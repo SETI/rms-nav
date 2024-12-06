@@ -1,9 +1,88 @@
-class DataSetVoyagerISS:
-    def __init__(self):
-        ...
+import re
 
-    def yield_observations(self):
-        ...
+from .dataset_pds3 import DataSetPDS3
+
+
+class DataSetVoyagerISS(DataSetPDS3):
+
+    _MIN_5xxx_VOL1 = 5101
+    _MAX_5xxx_VOL1 = 5120
+    _MIN_5xxx_VOL2 = 5201
+    _MAX_5xxx_VOL2 = 5214
+    _MIN_6xxx_VOL1 = 6101
+    _MAX_6xxx_VOL1 = 6121
+    _MIN_6xxx_VOL2 = 6201
+    _MAX_6xxx_VOL2 = 6215
+    _MIN_7xxx_VOL2 = 7201
+    _MAX_7xxx_VOL2 = 7207
+    _MIN_8xxx_VOL2 = 8201
+    _MAX_8xxx_VOL2 = 8210
+
+    @staticmethod
+    def _parse_filespec(filespec, volumes, volume, index_tab_abspath):
+        parts = filespec.split('/')
+        if parts[0].upper() != 'DATA':
+            raise ValueError(
+                f'Index file "{index_tab_abspath}" contains bad '
+                f'PRIMARY_FILE_SPECIFICATION "{filespec}"')
+        range_dir = parts[1]
+        img_name = parts[2]
+        if len(range_dir) != 8 or range_dir[0] != 'C':
+            raise ValueError(
+                f'Index file "{index_tab_abspath}" contains bad '
+                f'PRIMARY_FILE_SPECIFICATION "{filespec}"')
+        if not img_name.endswith('_GEOMED.LBL'):
+            return None
+        if volumes:
+            found_full_spec = False
+            good_full_spec = False
+            for vol in volumes:
+                idx = vol.find('/')
+                if idx == -1:
+                    continue
+                # Looking for volume/subdir
+                found_full_spec = True
+                if f'{volume}/{range_dir}' == vol:
+                    good_full_spec = True
+                    break
+            if found_full_spec and not good_full_spec:
+                return None
+        return img_name
+
+    @staticmethod
+    def _extract_image_number(f):
+        m = re.match(r'C(\d{7})_GEOMED\.\w+', f)
+        if m is None:
+            return None
+        return int(m[1])
+
+    @staticmethod
+    def _extract_camera(f):
+        m = re.match(r'(C)\d{7}_GEOMED\.\w+', f)
+        if m is None:
+            return None
+        return m[1]
+
+    _DATASET_LAYOUT = {
+        'all_volume_nums': [f'VGISS_{x:04d}' for x in
+                            list(range(_MIN_5xxx_VOL1, _MAX_5xxx_VOL1+1)) +
+                            list(range(_MIN_5xxx_VOL2, _MAX_5xxx_VOL2+1)) +
+                            list(range(_MIN_6xxx_VOL1, _MAX_6xxx_VOL1+1)) +
+                            list(range(_MIN_6xxx_VOL2, _MAX_6xxx_VOL2+1)) +
+                            list(range(_MIN_7xxx_VOL2, _MAX_7xxx_VOL2+1)) +
+                            list(range(_MIN_8xxx_VOL2, _MAX_8xxx_VOL2+1))],
+        'is_valid_volume_name':
+            lambda v: re.match(r'VGISS_[5678]\d{3}', v) is not None,
+        'extract_image_number': _extract_image_number,
+        'extract_camera': _extract_camera,
+        'parse_filespec': _parse_filespec,
+        'volset_and_volume': lambda v: f'VGISS_{v[6]}xxx/{v}',
+        'volume_to_index': lambda v: f'VGISS_{v[6]}xxx/{v}/{v}_index.lbl',
+    }
+
+    def __init__(self, *args, **kwargs):
+
+        super().__init__(*args, **kwargs)
 
     @staticmethod
     def image_name_valid(name: str) -> bool:
@@ -11,10 +90,24 @@ class DataSetVoyagerISS:
 
         name = name.upper()
 
-        # Cddddddd
-        if len(name) != 8 or name[0] != 'C':
+        # [NW]dddddddddd[_d[d]]
+        if name[0] not in 'NW':
             return False
+        if 13 <= len(name) <= 14:
+            if name[11] != '_':
+                return False
+            try:
+                _ = int(name[12:])
+            except ValueError:
+                return False
+            try:
+                _ = int(name[1:11])
+            except ValueError:
+                return False
+            return True
 
+        if len(name) != 11:
+            return False
         try:
             _ = int(name[1:])
         except ValueError:

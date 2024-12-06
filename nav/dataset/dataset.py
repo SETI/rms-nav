@@ -1,16 +1,16 @@
 from abc import ABC, abstractmethod
-import argparse
-from typing import Optional
 
 
 class DataSet(ABC):
     def __init__(self):
         ...
 
+    @staticmethod
     @abstractmethod
-    def image_name_valid(self):
+    def image_name_valid(name: str) -> bool:
         ...
 
+    @staticmethod
     @abstractmethod
     def add_selection_arguments(self):
         ...

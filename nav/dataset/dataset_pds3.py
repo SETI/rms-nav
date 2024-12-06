@@ -1,11 +1,10 @@
 import argparse
-import csv
+from functools import lru_cache
 import os
 from pathlib import Path
 import random
-import re
 
-from typing import Optional
+from typing import Any, Optional
 
 from filecache import FCPath, FileCache
 from pdstable import PdsTable
@@ -13,22 +12,28 @@ from pdstable import PdsTable
 from .dataset import DataSet
 
 
-_INDEX_FILECACHE = FileCache('nav_pds3_index')
-
-
 class DataSetPDS3(DataSet):
 
-    def __init__(self):
-        ...
+    _DATASET_LAYOUT: dict[str, Any] = {}  # Defined by subclasses
+
+    def __init__(self,
+                 pds3_holdings_dir: Optional[str | Path | FCPath] = None,
+                 index_filecache: Optional[FileCache] = None):
+
+        if index_filecache is None:
+            self._index_filecache = FileCache('nav_pds3_index')
+        else:
+            self._index_filecache = index_filecache
+
+        if pds3_holdings_dir is None:
+            pds3_holdings_dir = os.getenv('PDS3_HOLDINGS_DIR')
+            if pds3_holdings_dir is None:
+                raise ValueError('PDS3_HOLDINGS_DIR environment variable not set')
+        self._pds3_holdings_dir = self._index_filecache.new_path(pds3_holdings_dir)
 
     @staticmethod
-    def image_name_valid(name: str) -> bool:
-        """True if an image name is valid for this instrument."""
-
-        assert NotImplementedError
-
     def add_selection_arguments(cmdparser: argparse.ArgumentParser,
-                                group: Optional[str] = None) -> None:
+                                group: Optional[argparse._ArgumentGroup] = None) -> None:
 
         if group is None:
             group = cmdparser.add_argument_group('Image selection')
@@ -108,17 +113,19 @@ class DataSetPDS3(DataSet):
                     any actual processing"""
         )
 
-    def _validate_selection_arguments(self, arguments):
+    def _validate_selection_arguments(self,
+                                      arguments: argparse.ArgumentParser) -> None:
         """Validate the user arguments that can't be checked during initial parsing."""
-        if arguments.camera_type is not None:
-            if arguments.camera_type.upper() not in ('NAC', 'WAC'):
-                raise argparse.ArgumentTypeError('--camera-type must be NAC or WAC')
-        # arguments.image_name is a list of lists
-        for image_name in _flatten(arguments.image_name):
-            if not self.valid_image_name(image_name, arguments.instrument_host):
-                raise argparse.ArgumentTypeError(
-                    f'Invalid image name {image_name} with instrument host '
-                    f'{arguments.instrument_host}')
+        return
+        # if arguments.camera_type is not None:
+        #     if arguments.camera_type.upper() not in ('NAC', 'WAC'):
+        #         raise argparse.ArgumentTypeError('--camera-type must be NAC or WAC')
+        # # arguments.image_name is a list of lists
+        # for image_name in _flatten(arguments.image_name):
+        #     if not self.valid_image_name(image_name, arguments.instrument_host):
+        #         raise argparse.ArgumentTypeError(
+        #             f'Invalid image name {image_name} with instrument host '
+        #             f'{arguments.instrument_host}')
 
 # def log_arguments(arguments, log):
 #     """Log the details of the command line arguments."""
@@ -340,13 +347,17 @@ class DataSetPDS3(DataSet):
 #         else:
 #             yield last_image_path
 
+    @lru_cache(maxsize=3)
+    def _read_pds_table(self, fn):
+        print(fn)
+        return PdsTable(fn)
 
     def yield_image_filenames_index(self,
                                     img_start_num: Optional[int] = None,
                                     img_end_num: Optional[int] = None,
                                     vol_start: Optional[str] = None,
                                     vol_end: Optional[str] = None,
-                                    volumes: Optional[list[int]] = None,
+                                    volumes: Optional[list[str]] = None,
                                     camera: Optional[str] = None,
                                     restrict_list: Optional[list[str]] = None,
                                     force_has_offset_file: bool = False,
@@ -358,8 +369,7 @@ class DataSetPDS3(DataSet):
                                     force_has_offset_nonspice_error: bool = False,
                                     selection_expr: Optional[str] = None,
                                     choose_random_images: bool | int = False,
-                                    volume_raw_dir: Optional[str | Path | FCPath] = None,
-                                    index_dir: Optional[str | Path | FCPath] = None,
+                                    max_filenames: Optional[int] = None,
                                     suffix: Optional[str] = None,
                                     planets: Optional[str] = None):
         """Yield filenames given search criteria using index files.
@@ -385,6 +395,7 @@ class DataSetPDS3(DataSet):
         all_volume_nums = dataset_layout['all_volume_nums']
         is_valid_volume_name = dataset_layout['is_valid_volume_name']
         extract_image_number = dataset_layout['extract_image_number']
+        extract_camera = dataset_layout['extract_camera']
         parse_filespec = dataset_layout['parse_filespec']
         volset_and_volume = dataset_layout['volset_and_volume']
         volume_to_index = dataset_layout['volume_to_index']
@@ -393,30 +404,17 @@ class DataSetPDS3(DataSet):
             for vol in volumes:
                 if not is_valid_volume_name(vol):
                     raise ValueError(f'Illegal volume name: {vol}')
-            valid_volume_nums = [v for v in volumes if v in all_volume_nums]
+            # This keeps the order of the provided volumes
+            valid_volumes = [v for v in volumes if v in all_volume_nums]
         else:
-            valid_volume_nums = all_volume_nums
+            valid_volumes = all_volume_nums
 
-        valid_volume_nums = [v for v in valid_volume_nums
-                             if ((vol_start is not None and vol_start <= v) and
-                                 (vol_end is not None and v <= vol_end))]
-        valid_volumes = [v for v in valid_volume_nums]
+        valid_volumes = [v for v in valid_volumes
+                         if ((vol_start is None or vol_start <= v) and
+                             (vol_end is None or v <= vol_end))]
 
-        if volume_raw_dir is None and index_dir is None:
-            pds3_holdings_dir = os.getenv('PDS3_HOLDINGS_DIR')
-            if pds3_holdings_dir is None:
-                raise ValueError('PDS3_HOLDINGS_DIR environment variable not set')
-            pds3_holdings_dir = _INDEX_FILECACHE.new_path(pds3_holdings_dir)
-
-        if volume_raw_dir is None:
-            volume_raw_dir = pds3_holdings_dir / 'volumes'
-        else:
-            volume_raw_dir = FCPath(volume_raw_dir)
-
-        if index_dir is None:
-            index_dir = pds3_holdings_dir / 'metadata'
-        else:
-            index_dir = FCPath(index_dir)
+        volume_raw_dir = self._pds3_holdings_dir / 'volumes'
+        index_dir = self._pds3_holdings_dir / 'metadata'
 
         # When yielding via an index, we don't get to optimize searching for
         # offset/png files. We just always look through the index files, and then
@@ -461,7 +459,13 @@ class DataSetPDS3(DataSet):
         # logger.debug('Data exists in: %s', data_volume_path)
 
         limit_yields = choose_random_images if choose_random_images else None
-        cur_yields = 0
+        if max_filenames is not None:
+            if limit_yields is None:
+                limit_yields = max_filenames
+            else:
+                limit_yields = min(limit_yields, max_filenames)
+        num_yields = 0
+
         while True:
             done = False
             if choose_random_images:
@@ -472,7 +476,9 @@ class DataSetPDS3(DataSet):
                 index_tab_abspath = index_label_abspath.with_suffix('.tab')
                 # This will raise a FileNotFoundError if the index file label or table
                 # can't be found
-                _INDEX_FILECACHE.retrieve([index_label_abspath, index_tab_abspath])
+                index_label_localpath, index_tab_localpath = \
+                    self._index_filecache.retrieve([index_label_abspath,
+                                                    index_tab_abspath])
 
                 # if search_volume_path is not None:
                 #     search_vol_fulldir = clean_join(search_volume_path, search_vol)
@@ -481,7 +487,7 @@ class DataSetPDS3(DataSet):
                 #     if not os.path.isdir(search_vol_fulldir):
                 #         continue
 
-                index_tab = PdsTable(index_label_abspath.get_local_path())
+                index_tab = self._read_pds_table(index_label_localpath)
                 filespecs = index_tab.get_column('FILE_SPECIFICATION_NAME')
                 if choose_random_images:
                     random.shuffle(filespecs)
@@ -489,13 +495,22 @@ class DataSetPDS3(DataSet):
                     img_name = parse_filespec(filespec, volumes, search_vol,
                                               index_tab_abspath)
                     if img_name is None:
-                        continue
+                        continue  # Not a valid index line or not in volumes list
 
                     # if raw_suffix is not None:
                     #     img_name = img_name.replace(raw_suffix, suffix)
                     # There's no point in checking the range dir for image number
                     # since we have to go through the entire index either way
                     img_num = extract_image_number(img_name)
+                    if img_num is None:
+                        raise ValueError(
+                            f'IMGNUM Index file "{index_tab_abspath}" contains bad '
+                            f'PRIMARY_FILE_SPECIFICATION "{filespec}"')
+                    img_camera = extract_camera(img_name)
+                    if img_camera is None:
+                        raise ValueError(
+                            f'IMGCAM Index file "{index_tab_abspath}" contains bad '
+                            f'PRIMARY_FILE_SPECIFICATION "{filespec}"')
                     if img_end_num is not None and img_num > img_end_num:
                         # Images are in monotonically increasing order, so we can just
                         # quit now
@@ -503,13 +518,13 @@ class DataSetPDS3(DataSet):
                         break
                     if img_start_num is not None and img_num < img_start_num:
                         continue
-                    if camera is not None and img_name[0] not in camera:
+                    if camera is not None and img_camera not in camera:
                         continue
                     # if (restrict_list and
                     #     img_name[:img_name.find(suffix)] not in restrict_list and
                     #     img_name[img_lim_start:img_lim_end] not in restrict_list):
                     #     continue
-                    img_path = volume_raw_dir / search_vol / filespec
+                    img_path = volume_raw_dir / volset_and_volume(search_vol) / filespec
                     # if force_has_offset_file:
                     #     offset_path = img_to_offset_path(img_path, instrument_host)
                     #     if not os.path.isfile(offset_path):
@@ -550,9 +565,13 @@ class DataSetPDS3(DataSet):
                     #                 overlay=False)
                     #     if metadata is None or not eval(selection_expr):
                     #         continue
-                    yield img_path
-                    cur_yields += 1
-                    if limit_yields is not None and cur_yields >= limit_yields:
+                    label_path = img_path.with_suffix('.LBL')
+                    img_path_local, label_path_local = self._index_filecache.retrieve(
+                        [img_path, label_path])
+                    yield label_path_local
+
+                    num_yields += 1
+                    if limit_yields is not None and num_yields >= limit_yields:
                         return
                     if choose_random_images:
                         # Only return one image before cycling back for a new volume

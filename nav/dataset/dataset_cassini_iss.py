@@ -1,14 +1,4 @@
-import argparse
-import csv
-import os
-from pathlib import Path
-import random
 import re
-
-from typing import Optional
-
-from filecache import FCPath, FileCache
-from pdstable import PdsTable
 
 from .dataset_pds3 import DataSetPDS3
 
@@ -23,16 +13,16 @@ class DataSetCassiniISS(DataSetPDS3):
     @staticmethod
     def _parse_filespec(filespec, volumes, volume, index_tab_abspath):
         parts = filespec.split('/')
-        if parts[0] != 'data':
+        if parts[0].upper() != 'DATA':
             raise ValueError(
-                f'Index file {index_tab_abspath} contains bad '
-                f'PRIMARY_FILE_SPECIFICATION {filespec}')
+                f'Index file "{index_tab_abspath}" contains bad '
+                f'PRIMARY_FILE_SPECIFICATION "{filespec}"')
         range_dir = parts[1]
         img_name = parts[2]
         if len(range_dir) != 21 or range_dir[10] != '_':
             raise ValueError(
-                f'Index file {index_tab_abspath} contains bad '
-                f'PRIMARY_FILE_SPECIFICATION {filespec}')
+                f'Index file "{index_tab_abspath}" contains bad '
+                f'PRIMARY_FILE_SPECIFICATION "{filespec}"')
         if volumes:
             found_full_spec = False
             good_full_spec = False
@@ -51,7 +41,14 @@ class DataSetCassiniISS(DataSetPDS3):
 
     @staticmethod
     def _extract_image_number(f):
-        m = re.match(r'[NW](\d{8})(_\d{1,2})', f)
+        m = re.match(r'[NW](\d{10})_\d{1,2}\.\w+', f)
+        if m is None:
+            return None
+        return int(m[1])
+
+    @staticmethod
+    def _extract_camera(f):
+        m = re.match(r'([NW])\d{10}_\d{1,2}\.\w+', f)
         if m is None:
             return None
         return m[1]
@@ -61,16 +58,17 @@ class DataSetCassiniISS(DataSetPDS3):
                             list(range(_MIN_1xxx_VOL, _MAX_1xxx_VOL+1)) +
                             list(range(_MIN_2xxx_VOL, _MAX_2xxx_VOL+1))],
         'is_valid_volume_name':
-            lambda v: re.match(r'COISS_[12]\d{3}(/\d{8}_\d{8})', v) is not None,
+            lambda v: re.match(r'COISS_[12]\d{3}', v) is not None,
         'extract_image_number': _extract_image_number,
+        'extract_camera': _extract_camera,
         'parse_filespec': _parse_filespec,
         'volset_and_volume': lambda v: f'COISS_{v[6]}xxx/{v}',
         'volume_to_index': lambda v: f'COISS_{v[6]}xxx/{v}/{v}_index.lbl',
     }
 
+    def __init__(self, *args, **kwargs):
 
-    def __init__(self):
-        ...
+        super().__init__(*args, **kwargs)
 
     @staticmethod
     def image_name_valid(name: str) -> bool:
