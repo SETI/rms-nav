@@ -11,6 +11,10 @@ class DataSetCassiniISS(DataSetPDS3):
     _MAX_2xxx_VOL = 2116
 
     @staticmethod
+    def _get_filespec(row):
+        return row['FILE_SPECIFICATION_NAME']
+
+    @staticmethod
     def _parse_filespec(filespec, volumes, volume, index_tab_abspath):
         parts = filespec.split('/')
         if parts[0].upper() != 'DATA':
@@ -54,13 +58,12 @@ class DataSetCassiniISS(DataSetPDS3):
         return m[1]
 
     _DATASET_LAYOUT = {
-        'all_volume_nums': [f'COISS_{x:04d}' for x in
-                            list(range(_MIN_1xxx_VOL, _MAX_1xxx_VOL+1)) +
-                            list(range(_MIN_2xxx_VOL, _MAX_2xxx_VOL+1))],
-        'is_valid_volume_name':
-            lambda v: re.match(r'COISS_[12]\d{3}', v) is not None,
+        'all_volume_names': [f'COISS_{x:04d}' for x in
+                             list(range(_MIN_1xxx_VOL, _MAX_1xxx_VOL+1)) +
+                             list(range(_MIN_2xxx_VOL, _MAX_2xxx_VOL+1))],
         'extract_image_number': _extract_image_number,
         'extract_camera': _extract_camera,
+        'get_filespec': _get_filespec,
         'parse_filespec': _parse_filespec,
         'volset_and_volume': lambda v: f'COISS_{v[6]}xxx/{v}',
         'volume_to_index': lambda v: f'COISS_{v[6]}xxx/{v}/{v}_index.lbl',

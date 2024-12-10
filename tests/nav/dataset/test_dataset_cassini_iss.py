@@ -1,8 +1,7 @@
-
-import dataset.dataset_cassini_iss
+import nav.dataset.dataset_cassini_iss as dscoiss
 
 # Create this once so we can take advantage of PdsTable caching
-_DS = dataset.dataset_cassini_iss.DataSetCassiniISS()
+_DS = dscoiss.DataSetCassiniISS()
 
 
 def test_cassini_iss_yield_basic():

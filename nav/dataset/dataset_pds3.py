@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import random
 
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from filecache import FCPath, FileCache
 from pdstable import PdsTable
@@ -349,7 +349,6 @@ class DataSetPDS3(DataSet):
 
     @lru_cache(maxsize=3)
     def _read_pds_table(self, fn):
-        print(fn)
         return PdsTable(fn)
 
     def yield_image_filenames_index(self,
@@ -392,27 +391,34 @@ class DataSetPDS3(DataSet):
         # instrument_host_config = INSTRUMENT_HOST_CONFIG[instrument_host]
 
         dataset_layout = self._DATASET_LAYOUT
-        all_volume_nums = dataset_layout['all_volume_nums']
-        is_valid_volume_name = dataset_layout['is_valid_volume_name']
+        all_volume_names = dataset_layout['all_volume_names']
         extract_image_number = dataset_layout['extract_image_number']
         extract_camera = dataset_layout['extract_camera']
+        get_filespec = dataset_layout['get_filespec']
         parse_filespec = dataset_layout['parse_filespec']
         volset_and_volume = dataset_layout['volset_and_volume']
         volume_to_index = dataset_layout['volume_to_index']
 
         if volumes is not None:
             for vol in volumes:
-                if not is_valid_volume_name(vol):
+                if vol not in all_volume_names:
                     raise ValueError(f'Illegal volume name: {vol}')
             # This keeps the order of the provided volumes
-            valid_volumes = [v for v in volumes if v in all_volume_nums]
+            valid_volumes = [v for v in volumes if v in all_volume_names]
         else:
-            valid_volumes = all_volume_nums
+            valid_volumes = all_volume_names
 
+        if vol_start is not None:
+            vol_start_idx = all_volume_names.index(vol_start)
+        if vol_end is not None:
+            vol_end_idx = all_volume_names.index(vol_end)
         valid_volumes = [v for v in valid_volumes
-                         if ((vol_start is None or vol_start <= v) and
-                             (vol_end is None or v <= vol_end))]
+                         if ((vol_start is None or
+                              vol_start_idx <= all_volume_names.index(v)) and
+                             (vol_end is None or
+                              all_volume_names.index(v) <= vol_end_idx))]
 
+        print(valid_volumes)
         volume_raw_dir = self._pds3_holdings_dir / 'volumes'
         index_dir = self._pds3_holdings_dir / 'metadata'
 
@@ -476,9 +482,9 @@ class DataSetPDS3(DataSet):
                 index_tab_abspath = index_label_abspath.with_suffix('.tab')
                 # This will raise a FileNotFoundError if the index file label or table
                 # can't be found
-                index_label_localpath, index_tab_localpath = \
-                    self._index_filecache.retrieve([index_label_abspath,
-                                                    index_tab_abspath])
+                ret = self._index_filecache.retrieve([index_label_abspath,
+                                                      index_tab_abspath])
+                index_label_localpath, index_tab_localpath = cast(list[Path], ret)
 
                 # if search_volume_path is not None:
                 #     search_vol_fulldir = clean_join(search_volume_path, search_vol)
@@ -488,10 +494,12 @@ class DataSetPDS3(DataSet):
                 #         continue
 
                 index_tab = self._read_pds_table(index_label_localpath)
-                filespecs = index_tab.get_column('FILE_SPECIFICATION_NAME')
+                rows = index_tab.dicts_by_row()
+                print(len(rows))
                 if choose_random_images:
-                    random.shuffle(filespecs)
-                for filespec in filespecs:
+                    random.shuffle(rows)
+                for row in rows:
+                    filespec = get_filespec(row)
                     img_name = parse_filespec(filespec, volumes, search_vol,
                                               index_tab_abspath)
                     if img_name is None:
@@ -505,12 +513,12 @@ class DataSetPDS3(DataSet):
                     if img_num is None:
                         raise ValueError(
                             f'IMGNUM Index file "{index_tab_abspath}" contains bad '
-                            f'PRIMARY_FILE_SPECIFICATION "{filespec}"')
+                            f'path "{filespec}"')
                     img_camera = extract_camera(img_name)
                     if img_camera is None:
                         raise ValueError(
                             f'IMGCAM Index file "{index_tab_abspath}" contains bad '
-                            f'PRIMARY_FILE_SPECIFICATION "{filespec}"')
+                            f'path "{filespec}"')
                     if img_end_num is not None and img_num > img_end_num:
                         # Images are in monotonically increasing order, so we can just
                         # quit now
@@ -565,9 +573,12 @@ class DataSetPDS3(DataSet):
                     #                 overlay=False)
                     #     if metadata is None or not eval(selection_expr):
                     #         continue
-                    label_path = img_path.with_suffix('.LBL')
-                    img_path_local, label_path_local = self._index_filecache.retrieve(
-                        [img_path, label_path])
+                    if img_path.suffix in ('.lbl', '.tab'):
+                        label_path = img_path.with_suffix('.lbl')
+                    else:
+                        label_path = img_path.with_suffix('.LBL')
+                    ret = self._index_filecache.retrieve([img_path, label_path])
+                    img_path_local, label_path_local = cast(list[Path], ret)
                     yield label_path_local
 
                     num_yields += 1

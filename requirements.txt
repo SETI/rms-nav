@@ -2,6 +2,7 @@ flake8
 mypy
 pytest
 rms-filecache
+rms-pdslogger
 rms-pdstable
 rms-oops
 typing

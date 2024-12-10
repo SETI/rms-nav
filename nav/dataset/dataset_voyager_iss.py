@@ -19,6 +19,10 @@ class DataSetVoyagerISS(DataSetPDS3):
     _MAX_8xxx_VOL2 = 8210
 
     @staticmethod
+    def _get_filespec(row):
+        return row['FILE_SPECIFICATION_NAME']
+
+    @staticmethod
     def _parse_filespec(filespec, volumes, volume, index_tab_abspath):
         parts = filespec.split('/')
         if parts[0].upper() != 'DATA':
@@ -58,23 +62,19 @@ class DataSetVoyagerISS(DataSetPDS3):
 
     @staticmethod
     def _extract_camera(f):
-        m = re.match(r'(C)\d{7}_GEOMED\.\w+', f)
-        if m is None:
-            return None
-        return m[1]
+        return 'X'
 
     _DATASET_LAYOUT = {
-        'all_volume_nums': [f'VGISS_{x:04d}' for x in
-                            list(range(_MIN_5xxx_VOL1, _MAX_5xxx_VOL1+1)) +
-                            list(range(_MIN_5xxx_VOL2, _MAX_5xxx_VOL2+1)) +
-                            list(range(_MIN_6xxx_VOL1, _MAX_6xxx_VOL1+1)) +
-                            list(range(_MIN_6xxx_VOL2, _MAX_6xxx_VOL2+1)) +
-                            list(range(_MIN_7xxx_VOL2, _MAX_7xxx_VOL2+1)) +
-                            list(range(_MIN_8xxx_VOL2, _MAX_8xxx_VOL2+1))],
-        'is_valid_volume_name':
-            lambda v: re.match(r'VGISS_[5678]\d{3}', v) is not None,
+        'all_volume_names': [f'VGISS_{x:04d}' for x in
+                             list(range(_MIN_5xxx_VOL1, _MAX_5xxx_VOL1+1)) +
+                             list(range(_MIN_5xxx_VOL2, _MAX_5xxx_VOL2+1)) +
+                             list(range(_MIN_6xxx_VOL1, _MAX_6xxx_VOL1+1)) +
+                             list(range(_MIN_6xxx_VOL2, _MAX_6xxx_VOL2+1)) +
+                             list(range(_MIN_7xxx_VOL2, _MAX_7xxx_VOL2+1)) +
+                             list(range(_MIN_8xxx_VOL2, _MAX_8xxx_VOL2+1))],
         'extract_image_number': _extract_image_number,
         'extract_camera': _extract_camera,
+        'get_filespec': _get_filespec,
         'parse_filespec': _parse_filespec,
         'volset_and_volume': lambda v: f'VGISS_{v[6]}xxx/{v}',
         'volume_to_index': lambda v: f'VGISS_{v[6]}xxx/{v}/{v}_index.lbl',
@@ -90,26 +90,11 @@ class DataSetVoyagerISS(DataSetPDS3):
 
         name = name.upper()
 
-        # [NW]dddddddddd[_d[d]]
-        if name[0] not in 'NW':
-            return False
-        if 13 <= len(name) <= 14:
-            if name[11] != '_':
-                return False
-            try:
-                _ = int(name[12:])
-            except ValueError:
-                return False
-            try:
-                _ = int(name[1:11])
-            except ValueError:
-                return False
-            return True
-
-        if len(name) != 11:
+        # CddddddddddR
+        if len(name) != 12 or name[0] != 'C' or name[11] != 'R':
             return False
         try:
-            _ = int(name[1:])
+            _ = int(name[1:12])
         except ValueError:
             return False
 
