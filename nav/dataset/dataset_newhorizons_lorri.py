@@ -1,4 +1,5 @@
 import re
+from typing import Any, cast
 
 from .dataset_pds3 import DataSetPDS3
 
@@ -6,11 +7,14 @@ from .dataset_pds3 import DataSetPDS3
 class DataSetNewHorizonsLORRI(DataSetPDS3):
 
     @staticmethod
-    def _get_filespec(row):
-        return row['PATH_NAME'] + row['FILE_NAME']
+    def _get_filespec(row: dict[str, Any]) -> str:
+        return cast(str, row['PATH_NAME']) + cast(str, row['FILE_NAME'])
 
     @staticmethod
-    def _parse_filespec(filespec, volumes, volume, index_tab_abspath):
+    def _parse_filespec(filespec: str,
+                        volumes: list[str],
+                        volume: str,
+                        index_tab_abspath: str) -> str | None:
         parts = filespec.split('/')
         if parts[0].upper() != 'DATA':
             raise ValueError(
@@ -41,14 +45,14 @@ class DataSetNewHorizonsLORRI(DataSetPDS3):
         return img_name
 
     @staticmethod
-    def _extract_image_number(f):
+    def _extract_image_number(f: str) -> int | None:
         m = re.match(r'lor_(\d{10})_0x\d{3}_sci\.\w+', f)
         if m is None:
             return None
         return int(m[1])
 
     @staticmethod
-    def _extract_camera(f):
+    def _extract_camera(f: str) -> str | None:
         return 'X'
 
     _DATASET_LAYOUT = {
@@ -63,8 +67,7 @@ class DataSetNewHorizonsLORRI(DataSetPDS3):
         'volume_to_index': lambda v: f'NHxxLO_xxxx/{v}/{v}_index.lbl',
     }
 
-    def __init__(self, *args, **kwargs):
-
+    def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
 
     @staticmethod

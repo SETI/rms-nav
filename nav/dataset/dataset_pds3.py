@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import random
 
-from typing import Any, Optional, cast
+from typing import Any, Iterator, Optional, cast
 
 from filecache import FCPath, FileCache
 from pdstable import PdsTable
@@ -18,7 +18,9 @@ class DataSetPDS3(DataSet):
 
     def __init__(self,
                  pds3_holdings_dir: Optional[str | Path | FCPath] = None,
-                 index_filecache: Optional[FileCache] = None):
+                 index_filecache: Optional[FileCache] = None,
+                 **kwargs: Any):
+        super().__init__(**kwargs)
 
         if index_filecache is None:
             self._index_filecache = FileCache('nav_pds3_index')
@@ -348,7 +350,8 @@ class DataSetPDS3(DataSet):
 #             yield last_image_path
 
     @lru_cache(maxsize=3)
-    def _read_pds_table(self, fn):
+    def _read_pds_table(self,
+                        fn: str) -> PdsTable:
         return PdsTable(fn)
 
     def yield_image_filenames_index(self,
@@ -370,7 +373,7 @@ class DataSetPDS3(DataSet):
                                     choose_random_images: bool | int = False,
                                     max_filenames: Optional[int] = None,
                                     suffix: Optional[str] = None,
-                                    planets: Optional[str] = None):
+                                    planets: Optional[str] = None) -> Iterator[Path]:
         """Yield filenames given search criteria using index files.
 
         This function assumes that the dataset is in a set of PDS3 volumes laid out like

@@ -1,4 +1,5 @@
 import re
+from typing import Any, cast
 
 from .dataset_pds3 import DataSetPDS3
 
@@ -11,11 +12,14 @@ class DataSetCassiniISS(DataSetPDS3):
     _MAX_2xxx_VOL = 2116
 
     @staticmethod
-    def _get_filespec(row):
-        return row['FILE_SPECIFICATION_NAME']
+    def _get_filespec(row: dict[str, Any]) -> str:
+        return cast(str, row['FILE_SPECIFICATION_NAME'])
 
     @staticmethod
-    def _parse_filespec(filespec, volumes, volume, index_tab_abspath):
+    def _parse_filespec(filespec: str,
+                        volumes: list[str],
+                        volume: str,
+                        index_tab_abspath: str) -> str | None:
         parts = filespec.split('/')
         if parts[0].upper() != 'DATA':
             raise ValueError(
@@ -44,14 +48,14 @@ class DataSetCassiniISS(DataSetPDS3):
         return img_name
 
     @staticmethod
-    def _extract_image_number(f):
+    def _extract_image_number(f: str) -> int | None:
         m = re.match(r'[NW](\d{10})_\d{1,2}\.\w+', f)
         if m is None:
             return None
         return int(m[1])
 
     @staticmethod
-    def _extract_camera(f):
+    def _extract_camera(f: str) -> str | None:
         m = re.match(r'([NW])\d{10}_\d{1,2}\.\w+', f)
         if m is None:
             return None
@@ -69,8 +73,7 @@ class DataSetCassiniISS(DataSetPDS3):
         'volume_to_index': lambda v: f'COISS_{v[6]}xxx/{v}/{v}_index.lbl',
     }
 
-    def __init__(self, *args, **kwargs):
-
+    def __init__(self, *args: Any, **kwargs: Any):
         super().__init__(*args, **kwargs)
 
     @staticmethod

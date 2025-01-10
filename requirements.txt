@@ -1,9 +1,16 @@
+coverage
 flake8
 matplotlib
 mypy
+myst-parser
+numpy
 pytest
 rms-filecache
 rms-pdslogger
 rms-pdstable
+rms-pdstemplate
 rms-oops
+sphinx
+sphinxcontrib-napoleon
+sphinx-rtd-theme
 typing
