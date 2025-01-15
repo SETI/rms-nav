@@ -7,8 +7,9 @@ from oops.meshgrid import Meshgrid
 from oops.backplane import Backplane
 
 from nav.config.global_config import ALL_PLANETS
+from nav.inst import Inst
 from nav.util.image import pad_array
-from nav.util.types import NDArrayFloatType, DTypeLike
+from nav.util.types import DTypeLike, NDArrayFloatType, NDArrayBoolType
 
 from .obs import Obs
 
@@ -18,8 +19,9 @@ class ObsSnapshot(Obs, Snapshot):
 
     def __init__(self,
                  snapshot: Snapshot,
+                 *,
                  extfov_margin: Optional[int | tuple[int, int]] = None,
-                 **kwargs: Any):
+                 **kwargs: Any) -> None:
         # Because the oops image read routines create a Snapshot and not a
         # Navigation class, we need to create a Navigation class that looks
         # like a Snapshot but then adds our own attributes. This cool trick
@@ -27,25 +29,28 @@ class ObsSnapshot(Obs, Snapshot):
         # as the original Snapshot. Warning: Do not use that Snapshot anymore!
         self.__dict__ = snapshot.__dict__
 
-        super().__init__(**kwargs)
+        super().__init__(logger_name='ObsSnapshot', **kwargs)
 
-        assert len(self.data.shape) == 2
+        if len(self.data.shape) != 2:
+            raise ValueError(f'Data shape must be 2D, got {self.data.shape}')
+
         self._data_shape_uv = cast(tuple[int, int], self.data.shape[::-1])
         self._fov_uv_min = (0, 0)
-        self._fov_uv_max = (self._data_shape_uv[0] - 1, self._data_shape_uv[1] - 1)
+        self._fov_uv_max = (self._data_shape_uv[0]-1, self._data_shape_uv[1]-1)
 
         if extfov_margin is None:
-            self._extfov_margin = (0, 0)
+            self._extfov_margin_uv = (0, 0)
         elif isinstance(extfov_margin, int):
-            self._extfov_margin = (int(extfov_margin), int(extfov_margin))
+            self._extfov_margin_uv = (int(extfov_margin), int(extfov_margin))
         else:
-            self._extfov_margin = (int(extfov_margin[0]), int(extfov_margin[1]))
+            self._extfov_margin_uv = (int(extfov_margin[0]), int(extfov_margin[1]))
+        self._extfov_margin_vu = (self._extfov_margin_uv[1], self._extfov_margin_uv[0])
 
-        self._extdata = pad_array(self.data, self._extfov_margin)
+        self._extdata = pad_array(self.data, self._extfov_margin_vu)
         self._extdata_shape_uv = cast(tuple[int, int], self._extdata.shape[::-1])
-        self._extfov_uv_min = (-self._extfov_margin[0], -self._extfov_margin[1])
-        self._extfov_uv_max = (self._data_shape_uv[0] + self._extfov_margin[0] - 1,
-                               self._data_shape_uv[1] + self._extfov_margin[1] - 1)
+        self._extfov_uv_min = (-self._extfov_margin_uv[0], -self._extfov_margin_uv[1])
+        self._extfov_uv_max = (self._data_shape_uv[0] + self._extfov_margin_uv[0] - 1,
+                               self._data_shape_uv[1] + self._extfov_margin_uv[1] - 1)
         self.reset_all()
 
         closest_planet = None
@@ -55,7 +60,7 @@ class ObsSnapshot(Obs, Snapshot):
             if dist < closest_dist:
                 closest_planet = planet
                 closest_dist = dist
-        assert closest_planet is not None
+        assert closest_planet is not None  # This is really just for type checking
 
         self._closest_planet = closest_planet
 
@@ -66,6 +71,9 @@ class ObsSnapshot(Obs, Snapshot):
     def make_extfov_zeros(self,
                           dtype: DTypeLike = np.float64) -> NDArrayFloatType:
         return np.zeros(self.extdata.shape, dtype=dtype)
+
+    def make_extfov_false(self) -> NDArrayBoolType:
+        return np.zeros(self.extdata.shape, dtype=np.bool_)
 
     def clip_fov(self,
                  u: int,
@@ -116,16 +124,16 @@ class ObsSnapshot(Obs, Snapshot):
         return self._fov_uv_max[1]
 
     @property
-    def extfov_margin(self) -> tuple[int, int]:
-        return self._extfov_margin
+    def extfov_margin_uv(self) -> tuple[int, int]:
+        return self._extfov_margin_uv
 
     @property
     def extfov_margin_u(self) -> int:
-        return self._extfov_margin[0]
+        return self._extfov_margin_uv[1]
 
     @property
     def extfov_margin_v(self) -> int:
-        return self._extfov_margin[1]
+        return self._extfov_margin_uv[0]
 
     @property
     def extdata(self) -> NDArrayFloatType:
@@ -200,7 +208,7 @@ class ObsSnapshot(Obs, Snapshot):
         """Create a Backplane for the entire extended FOV."""
 
         if self._ext_bp is None:
-            if self._extfov_margin == (0, 0):
+            if self._extfov_margin_uv == (0, 0):
                 self._ext_bp = self.bp
             else:
                 ext_meshgrid = Meshgrid.for_fov(
@@ -232,7 +240,7 @@ class ObsSnapshot(Obs, Snapshot):
         """Create a Backplane with points only in the four corners of the extended FOV."""
 
         if self._ext_corner_bp is None:
-            if self._extfov_margin == (0, 0):
+            if self._extfov_margin_uv == (0, 0):
                 self._ext_corner_bp = self.corner_bp
             else:
                 ext_corner_meshgrid = Meshgrid.for_fov(

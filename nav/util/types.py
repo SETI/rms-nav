@@ -1,9 +1,9 @@
 from pathlib import Path
 from typing import Any, TypeVar
-try:
-    from typing import Self
-except ImportError:
-    from typing_extensions import Self
+# try:
+#     from typing import Self
+# except ImportError:
+#     from typing_extensions import Self
 
 from filecache import FCPath
 import numpy as np
@@ -13,7 +13,7 @@ NDArrayLike = npt.ArrayLike
 DTypeLike = npt.DTypeLike
 NDArrayBoolType = npt.NDArray[np.bool_]
 NDArrayFloatType = npt.NDArray[np.floating[Any]]
-NDArrayIntType = npt.NDArray[np.int_]
+NDArrayIntType = npt.NDArray[np.integer]
 NPType = TypeVar('NPType', bound=np.generic, covariant=True)
 NDArrayType = npt.NDArray[NPType]
 

@@ -10,11 +10,16 @@ import nav.config.nav_logger
 
 class DataSet(ABC):
     def __init__(self,
-                 logger: Optional[logging.Logger] = None):
+                 *,
+                 logger: Optional[logging.Logger] = None,
+                 logger_name: Optional[str] = None) -> None:
         if logger is None:
             self._logger = nav.config.nav_logger.DEFAULT_IMAGE_LOGGER
         else:
             self._logger = pdslogger.PdsLogger.as_pdslogger(logger)
+
+        if logger_name is not None:
+            self._logger = self._logger.get_logger(logger_name)
 
     @staticmethod
     @abstractmethod

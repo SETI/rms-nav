@@ -48,7 +48,7 @@ RINGS_BODY_LIST = ['PAN', 'DAPHNIS'] # XXX
 # CONFIGURATIONS #
 ##################
 
-STARS_DEFAULT_CONFIG = {
+STARS_CONFIG = {
     # True if data is already calibrated as I/F and needs to be converted back
     # to raw DN.
     'calibrated_data': True,

@@ -73,8 +73,8 @@ class DataSetCassiniISS(DataSetPDS3):
         'volume_to_index': lambda v: f'COISS_{v[6]}xxx/{v}/{v}_index.lbl',
     }
 
-    def __init__(self, *args: Any, **kwargs: Any):
-        super().__init__(*args, **kwargs)
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, logger_name='DataSetCassiniISS', **kwargs)
 
     @staticmethod
     def image_name_valid(name: str) -> bool:

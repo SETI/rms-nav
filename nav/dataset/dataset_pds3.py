@@ -3,7 +3,6 @@ from functools import lru_cache
 import os
 from pathlib import Path
 import random
-
 from typing import Any, Iterator, Optional, cast
 
 from filecache import FCPath, FileCache
@@ -18,8 +17,9 @@ class DataSetPDS3(DataSet):
 
     def __init__(self,
                  pds3_holdings_dir: Optional[str | Path | FCPath] = None,
+                 *,
                  index_filecache: Optional[FileCache] = None,
-                 **kwargs: Any):
+                 **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
         if index_filecache is None:
@@ -355,6 +355,7 @@ class DataSetPDS3(DataSet):
         return PdsTable(fn)
 
     def yield_image_filenames_index(self,
+                                    *,
                                     img_start_num: Optional[int] = None,
                                     img_end_num: Optional[int] = None,
                                     vol_start: Optional[str] = None,

@@ -1,17 +1,23 @@
 from typing import Any
 
-import oops.hosts.newhorizons.lorri as nh_lorri
+import oops.hosts.newhorizons.lorri
 
+from nav.obs import ObsSnapshot
 from nav.util.types import PathLike
 
 from .inst import Inst
 
 
 class InstNewHorizonsLORRI(Inst):
-    def __init__(self, *args: Any, **kwargs: Any):
-        super().__init__(*args, **kwargs)
+    def __init__(self,
+                 obs: oops.Observation,
+                 **kwargs: Any) -> None:
+        super().__init__(obs, logger_name='InstNewHorizonsLORRI', **kwargs)
 
     @staticmethod
-    def from_file(path: PathLike) -> 'InstNewHorizonsLORRI':
-        obs = nh_lorri.from_file(path)
-        return InstNewHorizonsLORRI(obs)
+    def from_file(path: PathLike) -> ObsSnapshot:
+        obs = oops.hosts.newhorizons.lorri.from_file(path)
+        new_obs = ObsSnapshot(obs)
+        new_obs.set_inst(InstNewHorizonsLORRI(new_obs))
+
+        return new_obs

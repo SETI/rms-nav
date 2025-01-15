@@ -8,18 +8,14 @@ from tests.config import URL_CASSINI_ISS_02, URL_VOYAGER_ISS_01, URL_VOYAGER_ISS
 
 # This image was chosen because it is 256x256 (and thus faster to create a Backplane)
 # and the RA wraps around.
-INST_COISS2 = instcoiss.InstCassiniISS.from_file(URL_CASSINI_ISS_02)
-OBS_COISS2 = INST_COISS2.obs
+OBS_COISS2 = instcoiss.InstCassiniISS.from_file(URL_CASSINI_ISS_02)
 
 # This image was chosen because it is of Io
-INST_VGISS1 = instvgiss.InstVoyagerISS.from_file(URL_VOYAGER_ISS_01)
-OBS_VGISS1 = INST_VGISS1.obs
+OBS_VGISS1 = instvgiss.InstVoyagerISS.from_file(URL_VOYAGER_ISS_01)
 
 # This image was chosen because it's a different instrument and the RA does not wrap
 # around and also it is of Uranus
-INST_VGISS2 = instvgiss.InstVoyagerISS.from_file(URL_VOYAGER_ISS_02)
-OBS_VGISS2 = INST_VGISS2.obs
-
+OBS_VGISS2 = instvgiss.InstVoyagerISS.from_file(URL_VOYAGER_ISS_02)
 
 
 def test_obs_snapshot_init():
@@ -27,7 +23,7 @@ def test_obs_snapshot_init():
     assert s._data_shape_uv == (256, 256)
     assert s._fov_uv_min == (0, 0)
     assert s._fov_uv_max == (255, 255)
-    assert s._extfov_margin == (0, 0)
+    assert s._extfov_margin_uv == (0, 0)
     assert s._extdata.shape == (256, 256)
     assert s._extdata_shape_uv == (256, 256)
     assert s._extfov_uv_min == (0, 0)
@@ -37,7 +33,7 @@ def test_obs_snapshot_init():
     assert s._data_shape_uv == (256, 256)
     assert s._fov_uv_min == (0, 0)
     assert s._fov_uv_max == (255, 255)
-    assert s._extfov_margin == (10, 10)
+    assert s._extfov_margin_uv == (10, 10)
     assert s._extdata.shape == (276, 276)
     assert s._extdata_shape_uv == (276, 276)
     assert s._extfov_uv_min == (-10, -10)
@@ -47,7 +43,7 @@ def test_obs_snapshot_init():
     assert s._data_shape_uv == (256, 256)
     assert s._fov_uv_min == (0, 0)
     assert s._fov_uv_max == (255, 255)
-    assert s._extfov_margin == (10, 20)
+    assert s._extfov_margin_uv == (10, 20)
     assert s._extdata.shape == (296, 276)
     assert s._extdata_shape_uv == (276, 296)
     assert s._extfov_uv_min == (-10, -20)

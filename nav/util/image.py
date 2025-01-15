@@ -7,66 +7,148 @@ import matplotlib.pyplot as plt
 
 from nav.util.types import NDArrayType, NDArrayFloatType, NPType
 
-import oops
-
 
 #==============================================================================
 #
-# array MANIPULATION
+# ARRAY MANIPULATION
 #
 #==============================================================================
 
 def shift_array(array: NDArrayType[NPType],
-                offset_u: int,
-                offset_v: int,
+                offset: int | list[int] | tuple[int, ...],
                 fill: Any = 0) -> NDArrayType[NPType]:
     """Shift an array by an offset, filling with zeros or a specified value.
 
-    A positive offset moves the array to the right (larger u) and down (larger v).
+    Parameters:
+        array: The N-dimensional array to shift.
+        offset: A list or tuple of length N of offsets in the same order as the array
+            indices. A positive offset shifts to higher numbers on the axis.
+        fill: The value used to fill the newly created array elements.
+
+    Returns:
+        The array shifted by the given amount.
+
+    Raises:
+        ValueError: If the array shape and offset list have different lengths.
     """
 
-    if offset_u == 0 and offset_v == 0:
+    if isinstance(offset, int):
+        offset = np.array((offset,))
+
+    if array.ndim != len(offset):
+        raise ValueError(f'Array ({array.ndim}) and offset ({len(offset)}) must have '
+                         'same number of dimensions')
+
+    if all(x == 0 for x in offset):
         return array
 
     array = array.copy()
-    array = np.roll(array, offset_u, 1)
-    array = np.roll(array, offset_v, 0)
+    for axis in range(len(offset)):
+        array = np.roll(array, offset[axis], axis)
 
-    if offset_u != 0:
-        if offset_u < 0:
-            array[:,offset_u:] = fill
-        else:
-            array[:,:offset_u] = fill
-    if offset_v != 0:
-        if offset_v < 0:
-            array[offset_v:,:] = fill
-        else:
-            array[:offset_v,:] = fill
+    for axis in range(len(offset)):
+        if offset[axis] != 0:
+            rolled_array = np.rollaxis(array, axis)
+            if offset[axis] < 0:
+                rolled_array[offset[axis]:, ...] = fill
+            else:
+                rolled_array[:offset[axis], ...] = fill
 
     return array
 
 
 def pad_array(array: NDArrayType[NPType],
-              margin: list[int] | tuple[int, int]) -> NDArrayType[NPType]:
-    """Pad an array with a zero-filled (U,V) margin on each edge."""
+              margin: list[int] | tuple[int, ...],
+              fill: Any = 0) -> NDArrayType[NPType]:
+    """Pad an array by the given margin at each edge.
 
-    if margin[0] == 0 and margin[1] == 0:
+    Parameters:
+        array: The N-dimensional array to pad.
+        margin: A list or tuple of length N of margin amounts in the same order as the
+            array indices. Each axis is padded to its original size plus 2*N and the
+            original values are centered on the new axis.
+        fill: The value used to fill the newly created array elements.
+
+    Returns:
+        The array padded by the given amount.
+
+    Raises:
+        ValueError: If the array shape and margin list have different lengths.
+    """
+
+    if array.ndim != len(margin):
+        raise ValueError(f'Array ({array.ndim}) and offset ({len(margin)}) must have '
+                         'same number of dimensions')
+
+    if all(x == 0 for x in margin):
         return array
-    new_array = np.zeros((array.shape[0]+margin[1]*2,array.shape[1]+margin[0]*2),
-                         dtype=array.dtype)
-    new_array[margin[1]:margin[1]+array.shape[0],
-              margin[0]:margin[0]+array.shape[1], ...] = array
-    return new_array
+
+    padding = [(x, x) for x in margin]
+    return np.pad(array, padding, mode='constant', constant_values=fill)
 
 
 def unpad_array(array: NDArrayType[NPType],
-                margin: list[int] | tuple[int, int]) -> NDArrayType[NPType]:
-    """Remove a padded margin (U,V) from each edge."""
+                margin: list[int] | tuple[int, ...]) -> NDArrayType[NPType]:
+    """Remove a padded margin from each edge.
 
-    if margin[0] == 0 and margin[1] == 0:
+    Parameters:
+        array: The N-dimensional array to unpad.
+        margin: A list or tuple of length N of margin amounts in the same order as the
+            array indices. Each axis is unpadded to its original size minus 2*N and the
+            original centered values are used on the new axis.
+
+    Returns:
+        The array unpadded by the given amount.
+
+    Raises:
+        ValueError: If the array shape and margin list have different lengths.
+    """
+
+    if array.ndim != len(margin):
+        raise ValueError(f'Array ({array.ndim}) and offset ({len(margin)}) must have '
+                         'same number of dimensions')
+
+    if all(x == 0 for x in margin):
         return array
-    return array[margin[1]:array.shape[0]-margin[1],
-                 margin[0]:array.shape[1]-margin[0], ...]
+
+    # See https://stackoverflow.com/questions/24806174/
+    # is-there-an-opposite-inverse-to-numpy-pad-function
+    reversed_padding = tuple([
+        slice(pad, dim - pad) for (pad, dim) in zip(margin, array.shape)
+    ])
+
+    return array[reversed_padding]
+
+
+def next_power_of_2(n: int) -> int:
+    """Compute the power of 2 >= n."""
+
+    s = bin(n)[2:]
+    if s.count('1') == 1: # Already power of 2
+        return n
+    return 2 ** len(s)
+
+
+def pad_array_to_power_of_2(data: NDArrayType[NPType]
+                           ) -> tuple[NDArrayType[NPType], tuple[int, int]]:
+    """Zero-pad a 2-D array on all sides to be a power of 2 in each dimension.
+
+    If the original array has a side that is not a power of 2, it must be even.
+
+    Returns: A tuple containing the padded array and the amount of padding added.
+    """
+
+    p2 = [next_power_of_2(x) for x in data.shape]
+
+    if all(s1 == s2 for s1, s2 in zip(p2, data.shape)):
+        return data, (0, 0)
+
+    if any((s != 1) and (s & 1) for s in data.shape):
+        raise ValueError(f'shape must be power of 2 or even: {data.shape}')
+
+    padding = tuple([(s - dim) // 2 for s, dim in zip(p2, data.shape)])
+    return pad_array(data, padding), padding
+
 
 # def compress_saturated_overlay(overlay):
 #     """Compress a 2-D RGB array making each color a single bit."""

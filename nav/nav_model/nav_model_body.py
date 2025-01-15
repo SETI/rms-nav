@@ -8,9 +8,13 @@ import numpy as np
 import oops
 import polymath
 
+from nav.annotation import Annotation
 from nav.config.global_config import BODIES_CONFIG
+from nav.inst import Inst
 from nav.util.image import (filter_downsample,
                             shift_array)
+from nav.util.types import NDArrayFloatType
+
 from .nav_model import NavModel
 
 # Sometimes the bounding box returned by "inventory" is not quite big enough
@@ -21,6 +25,7 @@ class NavModelBody(NavModel):
     def __init__(self,
                  obs: oops.Observation,
                  body_name: str,
+                 *,
                  inventory: Optional[dict[str, Any]] = None,
                  bodies_config: Optional[dict[str, Any]] = None,
                  **kwargs: Any):
@@ -34,9 +39,8 @@ class NavModelBody(NavModel):
             body_name (str): _description_
         """
 
-        super().__init__(**kwargs)
+        super().__init__(obs, logger_name='NavModelBody', **kwargs)
 
-        self._obs = obs
         self._body_name = body_name.upper()
         self._config = bodies_config or BODIES_CONFIG
 
@@ -46,9 +50,13 @@ class NavModelBody(NavModel):
         self._inventory = inventory
 
     def create_model(self,
+                     *,
                      always_create_model: bool = False,
                      never_create_model: bool = False,
-                     create_overlay: bool = False) -> Any:  # XXX
+                     create_overlay: bool = False
+                     ) -> tuple[NDArrayFloatType | None,
+                                dict[str, Any],
+                                Annotation | None]:
         """Create a model for a body.
 
         Parameters:
@@ -138,7 +146,10 @@ class NavModelBody(NavModel):
                       metadata: dict[str, Any],
                       always_create_model: bool,
                       never_create_model: bool,
-                      create_overlay: bool) -> Any:  # XXX
+                      create_overlay: bool
+                      ) -> tuple[NDArrayFloatType | None,
+                                 dict[str, Any],
+                                 Annotation | None]:
         # These are just shorthand to make later code easier to read
         obs = self._obs
         body_name = self._body_name
@@ -181,9 +192,7 @@ class NavModelBody(NavModel):
 
         bb_area = inventory['u_pixel_size'] * inventory['v_pixel_size']
         self._logger.info('Pixel size %.2f x %.2fx, bounding box area %.2f',
-                          inventory['u_pixel_size'],
-                          inventory['v_pixel_size'],
-                          bb_area)
+                          inventory['u_pixel_size'], inventory['v_pixel_size'], bb_area)
         if bb_area >= config['min_bounding_box_area']:
             metadata['size_ok'] = True
         else:
@@ -259,8 +268,8 @@ class NavModelBody(NavModel):
         if v_min == v_max and v_min == obs.extfov_v_min:
             v_max += 1
 
-        self._logger.debug(
-            'Original bounding box U %d to %d, V %d to %d', u_min, u_max, v_min, v_max)
+        self._logger.debug('Original bounding box U %d to %d, V %d to %d',
+                           u_min, u_max, v_min, v_max)
         self._logger.debug('Image size %d x %d; subrect w/slop U %d to %d, V %d to %d',
                            obs.data_shape_u, obs.data_shape_v, u_min, u_max, v_min, v_max)
 
@@ -288,7 +297,8 @@ class NavModelBody(NavModel):
                                               np.ceil(inventory['v_pixel_size']))), 1)
         restr_oversample_u = min(restr_oversample_u, config['oversample_maximum'])
         restr_oversample_v = min(restr_oversample_v, config['oversample_maximum'])
-        self._logger.debug(f'Oversampling by {restr_oversample_u:d} x {restr_oversample_v:d}')
+        self._logger.debug('Oversampling by %d x %d',
+                           restr_oversample_u, restr_oversample_v)
         restr_u_min = u_min + 1./(2*restr_oversample_u)
         restr_u_max = u_max + 1 - 1./(2*restr_oversample_u)
         restr_v_min = v_min + 1./(2*restr_oversample_v)
@@ -313,19 +323,19 @@ class NavModelBody(NavModel):
 
         # If the inv mask is true, but any of its neighbors are false, then
         # this is an edge
-        limb_mask_total = (shift_array(restr_body_mask_inv, -1,  0) |
-                           shift_array(restr_body_mask_inv,  1,  0) |
-                           shift_array(restr_body_mask_inv,  0, -1) |
-                           shift_array(restr_body_mask_inv,  0,  1))
+        restr_limb_mask_total = (shift_array(restr_body_mask_inv, (-1, 0)) |
+                                 shift_array(restr_body_mask_inv, (1, 0)) |
+                                 shift_array(restr_body_mask_inv, (0, -1)) |
+                                 shift_array(restr_body_mask_inv, (0, 1)))
         # This valid mask will be a single series of pixels just inside the limb
-        limb_mask = restr_body_mask_valid & limb_mask_total
+        restr_limb_mask = restr_body_mask_valid & restr_limb_mask_total
 
-        if not limb_mask.any():
+        if not restr_limb_mask.any():
             limb_incidence_min = 1e38
             limb_incidence_max = 1e38
             self._logger.info('There is no limb')
         else:
-            restr_incidence_limb = restr_incidence.mask_where(~limb_mask)
+            restr_incidence_limb = restr_incidence.mask_where(~restr_limb_mask)
             limb_incidence_min = restr_incidence_limb.min().vals
             limb_incidence_max = restr_incidence_limb.max().vals
             self._logger.info('Limb incidence angle min %.2f, max %.2f',
@@ -435,11 +445,6 @@ class NavModelBody(NavModel):
                 restr_model = filter_downsample(restr_o_lambert,
                                                 restr_oversample_v,
                                                 restr_oversample_u)
-                # # XXX FOR PAPER ONLY
-                # if nav.config.PNG_BODY_OUTLINE:
-                #     for _x in range(-1, 2):
-                #         for _y in range(-1, 2):
-                #             restr_model[shift_array(limb_mask, _x, _y)] = 5
                 # if body_name == 'TITAN':
                 #     # Special case for Titan because of the atmospheric glow at
                 #     # high phase angles. The model won't be used for correlation,
@@ -454,7 +459,7 @@ class NavModelBody(NavModel):
             if (config['use_albedo'] and
                 body_name in config['geometric_albedo']):
                 albedo = config['geometric_albedo'][body_name]
-                self._logger.info(f'Applying albedo {albedo:f}')
+                self._logger.info('Applying albedo %.6f', albedo)
                 restr_model *= albedo
 
         # if not used_cartographic:
@@ -474,16 +479,17 @@ class NavModelBody(NavModel):
         #             self._logger.info('Resolution %.2f is good enough for a sharp edge',
         #                         center_resolution)
 
-
         # Take the full-resolution object and put it back in the right place in a
         # full-size image
         model = obs.make_extfov_zeros()
+        limb_mask = obs.make_extfov_false()
         if restr_model is not None:
             model[v_min+obs.extfov_margin_v:v_max+obs.extfov_margin_v+1,
                   u_min+obs.extfov_margin_u:u_max+obs.extfov_margin_u+1] = restr_model
+            limb_mask[v_min+obs.extfov_margin_v:v_max+obs.extfov_margin_v+1,
+                      u_min+obs.extfov_margin_u:u_max+obs.extfov_margin_u+1] = \
+                restr_limb_mask
 
-        plt.imshow(model)
-        plt.show()
         # if create_overlay:
         #     model_text = _bodies_make_label(obs, body_name, model, label_avoid_mask,
         #                                     bodies_config)
@@ -491,4 +497,6 @@ class NavModelBody(NavModel):
         model_text = None
 
         metadata['confidence'] = 1.
-        return model, metadata, model_text
+
+        annotation = Annotation(limb_mask, thicken_overlay=0, text_info=model_text)
+        return model, metadata, annotation
