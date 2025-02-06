@@ -6,10 +6,13 @@ myst-parser
 numpy
 pytest
 rms-filecache
+rms-imgdisp
 rms-pdslogger
 rms-pdstable
 rms-pdstemplate
 rms-oops
+rms-starcat
+ruamel.yaml
 sphinx
 sphinxcontrib-napoleon
 sphinx-rtd-theme
