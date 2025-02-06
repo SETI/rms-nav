@@ -12,9 +12,9 @@ from nav.annotation import Annotations
 import nav.inst.inst_cassini_iss as instcoiss
 from nav.nav_model import NavModelBody
 import nav.obs.obs_snapshot as obs_snapshot
-from tests.config import URL_CASSINI_ISS_01
+from tests.config import URL_CASSINI_ISS_RHEA_01
 
-INST = instcoiss.InstCassiniISS.from_file(URL_CASSINI_ISS_01)
+INST = instcoiss.InstCassiniISS.from_file(URL_CASSINI_ISS_RHEA_01)
 OBS = INST.obs
 
 annotations = Annotations()

@@ -6,7 +6,7 @@ from oops.observation.snapshot import Snapshot
 from oops.meshgrid import Meshgrid
 from oops.backplane import Backplane
 
-from nav.config.global_config import ALL_PLANETS
+from nav.config import Config
 from nav.inst import Inst
 from nav.util.image import pad_array
 from nav.util.types import DTypeLike, NDArrayFloatType, NDArrayBoolType
@@ -55,7 +55,7 @@ class ObsSnapshot(Obs, Snapshot):
 
         closest_planet = None
         closest_dist = 1e38
-        for planet in ALL_PLANETS:
+        for planet in self._config.planets:
             dist = self.body_distance(planet)
             if dist < closest_dist:
                 closest_planet = planet

@@ -39,7 +39,9 @@ class Annotations:
         self._annotations: list[Annotation] = []
 
     def add_annotation(self,
-                       annotation: Annotation) -> None:
+                       annotation: Annotation | None) -> None:
+        if annotation is None:
+            return
         if len(self._annotations):
             if annotation.overlay.shape != self._annotations[-1].overlay.shape:
                 raise ValueError(
@@ -50,7 +52,9 @@ class Annotations:
 
     def combine(self,
                 overlay_color: tuple[int, int, int] = (255, 0, 0)
-                ) -> NDArrayIntType:
+                ) -> NDArrayIntType | None:
+        if len(self._annotations) == 0:
+            return None
         res = np.zeros(self._annotations[0].overlay.shape + (3,), dtype=np.uint8)
         for annotation in self._annotations:
             res[annotation.overlay] = overlay_color

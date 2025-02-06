@@ -9,7 +9,6 @@ import oops
 import polymath
 
 from nav.annotation import Annotation
-from nav.config.global_config import BODIES_CONFIG
 from nav.inst import Inst
 from nav.util.image import (filter_downsample,
                             shift_array)
@@ -27,7 +26,6 @@ class NavModelBody(NavModel):
                  body_name: str,
                  *,
                  inventory: Optional[dict[str, Any]] = None,
-                 bodies_config: Optional[dict[str, Any]] = None,
                  **kwargs: Any):
         """
                 obs                    The Observation.
@@ -42,11 +40,10 @@ class NavModelBody(NavModel):
         super().__init__(obs, logger_name='NavModelBody', **kwargs)
 
         self._body_name = body_name.upper()
-        self._config = bodies_config or BODIES_CONFIG
 
         if inventory is None:
-            inventory = self._obs.inventory([self._body_name],
-                                            return_type='full')[body_name]
+            inventory = self.obs.inventory([self._body_name],
+                                           return_type='full')[body_name]
         self._inventory = inventory
 
     def create_model(self,
@@ -151,10 +148,10 @@ class NavModelBody(NavModel):
                                  dict[str, Any],
                                  Annotation | None]:
         # These are just shorthand to make later code easier to read
-        obs = self._obs
+        obs = self.obs
         body_name = self._body_name
-        ext_bp = self._obs.ext_bp
-        config = self._config
+        ext_bp = self.obs.ext_bp
+        config = self._config.bodies_config
         inventory = self._inventory
 
         metadata['body_name'] = body_name

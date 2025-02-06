@@ -8,8 +8,8 @@
 # import scipy.ndimage.filters as filt
 # from PIL import Image, ImageDraw, ImageFont
 
-# import tkinter as tk
-# from imgdisp import ImageDisp
+import tkinter as tk
+from imgdisp import ImageDisp
 
 # from starcat import (UCAC4StarCatalog,
 #                      YBSCStarCatalog,
@@ -33,7 +33,7 @@
 # _LOGGING_NAME = "nav." + __name__
 
 # DEBUG_STARS_FILTER_IMGDISP = False
-# DEBUG_STARS_MODEL_IMGDISP = False
+_DEBUG_STARS_MODEL_IMGDISP = True
 # DEBUG_STARS_PSF_3D = False
 
 import time
@@ -51,7 +51,6 @@ from starcat import (SCLASS_TO_SURFACE_TEMP,
                      YBSCStarCatalog)
 
 from nav.annotation import Annotation, TextInfo
-from nav.config.global_config import STARS_CONFIG
 from nav.inst import Inst
 from nav.util.flux import clean_sclass
 from nav.util.types import NDArrayFloatType
@@ -66,8 +65,6 @@ _STAR_CATALOG_YBSC = YBSCStarCatalog()
 class NavModelStars(NavModel):
     def __init__(self,
                  obs: oops.Observation,
-                 *,
-                 stars_config: Optional[dict[Any, Any]] = None,
                  **kwargs: Any) -> None:
         """TBD
         """
@@ -75,7 +72,6 @@ class NavModelStars(NavModel):
         super().__init__(obs, logger_name='NavModelStars', **kwargs)
 
         self._obs = obs
-        self._config = stars_config or STARS_CONFIG
 
 
     def _aberrate_star(self, star: Star) -> None:
@@ -445,9 +441,7 @@ class NavModelStars(NavModel):
             #     sigma *= stars_config["psf_gain"][1]
             sigma = 1
 
-            gausspsf = GaussianPSF(sigma=sigma,
-                                   movement=(star.move_v,star.move_u),
-                                   movement_granularity=move_gran)
+            gausspsf = GaussianPSF(sigma=sigma)
 
             if (u_int < psf_size_half_u or
                 u_int >= model.shape[1]-psf_size_half_u or
@@ -457,16 +451,19 @@ class NavModelStars(NavModel):
 
             psf = gausspsf.eval_rect((psf_size_half_v*2+1, psf_size_half_u*2+1),
                                      offset=(v_frac, u_frac),
-                                     scale=1) # XXX scale=star.dn)
+                                     scale=1, # XXX scale=star.dn)
+                                     movement=(star.move_v, star.move_u),
+                                     movement_granularity=move_gran)
+
             model[v_int-psf_size_half_v:v_int+psf_size_half_v+1,
                   u_int-psf_size_half_u:u_int+psf_size_half_u+1] += psf
 
-        # if DEBUG_STARS_MODEL_IMGDISP:
-        #     ImageDisp([model],
-        #             canvas_size=(1024,1024),
-        #             enlarge_limit=10,
-        #             auto_update=True)
-        #     tk.mainloop()
+        if _DEBUG_STARS_MODEL_IMGDISP:
+            ImageDisp([model],
+                    canvas_size=(1024,1024),
+                    enlarge_limit=10,
+                    auto_update=True)
+            tk.mainloop()
 
         annotation = None # Annotation(limb_mask, thicken_overlay=0, text_info=None)
         return model, metadata, annotation

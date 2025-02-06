@@ -12,10 +12,9 @@ from nav.annotation import Annotations
 import nav.inst.inst_cassini_iss as instcoiss
 from nav.nav_model import NavModelStars
 import nav.obs.obs_snapshot as obs_snapshot
-from tests.config import URL_CASSINI_ISS_02
+from tests.config import URL_CASSINI_ISS_STARS_02
 
-INST = instcoiss.InstCassiniISS.from_file(URL_CASSINI_ISS_02)
-OBS = INST.obs
+OBS = instcoiss.InstCassiniISS.from_file(URL_CASSINI_ISS_STARS_02)
 
 annotations = Annotations()
 
@@ -26,8 +25,8 @@ model, metadata, annotation = stars.create_model()
 annotations.add_annotation(annotation)
 
 pprint.pprint(metadata)
-# plt.imshow(model)
-# plt.show()
+plt.imshow(model)
+plt.show()
 
 overlay = annotations.combine()
 

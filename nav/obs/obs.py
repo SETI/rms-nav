@@ -2,27 +2,32 @@ from abc import ABC
 import logging
 from typing import Optional, cast
 
-import pdslogger
+from pdslogger import PdsLogger
 
-import nav.config.nav_logger
+from nav.config import Config, DEFAULT_CONFIG
 from nav.inst import Inst
 
 
 class Obs(ABC):
     def __init__(self,
                  *,
-                 logger: Optional[logging.Logger] = None,
+                 config: Optional[Config] = None,
                  logger_name: Optional[str] = None) -> None:
 
+        self._config = config or DEFAULT_CONFIG
+        self._logger = self._config.logger
         self._inst: Optional[Inst] = None
-
-        if logger is None:
-            self._logger = nav.config.nav_logger.DEFAULT_IMAGE_LOGGER
-        else:
-            self._logger = pdslogger.PdsLogger.as_pdslogger(logger)
 
         if logger_name is not None:
             self._logger = self._logger.get_logger(logger_name)
+
+    @property
+    def config(self) -> Config:
+        return self._config
+
+    @property
+    def logger(self) -> PdsLogger:
+        return self._logger
 
     def set_inst(self, inst: Inst) -> None:
         self._inst = inst

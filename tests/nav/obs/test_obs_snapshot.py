@@ -4,22 +4,24 @@ import pytest
 import nav.inst.inst_cassini_iss as instcoiss
 import nav.inst.inst_voyager_iss as instvgiss
 import nav.obs.obs_snapshot as obs_snapshot
-from tests.config import URL_CASSINI_ISS_02, URL_VOYAGER_ISS_01, URL_VOYAGER_ISS_02
+from tests.config import (URL_CASSINI_ISS_STARS_01,
+                          URL_VOYAGER_ISS_IO_01,
+                          URL_VOYAGER_ISS_URANUS_01)
 
 # This image was chosen because it is 256x256 (and thus faster to create a Backplane)
 # and the RA wraps around.
-OBS_COISS2 = instcoiss.InstCassiniISS.from_file(URL_CASSINI_ISS_02)
+OBS_COISS1 = instcoiss.InstCassiniISS.from_file(URL_CASSINI_ISS_STARS_01)
 
 # This image was chosen because it is of Io
-OBS_VGISS1 = instvgiss.InstVoyagerISS.from_file(URL_VOYAGER_ISS_01)
+OBS_VGISS1 = instvgiss.InstVoyagerISS.from_file(URL_VOYAGER_ISS_IO_01)
 
 # This image was chosen because it's a different instrument and the RA does not wrap
 # around and also it is of Uranus
-OBS_VGISS2 = instvgiss.InstVoyagerISS.from_file(URL_VOYAGER_ISS_02)
+OBS_VGISS2 = instvgiss.InstVoyagerISS.from_file(URL_VOYAGER_ISS_URANUS_01)
 
 
 def test_obs_snapshot_init():
-    s = obs_snapshot.ObsSnapshot(OBS_COISS2)
+    s = obs_snapshot.ObsSnapshot(OBS_COISS1)
     assert s._data_shape_uv == (256, 256)
     assert s._fov_uv_min == (0, 0)
     assert s._fov_uv_max == (255, 255)
@@ -29,7 +31,7 @@ def test_obs_snapshot_init():
     assert s._extfov_uv_min == (0, 0)
     assert s._extfov_uv_max == (255, 255)
 
-    s = obs_snapshot.ObsSnapshot(OBS_COISS2, extfov_margin=10)
+    s = obs_snapshot.ObsSnapshot(OBS_COISS1, extfov_margin=10)
     assert s._data_shape_uv == (256, 256)
     assert s._fov_uv_min == (0, 0)
     assert s._fov_uv_max == (255, 255)
@@ -39,7 +41,7 @@ def test_obs_snapshot_init():
     assert s._extfov_uv_min == (-10, -10)
     assert s._extfov_uv_max == (265, 265)
 
-    s = obs_snapshot.ObsSnapshot(OBS_COISS2, extfov_margin=(10, 20))
+    s = obs_snapshot.ObsSnapshot(OBS_COISS1, extfov_margin=(10, 20))
     assert s._data_shape_uv == (256, 256)
     assert s._fov_uv_min == (0, 0)
     assert s._fov_uv_max == (255, 255)
@@ -51,7 +53,7 @@ def test_obs_snapshot_init():
 
 
 def test_obs_snapshot_bp_mg():
-    s = obs_snapshot.ObsSnapshot(OBS_COISS2)
+    s = obs_snapshot.ObsSnapshot(OBS_COISS1)
     assert s.bp is s.bp
     assert s.bp.meshgrid.shape == (256, 256)
     assert s.bp.meshgrid.uv.vals[0, 0, 0] == 0.5
@@ -71,7 +73,7 @@ def test_obs_snapshot_bp_mg():
     assert s.center_bp.meshgrid.uv.vals[0, 0, 0] == 128
     assert s.center_bp.meshgrid.uv.vals[0, 0, 1] == 128
 
-    s = obs_snapshot.ObsSnapshot(OBS_COISS2, extfov_margin=(10, 20))
+    s = obs_snapshot.ObsSnapshot(OBS_COISS1, extfov_margin=(10, 20))
     assert s.bp is s.bp
     assert s.bp.meshgrid.shape == (256, 256)
     assert s.bp.meshgrid.uv.vals[0, 0, 0] == 0.5
@@ -103,7 +105,7 @@ def test_obs_snapshot_bp_mg():
 
 
 def test_obs_snapshot_ra_dec_limits_wrap():
-    s = obs_snapshot.ObsSnapshot(OBS_COISS2)
+    s = obs_snapshot.ObsSnapshot(OBS_COISS1)
     ra_min, ra_max, dec_min, dec_max = s.ra_dec_limits()
     assert ra_min * oops.DPR == pytest.approx(359.96968466526647)
     assert ra_max * oops.DPR == pytest.approx(0.4436640310675228)
@@ -112,7 +114,7 @@ def test_obs_snapshot_ra_dec_limits_wrap():
 
 
 def test_obs_snapshot_ra_dec_limits_ext_wrap():
-    s = obs_snapshot.ObsSnapshot(OBS_COISS2, extfov_margin=10)
+    s = obs_snapshot.ObsSnapshot(OBS_COISS1, extfov_margin=10)
     ra_min, ra_max, dec_min, dec_max = s.ra_dec_limits_ext()
     assert ra_min * oops.DPR == pytest.approx(359.95125729565814)
     assert ra_max * oops.DPR == pytest.approx(0.46221430761720933)

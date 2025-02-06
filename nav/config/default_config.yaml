@@ -1,0 +1,326 @@
+planets:
+  - MERCURY
+  - VENUS
+  - EARTH
+  - MARS
+  - JUPITER
+  - SATURN
+  - URANUS
+  - NEPTUNE
+  - PLUTO
+satellites:
+  EARTH:
+    - MOON
+  JUPITER:
+    - ADRASTEA
+    - AMALTHEA
+    - CALLISTO
+    - EUROPA
+    - GANYMEDE
+    - IO
+    - METIS
+    - THEBE
+  SATURN:
+    - ATLAS
+    - CALYPSO
+    - DAPHNIS
+    - DIONE
+    - ENCELADUS
+    - EPIMETHEUS
+    - HELENE
+    - HYPERION
+    - IAPETUS
+    - JANUS
+    - MIMAS
+    - PAN
+    - PANDORA
+    - PHOEBE
+    - PROMETHEUS
+    - RHEA
+    - TELESTO
+    - TETHYS
+    - TITAN
+  URANUS:
+    - ARIEL
+    - BELINDA
+    - BIANCA
+    - CRESSIDA
+    - DESDEMONA
+    - JULIET
+    - MIRANDA
+    - OBERON
+    - PORTIA
+    - PUCK
+    - ROSALIND
+    - TITANIA
+    - UMBRIEL
+  NEPTUNE:
+    - DESPINA
+    - GALATEA
+    - LARISSA
+    - NAIAD
+    - PROTEUS
+    - THALASSA
+    - TRITON
+  PLUTO:
+    - CHARON
+    - HYDRA
+    - KERBEROS
+    - NIX
+    - STYX
+fuzzy_satellites:
+  SATURN:
+    - HYPERION
+    - PHOEBE
+ring_satellites:
+  SATURN:
+    - DAPHNIS
+    - PAN
+
+offset:
+  default_gaussian_blur: 0.25
+  maximum_blur: 100.0
+  maximum_blur_error_bars: 60.0
+  median_filter_size:
+  median_filter_blur: 1.2
+  median_filter_footprint: circle
+  num_bodies_threshold: 3
+  bodies_cov_threshold: 0.0005
+  model_cov_threshold: 25
+  model_edge_pixels: 5
+  secondary_corr_search_size: [15, 15]
+  lowest_confidence: 0.01
+  stars_model_diff_threshold: 2
+  stars_override_threshold: 6
+  secondary_max_attempts: 10
+  secondary_corr_threshold: 1
+  secondary_corr_peak_threshold: 0.2
+  secondary_corr_tweak_threshold: 0.7
+  secondary_max_num_exhaustive: 9
+  # font:
+  #   256: &id001
+  #     - /usr/share/fonts/truetype/liberation2/LiberationMono-Bold.ttf
+  #     - 10
+  #   512: *id001
+  #   1000: &id002
+  #     - /usr/share/fonts/truetype/liberation2/LiberationMono-Bold.ttf
+  #     - 18
+  #   1024: *id002
+bodies:
+  min_bounding_box_area: 9
+  min_emission_ring_body: 20
+  oversample_edge_limit: 512
+  oversample_maximum: 8
+  curvature_threshold_frac: 0.02
+  curvature_threshold_pixels: 20
+  limb_incidence_threshold: 1.53588974175501
+  limb_incidence_frac: 0.4
+  surface_bumpiness:
+    SATURN: 50.0
+    PAN: 7.0
+    DAPHNIS: 3.0
+    ATLAS: 12.0
+    PROMETHEUS: 25.0
+    PANDORA: 20.0
+    EPIMETHEUS: 13.0
+    JANUS: 20.0
+    MIMAS: 5.0
+    ENCELADUS: 0.5
+    TETHYS: 5.0
+    TELESTO: 5.0
+    CALYPSO: 7.0
+    DIONE: 0.75
+    HELENE: 45.0
+    RHEA: 0.75
+    TITAN: 0.0
+    HYPERION: 350.0
+    IAPETUS: 35.0
+    PHOEBE: 40.0
+  geometric_albedo:
+    SATURN: 0.342
+    PAN: 0.5
+    DAPHNIS: 0.5
+    ATLAS: 0.8
+    PROMETHEUS: 0.5
+    PANDORA: 0.7
+    EPIMETHEUS: 0.8
+    JANUS: 0.9
+    MIMAS: 0.6
+    ENCELADUS: 1.0
+    TETHYS: 0.8
+    TELESTO: 1.0
+    CALYPSO: 1.0
+    DIONE: 0.7
+    HELENE: 0.7
+    RHEA: 0.7
+    TITAN: 0.22
+    HYPERION: 0.3
+    IAPETUS: 0.275
+    PHOEBE: 0.08
+  use_lambert: true
+  use_albedo: false
+  min_reproj_seed_area: 40000
+  min_reproj_candidate_area: 2500
+  reproj_lon_resolution: 0.017453292519943295
+  reproj_lat_resolution: 0.017453292519943295
+  reproj_latlon_type: centric
+  reproj_lon_direction: east
+  min_text_area: 0.003
+  # font:
+  #   256: *id001
+  #   512: *id001
+  #   1000: *id002
+  #   1024: *id002
+rings:
+  model_source: ephemeris
+  fiducial_feature_threshold: 3
+  fiducial_rms_gain: 2
+  fiducial_min_feature_width: 2
+  one_sided_feature_width: 30.0
+  fiducial_ephemeris_width: 100
+  min_curvature_low_confidence:
+    - 0.0
+    - 0.5
+  min_curvature_high_confidence:
+    - 0.17
+    - 1.0
+  curvature_to_reduce_features: 1.5707963267948966
+  curvature_reduced_features: 1
+  emission_fiducial_threshold: 0.75
+  emission_use_threshold: 0.2
+  remove_saturn_shadow: true
+  remove_body_shadows: false
+  # font:
+  #   256: *id001
+  #   512: *id001
+  #   1000: *id002
+  #   1024: *id002
+  # parameter_font:
+  #   256: *id001
+  #   512: *id001
+  #   1000: &id003
+  #     - /usr/share/fonts/truetype/liberation2/LiberationMono-Bold.ttf
+  #     - 12
+  #   1024: *id003
+  # parameter_overlay_start:
+  #   512: &id004
+  #     - 10
+  #     - 30
+  #   1000: *id004
+  #   1024: *id004
+  # parameter_overlay_step:
+  #   512:
+  #     - 100
+  #     - 100
+  #   1000: &id005
+  #     - 150
+  #     - 100
+  #   1024: *id005
+  # parameter_overlay_line_len_thickness:
+  #   512:
+  #     - 10
+  #     - 1
+  #   1000: &id006
+  #     - 20
+  #     - 1
+  #   1024: *id006
+  # parameter_overlay_box_size:
+  #   512:
+  #     - 1
+  #     - 0
+  #   1000: &id007
+  #     - 2
+  #     - 1
+  #   1024: *id007
+stars:
+  calibrated_data: true
+  stellar_aberration: true
+  float_psf_sigma: false
+  search_multipliers:
+    - 0.25
+    - 0.5
+    - 0.75
+    - 1.0
+  max_stars: 30
+  perform_photometry: true
+  try_without_photometry: false
+  min_stars_low_confidence:
+    - 3
+    - 0.75
+  min_stars_high_confidence:
+    - 6
+    - 1.0
+  min_confidence: 0.9
+  # psf_boxsizes:
+  #   - &id008
+  #       - 100000
+  #       - 15
+  #   -   - 50000
+  #       - 13
+  #   -   - 500
+  #       - 11
+  #   -   - 0
+  #       - 9
+  psf_gain:
+    - 5000
+    - 4
+  max_movement_steps: 50
+  max_smear: 100
+  default_star_class: G0
+  # min_brightness_guaranteed_vis: 200.0
+  # ?   - min_detectable_dn
+  #     - NAC
+  # : 7
+  # ?   - min_detectable_dn
+  #     - WAC
+  # : 10
+  # ?   - photometry_slop
+  #     - NAC
+  # : 2.0
+  # ?   - photometry_slop
+  #     - WAC
+  # : 2.0
+  min_vmag: 5.0
+  max_vmag: 15.0
+  vmag_increment: 0.5
+  # photometry_boxsizes:
+  #   - *id008
+  #   -   - 50000
+  #       - 11
+  #   -   - 500
+  #       - 9
+  #   -   - 0
+  #       - 7
+  max_star_dn: 100000.0
+  min_dn_force_one_star: 25000.0
+  star_body_conflict_margin: 3
+  too_bright_dn: 1000
+  too_bright_factor:
+  # font:
+  #   256: *id001
+  #   512: *id001
+  #   1000: *id002
+  #   1024: *id002
+titan:
+  atmosphere_height: 700
+bootstrap:
+  bootstrap_min_body_area: 100
+  body_list:
+    - DIONE
+    - ENCELADUS
+    - IAPETUS
+    - MIMAS
+    - RHEA
+    - TETHYS
+  min_confidence: 0.1
+  min_area: 16384
+  max_phase_angle: 2.356194490192345
+  max_incidence_angle: 1.2217304763960306
+  max_emission_angle: 1.2217304763960306
+  lon_resolution: 0.008726646259971648
+  lat_resolution: 0.008726646259971648
+  latlon_type: centric
+  lon_direction: east
+  min_coverage_frac: 0.1
+  max_subsolar_dist: 0.7853981633974483
+  max_res_factor: 3
