@@ -1,12 +1,14 @@
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Any, Optional
 
 import oops
 from pdslogger import PdsLogger
 
+from nav.annotation import Annotation
 from nav.config import Config, DEFAULT_CONFIG
 from nav.inst import Inst
 from nav.obs import ObsSnapshot
+from nav.util.types import NDArrayFloatType, NDArrayBoolType
 
 
 class NavModel(ABC):
@@ -16,11 +18,17 @@ class NavModel(ABC):
                  config: Optional[Config] = None,
                  logger_name: Optional[str] = None) -> None:
 
-        self._obs = obs
         self._config = config or DEFAULT_CONFIG
+        self._obs = obs
+
         self._logger = self._config.logger
         if logger_name is not None:
             self._logger = self._logger.get_logger(logger_name)
+
+        self._model = None
+        self._model_mask = None
+        self._metadata = None
+        self._annotation = None
 
     @property
     def config(self) -> Config:
@@ -37,3 +45,19 @@ class NavModel(ABC):
     @property
     def inst(self) -> Inst:
         return self.obs.inst
+
+    @property
+    def model(self) -> NDArrayFloatType:
+        return self._model
+
+    @property
+    def model_mask(self) -> NDArrayBoolType:
+        return self._model_mask
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        return self._metadata
+
+    @property
+    def annotation(self) -> Annotation:
+        return self._annotation

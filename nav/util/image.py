@@ -400,6 +400,30 @@ def filter_downsample(arr: NDArrayFloatType,
 #
 #==============================================================================
 
+def draw_line_arrow(img: NDArrayType[NPType],
+                    color: int | float | list[int | float] | tuple[int | float, ...],
+                    x0: int | float,
+                    y0: int | float,
+                    x1: int | float,
+                    y1: int | float,
+                    thickness: int = 1,
+                    arrow_head_length: int = 10,
+                    arrow_head_angle: int = 45) -> None:
+
+    draw_line(img, color, x0, y0, x1, y1, thickness)
+
+    line_angle = -np.atan2((y1-y0), (x0-x1))
+    angle = line_angle + np.deg2rad(arrow_head_angle)
+    x2 = x1 + np.round(arrow_head_length * np.cos(angle))
+    y2 = y1 + np.round(arrow_head_length * np.sin(angle))
+    draw_line(img, color, x1, y1, x2, y2, thickness)
+
+    angle = line_angle - np.deg2rad(arrow_head_angle)
+    x2 = x1 + np.round(arrow_head_length * np.cos(angle))
+    y2 = y1 + np.round(arrow_head_length * np.sin(angle))
+    draw_line(img, color, x1, y1, x2, y2, thickness)
+
+
 def draw_line(img: NDArrayType[NPType],
               color: int | float | list[int | float] | tuple[int | float, ...],
               x0: int | float,
@@ -561,6 +585,7 @@ def draw_rect(img: NDArrayType[NPType],
     # Right
     img[yctr-yhalfwidth-thickness+1:yctr+yhalfwidth+thickness,
         xctr+xhalfwidth:xctr+xhalfwidth+thickness] = color
+
 
 def draw_circle(img: NDArrayType[NPType],
                 color: int | float | list[int | float] | tuple[int | float, ...],

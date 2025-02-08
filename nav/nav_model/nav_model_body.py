@@ -1,4 +1,3 @@
-import time
 from typing import Any, Optional
 
 import matplotlib.pyplot as plt
@@ -8,10 +7,16 @@ import numpy as np
 import oops
 import polymath
 
-from nav.annotation import Annotation
-from nav.inst import Inst
+from nav.annotation import (Annotation,
+                            AnnotationTextInfo,
+                            TEXTINFO_LEFT_ARROW,
+                            TEXTINFO_RIGHT_ARROW,
+                            TEXTINFO_BOTTOM_ARROW,
+                            TEXTINFO_TOP_ARROW)
+
 from nav.util.image import (filter_downsample,
                             shift_array)
+from nav.util.misc import now_dt, dt_delta_str
 from nav.util.types import NDArrayFloatType
 
 from .nav_model import NavModel
@@ -51,9 +56,7 @@ class NavModelBody(NavModel):
                      always_create_model: bool = False,
                      never_create_model: bool = False,
                      create_overlay: bool = False
-                     ) -> tuple[NDArrayFloatType | None,
-                                dict[str, Any],
-                                Annotation | None]:
+                     ) -> None:
         """Create a model for a body.
 
         Parameters:
@@ -126,33 +129,37 @@ class NavModelBody(NavModel):
         """
 
         metadata: dict[str, Any] = {}
+        metadata['start_time'] = start_time = now_dt()
+        metadata['end_time'] = None
+        metadata['elapsed_time'] = None
 
-        metadata['start_time'] = time.time()
+        self._model = None
+        self._model_mask = None
+        self._metadata = metadata
+        self._annotation = None
 
         with self._logger.open(f'Create body model for {self._body_name}'):
-            ret = self._create_model(metadata,
-                                     always_create_model=always_create_model,
-                                     never_create_model=never_create_model,
-                                     create_overlay=create_overlay)
+            self._create_model(always_create_model=always_create_model,
+                               never_create_model=never_create_model,
+                               create_overlay=create_overlay)
 
-        metadata['end_time'] = time.time()
-
-        return ret
+        metadata['end_time'] = end_time = now_dt()
+        metadata['elapsed_time'] = dt_delta_str(start_time, end_time)
+        return
 
     def _create_model(self,
-                      metadata: dict[str, Any],
                       always_create_model: bool,
                       never_create_model: bool,
                       create_overlay: bool
-                      ) -> tuple[NDArrayFloatType | None,
-                                 dict[str, Any],
-                                 Annotation | None]:
+                      ) -> None:
+
         # These are just shorthand to make later code easier to read
         obs = self.obs
         body_name = self._body_name
         ext_bp = self.obs.ext_bp
         config = self._config.bodies_config
         inventory = self._inventory
+        metadata = self._metadata
 
         metadata['body_name'] = body_name
         metadata['inventory'] = inventory
@@ -170,25 +177,25 @@ class NavModelBody(NavModel):
         # metadata['has_bad_pixels'] = None
         # metadata['confidence'] = None
 
-        metadata['sub_solar_lon'] = ext_bp.sub_solar_longitude(body_name).vals
-        metadata['sub_solar_lat'] = ext_bp.sub_solar_latitude(body_name).vals
-        metadata['sub_observer_lon'] = ext_bp.sub_observer_longitude(body_name).vals
-        metadata['sub_observer_lat'] = ext_bp.sub_observer_latitude(body_name).vals
-        metadata['phase_angle'] = ext_bp.center_phase_angle(body_name).vals
+        metadata['sub_solar_lon'] = np.degrees(ext_bp.sub_solar_longitude(body_name)
+                                               .vals)
+        metadata['sub_solar_lat'] = np.degrees(ext_bp.sub_solar_latitude(body_name)
+                                               .vals)
+        metadata['sub_observer_lon'] = np.degrees(ext_bp.sub_observer_longitude(body_name)
+                                                  .vals)
+        metadata['sub_observer_lat'] = np.degrees(ext_bp.sub_observer_latitude(body_name)
+                                                  .vals)
+        metadata['phase_angle'] = np.degrees(ext_bp.center_phase_angle(body_name)
+                                             .vals)
 
-        self._logger.info('Sub-solar longitude      %6.2f',
-                          np.degrees(metadata['sub_solar_lon']))
-        self._logger.info('Sub-solar latitude       %6.2f',
-                          np.degrees(metadata['sub_solar_lat']))
-        self._logger.info('Sub-observer longitude   %6.2f',
-                          np.degrees(metadata['sub_observer_lon']))
-        self._logger.info('Sub-observer latitude    %6.2f',
-                          np.degrees(metadata['sub_observer_lat']))
-        self._logger.info('Phase angle              %6.2f',
-                          np.degrees(metadata['phase_angle']))
+        self._logger.info('Sub-solar longitude      %6.2f', metadata['sub_solar_lon'])
+        self._logger.info('Sub-solar latitude       %6.2f', metadata['sub_solar_lat'])
+        self._logger.info('Sub-observer longitude   %6.2f', metadata['sub_observer_lon'])
+        self._logger.info('Sub-observer latitude    %6.2f', metadata['sub_observer_lat'])
+        self._logger.info('Phase angle              %6.2f', metadata['phase_angle'])
 
         bb_area = inventory['u_pixel_size'] * inventory['v_pixel_size']
-        self._logger.info('Pixel size %.2f x %.2fx, bounding box area %.2f',
+        self._logger.info('Pixel size %.2f x %.2f, bounding box area %.2f',
                           inventory['u_pixel_size'], inventory['v_pixel_size'], bb_area)
         if bb_area >= config['min_bounding_box_area']:
             metadata['size_ok'] = True
@@ -197,7 +204,7 @@ class NavModelBody(NavModel):
             if not always_create_model:
                 self._logger.info(
                     'Bounding box is too small to bother with - aborting early')
-                return None, metadata, None
+                return
 
         # # Create a Meshgrid that only covers the center pixel of the body
         # ctr_uv = inventory['center_uv']
@@ -236,8 +243,8 @@ class NavModelBody(NavModel):
         v_max = int(inventory['v_max_unclipped'])
 
         # For curvature later
-        u_center = int((u_min + u_max) / 2)
-        v_center = int((v_min + v_max) / 2)
+        u_center = (u_min + u_max) // 2
+        v_center = (v_min + v_max) // 2
         width = u_max - u_min + 1
         height = v_max - v_min + 1
         curvature_threshold_frac = config['curvature_threshold_frac']
@@ -284,7 +291,7 @@ class NavModelBody(NavModel):
         metadata['entirely_visible_extfov'] = entirely_visible_extfov
 
         if never_create_model:
-            return None, metadata, None
+            return
 
         # Make a new Backplane that only covers the body, but oversample
         # it so we can do anti-aliasing
@@ -338,6 +345,9 @@ class NavModelBody(NavModel):
             self._logger.info('Limb incidence angle min %.2f, max %.2f',
                               np.degrees(limb_incidence_min),
                               np.degrees(limb_incidence_max))
+
+            # XXX NEED RESTR_LIMB THAT ISN'T OVERSAMPLED
+            # XXX NEED BOOL MASK SHOWING WHERE MODEL IS
 
             # limb_threshold = config['limb_incidence_threshold']
             # limb_frac = config['limb_incidence_frac']
@@ -480,20 +490,124 @@ class NavModelBody(NavModel):
         # full-size image
         model = obs.make_extfov_zeros()
         limb_mask = obs.make_extfov_false()
+        body_mask = obs.make_extfov_false()
         if restr_model is not None:
             model[v_min+obs.extfov_margin_v:v_max+obs.extfov_margin_v+1,
                   u_min+obs.extfov_margin_u:u_max+obs.extfov_margin_u+1] = restr_model
             limb_mask[v_min+obs.extfov_margin_v:v_max+obs.extfov_margin_v+1,
                       u_min+obs.extfov_margin_u:u_max+obs.extfov_margin_u+1] = \
                 restr_limb_mask
+            body_mask[v_min+obs.extfov_margin_v:v_max+obs.extfov_margin_v+1,
+                      u_min+obs.extfov_margin_u:u_max+obs.extfov_margin_u+1] = \
+                restr_body_mask_valid
 
-        # if create_overlay:
         #     model_text = _bodies_make_label(obs, body_name, model, label_avoid_mask,
         #                                     bodies_config)
         # else:
-        model_text = None
 
         metadata['confidence'] = 1.
 
-        annotation = Annotation(limb_mask, thicken_overlay=0, text_info=model_text)
-        return model, metadata, annotation
+        # Figure out all the location where we might want to label the body
+
+        text_loc = []
+        v_center_extfov = v_center + obs.extfov_margin_v
+        u_center_extfov = u_center + obs.extfov_margin_u
+
+        v_center_extfov_clipped = np.clip(v_center_extfov, 0, body_mask.shape[0]-1)
+        u_center_extfov_clipped = np.clip(u_center_extfov, 0, body_mask.shape[1]-1)
+        body_mask_u_min = np.argmax(body_mask[v_center_extfov_clipped])
+        body_mask_u_max = (body_mask.shape[1] -
+                           np.argmax(body_mask[v_center_extfov_clipped, ::-1]) - 1)
+        body_mask_v_min = np.argmax(body_mask[:, u_center_extfov_clipped])
+        body_mask_v_max = (body_mask.shape[0] -
+                           np.argmax(body_mask[::-1, u_center_extfov_clipped]) - 1)
+        body_mask_u_ctr = (body_mask_u_min + body_mask_u_max) // 2
+        body_mask_v_ctr = (body_mask_v_min + body_mask_v_max) // 2
+
+        for orig_dist in range(0, body_mask_v_ctr - body_mask_v_min):
+            for neg in [-1, 1]:
+                dist = orig_dist * neg
+                v = body_mask_v_ctr + dist
+                if not 0 <= v < body_mask.shape[0]:
+                    continue
+
+                # Left side
+                u = np.argmax(body_mask[v])
+                if u > 0:
+                    angle = np.rad2deg(
+                        np.arctan2(v-v_center_extfov, u-u_center_extfov)) % 360
+                    if 135 < angle < 225:  # Left side
+                        text_loc.append((TEXTINFO_LEFT_ARROW,
+                                        v,
+                                        u - config['label_horiz_gap']))
+                    elif neg == -1:  # Top side
+                        text_loc.append((TEXTINFO_TOP_ARROW,
+                                        v - config['label_vert_gap'],
+                                        u))
+                    else:  # Bottom side
+                        text_loc.append((TEXTINFO_BOTTOM_ARROW,
+                                        v + config['label_vert_gap'],
+                                        u))
+
+                # Right side
+                u = body_mask.shape[1] - np.argmax(body_mask[v, ::-1]) - 1
+                if u < body_mask.shape[1]-1:
+                    angle = np.rad2deg(
+                        np.arctan2(v-v_center_extfov, u-u_center_extfov)) % 360
+                    if angle > 315 or angle < 45:  # Right side
+                        text_loc.append((TEXTINFO_RIGHT_ARROW,
+                                        v,
+                                        u + config['label_horiz_gap']))
+                    elif neg == -1:  # Top side
+                        text_loc.append((TEXTINFO_TOP_ARROW,
+                                        v - config['label_vert_gap'],
+                                        u))
+                    else:  # Bottom side
+                        text_loc.append((TEXTINFO_BOTTOM_ARROW,
+                                        v + config['label_vert_gap'],
+                                        u))
+
+                if orig_dist == 0:
+                    # Add in the very top and very bottom here to give them
+                    # priority
+                    text_loc.append((TEXTINFO_TOP_ARROW,
+                                    body_mask_v_min - config['label_vert_gap'],
+                                    body_mask_u_ctr))
+                    text_loc.append((TEXTINFO_BOTTOM_ARROW,
+                                    body_mask_v_max + config['label_vert_gap'],
+                                    body_mask_u_ctr))
+                    break
+
+        # Given the choice, make a label on the left or right
+        # if not body_mask[v_center_extfov, 0]:
+        #     u = np.argmax(body_mask[v_center_extfov])
+        #     text_loc.append((TEXTINFO_LEFT_ARROW,
+        #                      v_center_extfov,
+        #                      u - config['label_horiz_gap']))
+        # if not body_mask[v_center_extfov, -1]:
+        #     u = body_mask.shape[1] - np.argmax(body_mask[v_center_extfov, ::-1]) - 1
+        #     text_loc.append((TEXTINFO_RIGHT_ARROW,
+        #                      v_center_extfov,
+        #                      u + config['label_horiz_gap']))
+        # if not body_mask[0, u_center_extfov]:
+        #     v = np.argmax(body_mask[:, u_center_extfov])
+        #     text_loc.append((TEXTINFO_TOP_ARROW,
+        #                      v - config['label_vert_gap'],
+        #                      u_center_extfov))
+        # if not body_mask[-1, v_center_extfov]:
+        #     v = body_mask.shape[0] - np.argmax(body_mask[::-1, u_center_extfov]) - 1
+        #     text_loc.append((TEXTINFO_BOTTOM_ARROW,
+        #                      v + config['label_vert_gap'],
+        #                      u_center_extfov))
+        # text_loc.append((TEXTINFO_BOTTOM_ARROW, v_center_extfov, u_center_extfov))
+
+        text_info = AnnotationTextInfo(body_name, text_loc=text_loc,
+                                       font=config['label_font'],
+                                       font_size=config['label_font_size'],
+                                       color=config['label_font_color'])
+
+        annotation = Annotation(limb_mask, text_info=text_info, config=self._config)
+
+        self._model = model
+        self._model_mask = body_mask
+        self._annotation = annotation

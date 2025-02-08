@@ -73,6 +73,15 @@ class Config:
         self._maybe_read_config()
         return cast(list[str], self._config_dict['ring_satellites'][planet.upper()])
 
+    def general(self,
+               key: str) -> Any:
+        self._maybe_read_config()
+        return self._config_dict['general'][key]
+
+    @property
+    def general_config(self) -> dict[str, Any]:
+        return cast(dict[str, Any], self._config_dict['general'])
+
     def offset(self,
                key: str) -> Any:
         self._maybe_read_config()

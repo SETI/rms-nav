@@ -77,6 +77,9 @@ ring_satellites:
     - DAPHNIS
     - PAN
 
+general:
+  truetype_font_dir: /usr/share/fonts/truetype
+
 offset:
   default_gaussian_blur: 0.25
   maximum_blur: 100.0
@@ -166,11 +169,14 @@ bodies:
   reproj_latlon_type: centric
   reproj_lon_direction: east
   min_text_area: 0.003
-  # font:
-  #   256: *id001
-  #   512: *id001
-  #   1000: *id002
-  #   1024: *id002
+  label_font: liberation2/LiberationMono-Bold.ttf
+  label_font_size: 18
+    # 512: 18
+  label_font_color: [255, 0, 0]
+  label_horiz_gap: 3
+  label_vert_gap: 2
+
+
 rings:
   model_source: ephemeris
   fiducial_feature_threshold: 3

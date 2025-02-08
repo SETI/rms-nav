@@ -422,7 +422,6 @@ class DataSetPDS3(DataSet):
                              (vol_end is None or
                               all_volume_names.index(v) <= vol_end_idx))]
 
-        print(valid_volumes)
         volume_raw_dir = self._pds3_holdings_dir / 'volumes'
         index_dir = self._pds3_holdings_dir / 'metadata'
 
@@ -499,7 +498,6 @@ class DataSetPDS3(DataSet):
 
                 index_tab = self._read_pds_table(index_label_localpath)
                 rows = index_tab.dicts_by_row()
-                print(len(rows))
                 if choose_random_images:
                     random.shuffle(rows)
                 for row in rows:

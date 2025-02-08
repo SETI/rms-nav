@@ -20,7 +20,7 @@ class ObsSnapshot(Obs, Snapshot):
     def __init__(self,
                  snapshot: Snapshot,
                  *,
-                 extfov_margin: Optional[int | tuple[int, int]] = None,
+                 extfov_margin_vu: Optional[int | tuple[int, int]] = None,
                  **kwargs: Any) -> None:
         # Because the oops image read routines create a Snapshot and not a
         # Navigation class, we need to create a Navigation class that looks
@@ -35,22 +35,23 @@ class ObsSnapshot(Obs, Snapshot):
             raise ValueError(f'Data shape must be 2D, got {self.data.shape}')
 
         self._data_shape_uv = cast(tuple[int, int], self.data.shape[::-1])
-        self._fov_uv_min = (0, 0)
-        self._fov_uv_max = (self._data_shape_uv[0]-1, self._data_shape_uv[1]-1)
+        self._data_shape_vu = self.data.shape
+        self._fov_vu_min = (0, 0)
+        self._fov_vu_max = (self._data_shape_vu[0]-1, self._data_shape_vu[1]-1)
 
-        if extfov_margin is None:
-            self._extfov_margin_uv = (0, 0)
-        elif isinstance(extfov_margin, int):
-            self._extfov_margin_uv = (int(extfov_margin), int(extfov_margin))
+        if extfov_margin_vu is None:
+            self._extfov_margin_vu = (0, 0)
+        elif isinstance(extfov_margin_vu, int):
+            self._extfov_margin_vu = (int(extfov_margin_vu), int(extfov_margin_vu))
         else:
-            self._extfov_margin_uv = (int(extfov_margin[0]), int(extfov_margin[1]))
-        self._extfov_margin_vu = (self._extfov_margin_uv[1], self._extfov_margin_uv[0])
+            self._extfov_margin_vu = (int(extfov_margin_vu[0]), int(extfov_margin_vu[1]))
 
         self._extdata = pad_array(self.data, self._extfov_margin_vu)
         self._extdata_shape_uv = cast(tuple[int, int], self._extdata.shape[::-1])
-        self._extfov_uv_min = (-self._extfov_margin_uv[0], -self._extfov_margin_uv[1])
-        self._extfov_uv_max = (self._data_shape_uv[0] + self._extfov_margin_uv[0] - 1,
-                               self._data_shape_uv[1] + self._extfov_margin_uv[1] - 1)
+        self._extdata_shape_vu = self._extdata.shape
+        self._extfov_vu_min = (-self._extfov_margin_vu[0], -self._extfov_margin_vu[1])
+        self._extfov_vu_max = (self._data_shape_vu[0] + self._extfov_margin_vu[0] - 1,
+                               self._data_shape_vu[1] + self._extfov_margin_vu[1] - 1)
         self.reset_all()
 
         closest_planet = None
@@ -92,6 +93,10 @@ class ObsSnapshot(Obs, Snapshot):
         return self._data_shape_uv
 
     @property
+    def data_shape_vu(self) -> tuple[int, int]:
+        return self._data_shape_vu
+
+    @property
     def data_shape_u(self) -> int:
         return self._data_shape_uv[0]
 
@@ -100,40 +105,40 @@ class ObsSnapshot(Obs, Snapshot):
         return self._data_shape_uv[1]
 
     @property
-    def fov_uv_min(self) -> tuple[int, int]:
-        return self._fov_uv_min
+    def fov_vu_min(self) -> tuple[int, int]:
+        return self._fov_vu_min
 
     @property
-    def fov_uv_max(self) -> tuple[int, int]:
-        return self._fov_uv_max
-
-    @property
-    def fov_u_min(self) -> int:
-        return self._fov_uv_min[0]
-
-    @property
-    def fov_u_max(self) -> int:
-        return self._fov_uv_max[0]
+    def fov_vu_max(self) -> tuple[int, int]:
+        return self._fov_vu_max
 
     @property
     def fov_v_min(self) -> int:
-        return self._fov_uv_min[1]
+        return self._fov_vu_min[0]
 
     @property
     def fov_v_max(self) -> int:
-        return self._fov_uv_max[1]
+        return self._fov_vu_max[0]
 
     @property
-    def extfov_margin_uv(self) -> tuple[int, int]:
-        return self._extfov_margin_uv
+    def fov_u_min(self) -> int:
+        return self._fov_vu_min[1]
 
     @property
-    def extfov_margin_u(self) -> int:
-        return self._extfov_margin_uv[1]
+    def fov_u_max(self) -> int:
+        return self._fov_vu_max[1]
+
+    @property
+    def extfov_margin_vu(self) -> tuple[int, int]:
+        return self._extfov_margin_vu
 
     @property
     def extfov_margin_v(self) -> int:
-        return self._extfov_margin_uv[0]
+        return self._extfov_margin_vu[0]
+
+    @property
+    def extfov_margin_u(self) -> int:
+        return self._extfov_margin_vu[1]
 
     @property
     def extdata(self) -> NDArrayFloatType:
@@ -144,28 +149,32 @@ class ObsSnapshot(Obs, Snapshot):
         return self._extdata_shape_uv
 
     @property
-    def extfov_uv_min(self) -> tuple[int, int]:
-        return self._extfov_uv_min
+    def extdata_shape_vu(self) -> tuple[int, int]:
+        return self._extdata_shape_vu
 
     @property
-    def extfov_uv_max(self) -> tuple[int, int]:
-        return self._extfov_uv_max
+    def extfov_vu_min(self) -> tuple[int, int]:
+        return self._extfov_vu_min
 
     @property
-    def extfov_u_min(self) -> int:
-        return self._extfov_uv_min[0]
-
-    @property
-    def extfov_u_max(self) -> int:
-        return self._extfov_uv_max[0]
+    def extfov_vu_max(self) -> tuple[int, int]:
+        return self._extfov_vu_max
 
     @property
     def extfov_v_min(self) -> int:
-        return self._extfov_uv_min[1]
+        return self._extfov_vu_min[0]
 
     @property
     def extfov_v_max(self) -> int:
-        return self._extfov_uv_max[1]
+        return self._extfov_vu_max[0]
+
+    @property
+    def extfov_u_min(self) -> int:
+        return self._extfov_vu_min[1]
+
+    @property
+    def extfov_u_max(self) -> int:
+        return self._extfov_vu_max[1]
 
     @property
     def closest_planet(self) -> str | None:
@@ -208,13 +217,13 @@ class ObsSnapshot(Obs, Snapshot):
         """Create a Backplane for the entire extended FOV."""
 
         if self._ext_bp is None:
-            if self._extfov_margin_uv == (0, 0):
+            if self._extfov_margin_vu == (0, 0):
                 self._ext_bp = self.bp
             else:
                 ext_meshgrid = Meshgrid.for_fov(
                     self.fov,
-                    origin=(self._extfov_uv_min[0]+.5, self._extfov_uv_min[1]+.5),
-                    limit=(self._extfov_uv_max[0]+.5, self._extfov_uv_max[1]+.5),
+                    origin=(self._extfov_vu_min[1]+.5, self._extfov_vu_min[0]+.5),
+                    limit=(self._extfov_vu_max[1]+.5, self._extfov_vu_max[0]+.5),
                     swap=True)
                 self._ext_bp = Backplane(self, meshgrid=ext_meshgrid)
 
@@ -246,7 +255,7 @@ class ObsSnapshot(Obs, Snapshot):
                 ext_corner_meshgrid = Meshgrid.for_fov(
                     self.fov,
                     origin=self._extfov_uv_min,
-                    limit=(self._extfov_uv_max[0]+1, self._extfov_uv_max[1]+1),
+                    limit=(self._extfov_vu_max[1]+1, self._extfov_vu_max[0]+1),
                     undersample=(self._extdata_shape_uv[0], self._extdata_shape_uv[1]),
                     swap=True)
                 self._ext_corner_bp = Backplane(self, meshgrid=ext_corner_meshgrid)
