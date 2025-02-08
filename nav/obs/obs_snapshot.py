@@ -35,7 +35,7 @@ class ObsSnapshot(Obs, Snapshot):
             raise ValueError(f'Data shape must be 2D, got {self.data.shape}')
 
         self._data_shape_uv = cast(tuple[int, int], self.data.shape[::-1])
-        self._data_shape_vu = self.data.shape
+        self._data_shape_vu = cast(tuple[int, int], self.data.shape)
         self._fov_vu_min = (0, 0)
         self._fov_vu_max = (self._data_shape_vu[0]-1, self._data_shape_vu[1]-1)
 
@@ -48,7 +48,7 @@ class ObsSnapshot(Obs, Snapshot):
 
         self._extdata = pad_array(self.data, self._extfov_margin_vu)
         self._extdata_shape_uv = cast(tuple[int, int], self._extdata.shape[::-1])
-        self._extdata_shape_vu = self._extdata.shape
+        self._extdata_shape_vu = cast(tuple[int, int], self._extdata.shape)
         self._extfov_vu_min = (-self._extfov_margin_vu[0], -self._extfov_margin_vu[1])
         self._extfov_vu_max = (self._data_shape_vu[0] + self._extfov_margin_vu[0] - 1,
                                self._data_shape_vu[1] + self._extfov_margin_vu[1] - 1)

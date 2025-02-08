@@ -406,7 +406,7 @@ def draw_line_arrow(img: NDArrayType[NPType],
                     y0: int | float,
                     x1: int | float,
                     y1: int | float,
-                    thickness: int = 1,
+                    thickness: float = 1.,
                     arrow_head_length: int = 10,
                     arrow_head_angle: int = 45) -> None:
 
@@ -430,7 +430,7 @@ def draw_line(img: NDArrayType[NPType],
               y0: int | float,
               x1: int | float,
               y1: int | float,
-              thickness: int = 1) -> None:
+              thickness: float = 1.) -> None:
     """Draw a line using Bresenham's algorithm with the given thickness.
 
     The line is drawn by drawing each point as a line perpendicular to

@@ -15,22 +15,23 @@ import nav.obs.obs_snapshot as obs_snapshot
 from nav.util.file import dump_yaml
 from tests.config import URL_CASSINI_ISS_RHEA_01
 
-# OBS = instcoiss.InstCassiniISS.from_file(URL_CASSINI_ISS_RHEA_01); body = 'RHEA'
-OBS = instcoiss.InstCassiniISS.from_file('https://pds-rings.seti.org/holdings/calibrated/COISS_2xxx/COISS_2042/data/1584035653_1584189857/N1584039961_2_CALIB.IMG'); body = 'ENCELADUS'
+# OBS = instcoiss.InstCassiniISS.from_file(URL_CASSINI_ISS_RHEA_01); bodies = ['RHEA']
+# OBS = instcoiss.InstCassiniISS.from_file('https://pds-rings.seti.org/holdings/calibrated/COISS_2xxx/COISS_2042/data/1584035653_1584189857/N1584039961_2_CALIB.IMG'); bodies = ['ENCELADUS']
+# OBS = instcoiss.InstCassiniISS.from_file('https://pds-rings.seti.org/holdings/calibrated/COISS_2xxx/COISS_2067/data/1673418976_1673425869/W1673423216_1_CALIB.IMG'); bodies = ['DIONE', 'EPIMETHEUS', 'PROMETHEUS' ,'RHEA', 'TETHYS']
+OBS = instcoiss.InstCassiniISS.from_file('https://pds-rings.seti.org/holdings/calibrated/COISS_2xxx/COISS_2066/data/1669905491_1670314125/N1670313079_1_CALIB.IMG'); bodies = ['DIONE', 'TETHYS']
 annotations = Annotations()
 
 extfov_margin = (100, 200)
 s = obs_snapshot.ObsSnapshot(OBS, extfov_margin_vu=extfov_margin)
-body_model = NavModelBody(s, body)
-body_model.create_model()
-annotations.add_annotation(body_model.annotation)
 
-dump_yaml(body_model.metadata)
-# pprint.pprint(metadata)
-# plt.imshow(model)
-# plt.show()
+for body in bodies:
+    body_model = NavModelBody(s, body)
+    body_model.create_model()
+    annotations.add_annotation(body_model.annotation)
 
-offset = (0, 20)
+    dump_yaml(body_model.metadata)
+
+offset = (0, 0)
 
 overlay = annotations.combine(extfov_margin, offset=offset)
 img = OBS.data

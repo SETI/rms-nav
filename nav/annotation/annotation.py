@@ -1,5 +1,5 @@
 import os
-from typing import Optional
+from typing import Optional, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -28,10 +28,12 @@ class Annotation:
                  thicken_overlay: int = 0,
                  text_info: Optional[AnnotationTextInfo |
                                      list[AnnotationTextInfo]] = None,
+                 avoid_mask: Optional[NDArrayBoolType] = None,
                  config: Optional[Config] = None) -> None:
 
         self._config = config or DEFAULT_CONFIG
         self._overlay = overlay
+        self._avoid_mask = avoid_mask
         if thicken_overlay > 0:
             for u_offset in range(-thicken_overlay, thicken_overlay + 1):
                 for v_offset in range(-thicken_overlay, thicken_overlay + 1):
@@ -40,13 +42,15 @@ class Annotation:
                     self._overlay = (self._overlay |
                                      shift_array(overlay, (v_offset, u_offset)))
 
-        if not isinstance(text_info, (list, tuple)):
+        if text_info is None:
+            text_info = []
+        elif not isinstance(text_info, (list, tuple)):
             text_info = [text_info]
         self._text_info = text_info
 
 
     @property
-    def config(self) -> Config | None:
+    def config(self) -> Config:
         return self._config
 
     @property
@@ -54,8 +58,12 @@ class Annotation:
         return self._overlay
 
     @property
-    def text_info(self) -> AnnotationTextInfo | None:
+    def text_info(self) -> list[AnnotationTextInfo]:
         return self._text_info
+
+    @property
+    def avoid_mask(self) -> NDArrayBoolType:
+        return self._avoid_mask
 
     def add_text_info(self,
                       text_info: (AnnotationTextInfo |
@@ -91,11 +99,15 @@ class Annotations:
             return None
 
         res = np.zeros(self._annotations[0].overlay.shape + (3,), dtype=np.uint8)
+        all_avoid_mask = np.zeros(self._annotations[0].overlay.shape, dtype=np.bool_)
+
         for annotation in self._annotations:
             res[annotation.overlay] = overlay_color
+            if annotation.avoid_mask is not None:
+                all_avoid_mask |= annotation.avoid_mask
 
         if include_text:
-            self._add_text(res, extfov, offset)
+            self._add_text(res, extfov, offset, all_avoid_mask)
 
         return res[extfov[0]+offset[0]:res.shape[0]-extfov[0]+offset[0],
                    extfov[1]+offset[1]:res.shape[1]-extfov[1]+offset[1]]
@@ -103,7 +115,8 @@ class Annotations:
     def _add_text(self,
                   res: NDArrayIntType,
                   extfov: tuple[int, int],
-                  offset: tuple[int, int]) -> None:
+                  offset: tuple[int, int],
+                  avoid_mask: NDArrayBoolType) -> None:
 
         text_layer = np.zeros(self._annotations[0].overlay.shape + (3,), dtype=np.uint8)
         graphic_layer = np.zeros(self._annotations[0].overlay.shape + (3,), dtype=np.uint8)
@@ -118,97 +131,15 @@ class Annotations:
             if not annotation.text_info:
                 continue
 
-            tt_dir = annotation.config.general('truetype_font_dir')
+            tt_dir = cast(str, annotation.config.general('truetype_font_dir'))
 
-            for text_info in annotation.text_info:
-                font = ImageFont.truetype(os.path.join(tt_dir, text_info.font),
-                                          text_info.font_size)
-
-                text_size = text_draw.textbbox((0, 0), text_info.text,
-                                               anchor='lt', font=font)[2:]
-                horiz_arrow_gap = 2
-                horiz_arrow_len = 15
-                vert_arrow_gap = 2
-                vert_arrow_len = 15
-                arrow_thickness = 1.5
-                arrow_head_length = 6
-                arrow_head_angle = 30
-                edge_margin = 3
-                v_margin_min = extfov[0] + offset[0] + edge_margin
-                v_margin_max = (text_layer.shape[0] - extfov[0] + offset[0] -
-                                edge_margin - 1)
-                u_margin_min = extfov[1] + offset[1] + edge_margin
-                u_margin_max = (text_layer.shape[1] - extfov[1] + offset[1] -
-                                edge_margin - 1)
-
-                for text_pos, text_v, text_u in text_info.text_loc:
-                    arrow_u0 = arrow_u1 = arrow_v0 = arrow_v1 = None
-                    if text_pos == TEXTINFO_LEFT:
-                        v = text_v - text_size[1] // 2
-                        u = text_u - text_size[0]
-                    elif text_pos == TEXTINFO_LEFT_ARROW:
-                        v = text_v - text_size[1] // 2
-                        u = text_u - text_size[0] - horiz_arrow_len - horiz_arrow_gap
-                        arrow_v0 = arrow_v1 = text_v
-                        arrow_u0 = text_u - horiz_arrow_len
-                        arrow_u1 = text_u
-                    elif text_pos == TEXTINFO_RIGHT:
-                        v = text_v - text_size[1] // 2
-                        u = text_u
-                    elif text_pos == TEXTINFO_RIGHT_ARROW:
-                        v = text_v - text_size[1] // 2
-                        u = text_u + horiz_arrow_len + horiz_arrow_gap
-                        arrow_v0 = arrow_v1 = text_v
-                        arrow_u0 = text_u + horiz_arrow_len
-                        arrow_u1 = text_u
-                    elif text_pos == TEXTINFO_TOP:
-                        v = text_v - text_size[1]
-                        u = text_u - text_size[0] // 2
-                    elif text_pos == TEXTINFO_TOP_ARROW:
-                        v = text_v - text_size[1] - vert_arrow_len - vert_arrow_gap
-                        u = text_u - text_size[0] // 2
-                        arrow_u0 = arrow_u1 = text_u
-                        arrow_v0 = text_v - vert_arrow_len
-                        arrow_v1 = text_v
-                    elif text_pos == TEXTINFO_BOTTOM:
-                        v = text_v
-                        u = text_u - text_size[0] // 2
-                    elif text_pos == TEXTINFO_BOTTOM_ARROW:
-                        v = text_v + vert_arrow_len + vert_arrow_gap
-                        u = text_u - text_size[0] // 2
-                        arrow_u0 = arrow_u1 = text_u
-                        arrow_v0 = text_v + vert_arrow_len
-                        arrow_v1 = text_v
-                    elif text_pos == TEXTINFO_CENTER:
-                        v = text_v - text_size[1] // 2
-                        u = text_u - text_size[0] // 2
-                    else:
-                        raise ValueError(f'Unknown text position: {text_pos}')
-
-                    if (v < v_margin_min or v+text_size[1] > v_margin_max or
-                        u < u_margin_min or u+text_size[0] > u_margin_max):
-                        continue
-                    if (arrow_u0 is not None and
-                        not v_margin_min <= arrow_v0 <= v_margin_max or
-                        not v_margin_min <= arrow_v1 <= v_margin_max or
-                        not u_margin_min <= arrow_u0 <= u_margin_max or
-                        not u_margin_min <= arrow_u1 <= u_margin_max):
-                        continue
-
-                    text_draw.text((u, v), text_info.text,
-                                   anchor='lt', fill=text_info.color, font=font)
-                    ann_num_mask[v:v+text_size[1], u:u+text_size[0]] = ann_num+1
-
-                    if arrow_u0 is not None:
-                        draw_line_arrow(graphic_layer, text_info.color,
-                                        arrow_u0, arrow_v0, arrow_u1, arrow_v1,
-                                        thickness=arrow_thickness,
-                                        arrow_head_length=arrow_head_length,
-                                        arrow_head_angle=arrow_head_angle)
-
+            for avoid in [True, False]:
+                ret = self._try_text_info(annotation, ann_num, extfov, offset,
+                                          avoid_mask if avoid else None,
+                                          text_layer, graphic_layer, ann_num_mask,
+                                          text_draw, tt_dir)
+                if ret:
                     break
-                else:
-                    print(f'Warning: Could not find place for label {text_info.text}')
 
         text_layer = (np.array(text_im.getdata()).astype('uint8').
                       reshape(text_layer.shape))
@@ -219,3 +150,117 @@ class Annotations:
         # plt.figure()
         # plt.imshow(text_layer)
         # plt.show()
+
+    def _try_text_info(self,
+                       annotation: Annotation,
+                       ann_num: int,
+                       extfov: tuple[int, int],
+                       offset: tuple[int, int],
+                       avoid_mask: NDArrayBoolType | None,
+                       text_layer: NDArrayIntType,
+                       graphic_layer: NDArrayIntType,
+                       ann_num_mask: NDArrayIntType,
+                       text_draw: ImageDraw.ImageDraw,
+                       tt_dir: str) -> bool:
+
+        for text_info in annotation.text_info:
+            font = ImageFont.truetype(os.path.join(tt_dir, text_info.font),
+                                      text_info.font_size)
+
+            text_size = cast(tuple[int, int],
+                             text_draw.textbbox((0, 0), text_info.text,
+                                                anchor='lt', font=font)[2:])
+            horiz_arrow_gap = 2
+            horiz_arrow_len = 15
+            vert_arrow_gap = 2
+            vert_arrow_len = 15
+            arrow_thickness = 1.5
+            arrow_head_length = 6
+            arrow_head_angle = 30
+            edge_margin = 3
+            v_margin_min = extfov[0] + offset[0] + edge_margin
+            v_margin_max = (text_layer.shape[0] - extfov[0] + offset[0] -
+                            edge_margin - 1)
+            u_margin_min = extfov[1] + offset[1] + edge_margin
+            u_margin_max = (text_layer.shape[1] - extfov[1] + offset[1] -
+                            edge_margin - 1)
+
+            for text_pos, text_v, text_u in text_info.text_loc:
+                arrow_u0 = arrow_u1 = arrow_v0 = arrow_v1 = None
+                if text_pos == TEXTINFO_LEFT:
+                    v = text_v - text_size[1] // 2
+                    u = text_u - text_size[0]
+                elif text_pos == TEXTINFO_LEFT_ARROW:
+                    v = text_v - text_size[1] // 2
+                    u = text_u - text_size[0] - horiz_arrow_len - horiz_arrow_gap
+                    arrow_v0 = arrow_v1 = text_v
+                    arrow_u0 = text_u - horiz_arrow_len
+                    arrow_u1 = text_u
+                elif text_pos == TEXTINFO_RIGHT:
+                    v = text_v - text_size[1] // 2
+                    u = text_u
+                elif text_pos == TEXTINFO_RIGHT_ARROW:
+                    v = text_v - text_size[1] // 2
+                    u = text_u + horiz_arrow_len + horiz_arrow_gap
+                    arrow_v0 = arrow_v1 = text_v
+                    arrow_u0 = text_u + horiz_arrow_len
+                    arrow_u1 = text_u
+                elif text_pos == TEXTINFO_TOP:
+                    v = text_v - text_size[1]
+                    u = text_u - text_size[0] // 2
+                elif text_pos == TEXTINFO_TOP_ARROW:
+                    v = text_v - text_size[1] - vert_arrow_len - vert_arrow_gap
+                    u = text_u - text_size[0] // 2
+                    arrow_u0 = arrow_u1 = text_u
+                    arrow_v0 = text_v - vert_arrow_len
+                    arrow_v1 = text_v
+                elif text_pos == TEXTINFO_BOTTOM:
+                    v = text_v
+                    u = text_u - text_size[0] // 2
+                elif text_pos == TEXTINFO_BOTTOM_ARROW:
+                    v = text_v + vert_arrow_len + vert_arrow_gap
+                    u = text_u - text_size[0] // 2
+                    arrow_u0 = arrow_u1 = text_u
+                    arrow_v0 = text_v + vert_arrow_len
+                    arrow_v1 = text_v
+                elif text_pos == TEXTINFO_CENTER:
+                    v = text_v - text_size[1] // 2
+                    u = text_u - text_size[0] // 2
+                else:
+                    raise ValueError(f'Unknown text position: {text_pos}')
+
+                if (v < v_margin_min or v+text_size[1] > v_margin_max or
+                    u < u_margin_min or u+text_size[0] > u_margin_max):
+                    continue
+                if (arrow_u0 is not None and
+                    not v_margin_min <= arrow_v0 <= v_margin_max or
+                    not v_margin_min <= arrow_v1 <= v_margin_max or
+                    not u_margin_min <= arrow_u0 <= u_margin_max or
+                    not u_margin_min <= arrow_u1 <= u_margin_max):
+                    continue
+
+                if (avoid_mask is not None and
+                    np.any(avoid_mask[v:v+text_size[1], u:u+text_size[0]])):
+                    # Conflicts with something the program doesn't want us to overwrite
+                    continue
+                if np.any(ann_num_mask[v:v+text_size[1], u:u+text_size[0]]):
+                    # Conflicts with text we've already drawn
+                    continue
+
+                text_draw.text((u, v), text_info.text,
+                                anchor='lt', fill=text_info.color, font=font)
+                ann_num_mask[v:v+text_size[1], u:u+text_size[0]] = ann_num+1
+
+                if arrow_u0 is not None:
+                    draw_line_arrow(graphic_layer, text_info.color,
+                                    arrow_u0, arrow_v0, arrow_u1, arrow_v1,
+                                    thickness=arrow_thickness,
+                                    arrow_head_length=arrow_head_length,
+                                    arrow_head_angle=arrow_head_angle)
+
+                break
+            else:
+                print(f'Warning: Could not find place for label {text_info.text}')
+                return False
+
+        return True

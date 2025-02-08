@@ -19,9 +19,9 @@ class AnnotationTextInfo:
                  text: str,
                  text_loc: list[tuple[str, int, int]],
                  *,
-                 color: tuple[int, int, int] | tuple[int, int, int, int],
+                 color: tuple[int, ...],
                  font: str,
-                 font_size: int = None):
+                 font_size: int):
 
         self._config = DEFAULT_CONFIG
         self._text = text
@@ -39,13 +39,13 @@ class AnnotationTextInfo:
         return self._text_loc
 
     @property
-    def color(self) -> tuple[int, int, int] | tuple[int, int, int, int]:
+    def color(self) -> tuple[int, ...]:
         return self._color
 
     @property
-    def font(self) -> str | None:
+    def font(self) -> str:
         return self._font
 
     @property
-    def font_size(self) -> int | None:
+    def font_size(self) -> int:
         return self._font_size

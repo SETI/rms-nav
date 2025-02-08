@@ -524,7 +524,7 @@ class NavModelBody(NavModel):
         body_mask_u_ctr = (body_mask_u_min + body_mask_u_max) // 2
         body_mask_v_ctr = (body_mask_v_min + body_mask_v_max) // 2
 
-        for orig_dist in range(0, body_mask_v_ctr - body_mask_v_min):
+        for orig_dist in range(0, max(body_mask_v_ctr - body_mask_v_min, 1)):
             for neg in [-1, 1]:
                 dist = orig_dist * neg
                 v = body_mask_v_ctr + dist
@@ -578,6 +578,8 @@ class NavModelBody(NavModel):
                                     body_mask_u_ctr))
                     break
 
+        # XXX PUT OTHER LOCATIONS HERE
+
         # Given the choice, make a label on the left or right
         # if not body_mask[v_center_extfov, 0]:
         #     u = np.argmax(body_mask[v_center_extfov])
@@ -606,7 +608,8 @@ class NavModelBody(NavModel):
                                        font_size=config['label_font_size'],
                                        color=config['label_font_color'])
 
-        annotation = Annotation(limb_mask, text_info=text_info, config=self._config)
+        annotation = Annotation(limb_mask, avoid_mask=body_mask,
+                                text_info=text_info, config=self._config)
 
         self._model = model
         self._model_mask = body_mask

@@ -173,8 +173,8 @@ bodies:
   label_font_size: 18
     # 512: 18
   label_font_color: [255, 0, 0]
-  label_horiz_gap: 3
-  label_vert_gap: 2
+  label_horiz_gap: 7
+  label_vert_gap: 5
 
 
 rings:
