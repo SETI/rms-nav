@@ -169,12 +169,18 @@ bodies:
   reproj_latlon_type: centric
   reproj_lon_direction: east
   min_text_area: 0.003
+  # Details of labels placed on bodies
+  label_mask_enlarge: 10  # Number of pixels around a body to avoid for label placement
   label_font: liberation2/LiberationMono-Bold.ttf
   label_font_size: 18
     # 512: 18
-  label_font_color: [255, 0, 0]
-  label_horiz_gap: 7
-  label_vert_gap: 5
+  label_font_color: [255, 0, 0]  # Red
+  label_horiz_gap: 7  # Horizontal gap between limb and head of arrow (left/right)
+  label_vert_gap: 5   # Vertical gap between limb and head of arrow (top/bottom)
+  label_scan_v: 1     # Granularity in V when scanning a limb to find places to put labels
+  label_grid_v: 10    # Coarse grid for labeling a body if everything else fails
+  label_grid_u: 10
+
 
 
 rings:

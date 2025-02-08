@@ -2,7 +2,7 @@ from typing import Any, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
-# import scipy.ndimage.filters as filt
+import scipy.ndimage as ndimage
 
 import oops
 import polymath
@@ -12,7 +12,8 @@ from nav.annotation import (Annotation,
                             TEXTINFO_LEFT_ARROW,
                             TEXTINFO_RIGHT_ARROW,
                             TEXTINFO_BOTTOM_ARROW,
-                            TEXTINFO_TOP_ARROW)
+                            TEXTINFO_TOP_ARROW,
+                            TEXTINFO_CENTER)
 
 from nav.util.image import (filter_downsample,
                             shift_array)
@@ -346,9 +347,6 @@ class NavModelBody(NavModel):
                               np.degrees(limb_incidence_min),
                               np.degrees(limb_incidence_max))
 
-            # XXX NEED RESTR_LIMB THAT ISN'T OVERSAMPLED
-            # XXX NEED BOOL MASK SHOWING WHERE MODEL IS
-
             # limb_threshold = config['limb_incidence_threshold']
             # limb_frac = config['limb_incidence_frac']
 
@@ -501,13 +499,11 @@ class NavModelBody(NavModel):
                       u_min+obs.extfov_margin_u:u_max+obs.extfov_margin_u+1] = \
                 restr_body_mask_valid
 
-        #     model_text = _bodies_make_label(obs, body_name, model, label_avoid_mask,
-        #                                     bodies_config)
-        # else:
-
         metadata['confidence'] = 1.
 
+        #
         # Figure out all the location where we might want to label the body
+        #
 
         text_loc = []
         v_center_extfov = v_center + obs.extfov_margin_v
@@ -524,7 +520,14 @@ class NavModelBody(NavModel):
         body_mask_u_ctr = (body_mask_u_min + body_mask_u_max) // 2
         body_mask_v_ctr = (body_mask_v_min + body_mask_v_max) // 2
 
-        for orig_dist in range(0, max(body_mask_v_ctr - body_mask_v_min, 1)):
+        # Scan the body in +/- V starting at the center of the body in the FOV. For each
+        # V, find the leftmost and rightmost U of the limb and place a label there. This
+        # gives preference to labels centered vertically on the body.
+        # For each label, decide whether it should be a horizontal arrow or a vertical
+        # arrow based on the local curvature of the limb, computed as the angle relative
+        # to the absolute center of the body.
+        for orig_dist in range(0, max(body_mask_v_ctr - body_mask_v_min,
+                                      config['label_scan_v'])):
             for neg in [-1, 1]:
                 dist = orig_dist * neg
                 v = body_mask_v_ctr + dist
@@ -533,52 +536,76 @@ class NavModelBody(NavModel):
 
                 # Left side
                 u = np.argmax(body_mask[v])
-                if u > 0:
+                if u > 0:  # u == 0 if body runs off left side
                     angle = np.rad2deg(
                         np.arctan2(v-v_center_extfov, u-u_center_extfov)) % 360
                     if 135 < angle < 225:  # Left side
                         text_loc.append((TEXTINFO_LEFT_ARROW,
-                                        v,
-                                        u - config['label_horiz_gap']))
-                    elif neg == -1:  # Top side
+                                         v,
+                                         u - config['label_horiz_gap']))
+                    elif angle >= 225:  # Top side
                         text_loc.append((TEXTINFO_TOP_ARROW,
-                                        v - config['label_vert_gap'],
-                                        u))
+                                         v - config['label_vert_gap'],
+                                         u))
                     else:  # Bottom side
                         text_loc.append((TEXTINFO_BOTTOM_ARROW,
-                                        v + config['label_vert_gap'],
-                                        u))
+                                         v + config['label_vert_gap'],
+                                         u))
 
                 # Right side
                 u = body_mask.shape[1] - np.argmax(body_mask[v, ::-1]) - 1
-                if u < body_mask.shape[1]-1:
+                if u < body_mask.shape[1]-1:  # if body runs off right side
                     angle = np.rad2deg(
                         np.arctan2(v-v_center_extfov, u-u_center_extfov)) % 360
                     if angle > 315 or angle < 45:  # Right side
                         text_loc.append((TEXTINFO_RIGHT_ARROW,
-                                        v,
-                                        u + config['label_horiz_gap']))
-                    elif neg == -1:  # Top side
+                                         v,
+                                         u + config['label_horiz_gap']))
+                    elif angle >= 225:  # Top side
                         text_loc.append((TEXTINFO_TOP_ARROW,
-                                        v - config['label_vert_gap'],
-                                        u))
+                                         v - config['label_vert_gap'],
+                                         u))
                     else:  # Bottom side
                         text_loc.append((TEXTINFO_BOTTOM_ARROW,
-                                        v + config['label_vert_gap'],
-                                        u))
+                                         v + config['label_vert_gap'],
+                                         u))
 
                 if orig_dist == 0:
                     # Add in the very top and very bottom here to give them
                     # priority
                     text_loc.append((TEXTINFO_TOP_ARROW,
-                                    body_mask_v_min - config['label_vert_gap'],
-                                    body_mask_u_ctr))
+                                     body_mask_v_min - config['label_vert_gap'],
+                                     body_mask_u_ctr))
                     text_loc.append((TEXTINFO_BOTTOM_ARROW,
-                                    body_mask_v_max + config['label_vert_gap'],
-                                    body_mask_u_ctr))
-                    break
+                                     body_mask_v_max + config['label_vert_gap'],
+                                     body_mask_u_ctr))
+                    break  # No need to do +/- with zero
 
-        # XXX PUT OTHER LOCATIONS HERE
+        # Finally, it's possible none of the above worked, especially it the body is
+        # really large in the FOV. So scan through the FOV on a coarse grid, check
+        # if each point is in the body, and add it to the list if so. We work hard
+        # to give priority to points that are near the center of the body in the FOV.
+
+        for v_orig_dist in range(0, max(body_mask_v_ctr - body_mask_v_min,
+                                   config['label_grid_v'])):
+            for v_neg in [-1, 1]:
+                v_dist = v_orig_dist * v_neg
+                v = body_mask_v_ctr + v_dist
+                if not 0 <= v < body_mask.shape[0]:
+                    continue
+                for u_orig_dist in range(0, max(body_mask_u_ctr - body_mask_u_min,
+                                        config['label_grid_u'])):
+                    for u_neg in [-1, 1]:
+                        u_dist = u_orig_dist * u_neg
+                        u = body_mask_u_ctr + u_dist
+                        if not 0 <= u < body_mask.shape[1]:
+                            continue
+                        if not body_mask[v, u]:
+                            continue
+                        if u < model.shape[1] // 2:
+                            text_loc.append((TEXTINFO_LEFT_ARROW, v, u))
+                        else:
+                            text_loc.append((TEXTINFO_RIGHT_ARROW, v, u))
 
         # Given the choice, make a label on the left or right
         # if not body_mask[v_center_extfov, 0]:
@@ -608,7 +635,12 @@ class NavModelBody(NavModel):
                                        font_size=config['label_font_size'],
                                        color=config['label_font_color'])
 
-        annotation = Annotation(limb_mask, avoid_mask=body_mask,
+        # Make the avoid mask a little larger than the body mask, so that any text that
+        # we place later won't be right up against this body
+        text_avoid_mask = ndimage.maximum_filter(body_mask,
+                                                 config['label_mask_enlarge'])
+
+        annotation = Annotation(limb_mask, avoid_mask=text_avoid_mask,
                                 text_info=text_info, config=self._config)
 
         self._model = model
