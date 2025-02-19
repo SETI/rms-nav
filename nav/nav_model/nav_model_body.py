@@ -8,6 +8,7 @@ import oops
 import polymath
 
 from nav.annotation import (Annotation,
+                            Annotations,
                             AnnotationTextInfo,
                             TEXTINFO_LEFT_ARROW,
                             TEXTINFO_RIGHT_ARROW,
@@ -137,7 +138,7 @@ class NavModelBody(NavModel):
         self._model = None
         self._model_mask = None
         self._metadata = metadata
-        self._annotation = None
+        self._annotations = None
 
         with self._logger.open(f'Create body model for {self._body_name}'):
             self._create_model(always_create_model=always_create_model,
@@ -158,7 +159,7 @@ class NavModelBody(NavModel):
         obs = self.obs
         body_name = self._body_name
         ext_bp = self.obs.ext_bp
-        config = self._config.bodies_config
+        config = self._config.bodies
         inventory = self._inventory
         metadata = self._metadata
 
@@ -198,7 +199,7 @@ class NavModelBody(NavModel):
         bb_area = inventory['u_pixel_size'] * inventory['v_pixel_size']
         self._logger.info('Pixel size %.2f x %.2f, bounding box area %.2f',
                           inventory['u_pixel_size'], inventory['v_pixel_size'], bb_area)
-        if bb_area >= config['min_bounding_box_area']:
+        if bb_area >= config.min_bounding_box_area:
             metadata['size_ok'] = True
         else:
             metadata['size_ok'] = False
@@ -248,8 +249,8 @@ class NavModelBody(NavModel):
         v_center = (v_min + v_max) // 2
         width = u_max - u_min + 1
         height = v_max - v_min + 1
-        curvature_threshold_frac = config['curvature_threshold_frac']
-        curvature_threshold_pix = config['curvature_threshold_pixels']
+        curvature_threshold_frac = config.curvature_threshold_frac
+        curvature_threshold_pix = config.curvature_threshold_pixels
         width_threshold = max(width * curvature_threshold_frac,
                               curvature_threshold_pix)
         height_threshold = max(height * curvature_threshold_frac,
@@ -296,12 +297,12 @@ class NavModelBody(NavModel):
 
         # Make a new Backplane that only covers the body, but oversample
         # it so we can do anti-aliasing
-        restr_oversample_u = max(int(np.floor(config['oversample_edge_limit'] /
+        restr_oversample_u = max(int(np.floor(config.oversample_edge_limit /
                                               np.ceil(inventory['u_pixel_size']))), 1)
-        restr_oversample_v = max(int(np.floor(config['oversample_edge_limit'] /
+        restr_oversample_v = max(int(np.floor(config.oversample_edge_limit /
                                               np.ceil(inventory['v_pixel_size']))), 1)
-        restr_oversample_u = min(restr_oversample_u, config['oversample_maximum'])
-        restr_oversample_v = min(restr_oversample_v, config['oversample_maximum'])
+        restr_oversample_u = min(restr_oversample_u, config.oversample_maximum)
+        restr_oversample_v = min(restr_oversample_v, config.oversample_maximum)
         self._logger.debug('Oversampling by %d x %d',
                            restr_oversample_u, restr_oversample_v)
         restr_u_min = u_min + 1./(2*restr_oversample_u)
@@ -443,7 +444,7 @@ class NavModelBody(NavModel):
         else:
             self._logger.debug('Making Lambert model')
 
-            if config['use_lambert']:
+            if config.use_lambert:
                 # Make an oversampled Lambert, then downsample to get a nice anti-aliased
                 # edge
                 restr_o_lambert = restr_o_bp.lambert_law(body_name).mvals.filled(0.)
@@ -461,9 +462,9 @@ class NavModelBody(NavModel):
             else:
                 restr_model = restr_body_mask_valid.as_float()
 
-            if (config['use_albedo'] and
-                body_name in config['geometric_albedo']):
-                albedo = config['geometric_albedo'][body_name]
+            if (config.use_albedo and
+                body_name in config.geometric_albedo):
+                albedo = config.geometric_albedo[body_name]
                 self._logger.info('Applying albedo %.6f', albedo)
                 restr_model *= albedo
 
@@ -499,6 +500,12 @@ class NavModelBody(NavModel):
                       u_min+obs.extfov_margin_u:u_max+obs.extfov_margin_u+1] = \
                 restr_body_mask_valid
 
+        # ring_radius = obs.ext_bp.ring_radius('JUPITER:RING', rmax=200000)
+        # ring_radius_mask = ~ring_radius.expand_mask().mask
+        # limb_mask[ring_radius_mask] = True
+        # plt.imshow(ring_radius.mvals)
+        # plt.show()
+
         metadata['confidence'] = 1.
 
         #
@@ -527,7 +534,7 @@ class NavModelBody(NavModel):
         # arrow based on the local curvature of the limb, computed as the angle relative
         # to the absolute center of the body.
         for orig_dist in range(0, max(body_mask_v_ctr - body_mask_v_min,
-                                      config['label_scan_v'])):
+                                      config.label_scan_v)):
             for neg in [-1, 1]:
                 dist = orig_dist * neg
                 v = body_mask_v_ctr + dist
@@ -542,14 +549,14 @@ class NavModelBody(NavModel):
                     if 135 < angle < 225:  # Left side
                         text_loc.append((TEXTINFO_LEFT_ARROW,
                                          v,
-                                         u - config['label_horiz_gap']))
+                                         u - config.label_horiz_gap))
                     elif angle >= 225:  # Top side
                         text_loc.append((TEXTINFO_TOP_ARROW,
-                                         v - config['label_vert_gap'],
+                                         v - config.label_vert_gap,
                                          u))
                     else:  # Bottom side
                         text_loc.append((TEXTINFO_BOTTOM_ARROW,
-                                         v + config['label_vert_gap'],
+                                         v + config.label_vert_gap,
                                          u))
 
                 # Right side
@@ -560,24 +567,24 @@ class NavModelBody(NavModel):
                     if angle > 315 or angle < 45:  # Right side
                         text_loc.append((TEXTINFO_RIGHT_ARROW,
                                          v,
-                                         u + config['label_horiz_gap']))
+                                         u + config.label_horiz_gap))
                     elif angle >= 225:  # Top side
                         text_loc.append((TEXTINFO_TOP_ARROW,
-                                         v - config['label_vert_gap'],
+                                         v - config.label_vert_gap,
                                          u))
                     else:  # Bottom side
                         text_loc.append((TEXTINFO_BOTTOM_ARROW,
-                                         v + config['label_vert_gap'],
+                                         v + config.label_vert_gap,
                                          u))
 
                 if orig_dist == 0:
                     # Add in the very top and very bottom here to give them
                     # priority
                     text_loc.append((TEXTINFO_TOP_ARROW,
-                                     body_mask_v_min - config['label_vert_gap'],
+                                     body_mask_v_min - config.label_vert_gap,
                                      body_mask_u_ctr))
                     text_loc.append((TEXTINFO_BOTTOM_ARROW,
-                                     body_mask_v_max + config['label_vert_gap'],
+                                     body_mask_v_max + config.label_vert_gap,
                                      body_mask_u_ctr))
                     break  # No need to do +/- with zero
 
@@ -586,15 +593,15 @@ class NavModelBody(NavModel):
         # if each point is in the body, and add it to the list if so. We work hard
         # to give priority to points that are near the center of the body in the FOV.
 
-        for v_orig_dist in range(0, max(body_mask_v_ctr - body_mask_v_min,
-                                   config['label_grid_v'])):
+        for v_orig_dist in range(0, body_mask_v_ctr - body_mask_v_min,
+                                 config.label_grid_v):
             for v_neg in [-1, 1]:
                 v_dist = v_orig_dist * v_neg
                 v = body_mask_v_ctr + v_dist
                 if not 0 <= v < body_mask.shape[0]:
                     continue
-                for u_orig_dist in range(0, max(body_mask_u_ctr - body_mask_u_min,
-                                        config['label_grid_u'])):
+                for u_orig_dist in range(0, body_mask_u_ctr - body_mask_u_min,
+                                         config.label_grid_u):
                     for u_neg in [-1, 1]:
                         u_dist = u_orig_dist * u_neg
                         u = body_mask_u_ctr + u_dist
@@ -606,6 +613,8 @@ class NavModelBody(NavModel):
                             text_loc.append((TEXTINFO_LEFT_ARROW, v, u))
                         else:
                             text_loc.append((TEXTINFO_RIGHT_ARROW, v, u))
+                if v_orig_dist == 0:
+                    break
 
         # Given the choice, make a label on the left or right
         # if not body_mask[v_center_extfov, 0]:
@@ -631,18 +640,22 @@ class NavModelBody(NavModel):
         # text_loc.append((TEXTINFO_BOTTOM_ARROW, v_center_extfov, u_center_extfov))
 
         text_info = AnnotationTextInfo(body_name, text_loc=text_loc,
-                                       font=config['label_font'],
-                                       font_size=config['label_font_size'],
-                                       color=config['label_font_color'])
+                                       font=config.label_font,
+                                       font_size=config.label_font_size,
+                                       color=config.label_font_color)
 
         # Make the avoid mask a little larger than the body mask, so that any text that
         # we place later won't be right up against this body
         text_avoid_mask = ndimage.maximum_filter(body_mask,
-                                                 config['label_mask_enlarge'])
+                                                 config.label_mask_enlarge)
 
-        annotation = Annotation(limb_mask, avoid_mask=text_avoid_mask,
+        annotation = Annotation(limb_mask, config.label_limb_color,
+                                avoid_mask=text_avoid_mask,
                                 text_info=text_info, config=self._config)
+
+        annotations = Annotations()
+        annotations.add_annotations(annotation)
 
         self._model = model
         self._model_mask = body_mask
-        self._annotation = annotation
+        self._annotations = annotations

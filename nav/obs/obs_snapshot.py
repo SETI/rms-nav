@@ -222,8 +222,8 @@ class ObsSnapshot(Obs, Snapshot):
             else:
                 ext_meshgrid = Meshgrid.for_fov(
                     self.fov,
-                    origin=(self._extfov_vu_min[1]+.5, self._extfov_vu_min[0]+.5),
-                    limit=(self._extfov_vu_max[1]+.5, self._extfov_vu_max[0]+.5),
+                    origin=(self.extfov_u_min+.5, self.extfov_v_min+.5),
+                    limit=(self.extfov_u_max+.5, self.extfov_v_max+.5),
                     swap=True)
                 self._ext_bp = Backplane(self, meshgrid=ext_meshgrid)
 
@@ -249,13 +249,13 @@ class ObsSnapshot(Obs, Snapshot):
         """Create a Backplane with points only in the four corners of the extended FOV."""
 
         if self._ext_corner_bp is None:
-            if self._extfov_margin_uv == (0, 0):
+            if self._extfov_margin_vu == (0, 0):
                 self._ext_corner_bp = self.corner_bp
             else:
                 ext_corner_meshgrid = Meshgrid.for_fov(
                     self.fov,
-                    origin=self._extfov_uv_min,
-                    limit=(self._extfov_vu_max[1]+1, self._extfov_vu_max[0]+1),
+                    origin=(self.extfov_u_min, self.extfov_v_min),
+                    limit=(self.extfov_u_max+1, self.extfov_v_max+1),
                     undersample=(self._extdata_shape_uv[0], self._extdata_shape_uv[1]),
                     swap=True)
                 self._ext_corner_bp = Backplane(self, meshgrid=ext_corner_meshgrid)

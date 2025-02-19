@@ -8,6 +8,7 @@
 # import scipy.ndimage.filters as filt
 # from PIL import Image, ImageDraw, ImageFont
 
+from cProfile import label
 import tkinter as tk
 from imgdisp import ImageDisp
 
@@ -50,7 +51,14 @@ from starcat import (SCLASS_TO_SURFACE_TEMP,
                      UCAC4StarCatalog,
                      YBSCStarCatalog)
 
-from nav.annotation import Annotation, TextInfo
+from nav.annotation import (Annotation,
+                            Annotations,
+                            AnnotationTextInfo,
+                            TEXTINFO_LEFT,
+                            TEXTINFO_RIGHT,
+                            TEXTINFO_BOTTOM,
+                            TEXTINFO_TOP,
+                            TEXTINFO_CENTER)
 from nav.inst import Inst
 from nav.util.flux import clean_sclass
 from nav.util.types import NDArrayFloatType
@@ -138,6 +146,7 @@ class NavModelStars(NavModel):
         """
 
         obs = self._obs
+        config = self._config.stars
 
         self._logger.debug('Retrieving stars: Mag range %7.4f to %7.4f', mag_min, mag_max)
 
@@ -177,7 +186,7 @@ class NavModelStars(NavModel):
         discard_class = 0
         discard_dn = 0
 
-        default_star_class = cast(str, self._config['default_star_class'])
+        default_star_class = cast(str, config.default_star_class)
 
         star_list2 = []
         for star in star_list1:
@@ -212,7 +221,7 @@ class NavModelStars(NavModel):
     #             # M stars are too dim and too red to be seen
     #             discard_class += 1
     #             continue
-            if self._config['stellar_aberration']:
+            if config.stellar_aberration:
                 self._aberrate_star(star)
             star_list2.append(star)
 
@@ -288,7 +297,9 @@ class NavModelStars(NavModel):
                                 magnitude, and the filters being used.
         """
 
-        max_stars = self._config['max_stars']
+        config = self._config.stars
+
+        max_stars = config.max_stars
 
         ra_min, ra_max, dec_min, dec_max = self._obs.ra_dec_limits_ext()
 
@@ -406,7 +417,10 @@ class NavModelStars(NavModel):
                       ) -> tuple[NDArrayFloatType | None,
                                  dict[str, Any],
                                  Annotation | None]:
-        max_move_steps = self._config['max_movement_steps']
+
+        config = self._config.stars
+
+        max_move_steps = config.max_movement_steps
 
         radec_movement = None
 
@@ -465,8 +479,61 @@ class NavModelStars(NavModel):
                     auto_update=True)
             tk.mainloop()
 
-        annotation = None # Annotation(limb_mask, thicken_overlay=0, text_info=None)
-        return model, metadata, annotation
+        # Create the text labels
+
+        annotations = Annotations()
+
+        for star in star_list:
+            # Should NOT be rounded for plotting, since all of coord
+            # X to X+0.9999 is the same pixel
+            u = int(star.u + self._obs.extfov_margin_u)
+            v = int(star.v + self._obs.extfov_margin_v)
+
+            # width = star.overlay_box_width
+            # thickness = star.overlay_box_thickness
+            # width = 5
+            # thickness = 1
+            # if width == 0:
+            #     continue
+
+            # width += thickness-1
+            # if (not width <= u_idx < overlay.shape[1]-width or
+            #     not width <= v_idx < overlay.shape[0]-width):
+            #     continue
+
+            star_str1 = None
+            try:
+                star_str1 = star.name[:10]
+            except AttributeError:
+                pass
+
+            if star_str1 is None or star_str1 == "":
+                star_str1 = f'{star.unique_number:09d}'
+                star_str2 = f'{star.vmag:.3f} {clean_sclass(star.spectral_class)}'
+
+            text_loc = []
+
+            label_margin = 3
+
+            text_loc.append((TEXTINFO_BOTTOM, v + label_margin, u))
+            text_loc.append((TEXTINFO_TOP, v - label_margin, u))
+            text_loc.append((TEXTINFO_LEFT, v, u - label_margin))
+            text_loc.append((TEXTINFO_RIGHT, v, u + label_margin))
+
+            text_info = AnnotationTextInfo(f'{star_str1}\n{star_str2}',
+                                           text_loc=text_loc,
+                                            font=config.label_font,
+                                            font_size=config.label_font_size,
+                                            color=config.label_font_color)
+
+            star_mask = self._obs.make_extfov_false()
+            annotation = Annotation(star_mask, config.label_star_color,
+                                    thicken_overlay=0, text_info=text_info)
+            annotations.add_annotations(annotation)
+
+        self._model = model
+        self._model_mask = None
+        self._annotations = annotations
 
     def stars_make_good_bad_overlay(obs, star_list, offset,
                                     *,
@@ -597,125 +664,125 @@ class NavModelStars(NavModel):
                         draw_rect(overlay, u_idx, v_idx,
                                 width, width, 255, thickness)
 
-        # Now go through a second time to do the text labels. This way the labels
-        # can avoid overlapping with the squares.
-        for star in star_list:
-            # Should NOT be rounded for plotting, since all of coord
-            # X to X+0.9999 is the same pixel
-            u_idx = int(star.u+offset_u+extfov_margin[0])
-            v_idx = int(star.v+offset_v+extfov_margin[1])
+        # # Now go through a second time to do the text labels. This way the labels
+        # # can avoid overlapping with the squares.
+        # for star in star_list:
+        #     # Should NOT be rounded for plotting, since all of coord
+        #     # X to X+0.9999 is the same pixel
+        #     u_idx = int(star.u+offset_u+extfov_margin[0])
+        #     v_idx = int(star.v+offset_v+extfov_margin[1])
 
-            width = star.overlay_box_width
-            thickness = star.overlay_box_thickness
-            if width == 0:
-                continue
+        #     width = star.overlay_box_width
+        #     thickness = star.overlay_box_thickness
+        #     if width == 0:
+        #         continue
 
-            width += thickness-1
-            if (not width <= u_idx < overlay.shape[1]-width or
-                not width <= v_idx < overlay.shape[0]-width):
-                continue
+        #     width += thickness-1
+        #     if (not width <= u_idx < overlay.shape[1]-width or
+        #         not width <= v_idx < overlay.shape[0]-width):
+        #         continue
 
-            star_str1 = None
-            try:
-                star_str1 = star.name[:10]
-            except AttributeError:
-                pass
+        #     star_str1 = None
+        #     try:
+        #         star_str1 = star.name[:10]
+        #     except AttributeError:
+        #         pass
 
-            if star_str1 is None or star_str1 == "":
-                star_str1 = "%09d" % (star.unique_number)
-            star_str2 = "%.3f %s" % (star.vmag, clean_sclass(star.spectral_class))
-            text_size = text_draw.textbbox((0,0), star_str1, font=font)[2:]
-            locations = []
-            v_text = v_idx-text_size[1] # Whole size because we're doing two lines
-            if u_idx >= overlay.shape[1]//2:
-                # Star is on right side of image - default to label on left
-                if v_text+text_size[1]*2 < overlay.shape[0]:
-                    locations.append((u_idx-width-6-text_size[0], v_text))
-                if v_text >= 0:
-                    locations.append((u_idx+width+6, v_text))
-            else:
-                # Star is on left side of image - default to label on right
-                if v_text >= 0:
-                    locations.append((u_idx+width+6, v_text))
-                if v_text+text_size[1]*2 < overlay.shape[0]:
-                    locations.append((u_idx-width-6-text_size[0], v_text))
-            # Next try below star
-            u_text = u_idx-text_size[0]//2
-            v_text = v_idx+width+6
-            if v_text+text_size[1]*2 < overlay.shape[0]:
-                locations.append((u_text, v_text))
-            # And above the star
-            v_text = v_idx-width-3-text_size[1]*2
-            if v_text >= 0:
-                locations.append((u_text, v_text))
-            # One last gasp effort...try a little further above or below
-            u_text = u_idx-text_size[0]//2
-            v_text = v_idx+width+12
-            if v_text+text_size[1]*2 < overlay.shape[0]:
-                locations.append((u_text, v_text))
-            v_text = v_idx-width-12-text_size[1]
-            if v_text >= 0:
-                locations.append((u_text, v_text))
-            # And to the side but further above
-            v_text = v_idx-text_size[1]-6
-            if v_text+text_size[1]*2 < overlay.shape[0]:
-                locations.append((u_idx-width-6-text_size[0], v_text))
-            if v_text >= 0:
-                locations.append((u_idx+width+6, v_text))
-            # And to the side but further below
-            v_text = v_idx-text_size[1]+6
-            if v_text+text_size[1]*2 < overlay.shape[0]:
-                locations.append((u_idx-width-6-text_size[0], v_text))
-            if v_text >= 0:
-                locations.append((u_idx+width+6, v_text))
+        #     if star_str1 is None or star_str1 == "":
+        #         star_str1 = "%09d" % (star.unique_number)
+        #     star_str2 = "%.3f %s" % (star.vmag, clean_sclass(star.spectral_class))
+        #     text_size = text_draw.textbbox((0,0), star_str1, font=font)[2:]
+        #     locations = []
+        #     v_text = v_idx-text_size[1] # Whole size because we're doing two lines
+        #     if u_idx >= overlay.shape[1]//2:
+        #         # Star is on right side of image - default to label on left
+        #         if v_text+text_size[1]*2 < overlay.shape[0]:
+        #             locations.append((u_idx-width-6-text_size[0], v_text))
+        #         if v_text >= 0:
+        #             locations.append((u_idx+width+6, v_text))
+        #     else:
+        #         # Star is on left side of image - default to label on right
+        #         if v_text >= 0:
+        #             locations.append((u_idx+width+6, v_text))
+        #         if v_text+text_size[1]*2 < overlay.shape[0]:
+        #             locations.append((u_idx-width-6-text_size[0], v_text))
+        #     # Next try below star
+        #     u_text = u_idx-text_size[0]//2
+        #     v_text = v_idx+width+6
+        #     if v_text+text_size[1]*2 < overlay.shape[0]:
+        #         locations.append((u_text, v_text))
+        #     # And above the star
+        #     v_text = v_idx-width-3-text_size[1]*2
+        #     if v_text >= 0:
+        #         locations.append((u_text, v_text))
+        #     # One last gasp effort...try a little further above or below
+        #     u_text = u_idx-text_size[0]//2
+        #     v_text = v_idx+width+12
+        #     if v_text+text_size[1]*2 < overlay.shape[0]:
+        #         locations.append((u_text, v_text))
+        #     v_text = v_idx-width-12-text_size[1]
+        #     if v_text >= 0:
+        #         locations.append((u_text, v_text))
+        #     # And to the side but further above
+        #     v_text = v_idx-text_size[1]-6
+        #     if v_text+text_size[1]*2 < overlay.shape[0]:
+        #         locations.append((u_idx-width-6-text_size[0], v_text))
+        #     if v_text >= 0:
+        #         locations.append((u_idx+width+6, v_text))
+        #     # And to the side but further below
+        #     v_text = v_idx-text_size[1]+6
+        #     if v_text+text_size[1]*2 < overlay.shape[0]:
+        #         locations.append((u_idx-width-6-text_size[0], v_text))
+        #     if v_text >= 0:
+        #         locations.append((u_idx+width+6, v_text))
 
-            good_u = None
-            good_v = None
-            preferred_u = None
-            preferred_v = None
-            text = np.array(text_im.getdata()).reshape(text.shape)
-            for u, v in locations:
-                if (not np.any(
-                        text[
-                        max(v-3,0):
-                        min(v+text_size[1]*2+3, overlay.shape[0]),
-                        max(u-3,0):
-                        min(u+text_size[0]+3, overlay.shape[1])
-                        ]) and
-                    (label_avoid_mask is None or
-                    not np.any(
-                        label_avoid_mask[
-                        max(v-3,0):
-                        min(v+text_size[1]*2+3, overlay.shape[0]),
-                        max(u-3,0):
-                        min(u+text_size[0]+3, overlay.shape[1])
-                        ]))):
-                    if good_u is None:
-                        # Give precedence to earlier choices - they"re prettier
-                        good_u = u
-                        good_v = v
-                    # But we"d really rather the text not overlap with the squares
-                    # either, if possible
-                    if (preferred_u is None and not np.any(
-                    overlay[max(v-3,0):
-                            min(v+text_size[1]*2+3, overlay.shape[0]),
-                            max(u-3,0):
-                            min(u+text_size[0]+3, overlay.shape[1])])):
-                        preferred_u = u
-                        preferred_v = v
-                        break
+        #     good_u = None
+        #     good_v = None
+        #     preferred_u = None
+        #     preferred_v = None
+        #     text = np.array(text_im.getdata()).reshape(text.shape)
+        #     for u, v in locations:
+        #         if (not np.any(
+        #                 text[
+        #                 max(v-3,0):
+        #                 min(v+text_size[1]*2+3, overlay.shape[0]),
+        #                 max(u-3,0):
+        #                 min(u+text_size[0]+3, overlay.shape[1])
+        #                 ]) and
+        #             (label_avoid_mask is None or
+        #             not np.any(
+        #                 label_avoid_mask[
+        #                 max(v-3,0):
+        #                 min(v+text_size[1]*2+3, overlay.shape[0]),
+        #                 max(u-3,0):
+        #                 min(u+text_size[0]+3, overlay.shape[1])
+        #                 ]))):
+        #             if good_u is None:
+        #                 # Give precedence to earlier choices - they"re prettier
+        #                 good_u = u
+        #                 good_v = v
+        #             # But we"d really rather the text not overlap with the squares
+        #             # either, if possible
+        #             if (preferred_u is None and not np.any(
+        #             overlay[max(v-3,0):
+        #                     min(v+text_size[1]*2+3, overlay.shape[0]),
+        #                     max(u-3,0):
+        #                     min(u+text_size[0]+3, overlay.shape[1])])):
+        #                 preferred_u = u
+        #                 preferred_v = v
+        #                 break
 
-            if preferred_u is not None:
-                good_u = preferred_u
-                good_v = preferred_v
+        #     if preferred_u is not None:
+        #         good_u = preferred_u
+        #         good_v = preferred_v
 
-            if good_u is not None:
-                text_draw.text((good_u,good_v), star_str1,
-                            fill=255, font=font)
-                text_draw.text((good_u,good_v+text_size[1]), star_str2,
-                            fill=255, font=font)
+        #     if good_u is not None:
+        #         text_draw.text((good_u,good_v), star_str1,
+        #                     fill=255, font=font)
+        #         text_draw.text((good_u,good_v+text_size[1]), star_str2,
+        #                     fill=255, font=font)
 
-        text = np.array(text_im.getdata()).astype("uint8").reshape(text.shape)
+        # text = np.array(text_im.getdata()).astype("uint8").reshape(text.shape)
 
         return overlay, text
 

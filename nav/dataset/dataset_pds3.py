@@ -57,14 +57,14 @@ class DataSetPDS3(DataSet):
             '--camera-type', type=str, default=None,
             help='Only process images with the given camera type')
         group.add_argument(
-            '--volume', action='append',
-            help='An entire PDS3 volume or volume/range_subdir')
+            '--volumes', action='append',
+            help='One or more entire PDS3 volumes or volume/range_subdirs')
         group.add_argument(
-            '--first-volume-num', type=int, default=None, metavar='VOL_NUM',
-            help='The starting PDS3 volume number')
+            '--first-volume', type=str, default=None, metavar='VOL_NAME',
+            help='The starting PDS3 volume name')
         group.add_argument(
-            '--last-volume-num', type=int, default=None, metavar='VOL_NUM',
-            help='The ending PDS3 volume number')
+            '--last-volume', type=int, default=None, metavar='VOL_NAME',
+            help='The ending PDS3 volume name')
         group.add_argument(
             '--image-full-path', action='append', nargs='*',
             help='The full path for an image')
@@ -160,9 +160,9 @@ class DataSetPDS3(DataSet):
 #         log('*** Images restricted to list:')
 #         for filename in arguments.image_name[0]:
 #             log('        %s', filename)
-#     if arguments.volume is not None and arguments.volume != []:
+#     if arguments.volumes is not None and arguments.volumes != []:
 #         log('*** Images restricted to volumes:')
-#         for volume in arguments.volume:
+#         for volume in arguments.volumes:
 #             for vol in volume.split(','):
 #                 log('        %s', vol)
 #     if arguments.image_pds_csv:
@@ -174,180 +174,178 @@ class DataSetPDS3(DataSet):
 #         for filename in arguments.image_filelist:
 #             log('        %s', filename)
 
-# def yield_image_filenames_from_arguments(arguments, use_index_files=False,
-#                                          combine_botsim=False):
-#     """Given parsed arguments, yield all selected filenames.
 
-#     arguments               The parsed arguments structure.
-#     use_index_files         If True, look up images in the index files instead
-#                             of directly on the disk.
-#     combine_botsim          If True, look for adjacent NAC/WAC images with the
-#                             same image numbers and return them together as a
-#                             tuple.
-#     """
-#     instrument_host_config = INSTRUMENT_HOST_CONFIG[arguments.instrument_host]
+    def yield_image_filenames_from_arguments(self, arguments) -> Iterator[Path]:
+        """Given parsed arguments, yield all selected filenames.
 
-#     if arguments.image_full_path:
-#         # An explicit list of image paths overrides all other selectors.
-#         assert not combine_botsim
-#         if len(arguments.image_full_path) > 0:
-#             for image_path in arguments.image_full_path[0]:
-#                 yield image_path
-#             return
+        arguments               The parsed arguments structure.
+        use_index_files         If True, look up images in the index files instead
+                                of directly on the disk.
+        combine_botsim          If True, look for adjacent NAC/WAC images with the
+                                same image numbers and return them together as a
+                                tuple.
+        """
 
-#     # Start with wanting all images
-#     restrict_image_list = []
+        # if arguments.image_full_path:
+        #     # An explicit list of image paths overrides all other selectors.
+        #     # assert not combine_botsim
+        #     if len(arguments.image_full_path) > 0:
+        #         for image_path in arguments.image_full_path[0]:
+        #             yield image_path
+        #         return
 
-#     # Limit to the user-specific list of images, if any
-#     if arguments.image_name is not None and _flatten(arguments.image_name):
-#         restrict_image_list = [x.upper() for x in _flatten(arguments.image_name)]
+        # Start with wanting all images
+        restrict_image_list: list[str] = []
 
-#     # Also limit to the list of images in the PDS CSV file, if any
-#     if arguments.image_pds_csv:
-#         for filename in arguments.image_pds_csv:
-#             with open(filename, 'r') as csvfile:
-#                 csvreader = csv.reader(csvfile)
-#                 header = next(csvreader)
-#                 for colnum in range(len(header)):
-#                     if (header[colnum] == 'Primary File Spec' or
-#                         header[colnum] == 'primaryfilespec'):
-#                         break
-#                 else:
-#                     print('Badly formatted CSV file - no Primary File Spec header',
-#                           filename)
-#                     sys.exit(-1)
-#                 for row in csvreader:
-#                     filespec = row[colnum]
-#                     # XXX Should come from INSTRUMENT_HOST_CONFIG
-#                     filespec = (filespec
-#                                 .replace('.IMG', '')
-#                                 .replace('_CALIB', '')
-#                                 .replace('_RAW', '')
-#                                 .replace('_GEOMED', '')
-#                                 .replace('.LBL', '')
-#                                )
-#                     _, filespec = os.path.split(filespec)
-#                     restrict_image_list.append(filespec)
+        # Limit to the user-specific list of images, if any
+        # if arguments.image_name is not None and _flatten(arguments.image_name):
+        #     restrict_image_list = [x.upper() for x in _flatten(arguments.image_name)]
 
-#     # Also limit to the list of images in the filelist file, if any
-#     if arguments.image_filelist:
-#         for filename in arguments.image_filelist:
-#             with open(filename, 'r') as fp:
-#                 for line in fp:
-#                     line = line.strip()
-#                     if len(line) == 0 or line[0] == '#':
-#                         continue
-#                     # Ignore anything after the filename
-#                     line = line.split(' ')[0]
-#                     if not valid_image_name(line, arguments.instrument_host):
-#                         print('Bad filename for instrument host '
-#                               f'{arguments.instrument_host} - {line}')
-#                         sys.exit(-1)
-#                     restrict_image_list.append(line)
+        # Also limit to the list of images in the PDS CSV file, if any
+        # if arguments.image_pds_csv:
+        #     for filename in arguments.image_pds_csv:
+        #         with open(filename, 'r') as csvfile:
+        #             csvreader = csv.reader(csvfile)
+        #             header = next(csvreader)
+        #             for colnum in range(len(header)):
+        #                 if (header[colnum] == 'Primary File Spec' or
+        #                     header[colnum] == 'primaryfilespec'):
+        #                     break
+        #             else:
+        #                 print('Badly formatted CSV file - no Primary File Spec header',
+        #                       filename)
+        #                 sys.exit(-1)
+        #             for row in csvreader:
+        #                 filespec = row[colnum]
+        #                 # XXX Should come from INSTRUMENT_HOST_CONFIG
+        #                 filespec = (filespec
+        #                             .replace('.IMG', '')
+        #                             .replace('_CALIB', '')
+        #                             .replace('_RAW', '')
+        #                             .replace('_GEOMED', '')
+        #                             .replace('.LBL', '')
+        #                            )
+        #                 _, filespec = os.path.split(filespec)
+        #                 restrict_image_list.append(filespec)
 
-#     # Normally we walk through the directory structure or the index file to
-#     # find images, then see if they're in the restrict_image_list. But this
-#     # yields images in filesystem order, not the order specified by the user.
-#     # If the user cares, we have to yield these images directly, so create new
-#     # arguments that look like the user just provided the list of filenames
-#     # directly.
-#     if arguments.strict_file_order:
-#         new_arguments = copy.deepcopy(arguments)
-#         new_arguments.strict_order = False
-#         new_arguments.image_filelist = None
-#         new_arguments.image_pds_csv = None
-#         for filename in restrict_image_list:
-#             new_arguments.image_name = [[filename]]
-#             for ret in yield_image_filenames_from_arguments(
-#                                           new_arguments,
-#                                           use_index_files=use_index_files,
-#                                           combine_botsim=combine_botsim):
-#                 yield ret
-#         return
+        # Also limit to the list of images in the filelist file, if any
+        # if arguments.image_filelist:
+        #     for filename in arguments.image_filelist:
+        #         with open(filename, 'r') as fp:
+        #             for line in fp:
+        #                 line = line.strip()
+        #                 if len(line) == 0 or line[0] == '#':
+        #                     continue
+        #                 # Ignore anything after the filename
+        #                 line = line.split(' ')[0]
+        #                 if not valid_image_name(line, arguments.instrument_host):
+        #                     print('Bad filename for instrument host '
+        #                           f'{arguments.instrument_host} - {line}')
+        #                     sys.exit(-1)
+        #                 restrict_image_list.append(line)
 
-#     # Works for both Cassini and Voyager
-#     restrict_camera = None
-#     if arguments.instrument_host in ('cassini', 'voyager'):
-#         restrict_camera = 'NW'
-#         if arguments.nac_only:
-#             restrict_camera = 'N'
-#         if arguments.wac_only:
-#             restrict_camera = 'W'
+        # Normally we walk through the directory structure or the index file to
+        # find images, then see if they're in the restrict_image_list. But this
+        # yields images in filesystem order, not the order specified by the user.
+        # If the user cares, we have to yield these images directly, so create new
+        # arguments that look like the user just provided the list of filenames
+        # directly.
+        # if arguments.strict_file_order:
+        #     new_arguments = copy.deepcopy(arguments)
+        #     new_arguments.strict_order = False
+        #     new_arguments.image_filelist = None
+        #     new_arguments.image_pds_csv = None
+        #     for filename in restrict_image_list:
+        #         new_arguments.image_name = [[filename]]
+        #         for ret in yield_image_filenames_from_arguments(
+        #                                       new_arguments,
+        #                                       use_index_files=use_index_files,
+        #                                       combine_botsim=combine_botsim):
+        #             yield ret
+        #     return
 
-#     first_image_number = arguments.first_image_num
-#     last_image_number = arguments.last_image_num
-#     first_volume_number = arguments.first_volume_num
-#     last_volume_number = arguments.last_volume_num
-#     volumes = None
-#     if arguments.volume:
-#         volumes = [x for y in arguments.volume for x in y.split(',')]
+        # Works for both Cassini and Voyager
+        restrict_camera = None
+        # if arguments.instrument_host in ('cassini', 'voyager'):
+        #     restrict_camera = 'NW'
+        #     if arguments.nac_only:
+        #         restrict_camera = 'N'
+        #     if arguments.wac_only:
+        #         restrict_camera = 'W'
 
-#     # What part of the filename do we look at to get the image number?
-#     img_lim_start = instrument_host_config['filename_image_number_start']
-#     img_lim_end = instrument_host_config['filename_image_number_end']
+        first_image_number = arguments.first_image_num
+        last_image_number = arguments.last_image_num
+        first_volume_number = arguments.first_volume
+        last_volume_number = arguments.last_volume
+        volumes = None
+        if arguments.volumes:
+            volumes = [x for y in arguments.volumes for x in y.split(',')]
 
-#     if restrict_image_list:
-#         first_image_number = max(first_image_number,
-#                                  min([int(x[img_lim_start:img_lim_end])
-#                                       for x in restrict_image_list]))
-#         last_image_number = min(last_image_number,
-#                                 max([int(x[img_lim_start:img_lim_end])
-#                                      for x in restrict_image_list]))
+        # What part of the filename do we look at to get the image number?
+        # img_lim_start = instrument_host_config['filename_image_number_start']
+        # img_lim_end = instrument_host_config['filename_image_number_end']
 
-#     if use_index_files:
-#         yield_function = yield_image_filenames_index
-#     else:
-#         yield_function = yield_image_filenames
+        # if restrict_image_list:
+        #     first_image_number = max(first_image_number,
+        #                              min([int(x[img_lim_start:img_lim_end])
+        #                                   for x in restrict_image_list]))
+        #     last_image_number = min(last_image_number,
+        #                             max([int(x[img_lim_start:img_lim_end])
+        #                                  for x in restrict_image_list]))
 
-#     last_image_name = None
-#     last_image_path = None
+        # if use_index_files:
+        #     yield_function = yield_image_filenames_index
+        # else:
+        #     yield_function = yield_image_filenames
 
-#     for image_path in yield_function(
-#                 first_image_number,
-#                 last_image_number,
-#                 first_volume_number,
-#                 last_volume_number,
-#                 volumes,
-#                 restrict_camera,
-#                 restrict_image_list,
-#                 force_has_offset_file=arguments.has_offset_file,
-#                 force_has_no_offset_file=arguments.has_no_offset_file,
-#                 force_has_png_file=arguments.has_png_file,
-#                 force_has_no_png_file=arguments.has_no_png_file,
-#                 force_has_offset_error=arguments.has_offset_error,
-#                 force_has_offset_spice_error=arguments.has_offset_spice_error,
-#                 force_has_offset_nonspice_error=arguments.has_offset_nonspice_error,
-#                 selection_expr=arguments.selection_expr,
-#                 choose_random_images=arguments.choose_random_images,
-#                 instrument_host=arguments.instrument_host,
-#                 planet=arguments.planet):
-#         # Before returning a matching image, see if we need to combine BOTSIM
-#         # images. We do this by looking at adjacent pairs of returned images to
-#         # see if they match.
-#         _, image_name = os.path.split(image_path)
-#         image_name = image_name[img_lim_start:img_lim_end]
-#         if (combine_botsim and
-#             last_image_name is not None and
-#             last_image_name[0] == 'N' and
-#             image_name[0] == 'W' and
-#             image_name[1:] == last_image_name[1:]):
-#             yield (last_image_path, image_path)
-#             last_image_path = None
-#             last_image_name = None
-#         else:
-#             if last_image_path is not None:
-#                 if combine_botsim:
-#                     yield (last_image_path, None)
-#                 else:
-#                     yield last_image_path
-#             last_image_path = image_path
-#             last_image_name = image_name
+        last_image_name = None
+        last_image_path = None
 
-#     if last_image_path is not None:
-#         if combine_botsim:
-#             yield (last_image_path, None)
-#         else:
-#             yield last_image_path
+        for image_path in self.yield_image_filenames_index(
+                    img_start_num=first_image_number,
+                    img_end_num=last_image_number,
+                    vol_start=first_volume_number,
+                    vol_end=last_volume_number,
+                    volumes=volumes,
+                    camera=restrict_camera,
+                    restrict_list=restrict_image_list,
+                    force_has_offset_file=arguments.has_offset_file,
+                    force_has_no_offset_file=arguments.has_no_offset_file,
+                    force_has_png_file=arguments.has_png_file,
+                    force_has_no_png_file=arguments.has_no_png_file,
+                    force_has_offset_error=arguments.has_offset_error,
+                    force_has_offset_spice_error=arguments.has_offset_spice_error,
+                    force_has_offset_nonspice_error=arguments.has_offset_nonspice_error,
+                    selection_expr=arguments.selection_expr,
+                    choose_random_images=arguments.choose_random_images):
+            yield image_path
+        #     # Before returning a matching image, see if we need to combine BOTSIM
+        #     # images. We do this by looking at adjacent pairs of returned images to
+        #     # see if they match.
+        #     _, image_name = os.path.split(image_path)
+        #     image_name = image_name[img_lim_start:img_lim_end]
+        #     if (combine_botsim and
+        #         last_image_name is not None and
+        #         last_image_name[0] == 'N' and
+        #         image_name[0] == 'W' and
+        #         image_name[1:] == last_image_name[1:]):
+        #         yield (last_image_path, image_path)
+        #         last_image_path = None
+        #         last_image_name = None
+        #     else:
+        #         if last_image_path is not None:
+        #             if combine_botsim:
+        #                 yield (last_image_path, None)
+        #             else:
+        #                 yield last_image_path
+        #         last_image_path = image_path
+        #         last_image_name = image_name
+
+        # if last_image_path is not None:
+        #     if combine_botsim:
+        #         yield (last_image_path, None)
+        #     else:
+        #         yield last_image_path
 
     @lru_cache(maxsize=3)
     def _read_pds_table(self,

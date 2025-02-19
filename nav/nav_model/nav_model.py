@@ -28,7 +28,7 @@ class NavModel(ABC):
         self._model = None
         self._model_mask = None
         self._metadata = None
-        self._annotation = None
+        self._annotations = None
 
     @property
     def config(self) -> Config:
@@ -59,5 +59,5 @@ class NavModel(ABC):
         return self._metadata
 
     @property
-    def annotation(self) -> Annotation:
-        return self._annotation
+    def annotations(self) -> list[Annotation] | None:
+        return self._annotations

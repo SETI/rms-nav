@@ -37,5 +37,9 @@ class DataSet(ABC):
         ...
 
     @abstractmethod
+    def yield_image_filenames_from_arguments(*args: Any, **kwargs: Any) -> Iterator[Path]:
+        ...
+
+    @abstractmethod
     def yield_image_filenames_index(*args: Any, **kwargs: Any) -> Iterator[Path]:
         ...

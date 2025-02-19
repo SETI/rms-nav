@@ -23,33 +23,33 @@ OBS_VGISS2 = instvgiss.InstVoyagerISS.from_file(URL_VOYAGER_ISS_URANUS_01)
 def test_obs_snapshot_init():
     s = obs_snapshot.ObsSnapshot(OBS_COISS1)
     assert s._data_shape_uv == (256, 256)
-    assert s._fov_uv_min == (0, 0)
-    assert s._fov_uv_max == (255, 255)
-    assert s._extfov_margin_uv == (0, 0)
+    assert s._fov_vu_min == (0, 0)
+    assert s._fov_vu_max == (255, 255)
+    assert s._extfov_margin_vu == (0, 0)
     assert s._extdata.shape == (256, 256)
     assert s._extdata_shape_uv == (256, 256)
-    assert s._extfov_uv_min == (0, 0)
-    assert s._extfov_uv_max == (255, 255)
+    assert s._extfov_vu_min == (0, 0)
+    assert s._extfov_vu_max == (255, 255)
 
-    s = obs_snapshot.ObsSnapshot(OBS_COISS1, extfov_margin=10)
+    s = obs_snapshot.ObsSnapshot(OBS_COISS1, extfov_margin_vu=10)
     assert s._data_shape_uv == (256, 256)
-    assert s._fov_uv_min == (0, 0)
-    assert s._fov_uv_max == (255, 255)
-    assert s._extfov_margin_uv == (10, 10)
+    assert s._fov_vu_min == (0, 0)
+    assert s._fov_vu_max == (255, 255)
+    assert s._extfov_margin_vu == (10, 10)
     assert s._extdata.shape == (276, 276)
     assert s._extdata_shape_uv == (276, 276)
-    assert s._extfov_uv_min == (-10, -10)
-    assert s._extfov_uv_max == (265, 265)
+    assert s._extfov_vu_min == (-10, -10)
+    assert s._extfov_vu_max == (265, 265)
 
-    s = obs_snapshot.ObsSnapshot(OBS_COISS1, extfov_margin=(10, 20))
+    s = obs_snapshot.ObsSnapshot(OBS_COISS1, extfov_margin_vu=(10, 20))
     assert s._data_shape_uv == (256, 256)
-    assert s._fov_uv_min == (0, 0)
-    assert s._fov_uv_max == (255, 255)
-    assert s._extfov_margin_uv == (10, 20)
-    assert s._extdata.shape == (296, 276)
-    assert s._extdata_shape_uv == (276, 296)
-    assert s._extfov_uv_min == (-10, -20)
-    assert s._extfov_uv_max == (265, 275)
+    assert s._fov_vu_min == (0, 0)
+    assert s._fov_vu_max == (255, 255)
+    assert s._extfov_margin_vu == (10, 20)
+    assert s._extdata.shape == (276, 296)
+    assert s._extdata_shape_uv == (296, 276)
+    assert s._extfov_vu_min == (-10, -20)
+    assert s._extfov_vu_max == (265, 275)
 
 
 def test_obs_snapshot_bp_mg():
@@ -73,7 +73,7 @@ def test_obs_snapshot_bp_mg():
     assert s.center_bp.meshgrid.uv.vals[0, 0, 0] == 128
     assert s.center_bp.meshgrid.uv.vals[0, 0, 1] == 128
 
-    s = obs_snapshot.ObsSnapshot(OBS_COISS1, extfov_margin=(10, 20))
+    s = obs_snapshot.ObsSnapshot(OBS_COISS1, extfov_margin_vu=(10, 20))
     assert s.bp is s.bp
     assert s.bp.meshgrid.shape == (256, 256)
     assert s.bp.meshgrid.uv.vals[0, 0, 0] == 0.5
@@ -81,11 +81,11 @@ def test_obs_snapshot_bp_mg():
     assert s.bp.meshgrid.uv.vals[255, 255, 0] == 255.5
     assert s.bp.meshgrid.uv.vals[255, 255, 1] == 255.5
     assert s.ext_bp is not s.bp
-    assert s.ext_bp.meshgrid.shape == (296, 276)
-    assert s.ext_bp.meshgrid.uv.vals[0, 0, 0] == -9.5
-    assert s.ext_bp.meshgrid.uv.vals[0, 0, 1] == -19.5
-    assert s.ext_bp.meshgrid.uv.vals[295, 275, 0] == 265.5
-    assert s.ext_bp.meshgrid.uv.vals[295, 275, 1] == 275.5
+    assert s.ext_bp.meshgrid.shape == (276, 296)
+    assert s.ext_bp.meshgrid.uv.vals[0, 0, 0] == -19.5
+    assert s.ext_bp.meshgrid.uv.vals[0, 0, 1] == -9.5
+    assert s.ext_bp.meshgrid.uv.vals[275, 295, 0] == 275.5
+    assert s.ext_bp.meshgrid.uv.vals[275, 295, 1] == 265.5
     assert s.corner_bp is s.corner_bp
     assert s.corner_bp.meshgrid.shape == (2, 2)
     assert s.corner_bp.meshgrid.uv.vals[0, 0, 0] == 0
@@ -94,10 +94,10 @@ def test_obs_snapshot_bp_mg():
     assert s.corner_bp.meshgrid.uv.vals[1, 1, 1] == 256
     assert s.ext_corner_bp is not s.corner_bp
     assert s.ext_corner_bp.meshgrid.shape == (2, 2)
-    assert s.ext_corner_bp.meshgrid.uv.vals[0, 0, 0] == -10
-    assert s.ext_corner_bp.meshgrid.uv.vals[0, 0, 1] == -20
-    assert s.ext_corner_bp.meshgrid.uv.vals[1, 1, 0] == 266
-    assert s.ext_corner_bp.meshgrid.uv.vals[1, 1, 1] == 276
+    assert s.ext_corner_bp.meshgrid.uv.vals[0, 0, 0] == -20
+    assert s.ext_corner_bp.meshgrid.uv.vals[0, 0, 1] == -10
+    assert s.ext_corner_bp.meshgrid.uv.vals[1, 1, 0] == 276
+    assert s.ext_corner_bp.meshgrid.uv.vals[1, 1, 1] == 266
     assert s.center_bp is s.center_bp
     assert s.center_bp.meshgrid.shape == (1, 1)
     assert s.center_bp.meshgrid.uv.vals[0, 0, 0] == 128
@@ -114,7 +114,7 @@ def test_obs_snapshot_ra_dec_limits_wrap():
 
 
 def test_obs_snapshot_ra_dec_limits_ext_wrap():
-    s = obs_snapshot.ObsSnapshot(OBS_COISS1, extfov_margin=10)
+    s = obs_snapshot.ObsSnapshot(OBS_COISS1, extfov_margin_vu=10)
     ra_min, ra_max, dec_min, dec_max = s.ra_dec_limits_ext()
     assert ra_min * oops.DPR == pytest.approx(359.95125729565814)
     assert ra_max * oops.DPR == pytest.approx(0.46221430761720933)
@@ -125,19 +125,19 @@ def test_obs_snapshot_ra_dec_limits_ext_wrap():
 def test_obs_snapshot_ra_dec_limits():
     s = obs_snapshot.ObsSnapshot(OBS_VGISS2)
     ra_min, ra_max, dec_min, dec_max = s.ra_dec_limits()
-    assert ra_min * oops.DPR == pytest.approx(115.15217011450416)
-    assert ra_max * oops.DPR == pytest.approx(115.75520315049783)
-    assert dec_min * oops.DPR == pytest.approx(18.33519459450846)
-    assert dec_max * oops.DPR == pytest.approx(18.906653573574005)
+    assert ra_min * oops.DPR == pytest.approx(115.13781882464525)
+    assert ra_max * oops.DPR == pytest.approx(115.64874257283917)
+    assert dec_min * oops.DPR == pytest.approx(18.330307457361243)
+    assert dec_max * oops.DPR == pytest.approx(18.814618908448328)
 
 
 def test_obs_snapshot_ra_dec_limits_ext():
-    s = obs_snapshot.ObsSnapshot(OBS_VGISS2, extfov_margin=10)
+    s = obs_snapshot.ObsSnapshot(OBS_VGISS2, extfov_margin_vu=10)
     ra_min, ra_max, dec_min, dec_max = s.ra_dec_limits_ext()
-    assert ra_min * oops.DPR == pytest.approx(115.14615714065772)
-    assert ra_max * oops.DPR == pytest.approx(115.76125065791138)
-    assert dec_min * oops.DPR == pytest.approx(18.329473234091115)
-    assert dec_max * oops.DPR == pytest.approx(18.912360962666266)
+    assert ra_min * oops.DPR == pytest.approx(115.13272208854077)
+    assert ra_max * oops.DPR == pytest.approx(115.65386420280674)
+    assert dec_min * oops.DPR == pytest.approx(18.325459463553006)
+    assert dec_max * oops.DPR == pytest.approx(18.819456881754636)
 
 
 def test_obs_snapshot_distance():

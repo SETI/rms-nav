@@ -113,7 +113,7 @@ bodies:
   min_bounding_box_area: 9
   min_emission_ring_body: 20
   oversample_edge_limit: 512
-  oversample_maximum: 8
+  oversample_maximum: 2
   curvature_threshold_frac: 0.02
   curvature_threshold_pixels: 20
   limb_incidence_threshold: 1.53588974175501
@@ -171,17 +171,17 @@ bodies:
   min_text_area: 0.003
   # Details of labels placed on bodies
   label_mask_enlarge: 10  # Number of pixels around a body to avoid for label placement
+  label_limb_color: [255, 0, 0]  # Red
   label_font: liberation2/LiberationMono-Bold.ttf
   label_font_size: 18
     # 512: 18
   label_font_color: [255, 0, 0]  # Red
+  # label_font_color: [255, 255, 0]  # Yellow
   label_horiz_gap: 7  # Horizontal gap between limb and head of arrow (left/right)
   label_vert_gap: 5   # Vertical gap between limb and head of arrow (top/bottom)
   label_scan_v: 1     # Granularity in V when scanning a limb to find places to put labels
   label_grid_v: 10    # Coarse grid for labeling a body if everything else fails
   label_grid_u: 10
-
-
 
 rings:
   model_source: ephemeris
@@ -313,6 +313,13 @@ stars:
   #   512: *id001
   #   1000: *id002
   #   1024: *id002
+  label_star_color: [255, 0, 0]  # Red
+  label_font: liberation2/LiberationMono-Bold.ttf
+  label_font_size: 18
+    # 512: 18
+  label_font_color: [255, 0, 0]  # Red
+  # label_font_color: [255, 255, 0]  # Yellow
+
 titan:
   atmosphere_height: 700
 bootstrap:

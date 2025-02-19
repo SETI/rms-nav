@@ -7,7 +7,7 @@ OBS = instcoiss.InstCassiniISS.from_file(URL_CASSINI_ISS_RHEA_01)
 
 
 def test_nav_model_body():
-    s = obs_snapshot.ObsSnapshot(OBS, extfov_margin=(200, 100))
+    s = obs_snapshot.ObsSnapshot(OBS, extfov_margin_vu=(200, 100))
     body = NavModelBody(s, 'RHEA')
-    model, metadata, annotation = body.create_model()
-    print(metadata)
+    body.create_model()
+    print(body.metadata)

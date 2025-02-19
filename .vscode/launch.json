@@ -5,17 +5,24 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python Debugger: Current File",
+            "name": "nav_model_body1",
             "type": "debugpy",
             "request": "launch",
-            "program": "${file}",
+            "cwd": "${workspaceFolder}",
+            "program": "experiments/nav_model_body1.py",
+            "args": [],
             "console": "integratedTerminal"
-        },
-        {
-            "name": "Python Debugger: Module",
-            "type": "debugpy",
-            "request": "launch",
-            "module": "experiments/nav_model_body1"
         }
+        // {
+        //     "results_dir": "COISS_2021/1521798868_1521893025",
+        //     "name": "Star field N1521879918_2",
+        //     "type": "python",
+        //     "request": "launch",
+        //     "cwd": "navigation",
+        //     "program": "cb_main_offset.py",
+        //     "args": ["--force-offset", "--image-console-level", "debug", "N1521879918_2", "--stars-only"],
+        //     "console": "integratedTerminal",
+        //     "justMyCode": true
+        // },
     ]
 }

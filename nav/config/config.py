@@ -6,12 +6,23 @@ from pdslogger import PdsLogger
 from ruamel.yaml import YAML
 
 
-class Config:
-    _config: dict[str, Any]
+class AttrDict(dict):
+    def __init__(self, *args, **kwargs):
+        super(AttrDict, self).__init__(*args, **kwargs)
+        self.__dict__ = self
 
+
+class Config:
     def __init__(self) -> None:
         self._logger: PdsLogger | None = None
         self._config_dict: dict[str, Any] = {}
+        self._config_offset: dict[str, Any] = AttrDict({})
+        self._config_bodies: dict[str, Any] = AttrDict({})
+        self._config_general: dict[str, Any] = AttrDict({})
+        self._config_rings: dict[str, Any] = AttrDict({})
+        self._config_stars: dict[str, Any] = AttrDict({})
+        self._config_titan: dict[str, Any] = AttrDict({})
+        self._config_bootstrap: dict[str, Any] = AttrDict({})
 
     def set_logger(self,
                    logger: Logger) -> None:
@@ -21,12 +32,22 @@ class Config:
         if not self._config_dict:
             self.read_config()
 
+    def _update_attrdicts(self):
+        self._config_offset: dict[str, Any] = AttrDict(self._config_dict['offset'])
+        self._config_bodies: dict[str, Any] = AttrDict(self._config_dict['bodies'])
+        self._config_general: dict[str, Any] = AttrDict(self._config_dict['general'])
+        self._config_rings: dict[str, Any] = AttrDict(self._config_dict['rings'])
+        self._config_stars: dict[str, Any] = AttrDict(self._config_dict['stars'])
+        self._config_titan: dict[str, Any] = AttrDict(self._config_dict['titan'])
+        self._config_bootstrap: dict[str, Any] = AttrDict(self._config_dict['bootstrap'])
+
     def read_config(self,
                     config_path: Optional[str | Path] = None) -> None:
         if config_path is None:
             config_path = Path(__file__).resolve().parent / 'default_config.yaml'
         yaml = YAML(typ='safe')
         self._config_dict = yaml.load(config_path)
+        self._update_attrdicts()
 
     def update_config(self,
                       config_path: str | Path) -> None:
@@ -45,6 +66,7 @@ class Config:
                     'bootstrap'):
             if key in new_config:
                 self._config_dict[key].update(new_config[key])
+        self._update_attrdicts()
 
     @property
     def logger(self) -> PdsLogger:
@@ -73,68 +95,40 @@ class Config:
         self._maybe_read_config()
         return cast(list[str], self._config_dict['ring_satellites'][planet.upper()])
 
-    def general(self,
-               key: str) -> Any:
+    @property
+    def general(self) -> Any:
         self._maybe_read_config()
-        return self._config_dict['general'][key]
+        return self._config_general
 
     @property
-    def general_config(self) -> dict[str, Any]:
-        return cast(dict[str, Any], self._config_dict['general'])
-
-    def offset(self,
-               key: str) -> Any:
+    def offset(self) -> Any:
         self._maybe_read_config()
-        return self._config_dict['offset'][key]
+        return self._config_offset
 
     @property
-    def offset_config(self) -> dict[str, Any]:
-        return cast(dict[str, Any], self._config_dict['offset'])
-
-    def bodies(self,
-               key: str) -> Any:
+    def bodies(self) -> Any:
         self._maybe_read_config()
-        return self._config_dict['bodies'][key]
+        return self._config_bodies
 
     @property
-    def bodies_config(self) -> dict[str, Any]:
-        return cast(dict[str, Any], self._config_dict['bodies'])
-
-    def rings(self,
-              key: str) -> Any:
+    def rings(self) -> Any:
         self._maybe_read_config()
-        return self._config_dict['rings'][key]
+        return self._config_rings
 
     @property
-    def rings_config(self) -> dict[str, Any]:
-        return cast(dict[str, Any], self._config_dict['rings'])
-
-    def stars(self,
-              key: str) -> Any:
+    def stars(self) -> Any:
         self._maybe_read_config()
-        return self._config_dict['stars'][key]
+        return self._config_stars
 
     @property
-    def stars_config(self) -> dict[str, Any]:
-        return cast(dict[str, Any], self._config_dict['stars'])
-
-    def titan(self,
-              key: str) -> Any:
+    def titan(self) -> Any:
         self._maybe_read_config()
-        return self._config_dict['titan'][key]
+        return self._config_titan
 
     @property
-    def titan_config(self) -> dict[str, Any]:
-        return cast(dict[str, Any], self._config_dict['titan'])
-
-    def bootstrap(self,
-                  key: str) -> Any:
+    def bootstrap(self) -> Any:
         self._maybe_read_config()
-        return self._config_dict['bootstrap'][key]
-
-    @property
-    def bootstrap_config(self) -> dict[str, Any]:
-        return cast(dict[str, Any], self._config_dict['bootstrap'])
+        return self._config_bootstrap
 
 
 DEFAULT_CONFIG = Config()
