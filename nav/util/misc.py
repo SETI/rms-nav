@@ -65,6 +65,7 @@ def now_dt() -> datetime.datetime:
 
     return datetime.datetime.now().astimezone()
 
+
 def dt_delta_str(start_time: datetime.datetime,
                  end_time: datetime.datetime) -> str:
     """Return the difference between two DateTimes as a float"""

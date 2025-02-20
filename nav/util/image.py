@@ -33,7 +33,7 @@ def shift_array(array: NDArrayType[NPType],
     """
 
     if isinstance(offset, int):
-        offset = np.array((offset,))
+        offset = [offset]
 
     if array.ndim != len(offset):
         raise ValueError(f'Array ({array.ndim}) and offset ({len(offset)}) must have '
@@ -126,11 +126,11 @@ def next_power_of_2(n: int) -> int:
     s = bin(n)[2:]
     if s.count('1') == 1: # Already power of 2
         return n
-    return 2 ** len(s)
+    return 1 << len(s)
 
 
 def pad_array_to_power_of_2(data: NDArrayType[NPType]
-                           ) -> tuple[NDArrayType[NPType], tuple[int, int]]:
+                           ) -> tuple[NDArrayType[NPType], tuple[int, ...]]:
     """Zero-pad a 2-D array on all sides to be a power of 2 in each dimension.
 
     If the original array has a side that is not a power of 2, it must be even.
@@ -555,7 +555,7 @@ def draw_line(img: NDArrayType[NPType],
 
 
 def draw_rect(img: NDArrayType[NPType],
-              color: int | float | list[int | float] | tuple[int | float, ...],
+              color: bool | int | float | list[int | float] | tuple[int | float, ...],
               xctr: int,
               yctr: int,
               xhalfwidth: int,

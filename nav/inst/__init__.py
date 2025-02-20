@@ -4,7 +4,8 @@ from .inst_galileo_ssi import InstGalileoSSI  # noqa: F401
 from .inst_newhorizons_lorri import InstNewHorizonsLORRI  # noqa: F401
 from .inst_voyager_iss import InstVoyagerISS  # noqa: F401
 
-def inst_id_to_class(inst_id: str) -> Inst:
+
+def inst_id_to_class(inst_id: str) -> type[Inst]:
     match inst_id.upper():
         case 'COISS' | 'COISS_PDS3':
             return InstCassiniISS
@@ -15,6 +16,7 @@ def inst_id_to_class(inst_id: str) -> Inst:
         case 'VGISS' | 'VGISS_PDS3':
             return InstVoyagerISS
     raise ValueError(f'Unknown instrument id: {inst_id}')
+
 
 __all__ = ['Inst',
            'InstCassiniISS',

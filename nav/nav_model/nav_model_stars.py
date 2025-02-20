@@ -8,7 +8,6 @@
 # import scipy.ndimage.filters as filt
 # from PIL import Image, ImageDraw, ImageFont
 
-from cProfile import label
 import tkinter as tk
 from imgdisp import ImageDisp
 
@@ -26,15 +25,15 @@ from imgdisp import ImageDisp
 # from nav.flux import (calibrate_iof_image_as_dn,
 #                       clean_sclass,
 #                       compute_dn_from_star)
-# from nav.image import (draw_circle,
-#                        draw_rect,
-#                        filter_sub_median)
+from nav.util.image import (#draw_circle,
+                       draw_rect)
+                    #    filter_sub_median)
 # import nav.plot3d
 
 # _LOGGING_NAME = "nav." + __name__
 
 # DEBUG_STARS_FILTER_IMGDISP = False
-_DEBUG_STARS_MODEL_IMGDISP = True
+_DEBUG_STARS_MODEL_IMGDISP = False
 # DEBUG_STARS_PSF_3D = False
 
 import time
@@ -57,9 +56,7 @@ from nav.annotation import (Annotation,
                             TEXTINFO_LEFT,
                             TEXTINFO_RIGHT,
                             TEXTINFO_BOTTOM,
-                            TEXTINFO_TOP,
-                            TEXTINFO_CENTER)
-from nav.inst import Inst
+                            TEXTINFO_TOP)
 from nav.util.flux import clean_sclass
 from nav.util.types import NDArrayFloatType
 
@@ -481,7 +478,9 @@ class NavModelStars(NavModel):
 
         # Create the text labels
 
-        annotations = Annotations()
+        text_info_list = []
+        star_avoid_mask = self._obs.make_extfov_false()
+        star_overlay = self._obs.make_extfov_false()
 
         for star in star_list:
             # Should NOT be rounded for plotting, since all of coord
@@ -491,7 +490,7 @@ class NavModelStars(NavModel):
 
             # width = star.overlay_box_width
             # thickness = star.overlay_box_thickness
-            # width = 5
+            width = 5
             # thickness = 1
             # if width == 0:
             #     continue
@@ -500,6 +499,16 @@ class NavModelStars(NavModel):
             # if (not width <= u_idx < overlay.shape[1]-width or
             #     not width <= v_idx < overlay.shape[0]-width):
             #     continue
+
+            u_min = u - width
+            v_min = v - width
+            u_max = u + width
+            v_max = v + width
+            u_min, v_min = self._obs.clip_extfov(u_min, v_min)
+            u_max, v_max = self._obs.clip_extfov(u_max, v_max)
+
+            star_avoid_mask[v_min:v_max+1, u_min:u_max+1] = True
+            draw_rect(star_overlay, True, u, v, width, width)
 
             star_str1 = None
             try:
@@ -513,7 +522,7 @@ class NavModelStars(NavModel):
 
             text_loc = []
 
-            label_margin = 3
+            label_margin = width + 3
 
             text_loc.append((TEXTINFO_BOTTOM, v + label_margin, u))
             text_loc.append((TEXTINFO_TOP, v - label_margin, u))
@@ -522,14 +531,17 @@ class NavModelStars(NavModel):
 
             text_info = AnnotationTextInfo(f'{star_str1}\n{star_str2}',
                                            text_loc=text_loc,
-                                            font=config.label_font,
-                                            font_size=config.label_font_size,
-                                            color=config.label_font_color)
+                                           font=config.label_font,
+                                           font_size=config.label_font_size,
+                                           color=config.label_font_color)
+            text_info_list.append(text_info)
 
-            star_mask = self._obs.make_extfov_false()
-            annotation = Annotation(star_mask, config.label_star_color,
-                                    thicken_overlay=0, text_info=text_info)
-            annotations.add_annotations(annotation)
+        annotation = Annotation(star_overlay, config.label_star_color,
+                                thicken_overlay=0,
+                                avoid_mask=star_avoid_mask,
+                                text_info=text_info_list)
+        annotations = Annotations()
+        annotations.add_annotations(annotation)
 
         self._model = model
         self._model_mask = None

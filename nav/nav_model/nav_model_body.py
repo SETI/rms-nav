@@ -13,13 +13,11 @@ from nav.annotation import (Annotation,
                             TEXTINFO_LEFT_ARROW,
                             TEXTINFO_RIGHT_ARROW,
                             TEXTINFO_BOTTOM_ARROW,
-                            TEXTINFO_TOP_ARROW,
-                            TEXTINFO_CENTER)
+                            TEXTINFO_TOP_ARROW)
 
 from nav.util.image import (filter_downsample,
                             shift_array)
 from nav.util.misc import now_dt, dt_delta_str
-from nav.util.types import NDArrayFloatType
 
 from .nav_model import NavModel
 
@@ -251,10 +249,10 @@ class NavModelBody(NavModel):
         height = v_max - v_min + 1
         curvature_threshold_frac = config.curvature_threshold_frac
         curvature_threshold_pix = config.curvature_threshold_pixels
-        width_threshold = max(width * curvature_threshold_frac,
-                              curvature_threshold_pix)
-        height_threshold = max(height * curvature_threshold_frac,
-                               curvature_threshold_pix)
+        # width_threshold = max(width * curvature_threshold_frac,
+        #                       curvature_threshold_pix)
+        # height_threshold = max(height * curvature_threshold_frac,
+        #                        curvature_threshold_pix)
 
         u_min -= int((u_max-u_min) * BODIES_POSITION_SLOP_FRAC)
         u_max += int((u_max-u_min) * BODIES_POSITION_SLOP_FRAC)
@@ -512,18 +510,18 @@ class NavModelBody(NavModel):
         # Figure out all the location where we might want to label the body
         #
 
-        text_loc = []
+        text_loc: list[tuple[str, int, int]] = []
         v_center_extfov = v_center + obs.extfov_margin_v
         u_center_extfov = u_center + obs.extfov_margin_u
 
         v_center_extfov_clipped = np.clip(v_center_extfov, 0, body_mask.shape[0]-1)
         u_center_extfov_clipped = np.clip(u_center_extfov, 0, body_mask.shape[1]-1)
-        body_mask_u_min = np.argmax(body_mask[v_center_extfov_clipped])
-        body_mask_u_max = (body_mask.shape[1] -
-                           np.argmax(body_mask[v_center_extfov_clipped, ::-1]) - 1)
-        body_mask_v_min = np.argmax(body_mask[:, u_center_extfov_clipped])
-        body_mask_v_max = (body_mask.shape[0] -
-                           np.argmax(body_mask[::-1, u_center_extfov_clipped]) - 1)
+        body_mask_u_min = int(np.argmax(body_mask[v_center_extfov_clipped]))
+        body_mask_u_max = int((body_mask.shape[1] -
+                              np.argmax(body_mask[v_center_extfov_clipped, ::-1]) - 1))
+        body_mask_v_min = int(np.argmax(body_mask[:, u_center_extfov_clipped]))
+        body_mask_v_max = int((body_mask.shape[0] -
+                              np.argmax(body_mask[::-1, u_center_extfov_clipped]) - 1))
         body_mask_u_ctr = (body_mask_u_min + body_mask_u_max) // 2
         body_mask_v_ctr = (body_mask_v_min + body_mask_v_max) // 2
 
@@ -542,7 +540,7 @@ class NavModelBody(NavModel):
                     continue
 
                 # Left side
-                u = np.argmax(body_mask[v])
+                u = int(np.argmax(body_mask[v]))
                 if u > 0:  # u == 0 if body runs off left side
                     angle = np.rad2deg(
                         np.arctan2(v-v_center_extfov, u-u_center_extfov)) % 360
@@ -560,7 +558,7 @@ class NavModelBody(NavModel):
                                          u))
 
                 # Right side
-                u = body_mask.shape[1] - np.argmax(body_mask[v, ::-1]) - 1
+                u = body_mask.shape[1] - int(np.argmax(body_mask[v, ::-1])) - 1
                 if u < body_mask.shape[1]-1:  # if body runs off right side
                     angle = np.rad2deg(
                         np.arctan2(v-v_center_extfov, u-u_center_extfov)) % 360
@@ -615,29 +613,6 @@ class NavModelBody(NavModel):
                             text_loc.append((TEXTINFO_RIGHT_ARROW, v, u))
                 if v_orig_dist == 0:
                     break
-
-        # Given the choice, make a label on the left or right
-        # if not body_mask[v_center_extfov, 0]:
-        #     u = np.argmax(body_mask[v_center_extfov])
-        #     text_loc.append((TEXTINFO_LEFT_ARROW,
-        #                      v_center_extfov,
-        #                      u - config['label_horiz_gap']))
-        # if not body_mask[v_center_extfov, -1]:
-        #     u = body_mask.shape[1] - np.argmax(body_mask[v_center_extfov, ::-1]) - 1
-        #     text_loc.append((TEXTINFO_RIGHT_ARROW,
-        #                      v_center_extfov,
-        #                      u + config['label_horiz_gap']))
-        # if not body_mask[0, u_center_extfov]:
-        #     v = np.argmax(body_mask[:, u_center_extfov])
-        #     text_loc.append((TEXTINFO_TOP_ARROW,
-        #                      v - config['label_vert_gap'],
-        #                      u_center_extfov))
-        # if not body_mask[-1, v_center_extfov]:
-        #     v = body_mask.shape[0] - np.argmax(body_mask[::-1, u_center_extfov]) - 1
-        #     text_loc.append((TEXTINFO_BOTTOM_ARROW,
-        #                      v + config['label_vert_gap'],
-        #                      u_center_extfov))
-        # text_loc.append((TEXTINFO_BOTTOM_ARROW, v_center_extfov, u_center_extfov))
 
         text_info = AnnotationTextInfo(body_name, text_loc=text_loc,
                                        font=config.label_font,

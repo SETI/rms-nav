@@ -1,10 +1,9 @@
-from abc import ABC, abstractmethod
+from abc import ABC
 from typing import Any, Optional
 
-import oops
 from pdslogger import PdsLogger
 
-from nav.annotation import Annotation
+from nav.annotation import Annotations
 from nav.config import Config, DEFAULT_CONFIG
 from nav.inst import Inst
 from nav.obs import ObsSnapshot
@@ -25,10 +24,10 @@ class NavModel(ABC):
         if logger_name is not None:
             self._logger = self._logger.get_logger(logger_name)
 
-        self._model = None
-        self._model_mask = None
-        self._metadata = None
-        self._annotations = None
+        self._model: NDArrayFloatType | None = None
+        self._model_mask: NDArrayBoolType | None = None
+        self._metadata: dict[str, Any] = {}
+        self._annotations: Annotations | None = None
 
     @property
     def config(self) -> Config:
@@ -47,11 +46,11 @@ class NavModel(ABC):
         return self.obs.inst
 
     @property
-    def model(self) -> NDArrayFloatType:
+    def model(self) -> NDArrayFloatType | None:
         return self._model
 
     @property
-    def model_mask(self) -> NDArrayBoolType:
+    def model_mask(self) -> NDArrayBoolType | None:
         return self._model_mask
 
     @property
@@ -59,5 +58,5 @@ class NavModel(ABC):
         return self._metadata
 
     @property
-    def annotations(self) -> list[Annotation] | None:
+    def annotations(self) -> Annotations | None:
         return self._annotations

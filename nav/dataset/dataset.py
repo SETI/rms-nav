@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-import logging
 from pathlib import Path
 from typing import Any, Iterator, Optional
 

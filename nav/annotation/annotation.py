@@ -10,7 +10,7 @@ from .annotation_text_info import AnnotationTextInfo
 class Annotation:
     def __init__(self,
                  overlay: NDArrayBoolType,
-                 overlay_color: tuple[int, int, int] = (255, 255, 0),
+                 overlay_color: tuple[int, int, int],
                  *,
                  thicken_overlay: int = 0,
                  text_info: Optional[AnnotationTextInfo |
@@ -31,11 +31,11 @@ class Annotation:
                                      shift_array(overlay, (v_offset, u_offset)))
 
         if text_info is None:
-            self._text_info_list = []
+            self._text_info = []
         elif isinstance(text_info, (list, tuple)):
-            self._text_info_list = text_info
+            self._text_info = text_info
         else:
-            self._text_info_list = [text_info]
+            self._text_info = [text_info]
 
     @property
     def config(self) -> Config:
@@ -47,10 +47,10 @@ class Annotation:
 
     @property
     def text_info_list(self) -> list[AnnotationTextInfo]:
-        return self._text_info_list
+        return self._text_info
 
     @property
-    def avoid_mask(self) -> NDArrayBoolType:
+    def avoid_mask(self) -> NDArrayBoolType | None:
         return self._avoid_mask
 
     def add_text_info(self,
@@ -58,4 +58,4 @@ class Annotation:
                                   list[AnnotationTextInfo])) -> None:
         if not isinstance(text_info, (list, tuple)):
             text_info = [text_info]
-        self._text_info_list.extend(text_info)
+        self._text_info.extend(text_info)

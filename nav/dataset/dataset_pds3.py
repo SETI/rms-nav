@@ -174,8 +174,9 @@ class DataSetPDS3(DataSet):
 #         for filename in arguments.image_filelist:
 #             log('        %s', filename)
 
-
-    def yield_image_filenames_from_arguments(self, arguments) -> Iterator[Path]:
+    def yield_image_filenames_from_arguments(self,
+                                             arguments: argparse.Namespace
+                                             ) -> Iterator[Path]:
         """Given parsed arguments, yield all selected filenames.
 
         arguments               The parsed arguments structure.
@@ -298,8 +299,8 @@ class DataSetPDS3(DataSet):
         # else:
         #     yield_function = yield_image_filenames
 
-        last_image_name = None
-        last_image_path = None
+        # last_image_name = None
+        # last_image_path = None
 
         for image_path in self.yield_image_filenames_index(
                     img_start_num=first_image_number,
