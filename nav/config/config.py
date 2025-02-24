@@ -2,14 +2,10 @@ from logging import Logger
 from pathlib import Path
 from typing import Any, Optional, cast
 
-from pdslogger import PdsLogger
+from pdslogger import PdsLogger, STDOUT_HANDLER
 from ruamel.yaml import YAML
 
-
-class AttrDict(dict):
-    def __init__(self, *args, **kwargs):
-        super(AttrDict, self).__init__(*args, **kwargs)
-        self.__dict__ = self
+from nav.support.attrdict import AttrDict
 
 
 class Config:
@@ -32,14 +28,14 @@ class Config:
         if not self._config_dict:
             self.read_config()
 
-    def _update_attrdicts(self):
-        self._config_offset: dict[str, Any] = AttrDict(self._config_dict['offset'])
-        self._config_bodies: dict[str, Any] = AttrDict(self._config_dict['bodies'])
-        self._config_general: dict[str, Any] = AttrDict(self._config_dict['general'])
-        self._config_rings: dict[str, Any] = AttrDict(self._config_dict['rings'])
-        self._config_stars: dict[str, Any] = AttrDict(self._config_dict['stars'])
-        self._config_titan: dict[str, Any] = AttrDict(self._config_dict['titan'])
-        self._config_bootstrap: dict[str, Any] = AttrDict(self._config_dict['bootstrap'])
+    def _update_attrdicts(self) -> None:
+        self._config_offset = AttrDict(self._config_dict['offset'])
+        self._config_bodies = AttrDict(self._config_dict['bodies'])
+        self._config_general = AttrDict(self._config_dict['general'])
+        self._config_rings = AttrDict(self._config_dict['rings'])
+        self._config_stars = AttrDict(self._config_dict['stars'])
+        self._config_titan = AttrDict(self._config_dict['titan'])
+        self._config_bootstrap = AttrDict(self._config_dict['bootstrap'])
 
     def read_config(self,
                     config_path: Optional[str | Path] = None) -> None:
@@ -72,6 +68,7 @@ class Config:
     def logger(self) -> PdsLogger:
         if self._logger is None:
             self._logger = PdsLogger('nav', lognames=False)
+            self._logger.add_handler(STDOUT_HANDLER)
             self._logger.info('Starting')
         return self._logger
 
@@ -83,7 +80,7 @@ class Config:
     def satellites(self,
                    planet: str) -> list[str]:
         self._maybe_read_config()
-        return cast(list[str], self._config_dict['satellites'][planet.upper()])
+        return cast(list[str], self._config_dict['satellites'].get(planet.upper(), []))
 
     def fuzzy_satellites(self,
                          planet: str) -> list[str]:

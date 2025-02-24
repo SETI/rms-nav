@@ -1,8 +1,8 @@
 from typing import Optional
 
 from nav.config import Config, DEFAULT_CONFIG
-from nav.util.image import shift_array
-from nav.util.types import NDArrayBoolType
+from nav.support.image import shift_array
+from nav.support.types import NDArrayBoolType
 
 from .annotation_text_info import AnnotationTextInfo
 

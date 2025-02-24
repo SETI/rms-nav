@@ -8,8 +8,9 @@ import psfmodel.gaussian as gauss_psf
 import scipy.fftpack as fftpack
 import tkinter as tk
 
-import nav.util.image
-from nav.util.types import NDArrayType, NPType
+from nav.config import DEFAULT_CONFIG
+from nav.support.image import unpad_array, pad_array_to_power_of_2
+from nav.support.types import NDArrayType, NPType
 
 
 #==============================================================================
@@ -57,8 +58,8 @@ def correlate2d(image, model, normalize=False, retile=False):
         tk.mainloop()
 
     # Padding to a power of 2 makes FFT _much_ faster
-    newimage, _ = _pad_to_power_of_2_2d(image)
-    newmodel, padding = _pad_to_power_of_2_2d(model)
+    newimage, _ = pad_array_to_power_of_2(image)
+    newmodel, padding = pad_array_to_power_of_2(model)
 
     image_fft = fftpack.fft2(newimage)
     model_fft = fftpack.fft2(newmodel)
@@ -80,7 +81,7 @@ def correlate2d(image, model, normalize=False, retile=False):
         offset_image[-y: ,-x: ] = corr[ 0:y, 0:x]
         corr = offset_image
 
-    corr = nav.image.unpad_image(corr, padding)
+    corr = unpad_array(corr, padding)
 
     return corr
 
@@ -349,7 +350,7 @@ def corr_psf_xy_err_to_str(offset, psf_details, extra=None, extra_args=None):
                               extra, extra_args)
 
 def _find_correlated_offset(corr, search_size_min, search_size_max,
-                            max_offsets, peak_margin):
+                            max_offsets, peak_margin, logger):
     """Find the offset that best aligns an image and a model given the
     correlation.
 
@@ -383,7 +384,6 @@ def _find_correlated_offset(corr, search_size_min, search_size_max,
                            offset inside that array suitable for passing to
                            corr_analyze_peak.
     """
-    logger = logging.getLogger(_LOGGING_NAME+'._find_correlated_offset')
 
     if np.shape(search_size_min) == ():
         search_size_min_u = search_size_min
@@ -548,7 +548,8 @@ def find_correlation_and_offset(image, model, search_size_min=0,
                                 max_offsets=1, peak_margin=3,
                                 extfov_margin=(0,0),
                                 image_filter=None,
-                                model_filter=None):
+                                model_filter=None,
+                                logger=None):
     """Find the offset that best aligns an image and a model.
 
     Inputs:
@@ -584,7 +585,8 @@ def find_correlation_and_offset(image, model, search_size_min=0,
                            offset inside that array suitable for passing to
                            corr_analyze_peak.
 """
-    logger = logging.getLogger(_LOGGING_NAME+'.find_correlation_and_offset')
+    if logger is None:
+        logger = DEFAULT_CONFIG.logger
 
     image = image.astype('float32')
     model = model.astype('float32')
@@ -613,13 +615,13 @@ def find_correlation_and_offset(image, model, search_size_min=0,
     # the same as the maximum search limit. XXX
     extend_fov_u_list = [extend_fov_u]
     extend_fov_v_list = [extend_fov_v]
-    if nav.config.CORR_ALLOW_SUBMODELS:
-        if extend_fov_u and search_size_max_u == extend_fov_u:
-            extend_fov_u_list = [0, extend_fov_u, 2*extend_fov_u]
-            assert search_size_max_u == extend_fov_u
-        if extend_fov_v and search_size_max_v == extend_fov_v:
-            extend_fov_v_list = [0, extend_fov_v, 2*extend_fov_v]
-            assert search_size_max_v == extend_fov_v
+    # if nav.config.CORR_ALLOW_SUBMODELS:
+    #     if extend_fov_u and search_size_max_u == extend_fov_u:
+    #         extend_fov_u_list = [0, extend_fov_u, 2*extend_fov_u]
+    #         assert search_size_max_u == extend_fov_u
+    #     if extend_fov_v and search_size_max_v == extend_fov_v:
+    #         extend_fov_v_list = [0, extend_fov_v, 2*extend_fov_v]
+    #         assert search_size_max_v == extend_fov_v
 
     # Get the original image and maybe filter it.
     sub_image = image[extend_fov_v:extend_fov_v+orig_image_size_v,
@@ -650,7 +652,8 @@ def find_correlation_and_offset(image, model, search_size_min=0,
             ret_list = _find_correlated_offset(corr, search_size_min,
                                                (search_size_max_u,
                                                 search_size_max_v),
-                                               max_offsets, peak_margin)
+                                               max_offsets, peak_margin,
+                                               logger)
 
             # Iterate over each returned offset and calculate what the
             # offset actually is based on the model shift amount.

@@ -1,11 +1,11 @@
-from typing import cast
+from typing import Union, cast
 
 import numpy as np
 from PIL import Image, ImageDraw
 
 from .annotation import Annotation
 
-from nav.util.types import NDArrayBoolType, NDArrayIntType
+from nav.support.types import NDArrayBoolType, NDArrayIntType
 
 
 class Annotations:
@@ -13,7 +13,10 @@ class Annotations:
         self._annotations: list[Annotation] = []
 
     def add_annotations(self,
-                        annotations: Annotation | list[Annotation] | None
+                        annotations: Union[Annotation,
+                                           list[Annotation],
+                                           'Annotations',
+                                           None]
                         ) -> None:
         if annotations is None:
             return
@@ -49,6 +52,9 @@ class Annotations:
         all_avoid_mask = np.zeros(self._annotations[0].overlay.shape, dtype=np.bool_)
 
         for annotation in self._annotations:
+            # TODO This does not handle z-depth. In other words, an overlay does not
+            # get hidden by other overlays in front of it. This can best be seen with
+            # two moons that are partially occluding each other.
             res[annotation.overlay] = annotation._overlay_color
             if text_use_avoid_mask and annotation.avoid_mask is not None:
                 all_avoid_mask |= annotation.avoid_mask
@@ -83,8 +89,11 @@ class Annotations:
         text_draw = ImageDraw.Draw(text_im)
 
         for ann_num, annotation in enumerate(self._annotations):
-            # XXX ann_num is really not enough because we want a number for each
-            # text_info
+            # TODO ann_num is not really used for anything right now. Eventually it could
+            # be used for backtracking to know which annotation to try to move in order
+            # to place one that is overconstrained. However, ann_num is really not enough
+            # because we want a number for each text_info, so this code should probably
+            # just go away at some point.
             if not annotation.text_info_list:
                 continue
 

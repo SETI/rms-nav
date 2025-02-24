@@ -6,8 +6,8 @@ import numpy as np
 from PIL import ImageDraw, ImageFont
 
 from nav.config import DEFAULT_CONFIG
-from nav.util.image import draw_line_arrow
-from nav.util.types import NDArrayBoolType, NDArrayIntType
+from nav.support.image import draw_line_arrow
+from nav.support.types import NDArrayBoolType, NDArrayIntType
 
 
 TEXTINFO_LEFT = 'left'
@@ -155,6 +155,10 @@ class AnnotationTextInfo:
                 u = text_u - text_width_u // 2
             else:
                 raise ValueError(f'Unknown text position: {text_pos}')
+
+            # TODO This does not handle the case of the thing we're pointing at being off
+            # the offset image while the text is still visible. For example,
+            # inst_id = 'coiss'; URL = URL_CASSINI_ISS_STARS_02; offset = (-9, 28)
 
             # This mess with text_offset_u and text_offset_v is because textbbox and text
             # don't support the "lt" anchor for multi-line text, so we have to use "la",

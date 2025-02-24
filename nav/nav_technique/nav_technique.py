@@ -1,25 +1,23 @@
-from abc import ABC
+from abc import ABC, abstractmethod
 from typing import Optional
 
-from pdslogger import PdsLogger
+from nav.config import Config
+from nav.support.nav_base import NavBase
 
-from nav.config import Config, DEFAULT_CONFIG
 
-
-class NavTechnique(ABC):
+class NavTechnique(ABC, NavBase):
     def __init__(self,
                  *,
                  config: Optional[Config] = None,
                  logger_name: Optional[str] = None) -> None:
-        self._config = config or DEFAULT_CONFIG
-        self._logger = self._config.logger
-        if logger_name is not None:
-            self._logger = self._logger.get_logger(logger_name)
+        super().__init__(config=config, logger_name=logger_name)
+
+        self._offset: tuple[float, float] | None = None
 
     @property
-    def config(self) -> Config:
-        return self._config
+    def offset(self):
+        return self._offset
 
-    @property
-    def logger(self) -> PdsLogger:
-        return self._logger
+    @abstractmethod
+    def navigate(self) -> None:
+        ...

@@ -25,7 +25,7 @@ from imgdisp import ImageDisp
 # from nav.flux import (calibrate_iof_image_as_dn,
 #                       clean_sclass,
 #                       compute_dn_from_star)
-from nav.util.image import (#draw_circle,
+from nav.support.image import (#draw_circle,
                        draw_rect)
                     #    filter_sub_median)
 # import nav.plot3d
@@ -41,7 +41,7 @@ from typing import Any, Optional, cast
 
 import numpy as np
 
-import oops
+from oops import Observation
 import polymath
 from psfmodel.gaussian import GaussianPSF
 from starcat import (SCLASS_TO_SURFACE_TEMP,
@@ -57,8 +57,8 @@ from nav.annotation import (Annotation,
                             TEXTINFO_RIGHT,
                             TEXTINFO_BOTTOM,
                             TEXTINFO_TOP)
-from nav.util.flux import clean_sclass
-from nav.util.types import NDArrayFloatType
+from nav.support.flux import clean_sclass
+from nav.support.types import NDArrayFloatType
 
 from .nav_model import NavModel
 
@@ -69,7 +69,7 @@ _STAR_CATALOG_YBSC = YBSCStarCatalog()
 
 class NavModelStars(NavModel):
     def __init__(self,
-                 obs: oops.Observation,
+                 obs: Observation,
                  **kwargs: Any) -> None:
         """TBD
         """
@@ -518,7 +518,8 @@ class NavModelStars(NavModel):
 
             if star_str1 is None or star_str1 == "":
                 star_str1 = f'{star.unique_number:09d}'
-                star_str2 = f'{star.vmag:.3f} {clean_sclass(star.spectral_class)}'
+
+            star_str2 = f'{star.vmag:.3f} {clean_sclass(star.spectral_class)}'
 
             text_loc = []
 

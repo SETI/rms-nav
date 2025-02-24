@@ -10,18 +10,32 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from nav.annotation import Annotations
-import nav.inst.inst_cassini_iss as instcoiss
+from nav.inst import inst_id_to_class
 from nav.nav_model import NavModelStars
 import nav.obs.obs_snapshot as obs_snapshot
-from tests.config import URL_CASSINI_ISS_STARS_02
+from tests.config import (URL_CASSINI_ISS_STARS_01,
+                          URL_CASSINI_ISS_STARS_02,
+                          URL_GALILEO_SSI_STARS_01,
+                          URL_GALILEO_SSI_STARS_02,
+                          URL_VOYAGER_ISS_STARS_01,
+                          URL_VOYAGER_ISS_STARS_02)
 
-URL = URL_CASSINI_ISS_STARS_02
-OBS = instcoiss.InstCassiniISS.from_file(URL)
+offset = (0, 0)
+extfov_margin = (200, 100)
 
+# inst_id = 'coiss'; URL = URL_CASSINI_ISS_STARS_01
+inst_id = 'coiss'; URL = URL_CASSINI_ISS_STARS_02; offset = (-9, 28)
+
+# inst_id = 'gossi'; URL = URL_GALILEO_SSI_STARS_01; offset = (85, 391); extfov_margin = (200, 500)
+# inst_id = 'gossi'; URL = URL_GALILEO_SSI_STARS_02; offset = (0, 0) #; extfov_margin = (200, 500)
+
+# inst_id = 'vgiss'; URL = URL_VOYAGER_ISS_STARS_01; offset = (0, 0) ; extfov_margin = (1000, 1000)
+# inst_id = 'vgiss'; URL = URL_VOYAGER_ISS_STARS_02; offset = (1, 12) #; extfov_margin = (1000, 1000)
+
+inst_class = inst_id_to_class(inst_id)
+OBS = inst_class.from_file(URL)
 annotations = Annotations()
 
-offset = (-9, 28)
-extfov_margin = (200, 100)
 s = obs_snapshot.ObsSnapshot(OBS, extfov_margin_vu=extfov_margin)
 stars = NavModelStars(s)
 stars.create_model()

@@ -1,18 +1,19 @@
 from typing import Any, Optional
 
+from oops import Observation
 import oops.hosts.newhorizons.lorri
 from psfmodel import GaussianPSF, PSF
 
 from nav.config import Config, DEFAULT_CONFIG
 from nav.obs import ObsSnapshot
-from nav.util.types import PathLike
+from nav.support.types import PathLike
 
 from .inst import Inst
 
 
 class InstNewHorizonsLORRI(Inst):
     def __init__(self,
-                 obs: oops.Observation,
+                 obs: Observation,
                  **kwargs: Any) -> None:
         super().__init__(obs, logger_name='InstNewHorizonsLORRI', **kwargs)
 
@@ -21,6 +22,7 @@ class InstNewHorizonsLORRI(Inst):
                   config: Optional[Config] = None) -> ObsSnapshot:
         config = config or DEFAULT_CONFIG
         obs = oops.hosts.newhorizons.lorri.from_file(path)
+        # TODO Calibrate once oops.hosts is fixed.
         new_obs = ObsSnapshot(obs, config=config)
         new_obs.set_inst(InstNewHorizonsLORRI(new_obs, config=config))
 

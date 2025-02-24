@@ -1,18 +1,19 @@
 from typing import Any, Optional
 
+from oops import Observation
 import oops.hosts.galileo.ssi
 from psfmodel import GaussianPSF, PSF
 
 from nav.config import Config, DEFAULT_CONFIG
 from nav.obs import ObsSnapshot
-from nav.util.types import PathLike
+from nav.support.types import PathLike
 
 from .inst import Inst
 
 
 class InstGalileoSSI(Inst):
     def __init__(self,
-                 obs: oops.Observation,
+                 obs: Observation,
                  config: Config,
                  **kwargs: Any) -> None:
         super().__init__(obs, logger_name='InstGalileoSSI', **kwargs)

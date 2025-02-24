@@ -6,8 +6,8 @@ from oops.observation.snapshot import Snapshot
 from oops.meshgrid import Meshgrid
 from oops.backplane import Backplane
 
-from nav.util.image import pad_array
-from nav.util.types import DTypeLike, NDArrayFloatType, NDArrayBoolType
+from nav.support.image import pad_array
+from nav.support.types import DTypeLike, NDArrayFloatType, NDArrayBoolType
 
 from .obs import Obs
 

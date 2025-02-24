@@ -5,7 +5,7 @@ import scipy.ndimage as ndimage
 
 import matplotlib.pyplot as plt
 
-from nav.util.types import NDArrayType, NDArrayFloatType, NPType
+from nav.support.types import NDArrayType, NDArrayFloatType, NPType
 
 
 #==============================================================================

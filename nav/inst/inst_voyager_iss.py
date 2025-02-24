@@ -1,18 +1,19 @@
 from typing import Any, Optional
 
+from oops import Observation
 import oops.hosts.voyager.iss
 from psfmodel import GaussianPSF, PSF
 
 from nav.config import Config, DEFAULT_CONFIG
 from nav.obs import ObsSnapshot
-from nav.util.types import PathLike
+from nav.support.types import PathLike
 
 from .inst import Inst
 
 
 class InstVoyagerISS(Inst):
     def __init__(self,
-                 obs: oops.Observation,
+                 obs: Observation,
                  **kwargs: Any) -> None:
         super().__init__(obs, logger_name='InstVoyagerISS', **kwargs)
 
@@ -28,6 +29,8 @@ class InstVoyagerISS(Inst):
         # TODO Beware - Voyager 1 @ Saturn requires data to be multiplied by 3.345
         # because the Voyager 1 calibration pipeline always assumes the image
         # was taken at Jupiter.
+        # TODO Calibrate once oops.hosts is fixed.
+
         new_obs = ObsSnapshot(obs, config=config)
         new_obs.set_inst(InstVoyagerISS(new_obs, config=config))
 

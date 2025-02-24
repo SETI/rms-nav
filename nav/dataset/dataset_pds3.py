@@ -424,10 +424,9 @@ class DataSetPDS3(DataSet):
         volume_raw_dir = self._pds3_holdings_dir / 'volumes'
         index_dir = self._pds3_holdings_dir / 'metadata'
 
-        # When yielding via an index, we don't get to optimize searching for
-        # offset/png files. We just always look through the index files, and then
-        # check out the offset/png files later.
-        # This could definitely be improved. TODO
+        # TODO When yielding via an index, we don't get to optimize searching for
+        # offset/png files. We just always look through the index files, and then check
+        # out the offset/png files later. This could definitely be improved.
 
         # search_volume_path = None
         # search_suffix = None

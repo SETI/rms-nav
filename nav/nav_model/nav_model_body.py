@@ -4,7 +4,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.ndimage as ndimage
 
-import oops
+from oops import Meshgrid, Observation
+from oops.backplane import Backplane
 import polymath
 
 from nav.annotation import (Annotation,
@@ -14,10 +15,11 @@ from nav.annotation import (Annotation,
                             TEXTINFO_RIGHT_ARROW,
                             TEXTINFO_BOTTOM_ARROW,
                             TEXTINFO_TOP_ARROW)
-
-from nav.util.image import (filter_downsample,
+from nav.support.constants import HALFPI
+from nav.support.image import (filter_downsample,
                             shift_array)
-from nav.util.misc import now_dt, dt_delta_str
+from nav.support.misc import now_dt, dt_delta_str
+from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
 from .nav_model import NavModel
 
@@ -27,7 +29,7 @@ BODIES_POSITION_SLOP_FRAC = 0.05
 
 class NavModelBody(NavModel):
     def __init__(self,
-                 obs: oops.Observation,
+                 obs: Observation,
                  body_name: str,
                  *,
                  inventory: Optional[dict[str, Any]] = None,
@@ -245,10 +247,10 @@ class NavModelBody(NavModel):
         # For curvature later
         u_center = (u_min + u_max) // 2
         v_center = (v_min + v_max) // 2
-        width = u_max - u_min + 1
-        height = v_max - v_min + 1
-        curvature_threshold_frac = config.curvature_threshold_frac
-        curvature_threshold_pix = config.curvature_threshold_pixels
+        # width = u_max - u_min + 1
+        # height = v_max - v_min + 1
+        # curvature_threshold_frac = config.curvature_threshold_frac
+        # curvature_threshold_pix = config.curvature_threshold_pixels
         # width_threshold = max(width * curvature_threshold_frac,
         #                       curvature_threshold_pix)
         # height_threshold = max(height * curvature_threshold_frac,
@@ -301,19 +303,18 @@ class NavModelBody(NavModel):
                                               np.ceil(inventory['v_pixel_size']))), 1)
         restr_oversample_u = min(restr_oversample_u, config.oversample_maximum)
         restr_oversample_v = min(restr_oversample_v, config.oversample_maximum)
-        self._logger.debug('Oversampling by %d x %d',
-                           restr_oversample_u, restr_oversample_v)
+        self._logger.debug(f'Oversampling by {restr_oversample_u} x {restr_oversample_v}')
         restr_u_min = u_min + 1./(2*restr_oversample_u)
         restr_u_max = u_max + 1 - 1./(2*restr_oversample_u)
         restr_v_min = v_min + 1./(2*restr_oversample_v)
         restr_v_max = v_max + 1 - 1./(2*restr_oversample_v)
-        restr_o_meshgrid = oops.Meshgrid.for_fov(obs.fov,
-                                                 origin=(restr_u_min, restr_v_min),
-                                                 limit=(restr_u_max, restr_v_max),
-                                                 oversample=(restr_oversample_u,
-                                                             restr_oversample_v),
-                                                 swap=True)
-        restr_o_bp = oops.backplane.Backplane(obs, meshgrid=restr_o_meshgrid)
+        restr_o_meshgrid = Meshgrid.for_fov(obs.fov,
+                                            origin=(restr_u_min, restr_v_min),
+                                            limit=(restr_u_max, restr_v_max),
+                                            oversample=(restr_oversample_u,
+                                                        restr_oversample_v),
+                                            swap=True)
+        restr_o_bp = Backplane(obs, meshgrid=restr_o_meshgrid)
         restr_o_incidence_mvals = restr_o_bp.incidence_angle(body_name).mvals
         restr_incidence_mvals = filter_downsample(restr_o_incidence_mvals,
                                                   restr_oversample_v,
@@ -434,7 +435,7 @@ class NavModelBody(NavModel):
 
         restr_model = None
         if (not restr_body_mask_valid.any() or
-            restr_incidence[restr_body_mask_valid].min() >= oops.HALFPI):
+            restr_incidence[restr_body_mask_valid].min() >= HALFPI):
             self._logger.debug('Looking only at back side - making a faint glow')
             # Make a slight glow even on the back side
             restr_model = np.zeros(restr_body_mask_valid.shape)
@@ -483,20 +484,28 @@ class NavModelBody(NavModel):
         #             self._logger.info('Resolution %.2f is good enough for a sharp edge',
         #                         center_resolution)
 
+        assert restr_model is not None
+
         # Take the full-resolution object and put it back in the right place in a
         # full-size image
-        model = obs.make_extfov_zeros()
+        model_img = obs.make_extfov_zeros()
+        self._range = obs.make_extfov_zeros()
         limb_mask = obs.make_extfov_false()
         body_mask = obs.make_extfov_false()
-        if restr_model is not None:
-            model[v_min+obs.extfov_margin_v:v_max+obs.extfov_margin_v+1,
+        model_img[v_min+obs.extfov_margin_v:v_max+obs.extfov_margin_v+1,
                   u_min+obs.extfov_margin_u:u_max+obs.extfov_margin_u+1] = restr_model
-            limb_mask[v_min+obs.extfov_margin_v:v_max+obs.extfov_margin_v+1,
-                      u_min+obs.extfov_margin_u:u_max+obs.extfov_margin_u+1] = \
-                restr_limb_mask
-            body_mask[v_min+obs.extfov_margin_v:v_max+obs.extfov_margin_v+1,
-                      u_min+obs.extfov_margin_u:u_max+obs.extfov_margin_u+1] = \
-                restr_body_mask_valid
+        limb_mask[v_min+obs.extfov_margin_v:v_max+obs.extfov_margin_v+1,
+                  u_min+obs.extfov_margin_u:u_max+obs.extfov_margin_u+1] = \
+            restr_limb_mask
+        body_mask[v_min+obs.extfov_margin_v:v_max+obs.extfov_margin_v+1,
+                  u_min+obs.extfov_margin_u:u_max+obs.extfov_margin_u+1] = \
+            restr_body_mask_valid
+        # This is much faster than calculating the range at each pixel and we never
+        # need to know the precise range at that level of detail
+        self._range[v_min+obs.extfov_margin_v:v_max+obs.extfov_margin_v+1,
+                    u_min+obs.extfov_margin_u:u_max+obs.extfov_margin_u+1] = \
+                        inventory['range'] * restr_body_mask_valid
+        self._range[self._range == 0] = 1e308
 
         # ring_radius = obs.ext_bp.ring_radius('JUPITER:RING', rmax=200000)
         # ring_radius_mask = ~ring_radius.expand_mask().mask
@@ -509,6 +518,24 @@ class NavModelBody(NavModel):
         #
         # Figure out all the location where we might want to label the body
         #
+
+        annotations = self._create_annotations(u_center, v_center, model_img,
+                                               limb_mask, body_mask)
+
+        self._model_img = model_img
+        self._model_mask = body_mask
+        self._annotations = annotations
+
+    def _create_annotations(self,
+                            u_center: int,
+                            v_center: int,
+                            model: NDArrayFloatType,
+                            limb_mask: NDArrayBoolType,
+                            body_mask: NDArrayBoolType) -> Annotations:
+
+        obs = self._obs
+        body_name = self._body_name
+        config = self._config.bodies
 
         text_loc: list[tuple[str, int, int]] = []
         v_center_extfov = v_center + obs.extfov_margin_v
@@ -631,6 +658,4 @@ class NavModelBody(NavModel):
         annotations = Annotations()
         annotations.add_annotations(annotation)
 
-        self._model = model
-        self._model_mask = body_mask
-        self._annotations = annotations
+        return annotations

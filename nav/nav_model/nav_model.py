@@ -4,38 +4,28 @@ from typing import Any, Optional
 from pdslogger import PdsLogger
 
 from nav.annotation import Annotations
-from nav.config import Config, DEFAULT_CONFIG
+from nav.config import Config
 from nav.inst import Inst
 from nav.obs import ObsSnapshot
-from nav.util.types import NDArrayFloatType, NDArrayBoolType
+from nav.support.nav_base import NavBase
+from nav.support.types import NDArrayFloatType, NDArrayBoolType
 
 
-class NavModel(ABC):
+class NavModel(ABC, NavBase):
     def __init__(self,
                  obs: ObsSnapshot,
                  *,
                  config: Optional[Config] = None,
                  logger_name: Optional[str] = None) -> None:
 
-        self._config = config or DEFAULT_CONFIG
+        super().__init__(config=config, logger_name=logger_name)
+
         self._obs = obs
-
-        self._logger = self._config.logger
-        if logger_name is not None:
-            self._logger = self._logger.get_logger(logger_name)
-
-        self._model: NDArrayFloatType | None = None
+        self._model_img: NDArrayFloatType | None = None
         self._model_mask: NDArrayBoolType | None = None
         self._metadata: dict[str, Any] = {}
+        self._range: NDArrayFloatType | None = None
         self._annotations: Annotations | None = None
-
-    @property
-    def config(self) -> Config:
-        return self._config
-
-    @property
-    def logger(self) -> PdsLogger:
-        return self._logger
 
     @property
     def obs(self) -> ObsSnapshot:
@@ -46,8 +36,8 @@ class NavModel(ABC):
         return self.obs.inst
 
     @property
-    def model(self) -> NDArrayFloatType | None:
-        return self._model
+    def model_img(self) -> NDArrayFloatType | None:
+        return self._model_img
 
     @property
     def model_mask(self) -> NDArrayBoolType | None:
@@ -56,6 +46,10 @@ class NavModel(ABC):
     @property
     def metadata(self) -> dict[str, Any]:
         return self._metadata
+
+    @property
+    def range(self) -> NDArrayFloatType | None:
+        return self._range
 
     @property
     def annotations(self) -> Annotations | None:
