@@ -35,7 +35,6 @@ class InstVoyagerISS(Inst):
 
         new_obs = ObsSnapshot(obs, config=config, extfov_margin_vu=extfov_margin_vu)
         new_obs.set_inst(InstVoyagerISS(new_obs, config=config))
-        new_obs.basename = FCPath(path).name  # TODO This should be done in the oops.host
         return new_obs
 
     def star_psf(self) -> PSF:

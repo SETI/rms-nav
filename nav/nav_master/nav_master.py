@@ -13,7 +13,7 @@ from nav.nav_model import (NavModel,
                            NavModelRings,
                            NavModelStars,
                            NavModelTitan)
-from nav.nav_technique import (NavTechniqueCorrelation,
+from nav.nav_technique import (NavTechniqueAllModels,
                                NavTechniqueStars,
                                NavTechniqueTitan)
 from nav.support.nav_base import NavBase
@@ -31,11 +31,12 @@ class NavMaster(NavBase):
         super().__init__(config=config, logger_name=logger_name)
 
         self._obs = obs
-        self._offset: tuple[float, float] | None = None
-        self._star_models: list[NavModelStars] = []
-        self._body_models: list[NavModelBody] = []
-        self._ring_models: list[NavModelRings] = []
-        self._titan_models: list[NavModelTitan] = []
+        self._final_offset: tuple[float, float] | None = None
+        self._offsets: dict[str, Any] = {}  # TODO Type
+        self._star_models: list[NavModelStars] | None = None
+        self._body_models: list[NavModelBody] | None = None
+        self._ring_models: list[NavModelRings] | None = None
+        self._titan_models: list[NavModelTitan] | None = None
 
         self._combined_model: NDArrayFloatType | None = None
 
@@ -44,13 +45,46 @@ class NavMaster(NavBase):
         return self._obs
 
     @property
+    def final_offset(self) -> tuple[float, float] | None:
+        return self._final_offset
+
+    @property
+    def star_models(self) -> list[NavModelStars]:
+        self.compute_star_models()
+        assert self._star_models is not None
+        return self._star_models
+
+    @property
+    def body_models(self) -> list[NavModelBody]:
+        self.compute_body_models()
+        assert self._body_models is not None
+        return self._body_models
+
+    @property
+    def ring_models(self) -> list[NavModelRings]:
+        self.compute_ring_models()
+        assert self._ring_models is not None
+        return self._ring_models
+
+    @property
+    def titan_models(self) -> list[NavModelTitan]:
+        self.compute_titan_models()
+        assert self._titan_models is not None
+        return self._titan_models
+
+    @property
     def all_models(self) -> Sequence[NavModel]:
-        return (self._star_models + self._body_models +
-                self._ring_models + self._titan_models)
+        return (self.star_models + self.body_models +
+                self.ring_models + self.titan_models)
+
+    @property
+    def combined_model(self) -> NDArrayFloatType | None:
+        self._create_combined_model()
+        return self._combined_model
 
     def compute_star_models(self) -> None:
 
-        if self._star_models:
+        if self._star_models is not None:
             return
 
         stars_model = NavModelStars(self._obs)
@@ -62,7 +96,7 @@ class NavMaster(NavBase):
 
     def compute_body_models(self) -> None:
 
-        if self._body_models:
+        if self._body_models is not None:
             return
 
         obs = self._obs
@@ -91,6 +125,8 @@ class NavMaster(NavBase):
         logger.info('Large body inventory by increasing range: %s',
                     ', '.join([x[0] for x in large_bodies_by_range]))
 
+        self._body_models = []
+
         for body, inventory in large_bodies_by_range:
             body_model = NavModelBody(obs, body,
                                       inventory=inventory,
@@ -100,16 +136,16 @@ class NavMaster(NavBase):
 
     def compute_ring_models(self) -> None:
 
-        if self._ring_models:
+        if self._ring_models is not None:
             return
-
+        self._ring_models = []
         # TODO Ring models
 
     def compute_titan_models(self) -> None:
 
-        if self._titan_models:
+        if self._titan_models is not None:
             return
-
+        self._titan_models = []
         # TODO Titan models
 
     def compute_all_models(self) -> None:
@@ -119,7 +155,7 @@ class NavMaster(NavBase):
         self.compute_body_models()
         self.compute_titan_models()
 
-    def _create_combined_model(self) -> NDArrayFloatType | None:
+    def _create_combined_model(self):
 
         if self._combined_model is not None:
             return self._combined_model
@@ -143,7 +179,8 @@ class NavMaster(NavBase):
             ranges.append(range)
 
         if len(model_imgs) == 0:
-            return None
+            self._combined_model = None
+            return
 
         model_imgs_arr = np.array(model_imgs)
         ranges_arr = np.array(ranges)
@@ -152,15 +189,22 @@ class NavMaster(NavBase):
         final_model = model_imgs_arr[min_indices, row_idx, col_idx]
 
         self._combined_model = cast(NDArrayFloatType, final_model)
-        return self._combined_model
 
     def navigate(self) -> None:
         self.compute_all_models()
-        nav_corr = NavTechniqueCorrelation(self)
-        nav_corr.navigate()
 
-        self._offset = nav_corr.offset
+        nav_stars = NavTechniqueStars(self)
+        nav_stars.navigate()
+        self._offsets['stars'] = nav_stars.offset
 
+        nav_all = NavTechniqueAllModels(self)
+        nav_all.navigate()
+        self._offsets['all_models'] = nav_all.offset
+
+        if nav_stars.offset is not None:  # TODO More logic here
+            self._offset = nav_stars.offset
+        else:
+            self._offset = nav_all.offset
 
     def create_overlay(self) -> None:
 

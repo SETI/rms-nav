@@ -141,7 +141,7 @@ class NavModelBody(NavModel):
         self._metadata = metadata
         self._annotations = None
 
-        with self._logger.open(f'Create body model for {self._body_name}'):
+        with self._logger.open(f'CREATE BODY MODEL FOR: {self._body_name}'):
             self._create_model(always_create_model=always_create_model,
                                never_create_model=never_create_model,
                                create_overlay=create_overlay)

@@ -67,9 +67,9 @@ class Config:
     @property
     def logger(self) -> PdsLogger:
         if self._logger is None:
-            self._logger = PdsLogger('nav', lognames=False)
+            self._logger = PdsLogger('nav', lognames=False, digits=3)
             self._logger.add_handler(STDOUT_HANDLER)
-            self._logger.info('Starting')
+            self._logger.info('*** START OF LOG ***')
         return self._logger
 
     @property

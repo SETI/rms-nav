@@ -357,8 +357,8 @@ class NavModelStars(NavModel):
                     for j in range(len(full_star_list)):
                         if i == j:
                             continue
-                        if (abs(full_star_list[i].u - full_star_list[j].u) < 1 and
-                            abs(full_star_list[i].v - full_star_list[j].v) < 1 and
+                        if (abs(full_star_list[i].v - full_star_list[j].v) < 1 and
+                            abs(full_star_list[i].u - full_star_list[j].u) < 1 and
                             full_star_list[i].vmag < full_star_list[j].vmag):
                             good_star = False
                             self._logger.debug('Removing overlapping star:')
@@ -424,7 +424,7 @@ class NavModelStars(NavModel):
 
         metadata['start_time'] = time.time()
 
-        with self._logger.open(f'Create stars model'):
+        with self._logger.open(f'CREATE STARS MODEL'):
             ret = self._create_model(metadata, ra_dec_predicted, ignore_conflicts)
 
         metadata['end_time'] = time.time()
