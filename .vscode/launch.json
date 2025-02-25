@@ -12,6 +12,15 @@
             "program": "experiments/nav_model_body1.py",
             "args": [],
             "console": "integratedTerminal"
+        },
+        {
+            "name": "star_distortion",
+            "type": "debugpy",
+            "request": "launch",
+            "cwd": "${workspaceFolder}",
+            "program": "experiments/star_distortion.py",
+            "args": [],
+            "console": "integratedTerminal"
         }
         // {
         //     "results_dir": "COISS_2021/1521798868_1521893025",

@@ -279,6 +279,7 @@ stars:
   max_movement_steps: 50
   max_smear: 100
   default_star_class: G0
+  body_conflict_margin: 5
   # min_brightness_guaranteed_vis: 200.0
   # ?   - min_detectable_dn
   #     - NAC

@@ -14,19 +14,20 @@ from .inst import Inst
 class InstGalileoSSI(Inst):
     def __init__(self,
                  obs: Observation,
-                 config: Config,
                  **kwargs: Any) -> None:
         super().__init__(obs, logger_name='InstGalileoSSI', **kwargs)
 
     @staticmethod
     def from_file(path: PathLike,
-                  config: Optional[Config] = None) -> ObsSnapshot:
+                  config: Optional[Config] = None,
+                  extfov_margin_vu: tuple[int, int] | None = None) -> ObsSnapshot:
+
         config = config or DEFAULT_CONFIG
         obs = oops.hosts.galileo.ssi.from_file(path)
-        new_obs = ObsSnapshot(obs, config=config)
+        new_obs = ObsSnapshot(obs, config=config, extfov_margin_vu=extfov_margin_vu)
         new_obs.set_inst(InstGalileoSSI(new_obs, config=config))
 
         return new_obs
 
     def star_psf(self) -> PSF:
-        return GaussianPSF(sigma=1.)
+        return GaussianPSF(sigma=3.)  # TODO

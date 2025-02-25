@@ -7,5 +7,5 @@ class NavTechniqueStars(NavTechnique):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(logger_name='NavTechniqueStars', **kwargs)
 
-    def navigate(self):
+    def navigate(self) -> None:
         pass

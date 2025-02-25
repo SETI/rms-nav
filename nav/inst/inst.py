@@ -22,7 +22,10 @@ class Inst(ABC, NavBase):
 
     @staticmethod
     @abstractmethod
-    def from_file(path: PathLike) -> 'Inst':
+    def from_file(path: PathLike,
+                  *,
+                  config: Optional[Config] = None,
+                  extfov_margin_vu: tuple[int, int] | None) -> 'Inst':
         ...
 
     @property

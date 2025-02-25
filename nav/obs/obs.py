@@ -28,9 +28,9 @@ class Obs(ABC):
     def logger(self) -> PdsLogger:
         return self._logger
 
-    def set_inst(self, inst: Inst) -> None:
+    def set_inst(self, inst: 'Inst') -> None:
         self._inst = inst
 
     @property
-    def inst(self) -> Inst:
+    def inst(self) -> 'Inst':
         return cast(Inst, self._inst)

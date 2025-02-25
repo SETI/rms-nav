@@ -11,6 +11,7 @@ import polymath
 from nav.annotation import (Annotation,
                             Annotations,
                             AnnotationTextInfo,
+                            TextLocInfo,
                             TEXTINFO_LEFT_ARROW,
                             TEXTINFO_RIGHT_ARROW,
                             TEXTINFO_BOTTOM_ARROW,
@@ -537,7 +538,7 @@ class NavModelBody(NavModel):
         body_name = self._body_name
         config = self._config.bodies
 
-        text_loc: list[tuple[str, int, int]] = []
+        text_loc: list[TextLocInfo] = []
         v_center_extfov = v_center + obs.extfov_margin_v
         u_center_extfov = u_center + obs.extfov_margin_u
 
@@ -572,17 +573,17 @@ class NavModelBody(NavModel):
                     angle = np.rad2deg(
                         np.arctan2(v-v_center_extfov, u-u_center_extfov)) % 360
                     if 135 < angle < 225:  # Left side
-                        text_loc.append((TEXTINFO_LEFT_ARROW,
-                                         v,
-                                         u - config.label_horiz_gap))
+                        text_loc.append(TextLocInfo(TEXTINFO_LEFT_ARROW,
+                                                    v,
+                                                    u - config.label_horiz_gap))
                     elif angle >= 225:  # Top side
-                        text_loc.append((TEXTINFO_TOP_ARROW,
-                                         v - config.label_vert_gap,
-                                         u))
+                        text_loc.append(TextLocInfo(TEXTINFO_TOP_ARROW,
+                                                    v - config.label_vert_gap,
+                                                    u))
                     else:  # Bottom side
-                        text_loc.append((TEXTINFO_BOTTOM_ARROW,
-                                         v + config.label_vert_gap,
-                                         u))
+                        text_loc.append(TextLocInfo(TEXTINFO_BOTTOM_ARROW,
+                                                    v + config.label_vert_gap,
+                                                    u))
 
                 # Right side
                 u = body_mask.shape[1] - int(np.argmax(body_mask[v, ::-1])) - 1
@@ -590,27 +591,27 @@ class NavModelBody(NavModel):
                     angle = np.rad2deg(
                         np.arctan2(v-v_center_extfov, u-u_center_extfov)) % 360
                     if angle > 315 or angle < 45:  # Right side
-                        text_loc.append((TEXTINFO_RIGHT_ARROW,
-                                         v,
-                                         u + config.label_horiz_gap))
+                        text_loc.append(TextLocInfo(TEXTINFO_RIGHT_ARROW,
+                                                    v,
+                                                    u + config.label_horiz_gap))
                     elif angle >= 225:  # Top side
-                        text_loc.append((TEXTINFO_TOP_ARROW,
-                                         v - config.label_vert_gap,
-                                         u))
+                        text_loc.append(TextLocInfo(TEXTINFO_TOP_ARROW,
+                                                    v - config.label_vert_gap,
+                                                    u))
                     else:  # Bottom side
-                        text_loc.append((TEXTINFO_BOTTOM_ARROW,
-                                         v + config.label_vert_gap,
-                                         u))
+                        text_loc.append(TextLocInfo(TEXTINFO_BOTTOM_ARROW,
+                                                    v + config.label_vert_gap,
+                                                    u))
 
                 if orig_dist == 0:
                     # Add in the very top and very bottom here to give them
                     # priority
-                    text_loc.append((TEXTINFO_TOP_ARROW,
-                                     body_mask_v_min - config.label_vert_gap,
-                                     body_mask_u_ctr))
-                    text_loc.append((TEXTINFO_BOTTOM_ARROW,
-                                     body_mask_v_max + config.label_vert_gap,
-                                     body_mask_u_ctr))
+                    text_loc.append(TextLocInfo(TEXTINFO_TOP_ARROW,
+                                                body_mask_v_min - config.label_vert_gap,
+                                                body_mask_u_ctr))
+                    text_loc.append(TextLocInfo(TEXTINFO_BOTTOM_ARROW,
+                                                body_mask_v_max + config.label_vert_gap,
+                                                body_mask_u_ctr))
                     break  # No need to do +/- with zero
 
         # Finally, it's possible none of the above worked, especially it the body is
@@ -635,13 +636,14 @@ class NavModelBody(NavModel):
                         if not body_mask[v, u]:
                             continue
                         if u < model.shape[1] // 2:
-                            text_loc.append((TEXTINFO_LEFT_ARROW, v, u))
+                            text_loc.append(TextLocInfo(TEXTINFO_LEFT_ARROW, v, u))
                         else:
-                            text_loc.append((TEXTINFO_RIGHT_ARROW, v, u))
+                            text_loc.append(TextLocInfo(TEXTINFO_RIGHT_ARROW, v, u))
                 if v_orig_dist == 0:
                     break
 
         text_info = AnnotationTextInfo(body_name, text_loc=text_loc,
+                                       ref_vu=None,
                                        font=config.label_font,
                                        font_size=config.label_font_size,
                                        color=config.label_font_color)
@@ -651,7 +653,7 @@ class NavModelBody(NavModel):
         text_avoid_mask = ndimage.maximum_filter(body_mask,
                                                  config.label_mask_enlarge)
 
-        annotation = Annotation(limb_mask, config.label_limb_color,
+        annotation = Annotation(obs, limb_mask, config.label_limb_color,
                                 avoid_mask=text_avoid_mask,
                                 text_info=text_info, config=self._config)
 

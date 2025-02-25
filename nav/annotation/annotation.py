@@ -1,6 +1,7 @@
 from typing import Optional
 
 from nav.config import Config, DEFAULT_CONFIG
+from nav.obs import ObsSnapshot
 from nav.support.image import shift_array
 from nav.support.types import NDArrayBoolType
 
@@ -9,6 +10,7 @@ from .annotation_text_info import AnnotationTextInfo
 
 class Annotation:
     def __init__(self,
+                 obs: ObsSnapshot,
                  overlay: NDArrayBoolType,
                  overlay_color: tuple[int, int, int],
                  *,
@@ -19,6 +21,7 @@ class Annotation:
                  config: Optional[Config] = None) -> None:
 
         self._config = config or DEFAULT_CONFIG
+        self._obs = obs
         self._overlay = overlay
         self._overlay_color = overlay_color
         self._avoid_mask = avoid_mask
@@ -37,25 +40,39 @@ class Annotation:
         else:
             self._text_info = [text_info]
 
+        if overlay.shape != obs.extdata_shape_vu:
+            raise ValueError(
+                f'Annotation overlay shape ({overlay.shape}) does not agree with Obs '
+                f'shape ({obs.extdata_shape_vu})')
+
+
     @property
     def config(self) -> Config:
         return self._config
+
+    @property
+    def obs(self) -> ObsSnapshot:
+        return self._obs
 
     @property
     def overlay(self) -> NDArrayBoolType:
         return self._overlay
 
     @property
-    def text_info_list(self) -> list[AnnotationTextInfo]:
-        return self._text_info
+    def overlay_color(self) -> tuple[int, int, int]:
+        return self._overlay_color
 
     @property
     def avoid_mask(self) -> NDArrayBoolType | None:
         return self._avoid_mask
 
+    @property
+    def text_info_list(self) -> list[AnnotationTextInfo]:
+        return self._text_info
+
     def add_text_info(self,
                       text_info: (AnnotationTextInfo |
-                                  list[AnnotationTextInfo])) -> None:
+                                   list[AnnotationTextInfo])) -> None:
         if not isinstance(text_info, (list, tuple)):
             text_info = [text_info]
         self._text_info.extend(text_info)

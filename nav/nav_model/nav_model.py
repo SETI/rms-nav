@@ -48,7 +48,7 @@ class NavModel(ABC, NavBase):
         return self._metadata
 
     @property
-    def range(self) -> NDArrayFloatType | None:
+    def range(self) -> NDArrayFloatType | float | None:
         return self._range
 
     @property

@@ -19,14 +19,15 @@ class InstNewHorizonsLORRI(Inst):
 
     @staticmethod
     def from_file(path: PathLike,
-                  config: Optional[Config] = None) -> ObsSnapshot:
+                  config: Optional[Config] = None,
+                  extfov_margin_vu: tuple[int, int] | None = None) -> ObsSnapshot:
         config = config or DEFAULT_CONFIG
         obs = oops.hosts.newhorizons.lorri.from_file(path)
         # TODO Calibrate once oops.hosts is fixed.
-        new_obs = ObsSnapshot(obs, config=config)
+        new_obs = ObsSnapshot(obs, config=config, extfov_margin_vu=extfov_margin_vu)
         new_obs.set_inst(InstNewHorizonsLORRI(new_obs, config=config))
 
         return new_obs
 
     def star_psf(self) -> PSF:
-        return GaussianPSF(sigma=1.)
+        return GaussianPSF(sigma=1.)  # TODO

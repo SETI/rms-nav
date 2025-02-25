@@ -41,7 +41,8 @@ from typing import Any, Optional, cast
 
 import numpy as np
 
-from oops import Observation
+from oops import Event, Meshgrid, Observation
+from oops.backplane import Backplane
 import polymath
 from psfmodel.gaussian import GaussianPSF
 from starcat import (SCLASS_TO_SURFACE_TEMP,
@@ -77,15 +78,15 @@ class NavModelStars(NavModel):
         super().__init__(obs, logger_name='NavModelStars', **kwargs)
 
         self._obs = obs
-
+        self._conflict_body_list = None
 
     def _aberrate_star(self, star: Star) -> None:
         """Update the RA,DEC position of a star with stellar aberration."""
 
         obs = self._obs
-        event = oops.Event(obs.midtime, (polymath.Vector3.ZERO,
-                                         polymath.Vector3.ZERO),
-                           obs.path, obs.frame)
+        event = Event(obs.midtime, (polymath.Vector3.ZERO,
+                                    polymath.Vector3.ZERO),
+                      obs.path, obs.frame)
 
         event.neg_arr_j2000 = polymath.Vector3.from_ra_dec_length(
             star.ra, star.dec, 1., recursive=False)
@@ -97,7 +98,7 @@ class NavModelStars(NavModel):
     @staticmethod
     def _star_short_info(star: Star) -> str:
         return ('Star %9d U %8.3f~%7.3f V %8.3f~%7.3f MAG %6.3f BMAG %6.3f '
-                'VMAG %6.3f SCLASS %3s TEMP %6d DN %7.2f') % (
+                'VMAG %6.3f SCLASS %3s TEMP %6d DN %7.2f CONFLICT %s') % (
                     star.unique_number,
                     star.u, abs(star.move_u),
                     star.v, abs(star.move_v),
@@ -106,7 +107,8 @@ class NavModelStars(NavModel):
                     0 if star.johnson_mag_v is None else star.johnson_mag_v,
                     clean_sclass(star.spectral_class),
                     0 if star.temperature is None else star.temperature,
-                    0) # XXX star.dn)
+                    0,
+                    star.conflicts) # XXX star.dn)
 
     # def _compute_dimmest_visible_star_vmag(obs, stars_config):
     #     """Compute the VMAG of the dimmest star likely visible."""
@@ -210,6 +212,7 @@ class NavModelStars(NavModel):
                     star.johnson_mag_b = (star.vmag +
                         SCLASS_TO_B_MINUS_V[clean_sclass(star.spectral_class)] / 2.)
                     star.johnson_mag_faked = True
+            star.dn = 2 ** -(star.vmag-4)  # TODO
             # star.dn = compute_dn_from_star(obs, star)
             # if star.dn < min_dn:
             #     discard_dn += 1
@@ -257,8 +260,24 @@ class NavModelStars(NavModel):
                                               u_list, v_list,
                                               u1_list, v1_list,
                                               u2_list, v2_list):
-            if (u < obs.extfov_u_min or u > obs.extfov_u_max or
-                v < obs.extfov_v_min or v > obs.extfov_v_max):
+#     # Check for off the edge
+#     psf_size = max(_find_photometry_boxsize(star, stars_config),
+#                    _find_psf_boxsize(star, stars_config))
+#     psf_size_half_u = int(psf_size + np.round(abs(star.move_u))) // 2
+#     psf_size_half_v = int(psf_size + np.round(abs(star.move_v))) // 2
+
+#     if (star.u+offset[0] < psf_size_half_u or
+#         star.u+offset[0] >= obs.data_shape_xy[0]-psf_size_half_u or
+#         star.v+offset[1] < psf_size_half_v or
+#         star.v+offset[1] >= obs.data_shape_xy[1]-psf_size_half_v):
+#         logger.debug("Star %9d U %8.3f V %8.3f is off the edge",
+#                      star.unique_number, star.u, star.v)
+#         star.conflicts = "EDGE"
+#         return True
+
+
+            if (v < obs.extfov_v_min or v > obs.extfov_v_max or
+                u < obs.extfov_u_min or u > obs.extfov_u_max):
                 discard_uv += 1
                 continue
 
@@ -340,7 +359,7 @@ class NavModelStars(NavModel):
                             continue
                         if (abs(full_star_list[i].u - full_star_list[j].u) < 1 and
                             abs(full_star_list[i].v - full_star_list[j].v) < 1 and
-                            full_star_list[i].vmag > full_star_list[j].vmag):
+                            full_star_list[i].vmag < full_star_list[j].vmag):
                             good_star = False
                             self._logger.debug('Removing overlapping star:')
                             self._logger.debug('  %s; keeping ',
@@ -365,6 +384,11 @@ class NavModelStars(NavModel):
         full_star_list.sort(key=lambda x: x.vmag, reverse=False)
 
         full_star_list = full_star_list[:max_stars]
+
+        for star in full_star_list:
+            # Mark all the bodies (or rings) that are conflicting
+            rings_can_conflict = False  # TODO
+            self._mark_conflicts_obj(star, rings_can_conflict)
 
         self._logger.info('Star list (total %d):', len(full_star_list))
         for star in full_star_list:
@@ -430,6 +454,8 @@ class NavModelStars(NavModel):
         star_list = self.stars_list_for_obs(radec_movement)
 
         for star in star_list:
+            if star.conflicts:
+                continue
             u_idx = star.u + self._obs.extfov_margin_u
             v_idx = star.v + self._obs.extfov_margin_v
             u_int = int(u_idx)
@@ -450,9 +476,8 @@ class NavModelStars(NavModel):
             # sigma = nav.config.PSF_SIGMA[obs.clean_detector]
             # if star.dn >= stars_config["psf_gain"][0]:
             #     sigma *= stars_config["psf_gain"][1]
-            sigma = 1
 
-            gausspsf = GaussianPSF(sigma=sigma)
+            psf = self.obs.inst.star_psf()
 
             if (u_int < psf_size_half_u or
                 u_int >= model.shape[1]-psf_size_half_u or
@@ -460,11 +485,11 @@ class NavModelStars(NavModel):
                 v_int >= model.shape[0]-psf_size_half_v):
                 continue
 
-            psf = gausspsf.eval_rect((psf_size_half_v*2+1, psf_size_half_u*2+1),
-                                     offset=(v_frac, u_frac),
-                                     scale=1, # XXX scale=star.dn)
-                                     movement=(star.move_v, star.move_u),
-                                     movement_granularity=move_gran)
+            psf = psf.eval_rect((psf_size_half_v*2+1, psf_size_half_u*2+1),
+                                 offset=(v_frac, u_frac),
+                                 scale=star.dn,
+                                 movement=(star.move_v, star.move_u),
+                                 movement_granularity=move_gran)
 
             model[v_int-psf_size_half_v:v_int+psf_size_half_v+1,
                   u_int-psf_size_half_u:u_int+psf_size_half_u+1] += psf
@@ -483,6 +508,9 @@ class NavModelStars(NavModel):
         star_overlay = self._obs.make_extfov_false()
 
         for star in star_list:
+            if star.conflicts:
+                continue
+
             # Should NOT be rounded for plotting, since all of coord
             # X to X+0.9999 is the same pixel
             u = int(star.u + self._obs.extfov_margin_u)
@@ -531,21 +559,23 @@ class NavModelStars(NavModel):
             text_loc.append((TEXTINFO_RIGHT, v, u + label_margin))
 
             text_info = AnnotationTextInfo(f'{star_str1}\n{star_str2}',
+                                           ref_vu=(v, u),
                                            text_loc=text_loc,
                                            font=config.label_font,
                                            font_size=config.label_font_size,
                                            color=config.label_font_color)
             text_info_list.append(text_info)
 
-        annotation = Annotation(star_overlay, config.label_star_color,
+        annotation = Annotation(self.obs, star_overlay, config.label_star_color,
                                 thicken_overlay=0,
                                 avoid_mask=star_avoid_mask,
                                 text_info=text_info_list)
         annotations = Annotations()
         annotations.add_annotations(annotation)
 
-        self._model = model
+        self._model_img = model
         self._model_mask = None
+        self._range = 1e308
         self._annotations = annotations
 
     def stars_make_good_bad_overlay(obs, star_list, offset,
@@ -1053,84 +1083,64 @@ class NavModelStars(NavModel):
 #
 #===============================================================================
 
-# def _stars_mark_conflicts_edge(obs, star, offset, stars_config):
-#     """Check if a star conflicts runs off the edge of the FOV.
+    def _mark_conflicts_obj(self,
+                            star: Star,
+                            rings_can_conflict: bool) -> None:
+        """Check if a star conflicts with known bodies or rings.
 
-#     Sets star.conflicts to a string describing why the Star conflicted.
+        Sets star.conflicts to a string describing why the Star conflicted.
 
-#     Returns True if the star conflicted, False if the star didn't.
-#     """
-#     logger = logging.getLogger(_LOGGING_NAME+"._stars_mark_conflicts_edge")
+        Returns True if the star conflicted, False if the star didn't.
+        """
 
-#     # Check for off the edge
-#     psf_size = max(_find_photometry_boxsize(star, stars_config),
-#                    _find_psf_boxsize(star, stars_config))
-#     psf_size_half_u = int(psf_size + np.round(abs(star.move_u))) // 2
-#     psf_size_half_v = int(psf_size + np.round(abs(star.move_v))) // 2
+        obs = self._obs
+        config = self._config
 
-#     if (star.u+offset[0] < psf_size_half_u or
-#         star.u+offset[0] >= obs.data_shape_xy[0]-psf_size_half_u or
-#         star.v+offset[1] < psf_size_half_v or
-#         star.v+offset[1] >= obs.data_shape_xy[1]-psf_size_half_v):
-#         logger.debug("Star %9d U %8.3f V %8.3f is off the edge",
-#                      star.unique_number, star.u, star.v)
-#         star.conflicts = "EDGE"
-#         return True
+        if self._conflict_body_list is None:
+            self._conflict_body_list = ([obs.closest_planet] +
+                                        config.satellites(obs.closest_planet))
 
-#     return False
+        # Create a Meshgrid for the area around the star. Give slop on each side - we
+        # don't want a star to even be close to a large object.
+        star_slop = config.stars.body_conflict_margin
+        meshgrid = Meshgrid.for_fov(obs.fov,
+                                    origin=(star.u-star_slop,
+                                            star.v-star_slop),
+                                    limit =(star.u+star_slop,
+                                            star.v+star_slop))
+        backplane = Backplane(obs, meshgrid)
 
-# def _stars_mark_conflicts_obj(obs, star, rings_can_conflict, stars_config):
-#     """Check if a star conflicts with known bodies or rings.
+        # Check for planet and moons
+        for body_name in self._conflict_body_list:
+            intercepted = backplane.where_intercepted(body_name)
+            if intercepted.any():
+                self.logger.debug(f'Star {star.unique_number:9d} U {star.u:8.3f} V '
+                                  f'{star.v:8.3f} conflicts with {body_name}')
+                star.conflicts = f'BODY: {body_name}'
+                return True
 
-#     Sets star.conflicts to a string describing why the Star conflicted.
+        # Check for rings
+        # if rings_can_conflict:
+        #     ring_radius = obs.ext_bp.ring_radius("saturn:ring").mvals.astype("float")
+        #     ring_longitude = (obs.ext_bp.ring_longitude("saturn:ring").vals.
+        #                     astype("float"))
+        #     rad = ring_radius[int(star.v+obs.extfov_margin[1]),
+        #                     int(star.u+obs.extfov_margin[0])]
+        #     long = ring_longitude[int(star.v+obs.extfov_margin[1]),
+        #                         int(star.u+obs.extfov_margin[0])]
 
-#     Returns True if the star conflicted, False if the star didn't.
-#     """
-#     logger = logging.getLogger(_LOGGING_NAME+"._stars_mark_conflicts_obj")
+        #     # XXX We might want to improve this to support the known position of the
+        #     # F ring core.
+        #     # C to A rings and F ring
+        #     if ((oops.body.SATURN_C_RING[0] <= rad <= oops.body.SATURN_A_RING[1]) or
+        #         (139890 <= rad <= 140550)): # F ring
+        #         logger.debug("Star %9d U %8.3f V %8.3f conflicts with rings radius "
+        #                     "%.1f",
+        #                     star.unique_number, star.u, star.v, rad)
+        #         star.conflicts = "RINGS"
+        #         return True
 
-#     if len(obs.star_body_list):
-#         # Create a Meshgrid for the area around the star.
-#         # Give slop on each side - we don't want a star to
-#         # even be close to a large object.
-#         star_slop = stars_config["star_body_conflict_margin"]
-#         meshgrid = oops.Meshgrid.for_fov(obs.fov,
-#                                          origin=(star.u-star_slop,
-#                                                  star.v-star_slop),
-#                                          limit =(star.u+star_slop,
-#                                                  star.v+star_slop))
-#         backplane = oops.backplane.Backplane(obs, meshgrid)
-
-#         # Check for planet and moons
-#         for body_name in obs.star_body_list:
-#             intercepted = backplane.where_intercepted(body_name)
-#             if intercepted.any():
-#                 logger.debug("Star %9d U %8.3f V %8.3f conflicts with %s",
-#                              star.unique_number, star.u, star.v, body_name)
-#                 star.conflicts = "BODY:" + body_name
-#                 return True
-
-#     # Check for rings
-#     if rings_can_conflict:
-#         ring_radius = obs.ext_bp.ring_radius("saturn:ring").mvals.astype("float")
-#         ring_longitude = (obs.ext_bp.ring_longitude("saturn:ring").vals.
-#                           astype("float"))
-#         rad = ring_radius[int(star.v+obs.extfov_margin[1]),
-#                           int(star.u+obs.extfov_margin[0])]
-#         long = ring_longitude[int(star.v+obs.extfov_margin[1]),
-#                               int(star.u+obs.extfov_margin[0])]
-
-#         # XXX We might want to improve this to support the known position of the
-#         # F ring core.
-#         # C to A rings and F ring
-#         if ((oops.body.SATURN_C_RING[0] <= rad <= oops.body.SATURN_A_RING[1]) or
-#             (139890 <= rad <= 140550)): # F ring
-#             logger.debug("Star %9d U %8.3f V %8.3f conflicts with rings radius "
-#                          "%.1f",
-#                          star.unique_number, star.u, star.v, rad)
-#             star.conflicts = "RINGS"
-#             return True
-
-#     return False
+        return False
 
 # def _stars_optimize_offset_list(offset_list, tolerance=1):
 #     """Remove bad offsets.
@@ -1735,9 +1745,6 @@ class NavModelStars(NavModel):
 #     # A list of offset results so we can choose the best one at the very end.
 #     saved_offsets = []
 
-#     # Mark all the bodies (or rings) that are conflicting
-#     for star in star_list:
-#         _stars_mark_conflicts_obj(obs, star, rings_can_conflict, stars_config)
 
 #     while True:
 #         #

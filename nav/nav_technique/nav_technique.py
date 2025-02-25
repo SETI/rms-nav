@@ -15,7 +15,7 @@ class NavTechnique(ABC, NavBase):
         self._offset: tuple[float, float] | None = None
 
     @property
-    def offset(self):
+    def offset(self) -> tuple[float, float] | None:
         return self._offset
 
     @abstractmethod

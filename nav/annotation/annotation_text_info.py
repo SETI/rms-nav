@@ -1,3 +1,4 @@
+from collections import namedtuple
 import functools
 import os
 from typing import cast
@@ -20,6 +21,7 @@ TEXTINFO_BOTTOM = 'bottom'
 TEXTINFO_BOTTOM_ARROW = 'bottom_arrow'
 TEXTINFO_CENTER = 'center'
 
+TextLocInfo = namedtuple('TextLocInfo', ['label', 'label_v', 'label_u'])
 
 @functools.cache
 def _load_font(path: str,
@@ -30,7 +32,8 @@ def _load_font(path: str,
 class AnnotationTextInfo:
     def __init__(self,
                  text: str,
-                 text_loc: list[tuple[str, int, int]],
+                 text_loc: list[TextLocInfo],
+                 ref_vu: tuple[int, int] | None,
                  *,
                  color: tuple[int, ...],
                  font: str,
@@ -39,6 +42,7 @@ class AnnotationTextInfo:
         self._config = DEFAULT_CONFIG
         self._text = text
         self._text_loc = text_loc
+        self._ref_vu = ref_vu
         self._color = tuple(color)
         self._font = font
         self._font_size = font_size
@@ -48,8 +52,12 @@ class AnnotationTextInfo:
         return self._text
 
     @property
-    def text_loc(self) -> list[tuple[str, int, int]]:
+    def text_loc(self) -> list[TextLocInfo]:
         return self._text_loc
+
+    @property
+    def ref_vu(self) -> tuple[int, int] | None:
+        return self._ref_vu
 
     @property
     def color(self) -> tuple[int, ...]:
@@ -77,6 +85,14 @@ class AnnotationTextInfo:
                    show_all_positions: bool) -> bool:
         """Try to place the text for a text_info in a place that doesn't conflict."""
 
+        if (self.ref_vu is not None and
+            (self.ref_vu[0] - extfov[0] - offset[0] < 0 or
+             self.ref_vu[0] - extfov[0] - offset[0] > text_layer.shape[0] or
+             self.ref_vu[1] - extfov[1] - offset[1] < 0 or
+             self.ref_vu[1] - extfov[1] - offset[1] > text_layer.shape[1])):
+            # The thing we're labeling isn't in the FOV, so don't bother labeling it
+            return True
+
         font = _load_font(os.path.join(tt_dir, self.font), self.font_size)
 
         text_size = cast(tuple[int, int, int, int],
@@ -97,15 +113,10 @@ class AnnotationTextInfo:
         edge_margin = 3  # Margin at edge of FOV
         text_margin = 2  # Margin around text and arrow so text doesn't get too close
 
-        # We take the offset into account when deciding where to put labels, so that
-        # the final offset model, which will be cropped to the size of the original
-        # image, doesn't have text running off the edges.
-        v_margin_min = extfov[0] + offset[0] + edge_margin
-        v_margin_max = (text_layer.shape[0] - extfov[0] + offset[0] -
-                        edge_margin - 1)
-        u_margin_min = extfov[1] + offset[1] + edge_margin
-        u_margin_max = (text_layer.shape[1] - extfov[1] + offset[1] -
-                        edge_margin - 1)
+        v_margin_min = edge_margin
+        v_margin_max = text_layer.shape[0] - edge_margin - 1
+        u_margin_min = edge_margin
+        u_margin_max = text_layer.shape[1] - edge_margin - 1
 
         # Run through the possible positions in order. For each, figure out where the
         # text (and optionally, arrow) goes. Then see if that location would conflict
@@ -113,6 +124,8 @@ class AnnotationTextInfo:
         # (and optionally, arrow) and quit. This gives priority to the positions
         # earliest in the list.
         for text_pos, text_v, text_u in self.text_loc:
+            text_v = text_v - extfov[0] - offset[0]
+            text_u = text_u - extfov[1] - offset[1]
             arrow_u0 = arrow_u1 = arrow_v0 = arrow_v1 = None
             if text_pos == TEXTINFO_LEFT:
                 v = text_v - text_width_v // 2

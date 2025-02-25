@@ -19,17 +19,23 @@ class InstCassiniISS(Inst):
 
     @staticmethod
     def from_file(path: PathLike,
-                  config: Optional[Config] = None) -> ObsSnapshot:
+                  config: Optional[Config] = None,
+                  extfov_margin_vu: tuple[int, int] | None = None) -> ObsSnapshot:
+
         config = config or DEFAULT_CONFIG
         obs = oops.hosts.cassini.iss.from_file(path,
                                                fast_distortion=True,
                                                return_all_planets=True)
         # TODO Calibrate
         # obs.data = obs.extended_calib.value_from_dn(obs.data).vals
-        new_obs = ObsSnapshot(obs, config=config)
+        new_obs = ObsSnapshot(obs,
+                              config=config,
+                              extfov_margin_vu=extfov_margin_vu)
         new_obs.set_inst(InstCassiniISS(new_obs, config=config))
-
         return new_obs
 
     def star_psf(self) -> PSF:
-        return GaussianPSF(sigma=1.)
+        return GaussianPSF(sigma=0.54)
+# PSF_SIGMA = {"NAC":   0.54,
+#              "WAC":   0.77,
+#              "LORRI": 0.5} # XXX

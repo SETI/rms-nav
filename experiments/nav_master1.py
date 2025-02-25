@@ -1,21 +1,12 @@
 from pathlib import Path
 import sys
 
-import matplotlib.pyplot as plt
-import numpy as np
-import oops
-from PIL import Image
-
 # Add the repository root to the path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from nav.annotation import Annotations
 from nav.inst import inst_id_to_class
 from nav.nav_master import NavMaster
-from nav.nav_model import NavModelBody
 import nav.obs.obs_snapshot as obs_snapshot
-from nav.support.file import dump_yaml
-from tests.config import URL_CASSINI_ISS_RHEA_01
 
 # URL = URL_CASSINI_ISS_RHEA_01; bodies = ['RHEA']
 # inst_id = 'coiss'; URL = 'https://pds-rings.seti.org/holdings/calibrated/COISS_2xxx/COISS_2042/data/1584035653_1584189857/N1584039961_2_CALIB.IMG'; bodies = ['ENCELADUS']
@@ -26,8 +17,8 @@ from tests.config import URL_CASSINI_ISS_RHEA_01
 # inst_id = 'gossi'; URL = 'https://opus.pds-rings.seti.org/holdings/volumes/GO_0xxx/GO_0022/I24/IO/C0520821352R.IMG'; bodies = ['IO', 'JUPITER']
 # inst_id = 'gossi'; URL = 'https://opus.pds-rings.seti.org/holdings/volumes/GO_0xxx/GO_0023/I31/IO/C0615816324R.IMG'; bodies = ['IO']
 # inst_id = 'gossi'; URL = 'https://opus.pds-rings.seti.org/holdings/volumes/GO_0xxx/GO_0003/MOON/C0061059500R.IMG'; bodies = ['MOON']
-# inst_id = 'gossi'; URL = 'https://opus.pds-rings.seti.org/holdings/volumes/GO_0xxx/GO_0005/EARTH/C0061498700R.IMG'; bodies = ['EARTH']
-inst_id = 'gossi'; URL = 'https://opus.pds-rings.seti.org/holdings/volumes/GO_0xxx/GO_0019/C10/EUROPA/C0416073113R.IMG'; bodies = ['EUROPA']
+inst_id = 'gossi'; URL = 'https://opus.pds-rings.seti.org/holdings/volumes/GO_0xxx/GO_0005/EARTH/C0061498700R.IMG'; bodies = ['EARTH']
+# inst_id = 'gossi'; URL = 'https://opus.pds-rings.seti.org/holdings/volumes/GO_0xxx/GO_0019/C10/EUROPA/C0416073113R.IMG'; bodies = ['EUROPA']
 
 # inst_id = 'vgiss'; URL = 'https://opus.pds-rings.seti.org/holdings/volumes/VGISS_5xxx/VGISS_5112/DATA/C16101XX/C1610143_GEOMED.IMG'; bodies = ['EUROPA', 'IO', 'JUPITER']
 # inst_id = 'vgiss'; URL = 'https://opus.pds-rings.seti.org/holdings/volumes/VGISS_5xxx/VGISS_5112/DATA/C16101XX/C1610143_CALIB.IMG'; bodies = ['EUROPA', 'IO', 'JUPITER']

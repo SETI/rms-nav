@@ -5,6 +5,7 @@ from PIL import Image, ImageDraw
 
 from .annotation import Annotation
 
+from nav.obs import ObsSnapshot
 from nav.support.types import NDArrayBoolType, NDArrayIntType
 
 
@@ -28,16 +29,17 @@ class Annotations:
             ann_list = annotations
         for ann in ann_list:
             if len(self._annotations):
-                if ann.overlay.shape != self._annotations[-1].overlay.shape:
-                    raise ValueError(
-                        'Annotation does not have same shape as previous: '
-                        f'{ann.overlay.shape} vs '
-                        f'{self._annotations[-1].overlay.shape}')
+                if ann.obs != self._annotations[-1].obs:
+                    raise ValueError('Annotation does not have same Obs as previous')
             self._annotations.append(ann)
 
+    @property
+    def annotations(self) -> list[Annotation]:
+        """Return the list of annotations."""
+        return self._annotations
+
     def combine(self,
-                extfov: tuple[int, int],
-                offset: tuple[int, int] = (0, 0),
+                offset: tuple[float, float] | None = None,
                 include_text: bool = True,
                 text_use_avoid_mask: bool = True,
                 text_avoid_other_text: bool = True,
@@ -45,39 +47,57 @@ class Annotations:
                 ) -> NDArrayIntType | None:
         """Combine all annotations into a single graphic overlay."""
 
-        if len(self._annotations) == 0:
+        if len(self.annotations) == 0:
             return None
 
-        res = np.zeros(self._annotations[0].overlay.shape + (3,), dtype=np.uint8)
-        all_avoid_mask = np.zeros(self._annotations[0].overlay.shape, dtype=np.bool_)
+        obs = self.annotations[0].obs
+
+        data_shape = obs.data_shape_vu
+
+        res = np.zeros(data_shape + (3,), dtype=np.uint8)
+        all_avoid_mask = np.zeros(data_shape, dtype=np.bool_)
+
+        if offset is None:
+            int_offset = (0, 0)
+        else:
+            int_offset = (int(offset[0]), int(offset[1]))
 
         for annotation in self._annotations:
             # TODO This does not handle z-depth. In other words, an overlay does not
             # get hidden by other overlays in front of it. This can best be seen with
             # two moons that are partially occluding each other.
-            res[annotation.overlay] = annotation._overlay_color
+            overlay = annotation.overlay[
+                obs.extfov_margin_v+int_offset[0]:
+                    obs.extfov_margin_v+data_shape[0]+int_offset[0],
+                obs.extfov_margin_u+int_offset[1]:
+                    obs.extfov_margin_u+data_shape[1]+int_offset[1]]
+
+            res[overlay] = annotation.overlay_color
             if text_use_avoid_mask and annotation.avoid_mask is not None:
-                all_avoid_mask |= annotation.avoid_mask
+                avoid_mask = annotation.avoid_mask[
+                    obs.extfov_margin_v+int_offset[0]:
+                        obs.extfov_margin_v+data_shape[0]+int_offset[0],
+                    obs.extfov_margin_u+int_offset[1]:
+                        obs.extfov_margin_u+data_shape[1]+int_offset[1]]
+                all_avoid_mask |= avoid_mask
 
         if include_text:
-            self._add_text(res, extfov, offset, all_avoid_mask,
+            self._add_text(obs, res, int_offset, all_avoid_mask,
                            text_avoid_other_text, text_show_all_positions)
 
-        return res[extfov[0]+offset[0]:res.shape[0]-extfov[0]+offset[0],
-                   extfov[1]+offset[1]:res.shape[1]-extfov[1]+offset[1]]
+        return res
 
     def _add_text(self,
+                  obs: ObsSnapshot,
                   res: NDArrayIntType,
-                  extfov: tuple[int, int],
                   offset: tuple[int, int],
                   avoid_mask: NDArrayBoolType,
                   text_avoid_other_text: bool,
                   text_show_all_positions: bool) -> None:
         """Add label text to an existing overlay."""
 
-        text_layer = np.zeros(self._annotations[0].overlay.shape + (3,), dtype=np.uint8)
-        graphic_layer = np.zeros(self._annotations[0].overlay.shape + (3,),
-                                 dtype=np.uint8)
+        text_layer = np.zeros_like(res, dtype=np.uint8)
+        graphic_layer = np.zeros_like(res, dtype=np.uint8)
         if text_avoid_other_text:
             ann_num_mask = np.zeros(self._annotations[0].overlay.shape, dtype=np.int_)
         else:
@@ -94,6 +114,7 @@ class Annotations:
             # to place one that is overconstrained. However, ann_num is really not enough
             # because we want a number for each text_info, so this code should probably
             # just go away at some point.
+
             if not annotation.text_info_list:
                 continue
 
@@ -105,7 +126,8 @@ class Annotations:
                 found_place = False
                 for avoid in [True, False]:
                     ret = text_info._draw_text(ann_num=ann_num,
-                                               extfov=extfov, offset=offset,
+                                               extfov=obs.extfov_margin_vu,
+                                               offset=offset,
                                                avoid_mask=avoid_mask if avoid else None,
                                                text_layer=text_layer,
                                                graphic_layer=graphic_layer,
@@ -116,9 +138,13 @@ class Annotations:
                     if ret:
                         found_place = True
                         break
+                    annotation.config.logger.debug(
+                        'Count not find place avoiding other items for text annotation '
+                        f'{text_info.text!r}')
                 if not found_place:
                     annotation.config.logger.warning(
-                        f'Could not find place for text annotation {text_info.text}')
+                        'Could not find final place for text annotation '
+                        f'{text_info.text!r}')
 
         text_layer = (np.array(text_im.getdata()).astype('uint8')
                       .reshape(text_layer.shape))

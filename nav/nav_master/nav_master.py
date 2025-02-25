@@ -1,12 +1,10 @@
+from pathlib import Path
 from typing import Any, Optional, Sequence, cast
 
 import matplotlib.pyplot as plt
-import numpy as np
-from nav.nav_technique import (NavTechniqueCorrelation,
-                               NavTechniqueStars,
-                               NavTechniqueTitan)
-from nav.support.types import NDArrayFloatType
 from oops import Observation
+import numpy as np
+from PIL import Image, ImageDraw
 
 from nav.annotation import Annotations
 from nav.config import Config
@@ -15,8 +13,12 @@ from nav.nav_model import (NavModel,
                            NavModelRings,
                            NavModelStars,
                            NavModelTitan)
+from nav.nav_technique import (NavTechniqueCorrelation,
+                               NavTechniqueStars,
+                               NavTechniqueTitan)
 from nav.support.nav_base import NavBase
 from nav.support.file import dump_yaml
+from nav.support.types import NDArrayFloatType
 
 
 class NavMaster(NavBase):
@@ -29,7 +31,7 @@ class NavMaster(NavBase):
         super().__init__(config=config, logger_name=logger_name)
 
         self._obs = obs
-        self._offset = (0, 0)
+        self._offset: tuple[float, float] | None = None
         self._star_models: list[NavModelStars] = []
         self._body_models: list[NavModelBody] = []
         self._ring_models: list[NavModelRings] = []
@@ -47,7 +49,16 @@ class NavMaster(NavBase):
                 self._ring_models + self._titan_models)
 
     def compute_star_models(self) -> None:
-        ...
+
+        if self._star_models:
+            return
+
+        stars_model = NavModelStars(self._obs)
+        stars_model.create_model()
+        self._star_models = [stars_model]
+
+        # plt.imshow(stars_model.model_img)
+        # plt.show()
 
     def compute_body_models(self) -> None:
 
@@ -121,10 +132,18 @@ class NavMaster(NavBase):
             if model.model_img is None:
                 continue
             model_imgs.append(model.model_img)
-            ranges.append(model.range)
+            # Range can just be a float if the entire model is at the same distance
+            range = model.range
+            if not isinstance(range, np.ndarray):
+                if model.range is None:
+                    range = 0
+                else:
+                    range = model.range
+                range = cast(NDArrayFloatType, np.zeros_like(model.model_img)) + range
+            ranges.append(range)
 
         if len(model_imgs) == 0:
-            ret = None
+            return None
 
         model_imgs_arr = np.array(model_imgs)
         ranges_arr = np.array(ranges)
@@ -153,7 +172,11 @@ class NavMaster(NavBase):
             annotations.add_annotations(model.annotations)
             dump_yaml(model.metadata)
 
-        overlay = annotations.combine(obs.extfov_margin_vu, offset=self._offset,
+        offset = (0., 0.)
+        if self._offset is not None:
+            offset = self._offset
+
+        overlay = annotations.combine(offset=offset,
                                       #   text_use_avoid_mask=False,
                                       #   text_show_all_positions=True,
                                       #   text_avoid_other_text=False
@@ -184,9 +207,9 @@ class NavMaster(NavBase):
             mask = np.any(overlay, axis=2)
             res[mask, :] = overlay[mask, :]
 
-        # im = Image.fromarray(res)
-        # fn = URL.split('/')[-1].split('.')[0]
-        # im.save(f'/home/rfrench/{fn}.png')
+        im = Image.fromarray(res)
+        fn = Path(obs.basename).stem
+        im.save(f'/home/rfrench/{fn}.png')
 
         plt.imshow(res)
         # plt.figure()
