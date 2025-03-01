@@ -27,6 +27,8 @@ from nav.dataset import (DataSetCassiniISS,
                          DataSetNewHorizonsLORRI,
                          DataSetVoyagerISS)
 from nav.config.logger import DEFAULT_IMAGE_LOGGER
+from nav.inst import inst_id_to_class
+from nav.nav_master import NavMaster
 
 # import tkinter
 # import traceback
@@ -48,6 +50,7 @@ from nav.config.logger import DEFAULT_IMAGE_LOGGER
 MAIN_LOG_NAME = "nav_main_offset"
 
 DATASET = None
+INST_ID = None
 
 
 ################################################################################
@@ -57,11 +60,12 @@ DATASET = None
 ################################################################################
 
 def parse_args(command_list):
-    dataset_id = command_list[0]
-
     global DATASET
+    global INST_ID
 
-    match dataset_id.upper():
+    INST_ID = command_list[0]
+
+    match INST_ID.upper():
         case 'COISS':
             DATASET = DataSetCassiniISS()
         case 'GOSSI':
@@ -434,6 +438,18 @@ def process_offset_one_image(image_path,
         return True
 
     global NUM_FILES_COMPLETED
+
+    inst_class = inst_id_to_class(INST_ID)
+    extfov_margin = (200, 200)
+    s = inst_class.from_file(image_path, extfov_margin_vu=extfov_margin)
+
+
+    nm = NavMaster(s)
+    nm.compute_all_models()
+
+    nm.navigate()
+
+    nm.create_overlay()
 
     # if bootstrapped:
     #     type = "bootstrap"

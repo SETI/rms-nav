@@ -162,3 +162,4 @@ cython_debug/
 #.idea/
 
 csmithing/
+.code_planner_cache.db

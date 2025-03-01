@@ -13,17 +13,11 @@
 from pathlib import Path
 import sys
 
-import matplotlib.pyplot as plt
-import numpy as np
-import oops
-from PIL import Image
-
 # Add the repository root to the path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from nav.inst import inst_id_to_class
 from nav.nav_master import NavMaster
-import nav.obs.obs_snapshot as obs_snapshot
 
 extfov_margin_vu = (300, 300)
 

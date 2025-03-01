@@ -26,12 +26,10 @@ inst_id = 'gossi'; URL = 'https://opus.pds-rings.seti.org/holdings/volumes/GO_0x
 # inst_id = 'nhlorri'; URL = 'https://opus.pds-rings.seti.org/holdings/volumes/NHxxLO_xxxx/NHPELO_2001/data/20150625_029751/lor_0297516223_0x633_sci.fit'; bodies = ['CHARON', 'PLUTO']
 # inst_id = 'nhlorri'; URL = 'https://opus.pds-rings.seti.org/holdings/volumes/NHxxLO_xxxx/NHPELO_1001/data/20150625_029751/lor_0297516223_0x633_eng.fit'; bodies = ['CHARON', 'PLUTO', 'STYX']
 
-inst_class = inst_id_to_class(inst_id)
-OBS = inst_class.from_file(URL)
-
 extfov_margin = (200, 200)
-# extfov_margin = (0, 0)
-s = obs_snapshot.ObsSnapshot(OBS, extfov_margin_vu=extfov_margin)
+
+inst_class = inst_id_to_class(inst_id)
+s = inst_class.from_file(URL, extfov_margin_vu=extfov_margin)
 
 nm = NavMaster(s)
 nm.compute_all_models()

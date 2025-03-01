@@ -230,11 +230,12 @@ class NavMaster(NavBase):
         res = np.zeros(img.shape + (3,), dtype=np.uint8)
 
         img_sorted = sorted(list(img.flatten()))
-        blackpoint = img_sorted[np.clip(int(len(img_sorted)*0.005),
+        blackpoint = img_sorted[np.clip(int(len(img_sorted)*0.001),
                                         0, len(img_sorted)-1)]
-        whitepoint = img_sorted[np.clip(int(len(img_sorted)*0.995),
+        whitepoint = img_sorted[np.clip(int(len(img_sorted)*0.999),
                                         0, len(img_sorted)-1)]
-        gamma = 0.5
+        # whitepoint = np.max(img_sorted)
+        gamma = 1 # 0.5
 
         img_stretched = np.floor((np.maximum(img-blackpoint, 0) /
                                 (whitepoint-blackpoint))**gamma*256)
