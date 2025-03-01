@@ -8,10 +8,22 @@ from nav.inst import Inst
 
 
 class Obs(ABC):
+    """Represents an observation in the navigation system.
+    
+    This abstract base class provides common functionality for all observation types,
+    including configuration and logging capabilities.
+    """
+    
     def __init__(self,
                  *,
                  config: Optional[Config] = None,
                  logger_name: Optional[str] = None) -> None:
+        """Initializes a new observation instance.
+        
+        Parameters:
+            config: Configuration object to use. If None, uses DEFAULT_CONFIG.
+            logger_name: Name for the logger. If provided, creates a child logger with this name.
+        """
 
         self._config = config or DEFAULT_CONFIG
         self._logger = self._config.logger
@@ -22,15 +34,27 @@ class Obs(ABC):
 
     @property
     def config(self) -> Config:
+        """Returns the configuration object associated with this observation."""
+        
         return self._config
 
     @property
     def logger(self) -> PdsLogger:
+        """Returns the logger instance for this observation."""
+        
         return self._logger
 
     def set_inst(self, inst: 'Inst') -> None:
+        """Sets the instrument associated with this observation.
+        
+        Parameters:
+            inst: The instrument instance to associate with this observation.
+        """
+        
         self._inst = inst
 
     @property
     def inst(self) -> 'Inst':
+        """Returns the instrument associated with this observation."""
+        
         return cast(Inst, self._inst)

@@ -4,8 +4,18 @@ import oops
 
 
 def ra_rad_to_hms(ra: float) -> str:
-    """Convert right ascension in radians to a pretty string."""
-
+    """Converts right ascension in radians to a formatted string in hours, minutes, and seconds.
+    
+    Parameters:
+        ra: Right ascension value in radians.
+        
+    Returns:
+        Formatted string in the form "HHhMMmSS.SSSs".
+        
+    Raises:
+        ValueError: If the right ascension value is negative.
+    """
+    
     if ra < 0:
         raise ValueError(f'ra cannot be negative, got {ra}')
 
@@ -26,8 +36,15 @@ def ra_rad_to_hms(ra: float) -> str:
 
 
 def dec_rad_to_dms(dec: float) -> str:
-    """Convert declination in radians to a pretty string."""
-
+    """Converts declination in radians to a formatted string in degrees, minutes, and seconds.
+    
+    Parameters:
+        dec: Declination value in radians.
+        
+    Returns:
+        Formatted string in the form "+/-DDDdMMmSS.SSSs".
+    """
+    
     dec_deg = dec * oops.DPR  # In degrees
     is_neg = False
     if dec_deg < 0:
@@ -55,19 +72,35 @@ def dec_rad_to_dms(dec: float) -> str:
 
 
 def now_iso() -> str:
-    """Return the current time as an ISO 8601 string."""
-
+    """Returns the current time as an ISO 8601 formatted string with timezone information.
+    
+    Returns:
+        Current time as an ISO 8601 formatted string.
+    """
+    
     return datetime.datetime.now().astimezone().isoformat()
 
 
 def now_dt() -> datetime.datetime:
-    """Return the current time as a DateTime."""
-
+    """Returns the current time as a datetime object with timezone information.
+    
+    Returns:
+        Current time as a timezone-aware datetime object.
+    """
+    
     return datetime.datetime.now().astimezone()
 
 
 def dt_delta_str(start_time: datetime.datetime,
                  end_time: datetime.datetime) -> str:
-    """Return the difference between two DateTimes as a float"""
-
+    """Returns the difference between two datetime objects as a string representation.
+    
+    Parameters:
+        start_time: The starting datetime.
+        end_time: The ending datetime.
+        
+    Returns:
+        String representation of the time difference.
+    """
+    
     return str(end_time - start_time)

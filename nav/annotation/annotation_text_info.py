@@ -26,6 +26,15 @@ TextLocInfo = namedtuple('TextLocInfo', ['label', 'label_v', 'label_u'])
 @functools.cache
 def _load_font(path: str,
                size: int) -> ImageFont.FreeTypeFont:
+    """Loads and caches a font for text rendering.
+    
+    Parameters:
+        path: Path to the font file.
+        size: Font size in points.
+        
+    Returns:
+        A FreeTypeFont object for the specified font and size.
+    """
     return ImageFont.truetype(path, size)
 
 
@@ -38,6 +47,16 @@ class AnnotationTextInfo:
                  color: tuple[int, ...],
                  font: str,
                  font_size: int):
+        """Initializes text annotation information.
+        
+        Parameters:
+            text: The text to display.
+            text_loc: List of possible text locations with positioning information.
+            ref_vu: Optional reference point (v, u) that the text is associated with.
+            color: RGB or RGBA color tuple for the text.
+            font: Font filename to use for rendering.
+            font_size: Font size in points.
+        """
 
         self._config = DEFAULT_CONFIG
         self._text = text
@@ -49,26 +68,34 @@ class AnnotationTextInfo:
 
     @property
     def text(self) -> str:
+        """Returns the annotation text."""
         return self._text
 
     @property
     def text_loc(self) -> list[TextLocInfo]:
+        """Returns the list of possible text locations."""
         return self._text_loc
+
 
     @property
     def ref_vu(self) -> tuple[int, int] | None:
+        """Returns the reference point (v, u) that the text is associated with."""
         return self._ref_vu
 
     @property
     def color(self) -> tuple[int, ...]:
+        """Returns the RGB or RGBA color tuple for the text."""
         return self._color
+
 
     @property
     def font(self) -> str:
+        """Returns the font filename used for rendering the text."""
         return self._font
 
     @property
     def font_size(self) -> int:
+        """Returns the font size in points."""
         return self._font_size
 
     def _draw_text(self,
@@ -83,7 +110,23 @@ class AnnotationTextInfo:
                    text_draw: ImageDraw.ImageDraw,
                    tt_dir: str,
                    show_all_positions: bool) -> bool:
-        """Try to place the text for a text_info in a place that doesn't conflict."""
+        """Tries to place the text in a location that doesn't conflict with other elements.
+        
+        Parameters:
+            ann_num: Annotation number for identification.
+            extfov: Extended field of view margins (v, u).
+            offset: Offset to apply to coordinates (v, u).
+            avoid_mask: Mask of areas to avoid when placing text.
+            text_layer: Image layer for rendering text.
+            graphic_layer: Image layer for rendering arrows.
+            ann_num_mask: Mask tracking where annotations have been placed.
+            text_draw: ImageDraw object for rendering text.
+            tt_dir: Directory containing TrueType fonts.
+            show_all_positions: Whether to try all positions or stop after finding the first valid one.
+            
+        Returns:
+            True if the text was successfully placed, False otherwise.
+        """
 
         if (self.ref_vu is not None and
             (self.ref_vu[0] - extfov[0] - offset[0] < 0 or

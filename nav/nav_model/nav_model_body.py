@@ -35,14 +35,13 @@ class NavModelBody(NavModel):
                  *,
                  inventory: Optional[dict[str, Any]] = None,
                  **kwargs: Any):
-        """
-                obs                    The Observation.
-        body_name              The name of the moon.
-
-
-        Args:
-            obs (Observation): _description_
-            body_name (str): _description_
+        """Creates a navigation model for a planetary body.
+        
+        Parameters:
+            obs: The observation object containing the image data.
+            body_name: The name of the planetary body.
+            inventory: Optional dictionary containing inventory information for the body.
+            **kwargs: Additional keyword arguments to pass to the parent class.
         """
 
         super().__init__(obs, logger_name='NavModelBody', **kwargs)
@@ -60,75 +59,13 @@ class NavModelBody(NavModel):
                      never_create_model: bool = False,
                      create_overlay: bool = False
                      ) -> None:
-        """Create a model for a body.
-
+        """Creates a navigation model for a planetary body with optional text overlay.
+        
         Parameters:
-            inventory: The entry returned from the inventory() method of an Observation
-                for this body. Used to find the clipping rectangle.
-
-            always_create_model: True to always return a model even if the body is too
-                small or the curvature or limb is bad.
-
-            create_overlay: True to create the text overlay.
-
-            never_create_model: Create a metadata structure but don't make an actual
-            model.
-
-        Returns:
-            model, metadata, text
-
-            metadata is a dictionary containing
-
-            'body_name'            The name of the body. 'size_ok'             True if the
-            body is large enough to bother with. 'ring_emission_ok'     True if the ring
-            emission angle at the body's
-                                location is large enough that the body will be visible and
-                                not hidden by the rings. Only relevant for bodies located
-                                inside the rings; always True otherwise.
-            'inventory'            The inventory entry for this body.
-            'cartographic_data_source'
-                                The path of the mosaic used to provide the cartographic
-                                data. None if no data provided.
-            'curvature_ok'         True if sufficient curvature is visible to permit
-                                correlation.
-            'limb_ok'              True if the limb is sufficiently sharp to permit
-                                correlation.
-            'entirely_visible'     True if the body is entirely visible even if
-                                shifted to the maximum extent specified by extfov_margin.
-                                This is based purely on geometry, not looking at whether
-                                other objects occult it.
-            'occulted_by'          A list of body names or 'RINGS' that occult some
-                                or all of this body. This is set in the main offset loop,
-                                not in this procedure. None if nothing occults it or it
-                                hasn't been processed by the main loop yet.
-            'in_saturn_shadow'     True if the body is in Saturn's shadow and only
-                                illuminated by Saturn-shine.
-            'sub_solar_lon'        The sub-solar longitude (IAU, West). 'sub_solar_lat' The
-            sub-solar latitude. 'sub_observer_lon'     The sub-observer longitude (IAU, West).
-            'sub_observer_lat'     The sub-observer latitude. 'phase_angle' The phase angle at
-            the body's center. 'body_blur'            The amount of model blur required to
-            properly
-                                correlate low-resolution cartographic data or to not look
-                                bumpy when doing a ellipsoidal model.
-            'image_blur'           The amount of image blur required to properly
-                                correlate low-resolution cartographic data.
-            'nav_uncertainty'      The amount of uncertainty (in pixels) to add to
-                                the final model uncertainty by due to the uncertainty of
-                                the navigation of the source images in the cartographic
-                                data.
-            'confidence'           The confidence in how well this model will
-                                do in correlation.
-
-            'start_time'           The time (s) when bodies_create_model was called.
-            'end_time'             The time (s) when bodies_create_model returned.
-
-                These are used for bootstrapping:
-
-            'reproj'               The reprojection data structure at the
-                                resolution specified in the config. Filled in after the
-                                offset pass is finished. None if not appropriate for
-                                bootstrapping or it hasn't been processed by the main loop
-                                yet.
+            always_create_model: If True, creates a model even if the body is too small or has
+                poor limb definition.
+            never_create_model: If True, creates metadata but doesn't generate an actual model.
+            create_overlay: If True, creates a text overlay with the body name.
         """
 
         metadata: dict[str, Any] = {}
@@ -155,6 +92,15 @@ class NavModelBody(NavModel):
                       never_create_model: bool,
                       create_overlay: bool
                       ) -> None:
+        """Creates the internal model representation for a planetary body.
+        
+        Parameters:
+            always_create_model: If True, creates a model even if the body is too small.
+            never_create_model: If True, only creates metadata without generating a model.
+            create_overlay: If True, creates a text overlay with the body name.
+        """
+
+
 
         # These are just shorthand to make later code easier to read
         obs = self.obs
@@ -533,6 +479,20 @@ class NavModelBody(NavModel):
                             model: NDArrayFloatType,
                             limb_mask: NDArrayBoolType,
                             body_mask: NDArrayBoolType) -> Annotations:
+        """Creates annotation objects for labeling the planetary body in visualizations.
+        
+        Parameters:
+            u_center: The center U coordinate of the body in the image.
+            v_center: The center V coordinate of the body in the image.
+            model: The model image array for the body.
+            limb_mask: Boolean mask indicating the limb (edge) of the body.
+            body_mask: Boolean mask indicating the visible portion of the body.
+            
+        Returns:
+            A collection of annotations for the body.
+        """
+
+
 
         obs = self._obs
         body_name = self._body_name

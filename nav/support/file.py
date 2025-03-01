@@ -6,6 +6,15 @@ from ruamel.yaml import YAML
 
 
 def _clean_val(v: Any) -> Any:
+    """Converts NumPy scalar types to Python native types.
+    
+    Parameters:
+        v: The value to convert.
+        
+    Returns:
+        The converted value as a Python native type.
+    """
+    
     if isinstance(v, np.bool_):
         return bool(v)
     if isinstance(v, (np.int_, np.int8, np.int16, np.int32, np.int64)):
@@ -18,6 +27,15 @@ def _clean_val(v: Any) -> Any:
 
 
 def _clean_obj(obj: Any) -> Any:
+    """Recursively converts NumPy types in any object to Python native types.
+    
+    Parameters:
+        obj: The object to clean, can be a dict, list, tuple or scalar value.
+        
+    Returns:
+        The object with all NumPy types converted to Python native types.
+    """
+    
     if isinstance(obj, dict):
         _clean_dict(obj)
     elif isinstance(obj, (list, tuple)):
@@ -28,12 +46,30 @@ def _clean_obj(obj: Any) -> Any:
 
 
 def _clean_dict(obj: dict[Any, Any]) -> dict[Any, Any]:
+    """Recursively converts NumPy types in a dictionary to Python native types.
+    
+    Parameters:
+        obj: The dictionary to clean.
+        
+    Returns:
+        The dictionary with all NumPy types converted to Python native types.
+    """
+    
     for k, v in obj.items():
         obj[k] = _clean_obj(v)
     return obj
 
 
 def _clean_list(obj: list[Any] | tuple[Any, ...]) -> list[Any]:
+    """Recursively converts NumPy types in a list or tuple to Python native types.
+    
+    Parameters:
+        obj: The list or tuple to clean.
+        
+    Returns:
+        A list with all NumPy types converted to Python native types.
+    """
+    
     obj = list(obj)
     for i, v in enumerate(obj):
         obj[i] = _clean_obj(v)
@@ -41,6 +77,12 @@ def _clean_list(obj: list[Any] | tuple[Any, ...]) -> list[Any]:
 
 
 def dump_yaml(data: Any) -> None:
+    """Dumps data as YAML to standard output after converting NumPy types to Python types.
+    
+    Parameters:
+        data: The data to dump as YAML.
+    """
+    
     data = _clean_obj(data)
     yaml = YAML()
     yaml.default_flow_style = False

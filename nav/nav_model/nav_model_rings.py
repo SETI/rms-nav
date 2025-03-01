@@ -21,7 +21,11 @@ class NavModelRings(NavModel):
     def __init__(self,
                  obs: Observation,
                  **kwargs: Any) -> None:
-        """TBD
+        """Creates a navigation model for planetary rings.
+        
+        Parameters:
+            obs: The Observation object containing image data.
+            **kwargs: Additional keyword arguments to pass to the parent class.
         """
 
         super().__init__(obs, logger_name='NavModelRings', **kwargs)

@@ -22,11 +22,25 @@ from nav.support.types import NDArrayFloatType
 
 
 class NavMaster(NavBase):
+    """Coordinates the overall navigation process using multiple models and techniques.
+    
+    This class manages the creation of different navigation models (stars, bodies, rings, 
+    Titan), combines them appropriately, and applies navigation techniques to determine
+    the final offset between predicted and actual positions.
+    """
+    
     def __init__(self,
                  obs: Observation,
                  *,
                  config: Optional[Config] = None,
                  logger_name: Optional[str] = None) -> None:
+        """Initializes a navigation master object for an observation.
+        
+        Parameters:
+            obs: The observation object containing image and metadata.
+            config: Optional configuration object. If None, uses the default configuration.
+            logger_name: Optional name for the logger. If None, uses the class name.
+        """
 
         super().__init__(config=config, logger_name=logger_name)
 
@@ -42,47 +56,59 @@ class NavMaster(NavBase):
 
     @property
     def obs(self) -> Observation:
+        """Returns the observation object associated with this navigation master."""
         return self._obs
 
     @property
     def final_offset(self) -> tuple[float, float] | None:
+        """Returns the final computed offset between predicted and actual positions."""
         return self._final_offset
 
     @property
     def star_models(self) -> list[NavModelStars]:
+        """Returns the list of star navigation models, computing them if necessary."""
         self.compute_star_models()
         assert self._star_models is not None
         return self._star_models
 
     @property
     def body_models(self) -> list[NavModelBody]:
+        """Returns the list of planetary body navigation models, computing them if necessary."""
         self.compute_body_models()
         assert self._body_models is not None
         return self._body_models
 
     @property
     def ring_models(self) -> list[NavModelRings]:
+        """Returns the list of ring navigation models, computing them if necessary."""
         self.compute_ring_models()
         assert self._ring_models is not None
         return self._ring_models
 
     @property
     def titan_models(self) -> list[NavModelTitan]:
+        """Returns the list of Titan-specific navigation models, computing them if necessary."""
         self.compute_titan_models()
         assert self._titan_models is not None
         return self._titan_models
 
     @property
     def all_models(self) -> Sequence[NavModel]:
+        """Returns a sequence containing all navigation models."""
         return (self.star_models + self.body_models +
                 self.ring_models + self.titan_models)
 
     @property
     def combined_model(self) -> NDArrayFloatType | None:
+        """Returns the combined navigation model, creating it if necessary."""
         self._create_combined_model()
         return self._combined_model
 
     def compute_star_models(self) -> None:
+        """Creates navigation models for stars in the observation.
+        
+        If star models have already been computed, does nothing.
+        """
 
         if self._star_models is not None:
             return
@@ -95,6 +121,13 @@ class NavMaster(NavBase):
         # plt.show()
 
     def compute_body_models(self) -> None:
+        """Creates navigation models for planetary bodies in the observation.
+        
+        Identifies visible bodies within the field of view, sorts them by distance,
+        and creates a navigation model for each one. If body models have already been 
+        computed, does nothing.
+        """
+
 
         if self._body_models is not None:
             return
@@ -110,6 +143,15 @@ class NavMaster(NavBase):
         # that are actually in the FOV
         def _body_in_fov(obs: Observation,
                          inv: dict[str, Any]) -> bool:
+            """Determines if a body is within the extended field of view.
+            
+            Parameters:
+                obs: The observation object.
+                inv: The inventory dictionary for the body.
+                
+            Returns:
+                True if the body is at least partially within the extended field of view.
+            """
             return cast(bool,
                         (inv['u_max_unclipped'] >= obs.extfov_u_min and
                          inv['u_min_unclipped'] <= obs.extfov_u_max and
@@ -135,6 +177,10 @@ class NavMaster(NavBase):
             self._body_models.append(body_model)
 
     def compute_ring_models(self) -> None:
+        """Creates navigation models for planetary rings in the observation.
+        
+        If ring models have already been computed, does nothing.
+        """
 
         if self._ring_models is not None:
             return
@@ -142,6 +188,10 @@ class NavMaster(NavBase):
         # TODO Ring models
 
     def compute_titan_models(self) -> None:
+        """Creates Titan-specific navigation models for the observation.
+        
+        If Titan models have already been computed, does nothing.
+        """
 
         if self._titan_models is not None:
             return
@@ -149,6 +199,10 @@ class NavMaster(NavBase):
         # TODO Titan models
 
     def compute_all_models(self) -> None:
+        """Creates all navigation models for the observation.
+        
+        This includes star models, ring models, body models, and Titan-specific models.
+        """
 
         self.compute_star_models()
         self.compute_ring_models()
@@ -156,6 +210,11 @@ class NavMaster(NavBase):
         self.compute_titan_models()
 
     def _create_combined_model(self):
+        """Creates a combined model from all individual navigation models.
+        
+        For each pixel, selects the model element from the object with the smallest range
+        (closest to the observer), which would appear in front of other objects.
+        """
 
         if self._combined_model is not None:
             return self._combined_model
@@ -191,6 +250,11 @@ class NavMaster(NavBase):
         self._combined_model = cast(NDArrayFloatType, final_model)
 
     def navigate(self) -> None:
+        """Performs navigation by applying different navigation techniques.
+        
+        Computes all navigation models, then applies star-based and all-model-based
+        navigation techniques. Determines the final offset based on the results.
+        """
         self.compute_all_models()
 
         nav_stars = NavTechniqueStars(self)
@@ -206,7 +270,14 @@ class NavMaster(NavBase):
         else:
             self._offset = nav_all.offset
 
+
     def create_overlay(self) -> None:
+        """Creates a visual overlay combining the image and navigation annotations.
+        
+        Combines all model annotations, applies the computed offset, and generates
+        an annotated image with contrast adjustment.
+        """
+
 
         obs = self._obs
 

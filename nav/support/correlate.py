@@ -36,19 +36,17 @@ def correlate2d(image: NDArrayFloatType,
                 model: NDArrayFloatType,
                 normalize: bool = False,
                 retile: bool = False) -> NDArrayFloatType:
-    """Correlate the image with the model; normalization to [-1,1] is optional.
-
+    """Correlates the image with the model using the correlation theorem.
+    
     Correlation is performed using the 'correlation theorem' that equates
     correlation with a Fourier Transform.
 
-    Inputs:
-        image              The image.
-        model              The model to correlate against image.
-        normalize          If True, normalize the correlation result to [-1,1].
-        retile             If True, the resulting correlation matrix is
-                           shifted by 1/2 along each dimension so that
-                           (0,0) is now in the center pixel:
-                           (shape[0]//2,shape[1]//2).
+    Parameters:
+        image: The image array.
+        model: The model array to correlate against image.
+        normalize: If True, normalize the correlation result to [-1,1].
+        retile: If True, the resulting correlation matrix is shifted by 1/2 along
+               each dimension so that (0,0) is now in the center pixel (shape[0]//2,shape[1]//2).
 
     Returns:
         The 2-D correlation matrix.
@@ -93,52 +91,26 @@ def correlate2d(image: NDArrayFloatType,
 
 def corr_analyze_peak(corr, offset_u, offset_v, large_psf=True,
                       blur=0):
-    """Analyze the correlation peak with a 2-D Gaussian fit.
+    """Analyzes the correlation peak with a 2-D Gaussian fit.
 
-    Inputs:
-        corr               A 2-D correlation matrix with (0,0) located in the
-                           center pixel (shape[0]//2,shape[1]//2).
-        offset_u           The (U,V) coordinate of the peak in corr.
-        offset_v
-        large_psf          True to allow a much larger PSF sizes.
-        blur               The amount of blur applied to the image, used
-                           to determine a starting sigma.
+    Parameters:
+        corr: A 2-D correlation matrix with (0,0) located in the center pixel 
+             (shape[0]//2,shape[1]//2).
+        offset_u: The U coordinate of the peak in corr.
+        offset_v: The V coordinate of the peak in corr.
+        large_psf: True to allow much larger PSF sizes.
+        blur: The amount of blur applied to the image, used to determine a starting sigma.
 
     Returns:
-
-        A dict containing
-              'x'
-              'x_err'
-              'y'
-              'y_err'
-              'xy_err'
-              'xy_angle'
-              'xy_corr'
-              'xy_rot_err_1'  (long axis)
-              'xy_rot_err_2'
-              'xy_rot_angle'
-              'sigma_1'
-              'sigma_1_err'
-              'sigma_2'
-              'sigma_2_err'
-              'sigma_angle'
-              'sigma_angle_err'
-              'scale'
-              'scale_err'
-              'base'
-              'base_err'
-              'leastsq_mesg'
-              'leastsq_ier'
-              'subimg'
-              'psf'
-              'scaled_psf'
-           See psfmodel.py for more details.
-           Note that 'sigma_x' will always be the long axis of the ellipse,
-           and 'angle' will point along that long axis.
-           Also note that this is not necessarily the final set of uncertainties
-           that we will report to the user because we may combine these with
-           information about how various models were constructed (e.g.
-           the orientation of ring features).
+        A dict containing analysis results including position, errors, and PSF parameters:
+        'x', 'x_err', 'y', 'y_err', 'xy_err', 'xy_angle', 'xy_corr',
+        'xy_rot_err_1' (long axis), 'xy_rot_err_2', 'xy_rot_angle',
+        'sigma_1', 'sigma_1_err', 'sigma_2', 'sigma_2_err',
+        'sigma_angle', 'sigma_angle_err', 'scale', 'scale_err',
+        'base', 'base_err', 'leastsq_mesg', 'leastsq_ier',
+        'subimg', 'psf', 'scaled_psf'.
+        Note that 'sigma_1' will always be the long axis of the ellipse,
+        and 'sigma_angle' will point along that long axis.
     """
     debug = False
     last_x = last_y = last_psf_ret = None
@@ -310,6 +282,13 @@ def corr_analyze_peak(corr, offset_u, offset_v, large_psf=True,
     return details
 
 def corr_log_xy_err(logger, psf_details):
+    """Logs correlation position and error information to the provided logger.
+    
+    Parameters:
+        logger: The logger object to write information to.
+        psf_details: Dictionary containing PSF analysis results from corr_analyze_peak.
+    """
+    
     str_list = []
     if psf_details['xy_rot_err_1'] is None:
         logger.info('  dX %.3f dY %.3f (uncertainty failed)' % (psf_details['x'], psf_details['y']))
@@ -321,6 +300,18 @@ def corr_log_xy_err(logger, psf_details):
     logger.info('    %s', psf_details['leastsq_mesg'])
 
 def corr_xy_err_to_str(offset, uncertainty, extra=None, extra_args=None):
+    """Converts correlation offset and uncertainty information to a formatted string.
+    
+    Parameters:
+        offset: A tuple (x,y) containing the offset coordinates.
+        uncertainty: A tuple (xy_rot_err_1, xy_rot_err_2, xy_rot_angle) containing uncertainty values.
+        extra: Optional format string to append additional information.
+        extra_args: Optional arguments for the extra format string.
+        
+    Returns:
+        A formatted string representation of the offset and uncertainty.
+    """
+    
     # offset is (x,y)
     # uncertainty is (xy_rot_err_1, xy_rot_err_2, xy_rot_angle)
     if (offset is None or
@@ -347,6 +338,18 @@ def corr_xy_err_to_str(offset, uncertainty, extra=None, extra_args=None):
     return ret+' ('+err1+'x'+err2+' @ '+angle+')'+extra
 
 def corr_psf_xy_err_to_str(offset, psf_details, extra=None, extra_args=None):
+    """Converts correlation offset and PSF details to a formatted string.
+    
+    Parameters:
+        offset: A tuple (x,y) containing the offset coordinates.
+        psf_details: Dictionary containing PSF analysis results from corr_analyze_peak.
+        extra: Optional format string to append additional information.
+        extra_args: Optional arguments for the extra format string.
+        
+    Returns:
+        A formatted string representation of the offset and uncertainty from PSF details.
+    """
+    
     if psf_details is None:
         return corr_xy_err_to_str(offset, (None, None, None), extra, extra_args)
     return corr_xy_err_to_str(offset,
@@ -361,38 +364,29 @@ def _find_correlated_offset(corr: NDArrayFloatType,
                             max_offsets: int,
                             peak_margin: int,
                             logger: PdsLogger):
-    """Find the offset that best aligns an image and a model given the
-    correlation.
-
+    """Finds the offset that best aligns an image and a model given the correlation.
+    
     The offset is found by looking for the maximum correlation value within
     the given search range. Multiple offsets may be returned, in which case
     each peak and the area around it is eliminated from future consideration
     before the next peak is found.
 
-    Inputs:
-        corr               A 2-D correlation matrix with (0,0) located in the
-                           center pixel (shape[0]//2,shape[1]//2).
-        search_size_min    The number of pixels from an offset of zero to
-        search_size_max    search. If either is a single number, the same
-                           search size is used in each dimension. Otherwise it
-                           is (search_size_u, search_size_v). The returned
-                           offsets will always be within the range [min,max].
-        max_offsets        The maximum number of offsets to return.
-        peak_margin        The number of correlation pixels around a peak to
-                           remove from future consideration before finding
-                           the next peak.
+    Parameters:
+        corr: A 2-D correlation matrix with (0,0) located in the center pixel 
+              (shape[0]//2,shape[1]//2).
+        search_size_min: Minimum search range as (min_v, min_u) from offset zero.
+        search_size_max: Maximum search range as (max_v, max_u) from offset zero.
+        max_offsets: The maximum number of offsets to return.
+        peak_margin: The number of correlation pixels around a peak to remove from future
+                    consideration before finding the next peak.
+        logger: Logger object for recording diagnostic information.
 
     Returns:
-        List of
-            (offset_u, offset_v), peak_value, peak_data
-
-        offset_u           The offset in the U direction.
-        offset_v           The offset in the V direction.
-        peak_value         The correlation value at the peak in the range
-                           [-1,1].
-        peak_data          A tuple containing the correlation array and U,V
-                           offset inside that array suitable for passing to
-                           corr_analyze_peak.
+        List of tuples, each containing:
+        - (offset_v, offset_u): The offset in the V and U directions.
+        - peak_value: The correlation value at the peak in the range [-1,1].
+        - peak_data: A tuple containing the correlation array and U,V offset inside
+                    that array suitable for passing to corr_analyze_peak.
     """
 
     search_size_min_v, search_size_min_u = search_size_min
@@ -545,41 +539,28 @@ def find_correlation_and_offset(image: NDArrayFloatType,
                                 ) -> list[tuple[tuple[int, int],
                                                 float,
                                                 tuple[NDArrayFloatType, int, int]]]:
-    """Find the offset that best aligns an image and a model.
-
-    Inputs:
-        image              The image.
-        model              The model to correlate against image.
-        search_size_min    The number of pixels from an offset of zero to
-        search_size_max    search. If either is a single number, the same
-                           search size is used in each dimension. Otherwise it
-                           is (search_size_u, search_size_v). The returned
-                           offsets will always be within the range [min,max].
-        max_offsets        The maximum number of offsets to return.
-        peak_margin        The number of correlation pixels around a peak to
-                           remove from future consideration before finding
-                           the next peak.
-        extfov_margin      The amount the image and model have been extended
-                           on each side (U,V). This is used to search
-                           variations where the model 'margins' are shifted
-                           onto the image from each side one at a time.
-        image_filter       A filter to apply to the image before running
-                           correlation.
-        model_filter       A filter to apply to each sub-model chosen before
-                           running correlation.
+    """Finds the offset that best aligns an image and a model through correlation analysis.
+    
+    Parameters:
+        image: The image array to analyze.
+        model: The model array to correlate against the image.
+        search_size_min: Minimum search range from offset zero. Can be a single int or (min_v, min_u).
+        search_size_max: Maximum search range from offset zero. Can be a single int or (max_v, max_u).
+        max_offsets: Maximum number of offset candidates to return.
+        peak_margin: Number of correlation pixels around a peak to exclude when finding next peaks.
+        extfov_margin_vu: The amount (V,U) the image and model have been extended on each side.
+                         Used to search variations where model margins are shifted onto the image.
+        image_filter: Optional filter function to apply to the image before correlation.
+        model_filter: Optional filter function to apply to each sub-model before correlation.
+        logger: Optional logger object for recording diagnostic information.
 
     Returns:
-        List of
-            (offset_u, offset_v), peak_value, peak_data
-
-        offset_u           The offset in the U direction.
-        offset_v           The offset in the V direction.
-        peak_value         The correlation value at the peak in the range
-                           [-1,1].
-        peak_data          A tuple containing the correlation array and U,V
-                           offset inside that array suitable for passing to
-                           corr_analyze_peak.
-"""
+        List of tuples, each containing:
+        - (offset_v, offset_u): The offset in the V and U directions.
+        - peak_value: The correlation value at the peak in the range [-1,1].
+        - peak_data: A tuple containing the correlation array and U,V offset inside
+                   that array suitable for passing to corr_analyze_peak.
+    """
 
     if logger is None:
         logger = DEFAULT_CONFIG.logger

@@ -6,6 +6,17 @@ from .inst_voyager_iss import InstVoyagerISS  # noqa: F401
 
 
 def inst_id_to_class(inst_id: str) -> type[Inst]:
+    """Returns the appropriate instrument class for the given instrument ID.
+    
+    Parameters:
+        inst_id: The instrument identifier string.
+        
+    Returns:
+        The corresponding instrument class.
+        
+    Raises:
+        ValueError: If the instrument ID is not recognized.
+    """
     match inst_id.upper():
         case 'COISS' | 'COISS_PDS3':
             return InstCassiniISS

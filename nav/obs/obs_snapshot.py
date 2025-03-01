@@ -13,7 +13,11 @@ from .obs import Obs
 
 
 class ObsSnapshot(Obs, Snapshot):
-    """Class that defines cached Backplane and Meshgrid operations on Snapshots."""
+    """Provides cached Backplane and Meshgrid operations for snapshot observations.
+    
+    This class extends both Obs and Snapshot to provide navigation-specific functionality
+    for snapshot observations, including FOV management and backplane caching.
+    """
 
     def __init__(self,
                  snapshot: Snapshot,
@@ -65,24 +69,68 @@ class ObsSnapshot(Obs, Snapshot):
 
     def make_fov_zeros(self,
                        dtype: DTypeLike = np.float64) -> NDArrayFloatType:
+        """Creates a zero-filled array matching the original FOV dimensions.
+        
+        Parameters:
+            dtype: Data type for the array elements.
+            
+        Returns:
+            A zero-filled array with the same shape as the original data.
+        """
+        
         return np.zeros(self.data.shape, dtype=dtype)
 
     def make_extfov_zeros(self,
                           dtype: DTypeLike = np.float64) -> NDArrayFloatType:
+        """Creates a zero-filled array matching the extended FOV dimensions.
+        
+        Parameters:
+            dtype: Data type for the array elements.
+            
+        Returns:
+            A zero-filled array with the same shape as the extended FOV.
+        """
+        
         return np.zeros(self.extdata.shape, dtype=dtype)
 
     def make_extfov_false(self) -> NDArrayBoolType:
+        """Creates a boolean array of False values matching the extended FOV dimensions.
+        
+        Returns:
+            A boolean array of False values with the same shape as the extended FOV.
+        """
+        
         return np.zeros(self.extdata.shape, dtype=np.bool_)
 
     def clip_fov(self,
                  u: int,
                  v: int) -> tuple[int, int]:
+        """Clips coordinates to ensure they are within the original FOV boundaries.
+        
+        Parameters:
+            u: U coordinate to clip
+            v: V coordinate to clip
+            
+        Returns:
+            A tuple of (u, v) coordinates clipped to the FOV boundaries.
+        """
+        
         return (int(np.clip(u, self.fov_u_min, self.fov_u_max)),
                 int(np.clip(v, self.fov_v_min, self.fov_v_max)))
 
     def clip_extfov(self,
                     u: int,
                     v: int) -> tuple[int, int]:
+        """Clips coordinates to ensure they are within the extended FOV boundaries.
+        
+        Parameters:
+            u: U coordinate to clip
+            v: V coordinate to clip
+            
+        Returns:
+            A tuple of (u, v) coordinates clipped to the extended FOV boundaries.
+        """
+        
         return (int(np.clip(u, self.extfov_u_min, self.extfov_u_max)),
                 int(np.clip(v, self.extfov_v_min, self.extfov_v_max)))
 
@@ -179,7 +227,10 @@ class ObsSnapshot(Obs, Snapshot):
         return self._closest_planet
 
     def reset_all(self) -> None:
-        """Reset all Backplanes and Meshgrids to unknown."""
+        """Resets all cached Backplanes and Meshgrids to their initial state.
+        
+        Clears all cached computations, forcing them to be regenerated on next access.
+        """
 
         # Standard FOV
         self._meshgrid = None
@@ -203,7 +254,7 @@ class ObsSnapshot(Obs, Snapshot):
 
     @property
     def bp(self) -> Backplane:
-        """Create a Backplane for the entire original FOV."""
+        """Returns a Backplane for the entire original FOV, creating it if needed."""
 
         if self._bp is None:
             self._bp = Backplane(self, meshgrid=self.meshgrid())
@@ -306,26 +357,33 @@ class ObsSnapshot(Obs, Snapshot):
         return ra_min, ra_max, dec_min, dec_max
 
     def ra_dec_limits(self) -> tuple[float, float, float, float]:
-        """Find the RA and DEC limits of an observation using the standard FOV.
-
+        """Finds the right ascension and declination limits of the observation using the standard FOV.
+        
         Returns:
-            ra_min, ra_max, dec_min, dec_max (radians)
+            A tuple containing (ra_min, ra_max, dec_min, dec_max) in radians.
         """
 
         return self._ra_dec_limits(self.corner_bp)
 
     def ra_dec_limits_ext(self) -> tuple[float, float, float, float]:
-        """Find the RA and DEC limits of an observation using the extended FOV.
-
+        """Finds the right ascension and declination limits of the observation using the extended FOV.
+        
         Returns:
-            ra_min, ra_max, dec_min, dec_max (radians)
+            A tuple containing (ra_min, ra_max, dec_min, dec_max) in radians.
         """
 
         return self._ra_dec_limits(self.ext_corner_bp)
 
     def sun_body_distance(self,
                           body: str) -> float:
-        """Compute the distance from the Sun to an object in km."""
+        """Computes the distance from the Sun to the specified celestial body in kilometers.
+        
+        Parameters:
+            body: Name of the celestial body.
+            
+        Returns:
+            Distance in kilometers from the Sun to the specified body.
+        """
 
         target_sun_path = oops.path.Path.as_waypoint(body.upper()).wrt('SUN')
         sun_event = target_sun_path.event_at_time(self.midtime)
@@ -333,6 +391,13 @@ class ObsSnapshot(Obs, Snapshot):
 
     def body_distance(self,
                       body: str) -> float:
-        """Compute the distance from the spacecraft to an object in km."""
+        """Computes the distance from the spacecraft to the specified celestial body.
+        
+        Parameters:
+            body: Name of the celestial body.
+            
+        Returns:
+            Distance in kilometers from the spacecraft to the specified body.
+        """
 
         return cast(float, self.center_bp.center_distance(body).vals)

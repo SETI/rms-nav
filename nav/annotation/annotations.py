@@ -10,7 +10,13 @@ from nav.support.types import NDArrayBoolType, NDArrayIntType
 
 
 class Annotations:
+    """Manages a collection of annotation objects for an observation.
+    
+    This class provides functionality to combine multiple annotations into a single
+    overlay image and handle text placement.
+    """
     def __init__(self) -> None:
+        """Initializes an empty annotations collection."""
         self._annotations: list[Annotation] = []
 
     def add_annotations(self,
@@ -19,6 +25,15 @@ class Annotations:
                                            'Annotations',
                                            None]
                         ) -> None:
+        """Adds one or more annotations to this collection.
+        
+        Parameters:
+            annotations: The annotation(s) to add. Can be a single Annotation, a list
+                of Annotations, another Annotations object, or None.
+                
+        Raises:
+            ValueError: If an annotation is for a different observation than existing annotations.
+        """
         if annotations is None:
             return
         if isinstance(annotations, Annotations):
@@ -45,7 +60,18 @@ class Annotations:
                 text_avoid_other_text: bool = True,
                 text_show_all_positions: bool = False
                 ) -> NDArrayIntType | None:
-        """Combine all annotations into a single graphic overlay."""
+        """Combines all annotations into a single graphic overlay image.
+        
+        Parameters:
+            offset: Optional offset to apply to all annotations
+            include_text: Whether to include text annotations
+            text_use_avoid_mask: Whether to use avoid masks for text placement
+            text_avoid_other_text: Whether text should avoid other text
+            text_show_all_positions: Whether to show all possible text positions
+            
+        Returns:
+            A combined RGB array containing all annotations, or None if no annotations exist.
+        """
 
         if len(self.annotations) == 0:
             return None
@@ -94,7 +120,16 @@ class Annotations:
                   avoid_mask: NDArrayBoolType,
                   text_avoid_other_text: bool,
                   text_show_all_positions: bool) -> None:
-        """Add label text to an existing overlay."""
+        """Adds label text to an existing overlay image.
+        
+        Parameters:
+            obs: The observation snapshot
+            res: The target image array to modify
+            offset: Offset to apply to annotations
+            avoid_mask: Mask indicating areas to avoid when placing text
+            text_avoid_other_text: Whether text should avoid other text
+            text_show_all_positions: Whether to show all possible text positions
+        """
 
         text_layer = np.zeros_like(res, dtype=np.uint8)
         graphic_layer = np.zeros_like(res, dtype=np.uint8)

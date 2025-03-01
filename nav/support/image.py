@@ -121,7 +121,14 @@ def unpad_array(array: NDArrayType[NPType],
 
 
 def next_power_of_2(n: int) -> int:
-    """Compute the power of 2 >= n."""
+    """Computes the smallest power of 2 that is greater than or equal to n.
+    
+    Parameters:
+        n: The input integer value.
+        
+    Returns:
+        The smallest power of 2 that is greater than or equal to n.
+    """
 
     s = bin(n)[2:]
     if s.count('1') == 1: # Already power of 2
@@ -197,6 +204,16 @@ def pad_array_to_power_of_2(data: NDArrayType[NPType]
 
 def array_zoom(a: NDArrayType[NPType],
                factor: list[int] | tuple[int, ...]) -> NDArrayType[NPType]:
+    """Zooms an array by the specified factor using array indexing.
+    
+    Parameters:
+        a: The input array to zoom.
+        factor: The zoom factor for each dimension of the array.
+        
+    Returns:
+        The zoomed array with dimensions multiplied by the corresponding factors.
+    """
+    
     a = np.asarray(a)
     slices = [slice(0, old, 1/float(f))
                   for (f, old) in zip(factor, a.shape)]
@@ -386,6 +403,20 @@ def filter_sub_median(data: NDArrayFloatType,
 def filter_downsample(arr: NDArrayFloatType,
                       amt_y: int,
                       amt_x: int) -> NDArrayFloatType:
+    """Downsamples an array by averaging blocks of pixels.
+    
+    Parameters:
+        arr: The input array to downsample.
+        amt_y: The vertical downsampling factor.
+        amt_x: The horizontal downsampling factor.
+        
+    Returns:
+        The downsampled array.
+        
+    Raises:
+        AssertionError: If the array dimensions are not divisible by the downsampling factors.
+    """
+    
     assert arr.shape[0] % amt_y == 0
     assert arr.shape[1] % amt_x == 0
     ny = arr.shape[0] // amt_y
@@ -409,6 +440,19 @@ def draw_line_arrow(img: NDArrayType[NPType],
                     thickness: float = 1.,
                     arrow_head_length: int = 10,
                     arrow_head_angle: int = 45) -> None:
+    """Draws a line with an arrow head at the end point.
+    
+    Parameters:
+        img: The 2-D (or higher) array to draw on.
+        color: The scalar (or higher) color to draw.
+        x0: The x-coordinate of the starting point.
+        y0: The y-coordinate of the starting point.
+        x1: The x-coordinate of the ending point.
+        y1: The y-coordinate of the ending point.
+        thickness: The thickness of the line.
+        arrow_head_length: The length of the arrow head lines.
+        arrow_head_angle: The angle in degrees between the arrow head and the main line.
+    """
 
     draw_line(img, color, x0, y0, x1, y1, thickness)
 
