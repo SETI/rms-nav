@@ -1,0 +1,38 @@
+/* Custom styles for RMS-NAV documentation */
+
+/* Improve the display of mermaid diagrams */
+.mermaid {
+    margin: 20px 0;
+}
+
+/* Custom styling for code blocks */
+div.highlight {
+    border-radius: 5px;
+}
+
+/* Improve table styling */
+table.docutils {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 20px;
+}
+
+table.docutils th, table.docutils td {
+    padding: 8px;
+    border: 1px solid #e1e4e5;
+}
+
+table.docutils th {
+    background-color: #f3f6f6;
+    font-weight: bold;
+}
+
+/* Add some spacing for better readability */
+p {
+    margin-bottom: 1em;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    margin-top: 1.5em;
+    margin-bottom: 0.75em;
+}
