@@ -6,7 +6,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from nav.inst import inst_id_to_class
 from nav.nav_master import NavMaster
-import nav.obs.obs_snapshot as obs_snapshot
 
 # URL = URL_CASSINI_ISS_RHEA_01; bodies = ['RHEA']
 # inst_id = 'coiss'; URL = 'https://pds-rings.seti.org/holdings/calibrated/COISS_2xxx/COISS_2042/data/1584035653_1584189857/N1584039961_2_CALIB.IMG'; bodies = ['ENCELADUS']
