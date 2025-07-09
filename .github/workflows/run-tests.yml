@@ -43,7 +43,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest]
-        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
+        python-version: ['3.10', '3.11', '3.12', '3.13']
       fail-fast: false
     permissions:
       contents: read
@@ -75,9 +75,9 @@ jobs:
         run: |
           export PDS3_HOLDINGS_DIR=https://pds-rings.seti.org/holdings
           export PDS4_HOLDINGS_DIR=https://pds-rings.seti.org/pds4
-          export OOPS_RESOURCES=gs://rms-node-oops-resources
-          export UCAC4_PATH=gs://rms-node-star-catalogs/UCAC4
-          export YBSC_PATH=gs://rms-node-star-catalogs/YBSC
+          export OOPS_RESOURCES=https://storage.googleapis.com/rms-node-oops-resources
+          export UCAC4_PATH=https://storage.googleapis.com/rms-node-star-catalogs/UCAC4
+          export YBSC_PATH=https://storage.googleapis.com/rms-node-star-catalogs/YBSC
           python -m pytest --cov
 
       - name: Print coverage report

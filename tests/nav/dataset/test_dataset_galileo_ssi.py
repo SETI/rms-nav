@@ -57,15 +57,3 @@ def test_galileo_ssi_yield_volumes() -> None:
     assert len(ret2) == 1504
     ret3 = [x for x in ret2 if 'GO_0003' not in x and 'GO_0020' not in x]
     assert len(ret3) == 0
-
-# def test_galileo_ssi_camera():
-#     ret = _DS.yield_image_filenames_index(max_filenames=1, volumes=['COISS_1001'],
-#                                           camera='W', retrieve_files=False)
-#     ret = [x.as_posix() for x in ret]
-#     assert len(ret) == 1
-#     assert ret[0].endswith('W1294561143_1.LBL')
-#     ret = _DS.yield_image_filenames_index(max_filenames=1, volumes=['COISS_1001'],
-#                                           camera='N', retrieve_files=False)
-#     ret = [x.as_posix() for x in ret]
-#     assert len(ret) == 1
-#     assert ret[0].endswith('N1294562651_1.LBL')

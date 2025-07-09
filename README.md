@@ -36,7 +36,7 @@ RMS-NAV is a comprehensive navigation system designed for spacecraft imagery pro
 
 ## Prerequisites
 
-- Python 3.9 or higher
+- Python 3.10 or higher
 - SPICE toolkit and kernels for planetary data
 - Dependencies listed in `requirements.txt`
 

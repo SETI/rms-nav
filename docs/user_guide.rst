@@ -43,7 +43,7 @@ Prerequisites
 
 Before using RMS-NAV, you need to have:
 
-* Python 3.9 or higher
+* Python 3.10 or higher
 * SPICE toolkit and kernels for the relevant missions
 * Dependencies installed from ``requirements.txt``
 
