@@ -5,7 +5,7 @@ _DS = dsgossi.DataSetGalileoSSI()
 
 
 def test_galileo_ssi_yield_basic() -> None:
-    ret = _DS.yield_image_filenames_index(max_filenames=2)
+    ret = _DS.yield_image_filenames_index(max_filenames=2, retrieve_files=False)
     ret2 = [x.as_posix() for x in ret]
     assert len(ret2) == 2
     assert ret2[0].endswith(
@@ -15,7 +15,8 @@ def test_galileo_ssi_yield_basic() -> None:
 
 
 def test_galileo_ssi_yield_vol_start() -> None:
-    ret = _DS.yield_image_filenames_index(max_filenames=1, vol_start='GO_0020')
+    ret = _DS.yield_image_filenames_index(max_filenames=1, vol_start='GO_0020',
+                                          retrieve_files=False)
     ret2 = [x.as_posix() for x in ret]
     assert len(ret2) == 1
     assert ret2[0].endswith(
@@ -23,7 +24,7 @@ def test_galileo_ssi_yield_vol_start() -> None:
 
 
 def test_galileo_ssi_yield_vol_end() -> None:
-    ret = _DS.yield_image_filenames_index(vol_end='GO_0003')
+    ret = _DS.yield_image_filenames_index(vol_end='GO_0003', retrieve_files=False)
     ret2 = list(ret)
     assert len(ret2) == 1600
     assert ret2[-1].as_posix().endswith(
@@ -31,7 +32,8 @@ def test_galileo_ssi_yield_vol_end() -> None:
 
 
 def test_galileo_ssi_yield_img_start_num() -> None:
-    ret = _DS.yield_image_filenames_index(max_filenames=2, img_start_num=59468500)
+    ret = _DS.yield_image_filenames_index(max_filenames=2, img_start_num=59468500,
+                                          retrieve_files=False)
     ret2 = [x.as_posix() for x in ret]
     assert len(ret2) == 2
     assert ret2[0].endswith('C0059468500R.LBL')
@@ -39,7 +41,7 @@ def test_galileo_ssi_yield_img_start_num() -> None:
 
 
 def test_galileo_ssi_yield_img_end_num() -> None:
-    ret = _DS.yield_image_filenames_index(img_end_num=59468500)
+    ret = _DS.yield_image_filenames_index(img_end_num=59468500, retrieve_files=False)
     ret2 = [x.as_posix() for x in ret]
     assert len(ret2) == 181
     assert ret2[-2].endswith(
@@ -49,7 +51,8 @@ def test_galileo_ssi_yield_img_end_num() -> None:
 
 
 def test_galileo_ssi_yield_volumes() -> None:
-    ret = _DS.yield_image_filenames_index(volumes=['GO_0003', 'GO_0020'])
+    ret = _DS.yield_image_filenames_index(volumes=['GO_0003', 'GO_0020'],
+                                          retrieve_files=False)
     ret2 = [x.as_posix() for x in ret]
     assert len(ret2) == 1504
     ret3 = [x for x in ret2 if 'GO_0003' not in x and 'GO_0020' not in x]
@@ -57,12 +60,12 @@ def test_galileo_ssi_yield_volumes() -> None:
 
 # def test_galileo_ssi_camera():
 #     ret = _DS.yield_image_filenames_index(max_filenames=1, volumes=['COISS_1001'],
-#                                           camera='W')
+#                                           camera='W', retrieve_files=False)
 #     ret = [x.as_posix() for x in ret]
 #     assert len(ret) == 1
 #     assert ret[0].endswith('W1294561143_1.LBL')
 #     ret = _DS.yield_image_filenames_index(max_filenames=1, volumes=['COISS_1001'],
-#                                           camera='N')
+#                                           camera='N', retrieve_files=False)
 #     ret = [x.as_posix() for x in ret]
 #     assert len(ret) == 1
 #     assert ret[0].endswith('N1294562651_1.LBL')

@@ -5,7 +5,7 @@ _DS = dscoiss.DataSetCassiniISS()
 
 
 def test_cassini_iss_yield_basic() -> None:
-    ret = _DS.yield_image_filenames_index(max_filenames=2)
+    ret = _DS.yield_image_filenames_index(max_filenames=2, retrieve_files=False)
     ret2 = [x.as_posix() for x in ret]
     assert len(ret2) == 2
     assert ret2[0].endswith(
@@ -15,7 +15,8 @@ def test_cassini_iss_yield_basic() -> None:
 
 
 def test_cassini_iss_yield_vol_start() -> None:
-    ret = _DS.yield_image_filenames_index(max_filenames=1, vol_start='COISS_2009')
+    ret = _DS.yield_image_filenames_index(max_filenames=1, vol_start='COISS_2009',
+                                          retrieve_files=False)
     ret2 = [x.as_posix() for x in ret]
     assert len(ret2) == 1
     assert ret2[0].endswith(
@@ -23,7 +24,7 @@ def test_cassini_iss_yield_vol_start() -> None:
 
 
 def test_cassini_iss_yield_vol_end() -> None:
-    ret = _DS.yield_image_filenames_index(vol_end='COISS_1002')
+    ret = _DS.yield_image_filenames_index(vol_end='COISS_1002', retrieve_files=False)
     ret2 = list(ret)
     assert len(ret2) == 8868
     assert ret2[-1].as_posix().endswith(
@@ -31,7 +32,8 @@ def test_cassini_iss_yield_vol_end() -> None:
 
 
 def test_cassini_iss_yield_img_start_num() -> None:
-    ret = _DS.yield_image_filenames_index(max_filenames=2, img_start_num=1353634555)
+    ret = _DS.yield_image_filenames_index(max_filenames=2, img_start_num=1353634555,
+                                          retrieve_files=False)
     ret2 = [x.as_posix() for x in ret]
     assert len(ret2) == 2
     assert ret2[0].endswith('N1353634555_1.LBL')
@@ -39,7 +41,7 @@ def test_cassini_iss_yield_img_start_num() -> None:
 
 
 def test_cassini_iss_yield_img_end_num() -> None:
-    ret = _DS.yield_image_filenames_index(img_end_num=1294561202)
+    ret = _DS.yield_image_filenames_index(img_end_num=1294561202, retrieve_files=False)
     ret2 = [x.as_posix() for x in ret]
     assert len(ret2) == 2
     assert ret2[0].endswith(
@@ -49,7 +51,8 @@ def test_cassini_iss_yield_img_end_num() -> None:
 
 
 def test_cassini_iss_yield_volumes() -> None:
-    ret = _DS.yield_image_filenames_index(volumes=['COISS_1001', 'COISS_2009'])
+    ret = _DS.yield_image_filenames_index(volumes=['COISS_1001', 'COISS_2009'],
+                                          retrieve_files=False)
     ret2 = [x.as_posix() for x in ret]
     assert len(ret2) == 8421
     ret3 = [x for x in ret2 if 'COISS_1001' not in x and 'COISS_2009' not in x]
@@ -58,12 +61,12 @@ def test_cassini_iss_yield_volumes() -> None:
 
 def test_cassini_iss_camera() -> None:
     ret = _DS.yield_image_filenames_index(max_filenames=1, volumes=['COISS_1001'],
-                                          camera='W')
+                                          camera='W', retrieve_files=False)
     ret2 = [x.as_posix() for x in ret]
     assert len(ret2) == 1
     assert ret2[0].endswith('W1294561143_1.LBL')
     ret = _DS.yield_image_filenames_index(max_filenames=1, volumes=['COISS_1001'],
-                                          camera='N')
+                                          camera='N', retrieve_files=False)
     ret2 = [x.as_posix() for x in ret]
     assert len(ret2) == 1
     assert ret2[0].endswith('N1294562651_1.LBL')

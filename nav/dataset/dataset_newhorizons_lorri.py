@@ -1,4 +1,3 @@
-import re
 from typing import Any, cast
 
 from .dataset_pds3 import DataSetPDS3
@@ -46,10 +45,18 @@ class DataSetNewHorizonsLORRI(DataSetPDS3):
 
     @staticmethod
     def _extract_image_number(f: str) -> int | None:
-        m = re.match(r'lor_(\d{10})_0x\d{3}_sci\.\w+', f)
-        if m is None:
+        if not f.startswith('lor_'):
             return None
-        return int(m[1])
+        if f[14:17] != '_0x':
+            return None
+        if f[20:24] != '_sci':
+            return None
+        img_num_str = f[4:14]
+        try:
+            img_num = int(img_num_str)
+        except ValueError:
+            return None
+        return img_num
 
     @staticmethod
     def _extract_camera(f: str) -> str | None:
@@ -65,6 +72,7 @@ class DataSetNewHorizonsLORRI(DataSetPDS3):
         'parse_filespec': _parse_filespec,
         'volset_and_volume': lambda v: f'NHxxLO_xxxx/{v}',
         'volume_to_index': lambda v: f'NHxxLO_xxxx/{v}/{v}_index.lbl',
+        'index_columns': ('FILE_SPECIFICATION_NAME',),
     }
 
     def __init__(self,

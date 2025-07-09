@@ -371,19 +371,23 @@ class DataSetPDS3(DataSet):
 
     @lru_cache(maxsize=3)
     def _read_pds_table(self,
-                        fn: str) -> PdsTable:
+                        fn: str,
+                        columns: Optional[tuple[str, ...]] = None) -> PdsTable:
         """Reads a PDS table file with caching.
 
         Parameters:
             fn: Path to the PDS table file.
+            columns: Optional tuple of column names to read. If None, all columns
+                     are read. This is useful for improving performance.
 
         Returns:
             The parsed PdsTable object.
         """
-        return PdsTable(fn)
+        return PdsTable(fn, columns=columns, label_method='fast')
 
     def yield_image_filenames_index(self,
                                     *,
+                                    retrieve_files: bool = True,
                                     img_start_num: Optional[int] = None,
                                     img_end_num: Optional[int] = None,
                                     vol_start: Optional[str] = None,
@@ -430,6 +434,7 @@ class DataSetPDS3(DataSet):
         parse_filespec = dataset_layout['parse_filespec']
         volset_and_volume = dataset_layout['volset_and_volume']
         volume_to_index = dataset_layout['volume_to_index']
+        index_columns = dataset_layout['index_columns']
 
         if volumes is not None:
             for vol in volumes:
@@ -523,7 +528,8 @@ class DataSetPDS3(DataSet):
                 #     if not os.path.isdir(search_vol_fulldir):
                 #         continue
 
-                index_tab = self._read_pds_table(index_label_localpath)
+                index_tab = self._read_pds_table(index_label_localpath,
+                                                 columns=index_columns)
                 rows = index_tab.dicts_by_row()
                 if choose_random_images:
                     random.shuffle(rows)
@@ -541,12 +547,12 @@ class DataSetPDS3(DataSet):
                     img_num = extract_image_number(img_name)
                     if img_num is None:
                         raise ValueError(
-                            f'IMGNUM Index file "{index_tab_abspath}" contains bad '
+                            f'IMGNUM: Index file "{index_tab_abspath}" contains bad '
                             f'path "{filespec}"')
                     img_camera = extract_camera(img_name)
                     if img_camera is None:
                         raise ValueError(
-                            f'IMGCAM Index file "{index_tab_abspath}" contains bad '
+                            f'IMGCAM: Index file "{index_tab_abspath}" contains bad '
                             f'path "{filespec}"')
                     if img_end_num is not None and img_num > img_end_num:
                         # Images are in monotonically increasing order, so we can just
@@ -606,8 +612,12 @@ class DataSetPDS3(DataSet):
                         label_path = img_path.with_suffix('.lbl')
                     else:
                         label_path = img_path.with_suffix('.LBL')
-                    ret = self._index_filecache.retrieve([img_path, label_path])
-                    img_path_local, label_path_local = cast(list[Path], ret)
+                    if retrieve_files:
+                        ret = self._index_filecache.retrieve([img_path, label_path])
+                        img_path_local, label_path_local = cast(list[Path], ret)
+                    else:
+                        img_path_local = img_path
+                        label_path_local = label_path
                     yield label_path_local
 
                     num_yields += 1

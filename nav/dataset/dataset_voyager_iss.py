@@ -1,4 +1,3 @@
-import re
 from typing import Any, cast
 
 from .dataset_pds3 import DataSetPDS3
@@ -81,10 +80,16 @@ class DataSetVoyagerISS(DataSetPDS3):
 
     @staticmethod
     def _extract_image_number(f: str) -> int | None:
-        m = re.match(r'C(\d{7})_GEOMED\.\w+', f)
-        if m is None:
+        if f[0] != 'C':
             return None
-        return int(m[1])
+        if f[8:15] != '_GEOMED':
+            return None
+        img_num_str = f[1:8]
+        try:
+            img_num = int(img_num_str)
+        except ValueError:
+            return None
+        return img_num
 
     @staticmethod
     def _extract_camera(f: str) -> str | None:
@@ -104,6 +109,7 @@ class DataSetVoyagerISS(DataSetPDS3):
         'parse_filespec': _parse_filespec,
         'volset_and_volume': lambda v: f'VGISS_{v[6]}xxx/{v}',
         'volume_to_index': lambda v: f'VGISS_{v[6]}xxx/{v}/{v}_index.lbl',
+        'index_columns': ('FILE_SPECIFICATION_NAME',),
     }
 
     def __init__(self,

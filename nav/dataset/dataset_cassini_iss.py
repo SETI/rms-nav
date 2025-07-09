@@ -1,4 +1,3 @@
-import re
 from typing import Any, cast
 
 from .dataset_pds3 import DataSetPDS3
@@ -54,17 +53,22 @@ class DataSetCassiniISS(DataSetPDS3):
 
     @staticmethod
     def _extract_image_number(f: str) -> int | None:
-        m = re.match(r'[NW](\d{10})_\d{1,2}\.\w+', f)
-        if m is None:
+        if f[0] not in 'NW':
             return None
-        return int(m[1])
+        if f[11] != '_':
+            return None
+        img_num_str = f[1:11]
+        try:
+            img_num = int(img_num_str)
+        except ValueError:
+            return None
+        return img_num
 
     @staticmethod
     def _extract_camera(f: str) -> str | None:
-        m = re.match(r'([NW])\d{10}_\d{1,2}\.\w+', f)
-        if m is None:
+        if f[0] not in 'NW':
             return None
-        return m[1]
+        return f[0]
 
     _DATASET_LAYOUT = {
         'all_volume_names': [f'COISS_{x:04d}' for x in
@@ -76,6 +80,7 @@ class DataSetCassiniISS(DataSetPDS3):
         'parse_filespec': _parse_filespec,
         'volset_and_volume': lambda v: f'COISS_{v[6]}xxx/{v}',
         'volume_to_index': lambda v: f'COISS_{v[6]}xxx/{v}/{v}_index.lbl',
+        'index_columns': ('FILE_SPECIFICATION_NAME',),
     }
 
     def __init__(self,

@@ -4,6 +4,7 @@ matplotlib
 mypy
 myst-parser
 numpy
+pyinstrument  # For visualizing profiles
 pytest
 pytest-cov
 pytest-profiling
