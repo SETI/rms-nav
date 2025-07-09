@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 from multiprocessing import Value
 import pprint
 from typing import Any, Callable, Optional, cast
@@ -37,7 +38,7 @@ def correlate2d(image: NDArrayFloatType,
                 normalize: bool = False,
                 retile: bool = False) -> NDArrayFloatType:
     """Correlates the image with the model using the correlation theorem.
-    
+
     Correlation is performed using the 'correlation theorem' that equates
     correlation with a Fourier Transform.
 
@@ -94,7 +95,7 @@ def corr_analyze_peak(corr, offset_u, offset_v, large_psf=True,
     """Analyzes the correlation peak with a 2-D Gaussian fit.
 
     Parameters:
-        corr: A 2-D correlation matrix with (0,0) located in the center pixel 
+        corr: A 2-D correlation matrix with (0,0) located in the center pixel
              (shape[0]//2,shape[1]//2).
         offset_u: The U coordinate of the peak in corr.
         offset_v: The V coordinate of the peak in corr.
@@ -283,12 +284,12 @@ def corr_analyze_peak(corr, offset_u, offset_v, large_psf=True,
 
 def corr_log_xy_err(logger, psf_details):
     """Logs correlation position and error information to the provided logger.
-    
+
     Parameters:
         logger: The logger object to write information to.
         psf_details: Dictionary containing PSF analysis results from corr_analyze_peak.
     """
-    
+
     str_list = []
     if psf_details['xy_rot_err_1'] is None:
         logger.info('  dX %.3f dY %.3f (uncertainty failed)' % (psf_details['x'], psf_details['y']))
@@ -301,17 +302,17 @@ def corr_log_xy_err(logger, psf_details):
 
 def corr_xy_err_to_str(offset, uncertainty, extra=None, extra_args=None):
     """Converts correlation offset and uncertainty information to a formatted string.
-    
+
     Parameters:
         offset: A tuple (x,y) containing the offset coordinates.
         uncertainty: A tuple (xy_rot_err_1, xy_rot_err_2, xy_rot_angle) containing uncertainty values.
         extra: Optional format string to append additional information.
         extra_args: Optional arguments for the extra format string.
-        
+
     Returns:
         A formatted string representation of the offset and uncertainty.
     """
-    
+
     # offset is (x,y)
     # uncertainty is (xy_rot_err_1, xy_rot_err_2, xy_rot_angle)
     if (offset is None or
@@ -339,17 +340,17 @@ def corr_xy_err_to_str(offset, uncertainty, extra=None, extra_args=None):
 
 def corr_psf_xy_err_to_str(offset, psf_details, extra=None, extra_args=None):
     """Converts correlation offset and PSF details to a formatted string.
-    
+
     Parameters:
         offset: A tuple (x,y) containing the offset coordinates.
         psf_details: Dictionary containing PSF analysis results from corr_analyze_peak.
         extra: Optional format string to append additional information.
         extra_args: Optional arguments for the extra format string.
-        
+
     Returns:
         A formatted string representation of the offset and uncertainty from PSF details.
     """
-    
+
     if psf_details is None:
         return corr_xy_err_to_str(offset, (None, None, None), extra, extra_args)
     return corr_xy_err_to_str(offset,
@@ -365,14 +366,14 @@ def _find_correlated_offset(corr: NDArrayFloatType,
                             peak_margin: int,
                             logger: PdsLogger):
     """Finds the offset that best aligns an image and a model given the correlation.
-    
+
     The offset is found by looking for the maximum correlation value within
     the given search range. Multiple offsets may be returned, in which case
     each peak and the area around it is eliminated from future consideration
     before the next peak is found.
 
     Parameters:
-        corr: A 2-D correlation matrix with (0,0) located in the center pixel 
+        corr: A 2-D correlation matrix with (0,0) located in the center pixel
               (shape[0]//2,shape[1]//2).
         search_size_min: Minimum search range as (min_v, min_u) from offset zero.
         search_size_max: Maximum search range as (max_v, max_u) from offset zero.
@@ -540,7 +541,7 @@ def find_correlation_and_offset(image: NDArrayFloatType,
                                                 float,
                                                 tuple[NDArrayFloatType, int, int]]]:
     """Finds the offset that best aligns an image and a model through correlation analysis.
-    
+
     Parameters:
         image: The image array to analyze.
         model: The model array to correlate against the image.

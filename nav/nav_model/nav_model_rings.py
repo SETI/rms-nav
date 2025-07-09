@@ -1,18 +1,18 @@
-from typing import Any, Optional, cast
+from typing import Any
 
-import numpy as np
+# import numpy as np
 
 from oops import Observation
-import polymath
+# import polymath
 
-from nav.annotation import (Annotation,
-                            Annotations,
-                            AnnotationTextInfo,
-                            TEXTINFO_LEFT,
-                            TEXTINFO_RIGHT,
-                            TEXTINFO_BOTTOM,
-                            TEXTINFO_TOP)
-from nav.support.types import NDArrayFloatType
+# from nav.annotation import (Annotation,
+#                             Annotations,
+#                             AnnotationTextInfo,
+#                             TEXTINFO_LEFT,
+#                             TEXTINFO_RIGHT,
+#                             TEXTINFO_BOTTOM,
+#                             TEXTINFO_TOP)
+# from nav.support.types import NDArrayFloatType
 
 from .nav_model import NavModel
 
@@ -22,7 +22,7 @@ class NavModelRings(NavModel):
                  obs: Observation,
                  **kwargs: Any) -> None:
         """Creates a navigation model for planetary rings.
-        
+
         Parameters:
             obs: The Observation object containing image data.
             **kwargs: Additional keyword arguments to pass to the parent class.

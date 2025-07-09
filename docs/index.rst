@@ -1,9 +1,11 @@
 .. RMS-NAV documentation master file
 
-Welcome to RMS-NAV's documentation!
-==================================
+Welcome to the Documentation for RMS-NAV!
+=========================================
 
-RMS-NAV is a comprehensive navigation system designed for spacecraft imagery processing. It provides tools to analyze images from various space missions (Cassini, Voyager, Galileo, New Horizons) and determine precise positional offsets by comparing observed images with theoretical models of celestial bodies.
+.. include:: ../README.md
+   :parser: myst_parser.sphinx_
+   :start-after: forks/SETI/rms-nav)
 
 .. toctree::
    :maxdepth: 2

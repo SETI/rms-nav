@@ -6,7 +6,7 @@ from .dataset_pds3 import DataSetPDS3
 
 class DataSetCassiniISS(DataSetPDS3):
     """Implements dataset access for Cassini ISS (Imaging Science Subsystem) data.
-    
+
     This class provides specialized functionality for accessing and parsing Cassini
     ISS image data stored in PDS3 format.
     """

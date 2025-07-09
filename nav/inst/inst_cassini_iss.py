@@ -16,7 +16,7 @@ class InstCassiniISS(Inst):
                  obs: Observation,
                  **kwargs: Any) -> None:
         """Initializes a Cassini ISS instrument instance.
-        
+
         Parameters:
             obs: The Observation object containing Cassini ISS image data.
             **kwargs: Additional keyword arguments to pass to the parent class.
@@ -28,13 +28,13 @@ class InstCassiniISS(Inst):
                   config: Optional[Config] = None,
                   extfov_margin_vu: tuple[int, int] | None = None) -> ObsSnapshot:
         """Creates an ObsSnapshot from a Cassini ISS image file.
-        
+
         Parameters:
             path: Path to the Cassini ISS image file.
             config: Configuration object to use. If None, uses the default configuration.
             extfov_margin_vu: Optional tuple specifying the extended field of view margins
                 in (vertical, horizontal) pixels.
-                
+
         Returns:
             An ObsSnapshot object containing the image data and metadata.
         """
@@ -53,7 +53,7 @@ class InstCassiniISS(Inst):
 
     def star_psf(self) -> PSF:
         """Returns the point spread function for Cassini ISS stars.
-        
+
         Returns:
             A Gaussian PSF object with the appropriate sigma value for Cassini ISS.
         """

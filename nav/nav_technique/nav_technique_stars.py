@@ -7,7 +7,7 @@ from .nav_technique import NavTechnique
 
 class NavTechniqueStars(NavTechnique):
     """Implements navigation technique using star field correlation.
-    
+
     Parameters:
         *args: Variable length argument list passed to parent class
         **kwargs: Arbitrary keyword arguments passed to parent class
@@ -19,11 +19,10 @@ class NavTechniqueStars(NavTechnique):
 
     def navigate(self) -> None:
         """Performs navigation using star field correlation.
-        
+
         Attempts to find correlation between observed image and star model,
         computing the offset if successful.
         """
-
 
         with self.logger.open('NAVIGATION PASS: STARS CORRELATION'):
             obs = self.nav_master.obs
@@ -35,6 +34,8 @@ class NavTechniqueStars(NavTechnique):
                 self.logger.fatal('More than one star model available')
                 return
             final_model = star_models[0].model_img
+
+            assert final_model is not None
 
             model_offset_list = find_correlation_and_offset(
                 obs.extdata, final_model, extfov_margin_vu=obs.extfov_margin_vu,

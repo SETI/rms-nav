@@ -1,11 +1,11 @@
 import oops
 import pytest
 
-from nav.util.misc import (dec_rad_to_dms,
-                           ra_rad_to_hms,
-                           )
+from nav.support.misc import (dec_rad_to_dms,
+                              ra_rad_to_hms)
 
-def test_ra_rad_to_hms():
+
+def test_ra_rad_to_hms() -> None:
     assert ra_rad_to_hms(0) == '00h00m00.000s'
     assert ra_rad_to_hms(1 * oops.RPD) == '00h04m00.000s'
     assert ra_rad_to_hms(14 * oops.RPD) == '00h56m00.000s'
@@ -17,7 +17,8 @@ def test_ra_rad_to_hms():
     with pytest.raises(ValueError):
         ra_rad_to_hms(-1)
 
-def test_dec_rad_to_dms():
+
+def test_dec_rad_to_dms() -> None:
     assert dec_rad_to_dms(0) == '+000d00m00.000s'
     assert dec_rad_to_dms(1 * oops.RPD) == '+001d00m00.000s'
     assert dec_rad_to_dms(14 * oops.RPD) == '+014d00m00.000s'

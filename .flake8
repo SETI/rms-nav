@@ -1,4 +1,11 @@
 [flake8]
-max-line-length: 90
+max-line-length: 100
+exclude =
+    nav/nav_model/nav_model_stars.py
+    nav/support/correlate.py
+    nav/support/flux.py
+    nav/support/image.py
+
 extend-ignore = E129
 per-file-ignores =
+    tests/config.py: E501

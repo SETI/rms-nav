@@ -7,7 +7,7 @@ from .nav_technique import NavTechnique
 
 class NavTechniqueAllModels(NavTechnique):
     """Implements navigation technique using correlation across all available models.
-    
+
     Parameters:
         *args: Variable length argument list passed to parent class
         **kwargs: Arbitrary keyword arguments passed to parent class
@@ -19,15 +19,16 @@ class NavTechniqueAllModels(NavTechnique):
 
     def navigate(self) -> None:
         """Performs navigation using correlation across all available models.
-        
+
         Attempts to find correlation between observed image and combined model,
         computing the offset if successful.
         """
 
-
         with self.logger.open('NAVIGATION PASS: ALL MODELS CORRELATION'):
             obs = self.nav_master.obs
             final_model = self.nav_master.combined_model
+
+            assert final_model is not None
 
             model_offset_list = find_correlation_and_offset(
                 obs.extdata, final_model, extfov_margin_vu=obs.extfov_margin_vu,

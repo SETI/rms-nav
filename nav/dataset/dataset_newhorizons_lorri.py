@@ -8,7 +8,7 @@ class DataSetNewHorizonsLORRI(DataSetPDS3):
 
     @staticmethod
     def _get_filespec(row: dict[str, Any]) -> str:
-        return cast(str, row['PATH_NAME']) + cast(str, row['FILE_NAME'])
+        return cast(str, row['FILE_SPECIFICATION_NAME'])
 
     @staticmethod
     def _parse_filespec(filespec: str,

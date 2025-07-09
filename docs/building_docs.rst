@@ -1,11 +1,11 @@
-=========================
+==========================
 Building the Documentation
-=========================
+==========================
 
 This guide explains how to build the RMS-NAV documentation locally.
 
 Prerequisites
-------------
+-------------
 
 1. Install the required Python packages:
 
@@ -14,7 +14,7 @@ Prerequisites
       pip install sphinx sphinx-rtd-theme myst-parser sphinxcontrib-napoleon sphinxcontrib-mermaid
 
 Building HTML Documentation
--------------------------
+---------------------------
 
 1. Navigate to the docs directory:
 
@@ -31,7 +31,7 @@ Building HTML Documentation
 3. The built documentation will be available in ``docs/_build/html``. Open ``index.html`` in your browser to view it.
 
 Building Other Formats
---------------------
+----------------------
 
 PDF (requires LaTeX):
 
@@ -52,7 +52,7 @@ EPUB:
    make epub
 
 Working with Mermaid Diagrams
----------------------------
+-----------------------------
 
 Mermaid diagrams are rendered using the sphinxcontrib-mermaid extension. To create or modify diagrams:
 
@@ -75,13 +75,13 @@ Example Mermaid diagram syntax:
          class DataSet {
              <<abstract>>
              +__init__(config, logger_name)
-             +image_name_valid(name)* 
+             +image_name_valid(name)*
              +yield_image_filenames_from_arguments(args)*
          }
          NavBase <|-- DataSet
 
 Updating API Documentation
-------------------------
+--------------------------
 
 The API documentation is automatically generated from docstrings in the code. To update it:
 
@@ -91,7 +91,7 @@ The API documentation is automatically generated from docstrings in the code. To
 If you add new modules, you may need to update ``api_reference.rst`` to include them.
 
 Troubleshooting
--------------
+---------------
 
 If you encounter issues with the documentation build:
 

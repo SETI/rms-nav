@@ -22,10 +22,10 @@ class DataSetVoyagerISS(DataSetPDS3):
     @staticmethod
     def _get_filespec(row: dict[str, Any]) -> str:
         """Extracts the file specification from a data row.
-        
+
         Parameters:
             row: Dictionary containing PDS3 index table row data.
-            
+
         Returns:
             The file specification string from the row.
         """
@@ -37,16 +37,16 @@ class DataSetVoyagerISS(DataSetPDS3):
                         volume: str,
                         index_tab_abspath: str) -> str | None:
         """Parses a file specification to extract the image name.
-        
+
         Parameters:
             filespec: The file specification string to parse.
             volumes: List of volume names to check against.
             volume: The current volume name.
             index_tab_abspath: Absolute path to the index table file.
-            
+
         Returns:
             The image name if valid, None otherwise.
-            
+
         Raises:
             ValueError: If the file specification format is invalid.
         """
@@ -110,7 +110,7 @@ class DataSetVoyagerISS(DataSetPDS3):
                  *args: Any,
                  **kwargs: Any) -> None:
         """Initializes a Voyager ISS dataset handler.
-        
+
         Parameters:
             *args: Positional arguments to pass to the parent class.
             **kwargs: Keyword arguments to pass to the parent class.

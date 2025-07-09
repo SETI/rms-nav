@@ -11,7 +11,7 @@ from nav.support.types import NDArrayBoolType, NDArrayIntType
 
 class Annotations:
     """Manages a collection of annotation objects for an observation.
-    
+
     This class provides functionality to combine multiple annotations into a single
     overlay image and handle text placement.
     """
@@ -26,13 +26,14 @@ class Annotations:
                                            None]
                         ) -> None:
         """Adds one or more annotations to this collection.
-        
+
         Parameters:
             annotations: The annotation(s) to add. Can be a single Annotation, a list
                 of Annotations, another Annotations object, or None.
-                
+
         Raises:
-            ValueError: If an annotation is for a different observation than existing annotations.
+            ValueError: If an annotation is for a different observation than existing
+            annotations.
         """
         if annotations is None:
             return
@@ -61,16 +62,17 @@ class Annotations:
                 text_show_all_positions: bool = False
                 ) -> NDArrayIntType | None:
         """Combines all annotations into a single graphic overlay image.
-        
+
         Parameters:
             offset: Optional offset to apply to all annotations
             include_text: Whether to include text annotations
             text_use_avoid_mask: Whether to use avoid masks for text placement
             text_avoid_other_text: Whether text should avoid other text
             text_show_all_positions: Whether to show all possible text positions
-            
+
         Returns:
-            A combined RGB array containing all annotations, or None if no annotations exist.
+            A combined RGB array containing all annotations, or None if no annotations
+            exist.
         """
 
         if len(self.annotations) == 0:
@@ -121,7 +123,7 @@ class Annotations:
                   text_avoid_other_text: bool,
                   text_show_all_positions: bool) -> None:
         """Adds label text to an existing overlay image.
-        
+
         Parameters:
             obs: The observation snapshot
             res: The target image array to modify

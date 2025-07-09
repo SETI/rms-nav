@@ -23,15 +23,16 @@ TEXTINFO_CENTER = 'center'
 
 TextLocInfo = namedtuple('TextLocInfo', ['label', 'label_v', 'label_u'])
 
+
 @functools.cache
 def _load_font(path: str,
                size: int) -> ImageFont.FreeTypeFont:
     """Loads and caches a font for text rendering.
-    
+
     Parameters:
         path: Path to the font file.
         size: Font size in points.
-        
+
     Returns:
         A FreeTypeFont object for the specified font and size.
     """
@@ -48,7 +49,7 @@ class AnnotationTextInfo:
                  font: str,
                  font_size: int):
         """Initializes text annotation information.
-        
+
         Parameters:
             text: The text to display.
             text_loc: List of possible text locations with positioning information.
@@ -76,7 +77,6 @@ class AnnotationTextInfo:
         """Returns the list of possible text locations."""
         return self._text_loc
 
-
     @property
     def ref_vu(self) -> tuple[int, int] | None:
         """Returns the reference point (v, u) that the text is associated with."""
@@ -86,7 +86,6 @@ class AnnotationTextInfo:
     def color(self) -> tuple[int, ...]:
         """Returns the RGB or RGBA color tuple for the text."""
         return self._color
-
 
     @property
     def font(self) -> str:
@@ -110,8 +109,8 @@ class AnnotationTextInfo:
                    text_draw: ImageDraw.ImageDraw,
                    tt_dir: str,
                    show_all_positions: bool) -> bool:
-        """Tries to place the text in a location that doesn't conflict with other elements.
-        
+        """Try to place the text in a location that doesn't conflict with other elements.
+
         Parameters:
             ann_num: Annotation number for identification.
             extfov: Extended field of view margins (v, u).
@@ -122,8 +121,9 @@ class AnnotationTextInfo:
             ann_num_mask: Mask tracking where annotations have been placed.
             text_draw: ImageDraw object for rendering text.
             tt_dir: Directory containing TrueType fonts.
-            show_all_positions: Whether to try all positions or stop after finding the first valid one.
-            
+            show_all_positions: Whether to try all positions or stop after finding the
+                first valid one.
+
         Returns:
             True if the text was successfully placed, False otherwise.
         """

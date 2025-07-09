@@ -4,7 +4,7 @@ from typing import Any, Optional, Sequence, cast
 import matplotlib.pyplot as plt
 from oops import Observation
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image
 
 from nav.annotation import Annotations
 from nav.config import Config
@@ -14,8 +14,7 @@ from nav.nav_model import (NavModel,
                            NavModelStars,
                            NavModelTitan)
 from nav.nav_technique import (NavTechniqueAllModels,
-                               NavTechniqueStars,
-                               NavTechniqueTitan)
+                               NavTechniqueStars)
 from nav.support.nav_base import NavBase
 from nav.support.file import dump_yaml
 from nav.support.types import NDArrayFloatType
@@ -23,19 +22,19 @@ from nav.support.types import NDArrayFloatType
 
 class NavMaster(NavBase):
     """Coordinates the overall navigation process using multiple models and techniques.
-    
-    This class manages the creation of different navigation models (stars, bodies, rings, 
+
+    This class manages the creation of different navigation models (stars, bodies, rings,
     Titan), combines them appropriately, and applies navigation techniques to determine
     the final offset between predicted and actual positions.
     """
-    
+
     def __init__(self,
                  obs: Observation,
                  *,
                  config: Optional[Config] = None,
                  logger_name: Optional[str] = None) -> None:
         """Initializes a navigation master object for an observation.
-        
+
         Parameters:
             obs: The observation object containing image and metadata.
             config: Optional configuration object. If None, uses the default configuration.
@@ -95,8 +94,10 @@ class NavMaster(NavBase):
     @property
     def all_models(self) -> Sequence[NavModel]:
         """Returns a sequence containing all navigation models."""
-        return (self.star_models + self.body_models +
-                self.ring_models + self.titan_models)
+        return (cast(list[NavModel], self.star_models) +
+                cast(list[NavModel], self.body_models) +
+                cast(list[NavModel], self.ring_models) +
+                cast(list[NavModel], self.titan_models))
 
     @property
     def combined_model(self) -> NDArrayFloatType | None:
@@ -106,7 +107,7 @@ class NavMaster(NavBase):
 
     def compute_star_models(self) -> None:
         """Creates navigation models for stars in the observation.
-        
+
         If star models have already been computed, does nothing.
         """
 
@@ -122,12 +123,11 @@ class NavMaster(NavBase):
 
     def compute_body_models(self) -> None:
         """Creates navigation models for planetary bodies in the observation.
-        
+
         Identifies visible bodies within the field of view, sorts them by distance,
-        and creates a navigation model for each one. If body models have already been 
+        and creates a navigation model for each one. If body models have already been
         computed, does nothing.
         """
-
 
         if self._body_models is not None:
             return
@@ -144,11 +144,11 @@ class NavMaster(NavBase):
         def _body_in_fov(obs: Observation,
                          inv: dict[str, Any]) -> bool:
             """Determines if a body is within the extended field of view.
-            
+
             Parameters:
                 obs: The observation object.
                 inv: The inventory dictionary for the body.
-                
+
             Returns:
                 True if the body is at least partially within the extended field of view.
             """
@@ -159,8 +159,8 @@ class NavMaster(NavBase):
                          inv['v_min_unclipped'] <= obs.extfov_v_max))
 
         large_bodies_by_range = [(x, large_body_dict[x])
-                                    for x in large_body_dict
-                                        if _body_in_fov(obs, large_body_dict[x])]
+                                 for x in large_body_dict
+                                 if _body_in_fov(obs, large_body_dict[x])]
         large_bodies_by_range.sort(key=lambda x: x[1]['range'])
 
         logger.info('Closest planet: %s', obs.closest_planet)
@@ -178,7 +178,7 @@ class NavMaster(NavBase):
 
     def compute_ring_models(self) -> None:
         """Creates navigation models for planetary rings in the observation.
-        
+
         If ring models have already been computed, does nothing.
         """
 
@@ -189,7 +189,7 @@ class NavMaster(NavBase):
 
     def compute_titan_models(self) -> None:
         """Creates Titan-specific navigation models for the observation.
-        
+
         If Titan models have already been computed, does nothing.
         """
 
@@ -200,7 +200,7 @@ class NavMaster(NavBase):
 
     def compute_all_models(self) -> None:
         """Creates all navigation models for the observation.
-        
+
         This includes star models, ring models, body models, and Titan-specific models.
         """
 
@@ -209,15 +209,15 @@ class NavMaster(NavBase):
         self.compute_body_models()
         self.compute_titan_models()
 
-    def _create_combined_model(self):
+    def _create_combined_model(self) -> None:
         """Creates a combined model from all individual navigation models.
-        
+
         For each pixel, selects the model element from the object with the smallest range
         (closest to the observer), which would appear in front of other objects.
         """
 
         if self._combined_model is not None:
-            return self._combined_model
+            return
 
         # Create a single model which, for each pixel, has the element from the model with
         # the smallest range (to the observer), and is thus in front.
@@ -234,7 +234,7 @@ class NavMaster(NavBase):
                     range = 0
                 else:
                     range = model.range
-                range = cast(NDArrayFloatType, np.zeros_like(model.model_img)) + range
+                range = np.zeros_like(model.model_img) + range
             ranges.append(range)
 
         if len(model_imgs) == 0:
@@ -251,7 +251,7 @@ class NavMaster(NavBase):
 
     def navigate(self) -> None:
         """Performs navigation by applying different navigation techniques.
-        
+
         Computes all navigation models, then applies star-based and all-model-based
         navigation techniques. Determines the final offset based on the results.
         """
@@ -265,19 +265,17 @@ class NavMaster(NavBase):
         nav_all.navigate()
         self._offsets['all_models'] = nav_all.offset
 
-        if nav_stars.offset is not None:  # TODO More logic here
-            self._offset = nav_stars.offset
+        if nav_stars.offset is not None:
+            self._final_offset = nav_stars.offset
         else:
-            self._offset = nav_all.offset
-
+            self._final_offset = nav_all.offset
 
     def create_overlay(self) -> None:
         """Creates a visual overlay combining the image and navigation annotations.
-        
+
         Combines all model annotations, applies the computed offset, and generates
         an annotated image with contrast adjustment.
         """
-
 
         obs = self._obs
 
@@ -288,8 +286,8 @@ class NavMaster(NavBase):
             dump_yaml(model.metadata)
 
         offset = (0., 0.)
-        if self._offset is not None:
-            offset = self._offset
+        if self._final_offset is not None:
+            offset = self._final_offset
 
         overlay = annotations.combine(offset=offset,
                                       #   text_use_avoid_mask=False,
@@ -306,10 +304,10 @@ class NavMaster(NavBase):
         whitepoint = img_sorted[np.clip(int(len(img_sorted)*0.999),
                                         0, len(img_sorted)-1)]
         # whitepoint = np.max(img_sorted)
-        gamma = 1 # 0.5
+        gamma = 1  # 0.5
 
         img_stretched = np.floor((np.maximum(img-blackpoint, 0) /
-                                (whitepoint-blackpoint))**gamma*256)
+                                 (whitepoint-blackpoint))**gamma*256)
         img_stretched = np.clip(img_stretched, 0, 255)
 
         img_stretched = img_stretched.astype(np.uint8)

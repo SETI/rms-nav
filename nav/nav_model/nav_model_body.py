@@ -1,6 +1,5 @@
 from typing import Any, Optional
 
-import matplotlib.pyplot as plt
 import numpy as np
 import scipy.ndimage as ndimage
 
@@ -18,7 +17,7 @@ from nav.annotation import (Annotation,
                             TEXTINFO_TOP_ARROW)
 from nav.support.constants import HALFPI
 from nav.support.image import (filter_downsample,
-                            shift_array)
+                               shift_array)
 from nav.support.misc import now_dt, dt_delta_str
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
@@ -36,7 +35,7 @@ class NavModelBody(NavModel):
                  inventory: Optional[dict[str, Any]] = None,
                  **kwargs: Any):
         """Creates a navigation model for a planetary body.
-        
+
         Parameters:
             obs: The observation object containing the image data.
             body_name: The name of the planetary body.
@@ -60,7 +59,7 @@ class NavModelBody(NavModel):
                      create_overlay: bool = False
                      ) -> None:
         """Creates a navigation model for a planetary body with optional text overlay.
-        
+
         Parameters:
             always_create_model: If True, creates a model even if the body is too small or has
                 poor limb definition.
@@ -93,14 +92,12 @@ class NavModelBody(NavModel):
                       create_overlay: bool
                       ) -> None:
         """Creates the internal model representation for a planetary body.
-        
+
         Parameters:
             always_create_model: If True, creates a model even if the body is too small.
             never_create_model: If True, only creates metadata without generating a model.
             create_overlay: If True, creates a text overlay with the body name.
         """
-
-
 
         # These are just shorthand to make later code easier to read
         obs = self.obs
@@ -451,7 +448,7 @@ class NavModelBody(NavModel):
         # need to know the precise range at that level of detail
         self._range[v_min+obs.extfov_margin_v:v_max+obs.extfov_margin_v+1,
                     u_min+obs.extfov_margin_u:u_max+obs.extfov_margin_u+1] = \
-                        inventory['range'] * restr_body_mask_valid
+            inventory['range'] * restr_body_mask_valid
         self._range[self._range == 0] = 1e308
 
         # ring_radius = obs.ext_bp.ring_radius('JUPITER:RING', rmax=200000)
@@ -480,19 +477,17 @@ class NavModelBody(NavModel):
                             limb_mask: NDArrayBoolType,
                             body_mask: NDArrayBoolType) -> Annotations:
         """Creates annotation objects for labeling the planetary body in visualizations.
-        
+
         Parameters:
             u_center: The center U coordinate of the body in the image.
             v_center: The center V coordinate of the body in the image.
             model: The model image array for the body.
             limb_mask: Boolean mask indicating the limb (edge) of the body.
             body_mask: Boolean mask indicating the visible portion of the body.
-            
+
         Returns:
             A collection of annotations for the body.
         """
-
-
 
         obs = self._obs
         body_name = self._body_name

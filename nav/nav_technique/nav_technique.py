@@ -3,18 +3,20 @@ from typing import Optional
 
 from nav.config import Config
 from nav.support.nav_base import NavBase
+from nav import nav_master as nav_master_module
 
 
 class NavTechnique(ABC, NavBase):
     """Base class for navigation techniques.
-    
-    Parameters:
-        nav_master: The navigation master instance
-        config: Optional configuration object
-        logger_name: Optional name for the logger
+
+        Parameters:
+            nav_master: The navigation master instance
+            config: Configuration object to use. If None, uses DEFAULT_CONFIG.
+            logger_name: Name for the logger. If None, uses class name.
     """
+
     def __init__(self,
-                 nav_master: 'NavMaster',
+                 nav_master: 'nav_master_module.NavMaster',
                  *,
                  config: Optional[Config] = None,
                  logger_name: Optional[str] = None) -> None:
@@ -24,7 +26,7 @@ class NavTechnique(ABC, NavBase):
         self._offset: tuple[float, float] | None = None
 
     @property
-    def nav_master(self) -> 'NavMaster':
+    def nav_master(self) -> 'nav_master_module.NavMaster':
         """Returns the navigation master instance."""
         return self._nav_master
 
@@ -36,7 +38,7 @@ class NavTechnique(ABC, NavBase):
     @abstractmethod
     def navigate(self) -> None:
         """Performs the navigation process.
-        
+
         This abstract method must be implemented by all navigation technique subclasses.
         """
         ...

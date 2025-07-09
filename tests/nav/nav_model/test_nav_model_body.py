@@ -6,7 +6,7 @@ from tests.config import URL_CASSINI_ISS_RHEA_01
 OBS = instcoiss.InstCassiniISS.from_file(URL_CASSINI_ISS_RHEA_01)
 
 
-def test_nav_model_body():
+def test_nav_model_body() -> None:
     s = obs_snapshot.ObsSnapshot(OBS, extfov_margin_vu=(200, 100))
     body = NavModelBody(s, 'RHEA')
     body.create_model()

@@ -10,9 +10,10 @@ from .annotation_text_info import AnnotationTextInfo
 
 class Annotation:
     """Represents an annotation for an observation image.
-    
-    This class handles overlays and text annotations to be displayed on observation images.
-    
+
+    This class handles overlays and text annotations to be displayed on observation
+    images.
+
     Parameters:
         obs: The observation snapshot to annotate
         overlay: Boolean mask indicating where the overlay should appear
@@ -58,7 +59,6 @@ class Annotation:
                 f'Annotation overlay shape ({overlay.shape}) does not agree with Obs '
                 f'shape ({obs.extdata_shape_vu})')
 
-
     @property
     def config(self) -> Config:
         """Returns the configuration object for this annotation."""
@@ -91,13 +91,13 @@ class Annotation:
 
     def add_text_info(self,
                       text_info: (AnnotationTextInfo |
-                                   list[AnnotationTextInfo])) -> None:
+                                  list[AnnotationTextInfo])) -> None:
         """Adds text annotation information to this annotation.
-        
+
         Parameters:
             text_info: One or more text annotation information objects to add
         """
-        
+
         if not isinstance(text_info, (list, tuple)):
             text_info = [text_info]
         self._text_info.extend(text_info)

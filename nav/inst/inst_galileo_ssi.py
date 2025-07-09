@@ -16,7 +16,7 @@ class InstGalileoSSI(Inst):
                  obs: Observation,
                  **kwargs: Any) -> None:
         """Initializes a Galileo SSI instrument instance.
-        
+
         Parameters:
             obs: The Observation object containing Galileo SSI image data.
             **kwargs: Additional keyword arguments to pass to the parent class.
@@ -28,13 +28,13 @@ class InstGalileoSSI(Inst):
                   config: Optional[Config] = None,
                   extfov_margin_vu: tuple[int, int] | None = None) -> ObsSnapshot:
         """Creates an ObsSnapshot from a Galileo SSI image file.
-        
+
         Parameters:
             path: Path to the Galileo SSI image file.
             config: Configuration object to use. If None, uses the default configuration.
             extfov_margin_vu: Optional tuple specifying the extended field of view margins
                 in (vertical, horizontal) pixels.
-                
+
         Returns:
             An ObsSnapshot object containing the image data and metadata.
         """
@@ -48,7 +48,7 @@ class InstGalileoSSI(Inst):
 
     def star_psf(self) -> PSF:
         """Returns the point spread function for Galileo SSI stars.
-        
+
         Returns:
             A Gaussian PSF object with the appropriate sigma value for Galileo SSI.
         """

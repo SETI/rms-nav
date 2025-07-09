@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 # import logging
 
 # import copy
@@ -306,11 +307,11 @@ class NavModelStars(NavModel):
 
         Returns: The list of Star objects with additional attributes for each Star:
 
-            .u and .v           The U,V coordinate including stellar aberration.
-            .faked_temperature  A bool indicating if the temperature and spectral class
-                                had to be faked.
-            .dn                 The estimated integrated DN count given the star's class,
-                                magnitude, and the filters being used.
+            - ``.u`` and ``.v``: The U,V coordinate including stellar aberration.
+            - ``.faked_temperature``: A bool indicating if the temperature and spectral class
+              had to be faked.
+            - ``.dn``: The estimated integrated DN count given the star's class,
+              magnitude, and the filters being used.
         """
 
         config = self._config.stars
@@ -578,37 +579,36 @@ class NavModelStars(NavModel):
         self._range = 1e308
         self._annotations = annotations
 
-    def stars_make_good_bad_overlay(obs, star_list, offset,
+    def stars_make_good_bad_overlay(self,
+                                    obs: Observation,
+                                    star_list: list[Star],
+                                    offset: tuple[float, float],
                                     *,
-                                    use_extfov=True,
-                                    show_streaks=False,
-                                    label_avoid_mask=None,
-                                    stars_config=None):
+                                    use_extfov: bool = True,
+                                    show_streaks: bool = False,
+                                    label_avoid_mask: Optional[NDArrayFloatType] = None,
+                                    stars_config: Optional[dict[str, Any]] = None) -> tuple[NDArrayFloatType, NDArrayFloatType]:
         """Create an overlay with high and low confidence stars marked.
 
-        Inputs:
-            obs                    The observation.
-            star_list              The list of Star objects.
-            offset                 The amount to offset a star"s position in the
-                                (U,V) directions.
-            use_extfov             If True, use the extfov, otherwise use the normal
-                                fov size.
-            show_streaks           If True, draw the streak from the star"s PSF in
-                                addition to the box or circle.
-            label_avoid_mask       A mask giving places where text labels should
-                                not be placed (i.e. labels from another
-                                model are already there). None if no mask.
-            stars_config           Configuration parameters.
+        Parameters:
+            obs: The observation.
+            star_list: The list of Star objects.
+            offset: The amount to offset a star's position in the (U,V) directions.
+            use_extfov: If True, use the extfov, otherwise use the normal fov size.
+            show_streaks: If True, draw the streak from the star's PSF in addition to the box or
+                circle.
+            label_avoid_mask: A mask giving places where text labels should not be placed (i.e.
+                labels from another model are already there). None if no mask.
+            stars_config: Configuration parameters.
 
-        Returns:
-            overlay                The overlay.
+        Returns: The overlay.
 
-            Star excluded by brightness or conflict: circle
-            Star bad photometry: thin square
-            Star good photometry: thick square
+            - Star excluded by brightness or conflict: circle
+            - Star bad photometry: thin square
+            - Star good photometry: thick square
         """
         if stars_config is None:
-            stars_config = nav.config.STARS_DEFAULT_CONFIG
+            stars_config = self._config.stars
 
         offset_u = 0
         offset_v = 0

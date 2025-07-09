@@ -5,7 +5,7 @@ API Reference
 This section provides detailed API documentation for the RMS-NAV system.
 
 nav.nav_master
-=============
+==============
 
 .. automodule:: nav.nav_master.nav_master
    :members:
@@ -18,7 +18,7 @@ nav.nav_master
    :show-inheritance:
 
 nav.nav_model
-============
+=============
 
 .. automodule:: nav.nav_model.nav_model
    :members:
@@ -46,7 +46,7 @@ nav.nav_model
    :show-inheritance:
 
 nav.nav_technique
-===============
+=================
 
 .. automodule:: nav.nav_technique.nav_technique
    :members:
@@ -69,7 +69,7 @@ nav.nav_technique
    :show-inheritance:
 
 nav.dataset
-==========
+===========
 
 .. automodule:: nav.dataset.dataset
    :members:
@@ -77,6 +77,11 @@ nav.dataset
    :show-inheritance:
 
 .. automodule:: nav.dataset.dataset_pds3
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: nav.dataset.dataset_pds4
    :members:
    :undoc-members:
    :show-inheritance:
@@ -102,7 +107,7 @@ nav.dataset
    :show-inheritance:
 
 nav.obs
-======
+=======
 
 .. automodule:: nav.obs.obs
    :members:
@@ -115,7 +120,7 @@ nav.obs
    :show-inheritance:
 
 nav.inst
-=======
+========
 
 .. automodule:: nav.inst.inst
    :members:
@@ -143,7 +148,7 @@ nav.inst
    :show-inheritance:
 
 nav.annotation
-============
+==============
 
 .. automodule:: nav.annotation.annotation
    :members:
@@ -161,7 +166,7 @@ nav.annotation
    :show-inheritance:
 
 nav.config
-=========
+==========
 
 .. automodule:: nav.config.config
    :members:
@@ -169,7 +174,7 @@ nav.config
    :show-inheritance:
 
 nav.support
-=========
+===========
 
 .. automodule:: nav.support.attrdict
    :members:

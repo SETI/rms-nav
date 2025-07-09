@@ -1,0 +1,87 @@
+name: Run Tests
+run-name: Run Tests triggered by ${{ github.ref_type }} ${{ github.ref_name }} or ${{ github.triggering_actor }}
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+  schedule:
+    - cron: "21 11 * * 0"
+
+jobs:
+  flake8:
+    name: Lint nav
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements.txt
+
+      - name: Flake8
+        run: |
+          flake8 nav tests
+
+      - name: Mypy
+        run: |
+          mypy nav tests
+
+  test:
+    name: Test nav
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
+      fail-fast: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements.txt
+
+      # See: https://www.youtube.com/watch?v=ZgVhU5qvK1M
+      # for a walkthrough on how to create the workload_identity_provider
+      # - name: Authenticate to Google Cloud
+      #   uses: google-github-actions/auth@v2
+      #   with:
+      #     project_id: rms-node
+      #     workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+
+      - name: Test with coverage
+        run: |
+          python -m pytest --cov
+
+      - name: Print coverage report
+        run: |
+          coverage report -m
+
+      - name: Upload coverage report to codecov
+        uses: codecov/codecov-action@v5
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true

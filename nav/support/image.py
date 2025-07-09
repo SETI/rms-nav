@@ -122,10 +122,10 @@ def unpad_array(array: NDArrayType[NPType],
 
 def next_power_of_2(n: int) -> int:
     """Computes the smallest power of 2 that is greater than or equal to n.
-    
+
     Parameters:
         n: The input integer value.
-        
+
     Returns:
         The smallest power of 2 that is greater than or equal to n.
     """
@@ -205,15 +205,15 @@ def pad_array_to_power_of_2(data: NDArrayType[NPType]
 def array_zoom(a: NDArrayType[NPType],
                factor: list[int] | tuple[int, ...]) -> NDArrayType[NPType]:
     """Zooms an array by the specified factor using array indexing.
-    
+
     Parameters:
         a: The input array to zoom.
         factor: The zoom factor for each dimension of the array.
-        
+
     Returns:
         The zoomed array with dimensions multiplied by the corresponding factors.
     """
-    
+
     a = np.asarray(a)
     slices = [slice(0, old, 1/float(f))
                   for (f, old) in zip(factor, a.shape)]
@@ -306,22 +306,23 @@ def filter_local_maximum(data: NDArrayType[NPType],
            array where the maximum mask is true
         7) Gaussian blur this final result
 
-    Inputs:
-        data                The array
-        maximum_boxsize     The box size to use when finding the maximum
-                            value for the area around each pixel.
-        median_boxsize      The box size to use when finding the median
-                            value for the area around each pixel.
-        maximum_blur        The amount to blur the maximum filter. If a pixel
-                            is marked as a maximum, then the pixels in a
-                            blur X blur square will also be marked as a
-                            maximum.
-        maximum_tolerance   The factor above the local minimum that a
-                            maximum pixel has to be in order to be included
-                            in the final result.
-        minimum_boxsize     The box size to use when finding the minimum
-                            value for the area around each pixel.
-        gaussian_blur       The amount to blur the final result.
+    Parameters:
+        data: The array
+        maximum_boxsize: The box size to use when finding the maximum value for
+            the area around each pixel.
+        median_boxsize: The box size to use when finding the median value for
+            the area around each pixel.
+        maximum_blur: The amount to blur the maximum filter. If a pixel is
+            marked as a maximum, then the pixels in a blur X blur square will
+            also be marked as a maximum.
+        maximum_tolerance: The factor above the local minimum that a maximum
+            pixel has to be in order to be included in the final result.
+        minimum_boxsize: The box size to use when finding the minimum value for
+            the area around each pixel.
+        gaussian_blur: The amount to blur the final result.
+
+    Returns:
+        The filtered array.
     """
 
     assert maximum_boxsize > 0
@@ -358,13 +359,16 @@ def filter_sub_median(data: NDArrayFloatType,
                       footprint: str= 'square') -> NDArrayFloatType:
     """Compute the median-subtracted value for each pixel.
 
-    Inputs:
-        data                The array
-        median_boxsize      The box size to use when finding the median
-                            value for the area around each pixel.
-        gaussian_blur       The amount to blur the median value before
-                            subtracting it from the array.
-        footprint           The shape of footprint to use ('square', 'circle').
+    Parameters:
+        data: The array
+        median_boxsize: The box size to use when finding the median value for the
+            area around each pixel.
+        gaussian_blur: The amount to blur the median value before subtracting it
+            from the array.
+        footprint: The shape of footprint to use ('square', 'circle').
+
+    Returns:
+        The median-subtracted array.
     """
 
     if not median_boxsize and not gaussian_blur:
@@ -404,19 +408,20 @@ def filter_downsample(arr: NDArrayFloatType,
                       amt_y: int,
                       amt_x: int) -> NDArrayFloatType:
     """Downsamples an array by averaging blocks of pixels.
-    
+
     Parameters:
         arr: The input array to downsample.
         amt_y: The vertical downsampling factor.
         amt_x: The horizontal downsampling factor.
-        
+
     Returns:
         The downsampled array.
-        
+
     Raises:
-        AssertionError: If the array dimensions are not divisible by the downsampling factors.
+        AssertionError: If the array dimensions are not divisible by the downsampling
+            factors.
     """
-    
+
     assert arr.shape[0] % amt_y == 0
     assert arr.shape[1] % amt_x == 0
     ny = arr.shape[0] // amt_y
@@ -441,7 +446,7 @@ def draw_line_arrow(img: NDArrayType[NPType],
                     arrow_head_length: int = 10,
                     arrow_head_angle: int = 45) -> None:
     """Draws a line with an arrow head at the end point.
-    
+
     Parameters:
         img: The 2-D (or higher) array to draw on.
         color: The scalar (or higher) color to draw.
@@ -480,13 +485,12 @@ def draw_line(img: NDArrayType[NPType],
     The line is drawn by drawing each point as a line perpendicular to
     the main line.
 
-    Input:
-
-        img        The 2-D (or higher) array to draw on.
-        x0, y0     The starting point.
-        x1, y1     The ending point.
-        color      The scalar (or higher) color to draw.
-        thickness  The thickness (total width) of the line.
+    Parameters:
+        img: The 2-D (or higher) array to draw on.
+        x0, y0: The starting point.
+        x1, y1: The ending point.
+        color: The scalar (or higher) color to draw.
+        thickness: The thickness (total width) of the line.
     """
 
     x0 = int(x0)
@@ -607,14 +611,13 @@ def draw_rect(img: NDArrayType[NPType],
               thickness: int = 1) -> None:
     """Draw a rectangle with the given line thickness.
 
-    Input:
-
-        img        The 2-D (or higher) array to draw on.
-        xctr, yctr The center of the rectangle.
-        xhalfwidth The width of the rectangle on each side of the center.
-        yhalfwidth This is the inner border of the rectangle.
-        color      The scalar (or higher) color to draw.
-        thickness  The thickness (total width) of the line.
+    Parameters:
+        img: The 2-D (or higher) array to draw on.
+        xctr, yctr: The center of the rectangle.
+        xhalfwidth: The width of the rectangle on each side of the center.
+        yhalfwidth: This is the inner border of the rectangle.
+        color: The scalar (or higher) color to draw.
+        thickness: The thickness (total width) of the line.
     """
 
     # Top
@@ -639,13 +642,12 @@ def draw_circle(img: NDArrayType[NPType],
                 thickness: int = 1) -> None:
     """Draw a circle using Bresenham's algorithm with the given thickness.
 
-    Input:
-
-        img        The 2-D (or higher) array to draw on.
-        x0, y0     The middle of the circle.
-        r          The radius of the circle.
-        color      The scalar (or higher) color to draw.
-        thickness  The thickness (total width) of the circle.
+    Parameters:
+        img: The 2-D (or higher) array to draw on.
+        x0, y0: The middle of the circle.
+        r: The radius of the circle.
+        color: The scalar (or higher) color to draw.
+        thickness: The thickness (total width) of the circle.
     """
 
     def _draw_circle(img: NDArrayType[NPType],

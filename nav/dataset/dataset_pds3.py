@@ -21,16 +21,16 @@ class DataSetPDS3(DataSet):
                  index_filecache: Optional[FileCache] = None,
                  **kwargs: Any) -> None:
         """Initializes a PDS3 dataset with directory and cache settings.
-        
+
         Parameters:
             pds3_holdings_dir: Path to PDS3 holdings directory. If None, uses PDS3_HOLDINGS_DIR
-                             environment variable.
+                environment variable.
             index_filecache: FileCache object to use for index files. If None, creates a new one.
             **kwargs: Additional arguments passed to parent class initializer.
-            
+
         Raises:
             ValueError: If pds3_holdings_dir is None and PDS3_HOLDINGS_DIR environment variable
-                       is not set.
+                is not set.
         """
         super().__init__(**kwargs)
 
@@ -49,7 +49,7 @@ class DataSetPDS3(DataSet):
     def add_selection_arguments(cmdparser: argparse.ArgumentParser,
                                 group: Optional[argparse._ArgumentGroup] = None) -> None:
         """Adds PDS3-specific command-line arguments for image selection.
-        
+
         Parameters:
             cmdparser: The argument parser to add arguments to.
             group: Optional argument group to add arguments to. If None, creates a new group.
@@ -136,7 +136,7 @@ class DataSetPDS3(DataSet):
     def _validate_selection_arguments(self,
                                       arguments: argparse.ArgumentParser) -> None:
         """Validates user arguments that can't be checked during initial parsing.
-        
+
         Parameters:
             arguments: The parsed arguments to validate.
         """
@@ -201,12 +201,11 @@ class DataSetPDS3(DataSet):
                                              ) -> Iterator[Path]:
         """Given parsed arguments, yield all selected filenames.
 
-        arguments               The parsed arguments structure.
-        use_index_files         If True, look up images in the index files instead
-                                of directly on the disk.
-        combine_botsim          If True, look for adjacent NAC/WAC images with the
-                                same image numbers and return them together as a
-                                tuple.
+        Parameters:
+            arguments: The parsed arguments structure.
+
+        Yields:
+            Paths to the selected image files.
         """
 
         # if arguments.image_full_path:
@@ -374,10 +373,10 @@ class DataSetPDS3(DataSet):
     def _read_pds_table(self,
                         fn: str) -> PdsTable:
         """Reads a PDS table file with caching.
-        
+
         Parameters:
             fn: Path to the PDS table file.
-            
+
         Returns:
             The parsed PdsTable object.
         """

@@ -3,12 +3,12 @@ Developer Guide
 ===============
 
 Introduction
-===========
+============
 
 This guide is intended for developers who want to understand, modify, or extend the RMS-NAV system. It provides an overview of the system architecture, details on the class hierarchy, and instructions for extending the system with new functionality.
 
 System Architecture
-=================
+===================
 
 RMS-NAV follows a modular architecture organized around several key components:
 
@@ -20,7 +20,7 @@ RMS-NAV follows a modular architecture organized around several key components:
 6. **Annotation**: Creates visual overlays and text annotations
 
 Data Flow
---------
+---------
 
 1. The system loads an image through a Dataset implementation
 2. An ObsSnapshot is created to represent the observation
@@ -30,7 +30,7 @@ Data Flow
 6. Output files are generated (offset data, annotated images)
 
 Class Hierarchy
-=============
+===============
 
 The following Mermaid diagram shows the complete class hierarchy of the RMS-NAV system:
 
@@ -242,10 +242,10 @@ The following Mermaid diagram shows the complete class hierarchy of the RMS-NAV 
       Annotations --> Annotation
 
 Key Components
-============
+==============
 
 NavBase
-------
+-------
 
 ``NavBase`` is the base class for most components in the system. It provides:
 
@@ -254,7 +254,7 @@ NavBase
 * Common utility methods
 
 NavMaster
---------
+---------
 
 ``NavMaster`` is the central coordinator for the navigation process:
 
@@ -264,7 +264,7 @@ NavMaster
 * Creates the final overlay and results
 
 NavModel
--------
+--------
 
 ``NavModel`` is the abstract base class for model generators:
 
@@ -274,7 +274,7 @@ NavModel
 * ``NavModelTitan``: Specialized model for Titan's atmosphere
 
 NavTechnique
-----------
+------------
 
 ``NavTechnique`` is the abstract base class for navigation algorithms:
 
@@ -283,7 +283,7 @@ NavTechnique
 * ``NavTechniqueTitan``: Specialized navigation for Titan
 
 Dataset
-------
+-------
 
 ``DataSet`` handles access to image files and metadata:
 
@@ -294,7 +294,7 @@ Dataset
 * ``DataSetNewHorizonsLORRI``: New Horizons-specific dataset handler
 
 Obs and ObsSnapshot
------------------
+-------------------
 
 ``Obs`` is the base class for observations, while ``ObsSnapshot`` extends it with:
 
@@ -303,7 +303,7 @@ Obs and ObsSnapshot
 * Enhanced metadata access
 
 Annotation
----------
+----------
 
 The annotation system creates visual overlays:
 
@@ -312,10 +312,10 @@ The annotation system creates visual overlays:
 * ``AnnotationTextInfo``: Specialized text annotation handling
 
 Extending the System
-==================
+====================
 
 Adding a New Dataset
-------------------
+--------------------
 
 To add support for a new instrument:
 
@@ -344,7 +344,7 @@ Example:
 4. Add the instrument to the command-line parser in ``main/nav_main_offset.py``
 
 Adding a New Instrument
----------------------
+-----------------------
 
 To add a new instrument:
 
@@ -369,7 +369,7 @@ Example:
            ...
 
 Adding a New Navigation Model
---------------------------
+------------------------------
 
 To implement a new model type:
 
@@ -393,7 +393,7 @@ Example:
            ...
 
 Adding a New Navigation Technique
-------------------------------
+---------------------------------
 
 To implement a new navigation algorithm:
 
@@ -417,7 +417,7 @@ Example:
            ...
 
 Configuration System
-==================
+====================
 
 RMS-NAV uses a YAML-based configuration system. The default configuration is in ``nav/config/default_config.yaml``.
 
@@ -440,10 +440,10 @@ The configuration system uses a hierarchical structure with sections for:
 * Instrument-specific settings
 
 Best Practices
-============
+==============
 
 Code Style
----------
+----------
 
 * Follow PEP 8 for Python code style
 * Use type hints for all function parameters and return values
@@ -452,7 +452,7 @@ Code Style
 * Follow the existing logging and error handling patterns
 
 Testing
-------
+-------
 
 * Write unit tests for new functionality
 * Put tests in the ``tests/`` directory
@@ -460,7 +460,7 @@ Testing
 * Ensure backward compatibility with existing functionality
 
 Documentation
------------
+-------------
 
 * Update docstrings for all new code
 * Keep the class diagram up to date
@@ -468,7 +468,7 @@ Documentation
 * Add examples for new features
 
 Building the Documentation
-========================
+==========================
 
 The documentation uses Sphinx with the reStructuredText format. To build it:
 

@@ -1,8 +1,6 @@
 from abc import ABC
 from typing import Any, Optional
 
-from pdslogger import PdsLogger
-
 from nav.annotation import Annotations
 from nav.config import Config
 from nav.inst import Inst
@@ -13,14 +11,14 @@ from nav.support.types import NDArrayFloatType, NDArrayBoolType
 
 class NavModel(ABC, NavBase):
     """Base class for navigation models used to generate synthetic images."""
-    
+
     def __init__(self,
                  obs: ObsSnapshot,
                  *,
                  config: Optional[Config] = None,
                  logger_name: Optional[str] = None) -> None:
         """Initializes a navigation model with observation data.
-        
+
         Parameters:
             obs: Observation snapshot containing image and metadata.
             config: Configuration object to use. If None, uses DEFAULT_CONFIG.

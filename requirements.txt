@@ -5,6 +5,8 @@ mypy
 myst-parser
 numpy
 pytest
+pytest-cov
+pytest-profiling
 rms-filecache
 rms-imgdisp
 rms-pdslogger

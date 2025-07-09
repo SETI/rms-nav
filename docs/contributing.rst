@@ -1,16 +1,16 @@
-=============
+============
 Contributing
-=============
+============
 
 Thank you for your interest in contributing to RMS-NAV! This document provides guidelines and instructions for contributing to the project.
 
 Code of Conduct
---------------
+---------------
 
 We expect all contributors to follow our Code of Conduct, which ensures a welcoming and inclusive environment for everyone.
 
 Getting Started
---------------
+---------------
 
 1. Fork the repository on GitHub
 2. Clone your fork locally:
@@ -36,7 +36,7 @@ Getting Started
       pre-commit install
 
 Development Workflow
-------------------
+--------------------
 
 1. Create a new branch for your feature or bugfix:
 
@@ -69,7 +69,7 @@ Development Workflow
 7. Open a Pull Request on GitHub
 
 Coding Standards
---------------
+----------------
 
 We follow these standards for all code contributions:
 
@@ -97,7 +97,7 @@ Example of a well-formatted function:
        return u_offset, v_offset
 
 Pull Request Process
-------------------
+--------------------
 
 1. Ensure all tests pass
 2. Update documentation if necessary
@@ -109,7 +109,7 @@ Pull Request Process
 The maintainers will merge your PR once it meets all requirements.
 
 Testing
-------
+-------
 
 We use pytest for testing. To run the tests:
 
@@ -130,7 +130,7 @@ To run a specific test file:
    pytest tests/test_specific_file.py
 
 Documentation
------------
+-------------
 
 We use Sphinx for documentation. To build the docs:
 
@@ -148,7 +148,7 @@ When adding new features, please update the relevant documentation:
 * Update the user guide or developer guide if necessary
 
 Reporting Issues
---------------
+----------------
 
 If you find a bug or have a suggestion for improvement:
 
