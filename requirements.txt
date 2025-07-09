@@ -13,6 +13,7 @@ rms-imgdisp
 rms-pdslogger
 rms-pdstable
 rms-pdstemplate
+rms-psfmodel
 rms-oops
 rms-starcat
 ruamel.yaml

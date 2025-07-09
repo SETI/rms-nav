@@ -614,9 +614,8 @@ class DataSetPDS3(DataSet):
                         label_path = img_path.with_suffix('.LBL')
                     if retrieve_files:
                         ret = self._index_filecache.retrieve([img_path, label_path])
-                        img_path_local, label_path_local = cast(list[Path], ret)
+                        _, label_path_local = cast(list[Path], ret)
                     else:
-                        img_path_local = img_path
                         label_path_local = label_path
                     yield label_path_local
 

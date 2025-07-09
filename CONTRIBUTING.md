@@ -19,7 +19,6 @@ We expect all contributors to follow our Code of Conduct, which ensures a welcom
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    pip install -r requirements.txt
-   pip install -r requirements-dev.txt  # Development dependencies
    ```
 4. Set up pre-commit hooks:
    ```bash
@@ -63,10 +62,10 @@ We follow these standards for all code contributions:
 Example of a well-formatted function:
 
 ```python
-def calculate_offset(image: NDArrayFloatType, model: NDArrayFloatType) -> Tuple[float, float]:
+def calculate_offset(image: NDArrayFloatType, model: NDArrayFloatType) -> tuple[float, float]:
     """Calculate the offset between an image and a model.
 
-    Args:
+    Parameters:
         image: The observed image as a NumPy array
         model: The theoretical model as a NumPy array
 
@@ -81,10 +80,9 @@ def calculate_offset(image: NDArrayFloatType, model: NDArrayFloatType) -> Tuple[
 
 1. Ensure all tests pass
 2. Update documentation if necessary
-3. Add an entry to the CHANGELOG.md file describing your changes
-4. Make sure your code is properly formatted and passes all pre-commit checks
-5. Request a review from a maintainer
-6. Address any feedback from reviewers
+3. Make sure your code is properly formatted and passes both flake8 and mypy
+4. Request a review from a maintainer
+5. Address any feedback from reviewers
 
 The maintainers will merge your PR once it meets all requirements.
 

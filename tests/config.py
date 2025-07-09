@@ -1,3 +1,5 @@
+# TODO: Update to use PDS3_HOLDINGS_DIR
+
 # Image of Rhea
 # Camera: Cassini ISS WAC
 # Size: 1024x1024
