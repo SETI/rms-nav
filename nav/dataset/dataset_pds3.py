@@ -383,7 +383,10 @@ class DataSetPDS3(DataSet):
         Returns:
             The parsed PdsTable object.
         """
-        return PdsTable(fn, columns=columns, label_method='fast')
+        try:  # TODO: Remove once pdstable is updated
+            return PdsTable(fn, columns=columns, label_method='fast')
+        except TypeError:
+            return PdsTable(fn, columns=columns)
 
     def yield_image_filenames_index(self,
                                     *,
