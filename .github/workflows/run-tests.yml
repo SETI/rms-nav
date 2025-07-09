@@ -73,6 +73,11 @@ jobs:
 
       - name: Test with coverage
         run: |
+          export PDS3_HOLDINGS_DIR=https://pds-rings.seti.org/holdings
+          export PDS4_HOLDINGS_DIR=https://pds-rings.seti.org/pds4
+          export OOPS_RESOURCES=gs://rms-node-oops-resources
+          export UCAC4_PATH=gs://rms-node-star-catalogs/UCAC4
+          export YBSC_PATH=gs://rms-node-star-catalogs/YBSC
           python -m pytest --cov
 
       - name: Print coverage report
