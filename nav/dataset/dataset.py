@@ -45,7 +45,7 @@ class DataSet(ABC, NavBase):
         ...
 
     @abstractmethod
-    def yield_image_filenames_from_arguments(*args: Any, **kwargs: Any) -> Iterator[Path]:
+    def yield_filenames_from_arguments(*args: Any, **kwargs: Any) -> Iterator[Path]:
         """Yields image filenames based on provided command-line arguments.
 
         Parameters:
@@ -58,7 +58,7 @@ class DataSet(ABC, NavBase):
         ...
 
     @abstractmethod
-    def yield_image_filenames_index(*args: Any, **kwargs: Any) -> Iterator[Path]:
+    def yield_filenames_index(*args: Any, **kwargs: Any) -> Iterator[Path]:
         """Yields image filenames based on index information.
 
         Parameters:

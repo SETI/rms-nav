@@ -1,3 +1,4 @@
+import stat
 from typing import Any, cast
 
 from .dataset_pds3 import DataSetPDS3
@@ -70,6 +71,11 @@ class DataSetCassiniISS(DataSetPDS3):
             return None
         return f[0]
 
+    @staticmethod
+    def _map_filename(f: str) -> str:
+        assert f.endswith(('.LBL', '.IMG'))
+        return f[:-4] + '_CALIB' + f[-4:]
+
     _DATASET_LAYOUT = {
         'all_volume_names': [f'COISS_{x:04d}' for x in
                              list(range(_MIN_1xxx_VOL, _MAX_1xxx_VOL+1)) +
@@ -81,6 +87,8 @@ class DataSetCassiniISS(DataSetPDS3):
         'volset_and_volume': lambda v: f'COISS_{v[6]}xxx/{v}',
         'volume_to_index': lambda v: f'COISS_{v[6]}xxx/{v}/{v}_index.lbl',
         'index_columns': ('FILE_SPECIFICATION_NAME',),
+        'volumes_dir_name': 'calibrated',
+        'map_filename_func': _map_filename,
     }
 
     def __init__(self,

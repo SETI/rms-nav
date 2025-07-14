@@ -1,8 +1,6 @@
-from logging import Logger
 from pathlib import Path
 from typing import Any, Optional, cast
 
-from pdslogger import PdsLogger, STDOUT_HANDLER
 from ruamel.yaml import YAML
 
 from nav.support.attrdict import AttrDict
@@ -18,7 +16,6 @@ class Config:
     def __init__(self) -> None:
         """Initializes a new Config instance with empty configuration containers."""
 
-        self._logger: PdsLogger | None = None
         self._config_dict: dict[str, Any] = {}
         self._config_offset: dict[str, Any] = AttrDict({})
         self._config_bodies: dict[str, Any] = AttrDict({})
@@ -27,16 +24,6 @@ class Config:
         self._config_stars: dict[str, Any] = AttrDict({})
         self._config_titan: dict[str, Any] = AttrDict({})
         self._config_bootstrap: dict[str, Any] = AttrDict({})
-
-    def set_logger(self,
-                   logger: Logger) -> None:
-        """Sets the logger for this configuration instance.
-
-        Parameters:
-            logger: The logger instance to use for logging configuration-related messages.
-        """
-
-        self._logger = PdsLogger.as_pdslogger(logger)
 
     def _maybe_read_config(self) -> None:
         """Reads the configuration file if it hasn't been read already.
@@ -66,49 +53,40 @@ class Config:
         """Reads configuration from the specified YAML file.
 
         Parameters:
-            config_path: Path to the configuration file. If None, uses the default config file.
+            config_path: Path to the configuration file. If None, uses the default config files.
         """
 
         if config_path is None:
-            config_path = Path(__file__).resolve().parent / 'default_config.yaml'
+            config_dir = Path(__file__).resolve().parent.parent / 'config_files'
+            for filename in sorted(config_dir.glob('*.yaml')):
+                self.update_config(filename, read_default=False)
+            return
+
         yaml = YAML(typ='safe')
         self._config_dict = yaml.load(config_path)
         self._update_attrdicts()
 
     def update_config(self,
-                      config_path: str | Path) -> None:
+                      config_path: str | Path,
+                      read_default: bool = True) -> None:
         """Updates the current configuration with values from the specified YAML file.
 
         Parameters:
             config_path: Path to the configuration file containing update values.
+            read_default: Whether to read the default configuration file if no config
+                has been previously read.
         """
 
-        self._maybe_read_config()
+        if read_default:
+            self._maybe_read_config()
         yaml = YAML(typ='safe')
         new_config = yaml.load(config_path)
-        for key in ('planets',
-                    'satellites',
-                    'fuzzy_satellites',
-                    'ring_satellites',
-                    'offset',
-                    'bodies',
-                    'rings',
-                    'stars',
-                    'titan',
-                    'bootstrap'):
-            if key in new_config:
+        for key in new_config:
+            if key in self._config_dict:
                 self._config_dict[key].update(new_config[key])
+            else:
+                self._config_dict[key] = new_config[key]
         self._update_attrdicts()
-
-    @property
-    def logger(self) -> PdsLogger:
-        """Returns the logger instance, creating one if it doesn't exist."""
-
-        if self._logger is None:
-            self._logger = PdsLogger('nav', lognames=False, digits=3)
-            self._logger.add_handler(STDOUT_HANDLER)
-            self._logger.info('*** START OF LOG ***')
-        return self._logger
 
     @property
     def planets(self) -> list[str]:

@@ -41,7 +41,7 @@ class Inst(ABC, NavBase):
             path: Path to the image file.
             config: Configuration object to use. If None, uses DEFAULT_CONFIG.
             extfov_margin_vu: Optional tuple specifying the extended field of view margins
-                             in (vertical, horizontal) pixels.
+                in (vertical, horizontal) pixels.
 
         Returns:
             A new instrument instance.

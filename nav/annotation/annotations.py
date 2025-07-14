@@ -5,6 +5,7 @@ from PIL import Image, ImageDraw
 
 from .annotation import Annotation
 
+from nav.config import DEFAULT_LOGGER
 from nav.obs import ObsSnapshot
 from nav.support.types import NDArrayBoolType, NDArrayIntType
 
@@ -175,11 +176,11 @@ class Annotations:
                     if ret:
                         found_place = True
                         break
-                    annotation.config.logger.debug(
+                    DEFAULT_LOGGER.debug(
                         'Count not find place avoiding other items for text annotation '
                         f'{text_info.text!r}')
                 if not found_place:
-                    annotation.config.logger.warning(
+                    DEFAULT_LOGGER.warning(
                         'Could not find final place for text annotation '
                         f'{text_info.text!r}')
 

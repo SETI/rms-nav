@@ -65,7 +65,8 @@ class DataSetNewHorizonsLORRI(DataSetPDS3):
     _DATASET_LAYOUT = {
         'all_volume_names': ['NHLALO_2001', 'NHJULO_2001',
                              'NHPCLO_2001', 'NHPELO_2001',
-                             'NHKCLO_2001', 'NHKELO_2001'],
+                             'NHKCLO_2001', 'NHKELO_2001',
+                             'NHK2LO_2001'],
         'extract_image_number': _extract_image_number,
         'extract_camera': _extract_camera,
         'get_filespec': _get_filespec,
@@ -73,6 +74,8 @@ class DataSetNewHorizonsLORRI(DataSetPDS3):
         'volset_and_volume': lambda v: f'NHxxLO_xxxx/{v}',
         'volume_to_index': lambda v: f'NHxxLO_xxxx/{v}/{v}_index.lbl',
         'index_columns': ('FILE_SPECIFICATION_NAME',),
+        'volumes_dir_name': 'volumes',
+        'map_filename_func': None,
     }
 
     def __init__(self,

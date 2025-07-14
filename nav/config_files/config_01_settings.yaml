@@ -8,77 +8,17 @@ planets:
   - URANUS
   - NEPTUNE
   - PLUTO
-satellites:
-  EARTH:
-    - MOON
-  JUPITER:
-    - ADRASTEA
-    - AMALTHEA
-    - CALLISTO
-    - EUROPA
-    - GANYMEDE
-    - IO
-    - METIS
-    - THEBE
-  SATURN:
-    - ATLAS
-    - CALYPSO
-    - DAPHNIS
-    - DIONE
-    - ENCELADUS
-    - EPIMETHEUS
-    - HELENE
-    - HYPERION
-    - IAPETUS
-    - JANUS
-    - MIMAS
-    - PAN
-    - PANDORA
-    - PHOEBE
-    - PROMETHEUS
-    - RHEA
-    - TELESTO
-    - TETHYS
-    - TITAN
-  URANUS:
-    - ARIEL
-    - BELINDA
-    - BIANCA
-    - CRESSIDA
-    - DESDEMONA
-    - JULIET
-    - MIRANDA
-    - OBERON
-    - PORTIA
-    - PUCK
-    - ROSALIND
-    - TITANIA
-    - UMBRIEL
-  NEPTUNE:
-    - DESPINA
-    - GALATEA
-    - LARISSA
-    - NAIAD
-    - PROTEUS
-    - THALASSA
-    - TRITON
-  PLUTO:
-    - CHARON
-    - HYDRA
-    - KERBEROS
-    - NIX
-    - STYX
-fuzzy_satellites:
-  SATURN:
-    - HYPERION
-    - PHOEBE
-ring_satellites:
-  SATURN:
-    - DAPHNIS
-    - PAN
+
+####################
+# GENERAL SETTINGS #
+####################
 
 general:
   truetype_font_dir: /usr/share/fonts/truetype
+
+####################
+# OFFSET SETTINGS #
+####################
 
 offset:
   default_gaussian_blur: 0.25
@@ -109,6 +49,11 @@ offset:
   #     - /usr/share/fonts/truetype/liberation2/LiberationMono-Bold.ttf
   #     - 18
   #   1024: *id002
+
+####################
+# BODIES SETTINGS #
+####################
+
 bodies:
   min_bounding_box_area: 9
   min_emission_ring_body: 20
@@ -183,6 +128,10 @@ bodies:
   label_grid_v: 10    # Coarse grid for labeling a body if everything else fails
   label_grid_u: 10
 
+##################
+# RINGS SETTINGS #
+##################
+
 rings:
   model_source: ephemeris
   fiducial_feature_threshold: 3
@@ -244,6 +193,11 @@ rings:
   #     - 2
   #     - 1
   #   1024: *id007
+
+##################
+# STARS SETTINGS #
+##################
+
 stars:
   calibrated_data: true
   stellar_aberration: true
@@ -321,8 +275,17 @@ stars:
   label_font_color: [255, 0, 0]  # Red
   # label_font_color: [255, 255, 0]  # Yellow
 
+##################
+# TITAN SETTINGS #
+##################
+
 titan:
   atmosphere_height: 700
+
+######################
+# BOOTSTRAP SETTINGS #
+######################
+
 bootstrap:
   bootstrap_min_body_area: 100
   body_list:

@@ -32,8 +32,8 @@ class InstCassiniISS(Inst):
         Parameters:
             path: Path to the Cassini ISS image file.
             config: Configuration object to use. If None, uses the default configuration.
-            extfov_margin_vu: Optional tuple specifying the extended field of view margins
-                in (vertical, horizontal) pixels.
+            extfov_margin_vu: Optional tuple that overrides the extended field of view margins
+                found in the config.
 
         Returns:
             An ObsSnapshot object containing the image data and metadata.
@@ -45,6 +45,8 @@ class InstCassiniISS(Inst):
                                                return_all_planets=True)
         # TODO Calibrate
         # obs.data = obs.extended_calib.value_from_dn(obs.data).vals
+        if extfov_margin_vu is None:
+            extfov_margin_vu = config._config_dict['cassini_iss']['extfov_margin_vu'][obs.data.shape[0]]
         new_obs = ObsSnapshot(obs,
                               config=config,
                               extfov_margin_vu=extfov_margin_vu)

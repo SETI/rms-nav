@@ -2,7 +2,7 @@ from typing import Optional
 
 from pdslogger import PdsLogger
 
-from nav.config import Config, DEFAULT_CONFIG
+from nav.config import Config, DEFAULT_CONFIG, DEFAULT_LOGGER
 
 
 class NavBase:
@@ -22,7 +22,7 @@ class NavBase:
                  logger_name: Optional[str] = None) -> None:
 
         self._config = config or DEFAULT_CONFIG
-        self._logger = self._config.logger
+        self._logger = DEFAULT_LOGGER
         if logger_name is not None:
             self._logger = self._logger.get_logger(logger_name, lognames=False, digits=3)
 

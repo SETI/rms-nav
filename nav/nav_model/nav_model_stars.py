@@ -325,7 +325,7 @@ class NavModelStars(NavModel):
         magnitude_list = [0., 12., 13., 14., 15., 16., 17.]
 
         # XXX mag_vmax = _compute_dimmest_visible_star_vmag(obs, stars_config)+1
-        mag_vmax = 12
+        mag_vmax = 16
 
         if radec_movement is None:
             self._logger.debug('Retrieving star list with max detectable VMAG %.4f',

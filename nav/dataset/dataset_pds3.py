@@ -9,6 +9,7 @@ from filecache import FCPath, FileCache
 from pdstable import PdsTable
 
 from .dataset import DataSet
+from nav.support.misc import flatten_list
 
 
 class DataSetPDS3(DataSet):
@@ -151,54 +152,10 @@ class DataSetPDS3(DataSet):
         #             f'Invalid image name {image_name} with instrument host '
         #             f'{arguments.instrument_host}')
 
-# def log_arguments(arguments, log):
-#     """Log the details of the command line arguments."""
-#     log('*** Results root directory:  %s', CB_RESULTS_ROOT)
-#     log('*** Instrument host:         %s', arguments.instrument_host)
-#     if arguments.image_full_path:
-#         log('*** Images explicitly from full paths:')
-#         for image_path in arguments.image_full_path:
-#             log('        %s', image_path)
-#     log('*** Image #s:                %010d - %010d',
-#         arguments.first_image_num,
-#         arguments.last_image_num)
-#     try:
-#         v1 = '%04d' % arguments.first_volume_num
-#     except TypeError:
-#         v1 = 'None'
-#     try:
-#         v2 = '%04d' % arguments.last_volume_num
-#     except TypeError:
-#         v2 = 'None'
-#     log('*** Volume #s:               %s - %s', v1, v2)
-#     log('*** NAC only:                %s', arguments.nac_only)
-#     log('*** WAC only:                %s', arguments.wac_only)
-#     log('*** Already has offset file: %s', arguments.has_offset_file)
-#     log('*** Has no offset file:      %s', arguments.has_no_offset_file)
-#     log('*** Already has PNG file:    %s', arguments.has_png_file)
-#     log('*** Has no PNG file:         %s', arguments.has_no_png_file)
-#     if (arguments.image_name is not None and arguments.image_name != [] and
-#         arguments.image_name[0] != []):
-#         log('*** Images restricted to list:')
-#         for filename in arguments.image_name[0]:
-#             log('        %s', filename)
-#     if arguments.volumes is not None and arguments.volumes != []:
-#         log('*** Images restricted to volumes:')
-#         for volume in arguments.volumes:
-#             for vol in volume.split(','):
-#                 log('        %s', vol)
-#     if arguments.image_pds_csv:
-#         log('*** Images restricted to those from PDS CSV:')
-#         for filename in arguments.image_pds_csv:
-#             log('        %s', filename)
-#     if arguments.image_filelist:
-#         log('*** Images restricted to those from file:')
-#         for filename in arguments.image_filelist:
-#             log('        %s', filename)
 
-    def yield_image_filenames_from_arguments(self,
-                                             arguments: argparse.Namespace
-                                             ) -> Iterator[Path]:
+    def yield_filenames_from_arguments(self,
+                                       arguments: argparse.Namespace
+                                       ) -> Iterator[tuple[Path, Path]]:
         """Given parsed arguments, yield all selected filenames.
 
         Parameters:
@@ -220,8 +177,8 @@ class DataSetPDS3(DataSet):
         restrict_image_list: list[str] = []
 
         # Limit to the user-specific list of images, if any
-        # if arguments.image_name is not None and _flatten(arguments.image_name):
-        #     restrict_image_list = [x.upper() for x in _flatten(arguments.image_name)]
+        if arguments.image_name is not None and flatten_list(arguments.image_name):
+            restrict_image_list = [x.upper() for x in flatten_list(arguments.image_name)]
 
         # Also limit to the list of images in the PDS CSV file, if any
         # if arguments.image_pds_csv:
@@ -323,7 +280,7 @@ class DataSetPDS3(DataSet):
         # last_image_name = None
         # last_image_path = None
 
-        for image_path in self.yield_image_filenames_index(
+        for image_path in self.yield_filenames_index(
                     img_start_num=first_image_number,
                     img_end_num=last_image_number,
                     vol_start=first_volume_number,
@@ -388,28 +345,28 @@ class DataSetPDS3(DataSet):
         except TypeError:
             return PdsTable(fn, columns=columns)
 
-    def yield_image_filenames_index(self,
-                                    *,
-                                    retrieve_files: bool = True,
-                                    img_start_num: Optional[int] = None,
-                                    img_end_num: Optional[int] = None,
-                                    vol_start: Optional[str] = None,
-                                    vol_end: Optional[str] = None,
-                                    volumes: Optional[list[str]] = None,
-                                    camera: Optional[str] = None,
-                                    restrict_list: Optional[list[str]] = None,
-                                    force_has_offset_file: bool = False,
-                                    force_has_no_offset_file: bool = False,
-                                    force_has_png_file: bool = False,
-                                    force_has_no_png_file: bool = False,
-                                    force_has_offset_error: bool = False,
-                                    force_has_offset_spice_error: bool = False,
-                                    force_has_offset_nonspice_error: bool = False,
-                                    selection_expr: Optional[str] = None,
-                                    choose_random_images: bool | int = False,
-                                    max_filenames: Optional[int] = None,
-                                    suffix: Optional[str] = None,
-                                    planets: Optional[str] = None) -> Iterator[Path]:
+    def yield_filenames_index(self,
+                              *,
+                              retrieve_files: bool = True,
+                              img_start_num: Optional[int] = None,
+                              img_end_num: Optional[int] = None,
+                              vol_start: Optional[str] = None,
+                              vol_end: Optional[str] = None,
+                              volumes: Optional[list[str]] = None,
+                              camera: Optional[str] = None,
+                              restrict_list: Optional[list[str]] = None,
+                              force_has_offset_file: bool = False,
+                              force_has_no_offset_file: bool = False,
+                              force_has_png_file: bool = False,
+                              force_has_no_png_file: bool = False,
+                              force_has_offset_error: bool = False,
+                              force_has_offset_spice_error: bool = False,
+                              force_has_offset_nonspice_error: bool = False,
+                              selection_expr: Optional[str] = None,
+                              choose_random_images: bool | int = False,
+                              max_filenames: Optional[int] = None,
+                              suffix: Optional[str] = None,
+                              planets: Optional[str] = None) -> Iterator[tuple[Path, Path]]:
         """Yield filenames given search criteria using index files.
 
         This function assumes that the dataset is in a set of PDS3 volumes laid out like
@@ -424,8 +381,30 @@ class DataSetPDS3(DataSet):
 
         """
 
-        # logger = logging.getLogger(main_module_name() +
-        #                         '.yield_image_filenames_index')
+        logger = self._logger
+
+        logger.info(f'*** Image number range: {img_start_num} - {img_end_num}')
+        logger.info(f'*** Volume range:       {vol_start} - {vol_end}')
+        logger.info(f'*** Camera:             {camera}')
+        # logger.info('*** Results root directory:  %s', CB_RESULTS_ROOT)
+        # logger.info('*** Instrument host:         %s', arguments.instrument_host)
+        # if arguments.image_full_path:
+        #     log('*** Images explicitly from full paths:')
+        #     for image_path in arguments.image_full_path:
+        #         log('        %s', image_path)
+        # log('*** Already has offset file: %s', arguments.has_offset_file)
+        # log('*** Has no offset file:      %s', arguments.has_no_offset_file)
+        # log('*** Already has PNG file:    %s', arguments.has_png_file)
+        # log('*** Has no PNG file:         %s', arguments.has_no_png_file)
+        if (restrict_list is not None and restrict_list != []):
+            logger.info('*** Images restricted to list:')
+            for filename in restrict_list:
+                logger.info(f'        {filename}')
+        if volumes is not None and volumes != []:
+            logger.info('*** Images restricted to volumes:')
+            for volume in volumes:
+                for vol in volume.split(','):
+                    logger.info(f'        {vol}')
 
         # instrument_host_config = INSTRUMENT_HOST_CONFIG[instrument_host]
 
@@ -438,6 +417,8 @@ class DataSetPDS3(DataSet):
         volset_and_volume = dataset_layout['volset_and_volume']
         volume_to_index = dataset_layout['volume_to_index']
         index_columns = dataset_layout['index_columns']
+        volumes_dir_name = dataset_layout['volumes_dir_name']
+        map_filename_func = dataset_layout['map_filename_func']
 
         if volumes is not None:
             for vol in volumes:
@@ -458,7 +439,7 @@ class DataSetPDS3(DataSet):
                              (vol_end is None or
                               all_volume_names.index(v) <= vol_end_idx))]
 
-        volume_raw_dir = self._pds3_holdings_dir / 'volumes'
+        volume_raw_dir = self._pds3_holdings_dir / volumes_dir_name
         index_dir = self._pds3_holdings_dir / 'metadata'
 
         # TODO When yielding via an index, we don't get to optimize searching for
@@ -566,10 +547,12 @@ class DataSetPDS3(DataSet):
                         continue
                     if camera is not None and img_camera not in camera:
                         continue
-                    # if (restrict_list and
-                    #     img_name[:img_name.find(suffix)] not in restrict_list and
-                    #     img_name[img_lim_start:img_lim_end] not in restrict_list):
-                    #     continue
+                    if restrict_list:
+                        for restrict_name in restrict_list:
+                            if img_name.startswith(restrict_name):
+                                break
+                        else:
+                            continue
                     img_path = volume_raw_dir / volset_and_volume(search_vol) / filespec
                     # if force_has_offset_file:
                     #     offset_path = img_to_offset_path(img_path, instrument_host)
@@ -615,12 +598,16 @@ class DataSetPDS3(DataSet):
                         label_path = img_path.with_suffix('.lbl')
                     else:
                         label_path = img_path.with_suffix('.LBL')
+                    if map_filename_func is not None:
+                        label_path = label_path.with_name(map_filename_func(label_path.name))
+                        img_path = img_path.with_name(map_filename_func(img_path.name))
                     if retrieve_files:
                         ret = self._index_filecache.retrieve([img_path, label_path])
-                        _, label_path_local = cast(list[Path], ret)
+                        img_path_local, label_path_local = cast(list[Path], ret)
                     else:
                         label_path_local = label_path
-                    yield label_path_local
+                        img_path_local = img_path
+                    yield label_path_local, img_path_local
 
                     num_yields += 1
                     if limit_yields is not None and num_yields >= limit_yields:

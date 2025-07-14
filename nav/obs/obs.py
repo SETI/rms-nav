@@ -3,7 +3,7 @@ from typing import Optional, cast, TYPE_CHECKING
 
 from pdslogger import PdsLogger
 
-from nav.config import Config, DEFAULT_CONFIG
+from nav.config import Config, DEFAULT_CONFIG, DEFAULT_LOGGER
 
 if TYPE_CHECKING:
     from nav.inst import Inst
@@ -28,7 +28,7 @@ class Obs(ABC):
         """
 
         self._config = config or DEFAULT_CONFIG
-        self._logger = self._config.logger
+        self._logger = DEFAULT_LOGGER
         self._inst: Optional[Inst] = None
 
         if logger_name is not None:
@@ -59,4 +59,4 @@ class Obs(ABC):
     def inst(self) -> 'Inst':
         """Returns the instrument associated with this observation."""
 
-        return cast(Inst, self._inst)
+        return self._inst

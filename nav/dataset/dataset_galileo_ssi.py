@@ -63,6 +63,8 @@ class DataSetGalileoSSI(DataSetPDS3):
         'volset_and_volume': lambda v: f'GO_0xxx/{v}',
         'volume_to_index': lambda v: f'GO_0xxx/{v}/{v}_index.lbl',
         'index_columns': ('FILE_SPECIFICATION_NAME',),
+        'volumes_dir_name': 'volumes',
+        'map_filename_func': None,
     }
 
     def __init__(self,

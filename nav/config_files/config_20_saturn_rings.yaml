@@ -1,0 +1,1408 @@
+# Saturn Ring Fiducial Features
+# Based on French 2016 data from nav/model_ring.py
+# Features are listed in order from closer to Saturn to farther from Saturn
+
+# Data format:
+# - feature_type: "GAP" or "RINGLET"
+# - name: Feature name (or null if unnamed)
+# - inner_data: Inner edge data (or null if not available)
+#   - mode: Orbital mode number
+#   - a: Semi-major axis (km)
+#   - rms: RMS residual (km)
+#   - ae: Eccentricity amplitude (km)
+#   - long_peri: Longitude of pericenter (degrees)
+#   - rate_peri: Rate of pericenter (degrees/day)
+# - outer_data: Outer edge data (or null if not available)
+#   - Same structure as inner_data
+
+ring_features:
+  SATURN:
+    # C Ring - Nicholson et al, Icarus 241 (2014) 373-396
+    colombo_gap:
+      feature_type: "GAP"
+      name: "Colombo"
+      width_km: 178
+      inner_data:
+        - mode: 1
+          a: 77747.89
+          rms: 0.23
+          ae: 3.11
+          long_peri: 96.90
+          rate_peri: 22.57346
+      outer_data:
+        - mode: 1
+          a: 77926.01
+          rms: 0.27
+          ae: 4.89
+          long_peri: 280.02
+          rate_peri: 22.57696
+
+    titan_ringlet:
+      feature_type: "RINGLET"
+      name: "Titan"
+      width_km: 23
+      inner_data:
+        - mode: 1
+          a: 77867.13
+          rms: 0.62
+          ae: 17.39
+          long_peri: 270.54
+          rate_peri: 22.57503
+        - mode: 0
+          amplitude: 3.84
+          phase: 40.93
+          pattern_speed: 1391.16334
+        - mode: -5
+          amplitude: 0.45
+          phase: 60.87
+          pattern_speed: 1692.06574
+        - mode: -2
+          amplitude: 0.77
+          phase: 30.21
+          pattern_speed: 2109.40889
+      outer_data:
+        - mode: 1
+          a: 77890.21
+          rms: 0.94
+          ae: 27.20
+          long_peri: 270.70
+          rate_peri: 22.57562
+        - mode: 2
+          amplitude: 1.55
+          phase: 172.61
+          pattern_speed: 717.94917
+        - mode: 3
+          amplitude: 1.54
+          phase: 110.60
+          pattern_speed: 949.74161
+        - mode: 4
+          amplitude: 0.90
+          phase: 80.30
+          pattern_speed: 1065.62338
+
+    maxwell_gap:
+      feature_type: "GAP"
+      name: "Maxwell"
+      width_km: 267
+      inner_data:
+        - mode: 1
+          a: 87342.77
+          rms: 0.43
+          ae: 0.00
+          long_peri: 0.00
+          rate_peri: 0.00000
+      outer_data:
+        - mode: 1
+          a: 87610.12
+          rms: 0.41
+          ae: 1.11
+          long_peri: 228.54
+          rate_peri: 14.69150
+
+    maxwell_ringlet:
+      feature_type: "RINGLET"
+      name: "Maxwell"
+      width_km: 59
+      inner_data:
+        - mode: 1
+          a: 87480.29
+          rms: 0.23
+          ae: 18.93
+          long_peri: 55.60
+          rate_peri: 14.69572
+      outer_data:
+        - mode: 1
+          a: 87539.36
+          rms: 0.16
+          ae: 58.02
+          long_peri: 57.20
+          rate_peri: 14.69314
+        - mode: 2
+          amplitude: 0.19
+          phase: 73.26
+          pattern_speed: 599.52336
+        - mode: 4
+          amplitude: 0.29
+          phase: 16.55
+          pattern_speed: 891.94002
+
+    bond_gap:
+      feature_type: "GAP"
+      name: "Bond"
+      width_km: 37
+      inner_data:
+        - mode: 1
+          a: 88686.01
+          rms: 0.76
+          ae: 0.00
+          long_peri: 0.00
+          rate_peri: 0.00000
+      outer_data:
+        - mode: 1
+          a: 88723.04
+          rms: 0.30
+          ae: 0.00
+          long_peri: 0.00
+          rate_peri: 0.00000
+
+    bond_ringlet:
+      feature_type: "RINGLET"
+      name: "Bond"
+      width_km: 17
+      inner_data:
+        - mode: 1
+          a: 88701.89
+          rms: 0.28
+          ae: 0.00
+          long_peri: 0.00
+          rate_peri: 0.00000
+        - mode: 0
+          amplitude: 0.17
+          phase: 79.75
+          pattern_speed: 1146.43579
+        - mode: 3
+          amplitude: 0.16
+          phase: 88.49
+          pattern_speed: 778.35308
+      outer_data:
+        - mode: 1
+          a: 88719.24
+          rms: 0.32
+          ae: 0.00
+          long_peri: 0.00
+          rate_peri: 0.00000
+        - mode: 2
+          amplitude: 1.08
+          phase: 105.07
+          pattern_speed: 587.29003
+        - mode: 3
+          amplitude: 0.55
+          phase: 107.67
+          pattern_speed: 778.34105
+        - mode: 4
+          amplitude: 0.47
+          phase: 40.22
+          pattern_speed: 873.86707
+        - mode: 5
+          amplitude: 0.30
+          phase: 52.06
+          pattern_speed: 931.20532
+        - mode: 6
+          amplitude: 0.30
+          phase: 30.39
+          pattern_speed: 969.40781
+        - mode: 7
+          amplitude: 0.41
+          phase: 14.05
+          pattern_speed: 996.70499
+
+    dawes_gap:
+      feature_type: "GAP"
+      name: "Dawes"
+      width_km: 20
+      inner_data:
+        - mode: 1
+          a: 90200.38
+          rms: 0.75
+          ae: 6.10
+          long_peri: 69.24
+          rate_peri: 13.18027
+        - mode: 2
+          amplitude: 5.27
+          phase: 62.92
+          pattern_speed: 572.50536
+        - mode: 3
+          amplitude: 1.46
+          phase: 41.67
+          pattern_speed: 758.94278
+        - mode: 5
+          amplitude: 0.89
+          phase: 71.02
+          pattern_speed: 908.10954
+      outer_data:
+        - mode: 1
+          a: 90220.77
+          rms: 0.32
+          ae: 2.29
+          long_peri: 241.79
+          rate_peri: 13.17088
+        - mode: 2
+          amplitude: 0.43
+          phase: 157.21
+          pattern_speed: 572.48458
+
+    # Cassini Division - French et al Icarus 274 (2016) 131-162
+    huygens_gap:
+      feature_type: "GAP"
+      name: "Huygens"
+      width_km: 361
+      inner_data:
+        - mode: 1
+          a: 117569.41
+          rms: 7.56
+          ae: 22.89
+          long_peri: 66.89
+          rate_peri: 5.08300
+        - mode: 2
+          amplitude: 37.94
+          phase: 117.29
+          pattern_speed: 382.07925
+        - mode: 2
+          amplitude: 31.77
+          phase: 164.83
+          pattern_speed: 381.98729
+        - mode: 3
+          amplitude: 10.92
+          phase: 22.06
+          pattern_speed: 507.70626
+        - mode: 4
+          amplitude: 7.24
+          phase: 7.52
+          pattern_speed: 570.52601
+        - mode: 5
+          amplitude: 5.84
+          phase: 66.45
+          pattern_speed: 608.20820
+        - mode: 6
+          amplitude: 2.93
+          phase: 99.17
+          pattern_speed: 633.32360
+      outer_data:
+        - mode: 1
+          a: 117930.90
+          rms: 0.45
+          ae: 2.20
+          long_peri: 248.98
+          rate_peri: 5.03372
+        - mode: 91
+          amplitude: 0.44
+          phase: 245.70
+          pattern_speed: -4.98425
+        - mode: 0
+          amplitude: 1.82
+          phase: 143.78
+          pattern_speed: 750.25165
+        - mode: 2
+          amplitude: 1.34
+          phase: 76.25
+          pattern_speed: 381.98386
+        - mode: -4
+          amplitude: 0.35
+          phase: 45.39
+          pattern_speed: 942.82221
+        - mode: -3
+          amplitude: 0.40
+          phase: 84.88
+          pattern_speed: 1005.34987
+        - mode: -1
+          amplitude: 0.82
+          phase: 67.16
+          pattern_speed: 1505.51205
+
+    huygens_ringlet:
+      feature_type: "RINGLET"
+      name: "Huygens"
+      width_km: 18
+      inner_data:
+        - mode: 1
+          a: 117805.55
+          rms: 1.30
+          ae: 27.81
+          long_peri: 137.53
+          rate_peri: 5.02872
+        - mode: 91
+          amplitude: 0.59
+          phase: 115.57
+          pattern_speed: -4.98852
+        - mode: 2
+          amplitude: 2.09
+          phase: 81.56
+          pattern_speed: 381.98744
+        - mode: -10
+          amplitude: 0.74
+          phase: 14.73
+          pattern_speed: 831.59967
+        - mode: -5
+          amplitude: 0.85
+          phase: 43.95
+          pattern_speed: 906.74404
+        - mode: -4
+          amplitude: 1.85
+          phase: 32.20
+          pattern_speed: 944.31186
+        - mode: -3
+          amplitude: 1.20
+          phase: 84.52
+          pattern_speed: 1006.92419
+        - mode: -2
+          amplitude: 1.12
+          phase: 168.38
+          pattern_speed: 1132.15800
+      outer_data:
+        - mode: 1
+          a: 117823.65
+          rms: 1.50
+          ae: 28.03
+          long_peri: 141.77
+          rate_peri: 5.02587
+        - mode: 91
+          amplitude: 0.58
+          phase: 96.86
+          pattern_speed: -4.97462
+        - mode: 2
+          amplitude: 1.54
+          phase: 105.43
+          pattern_speed: 380.68870
+        - mode: 2
+          amplitude: 1.84
+          phase: 71.33
+          pattern_speed: 381.98878
+        - mode: 5
+          amplitude: 0.71
+          phase: 26.40
+          pattern_speed: 606.07903
+
+    strange_ringlet:
+      feature_type: "RINGLET"
+      name: "Strange"
+      width_km: 2
+      inner_data:
+        - mode: 1
+          a: 117907.04
+          rms: 1.63
+          ae: 7.63
+          long_peri: 153.21
+          rate_peri: 5.00570
+        - mode: 91
+          amplitude: 7.44
+          phase: 117.20
+          pattern_speed: -4.97620
+        - mode: 0
+          amplitude: 2.42
+          phase: 9.73
+          pattern_speed: 750.48932
+        - mode: 2
+          amplitude: 3.75
+          phase: 105.79
+          pattern_speed: 380.25154
+        - mode: 2
+          amplitude: 1.29
+          phase: 75.92
+          pattern_speed: 381.97024
+        - mode: 3
+          amplitude: 2.49
+          phase: 37.53
+          pattern_speed: 505.33539
+        - mode: 5
+          amplitude: 1.06
+          phase: 29.00
+          pattern_speed: 605.39489
+      outer_data:
+        - mode: 1
+          a: 117908.77
+          rms: 1.99
+          ae: 7.40
+          long_peri: 153.83
+          rate_peri: 5.00735
+        - mode: 91
+          amplitude: 7.39
+          phase: 120.60
+          pattern_speed: -4.97938
+        - mode: 0
+          amplitude: 2.56
+          phase: 19.83
+          pattern_speed: 750.47956
+        - mode: 2
+          amplitude: 4.13
+          phase: 106.14
+          pattern_speed: 380.25204
+        - mode: 2
+          amplitude: 1.55
+          phase: 77.43
+          pattern_speed: 381.96666
+        - mode: 3
+          amplitude: 2.60
+          phase: 33.24
+          pattern_speed: 505.33449
+        - mode: -1
+          amplitude: 1.14
+          phase: 352.19
+          pattern_speed: 1505.96783
+
+    herschel_gap:
+      feature_type: "GAP"
+      name: "Herschel"
+      width_km: 95
+      inner_data:
+        - mode: 1
+          a: 118188.42
+          rms: 0.41
+          ae: 8.27
+          long_peri: 347.32
+          rate_peri: 4.97362
+        - mode: 91
+          amplitude: 0.34
+          phase: 279.55
+          pattern_speed: -4.95092
+        - mode: 2
+          amplitude: 1.34
+          phase: 95.16
+          pattern_speed: 378.89248
+        - mode: 2
+          amplitude: 0.89
+          phase: 82.69
+          pattern_speed: 381.98160
+        - mode: 3
+          amplitude: 0.71
+          phase: 5.26
+          pattern_speed: 503.53264
+        - mode: 4
+          amplitude: 0.35
+          phase: 89.58
+          pattern_speed: 565.85131
+        - mode: 5
+          amplitude: 0.36
+          phase: 71.76
+          pattern_speed: 603.24143
+        - mode: 6
+          amplitude: 0.37
+          phase: 4.74
+          pattern_speed: 628.16426
+        - mode: 7
+          amplitude: 0.37
+          phase: 45.09
+          pattern_speed: 645.97255
+        - mode: 8
+          amplitude: 0.34
+          phase: 31.40
+          pattern_speed: 659.32551
+        - mode: 10
+          amplitude: 0.25
+          phase: 24.43
+          pattern_speed: 678.02618
+      outer_data:
+        - mode: 1
+          a: 118283.52
+          rms: 0.15
+          ae: 0.24
+          long_peri: 127.45
+          rate_peri: 4.94609
+        - mode: 91
+          amplitude: 0.25
+          phase: 57.07
+          pattern_speed: -4.92430
+        - mode: 0
+          amplitude: 1.27
+          phase: 232.50
+          pattern_speed: 746.91637
+        - mode: 2
+          amplitude: 0.67
+          phase: 76.01
+          pattern_speed: 381.98441
+        - mode: -3
+          amplitude: 0.11
+          phase: 96.61
+          pattern_speed: 1000.83562
+        - mode: -2
+          amplitude: 0.11
+          phase: 144.86
+          pattern_speed: 1125.34236
+        - mode: -1
+          amplitude: 0.23
+          phase: 197.18
+          pattern_speed: 1498.79019
+
+    herschel_ringlet:
+      feature_type: "RINGLET"
+      name: "Herschel"
+      width_km: 29
+      inner_data:
+        - mode: 1
+          a: 118234.30
+          rms: 0.26
+          ae: 1.49
+          long_peri: 172.81
+          rate_peri: 4.96229
+        - mode: 91
+          amplitude: 1.49
+          phase: 274.14
+          pattern_speed: -4.92970
+        - mode: 0
+          amplitude: 0.32
+          phase: 237.88
+          pattern_speed: 747.36440
+        - mode: 2
+          amplitude: 0.69
+          phase: 79.00
+          pattern_speed: 381.98129
+      outer_data:
+        - mode: 1
+          a: 118263.25
+          rms: 0.35
+          ae: 1.76
+          long_peri: 264.77
+          rate_peri: 4.95659
+        - mode: 91
+          amplitude: 2.12
+          phase: 294.58
+          pattern_speed: -4.93101
+        - mode: 2
+          amplitude: 0.37
+          phase: 6.80
+          pattern_speed: 378.53785
+        - mode: 2
+          amplitude: 0.72
+          phase: 77.59
+          pattern_speed: 381.98303
+        - mode: 3
+          amplitude: 0.32
+          phase: 32.76
+          pattern_speed: 503.04880
+        - mode: 4
+          amplitude: 0.20
+          phase: 76.13
+          pattern_speed: 565.30770
+        - mode: 5
+          amplitude: 0.22
+          phase: 54.38
+          pattern_speed: 602.66098
+
+    russell_gap:
+      feature_type: "GAP"
+      name: "Russell"
+      width_km: 38
+      inner_data:
+        - mode: 1
+          a: 118589.92
+          rms: 0.25
+          ae: 7.60
+          long_peri: 236.73
+          rate_peri: 4.90922
+        - mode: 2
+          amplitude: 0.23
+          phase: 165.64
+          pattern_speed: 376.94996
+        - mode: 2
+          amplitude: 0.51
+          phase: 80.23
+          pattern_speed: 381.98584
+        - mode: 3
+          amplitude: 0.25
+          phase: 92.19
+          pattern_speed: 500.95134
+      outer_data:
+        - mode: 1
+          a: 118628.40
+          rms: 0.09
+          ae: 0.11
+          long_peri: 73.68
+          rate_peri: 4.90829
+        - mode: 2
+          amplitude: 0.47
+          phase: 78.01
+          pattern_speed: 381.98525
+
+    jeffreys_gap:
+      feature_type: "GAP"
+      name: "Jeffreys"
+      width_km: 37
+      inner_data:
+        - mode: 1
+          a: 118929.63
+          rms: 0.13
+          ae: 3.26
+          long_peri: 333.51
+          rate_peri: 4.85753
+        - mode: 91
+          amplitude: 0.17
+          phase: 292.09
+          pattern_speed: -4.82576
+        - mode: 2
+          amplitude: 0.44
+          phase: 75.98
+          pattern_speed: 381.99151
+      outer_data:
+        - mode: 1
+          a: 118966.70
+          rms: 0.12
+          ae: 0.08
+          long_peri: 114.89
+          rate_peri: 4.80910
+        - mode: 2
+          amplitude: 0.37
+          phase: 74.90
+          pattern_speed: 381.98629
+
+    kuiper_gap:
+      feature_type: "GAP"
+      name: "Kuiper"
+      width_km: 5
+      inner_data:
+        - mode: 1
+          a: 119401.67
+          rms: 0.16
+          ae: 0.93
+          long_peri: 19.55
+          rate_peri: 4.79845
+        - mode: 91
+          amplitude: 0.18
+          phase: 226.51
+          pattern_speed: -4.78025
+        - mode: 2
+          amplitude: 0.25
+          phase: 79.87
+          pattern_speed: 381.98534
+      outer_data:
+        - mode: 1
+          a: 119406.30
+          rms: 0.13
+          ae: 0.10
+          long_peri: 220.24
+          rate_peri: 4.75654
+        - mode: 2
+          amplitude: 0.29
+          phase: 79.03
+          pattern_speed: 381.98449
+
+    laplace_gap:
+      feature_type: "GAP"
+      name: "Laplace"
+      width_km: 239
+      inner_data:
+        - mode: 1
+          a: 119844.78
+          rms: 0.26
+          ae: 3.25
+          long_peri: 310.11
+          rate_peri: 4.72673
+        - mode: 91
+          amplitude: 0.25
+          phase: 10.17
+          pattern_speed: -4.69233
+        - mode: 2
+          amplitude: 0.29
+          phase: 82.70
+          pattern_speed: 381.98579
+      outer_data:
+        - mode: 1
+          a: 120085.65
+          rms: 0.10
+          ae: 1.34
+          long_peri: 308.79
+          rate_peri: 4.71705
+        - mode: 2
+          amplitude: 0.22
+          phase: 76.51
+          pattern_speed: 381.98639
+
+    laplace_ringlet:
+      feature_type: "RINGLET"
+      name: "Laplace"
+      width_km: 41
+      inner_data:
+        - mode: 1
+          a: 120036.53
+          rms: 0.20
+          ae: 1.19
+          long_peri: 236.12
+          rate_peri: 4.71250
+        - mode: 0
+          amplitude: 2.22
+          phase: 160.05
+          pattern_speed: 730.64946
+        - mode: 2
+          amplitude: 0.27
+          phase: 75.51
+          pattern_speed: 381.98821
+        - mode: -4
+          amplitude: 0.13
+          phase: 19.39
+          pattern_speed: 918.04749
+        - mode: -2
+          amplitude: 0.74
+          phase: 141.40
+          pattern_speed: 1100.71164
+        - mode: -1
+          amplitude: 0.61
+          phase: 193.60
+          pattern_speed: 1466.03143
+      outer_data:
+        - mode: 1
+          a: 120077.75
+          rms: 0.14
+          ae: 2.79
+          long_peri: 51.49
+          rate_peri: 4.72457
+        - mode: 2
+          amplitude: 0.62
+          phase: 86.10
+          pattern_speed: 369.88543
+        - mode: 2
+          amplitude: 0.22
+          phase: 78.01
+          pattern_speed: 381.98827
+        - mode: 3
+          amplitude: 0.42
+          phase: 34.20
+          pattern_speed: 491.60221
+        - mode: 4
+          amplitude: 0.25
+          phase: 46.96
+          pattern_speed: 552.46291
+        - mode: 6
+          amplitude: 0.12
+          phase: 16.13
+          pattern_speed: 613.31846
+
+    bessel_gap:
+      feature_type: "GAP"
+      name: "Bessel"
+      width_km: 13
+      inner_data:
+        - mode: 1
+          a: 120231.17
+          rms: 0.44
+          ae: 1.78
+          long_peri: 263.16
+          rate_peri: 4.68450
+        - mode: 2
+          amplitude: 0.29
+          phase: 73.47
+          pattern_speed: 381.97875
+        - mode: 8
+          amplitude: 0.36
+          phase: 10.70
+          pattern_speed: 642.50158
+      outer_data:
+        - mode: 1
+          a: 120243.71
+          rms: 0.23
+          ae: 0.64
+          long_peri: 206.50
+          rate_peri: 4.68561
+        - mode: 0
+          amplitude: 0.21
+          phase: 350.29
+          pattern_speed: 728.80170
+        - mode: 2
+          amplitude: 0.23
+          phase: 75.99
+          pattern_speed: 381.98988
+        - mode: -1
+          amplitude: 0.14
+          phase: 302.16
+          pattern_speed: 1462.27593
+
+    barnard_gap:
+      feature_type: "GAP"
+      name: "Barnard"
+      width_km: 12
+      inner_data:
+        - mode: 1
+          a: 120303.69
+          rms: 0.43
+          ae: 0.44
+          long_peri: 200.07
+          rate_peri: 4.68212
+        - mode: 2
+          amplitude: 0.61
+          phase: 44.12
+          pattern_speed: 368.82370
+        - mode: 2
+          amplitude: 0.25
+          phase: 67.07
+          pattern_speed: 381.99503
+        - mode: 3
+          amplitude: 1.31
+          phase: 108.47
+          pattern_speed: 490.20424
+        - mode: 4
+          amplitude: 1.64
+          phase: 46.00
+          pattern_speed: 550.89054
+        - mode: 5
+          amplitude: 1.36
+          phase: 27.61
+          pattern_speed: 587.28565
+        - mode: 6
+          amplitude: 0.59
+          phase: 24.56
+          pattern_speed: 611.58228
+        - mode: 7
+          amplitude: 0.55
+          phase: 46.93
+          pattern_speed: 628.91493
+        - mode: 8
+          amplitude: 0.30
+          phase: 10.41
+          pattern_speed: 641.92788
+        - mode: 9
+          amplitude: 0.71
+          phase: 8.38
+          pattern_speed: 652.04071
+        - mode: 10
+          amplitude: 0.42
+          phase: 1.75
+          pattern_speed: 660.13055
+        - mode: 13
+          amplitude: 0.36
+          phase: 26.84
+          pattern_speed: 676.93190
+      outer_data:
+        - mode: 1
+          a: 120316.04
+          rms: 0.11
+          ae: 0.23
+          long_peri: 166.62
+          rate_peri: 4.66313
+        - mode: 2
+          amplitude: 0.22
+          phase: 79.36
+          pattern_speed: 381.98624
+        - mode: 5
+          amplitude: 0.19
+          phase: 58.97
+          pattern_speed: 587.28403
+    # A RING
+    # 2005 MAY 1 - 2005 AUG 1
+    keeler_a_ring_oe_2005_05_01_2005_08_01:
+      feature_type: "RINGLET"
+      name: "Keeler-A Ring OE"
+      start_date: "2005-05-01"
+      end_date: "2005-08-01"
+      inner_data:
+        - mode: 1
+          a: 136522.08727
+          rms: 1.005577
+          ae: 0.9887854
+          long_peri: 322.4368800
+          rate_peri: 2.9890023
+      outer_data:
+        - mode: 1
+          a: 136767.20
+          rms: 7.55
+          ae: 0.00
+          long_peri: 0.00
+          rate_peri: 0.00000
+
+    # 2006 JAN 1 - 2009 JULY 1
+    keeler_a_ring_oe_2006_01_01_2009_07_01:
+      feature_type: "RINGLET"
+      name: "Keeler-A Ring OE"
+      start_date: "2006-01-01"
+      end_date: "2009-07-01"
+      inner_data:
+        - mode: 1
+          a: 136522.08727
+          rms: 1.005577
+          ae: 0.9887854
+          long_peri: 322.4368800
+          rate_peri: 2.9890023
+      outer_data:
+        - mode: 1
+          a: 136770.09
+          rms: 1.78
+          ae: 0.00
+          long_peri: 0.00
+          rate_peri: 0.00000
+        - mode: 3
+          amplitude: 2.28
+          phase: 8.31
+          pattern_speed: 403.85329
+        - mode: 4
+          amplitude: 1.80
+          phase: 6.64
+          pattern_speed: 453.94649
+        - mode: 5
+          amplitude: 4.85
+          phase: 60.92
+          pattern_speed: 484.02086
+        - mode: 6
+          amplitude: 1.92
+          phase: 17.10
+          pattern_speed: 504.07364
+        - mode: 7
+          amplitude: 12.91
+          phase: 4.15
+          pattern_speed: 518.35437
+        - mode: 8
+          amplitude: 2.77
+          phase: 23.89
+          pattern_speed: 529.10426
+        - mode: 9
+          amplitude: 3.12
+          phase: 30.56
+          pattern_speed: 537.44541
+        - mode: 10
+          amplitude: 1.51
+          phase: 30.95
+          pattern_speed: 544.12491
+        - mode: 18
+          amplitude: 1.95
+          phase: 4.62
+          pattern_speed: 570.85163
+
+    # 2010 JAN 1 - 2013 AUG 1
+    keeler_a_ring_oe_2010_01_01_2013_08_01:
+      feature_type: "RINGLET"
+      name: "Keeler-A Ring OE"
+      start_date: "2010-01-01"
+      end_date: "2013-08-01"
+      inner_data:
+        - mode: 1
+          a: 136522.08727
+          rms: 1.005577
+          ae: 0.9887854
+          long_peri: 322.4368800
+          rate_peri: 2.9890023
+      outer_data:
+        - mode: 1
+          a: 136772.74
+          rms: 4.25
+          ae: 0.00
+          long_peri: 0.00
+          rate_peri: 0.00000
+        - mode: 9
+          amplitude: 6.14
+          phase: 27.17
+          pattern_speed: 537.45029
+        - mode: 12
+          amplitude: 7.94
+          phase: 12.84
+          pattern_speed: 554.11853
+
+    # Before 2005-MAY-1
+    keeler_a_ring_oe_1990_01_01_2005_05_01:
+      feature_type: "RINGLET"
+      name: "Keeler-A Ring OE"
+      start_date: "1990-01-01"
+      end_date: "2005-05-01"
+      inner_data:
+        - mode: 1
+          a: 136522.08727
+          rms: 1.005577
+          ae: 0.9887854
+          long_peri: 322.4368800
+          rate_peri: 2.9890023
+      outer_data:
+        - mode: 1
+          a: 136770.41
+          rms: 10.18
+          ae: 0.00
+          long_peri: 0.00
+          rate_peri: 0.00000
+
+    # Between 2005-AUG-1 and 2006-JAN-1
+    keeler_a_ring_oe_2005_08_01_2006_01_01:
+      feature_type: "RINGLET"
+      name: "Keeler-A Ring OE"
+      start_date: "2005-08-01"
+      end_date: "2006-01-01"
+      inner_data:
+        - mode: 1
+          a: 136522.08727
+          rms: 1.005577
+          ae: 0.9887854
+          long_peri: 322.4368800
+          rate_peri: 2.9890023
+      outer_data:
+        - mode: 1
+          a: 136770.41
+          rms: 10.18
+          ae: 0.00
+          long_peri: 0.00
+          rate_peri: 0.00000
+
+    # Between 2009-JULY-1 and 2010-JAN-1
+    keeler_a_ring_oe_2009_07_01_2010_01_01:
+      feature_type: "RINGLET"
+      name: "Keeler-A Ring OE"
+      start_date: "2009-07-01"
+      end_date: "2010-01-01"
+      inner_data:
+        - mode: 1
+          a: 136522.08727
+          rms: 1.005577
+          ae: 0.9887854
+          long_peri: 322.4368800
+          rate_peri: 2.9890023
+      outer_data:
+        - mode: 1
+          a: 136770.41
+          rms: 10.18
+          ae: 0.00
+          long_peri: 0.00
+          rate_peri: 0.00000
+
+    # After 2013-AUG-1
+    keeler_a_ring_oe_2013_08_01_2030_01_01:
+      feature_type: "RINGLET"
+      name: "Keeler-A Ring OE"
+      start_date: "2013-08-01"
+      end_date: "2030-01-01"
+      inner_data:
+        - mode: 1
+          a: 136522.08727
+          rms: 1.005577
+          ae: 0.9887854
+          long_peri: 322.4368800
+          rate_peri: 2.9890023
+      outer_data:
+        - mode: 1
+          a: 136770.41
+          rms: 10.18
+          ae: 0.00
+          long_peri: 0.00
+          rate_peri: 0.00000
+
+    # Keeler Gap - IEG only (OEG is paired with A ring outer edge above)
+    #
+    # Keeler IEG. Note this would normally be paired with the Keeler OEG above, but it's
+    # better to call the area between the OEG and the A ring OER a ringlet so it gets filled
+    # in in the model. From Dec 2013 CMF-V4687
+    keeler_gap:
+      feature_type: "GAP"
+      name: "Keeler"
+      inner_data:
+        - mode: 1
+          a: 136484.91000
+          rms: 3.620000
+          ae: 0.0000000
+          long_peri: 0.0000000
+          rate_peri: 0.0000000
+      outer_data: null
+
+    # Encke Gap - #4, #3 - IEG/OEG
+    encke_gap:
+      feature_type: "GAP"
+      name: "Encke"
+      feature_numbers: [4, 3]
+      inner_data:
+        - mode: 1
+          a: 133423.23793
+          rms: 0.948856
+          ae: 0.0000000
+          long_peri: 0.0000000
+          rate_peri: 0.0000000
+      outer_data:
+        - mode: 1
+          a: 133744.83759
+          rms: 0.808255
+          ae: 0.0000000
+          long_peri: 0.0000000
+          rate_peri: 0.0000000
+
+    # A Ring Inner Edge - #7 - IER
+    a_ring_inner_edge:
+      feature_type: "RINGLET"
+      name: "A Ring"
+      feature_number: 7
+      description: "A ring IER"
+      inner_data:
+        - mode: 1
+          a: 122050.07651
+          rms: 1.135272
+          ae: 0.0000000
+          long_peri: 0.0000000
+          rate_peri: 0.0000000
+      outer_data: null
+
+    # C RING
+    # #135 - IEG unpaired
+    feature_135_ieg:
+      feature_type: "GAP"
+      name: null
+      feature_number: 135
+      inner_data:
+        - mode: 1
+          a: 74614.73965
+          rms: 0.164346
+          ae: 0.0000000
+          long_peri: 0.0000000
+          rate_peri: 0.0000000
+      outer_data: null
+
+    # #144 - OER paired with #143, uncircular
+    feature_144_oer:
+      feature_type: "RINGLET"
+      name: null
+      feature_number: 144
+      inner_data: null
+      outer_data:
+        - mode: 1
+          a: 75988.65895
+          rms: 0.142803
+          ae: 0.0000000
+          long_peri: 0.0000000
+          rate_peri: 0.0000000
+        - mode: 1
+          amplitude: 0.1345940
+          phase: 101.5205612
+          pattern_speed: 22.5997842
+
+    # #40 - OER unpaired
+    feature_40_oer:
+      feature_type: "RINGLET"
+      name: null
+      feature_number: 40
+      inner_data: null
+      outer_data:
+        - mode: 1
+          a: 76261.77387
+          rms: 0.158014
+          ae: 0.0000000
+          long_peri: 0.0000000
+          rate_peri: 0.0000000
+        - mode: 1
+          amplitude: 0.2666899
+          phase: 97.8944271
+          pattern_speed: 22.5677381
+
+    # #39 - OER unpaired
+    feature_39_oer:
+      feature_type: "RINGLET"
+      name: null
+      feature_number: 39
+      inner_data: null
+      outer_data:
+        - mode: 1
+          a: 77162.11501
+          rms: 0.127343
+          ae: 0.0000000
+          long_peri: 0.0000000
+          rate_peri: 0.0000000
+        - mode: 1
+          amplitude: 0.5803149
+          phase: 95.1273754
+          pattern_speed: 22.5786349
+
+    # #38, #37 - 41 km
+    feature_38_37_ringlet:
+      feature_type: "RINGLET"
+      name: null
+      feature_numbers: [38, 37]
+      width_km: 41
+      inner_data:
+        - mode: 1
+          a: 79222.04152
+          rms: 0.113388
+          ae: 0.0000000
+          long_peri: 0.0000000
+          rate_peri: 0.0000000
+        - mode: 1
+          amplitude: 0.2341692
+          phase: 287.4580718
+          pattern_speed: 22.5734575
+      outer_data:
+        - mode: 1
+          a: 79262.91082
+          rms: 0.112969
+          ae: 0.0000000
+          long_peri: 0.0000000
+          rate_peri: 0.0000000
+        - mode: 1
+          amplitude: 0.1892659
+          phase: 284.0750895
+          pattern_speed: 22.5732605
+
+    # #35, #34
+    feature_35_34_ringlet:
+      feature_type: "RINGLET"
+      name: null
+      feature_numbers: [35, 34]
+      inner_data:
+        - mode: 1
+          a: 84751.77410
+          rms: 0.159019
+          ae: 0.0000000
+          long_peri: 0.0000000
+          rate_peri: 0.0000000
+      outer_data:
+        - mode: 1
+          a: 84947.29467
+          rms: 0.137759
+          ae: 0.0000000
+          long_peri: 0.0000000
+          rate_peri: 0.0000000
+
+    # #33, #42
+    feature_33_42_ringlet:
+      feature_type: "RINGLET"
+      name: null
+      feature_numbers: [33, 42]
+      inner_data:
+        - mode: 1
+          a: 85661.96178
+          rms: 0.113055
+          ae: 0.0000000
+          long_peri: 0.0000000
+          rate_peri: 0.0000000
+      outer_data:
+        - mode: 1
+          a: 85757.24532
+          rms: 0.176563
+          ae: 0.0000000
+          long_peri: 0.0000000
+          rate_peri: 0.0000000
+
+    # #31 - IER unpaired
+    feature_31_ier:
+      feature_type: "RINGLET"
+      name: null
+      feature_number: 31
+      inner_data:
+        - mode: 1
+          a: 85923.69993
+          rms: 0.104101
+          ae: 0.0000000
+          long_peri: 0.0000000
+          rate_peri: 0.0000000
+      outer_data: null
+
+    # #30 - IER paired with #29, uncircular
+    feature_30_ier:
+      feature_type: "RINGLET"
+      name: null
+      feature_number: 30
+      inner_data:
+        - mode: 1
+          a: 86373.17361
+          rms: 0.171814
+          ae: 0.0000000
+          long_peri: 0.0000000
+          rate_peri: 0.0000000
+      outer_data: null
+
+    # #28 - OER unpaired
+    feature_28_oer:
+      feature_type: "RINGLET"
+      name: null
+      feature_number: 28
+      inner_data: null
+      outer_data:
+        - mode: 1
+          a: 88592.73625
+          rms: 0.115294
+          ae: 0.0000000
+          long_peri: 0.0000000
+          rate_peri: 0.0000000
+
+    # #27, #41 - 103 km
+    feature_27_41_ringlet:
+      feature_type: "RINGLET"
+      name: null
+      feature_numbers: [27, 41]
+      width_km: 103
+      inner_data:
+        - mode: 1
+          a: 89190.58600
+          rms: 0.086866
+          ae: 0.0000000
+          long_peri: 0.0000000
+          rate_peri: 0.0000000
+      outer_data:
+        - mode: 1
+          a: 89294.05618
+          rms: 0.181465
+          ae: 0.0000000
+          long_peri: 0.0000000
+          rate_peri: 0.0000000
+
+    # #26, #25 - 148 km
+    feature_26_25_ringlet:
+      feature_type: "RINGLET"
+      name: null
+      feature_numbers: [26, 25]
+      width_km: 148
+      inner_data:
+        - mode: 1
+          a: 89789.57831
+          rms: 0.081971
+          ae: 0.0000000
+          long_peri: 0.0000000
+          rate_peri: 0.0000000
+      outer_data:
+        - mode: 1
+          a: 89937.78988
+          rms: 0.141344
+          ae: 0.0000000
+          long_peri: 0.0000000
+          rate_peri: 0.0000000
+
+    # #24, #23 - 508 km
+    feature_24_23_ringlet:
+      feature_type: "RINGLET"
+      name: null
+      feature_numbers: [24, 23]
+      width_km: 508
+      inner_data:
+        - mode: 1
+          a: 90406.12658
+          rms: 0.094128
+          ae: 0.0000000
+          long_peri: 0.0000000
+          rate_peri: 0.0000000
+      outer_data:
+        - mode: 1
+          a: 90613.79856
+          rms: 0.156829
+          ae: 0.0000000
+          long_peri: 0.0000000
+          rate_peri: 0.0000000
+
+    # B RING
+    # #77 - OEG unpaired
+    feature_77_oeg:
+      feature_type: "GAP"
+      name: null
+      feature_number: 77
+      inner_data: null
+      outer_data:
+        - mode: 1
+          a: 100024.40676
+          rms: 0.117471
+          ae: 0.0000000
+          long_peri: 0.0000000
+          rate_peri: 0.0000000
+
+    # #74 - OEG paired with #75, uncircular
+    feature_74_oeg:
+      feature_type: "GAP"
+      name: null
+      feature_number: 74
+      inner_data: null
+      outer_data:
+        - mode: 1
+          a: 101743.40857
+          rms: 0.110368
+          ae: 0.0000000
+          long_peri: 0.0000000
+          rate_peri: 0.0000000
+
+    # #73 - OER unpaired
+    feature_73_oer:
+      feature_type: "RINGLET"
+      name: null
+      feature_number: 73
+      inner_data: null
+      outer_data:
+        - mode: 1
+          a: 103008.64563
+          rms: 0.114512
+          ae: 0.0000000
+          long_peri: 0.0000000
+          rate_peri: 0.0000000
+
+    # #71 - OEG paired with #72, uncircular
+    feature_71_oeg:
+      feature_type: "GAP"
+      name: null
+      feature_number: 71
+      inner_data: null
+      outer_data:
+        - mode: 1
+          a: 104082.65168
+          rms: 0.144307
+          ae: 0.0000000
+          long_peri: 0.0000000
+          rate_peri: 0.0000000

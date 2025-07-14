@@ -1,0 +1,74 @@
+##############
+# SATELLITES #
+##############
+
+satellites:
+  EARTH:
+    - MOON
+  JUPITER:
+    - ADRASTEA
+    - AMALTHEA
+    - CALLISTO
+    - EUROPA
+    - GANYMEDE
+    - IO
+    - METIS
+    - THEBE
+  SATURN:
+    - ATLAS
+    - CALYPSO
+    - DAPHNIS
+    - DIONE
+    - ENCELADUS
+    - EPIMETHEUS
+    - HELENE
+    - HYPERION
+    - IAPETUS
+    - JANUS
+    - MIMAS
+    - PAN
+    - PANDORA
+    - PHOEBE
+    - PROMETHEUS
+    - RHEA
+    - TELESTO
+    - TETHYS
+    - TITAN
+  URANUS:
+    - ARIEL
+    - BELINDA
+    - BIANCA
+    - CRESSIDA
+    - DESDEMONA
+    - JULIET
+    - MIRANDA
+    - OBERON
+    - PORTIA
+    - PUCK
+    - ROSALIND
+    - TITANIA
+    - UMBRIEL
+  NEPTUNE:
+    - DESPINA
+    - GALATEA
+    - LARISSA
+    - NAIAD
+    - PROTEUS
+    - THALASSA
+    - TRITON
+  PLUTO:
+    - CHARON
+    - HYDRA
+    - KERBEROS
+    - NIX
+    - STYX
+
+fuzzy_satellites:
+  SATURN:
+    - HYPERION
+    - PHOEBE
+
+ring_satellites:
+  SATURN:
+    - DAPHNIS
+    - PAN
