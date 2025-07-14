@@ -1,5 +1,5 @@
 from abc import ABC
-from typing import Optional, cast, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 from pdslogger import PdsLogger
 

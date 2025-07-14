@@ -152,7 +152,6 @@ class DataSetPDS3(DataSet):
         #             f'Invalid image name {image_name} with instrument host '
         #             f'{arguments.instrument_host}')
 
-
     def yield_filenames_from_arguments(self,
                                        arguments: argparse.Namespace
                                        ) -> Iterator[tuple[Path, Path]]:

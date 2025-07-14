@@ -46,7 +46,8 @@ class InstCassiniISS(Inst):
         # TODO Calibrate
         # obs.data = obs.extended_calib.value_from_dn(obs.data).vals
         if extfov_margin_vu is None:
-            extfov_margin_vu = config._config_dict['cassini_iss']['extfov_margin_vu'][obs.data.shape[0]]
+            extfov_margin_vu = config._config_dict['cassini_iss']['extfov_margin_vu'][
+                obs.data.shape[0]]
         new_obs = ObsSnapshot(obs,
                               config=config,
                               extfov_margin_vu=extfov_margin_vu)

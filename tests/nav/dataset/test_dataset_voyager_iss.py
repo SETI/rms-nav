@@ -16,7 +16,7 @@ def test_voyager_iss_yield_basic() -> None:
 
 def test_voyager_iss_yield_vol_start() -> None:
     ret = _DS.yield_filenames_index(max_filenames=1, vol_start='VGISS_8201',
-                                          retrieve_files=False)
+                                    retrieve_files=False)
     ret2 = [x[0].as_posix() for x in ret]
     assert len(ret2) == 1
     assert ret2[0].endswith(
@@ -33,7 +33,7 @@ def test_voyager_iss_yield_vol_end() -> None:
 
 def test_voyager_iss_yield_img_start_num() -> None:
     ret = _DS.yield_filenames_index(max_filenames=2, img_start_num=1469548,
-                                          retrieve_files=False)
+                                    retrieve_files=False)
     ret2 = [x[0].as_posix() for x in ret]
     assert len(ret2) == 2
     assert ret2[0].endswith('C1469548_GEOMED.LBL')
@@ -52,7 +52,7 @@ def test_voyager_iss_yield_img_end_num() -> None:
 
 def test_voyager_iss_yield_volumes() -> None:
     ret = _DS.yield_filenames_index(volumes=['VGISS_5101', 'VGISS_8201'],
-                                          retrieve_files=False)
+                                    retrieve_files=False)
     ret2 = [x[0].as_posix() for x in ret]
     assert len(ret2) == 1403
     ret3 = [x for x in ret2 if 'VGISS_5101' not in x and 'VGISS_8201' not in x]

@@ -106,7 +106,7 @@ def dt_delta_str(start_time: datetime.datetime,
     return str(end_time - start_time)
 
 
-def flatten_list(l: list) -> list:
+def flatten_list(lst: list) -> list:
     """Flattens a list of lists into a single list.
 
     Parameters:
@@ -116,4 +116,4 @@ def flatten_list(l: list) -> list:
         A flattened list.
     """
 
-    return [x for sublist in l for x in sublist]
+    return [x for sublist in lst for x in sublist]

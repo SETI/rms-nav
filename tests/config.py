@@ -1,3 +1,6 @@
+from nav.config import DEFAULT_CONFIG
+DEFAULT_CONFIG.read_config()
+
 # TODO: Update to use PDS3_HOLDINGS_DIR
 
 # Image of Rhea
@@ -88,6 +91,3 @@ URL_VOYAGER_ISS_STARS_01 = 'https://pds-rings.seti.org/holdings/volumes/VGISS_6x
 # Exposure: 0.01 sec
 # https://opus.pds-rings.seti.org/#/view=detail&detail=vg-iss-2-n-c1036542
 URL_VOYAGER_ISS_STARS_02 = 'https://pds-rings.seti.org/holdings/volumes/VGISS_8xxx/VGISS_8203/DATA/C10365XX/C1036542_GEOMED.IMG'
-
-from nav.config import DEFAULT_CONFIG
-DEFAULT_CONFIG.read_config()

@@ -1,4 +1,3 @@
-import stat
 from typing import Any, cast
 
 from .dataset_pds3 import DataSetPDS3
