@@ -283,7 +283,7 @@ class NavMaster(NavBase):
 
         for model in self.all_models:
             annotations.add_annotations(model.annotations)
-            dump_yaml(model.metadata)
+            # dump_yaml(model.metadata)
 
         offset = (0., 0.)
         if self._final_offset is not None:

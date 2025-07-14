@@ -26,14 +26,16 @@ class InstGalileoSSI(Inst):
     @staticmethod
     def from_file(path: PathLike,
                   config: Optional[Config] = None,
-                  extfov_margin_vu: tuple[int, int] | None = None) -> ObsSnapshot:
+                  extfov_margin_vu: tuple[int, int] | None = None,
+                  **kwargs: Any) -> ObsSnapshot:
         """Creates an ObsSnapshot from a Galileo SSI image file.
 
         Parameters:
             path: Path to the Galileo SSI image file.
             config: Configuration object to use. If None, uses the default configuration.
-            extfov_margin_vu: Optional tuple specifying the extended field of view margins
-                in (vertical, horizontal) pixels.
+            extfov_margin_vu: Optional tuple that overrides the extended field of view margins
+                found in the config.
+            **kwargs: Additional keyword arguments (none for this instrument).
 
         Returns:
             An ObsSnapshot object containing the image data and metadata.
@@ -41,6 +43,9 @@ class InstGalileoSSI(Inst):
 
         config = config or DEFAULT_CONFIG
         obs = oops.hosts.galileo.ssi.from_file(path)
+        if extfov_margin_vu is None:
+            extfov_margin_vu = config._config_dict['galileo_ssi']['extfov_margin_vu'][
+                obs.data.shape[0]]
         new_obs = ObsSnapshot(obs, config=config, extfov_margin_vu=extfov_margin_vu)
         new_obs.set_inst(InstGalileoSSI(new_obs, config=config))
 

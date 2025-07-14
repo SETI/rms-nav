@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Any, Optional
 
 from oops import Observation
 from psfmodel import PSF
@@ -34,7 +34,8 @@ class Inst(ABC, NavBase):
     def from_file(path: PathLike,
                   *,
                   config: Optional[Config] = None,
-                  extfov_margin_vu: tuple[int, int] | None) -> 'Inst':
+                  extfov_margin_vu: tuple[int, int] | None,
+                  **kwargs: Any) -> 'Inst':
         """Creates an instrument instance from an image file.
 
         Parameters:
@@ -42,6 +43,7 @@ class Inst(ABC, NavBase):
             config: Configuration object to use. If None, uses DEFAULT_CONFIG.
             extfov_margin_vu: Optional tuple specifying the extended field of view margins
                 in (vertical, horizontal) pixels.
+            **kwargs: Additional keyword arguments to pass to the instrument constructor.
 
         Returns:
             A new instrument instance.

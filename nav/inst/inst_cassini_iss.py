@@ -26,7 +26,8 @@ class InstCassiniISS(Inst):
     @staticmethod
     def from_file(path: PathLike,
                   config: Optional[Config] = None,
-                  extfov_margin_vu: tuple[int, int] | None = None) -> ObsSnapshot:
+                  extfov_margin_vu: tuple[int, int] | None = None,
+                  **kwargs: Any) -> ObsSnapshot:
         """Creates an ObsSnapshot from a Cassini ISS image file.
 
         Parameters:
@@ -34,17 +35,22 @@ class InstCassiniISS(Inst):
             config: Configuration object to use. If None, uses the default configuration.
             extfov_margin_vu: Optional tuple that overrides the extended field of view margins
                 found in the config.
+            **kwargs: Additional keyword arguments:
+
+                - fast_distortion: Whether to use a fast distortion model.
+
+                - return_all_planets: Whether to return all planets.
 
         Returns:
             An ObsSnapshot object containing the image data and metadata.
         """
 
         config = config or DEFAULT_CONFIG
+        fast_distortion = kwargs.get('fast_distortion', True)
+        return_all_planets = kwargs.get('return_all_planets', True)
         obs = oops.hosts.cassini.iss.from_file(path,
-                                               fast_distortion=True,
-                                               return_all_planets=True)
-        # TODO Calibrate
-        # obs.data = obs.extended_calib.value_from_dn(obs.data).vals
+                                               fast_distortion=fast_distortion,
+                                               return_all_planets=return_all_planets)
         if extfov_margin_vu is None:
             extfov_margin_vu = config._config_dict['cassini_iss']['extfov_margin_vu'][
                 obs.data.shape[0]]

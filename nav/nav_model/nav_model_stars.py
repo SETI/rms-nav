@@ -453,6 +453,7 @@ class NavModelStars(NavModel):
         model = self._obs.make_extfov_zeros()
 
         star_list = self.stars_list_for_obs(radec_movement)
+        metadata['star_list'] = star_list
 
         for star in star_list:
             if star.conflicts:
@@ -578,6 +579,7 @@ class NavModelStars(NavModel):
         self._model_mask = None
         self._range = 1e308
         self._annotations = annotations
+        self._metadata = metadata
 
     def stars_make_good_bad_overlay(self,
                                     obs: Observation,

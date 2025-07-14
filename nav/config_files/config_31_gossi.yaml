@@ -1,0 +1,3 @@
+galileo_ssi:
+  extfov_margin_vu:
+    800: [500, 500]

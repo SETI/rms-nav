@@ -41,4 +41,4 @@ class NavTechniqueAllModels(NavTechnique):
                                  f'{offset[0]:.2f}, {offset[1]:.2f}')
             else:
                 self._offset = None
-                self.logger.info('All models natechnique failed')
+                self.logger.info('All models navigation technique failed')
