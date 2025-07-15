@@ -1,19 +1,25 @@
+from pathlib import Path
+
+from nav.inst import Inst
 from nav.nav_master import NavMaster
 from nav.config import DEFAULT_LOGGER
 
 
-def process_one_image(inst_class,
-                      label_path,
-                      image_path,
-                      *,
-                      allow_stars=True,
-                      allow_rings=True,
-                      allow_moons=True, allow_central_planet=True,
-                      force_offset_amount=None, cartographic_data=None,
-                      bootstrapped=False, sqs_handle=None,
-                      loaded_kernel_type="reconstructed",
-                      sqs_use_gapfill_kernels=False,
-                      max_allowed_time=None) -> bool:
+#   *,
+#   allow_stars: bool = True,
+#   allow_rings: bool = True,
+#   allow_moons: bool = True,
+#   allow_central_planet: bool = True,
+#   force_offset_amount: Optional[float] = None,
+#   cartographic_data: Optional[CartographicData] = None,
+#   bootstrapped=False, sqs_handle=None,
+#   loaded_kernel_type="reconstructed",
+#   sqs_use_gapfill_kernels=False,
+#   max_allowed_time=None
+
+def process_one_image(inst_class: Inst,
+                      label_path: Path,
+                      image_path: Path) -> bool:
     logger = DEFAULT_LOGGER
     with logger.open(str(image_path)):
         try:

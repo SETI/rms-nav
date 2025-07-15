@@ -1,10 +1,8 @@
-from pathlib import Path
 from typing import Any, Optional, Sequence, cast
 
 import matplotlib.pyplot as plt
 from oops import Observation
 import numpy as np
-from PIL import Image
 
 from nav.annotation import Annotations
 from nav.config import Config
@@ -16,7 +14,6 @@ from nav.nav_model import (NavModel,
 from nav.nav_technique import (NavTechniqueAllModels,
                                NavTechniqueStars)
 from nav.support.nav_base import NavBase
-from nav.support.file import dump_yaml
 from nav.support.types import NDArrayFloatType, NDArrayUint8Type
 
 
@@ -272,7 +269,8 @@ class NavMaster(NavBase):
         prevailing_confidence = nav_stars.confidence
         self._final_offset = nav_stars.offset
 
-        if prevailing_confidence is None or (nav_all.confidence is not None and nav_all.confidence > prevailing_confidence):
+        if (prevailing_confidence is None or
+            (nav_all.confidence is not None and nav_all.confidence > prevailing_confidence)):
             prevailing_confidence = nav_all.confidence
             self._final_offset = nav_all.offset
 
@@ -284,8 +282,6 @@ class NavMaster(NavBase):
         Combines all model annotations, applies the computed offset, and generates
         an annotated image with contrast adjustment.
         """
-
-        obs = self._obs
 
         annotations = Annotations()
 

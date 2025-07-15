@@ -161,7 +161,7 @@ class DataSetPDS3(DataSet):
             arguments: The parsed arguments structure.
 
         Yields:
-            Paths to the selected image files.
+            Paths to the selected files as (label, image) tuples.
         """
 
         # if arguments.image_full_path:
@@ -279,7 +279,7 @@ class DataSetPDS3(DataSet):
         # last_image_name = None
         # last_image_path = None
 
-        for image_path in self.yield_filenames_index(
+        for ret in self.yield_filenames_index(
                     img_start_num=first_image_number,
                     img_end_num=last_image_number,
                     vol_start=first_volume_number,
@@ -296,7 +296,7 @@ class DataSetPDS3(DataSet):
                     force_has_offset_nonspice_error=arguments.has_offset_nonspice_error,
                     selection_expr=arguments.selection_expr,
                     choose_random_images=arguments.choose_random_images):
-            yield image_path
+            yield ret
         #     # Before returning a matching image, see if we need to combine BOTSIM
         #     # images. We do this by looking at adjacent pairs of returned images to
         #     # see if they match.
@@ -344,28 +344,7 @@ class DataSetPDS3(DataSet):
         except TypeError:
             return PdsTable(fn, columns=columns)
 
-    def yield_filenames_index(self,
-                              *,
-                              retrieve_files: bool = True,
-                              img_start_num: Optional[int] = None,
-                              img_end_num: Optional[int] = None,
-                              vol_start: Optional[str] = None,
-                              vol_end: Optional[str] = None,
-                              volumes: Optional[list[str]] = None,
-                              camera: Optional[str] = None,
-                              restrict_list: Optional[list[str]] = None,
-                              force_has_offset_file: bool = False,
-                              force_has_no_offset_file: bool = False,
-                              force_has_png_file: bool = False,
-                              force_has_no_png_file: bool = False,
-                              force_has_offset_error: bool = False,
-                              force_has_offset_spice_error: bool = False,
-                              force_has_offset_nonspice_error: bool = False,
-                              selection_expr: Optional[str] = None,
-                              choose_random_images: bool | int = False,
-                              max_filenames: Optional[int] = None,
-                              suffix: Optional[str] = None,
-                              planets: Optional[str] = None) -> Iterator[tuple[Path, Path]]:
+    def yield_filenames_index(self, **kwargs: Any) -> Iterator[tuple[Path, Path]]:
         """Yield filenames given search criteria using index files.
 
         This function assumes that the dataset is in a set of PDS3 volumes laid out like
@@ -378,7 +357,44 @@ class DataSetPDS3(DataSet):
 
             $(PDS3_HOLDINGS_DIR)/metadata/(volume set)/(volume)/{volume}_index.[lbl,tab]
 
+        Parameters:
+            retrieve_files: bool = True,
+            img_start_num: Optional[int] = None,
+            img_end_num: Optional[int] = None,
+            vol_start: Optional[str] = None,
+            vol_end: Optional[str] = None,
+            volumes: Optional[list[str]] = None,
+            camera: Optional[str] = None,
+            restrict_list: Optional[list[str]] = None,
+            force_has_offset_file: bool = False,
+            force_has_no_offset_file: bool = False,
+            force_has_png_file: bool = False,
+            force_has_no_png_file: bool = False,
+            force_has_offset_error: bool = False,
+            force_has_offset_spice_error: bool = False,
+            force_has_offset_nonspice_error: bool = False,
+            selection_expr: Optional[str] = None,
+            choose_random_images: bool | int = False,
+            max_filenames: Optional[int] = None,
+            suffix: Optional[str] = None,
+            planets: Optional[str] = None) -> Iterator[tuple[Path, Path]]:
+
+
+        Yields:
+            Paths to the selected files as (label, image) tuples.
+
         """
+
+        retrieve_files = kwargs.get('retrieve_files', True)
+        img_start_num: Optional[int] = kwargs.get('img_start_num', None)
+        img_end_num: Optional[int] = kwargs.get('img_end_num', None)
+        vol_start: Optional[str] = kwargs.get('vol_start', None)
+        vol_end: Optional[str] = kwargs.get('vol_end', None)
+        volumes: Optional[list[str]] = kwargs.get('volumes', None)
+        camera: Optional[str] = kwargs.get('camera', None)
+        restrict_list: Optional[list[str]] = kwargs.get('restrict_list', None)
+        choose_random_images: bool | int = kwargs.get('choose_random_images', False)
+        max_filenames: Optional[int] = kwargs.get('max_filenames', None)
 
         logger = self._logger
 

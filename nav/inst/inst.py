@@ -34,8 +34,8 @@ class Inst(ABC, NavBase):
     def from_file(path: PathLike,
                   *,
                   config: Optional[Config] = None,
-                  extfov_margin_vu: tuple[int, int] | None,
-                  **kwargs: Any) -> 'Inst':
+                  extfov_margin_vu: Optional[tuple[int, int]] = None,
+                  **kwargs: Optional[Any]) -> 'Inst':
         """Creates an instrument instance from an image file.
 
         Parameters:

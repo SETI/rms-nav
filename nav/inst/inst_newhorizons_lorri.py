@@ -50,8 +50,11 @@ class InstNewHorizonsLORRI(Inst):
         # TODO Calibrate once oops.hosts is fixed.
 
         if extfov_margin_vu is None:
-            extfov_margin_vu = config._config_dict['newhorizons_lorri']['extfov_margin_vu'][
-                obs.data.shape[0]]
+            if isinstance(config._config_dict['newhorizons_lorri']['extfov_margin_vu'], dict):
+                extfov_margin_vu = config._config_dict['newhorizons_lorri']['extfov_margin_vu'][
+                    obs.data.shape[0]]
+            else:
+                extfov_margin_vu = config._config_dict['newhorizons_lorri']['extfov_margin_vu']
         logger.debug(f'  Data shape: {obs.data.shape}')
         logger.debug(f'  Extfov margin vu: {extfov_margin_vu}')
         logger.debug(f'  Data min: {np.min(obs.data)}, max: {np.max(obs.data)}')

@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import argparse
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
@@ -45,27 +46,28 @@ class DataSet(ABC, NavBase):
         ...
 
     @abstractmethod
-    def yield_filenames_from_arguments(*args: Any, **kwargs: Any) -> Iterator[Path]:
+    def yield_filenames_from_arguments(self,
+                                       arguments: argparse.Namespace
+                                       ) -> Iterator[tuple[Path, Path]]:
         """Yields image filenames based on provided command-line arguments.
 
         Parameters:
             *args: Variable length argument list.
             **kwargs: Arbitrary keyword arguments.
 
-        Returns:
-            An iterator of Path objects pointing to image files.
+        Yields:
+            Paths to the selected files as (label, image) tuples.
         """
         ...
 
     @abstractmethod
-    def yield_filenames_index(*args: Any, **kwargs: Any) -> Iterator[Path]:
+    def yield_filenames_index(**kwargs: Any) -> Iterator[tuple[Path, Path]]:
         """Yields image filenames based on index information.
 
         Parameters:
-            *args: Variable length argument list.
             **kwargs: Arbitrary keyword arguments.
 
-        Returns:
-            An iterator of Path objects pointing to image files.
+        Yields:
+            Paths to the selected files as (label, image) tuples.
         """
         ...

@@ -1,4 +1,5 @@
 import datetime
+from typing import Any
 
 import oops
 
@@ -106,7 +107,7 @@ def dt_delta_str(start_time: datetime.datetime,
     return str(end_time - start_time)
 
 
-def flatten_list(lst: list) -> list:
+def flatten_list(lst: list[Any]) -> list[Any]:
     """Flattens a list of lists into a single list.
 
     Parameters:

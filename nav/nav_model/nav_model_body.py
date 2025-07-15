@@ -470,7 +470,8 @@ class NavModelBody(NavModel):
         self._model_mask = body_mask
         self._annotations = annotations
 
-        self._logger.debug(f'  Body model min: {np.min(self._model_img)}, max: {np.max(self._model_img)}')
+        self._logger.debug(f'  Body model min: {np.min(self._model_img)}, '
+                           f'max: {np.max(self._model_img)}')
 
     def _create_annotations(self,
                             u_center: int,

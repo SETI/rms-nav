@@ -59,4 +59,5 @@ class Obs(ABC):
     def inst(self) -> 'Inst':
         """Returns the instrument associated with this observation."""
 
-        return self._inst
+        # Can't get casting to work here with Inst having a circular import
+        return self._inst  # type: ignore

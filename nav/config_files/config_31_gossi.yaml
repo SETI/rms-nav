@@ -1,3 +1,2 @@
 galileo_ssi:
-  extfov_margin_vu:
-    800: [300, 300]
+  extfov_margin_vu: [300, 300]
