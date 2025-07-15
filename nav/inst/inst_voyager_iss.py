@@ -1,10 +1,11 @@
 from typing import Any, Optional
 
+import numpy as np
 from oops import Observation
 import oops.hosts.voyager.iss
 from psfmodel import GaussianPSF, PSF
 
-from nav.config import Config, DEFAULT_CONFIG
+from nav.config import Config, DEFAULT_CONFIG, DEFAULT_LOGGER
 from nav.obs import ObsSnapshot
 from nav.support.types import PathLike
 
@@ -43,7 +44,11 @@ class InstVoyagerISS(Inst):
         """
 
         config = config or DEFAULT_CONFIG
+        logger = DEFAULT_LOGGER
+
+        logger.debug(f'Reading Voyager ISS image {path}')
         obs = oops.hosts.voyager.iss.from_file(path)
+
         label3 = obs.dict['LABEL3'].replace('FOR (I/F)*10000., MULTIPLY DN VALUE BY', '')
         factor = float(label3)
         obs.data = obs.data * factor / 10000
@@ -55,6 +60,10 @@ class InstVoyagerISS(Inst):
         if extfov_margin_vu is None:
             extfov_margin_vu = config._config_dict['voyager_iss']['extfov_margin_vu'][
                 obs.data.shape[0]]
+        logger.debug(f'  Data shape: {obs.data.shape}')
+        logger.debug(f'  Extfov margin vu: {extfov_margin_vu}')
+        logger.debug(f'  Data min: {np.min(obs.data)}, max: {np.max(obs.data)}')
+
         new_obs = ObsSnapshot(obs, config=config, extfov_margin_vu=extfov_margin_vu)
         new_obs.set_inst(InstVoyagerISS(new_obs, config=config))
         return new_obs

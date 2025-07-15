@@ -1,10 +1,11 @@
 from typing import Any, Optional
 
+import numpy as np
 from oops import Observation
 import oops.hosts.newhorizons.lorri
 from psfmodel import GaussianPSF, PSF
 
-from nav.config import Config, DEFAULT_CONFIG
+from nav.config import Config, DEFAULT_CONFIG, DEFAULT_LOGGER
 from nav.obs import ObsSnapshot
 from nav.support.types import PathLike
 
@@ -41,12 +42,20 @@ class InstNewHorizonsLORRI(Inst):
             An ObsSnapshot object containing the image data and metadata.
         """
         config = config or DEFAULT_CONFIG
+        logger = DEFAULT_LOGGER
+
+        logger.debug(f'Reading New Horizons LORRI image {path}')
         obs = oops.hosts.newhorizons.lorri.from_file(path)
+
         # TODO Calibrate once oops.hosts is fixed.
 
         if extfov_margin_vu is None:
             extfov_margin_vu = config._config_dict['newhorizons_lorri']['extfov_margin_vu'][
                 obs.data.shape[0]]
+        logger.debug(f'  Data shape: {obs.data.shape}')
+        logger.debug(f'  Extfov margin vu: {extfov_margin_vu}')
+        logger.debug(f'  Data min: {np.min(obs.data)}, max: {np.max(obs.data)}')
+
         new_obs = ObsSnapshot(obs, config=config, extfov_margin_vu=extfov_margin_vu)
         new_obs.set_inst(InstNewHorizonsLORRI(new_obs, config=config))
 

@@ -14,6 +14,7 @@ DTypeLike = npt.DTypeLike
 NDArrayBoolType = npt.NDArray[np.bool_]
 NDArrayFloatType = npt.NDArray[np.floating[Any]]
 NDArrayIntType = npt.NDArray[np.integer]
+NDArrayUint8Type = npt.NDArray[np.uint8]
 NPType = TypeVar('NPType', bound=np.generic, covariant=True)
 NDArrayType = npt.NDArray[NPType]
 

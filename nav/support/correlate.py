@@ -3,7 +3,7 @@ from multiprocessing import Value
 import pprint
 from typing import Any, Callable, Optional, cast
 
-# from imgdisp import ImageDisp
+from imgdisp import ImageDisp
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.linalg as linalg
@@ -56,7 +56,8 @@ def correlate2d(image: NDArrayFloatType,
     assert image.shape == model.shape
 
     if DEBUG_CORRELATE_IMGDISP:
-        imdisp = ImageDisp([image,model],
+        print('correlated2d: image, model')
+        imdisp = ImageDisp([image, model],
                            canvas_size=(512,512),
                            enlarge_limit=10,
                            auto_update=True)
@@ -429,15 +430,19 @@ def _find_correlated_offset(corr: NDArrayFloatType,
         peak = np.where(slyce == slyce.max())
 
         if DEBUG_CORRELATE_PLOT:
+            print(f'_find_correlated_offset: peaks {peak}')
             plt.jet()
             plt.imshow(slyce, interpolation='none')
             # plt.contour(slyce)
             plt.plot((search_size_max_u,search_size_max_u),
-                     (0,2*search_size_max_v),'k')
+                     (0,2*search_size_max_v), 'k')
             plt.plot((0,2*search_size_max_u),
-                     (search_size_max_v,search_size_max_v),'k')
+                     (search_size_max_v,search_size_max_v), 'k')
             if len(peak[0]) == 1:
+                print('Including sole peak')
                 plt.plot(peak[1], peak[0], 'wo')
+            else:
+                print('Multiple peaks, not including any')
             x_n_ticks = 5
             x_tick_step = max(int(search_size_max_u / x_n_ticks), 1)
             x_ticks = list(range(-x_tick_step * x_n_ticks,
@@ -455,10 +460,11 @@ def _find_correlated_offset(corr: NDArrayFloatType,
             plt.xlabel('X')
             plt.ylabel('Y')
             plt.tight_layout()
-            plt.savefig('output.png')
+            # plt.savefig('output.png')
             plt.show()
 
         if DEBUG_CORRELATE_IMGDISP > 1:
+            print('_find_correlated_offset: slyce')
             toplevel = tk.Tk()
             imdisp = ImageDisp([slyce], parent=toplevel,
                                canvas_size=(512, 512),
@@ -584,11 +590,15 @@ def find_correlation_and_offset(image: NDArrayFloatType,
     orig_image_size_v = image.shape[0] - extend_fov_v*2
     orig_image_size_u = image.shape[1] - extend_fov_u*2
 
+    # Normalize both the image and the model to 1
+    image = image / np.max(image)
+    model = model / np.max(model)
+
     # We dramatically increase the absolute values in the image and model because
     # otherwise very sparse and very dim images can just turn out as zero after
     # correlation.
-    image = image * 1e20
-    model = model * 1e20
+    image = image * 1e10
+    model = model * 1e10
     ret_list = []
 
     # If the image has been extended, try up to nine combinations of

@@ -581,6 +581,8 @@ class NavModelStars(NavModel):
         self._annotations = annotations
         self._metadata = metadata
 
+        self._logger.debug(f'  Star model min: {np.min(self._model_img)}, max: {np.max(self._model_img)}')
+
     def stars_make_good_bad_overlay(self,
                                     obs: Observation,
                                     star_list: list[Star],

@@ -58,9 +58,9 @@ satellites:
     - TRITON
   PLUTO:
     - CHARON
-    - HYDRA
+    # - HYDRA
     - KERBEROS
-    - NIX
+    # - NIX
     - STYX
 
 fuzzy_satellites:

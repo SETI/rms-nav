@@ -1,10 +1,11 @@
 from typing import Any, Optional
 
+import numpy as np
 from oops import Observation
 import oops.hosts.cassini.iss
 from psfmodel import GaussianPSF, PSF
 
-from nav.config import Config, DEFAULT_CONFIG
+from nav.config import Config, DEFAULT_CONFIG, DEFAULT_LOGGER
 from nav.obs import ObsSnapshot
 from nav.support.types import PathLike
 
@@ -46,14 +47,25 @@ class InstCassiniISS(Inst):
         """
 
         config = config or DEFAULT_CONFIG
+        logger = DEFAULT_LOGGER
+
         fast_distortion = kwargs.get('fast_distortion', True)
         return_all_planets = kwargs.get('return_all_planets', True)
+
+        logger.debug(f'Reading Cassini ISS image {path}')
+        logger.debug(f'  Fast distortion: {fast_distortion}')
+        logger.debug(f'  Return all planets: {return_all_planets}')
         obs = oops.hosts.cassini.iss.from_file(path,
                                                fast_distortion=fast_distortion,
                                                return_all_planets=return_all_planets)
+
         if extfov_margin_vu is None:
             extfov_margin_vu = config._config_dict['cassini_iss']['extfov_margin_vu'][
                 obs.data.shape[0]]
+        logger.debug(f'  Data shape: {obs.data.shape}')
+        logger.debug(f'  Extfov margin vu: {extfov_margin_vu}')
+        logger.debug(f'  Data min: {np.min(obs.data)}, max: {np.max(obs.data)}')
+
         new_obs = ObsSnapshot(obs,
                               config=config,
                               extfov_margin_vu=extfov_margin_vu)

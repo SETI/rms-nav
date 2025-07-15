@@ -17,7 +17,7 @@ from nav.nav_technique import (NavTechniqueAllModels,
                                NavTechniqueStars)
 from nav.support.nav_base import NavBase
 from nav.support.file import dump_yaml
-from nav.support.types import NDArrayFloatType
+from nav.support.types import NDArrayFloatType, NDArrayUint8Type
 
 
 class NavMaster(NavBase):
@@ -45,6 +45,7 @@ class NavMaster(NavBase):
 
         self._obs = obs
         self._final_offset: tuple[float, float] | None = None
+        self._final_confidence: float | None = None
         self._offsets: dict[str, Any] = {}  # TODO Type
         self._star_models: list[NavModelStars] | None = None
         self._body_models: list[NavModelBody] | None = None
@@ -249,6 +250,9 @@ class NavMaster(NavBase):
 
         self._combined_model = cast(NDArrayFloatType, final_model)
 
+        # plt.imshow(self._combined_model)
+        # plt.show()
+
     def navigate(self) -> None:
         """Performs navigation by applying different navigation techniques.
 
@@ -265,12 +269,16 @@ class NavMaster(NavBase):
         nav_all.navigate()
         self._offsets['all_models'] = nav_all.offset
 
-        if nav_stars.offset is not None:
-            self._final_offset = nav_stars.offset
-        else:
+        prevailing_confidence = nav_stars.confidence
+        self._final_offset = nav_stars.offset
+
+        if prevailing_confidence is None or (nav_all.confidence is not None and nav_all.confidence > prevailing_confidence):
+            prevailing_confidence = nav_all.confidence
             self._final_offset = nav_all.offset
 
-    def create_overlay(self) -> None:
+        self._final_confidence = prevailing_confidence
+
+    def create_overlay(self) -> NDArrayUint8Type:
         """Creates a visual overlay combining the image and navigation annotations.
 
         Combines all model annotations, applies the computed offset, and generates
@@ -321,12 +329,15 @@ class NavMaster(NavBase):
             mask = np.any(overlay, axis=2)
             res[mask, :] = overlay[mask, :]
 
-        im = Image.fromarray(res)
-        fn = Path(obs.basename).stem
-        im.save(f'/home/rfrench/{fn}.png')
+        # im = Image.fromarray(res)
+        # fn = Path(obs.basename).stem
+        # im.save(f'/home/rfrench/{fn}.png')
 
         plt.imshow(res)
-        # plt.figure()
+        plt.figure()
+        plt.show()
+
         # model_mask = body_model.model_mask
         # plt.imshow(model_mask)
-        plt.show()
+
+        return res

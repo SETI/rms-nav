@@ -37,8 +37,10 @@ class NavTechniqueAllModels(NavTechnique):
             if len(model_offset_list) > 0:
                 offset = (-model_offset_list[0][0][0], -model_offset_list[0][0][1])
                 self._offset = offset
+                self._confidence = model_offset_list[0][1]
                 self.logger.info('All models navigation technique final offset: '
                                  f'{offset[0]:.2f}, {offset[1]:.2f}')
             else:
                 self._offset = None
+                self._confidence = None
                 self.logger.info('All models navigation technique failed')
