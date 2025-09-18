@@ -118,7 +118,7 @@ bodies:
   label_mask_enlarge: 10  # Number of pixels around a body to avoid for label placement
   label_limb_color: [255, 0, 0]  # Red
   label_font: liberation2/LiberationMono-Bold.ttf
-  label_font_size: 18
+  label_font_size: 36  # 18
     # 512: 18
   label_font_color: [255, 0, 0]  # Red
   # label_font_color: [255, 255, 0]  # Yellow
@@ -127,6 +127,8 @@ bodies:
   label_scan_v: 1     # Granularity in V when scanning a limb to find places to put labels
   label_grid_v: 10    # Coarse grid for labeling a body if everything else fails
   label_grid_u: 10
+  # Details of outline around bodies
+  outline_thicken: 1
 
 ##################
 # RINGS SETTINGS #

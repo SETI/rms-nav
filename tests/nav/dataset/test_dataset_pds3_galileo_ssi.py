@@ -1,7 +1,7 @@
-import nav.dataset.dataset_galileo_ssi as dsgossi
+import nav.dataset.dataset_pds3_galileo_ssi as dsgossi
 
 # Create this once so we can take advantage of PdsTable caching
-_DS = dsgossi.DataSetGalileoSSI()
+_DS = dsgossi.DataSetPDS3GalileoSSI()
 
 
 def test_galileo_ssi_yield_basic() -> None:

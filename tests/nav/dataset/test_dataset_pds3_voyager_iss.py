@@ -1,7 +1,7 @@
-import nav.dataset.dataset_voyager_iss as dsvgiss
+import nav.dataset.dataset_pds3_voyager_iss as dsvgiss
 
 # Create this once so we can take advantage of PdsTable caching
-_DS = dsvgiss.DataSetVoyagerISS()
+_DS = dsvgiss.DataSetPDS3VoyagerISS()
 
 
 def test_voyager_iss_yield_basic() -> None:

@@ -1,7 +1,9 @@
-import nav.dataset.dataset_cassini_iss as dscoiss
+import argparse
+
+import nav.dataset.dataset_pds3_cassini_iss as dscoiss
 
 # Create this once so we can take advantage of PdsTable caching
-_DS = dscoiss.DataSetCassiniISS()
+_DS = dscoiss.DataSetPDS3CassiniISS()
 
 
 def test_cassini_iss_yield_basic() -> None:
@@ -60,13 +62,15 @@ def test_cassini_iss_yield_volumes() -> None:
 
 
 def test_cassini_iss_camera() -> None:
+    arguments = argparse.Namespace(camera='WAC')
     ret = _DS.yield_filenames_index(max_filenames=1, volumes=['COISS_1001'],
-                                    camera='W', retrieve_files=False)
+                                    retrieve_files=False, arguments=arguments)
     ret2 = [x[0].as_posix() for x in ret]
     assert len(ret2) == 1
     assert ret2[0].endswith('W1294561143_1_CALIB.LBL')
+    arguments = argparse.Namespace(camera='NAC')
     ret = _DS.yield_filenames_index(max_filenames=1, volumes=['COISS_1001'],
-                                    camera='N', retrieve_files=False)
+                                    retrieve_files=False, arguments=arguments)
     ret2 = [x[0].as_posix() for x in ret]
     assert len(ret2) == 1
     assert ret2[0].endswith('N1294562651_1_CALIB.LBL')

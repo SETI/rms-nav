@@ -70,14 +70,14 @@ perc = 100
 # URL = 'https://pds-rings.seti.org/holdings/volumes/NHxxLO_xxxx/NHPCLO_2001/data/20081015_008636/lor_0086360869_0x630_sci.fit'
 # URL = 'https://opus.pds-rings.seti.org/holdings/volumes/NHxxLO_xxxx/NHPCLO_2001/data/20081015_008636/lor_0086365265_0x630_sci.fit'
 # URL = 'https://opus.pds-rings.seti.org/holdings/volumes/NHxxLO_xxxx/NHPCLO_2001/data/20130702_023509/lor_0235099619_0x630_sci.fit'
-# URL = 'https://opus.pds-rings.seti.org/holdings/volumes/NHxxLO_xxxx/NHJULO_2001/data/20070227_003485/lor_0034858514_0x630_sci.fit'  # Callisto
+URL = 'https://opus.pds-rings.seti.org/holdings/volumes/NHxxLO_xxxx/NHJULO_2001/data/20070227_003485/lor_0034858514_0x630_sci.fit'  # Callisto
 # URL = 'https://opus.pds-rings.seti.org/holdings/volumes/NHxxLO_xxxx/NHJULO_2001/data/20070122_003173/lor_0031739639_0x630_sci.fit'  # Jupiter
-URL = 'https://opus.pds-rings.seti.org/holdings/volumes/NHxxLO_xxxx/NHPELO_2001/data/20150701_029803/lor_0298030149_0x630_sci.fit'
+# URL = 'https://opus.pds-rings.seti.org/holdings/volumes/NHxxLO_xxxx/NHPELO_2001/data/20150701_029803/lor_0298030149_0x630_sci.fit'
 
 DEFAULT_CONFIG.stars.max_stars = nstars
 
 inst_class = INST_NAME_TO_CLASS_MAPPING[inst_id.upper()]
-OBS = inst_class.from_file(URL, fast_distortion=None)
+OBS = inst_class.from_file(URL, fast_distortion=True)
 
 # plt.imshow(OBS.data)
 # plt.show()
@@ -174,6 +174,11 @@ u_diff_arr = np.array(u_diff_list)
 v_diff_arr = np.array(v_diff_list)
 mag_arr = np.sqrt(u_diff_arr**2 + v_diff_arr**2)
 mag_perc = np.percentile(mag_arr, perc)
+
+print(f'{perc}th percentile absolute star position error: {mag_perc}')
+mean_perc = np.mean(mag_arr[mag_arr <= mag_perc])
+median_perc = np.median(mag_arr[mag_arr <= mag_perc])
+print(f'Mean: {mean_perc}, Median: {median_perc}')
 
 for u, v, u_diff, v_diff in zip(u_arr, v_arr, u_diff_arr, v_diff_arr):
     mag = np.sqrt(u_diff**2 + v_diff**2)

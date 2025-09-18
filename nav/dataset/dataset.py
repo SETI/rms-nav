@@ -23,7 +23,7 @@ class DataSet(ABC, NavBase):
 
     @staticmethod
     @abstractmethod
-    def image_name_valid(name: str) -> bool:
+    def _img_name_valid(img_name: str) -> bool:
         """Validates whether the provided image name follows the dataset's naming convention.
 
         Parameters:
@@ -36,12 +36,13 @@ class DataSet(ABC, NavBase):
 
     @staticmethod
     @abstractmethod
-    def add_selection_arguments(*args: Any, **kwargs: Any) -> None:
+    def add_selection_arguments(cmdparser: argparse.ArgumentParser,
+                                group: Optional[argparse._ArgumentGroup] = None) -> None:
         """Adds dataset-specific command-line arguments for image selection.
 
         Parameters:
-            *args: Variable length argument list.
-            **kwargs: Arbitrary keyword arguments.
+            cmdparser: The argument parser to add arguments to.
+            group: Optional argument group to add arguments to. If None, creates a new group.
         """
         ...
 
@@ -52,8 +53,7 @@ class DataSet(ABC, NavBase):
         """Yields image filenames based on provided command-line arguments.
 
         Parameters:
-            *args: Variable length argument list.
-            **kwargs: Arbitrary keyword arguments.
+            arguments: The parsed arguments structure.
 
         Yields:
             Paths to the selected files as (label, image) tuples.
@@ -65,7 +65,7 @@ class DataSet(ABC, NavBase):
         """Yields image filenames based on index information.
 
         Parameters:
-            **kwargs: Arbitrary keyword arguments.
+            **kwargs: Arbitrary keyword arguments, usually used to restrict the search.
 
         Yields:
             Paths to the selected files as (label, image) tuples.

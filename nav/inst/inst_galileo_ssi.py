@@ -46,7 +46,7 @@ class InstGalileoSSI(Inst):
         logger = DEFAULT_LOGGER
 
         logger.debug(f'Reading Galileo SSI image {path}')
-        obs = oops.hosts.galileo.ssi.from_file(path)
+        obs = oops.hosts.galileo.ssi.from_file(path, full_fov=True)
 
         if extfov_margin_vu is None:
             if isinstance(config._config_dict['galileo_ssi']['extfov_margin_vu'], dict):

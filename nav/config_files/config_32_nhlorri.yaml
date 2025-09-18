@@ -1,3 +1,5 @@
 newhorizons_lorri:
   extfov_margin_vu:
+    256: [100, 100]
+    512: [200, 200]
     1024: [400, 400]

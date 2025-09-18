@@ -2,6 +2,7 @@ from typing import Any, Optional
 
 import numpy as np
 import scipy.ndimage as ndimage
+import matplotlib.pyplot as plt
 
 from oops import Meshgrid, Observation
 from oops.backplane import Backplane
@@ -242,9 +243,9 @@ class NavModelBody(NavModel):
         # Make a new Backplane that only covers the body, but oversample
         # it so we can do anti-aliasing
         restr_oversample_u = max(int(np.floor(config.oversample_edge_limit /
-                                              np.ceil(inventory['u_pixel_size']))), 1)
+                                              max(np.ceil(inventory['u_pixel_size']), 1))), 1)
         restr_oversample_v = max(int(np.floor(config.oversample_edge_limit /
-                                              np.ceil(inventory['v_pixel_size']))), 1)
+                                              max(np.ceil(inventory['v_pixel_size']), 1))), 1)
         restr_oversample_u = min(restr_oversample_u, config.oversample_maximum)
         restr_oversample_v = min(restr_oversample_v, config.oversample_maximum)
         self._logger.debug(f'Oversampling by {restr_oversample_u} x {restr_oversample_v}')
@@ -383,7 +384,7 @@ class NavModelBody(NavModel):
             self._logger.debug('Looking only at back side - making a faint glow')
             # Make a slight glow even on the back side
             restr_model = np.zeros(restr_body_mask_valid.shape)
-            restr_model[restr_body_mask_valid] = 0.05  # XXX
+            restr_model[restr_body_mask_valid] = 0.01  # TODO XXX
         else:
             self._logger.debug('Making Lambert model')
 
@@ -611,7 +612,9 @@ class NavModelBody(NavModel):
         text_avoid_mask = ndimage.maximum_filter(body_mask,
                                                  config.label_mask_enlarge)
 
-        annotation = Annotation(obs, limb_mask, config.label_limb_color,
+        annotation = Annotation(obs, limb_mask,
+                                config.label_limb_color,
+                                thicken_overlay=config.outline_thicken,
                                 avoid_mask=text_avoid_mask,
                                 text_info=text_info, config=self._config)
 

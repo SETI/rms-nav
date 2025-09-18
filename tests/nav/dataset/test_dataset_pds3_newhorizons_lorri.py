@@ -1,7 +1,7 @@
-import nav.dataset.dataset_newhorizons_lorri as dsnhlor
+import nav.dataset.dataset_pds3_newhorizons_lorri as dsnhlor
 
 # Create this once so we can take advantage of PdsTable caching
-_DS = dsnhlor.DataSetNewHorizonsLORRI()
+_DS = dsnhlor.DataSetPDS3NewHorizonsLORRI()
 
 
 def test_newhorizons_lorri_yield_basic() -> None:

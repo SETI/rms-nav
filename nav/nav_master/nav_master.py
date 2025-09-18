@@ -329,9 +329,9 @@ class NavMaster(NavBase):
         # fn = Path(obs.basename).stem
         # im.save(f'/home/rfrench/{fn}.png')
 
-        plt.imshow(res)
-        plt.figure()
-        plt.show()
+        # plt.imshow(res)
+        # plt.figure()
+        # plt.show()
 
         # model_mask = body_model.model_mask
         # plt.imshow(model_mask)
