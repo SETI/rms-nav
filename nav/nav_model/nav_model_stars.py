@@ -509,6 +509,8 @@ class NavModelStars(NavModel):
         star_avoid_mask = self._obs.make_extfov_false()
         star_overlay = self._obs.make_extfov_false()
 
+        stretch_regions = []
+
         for star in star_list:
             if star.conflicts:
                 continue
@@ -539,6 +541,11 @@ class NavModelStars(NavModel):
 
             star_avoid_mask[v_min:v_max+1, u_min:u_max+1] = True
             draw_rect(star_overlay, True, u, v, width, width)
+
+            stretch_region = self._obs.make_extfov_false()
+            stretch_region[v_min:v_max+1, u_min:u_max+1] = True
+            compressed_stretch_region = np.packbits(stretch_region, axis=0)
+            stretch_regions.append(compressed_stretch_region)
 
             star_str1 = None
             try:
@@ -578,6 +585,8 @@ class NavModelStars(NavModel):
         self._model_img = model
         self._model_mask = None
         self._range = 1e308
+        self._uncertainty = 0.
+        self._stretch_regions = stretch_regions
         self._annotations = annotations
         self._metadata = metadata
 

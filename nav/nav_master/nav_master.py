@@ -14,7 +14,7 @@ from nav.nav_model import (NavModel,
 from nav.nav_technique import (NavTechniqueAllModels,
                                NavTechniqueStars)
 from nav.support.nav_base import NavBase
-from nav.support.types import NDArrayFloatType, NDArrayUint8Type
+from nav.support.types import NDArrayFloatType, NDArrayUint32Type, NDArrayUint8Type
 
 
 class NavMaster(NavBase):
@@ -50,6 +50,8 @@ class NavMaster(NavBase):
         self._titan_models: list[NavModelTitan] | None = None
 
         self._combined_model: NDArrayFloatType | None = None
+
+        self._closest_model_index: NDArrayUint32Type | None = None
 
     @property
     def obs(self) -> Observation:
@@ -102,6 +104,11 @@ class NavMaster(NavBase):
         """Returns the combined navigation model, creating it if necessary."""
         self._create_combined_model()
         return self._combined_model
+
+    @property
+    def closest_model_index(self) -> NDArrayUint32Type | None:
+        """Returns the index of the closest model for each pixelin the combined model."""
+        return self._closest_model_index
 
     def compute_star_models(self) -> None:
         """Creates navigation models for stars in the observation.
@@ -211,7 +218,8 @@ class NavMaster(NavBase):
         """Creates a combined model from all individual navigation models.
 
         For each pixel, selects the model element from the object with the smallest range
-        (closest to the observer), which would appear in front of other objects.
+        (closest to the observer), which would appear in front of other objects. Also
+        does the same for the stretch regions.
         """
 
         if self._combined_model is not None:
@@ -246,6 +254,7 @@ class NavMaster(NavBase):
         final_model = model_imgs_arr[min_indices, row_idx, col_idx]
 
         self._combined_model = cast(NDArrayFloatType, final_model)
+        self._closest_model_index = min_indices
 
         # plt.imshow(self._combined_model)
         # plt.show()
@@ -301,24 +310,50 @@ class NavMaster(NavBase):
         img = self._obs.data.astype(np.float64)
 
         res = np.zeros(img.shape + (3,), dtype=np.uint8)
+        bw_res = np.zeros(img.shape, dtype=np.uint8)
 
-        img_sorted = sorted(list(img.flatten()))
-        blackpoint = img_sorted[np.clip(int(len(img_sorted)*0.001),
-                                        0, len(img_sorted)-1)]
-        whitepoint = img_sorted[np.clip(int(len(img_sorted)*0.999),
-                                        0, len(img_sorted)-1)]
-        # whitepoint = np.max(img_sorted)
-        gamma = 1  # 0.5
+        # Create a min_index that is the size of the original image, properly offset.
+        # This array indicates which model is at the front for each pixel.
+        min_index = self.obs.extract_offset_image(self.closest_model_index, offset)
 
-        img_stretched = np.floor((np.maximum(img-blackpoint, 0) /
-                                 (whitepoint-blackpoint))**gamma*256)
-        img_stretched = np.clip(img_stretched, 0, 255)
+        def _stretch_region(sub_img: NDArrayFloatType) -> NDArrayUint8Type:
+            """Stretches a region of the image."""
+            img_sorted = sorted(list(sub_img.flatten()))
+            blackpoint = img_sorted[np.clip(int(len(img_sorted)*0.001),
+                                            0, len(img_sorted)-1)]
+            whitepoint = img_sorted[np.clip(int(len(img_sorted)*0.999),
+                                            0, len(img_sorted)-1)]
+            # whitepoint = np.max(img_sorted)
+            gamma = 1  # 0.5
 
-        img_stretched = img_stretched.astype(np.uint8)
+            img_stretched = np.floor((np.maximum(sub_img-blackpoint, 0) /
+                                     (whitepoint-blackpoint))**gamma*256)
+            img_stretched = np.clip(img_stretched, 0, 255)
+            img_stretched = img_stretched.astype(np.uint8)
+            return img_stretched
 
-        res[:, :, 0] = img_stretched
-        res[:, :, 1] = img_stretched
-        res[:, :, 2] = img_stretched
+        already_stretched_mask = np.zeros(img.shape, dtype=np.bool_)
+        for model_index, model in enumerate(self.all_models):
+            if model.stretch_regions is not None:
+                for stretch_region_packed in model.stretch_regions:
+                    stretch_region = np.unpackbits(stretch_region_packed, axis=0)
+                    stretch_region = self._obs.extract_offset_image(stretch_region, offset)
+                    if not np.any(stretch_region):
+                        continue
+                    # We stretch this region by itself if we haven't already stretched
+                    # any part of it and all of it is the closest model in the view for those
+                    # pixels.
+                    if (not np.any(already_stretched_mask[stretch_region]) and
+                        np.all(min_index[stretch_region] == model_index)):
+                        bw_res[stretch_region] = _stretch_region(img[stretch_region])
+                        already_stretched_mask |= stretch_region
+
+        # Now stretch the rest of the image
+        bw_res[~already_stretched_mask] = _stretch_region(img[~already_stretched_mask])
+
+        res[:, :, 0] = bw_res
+        res[:, :, 1] = bw_res
+        res[:, :, 2] = bw_res
 
         if overlay is not None:
             overlay[overlay < 128] = 0
@@ -329,9 +364,8 @@ class NavMaster(NavBase):
         # fn = Path(obs.basename).stem
         # im.save(f'/home/rfrench/{fn}.png')
 
-        # plt.imshow(res)
-        # plt.figure()
-        # plt.show()
+        plt.imshow(res)
+        plt.show()
 
         # model_mask = body_model.model_mask
         # plt.imshow(model_mask)

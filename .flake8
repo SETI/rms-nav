@@ -9,3 +9,4 @@ exclude =
 extend-ignore = E129
 per-file-ignores =
     tests/config.py: E501
+    nav/nav_model/nav_model_body.py: E201

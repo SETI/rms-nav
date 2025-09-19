@@ -6,11 +6,15 @@ from .inst_voyager_iss import InstVoyagerISS  # noqa: F401
 
 
 INST_NAME_TO_CLASS_MAPPING = {
-    'COISS': InstCassiniISS,
-    'GOSSI': InstGalileoSSI,
-    'NHLORRI': InstNewHorizonsLORRI,
-    'VGISS': InstVoyagerISS,
+    'coiss': InstCassiniISS,
+    'gossi': InstGalileoSSI,
+    'nhlorri': InstNewHorizonsLORRI,
+    'vgiss': InstVoyagerISS,
 }
+
+
+def inst_name_to_class(name: str) -> type[Inst]:
+    return INST_NAME_TO_CLASS_MAPPING[name]
 
 
 __all__ = ['Inst',

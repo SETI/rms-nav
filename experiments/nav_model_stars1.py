@@ -10,9 +10,8 @@ from PIL import Image
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from nav.annotation import Annotations
-from nav.inst import inst_id_to_class
-from nav.nav_model import NavModelStars
-import nav.obs.obs_snapshot as obs_snapshot
+from nav.inst import inst_name_to_class
+from nav.nav_master import NavMaster
 from tests.config import (URL_CASSINI_ISS_STARS_01,
                           URL_CASSINI_ISS_STARS_02,
                           URL_GALILEO_SSI_STARS_01,
@@ -21,10 +20,10 @@ from tests.config import (URL_CASSINI_ISS_STARS_01,
                           URL_VOYAGER_ISS_STARS_02)
 
 offset = (0, 0)
-extfov_margin = (200, 100)
+extfov_margin_vu = (300, 300)
 
 # inst_id = 'coiss'; URL = URL_CASSINI_ISS_STARS_01
-inst_id = 'coiss'; URL = URL_CASSINI_ISS_STARS_02; offset = (-9, 28)
+inst_id = 'coiss'; URL = URL_CASSINI_ISS_STARS_02
 
 # inst_id = 'gossi'; URL = URL_GALILEO_SSI_STARS_01; offset = (85, 391); extfov_margin = (200, 500)
 # inst_id = 'gossi'; URL = URL_GALILEO_SSI_STARS_02; offset = (0, 0) #; extfov_margin = (200, 500)
@@ -32,53 +31,12 @@ inst_id = 'coiss'; URL = URL_CASSINI_ISS_STARS_02; offset = (-9, 28)
 # inst_id = 'vgiss'; URL = URL_VOYAGER_ISS_STARS_01; offset = (0, 0) ; extfov_margin = (1000, 1000)
 # inst_id = 'vgiss'; URL = URL_VOYAGER_ISS_STARS_02; offset = (1, 12) #; extfov_margin = (1000, 1000)
 
-inst_class = inst_id_to_class(inst_id)
-OBS = inst_class.from_file(URL)
-annotations = Annotations()
+inst_class = inst_name_to_class(inst_id)
+OBS = inst_class.from_file(URL, extfov_margin_vu=extfov_margin_vu)
 
-s = obs_snapshot.ObsSnapshot(OBS, extfov_margin_vu=extfov_margin)
-stars = NavModelStars(s)
-stars.create_model()
-annotations = stars.annotations
+nm = NavMaster(OBS)
+nm.compute_all_models()
 
-overlay = annotations.combine(extfov_margin, offset=offset
-                            #   text_use_avoid_mask=False,
-                            #   text_show_all_positions=True,
-                            #   text_avoid_other_text=False
-                              )
-img = OBS.data.astype(np.float64)
+nm.navigate()
 
-res = np.zeros(img.shape + (3,), dtype=np.uint8)
-
-img_sorted = sorted(list(img.flatten()))
-blackpoint = img_sorted[np.clip(int(len(img_sorted)*0.005),
-                                0, len(img_sorted)-1)]
-whitepoint = img_sorted[np.clip(int(len(img_sorted)*0.995),
-                                0, len(img_sorted)-1)]
-print(blackpoint, whitepoint)
-gamma = 0.5
-
-img_stretched = np.floor((np.maximum(img-blackpoint, 0) /
-                          (whitepoint-blackpoint))**gamma * 256)
-img_stretched = np.clip(img_stretched, 0, 255) # Clip black and white
-
-img_stretched = img_stretched.astype(np.uint8)
-
-res[:, :, 0] = img_stretched
-res[:, :, 1] = img_stretched
-res[:, :, 2] = img_stretched
-
-if overlay is not None:
-    overlay[overlay < 128] = 0
-    mask = np.any(overlay, axis=2)
-    res[mask, :] = overlay[mask, :]
-
-im = Image.fromarray(res)
-fn = URL.split('/')[-1].split('.')[0]
-im.save(f'/home/rfrench/{fn}.png')
-
-plt.imshow(res)
-# plt.figure()
-# model_mask = body_model.model_mask
-# plt.imshow(model_mask)
-plt.show()
+nm.create_overlay()

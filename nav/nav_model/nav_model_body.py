@@ -1,3 +1,4 @@
+import math
 from typing import Any, Optional
 
 import numpy as np
@@ -57,15 +58,16 @@ class NavModelBody(NavModel):
                      *,
                      always_create_model: bool = False,
                      never_create_model: bool = False,
-                     create_overlay: bool = False
+                     create_annotations: bool = True
                      ) -> None:
         """Creates a navigation model for a planetary body with optional text overlay.
 
         Parameters:
             always_create_model: If True, creates a model even if the body is too small or has
                 poor limb definition.
-            never_create_model: If True, creates metadata but doesn't generate an actual model.
-            create_overlay: If True, creates a text overlay with the body name.
+            never_create_model: If True, creates metadata but doesn't generate an actual model or
+                annotations.
+            create_annotations: If True, creates text annotations for the model.
         """
 
         metadata: dict[str, Any] = {}
@@ -77,11 +79,12 @@ class NavModelBody(NavModel):
         self._model_mask = None
         self._metadata = metadata
         self._annotations = None
+        self._uncertainty = 0.
 
         with self._logger.open(f'CREATE BODY MODEL FOR: {self._body_name}'):
             self._create_model(always_create_model=always_create_model,
                                never_create_model=never_create_model,
-                               create_overlay=create_overlay)
+                               create_annotations=create_annotations)
 
         metadata['end_time'] = end_time = now_dt()
         metadata['elapsed_time'] = dt_delta_str(start_time, end_time)
@@ -90,14 +93,14 @@ class NavModelBody(NavModel):
     def _create_model(self,
                       always_create_model: bool,
                       never_create_model: bool,
-                      create_overlay: bool
+                      create_annotations: bool
                       ) -> None:
         """Creates the internal model representation for a planetary body.
 
         Parameters:
             always_create_model: If True, creates a model even if the body is too small.
             never_create_model: If True, only creates metadata without generating a model.
-            create_overlay: If True, creates a text overlay with the body name.
+            create_annotations: If True, creates a text overlay with the body name.
         """
 
         # These are just shorthand to make later code easier to read
@@ -108,10 +111,14 @@ class NavModelBody(NavModel):
         inventory = self._inventory
         metadata = self._metadata
 
+        ########################################################################
+        # Fill in basic metadata
+        ########################################################################
+
         metadata['body_name'] = body_name
         metadata['inventory'] = inventory
         metadata['size_ok'] = None
-        metadata['entirely_visible_extfov'] = None
+        metadata['guaranteed_visible_in_fov'] = None
         # metadata['curvature_ok'] = None
         # metadata['limb_ok'] = None
         # metadata['entirely_visible'] = None
@@ -124,33 +131,32 @@ class NavModelBody(NavModel):
         # metadata['has_bad_pixels'] = None
         # metadata['confidence'] = None
 
-        metadata['sub_solar_lon'] = np.degrees(ext_bp.sub_solar_longitude(body_name)
-                                               .vals)
-        metadata['sub_solar_lat'] = np.degrees(ext_bp.sub_solar_latitude(body_name)
-                                               .vals)
-        metadata['sub_observer_lon'] = np.degrees(ext_bp.sub_observer_longitude(body_name)
-                                                  .vals)
-        metadata['sub_observer_lat'] = np.degrees(ext_bp.sub_observer_latitude(body_name)
-                                                  .vals)
-        metadata['phase_angle'] = np.degrees(ext_bp.center_phase_angle(body_name)
-                                             .vals)
+        # Single-valued metadata
+        metadata['sub_solar_lon'] = np.degrees(ext_bp.sub_solar_longitude(body_name).vals)
+        metadata['sub_solar_lat'] = np.degrees(ext_bp.sub_solar_latitude(body_name).vals)
+        metadata['sub_observer_lon'] = np.degrees(ext_bp.sub_observer_longitude(body_name).vals)
+        metadata['sub_observer_lat'] = np.degrees(ext_bp.sub_observer_latitude(body_name).vals)
+        metadata['phase_angle'] = np.degrees(ext_bp.center_phase_angle(body_name).vals)
 
-        self._logger.info('Sub-solar longitude      %6.2f', metadata['sub_solar_lon'])
-        self._logger.info('Sub-solar latitude       %6.2f', metadata['sub_solar_lat'])
-        self._logger.info('Sub-observer longitude   %6.2f', metadata['sub_observer_lon'])
-        self._logger.info('Sub-observer latitude    %6.2f', metadata['sub_observer_lat'])
-        self._logger.info('Phase angle              %6.2f', metadata['phase_angle'])
+        self._logger.info(f'Sub-solar longitude      {metadata["sub_solar_lon"]:6.2f}')
+        self._logger.info(f'Sub-solar latitude       {metadata["sub_solar_lat"]:6.2f}')
+        self._logger.info(f'Sub-observer longitude   {metadata["sub_observer_lon"]:6.2f}')
+        self._logger.info(f'Sub-observer latitude    {metadata["sub_observer_lat"]:6.2f}')
+        self._logger.info(f'Phase angle              {metadata["phase_angle"]:6.2f}')
+
+        ########################################################################
+        # Check the size of the bounding box
+        ########################################################################
 
         bb_area = inventory['u_pixel_size'] * inventory['v_pixel_size']
-        self._logger.info('Pixel size %.2f x %.2f, bounding box area %.2f',
-                          inventory['u_pixel_size'], inventory['v_pixel_size'], bb_area)
+        self._logger.info(f'Pixel size {inventory["u_pixel_size"]:.2f} x '
+                          f'{inventory["v_pixel_size"]:.2f}, bounding box area {bb_area:.2f}')
         if bb_area >= config.min_bounding_box_area:
             metadata['size_ok'] = True
         else:
             metadata['size_ok'] = False
             if not always_create_model:
-                self._logger.info(
-                    'Bounding box is too small to bother with - aborting early')
+                self._logger.info('Bounding box is too small to bother with - aborting early')
                 return
 
         # # Create a Meshgrid that only covers the center pixel of the body
@@ -184,6 +190,10 @@ class NavModelBody(NavModel):
 
         # metadata['ring_emission_ok'] = True
 
+        ########################################################################
+        # Figure out if the body is guaranteed to be visible in the FOV
+        ########################################################################
+
         u_min = int(inventory['u_min_unclipped'])
         u_max = int(inventory['u_max_unclipped'])
         v_min = int(inventory['v_min_unclipped'])
@@ -200,6 +210,9 @@ class NavModelBody(NavModel):
         #                       curvature_threshold_pix)
         # height_threshold = max(height * curvature_threshold_frac,
         #                        curvature_threshold_pix)
+
+        # Figure out the bounding box with some slop and see whether or not the body is
+        # going to be entirely visible even in the case of maximum offset
 
         u_min -= int((u_max-u_min) * BODIES_POSITION_SLOP_FRAC)
         u_max += int((u_max-u_min) * BODIES_POSITION_SLOP_FRAC)
@@ -219,33 +232,39 @@ class NavModelBody(NavModel):
         if v_min == v_max and v_min == obs.extfov_v_min:
             v_max += 1
 
-        self._logger.debug('Original bounding box U %d to %d, V %d to %d',
-                           u_min, u_max, v_min, v_max)
-        self._logger.debug('Image size %d x %d; subrect w/slop U %d to %d, V %d to %d',
-                           obs.data_shape_u, obs.data_shape_v, u_min, u_max, v_min, v_max)
+        self._logger.debug(f'Original bounding box U {u_min} to {u_max}, V {v_min} to {v_max}')
+        self._logger.debug(f'Image size {obs.data_shape_u} x {obs.data_shape_v}; '
+                           f'subrect w/slop U {u_min} to {u_max}, V {v_min} to {v_max}')
 
-        entirely_visible_extfov = False
+        guaranteed_visible_in_fov = False
         if (u_min >= obs.extfov_margin_u and
             u_max <= obs.data_shape_u-1 - obs.extfov_margin_u and
             v_min >= obs.extfov_margin_v and
             v_max <= obs.data_shape_v-1 - obs.extfov_margin_v):
             # Body is entirely visible - no part is off the edge even when shifting
             # the extended FOV
-            entirely_visible_extfov = True
+            guaranteed_visible_in_fov = True
             self._logger.info('All of body is guaranteed visible even after maximum offset')
         else:
             self._logger.info('Not all of body guaranteed to be visible after maximum offset')
-        metadata['entirely_visible_extfov'] = entirely_visible_extfov
+        metadata['guaranteed_visible_in_fov'] = guaranteed_visible_in_fov
 
         if never_create_model:
             return
 
-        # Make a new Backplane that only covers the body, but oversample
-        # it so we can do anti-aliasing
+        ########################################################################
+        # Make a new Backplane that only covers the body, but oversample it
+        # as necessary so we can do anti-aliasing
+        ########################################################################
+
         restr_oversample_u = max(int(np.floor(config.oversample_edge_limit /
-                                              max(np.ceil(inventory['u_pixel_size']), 1))), 1)
+                                              max(np.ceil(inventory['u_pixel_size']),
+                                                  1))),
+                                 1)
         restr_oversample_v = max(int(np.floor(config.oversample_edge_limit /
-                                              max(np.ceil(inventory['v_pixel_size']), 1))), 1)
+                                              max(np.ceil(inventory['v_pixel_size']),
+                                                  1))),
+                                 1)
         restr_oversample_u = min(restr_oversample_u, config.oversample_maximum)
         restr_oversample_v = min(restr_oversample_v, config.oversample_maximum)
         self._logger.debug(f'Oversampling by {restr_oversample_u} x {restr_oversample_v}')
@@ -260,37 +279,42 @@ class NavModelBody(NavModel):
                                                         restr_oversample_v),
                                             swap=True)
         restr_o_bp = Backplane(obs, meshgrid=restr_o_meshgrid)
+
+        ########################################################################
+        # Compute the incidence angles
+        ########################################################################
+
         restr_o_incidence_mvals = restr_o_bp.incidence_angle(body_name).mvals
         restr_incidence_mvals = filter_downsample(restr_o_incidence_mvals,
                                                   restr_oversample_v,
                                                   restr_oversample_u)
         restr_incidence = polymath.Scalar(restr_incidence_mvals)
 
+        ########################################################################
         # Analyze the limb
+        ########################################################################
 
-        restr_body_mask_inv = restr_incidence.expand_mask().mask
-        restr_body_mask_valid = ~restr_body_mask_inv
+        restr_body_mask_invalid = restr_incidence.expand_mask().mask
+        restr_body_mask_valid = ~restr_body_mask_invalid
 
         # If the inv mask is true, but any of its neighbors are false, then
         # this is an edge
-        restr_limb_mask_total = (shift_array(restr_body_mask_inv, (-1, 0)) |
-                                 shift_array(restr_body_mask_inv, (1, 0)) |
-                                 shift_array(restr_body_mask_inv, (0, -1)) |
-                                 shift_array(restr_body_mask_inv, (0, 1)))
+        restr_limb_mask_neighbor = (shift_array(restr_body_mask_invalid, (-1,  0)) |
+                                    shift_array(restr_body_mask_invalid, ( 1,  0)) |
+                                    shift_array(restr_body_mask_invalid, ( 0, -1)) |
+                                    shift_array(restr_body_mask_invalid, ( 0,  1)))
         # This valid mask will be a single series of pixels just inside the limb
-        restr_limb_mask = restr_body_mask_valid & restr_limb_mask_total
+        restr_limb_mask = restr_body_mask_valid & restr_limb_mask_neighbor
 
         if not restr_limb_mask.any():
-            limb_incidence_min = 1e38
-            limb_incidence_max = 1e38
             self._logger.info('There is no limb')
         else:
             restr_incidence_limb = restr_incidence.mask_where(~restr_limb_mask)
-            limb_incidence_min = restr_incidence_limb.min().vals
-            limb_incidence_max = restr_incidence_limb.max().vals
-            self._logger.info('Limb incidence angle min %.2f, max %.2f',
-                              np.degrees(limb_incidence_min),
-                              np.degrees(limb_incidence_max))
+            limb_incidence_min = np.degrees(restr_incidence_limb.min().vals)
+            limb_incidence_max = np.degrees(restr_incidence_limb.max().vals)
+            self._logger.info('Limb incidence angle '
+                              f'min {limb_incidence_min:.2f}, '
+                              f'max {limb_incidence_max:.2f}')
 
             # limb_threshold = config['limb_incidence_threshold']
             # limb_frac = config['limb_incidence_frac']
@@ -376,7 +400,9 @@ class NavModelBody(NavModel):
             # else:
             #     self._logger.info('Curvature+limb BAD')
 
+        ########################################################################
         # Make the actual model
+        ########################################################################
 
         restr_model = None
         if (not restr_body_mask_valid.any() or
@@ -402,14 +428,13 @@ class NavModelBody(NavModel):
                 #     restr_model = restr_model+filt.maximum_filter(limb_mask, 3)
                 # Make a slight glow even past the terminator
                 restr_model = restr_model+0.05  # XXX
-                restr_model[restr_body_mask_inv] = 0.
             else:
                 restr_model = restr_body_mask_valid.as_float()
 
             if (config.use_albedo and
                 body_name in config.geometric_albedo):
                 albedo = config.geometric_albedo[body_name]
-                self._logger.info('Applying albedo %.6f', albedo)
+                self._logger.info(f'Applying albedo {albedo:.6f}')
                 restr_model *= albedo
 
         # if not used_cartographic:
@@ -429,47 +454,37 @@ class NavModelBody(NavModel):
         #             self._logger.info('Resolution %.2f is good enough for a sharp edge',
         #                         center_resolution)
 
-        assert restr_model is not None
+        ########################################################################
+        # Put the small model back in the right place in the full-size model
+        ########################################################################
 
-        # Take the full-resolution object and put it back in the right place in a
-        # full-size image
+        model_slice_0 = slice(v_min+obs.extfov_margin_v, v_max+obs.extfov_margin_v+1)
+        model_slice_1 = slice(u_min+obs.extfov_margin_u, u_max+obs.extfov_margin_u+1)
         model_img = obs.make_extfov_zeros()
-        self._range = obs.make_extfov_zeros()
+        model_img[model_slice_0, model_slice_1] = restr_model
         limb_mask = obs.make_extfov_false()
+        limb_mask[model_slice_0, model_slice_1] = restr_limb_mask
         body_mask = obs.make_extfov_false()
-        model_img[v_min+obs.extfov_margin_v:v_max+obs.extfov_margin_v+1,
-                  u_min+obs.extfov_margin_u:u_max+obs.extfov_margin_u+1] = restr_model
-        limb_mask[v_min+obs.extfov_margin_v:v_max+obs.extfov_margin_v+1,
-                  u_min+obs.extfov_margin_u:u_max+obs.extfov_margin_u+1] = \
-            restr_limb_mask
-        body_mask[v_min+obs.extfov_margin_v:v_max+obs.extfov_margin_v+1,
-                  u_min+obs.extfov_margin_u:u_max+obs.extfov_margin_u+1] = \
-            restr_body_mask_valid
+        body_mask[:, :] = model_img != 0
+
         # This is much faster than calculating the range at each pixel and we never
         # need to know the precise range at that level of detail
-        self._range[v_min+obs.extfov_margin_v:v_max+obs.extfov_margin_v+1,
-                    u_min+obs.extfov_margin_u:u_max+obs.extfov_margin_u+1] = \
-            inventory['range'] * restr_body_mask_valid
-        self._range[self._range == 0] = 1e308
-
-        # ring_radius = obs.ext_bp.ring_radius('JUPITER:RING', rmax=200000)
-        # ring_radius_mask = ~ring_radius.expand_mask().mask
-        # limb_mask[ring_radius_mask] = True
-        # plt.imshow(ring_radius.mvals)
-        # plt.show()
+        self._range = obs.make_extfov_zeros()
+        self._range[:, :] = inventory['range'] * body_mask
+        self._range[self._range == 0] = math.inf
 
         metadata['confidence'] = 1.
 
-        #
+        ########################################################################
         # Figure out all the location where we might want to label the body
-        #
+        ########################################################################
 
-        annotations = self._create_annotations(u_center, v_center, model_img,
-                                               limb_mask, body_mask)
+        if create_annotations:
+            self._annotations = self._create_annotations(u_center, v_center, model_img,
+                                                         limb_mask, body_mask)
 
         self._model_img = model_img
         self._model_mask = body_mask
-        self._annotations = annotations
 
         self._logger.debug(f'  Body model min: {np.min(self._model_img)}, '
                            f'max: {np.max(self._model_img)}')

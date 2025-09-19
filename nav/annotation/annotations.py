@@ -65,7 +65,7 @@ class Annotations:
         """Combines all annotations into a single graphic overlay image.
 
         Parameters:
-            offset: Optional offset to apply to all annotations
+            offset: Optional offset (dv,du)to apply to all annotations
             include_text: Whether to include text annotations
             text_use_avoid_mask: Whether to use avoid masks for text placement
             text_avoid_other_text: Whether text should avoid other text
@@ -177,7 +177,7 @@ class Annotations:
                         found_place = True
                         break
                     DEFAULT_LOGGER.debug(
-                        'Count not find place avoiding other items for text annotation '
+                        'Could not find place avoiding other items for text annotation '
                         f'{text_info.text!r}')
                 if not found_place:
                     DEFAULT_LOGGER.warning(

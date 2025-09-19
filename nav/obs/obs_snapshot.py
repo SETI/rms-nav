@@ -7,7 +7,7 @@ from oops.meshgrid import Meshgrid
 from oops.backplane import Backplane
 
 from nav.support.image import pad_array
-from nav.support.types import DTypeLike, NDArrayFloatType, NDArrayBoolType
+from nav.support.types import DTypeLike, NDArrayType, NDArrayFloatType, NDArrayBoolType, NPType
 
 from .obs import Obs
 
@@ -324,16 +324,39 @@ class ObsSnapshot(Obs, Snapshot):
             self._center_bp = Backplane(self, meshgrid=center_meshgrid)
         return self._center_bp
 
+    def extract_offset_image(self,
+                             img: NDArrayType[NPType],
+                             offset: tuple[float, float]) -> NDArrayType[NPType]:
+        """Extracts a subimage from the given img at the given offset (dv,du).
+
+        Parameters:
+            img: Image to extract the subimage from. This must be the same shape as the
+                extended FOV.
+            offset: Offset (dv,du) to extract the subimage at.
+
+        Returns:
+            The extracted subimage. This will be the same shape as the original FOV.
+        """
+
+        offset_v = int(offset[0]) + self.extfov_margin_v
+        offset_u = int(offset[1]) + self.extfov_margin_u
+        return img[offset_v:offset_v+self.data_shape_v, offset_u:offset_u+self.data_shape_u]
+
     def _ra_dec_limits(self,
-                       bp: Backplane) -> tuple[float, float, float, float]:
+                       bp: Backplane,
+                       apparent: bool = True) -> tuple[float, float, float, float]:
         """Find the RA and DEC limits of an observation.
+
+        Parameters:
+            bp: Backplane to use.
+            apparent: Whether to compensate for aberration and light travel time.
 
         Returns:
             ra_min, ra_max, dec_min, dec_max (radians)
         """
 
-        ra = bp.right_ascension(apparent=True)
-        dec = bp.declination(apparent=True)
+        ra = bp.right_ascension(apparent=apparent)
+        dec = bp.declination(apparent=apparent)
 
         ra_min = ra.min()
         ra_max = ra.max()
@@ -356,25 +379,33 @@ class ObsSnapshot(Obs, Snapshot):
 
         return ra_min, ra_max, dec_min, dec_max
 
-    def ra_dec_limits(self) -> tuple[float, float, float, float]:
+    def ra_dec_limits(self,
+                      apparent: bool = True) -> tuple[float, float, float, float]:
         """Finds the right ascension and declination limits of the observation using the
         standard FOV.
 
+        Parameters:
+            apparent: Whether to compensate for aberration and light travel time.
+
         Returns:
             A tuple containing (ra_min, ra_max, dec_min, dec_max) in radians.
         """
 
-        return self._ra_dec_limits(self.corner_bp)
+        return self._ra_dec_limits(self.corner_bp, apparent=apparent)
 
-    def ra_dec_limits_ext(self) -> tuple[float, float, float, float]:
+    def ra_dec_limits_ext(self,
+                          apparent: bool = True) -> tuple[float, float, float, float]:
         """Finds the right ascension and declination limits of the observation using the
         extended FOV.
 
+        Parameters:
+            apparent: Whether to compensate for aberration and light travel time.
+
         Returns:
             A tuple containing (ra_min, ra_max, dec_min, dec_max) in radians.
         """
 
-        return self._ra_dec_limits(self.ext_corner_bp)
+        return self._ra_dec_limits(self.ext_corner_bp, apparent=apparent)
 
     def sun_body_distance(self,
                           body: str) -> float:
