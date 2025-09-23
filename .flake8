@@ -1,5 +1,5 @@
 [flake8]
-max-line-length: 100
+max-line-length = 100
 exclude =
     nav/nav_model/nav_model_stars.py
     nav/support/correlate.py

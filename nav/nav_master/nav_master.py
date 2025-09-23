@@ -240,8 +240,8 @@ class NavMaster(NavBase):
             rng = model.range
             if not isinstance(rng, np.ndarray):
                 rng = 0 if rng is None else rng
-                rng_arr = np.zeros_like(model.model_img) + rng
-            ranges.append(rng_arr)
+                rng = np.zeros_like(model.model_img) + rng
+            ranges.append(rng)
 
         if len(model_imgs) == 0:
             self._combined_model = None
@@ -270,6 +270,7 @@ class NavMaster(NavBase):
         Computes all navigation models, then applies star-based and all-model-based
         navigation techniques. Determines the final offset based on the results.
         """
+
         self.compute_all_models()
 
         nav_stars = NavTechniqueStars(self)
@@ -325,6 +326,8 @@ class NavMaster(NavBase):
             """Stretches a region of the image."""
             blackpoint = float(np.quantile(sub_img, 0.001))
             whitepoint = float(np.quantile(sub_img, 0.999))
+            if blackpoint == whitepoint:
+                return sub_img
             gamma = 1  # 0.5
 
             img_stretched = np.floor((np.maximum(sub_img-blackpoint, 0) /

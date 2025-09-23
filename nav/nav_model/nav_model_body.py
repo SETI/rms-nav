@@ -485,6 +485,11 @@ class NavModelBody(NavModel):
         self._model_img = model_img
         self._model_mask = body_mask
 
+        # plt.imshow(self._model_img)
+        # plt.figure()
+        # plt.imshow(self._model_mask)
+        # plt.show()
+
         self._logger.debug(f'  Body model min: {np.min(self._model_img)}, '
                            f'max: {np.max(self._model_img)}')
 

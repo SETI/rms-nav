@@ -14,6 +14,18 @@ INST_NAME_TO_CLASS_MAPPING = {
 
 
 def inst_name_to_class(name: str) -> type[Inst]:
+    """Convert an instrument name to the corresponding class.
+
+    Parameters:
+        name: The name of the instrument.
+
+    Returns:
+        The class corresponding to the instrument name.
+
+    Raises:
+        KeyError: If the instrument name is not found.
+    """
+
     return INST_NAME_TO_CLASS_MAPPING[name.lower()]
 
 

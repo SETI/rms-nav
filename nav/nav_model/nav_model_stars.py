@@ -473,7 +473,7 @@ class NavModelStars(NavModel):
         metadata['star_list'] = star_list
 
         for star in star_list:
-            if star.conflicts:
+            if star.conflicts and not ignore_conflicts:
                 continue
             u_idx = star.u + self._obs.extfov_margin_u
             v_idx = star.v + self._obs.extfov_margin_v

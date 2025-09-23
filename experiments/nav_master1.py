@@ -44,7 +44,6 @@ def main():
     s = inst_class.from_file(URL)
 
     nm = NavMaster(s)
-    nm.compute_all_models()
 
     nm.navigate()
 

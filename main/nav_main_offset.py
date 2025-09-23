@@ -1,10 +1,10 @@
 ################################################################################
-# cb_main_offset.py
+# nav_main_offset.py
 #
 # This is the main top-level driver for offset finding. It enumerates one or
 # more images either from scanning an index file, a holdings directory,
 # or from an AWS SQS queue, and for each computes the offset and saves the
-# resulting offset and preview image files.
+# resulting offset and preview image files. TODO
 ################################################################################
 
 import argparse
@@ -27,7 +27,6 @@ from nav.dataset import dataset_name_to_class, dataset_name_to_inst_name
 from nav.config import DEFAULT_CONFIG
 from nav.config.logger import DEFAULT_LOGGER
 from nav.inst import inst_name_to_class
-from nav.nav_master import NavMaster
 from nav.process import process_one_image
 
 import tkinter  # TODO Change to only install if needed

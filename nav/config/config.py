@@ -113,7 +113,8 @@ class Config:
         """
 
         self.read_config()
-        return cast(list[str], self._config_dict['satellites', {}].get(planet.upper(), []))
+        return cast(list[str],
+                    self._config_dict.get('satellites', {}).get(planet.upper(), []))
 
     def fuzzy_satellites(self,
                          planet: str) -> list[str]:
@@ -127,7 +128,8 @@ class Config:
         """
 
         self.read_config()
-        return cast(list[str], self._config_dict['fuzzy_satellites', {}][planet.upper(), []])
+        return cast(list[str],
+                    self._config_dict.get('fuzzy_satellites', {}).get(planet.upper(), []))
 
     def ring_satellites(self,
                         planet: str) -> list[str]:

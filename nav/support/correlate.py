@@ -86,6 +86,7 @@ def correlate2d(image: NDArrayFloatType,
         offset_image[-y: , 0:x] = corr[ 0:y,-x: ]
         offset_image[-y: ,-x: ] = corr[ 0:y, 0:x]
         corr = offset_image
+        # corr = np.fft.fftshift(corr)
 
     corr = unpad_array(corr, padding)
 
@@ -238,6 +239,8 @@ def corr_analyze_peak(corr, offset_u, offset_v, large_psf=True,
         details['xy_corr'] = details['xy_err'] / details['x_err'] / details['y_err']
         details['xy_rot_angle'] = details['xy_angle']
         eigv, _ = linalg.eig(details['leastsq_cov'][:2,:2])
+        eigv = np.real(eigv)
+        eigv = np.clip(eigv, 0.0, None)
         xy_semi_axes = np.sqrt(eigv)
         details['xy_rot_err_1'] = np.max(np.sqrt(eigv))
         details['xy_rot_err_2'] = np.min(np.sqrt(eigv))
@@ -591,6 +594,12 @@ def find_correlation_and_offset(image: NDArrayFloatType,
     orig_image_size_u = image.shape[1] - extend_fov_u*2
 
     # Normalize both the image and the model to 1
+    # imax = float(np.max(image))
+    # mmax = float(np.max(model))
+    # if imax > 0:
+    #     image = image / imax
+    # if mmax > 0:
+    #     model = model / mmax
     image = image / np.max(image)
     model = model / np.max(model)
 

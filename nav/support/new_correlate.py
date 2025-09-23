@@ -195,6 +195,64 @@ def masked_ncc(I, M, W):
     denom = np.sqrt(varI * varM + 1e-12)
     return (num - np.real(meanI)*np.sum(M*W)) / (denom + 1e-12)
 
+"""CodeRabbit says:
+
+Fix masked NCC math; current normalization is incorrect
+
+The numerator misses the symmetric mean terms and the denominator uses a scalar varM but omits shift‑wise varI properly. Use standard masked NCC with shift‑wise sums via FFT.
+
+-def masked_ncc(I, M, W):
++def masked_ncc(I, M, W):
+@@
+-    FI = fft2(I)
+-    FM = fft2(M * W)
+-    FW = fft2(W)
+-
+-    # numerator
+-    num = np.real(ifft2(FI * np.conj(FM)))
+-
+-    # local stats for I over mask support
+-    sumI = ifft2(FI * np.conj(FW))
+-    sumI2 = ifft2(fft2(I**2) * np.conj(FW))
+-
+-    sumW = np.sum(W)
+-    meanM = np.sum(M*W) / (sumW + 1e-12)
+-    varM = np.sum(((M*W) - meanM)**2) / (sumW + 1e-12)
+-
+-    meanI = sumI / (sumW + 1e-12)
+-    varI = (sumI2/(sumW + 1e-12)) - meanI**2
+-    varI[varI < 0] = 0.0
+-
+-    denom = np.sqrt(varI * varM + 1e-12)
+-    return (num - np.real(meanI)*np.sum(M*W)) / (denom + 1e-12)
++    FI = fft2(I)
++    FW = fft2(W)
++    FMW = fft2(M * W)
++
++    # Sums over shifting mask support
++    sumW = np.sum(W) + 1e-12
++    sumIW = ifft2(FI * np.conj(FW))
++    sumI2W = ifft2(fft2(I**2) * np.conj(FW))
++
++    # Model stats (constant over shifts)
++    sumMW = np.sum(M * W)
++    meanM = sumMW / sumW
++    varMW = np.sum(((M - meanM) * W)**2) + 1e-12
++
++    # Cross and means
++    sumIMW = ifft2(FI * np.conj(FMW))
++    meanI = sumIW / sumW
++
++    # Numerator of NCC
++    num = sumIMW - meanI * sumMW - meanM * sumIW + meanI * meanM * sumW
++
++    # Denominator: sqrt( var_I(s) * var_M ), with var_I(s) under mask W
++    varI = sumI2W - 2.0 * meanI * sumIW + (meanI**2) * sumW
++    varI[varI < 0] = 0.0
++    denom = np.sqrt(varI * varMW) + 1e-12
++    return np.real(num) / denom
+"""
+
 # ==============================================================
 # Peak metrics & selection
 # ==============================================================
@@ -451,6 +509,7 @@ def register_with_pyramid_kpeaks(
         I_ds = I[::s, ::s]
 
         # Downsample model & mask by simple stride (keeps alignment to top-left)
+        # TODO This is a bad way to downsample - should take mean of blocks
         M_ds = M_eff_full[::s, ::s]
         W_ds = W_eff_full[::s, ::s]
 

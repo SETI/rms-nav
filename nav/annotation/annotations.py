@@ -146,9 +146,7 @@ class Annotations:
         else:
             ann_num_mask = None
 
-        text_im = Image.frombuffer('RGB',
-                                   (text_layer.shape[1], text_layer.shape[0]),
-                                   text_layer, 'raw', 'RGB', 0, 1)
+        text_im = Image.fromarray(text_layer, mode='RGB')
         text_draw = ImageDraw.Draw(text_im)
 
         for ann_num, annotation in enumerate(self._annotations):
@@ -189,7 +187,8 @@ class Annotations:
                         'Could not find final place for text annotation '
                         f'{text_info.text!r}')
 
-        text_layer = (np.array(text_im.getdata()).astype('uint8')
+        # This ensures text_layer is writeable
+        text_layer = (np.array(text_im.getdata()).astype(np.uint8)
                       .reshape(text_layer.shape))
         text_layer[graphic_layer != 0] = graphic_layer[graphic_layer != 0]
 

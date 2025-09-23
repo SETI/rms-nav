@@ -513,7 +513,8 @@ def draw_line(img: NDArrayType[NPType],
         err = dx-dy
 
         while True:
-            img[y0, x0] = color
+            if 0 <= y0 < img.shape[0] and 0 <= x0 < img.shape[1]:
+                img[y0, x0] = color
             if x0 == x1 and y0 == y1:
                 break
             e2 = 2*err
@@ -590,7 +591,10 @@ def draw_line(img: NDArrayType[NPType],
 
     while True:
         for i in range(len(perp_offsets_x)):
-            img[y0+perp_offsets_y[i], x0+perp_offsets_x[i]] = color
+            yy = y0 + perp_offsets_y[i]
+            xx = x0 + perp_offsets_x[i]
+            if 0 <= yy < img.shape[0] and 0 <= xx < img.shape[1]:
+                img[yy, xx] = color
         if x0 == x1 and y0 == y1:
             break
         e2 = 2*err

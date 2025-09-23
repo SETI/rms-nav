@@ -67,7 +67,8 @@ def _clean_list(obj: list[Any] | tuple[Any, ...]) -> list[Any]:
         obj: The list or tuple to clean.
 
     Returns:
-        A list with all NumPy types converted to Python native types.
+        A list with all NumPy types converted to Python native types. Note that a list
+        is returned even if a tuple was provided.
     """
 
     obj = list(obj)

@@ -30,10 +30,32 @@ DATASET_NAME_TO_INST_NAME_MAPPING = {
 
 
 def dataset_name_to_class(name: str) -> type[DataSet]:
+    """Convert a dataset name to the corresponding class.
+
+    Parameters:
+        name: The name of the dataset.
+
+    Returns:
+        The class corresponding to the dataset name.
+
+    Raises:
+        KeyError: If the dataset name is not found.
+    """
     return DATASET_NAME_TO_CLASS_MAPPING[name.lower()]
 
 
 def dataset_name_to_inst_name(name: str) -> str:
+    """Convert a dataset name to the corresponding instrument name.
+
+    Parameters:
+        name: The name of the dataset.
+
+    Returns:
+        The instrument name corresponding to the dataset name.
+
+    Raises:
+        KeyError: If the dataset name is not found.
+    """
     return DATASET_NAME_TO_INST_NAME_MAPPING[name.lower()]
 
 

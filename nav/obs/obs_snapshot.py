@@ -24,6 +24,16 @@ class ObsSnapshot(Obs, Snapshot):
                  *,
                  extfov_margin_vu: Optional[int | tuple[int, int]] = None,
                  **kwargs: Any) -> None:
+        """Initialize an ObsSnapshot by wrapping an existing Snapshot.
+
+        Warning:
+            The provided snapshot object should not be used after this call,
+            as its internal state is transferred to this instance.
+        """
+
+        if not isinstance(snapshot, Snapshot):
+            raise TypeError(f"Expected Snapshot, got {type(snapshot).__name__}")
+
         # Because the oops image read routines create a Snapshot and not a
         # Navigation class, we need to create a Navigation class that looks
         # like a Snapshot but then adds our own attributes. This cool trick
@@ -33,7 +43,7 @@ class ObsSnapshot(Obs, Snapshot):
 
         super().__init__(logger_name='ObsSnapshot', **kwargs)
 
-        if len(self.data.shape) != 2:
+        if self.data.ndim != 2:
             raise ValueError(f'Data shape must be 2D, got {self.data.shape}')
 
         self._data_shape_uv = cast(tuple[int, int], self.data.shape[::-1])
@@ -47,6 +57,9 @@ class ObsSnapshot(Obs, Snapshot):
             self._extfov_margin_vu = (int(extfov_margin_vu), int(extfov_margin_vu))
         else:
             self._extfov_margin_vu = (int(extfov_margin_vu[0]), int(extfov_margin_vu[1]))
+
+        if self._extfov_margin_vu[0] < 0 or self._extfov_margin_vu[1] < 0:
+            raise ValueError('extfov_margin_vu must be non-negative (v,u).')
 
         self._extdata = pad_array(self.data, self._extfov_margin_vu)
         self._extdata_shape_uv = cast(tuple[int, int], self._extdata.shape[::-1])
@@ -337,9 +350,17 @@ class ObsSnapshot(Obs, Snapshot):
             The extracted subimage. This will be the same shape as the original FOV.
         """
 
+        h, w = self.extdata_shape_vu
+        if img.shape != (h, w):
+            raise ValueError(f'img shape {img.shape} must equal extdata shape {(h, w)}')
         offset_v = int(offset[0]) + self.extfov_margin_v
         offset_u = int(offset[1]) + self.extfov_margin_u
-        return img[offset_v:offset_v+self.data_shape_v, offset_u:offset_u+self.data_shape_u]
+        if (offset_v < 0 or offset_u < 0 or
+            offset_v + self.data_shape_v > h or
+            offset_u + self.data_shape_u > w):
+            raise ValueError('offset produces out-of-bounds subimage slice')
+        return img[offset_v:offset_v+self.data_shape_v,
+                   offset_u:offset_u+self.data_shape_u]
 
     def _ra_dec_limits(self,
                        bp: Backplane,

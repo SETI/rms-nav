@@ -163,7 +163,7 @@ class DataSetPDS3(DataSet):
             help="""The starting PDS3 volume name; only images in this volume or chronologically
             later will be processed""")
         group.add_argument(
-            '--last-volume', type=int, default=None, metavar='VOL_NAME',
+            '--last-volume', type=str, default=None, metavar='VOL_NAME',
             help="""The ending PDS3 volume name; only images in this volume or chronologically
             earlier will be processed""")
         group.add_argument(
@@ -426,11 +426,11 @@ class DataSetPDS3(DataSet):
         # log('*** Already has PNG file:    %s', arguments.has_png_file)
         # log('*** Has no PNG file:         %s', arguments.has_no_png_file)
         if img_name_list:
-            logger.info('*** Explit image names:')
+            logger.info('*** Explicit image names:')
             for explicit_img_name in img_name_list:
                 logger.info(f'        {explicit_img_name}')
         if img_filespec_list:
-            logger.info('*** Explit image filespecs:')
+            logger.info('*** Explicit image filespecs:')
             for explicit_img_filespec in img_filespec_list:
                 logger.info(f'        {explicit_img_filespec}')
         if volumes is not None and volumes != []:
