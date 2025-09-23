@@ -5,7 +5,7 @@ from nav.config import Config
 from nav.support.nav_base import NavBase
 
 if TYPE_CHECKING:
-    from nav import nav_master as NavMaster
+    from nav.nav_master import NavMaster
 
 
 class NavTechnique(ABC, NavBase):
@@ -29,7 +29,7 @@ class NavTechnique(ABC, NavBase):
         self._confidence: float | None = None
 
     @property
-    def nav_master(self) -> 'nav_master_module.NavMaster':
+    def nav_master(self) -> 'NavMaster':
         """Returns the navigation master instance."""
         return self._nav_master
 

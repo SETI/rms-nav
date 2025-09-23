@@ -3,8 +3,6 @@ from typing import Any, Optional, TYPE_CHECKING
 
 from nav.support.nav_base import NavBase
 
-from nav.config import Config, DEFAULT_CONFIG, DEFAULT_LOGGER
-
 if TYPE_CHECKING:
     from nav.inst import Inst
 
@@ -28,7 +26,6 @@ class Obs(ABC, NavBase):
         super().__init__(**kwargs)
 
         self._inst: Optional[Inst] = None
-
 
     def set_inst(self, inst: 'Inst') -> None:
         """Sets the instrument associated with this observation.

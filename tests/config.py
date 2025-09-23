@@ -1,7 +1,3 @@
-from nav.config import DEFAULT_CONFIG
-
-
-
 # TODO: Update to use PDS3_HOLDINGS_DIR
 
 # Image of Rhea

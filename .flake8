@@ -3,6 +3,7 @@ max-line-length = 100
 exclude =
     nav/nav_model/nav_model_stars.py
     nav/support/correlate.py
+    nav/support/new_correlate.py
     nav/support/flux.py
     nav/support/image.py
 

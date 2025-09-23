@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 
 from oops import Observation
 from psfmodel import PSF
@@ -7,6 +7,9 @@ from psfmodel import PSF
 from nav.config import Config
 from nav.support.nav_base import NavBase
 from nav.support.types import PathLike
+
+if TYPE_CHECKING:
+    from nav.obs import Obs
 
 
 class Inst(ABC, NavBase):

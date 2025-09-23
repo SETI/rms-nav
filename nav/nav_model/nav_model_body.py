@@ -3,7 +3,7 @@ from typing import Any, Optional
 
 import numpy as np
 import scipy.ndimage as ndimage
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 
 from oops import Meshgrid, Observation
 from oops.backplane import Backplane

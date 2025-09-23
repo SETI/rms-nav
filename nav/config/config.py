@@ -143,7 +143,8 @@ class Config:
         """
 
         self.read_config()
-        return cast(list[str], self._config_dict['ring_satellites', {}][planet.upper(), []])
+        return cast(list[str],
+                    self._config_dict.get('ring_satellites', {}).get(planet.upper(), []))
 
     @property
     def general(self) -> Any:

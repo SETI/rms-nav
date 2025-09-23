@@ -470,13 +470,13 @@ class DataSetPDS3(DataSet):
 
         # Validate the image_name_list and image_filespec_list
         if img_name_list:
-            for img_name in img_name_list:
-                if not self._img_name_valid(img_name):
-                    raise ValueError(f'Invalid image name "{img_name}"')
+            for explicit_img_name in img_name_list:
+                if not self._img_name_valid(explicit_img_name):
+                    raise ValueError(f'Invalid image name "{explicit_img_name}"')
         if img_filespec_list:
-            for img_filespec in img_filespec_list:
-                if not self._get_img_name_from_filespec(img_filespec):
-                    raise ValueError(f'Invalid image filespec "{img_filespec}"')
+            for explicit_img_filespec in img_filespec_list:
+                if not self._get_img_name_from_filespec(explicit_img_filespec):
+                    raise ValueError(f'Invalid image filespec "{explicit_img_filespec}"')
 
         # Optimize the first and last image number based on image_name_list and image_filespec_list
         # This is just to improve performance

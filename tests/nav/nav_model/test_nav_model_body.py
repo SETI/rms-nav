@@ -2,7 +2,6 @@ import pytest
 
 import nav.inst.inst_cassini_iss as instcoiss
 from nav.nav_model.nav_model_body import NavModelBody
-import nav.obs.obs_snapshot as obs_snapshot
 from tests.config import URL_CASSINI_ISS_RHEA_01
 
 

@@ -48,12 +48,13 @@ class Annotation:
                     self._overlay = (self._overlay |
                                      shift_array(overlay, (v_offset, u_offset)))
 
-        if text_info is None:
-            self._text_info = []
-        elif isinstance(text_info, (list, tuple)):
-            self._text_info = text_info
+        if text_info is not None:
+            if isinstance(text_info, (list, tuple)):
+                self._text_info: list[AnnotationTextInfo] = list(text_info)
+            else:
+                self._text_info = [text_info]
         else:
-            self._text_info = [text_info]
+            self._text_info = []
 
         if overlay.shape != obs.extdata_shape_vu:
             raise ValueError(

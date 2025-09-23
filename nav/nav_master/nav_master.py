@@ -1,4 +1,4 @@
-from typing import Any, Optional, Sequence, TYPE_CHECKING, cast
+from typing import Any, Optional, Sequence, cast
 
 import matplotlib.pyplot as plt
 from oops import Observation
@@ -327,13 +327,13 @@ class NavMaster(NavBase):
             blackpoint = float(np.quantile(sub_img, 0.001))
             whitepoint = float(np.quantile(sub_img, 0.999))
             if blackpoint == whitepoint:
-                return sub_img
+                whitepoint = blackpoint + .01
             gamma = 1  # 0.5
 
             img_stretched = np.floor((np.maximum(sub_img-blackpoint, 0) /
                                      (whitepoint-blackpoint))**gamma*256)
             img_stretched = np.clip(img_stretched, 0, 255)
-            img_stretched = img_stretched.astype(np.uint8)
+            img_stretched = cast(NDArrayUint8Type, img_stretched.astype(np.uint8))
             return img_stretched
 
         already_stretched_mask = np.zeros(img.shape, dtype=bool)

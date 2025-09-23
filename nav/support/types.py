@@ -11,7 +11,7 @@ import numpy.typing as npt
 
 NDArrayLike = npt.ArrayLike
 DTypeLike = npt.DTypeLike
-NDArrayBoolType = npt.NDArray[bool]
+NDArrayBoolType = npt.NDArray[np.bool_]
 NDArrayFloatType = npt.NDArray[np.floating[Any]]
 NDArrayIntType = npt.NDArray[np.integer[Any]]
 NDArrayUint8Type = npt.NDArray[np.uint8]
