@@ -1,0 +1,22 @@
+from pathlib import Path
+from typing import Any, TypeVar
+# try:
+#     from typing import Self
+# except ImportError:
+#     from typing_extensions import Self
+
+from filecache import FCPath
+import numpy as np
+import numpy.typing as npt
+
+NDArrayLike = npt.ArrayLike
+DTypeLike = npt.DTypeLike
+NDArrayBoolType = npt.NDArray[np.bool_]
+NDArrayFloatType = npt.NDArray[np.floating[Any]]
+NDArrayIntType = npt.NDArray[np.integer[Any]]
+NDArrayUint8Type = npt.NDArray[np.uint8]
+NDArrayUint32Type = npt.NDArray[np.uint32]
+NPType = TypeVar('NPType', bound=np.generic, covariant=True)
+NDArrayType = npt.NDArray[NPType]
+
+PathLike = str | Path | FCPath

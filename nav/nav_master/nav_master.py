@@ -1,0 +1,377 @@
+from typing import Any, Optional, Sequence, cast
+
+import matplotlib.pyplot as plt
+from oops import Observation
+import numpy as np
+
+from nav.annotation import Annotations
+from nav.config import Config
+from nav.nav_model import (NavModel,
+                           NavModelBody,
+                           NavModelRings,
+                           NavModelStars,
+                           NavModelTitan)
+from nav.nav_technique import (NavTechniqueAllModels,
+                               NavTechniqueStars)
+from nav.support.nav_base import NavBase
+from nav.support.types import NDArrayFloatType, NDArrayUint32Type, NDArrayUint8Type
+
+
+class NavMaster(NavBase):
+    """Coordinates the overall navigation process using multiple models and techniques.
+
+    This class manages the creation of different navigation models (stars, bodies, rings,
+    Titan), combines them appropriately, and applies navigation techniques to determine
+    the final offset between predicted and actual positions.
+    """
+
+    def __init__(self,
+                 obs: Observation,
+                 *,
+                 config: Optional[Config] = None,
+                 logger_name: Optional[str] = None) -> None:
+        """Initializes a navigation master object for an observation.
+
+        Parameters:
+            obs: The observation object containing image and metadata.
+            config: Optional configuration object. If None, uses the default configuration.
+            logger_name: Optional name for the logger. If None, uses the class name.
+        """
+
+        super().__init__(config=config, logger_name=logger_name)
+
+        self._obs = obs
+        self._final_offset: tuple[float, float] | None = None
+        self._final_confidence: float | None = None
+        self._offsets: dict[str, Any] = {}  # TODO Type
+        self._star_models: list[NavModelStars] | None = None
+        self._body_models: list[NavModelBody] | None = None
+        self._ring_models: list[NavModelRings] | None = None
+        self._titan_models: list[NavModelTitan] | None = None
+
+        self._combined_model: NDArrayFloatType | None = None
+
+        self._closest_model_index: NDArrayUint32Type | None = None
+
+    @property
+    def obs(self) -> Observation:
+        """Returns the observation object associated with this navigation master."""
+        return self._obs
+
+    @property
+    def final_offset(self) -> tuple[float, float] | None:
+        """Returns the final computed offset between predicted and actual positions."""
+        return self._final_offset
+
+    @property
+    def star_models(self) -> list[NavModelStars]:
+        """Returns the list of star navigation models, computing them if necessary."""
+        self.compute_star_models()
+        assert self._star_models is not None
+        return self._star_models
+
+    @property
+    def body_models(self) -> list[NavModelBody]:
+        """Returns the list of planetary body navigation models, computing them if necessary."""
+        self.compute_body_models()
+        assert self._body_models is not None
+        return self._body_models
+
+    @property
+    def ring_models(self) -> list[NavModelRings]:
+        """Returns the list of ring navigation models, computing them if necessary."""
+        self.compute_ring_models()
+        assert self._ring_models is not None
+        return self._ring_models
+
+    @property
+    def titan_models(self) -> list[NavModelTitan]:
+        """Returns the list of Titan-specific navigation models, computing them if necessary."""
+        self.compute_titan_models()
+        assert self._titan_models is not None
+        return self._titan_models
+
+    @property
+    def all_models(self) -> Sequence[NavModel]:
+        """Returns a sequence containing all navigation models."""
+        return (cast(list[NavModel], self.star_models) +
+                cast(list[NavModel], self.body_models) +
+                cast(list[NavModel], self.ring_models) +
+                cast(list[NavModel], self.titan_models))
+
+    @property
+    def combined_model(self) -> NDArrayFloatType | None:
+        """Returns the combined navigation model, creating it if necessary."""
+        self._create_combined_model()
+        return self._combined_model
+
+    @property
+    def closest_model_index(self) -> NDArrayUint32Type | None:
+        """Returns the index of the closest model for each pixelin the combined model."""
+        return self._closest_model_index
+
+    def compute_star_models(self) -> None:
+        """Creates navigation models for stars in the observation.
+
+        If star models have already been computed, does nothing.
+        """
+
+        if self._star_models is not None:
+            return
+
+        stars_model = NavModelStars(self._obs)
+        stars_model.create_model()
+        self._star_models = [stars_model]
+
+        # plt.imshow(stars_model.model_img)
+        # plt.show()
+
+    def compute_body_models(self) -> None:
+        """Creates navigation models for planetary bodies in the observation.
+
+        Identifies visible bodies within the field of view, sorts them by distance,
+        and creates a navigation model for each one. If body models have already been
+        computed, does nothing.
+        """
+
+        if self._body_models is not None:
+            return
+
+        obs = self._obs
+        config = self._config
+        logger = self._logger
+
+        if obs.closest_planet is not None:
+            body_list = [obs.closest_planet] + config.satellites(obs.closest_planet)
+        else:
+            body_list = []
+
+        large_body_dict = self._obs.inventory(body_list, return_type='full')
+        # Make a list sorted by range, with the closest body first, limiting to bodies
+        # that are actually in the FOV
+        def _body_in_fov(obs: Observation,
+                         inv: dict[str, Any]) -> bool:
+            """Determines if a body is within the extended field of view.
+
+            Parameters:
+                obs: The observation object.
+                inv: The inventory dictionary for the body.
+
+            Returns:
+                True if the body is at least partially within the extended field of view.
+            """
+            return cast(bool,
+                        (inv['u_max_unclipped'] >= obs.extfov_u_min and
+                         inv['u_min_unclipped'] <= obs.extfov_u_max and
+                         inv['v_max_unclipped'] >= obs.extfov_v_min and
+                         inv['v_min_unclipped'] <= obs.extfov_v_max))
+
+        large_bodies_by_range = [(x, large_body_dict[x])
+                                 for x in large_body_dict
+                                 if _body_in_fov(obs, large_body_dict[x])]
+        large_bodies_by_range.sort(key=lambda x: x[1]['range'])
+
+        logger.info('Closest planet: %s', obs.closest_planet)
+        logger.info('Large body inventory by increasing range: %s',
+                    ', '.join([x[0] for x in large_bodies_by_range]))
+
+        self._body_models = []
+
+        for body, inventory in large_bodies_by_range:
+            body_model = NavModelBody(obs, body,
+                                      inventory=inventory,
+                                      config=config)
+            body_model.create_model()
+            self._body_models.append(body_model)
+
+    def compute_ring_models(self) -> None:
+        """Creates navigation models for planetary rings in the observation.
+
+        If ring models have already been computed, does nothing.
+        """
+
+        if self._ring_models is not None:
+            return
+        self._ring_models = []
+        # TODO Ring models
+
+    def compute_titan_models(self) -> None:
+        """Creates Titan-specific navigation models for the observation.
+
+        If Titan models have already been computed, does nothing.
+        """
+
+        if self._titan_models is not None:
+            return
+        self._titan_models = []
+        # TODO Titan models
+
+    def compute_all_models(self) -> None:
+        """Creates all navigation models for the observation.
+
+        This includes star models, ring models, body models, and Titan-specific models.
+        """
+
+        self.compute_star_models()
+        self.compute_ring_models()
+        self.compute_body_models()
+        self.compute_titan_models()
+
+    def _create_combined_model(self) -> None:
+        """Creates a combined model from all individual navigation models.
+
+        For each pixel, selects the model element from the object with the smallest range
+        (closest to the observer), which would appear in front of other objects. Also
+        does the same for the stretch regions.
+        """
+
+        if self._combined_model is not None:
+            return
+
+        # Create a single model which, for each pixel, has the element from the model with
+        # the smallest range (to the observer), and is thus in front.
+        model_imgs: list[NDArrayFloatType] = []
+        ranges: list[NDArrayFloatType] = []
+        for model in self.all_models:
+            if model.model_img is None:
+                continue
+            model_imgs.append(model.model_img)
+            # Range can just be a float if the entire model is at the same distance
+            rng = model.range
+            if not isinstance(rng, np.ndarray):
+                rng = 0 if rng is None else rng
+                rng = np.zeros_like(model.model_img) + rng
+            ranges.append(rng)
+
+        if len(model_imgs) == 0:
+            self._combined_model = None
+            return
+
+        # Ensure shapes align
+        shapes = {img.shape for img in model_imgs}
+        if len(shapes) != 1:
+            raise ValueError(f'Model image shapes differ: {shapes}')
+        model_imgs_arr = np.stack(model_imgs, axis=0)
+        ranges_arr = np.stack(ranges, axis=0)
+
+        min_indices = np.argmin(ranges_arr, axis=0)
+        row_idx, col_idx = np.indices(min_indices.shape)
+        final_model = model_imgs_arr[min_indices, row_idx, col_idx]
+
+        self._combined_model = cast(NDArrayFloatType, final_model)
+        self._closest_model_index = min_indices
+
+        # plt.imshow(self._combined_model)
+        # plt.show()
+
+    def navigate(self) -> None:
+        """Performs navigation by applying different navigation techniques.
+
+        Computes all navigation models, then applies star-based and all-model-based
+        navigation techniques. Determines the final offset based on the results.
+        """
+
+        self.compute_all_models()
+
+        nav_stars = NavTechniqueStars(self)
+        nav_stars.navigate()
+        self._offsets['stars'] = nav_stars.offset
+
+        nav_all = NavTechniqueAllModels(self)
+        nav_all.navigate()
+        self._offsets['all_models'] = nav_all.offset
+
+        prevailing_confidence = nav_stars.confidence
+        self._final_offset = nav_stars.offset
+
+        if (prevailing_confidence is None or
+            (nav_all.confidence is not None and nav_all.confidence > prevailing_confidence)):
+            prevailing_confidence = nav_all.confidence
+            self._final_offset = nav_all.offset
+
+        self._final_confidence = prevailing_confidence
+
+    def create_overlay(self) -> NDArrayUint8Type:
+        """Creates a visual overlay combining the image and navigation annotations.
+
+        Combines all model annotations, applies the computed offset, and generates
+        an annotated image with contrast adjustment.
+        """
+
+        annotations = Annotations()
+
+        for model in self.all_models:
+            annotations.add_annotations(model.annotations)
+            # dump_yaml(model.metadata)
+
+        offset = (0., 0.)
+        if self._final_offset is not None:
+            offset = self._final_offset
+
+        overlay = annotations.combine(offset=offset,
+                                      #   text_use_avoid_mask=False,
+                                      #   text_show_all_positions=True,
+                                      #   text_avoid_other_text=False
+                                      )
+        img = self._obs.data.astype(np.float64)
+
+        res = np.zeros(img.shape + (3,), dtype=np.uint8)
+        bw_res = np.zeros(img.shape, dtype=np.uint8)
+
+        # Create a min_index that is the size of the original image, properly offset.
+        # This array indicates which model is at the front for each pixel.
+        min_index = self.obs.extract_offset_image(self.closest_model_index, offset)
+
+        def _stretch_region(sub_img: NDArrayFloatType) -> NDArrayUint8Type:
+            """Stretches a region of the image."""
+            blackpoint = float(np.quantile(sub_img, 0.001))
+            whitepoint = float(np.quantile(sub_img, 0.999))
+            if blackpoint == whitepoint:
+                whitepoint = blackpoint + .01
+            gamma = 1  # 0.5
+
+            img_stretched = np.floor((np.maximum(sub_img-blackpoint, 0) /
+                                     (whitepoint-blackpoint))**gamma*256)
+            img_stretched = np.clip(img_stretched, 0, 255)
+            img_stretched = cast(NDArrayUint8Type, img_stretched.astype(np.uint8))
+            return img_stretched
+
+        already_stretched_mask = np.zeros(img.shape, dtype=bool)
+        for model_index, model in enumerate(self.all_models):
+            if model.stretch_regions is not None:
+                for stretch_region_packed in model.stretch_regions:
+                    stretch_region = np.unpackbits(stretch_region_packed, axis=0).astype(bool)
+                    stretch_region = self._obs.extract_offset_image(stretch_region, offset)
+                    if not np.any(stretch_region):
+                        continue
+                    # We stretch this region by itself if we haven't already stretched
+                    # any part of it and all of it is the closest model in the view for those
+                    # pixels.
+                    if (not np.any(already_stretched_mask[stretch_region]) and
+                        np.all(min_index[stretch_region] == model_index)):
+                        bw_res[stretch_region] = _stretch_region(img[stretch_region])
+                        already_stretched_mask |= stretch_region
+
+        # Now stretch the rest of the image
+        bw_res[~already_stretched_mask] = _stretch_region(img[~already_stretched_mask])
+
+        res[:, :, 0] = bw_res
+        res[:, :, 1] = bw_res
+        res[:, :, 2] = bw_res
+
+        if overlay is not None:
+            overlay[overlay < 128] = 0  # TODO Hard-coded constant
+            mask = np.any(overlay, axis=2)
+            res[mask, :] = overlay[mask, :]
+
+        # im = Image.fromarray(res)
+        # fn = Path(obs.basename).stem
+        # im.save(f'/home/rfrench/{fn}.png')
+
+        plt.imshow(res)
+        plt.show()
+
+        # model_mask = body_model.model_mask
+        # plt.imshow(model_mask)
+
+        return res

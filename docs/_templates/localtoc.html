@@ -1,0 +1,5 @@
+{# Custom sidebar template #}
+{%- if pagename != 'index' and pagename != 'search' %}
+    <h3>{{ _('Page Navigation') }}</h3>
+    {{ toc }}
+{%- endif %}

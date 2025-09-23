@@ -1,0 +1,23 @@
+coverage
+flake8
+matplotlib
+mypy
+myst-parser
+numpy>=2.2.0
+pyinstrument  # For visualizing profiles
+pytest
+pytest-cov
+pytest-profiling
+rms-filecache>=3.0.0
+rms-imgdisp
+rms-pdslogger>=3.2.1
+rms-pdstable>=1.0.1
+rms-pdstemplate>=2.3.0
+rms-psfmodel
+rms-oops>=0.1.3
+rms-starcat>=1.0.1
+ruamel.yaml
+sphinx
+sphinxcontrib-mermaid
+sphinxcontrib-napoleon
+sphinx-rtd-theme

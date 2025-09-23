@@ -1,0 +1,4 @@
+[run]
+branch = true
+source = nav
+omit = tests/*
