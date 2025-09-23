@@ -39,7 +39,7 @@ class Annotations:
         if annotations is None:
             return
         if isinstance(annotations, Annotations):
-            ann_list = annotations._annotations
+            ann_list = annotations.annotations
         elif not isinstance(annotations, list):
             ann_list = [annotations]
         else:
@@ -84,12 +84,17 @@ class Annotations:
         data_shape = obs.data_shape_vu
 
         res = np.zeros(data_shape + (3,), dtype=np.uint8)
-        all_avoid_mask = np.zeros(data_shape, dtype=np.bool_)
+        all_avoid_mask = np.zeros(data_shape, dtype=bool)
 
         if offset is None:
             int_offset = (0, 0)
         else:
-            int_offset = (int(offset[0]), int(offset[1]))
+            int_offset = (np.clip(int(round(offset[0])),
+                                  -obs.extfov_margin_v,
+                                  obs.extfov_margin_v),
+                          np.clip(int(round(offset[1])),
+                                  -obs.extfov_margin_u,
+                                  obs.extfov_margin_u))
 
         for annotation in self._annotations:
             # TODO This does not handle z-depth. In other words, an overlay does not
@@ -137,7 +142,7 @@ class Annotations:
         text_layer = np.zeros_like(res, dtype=np.uint8)
         graphic_layer = np.zeros_like(res, dtype=np.uint8)
         if text_avoid_other_text:
-            ann_num_mask = np.zeros(self._annotations[0].overlay.shape, dtype=np.int_)
+            ann_num_mask = np.zeros(res.shape, dtype=int)
         else:
             ann_num_mask = None
 

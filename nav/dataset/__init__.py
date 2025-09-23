@@ -17,8 +17,30 @@ DATASET_NAME_TO_CLASS_MAPPING = {
 }
 
 
+DATASET_NAME_TO_INST_NAME_MAPPING = {
+    'coiss': 'coiss',
+    'coiss_pds3': 'coiss',
+    'gossi': 'gossi',
+    'gossi_pds3': 'gossi',
+    'nhlorri': 'nhlorri',
+    'nhlorri_pds3': 'nhlorri',
+    'vgiss': 'vgiss',
+    'vgiss_pds3': 'vgiss',
+}
+
+
+def dataset_name_to_class(name: str) -> type[DataSet]:
+    return DATASET_NAME_TO_CLASS_MAPPING[name.lower()]
+
+
+def dataset_name_to_inst_name(name: str) -> str:
+    return DATASET_NAME_TO_INST_NAME_MAPPING[name.lower()]
+
+
 __all__ = ['DataSet',
            'DataSetPDS3CassiniISS',
            'DataSetPDS3GalileoSSI',
            'DataSetPDS3NewHorizonsLORRI',
-           'DataSetPDS3VoyagerISS']
+           'DataSetPDS3VoyagerISS',
+           'DATASET_NAME_TO_CLASS_MAPPING',
+           'dataset_name_to_class']

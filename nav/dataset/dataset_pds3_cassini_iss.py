@@ -2,6 +2,7 @@ import argparse
 from typing import Any, Optional
 
 from .dataset_pds3 import DataSetPDS3
+from nav.support.misc import safe_lstrip_zero
 
 
 class DataSetPDS3CassiniISS(DataSetPDS3):
@@ -29,13 +30,16 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         """
 
         parts = filespec.split('/')
+        if len(parts) != 3:
+            raise ValueError(f'Bad Primary File Spec "{filespec}" - expected 3 '
+                             'directory levels')
         if parts[0].upper() != 'DATA':
-            raise ValueError(f'"Bad Primary File Spec "{filespec}"')
+            raise ValueError(f'Bad Primary File Spec "{filespec}" - expected "DATA"')
         range_dir = parts[1]
         img_name = parts[2]
         if len(range_dir) != 21 or range_dir[10] != '_':
-            img_name = parts[2]
-            raise ValueError(f'Bad Primary File Spec "{filespec}"')
+            raise ValueError(f'Bad Primary File Spec "{filespec}" - '
+                             'expected "DATA/dddddddddd_dddddddddd"')
         img_name = img_name.rsplit('.')[0]
         return img_name
 
@@ -55,26 +59,21 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         # [NW]dddddddddd[_d[d]]
         if img_name[0] not in 'NW':
             return False
+        if len(img_name) == 11:
+            try:
+                _ = int(img_name[1:])
+                return True
+            except ValueError:
+                return False
         if 13 <= len(img_name) <= 14:
             if img_name[11] != '_':
                 return False
             try:
-                _ = int(img_name[12:])
-            except ValueError:
-                return False
-            try:
                 _ = int(img_name[1:11])
+                _ = int(img_name[12:])
+                return True
             except ValueError:
                 return False
-            return True
-
-        if len(img_name) != 11:
-            return False
-        try:
-            _ = int(img_name[1:])
-        except ValueError:
-            return False
-
         return True
 
     @staticmethod
@@ -95,7 +94,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         if not DataSetPDS3CassiniISS._img_name_valid(img_name):
             raise ValueError(f'Invalid image name "{img_name}"')
 
-        return int(img_name[1:11].lstrip('0'))
+        return int(safe_lstrip_zero(img_name[1:11]))
 
     @staticmethod
     def _map_filename(img_filename: str) -> str:
@@ -110,7 +109,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         Raises:
             ValueError: If the image filename format is invalid.
         """
-        if not img_filename.endswith(('.LBL', '.IMG')):
+        if not img_filename.upper().endswith(('.LBL', '.IMG')):
             raise ValueError(f'Invalid image filename "{img_filename}"')
         return img_filename[:-4] + '_CALIB' + img_filename[-4:]
 
@@ -138,7 +137,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
     @staticmethod
     def add_selection_arguments(cmdparser: argparse.ArgumentParser,
                                 group: Optional[argparse._ArgumentGroup] = None) -> None:
-        """Adds Cassnini ISS-specific command-line arguments for image selection.
+        """Adds Cassini ISS-specific command-line arguments for image selection.
 
         Parameters:
             cmdparser: The argument parser to add arguments to.

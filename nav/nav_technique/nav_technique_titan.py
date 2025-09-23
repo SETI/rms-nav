@@ -13,11 +13,11 @@ class NavTechniqueTitan(NavTechnique):
     def __init__(self,
                  *args: Any,
                  **kwargs: Any) -> None:
-        super().__init__(logger_name='NavTechniqueTitan', **kwargs)
+        super().__init__(*args, logger_name='NavTechniqueTitan', **kwargs)
 
     def navigate(self) -> None:
         """Performs navigation specific to Titan observations.
 
         Currently a placeholder implementation.
         """
-        pass
+        pass  # TODO Implement

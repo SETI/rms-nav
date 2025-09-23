@@ -30,7 +30,8 @@ class Annotation:
                  *,
                  thicken_overlay: int = 0,
                  text_info: Optional[AnnotationTextInfo |
-                                     list[AnnotationTextInfo]] = None,
+                                     list[AnnotationTextInfo] |
+                                     tuple[AnnotationTextInfo, ...]] = None,
                  avoid_mask: Optional[NDArrayBoolType] = None,
                  config: Optional[Config] = None) -> None:
 
@@ -91,7 +92,8 @@ class Annotation:
 
     def add_text_info(self,
                       text_info: (AnnotationTextInfo |
-                                  list[AnnotationTextInfo])) -> None:
+                                  list[AnnotationTextInfo] |
+                                  tuple[AnnotationTextInfo, ...])) -> None:
         """Adds text annotation information to this annotation.
 
         Parameters:

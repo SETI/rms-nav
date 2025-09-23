@@ -41,7 +41,7 @@ class NavModel(ABC, NavBase):
 
         # The range from the observer to each point in the model in km; inf if infinitely
         # far away
-        self._range: NDArrayFloatType | None = None
+        self._range: NDArrayFloatType | float | None = None
 
         # The uncertainty in the model in pixels
         self._uncertainty: float = 0.

@@ -14,7 +14,7 @@ planets:
 ####################
 
 general:
-  truetype_font_dir: /usr/share/fonts/truetype
+  truetype_font_dir: /usr/share/fonts/truetype  # TODO
 
 ####################
 # OFFSET SETTINGS #
@@ -264,7 +264,7 @@ stars:
   min_dn_force_one_star: 25000.0
   star_body_conflict_margin: 3
   too_bright_dn: 1000
-  too_bright_factor:
+  too_bright_factor: 1  # TODO
   # font:
   #   256: *id001
   #   512: *id001

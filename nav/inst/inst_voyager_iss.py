@@ -25,7 +25,6 @@ class InstVoyagerISS(Inst):
         super().__init__(obs, logger_name='InstVoyagerISS', **kwargs)
 
     @staticmethod
-    @staticmethod
     def from_file(path: PathLike,
                   config: Optional[Config] = None,
                   extfov_margin_vu: tuple[int, int] | None = None,

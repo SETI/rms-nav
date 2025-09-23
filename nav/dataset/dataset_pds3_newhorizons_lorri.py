@@ -1,6 +1,7 @@
 from typing import Any
 
 from .dataset_pds3 import DataSetPDS3
+from nav.support.misc import safe_lstrip_zero
 
 
 class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
@@ -17,15 +18,19 @@ class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
         """
 
         parts = filespec.split('/')
+        if len(parts) != 3:
+            raise ValueError(f'Bad Primary File Spec "{filespec}" - expected 3 '
+                             'directory levels')
         if parts[0].upper() != 'DATA':
-            raise ValueError(f'Bad Primary File Spec "{filespec}"')
+            raise ValueError(f'Bad Primary File Spec "{filespec}" - expected "DATA"')
         range_dir = parts[1]
         img_name = parts[2]
         if len(range_dir) != 15 or range_dir[8] != '_':
-            raise ValueError(f'Bad Primary File Spec "{filespec}"')
+            raise ValueError(f'Bad Primary File Spec "{filespec}" - '
+                             'expected "DATA/ddddddd_ddddddd"')
         if not img_name.endswith('_sci.lbl'):
             return None
-        return img_name.rsplit('_sci')[0]
+        return img_name.rsplit('_sci', maxsplit=1)[0]
 
     @staticmethod
     def _img_name_valid(img_name: str) -> bool:
@@ -45,7 +50,7 @@ class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
         if len(img_name) != 20 or not img_name.startswith('LOR_') or img_name[14:17] != '_0X':
             return False
         try:
-            _ = int(img_name[4:14].lstrip('0'))
+            _ = int(safe_lstrip_zero(img_name[4:14]))
         except ValueError:
             return False
 
@@ -68,7 +73,7 @@ class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
         if not DataSetPDS3NewHorizonsLORRI._img_name_valid(img_name):
             raise ValueError(f'Invalid image name "{img_name}"')
 
-        return int(img_name[4:14].lstrip('0'))
+        return int(safe_lstrip_zero(img_name[4:14]))
 
     _DATASET_LAYOUT = {
         'all_volume_names': ['NHLALO_2001', 'NHJULO_2001',

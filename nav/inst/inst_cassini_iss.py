@@ -67,6 +67,7 @@ class InstCassiniISS(Inst):
                 extfov_margin_vu = config._config_dict['cassini_iss']['extfov_margin_vu']
         logger.debug(f'  Data shape: {obs.data.shape}')
         logger.debug(f'  Extfov margin vu: {extfov_margin_vu}')
+        # TODO This is slow when debug turned off
         logger.debug(f'  Data min: {np.min(obs.data)}, max: {np.max(obs.data)}')
 
         new_obs = ObsSnapshot(obs,
@@ -84,4 +85,4 @@ class InstCassiniISS(Inst):
         return GaussianPSF(sigma=0.54)
 # PSF_SIGMA = {"NAC":   0.54,
 #              "WAC":   0.77,
-#              "LORRI": 0.5} # XXX
+#              "LORRI": 0.5} # TODO

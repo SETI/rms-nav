@@ -17,9 +17,9 @@ def _clean_val(v: Any) -> Any:
 
     if isinstance(v, np.bool_):
         return bool(v)
-    if isinstance(v, (np.int_, np.int8, np.int16, np.int32, np.int64)):
+    if isinstance(v, np.integer):
         return int(v)
-    if isinstance(v, (np.float32, np.float64)):
+    if isinstance(v, np.floating):
         return float(v)
     if isinstance(v, np.ndarray):
         return _clean_list(list(v))
@@ -76,7 +76,7 @@ def _clean_list(obj: list[Any] | tuple[Any, ...]) -> list[Any]:
     return obj
 
 
-def dump_yaml(data: Any) -> None:
+def dump_yaml(data: Any, stream: Any = sys.stdout) -> None:
     """Dumps data as YAML to standard output after converting NumPy types to Python types.
 
     Parameters:
@@ -86,4 +86,4 @@ def dump_yaml(data: Any) -> None:
     data = _clean_obj(data)
     yaml = YAML()
     yaml.default_flow_style = False
-    yaml.dump(data, sys.stdout)
+    yaml.dump(data, stream)

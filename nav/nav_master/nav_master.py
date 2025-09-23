@@ -1,4 +1,4 @@
-from typing import Any, Optional, Sequence, cast
+from typing import Any, Optional, Sequence, TYPE_CHECKING, cast
 
 import matplotlib.pyplot as plt
 from oops import Observation
@@ -141,7 +141,10 @@ class NavMaster(NavBase):
         config = self._config
         logger = self._logger
 
-        body_list = [obs.closest_planet] + config.satellites(obs.closest_planet)
+        if obs.closest_planet is not None:
+            body_list = [obs.closest_planet] + config.satellites(obs.closest_planet)
+        else:
+            body_list = []
 
         large_body_dict = self._obs.inventory(body_list, return_type='full')
         # Make a list sorted by range, with the closest body first, limiting to bodies
@@ -227,28 +230,30 @@ class NavMaster(NavBase):
 
         # Create a single model which, for each pixel, has the element from the model with
         # the smallest range (to the observer), and is thus in front.
-        model_imgs = []
-        ranges = []
+        model_imgs: list[NDArrayFloatType] = []
+        ranges: list[NDArrayFloatType] = []
         for model in self.all_models:
             if model.model_img is None:
                 continue
             model_imgs.append(model.model_img)
             # Range can just be a float if the entire model is at the same distance
-            range = model.range
-            if not isinstance(range, np.ndarray):
-                if model.range is None:
-                    range = 0
-                else:
-                    range = model.range
-                range = np.zeros_like(model.model_img) + range
-            ranges.append(range)
+            rng = model.range
+            if not isinstance(rng, np.ndarray):
+                rng = 0 if rng is None else rng
+                rng_arr = np.zeros_like(model.model_img) + rng
+            ranges.append(rng_arr)
 
         if len(model_imgs) == 0:
             self._combined_model = None
             return
 
-        model_imgs_arr = np.array(model_imgs)
-        ranges_arr = np.array(ranges)
+        # Ensure shapes align
+        shapes = {img.shape for img in model_imgs}
+        if len(shapes) != 1:
+            raise ValueError(f'Model image shapes differ: {shapes}')
+        model_imgs_arr = np.stack(model_imgs, axis=0)
+        ranges_arr = np.stack(ranges, axis=0)
+
         min_indices = np.argmin(ranges_arr, axis=0)
         row_idx, col_idx = np.indices(min_indices.shape)
         final_model = model_imgs_arr[min_indices, row_idx, col_idx]
@@ -318,12 +323,8 @@ class NavMaster(NavBase):
 
         def _stretch_region(sub_img: NDArrayFloatType) -> NDArrayUint8Type:
             """Stretches a region of the image."""
-            img_sorted = sorted(list(sub_img.flatten()))
-            blackpoint = img_sorted[np.clip(int(len(img_sorted)*0.001),
-                                            0, len(img_sorted)-1)]
-            whitepoint = img_sorted[np.clip(int(len(img_sorted)*0.999),
-                                            0, len(img_sorted)-1)]
-            # whitepoint = np.max(img_sorted)
+            blackpoint = float(np.quantile(sub_img, 0.001))
+            whitepoint = float(np.quantile(sub_img, 0.999))
             gamma = 1  # 0.5
 
             img_stretched = np.floor((np.maximum(sub_img-blackpoint, 0) /
@@ -332,11 +333,11 @@ class NavMaster(NavBase):
             img_stretched = img_stretched.astype(np.uint8)
             return img_stretched
 
-        already_stretched_mask = np.zeros(img.shape, dtype=np.bool_)
+        already_stretched_mask = np.zeros(img.shape, dtype=bool)
         for model_index, model in enumerate(self.all_models):
             if model.stretch_regions is not None:
                 for stretch_region_packed in model.stretch_regions:
-                    stretch_region = np.unpackbits(stretch_region_packed, axis=0)
+                    stretch_region = np.unpackbits(stretch_region_packed, axis=0).astype(bool)
                     stretch_region = self._obs.extract_offset_image(stretch_region, offset)
                     if not np.any(stretch_region):
                         continue
@@ -356,7 +357,7 @@ class NavMaster(NavBase):
         res[:, :, 2] = bw_res
 
         if overlay is not None:
-            overlay[overlay < 128] = 0
+            overlay[overlay < 128] = 0  # TODO Hard-coded constant
             mask = np.any(overlay, axis=2)
             res[mask, :] = overlay[mask, :]
 

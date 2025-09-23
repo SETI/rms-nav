@@ -15,7 +15,7 @@ class NavTechniqueAllModels(NavTechnique):
     def __init__(self,
                  *args: Any,
                  **kwargs: Any) -> None:
-        super().__init__(*args, logger_name='NavTechniqueCorrelation', **kwargs)
+        super().__init__(*args, logger_name='NavTechniqueAllModels', **kwargs)
 
     def navigate(self) -> None:
         """Performs navigation using correlation across all available models.

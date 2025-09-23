@@ -260,8 +260,8 @@ class DataSetPDS3(DataSet):
                         img_filespec_list.append(filespec)
 
         # Also limit to the list of images in the filelist file, if any
-        if arguments.image_filelist:
-            for filename in arguments.image_filelist:
+        if arguments.image_file_list:
+            for filename in arguments.image_file_list:
                 with open(filename, 'r') as fp:
                     for line in fp:
                         line = line.strip()
@@ -298,13 +298,14 @@ class DataSetPDS3(DataSet):
                     volumes=volumes,
                     img_name_list=img_name_list,
                     img_filespec_list=img_filespec_list,
-                    force_has_offset_file=arguments.has_offset_file,
-                    force_has_no_offset_file=arguments.has_no_offset_file,
-                    force_has_png_file=arguments.has_png_file,
-                    force_has_no_png_file=arguments.has_no_png_file,
-                    force_has_offset_error=arguments.has_offset_error,
-                    force_has_offset_spice_error=arguments.has_offset_spice_error,
-                    force_has_offset_nonspice_error=arguments.has_offset_nonspice_error,
+                    # TODO
+                    # force_has_offset_file=arguments.has_offset_file,
+                    # force_has_no_offset_file=arguments.has_no_offset_file,
+                    # force_has_png_file=arguments.has_png_file,
+                    # force_has_no_png_file=arguments.has_no_png_file,
+                    # force_has_offset_error=arguments.has_offset_error,
+                    # force_has_offset_spice_error=arguments.has_offset_spice_error,
+                    # force_has_offset_nonspice_error=arguments.has_offset_nonspice_error,
                     selection_expr=arguments.selection_expr,
                     choose_random_images=arguments.choose_random_images,
                     arguments=arguments):
@@ -404,7 +405,7 @@ class DataSetPDS3(DataSet):
         volumes: Optional[list[str]] = kwargs.get('volumes', None)
         camera: Optional[str] = kwargs.get('camera', None)
         img_name_list: Optional[list[str]] = kwargs.get('img_name_list', None)
-        img_filespec_list: Optional[list[str]] = kwargs.get('image_filespec_list', None)
+        img_filespec_list: Optional[list[str]] = kwargs.get('img_filespec_list', None)
         choose_random_images: bool | int = kwargs.get('choose_random_images', False)
         max_filenames: Optional[int] = kwargs.get('max_filenames', None)
         arguments: Optional[argparse.Namespace] = kwargs.get('arguments', None)
@@ -466,6 +467,16 @@ class DataSetPDS3(DataSet):
 
         volume_raw_dir = self._pds3_holdings_dir / volumes_dir_name
         index_dir = self._pds3_holdings_dir / 'metadata'
+
+        # Validate the image_name_list and image_filespec_list
+        if img_name_list:
+            for img_name in img_name_list:
+                if not self._img_name_valid(img_name):
+                    raise ValueError(f'Invalid image name "{img_name}"')
+        if img_filespec_list:
+            for img_filespec in img_filespec_list:
+                if not self._get_img_name_from_filespec(img_filespec):
+                    raise ValueError(f'Invalid image filespec "{img_filespec}"')
 
         # Optimize the first and last image number based on image_name_list and image_filespec_list
         # This is just to improve performance
@@ -540,6 +551,7 @@ class DataSetPDS3(DataSet):
                 index_tab_abspath = index_label_abspath.with_suffix('.tab')
                 # This will raise a FileNotFoundError if the index file label or table
                 # can't be found
+                # TODO Consider additional error handling
                 ret = self._index_filecache.retrieve([index_label_abspath,
                                                       index_tab_abspath])
                 index_label_localpath, _ = cast(list[Path], ret)

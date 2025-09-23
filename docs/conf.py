@@ -15,8 +15,13 @@ project = 'RMS-NAV'
 copyright = '2025, SETI Institute'
 author = 'SETI Institute'
 
+import importlib.metadata
+
 # The full version, including alpha/beta/rc tags
-release = '1.0.0'
+try:
+    release = importlib.metadata.version('rms-nav')
+except importlib.metadata.PackageNotFoundError:
+    release = '1.0.0'  # fallback for development
 
 # -- General configuration ---------------------------------------------------
 
@@ -52,7 +57,7 @@ html_theme = 'sphinx_rtd_theme'
 html_static_path = ['_static']
 
 add_module_names = False
-python_use_unqualified_type_names = True
+autodoc_typehints_format = "short"
 
 # -- Extension configuration -------------------------------------------------
 

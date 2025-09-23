@@ -36,6 +36,8 @@ def _load_font(path: str,
     Returns:
         A FreeTypeFont object for the specified font and size.
     """
+
+    # TODO Add error handling
     return ImageFont.truetype(path, size)
 
 
@@ -130,9 +132,9 @@ class AnnotationTextInfo:
 
         if (self.ref_vu is not None and
             (self.ref_vu[0] - extfov[0] - offset[0] < 0 or
-             self.ref_vu[0] - extfov[0] - offset[0] > text_layer.shape[0] or
+             self.ref_vu[0] - extfov[0] - offset[0] >= text_layer.shape[0] or
              self.ref_vu[1] - extfov[1] - offset[1] < 0 or
-             self.ref_vu[1] - extfov[1] - offset[1] > text_layer.shape[1])):
+             self.ref_vu[1] - extfov[1] - offset[1] >= text_layer.shape[1])):
             # The thing we're labeling isn't in the FOV, so don't bother labeling it
             return True
 

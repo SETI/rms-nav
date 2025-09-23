@@ -1,9 +1,11 @@
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from nav.config import Config
 from nav.support.nav_base import NavBase
-from nav import nav_master as nav_master_module
+
+if TYPE_CHECKING:
+    from nav import nav_master as NavMaster
 
 
 class NavTechnique(ABC, NavBase):
@@ -16,7 +18,7 @@ class NavTechnique(ABC, NavBase):
     """
 
     def __init__(self,
-                 nav_master: 'nav_master_module.NavMaster',
+                 nav_master: 'NavMaster',
                  *,
                  config: Optional[Config] = None,
                  logger_name: Optional[str] = None) -> None:

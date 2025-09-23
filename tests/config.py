@@ -1,5 +1,6 @@
 from nav.config import DEFAULT_CONFIG
-DEFAULT_CONFIG.read_config()
+
+
 
 # TODO: Update to use PDS3_HOLDINGS_DIR
 

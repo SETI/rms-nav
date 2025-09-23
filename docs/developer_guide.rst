@@ -419,7 +419,8 @@ Example:
 Configuration System
 ====================
 
-RMS-NAV uses a YAML-based configuration system. The default configuration is in ``nav/config/default_config.yaml``.
+RMS-NAV uses a YAML-based configuration system. The default configuration files are located
+in the ``nav/config_files/`` directory.
 
 To override configuration settings:
 

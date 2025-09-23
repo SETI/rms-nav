@@ -2,7 +2,8 @@ import oops
 import pytest
 
 from nav.support.misc import (dec_rad_to_dms,
-                              ra_rad_to_hms)
+                              ra_rad_to_hms,
+                              safe_lstrip_zero)
 
 
 def test_ra_rad_to_hms() -> None:
@@ -35,3 +36,15 @@ def test_dec_rad_to_dms() -> None:
     assert dec_rad_to_dms(-180 * oops.RPD) == '+180d00m00.000s'
     assert dec_rad_to_dms(-.0006 / 60 / 60 * oops.RPD) == '-000d00m00.001s'
     assert dec_rad_to_dms(-59.9994 / 60 / 60 * oops.RPD) == '-000d00m59.999s'
+
+
+def test_safe_lstrip_zero() -> None:
+    assert safe_lstrip_zero('0000000000') == '0'
+    assert safe_lstrip_zero('0000000001') == '1'
+    assert safe_lstrip_zero('0000000009') == '9'
+    assert safe_lstrip_zero('0000000010') == '10'
+    assert safe_lstrip_zero('000000001f') == '1f'
+    assert safe_lstrip_zero('0000000020') == '20'
+    assert safe_lstrip_zero('00000000ff') == 'ff'
+    assert safe_lstrip_zero('00000000FF') == 'FF'
+    assert safe_lstrip_zero('00000000100') == '100'

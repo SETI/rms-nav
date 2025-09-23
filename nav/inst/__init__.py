@@ -14,11 +14,12 @@ INST_NAME_TO_CLASS_MAPPING = {
 
 
 def inst_name_to_class(name: str) -> type[Inst]:
-    return INST_NAME_TO_CLASS_MAPPING[name]
+    return INST_NAME_TO_CLASS_MAPPING[name.lower()]
 
 
 __all__ = ['Inst',
            'InstCassiniISS',
            'InstGalileoSSI',
            'InstNewHorizonsLORRI',
-           'InstVoyagerISS']
+           'InstVoyagerISS',
+           'inst_name_to_class']

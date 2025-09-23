@@ -1,4 +1,5 @@
 import datetime
+import math
 from typing import Any
 
 import oops
@@ -20,6 +21,7 @@ def ra_rad_to_hms(ra: float) -> str:
     if ra < 0:
         raise ValueError(f'ra cannot be negative, got {ra}')
 
+    ra = ra % math.tau
     ra_deg = ra * oops.DPR / 15  # In hours
     hh = int(ra_deg)
     mm = int((ra_deg - hh) * 60)
@@ -60,6 +62,7 @@ def dec_rad_to_dms(dec: float) -> str:
     if mm >= 60:
         dd += 1
         mm -= 60
+    # TODO Check this - does this make sense for both dec and rad?
     if dd >= 180:
         dd -= 360
     elif dd <= -180:
@@ -111,10 +114,29 @@ def flatten_list(lst: list[Any]) -> list[Any]:
     """Flattens a list of lists into a single list.
 
     Parameters:
-        l: The list to flatten.
+        lst: The list to flatten.
 
     Returns:
         A flattened list.
     """
 
     return [x for sublist in lst for x in sublist]
+
+
+def safe_lstrip_zero(s: str) -> str:
+    """Strips leading zeros from a string but leaves one zero behind if that's all there is.
+
+    Parameters:
+        s: The string to strip leading zeros from.
+
+    Returns:
+        The string with leading zeros stripped.
+    """
+
+    if not s:
+        return s
+
+    ret = s.lstrip('0')
+    if ret == '':
+        ret = '0'
+    return ret

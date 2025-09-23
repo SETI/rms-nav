@@ -1,4 +1,4 @@
 [run]
 branch = true
-include = nav/*
+source = nav
 omit = tests/*

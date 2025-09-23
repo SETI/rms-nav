@@ -1,6 +1,7 @@
 from typing import Any
 
 from .dataset_pds3 import DataSetPDS3
+from nav.support.misc import safe_lstrip_zero
 
 
 class DataSetPDS3VoyagerISS(DataSetPDS3):
@@ -17,12 +18,15 @@ class DataSetPDS3VoyagerISS(DataSetPDS3):
         """
 
         parts = filespec.split('/')
+        if len(parts) != 3:
+            raise ValueError(f'Bad Primary File Spec "{filespec}" - expected 3 '
+                             'directory levels')
         if parts[0].upper() != 'DATA':
-            raise ValueError(f'Bad Primary File Spec "{filespec}"')
+            raise ValueError(f'Bad Primary File Spec "{filespec}" - expected "DATA"')
         range_dir = parts[1]
         img_name = parts[2]
         if len(range_dir) != 8 or range_dir[0] != 'C':
-            raise ValueError(f'Bad Primary File Spec "{filespec}"')
+            raise ValueError(f'Bad Primary File Spec "{filespec}" - expected "Cddddddd"')
         if not img_name.endswith('_GEOMED.LBL'):
             return None
         return img_name.rsplit('_GEOMED')[0]
@@ -44,7 +48,7 @@ class DataSetPDS3VoyagerISS(DataSetPDS3):
         if len(img_name) != 8 or img_name[0] != 'C':
             return False
         try:
-            _ = int(img_name[1:].lstrip('0'))
+            _ = int(safe_lstrip_zero(img_name[1:]))
         except ValueError:
             return False
 
@@ -67,7 +71,7 @@ class DataSetPDS3VoyagerISS(DataSetPDS3):
         if not DataSetPDS3VoyagerISS._img_name_valid(img_name):
             raise ValueError(f'Invalid image name "{img_name}"')
 
-        return int(img_name[1:].lstrip('0'))
+        return int(safe_lstrip_zero(img_name[1:]))
 
     _MIN_5xxx_VOL1 = 5101
     _MAX_5xxx_VOL1 = 5120

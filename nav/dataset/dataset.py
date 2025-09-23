@@ -27,7 +27,7 @@ class DataSet(ABC, NavBase):
         """Validates whether the provided image name follows the dataset's naming convention.
 
         Parameters:
-            name: The image name to validate.
+            img_name: The image name to validate.
 
         Returns:
             True if the image name is valid for this dataset, False otherwise.
@@ -61,7 +61,8 @@ class DataSet(ABC, NavBase):
         ...
 
     @abstractmethod
-    def yield_filenames_index(**kwargs: Any) -> Iterator[tuple[Path, Path]]:
+    def yield_filenames_index(self,
+                              **kwargs: Any) -> Iterator[tuple[Path, Path]]:
         """Yields image filenames based on index information.
 
         Parameters:

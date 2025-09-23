@@ -532,7 +532,7 @@ if __name__ == "__main__":
         body_components=bodies,
         ring_components=rings,
         titan_masks=titan,
-        pyramid_levels=3,
+        pyramid_levels=3,  # TODO Remove hard-coded values
         max_peaks=5,
         upsample_factor=16,
         metric="psr",           # 'psr' | 'pmr' | 'per'
@@ -548,8 +548,6 @@ if __name__ == "__main__":
     print("Consistency (px):        ", res["consistency"])
     print("Spurious?:               ", res["spurious"])
 
-
-import numpy as np
 
 def make_ring_edge_model(shape, center, edges, angular_sampling=720):
     """

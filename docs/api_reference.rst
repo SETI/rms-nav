@@ -86,22 +86,22 @@ nav.dataset
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.dataset.dataset_cassini_iss
+.. automodule:: nav.dataset.dataset_pds3_cassini_iss
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.dataset.dataset_voyager_iss
+.. automodule:: nav.dataset.dataset_pds3_voyager_iss
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.dataset.dataset_galileo_ssi
+.. automodule:: nav.dataset.dataset_pds3_galileo_ssi
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.dataset.dataset_newhorizons_lorri
+.. automodule:: nav.dataset.dataset_pds3_newhorizons_lorri
    :members:
    :undoc-members:
    :show-inheritance:

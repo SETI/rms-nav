@@ -31,7 +31,7 @@ class NavTechniqueStars(NavTechnique):
                 self.logger.info('No star models available')
                 return
             if len(star_models) > 1:
-                self.logger.fatal('More than one star model available')
+                self.logger.error('More than one star model available')
                 return
             final_model = star_models[0].model_img
 

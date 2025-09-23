@@ -1,4 +1,3 @@
-# mypy: ignore-errors
 # import logging
 
 # import copy
@@ -65,8 +64,24 @@ from nav.support.types import NDArrayFloatType
 from .nav_model import NavModel
 
 
-_STAR_CATALOG_UCAC4 = UCAC4StarCatalog()
-_STAR_CATALOG_YBSC = YBSCStarCatalog()
+_STAR_CATALOG_UCAC4 = None
+_STAR_CATALOG_YBSC = None
+
+
+def _get_star_catalog_ucac4():
+    """Get UCAC4 star catalog, creating it lazily."""
+    global _STAR_CATALOG_UCAC4
+    if _STAR_CATALOG_UCAC4 is None:
+        _STAR_CATALOG_UCAC4 = UCAC4StarCatalog()
+    return _STAR_CATALOG_UCAC4
+
+
+def _get_star_catalog_ybsc():
+    """Get YBSC star catalog, creating it lazily."""
+    global _STAR_CATALOG_YBSC
+    if _STAR_CATALOG_YBSC is None:
+        _STAR_CATALOG_YBSC = YBSCStarCatalog()
+    return _STAR_CATALOG_YBSC
 
 
 class NavModelStars(NavModel):
@@ -109,7 +124,7 @@ class NavModelStars(NavModel):
                     clean_sclass(star.spectral_class),
                     0 if star.temperature is None else star.temperature,
                     0,
-                    star.conflicts) # XXX star.dn)
+                    star.conflicts) # TODO star.dn)
 
     # def _compute_dimmest_visible_star_vmag(obs, stars_config):
     #     """Compute the VMAG of the dimmest star likely visible."""
@@ -158,11 +173,12 @@ class NavModelStars(NavModel):
 
         if mag_min < 8:  # YBSC maximum is 7.96
             star_list1 = list(
-                _STAR_CATALOG_YBSC.find_stars(allow_double=True,
-                                              ra_min=ra_min, ra_max=ra_max,
-                                              dec_min=dec_min, dec_max=dec_max,
-                                              vmag_min=mag_min, vmag_max=mag_max,
-                                              **kwargs))
+                _get_star_catalog_ybsc().find_stars(
+                    allow_double=True,
+                    ra_min=ra_min, ra_max=ra_max,
+                    dec_min=dec_min, dec_max=dec_max,
+                    vmag_min=mag_min, vmag_max=mag_max,
+                    **kwargs))
             for star in star_list1:
                 star.johnson_mag_v = star.vmag
                 if star.b_v is None:
@@ -171,12 +187,13 @@ class NavModelStars(NavModel):
                     star.johnson_mag_b = star.vmag + star.b_v
 
         ucac_star_list = list(
-                _STAR_CATALOG_UCAC4.find_stars(allow_double=True,
-                                               allow_galaxy=False,
-                                               ra_min=ra_min, ra_max=ra_max,
-                                               dec_min=dec_min, dec_max=dec_max,
-                                               vmag_min=mag_min, vmag_max=mag_max,
-                                               **kwargs))
+                _get_star_catalog_ucac4().find_stars(
+                    allow_double=True,
+                    allow_galaxy=False,
+                    ra_min=ra_min, ra_max=ra_max,
+                    dec_min=dec_min, dec_max=dec_max,
+                    vmag_min=mag_min, vmag_max=mag_max,
+                    **kwargs))
 
         star_list1 += ucac_star_list
 
@@ -206,7 +223,7 @@ class NavModelStars(NavModel):
                 star.temperature_faked = True
                 star.temperature = SCLASS_TO_SURFACE_TEMP[default_star_class]
                 star.spectral_class = default_star_class
-            # XXX Validate this
+            # TODO Validate this
             if star.johnson_mag_v is None or star.johnson_mag_b is None:
                     star.johnson_mag_v = (star.vmag -
                         SCLASS_TO_B_MINUS_V[clean_sclass(star.spectral_class)] / 2.)
@@ -324,7 +341,7 @@ class NavModelStars(NavModel):
         # return a huge number of dimmer stars and then only need a few of them.
         magnitude_list = [0., 12., 13., 14., 15., 16., 17.]
 
-        # XXX mag_vmax = _compute_dimmest_visible_star_vmag(obs, stars_config)+1
+        # TODO mag_vmax = _compute_dimmest_visible_star_vmag(obs, stars_config)+1
         mag_vmax = 16
 
         if radec_movement is None:
@@ -381,7 +398,7 @@ class NavModelStars(NavModel):
                 break
 
         # Sort the list with the brightest stars first.
-        # XXX Was DN
+        # TODO Was DN
         full_star_list.sort(key=lambda x: x.vmag, reverse=False)
 
         full_star_list = full_star_list[:max_stars]
@@ -584,7 +601,7 @@ class NavModelStars(NavModel):
 
         self._model_img = model
         self._model_mask = None
-        self._range = 1e308
+        self._range = np.inf
         self._uncertainty = 0.
         self._stretch_regions = stretch_regions
         self._annotations = annotations
@@ -1127,8 +1144,8 @@ class NavModelStars(NavModel):
         for body_name in self._conflict_body_list:
             intercepted = backplane.where_intercepted(body_name)
             if intercepted.any():
-                self.logger.debug(f'Star {star.unique_number:9d} U {star.u:8.3f} V '
-                                  f'{star.v:8.3f} conflicts with {body_name}')
+                self._logger.debug(f'Star {star.unique_number:9d} U {star.u:8.3f} V '
+                                   f'{star.v:8.3f} conflicts with {body_name}')
                 star.conflicts = f'BODY: {body_name}'
                 return True
 
@@ -1142,7 +1159,7 @@ class NavModelStars(NavModel):
         #     long = ring_longitude[int(star.v+obs.extfov_margin[1]),
         #                         int(star.u+obs.extfov_margin[0])]
 
-        #     # XXX We might want to improve this to support the known position of the
+        #     # TODO We might want to improve this to support the known position of the
         #     # F ring core.
         #     # C to A rings and F ring
         #     if ((oops.body.SATURN_C_RING[0] <= rad <= oops.body.SATURN_A_RING[1]) or
@@ -1748,7 +1765,7 @@ class NavModelStars(NavModel):
 #     # Cache the body inventory
 #     if obs.star_body_list is None:
 #         obs.star_body_list = obs.inventory(
-#                                     # nav.config.LARGE_BODY_LIST_TITAN_ATMOS) # XXX
+#                                     # nav.config.LARGE_BODY_LIST_TITAN_ATMOS) # TODO
 #                                     nav.config.LARGE_BODY_LIST[obs.planet.upper()])
 
 #     # A list of offsets that we have already tried so we don't waste time

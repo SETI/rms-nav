@@ -9,18 +9,22 @@
             "type": "debugpy",
             "request": "launch",
             "cwd": "${workspaceFolder}",
+            "env": { "PYTHONPATH": "${workspaceFolder}" },
             "program": "experiments/nav_model_body1.py",
             "args": [],
-            "console": "integratedTerminal"
+            "console": "integratedTerminal",
+            "justMyCode": true
         },
         {
             "name": "star_distortion",
             "type": "debugpy",
             "request": "launch",
             "cwd": "${workspaceFolder}",
+            "env": { "PYTHONPATH": "${workspaceFolder}" },
             "program": "experiments/star_distortion.py",
             "args": [],
-            "console": "integratedTerminal"
+            "console": "integratedTerminal",
+            "justMyCode": true
         }
         // {
         //     "results_dir": "COISS_2021/1521798868_1521893025",

@@ -12,6 +12,10 @@
 #   - ae: Eccentricity amplitude (km)
 #   - long_peri: Longitude of pericenter (degrees)
 #   - rate_peri: Rate of pericenter (degrees/day)
+#       Optional:
+#   - amplitude: Amplitude (km)
+#   - phase: Phase (degrees)
+#   - pattern_speed: Pattern speed (degrees/day)
 # - outer_data: Outer edge data (or null if not available)
 #   - Same structure as inner_data
 
@@ -1096,7 +1100,7 @@ ring_features:
     a_ring_inner_edge:
       feature_type: "RINGLET"
       name: "A Ring"
-      feature_number: 7
+      feature_numbers: [7]
       description: "A ring IER"
       inner_data:
         - mode: 1
@@ -1112,7 +1116,7 @@ ring_features:
     feature_135_ieg:
       feature_type: "GAP"
       name: null
-      feature_number: 135
+      feature_numbers: [135]
       inner_data:
         - mode: 1
           a: 74614.73965
@@ -1126,7 +1130,7 @@ ring_features:
     feature_144_oer:
       feature_type: "RINGLET"
       name: null
-      feature_number: 144
+      feature_numbers: [144]
       inner_data: null
       outer_data:
         - mode: 1
@@ -1144,7 +1148,7 @@ ring_features:
     feature_40_oer:
       feature_type: "RINGLET"
       name: null
-      feature_number: 40
+      feature_numbers: [40]
       inner_data: null
       outer_data:
         - mode: 1
@@ -1162,7 +1166,7 @@ ring_features:
     feature_39_oer:
       feature_type: "RINGLET"
       name: null
-      feature_number: 39
+      feature_numbers: [39]
       inner_data: null
       outer_data:
         - mode: 1
@@ -1249,7 +1253,7 @@ ring_features:
     feature_31_ier:
       feature_type: "RINGLET"
       name: null
-      feature_number: 31
+      feature_numbers: [31]
       inner_data:
         - mode: 1
           a: 85923.69993
@@ -1263,7 +1267,7 @@ ring_features:
     feature_30_ier:
       feature_type: "RINGLET"
       name: null
-      feature_number: 30
+      feature_numbers: [30]
       inner_data:
         - mode: 1
           a: 86373.17361
@@ -1277,7 +1281,7 @@ ring_features:
     feature_28_oer:
       feature_type: "RINGLET"
       name: null
-      feature_number: 28
+      feature_numbers: [28]
       inner_data: null
       outer_data:
         - mode: 1
@@ -1355,7 +1359,7 @@ ring_features:
     feature_77_oeg:
       feature_type: "GAP"
       name: null
-      feature_number: 77
+      feature_numbers: [77]
       inner_data: null
       outer_data:
         - mode: 1
@@ -1369,7 +1373,7 @@ ring_features:
     feature_74_oeg:
       feature_type: "GAP"
       name: null
-      feature_number: 74
+      feature_numbers: [74]
       inner_data: null
       outer_data:
         - mode: 1
@@ -1383,7 +1387,7 @@ ring_features:
     feature_73_oer:
       feature_type: "RINGLET"
       name: null
-      feature_number: 73
+      feature_numbers: [73]
       inner_data: null
       outer_data:
         - mode: 1
@@ -1397,7 +1401,7 @@ ring_features:
     feature_71_oeg:
       feature_type: "GAP"
       name: null
-      feature_number: 71
+      feature_numbers: [71]
       inner_data: null
       outer_data:
         - mode: 1

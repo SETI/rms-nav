@@ -35,7 +35,7 @@ class Inst(ABC, NavBase):
                   *,
                   config: Optional[Config] = None,
                   extfov_margin_vu: Optional[tuple[int, int]] = None,
-                  **kwargs: Optional[Any]) -> 'Inst':
+                  **kwargs: Optional[Any]) -> 'Obs':
         """Creates an instrument instance from an image file.
 
         Parameters:
@@ -46,7 +46,7 @@ class Inst(ABC, NavBase):
             **kwargs: Additional keyword arguments to pass to the instrument constructor.
 
         Returns:
-            A new instrument instance.
+            An Obs object containing the image data and metadata.
         """
         ...
 

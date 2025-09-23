@@ -8,31 +8,32 @@
 ################################################################################
 
 import argparse
-# import cProfile
+import cProfile
 # import datetime
-# import io
+import io
 # import logging
 # import os
-# import pstats
+import pstats
 # import subprocess
 from pathlib import Path
 import sys
 import time
 
 # Add the repository root to the path
+# XXX This should eventually go away
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from nav.dataset import DATASET_NAME_TO_CLASS_MAPPING
+from nav.dataset import dataset_name_to_class, dataset_name_to_inst_name
 from nav.config import DEFAULT_CONFIG
 from nav.config.logger import DEFAULT_LOGGER
-from nav.inst import INST_NAME_TO_CLASS_MAPPING
+from nav.inst import inst_name_to_class
 from nav.nav_master import NavMaster
 from nav.process import process_one_image
 
-# import tkinter
+import tkinter  # TODO Change to only install if needed
 # import traceback
 
-# import spicedb
+import spicedb
 
 # import nav.aws
 # import nav.config
@@ -49,7 +50,7 @@ from nav.process import process_one_image
 MAIN_LOG_NAME = "nav_main_offset"
 
 DATASET = None
-INST_ID = None
+DATASET_NAME = None
 
 
 ################################################################################
@@ -58,18 +59,23 @@ INST_ID = None
 #
 ################################################################################
 
-def parse_args(command_list):
+def parse_args(command_list: list[str]) -> argparse.Namespace:
     global DATASET
-    global DATASET_ID
+    global DATASET_NAME
 
-    DATASET_ID = command_list[0]
+    if len(command_list) < 1:
+        print('Usage: python nav_main_offset.py <dataset_name> [args]')
+        sys.exit(1)
 
-    if DATASET_ID.upper() not in DATASET_NAME_TO_CLASS_MAPPING:
-        print(f'Unknown dataset "{DATASET_ID}"')
+    DATASET_NAME = command_list[0].lower()
+
+    try:
+        DATASET = dataset_name_to_class(DATASET_NAME)()
+    except KeyError:
+        print(f'Unknown dataset "{DATASET_NAME}"')
         print(f'Valid datasets are: {", ".join(DATASET_NAME_TO_CLASS_MAPPING.keys())}')
-        exit(1)
-
-    DATASET = DATASET_NAME_TO_CLASS_MAPPING[DATASET_ID.upper()]()
+        print('Usage: python nav_main_offset.py <dataset_name> [args]')
+        sys.exit(1)
 
     cmdparser = argparse.ArgumentParser(
         description="Navigation & Backplane Main Interface for Offsets",
@@ -180,6 +186,9 @@ def parse_args(command_list):
     output_group.add_argument(
         "--show-star-streaks", action=argparse.BooleanOptionalAction, default=False,
         help="Show star streaks in the overlay and PNG files")
+    output_group.add_argument(
+        "--dry-run", action="store_true", default=False,
+        help="Don't actually process any images or write any output files")
 
     # Add all the arguments related to selecting files
     DATASET.add_selection_arguments(cmdparser)
@@ -505,7 +514,7 @@ def main():
         arguments.write_overlay_file = False
         arguments.write_png_file = False
 
-    if arguments.profile and arguments.max_subprocesses == 0:
+    if arguments.profile:  # and arguments.max_subprocesses == 0:
         # Only do image offset profiling if we"re going to do the actual work in
         # this process
         pr = cProfile.Profile()
@@ -718,15 +727,17 @@ def main():
         # nav.file.log_arguments(arguments, main_logger.info)
         # main_logger.info("")
     if True:
-        if DATASET_ID.upper() not in INST_NAME_TO_CLASS_MAPPING:
-            print(f'Unknown dataset "{DATASET_ID}"')
-            print(f'Valid datasets are: {", ".join(INST_NAME_TO_CLASS_MAPPING.keys())}')
-            exit(1)
+        try:
+            INST_NAME = dataset_name_to_inst_name(DATASET_NAME)
+        except KeyError:
+            print(f'Unknown dataset "{DATASET_NAME}"')
+            print(f'Valid datasets are: {", ".join(dataset_name_to_inst_name.keys())}')
+            sys.exit(1)
 
-        inst_class = INST_NAME_TO_CLASS_MAPPING[DATASET_ID.upper()]
+        inst_class = inst_name_to_class(INST_NAME)
 
         for label_path, image_path in DATASET.yield_filenames_from_arguments(arguments):
-            if arguments.show_image_list_only:
+            if arguments.dry_run:
                 main_logger.info("Would process: %s", image_path)
                 continue
 

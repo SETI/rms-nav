@@ -21,4 +21,3 @@ sphinx
 sphinxcontrib-mermaid
 sphinxcontrib-napoleon
 sphinx-rtd-theme
-typing

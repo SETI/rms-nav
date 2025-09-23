@@ -63,7 +63,6 @@ class ObsSnapshot(Obs, Snapshot):
             if dist < closest_dist:
                 closest_planet = planet
                 closest_dist = dist
-        assert closest_planet is not None  # This is really just for type checking
 
         self._closest_planet = closest_planet
 
@@ -100,7 +99,7 @@ class ObsSnapshot(Obs, Snapshot):
             A boolean array of False values with the same shape as the extended FOV.
         """
 
-        return np.zeros(self.extdata.shape, dtype=np.bool_)
+        return np.zeros(self.extdata.shape, dtype=bool)
 
     def clip_fov(self,
                  u: int,

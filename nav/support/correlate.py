@@ -597,7 +597,7 @@ def find_correlation_and_offset(image: NDArrayFloatType,
     # We dramatically increase the absolute values in the image and model because
     # otherwise very sparse and very dim images can just turn out as zero after
     # correlation.
-    image = image * 1e10
+    image = image * 1e10   # TODO Remove hard-coded value
     model = model * 1e10
     ret_list = []
 

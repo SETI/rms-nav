@@ -1,6 +1,7 @@
 from typing import Any
 
 from .dataset_pds3 import DataSetPDS3
+from nav.support.misc import safe_lstrip_zero
 
 
 class DataSetPDS3GalileoSSI(DataSetPDS3):
@@ -19,6 +20,9 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
         """
 
         parts = filespec.split('/')
+        if not (2 <= len(parts) <= 3):
+            raise ValueError(f'Bad Primary File Spec "{filespec}" - expected 2 or 3 '
+                             'directory levels')
         if parts[0].upper() in ('REDO', 'RAW_CAL', 'VENUS', 'EARTH', 'MOON',
                                 'GASPRA', 'IDA'):
             img_name = parts[1]
@@ -30,10 +34,10 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
                                   'J0'):
             img_name = parts[2]
         else:
-            raise ValueError(f'Bad Primary File Spec "{filespec}"')
+            raise ValueError(f'Bad Primary File Spec "{filespec}" - bad target directory')
         if not img_name.endswith('.IMG'):
             return None
-        img_name = img_name.rsplit('.')[0]
+        img_name = img_name.rsplit('.', maxsplit=1)[0]
         return img_name
 
     @staticmethod
@@ -53,7 +57,7 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
         if len(img_name) != 12 or img_name[0] != 'C' or img_name[11] not in 'RS':
             return False
         try:
-            _ = int(img_name[1:11].lstrip('0'))
+            _ = int(safe_lstrip_zero(img_name[1:11]))
         except ValueError:
             return False
 

@@ -26,7 +26,7 @@ from nav.support.types import NDArrayBoolType, NDArrayFloatType
 from .nav_model import NavModel
 
 # Sometimes the bounding box returned by "inventory" is not quite big enough
-BODIES_POSITION_SLOP_FRAC = 0.05
+BODIES_POSITION_SLOP_FRAC = 0.05  # TODO Move to config
 
 
 class NavModelBody(NavModel):
@@ -75,7 +75,7 @@ class NavModelBody(NavModel):
         metadata['end_time'] = None
         metadata['elapsed_time'] = None
 
-        self._model = None
+        self._model_img = None
         self._model_mask = None
         self._metadata = metadata
         self._annotations = None
@@ -88,7 +88,6 @@ class NavModelBody(NavModel):
 
         metadata['end_time'] = end_time = now_dt()
         metadata['elapsed_time'] = dt_delta_str(start_time, end_time)
-        return
 
     def _create_model(self,
                       always_create_model: bool,
@@ -410,7 +409,7 @@ class NavModelBody(NavModel):
             self._logger.debug('Looking only at back side - making a faint glow')
             # Make a slight glow even on the back side
             restr_model = np.zeros(restr_body_mask_valid.shape)
-            restr_model[restr_body_mask_valid] = 0.01  # TODO XXX
+            restr_model[restr_body_mask_valid] = 0.01  # TODO Move to config
         else:
             self._logger.debug('Making Lambert model')
 
@@ -427,9 +426,9 @@ class NavModelBody(NavModel):
                 #     # only for making the pretty offset PNG.
                 #     restr_model = restr_model+filt.maximum_filter(limb_mask, 3)
                 # Make a slight glow even past the terminator
-                restr_model = restr_model+0.05  # XXX
+                restr_model = restr_model+0.05  # TODO Move to config
             else:
-                restr_model = restr_body_mask_valid.as_float()
+                restr_model = restr_body_mask_valid.astype(float)
 
             if (config.use_albedo and
                 body_name in config.geometric_albedo):
@@ -518,9 +517,14 @@ class NavModelBody(NavModel):
 
         v_center_extfov_clipped = np.clip(v_center_extfov, 0, body_mask.shape[0]-1)
         u_center_extfov_clipped = np.clip(u_center_extfov, 0, body_mask.shape[1]-1)
-        body_mask_u_min = int(np.argmax(body_mask[v_center_extfov_clipped]))
-        body_mask_u_max = int((body_mask.shape[1] -
-                              np.argmax(body_mask[v_center_extfov_clipped, ::-1]) - 1))
+        if not body_mask[v_center_extfov_clipped].any():
+            # Handle case where no body pixels exist at center row
+            body_mask_u_min = 0
+            body_mask_u_max = body_mask.shape[1] - 1
+        else:
+            body_mask_u_min = int(np.argmax(body_mask[v_center_extfov_clipped]))
+            body_mask_u_max = int((body_mask.shape[1] -
+                                  np.argmax(body_mask[v_center_extfov_clipped, ::-1]) - 1))
         body_mask_v_min = int(np.argmax(body_mask[:, u_center_extfov_clipped]))
         body_mask_v_max = int((body_mask.shape[0] -
                               np.argmax(body_mask[::-1, u_center_extfov_clipped]) - 1))

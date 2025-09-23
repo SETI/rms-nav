@@ -50,6 +50,7 @@ class InstGalileoSSI(Inst):
 
         if extfov_margin_vu is None:
             if isinstance(config._config_dict['galileo_ssi']['extfov_margin_vu'], dict):
+                # TODO Do this a better way
                 extfov_margin_vu = config._config_dict['galileo_ssi']['extfov_margin_vu'][
                     obs.data.shape[0]]
             else:

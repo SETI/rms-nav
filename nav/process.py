@@ -26,9 +26,9 @@ def process_one_image(inst_class: Inst,
             s = inst_class.from_file(image_path)
         except OSError as e:
             if 'SPICE(CKINSUFFDATA)' in str(e) or 'SPICE(SPKINSUFFDATA)' in str(e):
-                logger.info(f'No SPICE kernel available for "{image_path}"')
+                logger.error(f'No SPICE kernel available for "{image_path}"')
                 return False
-            logger.info(f'Error reading image "{image_path}": {e}')
+            logger.error(f'Error reading image "{image_path}": {e}')
             return False
 
         nm = NavMaster(s)
@@ -36,7 +36,7 @@ def process_one_image(inst_class: Inst,
 
         nm.navigate()
 
-        nm.create_overlay()
+        _ = nm.create_overlay()
 
         return True
 
@@ -113,7 +113,7 @@ def process_one_image(inst_class: Inst,
     #         image_log_path_local_cleanup = image_log_path_local
     #     else:
     #         if os.path.exists(image_log_path_local):
-    #             os.remove(image_log_path_local) # XXX Need option to not do this
+    #             os.remove(image_log_path_local) # TODO Need option to not do this
 
     #     image_log_filehandler = nav.logging_setup.add_file_handler(
     #                                 image_log_path_local, image_loglevel)

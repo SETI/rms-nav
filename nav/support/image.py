@@ -105,7 +105,7 @@ def unpad_array(array: NDArrayType[NPType],
     """
 
     if array.ndim != len(margin):
-        raise ValueError(f'Array ({array.ndim}) and offset ({len(margin)}) must have '
+        raise ValueError(f'Array ({array.ndim}) and margin ({len(margin)}) must have '
                          'same number of dimensions')
 
     if all(x == 0 for x in margin):

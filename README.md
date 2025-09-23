@@ -1,3 +1,5 @@
+# RMS-NAV
+
 [![GitHub release; latest by date](https://img.shields.io/github/v/release/SETI/rms-nav)](https://github.com/SETI/rms-nav/releases)
 [![GitHub Release Date](https://img.shields.io/github/release-date/SETI/rms-nav)](https://github.com/SETI/rms-nav/releases)
 [![Test Status](https://img.shields.io/github/actions/workflow/status/SETI/rms-nav/run-tests.yml?branch=main)](https://github.com/SETI/rms-nav/actions)
@@ -43,18 +45,21 @@ RMS-NAV is a comprehensive navigation system designed for spacecraft imagery pro
 ## Setup
 
 1. Clone the repository:
+
    ```bash
-   git clone https://github.com/yourusername/rms-nav.git
+   git clone https://github.com/SETI/rms-nav.git
    cd rms-nav
    ```
 
 2. Create and activate a virtual environment (recommended):
+
    ```bash
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
 3. Install the required packages:
+
    ```bash
    pip install -r requirements.txt
    ```
@@ -62,12 +67,13 @@ RMS-NAV is a comprehensive navigation system designed for spacecraft imagery pro
 4. Set up SPICE kernels:
    - Download the required SPICE kernels for your mission
    - Set the `SPICE_PATH` environment variable to point to your kernels directory:
+
      ```bash
      export SPICE_PATH=/path/to/your/spice/kernels
      ```
 
 > **Note**: To fix mypy operability with editable pip installs:
-> ```
+> ```bash
 > export SETUPTOOLS_ENABLE_FEATURES="legacy-editable"
 > ```
 

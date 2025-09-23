@@ -29,5 +29,3 @@ class NavModelRings(NavModel):
         """
 
         super().__init__(obs, logger_name='NavModelRings', **kwargs)
-
-        self._obs = obs

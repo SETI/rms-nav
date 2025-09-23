@@ -5,22 +5,27 @@ Thank you for your interest in contributing to RMS-NAV! This document provides g
 ## Code of Conduct
 
 We expect all contributors to follow our Code of Conduct, which ensures a welcoming and inclusive environment for everyone.
+See CODE_OF_CONDUCT.md.
 
 ## Getting Started
 
 1. Fork the repository on GitHub
 2. Clone your fork locally:
+
    ```bash
    git clone https://github.com/your-username/rms-nav.git
    cd rms-nav
    ```
 3. Create a virtual environment and install dependencies:
+
    ```bash
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    pip install -r requirements.txt
    ```
+
 4. Set up pre-commit hooks:
+
    ```bash
    pre-commit install
    ```
@@ -28,25 +33,33 @@ We expect all contributors to follow our Code of Conduct, which ensures a welcom
 ## Development Workflow
 
 1. Create a new branch for your feature or bugfix:
+
    ```bash
    git checkout -b feature/your-feature-name
    # or
    git checkout -b bugfix/issue-number
    ```
+
 2. Make your changes, following our coding standards
 3. Write or update tests as necessary
 4. Run the tests to ensure they pass:
+
    ```bash
    pytest
    ```
+
 5. Commit your changes with a descriptive message:
+
    ```bash
    git commit -m "Add feature: description of your changes"
    ```
+
 6. Push your branch to your fork:
+
    ```bash
    git push origin feature/your-feature-name
    ```
+
 7. Open a Pull Request on GitHub
 
 ## Coding Standards
