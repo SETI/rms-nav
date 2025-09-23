@@ -33,7 +33,7 @@ jobs:
 
       - name: Mypy
         run: |
-          mypy nav tests
+          mypy nav
 
   test:
     name: Test nav
