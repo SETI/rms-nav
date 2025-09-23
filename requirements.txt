@@ -3,19 +3,19 @@ flake8
 matplotlib
 mypy
 myst-parser
-numpy
+numpy>=2.3.0
 pyinstrument  # For visualizing profiles
 pytest
 pytest-cov
 pytest-profiling
-rms-filecache
+rms-filecache>=3.0.0
 rms-imgdisp
-rms-pdslogger
-rms-pdstable
-rms-pdstemplate
+rms-pdslogger>=3.2.1
+rms-pdstable>=1.0.1
+rms-pdstemplate>=2.3.0
 rms-psfmodel
-rms-oops
-rms-starcat
+rms-oops>=0.1.3
+rms-starcat>=1.0.1
 ruamel.yaml
 sphinx
 sphinxcontrib-mermaid
