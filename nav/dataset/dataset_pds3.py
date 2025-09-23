@@ -35,6 +35,7 @@ class DataSetPDS3(DataSet):
             ValueError: If pds3_holdings_dir is None and PDS3_HOLDINGS_DIR environment variable
                 is not set.
         """
+
         super().__init__(**kwargs)
 
         if index_filecache is None:
@@ -121,6 +122,7 @@ class DataSetPDS3(DataSet):
         Raises:
             ValueError: If the image filename format is invalid.
         """
+
         if not img_filename.upper().endswith(('.LBL', '.IMG')):
             raise ValueError(f'Invalid image filename "{img_filename}"')
         return img_filename
@@ -218,7 +220,10 @@ class DataSetPDS3(DataSet):
         Parameters:
             arguments: The parsed arguments to validate.
         """
-        for img_name in flatten_list(arguments.img_name):
+
+        # For some reason mypy can't see the img_name field
+        for img_name in flatten_list(arguments.img_name):  # type: ignore
+
             if not self._img_name_valid(img_name):
                 raise argparse.ArgumentTypeError(f'Invalid image name {img_name}')
 
@@ -394,7 +399,6 @@ class DataSetPDS3(DataSet):
 
         Yields:
             Paths to the selected files as (label, image) tuples.
-
         """
 
         retrieve_files = kwargs.get('retrieve_files', True)
@@ -690,4 +694,5 @@ class DataSetPDS3(DataSet):
         Returns:
             True if the image should be processed, False otherwise.
         """
+
         return True
