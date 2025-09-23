@@ -3,7 +3,7 @@ flake8
 matplotlib
 mypy
 myst-parser
-numpy>=2.3.0
+numpy>=2.2.0
 pyinstrument  # For visualizing profiles
 pytest
 pytest-cov
