@@ -5,6 +5,7 @@ import multiprocessing
 import sys
 from typing import Any, Optional
 
+import filecache
 from filecache import FCPath
 import matplotlib.pyplot as plt
 import numpy as np
@@ -466,6 +467,8 @@ def main(command_list):
     args = parser.parse_args(command_list[1:])
     DEFAULT_CONFIG.read_config()
     DEFAULT_LOGGER.set_level('DEBUG' if args.debug else 'WARNING')
+    if args.debug:
+        filecache.set_easy_logger()
 
     with open(args.config_file, 'r') as f:
         twist_config = json.load(f)
