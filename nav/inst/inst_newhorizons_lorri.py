@@ -45,7 +45,9 @@ class InstNewHorizonsLORRI(Inst):
         logger = DEFAULT_LOGGER
 
         logger.debug(f'Reading New Horizons LORRI image {path}')
-        obs = oops.hosts.newhorizons.lorri.from_file(path)
+        # TODO calibration=False is required because the hosts module can't find things like
+        # the distance from the Sun to M7. How do we handle this?
+        obs = oops.hosts.newhorizons.lorri.from_file(path, calibration=False)
 
         # TODO Calibrate once oops.hosts is fixed.
 

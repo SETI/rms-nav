@@ -1,6 +1,6 @@
 from typing import Any, Optional, Sequence, cast
 
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 from oops import Observation
 import numpy as np
 
@@ -28,12 +28,18 @@ class NavMaster(NavBase):
     def __init__(self,
                  obs: Observation,
                  *,
+                 nav_models: Optional[list[str]] = None,
+                 nav_techniques: Optional[list[str]] = None,
                  config: Optional[Config] = None,
                  logger_name: Optional[str] = None) -> None:
         """Initializes a navigation master object for an observation.
 
         Parameters:
             obs: The observation object containing image and metadata.
+            nav_models: Optional list of navigation models to use. If None, uses all models.
+                Each entry must be one of 'stars', 'bodies', 'rings', 'titan'.
+            nav_techniques: Optional list of navigation techniques to use. If None, uses all
+                techniques. Each entry must be one of 'stars', 'all_models'.
             config: Optional configuration object. If None, uses the default configuration.
             logger_name: Optional name for the logger. If None, uses the class name.
         """
@@ -41,6 +47,14 @@ class NavMaster(NavBase):
         super().__init__(config=config, logger_name=logger_name)
 
         self._obs = obs
+        if nav_models is not None and not np.all(
+                x in ['stars', 'bodies', 'rings', 'titan'] for x in nav_models):
+            raise ValueError(f'Invalid nav_models: {nav_models}')
+        self._nav_models_to_use = nav_models
+        if nav_techniques is not None and not np.all(
+                x in ['stars', 'all_models'] for x in nav_techniques):
+            raise ValueError(f'Invalid nav_techniques: {nav_techniques}')
+        self._nav_techniques_to_use = nav_techniques
         self._final_offset: tuple[float, float] | None = None
         self._final_confidence: float | None = None
         self._offsets: dict[str, Any] = {}  # TODO Type
@@ -116,7 +130,12 @@ class NavMaster(NavBase):
         If star models have already been computed, does nothing.
         """
 
+        if self._nav_models_to_use is not None and 'stars' not in self._nav_models_to_use:
+            self._star_models = []
+            return
+
         if self._star_models is not None:
+            # Keep cached version
             return
 
         stars_model = NavModelStars(self._obs)
@@ -134,7 +153,12 @@ class NavMaster(NavBase):
         computed, does nothing.
         """
 
+        if self._nav_models_to_use is not None and 'bodies' not in self._nav_models_to_use:
+            self._body_models = []
+            return
+
         if self._body_models is not None:
+            # Keep cached version
             return
 
         obs = self._obs
@@ -190,8 +214,14 @@ class NavMaster(NavBase):
         If ring models have already been computed, does nothing.
         """
 
-        if self._ring_models is not None:
+        if self._nav_models_to_use is not None and 'rings' not in self._nav_models_to_use:
+            self._ring_models = []
             return
+
+        if self._ring_models is not None:
+            # Keep cached version
+            return
+
         self._ring_models = []
         # TODO Ring models
 
@@ -201,8 +231,14 @@ class NavMaster(NavBase):
         If Titan models have already been computed, does nothing.
         """
 
-        if self._titan_models is not None:
+        if self._nav_models_to_use is not None and 'titan' not in self._nav_models_to_use:
+            self._titan_models = []
             return
+
+        if self._titan_models is not None:
+            # Keep cached version
+            return
+
         self._titan_models = []
         # TODO Titan models
 
@@ -226,6 +262,7 @@ class NavMaster(NavBase):
         """
 
         if self._combined_model is not None:
+            # Keep cached version
             return
 
         # Create a single model which, for each pixel, has the element from the model with
@@ -271,23 +308,32 @@ class NavMaster(NavBase):
         navigation techniques. Determines the final offset based on the results.
         """
 
+        prevailing_confidence = 0
+        self._final_offset = None
+
         self.compute_all_models()
 
-        nav_stars = NavTechniqueStars(self)
-        nav_stars.navigate()
-        self._offsets['stars'] = nav_stars.offset
+        # TODO If both nav_models and nav_techniques are limited to stars, then we
+        # essentially navigate using stars twice.
 
-        nav_all = NavTechniqueAllModels(self)
-        nav_all.navigate()
-        self._offsets['all_models'] = nav_all.offset
+        if self._nav_techniques_to_use is None or 'stars' in self._nav_techniques_to_use:
+            nav_stars = NavTechniqueStars(self)
+            nav_stars.navigate()
+            self._offsets['stars'] = nav_stars.offset
+            self._final_offset = nav_stars.offset
+            prevailing_confidence = nav_stars.confidence
+        else:
+            self._offsets['stars'] = None
 
-        prevailing_confidence = nav_stars.confidence
-        self._final_offset = nav_stars.offset
-
-        if (prevailing_confidence is None or
-            (nav_all.confidence is not None and nav_all.confidence > prevailing_confidence)):
-            prevailing_confidence = nav_all.confidence
-            self._final_offset = nav_all.offset
+        if self._nav_techniques_to_use is None or 'all_models' in self._nav_techniques_to_use:
+            nav_all = NavTechniqueAllModels(self)
+            nav_all.navigate()
+            self._offsets['all_models'] = nav_all.offset
+            if nav_all.confidence is not None and nav_all.confidence > prevailing_confidence:
+                prevailing_confidence = nav_all.confidence
+                self._final_offset = nav_all.offset
+        else:
+            self._offsets['all_models'] = None
 
         self._final_confidence = prevailing_confidence
 
@@ -368,8 +414,8 @@ class NavMaster(NavBase):
         # fn = Path(obs.basename).stem
         # im.save(f'/home/rfrench/{fn}.png')
 
-        plt.imshow(res)
-        plt.show()
+        # plt.imshow(res)
+        # plt.show()
 
         # model_mask = body_model.model_mask
         # plt.imshow(model_mask)

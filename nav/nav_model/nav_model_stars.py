@@ -2,7 +2,7 @@
 
 # import logging
 
-# import copy
+import copy
 # import os
 # import time
 
@@ -198,6 +198,11 @@ class NavModelStars(NavModel):
                     **kwargs))
 
         star_list1 += ucac_star_list
+
+        # This copy is required because we mutate the star object and if we ever
+        # reuse the same star object (like trying multiple navigations), we want
+        # it to start fresh.
+        star_list1 = [copy.deepcopy(star) for star in star_list1]
 
         # Fake the temperature if it's not known, and eliminate stars we just
         # don't want to deal with.
