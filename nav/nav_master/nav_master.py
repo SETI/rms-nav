@@ -47,11 +47,11 @@ class NavMaster(NavBase):
         super().__init__(config=config, logger_name=logger_name)
 
         self._obs = obs
-        if nav_models is not None and not np.all(
+        if nav_models is not None and not np.all(  # type: ignore
                 x in ['stars', 'bodies', 'rings', 'titan'] for x in nav_models):
             raise ValueError(f'Invalid nav_models: {nav_models}')
         self._nav_models_to_use = nav_models
-        if nav_techniques is not None and not np.all(
+        if nav_techniques is not None and not np.all(  # type: ignore
                 x in ['stars', 'all_models'] for x in nav_techniques):
             raise ValueError(f'Invalid nav_techniques: {nav_techniques}')
         self._nav_techniques_to_use = nav_techniques
@@ -308,7 +308,7 @@ class NavMaster(NavBase):
         navigation techniques. Determines the final offset based on the results.
         """
 
-        prevailing_confidence = 0
+        prevailing_confidence = 0.
         self._final_offset = None
 
         self.compute_all_models()
@@ -321,6 +321,8 @@ class NavMaster(NavBase):
             nav_stars.navigate()
             self._offsets['stars'] = nav_stars.offset
             self._final_offset = nav_stars.offset
+            if nav_stars.confidence is None:
+                raise ValueError('Star navigation technique confidence is None')
             prevailing_confidence = nav_stars.confidence
         else:
             self._offsets['stars'] = None
@@ -329,7 +331,9 @@ class NavMaster(NavBase):
             nav_all = NavTechniqueAllModels(self)
             nav_all.navigate()
             self._offsets['all_models'] = nav_all.offset
-            if nav_all.confidence is not None and nav_all.confidence > prevailing_confidence:
+            if nav_all.confidence is None:
+                raise ValueError('All models navigation technique confidence is None')
+            if nav_all.confidence > prevailing_confidence:
                 prevailing_confidence = nav_all.confidence
                 self._final_offset = nav_all.offset
         else:
