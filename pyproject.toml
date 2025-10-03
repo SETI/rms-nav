@@ -45,13 +45,13 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://github.com/SETI/rms-nav"
-Documentation = "https://rms-starcat.readthedocs.io/en/latest"
+Documentation = "https://rms-nav.readthedocs.io/en/latest"
 Repository = "https://github.com/SETI/rms-nav"
 Source = "https://github.com/SETI/rms-nav"
 Issues = "https://github.com/SETI/rms-nav/issues"
 
 [tool.setuptools]
-packages = ["nav"]
+packages = {find = {include = ["nav*"]}}
 
 [tool.setuptools.package-data]
 "nav" = ["py.typed"]

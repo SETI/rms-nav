@@ -139,7 +139,7 @@ def find_error_one_twist(obs: ObsSnapshot,
                          show_plot: bool = False) -> tuple[float, tuple[float, float],
                                                            tuple[float, float], list[float],
                                                            list[float], list[float], list[float],
-                                                           float, NavMaster]:
+                                                           float, NavMaster] | None:
     """Analyze one trial twist and return the error and related information.
 
     Parameters:
@@ -274,7 +274,10 @@ def find_error_one_twist(obs: ObsSnapshot,
                          (2 * np.pi))
     angle_arr = (np.arctan2(v_diff_arr, u_diff_arr) + np.pi) % (2 * np.pi)
     # Diff the angles always getting a number between -pi and pi
-    angle_diff_arr = angle_arr - angle_arr_perfect
+    angle_diff_arr = np.arctan2(
+        np.sin(angle_arr - angle_arr_perfect),
+        np.cos(angle_arr - angle_arr_perfect)
+    )    # Diff the angles always getting a number between -pi and pi
     # Compute the final error as a combination of the magnitude of the error vector
     # and the difference in the angle. Normalize for the number of stars.
     error = np.sqrt(np.sum((mag_arr*angle_diff_arr)**2)) / len(mag_arr)
@@ -347,7 +350,7 @@ def optimize_one_image(url: str,
                        verbose: bool = False,
                        show_plots: bool = False
                        ) -> tuple[str, float, float, tuple[float, float],
-                                  tuple[float, float], float]:
+                                  tuple[float, float], float] | None:
     """Optimize the twist for one image given star field data.
 
     Parameters:
@@ -393,7 +396,7 @@ def optimize_one_image(url: str,
 
             best_twist = None
             best_error = None
-            best_offset = None
+            best_ret = None
             for twist in np.arange(min_twist, max_twist+delta_twist/2, delta_twist):
                 ret = find_error_one_twist(orig_obs, img_name, twist_config=twist_config,
                                            twist=twist, verbose=verbose, show_plot=show_plots)
@@ -407,7 +410,7 @@ def optimize_one_image(url: str,
                 if best_error is None or error < best_error:
                     best_error = error
                     best_twist = twist
-                    best_offset = new_offset
+                    best_ret = ret
 
             if best_twist is None:
                 if verbose:
@@ -421,29 +424,33 @@ def optimize_one_image(url: str,
             min_twist = best_twist - delta_twist*2
             max_twist = best_twist + delta_twist*2
 
+        (best_error, best_offset, best_new_offset,
+         best_u_arr, best_v_arr, best_u_diff_arr, best_v_diff_arr,
+         best_mag_perc, best_nm) = best_ret
+
         print()
         print()
         log_fp.write('\n\n')
 
         corner_dist = np.sqrt((orig_obs.data.shape[0]/2)**2 + (orig_obs.data.shape[1]/2)**2)
-        rotation_error = np.sin(np.radians(twist)) * corner_dist
+        rotation_error = np.sin(np.radians(best_twist)) * corner_dist
         print(f'{img_name:15s} FINAL Best Twist: {best_twist:8.5f} deg '
               f'({rotation_error:9.5f} corner pixels)'
-              f'   Offset: {best_offset[0]:8.3f}, {best_offset[1]:8.3f}   Error: {best_error:9.5f}')
+              f'   Offset: {best_new_offset[0]:8.3f}, {best_new_offset[1]:8.3f}   Error: {best_error:9.5f}')
         log_fp.write(f'FINAL,{img_name},{best_twist:.5f},{rotation_error:.5f},'
-                     f'{best_offset[0]:.3f},{best_offset[1]:.3f},{best_error:.5f}\n')
+                     f'{best_new_offset[0]:.3f},{best_new_offset[1]:.3f},{best_error:.5f}\n')
         log_fp.flush()
 
         plot_path = plot_dir / f'{img_name}.png'
-        plot_with_arrows(u_arr=u_arr, v_arr=v_arr, u_diff_arr=u_diff_arr, v_diff_arr=v_diff_arr,
-                         mag_perc=mag_perc, nm=nm, twist=best_twist, offset=best_offset,
+        plot_with_arrows(u_arr=best_u_arr, v_arr=best_v_arr, u_diff_arr=best_u_diff_arr, v_diff_arr=best_v_diff_arr,
+                         mag_perc=best_mag_perc, nm=best_nm, twist=best_twist, offset=best_new_offset,
                          img_name=img_name, plot_path=plot_path)
         if show_plots:
-            plot_with_arrows(u_arr=u_arr, v_arr=v_arr, u_diff_arr=u_diff_arr, v_diff_arr=v_diff_arr,
-                             mag_perc=mag_perc, nm=nm, twist=best_twist, offset=best_offset,
+            plot_with_arrows(u_arr=best_u_arr, v_arr=best_v_arr, u_diff_arr=best_u_diff_arr, v_diff_arr=best_v_diff_arr,
+                             mag_perc=best_mag_perc, nm=best_nm, twist=best_twist, offset=best_new_offset,
                              img_name=img_name)
 
-        return url, best_twist, rotation_error, best_offset, best_offset, best_error
+        return url, best_twist, rotation_error, best_offset, best_new_offset, best_error
 
 
 def main(command_list):
