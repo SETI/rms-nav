@@ -3,7 +3,7 @@ from functools import partial
 import json
 import multiprocessing
 import sys
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 import filecache
 from filecache import FCPath
@@ -17,44 +17,6 @@ from nav.config import DEFAULT_CONFIG, DEFAULT_LOGGER
 from nav.inst import inst_name_to_class
 from nav.nav_master import NavMaster
 from nav.obs import ObsSnapshot
-
-
-
-# VGISS_NAC = {
-#     'urls': [
-#         '${PDS3_HOLDINGS_DIR}/volumes/VGISS_5xxx/VGISS_5209/DATA/C20326XX/C2032609_GEOMED.IMG',
-#         '${PDS3_HOLDINGS_DIR}/volumes/VGISS_6xxx/VGISS_6111/DATA/C34796XX/C3479608_GEOMED.IMG',
-#         '${PDS3_HOLDINGS_DIR}/volumes/VGISS_8xxx/VGISS_8210/DATA/C12050XX/C1205043_GEOMED.IMG',
-#         '${PDS3_HOLDINGS_DIR}/volumes/VGISS_8xxx/VGISS_8210/DATA/C12051XX/C1205117_GEOMED.IMG',
-
-#     ],
-#     'inst_id': 'vgiss',
-#     'nstars': 15,
-#     'psf_size': (15, 15),
-#     'perc': 80,
-#     'clip': 40,
-#     'peak_factor': 2,
-#     'min_twist': -.4,
-#     'max_twist': .4,
-#     'peak_factor': 2,
-# }
-
-# VGISS_WAC = {
-#     'urls': [
-#         '${PDS3_HOLDINGS_DIR}/volumes/VGISS_8xxx/VGISS_8210/DATA/C12051XX/C1205111_GEOMED.IMG',
-#         '${PDS3_HOLDINGS_DIR}/volumes/VGISS_5xxx/VGISS_5209/DATA/C20326XX/C2032609_GEOMED.IMG',
-#         '${PDS3_HOLDINGS_DIR}/volumes/VGISS_8xxx/VGISS_8210/DATA/C12050XX/C1205037_GEOMED.IMG',
-
-#     ],
-#     'inst_id': 'vgiss',
-#     'nstars': 15,
-#     'psf_size': (15, 15),
-#     'perc': 100,
-#     'clip': 40,
-#     'peak_factor': 2,
-#     'min_twist': .2,
-#     'max_twist': .6,
-# }
 
 
 def _analyze_star(star: Star,
@@ -137,8 +99,8 @@ def find_error_one_twist(obs: ObsSnapshot,
                          twist: float,
                          verbose: bool = False,
                          show_plot: bool = False) -> tuple[float, tuple[float, float],
-                                                           tuple[float, float], list[float],
-                                                           list[float], list[float], list[float],
+                                                           tuple[float, float], np.ndarray,
+                                                           np.ndarray, np.ndarray, np.ndarray,
                                                            float, NavMaster] | None:
     """Analyze one trial twist and return the error and related information.
 
@@ -152,17 +114,17 @@ def find_error_one_twist(obs: ObsSnapshot,
         image_margin_pixels: The margin pixels of the image.
         verbose: Whether to print verbose output.
 
-    Returns: XXX
+    Returns:
         A tuple containing:
 
             - the error
-            - the original offset
-            - the best offset
-            - the list of u positions
-            - the list of v positions
-            - the list of u differences
-            - the list of v differences
-            - the percentile of the error
+            - the original offset computed by navigation
+            - the best offset after applying the twist
+            - the list of u positions of the stars
+            - the list of v positions of the stars
+            - the list of u differences between predicted and actual positions
+            - the list of v differences between predicted and actual positions
+            - the magnitude of a star's error used as a threshold for computing the error
             - the navigated NavMaster object
     """
 
@@ -200,7 +162,7 @@ def find_error_one_twist(obs: ObsSnapshot,
     # position, slightly blurred by motion, overexposed, etc.
     psf = GaussianPSF(sigma=2.0)
 
-    uv_list = []
+    uv_list: list[tuple[float, float, float, float]] = []
 
     for star in star_list:
         u = star.u - offset[1]
@@ -229,7 +191,7 @@ def find_error_one_twist(obs: ObsSnapshot,
 
     uv_list = []
 
-    new_offset = (offset[0] - median_diff_v, offset[1] - median_diff_u)
+    new_offset = (float(offset[0] - median_diff_v), float(offset[1] - median_diff_u))
 
     if verbose:
         print(f'Adjusted offset: {new_offset[1]}, {new_offset[0]}')
@@ -329,6 +291,7 @@ def plot_with_arrows(*,
     for u, v, u_diff, v_diff in zip(u_arr, v_arr, u_diff_arr, v_diff_arr):
         mag = np.sqrt(u_diff**2 + v_diff**2)
         if mag <= mag_perc:
+            # We multiply by 100 to make the arrows visible
             plt.quiver(u, v, u_diff*100, v_diff*100,
                        angles='xy', scale_units='xy', scale=1,
                        color='#80ff80', alpha=0.6)
@@ -363,9 +326,15 @@ def optimize_one_image(url: str,
         show_plots: Whether to show plots interactively during optimization. Used
             for debugging.
 
-    Returns: XXX
-        A tuple containing the image URL, the best twist, the rotation error, the original offset,
-        the best offset, and the best error.
+    Returns:
+        A tuple containing:
+
+            - the image URL
+            - the best twist
+            - the rotation error
+            - the offset computed by navigation
+            - the offset after applying the best twist
+            - the error after applying the best twist
     """
 
     img_name = url.split('/')[-1].split('.')[0]
@@ -378,8 +347,8 @@ def optimize_one_image(url: str,
         try:
             # fast_distortion is supported by some instrument classes and ignored
             # by others
-            orig_obs = inst_class.from_file(FCPath(url).expandvars(),
-                                            fast_distortion=True)
+            orig_obs = cast(ObsSnapshot, inst_class.from_file(FCPath(url).expandvars(),
+                                                              fast_distortion=True))
         except Exception as e:
             print(f'Error reading image {url}: {e}')
             log_fp.write(f'Error reading image {url}: {e}\n')
@@ -409,7 +378,7 @@ def optimize_one_image(url: str,
                              f'Offset: {offset[0]:8.3f}, {offset[1]:8.3f}   Error: {error:9.5f}\n')
                 if best_error is None or error < best_error:
                     best_error = error
-                    best_twist = twist
+                    best_twist = float(twist)
                     best_ret = ret
 
             if best_twist is None:
@@ -424,9 +393,12 @@ def optimize_one_image(url: str,
             min_twist = best_twist - delta_twist*2
             max_twist = best_twist + delta_twist*2
 
+        assert best_twist is not None
+        assert best_ret is not None
         (best_error, best_offset, best_new_offset,
          best_u_arr, best_v_arr, best_u_diff_arr, best_v_diff_arr,
          best_mag_perc, best_nm) = best_ret
+
 
         print()
         print()
@@ -453,7 +425,7 @@ def optimize_one_image(url: str,
         return url, best_twist, rotation_error, best_offset, best_new_offset, best_error
 
 
-def main(command_list):
+def main(command_list: list[str]) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('config_file',
                         help='The config file containing the star field data.')
