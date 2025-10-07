@@ -51,7 +51,8 @@ Source = "https://github.com/SETI/rms-nav"
 Issues = "https://github.com/SETI/rms-nav/issues"
 
 [tool.setuptools]
-packages = {find = {include = ["nav*"]}}
+[tool.setuptools.packages.find]
+include = ["nav"]
 
 [tool.setuptools.package-data]
 "nav" = ["py.typed"]
