@@ -310,7 +310,8 @@ def optimize_one_image(url: str,
                        *,
                        verbose: bool = False,
                        show_plots: bool = False,
-                       num_phases: int = 3
+                       max_passes: int = 10,
+                       precision: float = 0.001
                        ) -> tuple[str, float, float, tuple[float, float],
                                   tuple[float, float], float] | None:
     """Optimize the twist for one image given instrument data.
@@ -324,7 +325,8 @@ def optimize_one_image(url: str,
         verbose: Whether to print verbose output.
         show_plots: Whether to show plots interactively during optimization. Used
             for debugging.
-        num_phases: The number of phases to use for the optimization.
+        max_passes: The maximum number of passes to use for the optimization.
+        precision: The required precision of the final twist result (degrees).
 
     Returns:
         A tuple containing:
@@ -358,7 +360,7 @@ def optimize_one_image(url: str,
         min_twist = twist_config['min_twist']
         max_twist = twist_config['max_twist']
 
-        for pass_num in range(1, num_phases + 1):
+        for pass_num in range(1, max_passes + 1):
             delta_twist = (max_twist - min_twist) / divisions
             print(f'{img_name:15s} Pass {pass_num}: {min_twist:.5f} to {max_twist:.5f} '
                   f'by {delta_twist:.5f}')
@@ -388,8 +390,17 @@ def optimize_one_image(url: str,
             print(f'{img_name:15s} Best twist: {best_twist:8.5f}, Error: {best_error:9.5f}')
             log_fp.write(f'Best twist: {best_twist:8.5f}, Error: {best_error:9.5f}\n')
 
+            if delta_twist <= precision:
+                break
+
+            old_min_twist = min_twist
+            old_max_twist = max_twist
             min_twist = best_twist - delta_twist*2
             max_twist = best_twist + delta_twist*2
+
+            if old_min_twist >= min_twist or old_max_twist <= max_twist:
+                min_twist = best_twist - delta_twist
+                max_twist = best_twist + delta_twist
 
         (best_error, best_offset, best_new_offset,
          best_u_arr, best_v_arr, best_u_diff_arr, best_v_diff_arr,
@@ -438,8 +449,10 @@ def main(command_list: list[str]) -> None:
                         specified, the current directory is used. The directory may
                         contain destination prefixes like gs:// or s3:// as supported by
                         FCPath to store the results remotely.""")
-    parser.add_argument('--num-phases', type=int, default=3,
-                        help='The number of phases to use for the optimization.')
+    parser.add_argument('--precision', type=float, default=0.001,
+                        help='The required precision of the final twist result (degrees).')
+    parser.add_argument('--max-passes', type=int, default=10,
+                        help='The maximum number of passes to use for the optimization.')
     parser.add_argument('--verbose', action='store_true', default=False,
                         help='Print verbose output during the optimization process.')
     parser.add_argument('--debug', action='store_true', default=False,
@@ -467,20 +480,23 @@ def main(command_list: list[str]) -> None:
         for url in twist_config['image_urls']:
             res = optimize_one_image(url, twist_config, dataset, results_path,
                                      verbose=args.verbose, show_plots=args.show_plots,
-                                     num_phases=args.num_phases)
+                                     max_passes=args.max_passes, precision=args.precision)
             results.append(res)
     else:
         with multiprocessing.Pool(args.nthreads) as pool:
             opt_func = partial(optimize_one_image, twist_config=twist_config, dataset=dataset,
                                results_path=results_path, verbose=args.verbose,
-                               show_plots=args.show_plots, num_phases=args.num_phases)
+                               show_plots=args.show_plots, max_passes=args.max_passes,
+                               precision=args.precision)
             results = pool.map(opt_func, twist_config['image_urls'])
 
     print('Results summary')
     twist_list = []
     rotation_error_list = []
-    summary_path = results_path / f'{dataset}_results.txt'
+    summary_path = results_path / f'{dataset}_results.csv'
     with summary_path.open('w') as summary_fp:
+        summary_fp.write('url,img_name,twist,rotation_error,int_offset_x,int_offset_y,'
+                         'opt_offset_x,opt_offset_y,error\n')
         for res in results:
             if res is None:
                 continue
