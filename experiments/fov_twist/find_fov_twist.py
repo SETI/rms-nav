@@ -393,14 +393,8 @@ def optimize_one_image(url: str,
             if delta_twist <= precision:
                 break
 
-            old_min_twist = min_twist
-            old_max_twist = max_twist
             min_twist = best_twist - delta_twist*2
             max_twist = best_twist + delta_twist*2
-
-            if old_min_twist >= min_twist or old_max_twist <= max_twist:
-                min_twist = best_twist - delta_twist
-                max_twist = best_twist + delta_twist
 
         (best_error, best_offset, best_new_offset,
          best_u_arr, best_v_arr, best_u_diff_arr, best_v_diff_arr,
