@@ -428,7 +428,7 @@ def optimize_one_image(url: str,
                              img_name=img_name)
 
         return (url, float(best_twist), float(rotation_error),
-                (best_offset[0], best_offset[1]), (best_new_offset[0], best_new_offset[1]),
+                best_offset, best_new_offset,
                 float(best_error))
 
 
