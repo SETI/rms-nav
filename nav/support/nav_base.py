@@ -23,8 +23,9 @@ class NavBase:
 
         self._config = config or DEFAULT_CONFIG
         self._logger = DEFAULT_LOGGER
-        if logger_name is not None:
-            self._logger = self._logger.get_logger(logger_name, lognames=False, digits=3)
+        # if logger_name is not None:
+        #     self._logger = self._logger.get_logger(logger_name, lognames=False, digits=3,
+        #                                            level='ERROR')
 
     @property
     def config(self) -> Config:

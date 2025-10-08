@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools", "setuptools_scm[toml]"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rms-nav"
+dynamic = ["version"]
+description = "Navigation system for spacecraft imagery"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "matplotlib",
+  "numpy>=2.2.0",
+  "rms-filecache>=3.0.0",
+  "rms-imgdisp",
+  "rms-pdslogger>=3.2.1",
+  "rms-pdstable>=1.0.1",
+  "rms-pdstemplate>=2.3.0",
+  "rms-psfmodel",
+  "rms-oops>=0.1.3",
+  "rms-starcat>=1.0.1",
+  "ruamel.yaml"
+]
+license = {text = "Apache-2.0"}
+maintainers = [
+  {name = "Robert S. French", email = "rfrench@seti.org"}
+]
+keywords = ["Voyager", "Galileo", "New Horizons", "Cassini", "image navigation", "spice"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Natural Language :: English",
+  "Topic :: Scientific/Engineering",
+  "Topic :: Scientific/Engineering :: Astronomy",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: Utilities",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Operating System :: MacOS :: MacOS X",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: Microsoft :: Windows"
+]
+
+[project.urls]
+Homepage = "https://github.com/SETI/rms-nav"
+Documentation = "https://rms-nav.readthedocs.io/en/latest"
+Repository = "https://github.com/SETI/rms-nav"
+Source = "https://github.com/SETI/rms-nav"
+Issues = "https://github.com/SETI/rms-nav/issues"
+
+[tool.setuptools]
+[tool.setuptools.packages.find]
+include = ["nav"]
+
+[tool.setuptools.package-data]
+"nav" = ["py.typed"]
+
+[tool.setuptools_scm]
+local_scheme = "no-local-version"
+write_to = "nav/_version.py"
