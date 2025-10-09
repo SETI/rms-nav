@@ -737,7 +737,6 @@ def main():
 
         for imagefiles in DATASET.yield_image_files_from_arguments(arguments):
             assert len(imagefiles.image_files) == 1
-            label_path = imagefiles.image_files[0].label_file_path
             image_path = imagefiles.image_files[0].image_file_path
             if arguments.dry_run:
                 main_logger.info("Would process: %s", image_path)

@@ -85,7 +85,7 @@ class NavMaster(NavBase):
         except Exception:
             pass
         else:
-            obs_metadata['spice_kernels'] = spice_kernels
+            self._metadata['spice_kernels'] = spice_kernels
 
     @property
     def obs(self) -> Observation:

@@ -14,7 +14,7 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
 
     _MIN_VOL = 2
     _MAX_VOL = 23
-    _ALL_VOLUME_NAMES = tuple(f'GO_{x:04d}' for x in list(range(_MIN_VOL, _MAX_VOL+1)))
+    _ALL_VOLUME_NAMES = tuple(f'GO_{x:04d}' for x in range(_MIN_VOL, _MAX_VOL+1))
     _INDEX_COLUMNS = ('FILE_SPECIFICATION_NAME',)
     _VOLUMES_DIR_NAME = 'volumes'
 
@@ -154,7 +154,7 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
 
     @staticmethod
     def _results_path_stub(volume: str, filespec: str) -> Path:
-        f"""Get the results path stub for an image filespec.
+        """Get the results path stub for an image filespec.
 
         Parameters:
             volume: The volume name.

@@ -78,10 +78,10 @@ class InstGalileoSSI(Inst):
         return GaussianPSF(sigma=3.)  # TODO
 
     def get_public_metadata(self) -> dict[str, Any]:
-        """Returns the public metadata for Cassini ISS.
+        """Returns the public metadata for Galileo SSI.
 
         Returns:
-            A dictionary containing the public metadata for Cassini ISS.
+            A dictionary containing the public metadata for Galileo SSI.
         """
         obs = self.obs
         # TODO

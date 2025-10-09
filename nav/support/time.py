@@ -43,7 +43,8 @@ def et_to_utc(et: float, digits: int = 3) -> str:
     """Returns the UTC time for a given ET time.
 
     Parameters:
-        et: The ET time.
+        et: The SPICE ET time (equivalent to TDB).
+        digits: The number of digits to include after the decimal point.
 
     Returns:
         The UTC time as a string.

@@ -83,7 +83,7 @@ class InstVoyagerISS(Inst):
         return GaussianPSF(sigma=1.)  # TODO
 
     def get_public_metadata(self) -> dict[str, Any]:
-        """Returns the public metadata for Cassini ISS.
+        """Returns the public metadata for Voyager ISS.
 
         Returns:
             A dictionary containing the public metadata for Cassini ISS.
