@@ -27,7 +27,7 @@ from nav.dataset import dataset_name_to_class, dataset_name_to_inst_name
 from nav.config import DEFAULT_CONFIG
 from nav.config.logger import DEFAULT_LOGGER
 from nav.inst import inst_name_to_class
-from nav.process import process_one_image
+from nav.process import process_image_files
 
 import tkinter  # TODO Change to only install if needed
 # import traceback
@@ -735,23 +735,26 @@ def main():
 
         inst_class = inst_name_to_class(INST_NAME)
 
-        for label_path, image_path in DATASET.yield_filenames_from_arguments(arguments):
+        for imagefiles in DATASET.yield_image_files_from_arguments(arguments):
+            assert len(imagefiles.image_files) == 1
+            label_path = imagefiles.image_files[0].label_file_path
+            image_path = imagefiles.image_files[0].image_file_path
             if arguments.dry_run:
                 main_logger.info("Would process: %s", image_path)
                 continue
 
-            if process_one_image(
+            if process_image_files(
                     inst_class,
-                    label_path,
-                    image_path,
-                    allow_stars=arguments.allow_stars,
-                    allow_rings=arguments.allow_rings,
-                    allow_moons=arguments.allow_moons,
-                    allow_central_planet=arguments.allow_central_planet,
-                    force_offset_amount=force_offset_amount,
-                    cartographic_data=cartographic_data,
-                    bootstrapped=bootstrapped,
-                    loaded_kernel_type=loaded_kernel_type):
+                    imagefiles,
+                    # allow_stars=arguments.allow_stars,
+                    # allow_rings=arguments.allow_rings,
+                    # allow_moons=arguments.allow_moons,
+                    # allow_central_planet=arguments.allow_central_planet,
+                    # force_offset_amount=force_offset_amount,
+                    # cartographic_data=cartographic_data,
+                    # bootstrapped=bootstrapped,
+                    # loaded_kernel_type=loaded_kernel_type
+                    ):
                 NUM_FILES_PROCESSED += 1
             else:
                 NUM_FILES_SKIPPED += 1

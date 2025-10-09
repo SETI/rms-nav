@@ -1,13 +1,73 @@
-from typing import Any
+from pathlib import Path
+from typing import Any, cast
 
 from .dataset_pds3 import DataSetPDS3
 from nav.support.misc import safe_lstrip_zero
 
 
 class DataSetPDS3VoyagerISS(DataSetPDS3):
+    """Implements dataset access for Voyager ISS (Imaging Science Subsystem) data.
+
+    This class provides specialized functionality for accessing and parsing Voyager
+    ISS image data stored in PDS3 format.
+    """
+
+    _MIN_5xxx_VOL1 = 5101
+    _MAX_5xxx_VOL1 = 5120
+    _MIN_5xxx_VOL2 = 5201
+    _MAX_5xxx_VOL2 = 5214
+    _MIN_6xxx_VOL1 = 6101
+    _MAX_6xxx_VOL1 = 6121
+    _MIN_6xxx_VOL2 = 6201
+    _MAX_6xxx_VOL2 = 6215
+    _MIN_7xxx_VOL2 = 7201
+    _MAX_7xxx_VOL2 = 7207
+    _MIN_8xxx_VOL2 = 8201
+    _MAX_8xxx_VOL2 = 8210
+
+    _ALL_VOLUME_NAMES = tuple(f'VGISS_{x:04d}' for x in
+                              list(range(_MIN_5xxx_VOL1, _MAX_5xxx_VOL1+1)) +
+                              list(range(_MIN_5xxx_VOL2, _MAX_5xxx_VOL2+1)) +
+                              list(range(_MIN_6xxx_VOL1, _MAX_6xxx_VOL1+1)) +
+                              list(range(_MIN_6xxx_VOL2, _MAX_6xxx_VOL2+1)) +
+                              list(range(_MIN_7xxx_VOL2, _MAX_7xxx_VOL2+1)) +
+                              list(range(_MIN_8xxx_VOL2, _MAX_8xxx_VOL2+1)))
+    _INDEX_COLUMNS = ('FILE_SPECIFICATION_NAME',)
+    _VOLUMES_DIR_NAME = 'volumes'
+
+    # Methods inherited from DataSetPDS3
 
     @staticmethod
-    def _get_img_name_from_filespec(filespec: str) -> str | None:
+    def _get_label_filespec_from_index(row: dict[str, Any]) -> str:
+        """Extracts the label file specification from a row from an index table.
+
+        Parameters:
+            row: Dictionary containing PDS3 index table row data.
+
+        Returns:
+            The file specification string from the row.
+        """
+
+        filespec = cast(str, row['FILE_SPECIFICATION_NAME'])
+        if not filespec.endswith('.LBL'):
+            raise ValueError(f'Bad Primary File Spec "{filespec}" - '
+                             'expected ".LBL"')
+        return filespec
+
+    @staticmethod
+    def _get_image_filespec_from_label_filespec(label_filespec: str) -> str:
+        """Extracts the image file specification from a label file specification.
+
+        Parameters:
+            label_filespec: The label file specification string to parse.
+
+        Returns:
+            The image file specification string.
+        """
+        return label_filespec.replace('.LBL', '.IMG')
+
+    @staticmethod
+    def _get_img_name_from_label_filespec(filespec: str) -> str | None:
         """Extract the image name (with no extension) from a file specification.
 
         Parameters:
@@ -73,32 +133,33 @@ class DataSetPDS3VoyagerISS(DataSetPDS3):
 
         return int(safe_lstrip_zero(img_name[1:]))
 
-    _MIN_5xxx_VOL1 = 5101
-    _MAX_5xxx_VOL1 = 5120
-    _MIN_5xxx_VOL2 = 5201
-    _MAX_5xxx_VOL2 = 5214
-    _MIN_6xxx_VOL1 = 6101
-    _MAX_6xxx_VOL1 = 6121
-    _MIN_6xxx_VOL2 = 6201
-    _MAX_6xxx_VOL2 = 6215
-    _MIN_7xxx_VOL2 = 7201
-    _MAX_7xxx_VOL2 = 7207
-    _MIN_8xxx_VOL2 = 8201
-    _MAX_8xxx_VOL2 = 8210
+    @staticmethod
+    def _volset_and_volume(volume: str) -> str:
+        """Get the volset and volume name.
 
-    _DATASET_LAYOUT = {
-        'all_volume_names': [f'VGISS_{x:04d}' for x in
-                             list(range(_MIN_5xxx_VOL1, _MAX_5xxx_VOL1+1)) +
-                             list(range(_MIN_5xxx_VOL2, _MAX_5xxx_VOL2+1)) +
-                             list(range(_MIN_6xxx_VOL1, _MAX_6xxx_VOL1+1)) +
-                             list(range(_MIN_6xxx_VOL2, _MAX_6xxx_VOL2+1)) +
-                             list(range(_MIN_7xxx_VOL2, _MAX_7xxx_VOL2+1)) +
-                             list(range(_MIN_8xxx_VOL2, _MAX_8xxx_VOL2+1))],
-        'volset_and_volume': lambda v: f'VGISS_{v[6]}xxx/{v}',
-        'volume_to_index': lambda v: f'VGISS_{v[6]}xxx/{v}/{v}_index.lbl',
-        'index_columns': ('FILE_SPECIFICATION_NAME',),
-        'volumes_dir_name': 'volumes',
-    }
+        Parameters:
+            volume: The volume name.
+        """
+        return f'VGISS_{volume[6]}xxx/{volume}'
+
+    @staticmethod
+    def _volume_to_index(volume: str) -> str:
+        """Get the index file name for a volume.
+
+        Parameters:
+            volume: The volume name.
+        """
+        return f'VGISS_{volume[6]}xxx/{volume}/{volume}_index.lbl'
+
+    @staticmethod
+    def _results_path_stub(volume: str, filespec: str) -> Path:
+        """Get the results path stub for an image filespec.
+
+        Parameters:
+            volume: The volume name.
+            filespec: The filespec of the image.
+        """
+        return Path(f'{volume}/{filespec}').with_suffix('')
 
     def __init__(self,
                  *args: Any,

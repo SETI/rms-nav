@@ -99,6 +99,23 @@ class AnnotationTextInfo:
         """Returns the font size in points."""
         return self._font_size
 
+    def __str__(self) -> str:
+        """Returns a string representation of the text annotation information."""
+        ret = ('AnnotationTextInfo\n'
+               f'Text: {self.text}\n'
+               f'Ref vu: {self.ref_vu}, Color: {self.color}, Font: {self.font}, '
+               f'Font size: {self.font_size}\n'
+               'Text loc: ')
+        for loc in self.text_loc[:10]:
+            ret += f'{loc} '
+        if len(self.text_loc) > 10:
+            ret += '...'
+        return ret
+
+    def __repr__(self) -> str:
+        """Returns a string representation of the text annotation information."""
+        return self.__str__()
+
     def _draw_text(self,
                    *,
                    ann_num: int,

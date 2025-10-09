@@ -67,6 +67,26 @@ class NavMaster(NavBase):
 
         self._closest_model_index: NDArrayUint32Type | None = None
 
+        self._metadata: dict[str, Any] = {}
+        self._initialize_metadata()
+
+    def _initialize_metadata(self) -> None:
+        """Initializes the metadata dictionary."""
+        obs_metadata = self.obs.inst.get_public_metadata()
+        # kernels
+        # RA/DEC corners and center, un nav and nav
+
+        self._metadata = {
+            'observation': obs_metadata,
+        }
+
+        try:
+            spice_kernels = self.obs.inst.get_spice_kernels()
+        except Exception:
+            pass
+        else:
+            obs_metadata['spice_kernels'] = spice_kernels
+
     @property
     def obs(self) -> Observation:
         """Returns the observation object associated with this navigation master."""
@@ -76,6 +96,11 @@ class NavMaster(NavBase):
     def final_offset(self) -> tuple[float, float] | None:
         """Returns the final computed offset between predicted and actual positions."""
         return self._final_offset
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        """Returns the metadata dictionary."""
+        return self._metadata
 
     @property
     def star_models(self) -> list[NavModelStars]:
@@ -121,7 +146,7 @@ class NavMaster(NavBase):
 
     @property
     def closest_model_index(self) -> NDArrayUint32Type | None:
-        """Returns the index of the closest model for each pixelin the combined model."""
+        """Returns the index of the closest model for each pixel in the combined model."""
         return self._closest_model_index
 
     def compute_star_models(self) -> None:
@@ -354,7 +379,6 @@ class NavMaster(NavBase):
 
         for model in self.all_models:
             annotations.add_annotations(model.annotations)
-            # dump_yaml(model.metadata)
 
         offset = (0., 0.)
         if self._final_offset is not None:

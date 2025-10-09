@@ -20,7 +20,7 @@ from nav.annotation import (Annotation,
 from nav.support.constants import HALFPI
 from nav.support.image import (filter_downsample,
                                shift_array)
-from nav.support.misc import now_dt, dt_delta_str
+from nav.support.time import now_dt, dt_delta_str
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
 from .nav_model import NavModel

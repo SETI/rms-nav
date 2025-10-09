@@ -1,10 +1,49 @@
 from abc import ABC, abstractmethod
 import argparse
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Iterator, Optional, cast
+
+from filecache import FCPath
 
 from nav.config import Config
 from nav.support.nav_base import NavBase
+
+
+@dataclass
+class ImageFile:
+    image_file_url: FCPath
+    label_file_url: FCPath
+    results_path_stub: Path
+    # Convert this to use a default factory
+    index_file_row: dict[str, Any] = field(default_factory=dict)
+    _image_file_path: Optional[Path] = None
+    _label_file_path: Optional[Path] = None
+
+    @property
+    def image_file_name(self) -> str:
+        return self.image_file_url.name
+
+    @property
+    def label_file_name(self) -> str:
+        return self.label_file_url.name
+
+    @property
+    def image_file_path(self) -> Path:
+        if self._image_file_path is None:
+            self._image_file_path = cast(Path, self.image_file_url.retrieve())
+        return self._image_file_path
+
+    @property
+    def label_file_path(self) -> Path:
+        if self._label_file_path is None:
+            self._label_file_path = cast(Path, self.label_file_url.retrieve())
+        return self._label_file_path
+
+
+@dataclass
+class ImageFiles:
+    image_files: list[ImageFile]
 
 
 class DataSet(ABC, NavBase):
@@ -47,9 +86,9 @@ class DataSet(ABC, NavBase):
         ...
 
     @abstractmethod
-    def yield_filenames_from_arguments(self,
-                                       arguments: argparse.Namespace
-                                       ) -> Iterator[tuple[Path, Path]]:
+    def yield_image_files_from_arguments(self,
+                                         arguments: argparse.Namespace
+                                         ) -> Iterator[ImageFiles]:
         """Yields image filenames based on provided command-line arguments.
 
         Parameters:
@@ -61,8 +100,8 @@ class DataSet(ABC, NavBase):
         ...
 
     @abstractmethod
-    def yield_filenames_index(self,
-                              **kwargs: Any) -> Iterator[tuple[Path, Path]]:
+    def yield_image_files_index(self,
+                                **kwargs: Any) -> Iterator[ImageFiles]:
         """Yields image filenames based on index information.
 
         Parameters:
@@ -70,5 +109,14 @@ class DataSet(ABC, NavBase):
 
         Yields:
             Paths to the selected files as (label, image) tuples.
+        """
+        ...
+
+    @abstractmethod
+    def supported_grouping(self) -> list[str]:
+        """Returns the list of supported grouping types.
+
+        Returns:
+            The list of supported grouping types.
         """
         ...
