@@ -11,7 +11,7 @@ from nav.nav_model import (NavModel,
                            NavModelRings,
                            NavModelStars,
                            NavModelTitan)
-from nav.nav_technique import (NavTechniqueAllModels,
+from nav.nav_technique import (NavTechniqueCorrelateAll,
                                NavTechniqueStars)
 from nav.support.nav_base import NavBase
 from nav.support.types import NDArrayFloatType, NDArrayUint32Type, NDArrayUint8Type
@@ -83,6 +83,7 @@ class NavMaster(NavBase):
         try:
             spice_kernels = self.obs.inst.get_spice_kernels()
         except Exception:
+            self._metadata['spice_kernels'] = 'Not supported by instrument'  # TODO
             pass
         else:
             self._metadata['spice_kernels'] = spice_kernels
@@ -354,7 +355,7 @@ class NavMaster(NavBase):
             self._offsets['stars'] = None
 
         if self._nav_techniques_to_use is None or 'all_models' in self._nav_techniques_to_use:
-            nav_all = NavTechniqueAllModels(self)
+            nav_all = NavTechniqueCorrelateAll(self)
             nav_all.navigate()
             self._offsets['all_models'] = nav_all.offset
             if nav_all.offset is not None:

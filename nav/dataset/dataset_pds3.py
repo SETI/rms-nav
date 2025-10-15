@@ -640,8 +640,8 @@ class DataSetPDS3(DataSet):
                     try:
                         img_name = self._get_img_name_from_label_filespec(label_filespec)
                     except ValueError:
-                        logger.error(f'IMGNAME: Index file "{index_tab_url}" contains bad '
-                                     f'Primary File Spec "{label_filespec}"')
+                        logger.error('IMGNAME: Index file "%s" contains bad Primary File Spec "%s"',
+                                     index_tab_url, label_filespec)
                         continue
                     if img_name is None:
                         continue  # Not a name we should process
@@ -662,10 +662,10 @@ class DataSetPDS3(DataSet):
                     # since we have to go through the entire index either way
                     try:
                         img_num = self._extract_img_number(img_name)
-                    except ValueError:
+                    except ValueError as err:
                         raise ValueError(
                             f'IMGNUM: Index file "{index_tab_url}" contains bad '
-                            f'path "{label_filespec}"')
+                            f'path "{label_filespec}"') from err
                     if img_end_num is not None and img_num > img_end_num:
                         if choose_random_images:
                             continue

@@ -16,14 +16,18 @@ from nav.nav_master import NavMaster
 #   sqs_use_gapfill_kernels=False,
 #   max_allowed_time=None
 
-def process_image_files(inst_class: Inst,
+def process_image_files(inst_class: type[Inst],
                         image_files: ImageFiles) -> bool:
 
-    assert len(image_files.image_files) == 1
+    logger = DEFAULT_LOGGER
+
+    if len(image_files.image_files) != 1:
+        logger.error("Expected exactly one image per batch; got %d", len(image_files.image_files))
+        return False
+
     image_file = image_files.image_files[0]
     image_path = image_file.image_file_path
 
-    logger = DEFAULT_LOGGER
     with logger.open(str(image_path)):
         try:
             snapshot = inst_class.from_file(image_path)

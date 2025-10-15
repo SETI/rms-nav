@@ -1,8 +1,9 @@
 import argparse
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator, Optional, cast
+from typing import Any, Optional, cast
 
-from .dataset import ImageFiles
+from .dataset import ImageFile, ImageFiles
 from .dataset_pds3 import DataSetPDS3
 from nav.support.misc import safe_lstrip_zero
 
@@ -157,7 +158,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
 
     @staticmethod
     def _results_path_stub(volume: str, filespec: str) -> Path:
-        f"""Get the results path stub for an image filespec.
+        """Get the results path stub for an image filespec.
 
         Parameters:
             volume: The volume name.
@@ -230,7 +231,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
             **kwargs: Arbitrary keyword arguments, usually used to restrict the search.
 
         Yields:
-            ImageFiles objects containing information about groupsof selected
+            ImageFiles objects containing information about groups of selected
             image files.
         """
 
@@ -245,7 +246,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
             raise ValueError(f'Invalid group type "{group}"')
 
         # Combine BOTSIM files
-        last_imagefile = None
+        last_imagefile: ImageFile | None = None
         for imagefile in self._yield_image_files_index(additional_index_columns=('SHUTTER_MODE_ID',
                                                                                  'IMAGE_NUMBER'),
                                                        **kwargs):

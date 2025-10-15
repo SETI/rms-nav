@@ -122,6 +122,6 @@ class InstCassiniISS(Inst):
             'filters': (obs.filter1, obs.filter2),
             'sampling': obs.sampling,
             'gain_mode': obs.gain_mode,
-            'description': obs.dict["DESCRIPTION"],
-            'observation_id': obs.dict["OBSERVATION_ID"]
+            'description': obs.dict.get("DESCRIPTION"),
+            'observation_id': obs.dict.get("OBSERVATION_ID")
         }

@@ -86,7 +86,6 @@ class InstNewHorizonsLORRI(Inst):
         """
 
         obs = self.obs
-        print(obs.__dict__.keys())
         # TODO
         # scet_start = float(obs.dict["SPACECRAFT_CLOCK_START_COUNT"])
         # scet_end = float(obs.dict["SPACECRAFT_CLOCK_STOP_COUNT"])

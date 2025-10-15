@@ -75,7 +75,7 @@ def test_cassini_iss_camera_invalid(ds_cassini_iss) -> None:
     try:
         next(ds_cassini_iss.yield_image_files_index(max_filenames=1, volumes=['COISS_1001'],
                                                     arguments=arguments))
-        assert False, "Expected ValueError for invalid camera"
+        pytest.fail("Expected ValueError for invalid camera")
     except ValueError:
         pass
 

@@ -85,8 +85,6 @@ class InstGalileoSSI(Inst):
         """
         obs = self.obs
         # TODO
-        print(obs.__dict__.keys())
-        print(obs.dict)
         # scet_start = float(obs.dict["SPACECRAFT_CLOCK_START_COUNT"])
         # scet_end = float(obs.dict["SPACECRAFT_CLOCK_STOP_COUNT"])
 

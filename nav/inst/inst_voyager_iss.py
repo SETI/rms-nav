@@ -86,12 +86,10 @@ class InstVoyagerISS(Inst):
         """Returns the public metadata for Voyager ISS.
 
         Returns:
-            A dictionary containing the public metadata for Cassini ISS.
+            A dictionary containing the public metadata for Voyager ISS.
         """
 
         obs = self.obs
-        print(obs.__dict__.keys())
-        print(obs.dict)
         # scet_start = float(obs.dict["SPACECRAFT_CLOCK_START_COUNT"])
         # scet_end = float(obs.dict["SPACECRAFT_CLOCK_STOP_COUNT"])
 

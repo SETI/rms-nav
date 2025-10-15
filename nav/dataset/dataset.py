@@ -1,8 +1,9 @@
 from abc import ABC, abstractmethod
 import argparse
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator, Optional, cast
+from typing import Any, Optional, cast
 
 from filecache import FCPath
 
@@ -112,8 +113,9 @@ class DataSet(ABC, NavBase):
         """
         ...
 
+    @staticmethod
     @abstractmethod
-    def supported_grouping(self) -> list[str]:
+    def supported_grouping() -> list[str]:
         """Returns the list of supported grouping types.
 
         Returns:
