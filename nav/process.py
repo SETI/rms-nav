@@ -33,14 +33,12 @@ def process_image_files(inst_class: type[Inst],
             snapshot = inst_class.from_file(image_path)
         except OSError as e:
             if 'SPICE(CKINSUFFDATA)' in str(e) or 'SPICE(SPKINSUFFDATA)' in str(e):
-                logger.error(f'No SPICE kernel available for "{image_path}"')
+                logger.error('No SPICE kernel available for "%s"', image_path)
                 return False
-            logger.error(f'Error reading image "{image_path}": {e}')
+            logger.error('Error reading image "%s"', image_path, exc_info=True)
             return False
 
         nm = NavMaster(snapshot)
-        import pprint
-        pprint.pprint(nm.metadata, sort_dicts=False)
         nm.compute_all_models()
 
         nm.navigate()

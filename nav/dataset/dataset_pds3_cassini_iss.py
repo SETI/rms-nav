@@ -171,9 +171,9 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         return Path(f'{volume}/{filespec}').with_suffix('')
 
     def _check_additional_image_selection_criteria(self,
-                                                   img_path: str,
+                                                   _img_path: str,
                                                    img_name: str,
-                                                   img_num: int,
+                                                   _img_num: int,
                                                    arguments: Optional[argparse.Namespace] = None
                                                    ) -> bool:
         """Check additional image selection criteria.

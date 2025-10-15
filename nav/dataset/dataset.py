@@ -46,6 +46,14 @@ class ImageFile:
 class ImageFiles:
     image_files: list[ImageFile]
 
+    def __iter__(self):
+        return iter(self.image_files)
+
+    def __len__(self) -> int:
+        return len(self.image_files)
+
+    def __getitem__(self, idx: int) -> ImageFile:
+        return self.image_files[idx]
 
 class DataSet(ABC, NavBase):
     def __init__(self,
@@ -96,7 +104,7 @@ class DataSet(ABC, NavBase):
             arguments: The parsed arguments structure.
 
         Yields:
-            Paths to the selected files as (label, image) tuples.
+            Information about the selected files in groups as ImageFiles objects.
         """
         ...
 
