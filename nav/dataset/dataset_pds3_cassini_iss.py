@@ -267,6 +267,8 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
                             nac_imagefile = imagefile
                         yield ImageFiles(image_files=[nac_imagefile, wac_imagefile])
                         last_imagefile = None
+                    else:
+                        last_imagefile = imagefile
             else:
                 last_imagefile = imagefile
 
