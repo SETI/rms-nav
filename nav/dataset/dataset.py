@@ -1,10 +1,73 @@
 from abc import ABC, abstractmethod
 import argparse
+from collections.abc import Iterator
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Optional, cast
+
+from filecache import FCPath
 
 from nav.config import Config
 from nav.support.nav_base import NavBase
+
+
+@dataclass
+class ImageFile:
+    """Represents a single image file with its metadata and lazy-loaded paths.
+
+    Attributes:
+        image_file_url: Remote URL for the image file
+        label_file_url: Remote URL for the label file
+        results_path_stub: Local path stub for storing results
+        index_file_row: Optional metadata from index files
+    """
+
+    image_file_url: FCPath
+    label_file_url: FCPath
+    results_path_stub: Path
+    # Convert this to use a default factory
+    index_file_row: dict[str, Any] = field(default_factory=dict)
+    _image_file_path: Optional[Path] = None
+    _label_file_path: Optional[Path] = None
+
+    @property
+    def image_file_name(self) -> str:
+        return self.image_file_url.name
+
+    @property
+    def label_file_name(self) -> str:
+        return self.label_file_url.name
+
+    @property
+    def image_file_path(self) -> Path:
+        if self._image_file_path is None:
+            self._image_file_path = cast(Path, self.image_file_url.retrieve())
+        return self._image_file_path
+
+    @property
+    def label_file_path(self) -> Path:
+        if self._label_file_path is None:
+            self._label_file_path = cast(Path, self.label_file_url.retrieve())
+        return self._label_file_path
+
+
+@dataclass
+class ImageFiles:
+    """A collection of ImageFile objects that behaves like a sequence.
+
+    Supports iteration, indexing, and length operations on the wrapped image files.
+    """
+
+    image_files: list[ImageFile]
+
+    def __iter__(self) -> Iterator[ImageFile]:
+        return iter(self.image_files)
+
+    def __len__(self) -> int:
+        return len(self.image_files)
+
+    def __getitem__(self, idx: int) -> ImageFile:
+        return self.image_files[idx]
 
 
 class DataSet(ABC, NavBase):
@@ -47,22 +110,22 @@ class DataSet(ABC, NavBase):
         ...
 
     @abstractmethod
-    def yield_filenames_from_arguments(self,
-                                       arguments: argparse.Namespace
-                                       ) -> Iterator[tuple[Path, Path]]:
+    def yield_image_files_from_arguments(self,
+                                         arguments: argparse.Namespace
+                                         ) -> Iterator[ImageFiles]:
         """Yields image filenames based on provided command-line arguments.
 
         Parameters:
             arguments: The parsed arguments structure.
 
         Yields:
-            Paths to the selected files as (label, image) tuples.
+            Information about the selected files in groups as ImageFiles objects.
         """
         ...
 
     @abstractmethod
-    def yield_filenames_index(self,
-                              **kwargs: Any) -> Iterator[tuple[Path, Path]]:
+    def yield_image_files_index(self,
+                                **kwargs: Any) -> Iterator[ImageFiles]:
         """Yields image filenames based on index information.
 
         Parameters:
@@ -70,5 +133,15 @@ class DataSet(ABC, NavBase):
 
         Yields:
             Paths to the selected files as (label, image) tuples.
+        """
+        ...
+
+    @staticmethod
+    @abstractmethod
+    def supported_grouping() -> list[str]:
+        """Returns the list of supported grouping types.
+
+        Returns:
+            The list of supported grouping types.
         """
         ...

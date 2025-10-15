@@ -1,13 +1,58 @@
-from typing import Any
+from pathlib import Path
+from typing import Any, cast
 
 from .dataset_pds3 import DataSetPDS3
 from nav.support.misc import safe_lstrip_zero
 
 
 class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
+    """Implements dataset access for New Horizons LORRI (Low-Resolution Imaging
+    Experiment) data.
+
+    This class provides specialized functionality for accessing and parsing New
+    Horizons LORRI image data stored in PDS3 format.
+    """
+
+    _ALL_VOLUME_NAMES = ('NHLALO_2001', 'NHJULO_2001',
+                         'NHPCLO_2001', 'NHPELO_2001',
+                         'NHKCLO_2001', 'NHKELO_2001',
+                         'NHK2LO_2001')
+    _INDEX_COLUMNS = ('FILE_SPECIFICATION_NAME',)
+    _VOLUMES_DIR_NAME = 'volumes'
+
+    # Methods inherited from DataSetPDS3
 
     @staticmethod
-    def _get_img_name_from_filespec(filespec: str) -> str | None:
+    def _get_label_filespec_from_index(row: dict[str, Any]) -> str:
+        """Extracts the label file specification from a row from an index table.
+
+        Parameters:
+            row: Dictionary containing PDS3 index table row data.
+
+        Returns:
+            The file specification string from the row.
+        """
+
+        filespec = cast(str, row['FILE_SPECIFICATION_NAME'])
+        if not filespec.endswith(('_sci.lbl', '_eng.lbl')):
+            raise ValueError(f'Bad Primary File Spec "{filespec}" - '
+                             'expected "_sci.lbl" or "_eng.lbl"')
+        return filespec
+
+    @staticmethod
+    def _get_image_filespec_from_label_filespec(label_filespec: str) -> str:
+        """Extracts the image file specification from a label file specification.
+
+        Parameters:
+            label_filespec: The label file specification string to parse.
+
+        Returns:
+            The image file specification string.
+        """
+        return label_filespec.replace('.lbl', '.fit')
+
+    @staticmethod
+    def _get_img_name_from_label_filespec(filespec: str) -> str | None:
         """Extract the image name (with no extension) from a file specification.
 
         Parameters:
@@ -28,9 +73,10 @@ class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
         if len(range_dir) != 15 or range_dir[8] != '_':
             raise ValueError(f'Bad Primary File Spec "{filespec}" - '
                              'expected "DATA/ddddddd_ddddddd"')
-        if not img_name.endswith('_sci.lbl'):
-            return None
-        return img_name.rsplit('_sci', maxsplit=1)[0]
+        if not img_name.endswith(('_sci.lbl', '_eng.lbl')):
+            raise ValueError(f'Bad Primary File Spec "{filespec}" - '
+                             'expected "_sci.lbl" or "_eng.lbl"')
+        return img_name[:14]
 
     @staticmethod
     def _img_name_valid(img_name: str) -> bool:
@@ -46,8 +92,8 @@ class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
 
         img_name = img_name.upper()
 
-        # lor_0297859350_0x633
-        if len(img_name) != 20 or not img_name.startswith('LOR_') or img_name[14:17] != '_0X':
+        # lor_0297859350
+        if len(img_name) != 14 or not img_name.startswith('LOR_'):
             return False
         try:
             _ = int(safe_lstrip_zero(img_name[4:14]))
@@ -75,16 +121,35 @@ class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
 
         return int(safe_lstrip_zero(img_name[4:14]))
 
-    _DATASET_LAYOUT = {
-        'all_volume_names': ['NHLALO_2001', 'NHJULO_2001',
-                             'NHPCLO_2001', 'NHPELO_2001',
-                             'NHKCLO_2001', 'NHKELO_2001',
-                             'NHK2LO_2001'],
-        'volset_and_volume': lambda v: f'NHxxLO_xxxx/{v}',
-        'volume_to_index': lambda v: f'NHxxLO_xxxx/{v}/{v}_index.lbl',
-        'index_columns': ('FILE_SPECIFICATION_NAME',),
-        'volumes_dir_name': 'volumes',
-    }
+    @staticmethod
+    def _volset_and_volume(volume: str) -> str:
+        """Get the volset and volume name.
+
+        Parameters:
+            volume: The volume name.
+        """
+        return f'NHxxLO_xxxx/{volume}'
+
+    @staticmethod
+    def _volume_to_index(volume: str) -> str:
+        """Get the index file name for a volume.
+
+        Parameters:
+            volume: The volume name.
+        """
+        return f'NHxxLO_xxxx/{volume}/{volume}_index.lbl'
+
+    @staticmethod
+    def _results_path_stub(volume: str, filespec: str) -> Path:
+        """Get the results path stub for an image filespec.
+
+        Parameters:
+            volume: The volume name.
+            filespec: The filespec of the image.
+        """
+        return Path(f'{volume}/{filespec}').with_suffix('')
+
+    # Public methods
 
     def __init__(self,
                  *args: Any,

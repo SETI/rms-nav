@@ -5,7 +5,7 @@ from nav.support.correlate import find_correlation_and_offset
 from .nav_technique import NavTechnique
 
 
-class NavTechniqueAllModels(NavTechnique):
+class NavTechniqueCorrelateAll(NavTechnique):
     """Implements navigation technique using correlation across all available models.
 
     Parameters:

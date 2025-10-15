@@ -1,5 +1,6 @@
 from typing import Any, Optional
 
+from filecache import FCPath
 import numpy as np
 from oops import Observation
 import oops.hosts.newhorizons.lorri
@@ -7,6 +8,7 @@ from psfmodel import GaussianPSF, PSF
 
 from nav.config import Config, DEFAULT_CONFIG, DEFAULT_LOGGER
 from nav.obs import ObsSnapshot
+from nav.support.time import et_to_utc
 from nav.support.types import PathLike
 
 from .inst import Inst
@@ -47,7 +49,9 @@ class InstNewHorizonsLORRI(Inst):
         logger.debug(f'Reading New Horizons LORRI image {path}')
         # TODO calibration=False is required because the hosts module can't find things like
         # the distance from the Sun to M7. How do we handle this?
+        path = FCPath(path).absolute()
         obs = oops.hosts.newhorizons.lorri.from_file(path, calibration=False)
+        obs.abspath = path
 
         # TODO Calibrate once oops.hosts is fixed.
 
@@ -73,3 +77,35 @@ class InstNewHorizonsLORRI(Inst):
             A Gaussian PSF object with the appropriate sigma value for New Horizons LORRI.
         """
         return GaussianPSF(sigma=1.)  # TODO
+
+    def get_public_metadata(self) -> dict[str, Any]:
+        """Returns the public metadata for New Horizons LORRI.
+
+        Returns:
+            A dictionary containing the public metadata for New Horizons LORRI.
+        """
+
+        obs = self.obs
+        # TODO
+        # scet_start = float(obs.dict["SPACECRAFT_CLOCK_START_COUNT"])
+        # scet_end = float(obs.dict["SPACECRAFT_CLOCK_STOP_COUNT"])
+
+        return {
+            'image_path': str(obs.abspath),
+            'image_name': obs.abspath.name,
+            'instrument_host_lid': 'urn:nasa:pds:context:instrument_host:spacecraft.nh',
+            'instrument_lid': 'urn:nasa:pds:context:instrument:nh.lorri',
+            'start_time_utc': et_to_utc(obs.time[0]),
+            'midtime_utc': et_to_utc(obs.midtime),
+            'end_time_utc': et_to_utc(obs.time[1]),
+            'start_time_et': obs.time[0],
+            'midtime_et': obs.midtime,
+            'end_time_et': obs.time[1],
+            # 'start_time_scet': scet_start,
+            # 'midtime_scet': (scet_start + scet_end) / 2,
+            # 'end_time_scet': scet_end,
+            'image_shape_xy': obs.data_shape_uv,
+            'camera': 'LORRI',
+            'exposure_time': obs.texp,
+            'filters': [],
+        }

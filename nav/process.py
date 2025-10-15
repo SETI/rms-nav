@@ -1,8 +1,7 @@
-from pathlib import Path
-
-from nav.inst import Inst
-from nav.nav_master import NavMaster
 from nav.config import DEFAULT_LOGGER
+from nav.inst import Inst
+from nav.dataset.dataset import ImageFiles
+from nav.nav_master import NavMaster
 
 
 #   *,
@@ -17,21 +16,29 @@ from nav.config import DEFAULT_LOGGER
 #   sqs_use_gapfill_kernels=False,
 #   max_allowed_time=None
 
-def process_one_image(inst_class: Inst,
-                      label_path: Path,
-                      image_path: Path) -> bool:
+def process_image_files(inst_class: type[Inst],
+                        image_files: ImageFiles) -> bool:
+
     logger = DEFAULT_LOGGER
+
+    if len(image_files.image_files) != 1:
+        logger.error("Expected exactly one image per batch; got %d", len(image_files.image_files))
+        return False
+
+    image_file = image_files.image_files[0]
+    image_path = image_file.image_file_path
+
     with logger.open(str(image_path)):
         try:
-            s = inst_class.from_file(image_path)
+            snapshot = inst_class.from_file(image_path)
         except OSError as e:
             if 'SPICE(CKINSUFFDATA)' in str(e) or 'SPICE(SPKINSUFFDATA)' in str(e):
-                logger.error(f'No SPICE kernel available for "{image_path}"')
+                logger.error('No SPICE kernel available for "%s"', image_path)
                 return False
-            logger.error(f'Error reading image "{image_path}": {e}')
+            logger.exception('Error reading image "%s"', image_path)
             return False
 
-        nm = NavMaster(s)
+        nm = NavMaster(snapshot)
         nm.compute_all_models()
 
         nm.navigate()

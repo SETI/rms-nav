@@ -66,3 +66,8 @@ class Inst(ABC, NavBase):
             A PSF model appropriate for stars observed by this instrument.
         """
         ...
+
+    @abstractmethod
+    def get_public_metadata(self) -> dict[str, Any]:
+        """Returns the public metadata for this instrument."""
+        ...

@@ -13,6 +13,7 @@ dependencies = [
   "numpy>=2.2.0",
   "rms-filecache>=3.0.0",
   "rms-imgdisp",
+  "rms-julian>=3.0.1",
   "rms-pdslogger>=3.2.1",
   "rms-pdstable>=1.0.1",
   "rms-pdstemplate>=2.3.0",

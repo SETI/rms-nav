@@ -1,15 +1,56 @@
-from typing import Any
+from pathlib import Path
+from typing import Any, cast
 
 from .dataset_pds3 import DataSetPDS3
 from nav.support.misc import safe_lstrip_zero
 
 
 class DataSetPDS3GalileoSSI(DataSetPDS3):
+    """Implements dataset access for Galileo SSI (Solid State Imager) data.
+
+    This class provides specialized functionality for accessing and parsing Galileo
+    SSI image data stored in PDS3 format.
+    """
+
+    _MIN_VOL = 2
+    _MAX_VOL = 23
+    _ALL_VOLUME_NAMES = tuple(f'GO_{x:04d}' for x in range(_MIN_VOL, _MAX_VOL+1))
+    _INDEX_COLUMNS = ('FILE_SPECIFICATION_NAME',)
+    _VOLUMES_DIR_NAME = 'volumes'
 
     # Methods inherited from DataSetPDS3
 
     @staticmethod
-    def _get_img_name_from_filespec(filespec: str) -> str | None:
+    def _get_label_filespec_from_index(row: dict[str, Any]) -> str:
+        """Extracts the label file specification from a row from an index table.
+
+        Parameters:
+            row: Dictionary containing PDS3 index table row data.
+
+        Returns:
+            The file specification string from the row.
+        """
+
+        filespec = cast(str, row['FILE_SPECIFICATION_NAME'])
+        if not filespec.endswith('.IMG'):
+            raise ValueError(f'Bad Primary File Spec "{filespec}" - '
+                             'expected ".IMG"')
+        return filespec.replace('.IMG', '.LBL')
+
+    @staticmethod
+    def _get_image_filespec_from_label_filespec(label_filespec: str) -> str:
+        """Extracts the image file specification from a label file specification.
+
+        Parameters:
+            label_filespec: The label file specification string to parse.
+
+        Returns:
+            The image file specification string.
+        """
+        return label_filespec.replace('.LBL', '.IMG')
+
+    @staticmethod
+    def _get_img_name_from_label_filespec(filespec: str) -> str | None:
         """Extract the image name (with no extension) from a file specification.
 
         Parameters:
@@ -20,13 +61,15 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
         """
 
         parts = filespec.split('/')
-        if not (2 <= len(parts) <= 3):
+        if not (2 <= len(parts) <= 4):
             raise ValueError(f'Bad Primary File Spec "{filespec}" - expected 2 or 3 '
                              'directory levels')
-        if parts[0].upper() in ('REDO', 'RAW_CAL', 'VENUS', 'EARTH', 'MOON',
-                                'GASPRA', 'IDA'):
+        if parts[0].upper() == 'REDO':
+            parts = parts[1:]
+        if parts[0].upper() in ('RAW_CAL', 'VENUS', 'EARTH', 'MOON',
+                                'GASPRA', 'IDA', 'SL9', 'EMCONJ', 'GOPEX'):
             img_name = parts[1]
-        elif parts[0].upper() in ('C9', 'C10', 'C20', 'C21', 'C22', 'C30',
+        elif parts[0].upper() in ('C3', 'C9', 'C10', 'C20', 'C21', 'C22', 'C30',
                                   'E4', 'E6', 'E11', 'E12', 'E14', 'E15',
                                   'E17', 'E18', 'E19', 'E26',
                                   'G1', 'G2', 'G7', 'G8', 'G28', 'G29',
@@ -35,7 +78,7 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
             img_name = parts[2]
         else:
             raise ValueError(f'Bad Primary File Spec "{filespec}" - bad target directory')
-        if not img_name.endswith('.IMG'):
+        if not img_name.endswith('.LBL'):
             return None
         img_name = img_name.rsplit('.', maxsplit=1)[0]
         return img_name
@@ -83,17 +126,47 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
 
         return int(img_name[1:11].lstrip('0'))
 
-    _MIN_0xxx_VOL = 2
-    _MAX_0xxx_VOL = 23
+    @staticmethod
+    def _volset_and_volume(volume: str) -> str:
+        """Get the volset and volume name.
 
-    _DATASET_LAYOUT = {
-        'all_volume_names': [f'GO_{x:04d}' for x in
-                             list(range(_MIN_0xxx_VOL, _MAX_0xxx_VOL+1))],
-        'volset_and_volume': lambda v: f'GO_0xxx/{v}',
-        'volume_to_index': lambda v: f'GO_0xxx/{v}/{v}_index.lbl',
-        'index_columns': ('FILE_SPECIFICATION_NAME',),
-        'volumes_dir_name': 'volumes',
-    }
+        Parameters:
+            volume: The volume name.
+
+        Returns:
+            The volset and volume name.
+        """
+
+        return f'GO_0xxx/{volume}'
+
+    @staticmethod
+    def _volume_to_index(volume: str) -> str:
+        """Get the index file name for a volume.
+
+        Parameters:
+            volume: The volume name.
+
+        Returns:
+            The index file name.
+        """
+
+        return f'GO_0xxx/{volume}/{volume}_index.lbl'
+
+    @staticmethod
+    def _results_path_stub(volume: str, filespec: str) -> Path:
+        """Get the results path stub for an image filespec.
+
+        Parameters:
+            volume: The volume name.
+            filespec: The filespec of the image.
+
+        Returns:
+            The results path stub. This is {volume}/{filespec} without the .IMG extension.
+        """
+
+        return Path(f'{volume}/{filespec}').with_suffix('')
+
+    # Public methods
 
     def __init__(self,
                  *args: Any,

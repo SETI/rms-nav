@@ -1,5 +1,6 @@
 from typing import Any, Optional
 
+from filecache import FCPath
 import numpy as np
 from oops import Observation
 import oops.hosts.voyager.iss
@@ -7,6 +8,7 @@ from psfmodel import GaussianPSF, PSF
 
 from nav.config import Config, DEFAULT_CONFIG, DEFAULT_LOGGER
 from nav.obs import ObsSnapshot
+from nav.support.time import et_to_utc
 from nav.support.types import PathLike
 
 from .inst import Inst
@@ -46,7 +48,9 @@ class InstVoyagerISS(Inst):
         logger = DEFAULT_LOGGER
 
         logger.debug(f'Reading Voyager ISS image {path}')
+        path = FCPath(path).absolute()
         obs = oops.hosts.voyager.iss.from_file(path)
+        obs.abspath = path
 
         label3 = obs.dict['LABEL3'].replace('FOR (I/F)*10000., MULTIPLY DN VALUE BY', '')
         factor = float(label3)
@@ -77,3 +81,38 @@ class InstVoyagerISS(Inst):
             A Gaussian PSF object with the appropriate sigma value for Voyager ISS.
         """
         return GaussianPSF(sigma=1.)  # TODO
+
+    def get_public_metadata(self) -> dict[str, Any]:
+        """Returns the public metadata for Voyager ISS.
+
+        Returns:
+            A dictionary containing the public metadata for Voyager ISS.
+        """
+
+        obs = self.obs
+        # scet_start = float(obs.dict["SPACECRAFT_CLOCK_START_COUNT"])
+        # scet_end = float(obs.dict["SPACECRAFT_CLOCK_STOP_COUNT"])
+
+        spacecraft = obs.dict['LAB02'][4]
+
+        return {
+            'image_path': str(obs.abspath),
+            'image_name': obs.abspath.name,
+            'instrument_host_lid':
+                f'urn:nasa:pds:context:instrument_host:spacecraft.vg{spacecraft}',
+            'instrument_lid':
+                f'urn:nasa:pds:context:instrument:vg{spacecraft}.iss{obs.detector[0].lower()}',
+            'start_time_utc': et_to_utc(obs.time[0]),
+            'midtime_utc': et_to_utc(obs.midtime),
+            'end_time_utc': et_to_utc(obs.time[1]),
+            'start_time_et': obs.time[0],
+            'midtime_et': obs.midtime,
+            'end_time_et': obs.time[1],
+            # 'start_time_scet': scet_start,
+            # 'midtime_scet': (scet_start + scet_end) / 2,
+            # 'end_time_scet': scet_end,
+            'image_shape_xy': obs.data_shape_uv,
+            'camera': obs.detector,
+            'exposure_time': obs.texp,
+            'filters': [obs.filter],
+        }
