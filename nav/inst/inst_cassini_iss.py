@@ -119,7 +119,7 @@ class InstCassiniISS(Inst):
             'image_shape_xy': obs.data_shape_uv,
             'camera': obs.detector,
             'exposure_time': obs.texp,
-            'filters': (obs.filter1, obs.filter2),
+            'filters': [obs.filter1, obs.filter2],
             'sampling': obs.sampling,
             'gain_mode': obs.gain_mode,
             'description': obs.dict.get("DESCRIPTION"),

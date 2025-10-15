@@ -107,5 +107,5 @@ class InstNewHorizonsLORRI(Inst):
             'image_shape_xy': obs.data_shape_uv,
             'camera': 'LORRI',
             'exposure_time': obs.texp,
-            'filters': None,
+            'filters': [],
         }

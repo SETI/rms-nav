@@ -46,7 +46,7 @@ class ImageFile:
 class ImageFiles:
     image_files: list[ImageFile]
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[ImageFile]:
         return iter(self.image_files)
 
     def __len__(self) -> int:

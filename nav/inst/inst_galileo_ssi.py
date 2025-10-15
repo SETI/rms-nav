@@ -105,5 +105,5 @@ class InstGalileoSSI(Inst):
             'image_shape_xy': obs.data_shape_uv,
             'camera': 'SSI',
             'exposure_time': obs.texp,
-            'filter': obs.filter,
+            'filters': [obs.filter],
         }

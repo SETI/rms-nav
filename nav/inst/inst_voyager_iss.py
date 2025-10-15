@@ -114,5 +114,5 @@ class InstVoyagerISS(Inst):
             'image_shape_xy': obs.data_shape_uv,
             'camera': obs.detector,
             'exposure_time': obs.texp,
-            'filters': obs.filter,
+            'filters': [obs.filter],
         }

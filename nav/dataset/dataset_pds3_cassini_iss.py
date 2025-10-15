@@ -179,9 +179,9 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         """Check additional image selection criteria.
 
         Parameters:
-            img_path: The path to the image.
+            _img_path: The path to the image.
             img_name: The name of the image.
-            img_num: The number of the image.
+            _img_num: The number of the image.
             arguments: The parsed arguments.
 
         Returns:
