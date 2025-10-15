@@ -55,6 +55,7 @@ class ImageFiles:
     def __getitem__(self, idx: int) -> ImageFile:
         return self.image_files[idx]
 
+
 class DataSet(ABC, NavBase):
     def __init__(self,
                  *,
