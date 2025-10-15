@@ -35,7 +35,7 @@ def process_image_files(inst_class: type[Inst],
             if 'SPICE(CKINSUFFDATA)' in str(e) or 'SPICE(SPKINSUFFDATA)' in str(e):
                 logger.error('No SPICE kernel available for "%s"', image_path)
                 return False
-            logger.error('Error reading image "%s"', image_path, exc_info=True)
+            logger.exception('Error reading image "%s"', image_path)
             return False
 
         nm = NavMaster(snapshot)
