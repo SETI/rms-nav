@@ -13,6 +13,15 @@ from nav.support.nav_base import NavBase
 
 @dataclass
 class ImageFile:
+    """Represents a single image file with its metadata and lazy-loaded paths.
+
+    Attributes:
+        image_file_url: Remote URL for the image file
+        label_file_url: Remote URL for the label file
+        results_path_stub: Local path stub for storing results
+        index_file_row: Optional metadata from index files
+    """
+
     image_file_url: FCPath
     label_file_url: FCPath
     results_path_stub: Path
@@ -44,6 +53,11 @@ class ImageFile:
 
 @dataclass
 class ImageFiles:
+    """A collection of ImageFile objects that behaves like a sequence.
+
+    Supports iteration, indexing, and length operations on the wrapped image files.
+    """
+
     image_files: list[ImageFile]
 
     def __iter__(self) -> Iterator[ImageFile]:
