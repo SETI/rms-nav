@@ -17,6 +17,7 @@ from nav.annotation import (Annotation,
                             TEXTINFO_RIGHT_ARROW,
                             TEXTINFO_BOTTOM_ARROW,
                             TEXTINFO_TOP_ARROW)
+from nav.config import Config
 from nav.support.constants import HALFPI
 from nav.support.image import (filter_downsample,
                                shift_array)
@@ -35,17 +36,17 @@ class NavModelBody(NavModel):
                  body_name: str,
                  *,
                  inventory: Optional[dict[str, Any]] = None,
-                 **kwargs: Any):
+                 config: Optional[Config] = None):
         """Creates a navigation model for a planetary body.
 
         Parameters:
             obs: The observation object containing the image data.
             body_name: The name of the planetary body.
             inventory: Optional dictionary containing inventory information for the body.
-            **kwargs: Additional keyword arguments to pass to the parent class.
+            config: Configuration object to use. If None, uses DEFAULT_CONFIG.
         """
 
-        super().__init__(obs, logger_name='NavModelBody', **kwargs)
+        super().__init__(obs, config=config)
 
         self._body_name = body_name.upper()
 

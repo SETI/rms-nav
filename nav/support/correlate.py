@@ -1,701 +1,417 @@
 # mypy: ignore-errors
-from multiprocessing import Value
-import pprint
-from typing import Any, Callable, Optional, cast
 
-from imgdisp import ImageDisp
-import matplotlib.pyplot as plt
+from typing import Any
+
 import numpy as np
-import numpy.linalg as linalg
-from pdslogger import PdsLogger
-import psfmodel.gaussian as gauss_psf
-import scipy.fftpack as fftpack
-import tkinter as tk
+from numpy.fft import fft2, ifft2, fftfreq, ifftshift
 
-from nav.config import DEFAULT_CONFIG
-from nav.support.image import unpad_array, pad_array_to_power_of_2
-from nav.support.types import NDArrayFloatType
+from nav.support.image import (crop_center,
+                               normalize_array,
+                               pad_top_left)
+from nav.support.misc import mad_std
+from nav.support.types import NDArrayFloatType, NDArrayBoolType
 
+# ==============================================================
+# Small utilities
+# ==============================================================
 
-#==============================================================================
-#
-# CONSTANTS
-#
-#==============================================================================
+def int_to_signed(idx, size):
+    """Map [0..size-1] argmax index to signed displacement coordinate."""
+    return idx if idx < size//2 else idx - size
 
-DEBUG_CORRELATE_PLOT = False
-DEBUG_CORRELATE_IMGDISP = False
+# ==============================================================
+# Fourier helpers
+# ==============================================================
 
+def fourier_shift(img: NDArrayFloatType, dy: float, dx: float) -> NDArrayFloatType:
+    """Subpixel shift via Fourier shift theorem (positive = down/right)."""
+    img_v, img_u = img.shape
+    fy = fftfreq(img_v)[:, None]
+    fx = fftfreq(img_u)[None, :]
+    phase = np.exp(-2j * np.pi * (dy*fy + dx*fx))
+    return np.real(ifft2(fft2(img) * phase))
 
-#==============================================================================
-#
-# CORRELATION ROUTINES
-#
-#==============================================================================
+def upsampled_dft(X: NDArrayFloatType,
+                  up_factor: int,
+                  region_sz: tuple[int, int],
+                  offsets: tuple[int, int]) -> NDArrayFloatType:
+    """Localized upsampled DFT (Guizar–Sicairos)."""
+    X_v, X_u = X.shape
+    region_v, region_u = region_sz
+    oy, ox = offsets
+    ky = ifftshift(np.arange(X_v))
+    kx = ifftshift(np.arange(X_u))
+    a = np.arange(region_v) - oy
+    b = np.arange(region_u) - ox
+    j2pi = 1j * 2.0 * np.pi
+    Er = np.exp((-j2pi / (X_v*up_factor)) * (a[:, None] @ ky[None, :]))
+    Ec = np.exp((-j2pi / (X_u*up_factor)) * (kx[:, None] @ b[None, :]))
+    return Er @ X @ Ec
 
-def correlate2d(image: NDArrayFloatType,
-                model: NDArrayFloatType,
-                normalize: bool = False,
-                retile: bool = False) -> NDArrayFloatType:
-    """Correlates the image with the model using the correlation theorem.
+# ==============================================================
+# Masked NCC (linear correlation via padding)
+# ==============================================================
 
-    Correlation is performed using the 'correlation theorem' that equates
-    correlation with a Fourier Transform.
-
-    Parameters:
-        image: The image array.
-        model: The model array to correlate against image.
-        normalize: If True, normalize the correlation result to [-1,1].
-        retile: If True, the resulting correlation matrix is shifted by 1/2 along
-               each dimension so that (0,0) is now in the center pixel (shape[0]//2,shape[1]//2).
-
-    Returns:
-        The 2-D correlation matrix.
+def masked_ncc(image: NDArrayFloatType,
+               model: NDArrayFloatType,
+               mask: NDArrayBoolType) -> NDArrayFloatType:
     """
-
-    assert image.shape == model.shape
-
-    if DEBUG_CORRELATE_IMGDISP:
-        print('correlated2d: image, model')
-        imdisp = ImageDisp([image, model],
-                           canvas_size=(512,512),
-                           enlarge_limit=10,
-                           auto_update=True)
-        tk.mainloop()
-
-    # Padding to a power of 2 makes FFT _much_ faster
-    newimage, _ = pad_array_to_power_of_2(image)
-    newmodel, padding = pad_array_to_power_of_2(model)
-
-    image_fft = fftpack.fft2(newimage)
-    model_fft = fftpack.fft2(newmodel)
-    corr = np.real(fftpack.ifft2(image_fft * np.conj(model_fft)))
-
-    if normalize:
-        norm_amt = np.sqrt(np.sum(image**2) * np.sum(model**2))
-        if norm_amt != 0:
-            corr /= norm_amt
-
-    if retile:
-        # This maps (0,0) into (-y,-x) == (shape[0]//2, shape[1]//2)
-        y = corr.shape[0] // 2
-        x = corr.shape[1] // 2
-        offset_image = np.zeros(corr.shape, image.dtype)
-        offset_image[ 0:y, 0:x] = corr[-y: ,-x: ]
-        offset_image[ 0:y,-x: ] = corr[-y: , 0:x]
-        offset_image[-y: , 0:x] = corr[ 0:y,-x: ]
-        offset_image[-y: ,-x: ] = corr[ 0:y, 0:x]
-        corr = offset_image
-        # corr = np.fft.fftshift(corr)
-
-    corr = unpad_array(corr, padding)
-
-    return corr
-
-def corr_analyze_peak(corr, offset_u, offset_v, large_psf=True,
-                      blur=0):
-    """Analyzes the correlation peak with a 2-D Gaussian fit.
-
-    Parameters:
-        corr: A 2-D correlation matrix with (0,0) located in the center pixel
-             (shape[0]//2,shape[1]//2).
-        offset_u: The U coordinate of the peak in corr.
-        offset_v: The V coordinate of the peak in corr.
-        large_psf: True to allow much larger PSF sizes.
-        blur: The amount of blur applied to the image, used to determine a starting sigma.
-
-    Returns:
-        A dict containing analysis results including position, errors, and PSF parameters:
-        'x', 'x_err', 'y', 'y_err', 'xy_err', 'xy_angle', 'xy_corr',
-        'xy_rot_err_1' (long axis), 'xy_rot_err_2', 'xy_rot_angle',
-        'sigma_1', 'sigma_1_err', 'sigma_2', 'sigma_2_err',
-        'sigma_angle', 'sigma_angle_err', 'scale', 'scale_err',
-        'base', 'base_err', 'leastsq_mesg', 'leastsq_ier',
-        'subimg', 'psf', 'scaled_psf'.
-        Note that 'sigma_1' will always be the long axis of the ellipse,
-        and 'sigma_angle' will point along that long axis.
+    Masked normalized cross-correlation surface between image and model
+    with mask.
+    All must be same padded shape.
     """
-    debug = False
-    last_x = last_y = last_psf_ret = None
-    if large_psf:
-        psf_sigma_size_list = [
-            ( 5,  60),
-            ( 7, 120),
-            ( 9, 120),
-            (11, 120),
-            (13, 120),
-            (15, 120),
-            (17, 120),
-            (21, 120),
-            (25, 120),
-            (31, 120),
-            (35, 120),
-            ( 3,  60)]
-    else:
-        psf_sigma_size_list = [
-            ( 5,  10),
-            ( 7,  30),
-            ( 9,  30),
-            ( 3,  10)]
-    for psf_size, sigma_max in psf_sigma_size_list:
-        psf_size_x = psf_size_y = psf_size
+    image_fft = fft2(image)
+    model_fft = fft2(model * mask)
+    mask_fft = fft2(mask)
 
-        if False:
-            subimg = corr[offset_v-psf_size_y//2:offset_v+psf_size_y//2+1,
-                          offset_u-psf_size_x//2:offset_u+psf_size_x//2+1]
-            plot3d(subimg)
-            # plt.imshow(subimg)
-            # plt.show()
-        g = gauss_psf.GaussianPSF(sigma_angle=None,
-                                  sigma_x_range=(0, sigma_max),
-                                  sigma_y_range=(0, sigma_max))
-        if debug:
-            print('TRYING', sigma_max, psf_size_x, psf_size_y)
+    # numerator
+    num = np.real(ifft2(image_fft * np.conj(model_fft)))
 
-        search_limit_x = psf_size_x//2+1
-        search_limit_y = psf_size_y//2+1
-        psf_ret = g.find_position(corr, (psf_size_y,psf_size_x),
-                                  (offset_v, offset_u),
-                                  bkgnd_degree=None,
-                                  allow_nonzero_base=True,
-                                  use_angular_params=False,
-                                  search_limit=(search_limit_x,
-                                                search_limit_y))
-        if psf_ret is None:
-            if debug:
-                print('psf_ret is None')
-            continue
-        if psf_ret[2]['leastsq_cov'] is None:
-            if debug:
-                print('leastsq_cov is None')
-            continue
-        if (abs(psf_ret[2]['x']-.5) > search_limit_x/2 or
-            abs(psf_ret[2]['y']-.5) > search_limit_y/2):
-            if debug:
-                print('X Y beyond limit', psf_ret[2]['x']-.5, psf_ret[2]['y']-.5)
-            continue
+    # local stats for I over mask support
+    sumI = ifft2(image_fft * np.conj(mask_fft))
+    sumI2 = ifft2(fft2(image**2) * np.conj(mask_fft))
 
-        break
+    sumW = np.sum(mask)
+    meanM = np.sum(model*mask) / (sumW + 1e-12)
+    varM = np.sum(((model*mask) - meanM)**2) / (sumW + 1e-12)
 
-    if psf_ret is None or psf_ret[2]['leastsq_cov'] is None:
-        return None
+    meanI = sumI / (sumW + 1e-12)
+    varI = (sumI2/(sumW + 1e-12)) - meanI**2
+    varI[varI < 0] = 0.0
 
-    details = {}
-    for key in ('subimg',
-                'psf',
-                'scaled_psf',
-                'x', 'x_err',
-                'y', 'y_err',
-                'sigma_x', 'sigma_x_err',
-                'sigma_y', 'sigma_y_err',
-                'sigma_angle', 'sigma_angle_err',
-                'scale', 'scale_err',
-                'base', 'base_err',
-                'leastsq_cov',
-                'leastsq_infodict',
-                'leastsq_mesg',
-                'leastsq_ier'):
-        new_key = key.replace('sigma_x', 'sigma_1')
-        new_key = new_key.replace('sigma_y', 'sigma_2')
-        details[new_key] = psf_ret[2][key]
+    denom = np.sqrt(varI * varM + 1e-12)
+    return (num - np.real(meanI)*np.sum(model*mask)) / (denom + 1e-12)
 
-    # The PSF is centered with (0.5,0.5) as the center of a pixel, but we want
-    # (0,0) to be the center of a pixel
-    details['x'] = details['x'] - 0.5
-    details['y'] = details['y'] - 0.5
+"""CodeRabbit says:
 
-    details['sigma_angle'] = details['sigma_angle'] % np.pi
-    details['sigma_1'] = abs(details['sigma_1'])
-    details['sigma_2'] = abs(details['sigma_2'])
+Fix masked NCC math; current normalization is incorrect
 
-    if (details['sigma_1'] > sigma_max*0.95 or
-        details['sigma_2'] > sigma_max*0.95):
-        details['sigma_1'] = None
-        details['sigma_1_err'] = None
-        details['sigma_2'] = None
-        details['sigma_2_err'] = None
-        details['sigma_angle'] = None
-        details['sigma_angle_err'] = None
-    else:
-        if details['sigma_1'] < details['sigma_2']:
-            # Make angle_1 always be the long axis
-            details['sigma_1'], details['sigma_2'] = details['sigma_2'], details['sigma_1']
-            details['sigma_angle'] = (details['sigma_angle']+np.pi/2)%np.pi
+The numerator misses the symmetric mean terms and the denominator uses a scalar varM but omits shift‑wise varI properly. Use standard masked NCC with shift‑wise sums via FFT.
 
-    if details['x_err'] > 100 or details['y_err'] > 100: # Magic constant
-        details['x_err'] = None
-        details['y_err'] = None
-        details['xy_err'] = None
-        details['xy_angle'] = None
-        details['xy_corr'] = None
-        details['xy_rot_angle'] = None
-        details['xy_rot_err_1'] = None
-        details['xy_rot_err_2'] = None
-    else:
-        details['xy_err'] = details['leastsq_cov'][1,0]
-        details['xy_angle'] = (np.pi/2-.5*np.arctan(
-                                    2*details['xy_err']/
-                                    (details['x_err']**2-details['y_err']**2)))
-        details['xy_corr'] = details['xy_err'] / details['x_err'] / details['y_err']
-        details['xy_rot_angle'] = details['xy_angle']
-        eigv, _ = linalg.eig(details['leastsq_cov'][:2,:2])
-        eigv = np.real(eigv)
-        eigv = np.clip(eigv, 0.0, None)
-        xy_semi_axes = np.sqrt(eigv)
-        details['xy_rot_err_1'] = np.max(np.sqrt(eigv))
-        details['xy_rot_err_2'] = np.min(np.sqrt(eigv))
-        if details['x_err'] > details['y_err']:
-            details['xy_rot_angle'] = (details['xy_rot_angle']+np.pi/2)%np.pi
+-def masked_ncc(I, M, W):
++def masked_ncc(I, M, W):
+@@
+-    FI = fft2(I)
+-    FM = fft2(M * W)
+-    FW = fft2(W)
+-
+-    # numerator
+-    num = np.real(ifft2(FI * np.conj(FM)))
+-
+-    # local stats for I over mask support
+-    sumI = ifft2(FI * np.conj(FW))
+-    sumI2 = ifft2(fft2(I**2) * np.conj(FW))
+-
+-    sumW = np.sum(W)
+-    meanM = np.sum(M*W) / (sumW + 1e-12)
+-    varM = np.sum(((M*W) - meanM)**2) / (sumW + 1e-12)
+-
+-    meanI = sumI / (sumW + 1e-12)
+-    varI = (sumI2/(sumW + 1e-12)) - meanI**2
+-    varI[varI < 0] = 0.0
+-
+-    denom = np.sqrt(varI * varM + 1e-12)
+-    return (num - np.real(meanI)*np.sum(M*W)) / (denom + 1e-12)
++    FI = fft2(I)
++    FW = fft2(W)
++    FMW = fft2(M * W)
++
++    # Sums over shifting mask support
++    sumW = np.sum(W) + 1e-12
++    sumIW = ifft2(FI * np.conj(FW))
++    sumI2W = ifft2(fft2(I**2) * np.conj(FW))
++
++    # Model stats (constant over shifts)
++    sumMW = np.sum(M * W)
++    meanM = sumMW / sumW
++    varMW = np.sum(((M - meanM) * W)**2) + 1e-12
++
++    # Cross and means
++    sumIMW = ifft2(FI * np.conj(FMW))
++    meanI = sumIW / sumW
++
++    # Numerator of NCC
++    num = sumIMW - meanI * sumMW - meanM * sumIW + meanI * meanM * sumW
++
++    # Denominator: sqrt( var_I(s) * var_M ), with var_I(s) under mask W
++    varI = sumI2W - 2.0 * meanI * sumIW + (meanI**2) * sumW
++    varI[varI < 0] = 0.0
++    denom = np.sqrt(varI * varMW) + 1e-12
++    return np.real(num) / denom
+"""
 
-    #http://www.cs.utah.edu/~tch/CS4300/resources/refs/ErrorEllipses.pdf
-    if False:
-        if True:
-            if details['sigma_angle'] is not None:
-                print('GAUSS ANGLE', np.degrees(details['sigma_angle']))
-            if details['xy_angle'] is not None:
-                print('COV ANGLE', np.degrees(details['xy_angle']))
-            if details['xy_rot_angle'] is not None:
-                print('XYROT ANGLE', np.degrees(details['xy_rot_angle']))
-            pp = pprint.PrettyPrinter(indent=4)
-            pp.pprint(details)
-        psf = details['subimg']
-        the_max = np.max(psf)
-        fig = plt.figure(figsize=(11,8))
-        ax = fig.add_subplot(221)
-        contour_levels = [x*.05*the_max for x in range(20)]
-        ax.contour(psf[::-1], levels=contour_levels)
-        ax.set_title('Image')
-        psf = details['scaled_psf']
-        the_max = np.max(psf)
-        ax = fig.add_subplot(222)
-        ax.contour(psf[::-1], levels=contour_levels)
-        if details['sigma_angle'] is None:
-            ax.set_title('Scaled PSF')
-        else:
-            ax.set_title('Scaled PSF (%.2fx%.2f @ %.2f)' %
-                         (details['sigma_1'], details['sigma_1'],
-                         np.degrees(details['sigma_angle'])))
-        ax = fig.add_subplot(223)
-        ax.imshow(psf)
-        ax.set_title('Correlation')
-        ax = fig.add_subplot(224, projection='3d')
-        plot3d(details['subimg'], details['scaled_psf'], ax=ax,
-               title='PSF and Image', show=False)
-        plt.tight_layout()
-        plt.show()
+# ==============================================================
+# Peak metrics & selection
+# ==============================================================
 
-    return details
+def psr_metric(corr: NDArrayFloatType,
+               rc: tuple[int, int],
+               guard: int = 5) -> float:
+    corr_v, corr_u = corr.shape
+    row, col = rc
+    peak = corr[row, col]
+    y, x = np.ogrid[:corr_v, :corr_u]
+    mask = (y-row)**2 + (x-col)**2 > guard**2
+    bg = corr[mask]
+    return (peak - bg.mean()) / (bg.std() + 1e-12)
 
-def corr_log_xy_err(logger, psf_details):
-    """Logs correlation position and error information to the provided logger.
+def pmr_metric(corr: NDArrayFloatType, peak_val: float) -> float:
+    return peak_val / (corr.mean() + 1e-12)
 
-    Parameters:
-        logger: The logger object to write information to.
-        psf_details: Dictionary containing PSF analysis results from corr_analyze_peak.
-    """
+def per_metric(corr: NDArrayFloatType, peak_val: float) -> float:
+    return peak_val / (np.sqrt(np.sum(corr**2)) + 1e-12)
 
-    str_list = []
-    if psf_details['xy_rot_err_1'] is None:
-        logger.info('  dX %.3f dY %.3f (uncertainty failed)' % (psf_details['x'], psf_details['y']))
-    else:
-        logger.info('  dX %.3f dY %.3f (%.3fx%.3f @ %.3f)',
-                    psf_details['x'], psf_details['y'],
-                    psf_details['xy_rot_err_1'], psf_details['xy_rot_err_2'],
-                    np.degrees(psf_details['xy_rot_angle']))
-    logger.info('    %s', psf_details['leastsq_mesg'])
-
-def corr_xy_err_to_str(offset, uncertainty, extra=None, extra_args=None):
-    """Converts correlation offset and uncertainty information to a formatted string.
-
-    Parameters:
-        offset: A tuple (x,y) containing the offset coordinates.
-        uncertainty: A tuple (xy_rot_err_1, xy_rot_err_2, xy_rot_angle) containing uncertainty values.
-        extra: Optional format string to append additional information.
-        extra_args: Optional arguments for the extra format string.
-
-    Returns:
-        A formatted string representation of the offset and uncertainty.
-    """
-
-    # offset is (x,y)
-    # uncertainty is (xy_rot_err_1, xy_rot_err_2, xy_rot_angle)
-    if (offset is None or
-        (offset[0] is None and offset[1] is None)):
-        return 'N/A'
-    if extra is None:
-        extra = ''
-    else:
-        extra = ' '+(extra % extra_args)
-    ret = '%.2f,%.2f' % offset
-    if (uncertainty is None or
-        (uncertainty[0] is None and uncertainty[1] is None and
-         uncertainty[2] is None)):
-         return ret+extra
-    err1 = 'UNK'
-    if uncertainty[0] is not None:
-        err1 = ('%.2f' % uncertainty[0])
-    err2 = 'UNK'
-    if uncertainty[1] is not None:
-        err2 = ('%.2f' % uncertainty[1])
-    angle = 'UNK'
-    if uncertainty[2] is not None:
-        angle = ('%.2f' % np.degrees(uncertainty[2]))
-    return ret+' ('+err1+'x'+err2+' @ '+angle+')'+extra
-
-def corr_psf_xy_err_to_str(offset, psf_details, extra=None, extra_args=None):
-    """Converts correlation offset and PSF details to a formatted string.
-
-    Parameters:
-        offset: A tuple (x,y) containing the offset coordinates.
-        psf_details: Dictionary containing PSF analysis results from corr_analyze_peak.
-        extra: Optional format string to append additional information.
-        extra_args: Optional arguments for the extra format string.
-
-    Returns:
-        A formatted string representation of the offset and uncertainty from PSF details.
-    """
-
-    if psf_details is None:
-        return corr_xy_err_to_str(offset, (None, None, None), extra, extra_args)
-    return corr_xy_err_to_str(offset,
-                              (psf_details['xy_rot_err_1'],
-                               psf_details['xy_rot_err_2'],
-                               psf_details['xy_rot_angle']),
-                              extra, extra_args)
-
-def _find_correlated_offset(corr: NDArrayFloatType,
-                            search_size_min: tuple[int, int],
-                            search_size_max: tuple[int, int],
-                            max_offsets: int,
-                            peak_margin: int,
-                            logger: PdsLogger):
-    """Finds the offset that best aligns an image and a model given the correlation.
-
-    The offset is found by looking for the maximum correlation value within
-    the given search range. Multiple offsets may be returned, in which case
-    each peak and the area around it is eliminated from future consideration
-    before the next peak is found.
-
-    Parameters:
-        corr: A 2-D correlation matrix with (0,0) located in the center pixel
-              (shape[0]//2,shape[1]//2).
-        search_size_min: Minimum search range as (min_v, min_u) from offset zero.
-        search_size_max: Maximum search range as (max_v, max_u) from offset zero.
-        max_offsets: The maximum number of offsets to return.
-        peak_margin: The number of correlation pixels around a peak to remove from future
-                    consideration before finding the next peak.
-        logger: Logger object for recording diagnostic information.
-
-    Returns:
-        List of tuples, each containing:
-        - (offset_v, offset_u): The offset in the V and U directions.
-        - peak_value: The correlation value at the peak in the range [-1,1].
-        - peak_data: A tuple containing the correlation array and U,V offset inside
-                    that array suitable for passing to corr_analyze_peak.
-    """
-
-    search_size_min_v, search_size_min_u = search_size_min
-    search_size_max_v, search_size_max_u = search_size_max
-
-    logger.debug(f'Search V {search_size_min_v} to {search_size_max_v}, '
-                 f'U {search_size_min_u} to {search_size_max_u} #OFFSETS '
-                 f'{max_offsets} PEAKMARGIN {peak_margin}')
-
-    if not (0 <= search_size_min_v <= search_size_max_v and
-            0 <= search_size_min_u <= search_size_max_u and
-            0 <= search_size_max_v <= corr.shape[0]//2 and
-            0 <= search_size_max_u <= corr.shape[1]//2):
-        raise ValueError('Bad parameters to _find_correlated_offset')
-
-    # Extract a slice from the correlation matrix that is the maximum search size and then
-    # make a "hole" in the center to represent the minimum search size.
-    # Note: SLICE is a Python built-in!
-    slyce = corr[corr.shape[0]//2-search_size_max_v:corr.shape[0]//2+search_size_max_v+1,
-                 corr.shape[1]//2-search_size_max_u:corr.shape[1]//2+search_size_max_u+1]
-    slyce = slyce.copy()
-
-    global_min = np.min(slyce)
-
-    if search_size_min_u != 0 and search_size_min_v != 0:
-        slyce[slyce.shape[0]//2-search_size_min_v+1:
-                slyce.shape[0]//2+search_size_min_v,
-              slyce.shape[1]//2-search_size_min_u+1:
-                slyce.shape[1]//2+search_size_min_u] = global_min
-
-    # Iteratively search for the next peak.
-    ret_list: list[tuple[tuple[int, int], float, tuple[NDArrayFloatType, int, int]] |
-                   None] = []
-    all_offset_u = []
-    all_offset_v = []
-
-    while len(ret_list) != max_offsets:
-        peak_num = len(ret_list) + 1
-        peak = np.where(slyce == slyce.max())
-
-        if DEBUG_CORRELATE_PLOT:
-            print(f'_find_correlated_offset: peaks {peak}')
-            plt.jet()
-            plt.imshow(slyce, interpolation='none')
-            # plt.contour(slyce)
-            plt.plot((search_size_max_u,search_size_max_u),
-                     (0,2*search_size_max_v), 'k')
-            plt.plot((0,2*search_size_max_u),
-                     (search_size_max_v,search_size_max_v), 'k')
-            if len(peak[0]) == 1:
-                print('Including sole peak')
-                plt.plot(peak[1], peak[0], 'wo')
-            else:
-                print('Multiple peaks, not including any')
-            x_n_ticks = 5
-            x_tick_step = max(int(search_size_max_u / x_n_ticks), 1)
-            x_ticks = list(range(-x_tick_step * x_n_ticks,
-                                 x_tick_step * x_n_ticks+1,
-                                 x_tick_step))
-            plt.xticks([x+search_size_max_u for x in x_ticks],
-                       [str(x) for x in x_ticks])
-            y_n_ticks = 5
-            y_tick_step = max(int(search_size_max_v / y_n_ticks), 1)
-            y_ticks = list(range(-y_tick_step * y_n_ticks,
-                                 y_tick_step * y_n_ticks+1,
-                                 y_tick_step))
-            plt.yticks([x+search_size_max_v for x in y_ticks],
-                       [str(x) for x in y_ticks])
-            plt.xlabel('X')
-            plt.ylabel('Y')
-            plt.tight_layout()
-            # plt.savefig('output.png')
-            plt.show()
-
-        if DEBUG_CORRELATE_IMGDISP > 1:
-            print('_find_correlated_offset: slyce')
-            toplevel = tk.Tk()
-            imdisp = ImageDisp([slyce], parent=toplevel,
-                               canvas_size=(512, 512),
-                               allow_enlarge=True, enlarge_limit=10,
-                               auto_update=True)
-            tk.mainloop()
-
-        if len(peak[0]) != 1:
-            logger.debug(f'Peak #{peak_num} - No unique peak found - aborting')
+def nms_topk(corr: NDArrayFloatType,
+             k: int = 5,
+             radius: int = 5) -> list[tuple[int, int, float]]:
+    """Non-maximum suppression to get top-k peaks."""
+    corr_v, corr_u = corr.shape
+    work = corr.copy()
+    peaks = []
+    for _ in range(k):
+        idx = np.argmax(work)
+        v = work.flat[idx]
+        if not np.isfinite(v):
             break
+        row, col = np.unravel_index(idx, work.shape)
+        peaks.append((row, col, v))
+        y, x = np.ogrid[:corr_v, :corr_u]
+        work[(y-row)**2 + (x-col)**2 <= radius**2] = -np.inf
+    return peaks
 
-        peak_v = peak[0][0]
-        peak_u = peak[1][0]
-        offset_v = peak_v-search_size_max_v # Compensate for slice location
-        offset_u = peak_u-search_size_max_u
-        peak_val = slyce[peak_v,peak_u]
+# ==============================================================
+# Fisher / CRLB
+# ==============================================================
 
-        logger.debug(f'Peak #{peak_num} - Trial offset {offset_v},{offset_u} '
-                     f'CORR {peak_val:.7f}')
+def fisher_covariance(model_aligned: NDArrayFloatType,
+                      sigma_n: float) -> NDArrayFloatType:
+    sy = np.gradient(model_aligned, axis=0)
+    sx = np.gradient(model_aligned, axis=1)
+    Sxx = np.sum(sx * sx)
+    Syy = np.sum(sy * sy)
+    Sxy = np.sum(sx * sy)
+    F = (1.0/(sigma_n**2 + 1e-18)) * np.array([[Sxx, Sxy],[Sxy, Syy]])
+    return np.linalg.pinv(F + 1e-12*np.eye(2))
 
-        if peak_val <= 0:
-            logger.debug(f'Peak #{peak_num} - Correlation value is negative - aborting')
-            break
+# ==============================================================
+# Single-scale, K-peak evaluation (with optional prior)
+# ==============================================================
 
-        all_offset_v.append(offset_v)
-        all_offset_u.append(offset_u)
-
-        if peak_num < max_offsets:
-            # Eliminating this peak from future consideration if we're going
-            # to be looping again.
-            min_u = np.clip(offset_u-peak_margin+slyce.shape[1]//2, 0, slyce.shape[1]-1)
-            max_u = np.clip(offset_u+peak_margin+slyce.shape[1]//2, 0, slyce.shape[1]-1)
-            min_v = np.clip(offset_v-peak_margin+slyce.shape[0]//2, 0, slyce.shape[0]-1)
-            max_v = np.clip(offset_v+peak_margin+slyce.shape[0]//2, 0, slyce.shape[0]-1)
-            slyce[min_v:max_v+1,min_u:max_u+1] = np.min(slyce)
-
-        if (abs(offset_v) == search_size_max_v or
-            abs(offset_u) == search_size_max_u):
-            logger.debug(f'Peak #{peak_num} - Offset at edge of search area - BAD')
-            # Go ahead and store a None result. This way we will eventually
-            # hit max_offsets and exit. Otherwise we could be looking for
-            # a very long time.
-            ret_list.append(None)
-            continue
-
-        for i in range(len(all_offset_u)):
-            if (((offset_u == all_offset_u[i]-peak_margin-1 or
-                  offset_u == all_offset_u[i]+peak_margin+1) and
-                 offset_v-peak_margin <= all_offset_v[i] <= offset_v+peak_margin) or
-                ((offset_v == all_offset_v[i]-peak_margin-1 or
-                  offset_v == all_offset_v[i]+peak_margin+1) and
-                 offset_u-peak_margin <= all_offset_u[i] <= offset_u+peak_margin)):
-                logger.debug(
-                    f'Peak #{peak_num} - Offset at edge of previous blackout area - BAD')
-                ret_list.append(None)
-                break
-        else:
-            ret_list.append(((offset_v, offset_u), peak_val,
-                             (corr,
-                              offset_u+corr.shape[1]//2, offset_v+corr.shape[0]//2)))
-
-    # Now remove all the Nones from the returned list.
-    while None in ret_list:
-        ret_list.remove(None)
-
-    return ret_list
-
-def find_correlation_and_offset(image: NDArrayFloatType,
-                                model: NDArrayFloatType,
-                                *,
-                                search_size_min: int | tuple[int, int] = 0,
-                                search_size_max: Optional[int | tuple[int, int]] = None,
-                                max_offsets: int = 1,
-                                peak_margin: int = 3,
-                                extfov_margin_vu: tuple[int, int] = (0, 0),
-                                image_filter: Optional[Callable] = None,
-                                model_filter: Optional[Callable] = None,
-                                logger: Optional[PdsLogger] = None
-                                ) -> list[tuple[tuple[int, int],
-                                                float,
-                                                tuple[NDArrayFloatType, int, int]]]:
-    """Finds the offset that best aligns an image and a model through correlation analysis.
+def evaluate_candidate(image_pad: NDArrayFloatType,
+                       model_pad: NDArrayFloatType,
+                       mask_pad: NDArrayBoolType,
+                       corr: NDArrayFloatType,
+                       rc: tuple[int, int],
+                       upsample_factor: int,
+                       model_shape: tuple[int, int],
+                       image_shape: tuple[int, int],
+                       prior_shift=None,
+                       prior_weight=0.0,
+                       metric='psr'):
+    """
+    Evaluate a candidate for the navigation.
 
     Parameters:
-        image: The image array to analyze.
-        model: The model array to correlate against the image.
-        search_size_min: Minimum search range from offset zero. Can be a single int or (min_v, min_u).
-        search_size_max: Maximum search range from offset zero. Can be a single int or (max_v, max_u).
-        max_offsets: Maximum number of offset candidates to return.
-        peak_margin: Number of correlation pixels around a peak to exclude when finding next peaks.
-        extfov_margin_vu: The amount (V,U) the image and model have been extended on each side.
-                         Used to search variations where model margins are shifted onto the image.
-        image_filter: Optional filter function to apply to the image before correlation.
-        model_filter: Optional filter function to apply to each sub-model before correlation.
-        logger: Optional logger object for recording diagnostic information.
+        image_pad: The padded image.
+        model_pad: The padded model.
+        mask_pad: The padded mask.
+        corr: The correlation matrix.
+        rc: The row and column of the candidate.
+        upsample_factor: The upsample factor.
+        model_shape: The shape of the model.
+        image_shape: The shape of the image.
+        prior_shift: The prior shift.
+        prior_weight: The prior weight.
+        metric: The metric to use for the navigation.
 
     Returns:
-        List of tuples, each containing:
-        - (offset_v, offset_u): The offset in the V and U directions.
-        - peak_value: The correlation value at the peak in the range [-1,1].
-        - peak_data: A tuple containing the correlation array and U,V offset inside
-                   that array suitable for passing to corr_analyze_peak.
+        A dictionary containing the navigation result.
     """
 
-    if logger is None:
-        logger = DEFAULT_CONFIG.logger
+    corr_v, corr_h = corr.shape
+    p, q = rc
+    dy_i, dx_i = int_to_signed(p, corr_v), int_to_signed(q, corr_h)
 
-    if np.shape(search_size_min) == ():
-        search_size_min_v = cast(int, search_size_min)
-        search_size_min_u = cast(int, search_size_min)
+    # Subpixel refinement: local upsampled DFT of correlation spectrum numerator
+    spec = fft2(image_pad) * np.conj(fft2(model_pad * mask_pad))
+    oy = int(np.floor(upsample_factor*0.5))
+    ox = int(np.floor(upsample_factor*0.5))
+    Up = upsampled_dft(spec, upsample_factor, (3,3),
+                       [oy - dy_i*upsample_factor, ox - dx_i*upsample_factor])
+    upy, upx = np.unravel_index(np.argmax(np.abs(Up)), Up.shape)
+    dy = dy_i + (upy - oy) / upsample_factor
+    dx = dx_i + (upx - ox) / upsample_factor
+
+    # Align combined model and compute residual stats
+    model_h, model_w = model_shape
+    image_h, image_w = image_shape
+    model_shift = fourier_shift(model_pad[:model_h,:model_w], dy, dx)
+    model_crop = crop_center(model_shift, (image_h, image_w))
+    image_crop = image_pad[:image_h, :image_w]
+    resid = normalize_array(image_crop) - normalize_array(model_crop)
+    sigma_n = mad_std(resid)
+    if sigma_n <= 1e-12:
+        sigma_n = max(resid.std(), 1e-6)
+    cov = fisher_covariance(model_crop, sigma_n)
+
+    # Quality metric
+    peak_val = corr[p, q]
+    if metric == 'psr':
+        quality = psr_metric(corr, (p, q))
+    elif metric == 'pmr':
+        quality = pmr_metric(corr, peak_val)
+    elif metric == 'per':
+        quality = per_metric(corr, peak_val)
     else:
-        search_size_min_v, search_size_min_u = cast(tuple[int, int], search_size_min)
+        raise ValueError(f"metric must be 'psr', 'pmr', or 'per', not '{metric}'")
 
-    if search_size_max is None:
-        search_size_max = extfov_margin_vu
-    if np.shape(search_size_max) == ():
-        search_size_max_v = cast(int, search_size_max)
-        search_size_max_u = cast(int, search_size_max)
-    else:
-        search_size_max_v, search_size_max_u = cast(tuple[int, int], search_size_max)
+    # Prior penalty (encourage pyramid consistency or external priors)
+    if prior_shift is not None and prior_weight > 0.0:
+        dist = np.hypot(dy - prior_shift[0], dx - prior_shift[1])
+        quality -= prior_weight * dist
 
-    extend_fov_v, extend_fov_u = extfov_margin_vu
-    orig_image_size_v = image.shape[0] - extend_fov_v*2
-    orig_image_size_u = image.shape[1] - extend_fov_u*2
+    return {
+        "offset": (float(dy), float(dx)),
+        "cov": cov,
+        "sigma_xy": (float(np.sqrt(cov[0,0])), float(np.sqrt(cov[1,1]))),
+        "quality": float(quality),
+        "peak_val": float(peak_val),
+        "rc": (int(p), int(q))
+    }
 
-    # Normalize both the image and the model to 1
-    # imax = float(np.max(image))
-    # mmax = float(np.max(model))
-    # if imax > 0:
-    #     image = image / imax
-    # if mmax > 0:
-    #     model = model / mmax
-    image = image / np.max(image)
-    model = model / np.max(model)
+def navigate_single_scale_kpeaks(image: NDArrayFloatType,
+                                 model: NDArrayFloatType,
+                                 mask: NDArrayBoolType,
+                                 max_peaks: int = 5,
+                                 upsample_factor: int = 16,
+                                 metric: str = 'psr',
+                                 prior_shift: tuple[float, float] | None = None,
+                                 prior_weight: float = 0.0,
+                                 nms_radius: int = 5) -> dict[str, Any]:
+    """
+    One-scale masked NCC + top-K candidate evaluation.
 
-    # We dramatically increase the absolute values in the image and model because
-    # otherwise very sparse and very dim images can just turn out as zero after
-    # correlation.
-    image = image * 1e10   # TODO Remove hard-coded value
-    model = model * 1e10
-    ret_list = []
+    Parameters:
+        image: The image to navigate.
+        model: The model to navigate.
+        mask: The mask to use for the navigation.
+        max_peaks: The number of peaks to use for the navigation.
+        upsample_factor: The upsample factor to use for the navigation.
+        metric: The metric to use for the navigation.
+        prior_shift: The prior shift to use for the navigation.
+        prior_weight: The prior weight to use for the navigation.
+        nms_radius: The radius to use for the non-maximum suppression.
 
-    # If the image has been extended, try up to nine combinations of
-    # sub-models if the model shifted onto the image from each direction.
-    # The current implementation falls apart if the extend amount is not
-    # the same as the maximum search limit. TODO
-    extend_fov_u_list = [extend_fov_u]
-    extend_fov_v_list = [extend_fov_v]
-    # if nav.config.CORR_ALLOW_SUBMODELS:
-    #     if extend_fov_v and search_size_max_v == extend_fov_v:
-    #         extend_fov_v_list = [0, extend_fov_v, 2*extend_fov_v]
-    #         assert search_size_max_v == extend_fov_v
-    #     if extend_fov_u and search_size_max_u == extend_fov_u:
-    #         extend_fov_u_list = [0, extend_fov_u, 2*extend_fov_u]
-    #         assert search_size_max_u == extend_fov_u
+    Returns:
+        A dictionary containing the navigation result.
+    """
 
-    if image.shape != model.shape:
-        raise ValueError(
-            f'Image ({image.shape}) and model ({model.shape}) must be the same shape')
+    image_norm = normalize_array(image)
+    model_h, model_w = model.shape
+    image_h, image_w = image_norm.shape
+    padded_h, padded_w = image_h + model_h, image_w + model_w
 
-    # Get the original image and maybe filter it.
-    sub_image = image[extend_fov_v:extend_fov_v+orig_image_size_v,
-                      extend_fov_u:extend_fov_u+orig_image_size_u]
-    if image_filter is not None:
-        sub_image = image_filter(sub_image)
+    image_pad = pad_top_left(image_norm, padded_h, padded_w)
+    model_pad = pad_top_left(model, padded_h, padded_w)
+    mask_pad = pad_top_left(mask, padded_h, padded_w)
 
-    new_ret_list = []
+    corr = masked_ncc(image_pad, model_pad, mask_pad)
+    peaks = nms_topk(corr, k=max_peaks, radius=nms_radius)
 
-    # Iterate over each chosen sub-model and correlate it with the image.
-    for start_u in extend_fov_u_list:
-        for start_v in extend_fov_v_list:
-            logger.debug('Correlating model slice V %d:%d U %d:%d',
-                         start_v-extend_fov_v,
-                         start_v-extend_fov_v+orig_image_size_v-1,
-                         start_u-extend_fov_u,
-                         start_u-extend_fov_u+orig_image_size_u-1)
-            sub_model = model[start_v:start_v+orig_image_size_v,
-                              start_u:start_u+orig_image_size_u]
-            if not np.any(sub_model):
-                continue
+    candidates = []
+    for p, q, _ in peaks:
+        candidates.append(
+            evaluate_candidate(image_pad, model_pad, mask_pad, corr, (p,q),
+                               upsample_factor, (model_h,model_w), (image_h,image_w),
+                               prior_shift=prior_shift, prior_weight=prior_weight,
+                               metric=metric)
+        )
+    if not candidates:
+        return {
+            'offset': (0.0, 0.0),
+            'cov': np.diag([1e6, 1e6]),
+            'sigma_xy': (1e3, 1e3),
+            'quality': -np.inf,
+        }
+    return max(candidates, key=lambda r: r["quality"])
 
-            if model_filter is not None:
-                sub_model = model_filter(sub_model)
-            corr = correlate2d(sub_image, sub_model,
-                               normalize=True, retile=True)
-            # plt.figure()
-            # plt.imshow(sub_image)
-            # plt.figure()
-            # plt.imshow(sub_model)
-            # plt.figure()
-            # plt.imshow(corr)
-            # plt.show()
-            ret_list = _find_correlated_offset(corr,
-                                               (search_size_min_v, search_size_min_u),
-                                               (search_size_max_v, search_size_max_u),
-                                               max_offsets,
-                                               peak_margin,
-                                               logger)
+# ==============================================================
+# Pyramid wrapper with K-peak final selection
+# ==============================================================
 
-            # Iterate over each returned offset and calculate what the offset actually is
-            # based on the model shift amount. Throw away any results that are outside of
-            # the given search limits. Note that if the offset is exactly equal to the
-            # search limit, we throw it away too, because this almost always indicates a
-            # bad result.
-            for offset, peak, details in ret_list:
-                if offset is not None:
-                    new_offset_v = offset[0]-start_v+extend_fov_v
-                    new_offset_u = offset[1]-start_u+extend_fov_u
-                    if (abs(new_offset_v) < search_size_max_v and
-                        abs(new_offset_u) < search_size_max_u):
-                        logger.debug('Adding possible offset '
-                                     f'{new_offset_v},{new_offset_u}')
-                        new_ret_list.append(((new_offset_v, new_offset_u), peak, details))
-                    else:
-                        logger.debug('Offset beyond search limits '
-                                     f'{new_offset_v},{new_offset_u}')
+def navigate_with_pyramid_kpeaks(image: NDArrayFloatType,
+                                 model: NDArrayFloatType,
+                                 mask: NDArrayBoolType,
+                                 pyramid_levels: int = 3,
+                                 max_peaks: int = 5,
+                                 upsample_factor: int = 16,
+                                 metric: str = 'psr',
+                                 quality_thresh: float = 6.0,
+                                 consistency_tol: float = 2.0,
+                                 nms_radius: int = 5,
+                                 prior_weight_final: float = 0.25) -> dict[str, Any]:
+    """TODO Clean this up
+    Build class-aware effective model + mask, run coarse->fine, then evaluate K peaks at final scale.
+    Returns dict with shift, covariance, sigma_xy, quality, consistency, spurious flag.
 
-    # Sort the offsets in descending order by correlation peak value.
-    # Truncate the (possibly longer) list to the maximum number of requested
-    # offsets.
-    new_ret_list.sort(key=lambda x: -x[1])
-    new_ret_list = new_ret_list[:max_offsets]
+    Parameters:
+        image: The source image to navigate.
+        model: The model to navigate.
+        mask: The mask indicating which pixels in the model are valid.
+        pyramid_levels: The number of pyramid levels to use.
+        max_peaks: The number of peaks to use for the navigation.
+        upsample_factor: The upsample factor to use for the navigation.
+        metric: The metric to use for the navigation.
+        quality_thresh: The quality threshold to use for the navigation.
+        consistency_tol: The consistency tolerance to use for the navigation.
+        nms_radius: The radius to use for the non-maximum suppression.
+        prior_weight_final: The prior weight to use for the final navigation.
 
-    if len(new_ret_list) == 0:
-        logger.debug('No offsets to return')
-    else:
-        for i, ((offset_v, offset_u), peak, details) in enumerate(new_ret_list):
-            logger.debug(
-                f'Returning Peak {i+1} offset {offset_v},{offset_u} CORR {peak:.7f}')
+    Returns:
+        A dictionary containing the navigation result.
+    """
 
-    return new_ret_list
+    # Coarse-to-fine prior sequence
+    level_shifts = []
+    for lvl in range(pyramid_levels, 0, -1):
+        s = 2**(lvl-1)
+        image_downsampled = image[::s, ::s]
+
+        # Downsample model & mask by simple stride (keeps alignment to top-left)
+        # TODO This is a bad way to downsample - should take mean of blocks
+        model_downsampled = model[::s, ::s]
+        mask_downsampled = mask[::s, ::s]
+
+        res_lvl = navigate_single_scale_kpeaks(
+            image_downsampled, model_downsampled, mask_downsampled,
+            max_peaks=1, upsample_factor=upsample_factor,
+            metric=metric, prior_shift=None, prior_weight=0.0,
+            nms_radius=nms_radius
+        )
+        # Scale shift back to full res
+        level_shifts.append((res_lvl['offset'][0]*s, res_lvl['offset'][1]*s))
+
+    # Consistency: max deviation to last level’s shift
+    shifts_arr = np.array(level_shifts, dtype=np.float64)
+    final_prior = shifts_arr[-1]
+    consistency = float(np.max(np.linalg.norm(shifts_arr - final_prior, axis=1)))
+
+    # Final level: K-peak evaluation with prior penalty
+    result = navigate_single_scale_kpeaks(
+        image, model, mask,
+        max_peaks=max_peaks, upsample_factor=upsample_factor,
+        metric=metric, prior_shift=final_prior, prior_weight=prior_weight_final,
+        nms_radius=nms_radius
+    )
+
+    spurious = (result["quality"] < quality_thresh) or (consistency > consistency_tol)
+
+    return {
+        "offset": result["offset"],
+        "cov": result["cov"],
+        "sigma_xy": result["sigma_xy"],
+        "quality": result["quality"],
+        "metric": metric,
+        "consistency": consistency,
+        "spurious": bool(spurious)
+    }

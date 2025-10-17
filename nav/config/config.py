@@ -17,9 +17,10 @@ class Config:
         """Initializes a new Config instance with empty configuration containers."""
 
         self._config_dict: dict[str, Any] = {}
+        self._config_environment: dict[str, Any] = AttrDict({})
+        self._config_general: dict[str, Any] = AttrDict({})
         self._config_offset: dict[str, Any] = AttrDict({})
         self._config_bodies: dict[str, Any] = AttrDict({})
-        self._config_general: dict[str, Any] = AttrDict({})
         self._config_rings: dict[str, Any] = AttrDict({})
         self._config_stars: dict[str, Any] = AttrDict({})
         self._config_titan: dict[str, Any] = AttrDict({})
@@ -31,13 +32,14 @@ class Config:
         Converts dictionary sections to AttrDict instances for convenient attribute-style access.
         """
 
-        self._config_offset = AttrDict(self._config_dict['offset'])
-        self._config_bodies = AttrDict(self._config_dict['bodies'])
-        self._config_general = AttrDict(self._config_dict['general'])
-        self._config_rings = AttrDict(self._config_dict['rings'])
-        self._config_stars = AttrDict(self._config_dict['stars'])
-        self._config_titan = AttrDict(self._config_dict['titan'])
-        self._config_bootstrap = AttrDict(self._config_dict['bootstrap'])
+        self._config_environment = AttrDict(self._config_dict.get('environment', {}))
+        self._config_general = AttrDict(self._config_dict.get('general', {}))
+        self._config_offset = AttrDict(self._config_dict.get('offset', {}))
+        self._config_bodies = AttrDict(self._config_dict.get('bodies', {}))
+        self._config_rings = AttrDict(self._config_dict.get('rings', {}))
+        self._config_stars = AttrDict(self._config_dict.get('stars', {}))
+        self._config_titan = AttrDict(self._config_dict.get('titan', {}))
+        self._config_bootstrap = AttrDict(self._config_dict.get('bootstrap', {}))
 
     def _load_yaml(self,
                    config_path: str | Path) -> dict[str, Any]:
@@ -57,7 +59,8 @@ class Config:
         """Reads configuration from the specified YAML file.
 
         Parameters:
-            config_path: Path to the configuration file. If None, uses the default config files.
+            config_path: Path to the configuration file. If None, uses the default
+                config files.
             reread: Whether to reread the configuration file if it has already been read.
         """
 
@@ -93,6 +96,20 @@ class Config:
             else:
                 self._config_dict[key] = new_config[key]
         self._update_attrdicts()
+
+    @property
+    def general(self) -> Any:
+        """Returns the general configuration settings."""
+
+        self.read_config()
+        return self._config_general
+
+    @property
+    def environment(self) -> Any:
+        """Returns the environment configuration settings."""
+
+        self.read_config()
+        return self._config_environment
 
     @property
     def planets(self) -> list[str]:
@@ -145,13 +162,6 @@ class Config:
         self.read_config()
         return cast(list[str],
                     self._config_dict.get('ring_satellites', {}).get(planet.upper(), []))
-
-    @property
-    def general(self) -> Any:
-        """Returns the general configuration settings."""
-
-        self.read_config()
-        return self._config_general
 
     @property
     def offset(self) -> Any:

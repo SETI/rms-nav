@@ -1,8 +1,13 @@
-from typing import Any
+from typing import Optional, TYPE_CHECKING
 
-from nav.support.correlate import find_correlation_and_offset
+import numpy as np
 
 from .nav_technique import NavTechnique
+from nav.config import Config
+from nav.support.correlate import navigate_with_pyramid_kpeaks
+
+if TYPE_CHECKING:
+    from nav.nav_master import NavMaster
 
 
 class NavTechniqueStars(NavTechnique):
@@ -13,9 +18,10 @@ class NavTechniqueStars(NavTechnique):
         **kwargs: Arbitrary keyword arguments passed to parent class
     """
     def __init__(self,
-                 *args: Any,
-                 **kwargs: Any) -> None:
-        super().__init__(*args, logger_name='NavTechniqueStars', **kwargs)
+                 nav_master: 'NavMaster',
+                 *,
+                 config: Optional[Config] = None) -> None:
+        super().__init__(nav_master, config=config)
 
     def navigate(self) -> None:
         """Performs navigation using star field correlation.
@@ -24,7 +30,8 @@ class NavTechniqueStars(NavTechnique):
         computing the offset if successful.
         """
 
-        with self.logger.open('NAVIGATION PASS: STARS CORRELATION'):
+        log_level = self._config.general.get('nav_stars_log_level')
+        with self.logger.open('NAVIGATION PASS: STARS', level=log_level):
             obs = self.nav_master.obs
             star_models = self.nav_master.star_models
             if len(star_models) == 0:
@@ -33,21 +40,76 @@ class NavTechniqueStars(NavTechnique):
             if len(star_models) > 1:
                 self.logger.error('More than one star model available')
                 return
-            final_model = star_models[0].model_img
+            star_model = star_models[0]
 
-            assert final_model is not None
+            result = navigate_with_pyramid_kpeaks(obs.extdata,
+                                                  star_model.model_img,
+                                                  star_model.model_mask)
+            corr_offset = (-float(result['offset'][0]), -float(result['offset'][1]))
 
-            model_offset_list = find_correlation_and_offset(
-                obs.extdata, final_model, extfov_margin_vu=obs.extfov_margin_vu,
-                logger=self.logger)
+            self.logger.debug('Correlation offset: '
+                              f'{corr_offset[0]:.2f}, {corr_offset[1]:.2f}')
+            self.logger.debug('Correlation quality: '
+                              f'{float(result['quality']):.2f}')
 
-            if len(model_offset_list) > 0:
-                offset = (-model_offset_list[0][0][0], -model_offset_list[0][0][1])
-                self._offset = offset
-                self._confidence = model_offset_list[0][1]
-                self.logger.info('Star navigation technique final offset: '
-                                 f'{offset[0]:.2f}, {offset[1]:.2f}')
-            else:
-                self._offset = None
-                self._confidence = None
-                self.logger.info('Star navigation technique failed')
+            img = obs.data
+            psf = obs.inst.star_psf()
+
+            self.logger.info('Starting star position optimization process')
+            u_diff_list = []
+            v_diff_list = []
+            for star in star_model.star_list:
+                if star.conflicts:
+                    continue
+                psf_size = obs.inst.star_psf_size(star)
+                star_u = star.u - corr_offset[1]
+                star_v = star.v - corr_offset[0]
+                if (star_u < psf_size[1] or star_u > img.shape[1] - psf_size[1] or
+                    star_v < psf_size[0] or star_v > img.shape[0] - psf_size[0]):
+                    self.logger.debug(f'Star {star.unique_number} VMAG {star.vmag} outside image')
+                    continue
+                ret = psf.find_position(img, psf_size, (star_v, star_u), search_limit=(2.5, 2.5))
+                if ret is None:
+                    self.logger.info(f'Star {star.unique_number} VMAG {star.vmag} failed '
+                                     'to find position')
+                    continue
+                opt_v, opt_u, opt_metadata = ret
+                self.logger.debug(f'Star {star.unique_number} VMAG {star.vmag} '
+                                  f'Searched at {star_u:.3f}, {star_v:.3f} '
+                                  f'found at {opt_u:.3f}, {opt_v:.3f}')
+                # TODO Implement edge clipping for Voyager and Galileo
+                # if opt_u < clip or opt_u > img.shape[1] - clip or opt_v < clip or opt_v > img.shape[0] - clip:
+                #     if verbose:
+                #         print(f'Star {star.unique_number} VMAG {star.vmag} clipped')
+                #     return False
+                diff_u = float(opt_u-star_u)
+                diff_v = float(opt_v-star_v)
+                if abs(diff_u) > 1.5 or abs(diff_v) > 1.5:
+                    self.logger.info(f'Star {star.unique_number} VMAG {star.vmag} offset {diff_u}, {diff_v} too large')
+                    continue
+                u_diff_list.append(diff_u)
+                v_diff_list.append(diff_v)
+
+            u_diff_min = np.min(u_diff_list)
+            u_diff_max = np.max(u_diff_list)
+            u_diff_mean = np.mean(u_diff_list)
+            u_diff_std = np.std(u_diff_list)
+            v_diff_min = np.min(v_diff_list)
+            v_diff_max = np.max(v_diff_list)
+            v_diff_mean = np.mean(v_diff_list)
+            v_diff_std = np.std(v_diff_list)
+
+            self.logger.info(f'U diff: min {u_diff_min:.2f}, max {u_diff_max:.2f}, '
+                             f'mean {u_diff_mean:.2f}, std {u_diff_std:.2f}')
+            self.logger.info(f'V diff: min {v_diff_min:.2f}, max {v_diff_max:.2f}, '
+                             f'mean {v_diff_mean:.2f}, std {v_diff_std:.2f}')
+
+            self._offset = corr_offset
+            self._confidence = float(result['quality'])
+            self.logger.info('Final offset: '
+                             f'{self._offset[0]:.2f}, {self._offset[1]:.2f}')
+            self.logger.info('Final confidence: '
+                             f'{self._confidence:.2f}')
+
+        self._metadata['offset'] = self._offset
+        self._metadata['confidence'] = self._confidence

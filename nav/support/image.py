@@ -1,6 +1,8 @@
+from collections.abc import Sequence
 from typing import Any, cast
 
 import numpy as np
+from numpy.fft import fft2, ifft2, fftfreq
 import scipy.ndimage as ndimage
 
 import matplotlib.pyplot as plt
@@ -118,6 +120,23 @@ def unpad_array(array: NDArrayType[NPType],
     ])
 
     return array[reversed_padding]
+
+
+def pad_top_left(array: NDArrayType[NPType], v_size: int, u_size: int) -> NDArrayType[NPType]:
+    """Place array 'array' at (0,0) inside zeros(v_size, u_size)."""
+    ret = np.zeros((v_size, u_size), dtype=array.dtype)
+    v, u = array.shape
+    ret[:v, :u] = array
+    return ret
+
+
+def crop_center(img: NDArrayType[NPType], out_shape: tuple[int, int]) -> NDArrayType[NPType]:
+    """Center crop to out_shape (h,w)."""
+    img_v, img_u = img.shape
+    out_v, out_u = out_shape
+    sy = (img_v - out_v)//2
+    sx = (img_u - out_u)//2
+    return img[sy:sy+out_v, sx:sx+out_u]
 
 
 def next_power_of_2(n: int) -> int:
@@ -429,6 +448,40 @@ def filter_downsample(arr: NDArrayFloatType,
     ret = (np.swapaxes(arr.reshape(ny, amt_y, nx, amt_x), 1, 2).
            reshape(ny, nx, amt_x*amt_y).mean(axis=2))
     return cast(NDArrayFloatType, ret)
+
+
+def gaussian_blur_cov(img: NDArrayFloatType,
+                      sigma: NDArrayFloatType
+                      ) -> NDArrayFloatType:
+    """Blur by anisotropic Gaussian with covariance Sigma in frequency domain."""
+    h, w = img.shape
+    fy = fftfreq(h)[:, None]
+    fx = fftfreq(w)[None, :]
+    Syy, Syx = sigma[0, 0], sigma[0, 1]
+    Sxy, Sxx = sigma[1, 0], sigma[1, 1]
+    q = Syy*(fy*fy) + (Syx+Sxy)*(fy*fx) + Sxx*(fx*fx)
+    H = np.exp(-2.0 * (np.pi**2) * q)
+    return np.real(ifft2(fft2(img) * H))
+
+
+def normalize_array(a: NDArrayFloatType, eps: float = 1e-12) -> NDArrayFloatType:
+    """Zero-mean, unit-std normalization (safe if nearly constant)."""
+    a = np.asarray(a, np.float64)
+    m = a.mean()
+    s = a.std()
+    if s < eps:
+        return np.zeros_like(a)
+    return cast(NDArrayFloatType, (a - m) / s)
+
+
+def gradient_magnitude(img: NDArrayFloatType) -> NDArrayFloatType:
+    """Simple isotropic gradient magnitude."""
+    gy = np.gradient(img, axis=0)
+    gx = np.gradient(img, axis=1)
+    return cast(NDArrayFloatType, np.hypot(gy, gx))
+
+
+
 
 #==============================================================================
 #

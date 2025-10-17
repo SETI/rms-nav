@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 from nav.config import Config
 from nav.support.nav_base import NavBase
@@ -14,19 +14,18 @@ class NavTechnique(ABC, NavBase):
         Parameters:
             nav_master: The navigation master instance
             config: Configuration object to use. If None, uses DEFAULT_CONFIG.
-            logger_name: Name for the logger. If None, uses class name.
     """
 
     def __init__(self,
                  nav_master: 'NavMaster',
                  *,
-                 config: Optional[Config] = None,
-                 logger_name: Optional[str] = None) -> None:
-        super().__init__(config=config, logger_name=logger_name)
+                 config: Optional[Config] = None) -> None:
+        super().__init__(config=config)
 
         self._nav_master = nav_master
         self._offset: tuple[float, float] | None = None
         self._confidence: float | None = None
+        self._metadata: dict[str, Any] = {}
 
     @property
     def nav_master(self) -> 'NavMaster':
@@ -42,6 +41,11 @@ class NavTechnique(ABC, NavBase):
     def confidence(self) -> float | None:
         """Returns the confidence in the computed offset as a float or None if not calculated."""
         return self._confidence
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        """Returns the metadata dictionary."""
+        return self._metadata
 
     @abstractmethod
     def navigate(self) -> None:

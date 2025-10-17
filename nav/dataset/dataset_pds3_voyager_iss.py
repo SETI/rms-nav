@@ -1,7 +1,8 @@
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Optional, cast
 
 from .dataset_pds3 import DataSetPDS3
+from nav.config import Config
 from nav.support.misc import safe_lstrip_zero
 
 
@@ -162,12 +163,11 @@ class DataSetPDS3VoyagerISS(DataSetPDS3):
         return Path(f'{volume}/{filespec}').with_suffix('')
 
     def __init__(self,
-                 *args: Any,
-                 **kwargs: Any) -> None:
+                 *,
+                 config: Optional[Config] = None) -> None:
         """Initializes a Voyager ISS dataset handler.
 
         Parameters:
-            *args: Positional arguments to pass to the parent class.
-            **kwargs: Keyword arguments to pass to the parent class.
+            config: Configuration object to use. If None, uses DEFAULT_CONFIG.
         """
-        super().__init__(*args, logger_name='DataSetVoyagerISS', **kwargs)
+        super().__init__(config=config)

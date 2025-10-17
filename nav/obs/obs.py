@@ -1,6 +1,7 @@
 from abc import ABC
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
+from nav.config import Config
 from nav.support.nav_base import NavBase
 
 if TYPE_CHECKING:
@@ -15,15 +16,15 @@ class Obs(ABC, NavBase):
     """
 
     def __init__(self,
-                 **kwargs: Any) -> None:
+                 *,
+                 config: Optional[Config] = None) -> None:
         """Initializes a new observation instance.
 
         Parameters:
             config: Configuration object to use. If None, uses DEFAULT_CONFIG.
-            logger_name: Name for the logger. If provided, creates a child logger with this name.
         """
 
-        super().__init__(**kwargs)
+        super().__init__(config=config)
 
         self._inst: Optional[Inst] = None
 

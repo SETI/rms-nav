@@ -1,4 +1,4 @@
-from typing import Any, Optional, cast
+from typing import Optional, cast
 
 import numpy as np
 import oops
@@ -6,6 +6,7 @@ from oops.observation.snapshot import Snapshot
 from oops.meshgrid import Meshgrid
 from oops.backplane import Backplane
 
+from nav.config import Config
 from nav.support.image import pad_array
 from nav.support.types import DTypeLike, NDArrayType, NDArrayFloatType, NDArrayBoolType, NPType
 
@@ -23,7 +24,7 @@ class ObsSnapshot(Obs, Snapshot):
                  snapshot: Snapshot,
                  *,
                  extfov_margin_vu: Optional[int | tuple[int, int]] = None,
-                 **kwargs: Any) -> None:
+                 config: Optional[Config] = None) -> None:
         """Initialize an ObsSnapshot by wrapping an existing Snapshot.
 
         Warning:
@@ -41,7 +42,7 @@ class ObsSnapshot(Obs, Snapshot):
         # as the original Snapshot. Warning: Do not use that Snapshot anymore!
         self.__dict__ = snapshot.__dict__
 
-        super().__init__(logger_name='ObsSnapshot', **kwargs)
+        super().__init__(config=config)
 
         if self.data.ndim != 2:
             raise ValueError(f'Data shape must be 2D, got {self.data.shape}')
@@ -113,6 +114,18 @@ class ObsSnapshot(Obs, Snapshot):
         """
 
         return np.zeros(self.extdata.shape, dtype=bool)
+
+    def unpad_array_to_extfov(self,
+                              array: NDArrayType[NPType]) -> NDArrayType[NPType]:
+        """Unpads an array to be the size of the extended FOV.
+
+        This is most useful for using the result of np.unpackbits.
+
+        Returns:
+            The unpadded array.
+        """
+
+        return array[:self.extdata_shape_vu[0], :self.extdata_shape_vu[1]]
 
     def clip_fov(self,
                  u: int,
@@ -350,14 +363,15 @@ class ObsSnapshot(Obs, Snapshot):
             The extracted subimage. This will be the same shape as the original FOV.
         """
 
-        h, w = self.extdata_shape_vu
-        if img.shape != (h, w):
-            raise ValueError(f'img shape {img.shape} must equal extdata shape {(h, w)}')
+        if img.shape != self.extdata_shape_vu:
+            raise ValueError(f'img shape {img.shape} must equal extdata shape '
+                             f'{self.extdata_shape_vu}')
+        v_size, u_size = self.extdata_shape_vu
         offset_v = int(offset[0]) + self.extfov_margin_v
         offset_u = int(offset[1]) + self.extfov_margin_u
         if (offset_v < 0 or offset_u < 0 or
-            offset_v + self.data_shape_v > h or
-            offset_u + self.data_shape_u > w):
+            offset_v + self.data_shape_v > v_size or
+            offset_u + self.data_shape_u > u_size):
             raise ValueError('offset produces out-of-bounds subimage slice')
         return img[offset_v:offset_v+self.data_shape_v,
                    offset_u:offset_u+self.data_shape_u]

@@ -1,3 +1,7 @@
+import json
+
+from filecache import FCPath
+
 from nav.config import DEFAULT_LOGGER
 from nav.inst import Inst
 from nav.dataset.dataset import ImageFiles
@@ -17,7 +21,8 @@ from nav.nav_master import NavMaster
 #   max_allowed_time=None
 
 def process_image_files(inst_class: type[Inst],
-                        image_files: ImageFiles) -> bool:
+                        image_files: ImageFiles,
+                        results_root: FCPath) -> bool:
 
     logger = DEFAULT_LOGGER
 
@@ -44,6 +49,12 @@ def process_image_files(inst_class: type[Inst],
         nm.navigate()
 
         _ = nm.create_overlay()
+
+        public_metadata_file = results_root / image_file.results_path_stub.with_suffix('.json')
+        try:
+            public_metadata_file.write_text(json.dumps(nm.metadata, indent=2))
+        except TypeError:
+            logger.error('Metadata is not JSON serializable: %s', nm.metadata)
 
         return True
 

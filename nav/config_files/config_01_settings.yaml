@@ -219,16 +219,6 @@ stars:
     - 6
     - 1.0
   min_confidence: 0.9
-  # psf_boxsizes:
-  #   - &id008
-  #       - 100000
-  #       - 15
-  #   -   - 50000
-  #       - 13
-  #   -   - 500
-  #       - 11
-  #   -   - 0
-  #       - 9
   psf_gain:
     - 5000
     - 4
@@ -236,46 +226,18 @@ stars:
   max_smear: 100
   default_star_class: G0
   body_conflict_margin: 5
-  # min_brightness_guaranteed_vis: 200.0
-  # ?   - min_detectable_dn
-  #     - NAC
-  # : 7
-  # ?   - min_detectable_dn
-  #     - WAC
-  # : 10
-  # ?   - photometry_slop
-  #     - NAC
-  # : 2.0
-  # ?   - photometry_slop
-  #     - WAC
-  # : 2.0
   min_vmag: 5.0
   max_vmag: 15.0
   vmag_increment: 0.5
-  # photometry_boxsizes:
-  #   - *id008
-  #   -   - 50000
-  #       - 11
-  #   -   - 500
-  #       - 9
-  #   -   - 0
-  #       - 7
   max_star_dn: 100000.0
   min_dn_force_one_star: 25000.0
   star_body_conflict_margin: 3
   too_bright_dn: 1000
   too_bright_factor: 1  # TODO
-  # font:
-  #   256: *id001
-  #   512: *id001
-  #   1000: *id002
-  #   1024: *id002
   label_star_color: [255, 0, 0]  # Red
   label_font: liberation2/LiberationMono-Bold.ttf
   label_font_size: 18
-    # 512: 18
   label_font_color: [255, 0, 0]  # Red
-  # label_font_color: [255, 255, 0]  # Yellow
 
 ##################
 # TITAN SETTINGS #

@@ -73,16 +73,13 @@ class ImageFiles:
 class DataSet(ABC, NavBase):
     def __init__(self,
                  *,
-                 config: Optional[Config] = None,
-                 logger_name: Optional[str] = None) -> None:
+                 config: Optional[Config] = None) -> None:
         """Initializes a dataset with configuration and logging options.
 
         Parameters:
             config: Configuration object to use. If None, uses DEFAULT_CONFIG.
-            logger_name: Name for the logger. If None, uses class name.
         """
-
-        super().__init__(config=config, logger_name=logger_name)
+        super().__init__(config=config)
 
     @staticmethod
     @abstractmethod

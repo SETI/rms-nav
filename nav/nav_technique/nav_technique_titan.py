@@ -1,6 +1,10 @@
-from typing import Any
+from typing import Optional, TYPE_CHECKING
 
 from .nav_technique import NavTechnique
+from nav.config import Config
+
+if TYPE_CHECKING:
+    from nav.nav_master import NavMaster
 
 
 class NavTechniqueTitan(NavTechnique):
@@ -11,9 +15,10 @@ class NavTechniqueTitan(NavTechnique):
         **kwargs: Arbitrary keyword arguments passed to parent class
     """
     def __init__(self,
-                 *args: Any,
-                 **kwargs: Any) -> None:
-        super().__init__(*args, logger_name='NavTechniqueTitan', **kwargs)
+                 nav_master: 'NavMaster',
+                 *,
+                 config: Optional[Config] = None) -> None:
+        super().__init__(nav_master, config=config)
 
     def navigate(self) -> None:
         """Performs navigation specific to Titan observations.

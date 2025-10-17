@@ -1,7 +1,8 @@
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Optional, cast
 
 from .dataset_pds3 import DataSetPDS3
+from nav.config import Config
 from nav.support.misc import safe_lstrip_zero
 
 
@@ -169,6 +170,11 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
     # Public methods
 
     def __init__(self,
-                 *args: Any,
-                 **kwargs: Any) -> None:
-        super().__init__(*args, logger_name='DataSetGalileoSSI', **kwargs)
+                 *,
+                 config: Optional[Config] = None) -> None:
+        """Initializes a Galileo SSI dataset handler.
+
+        Parameters:
+            config: Configuration object to use. If None, uses DEFAULT_CONFIG.
+        """
+        super().__init__(config=config)

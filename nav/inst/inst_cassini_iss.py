@@ -1,10 +1,11 @@
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from filecache import FCPath
 import numpy as np
 from oops import Observation
 import oops.hosts.cassini.iss
 from psfmodel import GaussianPSF, PSF
+from starcat import Star
 
 from nav.config import Config, DEFAULT_CONFIG, DEFAULT_LOGGER
 from nav.obs import ObsSnapshot
@@ -17,17 +18,21 @@ from .inst import Inst
 class InstCassiniISS(Inst):
     def __init__(self,
                  obs: Observation,
-                 **kwargs: Any) -> None:
+                 *,
+                 config: Optional[Config] = None) -> None:
         """Initializes a Cassini ISS instrument instance.
 
         Parameters:
             obs: The Observation object containing Cassini ISS image data.
-            **kwargs: Additional keyword arguments to pass to the parent class.
+            config: Configuration object to use. If None, uses DEFAULT_CONFIG.
         """
-        super().__init__(obs, logger_name='InstCassiniISS', **kwargs)
+        super().__init__(obs, config=config)
+
+        self._inst_config: dict[str, Any] | None = None
 
     @staticmethod
     def from_file(path: PathLike,
+                  *,
                   config: Optional[Config] = None,
                   extfov_margin_vu: tuple[int, int] | None = None,
                   **kwargs: Any) -> ObsSnapshot:
@@ -63,12 +68,15 @@ class InstCassiniISS(Inst):
                                                return_all_planets=return_all_planets)
         obs.abspath = path
 
+        detector = obs.detector.lower()
+        inst_config = config._config_dict['cassini_iss'][detector]
+
         if extfov_margin_vu is None:
-            if isinstance(config._config_dict['cassini_iss']['extfov_margin_vu'], dict):
-                extfov_margin_vu = config._config_dict['cassini_iss']['extfov_margin_vu'][
-                    obs.data.shape[0]]
+            extfov_margin_vu_entry = inst_config['extfov_margin_vu']
+            if isinstance(extfov_margin_vu_entry, dict):
+                extfov_margin_vu = extfov_margin_vu_entry[obs.data.shape[0]]
             else:
-                extfov_margin_vu = config._config_dict['cassini_iss']['extfov_margin_vu']
+                extfov_margin_vu = extfov_margin_vu_entry
         logger.debug(f'  Data shape: {obs.data.shape}')
         logger.debug(f'  Extfov margin vu: {extfov_margin_vu}')
         # TODO This is slow when debug turned off
@@ -77,19 +85,39 @@ class InstCassiniISS(Inst):
         new_obs = ObsSnapshot(obs,
                               config=config,
                               extfov_margin_vu=extfov_margin_vu)
-        new_obs.set_inst(InstCassiniISS(new_obs, config=config))
+        inst = InstCassiniISS(new_obs, config=config)
+        inst._inst_config = inst_config
+        new_obs.set_inst(inst)
         return new_obs
 
     def star_psf(self) -> PSF:
-        """Returns the point spread function for Cassini ISS stars.
+        """Returns the point spread function (PSF) model appropriate for stars observed
+        by this instrument.
 
         Returns:
-            A Gaussian PSF object with the appropriate sigma value for Cassini ISS.
+            A PSF model appropriate for stars observed by this instrument.
         """
-        return GaussianPSF(sigma=0.54)
-# PSF_SIGMA = {"NAC":   0.54,
-#              "WAC":   0.77,
-#              "LORRI": 0.5} # TODO
+
+        if self._inst_config is None:
+            raise ValueError('InstCassiniISS not initialized')
+
+        sigma = self._inst_config['star_psf_sigma']
+        return GaussianPSF(sigma=sigma)
+
+    def star_psf_size(self, star: Star) -> tuple[int, int]:
+        """Returns the size of the point spread function (PSF) to use for a star.
+
+        Parameters:
+            star: The star to get the PSF size for.
+
+        Returns:
+            A tuple of the PSF size (v, u) in pixels.
+        """
+
+        if self._inst_config is None:
+            raise ValueError('InstCassiniISS not initialized')
+
+        return cast(tuple[int, int], self._inst_config['star_psf_size'])
 
     def get_public_metadata(self) -> dict[str, Any]:
         """Returns the public metadata for Cassini ISS.
@@ -122,6 +150,6 @@ class InstCassiniISS(Inst):
             'filters': [obs.filter1, obs.filter2],
             'sampling': obs.sampling,
             'gain_mode': obs.gain_mode,
-            'description': obs.dict.get("DESCRIPTION"),
-            'observation_id': obs.dict.get("OBSERVATION_ID")
+            'description': obs.dict.get("DESCRIPTION", None),
+            'observation_id': obs.dict.get("OBSERVATION_ID", None)
         }

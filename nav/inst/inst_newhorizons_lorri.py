@@ -5,6 +5,7 @@ import numpy as np
 from oops import Observation
 import oops.hosts.newhorizons.lorri
 from psfmodel import GaussianPSF, PSF
+from starcat import Star
 
 from nav.config import Config, DEFAULT_CONFIG, DEFAULT_LOGGER
 from nav.obs import ObsSnapshot
@@ -17,14 +18,15 @@ from .inst import Inst
 class InstNewHorizonsLORRI(Inst):
     def __init__(self,
                  obs: Observation,
-                 **kwargs: Any) -> None:
+                 *,
+                 config: Optional[Config] = None) -> None:
         """Initializes a New Horizons LORRI instrument instance.
 
         Parameters:
             obs: The Observation object containing New Horizons LORRI image data.
-            **kwargs: Additional keyword arguments to pass to the parent class.
+            config: Configuration object to use. If None, uses DEFAULT_CONFIG.
         """
-        super().__init__(obs, logger_name='InstNewHorizonsLORRI', **kwargs)
+        super().__init__(obs, config=config)
 
     @staticmethod
     def from_file(path: PathLike,
@@ -71,12 +73,26 @@ class InstNewHorizonsLORRI(Inst):
         return new_obs
 
     def star_psf(self) -> PSF:
-        """Returns the point spread function for New Horizons LORRI stars.
+        """Returns the point spread function (PSF) model appropriate for stars observed
+        by this instrument.
 
         Returns:
-            A Gaussian PSF object with the appropriate sigma value for New Horizons LORRI.
+            A PSF model appropriate for stars observed by this instrument.
         """
+
         return GaussianPSF(sigma=1.)  # TODO
+
+    def star_psf_size(self, star: Star) -> tuple[int, int]:
+        """Returns the size of the point spread function (PSF) to use for a star.
+
+        Parameters:
+            star: The star to get the PSF size for.
+
+        Returns:
+            A tuple of the PSF size (v, u) in pixels.
+        """
+
+        return (7, 7)  # TODO
 
     def get_public_metadata(self) -> dict[str, Any]:
         """Returns the public metadata for New Horizons LORRI.
