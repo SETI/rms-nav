@@ -102,7 +102,7 @@ class Annotations(NavBase):
                                       -obs.extfov_margin_u,
                                       obs.extfov_margin_u))
 
-            for annotation in self._annotations:
+            for annotation in self.annotations:
                 # TODO This does not handle z-depth. In other words, an overlay does not
                 # get hidden by other overlays in front of it. This can best be seen with
                 # two moons that are partially occluding each other.
@@ -155,7 +155,7 @@ class Annotations(NavBase):
         text_im = Image.fromarray(text_layer, mode='RGB')
         text_draw = ImageDraw.Draw(text_im)
 
-        for ann_num, annotation in enumerate(self._annotations):
+        for ann_num, annotation in enumerate(self.annotations):
             # TODO ann_num is not really used for anything right now. Eventually it could
             # be used for backtracking to know which annotation to try to move in order
             # to place one that is overconstrained. However, ann_num is really not enough

@@ -570,20 +570,6 @@ def main():
                          'NAV_RESULTS_ROOT environment variable must be set')
     results_root = FileCache('nav_results').new_path(results_root_str)
 
-    kernel_type = 'reconstructed'
-    # if arguments.use_predicted_kernels:
-    #     kernel_type = 'predicted'
-    #     assert arguments.use_kernel is None or len(arguments.use_kernel) == 0
-    # if arguments.use_kernel is not None and len(arguments.use_kernel) > 0:
-    #     kernel_type = 'none'
-
-    if kernel_type == 'none':
-        for kernel in arguments.use_kernel:
-            spicedb.furnish_by_filepath(kernel)
-    loaded_kernel_type = kernel_type
-    if loaded_kernel_type == 'none':
-        loaded_kernel_type = 'custom' # Required by master_find_offset
-
     # main_log_path = arguments.main_logfile
     # main_log_path_local = main_log_path
     # if (arguments.results_in_s3 and
@@ -646,7 +632,7 @@ def main():
         INST_NAME = dataset_name_to_inst_name(DATASET_NAME)
     except KeyError:
         print(f'Unknown dataset "{DATASET_NAME}"')
-        print(f'Valid datasets are: {", ".join(dataset_name_to_inst_name.keys())}')
+        print(f'Valid datasets are: {", ".join(DATASET_NAME_TO_CLASS_MAPPING.keys())}')
         sys.exit(1)
 
     inst_class = inst_name_to_class(INST_NAME)

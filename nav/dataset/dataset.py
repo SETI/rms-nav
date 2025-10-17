@@ -74,7 +74,7 @@ class DataSet(ABC, NavBase):
     def __init__(self,
                  *,
                  config: Optional[Config] = None) -> None:
-        """Initializes a dataset with configuration and logging options.
+        """Initializes a dataset.
 
         Parameters:
             config: Configuration object to use. If None, uses DEFAULT_CONFIG.

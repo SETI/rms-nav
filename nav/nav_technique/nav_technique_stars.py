@@ -45,6 +45,7 @@ class NavTechniqueStars(NavTechnique):
             result = navigate_with_pyramid_kpeaks(obs.extdata,
                                                   star_model.model_img,
                                                   star_model.model_mask)
+            # TODO Handle failure
             corr_offset = (-float(result['offset'][0]), -float(result['offset'][1]))
 
             self.logger.debug('Correlation offset: '
@@ -90,6 +91,7 @@ class NavTechniqueStars(NavTechnique):
                 u_diff_list.append(diff_u)
                 v_diff_list.append(diff_v)
 
+            # TODO Handle empty lists
             u_diff_min = np.min(u_diff_list)
             u_diff_max = np.max(u_diff_list)
             u_diff_mean = np.mean(u_diff_list)

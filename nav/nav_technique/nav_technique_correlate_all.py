@@ -29,6 +29,7 @@ class NavTechniqueCorrelateAll(NavTechnique):
         self._combined_model: NDArrayFloatType | None = None
         self._combined_mask: NDArrayBoolType | None = None
         self._combined_weighted_mask: NDArrayFloatType | None = None
+        self._combined_range: NDArrayFloatType | None = None
         self._closest_model_index: NDArrayUint32Type | None = None
 
     @property
@@ -122,6 +123,9 @@ class NavTechniqueCorrelateAll(NavTechnique):
         for model in self.nav_master.all_models:
             if model.model_img is None:
                 continue
+            if model.model_mask is None or model.model_image.shape != model.model_mask.shape:
+                raise ValueError(f'Model image and mask shapes differ: {model.model_img.shape} != '
+                                 f'{model.model_mask.shape}')
             model_img = normalize_array(model.model_img)
             if model.blur_amount is not None:
                 model_img = gaussian_blur_cov(model_img, model.blur_amount)
@@ -136,6 +140,9 @@ class NavTechniqueCorrelateAll(NavTechnique):
             if not isinstance(rng, np.ndarray):
                 rng = 0 if rng is None else rng
                 rng = np.zeros_like(model.model_img) + rng
+            elif rng.shape != model.model_img.shape:
+                raise ValueError(f'Range shape differs from model image shape: {rng.shape} != '
+                                 f'{model.model_img.shape}')
             ranges.append(rng)
 
         if len(model_imgs) == 0:
@@ -165,6 +172,7 @@ class NavTechniqueCorrelateAll(NavTechnique):
         self._combined_model = cast(NDArrayFloatType, final_model)
         self._combined_mask = cast(NDArrayBoolType, final_mask)
         self._combined_weighted_mask = cast(NDArrayFloatType, final_weighted_mask)
+        self._combined_range = ranges_arr[min_indices, row_idx, col_idx]
         self._closest_model_index = min_indices
 
         if False:

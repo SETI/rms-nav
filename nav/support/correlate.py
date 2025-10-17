@@ -168,6 +168,8 @@ def nms_topk(corr: NDArrayFloatType,
     corr_v, corr_u = corr.shape
     work = corr.copy()
     peaks = []
+    if not np.any(np.isfinite(work)):
+        return peaks
     for _ in range(k):
         idx = np.argmax(work)
         v = work.flat[idx]
@@ -191,6 +193,9 @@ def fisher_covariance(model_aligned: NDArrayFloatType,
     Syy = np.sum(sy * sy)
     Sxy = np.sum(sx * sy)
     F = (1.0/(sigma_n**2 + 1e-18)) * np.array([[Sxx, Sxy],[Sxy, Syy]])
+    if cond > 1e10:
+        # Degenerate case: return large uncertainty
+        return np.diag([1e6, 1e6])
     return np.linalg.pinv(F + 1e-12*np.eye(2))
 
 # ==============================================================
@@ -251,6 +256,12 @@ def evaluate_candidate(image_pad: NDArrayFloatType,
     resid = normalize_array(image_crop) - normalize_array(model_crop)
     sigma_n = mad_std(resid)
     if sigma_n <= 1e-12:
+        # When mad_std(resid) returns a value ≤ 1e-12, the code falls back to
+        # max(resid.std(), 1e-6). This might indicate a perfect match or a numerical
+        # issue, but the fallback silently continues. Consider logging this condition
+        # or investigating why the residual variance is zero.
+        # Add logging or a warning:
+        # self.logger.warning("Residual variance near zero; using fallback sigma")
         sigma_n = max(resid.std(), 1e-6)
     cov = fisher_covariance(model_crop, sigma_n)
 
@@ -267,6 +278,12 @@ def evaluate_candidate(image_pad: NDArrayFloatType,
 
     # Prior penalty (encourage pyramid consistency or external priors)
     if prior_shift is not None and prior_weight > 0.0:
+        # TODO The prior penalty subtracts prior_weight * dist from quality, but the units/scale of
+        # quality (PSR/PMR/PER) may not be comparable to distance. This could make the penalty
+        # disproportionately strong or weak depending on the metric choice.
+        # Consider normalizing the distance penalty or using a separate scoring function that
+        # combines quality and distance in a principled way (e.g., weighted sum with normalized
+        # components).
         dist = np.hypot(dy - prior_shift[0], dx - prior_shift[1])
         quality -= prior_weight * dist
 
@@ -327,6 +344,9 @@ def navigate_single_scale_kpeaks(image: NDArrayFloatType,
                                metric=metric)
         )
     if not candidates:
+        # TODO When no candidates are found, the function returns cov: np.diag([1e6, 1e6])
+        # and quality: -np.inf. Downstream code might not check for -np.inf quality and could
+        # treat this as a valid result. Consider returning None or raising an exception instead.
         return {
             'offset': (0.0, 0.0),
             'cov': np.diag([1e6, 1e6]),
@@ -377,10 +397,12 @@ def navigate_with_pyramid_kpeaks(image: NDArrayFloatType,
         s = 2**(lvl-1)
         image_downsampled = image[::s, ::s]
 
-        # Downsample model & mask by simple stride (keeps alignment to top-left)
-        # TODO This is a bad way to downsample - should take mean of blocks
-        model_downsampled = model[::s, ::s]
-        mask_downsampled = mask[::s, ::s]
+        # Downsample model & mask with anti-aliasing
+        sigma = s / 2.0
+        model_blurred = gaussian_filter(model, sigma=sigma)
+        mask_blurred = gaussian_filter(mask.astype(float), sigma=sigma)
+        model_downsampled = model_blurred[::s, ::s]
+        mask_downsampled = (mask_blurred[::s, ::s] > 0.5)
 
         res_lvl = navigate_single_scale_kpeaks(
             image_downsampled, model_downsampled, mask_downsampled,

@@ -16,7 +16,6 @@ class NavModelTitan(NavModel):
         Parameters:
             obs: The observation object containing the image data.
             config: Configuration object to use. If None, uses DEFAULT_CONFIG.
-            **kwargs: Additional keyword arguments to pass to the parent class.
         """
         super().__init__(obs, config=config)
 

@@ -27,6 +27,11 @@ class ObsSnapshot(Obs, Snapshot):
                  config: Optional[Config] = None) -> None:
         """Initialize an ObsSnapshot by wrapping an existing Snapshot.
 
+        Parameters:
+            snapshot: The Snapshot object to wrap.
+            extfov_margin_vu: The extended field of view margins in (v, u) pixels.
+            config: The configuration object to use. If None, uses DEFAULT_CONFIG.
+
         Warning:
             The provided snapshot object should not be used after this call,
             as its internal state is transferred to this instance.

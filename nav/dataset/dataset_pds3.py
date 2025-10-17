@@ -77,7 +77,7 @@ class DataSetPDS3(DataSet):
         if pds3_holdings_root is None:
             raise ValueError('One of configuration variable "pds3_holdings_root" or '
                              'PDS3_HOLDINGS_DIR environment variable must be set')
-        self._pds3_holdings_root = self._index_filecache.new_path(pds3_holdings_root)
+        self._pds3_holdings_root = self._pds3_holdings_filecache.new_path(pds3_holdings_root)
 
         return self._pds3_holdings_root
 
