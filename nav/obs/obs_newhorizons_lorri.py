@@ -2,38 +2,26 @@ from typing import Any, Optional
 
 from filecache import FCPath
 import numpy as np
-from oops import Observation
 import oops.hosts.newhorizons.lorri
 from psfmodel import GaussianPSF, PSF
 from starcat import Star
 
-from nav.config import Config, DEFAULT_CONFIG, DEFAULT_LOGGER
-from nav.obs import ObsSnapshot
+from nav.config import DEFAULT_CONFIG, DEFAULT_LOGGER, Config
 from nav.support.time import et_to_utc
 from nav.support.types import PathLike
 
-from .inst import Inst
+from .obs_inst import ObsInst
 
 
-class InstNewHorizonsLORRI(Inst):
-    def __init__(self,
-                 obs: Observation,
-                 *,
-                 config: Optional[Config] = None) -> None:
-        """Initializes a New Horizons LORRI instrument instance.
-
-        Parameters:
-            obs: The Observation object containing New Horizons LORRI image data.
-            config: Configuration object to use. If None, uses DEFAULT_CONFIG.
-        """
-        super().__init__(obs, config=config)
+class ObsNewHorizonsLORRI(ObsInst):
 
     @staticmethod
     def from_file(path: PathLike,
+                  *,
                   config: Optional[Config] = None,
                   extfov_margin_vu: tuple[int, int] | None = None,
-                  **kwargs: Any) -> ObsSnapshot:
-        """Creates an ObsSnapshot from a New Horizons LORRI image file.
+                  **kwargs: Any) -> 'ObsNewHorizonsLORRI':
+        """Creates an ObsNewHorizonsLORRI from a New Horizons LORRI image file.
 
         Parameters:
             path: Path to the New Horizons LORRI image file.
@@ -43,7 +31,7 @@ class InstNewHorizonsLORRI(Inst):
             **kwargs: Additional keyword arguments (none for this instrument).
 
         Returns:
-            An ObsSnapshot object containing the image data and metadata.
+            An ObsNewHorizonsLORRI object containing the image data and metadata.
         """
         config = config or DEFAULT_CONFIG
         logger = DEFAULT_LOGGER
@@ -55,21 +43,20 @@ class InstNewHorizonsLORRI(Inst):
         obs = oops.hosts.newhorizons.lorri.from_file(path, calibration=False)
         obs.abspath = path
 
+        inst_config = config._config_dict['newhorizons_lorri']
         # TODO Calibrate once oops.hosts is fixed.
 
         if extfov_margin_vu is None:
-            if isinstance(config._config_dict['newhorizons_lorri']['extfov_margin_vu'], dict):
-                extfov_margin_vu = config._config_dict['newhorizons_lorri']['extfov_margin_vu'][
-                    obs.data.shape[0]]
+            if isinstance(inst_config['extfov_margin_vu'], dict):
+                extfov_margin_vu = inst_config['extfov_margin_vu'][obs.data.shape[0]]
             else:
-                extfov_margin_vu = config._config_dict['newhorizons_lorri']['extfov_margin_vu']
+                extfov_margin_vu = inst_config['extfov_margin_vu']
         logger.debug(f'  Data shape: {obs.data.shape}')
         logger.debug(f'  Extfov margin vu: {extfov_margin_vu}')
         logger.debug(f'  Data min: {np.min(obs.data)}, max: {np.max(obs.data)}')
 
-        new_obs = ObsSnapshot(obs, config=config, extfov_margin_vu=extfov_margin_vu)
-        new_obs.set_inst(InstNewHorizonsLORRI(new_obs, config=config))
-
+        new_obs = ObsNewHorizonsLORRI(obs, config=config, extfov_margin_vu=extfov_margin_vu)
+        new_obs._inst_config = inst_config
         return new_obs
 
     def star_psf(self) -> PSF:
@@ -101,22 +88,21 @@ class InstNewHorizonsLORRI(Inst):
             A dictionary containing the public metadata for New Horizons LORRI.
         """
 
-        obs = self.obs
         # TODO
         # scet_start = float(obs.dict["SPACECRAFT_CLOCK_START_COUNT"])
         # scet_end = float(obs.dict["SPACECRAFT_CLOCK_STOP_COUNT"])
 
         return {
-            'image_path': str(obs.abspath),
-            'image_name': obs.abspath.name,
+            'image_path': str(self.abspath),
+            'image_name': self.abspath.name,
             'instrument_host_lid': 'urn:nasa:pds:context:instrument_host:spacecraft.nh',
             'instrument_lid': 'urn:nasa:pds:context:instrument:nh.lorri',
-            'start_time_utc': et_to_utc(obs.time[0]),
-            'midtime_utc': et_to_utc(obs.midtime),
-            'end_time_utc': et_to_utc(obs.time[1]),
-            'start_time_et': obs.time[0],
-            'midtime_et': obs.midtime,
-            'end_time_et': obs.time[1],
+            'start_time_utc': et_to_utc(self.time[0]),
+            'midtime_utc': et_to_utc(self.midtime),
+            'end_time_utc': et_to_utc(self.time[1]),
+            'start_time_et': self.time[0],
+            'midtime_et': self.midtime,
+            'end_time_et': self.time[1],
             # 'start_time_scet': scet_start,
             # 'midtime_scet': (scet_start + scet_end) / 2,
             # 'end_time_scet': scet_end,

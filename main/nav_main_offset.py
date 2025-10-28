@@ -30,8 +30,8 @@ from nav.dataset import (DATASET_NAME_TO_CLASS_MAPPING,
                          dataset_name_to_inst_name)
 from nav.config import DEFAULT_CONFIG
 from nav.config.logger import DEFAULT_LOGGER
-from nav.inst import inst_name_to_class
-from nav.process import process_image_files
+from nav.obs import inst_name_to_obs_class
+from nav.navigate_image_files import navigate_image_files
 
 import tkinter  # TODO Change to only install if needed
 # import traceback
@@ -218,240 +218,16 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     # Add all the arguments related to selecting files
     DATASET.add_selection_arguments(cmdparser)
 
-    # Add all the arguments related to logging
-    # nav.logging_setup.add_arguments(cmdparser, MAIN_LOG_NAME, 'OFFSET')
-
-    # Arguments about subprocesses
-    # subprocess_group = cmdparser.add_argument_group('Subprocess handling')
-    # subprocess_group.add_argument(
-    #     '--max-subprocesses', type=int, default=0, metavar='NUM',
-    #     help='The maximum number jobs to perform in parallel')
-    # subprocess_group.add_argument(
-    #     '--max-allowed-time', type=int, default=10*60, metavar='SECS',
-    #     help='The maximum time allowed for a subprocess to run')
-    # subprocess_group.add_argument(
-    #     '--is-subprocess', action='store_true',
-    #     help='Internal flag used to indicate this process was spawned by a parent')
-
-    # Add all the arguments related to AWS
-    # aws_group = cmdparser.add_argument_group('AWS')
-    # aws_group.add_argument(
-    #     '--aws', action='store_true', default=False,
-    #     help="""Set for running on AWS EC2; implies
-    #             --retrieve-from-pds
-    #             --results-in-s3 --use-sqs --no-overlay-file
-    #             --deduce-aws-processors""")
-    # nav.aws.aws_add_arguments(cmdparser, nav.aws.SQS_OFFSET_QUEUE_NAME,
-    #                         group=aws_group)
-
     # Misc arguments
     misc_group = cmdparser.add_argument_group('Miscellaneous')
     misc_group.add_argument(
         '--profile', action=argparse.BooleanOptionalAction, default=False,
         help='Do performance profiling')
 
-    # Arguments for retrieving image and index data
-    # misc_group.add_argument(
-    #     '--retrieve-from-pds', action=argparse.BooleanOptionalAction, default=False,
-    #     help="""Retrieve the image files and indexes from pds-rings.seti.org instead of
-    #             from the local disk""")
-    # misc_group.add_argument(
-    #     '--update-indexes', action=argparse.BooleanOptionalAction, default=False,
-    #     help="""Update the index files from the PDS instead of using the existing
-    #             locally-cached copies""")
-
-    # Add all the arguments about the local environment
-    # nav.config.config_add_override_arguments(cmdparser, group=misc_group)
-
     arguments = cmdparser.parse_args(command_list[1:])
-    # nav.file.validate_selection_arguments(arguments)
 
     return arguments
 
-
-###############################################################################
-#
-# SUBPROCESS HANDLING
-#
-###############################################################################
-
-# def collect_cmd_line(image_path, use_gapfill_kernels=False):
-#     def _yes_no_arg(val, param):
-#         if val:
-#             return [f'--{param}']
-#         return [f'--no-{param}']
-
-#     ret = []
-
-#     # -- Arguments from the main argument list --
-
-#     if arguments.force_offset:
-#         ret += ['--force-offset']
-
-#     # There's no point in a set of subprocesses displaying a result UI or
-#     # all forcing the same offset amount
-#     assert not arguments.display_offset_results
-#     assert not arguments.force_offset_amount
-
-#     ret += _yes_no_arg(arguments.allow_stars, 'allow-stars')
-#     ret += _yes_no_arg(arguments.allow_rings, 'allow-rings')
-#     ret += _yes_no_arg(arguments.allow_moons, 'allow-moons')
-#     ret += _yes_no_arg(arguments.allow_central_planet, 'allow-central-planet')
-#     if arguments.body_cartographic_data:
-#         for entry in arguments.body_cartographic_data:
-#             ret += ['--body-cartographic-data', entry]
-#     ret += _yes_no_arg(arguments.use_predicted_kernels, 'use-predicted-kernels')
-#     ret += _yes_no_arg(arguments.use_gapfill_kernels or use_gapfill_kernels,
-#                        'use-gapfill-kernels')
-#     if arguments.use_kernel:
-#         ret += ['--use-kernel']
-#         ret.extend(arguments.use_kernel)
-#     ret += _yes_no_arg(arguments.use_cassini_nac_wac_offset, 'use-cassini-nac-wac-offset')
-
-#     ret += _yes_no_arg(arguments.write_offset_file, 'write-offset-file')
-#     ret += _yes_no_arg(arguments.write_overlay_file, 'write-overlay-file')
-#     ret += _yes_no_arg(arguments.write_png_file, 'write-png-file')
-#     ret += _yes_no_arg(arguments.png_also_bw, 'png-also-bw')
-#     if arguments.png_blackpoint:
-#         ret += ['--png-blackpoint', str(arguments.png_blackpoint)]
-#     if arguments.png_whitepoint:
-#         ret += ['--png-whitepoint', str(arguments.png_whitepoint)]
-#     if arguments.png_gamma:
-#         ret += ['--png-gamma', str(arguments.png_gamma)]
-#     if arguments.metadata_label_font:
-#         ret += ['--metadata-label-font', arguments.metadata_label_font]
-#     if arguments.stars_label_font:
-#         ret += ['--stars-label-font', arguments.stars_label_font]
-#     if arguments.rings_label_font:
-#         ret += ['--rings-label-font', arguments.rings_label_font]
-#     if arguments.bodies_label_font:
-#         ret += ['--bodies-label-font', arguments.bodies_label_font]
-#     ret += _yes_no_arg(arguments.label_rings_backplane, 'label-rings-backplane')
-#     ret += _yes_no_arg(arguments.show_star_streaks, 'show-star-streaks')
-#     ret += _yes_no_arg(arguments.retrieve_from_pds, 'retrieve-from-pds')
-#     # Subprocesses don't need index files because they're only processing one image
-#     ret += ['--no-update-indexes']
-
-#     # -- Arguments from AWS --
-#     if arguments.results_in_s3:
-#         ret += ['--results-in-s3', '--aws-results-bucket', arguments.aws_results_bucket]
-#     # We don't need SQS arguments because only the top-level driver is retrieving from
-#     # the queue
-
-#     # -- Arguments from file selection --
-#     ret += ['--instrument-host', arguments.instrument_host]
-#     # Subprocesses don't need file selection because they're only processing one image
-
-#     # -- Arguments from logging --
-#     ret += ['--main-logfile-level', 'none']
-#     ret += ['--main-console-level', 'none']
-#     ret += ['--image-logfile-level', arguments.image_logfile_level]
-#     ret += ['--image-console-level', arguments.image_console_level]
-
-#     # -- Misc arguments --
-#     ret += ['--is-subprocess']
-#     if arguments.override_results_root:
-#         ret += ['--override-results-root', arguments.override_results_root]
-#     ret += _yes_no_arg(arguments.profile, 'profile')
-
-#     ret += ['--image-full-path', image_path]
-
-#     return ret
-
-
-# SUBPROCESS_LIST = []
-
-# def wait_for_subprocess(all=False):
-#     """Wait for one (or all) subprocess slots to open up."""
-#     global NUM_FILES_COMPLETED
-#     ec2_termination_count = 0
-#     subprocess_count = arguments.max_subprocesses-1
-#     if all:
-#         subprocess_count = 0
-#     while len(SUBPROCESS_LIST) > 0:
-#         if ec2_termination_count == 5: # Check every 5 seconds
-#             ec2_termination_count = 0
-#             term = nav.aws.aws_check_for_ec2_termination()
-#             if term:
-#                 # Termination notice! We have two minutes
-#                 main_logger.error('Termination notice received - shutdown at %s',
-#                                   term)
-#                 exit_processing()
-#         else:
-#             ec2_termination_count += 1
-#         cur_time = time.time()
-#         for i in range(len(SUBPROCESS_LIST)):
-#             (pid, old_image_path, bootstrapped, old_sqs_handle,
-#              proc_start_time, proc_max_time) = SUBPROCESS_LIST[i]
-#             filename = nav.file.clean_name(old_image_path)
-#             if pid.poll() is not None:
-#                 # The subprocess completed!
-#                 if bootstrapped:
-#                     type_pref = 'force_bootstrap'
-#                 else:
-#                     type_pref = 'force_plain'
-#                 if arguments.results_in_s3:
-#                     # If the results are stored in S3, they were already copied there
-#                     # by the subprocess. Just read the metadata and delete the local
-#                     # file.
-#                     offset_path = nav.file.clean_join(nav.config.TMP_DIR,
-#                                                       filename+'.off')
-#                     metadata = nav.file.read_offset_metadata_path(offset_path)
-#                     nav.file.safe_remove(offset_path)
-#                 else:
-#                     # Otherwise the local file is the real offset file, so read it and
-#                     # leave as-is.
-#                     metadata = nav.file.read_offset_metadata(
-#                                             old_image_path, arguments.instrument_host,
-#                                             arguments.planet, type_pref=type_pref)
-#                 NUM_FILES_COMPLETED += 1
-#                 results = filename + ' - ' + nav.offset.offset_result_str(metadata)
-#                 results += ' (%.2f sec/image)' % ((time.time()-START_TIME)/
-#                                                   float(NUM_FILES_COMPLETED))
-#                 main_logger.info(results)
-#                 del SUBPROCESS_LIST[i]
-#                 if old_sqs_handle is not None:
-#                     # It really completed, so remove it from the SQS queue
-#                     nav.aws.AWS_SQS_CLIENT.delete_message(QueueUrl=SQS_QUEUE_URL,
-#                                                           ReceiptHandle=old_sqs_handle)
-#                 break
-#             if cur_time > proc_max_time:
-#                 # If a subprocess has been running for too long, kill it
-#                 # Note no offset file will be written in this case
-#                 pid.kill()
-#                 NUM_FILES_COMPLETED += 1
-#                 results = filename + ' - KILLED DUE TO TIMEOUT'
-#                 main_logger.info(results)
-#                 del SUBPROCESS_LIST[i]
-#                 if old_sqs_handle is not None:
-#                     # We don't want to keep trying it if it's timing out
-#                     nav.aws.AWS_SQS_CLIENT.delete_message(QueueUrl=SQS_QUEUE_URL,
-#                                                           ReceiptHandle=old_sqs_handle)
-#                 break
-
-#         if len(SUBPROCESS_LIST) <= subprocess_count:
-#             # A slot opened up! Or all processes finished. Depending on what we're
-#             # waiting for.
-#             break
-#         time.sleep(1)
-
-# def run_and_maybe_wait(args, image_path, bootstrapped, sqs_handle,
-#                        max_allowed_time):
-#     """Run one subprocess, waiting as necessary for a slot to open up."""
-#     wait_for_subprocess()
-
-#     main_logger.debug('Spawning subprocess %s', str(args))
-
-#     pid = subprocess.Popen(args)
-#     SUBPROCESS_LIST.append((pid, image_path, bootstrapped, sqs_handle,
-#                             time.time(), time.time()+max_allowed_time))
-
-
-###############################################################################
-#
-# PERFORM INDIVIDUAL OFFSETS ON NAC/WAC IMAGES
-#
-###############################################################################
 
 def exit_processing():
     end_time = time.time()
@@ -492,32 +268,6 @@ def main():
     command_list = sys.argv[1:]
     arguments = parse_args(command_list)
 
-    # nav.config.config_perform_overrides(arguments)
-
-    # RESULTS_DIR = nav.config.CB_RESULTS_ROOT
-
-    # # We don't support B&W PNG files in S3
-    # assert not arguments.results_in_s3 or not arguments.png_also_bw, \
-    #     'B&W PNG not supported with S3'
-
-    # if arguments.update_indexes:
-    #     assert arguments.retrieve_from_pds, \
-    #         '--update-indexes meaningless without --retrieve-from-pds'
-
-    # if arguments.aws:
-    #     arguments.retrieve_from_pds = True
-    #     arguments.results_in_s3 = True
-    #     arguments.use_sqs = True
-    #     arguments.write_overlay_file = False
-    #     arguments.deduce_aws_processors = True
-    # if arguments.results_in_s3:
-    #     RESULTS_DIR = ''
-
-    # if nav.aws.AWS_ON_EC2_INSTANCE:
-    #     if arguments.deduce_aws_processors:
-    #         arguments.max_subprocesses = nav.aws.AWS_PROCESSORS[
-    #             nav.aws.AWS_HOST_INSTANCE_TYPE]
-
     if arguments.stars_only:
         arguments.allow_rings = False
         arguments.allow_moons = False
@@ -539,9 +289,7 @@ def main():
         arguments.write_overlay_file = False
         arguments.write_png_file = False
 
-    if arguments.profile:  # and arguments.max_subprocesses == 0:
-        # Only do image offset profiling if we're going to do the actual work in
-        # this process
+    if arguments.profile:
         pr = cProfile.Profile()
         pr.enable()
 
@@ -635,7 +383,7 @@ def main():
         print(f'Valid datasets are: {", ".join(DATASET_NAME_TO_CLASS_MAPPING.keys())}')
         sys.exit(1)
 
-    inst_class = inst_name_to_class(INST_NAME)
+    obs_class = inst_name_to_obs_class(INST_NAME)
 
     for imagefiles in DATASET.yield_image_files_from_arguments(arguments):
         assert len(imagefiles.image_files) == 1
@@ -644,8 +392,8 @@ def main():
             main_logger.info('Would process: %s', image_path)
             continue
 
-        if process_image_files(
-                inst_class,
+        if navigate_image_files(
+                obs_class,
                 imagefiles,
                 results_root=results_root,
                 # allow_stars=arguments.allow_stars,

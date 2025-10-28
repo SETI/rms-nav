@@ -203,6 +203,7 @@ rings:
 stars:
   calibrated_data: true
   stellar_aberration: true
+  proper_motion: true
   float_psf_sigma: false
   search_multipliers:
     - 0.25

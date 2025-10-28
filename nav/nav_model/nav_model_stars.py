@@ -190,7 +190,7 @@ class NavModelStars(NavModel):
             star.psf_delta_v = None
             star.psf_sigma_x = None
             star.psf_sigma_y = None
-            star.psf_size = obs.inst.star_psf_size(star)
+            star.psf_size = obs.star_psf_size(star)
             if star.temperature is None:
                 star.temperature_faked = True
                 star.temperature = SCLASS_TO_SURFACE_TEMP[default_star_class]
@@ -210,7 +210,10 @@ class NavModelStars(NavModel):
         # Eliminate stars that are not actually in the FOV, including the PSF size
         # margin beyond the edge
 
-        ra_dec_list = [x.ra_dec_with_pm(obs.midtime) for x in star_list2]
+        if config.proper_motion:
+            ra_dec_list = [x.ra_dec_with_pm(obs.midtime) for x in star_list2]
+        else:
+            ra_dec_list = [(x.ra, ra.dec) for x in star_list2]
         ra_list = polymath.Scalar([x[0] for x in ra_dec_list])
         dec_list = polymath.Scalar([x[1] for x in ra_dec_list])
 
@@ -330,25 +333,27 @@ class NavModelStars(NavModel):
 
             self._logger.debug('New total stars %d', len(full_star_list))
 
-            # Remove stars that are on top of each other and keep the brighter one
+            # Remove stars that are on top of each other
             if len(full_star_list) > 1:
                 new_full_star_list = []
                 for i in range(len(full_star_list)):
-                    good_star = True
-                    for j in range(len(full_star_list)):
-                        if i == j:
-                            continue
-                        if (abs(full_star_list[i].v - full_star_list[j].v) < 1 and
-                            abs(full_star_list[i].u - full_star_list[j].u) < 1 and
-                            full_star_list[i].vmag < full_star_list[j].vmag):
-                            good_star = False
-                            self._logger.debug('Removing overlapping star:')
-                            self._logger.debug('  %s; keeping ',
+                    if full_star_list[i].conflicts == 'STAR':
+                        continue
+                    for j in range(i+1, len(full_star_list)):
+                        u_gap = (full_star_list[i].psf_size[1] / 2 +
+                                 full_star_list[j].psf_size[1] / 2)
+                        v_gap = (full_star_list[i].psf_size[0] / 2 +
+                                 full_star_list[j].psf_size[0] / 2)
+                        if (abs(full_star_list[i].v - full_star_list[j].v) < v_gap and
+                            abs(full_star_list[i].u - full_star_list[j].u) < u_gap):
+                            self._logger.debug('Removing overlapping stars:')
+                            self._logger.debug('  %s',
                                                self._star_short_info(full_star_list[i]))
                             self._logger.debug('  %s',
                                                self._star_short_info(full_star_list[j]))
+                            full_star_list[j].conflicts = 'STAR'
                             break
-                    if good_star:
+                    else:
                         new_full_star_list.append(full_star_list[i])
 
                 if len(full_star_list) != len(new_full_star_list):
@@ -461,7 +466,7 @@ class NavModelStars(NavModel):
             # if star.dn >= stars_config["psf_gain"][0]:
             #     sigma *= stars_config["psf_gain"][1]
 
-            psf = self.obs.inst.star_psf()
+            psf = self.obs.star_psf()
 
             if (u_int < psf_size_half_u or
                 u_int >= model.shape[1]-psf_size_half_u or
@@ -504,25 +509,23 @@ class NavModelStars(NavModel):
 
             # width = star.overlay_box_width
             # thickness = star.overlay_box_thickness
-            width = 5
-            # thickness = 1
-            # if width == 0:
-            #     continue
+            v_halfsize = (star.psf_size[0] // 2) + 2
+            u_halfsize = (star.psf_size[1] // 2) + 2
 
             # width += thickness-1
             # if (not width <= u_idx < overlay.shape[1]-width or
             #     not width <= v_idx < overlay.shape[0]-width):
             #     continue
 
-            u_min = u - width
-            v_min = v - width
-            u_max = u + width
-            v_max = v + width
+            u_min = u - u_halfsize
+            v_min = v - v_halfsize
+            u_max = u + u_halfsize
+            v_max = v + v_halfsize
             u_min, v_min = self._obs.clip_extfov(u_min, v_min)
             u_max, v_max = self._obs.clip_extfov(u_max, v_max)
 
             star_avoid_mask[v_min:v_max+1, u_min:u_max+1] = True
-            draw_rect(star_overlay, True, u, v, width, width)
+            draw_rect(star_overlay, True, u, v, u_halfsize, v_halfsize)
 
             stretch_region = self._obs.make_extfov_false()
             stretch_region[v_min:v_max+1, u_min:u_max+1] = True
@@ -544,7 +547,7 @@ class NavModelStars(NavModel):
 
             text_loc = []
 
-            label_margin = width + 3
+            label_margin = u_halfsize + 3
 
             text_loc.append((TEXTINFO_BOTTOM, v + label_margin, u))
             text_loc.append((TEXTINFO_TOP, v - label_margin, u))
@@ -569,7 +572,7 @@ class NavModelStars(NavModel):
         self._model_img = model
         self._model_mask = self._model_img != 0
         self._range = np.inf
-        self._blur_amount = None
+        self._blur_amount = None  # np.eye(2, 2) * 5.
         self._uncertainty = 0.
         self._confidence = 1.
         self._stretch_regions = stretch_regions

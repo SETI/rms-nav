@@ -24,7 +24,7 @@ class ImageFile:
 
     image_file_url: FCPath
     label_file_url: FCPath
-    results_path_stub: Path
+    results_path_stub: str
     # Convert this to use a default factory
     index_file_row: dict[str, Any] = field(default_factory=dict)
     _image_file_path: Optional[Path] = None

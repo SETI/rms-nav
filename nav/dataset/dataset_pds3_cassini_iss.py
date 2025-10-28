@@ -158,7 +158,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         return f'COISS_{volume[6]}xxx/{volume}/{volume}_index.lbl'
 
     @staticmethod
-    def _results_path_stub(volume: str, filespec: str) -> Path:
+    def _results_path_stub(volume: str, filespec: str) -> str:
         """Get the results path stub for an image filespec.
 
         Parameters:
@@ -169,7 +169,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
             The results path stub. This is {volume}/{filespec} without the .IMG extension.
         """
 
-        return Path(f'{volume}/{filespec}').with_suffix('')
+        return str(Path(f'{volume}/{filespec}').with_suffix(''))
 
     def _check_additional_image_selection_criteria(self,
                                                    _img_path: str,

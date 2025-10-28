@@ -154,7 +154,7 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
         return f'GO_0xxx/{volume}/{volume}_index.lbl'
 
     @staticmethod
-    def _results_path_stub(volume: str, filespec: str) -> Path:
+    def _results_path_stub(volume: str, filespec: str) -> str:
         """Get the results path stub for an image filespec.
 
         Parameters:
@@ -165,7 +165,7 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
             The results path stub. This is {volume}/{filespec} without the .IMG extension.
         """
 
-        return Path(f'{volume}/{filespec}').with_suffix('')
+        return str(Path(f'{volume}/{filespec}').with_suffix(''))
 
     # Public methods
 

@@ -1,34 +1,28 @@
 from abc import ABC, abstractmethod
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING, cast
 
-from oops import Observation
-from psfmodel import PSF
+from psfmodel import GaussianPSF, PSF
 from starcat import Star
 
 from nav.config import Config
-from nav.support.nav_base import NavBase
 from nav.support.types import PathLike
 
 if TYPE_CHECKING:
     from nav.obs import Obs
 
 
-class Inst(ABC, NavBase):
-    """Base class for instrument models representing spacecraft cameras."""
+class ObsInst(ABC):
+    """Mix-in class for instrument models representing spacecraft cameras."""
 
-    def __init__(self,
-                 obs: Observation,
-                 *,
-                 config: Optional[Config] = None) -> None:
-        """Initializes an instrument model with observation data.
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
 
-        Parameters:
-            obs: OOPS Observation object containing instrument and pointing information.
-            config: Configuration object to use. If None, uses DEFAULT_CONFIG.
-        """
-        super().__init__(config=config)
+        self._inst_config: dict[str, Any] | None = None
 
-        self._obs = obs
+    @property
+    def inst_config(self) -> dict[str, Any] | None:
+        """Returns the instrument configuration."""
+        return self._inst_config
 
     @staticmethod
     @abstractmethod
@@ -51,24 +45,28 @@ class Inst(ABC, NavBase):
         """
         ...
 
-    @property
-    def obs(self) -> Observation:
-        """Returns the observation object associated with this instrument."""
-        return self._obs
-
-    @abstractmethod
     def star_psf(self) -> PSF:
         """Returns the point spread function (PSF) model appropriate for stars observed
         by this instrument.
 
+        This generic implementation uses the "star_psf_sigma" configuration value and
+        creates a Gaussian PSF with that sigma.
+
         Returns:
             A PSF model appropriate for stars observed by this instrument.
         """
-        ...
 
-    @abstractmethod
+        if self._inst_config is None:
+            raise ValueError('Instrument configuration not set')
+
+        sigma = self._inst_config['star_psf_sigma']
+        return GaussianPSF(sigma=sigma)
+
     def star_psf_size(self, star: Star) -> tuple[int, int]:
         """Returns the size of the point spread function (PSF) to use for a star.
+
+        This generic implementation uses the "star_psf_sizes" configuration value and
+        returns the appropriate value for the star's magnitude.
 
         Parameters:
             star: The star to get the PSF size for.
@@ -76,7 +74,15 @@ class Inst(ABC, NavBase):
         Returns:
             A tuple of the PSF size (v, u) in pixels.
         """
-        ...
+
+        if self._inst_config is None:
+            raise ValueError('Instrument configuration not set')
+
+        star_psf_sizes = self._inst_config['star_psf_sizes']
+        for mag, size in star_psf_sizes.items():
+            if star.vmag < mag:
+                return tuple(size)
+        return tuple(size) # Default to smallest
 
     @abstractmethod
     def get_public_metadata(self) -> dict[str, Any]:

@@ -69,7 +69,7 @@ class NavMaster(NavBase):
 
     def _initialize_metadata(self) -> None:
         """Initializes the metadata dictionary."""
-        obs_metadata = self.obs.inst.get_public_metadata()
+        obs_metadata = self.obs.get_public_metadata()
         # kernels
         # RA/DEC corners and center, un nav and nav
 
@@ -185,7 +185,7 @@ class NavMaster(NavBase):
         else:
             body_list = []
 
-        large_body_dict = self._obs.inventory(body_list, return_type='full')
+        large_body_dict = obs.inventory(body_list, return_type='full')
         # Make a list sorted by range, with the closest body first, limiting to bodies
         # that are actually in the FOV
         def _body_in_fov(obs: Observation,
@@ -399,8 +399,8 @@ class NavMaster(NavBase):
         # fn = Path(obs.basename).stem
         # im.save(f'/home/rfrench/{fn}.png')
 
-        plt.imshow(res)
-        plt.show()
+        # plt.imshow(res)
+        # plt.show()
 
         # model_mask = body_model.model_mask
         # plt.imshow(model_mask)

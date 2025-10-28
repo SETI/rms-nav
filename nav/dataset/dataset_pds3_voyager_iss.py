@@ -153,14 +153,14 @@ class DataSetPDS3VoyagerISS(DataSetPDS3):
         return f'VGISS_{volume[6]}xxx/{volume}/{volume}_index.lbl'
 
     @staticmethod
-    def _results_path_stub(volume: str, filespec: str) -> Path:
+    def _results_path_stub(volume: str, filespec: str) -> str:
         """Get the results path stub for an image filespec.
 
         Parameters:
             volume: The volume name.
             filespec: The filespec of the image.
         """
-        return Path(f'{volume}/{filespec}').with_suffix('')
+        return str(Path(f'{volume}/{filespec}').with_suffix(''))
 
     def __init__(self,
                  *,

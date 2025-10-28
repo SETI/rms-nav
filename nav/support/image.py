@@ -454,9 +454,8 @@ def gaussian_blur_cov(img: NDArrayFloatType,
                       sigma: NDArrayFloatType
                       ) -> NDArrayFloatType:
     """Blur by anisotropic Gaussian with covariance Sigma in frequency domain."""
-    h, w = img.shape
-    fy = fftfreq(h)[:, None]
-    fx = fftfreq(w)[None, :]
+    fy = fftfreq(img.shape[0])[:, None]
+    fx = fftfreq(img.shape[1])[None, :]
     Syy, Syx = sigma[0, 0], sigma[0, 1]
     Sxy, Sxx = sigma[1, 0], sigma[1, 1]
     q = Syy*(fy*fy) + (Syx+Sxy)*(fy*fx) + Sxx*(fx*fx)

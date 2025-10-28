@@ -51,7 +51,8 @@ class DataSetPDS3(DataSet):
             self._index_filecache = index_filecache
 
         if pds3_holdings_filecache is None:
-            self._pds3_holdings_filecache = FileCache('nav_pds3_holdings')  # This is multiprocess safe
+            # This is multiprocess safe
+            self._pds3_holdings_filecache = FileCache('nav_pds3_holdings')
         else:
             self._pds3_holdings_filecache = pds3_holdings_filecache
 
@@ -182,7 +183,7 @@ class DataSetPDS3(DataSet):
 
     @staticmethod
     @abstractmethod
-    def _results_path_stub(volume: str, filespec: str) -> Path:
+    def _results_path_stub(volume: str, filespec: str) -> str:
         """Get the results path stub for an image filespec.
         """
         raise NotImplementedError

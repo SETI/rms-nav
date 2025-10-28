@@ -25,23 +25,3 @@ class Obs(ABC, NavBase):
         """
 
         super().__init__(config=config)
-
-        self._inst: Optional[Inst] = None
-
-    def set_inst(self, inst: 'Inst') -> None:
-        """Sets the instrument associated with this observation.
-
-        Parameters:
-            inst: The instrument instance to associate with this observation.
-        """
-
-        self._inst = inst
-
-    @property
-    def inst(self) -> 'Inst':
-        """Returns the instrument associated with this observation."""
-
-        if self._inst is None:
-            raise ValueError('Instrument not set')
-
-        return self._inst

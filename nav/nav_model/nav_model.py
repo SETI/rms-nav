@@ -3,7 +3,6 @@ from typing import Any, Optional
 
 from nav.annotation import Annotations
 from nav.config import Config
-from nav.inst import Inst
 from nav.obs import ObsSnapshot
 from nav.support.nav_base import NavBase
 from nav.support.types import NDArrayBoolType, NDArrayFloatType, NDArrayUint8Type
@@ -72,11 +71,6 @@ class NavModel(ABC, NavBase):
     def obs(self) -> ObsSnapshot:
         """Returns the observation snapshot associated with this model."""
         return self._obs
-
-    @property
-    def inst(self) -> Inst:
-        """Returns the instrument associated with the observation."""
-        return self.obs.inst
 
     @property
     def metadata(self) -> dict[str, Any]:

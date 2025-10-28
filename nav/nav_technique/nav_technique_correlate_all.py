@@ -123,7 +123,7 @@ class NavTechniqueCorrelateAll(NavTechnique):
         for model in self.nav_master.all_models:
             if model.model_img is None:
                 continue
-            if model.model_mask is None or model.model_image.shape != model.model_mask.shape:
+            if model.model_mask is None or model.model_img.shape != model.model_mask.shape:
                 raise ValueError(f'Model image and mask shapes differ: {model.model_img.shape} != '
                                  f'{model.model_mask.shape}')
             model_img = normalize_array(model.model_img)

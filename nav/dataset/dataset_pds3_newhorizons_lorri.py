@@ -141,14 +141,14 @@ class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
         return f'NHxxLO_xxxx/{volume}/{volume}_index.lbl'
 
     @staticmethod
-    def _results_path_stub(volume: str, filespec: str) -> Path:
+    def _results_path_stub(volume: str, filespec: str) -> str:
         """Get the results path stub for an image filespec.
 
         Parameters:
             volume: The volume name.
             filespec: The filespec of the image.
         """
-        return Path(f'{volume}/{filespec}').with_suffix('')
+        return str(Path(f'{volume}/{filespec}').with_suffix(''))
 
     # Public methods
 
