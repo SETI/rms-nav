@@ -50,8 +50,9 @@ def upsampled_dft(X: NDArrayFloatType,
     a = np.arange(region_v) - oy
     b = np.arange(region_u) - ox
     j2pi = 1j * 2.0 * np.pi
-    Er = np.exp((-j2pi / (X_v_size*up_factor)) * (a[:, None] @ ky[None, :]))
-    Ec = np.exp((-j2pi / (X_u_size*up_factor)) * (kx[:, None] @ b[None, :]))
+    # Use +j sign to evaluate localized inverse DFT samples (consistent with ifft).
+    Er = np.exp((j2pi / (X_v_size*up_factor)) * (a[:, None] @ ky[None, :]))
+    Ec = np.exp((j2pi / (X_u_size*up_factor)) * (kx[:, None] @ b[None, :]))
     return Er @ X @ Ec
 
 # ==============================================================
@@ -247,9 +248,16 @@ def evaluate_candidate(*,
 
     # Subpixel refinement: local upsampled DFT of correlation spectrum numerator
     spec = fft2(image_pad) * np.conj(fft2(model_pad * mask_pad))
-    oy = int(np.floor(upsample_factor*0.5))
-    ox = int(np.floor(upsample_factor*0.5))
-    Up = upsampled_dft(spec, upsample_factor, (3, 3),
+    # Center of the local upsampled DFT window should be the middle of the
+    # evaluation region (e.g., 3x3 -> center index 1), not half the upsample factor.
+    # Using upsample_factor here caused increasing bias for large factors.
+    # Use a region size that scales with upsample_factor so the true peak
+    # (which can be ~0.5*upsample_factor samples from center) is inside the window.
+    region_v = upsample_factor + 1
+    region_u = upsample_factor + 1
+    oy = region_v // 2
+    ox = region_u // 2
+    Up = upsampled_dft(spec, upsample_factor, (region_v, region_u),
                        [oy - dy_i*upsample_factor, ox - dx_i*upsample_factor])
     upy, upx = np.unravel_index(np.argmax(np.abs(Up)), Up.shape)
     dy = dy_i + (upy - oy) / upsample_factor
@@ -334,17 +342,23 @@ def navigate_single_scale_kpeaks(*,
         A dictionary containing the navigation result.
     """
 
-    image_norm = normalize_array(image)
+    # Use original image for correlation surfaces; masked NCC computes its own
+    # normalization, and using normalized-and-then-padded images biases the
+    # unnormalized numerator surface used in refinement.
+    image_orig = np.asarray(image, np.float64)
     model_h, model_w = model.shape
-    image_h, image_w = image_norm.shape
+    image_h, image_w = image_orig.shape
     padded_h, padded_w = image_h + model_h, image_w + model_w
 
-    image_pad = pad_top_left(image_norm, padded_h, padded_w)
+    image_pad = pad_top_left(image_orig, padded_h, padded_w)
     model_pad = pad_top_left(model, padded_h, padded_w)
     mask_pad = pad_top_left(mask, padded_h, padded_w)
 
     corr = masked_ncc(image_pad, model_pad, mask_pad)
-    peaks = nms_topk(corr, k=max_peaks, radius=nms_radius)
+    # Use unnormalized correlation numerator for peak localization to match
+    # the refinement surface computed in evaluate_candidate.
+    corr_num = np.real(ifft2(fft2(image_pad) * np.conj(fft2(model_pad * mask_pad))))
+    peaks = nms_topk(corr_num, k=max_peaks, radius=nms_radius)
 
     logger.debug(f'Correlation peaks:')
 
@@ -385,7 +399,7 @@ def navigate_with_pyramid_kpeaks(image: NDArrayFloatType,
                                  mask: NDArrayBoolType,
                                  pyramid_levels: int = 3,
                                  max_peaks: int = 5,
-                                 upsample_factor: int = 16,
+                                 upsample_factor: int = 128,
                                  metric: str = 'psr',
                                  quality_thresh: float = 6.0,
                                  consistency_tol: float = 2.0,
@@ -456,7 +470,9 @@ def navigate_with_pyramid_kpeaks(image: NDArrayFloatType,
     level_shifts = []
     for lvl in range(pyramid_levels, 0, -1):
         s = 2**(lvl-1)
-        image_downsampled = image[::s, ::s]
+        # Anti-alias the image prior to decimation to avoid peak shifts at coarse levels
+        image_blurred = gaussian_filter(image, sigma=s/2.0)
+        image_downsampled = image_blurred[::s, ::s]
 
         # Downsample model & mask with anti-aliasing
         # First blur them both with an appropriate Gaussian kernel so that simple downsampling
@@ -511,8 +527,8 @@ def navigate_with_pyramid_kpeaks(image: NDArrayFloatType,
     }
 
     logger.debug(f'Correlation result: '
-                 f'offset {result["offset"][0]:.3f}, {result["offset"][1]:.3}; '
-                 f'sigma_xy {result["sigma_xy"][0]:.3f}, {result["sigma_xy"][1]:.3}; '
+                 f'offset dU {result["offset"][1]:.3f}, dV {result["offset"][0]:.3}; '
+                 f'sigma U {result["sigma_xy"][1]:.3f}, V {result["sigma_xy"][0]:.3}; '
                  f'consistency {consistency:.3f}; '
                  f'spurious {spurious}')
 

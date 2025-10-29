@@ -79,7 +79,7 @@ class Annotations(NavBase):
             exist.
         """
 
-        log_level = self._config.general.get('annotate_log_level')
+        log_level = self._config.general.get('log_level_annotate')
         with self.logger.open('ANNOTATE IMAGE', level=log_level):
             if len(self.annotations) == 0:
                 self.logger.info('No annotations to annotate')

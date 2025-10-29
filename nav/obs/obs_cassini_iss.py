@@ -72,6 +72,36 @@ class ObsCassiniISS(ObsSnapshot, ObsInst):
         new_obs._inst_config = inst_config
         return new_obs
 
+    def star_min_usable_vmag(self) -> float:
+        """Returns the minimum usable magnitude for stars in this observation.
+
+        Returns:
+            The minimum usable magnitude for stars in this observation.
+        """
+
+        if self.detector == 'WAC':
+            return 0.
+
+        return 0.
+
+    def star_max_usable_vmag(self) -> float:
+        """Returns the maximum usable magnitude for stars in this observation.
+
+        Returns:
+            The maximum usable magnitude for stars in this observation.
+        """
+
+        if self.detector == 'WAC':
+            # This is based on star field image W1580760393 with texp 26 and clear filter.
+            # This image was not useful beyond mag 10.7.
+            # We don't try to compensate for non-clear filters.
+            return 10.7 + np.log(self.texp / 26) / np.log(2.512)
+
+        # This is based on star field image N1521881358 with texp 1 and clear filter.
+        # This image was not useful beyond mag 10.7.
+        # We don't try to compensate for non-clear filters.
+        return 10.5 + np.log(self.texp) / np.log(2.512)
+
     def get_public_metadata(self) -> dict[str, Any]:
         """Returns the public metadata for Cassini ISS.
 

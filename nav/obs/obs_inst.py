@@ -85,6 +85,26 @@ class ObsInst(ABC):
         return tuple(size) # Default to smallest
 
     @abstractmethod
+    def star_min_usable_vmag(self) -> float:
+        """Returns the minimum usable magnitude for stars in this observation.
+
+        Returns:
+            The minimum usable magnitude for stars in this observation.
+        """
+
+        raise NotImplementedError
+
+    @abstractmethod
+    def star_max_usable_vmag(self) -> float:
+        """Returns the maximum usable magnitude for stars in this observation.
+
+        Returns:
+            The maximum usable magnitude for stars in this observation.
+        """
+
+        raise NotImplementedError
+
+    @abstractmethod
     def get_public_metadata(self) -> dict[str, Any]:
         """Returns the public metadata for this instrument."""
         ...

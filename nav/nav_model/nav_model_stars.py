@@ -19,6 +19,7 @@ import polymath
 from psfmodel.gaussian import GaussianPSF
 from starcat import (SCLASS_TO_SURFACE_TEMP,
                      SCLASS_TO_B_MINUS_V,
+                     SpiceStarCatalog,
                      Star,
                      UCAC4StarCatalog,
                      YBSCStarCatalog)
@@ -38,6 +39,7 @@ from .nav_model import NavModel
 
 
 _STAR_CATALOG_UCAC4 = None
+_STAR_CATALOG_TYCHO2 = None
 _STAR_CATALOG_YBSC = None
 
 
@@ -47,6 +49,14 @@ def _get_star_catalog_ucac4():
     if _STAR_CATALOG_UCAC4 is None:
         _STAR_CATALOG_UCAC4 = UCAC4StarCatalog()
     return _STAR_CATALOG_UCAC4
+
+
+def _get_star_catalog_tycho2():
+    """Get Tycho-2 star catalog, creating it lazily."""
+    global _STAR_CATALOG_TYCHO2
+    if _STAR_CATALOG_TYCHO2 is None:
+        _STAR_CATALOG_TYCHO2 = SpiceStarCatalog('tycho2')
+    return _STAR_CATALOG_TYCHO2
 
 
 def _get_star_catalog_ybsc():
@@ -74,6 +84,7 @@ class NavModelStars(NavModel):
         self._obs = obs
         self._conflict_body_list = None
         self._star_list = None
+        self._stars_config = self._config.stars
 
     @property
     def star_list(self) -> list[Star]:
@@ -97,9 +108,9 @@ class NavModelStars(NavModel):
 
     @staticmethod
     def _star_short_info(star: Star) -> str:
-        return ('Star %9d U %8.3f+/-%7.3f V %8.3f+/-%7.3f MAG %6.3f BMAG %6.3f '
+        return ('Star %9s U %9.3f+/-%7.3f V %9.3f+/-%7.3f MAG %6.3f BMAG %6.3f '
                 'VMAG %6.3f SCLASS %3s TEMP %6d DN %7.2f CONFLICT %s') % (
-                    star.unique_number,
+                    star.pretty_name,
                     star.u, abs(star.move_u),
                     star.v, abs(star.move_v),
                     star.vmag,
@@ -111,6 +122,7 @@ class NavModelStars(NavModel):
                     star.conflicts) # TODO star.dn)
 
     def _stars_list_for_obs(self,
+                            catalog_name: str,
                             ra_min: float,
                             ra_max: float,
                             dec_min: float,
@@ -125,17 +137,33 @@ class NavModelStars(NavModel):
         """
 
         obs = self._obs
-        config = self._config.stars
 
-        self._logger.debug('Retrieving stars: Mag range %7.4f to %7.4f', mag_min, mag_max)
+        self.logger.debug(f'Retrieving stars from {catalog_name}: Mag range '
+                          f'{mag_min:7.4f} to {mag_max:7.4f}')
 
-        # min_dn = self._config[('min_detectable_dn', obs.clean_detector)]
-
-        # Get a list of all reasonable stars with the given magnitude range.
-
-        star_list1 = []
-
-        if mag_min < 8:  # YBSC maximum is 7.96
+        # Get a list of all reasonable stars within the given magnitude range
+        # from the selected catalog.
+        if catalog_name == 'ucac4':
+            star_list1 = list(
+                _get_star_catalog_ucac4().find_stars(
+                    allow_double=True,
+                    allow_galaxy=False,
+                    ra_min=ra_min, ra_max=ra_max,
+                    dec_min=dec_min, dec_max=dec_max,
+                    vmag_min=mag_min, vmag_max=mag_max,
+                    **kwargs))
+        elif catalog_name == 'tycho2':
+            star_list1 = list(
+                _get_star_catalog_tycho2().find_stars(
+                    allow_double=True,
+                    ra_min=ra_min, ra_max=ra_max,
+                    dec_min=dec_min, dec_max=dec_max,
+                    vmag_min=mag_min, vmag_max=mag_max,
+                    **kwargs))
+            for star in star_list1:
+                star.johnson_mag_v = star.vmag
+                star.johnson_mag_b = star.vmag
+        elif catalog_name == 'ybsc':
             star_list1 = list(
                 _get_star_catalog_ybsc().find_stars(
                     allow_double=True,
@@ -149,17 +177,8 @@ class NavModelStars(NavModel):
                     star.johnson_mag_b = star.johnson_mag_v
                 else:
                     star.johnson_mag_b = star.vmag + star.b_v
-
-        ucac_star_list = list(
-                _get_star_catalog_ucac4().find_stars(
-                    allow_double=True,
-                    allow_galaxy=False,
-                    ra_min=ra_min, ra_max=ra_max,
-                    dec_min=dec_min, dec_max=dec_max,
-                    vmag_min=mag_min, vmag_max=mag_max,
-                    **kwargs))
-
-        star_list1 += ucac_star_list
+        else:
+            raise ValueError(f'Invalid star catalog: {catalog_name}')
 
         # This copy is required because we mutate the star object and if we ever
         # reuse the same star object (like trying multiple navigations), we want
@@ -171,21 +190,28 @@ class NavModelStars(NavModel):
         # Fake the temperature if it's not known, and eliminate stars we just
         # don't want to deal with.
 
-        discard_class = 0
-        discard_dn = 0
+        discard_class = 0  # TODO
+        discard_dn = 0  # TODO
 
-        default_star_class = cast(str, config.default_star_class)
+        default_star_class = cast(str, self._stars_config.default_star_class)
 
         star_list2 = []
         for star in star_list1:
             if star.ra is None or star.dec is None:
                 continue
+            star.catalog_name = catalog_name
+            star.pretty_name = str(star.unique_number)
+            try:
+                # Replace all multiple spaces with a single space
+                if star.name.strip():
+                    star.pretty_name = ' '.join(star.name.split())
+            except AttributeError:
+                star.name = ''
             star.conflicts = None
             star.temperature_faked = False
             star.johnson_mag_faked = False
-            star.integrated_dn = 0.
-            star.overlay_box_width = 0
-            star.overlay_box_thickness = 0
+            star.overlay_box_width = 0  # TODO
+            star.overlay_box_thickness = 0  # TODO
             star.psf_delta_u = None
             star.psf_delta_v = None
             star.psf_sigma_x = None
@@ -197,21 +223,23 @@ class NavModelStars(NavModel):
                 star.spectral_class = default_star_class
             # TODO Validate this
             if star.johnson_mag_v is None or star.johnson_mag_b is None:
-                    star.johnson_mag_v = (star.vmag -
-                        SCLASS_TO_B_MINUS_V[clean_sclass(star.spectral_class)] / 2.)
-                    star.johnson_mag_b = (star.vmag +
-                        SCLASS_TO_B_MINUS_V[clean_sclass(star.spectral_class)] / 2.)
-                    star.johnson_mag_faked = True
-            star.dn = 2 ** -(star.vmag-4)  # TODO
-            if config.stellar_aberration:
+                star.johnson_mag_v = (star.vmag -
+                    SCLASS_TO_B_MINUS_V[clean_sclass(star.spectral_class)] / 2.)
+                star.johnson_mag_b = (star.vmag +
+                    SCLASS_TO_B_MINUS_V[clean_sclass(star.spectral_class)] / 2.)
+                star.johnson_mag_faked = True
+            if self._stars_config.stellar_aberration:
                 self._aberrate_star(star)
+            star.dn = 2.512 ** -(star.vmag-4)  # TODO
             star_list2.append(star)
 
         # Eliminate stars that are not actually in the FOV, including the PSF size
         # margin beyond the edge
 
-        if config.proper_motion:
-            ra_dec_list = [x.ra_dec_with_pm(obs.midtime) for x in star_list2]
+        ra_dec_pm_list = [x.ra_dec_with_pm(obs.midtime) for x in star_list2]
+
+        if self._stars_config.proper_motion:
+            ra_dec_list = ra_dec_pm_list
         else:
             ra_dec_list = [(x.ra, ra.dec) for x in star_list2]
         ra_list = polymath.Scalar([x[0] for x in ra_dec_list])
@@ -241,7 +269,8 @@ class NavModelStars(NavModel):
 
         star_list3 = []
         discard_uv = 0
-        for star, u, v, u1, v1, u2, v2 in zip(star_list2,
+        for star, (ra_pm, dec_pm),u, v, u1, v1, u2, v2 in zip(star_list2,
+                                              ra_dec_pm_list,
                                               u_list, v_list,
                                               u1_list, v1_list,
                                               u2_list, v2_list):
@@ -261,20 +290,23 @@ class NavModelStars(NavModel):
                 u2 >= obs.extfov_u_max-psf_size_half_u or
                 v2 <= obs.extfov_v_min+psf_size_half_v or
                 v2 >= obs.extfov_v_max-psf_size_half_v):
-                self._logger.debug("Star %9d U %8.3f V %8.3f is off the edge",
-                                   star.unique_number, u, v)
+                self.logger.debug(f'Star {star.pretty_name:9s} U {u:9.3f} V {v:9.3f} is off '
+                                  'the edge')
+                discard_uv += 1
                 continue
 
             star.u = u
             star.v = v
             star.move_u = u2-u1
             star.move_v = v2-v1
+            star.ra_pm = ra_pm
+            star.dec_pm = dec_pm
 
             star_list3.append(star)
 
-        self._logger.debug(
-            'Found %d stars, discarded because of CLASS %d, LOW DN %d, BAD UV %d',
-            len(star_list3), discard_class, discard_dn, discard_uv)
+        self.logger.debug(
+            f'Found {len(star_list3)} new stars, discarded because of CLASS {discard_class}, '
+            f'LOW DN {discard_dn}, BAD UV {discard_uv}')
 
         return star_list3
 
@@ -297,78 +329,134 @@ class NavModelStars(NavModel):
               magnitude, and the filters being used.
         """
 
-        config = self._config.stars
-
-        max_stars = config.max_stars
+        max_stars = self._stars_config.max_stars
 
         ra_min, ra_max, dec_min, dec_max = self._obs.ra_dec_limits_ext()
 
         # Try to be efficient by limiting the magnitudes searched so we don't
         # return a huge number of dimmer stars and then only need a few of them.
-        magnitude_list = [0., 12., 13., 14., 15., 16., 17.]
+        magnitude_list = [0., 8., 9., 10., 10.5, 11., 11.5, 12., 12.5,
+                          13., 14., 15., 16., 17.]
 
-        # TODO mag_vmax = _compute_dimmest_visible_star_vmag(obs, stars_config)+1
-        mag_vmax = 16
+        mag_vmin = self.obs.star_min_usable_vmag()
+        mag_vmax = self.obs.star_max_usable_vmag()
+        duplicate_ra_dec_threshold = np.radians(
+            self._stars_config.duplicate_ra_dec_threshold_arcsec / 3600)
+        duplicate_vmag_threshold = self._stars_config.duplicate_vmag_threshold
+        overlapping_vmag_threshold = self._stars_config.overlapping_vmag_threshold
 
         if radec_movement is None:
-            self._logger.debug('Retrieving star list with max detectable VMAG %.4f',
-                               mag_vmax)
+            self.logger.debug(f'Retrieving star list with VMAG range {mag_vmin:.2f} to '
+                              f'{mag_vmax:.2f}')
         else:
-            self._logger.debug('Retrieving star list with RA/DEC movement %.5f, %.5f, max '
-                            'detectable VMAG %.4f',
-                            radec_movement[0], radec_movement[1], mag_vmax)
+            self.logger.debug(f'Retrieving star list with RA/DEC movement {radec_movement[0]:.5f}, '
+                              f'{radec_movement[1]:.5f}, '
+                              f'VMAG range {mag_vmin:.2f} to {mag_vmax:.2f}')
 
-        full_star_list = []
+        prev_star_list = []
 
-        for mag_min, mag_max in zip(magnitude_list[:-1], magnitude_list[1:]):
-            if mag_min > mag_vmax:
-                break
-            mag_max = min(mag_max, mag_vmax)
+        # Go through the catalogs in order of precedence, get the complete star list from each,
+        # and then check for duplicates and overlapping stars.
+        for catalog_name in self._stars_config.catalogs:
+            full_star_list = []
+            for mag_min, mag_max in zip(magnitude_list[:-1], magnitude_list[1:]):
+                if mag_min > mag_vmax:
+                    break
+                if mag_max < mag_vmin:
+                    continue
+                mag_min = max(mag_min, mag_vmin)
+                mag_max = min(mag_max, mag_vmax)
 
-            star_list = self._stars_list_for_obs(ra_min, ra_max, dec_min, dec_max,
-                                                 mag_min, mag_max,
-                                                 radec_movement,
-                                                 **kwargs)
-            full_star_list += star_list
+                star_list = self._stars_list_for_obs(catalog_name.lower(),
+                                                     ra_min, ra_max, dec_min, dec_max,
+                                                     mag_min, mag_max,
+                                                     radec_movement,
+                                                     **kwargs)
+                full_star_list += star_list
+                self.logger.debug('Updated total stars %d', len(full_star_list))
+                if len(full_star_list) >= max_stars:
+                    break
 
-            self._logger.debug('New total stars %d', len(full_star_list))
-
-            # Remove stars that are on top of each other
-            if len(full_star_list) > 1:
-                new_full_star_list = []
-                for i in range(len(full_star_list)):
-                    if full_star_list[i].conflicts == 'STAR':
-                        continue
-                    for j in range(i+1, len(full_star_list)):
-                        u_gap = (full_star_list[i].psf_size[1] / 2 +
-                                 full_star_list[j].psf_size[1] / 2)
-                        v_gap = (full_star_list[i].psf_size[0] / 2 +
-                                 full_star_list[j].psf_size[0] / 2)
-                        if (abs(full_star_list[i].v - full_star_list[j].v) < v_gap and
-                            abs(full_star_list[i].u - full_star_list[j].u) < u_gap):
-                            self._logger.debug('Removing overlapping stars:')
-                            self._logger.debug('  %s',
-                                               self._star_short_info(full_star_list[i]))
-                            self._logger.debug('  %s',
-                                               self._star_short_info(full_star_list[j]))
-                            full_star_list[j].conflicts = 'STAR'
+            # Check for true duplicates. These will have almost identical RA/DEC but may
+            # have different VMAG.
+            if prev_star_list is not None:
+                # The previous list will have precedence
+                # Check for duplicates based on RA, DEC, and VMAG
+                # Sort by V so we don't have to look so far
+                full_star_list.sort(key=lambda x: x.dec_pm)
+                prev_star_list.sort(key=lambda x: x.dec_pm)
+                new_star_list = []
+                for star in full_star_list:
+                    for prev_star in prev_star_list:
+                        # We always use the PM to find duplicate stars because the star
+                        # catalogs might have different epochs.
+                        # We check dec first to shortcircuit the test most efficiently.
+                        if prev_star.dec_pm - star.dec_pm > duplicate_ra_dec_threshold:
+                            # Don't need to iterate any further
+                            break
+                        if (abs(prev_star.dec_pm - star.dec_pm) < duplicate_ra_dec_threshold and
+                            abs(prev_star.ra_pm - star.ra_pm) < duplicate_ra_dec_threshold and
+                            abs(prev_star.vmag - star.vmag) < duplicate_vmag_threshold):
+                            # Some catalogs like YBSC has a nice name, but others don't.
+                            # If we're getting rid of a star with a name in favor of a
+                            # star without a name, keep the name of the star with a name.
+                            # Note we're checking prev_star.name intentionally, because
+                            # prev_star.pretty_name will have already been updated to
+                            # unique_number.
+                            if (not prev_star.name) and star.name:
+                                self.logger.debug('Removing duplicate star '
+                                                f'{star.catalog_name}/{star.pretty_name}, '
+                                                'keeping '
+                                                f'{prev_star.catalog_name}/{prev_star.pretty_name} '
+                                                f'(renamed to {star.pretty_name})')
+                                prev_star.pretty_name = star.pretty_name
+                            else:
+                                self.logger.debug('Removing duplicate star '
+                                                f'{star.catalog_name}/{star.pretty_name}, '
+                                                'keeping '
+                                                f'{prev_star.catalog_name}/{prev_star.pretty_name}')
                             break
                     else:
-                        new_full_star_list.append(full_star_list[i])
+                        new_star_list.append(star)
 
-                if len(full_star_list) != len(new_full_star_list):
-                    self._logger.debug('After removing overlapping stars, total stars %d',
-                                       len(new_full_star_list))
+                prev_star_list = prev_star_list + new_star_list
 
-                full_star_list = new_full_star_list
+        full_star_list = prev_star_list
+        full_star_list.sort(key=lambda x: x.v, reverse=False)
 
-            if len(full_star_list) >= max_stars:
-                break
+        # Mark stars that conflict visually by being within each others' PSFs.
+        # These stars can be used for correlation, but can't be used for future
+        # PSF precision fitting.
+        if len(full_star_list) > 1:
+            for i in range(len(full_star_list)):
+                for j in range(i+1, len(full_star_list)):
+                    u_gap = (full_star_list[i].psf_size[1] / 2 +
+                                full_star_list[j].psf_size[1] / 2)
+                    v_gap = (full_star_list[i].psf_size[0] / 2 +
+                                full_star_list[j].psf_size[0] / 2)
+                    if (abs(full_star_list[i].v - full_star_list[j].v) < v_gap and
+                        abs(full_star_list[i].u - full_star_list[j].u) < u_gap):
+                        if (full_star_list[j].vmag - full_star_list[i].vmag <
+                            overlapping_vmag_threshold):
+                            # VMAGs are too close
+                            full_star_list[i].conflicts = 'STAR'
+                            full_star_list[j].conflicts = 'STAR'
+                            self.logger.debug('Marking both overlapping stars:')
+                            self.logger.debug('  %s',
+                                              self._star_short_info(full_star_list[i]))
+                            self.logger.debug('  %s',
+                                              self._star_short_info(full_star_list[j]))
+                        else:
+                            full_star_list[j].conflicts = 'STAR'
+                            self.logger.debug('Marking one overlapping star:')
+                            self.logger.debug('  %s',
+                                            self._star_short_info(full_star_list[i]))
+                            self.logger.debug('  %s',
+                                            self._star_short_info(full_star_list[j]))
 
         # Sort the list with the brightest stars first.
         # TODO Was DN
         full_star_list.sort(key=lambda x: x.vmag, reverse=False)
-
         full_star_list = full_star_list[:max_stars]
 
         for star in full_star_list:
@@ -376,9 +464,9 @@ class NavModelStars(NavModel):
             rings_can_conflict = False  # TODO
             self._mark_conflicts_obj(star, rings_can_conflict)
 
-        self._logger.info('Star list (total %d):', len(full_star_list))
+        self.logger.info('Star list (total %d):', len(full_star_list))
         for star in full_star_list:
-            self._logger.info('  %s', self._star_short_info(star))
+            self.logger.info('  %s', self._star_short_info(star))
 
         return full_star_list
 
@@ -410,8 +498,8 @@ class NavModelStars(NavModel):
 
         metadata['start_time'] = time.time()
 
-        log_level = self._config.general.get('model_stars_log_level')
-        with self._logger.open(f'CREATE STARS MODEL', level=log_level):
+        log_level = self._config.general.get('log_level_model_stars')
+        with self.logger.open(f'CREATE STARS MODEL', level=log_level):
             ret = self._create_model(metadata, ra_dec_predicted, ignore_conflicts)
 
         metadata['end_time'] = time.time()
@@ -426,9 +514,9 @@ class NavModelStars(NavModel):
                                  dict[str, Any],
                                  Annotation | None]:
 
-        config = self._config.stars
+        stars_config = self._config.stars
 
-        max_move_steps = config.max_movement_steps
+        max_move_steps = stars_config.max_movement_steps
 
         radec_movement = None
 
@@ -499,7 +587,7 @@ class NavModelStars(NavModel):
         stretch_regions = []
 
         for star in star_list:
-            if star.conflicts:
+            if star.conflicts and star.conflicts != 'STAR':
                 continue
 
             # Should NOT be rounded for plotting, since all of coord
@@ -534,15 +622,7 @@ class NavModelStars(NavModel):
             compressed_stretch_region = np.packbits(stretch_region, axis=0)
             stretch_regions.append(compressed_stretch_region)
 
-            star_str1 = None
-            try:
-                star_str1 = star.name[:10]
-            except AttributeError:
-                pass
-
-            if star_str1 is None or star_str1 == "":
-                star_str1 = f'{star.unique_number:09d}'
-
+            star_str1 = star.pretty_name[:10]
             star_str2 = f'{star.vmag:.3f} {clean_sclass(star.spectral_class)}'
 
             text_loc = []
@@ -557,12 +637,12 @@ class NavModelStars(NavModel):
             text_info = AnnotationTextInfo(f'{star_str1}\n{star_str2}',
                                            ref_vu=(v, u),
                                            text_loc=text_loc,
-                                           font=config.label_font,
-                                           font_size=config.label_font_size,
-                                           color=config.label_font_color)
+                                           font=self._stars_config.label_font,
+                                           font_size=self._stars_config.label_font_size,
+                                           color=self._stars_config.label_font_color)
             text_info_list.append(text_info)
 
-        annotation = Annotation(self.obs, star_overlay, config.label_star_color,
+        annotation = Annotation(self.obs, star_overlay, self._stars_config.label_star_color,
                                 thicken_overlay=0,
                                 avoid_mask=star_avoid_mask,
                                 text_info=text_info_list)
@@ -579,7 +659,7 @@ class NavModelStars(NavModel):
         self._annotations = annotations
         self._metadata = metadata
 
-        self._logger.debug(f'  Star model min: {np.min(self._model_img)}, max: {np.max(self._model_img)}')
+        self.logger.debug(f'  Star model min: {np.min(self._model_img)}, max: {np.max(self._model_img)}')
 
 #===============================================================================
 #
@@ -606,7 +686,7 @@ class NavModelStars(NavModel):
 
         # Create a Meshgrid for the area around the star. Give slop on each side - we
         # don't want a star to even be close to a large object.
-        star_slop = config.stars.body_conflict_margin
+        star_slop = self._stars_config.body_conflict_margin
         meshgrid = Meshgrid.for_fov(obs.fov,
                                     origin=(star.u-star_slop,
                                             star.v-star_slop),
@@ -618,8 +698,8 @@ class NavModelStars(NavModel):
         for body_name in self._conflict_body_list:
             intercepted = backplane.where_intercepted(body_name)
             if intercepted.any():
-                self._logger.debug(f'Star {star.unique_number:9d} U {star.u:8.3f} V '
-                                   f'{star.v:8.3f} conflicts with {body_name}')
+                self.logger.debug(f'Star {star.pretty_name:9s} U {star.u:9.3f} V '
+                                  f'{star.v:9.3f} conflicts with {body_name}')
                 star.conflicts = f'BODY: {body_name}'
                 return True
 

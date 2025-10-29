@@ -32,7 +32,7 @@ class NavTechniqueStars(NavTechnique):
         computing the offset if successful.
         """
 
-        log_level = self._config.general.get('nav_stars_log_level')
+        log_level = self._config.general.get('log_level_nav_stars')
         with self.logger.open('NAVIGATION PASS: STARS', level=log_level):
             obs = self.nav_master.obs
             star_models = self.nav_master.star_models
@@ -52,16 +52,16 @@ class NavTechniqueStars(NavTechnique):
                 # plt.imshow(model_img)
                 # plt.show()
 
-            result = navigate_with_pyramid_kpeaks(obs.extdata,
-                                                  star_model.model_img,
-                                                  star_model.model_mask)
+            result = navigate_with_pyramid_kpeaks(
+                obs.extdata, star_model.model_img, star_model.model_mask,
+                upsample_factor=self.config.stars.correlation_fft_upsample_factor)
             # TODO Handle failure
             corr_offset = (-float(result['offset'][0]), -float(result['offset'][1]))
 
             self.logger.debug('Correlation offset: '
-                              f'{corr_offset[0]:.2f}, {corr_offset[1]:.2f}')
+                              f'dU {corr_offset[1]:.3f}, dV {corr_offset[0]:.3f}')
             self.logger.debug('Correlation quality: '
-                              f'{float(result['quality']):.2f}')
+                              f'{float(result['quality']):.3f}')
 
             img = obs.data
             psf = obs.star_psf()
@@ -77,15 +77,16 @@ class NavTechniqueStars(NavTechnique):
                 star_v = star.v - corr_offset[0]
                 if (star_u < psf_size[1] or star_u > img.shape[1] - psf_size[1] or
                     star_v < psf_size[0] or star_v > img.shape[0] - psf_size[0]):
-                    self.logger.debug(f'Star {star.unique_number} VMAG {star.vmag} outside image')
+                    self.logger.debug(f'Star {star.pretty_name:9s} VMAG {star.vmag:6.3f} too '
+                                      'close to edge or outside image')
                     continue
                 ret = psf.find_position(img, psf_size, (star_v, star_u), search_limit=(2.5, 2.5))
                 if ret is None:
-                    self.logger.info(f'Star {star.unique_number} VMAG {star.vmag} failed '
+                    self.logger.info(f'Star {star.pretty_name:9s} VMAG {star.vmag} failed '
                                      'to find position')
                     continue
                 opt_v, opt_u, opt_metadata = ret
-                self.logger.debug(f'Star {star.unique_number:9d} VMAG {star.vmag:6.3f} '
+                self.logger.debug(f'Star {star.pretty_name:9s} VMAG {star.vmag:6.3f} '
                                   f'Searched at {star_u:8.3f}, {star_v:8.3f} '
                                   f'found at {opt_u:8.3f}, {opt_v:8.3f} '
                                   f'diff {opt_u-star_u:6.3f}, {opt_v-star_v:6.3f}')
@@ -115,19 +116,19 @@ class NavTechniqueStars(NavTechnique):
             v_diff_std = np.std(v_diff_list)
             v_diff_median = np.median(v_diff_list)
 
-            self.logger.info(f'U diff: min {u_diff_min:5.2f}, max {u_diff_max:5.2f}, '
-                             f'mean {u_diff_mean:5.2f}, std {u_diff_std:5.2f}, '
-                             f'median {u_diff_median:5.2f}')
-            self.logger.info(f'V diff: min {v_diff_min:5.2f}, max {v_diff_max:5.2f}, '
-                             f'mean {v_diff_mean:5.2f}, std {v_diff_std:5.2f}'
-                             f'median {v_diff_median:5.2f}')
+            self.logger.info(f'U diff: min {u_diff_min:6.3f}, max {u_diff_max:6.3f}, '
+                             f'mean {u_diff_mean:6.3f}, std {u_diff_std:6.3f}, '
+                             f'median {u_diff_median:6.3f}')
+            self.logger.info(f'V diff: min {v_diff_min:6.3f}, max {v_diff_max:6.3f}, '
+                             f'mean {v_diff_mean:6.3f}, std {v_diff_std:6.3f}, '
+                             f'median {v_diff_median:6.3f}')
 
             self._offset = corr_offset
             self._confidence = float(result['quality'])
             self.logger.info('Final offset: '
-                             f'dU {self._offset[1]:.2f}, dV {self._offset[0]:.2f}')
+                             f'dU {self._offset[1]:.3f}, dV {self._offset[0]:.3f}')
             self.logger.info('Final confidence: '
-                             f'{self._confidence:.2f}')
+                             f'{self._confidence:.3f}')
 
         self._metadata['offset'] = self._offset
         self._metadata['confidence'] = self._confidence

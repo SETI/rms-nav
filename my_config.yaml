@@ -3,6 +3,6 @@ environment:
   results_root: /data/nav-offset-results
 
 general:
-  nav_stars_log_level: DEBUG
-  model_stars_log_level: INFO
-  annotate_log_level: ERROR
+  log_level_nav_stars: DEBUG
+  log_level_model_stars: DEBUG
+  log_level_annotate: ERROR
