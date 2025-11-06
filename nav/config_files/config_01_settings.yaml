@@ -216,6 +216,9 @@ stars:
   duplicate_ra_dec_threshold_arcsec: 5  # Closer than this - stars are true duplicates
   duplicate_vmag_threshold: 3  # Less than this - stars are true duplicates
   overlapping_vmag_threshold: 2  # Less than this - remove both stars when visually overlapping
+  max_refinement_iterations: 3
+  refinement_nsigma: 3
+  refinement_search_limit: [2.5, 2.5]
 
   calibrated_data: true
   float_psf_sigma: false

@@ -35,6 +35,7 @@ class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
         """
 
         filespec = cast(str, row['FILE_SPECIFICATION_NAME'])
+        # Intentionally lowercase only
         if not filespec.endswith(('_sci.lbl', '_eng.lbl')):
             raise ValueError(f'Bad Primary File Spec "{filespec}" - '
                              'expected "_sci.lbl" or "_eng.lbl"')
@@ -50,6 +51,7 @@ class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
         Returns:
             The image file specification string.
         """
+        # Intentionally lowercase only
         return label_filespec.replace('.lbl', '.fit')
 
     @staticmethod
@@ -74,6 +76,7 @@ class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
         if len(range_dir) != 15 or range_dir[8] != '_':
             raise ValueError(f'Bad Primary File Spec "{filespec}" - '
                              'expected "DATA/ddddddd_ddddddd"')
+        # Intentionally lowercase only
         if not img_name.endswith(('_sci.lbl', '_eng.lbl')):
             raise ValueError(f'Bad Primary File Spec "{filespec}" - '
                              'expected "_sci.lbl" or "_eng.lbl"')

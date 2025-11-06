@@ -14,6 +14,7 @@ from nav.support.image import (crop_center,
 from nav.support.misc import mad_std
 from nav.support.types import NDArrayFloatType, NDArrayBoolType
 
+
 # ==============================================================
 # Small utilities
 # ==============================================================
@@ -21,6 +22,7 @@ from nav.support.types import NDArrayFloatType, NDArrayBoolType
 def int_to_signed(idx, size):
     """Map [0..size-1] argmax index to signed displacement coordinate."""
     return idx if idx < size//2 else idx - size
+
 
 # ==============================================================
 # Fourier helpers
@@ -32,6 +34,7 @@ def fourier_shift(img: NDArrayFloatType, dy: float, dx: float) -> NDArrayFloatTy
     fx = fftfreq(img.shape[1])[None, :]
     phase = np.exp(-2j * np.pi * (dy*fy + dx*fx))
     return np.real(ifft2(fft2(img) * phase))
+
 
 def upsampled_dft(X: NDArrayFloatType,
                   up_factor: int,
@@ -54,6 +57,7 @@ def upsampled_dft(X: NDArrayFloatType,
     Er = np.exp((j2pi / (X_v_size*up_factor)) * (a[:, None] @ ky[None, :]))
     Ec = np.exp((j2pi / (X_u_size*up_factor)) * (kx[:, None] @ b[None, :]))
     return Er @ X @ Ec
+
 
 # ==============================================================
 # Masked NCC (linear correlation via padding)
@@ -89,11 +93,13 @@ def masked_ncc(image: NDArrayFloatType,
     denom = np.sqrt(varI * varM + 1e-12)
     return (num - np.real(meanI)*np.sum(model*mask)) / (denom + 1e-12)
 
+
 """CodeRabbit says:
 
 Fix masked NCC math; current normalization is incorrect
 
-The numerator misses the symmetric mean terms and the denominator uses a scalar varM but omits shift‑wise varI properly. Use standard masked NCC with shift‑wise sums via FFT.
+The numerator misses the symmetric mean terms and the denominator uses a scalar varM
+but omits shift‑wise varI properly. Use standard masked NCC with shift‑wise sums via FFT.
 
 -def masked_ncc(I, M, W):
 +def masked_ncc(I, M, W):
@@ -147,6 +153,7 @@ The numerator misses the symmetric mean terms and the denominator uses a scalar 
 +    return np.real(num) / denom
 """
 
+
 # ==============================================================
 # Peak metrics & selection
 # ==============================================================
@@ -162,11 +169,14 @@ def psr_metric(corr: NDArrayFloatType,
     bg = corr[mask]
     return (peak - bg.mean()) / (bg.std() + 1e-12)
 
+
 def pmr_metric(corr: NDArrayFloatType, peak_val: float) -> float:
     return peak_val / (corr.mean() + 1e-12)
 
+
 def per_metric(corr: NDArrayFloatType, peak_val: float) -> float:
     return peak_val / (np.sqrt(np.sum(corr**2)) + 1e-12)
+
 
 def nms_topk(corr: NDArrayFloatType,
              k: int = 5,
@@ -188,6 +198,7 @@ def nms_topk(corr: NDArrayFloatType,
         work[(y-row)**2 + (x-col)**2 <= radius**2] = -np.inf
     return peaks
 
+
 # ==============================================================
 # Fisher / CRLB
 # ==============================================================
@@ -199,11 +210,12 @@ def fisher_covariance(model_aligned: NDArrayFloatType,
     Sxx = np.sum(sx * sx)
     Syy = np.sum(sy * sy)
     Sxy = np.sum(sx * sy)
-    F = (1.0/(sigma_n**2 + 1e-18)) * np.array([[Sxx, Sxy],[Sxy, Syy]])
+    F = (1.0/(sigma_n**2 + 1e-18)) * np.array([[Sxx, Sxy], [Sxy, Syy]])
     if np.linalg.cond(F) > 1e10:
         # Degenerate case: return large uncertainty
         return np.diag([1e6, 1e6])
     return np.linalg.pinv(F + 1e-12*np.eye(2))
+
 
 # ==============================================================
 # Single-scale, K-peak evaluation (with optional prior)
@@ -266,7 +278,7 @@ def evaluate_candidate(*,
     # Align combined model and compute residual stats
     model_h, model_w = model_shape
     image_h, image_w = image_shape
-    model_shift = fourier_shift(model_pad[:model_h,:model_w], dy, dx)
+    model_shift = fourier_shift(model_pad[:model_h, :model_w], dy, dx)
     model_crop = crop_center(model_shift, (image_h, image_w))
     image_crop = image_pad[:image_h, :image_w]
     resid = normalize_array(image_crop) - normalize_array(model_crop)
@@ -306,11 +318,12 @@ def evaluate_candidate(*,
     return {
         "offset": (float(dy), float(dx)),
         "cov": cov,
-        "sigma_xy": (float(np.sqrt(cov[0,0])), float(np.sqrt(cov[1,1]))),
+        "sigma_xy": (float(np.sqrt(cov[0, 0])), float(np.sqrt(cov[1, 1]))),
         "quality": float(quality.real),
         "peak_val": float(peak_val.real),
         "rc": (int(p), int(q))
     }
+
 
 def navigate_single_scale_kpeaks(*,
                                  image: NDArrayFloatType,
@@ -360,12 +373,12 @@ def navigate_single_scale_kpeaks(*,
     corr_num = np.real(ifft2(fft2(image_pad) * np.conj(fft2(model_pad * mask_pad))))
     peaks = nms_topk(corr_num, k=max_peaks, radius=nms_radius)
 
-    logger.debug(f'Correlation peaks:')
+    logger.debug('Correlation peaks:')
 
     candidates = []
     for p, q, _ in peaks:
         evaluation = evaluate_candidate(image_pad=image_pad, model_pad=model_pad, mask_pad=mask_pad,
-                                        corr=corr, rc=(p,q),
+                                        corr=corr, rc=(p, q),
                                         upsample_factor=upsample_factor,
                                         model_shape=(model_h, model_w),
                                         image_shape=(image_h, image_w),
@@ -390,6 +403,7 @@ def navigate_single_scale_kpeaks(*,
         }
     return max(candidates, key=lambda r: r["quality"])
 
+
 # ==============================================================
 # Pyramid wrapper with K-peak final selection
 # ==============================================================
@@ -407,7 +421,8 @@ def navigate_with_pyramid_kpeaks(image: NDArrayFloatType,
                                  prior_weight_final: float = 0.25,
                                  logger: Optional[PdsLogger] = None) -> dict[str, Any]:
     """TODO Clean this up
-    Build class-aware effective model + mask, run coarse->fine, then evaluate K peaks at final scale.
+    Build class-aware effective model + mask, run coarse->fine, then evaluate K peaks at final
+    scale.
     Returns dict with shift, covariance, sigma_xy, quality, consistency, spurious flag.
 
     Parameters:
@@ -456,7 +471,7 @@ def navigate_with_pyramid_kpeaks(image: NDArrayFloatType,
     if logger is None:
         logger = DEFAULT_LOGGER
 
-    logger.debug(f'Navigating with pyramid kpeaks:')
+    logger.debug('Navigating with pyramid kpeaks:')
     logger.debug(f'  Pyramid levels: {pyramid_levels}')
     logger.debug(f'  Max peaks: {max_peaks}')
     logger.debug(f'  Upsample factor: {upsample_factor}')

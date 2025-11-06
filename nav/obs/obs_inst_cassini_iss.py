@@ -1,9 +1,8 @@
-from typing import Any, Optional, cast
+from typing import Any, Optional
 
 from filecache import FCPath
 import numpy as np
 import oops.hosts.cassini.iss
-from starcat import Star
 
 from .obs_inst import ObsInst
 from .obs_snapshot import ObsSnapshot
@@ -13,7 +12,6 @@ from nav.support.time import et_to_utc
 from nav.support.types import PathLike
 
 
-
 class ObsCassiniISS(ObsSnapshot, ObsInst):
 
     @staticmethod
@@ -21,7 +19,7 @@ class ObsCassiniISS(ObsSnapshot, ObsInst):
                   *,
                   config: Optional[Config] = None,
                   extfov_margin_vu: tuple[int, int] | None = None,
-                  **kwargs: Any) -> ObsSnapshot:
+                  **kwargs: Any) -> 'ObsCassiniISS':
         """Creates an ObsCassiniISS from a Cassini ISS image file.
 
         Parameters:
@@ -55,7 +53,7 @@ class ObsCassiniISS(ObsSnapshot, ObsInst):
         obs.abspath = path
 
         detector = obs.detector.lower()
-        inst_config = config._config_dict['cassini_iss'][detector]
+        inst_config = config.category('cassini_iss')[detector]
 
         if extfov_margin_vu is None:
             extfov_margin_vu_entry = inst_config['extfov_margin_vu']

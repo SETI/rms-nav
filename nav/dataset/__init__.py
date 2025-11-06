@@ -5,7 +5,7 @@ from .dataset_pds3_newhorizons_lorri import DataSetPDS3NewHorizonsLORRI  # noqa:
 from .dataset_pds3_voyager_iss import DataSetPDS3VoyagerISS  # noqa: F401
 
 
-DATASET_NAME_TO_CLASS_MAPPING = {
+_DATASET_NAME_TO_CLASS_MAPPING = {
     'coiss': DataSetPDS3CassiniISS,
     'coiss_pds3': DataSetPDS3CassiniISS,
     'gossi': DataSetPDS3GalileoSSI,
@@ -17,7 +17,7 @@ DATASET_NAME_TO_CLASS_MAPPING = {
 }
 
 
-DATASET_NAME_TO_INST_NAME_MAPPING = {
+_DATASET_NAME_TO_INST_NAME_MAPPING = {
     'coiss': 'coiss',
     'coiss_pds3': 'coiss',
     'gossi': 'gossi',
@@ -27,6 +27,16 @@ DATASET_NAME_TO_INST_NAME_MAPPING = {
     'vgiss': 'vgiss',
     'vgiss_pds3': 'vgiss',
 }
+
+
+assert (sorted(_DATASET_NAME_TO_CLASS_MAPPING.keys()) ==
+        sorted(_DATASET_NAME_TO_INST_NAME_MAPPING.keys())), \
+            'Dataset names are inconsistent'
+
+
+def dataset_names() -> list[str]:
+    """Return a list of all dataset names."""
+    return sorted(_DATASET_NAME_TO_CLASS_MAPPING.keys())
 
 
 def dataset_name_to_class(name: str) -> type[DataSet]:
@@ -41,7 +51,7 @@ def dataset_name_to_class(name: str) -> type[DataSet]:
     Raises:
         KeyError: If the dataset name is not found.
     """
-    return DATASET_NAME_TO_CLASS_MAPPING[name.lower()]
+    return _DATASET_NAME_TO_CLASS_MAPPING[name.lower()]
 
 
 def dataset_name_to_inst_name(name: str) -> str:
@@ -56,7 +66,7 @@ def dataset_name_to_inst_name(name: str) -> str:
     Raises:
         KeyError: If the dataset name is not found.
     """
-    return DATASET_NAME_TO_INST_NAME_MAPPING[name.lower()]
+    return _DATASET_NAME_TO_INST_NAME_MAPPING[name.lower()]
 
 
 __all__ = ['DataSet',
@@ -64,5 +74,5 @@ __all__ = ['DataSet',
            'DataSetPDS3GalileoSSI',
            'DataSetPDS3NewHorizonsLORRI',
            'DataSetPDS3VoyagerISS',
-           'DATASET_NAME_TO_CLASS_MAPPING',
+           'dataset_names',
            'dataset_name_to_class']

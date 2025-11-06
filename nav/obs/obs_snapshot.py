@@ -95,7 +95,6 @@ class ObsSnapshot(Obs, Snapshot):
         Returns:
             A zero-filled array with the same shape as the original data.
         """
-
         return np.zeros(self.data.shape, dtype=dtype)
 
     def make_extfov_zeros(self,
@@ -108,7 +107,6 @@ class ObsSnapshot(Obs, Snapshot):
         Returns:
             A zero-filled array with the same shape as the extended FOV.
         """
-
         return np.zeros(self.extdata.shape, dtype=dtype)
 
     def make_extfov_false(self) -> NDArrayBoolType:
@@ -117,7 +115,6 @@ class ObsSnapshot(Obs, Snapshot):
         Returns:
             A boolean array of False values with the same shape as the extended FOV.
         """
-
         return np.zeros(self.extdata.shape, dtype=bool)
 
     def unpad_array_to_extfov(self,
@@ -129,7 +126,6 @@ class ObsSnapshot(Obs, Snapshot):
         Returns:
             The unpadded array.
         """
-
         return array[:self.extdata_shape_vu[0], :self.extdata_shape_vu[1]]
 
     def clip_fov(self,
@@ -144,7 +140,6 @@ class ObsSnapshot(Obs, Snapshot):
         Returns:
             A tuple of (u, v) coordinates clipped to the FOV boundaries.
         """
-
         return (int(np.clip(u, self.fov_u_min, self.fov_u_max)),
                 int(np.clip(v, self.fov_v_min, self.fov_v_max)))
 
@@ -160,7 +155,6 @@ class ObsSnapshot(Obs, Snapshot):
         Returns:
             A tuple of (u, v) coordinates clipped to the extended FOV boundaries.
         """
-
         return (int(np.clip(u, self.extfov_u_min, self.extfov_u_max)),
                 int(np.clip(v, self.extfov_v_min, self.extfov_v_max)))
 
@@ -399,14 +393,14 @@ class ObsSnapshot(Obs, Snapshot):
 
         ra_min = ra.min()
         ra_max = ra.max()
-        if ra_max-ra_min > oops.PI:
+        if ra_max-ra_min > np.pi:
             # Wrap around
             ra_min = ra[np.where(ra > np.pi)].min()
             ra_max = ra[np.where(ra < np.pi)].max()
 
         dec_min = dec.min()
         dec_max = dec.max()
-        if dec_max-dec_min > oops.PI:
+        if dec_max-dec_min > np.pi:
             # Wrap around
             dec_min = dec[np.where(dec > np.pi)].min()
             dec_max = dec[np.where(dec < np.pi)].max()

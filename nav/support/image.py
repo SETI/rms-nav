@@ -664,7 +664,8 @@ def draw_rect(img: NDArrayType[NPType],
               yctr: int,
               xhalfwidth: int,
               yhalfwidth: int,
-              thickness: int = 1) -> None:
+              thickness: int = 1,
+              dot_spacing: int = 1) -> None:
     """Draw a rectangle with the given line thickness.
 
     Parameters:
@@ -674,6 +675,8 @@ def draw_rect(img: NDArrayType[NPType],
         yhalfwidth: This is the inner border of the rectangle.
         color: The scalar (or higher) color to draw.
         thickness: The thickness (total width) of the line.
+        dot_spacing: The spacing between dots in the rectangle. 1 means dots are
+            adjacent (solid lines).
     """
 
     # Top

@@ -97,6 +97,13 @@ class Config:
                 self._config_dict[key] = new_config[key]
         self._update_attrdicts()
 
+    def category(self,
+                 category: str) -> AttrDict:
+        """Returns the configuration settings for the specified category."""
+
+        self.read_config()
+        return AttrDict(self._config_dict.get(category, {}))
+
     @property
     def general(self) -> Any:
         """Returns the general configuration settings."""

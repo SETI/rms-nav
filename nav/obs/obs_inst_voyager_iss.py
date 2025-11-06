@@ -3,17 +3,16 @@ from typing import Any, Optional
 from filecache import FCPath
 import numpy as np
 import oops.hosts.voyager.iss
-from psfmodel import GaussianPSF, PSF
-from starcat import Star
 
 from nav.config import DEFAULT_CONFIG, DEFAULT_LOGGER, Config
 from nav.support.time import et_to_utc
 from nav.support.types import PathLike
 
 from .obs_inst import ObsInst
+from .obs_snapshot import ObsSnapshot
 
 
-class ObsVoyagerISS(ObsInst):
+class ObsVoyagerISS(ObsSnapshot, ObsInst):
 
     @staticmethod
     def from_file(path: PathLike,
@@ -42,7 +41,7 @@ class ObsVoyagerISS(ObsInst):
         obs = oops.hosts.voyager.iss.from_file(path)
         obs.abspath = path
 
-        inst_config = config._config_dict['voyager_iss']
+        inst_config = config.category('voyager_iss')
 
         label3 = obs.dict['LABEL3'].replace('FOR (I/F)*10000., MULTIPLY DN VALUE BY', '')
         factor = float(label3)
@@ -53,10 +52,10 @@ class ObsVoyagerISS(ObsInst):
         # TODO Calibrate once oops.hosts is fixed.
 
         if extfov_margin_vu is None:
-            if isinstance(inst_config['extfov_margin_vu'], dict):
-                extfov_margin_vu = inst_config['extfov_margin_vu'][obs.data.shape[0]]
+            if isinstance(inst_config.extfov_margin_vu, dict):
+                extfov_margin_vu = inst_config.extfov_margin_vu[obs.data.shape[0]]
             else:
-                extfov_margin_vu = inst_config['extfov_margin_vu']
+                extfov_margin_vu = inst_config.extfov_margin_vu
         logger.debug(f'  Data shape: {obs.data.shape}')
         logger.debug(f'  Extfov margin vu: {extfov_margin_vu}')
         logger.debug(f'  Data min: {np.min(obs.data)}, max: {np.max(obs.data)}')
@@ -65,27 +64,21 @@ class ObsVoyagerISS(ObsInst):
         new_obs._inst_config = inst_config
         return new_obs
 
-    def star_psf(self) -> PSF:
-        """Returns the point spread function (PSF) model appropriate for stars observed
-        by this instrument.
+    def star_min_usable_vmag(self) -> float:
+        """Returns the minimum usable magnitude for stars in this observation.
 
         Returns:
-            A PSF model appropriate for stars observed by this instrument.
+            The minimum usable magnitude for stars in this observation.
         """
+        return 0.
 
-        return GaussianPSF(sigma=3.)  # TODO
-
-    def star_psf_size(self, star: Star) -> tuple[int, int]:
-        """Returns the size of the point spread function (PSF) to use for a star.
-
-        Parameters:
-            star: The star to get the PSF size for.
+    def star_max_usable_vmag(self) -> float:
+        """Returns the maximum usable magnitude for stars in this observation.
 
         Returns:
-            A tuple of the PSF size (v, u) in pixels.
+            The maximum usable magnitude for stars in this observation.
         """
-
-        return (7, 7)  # TODO
+        return 10  # TODO
 
     def get_public_metadata(self) -> dict[str, Any]:
         """Returns the public metadata for Voyager ISS.
@@ -106,7 +99,7 @@ class ObsVoyagerISS(ObsInst):
                 f'urn:nasa:pds:context:instrument_host:spacecraft.vg{spacecraft}',
             'instrument_lid':
                 f'urn:nasa:pds:context:instrument:vg{spacecraft}.iss{self.detector[0].lower()}',
-            'start_time_utc': et_to_utc(obs.time[0]),
+            'start_time_utc': et_to_utc(self.time[0]),
             'midtime_utc': et_to_utc(self.midtime),
             'end_time_utc': et_to_utc(self.time[1]),
             'start_time_et': self.time[0],

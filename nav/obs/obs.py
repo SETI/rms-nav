@@ -5,7 +5,7 @@ from nav.config import Config
 from nav.support.nav_base import NavBase
 
 if TYPE_CHECKING:
-    from nav.inst import Inst
+    from nav.inst import Inst  # noqa: F401
 
 
 class Obs(ABC, NavBase):
@@ -23,5 +23,4 @@ class Obs(ABC, NavBase):
         Parameters:
             config: Configuration object to use. If None, uses DEFAULT_CONFIG.
         """
-
         super().__init__(config=config)

@@ -25,7 +25,7 @@ from filecache import FileCache
 # XXX This should eventually go away
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from nav.dataset import (DATASET_NAME_TO_CLASS_MAPPING,
+from nav.dataset import (dataset_names,
                          dataset_name_to_class,
                          dataset_name_to_inst_name)
 from nav.config import DEFAULT_CONFIG
@@ -72,9 +72,9 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
 
     DATASET_NAME = command_list[0].lower()
 
-    if not DATASET_NAME in DATASET_NAME_TO_CLASS_MAPPING:
+    if not DATASET_NAME in dataset_names():
         print(f'Unknown dataset "{DATASET_NAME}"')
-        print(f'Valid datasets are: {", ".join(DATASET_NAME_TO_CLASS_MAPPING.keys())}')
+        print(f'Valid datasets are: {", ".join(dataset_names())}')
         print('Usage: python nav_main_offset.py <dataset_name> [args]')
         sys.exit(1)
 
@@ -83,7 +83,7 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         DATASET = dataset_name_to_class(DATASET_NAME)()
     except KeyError:
         print(f'Unknown dataset "{DATASET_NAME}"')
-        print(f'Valid datasets are: {", ".join(DATASET_NAME_TO_CLASS_MAPPING.keys())}')
+        print(f'Valid datasets are: {", ".join(dataset_names())}')
         print('Usage: python nav_main_offset.py <dataset_name> [args]')
         sys.exit(1)
 
@@ -380,7 +380,7 @@ def main():
         INST_NAME = dataset_name_to_inst_name(DATASET_NAME)
     except KeyError:
         print(f'Unknown dataset "{DATASET_NAME}"')
-        print(f'Valid datasets are: {", ".join(DATASET_NAME_TO_CLASS_MAPPING.keys())}')
+        print(f'Valid datasets are: {", ".join(dataset_names())}')
         sys.exit(1)
 
     obs_class = inst_name_to_obs_class(INST_NAME)

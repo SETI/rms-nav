@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Optional, TYPE_CHECKING, cast
+from typing import Any, Optional, TYPE_CHECKING
 
 from psfmodel import GaussianPSF, PSF
 from starcat import Star
@@ -30,7 +30,7 @@ class ObsInst(ABC):
                   *,
                   config: Optional[Config] = None,
                   extfov_margin_vu: Optional[tuple[int, int]] = None,
-                  **kwargs: Optional[Any]) -> 'Obs':
+                  **kwargs: Any) -> 'Obs':
         """Creates an instrument instance from an image file.
 
         Parameters:
@@ -79,10 +79,10 @@ class ObsInst(ABC):
             raise ValueError('Instrument configuration not set')
 
         star_psf_sizes = self._inst_config['star_psf_sizes']
-        for mag, size in star_psf_sizes.items():
+        for mag in sorted(star_psf_sizes):
             if star.vmag < mag:
-                return tuple(size)
-        return tuple(size) # Default to smallest
+                return star_psf_sizes[mag]
+        return star_psf_sizes[mag]  # Default to largest
 
     @abstractmethod
     def star_min_usable_vmag(self) -> float:

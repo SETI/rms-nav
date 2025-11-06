@@ -1,6 +1,6 @@
 from typing import Any, Optional, Sequence, cast
 
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt  # noqa: F401
 from oops import Observation
 import numpy as np
 

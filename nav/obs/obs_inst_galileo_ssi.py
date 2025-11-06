@@ -2,19 +2,17 @@ from typing import Any, Optional
 
 from filecache import FCPath
 import numpy as np
-from oops import Observation
 import oops.hosts.galileo.ssi
-from psfmodel import GaussianPSF, PSF
-from starcat import Star
 
 from nav.config import DEFAULT_CONFIG, DEFAULT_LOGGER, Config
 from nav.support.time import et_to_utc
 from nav.support.types import PathLike
 
 from .obs_inst import ObsInst
+from .obs_snapshot import ObsSnapshot
 
 
-class ObsGalileoSSI(ObsInst):
+class ObsGalileoSSI(ObsSnapshot, ObsInst):
 
     @staticmethod
     def from_file(path: PathLike,
@@ -42,13 +40,13 @@ class ObsGalileoSSI(ObsInst):
         obs = oops.hosts.galileo.ssi.from_file(path, full_fov=True)
         obs.abspath = path
 
-        inst_config = config._config_dict['galileo_ssi']
+        inst_config = config.category('galileo_ssi')
         if extfov_margin_vu is None:
-            if isinstance(inst_config['extfov_margin_vu'], dict):
+            if isinstance(inst_config.extfov_margin_vu, dict):
                 # TODO Do this a better way
-                extfov_margin_vu = inst_config['extfov_margin_vu'][obs.data.shape[0]]
+                extfov_margin_vu = inst_config.extfov_margin_vu[obs.data.shape[0]]
             else:
-                extfov_margin_vu = inst_config['extfov_margin_vu']
+                extfov_margin_vu = inst_config.extfov_margin_vu
         logger.debug(f'  Data shape: {obs.data.shape}')
         logger.debug(f'  Extfov margin vu: {extfov_margin_vu}')
         logger.debug(f'  Data min: {np.min(obs.data)}, max: {np.max(obs.data)}')
@@ -57,27 +55,21 @@ class ObsGalileoSSI(ObsInst):
         new_obs._inst_config = inst_config
         return new_obs
 
-    def star_psf(self) -> PSF:
-        """Returns the point spread function (PSF) model appropriate for stars observed
-        by this instrument.
+    def star_min_usable_vmag(self) -> float:
+        """Returns the minimum usable magnitude for stars in this observation.
 
         Returns:
-            A PSF model appropriate for stars observed by this instrument.
+            The minimum usable magnitude for stars in this observation.
         """
+        return 0.
 
-        return GaussianPSF(sigma=3.)  # TODO
-
-    def star_psf_size(self, star: Star) -> tuple[int, int]:
-        """Returns the size of the point spread function (PSF) to use for a star.
-
-        Parameters:
-            star: The star to get the PSF size for.
+    def star_max_usable_vmag(self) -> float:
+        """Returns the maximum usable magnitude for stars in this observation.
 
         Returns:
-            A tuple of the PSF size (v, u) in pixels.
+            The maximum usable magnitude for stars in this observation.
         """
-
-        return (7, 7)  # TODO
+        return 10  # TODO
 
     def get_public_metadata(self) -> dict[str, Any]:
         """Returns the public metadata for Galileo SSI.
@@ -85,26 +77,27 @@ class ObsGalileoSSI(ObsInst):
         Returns:
             A dictionary containing the public metadata for Galileo SSI.
         """
+
         # TODO
         # scet_start = float(obs.dict["SPACECRAFT_CLOCK_START_COUNT"])
         # scet_end = float(obs.dict["SPACECRAFT_CLOCK_STOP_COUNT"])
 
         return {
-            'image_path': str(self.obs.abspath),
-            'image_name': self.obs.abspath.name,
+            'image_path': str(self.abspath),
+            'image_name': self.abspath.name,
             'instrument_host_lid': 'urn:nasa:pds:context:instrument_host:spacecraft.go',
             'instrument_lid': 'urn:nasa:pds:context:instrument:go.ssi',
-            'start_time_utc': et_to_utc(self.obs.time[0]),
-            'midtime_utc': et_to_utc(self.obs.midtime),
-            'end_time_utc': et_to_utc(self.obs.time[1]),
-            'start_time_et': self.obs.time[0],
-            'midtime_et': self.obs.midtime,
-            'end_time_et': self.obs.time[1],
+            'start_time_utc': et_to_utc(self.time[0]),
+            'midtime_utc': et_to_utc(self.midtime),
+            'end_time_utc': et_to_utc(self.time[1]),
+            'start_time_et': self.time[0],
+            'midtime_et': self.midtime,
+            'end_time_et': self.time[1],
             # 'start_time_scet': scet_start,
             # 'midtime_scet': (scet_start + scet_end) / 2,
             # 'end_time_scet': scet_end,
-            'image_shape_xy': self.obs.data_shape_uv,
+            'image_shape_xy': self.data_shape_uv,
             'camera': 'SSI',
-            'exposure_time': self.obs.texp,
-            'filters': [obs.filter],
+            'exposure_time': self.texp,
+            'filters': [self.filter],
         }

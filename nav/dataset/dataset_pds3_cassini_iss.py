@@ -40,9 +40,11 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         """
 
         filespec = cast(str, row['FILE_SPECIFICATION_NAME'])
+        # Intentionally uppercase only
         if not filespec.endswith('.IMG'):
             raise ValueError(f'Bad Primary File Spec "{filespec}" - '
                              'expected ".IMG"')
+        # Intentionally uppercase only
         return filespec.replace('.IMG', '_CALIB.LBL')
 
     @staticmethod
@@ -55,6 +57,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         Returns:
             The image file specification string.
         """
+        # Intentionally uppercase only
         return label_filespec.replace('.LBL', '.IMG')
 
     @staticmethod
@@ -98,6 +101,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         """
 
         img_name = img_name.upper()
+        img_name = img_name.replace('_CALIB', '')
 
         # [NW]dddddddddd[_d[d]]
         if img_name[0] not in 'NW':
@@ -117,7 +121,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
                 return True
             except ValueError:
                 return False
-        return True
+        return False
 
     @staticmethod
     def _extract_img_number(img_name: str) -> int:
@@ -155,6 +159,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         Parameters:
             volume: The volume name.
         """
+        # Intentionally lowercase only
         return f'COISS_{volume[6]}xxx/{volume}/{volume}_index.lbl'
 
     @staticmethod
@@ -289,5 +294,4 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
             The list of supported grouping types. For Cassini ISS, only 'botsim'
             is supported.
         """
-
         return ['botsim']

@@ -24,6 +24,7 @@ class NavTechnique(ABC, NavBase):
 
         self._nav_master = nav_master
         self._offset: tuple[float, float] | None = None
+        self._uncertainty: tuple[float, float] | None = None
         self._confidence: float | None = None
         self._metadata: dict[str, Any] = {}
 
@@ -34,8 +35,13 @@ class NavTechnique(ABC, NavBase):
 
     @property
     def offset(self) -> tuple[float, float] | None:
-        """Returns the computed offset as a tuple of (x, y) or None if not calculated."""
+        """Returns the computed offset as a tuple of (v, u) or None if not calculated."""
         return self._offset
+
+    @property
+    def uncertainty(self) -> tuple[float, float] | None:
+        """Returns the computed uncertainty as a tuple of (v, u) or None if not calculated."""
+        return self._uncertainty
 
     @property
     def confidence(self) -> float | None:

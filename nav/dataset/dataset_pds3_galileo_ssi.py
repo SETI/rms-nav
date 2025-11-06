@@ -33,9 +33,11 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
         """
 
         filespec = cast(str, row['FILE_SPECIFICATION_NAME'])
+        # Intentionally uppercase only
         if not filespec.endswith('.IMG'):
             raise ValueError(f'Bad Primary File Spec "{filespec}" - '
                              'expected ".IMG"')
+        # Intentionally uppercase only
         return filespec.replace('.IMG', '.LBL')
 
     @staticmethod
@@ -48,6 +50,7 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
         Returns:
             The image file specification string.
         """
+        # Intentionally uppercase only
         return label_filespec.replace('.LBL', '.IMG')
 
     @staticmethod
@@ -63,7 +66,7 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
 
         parts = filespec.split('/')
         if not (2 <= len(parts) <= 4):
-            raise ValueError(f'Bad Primary File Spec "{filespec}" - expected 2 or 3 '
+            raise ValueError(f'Bad Primary File Spec "{filespec}" - expected 2 to 4 '
                              'directory levels')
         if parts[0].upper() == 'REDO':
             parts = parts[1:]
@@ -79,6 +82,7 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
             img_name = parts[2]
         else:
             raise ValueError(f'Bad Primary File Spec "{filespec}" - bad target directory')
+        # Intentionally uppercase only
         if not img_name.endswith('.LBL'):
             return None
         img_name = img_name.rsplit('.', maxsplit=1)[0]
@@ -125,7 +129,7 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
         if not DataSetPDS3GalileoSSI._img_name_valid(img_name):
             raise ValueError(f'Invalid image name "{img_name}"')
 
-        return int(img_name[1:11].lstrip('0'))
+        return int(safe_lstrip_zero(img_name[1:11]))
 
     @staticmethod
     def _volset_and_volume(volume: str) -> str:
@@ -137,7 +141,6 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
         Returns:
             The volset and volume name.
         """
-
         return f'GO_0xxx/{volume}'
 
     @staticmethod
@@ -150,7 +153,7 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
         Returns:
             The index file name.
         """
-
+        # Intentionally lowercase only
         return f'GO_0xxx/{volume}/{volume}_index.lbl'
 
     @staticmethod
@@ -164,7 +167,6 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
         Returns:
             The results path stub. This is {volume}/{filespec} without the .IMG extension.
         """
-
         return str(Path(f'{volume}/{filespec}').with_suffix(''))
 
     # Public methods

@@ -232,7 +232,7 @@ class DataSetPDS3(DataSet):
         group.add_argument(
             '--image-filespec-csv', action='append',
             help="""A CSV file that contains filespecs of images to process; a header row
-            is required and must contain a column named 'FILE_SPECIFICATION_NAME'.
+            is required and must contain a column named 'Primary File Spec' or 'primaryfilespec'.
             The list is still subject to other selection criteria.""")
         group.add_argument(
             '--image-file-list', action='append',
@@ -267,7 +267,7 @@ class DataSetPDS3(DataSet):
         #     help='Expression to evaluate to decide whether to reprocess an offset')
         group.add_argument(
             '--choose-random-images', type=int, default=None, metavar='N',
-            help='Choose random images to process within other constraints')
+            help='Choose N random images to process within other constraints')
         # group.add_argument(
         #     '--show-image-list-only', action='store_true', default=False,
         #     help="""Just show a list of files that would be processed without doing
@@ -275,7 +275,7 @@ class DataSetPDS3(DataSet):
         # )
 
     def _validate_selection_arguments(self,
-                                      arguments: argparse.ArgumentParser) -> None:
+                                      arguments: argparse.Namespace) -> None:
         """Validates user arguments that can't be checked during initial parsing.
 
         Parameters:
@@ -453,7 +453,7 @@ class DataSetPDS3(DataSet):
             force_has_offset_spice_error: bool = False,
             force_has_offset_nonspice_error: bool = False,
             selection_expr: Optional[str] = None,
-            choose_random_images: bool | int = False,
+            choose_random_images: int | None = False,
             max_filenames: Optional[int] = None,
             suffix: Optional[str] = None,
             planets: Optional[str] = None
@@ -471,7 +471,7 @@ class DataSetPDS3(DataSet):
         camera: Optional[str] = kwargs.pop('camera', None)
         img_name_list: Optional[list[str]] = kwargs.pop('img_name_list', None)
         img_filespec_list: Optional[list[str]] = kwargs.pop('img_filespec_list', None)
-        choose_random_images: bool | int = kwargs.pop('choose_random_images', False)
+        choose_random_images: Optional[int] = kwargs.pop('choose_random_images', None)
         max_filenames: Optional[int] = kwargs.pop('max_filenames', None)
         arguments: Optional[argparse.Namespace] = kwargs.pop('arguments', None)
         additional_index_columns: tuple[str, ...] = kwargs.pop('additional_index_columns', ())

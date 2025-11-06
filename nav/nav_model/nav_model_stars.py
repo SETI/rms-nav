@@ -6,6 +6,7 @@ import tkinter as tk
 from imgdisp import ImageDisp
 
 from nav.support.image import draw_rect
+from nav.support.time import now_iso
 _DEBUG_STARS_MODEL_IMGDISP = False
 
 import time
@@ -71,11 +72,14 @@ class NavModelStars(NavModel):
     def __init__(self,
                  obs: Observation,
                  *,
+                 star_list: Optional[list[Star]] = None,
                  config: Optional[Config] = None) -> None:
         """Creates a navigation model for stars.
 
         Parameters:
             obs: The Observation object containing image data.
+            star_list: A list of Star objects to use for the model. If None, the star list
+                will be retrieved from the observation.
             config: Configuration object to use. If None, uses DEFAULT_CONFIG.
         """
 
@@ -83,7 +87,7 @@ class NavModelStars(NavModel):
 
         self._obs = obs
         self._conflict_body_list = None
-        self._star_list = None
+        self._star_list = star_list
         self._stars_config = self._config.stars
 
     @property
@@ -108,9 +112,10 @@ class NavModelStars(NavModel):
 
     @staticmethod
     def _star_short_info(star: Star) -> str:
-        return ('Star %9s U %9.3f+/-%7.3f V %9.3f+/-%7.3f MAG %6.3f BMAG %6.3f '
-                'VMAG %6.3f SCLASS %3s TEMP %6d DN %7.2f CONFLICT %s') % (
-                    star.pretty_name,
+        """Return a short string containing information about a star suitable for logging."""
+        return ('Star %6s/%9s U %9.3f+/-%7.3f V %9.3f+/-%7.3f VMAG %6.3f JBMAG %6.3f '
+                'JVMAG %6.3f SCLASS %3s TEMP %6d DN %7.2f CONFLICT %s') % (
+                    star.catalog_name, star.pretty_name,
                     star.u, abs(star.move_u),
                     star.v, abs(star.move_v),
                     star.vmag,
@@ -133,13 +138,44 @@ class NavModelStars(NavModel):
                             **kwargs: Any) -> list[Star]:
         """Return a list of stars with the given constraints.
 
-        See stars_list_for_obs for full details.
+        Parameters:
+            catalog_name: The name of the star catalog to use (ucac4, tycho2, ybsc).
+            ra_min: The minimum RA of the stars to return.
+            ra_max: The maximum RA of the stars to return.
+            dec_min: The minimum DEC of the stars to return.
+            dec_max: The maximum DEC of the stars to return.
+            mag_min: The minimum visual magnitude of the stars to return.
+            mag_max: The maximum visual magnitude of the stars to return.
+            radec_movement: The movement of the FOV relative to the background stars in half
+                of the exposure time.
+            **kwargs: Additional keyword arguments that can be passed to the star catalog
+                for additional filtering.
+
+        Returns:
+            A list of Star objects that meet the given constraints. The following attributes
+            are added to the Star object:
+            - ``catalog_name``: The name of the catalog the star was found in.
+            - ``pretty_name``: A pretty name for the star.
+            - ``u`` and ``v``: The U,V coordinate (including stellar aberration if applicable).
+            - ``move_u`` and ``move_v``: The movement of the star in U,V coordinates the entire
+                exposure.
+            - ``ra_pm`` and ``dec_pm``: The proper motion of the star.
+            - ``temperature_faked``: A bool indicating if the temperature and spectral class
+                had to be faked.
+            - ``johnson_mag_faked``: A bool indicating if the Johnson magnitudes had to be faked.
+            - ``dn``: The estimated integrated DN count given the star's class, magnitude, and
+                the filters being used. This is just a relative value based on the star's magnitude.
+            - ``conflicts``: A string indicating if the star has a conflict with another star
+                or body.
+
+        Raises:
+            ValueError: If the catalog name is invalid.
         """
 
         obs = self._obs
 
-        self.logger.debug(f'Retrieving stars from {catalog_name}: Mag range '
-                          f'{mag_min:7.4f} to {mag_max:7.4f}')
+        self.logger.debug(f'Retrieving stars from {catalog_name} with VMAG range '
+                          f'{mag_min:.4f} to {mag_max:.4f}')
 
         # Get a list of all reasonable stars within the given magnitude range
         # from the selected catalog.
@@ -152,6 +188,7 @@ class NavModelStars(NavModel):
                     dec_min=dec_min, dec_max=dec_max,
                     vmag_min=mag_min, vmag_max=mag_max,
                     **kwargs))
+
         elif catalog_name == 'tycho2':
             star_list1 = list(
                 _get_star_catalog_tycho2().find_stars(
@@ -161,8 +198,9 @@ class NavModelStars(NavModel):
                     vmag_min=mag_min, vmag_max=mag_max,
                     **kwargs))
             for star in star_list1:
-                star.johnson_mag_v = star.vmag
-                star.johnson_mag_b = star.vmag
+                star.johnson_mag_v = None
+                star.johnson_mag_b = None
+
         elif catalog_name == 'ybsc':
             star_list1 = list(
                 _get_star_catalog_ybsc().find_stars(
@@ -172,6 +210,7 @@ class NavModelStars(NavModel):
                     vmag_min=mag_min, vmag_max=mag_max,
                     **kwargs))
             for star in star_list1:
+                # YBSC only includes the b_v difference so we can calculate mag_b based on mag_v
                 star.johnson_mag_v = star.vmag
                 if star.b_v is None:
                     star.johnson_mag_b = star.johnson_mag_v
@@ -190,9 +229,6 @@ class NavModelStars(NavModel):
         # Fake the temperature if it's not known, and eliminate stars we just
         # don't want to deal with.
 
-        discard_class = 0  # TODO
-        discard_dn = 0  # TODO
-
         default_star_class = cast(str, self._stars_config.default_star_class)
 
         star_list2 = []
@@ -207,26 +243,18 @@ class NavModelStars(NavModel):
                     star.pretty_name = ' '.join(star.name.split())
             except AttributeError:
                 star.name = ''
-            star.conflicts = None
+            star.conflicts: str = ''
             star.temperature_faked = False
             star.johnson_mag_faked = False
-            star.overlay_box_width = 0  # TODO
-            star.overlay_box_thickness = 0  # TODO
-            star.psf_delta_u = None
-            star.psf_delta_v = None
-            star.psf_sigma_x = None
-            star.psf_sigma_y = None
             star.psf_size = obs.star_psf_size(star)
             if star.temperature is None:
                 star.temperature_faked = True
                 star.temperature = SCLASS_TO_SURFACE_TEMP[default_star_class]
                 star.spectral_class = default_star_class
-            # TODO Validate this
             if star.johnson_mag_v is None or star.johnson_mag_b is None:
-                star.johnson_mag_v = (star.vmag -
-                    SCLASS_TO_B_MINUS_V[clean_sclass(star.spectral_class)] / 2.)
+                star.johnson_mag_v = star.vmag
                 star.johnson_mag_b = (star.vmag +
-                    SCLASS_TO_B_MINUS_V[clean_sclass(star.spectral_class)] / 2.)
+                                      SCLASS_TO_B_MINUS_V[clean_sclass(star.spectral_class)])
                 star.johnson_mag_faked = True
             if self._stars_config.stellar_aberration:
                 self._aberrate_star(star)
@@ -241,7 +269,7 @@ class NavModelStars(NavModel):
         if self._stars_config.proper_motion:
             ra_dec_list = ra_dec_pm_list
         else:
-            ra_dec_list = [(x.ra, ra.dec) for x in star_list2]
+            ra_dec_list = [(x.ra, x.dec) for x in star_list2]
         ra_list = polymath.Scalar([x[0] for x in ra_dec_list])
         dec_list = polymath.Scalar([x[1] for x in ra_dec_list])
 
@@ -268,7 +296,6 @@ class NavModelStars(NavModel):
         v2_list = v2_list.vals
 
         star_list3 = []
-        discard_uv = 0
         for star, (ra_pm, dec_pm),u, v, u1, v1, u2, v2 in zip(star_list2,
                                               ra_dec_pm_list,
                                               u_list, v_list,
@@ -292,8 +319,8 @@ class NavModelStars(NavModel):
                 v2 >= obs.extfov_v_max-psf_size_half_v):
                 self.logger.debug(f'Star {star.pretty_name:9s} U {u:9.3f} V {v:9.3f} is off '
                                   'the edge')
-                discard_uv += 1
                 continue
+            self.logger.debug(f'Star {star.pretty_name:9s} U {u:9.3f} V {v:9.3f}')
 
             star.u = u
             star.v = v
@@ -305,8 +332,7 @@ class NavModelStars(NavModel):
             star_list3.append(star)
 
         self.logger.debug(
-            f'Found {len(star_list3)} new stars, discarded because of CLASS {discard_class}, '
-            f'LOW DN {discard_dn}, BAD UV {discard_uv}')
+            f'Found {len(star_list3)} new stars')
 
         return star_list3
 
@@ -320,13 +346,22 @@ class NavModelStars(NavModel):
                 each half of the exposure. None if no movement is available.
             **kwargs: Passed to find_stars to restrict the types of stars returned.
 
-        Returns: The list of Star objects with additional attributes for each Star:
-
-            - ``.u`` and ``.v``: The U,V coordinate including stellar aberration.
-            - ``.faked_temperature``: A bool indicating if the temperature and spectral class
-              had to be faked.
-            - ``.dn``: The estimated integrated DN count given the star's class,
-              magnitude, and the filters being used.
+        Returns:
+            A list of Star objects in the FOV. The following attributes are added to the Star
+            object:
+            - ``catalog_name``: The name of the catalog the star was found in.
+            - ``pretty_name``: A pretty name for the star.
+            - ``u`` and ``v``: The U,V coordinate (including stellar aberration if applicable).
+            - ``move_u`` and ``move_v``: The movement of the star in U,V coordinates the entire
+                exposure.
+            - ``ra_pm`` and ``dec_pm``: The proper motion of the star.
+            - ``temperature_faked``: A bool indicating if the temperature and spectral class
+                had to be faked.
+            - ``johnson_mag_faked``: A bool indicating if the Johnson magnitudes had to be faked.
+            - ``dn``: The estimated integrated DN count given the star's class, magnitude, and
+                the filters being used. This is just a relative value based on the star's magnitude.
+            - ``conflicts``: A string indicating if the star has a conflict with another star
+                or body.
         """
 
         max_stars = self._stars_config.max_stars
@@ -358,6 +393,7 @@ class NavModelStars(NavModel):
         # Go through the catalogs in order of precedence, get the complete star list from each,
         # and then check for duplicates and overlapping stars.
         for catalog_name in self._stars_config.catalogs:
+            self.logger.debug(f'Retrieving star list from {catalog_name}')
             full_star_list = []
             for mag_min, mag_max in zip(magnitude_list[:-1], magnitude_list[1:]):
                 if mag_min > mag_vmax:
@@ -378,7 +414,7 @@ class NavModelStars(NavModel):
                     break
 
             # Check for true duplicates. These will have almost identical RA/DEC but may
-            # have different VMAG.
+            # have different VMAG. We remove duplicates from the star list entirely.
             if prev_star_list is not None:
                 # The previous list will have precedence
                 # Check for duplicates based on RA, DEC, and VMAG
@@ -397,7 +433,7 @@ class NavModelStars(NavModel):
                         if (abs(prev_star.dec_pm - star.dec_pm) < duplicate_ra_dec_threshold and
                             abs(prev_star.ra_pm - star.ra_pm) < duplicate_ra_dec_threshold and
                             abs(prev_star.vmag - star.vmag) < duplicate_vmag_threshold):
-                            # Some catalogs like YBSC has a nice name, but others don't.
+                            # Some catalogs like YBSC have a nice name, but others don't.
                             # If we're getting rid of a star with a name in favor of a
                             # star without a name, keep the name of the star with a name.
                             # Note we're checking prev_star.name intentionally, because
@@ -405,16 +441,17 @@ class NavModelStars(NavModel):
                             # unique_number.
                             if (not prev_star.name) and star.name:
                                 self.logger.debug('Removing duplicate star '
-                                                f'{star.catalog_name}/{star.pretty_name}, '
-                                                'keeping '
-                                                f'{prev_star.catalog_name}/{prev_star.pretty_name} '
-                                                f'(renamed to {star.pretty_name})')
+                                                  f'{star.catalog_name}/{star.pretty_name}, '
+                                                  'keeping '
+                                                  f'{prev_star.catalog_name}/{prev_star.pretty_name} '
+                                                  f'(renamed to {star.pretty_name})')
                                 prev_star.pretty_name = star.pretty_name
                             else:
                                 self.logger.debug('Removing duplicate star '
-                                                f'{star.catalog_name}/{star.pretty_name}, '
-                                                'keeping '
-                                                f'{prev_star.catalog_name}/{prev_star.pretty_name}')
+                                                  f'{star.catalog_name}/{star.pretty_name}, '
+                                                  'keeping '
+                                                  f'{prev_star.catalog_name}/'
+                                                  f'{prev_star.pretty_name}')
                             break
                     else:
                         new_star_list.append(star)
@@ -430,15 +467,14 @@ class NavModelStars(NavModel):
         if len(full_star_list) > 1:
             for i in range(len(full_star_list)):
                 for j in range(i+1, len(full_star_list)):
-                    u_gap = (full_star_list[i].psf_size[1] / 2 +
-                                full_star_list[j].psf_size[1] / 2)
-                    v_gap = (full_star_list[i].psf_size[0] / 2 +
-                                full_star_list[j].psf_size[0] / 2)
+                    u_gap = (full_star_list[i].psf_size[1] / 2 + full_star_list[j].psf_size[1] / 2)
+                    v_gap = (full_star_list[i].psf_size[0] / 2 + full_star_list[j].psf_size[0] / 2)
                     if (abs(full_star_list[i].v - full_star_list[j].v) < v_gap and
                         abs(full_star_list[i].u - full_star_list[j].u) < u_gap):
                         if (full_star_list[j].vmag - full_star_list[i].vmag <
                             overlapping_vmag_threshold):
-                            # VMAGs are too close
+                            # Stars overlap and VMAGs are too close so the stars will get in each
+                            # other's way
                             full_star_list[i].conflicts = 'STAR'
                             full_star_list[j].conflicts = 'STAR'
                             self.logger.debug('Marking both overlapping stars:')
@@ -447,6 +483,8 @@ class NavModelStars(NavModel):
                             self.logger.debug('  %s',
                                               self._star_short_info(full_star_list[j]))
                         else:
+                            # Stars overlap but the VMAGs are far enough apart that one will
+                            # overwhelm the other
                             full_star_list[j].conflicts = 'STAR'
                             self.logger.debug('Marking one overlapping star:')
                             self.logger.debug('  %s',
@@ -455,16 +493,15 @@ class NavModelStars(NavModel):
                                             self._star_short_info(full_star_list[j]))
 
         # Sort the list with the brightest stars first.
-        # TODO Was DN
-        full_star_list.sort(key=lambda x: x.vmag, reverse=False)
+        full_star_list.sort(key=lambda x: x.dn, reverse=False)
         full_star_list = full_star_list[:max_stars]
 
         for star in full_star_list:
             # Mark all the bodies (or rings) that are conflicting
-            rings_can_conflict = False  # TODO
+            rings_can_conflict = True  # TODO
             self._mark_conflicts_obj(star, rings_can_conflict)
 
-        self.logger.info('Star list (total %d):', len(full_star_list))
+        self.logger.info('Final star list (total %d):', len(full_star_list))
         for star in full_star_list:
             self.logger.info('  %s', self._star_short_info(star))
 
@@ -478,7 +515,6 @@ class NavModelStars(NavModel):
 
     def create_model(self,
                      *,
-                     ra_dec_predicted: Optional[tuple[float, ...]] = None,
                      ignore_conflicts: bool = False
                      ) -> tuple[NDArrayFloatType | None,
                                 dict[str, Any],
@@ -491,25 +527,27 @@ class NavModelStars(NavModel):
             ignore_conflicts: True to include stars that have a conflict with a body or
                 rings.
 
-        Returns: The model.
+        Returns:
+            A tuple containing the model, metadata, and annotations.
         """
 
         metadata: dict[str, Any] = {}
 
-        metadata['start_time'] = time.time()
+        metadata['start_time'] = now_iso()
 
         log_level = self._config.general.get('log_level_model_stars')
         with self.logger.open(f'CREATE STARS MODEL', level=log_level):
-            ret = self._create_model(metadata, ra_dec_predicted, ignore_conflicts)
+            # TODO Deal with star movement
+            ret = self._create_model(metadata, None, ignore_conflicts)
 
-        metadata['end_time'] = time.time()
+        metadata['end_time'] = now_iso()
 
         return ret
 
     def _create_model(self,
                       metadata: dict[str, Any],
                       ra_dec_predicted: Optional[tuple[float, ...]],
-                      ignore_conflicts
+                      ignore_conflicts: bool = False
                       ) -> tuple[NDArrayFloatType | None,
                                  dict[str, Any],
                                  Annotation | None]:
@@ -521,17 +559,40 @@ class NavModelStars(NavModel):
         radec_movement = None
 
         if ra_dec_predicted is not None:
+            # TODO This will need to be updated to handle all instruments
             radec_movement = (ra_dec_predicted[6] * self._obs.texp/2,
                               ra_dec_predicted[7] * self._obs.texp/2)
 
         model = self._obs.make_extfov_zeros()
 
-        star_list = self.stars_list_for_obs(radec_movement)
-        self._star_list = star_list
-        # TODO Should break this apart into a dictionary for the metadata
-        metadata['star_list'] = [self._star_short_info(star) for star in star_list]
+        if self._star_list is None:
+            self._star_list = self.stars_list_for_obs(radec_movement)
+        star_list = self._star_list
 
+        # TODO We need to fix this up along with other models to handle the u,v
+        # coordinates after the offset procedure is done.
+        stars_metadata = []
         for star in star_list:
+            stars_metadata.append({
+                'catalog_name': star.catalog_name,
+                'unique_number': star.unique_number,
+                'pretty_name': star.pretty_name,
+                'ra': np.degrees(star.ra_pm),
+                'dec': np.degrees(star.dec_pm),
+                'vmag': star.vmag,
+                'johnson_mag_v': star.johnson_mag_v,
+                'johnson_mag_b': star.johnson_mag_b,
+                'johnson_mag_faked': star.johnson_mag_faked,
+                'temperature': star.temperature,
+                'temperature_faked': star.temperature_faked,
+                'spectral_class': star.spectral_class,
+                'conflicts': star.conflicts,
+                'u': star.u,  # TODO Should be post-offset value
+                'v': star.v,
+                'movement_v': star.move_v,
+                'movement_u': star.move_u,
+            })
+
             if star.conflicts and not ignore_conflicts:
                 continue
             u_idx = star.u + self._obs.extfov_margin_u
@@ -541,18 +602,12 @@ class NavModelStars(NavModel):
             u_frac = u_idx - u_int
             v_frac = v_idx - v_int
 
-            # psf_size = _find_psf_boxsize(star, stars_config)
-
             psf_size_half_u = int(star.psf_size[1] + np.round(abs(star.move_u))) // 2
             psf_size_half_v = int(star.psf_size[0] + np.round(abs(star.move_v))) // 2
 
             move_gran = max(abs(star.move_u) / max_move_steps,
                             abs(star.move_v) / max_move_steps)
             move_gran = np.clip(move_gran, 0.1, 1.0)
-
-            # sigma = nav.config.PSF_SIGMA[obs.clean_detector]
-            # if star.dn >= stars_config["psf_gain"][0]:
-            #     sigma *= stars_config["psf_gain"][1]
 
             psf = self.obs.star_psf()
 
@@ -587,7 +642,11 @@ class NavModelStars(NavModel):
         stretch_regions = []
 
         for star in star_list:
-            if star.conflicts and star.conflicts != 'STAR':
+            if (star.conflicts and
+                star.conflicts != 'STAR' and
+                not star.conflicts.startswith('REFINEMENT')):
+                # Don't label stars that are blocked by bodies or rings but keep stars that
+                # are just near other stars
                 continue
 
             # Should NOT be rounded for plotting, since all of coord
@@ -595,15 +654,8 @@ class NavModelStars(NavModel):
             u = int(star.u + self._obs.extfov_margin_u)
             v = int(star.v + self._obs.extfov_margin_v)
 
-            # width = star.overlay_box_width
-            # thickness = star.overlay_box_thickness
             v_halfsize = (star.psf_size[0] // 2) + 2
             u_halfsize = (star.psf_size[1] // 2) + 2
-
-            # width += thickness-1
-            # if (not width <= u_idx < overlay.shape[1]-width or
-            #     not width <= v_idx < overlay.shape[0]-width):
-            #     continue
 
             u_min = u - u_halfsize
             v_min = v - v_halfsize
@@ -613,8 +665,10 @@ class NavModelStars(NavModel):
             u_max, v_max = self._obs.clip_extfov(u_max, v_max)
 
             star_avoid_mask[v_min:v_max+1, u_min:u_max+1] = True
-            draw_rect(star_overlay, True, u, v, u_halfsize, v_halfsize)
+            dot_spacing = 2 if star.conflicts.startswith('REFINEMENT') else 1
+            draw_rect(star_overlay, True, u, v, u_halfsize, v_halfsize, dot_spacing=dot_spacing)
 
+            # Create the region of the image that should be contrast-stretched separately
             stretch_region = self._obs.make_extfov_false()
             stretch_region[v_min:v_max+1, u_min:u_max+1] = True
             # Note that packbits pads the array with zeros to the nearest multiple of 8
@@ -652,7 +706,7 @@ class NavModelStars(NavModel):
         self._model_img = model
         self._model_mask = self._model_img != 0
         self._range = np.inf
-        self._blur_amount = None  # np.eye(2, 2) * 5.
+        self._blur_amount = None
         self._uncertainty = 0.
         self._confidence = 1.
         self._stretch_regions = stretch_regions
@@ -669,12 +723,17 @@ class NavModelStars(NavModel):
 
     def _mark_conflicts_obj(self,
                             star: Star,
-                            rings_can_conflict: bool) -> None:
+                            rings_can_conflict: bool) -> None:  # TODO
         """Check if a star conflicts with known bodies or rings.
 
         Sets star.conflicts to a string describing why the Star conflicted.
 
-        Returns True if the star conflicted, False if the star didn't.
+        Parameters:
+            star: The star to check for conflicts.
+            rings_can_conflict: True if rings can conflict with the star.
+
+        Returns:
+            True if the star conflicted, False if the star didn't.
         """
 
         obs = self._obs

@@ -3,17 +3,16 @@ from typing import Any, Optional
 from filecache import FCPath
 import numpy as np
 import oops.hosts.newhorizons.lorri
-from psfmodel import GaussianPSF, PSF
-from starcat import Star
 
 from nav.config import DEFAULT_CONFIG, DEFAULT_LOGGER, Config
 from nav.support.time import et_to_utc
 from nav.support.types import PathLike
 
 from .obs_inst import ObsInst
+from .obs_snapshot import ObsSnapshot
 
 
-class ObsNewHorizonsLORRI(ObsInst):
+class ObsNewHorizonsLORRI(ObsSnapshot, ObsInst):
 
     @staticmethod
     def from_file(path: PathLike,
@@ -33,6 +32,7 @@ class ObsNewHorizonsLORRI(ObsInst):
         Returns:
             An ObsNewHorizonsLORRI object containing the image data and metadata.
         """
+
         config = config or DEFAULT_CONFIG
         logger = DEFAULT_LOGGER
 
@@ -43,14 +43,14 @@ class ObsNewHorizonsLORRI(ObsInst):
         obs = oops.hosts.newhorizons.lorri.from_file(path, calibration=False)
         obs.abspath = path
 
-        inst_config = config._config_dict['newhorizons_lorri']
+        inst_config = config.category('newhorizons_lorri')
         # TODO Calibrate once oops.hosts is fixed.
 
         if extfov_margin_vu is None:
-            if isinstance(inst_config['extfov_margin_vu'], dict):
-                extfov_margin_vu = inst_config['extfov_margin_vu'][obs.data.shape[0]]
+            if isinstance(inst_config.extfov_margin_vu, dict):
+                extfov_margin_vu = inst_config.extfov_margin_vu[obs.data.shape[0]]
             else:
-                extfov_margin_vu = inst_config['extfov_margin_vu']
+                extfov_margin_vu = inst_config.extfov_margin_vu
         logger.debug(f'  Data shape: {obs.data.shape}')
         logger.debug(f'  Extfov margin vu: {extfov_margin_vu}')
         logger.debug(f'  Data min: {np.min(obs.data)}, max: {np.max(obs.data)}')
@@ -59,27 +59,21 @@ class ObsNewHorizonsLORRI(ObsInst):
         new_obs._inst_config = inst_config
         return new_obs
 
-    def star_psf(self) -> PSF:
-        """Returns the point spread function (PSF) model appropriate for stars observed
-        by this instrument.
+    def star_min_usable_vmag(self) -> float:
+        """Returns the minimum usable magnitude for stars in this observation.
 
         Returns:
-            A PSF model appropriate for stars observed by this instrument.
+            The minimum usable magnitude for stars in this observation.
         """
+        return 0.
 
-        return GaussianPSF(sigma=1.)  # TODO
-
-    def star_psf_size(self, star: Star) -> tuple[int, int]:
-        """Returns the size of the point spread function (PSF) to use for a star.
-
-        Parameters:
-            star: The star to get the PSF size for.
+    def star_max_usable_vmag(self) -> float:
+        """Returns the maximum usable magnitude for stars in this observation.
 
         Returns:
-            A tuple of the PSF size (v, u) in pixels.
+            The maximum usable magnitude for stars in this observation.
         """
-
-        return (7, 7)  # TODO
+        return 10  # TODO
 
     def get_public_metadata(self) -> dict[str, Any]:
         """Returns the public metadata for New Horizons LORRI.
@@ -106,8 +100,8 @@ class ObsNewHorizonsLORRI(ObsInst):
             # 'start_time_scet': scet_start,
             # 'midtime_scet': (scet_start + scet_end) / 2,
             # 'end_time_scet': scet_end,
-            'image_shape_xy': obs.data_shape_uv,
+            'image_shape_xy': self.data_shape_uv,
             'camera': 'LORRI',
-            'exposure_time': obs.texp,
+            'exposure_time': self.texp,
             'filters': [],
         }

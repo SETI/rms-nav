@@ -129,7 +129,7 @@ class DataSet(ABC, NavBase):
             **kwargs: Arbitrary keyword arguments, usually used to restrict the search.
 
         Yields:
-            Paths to the selected files as (label, image) tuples.
+            Information about the selected files in groups as ImageFiles objects.
         """
         ...
 
