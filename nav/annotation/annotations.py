@@ -59,7 +59,7 @@ class Annotations(NavBase):
         return self._annotations
 
     def combine(self,
-                offset: tuple[float, float] | None = None,
+                offset: tuple[float, float] = (0., 0.),
                 include_text: bool = True,
                 text_use_avoid_mask: bool = True,
                 text_avoid_other_text: bool = True,

@@ -90,6 +90,7 @@ class NavMaster(NavBase):
         # RA/DEC corners and center, un nav and nav
 
         self._metadata = {
+            'status': 'ok',
             'observation': obs_metadata,
         }
 
@@ -383,6 +384,8 @@ class NavMaster(NavBase):
         # TODO This is inefficient because we are creating the combined model a second
         # time. But we may need to do this in the future if NavTechniqueCorrelateAll
         # ends up being more complicated. This needs to be revisited.
+        if self.combined_model is None:
+            raise ValueError('Combined model is None')
         min_index = self.obs.extract_offset_array(self.combined_model.closest_model_index,
                                                   offset)
 

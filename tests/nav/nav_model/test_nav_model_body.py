@@ -13,6 +13,6 @@ def obs_rhea(config_fixture):
 
 
 def test_nav_model_body(obs_rhea) -> None:
-    body = NavModelBody(obs_rhea, 'RHEA')
+    body = NavModelBody('body:rhea', obs_rhea, 'RHEA')
     body.create_model()
     # TODO Add tests here

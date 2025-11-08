@@ -1,5 +1,6 @@
 from .obs import Obs  # noqa: F401
 from .obs_snapshot import ObsSnapshot  # noqa: F401
+from .obs_snapshot_inst import ObsSnapshotInst  # noqa: F401
 
 from .obs_inst_cassini_iss import ObsCassiniISS  # noqa: F401
 from .obs_inst_galileo_ssi import ObsGalileoSSI  # noqa: F401
@@ -20,7 +21,7 @@ def inst_names() -> list[str]:
     return sorted(_INST_NAME_TO_OBS_CLASS_MAPPING.keys())
 
 
-def inst_name_to_obs_class(name: str) -> type[Obs]:
+def inst_name_to_obs_class(name: str) -> type[ObsSnapshotInst]:
     """Convert an instrument name to the corresponding class.
 
     Parameters:
@@ -34,6 +35,7 @@ def inst_name_to_obs_class(name: str) -> type[Obs]:
 
 __all__ = ['Obs',
            'ObsSnapshot',
+           'ObsSnapshotInst',
            'ObsCassiniISS',
            'ObsGalileoSSI',
            'ObsNewHorizonsLORRI',

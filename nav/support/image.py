@@ -451,8 +451,7 @@ def filter_downsample(arr: NDArrayFloatType,
 
 
 def gaussian_blur_cov(img: NDArrayFloatType,
-                      sigma: NDArrayFloatType
-                      ) -> NDArrayFloatType:
+                      sigma: NDArrayFloatType) -> NDArrayFloatType:
     """Blur by anisotropic Gaussian with covariance Sigma in frequency domain."""
     fy = fftfreq(img.shape[0])[:, None]
     fx = fftfreq(img.shape[1])[None, :]

@@ -287,7 +287,7 @@ class DataSetPDS3(DataSet):
         """
 
         # For some reason mypy can't see the img_name field
-        for img_name in flatten_list(arguments.img_name):  # type: ignore
+        for img_name in flatten_list(arguments.img_name):
 
             if not self._img_name_valid(img_name):
                 raise argparse.ArgumentTypeError(f'Invalid image name {img_name}')

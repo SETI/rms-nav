@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, cast
 
 import numpy as np
 
@@ -47,6 +47,8 @@ class NavModelCombined(NavModel):
                 continue
             if model.model_mask is None:
                 raise ValueError(f'Model mask is None for model: {model.name}')
+            if model.confidence is None:
+                raise ValueError(f'Model confidence is None for model: {model.name}')
             if shape is None:
                 shape = model.model_img.shape
             elif shape != model.model_img.shape:
@@ -58,7 +60,7 @@ class NavModelCombined(NavModel):
 
             model_img = normalize_array(model.model_img)
             if model.blur_amount is not None:
-                model_img = gaussian_blur_cov(model_img, model.blur_amount)
+                model_img = gaussian_blur_cov(model_img, cast(NDArrayFloatType, model.blur_amount))
             model_img *= model.confidence
             wt_model_mask = model.model_mask.astype(np.float64) * model.confidence
             total_w += model.confidence
@@ -102,11 +104,15 @@ class NavModelCombined(NavModel):
         self._closest_model_index = min_indices
 
     @property
-    def closest_model_index(self) -> NDArrayUint32Type:
+    def closest_model_index(self) -> NDArrayUint32Type | None:
         """Returns the index of the closest object for each pixel."""
         return self._closest_model_index
 
-    def create_model(self) -> None:
+    def create_model(self,
+                     *,
+                     always_create_model: bool = False,
+                     never_create_model: bool = False,
+                     create_annotations: bool = True) -> None:
         """Creates the combined model.
 
         Doesn't do anything here because the model is already created.

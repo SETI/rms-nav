@@ -1,11 +1,8 @@
 from abc import ABC
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
 
 from nav.config import Config
 from nav.support.nav_base import NavBase
-
-if TYPE_CHECKING:
-    from nav.inst import Inst  # noqa: F401
 
 
 class Obs(ABC, NavBase):

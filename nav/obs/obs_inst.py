@@ -85,8 +85,8 @@ class ObsInst(ABC):
         star_psf_sizes = self._inst_config['star_psf_sizes']
         for mag in sorted(star_psf_sizes):
             if star.vmag < mag:
-                return star_psf_sizes[mag]
-        return star_psf_sizes[mag]  # Default to largest
+                return tuple(star_psf_sizes[mag])
+        return tuple(star_psf_sizes[mag])  # Default to largest
 
     @abstractmethod
     def star_min_usable_vmag(self) -> float:

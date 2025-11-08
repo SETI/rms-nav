@@ -1,15 +1,15 @@
 import copy
 import fnmatch
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, cast
 
 import numpy as np
-import matplotlib.pyplot as plt
 
 from .nav_technique import NavTechnique
 from nav.config import Config
 from nav.nav_model import NavModel, NavModelCombined, NavModelStars
 from nav.support.correlate import navigate_with_pyramid_kpeaks
 from nav.support.misc import mad_std
+from nav.support.types import NDArrayFloatType, NDArrayIntType
 
 if TYPE_CHECKING:
     from nav.nav_master import NavMaster
@@ -32,7 +32,6 @@ class NavTechniqueCorrelateAll(NavTechnique):
         super().__init__(nav_master, config=config)
 
         self._combined_model: NavModelCombined | None = None
-
 
     # # Bodies: limb annulus extraction + gradient model
     # # Set annulus half-width in pixels from crater_height/resolution
@@ -67,7 +66,7 @@ class NavTechniqueCorrelateAll(NavTechnique):
         # Create a single model which, for each pixel, has the element from the model with
         # the smallest range (to the observer), and is thus in front.
 
-    def combined_model(self) -> NavModelCombined:
+    def combined_model(self) -> NavModelCombined | None:
         """Returns the final combined model."""
         return self._combined_model
 
@@ -78,7 +77,7 @@ class NavTechniqueCorrelateAll(NavTechnique):
         return models
 
     def _combine_models(self,
-                        model_names: list[str]) -> NavModelCombined:
+                        model_names: list[str]) -> NavModelCombined | None:
         """Returns a combined model from some of the available models."""
         models = self._filter_models(model_names)
         if len(models) == 0:
@@ -94,7 +93,8 @@ class NavTechniqueCorrelateAll(NavTechnique):
 
         # offset, uncertainty, confidence, and metadata start out as None/empty
 
-        with self.logger.open('NAVIGATION PASS: ALL MODELS CORRELATION'):
+        with self.logger.open('NAVIGATION PASS: ALL MODELS CORRELATION',
+                              log_level=self.config.general.log_level_nav_correlate_all):
             obs = self.nav_master.obs
 
             #
@@ -106,11 +106,21 @@ class NavTechniqueCorrelateAll(NavTechnique):
                 self.logger.info('correlate_all navigation technique failed - no models available')
                 return
 
+            if combined_model.model_img is None:
+                raise ValueError('Combined model image is None')
+            if combined_model.model_mask is None:
+                raise ValueError('Combined model mask is None')
+
             result = navigate_with_pyramid_kpeaks(
                 obs.extdata, combined_model.model_img, combined_model.model_mask,
                 upsample_factor=self.config.offset.correlation_fft_upsample_factor)
 
             corr_offset = (float(result['offset'][0]), float(result['offset'][1]))
+
+            if not (-obs.extfov_margin_u+1 < corr_offset[1] < obs.extfov_margin_u-1 and
+                    -obs.extfov_margin_v+1 < corr_offset[0] < obs.extfov_margin_v-1):
+                self.logger.info('Correlation offset is outside the extended FOV')
+                return
 
             self.logger.debug('Correlation offset: '
                               f'dU {corr_offset[1]:.3f}, dV {corr_offset[0]:.3f}')
@@ -124,9 +134,14 @@ class NavTechniqueCorrelateAll(NavTechnique):
 
             star_models = self._filter_models(['stars'])
             if len(star_models) == 1:
-                ret = self._refine_stars(star_models[0], corr_offset)
+                ret = self._refine_stars(cast(NavModelStars, star_models[0]), corr_offset)
                 if ret is not None:
                     self._offset, self._uncertainty = ret
+
+        if not (-obs.extfov_margin_u+1 < self._offset[1] < obs.extfov_margin_u-1 and
+                -obs.extfov_margin_v+1 < self._offset[0] < obs.extfov_margin_v-1):
+            self.logger.info('Final offset is outside the extended FOV')
+            return
 
         self._metadata['offset'] = self._offset
         self._metadata['uncertainty'] = self._uncertainty
@@ -148,20 +163,20 @@ class NavTechniqueCorrelateAll(NavTechnique):
 
         def detect_outliers(data: list[float],
                             reliability: list[float],
-                            threshold: float):
-            data = np.asarray(data)
-            n = data.size
+                            threshold: float) -> NDArrayIntType:
+            data_array = cast(NDArrayFloatType, np.asarray(data))
+            n = data_array.size
             if n < 3:
-                return np.array([], dtype=int)
+                return cast(NDArrayIntType, np.array([], dtype=int))
 
             # Robust center and scale
-            median = np.median(data)
-            mad = np.median(np.abs(data - median))
+            median = np.median(data_array)
+            mad = np.median(np.abs(data_array - median))
             if mad == 0:  # degenerate case
                 return np.array([], dtype=int)
 
             # Robust z-scores (standard deviation units)
-            z = 0.6745 * (data - median) / mad   # 0.6745 ~ Phi^-1(0.75)
+            z = 0.6745 * (data_array - median) / mad   # 0.6745 ~ Phi^-1(0.75)
 
             # Make later points “more suspicious” by dividing by reliability
             score = np.abs(z) / reliability
@@ -220,6 +235,10 @@ class NavTechniqueCorrelateAll(NavTechnique):
             u_diff_list.append(star.diff_u)
             v_diff_list.append(star.diff_v)
             uv_star_list.append(star)
+
+        if len(u_diff_list) == 0:
+            self.logger.info('No stars found to refine')
+            return None
 
         u_diff_min = np.min(u_diff_list)
         u_diff_max = np.max(u_diff_list)
@@ -294,5 +313,6 @@ class NavTechniqueCorrelateAll(NavTechnique):
         refined_sigma = (np.std(final_v_diff_list), np.std(final_u_diff_list))
 
         self.logger.info('Refined offset: '
-                         f'dU {refined_offset[1]:.3f} +/- {refined_sigma[1]:.3f}, dV {refined_offset[0]:.3f} +/- {refined_sigma[0]:.3f}')
+                         f'dU {refined_offset[1]:.3f} +/- {refined_sigma[1]:.3f}, '
+                         f'dV {refined_offset[0]:.3f} +/- {refined_sigma[0]:.3f}')
         return refined_offset, refined_sigma

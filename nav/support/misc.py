@@ -1,5 +1,5 @@
 import math
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import oops
@@ -109,7 +109,8 @@ def safe_lstrip_zero(s: str) -> str:
     return ret
 
 
-def mad_std(a: NDArrayFloatType) -> float:
+def mad_std(a: NDArrayFloatType | list[float]) -> float:
     """Median absolute deviation (MAD) standard deviation."""
-    m = np.median(a)
-    return 1.4826 * float(np.median(np.abs(a - m)))
+    a_array = cast(NDArrayFloatType, np.asarray(a))
+    m = np.median(a_array)
+    return 1.4826 * float(np.median(np.abs(a_array - m)))

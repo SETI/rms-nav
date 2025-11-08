@@ -91,7 +91,7 @@ def dump_yaml(data: Any, stream: Any = sys.stdout) -> None:
     yaml.dump(data, stream)
 
 
-def json_as_string(data: Any) -> None:
+def json_as_string(data: Any) -> str:
     """Dumps data as a JSON string after converting NumPy types to Python types.
 
     Parameters:

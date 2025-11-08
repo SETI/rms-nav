@@ -1,18 +1,17 @@
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from filecache import FCPath
 import numpy as np
 import oops.hosts.cassini.iss
 
-from .obs_inst import ObsInst
-from .obs_snapshot import ObsSnapshot
+from .obs_snapshot_inst import ObsSnapshotInst
 
 from nav.config import DEFAULT_CONFIG, DEFAULT_LOGGER, Config
 from nav.support.time import et_to_utc
 from nav.support.types import PathLike
 
 
-class ObsCassiniISS(ObsSnapshot, ObsInst):
+class ObsCassiniISS(ObsSnapshotInst):
     """Implements an observation of a Cassini ISS image.
 
     This class provides specialized functionality for accessing and analyzing Cassini
@@ -98,12 +97,12 @@ class ObsCassiniISS(ObsSnapshot, ObsInst):
             # This is based on star field image W1580760393 with texp 26 and clear filter.
             # This image was not useful beyond mag 10.7.
             # We don't try to compensate for non-clear filters.
-            return 10.7 + np.log(self.texp / 26) / np.log(2.512)
+            return cast(float, 10.7 + np.log(self.texp / 26) / np.log(2.512))
 
         # This is based on star field image N1521881358 with texp 1 and clear filter.
         # This image was not useful beyond mag 10.7.
         # We don't try to compensate for non-clear filters.
-        return 10.5 + np.log(self.texp) / np.log(2.512)
+        return cast(float, 10.5 + np.log(self.texp) / np.log(2.512))
 
     def get_public_metadata(self) -> dict[str, Any]:
         """Returns the public metadata for Cassini ISS.
