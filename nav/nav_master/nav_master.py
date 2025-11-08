@@ -356,7 +356,8 @@ class NavMaster(NavBase):
         if self._final_offset is None:
             self.logger.info('Final offset: NONE')
         else:
-            self.logger.info(f'Final offset: dU {self._final_offset[1]:.3f}, dV {self._final_offset[0]:.3f}')
+            self.logger.info(f'Final offset: dU {self._final_offset[1]:.3f}, '
+                             f'dV {self._final_offset[0]:.3f}')
             self.logger.info(f'Final confidence: {self._final_confidence:.5f}')
 
     def create_overlay(self) -> NDArrayUint8Type:
