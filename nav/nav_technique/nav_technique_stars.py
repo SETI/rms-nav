@@ -15,12 +15,8 @@ if TYPE_CHECKING:
 
 
 class NavTechniqueStars(NavTechnique):
-    """Implements navigation technique using star field correlation.
+    """Implements navigation technique using star field correlation."""
 
-    Parameters:
-        *args: Variable length argument list passed to parent class
-        **kwargs: Arbitrary keyword arguments passed to parent class
-    """
     def __init__(self,
                  nav_master: 'NavMaster',
                  *,
@@ -62,7 +58,7 @@ class NavTechniqueStars(NavTechnique):
 
                 result = navigate_with_pyramid_kpeaks(
                     obs.extdata, star_model.model_img, star_model.model_mask,
-                    upsample_factor=self.config.stars.correlation_fft_upsample_factor)
+                    upsample_factor=self.config.offset.correlation_fft_upsample_factor)
                 # TODO Handle failure
                 corr_offset = (-float(result['offset'][0]), -float(result['offset'][1]))
 

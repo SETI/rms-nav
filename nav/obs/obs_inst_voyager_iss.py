@@ -13,6 +13,11 @@ from .obs_snapshot import ObsSnapshot
 
 
 class ObsVoyagerISS(ObsSnapshot, ObsInst):
+    """Implements an observation of a Voyager ISS image.
+
+    This class provides specialized functionality for accessing and analyzing Voyager
+    ISS image data.
+    """
 
     @staticmethod
     def from_file(path: PathLike,

@@ -7,7 +7,7 @@ from nav.support.misc import safe_lstrip_zero
 
 
 class DataSetPDS3VoyagerISS(DataSetPDS3):
-    """Implements dataset access for Voyager ISS (Imaging Science Subsystem) data.
+    """Implements dataset access for PDS3 Voyager ISS (Imaging Science Subsystem) data.
 
     This class provides specialized functionality for accessing and parsing Voyager
     ISS image data stored in PDS3 format.

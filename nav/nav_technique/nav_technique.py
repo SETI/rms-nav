@@ -9,17 +9,19 @@ if TYPE_CHECKING:
 
 
 class NavTechnique(ABC, NavBase):
-    """Base class for navigation techniques.
-
-        Parameters:
-            nav_master: The navigation master instance
-            config: Configuration object to use. If None, uses DEFAULT_CONFIG.
-    """
+    """Base class for navigation techniques."""
 
     def __init__(self,
                  nav_master: 'NavMaster',
                  *,
                  config: Optional[Config] = None) -> None:
+        """Initializes a navigation technique.
+
+        Parameters:
+            nav_master: The navigation master instance.
+            config: Configuration object to use. If None, uses DEFAULT_CONFIG.
+        """
+
         super().__init__(config=config)
 
         self._nav_master = nav_master
@@ -35,7 +37,13 @@ class NavTechnique(ABC, NavBase):
 
     @property
     def offset(self) -> tuple[float, float] | None:
-        """Returns the computed offset as a tuple of (v, u) or None if not calculated."""
+        """Returns the computed offset as a tuple of (v, u) or None if not calculated.
+
+        The floating point offset is of form (dv, du). If an object is predicted by the SPICE
+        kernels to be at location (v, u) in the image, then the actual location of the
+        object is (v+dv, u+du). This means a positive offset is equivalent to shifting a model
+        up and to the right (positive v and u).
+        """
         return self._offset
 
     @property

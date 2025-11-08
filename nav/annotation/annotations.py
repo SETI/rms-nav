@@ -4,8 +4,8 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from nav.config import Config
-from .annotation import Annotation
 from nav.obs import ObsSnapshot
+from .annotation import Annotation
 from nav.support.nav_base import NavBase
 from nav.support.types import NDArrayBoolType, NDArrayIntType
 
@@ -92,37 +92,19 @@ class Annotations(NavBase):
             res = np.zeros(data_shape + (3,), dtype=np.uint8)
             all_avoid_mask = np.zeros(data_shape, dtype=bool)
 
-            if offset is None:
-                int_offset = (0, 0)
-            else:
-                int_offset = (np.clip(int(round(offset[0])),
-                                      -obs.extfov_margin_v,
-                                      obs.extfov_margin_v),
-                              np.clip(int(round(offset[1])),
-                                      -obs.extfov_margin_u,
-                                      obs.extfov_margin_u))
-
             for annotation in self.annotations:
                 # TODO This does not handle z-depth. In other words, an overlay does not
                 # get hidden by other overlays in front of it. This can best be seen with
                 # two moons that are partially occluding each other.
-                overlay = annotation.overlay[
-                    obs.extfov_margin_v+int_offset[0]:
-                        obs.extfov_margin_v+data_shape[0]+int_offset[0],
-                    obs.extfov_margin_u+int_offset[1]:
-                        obs.extfov_margin_u+data_shape[1]+int_offset[1]]
+                overlay = obs.extract_offset_array(annotation.overlay, offset)
 
                 res[overlay] = annotation.overlay_color
                 if text_use_avoid_mask and annotation.avoid_mask is not None:
-                    avoid_mask = annotation.avoid_mask[
-                        obs.extfov_margin_v+int_offset[0]:
-                            obs.extfov_margin_v+data_shape[0]+int_offset[0],
-                        obs.extfov_margin_u+int_offset[1]:
-                            obs.extfov_margin_u+data_shape[1]+int_offset[1]]
+                    avoid_mask = obs.extract_offset_array(annotation.avoid_mask, offset)
                     all_avoid_mask |= avoid_mask
 
             if include_text:
-                self._add_text(obs, res, int_offset, all_avoid_mask,
+                self._add_text(obs, res, offset, all_avoid_mask,
                                text_avoid_other_text, text_show_all_positions)
 
             return res
@@ -130,7 +112,7 @@ class Annotations(NavBase):
     def _add_text(self,
                   obs: ObsSnapshot,
                   res: NDArrayIntType,
-                  offset: tuple[int, int],
+                  offset: tuple[float, float],
                   avoid_mask: NDArrayBoolType,
                   text_avoid_other_text: bool,
                   text_show_all_positions: bool) -> None:

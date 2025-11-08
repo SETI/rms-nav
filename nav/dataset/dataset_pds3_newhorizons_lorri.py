@@ -7,7 +7,7 @@ from nav.support.misc import safe_lstrip_zero
 
 
 class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
-    """Implements dataset access for New Horizons LORRI (Low-Resolution Imaging
+    """Implements dataset access for PDS3 New Horizons LORRI (Low-Resolution Imaging
     Experiment) data.
 
     This class provides specialized functionality for accessing and parsing New

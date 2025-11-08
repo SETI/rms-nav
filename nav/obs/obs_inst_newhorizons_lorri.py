@@ -13,6 +13,11 @@ from .obs_snapshot import ObsSnapshot
 
 
 class ObsNewHorizonsLORRI(ObsSnapshot, ObsInst):
+    """Implements an observation of a New Horizons LORRI image.
+
+    This class provides specialized functionality for accessing and analyzing New
+    Horizons LORRI image data.
+    """
 
     @staticmethod
     def from_file(path: PathLike,

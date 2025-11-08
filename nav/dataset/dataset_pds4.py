@@ -6,9 +6,14 @@ from .dataset import DataSet, ImageFiles
 
 
 class DataSetPDS4(DataSet, ABC):
+    """Parent class for PDS3 datasets.
+
+    This class provides functionality common to all PDS3 datasets.
+    """
+
     @staticmethod
     def _img_name_valid(img_name: str) -> bool:
-        return False
+        raise NotImplementedError('PDS4 datasets are not yet implemented')
 
     @staticmethod
     def add_selection_arguments(cmdparser: argparse.ArgumentParser,
@@ -25,4 +30,4 @@ class DataSetPDS4(DataSet, ABC):
 
     @staticmethod
     def supported_grouping() -> list[str]:
-        return []
+        raise NotImplementedError('PDS4 datasets are not yet implemented')

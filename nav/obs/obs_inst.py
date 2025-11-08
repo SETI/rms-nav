@@ -12,7 +12,11 @@ if TYPE_CHECKING:
 
 
 class ObsInst(ABC):
-    """Mix-in class for instrument models representing spacecraft cameras."""
+    """Mix-in class for instrument models representing spacecraft cameras.
+
+    This class provides default functionality for methods related to instruments
+    and abstract methods for instrument-specific functionality.
+    """
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -91,7 +95,6 @@ class ObsInst(ABC):
         Returns:
             The minimum usable magnitude for stars in this observation.
         """
-
         raise NotImplementedError
 
     @abstractmethod
@@ -101,7 +104,6 @@ class ObsInst(ABC):
         Returns:
             The maximum usable magnitude for stars in this observation.
         """
-
         raise NotImplementedError
 
     @abstractmethod

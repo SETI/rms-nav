@@ -10,7 +10,7 @@ from nav.support.misc import safe_lstrip_zero
 
 
 class DataSetPDS3CassiniISS(DataSetPDS3):
-    """Implements dataset access for Cassini ISS (Imaging Science Subsystem) data.
+    """Implements dataset access for PDS3 Cassini ISS (Imaging Science Subsystem) data.
 
     This class provides specialized functionality for accessing and parsing Cassini
     ISS image data stored in PDS3 format.

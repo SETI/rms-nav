@@ -16,6 +16,10 @@ from nav.support.misc import flatten_list
 
 
 class DataSetPDS3(DataSet):
+    """Parent class for PDS3 datasets.
+
+    This class provides functionality common to all PDS3 datasets.
+    """
 
     # Data definitions overriden by subclasses
     _ALL_VOLUME_NAMES: tuple[str, ...] = ()

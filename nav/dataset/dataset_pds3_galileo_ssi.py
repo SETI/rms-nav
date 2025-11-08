@@ -7,7 +7,7 @@ from nav.support.misc import safe_lstrip_zero
 
 
 class DataSetPDS3GalileoSSI(DataSetPDS3):
-    """Implements dataset access for Galileo SSI (Solid State Imager) data.
+    """Implements dataset access for PDS3 Galileo SSI (Solid State Imager) data.
 
     This class provides specialized functionality for accessing and parsing Galileo
     SSI image data stored in PDS3 format.

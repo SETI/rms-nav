@@ -6,7 +6,7 @@ import tkinter as tk
 from imgdisp import ImageDisp
 
 from nav.support.image import draw_rect
-from nav.support.time import now_iso
+from nav.support.time import now_dt
 _DEBUG_STARS_MODEL_IMGDISP = False
 
 import time
@@ -70,6 +70,7 @@ def _get_star_catalog_ybsc():
 
 class NavModelStars(NavModel):
     def __init__(self,
+                 name: str,
                  obs: Observation,
                  *,
                  star_list: Optional[list[Star]] = None,
@@ -77,13 +78,14 @@ class NavModelStars(NavModel):
         """Creates a navigation model for stars.
 
         Parameters:
+            name: The name of the model.
             obs: The Observation object containing image data.
             star_list: A list of Star objects to use for the model. If None, the star list
                 will be retrieved from the observation.
             config: Configuration object to use. If None, uses DEFAULT_CONFIG.
         """
 
-        super().__init__(obs, config=config)
+        super().__init__(name, obs, config=config)
 
         self._obs = obs
         self._conflict_body_list = None
@@ -493,7 +495,7 @@ class NavModelStars(NavModel):
                                             self._star_short_info(full_star_list[j]))
 
         # Sort the list with the brightest stars first.
-        full_star_list.sort(key=lambda x: x.dn, reverse=False)
+        full_star_list.sort(key=lambda x: x.dn)
         full_star_list = full_star_list[:max_stars]
 
         for star in full_star_list:
@@ -533,14 +535,19 @@ class NavModelStars(NavModel):
 
         metadata: dict[str, Any] = {}
 
-        metadata['start_time'] = now_iso()
+        start_time = now_dt()
+        metadata['start_time'] = start_time.isoformat()
+        metadata['end_time'] = None
+        metadata['elapsed_time_sec'] = None
 
         log_level = self._config.general.get('log_level_model_stars')
         with self.logger.open(f'CREATE STARS MODEL', level=log_level):
             # TODO Deal with star movement
             ret = self._create_model(metadata, None, ignore_conflicts)
 
-        metadata['end_time'] = now_iso()
+        end_time = now_dt()
+        metadata['end_time'] = end_time.isoformat()
+        metadata['elapsed_time_sec'] = (end_time - start_time).total_seconds()
 
         return ret
 
@@ -572,6 +579,7 @@ class NavModelStars(NavModel):
         # TODO We need to fix this up along with other models to handle the u,v
         # coordinates after the offset procedure is done.
         stars_metadata = []
+        metadata['star_list'] = stars_metadata
         for star in star_list:
             stars_metadata.append({
                 'catalog_name': star.catalog_name,

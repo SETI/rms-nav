@@ -348,32 +348,38 @@ class ObsSnapshot(Obs, Snapshot):
             self._center_bp = Backplane(self, meshgrid=center_meshgrid)
         return self._center_bp
 
-    def extract_offset_image(self,
-                             img: NDArrayType[NPType],
-                             offset: tuple[float, float]) -> NDArrayType[NPType]:
-        """Extracts a subimage from the given img at the given offset (dv,du).
+    def extract_offset_array(self,
+                             array: NDArrayType[NPType],
+                             offset: tuple[float, float] | tuple[int, int] | None
+                             ) -> NDArrayType[NPType]:
+        """Extracts a full-size array from the given extended FOV array.
 
         Parameters:
-            img: Image to extract the subimage from. This must be the same shape as the
+            array: Array to extract the subimage from. This must be the same shape as the
                 extended FOV.
-            offset: Offset (dv,du) to extract the subimage at.
+            offset: Offset (dv,du) to extract the subarray at. An offset of (0,0) means
+                to extract the center of the normal FOV. A positive offset means to
+                extract in the negative direction of v and u.
 
         Returns:
             The extracted subimage. This will be the same shape as the original FOV.
         """
 
-        if img.shape != self.extdata_shape_vu:
-            raise ValueError(f'img shape {img.shape} must equal extdata shape '
+        if array.shape != self.extdata_shape_vu:
+            raise ValueError(f'array shape {array.shape} must equal extdata shape '
                              f'{self.extdata_shape_vu}')
+        if offset is None:
+            return array
         v_size, u_size = self.extdata_shape_vu
-        offset_v = int(offset[0]) + self.extfov_margin_v
-        offset_u = int(offset[1]) + self.extfov_margin_u
-        if (offset_v < 0 or offset_u < 0 or
-            offset_v + self.data_shape_v > v_size or
-            offset_u + self.data_shape_u > u_size):
+        v0 = self.extfov_margin_v - int(np.round(offset[0]))
+        u0 = self.extfov_margin_u - int(np.round(offset[1]))
+        v1 = v0 + self.data_shape_v
+        u1 = u0 + self.data_shape_u
+        if (v0 < 0 or u0 < 0 or
+            v0 + self.data_shape_v > v_size or
+            u0 + self.data_shape_u > u_size):
             raise ValueError('offset produces out-of-bounds subimage slice')
-        return img[offset_v:offset_v+self.data_shape_v,
-                   offset_u:offset_u+self.data_shape_u]
+        return array[v0:v1, u0:u1]
 
     def _ra_dec_limits(self,
                        bp: Backplane,

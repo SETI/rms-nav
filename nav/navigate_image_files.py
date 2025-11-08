@@ -1,5 +1,3 @@
-import json
-
 from filecache import FCPath
 from PIL import Image
 
@@ -7,6 +5,7 @@ from nav.config import DEFAULT_LOGGER
 from nav.obs import Obs
 from nav.dataset.dataset import ImageFiles
 from nav.nav_master import NavMaster
+from nav.support.file import json_as_string
 
 
 #   *,
@@ -55,7 +54,7 @@ def navigate_image_files(obs_class: type[Obs],
         summary_png_file = results_root / (image_file.results_path_stub + '_summary.png')
 
         try:
-            public_metadata_file.write_text(json.dumps(nm.metadata, indent=2))
+            public_metadata_file.write_text(json_as_string(nm.metadata))
         except TypeError:
             logger.error('Metadata is not JSON serializable: %s', nm.metadata)
 

@@ -120,7 +120,7 @@ class AnnotationTextInfo:
                    *,
                    ann_num: int,
                    extfov: tuple[int, int],
-                   offset: tuple[int, int],
+                   offset: tuple[float, float],
                    avoid_mask: NDArrayBoolType | None,
                    text_layer: NDArrayIntType,
                    graphic_layer: NDArrayIntType,
@@ -133,7 +133,7 @@ class AnnotationTextInfo:
         Parameters:
             ann_num: Annotation number for identification.
             extfov: Extended field of view margins (v, u).
-            offset: Offset to apply to coordinates (v, u).
+            offset: Offset to apply to coordinates (dv, du).
             avoid_mask: Mask of areas to avoid when placing text.
             text_layer: Image layer for rendering text.
             graphic_layer: Image layer for rendering arrows.
@@ -147,11 +147,15 @@ class AnnotationTextInfo:
             True if the text was successfully placed, False otherwise.
         """
 
+        # ref_vu is in the actual extended FOV coordinate system (never negative)
+        ext_offset_v = int(np.round(offset[0])) - extfov[0]
+        ext_offset_u = int(np.round(offset[1])) - extfov[1]
+
         if (self.ref_vu is not None and
-            (self.ref_vu[0] - extfov[0] - offset[0] < 0 or
-             self.ref_vu[0] - extfov[0] - offset[0] >= text_layer.shape[0] or
-             self.ref_vu[1] - extfov[1] - offset[1] < 0 or
-             self.ref_vu[1] - extfov[1] - offset[1] >= text_layer.shape[1])):
+            (self.ref_vu[0] + ext_offset_v < 0 or
+             self.ref_vu[0] + ext_offset_v >= text_layer.shape[0] or
+             self.ref_vu[1] + ext_offset_u < 0 or
+             self.ref_vu[1] + ext_offset_u >= text_layer.shape[1])):
             # The thing we're labeling isn't in the FOV, so don't bother labeling it
             return True
 
@@ -186,8 +190,8 @@ class AnnotationTextInfo:
         # (and optionally, arrow) and quit. This gives priority to the positions
         # earliest in the list.
         for text_pos, text_v, text_u in self.text_loc:
-            text_v = text_v - extfov[0] - offset[0]
-            text_u = text_u - extfov[1] - offset[1]
+            text_v = text_v + ext_offset_v
+            text_u = text_u + ext_offset_u
             arrow_u0 = arrow_u1 = arrow_v0 = arrow_v1 = None
             if text_pos == TEXTINFO_LEFT:
                 v = text_v - text_width_v // 2

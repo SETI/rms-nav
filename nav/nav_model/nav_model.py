@@ -12,17 +12,22 @@ class NavModel(ABC, NavBase):
     """Base class for navigation models used to generate synthetic images."""
 
     def __init__(self,
+                 name: str,
                  obs: ObsSnapshot,
                  *,
                  config: Optional[Config] = None) -> None:
         """Initializes a navigation model with observation data.
 
         Parameters:
+            name: The name of the model.
             obs: Observation snapshot containing image and metadata.
             config: Configuration object to use. If None, uses DEFAULT_CONFIG.
         """
 
         super().__init__(config=config)
+
+        # The name of the model
+        self._name = name
 
         # The snapshot describing the observation the model is based on
         self._obs = obs
@@ -38,6 +43,9 @@ class NavModel(ABC, NavBase):
 
         # A boolean array indicating which pixels are part of the model (True)
         self._model_mask: NDArrayBoolType | None = None
+
+        # A weighted mask where each pixel is the confidence of the model at that pixel
+        self._weighted_mask: NDArrayFloatType | None = None
 
         # The range from the observer to each point in the model in km; inf if infinitely
         # far away like stars
@@ -66,6 +74,11 @@ class NavModel(ABC, NavBase):
 
         # An optional list of text annotations for the model
         self._annotations: Annotations | None = None
+
+    @property
+    def name(self) -> str:
+        """Returns the name of the model."""
+        return self._name
 
     @property
     def obs(self) -> ObsSnapshot:

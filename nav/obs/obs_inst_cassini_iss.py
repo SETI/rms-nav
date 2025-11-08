@@ -13,6 +13,11 @@ from nav.support.types import PathLike
 
 
 class ObsCassiniISS(ObsSnapshot, ObsInst):
+    """Implements an observation of a Cassini ISS image.
+
+    This class provides specialized functionality for accessing and analyzing Cassini
+    ISS image data.
+    """
 
     @staticmethod
     def from_file(path: PathLike,

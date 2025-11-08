@@ -13,6 +13,11 @@ from .obs_snapshot import ObsSnapshot
 
 
 class ObsGalileoSSI(ObsSnapshot, ObsInst):
+    """Implements an observation of a Galileo SSI image.
+
+    This class provides specialized functionality for accessing and analyzing Galileo
+    SSI image data.
+    """
 
     @staticmethod
     def from_file(path: PathLike,

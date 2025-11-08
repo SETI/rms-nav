@@ -1,3 +1,4 @@
+import fnmatch
 from typing import Any, Optional, Sequence, cast
 
 import matplotlib.pyplot as plt  # noqa: F401
@@ -8,21 +9,26 @@ from nav.annotation import Annotations
 from nav.config import Config
 from nav.nav_model import (NavModel,
                            NavModelBody,
+                           NavModelCombined,
                            NavModelRings,
                            NavModelStars,
                            NavModelTitan)
-from nav.nav_technique import (NavTechniqueCorrelateAll,
-                               NavTechniqueStars)
+from nav.nav_technique import NavTechniqueCorrelateAll
 from nav.support.nav_base import NavBase
-from nav.support.types import NDArrayFloatType, NDArrayUint32Type, NDArrayUint8Type
+from nav.support.types import NDArrayFloatType, NDArrayUint8Type
 
 
 class NavMaster(NavBase):
     """Coordinates the overall navigation process using multiple models and techniques.
 
-    This class manages the creation of different navigation models (stars, bodies, rings,
-    Titan), combines them appropriately, and applies navigation techniques to determine
-    the final offset between predicted and actual positions.
+    This class manages the creation of different navigation models (e.g. stars, bodies,
+    rings, andTitan), combines them appropriately, and applies navigation techniques to
+    determine the final offset between predicted and actual positions.
+
+    The floating point offset is of form (dv, du). If an object is predicted by the SPICE
+    kernels to be at location (v, u) in the image, then the actual location of the
+    object is (v+dv, u+du). This means a positive offset is equivalent to shifting a model
+    up and to the right (positive v and u).
     """
 
     def __init__(self,
@@ -36,7 +42,7 @@ class NavMaster(NavBase):
         Parameters:
             obs: The observation object containing image and metadata.
             nav_models: Optional list of navigation models to use. If None, uses all models.
-                Each entry must be one of 'stars', 'bodies', 'rings', 'titan'.
+                Each entry must be one of 'stars', 'body:<body_name>', 'rings', 'titan'.
             nav_techniques: Optional list of navigation techniques to use. If None, uses all
                 techniques. Each entry must be one of 'stars', 'correlate_all'.
             config: Optional configuration object. If None, uses the default configuration.
@@ -44,15 +50,25 @@ class NavMaster(NavBase):
 
         super().__init__(config=config)
 
-        nav_techniques = nav_techniques or ['stars']  # XXX
+        valid_models = ['stars', 'body:*', 'rings', 'titan']
+        valid_techniques = ['stars', 'correlate_all']
+        if nav_models is None:
+            nav_models = ['*']
+        if nav_techniques is None:
+            nav_techniques = ['correlate_all']  # ['*']
+
         self._obs = obs
-        if nav_models is not None and not all(
-                x in ['stars', 'bodies', 'rings', 'titan'] for x in nav_models):
-            raise ValueError(f'Invalid nav_models: {nav_models}')
+        for nav_model in nav_models:
+            if any(fnmatch.fnmatch(x, nav_model) for x in valid_models):
+                continue
+            raise ValueError(f'Invalid nav_model: {nav_model}')
+
+        for nav_technique in nav_techniques:
+            if any(fnmatch.fnmatch(nav_technique, x) for x in valid_techniques):
+                continue
+            raise ValueError(f'Invalid nav_technique: {nav_technique}')
+
         self._nav_models_to_use = nav_models
-        if nav_techniques is not None and not all(
-                x in ['stars', 'correlate_all'] for x in nav_techniques):
-            raise ValueError(f'Invalid nav_techniques: {nav_techniques}')
         self._nav_techniques_to_use = nav_techniques
         self._final_offset: tuple[float, float] | None = None
         self._final_confidence: float | None = None
@@ -62,7 +78,7 @@ class NavMaster(NavBase):
         self._ring_models: list[NavModelRings] | None = None
         self._titan_models: list[NavModelTitan] | None = None
 
-        self._closest_model_index: NDArrayUint32Type | None = None
+        self._combined_model: NavModelCombined | None = None
 
         self._metadata: dict[str, Any] = {}
         self._initialize_metadata()
@@ -138,13 +154,19 @@ class NavMaster(NavBase):
                 cast(list[NavModel], self.ring_models) +
                 cast(list[NavModel], self.titan_models))
 
+    @property
+    def combined_model(self) -> NavModelCombined | None:
+        """Returns the final combined model."""
+        return self._combined_model
+
     def compute_star_models(self) -> None:
         """Creates navigation models for stars in the observation.
 
         If star models have already been computed, does nothing.
         """
 
-        if self._nav_models_to_use is not None and 'stars' not in self._nav_models_to_use:
+        if (self._nav_models_to_use is not None and
+            not any(fnmatch.fnmatch('stars', x) for x in self._nav_models_to_use)):
             self._star_models = []
             return
 
@@ -152,7 +174,7 @@ class NavMaster(NavBase):
             # Keep cached version
             return
 
-        stars_model = NavModelStars(self._obs)
+        stars_model = NavModelStars('stars', self._obs)
         stars_model.create_model()
         self._star_models = [stars_model]
         self._metadata['models']['star_model'] = stars_model.metadata
@@ -167,10 +189,6 @@ class NavMaster(NavBase):
         and creates a navigation model for each one. If body models have already been
         computed, does nothing.
         """
-
-        if self._nav_models_to_use is not None and 'bodies' not in self._nav_models_to_use:
-            self._body_models = []
-            return
 
         if self._body_models is not None:
             # Keep cached version
@@ -218,7 +236,10 @@ class NavMaster(NavBase):
         self._metadata['models']['body_models'] = {}
 
         for body, inventory in large_bodies_by_range:
-            body_model = NavModelBody(obs, body,
+            model_name = f'body:{body}'
+            if not any(fnmatch.fnmatch(model_name, x) for x in self._nav_models_to_use):
+                continue
+            body_model = NavModelBody(model_name, obs, body,
                                       inventory=inventory,
                                       config=config)
             body_model.create_model()
@@ -231,7 +252,8 @@ class NavMaster(NavBase):
         If ring models have already been computed, does nothing.
         """
 
-        if self._nav_models_to_use is not None and 'rings' not in self._nav_models_to_use:
+        if (self._nav_models_to_use is not None and
+            not any(fnmatch.fnmatch('rings', x) for x in self._nav_models_to_use)):
             self._ring_models = []
             return
 
@@ -249,7 +271,8 @@ class NavMaster(NavBase):
         If Titan models have already been computed, does nothing.
         """
 
-        if self._nav_models_to_use is not None and 'titan' not in self._nav_models_to_use:
+        if (self._nav_models_to_use is not None and
+            not any(fnmatch.fnmatch('titan', x) for x in self._nav_models_to_use)):
             self._titan_models = []
             return
 
@@ -289,30 +312,41 @@ class NavMaster(NavBase):
         # TODO If both nav_models and nav_techniques are limited to stars, then we
         # essentially navigate using stars twice.
 
-        if self._nav_techniques_to_use is None or 'stars' in self._nav_techniques_to_use:
-            nav_stars = NavTechniqueStars(self)
-            nav_stars.navigate()
-            self._metadata['navigation_techniques']['stars'] = nav_stars.metadata
-            self._offsets['stars'] = nav_stars.offset
-            if nav_stars.offset is not None:
-                self._final_offset = nav_stars.offset
-                if nav_stars.confidence is None:
-                    raise ValueError('Star navigation technique confidence is None')
-                prevailing_confidence = nav_stars.confidence
-        else:
-            self._offsets['stars'] = None
+        # if self._nav_techniques_to_use is None or 'stars' in self._nav_techniques_to_use:
+        #     nav_stars = NavTechniqueStars(self)
+        #     nav_stars.navigate()
+        #     self._metadata['navigation_techniques']['stars'] = nav_stars.metadata
+        #     self._offsets['stars'] = nav_stars.offset
+        #     if nav_stars.offset is not None:
+        #         self._final_offset = nav_stars.offset
+        #         if nav_stars.confidence is None:
+        #             raise ValueError('Star navigation technique confidence is None')
+        #         prevailing_confidence = nav_stars.confidence
+        # else:
+        #     self._offsets['stars'] = None
 
         if self._nav_techniques_to_use is None or 'correlate_all' in self._nav_techniques_to_use:
             nav_all = NavTechniqueCorrelateAll(self)
             nav_all.navigate()
-            self._metadata['navigation_techniques']['correlate_all'] = nav_all.metadata
-            self._offsets['correlate_all'] = nav_all.offset
-            if nav_all.offset is not None:
-                if nav_all.confidence is None:
-                    raise ValueError('Correlate all navigation technique confidence is None')
-                if nav_all.confidence > prevailing_confidence:
-                    prevailing_confidence = nav_all.confidence
-                    self._final_offset = nav_all.offset
+            correlate_all_combined_model = nav_all.combined_model()
+            self._combined_model = correlate_all_combined_model
+            if correlate_all_combined_model is None:
+                self.logger.info('Correlate all navigation technique failed')
+            else:
+                # plt.imshow(correlate_all_combined_model.model_img)
+                # plt.show()
+                # plt.imshow(correlate_all_combined_model.mask)
+                # plt.show()
+                # plt.imshow(correlate_all_combined_model.weighted_mask)
+                # plt.show()
+                self._metadata['navigation_techniques']['correlate_all'] = nav_all.metadata
+                self._offsets['correlate_all'] = nav_all.offset
+                if nav_all.offset is not None:
+                    if nav_all.confidence is None:
+                        raise ValueError('Correlate all navigation technique confidence is None')
+                    if nav_all.confidence > prevailing_confidence:
+                        prevailing_confidence = nav_all.confidence
+                        self._final_offset = nav_all.offset
         else:
             self._offsets['correlate_all'] = None
 
@@ -349,8 +383,8 @@ class NavMaster(NavBase):
         # TODO This is inefficient because we are creating the combined model a second
         # time. But we may need to do this in the future if NavTechniqueCorrelateAll
         # ends up being more complicated. This needs to be revisited.
-        nav_all = NavTechniqueCorrelateAll(self)
-        min_index = self.obs.extract_offset_image(nav_all.closest_model_index, offset)
+        min_index = self.obs.extract_offset_array(self.combined_model.closest_model_index,
+                                                  offset)
 
         def _stretch_region(sub_img: NDArrayFloatType) -> NDArrayUint8Type:
             """Stretches a region of the image."""
@@ -372,7 +406,7 @@ class NavMaster(NavBase):
                 for stretch_region_packed in model.stretch_regions:
                     stretch_region = np.unpackbits(stretch_region_packed, axis=0).astype(bool)
                     stretch_region = self.obs.unpad_array_to_extfov(stretch_region)
-                    stretch_region = self._obs.extract_offset_image(stretch_region, offset)
+                    stretch_region = self._obs.extract_offset_array(stretch_region, offset)
                     if not np.any(stretch_region):
                         continue
                     # We stretch this region by itself if we haven't already stretched
