@@ -495,7 +495,7 @@ class NavModelStars(NavModel):
                                             self._star_short_info(full_star_list[j]))
 
         # Sort the list with the brightest stars first.
-        full_star_list.sort(key=lambda x: x.dn)
+        full_star_list.sort(key=lambda x: x.dn, reverse=True)
         full_star_list = full_star_list[:max_stars]
 
         for star in full_star_list:

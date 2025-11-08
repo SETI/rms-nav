@@ -100,6 +100,8 @@ class NavTechniqueCorrelateAll(NavTechnique):
             #
             # The first thing we do is create the combined model with ALL models available
             #
+            used_model_names = ', '.join([x.name for x in self.nav_master.all_models])
+            self.logger.info(f'Initial correlation using all models: {used_model_names}')
             combined_model = self._combine_models(['*'])
             self._combined_model = combined_model
             if combined_model is None:
@@ -193,6 +195,7 @@ class NavTechniqueCorrelateAll(NavTechnique):
 
         self.logger.info('Starting star position optimization process')
         self.logger.info(f'Initial offset: dU {offset[1]:.3f}, dV {offset[0]:.3f}')
+        self.logger.info(f'Initial number of stars: {len(star_model.star_list)}')
 
         u_diff_list = []
         v_diff_list = []
@@ -253,6 +256,7 @@ class NavTechniqueCorrelateAll(NavTechnique):
         v_diff_median = np.median(v_diff_list)
         v_diff_mad = mad_std(v_diff_list)
 
+        self.logger.info(f'Number of stars: {len(u_diff_list)}')
         self.logger.info(f'U diff: min {u_diff_min:6.3f}, max {u_diff_max:6.3f}, '
                          f'mean {u_diff_mean:6.3f} +/- {u_diff_std:6.3f}, '
                          f'median {u_diff_median:6.3f} +/- {u_diff_mad:6.3f}')
@@ -299,6 +303,7 @@ class NavTechniqueCorrelateAll(NavTechnique):
         final_v_diff_median = np.median(final_v_diff_list)
         final_v_diff_mad = mad_std(final_v_diff_list)
 
+        self.logger.info(f'Refined number of stars: {len(final_u_diff_list)}')
         self.logger.info(f'Refined U diff: min {final_u_diff_min:6.3f}, '
                          f'max {final_u_diff_max:6.3f}, '
                          f'mean {final_u_diff_mean:6.3f} +/- {final_u_diff_std:6.3f}, '
