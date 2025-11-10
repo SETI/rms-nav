@@ -158,14 +158,19 @@ class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
     # Public methods
 
     def __init__(self,
-                 *,
                  pds3_holdings_root: Optional[str | Path | FCPath] = None,
+                 *,
                  index_filecache: Optional[FileCache] = None,
                  pds3_holdings_filecache: Optional[FileCache] = None,
                  config: Optional[Config] = None) -> None:
         """Initializes a New Horizons LORRI dataset handler.
 
         Parameters:
+            pds3_holdings_root: Path to PDS3 holdings directory. If None, uses PDS3_HOLDINGS_DIR
+                environment variable. May be a URL accepted by FCPath.
+            index_filecache: FileCache object to use for index files. If None, creates a new one.
+            pds3_holdings_filecache: FileCache object to use for PDS3 holdings files. If None,
+                creates a new one.
             config: Configuration object to use. If None, uses DEFAULT_CONFIG.
         """
         super().__init__(pds3_holdings_root=pds3_holdings_root,

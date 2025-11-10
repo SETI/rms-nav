@@ -1,5 +1,5 @@
 # mypy: ignore-errors
-
+# TODO Clean up typing
 from typing import Any, Optional
 
 import numpy as np
@@ -43,7 +43,7 @@ def upsampled_dft(X: NDArrayFloatType,
     """Localized upsampled DFT.
 
     From Guizar-Sicairos, 2008. "Efficient subpixel image registration via cross-correlation."
-    Optices Leters, 33(2):156-158
+    Optics Leters, 33(2):156-158
     """
     X_v_size, X_u_size = X.shape
     region_v, region_u = region_sz
@@ -516,7 +516,7 @@ def navigate_with_pyramid_kpeaks(image: NDArrayFloatType,
         # Scale shift back to full res
         level_shifts.append((res_lvl['offset'][0]*s, res_lvl['offset'][1]*s))
 
-    # Consistency: max deviation to last level’s shift
+    # Consistency: max deviation to last level's shift
     shifts_arr = np.array(level_shifts, dtype=np.float64)
     final_prior = shifts_arr[-1]
     consistency = float(np.max(np.linalg.norm(shifts_arr - final_prior, axis=1)))

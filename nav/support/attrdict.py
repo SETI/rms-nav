@@ -25,5 +25,5 @@ class AttrDict(dict[str, Any]):
     def __getattr__(self, name: str) -> Any:
         try:
             return self[name]
-        except KeyError:
-            raise AttributeError(f"Attribute '{name}' not found")
+        except KeyError as exc:
+            raise AttributeError(f"Attribute '{name}' not found") from exc

@@ -93,8 +93,11 @@ class NavTechniqueCorrelateAll(NavTechnique):
 
         # offset, uncertainty, confidence, and metadata start out as None/empty
 
-        with self.logger.open('NAVIGATION PASS: ALL MODELS CORRELATION',
-                              log_level=self.config.general.log_level_nav_correlate_all):
+        try:
+            log_level = self.config.general.log_level_nav_correlate_all
+        except AttributeError:
+            log_level = None
+        with self.logger.open('NAVIGATION PASS: ALL MODELS CORRELATION', log_level=log_level):
             obs = self.nav_master.obs
 
             #

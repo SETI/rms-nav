@@ -215,6 +215,11 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         """Initializes a Cassini ISS dataset handler.
 
         Parameters:
+            pds3_holdings_root: Path to PDS3 holdings directory. If None, uses PDS3_HOLDINGS_DIR
+                environment variable. May be a URL accepted by FCPath.
+            index_filecache: FileCache object to use for index files. If None, creates a new one.
+            pds3_holdings_filecache: FileCache object to use for PDS3 holdings files. If None,
+                creates a new one.
             config: Configuration object to use. If None, uses DEFAULT_CONFIG.
         """
         super().__init__(pds3_holdings_root=pds3_holdings_root,

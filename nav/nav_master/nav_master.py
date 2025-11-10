@@ -51,8 +51,8 @@ class NavMaster(NavBase):
 
         super().__init__(config=config)
 
-        valid_models = ['stars', 'body:*', 'rings', 'titan']
-        valid_techniques = ['stars', 'correlate_all']
+        valid_models = ['stars', 'body:', 'rings', 'titan']
+        valid_techniques = ['correlate_all']
         if nav_models is None:
             nav_models = ['*']
         if nav_techniques is None:
@@ -60,12 +60,12 @@ class NavMaster(NavBase):
 
         self._obs = obs
         for nav_model in nav_models:
-            if any(fnmatch.fnmatch(nav_model, x) for x in valid_models):
+            if any(fnmatch.fnmatch(x, nav_model) for x in valid_models):
                 continue
             raise ValueError(f'Invalid nav_model: {nav_model}')
 
         for nav_technique in nav_techniques:
-            if any(fnmatch.fnmatch(nav_technique, x) for x in valid_techniques):
+            if any(fnmatch.fnmatch(x, nav_technique) for x in valid_techniques):
                 continue
             raise ValueError(f'Invalid nav_technique: {nav_technique}')
 

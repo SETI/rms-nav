@@ -1,6 +1,7 @@
 from abc import ABC
 import argparse
-from typing import Any, Iterator, Optional
+from collections.abc import Iterator
+from typing import Any, Optional
 
 from .dataset import DataSet, ImageFiles
 
