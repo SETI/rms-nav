@@ -270,7 +270,7 @@ class NavTechniqueCorrelateAll(NavTechnique):
         nsigma = self.config.offset.star_refinement_nsigma
 
         # Roughly mark dimmer stars as less reliable and thus more likely to be outliers
-        min_vmag = 6
+        min_vmag = 6  # TODO Fix this
         max_vmag = obs.star_max_usable_vmag()
         vmag_spread = max_vmag - min_vmag
         # Convert vmag to a reliability between 1 and 0.5

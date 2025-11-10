@@ -51,24 +51,16 @@ class NavMaster(NavBase):
 
         super().__init__(config=config)
 
-        valid_models = ['stars', 'body:', 'rings', 'titan']
-        valid_techniques = ['correlate_all']
         if nav_models is None:
             nav_models = ['*']
+        else:
+            nav_models = [x.strip().lower() for x in nav_models]
         if nav_techniques is None:
-            nav_techniques = ['correlate_all']  # ['*']
+            nav_techniques = ['*']
+        else:
+            nav_techniques = [x.strip().lower() for x in nav_techniques]
 
         self._obs = obs
-        for nav_model in nav_models:
-            if any(fnmatch.fnmatch(x, nav_model) for x in valid_models):
-                continue
-            raise ValueError(f'Invalid nav_model: {nav_model}')
-
-        for nav_technique in nav_techniques:
-            if any(fnmatch.fnmatch(x, nav_technique) for x in valid_techniques):
-                continue
-            raise ValueError(f'Invalid nav_technique: {nav_technique}')
-
         self._nav_models_to_use = nav_models
         self._nav_techniques_to_use = nav_techniques
         self._final_offset: tuple[float, float] | None = None
@@ -238,7 +230,7 @@ class NavMaster(NavBase):
         self._metadata['models']['body_models'] = {}
 
         for body, inventory in large_bodies_by_range:
-            model_name = f'body:{body}'
+            model_name = f'body:{body.lower()}'
             if not any(fnmatch.fnmatch(model_name, x) for x in self._nav_models_to_use):
                 continue
             body_model = NavModelBody(model_name, obs, body,
@@ -311,23 +303,7 @@ class NavMaster(NavBase):
 
         self._metadata['navigation_techniques'] = {}
 
-        # TODO If both nav_models and nav_techniques are limited to stars, then we
-        # essentially navigate using stars twice.
-
-        # if self._nav_techniques_to_use is None or 'stars' in self._nav_techniques_to_use:
-        #     nav_stars = NavTechniqueStars(self)
-        #     nav_stars.navigate()
-        #     self._metadata['navigation_techniques']['stars'] = nav_stars.metadata
-        #     self._offsets['stars'] = nav_stars.offset
-        #     if nav_stars.offset is not None:
-        #         self._final_offset = nav_stars.offset
-        #         if nav_stars.confidence is None:
-        #             raise ValueError('Star navigation technique confidence is None')
-        #         prevailing_confidence = nav_stars.confidence
-        # else:
-        #     self._offsets['stars'] = None
-
-        if self._nav_techniques_to_use is None or 'correlate_all' in self._nav_techniques_to_use:
+        if any(fnmatch.fnmatch('correlate_all', x) for x in self._nav_techniques_to_use):
             nav_all = NavTechniqueCorrelateAll(self)
             nav_all.navigate()
             correlate_all_combined_model = nav_all.combined_model()

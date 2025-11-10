@@ -388,9 +388,9 @@ def navigate_single_scale_kpeaks(*,
         candidates.append(evaluation)
         if logger is not None:
             logger.debug(f'  Candidate {p}, {q} results: '
-                         f'offset {evaluation["offset"][0]:.3f}, {evaluation["offset"][1]:.3}; '
+                         f'offset {evaluation["offset"][0]:.3f}, {evaluation["offset"][1]:.3f}; '
                          f'sigma_xy {evaluation["sigma_xy"][0]:.3f}, '
-                         f'{evaluation["sigma_xy"][1]:.3}; '
+                         f'{evaluation["sigma_xy"][1]:.3f}; '
                          f'quality {evaluation["quality"]:.3f}; '
                          f'peak_val {evaluation["peak_val"]:.3f}')
 
@@ -508,8 +508,8 @@ def navigate_with_pyramid_kpeaks(image: NDArrayFloatType,
             nms_radius=nms_radius, logger=logger
         )
         logger.debug(f'Correlation pyramid level {lvl} results: '
-                     f'offset {res_lvl["offset"][0]*s:.3f}, {res_lvl["offset"][1]*s:.3}; '
-                     f'sigma_xy {res_lvl["sigma_xy"][0]*s:.3f}, {res_lvl["sigma_xy"][1]*s:.3}; '
+                     f'offset {res_lvl["offset"][0]*s:.3f}, {res_lvl["offset"][1]*s:.3f}; '
+                     f'sigma_xy {res_lvl["sigma_xy"][0]*s:.3f}, {res_lvl["sigma_xy"][1]*s:.3f}; '
                      f'quality {res_lvl["quality"]:.3f}; '
                      f'peak_val {res_lvl["peak_val"]:.3f}')
 
@@ -545,8 +545,8 @@ def navigate_with_pyramid_kpeaks(image: NDArrayFloatType,
     }
 
     logger.debug(f'Correlation result: '
-                 f'offset dU {result["offset"][1]:.3f}, dV {result["offset"][0]:.3}; '
-                 f'sigma U {result["sigma_xy"][1]:.3f}, V {result["sigma_xy"][0]:.3}; '
+                 f'offset dU {result["offset"][1]:.3f}, dV {result["offset"][0]:.3f}; '
+                 f'sigma U {result["sigma_xy"][1]:.3f}, V {result["sigma_xy"][0]:.3f}; '
                  f'consistency {consistency:.3f}; '
                  f'spurious {spurious}')
 
