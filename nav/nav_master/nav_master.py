@@ -43,6 +43,7 @@ class NavMaster(NavBase):
             obs: The observation object containing image and metadata.
             nav_models: Optional list of navigation models to use. If None, uses all models.
                 Each entry must be one of 'stars', 'body:<body_name>', 'rings', 'titan'.
+                Glob-style wildcards are supported.
             nav_techniques: Optional list of navigation techniques to use. If None, uses all
                 techniques. Each entry must be one of 'stars', 'correlate_all'.
             config: Optional configuration object. If None, uses the default configuration.
@@ -59,7 +60,7 @@ class NavMaster(NavBase):
 
         self._obs = obs
         for nav_model in nav_models:
-            if any(fnmatch.fnmatch(x, nav_model) for x in valid_models):
+            if any(fnmatch.fnmatch(nav_model, x) for x in valid_models):
                 continue
             raise ValueError(f'Invalid nav_model: {nav_model}')
 
@@ -392,7 +393,14 @@ class NavMaster(NavBase):
         # time. But we may need to do this in the future if NavTechniqueCorrelateAll
         # ends up being more complicated. This needs to be revisited.
         if self.combined_model is None:
+            # If we never created a combined model earlier, we need one now for the overlay
+            self._combined_model = NavModelCombined('combined',
+                                                    self.obs,
+                                                    list(self.all_models))
+        if self.combined_model is None:
             raise ValueError('Combined model is None')
+        if self.combined_model.closest_model_index is None:
+            raise ValueError('Combined model closest model index is None')
         min_index = self.obs.extract_offset_array(self.combined_model.closest_model_index,
                                                   offset)
 

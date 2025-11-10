@@ -204,7 +204,7 @@ rings:
 ##################
 
 stars:
-  catalogs: [ ucac4, tycho2, ybsc ]  # Order of most precise to least
+  catalogs: [ucac4, tycho2, ybsc]  # Order of most precise to least
   body_conflict_margin: 5
   default_star_class: G0
   stellar_aberration: true

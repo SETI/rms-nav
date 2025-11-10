@@ -369,7 +369,7 @@ class ObsSnapshot(Obs, Snapshot):
             raise ValueError(f'array shape {array.shape} must equal extdata shape '
                              f'{self.extdata_shape_vu}')
         if offset is None:
-            return array
+            offset = (0, 0)
         v_size, u_size = self.extdata_shape_vu
         v0 = self.extfov_margin_v - int(np.round(offset[0]))
         u0 = self.extfov_margin_u - int(np.round(offset[1]))

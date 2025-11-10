@@ -42,7 +42,8 @@ class NavModelCombined(NavModel):
         weighted_model_masks: list[NDArrayFloatType] = []
         ranges: list[NDArrayFloatType] = []
         total_w = 0.
-        for model in models:
+        valid_model_indices: list[int] = []
+        for model_idx, model in enumerate(models):
             if model.model_img is None:
                 continue
             if model.model_mask is None:
@@ -77,6 +78,7 @@ class NavModelCombined(NavModel):
                 raise ValueError(f'Range shape differs from model image shape: {rng.shape} != '
                                  f'{model.model_img.shape}')
             ranges.append(rng)
+            valid_model_indices.append(model_idx)
 
         if len(model_imgs) == 0:
             return
@@ -87,6 +89,7 @@ class NavModelCombined(NavModel):
         ranges_arr = np.stack(ranges, axis=0)
 
         min_indices = np.argmin(ranges_arr, axis=0)
+        index_lookup = np.asarray(valid_model_indices, dtype=np.uint32)
         row_idx, col_idx = np.indices(min_indices.shape)
         final_model = model_imgs_arr[min_indices, row_idx, col_idx]
         final_mask = model_masks_arr[min_indices, row_idx, col_idx]
@@ -101,7 +104,7 @@ class NavModelCombined(NavModel):
         self._model_mask = final_mask
         self._weighted_mask = final_weighted_mask
         self._range = ranges_arr[min_indices, row_idx, col_idx]
-        self._closest_model_index = min_indices
+        self._closest_model_index = index_lookup[min_indices]
 
     @property
     def closest_model_index(self) -> NDArrayUint32Type | None:

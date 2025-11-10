@@ -127,7 +127,7 @@ class NavTechniqueCorrelateAll(NavTechnique):
             self.logger.debug('Correlation offset: '
                               f'dU {corr_offset[1]:.3f}, dV {corr_offset[0]:.3f}')
             self.logger.debug('Correlation quality: '
-                              f'{float(result['quality']):.3f}')
+                              f'{float(result["quality"]):.3f}')
 
             self._offset = corr_offset
             # TODO
@@ -289,6 +289,10 @@ class NavTechniqueCorrelateAll(NavTechnique):
                 final_u_diff_list.append(u_diff)
                 final_v_diff_list.append(v_diff)
                 final_uv_star_list.append(star)
+
+        if len(final_u_diff_list) == 0:
+            self.logger.info('No remaining stars after removing outliers')
+            return None
 
         final_u_diff_min = np.min(final_u_diff_list)
         final_u_diff_max = np.max(final_u_diff_list)

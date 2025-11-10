@@ -373,7 +373,8 @@ def navigate_single_scale_kpeaks(*,
     corr_num = np.real(ifft2(fft2(image_pad) * np.conj(fft2(model_pad * mask_pad))))
     peaks = nms_topk(corr_num, k=max_peaks, radius=nms_radius)
 
-    logger.debug('Correlation peaks:')
+    if logger is not None:
+        logger.debug('Correlation peaks:')
 
     candidates = []
     for p, q, _ in peaks:
@@ -385,11 +386,13 @@ def navigate_single_scale_kpeaks(*,
                                         prior_shift=prior_shift, prior_weight=prior_weight,
                                         metric=metric, logger=logger)
         candidates.append(evaluation)
-        logger.debug(f'  Candidate {p}, {q} results: '
-                     f'offset {evaluation["offset"][0]:.3f}, {evaluation["offset"][1]:.3}; '
-                     f'sigma_xy {evaluation["sigma_xy"][0]:.3f}, {evaluation["sigma_xy"][1]:.3}; '
-                     f'quality {evaluation["quality"]:.3f}; '
-                     f'peak_val {evaluation["peak_val"]:.3f}')
+        if logger is not None:
+            logger.debug(f'  Candidate {p}, {q} results: '
+                         f'offset {evaluation["offset"][0]:.3f}, {evaluation["offset"][1]:.3}; '
+                         f'sigma_xy {evaluation["sigma_xy"][0]:.3f}, '
+                         f'{evaluation["sigma_xy"][1]:.3}; '
+                         f'quality {evaluation["quality"]:.3f}; '
+                         f'peak_val {evaluation["peak_val"]:.3f}')
 
     if not candidates:
         # TODO When no candidates are found, the function returns cov: np.diag([1e6, 1e6])

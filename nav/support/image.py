@@ -1,4 +1,3 @@
-from collections.abc import Sequence
 from typing import Any, cast
 
 import numpy as np
@@ -123,17 +122,46 @@ def unpad_array(array: NDArrayType[NPType],
 
 
 def pad_top_left(array: NDArrayType[NPType], v_size: int, u_size: int) -> NDArrayType[NPType]:
-    """Place array 'array' at (0,0) inside zeros(v_size, u_size)."""
+    """Place array at (0,0) inside zeros(v_size, u_size).
+
+    Parameters:
+        array: A 2-D array to place.
+        v_size: The height of the output array.
+        u_size: The width of the output array.
+
+    Returns:
+        A (v_size, u_size) array with the input array at the top-left corner.
+        If the input array is larger than the target size, it will be truncated.
+    """
+
+    if array.ndim != 2:
+        raise ValueError(f'Array must be 2-dimensional, got {array.ndim}')
     ret = np.zeros((v_size, u_size), dtype=array.dtype)
     v, u = array.shape
-    ret[:v, :u] = array
+    ret[:min(v, v_size), :min(u, u_size)] = array[:min(v, v_size), :min(u, u_size)]
     return ret
 
 
 def crop_center(img: NDArrayType[NPType], out_shape: tuple[int, int]) -> NDArrayType[NPType]:
-    """Center crop to out_shape (h,w)."""
+    """Center crop to out_shape (h,w).
+
+    Parameters:
+        img: A 2-D array to crop.
+        out_shape: The target shape (height, width).
+
+    Returns:
+        The center-cropped array.
+
+    Raises:
+        ValueError: If img is not 2-dimensional or out_shape is larger than img.shape.
+    """
+
+    if img.ndim != 2:
+        raise ValueError(f'Image must be 2-dimensional, got {img.ndim}')
     img_v, img_u = img.shape
     out_v, out_u = out_shape
+    if out_v > img_v or out_u > img_u:
+        raise ValueError(f'Output shape {out_shape} cannot be larger than image shape {img.shape}')
     sy = (img_v - out_v)//2
     sx = (img_u - out_u)//2
     return img[sy:sy+out_v, sx:sx+out_u]
@@ -452,7 +480,23 @@ def filter_downsample(arr: NDArrayFloatType,
 
 def gaussian_blur_cov(img: NDArrayFloatType,
                       sigma: NDArrayFloatType) -> NDArrayFloatType:
-    """Blur by anisotropic Gaussian with covariance Sigma in frequency domain."""
+    """Blur by anisotropic Gaussian with covariance matrix in frequency domain.
+
+    Parameters:
+        img: A 2-D array to blur.
+        sigma: A 2x2 covariance matrix [[Syy, Syx], [Sxy, Sxx]].
+
+    Returns:
+        The blurred image.
+
+    Raises:
+        ValueError: If img is not 2-dimensional or sigma is not 2x2.
+    """
+
+    if img.ndim != 2:
+        raise ValueError(f'Image must be 2-dimensional, got {img.ndim}')
+    if sigma.shape != (2, 2):
+        raise ValueError(f'Sigma must be 2x2, got {sigma.shape}')
     fy = fftfreq(img.shape[0])[:, None]
     fx = fftfreq(img.shape[1])[None, :]
     Syy, Syx = sigma[0, 0], sigma[0, 1]
@@ -463,22 +507,36 @@ def gaussian_blur_cov(img: NDArrayFloatType,
 
 
 def normalize_array(a: NDArrayFloatType, eps: float = 1e-12) -> NDArrayFloatType:
-    """Zero-mean, unit-std normalization (safe if nearly constant)."""
+    """Zero-mean, unit-std normalization (safe if nearly constant).
+
+    Parameters:
+        a: The input array to normalize.
+        eps: Minimum standard deviation threshold. If std < eps, returns zeros.
+
+    Returns:
+        Normalized array with mean 0 and std 1, or zeros if nearly constant.
+    """
+
     a = np.asarray(a, np.float64)
     m = a.mean()
     s = a.std()
     if s < eps:
-        return np.zeros_like(a)
+        return np.zeros_like(a, dtype=np.float64)
     return cast(NDArrayFloatType, (a - m) / s)
 
 
 def gradient_magnitude(img: NDArrayFloatType) -> NDArrayFloatType:
-    """Simple isotropic gradient magnitude."""
+    """Compute isotropic gradient magnitude.
+
+    Parameters:
+        img: The input array.
+
+    Returns:
+        The gradient magnitude at each pixel, computed as sqrt(gx² + gy²).
+    """
     gy = np.gradient(img, axis=0)
     gx = np.gradient(img, axis=1)
     return cast(NDArrayFloatType, np.hypot(gy, gx))
-
-
 
 
 #==============================================================================
@@ -680,16 +738,16 @@ def draw_rect(img: NDArrayType[NPType],
 
     # Top
     img[yctr-yhalfwidth-thickness+1:yctr-yhalfwidth+1,
-        xctr-xhalfwidth-thickness+1:xctr+xhalfwidth+thickness] = color
+        xctr-xhalfwidth-thickness+1:xctr+xhalfwidth+thickness:dot_spacing] = color
     # Bottom
     img[yctr+yhalfwidth:yctr+yhalfwidth+thickness,
-        xctr-xhalfwidth-thickness+1:xctr+xhalfwidth+thickness] = color
+        xctr-xhalfwidth-thickness+1:xctr+xhalfwidth+thickness:dot_spacing] = color
     # Left
     img[yctr-yhalfwidth-thickness+1:yctr+yhalfwidth+thickness,
-        xctr-xhalfwidth-thickness+1:xctr-xhalfwidth+1] = color
+        xctr-xhalfwidth-thickness+1:xctr-xhalfwidth+1:dot_spacing] = color
     # Right
     img[yctr-yhalfwidth-thickness+1:yctr+yhalfwidth+thickness,
-        xctr+xhalfwidth:xctr+xhalfwidth+thickness] = color
+        xctr+xhalfwidth:xctr+xhalfwidth+thickness:dot_spacing] = color
 
 
 def draw_circle(img: NDArrayType[NPType],

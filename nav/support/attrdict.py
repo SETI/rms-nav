@@ -23,4 +23,7 @@ class AttrDict(dict[str, Any]):
     # __getattr__ method.
     @no_type_check
     def __getattr__(self, name: str) -> Any:
-        return super().__getattr__(name)
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(f"Attribute '{name}' not found")

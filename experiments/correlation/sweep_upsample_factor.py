@@ -4,7 +4,7 @@ from typing import Tuple, List
 from nav.support.correlate import navigate_with_pyramid_kpeaks
 
 
-def gaussian_patch(shape: Tuple[int, int], sigma: float, offset: Tuple[float, float]) -> np.ndarray:
+def gaussian_patch(shape: tuple[int, int], sigma: float, offset: tuple[float, float]) -> np.ndarray:
     v_size, u_size = shape
     ov, ou = offset
     cv = (v_size - 1) / 2.0
@@ -44,7 +44,7 @@ def make_synthetic(image_size=(100, 100), model_size=(100, 100),
     return image, model, mask
 
 
-def run_sweep(upsample_factors: List[int]) -> None:
+def run_sweep(upsample_factors: list[int]) -> None:
     gt = (0.5, 0.0)
     image, model, mask = make_synthetic(image_offset=gt)
     print('usfac, est_dy, est_dx, err')

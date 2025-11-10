@@ -2,9 +2,12 @@ import numpy as np
 from numpy.fft import fft2
 
 from nav.support.correlate import upsampled_dft
+from nav.support.types import NDArrayFloatType
 
 
-def _gaussian(shape, sigma, offset):
+def _gaussian(shape: tuple[int, int],
+              sigma: float,
+              offset: tuple[float, float]) -> NDArrayFloatType:
     v, u = shape
     ov, ou = offset
     cv = (v - 1) / 2.0

@@ -6,9 +6,9 @@ from .dataset import DataSet, ImageFiles
 
 
 class DataSetPDS4(DataSet, ABC):
-    """Parent class for PDS3 datasets.
+    """Parent class for PDS4 datasets.
 
-    This class provides functionality common to all PDS3 datasets.
+    This class provides functionality common to all PDS4 datasets.
     """
 
     @staticmethod
