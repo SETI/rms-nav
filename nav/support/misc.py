@@ -1,7 +1,10 @@
 import math
-from typing import Any
+from typing import Any, cast
 
+import numpy as np
 import oops
+
+from nav.support.types import NDArrayFloatType
 
 
 def ra_rad_to_hms(ra: float) -> str:
@@ -104,3 +107,10 @@ def safe_lstrip_zero(s: str) -> str:
     if ret == '':
         ret = '0'
     return ret
+
+
+def mad_std(a: NDArrayFloatType | list[float]) -> float:
+    """Median absolute deviation (MAD) standard deviation."""
+    a_array = cast(NDArrayFloatType, np.asarray(a))
+    m = np.median(a_array)
+    return 1.4826 * float(np.median(np.abs(a_array - m)))

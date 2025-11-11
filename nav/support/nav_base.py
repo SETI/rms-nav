@@ -13,19 +13,14 @@ class NavBase:
 
     Parameters:
         config: Configuration object for this instance. Uses DEFAULT_CONFIG if not provided.
-        logger_name: Name for the logger instance. If provided, creates a child logger.
     """
 
     def __init__(self,
                  *,
-                 config: Optional[Config] = None,
-                 logger_name: Optional[str] = None) -> None:
+                 config: Optional[Config] = None) -> None:
 
         self._config = config or DEFAULT_CONFIG
         self._logger = DEFAULT_LOGGER
-        # if logger_name is not None:
-        #     self._logger = self._logger.get_logger(logger_name, lognames=False, digits=3,
-        #                                            level='ERROR')
 
     @property
     def config(self) -> Config:

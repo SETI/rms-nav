@@ -1,2 +1,5 @@
 galileo_ssi:
   extfov_margin_vu: [200, 200]
+  star_psf_sigma: 3.
+  star_psf_sizes:
+    100: [7, 7]

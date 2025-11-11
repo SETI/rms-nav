@@ -17,10 +17,11 @@ from nav.annotation import (Annotation,
                             TEXTINFO_RIGHT_ARROW,
                             TEXTINFO_BOTTOM_ARROW,
                             TEXTINFO_TOP_ARROW)
+from nav.config import Config
 from nav.support.constants import HALFPI
 from nav.support.image import (filter_downsample,
                                shift_array)
-from nav.support.time import now_dt, dt_delta_str
+from nav.support.time import now_dt
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
 from .nav_model import NavModel
@@ -31,21 +32,23 @@ BODIES_POSITION_SLOP_FRAC = 0.05  # TODO Move to config
 
 class NavModelBody(NavModel):
     def __init__(self,
+                 name: str,
                  obs: Observation,
                  body_name: str,
                  *,
                  inventory: Optional[dict[str, Any]] = None,
-                 **kwargs: Any):
+                 config: Optional[Config] = None):
         """Creates a navigation model for a planetary body.
 
         Parameters:
+            name: The name of the model.
             obs: The observation object containing the image data.
             body_name: The name of the planetary body.
             inventory: Optional dictionary containing inventory information for the body.
-            **kwargs: Additional keyword arguments to pass to the parent class.
+            config: Configuration object to use. If None, uses DEFAULT_CONFIG.
         """
 
-        super().__init__(obs, logger_name='NavModelBody', **kwargs)
+        super().__init__(name, obs, config=config)
 
         self._body_name = body_name.upper()
 
@@ -71,12 +74,11 @@ class NavModelBody(NavModel):
         """
 
         metadata: dict[str, Any] = {}
-        metadata['start_time'] = start_time = now_dt()
+        start_time = now_dt()
+        metadata['start_time'] = start_time.isoformat()
         metadata['end_time'] = None
-        metadata['elapsed_time'] = None
+        metadata['elapsed_time_sec'] = None
 
-        self._model_img = None
-        self._model_mask = None
         self._metadata = metadata
         self._annotations = None
         self._uncertainty = 0.
@@ -86,8 +88,9 @@ class NavModelBody(NavModel):
                                never_create_model=never_create_model,
                                create_annotations=create_annotations)
 
-        metadata['end_time'] = end_time = now_dt()
-        metadata['elapsed_time'] = dt_delta_str(start_time, end_time)
+        end_time = now_dt()
+        metadata['end_time'] = end_time.isoformat()
+        metadata['elapsed_time_sec'] = (end_time - start_time).total_seconds()
 
     def _create_model(self,
                       always_create_model: bool,
@@ -472,6 +475,7 @@ class NavModelBody(NavModel):
         self._range[:, :] = inventory['range'] * body_mask
         self._range[self._range == 0] = math.inf
 
+        self._confidence = 1.
         metadata['confidence'] = 1.
 
         ########################################################################

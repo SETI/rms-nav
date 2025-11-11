@@ -1,12 +1,15 @@
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Optional, cast
+
+from filecache import FCPath, FileCache
 
 from .dataset_pds3 import DataSetPDS3
+from nav.config import Config
 from nav.support.misc import safe_lstrip_zero
 
 
 class DataSetPDS3VoyagerISS(DataSetPDS3):
-    """Implements dataset access for Voyager ISS (Imaging Science Subsystem) data.
+    """Implements dataset access for PDS3 Voyager ISS (Imaging Science Subsystem) data.
 
     This class provides specialized functionality for accessing and parsing Voyager
     ISS image data stored in PDS3 format.
@@ -152,22 +155,32 @@ class DataSetPDS3VoyagerISS(DataSetPDS3):
         return f'VGISS_{volume[6]}xxx/{volume}/{volume}_index.lbl'
 
     @staticmethod
-    def _results_path_stub(volume: str, filespec: str) -> Path:
+    def _results_path_stub(volume: str, filespec: str) -> str:
         """Get the results path stub for an image filespec.
 
         Parameters:
             volume: The volume name.
             filespec: The filespec of the image.
         """
-        return Path(f'{volume}/{filespec}').with_suffix('')
+        return str(Path(f'{volume}/{filespec}').with_suffix(''))
 
     def __init__(self,
-                 *args: Any,
-                 **kwargs: Any) -> None:
+                 pds3_holdings_root: Optional[str | Path | FCPath] = None,
+                 *,
+                 index_filecache: Optional[FileCache] = None,
+                 pds3_holdings_filecache: Optional[FileCache] = None,
+                 config: Optional[Config] = None) -> None:
         """Initializes a Voyager ISS dataset handler.
 
         Parameters:
-            *args: Positional arguments to pass to the parent class.
-            **kwargs: Keyword arguments to pass to the parent class.
+            pds3_holdings_root: Path to PDS3 holdings directory. If None, uses PDS3_HOLDINGS_DIR
+                environment variable. May be a URL accepted by FCPath.
+            index_filecache: FileCache object to use for index files. If None, creates a new one.
+            pds3_holdings_filecache: FileCache object to use for PDS3 holdings files. If None,
+                creates a new one.
+            config: Configuration object to use. If None, uses DEFAULT_CONFIG.
         """
-        super().__init__(*args, logger_name='DataSetVoyagerISS', **kwargs)
+        super().__init__(pds3_holdings_root=pds3_holdings_root,
+                         index_filecache=index_filecache,
+                         pds3_holdings_filecache=pds3_holdings_filecache,
+                         config=config)

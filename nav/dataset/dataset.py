@@ -24,7 +24,7 @@ class ImageFile:
 
     image_file_url: FCPath
     label_file_url: FCPath
-    results_path_stub: Path
+    results_path_stub: str
     # Convert this to use a default factory
     index_file_row: dict[str, Any] = field(default_factory=dict)
     _image_file_path: Optional[Path] = None
@@ -73,16 +73,13 @@ class ImageFiles:
 class DataSet(ABC, NavBase):
     def __init__(self,
                  *,
-                 config: Optional[Config] = None,
-                 logger_name: Optional[str] = None) -> None:
-        """Initializes a dataset with configuration and logging options.
+                 config: Optional[Config] = None) -> None:
+        """Initializes a dataset.
 
         Parameters:
             config: Configuration object to use. If None, uses DEFAULT_CONFIG.
-            logger_name: Name for the logger. If None, uses class name.
         """
-
-        super().__init__(config=config, logger_name=logger_name)
+        super().__init__(config=config)
 
     @staticmethod
     @abstractmethod
@@ -132,7 +129,7 @@ class DataSet(ABC, NavBase):
             **kwargs: Arbitrary keyword arguments, usually used to restrict the search.
 
         Yields:
-            Paths to the selected files as (label, image) tuples.
+            Information about the selected files in groups as ImageFiles objects.
         """
         ...
 

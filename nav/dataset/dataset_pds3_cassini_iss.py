@@ -3,13 +3,16 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Optional, cast
 
+from filecache import FCPath, FileCache
+
 from .dataset import ImageFile, ImageFiles
 from .dataset_pds3 import DataSetPDS3
+from nav.config import Config
 from nav.support.misc import safe_lstrip_zero
 
 
 class DataSetPDS3CassiniISS(DataSetPDS3):
-    """Implements dataset access for Cassini ISS (Imaging Science Subsystem) data.
+    """Implements dataset access for PDS3 Cassini ISS (Imaging Science Subsystem) data.
 
     This class provides specialized functionality for accessing and parsing Cassini
     ISS image data stored in PDS3 format.
@@ -39,9 +42,11 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         """
 
         filespec = cast(str, row['FILE_SPECIFICATION_NAME'])
+        # Intentionally uppercase only
         if not filespec.endswith('.IMG'):
             raise ValueError(f'Bad Primary File Spec "{filespec}" - '
                              'expected ".IMG"')
+        # Intentionally uppercase only
         return filespec.replace('.IMG', '_CALIB.LBL')
 
     @staticmethod
@@ -54,6 +59,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         Returns:
             The image file specification string.
         """
+        # Intentionally uppercase only
         return label_filespec.replace('.LBL', '.IMG')
 
     @staticmethod
@@ -97,6 +103,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         """
 
         img_name = img_name.upper()
+        img_name = img_name.replace('_CALIB', '')
 
         # [NW]dddddddddd[_d[d]]
         if img_name[0] not in 'NW':
@@ -116,7 +123,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
                 return True
             except ValueError:
                 return False
-        return True
+        return False
 
     @staticmethod
     def _extract_img_number(img_name: str) -> int:
@@ -154,10 +161,11 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         Parameters:
             volume: The volume name.
         """
+        # Intentionally lowercase only
         return f'COISS_{volume[6]}xxx/{volume}/{volume}_index.lbl'
 
     @staticmethod
-    def _results_path_stub(volume: str, filespec: str) -> Path:
+    def _results_path_stub(volume: str, filespec: str) -> str:
         """Get the results path stub for an image filespec.
 
         Parameters:
@@ -168,7 +176,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
             The results path stub. This is {volume}/{filespec} without the .IMG extension.
         """
 
-        return Path(f'{volume}/{filespec}').with_suffix('')
+        return str(Path(f'{volume}/{filespec}').with_suffix(''))
 
     def _check_additional_image_selection_criteria(self,
                                                    _img_path: str,
@@ -199,9 +207,25 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
     # Public methods
 
     def __init__(self,
-                 *args: Any,
-                 **kwargs: Any) -> None:
-        super().__init__(*args, logger_name='DataSetCassiniISS', **kwargs)
+                 pds3_holdings_root: Optional[str | Path | FCPath] = None,
+                 *,
+                 index_filecache: Optional[FileCache] = None,
+                 pds3_holdings_filecache: Optional[FileCache] = None,
+                 config: Optional[Config] = None) -> None:
+        """Initializes a Cassini ISS dataset handler.
+
+        Parameters:
+            pds3_holdings_root: Path to PDS3 holdings directory. If None, uses PDS3_HOLDINGS_DIR
+                environment variable. May be a URL accepted by FCPath.
+            index_filecache: FileCache object to use for index files. If None, creates a new one.
+            pds3_holdings_filecache: FileCache object to use for PDS3 holdings files. If None,
+                creates a new one.
+            config: Configuration object to use. If None, uses DEFAULT_CONFIG.
+        """
+        super().__init__(pds3_holdings_root=pds3_holdings_root,
+                         index_filecache=index_filecache,
+                         pds3_holdings_filecache=pds3_holdings_filecache,
+                         config=config)
 
     @staticmethod
     def add_selection_arguments(cmdparser: argparse.ArgumentParser,
@@ -283,5 +307,4 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
             The list of supported grouping types. For Cassini ISS, only 'botsim'
             is supported.
         """
-
         return ['botsim']

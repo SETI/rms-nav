@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 from nav.config import Config
 from nav.support.nav_base import NavBase
@@ -9,24 +9,26 @@ if TYPE_CHECKING:
 
 
 class NavTechnique(ABC, NavBase):
-    """Base class for navigation techniques.
-
-        Parameters:
-            nav_master: The navigation master instance
-            config: Configuration object to use. If None, uses DEFAULT_CONFIG.
-            logger_name: Name for the logger. If None, uses class name.
-    """
+    """Base class for navigation techniques."""
 
     def __init__(self,
                  nav_master: 'NavMaster',
                  *,
-                 config: Optional[Config] = None,
-                 logger_name: Optional[str] = None) -> None:
-        super().__init__(config=config, logger_name=logger_name)
+                 config: Optional[Config] = None) -> None:
+        """Initializes a navigation technique.
+
+        Parameters:
+            nav_master: The navigation master instance.
+            config: Configuration object to use. If None, uses DEFAULT_CONFIG.
+        """
+
+        super().__init__(config=config)
 
         self._nav_master = nav_master
         self._offset: tuple[float, float] | None = None
+        self._uncertainty: tuple[float, float] | None = None
         self._confidence: float | None = None
+        self._metadata: dict[str, Any] = {}
 
     @property
     def nav_master(self) -> 'NavMaster':
@@ -35,13 +37,29 @@ class NavTechnique(ABC, NavBase):
 
     @property
     def offset(self) -> tuple[float, float] | None:
-        """Returns the computed offset as a tuple of (x, y) or None if not calculated."""
+        """Returns the computed offset as a tuple of (v, u) or None if not calculated.
+
+        The floating point offset is of form (dv, du). If an object is predicted by the SPICE
+        kernels to be at location (v, u) in the image, then the actual location of the
+        object is (v+dv, u+du). This means a positive offset is equivalent to shifting a model
+        up and to the right (positive v and u).
+        """
         return self._offset
+
+    @property
+    def uncertainty(self) -> tuple[float, float] | None:
+        """Returns the computed uncertainty as a tuple of (v, u) or None if not calculated."""
+        return self._uncertainty
 
     @property
     def confidence(self) -> float | None:
         """Returns the confidence in the computed offset as a float or None if not calculated."""
         return self._confidence
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        """Returns the metadata dictionary."""
+        return self._metadata
 
     @abstractmethod
     def navigate(self) -> None:

@@ -1,12 +1,14 @@
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Optional, cast
+from filecache import FCPath, FileCache
 
 from .dataset_pds3 import DataSetPDS3
+from nav.config import Config
 from nav.support.misc import safe_lstrip_zero
 
 
 class DataSetPDS3GalileoSSI(DataSetPDS3):
-    """Implements dataset access for Galileo SSI (Solid State Imager) data.
+    """Implements dataset access for PDS3 Galileo SSI (Solid State Imager) data.
 
     This class provides specialized functionality for accessing and parsing Galileo
     SSI image data stored in PDS3 format.
@@ -32,9 +34,11 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
         """
 
         filespec = cast(str, row['FILE_SPECIFICATION_NAME'])
+        # Intentionally uppercase only
         if not filespec.endswith('.IMG'):
             raise ValueError(f'Bad Primary File Spec "{filespec}" - '
                              'expected ".IMG"')
+        # Intentionally uppercase only
         return filespec.replace('.IMG', '.LBL')
 
     @staticmethod
@@ -47,6 +51,7 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
         Returns:
             The image file specification string.
         """
+        # Intentionally uppercase only
         return label_filespec.replace('.LBL', '.IMG')
 
     @staticmethod
@@ -62,7 +67,7 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
 
         parts = filespec.split('/')
         if not (2 <= len(parts) <= 4):
-            raise ValueError(f'Bad Primary File Spec "{filespec}" - expected 2 or 3 '
+            raise ValueError(f'Bad Primary File Spec "{filespec}" - expected 2 to 4 '
                              'directory levels')
         if parts[0].upper() == 'REDO':
             parts = parts[1:]
@@ -78,6 +83,7 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
             img_name = parts[2]
         else:
             raise ValueError(f'Bad Primary File Spec "{filespec}" - bad target directory')
+        # Intentionally uppercase only
         if not img_name.endswith('.LBL'):
             return None
         img_name = img_name.rsplit('.', maxsplit=1)[0]
@@ -124,7 +130,7 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
         if not DataSetPDS3GalileoSSI._img_name_valid(img_name):
             raise ValueError(f'Invalid image name "{img_name}"')
 
-        return int(img_name[1:11].lstrip('0'))
+        return int(safe_lstrip_zero(img_name[1:11]))
 
     @staticmethod
     def _volset_and_volume(volume: str) -> str:
@@ -136,7 +142,6 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
         Returns:
             The volset and volume name.
         """
-
         return f'GO_0xxx/{volume}'
 
     @staticmethod
@@ -149,11 +154,11 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
         Returns:
             The index file name.
         """
-
+        # Intentionally lowercase only
         return f'GO_0xxx/{volume}/{volume}_index.lbl'
 
     @staticmethod
-    def _results_path_stub(volume: str, filespec: str) -> Path:
+    def _results_path_stub(volume: str, filespec: str) -> str:
         """Get the results path stub for an image filespec.
 
         Parameters:
@@ -163,12 +168,27 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
         Returns:
             The results path stub. This is {volume}/{filespec} without the .IMG extension.
         """
-
-        return Path(f'{volume}/{filespec}').with_suffix('')
+        return str(Path(f'{volume}/{filespec}').with_suffix(''))
 
     # Public methods
 
     def __init__(self,
-                 *args: Any,
-                 **kwargs: Any) -> None:
-        super().__init__(*args, logger_name='DataSetGalileoSSI', **kwargs)
+                 pds3_holdings_root: Optional[str | Path | FCPath] = None,
+                 *,
+                 index_filecache: Optional[FileCache] = None,
+                 pds3_holdings_filecache: Optional[FileCache] = None,
+                 config: Optional[Config] = None) -> None:
+        """Initializes a Galileo SSI dataset handler.
+
+        Parameters:
+            pds3_holdings_root: Path to PDS3 holdings directory. If None, uses PDS3_HOLDINGS_DIR
+                environment variable. May be a URL accepted by FCPath.
+            index_filecache: FileCache object to use for index files. If None, creates a new one.
+            pds3_holdings_filecache: FileCache object to use for PDS3 holdings files. If None,
+                creates a new one.
+            config: Configuration object to use. If None, uses DEFAULT_CONFIG.
+        """
+        super().__init__(pds3_holdings_root=pds3_holdings_root,
+                         index_filecache=index_filecache,
+                         pds3_holdings_filecache=pds3_holdings_filecache,
+                         config=config)

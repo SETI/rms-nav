@@ -21,6 +21,9 @@ general:
 ####################
 
 offset:
+  star_refinement_nsigma: 3
+  star_refinement_search_limit: [2.5, 2.5]
+  correlation_fft_upsample_factor: 128
   default_gaussian_blur: 0.25
   maximum_blur: 100.0
   maximum_blur_error_bars: 60.0
@@ -118,7 +121,7 @@ bodies:
   label_mask_enlarge: 10  # Number of pixels around a body to avoid for label placement
   label_limb_color: [255, 0, 0]  # Red
   label_font: liberation2/LiberationMono-Bold.ttf
-  label_font_size: 36  # 18
+  label_font_size: 18
     # 512: 18
   label_font_color: [255, 0, 0]  # Red
   # label_font_color: [255, 255, 0]  # Yellow
@@ -128,7 +131,7 @@ bodies:
   label_grid_v: 10    # Coarse grid for labeling a body if everything else fails
   label_grid_u: 10
   # Details of outline around bodies
-  outline_thicken: 1
+  outline_thicken: 0
 
 ##################
 # RINGS SETTINGS #
@@ -201,15 +204,28 @@ rings:
 ##################
 
 stars:
-  calibrated_data: true
+  catalogs: [ucac4, tycho2, ybsc]  # Order of most precise to least
+  body_conflict_margin: 5
+  default_star_class: G0
   stellar_aberration: true
+  proper_motion: true
+  max_stars: 100
+  max_movement_steps: 50
+  label_font: liberation2/LiberationMono-Bold.ttf
+  label_font_size: 18
+  label_font_color: [255, 0, 0]  # Red
+  label_star_color: [255, 0, 0]  # Red
+  duplicate_ra_dec_threshold_arcsec: 5  # Closer than this - stars are true duplicates
+  duplicate_vmag_threshold: 3  # Less than this - stars are true duplicates
+  overlapping_vmag_threshold: 2  # Less than this - remove both stars when visually overlapping
+
+  calibrated_data: true
   float_psf_sigma: false
   search_multipliers:
     - 0.25
     - 0.5
     - 0.75
     - 1.0
-  max_stars: 30
   perform_photometry: true
   try_without_photometry: false
   min_stars_low_confidence:
@@ -219,63 +235,18 @@ stars:
     - 6
     - 1.0
   min_confidence: 0.9
-  # psf_boxsizes:
-  #   - &id008
-  #       - 100000
-  #       - 15
-  #   -   - 50000
-  #       - 13
-  #   -   - 500
-  #       - 11
-  #   -   - 0
-  #       - 9
   psf_gain:
     - 5000
     - 4
-  max_movement_steps: 50
   max_smear: 100
-  default_star_class: G0
-  body_conflict_margin: 5
-  # min_brightness_guaranteed_vis: 200.0
-  # ?   - min_detectable_dn
-  #     - NAC
-  # : 7
-  # ?   - min_detectable_dn
-  #     - WAC
-  # : 10
-  # ?   - photometry_slop
-  #     - NAC
-  # : 2.0
-  # ?   - photometry_slop
-  #     - WAC
-  # : 2.0
   min_vmag: 5.0
   max_vmag: 15.0
   vmag_increment: 0.5
-  # photometry_boxsizes:
-  #   - *id008
-  #   -   - 50000
-  #       - 11
-  #   -   - 500
-  #       - 9
-  #   -   - 0
-  #       - 7
   max_star_dn: 100000.0
   min_dn_force_one_star: 25000.0
   star_body_conflict_margin: 3
   too_bright_dn: 1000
   too_bright_factor: 1  # TODO
-  # font:
-  #   256: *id001
-  #   512: *id001
-  #   1000: *id002
-  #   1024: *id002
-  label_star_color: [255, 0, 0]  # Red
-  label_font: liberation2/LiberationMono-Bold.ttf
-  label_font_size: 18
-    # 512: 18
-  label_font_color: [255, 0, 0]  # Red
-  # label_font_color: [255, 255, 0]  # Yellow
 
 ##################
 # TITAN SETTINGS #

@@ -1,4 +1,4 @@
-from typing import Any, Optional, cast
+from typing import Optional, cast
 
 import numpy as np
 import oops
@@ -6,6 +6,7 @@ from oops.observation.snapshot import Snapshot
 from oops.meshgrid import Meshgrid
 from oops.backplane import Backplane
 
+from nav.config import Config
 from nav.support.image import pad_array
 from nav.support.types import DTypeLike, NDArrayType, NDArrayFloatType, NDArrayBoolType, NPType
 
@@ -23,8 +24,13 @@ class ObsSnapshot(Obs, Snapshot):
                  snapshot: Snapshot,
                  *,
                  extfov_margin_vu: Optional[int | tuple[int, int]] = None,
-                 **kwargs: Any) -> None:
+                 config: Optional[Config] = None) -> None:
         """Initialize an ObsSnapshot by wrapping an existing Snapshot.
+
+        Parameters:
+            snapshot: The Snapshot object to wrap.
+            extfov_margin_vu: The extended field of view margins in (v, u) pixels.
+            config: The configuration object to use. If None, uses DEFAULT_CONFIG.
 
         Warning:
             The provided snapshot object should not be used after this call,
@@ -41,7 +47,7 @@ class ObsSnapshot(Obs, Snapshot):
         # as the original Snapshot. Warning: Do not use that Snapshot anymore!
         self.__dict__ = snapshot.__dict__
 
-        super().__init__(logger_name='ObsSnapshot', **kwargs)
+        super().__init__(config=config)
 
         if self.data.ndim != 2:
             raise ValueError(f'Data shape must be 2D, got {self.data.shape}')
@@ -89,7 +95,6 @@ class ObsSnapshot(Obs, Snapshot):
         Returns:
             A zero-filled array with the same shape as the original data.
         """
-
         return np.zeros(self.data.shape, dtype=dtype)
 
     def make_extfov_zeros(self,
@@ -102,7 +107,6 @@ class ObsSnapshot(Obs, Snapshot):
         Returns:
             A zero-filled array with the same shape as the extended FOV.
         """
-
         return np.zeros(self.extdata.shape, dtype=dtype)
 
     def make_extfov_false(self) -> NDArrayBoolType:
@@ -111,8 +115,18 @@ class ObsSnapshot(Obs, Snapshot):
         Returns:
             A boolean array of False values with the same shape as the extended FOV.
         """
-
         return np.zeros(self.extdata.shape, dtype=bool)
+
+    def unpad_array_to_extfov(self,
+                              array: NDArrayType[NPType]) -> NDArrayType[NPType]:
+        """Unpads an array to be the size of the extended FOV.
+
+        This is most useful for using the result of np.unpackbits.
+
+        Returns:
+            The unpadded array.
+        """
+        return array[:self.extdata_shape_vu[0], :self.extdata_shape_vu[1]]
 
     def clip_fov(self,
                  u: int,
@@ -126,7 +140,6 @@ class ObsSnapshot(Obs, Snapshot):
         Returns:
             A tuple of (u, v) coordinates clipped to the FOV boundaries.
         """
-
         return (int(np.clip(u, self.fov_u_min, self.fov_u_max)),
                 int(np.clip(v, self.fov_v_min, self.fov_v_max)))
 
@@ -142,7 +155,6 @@ class ObsSnapshot(Obs, Snapshot):
         Returns:
             A tuple of (u, v) coordinates clipped to the extended FOV boundaries.
         """
-
         return (int(np.clip(u, self.extfov_u_min, self.extfov_u_max)),
                 int(np.clip(v, self.extfov_v_min, self.extfov_v_max)))
 
@@ -336,31 +348,38 @@ class ObsSnapshot(Obs, Snapshot):
             self._center_bp = Backplane(self, meshgrid=center_meshgrid)
         return self._center_bp
 
-    def extract_offset_image(self,
-                             img: NDArrayType[NPType],
-                             offset: tuple[float, float]) -> NDArrayType[NPType]:
-        """Extracts a subimage from the given img at the given offset (dv,du).
+    def extract_offset_array(self,
+                             array: NDArrayType[NPType],
+                             offset: tuple[float, float] | tuple[int, int] | None
+                             ) -> NDArrayType[NPType]:
+        """Extracts a full-size array from the given extended FOV array.
 
         Parameters:
-            img: Image to extract the subimage from. This must be the same shape as the
+            array: Array to extract the subimage from. This must be the same shape as the
                 extended FOV.
-            offset: Offset (dv,du) to extract the subimage at.
+            offset: Offset (dv,du) to extract the subarray at. An offset of (0,0) means
+                to extract the center of the normal FOV. A positive offset means to
+                extract in the negative direction of v and u.
 
         Returns:
             The extracted subimage. This will be the same shape as the original FOV.
         """
 
-        h, w = self.extdata_shape_vu
-        if img.shape != (h, w):
-            raise ValueError(f'img shape {img.shape} must equal extdata shape {(h, w)}')
-        offset_v = int(offset[0]) + self.extfov_margin_v
-        offset_u = int(offset[1]) + self.extfov_margin_u
-        if (offset_v < 0 or offset_u < 0 or
-            offset_v + self.data_shape_v > h or
-            offset_u + self.data_shape_u > w):
+        if array.shape != self.extdata_shape_vu:
+            raise ValueError(f'array shape {array.shape} must equal extdata shape '
+                             f'{self.extdata_shape_vu}')
+        if offset is None:
+            offset = (0, 0)
+        v_size, u_size = self.extdata_shape_vu
+        v0 = self.extfov_margin_v - int(np.round(offset[0]))
+        u0 = self.extfov_margin_u - int(np.round(offset[1]))
+        v1 = v0 + self.data_shape_v
+        u1 = u0 + self.data_shape_u
+        if (v0 < 0 or u0 < 0 or
+            v0 + self.data_shape_v > v_size or
+            u0 + self.data_shape_u > u_size):
             raise ValueError('offset produces out-of-bounds subimage slice')
-        return img[offset_v:offset_v+self.data_shape_v,
-                   offset_u:offset_u+self.data_shape_u]
+        return array[v0:v1, u0:u1]
 
     def _ra_dec_limits(self,
                        bp: Backplane,
@@ -380,14 +399,14 @@ class ObsSnapshot(Obs, Snapshot):
 
         ra_min = ra.min()
         ra_max = ra.max()
-        if ra_max-ra_min > oops.PI:
+        if ra_max-ra_min > np.pi:
             # Wrap around
             ra_min = ra[np.where(ra > np.pi)].min()
             ra_max = ra[np.where(ra < np.pi)].max()
 
         dec_min = dec.min()
         dec_max = dec.max()
-        if dec_max-dec_min > oops.PI:
+        if dec_max-dec_min > np.pi:
             # Wrap around
             dec_min = dec[np.where(dec > np.pi)].min()
             dec_max = dec[np.where(dec < np.pi)].max()

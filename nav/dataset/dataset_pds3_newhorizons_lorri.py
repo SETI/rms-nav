@@ -1,12 +1,15 @@
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Optional, cast
+
+from filecache import FCPath, FileCache
 
 from .dataset_pds3 import DataSetPDS3
+from nav.config import Config
 from nav.support.misc import safe_lstrip_zero
 
 
 class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
-    """Implements dataset access for New Horizons LORRI (Low-Resolution Imaging
+    """Implements dataset access for PDS3 New Horizons LORRI (Low-Resolution Imaging
     Experiment) data.
 
     This class provides specialized functionality for accessing and parsing New
@@ -34,6 +37,7 @@ class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
         """
 
         filespec = cast(str, row['FILE_SPECIFICATION_NAME'])
+        # Intentionally lowercase only
         if not filespec.endswith(('_sci.lbl', '_eng.lbl')):
             raise ValueError(f'Bad Primary File Spec "{filespec}" - '
                              'expected "_sci.lbl" or "_eng.lbl"')
@@ -49,6 +53,7 @@ class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
         Returns:
             The image file specification string.
         """
+        # Intentionally lowercase only
         return label_filespec.replace('.lbl', '.fit')
 
     @staticmethod
@@ -73,6 +78,7 @@ class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
         if len(range_dir) != 15 or range_dir[8] != '_':
             raise ValueError(f'Bad Primary File Spec "{filespec}" - '
                              'expected "DATA/ddddddd_ddddddd"')
+        # Intentionally lowercase only
         if not img_name.endswith(('_sci.lbl', '_eng.lbl')):
             raise ValueError(f'Bad Primary File Spec "{filespec}" - '
                              'expected "_sci.lbl" or "_eng.lbl"')
@@ -140,18 +146,34 @@ class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
         return f'NHxxLO_xxxx/{volume}/{volume}_index.lbl'
 
     @staticmethod
-    def _results_path_stub(volume: str, filespec: str) -> Path:
+    def _results_path_stub(volume: str, filespec: str) -> str:
         """Get the results path stub for an image filespec.
 
         Parameters:
             volume: The volume name.
             filespec: The filespec of the image.
         """
-        return Path(f'{volume}/{filespec}').with_suffix('')
+        return str(Path(f'{volume}/{filespec}').with_suffix(''))
 
     # Public methods
 
     def __init__(self,
-                 *args: Any,
-                 **kwargs: Any) -> None:
-        super().__init__(*args, logger_name='DataSetNewHorizonsLORRI', **kwargs)
+                 pds3_holdings_root: Optional[str | Path | FCPath] = None,
+                 *,
+                 index_filecache: Optional[FileCache] = None,
+                 pds3_holdings_filecache: Optional[FileCache] = None,
+                 config: Optional[Config] = None) -> None:
+        """Initializes a New Horizons LORRI dataset handler.
+
+        Parameters:
+            pds3_holdings_root: Path to PDS3 holdings directory. If None, uses PDS3_HOLDINGS_DIR
+                environment variable. May be a URL accepted by FCPath.
+            index_filecache: FileCache object to use for index files. If None, creates a new one.
+            pds3_holdings_filecache: FileCache object to use for PDS3 holdings files. If None,
+                creates a new one.
+            config: Configuration object to use. If None, uses DEFAULT_CONFIG.
+        """
+        super().__init__(pds3_holdings_root=pds3_holdings_root,
+                         index_filecache=index_filecache,
+                         pds3_holdings_filecache=pds3_holdings_filecache,
+                         config=config)

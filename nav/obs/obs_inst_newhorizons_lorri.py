@@ -2,36 +2,30 @@ from typing import Any, Optional
 
 from filecache import FCPath
 import numpy as np
-from oops import Observation
 import oops.hosts.newhorizons.lorri
-from psfmodel import GaussianPSF, PSF
 
-from nav.config import Config, DEFAULT_CONFIG, DEFAULT_LOGGER
-from nav.obs import ObsSnapshot
+from nav.config import DEFAULT_CONFIG, DEFAULT_LOGGER, Config
 from nav.support.time import et_to_utc
 from nav.support.types import PathLike
 
-from .inst import Inst
+from .obs_inst import ObsInst
+from .obs_snapshot import ObsSnapshot
 
 
-class InstNewHorizonsLORRI(Inst):
-    def __init__(self,
-                 obs: Observation,
-                 **kwargs: Any) -> None:
-        """Initializes a New Horizons LORRI instrument instance.
+class ObsNewHorizonsLORRI(ObsSnapshot, ObsInst):
+    """Implements an observation of a New Horizons LORRI image.
 
-        Parameters:
-            obs: The Observation object containing New Horizons LORRI image data.
-            **kwargs: Additional keyword arguments to pass to the parent class.
-        """
-        super().__init__(obs, logger_name='InstNewHorizonsLORRI', **kwargs)
+    This class provides specialized functionality for accessing and analyzing New
+    Horizons LORRI image data.
+    """
 
     @staticmethod
     def from_file(path: PathLike,
+                  *,
                   config: Optional[Config] = None,
                   extfov_margin_vu: tuple[int, int] | None = None,
-                  **kwargs: Any) -> ObsSnapshot:
-        """Creates an ObsSnapshot from a New Horizons LORRI image file.
+                  **kwargs: Any) -> 'ObsNewHorizonsLORRI':
+        """Creates an ObsNewHorizonsLORRI from a New Horizons LORRI image file.
 
         Parameters:
             path: Path to the New Horizons LORRI image file.
@@ -41,8 +35,9 @@ class InstNewHorizonsLORRI(Inst):
             **kwargs: Additional keyword arguments (none for this instrument).
 
         Returns:
-            An ObsSnapshot object containing the image data and metadata.
+            An ObsNewHorizonsLORRI object containing the image data and metadata.
         """
+
         config = config or DEFAULT_CONFIG
         logger = DEFAULT_LOGGER
 
@@ -53,30 +48,37 @@ class InstNewHorizonsLORRI(Inst):
         obs = oops.hosts.newhorizons.lorri.from_file(path, calibration=False)
         obs.abspath = path
 
+        inst_config = config.category('newhorizons_lorri')
         # TODO Calibrate once oops.hosts is fixed.
 
         if extfov_margin_vu is None:
-            if isinstance(config._config_dict['newhorizons_lorri']['extfov_margin_vu'], dict):
-                extfov_margin_vu = config._config_dict['newhorizons_lorri']['extfov_margin_vu'][
-                    obs.data.shape[0]]
+            if isinstance(inst_config.extfov_margin_vu, dict):
+                extfov_margin_vu = inst_config.extfov_margin_vu[obs.data.shape[0]]
             else:
-                extfov_margin_vu = config._config_dict['newhorizons_lorri']['extfov_margin_vu']
+                extfov_margin_vu = inst_config.extfov_margin_vu
         logger.debug(f'  Data shape: {obs.data.shape}')
         logger.debug(f'  Extfov margin vu: {extfov_margin_vu}')
         logger.debug(f'  Data min: {np.min(obs.data)}, max: {np.max(obs.data)}')
 
-        new_obs = ObsSnapshot(obs, config=config, extfov_margin_vu=extfov_margin_vu)
-        new_obs.set_inst(InstNewHorizonsLORRI(new_obs, config=config))
-
+        new_obs = ObsNewHorizonsLORRI(obs, config=config, extfov_margin_vu=extfov_margin_vu)
+        new_obs._inst_config = inst_config
         return new_obs
 
-    def star_psf(self) -> PSF:
-        """Returns the point spread function for New Horizons LORRI stars.
+    def star_min_usable_vmag(self) -> float:
+        """Returns the minimum usable magnitude for stars in this observation.
 
         Returns:
-            A Gaussian PSF object with the appropriate sigma value for New Horizons LORRI.
+            The minimum usable magnitude for stars in this observation.
         """
-        return GaussianPSF(sigma=1.)  # TODO
+        return 0.
+
+    def star_max_usable_vmag(self) -> float:
+        """Returns the maximum usable magnitude for stars in this observation.
+
+        Returns:
+            The maximum usable magnitude for stars in this observation.
+        """
+        return 10  # TODO
 
     def get_public_metadata(self) -> dict[str, Any]:
         """Returns the public metadata for New Horizons LORRI.
@@ -85,27 +87,26 @@ class InstNewHorizonsLORRI(Inst):
             A dictionary containing the public metadata for New Horizons LORRI.
         """
 
-        obs = self.obs
         # TODO
         # scet_start = float(obs.dict["SPACECRAFT_CLOCK_START_COUNT"])
         # scet_end = float(obs.dict["SPACECRAFT_CLOCK_STOP_COUNT"])
 
         return {
-            'image_path': str(obs.abspath),
-            'image_name': obs.abspath.name,
+            'image_path': str(self.abspath),
+            'image_name': self.abspath.name,
             'instrument_host_lid': 'urn:nasa:pds:context:instrument_host:spacecraft.nh',
             'instrument_lid': 'urn:nasa:pds:context:instrument:nh.lorri',
-            'start_time_utc': et_to_utc(obs.time[0]),
-            'midtime_utc': et_to_utc(obs.midtime),
-            'end_time_utc': et_to_utc(obs.time[1]),
-            'start_time_et': obs.time[0],
-            'midtime_et': obs.midtime,
-            'end_time_et': obs.time[1],
+            'start_time_utc': et_to_utc(self.time[0]),
+            'midtime_utc': et_to_utc(self.midtime),
+            'end_time_utc': et_to_utc(self.time[1]),
+            'start_time_et': self.time[0],
+            'midtime_et': self.midtime,
+            'end_time_et': self.time[1],
             # 'start_time_scet': scet_start,
             # 'midtime_scet': (scet_start + scet_end) / 2,
             # 'end_time_scet': scet_end,
-            'image_shape_xy': obs.data_shape_uv,
+            'image_shape_xy': self.data_shape_uv,
             'camera': 'LORRI',
-            'exposure_time': obs.texp,
+            'exposure_time': self.texp,
             'filters': [],
         }

@@ -11,10 +11,15 @@ from filecache import FCPath, FileCache
 from pdstable import PdsTable
 
 from .dataset import DataSet, ImageFile, ImageFiles
+from nav.config import Config
 from nav.support.misc import flatten_list
 
 
 class DataSetPDS3(DataSet):
+    """Parent class for PDS3 datasets.
+
+    This class provides functionality common to all PDS3 datasets.
+    """
 
     # Data definitions overriden by subclasses
     _ALL_VOLUME_NAMES: tuple[str, ...] = ()
@@ -25,36 +30,60 @@ class DataSetPDS3(DataSet):
                  pds3_holdings_root: Optional[str | Path | FCPath] = None,
                  *,
                  index_filecache: Optional[FileCache] = None,
-                 **kwargs: Any) -> None:
+                 pds3_holdings_filecache: Optional[FileCache] = None,
+                 config: Optional[Config] = None) -> None:
         """Initializes a PDS3 dataset with directory and cache settings.
 
         Parameters:
             pds3_holdings_root: Path to PDS3 holdings directory. If None, uses PDS3_HOLDINGS_DIR
                 environment variable. May be a URL accepted by FCPath.
             index_filecache: FileCache object to use for index files. If None, creates a new one.
-            **kwargs: Additional arguments passed to parent class initializer.
+            pds3_holdings_filecache: FileCache object to use for PDS3 holdings files. If None,
+                creates a new one.
+            config: Configuration object to use. If None, uses DEFAULT_CONFIG.
 
         Raises:
             ValueError: If pds3_holdings_root is None and PDS3_HOLDINGS_DIR environment variable
                 is not set.
         """
 
-        super().__init__(**kwargs)
+        super().__init__(config=config)
 
         if index_filecache is None:
             self._index_filecache = FileCache('nav_pds3_index')  # This is multiprocess safe
         else:
             self._index_filecache = index_filecache
 
-        if pds3_holdings_root is None:
-            pds3_holdings_root = os.getenv('PDS3_HOLDINGS_DIR')
-            if pds3_holdings_root is None:
-                raise ValueError('PDS3_HOLDINGS_DIR environment variable not set')
-        self._pds3_holdings_root = self._index_filecache.new_path(pds3_holdings_root)
+        if pds3_holdings_filecache is None:
+            # This is multiprocess safe
+            self._pds3_holdings_filecache = FileCache('nav_pds3_holdings')
+        else:
+            self._pds3_holdings_filecache = pds3_holdings_filecache
+
+        if pds3_holdings_root is not None:
+            self._pds3_holdings_root: FCPath | None = self._pds3_holdings_filecache.new_path(
+                pds3_holdings_root)
+        else:
+            self._pds3_holdings_root = None
 
     @property
     def pds3_holdings_root(self) -> FCPath:
         """The PDS3 holdings directory; may be a URL."""
+        if self._pds3_holdings_root is not None:
+            return self._pds3_holdings_root
+
+        pds3_holdings_root = None
+        try:
+            pds3_holdings_root = self.config.environment.pds3_holdings_root
+        except AttributeError:
+            pass
+        if pds3_holdings_root is None:
+            pds3_holdings_root = os.getenv('PDS3_HOLDINGS_DIR')
+        if pds3_holdings_root is None:
+            raise ValueError('One of configuration variable "pds3_holdings_root" or '
+                             'PDS3_HOLDINGS_DIR environment variable must be set')
+        self._pds3_holdings_root = self._pds3_holdings_filecache.new_path(pds3_holdings_root)
+
         return self._pds3_holdings_root
 
     def __str__(self) -> str:
@@ -158,7 +187,7 @@ class DataSetPDS3(DataSet):
 
     @staticmethod
     @abstractmethod
-    def _results_path_stub(volume: str, filespec: str) -> Path:
+    def _results_path_stub(volume: str, filespec: str) -> str:
         """Get the results path stub for an image filespec.
         """
         raise NotImplementedError
@@ -207,7 +236,7 @@ class DataSetPDS3(DataSet):
         group.add_argument(
             '--image-filespec-csv', action='append',
             help="""A CSV file that contains filespecs of images to process; a header row
-            is required and must contain a column named 'FILE_SPECIFICATION_NAME'.
+            is required and must contain a column named 'Primary File Spec' or 'primaryfilespec'.
             The list is still subject to other selection criteria.""")
         group.add_argument(
             '--image-file-list', action='append',
@@ -242,7 +271,7 @@ class DataSetPDS3(DataSet):
         #     help='Expression to evaluate to decide whether to reprocess an offset')
         group.add_argument(
             '--choose-random-images', type=int, default=None, metavar='N',
-            help='Choose random images to process within other constraints')
+            help='Choose N random images to process within other constraints')
         # group.add_argument(
         #     '--show-image-list-only', action='store_true', default=False,
         #     help="""Just show a list of files that would be processed without doing
@@ -250,7 +279,7 @@ class DataSetPDS3(DataSet):
         # )
 
     def _validate_selection_arguments(self,
-                                      arguments: argparse.ArgumentParser) -> None:
+                                      arguments: argparse.Namespace) -> None:
         """Validates user arguments that can't be checked during initial parsing.
 
         Parameters:
@@ -258,7 +287,7 @@ class DataSetPDS3(DataSet):
         """
 
         # For some reason mypy can't see the img_name field
-        for img_name in flatten_list(arguments.img_name):  # type: ignore
+        for img_name in flatten_list(arguments.img_name):
 
             if not self._img_name_valid(img_name):
                 raise argparse.ArgumentTypeError(f'Invalid image name {img_name}')
@@ -428,7 +457,7 @@ class DataSetPDS3(DataSet):
             force_has_offset_spice_error: bool = False,
             force_has_offset_nonspice_error: bool = False,
             selection_expr: Optional[str] = None,
-            choose_random_images: bool | int = False,
+            choose_random_images: int | None = False,
             max_filenames: Optional[int] = None,
             suffix: Optional[str] = None,
             planets: Optional[str] = None
@@ -446,7 +475,7 @@ class DataSetPDS3(DataSet):
         camera: Optional[str] = kwargs.pop('camera', None)
         img_name_list: Optional[list[str]] = kwargs.pop('img_name_list', None)
         img_filespec_list: Optional[list[str]] = kwargs.pop('img_filespec_list', None)
-        choose_random_images: bool | int = kwargs.pop('choose_random_images', False)
+        choose_random_images: Optional[int] = kwargs.pop('choose_random_images', None)
         max_filenames: Optional[int] = kwargs.pop('max_filenames', None)
         arguments: Optional[argparse.Namespace] = kwargs.pop('arguments', None)
         additional_index_columns: tuple[str, ...] = kwargs.pop('additional_index_columns', ())
@@ -510,8 +539,8 @@ class DataSetPDS3(DataSet):
                               all_volume_names.index(v) <= vol_end_idx))]
 
         # URLs to the volume raw directory and index directory
-        volume_raw_dir_url = self._pds3_holdings_root / volumes_dir_name
-        index_dir_url = self._pds3_holdings_root / 'metadata'
+        volume_raw_dir_url = self.pds3_holdings_root / volumes_dir_name
+        index_dir_url = self.pds3_holdings_root / 'metadata'
 
         # Validate the image_name_list and image_filespec_list
         if img_name_list:

@@ -1,6 +1,7 @@
-from typing import Any
+from typing import Any, no_type_check
 
 
+@no_type_check
 class AttrDict(dict[str, Any]):
     """Implements a dictionary that allows attribute-style access to its key-value pairs.
 
@@ -16,3 +17,13 @@ class AttrDict(dict[str, Any]):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super(AttrDict, self).__init__(*args, **kwargs)
         self.__dict__ = self
+
+    # This is a stupid thing to do, but it's necessary to avoid mypy from complaining
+    # about missing attributes. mypy ignores attributes for classes that have a
+    # __getattr__ method.
+    @no_type_check
+    def __getattr__(self, name: str) -> Any:
+        try:
+            return self[name]
+        except KeyError as exc:
+            raise AttributeError(f"Attribute '{name}' not found") from exc

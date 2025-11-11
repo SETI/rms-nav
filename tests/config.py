@@ -8,14 +8,22 @@
 # https://opus.pds-rings.seti.org/opus/#/view=detail&detail=co-iss-w1521598221
 URL_CASSINI_ISS_RHEA_01 = 'https://pds-rings.seti.org/holdings/calibrated/COISS_2xxx/COISS_2021/data/1521584844_1521609901/W1521598221_1_CALIB.IMG'
 
-# Image of a star field
-# Camera: Cassini ISS NAC
-# Size: 256x256
-# Filter: CLEAR
-# Exposure: 6.8 sec
+# Image of Titan
+# Camera: Cassini ISS WAC
+# Size: 1024x1024
+# Filter: CB3
+# Exposure: 12 sec
 # Note: RA wraps around
-# https://opus.pds-rings.seti.org/opus/#/view=detail&detail=co-iss-n1787139424
-URL_CASSINI_ISS_STARS_01 = 'https://pds-rings.seti.org/holdings/calibrated/COISS_2xxx/COISS_2091/data/1787135320_1787144464/N1787139424_1_CALIB.IMG'
+# https://opus.pds-rings.seti.org/#/view=detail&detail=co-iss-w1624353774
+URL_CASSINI_ISS_TITAN_01 = 'https://pds-rings.seti.org/holdings/calibrated/COISS_2xxx/COISS_2055/data/1624240547_1624420949/W1624353774_1_CALIB.IMG'
+
+# Image of a star field
+# Camera: Cassini ISS WAC
+# Size: 1024x1024
+# Filter: CLEAR
+# Exposure: 26 sec
+# https://opus.pds-rings.seti.org/opus/#/view=detail&detail=co-iss-w1580760393
+URL_CASSINI_ISS_STARS_01 = 'https://pds-rings.seti.org/holdings/calibrated/COISS_2xxx/COISS_2041/data/1580756433_1580830157/W1580760393_1_CALIB.IMG'
 
 # Image of a star field
 # Camera: Cassini ISS NAC

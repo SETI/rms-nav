@@ -1,3 +1,6 @@
 voyager_iss:
   extfov_margin_vu:
     1000: [400, 400]
+  star_psf_sigma: 3.
+  star_psf_sizes:
+    100: [7, 7]

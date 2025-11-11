@@ -1,3 +1,4 @@
+import json
 import sys
 from typing import Any
 
@@ -37,9 +38,9 @@ def _clean_obj(obj: Any) -> Any:
     """
 
     if isinstance(obj, dict):
-        _clean_dict(obj)
+        obj = _clean_dict(obj)
     elif isinstance(obj, (list, tuple)):
-        _clean_list(obj)
+        obj = _clean_list(obj)
     else:
         obj = _clean_val(obj)
     return obj
@@ -78,7 +79,7 @@ def _clean_list(obj: list[Any] | tuple[Any, ...]) -> list[Any]:
 
 
 def dump_yaml(data: Any, stream: Any = sys.stdout) -> None:
-    """Dumps data as YAML to standard output after converting NumPy types to Python types.
+    """Dumps data as YAML output after converting NumPy types to Python types.
 
     Parameters:
         data: The data to dump as YAML.
@@ -88,3 +89,14 @@ def dump_yaml(data: Any, stream: Any = sys.stdout) -> None:
     yaml = YAML()
     yaml.default_flow_style = False
     yaml.dump(data, stream)
+
+
+def json_as_string(data: Any) -> str:
+    """Dumps data as a JSON string after converting NumPy types to Python types.
+
+    Parameters:
+        data: The data to dump as JSON.
+    """
+
+    data = _clean_obj(data)
+    return json.dumps(data, indent=2)

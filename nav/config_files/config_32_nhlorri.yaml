@@ -3,3 +3,6 @@ newhorizons_lorri:
     256: [15, 15]
     512: [30, 30]
     1024: [60, 60]
+  star_psf_sigma: 3.
+  star_psf_sizes:
+    100: [7, 7]
