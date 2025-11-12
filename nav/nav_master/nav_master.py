@@ -22,7 +22,7 @@ class NavMaster(NavBase):
     """Coordinates the overall navigation process using multiple models and techniques.
 
     This class manages the creation of different navigation models (e.g. stars, bodies,
-    rings, andTitan), combines them appropriately, and applies navigation techniques to
+    rings, and Titan), combines them appropriately, and applies navigation techniques to
     determine the final offset between predicted and actual positions.
 
     The floating point offset is of form (dv, du). If an object is predicted by the SPICE
@@ -91,7 +91,6 @@ class NavMaster(NavBase):
             spice_kernels = self.obs.spice_kernels
         except Exception:
             self._metadata['spice_kernels'] = 'Not supported by instrument'  # TODO
-            pass
         else:
             self._metadata['spice_kernels'] = spice_kernels
 

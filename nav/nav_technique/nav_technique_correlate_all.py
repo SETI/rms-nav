@@ -146,6 +146,9 @@ class NavTechniqueCorrelateAll(NavTechnique):
         if not (-obs.extfov_margin_u+1 < self._offset[1] < obs.extfov_margin_u-1 and
                 -obs.extfov_margin_v+1 < self._offset[0] < obs.extfov_margin_v-1):
             self.logger.info('Final offset is outside the extended FOV')
+            self._offset = None
+            self._uncertainty = None
+            self._confidence = None
             return
 
         self._metadata['offset'] = self._offset
