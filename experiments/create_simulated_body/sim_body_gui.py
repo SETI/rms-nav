@@ -639,7 +639,7 @@ class SimulatedBodyGUI(QMainWindow):
     def _on_visual_aids_changed(self, state: int):
         """Handle visual aids checkbox change."""
         # state is 0 (Unchecked), 1 (PartiallyChecked), or 2 (Checked)
-        self._show_visual_aids = (state == Qt.CheckState.Checked.value or state == 2)
+        self._show_visual_aids = (state == Qt.CheckState.Checked.value)
         # Regenerate the base pixmap with or without visual aids
         if self._current_image is not None:
             # Force regeneration by clearing the base pixmap first
@@ -648,7 +648,7 @@ class SimulatedBodyGUI(QMainWindow):
 
     def _on_zoom_sharp_changed(self, state: int):
         """Handle sharp zoom checkbox change."""
-        self._zoom_sharp = (state == Qt.CheckState.Checked.value or state == 2)
+        self._zoom_sharp = (state == Qt.CheckState.Checked.value)
         self._update_display()
 
     def _force_update(self):
