@@ -561,7 +561,7 @@ import matplotlib.pyplot as plt
 #
 #===============================================================================
 
-def clean_sclass(sclass: str) -> str:
+def clean_sclass(sclass: str | None) -> str:
     """Return a clean stellar classification such as A0 or M8."""
     if sclass is None:
         sclass = 'XX'

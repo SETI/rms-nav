@@ -206,7 +206,7 @@ class NavMaster(NavBase):
             self._metadata['models']['body_models'] = {}
 
             for body_name, params in body_models_desc.items():
-                model_name = f'body:{str(body_name).lower()}'
+                model_name = f'body:{str(body_name).upper()}'
                 if not any(fnmatch.fnmatch(model_name, x) for x in self._nav_models_to_use):
                     continue
 

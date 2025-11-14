@@ -987,6 +987,7 @@ class SimulatedBodyGUI(QMainWindow):
         self._craters_label.setText(f'{self._craters:.3f}')
         self._anti_aliasing_slider.setValue(int(self._anti_aliasing * 1000))
         self._anti_aliasing_label.setText(f'{self._anti_aliasing:.3f}')
+        self._visual_aids_check.setChecked(self._show_visual_aids)
         self._zoom_sharp_check.setChecked(self._zoom_sharp)
 
         # Trigger update

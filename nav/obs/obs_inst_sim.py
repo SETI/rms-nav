@@ -1,5 +1,5 @@
 import json
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from filecache import FCPath
 import numpy as np
@@ -11,7 +11,7 @@ from starcat import Star
 from nav.config import DEFAULT_CONFIG, DEFAULT_LOGGER, Config
 from nav.obs.obs_snapshot_inst import ObsSnapshotInst
 from nav.support.sim import create_simulated_body
-from nav.support.types import PathLike
+from nav.support.types import MutableStar, PathLike
 
 
 class ObsSim(ObsSnapshotInst):
@@ -52,8 +52,8 @@ class ObsSim(ObsSnapshotInst):
             size_u = int(sim_params['size_u'])
             offset_v = float(sim_params.get('offset_v', 0.0))
             offset_u = float(sim_params.get('offset_u', 0.0))
-        except KeyError as e:
-            raise ValueError('Missing required field in simulated image '
+        except (KeyError, TypeError, ValueError) as e:
+            raise ValueError('Invalid of missing size/off field in simulated image '
                              f'JSON file "{json_path}": {e}') from e
 
         # Create base blank image
@@ -112,9 +112,9 @@ class ObsSim(ObsSnapshotInst):
         offset_u = obs.sim_offset_u
 
         stars_params = sim_params.get('stars', [])
-        sim_star_list: list[Star] = []
+        sim_star_list: list[MutableStar] = []
         for i, star_params in enumerate(stars_params):
-            star = Star()
+            star = cast(MutableStar, Star())
             # Required by NavModelStars
             star.unique_number = i + 1
             star.catalog_name = str(star_params.get('catalog_name', 'SIM'))
@@ -174,14 +174,14 @@ class ObsSim(ObsSnapshotInst):
                 v_int >= img.shape[0]-psf_size_half_v):
                 continue
 
-            psf = psf.eval_rect((psf_size_half_v*2+1, psf_size_half_u*2+1),
-                                offset=(v_frac, u_frac),
-                                scale=star.dn,
-                                movement=(star.move_v, star.move_u),
-                                movement_granularity=move_gran)
+            star_psf = psf.eval_rect((psf_size_half_v*2+1, psf_size_half_u*2+1),
+                                     offset=(v_frac, u_frac),
+                                     scale=star.dn,
+                                     movement=(star.move_v, star.move_u),
+                                     movement_granularity=move_gran)
 
             img[v_int-psf_size_half_v:v_int+psf_size_half_v+1,
-                u_int-psf_size_half_u:u_int+psf_size_half_u+1] += psf
+                u_int-psf_size_half_u:u_int+psf_size_half_u+1] += star_psf
 
         obs.sim_star_list = sim_star_list
 

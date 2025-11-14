@@ -31,7 +31,7 @@ class ObsVoyagerISS(ObsSnapshotInst):
             config: Configuration object to use. If None, uses the default configuration.
             extfov_margin_vu: Optional tuple that overrides the extended field of view margins
                 found in the config.
-            **kwargs: Additional keyword arguments (none for this instrument).
+            **_kwargs: Additional keyword arguments (none for this instrument).
 
         Returns:
             An ObsVoyagerISS object containing the image data and metadata.

@@ -59,13 +59,19 @@ class NavModelBodySimulated(NavModelBodyBase):
         self._annotations = None
 
         with self._logger.open(f'CREATE SIMULATED BODY MODEL FOR: {self._body_name}'):
-            self._create_model()
+            self._create_model(always_create_model=always_create_model,
+                               never_create_model=never_create_model,
+                               create_annotations=create_annotations)
 
         end_time = now_dt()
         metadata['end_time'] = end_time.isoformat()
         metadata['elapsed_time_sec'] = (end_time - start_time).total_seconds()
 
-    def _create_model(self) -> None:
+    def _create_model(self,
+                      *,
+                      always_create_model: bool,
+                      never_create_model: bool,
+                      create_annotations: bool) -> None:
         """Generate the model image from the saved GUI parameters and build masks."""
         p = self._sim_params
 
@@ -142,12 +148,13 @@ class NavModelBodySimulated(NavModelBodyBase):
                 # Ignore invalid range; keep infinity
                 pass
 
-        # Create annotations using shared helper
-        v_center_ext = int(round(center_v + ext_margin_v))
-        u_center_ext = int(round(center_u + ext_margin_u))
-        self._annotations = self._create_annotations(u_center_ext, v_center_ext,
-                                                     self._model_img,
-                                                     limb_mask_full,
-                                                     body_mask_full)
+        if create_annotations:
+            v_center_data = int(round(center_v))
+            u_center_data = int(round(center_u))
+            self._annotations = self._create_annotations(u_center_data, v_center_data,
+                                                         self._model_img,
+                                                         limb_mask_full,
+                                                         body_mask_full)
+
         self._metadata['confidence'] = 1.0
         self._confidence = 1.0
