@@ -10,7 +10,11 @@ from .annotation_text_info import (AnnotationTextInfo,  # noqa: F401
                                    TEXTINFO_TOP_ARROW,
                                    TEXTINFO_BOTTOM,
                                    TEXTINFO_BOTTOM_ARROW,
-                                   TEXTINFO_CENTER)
+                                   TEXTINFO_CENTER,
+                                   TEXTINFO_TOP_LEFT,
+                                   TEXTINFO_TOP_RIGHT,
+                                   TEXTINFO_BOTTOM_LEFT,
+                                   TEXTINFO_BOTTOM_RIGHT)
 
 __all__ = ['Annotation',
            'Annotations',
@@ -24,4 +28,8 @@ __all__ = ['Annotation',
            'TEXTINFO_TOP_ARROW',
            'TEXTINFO_BOTTOM',
            'TEXTINFO_BOTTOM_ARROW',
-           'TEXTINFO_CENTER']
+           'TEXTINFO_CENTER',
+           'TEXTINFO_TOP_LEFT',
+           'TEXTINFO_TOP_RIGHT',
+           'TEXTINFO_BOTTOM_LEFT',
+           'TEXTINFO_BOTTOM_RIGHT']

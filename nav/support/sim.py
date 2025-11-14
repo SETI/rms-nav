@@ -250,62 +250,52 @@ def create_simulated_body(
 
     # Lambertian shading: I = I₀ * max(0, cos(incidence))
     # Only apply to visible hemisphere and clip to [0, 1] range
-    illum_strength = np.where(visible_hemisphere, np.clip(cos_incidence, 0.0, 1.0), 0.0)
+    illum_strength = np.where(visible_hemisphere, np.clip(cos_incidence, 0.001, 1.0), 0.0)
 
     # Base intensity from Lambertian shading (only inside the ellipsoid and visible hemisphere)
     intensity = illum_strength * ellipse_mask
 
     # Add internal craters
     if craters > 0:
+
         # Generate random craters with better visibility
         rng = np.random.RandomState(43)  # For reproducibility
-        n_craters = int(200 * craters)  # More craters for better visibility
+        n_craters = int(craters * 1000)
 
         # Initialize crater image to ones, but only apply where ellipse exists
         crater_image = np.ones_like(intensity)
 
-        for _ in range(n_craters):
-            # Random position inside ellipse (in local coordinates)
-            # Use rejection sampling to ensure craters are inside ellipse
-            max_attempts = 100
-            v_local = 0.0
-            u_local = 0.0
-            for _ in range(max_attempts):
-                v_local = rng.uniform(-work_semi_major * 0.8, work_semi_major * 0.8)
-                u_local = rng.uniform(-work_semi_minor * 0.8, work_semi_minor * 0.8)
-                if (v_local / work_semi_major) ** 2 + (u_local / work_semi_minor) ** 2 < 0.7:
-                    break
+        ellipse_mask_nz = ellipse_mask > 0
+        nz = np.argwhere(ellipse_mask_nz)
 
-            # Rotate to image coordinates (inverse rotation to match coordinate transform)
-            v_crater = v_local * cos_rz + u_local * sin_rz + work_center_v
-            u_crater = -v_local * sin_rz + u_local * cos_rz + work_center_u
+        for _ in range(n_craters):
+            v_crater, u_crater = nz[rng.randint(len(nz))]
 
             # Random crater size (logarithmic distribution for realism)
-            crater_radius = rng.lognormal(np.log(3.0), 0.9) * aa_scale
+            crater_radius = rng.lognormal(np.log(10.0), 0.9) * aa_scale
             crater_radius = np.clip(crater_radius, 2.0, work_semi_major * 0.25)
 
             # Random crater depth (darker = deeper) - make more visible
             # Increase depth range for better visibility
-            crater_depth = rng.uniform(0.5, 1.0) * craters
+            crater_depth = rng.uniform(0.5, 1.0)
 
             # Create crater as a circular depression
-            v_dist = v_coords - v_crater
-            u_dist = u_coords - u_crater
+            v_dist = v_coords - (v_crater - work_center_v)
+            u_dist = u_coords - (u_crater - work_center_u)
             crater_dist = np.sqrt(v_dist ** 2 + u_dist ** 2)
 
             # Crater shape: deeper in center, shallower at edges
             # Use a sharper falloff for better visibility
             crater_mask = crater_dist < crater_radius
             # Only apply craters where the ellipse exists
-            crater_mask = crater_mask & (ellipse_mask > 0)
+            crater_mask = crater_mask & ellipse_mask_nz
             if np.any(crater_mask):
                 # Gaussian-like profile with sharper edges
                 sigma = crater_radius / 2.5
-                crater_profile = 1.0 - crater_depth * np.exp(-crater_dist ** 2 / (2 * sigma ** 2))
+                crater_profile = 1.2 - crater_depth * np.exp(-crater_dist ** 2 / (2 * sigma ** 2))
                 # Apply crater by darkening (multiply, but ensure it only affects where mask is
                 # true)
-                crater_image[crater_mask] = np.minimum(crater_image[crater_mask],
-                                                       crater_profile[crater_mask])
+                crater_image[crater_mask] = crater_image[crater_mask] * crater_profile[crater_mask]
 
         # Apply craters to intensity (multiply to darken) - only where ellipse exists
         intensity = intensity * crater_image

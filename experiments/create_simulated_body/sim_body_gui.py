@@ -33,7 +33,7 @@ from PyQt6.QtWidgets import (
     QStatusBar,
 )
 
-from nav.support.sim import create_simulated_body  # noqa: E402
+from nav.support.sim import create_simulated_body
 
 
 class ParameterUpdater(QObject):
@@ -835,11 +835,11 @@ class SimulatedBodyGUI(QMainWindow):
             'name': 'simulated_body',
             'size_v': self._size_v,
             'size_u': self._size_u,
+            'center_v': self._center_v,
+            'center_u': self._center_u,
             'semi_major_axis': self._semi_major_axis,
             'semi_minor_axis': self._semi_minor_axis,
             'semi_c_axis': self._semi_c_axis,
-            'center_v': self._center_v,
-            'center_u': self._center_u,
             'rotation_z': self._rotation_z,  # degrees
             'rotation_tilt': self._rotation_tilt,  # degrees
             'illumination_angle': self._illumination_angle,  # degrees

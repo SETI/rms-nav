@@ -28,7 +28,11 @@ from nav.annotation import (Annotation,
                             TEXTINFO_LEFT,
                             TEXTINFO_RIGHT,
                             TEXTINFO_BOTTOM,
-                            TEXTINFO_TOP)
+                            TEXTINFO_TOP,
+                            TEXTINFO_TOP_LEFT,
+                            TEXTINFO_TOP_RIGHT,
+                            TEXTINFO_BOTTOM_LEFT,
+                            TEXTINFO_BOTTOM_RIGHT)
 from nav.config import Config
 from nav.support.flux import clean_sclass
 from nav.support.types import MutableStar
@@ -704,6 +708,10 @@ class NavModelStars(NavModel):
                 text_loc.append(TextLocInfo(TEXTINFO_TOP, v - label_margin, u))
                 text_loc.append(TextLocInfo(TEXTINFO_LEFT, v, u - label_margin))
                 text_loc.append(TextLocInfo(TEXTINFO_RIGHT, v, u + label_margin))
+                text_loc.append(TextLocInfo(TEXTINFO_TOP_LEFT, v - label_margin, u - label_margin))
+                text_loc.append(TextLocInfo(TEXTINFO_TOP_RIGHT, v - label_margin, u + label_margin))
+                text_loc.append(TextLocInfo(TEXTINFO_BOTTOM_LEFT, v + label_margin, u - label_margin))
+                text_loc.append(TextLocInfo(TEXTINFO_BOTTOM_RIGHT, v + label_margin, u + label_margin))
 
                 text_info = AnnotationTextInfo(f'{star_str1}\n{star_str2}',
                                             ref_vu=(v, u),
