@@ -5,8 +5,9 @@ astronomical objects for testing navigation algorithms without requiring real
 image files and SPICE kernels.
 """
 
+from typing import cast
+
 import numpy as np
-from numpy.typing import NDArray
 
 from nav.support.types import NDArrayFloatType
 
@@ -98,7 +99,6 @@ def create_simulated_body(
     # Apply rotation_tilt (rotation around u-axis, tilting toward/away from viewer)
     # This affects the apparent shape and the z-coordinate
     cos_rt = np.cos(rotation_tilt)
-    sin_rt = np.sin(rotation_tilt)
 
     # After tilt, the v coordinate is affected
     # v_rot = v_rot1 * cos_rt (compressed by tilt)
@@ -161,7 +161,8 @@ def create_simulated_body(
 
         # Recompute mask with roughness (only affects edge)
         if anti_aliasing > 0:
-            ellipse_mask = np.clip(1.0 - np.maximum(0, ellipse_dist_rough - 1.0) / edge_width, 0.0, 1.0)
+            ellipse_mask = np.clip(1.0 - np.maximum(0, ellipse_dist_rough - 1.0) / edge_width,
+                                   0.0, 1.0)
         else:
             ellipse_mask = (ellipse_dist_rough <= 1.0).astype(float)
 
@@ -221,7 +222,7 @@ def create_simulated_body(
     # so z should be negative (illumination away from observer) to make dot product negative.
     # When phase_angle = 0, we want fully lit, so z should be positive to make dot product positive.
     # So: z = cos(phase_angle) gives phase_angle=0 -> z=+1, phase_angle=π -> z=-1
-    illum_z = np.cos(phase_angle)  # phase_angle=0 -> z=+1 (lit), phase_angle=π -> z=-1 (backlit/dark)
+    illum_z = np.cos(phase_angle)
 
     # The in-plane component magnitude
     illum_scale_2d = np.sin(phase_angle)
@@ -301,8 +302,10 @@ def create_simulated_body(
                 # Gaussian-like profile with sharper edges
                 sigma = crater_radius / 2.5
                 crater_profile = 1.0 - crater_depth * np.exp(-crater_dist ** 2 / (2 * sigma ** 2))
-                # Apply crater by darkening (multiply, but ensure it only affects where mask is true)
-                crater_image[crater_mask] = np.minimum(crater_image[crater_mask], crater_profile[crater_mask])
+                # Apply crater by darkening (multiply, but ensure it only affects where mask is
+                # true)
+                crater_image[crater_mask] = np.minimum(crater_image[crater_mask],
+                                                       crater_profile[crater_mask])
 
         # Apply craters to intensity (multiply to darken) - only where ellipse exists
         intensity = intensity * crater_image
@@ -315,4 +318,4 @@ def create_simulated_body(
     # Ensure values are in [0, 1] range
     intensity = np.clip(intensity, 0.0, 1.0)
 
-    return intensity
+    return cast(NDArrayFloatType, intensity)

@@ -4,11 +4,10 @@
 This application provides an interactive interface to test and visualize
 the create_simulated_body function with real-time parameter adjustment.
 """
-
 import json
 import math
-import sys
 from pathlib import Path
+import sys
 from typing import Any
 
 import numpy as np
@@ -34,10 +33,7 @@ from PyQt6.QtWidgets import (
     QStatusBar,
 )
 
-# Add parent directory to path to import nav module
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-
-from nav.support.sim import create_simulated_body
+from nav.support.sim import create_simulated_body  # noqa: E402
 
 
 class ParameterUpdater(QObject):
@@ -77,8 +73,8 @@ class SimulatedBodyGUI(QMainWindow):
         self._semi_major_axis = 100.0
         self._semi_minor_axis = 80.0
         self._semi_c_axis = 80.0  # Third axis (depth)
-        self._center_v = 256.0
-        self._center_u = 256.0
+        self._center_v = 256.5
+        self._center_u = 256.5
         self._rotation_z = 0.0  # degrees
         self._rotation_tilt = 0.0  # degrees
         self._illumination_angle = 0.0  # degrees
@@ -88,7 +84,7 @@ class SimulatedBodyGUI(QMainWindow):
         self._craters = 0.0
         self._anti_aliasing = 0.5
         self._show_visual_aids = True
-        self._zoom_sharp = False
+        self._zoom_sharp = True
 
         # Current image data
         self._current_image: np.ndarray | None = None
@@ -201,11 +197,13 @@ class SimulatedBodyGUI(QMainWindow):
         """Zoom in at a specific point."""
         self._zoom_at_point(1.2, viewport_x, viewport_y, scaled_x, scaled_y)
 
-    def _zoom_out_at_point(self, viewport_x: int, viewport_y: int, scaled_x: float, scaled_y: float):
+    def _zoom_out_at_point(self, viewport_x: int, viewport_y: int, scaled_x: float,
+                           scaled_y: float):
         """Zoom out at a specific point."""
         self._zoom_at_point(1.0 / 1.2, viewport_x, viewport_y, scaled_x, scaled_y)
 
-    def _zoom_at_point(self, factor: float, viewport_x: int, viewport_y: int, scaled_x: float, scaled_y: float):
+    def _zoom_at_point(self, factor: float, viewport_x: int, viewport_y: int, scaled_x: float,
+                       scaled_y: float):
         """Zoom at a specific point, maintaining that point's position in image coordinates."""
         if self._base_pixmap is None:
             return
@@ -390,6 +388,20 @@ class SimulatedBodyGUI(QMainWindow):
         ellipse_group = QGroupBox('Ellipse Geometry')
         ellipse_layout = QFormLayout()
 
+        self._center_v_spin = QDoubleSpinBox()
+        self._center_v_spin.setRange(0.0, 10000.0)
+        self._center_v_spin.setDecimals(1)
+        self._center_v_spin.setValue(self._center_v)
+        self._center_v_spin.valueChanged.connect(self._on_center_v_changed)
+        ellipse_layout.addRow('Center V:', self._center_v_spin)
+
+        self._center_u_spin = QDoubleSpinBox()
+        self._center_u_spin.setRange(0.0, 10000.0)
+        self._center_u_spin.setDecimals(1)
+        self._center_u_spin.setValue(self._center_u)
+        self._center_u_spin.valueChanged.connect(self._on_center_u_changed)
+        ellipse_layout.addRow('Center U:', self._center_u_spin)
+
         self._semi_major_spin = QDoubleSpinBox()
         self._semi_major_spin.setRange(1.0, 1000.0)
         self._semi_major_spin.setDecimals(1)
@@ -410,20 +422,6 @@ class SimulatedBodyGUI(QMainWindow):
         self._semi_c_spin.setValue(self._semi_c_axis)
         self._semi_c_spin.valueChanged.connect(self._on_semi_c_changed)
         ellipse_layout.addRow('Semi-c axis (depth):', self._semi_c_spin)
-
-        self._center_v_spin = QDoubleSpinBox()
-        self._center_v_spin.setRange(0.0, 10000.0)
-        self._center_v_spin.setDecimals(1)
-        self._center_v_spin.setValue(self._center_v)
-        self._center_v_spin.valueChanged.connect(self._on_center_v_changed)
-        ellipse_layout.addRow('Center V:', self._center_v_spin)
-
-        self._center_u_spin = QDoubleSpinBox()
-        self._center_u_spin.setRange(0.0, 10000.0)
-        self._center_u_spin.setDecimals(1)
-        self._center_u_spin.setValue(self._center_u)
-        self._center_u_spin.valueChanged.connect(self._on_center_u_changed)
-        ellipse_layout.addRow('Center U:', self._center_u_spin)
 
         self._rotation_z_spin = QDoubleSpinBox()
         self._rotation_z_spin.setRange(0.0, 360.0)
@@ -730,9 +728,11 @@ class SimulatedBodyGUI(QMainWindow):
             cos_rz = math.cos(rotation_z_rad)
             sin_rz = math.sin(rotation_z_rad)
 
-            # Semi-major axis (longer) - points along v direction in local coords (u_local=0, v_local=1)
+            # Semi-major axis (longer) - points along v direction in local coords
+            #   (u_local=0, v_local=1)
             # In sim.py: ellipse uses (v_rot/semi_major)^2, so v is the major axis direction
-            # After rotation in sim.py: v_rot = v*cos - u*sin, so for v_local=1: v_rot = cos, u_rot = sin
+            # After rotation in sim.py: v_rot = v*cos - u*sin, so for v_local=1:
+            #   v_rot = cos, u_rot = sin
             # In screen coords: x = u = sin, y = -v = -cos
             major_len = self._semi_major_axis
             major_end_x = center_x + major_len * sin_rz
@@ -741,9 +741,11 @@ class SimulatedBodyGUI(QMainWindow):
             painter.setPen(pen)
             painter.drawLine(center_x, center_y, int(major_end_x), int(major_end_y))
 
-            # Semi-minor axis (shorter) - points along u direction in local coords (u_local=1, v_local=0)
+            # Semi-minor axis (shorter) - points along u direction in local coords
+            #   (u_local=1, v_local=0)
             # In sim.py: ellipse uses (u_rot/semi_minor)^2, so u is the minor axis direction
-            # After rotation in sim.py: v_rot = v*cos - u*sin, so for u_local=1: v_rot = -sin, u_rot = cos
+            # After rotation in sim.py: v_rot = v*cos - u*sin, so for u_local=1:
+            #   v_rot = -sin, u_rot = cos
             # In screen coords: x = u = cos, y = -v = -(-sin) = sin
             minor_len = self._semi_minor_axis
             minor_end_x = center_x + minor_len * cos_rz
@@ -793,7 +795,7 @@ class SimulatedBodyGUI(QMainWindow):
         scaled_height = int(self._base_pixmap.height() * self._zoom_factor)
 
         transform_mode = (Qt.TransformationMode.FastTransformation
-                           if self._zoom_sharp else Qt.TransformationMode.SmoothTransformation)
+                          if self._zoom_sharp else Qt.TransformationMode.SmoothTransformation)
         scaled_pixmap = self._base_pixmap.scaled(
             scaled_width,
             scaled_height,
@@ -862,7 +864,7 @@ class SimulatedBodyGUI(QMainWindow):
             'rough_std': self._rough_std,
             'craters': self._craters,
             'anti_aliasing': self._anti_aliasing,
-            'zoom_sharp': self._zoom_sharp,
+            # We intentionally don't save the show_visual_aids and zoom_sharp parameters
         }
 
     def _set_parameters_from_dict(self, params: dict[str, Any]):
@@ -886,6 +888,7 @@ class SimulatedBodyGUI(QMainWindow):
         self._rough_std = params.get('rough_std', self._rough_std)
         self._craters = params.get('craters', self._craters)
         self._anti_aliasing = params.get('anti_aliasing', self._anti_aliasing)
+        self._show_visual_aids = params.get('show_visual_aids', self._show_visual_aids)
         self._zoom_sharp = params.get('zoom_sharp', self._zoom_sharp)
 
         # Update UI controls
@@ -906,6 +909,7 @@ class SimulatedBodyGUI(QMainWindow):
         self._craters_label.setText(f'{self._craters:.3f}')
         self._anti_aliasing_slider.setValue(int(self._anti_aliasing * 1000))
         self._anti_aliasing_label.setText(f'{self._anti_aliasing:.3f}')
+        self._visual_aids_check.setChecked(self._show_visual_aids)
         self._zoom_sharp_check.setChecked(self._zoom_sharp)
 
         # Trigger update
@@ -925,7 +929,6 @@ class SimulatedBodyGUI(QMainWindow):
                 params = self._get_parameters_dict()
                 with open(filename, 'w') as f:
                     json.dump(params, f, indent=2)
-                QMessageBox.information(self, 'Success', f'Parameters saved to {filename}')
             except Exception as e:
                 QMessageBox.critical(self, 'Error', f'Failed to save parameters:\n{str(e)}')
 
@@ -943,7 +946,6 @@ class SimulatedBodyGUI(QMainWindow):
                 with open(filename, 'r') as f:
                     params = json.load(f)
                 self._set_parameters_from_dict(params)
-                QMessageBox.information(self, 'Success', f'Parameters loaded from {filename}')
             except Exception as e:
                 QMessageBox.critical(self, 'Error', f'Failed to load parameters:\n{str(e)}')
 
@@ -964,7 +966,8 @@ class SimulatedBodyGUI(QMainWindow):
         self._rough_std = 0.0
         self._craters = 0.0
         self._anti_aliasing = 0.5
-        self._zoom_sharp = False
+        self._show_visual_aids = True
+        self._zoom_sharp = True
 
         # Update UI controls
         self._size_v_spin.setValue(self._size_v)

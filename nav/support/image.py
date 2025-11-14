@@ -4,8 +4,6 @@ import numpy as np
 from numpy.fft import fft2, ifft2, fftfreq
 import scipy.ndimage as ndimage
 
-import matplotlib.pyplot as plt
-
 from nav.support.types import NDArrayType, NDArrayFloatType, NPType
 
 
@@ -440,8 +438,6 @@ def filter_sub_median(data: NDArrayFloatType,
                      reshape((median_boxsize, median_boxsize)))
                 dist = np.sqrt(x**2 + y**2)
                 footprint_arr[dist <= box_half+.5] = 1
-                plt.imshow(footprint_arr)
-                plt.show()
                 _FOOTPRINT_CACHE[median_boxsize] = footprint_arr
             sub = ndimage.median_filter(sub, footprint=footprint_arr)
 

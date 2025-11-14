@@ -1,0 +1,5 @@
+sim:
+  extfov_margin_vu: [50, 50]
+  star_psf_sigma: 3.
+  star_psf_sizes:
+    100: [7, 7]

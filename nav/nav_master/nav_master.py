@@ -9,10 +9,12 @@ from nav.annotation import Annotations
 from nav.config import Config
 from nav.nav_model import (NavModel,
                            NavModelBody,
+                           NavModelBodySimulated,
                            NavModelCombined,
                            NavModelRings,
                            NavModelStars,
                            NavModelTitan)
+from nav.nav_model.nav_model_body_base import NavModelBodyBase
 from nav.nav_technique import NavTechniqueCorrelateAll
 from nav.support.nav_base import NavBase
 from nav.support.types import NDArrayFloatType, NDArrayUint8Type
@@ -67,7 +69,7 @@ class NavMaster(NavBase):
         self._final_confidence: float | None = None
         self._offsets: dict[str, Any] = {}  # TODO Type
         self._star_models: list[NavModelStars] | None = None
-        self._body_models: list[NavModelBody] | None = None
+        self._body_models: list[NavModelBodyBase] | None = None
         self._ring_models: list[NavModelRings] | None = None
         self._titan_models: list[NavModelTitan] | None = None
 
@@ -119,7 +121,7 @@ class NavMaster(NavBase):
         return self._star_models
 
     @property
-    def body_models(self) -> list[NavModelBody]:
+    def body_models(self) -> list[NavModelBodyBase]:
         """Returns the list of planetary body navigation models, computing them if necessary."""
         self.compute_body_models()
         assert self._body_models is not None
@@ -167,7 +169,11 @@ class NavMaster(NavBase):
             # Keep cached version
             return
 
-        stars_model = NavModelStars('stars', self._obs)
+        # If obs has a simulated star list, pass it to NavModelStars
+        star_list = None
+        if hasattr(self._obs, 'sim_star_list'):
+            star_list = getattr(self._obs, 'sim_star_list')
+        stars_model = NavModelStars('stars', self._obs, star_list=star_list)
         stars_model.create_model()
         self._star_models = [stars_model]
         self._metadata['models']['star_model'] = stars_model.metadata
@@ -191,12 +197,39 @@ class NavMaster(NavBase):
         config = self._config
         logger = self._logger
 
+        # If this is a simulated observation, use body descriptors from JSON
+        if hasattr(obs, 'sim_json') and isinstance(getattr(obs, 'sim_json'), dict):
+            sim_desc = getattr(obs, 'sim_json')
+            body_models_desc = sim_desc.get('body_models', {})
+
+            self._body_models = []
+            self._metadata['models']['body_models'] = {}
+
+            for body_name, params in body_models_desc.items():
+                model_name = f'body:{str(body_name).lower()}'
+                if not any(fnmatch.fnmatch(model_name, x) for x in self._nav_models_to_use):
+                    continue
+
+                # Do NOT apply top-level offsets here; NavModelBodySimulated expects raw params
+                # and NavTechnique will estimate fractional offsets.
+                body_model: NavModelBodyBase = NavModelBodySimulated(model_name, obs,
+                                                                     str(body_name), params,
+                                                                     config=config)
+                body_model.create_model()
+                self._body_models.append(body_model)
+                self._metadata['models']['body_models'][str(body_name)] = body_model.metadata
+
+            return
+
         if obs.closest_planet is not None:
             body_list = [obs.closest_planet] + config.satellites(obs.closest_planet)
         else:
             body_list = []
 
-        large_body_dict = obs.inventory(body_list, return_type='full')
+        try:
+            large_body_dict = obs.sim_inventory  # For simulated observations
+        except AttributeError:
+            large_body_dict = obs.inventory(body_list, return_type='full')
         # Make a list sorted by range, with the closest body first, limiting to bodies
         # that are actually in the FOV
         def _body_in_fov(obs: Observation,
@@ -229,7 +262,7 @@ class NavMaster(NavBase):
         self._metadata['models']['body_models'] = {}
 
         for body, inventory in large_bodies_by_range:
-            model_name = f'body:{body.lower()}'
+            model_name = f'body:{body.upper()}'
             if not any(fnmatch.fnmatch(model_name, x) for x in self._nav_models_to_use):
                 continue
             body_model = NavModelBody(model_name, obs, body,

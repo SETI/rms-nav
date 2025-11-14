@@ -8,11 +8,10 @@ from nav.config import DEFAULT_CONFIG, DEFAULT_LOGGER, Config
 from nav.support.time import et_to_utc
 from nav.support.types import PathLike
 
-from .obs_inst import ObsInst
-from .obs_snapshot import ObsSnapshot
+from .obs_snapshot_inst import ObsSnapshotInst
 
 
-class ObsVoyagerISS(ObsSnapshot, ObsInst):
+class ObsVoyagerISS(ObsSnapshotInst):
     """Implements an observation of a Voyager ISS image.
 
     This class provides specialized functionality for accessing and analyzing Voyager
@@ -24,7 +23,7 @@ class ObsVoyagerISS(ObsSnapshot, ObsInst):
                   *,
                   config: Optional[Config] = None,
                   extfov_margin_vu: tuple[int, int] | None = None,
-                  **kwargs: Any) -> 'ObsVoyagerISS':
+                  **_kwargs: Any) -> 'ObsVoyagerISS':
         """Creates an ObsVoyagerISS from a Voyager ISS image file.
 
         Parameters:

@@ -625,14 +625,14 @@ class NavModelStars(NavModel):
                 v_int >= model.shape[0]-psf_size_half_v):
                 continue
 
-            psf = psf.eval_rect((psf_size_half_v*2+1, psf_size_half_u*2+1),
-                                 offset=(v_frac, u_frac),
-                                 scale=star.dn,
-                                 movement=(star.move_v, star.move_u),
-                                 movement_granularity=move_gran)
+            star_psf = psf.eval_rect((psf_size_half_v*2+1, psf_size_half_u*2+1),
+                                     offset=(v_frac, u_frac),
+                                     scale=star.dn,
+                                     movement=(star.move_v, star.move_u),
+                                     movement_granularity=move_gran)
 
             model[v_int-psf_size_half_v:v_int+psf_size_half_v+1,
-                  u_int-psf_size_half_u:u_int+psf_size_half_u+1] += psf
+                  u_int-psf_size_half_u:u_int+psf_size_half_u+1] += star_psf
 
         if _DEBUG_STARS_MODEL_IMGDISP:
             ImageDisp([model],

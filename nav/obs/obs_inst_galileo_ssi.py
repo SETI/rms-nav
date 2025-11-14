@@ -8,11 +8,10 @@ from nav.config import DEFAULT_CONFIG, DEFAULT_LOGGER, Config
 from nav.support.time import et_to_utc
 from nav.support.types import PathLike
 
-from .obs_inst import ObsInst
-from .obs_snapshot import ObsSnapshot
+from .obs_snapshot_inst import ObsSnapshotInst
 
 
-class ObsGalileoSSI(ObsSnapshot, ObsInst):
+class ObsGalileoSSI(ObsSnapshotInst):
     """Implements an observation of a Galileo SSI image.
 
     This class provides specialized functionality for accessing and analyzing Galileo
@@ -23,7 +22,7 @@ class ObsGalileoSSI(ObsSnapshot, ObsInst):
     def from_file(path: PathLike,
                   config: Optional[Config] = None,
                   extfov_margin_vu: tuple[int, int] | None = None,
-                  **kwargs: Any) -> 'ObsGalileoSSI':
+                  **_kwargs: Any) -> 'ObsGalileoSSI':
         """Creates an ObsGalileoSSI from a Galileo SSI image file.
 
         Parameters:
@@ -31,7 +30,7 @@ class ObsGalileoSSI(ObsSnapshot, ObsInst):
             config: Configuration object to use. If None, uses the default configuration.
             extfov_margin_vu: Optional tuple that overrides the extended field of view margins
                 found in the config.
-            **kwargs: Additional keyword arguments (none for this instrument).
+            **_kwargs: Additional keyword arguments (none for this instrument).
 
         Returns:
             An ObsGalileoSSI object containing the image data and metadata.

@@ -1,4 +1,4 @@
-from typing import Optional, cast
+from typing import Any, Optional, cast
 
 import numpy as np
 import oops
@@ -24,13 +24,15 @@ class ObsSnapshot(Obs, Snapshot):
                  snapshot: Snapshot,
                  *,
                  extfov_margin_vu: Optional[int | tuple[int, int]] = None,
-                 config: Optional[Config] = None) -> None:
+                 config: Optional[Config] = None,
+                 **kwargs: Any) -> None:
         """Initialize an ObsSnapshot by wrapping an existing Snapshot.
 
         Parameters:
             snapshot: The Snapshot object to wrap.
             extfov_margin_vu: The extended field of view margins in (v, u) pixels.
             config: The configuration object to use. If None, uses DEFAULT_CONFIG.
+            **kwargs: Additional keyword arguments used by subclasses.
 
         Warning:
             The provided snapshot object should not be used after this call,
@@ -47,7 +49,7 @@ class ObsSnapshot(Obs, Snapshot):
         # as the original Snapshot. Warning: Do not use that Snapshot anymore!
         self.__dict__ = snapshot.__dict__
 
-        super().__init__(config=config)
+        super().__init__(config=config, **kwargs)
 
         if self.data.ndim != 2:
             raise ValueError(f'Data shape must be 2D, got {self.data.shape}')
@@ -75,15 +77,19 @@ class ObsSnapshot(Obs, Snapshot):
                                self._data_shape_vu[1] + self._extfov_margin_vu[1] - 1)
         self.reset_all()
 
-        closest_planet = None
-        closest_dist = 1e38
-        for planet in self._config.planets:
-            dist = self.body_distance(planet)
-            if dist < closest_dist:
-                closest_planet = planet
-                closest_dist = dist
+        try:
+            # Will already be set for simulated observations
+            _ = self._closest_planet  # type: ignore
+        except AttributeError:
+            closest_planet = None
+            closest_dist = 1e38
+            for planet in self._config.planets:
+                dist = self.body_distance(planet)
+                if dist < closest_dist:
+                    closest_planet = planet
+                    closest_dist = dist
 
-        self._closest_planet = closest_planet
+            self._closest_planet = closest_planet
 
     def make_fov_zeros(self,
                        dtype: DTypeLike = np.float64) -> NDArrayFloatType:
