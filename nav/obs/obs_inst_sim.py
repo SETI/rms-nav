@@ -53,7 +53,7 @@ class ObsSim(ObsSnapshotInst):
             offset_v = float(sim_params.get('offset_v', 0.0))
             offset_u = float(sim_params.get('offset_u', 0.0))
         except (KeyError, TypeError, ValueError) as e:
-            raise ValueError('Invalid of missing size/off field in simulated image '
+            raise ValueError('Invalid or missing size/offset field in simulated image '
                              f'JSON file "{json_path}": {e}') from e
 
         # Create base blank image

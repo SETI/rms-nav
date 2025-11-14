@@ -67,24 +67,7 @@ class SimulatedBodyGUI(QMainWindow):
         self.setWindowTitle('Simulated Body Generator')
         self.setMinimumSize(1200, 800)
 
-        # Default parameters
-        self._size_v = 512
-        self._size_u = 512
-        self._semi_major_axis = 100.0
-        self._semi_minor_axis = 80.0
-        self._semi_c_axis = 80.0  # Third axis (depth)
-        self._center_v = 256.5
-        self._center_u = 256.5
-        self._rotation_z = 0.0  # degrees
-        self._rotation_tilt = 0.0  # degrees
-        self._illumination_angle = 0.0  # degrees
-        self._phase_angle = 0.0  # degrees
-        self._rough_mean = 0.0
-        self._rough_std = 0.0
-        self._craters = 0.0
-        self._anti_aliasing = 0.5
-        self._show_visual_aids = True
-        self._zoom_sharp = True
+        self._set_defaults()
 
         # Current image data
         self._current_image: np.ndarray | None = None
@@ -849,6 +832,7 @@ class SimulatedBodyGUI(QMainWindow):
     def _get_parameters_dict(self) -> dict[str, Any]:
         """Get current parameters as a dictionary."""
         return {
+            'name': 'simulated_body',
             'size_v': self._size_v,
             'size_u': self._size_u,
             'semi_major_axis': self._semi_major_axis,
@@ -865,6 +849,9 @@ class SimulatedBodyGUI(QMainWindow):
             'craters': self._craters,
             'anti_aliasing': self._anti_aliasing,
             # We intentionally don't save the show_visual_aids and zoom_sharp parameters
+            # so that the JSON file is more easily used in a simulated model file,
+            # but if the user adds these fields to the JSON file, they will be restored
+            # on load.
         }
 
     def _set_parameters_from_dict(self, params: dict[str, Any]):
@@ -943,21 +930,21 @@ class SimulatedBodyGUI(QMainWindow):
 
         if filename:
             try:
-                with open(filename, 'r') as f:
+                with open(filename) as f:
                     params = json.load(f)
                 self._set_parameters_from_dict(params)
             except Exception as e:
                 QMessageBox.critical(self, 'Error', f'Failed to load parameters:\n{str(e)}')
 
-    def _reset_defaults(self):
-        """Reset all parameters to default values."""
+    def _set_defaults(self):
+        """Set all parameters to default values."""
         self._size_v = 512
         self._size_u = 512
         self._semi_major_axis = 100.0
         self._semi_minor_axis = 80.0
         self._semi_c_axis = 80.0
-        self._center_v = 256.0
-        self._center_u = 256.0
+        self._center_v = 256.5
+        self._center_u = 256.5
         self._rotation_z = 0.0
         self._rotation_tilt = 0.0
         self._illumination_angle = 0.0
@@ -968,6 +955,10 @@ class SimulatedBodyGUI(QMainWindow):
         self._anti_aliasing = 0.5
         self._show_visual_aids = True
         self._zoom_sharp = True
+
+    def _reset_defaults(self):
+        """Reset all parameters to default values."""
+        self._set_defaults()
 
         # Update UI controls
         self._size_v_spin.setValue(self._size_v)

@@ -276,7 +276,9 @@ class NavTechniqueCorrelateAll(NavTechnique):
         min_vmag = 6  # TODO Fix this
         max_vmag = obs.star_max_usable_vmag()
         vmag_spread = max_vmag - min_vmag
-        # Convert vmag to a reliability between 1 and 0.5
+        # Convert vmag to a reliability between 1 and 0.5.
+        # Note vmag is guaranteed to have a value because of if it doesn't the star
+        # isn't added to the original star list.
         # TODO clean this up
         reliability = [1-(cast(float, x.vmag)-min_vmag)/vmag_spread/2 for x in uv_star_list]
         u_outliers = detect_outliers(u_diff_list, reliability, nsigma)

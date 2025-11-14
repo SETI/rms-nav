@@ -170,9 +170,7 @@ class NavMaster(NavBase):
             return
 
         # If obs has a simulated star list, pass it to NavModelStars
-        star_list = None
-        if hasattr(self._obs, 'sim_star_list'):
-            star_list = getattr(self._obs, 'sim_star_list')
+        star_list = getattr(self._obs, 'sim_star_list', None)
         stars_model = NavModelStars('stars', self._obs, star_list=star_list)
         stars_model.create_model()
         self._star_models = [stars_model]
