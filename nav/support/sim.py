@@ -9,7 +9,7 @@ from typing import Optional, cast
 
 import numpy as np
 
-from nav.support.types import NDArrayBoolType, NDArrayFloatType, NDArrayIntType
+from nav.support.types import NDArrayFloatType, NDArrayIntType
 
 
 def create_simulated_body(
