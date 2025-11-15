@@ -8,11 +8,10 @@ from nav.config import DEFAULT_CONFIG, DEFAULT_LOGGER, Config
 from nav.support.time import et_to_utc
 from nav.support.types import PathLike
 
-from .obs_inst import ObsInst
-from .obs_snapshot import ObsSnapshot
+from .obs_snapshot_inst import ObsSnapshotInst
 
 
-class ObsNewHorizonsLORRI(ObsSnapshot, ObsInst):
+class ObsNewHorizonsLORRI(ObsSnapshotInst):
     """Implements an observation of a New Horizons LORRI image.
 
     This class provides specialized functionality for accessing and analyzing New
@@ -24,7 +23,7 @@ class ObsNewHorizonsLORRI(ObsSnapshot, ObsInst):
                   *,
                   config: Optional[Config] = None,
                   extfov_margin_vu: tuple[int, int] | None = None,
-                  **kwargs: Any) -> 'ObsNewHorizonsLORRI':
+                  **_kwargs: Any) -> 'ObsNewHorizonsLORRI':
         """Creates an ObsNewHorizonsLORRI from a New Horizons LORRI image file.
 
         Parameters:
@@ -32,7 +31,7 @@ class ObsNewHorizonsLORRI(ObsSnapshot, ObsInst):
             config: Configuration object to use. If None, uses the default configuration.
             extfov_margin_vu: Optional tuple that overrides the extended field of view margins
                 found in the config.
-            **kwargs: Additional keyword arguments (none for this instrument).
+            **_kwargs: Additional keyword arguments (none for this instrument).
 
         Returns:
             An ObsNewHorizonsLORRI object containing the image data and metadata.

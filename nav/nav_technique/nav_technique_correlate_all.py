@@ -9,7 +9,7 @@ from nav.config import Config
 from nav.nav_model import NavModel, NavModelCombined, NavModelStars
 from nav.support.correlate import navigate_with_pyramid_kpeaks
 from nav.support.misc import mad_std
-from nav.support.types import NDArrayFloatType, NDArrayIntType
+from nav.support.types import MutableStar, NDArrayFloatType, NDArrayIntType
 
 if TYPE_CHECKING:
     from nav.nav_master import NavMaster
@@ -146,6 +146,9 @@ class NavTechniqueCorrelateAll(NavTechnique):
         if not (-obs.extfov_margin_u+1 < self._offset[1] < obs.extfov_margin_u-1 and
                 -obs.extfov_margin_v+1 < self._offset[0] < obs.extfov_margin_v-1):
             self.logger.info('Final offset is outside the extended FOV')
+            self._offset = None
+            self._uncertainty = None
+            self._confidence = None
             return
 
         self._metadata['offset'] = self._offset
@@ -203,7 +206,7 @@ class NavTechniqueCorrelateAll(NavTechnique):
         u_diff_list = []
         v_diff_list = []
         uv_star_list = []
-        new_star_list = copy.deepcopy(star_model.star_list)
+        new_star_list: list[MutableStar] = copy.deepcopy(star_model.star_list)
         for star in new_star_list:
             if star.conflicts:
                 continue
@@ -273,8 +276,11 @@ class NavTechniqueCorrelateAll(NavTechnique):
         min_vmag = 6  # TODO Fix this
         max_vmag = obs.star_max_usable_vmag()
         vmag_spread = max_vmag - min_vmag
-        # Convert vmag to a reliability between 1 and 0.5
-        reliability = [1-(x.vmag-min_vmag)/vmag_spread/2 for x in uv_star_list]
+        # Convert vmag to a reliability between 1 and 0.5.
+        # Note vmag is guaranteed to have a value because of if it doesn't the star
+        # isn't added to the original star list.
+        # TODO clean this up
+        reliability = [1-(cast(float, x.vmag)-min_vmag)/vmag_spread/2 for x in uv_star_list]
         u_outliers = detect_outliers(u_diff_list, reliability, nsigma)
         v_outliers = detect_outliers(v_diff_list, reliability, nsigma)
         final_u_diff_list = []
@@ -321,8 +327,9 @@ class NavTechniqueCorrelateAll(NavTechnique):
                          f'median {final_v_diff_median:6.3f} +/- {final_v_diff_mad:6.3f}')
 
         # Update the offset with the median difference
-        refined_offset = (offset[0] + final_v_diff_median, offset[1] + final_u_diff_median)
-        refined_sigma = (np.std(final_v_diff_list), np.std(final_u_diff_list))
+        refined_offset = (float(offset[0] + final_v_diff_median),
+                          float(offset[1] + final_u_diff_median))
+        refined_sigma = (float(np.std(final_v_diff_list)), float(np.std(final_u_diff_list)))
 
         self.logger.info('Refined offset: '
                          f'dU {refined_offset[1]:.3f} +/- {refined_sigma[1]:.3f}, '

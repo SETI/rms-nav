@@ -5,6 +5,7 @@ mypy
 myst-parser
 numpy>=2.2.0
 pyinstrument  # For visualizing profiles
+PyQt6
 pytest
 pytest-cov
 pytest-profiling

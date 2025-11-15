@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 import copy
 
 import tkinter as tk
@@ -9,7 +7,6 @@ from nav.support.image import draw_rect
 from nav.support.time import now_dt
 _DEBUG_STARS_MODEL_IMGDISP = False
 
-import time
 from typing import Any, Optional, cast
 
 import numpy as np
@@ -17,7 +14,6 @@ import numpy as np
 from oops import Event, Meshgrid, Observation
 from oops.backplane import Backplane
 import polymath
-from psfmodel.gaussian import GaussianPSF
 from starcat import (SCLASS_TO_SURFACE_TEMP,
                      SCLASS_TO_B_MINUS_V,
                      SpiceStarCatalog,
@@ -28,23 +24,28 @@ from starcat import (SCLASS_TO_SURFACE_TEMP,
 from nav.annotation import (Annotation,
                             Annotations,
                             AnnotationTextInfo,
+                            TextLocInfo,
                             TEXTINFO_LEFT,
                             TEXTINFO_RIGHT,
                             TEXTINFO_BOTTOM,
-                            TEXTINFO_TOP)
+                            TEXTINFO_TOP,
+                            TEXTINFO_TOP_LEFT,
+                            TEXTINFO_TOP_RIGHT,
+                            TEXTINFO_BOTTOM_LEFT,
+                            TEXTINFO_BOTTOM_RIGHT)
 from nav.config import Config
 from nav.support.flux import clean_sclass
-from nav.support.types import NDArrayFloatType
+from nav.support.types import MutableStar
 
 from .nav_model import NavModel
 
 
-_STAR_CATALOG_UCAC4 = None
-_STAR_CATALOG_TYCHO2 = None
-_STAR_CATALOG_YBSC = None
+_STAR_CATALOG_UCAC4: UCAC4StarCatalog | None = None
+_STAR_CATALOG_TYCHO2: SpiceStarCatalog | None = None
+_STAR_CATALOG_YBSC: YBSCStarCatalog | None = None
 
 
-def _get_star_catalog_ucac4():
+def _get_star_catalog_ucac4() -> UCAC4StarCatalog:
     """Get UCAC4 star catalog, creating it lazily."""
     global _STAR_CATALOG_UCAC4
     if _STAR_CATALOG_UCAC4 is None:
@@ -52,7 +53,7 @@ def _get_star_catalog_ucac4():
     return _STAR_CATALOG_UCAC4
 
 
-def _get_star_catalog_tycho2():
+def _get_star_catalog_tycho2() -> SpiceStarCatalog:
     """Get Tycho-2 star catalog, creating it lazily."""
     global _STAR_CATALOG_TYCHO2
     if _STAR_CATALOG_TYCHO2 is None:
@@ -60,7 +61,7 @@ def _get_star_catalog_tycho2():
     return _STAR_CATALOG_TYCHO2
 
 
-def _get_star_catalog_ybsc():
+def _get_star_catalog_ybsc() -> YBSCStarCatalog:
     """Get YBSC star catalog, creating it lazily."""
     global _STAR_CATALOG_YBSC
     if _STAR_CATALOG_YBSC is None:
@@ -73,7 +74,7 @@ class NavModelStars(NavModel):
                  name: str,
                  obs: Observation,
                  *,
-                 star_list: Optional[list[Star]] = None,
+                 star_list: Optional[list[MutableStar]] = None,
                  config: Optional[Config] = None) -> None:
         """Creates a navigation model for stars.
 
@@ -88,16 +89,16 @@ class NavModelStars(NavModel):
         super().__init__(name, obs, config=config)
 
         self._obs = obs
-        self._conflict_body_list = None
+        self._conflict_body_list: list[str] | None = None
         self._star_list = star_list
         self._stars_config = self._config.stars
 
     @property
-    def star_list(self) -> list[Star]:
+    def star_list(self) -> list[MutableStar]:
         """Return the list of stars in the model."""
-        return self._star_list
+        return self._star_list or []
 
-    def _aberrate_star(self, star: Star) -> None:
+    def _aberrate_star(self, star: MutableStar) -> None:
         """Update the RA,DEC position of a star with stellar aberration."""
 
         obs = self._obs
@@ -113,18 +114,18 @@ class NavModelStars(NavModel):
         star.dec = abb_dec.vals
 
     @staticmethod
-    def _star_short_info(star: Star) -> str:
+    def _star_short_info(star: MutableStar) -> str:
         """Return a short string containing information about a star suitable for logging."""
         return ('Star %6s/%9s U %9.3f+/-%7.3f V %9.3f+/-%7.3f VMAG %6.3f JBMAG %6.3f '
-                'JVMAG %6.3f SCLASS %3s TEMP %6d DN %7.2f CONFLICT %s') % (
+                'JVMAG %6.3f SCLASS %3s TEMP %6.0f DN %7.2f CONFLICT %s') % (
                     star.catalog_name, star.pretty_name,
                     star.u, abs(star.move_u),
                     star.v, abs(star.move_v),
-                    star.vmag,
+                    -1.0 if star.vmag is None else star.vmag,
                     0 if star.johnson_mag_b is None else star.johnson_mag_b,
                     0 if star.johnson_mag_v is None else star.johnson_mag_v,
                     clean_sclass(star.spectral_class),
-                    0 if star.temperature is None else star.temperature,
+                    0.0 if star.temperature is None else star.temperature,
                     0,
                     star.conflicts) # TODO star.dn)
 
@@ -137,7 +138,7 @@ class NavModelStars(NavModel):
                             mag_min: float,
                             mag_max: float,
                             radec_movement: Optional[tuple[float, float]] = None,
-                            **kwargs: Any) -> list[Star]:
+                            **kwargs: Any) -> list[MutableStar]:
         """Return a list of stars with the given constraints.
 
         Parameters:
@@ -182,37 +183,39 @@ class NavModelStars(NavModel):
         # Get a list of all reasonable stars within the given magnitude range
         # from the selected catalog.
         if catalog_name == 'ucac4':
-            star_list1 = list(
+            star_list1 = cast(list[MutableStar], list(
                 _get_star_catalog_ucac4().find_stars(
                     allow_double=True,
                     allow_galaxy=False,
                     ra_min=ra_min, ra_max=ra_max,
                     dec_min=dec_min, dec_max=dec_max,
                     vmag_min=mag_min, vmag_max=mag_max,
-                    **kwargs))
+                    **kwargs)))
 
         elif catalog_name == 'tycho2':
-            star_list1 = list(
+            star_list1 = cast(list[MutableStar], list(
                 _get_star_catalog_tycho2().find_stars(
                     allow_double=True,
                     ra_min=ra_min, ra_max=ra_max,
                     dec_min=dec_min, dec_max=dec_max,
                     vmag_min=mag_min, vmag_max=mag_max,
-                    **kwargs))
+                    **kwargs)))
             for star in star_list1:
                 star.johnson_mag_v = None
                 star.johnson_mag_b = None
 
         elif catalog_name == 'ybsc':
-            star_list1 = list(
+            star_list1 = cast(list[MutableStar], list(
                 _get_star_catalog_ybsc().find_stars(
                     allow_double=True,
                     ra_min=ra_min, ra_max=ra_max,
                     dec_min=dec_min, dec_max=dec_max,
                     vmag_min=mag_min, vmag_max=mag_max,
-                    **kwargs))
+                    **kwargs)))
             for star in star_list1:
                 # YBSC only includes the b_v difference so we can calculate mag_b based on mag_v
+                if star.vmag is None:
+                    continue
                 star.johnson_mag_v = star.vmag
                 if star.b_v is None:
                     star.johnson_mag_b = star.johnson_mag_v
@@ -233,9 +236,9 @@ class NavModelStars(NavModel):
 
         default_star_class = cast(str, self._stars_config.default_star_class)
 
-        star_list2 = []
+        star_list2: list[MutableStar] = []
         for star in star_list1:
-            if star.ra is None or star.dec is None:
+            if star.ra is None or star.dec is None or star.vmag is None:
                 continue
             star.catalog_name = catalog_name
             star.pretty_name = str(star.unique_number)
@@ -245,7 +248,7 @@ class NavModelStars(NavModel):
                     star.pretty_name = ' '.join(star.name.split())
             except AttributeError:
                 star.name = ''
-            star.conflicts: str = ''
+            star.conflicts = ''
             star.temperature_faked = False
             star.johnson_mag_faked = False
             star.psf_size = obs.star_psf_size(star)
@@ -260,18 +263,23 @@ class NavModelStars(NavModel):
                 star.johnson_mag_faked = True
             if self._stars_config.stellar_aberration:
                 self._aberrate_star(star)
-            star.dn = 2.512 ** -(star.vmag-4)  # TODO
+            star.dn = 2.512 ** -(star.vmag - 4)  # TODO
             star_list2.append(star)
 
         # Eliminate stars that are not actually in the FOV, including the PSF size
         # margin beyond the edge
 
-        ra_dec_pm_list = [x.ra_dec_with_pm(obs.midtime) for x in star_list2]
+        ra_dec_pm_list = cast(list[tuple[float, float]],
+                              [cast(tuple[float, float], x.ra_dec_with_pm(obs.midtime))
+                               for x in star_list2])
 
+        ra_dec_list: list[tuple[float, float]]
         if self._stars_config.proper_motion:
             ra_dec_list = ra_dec_pm_list
         else:
-            ra_dec_list = [(x.ra, x.dec) for x in star_list2]
+            ra_dec_list = [
+                (cast(float, x.ra), cast(float, x.dec)) for x in star_list2
+            ]
         ra_list = polymath.Scalar([x[0] for x in ra_dec_list])
         dec_list = polymath.Scalar([x[1] for x in ra_dec_list])
 
@@ -297,7 +305,7 @@ class NavModelStars(NavModel):
         u2_list = u2_list.vals
         v2_list = v2_list.vals
 
-        star_list3 = []
+        star_list3: list[MutableStar] = []
         for star, (ra_pm, dec_pm),u, v, u1, v1, u2, v2 in zip(star_list2,
                                               ra_dec_pm_list,
                                               u_list, v_list,
@@ -340,7 +348,7 @@ class NavModelStars(NavModel):
 
     def stars_list_for_obs(self,
                            radec_movement: Optional[tuple[float, float]] = None,
-                           **kwargs) -> list[Star]:
+                           **kwargs: Any) -> list[MutableStar]:
         """Return a list of stars in the FOV of the obs.
 
         Parameters:
@@ -390,7 +398,7 @@ class NavModelStars(NavModel):
                               f'{radec_movement[1]:.5f}, '
                               f'VMAG range {mag_vmin:.2f} to {mag_vmax:.2f}')
 
-        prev_star_list = []
+        prev_star_list: list[MutableStar] = []
 
         # Go through the catalogs in order of precedence, get the complete star list from each,
         # and then check for duplicates and overlapping stars.
@@ -434,7 +442,8 @@ class NavModelStars(NavModel):
                             break
                         if (abs(prev_star.dec_pm - star.dec_pm) < duplicate_ra_dec_threshold and
                             abs(prev_star.ra_pm - star.ra_pm) < duplicate_ra_dec_threshold and
-                            abs(prev_star.vmag - star.vmag) < duplicate_vmag_threshold):
+                            abs((cast(float, prev_star.vmag)) - (cast(float, star.vmag))) <
+                            duplicate_vmag_threshold):
                             # Some catalogs like YBSC have a nice name, but others don't.
                             # If we're getting rid of a star with a name in favor of a
                             # star without a name, keep the name of the star with a name.
@@ -473,7 +482,8 @@ class NavModelStars(NavModel):
                     v_gap = (full_star_list[i].psf_size[0] / 2 + full_star_list[j].psf_size[0] / 2)
                     if (abs(full_star_list[i].v - full_star_list[j].v) < v_gap and
                         abs(full_star_list[i].u - full_star_list[j].u) < u_gap):
-                        if (full_star_list[j].vmag - full_star_list[i].vmag <
+                        if (cast(float, full_star_list[j].vmag) -
+                            cast(float, full_star_list[i].vmag) <
                             overlapping_vmag_threshold):
                             # Stars overlap and VMAGs are too close so the stars will get in each
                             # other's way
@@ -517,10 +527,9 @@ class NavModelStars(NavModel):
 
     def create_model(self,
                      *,
-                     ignore_conflicts: bool = False
-                     ) -> tuple[NDArrayFloatType | None,
-                                dict[str, Any],
-                                Annotation | None]:
+                     always_create_model: bool = False,
+                     never_create_model: bool = False,
+                     create_annotations: bool = True) -> None:
         """Create a model containing nothing but stars.
 
         Individual stars are modeled using the PSF specified by the associated Inst class.
@@ -543,21 +552,24 @@ class NavModelStars(NavModel):
         log_level = self._config.general.get('log_level_model_stars')
         with self.logger.open(f'CREATE STARS MODEL', level=log_level):
             # TODO Deal with star movement
-            ret = self._create_model(metadata, None, ignore_conflicts)
+            self._create_model(metadata, None, ignore_conflicts=False,
+                               always_create_model=always_create_model,
+                               never_create_model=never_create_model,
+                               create_annotations=create_annotations)
 
         end_time = now_dt()
         metadata['end_time'] = end_time.isoformat()
         metadata['elapsed_time_sec'] = (end_time - start_time).total_seconds()
-
-        return ret
+        return None
 
     def _create_model(self,
                       metadata: dict[str, Any],
                       ra_dec_predicted: Optional[tuple[float, ...]],
-                      ignore_conflicts: bool = False
-                      ) -> tuple[NDArrayFloatType | None,
-                                 dict[str, Any],
-                                 Annotation | None]:
+                      ignore_conflicts: bool = False,
+                      always_create_model: bool = False,
+                      never_create_model: bool = False,
+                      create_annotations: bool = True
+                      ) -> None:
 
         stars_config = self._config.stars
 
@@ -578,7 +590,7 @@ class NavModelStars(NavModel):
 
         # TODO We need to fix this up along with other models to handle the u,v
         # coordinates after the offset procedure is done.
-        stars_metadata = []
+        stars_metadata: list[dict[str, Any]] = []
         metadata['star_list'] = stars_metadata
         for star in star_list:
             stars_metadata.append({
@@ -625,17 +637,17 @@ class NavModelStars(NavModel):
                 v_int >= model.shape[0]-psf_size_half_v):
                 continue
 
-            psf = psf.eval_rect((psf_size_half_v*2+1, psf_size_half_u*2+1),
-                                 offset=(v_frac, u_frac),
-                                 scale=star.dn,
-                                 movement=(star.move_v, star.move_u),
-                                 movement_granularity=move_gran)
+            star_psf = psf.eval_rect((psf_size_half_v*2+1, psf_size_half_u*2+1),
+                                     offset=(v_frac, u_frac),
+                                     scale=star.dn,
+                                     movement=(star.move_v, star.move_u),
+                                     movement_granularity=move_gran)
 
             model[v_int-psf_size_half_v:v_int+psf_size_half_v+1,
-                  u_int-psf_size_half_u:u_int+psf_size_half_u+1] += psf
+                  u_int-psf_size_half_u:u_int+psf_size_half_u+1] += star_psf
 
         if _DEBUG_STARS_MODEL_IMGDISP:
-            ImageDisp([model],
+            cast(Any, ImageDisp)([model],
                     canvas_size=(1024,1024),
                     enlarge_limit=10,
                     auto_update=True)
@@ -643,73 +655,79 @@ class NavModelStars(NavModel):
 
         # Create the text labels
 
-        text_info_list = []
-        star_avoid_mask = self._obs.make_extfov_false()
-        star_overlay = self._obs.make_extfov_false()
+        if create_annotations:
+            text_info_list = []
+            star_avoid_mask = self._obs.make_extfov_false()
+            star_overlay = self._obs.make_extfov_false()
 
-        stretch_regions = []
+            stretch_regions = []
 
-        for star in star_list:
-            if (star.conflicts and
-                star.conflicts != 'STAR' and
-                not star.conflicts.startswith('REFINEMENT')):
-                # Don't label stars that are blocked by bodies or rings but keep stars that
-                # are just near other stars
-                continue
+            for star in star_list:
+                if (star.conflicts and
+                    star.conflicts != 'STAR' and
+                    not star.conflicts.startswith('REFINEMENT')):
+                    # Don't label stars that are blocked by bodies or rings but keep stars that
+                    # are just near other stars
+                    continue
 
-            # Should NOT be rounded for plotting, since all of coord
-            # X to X+0.9999 is the same pixel
-            u = int(star.u + self._obs.extfov_margin_u)
-            v = int(star.v + self._obs.extfov_margin_v)
+                # Should NOT be rounded for plotting, since all of coord
+                # X to X+0.9999 is the same pixel
+                u = int(star.u + self._obs.extfov_margin_u)
+                v = int(star.v + self._obs.extfov_margin_v)
 
-            v_halfsize = (star.psf_size[0] // 2) + 2
-            u_halfsize = (star.psf_size[1] // 2) + 2
+                v_halfsize = (star.psf_size[0] // 2) + 2
+                u_halfsize = (star.psf_size[1] // 2) + 2
 
-            u_min = u - u_halfsize
-            v_min = v - v_halfsize
-            u_max = u + u_halfsize
-            v_max = v + v_halfsize
-            u_min, v_min = self._obs.clip_extfov(u_min, v_min)
-            u_max, v_max = self._obs.clip_extfov(u_max, v_max)
+                u_min = u - u_halfsize
+                v_min = v - v_halfsize
+                u_max = u + u_halfsize
+                v_max = v + v_halfsize
+                u_min, v_min = self._obs.clip_extfov(u_min, v_min)
+                u_max, v_max = self._obs.clip_extfov(u_max, v_max)
 
-            star_avoid_mask[v_min:v_max+1, u_min:u_max+1] = True
-            dot_spacing = 2 if star.conflicts.startswith('REFINEMENT') else 1
-            draw_rect(star_overlay, True, u, v, u_halfsize, v_halfsize, dot_spacing=dot_spacing)
+                star_avoid_mask[v_min:v_max+1, u_min:u_max+1] = True
+                dot_spacing = 2 if star.conflicts.startswith('REFINEMENT') else 1
+                draw_rect(star_overlay, True, u, v, u_halfsize, v_halfsize, dot_spacing=dot_spacing)
 
-            # Create the region of the image that should be contrast-stretched separately
-            stretch_region = self._obs.make_extfov_false()
-            stretch_region[v_min:v_max+1, u_min:u_max+1] = True
-            # Note that packbits pads the array with zeros to the nearest multiple of 8
-            # in each dimension, so when unpacking the array we have to clip the array
-            compressed_stretch_region = np.packbits(stretch_region, axis=0)
-            stretch_regions.append(compressed_stretch_region)
+                # Create the region of the image that should be contrast-stretched separately
+                stretch_region = self._obs.make_extfov_false()
+                stretch_region[v_min:v_max+1, u_min:u_max+1] = True
+                # Note that packbits pads the array with zeros to the nearest multiple of 8
+                # in each dimension, so when unpacking the array we have to clip the array
+                compressed_stretch_region = np.packbits(stretch_region, axis=0)
+                stretch_regions.append(compressed_stretch_region)
 
-            star_str1 = star.pretty_name[:10]
-            star_str2 = f'{star.vmag:.3f} {clean_sclass(star.spectral_class)}'
+                star_str1 = star.pretty_name[:10]
+                star_str2 = f'{star.vmag:.3f} {clean_sclass(star.spectral_class or "")}'
 
-            text_loc = []
+                text_loc: list[TextLocInfo] = []
 
-            label_margin = u_halfsize + 3
+                label_margin = u_halfsize + 3
 
-            text_loc.append((TEXTINFO_BOTTOM, v + label_margin, u))
-            text_loc.append((TEXTINFO_TOP, v - label_margin, u))
-            text_loc.append((TEXTINFO_LEFT, v, u - label_margin))
-            text_loc.append((TEXTINFO_RIGHT, v, u + label_margin))
+                text_loc.append(TextLocInfo(TEXTINFO_BOTTOM, v + label_margin, u))
+                text_loc.append(TextLocInfo(TEXTINFO_TOP, v - label_margin, u))
+                text_loc.append(TextLocInfo(TEXTINFO_LEFT, v, u - label_margin))
+                text_loc.append(TextLocInfo(TEXTINFO_RIGHT, v, u + label_margin))
+                text_loc.append(TextLocInfo(TEXTINFO_TOP_LEFT, v - label_margin, u - label_margin))
+                text_loc.append(TextLocInfo(TEXTINFO_TOP_RIGHT, v - label_margin, u + label_margin))
+                text_loc.append(TextLocInfo(TEXTINFO_BOTTOM_LEFT, v + label_margin, u - label_margin))
+                text_loc.append(TextLocInfo(TEXTINFO_BOTTOM_RIGHT, v + label_margin, u + label_margin))
 
-            text_info = AnnotationTextInfo(f'{star_str1}\n{star_str2}',
-                                           ref_vu=(v, u),
-                                           text_loc=text_loc,
-                                           font=self._stars_config.label_font,
-                                           font_size=self._stars_config.label_font_size,
-                                           color=self._stars_config.label_font_color)
-            text_info_list.append(text_info)
+                text_info = AnnotationTextInfo(f'{star_str1}\n{star_str2}',
+                                            ref_vu=(v, u),
+                                            text_loc=text_loc,
+                                            font=self._stars_config.label_font,
+                                            font_size=self._stars_config.label_font_size,
+                                            color=self._stars_config.label_font_color)
+                text_info_list.append(text_info)
 
-        annotation = Annotation(self.obs, star_overlay, self._stars_config.label_star_color,
-                                thicken_overlay=0,
-                                avoid_mask=star_avoid_mask,
-                                text_info=text_info_list)
-        annotations = Annotations()
-        annotations.add_annotations(annotation)
+            annotation = Annotation(self.obs, star_overlay, self._stars_config.label_star_color,
+                                    thicken_overlay=0,
+                                    avoid_mask=star_avoid_mask,
+                                    text_info=text_info_list)
+            annotations = Annotations()
+            annotations.add_annotations(annotation)
+            self._annotations = annotations
 
         self._model_img = model
         self._model_mask = self._model_img != 0
@@ -718,7 +736,6 @@ class NavModelStars(NavModel):
         self._uncertainty = 0.
         self._confidence = 1.
         self._stretch_regions = stretch_regions
-        self._annotations = annotations
         self._metadata = metadata
 
         self.logger.debug(f'  Star model min: {np.min(self._model_img)}, max: {np.max(self._model_img)}')
@@ -730,8 +747,8 @@ class NavModelStars(NavModel):
 #===============================================================================
 
     def _mark_conflicts_obj(self,
-                            star: Star,
-                            rings_can_conflict: bool) -> None:  # TODO
+                            star: MutableStar,
+                            rings_can_conflict: bool) -> bool:  # TODO
         """Check if a star conflicts with known bodies or rings.
 
         Sets star.conflicts to a string describing why the Star conflicted.
@@ -748,8 +765,10 @@ class NavModelStars(NavModel):
         config = self._config
 
         if self._conflict_body_list is None:
-            self._conflict_body_list = ([obs.closest_planet] +
-                                        config.satellites(obs.closest_planet))
+            closest = obs.closest_planet
+            body_list: list[str] = ([closest] if closest is not None else [])
+            body_list += config.satellites(closest or '')
+            self._conflict_body_list = body_list
 
         # Create a Meshgrid for the area around the star. Give slop on each side - we
         # don't want a star to even be close to a large object.

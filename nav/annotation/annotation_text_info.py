@@ -20,6 +20,10 @@ TEXTINFO_TOP_ARROW = 'top_arrow'
 TEXTINFO_BOTTOM = 'bottom'
 TEXTINFO_BOTTOM_ARROW = 'bottom_arrow'
 TEXTINFO_CENTER = 'center'
+TEXTINFO_TOP_LEFT = 'top_left'
+TEXTINFO_TOP_RIGHT = 'top_right'
+TEXTINFO_BOTTOM_LEFT = 'bottom_left'
+TEXTINFO_BOTTOM_RIGHT = 'bottom_right'
 
 TextLocInfo = namedtuple('TextLocInfo', ['label', 'label_v', 'label_u'])
 
@@ -232,6 +236,18 @@ class AnnotationTextInfo:
             elif text_pos == TEXTINFO_CENTER:
                 v = text_v - text_width_v // 2
                 u = text_u - text_width_u // 2
+            elif text_pos == TEXTINFO_TOP_LEFT:
+                v = text_v - text_width_v
+                u = text_u - text_width_u
+            elif text_pos == TEXTINFO_TOP_RIGHT:
+                v = text_v - text_width_v
+                u = text_u
+            elif text_pos == TEXTINFO_BOTTOM_LEFT:
+                v = text_v
+                u = text_u - text_width_u
+            elif text_pos == TEXTINFO_BOTTOM_RIGHT:
+                v = text_v
+                u = text_u
             else:
                 raise ValueError(f'Unknown text position: {text_pos}')
 

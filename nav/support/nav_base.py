@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Optional
 
 from pdslogger import PdsLogger
 
@@ -17,7 +17,14 @@ class NavBase:
 
     def __init__(self,
                  *,
-                 config: Optional[Config] = None) -> None:
+                 config: Optional[Config] = None,
+                 **kwargs: Any) -> None:
+        """Initializes a new NavBase instance.
+
+        Parameters:
+            config: Configuration object to use. If None, uses DEFAULT_CONFIG.
+            **kwargs: Additional keyword arguments used by subclasses.
+        """
 
         self._config = config or DEFAULT_CONFIG
         self._logger = DEFAULT_LOGGER

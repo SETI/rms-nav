@@ -9,10 +9,12 @@ from nav.annotation import Annotations
 from nav.config import Config
 from nav.nav_model import (NavModel,
                            NavModelBody,
+                           NavModelBodySimulated,
                            NavModelCombined,
                            NavModelRings,
                            NavModelStars,
                            NavModelTitan)
+from nav.nav_model.nav_model_body_base import NavModelBodyBase
 from nav.nav_technique import NavTechniqueCorrelateAll
 from nav.support.nav_base import NavBase
 from nav.support.types import NDArrayFloatType, NDArrayUint8Type
@@ -22,7 +24,7 @@ class NavMaster(NavBase):
     """Coordinates the overall navigation process using multiple models and techniques.
 
     This class manages the creation of different navigation models (e.g. stars, bodies,
-    rings, andTitan), combines them appropriately, and applies navigation techniques to
+    rings, and Titan), combines them appropriately, and applies navigation techniques to
     determine the final offset between predicted and actual positions.
 
     The floating point offset is of form (dv, du). If an object is predicted by the SPICE
@@ -67,7 +69,7 @@ class NavMaster(NavBase):
         self._final_confidence: float | None = None
         self._offsets: dict[str, Any] = {}  # TODO Type
         self._star_models: list[NavModelStars] | None = None
-        self._body_models: list[NavModelBody] | None = None
+        self._body_models: list[NavModelBodyBase] | None = None
         self._ring_models: list[NavModelRings] | None = None
         self._titan_models: list[NavModelTitan] | None = None
 
@@ -91,7 +93,6 @@ class NavMaster(NavBase):
             spice_kernels = self.obs.spice_kernels
         except Exception:
             self._metadata['spice_kernels'] = 'Not supported by instrument'  # TODO
-            pass
         else:
             self._metadata['spice_kernels'] = spice_kernels
 
@@ -120,7 +121,7 @@ class NavMaster(NavBase):
         return self._star_models
 
     @property
-    def body_models(self) -> list[NavModelBody]:
+    def body_models(self) -> list[NavModelBodyBase]:
         """Returns the list of planetary body navigation models, computing them if necessary."""
         self.compute_body_models()
         assert self._body_models is not None
@@ -168,7 +169,9 @@ class NavMaster(NavBase):
             # Keep cached version
             return
 
-        stars_model = NavModelStars('stars', self._obs)
+        # If obs has a simulated star list, pass it to NavModelStars
+        star_list = getattr(self._obs, 'sim_star_list', None)
+        stars_model = NavModelStars('stars', self._obs, star_list=star_list)
         stars_model.create_model()
         self._star_models = [stars_model]
         self._metadata['models']['star_model'] = stars_model.metadata
@@ -197,7 +200,11 @@ class NavMaster(NavBase):
         else:
             body_list = []
 
-        large_body_dict = obs.inventory(body_list, return_type='full')
+        if obs.is_simulated:
+            large_body_dict = obs.sim_inventory
+        else:
+            large_body_dict = obs.inventory(body_list, return_type='full')
+
         # Make a list sorted by range, with the closest body first, limiting to bodies
         # that are actually in the FOV
         def _body_in_fov(obs: Observation,
@@ -229,16 +236,23 @@ class NavMaster(NavBase):
         self._body_models = []
         self._metadata['models']['body_models'] = {}
 
-        for body, inventory in large_bodies_by_range:
-            model_name = f'body:{body.lower()}'
-            if not any(fnmatch.fnmatch(model_name, x) for x in self._nav_models_to_use):
+        for body_name, inventory in large_bodies_by_range:
+            model_name = f'body:{body_name.upper()}'
+            if not any(fnmatch.fnmatch(model_name.lower(), x.lower())
+                       for x in self._nav_models_to_use):
                 continue
-            body_model = NavModelBody(model_name, obs, body,
-                                      inventory=inventory,
-                                      config=config)
+            if obs.is_simulated:
+                sim_params = obs.sim_body_models[body_name]
+                body_model: NavModelBodyBase = NavModelBodySimulated(model_name, obs,
+                                                                     body_name, sim_params,
+                                                                     config=config)
+            else:
+                body_model = NavModelBody(model_name, obs, body_name,
+                                          inventory=inventory,
+                                          config=config)
             body_model.create_model()
             self._body_models.append(body_model)
-            self._metadata['models']['body_models'][body] = body_model.metadata
+            self._metadata['models']['body_models'][body_name] = body_model.metadata
 
     def compute_ring_models(self) -> None:
         """Creates navigation models for planetary rings in the observation.
@@ -247,7 +261,7 @@ class NavMaster(NavBase):
         """
 
         if (self._nav_models_to_use is not None and
-            not any(fnmatch.fnmatch('rings', x) for x in self._nav_models_to_use)):
+            not any(fnmatch.fnmatch('rings', x.lower()) for x in self._nav_models_to_use)):
             self._ring_models = []
             return
 
@@ -266,7 +280,7 @@ class NavMaster(NavBase):
         """
 
         if (self._nav_models_to_use is not None and
-            not any(fnmatch.fnmatch('titan', x) for x in self._nav_models_to_use)):
+            not any(fnmatch.fnmatch('titan', x.lower()) for x in self._nav_models_to_use)):
             self._titan_models = []
             return
 
@@ -303,7 +317,8 @@ class NavMaster(NavBase):
 
         self._metadata['navigation_techniques'] = {}
 
-        if any(fnmatch.fnmatch('correlate_all', x) for x in self._nav_techniques_to_use):
+        if any(fnmatch.fnmatch('correlate_all', x.lower())
+               for x in self._nav_techniques_to_use):
             nav_all = NavTechniqueCorrelateAll(self)
             nav_all.navigate()
             correlate_all_combined_model = nav_all.combined_model()

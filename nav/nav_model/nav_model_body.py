@@ -2,35 +2,27 @@ import math
 from typing import Any, Optional
 
 import numpy as np
-import scipy.ndimage as ndimage
 # import matplotlib.pyplot as plt
 
 from oops import Meshgrid, Observation
 from oops.backplane import Backplane
 import polymath
 
-from nav.annotation import (Annotation,
-                            Annotations,
-                            AnnotationTextInfo,
-                            TextLocInfo,
-                            TEXTINFO_LEFT_ARROW,
-                            TEXTINFO_RIGHT_ARROW,
-                            TEXTINFO_BOTTOM_ARROW,
-                            TEXTINFO_TOP_ARROW)
 from nav.config import Config
+from nav.support.attrdict import AttrDict
 from nav.support.constants import HALFPI
 from nav.support.image import (filter_downsample,
                                shift_array)
 from nav.support.time import now_dt
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
-from .nav_model import NavModel
+from .nav_model_body_base import NavModelBodyBase
 
 # Sometimes the bounding box returned by "inventory" is not quite big enough
 BODIES_POSITION_SLOP_FRAC = 0.05  # TODO Move to config
 
 
-class NavModelBody(NavModel):
+class NavModelBody(NavModelBodyBase):
     def __init__(self,
                  name: str,
                  obs: Observation,
@@ -109,7 +101,7 @@ class NavModelBody(NavModel):
         obs = self.obs
         body_name = self._body_name
         ext_bp = self.obs.ext_bp
-        config = self._config.bodies
+        body_config = self._config.bodies
         inventory = self._inventory
         metadata = self._metadata
 
@@ -153,7 +145,7 @@ class NavModelBody(NavModel):
         bb_area = inventory['u_pixel_size'] * inventory['v_pixel_size']
         self._logger.info(f'Pixel size {inventory["u_pixel_size"]:.2f} x '
                           f'{inventory["v_pixel_size"]:.2f}, bounding box area {bb_area:.2f}')
-        if bb_area >= config.min_bounding_box_area:
+        if bb_area >= body_config.min_bounding_box_area:
             metadata['size_ok'] = True
         else:
             metadata['size_ok'] = False
@@ -206,7 +198,7 @@ class NavModelBody(NavModel):
         v_center = (v_min + v_max) // 2
         # width = u_max - u_min + 1
         # height = v_max - v_min + 1
-        # curvature_threshold_frac = config.curvature_threshold_frac
+        # curvature_threshold_frac = body_config.curvature_threshold_frac
         # curvature_threshold_pix = config.curvature_threshold_pixels
         # width_threshold = max(width * curvature_threshold_frac,
         #                       curvature_threshold_pix)
@@ -254,21 +246,80 @@ class NavModelBody(NavModel):
         if never_create_model:
             return
 
+        model_img, limb_mask = self._create_backplane_model(body_name=body_name, obs=obs,
+                                                            body_config=body_config,
+                                                            inventory=inventory,
+                                                            u_min=u_min, u_max=u_max,
+                                                            v_min=v_min, v_max=v_max)
+
+        body_mask = model_img != 0
+
+        # This is much faster than calculating the range at each pixel and we never
+        # need to know the precise range at that level of detail
+        self._range = obs.make_extfov_zeros()
+        self._range[:, :] = inventory['range'] * body_mask
+        self._range[self._range == 0] = math.inf
+
+        self._confidence = 1.
+        metadata['confidence'] = 1.
+
+        ########################################################################
+        # Figure out all the location where we might want to label the body
+        ########################################################################
+
+        if create_annotations:
+            self._annotations = self._create_annotations(u_center, v_center, model_img,
+                                                         limb_mask, body_mask)
+
+        self._model_img = model_img
+        self._model_mask = body_mask
+
+        # plt.imshow(self._model_img)
+        # plt.figure()
+        # plt.imshow(self._model_mask)
+        # plt.show()
+
+        self._logger.debug(f'  Body model min: {np.min(self._model_img)}, '
+                           f'max: {np.max(self._model_img)}')
+
+    def _create_backplane_model(self,
+                                *,
+                                body_name: str,
+                                obs: Observation,
+                                body_config: AttrDict,
+                                inventory: dict[str, Any],
+                                u_min: int,
+                                u_max: int,
+                                v_min: int,
+                                v_max: int) -> tuple[NDArrayFloatType, NDArrayBoolType]:
+        """Create a model for a planetary body using a backplane.
+
+        Parameters:
+            body_name: The name of the planetary body.
+            obs: The observation object containing the image data.
+            body_config: Body configuration dictionary to use.
+            inventory: Dictionary of inventory data.
+            u_min: The minimum U coordinate.
+            u_max: The maximum U coordinate.
+            v_min: The minimum V coordinate.
+            v_max: The maximum V coordinate.
+        """
+
         ########################################################################
         # Make a new Backplane that only covers the body, but oversample it
         # as necessary so we can do anti-aliasing
         ########################################################################
 
-        restr_oversample_u = max(int(np.floor(config.oversample_edge_limit /
+        restr_oversample_u = max(int(np.floor(body_config.oversample_edge_limit /
                                               max(np.ceil(inventory['u_pixel_size']),
                                                   1))),
                                  1)
-        restr_oversample_v = max(int(np.floor(config.oversample_edge_limit /
+        restr_oversample_v = max(int(np.floor(body_config.oversample_edge_limit /
                                               max(np.ceil(inventory['v_pixel_size']),
                                                   1))),
                                  1)
-        restr_oversample_u = min(restr_oversample_u, config.oversample_maximum)
-        restr_oversample_v = min(restr_oversample_v, config.oversample_maximum)
+        restr_oversample_u = min(restr_oversample_u, body_config.oversample_maximum)
+        restr_oversample_v = min(restr_oversample_v, body_config.oversample_maximum)
         self._logger.debug(f'Oversampling by {restr_oversample_u} x {restr_oversample_v}')
         restr_u_min = u_min + 1./(2*restr_oversample_u)
         restr_u_max = u_max + 1 - 1./(2*restr_oversample_u)
@@ -416,7 +467,7 @@ class NavModelBody(NavModel):
         else:
             self._logger.debug('Making Lambert model')
 
-            if config.use_lambert:
+            if body_config.use_lambert:
                 # Make an oversampled Lambert, then downsample to get a nice anti-aliased
                 # edge
                 restr_o_lambert = restr_o_bp.lambert_law(body_name).mvals.filled(0.)
@@ -433,28 +484,11 @@ class NavModelBody(NavModel):
             else:
                 restr_model = restr_body_mask_valid.astype(float)
 
-            if (config.use_albedo and
-                body_name in config.geometric_albedo):
-                albedo = config.geometric_albedo[body_name]
+            if (body_config.use_albedo and
+                body_name in body_config.geometric_albedo):
+                albedo = body_config.geometric_albedo[body_name]
                 self._logger.info(f'Applying albedo {albedo:.6f}')
                 restr_model *= albedo
-
-        # if not used_cartographic:
-        #     if body_name in bodies_config['surface_bumpiness']:
-        #         center_resolution = obs.ext_bp.center_resolution(body_name).vals
-        #         if (center_resolution <
-        #             bodies_config['surface_bumpiness'][body_name]):
-        #             metadata['body_blur'] = (bodies_config[
-        #                                         'surface_bumpiness'][body_name] /
-        #                                 center_resolution)
-        #             metadata['image_blur'] = metadata['body_blur']
-        #             self._logger.info('Resolution %.2f is too high - limb will look '+
-        #                         'bumpy - need to blur by %.5f',
-        #                         center_resolution,
-        #                         metadata['body_blur'])
-        #         else:
-        #             self._logger.info('Resolution %.2f is good enough for a sharp edge',
-        #                         center_resolution)
 
         ########################################################################
         # Put the small model back in the right place in the full-size model
@@ -466,187 +500,5 @@ class NavModelBody(NavModel):
         model_img[model_slice_0, model_slice_1] = restr_model
         limb_mask = obs.make_extfov_false()
         limb_mask[model_slice_0, model_slice_1] = restr_limb_mask
-        body_mask = obs.make_extfov_false()
-        body_mask[:, :] = model_img != 0
 
-        # This is much faster than calculating the range at each pixel and we never
-        # need to know the precise range at that level of detail
-        self._range = obs.make_extfov_zeros()
-        self._range[:, :] = inventory['range'] * body_mask
-        self._range[self._range == 0] = math.inf
-
-        self._confidence = 1.
-        metadata['confidence'] = 1.
-
-        ########################################################################
-        # Figure out all the location where we might want to label the body
-        ########################################################################
-
-        if create_annotations:
-            self._annotations = self._create_annotations(u_center, v_center, model_img,
-                                                         limb_mask, body_mask)
-
-        self._model_img = model_img
-        self._model_mask = body_mask
-
-        # plt.imshow(self._model_img)
-        # plt.figure()
-        # plt.imshow(self._model_mask)
-        # plt.show()
-
-        self._logger.debug(f'  Body model min: {np.min(self._model_img)}, '
-                           f'max: {np.max(self._model_img)}')
-
-    def _create_annotations(self,
-                            u_center: int,
-                            v_center: int,
-                            model: NDArrayFloatType,
-                            limb_mask: NDArrayBoolType,
-                            body_mask: NDArrayBoolType) -> Annotations:
-        """Creates annotation objects for labeling the planetary body in visualizations.
-
-        Parameters:
-            u_center: The center U coordinate of the body in the image.
-            v_center: The center V coordinate of the body in the image.
-            model: The model image array for the body.
-            limb_mask: Boolean mask indicating the limb (edge) of the body.
-            body_mask: Boolean mask indicating the visible portion of the body.
-
-        Returns:
-            A collection of annotations for the body.
-        """
-
-        obs = self._obs
-        body_name = self._body_name
-        config = self._config.bodies
-
-        text_loc: list[TextLocInfo] = []
-        v_center_extfov = v_center + obs.extfov_margin_v
-        u_center_extfov = u_center + obs.extfov_margin_u
-
-        v_center_extfov_clipped = np.clip(v_center_extfov, 0, body_mask.shape[0]-1)
-        u_center_extfov_clipped = np.clip(u_center_extfov, 0, body_mask.shape[1]-1)
-        if not body_mask[v_center_extfov_clipped].any():
-            # Handle case where no body pixels exist at center row
-            body_mask_u_min = 0
-            body_mask_u_max = body_mask.shape[1] - 1
-        else:
-            body_mask_u_min = int(np.argmax(body_mask[v_center_extfov_clipped]))
-            body_mask_u_max = int((body_mask.shape[1] -
-                                  np.argmax(body_mask[v_center_extfov_clipped, ::-1]) - 1))
-        body_mask_v_min = int(np.argmax(body_mask[:, u_center_extfov_clipped]))
-        body_mask_v_max = int((body_mask.shape[0] -
-                              np.argmax(body_mask[::-1, u_center_extfov_clipped]) - 1))
-        body_mask_u_ctr = (body_mask_u_min + body_mask_u_max) // 2
-        body_mask_v_ctr = (body_mask_v_min + body_mask_v_max) // 2
-
-        # Scan the body in +/- V starting at the center of the body in the FOV. For each
-        # V, find the leftmost and rightmost U of the limb and place a label there. This
-        # gives preference to labels centered vertically on the body.
-        # For each label, decide whether it should be a horizontal arrow or a vertical
-        # arrow based on the local curvature of the limb, computed as the angle relative
-        # to the absolute center of the body.
-        for orig_dist in range(0, max(body_mask_v_ctr - body_mask_v_min,
-                                      config.label_scan_v)):
-            for neg in [-1, 1]:
-                dist = orig_dist * neg
-                v = body_mask_v_ctr + dist
-                if not 0 <= v < body_mask.shape[0]:
-                    continue
-
-                # Left side
-                u = int(np.argmax(body_mask[v]))
-                if u > 0:  # u == 0 if body runs off left side
-                    angle = np.rad2deg(
-                        np.arctan2(v-v_center_extfov, u-u_center_extfov)) % 360
-                    if 135 < angle < 225:  # Left side
-                        text_loc.append(TextLocInfo(TEXTINFO_LEFT_ARROW,
-                                                    v,
-                                                    u - config.label_horiz_gap))
-                    elif angle >= 225:  # Top side
-                        text_loc.append(TextLocInfo(TEXTINFO_TOP_ARROW,
-                                                    v - config.label_vert_gap,
-                                                    u))
-                    else:  # Bottom side
-                        text_loc.append(TextLocInfo(TEXTINFO_BOTTOM_ARROW,
-                                                    v + config.label_vert_gap,
-                                                    u))
-
-                # Right side
-                u = body_mask.shape[1] - int(np.argmax(body_mask[v, ::-1])) - 1
-                if u < body_mask.shape[1]-1:  # if body runs off right side
-                    angle = np.rad2deg(
-                        np.arctan2(v-v_center_extfov, u-u_center_extfov)) % 360
-                    if angle > 315 or angle < 45:  # Right side
-                        text_loc.append(TextLocInfo(TEXTINFO_RIGHT_ARROW,
-                                                    v,
-                                                    u + config.label_horiz_gap))
-                    elif angle >= 225:  # Top side
-                        text_loc.append(TextLocInfo(TEXTINFO_TOP_ARROW,
-                                                    v - config.label_vert_gap,
-                                                    u))
-                    else:  # Bottom side
-                        text_loc.append(TextLocInfo(TEXTINFO_BOTTOM_ARROW,
-                                                    v + config.label_vert_gap,
-                                                    u))
-
-                if orig_dist == 0:
-                    # Add in the very top and very bottom here to give them
-                    # priority
-                    text_loc.append(TextLocInfo(TEXTINFO_TOP_ARROW,
-                                                body_mask_v_min - config.label_vert_gap,
-                                                body_mask_u_ctr))
-                    text_loc.append(TextLocInfo(TEXTINFO_BOTTOM_ARROW,
-                                                body_mask_v_max + config.label_vert_gap,
-                                                body_mask_u_ctr))
-                    break  # No need to do +/- with zero
-
-        # Finally, it's possible none of the above worked, especially it the body is
-        # really large in the FOV. So scan through the FOV on a coarse grid, check
-        # if each point is in the body, and add it to the list if so. We work hard
-        # to give priority to points that are near the center of the body in the FOV.
-
-        for v_orig_dist in range(0, body_mask_v_ctr - body_mask_v_min,
-                                 config.label_grid_v):
-            for v_neg in [-1, 1]:
-                v_dist = v_orig_dist * v_neg
-                v = body_mask_v_ctr + v_dist
-                if not 0 <= v < body_mask.shape[0]:
-                    continue
-                for u_orig_dist in range(0, body_mask_u_ctr - body_mask_u_min,
-                                         config.label_grid_u):
-                    for u_neg in [-1, 1]:
-                        u_dist = u_orig_dist * u_neg
-                        u = body_mask_u_ctr + u_dist
-                        if not 0 <= u < body_mask.shape[1]:
-                            continue
-                        if not body_mask[v, u]:
-                            continue
-                        if u < model.shape[1] // 2:
-                            text_loc.append(TextLocInfo(TEXTINFO_LEFT_ARROW, v, u))
-                        else:
-                            text_loc.append(TextLocInfo(TEXTINFO_RIGHT_ARROW, v, u))
-                if v_orig_dist == 0:
-                    break
-
-        text_info = AnnotationTextInfo(body_name, text_loc=text_loc,
-                                       ref_vu=None,
-                                       font=config.label_font,
-                                       font_size=config.label_font_size,
-                                       color=config.label_font_color)
-
-        # Make the avoid mask a little larger than the body mask, so that any text that
-        # we place later won't be right up against this body
-        text_avoid_mask = ndimage.maximum_filter(body_mask,
-                                                 config.label_mask_enlarge)
-
-        annotation = Annotation(obs, limb_mask,
-                                config.label_limb_color,
-                                thicken_overlay=config.outline_thicken,
-                                avoid_mask=text_avoid_mask,
-                                text_info=text_info, config=self._config)
-
-        annotations = Annotations()
-        annotations.add_annotations(annotation)
-
-        return annotations
+        return model_img, limb_mask

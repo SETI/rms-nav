@@ -22,6 +22,7 @@ class ObsInst(ABC):
         super().__init__(**kwargs)
 
         self._inst_config: dict[str, Any] | None = None
+        self.is_simulated: bool = kwargs.get('simulated', False)
 
     @property
     def inst_config(self) -> dict[str, Any] | None:

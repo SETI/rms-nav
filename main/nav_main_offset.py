@@ -110,47 +110,11 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     # Arguments about the general navigation process
     nav_group = cmdparser.add_argument_group('Navigation')
     nav_group.add_argument(
-        '--force-offset', action='store_true', default=False,
-        help='Force offset computation even if the offset file exists')
+        '--nav-models', type=str, default=None,
+        help='Comma-separated list of model names to use')
     nav_group.add_argument(
-        '--display-offset-results', action='store_true', default=False,
-        help='Graphically display the results of the offset process')
-    nav_group.add_argument(
-        '--force-offset-amount', type=str, metavar='U,V',
-        help='Force the offset to be u,v')
-    nav_group.add_argument(
-        '--stars-only', action='store_true', default=False,
-        help="""Navigate only using stars;
-                implies --no-allow-rings --no-allow-moons --no-allow-central-body""")
-    nav_group.add_argument(
-        '--allow-stars', action=argparse.BooleanOptionalAction, default=True,
-        help='Include stars in navigation')
-    nav_group.add_argument(
-        '--rings-only', action='store_true', default=False,
-        help="""Navigate only using rings;
-                implies --no-allow-stars --no-allow-moons --no-allow-central-body""")
-    nav_group.add_argument(
-        '--allow-rings', action=argparse.BooleanOptionalAction, default=True,
-        help='Include rings in navigation')
-    nav_group.add_argument(
-        '--moons-only', action='store_true', default=False,
-        help="""Navigate only using moons;
-                implies --no-allow-stars --no-allow-rings --no-allow-central-body""")
-    nav_group.add_argument(
-        '--allow-moons', action=argparse.BooleanOptionalAction, default=True,
-        help='Include moons in navigation')
-    nav_group.add_argument(
-        '--central-planet-only', action='store_true', default=False,
-        help="""Navigate only using the central planet (e.g. Saturn, Jupiter);
-                implies --no-allow-stars --no-allow-rings --no-allow-moons""")
-    nav_group.add_argument(
-        '--allow-central-planet', action=argparse.BooleanOptionalAction, default=True,
-        help='Include the central planet in navigation')
-    nav_group.add_argument(
-        '--body-cartographic-data', dest='body_cartographic_data', action='append',
-        metavar='BODY=MOSAIC',
-        help="""The mosaic providing cartographic data for the given BODY
-                (not currently supported)""")
+        '--nav-techniques', type=str, default=None,
+        help='Comma-separated list of navigation technique names to use')
     nav_group.add_argument(
         '--use-predicted-kernels', action=argparse.BooleanOptionalAction, default=False,
         help='Use predicted CK kernels')
@@ -160,10 +124,6 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     nav_group.add_argument(
         '--use-kernel', action='append',
         help='Use specified CK kernel(s)')
-    nav_group.add_argument(
-        '--use-cassini-nac-wac-offset', action=argparse.BooleanOptionalAction,
-        default=True,
-        help='Use the computed offset between NAC and WAC frames')
 
     # Arguments about offset, overlay, and PNG file generation
     output_group = cmdparser.add_argument_group('Output')
@@ -268,22 +228,6 @@ def main():
     command_list = sys.argv[1:]
     arguments = parse_args(command_list)
 
-    if arguments.stars_only:
-        arguments.allow_rings = False
-        arguments.allow_moons = False
-        arguments.allow_central_planet = False
-    if arguments.rings_only:
-        arguments.allow_stars = False
-        arguments.allow_moons = False
-        arguments.allow_central_planet = False
-    if arguments.moons_only:
-        arguments.allow_stars = False
-        arguments.allow_rings = False
-        arguments.allow_central_planet = False
-    if arguments.central_planet_only:
-        arguments.allow_stars = False
-        arguments.allow_rings = False
-        arguments.allow_moons = False
     if arguments.no_write_results:
         arguments.write_offset_file = False
         arguments.write_overlay_file = False
@@ -292,10 +236,6 @@ def main():
     if arguments.profile:
         pr = cProfile.Profile()
         pr.enable()
-
-    if arguments.display_offset_results:
-        root = tkinter.Tk()
-        root.withdraw()
 
     # Read the default configuration file and then any override files provided
     # on the command line
@@ -396,14 +336,10 @@ def main():
                 obs_class,
                 imagefiles,
                 results_root=results_root,
-                # allow_stars=arguments.allow_stars,
-                # allow_rings=arguments.allow_rings,
-                # allow_moons=arguments.allow_moons,
-                # allow_central_planet=arguments.allow_central_planet,
-                # force_offset_amount=force_offset_amount,
-                # cartographic_data=cartographic_data,
-                # bootstrapped=bootstrapped,
-                # loaded_kernel_type=loaded_kernel_type
+                nav_models=arguments.nav_models.split(',')
+                    if arguments.nav_models is not None else None,
+                nav_techniques=arguments.nav_techniques.split(',')
+                    if arguments.nav_techniques is not None else None,
                 ):
             NUM_FILES_PROCESSED += 1
         else:

@@ -1,11 +1,12 @@
-from .dataset import DataSet  # noqa: F401
-from .dataset_pds3_cassini_iss import DataSetPDS3CassiniISS  # noqa: F401
-from .dataset_pds3_galileo_ssi import DataSetPDS3GalileoSSI  # noqa: F401
-from .dataset_pds3_newhorizons_lorri import DataSetPDS3NewHorizonsLORRI  # noqa: F401
-from .dataset_pds3_voyager_iss import DataSetPDS3VoyagerISS  # noqa: F401
+from .dataset import DataSet
+from .dataset_pds3_cassini_iss import DataSetPDS3CassiniISS
+from .dataset_pds3_galileo_ssi import DataSetPDS3GalileoSSI
+from .dataset_pds3_newhorizons_lorri import DataSetPDS3NewHorizonsLORRI
+from .dataset_pds3_voyager_iss import DataSetPDS3VoyagerISS
+from .dataset_sim import DataSetSim
 
 
-_DATASET_NAME_TO_CLASS_MAPPING = {
+_DATASET_NAME_TO_CLASS_MAPPING: dict[str, type[DataSet]] = {
     'coiss': DataSetPDS3CassiniISS,
     'coiss_pds3': DataSetPDS3CassiniISS,
     'gossi': DataSetPDS3GalileoSSI,
@@ -14,6 +15,7 @@ _DATASET_NAME_TO_CLASS_MAPPING = {
     'nhlorri_pds3': DataSetPDS3NewHorizonsLORRI,
     'vgiss': DataSetPDS3VoyagerISS,
     'vgiss_pds3': DataSetPDS3VoyagerISS,
+    'sim': DataSetSim,
 }
 
 
@@ -26,6 +28,7 @@ _DATASET_NAME_TO_INST_NAME_MAPPING = {
     'nhlorri_pds3': 'nhlorri',
     'vgiss': 'vgiss',
     'vgiss_pds3': 'vgiss',
+    'sim': 'sim',
 }
 
 
@@ -74,5 +77,6 @@ __all__ = ['DataSet',
            'DataSetPDS3GalileoSSI',
            'DataSetPDS3NewHorizonsLORRI',
            'DataSetPDS3VoyagerISS',
+           'DataSetSim',
            'dataset_names',
            'dataset_name_to_class']
