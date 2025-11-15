@@ -9,7 +9,7 @@ from typing import Optional, cast
 
 import numpy as np
 
-from nav.support.types import NDArrayFloatType, NDArrayIntType
+from nav.support.types import NDArrayBoolType, NDArrayFloatType, NDArrayIntType
 
 
 def create_simulated_body(
@@ -279,8 +279,8 @@ def _lambertian_shading(ellipse_mask: NDArrayFloatType,
 
     # Lambertian shading: I = I₀ * max(0, cos(incidence))
     # Only apply to visible hemisphere and clip to [0, 1] range
-    dark_side_illum_strength = 0.01
-    light_side_illum_gamma = 0.7
+    dark_side_illum_strength = 0.01  # TODO make config parameter
+    light_side_illum_gamma = 1  # TODO make config parameter
     illum_strength = np.where(visible_hemisphere,
                               np.clip(cos_incidence, dark_side_illum_strength, 1.0), 0.0)
     illum_strength **= light_side_illum_gamma
@@ -291,7 +291,7 @@ def _lambertian_shading(ellipse_mask: NDArrayFloatType,
     return intensity
 
 
-def _add_craters_and_shading(ellipse_mask_nz: NDArrayFloatType,
+def _add_craters_and_shading(ellipse_mask_nz: NDArrayBoolType,
                              v_coords: NDArrayFloatType,
                              u_coords: NDArrayFloatType,
                              nz: NDArrayIntType,

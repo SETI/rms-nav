@@ -11,7 +11,16 @@ from typing import Any
 
 import numpy as np
 from PyQt6.QtCore import QTimer, Qt, pyqtSignal, QObject, QPoint
-from PyQt6.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QWheelEvent, QMouseEvent
+from PyQt6.QtGui import (
+    QColor,
+    QImage,
+    QMouseEvent,
+    QPainter,
+    QPen,
+    QPixmap,
+    QResizeEvent,
+    QWheelEvent
+)
 from PyQt6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -40,19 +49,19 @@ class ParameterUpdater(QObject):
 
     update_requested = pyqtSignal()
 
-    def __init__(self, delay_ms: int = 100):
+    def __init__(self, delay_ms: int = 100) -> None:
         super().__init__()
         self._timer = QTimer()
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self.update_requested)
         self._delay_ms = delay_ms
 
-    def request_update(self):
+    def request_update(self) -> None:
         """Request an update, resetting the timer if already running."""
         self._timer.stop()
         self._timer.start(self._delay_ms)
 
-    def immediate_update(self):
+    def immediate_update(self) -> None:
         """Trigger an immediate update."""
         self._timer.stop()
         self.update_requested.emit()
@@ -61,7 +70,7 @@ class ParameterUpdater(QObject):
 class SimulatedBodyGUI(QMainWindow):
     """Main GUI window for simulated body creation."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle('Simulated Body Generator')
         self.setMinimumSize(1200, 800)
@@ -89,14 +98,14 @@ class SimulatedBodyGUI(QMainWindow):
         # Initial image generation
         self._update_image()
 
-    def resizeEvent(self, event):
+    def resizeEvent(self, event: QResizeEvent) -> None:
         """Handle window resize events."""
         super().resizeEvent(event)
         # Redisplay image with current zoom and pan
         if self._current_image is not None:
             self._display_image()
 
-    def _on_mouse_press(self, event: QMouseEvent):
+    def _on_mouse_press(self, event: QMouseEvent) -> None:
         """Handle mouse press for panning."""
         if event.button() == Qt.MouseButton.LeftButton:
             # Store mouse position in global coordinates to avoid coordinate system issues
@@ -105,7 +114,7 @@ class SimulatedBodyGUI(QMainWindow):
             self._drag_start_pan = (self._pan_x, self._pan_y)
             self._image_label.setCursor(Qt.CursorShape.ClosedHandCursor)
 
-    def _on_mouse_move(self, event: QMouseEvent):
+    def _on_mouse_move(self, event: QMouseEvent) -> None:
         """Handle mouse move for panning and status bar update."""
         if self._drag_start_pos is not None and self._drag_start_pan is not None:
             # Get current mouse position in global coordinates
@@ -120,14 +129,14 @@ class SimulatedBodyGUI(QMainWindow):
             # Update status bar with v,u coordinates
             self._update_status_bar(event.position().toPoint())
 
-    def _on_mouse_release(self, event: QMouseEvent):
+    def _on_mouse_release(self, event: QMouseEvent) -> None:
         """Handle mouse release for panning."""
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_start_pos = None
             self._drag_start_pan = None
             self._image_label.setCursor(Qt.CursorShape.ArrowCursor)
 
-    def _on_wheel(self, event: QWheelEvent):
+    def _on_wheel(self, event: QWheelEvent) -> None:
         """Handle mouse wheel for zooming."""
         # Get mouse position relative to the label widget
         label_pos = event.position().toPoint()
@@ -147,7 +156,7 @@ class SimulatedBodyGUI(QMainWindow):
         else:
             self._zoom_out_at_point(viewport_x, viewport_y, scaled_image_x, scaled_image_y)
 
-    def _zoom_in(self):
+    def _zoom_in(self) -> None:
         """Zoom in at center."""
         if self._base_pixmap is not None:
             # Use viewport center as the reference point
@@ -161,7 +170,7 @@ class SimulatedBodyGUI(QMainWindow):
             scaled_y = center_y + scrollbar_v.value()
             self._zoom_at_point(1.2, center_x, center_y, scaled_x, scaled_y)
 
-    def _zoom_out(self):
+    def _zoom_out(self) -> None:
         """Zoom out at center."""
         if self._base_pixmap is not None:
             # Use viewport center as the reference point
@@ -175,17 +184,18 @@ class SimulatedBodyGUI(QMainWindow):
             scaled_y = center_y + scrollbar_v.value()
             self._zoom_at_point(1.0 / 1.2, center_x, center_y, scaled_x, scaled_y)
 
-    def _zoom_in_at_point(self, viewport_x: int, viewport_y: int, scaled_x: float, scaled_y: float):
+    def _zoom_in_at_point(self, viewport_x: int, viewport_y: int, scaled_x: float,
+                          scaled_y: float) -> None:
         """Zoom in at a specific point."""
         self._zoom_at_point(1.2, viewport_x, viewport_y, scaled_x, scaled_y)
 
     def _zoom_out_at_point(self, viewport_x: int, viewport_y: int, scaled_x: float,
-                           scaled_y: float):
+                           scaled_y: float) -> None:
         """Zoom out at a specific point."""
         self._zoom_at_point(1.0 / 1.2, viewport_x, viewport_y, scaled_x, scaled_y)
 
     def _zoom_at_point(self, factor: float, viewport_x: int, viewport_y: int, scaled_x: float,
-                       scaled_y: float):
+                       scaled_y: float) -> None:
         """Zoom at a specific point, maintaining that point's position in image coordinates."""
         if self._base_pixmap is None:
             return
@@ -221,7 +231,7 @@ class SimulatedBodyGUI(QMainWindow):
             self._zoom_label.setText(f'zoom: {self._zoom_factor:.2f}x')
         self._update_display()
 
-    def _reset_view(self):
+    def _reset_view(self) -> None:
         """Reset zoom and pan to default."""
         self._zoom_factor = 1.0
         self._pan_x = 0.0
@@ -231,7 +241,7 @@ class SimulatedBodyGUI(QMainWindow):
             self._zoom_label.setText(f'zoom: {self._zoom_factor:.2f}x')
         self._update_display()
 
-    def _update_status_bar(self, label_pos: QPoint):
+    def _update_status_bar(self, label_pos: QPoint) -> None:
         """Update status bar with v,u coordinates and pixel value."""
         # Update zoom scale
         self._zoom_label.setText(f'zoom: {self._zoom_factor:.2f}x')
@@ -278,7 +288,7 @@ class SimulatedBodyGUI(QMainWindow):
         else:
             self._status_label.setText('v, u: --, --  value: --')
 
-    def _setup_ui(self):
+    def _setup_ui(self) -> None:
         """Set up the user interface."""
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -555,93 +565,93 @@ class SimulatedBodyGUI(QMainWindow):
         scroll_area.setWidget(control_widget)
         main_layout.addWidget(scroll_area, stretch=1)
 
-    def _on_size_v_changed(self, value: int):
+    def _on_size_v_changed(self, value: int) -> None:
         """Handle size_v parameter change."""
         self._size_v = value
         self._updater.request_update()
 
-    def _on_size_u_changed(self, value: int):
+    def _on_size_u_changed(self, value: int) -> None:
         """Handle size_u parameter change."""
         self._size_u = value
         self._updater.request_update()
 
-    def _on_semi_major_changed(self, value: float):
+    def _on_semi_major_changed(self, value: float) -> None:
         """Handle semi_major_axis parameter change."""
         self._semi_major_axis = value
         self._updater.request_update()
 
-    def _on_semi_minor_changed(self, value: float):
+    def _on_semi_minor_changed(self, value: float) -> None:
         """Handle semi_minor_axis parameter change."""
         self._semi_minor_axis = value
         self._updater.request_update()
 
-    def _on_semi_c_changed(self, value: float):
+    def _on_semi_c_changed(self, value: float) -> None:
         """Handle semi_c_axis parameter change."""
         self._semi_c_axis = value
         self._updater.request_update()
 
-    def _on_center_v_changed(self, value: float):
+    def _on_center_v_changed(self, value: float) -> None:
         """Handle center_v parameter change."""
         self._center_v = value
         self._updater.request_update()
 
-    def _on_center_u_changed(self, value: float):
+    def _on_center_u_changed(self, value: float) -> None:
         """Handle center_u parameter change."""
         self._center_u = value
         self._updater.request_update()
 
-    def _on_rotation_z_changed(self, value: float):
+    def _on_rotation_z_changed(self, value: float) -> None:
         """Handle rotation_z parameter change."""
         self._rotation_z = value
         self._updater.request_update()
 
-    def _on_rotation_tilt_changed(self, value: float):
+    def _on_rotation_tilt_changed(self, value: float) -> None:
         """Handle rotation_tilt parameter change."""
         self._rotation_tilt = value
         self._updater.request_update()
 
-    def _on_illum_angle_changed(self, value: float):
+    def _on_illum_angle_changed(self, value: float) -> None:
         """Handle illumination_angle parameter change."""
         self._illumination_angle = value
         self._updater.request_update()
 
-    def _on_phase_angle_changed(self, value: float):
+    def _on_phase_angle_changed(self, value: float) -> None:
         """Handle phase_angle parameter change."""
         self._phase_angle = value
         self._updater.request_update()
 
-    def _on_crater_fill_changed(self, value: float):
+    def _on_crater_fill_changed(self, value: float) -> None:
         """Handle crater_fill parameter change."""
         self._crater_fill = value
         self._updater.request_update()
 
-    def _on_crater_min_radius_changed(self, value: float):
+    def _on_crater_min_radius_changed(self, value: float) -> None:
         """Handle crater_min_radius parameter change."""
         self._crater_min_radius = value
         self._updater.request_update()
 
-    def _on_crater_max_radius_changed(self, value: float):
+    def _on_crater_max_radius_changed(self, value: float) -> None:
         """Handle crater_max_radius parameter change."""
         self._crater_max_radius = value
         self._updater.request_update()
 
-    def _on_crater_power_law_exponent_changed(self, value: float):
+    def _on_crater_power_law_exponent_changed(self, value: float) -> None:
         """Handle crater_power_law_exponent parameter change."""
         self._crater_power_law_exponent = value
         self._updater.request_update()
 
-    def _on_crater_relief_scale_changed(self, value: float):
+    def _on_crater_relief_scale_changed(self, value: float) -> None:
         """Handle crater_relief_scale parameter change."""
         self._crater_relief_scale = value
         self._updater.request_update()
 
-    def _on_anti_aliasing_changed(self, value: int):
+    def _on_anti_aliasing_changed(self, value: int) -> None:
         """Handle anti_aliasing parameter change."""
         self._anti_aliasing = value / 1000.0
         self._anti_aliasing_label.setText(f'{self._anti_aliasing:.3f}')
         self._updater.request_update()
 
-    def _on_visual_aids_changed(self, state: int):
+    def _on_visual_aids_changed(self, state: int) -> None:
         """Handle visual aids checkbox change."""
         # state is 0 (Unchecked), 1 (PartiallyChecked), or 2 (Checked)
         self._show_visual_aids = (state == Qt.CheckState.Checked.value)
@@ -651,16 +661,16 @@ class SimulatedBodyGUI(QMainWindow):
             self._base_pixmap = None
             self._display_image()
 
-    def _on_zoom_sharp_changed(self, state: int):
+    def _on_zoom_sharp_changed(self, state: int) -> None:
         """Handle sharp zoom checkbox change."""
         self._zoom_sharp = (state == Qt.CheckState.Checked.value)
         self._update_display()
 
-    def _force_update(self):
+    def _force_update(self) -> None:
         """Force an immediate update."""
         self._updater.immediate_update()
 
-    def _update_image(self):
+    def _update_image(self) -> None:
         """Generate and display the simulated body image."""
         try:
             # Convert degrees to radians for angles
@@ -694,7 +704,7 @@ class SimulatedBodyGUI(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to generate image:\n{str(e)}')
 
-    def _display_image(self):
+    def _display_image(self) -> None:
         """Display the current image with optional visual aids."""
         if self._current_image is None:
             return
@@ -795,7 +805,7 @@ class SimulatedBodyGUI(QMainWindow):
         self._image_label.repaint()
         self._scroll_area.viewport().repaint()
 
-    def _update_display(self):
+    def _update_display(self) -> None:
         """Update the displayed image with current zoom and pan."""
         if self._base_pixmap is None:
             return
@@ -833,7 +843,7 @@ class SimulatedBodyGUI(QMainWindow):
         scrollbar_h.setValue(scroll_pos_h)
         scrollbar_v.setValue(scroll_pos_v)
 
-    def _save_image(self):
+    def _save_image(self) -> None:
         """Save the current image as PNG."""
         if self._current_image is None:
             QMessageBox.warning(self, 'No Image', 'No image to save.')
@@ -930,7 +940,7 @@ class SimulatedBodyGUI(QMainWindow):
         # Trigger update
         self._updater.immediate_update()
 
-    def _save_parameters(self):
+    def _save_parameters(self) -> None:
         """Save current parameters to JSON file."""
         filename, _ = QFileDialog.getSaveFileName(
             self,
@@ -947,7 +957,7 @@ class SimulatedBodyGUI(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, 'Error', f'Failed to save parameters:\n{str(e)}')
 
-    def _load_parameters(self):
+    def _load_parameters(self) -> None:
         """Load parameters from JSON file."""
         filename, _ = QFileDialog.getOpenFileName(
             self,
@@ -964,7 +974,7 @@ class SimulatedBodyGUI(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, 'Error', f'Failed to load parameters:\n{str(e)}')
 
-    def _set_defaults(self):
+    def _set_defaults(self) -> None:
         """Set all parameters to default values."""
         self._size_v = 512
         self._size_u = 512
@@ -986,7 +996,7 @@ class SimulatedBodyGUI(QMainWindow):
         self._show_visual_aids = True
         self._zoom_sharp = True
 
-    def _reset_defaults(self):
+    def _reset_defaults(self) -> None:
         """Reset all parameters to default values."""
         self._set_defaults()
 
@@ -1016,7 +1026,7 @@ class SimulatedBodyGUI(QMainWindow):
         self._updater.immediate_update()
 
 
-def main():
+def main() -> None:
     """Main entry point for the GUI application."""
     app = QApplication(sys.argv)
     window = SimulatedBodyGUI()
