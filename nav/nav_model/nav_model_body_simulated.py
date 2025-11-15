@@ -25,12 +25,15 @@ class NavModelBodySimulated(NavModelBodyBase):
             obs: Observation containing image geometry (used for output shapes/margins).
             body_name: Logical body name for metadata/labels.
             sim_params: Dictionary of parameters saved by the GUI JSON. Expected keys:
-                semi_major_axis, semi_minor_axis, semi_c_axis,
-                center_v, center_u, rotation_z (deg), rotation_tilt (deg),
-                illumination_angle (deg), phase_angle (deg), rough_mean, rough_std,
-                craters, anti_aliasing. Extra keys are ignored.
+                center_v, center_u, semi_major_axis, semi_minor_axis, semi_c_axis,
+                rotation_z (deg), rotation_tilt (deg),
+                illumination_angle (deg), phase_angle (deg),
+                crater_fill, crater_min_radius, crater_max_radius,
+                crater_power_law_exponent, crater_relief_scale, anti_aliasing.
+                Extra keys are ignored.
             config: Optional configuration.
         """
+
         super().__init__(name, obs, config=config)
         self._body_name = body_name.upper()
         self._sim_params = sim_params.copy()
@@ -49,6 +52,7 @@ class NavModelBodySimulated(NavModelBodyBase):
                      never_create_model: bool = False,
                      create_annotations: bool = True) -> None:
         """Create the simulated model, mask, limb, and annotations."""
+
         metadata: dict[str, Any] = {}
         start_time = now_dt()
         metadata['start_time'] = start_time.isoformat()
@@ -73,6 +77,7 @@ class NavModelBodySimulated(NavModelBodyBase):
                       never_create_model: bool,
                       create_annotations: bool) -> None:
         """Generate the model image from the saved GUI parameters and build masks."""
+
         p = self._sim_params
 
         # Determine normal (non-extended) image size and extended-FOV margins

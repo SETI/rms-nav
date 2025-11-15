@@ -133,26 +133,10 @@ def create_simulated_body(
     else:
         ellipse_mask = (ellipse_dist <= 1.0).astype(float)
 
-    intensity = _lambertian_shading(
-        ellipse_mask,
-        v_rot,
-        u_rot,
-        z_coords,
-        work_semi_major,
-        work_semi_minor,
-        work_semi_c,
-        illumination_angle,
-        phase_angle,
-        cos_rz,
-        sin_rz,
-    )
-
-    # Add internal craters
     if crater_fill > 0:
-        total_area = np.sum(ellipse_mask)
-        avg_crater_area = ((crater_min_radius + crater_max_radius) / 2 * semi_major_axis) ** 2
+        total_area = np.sum(inside_mask)
+        avg_crater_area = (crater_max_radius * semi_major_axis) ** 2
         n_craters = np.clip(int(crater_fill * total_area / avg_crater_area), 0, 1000)
-        n_craters = int(crater_fill / ((crater_min_radius + crater_max_radius) / 2) ** 2)
 
         rng = np.random.RandomState(int(semi_major_axis))  # For reproducibility
         # Choose crater centers strictly inside the ellipse (exclude AA rim and exterior)
@@ -160,7 +144,6 @@ def create_simulated_body(
         nz = np.argwhere(ellipse_mask_nz)
 
         intensity = _add_craters_and_shading(
-            intensity,
             ellipse_mask_nz,
             v_coords,
             u_coords,
@@ -177,14 +160,22 @@ def create_simulated_body(
             illumination_angle,     # 0 = from top, pi/2 = from right
             phase_angle,        # 0 = from front, pi/2 = from side, pi = from back
             ellipse_mask=ellipse_mask,
-            v_rot=v_rot,
-            u_rot=u_rot,
             z_coords=z_coords,
-            work_semi_major=work_semi_major,
-            work_semi_minor=work_semi_minor,
-            work_semi_c=work_semi_c,
-            cos_rz=cos_rz,
-            sin_rz=sin_rz,
+        )
+
+    else:
+        intensity = _lambertian_shading(
+            ellipse_mask,
+            v_rot,
+            u_rot,
+            z_coords,
+            work_semi_major,
+            work_semi_minor,
+            work_semi_c,
+            illumination_angle,
+            phase_angle,
+            cos_rz,
+            sin_rz,
         )
 
     # Downsample if anti-aliasing was used
@@ -198,7 +189,7 @@ def create_simulated_body(
     return intensity
 
 
-def _lambertian_shading(ellipse_mask: NDArrayBoolType,
+def _lambertian_shading(ellipse_mask: NDArrayFloatType,
                         v_rot: NDArrayFloatType,
                         u_rot: NDArrayFloatType,
                         z_coords: NDArrayFloatType,
@@ -300,8 +291,7 @@ def _lambertian_shading(ellipse_mask: NDArrayBoolType,
     return intensity
 
 
-def _add_craters_and_shading(intensity: NDArrayFloatType,
-                             ellipse_mask_nz: NDArrayBoolType,
+def _add_craters_and_shading(ellipse_mask_nz: NDArrayFloatType,
                              v_coords: NDArrayFloatType,
                              u_coords: NDArrayFloatType,
                              nz: NDArrayIntType,
@@ -318,14 +308,8 @@ def _add_craters_and_shading(intensity: NDArrayFloatType,
                              phase_angle: float,
                              *,
                              ellipse_mask: NDArrayFloatType,
-                             v_rot: NDArrayFloatType,
-                             u_rot: NDArrayFloatType,
-                             z_coords: NDArrayFloatType,
-                             work_semi_major: float,
-                             work_semi_minor: float,
-                             work_semi_c: float,
-                             cos_rz: float,
-                             sin_rz: float) -> NDArrayFloatType:
+                             z_coords: NDArrayFloatType
+                             ) -> NDArrayFloatType:
     """
     Returns new intensity with craters + lighting applied.
     """
@@ -333,7 +317,7 @@ def _add_craters_and_shading(intensity: NDArrayFloatType,
     # ------------------------------------------------------------------
     # 0. Heightmap we will add craters to
     # ------------------------------------------------------------------
-    height = np.zeros_like(intensity, dtype=float)
+    height = np.zeros_like(ellipse_mask, dtype=float)
 
     # ------------------------------------------------------------------
     # 1. Radius distribution: power law in [R_min, R_max]
@@ -380,6 +364,7 @@ def _add_craters_and_shading(intensity: NDArrayFloatType,
         crater_dist = np.sqrt(v_dist**2 + u_dist**2)
 
         # Mask where crater affects height (slightly beyond radius for rim)
+        # TODO make config parameter
         crater_mask = (crater_dist < crater_radius * 1.1) & ellipse_mask_nz
         if not np.any(crater_mask):
             continue
@@ -408,6 +393,7 @@ def _add_craters_and_shading(intensity: NDArrayFloatType,
         # ------------------------------------------------------------------
         # 2b. Geometric profile: bowl + walls + raised rim
         # ------------------------------------------------------------------
+        # TODO make config parameters
         R_floor = 0.6 * crater_radius     # flat-ish floor
         R_rim = crater_radius             # inner rim radius
         R_outer = 1.3 * crater_radius     # where rim merges back to surface
@@ -468,8 +454,8 @@ def _add_craters_and_shading(intensity: NDArrayFloatType,
     # Only illuminate points on the visible hemisphere (facing observer)
     visible = nz_ > 0
     cos_incidence = nx * lx + ny * ly + nz_ * lz
-    dark_side_illum_strength = 0.01
-    light_side_illum_gamma = 1
+    dark_side_illum_strength = 0.01  # TODO make config parameter
+    light_side_illum_gamma = 1  # TODO make config parameter
     lambert = np.where(visible, np.clip(cos_incidence, dark_side_illum_strength, 1.0), 0.0)
     lambert **= light_side_illum_gamma
 

@@ -6,7 +6,6 @@ the create_simulated_body function with real-time parameter adjustment.
 """
 import json
 import math
-from pathlib import Path
 import sys
 from typing import Any
 
@@ -458,7 +457,7 @@ class SimulatedBodyGUI(QMainWindow):
         self._crater_fill_spin.setSingleStep(0.01)
         self._crater_fill_spin.setValue(self._crater_fill)
         self._crater_fill_spin.valueChanged.connect(self._on_crater_fill_changed)
-        crater_layout.addRow('Crater fill (0–10):', self._crater_fill_spin)
+        crater_layout.addRow('Crater fill (0-10):', self._crater_fill_spin)
 
         self._crater_min_radius_spin = QDoubleSpinBox()
         self._crater_min_radius_spin.setRange(0.01, 0.25)
@@ -466,7 +465,7 @@ class SimulatedBodyGUI(QMainWindow):
         self._crater_min_radius_spin.setSingleStep(0.005)
         self._crater_min_radius_spin.setValue(self._crater_min_radius)
         self._crater_min_radius_spin.valueChanged.connect(self._on_crater_min_radius_changed)
-        crater_layout.addRow('Crater min radius (0.01–0.25):', self._crater_min_radius_spin)
+        crater_layout.addRow('Crater min radius (0.01-0.25):', self._crater_min_radius_spin)
 
         self._crater_max_radius_spin = QDoubleSpinBox()
         self._crater_max_radius_spin.setRange(0.01, 0.25)
@@ -474,7 +473,7 @@ class SimulatedBodyGUI(QMainWindow):
         self._crater_max_radius_spin.setSingleStep(0.005)
         self._crater_max_radius_spin.setValue(self._crater_max_radius)
         self._crater_max_radius_spin.valueChanged.connect(self._on_crater_max_radius_changed)
-        crater_layout.addRow('Crater max radius (0.01–0.25):', self._crater_max_radius_spin)
+        crater_layout.addRow('Crater max radius (0.01-0.25):', self._crater_max_radius_spin)
 
         self._crater_power_law_exponent_spin = QDoubleSpinBox()
         self._crater_power_law_exponent_spin.setRange(1.1, 5.0)
@@ -482,7 +481,7 @@ class SimulatedBodyGUI(QMainWindow):
         self._crater_power_law_exponent_spin.setSingleStep(0.05)
         self._crater_power_law_exponent_spin.setValue(self._crater_power_law_exponent)
         self._crater_power_law_exponent_spin.valueChanged.connect(self._on_crater_power_law_exponent_changed)
-        crater_layout.addRow('Crater power-law exponent (1.1–5):', self._crater_power_law_exponent_spin)
+        crater_layout.addRow('Crater power-law exponent (1.1-5):', self._crater_power_law_exponent_spin)
 
         self._crater_relief_scale_spin = QDoubleSpinBox()
         self._crater_relief_scale_spin.setRange(0.0, 3.0)
@@ -490,7 +489,7 @@ class SimulatedBodyGUI(QMainWindow):
         self._crater_relief_scale_spin.setSingleStep(0.01)
         self._crater_relief_scale_spin.setValue(self._crater_relief_scale)
         self._crater_relief_scale_spin.valueChanged.connect(self._on_crater_relief_scale_changed)
-        crater_layout.addRow('Crater relief scale (0–3):', self._crater_relief_scale_spin)
+        crater_layout.addRow('Crater relief scale (0-3):', self._crater_relief_scale_spin)
 
         crater_group.setLayout(crater_layout)
         control_layout.addWidget(crater_group)
@@ -893,24 +892,11 @@ class SimulatedBodyGUI(QMainWindow):
         self._semi_c_axis = params.get('semi_c_axis', self._semi_c_axis)
         self._center_v = params.get('center_v', self._center_v)
         self._center_u = params.get('center_u', self._center_u)
-        # Handle old format with single rotation parameter
-        if 'rotation' in params and 'rotation_z' not in params:
-            self._rotation_z = params.get('rotation', self._rotation_z)
-        else:
-            self._rotation_z = params.get('rotation_z', self._rotation_z)
+        self._rotation_z = params.get('rotation_z', self._rotation_z)
         self._rotation_tilt = params.get('rotation_tilt', self._rotation_tilt)
         self._illumination_angle = params.get('illumination_angle', self._illumination_angle)
         self._phase_angle = params.get('phase_angle', self._phase_angle)
-        # New crater parameters; map legacy 'craters' to crater_fill if present
-        if 'crater_fill' in params:
-            self._crater_fill = params.get('crater_fill', self._crater_fill)
-        else:
-            legacy_craters = params.get('craters', None)
-            if legacy_craters is not None:
-                try:
-                    self._crater_fill = float(legacy_craters) * 3.0
-                except Exception:
-                    pass
+        self._crater_fill = params.get('crater_fill', self._crater_fill)
         self._crater_min_radius = params.get('crater_min_radius', self._crater_min_radius)
         self._crater_max_radius = params.get('crater_max_radius', self._crater_max_radius)
         self._crater_power_law_exponent = params.get('crater_power_law_exponent', self._crater_power_law_exponent)
