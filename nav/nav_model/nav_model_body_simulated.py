@@ -87,34 +87,25 @@ class NavModelBodySimulated(NavModelBodyBase):
         illumination_angle_rad = np.radians(p.get('illumination_angle', 0.0))
         phase_angle_rad = np.radians(p.get('phase_angle', 0.0))
 
-        # Roughness tuple
-        rough_mean = float(p.get('rough_mean', 0.0))
-        rough_std = float(p.get('rough_std', 0.0))
-        rough_tuple = (rough_mean, rough_std)
-
         # Other parameters
+        center_v = float(p.get('center_v', data_size_v / 2.0))
+        center_u = float(p.get('center_u', data_size_u / 2.0))
         semi_major_axis = float(p.get('semi_major_axis', 0.0))
         semi_minor_axis = float(p.get('semi_minor_axis', 0.0))
         semi_c_axis = float(p.get('semi_c_axis', min(semi_major_axis, semi_minor_axis)))
-        center_v = float(p.get('center_v', data_size_v / 2.0))
-        center_u = float(p.get('center_u', data_size_u / 2.0))
-        craters = float(p.get('craters', 0.0))
-        anti_aliasing = float(p.get('anti_aliasing', 0.0))
 
         # Build simulated model image (float 0..1) at the normal image size
         sim_img = create_simulated_body(
             size=(data_size_v, data_size_u),
+            center=(center_v, center_u),
             semi_major_axis=semi_major_axis,
             semi_minor_axis=semi_minor_axis,
             semi_c_axis=semi_c_axis,
-            center=(center_v, center_u),
             rotation_z=rotation_z_rad,
             rotation_tilt=rotation_tilt_rad,
             illumination_angle=illumination_angle_rad,
             phase_angle=phase_angle_rad,
-            rough=rough_tuple,
-            craters=craters,
-            anti_aliasing=anti_aliasing,
+            anti_aliasing=1,
         )
 
         # Create masks

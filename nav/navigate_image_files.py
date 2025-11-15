@@ -25,7 +25,9 @@ from nav.support.file import json_as_string
 
 def navigate_image_files(obs_class: type[ObsSnapshotInst],
                          image_files: ImageFiles,
-                         results_root: FCPath) -> bool:
+                         results_root: FCPath,
+                         nav_models: list[str],
+                         nav_techniques: list[str]) -> bool:
 
     logger = DEFAULT_LOGGER
 
@@ -70,7 +72,7 @@ def navigate_image_files(obs_class: type[ObsSnapshotInst],
             public_metadata_file.write_text(json_as_string(metadata))
             return False
 
-        nm = NavMaster(snapshot)
+        nm = NavMaster(snapshot, nav_models=nav_models, nav_techniques=nav_techniques)
         nm.compute_all_models()
 
         nm.navigate()

@@ -195,39 +195,16 @@ class NavMaster(NavBase):
         config = self._config
         logger = self._logger
 
-        # If this is a simulated observation, use body descriptors from JSON
-        if hasattr(obs, 'sim_json') and isinstance(getattr(obs, 'sim_json'), dict):
-            sim_desc = getattr(obs, 'sim_json')
-            body_models_desc = sim_desc.get('body_models', {})
-
-            self._body_models = []
-            self._metadata['models']['body_models'] = {}
-
-            for body_name, params in body_models_desc.items():
-                model_name = f'body:{str(body_name).upper()}'
-                if not any(fnmatch.fnmatch(model_name, x) for x in self._nav_models_to_use):
-                    continue
-
-                # Do NOT apply top-level offsets here; NavModelBodySimulated expects raw params
-                # and NavTechnique will estimate fractional offsets.
-                body_model: NavModelBodyBase = NavModelBodySimulated(model_name, obs,
-                                                                     str(body_name), params,
-                                                                     config=config)
-                body_model.create_model()
-                self._body_models.append(body_model)
-                self._metadata['models']['body_models'][str(body_name)] = body_model.metadata
-
-            return
-
         if obs.closest_planet is not None:
             body_list = [obs.closest_planet] + config.satellites(obs.closest_planet)
         else:
             body_list = []
 
-        try:
-            large_body_dict = obs.sim_inventory  # For simulated observations
-        except AttributeError:
+        if obs.is_simulated:
+            large_body_dict = obs.sim_inventory
+        else:
             large_body_dict = obs.inventory(body_list, return_type='full')
+
         # Make a list sorted by range, with the closest body first, limiting to bodies
         # that are actually in the FOV
         def _body_in_fov(obs: Observation,
@@ -259,16 +236,23 @@ class NavMaster(NavBase):
         self._body_models = []
         self._metadata['models']['body_models'] = {}
 
-        for body, inventory in large_bodies_by_range:
-            model_name = f'body:{body.upper()}'
-            if not any(fnmatch.fnmatch(model_name, x) for x in self._nav_models_to_use):
+        for body_name, inventory in large_bodies_by_range:
+            model_name = f'body:{body_name.upper()}'
+            if not any(fnmatch.fnmatch(model_name.lower(), x.lower())
+                       for x in self._nav_models_to_use):
                 continue
-            body_model = NavModelBody(model_name, obs, body,
-                                      inventory=inventory,
-                                      config=config)
+            if obs.is_simulated:
+                sim_params = obs.sim_body_models[body_name]
+                body_model: NavModelBodyBase = NavModelBodySimulated(model_name, obs,
+                                                                     body_name, sim_params,
+                                                                     config=config)
+            else:
+                body_model = NavModelBody(model_name, obs, body_name,
+                                          inventory=inventory,
+                                          config=config)
             body_model.create_model()
             self._body_models.append(body_model)
-            self._metadata['models']['body_models'][body] = body_model.metadata
+            self._metadata['models']['body_models'][body_name] = body_model.metadata
 
     def compute_ring_models(self) -> None:
         """Creates navigation models for planetary rings in the observation.
@@ -277,7 +261,7 @@ class NavMaster(NavBase):
         """
 
         if (self._nav_models_to_use is not None and
-            not any(fnmatch.fnmatch('rings', x) for x in self._nav_models_to_use)):
+            not any(fnmatch.fnmatch('rings', x.lower()) for x in self._nav_models_to_use)):
             self._ring_models = []
             return
 
@@ -296,7 +280,7 @@ class NavMaster(NavBase):
         """
 
         if (self._nav_models_to_use is not None and
-            not any(fnmatch.fnmatch('titan', x) for x in self._nav_models_to_use)):
+            not any(fnmatch.fnmatch('titan', x.lower()) for x in self._nav_models_to_use)):
             self._titan_models = []
             return
 
@@ -333,7 +317,8 @@ class NavMaster(NavBase):
 
         self._metadata['navigation_techniques'] = {}
 
-        if any(fnmatch.fnmatch('correlate_all', x) for x in self._nav_techniques_to_use):
+        if any(fnmatch.fnmatch('correlate_all', x.lower())
+               for x in self._nav_techniques_to_use):
             nav_all = NavTechniqueCorrelateAll(self)
             nav_all.navigate()
             correlate_all_combined_model = nav_all.combined_model()

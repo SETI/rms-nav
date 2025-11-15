@@ -448,36 +448,52 @@ class SimulatedBodyGUI(QMainWindow):
         illum_group.setLayout(illum_layout)
         control_layout.addWidget(illum_group)
 
-        # Surface Features group
-        surface_group = QGroupBox('Surface Features')
-        surface_layout = QFormLayout()
+        # Crater Parameters group
+        crater_group = QGroupBox('Craters')
+        crater_layout = QFormLayout()
 
-        self._rough_mean_spin = QDoubleSpinBox()
-        self._rough_mean_spin.setRange(0.0, 50.0)
-        self._rough_mean_spin.setDecimals(2)
-        self._rough_mean_spin.setValue(self._rough_mean)
-        self._rough_mean_spin.valueChanged.connect(self._on_rough_mean_changed)
-        surface_layout.addRow('Rough mean:', self._rough_mean_spin)
+        self._crater_fill_spin = QDoubleSpinBox()
+        self._crater_fill_spin.setRange(0.0, 10.0)
+        self._crater_fill_spin.setDecimals(3)
+        self._crater_fill_spin.setSingleStep(0.01)
+        self._crater_fill_spin.setValue(self._crater_fill)
+        self._crater_fill_spin.valueChanged.connect(self._on_crater_fill_changed)
+        crater_layout.addRow('Crater fill (0–10):', self._crater_fill_spin)
 
-        self._rough_std_spin = QDoubleSpinBox()
-        self._rough_std_spin.setRange(0.0, 50.0)
-        self._rough_std_spin.setDecimals(2)
-        self._rough_std_spin.setValue(self._rough_std)
-        self._rough_std_spin.valueChanged.connect(self._on_rough_std_changed)
-        surface_layout.addRow('Rough std dev:', self._rough_std_spin)
+        self._crater_min_radius_spin = QDoubleSpinBox()
+        self._crater_min_radius_spin.setRange(0.01, 0.25)
+        self._crater_min_radius_spin.setDecimals(3)
+        self._crater_min_radius_spin.setSingleStep(0.005)
+        self._crater_min_radius_spin.setValue(self._crater_min_radius)
+        self._crater_min_radius_spin.valueChanged.connect(self._on_crater_min_radius_changed)
+        crater_layout.addRow('Crater min radius (0.01–0.25):', self._crater_min_radius_spin)
 
-        self._craters_slider = QSlider(Qt.Orientation.Horizontal)
-        self._craters_slider.setRange(0, 1000)
-        self._craters_slider.setValue(int(self._craters * 1000))
-        self._craters_slider.valueChanged.connect(self._on_craters_changed)
-        self._craters_label = QLabel(f'{self._craters:.3f}')
-        craters_layout = QHBoxLayout()
-        craters_layout.addWidget(self._craters_slider)
-        craters_layout.addWidget(self._craters_label)
-        surface_layout.addRow('Craters:', craters_layout)
+        self._crater_max_radius_spin = QDoubleSpinBox()
+        self._crater_max_radius_spin.setRange(0.01, 0.25)
+        self._crater_max_radius_spin.setDecimals(3)
+        self._crater_max_radius_spin.setSingleStep(0.005)
+        self._crater_max_radius_spin.setValue(self._crater_max_radius)
+        self._crater_max_radius_spin.valueChanged.connect(self._on_crater_max_radius_changed)
+        crater_layout.addRow('Crater max radius (0.01–0.25):', self._crater_max_radius_spin)
 
-        surface_group.setLayout(surface_layout)
-        control_layout.addWidget(surface_group)
+        self._crater_power_law_exponent_spin = QDoubleSpinBox()
+        self._crater_power_law_exponent_spin.setRange(1.1, 5.0)
+        self._crater_power_law_exponent_spin.setDecimals(2)
+        self._crater_power_law_exponent_spin.setSingleStep(0.05)
+        self._crater_power_law_exponent_spin.setValue(self._crater_power_law_exponent)
+        self._crater_power_law_exponent_spin.valueChanged.connect(self._on_crater_power_law_exponent_changed)
+        crater_layout.addRow('Crater power-law exponent (1.1–5):', self._crater_power_law_exponent_spin)
+
+        self._crater_relief_scale_spin = QDoubleSpinBox()
+        self._crater_relief_scale_spin.setRange(0.0, 3.0)
+        self._crater_relief_scale_spin.setDecimals(3)
+        self._crater_relief_scale_spin.setSingleStep(0.01)
+        self._crater_relief_scale_spin.setValue(self._crater_relief_scale)
+        self._crater_relief_scale_spin.valueChanged.connect(self._on_crater_relief_scale_changed)
+        crater_layout.addRow('Crater relief scale (0–3):', self._crater_relief_scale_spin)
+
+        crater_group.setLayout(crater_layout)
+        control_layout.addWidget(crater_group)
 
         # Quality group
         quality_group = QGroupBox('Quality')
@@ -595,20 +611,29 @@ class SimulatedBodyGUI(QMainWindow):
         self._phase_angle = value
         self._updater.request_update()
 
-    def _on_rough_mean_changed(self, value: float):
-        """Handle rough_mean parameter change."""
-        self._rough_mean = value
+    def _on_crater_fill_changed(self, value: float):
+        """Handle crater_fill parameter change."""
+        self._crater_fill = value
         self._updater.request_update()
 
-    def _on_rough_std_changed(self, value: float):
-        """Handle rough_std parameter change."""
-        self._rough_std = value
+    def _on_crater_min_radius_changed(self, value: float):
+        """Handle crater_min_radius parameter change."""
+        self._crater_min_radius = value
         self._updater.request_update()
 
-    def _on_craters_changed(self, value: int):
-        """Handle craters parameter change."""
-        self._craters = value / 1000.0
-        self._craters_label.setText(f'{self._craters:.3f}')
+    def _on_crater_max_radius_changed(self, value: float):
+        """Handle crater_max_radius parameter change."""
+        self._crater_max_radius = value
+        self._updater.request_update()
+
+    def _on_crater_power_law_exponent_changed(self, value: float):
+        """Handle crater_power_law_exponent parameter change."""
+        self._crater_power_law_exponent = value
+        self._updater.request_update()
+
+    def _on_crater_relief_scale_changed(self, value: float):
+        """Handle crater_relief_scale parameter change."""
+        self._crater_relief_scale = value
         self._updater.request_update()
 
     def _on_anti_aliasing_changed(self, value: int):
@@ -656,8 +681,11 @@ class SimulatedBodyGUI(QMainWindow):
                 rotation_tilt=rotation_tilt_rad,
                 illumination_angle=illumination_angle_rad,
                 phase_angle=phase_angle_rad,
-                rough=(self._rough_mean, self._rough_std),
-                craters=self._craters,
+                crater_fill=self._crater_fill,
+                crater_min_radius=self._crater_min_radius,
+                crater_max_radius=self._crater_max_radius,
+                crater_power_law_exponent=self._crater_power_law_exponent,
+                crater_relief_scale=self._crater_relief_scale,
                 anti_aliasing=self._anti_aliasing,
             )
 
@@ -844,9 +872,11 @@ class SimulatedBodyGUI(QMainWindow):
             'rotation_tilt': self._rotation_tilt,  # degrees
             'illumination_angle': self._illumination_angle,  # degrees
             'phase_angle': self._phase_angle,  # degrees
-            'rough_mean': self._rough_mean,
-            'rough_std': self._rough_std,
-            'craters': self._craters,
+            'crater_fill': self._crater_fill,
+            'crater_min_radius': self._crater_min_radius,
+            'crater_max_radius': self._crater_max_radius,
+            'crater_power_law_exponent': self._crater_power_law_exponent,
+            'crater_relief_scale': self._crater_relief_scale,
             'anti_aliasing': self._anti_aliasing,
             # We intentionally don't save the show_visual_aids and zoom_sharp parameters
             # so that the JSON file is more easily used in a simulated model file,
@@ -871,9 +901,20 @@ class SimulatedBodyGUI(QMainWindow):
         self._rotation_tilt = params.get('rotation_tilt', self._rotation_tilt)
         self._illumination_angle = params.get('illumination_angle', self._illumination_angle)
         self._phase_angle = params.get('phase_angle', self._phase_angle)
-        self._rough_mean = params.get('rough_mean', self._rough_mean)
-        self._rough_std = params.get('rough_std', self._rough_std)
-        self._craters = params.get('craters', self._craters)
+        # New crater parameters; map legacy 'craters' to crater_fill if present
+        if 'crater_fill' in params:
+            self._crater_fill = params.get('crater_fill', self._crater_fill)
+        else:
+            legacy_craters = params.get('craters', None)
+            if legacy_craters is not None:
+                try:
+                    self._crater_fill = float(legacy_craters) * 3.0
+                except Exception:
+                    pass
+        self._crater_min_radius = params.get('crater_min_radius', self._crater_min_radius)
+        self._crater_max_radius = params.get('crater_max_radius', self._crater_max_radius)
+        self._crater_power_law_exponent = params.get('crater_power_law_exponent', self._crater_power_law_exponent)
+        self._crater_relief_scale = params.get('crater_relief_scale', self._crater_relief_scale)
         self._anti_aliasing = params.get('anti_aliasing', self._anti_aliasing)
         self._show_visual_aids = params.get('show_visual_aids', self._show_visual_aids)
         self._zoom_sharp = params.get('zoom_sharp', self._zoom_sharp)
@@ -890,10 +931,11 @@ class SimulatedBodyGUI(QMainWindow):
         self._rotation_tilt_spin.setValue(self._rotation_tilt)
         self._illum_angle_spin.setValue(self._illumination_angle)
         self._phase_angle_spin.setValue(self._phase_angle)
-        self._rough_mean_spin.setValue(self._rough_mean)
-        self._rough_std_spin.setValue(self._rough_std)
-        self._craters_slider.setValue(int(self._craters * 1000))
-        self._craters_label.setText(f'{self._craters:.3f}')
+        self._crater_fill_spin.setValue(self._crater_fill)
+        self._crater_min_radius_spin.setValue(self._crater_min_radius)
+        self._crater_max_radius_spin.setValue(self._crater_max_radius)
+        self._crater_power_law_exponent_spin.setValue(self._crater_power_law_exponent)
+        self._crater_relief_scale_spin.setValue(self._crater_relief_scale)
         self._anti_aliasing_slider.setValue(int(self._anti_aliasing * 1000))
         self._anti_aliasing_label.setText(f'{self._anti_aliasing:.3f}')
         self._visual_aids_check.setChecked(self._show_visual_aids)
@@ -949,9 +991,11 @@ class SimulatedBodyGUI(QMainWindow):
         self._rotation_tilt = 0.0
         self._illumination_angle = 0.0
         self._phase_angle = 0.0
-        self._rough_mean = 0.0
-        self._rough_std = 0.0
-        self._craters = 0.0
+        self._crater_fill = 0.0
+        self._crater_min_radius = 0.05
+        self._crater_max_radius = 0.25
+        self._crater_power_law_exponent = 3.0
+        self._crater_relief_scale = 0.6
         self._anti_aliasing = 0.5
         self._show_visual_aids = True
         self._zoom_sharp = True
@@ -972,10 +1016,11 @@ class SimulatedBodyGUI(QMainWindow):
         self._rotation_tilt_spin.setValue(self._rotation_tilt)
         self._illum_angle_spin.setValue(self._illumination_angle)
         self._phase_angle_spin.setValue(self._phase_angle)
-        self._rough_mean_spin.setValue(self._rough_mean)
-        self._rough_std_spin.setValue(self._rough_std)
-        self._craters_slider.setValue(int(self._craters * 1000))
-        self._craters_label.setText(f'{self._craters:.3f}')
+        self._crater_fill_spin.setValue(self._crater_fill)
+        self._crater_min_radius_spin.setValue(self._crater_min_radius)
+        self._crater_max_radius_spin.setValue(self._crater_max_radius)
+        self._crater_power_law_exponent_spin.setValue(self._crater_power_law_exponent)
+        self._crater_relief_scale_spin.setValue(self._crater_relief_scale)
         self._anti_aliasing_slider.setValue(int(self._anti_aliasing * 1000))
         self._anti_aliasing_label.setText(f'{self._anti_aliasing:.3f}')
         self._visual_aids_check.setChecked(self._show_visual_aids)

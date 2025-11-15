@@ -78,9 +78,11 @@ class ObsSim(ObsSnapshotInst):
         snapshot.sim_offset_u = offset_u
 
         # Add the stars first since they're at infinite range
+        logger.debug('Adding simulated stars')
         ObsSim._add_simulated_stars(snapshot, sim_params)
 
         # Add the bodies second in front of the stars
+        logger.debug('Adding simulated bodies')
         ObsSim._add_simulated_bodies(snapshot, sim_params)
 
         # Determine extfov margins
@@ -224,22 +226,28 @@ class ObsSim(ObsSnapshotInst):
             illumination_angle = np.radians(params.get('illumination_angle', 0.0))
             phase_angle = np.radians(params.get('phase_angle', 0.0))
 
-            rough = (float(params.get('rough_mean', 0.0)), float(params.get('rough_std', 0.0)))
-            craters = float(params.get('craters', 0.0))
-            anti_aliasing = float(params.get('anti_aliasing', 0.0))
+            crater_fill = float(params.get('crater_fill', 0.0))
+            crater_min_radius = float(params.get('crater_min_radius', 0.05))
+            crater_max_radius = float(params.get('crater_max_radius', 0.25))
+            crater_power_law_exponent = float(params.get('crater_power_law_exponent', 3.0))
+            crater_relief_scale = float(params.get('crater_relief_scale', 0.6))
+            anti_aliasing = float(params.get('anti_aliasing', 1.0))
 
             sim_body = create_simulated_body(
                 size=(size_v, size_u),
+                center=(center_v, center_u),
                 semi_major_axis=semi_major_axis,
                 semi_minor_axis=semi_minor_axis,
                 semi_c_axis=semi_c_axis,
-                center=(center_v, center_u),
                 rotation_z=rotation_z,
                 rotation_tilt=rotation_tilt,
                 illumination_angle=illumination_angle,
                 phase_angle=phase_angle,
-                rough=rough,
-                craters=craters,
+                crater_fill=crater_fill,
+                crater_min_radius=crater_min_radius,
+                crater_max_radius=crater_max_radius,
+                crater_power_law_exponent=crater_power_law_exponent,
+                crater_relief_scale=crater_relief_scale,
                 anti_aliasing=anti_aliasing,
             )
 

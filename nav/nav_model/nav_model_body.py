@@ -13,7 +13,6 @@ from nav.support.attrdict import AttrDict
 from nav.support.constants import HALFPI
 from nav.support.image import (filter_downsample,
                                shift_array)
-from nav.support.sim import create_simulated_body
 from nav.support.time import now_dt
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
@@ -127,18 +126,17 @@ class NavModelBody(NavModelBodyBase):
         # metadata['confidence'] = None
 
         # Single-valued metadata
-        if not obs.is_simulated:
-            metadata['sub_solar_lon'] = np.degrees(ext_bp.sub_solar_longitude(body_name).vals)
-            metadata['sub_solar_lat'] = np.degrees(ext_bp.sub_solar_latitude(body_name).vals)
-            metadata['sub_observer_lon'] = np.degrees(ext_bp.sub_observer_longitude(body_name).vals)
-            metadata['sub_observer_lat'] = np.degrees(ext_bp.sub_observer_latitude(body_name).vals)
-            metadata['phase_angle'] = np.degrees(ext_bp.center_phase_angle(body_name).vals)
+        metadata['sub_solar_lon'] = np.degrees(ext_bp.sub_solar_longitude(body_name).vals)
+        metadata['sub_solar_lat'] = np.degrees(ext_bp.sub_solar_latitude(body_name).vals)
+        metadata['sub_observer_lon'] = np.degrees(ext_bp.sub_observer_longitude(body_name).vals)
+        metadata['sub_observer_lat'] = np.degrees(ext_bp.sub_observer_latitude(body_name).vals)
+        metadata['phase_angle'] = np.degrees(ext_bp.center_phase_angle(body_name).vals)
 
-            self._logger.info(f'Sub-solar longitude      {metadata["sub_solar_lon"]:6.2f}')
-            self._logger.info(f'Sub-solar latitude       {metadata["sub_solar_lat"]:6.2f}')
-            self._logger.info(f'Sub-observer longitude   {metadata["sub_observer_lon"]:6.2f}')
-            self._logger.info(f'Sub-observer latitude    {metadata["sub_observer_lat"]:6.2f}')
-            self._logger.info(f'Phase angle              {metadata["phase_angle"]:6.2f}')
+        self._logger.info(f'Sub-solar longitude      {metadata["sub_solar_lon"]:6.2f}')
+        self._logger.info(f'Sub-solar latitude       {metadata["sub_solar_lat"]:6.2f}')
+        self._logger.info(f'Sub-observer longitude   {metadata["sub_observer_lon"]:6.2f}')
+        self._logger.info(f'Sub-observer latitude    {metadata["sub_observer_lat"]:6.2f}')
+        self._logger.info(f'Phase angle              {metadata["phase_angle"]:6.2f}')
 
         ########################################################################
         # Check the size of the bounding box
@@ -248,15 +246,11 @@ class NavModelBody(NavModelBodyBase):
         if never_create_model:
             return
 
-        if obs.is_simulated:
-            model_img, limb_mask = self._create_simulated_model(body_name=body_name, obs=obs,
-                                                                body_config=body_config)
-        else:
-            model_img, limb_mask = self._create_backplane_model(body_name=body_name, obs=obs,
-                                                                body_config=body_config,
-                                                                inventory=inventory,
-                                                                u_min=u_min, u_max=u_max,
-                                                                v_min=v_min, v_max=v_max)
+        model_img, limb_mask = self._create_backplane_model(body_name=body_name, obs=obs,
+                                                            body_config=body_config,
+                                                            inventory=inventory,
+                                                            u_min=u_min, u_max=u_max,
+                                                            v_min=v_min, v_max=v_max)
 
         body_mask = model_img != 0
 
@@ -287,72 +281,6 @@ class NavModelBody(NavModelBodyBase):
 
         self._logger.debug(f'  Body model min: {np.min(self._model_img)}, '
                            f'max: {np.max(self._model_img)}')
-
-    def _create_simulated_model(self,
-                                *,
-                                body_name: str,
-                                obs: Observation,
-                                body_config: AttrDict
-                                ) -> tuple[NDArrayFloatType, NDArrayBoolType]:
-        """Create a model for a planetary body using simulated parameters.
-
-        Parameters:
-            body_name: The name of the planetary body.
-            obs: The observation object containing the image data.
-            body_config: Body configuration dictionary to use.
-        """
-
-        params = obs.sim_body_models[body_name]
-        size_v, size_u = obs.extdata_shape_vu
-
-        center_v = float(params.get('center_v', size_v / 2.0)) + obs.extfov_margin_v
-        center_u = float(params.get('center_u', size_u / 2.0)) + obs.extfov_margin_u
-
-        semi_major_axis = float(params.get('semi_major_axis', 0.0))
-        semi_minor_axis = float(params.get('semi_minor_axis', 0.0))
-        semi_c_axis = float(params.get('semi_c_axis',
-                                       min(semi_major_axis, semi_minor_axis)))
-
-        rotation_z = np.radians(params.get('rotation_z', 0.0))
-        rotation_tilt = np.radians(params.get('rotation_tilt', 0.0))
-        illumination_angle = np.radians(params.get('illumination_angle', 0.0))
-        phase_angle = np.radians(params.get('phase_angle', 0.0))
-
-        rough = (float(params.get('rough_mean', 0.0)), float(params.get('rough_std', 0.0)))
-        craters = float(params.get('craters', 0.0))
-        anti_aliasing = float(params.get('anti_aliasing', 0.0))
-
-        sim_body = create_simulated_body(
-            size=(size_v, size_u),
-            semi_major_axis=semi_major_axis,
-            semi_minor_axis=semi_minor_axis,
-            semi_c_axis=semi_c_axis,
-            center=(center_v, center_u),
-            rotation_z=rotation_z,
-            rotation_tilt=rotation_tilt,
-            illumination_angle=illumination_angle,
-            phase_angle=phase_angle,
-            rough=rough,
-            craters=craters,
-            anti_aliasing=anti_aliasing,
-        )
-
-        body_mask_invalid = sim_body == 0
-        body_mask_valid = ~body_mask_invalid
-
-        # If the inv mask is true, but any of its neighbors are false, then
-        # this is an edge
-        limb_mask_neighbor = (shift_array(body_mask_invalid, (-1,  0)) |
-                              shift_array(body_mask_invalid, ( 1,  0)) |
-                              shift_array(body_mask_invalid, ( 0, -1)) |
-                              shift_array(body_mask_invalid, ( 0,  1)))
-        # This valid mask will be a single series of pixels just inside the limb
-        limb_mask = body_mask_valid & limb_mask_neighbor
-
-        if not limb_mask.any():
-            self._logger.info('There is no limb')
-
-        return sim_body, limb_mask
 
     def _create_backplane_model(self,
                                 *,
