@@ -33,9 +33,8 @@ def create_simulated_body(
     """Create a simulated planetary body as an ellipsoid with shading and surface features.
 
     The body is modeled as a 3D ellipsoid projected onto 2D. The ellipsoid can have internal
-    craters of varying sizes and depths.
-    varying sizes. The body is illuminated using Lambertian shading (cos(incidence))
-    based on the illumination direction and phase angle.
+    craters of varying sizes and depths. The body is illuminated using Lambertian shading
+    (cos(incidence)) based on the illumination direction and phase angle.
 
     Parameters:
         size: Tuple of (size_v, size_u) giving the image dimensions in pixels.
