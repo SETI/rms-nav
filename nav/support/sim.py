@@ -134,10 +134,11 @@ def create_simulated_body(
 
     if crater_fill > 0:
         total_area = np.sum(inside_mask)
-        avg_crater_area = (crater_max_radius * semi_major_axis) ** 2
+        avg_crater_area = (crater_max_radius * semi_major_axis * aa_scale) ** 2
         n_craters = np.clip(int(crater_fill * total_area / avg_crater_area), 0, 1000)
 
-        rng = np.random.RandomState(int(semi_major_axis))  # For reproducibility
+        seed_value = hash((semi_major_axis, semi_minor_axis, semi_c_axis, center)) & 0x7FFFFFFF
+        rng = np.random.RandomState(seed_value)
         # Choose crater centers strictly inside the ellipse (exclude AA rim and exterior)
         ellipse_mask_nz = ellipse_dist_sq < 1.0
         nz = np.argwhere(ellipse_mask_nz)

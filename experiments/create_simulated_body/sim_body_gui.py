@@ -893,7 +893,7 @@ class SimulatedBodyGUI(QMainWindow):
             # on load.
         }
 
-    def _set_parameters_from_dict(self, params: dict[str, Any]):
+    def _set_parameters_from_dict(self, params: dict[str, Any]) -> None:
         """Set parameters from a dictionary."""
         self._size_v = params.get('size_v', self._size_v)
         self._size_u = params.get('size_u', self._size_u)
