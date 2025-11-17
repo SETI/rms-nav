@@ -2,7 +2,6 @@ from typing import Any, Optional, cast
 
 from filecache import FCPath
 import numpy as np
-import oops.hosts.cassini.iss
 
 from .obs_snapshot_inst import ObsSnapshotInst
 
@@ -40,6 +39,8 @@ class ObsCassiniISS(ObsSnapshotInst):
         Returns:
             An ObsCassiniISS object containing the image data and metadata.
         """
+
+        import oops.hosts.cassini.iss
 
         config = config or DEFAULT_CONFIG
         logger = DEFAULT_LOGGER

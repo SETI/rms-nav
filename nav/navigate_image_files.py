@@ -11,18 +11,6 @@ from nav.nav_master import NavMaster
 from nav.support.file import json_as_string
 
 
-#   *,
-#   allow_stars: bool = True,
-#   allow_rings: bool = True,
-#   allow_moons: bool = True,
-#   allow_central_planet: bool = True,
-#   force_offset_amount: Optional[float] = None,
-#   cartographic_data: Optional[CartographicData] = None,
-#   bootstrapped=False, sqs_handle=None,
-#   loaded_kernel_type="reconstructed",
-#   sqs_use_gapfill_kernels=False,
-#   max_allowed_time=None
-
 def navigate_image_files(obs_class: type[ObsSnapshotInst],
                          image_files: ImageFiles,
                          results_root: FCPath,
