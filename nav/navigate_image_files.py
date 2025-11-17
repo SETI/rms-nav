@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Optional, cast
 
 from filecache import FCPath
 from PIL import Image
@@ -14,9 +14,26 @@ from nav.support.file import json_as_string
 def navigate_image_files(obs_class: type[ObsSnapshotInst],
                          image_files: ImageFiles,
                          results_root: FCPath,
-                         nav_models: list[str],
-                         nav_techniques: list[str],
+                         *,
+                         nav_models: Optional[list[str]] = None,
+                         nav_techniques: Optional[list[str]] = None,
                          write_output_files: bool = True) -> tuple[bool, dict[str, Any]]:
+    """Navigate a set of image files.
+
+    Parameters:
+        obs_class: The observation snapshot class.
+        image_files: The image files to navigate.
+        results_root: The directory to write the results to; may be a FileCache URL.
+        nav_models: The models to use for navigation; or None if all models are to be used.
+        nav_techniques: The techniques to use for navigation; or None if all techniques are to be
+            used.
+        write_output_files: Whether to write output files. False performs the navigation as
+            a dry run but doesn't write any results.
+
+    Returns:
+        A tuple containing a boolean indicating success or failure and a dictionary containing the
+        public metadata for the navigation.
+    """
 
     logger = DEFAULT_LOGGER
 
@@ -82,5 +99,7 @@ def navigate_image_files(obs_class: type[ObsSnapshotInst],
             im = Image.fromarray(overlay)
             im.save(png_local)
             summary_png_file.upload()
+        else:
+            metadata = {}
 
         return True, metadata

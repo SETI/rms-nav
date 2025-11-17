@@ -76,7 +76,7 @@ def process_task(
     except KeyError:
         return False, f'{task_id}: Unknown dataset "{dataset_name}"'
     obs_class = inst_name_to_obs_class(inst_name)
-    files = task_data.get('files', [])
+    files = task_data.get('files', None)
     if files is None:
         return False, f'{task_id}: "files" field is required'
     image_files = []
@@ -99,16 +99,13 @@ def process_task(
         )
         image_files.append(image_file)
 
-    result, metadata = navigate_image_files(obs_class,
-                                            ImageFiles(image_files=image_files),
-                                            results_root=results_root,
-                                            nav_models=nav_models,
-                                            nav_techniques=nav_techniques)
+    _, metadata = navigate_image_files(obs_class,
+                                       ImageFiles(image_files=image_files),
+                                       results_root=results_root,
+                                       nav_models=nav_models,
+                                       nav_techniques=nav_techniques)
 
-    if result:
-        return False, 'Success'
-
-    return
+    return False, metadata  # No retry under any circumstances
 
 
 async def main():
