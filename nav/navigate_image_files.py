@@ -88,18 +88,16 @@ def navigate_image_files(obs_class: type[ObsSnapshotInst],
 
         nm.navigate()
 
-        if write_output_files:
-            overlay = nm.create_overlay()
+        metadata = nm.metadata_serializable()
+        metadata['status'] = 'success'
 
-            metadata = nm.metadata_serializable()
-            metadata['status'] = 'success'
+        if write_output_files:
             public_metadata_file.write_text(json_as_string(metadata))
 
+            overlay = nm.create_overlay()
             png_local = cast(Path, summary_png_file.get_local_path())
             im = Image.fromarray(overlay)
             im.save(png_local)
             summary_png_file.upload()
-        else:
-            metadata = {}
 
         return True, metadata
