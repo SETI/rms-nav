@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from filecache import FCPath
 from PIL import Image
@@ -15,13 +15,19 @@ def navigate_image_files(obs_class: type[ObsSnapshotInst],
                          image_files: ImageFiles,
                          results_root: FCPath,
                          nav_models: list[str],
-                         nav_techniques: list[str]) -> bool:
+                         nav_techniques: list[str],
+                         write_output_files: bool = True) -> tuple[bool, dict[str, Any]]:
 
     logger = DEFAULT_LOGGER
 
     if len(image_files.image_files) != 1:
         logger.error("Expected exactly one image per batch; got %d", len(image_files.image_files))
-        return False
+        return False, {
+            'status': 'error',
+            'status_error': 'expected_one_image_per_batch',
+            'status_exception':
+                f'Expected exactly one image per batch; got {len(image_files.image_files)}',
+        }
 
     image_file = image_files.image_files[0]
     image_path = image_file.image_file_path.absolute()
@@ -58,23 +64,23 @@ def navigate_image_files(obs_class: type[ObsSnapshotInst],
                     }
                 }
             public_metadata_file.write_text(json_as_string(metadata))
-            return False
+            return False, metadata
 
         nm = NavMaster(snapshot, nav_models=nav_models, nav_techniques=nav_techniques)
         nm.compute_all_models()
 
         nm.navigate()
 
-        overlay = nm.create_overlay()
+        if write_output_files:
+            overlay = nm.create_overlay()
 
-        try:
-            public_metadata_file.write_text(json_as_string(nm.metadata))
-        except TypeError:
-            logger.error('Metadata is not JSON serializable: %s', nm.metadata)
+            metadata = nm.metadata_serializable()
+            metadata['status'] = 'success'
+            public_metadata_file.write_text(json_as_string(metadata))
 
-        png_local = cast(Path, summary_png_file.get_local_path())
-        im = Image.fromarray(overlay)
-        im.save(png_local)
-        summary_png_file.upload()
+            png_local = cast(Path, summary_png_file.get_local_path())
+            im = Image.fromarray(overlay)
+            im.save(png_local)
+            summary_png_file.upload()
 
-        return True
+        return True, metadata

@@ -52,7 +52,6 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         print('Usage: python nav_main_offset.py <dataset_name> [args]')
         sys.exit(1)
 
-    DATASET = dataset_name_to_class(DATASET_NAME)()
     try:
         DATASET = dataset_name_to_class(DATASET_NAME)()
     except KeyError:
@@ -75,10 +74,6 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     environment_group.add_argument(
         '--pds3-holdings-root', type=str, default=None,
         help="""The root directory of the PDS3 holdings; overrides the PDS3_HOLDINGS_DIR
-        environment variable and the pds3_holdings_root configuration variable""")
-    environment_group.add_argument(
-        '--pds4-holdings-root', type=str, default=None,
-        help="""The root directory of the PDS4 holdings; overrides the PDS4_HOLDINGS_DIR
         environment variable and the pds3_holdings_root configuration variable""")
     environment_group.add_argument(
         '--results-root', type=str, default=None,
@@ -111,6 +106,9 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         is suitable for loading into a cloud_tasks queue; do not perform any other processing.""")
     output_group.add_argument(
         '--dry-run', action='store_true', default=False,
+        help="Don't actually process the images, just print what would be done")
+    output_group.add_argument(
+        '--no-write-output-files', action='store_true', default=False,
         help="Don't write any output files")
 
     # Add all the arguments related to selecting files
@@ -254,11 +252,11 @@ def main():
             }
             tasks_json.append(task_info)
 
-            cloud_tasks_path = FCPath(arguments.output_cloud_tasks_file)
-            with cloud_tasks_path.open('w') as f:
-                json_string = json_as_string(tasks_json)
-                f.write(json_string)
-            sys.exit(0)
+        cloud_tasks_path = FCPath(arguments.output_cloud_tasks_file)
+        with cloud_tasks_path.open('w') as f:
+            json_string = json_as_string(tasks_json)
+            f.write(json_string)
+        sys.exit(0)
 
     for imagefiles in DATASET.yield_image_files_from_arguments(arguments):
         assert len(imagefiles.image_files) == 1
@@ -275,7 +273,7 @@ def main():
                     if arguments.nav_models is not None else None,
                 nav_techniques=arguments.nav_techniques.split(',')
                     if arguments.nav_techniques is not None else None,
-                dry_run=arguments.dry_run
+                write_output_files=not arguments.no_write_output_files
                 ):
             NUM_FILES_PROCESSED += 1
         else:
