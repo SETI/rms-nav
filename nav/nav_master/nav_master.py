@@ -7,6 +7,7 @@ import numpy as np
 
 from nav.annotation import Annotations
 from nav.config import Config
+from nav.support.file import clean_obj
 from nav.nav_model import (NavModel,
                            NavModelBody,
                            NavModelBodySimulated,
@@ -112,6 +113,10 @@ class NavMaster(NavBase):
     def metadata(self) -> dict[str, Any]:
         """Returns the metadata dictionary."""
         return self._metadata
+
+    def metadata_serializable(self) -> dict[str, Any]:
+        """Returns a copy of the metadata dictionary that is JSON serializable."""
+        return cast(dict[str, Any], clean_obj(self._metadata))
 
     @property
     def star_models(self) -> list[NavModelStars]:

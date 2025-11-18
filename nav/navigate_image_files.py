@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import cast
+from typing import Any, Optional, cast
 
 from filecache import FCPath
 from PIL import Image
@@ -11,29 +11,40 @@ from nav.nav_master import NavMaster
 from nav.support.file import json_as_string
 
 
-#   *,
-#   allow_stars: bool = True,
-#   allow_rings: bool = True,
-#   allow_moons: bool = True,
-#   allow_central_planet: bool = True,
-#   force_offset_amount: Optional[float] = None,
-#   cartographic_data: Optional[CartographicData] = None,
-#   bootstrapped=False, sqs_handle=None,
-#   loaded_kernel_type="reconstructed",
-#   sqs_use_gapfill_kernels=False,
-#   max_allowed_time=None
-
 def navigate_image_files(obs_class: type[ObsSnapshotInst],
                          image_files: ImageFiles,
                          results_root: FCPath,
-                         nav_models: list[str],
-                         nav_techniques: list[str]) -> bool:
+                         *,
+                         nav_models: Optional[list[str]] = None,
+                         nav_techniques: Optional[list[str]] = None,
+                         write_output_files: bool = True) -> tuple[bool, dict[str, Any]]:
+    """Navigate a set of image files.
+
+    Parameters:
+        obs_class: The observation snapshot class.
+        image_files: The image files to navigate.
+        results_root: The directory to write the results to; may be a FileCache URL.
+        nav_models: The models to use for navigation; or None if all models are to be used.
+        nav_techniques: The techniques to use for navigation; or None if all techniques are to be
+            used.
+        write_output_files: Whether to write output files. False performs the navigation as
+            a dry run but doesn't write any results.
+
+    Returns:
+        A tuple containing a boolean indicating success or failure and a dictionary containing the
+        public metadata for the navigation.
+    """
 
     logger = DEFAULT_LOGGER
 
     if len(image_files.image_files) != 1:
         logger.error("Expected exactly one image per batch; got %d", len(image_files.image_files))
-        return False
+        return False, {
+            'status': 'error',
+            'status_error': 'expected_one_image_per_batch',
+            'status_exception':
+                f'Expected exactly one image per batch; got {len(image_files.image_files)}',
+        }
 
     image_file = image_files.image_files[0]
     image_path = image_file.image_file_path.absolute()
@@ -70,23 +81,23 @@ def navigate_image_files(obs_class: type[ObsSnapshotInst],
                     }
                 }
             public_metadata_file.write_text(json_as_string(metadata))
-            return False
+            return False, metadata
 
         nm = NavMaster(snapshot, nav_models=nav_models, nav_techniques=nav_techniques)
         nm.compute_all_models()
 
         nm.navigate()
 
-        overlay = nm.create_overlay()
+        metadata = nm.metadata_serializable()
+        metadata['status'] = 'success'
 
-        try:
-            public_metadata_file.write_text(json_as_string(nm.metadata))
-        except TypeError:
-            logger.error('Metadata is not JSON serializable: %s', nm.metadata)
+        if write_output_files:
+            public_metadata_file.write_text(json_as_string(metadata))
 
-        png_local = cast(Path, summary_png_file.get_local_path())
-        im = Image.fromarray(overlay)
-        im.save(png_local)
-        summary_png_file.upload()
+            overlay = nm.create_overlay()
+            png_local = cast(Path, summary_png_file.get_local_path())
+            im = Image.fromarray(overlay)
+            im.save(png_local)
+            summary_png_file.upload()
 
-        return True
+        return True, metadata

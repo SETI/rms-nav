@@ -2,7 +2,6 @@ from typing import Any, Optional
 
 from filecache import FCPath
 import numpy as np
-import oops.hosts.newhorizons.lorri
 
 from nav.config import DEFAULT_CONFIG, DEFAULT_LOGGER, Config
 from nav.support.time import et_to_utc
@@ -36,6 +35,8 @@ class ObsNewHorizonsLORRI(ObsSnapshotInst):
         Returns:
             An ObsNewHorizonsLORRI object containing the image data and metadata.
         """
+
+        import oops.hosts.newhorizons.lorri
 
         config = config or DEFAULT_CONFIG
         logger = DEFAULT_LOGGER

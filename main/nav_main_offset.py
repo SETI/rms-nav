@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 ################################################################################
 # nav_main_offset.py
 #
@@ -9,51 +10,25 @@
 
 import argparse
 import cProfile
-# import datetime
-import io
-# import logging
 import os
-import pstats
-# import subprocess
-from pathlib import Path
 import sys
 import time
 
-from filecache import FileCache
+from filecache import FileCache, FCPath
 
-# Add the repository root to the path
-# XXX This should eventually go away
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
+from nav.dataset.dataset import DataSet
 from nav.dataset import (dataset_names,
                          dataset_name_to_class,
                          dataset_name_to_inst_name)
 from nav.config import DEFAULT_CONFIG
 from nav.config.logger import DEFAULT_LOGGER
+from nav.support.file import json_as_string
 from nav.obs import inst_name_to_obs_class
 from nav.navigate_image_files import navigate_image_files
 
-import tkinter  # TODO Change to only install if needed
-# import traceback
 
-import spicedb
-
-# import nav.aws
-# import nav.config
-# import nav.file
-# import nav.file_oops
-# import nav.gui_offset_data
-# import nav.logging_setup
-# import nav.misc
-# from   nav.nav import Navigation
-# import nav.offset
-# import nav.web
-
-
-MAIN_LOG_NAME = 'nav_main_offset'
-
-DATASET = None
-DATASET_NAME = None
+DATASET: DataSet | None = None
+DATASET_NAME: str | None = None
 
 
 ################################################################################
@@ -78,7 +53,6 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         print('Usage: python nav_main_offset.py <dataset_name> [args]')
         sys.exit(1)
 
-    DATASET = dataset_name_to_class(DATASET_NAME)()
     try:
         DATASET = dataset_name_to_class(DATASET_NAME)()
     except KeyError:
@@ -115,65 +89,28 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     nav_group.add_argument(
         '--nav-techniques', type=str, default=None,
         help='Comma-separated list of navigation technique names to use')
-    nav_group.add_argument(
-        '--use-predicted-kernels', action=argparse.BooleanOptionalAction, default=False,
-        help='Use predicted CK kernels')
-    nav_group.add_argument(
-        '--use-gapfill-kernels', action=argparse.BooleanOptionalAction, default=False,
-        help='Use gapfill kernels')
-    nav_group.add_argument(
-        '--use-kernel', action='append',
-        help='Use specified CK kernel(s)')
 
-    # Arguments about offset, overlay, and PNG file generation
+    # Arguments about output file generation
     output_group = cmdparser.add_argument_group('Output')
+    # output_group.add_argument(
+    #     '--write-offset-file', action=argparse.BooleanOptionalAction, default=True,
+    #     help='Generate an offset file; no implies --no-overlay-file')
+    # output_group.add_argument(
+    #     '--write-overlay-file', action=argparse.BooleanOptionalAction, default=True,
+    #     help='Generate an overlay file')
+    # output_group.add_argument(
+    #     '--write-png-file', action=argparse.BooleanOptionalAction, default=True,
+    #     help='Generate a PNG file')
     output_group.add_argument(
-        '--write-offset-file', action=argparse.BooleanOptionalAction, default=True,
-        help='Generate an offset file; no implies --no-overlay-file')
-    output_group.add_argument(
-        '--write-overlay-file', action=argparse.BooleanOptionalAction, default=True,
-        help='Generate an overlay file')
-    output_group.add_argument(
-        '--write-png-file', action=argparse.BooleanOptionalAction, default=True,
-        help='Generate a PNG file')
-    output_group.add_argument(
-        '--no-write-results', action='store_true', default=False,
-        help="""Don't write offset, overlay, or PNG files;
-                implies --no-write-offset-file --no-write-overlay-file
-                --no-write-png-file""")
-    output_group.add_argument(
-        '--png-also-bw', action=argparse.BooleanOptionalAction, default=False,
-        help='Produce a black and white PNG file along with the color one')
-    output_group.add_argument(
-        '--png-blackpoint', type=float, default=None,
-        help='Set the blackpoint for the PNG file')
-    output_group.add_argument(
-        '--png-whitepoint', type=float, default=None,
-        help='Set the whitepoint for the PNG file')
-    output_group.add_argument(
-        '--png-gamma', type=float, default=None,
-        help='Set the gamma for the PNG file')
-    output_group.add_argument(
-        '--metadata-label-font', type=str, default=None, metavar='FONTFILE,SIZE',
-        help='Set the font for the PNG metadata info')
-    output_group.add_argument(
-        '--stars-label-font', type=str, default=None, metavar='FONTFILE,SIZE',
-        help='Set the font for star labels')
-    output_group.add_argument(
-        '--rings-label-font', type=str, default=None, metavar='FONTFILE,SIZE',
-        help='Set the font for ring labels')
-    output_group.add_argument(
-        '--bodies-label-font', type=str, default=None, metavar='FONTFILE,SIZE',
-        help='Set the font for body labels (moons and central planet)')
-    output_group.add_argument(
-        '--label-rings-backplane', action=argparse.BooleanOptionalAction, default=False,
-        help='Label backplane longitude and radius on ring images')
-    output_group.add_argument(
-        '--show-star-streaks', action=argparse.BooleanOptionalAction, default=False,
-        help='Show star streaks in the overlay and PNG files')
+        '--output-cloud-tasks-file', type=str, default=None,
+        help="""Write a JSON file containing task descriptions for all selected images that
+        is suitable for loading into a cloud_tasks queue; do not perform any other processing.""")
     output_group.add_argument(
         '--dry-run', action='store_true', default=False,
-        help="Don't actually process any images or write any output files")
+        help="Don't actually process the images, just print what would be done")
+    output_group.add_argument(
+        '--no-write-output-files', action='store_true', default=False,
+        help="Don't write any output files")
 
     # Add all the arguments related to selecting files
     DATASET.add_selection_arguments(cmdparser)
@@ -190,29 +127,8 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
 
 
 def exit_processing():
-    end_time = time.time()
-
     # main_logger.info('Total files processed %d', NUM_FILES_PROCESSED)
     # main_logger.info('Total files skipped %d', NUM_FILES_SKIPPED)
-    # main_logger.info('Total elapsed time %.2f sec', end_time-START_TIME)
-
-    # if arguments.profile and arguments.max_subprocesses == 0:
-    #     pr.disable()
-    #     s = io.StringIO()
-    #     sortby = 'cumulative'
-    #     ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
-    #     ps.print_stats()
-    #     ps.print_callers()
-    #     main_logger.info('Profile results:\n%s', s.getvalue())
-
-    # nav.logging_setup.close_main_logging()
-
-    # if (arguments.results_in_s3 and
-    #     arguments.main_loglevel.upper() != 'NONE'):
-    #     nav.aws.aws_copy_to_s3(main_log_path_local,
-    #                            arguments.aws_results_bucket, main_log_path,
-    #                            main_logger)
-    #     nav.file.safe_remove(main_log_path_local)
 
     sys.exit(0)
 
@@ -227,11 +143,6 @@ def main():
 
     command_list = sys.argv[1:]
     arguments = parse_args(command_list)
-
-    if arguments.no_write_results:
-        arguments.write_offset_file = False
-        arguments.write_overlay_file = False
-        arguments.write_png_file = False
 
     if arguments.profile:
         pr = cProfile.Profile()
@@ -303,18 +214,6 @@ def main():
     # main_logger.info('')
     # main_logger.info('Command line: %s', ' '.join(command_list))
     # main_logger.info('')
-    # main_logger.info('Subprocesses:  %d', arguments.max_subprocesses)
-    # main_logger.info('')
-    # main_logger.info('Allow stars:   %s', str(arguments.allow_stars))
-    # main_logger.info('Allow rings:   %s', str(arguments.allow_rings))
-    # main_logger.info('Allow moons:   %s', str(arguments.allow_moons))
-    # main_logger.info('Allow planet:  %s', str(arguments.allow_central_planet))
-    # main_logger.info('BOTSIM offset: %s', str(force_offset_amount))
-    # main_logger.info('Pred kernels:  %s', str(arguments.use_predicted_kernels))
-    # if kernel_type == 'none':
-    #     main_logger.info('Specific kernels:')
-    #     for kernel in arguments.use_kernel:
-    #         main_logger.info('  %s', kernel)
 
     try:
         INST_NAME = dataset_name_to_inst_name(DATASET_NAME)
@@ -324,6 +223,41 @@ def main():
         sys.exit(1)
 
     obs_class = inst_name_to_obs_class(INST_NAME)
+
+    if arguments.output_cloud_tasks_file:
+        task_arguments = {
+            'nav_models': arguments.nav_models.split(',')
+                if arguments.nav_models is not None else None,
+            'nav_techniques': arguments.nav_techniques.split(',')
+                if arguments.nav_techniques is not None else None,
+        }
+        tasks_json = []
+        for imagefile_idx, imagefiles in enumerate(
+                DATASET.yield_image_files_from_arguments(arguments)):
+            task_id = f'{DATASET_NAME}-{imagefiles.image_files[0].label_file_name}-{imagefile_idx}'
+            task_files = []
+            for image_file in imagefiles.image_files:
+                task_files.append({
+                    'image_file_url': image_file.image_file_url.as_posix(),
+                    'label_file_url': image_file.label_file_url.as_posix(),
+                    'results_path_stub': image_file.results_path_stub,
+                    'index_file_row': image_file.index_file_row,
+                })
+            task_info = {
+                'task_id': task_id,
+                'data': {
+                    'arguments': task_arguments,
+                    'dataset_name': DATASET_NAME,
+                    'files': task_files,
+                }
+            }
+            tasks_json.append(task_info)
+
+        cloud_tasks_path = FCPath(arguments.output_cloud_tasks_file)
+        with cloud_tasks_path.open('w') as f:
+            json_string = json_as_string(tasks_json)
+            f.write(json_string)
+        sys.exit(0)
 
     for imagefiles in DATASET.yield_image_files_from_arguments(arguments):
         assert len(imagefiles.image_files) == 1
@@ -340,6 +274,7 @@ def main():
                     if arguments.nav_models is not None else None,
                 nav_techniques=arguments.nav_techniques.split(',')
                     if arguments.nav_techniques is not None else None,
+                write_output_files=not arguments.no_write_output_files
                 ):
             NUM_FILES_PROCESSED += 1
         else:

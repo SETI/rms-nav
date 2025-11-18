@@ -2,7 +2,6 @@ from typing import Any, Optional
 
 from filecache import FCPath
 import numpy as np
-import oops.hosts.galileo.ssi
 
 from nav.config import DEFAULT_CONFIG, DEFAULT_LOGGER, Config
 from nav.support.time import et_to_utc
@@ -35,6 +34,8 @@ class ObsGalileoSSI(ObsSnapshotInst):
         Returns:
             An ObsGalileoSSI object containing the image data and metadata.
         """
+
+        import oops.hosts.galileo.ssi
 
         config = config or DEFAULT_CONFIG
         logger = DEFAULT_LOGGER
