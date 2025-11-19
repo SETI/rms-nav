@@ -14,9 +14,9 @@ class NavTechniqueManual(NavTechnique):
     """Manual navigation technique using an interactive PyQt6 dialog.
 
     Builds the same combined model as NavTechniqueCorrelateAll, but lets the user
-    manually specify the (dv, du) offset using a GUI with pan/zoom parity to the
-    existing Qt app. The dialog also supports an Auto button that calls the same
-    KPeaks correlation used by the correlate_all technique.
+    manually specify the (dv, du) offset using a GUI with pan/zoom. The dialog also
+    supports an Auto button that calls the same KPeaks correlation used by the
+    correlate_all technique.
     """
 
     def __init__(self,
