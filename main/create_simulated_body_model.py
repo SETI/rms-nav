@@ -444,10 +444,10 @@ class CreateSimulatedBodyModel(QMainWindow):
     def _add_tab_dialog(self) -> None:
         msg = QMessageBox(self)
         msg.setWindowTitle('Add Tab')
-        msg.setText('Add a body or a star?')
-        body_btn = msg.addButton('body', QMessageBox.ButtonRole.AcceptRole)
-        star_btn = msg.addButton('star', QMessageBox.ButtonRole.AcceptRole)
-        msg.addButton('cancel', QMessageBox.ButtonRole.RejectRole)
+        msg.setText('Add what type of model?')
+        body_btn = msg.addButton('Body', QMessageBox.ButtonRole.AcceptRole)
+        star_btn = msg.addButton('Star', QMessageBox.ButtonRole.AcceptRole)
+        msg.addButton('Cancel', QMessageBox.ButtonRole.RejectRole)
         msg.exec()
         clicked = msg.clickedButton()
         if clicked == body_btn:
@@ -563,6 +563,9 @@ class CreateSimulatedBodyModel(QMainWindow):
             lambda v, i=idx: self._on_body_field(i, 'center_u', v)
         )
         fl.addRow('Center U:', center_u)
+        # Keep references so drag updates can sync the UI
+        setattr(w, 'center_v_spin', center_v)
+        setattr(w, 'center_u_spin', center_u)
 
         smaj = QDoubleSpinBox()
         smaj.setRange(1.0, 5000.0)
@@ -722,6 +725,9 @@ class CreateSimulatedBodyModel(QMainWindow):
             lambda v, i=idx: self._on_star_field(i, 'u', v)
         )
         fl.addRow('U:', u_spin)
+        # Keep references so drag updates can sync the UI
+        setattr(w, 'v_spin', v_spin)
+        setattr(w, 'u_spin', u_spin)
 
         vmag = QDoubleSpinBox()
         vmag.setRange(-10.0, 30.0)
@@ -805,7 +811,7 @@ class CreateSimulatedBodyModel(QMainWindow):
     # ---- Rendering ----
     def _update_image(self) -> None:
         try:
-            img, meta = render_combined_model(self.sim_params)
+            img, meta = render_combined_model(self.sim_params, ignore_offset=True)
             self._current_image = img
             self._last_meta = meta
             self._display_image()
@@ -947,6 +953,16 @@ class CreateSimulatedBodyModel(QMainWindow):
             self.sim_params['bodies'][idx]['center_u'] = float(
                 self.sim_params['bodies'][idx].get('center_u', 0.0) + du
             )
+            # Sync the tab spin boxes for this body
+            tab_idx = 1 + idx
+            tab_w = self._tabs.widget(tab_idx)
+            if tab_w is not None:
+                cv_spin = getattr(tab_w, 'center_v_spin', None)
+                cu_spin = getattr(tab_w, 'center_u_spin', None)
+                if cv_spin is not None:
+                    cv_spin.setValue(self.sim_params['bodies'][idx]['center_v'])
+                if cu_spin is not None:
+                    cu_spin.setValue(self.sim_params['bodies'][idx]['center_u'])
             self._updater.immediate_update()
         elif kind == 'star' and 0 <= idx < len(self.sim_params['stars']):
             self.sim_params['stars'][idx]['v'] = float(
@@ -955,6 +971,16 @@ class CreateSimulatedBodyModel(QMainWindow):
             self.sim_params['stars'][idx]['u'] = float(
                 self.sim_params['stars'][idx].get('u', 0.0) + du
             )
+            # Sync the tab spin boxes for this star
+            tab_idx = 1 + len(self.sim_params['bodies']) + idx
+            tab_w = self._tabs.widget(tab_idx)
+            if tab_w is not None:
+                v_spin = getattr(tab_w, 'v_spin', None)
+                u_spin = getattr(tab_w, 'u_spin', None)
+                if v_spin is not None:
+                    v_spin.setValue(self.sim_params['stars'][idx]['v'])
+                if u_spin is not None:
+                    u_spin.setValue(self.sim_params['stars'][idx]['u'])
             self._updater.immediate_update()
         self._last_drag_img_vu = (img_v, img_u)
 
@@ -976,7 +1002,6 @@ class CreateSimulatedBodyModel(QMainWindow):
                     np.clip(self._current_image, 0.0, 1.0) * 255
                 ).astype(np.uint8)
                 Image.fromarray(img_uint8, mode='L').save(filename)
-                QMessageBox.information(self, 'Saved', f'Image saved to {filename}')
             except Exception as e:
                 QMessageBox.critical(self, 'Error', f'Failed to save image:\n{str(e)}')
 

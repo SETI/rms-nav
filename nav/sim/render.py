@@ -197,13 +197,17 @@ def render_bodies(
 
 
 def render_combined_model(
-    sim_params: dict[str, Any],
+    sim_params: dict[str, Any], ignore_offset: bool = False
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """Render stars then bodies from a full sim_params dict. Returns (img, meta)."""
     size_v = int(sim_params['size_v'])
     size_u = int(sim_params['size_u'])
-    offset_v = float(sim_params.get('offset_v', 0.0))
-    offset_u = float(sim_params.get('offset_u', 0.0))
+    if not ignore_offset:
+        offset_v = float(sim_params.get('offset_v', 0.0))
+        offset_u = float(sim_params.get('offset_u', 0.0))
+    else:
+        offset_v = 0.0
+        offset_u = 0.0
 
     img = np.zeros((size_v, size_u), dtype=np.float64)
 

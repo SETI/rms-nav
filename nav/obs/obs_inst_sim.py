@@ -93,12 +93,12 @@ class ObsSim(ObsSnapshotInst):
             else:
                 extfov_margin_vu = extfov_margin_vu_entry
 
+        snapshot._closest_planet = sim_params.get('closest_planet', None)
         new_obs = ObsSim(snapshot, config=config, extfov_margin_vu=extfov_margin_vu,
                          simulated=True)
         new_obs._inst_config = inst_config
 
         new_obs.spice_kernels = ['fake_kernel1.txt', 'fake_kernel2.txt']
-        new_obs._closest_planet = sim_params.get('closest_planet', None)
 
         return new_obs
 
