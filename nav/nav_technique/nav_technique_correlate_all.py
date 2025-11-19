@@ -1,12 +1,11 @@
 import copy
-import fnmatch
 from typing import Optional, TYPE_CHECKING, cast
 
 import numpy as np
 
 from .nav_technique import NavTechnique
 from nav.config import Config
-from nav.nav_model import NavModel, NavModelCombined, NavModelStars
+from nav.nav_model import NavModelCombined, NavModelStars
 from nav.support.correlate import navigate_with_pyramid_kpeaks
 from nav.support.misc import mad_std
 from nav.support.types import MutableStar, NDArrayFloatType, NDArrayIntType
@@ -69,20 +68,6 @@ class NavTechniqueCorrelateAll(NavTechnique):
     def combined_model(self) -> NavModelCombined | None:
         """Returns the final combined model."""
         return self._combined_model
-
-    def _filter_models(self, model_names: list[str]) -> list[NavModel]:
-        """Filters the models to only include the ones that match the given names."""
-        models = [x for x in self.nav_master.all_models if any(fnmatch.fnmatch(x.name, model_name)
-                                                               for model_name in model_names)]
-        return models
-
-    def _combine_models(self,
-                        model_names: list[str]) -> NavModelCombined | None:
-        """Returns a combined model from some of the available models."""
-        models = self._filter_models(model_names)
-        if len(models) == 0:
-            return None
-        return NavModelCombined('combined', self.nav_master.obs, models)
 
     def navigate(self) -> None:
         """Performs navigation using correlation across all available models.

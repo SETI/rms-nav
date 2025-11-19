@@ -29,11 +29,11 @@ jobs:
 
       - name: Flake8
         run: |
-          flake8 nav tests
+          flake8 main nav tests
 
       - name: Mypy
         run: |
-          mypy nav
+          mypy main nav
 
   test:
     name: Test nav

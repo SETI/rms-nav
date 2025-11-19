@@ -10,7 +10,7 @@ import argparse
 import asyncio
 import os
 import sys
-from typing import Any
+from typing import Any, cast
 
 from cloud_tasks.worker import Worker, WorkerData
 from filecache import FileCache, FCPath
@@ -50,11 +50,12 @@ def process_task(
     # Read the default configuration file and then any override files provided
     # on the command line
     DEFAULT_CONFIG.read_config()
-    if worker_data.args.config_file:
-        for config_file in worker_data.args.config_file:
+    arguments = cast(argparse.Namespace, worker_data.args)
+    if arguments.config_file:
+        for config_file in arguments.config_file:
             DEFAULT_CONFIG.update_config(config_file)
 
-    results_root_str = worker_data.args.results_root
+    results_root_str = arguments.results_root
     if results_root_str is None:
         try:
             results_root_str = DEFAULT_CONFIG.environment.results_root
@@ -109,7 +110,7 @@ def process_task(
     return False, metadata  # No retry under any circumstances
 
 
-async def main():
+async def main() -> None:
     argparser = argparse.ArgumentParser(
         description='Navigation & Backplane Main Interface for Offsets '
                     'Cloud Tasks version)')
