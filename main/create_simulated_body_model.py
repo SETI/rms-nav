@@ -759,22 +759,18 @@ class CreateSimulatedBodyModel(QMainWindow):
     def _on_body_field(self,
                        idx: int,
                        key: str,
-                       value: Any,
+                       value: float,
                        *,
                        trigger_validate: bool = False) -> None:
         if 0 <= idx < len(self.sim_params['bodies']):
-            self.sim_params['bodies'][idx][key] = (
-                float(value) if isinstance(value, (int, float)) else value
-            )
+            self.sim_params['bodies'][idx][key] = float(value)
             self._updater.request_update()
             if trigger_validate and key == 'range':
                 self._validate_ranges()
 
     def _on_star_field(self, idx: int, key: str, value: Any) -> None:
         if 0 <= idx < len(self.sim_params['stars']):
-            self.sim_params['stars'][idx][key] = (
-                float(value) if isinstance(value, (int, float)) else value
-            )
+            self.sim_params['stars'][idx][key] = float(value)
             self._updater.request_update()
 
     def _on_body_name(self, idx: int, text: str) -> None:

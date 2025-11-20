@@ -131,9 +131,7 @@ def render_bodies(
     sorted_body_models = sorted(body_models, key=lambda x: x['range'], reverse=True)
     order_near_to_far = [
         bp.get('name', f'SIM-BODY-{i+1}').upper()
-        for i, bp in enumerate(
-            sorted(bodies_params or [], key=lambda x: x['range'])
-        )
+        for i, bp in enumerate(sorted(body_models, key=lambda x: x['range']))
     ]
 
     inventory: dict[str, dict[str, float]] = {}

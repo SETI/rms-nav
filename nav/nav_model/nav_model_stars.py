@@ -157,6 +157,7 @@ class NavModelStars(NavModel):
         Returns:
             A list of Star objects that meet the given constraints. The following attributes
             are added to the Star object:
+
             - ``catalog_name``: The name of the catalog the star was found in.
             - ``pretty_name``: A pretty name for the star.
             - ``u`` and ``v``: The U,V coordinate (including stellar aberration if applicable).
@@ -359,6 +360,7 @@ class NavModelStars(NavModel):
         Returns:
             A list of Star objects in the FOV. The following attributes are added to the Star
             object:
+
             - ``catalog_name``: The name of the catalog the star was found in.
             - ``pretty_name``: A pretty name for the star.
             - ``u`` and ``v``: The U,V coordinate (including stellar aberration if applicable).
