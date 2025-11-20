@@ -1,5 +1,8 @@
 from abc import ABC, abstractmethod
+import fnmatch
 from typing import Any, Optional, TYPE_CHECKING
+
+from nav.nav_model import NavModel, NavModelCombined
 
 from nav.config import Config
 from nav.support.nav_base import NavBase
@@ -68,3 +71,18 @@ class NavTechnique(ABC, NavBase):
         This abstract method must be implemented by all navigation technique subclasses.
         """
         ...
+
+    def _filter_models(self, model_names: list[str]) -> list['NavModel']:
+        """Filters the available models using glob patterns."""
+        models = [
+            x for x in self.nav_master.all_models
+            if any(fnmatch.fnmatch(x.name.upper(), pattern.upper()) for pattern in model_names)
+        ]
+        return models
+
+    def _combine_models(self, model_names: list[str]) -> 'NavModelCombined | None':
+        """Returns a combined model from the available models matching patterns."""
+        models = self._filter_models(model_names)
+        if len(models) == 0:
+            return None
+        return NavModelCombined('combined', self.nav_master.obs, models)

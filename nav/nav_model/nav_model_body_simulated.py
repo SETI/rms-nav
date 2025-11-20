@@ -4,7 +4,7 @@ from oops import Observation
 import numpy as np
 
 from nav.config import Config
-from nav.support.sim import create_simulated_body
+from nav.sim.sim_body import create_simulated_body
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 from nav.support.time import now_dt
 from .nav_model_body_base import NavModelBodyBase

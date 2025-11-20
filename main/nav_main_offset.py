@@ -13,8 +13,10 @@ import cProfile
 import os
 import sys
 import time
+from typing import cast
 
 from filecache import FileCache, FCPath
+import pdslogger
 
 from nav.dataset.dataset import DataSet
 from nav.dataset import (dataset_names,
@@ -29,6 +31,11 @@ from nav.navigate_image_files import navigate_image_files
 
 DATASET: DataSet | None = None
 DATASET_NAME: str | None = None
+MAIN_LOGGER: pdslogger.PdsLogger | None = None
+NUM_FILES_PROCESSED: int = 0
+NUM_FILES_SKIPPED: int = 0
+NUM_FILES_COMPLETED: int = 0
+START_TIME: float = 0.0
 
 
 ################################################################################
@@ -47,7 +54,7 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
 
     DATASET_NAME = command_list[0].lower()
 
-    if not DATASET_NAME in dataset_names():
+    if DATASET_NAME not in dataset_names():
         print(f'Unknown dataset "{DATASET_NAME}"')
         print(f'Valid datasets are: {", ".join(dataset_names())}')
         print('Usage: python nav_main_offset.py <dataset_name> [args]')
@@ -126,9 +133,11 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     return arguments
 
 
-def exit_processing():
-    # main_logger.info('Total files processed %d', NUM_FILES_PROCESSED)
-    # main_logger.info('Total files skipped %d', NUM_FILES_SKIPPED)
+def exit_processing() -> None:
+    assert MAIN_LOGGER is not None
+    MAIN_LOGGER.info('Total files processed %d', NUM_FILES_PROCESSED)
+    MAIN_LOGGER.info('Total files skipped %d', NUM_FILES_SKIPPED)
+    MAIN_LOGGER.info('Total elapsed time %.2f sec', time.time() - START_TIME)
 
     sys.exit(0)
 
@@ -139,7 +148,7 @@ def exit_processing():
 #
 ###############################################################################
 
-def main():
+def main() -> None:
 
     command_list = sys.argv[1:]
     arguments = parse_args(command_list)
@@ -184,14 +193,14 @@ def main():
     #         main_log_path += '-'+str(os.getpid())
     #     main_log_path += '.log'
 
-    main_logger = DEFAULT_LOGGER
+    global MAIN_LOGGER
+    MAIN_LOGGER = DEFAULT_LOGGER
     # main_logger, image_logger = nav.logging_setup.setup_main_logging(
     #             MAIN_LOG_NAME, arguments.main_logfile_level,
     #             arguments.main_console_level, main_log_path_local,
     #             arguments.image_logfile_level, arguments.image_console_level)
 
     # image_loglevel = nav.logging_setup.decode_level(arguments.image_logfile_level)
-
 
     global START_TIME, NUM_FILES_PROCESSED, NUM_FILES_SKIPPED, NUM_FILES_COMPLETED
     START_TIME = time.time()
@@ -216,7 +225,7 @@ def main():
     # main_logger.info('')
 
     try:
-        INST_NAME = dataset_name_to_inst_name(DATASET_NAME)
+        INST_NAME = dataset_name_to_inst_name(cast(str, DATASET_NAME))
     except KeyError:
         print(f'Unknown dataset "{DATASET_NAME}"')
         print(f'Valid datasets are: {", ".join(dataset_names())}')
@@ -224,12 +233,16 @@ def main():
 
     obs_class = inst_name_to_obs_class(INST_NAME)
 
+    nav_models = arguments.nav_models.split(',') if arguments.nav_models is not None else None
+    nav_techniques = (arguments.nav_techniques.split(',')
+                      if arguments.nav_techniques is not None else None)
+
+    assert DATASET is not None  # just for type checking
+
     if arguments.output_cloud_tasks_file:
         task_arguments = {
-            'nav_models': arguments.nav_models.split(',')
-                if arguments.nav_models is not None else None,
-            'nav_techniques': arguments.nav_techniques.split(',')
-                if arguments.nav_techniques is not None else None,
+            'nav_models': nav_models,
+            'nav_techniques': nav_techniques,
         }
         tasks_json = []
         for imagefile_idx, imagefiles in enumerate(
@@ -263,17 +276,15 @@ def main():
         assert len(imagefiles.image_files) == 1
         image_path = imagefiles.image_files[0].image_file_path
         if arguments.dry_run:
-            main_logger.info('Would process: %s', image_path)
+            MAIN_LOGGER.info('Would process: %s', image_path)
             continue
 
         if navigate_image_files(
                 obs_class,
                 imagefiles,
                 results_root=results_root,
-                nav_models=arguments.nav_models.split(',')
-                    if arguments.nav_models is not None else None,
-                nav_techniques=arguments.nav_techniques.split(',')
-                    if arguments.nav_techniques is not None else None,
+                nav_models=nav_models,
+                nav_techniques=nav_techniques,
                 write_output_files=not arguments.no_write_output_files
                 ):
             NUM_FILES_PROCESSED += 1
@@ -281,6 +292,7 @@ def main():
             NUM_FILES_SKIPPED += 1
 
     exit_processing()
+
 
 if __name__ == '__main__':
     main()

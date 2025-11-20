@@ -17,6 +17,7 @@ from nav.nav_model import (NavModel,
                            NavModelTitan)
 from nav.nav_model.nav_model_body_base import NavModelBodyBase
 from nav.nav_technique import NavTechniqueCorrelateAll
+from nav.nav_technique import NavTechniqueManual
 from nav.support.nav_base import NavBase
 from nav.support.types import NDArrayFloatType, NDArrayUint8Type
 
@@ -59,7 +60,8 @@ class NavMaster(NavBase):
         else:
             nav_models = [x.strip().lower() for x in nav_models]
         if nav_techniques is None:
-            nav_techniques = ['*']
+            # Default: only run correlate_all unless user explicitly adds others
+            nav_techniques = ['correlate_all']
         else:
             nav_techniques = [x.strip().lower() for x in nav_techniques]
 
@@ -347,6 +349,26 @@ class NavMaster(NavBase):
                         self._final_offset = nav_all.offset
         else:
             self._offsets['correlate_all'] = None
+
+        # Manual technique
+        if any(fnmatch.fnmatch('manual', x.lower())
+               for x in self._nav_techniques_to_use):
+            nav_manual = NavTechniqueManual(self)
+            nav_manual.navigate()
+            manual_combined_model = nav_manual.combined_model()
+            # Keep a combined model available for overlays if needed
+            if manual_combined_model is not None:
+                self._combined_model = manual_combined_model
+            self._metadata['navigation_techniques']['manual'] = nav_manual.metadata
+            self._offsets['manual'] = nav_manual.offset
+            if nav_manual.offset is not None:
+                # Manual result should take precedence as an explicit override
+                # TODO Eventually pay attention to confidence
+                self._final_offset = nav_manual.offset
+                self._final_confidence = nav_manual.confidence
+                prevailing_confidence = nav_manual.confidence or prevailing_confidence
+        else:
+            self._offsets['manual'] = None
 
         self._final_confidence = prevailing_confidence
 
