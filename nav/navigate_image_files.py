@@ -13,7 +13,7 @@ from nav.support.file import json_as_string
 
 def navigate_image_files(obs_class: type[ObsSnapshotInst],
                          image_files: ImageFiles,
-                         results_root: FCPath,
+                         nav_results_root: FCPath,
                          *,
                          nav_models: Optional[list[str]] = None,
                          nav_techniques: Optional[list[str]] = None,
@@ -23,7 +23,7 @@ def navigate_image_files(obs_class: type[ObsSnapshotInst],
     Parameters:
         obs_class: The observation snapshot class.
         image_files: The image files to navigate.
-        results_root: The directory to write the results to; may be a FileCache URL.
+        nav_results_root: The directory to write the navigation results to; may be a FileCache URL.
         nav_models: The models to use for navigation; or None if all models are to be used.
         nav_techniques: The techniques to use for navigation; or None if all techniques are to be
             used.
@@ -49,8 +49,8 @@ def navigate_image_files(obs_class: type[ObsSnapshotInst],
     image_file = image_files.image_files[0]
     image_path = image_file.image_file_path.absolute()
     image_name = image_path.name
-    public_metadata_file = results_root / (image_file.results_path_stub + '_metadata.json')
-    summary_png_file = results_root / (image_file.results_path_stub + '_summary.png')
+    public_metadata_file = nav_results_root / (image_file.results_path_stub + '_metadata.json')
+    summary_png_file = nav_results_root / (image_file.results_path_stub + '_summary.png')
 
     with logger.open(str(image_path)):
         try:

@@ -76,17 +76,17 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     # Arguments about the environment
     environment_group = cmdparser.add_argument_group('Environment')
     environment_group.add_argument(
-        '--config-file', action='append', default=None,
-        help="""The configuration file(s) to use to override settings in the
-        the default configuration file; may be specified multiple times""")
+        '--config-file', action='append', default=['nav_default_config.yaml'],
+        help="""The configuration file(s) to use to override default settings;
+        may be specified multiple times (default: ./nav_default_config.yaml)""")
     environment_group.add_argument(
         '--pds3-holdings-root', type=str, default=None,
         help="""The root directory of the PDS3 holdings; overrides the PDS3_HOLDINGS_DIR
         environment variable and the pds3_holdings_root configuration variable""")
     environment_group.add_argument(
-        '--results-root', type=str, default=None,
-        help="""The root directory of the results; overrides the NAV_RESULTS_ROOT
-        environment variable and the results_root configuration variable""")
+        '--nav-results-root', type=str, default=None,
+        help="""The root directory of the navigation results; overrides the NAV_RESULTS_ROOT
+        environment variable and the nav_results_root configuration variable""")
 
     # Arguments about the general navigation process
     nav_group = cmdparser.add_argument_group('Navigation')
@@ -165,18 +165,17 @@ def main() -> None:
             DEFAULT_CONFIG.update_config(config_file)
 
     # Derive the results root
-    results_root_str = arguments.results_root
-    if results_root_str is None:
+    nav_results_root_str = arguments.nav_results_root
+    if nav_results_root_str is None:
         try:
-            results_root_str = DEFAULT_CONFIG.environment.results_root
+            nav_results_root_str = DEFAULT_CONFIG.environment.nav_results_root
         except AttributeError:
             pass
-    if results_root_str is None:
-        results_root_str = os.getenv('NAV_RESULTS_ROOT')
-    if results_root_str is None:
-        raise ValueError('One of configuration variable "results_root" or '
-                         'NAV_RESULTS_ROOT environment variable must be set')
-    results_root = FileCache('nav_results').new_path(results_root_str)
+    if nav_results_root_str is None:
+        raise ValueError('One of --nav-results-root, the configuration variable '
+                         '"nav_results_root" or the NAV_RESULTS_ROOT environment variable must be '
+                         'set')
+    nav_results_root = FileCache('nav_results').new_path(nav_results_root_str)
 
     # main_log_path = arguments.main_logfile
     # main_log_path_local = main_log_path
@@ -282,7 +281,7 @@ def main() -> None:
         if navigate_image_files(
                 obs_class,
                 imagefiles,
-                results_root=results_root,
+                nav_results_root=nav_results_root,
                 nav_models=nav_models,
                 nav_techniques=nav_techniques,
                 write_output_files=not arguments.no_write_output_files
