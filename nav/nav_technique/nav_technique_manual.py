@@ -1,7 +1,5 @@
 from typing import Optional, TYPE_CHECKING
 
-from PyQt6.QtWidgets import QApplication
-
 from .nav_technique import NavTechnique
 from nav.config import Config
 from nav.nav_model import NavModelCombined
@@ -46,7 +44,9 @@ class NavTechniqueManual(NavTechnique):
                 raise ValueError('Combined model mask is None')
 
             # Import here to avoid importing PyQt6 unless needed
+            from PyQt6.QtWidgets import QApplication
             from nav.ui.manual_nav_dialog import ManualNavDialog
+
             obs = self.nav_master.obs
 
             # Ensure a QApplication exists before creating any QWidget
@@ -64,7 +64,7 @@ class NavTechniqueManual(NavTechnique):
                 parent=None
             )
 
-            accepted, chosen_offset, last_corr = dialog.run_modal()
+            accepted, chosen_offset, _last_corr = dialog.run_modal()
 
             # If we created the QApplication in this method, shut it down
             if app_created:

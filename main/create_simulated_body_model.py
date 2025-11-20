@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import json
 import sys
-from typing import Any, Optional, cast
+from typing import Any, Callable, Optional, cast
 
 import numpy as np
 from PyQt6.QtCore import QTimer, Qt, pyqtSignal, QObject, QPoint
@@ -42,10 +42,10 @@ class ImageLabel(QLabel):
     def __init__(
         self,
         parent: Optional[QWidget],
-        on_press: Any,
-        on_move: Any,
-        on_release: Any,
-        on_wheel: Any,
+        on_press: Callable[[QMouseEvent], None],
+        on_move: Callable[[QMouseEvent], None],
+        on_release: Callable[[QMouseEvent], None],
+        on_wheel: Callable[[QWheelEvent], None],
     ) -> None:
         super().__init__(parent)
         self._on_press = on_press
@@ -213,6 +213,8 @@ class CreateSimulatedBodyModel(QMainWindow):
         self._offset_v_spin.setRange(-10000.0, 10000.0)
         self._offset_v_spin.setDecimals(3)
         self._offset_v_spin.setValue(self.sim_params['offset_v'])
+        self._offset_v_spin.setToolTip(
+            'Offsets are saved in the model but not shown in the preview.')
         self._offset_v_spin.valueChanged.connect(self._on_offset_v)
         gen_layout.addRow('Offset V:', self._offset_v_spin)
 
@@ -220,6 +222,8 @@ class CreateSimulatedBodyModel(QMainWindow):
         self._offset_u_spin.setRange(-10000.0, 10000.0)
         self._offset_u_spin.setDecimals(3)
         self._offset_u_spin.setValue(self.sim_params['offset_u'])
+        self._offset_u_spin.setToolTip(
+            'Offsets are saved in the model but not shown in the preview.')
         self._offset_u_spin.valueChanged.connect(self._on_offset_u)
         gen_layout.addRow('Offset U:', self._offset_u_spin)
 
@@ -564,8 +568,8 @@ class CreateSimulatedBodyModel(QMainWindow):
         )
         fl.addRow('Center U:', center_u)
         # Keep references so drag updates can sync the UI
-        setattr(w, 'center_v_spin', center_v)
-        setattr(w, 'center_u_spin', center_u)
+        w.center_v_spin = center_v  # type: ignore
+        w.center_u_spin = center_u  # type: ignore
 
         smaj = QDoubleSpinBox()
         smaj.setRange(1.0, 5000.0)

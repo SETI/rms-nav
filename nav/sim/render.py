@@ -63,6 +63,8 @@ def render_stars(img: np.ndarray,
         sigma = star_params.get('psf_sigma', 3.0)
         psf = GaussianPSF(sigma=sigma)
 
+        # Stars where any part of the PSF would be off the edge of the image are ignored.
+        # This is because PSF fitting will not work in these cases.
         if (u_int < psf_size_half_u or
             u_int >= img.shape[1]-psf_size_half_u or
             v_int < psf_size_half_v or
@@ -117,9 +119,12 @@ def render_bodies(
     """
     size_v, size_u = img.shape
 
-    body_models: list[dict[str, Any]] = bodies_params or []
+    # Make a copy before we modify it with range info
+    body_models = [dict(x) for x in bodies_params]
     for body_number, body_params in enumerate(body_models):
-        if 'range' not in body_params:
+        if 'range' in body_params:
+            body_params['range'] = float(body_params['range'])
+        else:
             body_params['range'] = body_number + 1
 
     # Sort by range: far to near for composition; also prepare near-to-far order for hit-test
@@ -197,9 +202,15 @@ def render_bodies(
 
 
 def render_combined_model(
-    sim_params: dict[str, Any], ignore_offset: bool = False
+    sim_params: dict[str, Any],
+    *,
+    ignore_offset: bool = False
 ) -> tuple[np.ndarray, dict[str, Any]]:
-    """Render stars then bodies from a full sim_params dict. Returns (img, meta)."""
+    """Render stars then bodies from a full sim_params dict. Returns (img, meta).
+
+    ignore_offset = True should be used when rendering the image in the GUI, but not
+    when creating the simulated image to navigate.
+    """
     size_v = int(sim_params['size_v'])
     size_u = int(sim_params['size_u'])
     if not ignore_offset:

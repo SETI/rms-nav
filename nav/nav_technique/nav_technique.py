@@ -76,7 +76,7 @@ class NavTechnique(ABC, NavBase):
         """Filters the available models using glob patterns."""
         models = [
             x for x in self.nav_master.all_models
-            if any(fnmatch.fnmatch(x.name, pattern) for pattern in model_names)
+            if any(fnmatch.fnmatch(x.name.upper(), pattern.upper()) for pattern in model_names)
         ]
         return models
 
