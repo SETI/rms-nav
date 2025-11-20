@@ -249,67 +249,37 @@ NavBase
 
 ``NavBase`` is the base class for most components in the system. It provides:
 
-* Logging functionality
-* Access to configuration settings
-* Common utility methods
+logging, access to configuration settings, and common utility methods shared across components.
 
 NavMaster
 ---------
 
-``NavMaster`` is the central coordinator for the navigation process:
-
-* Initializes with an ``ObsSnapshot``
-* Manages the creation of various models
-* Coordinates the navigation techniques
-* Creates the final overlay and results
+``NavMaster`` coordinates the navigation process. It initializes with an observation snapshot and optional model and technique selections, computes models, applies techniques (for example, ``correlate_all`` and ``manual``), determines the prevailing offset based on confidence, and produces both an overlay image and JSON-serializable metadata via ``metadata_serializable()``.
 
 NavModel
 --------
 
-``NavModel`` is the abstract base class for model generators:
-
-* ``NavModelStars``: Generates star field models
-* ``NavModelBody``: Generates planet/moon models
-* ``NavModelRings``: Generates ring system models
-* ``NavModelTitan``: Specialized model for Titan's atmosphere
+``NavModel`` is the abstract base for synthetic model generators. Subclasses implement ``create_model(...)`` to populate arrays and annotations. Public properties include the model name and snapshot (``name``, ``obs``), arrays (``model_img``, ``model_mask``, ``range``), optional quality measures (``uncertainty``, ``blur_amount``, ``confidence``), optional packed ``stretch_regions`` for per-region contrast, and ``annotations``. Implementations include complete classes for stars, bodies (including a simulated variant), rings, and Titan, plus a combined model used to merge the nearest visible model at each pixel.
 
 NavTechnique
 ------------
 
-``NavTechnique`` is the abstract base class for navigation algorithms:
-
-* ``NavTechniqueStars``: Star-based navigation
-* ``NavTechniqueAllModels``: Combined navigation using all available models
-* ``NavTechniqueTitan``: Specialized navigation for Titan
+``NavTechnique`` is the abstract base for navigation algorithms that estimate offsets from models and the observation. Techniques are selected by name and record technique-specific metadata. Current implementations include a joint correlation across models and a manual override technique.
 
 Dataset
 -------
 
-``DataSet`` handles access to image files and metadata:
-
-* ``DataSetPDS3``: Base class for PDS3-formatted datasets
-* ``DataSetCassiniISS``: Cassini-specific dataset handler
-* ``DataSetVoyagerISS``: Voyager-specific dataset handler
-* ``DataSetGalileoSSI``: Galileo-specific dataset handler
-* ``DataSetNewHorizonsLORRI``: New Horizons-specific dataset handler
+``DataSet`` handles access to image files and metadata. ``DataSetPDS3`` provides volume and index-based iteration for archives, while instrument-specific subclasses tailor parsing and volume sets. ``DataSetSim`` supplies images described by JSON files. Some datasets add flags; for example, Cassini ISS adds ``--camera`` (NAC or WAC) and supports a ``botsim`` grouping that pairs NAC/WAC images when available.
 
 Obs and ObsSnapshot
 -------------------
 
-``Obs`` is the base class for observations, while ``ObsSnapshot`` extends it with:
-
-* Cached backplane data
-* Additional coordinate transformations
-* Enhanced metadata access
+``Obs`` is the base class for observations. ``ObsSnapshot`` extends it with backplane handling and accessors, while ``ObsSnapshotInst`` defines the instrument-specific snapshot contract with a ``from_file(...)`` constructor and ``get_public_metadata()``. Instrument classes include ``ObsCassiniISS``, ``ObsVoyagerISS``, ``ObsGalileoSSI``, ``ObsNewHorizonsLORRI``, and ``ObsSim``.
 
 Annotation
 ----------
 
-The annotation system creates visual overlays:
-
-* ``Annotation``: Base class for individual annotations
-* ``Annotations``: Collection of annotations
-* ``AnnotationTextInfo``: Specialized text annotation handling
+The annotation subsystem composes labels and graphical elements into an overlay used by the final PNG. ``Annotations`` aggregates model-provided annotations and renders them with appropriate coloring and contrast stretching, optionally using per-region stretching via ``stretch_regions``.
 
 Extending the System
 ====================
@@ -317,13 +287,7 @@ Extending the System
 Adding a New Dataset
 --------------------
 
-To add support for a new instrument:
-
-1. Create a new dataset class in ``nav/dataset/`` inheriting from ``DataSet`` or ``DataSetPDS3``
-2. Implement required methods:
-   * ``image_name_valid(name)``
-   * ``yield_image_filenames_from_arguments(args)``
-   * Any additional methods needed for the specific dataset
+To add a dataset, create a class in ``nav/dataset/`` that inherits from ``DataSet`` (or from ``DataSetPDS3`` for archives). Implement ``_img_name_valid(...)``, the file-yielding methods, and ``add_selection_arguments(...)`` to expose CLI selection flags. Register the dataset in ``nav/dataset/__init__.py`` so it becomes available to the CLI.
 
 Example:
 
@@ -346,26 +310,21 @@ Example:
 Adding a New Instrument
 -----------------------
 
-To add a new instrument:
-
-1. Create a new instrument class in ``nav/inst/`` inheriting from ``Inst``
-2. Implement the ``from_file`` method to load and process images from this instrument
-3. Update the instrument registry in ``nav/inst/__init__.py``
+To add an instrument, implement a subclass of ``ObsSnapshotInst`` in ``nav/obs/`` that provides ``from_file(...)`` and any instrument-specific helpers. Update the instrument registry in ``nav/obs/__init__.py`` so datasets can resolve the instrument class.
 
 Example:
 
 .. code-block:: python
 
-   from nav.inst.inst import Inst
+   from nav.obs.obs_snapshot_inst import ObsSnapshotInst
 
-   class InstNewInstrument(Inst):
-       def __init__(self, *, config=None, logger_name=None):
-           super().__init__(config=config, logger_name=logger_name)
+   class ObsNewInstrument(ObsSnapshotInst):
+       def __init__(self, obs, *, config=None, logger_name=None):
+           super().__init__(obs, config=config, logger_name=logger_name)
 
        @classmethod
        def from_file(cls, path, extfov_margin_vu=None):
-           # Implement logic to load an image file for this instrument
-           # and return an ObsSnapshot object
+           # Implement logic to load an image file and return an ObsSnapshotInst
            ...
 
 Adding a New Navigation Model
@@ -373,9 +332,9 @@ Adding a New Navigation Model
 
 To implement a new model type:
 
-1. Create a new class in ``nav/nav_model/`` inheriting from ``NavModel``
-2. Implement the ``compute_model`` method to generate the model
-3. Update ``NavMaster.compute_all_models()`` to use your model
+1. Create a new class in ``nav/nav_model/`` inheriting from ``NavModel``.
+2. Implement ``create_model(...)`` to generate arrays and annotations.
+3. Update ``NavMaster.compute_all_models()`` to construct your model.
 
 Example:
 
@@ -384,12 +343,11 @@ Example:
    from nav.nav_model.nav_model import NavModel
 
    class NavModelNewFeature(NavModel):
-       def __init__(self, obs, *, config=None, logger_name=None):
-           super().__init__(obs, config=config, logger_name=logger_name)
+       def __init__(self, name, obs, *, config=None, logger_name=None):
+           super().__init__(name, obs, config=config, logger_name=logger_name)
 
-       def compute_model(self):
-           # Implement logic to compute the new feature model
-           # and set self.model_img and self.model_mask
+       def create_model(self, *, always_create_model=False, never_create_model=False, create_annotations=True):
+           # Implement logic to compute arrays and metadata
            ...
 
 Adding a New Navigation Technique
@@ -397,9 +355,9 @@ Adding a New Navigation Technique
 
 To implement a new navigation algorithm:
 
-1. Create a new class in ``nav/nav_technique/`` inheriting from ``NavTechnique``
-2. Implement the ``navigate`` method with your algorithm
-3. Update ``NavMaster.navigate()`` to use your technique
+1. Create a new class in ``nav/nav_technique/`` inheriting from ``NavTechnique``.
+2. Implement the ``navigate`` method with your algorithm.
+3. Update ``NavMaster.navigate()`` to construct and record your technique.
 
 Example:
 
@@ -553,8 +511,8 @@ Updating API Documentation
 
 The API documentation is automatically generated from docstrings in the code. To update it:
 
-1. Ensure your code has proper docstrings
-2. Run ``make html`` to rebuild the documentation
+1. Ensure your code has proper docstrings.
+2. Run ``make html`` to rebuild the documentation.
 
 If you add new modules, you may need to update ``api_reference.rst`` to include them.
 

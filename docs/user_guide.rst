@@ -5,7 +5,7 @@ User Guide
 Introduction
 ============
 
-RMS-NAV is a spacecraft image navigation system designed to analyze images from various space missions and determine precise positional offsets. This guide explains how to use the ``nav_main_offset.py`` program, which is the primary command-line interface for the RMS-NAV system.
+RMS-NAV is a spacecraft image navigation system designed to analyze images from various space missions and determine precise positional offsets. This guide explains how to use the primary command-line interface in ``main/nav_main_offset.py`` to navigate images and generate results, how to invoke the cloud-tasks variant for queue-driven processing, and how to launch the GUI used to design simulated models for testing.
 
 Purpose of the System
 ---------------------
@@ -28,12 +28,13 @@ The system works by:
 Supported Missions
 ------------------
 
-RMS-NAV currently supports the following spacecraft missions and instruments:
+RMS-NAV currently supports multiple instruments, organized by dataset names you will pass on the command line. Dataset names are case-insensitive and map to instrument-specific handlers. The complete set is:
 
-* **Cassini** - Imaging Science Subsystem (COISS)
-* **Voyager** - Imaging Science Subsystem (VGISS)
-* **Galileo** - Solid State Imager (GOSSI)
-* **New Horizons** - Long Range Reconnaissance Imager (NHLORRI)
+* ``coiss`` and ``coiss_pds3`` — Cassini Imaging Science Subsystem
+* ``gossi`` and ``gossi_pds3`` — Galileo Solid State Imager
+* ``nhlorri`` and ``nhlorri_pds3`` — New Horizons Long Range Reconnaissance Imager
+* ``vgiss`` and ``vgiss_pds3`` — Voyager Imaging Science Subsystem
+* ``sim`` — simulated images described by JSON files
 
 Installation and Setup
 ======================
@@ -100,267 +101,120 @@ The main entry point for RMS-NAV is ``main/nav_main_offset.py``. The basic synta
 
 .. code-block:: bash
 
-   python main/nav_main_offset.py INSTRUMENT [options] [file selection options]
+   python main/nav_main_offset.py DATASET_NAME [options]
 
-Where ``INSTRUMENT`` is one of:
-
-* ``COISS`` - Cassini Imaging Science Subsystem
-* ``GOSSI`` - Galileo Solid State Imager
-* ``NHLORRI`` - New Horizons Long Range Reconnaissance Imager
-* ``VGISS`` - Voyager Imaging Science Subsystem
+Where ``DATASET_NAME`` is one of the supported names listed in the "Supported Missions" section. Names are case-insensitive (for example, ``COISS`` and ``coiss`` are equivalent).
 
 Command-Line Arguments
 ----------------------
 
-Navigation Options
+The command-line interface groups options by purpose. Environment options control configuration sources and output roots. Navigation options select which models or techniques to run. Output options determine whether to write artifacts locally or to produce a cloud-tasks description instead of processing. Dataset selection options are provided by each dataset type: PDS3 datasets expose volume and image filters, while the simulated dataset expects one or more JSON files. A single profiling toggle is available for performance analysis.
+
+Environment options
+^^^^^^^^^^^^^^^^^^^
+
+* ``--config-file PATH`` (repeatable): one or more configuration file paths to override defaults.
+* ``--pds3-holdings-root PATH``: root directory or URL for PDS3 holdings, overriding both the ``PDS3_HOLDINGS_DIR`` environment variable and any corresponding configuration setting.
+* ``--results-root PATH``: root directory or URL where results will be written, overriding both the ``NAV_RESULTS_ROOT`` environment variable and any corresponding configuration setting.
+
+Navigation options
 ^^^^^^^^^^^^^^^^^^
 
-These options control how the navigation process works:
+* ``--nav-models LIST``: a comma-separated list of model names or patterns to enable. Valid entries include ``stars``, ``rings``, ``titan``, and body-specific entries of the form ``body:NAME`` (glob patterns are allowed).
+* ``--nav-techniques LIST``: a comma-separated list of navigation techniques to apply. Valid entries include ``correlate_all`` and ``manual``.
 
-.. list-table::
-   :widths: 30 70
-   :header-rows: 1
-
-   * - Option
-     - Description
-   * - ``--force-offset``
-     - Force offset computation even if offset file exists
-   * - ``--display-offset-results``
-     - Graphically display offset results
-   * - ``--force-offset-amount U,V``
-     - Force the offset to be the specified u,v values
-   * - ``--stars-only``
-     - Navigate using only stars
-   * - ``--allow-stars``/``--no-allow-stars``
-     - Include/exclude stars in navigation (default: include)
-   * - ``--rings-only``
-     - Navigate using only rings
-   * - ``--allow-rings``/``--no-allow-rings``
-     - Include/exclude rings in navigation (default: include)
-   * - ``--moons-only``
-     - Navigate using only moons
-   * - ``--allow-moons``/``--no-allow-moons``
-     - Include/exclude moons in navigation (default: include)
-   * - ``--central-planet-only``
-     - Navigate using only the central planet
-   * - ``--allow-central-planet``/``--no-allow-central-planet``
-     - Include/exclude central planet in navigation (default: include)
-   * - ``--use-predicted-kernels``/``--no-use-predicted-kernels``
-     - Use predicted CK kernels (default: no)
-   * - ``--use-gapfill-kernels``/``--no-use-gapfill-kernels``
-     - Use gapfill kernels (default: no)
-   * - ``--use-kernel KERNEL``
-     - Use specified CK kernel(s)
-   * - ``--use-cassini-nac-wac-offset``/``--no-use-cassini-nac-wac-offset``
-     - Use the computed offset between NAC and WAC frames (default: yes)
-
-Output Options
+Output options
 ^^^^^^^^^^^^^^
 
-These options control the output files generated by the system:
+* ``--output-cloud-tasks-file PATH``: write a JSON file describing tasks for all selected images suitable for a cloud-tasks queue, and exit without performing navigation.
+* ``--dry-run``: print the images that would be processed without performing navigation.
+* ``--no-write-output-files``: perform navigation but do not write any output files.
 
-.. list-table::
-   :widths: 30 70
-   :header-rows: 1
+Dataset selection (PDS3 datasets)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-   * - Option
-     - Description
-   * - ``--write-offset-file``/``--no-write-offset-file``
-     - Generate an offset file (default: yes)
-   * - ``--write-overlay-file``/``--no-write-overlay-file``
-     - Generate an overlay file (default: yes)
-   * - ``--write-png-file``/``--no-write-png-file``
-     - Generate a PNG file (default: yes)
-   * - ``--no-write-results``
-     - Don't write any output files
-   * - ``--png-also-bw``/``--no-png-also-bw``
-     - Produce a black and white PNG file along with the color one (default: no)
-   * - ``--png-blackpoint VALUE``
-     - Set the blackpoint for the PNG file
-   * - ``--png-whitepoint VALUE``
-     - Set the whitepoint for the PNG file
-   * - ``--png-gamma VALUE``
-     - Set the gamma for the PNG file
-   * - ``--metadata-label-font FONTFILE,SIZE``
-     - Set the font for the PNG metadata info
-   * - ``--stars-label-font FONTFILE,SIZE``
-     - Set the font for star labels
-   * - ``--rings-label-font FONTFILE,SIZE``
-     - Set the font for ring labels
-   * - ``--bodies-label-font FONTFILE,SIZE``
-     - Set the font for body labels (moons and central planet)
-   * - ``--label-rings-backplane``/``--no-label-rings-backplane``
-     - Label backplane longitude and radius on ring images (default: no)
-   * - ``--show-star-streaks``/``--no-show-star-streaks``
-     - Show star streaks in the overlay and PNG files (default: no)
+For PDS3 datasets (``coiss``, ``coiss_pds3``, ``gossi``, ``gossi_pds3``, ``nhlorri``, ``nhlorri_pds3``, ``vgiss``, ``vgiss_pds3``), the following options control which images are selected. All filters combine with logical AND, and explicit lists restrict the search domain before range filters to improve performance.
 
-File Selection Options
-^^^^^^^^^^^^^^^^^^^^^^
+* ``img_name`` (positional, repeatable): specific image name(s) to process.
+* ``--first-image-num N``: minimum image number (inclusive).
+* ``--last-image-num N``: maximum image number (inclusive).
+* ``--volumes NAME[,NAME...]`` (repeatable): one or more complete PDS3 volume names; you may pass comma-separated values or specify the option multiple times.
+* ``--first-volume NAME``: starting PDS3 volume; only that volume and chronologically later ones are processed.
+* ``--last-volume NAME``: ending PDS3 volume; only that volume and chronologically earlier ones are processed.
+* ``--image-filespec-csv FILE`` (repeatable): CSV file(s) containing PDS3 file specifications; files must include a header column named ``Primary File Spec`` or ``primaryfilespec``.
+* ``--image-file-list FILE`` (repeatable): file(s) containing file specifications or names, one per line; lines beginning with ``#`` are ignored.
+* ``--choose-random-images N``: choose a random subset of N images that meet the other criteria.
 
-File Selection Logic
-^^^^^^^^^^^^^^^^^^^^
+Dataset selection (simulated dataset)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The file selection options can be combined to create complex filtering rules:
+For the simulated dataset (``sim``), each dataset value is a path to a JSON file describing an image to be rendered and navigated. Selection options are:
 
-1. **Volume-based selection**: Use ``--volumes``, ``--first-volume``, and ``--last-volume`` to select images from specific PDS3 volumes.
+* ``img_path`` (positional, repeatable): one or more paths to JSON files containing simulated images to process.
 
-2. **Image number selection**: Use ``--first-image-num`` and ``--last-image-num`` to select images within a specific range of image numbers.
+Miscellaneous
+^^^^^^^^^^^^^
 
-3. **Camera type filtering**: Use ``--camera-type`` to select images from a specific camera (e.g., NAC or WAC for Cassini).
-
-4. **File list selection**: Use ``--image-filelist`` or ``--image-pds-csv`` to process images listed in external files.
-
-5. **Processing state filtering**: Use ``--has-offset-file``, ``--has-no-offset-file``, ``--has-png-file``, and ``--has-no-png-file`` to select images based on whether they've been processed before.
-
-6. **Error condition filtering**: Use ``--has-offset-error``, ``--has-offset-spice-error``, and ``--has-offset-nonspice-error`` to select images that had specific errors during previous processing attempts.
-
-7. **Custom filtering**: Use ``--selection-expr`` with a Python expression that evaluates metadata from previous processing attempts.
-
-8. **Random sampling**: Use ``--choose-random-images`` to select a random subset of images that match other criteria.
-
-When multiple selection criteria are specified, they are combined with logical AND - only images that satisfy all criteria will be selected.
-
-File Selection Options
-^^^^^^^^^^^^^^^^^^^^^^
-
-These options vary by instrument but generally include:
-
-.. list-table::
-   :widths: 30 70
-   :header-rows: 1
-
-   * - Option
-     - Description
-   * - ``image_name``
-     - Specific image name(s) to process
-   * - ``--image-full-path PATH``
-     - Process a single image at the specified path
-   * - ``--directory DIR``
-     - Process all valid images in the specified directory
-   * - ``--first-image-num IMAGE_NUM``
-     - The starting image number
-   * - ``--last-image-num IMAGE_NUM``
-     - The ending image number
-   * - ``--camera-type TYPE``
-     - Only process images with the given camera type
-   * - ``--volumes VOL_NAME``
-     - One or more entire PDS3 volumes or volume/range_subdirs
-   * - ``--first-volume VOL_NAME``
-     - The starting PDS3 volume name
-   * - ``--last-volume VOL_NAME``
-     - The ending PDS3 volume name
-   * - ``--image-pds-csv FILE``
-     - A CSV file downloaded from PDS that contains filespecs of images to process
-   * - ``--image-filelist FILE``
-     - A file that contains image names of images to process
-   * - ``--strict-file-order``
-     - With --image-filelist or --image-pds-csv, return filename in the order in the file, not numerical order
-   * - ``--has-offset-file``
-     - Only process images that already have an offset file
-   * - ``--has-no-offset-file``
-     - Only process images that don't already have an offset file
-   * - ``--has-png-file``
-     - Only process images that already have a PNG file
-   * - ``--has-no-png-file``
-     - Only process images that don't already have a PNG file
-   * - ``--has-offset-error``
-     - Only process images if the offset file exists and indicates a fatal error
-   * - ``--has-offset-nonspice-error``
-     - Only process images if the offset file exists and indicates a fatal error other than missing SPICE data
-   * - ``--has-offset-spice-error``
-     - Only process images if the offset file exists and indicates a fatal error from missing SPICE data
-   * - ``--selection-expr EXPR``
-     - Expression to evaluate to decide whether to reprocess an offset
-   * - ``--choose-random-images N``
-     - Choose N random images to process within other constraints
-   * - ``--show-image-list-only``
-     - Only show the list of images that would be processed
-
-Miscellaneous Options
-^^^^^^^^^^^^^^^^^^^^^
-
-.. list-table::
-   :widths: 30 70
-   :header-rows: 1
-
-   * - Option
-     - Description
-   * - ``--profile``/``--no-profile``
-     - Do performance profiling (default: no)
+* ``--profile`` / ``--no-profile``: enable or disable runtime profiling (default is disabled).
 
 Example Commands
 ----------------
 
-Process a single Cassini image using only star navigation:
+To process a single Cassini image by specifying its name explicitly and using the default navigation technique:
 
 .. code-block:: bash
 
-   python main/nav_main_offset.py COISS --stars-only --image-full-path /path/to/image/N1234567890.IMG
+   python main/nav_main_offset.py coiss N1234567890
 
-Process all Voyager images in a directory:
-
-.. code-block:: bash
-
-   python main/nav_main_offset.py VGISS --directory /path/to/voyager/images
-
-Process a New Horizons image with custom PNG settings:
+To process Voyager images within a single PDS3 volume:
 
 .. code-block:: bash
 
-   python main/nav_main_offset.py NHLORRI --image-full-path /path/to/image.IMG --png-blackpoint 100 --png-whitepoint 1000 --png-gamma 1.2
+   python main/nav_main_offset.py vgiss --volumes VGISS_5101
 
-Process a Galileo image using only moon features:
-
-.. code-block:: bash
-
-   python main/nav_main_offset.py GOSSI --moons-only --image-full-path /path/to/image.IMG
-
-Process a Cassini image without creating output files (for testing):
+To process a New Horizons image list found in a CSV from PDS, running both star and manual techniques:
 
 .. code-block:: bash
 
-    python main/nav_main_offset.py COISS --no-write-results --image-full-path /path/to/image.IMG
+   python main/nav_main_offset.py nhlorri --image-filespec-csv /path/to/nhlorri.csv --nav-techniques correlate_all,manual
 
-Using PDS3 Dataset Options
---------------------------
-
-The PDS3 dataset options provide powerful ways to select and filter images from PDS3 archives:
-
-Processing images from a specific volume:
+To choose ten random Cassini images between two volumes and perform a dry run:
 
 .. code-block:: bash
 
-   python main/nav_main_offset.py VGISS --volumes VGISS_5101 --show-image-list-only
+   python main/nav_main_offset.py coiss --first-volume COISS_2001 --last-volume COISS_2010 --choose-random-images 10 --dry-run
 
-Processing images within a range of volumes:
-
-.. code-block:: bash
-
-   python main/nav_main_offset.py COISS --first-volume COISS_2001 --last-volume COISS_2010
-
-Processing images that need reprocessing (no existing offset file):
+To generate a cloud-tasks JSON file for images across two Voyager volumes without processing:
 
 .. code-block:: bash
 
-   python main/nav_main_offset.py COISS --has-no-offset-file --volumes COISS_2001
+   python main/nav_main_offset.py vgiss --volumes VGISS_5101 --volumes VGISS_5102 --output-cloud-tasks-file tasks.json
 
-Processing images with specific error conditions:
+Cloud-tasks entry point
+-----------------------
 
-.. code-block:: bash
-
-   python main/nav_main_offset.py COISS --has-offset-spice-error --volumes COISS_2001
-
-Processing a random sample of images:
+Queue-driven processing is supported by ``main/nav_main_offset_cloud_tasks.py``. This variant reads tasks from a queue and processes each batch of files described by the task payload. It accepts the same environment options used to derive configuration and results roots and does not include dataset selection flags because the task provides the list of files. Invoke it with:
 
 .. code-block:: bash
 
-   python main/nav_main_offset.py VGISS --volumes VGISS_5101 --choose-random-images 10
+   python main/nav_main_offset_cloud_tasks.py [--config-file PATH] [--results-root PATH]
 
-Using a custom selection expression to filter images:
+Each task payload must be a JSON object with the following fields:
+
+* ``dataset_name``: one of the supported dataset names.
+* ``arguments``: an object with optional keys ``nav_models`` and ``nav_techniques`` (lists or ``null``).
+* ``files``: an array of objects, each containing ``image_file_url``, ``label_file_url``, ``results_path_stub``, and optional ``index_file_row`` metadata.
+
+Simulated model GUI
+-------------------
+
+The GUI in ``main/create_simulated_body_model.py`` allows you to build and adjust simulated scenes consisting of one or more planetary bodies and star fields. Launch it with:
 
 .. code-block:: bash
 
-   python main/nav_main_offset.py COISS --selection-expr "metadata.get('EXPOSURE_DURATION') > 100" --volumes COISS_2001
+   python main/create_simulated_body_model.py
+
+The interface provides a live preview with pan and zoom, tabs for each model element, and controls to adjust geometry and photometric parameters. You can save a PNG snapshot of the current scene and export or import the JSON parameter set used to describe the model. The rendering uses the same engine as the navigation system (see ``nav.sim.render``), so the generated scenes are suitable for testing navigation algorithms end-to-end.
 
 
 Inputs and Outputs
@@ -432,21 +286,11 @@ Troubleshooting
 Common Issues
 -------------
 
-1. **Missing SPICE kernels**: Ensure all required SPICE kernels are available and the SPICE_PATH is set correctly
-2. **Image format issues**: Verify that the input image is in the expected PDS3 format
-3. **No features found**: Some images may not contain enough features for navigation
-4. **Poor correlation**: Check image quality and try different navigation techniques
+If SPICE kernels are missing, ensure that all required kernels are available and that environment variables and configuration files point to valid paths. For PDS3 inputs, verify the files conform to expected formats. In cases where no features are found or correlations are weak, check image quality, adjust the selected models or techniques, or limit processing to images known to contain suitable features. Use ``--dry-run`` to validate selection criteria without performing full processing.
 
 Getting Help
 ------------
 
 If you encounter persistent issues:
 
-1. Check the log files for detailed error messages
-2. Review the example scripts in the `examples/` directory
-3. Consult the developer documentation
-4. Contact the development team with:
-   - A description of the issue
-   - The command line used
-   - Log files
-   - Sample images (if possible)
+Review logs for detailed errors, consult the developer documentation for architectural context, and provide the command line, log snippets, and representative input data when asking for support.

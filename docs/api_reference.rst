@@ -12,11 +12,6 @@ nav.nav_master
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_master
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 nav.nav_model
 =============
 
@@ -35,12 +30,27 @@ nav.nav_model
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: nav.nav_model.nav_model_body_base
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: nav.nav_model.nav_model_body_simulated
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: nav.nav_model.nav_model_rings
    :members:
    :undoc-members:
    :show-inheritance:
 
 .. automodule:: nav.nav_model.nav_model_titan
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: nav.nav_model.nav_model_combined
    :members:
    :undoc-members:
    :show-inheritance:
@@ -53,12 +63,12 @@ nav.nav_technique
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_technique.nav_technique_stars
+.. automodule:: nav.nav_technique.nav_technique_manual
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_technique.nav_technique_all_models
+.. automodule:: nav.nav_technique.nav_technique_correlate_all
    :members:
    :undoc-members:
    :show-inheritance:
@@ -75,6 +85,7 @@ nav.dataset
    :members:
    :undoc-members:
    :show-inheritance:
+   :noindex:
 
 .. automodule:: nav.dataset.dataset_pds3
    :members:
@@ -119,30 +130,32 @@ nav.obs
    :undoc-members:
    :show-inheritance:
 
-nav.inst
-========
-
-.. automodule:: nav.inst.inst
+.. automodule:: nav.obs.obs_snapshot_inst
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.inst.inst_cassini_iss
+.. automodule:: nav.obs.obs_inst
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.inst.inst_voyager_iss
+.. automodule:: nav.obs.obs_inst_cassini_iss
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.inst.inst_galileo_ssi
+.. automodule:: nav.obs.obs_inst_voyager_iss
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.inst.inst_newhorizons_lorri
+.. automodule:: nav.obs.obs_inst_galileo_ssi
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: nav.obs.obs_inst_newhorizons_lorri
    :members:
    :undoc-members:
    :show-inheritance:
@@ -169,6 +182,11 @@ nav.config
 ==========
 
 .. automodule:: nav.config.config
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: nav.config.logger
    :members:
    :undoc-members:
    :show-inheritance:
@@ -217,6 +235,35 @@ nav.support
    :show-inheritance:
 
 .. automodule:: nav.support.types
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: nav.support.time
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+nav.sim
+=======
+
+.. automodule:: nav.sim.render
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+nav.ui
+======
+
+.. automodule:: nav.ui.manual_nav_dialog
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Other modules
+=============
+
+.. automodule:: nav.navigate_image_files
    :members:
    :undoc-members:
    :show-inheritance:

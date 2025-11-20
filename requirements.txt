@@ -9,7 +9,7 @@ PyQt6
 pytest
 pytest-cov
 pytest-profiling
-rms-cloud-tasks>=0.1.1
+rms-cloud-tasks>=0.1.2
 rms-filecache>=3.0.0
 rms-imgdisp
 rms-julian>=3.0.1
