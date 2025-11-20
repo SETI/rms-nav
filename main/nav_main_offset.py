@@ -10,7 +10,6 @@
 
 import argparse
 import cProfile
-import os
 import sys
 import time
 from typing import cast

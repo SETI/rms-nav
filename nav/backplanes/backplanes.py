@@ -8,7 +8,7 @@ import oops
 from nav.config import DEFAULT_CONFIG
 from nav.config.logger import DEFAULT_LOGGER
 from nav.dataset.dataset import ImageFiles
-from nav.obs import ObsSnapshotInst
+from nav.obs import ObsSnapshot, ObsSnapshotInst
 
 from .backplanes_bodies import create_body_backplanes
 from .backplanes_rings import create_ring_backplanes
@@ -92,7 +92,11 @@ def generate_backplanes_image_files(
 
         # Build observation in original FOV
         try:
-            snapshot = obs_class.from_file(image_path, extfov_margin_vu=(0, 0))
+            # TODO We only support snapshots for backplane generation for now
+            obs = obs_class.from_file(image_path, extfov_margin_vu=(0, 0))
+            if not isinstance(obs, ObsSnapshot):
+                raise ValueError('Expected ObsSnapshot, got %s', type(obs).__name__)
+            snapshot = obs
         except Exception as e:
             logger.exception('Error reading image "%s"', image_path)
             return False, {
@@ -107,6 +111,7 @@ def generate_backplanes_image_files(
         try:
             dv, du = nav_metadata.get('offset', (0.0, 0.0))
             snapshot.fov = oops.fov.OffsetFOV(snapshot.fov, uv_offset=(float(du), float(dv)))
+
         except Exception as e:
             logger.error('Unable to apply OffsetFOV; continuing with unshifted FOV: %s', e)
             return False, {

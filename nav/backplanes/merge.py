@@ -6,7 +6,8 @@ import numpy as np
 from nav.obs import ObsSnapshot
 
 
-def _union_backplane_types(bodies_result: dict, rings_result: dict) -> list[str]:
+def _union_backplane_types(bodies_result: dict[str, Any],
+                           rings_result: dict[str, Any]) -> list[str]:
     types: set[str] = set()
     # Bodies
     for body_name, entry in bodies_result.get('per_body', {}).items():
@@ -19,8 +20,8 @@ def _union_backplane_types(bodies_result: dict, rings_result: dict) -> list[str]
 def merge_sources_into_master(
     snapshot: ObsSnapshot,
     *,
-    bodies_result: dict,
-    rings_result: dict,
+    bodies_result: dict[str, Any],
+    rings_result: dict[str, Any],
 ) -> tuple[dict[str, np.ndarray], np.ndarray, dict[str, Any]]:
     """Merge bodies and rings per-pixel based on nearest distance.
 
@@ -91,8 +92,8 @@ def merge_sources_into_master(
         master = np.zeros((height, width), dtype=np.float32)
         # For each source, place values where it is the nearest and has valid mask for this type
         for idx, src in enumerate(sources):
-            arrays: dict = src['arrays']
-            masks: dict = src['masks']
+            arrays: dict[str, Any] = src['arrays']
+            masks: dict[str, Any] = src['masks']
             if bp_type not in arrays or bp_type not in masks:
                 continue
             src_vals = arrays[bp_type]

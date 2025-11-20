@@ -1,5 +1,6 @@
 from typing import Any
 
+from filecache import FCPath
 from astropy.io import fits
 import numpy as np
 import pdstemplate
@@ -12,13 +13,13 @@ from pathlib import Path
 
 def write_fits_and_label(
     *,
-    fits_file_path: str,
-    label_file_path: str,
+    fits_file_path: FCPath,
+    label_file_path: FCPath,
     snapshot: ObsSnapshot,
-    master_by_type: dict[str, Any],
-    body_id_map,
+    master_by_type: dict[str, np.ndarray],
+    body_id_map: np.ndarray,
     config: Config,
-    logger=DEFAULT_LOGGER,
+    logger: Any = DEFAULT_LOGGER,
 ) -> None:
     """Write FITS and PDS4 label using FCPath.
 

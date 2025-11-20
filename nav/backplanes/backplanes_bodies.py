@@ -100,7 +100,6 @@ def create_body_backplanes(snapshot: ObsSnapshot,
                 # Build mask from sim body index map if available
                 sub_mask = None
                 # Prefer body mask map if available
-                # type: ignore[attr-defined]
                 mask_map = snapshot.sim_body_mask_map
                 mask = mask_map.get(str(body_name).upper(), None)
                 if mask is None:
@@ -111,10 +110,8 @@ def create_body_backplanes(snapshot: ObsSnapshot,
                 if sub_mask is None:
                     try:
                         # Build robust name list for matching
-                        # type: ignore[attr-defined]
                         order_names = [str(n).upper() for n in snapshot.sim_body_order_near_to_far]
                         body_idx = order_names.index(str(body_name).upper()) + 1
-                        # type: ignore[attr-defined]
                         sim_map = snapshot.sim_body_index_map
                         sub_mask = (sim_map[v0:v1 + 1, u0:u1 + 1] == body_idx)
                     except Exception:
@@ -140,7 +137,7 @@ def create_body_backplanes(snapshot: ObsSnapshot,
             full = np.zeros(snapshot.data.shape, dtype=np.float32)
             full_mask = np.zeros(snapshot.data.shape, dtype=bool)
             full[v0:v1 + 1, u0:u1 + 1] = np.ma.filled(mvals, fill_value=0.0).astype(np.float32)
-            mask = ~np.ma.getmaskarray(mvals)
+            mask = ~np.ma.getmaskarray(mvals)  # type: ignore[no-untyped-call]
             full_mask[v0:v1 + 1, u0:u1 + 1] = mask  # True where valid
 
             per_type_arrays[name] = full
