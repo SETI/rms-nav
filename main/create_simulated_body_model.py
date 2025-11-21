@@ -266,6 +266,19 @@ class CreateSimulatedBodyModel(QMainWindow):
         right.addLayout(vis_row)
 
         main_layout.addLayout(right, stretch=1)
+        # Initialize common zoom/pan controller for left-button pan and wheel zoom
+        try:
+            from nav.ui.common import ZoomPanController
+            self._zoom_ctl = ZoomPanController(
+                label=self._image_label,
+                scroll_area=self._scroll_area,
+                get_zoom=lambda: self._zoom_factor,
+                set_zoom=lambda z: setattr(self, '_zoom_factor', float(z)),
+                update_display=self._update_display,
+                set_zoom_label_text=lambda s: self._zoom_label.setText(s),
+            )
+        except Exception:
+            self._zoom_ctl = None
 
     # ---- Event handlers: pan/zoom copied logic ----
     def resizeEvent(self, event: QResizeEvent | None) -> None:
@@ -275,8 +288,11 @@ class CreateSimulatedBodyModel(QMainWindow):
 
     def _on_mouse_press(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_start_pos = event.globalPosition().toPoint()
-            self._drag_start_pan = (self._pan_x, self._pan_y)
+            if getattr(self, '_zoom_ctl', None) is not None:
+                self._zoom_ctl.on_mouse_press(event)  # type: ignore[attr-defined]
+            else:
+                self._drag_start_pos = event.globalPosition().toPoint()
+                self._drag_start_pan = (self._pan_x, self._pan_y)
             self._image_label.setCursor(Qt.CursorShape.ClosedHandCursor)
         elif event.button() == Qt.MouseButton.RightButton:
             # Select model at cursor
@@ -287,11 +303,14 @@ class CreateSimulatedBodyModel(QMainWindow):
 
     def _on_mouse_move(self, event: QMouseEvent) -> None:
         if self._drag_start_pos is not None and self._drag_start_pan is not None:
-            current_pos = event.globalPosition().toPoint()
-            delta = current_pos - self._drag_start_pos
-            self._pan_x = self._drag_start_pan[0] - delta.x()
-            self._pan_y = self._drag_start_pan[1] - delta.y()
-            self._update_display()
+            if getattr(self, '_zoom_ctl', None) is not None:
+                self._zoom_ctl.on_mouse_move(event)  # type: ignore[attr-defined]
+            else:
+                current_pos = event.globalPosition().toPoint()
+                delta = current_pos - self._drag_start_pos
+                self._pan_x = self._drag_start_pan[0] - delta.x()
+                self._pan_y = self._drag_start_pan[1] - delta.y()
+                self._update_display()
         else:
             # status
             self._update_status_bar(event.position().toPoint())
@@ -303,6 +322,8 @@ class CreateSimulatedBodyModel(QMainWindow):
 
     def _on_mouse_release(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
+            if getattr(self, '_zoom_ctl', None) is not None:
+                self._zoom_ctl.on_mouse_release(event)  # type: ignore[attr-defined]
             self._drag_start_pos = None
             self._drag_start_pan = None
             self._image_label.setCursor(Qt.CursorShape.ArrowCursor)
@@ -311,25 +332,27 @@ class CreateSimulatedBodyModel(QMainWindow):
             self._last_drag_img_vu = None
 
     def _on_wheel(self, event: QWheelEvent) -> None:
-        label_pos = event.position().toPoint()
-        viewport = self._scroll_area.viewport()
-        if viewport is None:
-            return
-        viewport_pos = self._image_label.mapTo(viewport, label_pos)
-        viewport_x = viewport_pos.x()
-        viewport_y = viewport_pos.y()
-        scrollbar_h = self._scroll_area.horizontalScrollBar()
-        scrollbar_v = self._scroll_area.verticalScrollBar()
-        if scrollbar_h is None or scrollbar_v is None:
-            return
-        scaled_image_x = viewport_x + scrollbar_h.value()
-        scaled_image_y = viewport_y + scrollbar_v.value()
-
-        delta = event.angleDelta().y()
-        if delta > 0:
-            self._zoom_at_point(1.2, viewport_x, viewport_y, scaled_image_x, scaled_image_y)
+        if getattr(self, '_zoom_ctl', None) is not None:
+            self._zoom_ctl.on_wheel(event)  # type: ignore[attr-defined]
         else:
-            self._zoom_at_point(1.0/1.2, viewport_x, viewport_y, scaled_image_x, scaled_image_y)
+            label_pos = event.position().toPoint()
+            viewport = self._scroll_area.viewport()
+            if viewport is None:
+                return
+            viewport_pos = self._image_label.mapTo(viewport, label_pos)
+            viewport_x = viewport_pos.x()
+            viewport_y = viewport_pos.y()
+            scrollbar_h = self._scroll_area.horizontalScrollBar()
+            scrollbar_v = self._scroll_area.verticalScrollBar()
+            if scrollbar_h is None or scrollbar_v is None:
+                return
+            scaled_image_x = viewport_x + scrollbar_h.value()
+            scaled_image_y = viewport_y + scrollbar_v.value()
+            delta = event.angleDelta().y()
+            if delta > 0:
+                self._zoom_at_point(1.2, viewport_x, viewport_y, scaled_image_x, scaled_image_y)
+            else:
+                self._zoom_at_point(1.0/1.2, viewport_x, viewport_y, scaled_image_x, scaled_image_y)
 
     def _zoom_in(self) -> None:
         if self._base_pixmap is not None:

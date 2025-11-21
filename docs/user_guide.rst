@@ -363,3 +363,45 @@ Outputs
   - One ``ImageHDU`` per non-empty master backplane array. ``BUNIT`` is set from config when provided.
 
 - PDS4 label: ``<results_path_stub>_backplanes.xml``, generated from a local template (``nav/backplanes/templates/backplanes.lblx``), referencing the output FITS and including target references when configured.
+
+Backplane Viewer GUI
+--------------------
+
+Use the interactive GUI to inspect backplane FITS alongside the science image.
+
+Run
+^^^
+
+.. code-block:: bash
+
+    python3 main/nav_backplane_viewer.py COISS \
+      --nav-results-root /data/nav/results \
+      --backplane-results-root /data/nav/backplanes \
+      --vol-start COISS_2001 --vol-end COISS_2001 \
+      --img-start-num 1454000000 --img-end-num 1454000999
+
+Features
+^^^^^^^^
+
+- Image stretch: Blackpoint, whitepoint, and gamma for the grayscale science image.
+- Zoom and pan: Same behavior as the simulated body model UI.
+- Summary overlay: If ``<results_path_stub>_summary.png`` exists under ``--nav-results-root``, it can be toggled on/off with an alpha control (no stretch or colormap).
+- Backplane layers:
+
+  - Lists all FITS image HDUs: ``BODY_ID_MAP`` (int16) plus each backplane (float32).
+  - Each backplane can be toggled with a checkbox, assigned transparency 0–1, a colormap, and scaling mode (Absolute or Relative).
+  - Relative mode computes min/max using only pixels where ``BODY_ID_MAP != 0`` (numeric zeros are not treated specially).
+  - Absolute mode:
+
+    - Longitudes: 0–360°; Latitudes: −90–90°.
+    - Incidence/Emission/Phase: 0–180°.
+    - Radius: 0 to observed max.
+    - Resolution and others: observed min–max.
+
+- Live readout: Shows the science image value at the cursor and, for each backplane row, the current value at the cursor (angles are converted from radians to degrees when applicable).
+
+Notes
+^^^^^
+
+- Units: Angular FITS HDUs with ``BUNIT=rad`` are converted to degrees for display and absolute scaling. Heuristics are used for common angle names if units are missing.
+- Masking: Backplane visualizations use ``BODY_ID_MAP != 0`` to determine valid pixels for relative scaling; numeric zeros are not treated as masked unless indicated by the body map.

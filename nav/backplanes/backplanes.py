@@ -109,7 +109,9 @@ def generate_backplanes_image_files(
 
         # Apply offset via OffsetFOV; metadata uses (dv, du)
         try:
-            dv, du = nav_metadata.get('offset', (0.0, 0.0))
+            if 'offset' not in nav_metadata:
+                raise ValueError(f'{image_path}: "offset" field not found in metadata')
+            dv, du = nav_metadata['offset']
             snapshot.fov = oops.fov.OffsetFOV(snapshot.fov, uv_offset=(float(du), float(dv)))
 
         except Exception as e:

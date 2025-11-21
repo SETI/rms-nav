@@ -379,6 +379,9 @@ class NavMaster(NavBase):
                              f'dV {self._final_offset[0]:.3f}')
             self.logger.info(f'Final confidence: {self._final_confidence:.5f}')
 
+        self._metadata['offset'] = self._final_offset
+        self._metadata['confidence'] = self._final_confidence
+
     def create_overlay(self) -> NDArrayUint8Type:
         """Creates a visual overlay combining the image and navigation annotations.
 
