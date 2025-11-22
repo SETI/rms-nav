@@ -25,6 +25,7 @@ class Config:
         self._config_stars: dict[str, Any] = AttrDict({})
         self._config_titan: dict[str, Any] = AttrDict({})
         self._config_bootstrap: dict[str, Any] = AttrDict({})
+        self._config_backplanes: dict[str, Any] = AttrDict({})
 
     def _update_attrdicts(self) -> None:
         """Updates all attribute dictionaries from the main configuration dictionary.
@@ -40,6 +41,7 @@ class Config:
         self._config_stars = AttrDict(self._config_dict.get('stars', {}))
         self._config_titan = AttrDict(self._config_dict.get('titan', {}))
         self._config_bootstrap = AttrDict(self._config_dict.get('bootstrap', {}))
+        self._config_backplanes = AttrDict(self._config_dict.get('backplanes', {}))
 
     def _load_yaml(self,
                    config_path: str | Path) -> dict[str, Any]:
@@ -211,6 +213,13 @@ class Config:
 
         self.read_config()
         return self._config_bootstrap
+
+    @property
+    def backplanes(self) -> Any:
+        """Returns backplanes configuration, including bodies, rings, and target LIDs."""
+
+        self.read_config()
+        return self._config_backplanes
 
 
 DEFAULT_CONFIG = Config()

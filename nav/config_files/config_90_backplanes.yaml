@@ -1,0 +1,50 @@
+########################
+# BACKPLANES SETTINGS  #
+########################
+
+backplanes:
+  bodies:
+    - name: body_longitude
+      method: longitude
+      units: rad
+    - name: body_latitude
+      method: latitude
+      units: rad
+    - name: body_incidence_angle
+      method: incidence_angle
+      units: rad
+    - name: body_emission_angle
+      method: emission_angle
+      units: rad
+    - name: body_phase_angle
+      method: phase_angle
+      units: rad
+    - name: body_finest_resolution
+      method: finest_resolution
+      units: km/pixel
+    - name: body_coarsest_resolution
+      method: coarsest_resolution
+      units: km/pixel
+
+  rings:
+    - name: ring_radius
+      method: ring_radius
+      units: km
+    - name: ring_longitude
+      method: ring_longitude
+      units: rad
+    - name: ring_emission_angle
+      method: ring_emission_angle
+      units: rad
+    - name: ring_phase_angle
+      method: phase_angle
+      units: rad
+    - name: ring_radial_resolution
+      method: ring_radial_resolution
+      units: km/pixel
+    - name: ring_longitudinal_resolution
+      method: ring_angular_resolution
+      units: rad/pixel
+
+  # Optional mapping from NAIF ID to PDS4 LID (used for label target identification)
+  target_lids: {}

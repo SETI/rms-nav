@@ -2,7 +2,6 @@ import json
 from typing import Any, Optional
 
 from filecache import FCPath
-import numpy as np
 import oops
 from oops.observation.snapshot import Snapshot
 
@@ -54,9 +53,6 @@ class ObsSim(ObsSnapshotInst):
             raise ValueError('Invalid or missing size/offset field in simulated image '
                              f'JSON file "{json_path}": {e}') from e
 
-        # Create base blank image
-        img = np.zeros((size_v, size_u), dtype=np.float64)
-
         # Build a basic Snapshot with a flat FOV and dummy geometry
         fov = oops.fov.FlatFOV((1.0, 1.0), (size_u, size_v))
         snapshot = oops.observation.snapshot.Snapshot(
@@ -69,7 +65,6 @@ class ObsSim(ObsSnapshotInst):
         )
         # Store data and the full JSON dictionary for future use
         snapshot.abspath = json_path
-        snapshot.insert_subfield('data', img)
 
         snapshot.sim_params = sim_params
         snapshot.sim_offset_v = offset_v
@@ -83,6 +78,9 @@ class ObsSim(ObsSnapshotInst):
         snapshot.sim_star_list = meta.get('stars', [])
         snapshot.sim_body_models = meta.get('bodies', {})
         snapshot.sim_inventory = meta.get('inventory', {})
+        snapshot.sim_body_order_near_to_far = meta.get('order_near_to_far', [])
+        snapshot.sim_body_index_map = meta.get('body_index_map', None)
+        snapshot.sim_body_mask_map = meta.get('body_mask_map', {})
 
         # Determine extfov margins
         inst_config = config.category('sim')

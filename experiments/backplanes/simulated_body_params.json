@@ -1,0 +1,57 @@
+{
+  "size_v": 500,
+  "size_u": 500,
+  "offset_v": 12.5,
+  "offset_u": -11.8,
+  "closest_planet": "SATURN",
+  "stars": [
+    {
+      "name": "star1",
+      "v": 0.0,
+      "u": 61.0,
+      "vmag": 3.0,
+      "spectral_class": "G2",
+      "psf_sigma": 3.0
+    }
+  ],
+  "bodies": [
+    {
+      "name": "body1",
+      "center_v": 295.0,
+      "center_u": 311.0,
+      "semi_major_axis": 100.0,
+      "semi_minor_axis": 80.0,
+      "semi_c_axis": 80.0,
+      "rotation_z": 0.0,
+      "rotation_tilt": 0.0,
+      "illumination_angle": 50.0,
+      "phase_angle": 50.0,
+      "crater_fill": 0.0,
+      "crater_min_radius": 0.05,
+      "crater_max_radius": 0.25,
+      "crater_power_law_exponent": 3.0,
+      "crater_relief_scale": 0.6,
+      "anti_aliasing": 0.5,
+      "range": 1
+    },
+    {
+      "name": "body2",
+      "center_v": 215.0,
+      "center_u": 346.0,
+      "semi_major_axis": 100.0,
+      "semi_minor_axis": 80.0,
+      "semi_c_axis": 80.0,
+      "rotation_z": 0.0,
+      "rotation_tilt": 0.0,
+      "illumination_angle": 90.0,
+      "phase_angle": 90.0,
+      "crater_fill": 1.0,
+      "crater_min_radius": 0.05,
+      "crater_max_radius": 0.25,
+      "crater_power_law_exponent": 3.0,
+      "crater_relief_scale": 0.6,
+      "anti_aliasing": 0.5,
+      "range": 2
+    }
+  ]
+}

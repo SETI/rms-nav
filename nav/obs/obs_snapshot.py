@@ -149,6 +149,29 @@ class ObsSnapshot(Obs, Snapshot):
         return (int(np.clip(u, self.fov_u_min, self.fov_u_max)),
                 int(np.clip(v, self.fov_v_min, self.fov_v_max)))
 
+    def clip_rect_fov(self,
+                      u_min: int, u_max: int,
+                      v_min: int, v_max: int) -> tuple[int, int, int, int]:
+        """Clip a rectangle to the original FOV bounds.
+
+        Returns:
+            (u0, u1, v0, v1) clipped to [fov_u_min..fov_u_max], [fov_v_min..fov_v_max]
+        """
+        u0 = int(np.clip(u_min, self.fov_u_min, self.fov_u_max))
+        u1 = int(np.clip(u_max, self.fov_u_min, self.fov_u_max))
+        v0 = int(np.clip(v_min, self.fov_v_min, self.fov_v_max))
+        v1 = int(np.clip(v_max, self.fov_v_min, self.fov_v_max))
+        return u0, u1, v0, v1
+
+    def inventory_body_in_fov(self, inv: dict[str, Any]) -> bool:
+        """Returns True if an inventory box overlaps the original FOV."""
+        return bool(
+            inv['u_max_unclipped'] >= self.fov_u_min and
+            inv['u_min_unclipped'] <= self.fov_u_max and
+            inv['v_max_unclipped'] >= self.fov_v_min and
+            inv['v_min_unclipped'] <= self.fov_v_max
+        )
+
     def clip_extfov(self,
                     u: int,
                     v: int) -> tuple[int, int]:
@@ -163,6 +186,29 @@ class ObsSnapshot(Obs, Snapshot):
         """
         return (int(np.clip(u, self.extfov_u_min, self.extfov_u_max)),
                 int(np.clip(v, self.extfov_v_min, self.extfov_v_max)))
+
+    def clip_rect_extfov(self,
+                         u_min: int, u_max: int,
+                         v_min: int, v_max: int) -> tuple[int, int, int, int]:
+        """Clip a rectangle to the extended FOV bounds.
+
+        Returns:
+            (u0, u1, v0, v1) clipped to [extfov_u_min..extfov_u_max], [extfov_v_min..extfov_v_max]
+        """
+        u0 = int(np.clip(u_min, self.extfov_u_min, self.extfov_u_max))
+        u1 = int(np.clip(u_max, self.extfov_u_min, self.extfov_u_max))
+        v0 = int(np.clip(v_min, self.extfov_v_min, self.extfov_v_max))
+        v1 = int(np.clip(v_max, self.extfov_v_min, self.extfov_v_max))
+        return u0, u1, v0, v1
+
+    def inventory_body_in_extfov(self, inv: dict[str, Any]) -> bool:
+        """Returns True if an inventory box overlaps the extended FOV."""
+        return bool(
+            inv['u_max_unclipped'] >= self.extfov_u_min and
+            inv['u_min_unclipped'] <= self.extfov_u_max and
+            inv['v_max_unclipped'] >= self.extfov_v_min and
+            inv['v_min_unclipped'] <= self.extfov_v_max
+        )
 
     @property
     def data_shape_uv(self) -> tuple[int, int]:

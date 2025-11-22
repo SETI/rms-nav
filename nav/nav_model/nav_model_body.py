@@ -274,6 +274,7 @@ class NavModelBody(NavModelBodyBase):
         self._model_img = model_img
         self._model_mask = body_mask
 
+        # import matplotlib.pyplot as plt
         # plt.imshow(self._model_img)
         # plt.figure()
         # plt.imshow(self._model_mask)
@@ -481,6 +482,7 @@ class NavModelBody(NavModelBodyBase):
                 #     restr_model = restr_model+filt.maximum_filter(limb_mask, 3)
                 # Make a slight glow even past the terminator
                 restr_model = restr_model+0.05  # TODO Move to config
+                restr_model[restr_body_mask_invalid] = 0.0
             else:
                 restr_model = restr_body_mask_valid.astype(float)
 

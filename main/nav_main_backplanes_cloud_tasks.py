@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 ################################################################################
-# nav_main_offset_cloud_tasks.py
+# nav_main_backplanes_cloud_tasks.py
 #
-# This is the main top-level driver for offset finding when the list of images
-# to process is provided by the cloud_tasks module.
+# Backplanes generator when image batches are provided by cloud_tasks.
 ################################################################################
 
 import argparse
@@ -19,58 +18,43 @@ from nav.dataset.dataset import ImageFile, ImageFiles
 from nav.dataset import dataset_name_to_inst_name
 from nav.config import DEFAULT_CONFIG
 from nav.obs import inst_name_to_obs_class
-from nav.navigate_image_files import navigate_image_files
+from nav.backplanes.backplanes import generate_backplanes_image_files
 
 
 def process_task(
     task_id: str, task_data: dict[str, Any], worker_data: WorkerData
 ) -> tuple[bool, Any]:
-    """Navigate a single batch of image files.
+    """Generate backplanes for a single batch of image files."""
 
-    Parameters:
-        task_id: The ID of the task.
-        task_data: The data for the task. It is expected to contain the following keys:
-            - "arguments": The arguments for the task. It is expected to contain the following keys:
-                - "nav_models": The models to use for navigation, or None if all models are to be
-                  used.
-                - "nav_techniques": The techniques to use for navigation, or None if all techniques
-                  are to be used.
-            - "dataset_name": The name of the dataset.
-            - "files": The files to process. It is expected to contain the following keys:
-                - "image_file_url": The URL of the image file.
-                - "label_file_url": The URL of the label file.
-                - "results_path_stub": The path stub for the results.
-                - "index_file_row": The row from the index file for the image file.
-        worker_data: The data for the worker.
-
-    Returns:
-        Tuple of (retry, result)
-    """
-
-    # Read the default configuration file and then any override files provided
-    # on the command line
     DEFAULT_CONFIG.read_config()
     arguments = cast(argparse.Namespace, worker_data.args)
     if arguments.config_file:
         for config_file in arguments.config_file:
             DEFAULT_CONFIG.update_config(config_file)
 
+    backplane_results_root_str = arguments.backplane_results_root
+    if backplane_results_root_str is None:
+        try:
+            backplane_results_root_str = DEFAULT_CONFIG.environment.results_root
+        except AttributeError:
+            pass
+    if backplane_results_root_str is None:
+        backplane_results_root_str = os.getenv('NAV_RESULTS_ROOT')
+    if backplane_results_root_str is None:
+        return False, (f'{task_id}: One of configuration variable "results_root" or '
+                       'NAV_RESULTS_ROOT environment variable must be set')
+    backplane_results_root = FileCache('nav_results').new_path(backplane_results_root_str)
+
     nav_results_root_str = arguments.nav_results_root
     if nav_results_root_str is None:
         try:
-            nav_results_root_str = DEFAULT_CONFIG.environment.nav_results_root
+            nav_results_root_str = DEFAULT_CONFIG.environment.results_root
         except AttributeError:
             pass
     if nav_results_root_str is None:
-        nav_results_root_str = os.getenv('NAV_RESULTS_ROOT')
-    if nav_results_root_str is None:
-        return False, (f'{task_id}: One of --nav-results-root, the configuration variable '
-                       '"nav_results_root" or the NAV_RESULTS_ROOT environment variable must be '
-                       'set')
+        return False, f'{task_id}: "--nav-results-root" must be provided'
     nav_results_root = FileCache('nav_results').new_path(nav_results_root_str)
 
-    nav_models = task_data.get('arguments', {}).get('nav_models', None)
-    nav_techniques = task_data.get('arguments', {}).get('nav_techniques', None)
     dataset_name = task_data.get('dataset_name', None)
     if dataset_name is None:
         return False, f'{task_id}: "dataset_name" field is required'
@@ -102,30 +86,32 @@ def process_task(
         )
         image_files.append(image_file)
 
-    _, metadata = navigate_image_files(obs_class,
-                                       ImageFiles(image_files=image_files),
-                                       nav_results_root=nav_results_root,
-                                       nav_models=nav_models,
-                                       nav_techniques=nav_techniques)
+    _, metadata = generate_backplanes_image_files(
+        obs_class,
+        ImageFiles(image_files=image_files),
+        nav_results_root=nav_results_root,
+        backplane_results_root=backplane_results_root,
+        write_output_files=True
+    )
 
     return False, metadata  # No retry under any circumstances
 
 
 async def main() -> None:
     argparser = argparse.ArgumentParser(
-        description='Navigation & Backplane Main Interface for Offsets '
-                    'Cloud Tasks version)')
+        description='Backplanes Main Interface (Cloud Tasks version)')
 
-    # Arguments about the environment
     environment_group = argparser.add_argument_group('Environment')
     environment_group.add_argument(
         '--config-file', action='append', default=['nav_default_config.yaml'],
         help="""The configuration file(s) to use to override default settings;
         may be specified multiple times (default: ./nav_default_config.yaml)""")
     environment_group.add_argument(
+        '--backplane-results-root', type=str, default=None,
+        help='Root directory for backplane results; overrides NAV_RESULTS_ROOT or config')
+    environment_group.add_argument(
         '--nav-results-root', type=str, default=None,
-        help="""The root directory of the navigation results; overrides the NAV_RESULTS_ROOT
-        environment variable and the results_root configuration variable""")
+        help='Root directory for prior navigation results (metadata, offsets)')
 
     worker = Worker(process_task, args=sys.argv[1:], argparser=argparser)
     await worker.start()

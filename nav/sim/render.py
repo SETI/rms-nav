@@ -106,16 +106,17 @@ def render_bodies(
     bodies_params: list[dict[str, Any]],
     offset_v: float,
     offset_u: float,
-) -> tuple[
-    np.ndarray,
-    dict[str, dict[str, Any]],
-    dict[str, dict[str, float]],
-    list[np.ndarray],
-    list[str],
-]:
-    """Render bodies over img.
+) -> dict[str, Any]:
+    """Render bodies over img and return fields by name.
 
-    Returns (img, body_models, inventory, body_masks, order_near_to_far_names).
+    Returns: a dict with keys:
+
+      - img: np.ndarray the rendered image
+      - bodies: dict[str, dict[str, Any]]
+      - inventory: dict[str, dict[str, float]]
+      - body_masks: list[np.ndarray]
+      - order_near_to_far: list[str]
+      - body_index_map: np.ndarray (int32), 1-based index into order_near_to_far or 0 if none
     """
     size_v, size_u = img.shape
 
@@ -137,6 +138,8 @@ def render_bodies(
     inventory: dict[str, dict[str, float]] = {}
     body_model_dict: dict[str, dict[str, Any]] = {}
     body_masks: list[np.ndarray] = []
+    body_mask_map: dict[str, np.ndarray] = {}
+    body_index_map = np.zeros((size_v, size_u), dtype=np.int32)
 
     for body_number, params in enumerate(sorted_body_models):
         body_name = params.get('name', f'SIM-BODY-{body_number+1}').upper()
@@ -182,6 +185,10 @@ def render_bodies(
         mask = sim_body > 0
         img[mask] = sim_body[mask]
         body_masks.append(mask)
+        body_mask_map[body_name] = mask
+        # Index into near-to-far order is 1-based
+        near_index = order_near_to_far.index(body_name) + 1
+        body_index_map[mask] = near_index
 
         max_dim = max(semi_major_axis, semi_minor_axis, semi_c_axis)
         inventory_item = {
@@ -196,7 +203,15 @@ def render_bodies(
         inventory[body_name] = inventory_item
         body_model_dict[body_name] = params
 
-    return img, body_model_dict, inventory, body_masks, order_near_to_far
+    return {
+        'img': img,
+        'bodies': body_model_dict,
+        'inventory': inventory,
+        'body_masks': body_masks,
+        'body_mask_map': body_mask_map,
+        'order_near_to_far': order_near_to_far,
+        'body_index_map': body_index_map,
+    }
 
 
 def render_combined_model(
@@ -208,7 +223,15 @@ def render_combined_model(
 
     ignore_offset = True should be used when rendering the image in the GUI, but not
     when creating the simulated image to navigate.
+
+    Parameters:
+        sim_params: The parameters describing the simulated model.
+        ignore_offset: Whether to ignore the offset.
+
+    Returns:
+        A tuple containing the image and metadata.
     """
+
     size_v = int(sim_params['size_v'])
     size_u = int(sim_params['size_u'])
     if not ignore_offset:
@@ -224,9 +247,13 @@ def render_combined_model(
     bodies_params = sim_params.get('bodies', []) or []
 
     img, sim_star_list, star_info = render_stars(img, stars_params, offset_v, offset_u)
-    img, body_models, inventory, body_masks, order_near_to_far = render_bodies(
-        img, bodies_params, offset_v, offset_u
-    )
+    bodies_result = render_bodies(img, bodies_params, offset_v, offset_u)
+    img = bodies_result['img']
+    body_models = bodies_result['bodies']
+    inventory = bodies_result['inventory']
+    body_masks = bodies_result['body_masks']
+    order_near_to_far = bodies_result['order_near_to_far']
+    body_index_map = bodies_result['body_index_map']
 
     meta: dict[str, Any] = {
         'stars': sim_star_list,
@@ -235,5 +262,6 @@ def render_combined_model(
         'star_info': star_info,
         'body_masks': body_masks,
         'order_near_to_far': order_near_to_far,
+        'body_index_map': body_index_map,
     }
     return img, meta

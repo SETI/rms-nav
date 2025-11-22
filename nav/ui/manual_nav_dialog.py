@@ -25,6 +25,7 @@ from nav.config import Config
 from nav.nav_model import NavModelCombined
 from nav.obs import ObsSnapshot
 from nav.support.correlate import masked_ncc, navigate_with_pyramid_kpeaks
+from nav.ui.common import ZoomPanController, build_stretch_controls
 
 
 def _apply_stretch_gamma(image: np.ndarray,
@@ -184,6 +185,14 @@ class ManualNavDialog(QDialog):
         self._btn_zoom_out.clicked.connect(self._zoom_out_center)
         self._btn_zoom_in.clicked.connect(self._zoom_in_center)
         self._btn_reset.clicked.connect(self._reset_view)
+        # Prevent Enter from triggering zoom buttons; keep them out of focus chain
+        for btn in (self._btn_zoom_out, self._btn_zoom_in, self._btn_reset):
+            try:
+                btn.setAutoDefault(False)
+                btn.setDefault(False)  # type: ignore[attr-defined]
+            except Exception:
+                pass
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         zoom_row.addStretch()
         zoom_row.addWidget(self._btn_zoom_out)
         zoom_row.addWidget(self._btn_zoom_in)
@@ -216,55 +225,28 @@ class ManualNavDialog(QDialog):
 
         # Right: controls
         right = QVBoxLayout()
-        # Stretch group
+        # Stretch group (common controls)
         stretch_group = QGroupBox('Image Stretch')
         stretch_form = QFormLayout()
-        # Black/White sliders (scaled to 0..1000 within observed min/max)
-        img_min = self._stretch_min
-        img_max = self._stretch_max
-        if img_max <= img_min:
-            img_max = img_min + 1.0
-
-        self._slider_black = QSlider(Qt.Orientation.Horizontal)
-        self._slider_black.setRange(0, 1000)
-        self._slider_white = QSlider(Qt.Orientation.Horizontal)
-        self._slider_white.setRange(0, 1000)
-
-        # Map actual values to slider positions
-        def _to_slider(val: float) -> int:
-            return int(round(1000.0 * (val - img_min) / (img_max - img_min)))
-
-        def _from_slider(pos: int) -> float:
-            return img_min + (img_max - img_min) * (pos / 1000.0)
-
-        self._slider_black.setValue(_to_slider(self._black))
-        self._slider_white.setValue(_to_slider(self._white))
-        self._lbl_black = QLabel(f'{self._black:.6g}')
-        self._lbl_white = QLabel(f'{self._white:.6g}')
-        self._slider_black.valueChanged.connect(
-            lambda v: self._on_black_changed(_from_slider(v)))
-        self._slider_white.valueChanged.connect(
-            lambda v: self._on_white_changed(_from_slider(v)))
-        row_b = QHBoxLayout()
-        row_b.addWidget(self._slider_black)
-        row_b.addWidget(self._lbl_black)
-        stretch_form.addRow('Black point:', row_b)
-        row_w = QHBoxLayout()
-        row_w.addWidget(self._slider_white)
-        row_w.addWidget(self._lbl_white)
-        stretch_form.addRow('White point:', row_w)
-
-        # Gamma slider (0.10 .. 5.00)
-        self._slider_gamma = QSlider(Qt.Orientation.Horizontal)
-        self._slider_gamma.setRange(10, 500)
-        self._slider_gamma.setValue(100)
-        self._lbl_gamma = QLabel(f'{self._gamma:.3f}')
-        self._slider_gamma.valueChanged.connect(
-            lambda v: self._on_gamma_changed(max(0.10, v / 100.0)))
-        row_g = QHBoxLayout()
-        row_g.addWidget(self._slider_gamma)
-        row_g.addWidget(self._lbl_gamma)
-        stretch_form.addRow('Gamma:', row_g)
+        controls = build_stretch_controls(
+            stretch_form,
+            img_min=self._stretch_min,
+            img_max=self._stretch_max,
+            black_init=self._black,
+            white_init=self._white,
+            gamma_init=self._gamma,
+            on_black_changed=self._on_black_changed,
+            on_white_changed=self._on_white_changed,
+            on_gamma_changed=self._on_gamma_changed,
+        )
+        # Keep attribute names for downstream code
+        self._slider_black = controls['slider_black']
+        self._slider_white = controls['slider_white']
+        self._slider_gamma = controls['slider_gamma']
+        self._lbl_black = controls['label_black']
+        self._lbl_white = controls['label_white']
+        self._lbl_gamma = controls['label_gamma']
+        self._stretch_controls = controls
         # Reset stretch button
         self._btn_reset_stretch = QPushButton('Reset Stretch')
         self._btn_reset_stretch.clicked.connect(self._on_reset_stretch)
@@ -327,22 +309,31 @@ class ManualNavDialog(QDialog):
         right.addStretch(1)
 
         layout.addLayout(right, stretch=1)
+        # Initialize zoom/pan controller for left-pan and wheel zoom
+        self._zoom_ctl = ZoomPanController(
+            label=self._label,
+            scroll_area=self._scroll,
+            get_zoom=lambda: self._zoom,
+            set_zoom=lambda z: setattr(self, '_zoom', float(z)),
+            update_display=self._update_display_only,
+            set_zoom_label_text=lambda s: self._zoom_label.setText(s),
+        )
 
     # ---- Event handlers ----
 
     def _on_black_changed(self, val: float) -> None:
         self._black = float(val)
-        self._lbl_black.setText(f'{self._black:.6g}')
+        self._lbl_black.setText(f'{self._black:.5f}')
         self._refresh_overlay()
 
     def _on_white_changed(self, val: float) -> None:
         self._white = float(val)
-        self._lbl_white.setText(f'{self._white:.6g}')
+        self._lbl_white.setText(f'{self._white:.5f}')
         self._refresh_overlay()
 
     def _on_gamma_changed(self, val: float) -> None:
         self._gamma = float(val)
-        self._lbl_gamma.setText(f'{self._gamma:.3f}')
+        self._lbl_gamma.setText(f'{self._gamma:.5f}')
         self._refresh_overlay()
 
     def _on_alpha_changed(self, val: float) -> None:
@@ -365,20 +356,8 @@ class ManualNavDialog(QDialog):
         if self._black >= self._white:
             self._white = self._black + 0.01
         self._gamma = 1.0
-        # Update labels
-        self._lbl_black.setText(f'{self._black:.6g}')
-        self._lbl_white.setText(f'{self._white:.6g}')
-        self._lbl_gamma.setText(f'{self._gamma:.3f}')
-        # Update sliders without recursive changes
-        self._slider_black.blockSignals(True)
-        self._slider_white.blockSignals(True)
-        self._slider_gamma.blockSignals(True)
-        self._slider_black.setValue(self._stretch_to_slider(self._black))
-        self._slider_white.setValue(self._stretch_to_slider(self._white))
-        self._slider_gamma.setValue(int(round(self._gamma * 100)))
-        self._slider_black.blockSignals(False)
-        self._slider_white.blockSignals(False)
-        self._slider_gamma.blockSignals(False)
+        # Update UI via common helper
+        self._stretch_controls['set_values'](self._black, self._white, self._gamma)
         # Redraw
         self._refresh_overlay()
 
@@ -421,6 +400,7 @@ class ManualNavDialog(QDialog):
     def _on_mouse_press(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_mode = 'pan'
+            # Legacy pan behavior for this dialog
             self._drag_start_pos = event.globalPosition().toPoint()
             self._drag_start_pan = (self._pan_x, self._pan_y)
             self._label.setCursor(Qt.CursorShape.ClosedHandCursor)
@@ -474,6 +454,11 @@ class ManualNavDialog(QDialog):
         self._label.setCursor(Qt.CursorShape.ArrowCursor)
 
     def _on_wheel(self, event: QWheelEvent) -> None:
+        # Ignore wheel-zoom if focus is on editable controls
+        fw = self.focusWidget()
+        if isinstance(fw, (QDoubleSpinBox, QSlider)):
+            event.ignore()
+            return
         label_pos = event.position().toPoint()
         viewport_widget = cast(QWidget, self._scroll.viewport())
         viewport_pos = self._label.mapTo(viewport_widget, label_pos)
