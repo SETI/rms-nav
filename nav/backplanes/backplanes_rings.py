@@ -6,7 +6,7 @@ from nav.config import Config
 from nav.obs import ObsSnapshot
 
 
-RingsResult = dict[str, Any]
+RingsResult = dict[str, Any] | None
 
 
 def create_ring_backplanes(snapshot: ObsSnapshot,
@@ -35,7 +35,6 @@ def create_ring_backplanes(snapshot: ObsSnapshot,
     """
 
     result: RingsResult = {
-        'enabled': False,
         'planet': None,
         'target_key': None,
         'types': [],
@@ -45,21 +44,23 @@ def create_ring_backplanes(snapshot: ObsSnapshot,
     }
 
     if snapshot.is_simulated:
-        return result
+        return None
 
     closest_planet = snapshot.closest_planet
     if closest_planet is None:
-        return result
+        return None
 
     rings_cfg = getattr(config.backplanes, 'rings', [])
     if not rings_cfg:
-        return result
+        return None
 
     # Use planet name
-    target_key = f'{closest_planet}:RING'
+    target_key = f'{closest_planet}_RING_SYSTEM'
+    if closest_planet == 'SATURN':
+        target_key = 'SATURN_MAIN_RINGS'
+
     bp = snapshot.bp
 
-    result['enabled'] = True
     result['planet'] = closest_planet
     result['target_key'] = target_key
 
@@ -78,11 +79,12 @@ def create_ring_backplanes(snapshot: ObsSnapshot,
             result['distance'] = np.asarray(vals.mvals.filled(np.inf), dtype=np.float32)
 
         mvals = vals.mvals
-        full = np.asarray(np.ma.filled(mvals, fill_value=0.0), dtype=np.float32)
+        full = np.asarray(np.ma.filled(mvals, fill_value=np.nan), dtype=np.float32)
         mask = ~np.ma.getmaskarray(mvals)  # type: ignore[no-untyped-call]
 
-        result['arrays'][name] = full
-        result['masks'][name] = mask
+        if np.any(mask):
+            result['arrays'][name] = full
+            result['masks'][name] = mask
 
     # Ensure distance is present
     if result['distance'] is None:

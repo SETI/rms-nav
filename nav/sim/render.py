@@ -116,7 +116,7 @@ def render_bodies(
       - inventory: dict[str, dict[str, float]]
       - body_masks: list[np.ndarray]
       - order_near_to_far: list[str]
-      - body_index_map: np.ndarray (int16), 1-based index into order_near_to_far or 0 if none
+      - body_index_map: np.ndarray (int32), 1-based index into order_near_to_far or 0 if none
     """
     size_v, size_u = img.shape
 
@@ -139,7 +139,7 @@ def render_bodies(
     body_model_dict: dict[str, dict[str, Any]] = {}
     body_masks: list[np.ndarray] = []
     body_mask_map: dict[str, np.ndarray] = {}
-    body_index_map = np.zeros((size_v, size_u), dtype=np.int16)
+    body_index_map = np.zeros((size_v, size_u), dtype=np.int32)
 
     for body_number, params in enumerate(sorted_body_models):
         body_name = params.get('name', f'SIM-BODY-{body_number+1}').upper()

@@ -359,7 +359,7 @@ Outputs
 - FITS: ``<results_path_stub>_backplanes.fits`` with:
 
   - Primary HDU.
-  - BODY_ID_MAP (int16) as the first image HDU.
+  - BODY_ID_MAP (int32) as the first image HDU.
   - One ``ImageHDU`` per non-empty master backplane array. ``BUNIT`` is set from config when provided.
 
 - PDS4 label: ``<results_path_stub>_backplanes.xml``, generated from a local template (``nav/backplanes/templates/backplanes.lblx``), referencing the output FITS and including target references when configured.
@@ -388,7 +388,7 @@ Features
 - Summary overlay: If ``<results_path_stub>_summary.png`` exists under ``--nav-results-root``, it can be toggled on/off with an alpha control (no stretch or colormap).
 - Backplane layers:
 
-  - Lists all FITS image HDUs: ``BODY_ID_MAP`` (int16) plus each backplane (float32).
+  - Lists all FITS image HDUs: ``BODY_ID_MAP`` (int32) plus each backplane (float32).
   - Each backplane can be toggled with a checkbox, assigned transparency 0–1, a colormap, and scaling mode (Absolute or Relative).
   - Relative mode computes min/max using only pixels where ``BODY_ID_MAP != 0`` (numeric zeros are not treated specially).
   - Absolute mode:

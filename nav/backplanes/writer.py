@@ -36,7 +36,7 @@ def write_fits_and_label(
     hdus.append(primary)
 
     # BODY_ID_MAP first (after Primary)
-    id_hdu = fits.ImageHDU(data=body_id_map.astype('int16'), name='BODY_ID_MAP')
+    id_hdu = fits.ImageHDU(data=body_id_map.astype('int32'), name='BODY_ID_MAP')
     hdus.append(id_hdu)
 
     # Backplane arrays

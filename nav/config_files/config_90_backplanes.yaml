@@ -33,9 +33,6 @@ backplanes:
     - name: ring_longitude
       method: ring_longitude
       units: rad
-    - name: ring_incidence_angle
-      method: ring_incidence_angle
-      units: rad
     - name: ring_emission_angle
       method: ring_emission_angle
       units: rad

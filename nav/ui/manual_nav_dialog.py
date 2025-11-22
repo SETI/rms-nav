@@ -185,6 +185,14 @@ class ManualNavDialog(QDialog):
         self._btn_zoom_out.clicked.connect(self._zoom_out_center)
         self._btn_zoom_in.clicked.connect(self._zoom_in_center)
         self._btn_reset.clicked.connect(self._reset_view)
+        # Prevent Enter from triggering zoom buttons; keep them out of focus chain
+        for btn in (self._btn_zoom_out, self._btn_zoom_in, self._btn_reset):
+            try:
+                btn.setAutoDefault(False)
+                btn.setDefault(False)  # type: ignore[attr-defined]
+            except Exception:
+                pass
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         zoom_row.addStretch()
         zoom_row.addWidget(self._btn_zoom_out)
         zoom_row.addWidget(self._btn_zoom_in)
@@ -392,13 +400,9 @@ class ManualNavDialog(QDialog):
     def _on_mouse_press(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_mode = 'pan'
-            # Delegate to common zoom/pan controller
-            try:
-                self._zoom_ctl.on_mouse_press(event)  # type: ignore[attr-defined]
-            except AttributeError:
-                # Fallback to legacy behavior if controller not present
-                self._drag_start_pos = event.globalPosition().toPoint()
-                self._drag_start_pan = (self._pan_x, self._pan_y)
+            # Legacy pan behavior for this dialog
+            self._drag_start_pos = event.globalPosition().toPoint()
+            self._drag_start_pan = (self._pan_x, self._pan_y)
             self._label.setCursor(Qt.CursorShape.ClosedHandCursor)
         elif event.button() == Qt.MouseButton.RightButton:
             self._drag_mode = 'offset'
@@ -411,12 +415,9 @@ class ManualNavDialog(QDialog):
             current_pos = event.globalPosition().toPoint()
             delta = current_pos - self._drag_start_pos
             if self._drag_mode == 'pan' and self._drag_start_pan is not None:
-                try:
-                    self._zoom_ctl.on_mouse_move(event)  # type: ignore[attr-defined]
-                except AttributeError:
-                    self._pan_x = self._drag_start_pan[0] - delta.x()
-                    self._pan_y = self._drag_start_pan[1] - delta.y()
-                    self._update_display_only()
+                self._pan_x = self._drag_start_pan[0] - delta.x()
+                self._pan_y = self._drag_start_pan[1] - delta.y()
+                self._update_display_only()
             elif self._drag_mode == 'offset' and self._drag_start_offset is not None:
                 # Convert label-pixel delta to image pixels via zoom
                 du = self._drag_start_offset[1] + (delta.x() / max(self._zoom, 1e-6))
@@ -453,22 +454,24 @@ class ManualNavDialog(QDialog):
         self._label.setCursor(Qt.CursorShape.ArrowCursor)
 
     def _on_wheel(self, event: QWheelEvent) -> None:
-        try:
-            self._zoom_ctl.on_wheel(event)  # type: ignore[attr-defined]
-        except AttributeError:
-            label_pos = event.position().toPoint()
-            viewport_widget = cast(QWidget, self._scroll.viewport())
-            viewport_pos = self._label.mapTo(viewport_widget, label_pos)
-            vx = viewport_pos.x()
-            vy = viewport_pos.y()
-            sh = cast(QScrollBar, self._scroll.horizontalScrollBar())
-            sv = cast(QScrollBar, self._scroll.verticalScrollBar())
-            scaled_x = vx + sh.value()
-            scaled_y = vy + sv.value()
-            if event.angleDelta().y() > 0:
-                self._zoom_at_point(1.2, vx, vy, scaled_x, scaled_y)
-            else:
-                self._zoom_at_point(1.0 / 1.2, vx, vy, scaled_x, scaled_y)
+        # Ignore wheel-zoom if focus is on editable controls
+        fw = self.focusWidget()
+        if isinstance(fw, (QDoubleSpinBox, QSlider)):
+            event.ignore()
+            return
+        label_pos = event.position().toPoint()
+        viewport_widget = cast(QWidget, self._scroll.viewport())
+        viewport_pos = self._label.mapTo(viewport_widget, label_pos)
+        vx = viewport_pos.x()
+        vy = viewport_pos.y()
+        sh = cast(QScrollBar, self._scroll.horizontalScrollBar())
+        sv = cast(QScrollBar, self._scroll.verticalScrollBar())
+        scaled_x = vx + sh.value()
+        scaled_y = vy + sv.value()
+        if event.angleDelta().y() > 0:
+            self._zoom_at_point(1.2, vx, vy, scaled_x, scaled_y)
+        else:
+            self._zoom_at_point(1.0 / 1.2, vx, vy, scaled_x, scaled_y)
 
     # ---- Zoom/pan helpers (parity with sim_body_gui) ----
 

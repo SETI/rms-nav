@@ -177,6 +177,9 @@ def build_stretch_controls(form: QFormLayout,
     slider_white.setRange(0, 1000)
     slider_gamma = QSlider(Qt.Orientation.Horizontal)
     slider_gamma.setRange(10, 500)  # 0.10..5.00
+    # Real-time updates during drags
+    slider_black.setTracking(True)
+    slider_white.setTracking(True)
 
     # Labels (fixed width, 5 digits after decimal)
     label_black = QLabel(f'{black_init:.5f}')
