@@ -198,7 +198,7 @@ def build_stretch_controls(form: QFormLayout,
     hi = img_max if img_max > img_min else (img_min + 1.0)
 
     def to_slider(val: float) -> int:
-        return int(round(1000.0 * (val - lo) / (hi - lo)))
+        return round(1000.0 * (val - lo) / (hi - lo))
 
     def from_slider(pos: int) -> float:
         return lo + (hi - lo) * (pos / 1000.0)
@@ -206,7 +206,7 @@ def build_stretch_controls(form: QFormLayout,
     # Initial positions
     slider_black.setValue(to_slider(black_init))
     slider_white.setValue(to_slider(white_init))
-    slider_gamma.setValue(int(round(gamma_init * 100)))
+    slider_gamma.setValue(round(gamma_init * 100))
 
     # Wire up signals
     def _black_slot(v: int) -> None:
@@ -257,7 +257,7 @@ def build_stretch_controls(form: QFormLayout,
         slider_gamma.blockSignals(True)
         slider_black.setValue(to_slider(black))
         slider_white.setValue(to_slider(white))
-        slider_gamma.setValue(int(round(gamma * 100)))
+        slider_gamma.setValue(round(gamma * 100))
         slider_black.blockSignals(False)
         slider_white.blockSignals(False)
         slider_gamma.blockSignals(False)
