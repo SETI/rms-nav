@@ -12,7 +12,6 @@ from PyQt6.QtGui import (
     QPainter,
     QPen,
     QPixmap,
-    QResizeEvent,
     QWheelEvent,
 )
 from PyQt6.QtWidgets import (
@@ -36,6 +35,7 @@ from PyQt6.QtWidgets import (
 )
 
 from nav.sim.render import render_combined_model
+from nav.ui.common import ZoomPanController
 
 
 class ImageLabel(QLabel):
@@ -73,19 +73,21 @@ class ImageLabel(QLabel):
 class ParameterUpdater(QObject):
     update_requested = pyqtSignal()
 
-    def __init__(self, delay_ms: int = 120) -> None:
+    def __init__(self, delay_ms: int) -> None:
         super().__init__()
-        self._timer = QTimer()
+        self._timer = QTimer(self)
+        self._timer.setInterval(delay_ms)
         self._timer.setSingleShot(True)
-        self._timer.timeout.connect(self.update_requested)
-        self._delay_ms = delay_ms
+        self._timer.timeout.connect(self._emit_update)
 
     def request_update(self) -> None:
-        self._timer.stop()
-        self._timer.start(self._delay_ms)
+        self._timer.start()
 
     def immediate_update(self) -> None:
         self._timer.stop()
+        self.update_requested.emit()
+
+    def _emit_update(self) -> None:
         self.update_requested.emit()
 
 
@@ -112,10 +114,6 @@ class CreateSimulatedBodyModel(QMainWindow):
 
         # View state (copied math from existing GUI)
         self._zoom_factor = 1.0
-        self._pan_x = 0.0
-        self._pan_y = 0.0
-        self._drag_start_pos: Optional[QPoint] = None
-        self._drag_start_pan: Optional[tuple[float, float]] = None
         self._right_drag_active = False
         self._selected_model_key: Optional[tuple[str, int]] = None  # ('body' or 'star', index)
         self._last_drag_img_vu: Optional[tuple[float, float]] = None
@@ -129,7 +127,6 @@ class CreateSimulatedBodyModel(QMainWindow):
         self._setup_ui()
         self._update_image()
 
-    # ---- UI setup ----
     def _setup_ui(self) -> None:
         central = QWidget()
         self.setCentralWidget(central)
@@ -161,9 +158,9 @@ class CreateSimulatedBodyModel(QMainWindow):
 
         self._image_label = ImageLabel(
             self,
-            self._on_mouse_press,
-            self._on_mouse_move,
-            self._on_mouse_release,
+            self._on_press,
+            self._on_move,
+            self._on_release,
             self._on_wheel,
         )
         self._image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -176,9 +173,9 @@ class CreateSimulatedBodyModel(QMainWindow):
 
         # Status bar
         status_bar = QStatusBar()
-        self._status_label = QLabel('v, u: --, --  value: --')
+        self._status_label = QLabel('V, U: --, --  Value: --')
         status_bar.addWidget(self._status_label)
-        self._zoom_label = QLabel('zoom: 1.00x')
+        self._zoom_label = QLabel('Zoom: 1.00x')
         status_bar.addPermanentWidget(self._zoom_label)
         self.setStatusBar(status_bar)
 
@@ -267,33 +264,19 @@ class CreateSimulatedBodyModel(QMainWindow):
 
         main_layout.addLayout(right, stretch=1)
         # Initialize common zoom/pan controller for left-button pan and wheel zoom
-        self._zoom_ctl: Optional['ZoomPanController'] = None
-        try:
-            from nav.ui.common import ZoomPanController
-            self._zoom_ctl = ZoomPanController(
-                label=self._image_label,
-                scroll_area=self._scroll_area,
-                get_zoom=lambda: self._zoom_factor,
-                set_zoom=lambda z: setattr(self, '_zoom_factor', float(z)),
-                update_display=self._update_display,
-                set_zoom_label_text=lambda s: self._zoom_label.setText(s),
-            )
-        except Exception:
-            self._zoom_ctl = None
+        self._zoom_ctl = ZoomPanController(
+            label=self._image_label,
+            scroll_area=self._scroll_area,
+            get_zoom=lambda: self._zoom_factor,
+            set_zoom=lambda z: setattr(self, '_zoom_factor', float(z)),
+            update_display=self._update_display,
+            set_zoom_label_text=lambda s: self._zoom_label.setText(s),
+        )
 
-    # ---- Event handlers: pan/zoom copied logic ----
-    def resizeEvent(self, event: QResizeEvent | None) -> None:
-        super().resizeEvent(event)
-        if self._current_image is not None:
-            self._display_image()
-
-    def _on_mouse_press(self, event: QMouseEvent) -> None:
+    # ---- Event handlers: pan/zoom ----
+    def _on_press(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
-            if self._zoom_ctl is not None:
-                self._zoom_ctl.on_mouse_press(event)
-            else:
-                self._drag_start_pos = event.globalPosition().toPoint()
-                self._drag_start_pan = (self._pan_x, self._pan_y)
+            self._zoom_ctl.on_mouse_press(event)
             self._image_label.setCursor(Qt.CursorShape.ClosedHandCursor)
         elif event.button() == Qt.MouseButton.RightButton:
             # Select model at cursor
@@ -302,58 +285,25 @@ class CreateSimulatedBodyModel(QMainWindow):
             self._right_drag_active = True
             self._last_drag_img_vu = (img_v, img_u)
 
-    def _on_mouse_move(self, event: QMouseEvent) -> None:
-        if self._drag_start_pos is not None and self._drag_start_pan is not None:
-            if self._zoom_ctl is not None:
-                self._zoom_ctl.on_mouse_move(event)
-            else:
-                current_pos = event.globalPosition().toPoint()
-                delta = current_pos - self._drag_start_pos
-                self._pan_x = self._drag_start_pan[0] - delta.x()
-                self._pan_y = self._drag_start_pan[1] - delta.y()
-                self._update_display()
-        else:
-            # status
-            self._update_status_bar(event.position().toPoint())
+    def _on_move(self, event: QMouseEvent) -> None:
+        self._zoom_ctl.on_mouse_move(event)
+        # status
+        self._update_status_bar(event.position().toPoint())
 
         # Right-drag to move selected model
         if self._right_drag_active and self._selected_model_key is not None:
             img_v, img_u = self._label_pos_to_image_vu(event.position().toPoint())
             self._move_selected_by(img_v, img_u)
 
-    def _on_mouse_release(self, event: QMouseEvent) -> None:
+    def _on_release(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
-            if self._zoom_ctl is not None:
-                self._zoom_ctl.on_mouse_release(event)
-            self._drag_start_pos = None
-            self._drag_start_pan = None
-            self._image_label.setCursor(Qt.CursorShape.ArrowCursor)
+            self._zoom_ctl.on_mouse_release(event)
         elif event.button() == Qt.MouseButton.RightButton:
             self._right_drag_active = False
             self._last_drag_img_vu = None
 
     def _on_wheel(self, event: QWheelEvent) -> None:
-        if self._zoom_ctl is not None:
-            self._zoom_ctl.on_wheel(event)
-        else:
-            label_pos = event.position().toPoint()
-            viewport = self._scroll_area.viewport()
-            if viewport is None:
-                return
-            viewport_pos = self._image_label.mapTo(viewport, label_pos)
-            viewport_x = viewport_pos.x()
-            viewport_y = viewport_pos.y()
-            scrollbar_h = self._scroll_area.horizontalScrollBar()
-            scrollbar_v = self._scroll_area.verticalScrollBar()
-            if scrollbar_h is None or scrollbar_v is None:
-                return
-            scaled_image_x = viewport_x + scrollbar_h.value()
-            scaled_image_y = viewport_y + scrollbar_v.value()
-            delta = event.angleDelta().y()
-            if delta > 0:
-                self._zoom_at_point(1.2, viewport_x, viewport_y, scaled_image_x, scaled_image_y)
-            else:
-                self._zoom_at_point(1.0/1.2, viewport_x, viewport_y, scaled_image_x, scaled_image_y)
+        self._zoom_ctl.on_wheel(event)
 
     def _zoom_in(self) -> None:
         if self._base_pixmap is not None:
@@ -385,37 +335,25 @@ class CreateSimulatedBodyModel(QMainWindow):
             scaled_y = center_y + scrollbar_v.value()
             self._zoom_at_point(1.0/1.2, center_x, center_y, scaled_x, scaled_y)
 
-    def _zoom_at_point(
-        self,
-        factor: float,
-        viewport_x: int,
-        viewport_y: int,
-        scaled_x: float,
-        scaled_y: float,
-    ) -> None:
+    def _zoom_at_point(self,
+                       factor: float,
+                       viewport_x: int,
+                       viewport_y: int,
+                       scaled_x: float,
+                       scaled_y: float,
+                       ) -> None:
         if self._base_pixmap is None:
             return
         old_zoom = self._zoom_factor
-        new_zoom = max(0.1, min(50.0, old_zoom * factor))
+        new_zoom = float(np.clip(old_zoom * factor, 0.1, 50.0))
         if new_zoom == old_zoom:
             return
-        img_x = scaled_x / old_zoom
-        img_y = scaled_y / old_zoom
-        new_scroll_x = img_x * new_zoom - viewport_x
-        new_scroll_y = img_y * new_zoom - viewport_y
-        self._pan_x = new_scroll_x
-        self._pan_y = new_scroll_y
-        self._zoom_factor = new_zoom
-        if hasattr(self, '_zoom_label'):
-            self._zoom_label.setText(f'zoom: {self._zoom_factor:.2f}x')
-        self._update_display()
+        # Delegate to the controller to perform zoom and maintain pan
+        self._zoom_ctl._zoom_at_point(factor, viewport_x, viewport_y, scaled_x, scaled_y)
 
     def _reset_view(self) -> None:
         self._zoom_factor = 1.0
-        self._pan_x = 0.0
-        self._pan_y = 0.0
-        if hasattr(self, '_zoom_label'):
-            self._zoom_label.setText(f'zoom: {self._zoom_factor:.2f}x')
+        self._zoom_label.setText(f'Zoom: {self._zoom_factor:.2f}x')
         self._update_display()
 
     def _label_pos_to_image_vu(self, label_pos: QPoint) -> tuple[float, float]:
@@ -426,9 +364,9 @@ class CreateSimulatedBodyModel(QMainWindow):
         return img_v, img_u
 
     def _update_status_bar(self, label_pos: QPoint) -> None:
-        self._zoom_label.setText(f'zoom: {self._zoom_factor:.2f}x')
+        self._zoom_label.setText(f'Zoom: {self._zoom_factor:.2f}x')
         if self._current_image is None:
-            self._status_label.setText('v, u: --, --  value: --')
+            self._status_label.setText('V, U: --, --  Value: --')
             return
         img_v, img_u = self._label_pos_to_image_vu(label_pos)
         height, width = self._current_image.shape
@@ -447,9 +385,9 @@ class CreateSimulatedBodyModel(QMainWindow):
                    val01 * du * (1 - dv) +
                    val10 * (1 - du) * dv +
                    val11 * du * dv)
-            self._status_label.setText(f'v, u: {img_v:.2f}, {img_u:.2f}  value: {val:.6f}')
+            self._status_label.setText(f'V, U: {img_v:.2f}, {img_u:.2f}  Value: {val:.6f}')
         else:
-            self._status_label.setText('v, u: --, --  value: --')
+            self._status_label.setText('V, U: --, --  Value: --')
 
     # ---- Sim param handlers ----
     def _on_size_v(self, value: int) -> None:
@@ -900,17 +838,6 @@ class CreateSimulatedBodyModel(QMainWindow):
         )
         self._image_label.setPixmap(scaled_pixmap)
         self._image_label.resize(scaled_width, scaled_height)
-        scrollbar_h = self._scroll_area.horizontalScrollBar()
-        scrollbar_v = self._scroll_area.verticalScrollBar()
-        viewport = self._scroll_area.viewport()
-        if scrollbar_h is None or scrollbar_v is None or viewport is None:
-            return
-        scrollbar_h.setRange(0, max(0, scaled_width - viewport.width()))
-        scrollbar_v.setRange(0, max(0, scaled_height - viewport.height()))
-        scroll_pos_h = int(max(0, min(scrollbar_h.maximum(), self._pan_x)))
-        scroll_pos_v = int(max(0, min(scrollbar_v.maximum(), self._pan_y)))
-        scrollbar_h.setValue(scroll_pos_h)
-        scrollbar_v.setValue(scroll_pos_v)
 
     # ---- Selection / drag-move ----
     def _select_model_at(self, img_v: float, img_u: float) -> None:

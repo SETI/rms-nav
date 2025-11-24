@@ -31,6 +31,11 @@ def process_task(
     if arguments.config_file:
         for config_file in arguments.config_file:
             DEFAULT_CONFIG.update_config(config_file)
+    else:
+        try:
+            DEFAULT_CONFIG.update_config('nav_default_config.yaml')
+        except FileNotFoundError:
+            pass
 
     # Derive roots
     nav_results_root_str = arguments.nav_results_root
@@ -40,6 +45,8 @@ def process_task(
             nav_results_root_str = DEFAULT_CONFIG.environment.nav_results_root
         except AttributeError:
             pass
+    if nav_results_root_str is None:
+        nav_results_root_str = os.getenv('NAV_RESULTS_ROOT')
     if nav_results_root_str is None:
         raise ValueError('One of --nav-results-root, the configuration variable '
                          '"nav_results_root" or the NAV_RESULTS_ROOT environment variable must be '
@@ -110,7 +117,8 @@ async def main() -> None:
     environment_group.add_argument(
         '--config-file', action='append', default=['nav_default_config.yaml'],
         help="""The configuration file(s) to use to override default settings;
-        may be specified multiple times (default: ./nav_default_config.yaml)""")
+        may be specified multiple times. If not provided, attempts to load
+        ./nav_default_config.yaml if present.""")
     environment_group.add_argument(
         '--backplane-results-root', type=str, default=None,
         help='Root directory for backplane results; overrides NAV_RESULTS_ROOT or config')

@@ -64,7 +64,8 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     environment_group.add_argument(
         '--config-file', action='append', default=['nav_default_config.yaml'],
         help="""The configuration file(s) to use to override default settings;
-        may be specified multiple times (default: ./nav_default_config.yaml)""")
+        may be specified multiple times. If not provided, attempts to load
+        ./nav_default_config.yaml if present.""")
     environment_group.add_argument(
         '--pds3-holdings-root', type=str, default=None,
         help='Root directory of PDS3 holdings; overrides PDS3_HOLDINGS_DIR or config')
@@ -74,7 +75,7 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         overrides NAV_RESULTS_ROOT and the nav_results_root configuration variable""")
     environment_group.add_argument(
         '--backplane-results-root', type=str, default=None,
-        help="""Root directory for backplane results; overrides the NAV_BACKPLANES_ROOT
+        help="""Root directory for backplane results; overrides the BACKPLANE_RESULTS_ROOT
         environment variable and the backplane_results_root configuration variable""")
 
     # Output
@@ -107,6 +108,11 @@ def main() -> None:
     if arguments.config_file:
         for config_file in arguments.config_file:
             DEFAULT_CONFIG.update_config(config_file)
+    else:
+        try:
+            DEFAULT_CONFIG.update_config('nav_default_config.yaml')
+        except FileNotFoundError:
+            pass
 
     # Derive roots
     nav_results_root_str = arguments.nav_results_root
@@ -116,6 +122,8 @@ def main() -> None:
             nav_results_root_str = DEFAULT_CONFIG.environment.nav_results_root
         except AttributeError:
             pass
+    if nav_results_root_str is None:
+        nav_results_root_str = os.getenv('NAV_RESULTS_ROOT')
     if nav_results_root_str is None:
         raise ValueError('One of --nav-results-root, the configuration variable '
                          '"nav_results_root" or the NAV_RESULTS_ROOT environment variable must be '
@@ -145,9 +153,9 @@ def main() -> None:
 
     for imagefiles in DATASET.yield_image_files_from_arguments(arguments):
         assert len(imagefiles.image_files) == 1
-        image_path = imagefiles.image_files[0].image_file_path
         if arguments.dry_run:
-            MAIN_LOGGER.info('Would process: %s', image_path)
+            MAIN_LOGGER.info('Would process: %s',
+                             imagefiles.image_files[0].label_file_url.as_posix())
             continue
 
         ok, metadata = generate_backplanes_image_files(
@@ -158,7 +166,9 @@ def main() -> None:
             write_output_files=not arguments.no_write_output_files
         )
         if not ok:
-            MAIN_LOGGER.info('Skipped: %s (%s)', image_path, metadata.get('status_error', ''))
+            MAIN_LOGGER.info('Skipped: %s (%s)',
+                             imagefiles.image_files[0].label_file_url.as_posix(),
+                             metadata.get('status_error', ''))
 
 
 if __name__ == '__main__':

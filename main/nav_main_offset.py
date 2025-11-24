@@ -78,7 +78,8 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     environment_group.add_argument(
         '--config-file', action='append', default=None,
         help="""The configuration file(s) to use to override default settings;
-        may be specified multiple times (default: ./nav_default_config.yaml)""")
+        may be specified multiple times. If not provided, attempts to load
+        ./nav_default_config.yaml if present.""")
     environment_group.add_argument(
         '--pds3-holdings-root', type=str, default=None,
         help="""The root directory of the PDS3 holdings; overrides the PDS3_HOLDINGS_DIR

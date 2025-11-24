@@ -95,7 +95,7 @@ def generate_backplanes_image_files(
             # TODO We only support snapshots for backplane generation for now
             obs = obs_class.from_file(image_path, extfov_margin_vu=(0, 0))
             if not isinstance(obs, ObsSnapshot):
-                raise ValueError('Expected ObsSnapshot, got %s', type(obs).__name__)
+                raise ValueError(f'Expected ObsSnapshot, got {type(obs).__name__}')
             snapshot = obs
         except Exception as e:
             logger.exception('Error reading image "%s"', image_path)

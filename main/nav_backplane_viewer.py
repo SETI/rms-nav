@@ -174,12 +174,10 @@ class NavBackplaneViewer(QDialog):
 
         # Image data
         self._img_float: Optional[np.ndarray] = None
-        self._img_uint8: Optional[np.ndarray] = None
         self._summary_rgba: Optional[np.ndarray] = None  # HxWx4 uint8
         self._fits_hdus: list[fits.ImageHDU | fits.PrimaryHDU] = []
         self._body_id_map: Optional[np.ndarray] = None
         # one per HDU (excluding primary and BODY_ID_MAP)
-        self._backplane_entries: list[dict[str, Any]] = []
         self._last_rgba: Optional[np.ndarray] = None
 
         # Stretch controls
@@ -191,15 +189,13 @@ class NavBackplaneViewer(QDialog):
 
         # View state (copied math/state shape from create_simulated_body_model)
         self._zoom_factor = 1.0
-        self._pan_x = 0.0
-        self._pan_y = 0.0
-        self._drag_start_pos: Optional[QPoint] = None
-        self._drag_start_pan: Optional[tuple[float, float]] = None
-        self._right_drag_active = False
         self._zoom_sharp = True
 
         self._updater = _ParameterUpdater(120)
         self._updater.update_requested.connect(self._compose_and_display)
+
+        self._cmap_items: list[tuple[str, str]] = []
+        self._stretch_controls: dict[str, Any] = {}
 
         self._build_ui()
 
@@ -207,7 +203,6 @@ class NavBackplaneViewer(QDialog):
         if self._image_groups:
             self._load_group(self._current_index)
 
-    # ---- UI ----
     def _build_ui(self) -> None:
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -216,17 +211,27 @@ class NavBackplaneViewer(QDialog):
         # Left column: controls row + viewport + status
         left = QVBoxLayout()
         nav_row = QHBoxLayout()
-        self._btn_prev = QPushButton('Prev')
-        self._btn_next = QPushButton('Next')
+        self._btn_prev = QPushButton('Prev Image')
+        self._btn_next = QPushButton('Next Image')
+        self._btn_zoom_out = QPushButton('Zoom -')
+        self._btn_zoom_in = QPushButton('Zoom +')
         self._btn_reset = QPushButton('Reset View')
         self._btn_save = QPushButton('Save PNG')
+        self._zoom_sharp_check = QCheckBox('Sharp zoom')
+        self._zoom_sharp_check.setChecked(self._zoom_sharp)
         self._btn_prev.clicked.connect(self._prev_image)
         self._btn_next.clicked.connect(self._next_image)
+        self._btn_zoom_out.clicked.connect(self._zoom_out)
+        self._btn_zoom_in.clicked.connect(self._zoom_in)
         self._btn_reset.clicked.connect(self._reset_view)
         self._btn_save.clicked.connect(self._save_viewport_png)
+        self._zoom_sharp_check.stateChanged.connect(self._toggle_zoom_sharp)
         nav_row.addStretch()
         nav_row.addWidget(self._btn_prev)
         nav_row.addWidget(self._btn_next)
+        nav_row.addWidget(self._btn_zoom_out)
+        nav_row.addWidget(self._btn_zoom_in)
+        nav_row.addWidget(self._zoom_sharp_check)
         nav_row.addWidget(self._btn_reset)
         nav_row.addWidget(self._btn_save)
         nav_row.addStretch()
@@ -523,7 +528,7 @@ class NavBackplaneViewer(QDialog):
         self._gamma = 1.0
         # Build or update stretch controls
         # Build stretch controls on first load
-        if not hasattr(self, '_stretch_controls'):
+        if not self._stretch_controls:
             self._stretch_controls = build_stretch_controls(
                 self._image_form,
                 img_min=self._stretch_min,
@@ -536,10 +541,7 @@ class NavBackplaneViewer(QDialog):
                 on_gamma_changed=self._on_gamma_changed,
             )
         # Ensure slider mappings use current image bounds before setting values
-        try:
-            self._stretch_controls['set_range'](self._stretch_min, self._stretch_max)
-        except Exception:
-            pass
+        self._stretch_controls['set_range'](self._stretch_min, self._stretch_max)
         # Update displayed values
         self._stretch_controls['set_values'](self._black, self._white, self._gamma)
 
@@ -575,7 +577,7 @@ class NavBackplaneViewer(QDialog):
             local_path = cast(str, fits_file.get_local_path())
             with fits.open(local_path) as hdul:
                 self._fits_hdus = list(hdul)
-                self._logger.info('Opened backplanes FITS "%s" with %d HDUs',
+                self._logger.info('Opened backplanes FITS file "%s" with %d HDUs',
                                   local_path, len(self._fits_hdus))
                 # Parse HDUs: locate BODY_ID_MAP and backplanes
                 for hdu in self._fits_hdus[1:]:
@@ -599,7 +601,7 @@ class NavBackplaneViewer(QDialog):
                         elif name.startswith('RING_'):
                             self._bp_ring_map[name] = (arr, units)
         except Exception as e:
-            self._logger.exception('Failed to read FITS: %s', e)
+            self._logger.exception('Failed to read FITS backplane file', e)
             self._fits_hdus = []
             self._bp_body_map.clear()
             self._bp_ring_map.clear()
@@ -621,7 +623,7 @@ class NavBackplaneViewer(QDialog):
         qimg = QImage(bytes(rgba.data), w, h, rgba.strides[0], QImage.Format.Format_RGBA8888).copy()
         default_name = 'backplanes.png'
         try:
-            if hasattr(self, '_current_image_name') and self._current_image_name:
+            if self._current_image_name:
                 default_name = f'{self._current_image_name}_backplanes.png'
         except Exception:
             pass
@@ -669,8 +671,7 @@ class NavBackplaneViewer(QDialog):
             valid = idmap > 0
             if np.any(valid):
                 ids = idmap.astype(np.int32)
-                if (self._body_id_mode_abs.isChecked()
-                        if hasattr(self, '_body_id_mode_abs') else False):
+                if self._body_id_mode_abs.isChecked():
                     id_min = 0
                     id_max = int(np.max(ids))
                 else:
@@ -773,8 +774,7 @@ class NavBackplaneViewer(QDialog):
             valid = np.isfinite(arr) & ((self._body_id_map != 0)
                                         if self._body_id_map is not None else True)
             rgba = compose_scalar(rgba, body_name, arr, units, valid,
-                                  mode_abs=(self._body_mode_abs.isChecked()
-                                            if hasattr(self, '_body_mode_abs') else False),
+                                  mode_abs=self._body_mode_abs.isChecked(),
                                   alpha_val=float(self._body_alpha.value()) / 100.0,
                                   cmap_name=self._body_cmap.currentData())
         # Ring
@@ -784,15 +784,14 @@ class NavBackplaneViewer(QDialog):
             valid = np.isfinite(arr) & ((self._body_id_map == 0)
                                         if self._body_id_map is not None else True)
             rgba = compose_scalar(rgba, ring_name, arr, units, valid,
-                                  mode_abs=(self._ring_mode_abs.isChecked()
-                                            if hasattr(self, '_ring_mode_abs') else False),
+                                  mode_abs=self._ring_mode_abs.isChecked(),
                                   alpha_val=float(self._ring_alpha.value()) / 100.0,
                                   cmap_name=self._ring_cmap.currentData())
         return rgba
 
     # ---- Helpers ----
     def _populate_cmaps_if_needed(self) -> None:
-        if hasattr(self, '_cmap_items'):
+        if self._cmap_items:
             return
 
         def _has_cmap(name: str) -> bool:
@@ -809,7 +808,8 @@ class NavBackplaneViewer(QDialog):
                 except Exception:
                     return False
             return False
-        self._cmap_items: list[tuple[str, str]] = [
+
+        self._cmap_items = [
             ('Grayscale', 'gray'),
             ('Viridis (Perceptual)', 'viridis'),
             ('Plasma (Perceptual)', 'plasma'),
@@ -976,7 +976,7 @@ class NavBackplaneViewer(QDialog):
             }
         self._compose_and_display()
 
-    # ---- Zoom/Pan (copied behavior) ----
+    # ---- Event handlers: pan/zoom ----
     def _on_press(self, event: QMouseEvent) -> None:
         self._zoom_ctl.on_mouse_press(event)
 
@@ -991,17 +991,52 @@ class NavBackplaneViewer(QDialog):
     def _on_wheel(self, event: QWheelEvent) -> None:
         self._zoom_ctl.on_wheel(event)
 
+    def _zoom_in(self) -> None:
+        viewport = self._scroll.viewport()
+        if viewport is None:
+            return
+        center_x = viewport.width() // 2
+        center_y = viewport.height() // 2
+        scrollbar_h = self._scroll.horizontalScrollBar()
+        scrollbar_v = self._scroll.verticalScrollBar()
+        if scrollbar_h is None or scrollbar_v is None:
+            return
+        scaled_x = center_x + scrollbar_h.value()
+        scaled_y = center_y + scrollbar_v.value()
+        self._zoom_at_point(1.2, center_x, center_y, scaled_x, scaled_y)
+
+    def _zoom_out(self) -> None:
+        viewport = self._scroll.viewport()
+        if viewport is None:
+            return
+        center_x = viewport.width() // 2
+        center_y = viewport.height() // 2
+        scrollbar_h = self._scroll.horizontalScrollBar()
+        scrollbar_v = self._scroll.verticalScrollBar()
+        if scrollbar_h is None or scrollbar_v is None:
+            return
+        scaled_x = center_x + scrollbar_h.value()
+        scaled_y = center_y + scrollbar_v.value()
+        self._zoom_at_point(1.0 / 1.2, center_x, center_y, scaled_x, scaled_y)
+
     def _reset_view(self) -> None:
         self._zoom_factor = 1.0
-        self._pan_x = 0.0
-        self._pan_y = 0.0
         self._zoom_label.setText('Zoom: 1.00x')
+        self._compose_and_display()
+
+    def _toggle_zoom_sharp(self, state: Any) -> None:
+        if isinstance(state, Qt.CheckState):
+            self._zoom_sharp = (state is Qt.CheckState.Checked)
+        elif isinstance(state, int):
+            self._zoom_sharp = (state == cast(int, Qt.CheckState.Checked.value))
+        else:
+            self._zoom_sharp = False
         self._compose_and_display()
 
     def _zoom_at_point(self,
                        factor: float,
-                       vx: int,
-                       vy: int,
+                       viewport_x: int,
+                       viewport_y: int,
                        scaled_x: float,
                        scaled_y: float) -> None:
         # Delegate to controller's internal method via wheel interface
@@ -1011,7 +1046,7 @@ class NavBackplaneViewer(QDialog):
         if new_zoom == old_zoom:
             return
         # Use controller logic
-        self._zoom_ctl._zoom_at_point(factor, vx, vy, scaled_x, scaled_y)
+        self._zoom_ctl._zoom_at_point(factor, viewport_x, viewport_y, scaled_x, scaled_y)
 
     # ---- Compose & Display ----
     def _compose_and_display(self) -> None:
@@ -1166,8 +1201,7 @@ class NavBackplaneViewer(QDialog):
         h, w = self._img_float.shape
         if v < 0 or v >= h or u < 0 or u >= w:
             self._status_label.setText('V, U: --, --  Value: --')
-            if hasattr(self, '_body_id_val_label'):
-                self._body_id_val_label.setText('Object: --')
+            self._body_id_val_label.setText('Object: --')
             self._body_val_label.setText('Value: --')
             self._ring_val_label.setText('Value: --')
             return

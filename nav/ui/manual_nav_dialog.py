@@ -1,5 +1,5 @@
 import math
-from typing import Optional, Tuple, cast
+from typing import Any, Optional, Tuple, cast
 
 import numpy as np
 from PyQt6.QtCore import Qt, QPoint
@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QScrollBar,
     QSlider,
     QStatusBar,
+    QCheckBox,
     QVBoxLayout,
     QWidget,
 )
@@ -107,6 +108,8 @@ class ManualNavDialog(QDialog):
         self._model = combined_model
         self._config = config
 
+        self.setWindowTitle(f'Manual Navigation - {obs.abspath.name}')
+
         # Image and model arrays
         self._img_fov = obs.data  # V x U, float64
         self._img_ext = obs.extdata  # for correlation
@@ -132,12 +135,11 @@ class ManualNavDialog(QDialog):
 
         # Zoom/pan state
         self._zoom = 1.0
-        self._pan_x = 0.0
-        self._pan_y = 0.0
         self._drag_start_pos: Optional[QPoint] = None
-        self._drag_start_pan: Optional[Tuple[float, float]] = None
-        self._drag_mode: Optional[str] = None  # 'pan' (left), 'offset' (right)
+        self._drag_mode: Optional[str] = None  # 'offset' (right)
         self._drag_start_offset: Optional[Tuple[float, float]] = None
+        # Zoom rendering mode
+        self._zoom_sharp = True
 
         # Precompute correlation surface once for status bar display
         self._precompute_correlation_surface()
@@ -182,9 +184,12 @@ class ManualNavDialog(QDialog):
         self._btn_zoom_out = QPushButton('Zoom -')
         self._btn_zoom_in = QPushButton('Zoom +')
         self._btn_reset = QPushButton('Reset View')
+        self._zoom_sharp_check = QCheckBox('Sharp zoom')
+        self._zoom_sharp_check.setChecked(self._zoom_sharp)
         self._btn_zoom_out.clicked.connect(self._zoom_out_center)
         self._btn_zoom_in.clicked.connect(self._zoom_in_center)
         self._btn_reset.clicked.connect(self._reset_view)
+        self._zoom_sharp_check.stateChanged.connect(self._toggle_zoom_sharp)
         # Prevent Enter from triggering zoom buttons; keep them out of focus chain
         for btn in (self._btn_zoom_out, self._btn_zoom_in, self._btn_reset):
             try:
@@ -196,6 +201,7 @@ class ManualNavDialog(QDialog):
         zoom_row.addStretch()
         zoom_row.addWidget(self._btn_zoom_out)
         zoom_row.addWidget(self._btn_zoom_in)
+        zoom_row.addWidget(self._zoom_sharp_check)
         zoom_row.addWidget(self._btn_reset)
         zoom_row.addStretch()
         left.addLayout(zoom_row)
@@ -217,8 +223,8 @@ class ManualNavDialog(QDialog):
 
         # Status bar (within dialog)
         status = QStatusBar()
-        self._status_label = QLabel('v, u: --, --  value: --  corr: --')
-        self._zoom_label = QLabel('zoom: 1.00x')
+        self._status_label = QLabel('V, U: --, --  Value: --  Correlation: --')
+        self._zoom_label = QLabel('Zoom: 1.00x')
         status.addWidget(self._status_label)
         status.addPermanentWidget(self._zoom_label)
         left.addWidget(status)
@@ -399,10 +405,8 @@ class ManualNavDialog(QDialog):
     # Mouse handling
     def _on_mouse_press(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_mode = 'pan'
-            # Legacy pan behavior for this dialog
-            self._drag_start_pos = event.globalPosition().toPoint()
-            self._drag_start_pan = (self._pan_x, self._pan_y)
+            # Use common zoom/pan controller for left-button pan
+            self._zoom_ctl.on_mouse_press(event)
             self._label.setCursor(Qt.CursorShape.ClosedHandCursor)
         elif event.button() == Qt.MouseButton.RightButton:
             self._drag_mode = 'offset'
@@ -411,14 +415,10 @@ class ManualNavDialog(QDialog):
             self._label.setCursor(Qt.CursorShape.SizeAllCursor)
 
     def _on_mouse_move(self, event: QMouseEvent) -> None:
-        if self._drag_start_pos is not None:
+        if self._drag_mode == 'offset' and self._drag_start_pos is not None:
             current_pos = event.globalPosition().toPoint()
             delta = current_pos - self._drag_start_pos
-            if self._drag_mode == 'pan' and self._drag_start_pan is not None:
-                self._pan_x = self._drag_start_pan[0] - delta.x()
-                self._pan_y = self._drag_start_pan[1] - delta.y()
-                self._update_display_only()
-            elif self._drag_mode == 'offset' and self._drag_start_offset is not None:
+            if self._drag_start_offset is not None:
                 # Convert label-pixel delta to image pixels via zoom
                 du = self._drag_start_offset[1] + (delta.x() / max(self._zoom, 1e-6))
                 dv = self._drag_start_offset[0] + (delta.y() / max(self._zoom, 1e-6))
@@ -443,15 +443,19 @@ class ManualNavDialog(QDialog):
                 self._spin_du.blockSignals(False)
                 self._refresh_overlay()
         else:
-            # Update status bar v,u and pixel value
+            # Delegate to common controller for hover/move and update status
+            self._zoom_ctl.on_mouse_move(event)
             self._update_status_from_mouse(event)
 
     def _on_mouse_release(self, event: QMouseEvent) -> None:
-        self._drag_start_pos = None
-        self._drag_start_pan = None
-        self._drag_start_offset = None
-        self._drag_mode = None
-        self._label.setCursor(Qt.CursorShape.ArrowCursor)
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._zoom_ctl.on_mouse_release(event)
+            self._label.setCursor(Qt.CursorShape.ArrowCursor)
+        elif event.button() == Qt.MouseButton.RightButton:
+            self._drag_start_pos = None
+            self._drag_start_offset = None
+            self._drag_mode = None
+            self._label.setCursor(Qt.CursorShape.ArrowCursor)
 
     def _on_wheel(self, event: QWheelEvent) -> None:
         # Ignore wheel-zoom if focus is on editable controls
@@ -459,19 +463,8 @@ class ManualNavDialog(QDialog):
         if isinstance(fw, (QDoubleSpinBox, QSlider)):
             event.ignore()
             return
-        label_pos = event.position().toPoint()
-        viewport_widget = cast(QWidget, self._scroll.viewport())
-        viewport_pos = self._label.mapTo(viewport_widget, label_pos)
-        vx = viewport_pos.x()
-        vy = viewport_pos.y()
-        sh = cast(QScrollBar, self._scroll.horizontalScrollBar())
-        sv = cast(QScrollBar, self._scroll.verticalScrollBar())
-        scaled_x = vx + sh.value()
-        scaled_y = vy + sv.value()
-        if event.angleDelta().y() > 0:
-            self._zoom_at_point(1.2, vx, vy, scaled_x, scaled_y)
-        else:
-            self._zoom_at_point(1.0 / 1.2, vx, vy, scaled_x, scaled_y)
+        # Delegate wheel zoom to common controller
+        self._zoom_ctl.on_wheel(event)
 
     # ---- Zoom/pan helpers (parity with sim_body_gui) ----
 
@@ -504,23 +497,14 @@ class ManualNavDialog(QDialog):
         if self._pixmap_base is None:
             return
         old_zoom = self._zoom
-        new_zoom = max(0.1, min(50.0, old_zoom * factor))
+        new_zoom = float(np.clip(old_zoom * factor, 0.1, 50.0))
         if new_zoom == old_zoom:
             return
-        img_x = scaled_x / old_zoom
-        img_y = scaled_y / old_zoom
-        new_scroll_x = img_x * new_zoom - vx
-        new_scroll_y = img_y * new_zoom - vy
-        self._pan_x = new_scroll_x
-        self._pan_y = new_scroll_y
-        self._zoom = new_zoom
-        self._zoom_label.setText(f'zoom: {self._zoom:.2f}x')
-        self._update_display_only()
+        # Use controller logic to maintain pan correctly
+        self._zoom_ctl._zoom_at_point(factor, vx, vy, scaled_x, scaled_y)
 
     def _reset_view(self) -> None:
         self._zoom = 1.0
-        self._pan_x = 0.0
-        self._pan_y = 0.0
         self._zoom_label.setText(f'zoom: {self._zoom:.2f}x')
         self._update_display_only()
 
@@ -563,23 +547,18 @@ class ManualNavDialog(QDialog):
             return
         scaled_w = int(self._pixmap_base.width() * self._zoom)
         scaled_h = int(self._pixmap_base.height() * self._zoom)
+        transform_mode = (Qt.TransformationMode.FastTransformation
+                          if self._zoom_sharp else Qt.TransformationMode.SmoothTransformation)
         scaled = self._pixmap_base.scaled(
             scaled_w, scaled_h,
             Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation
+            transform_mode
         )
         self._label.setPixmap(scaled)
         self._label.resize(scaled_w, scaled_h)
-        sh = cast(QScrollBar, self._scroll.horizontalScrollBar())
-        sv = cast(QScrollBar, self._scroll.verticalScrollBar())
-        viewport = cast(QWidget, self._scroll.viewport())
-        sh.setRange(0, max(0, scaled_w - viewport.width()))
-        sv.setRange(0, max(0, scaled_h - viewport.height()))
-        sh.setValue(int(max(0, min(sh.maximum(), self._pan_x))))
-        sv.setValue(int(max(0, min(sv.maximum(), self._pan_y))))
         # Update status bar with latest corr (no mouse move)
         self._status_label.setText(
-            f'v, u: --, --  value: --  corr: {self._current_corr_value():.6f}'
+            f'V, U: --, --  Value: --  Correlation: {self._current_corr_value():.6f}'
         )
 
     def _refresh_overlay(self) -> None:
@@ -610,11 +589,11 @@ class ManualNavDialog(QDialog):
             )
             corr_val = self._current_corr_value()
             self._status_label.setText(
-                f'v, u: {img_v:.2f}, {img_u:.2f}  value: {val:.6f}  corr: {corr_val:.6f}'
+                f'V, U: {img_v:.2f}, {img_u:.2f}  Value: {val:.6f}  Correlation: {corr_val:.6f}'
             )
         else:
             self._status_label.setText(
-                f'v, u: --, --  value: --  corr: {self._current_corr_value():.6f}'
+                f'V, U: --, --  Value: --  Correlation: {self._current_corr_value():.6f}'
             )
 
     # ---- Dialog control ----
@@ -634,6 +613,16 @@ class ManualNavDialog(QDialog):
             # Do not quit an existing app
             app.quit()
         return accepted, chosen, corr
+
+    # ---- Zoom options ----
+    def _toggle_zoom_sharp(self, state: Any) -> None:
+        if isinstance(state, Qt.CheckState):
+            self._zoom_sharp = (state is Qt.CheckState.Checked)
+        elif isinstance(state, int):
+            self._zoom_sharp = (state == cast(int, Qt.CheckState.Checked.value))
+        else:
+            self._zoom_sharp = False
+        self._update_display_only()
 
     # Internal buffers
     _pixmap_base: Optional[QPixmap] = None
