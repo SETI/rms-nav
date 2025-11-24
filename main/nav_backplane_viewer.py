@@ -1327,7 +1327,7 @@ def main() -> None:
     if backplane_results_root_str is None:
         raise ValueError('One of --backplane-results-root or configuration variable '
                          '"backplane_results_root" must be set')
-    backplane_results_root = FileCache('nav_results').new_path(backplane_results_root_str)
+    backplane_results_root = FileCache('backplane_results').new_path(backplane_results_root_str)
 
     dataset: DataSet = arguments._dataset
     dataset._validate_selection_arguments(arguments)  # type: ignore[attr-defined]
