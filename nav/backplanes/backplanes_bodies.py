@@ -8,11 +8,8 @@ from nav.config import Config
 from nav.obs import ObsSnapshot
 
 
-BodiesResult = dict[str, Any]
-
-
 def create_body_backplanes(snapshot: ObsSnapshot,
-                           config: Config) -> BodiesResult:
+                           config: Config) -> dict[str, Any]:
     """Create configured body backplanes embedded in full-frame arrays.
 
     Parameters:
@@ -24,7 +21,7 @@ def create_body_backplanes(snapshot: ObsSnapshot,
     """
 
     # per_body maps body_name -> arrays/masks/distance
-    result: BodiesResult = {
+    result: dict[str, Any] = {
         'per_body': {},
         'types': [],             # available backplane types for bodies
         'order': [],             # body names sorted by increasing distance

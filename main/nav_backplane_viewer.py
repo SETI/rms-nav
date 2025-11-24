@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-from __future__ import annotations
-
 import argparse
 import sys
 from typing import Any, Callable, Optional, cast
@@ -634,7 +632,7 @@ class NavBackplaneViewer(QDialog):
                             self._bp_body_map[name] = (arr, units)
                         elif name.startswith('RING_'):
                             self._bp_ring_map[name] = (arr, units)
-        except Exception as e:
+        except Exception:
             self._logger.exception('Failed to read FITS backplane file')
             self._fits_hdus = []
             self._bp_body_map.clear()
