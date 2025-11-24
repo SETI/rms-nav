@@ -1,5 +1,5 @@
 import math
-from typing import Optional, Tuple, cast
+from typing import Any, Optional, cast
 
 import numpy as np
 from PyQt6.QtCore import Qt, QPoint
@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QScrollBar,
     QSlider,
     QStatusBar,
+    QCheckBox,
     QVBoxLayout,
     QWidget,
 )
@@ -25,6 +26,7 @@ from nav.config import Config
 from nav.nav_model import NavModelCombined
 from nav.obs import ObsSnapshot
 from nav.support.correlate import masked_ncc, navigate_with_pyramid_kpeaks
+from nav.ui.common import ZoomPanController, build_stretch_controls
 
 
 def _apply_stretch_gamma(image: np.ndarray,
@@ -106,6 +108,8 @@ class ManualNavDialog(QDialog):
         self._model = combined_model
         self._config = config
 
+        self.setWindowTitle(f'Manual Navigation - {obs.abspath.name}')
+
         # Image and model arrays
         self._img_fov = obs.data  # V x U, float64
         self._img_ext = obs.extdata  # for correlation
@@ -131,12 +135,11 @@ class ManualNavDialog(QDialog):
 
         # Zoom/pan state
         self._zoom = 1.0
-        self._pan_x = 0.0
-        self._pan_y = 0.0
         self._drag_start_pos: Optional[QPoint] = None
-        self._drag_start_pan: Optional[Tuple[float, float]] = None
-        self._drag_mode: Optional[str] = None  # 'pan' (left), 'offset' (right)
-        self._drag_start_offset: Optional[Tuple[float, float]] = None
+        self._drag_mode: Optional[str] = None  # 'offset' (right)
+        self._drag_start_offset: Optional[tuple[float, float]] = None
+        # Zoom rendering mode
+        self._zoom_sharp = True
 
         # Precompute correlation surface once for status bar display
         self._precompute_correlation_surface()
@@ -157,7 +160,7 @@ class ManualNavDialog(QDialog):
         self._corr_surface = masked_ncc(image, model, mask)
         self._corr_h, self._corr_w = self._corr_surface.shape
 
-    def _offset_to_corr_indices(self, dv: float, du: float) -> Tuple[float, float]:
+    def _offset_to_corr_indices(self, dv: float, du: float) -> tuple[float, float]:
         """Map signed (dv, du) to correlation surface indices for sampling."""
         # Same mapping as int_to_signed inverse: idx = s if s >= 0 else s + size
         y = dv if dv >= 0 else dv + self._corr_h
@@ -181,12 +184,24 @@ class ManualNavDialog(QDialog):
         self._btn_zoom_out = QPushButton('Zoom -')
         self._btn_zoom_in = QPushButton('Zoom +')
         self._btn_reset = QPushButton('Reset View')
+        self._zoom_sharp_check = QCheckBox('Sharp zoom')
+        self._zoom_sharp_check.setChecked(self._zoom_sharp)
         self._btn_zoom_out.clicked.connect(self._zoom_out_center)
         self._btn_zoom_in.clicked.connect(self._zoom_in_center)
         self._btn_reset.clicked.connect(self._reset_view)
+        self._zoom_sharp_check.stateChanged.connect(self._toggle_zoom_sharp)
+        # Prevent Enter from triggering zoom buttons; keep them out of focus chain
+        for btn in (self._btn_zoom_out, self._btn_zoom_in, self._btn_reset):
+            try:
+                btn.setAutoDefault(False)
+                btn.setDefault(False)
+            except Exception:
+                pass
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         zoom_row.addStretch()
         zoom_row.addWidget(self._btn_zoom_out)
         zoom_row.addWidget(self._btn_zoom_in)
+        zoom_row.addWidget(self._zoom_sharp_check)
         zoom_row.addWidget(self._btn_reset)
         zoom_row.addStretch()
         left.addLayout(zoom_row)
@@ -208,63 +223,36 @@ class ManualNavDialog(QDialog):
 
         # Status bar (within dialog)
         status = QStatusBar()
-        self._status_label = QLabel('v, u: --, --  value: --  corr: --')
-        self._zoom_label = QLabel('zoom: 1.00x')
+        self._status_label = QLabel('V, U: --, --  Value: --  Correlation: --')
+        self._zoom_label = QLabel('Zoom: 1.00x')
         status.addWidget(self._status_label)
         status.addPermanentWidget(self._zoom_label)
         left.addWidget(status)
 
         # Right: controls
         right = QVBoxLayout()
-        # Stretch group
+        # Stretch group (common controls)
         stretch_group = QGroupBox('Image Stretch')
         stretch_form = QFormLayout()
-        # Black/White sliders (scaled to 0..1000 within observed min/max)
-        img_min = self._stretch_min
-        img_max = self._stretch_max
-        if img_max <= img_min:
-            img_max = img_min + 1.0
-
-        self._slider_black = QSlider(Qt.Orientation.Horizontal)
-        self._slider_black.setRange(0, 1000)
-        self._slider_white = QSlider(Qt.Orientation.Horizontal)
-        self._slider_white.setRange(0, 1000)
-
-        # Map actual values to slider positions
-        def _to_slider(val: float) -> int:
-            return int(round(1000.0 * (val - img_min) / (img_max - img_min)))
-
-        def _from_slider(pos: int) -> float:
-            return img_min + (img_max - img_min) * (pos / 1000.0)
-
-        self._slider_black.setValue(_to_slider(self._black))
-        self._slider_white.setValue(_to_slider(self._white))
-        self._lbl_black = QLabel(f'{self._black:.6g}')
-        self._lbl_white = QLabel(f'{self._white:.6g}')
-        self._slider_black.valueChanged.connect(
-            lambda v: self._on_black_changed(_from_slider(v)))
-        self._slider_white.valueChanged.connect(
-            lambda v: self._on_white_changed(_from_slider(v)))
-        row_b = QHBoxLayout()
-        row_b.addWidget(self._slider_black)
-        row_b.addWidget(self._lbl_black)
-        stretch_form.addRow('Black point:', row_b)
-        row_w = QHBoxLayout()
-        row_w.addWidget(self._slider_white)
-        row_w.addWidget(self._lbl_white)
-        stretch_form.addRow('White point:', row_w)
-
-        # Gamma slider (0.10 .. 5.00)
-        self._slider_gamma = QSlider(Qt.Orientation.Horizontal)
-        self._slider_gamma.setRange(10, 500)
-        self._slider_gamma.setValue(100)
-        self._lbl_gamma = QLabel(f'{self._gamma:.3f}')
-        self._slider_gamma.valueChanged.connect(
-            lambda v: self._on_gamma_changed(max(0.10, v / 100.0)))
-        row_g = QHBoxLayout()
-        row_g.addWidget(self._slider_gamma)
-        row_g.addWidget(self._lbl_gamma)
-        stretch_form.addRow('Gamma:', row_g)
+        controls = build_stretch_controls(
+            stretch_form,
+            img_min=self._stretch_min,
+            img_max=self._stretch_max,
+            black_init=self._black,
+            white_init=self._white,
+            gamma_init=self._gamma,
+            on_black_changed=self._on_black_changed,
+            on_white_changed=self._on_white_changed,
+            on_gamma_changed=self._on_gamma_changed,
+        )
+        # Keep attribute names for downstream code
+        self._slider_black = controls['slider_black']
+        self._slider_white = controls['slider_white']
+        self._slider_gamma = controls['slider_gamma']
+        self._lbl_black = controls['label_black']
+        self._lbl_white = controls['label_white']
+        self._lbl_gamma = controls['label_gamma']
+        self._stretch_controls = controls
         # Reset stretch button
         self._btn_reset_stretch = QPushButton('Reset Stretch')
         self._btn_reset_stretch.clicked.connect(self._on_reset_stretch)
@@ -327,22 +315,31 @@ class ManualNavDialog(QDialog):
         right.addStretch(1)
 
         layout.addLayout(right, stretch=1)
+        # Initialize zoom/pan controller for left-pan and wheel zoom
+        self._zoom_ctl = ZoomPanController(
+            label=self._label,
+            scroll_area=self._scroll,
+            get_zoom=lambda: self._zoom,
+            set_zoom=lambda z: setattr(self, '_zoom', float(z)),
+            update_display=self._update_display_only,
+            set_zoom_label_text=lambda s: self._zoom_label.setText(s),
+        )
 
     # ---- Event handlers ----
 
     def _on_black_changed(self, val: float) -> None:
         self._black = float(val)
-        self._lbl_black.setText(f'{self._black:.6g}')
+        self._lbl_black.setText(f'{self._black:.5f}')
         self._refresh_overlay()
 
     def _on_white_changed(self, val: float) -> None:
         self._white = float(val)
-        self._lbl_white.setText(f'{self._white:.6g}')
+        self._lbl_white.setText(f'{self._white:.5f}')
         self._refresh_overlay()
 
     def _on_gamma_changed(self, val: float) -> None:
         self._gamma = float(val)
-        self._lbl_gamma.setText(f'{self._gamma:.3f}')
+        self._lbl_gamma.setText(f'{self._gamma:.5f}')
         self._refresh_overlay()
 
     def _on_alpha_changed(self, val: float) -> None:
@@ -365,20 +362,8 @@ class ManualNavDialog(QDialog):
         if self._black >= self._white:
             self._white = self._black + 0.01
         self._gamma = 1.0
-        # Update labels
-        self._lbl_black.setText(f'{self._black:.6g}')
-        self._lbl_white.setText(f'{self._white:.6g}')
-        self._lbl_gamma.setText(f'{self._gamma:.3f}')
-        # Update sliders without recursive changes
-        self._slider_black.blockSignals(True)
-        self._slider_white.blockSignals(True)
-        self._slider_gamma.blockSignals(True)
-        self._slider_black.setValue(self._stretch_to_slider(self._black))
-        self._slider_white.setValue(self._stretch_to_slider(self._white))
-        self._slider_gamma.setValue(int(round(self._gamma * 100)))
-        self._slider_black.blockSignals(False)
-        self._slider_white.blockSignals(False)
-        self._slider_gamma.blockSignals(False)
+        # Update UI via common helper
+        self._stretch_controls['set_values'](self._black, self._white, self._gamma)
         # Redraw
         self._refresh_overlay()
 
@@ -420,9 +405,8 @@ class ManualNavDialog(QDialog):
     # Mouse handling
     def _on_mouse_press(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_mode = 'pan'
-            self._drag_start_pos = event.globalPosition().toPoint()
-            self._drag_start_pan = (self._pan_x, self._pan_y)
+            # Use common zoom/pan controller for left-button pan
+            self._zoom_ctl.on_mouse_press(event)
             self._label.setCursor(Qt.CursorShape.ClosedHandCursor)
         elif event.button() == Qt.MouseButton.RightButton:
             self._drag_mode = 'offset'
@@ -431,14 +415,10 @@ class ManualNavDialog(QDialog):
             self._label.setCursor(Qt.CursorShape.SizeAllCursor)
 
     def _on_mouse_move(self, event: QMouseEvent) -> None:
-        if self._drag_start_pos is not None:
+        if self._drag_mode == 'offset' and self._drag_start_pos is not None:
             current_pos = event.globalPosition().toPoint()
             delta = current_pos - self._drag_start_pos
-            if self._drag_mode == 'pan' and self._drag_start_pan is not None:
-                self._pan_x = self._drag_start_pan[0] - delta.x()
-                self._pan_y = self._drag_start_pan[1] - delta.y()
-                self._update_display_only()
-            elif self._drag_mode == 'offset' and self._drag_start_offset is not None:
+            if self._drag_start_offset is not None:
                 # Convert label-pixel delta to image pixels via zoom
                 du = self._drag_start_offset[1] + (delta.x() / max(self._zoom, 1e-6))
                 dv = self._drag_start_offset[0] + (delta.y() / max(self._zoom, 1e-6))
@@ -463,30 +443,28 @@ class ManualNavDialog(QDialog):
                 self._spin_du.blockSignals(False)
                 self._refresh_overlay()
         else:
-            # Update status bar v,u and pixel value
+            # Delegate to common controller for hover/move and update status
+            self._zoom_ctl.on_mouse_move(event)
             self._update_status_from_mouse(event)
 
     def _on_mouse_release(self, event: QMouseEvent) -> None:
-        self._drag_start_pos = None
-        self._drag_start_pan = None
-        self._drag_start_offset = None
-        self._drag_mode = None
-        self._label.setCursor(Qt.CursorShape.ArrowCursor)
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._zoom_ctl.on_mouse_release(event)
+            self._label.setCursor(Qt.CursorShape.ArrowCursor)
+        elif event.button() == Qt.MouseButton.RightButton:
+            self._drag_start_pos = None
+            self._drag_start_offset = None
+            self._drag_mode = None
+            self._label.setCursor(Qt.CursorShape.ArrowCursor)
 
     def _on_wheel(self, event: QWheelEvent) -> None:
-        label_pos = event.position().toPoint()
-        viewport_widget = cast(QWidget, self._scroll.viewport())
-        viewport_pos = self._label.mapTo(viewport_widget, label_pos)
-        vx = viewport_pos.x()
-        vy = viewport_pos.y()
-        sh = cast(QScrollBar, self._scroll.horizontalScrollBar())
-        sv = cast(QScrollBar, self._scroll.verticalScrollBar())
-        scaled_x = vx + sh.value()
-        scaled_y = vy + sv.value()
-        if event.angleDelta().y() > 0:
-            self._zoom_at_point(1.2, vx, vy, scaled_x, scaled_y)
-        else:
-            self._zoom_at_point(1.0 / 1.2, vx, vy, scaled_x, scaled_y)
+        # Ignore wheel-zoom if focus is on editable controls
+        fw = self.focusWidget()
+        if isinstance(fw, (QDoubleSpinBox, QSlider)):
+            event.ignore()
+            return
+        # Delegate wheel zoom to common controller
+        self._zoom_ctl.on_wheel(event)
 
     # ---- Zoom/pan helpers (parity with sim_body_gui) ----
 
@@ -519,23 +497,14 @@ class ManualNavDialog(QDialog):
         if self._pixmap_base is None:
             return
         old_zoom = self._zoom
-        new_zoom = max(0.1, min(50.0, old_zoom * factor))
+        new_zoom = float(np.clip(old_zoom * factor, 0.1, 50.0))
         if new_zoom == old_zoom:
             return
-        img_x = scaled_x / old_zoom
-        img_y = scaled_y / old_zoom
-        new_scroll_x = img_x * new_zoom - vx
-        new_scroll_y = img_y * new_zoom - vy
-        self._pan_x = new_scroll_x
-        self._pan_y = new_scroll_y
-        self._zoom = new_zoom
-        self._zoom_label.setText(f'zoom: {self._zoom:.2f}x')
-        self._update_display_only()
+        # Use controller public API to maintain pan correctly
+        self._zoom_ctl.zoom_at_point(factor, vx, vy, scaled_x, scaled_y)
 
     def _reset_view(self) -> None:
         self._zoom = 1.0
-        self._pan_x = 0.0
-        self._pan_y = 0.0
         self._zoom_label.setText(f'zoom: {self._zoom:.2f}x')
         self._update_display_only()
 
@@ -578,23 +547,18 @@ class ManualNavDialog(QDialog):
             return
         scaled_w = int(self._pixmap_base.width() * self._zoom)
         scaled_h = int(self._pixmap_base.height() * self._zoom)
+        transform_mode = (Qt.TransformationMode.FastTransformation
+                          if self._zoom_sharp else Qt.TransformationMode.SmoothTransformation)
         scaled = self._pixmap_base.scaled(
             scaled_w, scaled_h,
             Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation
+            transform_mode
         )
         self._label.setPixmap(scaled)
         self._label.resize(scaled_w, scaled_h)
-        sh = cast(QScrollBar, self._scroll.horizontalScrollBar())
-        sv = cast(QScrollBar, self._scroll.verticalScrollBar())
-        viewport = cast(QWidget, self._scroll.viewport())
-        sh.setRange(0, max(0, scaled_w - viewport.width()))
-        sv.setRange(0, max(0, scaled_h - viewport.height()))
-        sh.setValue(int(max(0, min(sh.maximum(), self._pan_x))))
-        sv.setValue(int(max(0, min(sv.maximum(), self._pan_y))))
         # Update status bar with latest corr (no mouse move)
         self._status_label.setText(
-            f'v, u: --, --  value: --  corr: {self._current_corr_value():.6f}'
+            f'V, U: --, --  Value: --  Correlation: {self._current_corr_value():.6f}'
         )
 
     def _refresh_overlay(self) -> None:
@@ -625,16 +589,16 @@ class ManualNavDialog(QDialog):
             )
             corr_val = self._current_corr_value()
             self._status_label.setText(
-                f'v, u: {img_v:.2f}, {img_u:.2f}  value: {val:.6f}  corr: {corr_val:.6f}'
+                f'V, U: {img_v:.2f}, {img_u:.2f}  Value: {val:.6f}  Correlation: {corr_val:.6f}'
             )
         else:
             self._status_label.setText(
-                f'v, u: --, --  value: --  corr: {self._current_corr_value():.6f}'
+                f'V, U: --, --  Value: --  Correlation: {self._current_corr_value():.6f}'
             )
 
     # ---- Dialog control ----
 
-    def run_modal(self) -> Tuple[bool, Optional[Tuple[float, float]], Optional[float]]:
+    def run_modal(self) -> tuple[bool, Optional[tuple[float, float]], Optional[float]]:
         """Run the dialog modally, creating a QApplication if necessary."""
         app_created = False
         app = QApplication.instance()
@@ -649,6 +613,11 @@ class ManualNavDialog(QDialog):
             # Do not quit an existing app
             app.quit()
         return accepted, chosen, corr
+
+    # ---- Zoom options ----
+    def _toggle_zoom_sharp(self, state: Any) -> None:
+        self._zoom_sharp = (state == int(cast(int, Qt.CheckState.Checked.value)))
+        self._update_display_only()
 
     # Internal buffers
     _pixmap_base: Optional[QPixmap] = None

@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Backplanes PDS4 label template.
+  Expected keys in the template context:
+    - PRODUCT_ID (string)
+    - FILE_NAME (string)
+    - LINES (int)
+    - LINE_SAMPLES (int)
+    - BANDS (int)
+    - BACKPLANE_TYPES (list of strings)
+    - TARGETS (list of { NAIF_ID:int, LID:string })  [optional]
+-->
+<Product_Ancillary xmlns="http://pds.nasa.gov/pds4/pds/v1">
+  <Identification_Area>
+    <logical_identifier>urn:nasa:pds:backplanes:product:{{PRODUCT_ID}}</logical_identifier>
+    <version_id>1.0</version_id>
+    <title>{{PRODUCT_ID}}</title>
+    <information_model_version>1.17.0.0</information_model_version>
+    <product_class>Product_Ancillary</product_class>
+  </Identification_Area>
+
+  <Reference_List>
+  <!-- Optional: targets referenced by this product -->
+  <!-- TARGETS is optional; template engine should ignore if not provided -->
+  {{#for TARGETS}}
+    <Internal_Reference>
+      <lid_reference>{{LID}}</lid_reference>
+      <reference_type>ancillary_to_target</reference_type>
+    </Internal_Reference>
+  {{/for}}
+  </Reference_List>
+
+  <File_Area_Observational>
+    <File>
+      <file_name>{{FILE_NAME}}</file_name>
+    </File>
+    <Array_3D_Image>
+      <name>BACKPLANES</name>
+      <axes>3</axes>
+      <axis_index_order>Last Index Fastest</axis_index_order>
+      <elements>{{BANDS}}</elements>
+      <lines>{{LINES}}</lines>
+      <samples>{{LINE_SAMPLES}}</samples>
+      <element_array>
+        <data_type>IEEE754MSBSingle</data_type>
+      </element_array>
+    </Array_3D_Image>
+  </File_Area_Observational>
+</Product_Ancillary>
+
+
