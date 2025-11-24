@@ -116,7 +116,6 @@ def _rad_to_deg_if_units(name: str, units: str | None, arr: np.ndarray) -> np.nd
 
 
 def _absolute_range_for(name: str,
-                        units: str | None,
                         arr_deg_or_native: np.ndarray) -> tuple[float, float]:
     lname = name.lower()
     if 'longitude' in lname:
@@ -733,7 +732,7 @@ class NavBackplaneViewer(QDialog):
         ) -> np.ndarray:
             arr_disp = _rad_to_deg_if_units(name, units, arr)
             if mode_abs:
-                vmin, vmax = _absolute_range_for(name, units, arr_disp)
+                vmin, vmax = _absolute_range_for(name, arr_disp)
             else:
                 finite_vals = arr_disp[valid]
                 if finite_vals.size == 0:
@@ -756,24 +755,28 @@ class NavBackplaneViewer(QDialog):
             return _alpha_blend_layer(rgba_in, rgb, a)
         # Body
         body_name = self._body_combo.currentText()
-        if self._body_show.isChecked() and body_name in self._bp_body_map and body_name != 'None':
+        if (self._body_show.isChecked() and body_name in self._bp_body_map
+                and body_name != 'None'):
             arr, units = self._bp_body_map[body_name]
-            valid = np.isfinite(arr) & ((self._body_id_map != 0)
-                                        if self._body_id_map is not None else True)
-            rgba = compose_scalar(rgba, body_name, arr, units, valid,
-                                  mode_abs=self._body_mode_abs.isChecked(),
-                                  alpha_val=float(self._body_alpha.value()) / 100.0,
-                                  cmap_name=self._body_cmap.currentData())
+            if arr.shape == (h, w):
+                valid = np.isfinite(arr) & ((self._body_id_map != 0)
+                                            if self._body_id_map is not None else True)
+                rgba = compose_scalar(rgba, body_name, arr, units, valid,
+                                      mode_abs=self._body_mode_abs.isChecked(),
+                                      alpha_val=float(self._body_alpha.value()) / 100.0,
+                                      cmap_name=self._body_cmap.currentData())
         # Ring
         ring_name = self._ring_combo.currentText()
-        if self._ring_show.isChecked() and ring_name in self._bp_ring_map and ring_name != 'None':
+        if (self._ring_show.isChecked() and ring_name in self._bp_ring_map
+                and ring_name != 'None'):
             arr, units = self._bp_ring_map[ring_name]
-            valid = np.isfinite(arr) & ((self._body_id_map == 0)
-                                        if self._body_id_map is not None else True)
-            rgba = compose_scalar(rgba, ring_name, arr, units, valid,
-                                  mode_abs=self._ring_mode_abs.isChecked(),
-                                  alpha_val=float(self._ring_alpha.value()) / 100.0,
-                                  cmap_name=self._ring_cmap.currentData())
+            if arr.shape == (h, w):
+                valid = np.isfinite(arr) & ((self._body_id_map == 0)
+                                            if self._body_id_map is not None else True)
+                rgba = compose_scalar(rgba, ring_name, arr, units, valid,
+                                      mode_abs=self._ring_mode_abs.isChecked(),
+                                      alpha_val=float(self._ring_alpha.value()) / 100.0,
+                                      cmap_name=self._ring_cmap.currentData())
         return rgba
 
     # ---- Helpers ----
@@ -847,7 +850,7 @@ class NavBackplaneViewer(QDialog):
         h, w, _ = rgba.shape
         arr_disp = _rad_to_deg_if_units(name, units, arr)
         if mode == 'Absolute':
-            vmin, vmax = _absolute_range_for(name, units, arr_disp)
+            vmin, vmax = _absolute_range_for(name, arr_disp)
         else:
             finite_vals = arr_disp[valid_mask]
             if finite_vals.size == 0:

@@ -1,4 +1,5 @@
-from typing import Callable, Optional, Any
+from collections.abc import Callable
+from typing import Optional, Any
 
 import numpy as np
 from PyQt6.QtCore import Qt, QPoint
