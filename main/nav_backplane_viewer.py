@@ -144,7 +144,7 @@ def _absolute_range_for(name: str,
 
 
 def _load_colormap(cmap_name: Any) -> Any:
-    """Resolve a colormap by name using matplotlib's modern and legacy APIs."""
+    """Resolve a colormap by name."""
     if cmap_name is None:
         return None
     return mpl_colormaps.get(str(cmap_name))
@@ -752,21 +752,6 @@ class NavBackplaneViewer(QDialog):
         if self._cmap_items:
             return
 
-        def _has_cmap(name: str) -> bool:
-            if mpl_colormaps is not None:
-                try:
-                    _ = mpl_colormaps.get(name)
-                    return True
-                except Exception:
-                    return False
-            if cm is not None:
-                try:
-                    _ = cm.get_cmap(name)
-                    return True
-                except Exception:
-                    return False
-            return False
-
         self._cmap_items = [
             ('Grayscale', 'gray'),
             ('Viridis (Perceptual)', 'viridis'),
@@ -774,7 +759,7 @@ class NavBackplaneViewer(QDialog):
             ('Inferno (Perceptual)', 'inferno'),
             ('Magma (Perceptual)', 'magma'),
             ('Cividis (Colorblind-safe)', 'cividis'),
-            ('Turbo (Rainbow-like)', 'turbo') if _has_cmap('turbo') else ('Jet (Rainbow)', 'jet'),
+            ('Turbo (Rainbow-like)', 'turbo'),
             ('Coolwarm (Diverging)', 'coolwarm'),
             ('Spectral (Diverging)', 'Spectral'),
             ('Terrain', 'terrain'),
@@ -851,7 +836,7 @@ class NavBackplaneViewer(QDialog):
         if prefs:
             self._body_alpha.blockSignals(True)
             self._body_cmap.blockSignals(True)
-            self._body_alpha.setValue(int(round(float(prefs.get('alpha', 0.5)) * 100)))
+            self._body_alpha.setValue(round(float(prefs.get('alpha', 0.5)) * 100))
             # Restore mode radios
             mode = str(prefs.get('mode', 'Relative'))
             if mode.lower().startswith('abs'):
@@ -1089,7 +1074,11 @@ class NavBackplaneViewer(QDialog):
         if self._ring_show.isChecked() and ring_name in self._bp_ring_map and ring_name != 'None':
             arr, units = self._bp_ring_map[ring_name]
             if arr.shape == (h, w):
-                valid = np.isfinite(arr)
+                valid = np.isfinite(arr) & (
+                    (self._body_id_map == 0)
+                    if self._body_id_map is not None
+                    else True
+                )
                 rgba = self._composite_scalar_layer(rgba, arr, units, ring_name,
                                                     valid_mask=valid,
                                                     mode=('Absolute'
