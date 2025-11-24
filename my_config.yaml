@@ -1,8 +1,0 @@
-environment:
-  pds3_holdings_root: /mnt/ganymede/PDS/holdings
-  results_root: /data/nav-offset-results
-
-general:
-  log_level_model_stars: INFO
-  log_level_nav_correlate_all: DEBUG
-  log_level_annotate: ERROR
