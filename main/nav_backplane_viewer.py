@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 import argparse
+from collections.abc import Callable
 import sys
-from typing import Any, Callable, Optional, cast
+from typing import Any, Optional, cast
 
 from astropy.io import fits
 import cspyce
@@ -16,6 +17,7 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QDialog,
     QFileDialog,
+    QMessageBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -525,11 +527,8 @@ class NavBackplaneViewer(QDialog):
         image_file = group.image_files[0]
         image_path = image_file.image_file_path.absolute()
         results_stub = image_file.results_path_stub
-        try:
-            self._current_image_name = image_path.name
-            self.setWindowTitle(f'Backplane Viewer - {self._current_image_name}')
-        except Exception:
-            pass
+        self._current_image_name = image_path.name
+        self.setWindowTitle(f'Backplane Viewer - {self._current_image_name}')
 
         # Load observation (science image)
         try:
@@ -574,22 +573,17 @@ class NavBackplaneViewer(QDialog):
 
         # Optional summary PNG
         summary_png_file = self._nav_results_root / (results_stub + '_summary.png')
-        try:
-            if summary_png_file.exists():
-                png_local = cast(str, summary_png_file.get_local_path())
-                with Image.open(png_local, mode='r') as im:
-                    rgba = im.convert('RGBA')
-                    self._summary_rgba = np.array(rgba)
-                if self._summary_rgba is not None:
-                    self._logger.info('Loaded summary overlay "%s" size=%dx%d',
-                                      png_local,
-                                      self._summary_rgba.shape[1], self._summary_rgba.shape[0])
-                self._summary_enable.setEnabled(True)
-            else:
-                self._summary_rgba = None
-                self._summary_enable.setChecked(False)
-                self._summary_enable.setEnabled(False)
-        except Exception:
+        if summary_png_file.exists():
+            png_local = cast(str, summary_png_file.get_local_path())
+            with Image.open(png_local, mode='r') as im:
+                rgba = im.convert('RGBA')
+                self._summary_rgba = np.array(rgba)
+            if self._summary_rgba is not None:
+                self._logger.info('Loaded summary overlay "%s" size=%dx%d',
+                                  png_local,
+                                  self._summary_rgba.shape[1], self._summary_rgba.shape[0])
+            self._summary_enable.setEnabled(True)
+        else:
             self._summary_rgba = None
             self._summary_enable.setChecked(False)
             self._summary_enable.setEnabled(False)
@@ -668,8 +662,9 @@ class NavBackplaneViewer(QDialog):
             return
         try:
             qimg.save(path, 'PNG')
-        except Exception:
-            pass
+        except Exception as e:
+            QMessageBox.critical(self, 'Save Error',
+                                 f'Failed to save PNG to:\n{path}\n\n{e}')
 
     def _render_full_rgba(self) -> Optional[np.ndarray]:
         if self._img_float is None:
@@ -719,40 +714,7 @@ class NavBackplaneViewer(QDialog):
                 a[valid] = float(self._body_id_alpha.value()) / 100.0
                 rgba = _alpha_blend_layer(rgba, rgb, a)
 
-        # Body and Ring backplanes
-        def compose_scalar(
-            rgba_in: np.ndarray,
-            name: str,
-            arr: np.ndarray,
-            units: str,
-            valid: np.ndarray,
-            mode_abs: bool,
-            alpha_val: float,
-            cmap_name: Any,
-        ) -> np.ndarray:
-            arr_disp = _rad_to_deg_if_units(name, units, arr)
-            if mode_abs:
-                vmin, vmax = _absolute_range_for(name, arr_disp)
-            else:
-                finite_vals = arr_disp[valid]
-                if finite_vals.size == 0:
-                    vmin, vmax = (0.0, 1.0)
-                else:
-                    vmin = float(np.nanmin(finite_vals))
-                    vmax = float(np.nanmax(finite_vals))
-                    if vmax <= vmin:
-                        vmax = vmin + 1e-6
-            with np.errstate(invalid='ignore', divide='ignore'):
-                norm = np.clip((arr_disp - vmin) / (vmax - vmin), 0.0, 1.0)
-            cmap_obj = _load_colormap(cmap_name)
-            if cmap_obj is not None:
-                rgb = (cmap_obj(norm)[..., :3] * 255.0).astype(np.uint8)
-            else:
-                val = (norm * 255.0).astype(np.uint8)
-                rgb = np.stack([val, val, val], axis=-1)
-            a = np.zeros((h, w), dtype=np.float32)
-            a[valid] = alpha_val
-            return _alpha_blend_layer(rgba_in, rgb, a)
+        # Body and Ring backplanes (shared helper)
         # Body
         body_name = self._body_combo.currentText()
         if (self._body_show.isChecked() and body_name in self._bp_body_map
@@ -761,10 +723,13 @@ class NavBackplaneViewer(QDialog):
             if arr.shape == (h, w):
                 valid = np.isfinite(arr) & ((self._body_id_map != 0)
                                             if self._body_id_map is not None else True)
-                rgba = compose_scalar(rgba, body_name, arr, units, valid,
-                                      mode_abs=self._body_mode_abs.isChecked(),
-                                      alpha_val=float(self._body_alpha.value()) / 100.0,
-                                      cmap_name=self._body_cmap.currentData())
+                rgba = self._composite_scalar_layer(
+                    rgba, arr, units, body_name,
+                    valid_mask=valid,
+                    mode=('Absolute' if self._body_mode_abs.isChecked() else 'Relative'),
+                    alpha=float(self._body_alpha.value()) / 100.0,
+                    cmap_name=self._body_cmap.currentData(),
+                )
         # Ring
         ring_name = self._ring_combo.currentText()
         if (self._ring_show.isChecked() and ring_name in self._bp_ring_map
@@ -773,10 +738,13 @@ class NavBackplaneViewer(QDialog):
             if arr.shape == (h, w):
                 valid = np.isfinite(arr) & ((self._body_id_map == 0)
                                             if self._body_id_map is not None else True)
-                rgba = compose_scalar(rgba, ring_name, arr, units, valid,
-                                      mode_abs=self._ring_mode_abs.isChecked(),
-                                      alpha_val=float(self._ring_alpha.value()) / 100.0,
-                                      cmap_name=self._ring_cmap.currentData())
+                rgba = self._composite_scalar_layer(
+                    rgba, arr, units, ring_name,
+                    valid_mask=valid,
+                    mode=('Absolute' if self._ring_mode_abs.isChecked() else 'Relative'),
+                    alpha=float(self._ring_alpha.value()) / 100.0,
+                    cmap_name=self._ring_cmap.currentData(),
+                )
         return rgba
 
     # ---- Helpers ----
@@ -863,17 +831,7 @@ class NavBackplaneViewer(QDialog):
         with np.errstate(invalid='ignore', divide='ignore'):
             norm = np.clip((arr_disp - vmin) / (vmax - vmin), 0.0, 1.0)
         # Colormap
-        cmap_obj = None
-        if mpl_colormaps is not None and cmap_name is not None:
-            try:
-                cmap_obj = mpl_colormaps.get(str(cmap_name))
-            except Exception:
-                cmap_obj = None
-        if cmap_obj is None and cm is not None and cmap_name is not None:
-            try:
-                cmap_obj = cm.get_cmap(str(cmap_name))
-            except Exception:
-                cmap_obj = None
+        cmap_obj = _load_colormap(cmap_name)
         if cmap_obj is not None:
             rgb = (cmap_obj(norm)[..., :3] * 255.0).astype(np.uint8)
         else:
@@ -881,17 +839,7 @@ class NavBackplaneViewer(QDialog):
             rgb = np.stack([val, val, val], axis=-1)
         a = np.zeros((h, w), dtype=np.float32)
         a[valid_mask] = float(alpha)
-        dst_rgb = rgba[..., :3].astype(np.float32)
-        dst_a = rgba[..., 3].astype(np.float32) / 255.0
-        out_a = a + dst_a * (1.0 - a)
-        src_rgb = rgb.astype(np.float32)
-        out_rgb = (src_rgb * a[..., None] + dst_rgb * dst_a[..., None] * (1.0 - a[..., None]))
-        mask = out_a > 0
-        out_rgb[mask] = out_rgb[mask] / out_a[mask, None]
-        out_rgb[~mask] = 0.0
-        rgba[..., :3] = np.clip(out_rgb, 0, 255).astype(np.uint8)
-        rgba[..., 3] = np.clip(out_a * 255.0, 0, 255).astype(np.uint8)
-        return rgba
+        return _alpha_blend_layer(rgba, rgb, a)
 
     def _on_body_selection_changed(self) -> None:
         name = self._body_combo.currentText()
@@ -930,7 +878,7 @@ class NavBackplaneViewer(QDialog):
         if prefs:
             self._ring_alpha.blockSignals(True)
             self._ring_cmap.blockSignals(True)
-            self._ring_alpha.setValue(int(round(float(prefs.get('alpha', 0.5)) * 100)))
+            self._ring_alpha.setValue(round(float(prefs.get('alpha', 0.5)) * 100))
             mode = str(prefs.get('mode', 'Relative'))
             if mode.lower().startswith('abs'):
                 self._ring_mode_abs.setChecked(True)
@@ -1275,7 +1223,7 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
 
     env = cmdparser.add_argument_group('Environment')
     env.add_argument(
-        '--config-file', action='append', default=['nav_default_config.yaml'],
+        '--config-file', action='append', default=None,
         help='Configuration override file(s) (default: ./nav_default_config.yaml)')
     env.add_argument(
         '--pds3-holdings-root', type=str, default=None,
@@ -1305,6 +1253,11 @@ def main() -> None:
     if arguments.config_file:
         for config_file in arguments.config_file:
             DEFAULT_CONFIG.update_config(config_file)
+    else:
+        try:
+            DEFAULT_CONFIG.update_config('nav_default_config.yaml')
+        except FileNotFoundError:
+            pass
 
     # Roots
     nav_results_root_str = arguments.nav_results_root
