@@ -134,7 +134,7 @@ def main() -> None:
         raise ValueError('One of --backplane-results-root, the configuration variable '
                          '"backplane_results_root" or the BACKPLANE_RESULTS_ROOT environment '
                          'variable must be set')
-    backplane_results_root = FileCache('nav_results').new_path(backplane_results_root_str)
+    backplane_results_root = FileCache('backplane_results').new_path(backplane_results_root_str)
 
     global MAIN_LOGGER
     MAIN_LOGGER = DEFAULT_LOGGER

@@ -29,8 +29,8 @@ def generate_backplanes_image_files(
     Parameters:
         obs_class: Observation snapshot class for the instrument.
         image_files: List of images; must have exactly one image in the batch.
-        metadata_root: Root containing previously written navigation metadata JSONs.
-        results_root: Destination root for FITS and label files.
+        nav_results_root: Root containing previously written navigation metadata JSONs.
+        backplane_results_root: Destination root for FITS and label files.
         write_output_files: Whether to write outputs to storage.
     """
 
@@ -115,7 +115,7 @@ def generate_backplanes_image_files(
             snapshot.fov = oops.fov.OffsetFOV(snapshot.fov, uv_offset=(float(du), float(dv)))
 
         except Exception as e:
-            logger.error('Unable to apply OffsetFOV; continuing with unshifted FOV: %s', e)
+            logger.error('Unable to apply OffsetFOV: %s', e)
             return False, {
                 'status': 'error',
                 'status_error': 'offset_apply_error',
@@ -161,7 +161,7 @@ def generate_backplanes_image_files(
             'status': 'success',
             'image_path': str(image_path),
             'image_name': image_name,
-            'backplane_types': sorted(list(master_by_type.keys())),
+            'backplane_types': sorted(list(master_by_type)),
             'merge': merge_info,
         }
 

@@ -1,20 +1,9 @@
-from __future__ import annotations
-
-from typing import Callable, Optional, Tuple, Dict, Any
+from typing import Callable, Optional, Any
 
 import numpy as np
 from PyQt6.QtCore import Qt, QPoint
 from PyQt6.QtGui import QMouseEvent, QWheelEvent
-from PyQt6.QtWidgets import (
-    QLabel,
-    QScrollArea,
-    QScrollBar,
-    QFormLayout,
-    QHBoxLayout,
-    QLabel,
-    QSlider,
-    QWidget,
-)
+from PyQt6.QtWidgets import QLabel, QScrollArea, QFormLayout, QHBoxLayout, QSlider, QWidget
 
 
 class ZoomPanController:
@@ -46,7 +35,7 @@ class ZoomPanController:
         self._set_zoom_label_text = set_zoom_label_text
 
         self._drag_start_pos: Optional[QPoint] = None
-        self._drag_start_scroll_xy: Optional[Tuple[int, int]] = None
+        self._drag_start_scroll_xy: Optional[tuple[int, int]] = None
 
     # Event handlers (UI should call these from its own handlers)
     def on_mouse_press(self, event: QMouseEvent) -> None:
@@ -163,7 +152,7 @@ def build_stretch_controls(form: QFormLayout,
                            gamma_init: float,
                            on_black_changed: Callable[[float], None],
                            on_white_changed: Callable[[float], None],
-                           on_gamma_changed: Callable[[float], None]) -> Dict[str, Any]:
+                           on_gamma_changed: Callable[[float], None]) -> dict[str, Any]:
     """
     Construct black/white/gamma controls matching manual_nav_dialog behavior with shared formatting.
     Returns dict with widgets and mappers:
@@ -261,6 +250,11 @@ def build_stretch_controls(form: QFormLayout,
         label_white.setText(f'{white:.5f}')
         label_gamma.setText(f'{gamma:.5f}')
 
+    def set_range(new_img_min: float, new_img_max: float) -> None:
+        nonlocal lo, hi
+        lo = float(new_img_min)
+        hi = float(new_img_max) if new_img_max > new_img_min else (float(new_img_min) + 1.0)
+
     return {
         'slider_black': slider_black,
         'label_black': label_black,
@@ -271,4 +265,5 @@ def build_stretch_controls(form: QFormLayout,
         'to_slider': to_slider,
         'from_slider': from_slider,
         'set_values': set_values,
+        'set_range': set_range,
     }

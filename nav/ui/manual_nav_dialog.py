@@ -189,7 +189,7 @@ class ManualNavDialog(QDialog):
         for btn in (self._btn_zoom_out, self._btn_zoom_in, self._btn_reset):
             try:
                 btn.setAutoDefault(False)
-                btn.setDefault(False)  # type: ignore[attr-defined]
+                btn.setDefault(False)
             except Exception:
                 pass
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)

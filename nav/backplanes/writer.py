@@ -3,6 +3,7 @@ from typing import Any
 from filecache import FCPath
 from astropy.io import fits
 import numpy as np
+from pdslogger import PdsLogger
 import pdstemplate
 
 from nav.config import Config
@@ -19,7 +20,7 @@ def write_fits_and_label(
     master_by_type: dict[str, np.ndarray],
     body_id_map: np.ndarray,
     config: Config,
-    logger: Any = DEFAULT_LOGGER,
+    logger: PdsLogger = DEFAULT_LOGGER,
 ) -> None:
     """Write FITS and PDS4 label using FCPath.
 
@@ -63,6 +64,7 @@ def write_fits_and_label(
     fits_file_path.upload()
 
     # PDS4 label via PdsTemplate
+    # TODO Everything here will need to be updated once we have a real label template
     try:
         template_path = Path(__file__).resolve().parent / 'templates' / 'backplanes.lblx'
         template = pdstemplate.PdsTemplate(str(template_path))

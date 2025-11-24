@@ -267,6 +267,7 @@ class CreateSimulatedBodyModel(QMainWindow):
 
         main_layout.addLayout(right, stretch=1)
         # Initialize common zoom/pan controller for left-button pan and wheel zoom
+        self._zoom_ctl: Optional['ZoomPanController'] = None
         try:
             from nav.ui.common import ZoomPanController
             self._zoom_ctl = ZoomPanController(
@@ -288,8 +289,8 @@ class CreateSimulatedBodyModel(QMainWindow):
 
     def _on_mouse_press(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
-            if getattr(self, '_zoom_ctl', None) is not None:
-                self._zoom_ctl.on_mouse_press(event)  # type: ignore[attr-defined]
+            if self._zoom_ctl is not None:
+                self._zoom_ctl.on_mouse_press(event)
             else:
                 self._drag_start_pos = event.globalPosition().toPoint()
                 self._drag_start_pan = (self._pan_x, self._pan_y)
@@ -303,8 +304,8 @@ class CreateSimulatedBodyModel(QMainWindow):
 
     def _on_mouse_move(self, event: QMouseEvent) -> None:
         if self._drag_start_pos is not None and self._drag_start_pan is not None:
-            if getattr(self, '_zoom_ctl', None) is not None:
-                self._zoom_ctl.on_mouse_move(event)  # type: ignore[attr-defined]
+            if self._zoom_ctl is not None:
+                self._zoom_ctl.on_mouse_move(event)
             else:
                 current_pos = event.globalPosition().toPoint()
                 delta = current_pos - self._drag_start_pos
@@ -322,8 +323,8 @@ class CreateSimulatedBodyModel(QMainWindow):
 
     def _on_mouse_release(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
-            if getattr(self, '_zoom_ctl', None) is not None:
-                self._zoom_ctl.on_mouse_release(event)  # type: ignore[attr-defined]
+            if self._zoom_ctl is not None:
+                self._zoom_ctl.on_mouse_release(event)
             self._drag_start_pos = None
             self._drag_start_pan = None
             self._image_label.setCursor(Qt.CursorShape.ArrowCursor)
@@ -332,8 +333,8 @@ class CreateSimulatedBodyModel(QMainWindow):
             self._last_drag_img_vu = None
 
     def _on_wheel(self, event: QWheelEvent) -> None:
-        if getattr(self, '_zoom_ctl', None) is not None:
-            self._zoom_ctl.on_wheel(event)  # type: ignore[attr-defined]
+        if self._zoom_ctl is not None:
+            self._zoom_ctl.on_wheel(event)
         else:
             label_pos = event.position().toPoint()
             viewport = self._scroll_area.viewport()

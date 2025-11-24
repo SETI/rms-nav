@@ -32,28 +32,33 @@ def process_task(
         for config_file in arguments.config_file:
             DEFAULT_CONFIG.update_config(config_file)
 
+    # Derive roots
+    nav_results_root_str = arguments.nav_results_root
+    if nav_results_root_str is None:
+        # Allow config override if present
+        try:
+            nav_results_root_str = DEFAULT_CONFIG.environment.nav_results_root
+        except AttributeError:
+            pass
+    if nav_results_root_str is None:
+        raise ValueError('One of --nav-results-root, the configuration variable '
+                         '"nav_results_root" or the NAV_RESULTS_ROOT environment variable must be '
+                         'set')
+    nav_results_root = FileCache('nav_results').new_path(nav_results_root_str)
+
     backplane_results_root_str = arguments.backplane_results_root
     if backplane_results_root_str is None:
         try:
-            backplane_results_root_str = DEFAULT_CONFIG.environment.results_root
+            backplane_results_root_str = DEFAULT_CONFIG.environment.backplane_results_root
         except AttributeError:
             pass
     if backplane_results_root_str is None:
-        backplane_results_root_str = os.getenv('NAV_RESULTS_ROOT')
+        backplane_results_root_str = os.getenv('BACKPLANE_RESULTS_ROOT')
     if backplane_results_root_str is None:
-        return False, (f'{task_id}: One of configuration variable "results_root" or '
-                       'NAV_RESULTS_ROOT environment variable must be set')
-    backplane_results_root = FileCache('nav_results').new_path(backplane_results_root_str)
-
-    nav_results_root_str = arguments.nav_results_root
-    if nav_results_root_str is None:
-        try:
-            nav_results_root_str = DEFAULT_CONFIG.environment.results_root
-        except AttributeError:
-            pass
-    if nav_results_root_str is None:
-        return False, f'{task_id}: "--nav-results-root" must be provided'
-    nav_results_root = FileCache('nav_results').new_path(nav_results_root_str)
+        return False, ('One of --backplane-results-root, the configuration variable '
+                       '"backplane_results_root" or the BACKPLANE_RESULTS_ROOT environment '
+                       'variable must be set')
+    backplane_results_root = FileCache('backplane_results').new_path(backplane_results_root_str)
 
     dataset_name = task_data.get('dataset_name', None)
     if dataset_name is None:

@@ -6,11 +6,8 @@ from nav.config import Config
 from nav.obs import ObsSnapshot
 
 
-RingsResult = dict[str, Any] | None
-
-
 def create_ring_backplanes(snapshot: ObsSnapshot,
-                           config: Config) -> RingsResult:
+                           config: Config) -> dict[str, Any] | None:
     """Create configured ring backplanes over the full image, if applicable.
 
     Returns an empty dict if no rings are configured or closest planet is None.
@@ -20,9 +17,9 @@ def create_ring_backplanes(snapshot: ObsSnapshot,
         config: The configuration.
 
     Returns:
-        A dictionary containing the ring backplanes.
+        A dictionary containing the ring backplanes, or None if there is no closest planet
+        or ring backplanes are not configured.
 
-        - enabled: Whether rings are enabled.
         - planet: The planet name.
         - target_key: The target key.
         - types: The ring backplane types.
@@ -34,7 +31,7 @@ def create_ring_backplanes(snapshot: ObsSnapshot,
         Exception: If the ring backplanes are not available.
     """
 
-    result: RingsResult = {
+    result: dict[str, Any] = {
         'planet': None,
         'target_key': None,
         'types': [],

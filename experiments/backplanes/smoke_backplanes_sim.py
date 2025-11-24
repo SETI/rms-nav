@@ -51,8 +51,8 @@ def main():
     ok, meta = generate_backplanes_image_files(
         obs_class,
         image_files,
-        metadata_root=metadata_root,
-        results_root=results_root,
+        nav_results_root=metadata_root,
+        backplane_results_root=results_root,
         write_output_files=True,
     )
     print('OK:', ok)

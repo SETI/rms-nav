@@ -54,6 +54,11 @@ def process_task(
     if arguments.config_file:
         for config_file in arguments.config_file:
             DEFAULT_CONFIG.update_config(config_file)
+    else:
+        try:
+            DEFAULT_CONFIG.update_config('nav_default_config.yaml')
+        except FileNotFoundError:
+            pass
 
     nav_results_root_str = arguments.nav_results_root
     if nav_results_root_str is None:
@@ -119,7 +124,7 @@ async def main() -> None:
     # Arguments about the environment
     environment_group = argparser.add_argument_group('Environment')
     environment_group.add_argument(
-        '--config-file', action='append', default=['nav_default_config.yaml'],
+        '--config-file', action='append', default=None,
         help="""The configuration file(s) to use to override default settings;
         may be specified multiple times (default: ./nav_default_config.yaml)""")
     environment_group.add_argument(

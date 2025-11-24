@@ -10,6 +10,7 @@
 
 import argparse
 import cProfile
+import os
 import sys
 import time
 from typing import cast
@@ -75,7 +76,7 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     # Arguments about the environment
     environment_group = cmdparser.add_argument_group('Environment')
     environment_group.add_argument(
-        '--config-file', action='append', default=['nav_default_config.yaml'],
+        '--config-file', action='append', default=None,
         help="""The configuration file(s) to use to override default settings;
         may be specified multiple times (default: ./nav_default_config.yaml)""")
     environment_group.add_argument(
@@ -162,6 +163,11 @@ def main() -> None:
     if arguments.config_file:
         for config_file in arguments.config_file:
             DEFAULT_CONFIG.update_config(config_file)
+    else:
+        try:
+            DEFAULT_CONFIG.update_config('nav_default_config.yaml')
+        except FileNotFoundError:
+            pass
 
     # Derive the results root
     nav_results_root_str = arguments.nav_results_root
@@ -170,6 +176,8 @@ def main() -> None:
             nav_results_root_str = DEFAULT_CONFIG.environment.nav_results_root
         except AttributeError:
             pass
+    if nav_results_root_str is None:
+        nav_results_root_str = os.getenv('NAV_RESULTS_ROOT')
     if nav_results_root_str is None:
         raise ValueError('One of --nav-results-root, the configuration variable '
                          '"nav_results_root" or the NAV_RESULTS_ROOT environment variable must be '
