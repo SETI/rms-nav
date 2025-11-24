@@ -1,5 +1,5 @@
 import math
-from typing import Any, Optional, Tuple, cast
+from typing import Any, Optional, cast
 
 import numpy as np
 from PyQt6.QtCore import Qt, QPoint
@@ -137,7 +137,7 @@ class ManualNavDialog(QDialog):
         self._zoom = 1.0
         self._drag_start_pos: Optional[QPoint] = None
         self._drag_mode: Optional[str] = None  # 'offset' (right)
-        self._drag_start_offset: Optional[Tuple[float, float]] = None
+        self._drag_start_offset: Optional[tuple[float, float]] = None
         # Zoom rendering mode
         self._zoom_sharp = True
 
@@ -160,7 +160,7 @@ class ManualNavDialog(QDialog):
         self._corr_surface = masked_ncc(image, model, mask)
         self._corr_h, self._corr_w = self._corr_surface.shape
 
-    def _offset_to_corr_indices(self, dv: float, du: float) -> Tuple[float, float]:
+    def _offset_to_corr_indices(self, dv: float, du: float) -> tuple[float, float]:
         """Map signed (dv, du) to correlation surface indices for sampling."""
         # Same mapping as int_to_signed inverse: idx = s if s >= 0 else s + size
         y = dv if dv >= 0 else dv + self._corr_h
@@ -500,8 +500,8 @@ class ManualNavDialog(QDialog):
         new_zoom = float(np.clip(old_zoom * factor, 0.1, 50.0))
         if new_zoom == old_zoom:
             return
-        # Use controller logic to maintain pan correctly
-        self._zoom_ctl._zoom_at_point(factor, vx, vy, scaled_x, scaled_y)
+        # Use controller public API to maintain pan correctly
+        self._zoom_ctl.zoom_at_point(factor, vx, vy, scaled_x, scaled_y)
 
     def _reset_view(self) -> None:
         self._zoom = 1.0
@@ -598,7 +598,7 @@ class ManualNavDialog(QDialog):
 
     # ---- Dialog control ----
 
-    def run_modal(self) -> Tuple[bool, Optional[Tuple[float, float]], Optional[float]]:
+    def run_modal(self) -> tuple[bool, Optional[tuple[float, float]], Optional[float]]:
         """Run the dialog modally, creating a QApplication if necessary."""
         app_created = False
         app = QApplication.instance()
@@ -616,12 +616,7 @@ class ManualNavDialog(QDialog):
 
     # ---- Zoom options ----
     def _toggle_zoom_sharp(self, state: Any) -> None:
-        if isinstance(state, Qt.CheckState):
-            self._zoom_sharp = (state is Qt.CheckState.Checked)
-        elif isinstance(state, int):
-            self._zoom_sharp = (state == cast(int, Qt.CheckState.Checked.value))
-        else:
-            self._zoom_sharp = False
+        self._zoom_sharp = (state == int(cast(int, Qt.CheckState.Checked.value)))
         self._update_display_only()
 
     # Internal buffers

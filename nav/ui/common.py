@@ -115,6 +115,19 @@ class ZoomPanController:
         # Let the UI handle any additional state
         self._update_display()
 
+    # Public zoom-at-point API
+    def zoom_at_point(self,
+                      factor: float,
+                      viewport_x: int,
+                      viewport_y: int,
+                      scaled_x: float,
+                      scaled_y: float) -> None:
+        """
+        Zoom by a factor anchored at the given viewport coordinates, where
+        scaled_x/y are the corresponding coordinates in the scaled image space.
+        """
+        self._zoom_at_point(factor, viewport_x, viewport_y, scaled_x, scaled_y)
+
     # Internal
     def _zoom_at_point(self,
                        factor: float,

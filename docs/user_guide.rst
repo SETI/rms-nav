@@ -115,7 +115,7 @@ Environment options
 
 * ``--config-file PATH`` (repeatable): one or more configuration file paths to override defaults.
 * ``--pds3-holdings-root PATH``: root directory or URL for PDS3 holdings, overriding both the ``PDS3_HOLDINGS_DIR`` environment variable and any corresponding configuration setting.
-* ``--results-root PATH``: root directory or URL where results will be written, overriding both the ``NAV_RESULTS_ROOT`` environment variable and any corresponding configuration setting.
+* ``--nav-results-root PATH``: root directory or URL where navigation results will be written, overriding both the ``NAV_RESULTS_ROOT`` environment variable and any corresponding configuration setting.
 
 Navigation options
 ^^^^^^^^^^^^^^^^^^
@@ -197,7 +197,7 @@ Queue-driven processing is supported by ``main/nav_main_offset_cloud_tasks.py``.
 
 .. code-block:: bash
 
-   python main/nav_main_offset_cloud_tasks.py [--config-file PATH] [--results-root PATH]
+   python main/nav_main_offset_cloud_tasks.py [--config-file PATH] [--nav-results-root PATH]
 
 Each task payload must be a JSON object with the following fields:
 

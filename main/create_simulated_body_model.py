@@ -349,7 +349,7 @@ class CreateSimulatedBodyModel(QMainWindow):
         if new_zoom == old_zoom:
             return
         # Delegate to the controller to perform zoom and maintain pan
-        self._zoom_ctl._zoom_at_point(factor, viewport_x, viewport_y, scaled_x, scaled_y)
+        self._zoom_ctl.zoom_at_point(factor, viewport_x, viewport_y, scaled_x, scaled_y)
 
     def _reset_view(self) -> None:
         self._zoom_factor = 1.0
@@ -1020,12 +1020,7 @@ class CreateSimulatedBodyModel(QMainWindow):
             self._display_image()
 
     def _toggle_zoom_sharp(self, state: Any) -> None:
-        if isinstance(state, Qt.CheckState):
-            self._zoom_sharp = (state is Qt.CheckState.Checked)
-        elif isinstance(state, int):
-            self._zoom_sharp = (state == cast(int, Qt.CheckState.Checked.value))
-        else:
-            self._zoom_sharp = False
+        self._zoom_sharp = (state == int(cast(int, Qt.CheckState.Checked.value)))
         self._update_display()
 
 

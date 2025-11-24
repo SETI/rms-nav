@@ -144,6 +144,36 @@ def _absolute_range_for(name: str,
     return (float(np.nanmin(finite)), float(np.nanmax(finite)))
 
 
+def _load_colormap(cmap_name: Any) -> Any:
+    """Resolve a colormap by name using matplotlib's modern and legacy APIs."""
+    if cmap_name is None:
+        return None
+    return mpl_colormaps.get(str(cmap_name))
+
+
+def _alpha_blend_layer(dst_rgba: np.ndarray,
+                       src_rgb: np.ndarray,
+                       alpha_mask: np.ndarray) -> np.ndarray:
+    """Alpha-blend src_rgb over dst_rgba using per-pixel alpha in [0,1].
+
+    dst_rgba is modified in-place and also returned.
+    """
+    dst_rgb = dst_rgba[..., :3].astype(np.float32)
+    dst_a = dst_rgba[..., 3].astype(np.float32) / 255.0
+    src_rgb_f = src_rgb.astype(np.float32)
+    a = alpha_mask.astype(np.float32)
+    out_a = a + dst_a * (1.0 - a)
+    with np.errstate(invalid='ignore'):
+        out_rgb = (src_rgb_f * a[..., None] +
+                   dst_rgb * dst_a[..., None] * (1.0 - a[..., None]))
+        mask = out_a > 0
+        out_rgb[mask] = out_rgb[mask] / out_a[mask, None]
+        out_rgb[~mask] = 0.0
+    dst_rgba[..., :3] = np.clip(out_rgb, 0, 255).astype(np.uint8)
+    dst_rgba[..., 3] = np.clip(out_a * 255.0, 0, 255).astype(np.uint8)
+    return dst_rgba
+
+
 class NavBackplaneViewer(QDialog):
     """Interactive backplane viewer with dataset-driven file discovery."""
 
@@ -586,12 +616,16 @@ class NavBackplaneViewer(QDialog):
                         try:
                             self._body_id_map = np.asarray(hdu.data, dtype=np.int32)
                         except Exception:
+                            self._logger.exception('Failed to parse BODY_ID_MAP from HDU '
+                                                   f'for {fits_file}')
                             self._body_id_map = None
                     else:
                         arr: Optional[np.ndarray] = None
                         try:
                             arr = np.asarray(hdu.data, dtype=np.float64)
                         except Exception:
+                            self._logger.exception(f'Failed to parse {name} from HDU '
+                                                   f'for {fits_file}')
                             arr = None
                         if arr is None:
                             continue
@@ -601,7 +635,7 @@ class NavBackplaneViewer(QDialog):
                         elif name.startswith('RING_'):
                             self._bp_ring_map[name] = (arr, units)
         except Exception as e:
-            self._logger.exception('Failed to read FITS backplane file', e)
+            self._logger.exception('Failed to read FITS backplane file')
             self._fits_hdus = []
             self._bp_body_map.clear()
             self._bp_ring_map.clear()
@@ -609,6 +643,11 @@ class NavBackplaneViewer(QDialog):
 
         # Populate dropdowns with names
         self._populate_backplane_combos()
+        # Enable/disable ring show checkbox based on availability
+        has_rings = bool(self._bp_ring_map)
+        self._ring_show.setEnabled(has_rings)
+        if not has_rings:
+            self._ring_show.setChecked(False)
 
         # Compose first display
         self._reset_view()
@@ -652,19 +691,9 @@ class NavBackplaneViewer(QDialog):
             s = self._summary_rgba
             if s.shape[0] == h and s.shape[1] == w:
                 alpha = float(self._summary_alpha_slider.value()) / 100.0
-                s_rgb = s[..., :3].astype(np.float32)
+                s_rgb = s[..., :3]
                 s_a = (s[..., 3].astype(np.float32) / 255.0) * alpha
-                dst_rgb = rgba[..., :3].astype(np.float32)
-                dst_a = rgba[..., 3].astype(np.float32) / 255.0
-                out_a = s_a + dst_a * (1.0 - s_a)
-                with np.errstate(invalid='ignore'):
-                    out_rgb = (s_rgb * s_a[..., None] +
-                               dst_rgb * dst_a[..., None] * (1.0 - s_a[..., None]))
-                    mask = out_a > 0
-                    out_rgb[mask] = out_rgb[mask] / out_a[mask, None]
-                    out_rgb[~mask] = 0.0
-                rgba[..., :3] = np.clip(out_rgb, 0, 255).astype(np.uint8)
-                rgba[..., 3] = np.clip(out_a * 255.0, 0, 255).astype(np.uint8)
+                rgba = _alpha_blend_layer(rgba, s_rgb, s_a)
         # BODY_ID overlay
         if self._body_id_map is not None and self._body_id_enable.isChecked():
             idmap = self._body_id_map
@@ -683,17 +712,7 @@ class NavBackplaneViewer(QDialog):
                 norm = np.zeros_like(ids, dtype=np.float32)
                 norm[valid] = (ids[valid] - id_min) / float(id_max - id_min)
                 cmap_name = self._body_id_cmap.currentData()
-                cmap_obj = None
-                if mpl_colormaps is not None and cmap_name is not None:
-                    try:
-                        cmap_obj = mpl_colormaps.get(str(cmap_name))
-                    except Exception:
-                        cmap_obj = None
-                if cmap_obj is None and cm is not None and cmap_name is not None:
-                    try:
-                        cmap_obj = cm.get_cmap(str(cmap_name))
-                    except Exception:
-                        cmap_obj = None
+                cmap_obj = _load_colormap(cmap_name)
                 if cmap_obj is not None:
                     rgb = (cmap_obj(norm)[..., :3] * 255.0).astype(np.uint8)
                 else:
@@ -701,17 +720,7 @@ class NavBackplaneViewer(QDialog):
                     rgb = np.stack([val, val, val], axis=-1)
                 a = np.zeros((h, w), dtype=np.float32)
                 a[valid] = float(self._body_id_alpha.value()) / 100.0
-                dst_rgb = rgba[..., :3].astype(np.float32)
-                dst_a = rgba[..., 3].astype(np.float32) / 255.0
-                out_a = a + dst_a * (1.0 - a)
-                src_rgb = rgb.astype(np.float32)
-                out_rgb = (src_rgb * a[..., None] +
-                           dst_rgb * dst_a[..., None] * (1.0 - a[..., None]))
-                mask = out_a > 0
-                out_rgb[mask] = out_rgb[mask] / out_a[mask, None]
-                out_rgb[~mask] = 0.0
-                rgba[..., :3] = np.clip(out_rgb, 0, 255).astype(np.uint8)
-                rgba[..., 3] = np.clip(out_a * 255.0, 0, 255).astype(np.uint8)
+                rgba = _alpha_blend_layer(rgba, rgb, a)
 
         # Body and Ring backplanes
         def compose_scalar(
@@ -738,17 +747,7 @@ class NavBackplaneViewer(QDialog):
                         vmax = vmin + 1e-6
             with np.errstate(invalid='ignore', divide='ignore'):
                 norm = np.clip((arr_disp - vmin) / (vmax - vmin), 0.0, 1.0)
-            cmap_obj = None
-            if mpl_colormaps is not None and cmap_name is not None:
-                try:
-                    cmap_obj = mpl_colormaps.get(str(cmap_name))
-                except Exception:
-                    cmap_obj = None
-            if cmap_obj is None and cm is not None and cmap_name is not None:
-                try:
-                    cmap_obj = cm.get_cmap(str(cmap_name))
-                except Exception:
-                    cmap_obj = None
+            cmap_obj = _load_colormap(cmap_name)
             if cmap_obj is not None:
                 rgb = (cmap_obj(norm)[..., :3] * 255.0).astype(np.uint8)
             else:
@@ -756,17 +755,7 @@ class NavBackplaneViewer(QDialog):
                 rgb = np.stack([val, val, val], axis=-1)
             a = np.zeros((h, w), dtype=np.float32)
             a[valid] = alpha_val
-            dst_rgb = rgba_in[..., :3].astype(np.float32)
-            dst_a = rgba_in[..., 3].astype(np.float32) / 255.0
-            out_a = a + dst_a * (1.0 - a)
-            src_rgb = rgb.astype(np.float32)
-            out_rgb = (src_rgb * a[..., None] + dst_rgb * dst_a[..., None] * (1.0 - a[..., None]))
-            mask = out_a > 0
-            out_rgb[mask] = out_rgb[mask] / out_a[mask, None]
-            out_rgb[~mask] = 0.0
-            rgba_in[..., :3] = np.clip(out_rgb, 0, 255).astype(np.uint8)
-            rgba_in[..., 3] = np.clip(out_a * 255.0, 0, 255).astype(np.uint8)
-            return rgba_in
+            return _alpha_blend_layer(rgba_in, rgb, a)
         # Body
         body_name = self._body_combo.currentText()
         if self._body_show.isChecked() and body_name in self._bp_body_map and body_name != 'None':
@@ -1025,12 +1014,7 @@ class NavBackplaneViewer(QDialog):
         self._compose_and_display()
 
     def _toggle_zoom_sharp(self, state: Any) -> None:
-        if isinstance(state, Qt.CheckState):
-            self._zoom_sharp = (state is Qt.CheckState.Checked)
-        elif isinstance(state, int):
-            self._zoom_sharp = (state == cast(int, Qt.CheckState.Checked.value))
-        else:
-            self._zoom_sharp = False
+        self._zoom_sharp = (state == int(cast(int, Qt.CheckState.Checked.value)))
         self._compose_and_display()
 
     def _zoom_at_point(self,
@@ -1046,7 +1030,7 @@ class NavBackplaneViewer(QDialog):
         if new_zoom == old_zoom:
             return
         # Use controller logic
-        self._zoom_ctl._zoom_at_point(factor, viewport_x, viewport_y, scaled_x, scaled_y)
+        self._zoom_ctl.zoom_at_point(factor, viewport_x, viewport_y, scaled_x, scaled_y)
 
     # ---- Compose & Display ----
     def _compose_and_display(self) -> None:

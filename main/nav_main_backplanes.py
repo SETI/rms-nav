@@ -62,7 +62,7 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     # Environment
     environment_group = cmdparser.add_argument_group('Environment')
     environment_group.add_argument(
-        '--config-file', action='append', default=['nav_default_config.yaml'],
+        '--config-file', action='append', default=None,
         help="""The configuration file(s) to use to override default settings;
         may be specified multiple times. If not provided, attempts to load
         ./nav_default_config.yaml if present.""")

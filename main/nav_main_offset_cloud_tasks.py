@@ -131,7 +131,7 @@ async def main() -> None:
     environment_group.add_argument(
         '--nav-results-root', type=str, default=None,
         help="""The root directory of the navigation results; overrides the NAV_RESULTS_ROOT
-        environment variable and the results_root configuration variable""")
+        environment variable and the nav_results_root configuration variable""")
 
     worker = Worker(process_task, args=sys.argv[1:], argparser=argparser)
     await worker.start()

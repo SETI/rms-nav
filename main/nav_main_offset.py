@@ -281,9 +281,9 @@ def main() -> None:
 
     for imagefiles in DATASET.yield_image_files_from_arguments(arguments):
         assert len(imagefiles.image_files) == 1
-        image_path = imagefiles.image_files[0].image_file_path
         if arguments.dry_run:
-            MAIN_LOGGER.info('Would process: %s', image_path)
+            MAIN_LOGGER.info('Would process: %s',
+                             imagefiles.image_files[0].label_file_url.as_posix())
             continue
 
         if navigate_image_files(
