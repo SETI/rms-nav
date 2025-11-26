@@ -36,9 +36,11 @@ def write_fits_and_label(
     primary = fits.PrimaryHDU()
     hdus.append(primary)
 
-    # BODY_ID_MAP first (after Primary)
-    id_hdu = fits.ImageHDU(data=body_id_map.astype('int32'), name='BODY_ID_MAP')
-    hdus.append(id_hdu)
+    # BODY_ID_MAP first (after Primary) - only include if not empty
+    has_body_id_map = np.any(body_id_map != 0)
+    if has_body_id_map:
+        id_hdu = fits.ImageHDU(data=body_id_map.astype('int32'), name='BODY_ID_MAP')
+        hdus.append(id_hdu)
 
     # Backplane arrays
     units_map: dict[str, str] = {}
@@ -73,7 +75,8 @@ def write_fits_and_label(
             'FILE_NAME': fits_file_path.name,
             'LINES': snapshot.data.shape[0],
             'LINE_SAMPLES': snapshot.data.shape[1],
-            'BANDS': len(filtered_master) + 1,  # + BODY_ID_MAP
+            # + BODY_ID_MAP if present
+            'BANDS': len(filtered_master) + (1 if has_body_id_map else 0),
             'BACKPLANE_TYPES': sorted([k.upper() for k in filtered_master.keys()]),
             'TARGETS': [],
         }

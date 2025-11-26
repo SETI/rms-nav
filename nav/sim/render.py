@@ -1,4 +1,4 @@
-from typing import Any, cast
+from typing import Any, Optional, cast
 
 import numpy as np
 from psfmodel import GaussianPSF
@@ -106,6 +106,8 @@ def render_bodies(
     bodies_params: list[dict[str, Any]],
     offset_v: float,
     offset_u: float,
+    *,
+    seed: Optional[int] = None,
 ) -> dict[str, Any]:
     """Render bodies over img and return fields by name.
 
@@ -147,9 +149,9 @@ def render_bodies(
         center_v = float(params.get('center_v', size_v / 2.0)) + offset_v
         center_u = float(params.get('center_u', size_u / 2.0)) + offset_u
 
-        semi_major_axis = float(params.get('semi_major_axis', 0.0))
-        semi_minor_axis = float(params.get('semi_minor_axis', 0.0))
-        semi_c_axis = float(params.get('semi_c_axis', min(semi_major_axis, semi_minor_axis)))
+        axis1 = float(params.get('axis1', 0.0))
+        axis2 = float(params.get('axis2', 0.0))
+        axis3 = float(params.get('axis3', min(axis1, axis2)))
 
         rotation_z = np.radians(params.get('rotation_z', 0.0))
         rotation_tilt = np.radians(params.get('rotation_tilt', 0.0))
@@ -162,13 +164,15 @@ def render_bodies(
         crater_power_law_exponent = float(params.get('crater_power_law_exponent', 3.0))
         crater_relief_scale = float(params.get('crater_relief_scale', 0.6))
         anti_aliasing = float(params.get('anti_aliasing', 1.0))
+        # Use seed from render_bodies parameter, fall back to body-specific seed if provided
+        body_seed = seed if seed is not None else params.get('seed')
 
         sim_body = create_simulated_body(
             size=(size_v, size_u),
             center=(center_v, center_u),
-            semi_major_axis=semi_major_axis,
-            semi_minor_axis=semi_minor_axis,
-            semi_c_axis=semi_c_axis,
+            axis1=axis1,
+            axis2=axis2,
+            axis3=axis3,
             rotation_z=rotation_z,
             rotation_tilt=rotation_tilt,
             illumination_angle=illumination_angle,
@@ -179,6 +183,7 @@ def render_bodies(
             crater_power_law_exponent=crater_power_law_exponent,
             crater_relief_scale=crater_relief_scale,
             anti_aliasing=anti_aliasing,
+            seed=body_seed,
         )
 
         # Composition: overwrite where body contributes
@@ -190,7 +195,7 @@ def render_bodies(
         near_index = order_near_to_far.index(body_name) + 1
         body_index_map[mask] = near_index
 
-        max_dim = max(semi_major_axis, semi_minor_axis, semi_c_axis)
+        max_dim = max(axis1, axis2, axis3) / 2.0  # Convert to half-width for dimension calculation
         inventory_item = {
             'v_min_unclipped': center_v - max_dim,
             'v_max_unclipped': center_v + max_dim,
@@ -212,6 +217,90 @@ def render_bodies(
         'order_near_to_far': order_near_to_far,
         'body_index_map': body_index_map,
     }
+
+
+def render_background_noise(img: np.ndarray, noise_level: float, seed: int) -> None:
+    """Add Gaussian background noise to the image.
+
+    Parameters:
+        img: Image array to modify in-place.
+        noise_level: Standard deviation of Gaussian noise (0-1).
+        seed: Random seed for reproducibility.
+    """
+    if noise_level <= 0:
+        return
+    rng = np.random.RandomState(seed)
+    noise = rng.normal(0.0, noise_level, size=img.shape)
+    img[:] = np.clip(img + noise, 0.0, 1.0)
+
+
+def render_background_stars(
+        img: np.ndarray, n_stars: int, seed: int, psf_sigma: float = 0.9,
+        distribution_exponent: float = 2.5) -> None:
+    """Add random background stars to the image.
+
+    Parameters:
+        img: Image array to modify in-place (stars are added, not overwritten).
+        n_stars: Number of stars to add (0-1000).
+        seed: Random seed for reproducibility.
+        psf_sigma: PSF sigma value for star rendering (default 0.9).
+        distribution_exponent: Power law exponent for intensity distribution (default 2.5).
+            Higher values make dimmer stars more common.
+    """
+    if n_stars <= 0:
+        return
+    size_v, size_u = img.shape
+    rng = np.random.RandomState(seed)
+
+    # Power law for intensity: weight toward dimmer stars
+    # intensity = uniform^power where power > 1 makes dimmer stars more common
+    uniform_samples = rng.uniform(0.0, 1.0, size=n_stars)
+    intensities = uniform_samples ** distribution_exponent
+
+    # PSF size: at least 11x11, but scale with sigma
+    # Use at least 3*sigma pixels on each side, minimum 6 for 11x11
+    psf_size_half = max(6, int(np.ceil(3.0 * psf_sigma)))
+
+    psf = GaussianPSF(sigma=psf_sigma)
+
+    for i in range(n_stars):
+        # Random position
+        v = rng.uniform(0.0, float(size_v))
+        u = rng.uniform(0.0, float(size_u))
+
+        v_int = int(v)
+        u_int = int(u)
+        v_frac = v - v_int
+        u_frac = u - u_int
+
+        # Skip if too close to edge
+        if (u_int < psf_size_half or u_int >= size_u - psf_size_half or
+            v_int < psf_size_half or v_int >= size_v - psf_size_half):
+            continue
+
+        # Generate PSF (normalized so peak is 1.0)
+        star_psf = psf.eval_rect(
+            (psf_size_half * 2 + 1, psf_size_half * 2 + 1),
+            offset=(v_frac, u_frac),
+            scale=1.0,  # Use scale=1.0 to get normalized PSF
+            movement=(0.0, 0.0),
+            movement_granularity=1.0
+        )
+
+        # Normalize PSF to have peak value of 1.0, then scale by intensity
+        # This ensures stars are bright (peak brightness = intensity, not distributed)
+        psf_max = np.max(star_psf)
+        if psf_max > 0:
+            star_psf = star_psf / psf_max * intensities[i]
+        else:
+            star_psf = star_psf * intensities[i]
+
+        # Add to image (don't overwrite)
+        img[v_int - psf_size_half:v_int + psf_size_half + 1,
+            u_int - psf_size_half:u_int + psf_size_half + 1] += star_psf
+
+    # Clip to valid range
+    img[:] = np.clip(img, 0.0, 1.0)
 
 
 def render_combined_model(
@@ -243,11 +332,32 @@ def render_combined_model(
 
     img = np.zeros((size_v, size_u), dtype=np.float64)
 
+    # Get random seed for background effects
+    random_seed = int(sim_params.get('random_seed', 42))
+
+    # Apply background noise first
+    background_noise_intensity = float(
+        sim_params.get('background_noise_intensity', 0.0))
+    render_background_noise(img, background_noise_intensity, random_seed)
+
+    # Then background stars
+    background_stars_num = int(sim_params.get('background_stars_num', 0))
+    background_stars_psf_sigma = float(
+        sim_params.get('background_stars_psf_sigma', 0.9))
+    background_stars_distribution_exponent = float(
+        sim_params.get('background_stars_distribution_exponent', 2.5))
+    render_background_stars(
+        img, background_stars_num, random_seed,
+        psf_sigma=background_stars_psf_sigma,
+        distribution_exponent=background_stars_distribution_exponent)
+
     stars_params = sim_params.get('stars', []) or []
     bodies_params = sim_params.get('bodies', []) or []
 
     img, sim_star_list, star_info = render_stars(img, stars_params, offset_v, offset_u)
-    bodies_result = render_bodies(img, bodies_params, offset_v, offset_u)
+
+    # Pass seed to render_bodies for crater generation
+    bodies_result = render_bodies(img, bodies_params, offset_v, offset_u, seed=random_seed)
     img = bodies_result['img']
     body_models = bodies_result['bodies']
     inventory = bodies_result['inventory']

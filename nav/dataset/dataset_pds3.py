@@ -286,6 +286,7 @@ class DataSetPDS3(DataSet):
             arguments: The parsed arguments to validate.
         """
 
+        # TODO This method is currently unused and should be used
         # For some reason mypy can't see the img_name field
         for img_name in flatten_list(arguments.img_name):
 

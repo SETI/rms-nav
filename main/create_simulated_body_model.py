@@ -32,6 +32,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QStatusBar,
     QCheckBox,
+    QSlider,
 )
 
 from nav.sim.render import render_combined_model
@@ -103,6 +104,11 @@ class CreateSimulatedBodyModel(QMainWindow):
             'size_u': 512,
             'offset_v': 0.0,
             'offset_u': 0.0,
+            'random_seed': 42,
+            'background_noise_intensity': 0.0,
+            'background_stars_num': 0,
+            'background_stars_psf_sigma': 0.9,
+            'background_stars_distribution_exponent': 2.5,
             'stars': [],
             'bodies': [],
         }
@@ -111,12 +117,18 @@ class CreateSimulatedBodyModel(QMainWindow):
         self._current_image: Optional[np.ndarray] = None
         self._last_meta: dict[str, Any] = {}
         self._base_pixmap: Optional[QPixmap] = None
+        # Cache for rendered images - store previous params hash and result
+        self._cached_params_hash: Optional[int] = None
+        self._cached_image: Optional[np.ndarray] = None
+        self._cached_meta: Optional[dict[str, Any]] = None
 
         # View state (copied math from existing GUI)
         self._zoom_factor = 1.0
         self._right_drag_active = False
         self._selected_model_key: Optional[tuple[str, int]] = None  # ('body' or 'star', index)
         self._last_drag_img_vu: Optional[tuple[float, float]] = None
+        # Track last valid (non-"+") tab for cancel behavior
+        self._last_valid_tab_index = 0  # Start with General tab
 
         self._show_visual_aids = True
         self._zoom_sharp = True
@@ -189,6 +201,10 @@ class CreateSimulatedBodyModel(QMainWindow):
 
         self._tabs = QTabWidget()
         self._tabs.setMovable(True)
+        # Connect tab bar click to detect clicks on "+" tab
+        self._tabs.tabBarClicked.connect(self._on_tab_bar_clicked)
+        # Track current tab changes to remember last valid tab
+        self._tabs.currentChanged.connect(self._on_tab_changed)
         right.addWidget(self._tabs, stretch=1)
 
         # General tab (always first)
@@ -224,16 +240,153 @@ class CreateSimulatedBodyModel(QMainWindow):
         self._offset_u_spin.valueChanged.connect(self._on_offset_u)
         gen_layout.addRow('Offset U:', self._offset_u_spin)
 
-        self._tabs.addTab(self._general_tab, 'general')
+        # Random seed
+        self._random_seed_spin = QSpinBox()
+        self._random_seed_spin.setRange(0, 2147483647)
+        self._random_seed_spin.setValue(self.sim_params['random_seed'])
+        self._random_seed_spin.valueChanged.connect(self._on_random_seed)
+        gen_layout.addRow('Random seed:', self._random_seed_spin)
 
-        # Buttons row
+        # Background noise slider with min/max labels and spinbox
+        noise_row = QHBoxLayout()
+        noise_row.setSpacing(4)
+        noise_row.setContentsMargins(0, 0, 0, 0)
+        noise_min_label = QLabel('0.0')
+        noise_min_label.setFixedWidth(35)
+        noise_min_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        noise_max_label = QLabel('1.0')
+        noise_max_label.setFixedWidth(35)
+        noise_max_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self._background_noise_slider = QSlider(Qt.Orientation.Horizontal)
+        self._background_noise_slider.setRange(0, 1000)
+        noise_slider_init_val = int(
+            self.sim_params['background_noise_intensity'] * 1000)
+        self._background_noise_slider.setValue(noise_slider_init_val)
+        self._background_noise_slider.valueChanged.connect(self._on_background_noise_slider)
+        self._background_noise_spin = QDoubleSpinBox()
+        self._background_noise_spin.setRange(0.0, 1.0)
+        self._background_noise_spin.setDecimals(3)
+        self._background_noise_spin.setSingleStep(0.001)
+        self._background_noise_spin.setValue(self.sim_params['background_noise_intensity'])
+        self._background_noise_spin.valueChanged.connect(self._on_background_noise_spin)
+        noise_row.addWidget(noise_min_label)
+        noise_row.addWidget(self._background_noise_slider, stretch=1)
+        noise_row.addWidget(noise_max_label)
+        noise_row.addWidget(self._background_noise_spin)
+        noise_holder = QWidget()
+        noise_holder.setLayout(noise_row)
+        gen_layout.addRow('Background noise intensity:', noise_holder)
+
+        # Background stars slider with min/max labels and spinbox
+        stars_row = QHBoxLayout()
+        stars_row.setSpacing(4)
+        stars_row.setContentsMargins(0, 0, 0, 0)
+        stars_min_label = QLabel('0')
+        stars_min_label.setFixedWidth(35)
+        stars_min_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        stars_max_label = QLabel('1000')
+        stars_max_label.setFixedWidth(40)
+        stars_max_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self._background_stars_slider = QSlider(Qt.Orientation.Horizontal)
+        self._background_stars_slider.setRange(0, 1000)
+        self._background_stars_slider.setValue(self.sim_params['background_stars_num'])
+        self._background_stars_slider.valueChanged.connect(self._on_background_stars_slider)
+        self._background_stars_spin = QSpinBox()
+        self._background_stars_spin.setRange(0, 1000)
+        self._background_stars_spin.setValue(self.sim_params['background_stars_num'])
+        self._background_stars_spin.valueChanged.connect(self._on_background_stars_spin)
+        stars_row.addWidget(stars_min_label)
+        stars_row.addWidget(self._background_stars_slider, stretch=1)
+        stars_row.addWidget(stars_max_label)
+        stars_row.addWidget(self._background_stars_spin)
+        stars_holder = QWidget()
+        stars_holder.setLayout(stars_row)
+        gen_layout.addRow('Background stars num:', stars_holder)
+
+        # Background stars PSF sigma slider with min/max labels and spinbox
+        psf_sigma_row = QHBoxLayout()
+        psf_sigma_row.setSpacing(4)
+        psf_sigma_row.setContentsMargins(0, 0, 0, 0)
+        psf_sigma_min_label = QLabel('0.1')
+        psf_sigma_min_label.setFixedWidth(35)
+        psf_sigma_min_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        psf_sigma_max_label = QLabel('3.0')
+        psf_sigma_max_label.setFixedWidth(40)
+        psf_sigma_max_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self._background_stars_psf_sigma_slider = QSlider(Qt.Orientation.Horizontal)
+        # 0.1 to 3.0 with 0.01 steps
+        self._background_stars_psf_sigma_slider.setRange(1, 300)
+        psf_sigma_slider_val = int(
+            self.sim_params['background_stars_psf_sigma'] * 100)
+        self._background_stars_psf_sigma_slider.setValue(psf_sigma_slider_val)
+        self._background_stars_psf_sigma_slider.valueChanged.connect(
+            self._on_background_stars_psf_sigma_slider)
+        self._background_stars_psf_sigma_spin = QDoubleSpinBox()
+        self._background_stars_psf_sigma_spin.setRange(0.1, 3.0)
+        self._background_stars_psf_sigma_spin.setDecimals(2)
+        self._background_stars_psf_sigma_spin.setSingleStep(0.1)
+        psf_sigma_spin_val = self.sim_params['background_stars_psf_sigma']
+        self._background_stars_psf_sigma_spin.setValue(psf_sigma_spin_val)
+        self._background_stars_psf_sigma_spin.valueChanged.connect(
+            self._on_background_stars_psf_sigma_spin)
+        psf_sigma_row.addWidget(psf_sigma_min_label)
+        psf_sigma_row.addWidget(self._background_stars_psf_sigma_slider, stretch=1)
+        psf_sigma_row.addWidget(psf_sigma_max_label)
+        psf_sigma_row.addWidget(self._background_stars_psf_sigma_spin)
+        psf_sigma_holder = QWidget()
+        psf_sigma_holder.setLayout(psf_sigma_row)
+        gen_layout.addRow('Background stars PSF sigma:', psf_sigma_holder)
+
+        # Background stars distribution exponent slider with min/max labels and spinbox
+        dist_exp_row = QHBoxLayout()
+        dist_exp_row.setSpacing(4)
+        dist_exp_row.setContentsMargins(0, 0, 0, 0)
+        dist_exp_min_label = QLabel('1.0')
+        dist_exp_min_label.setFixedWidth(35)
+        dist_exp_min_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        dist_exp_max_label = QLabel('4.0')
+        dist_exp_max_label.setFixedWidth(40)
+        dist_exp_max_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self._background_stars_dist_exp_slider = QSlider(Qt.Orientation.Horizontal)
+        # 1.0 to 4.0 with 0.01 steps
+        self._background_stars_dist_exp_slider.setRange(100, 400)
+        dist_exp_slider_val = int(
+            self.sim_params['background_stars_distribution_exponent'] * 100)
+        self._background_stars_dist_exp_slider.setValue(dist_exp_slider_val)
+        self._background_stars_dist_exp_slider.valueChanged.connect(
+            self._on_background_stars_dist_exp_slider)
+        self._background_stars_dist_exp_spin = QDoubleSpinBox()
+        self._background_stars_dist_exp_spin.setRange(1.0, 4.0)
+        self._background_stars_dist_exp_spin.setDecimals(2)
+        self._background_stars_dist_exp_spin.setSingleStep(0.1)
+        dist_exp_spin_val = self.sim_params['background_stars_distribution_exponent']
+        self._background_stars_dist_exp_spin.setValue(dist_exp_spin_val)
+        self._background_stars_dist_exp_spin.valueChanged.connect(
+            self._on_background_stars_dist_exp_spin)
+        dist_exp_row.addWidget(dist_exp_min_label)
+        dist_exp_row.addWidget(self._background_stars_dist_exp_slider, stretch=1)
+        dist_exp_row.addWidget(dist_exp_max_label)
+        dist_exp_row.addWidget(self._background_stars_dist_exp_spin)
+        dist_exp_holder = QWidget()
+        dist_exp_holder.setLayout(dist_exp_row)
+        gen_layout.addRow('Background stars distribution exponent:', dist_exp_holder)
+
+        # Add General tab first
+        self._tabs.addTab(self._general_tab, 'General')
+
+        # Add "+" tab for adding new objects (fake tab - just header, no content, always last)
+        self._add_tab_widget = QWidget()
+        self._tabs.addTab(self._add_tab_widget, '+')
+
+        # Ensure correct tab order
+        self._ensure_tab_order()
+
+        # Buttons row (no Add/Delete buttons - handled by tabs)
         btns = QHBoxLayout()
-        self._add_tab_btn = QPushButton('Add Tab')
-        self._add_tab_btn.clicked.connect(self._add_tab_dialog)
-        btns.addWidget(self._add_tab_btn)
-        self._del_tab_btn = QPushButton('Delete Tab')
-        self._del_tab_btn.clicked.connect(self._delete_current_tab)
-        btns.addWidget(self._del_tab_btn)
         btns.addStretch()
 
         self._save_img_btn = QPushButton('Save Image (PNG)')
@@ -250,7 +403,7 @@ class CreateSimulatedBodyModel(QMainWindow):
 
         right.addLayout(btns)
 
-        # Visual options
+        # Visual options with Exit button on same line
         vis_row = QHBoxLayout()
         self._visual_aids_check = QCheckBox('Show Visual Aids')
         self._visual_aids_check.setChecked(self._show_visual_aids)
@@ -260,6 +413,10 @@ class CreateSimulatedBodyModel(QMainWindow):
         self._zoom_sharp_check.setChecked(self._zoom_sharp)
         self._zoom_sharp_check.stateChanged.connect(self._toggle_zoom_sharp)
         vis_row.addWidget(self._zoom_sharp_check)
+        vis_row.addStretch()
+        exit_btn = QPushButton('Exit')
+        exit_btn.clicked.connect(self.close)
+        vis_row.addWidget(exit_btn)
         right.addLayout(vis_row)
 
         main_layout.addLayout(right, stretch=1)
@@ -406,10 +563,180 @@ class CreateSimulatedBodyModel(QMainWindow):
         self.sim_params['offset_u'] = value
         self._updater.request_update()
 
+    def _on_random_seed(self, value: int) -> None:
+        self.sim_params['random_seed'] = value
+        self._updater.request_update()
+
+    def _on_background_noise_slider(self, value: int) -> None:
+        noise_val = value / 1000.0
+        self._background_noise_spin.blockSignals(True)
+        self._background_noise_spin.setValue(noise_val)
+        self._background_noise_spin.blockSignals(False)
+        self.sim_params['background_noise_intensity'] = noise_val
+        self._updater.request_update()
+
+    def _on_background_noise_spin(self, value: float) -> None:
+        slider_val = int(value * 1000)
+        self._background_noise_slider.blockSignals(True)
+        self._background_noise_slider.setValue(slider_val)
+        self._background_noise_slider.blockSignals(False)
+        self.sim_params['background_noise_intensity'] = value
+        self._updater.request_update()
+
+    def _on_background_stars_slider(self, value: int) -> None:
+        self._background_stars_spin.blockSignals(True)
+        self._background_stars_spin.setValue(value)
+        self._background_stars_spin.blockSignals(False)
+        self.sim_params['background_stars_num'] = value
+        self._updater.request_update()
+
+    def _on_background_stars_spin(self, value: int) -> None:
+        self._background_stars_slider.blockSignals(True)
+        self._background_stars_slider.setValue(value)
+        self._background_stars_slider.blockSignals(False)
+        self.sim_params['background_stars_num'] = value
+        self._updater.request_update()
+
+    def _on_background_stars_psf_sigma_slider(self, value: int) -> None:
+        psf_sigma_val = value / 100.0
+        self._background_stars_psf_sigma_spin.blockSignals(True)
+        self._background_stars_psf_sigma_spin.setValue(psf_sigma_val)
+        self._background_stars_psf_sigma_spin.blockSignals(False)
+        self.sim_params['background_stars_psf_sigma'] = psf_sigma_val
+        self._updater.request_update()
+
+    def _on_background_stars_psf_sigma_spin(self, value: float) -> None:
+        slider_val = int(value * 100)
+        self._background_stars_psf_sigma_slider.blockSignals(True)
+        self._background_stars_psf_sigma_slider.setValue(slider_val)
+        self._background_stars_psf_sigma_slider.blockSignals(False)
+        self.sim_params['background_stars_psf_sigma'] = value
+        self._updater.request_update()
+
+    def _on_background_stars_dist_exp_slider(self, value: int) -> None:
+        dist_exp_val = value / 100.0
+        self._background_stars_dist_exp_spin.blockSignals(True)
+        self._background_stars_dist_exp_spin.setValue(dist_exp_val)
+        self._background_stars_dist_exp_spin.blockSignals(False)
+        self.sim_params['background_stars_distribution_exponent'] = dist_exp_val
+        self._updater.request_update()
+
+    def _on_background_stars_dist_exp_spin(self, value: float) -> None:
+        slider_val = int(value * 100)
+        self._background_stars_dist_exp_slider.blockSignals(True)
+        self._background_stars_dist_exp_slider.setValue(slider_val)
+        self._background_stars_dist_exp_slider.blockSignals(False)
+        self.sim_params['background_stars_distribution_exponent'] = value
+        self._updater.request_update()
+
     # ---- Tab management ----
-    def _add_tab_dialog(self) -> None:
+    def _ensure_tab_order(self) -> None:
+        """Ensure General is first and '+' is last."""
+        # Block signals to prevent tab change events during reordering
+        self._tabs.blockSignals(True)
+
+        general_idx = -1
+        plus_idx = -1
+        for i in range(self._tabs.count()):
+            text = self._tabs.tabText(i)
+            if text == 'General':
+                general_idx = i
+            elif text == '+':
+                plus_idx = i
+
+        # Remember current tab before reordering
+        current_idx = self._tabs.currentIndex()
+        current_widget = None
+        if current_idx >= 0 and current_idx < self._tabs.count():
+            current_widget = self._tabs.widget(current_idx)
+
+        # Move General to first if needed
+        if general_idx >= 0 and general_idx != 0:
+            general_widget = self._tabs.widget(general_idx)
+            self._tabs.removeTab(general_idx)
+            self._tabs.insertTab(0, general_widget, 'General')
+            # Recalculate plus_idx after removal
+            for i in range(self._tabs.count()):
+                if self._tabs.tabText(i) == '+':
+                    plus_idx = i
+                    break
+
+        # Move "+" to last if needed
+        if plus_idx >= 0 and plus_idx != self._tabs.count() - 1:
+            plus_widget = self._tabs.widget(plus_idx)
+            self._tabs.removeTab(plus_idx)
+            self._tabs.addTab(plus_widget, '+')
+
+        # Restore current tab if it still exists
+        if current_widget is not None:
+            for i in range(self._tabs.count()):
+                if self._tabs.widget(i) == current_widget:
+                    self._tabs.setCurrentIndex(i)
+                    break
+
+        # Unblock signals
+        self._tabs.blockSignals(False)
+
+    def _on_tab_changed(self, index: int) -> None:
+        """Track tab changes and intercept switches to the '+' tab."""
+        # Ignore invalid indices (can happen during tab rebuilding)
+        if index < 0 or index >= self._tabs.count():
+            return
+
+        # If signals are blocked, we're in the middle of a programmatic change - don't intercept
+        if self._tabs.signalsBlocked():
+            # Still track valid tabs for future reference
+            tab_text = self._tabs.tabText(index)
+            if tab_text != '+':
+                self._last_valid_tab_index = index
+            return
+
+        tab_text = self._tabs.tabText(index)
+
+        # If switching to the "+" tab, intercept it
+        if tab_text == '+':
+            # Get the last valid tab index
+            prev_tab = self._last_valid_tab_index
+            # Ensure it's valid
+            if (prev_tab < 0 or prev_tab >= self._tabs.count() or
+                    self._tabs.tabText(prev_tab) == '+'):
+                # Fallback: find the last non-"+", non-General tab, or use General
+                prev_tab = 0  # Default to General
+                # Start from second-to-last, skip General
+                for i in range(self._tabs.count() - 2, 0, -1):
+                    if self._tabs.tabText(i) != '+':
+                        prev_tab = i
+                        break
+
+            # Block signals to prevent recursion
+            self._tabs.blockSignals(True)
+            # Switch back to the previous tab immediately (before showing dialog)
+            self._tabs.setCurrentIndex(prev_tab)
+            self._tabs.blockSignals(False)
+
+            # Now show the dialog
+            result = self._add_tab_dialog()
+            # If canceled, we've already switched back, so we're done
+            # If successful, the new tab will be created and automatically selected
+            if not result:
+                # Make sure we're still on the previous tab (should already be, but be explicit)
+                if (prev_tab >= 0 and prev_tab < self._tabs.count() and
+                        self._tabs.tabText(prev_tab) != '+'):
+                    self._tabs.blockSignals(True)
+                    self._tabs.setCurrentIndex(prev_tab)
+                    self._tabs.blockSignals(False)
+        else:
+            # This is a valid tab, remember it
+            self._last_valid_tab_index = index
+
+    def _on_tab_bar_clicked(self, index: int) -> None:
+        # This is just for tracking - the actual interception happens in _on_tab_changed
+        pass
+
+    def _add_tab_dialog(self) -> bool:
+        """Show dialog to add object. Returns True if object was added, False if canceled."""
         msg = QMessageBox(self)
-        msg.setWindowTitle('Add Tab')
+        msg.setWindowTitle('Add object')
         msg.setText('Add what type of model?')
         body_btn = msg.addButton('Body', QMessageBox.ButtonRole.AcceptRole)
         star_btn = msg.addButton('Star', QMessageBox.ButtonRole.AcceptRole)
@@ -418,19 +745,21 @@ class CreateSimulatedBodyModel(QMainWindow):
         clicked = msg.clickedButton()
         if clicked == body_btn:
             self._add_body_tab()
+            return True
         elif clicked == star_btn:
             self._add_star_tab()
+            return True
         else:
-            return
+            return False
 
     def _add_body_tab(self, params: Optional[dict[str, Any]] = None) -> None:
         p = params or {
-            'name': f'body{len(self.sim_params["bodies"])+1}',
+            'name': f'Body{len(self.sim_params["bodies"])+1}',
             'center_v': self.sim_params['size_v'] / 2.0,
             'center_u': self.sim_params['size_u'] / 2.0,
-            'semi_major_axis': 100.0,
-            'semi_minor_axis': 80.0,
-            'semi_c_axis': 80.0,
+            'axis1': 100.0,
+            'axis2': 80.0,
+            'axis3': 80.0,
             'rotation_z': 0.0,
             'rotation_tilt': 0.0,
             'illumination_angle': 0.0,
@@ -446,14 +775,23 @@ class CreateSimulatedBodyModel(QMainWindow):
         idx = len(self.sim_params['bodies'])
         self.sim_params['bodies'].append(p)
         tab = self._build_body_tab(idx)
-        self._tabs.addTab(tab, p.get('name', f'body{idx+1}'))
-        self._tabs.setCurrentWidget(tab)
+        # Find "+" tab index by text
+        plus_idx = -1
+        for i in range(self._tabs.count()):
+            if self._tabs.tabText(i) == '+':
+                plus_idx = i
+                break
+        if plus_idx < 0:
+            plus_idx = self._tabs.count()  # If not found, add at end
+        self._tabs.insertTab(plus_idx, tab, p.get('name', f'Body{idx+1}'))
+        self._tabs.setCurrentIndex(plus_idx)
+        self._ensure_tab_order()  # Ensure order is correct
         self._validate_ranges()
         self._updater.request_update()
 
     def _add_star_tab(self, params: Optional[dict[str, Any]] = None) -> None:
         p = params or {
-            'name': f'star{len(self.sim_params["stars"])+1}',
+            'name': f'Star{len(self.sim_params["stars"])+1}',
             'v': self.sim_params['size_v'] / 2.0,
             'u': self.sim_params['size_u'] / 2.0,
             'vmag': 3.0,
@@ -463,43 +801,146 @@ class CreateSimulatedBodyModel(QMainWindow):
         idx = len(self.sim_params['stars'])
         self.sim_params['stars'].append(p)
         tab = self._build_star_tab(idx)
-        self._tabs.addTab(tab, p.get('name', f'star{idx+1}'))
-        self._tabs.setCurrentWidget(tab)
+        # Find "+" tab index by text
+        plus_idx = -1
+        for i in range(self._tabs.count()):
+            if self._tabs.tabText(i) == '+':
+                plus_idx = i
+                break
+        if plus_idx < 0:
+            plus_idx = self._tabs.count()  # If not found, add at end
+        self._tabs.insertTab(plus_idx, tab, p.get('name', f'Star{idx+1}'))
+        self._tabs.setCurrentIndex(plus_idx)
+        self._ensure_tab_order()  # Ensure order is correct
         self._updater.request_update()
 
     def _delete_current_tab(self) -> None:
         idx = self._tabs.currentIndex()
-        # Do not delete General (index 0)
-        if idx <= 0:
-            return
-        widget = self._tabs.widget(idx)
-        if widget is None:
-            return
-        # Determine if it's body or star by stored property
-        kind = widget.property('kind')
-        data_index = widget.property('data_index')
-        if kind == 'body':
-            if 0 <= data_index < len(self.sim_params['bodies']):
-                del self.sim_params['bodies'][data_index]
-        elif kind == 'star':
-            if 0 <= data_index < len(self.sim_params['stars']):
-                del self.sim_params['stars'][data_index]
-        self._tabs.removeTab(idx)
-        # Rebuild tabs indices to align with lists
-        self._rebuild_dynamic_tabs()
-        self._validate_ranges()
-        self._updater.request_update()
+        self._delete_tab_by_index(idx)
+
+    def _delete_tab_by_index(self, data_index: int) -> None:
+        # Find the tab index for this data_index
+        # Skip General and "+" tabs
+        for tab_idx in range(self._tabs.count()):
+            text = self._tabs.tabText(tab_idx)
+            if text == 'General' or text == '+':
+                continue
+            widget = self._tabs.widget(tab_idx)
+            if widget is None:
+                continue
+            widget_data_index = widget.property('data_index')
+            widget_kind = widget.property('kind')
+            if widget_data_index == data_index:
+                if widget_kind == 'body':
+                    if 0 <= data_index < len(self.sim_params['bodies']):
+                        del self.sim_params['bodies'][data_index]
+                elif widget_kind == 'star':
+                    if 0 <= data_index < len(self.sim_params['stars']):
+                        del self.sim_params['stars'][data_index]
+                # Block signals before removing tab to prevent unwanted tab change events
+                self._tabs.blockSignals(True)
+                self._tabs.removeTab(tab_idx)
+                self._tabs.blockSignals(False)
+
+                # Rebuild tabs indices to align with lists
+                self._rebuild_dynamic_tabs()
+                self._ensure_tab_order()  # Ensure order is correct
+                self._validate_ranges()
+                self._updater.request_update()
+                return
 
     def _rebuild_dynamic_tabs(self) -> None:
-        # Remove all non-general tabs and recreate
-        while self._tabs.count() > 1:
-            self._tabs.removeTab(1)
+        # Save General and "+" tab widgets
+        general_widget = None
+        plus_widget = None
+        for i in range(self._tabs.count()):
+            text = self._tabs.tabText(i)
+            if text == 'General':
+                general_widget = self._tabs.widget(i)
+            elif text == '+':
+                plus_widget = self._tabs.widget(i)
+
+        # Remember current tab before rebuilding (if it's a valid tab)
+        current_idx = self._tabs.currentIndex()
+        target_tab_name = None
+        if current_idx >= 0 and current_idx < self._tabs.count():
+            current_text = self._tabs.tabText(current_idx)
+            if current_text not in ('General', '+'):
+                # Try to identify which body/star this was
+                widget = self._tabs.widget(current_idx)
+                if widget is not None:
+                    widget_kind = widget.property('kind')
+                    widget_data_index = widget.property('data_index')
+                    if widget_kind == 'body' and widget_data_index is not None:
+                        if 0 <= widget_data_index < len(self.sim_params['bodies']):
+                            body_name = self.sim_params['bodies'][widget_data_index].get(
+                                'name', f'Body{widget_data_index+1}')
+                            target_tab_name = body_name
+                    elif widget_kind == 'star' and widget_data_index is not None:
+                        if 0 <= widget_data_index < len(self.sim_params['stars']):
+                            star_name = self.sim_params['stars'][widget_data_index].get(
+                                'name', f'Star{widget_data_index+1}')
+                            target_tab_name = star_name
+
+        # Block signals during rebuild to prevent tab change handler from firing
+        self._tabs.blockSignals(True)
+
+        # Remove all tabs
+        while self._tabs.count() > 0:
+            self._tabs.removeTab(0)
+
+        # Re-add in correct order: General first, then bodies, then stars, then "+"
+        if general_widget is not None:
+            self._tabs.addTab(general_widget, 'General')
+
+        # Add body tabs
         for i, _ in enumerate(self.sim_params['bodies']):
             tab = self._build_body_tab(i)
-            self._tabs.addTab(tab, self.sim_params['bodies'][i].get('name', f'body{i+1}'))
+            tab_name = self.sim_params['bodies'][i].get('name', f'Body{i+1}')
+            self._tabs.addTab(tab, tab_name)
+
+        # Add star tabs
         for i, _ in enumerate(self.sim_params['stars']):
             tab = self._build_star_tab(i)
-            self._tabs.addTab(tab, self.sim_params['stars'][i].get('name', f'star{i+1}'))
+            tab_name = self.sim_params['stars'][i].get('name', f'Star{i+1}')
+            self._tabs.addTab(tab, tab_name)
+
+        # Add "+" tab last
+        if plus_widget is not None:
+            self._tabs.addTab(plus_widget, '+')
+        else:
+            # Create if it doesn't exist
+            self._add_tab_widget = QWidget()
+            self._tabs.addTab(self._add_tab_widget, '+')
+
+        # Restore the previously selected tab if it still exists
+        if target_tab_name is not None:
+            found = False
+            for i in range(self._tabs.count()):
+                if self._tabs.tabText(i) == target_tab_name:
+                    self._tabs.setCurrentIndex(i)
+                    self._last_valid_tab_index = i
+                    found = True
+                    break
+            if not found:
+                # Tab was deleted, default to General
+                self._tabs.setCurrentIndex(0)
+                self._last_valid_tab_index = 0
+        else:
+            # Default to General tab (index 0)
+            self._tabs.setCurrentIndex(0)
+            self._last_valid_tab_index = 0
+
+        # Ensure we're on a valid tab (not "+") before unblocking signals
+        current_idx = self._tabs.currentIndex()
+        if current_idx >= 0 and current_idx < self._tabs.count():
+            if self._tabs.tabText(current_idx) == '+':
+                # Shouldn't happen, but be safe
+                self._tabs.setCurrentIndex(0)
+                self._last_valid_tab_index = 0
+
+        # Unblock signals - this might emit currentChanged, but we're on General so it's safe
+        self._tabs.blockSignals(False)
 
     # ---- Build body tab ----
     def _build_body_tab(self, idx: int) -> QWidget:
@@ -507,7 +948,9 @@ class CreateSimulatedBodyModel(QMainWindow):
         w = QWidget()
         w.setProperty('kind', 'body')
         w.setProperty('data_index', idx)
-        fl = QFormLayout(w)
+        main_layout = QVBoxLayout(w)
+        fl = QFormLayout()
+        main_layout.addLayout(fl)
 
         name_edit = QLineEdit(p.get('name', ''))
         name_edit.textChanged.connect(lambda t, i=idx: self._on_body_name(i, t))
@@ -536,27 +979,27 @@ class CreateSimulatedBodyModel(QMainWindow):
         smaj = QDoubleSpinBox()
         smaj.setRange(1.0, 5000.0)
         smaj.setDecimals(1)
-        smaj.setValue(p.get('semi_major_axis', 0.0))
+        smaj.setValue(p.get('axis1', 0.0))
         smaj.valueChanged.connect(
-            lambda v, i=idx: self._on_body_field(i, 'semi_major_axis', v)
+            lambda v, i=idx: self._on_body_field(i, 'axis1', v)
         )
-        fl.addRow('Semi-major axis:', smaj)
+        fl.addRow('Axis 1:', smaj)
         smin = QDoubleSpinBox()
         smin.setRange(1.0, 5000.0)
         smin.setDecimals(1)
-        smin.setValue(p.get('semi_minor_axis', 0.0))
+        smin.setValue(p.get('axis2', 0.0))
         smin.valueChanged.connect(
-            lambda v, i=idx: self._on_body_field(i, 'semi_minor_axis', v)
+            lambda v, i=idx: self._on_body_field(i, 'axis2', v)
         )
-        fl.addRow('Semi-minor axis:', smin)
+        fl.addRow('Axis 2:', smin)
         sc = QDoubleSpinBox()
         sc.setRange(1.0, 5000.0)
         sc.setDecimals(1)
-        sc.setValue(p.get('semi_c_axis', 0.0))
+        sc.setValue(p.get('axis3', 0.0))
         sc.valueChanged.connect(
-            lambda v, i=idx: self._on_body_field(i, 'semi_c_axis', v)
+            lambda v, i=idx: self._on_body_field(i, 'axis3', v)
         )
-        fl.addRow('Semi-c axis (depth):', sc)
+        fl.addRow('Axis 3:', sc)
 
         rz = QDoubleSpinBox()
         rz.setRange(0.0, 360.0)
@@ -596,15 +1039,40 @@ class CreateSimulatedBodyModel(QMainWindow):
         )
         fl.addRow('Phase angle:', phase)
 
-        cf = QDoubleSpinBox()
-        cf.setRange(0.0, 10.0)
-        cf.setDecimals(3)
-        cf.setSingleStep(0.01)
-        cf.setValue(p.get('crater_fill', 0.0))
-        cf.valueChanged.connect(
-            lambda v, i=idx: self._on_body_field(i, 'crater_fill', v)
+        # Crater fill slider with min/max labels and spinbox
+        cf_row = QHBoxLayout()
+        cf_row.setSpacing(4)
+        cf_row.setContentsMargins(0, 0, 0, 0)
+        cf_min_label = QLabel('0.0')
+        cf_min_label.setFixedWidth(35)
+        cf_min_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        cf_max_label = QLabel('10.0')
+        cf_max_label.setFixedWidth(40)
+        cf_max_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        cf_slider = QSlider(Qt.Orientation.Horizontal)
+        cf_slider.setRange(0, 10000)  # 0.0 to 10.0 with 0.001 steps
+        cf_slider.setValue(int(p.get('crater_fill', 0.0) * 1000))
+        cf_slider.valueChanged.connect(
+            lambda v, i=idx: self._on_body_crater_fill_slider(i, v)
         )
-        fl.addRow('Crater fill (0-10):', cf)
+        cf_spin = QDoubleSpinBox()
+        cf_spin.setRange(0.0, 10.0)
+        cf_spin.setDecimals(3)
+        cf_spin.setSingleStep(0.01)
+        cf_spin.setValue(p.get('crater_fill', 0.0))
+        cf_spin.valueChanged.connect(
+            lambda v, i=idx: self._on_body_crater_fill_spin(i, v)
+        )
+        cf_row.addWidget(cf_min_label)
+        cf_row.addWidget(cf_slider, stretch=1)
+        cf_row.addWidget(cf_max_label)
+        cf_row.addWidget(cf_spin)
+        cf_holder = QWidget()
+        cf_holder.setLayout(cf_row)
+        fl.addRow('Crater fill (0-10):', cf_holder)
+        # Store references for sync
+        w.crater_fill_slider = cf_slider  # type: ignore
+        w.crater_fill_spin = cf_spin  # type: ignore
         cmin = QDoubleSpinBox()
         cmin.setRange(0.01, 0.25)
         cmin.setDecimals(3)
@@ -642,15 +1110,40 @@ class CreateSimulatedBodyModel(QMainWindow):
         )
         fl.addRow('Crater relief scale:', crs)
 
-        aa = QDoubleSpinBox()
-        aa.setRange(0.0, 1.0)
-        aa.setDecimals(3)
-        aa.setSingleStep(0.01)
-        aa.setValue(p.get('anti_aliasing', 0.5))
-        aa.valueChanged.connect(
-            lambda v, i=idx: self._on_body_field(i, 'anti_aliasing', v)
+        # Anti-aliasing slider with min/max labels and spinbox
+        aa_row = QHBoxLayout()
+        aa_row.setSpacing(4)
+        aa_row.setContentsMargins(0, 0, 0, 0)
+        aa_min_label = QLabel('0.0')
+        aa_min_label.setFixedWidth(35)
+        aa_min_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        aa_max_label = QLabel('1.0')
+        aa_max_label.setFixedWidth(35)
+        aa_max_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        aa_slider = QSlider(Qt.Orientation.Horizontal)
+        aa_slider.setRange(0, 1000)  # 0.0 to 1.0 with 0.001 steps
+        aa_slider.setValue(int(p.get('anti_aliasing', 0.5) * 1000))
+        aa_slider.valueChanged.connect(
+            lambda v, i=idx: self._on_body_anti_aliasing_slider(i, v)
         )
-        fl.addRow('Anti-aliasing:', aa)
+        aa_spin = QDoubleSpinBox()
+        aa_spin.setRange(0.0, 1.0)
+        aa_spin.setDecimals(3)
+        aa_spin.setSingleStep(0.01)
+        aa_spin.setValue(p.get('anti_aliasing', 0.5))
+        aa_spin.valueChanged.connect(
+            lambda v, i=idx: self._on_body_anti_aliasing_spin(i, v)
+        )
+        aa_row.addWidget(aa_min_label)
+        aa_row.addWidget(aa_slider, stretch=1)
+        aa_row.addWidget(aa_max_label)
+        aa_row.addWidget(aa_spin)
+        aa_holder = QWidget()
+        aa_holder.setLayout(aa_row)
+        fl.addRow('Anti-aliasing:', aa_holder)
+        # Store references for sync
+        w.anti_aliasing_slider = aa_slider  # type: ignore
+        w.anti_aliasing_spin = aa_spin  # type: ignore
 
         rng = QDoubleSpinBox()
         rng.setRange(-1e9, 1e9)
@@ -661,6 +1154,12 @@ class CreateSimulatedBodyModel(QMainWindow):
         )
         fl.addRow('Range:', rng)
 
+        # Delete button at bottom
+        delete_btn = QPushButton('Delete')
+        delete_btn.clicked.connect(lambda: self._delete_tab_by_index(idx))
+        main_layout.addStretch()
+        main_layout.addWidget(delete_btn)
+
         return w
 
     # ---- Build star tab ----
@@ -669,7 +1168,9 @@ class CreateSimulatedBodyModel(QMainWindow):
         w = QWidget()
         w.setProperty('kind', 'star')
         w.setProperty('data_index', idx)
-        fl = QFormLayout(w)
+        main_layout = QVBoxLayout(w)
+        fl = QFormLayout()
+        main_layout.addLayout(fl)
 
         name_edit = QLineEdit(p.get('name', ''))
         name_edit.textChanged.connect(lambda t, i=idx: self._on_star_name(i, t))
@@ -715,6 +1216,12 @@ class CreateSimulatedBodyModel(QMainWindow):
         )
         fl.addRow('PSF sigma:', psf)
 
+        # Delete button at bottom
+        delete_btn = QPushButton('Delete')
+        delete_btn.clicked.connect(lambda: self._delete_tab_by_index(idx))
+        main_layout.addStretch()
+        main_layout.addWidget(delete_btn)
+
         return w
 
     # ---- Field handlers ----
@@ -752,17 +1259,73 @@ class CreateSimulatedBodyModel(QMainWindow):
             self._update_tab_titles()
             self._updater.request_update()
 
+    def _on_body_crater_fill_slider(self, idx: int, value: int) -> None:
+        fill_val = value / 1000.0
+        tab_idx = 1 + idx
+        tab_w = self._tabs.widget(tab_idx)
+        if tab_w is not None:
+            spin = getattr(tab_w, 'crater_fill_spin', None)
+            if spin is not None:
+                spin.blockSignals(True)
+                spin.setValue(fill_val)
+                spin.blockSignals(False)
+        if 0 <= idx < len(self.sim_params['bodies']):
+            self.sim_params['bodies'][idx]['crater_fill'] = fill_val
+            self._updater.request_update()
+
+    def _on_body_crater_fill_spin(self, idx: int, value: float) -> None:
+        slider_val = int(value * 1000)
+        tab_idx = 1 + idx
+        tab_w = self._tabs.widget(tab_idx)
+        if tab_w is not None:
+            slider = getattr(tab_w, 'crater_fill_slider', None)
+            if slider is not None:
+                slider.blockSignals(True)
+                slider.setValue(slider_val)
+                slider.blockSignals(False)
+        if 0 <= idx < len(self.sim_params['bodies']):
+            self.sim_params['bodies'][idx]['crater_fill'] = value
+            self._updater.request_update()
+
+    def _on_body_anti_aliasing_slider(self, idx: int, value: int) -> None:
+        aa_val = value / 1000.0
+        tab_idx = 1 + idx
+        tab_w = self._tabs.widget(tab_idx)
+        if tab_w is not None:
+            spin = getattr(tab_w, 'anti_aliasing_spin', None)
+            if spin is not None:
+                spin.blockSignals(True)
+                spin.setValue(aa_val)
+                spin.blockSignals(False)
+        if 0 <= idx < len(self.sim_params['bodies']):
+            self.sim_params['bodies'][idx]['anti_aliasing'] = aa_val
+            self._updater.request_update()
+
+    def _on_body_anti_aliasing_spin(self, idx: int, value: float) -> None:
+        slider_val = int(value * 1000)
+        tab_idx = 1 + idx
+        tab_w = self._tabs.widget(tab_idx)
+        if tab_w is not None:
+            slider = getattr(tab_w, 'anti_aliasing_slider', None)
+            if slider is not None:
+                slider.blockSignals(True)
+                slider.setValue(slider_val)
+                slider.blockSignals(False)
+        if 0 <= idx < len(self.sim_params['bodies']):
+            self.sim_params['bodies'][idx]['anti_aliasing'] = value
+            self._updater.request_update()
+
     def _update_tab_titles(self) -> None:
-        # General tab remains 'general'
+        # General tab remains 'General', "+" tab remains last
         for i, p in enumerate(self.sim_params['bodies']):
             tab_idx = 1 + i
-            if tab_idx < self._tabs.count():
-                self._tabs.setTabText(tab_idx, p.get('name', f'body{i+1}'))
+            if tab_idx < self._tabs.count() - 1:  # Don't update "+" tab
+                self._tabs.setTabText(tab_idx, p.get('name', f'Body{i+1}'))
         base = 1 + len(self.sim_params['bodies'])
         for j, p in enumerate(self.sim_params['stars']):
             tab_idx = base + j
-            if tab_idx < self._tabs.count():
-                self._tabs.setTabText(tab_idx, p.get('name', f'star{j+1}'))
+            if tab_idx < self._tabs.count() - 1:  # Don't update "+" tab
+                self._tabs.setTabText(tab_idx, p.get('name', f'Star{j+1}'))
 
     def _validate_ranges(self) -> None:
         ranges = [
@@ -777,9 +1340,32 @@ class CreateSimulatedBodyModel(QMainWindow):
     # ---- Rendering ----
     def _update_image(self) -> None:
         try:
-            img, meta = render_combined_model(self.sim_params, ignore_offset=True)
-            self._current_image = img
-            self._last_meta = meta
+            # Create hash of sim_params for caching
+            # (exclude visual aids which don't affect rendering)
+            params_for_hash = {
+                k: v for k, v in self.sim_params.items()
+                if k not in ['offset_v', 'offset_u']  # Offsets are ignored in preview
+            }
+            params_str = json.dumps(params_for_hash, sort_keys=True)
+            params_hash = hash(params_str)
+
+            # Check cache
+            if (self._cached_params_hash == params_hash and
+                self._cached_image is not None and
+                self._cached_meta is not None):
+                # Use cached result
+                self._current_image = self._cached_image
+                self._last_meta = self._cached_meta
+            else:
+                # Render new image
+                img, meta = render_combined_model(self.sim_params, ignore_offset=True)
+                self._current_image = img
+                self._last_meta = meta
+                # Update cache
+                self._cached_params_hash = params_hash
+                self._cached_image = img.copy() if img is not None else None
+                self._cached_meta = meta.copy() if meta is not None else None
+
             self._display_image()
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to render image:\n{str(e)}')
@@ -985,12 +1571,26 @@ class CreateSimulatedBodyModel(QMainWindow):
             try:
                 with open(filename) as f:
                     params = json.load(f)
-                # Shallow validation
+                # Shallow validation (no backward compatibility - don't read old semi_major_axis)
+                # Support old parameter names for backward compatibility
+                background_noise_val = params.get('background_noise_intensity')
+                if background_noise_val is None:
+                    background_noise_val = params.get('background_noise', 0.0)
+                background_stars_val = params.get('background_stars_num')
+                if background_stars_val is None:
+                    background_stars_val = params.get('background_stars', 0)
                 self.sim_params = {
                     'size_v': int(params.get('size_v', 512)),
                     'size_u': int(params.get('size_u', 512)),
                     'offset_v': float(params.get('offset_v', 0.0)),
                     'offset_u': float(params.get('offset_u', 0.0)),
+                    'random_seed': int(params.get('random_seed', 42)),
+                    'background_noise_intensity': float(background_noise_val),
+                    'background_stars_num': int(background_stars_val),
+                    'background_stars_psf_sigma': float(
+                        params.get('background_stars_psf_sigma', 0.9)),
+                    'background_stars_distribution_exponent': float(
+                        params.get('background_stars_distribution_exponent', 2.5)),
                     'bodies': list(params.get('bodies', [])),
                     'stars': list(params.get('stars', [])),
                 }
@@ -999,6 +1599,41 @@ class CreateSimulatedBodyModel(QMainWindow):
                 self._size_u_spin.setValue(self.sim_params['size_u'])
                 self._offset_v_spin.setValue(self.sim_params['offset_v'])
                 self._offset_u_spin.setValue(self.sim_params['offset_u'])
+                self._random_seed_spin.setValue(self.sim_params['random_seed'])
+                # Update background noise controls
+                self._background_noise_slider.blockSignals(True)
+                noise_slider_val = int(self.sim_params['background_noise_intensity'] * 1000)
+                self._background_noise_slider.setValue(noise_slider_val)
+                self._background_noise_slider.blockSignals(False)
+                self._background_noise_spin.blockSignals(True)
+                self._background_noise_spin.setValue(self.sim_params['background_noise_intensity'])
+                self._background_noise_spin.blockSignals(False)
+                # Update background stars controls
+                self._background_stars_slider.blockSignals(True)
+                self._background_stars_slider.setValue(self.sim_params['background_stars_num'])
+                self._background_stars_slider.blockSignals(False)
+                self._background_stars_spin.blockSignals(True)
+                self._background_stars_spin.setValue(self.sim_params['background_stars_num'])
+                self._background_stars_spin.blockSignals(False)
+                # Update background stars PSF sigma controls
+                self._background_stars_psf_sigma_slider.blockSignals(True)
+                psf_sigma_val = int(self.sim_params['background_stars_psf_sigma'] * 100)
+                self._background_stars_psf_sigma_slider.setValue(psf_sigma_val)
+                self._background_stars_psf_sigma_slider.blockSignals(False)
+                self._background_stars_psf_sigma_spin.blockSignals(True)
+                psf_sigma_spin_val = self.sim_params['background_stars_psf_sigma']
+                self._background_stars_psf_sigma_spin.setValue(psf_sigma_spin_val)
+                self._background_stars_psf_sigma_spin.blockSignals(False)
+                # Update background stars distribution exponent controls
+                self._background_stars_dist_exp_slider.blockSignals(True)
+                dist_exp_slider_val = int(
+                    self.sim_params['background_stars_distribution_exponent'] * 100)
+                self._background_stars_dist_exp_slider.setValue(dist_exp_slider_val)
+                self._background_stars_dist_exp_slider.blockSignals(False)
+                self._background_stars_dist_exp_spin.blockSignals(True)
+                dist_exp_spin_val = self.sim_params['background_stars_distribution_exponent']
+                self._background_stars_dist_exp_spin.setValue(dist_exp_spin_val)
+                self._background_stars_dist_exp_spin.blockSignals(False)
                 # Rebuild tabs
                 self._rebuild_dynamic_tabs()
                 self._update_tab_titles()
