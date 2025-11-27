@@ -469,6 +469,7 @@ def render_background_stars(
 @lru_cache(maxsize=1)
 def _render_combined_model_cached(
     sim_params_json: str,
+    *,
     ignore_offset: bool,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """Internal cached function to compute combined model rendering."""
@@ -552,7 +553,9 @@ def render_combined_model(
         params_for_hash = {k: v for k, v in params_for_hash.items()
                            if k not in ('offset_v', 'offset_u')}
     sim_params_json = json.dumps(params_for_hash, sort_keys=True)
-    cached_img, cached_meta = _render_combined_model_cached(sim_params_json, ignore_offset)
+    cached_img, cached_meta = _render_combined_model_cached(
+        sim_params_json, ignore_offset=ignore_offset
+    )
     # Return copies to avoid cache modification
     # Use deepcopy for meta to fully isolate nested mutable structures
     return cached_img.copy(), copy.deepcopy(cached_meta)

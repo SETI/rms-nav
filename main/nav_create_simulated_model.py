@@ -1269,8 +1269,8 @@ class CreateSimulatedBodyModel(QMainWindow):
         )
         fl.addRow('U:', u_spin)
         # Keep references so drag updates can sync the UI
-        setattr(w, 'v_spin', v_spin)
-        setattr(w, 'u_spin', u_spin)
+        w.v_spin = v_spin
+        w.u_spin = u_spin
 
         vmag = QDoubleSpinBox()
         vmag.setRange(-10.0, 30.0)
@@ -1519,7 +1519,7 @@ class CreateSimulatedBodyModel(QMainWindow):
                     reverse=True,
                 )
                 body_names_far_to_near = [k for k, _ in sorted_items]
-                for nm, m in zip(body_names_far_to_near, body_masks):
+                for nm, m in zip(body_names_far_to_near, body_masks, strict=True):
                     name_to_mask[nm] = m
                 for nm in order_near_to_far:
                     m = name_to_mask.get(nm)
@@ -1646,8 +1646,8 @@ class CreateSimulatedBodyModel(QMainWindow):
             try:
                 with open(filename) as f:
                     params = json.load(f)
-                background_noise_val = params.get('background_noise_intensity')
-                background_stars_val = params.get('background_stars_num')
+                background_noise_val = params.get('background_noise_intensity', 0.0)
+                background_stars_val = params.get('background_stars_num', 0)
                 self.sim_params = {
                     'size_v': int(params.get('size_v', 512)),
                     'size_u': int(params.get('size_u', 512)),
