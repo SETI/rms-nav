@@ -95,7 +95,7 @@ class ParameterUpdater(QObject):
 class CreateSimulatedBodyModel(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle('Create Simulated Body Model')
+        self.setWindowTitle('Create Simulated Model')
         self.setMinimumSize(1300, 850)
 
         # Data model mirrors JSON schema
@@ -774,18 +774,12 @@ class CreateSimulatedBodyModel(QMainWindow):
         }
         idx = len(self.sim_params['bodies'])
         self.sim_params['bodies'].append(p)
-        tab = self._build_body_tab(idx)
-        # Find "+" tab index by text
-        plus_idx = -1
-        for i in range(self._tabs.count()):
-            if self._tabs.tabText(i) == '+':
-                plus_idx = i
-                break
-        if plus_idx < 0:
-            plus_idx = self._tabs.count()  # If not found, add at end
-        self._tabs.insertTab(plus_idx, tab, p.get('name', f'Body{idx+1}'))
-        self._tabs.setCurrentIndex(plus_idx)
-        self._ensure_tab_order()  # Ensure order is correct
+        # Rebuild tabs to ensure consistency and proper ordering
+        self._rebuild_dynamic_tabs()
+        # Find and select the newly added tab
+        tab_idx = self._find_tab_by_properties('body', idx)
+        if tab_idx is not None:
+            self._tabs.setCurrentIndex(tab_idx)
         self._validate_ranges()
         self._updater.request_update()
 
@@ -800,23 +794,43 @@ class CreateSimulatedBodyModel(QMainWindow):
         }
         idx = len(self.sim_params['stars'])
         self.sim_params['stars'].append(p)
-        tab = self._build_star_tab(idx)
-        # Find "+" tab index by text
-        plus_idx = -1
-        for i in range(self._tabs.count()):
-            if self._tabs.tabText(i) == '+':
-                plus_idx = i
-                break
-        if plus_idx < 0:
-            plus_idx = self._tabs.count()  # If not found, add at end
-        self._tabs.insertTab(plus_idx, tab, p.get('name', f'Star{idx+1}'))
-        self._tabs.setCurrentIndex(plus_idx)
-        self._ensure_tab_order()  # Ensure order is correct
+        # Rebuild tabs to ensure consistency and proper ordering
+        self._rebuild_dynamic_tabs()
+        # Find and select the newly added tab
+        tab_idx = self._find_tab_by_properties('star', idx)
+        if tab_idx is not None:
+            self._tabs.setCurrentIndex(tab_idx)
         self._updater.request_update()
 
+    def _find_tab_by_properties(self, kind: str, data_index: int) -> Optional[int]:
+        """Find tab index by kind and data_index properties.
+
+        Returns the tab index if found, None otherwise.
+        """
+        for tab_idx in range(self._tabs.count()):
+            widget = self._tabs.widget(tab_idx)
+            if widget is None:
+                continue
+            widget_kind = widget.property('kind')
+            widget_data_index = widget.property('data_index')
+            if (widget_kind == kind and
+                    widget_data_index is not None and
+                    widget_data_index == data_index):
+                return tab_idx
+        return None
+
     def _delete_current_tab(self) -> None:
-        idx = self._tabs.currentIndex()
-        self._delete_tab_by_index(idx)
+        """Delete the currently selected tab by looking up its data_index."""
+        tab_idx = self._tabs.currentIndex()
+        widget = self._tabs.widget(tab_idx)
+        if widget is None:
+            # No widget at this tab index, nothing to delete
+            return
+        data_index = widget.property('data_index')
+        if data_index is None:
+            # Widget doesn't have a data_index (e.g., General or "+" tab)
+            return
+        self._delete_tab_by_index(data_index)
 
     def _delete_tab_by_index(self, data_index: int) -> None:
         # Find the tab index for this data_index
@@ -1261,70 +1275,74 @@ class CreateSimulatedBodyModel(QMainWindow):
 
     def _on_body_crater_fill_slider(self, idx: int, value: int) -> None:
         fill_val = value / 1000.0
-        tab_idx = 1 + idx
-        tab_w = self._tabs.widget(tab_idx)
-        if tab_w is not None:
-            spin = getattr(tab_w, 'crater_fill_spin', None)
-            if spin is not None:
-                spin.blockSignals(True)
-                spin.setValue(fill_val)
-                spin.blockSignals(False)
+        tab_idx = self._find_tab_by_properties('body', idx)
+        if tab_idx is not None:
+            tab_w = self._tabs.widget(tab_idx)
+            if tab_w is not None:
+                spin = getattr(tab_w, 'crater_fill_spin', None)
+                if spin is not None:
+                    spin.blockSignals(True)
+                    spin.setValue(fill_val)
+                    spin.blockSignals(False)
         if 0 <= idx < len(self.sim_params['bodies']):
             self.sim_params['bodies'][idx]['crater_fill'] = fill_val
             self._updater.request_update()
 
     def _on_body_crater_fill_spin(self, idx: int, value: float) -> None:
         slider_val = int(value * 1000)
-        tab_idx = 1 + idx
-        tab_w = self._tabs.widget(tab_idx)
-        if tab_w is not None:
-            slider = getattr(tab_w, 'crater_fill_slider', None)
-            if slider is not None:
-                slider.blockSignals(True)
-                slider.setValue(slider_val)
-                slider.blockSignals(False)
+        tab_idx = self._find_tab_by_properties('body', idx)
+        if tab_idx is not None:
+            tab_w = self._tabs.widget(tab_idx)
+            if tab_w is not None:
+                slider = getattr(tab_w, 'crater_fill_slider', None)
+                if slider is not None:
+                    slider.blockSignals(True)
+                    slider.setValue(slider_val)
+                    slider.blockSignals(False)
         if 0 <= idx < len(self.sim_params['bodies']):
             self.sim_params['bodies'][idx]['crater_fill'] = value
             self._updater.request_update()
 
     def _on_body_anti_aliasing_slider(self, idx: int, value: int) -> None:
         aa_val = value / 1000.0
-        tab_idx = 1 + idx
-        tab_w = self._tabs.widget(tab_idx)
-        if tab_w is not None:
-            spin = getattr(tab_w, 'anti_aliasing_spin', None)
-            if spin is not None:
-                spin.blockSignals(True)
-                spin.setValue(aa_val)
-                spin.blockSignals(False)
+        tab_idx = self._find_tab_by_properties('body', idx)
+        if tab_idx is not None:
+            tab_w = self._tabs.widget(tab_idx)
+            if tab_w is not None:
+                spin = getattr(tab_w, 'anti_aliasing_spin', None)
+                if spin is not None:
+                    spin.blockSignals(True)
+                    spin.setValue(aa_val)
+                    spin.blockSignals(False)
         if 0 <= idx < len(self.sim_params['bodies']):
             self.sim_params['bodies'][idx]['anti_aliasing'] = aa_val
             self._updater.request_update()
 
     def _on_body_anti_aliasing_spin(self, idx: int, value: float) -> None:
         slider_val = int(value * 1000)
-        tab_idx = 1 + idx
-        tab_w = self._tabs.widget(tab_idx)
-        if tab_w is not None:
-            slider = getattr(tab_w, 'anti_aliasing_slider', None)
-            if slider is not None:
-                slider.blockSignals(True)
-                slider.setValue(slider_val)
-                slider.blockSignals(False)
+        tab_idx = self._find_tab_by_properties('body', idx)
+        if tab_idx is not None:
+            tab_w = self._tabs.widget(tab_idx)
+            if tab_w is not None:
+                slider = getattr(tab_w, 'anti_aliasing_slider', None)
+                if slider is not None:
+                    slider.blockSignals(True)
+                    slider.setValue(slider_val)
+                    slider.blockSignals(False)
         if 0 <= idx < len(self.sim_params['bodies']):
             self.sim_params['bodies'][idx]['anti_aliasing'] = value
             self._updater.request_update()
 
     def _update_tab_titles(self) -> None:
-        # General tab remains 'General', "+" tab remains last
+        # Update body tab titles by finding tabs by properties
         for i, p in enumerate(self.sim_params['bodies']):
-            tab_idx = 1 + i
-            if tab_idx < self._tabs.count() - 1:  # Don't update "+" tab
+            tab_idx = self._find_tab_by_properties('body', i)
+            if tab_idx is not None:
                 self._tabs.setTabText(tab_idx, p.get('name', f'Body{i+1}'))
-        base = 1 + len(self.sim_params['bodies'])
+        # Update star tab titles by finding tabs by properties
         for j, p in enumerate(self.sim_params['stars']):
-            tab_idx = base + j
-            if tab_idx < self._tabs.count() - 1:  # Don't update "+" tab
+            tab_idx = self._find_tab_by_properties('star', j)
+            if tab_idx is not None:
                 self._tabs.setTabText(tab_idx, p.get('name', f'Star{j+1}'))
 
     def _validate_ranges(self) -> None:
@@ -1458,7 +1476,9 @@ class CreateSimulatedBodyModel(QMainWindow):
                         idx = name_to_index.get(nm, None)
                         if idx is not None:
                             self._selected_model_key = ('body', idx)
-                            self._tabs.setCurrentIndex(1 + idx)
+                            tab_idx = self._find_tab_by_properties('body', idx)
+                            if tab_idx is not None:
+                                self._tabs.setCurrentIndex(tab_idx)
                             return
         # Stars: evaluate PSF contribution approx via Gaussian envelope
         star_info = self._last_meta.get('star_info', [])
@@ -1474,8 +1494,10 @@ class CreateSimulatedBodyModel(QMainWindow):
                 # Gaussian threshold ~ 3 sigma circle
                 if r2 <= (3.0 * sigma) ** 2:
                     self._selected_model_key = ('star', j)
-                    # Switch to star tab: index = 1 + num_bodies + j
-                    self._tabs.setCurrentIndex(1 + len(self.sim_params['bodies']) + j)
+                    # Switch to star tab by finding it by properties
+                    tab_idx = self._find_tab_by_properties('star', j)
+                    if tab_idx is not None:
+                        self._tabs.setCurrentIndex(tab_idx)
                     return
         self._selected_model_key = None
 
@@ -1495,15 +1517,16 @@ class CreateSimulatedBodyModel(QMainWindow):
                 self.sim_params['bodies'][idx].get('center_u', 0.0) + du
             )
             # Sync the tab spin boxes for this body
-            tab_idx = 1 + idx
-            tab_w = self._tabs.widget(tab_idx)
-            if tab_w is not None:
-                cv_spin = getattr(tab_w, 'center_v_spin', None)
-                cu_spin = getattr(tab_w, 'center_u_spin', None)
-                if cv_spin is not None:
-                    cv_spin.setValue(self.sim_params['bodies'][idx]['center_v'])
-                if cu_spin is not None:
-                    cu_spin.setValue(self.sim_params['bodies'][idx]['center_u'])
+            tab_idx = self._find_tab_by_properties('body', idx)
+            if tab_idx is not None:
+                tab_w = self._tabs.widget(tab_idx)
+                if tab_w is not None:
+                    cv_spin = getattr(tab_w, 'center_v_spin', None)
+                    cu_spin = getattr(tab_w, 'center_u_spin', None)
+                    if cv_spin is not None:
+                        cv_spin.setValue(self.sim_params['bodies'][idx]['center_v'])
+                    if cu_spin is not None:
+                        cu_spin.setValue(self.sim_params['bodies'][idx]['center_u'])
             self._updater.immediate_update()
         elif kind == 'star' and 0 <= idx < len(self.sim_params['stars']):
             self.sim_params['stars'][idx]['v'] = float(
@@ -1513,15 +1536,16 @@ class CreateSimulatedBodyModel(QMainWindow):
                 self.sim_params['stars'][idx].get('u', 0.0) + du
             )
             # Sync the tab spin boxes for this star
-            tab_idx = 1 + len(self.sim_params['bodies']) + idx
-            tab_w = self._tabs.widget(tab_idx)
-            if tab_w is not None:
-                v_spin = getattr(tab_w, 'v_spin', None)
-                u_spin = getattr(tab_w, 'u_spin', None)
-                if v_spin is not None:
-                    v_spin.setValue(self.sim_params['stars'][idx]['v'])
-                if u_spin is not None:
-                    u_spin.setValue(self.sim_params['stars'][idx]['u'])
+            tab_idx = self._find_tab_by_properties('star', idx)
+            if tab_idx is not None:
+                tab_w = self._tabs.widget(tab_idx)
+                if tab_w is not None:
+                    v_spin = getattr(tab_w, 'v_spin', None)
+                    u_spin = getattr(tab_w, 'u_spin', None)
+                    if v_spin is not None:
+                        v_spin.setValue(self.sim_params['stars'][idx]['v'])
+                    if u_spin is not None:
+                        u_spin.setValue(self.sim_params['stars'][idx]['u'])
             self._updater.immediate_update()
         self._last_drag_img_vu = (img_v, img_u)
 
