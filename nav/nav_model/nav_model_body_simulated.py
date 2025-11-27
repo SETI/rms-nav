@@ -25,7 +25,7 @@ class NavModelBodySimulated(NavModelBodyBase):
             obs: Observation containing image geometry (used for output shapes/margins).
             body_name: Logical body name for metadata/labels.
             sim_params: Dictionary of parameters saved by the GUI JSON. Expected keys:
-                center_v, center_u, semi_major_axis, semi_minor_axis, semi_c_axis,
+                center_v, center_u, axis1, axis2, axis3,
                 rotation_z (deg), rotation_tilt (deg),
                 illumination_angle (deg), phase_angle (deg),
                 crater_fill, crater_min_radius, crater_max_radius,
@@ -95,17 +95,17 @@ class NavModelBodySimulated(NavModelBodyBase):
         # Other parameters
         center_v = float(p.get('center_v', data_size_v / 2.0))
         center_u = float(p.get('center_u', data_size_u / 2.0))
-        semi_major_axis = float(p.get('semi_major_axis', 0.0))
-        semi_minor_axis = float(p.get('semi_minor_axis', 0.0))
-        semi_c_axis = float(p.get('semi_c_axis', min(semi_major_axis, semi_minor_axis)))
+        axis1 = float(p.get('axis1', 0.0))
+        axis2 = float(p.get('axis2', 0.0))
+        axis3 = float(p.get('axis3', min(axis1, axis2)))
 
         # Build simulated model image (float 0..1) at the normal image size
         sim_img = create_simulated_body(
             size=(data_size_v, data_size_u),
             center=(center_v, center_u),
-            semi_major_axis=semi_major_axis,
-            semi_minor_axis=semi_minor_axis,
-            semi_c_axis=semi_c_axis,
+            axis1=axis1,
+            axis2=axis2,
+            axis3=axis3,
             rotation_z=rotation_z_rad,
             rotation_tilt=rotation_tilt_rad,
             illumination_angle=illumination_angle_rad,

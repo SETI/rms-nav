@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QDoubleSpinBox,
     QFileDialog,
     QMessageBox,
     QFormLayout,
@@ -186,7 +187,8 @@ class NavBackplaneViewer(QDialog):
                  config: Optional[Config]) -> None:
         super().__init__(None)
         self.setWindowTitle('Backplane Viewer')
-        self.setMinimumSize(1300, 850)
+        # Minimum size: scroll area (900x800) + right panel (~400) + margins
+        self.setMinimumSize(1650, 950)
 
         self._dataset = dataset
         self._inst_name = inst_name
@@ -289,7 +291,9 @@ class NavBackplaneViewer(QDialog):
         layout.addLayout(left, stretch=3)
 
         # Right column: sections (Image Stretch, Summary, Backplanes)
-        right = QVBoxLayout()
+        right_widget = QWidget()
+        right_widget.setMinimumWidth(380)  # Ensure controls panel doesn't get too narrow
+        right = QVBoxLayout(right_widget)
         right.setSpacing(6)
         # Image Stretch group (built after image load)
         self._image_group = QGroupBox('Image Stretch')
@@ -308,14 +312,37 @@ class NavBackplaneViewer(QDialog):
         self._summary_group.setContentsMargins(6, 14, 6, 6)
         summary_form = QFormLayout(self._summary_group)
         summary_form.setSpacing(4)
-        self._summary_enable = QCheckBox('Show summary overlay (if available)')
+        self._summary_enable = QCheckBox('Show summary overlay')
         self._summary_enable.stateChanged.connect(lambda *_: self._compose_and_display())
+        summary_alpha_row = QHBoxLayout()
+        summary_alpha_row.setSpacing(4)
+        summary_alpha_row.setContentsMargins(0, 0, 0, 0)
+        summary_alpha_min_label = QLabel('0.0')
+        summary_alpha_min_label.setFixedWidth(30)
+        summary_alpha_min_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        summary_alpha_max_label = QLabel('1.0')
+        summary_alpha_max_label.setFixedWidth(35)
+        summary_alpha_max_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self._summary_alpha_slider = QSlider(Qt.Orientation.Horizontal)
-        self._summary_alpha_slider.setRange(0, 100)
-        self._summary_alpha_slider.setValue(50)
-        self._summary_alpha_slider.valueChanged.connect(lambda *_: self._compose_and_display())
+        self._summary_alpha_slider.setRange(0, 1000)  # 0.0 to 1.0 with 0.001 steps
+        self._summary_alpha_slider.setValue(500)  # 0.5
+        self._summary_alpha_slider.valueChanged.connect(self._on_summary_alpha_changed)
+        self._summary_alpha_spin = QDoubleSpinBox()
+        self._summary_alpha_spin.setRange(0.0, 1.0)
+        self._summary_alpha_spin.setDecimals(3)
+        self._summary_alpha_spin.setSingleStep(0.01)
+        self._summary_alpha_spin.setValue(0.5)
+        self._summary_alpha_spin.valueChanged.connect(self._on_summary_alpha_spin_changed)
+        summary_alpha_row.addWidget(summary_alpha_min_label)
+        summary_alpha_row.addWidget(self._summary_alpha_slider, stretch=1)
+        summary_alpha_row.addWidget(summary_alpha_max_label)
+        summary_alpha_row.addWidget(self._summary_alpha_spin)
+        summary_alpha_holder = QWidget()
+        summary_alpha_holder.setLayout(summary_alpha_row)
         summary_form.addRow(self._summary_enable)
-        summary_form.addRow('Alpha', self._summary_alpha_slider)
+        summary_form.addRow('Alpha', summary_alpha_holder)
         right.addWidget(self._summary_group)
 
         # Backplanes - separate groups
@@ -332,14 +359,37 @@ class NavBackplaneViewer(QDialog):
         self._body_id_enable = QCheckBox('Show BODY_ID_MAP')
         self._body_id_enable.setChecked(False)
         self._body_id_enable.stateChanged.connect(lambda *_: self._compose_and_display())
+        body_id_alpha_row = QHBoxLayout()
+        body_id_alpha_row.setSpacing(4)
+        body_id_alpha_row.setContentsMargins(0, 0, 0, 0)
+        body_id_alpha_min_label = QLabel('0.0')
+        body_id_alpha_min_label.setFixedWidth(30)
+        body_id_alpha_min_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        body_id_alpha_max_label = QLabel('1.0')
+        body_id_alpha_max_label.setFixedWidth(35)
+        body_id_alpha_max_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self._body_id_alpha = QSlider(Qt.Orientation.Horizontal)
-        self._body_id_alpha.setRange(0, 100)
-        self._body_id_alpha.setValue(50)
+        self._body_id_alpha.setRange(0, 1000)  # 0.0 to 1.0 with 0.001 steps
+        self._body_id_alpha.setValue(500)  # 0.5
         self._body_id_alpha.setMinimumWidth(alpha_min_width)
-        self._body_id_alpha.valueChanged.connect(lambda *_: self._compose_and_display())
+        self._body_id_alpha.valueChanged.connect(self._on_body_id_alpha_changed)
+        self._body_id_alpha_spin = QDoubleSpinBox()
+        self._body_id_alpha_spin.setRange(0.0, 1.0)
+        self._body_id_alpha_spin.setDecimals(3)
+        self._body_id_alpha_spin.setSingleStep(0.01)
+        self._body_id_alpha_spin.setValue(0.5)
+        self._body_id_alpha_spin.valueChanged.connect(self._on_body_id_alpha_spin_changed)
+        body_id_alpha_row.addWidget(body_id_alpha_min_label)
+        body_id_alpha_row.addWidget(self._body_id_alpha, stretch=1)
+        body_id_alpha_row.addWidget(body_id_alpha_max_label)
+        body_id_alpha_row.addWidget(self._body_id_alpha_spin)
+        body_id_alpha_holder = QWidget()
+        body_id_alpha_holder.setLayout(body_id_alpha_row)
         row_id1.addWidget(self._body_id_enable)
         row_id1.addWidget(QLabel('Alpha'))
-        row_id1.addWidget(self._body_id_alpha, stretch=1)
+        row_id1.addWidget(body_id_alpha_holder, stretch=1)
         row_id2 = QHBoxLayout()
         row_id2.setSpacing(6)
         self._body_id_cmap = QComboBox()
@@ -393,14 +443,37 @@ class NavBackplaneViewer(QDialog):
         self._body_combo = QComboBox()
         self._body_combo.addItem('None')
         self._body_combo.currentIndexChanged.connect(lambda *_: self._on_body_selection_changed())
+        body_alpha_row = QHBoxLayout()
+        body_alpha_row.setSpacing(4)
+        body_alpha_row.setContentsMargins(0, 0, 0, 0)
+        body_alpha_min_label = QLabel('0.0')
+        body_alpha_min_label.setFixedWidth(30)
+        body_alpha_min_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        body_alpha_max_label = QLabel('1.0')
+        body_alpha_max_label.setFixedWidth(35)
+        body_alpha_max_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self._body_alpha = QSlider(Qt.Orientation.Horizontal)
-        self._body_alpha.setRange(0, 100)
-        self._body_alpha.setValue(50)
+        self._body_alpha.setRange(0, 1000)  # 0.0 to 1.0 with 0.001 steps
+        self._body_alpha.setValue(500)  # 0.5
         self._body_alpha.setMinimumWidth(alpha_min_width)
-        self._body_alpha.valueChanged.connect(lambda *_: self._on_body_controls_changed())
+        self._body_alpha.valueChanged.connect(self._on_body_alpha_changed)
+        self._body_alpha_spin = QDoubleSpinBox()
+        self._body_alpha_spin.setRange(0.0, 1.0)
+        self._body_alpha_spin.setDecimals(3)
+        self._body_alpha_spin.setSingleStep(0.01)
+        self._body_alpha_spin.setValue(0.5)
+        self._body_alpha_spin.valueChanged.connect(self._on_body_alpha_spin_changed)
+        body_alpha_row.addWidget(body_alpha_min_label)
+        body_alpha_row.addWidget(self._body_alpha, stretch=1)
+        body_alpha_row.addWidget(body_alpha_max_label)
+        body_alpha_row.addWidget(self._body_alpha_spin)
+        body_alpha_holder = QWidget()
+        body_alpha_holder.setLayout(body_alpha_row)
         row_b1.addWidget(self._body_combo, stretch=1)
         row_b1.addWidget(QLabel('Alpha'))
-        row_b1.addWidget(self._body_alpha, stretch=1)
+        row_b1.addWidget(body_alpha_holder, stretch=1)
         row_b2 = QHBoxLayout()
         row_b2.setSpacing(6)
         # Body mode radio buttons
@@ -454,14 +527,37 @@ class NavBackplaneViewer(QDialog):
         self._ring_combo = QComboBox()
         self._ring_combo.addItem('None')
         self._ring_combo.currentIndexChanged.connect(lambda *_: self._on_ring_selection_changed())
+        ring_alpha_row = QHBoxLayout()
+        ring_alpha_row.setSpacing(4)
+        ring_alpha_row.setContentsMargins(0, 0, 0, 0)
+        ring_alpha_min_label = QLabel('0.0')
+        ring_alpha_min_label.setFixedWidth(30)
+        ring_alpha_min_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        ring_alpha_max_label = QLabel('1.0')
+        ring_alpha_max_label.setFixedWidth(35)
+        ring_alpha_max_label.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self._ring_alpha = QSlider(Qt.Orientation.Horizontal)
-        self._ring_alpha.setRange(0, 100)
-        self._ring_alpha.setValue(50)
+        self._ring_alpha.setRange(0, 1000)  # 0.0 to 1.0 with 0.001 steps
+        self._ring_alpha.setValue(500)  # 0.5
         self._ring_alpha.setMinimumWidth(alpha_min_width)
-        self._ring_alpha.valueChanged.connect(lambda *_: self._on_ring_controls_changed())
+        self._ring_alpha.valueChanged.connect(self._on_ring_alpha_changed)
+        self._ring_alpha_spin = QDoubleSpinBox()
+        self._ring_alpha_spin.setRange(0.0, 1.0)
+        self._ring_alpha_spin.setDecimals(3)
+        self._ring_alpha_spin.setSingleStep(0.01)
+        self._ring_alpha_spin.setValue(0.5)
+        self._ring_alpha_spin.valueChanged.connect(self._on_ring_alpha_spin_changed)
+        ring_alpha_row.addWidget(ring_alpha_min_label)
+        ring_alpha_row.addWidget(self._ring_alpha, stretch=1)
+        ring_alpha_row.addWidget(ring_alpha_max_label)
+        ring_alpha_row.addWidget(self._ring_alpha_spin)
+        ring_alpha_holder = QWidget()
+        ring_alpha_holder.setLayout(ring_alpha_row)
         row_r1.addWidget(self._ring_combo, stretch=1)
         row_r1.addWidget(QLabel('Alpha'))
-        row_r1.addWidget(self._ring_alpha, stretch=1)
+        row_r1.addWidget(ring_alpha_holder, stretch=1)
         row_r2 = QHBoxLayout()
         row_r2.setSpacing(6)
         # Ring mode radio buttons
@@ -500,7 +596,14 @@ class NavBackplaneViewer(QDialog):
         right.addWidget(self._bp_ring_group)
         # All panes compact; put stretch at bottom to absorb extra space
         right.addStretch(1)
-        layout.addLayout(right, stretch=2)
+        # Exit button at bottom right
+        exit_row = QHBoxLayout()
+        exit_row.addStretch()
+        exit_btn = QPushButton('Exit')
+        exit_btn.clicked.connect(self.close)
+        exit_row.addWidget(exit_btn)
+        right.addLayout(exit_row)
+        layout.addWidget(right_widget, stretch=2)
         # Initialize preferences and maps
         self._body_prefs: dict[str, dict[str, Any]] = {}
         self._ring_prefs: dict[str, dict[str, Any]] = {}
@@ -573,20 +676,26 @@ class NavBackplaneViewer(QDialog):
 
         # Optional summary PNG
         summary_png_file = self._nav_results_root / (results_stub + '_summary.png')
+        self._summary_rgba = None
         if summary_png_file.exists():
-            png_local = cast(str, summary_png_file.get_local_path())
-            with Image.open(png_local, mode='r') as im:
-                rgba = im.convert('RGBA')
-                self._summary_rgba = np.array(rgba)
-            if self._summary_rgba is not None:
-                self._logger.info('Loaded summary overlay "%s" size=%dx%d',
-                                  png_local,
-                                  self._summary_rgba.shape[1], self._summary_rgba.shape[0])
-            self._summary_enable.setEnabled(True)
-        else:
-            self._summary_rgba = None
+            try:
+                png_local = cast(str, summary_png_file.get_local_path())
+                with Image.open(png_local, mode='r') as im:
+                    rgba = im.convert('RGBA')
+                    self._summary_rgba = np.array(rgba)
+                if self._summary_rgba is not None:
+                    self._logger.info('Loaded summary overlay "%s" size=%dx%d',
+                                      png_local,
+                                      self._summary_rgba.shape[1], self._summary_rgba.shape[0])
+            except Exception:
+                self._logger.exception('Failed to load summary overlay from %s',
+                                       summary_png_file)
+                self._summary_rgba = None
+        # Enable/disable summary checkbox based on availability
+        has_summary = self._summary_rgba is not None
+        self._summary_enable.setEnabled(has_summary)
+        if not has_summary:
             self._summary_enable.setChecked(False)
-            self._summary_enable.setEnabled(False)
 
         # Load backplanes FITS
         fits_file = self._backplane_results_root / (results_stub + '_backplanes.fits')
@@ -625,6 +734,18 @@ class NavBackplaneViewer(QDialog):
                             self._bp_body_map[name] = (arr, units)
                         elif name.startswith('RING_'):
                             self._bp_ring_map[name] = (arr, units)
+        except FileNotFoundError:
+            # Show modal dialog for file not found
+            QMessageBox.warning(
+                self,
+                'FITS File Not Found',
+                f'Backplane FITS file not found:\n{fits_file}\n\n'
+                f'All backplane data will be unavailable.')
+            self._logger.warning('FITS file not found: %s', fits_file)
+            self._fits_hdus = []
+            self._bp_body_map.clear()
+            self._bp_ring_map.clear()
+            self._body_id_map = None
         except Exception:
             self._logger.exception('Failed to read FITS backplane file')
             self._fits_hdus = []
@@ -634,11 +755,21 @@ class NavBackplaneViewer(QDialog):
 
         # Populate dropdowns with names
         self._populate_backplane_combos()
+        # Enable/disable body show checkbox based on availability
+        has_bodies = bool(self._bp_body_map)
+        self._body_show.setEnabled(has_bodies)
+        if not has_bodies:
+            self._body_show.setChecked(False)
         # Enable/disable ring show checkbox based on availability
         has_rings = bool(self._bp_ring_map)
         self._ring_show.setEnabled(has_rings)
         if not has_rings:
             self._ring_show.setChecked(False)
+        # Enable/disable BODY_ID_MAP checkbox based on availability
+        has_body_id = self._body_id_map is not None
+        self._body_id_enable.setEnabled(has_body_id)
+        if not has_body_id:
+            self._body_id_enable.setChecked(False)
 
         # Compose first display
         self._reset_view()
@@ -682,7 +813,7 @@ class NavBackplaneViewer(QDialog):
         if self._summary_rgba is not None and self._summary_enable.isChecked():
             s = self._summary_rgba
             if s.shape[0] == h and s.shape[1] == w:
-                alpha = float(self._summary_alpha_slider.value()) / 100.0
+                alpha = float(self._summary_alpha_slider.value()) / 1000.0
                 s_rgb = s[..., :3]
                 s_a = (s[..., 3].astype(np.float32) / 255.0) * alpha
                 rgba = _alpha_blend_layer(rgba, s_rgb, s_a)
@@ -711,7 +842,7 @@ class NavBackplaneViewer(QDialog):
                     val = (norm * 255.0).astype(np.uint8)
                     rgb = np.stack([val, val, val], axis=-1)
                 a = np.zeros((h, w), dtype=np.float32)
-                a[valid] = float(self._body_id_alpha.value()) / 100.0
+                a[valid] = float(self._body_id_alpha.value()) / 1000.0
                 rgba = _alpha_blend_layer(rgba, rgb, a)
 
         # Body and Ring backplanes (shared helper)
@@ -727,7 +858,7 @@ class NavBackplaneViewer(QDialog):
                     rgba, arr, units, body_name,
                     valid_mask=valid,
                     mode=('Absolute' if self._body_mode_abs.isChecked() else 'Relative'),
-                    alpha=float(self._body_alpha.value()) / 100.0,
+                    alpha=float(self._body_alpha.value()) / 1000.0,
                     cmap_name=self._body_cmap.currentData(),
                 )
         # Ring
@@ -742,7 +873,7 @@ class NavBackplaneViewer(QDialog):
                     rgba, arr, units, ring_name,
                     valid_mask=valid,
                     mode=('Absolute' if self._ring_mode_abs.isChecked() else 'Relative'),
-                    alpha=float(self._ring_alpha.value()) / 100.0,
+                    alpha=float(self._ring_alpha.value()) / 1000.0,
                     cmap_name=self._ring_cmap.currentData(),
                 )
         return rgba
@@ -836,7 +967,9 @@ class NavBackplaneViewer(QDialog):
         if prefs:
             self._body_alpha.blockSignals(True)
             self._body_cmap.blockSignals(True)
-            self._body_alpha.setValue(round(float(prefs.get('alpha', 0.5)) * 100))
+            alpha_val = float(prefs.get('alpha', 0.5))
+            self._body_alpha.setValue(int(alpha_val * 1000))
+            self._body_alpha_spin.setValue(alpha_val)
             # Restore mode radios
             mode = str(prefs.get('mode', 'Relative'))
             if mode.lower().startswith('abs'):
@@ -863,7 +996,9 @@ class NavBackplaneViewer(QDialog):
         if prefs:
             self._ring_alpha.blockSignals(True)
             self._ring_cmap.blockSignals(True)
-            self._ring_alpha.setValue(round(float(prefs.get('alpha', 0.5)) * 100))
+            alpha_val = float(prefs.get('alpha', 0.5))
+            self._ring_alpha.setValue(int(alpha_val * 1000))
+            self._ring_alpha_spin.setValue(alpha_val)
             mode = str(prefs.get('mode', 'Relative'))
             if mode.lower().startswith('abs'):
                 self._ring_mode_abs.setChecked(True)
@@ -883,7 +1018,7 @@ class NavBackplaneViewer(QDialog):
         name = self._body_combo.currentText()
         if name:
             self._body_prefs[name] = {
-                'alpha': float(self._body_alpha.value()) / 100.0,
+                'alpha': float(self._body_alpha.value()) / 1000.0,
                 'mode': ('Absolute' if self._body_mode_abs.isChecked() else 'Relative'),
                 'cmap': self._body_cmap.currentData(),
             }
@@ -893,11 +1028,59 @@ class NavBackplaneViewer(QDialog):
         name = self._ring_combo.currentText()
         if name:
             self._ring_prefs[name] = {
-                'alpha': float(self._ring_alpha.value()) / 100.0,
+                'alpha': float(self._ring_alpha.value()) / 1000.0,
                 'mode': ('Absolute' if self._ring_mode_abs.isChecked() else 'Relative'),
                 'cmap': self._ring_cmap.currentData(),
             }
         self._compose_and_display()
+
+    def _on_summary_alpha_changed(self, value: int) -> None:
+        self._summary_alpha_spin.blockSignals(True)
+        self._summary_alpha_spin.setValue(value / 1000.0)
+        self._summary_alpha_spin.blockSignals(False)
+        self._compose_and_display()
+
+    def _on_summary_alpha_spin_changed(self, value: float) -> None:
+        self._summary_alpha_slider.blockSignals(True)
+        self._summary_alpha_slider.setValue(int(value * 1000))
+        self._summary_alpha_slider.blockSignals(False)
+        self._compose_and_display()
+
+    def _on_body_id_alpha_changed(self, value: int) -> None:
+        self._body_id_alpha_spin.blockSignals(True)
+        self._body_id_alpha_spin.setValue(value / 1000.0)
+        self._body_id_alpha_spin.blockSignals(False)
+        self._compose_and_display()
+
+    def _on_body_id_alpha_spin_changed(self, value: float) -> None:
+        self._body_id_alpha.blockSignals(True)
+        self._body_id_alpha.setValue(int(value * 1000))
+        self._body_id_alpha.blockSignals(False)
+        self._compose_and_display()
+
+    def _on_body_alpha_changed(self, value: int) -> None:
+        self._body_alpha_spin.blockSignals(True)
+        self._body_alpha_spin.setValue(value / 1000.0)
+        self._body_alpha_spin.blockSignals(False)
+        self._on_body_controls_changed()
+
+    def _on_body_alpha_spin_changed(self, value: float) -> None:
+        self._body_alpha.blockSignals(True)
+        self._body_alpha.setValue(int(value * 1000))
+        self._body_alpha.blockSignals(False)
+        self._on_body_controls_changed()
+
+    def _on_ring_alpha_changed(self, value: int) -> None:
+        self._ring_alpha_spin.blockSignals(True)
+        self._ring_alpha_spin.setValue(value / 1000.0)
+        self._ring_alpha_spin.blockSignals(False)
+        self._on_ring_controls_changed()
+
+    def _on_ring_alpha_spin_changed(self, value: float) -> None:
+        self._ring_alpha.blockSignals(True)
+        self._ring_alpha.setValue(int(value * 1000))
+        self._ring_alpha.blockSignals(False)
+        self._on_ring_controls_changed()
 
     # ---- Event handlers: pan/zoom ----
     def _on_press(self, event: QMouseEvent) -> None:
@@ -988,7 +1171,7 @@ class NavBackplaneViewer(QDialog):
         if self._summary_rgba is not None and self._summary_enable.isChecked():
             s = self._summary_rgba
             if s.shape[0] == h and s.shape[1] == w:
-                alpha = float(self._summary_alpha_slider.value()) / 100.0
+                alpha = float(self._summary_alpha_slider.value()) / 1000.0
                 s_rgb = s[..., :3].astype(np.float32)
                 s_a = (s[..., 3].astype(np.float32) / 255.0) * alpha
                 dst_rgb = rgba[..., :3].astype(np.float32)
@@ -1041,7 +1224,7 @@ class NavBackplaneViewer(QDialog):
                     val = (norm * 255.0).astype(np.uint8)
                     rgb = np.stack([val, val, val], axis=-1)
                 a = np.zeros((h, w), dtype=np.float32)
-                a[valid] = float(self._body_id_alpha.value()) / 100.0
+                a[valid] = float(self._body_id_alpha.value()) / 1000.0
                 dst_rgb = rgba[..., :3].astype(np.float32)
                 dst_a = rgba[..., 3].astype(np.float32) / 255.0
                 out_a = a + dst_a * (1.0 - a)
@@ -1066,7 +1249,7 @@ class NavBackplaneViewer(QDialog):
                                                     mode=('Absolute'
                                                           if self._body_mode_abs.isChecked()
                                                           else 'Relative'),
-                                                    alpha=float(self._body_alpha.value()) / 100.0,
+                                                    alpha=float(self._body_alpha.value()) / 1000.0,
                                                     cmap_name=self._body_cmap.currentData())
 
         # Selected Ring backplane
@@ -1084,7 +1267,7 @@ class NavBackplaneViewer(QDialog):
                                                     mode=('Absolute'
                                                           if self._ring_mode_abs.isChecked()
                                                           else 'Relative'),
-                                                    alpha=float(self._ring_alpha.value()) / 100.0,
+                                                    alpha=float(self._ring_alpha.value()) / 1000.0,
                                                     cmap_name=self._ring_cmap.currentData())
 
         # Scale/translate for zoom/pan
@@ -1272,7 +1455,6 @@ def main() -> None:
     backplane_results_root = FileCache('backplane_results').new_path(backplane_results_root_str)
 
     dataset: DataSet = arguments._dataset
-    dataset._validate_selection_arguments(arguments)  # type: ignore[attr-defined]
 
     image_groups: list[ImageFiles] = list(
         dataset.yield_image_files_from_arguments(arguments))

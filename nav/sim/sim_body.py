@@ -15,9 +15,9 @@ from nav.support.types import NDArrayBoolType, NDArrayFloatType, NDArrayIntType
 def create_simulated_body(
     size: tuple[int, int],
     center: tuple[float, float],
-    semi_major_axis: float,
-    semi_minor_axis: float,
-    semi_c_axis: float,
+    axis1: float,
+    axis2: float,
+    axis3: float,
     *,
     rotation_z: float = 0.0,
     rotation_tilt: float = 0.0,
@@ -29,6 +29,7 @@ def create_simulated_body(
     crater_power_law_exponent: float = 3.0,
     crater_relief_scale: float = 0.6,
     anti_aliasing: float = 0.0,
+    seed: Optional[int] = None,
 ) -> NDArrayFloatType:
     """Create a simulated planetary body as an ellipsoid with shading and surface features.
 
@@ -38,9 +39,9 @@ def create_simulated_body(
 
     Parameters:
         size: Tuple of (size_v, size_u) giving the image dimensions in pixels.
-        semi_major_axis: The semi-major axis (a) of the ellipsoid in pixels.
-        semi_minor_axis: The semi-minor axis (b) of the ellipsoid in pixels.
-        semi_c_axis: The third semi-axis (c) of the ellipsoid in pixels (depth).
+        axis1: The full width of axis 1 (a) of the ellipsoid in pixels.
+        axis2: The full width of axis 2 (b) of the ellipsoid in pixels.
+        axis3: The full width of axis 3 (c) of the ellipsoid in pixels (depth).
         center: Tuple of (v, u) giving the center position in floating-point pixels.
             (0.0, 0.0) is the top-left corner of pixel (0,0), (0.5, 0.5) is the
             center of pixel (0,0).
@@ -54,18 +55,24 @@ def create_simulated_body(
             π/2 = side illumination (half illuminated),
             π = back illumination (no visible illumination).
         crater_fill: Approximate fraction of the ellipse to fill with craters.
-        crater_min_radius: Minimum radius of a crater as a fraction of the semi-major axis.
-        crater_max_radius: Maximum radius of a crater as a fraction of the semi-major axis.
+        crater_min_radius: Minimum radius of a crater as a fraction of axis1.
+        crater_max_radius: Maximum radius of a crater as a fraction of axis1.
         crater_power_law_exponent: Power law exponent for the crater radius distribution.
         crater_relief_scale: Scale factor for the crater depth.
         anti_aliasing: Float between 0 and 1 controlling anti-aliasing amount at the limb.
             0 = no anti-aliasing, 1 = maximum anti-aliasing. Only affects the edge.
+        seed: Random seed for crater generation. If None, uses a hash-based seed.
 
     Returns:
         A 2D numpy array of shape (size_v, size_u) with float values from 0.0 to 1.0,
         where 0.0 is black and 1.0 is full white.
     """
     size_v, size_u = size
+
+    # Convert full-width axes to half-widths for ellipsoid math
+    semi_major_axis = axis1 / 2.0
+    semi_minor_axis = axis2 / 2.0
+    semi_c_axis = axis3 / 2.0
 
     # Determine anti-aliasing scale factor (only for limb smoothing)
     if anti_aliasing > 0:
@@ -137,7 +144,11 @@ def create_simulated_body(
         avg_crater_area = (crater_max_radius * semi_major_axis * aa_scale) ** 2
         n_craters = np.clip(int(crater_fill * total_area / avg_crater_area), 0, 1000)
 
-        seed_value = hash((semi_major_axis, semi_minor_axis, semi_c_axis, center)) & 0x7FFFFFFF
+        # Use provided seed or fall back to hash-based seed
+        if seed is not None:
+            seed_value = int(seed) & 0x7FFFFFFF
+        else:
+            seed_value = hash((axis1, axis2, axis3, center)) & 0x7FFFFFFF
         rng = np.random.RandomState(seed_value)
         # Choose crater centers strictly inside the ellipse (exclude AA rim and exterior)
         ellipse_mask_nz = ellipse_dist_sq < 1.0

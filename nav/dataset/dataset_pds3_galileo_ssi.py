@@ -35,11 +35,11 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
 
         filespec = cast(str, row['FILE_SPECIFICATION_NAME'])
         # Intentionally uppercase only
-        if not filespec.endswith('.IMG'):
+        if not filespec.endswith('.LBL'):
             raise ValueError(f'Bad Primary File Spec "{filespec}" - '
-                             'expected ".IMG"')
+                             'expected ".LBL"')
         # Intentionally uppercase only
-        return filespec.replace('.IMG', '.LBL')
+        return filespec
 
     @staticmethod
     def _get_image_filespec_from_label_filespec(label_filespec: str) -> str:
