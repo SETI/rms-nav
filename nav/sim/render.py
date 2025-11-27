@@ -5,14 +5,8 @@ from typing import Any, Optional, cast
 
 import numpy as np
 from psfmodel import GaussianPSF
+from scipy import ndimage
 from starcat import Star
-
-try:
-    from scipy import ndimage
-    HAS_SCIPY = True
-except ImportError:
-    HAS_SCIPY = False
-    ndimage = None
 
 from nav.sim.sim_body import create_simulated_body
 from nav.support.types import MutableStar
@@ -267,29 +261,10 @@ def _render_bodies_positioned_cached(
         du = center_u - ref_center_u
 
         # Create positioned body by translating the cached shape
-        if HAS_SCIPY:
-            # Use scipy for sub-pixel translation
-            positioned_body = ndimage.shift(
-                body_shape, (dv, du), order=1, mode='constant', cval=0.0
-            )
-        else:
-            # Fallback: simple integer translation
-            dv_int = int(np.round(dv))
-            du_int = int(np.round(du))
-            positioned_body = np.zeros((size_v, size_u), dtype=np.float64)
-            v_src_start = max(0, -dv_int)
-            v_src_end = min(size_v, size_v - dv_int)
-            u_src_start = max(0, -du_int)
-            u_src_end = min(size_u, size_u - du_int)
-            v_dst_start = max(0, dv_int)
-            v_dst_end = v_dst_start + (v_src_end - v_src_start)
-            u_dst_start = max(0, du_int)
-            u_dst_end = u_dst_start + (u_src_end - u_src_start)
-
-            if (v_src_end > v_src_start and u_src_end > u_src_start and
-                v_dst_end <= size_v and u_dst_end <= size_u):
-                positioned_body[v_dst_start:v_dst_end, u_dst_start:u_dst_end] = \
-                    body_shape[v_src_start:v_src_end, u_src_start:u_src_end]
+        # Use scipy for sub-pixel translation
+        positioned_body = ndimage.shift(
+            body_shape, (dv, du), order=1, mode='constant', cval=0.0
+        )
 
         # Composition: overwrite where body contributes
         mask = positioned_body > 0
