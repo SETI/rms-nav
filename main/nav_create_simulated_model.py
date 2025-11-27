@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
+from collections.abc import Callable
 import json
 import re
 import sys
-from typing import Any, Callable, Optional, cast
+from typing import Any, Optional, cast
 
 import numpy as np
 from PyQt6.QtCore import QTimer, Qt, pyqtSignal, QObject, QPoint
@@ -1269,8 +1270,8 @@ class CreateSimulatedBodyModel(QMainWindow):
         )
         fl.addRow('U:', u_spin)
         # Keep references so drag updates can sync the UI
-        w.v_spin = v_spin
-        w.u_spin = u_spin
+        w.v_spin = v_spin  # type: ignore[attr-defined]
+        w.u_spin = u_spin  # type: ignore[attr-defined]
 
         vmag = QDoubleSpinBox()
         vmag.setRange(-10.0, 30.0)
