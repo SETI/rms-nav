@@ -1,3 +1,4 @@
+import copy
 import json
 from functools import lru_cache
 from typing import Any, Optional, cast
@@ -578,4 +579,5 @@ def render_combined_model(
     sim_params_json = json.dumps(params_for_hash, sort_keys=True)
     cached_img, cached_meta = _render_combined_model_cached(sim_params_json, ignore_offset)
     # Return copies to avoid cache modification
-    return cached_img.copy(), cached_meta.copy()
+    # Use deepcopy for meta to fully isolate nested mutable structures
+    return cached_img.copy(), copy.deepcopy(cached_meta)

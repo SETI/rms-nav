@@ -1646,14 +1646,8 @@ class CreateSimulatedBodyModel(QMainWindow):
             try:
                 with open(filename) as f:
                     params = json.load(f)
-                # Shallow validation (no backward compatibility - don't read old semi_major_axis)
-                # Support old parameter names for backward compatibility
                 background_noise_val = params.get('background_noise_intensity')
-                if background_noise_val is None:
-                    background_noise_val = params.get('background_noise', 0.0)
                 background_stars_val = params.get('background_stars_num')
-                if background_stars_val is None:
-                    background_stars_val = params.get('background_stars', 0)
                 self.sim_params = {
                     'size_v': int(params.get('size_v', 512)),
                     'size_u': int(params.get('size_u', 512)),
