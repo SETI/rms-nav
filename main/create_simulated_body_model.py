@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import re
 import sys
 from typing import Any, Callable, Optional, cast
 
@@ -117,10 +118,6 @@ class CreateSimulatedBodyModel(QMainWindow):
         self._current_image: Optional[np.ndarray] = None
         self._last_meta: dict[str, Any] = {}
         self._base_pixmap: Optional[QPixmap] = None
-        # Cache for rendered images - store previous params hash and result
-        self._cached_params_hash: Optional[int] = None
-        self._cached_image: Optional[np.ndarray] = None
-        self._cached_meta: Optional[dict[str, Any]] = None
 
         # View state (copied math from existing GUI)
         self._zoom_factor = 1.0
@@ -200,7 +197,7 @@ class CreateSimulatedBodyModel(QMainWindow):
         right.addWidget(self._warning_label)
 
         self._tabs = QTabWidget()
-        self._tabs.setMovable(True)
+        self._tabs.setMovable(False)  # Prevent manual reordering
         # Connect tab bar click to detect clicks on "+" tab
         self._tabs.tabBarClicked.connect(self._on_tab_bar_clicked)
         # Track current tab changes to remember last valid tab
@@ -752,26 +749,65 @@ class CreateSimulatedBodyModel(QMainWindow):
         else:
             return False
 
+    def _find_unique_name(self, base_name: str) -> str:
+        """Find a unique name by incrementing the number suffix if needed.
+
+        Checks both bodies and stars to ensure the name is unique.
+        """
+        # Collect all existing names (case-insensitive)
+        existing_names = set()
+        for body in self.sim_params.get('bodies', []):
+            existing_names.add(body.get('name', '').lower())
+        for star in self.sim_params.get('stars', []):
+            existing_names.add(star.get('name', '').lower())
+
+        # Try the base name first
+        if base_name.lower() not in existing_names:
+            return base_name
+
+        # Extract base prefix and number if present
+        match = re.match(r'^(.+?)(\d+)$', base_name)
+        if match:
+            prefix = match.group(1)
+            start_num = int(match.group(2))
+        else:
+            # No number suffix, add one
+            prefix = base_name
+            start_num = 1
+
+        # Increment until we find a unique name
+        num = start_num + 1
+        while True:
+            candidate = f'{prefix}{num}'
+            if candidate.lower() not in existing_names:
+                return candidate
+            num += 1
+
     def _add_body_tab(self, params: Optional[dict[str, Any]] = None) -> None:
-        p = params or {
-            'name': f'Body{len(self.sim_params["bodies"])+1}',
-            'center_v': self.sim_params['size_v'] / 2.0,
-            'center_u': self.sim_params['size_u'] / 2.0,
-            'axis1': 100.0,
-            'axis2': 80.0,
-            'axis3': 80.0,
-            'rotation_z': 0.0,
-            'rotation_tilt': 0.0,
-            'illumination_angle': 0.0,
-            'phase_angle': 0.0,
-            'crater_fill': 0.0,
-            'crater_min_radius': 0.05,
-            'crater_max_radius': 0.25,
-            'crater_power_law_exponent': 3.0,
-            'crater_relief_scale': 0.6,
-            'anti_aliasing': 0.5,
-            'range': len(self.sim_params['bodies']) + 1,
-        }
+        if params is None:
+            default_name = f'Body{len(self.sim_params["bodies"])+1}'
+            unique_name = self._find_unique_name(default_name)
+            p = {
+                'name': unique_name,
+                'center_v': self.sim_params['size_v'] / 2.0,
+                'center_u': self.sim_params['size_u'] / 2.0,
+                'axis1': 100.0,
+                'axis2': 80.0,
+                'axis3': 80.0,
+                'rotation_z': 0.0,
+                'rotation_tilt': 0.0,
+                'illumination_angle': 0.0,
+                'phase_angle': 0.0,
+                'crater_fill': 0.0,
+                'crater_min_radius': 0.05,
+                'crater_max_radius': 0.25,
+                'crater_power_law_exponent': 3.0,
+                'crater_relief_scale': 0.6,
+                'anti_aliasing': 0.5,
+                'range': self._find_unique_range(),
+            }
+        else:
+            p = params
         idx = len(self.sim_params['bodies'])
         self.sim_params['bodies'].append(p)
         # Rebuild tabs to ensure consistency and proper ordering
@@ -784,14 +820,19 @@ class CreateSimulatedBodyModel(QMainWindow):
         self._updater.request_update()
 
     def _add_star_tab(self, params: Optional[dict[str, Any]] = None) -> None:
-        p = params or {
-            'name': f'Star{len(self.sim_params["stars"])+1}',
-            'v': self.sim_params['size_v'] / 2.0,
-            'u': self.sim_params['size_u'] / 2.0,
-            'vmag': 3.0,
-            'spectral_class': 'G2',
-            'psf_sigma': 3.0,
-        }
+        if params is None:
+            default_name = f'Star{len(self.sim_params["stars"])+1}'
+            unique_name = self._find_unique_name(default_name)
+            p = {
+                'name': unique_name,
+                'v': self.sim_params['size_v'] / 2.0,
+                'u': self.sim_params['size_u'] / 2.0,
+                'vmag': 3.0,
+                'spectral_class': 'G2',
+                'psf_sigma': 3.0,
+            }
+        else:
+            p = params
         idx = len(self.sim_params['stars'])
         self.sim_params['stars'].append(p)
         # Rebuild tabs to ensure consistency and proper ordering
@@ -827,41 +868,48 @@ class CreateSimulatedBodyModel(QMainWindow):
             # No widget at this tab index, nothing to delete
             return
         data_index = widget.property('data_index')
-        if data_index is None:
-            # Widget doesn't have a data_index (e.g., General or "+" tab)
+        widget_kind = widget.property('kind')
+        if data_index is None or widget_kind is None:
+            # Widget doesn't have required properties (e.g., General or "+" tab)
             return
-        self._delete_tab_by_index(data_index)
+        self._delete_tab_by_index(widget_kind, data_index)
 
-    def _delete_tab_by_index(self, data_index: int) -> None:
-        # Find the tab index for this data_index
-        # Skip General and "+" tabs
-        for tab_idx in range(self._tabs.count()):
-            text = self._tabs.tabText(tab_idx)
-            if text == 'General' or text == '+':
-                continue
-            widget = self._tabs.widget(tab_idx)
-            if widget is None:
-                continue
-            widget_data_index = widget.property('data_index')
-            widget_kind = widget.property('kind')
-            if widget_data_index == data_index:
-                if widget_kind == 'body':
-                    if 0 <= data_index < len(self.sim_params['bodies']):
-                        del self.sim_params['bodies'][data_index]
-                elif widget_kind == 'star':
-                    if 0 <= data_index < len(self.sim_params['stars']):
-                        del self.sim_params['stars'][data_index]
-                # Block signals before removing tab to prevent unwanted tab change events
-                self._tabs.blockSignals(True)
-                self._tabs.removeTab(tab_idx)
-                self._tabs.blockSignals(False)
+    def _delete_tab_by_index(self, kind: str, data_index: int) -> None:
+        """Delete a tab by its kind ('body' or 'star') and data_index."""
+        # Use the helper function to find the correct tab
+        tab_idx = self._find_tab_by_properties(kind, data_index)
+        if tab_idx is None:
+            # Tab not found, nothing to delete
+            return
 
-                # Rebuild tabs indices to align with lists
-                self._rebuild_dynamic_tabs()
-                self._ensure_tab_order()  # Ensure order is correct
-                self._validate_ranges()
-                self._updater.request_update()
-                return
+        # Verify the widget matches what we expect
+        widget = self._tabs.widget(tab_idx)
+        if widget is None:
+            return
+        widget_kind = widget.property('kind')
+        widget_data_index = widget.property('data_index')
+        if widget_kind != kind or widget_data_index != data_index:
+            # Safety check: widget doesn't match what we're looking for
+            return
+
+        # Delete from the correct list
+        if kind == 'body':
+            if 0 <= data_index < len(self.sim_params['bodies']):
+                del self.sim_params['bodies'][data_index]
+        elif kind == 'star':
+            if 0 <= data_index < len(self.sim_params['stars']):
+                del self.sim_params['stars'][data_index]
+
+        # Block signals before removing tab to prevent unwanted tab change events
+        self._tabs.blockSignals(True)
+        self._tabs.removeTab(tab_idx)
+        self._tabs.blockSignals(False)
+
+        # Rebuild tabs indices to align with lists
+        self._rebuild_dynamic_tabs()
+        self._ensure_tab_order()  # Ensure order is correct
+        self._validate_ranges()
+        self._updater.request_update()
 
     def _rebuild_dynamic_tabs(self) -> None:
         # Save General and "+" tab widgets
@@ -903,18 +951,30 @@ class CreateSimulatedBodyModel(QMainWindow):
         while self._tabs.count() > 0:
             self._tabs.removeTab(0)
 
-        # Re-add in correct order: General first, then bodies, then stars, then "+"
+        # Re-add in correct order: General first, then bodies (sorted by range),
+        # then stars (sorted by name), then "+"
         if general_widget is not None:
             self._tabs.addTab(general_widget, 'General')
 
-        # Add body tabs
-        for i, _ in enumerate(self.sim_params['bodies']):
+        # Add body tabs (sorted by range)
+        body_indices = list(range(len(self.sim_params['bodies'])))
+        body_indices.sort(
+            key=lambda i: (
+                self.sim_params['bodies'][i].get('range', float('inf')),
+                self.sim_params['bodies'][i].get('name', f'Body{i+1}').lower()
+            )
+        )
+        for i in body_indices:
             tab = self._build_body_tab(i)
             tab_name = self.sim_params['bodies'][i].get('name', f'Body{i+1}')
             self._tabs.addTab(tab, tab_name)
 
-        # Add star tabs
-        for i, _ in enumerate(self.sim_params['stars']):
+        # Add star tabs (sorted by name)
+        star_indices = list(range(len(self.sim_params['stars'])))
+        star_indices.sort(
+            key=lambda i: self.sim_params['stars'][i].get('name', f'Star{i+1}').lower()
+        )
+        for i in star_indices:
             tab = self._build_star_tab(i)
             tab_name = self.sim_params['stars'][i].get('name', f'Star{i+1}')
             self._tabs.addTab(tab, tab_name)
@@ -1170,7 +1230,9 @@ class CreateSimulatedBodyModel(QMainWindow):
 
         # Delete button at bottom
         delete_btn = QPushButton('Delete')
-        delete_btn.clicked.connect(lambda: self._delete_tab_by_index(idx))
+        delete_btn.clicked.connect(
+            lambda checked=False, i=idx: self._delete_tab_by_index('body', i)
+        )
         main_layout.addStretch()
         main_layout.addWidget(delete_btn)
 
@@ -1232,7 +1294,9 @@ class CreateSimulatedBodyModel(QMainWindow):
 
         # Delete button at bottom
         delete_btn = QPushButton('Delete')
-        delete_btn.clicked.connect(lambda: self._delete_tab_by_index(idx))
+        delete_btn.clicked.connect(
+            lambda checked=False, i=idx: self._delete_tab_by_index('star', i)
+        )
         main_layout.addStretch()
         main_layout.addWidget(delete_btn)
 
@@ -1334,22 +1398,31 @@ class CreateSimulatedBodyModel(QMainWindow):
             self._updater.request_update()
 
     def _update_tab_titles(self) -> None:
-        # Update body tab titles by finding tabs by properties
-        for i, p in enumerate(self.sim_params['bodies']):
-            tab_idx = self._find_tab_by_properties('body', i)
-            if tab_idx is not None:
-                self._tabs.setTabText(tab_idx, p.get('name', f'Body{i+1}'))
-        # Update star tab titles by finding tabs by properties
-        for j, p in enumerate(self.sim_params['stars']):
-            tab_idx = self._find_tab_by_properties('star', j)
-            if tab_idx is not None:
-                self._tabs.setTabText(tab_idx, p.get('name', f'Star{j+1}'))
+        # Rebuild tabs to maintain sorted order when names change
+        # This ensures bodies and stars are always sorted by name
+        self._rebuild_dynamic_tabs()
+
+    def _find_unique_range(self) -> float:
+        """Find a unique range value by incrementing from 1 until one doesn't exist."""
+        existing_ranges = set()
+        for body in self.sim_params.get('bodies', []):
+            range_val = body.get('range')
+            if range_val is not None:
+                existing_ranges.add(float(range_val))
+
+        # Start from 1 and increment until we find a unique range
+        candidate = 1.0
+        while candidate in existing_ranges:
+            candidate += 1.0
+        return candidate
 
     def _validate_ranges(self) -> None:
-        ranges = [
-            str(self.sim_params['bodies'][i].get('range'))
-            for i in range(len(self.sim_params['bodies']))
-        ]
+        """Check for duplicate body ranges and display a warning if found."""
+        ranges = []
+        for i in range(len(self.sim_params['bodies'])):
+            range_val = self.sim_params['bodies'][i].get('range')
+            if range_val is not None:
+                ranges.append(float(range_val))
         duplicates = len(ranges) != len(set(ranges))
         self._warning_label.setText(
             'Warning: duplicate body ranges' if duplicates else ''
@@ -1358,32 +1431,10 @@ class CreateSimulatedBodyModel(QMainWindow):
     # ---- Rendering ----
     def _update_image(self) -> None:
         try:
-            # Create hash of sim_params for caching
-            # (exclude visual aids which don't affect rendering)
-            params_for_hash = {
-                k: v for k, v in self.sim_params.items()
-                if k not in ['offset_v', 'offset_u']  # Offsets are ignored in preview
-            }
-            params_str = json.dumps(params_for_hash, sort_keys=True)
-            params_hash = hash(params_str)
-
-            # Check cache
-            if (self._cached_params_hash == params_hash and
-                self._cached_image is not None and
-                self._cached_meta is not None):
-                # Use cached result
-                self._current_image = self._cached_image
-                self._last_meta = self._cached_meta
-            else:
-                # Render new image
-                img, meta = render_combined_model(self.sim_params, ignore_offset=True)
-                self._current_image = img
-                self._last_meta = meta
-                # Update cache
-                self._cached_params_hash = params_hash
-                self._cached_image = img.copy() if img is not None else None
-                self._cached_meta = meta.copy() if meta is not None else None
-
+            # Render image (caching is handled in render.py)
+            img, meta = render_combined_model(self.sim_params, ignore_offset=True)
+            self._current_image = img
+            self._last_meta = meta
             self._display_image()
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to render image:\n{str(e)}')
