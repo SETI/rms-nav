@@ -164,3 +164,4 @@ cython_debug/
 csmithing/
 .code_planner_cache.db
 prof/
+_work/

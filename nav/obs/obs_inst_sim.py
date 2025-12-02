@@ -24,24 +24,29 @@ class ObsSim(ObsSnapshotInst):
                   *,
                   config: Optional[Config] = None,
                   extfov_margin_vu: Optional[tuple[int, int]] = None,
-                  **_kwargs: Any) -> 'ObsSim':
+                  **kwargs: Any) -> 'ObsSim':
         """Creates an ObsSim from a JSON file.
 
         Parameters:
             path: Path to the JSON description file.
             config: Navigation configuration. If None, uses defaults.
             extfov_margin_vu: Optional extended FOV margins (v,u) to add around the image.
-            **_kwargs: Additional keyword arguments (none for this instrument).
+            **kwargs: Additional keyword arguments.
+                sim_params: Dictionary of parameters saved by the GUI JSON. If present,
+                this will override the JSON file.
         """
 
         config = config or DEFAULT_CONFIG
         logger = DEFAULT_LOGGER
 
+        sim_params = kwargs.get('sim_params', None)
         json_path = FCPath(path).absolute()
-        logger.debug(f'Reading simulated image JSON {json_path}')
-
-        with json_path.open() as f:
-            sim_params = json.load(f)
+        if sim_params is None:
+            logger.debug(f'Reading simulated image JSON {json_path}')
+            with json_path.open() as f:
+                sim_params = json.load(f)
+        else:
+            logger.debug('Using provided sim_params')
 
         # Required fields
         try:

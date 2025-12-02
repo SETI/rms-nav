@@ -42,9 +42,8 @@ class ObsVoyagerISS(ObsSnapshotInst):
         logger = DEFAULT_LOGGER
 
         logger.debug(f'Reading Voyager ISS image {path}')
-        path = FCPath(path).absolute()
         obs = oops.hosts.voyager.iss.from_file(path)
-        obs.abspath = path
+        obs.abspath = FCPath(path).get_local_path().absolute()
 
         inst_config = config.category('voyager_iss')
 

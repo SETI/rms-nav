@@ -51,11 +51,10 @@ class ObsCassiniISS(ObsSnapshotInst):
         logger.debug(f'Reading Cassini ISS image {path}')
         logger.debug(f'  Fast distortion: {fast_distortion}')
         logger.debug(f'  Return all planets: {return_all_planets}')
-        path = FCPath(path).absolute()
         obs = oops.hosts.cassini.iss.from_file(path,
                                                fast_distortion=fast_distortion,
                                                return_all_planets=return_all_planets)
-        obs.abspath = path
+        obs.abspath = FCPath(path).get_local_path().absolute()
 
         detector = obs.detector.lower()
         inst_config = config.category('cassini_iss')[detector]

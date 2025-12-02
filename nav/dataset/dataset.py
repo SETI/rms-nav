@@ -27,6 +27,7 @@ class ImageFile:
     results_path_stub: str
     # Convert this to use a default factory
     index_file_row: dict[str, Any] = field(default_factory=dict)
+    extra_params: dict[str, Any] = field(default_factory=dict)
     _image_file_path: Optional[Path] = None
     _label_file_path: Optional[Path] = None
 
@@ -41,14 +42,20 @@ class ImageFile:
     @property
     def image_file_path(self) -> Path:
         if self._image_file_path is None:
-            self._image_file_path = cast(Path, self.image_file_url.retrieve())
+            self._image_file_path = cast(Path, self.image_file_url.get_local_path())
         return self._image_file_path
+
+    def retrieve_image_file(self) -> Path:
+        return cast(Path, self.image_file_url.retrieve())
 
     @property
     def label_file_path(self) -> Path:
         if self._label_file_path is None:
-            self._label_file_path = cast(Path, self.label_file_url.retrieve())
+            self._label_file_path = cast(Path, self.label_file_url.get_local_path())
         return self._label_file_path
+
+    def retrieve_label_file(self) -> Path:
+        return cast(Path, self.label_file_url.retrieve())
 
 
 @dataclass
