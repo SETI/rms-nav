@@ -39,13 +39,14 @@ class ObsSim(ObsSnapshotInst):
         config = config or DEFAULT_CONFIG
         logger = DEFAULT_LOGGER
 
-        sim_params = kwargs.get('sim_params', None)
+        provided_sim_params = kwargs.get('sim_params', None)
         json_path = FCPath(path).absolute()
-        if sim_params is None:
+        if provided_sim_params is None:
             logger.debug(f'Reading simulated image JSON {json_path}')
             with json_path.open() as f:
                 sim_params = json.load(f)
         else:
+            sim_params = provided_sim_params
             logger.debug('Using provided sim_params')
 
         # Required fields
@@ -55,8 +56,13 @@ class ObsSim(ObsSnapshotInst):
             offset_v = float(sim_params.get('offset_v', 0.0))
             offset_u = float(sim_params.get('offset_u', 0.0))
         except (KeyError, TypeError, ValueError) as e:
-            raise ValueError('Invalid or missing size/offset field in simulated image '
-                             f'JSON file "{json_path}": {e}') from e
+            if provided_sim_params is None:
+                raise ValueError('Invalid or missing size/offset field in simulated image '
+                                 f'JSON file "{json_path}": {e}') from e
+            else:
+                raise ValueError('Invalid or missing size/offset field in provided '
+                                 'sim_params for simulated image JSON file '
+                                 f'"{json_path}": {e}') from e
 
         # Build a basic Snapshot with a flat FOV and dummy geometry
         fov = oops.fov.FlatFOV((1.0, 1.0), (size_u, size_v))

@@ -102,7 +102,10 @@ def collect_results(
         try:
             with metadata_file.open() as f:
                 metadata = json.load(f)
-        except Exception as e:
+        except json.JSONDecodeError as e:
+            print(f'Warning: Invalid JSON in {metadata_file.name}: {e}')
+            continue
+        except OSError as e:
             print(f'Warning: Could not read metadata file {metadata_file.name}: {e}')
             continue
 
@@ -118,11 +121,19 @@ def collect_results(
             continue
 
         # Offset format is [dv, du] according to nav_master.py
-        if not isinstance(offset, (list, tuple)) or len(offset) != 2:
-            print(f'Warning: Invalid offset format in {metadata_file.name}: {offset}')
+        # Explicitly validate type and length
+        if not isinstance(offset, (list, tuple)):
+            print(f'Warning: Invalid offset type in {metadata_file.name}: {type(offset)}')
+            continue
+        if len(offset) != 2:
+            print(f'Warning: Invalid offset length in {metadata_file.name}: {len(offset)}')
             continue
 
-        found_v, found_u = float(offset[0]), float(offset[1])
+        try:
+            found_v, found_u = float(offset[0]), float(offset[1])
+        except (ValueError, TypeError) as e:
+            print(f'Warning: Could not convert offset values to float in {metadata_file.name}: {e}')
+            continue
 
         # Store result
         results[(original_u, original_v)] = (found_u, found_v)
@@ -146,8 +157,8 @@ def create_heatmaps(
         return
 
     # Extract all unique U and V values
-    u_values = sorted(set(u for u, v in results.keys()))
-    v_values = sorted(set(v for u, v in results.keys()))
+    u_values = sorted({u for u, v in results.keys()})
+    v_values = sorted({v for u, v in results.keys()})
 
     # Create grid
     u_grid, v_grid = np.meshgrid(u_values, v_values)
@@ -171,7 +182,7 @@ def create_heatmaps(
         v_error_grid[v_idx, u_idx] = v_error
 
     # Create two subplots
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+    _fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
 
     # Plot U error heatmap
     im1 = ax1.pcolormesh(u_grid, v_grid, u_error_grid, shading='auto', cmap='RdBu_r')
