@@ -1,7 +1,8 @@
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from filecache import FCPath
 import numpy as np
+from pathlib import Path
 
 from nav.config import DEFAULT_CONFIG, DEFAULT_LOGGER, Config
 from nav.support.time import et_to_utc
@@ -43,7 +44,7 @@ class ObsVoyagerISS(ObsSnapshotInst):
 
         logger.debug(f'Reading Voyager ISS image {path}')
         obs = oops.hosts.voyager.iss.from_file(path)
-        obs.abspath = FCPath(path).get_local_path().absolute()
+        obs.abspath = cast(Path, FCPath(path).get_local_path()).absolute()
 
         inst_config = config.category('voyager_iss')
 

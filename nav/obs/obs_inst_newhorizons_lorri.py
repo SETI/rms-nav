@@ -1,7 +1,8 @@
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from filecache import FCPath
 import numpy as np
+from pathlib import Path
 
 from nav.config import DEFAULT_CONFIG, DEFAULT_LOGGER, Config
 from nav.support.time import et_to_utc
@@ -45,7 +46,7 @@ class ObsNewHorizonsLORRI(ObsSnapshotInst):
         # TODO calibration=False is required because the hosts module can't find things like
         # the distance from the Sun to M7. How do we handle this?
         obs = oops.hosts.newhorizons.lorri.from_file(path, calibration=False)
-        obs.abspath = FCPath(path).get_local_path().absolute()
+        obs.abspath = cast(Path, FCPath(path).get_local_path()).absolute()
 
         inst_config = config.category('newhorizons_lorri')
         # TODO Calibrate once oops.hosts is fixed.

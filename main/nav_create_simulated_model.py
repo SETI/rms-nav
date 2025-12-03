@@ -1301,17 +1301,21 @@ class CreateSimulatedBodyModel(QMainWindow):
         psf_size_v_row.setContentsMargins(0, 0, 0, 0)
         psf_size_v_min_label = QLabel('1')
         psf_size_v_min_label.setFixedWidth(35)
-        psf_size_v_min_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        psf_size_v_min_label.setAlignment(Qt.AlignmentFlag.AlignRight |
+                                          Qt.AlignmentFlag.AlignVCenter)
         psf_size_v_max_label = QLabel('23')
         psf_size_v_max_label.setFixedWidth(40)
-        psf_size_v_max_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        psf_size_v_max_label.setAlignment(Qt.AlignmentFlag.AlignLeft |
+                                          Qt.AlignmentFlag.AlignVCenter)
         psf_size_v_slider = QSlider(Qt.Orientation.Horizontal)
         psf_size_v_slider.setRange(0, 11)  # 12 positions for odd values 1-23
         psf_size_v_default = p.get('psf_size', (11, 11))[0]
         # Ensure value is odd
         psf_size_v_default = int(psf_size_v_default)
         if psf_size_v_default % 2 == 0:
-            psf_size_v_default = max(1, min(23, psf_size_v_default - 1 if psf_size_v_default > 1 else 1))
+            psf_size_v_default = max(1, min(23,
+                                            psf_size_v_default - 1
+                                            if psf_size_v_default > 1 else 1))
         # Convert odd value to slider position: (value - 1) // 2
         psf_size_v_slider.setValue((psf_size_v_default - 1) // 2)
         psf_size_v_slider.valueChanged.connect(
@@ -1342,17 +1346,21 @@ class CreateSimulatedBodyModel(QMainWindow):
         psf_size_u_row.setContentsMargins(0, 0, 0, 0)
         psf_size_u_min_label = QLabel('1')
         psf_size_u_min_label.setFixedWidth(35)
-        psf_size_u_min_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        psf_size_u_min_label.setAlignment(Qt.AlignmentFlag.AlignRight |
+                                          Qt.AlignmentFlag.AlignVCenter)
         psf_size_u_max_label = QLabel('23')
         psf_size_u_max_label.setFixedWidth(40)
-        psf_size_u_max_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        psf_size_u_max_label.setAlignment(Qt.AlignmentFlag.AlignLeft |
+                                          Qt.AlignmentFlag.AlignVCenter)
         psf_size_u_slider = QSlider(Qt.Orientation.Horizontal)
         psf_size_u_slider.setRange(0, 11)  # 12 positions for odd values 1-23
         psf_size_u_default = p.get('psf_size', (11, 11))[1]
         # Ensure value is odd
         psf_size_u_default = int(psf_size_u_default)
         if psf_size_u_default % 2 == 0:
-            psf_size_u_default = max(1, min(23, psf_size_u_default - 1 if psf_size_u_default > 1 else 1))
+            psf_size_u_default = max(1, min(23,
+                                            psf_size_u_default - 1
+                                            if psf_size_u_default > 1 else 1))
         # Convert odd value to slider position: (value - 1) // 2
         psf_size_u_slider.setValue((psf_size_u_default - 1) // 2)
         psf_size_u_slider.valueChanged.connect(
