@@ -83,16 +83,19 @@ def process_task(
         inst_name = dataset_name_to_inst_name(dataset_name)
     except KeyError:
         return False, f'{task_id}: Unknown dataset "{dataset_name}"'
+
     obs_class = inst_name_to_obs_class(inst_name)
     files = task_data.get('files', None)
     if files is None:
         return False, f'{task_id}: "files" field is required'
+
     image_files = []
     for file in files:
         image_file_url = file.get('image_file_url', None)
         label_file_url = file.get('label_file_url', None)
         results_path_stub = file.get('results_path_stub', None)
         index_file_row = file.get('index_file_row', None)
+        extra_params = file.get('extra_params', {})
         if image_file_url is None:
             return False, f'{task_id}: "image_file_url" field is required'
         if label_file_url is None:
@@ -104,6 +107,7 @@ def process_task(
             label_file_url=FCPath(label_file_url),
             results_path_stub=results_path_stub,
             index_file_row=index_file_row,
+            extra_params=extra_params,
         )
         image_files.append(image_file)
 

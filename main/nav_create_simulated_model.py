@@ -790,8 +790,8 @@ class CreateSimulatedBodyModel(QMainWindow):
             unique_name = self._find_unique_name(default_name)
             p = {
                 'name': unique_name,
-                'center_v': self.sim_params['size_v'] / 2.0,
-                'center_u': self.sim_params['size_u'] / 2.0,
+                'center_v': self.sim_params['size_v'] // 2.0 + 0.5,
+                'center_u': self.sim_params['size_u'] // 2.0 + 0.5,
                 'axis1': 100.0,
                 'axis2': 80.0,
                 'axis3': 80.0,
@@ -826,11 +826,12 @@ class CreateSimulatedBodyModel(QMainWindow):
             unique_name = self._find_unique_name(default_name)
             p = {
                 'name': unique_name,
-                'v': self.sim_params['size_v'] / 2.0,
-                'u': self.sim_params['size_u'] / 2.0,
+                'v': self.sim_params['size_v'] // 2.0 + 0.5,
+                'u': self.sim_params['size_u'] // 2.0 + 0.5,
                 'vmag': 3.0,
                 'spectral_class': 'G2',
-                'psf_sigma': 3.0,
+                'psf_sigma': 1.0,
+                'psf_size': (11, 11),
             }
         else:
             p = params
@@ -1293,6 +1294,96 @@ class CreateSimulatedBodyModel(QMainWindow):
         )
         fl.addRow('PSF sigma:', psf)
 
+        # PSF size V slider with min/max labels and spinbox
+        # Map slider positions 0-11 to odd values 1, 3, 5, ..., 23
+        psf_size_v_row = QHBoxLayout()
+        psf_size_v_row.setSpacing(4)
+        psf_size_v_row.setContentsMargins(0, 0, 0, 0)
+        psf_size_v_min_label = QLabel('1')
+        psf_size_v_min_label.setFixedWidth(35)
+        psf_size_v_min_label.setAlignment(Qt.AlignmentFlag.AlignRight |
+                                          Qt.AlignmentFlag.AlignVCenter)
+        psf_size_v_max_label = QLabel('23')
+        psf_size_v_max_label.setFixedWidth(40)
+        psf_size_v_max_label.setAlignment(Qt.AlignmentFlag.AlignLeft |
+                                          Qt.AlignmentFlag.AlignVCenter)
+        psf_size_v_slider = QSlider(Qt.Orientation.Horizontal)
+        psf_size_v_slider.setRange(0, 11)  # 12 positions for odd values 1-23
+        psf_size_v_default = p.get('psf_size', (11, 11))[0]
+        # Ensure value is odd
+        psf_size_v_default = int(psf_size_v_default)
+        if psf_size_v_default % 2 == 0:
+            psf_size_v_default = max(1, min(23,
+                                            psf_size_v_default - 1
+                                            if psf_size_v_default > 1 else 1))
+        # Convert odd value to slider position: (value - 1) // 2
+        psf_size_v_slider.setValue((psf_size_v_default - 1) // 2)
+        psf_size_v_slider.valueChanged.connect(
+            lambda v, i=idx: self._on_star_psf_size_v_slider(i, v)
+        )
+        psf_size_v_spin = QSpinBox()
+        psf_size_v_spin.setRange(1, 23)
+        psf_size_v_spin.setSingleStep(2)  # Step by 2 to keep odd
+        psf_size_v_spin.setValue(psf_size_v_default)
+        psf_size_v_spin.valueChanged.connect(
+            lambda v, i=idx: self._on_star_psf_size_v_spin(i, v)
+        )
+        psf_size_v_row.addWidget(psf_size_v_min_label)
+        psf_size_v_row.addWidget(psf_size_v_slider, stretch=1)
+        psf_size_v_row.addWidget(psf_size_v_max_label)
+        psf_size_v_row.addWidget(psf_size_v_spin)
+        psf_size_v_holder = QWidget()
+        psf_size_v_holder.setLayout(psf_size_v_row)
+        fl.addRow('PSF size V:', psf_size_v_holder)
+        # Store references for sync
+        w.psf_size_v_slider = psf_size_v_slider  # type: ignore[attr-defined]
+        w.psf_size_v_spin = psf_size_v_spin  # type: ignore[attr-defined]
+
+        # PSF size U slider with min/max labels and spinbox
+        # Map slider positions 0-11 to odd values 1, 3, 5, ..., 23
+        psf_size_u_row = QHBoxLayout()
+        psf_size_u_row.setSpacing(4)
+        psf_size_u_row.setContentsMargins(0, 0, 0, 0)
+        psf_size_u_min_label = QLabel('1')
+        psf_size_u_min_label.setFixedWidth(35)
+        psf_size_u_min_label.setAlignment(Qt.AlignmentFlag.AlignRight |
+                                          Qt.AlignmentFlag.AlignVCenter)
+        psf_size_u_max_label = QLabel('23')
+        psf_size_u_max_label.setFixedWidth(40)
+        psf_size_u_max_label.setAlignment(Qt.AlignmentFlag.AlignLeft |
+                                          Qt.AlignmentFlag.AlignVCenter)
+        psf_size_u_slider = QSlider(Qt.Orientation.Horizontal)
+        psf_size_u_slider.setRange(0, 11)  # 12 positions for odd values 1-23
+        psf_size_u_default = p.get('psf_size', (11, 11))[1]
+        # Ensure value is odd
+        psf_size_u_default = int(psf_size_u_default)
+        if psf_size_u_default % 2 == 0:
+            psf_size_u_default = max(1, min(23,
+                                            psf_size_u_default - 1
+                                            if psf_size_u_default > 1 else 1))
+        # Convert odd value to slider position: (value - 1) // 2
+        psf_size_u_slider.setValue((psf_size_u_default - 1) // 2)
+        psf_size_u_slider.valueChanged.connect(
+            lambda v, i=idx: self._on_star_psf_size_u_slider(i, v)
+        )
+        psf_size_u_spin = QSpinBox()
+        psf_size_u_spin.setRange(1, 23)
+        psf_size_u_spin.setSingleStep(2)  # Step by 2 to keep odd
+        psf_size_u_spin.setValue(psf_size_u_default)
+        psf_size_u_spin.valueChanged.connect(
+            lambda v, i=idx: self._on_star_psf_size_u_spin(i, v)
+        )
+        psf_size_u_row.addWidget(psf_size_u_min_label)
+        psf_size_u_row.addWidget(psf_size_u_slider, stretch=1)
+        psf_size_u_row.addWidget(psf_size_u_max_label)
+        psf_size_u_row.addWidget(psf_size_u_spin)
+        psf_size_u_holder = QWidget()
+        psf_size_u_holder.setLayout(psf_size_u_row)
+        fl.addRow('PSF size U:', psf_size_u_holder)
+        # Store references for sync
+        w.psf_size_u_slider = psf_size_u_slider  # type: ignore[attr-defined]
+        w.psf_size_u_spin = psf_size_u_spin  # type: ignore[attr-defined]
+
         # Delete button at bottom
         delete_btn = QPushButton('Delete')
         delete_btn.clicked.connect(
@@ -1323,6 +1414,94 @@ class CreateSimulatedBodyModel(QMainWindow):
             self.sim_params['stars'][idx][key] = (
                 float(value) if isinstance(value, (int, float)) else value
             )
+            self._updater.request_update()
+
+    def _on_star_psf_size_v_slider(self, idx: int, value: int) -> None:
+        # Convert slider position (0-11) to odd value (1, 3, 5, ..., 23)
+        odd_value = value * 2 + 1
+        tab_idx = self._find_tab_by_properties('star', idx)
+        if tab_idx is not None:
+            tab_w = self._tabs.widget(tab_idx)
+            if tab_w is not None:
+                spin = getattr(tab_w, 'psf_size_v_spin', None)
+                if spin is not None:
+                    spin.blockSignals(True)
+                    spin.setValue(odd_value)
+                    spin.blockSignals(False)
+        if 0 <= idx < len(self.sim_params['stars']):
+            current_psf_size = self.sim_params['stars'][idx].get('psf_size', (11, 11))
+            self.sim_params['stars'][idx]['psf_size'] = (odd_value, current_psf_size[1])
+            self._updater.request_update()
+
+    def _on_star_psf_size_v_spin(self, idx: int, value: int) -> None:
+        # Ensure value is odd (round to nearest odd)
+        odd_value = value if value % 2 == 1 else (value - 1 if value > 1 else 1)
+        # Clamp to valid range
+        odd_value = max(1, min(23, odd_value))
+        tab_idx = self._find_tab_by_properties('star', idx)
+        if tab_idx is not None:
+            tab_w = self._tabs.widget(tab_idx)
+            if tab_w is not None:
+                # Update spinbox if value was adjusted
+                if odd_value != value:
+                    spin = getattr(tab_w, 'psf_size_v_spin', None)
+                    if spin is not None:
+                        spin.blockSignals(True)
+                        spin.setValue(odd_value)
+                        spin.blockSignals(False)
+                # Convert odd value to slider position: (value - 1) // 2
+                slider = getattr(tab_w, 'psf_size_v_slider', None)
+                if slider is not None:
+                    slider.blockSignals(True)
+                    slider.setValue((odd_value - 1) // 2)
+                    slider.blockSignals(False)
+        if 0 <= idx < len(self.sim_params['stars']):
+            current_psf_size = self.sim_params['stars'][idx].get('psf_size', (11, 11))
+            self.sim_params['stars'][idx]['psf_size'] = (odd_value, current_psf_size[1])
+            self._updater.request_update()
+
+    def _on_star_psf_size_u_slider(self, idx: int, value: int) -> None:
+        # Convert slider position (0-11) to odd value (1, 3, 5, ..., 23)
+        odd_value = value * 2 + 1
+        tab_idx = self._find_tab_by_properties('star', idx)
+        if tab_idx is not None:
+            tab_w = self._tabs.widget(tab_idx)
+            if tab_w is not None:
+                spin = getattr(tab_w, 'psf_size_u_spin', None)
+                if spin is not None:
+                    spin.blockSignals(True)
+                    spin.setValue(odd_value)
+                    spin.blockSignals(False)
+        if 0 <= idx < len(self.sim_params['stars']):
+            current_psf_size = self.sim_params['stars'][idx].get('psf_size', (11, 11))
+            self.sim_params['stars'][idx]['psf_size'] = (current_psf_size[0], odd_value)
+            self._updater.request_update()
+
+    def _on_star_psf_size_u_spin(self, idx: int, value: int) -> None:
+        # Ensure value is odd (round to nearest odd)
+        odd_value = value if value % 2 == 1 else (value - 1 if value > 1 else 1)
+        # Clamp to valid range
+        odd_value = max(1, min(23, odd_value))
+        tab_idx = self._find_tab_by_properties('star', idx)
+        if tab_idx is not None:
+            tab_w = self._tabs.widget(tab_idx)
+            if tab_w is not None:
+                # Update spinbox if value was adjusted
+                if odd_value != value:
+                    spin = getattr(tab_w, 'psf_size_u_spin', None)
+                    if spin is not None:
+                        spin.blockSignals(True)
+                        spin.setValue(odd_value)
+                        spin.blockSignals(False)
+                # Convert odd value to slider position: (value - 1) // 2
+                slider = getattr(tab_w, 'psf_size_u_slider', None)
+                if slider is not None:
+                    slider.blockSignals(True)
+                    slider.setValue((odd_value - 1) // 2)
+                    slider.blockSignals(False)
+        if 0 <= idx < len(self.sim_params['stars']):
+            current_psf_size = self.sim_params['stars'][idx].get('psf_size', (11, 11))
+            self.sim_params['stars'][idx]['psf_size'] = (current_psf_size[0], odd_value)
             self._updater.request_update()
 
     def _on_body_name(self, idx: int, text: str) -> None:

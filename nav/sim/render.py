@@ -49,7 +49,7 @@ def _render_stars_cached(
         star.ra_pm = 0.0
         star.dec_pm = 0.0
         star.conflicts = ''
-        star.psf_size = tuple(star_params.get('psf_size', (5, 5)))
+        star.psf_size = tuple(star_params.get('psf_size', (11, 11)))
         star.dn = 2.512 ** -(star.vmag - 4.0)
         sim_star_list.append(star)
 
@@ -88,11 +88,22 @@ def _render_stars_cached(
             })
             continue
 
+        # Evaluate PSF with scale=1.0 first to get unnormalized PSF
         star_psf = psf.eval_rect((psf_size_half_v*2+1, psf_size_half_u*2+1),
                                  offset=(v_frac, u_frac),
-                                 scale=star.dn,
+                                 scale=1.0,
                                  movement=(star.move_v, star.move_u),
                                  movement_granularity=move_gran)
+
+        # Normalize PSF so peak is 1.0, then scale by magnitude
+        psf_max = np.max(star_psf)
+        if psf_max > 0:
+            star_psf = star_psf / psf_max
+        # Scale so that vmag=0 results in peak=1.0
+        # star.dn = 2.512^-(vmag - 4.0), so for vmag=0: star.dn = 2.512^4
+        # We want vmag=0 → peak=1, so scale by star.dn / (2.512^4)
+        scale_factor = star.dn / (2.512 ** 4.0)
+        star_psf = star_psf * scale_factor
 
         img[v_int-psf_size_half_v:v_int+psf_size_half_v+1,
             u_int-psf_size_half_u:u_int+psf_size_half_u+1] += star_psf

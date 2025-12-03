@@ -31,6 +31,8 @@ class NavModelBodySimulated(NavModelBodyBase):
                 crater_fill, crater_min_radius, crater_max_radius,
                 crater_power_law_exponent, crater_relief_scale, anti_aliasing.
                 Extra keys are ignored.
+                Note that anti_aliasing is always set to the max when creating this model
+                and the anti_aliasing parameter is ignored.
             config: Optional configuration.
         """
 

@@ -177,7 +177,7 @@ class NavTechniqueCorrelateAll(NavTechnique):
             outliers = np.where(score > threshold)[0]
             return outliers
 
-        if len(star_model.star_list) == 0:
+        if not self.config.offset.star_refinement_enabled or len(star_model.star_list) == 0:
             return None
 
         obs = self.nav_master.obs

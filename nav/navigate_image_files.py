@@ -47,14 +47,16 @@ def navigate_image_files(obs_class: type[ObsSnapshotInst],
         }
 
     image_file = image_files.image_files[0]
+    image_url = image_file.image_file_url
     image_path = image_file.image_file_path.absolute()
     image_name = image_path.name
+    extra_params = image_file.extra_params
     public_metadata_file = nav_results_root / (image_file.results_path_stub + '_metadata.json')
     summary_png_file = nav_results_root / (image_file.results_path_stub + '_summary.png')
 
     with logger.open(str(image_path)):
         try:
-            snapshot = obs_class.from_file(image_path)
+            snapshot = obs_class.from_file(image_url, **extra_params)
         except (OSError, RuntimeError) as e:
             if ('SPICE(CKINSUFFDATA)' in str(e) or
                 'SPICE(SPKINSUFFDATA)' in str(e) or
