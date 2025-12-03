@@ -204,7 +204,7 @@ def main() -> None:
     )
 
     parser.add_argument(
-        '--output',
+        '--task-file',
         type=str,
         required=True,
         help='Output task JSON file path',
@@ -228,7 +228,7 @@ def main() -> None:
         v_stride = args.v_stride
 
     template_path = FCPath(args.model_template)
-    output_path = FCPath(args.output)
+    output_path = FCPath(args.task_file)
 
     generate_tasks(
         template_path=template_path,

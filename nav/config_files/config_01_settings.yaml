@@ -21,6 +21,7 @@ general:
 ####################
 
 offset:
+  star_refinement_enabled: true
   star_refinement_nsigma: 3
   star_refinement_search_limit: [2.5, 2.5]
   correlation_fft_upsample_factor: 128

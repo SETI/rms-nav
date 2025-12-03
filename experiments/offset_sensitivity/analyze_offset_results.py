@@ -142,15 +142,50 @@ def collect_results(
     return results
 
 
+def filter_results(
+    results: dict[tuple[float, float], tuple[float, float]],
+    u_min: Optional[float] = None,
+    u_max: Optional[float] = None,
+    v_min: Optional[float] = None,
+    v_max: Optional[float] = None,
+) -> dict[tuple[float, float], tuple[float, float]]:
+    """Filter results by U and V offset ranges.
+
+    Parameters:
+        results: Dictionary mapping (original_u, original_v) to (found_u, found_v).
+        u_min: Minimum U offset to include (inclusive). If None, no lower bound.
+        u_max: Maximum U offset to include (inclusive). If None, no upper bound.
+        v_min: Minimum V offset to include (inclusive). If None, no lower bound.
+        v_max: Maximum V offset to include (inclusive). If None, no upper bound.
+
+    Returns:
+        Filtered dictionary mapping (original_u, original_v) to (found_u, found_v).
+    """
+    filtered = {}
+    for (orig_u, orig_v), (found_u, found_v) in results.items():
+        if u_min is not None and orig_u < u_min:
+            continue
+        if u_max is not None and orig_u > u_max:
+            continue
+        if v_min is not None and orig_v < v_min:
+            continue
+        if v_max is not None and orig_v > v_max:
+            continue
+        filtered[(orig_u, orig_v)] = (found_u, found_v)
+    return filtered
+
+
 def create_heatmaps(
     results: dict[tuple[float, float], tuple[float, float]],
     output_path: Optional[FCPath] = None,
+    show: str = 'both',
 ) -> None:
     """Create heatmaps showing U and V offset errors.
 
     Parameters:
         results: Dictionary mapping (original_u, original_v) to (found_u, found_v).
         output_path: Optional path to save plots. If None, show interactively.
+        show: Which heatmaps to display: 'both', 'u', or 'v'.
     """
     if not results:
         print('No results to plot')
@@ -159,6 +194,15 @@ def create_heatmaps(
     # Extract all unique U and V values
     u_values = sorted({u for u, v in results.keys()})
     v_values = sorted({v for u, v in results.keys()})
+
+    # Handle edge case: pcolormesh needs at least 2 points in each dimension
+    # Add a small padding if there's only one value, keeping the original value
+    if len(u_values) == 1:
+        u_padding = abs(u_values[0]) * 0.01 if u_values[0] != 0 else 0.01
+        u_values = [u_values[0] - u_padding, u_values[0], u_values[0] + u_padding]
+    if len(v_values) == 1:
+        v_padding = abs(v_values[0]) * 0.01 if v_values[0] != 0 else 0.01
+        v_values = [v_values[0] - v_padding, v_values[0], v_values[0] + v_padding]
 
     # Create grid
     u_grid, v_grid = np.meshgrid(u_values, v_values)
@@ -169,9 +213,13 @@ def create_heatmaps(
 
     # Fill in error values
     for (orig_u, orig_v), (found_u, found_v) in results.items():
-        # Find indices
-        u_idx = u_values.index(orig_u)
-        v_idx = v_values.index(orig_v)
+        # Find indices (handle case where we padded single values)
+        u_idx = u_values.index(orig_u) if orig_u in u_values else min(
+            range(len(u_values)), key=lambda i: abs(u_values[i] - orig_u)
+        )
+        v_idx = v_values.index(orig_v) if orig_v in v_values else min(
+            range(len(v_values)), key=lambda i: abs(v_values[i] - orig_v)
+        )
 
         # Compute errors
         u_error = found_u - orig_u
@@ -181,26 +229,44 @@ def create_heatmaps(
         u_error_grid[v_idx, u_idx] = u_error
         v_error_grid[v_idx, u_idx] = v_error
 
-    # Create two subplots
-    _fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+    # Determine which plots to show
+    show_u = show in ('both', 'u')
+    show_v = show in ('both', 'v')
+
+    # Create subplots based on what to show
+    if show_u and show_v:
+        _fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+        axes = [ax1, ax2]
+    else:
+        _fig, ax = plt.subplots(1, 1, figsize=(7, 6))
+        axes = [ax]
 
     # Plot U error heatmap
-    im1 = ax1.pcolormesh(u_grid, v_grid, u_error_grid, shading='auto', cmap='RdBu_r')
-    ax1.set_xlabel('Original U Offset')
-    ax1.set_ylabel('Original V Offset')
-    ax1.set_title('U Offset Error (Found - Original)')
-    ax1.set_aspect('equal')
-    plt.colorbar(im1, ax=ax1, label='U Error')
+    if show_u:
+        ax = axes[0]
+        im1 = ax.pcolormesh(u_grid, v_grid, u_error_grid, shading='auto', cmap='RdBu_r')
+        ax.set_xlabel('Original U Offset')
+        ax.set_ylabel('Original V Offset')
+        ax.set_title('U Offset Error (Found - Original)')
+        ax.set_aspect('equal')
+        plt.colorbar(im1, ax=ax, label='U Error')
 
     # Plot V error heatmap
-    im2 = ax2.pcolormesh(u_grid, v_grid, v_error_grid, shading='auto', cmap='RdBu_r')
-    ax2.set_xlabel('Original U Offset')
-    ax2.set_ylabel('Original V Offset')
-    ax2.set_title('V Offset Error (Found - Original)')
-    ax2.set_aspect('equal')
-    plt.colorbar(im2, ax=ax2, label='V Error')
+    if show_v:
+        ax = axes[1] if show_u and show_v else axes[0]
+        im2 = ax.pcolormesh(u_grid, v_grid, v_error_grid, shading='auto', cmap='RdBu_r')
+        ax.set_xlabel('Original U Offset')
+        ax.set_ylabel('Original V Offset')
+        ax.set_title('V Offset Error (Found - Original)')
+        ax.set_aspect('equal')
+        plt.colorbar(im2, ax=ax, label='V Error')
 
-    plt.tight_layout()
+    if show_u and show_v:
+        _fig.tight_layout()
+    else:
+        # For single plot, use tight_layout then adjust to remove extra margins
+        _fig.tight_layout()
+        _fig.subplots_adjust(left=0.12, right=0.92, top=0.95, bottom=0.1)
 
     if output_path is not None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -232,20 +298,68 @@ def main() -> None:
     )
 
     parser.add_argument(
-        '--output',
+        '--output-file',
         type=str,
         default=None,
         help='Output plot filename (optional - if not provided, show interactively)',
     )
 
+    parser.add_argument(
+        '--show',
+        type=str,
+        choices=['both', 'u', 'v'],
+        default='both',
+        help='Which heatmaps to display: "both", "u", or "v" (default: both).',
+    )
+
+    parser.add_argument(
+        '--u-min',
+        type=float,
+        default=None,
+        help='Minimum U offset to include (inclusive). If not specified, use entire range.',
+    )
+
+    parser.add_argument(
+        '--u-max',
+        type=float,
+        default=None,
+        help='Maximum U offset to include (inclusive). If not specified, use entire range.',
+    )
+
+    parser.add_argument(
+        '--v-min',
+        type=float,
+        default=None,
+        help='Minimum V offset to include (inclusive). If not specified, use entire range.',
+    )
+
+    parser.add_argument(
+        '--v-max',
+        type=float,
+        default=None,
+        help='Maximum V offset to include (inclusive). If not specified, use entire range.',
+    )
+
     args = parser.parse_args()
 
     nav_results_root = FCPath(args.nav_results_root)
-    output_path = FCPath(args.output) if args.output else None
+    output_path = FCPath(args.output_file) if args.output_file else None
 
     results = collect_results(nav_results_root, args.template_name)
 
-    create_heatmaps(results, output_path)
+    # Filter results by U/V ranges if specified
+    if (args.u_min is not None or args.u_max is not None or
+            args.v_min is not None or args.v_max is not None):
+        results = filter_results(
+            results,
+            u_min=args.u_min,
+            u_max=args.u_max,
+            v_min=args.v_min,
+            v_max=args.v_max,
+        )
+        print(f'After filtering: {len(results)} results')
+
+    create_heatmaps(results, output_path, show=args.show)
 
 
 if __name__ == '__main__':
