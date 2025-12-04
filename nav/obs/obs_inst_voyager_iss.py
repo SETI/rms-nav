@@ -44,7 +44,9 @@ class ObsVoyagerISS(ObsSnapshotInst):
 
         logger.debug(f'Reading Voyager ISS image {path}')
         obs = oops.hosts.voyager.iss.from_file(path)
-        obs.abspath = cast(Path, FCPath(path).get_local_path()).absolute()
+        fc_path = FCPath(path)
+        obs.abspath = cast(Path, fc_path.get_local_path()).absolute()
+        obs.image_url = str(fc_path.absolute())
 
         inst_config = config.category('voyager_iss')
 
@@ -98,7 +100,7 @@ class ObsVoyagerISS(ObsSnapshotInst):
         spacecraft = self.dict['LAB02'][4]
 
         return {
-            'image_path': str(self.abspath),
+            'image_path': str(self.image_url),
             'image_name': self.abspath.name,
             'instrument_host_lid':
                 f'urn:nasa:pds:context:instrument_host:spacecraft.vg{spacecraft}',

@@ -46,8 +46,9 @@ class ObsNewHorizonsLORRI(ObsSnapshotInst):
         # TODO calibration=False is required because the hosts module can't find things like
         # the distance from the Sun to M7. How do we handle this?
         obs = oops.hosts.newhorizons.lorri.from_file(path, calibration=False)
-        obs.abspath = cast(Path, FCPath(path).get_local_path()).absolute()
-        obs.image_url = str(FCPath(path).absolute())
+        fc_path = FCPath(path)
+        obs.abspath = cast(Path, fc_path.get_local_path()).absolute()
+        obs.image_url = str(fc_path.absolute())
 
         inst_config = config.category('newhorizons_lorri')
         # TODO Calibrate once oops.hosts is fixed.

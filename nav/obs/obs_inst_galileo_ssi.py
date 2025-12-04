@@ -43,8 +43,9 @@ class ObsGalileoSSI(ObsSnapshotInst):
 
         logger.debug(f'Reading Galileo SSI image {path}')
         obs = oops.hosts.galileo.ssi.from_file(path, full_fov=True)
-        obs.abspath = cast(Path, FCPath(path).get_local_path()).absolute()
-        obs.image_url = str(FCPath(path).absolute())
+        fc_path = FCPath(path)
+        obs.abspath = cast(Path, fc_path.get_local_path()).absolute()
+        obs.image_url = str(fc_path.absolute())
 
         inst_config = config.category('galileo_ssi')
         if extfov_margin_vu is None:
