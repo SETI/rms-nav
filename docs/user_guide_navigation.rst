@@ -34,6 +34,7 @@ RMS-NAV currently supports multiple instruments, organized by dataset names you 
 * ``gossi`` and ``gossi_pds3`` — Galileo Solid State Imager
 * ``nhlorri`` and ``nhlorri_pds3`` — New Horizons Long Range Reconnaissance Imager
 * ``vgiss`` and ``vgiss_pds3`` — Voyager Imaging Science Subsystem
+* ``sim`` — simulated images
 
 Installation and Setup
 ======================
@@ -101,6 +102,7 @@ Configuration Loading Order
 The configuration system loads settings in the following order, with later files overriding earlier ones:
 
 1. **Standard Configuration Files**: All YAML files in the ``nav/config_files/`` directory are loaded in alphabetical order. These files provide default settings for:
+
    * ``config_01_settings.yaml``: General settings, offset parameters, and body defaults
    * ``config_10_satellites.yaml``: Satellite definitions for planets
    * ``config_20_saturn_rings.yaml``: Saturn ring system parameters
@@ -279,7 +281,7 @@ Each task payload must be a JSON object with the following fields:
 
 * ``dataset_name``: one of the supported dataset names.
 * ``arguments``: an object with optional keys ``nav_models`` and ``nav_techniques`` (lists or ``null``).
-* ``files``: an array of objects, each containing ``image_file_url``, ``label_file_url``, ``results_path_stub``, and optional ``index_file_row`` metadata.
+* ``files``: an array of objects, each containing required fields ``image_file_url``, ``label_file_url``, and ``results_path_stub``, and optional fields ``index_file_row`` (metadata) and ``extra_params`` (a JSON object/dictionary of arbitrary key/value pairs that will be passed through to the task implementation; optional, may be null or omitted).
 
 Inputs and Outputs
 ==================

@@ -100,7 +100,7 @@ class ObsVoyagerISS(ObsSnapshotInst):
         spacecraft = self.dict['LAB02'][4]
 
         return {
-            'image_path': str(self.image_url),
+            'image_path': self.image_url,
             'image_name': self.abspath.name,
             'instrument_host_lid':
                 f'urn:nasa:pds:context:instrument_host:spacecraft.vg{spacecraft}',
