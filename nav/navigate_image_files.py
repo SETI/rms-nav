@@ -54,7 +54,7 @@ def navigate_image_files(obs_class: type[ObsSnapshotInst],
     public_metadata_file = nav_results_root / (image_file.results_path_stub + '_metadata.json')
     summary_png_file = nav_results_root / (image_file.results_path_stub + '_summary.png')
 
-    with logger.open(str(image_path)):
+    with logger.open(str(image_url)):
         try:
             snapshot = obs_class.from_file(image_url, **extra_params)
         except (OSError, RuntimeError) as e:

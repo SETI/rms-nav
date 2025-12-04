@@ -13,6 +13,29 @@ from filecache import FCPath
 import numpy as np
 
 
+def positive_float(value: str) -> float:
+    """Type function for argparse that ensures a positive float value.
+
+    Parameters:
+        value: String value to convert to float.
+
+    Returns:
+        Positive float value.
+
+    Raises:
+        argparse.ArgumentTypeError: If the value is not a positive float.
+    """
+    try:
+        fval = float(value)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(f'Invalid float value: {value}') from e
+    if fval <= 0:
+        raise argparse.ArgumentTypeError(
+            f'Stride must be positive, got: {value}'
+        )
+    return fval
+
+
 def parse_slice(slice_str: str) -> tuple[float, float, float]:
     """Parse a slice string of the form min:max:stride.
 
@@ -23,15 +46,22 @@ def parse_slice(slice_str: str) -> tuple[float, float, float]:
         Tuple of (min, max, stride).
 
     Raises:
-        ValueError: If the slice string is invalid.
+        ValueError: If the slice string is invalid or stride is not positive.
     """
     parts = slice_str.split(':')
     if len(parts) != 3:
         raise ValueError(f'Invalid slice format: {slice_str}. Expected min:max:stride')
     try:
-        return (float(parts[0]), float(parts[1]), float(parts[2]))
+        min_val = float(parts[0])
+        max_val = float(parts[1])
+        stride = float(parts[2])
     except ValueError as e:
         raise ValueError(f'Invalid slice format: {slice_str}. {e}') from e
+    if stride <= 0:
+        raise ValueError(
+            f'Stride must be positive, got: {stride} in slice "{slice_str}"'
+        )
+    return (min_val, max_val, stride)
 
 
 def format_offset(offset: float) -> str:
@@ -170,7 +200,7 @@ def main() -> None:
 
     parser.add_argument(
         '--u-stride',
-        type=float,
+        type=positive_float,
         default=0.1,
         help='Stride for U offset (default: 0.1)',
     )
@@ -198,7 +228,7 @@ def main() -> None:
 
     parser.add_argument(
         '--v-stride',
-        type=float,
+        type=positive_float,
         default=0.1,
         help='Stride for V offset (default: 0.1)',
     )
@@ -214,14 +244,20 @@ def main() -> None:
 
     # Parse slice notation if provided, otherwise use individual arguments
     if args.u is not None:
-        u_min, u_max, u_stride = parse_slice(args.u)
+        try:
+            u_min, u_max, u_stride = parse_slice(args.u)
+        except ValueError as e:
+            parser.error(f'Invalid --u argument: {e}')
     else:
         u_min = args.u_min
         u_max = args.u_max
         u_stride = args.u_stride
 
     if args.v is not None:
-        v_min, v_max, v_stride = parse_slice(args.v)
+        try:
+            v_min, v_max, v_stride = parse_slice(args.v)
+        except ValueError as e:
+            parser.error(f'Invalid --v argument: {e}')
     else:
         v_min = args.v_min
         v_max = args.v_max

@@ -1,8 +1,5 @@
 import copy
 
-import tkinter as tk
-from imgdisp import ImageDisp
-
 from nav.support.image import draw_rect
 from nav.support.time import now_dt
 _DEBUG_STARS_MODEL_IMGDISP = False
@@ -649,6 +646,8 @@ class NavModelStars(NavModel):
                   u_int-psf_size_half_u:u_int+psf_size_half_u+1] += star_psf
 
         if _DEBUG_STARS_MODEL_IMGDISP:
+            import tkinter as tk
+            from imgdisp import ImageDisp
             cast(Any, ImageDisp)([model],
                     canvas_size=(1024,1024),
                     enlarge_limit=10,
