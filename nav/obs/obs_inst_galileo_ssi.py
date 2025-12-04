@@ -44,6 +44,7 @@ class ObsGalileoSSI(ObsSnapshotInst):
         logger.debug(f'Reading Galileo SSI image {path}')
         obs = oops.hosts.galileo.ssi.from_file(path, full_fov=True)
         obs.abspath = cast(Path, FCPath(path).get_local_path()).absolute()
+        obs.image_url = str(FCPath(path).absolute())
 
         inst_config = config.category('galileo_ssi')
         if extfov_margin_vu is None:
@@ -88,7 +89,7 @@ class ObsGalileoSSI(ObsSnapshotInst):
         # scet_end = float(obs.dict["SPACECRAFT_CLOCK_STOP_COUNT"])
 
         return {
-            'image_path': str(self.abspath),
+            'image_path': str(self.image_url),
             'image_name': self.abspath.name,
             'instrument_host_lid': 'urn:nasa:pds:context:instrument_host:spacecraft.go',
             'instrument_lid': 'urn:nasa:pds:context:instrument:go.ssi',

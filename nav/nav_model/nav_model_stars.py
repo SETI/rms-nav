@@ -2,7 +2,6 @@ import copy
 
 from nav.support.image import draw_rect
 from nav.support.time import now_dt
-_DEBUG_STARS_MODEL_IMGDISP = False
 
 from typing import Any, Optional, cast
 
@@ -14,7 +13,6 @@ import polymath
 from starcat import (SCLASS_TO_SURFACE_TEMP,
                      SCLASS_TO_B_MINUS_V,
                      SpiceStarCatalog,
-                     Star,
                      UCAC4StarCatalog,
                      YBSCStarCatalog)
 
@@ -36,6 +34,8 @@ from nav.support.types import MutableStar
 
 from .nav_model import NavModel
 
+
+_DEBUG_STARS_MODEL_IMGDISP = False
 
 _STAR_CATALOG_UCAC4: UCAC4StarCatalog | None = None
 _STAR_CATALOG_TYCHO2: SpiceStarCatalog | None = None
@@ -124,7 +124,7 @@ class NavModelStars(NavModel):
                     clean_sclass(star.spectral_class),
                     0.0 if star.temperature is None else star.temperature,
                     0,
-                    star.conflicts) # TODO star.dn)
+                    star.conflicts)  # TODO star.dn)
 
     def _stars_list_for_obs(self,
                             catalog_name: str,
@@ -304,11 +304,11 @@ class NavModelStars(NavModel):
         v2_list = v2_list.vals
 
         star_list3: list[MutableStar] = []
-        for star, (ra_pm, dec_pm),u, v, u1, v1, u2, v2 in zip(star_list2,
-                                              ra_dec_pm_list,
-                                              u_list, v_list,
-                                              u1_list, v1_list,
-                                              u2_list, v2_list):
+        for star, (ra_pm, dec_pm), u, v, u1, v1, u2, v2 in zip(star_list2,
+                                                               ra_dec_pm_list,
+                                                               u_list, v_list,
+                                                               u1_list, v1_list,
+                                                               u2_list, v2_list):
             psf_size_half_u = star.psf_size[1] // 2
             psf_size_half_v = star.psf_size[0] // 2
 
@@ -453,7 +453,8 @@ class NavModelStars(NavModel):
                                 self.logger.debug('Removing duplicate star '
                                                   f'{star.catalog_name}/{star.pretty_name}, '
                                                   'keeping '
-                                                  f'{prev_star.catalog_name}/{prev_star.pretty_name} '
+                                                  f'{prev_star.catalog_name}/'
+                                                  f'{prev_star.pretty_name} '
                                                   f'(renamed to {star.pretty_name})')
                                 prev_star.pretty_name = star.pretty_name
                             else:
@@ -499,9 +500,9 @@ class NavModelStars(NavModel):
                             full_star_list[j].conflicts = 'STAR'
                             self.logger.debug('Marking one overlapping star:')
                             self.logger.debug('  %s',
-                                            self._star_short_info(full_star_list[i]))
+                                              self._star_short_info(full_star_list[i]))
                             self.logger.debug('  %s',
-                                            self._star_short_info(full_star_list[j]))
+                                              self._star_short_info(full_star_list[j]))
 
         # Sort the list with the brightest stars first.
         full_star_list.sort(key=lambda x: x.dn, reverse=True)
@@ -518,11 +519,11 @@ class NavModelStars(NavModel):
 
         return full_star_list
 
-#===============================================================================
+# ==============================================================================
 #
 # CREATE A MODEL OR OVERLAY FOR STARS IN THE FOV.
 #
-#===============================================================================
+# ==============================================================================
 
     def create_model(self,
                      *,
@@ -549,7 +550,7 @@ class NavModelStars(NavModel):
         metadata['elapsed_time_sec'] = None
 
         log_level = self._config.general.get('log_level_model_stars')
-        with self.logger.open(f'CREATE STARS MODEL', level=log_level):
+        with self.logger.open('CREATE STARS MODEL', level=log_level):
             # TODO Deal with star movement
             self._create_model(metadata, None, ignore_conflicts=False,
                                always_create_model=always_create_model,
@@ -649,9 +650,9 @@ class NavModelStars(NavModel):
             import tkinter as tk
             from imgdisp import ImageDisp
             cast(Any, ImageDisp)([model],
-                    canvas_size=(1024,1024),
-                    enlarge_limit=10,
-                    auto_update=True)
+                                 canvas_size=(1024, 1024),
+                                 enlarge_limit=10,
+                                 auto_update=True)
             tk.mainloop()
 
         # Create the text labels
@@ -711,15 +712,17 @@ class NavModelStars(NavModel):
                 text_loc.append(TextLocInfo(TEXTINFO_RIGHT, v, u + label_margin))
                 text_loc.append(TextLocInfo(TEXTINFO_TOP_LEFT, v - label_margin, u - label_margin))
                 text_loc.append(TextLocInfo(TEXTINFO_TOP_RIGHT, v - label_margin, u + label_margin))
-                text_loc.append(TextLocInfo(TEXTINFO_BOTTOM_LEFT, v + label_margin, u - label_margin))
-                text_loc.append(TextLocInfo(TEXTINFO_BOTTOM_RIGHT, v + label_margin, u + label_margin))
+                text_loc.append(TextLocInfo(TEXTINFO_BOTTOM_LEFT, v + label_margin,
+                                            u - label_margin))
+                text_loc.append(TextLocInfo(TEXTINFO_BOTTOM_RIGHT, v + label_margin,
+                                            u + label_margin))
 
                 text_info = AnnotationTextInfo(f'{star_str1}\n{star_str2}',
-                                            ref_vu=(v, u),
-                                            text_loc=text_loc,
-                                            font=self._stars_config.label_font,
-                                            font_size=self._stars_config.label_font_size,
-                                            color=self._stars_config.label_font_color)
+                                               ref_vu=(v, u),
+                                               text_loc=text_loc,
+                                               font=self._stars_config.label_font,
+                                               font_size=self._stars_config.label_font_size,
+                                               color=self._stars_config.label_font_color)
                 text_info_list.append(text_info)
 
             annotation = Annotation(self.obs, star_overlay, self._stars_config.label_star_color,
@@ -739,13 +742,14 @@ class NavModelStars(NavModel):
         self._stretch_regions = stretch_regions
         self._metadata = metadata
 
-        self.logger.debug(f'  Star model min: {np.min(self._model_img)}, max: {np.max(self._model_img)}')
+        self.logger.debug(f'  Star model min: {np.min(self._model_img)}, '
+                          f'max: {np.max(self._model_img)}')
 
-#===============================================================================
+# ==============================================================================
 #
 # FIND THE IMAGE OFFSET BASED ON STARS.
 #
-#===============================================================================
+# ==============================================================================
 
     def _mark_conflicts_obj(self,
                             star: MutableStar,
@@ -777,8 +781,8 @@ class NavModelStars(NavModel):
         meshgrid = Meshgrid.for_fov(obs.fov,
                                     origin=(star.u-star_slop,
                                             star.v-star_slop),
-                                    limit =(star.u+star_slop,
-                                            star.v+star_slop))
+                                    limit=(star.u+star_slop,
+                                           star.v+star_slop))
         backplane = Backplane(obs, meshgrid)
 
         # Check for planet and moons

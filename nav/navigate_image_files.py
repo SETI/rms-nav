@@ -94,8 +94,9 @@ def navigate_image_files(obs_class: type[ObsSnapshotInst],
         metadata['status'] = 'success'
 
         if write_output_files:
+            logger.info(f'Writing metadata to {public_metadata_file}')
             public_metadata_file.write_text(json_as_string(metadata))
-
+            logger.info(f'Writing summary PNG to {summary_png_file}')
             overlay = nm.create_overlay()
             png_local = cast(Path, summary_png_file.get_local_path())
             im = Image.fromarray(overlay)
