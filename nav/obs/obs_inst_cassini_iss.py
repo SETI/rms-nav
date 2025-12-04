@@ -117,7 +117,7 @@ class ObsCassiniISS(ObsSnapshotInst):
         scet_end = float(self.dict["SPACECRAFT_CLOCK_STOP_COUNT"])
 
         return {
-            'image_path': str(self.image_url),
+            'image_path': self.image_url,
             'image_name': self.abspath.name,
             'instrument_host_lid': 'urn:nasa:pds:context:instrument_host:spacecraft.co',
             'instrument_lid': f'urn:nasa:pds:context:instrument:iss{self.detector[0].lower()}a.co',

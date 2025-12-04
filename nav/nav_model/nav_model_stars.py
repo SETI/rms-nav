@@ -308,7 +308,8 @@ class NavModelStars(NavModel):
                                                                ra_dec_pm_list,
                                                                u_list, v_list,
                                                                u1_list, v1_list,
-                                                               u2_list, v2_list):
+                                                               u2_list, v2_list,
+                                                               strict=True):
             psf_size_half_u = star.psf_size[1] // 2
             psf_size_half_v = star.psf_size[0] // 2
 
