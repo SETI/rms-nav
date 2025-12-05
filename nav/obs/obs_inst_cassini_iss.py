@@ -55,7 +55,9 @@ class ObsCassiniISS(ObsSnapshotInst):
         obs = oops.hosts.cassini.iss.from_file(path,
                                                fast_distortion=fast_distortion,
                                                return_all_planets=return_all_planets)
-        obs.abspath = cast(Path, FCPath(path).get_local_path()).absolute()
+        fc_path = FCPath(path)
+        obs.abspath = cast(Path, fc_path.get_local_path()).absolute()
+        obs.image_url = str(fc_path.absolute())
 
         detector = obs.detector.lower()
         inst_config = config.category('cassini_iss')[detector]
@@ -116,7 +118,7 @@ class ObsCassiniISS(ObsSnapshotInst):
         scet_end = float(self.dict["SPACECRAFT_CLOCK_STOP_COUNT"])
 
         return {
-            'image_path': str(self.abspath),
+            'image_path': self.image_url,
             'image_name': self.abspath.name,
             'instrument_host_lid': 'urn:nasa:pds:context:instrument_host:spacecraft.co',
             'instrument_lid': f'urn:nasa:pds:context:instrument:iss{self.detector[0].lower()}a.co',

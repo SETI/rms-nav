@@ -1,7 +1,6 @@
 import fnmatch
 from typing import Any, Optional, Sequence, cast
 
-import matplotlib.pyplot as plt  # noqa: F401
 from oops import Observation
 import numpy as np
 
@@ -183,6 +182,7 @@ class NavMaster(NavBase):
         self._star_models = [stars_model]
         self._metadata['models']['star_model'] = stars_model.metadata
 
+        # import matplotlib.pyplot as plt  # noqa: F401
         # plt.imshow(stars_model.model_img)
         # plt.show()
 

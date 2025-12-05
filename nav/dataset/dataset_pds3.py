@@ -634,10 +634,12 @@ class DataSetPDS3(DataSet):
                 index_tab_url = index_label_url.with_suffix('.tab')
                 # This will raise a FileNotFoundError if the index file label or table
                 # can't be found
-                # TODO Consider additional error handling
+                # TODO Implement actual error handling
                 # We have to convert the FCPaths to Posix strings here so that FileCache.retrieve()
                 # can use them. Note that if for some reason there was a specific FileCache given
                 # for pds3_holdings_root, it will be overriden by self._index_filecache.
+                # TODO Needs to return exceptions instead of a single FileNotFoundError
+                # so we can tell the user what's actually going on.
                 ret = self._index_filecache.retrieve([index_label_url.as_posix(),
                                                       index_tab_url.as_posix()])
                 index_label_localpath, _ = cast(list[Path], ret)

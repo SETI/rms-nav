@@ -1,5 +1,6 @@
 import json
-from typing import Any, Optional
+from pathlib import Path
+from typing import Any, Optional, cast
 
 from filecache import FCPath
 import oops
@@ -40,7 +41,8 @@ class ObsSim(ObsSnapshotInst):
         logger = DEFAULT_LOGGER
 
         provided_sim_params = kwargs.get('sim_params', None)
-        json_path = FCPath(path).absolute()
+        json_path = FCPath(path)
+        abspath = cast(Path, json_path.get_local_path()).absolute()
         if provided_sim_params is None:
             logger.debug(f'Reading simulated image JSON {json_path}')
             with json_path.open() as f:
@@ -75,7 +77,8 @@ class ObsSim(ObsSnapshotInst):
             frame='J2000',
         )
         # Store data and the full JSON dictionary for future use
-        snapshot.abspath = json_path
+        snapshot.image_url = str(json_path.absolute())
+        snapshot.abspath = abspath
 
         snapshot.sim_params = sim_params
         snapshot.sim_offset_v = offset_v
@@ -119,7 +122,7 @@ class ObsSim(ObsSnapshotInst):
 
     def get_public_metadata(self) -> dict[str, Any]:
         return {
-            'image_path': str(self.abspath),
+            'image_path': self.image_url,
             'image_name': self.abspath.name,
             'instrument_host_lid': 'sim',
             'instrument_lid': 'sim',
