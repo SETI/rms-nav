@@ -165,4 +165,5 @@ csmithing/
 .code_planner_cache.db
 prof/
 _work/
+**/_version.py
 nav_default_config.yaml
