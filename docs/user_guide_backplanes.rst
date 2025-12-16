@@ -19,8 +19,8 @@ Command-Line Interfaces
 
 Two drivers mirror the offset drivers:
 
-- ``main/nav_backplanes.py`` (local/CLI)
-- ``main/nav_backplanes_cloud_tasks.py`` (Cloud Tasks)
+- ``nav_backplanes`` (local/CLI)
+- ``nav_backplanes_cloud_tasks`` (Cloud Tasks)
 
 Common flags:
 
@@ -35,7 +35,7 @@ Generate backplanes locally for a dataset:
 
 .. code-block:: bash
 
-    python3 main/nav_backplanes.py COISS \
+    nav_backplanes COISS \
       --nav-results-root /data/nav/results \
       --backplane-results-root /data/nav/backplanes \
       --volumes COISS_2001 --first-image-num 1454000000 --last-image-num 1454999999
@@ -44,9 +44,9 @@ Cloud Tasks variant (arguments come from the queue):
 
 .. code-block:: bash
 
-    python3 main/nav_backplanes_cloud_tasks.py \
-      --nav-results-root /data/src/nav/results \
-      --backplane-results-root /data/src/nav/backplanes
+    nav_backplanes_cloud_tasks \
+      --nav-results-root /data/nav/results \
+      --backplane-results-root /data/nav/backplanes
 
 Configuration
 -------------
@@ -66,7 +66,7 @@ Outputs
   - BODY_ID_MAP (int32) as the first image HDU.
   - One ``ImageHDU`` per non-empty master backplane array. ``BUNIT`` is set from config when provided.
 
-- PDS4 label: ``<results_path_stub>_backplanes.xml``, generated from a local template (``src/nav/backplanes/templates/backplanes.lblx``), referencing the output FITS and including target references when configured.
+- PDS4 label: ``<results_path_stub>_backplanes.xml``, generated from a local template (``src/backplanes/templates/backplanes.lblx``), referencing the output FITS and including target references when configured.
 
 Backplane Viewer GUI
 ====================
@@ -78,7 +78,7 @@ Run
 
 .. code-block:: bash
 
-    python3 main/nav_backplane_viewer.py COISS \
+    nav_backplane_viewer COISS \
       --nav-results-root /data/nav/results \
       --backplane-results-root /data/nav/backplanes \
       --volumes COISS_2001 \

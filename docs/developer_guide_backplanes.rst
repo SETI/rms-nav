@@ -8,7 +8,7 @@ Backplanes Architecture
 Modules
 ~~~~~~~
 
-- ``src/nav/backplanes/backplanes.py``: Orchestrates per-image flow
+- ``src/backplanes/backplanes.py``: Orchestrates per-image flow
 
   - Reads prior nav metadata from ``--nav-results-root``
   - Builds ``ObsSnapshot`` with ``extfov_margin_vu=(0, 0)`` and applies ``OffsetFOV``
@@ -16,7 +16,7 @@ Modules
   - Merges sources per-pixel by distance
   - Writes FITS + PDS4 via writer
 
-- ``src/nav/backplanes/backplanes_bodies.py``: Body backplanes
+- ``src/backplanes/backplanes_bodies.py``: Body backplanes
 
   - For each body in FOV, builds a clipped meshgrid (no oversampling) and evaluates OOPS backplanes
   - Embeds arrays/masks into full-size frames
@@ -24,22 +24,22 @@ Modules
     - ``snapshot.sim_body_mask_map[body_name]`` if present, else
     - ``snapshot.sim_body_index_map`` matched against ``snapshot.sim_body_order_near_to_far``
 
-- ``src/nav/backplanes/backplanes_rings.py``: Ring backplanes
+- ``src/backplanes/backplanes_rings.py``: Ring backplanes
 
   - Uses full-frame ``snapshot.bp``, evaluates configured ring backplanes
   - Produces per-pixel ``distance`` used for merge ordering
 
-- ``src/nav/backplanes/merge.py``: Per-pixel distance-ordered merge
+- ``src/backplanes/merge.py``: Per-pixel distance-ordered merge
 
   - Bodies: body-level scalar distances, broadcast within each body's mask
   - Rings: per-pixel distances
   - BODY_ID_MAP is filled with NAIF IDs; simulation uses deterministic fake IDs when unknown
 
-- ``src/nav/backplanes/writer.py``: Output writer
+- ``src/backplanes/writer.py``: Output writer
 
   - Writes BODY_ID_MAP as the first image HDU
   - Excludes any backplane that is entirely zeros from FITS and label
-  - Uses ``src/nav/backplanes/templates/backplanes.lblx`` via ``PdsTemplate``
+  - Uses ``src/backplanes/templates/backplanes.lblx`` via ``PdsTemplate``
 
 Snapshot Helpers
 ~~~~~~~~~~~~~~~~

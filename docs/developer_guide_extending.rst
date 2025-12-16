@@ -17,11 +17,11 @@ Example:
    from nav.dataset.dataset_pds3 import DataSetPDS3
 
    class DataSetNewInstrument(DataSetPDS3):
-       def __init__(self, *, config=None, logger_name=None):
-           super().__init__(config=config, logger_name=logger_name)
+       def __init__(self, *, config=None):
+           super().__init__(config=config)
 
        @staticmethod
-       def image_name_valid(name):
+       def _img_name_valid(name: str) -> bool:
            # Implement logic to determine if a filename is valid for this instrument
            return name.startswith("NEW") and name.endswith(".IMG")
 
@@ -39,13 +39,19 @@ Example:
 .. code-block:: python
 
    from nav.obs.obs_snapshot_inst import ObsSnapshotInst
+   from nav.support.types import PathLike
 
    class ObsNewInstrument(ObsSnapshotInst):
-       def __init__(self, obs, *, config=None, logger_name=None):
-           super().__init__(obs, config=config, logger_name=logger_name)
+       def __init__(self, obs, *, config=None, **kwargs):
+           super().__init__(obs, config=config, **kwargs)
 
        @classmethod
-       def from_file(cls, path, extfov_margin_vu=None):
+       def from_file(cls,
+                     path: PathLike,
+                     *,
+                     config=None,
+                     extfov_margin_vu=None,
+                     **kwargs):
            # Implement logic to load an image file and return an ObsSnapshotInst
            ...
 
@@ -65,8 +71,8 @@ Example:
    from nav.nav_model.nav_model import NavModel
 
    class NavModelNewFeature(NavModel):
-       def __init__(self, name, obs, *, config=None, logger_name=None):
-           super().__init__(name, obs, config=config, logger_name=logger_name)
+       def __init__(self, name, obs, *, config=None):
+           super().__init__(name, obs, config=config)
 
        def create_model(self, *, always_create_model=False, never_create_model=False, create_annotations=True):
            # Implement logic to compute arrays and metadata
@@ -88,8 +94,8 @@ Example:
    from nav.nav_technique.nav_technique import NavTechnique
 
    class NavTechniqueNewMethod(NavTechnique):
-       def __init__(self, nav_master, *, config=None, logger_name=None):
-           super().__init__(nav_master, config=config, logger_name=logger_name)
+       def __init__(self, nav_master, *, config=None):
+           super().__init__(nav_master, config=config)
 
        def navigate(self):
            # Implement your navigation algorithm

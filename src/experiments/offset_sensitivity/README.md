@@ -33,7 +33,7 @@ python experiments/offset_sensitivity/generate_offset_tasks.py \
 
 - `--model-template <path>`: Path to the template simulated model JSON file (as created by `nav_create_simulated_model.py`). This file defines the base simulated image parameters (bodies, stars, sizes, etc.). The generator will create tasks with identical parameters except for the `offset_u` and `offset_v` values.
 
-- `--task-file <path>`: Path to write the output task JSON file. The file will contain an array of task objects compatible with `nav_offset_cloud_tasks.py`.
+- `--task-file <path>`: Path to write the output task JSON file. The file will contain an array of task objects compatible with `nav_offset_cloud_tasks`.
 
 #### Offset Range Options
 
@@ -84,7 +84,7 @@ After generating the task file, the tasks must be executed to produce navigation
 To run tasks locally using multiple CPU cores:
 
 ```bash
-python main/nav_offset_cloud_tasks.py \
+nav_offset_cloud_tasks \
     --task-file offset_tasks.json \
     --nav-results-root /path/to/nav_results \
     --num-cpus 16
