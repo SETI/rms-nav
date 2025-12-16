@@ -1,11 +1,14 @@
 [flake8]
 max-line-length = 100
 exclude =
-    nav/support/correlate_old.py
-    nav/support/flux.py
-    nav/support/image.py
+    src/nav/support/correlate_old.py
+    src/nav/support/flux.py
+    src/nav/support/image.py
+    src/experiments
 
 extend-ignore = E129
 per-file-ignores =
     tests/config.py: E501
-    nav/nav_model/nav_model_body.py: E201
+    src/nav/nav_model/nav_model_body.py: E201
+    # E402 module level import not at top of file
+    src/main/*.py: E402

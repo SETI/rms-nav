@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from collections.abc import Callable
 import json
+import os
 import re
 import sys
 from typing import Any, Optional, cast
@@ -36,6 +37,11 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QSlider,
 )
+
+# Make CLI runnable from source tree with
+#    python src/package
+package_source_path = os.path.dirname(os.path.dirname(__file__))
+sys.path.insert(0, package_source_path)
 
 from nav.sim.render import render_combined_model
 from nav.ui.common import ZoomPanController

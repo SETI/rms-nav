@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 from collections.abc import Callable
+import os
 import sys
 from typing import Any, Optional, cast
 
@@ -31,6 +32,11 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+# Make CLI runnable from source tree with
+#    python src/package
+package_source_path = os.path.dirname(os.path.dirname(__file__))
+sys.path.insert(0, package_source_path)
 
 from nav.config import DEFAULT_CONFIG, Config
 from nav.config.logger import DEFAULT_LOGGER

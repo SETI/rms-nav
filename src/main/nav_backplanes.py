@@ -14,6 +14,11 @@ from typing import cast
 from filecache import FileCache
 import pdslogger
 
+# Make CLI runnable from source tree with
+#    python src/package
+package_source_path = os.path.dirname(os.path.dirname(__file__))
+sys.path.insert(0, package_source_path)
+
 from nav.dataset.dataset import DataSet
 from nav.dataset import (dataset_names,
                          dataset_name_to_class,
@@ -22,7 +27,7 @@ from nav.config import DEFAULT_CONFIG
 from nav.config.logger import DEFAULT_LOGGER
 from nav.obs import inst_name_to_obs_class
 
-from nav.backplanes.backplanes import generate_backplanes_image_files
+from backplanes.backplanes import generate_backplanes_image_files
 
 
 DATASET: DataSet | None = None

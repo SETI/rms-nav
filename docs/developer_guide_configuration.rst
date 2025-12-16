@@ -1,12 +1,12 @@
-=============================================
+=====================================
 Developer Guide: Configuration System
-=============================================
+=====================================
 
 Configuration System
 ====================
 
 RMS-NAV uses a YAML-based configuration system. The default configuration files are located
-in the ``nav/config_files/`` directory.
+in the ``src/nav/config_files/`` directory.
 
 To override configuration settings:
 
