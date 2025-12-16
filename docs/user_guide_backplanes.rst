@@ -1,6 +1,6 @@
-==========
+=====================
 Backplanes User Guide
-==========
+=====================
 
 Overview
 ========
@@ -45,13 +45,13 @@ Cloud Tasks variant (arguments come from the queue):
 .. code-block:: bash
 
     python3 main/nav_backplanes_cloud_tasks.py \
-      --nav-results-root /data/nav/results \
-      --backplane-results-root /data/nav/backplanes
+      --nav-results-root /data/src/nav/results \
+      --backplane-results-root /data/src/nav/backplanes
 
 Configuration
 -------------
 
-Backplanes are configured in YAML (see ``nav/config_files/config_90_backplanes.yaml``):
+Backplanes are configured in YAML (see ``src/nav/config_files/config_90_backplanes.yaml``):
 
 - ``backplanes.bodies``: list of backplane entries with ``name``, ``method``, and optional ``units``.
 - ``backplanes.rings``: list of ring backplanes; the special ``distance`` entry is used only for per-pixel ordering and is not written as an HDU.
@@ -66,7 +66,7 @@ Outputs
   - BODY_ID_MAP (int32) as the first image HDU.
   - One ``ImageHDU`` per non-empty master backplane array. ``BUNIT`` is set from config when provided.
 
-- PDS4 label: ``<results_path_stub>_backplanes.xml``, generated from a local template (``nav/backplanes/templates/backplanes.lblx``), referencing the output FITS and including target references when configured.
+- PDS4 label: ``<results_path_stub>_backplanes.xml``, generated from a local template (``src/nav/backplanes/templates/backplanes.lblx``), referencing the output FITS and including target references when configured.
 
 Backplane Viewer GUI
 ====================

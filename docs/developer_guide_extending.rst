@@ -1,6 +1,6 @@
-===========================================
+=====================================
 Developer Guide: Extending the System
-===========================================
+=====================================
 
 Extending the System
 ====================
@@ -8,7 +8,7 @@ Extending the System
 Adding a New Dataset
 --------------------
 
-To add a dataset, create a class in ``nav/dataset/`` that inherits from ``DataSet`` (or from ``DataSetPDS3`` for archives). Implement ``_img_name_valid(...)``, the file-yielding methods, and ``add_selection_arguments(...)`` to expose CLI selection flags. Register the dataset in ``nav/dataset/__init__.py`` so it becomes available to the CLI.
+To add a dataset, create a class in ``src/nav/dataset/`` that inherits from ``DataSet`` (or from ``DataSetPDS3`` for archives). Implement ``_img_name_valid(...)``, the file-yielding methods, and ``add_selection_arguments(...)`` to expose CLI selection flags. Register the dataset in ``src/nav/dataset/__init__.py`` so it becomes available to the CLI.
 
 Example:
 
@@ -25,14 +25,14 @@ Example:
            # Implement logic to determine if a filename is valid for this instrument
            return name.startswith("NEW") and name.endswith(".IMG")
 
-3. Update the dataset registry in ``nav/dataset/__init__.py``
+3. Update the dataset registry in ``src/nav/dataset/__init__.py``
 
 The dataset will automatically be available to the CLI once registered.
 
 Adding a New Instrument
 -----------------------
 
-To add an instrument, implement a subclass of ``ObsSnapshotInst`` in ``nav/obs/`` that provides ``from_file(...)`` and any instrument-specific helpers. Update the instrument registry in ``nav/obs/__init__.py`` so datasets can resolve the instrument class.
+To add an instrument, implement a subclass of ``ObsSnapshotInst`` in ``src/nav/obs/`` that provides ``from_file(...)`` and any instrument-specific helpers. Update the instrument registry in ``src/nav/obs/__init__.py`` so datasets can resolve the instrument class.
 
 Example:
 
@@ -54,7 +54,7 @@ Adding a New Navigation Model
 
 To implement a new model type:
 
-1. Create a new class in ``nav/nav_model/`` inheriting from ``NavModel``.
+1. Create a new class in ``src/nav/nav_model/`` inheriting from ``NavModel``.
 2. Implement ``create_model(...)`` to generate arrays and annotations.
 3. Update ``NavMaster.compute_all_models()`` to construct your model.
 
@@ -77,7 +77,7 @@ Adding a New Navigation Technique
 
 To implement a new navigation algorithm:
 
-1. Create a new class in ``nav/nav_technique/`` inheriting from ``NavTechnique``.
+1. Create a new class in ``src/nav/nav_technique/`` inheriting from ``NavTechnique``.
 2. Implement the ``navigate`` method with your algorithm.
 3. Update ``NavMaster.navigate()`` to construct and record your technique.
 

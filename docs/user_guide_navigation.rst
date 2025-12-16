@@ -101,7 +101,7 @@ Configuration Loading Order
 
 The configuration system loads settings in the following order, with later files overriding earlier ones:
 
-1. **Standard Configuration Files**: All YAML files in the ``nav/config_files/`` directory are loaded in alphabetical order. These files provide default settings for:
+1. **Standard Configuration Files**: All YAML files in the ``src/nav/config_files/`` directory are loaded in alphabetical order. These files provide default settings for:
 
    * ``config_01_settings.yaml``: General settings, offset parameters, and body defaults
    * ``config_10_satellites.yaml``: Satellite definitions for planets

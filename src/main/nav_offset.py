@@ -18,6 +18,11 @@ from typing import cast
 from filecache import FileCache, FCPath
 import pdslogger
 
+# Make CLI runnable from source tree with
+#    python src/package
+package_source_path = os.path.dirname(os.path.dirname(__file__))
+sys.path.insert(0, package_source_path)
+
 from nav.dataset.dataset import DataSet
 from nav.dataset import (dataset_names,
                          dataset_name_to_class,
