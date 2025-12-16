@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import os
 import json
 from pathlib import Path
 
@@ -7,7 +6,7 @@ from filecache import FileCache, FCPath
 
 from nav.dataset.dataset import ImageFiles, ImageFile
 from nav.obs import inst_name_to_obs_class
-from nav.backplanes.backplanes import generate_backplanes_image_files
+from backplanes.backplanes import generate_backplanes_image_files
 
 
 def main():
