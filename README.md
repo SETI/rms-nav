@@ -79,16 +79,21 @@ RMS-NAV is a comprehensive navigation system designed for spacecraft imagery pro
 
 # Quick Start
 
-Process a single Cassini image using star navigation:
+Process a single Cassini image using the installed CLI script:
 
 ```bash
-python main/nav_main_offset.py COISS --stars-only --image-full-path /path/to/image/N1234567890.IMG
+nav_offset coiss N1234567890 \
+  --pds3-holdings-root /path/to/pds3 \
+  --nav-results-root /path/to/nav_results
 ```
 
-Process all Voyager images in a directory:
+Process all Voyager images within a single PDS3 volume:
 
 ```bash
-python main/nav_main_offset.py VGISS --directory /path/to/voyager/images
+nav_offset vgiss \
+  --volumes VGISS_5101 \
+  --pds3-holdings-root /path/to/pds3 \
+  --nav-results-root /path/to/nav_results
 ```
 
 # Documentation

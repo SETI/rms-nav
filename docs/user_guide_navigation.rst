@@ -5,7 +5,7 @@ Navigation User Guide
 Introduction
 ============
 
-RMS-NAV is a spacecraft image navigation system designed to analyze images from various space missions and determine precise positional offsets. This guide explains how to use the primary command-line interface in ``main/nav_offset.py`` to navigate images and generate results, and how to invoke the cloud-tasks variant for queue-driven processing.
+RMS-NAV is a spacecraft image navigation system designed to analyze images from various space missions and determine precise positional offsets. This guide explains how to use the primary command-line interface exposed by the ``nav_offset`` script to navigate images and generate results, and how to invoke the cloud-tasks variant for queue-driven processing.
 
 Purpose of the System
 ---------------------
@@ -166,13 +166,13 @@ You can override configuration on a per-run basis using ``--config-file``:
 
 .. code-block:: bash
 
-   python main/nav_offset.py coiss N1234567890 --config-file /path/to/special_config.yaml
+   nav_offset coiss N1234567890 --config-file /path/to/special_config.yaml
 
 You can specify multiple configuration files, and they will be loaded in order:
 
 .. code-block:: bash
 
-   python main/nav_offset.py coiss N1234567890 \
+   nav_offset coiss N1234567890 \
      --config-file base_overrides.yaml \
      --config-file run_specific.yaml
 
@@ -182,11 +182,11 @@ Command-Line Interface
 Basic Usage
 -----------
 
-The main entry point for RMS-NAV is ``main/nav_offset.py``. The basic syntax is:
+The main entry point for RMS-NAV is the ``nav_offset`` script installed via ``pyproject.toml``. The basic syntax is:
 
 .. code-block:: bash
 
-   python main/nav_offset.py DATASET_NAME [options]
+   nav_offset DATASET_NAME [options]
 
 Where ``DATASET_NAME`` is one of the supported names listed in the "Supported Missions" section. Names are case-insensitive (for example, ``COISS`` and ``coiss`` are equivalent).
 
@@ -242,40 +242,40 @@ To process a single Cassini image by specifying its name explicitly and using th
 
 .. code-block:: bash
 
-   python main/nav_offset.py coiss N1234567890
+   nav_offset coiss N1234567890
 
 To process Voyager images within a single PDS3 volume:
 
 .. code-block:: bash
 
-   python main/nav_offset.py vgiss --volumes VGISS_5101
+   nav_offset vgiss --volumes VGISS_5101
 
 To process a New Horizons image list found in a CSV from PDS using the correlate_all technique:
 
 .. code-block:: bash
 
-   python main/nav_offset.py nhlorri --image-filespec-csv /path/to/nhlorri.csv --nav-techniques correlate_all
+   nav_offset nhlorri --image-filespec-csv /path/to/nhlorri.csv --nav-techniques correlate_all
 
 To choose ten random Cassini images between two volumes and perform a dry run:
 
 .. code-block:: bash
 
-   python main/nav_offset.py coiss --first-volume COISS_2001 --last-volume COISS_2010 --choose-random-images 10 --dry-run
+   nav_offset coiss --first-volume COISS_2001 --last-volume COISS_2010 --choose-random-images 10 --dry-run
 
 To generate a cloud-tasks JSON file for images across two Voyager volumes without processing:
 
 .. code-block:: bash
 
-   python main/nav_offset.py vgiss --volumes VGISS_5101 --volumes VGISS_5102 --output-cloud-tasks-file tasks.json
+   nav_offset vgiss --volumes VGISS_5101 --volumes VGISS_5102 --output-cloud-tasks-file tasks.json
 
 Cloud-tasks entry point
 -----------------------
 
-Queue-driven processing is supported by ``main/nav_offset_cloud_tasks.py``. This variant reads tasks from a queue and processes each batch of files described by the task payload. It accepts the same environment options used to derive configuration and results roots and does not include dataset selection flags because the task provides the list of files. Invoke it with:
+Queue-driven processing is supported by ``nav_offset_cloud_tasks``. This variant reads tasks from a queue and processes each batch of files described by the task payload. It accepts the same environment options used to derive configuration and results roots and does not include dataset selection flags because the task provides the list of files. Invoke it with:
 
 .. code-block:: bash
 
-   python main/nav_offset_cloud_tasks.py [--config-file PATH] [--nav-results-root PATH]
+   nav_offset_cloud_tasks [--config-file PATH] [--nav-results-root PATH]
 
 Each task payload must be a JSON object with the following fields:
 
