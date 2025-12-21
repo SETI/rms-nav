@@ -14,7 +14,7 @@ urn:nasa:pds:cassini_iss_fring_mosaics_rsfrench2025
 The most current version of the User Guide may be obtained from the PDS
 using the logical identifier:
 
-urn:nasa:pds:cassini_iss_saturn_backplanes_rsfrench_2027:document:backplanes-users-guide
+urn:nasa:pds:cassini_iss_saturn_backplanes_rsfrench2027:document:backplanes-users-guide
 
 or by browsing the document collection of this bundle at the PDS Ring-Moon
 Systems Node: https://pds-rings.seti.org/
