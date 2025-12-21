@@ -13,7 +13,7 @@ from nav.obs import ObsSnapshot, ObsSnapshotInst
 from .backplanes_bodies import create_body_backplanes
 from .backplanes_rings import create_ring_backplanes
 from .merge import merge_sources_into_master
-from .writer import write_fits_and_label
+from .writer import write_fits
 
 
 def generate_backplanes_image_files(
@@ -51,7 +51,6 @@ def generate_backplanes_image_files(
     image_name = image_path.name
     metadata_file = nav_results_root / (image_file.results_path_stub + '_metadata.json')
     fits_file_path = backplane_results_root / (image_file.results_path_stub + '_backplanes.fits')
-    label_file_path = backplane_results_root / (image_file.results_path_stub + '_backplanes.xml')
 
     with logger.open(str(image_path)):
         # Gate on metadata existence
@@ -166,9 +165,8 @@ def generate_backplanes_image_files(
         }
 
         if write_output_files:
-            write_fits_and_label(
+            write_fits(
                 fits_file_path=fits_file_path,
-                label_file_path=label_file_path,
                 snapshot=snapshot,
                 master_by_type=master_by_type,
                 body_id_map=body_id_map,

@@ -149,3 +149,73 @@ class DataSet(ABC, NavBase):
             The list of supported grouping types.
         """
         ...
+
+    def pds4_bundle_template_dir(self) -> str:
+        """Returns absolute path to template directory for PDS4 bundle generation.
+
+        Checks config section pds4.{dataset_name}.template_dir first, then allows override.
+        If just a name is given, it is relative to the pds4/templates directory.
+        If a full path is given, it will be left as absolute.
+
+        Returns:
+            Absolute path to template directory
+            (e.g., "/path/to/pds4/templates/cassini_iss_saturn_1.0").
+        """
+        raise NotImplementedError
+
+    def pds4_bundle_name(self) -> str:
+        """Returns bundle name for PDS4 bundle generation.
+
+        Checks config section pds4.{dataset_name}.bundle_name first, then allows override.
+
+        Returns:
+            Bundle name (e.g., "cassini_iss_saturn_backplanes_rsfrench2027").
+        """
+        raise NotImplementedError
+
+    @staticmethod
+    def pds4_bundle_path_for_image(image_name: str) -> str:
+        """Maps image name to bundle directory path.
+
+        Parameters:
+            image_name: The image name to map.
+
+        Returns:
+            Bundle directory path relative to bundle root (e.g., "1234xxxxxx/123456xxxx").
+        """
+        raise NotImplementedError
+
+    def pds4_path_stub(self, image_file: ImageFile) -> str:
+        """Returns PDS4 path stub for bundle directory structure.
+
+        Parameters:
+            image_file: The image file to generate path stub for.
+
+        Returns:
+            Path stub relative to bundle root (e.g., "1234xxxxxx/123456xxxx/1234567890w").
+
+        Raises:
+            NotImplementedError: If not implemented by subclass.
+        """
+        raise NotImplementedError
+
+    def pds4_template_variables(
+        self,
+        *,
+        image_file: ImageFile,
+        nav_metadata: dict[str, Any],
+        backplane_metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Returns template variables for PDS4 label generation.
+
+        Parameters:
+            image_file: The image file being processed.
+            nav_metadata: Navigation metadata dictionary (as read from offset_metadata
+                JSON file).
+            backplane_metadata: Backplane metadata dictionary (created from backplane FITS
+                file).
+
+        Returns:
+            Dictionary mapping variable names to values for template substitution.
+        """
+        raise NotImplementedError

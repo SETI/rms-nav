@@ -26,6 +26,7 @@ class Config:
         self._config_titan: dict[str, Any] = AttrDict({})
         self._config_bootstrap: dict[str, Any] = AttrDict({})
         self._config_backplanes: dict[str, Any] = AttrDict({})
+        self._config_pds4: dict[str, Any] = AttrDict({})
 
     def _update_attrdicts(self) -> None:
         """Updates all attribute dictionaries from the main configuration dictionary.
@@ -42,6 +43,7 @@ class Config:
         self._config_titan = AttrDict(self._config_dict.get('titan', {}))
         self._config_bootstrap = AttrDict(self._config_dict.get('bootstrap', {}))
         self._config_backplanes = AttrDict(self._config_dict.get('backplanes', {}))
+        self._config_pds4 = AttrDict(self._config_dict.get('pds4', {}))
 
     def _load_yaml(self,
                    config_path: str | Path) -> dict[str, Any]:
@@ -220,6 +222,13 @@ class Config:
 
         self.read_config()
         return self._config_backplanes
+
+    @property
+    def pds4(self) -> Any:
+        """Returns PDS4 bundle generation configuration."""
+
+        self.read_config()
+        return self._config_pds4
 
 
 DEFAULT_CONFIG = Config()

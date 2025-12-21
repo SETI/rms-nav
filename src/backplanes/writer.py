@@ -12,10 +12,9 @@ from nav.obs import ObsSnapshot
 from pathlib import Path
 
 
-def write_fits_and_label(
+def write_fits(
     *,
     fits_file_path: FCPath,
-    label_file_path: FCPath,
     snapshot: ObsSnapshot,
     master_by_type: dict[str, np.ndarray],
     body_id_map: np.ndarray,
@@ -64,29 +63,3 @@ def write_fits_and_label(
     local_path = fits_file_path.get_local_path()
     hdul.writeto(local_path, overwrite=True)
     fits_file_path.upload()
-
-    # PDS4 label via PdsTemplate
-    # TODO Everything here will need to be updated once we have a real label template
-    try:
-        template_path = Path(__file__).resolve().parent / 'templates' / 'backplanes.lblx'
-        template = pdstemplate.PdsTemplate(str(template_path))
-        xml_meta: dict[str, Any] = {
-            'PRODUCT_ID': fits_file_path.name,
-            'FILE_NAME': fits_file_path.name,
-            'LINES': snapshot.data.shape[0],
-            'LINE_SAMPLES': snapshot.data.shape[1],
-            # + BODY_ID_MAP if present
-            'BANDS': len(filtered_master) + (1 if has_body_id_map else 0),
-            'BACKPLANE_TYPES': sorted([k.upper() for k in filtered_master.keys()]),
-            'TARGETS': [],
-        }
-        # Populate targets if mapping exists (optional)
-        target_lids = getattr(config.backplanes, 'target_lids', {})
-        for naif_id, lid in target_lids.items():
-            xml_meta.setdefault('TARGETS', []).append({'NAIF_ID': int(naif_id), 'LID': lid})
-
-        local_label = label_file_path.get_local_path()
-        template.write(xml_meta, local_label)
-        label_file_path.upload()
-    except Exception as e:
-        logger.error('Failed to write PDS4 label for %s: %s', fits_file_path, e)
