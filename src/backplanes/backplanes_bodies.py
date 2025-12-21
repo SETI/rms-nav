@@ -149,6 +149,7 @@ def create_body_backplanes(snapshot: ObsSnapshot,
                 valid_values = bp_array[bp_mask]
                 if len(valid_values) > 0:
                     # Check if this backplane type is in radians and needs conversion
+                    # TODO Clean this up - currently units is not used in the default config
                     bp_cfg = next((b for b in bodies_cfg if b['name'] == bp_type), None)
                     units = bp_cfg.get('units', '') if bp_cfg else ''
                     # Convert radians to degrees for angle backplanes

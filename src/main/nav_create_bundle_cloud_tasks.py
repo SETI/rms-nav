@@ -46,12 +46,12 @@ def process_task(
     # Derive roots
     nav_results_root_str = arguments.nav_results_root
     if nav_results_root_str is None:
+        nav_results_root_str = os.getenv('NAV_RESULTS_ROOT')
+    if nav_results_root_str is None:
         try:
             nav_results_root_str = DEFAULT_CONFIG.environment.nav_results_root
         except AttributeError:
             pass
-    if nav_results_root_str is None:
-        nav_results_root_str = os.getenv('NAV_RESULTS_ROOT')
     if nav_results_root_str is None:
         return False, ('One of --nav-results-root, the configuration variable '
                        '"nav_results_root" or the NAV_RESULTS_ROOT environment variable must be '
@@ -60,12 +60,12 @@ def process_task(
 
     backplane_results_root_str = arguments.backplane_results_root
     if backplane_results_root_str is None:
+        backplane_results_root_str = os.getenv('BACKPLANE_RESULTS_ROOT')
+    if backplane_results_root_str is None:
         try:
             backplane_results_root_str = DEFAULT_CONFIG.environment.backplane_results_root
         except AttributeError:
             pass
-    if backplane_results_root_str is None:
-        backplane_results_root_str = os.getenv('BACKPLANE_RESULTS_ROOT')
     if backplane_results_root_str is None:
         return False, ('One of --backplane-results-root, the configuration variable '
                        '"backplane_results_root" or the BACKPLANE_RESULTS_ROOT environment '
@@ -74,12 +74,12 @@ def process_task(
 
     bundle_results_root_str = arguments.bundle_results_root
     if bundle_results_root_str is None:
+        bundle_results_root_str = os.getenv('BUNDLE_RESULTS_ROOT')
+    if bundle_results_root_str is None:
         try:
             bundle_results_root_str = DEFAULT_CONFIG.environment.bundle_results_root
         except AttributeError:
             pass
-    if bundle_results_root_str is None:
-        bundle_results_root_str = os.getenv('BUNDLE_RESULTS_ROOT')
     if bundle_results_root_str is None:
         return False, ('One of --bundle-results-root, the configuration variable '
                        '"bundle_results_root" or the BUNDLE_RESULTS_ROOT environment variable must '

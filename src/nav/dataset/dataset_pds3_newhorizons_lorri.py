@@ -219,4 +219,4 @@ class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
         backplane_metadata: dict[str, Any],
     ) -> dict[str, Any]:
         """Returns template variables for PDS4 label generation."""
-        return {}
+        raise NotImplementedError

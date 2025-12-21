@@ -193,9 +193,6 @@ class DataSet(ABC, NavBase):
 
         Returns:
             Path stub relative to bundle root (e.g., "1234xxxxxx/123456xxxx/1234567890w").
-
-        Raises:
-            NotImplementedError: If not implemented by subclass.
         """
         raise NotImplementedError
 

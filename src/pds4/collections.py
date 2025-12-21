@@ -60,7 +60,7 @@ def generate_collection_files(
     # read from metadata - for now, generate placeholder)
     # TODO: Parse actual LIDVIDs from label files
     for label_file in label_files:
-        # Placeholder: would need to parse XML to get actual LIDVID
+        # TODO Placeholder: would need to parse XML to get actual LIDVID
         lidvids.append(f'urn:nasa:pds:{bundle_name}:data:placeholder::1.0')
 
     # Generate collection_data.csv
@@ -190,6 +190,7 @@ def generate_global_index_files(
             metadata = json.loads(suppl_text)
         except Exception:
             logger.exception('Error reading supplemental file %s', suppl_file)
+            # TODO Should we continue here?
             continue
 
         backplanes = metadata.get('backplanes', {})
@@ -222,8 +223,8 @@ def generate_global_index_files(
             # Add min/max columns for each configured backplane type
             for bp_type in body_backplane_types:
                 bp_values = body_backplanes.get(bp_type, {})
-                body_row[f'{bp_type}_min'] = bp_values.get('min', '')
-                body_row[f'{bp_type}_max'] = bp_values.get('max', '')
+                body_row[f'{bp_type}_min'] = bp_values.get('min')
+                body_row[f'{bp_type}_max'] = bp_values.get('max')
             body_index_rows.append(body_row)
 
         # Ring index: one line per image
@@ -297,7 +298,12 @@ def generate_global_index_files(
         template_vars = {
             'FILE_RECORDS': len(body_index_rows),
         }
-        template.write(template_vars, str(bodies_label_local))
+        try:
+            template.write(template_vars, str(bodies_label_local))
+        except Exception:
+            logger.exception('Error creating label global_index_bodies.lblx: %s',
+                            bodies_label_local)
+            raise
         bodies_label.upload()
         logger.info('Generated global_index_bodies.lblx')
 

@@ -97,6 +97,7 @@ def create_ring_backplanes(snapshot: ObsSnapshot,
         if len(valid_values) > 0:
             # Check if this backplane type is in radians and needs conversion
             bp_cfg = next((r for r in rings_cfg if r['name'] == name), None)
+            # TODO Clean this up - currently units is not used in the default config
             units = bp_cfg.get('units', '') if bp_cfg else ''
             # Convert radians to degrees for angle backplanes
             if units.lower() == 'rad' or any(

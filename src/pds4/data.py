@@ -39,6 +39,7 @@ def generate_bundle_data_files(
         Raises exceptions for unexpected errors.
     """
 
+    # TODO Move this to the top-level program
     pdstemplate.PdsTemplate.set_logger(logger)
 
     if len(image_files.image_files) != 1:
@@ -86,8 +87,7 @@ def generate_bundle_data_files(
         # Extract directory and filename prefix from pds4_path_stub
         # pds4_path_stub is like "1234xxxxxx/123456xxxx/1234567890w"
         if '/' in pds4_path_stub:
-            pds4_dir = '/'.join(pds4_path_stub.rsplit('/', 1)[:-1])
-            pds4_filename_prefix = pds4_path_stub.rsplit('/', 1)[-1]
+            pds4_dir, pds4_filename_prefix = pds4_path_stub.rsplit('/', 1)
         else:
             pds4_dir = ''
             pds4_filename_prefix = pds4_path_stub
@@ -144,11 +144,11 @@ def generate_bundle_data_files(
 
             # Copy summary PNG to browse directory and generate browse label
             if summary_png_source.exists():
-                browse_dir.mkdir(parents=True, exist_ok=True)
                 # Copy the summary PNG file
                 summary_png_local = summary_png_source.get_local_path()
                 browse_image_local = browse_image_path.get_local_path()
                 # TODO This needs to be updated for cloud storage
+                browse_dir.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(summary_png_local, browse_image_local)
                 browse_image_path.upload()
                 logger.info('Copied summary image: %s', browse_image_path)

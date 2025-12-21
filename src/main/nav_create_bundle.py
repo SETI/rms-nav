@@ -69,13 +69,7 @@ def parse_args_labels(command_list: list[str]) -> argparse.Namespace:
         print('Usage: python nav_create_bundle.py labels <dataset_name> [args]')
         sys.exit(1)
 
-    try:
-        DATASET = dataset_name_to_class(DATASET_NAME)()
-    except KeyError:
-        print(f'Unknown dataset "{DATASET_NAME}"')
-        print(f'Valid datasets are: {", ".join(dataset_names())}')
-        print('Usage: python nav_create_bundle.py labels <dataset_name> [args]')
-        sys.exit(1)
+    DATASET = dataset_name_to_class(DATASET_NAME)()
 
     cmdparser = argparse.ArgumentParser(
         description='PDS4 Bundle Generation - Labels',
@@ -85,6 +79,7 @@ def parse_args_labels(command_list: list[str]) -> argparse.Namespace:
     add_common_arguments(cmdparser)
 
     # Environment (additional arguments specific to labels)
+    # TODO there is already an environment group with common arguments
     environment_group = cmdparser.add_argument_group('Environment')
     environment_group.add_argument(
         '--pds3-holdings-root', type=str, default=None,
@@ -151,12 +146,12 @@ def derive_bundle_results_root(arguments: argparse.Namespace) -> FCPath:
     """
     bundle_results_root_str = arguments.bundle_results_root
     if bundle_results_root_str is None:
+        bundle_results_root_str = os.getenv('BUNDLE_RESULTS_ROOT')
+    if bundle_results_root_str is None:
         try:
             bundle_results_root_str = DEFAULT_CONFIG.environment.bundle_results_root
         except AttributeError:
             pass
-    if bundle_results_root_str is None:
-        bundle_results_root_str = os.getenv('BUNDLE_RESULTS_ROOT')
     if bundle_results_root_str is None:
         raise ValueError('One of --bundle-results-root, the configuration variable '
                          '"bundle_results_root" or the BUNDLE_RESULTS_ROOT environment '
@@ -217,7 +212,10 @@ def main_labels() -> None:
     assert DATASET is not None
 
     for imagefiles in DATASET.yield_image_files_from_arguments(arguments):
-        assert len(imagefiles.image_files) == 1
+        if len(imagefiles.image_files) != 1:
+            MAIN_LOGGER.error('Expected 1 image file, got %d for %s',
+                              len(imagefiles.image_files), imagefiles)
+            continue
         if arguments.dry_run:
             MAIN_LOGGER.info('Would process: %s',
                              imagefiles.image_files[0].label_file_url.as_posix())
@@ -230,7 +228,7 @@ def main_labels() -> None:
             backplane_results_root=backplane_results_root,
             bundle_results_root=bundle_results_root,
             logger=MAIN_LOGGER,
-            write_output_files=not arguments.dry_run,
+            write_output_files=not arguments.dry_run,  # TODO Not needed with above continue
         )
         if not ok:
             MAIN_LOGGER.info('Skipped: %s',

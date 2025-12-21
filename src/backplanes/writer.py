@@ -77,6 +77,7 @@ def write_fits(
     }
 
     # Get inventory information for all bodies
+    # TODO Clean this up
     inv: dict[str, Any] = {}
     try:
         if snapshot.is_simulated:

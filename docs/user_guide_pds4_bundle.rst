@@ -199,8 +199,7 @@ The labels pass requires:
 * Navigation metadata files (``*_metadata.json``) from the navigation pass
 * Backplane FITS files (``*_backplanes.fits``) from the backplanes pass
 * Backplane metadata files (``*_backplane_metadata.json``) from the backplanes pass
-* Summary PNG files (``*_summary.png``) from the navigation pass (optional, for browse
-  products)
+* Summary PNG files (``*_summary.png``) from the navigation pass
 
 The summary pass requires:
 
@@ -276,7 +275,8 @@ Configuration Options
 ---------------------
 
 * ``template_dir``: Name or absolute path to the template directory. If just a name, it
-  is resolved relative to ``src/pds4/templates/``. If an absolute path, it is used as-is.
+  is resolved relative to ``src/pds4/templates/`` in the ``rms-nav`` package.
+  If an absolute path, it is used as-is.
 
 * ``bundle_name``: Name of the bundle directory (e.g., ``cassini_iss_saturn_backplanes_rsfrench2027``).
 

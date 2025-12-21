@@ -73,11 +73,11 @@ class DataSetSim(DataSet):
     @staticmethod
     def pds4_bundle_path_for_image(image_name: str) -> str:
         """Maps image name to bundle directory path."""
-        raise NotImplementedError
+        raise NotImplementedError('Bundle generation not supported for sim dataset')
 
     def pds4_path_stub(self, image_file: ImageFile) -> str:
         """Returns PDS4 path stub for bundle directory structure."""
-        raise NotImplementedError
+        raise NotImplementedError('Bundle generation not supported for sim dataset')
 
     def pds4_template_variables(
         self,

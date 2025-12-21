@@ -1,5 +1,5 @@
 import argparse
-from collections.abc import Iterator
+from collections.abc import Iterator, ABC
 from pathlib import Path
 from typing import Any, Optional, cast
 
@@ -11,7 +11,7 @@ from nav.config import Config
 from nav.support.misc import safe_lstrip_zero
 
 
-class DataSetPDS3CassiniISS(DataSetPDS3):
+class DataSetPDS3CassiniISS(ABC, DataSetPDS3):
     """Implements dataset access for PDS3 Cassini ISS (Imaging Science Subsystem) data.
 
     This class provides specialized functionality for accessing and parsing Cassini
@@ -238,8 +238,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         """
 
         # First add the PDS3 arguments
-        super(DataSetPDS3CassiniISS, DataSetPDS3CassiniISS).add_selection_arguments(
-            cmdparser, group)
+        DataSetPDS3.add_selection_arguments(cmdparser, group)
 
         if group is None:
             group = cmdparser.add_argument_group('Image selection (Cassini ISS-specific)')
@@ -531,6 +530,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         vars_dict['TITLE'] = f'Backplanes for {image_file.image_file_name}'
         vars_dict['DESCRIPTION'] = f'Backplanes for navigated image {image_file.image_file_name}'
         vars_dict['COMMENT'] = 'Generated from navigated image data'
+        # TODO Placeholder LIDVID
         vars_dict['SOURCE_IMAGE_LIDVID'] = 'urn:nasa:pds:cassini_iss_saturn:data:placeholder::1.0'
 
         return vars_dict
