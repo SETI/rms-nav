@@ -42,6 +42,7 @@ NUM_FILES_SKIPPED: int = 0
 NUM_FILES_COMPLETED: int = 0
 START_TIME: float = 0.0
 
+
 ################################################################################
 #
 # ARGUMENT PARSING

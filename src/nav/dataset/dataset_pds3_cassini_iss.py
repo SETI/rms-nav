@@ -1,5 +1,5 @@
 import argparse
-from collections.abc import Iterator, ABC
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Optional, cast
 
@@ -11,7 +11,7 @@ from nav.config import Config
 from nav.support.misc import safe_lstrip_zero
 
 
-class DataSetPDS3CassiniISS(ABC, DataSetPDS3):
+class DataSetPDS3CassiniISS(DataSetPDS3):
     """Implements dataset access for PDS3 Cassini ISS (Imaging Science Subsystem) data.
 
     This class provides specialized functionality for accessing and parsing Cassini
@@ -316,12 +316,12 @@ class DataSetPDS3CassiniISS(ABC, DataSetPDS3):
         """
         # Check config first
         template_dir = None
-        dataset_config = self.config.pds4.get(self._dataset_name_for_config(), {})
+        dataset_config = self.config.pds4.get(self._dataset_name_for_pds4_config(), {})
         if 'template_dir' in dataset_config:
             template_dir = str(dataset_config['template_dir'])
 
         if template_dir is None:
-            template_dir = self._default_template_dir()
+            template_dir = self._default_pds4_template_dir()
 
         # If it's an absolute path, return as-is
         if Path(template_dir).is_absolute():
@@ -339,11 +339,11 @@ class DataSetPDS3CassiniISS(ABC, DataSetPDS3):
             Bundle name.
         """
         # Check config first
-        dataset_config = self.config.pds4.get(self._dataset_name_for_config(), {})
+        dataset_config = self.config.pds4.get(self._dataset_name_for_pds4_config(), {})
         if 'bundle_name' in dataset_config:
             return str(dataset_config['bundle_name'])
         # Default
-        return self._default_bundle_name()
+        return self._default_pds4_bundle_name()
 
     @staticmethod
     def pds4_bundle_path_for_image(image_name: str) -> str:
@@ -535,29 +535,29 @@ class DataSetPDS3CassiniISS(ABC, DataSetPDS3):
 
         return vars_dict
 
-    def _dataset_name_for_config(self) -> str:
-        """Returns the dataset name for config lookup.
+    def _dataset_name_for_pds4_config(self) -> str:
+        """Returns the dataset name for config lookup under the PDS4 section.
 
         Returns:
             Dataset name for config (e.g., "coiss_cruise" or "coiss_saturn").
         """
-        raise NotImplementedError
+        raise NotImplementedError('PDS4 bundle generation not supported for this dataset')
 
-    def _default_template_dir(self) -> str:
+    def _default_pds4_template_dir(self) -> str:
         """Returns the default template directory name.
 
         Returns:
             Default template directory name.
         """
-        raise NotImplementedError
+        raise NotImplementedError('PDS4 bundle generation not supported for this dataset')
 
-    def _default_bundle_name(self) -> str:
+    def _default_pds4_bundle_name(self) -> str:
         """Returns the default bundle name.
 
         Returns:
             Default bundle name.
         """
-        raise NotImplementedError
+        raise NotImplementedError('PDS4 bundle generation not supported for this dataset')
 
 
 class DataSetPDS3CassiniISSCruise(DataSetPDS3CassiniISS):
@@ -567,13 +567,13 @@ class DataSetPDS3CassiniISSCruise(DataSetPDS3CassiniISS):
     _MAX_1xxx_VOL = 1009
     _ALL_VOLUME_NAMES = tuple(f'COISS_{x:04d}' for x in range(_MIN_1xxx_VOL, _MAX_1xxx_VOL+1))
 
-    def _dataset_name_for_config(self) -> str:
+    def _dataset_name_for_pds4_config(self) -> str:
         return 'coiss_cruise'
 
-    def _default_template_dir(self) -> str:
+    def _default_pds4_template_dir(self) -> str:
         return 'cassini_iss_cruise_1.0'
 
-    def _default_bundle_name(self) -> str:
+    def _default_pds4_bundle_name(self) -> str:
         return 'cassini_iss_cruise_backplanes_rsfrench2027'
 
 
@@ -584,11 +584,11 @@ class DataSetPDS3CassiniISSSaturn(DataSetPDS3CassiniISS):
     _MAX_2xxx_VOL = 2116
     _ALL_VOLUME_NAMES = tuple(f'COISS_{x:04d}' for x in range(_MIN_2xxx_VOL, _MAX_2xxx_VOL+1))
 
-    def _dataset_name_for_config(self) -> str:
+    def _dataset_name_for_pds4_config(self) -> str:
         return 'coiss_saturn'
 
-    def _default_template_dir(self) -> str:
+    def _default_pds4_template_dir(self) -> str:
         return 'cassini_iss_saturn_1.0'
 
-    def _default_bundle_name(self) -> str:
+    def _default_pds4_bundle_name(self) -> str:
         return 'cassini_iss_saturn_backplanes_rsfrench2027'

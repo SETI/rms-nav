@@ -302,7 +302,7 @@ def generate_global_index_files(
             template.write(template_vars, str(bodies_label_local))
         except Exception:
             logger.exception('Error creating label global_index_bodies.lblx: %s',
-                            bodies_label_local)
+                             bodies_label_local)
             raise
         bodies_label.upload()
         logger.info('Generated global_index_bodies.lblx')

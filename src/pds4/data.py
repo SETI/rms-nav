@@ -145,8 +145,8 @@ def generate_bundle_data_files(
             # Copy summary PNG to browse directory and generate browse label
             if summary_png_source.exists():
                 # Copy the summary PNG file
-                summary_png_local = summary_png_source.get_local_path()
-                browse_image_local = browse_image_path.get_local_path()
+                summary_png_local = cast(Path, summary_png_source.get_local_path())
+                browse_image_local = cast(Path, browse_image_path.get_local_path())
                 # TODO This needs to be updated for cloud storage
                 browse_dir.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(summary_png_local, browse_image_local)

@@ -77,7 +77,7 @@ def create_ring_backplanes(snapshot: ObsSnapshot,
 
         mvals = vals.mvals
         full = np.asarray(np.ma.filled(mvals, fill_value=np.nan), dtype=np.float32)
-        mask = ~np.ma.getmaskarray(mvals)  # type: ignore[no-untyped-call]
+        mask = ~np.ma.getmaskarray(mvals)
 
         if np.any(mask):
             result['arrays'][name] = full

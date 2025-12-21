@@ -161,6 +161,8 @@ class DataSet(ABC, NavBase):
             Absolute path to template directory
             (e.g., "/path/to/pds4/templates/cassini_iss_saturn_1.0").
         """
+        # We don't make PDS4 methods as @abstractmethod because it's possible to make
+        # a DataSet that doesn't support PDS4 bundle generation
         raise NotImplementedError
 
     def pds4_bundle_name(self) -> str:
@@ -171,6 +173,8 @@ class DataSet(ABC, NavBase):
         Returns:
             Bundle name (e.g., "cassini_iss_saturn_backplanes_rsfrench2027").
         """
+        # We don't make PDS4 methods as @abstractmethod because it's possible to make
+        # a DataSet that doesn't support PDS4 bundle generation
         raise NotImplementedError
 
     @staticmethod
@@ -183,6 +187,8 @@ class DataSet(ABC, NavBase):
         Returns:
             Bundle directory path relative to bundle root (e.g., "1234xxxxxx/123456xxxx").
         """
+        # We don't make PDS4 methods as @abstractmethod because it's possible to make
+        # a DataSet that doesn't support PDS4 bundle generation
         raise NotImplementedError
 
     def pds4_path_stub(self, image_file: ImageFile) -> str:
@@ -194,6 +200,8 @@ class DataSet(ABC, NavBase):
         Returns:
             Path stub relative to bundle root (e.g., "1234xxxxxx/123456xxxx/1234567890w").
         """
+        # We don't make PDS4 methods as @abstractmethod because it's possible to make
+        # a DataSet that doesn't support PDS4 bundle generation
         raise NotImplementedError
 
     def pds4_template_variables(
@@ -215,4 +223,6 @@ class DataSet(ABC, NavBase):
         Returns:
             Dictionary mapping variable names to values for template substitution.
         """
+        # We don't make PDS4 methods as @abstractmethod because it's possible to make
+        # a DataSet that doesn't support PDS4 bundle generation
         raise NotImplementedError
