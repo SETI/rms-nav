@@ -29,6 +29,32 @@ Example:
 
 The dataset will automatically be available to the CLI once registered.
 
+Implementing PDS4 Bundle Generation Methods
+---------------------------------------------
+
+To support PDS4 bundle generation, datasets must implement the following abstract methods
+from :class:`nav.dataset.dataset.DataSet`:
+
+* ``pds4_bundle_template_dir()``: Returns the absolute path to the template directory
+  for PDS4 label generation. If a relative name is provided in config, it should be
+  resolved relative to ``src/pds4/templates/``.
+
+* ``pds4_bundle_name()``: Returns the bundle name (e.g., ``"instrument_backplanes_rsfrench2027"``).
+
+* ``pds4_bundle_path_for_image()``: Maps an image name to a bundle directory path
+  (e.g., ``"1234xxxxxx/123456xxxx"``). This is a static method.
+
+* ``pds4_path_stub()``: Returns the full path stub including directory and filename prefix
+  (e.g., ``"1234xxxxxx/123456xxxx/1234567890w"``).
+
+* ``pds4_template_variables()``: Returns a dictionary mapping template variable names to
+  values for PDS4 label generation. This should extract values from navigation metadata,
+  backplane metadata, and PDS3 index rows (if available).
+
+For datasets that do not support PDS4 bundle generation, these methods should raise
+``NotImplementedError``. See :class:`nav.dataset.dataset_pds3_cassini_iss.DataSetPDS3CassiniISS`
+for a complete implementation example.
+
 Adding a New Instrument
 -----------------------
 

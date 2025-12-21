@@ -260,6 +260,19 @@ nav.ui
    :undoc-members:
    :show-inheritance:
 
+nav.pds4
+========
+
+.. automodule:: pds4.data
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: pds4.collections
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Other modules
 =============
 
