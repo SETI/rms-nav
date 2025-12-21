@@ -4,12 +4,11 @@ from filecache import FCPath
 from astropy.io import fits
 import numpy as np
 from pdslogger import PdsLogger
-import pdstemplate
 
 from nav.config import Config
 from nav.config.logger import DEFAULT_LOGGER
 from nav.obs import ObsSnapshot
-from pathlib import Path
+from nav.support.file import json_as_string
 
 
 def write_fits(
@@ -19,16 +18,21 @@ def write_fits(
     master_by_type: dict[str, np.ndarray],
     body_id_map: np.ndarray,
     config: Config,
+    bodies_result: dict[str, Any] | None = None,
+    rings_result: dict[str, Any] | None = None,
     logger: PdsLogger = DEFAULT_LOGGER,
 ) -> None:
-    """Write FITS and PDS4 label using FCPath.
+    """Write FITS file and backplane metadata JSON using FCPath.
 
     Parameters:
         fits_file_path: The FITS file path.
-        label_file_path: The PDS4 label file path.
         snapshot: The observation snapshot.
         master_by_type: The master by type.
         body_id_map: The body id map.
+        config: The configuration.
+        bodies_result: Result from create_body_backplanes containing statistics.
+        rings_result: Result from create_ring_backplanes containing statistics.
+        logger: Logger for diagnostic messages.
     """
 
     hdus: list[fits.ImageHDU | fits.PrimaryHDU] = []
@@ -63,3 +67,61 @@ def write_fits(
     local_path = fits_file_path.get_local_path()
     hdul.writeto(local_path, overwrite=True)
     fits_file_path.upload()
+
+    # Write backplane metadata JSON file
+    metadata_file_path = fits_file_path.parent / (
+        fits_file_path.stem.replace('_backplanes', '') + '_backplane_metadata.json')
+    backplane_metadata: dict[str, Any] = {
+        'bodies': {},
+        'rings': {},
+    }
+
+    # Get inventory information for all bodies
+    inv: dict[str, Any] = {}
+    try:
+        if snapshot.is_simulated:
+            inv = snapshot.sim_inventory
+        else:
+            closest_planet = snapshot.closest_planet
+            if closest_planet:
+                body_list = [closest_planet] + list(
+                    config.satellites(closest_planet))
+                inv = snapshot.inventory(body_list, return_type='full')
+    except Exception as e:
+        logger.debug('Could not get inventory data: %s', e)
+
+    # Extract body statistics and inventory information per body
+    if bodies_result and 'per_body' in bodies_result:
+        for body_name, body_data in bodies_result['per_body'].items():
+            body_entry: dict[str, Any] = {}
+            if 'statistics' in body_data:
+                body_entry['backplanes'] = body_data['statistics']
+
+            # Add inventory information for this body
+            if body_name in inv:
+                inv_data = inv[body_name]
+                # center_uv is [u, v] but we need [v, u]
+                center_uv = inv_data.get('center_uv', None)
+                if center_uv is not None:
+                    body_entry['center_uv'] = [
+                        float(center_uv[1]), float(center_uv[0])]
+                # center_range from range
+                center_range = inv_data.get('range', None)
+                if center_range is not None:
+                    body_entry['center_range'] = float(center_range)
+                # size_uv from u_pixel_size and v_pixel_size
+                u_pixel_size = inv_data.get('u_pixel_size', None)
+                v_pixel_size = inv_data.get('v_pixel_size', None)
+                if u_pixel_size is not None and v_pixel_size is not None:
+                    body_entry['size_uv'] = [
+                        float(u_pixel_size), float(v_pixel_size)]
+
+            if body_entry:
+                backplane_metadata['bodies'][body_name] = body_entry
+
+    # Extract ring statistics
+    if rings_result and 'statistics' in rings_result:
+        backplane_metadata['rings'] = {'backplanes': rings_result['statistics']}
+
+    metadata_file_path.write_text(json_as_string(backplane_metadata))
+    logger.debug('Wrote backplane metadata: %s', metadata_file_path)

@@ -1,18 +1,14 @@
 import json
+import shutil
 from pathlib import Path
 from typing import Any, cast
 
-from astropy.io import fits
 from filecache import FCPath
-import numpy as np
 from pdslogger import PdsLogger
 import pdstemplate
 
 from nav.dataset.dataset import DataSet, ImageFiles
 from nav.support.file import json_as_string
-from nav.support.types import NDArrayFloatType, NDArrayIntType
-
-from .backplane_summary import calculate_backplane_statistics
 
 
 def generate_bundle_data_files(
@@ -24,7 +20,7 @@ def generate_bundle_data_files(
     bundle_results_root: FCPath,
     logger: PdsLogger,
     write_output_files: bool = True,
-) -> tuple[bool, dict[str, Any]]:
+) -> tuple[bool, dict[str, Any] | None]:
     """Generate PDS4 bundle data files for a single image batch.
 
     Parameters:
@@ -37,29 +33,26 @@ def generate_bundle_data_files(
         write_output_files: Whether to write output files.
 
     Returns:
-        Tuple of (success boolean, metadata dictionary).
+        Tuple of (success boolean, metadata dictionary or None).
+        Returns (False, None) if image should be skipped (missing files, etc.).
+        Returns (True, metadata) on success.
+        Raises exceptions for unexpected errors.
     """
 
+    pdstemplate.PdsTemplate.set_logger(logger)
+
     if len(image_files.image_files) != 1:
-        logger.error("Expected exactly one image per batch; got %d",
-                     len(image_files.image_files))
-        return False, {
-            'status': 'error',
-            'status_error': 'expected_one_image_per_batch',
-            'status_exception':
-                f'Expected exactly one image per batch; got {len(image_files.image_files)}',
-        }
+        raise ValueError(
+            f'Expected exactly one image per batch; got {len(image_files.image_files)}')
 
     image_file = image_files.image_files[0]
     image_path = image_file.image_file_path.absolute()
     image_name = image_path.name
     results_path_stub = image_file.results_path_stub
 
-    # Get supplemental filename from end of results_path_stub
-    results_path_stub_end = Path(results_path_stub).name
-
     metadata_file = nav_results_root / (results_path_stub + '_metadata.json')
-    fits_file_path = backplane_results_root / (results_path_stub + '_backplanes.fits')
+    backplane_metadata_file = backplane_results_root / (
+        results_path_stub + '_backplane_metadata.json')
 
     with logger.open(str(image_path)):
         # Read navigation metadata
@@ -68,177 +61,113 @@ def generate_bundle_data_files(
             nav_metadata = cast(dict[str, Any], json.loads(metadata_text))
         except FileNotFoundError:
             logger.warning('Offset metadata not found: %s', metadata_file)
-            return False, {
-                'status': 'warning',
-                'status_error': 'metadata_missing',
-                'status_exception': f'Offset metadata not found: {metadata_file}',
-                'image_path': str(image_path),
-                'image_name': image_name,
-            }
-        except Exception as e:
-            logger.warning('Error reading metadata "%s": %s', metadata_file, e)
-            return False, {
-                'status': 'warning',
-                'status_error': 'metadata_read_error',
-                'status_exception': str(e),
-                'image_path': str(image_path),
-                'image_name': image_name,
-            }
+            return False, None
 
         status = nav_metadata.get('status', None)
         if status != 'success':
             logger.warning('Skipping bundle generation for "%s": status=%s error=%s',
                            image_path, status,
                            nav_metadata.get('status_error', 'unknown'))
-            return False, {
-                'status': 'warning',
-                'status_error': 'prior_status_not_success',
-                'status_exception': nav_metadata.get('status_exception', ''),
-                'image_path': str(image_path),
-                'image_name': image_name,
-            }
+            return False, None
 
-        # Read backplane FITS file
+        # Read backplane metadata file
         try:
-            local_fits_path = cast(str, fits_file_path.retrieve())
-            with fits.open(local_fits_path) as hdul:
-                body_id_map: NDArrayIntType | None = None
-                backplane_arrays: dict[str, NDArrayFloatType] = {}
-
-                # Parse HDUs: locate BODY_ID_MAP and backplanes
-                for hdu in hdul[1:]:  # Skip primary HDU
-                    name = (hdu.name or '').upper()
-                    if name == 'BODY_ID_MAP':
-                        body_id_map = np.asarray(hdu.data, dtype=np.int32)
-                        logger.debug('Found BODY_ID_MAP in FITS file')
-                    else:
-                        arr = np.asarray(hdu.data, dtype=np.float64)
-                        backplane_arrays[name] = arr
-                        logger.debug('Found backplane %s in FITS file', name)
-
-                if body_id_map is None:
-                    logger.warning('No BODY_ID_MAP found in FITS file %s', fits_file_path)
-                    body_id_map = np.zeros((1, 1), dtype=np.int32)
-
+            backplane_metadata_text = backplane_metadata_file.read_text()
+            bp_stats = cast(dict[str, Any], json.loads(backplane_metadata_text))
         except FileNotFoundError:
-            logger.warning('Backplane FITS file not found: %s', fits_file_path)
-            return False, {
-                'status': 'warning',
-                'status_error': 'fits_file_missing',
-                'status_exception': f'Backplane FITS file not found: {fits_file_path}',
-                'image_path': str(image_path),
-                'image_name': image_name,
-            }
-        except Exception as e:
-            logger.exception('Error reading FITS file "%s"', fits_file_path)
-            return False, {
-                'status': 'error',
-                'status_error': 'fits_read_error',
-                'status_exception': str(e),
-                'image_path': str(image_path),
-                'image_name': image_name,
-            }
+            logger.warning('Backplane metadata file not found: %s', backplane_metadata_file)
+            return False, None
 
-        # Calculate backplane statistics
-        try:
-            bp_stats = calculate_backplane_statistics(
-                body_id_map=body_id_map,
-                backplane_arrays=backplane_arrays,
-                logger=logger,
-            )
-        except Exception as e:
-            logger.exception('Error calculating backplane statistics')
-            return False, {
-                'status': 'error',
-                'status_error': 'statistics_calculation_error',
-                'status_exception': str(e),
-                'image_path': str(image_path),
-                'image_name': image_name,
-            }
-
-        # Get PDS4 path stub
+        # Get PDS4 path stub (includes path and filename prefix)
         pds4_path_stub = dataset.pds4_path_stub(image_file)
         bundle_name = dataset.pds4_bundle_name()
         template_dir = dataset.pds4_bundle_template_dir()
+
+        # Extract directory and filename prefix from pds4_path_stub
+        # pds4_path_stub is like "1234xxxxxx/123456xxxx/1234567890w"
+        if '/' in pds4_path_stub:
+            pds4_dir = '/'.join(pds4_path_stub.rsplit('/', 1)[:-1])
+            pds4_filename_prefix = pds4_path_stub.rsplit('/', 1)[-1]
+        else:
+            pds4_dir = ''
+            pds4_filename_prefix = pds4_path_stub
 
         # Combine metadata
         combined_metadata: dict[str, Any] = {
             'navigation': nav_metadata,
             'backplanes': bp_stats,
-            'pds4_path_stub': pds4_path_stub,
         }
 
         # Get template variables from dataset
-        try:
-            template_vars = dataset.pds4_template_variables(
-                image_file=image_file,
-                nav_metadata=nav_metadata,
-                backplane_metadata=bp_stats,
-            )
-        except Exception as e:
-            logger.exception('Error getting template variables from dataset')
-            return False, {
-                'status': 'error',
-                'status_error': 'template_variables_error',
-                'status_exception': str(e),
-                'image_path': str(image_path),
-                'image_name': image_name,
-            }
+        template_vars = dataset.pds4_template_variables(
+            image_file=image_file,
+            nav_metadata=nav_metadata,
+            backplane_metadata=bp_stats,
+        )
 
         # Determine output paths
         bundle_root = bundle_results_root / bundle_name
-        data_dir = bundle_root / 'data' / pds4_path_stub
-        label_file_path = data_dir / f'{image_name.rsplit(".", 1)[0]}_backplanes.lblx'
-        suppl_file_path = data_dir / f'{results_path_stub_end}_supplemental.txt'
-        metadata_output_path = bundle_results_root / (results_path_stub + '_bundle_metadata.json')
+        if pds4_dir:
+            data_dir = bundle_root / 'data' / pds4_dir
+            browse_dir = bundle_root / 'browse' / pds4_dir
+        else:
+            data_dir = bundle_root / 'data'
+            browse_dir = bundle_root / 'browse'
+        label_file_path = data_dir / f'{pds4_filename_prefix}_backplanes.lblx'
+        suppl_file_path = data_dir / f'{pds4_filename_prefix}_supplemental.txt'
+        browse_label_path = browse_dir / f'{pds4_filename_prefix}_summary.lblx'
+        browse_image_path = browse_dir / f'{pds4_filename_prefix}_summary.png'
 
         # Add file path variables to template_vars
+        fits_file_path = backplane_results_root / (results_path_stub + '_backplanes.fits')
+        summary_png_source = nav_results_root / (results_path_stub + '_summary.png')
         template_vars['BACKPLANE_FILENAME'] = label_file_path.name.replace('.lblx', '.fits')
         template_vars['BACKPLANE_PATH'] = str(fits_file_path)
         template_vars['BACKPLANE_SUPPL_FILENAME'] = suppl_file_path.name
         template_vars['BACKPLANE_SUPPL_PATH'] = str(suppl_file_path)
+        template_vars['BROWSE_FULL_FILENAME'] = browse_image_path.name
+        template_vars['BROWSE_FULL_PATH'] = str(browse_image_path)
 
         if write_output_files:
-            try:
-                # Generate supplemental file (JSON format) - must be written before template
-                suppl_file_path.write_text(json_as_string(combined_metadata))
-                logger.info('Generated supplemental file: %s', suppl_file_path)
+            # Generate supplemental file (JSON format) - must be written before template
+            suppl_file_path.write_text(json_as_string(combined_metadata))
+            logger.info('Generated supplemental file: %s', suppl_file_path)
 
-                # Generate PDS4 label file
-                template_path = Path(template_dir) / 'data.lblx'
-                if not template_path.exists():
-                    logger.error('Template file not found: %s', template_path)
-                    return False, {
-                        'status': 'error',
-                        'status_error': 'template_not_found',
-                        'status_exception': f'Template file not found: {template_path}',
-                        'image_path': str(image_path),
-                        'image_name': image_name,
-                    }
+            # Generate PDS4 label file
+            template_path = Path(template_dir) / 'data.lblx'
+            if not template_path.exists():
+                raise FileNotFoundError(f'Template file not found: {template_path}')
 
-                template = pdstemplate.PdsTemplate(str(template_path))
-                template.write(template_vars, label_file_path)
-                logger.info('Generated PDS4 label: %s', label_file_path)
+            template = pdstemplate.PdsTemplate(str(template_path))
+            template.write(template_vars, label_file_path)
+            logger.info('Generated PDS4 label: %s', label_file_path)
 
-                # Write combined metadata file
-                metadata_output_path.write_text(json_as_string(combined_metadata))
-                logger.debug('Wrote combined metadata: %s', metadata_output_path)
+            # Copy summary PNG to browse directory and generate browse label
+            if summary_png_source.exists():
+                browse_dir.mkdir(parents=True, exist_ok=True)
+                # Copy the summary PNG file
+                summary_png_local = summary_png_source.get_local_path()
+                browse_image_local = browse_image_path.get_local_path()
+                # TODO This needs to be updated for cloud storage
+                shutil.copy2(summary_png_local, browse_image_local)
+                browse_image_path.upload()
+                logger.info('Copied summary image: %s', browse_image_path)
 
-            except Exception as e:
-                logger.exception('Error writing output files')
-                return False, {
-                    'status': 'error',
-                    'status_error': 'write_error',
-                    'status_exception': str(e),
-                    'image_path': str(image_path),
-                    'image_name': image_name,
-                }
+                # Generate browse label
+                browse_template_path = Path(template_dir) / 'browse.lblx'
+                if browse_template_path.exists():
+                    browse_template = pdstemplate.PdsTemplate(str(browse_template_path))
+                    browse_template.write(template_vars, browse_label_path)
+                    browse_label_path.upload()
+                    logger.info('Generated browse label: %s', browse_label_path)
+                else:
+                    logger.warning('Browse template not found: %s', browse_template_path)
+            else:
+                logger.warning('Summary PNG not found: %s', summary_png_source)
 
         out_metadata: dict[str, Any] = {
-            'status': 'success',
             'image_path': str(image_path),
             'image_name': image_name,
-            'pds4_path_stub': pds4_path_stub,
             'label_file': str(label_file_path),
             'supplemental_file': str(suppl_file_path),
         }

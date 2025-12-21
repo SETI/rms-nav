@@ -89,4 +89,24 @@ def create_ring_backplanes(snapshot: ObsSnapshot,
         vals = bp.distance(target_key, direction='dep')
         result['distance'] = np.asarray(vals.mvals.filled(np.inf), dtype=np.float32)
 
+    # Calculate min/max statistics for ring backplanes
+    ring_stats: dict[str, dict[str, float]] = {}
+    for name, arr in result['arrays'].items():
+        mask = result['masks'][name]
+        valid_values = arr[mask]
+        if len(valid_values) > 0:
+            # Check if this backplane type is in radians and needs conversion
+            bp_cfg = next((r for r in rings_cfg if r['name'] == name), None)
+            units = bp_cfg.get('units', '') if bp_cfg else ''
+            # Convert radians to degrees for angle backplanes
+            if units.lower() == 'rad' or any(
+                    k in name.lower() for k in
+                    ('longitude', 'latitude', 'incidence', 'emission', 'phase')):
+                valid_values = np.degrees(valid_values)
+            min_val = float(np.nanmin(valid_values))
+            max_val = float(np.nanmax(valid_values))
+            ring_stats[name] = {'min': min_val, 'max': max_val}
+
+    result['statistics'] = ring_stats
+
     return result

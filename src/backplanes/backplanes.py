@@ -171,6 +171,8 @@ def generate_backplanes_image_files(
                 master_by_type=master_by_type,
                 body_id_map=body_id_map,
                 config=config,
+                bodies_result=bodies_result,
+                rings_result=rings_result,
                 logger=logger,
             )
 

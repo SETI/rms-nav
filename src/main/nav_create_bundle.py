@@ -113,20 +113,27 @@ def parse_args_labels(command_list: list[str]) -> argparse.Namespace:
 
 def parse_args_summary(command_list: list[str]) -> argparse.Namespace:
     """Parse arguments for the summary subcommand."""
+    if len(command_list) < 1:
+        print('Usage: python nav_create_bundle.py summary <dataset_name> [args]')
+        sys.exit(1)
+
+    dataset_name = command_list[0].lower()
+
+    if dataset_name not in dataset_names():
+        print(f'Unknown dataset "{dataset_name}"')
+        print(f'Valid datasets are: {", ".join(dataset_names())}')
+        print('Usage: python nav_create_bundle.py summary <dataset_name> [args]')
+        sys.exit(1)
+
     cmdparser = argparse.ArgumentParser(
         description='PDS4 Bundle Generation - Summary',
         epilog="""Generate collection files and global index files for completed bundle.""")
 
     add_common_arguments(cmdparser)
 
-    # Dataset selection (needed to get dataset instance)
-    environment_group = cmdparser.add_argument_group('Environment')
-    environment_group.add_argument(
-        '--dataset-name', type=str, default=None,
-        required=True,
-        help='Dataset name (e.g., coiss)')
-
-    arguments = cmdparser.parse_args(command_list)
+    arguments = cmdparser.parse_args(command_list[1:])
+    # Store dataset_name in arguments for use in main_summary
+    arguments.dataset_name = dataset_name
     return arguments
 
 
@@ -226,9 +233,8 @@ def main_labels() -> None:
             write_output_files=not arguments.dry_run,
         )
         if not ok:
-            MAIN_LOGGER.info('Skipped: %s (%s)',
-                             imagefiles.image_files[0].label_file_url.as_posix(),
-                             metadata.get('status_error', ''))
+            MAIN_LOGGER.info('Skipped: %s',
+                             imagefiles.image_files[0].label_file_url.as_posix())
 
 
 def main_summary() -> None:
@@ -254,11 +260,6 @@ def main_summary() -> None:
 
     # Get dataset instance
     dataset_name = arguments.dataset_name.lower()
-    if dataset_name not in dataset_names():
-        print(f'Unknown dataset "{dataset_name}"')
-        print(f'Valid datasets are: {", ".join(dataset_names())}')
-        sys.exit(1)
-
     try:
         dataset = dataset_name_to_class(dataset_name)()
     except KeyError:
@@ -267,25 +268,28 @@ def main_summary() -> None:
         sys.exit(1)
 
     # Generate collection files
-    ok, metadata = generate_collection_files(
-        bundle_results_root=bundle_results_root,
-        dataset=dataset,
-        logger=MAIN_LOGGER,
-    )
-    if not ok:
-        MAIN_LOGGER.error('Failed to generate collection files: %s',
-                          metadata.get('status_exception', 'unknown error'))
+    try:
+        metadata = generate_collection_files(
+            bundle_results_root=bundle_results_root,
+            dataset=dataset,
+            logger=MAIN_LOGGER,
+        )
+        MAIN_LOGGER.info('Generated collection files: %d products', metadata['num_products'])
+    except Exception:
+        MAIN_LOGGER.exception('Failed to generate collection files')
         sys.exit(1)
 
     # Generate global index files
-    ok, metadata = generate_global_index_files(
-        bundle_results_root=bundle_results_root,
-        dataset=dataset,
-        logger=MAIN_LOGGER,
-    )
-    if not ok:
-        MAIN_LOGGER.error('Failed to generate global index files: %s',
-                          metadata.get('status_exception', 'unknown error'))
+    try:
+        metadata = generate_global_index_files(
+            bundle_results_root=bundle_results_root,
+            dataset=dataset,
+            logger=MAIN_LOGGER,
+        )
+        MAIN_LOGGER.info('Generated global index files: %d body rows, %d ring rows',
+                         metadata['num_body_rows'], metadata['num_ring_rows'])
+    except Exception:
+        MAIN_LOGGER.exception('Failed to generate global index files')
         sys.exit(1)
 
     MAIN_LOGGER.info('Summary generation complete')

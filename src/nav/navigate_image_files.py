@@ -61,7 +61,7 @@ def navigate_image_files(obs_class: type[ObsSnapshotInst],
             if ('SPICE(CKINSUFFDATA)' in str(e) or
                 'SPICE(SPKINSUFFDATA)' in str(e) or
                 'SPICE(NOFRAMECONNECT)' in str(e)):
-                logger.exception('No SPICE kernel available for "%s"', image_path)
+                logger.exception('No SPICE kernel available for "%s": %s', image_path, str(e))
                 metadata = {
                     'status': 'error',
                     'status_error': 'missing_spice_data',
@@ -72,7 +72,7 @@ def navigate_image_files(obs_class: type[ObsSnapshotInst],
                     }
                 }
             else:
-                logger.exception('Error reading image "%s"', image_path)
+                logger.exception('Error reading image "%s": %s', image_path, str(e))
                 metadata = {
                     'status': 'error',
                     'status_error': 'image_read_error',

@@ -191,14 +191,14 @@
     <File_Area_Inventory>
         <File>
             <file_name>collection_data.csv</file_name>
-            <creation_date_time>$FILE_ZULU("collection_data.csv")$</creation_date_time>
-            <file_size unit="byte">$FILE_BYTES("collection_data.csv")$</file_size>
-            <md5_checksum>$FILE_MD5("collection_data.csv")$</md5_checksum>
+            <creation_date_time>$FILE_ZULU(COLLECTION_DATA_CSV_PATH)$</creation_date_time>
+            <file_size unit="byte">$FILE_BYTES(COLLECTION_DATA_CSV_PATH)$</file_size>
+            <md5_checksum>$FILE_MD5(COLLECTION_DATA_CSV_PATH)$</md5_checksum>
         </File>
         <Inventory>
             <offset unit="byte">0</offset>
             <parsing_standard_id>PDS DSV 1</parsing_standard_id>
-            <records>$FILE_RECORDS("collection_data.csv")$</records>
+            <records>$FILE_RECORDS(COLLECTION_DATA_CSV_PATH)$</records>
             <record_delimiter>Line-Feed</record_delimiter>
             <field_delimiter>Comma</field_delimiter>
             <Record_Delimited>

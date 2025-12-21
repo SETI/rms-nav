@@ -16,6 +16,7 @@ import time
 from typing import cast
 
 from filecache import FileCache, FCPath
+from oops.hosts.cassini import Cassini
 import pdslogger
 
 # Make CLI runnable from source tree with
@@ -42,6 +43,7 @@ NUM_FILES_SKIPPED: int = 0
 NUM_FILES_COMPLETED: int = 0
 START_TIME: float = 0.0
 
+Cassini.initialize(ck='predicted', spk='predicted')
 
 ################################################################################
 #

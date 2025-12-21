@@ -141,10 +141,30 @@ def create_body_backplanes(snapshot: ObsSnapshot,
             per_type_masks[name] = full_mask
 
         if per_type_arrays:
+            # Calculate min/max statistics for each backplane type
+            body_stats: dict[str, dict[str, float]] = {}
+            for bp_type, bp_array in per_type_arrays.items():
+                bp_mask = per_type_masks[bp_type]
+                # Extract valid values using the mask
+                valid_values = bp_array[bp_mask]
+                if len(valid_values) > 0:
+                    # Check if this backplane type is in radians and needs conversion
+                    bp_cfg = next((b for b in bodies_cfg if b['name'] == bp_type), None)
+                    units = bp_cfg.get('units', '') if bp_cfg else ''
+                    # Convert radians to degrees for angle backplanes
+                    if units.lower() == 'rad' or any(
+                            k in bp_type.lower() for k in
+                            ('longitude', 'latitude', 'incidence', 'emission', 'phase')):
+                        valid_values = np.degrees(valid_values)
+                    min_val = float(np.nanmin(valid_values))
+                    max_val = float(np.nanmax(valid_values))
+                    body_stats[bp_type] = {'min': min_val, 'max': max_val}
+
             result['per_body'][body_name] = {
                 'arrays': per_type_arrays,
                 'masks': per_type_masks,
                 'distance': float(inv_info['range']),
+                'statistics': body_stats,
             }
 
     return result
