@@ -1,7 +1,9 @@
 from pathlib import Path
 from typing import Any, Optional, cast
+
 from filecache import FCPath, FileCache
 
+from .dataset import ImageFile
 from .dataset_pds3 import DataSetPDS3
 from nav.config import Config
 from nav.support.misc import safe_lstrip_zero
@@ -192,3 +194,90 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
                          index_filecache=index_filecache,
                          pds3_holdings_filecache=pds3_holdings_filecache,
                          config=config)
+
+    def pds4_bundle_template_dir(self) -> str:
+        """Returns absolute path to template directory for PDS4 bundle generation."""
+        template_dir = None
+        gossi_config = self.config.pds4.get('gossi', {})
+        if 'template_dir' in gossi_config:
+            template_dir = str(gossi_config['template_dir'])
+
+        if template_dir is None:
+            template_dir = 'galileo_ssi_1.0'
+
+        if Path(template_dir).is_absolute():
+            return template_dir
+
+        pds4_templates_dir = (Path(__file__).resolve().parent.parent.parent / 'pds4' /
+                              'templates')
+        return str(pds4_templates_dir / template_dir)
+
+    def pds4_bundle_name(self) -> str:
+        """Returns bundle name for PDS4 bundle generation."""
+        gossi_config = self.config.pds4.get('gossi', {})
+        if 'bundle_name' in gossi_config:
+            return str(gossi_config['bundle_name'])
+        return 'galileo_ssi_backplanes_rsfrench2027'
+
+    @staticmethod
+    def pds4_bundle_path_for_image(image_name: str) -> str:
+        """Maps image name to bundle directory path."""
+        raise NotImplementedError
+
+    def pds4_path_stub(self, image_file: ImageFile) -> str:
+        """Returns PDS4 path stub for bundle directory structure."""
+        raise NotImplementedError
+
+    def pds4_image_name_to_browse_lid(self, image_name: str) -> str:
+        """Returns the browse LID for the given image name.
+
+        Parameters:
+            image_name: The image name to convert to a browse LID.
+
+        Returns:
+            The browse LID.
+        """
+        raise NotImplementedError
+
+    def pds4_image_name_to_browse_lidvid(self, image_name: str) -> str:
+        """Returns the browse LIDVID for the given image name.
+
+        Parameters:
+            image_name: The image name to convert to a browse LIDVID.
+
+        Returns:
+            The browse LIDVID.
+        """
+        raise NotImplementedError
+
+    def pds4_image_name_to_data_lid(self, image_name: str) -> str:
+        """Returns the data LID for the given image name.
+
+        Parameters:
+            image_name: The image name to convert to a data LID.
+
+        Returns:
+            The data LID.
+        """
+        raise NotImplementedError
+
+    def pds4_image_name_to_data_lidvid(self, image_name: str) -> str:
+        """Returns the data LIDVID for the given image name.
+
+        Parameters:
+            image_name: The image name to convert to a data LIDVID.
+
+        Returns:
+            The data LIDVID.
+        """
+        raise NotImplementedError
+
+    def pds4_template_variables(
+        self,
+        *,
+        image_file: ImageFile,
+        nav_metadata: dict[str, Any],
+        backplane_metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Returns template variables for PDS4 label generation."""
+        raise NotImplementedError

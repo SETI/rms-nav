@@ -27,8 +27,9 @@ from nav.dataset.dataset import DataSet
 from nav.dataset import (dataset_names,
                          dataset_name_to_class,
                          dataset_name_to_inst_name)
-from nav.config import DEFAULT_CONFIG
-from nav.config.logger import DEFAULT_LOGGER
+from nav.config import (DEFAULT_CONFIG, DEFAULT_LOGGER,
+                        get_nav_results_root,
+                        load_default_and_user_config)
 from nav.support.file import json_as_string
 from nav.obs import inst_name_to_obs_class
 from nav.navigate_image_files import navigate_image_files
@@ -54,7 +55,7 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     global DATASET_NAME
 
     if len(command_list) < 1:
-        print('Usage: python nav_main_offset.py <dataset_name> [args]')
+        print('Usage: nav_main_offset <dataset_name> [args]')
         sys.exit(1)
 
     DATASET_NAME = command_list[0].lower()
@@ -62,7 +63,7 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     if DATASET_NAME not in dataset_names():
         print(f'Unknown dataset "{DATASET_NAME}"')
         print(f'Valid datasets are: {", ".join(dataset_names())}')
-        print('Usage: python nav_main_offset.py <dataset_name> [args]')
+        print('Usage: nav_main_offset <dataset_name> [args]')
         sys.exit(1)
 
     try:
@@ -70,7 +71,7 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     except KeyError:
         print(f'Unknown dataset "{DATASET_NAME}"')
         print(f'Valid datasets are: {", ".join(dataset_names())}')
-        print('Usage: python nav_main_offset.py <dataset_name> [args]')
+        print('Usage: nav_main_offset <dataset_name> [args]')
         sys.exit(1)
 
     cmdparser = argparse.ArgumentParser(
@@ -163,32 +164,11 @@ def main() -> None:
         pr = cProfile.Profile()
         pr.enable()
 
-    # Read the default configuration file and then any override files provided
-    # on the command line
-    DEFAULT_CONFIG.read_config()
-    if arguments.config_file:
-        for config_file in arguments.config_file:
-            DEFAULT_CONFIG.update_config(config_file)
-    else:
-        try:
-            DEFAULT_CONFIG.update_config('nav_default_config.yaml')
-        except FileNotFoundError:
-            pass
+    load_default_and_user_config(arguments, DEFAULT_CONFIG)
 
     # Derive the results root
-    nav_results_root_str = arguments.nav_results_root
-    if nav_results_root_str is None:
-        try:
-            nav_results_root_str = DEFAULT_CONFIG.environment.nav_results_root
-        except AttributeError:
-            pass
-    if nav_results_root_str is None:
-        nav_results_root_str = os.getenv('NAV_RESULTS_ROOT')
-    if nav_results_root_str is None:
-        raise ValueError('One of --nav-results-root, the configuration variable '
-                         '"nav_results_root" or the NAV_RESULTS_ROOT environment variable must be '
-                         'set')
-    nav_results_root = FileCache('nav_results').new_path(nav_results_root_str)
+    nav_results_root_str = get_nav_results_root(arguments, DEFAULT_CONFIG)
+    nav_results_root = FileCache(None).new_path(nav_results_root_str)
 
     # main_log_path = arguments.main_logfile
     # main_log_path_local = main_log_path

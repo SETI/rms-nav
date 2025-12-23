@@ -1,5 +1,9 @@
 from .dataset import DataSet
-from .dataset_pds3_cassini_iss import DataSetPDS3CassiniISS
+from .dataset_pds3_cassini_iss import (
+    DataSetPDS3CassiniISS,
+    DataSetPDS3CassiniISSCruise,
+    DataSetPDS3CassiniISSSaturn,
+)
 from .dataset_pds3_galileo_ssi import DataSetPDS3GalileoSSI
 from .dataset_pds3_newhorizons_lorri import DataSetPDS3NewHorizonsLORRI
 from .dataset_pds3_voyager_iss import DataSetPDS3VoyagerISS
@@ -9,6 +13,10 @@ from .dataset_sim import DataSetSim
 _DATASET_NAME_TO_CLASS_MAPPING: dict[str, type[DataSet]] = {
     'coiss': DataSetPDS3CassiniISS,
     'coiss_pds3': DataSetPDS3CassiniISS,
+    'coiss_cruise': DataSetPDS3CassiniISSCruise,
+    'coiss_cruise_pds3': DataSetPDS3CassiniISSCruise,
+    'coiss_saturn': DataSetPDS3CassiniISSSaturn,
+    'coiss_saturn_pds3': DataSetPDS3CassiniISSSaturn,
     'gossi': DataSetPDS3GalileoSSI,
     'gossi_pds3': DataSetPDS3GalileoSSI,
     'nhlorri': DataSetPDS3NewHorizonsLORRI,
@@ -22,6 +30,10 @@ _DATASET_NAME_TO_CLASS_MAPPING: dict[str, type[DataSet]] = {
 _DATASET_NAME_TO_INST_NAME_MAPPING = {
     'coiss': 'coiss',
     'coiss_pds3': 'coiss',
+    'coiss_cruise': 'coiss',
+    'coiss_cruise_pds3': 'coiss',
+    'coiss_saturn': 'coiss',
+    'coiss_saturn_pds3': 'coiss',
     'gossi': 'gossi',
     'gossi_pds3': 'gossi',
     'nhlorri': 'nhlorri',
@@ -74,6 +86,8 @@ def dataset_name_to_inst_name(name: str) -> str:
 
 __all__ = ['DataSet',
            'DataSetPDS3CassiniISS',
+           'DataSetPDS3CassiniISSCruise',
+           'DataSetPDS3CassiniISSSaturn',
            'DataSetPDS3GalileoSSI',
            'DataSetPDS3NewHorizonsLORRI',
            'DataSetPDS3VoyagerISS',

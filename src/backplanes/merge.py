@@ -11,13 +11,13 @@ def merge_sources_into_master(
     *,
     bodies_result: dict[str, Any],
     rings_result: dict[str, Any] | None,
-) -> tuple[dict[str, np.ndarray], np.ndarray, dict[str, Any]]:
+) -> tuple[dict[str, np.ndarray], np.ndarray]:
     """Merge bodies and rings per-pixel based on nearest distance.
 
     Parameters:
         snapshot: The observation snapshot.
-        bodies_result: The bodies result.
-        rings_result: The rings result.
+        bodies_result: The bodies result from create_body_backplanes (dict keyed by body name).
+        rings_result: The rings result from create_ring_backplanes (dict keyed by metadata key).
 
     Returns:
         A tuple containing the master by type, body id map, and merge info.
@@ -31,7 +31,7 @@ def merge_sources_into_master(
     body_sources: list[dict[str, Any]] = []
 
     # Bodies: scalar distances per body, broadcast within mask; inf elsewhere
-    for body_name, entry in bodies_result['per_body'].items():
+    for body_name, entry in bodies_result.items():
         distance_scalar = float(entry['distance'])
         # Create per-pixel distance with inf default and scalar where within any mask
         any_mask: np.ndarray | None = None
@@ -62,7 +62,7 @@ def merge_sources_into_master(
         })
 
     if not body_sources and not rings_result:
-        return master_by_type, body_id_map, {'bodies': [], 'rings': []}
+        return master_by_type, body_id_map
 
     body_presence = np.zeros((height, width), dtype=bool)
 
@@ -111,7 +111,6 @@ def merge_sources_into_master(
         ring_arrays: dict[str, Any] = rings_result['arrays']
         ring_masks: dict[str, Any] = rings_result['masks']
         ring_distance: np.ndarray = rings_result['distance']
-        ring_name = rings_result['target_key']
 
         for bp_type in sorted(ring_arrays.keys()):
             if bp_type not in ring_arrays or bp_type not in ring_masks:
@@ -128,10 +127,4 @@ def merge_sources_into_master(
                                  'because it is also a body backplane type')
             master_by_type[bp_type] = master
 
-    merge_info = {
-        'bodies': [{'name': s['name'], 'naif_id': s['naif_id']} for s in body_sources],
-    }
-    if rings_result:
-        merge_info['rings'] = [{'name': ring_name}]
-
-    return master_by_type, body_id_map, merge_info
+    return master_by_type, body_id_map

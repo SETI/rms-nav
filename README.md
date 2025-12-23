@@ -33,6 +33,8 @@ RMS-NAV is a comprehensive navigation system designed for spacecraft imagery pro
 - **Automated offset calculation**: Determines precise pointing corrections
 - **Visualization tools**: Creates annotated images with identified features
 - **Configurable processing**: Customizable parameters for different scenarios
+- **PDS4 bundle generation**: Creates PDS4-compliant bundles with labels, metadata, and browse products
+- **Backplane generation**: Computes per-pixel geometry products (longitude, latitude, angles, etc.)
 
 # Installation
 
@@ -94,6 +96,25 @@ nav_offset vgiss \
   --volumes VGISS_5101 \
   --pds3-holdings-root /path/to/pds3 \
   --nav-results-root /path/to/nav_results
+```
+
+Generate backplanes for processed images:
+
+```bash
+nav_backplanes coiss_saturn \
+  --nav-results-root /path/to/nav_results \
+  --backplane-results-root /path/to/backplane_results \
+  --volumes COISS_2001
+```
+
+Generate PDS4 bundle files:
+
+```bash
+nav_create_bundle labels coiss_saturn \
+  --nav-results-root /path/to/nav_results \
+  --backplane-results-root /path/to/backplane_results \
+  --bundle-results-root /path/to/bundle_results \
+  --volumes COISS_2001
 ```
 
 # Documentation

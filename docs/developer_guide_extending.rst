@@ -8,7 +8,11 @@ Extending the System
 Adding a New Dataset
 --------------------
 
-To add a dataset, create a class in ``src/nav/dataset/`` that inherits from ``DataSet`` (or from ``DataSetPDS3`` for archives). Implement ``_img_name_valid(...)``, the file-yielding methods, and ``add_selection_arguments(...)`` to expose CLI selection flags. Register the dataset in ``src/nav/dataset/__init__.py`` so it becomes available to the CLI.
+To add a dataset, create a class in ``src/nav/dataset/`` that inherits from ``DataSet``
+(or from ``DataSetPDS3`` for archives). Implement ``_img_name_valid(...)``, the
+file-yielding methods, and ``add_selection_arguments(...)`` to expose CLI selection flags.
+Register the dataset in ``src/nav/dataset/__init__.py`` so it becomes available to the
+CLI.
 
 Example:
 
@@ -29,10 +33,53 @@ Example:
 
 The dataset will automatically be available to the CLI once registered.
 
+Implementing PDS4 Bundle Generation Methods
+---------------------------------------------
+
+To support PDS4 bundle generation, datasets must implement the following abstract methods
+from :class:`nav.dataset.dataset.DataSet`:
+
+* ``pds4_bundle_template_dir()``: Returns the absolute path to the template directory
+  for PDS4 label generation. If a relative name is provided in config, it should be
+  resolved relative to ``src/pds4/templates/``.
+
+* ``pds4_bundle_name()``: Returns the bundle name (e.g.,
+  ``"<instrument_name>_backplanes_rsfrench2027"``).
+
+* ``pds4_bundle_path_for_image()``: Maps an image name to a bundle directory path
+  (e.g., ``"1234xxxxxx/123456xxxx"``). This is a static method.
+
+* ``pds4_path_stub()``: Returns the full path stub including directory and filename prefix
+  (e.g., ``"1234xxxxxx/123456xxxx/1234567890w"``).
+
+* ``pds4_template_variables()``: Returns a dictionary mapping template variable names to
+  values for PDS4 label generation. This should extract values from navigation metadata,
+  backplane metadata, and PDS3 index rows (if available).
+
+* ``pds4_image_name_to_data_lid()``: Converts an image name to a data product LID.
+  This should return a full LID string (e.g., ``"urn:nasa:pds:<bundle_name>:data:<image_name>"``).
+
+* ``pds4_image_name_to_data_lidvid()``: Converts an image name to a data product LIDVID
+  for use in collection files. This should return a full LIDVID string (e.g.,
+  ``"urn:nasa:pds:<bundle_name>:data:<image_name>::1.0"``).
+
+* ``pds4_image_name_to_browse_lid()``: Converts an image name to a browse product LID.
+  This should return a full LID string (e.g., ``"urn:nasa:pds:<bundle_name>:browse:<image_name>"``).
+
+* ``pds4_image_name_to_browse_lidvid()``: Converts an image name to a browse product
+  LIDVID for use in collection files. This should return a full LIDVID string (e.g.,
+  ``"urn:nasa:pds:<bundle_name>:browse:<image_name>::1.0"``).
+
+For datasets that do not support PDS4 bundle generation, these methods should raise
+``NotImplementedError``. See :class:`nav.dataset.dataset_pds3_cassini_iss.DataSetPDS3CassiniISS`
+for a complete implementation example.
+
 Adding a New Instrument
 -----------------------
 
-To add an instrument, implement a subclass of ``ObsSnapshotInst`` in ``src/nav/obs/`` that provides ``from_file(...)`` and any instrument-specific helpers. Update the instrument registry in ``src/nav/obs/__init__.py`` so datasets can resolve the instrument class.
+To add an instrument, implement a subclass of ``ObsSnapshotInst`` in ``src/nav/obs/`` that
+provides ``from_file(...)`` and any instrument-specific helpers. Update the instrument
+registry in ``src/nav/obs/__init__.py`` so datasets can resolve the instrument class.
 
 Example:
 

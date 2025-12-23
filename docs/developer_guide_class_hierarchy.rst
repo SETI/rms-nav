@@ -25,6 +25,13 @@ The following Mermaid diagram shows the complete class hierarchy of the RMS-NAV 
           +yield_image_files_from_arguments(args)*
           +yield_image_files_index(**kwargs)*
           +supported_grouping()
+          +pds4_bundle_template_dir()*
+          +pds4_bundle_name()*
+          +pds4_bundle_path_for_image(name)*
+          +pds4_path_stub(image_file)*
+          +pds4_template_variables(...)*
+          +pds4_image_name_to_data_lidvid(name)*
+          +pds4_image_name_to_browse_lidvid(name)*
       }
 
       class DataSetPDS3 {
@@ -34,6 +41,23 @@ The following Mermaid diagram shows the complete class hierarchy of the RMS-NAV 
       }
 
       class DataSetPDS3CassiniISS {
+          +__init__(*, config=None)
+          +_img_name_valid(name)
+          +pds4_bundle_template_dir()
+          +pds4_bundle_name()
+          +pds4_bundle_path_for_image(name)
+          +pds4_path_stub(image_file)
+          +pds4_template_variables(...)
+          +pds4_image_name_to_data_lidvid(name)
+          +pds4_image_name_to_browse_lidvid(name)
+      }
+
+      class DataSetPDS3CassiniISSCruise {
+          +__init__(*, config=None)
+          +_img_name_valid(name)
+      }
+
+      class DataSetPDS3CassiniISSSaturn {
           +__init__(*, config=None)
           +_img_name_valid(name)
       }
@@ -232,6 +256,8 @@ The following Mermaid diagram shows the complete class hierarchy of the RMS-NAV 
       DataSetPDS3 <|-- DataSetPDS3VoyagerISS
       DataSetPDS3 <|-- DataSetPDS3GalileoSSI
       DataSetPDS3 <|-- DataSetPDS3NewHorizonsLORRI
+      DataSetPDS3CassiniISS <|-- DataSetPDS3CassiniISSCruise
+      DataSetPDS3CassiniISS <|-- DataSetPDS3CassiniISSSaturn
 
       Obs <|-- ObsSnapshot
       ObsInst <|-- ObsSnapshotInst
@@ -308,17 +334,24 @@ Dataset
 :class:`nav.dataset.dataset.DataSet` handles access to image files and metadata. It
 defines ``_img_name_valid(...)``, ``add_selection_arguments(...)``,
 ``yield_image_files_from_arguments(...)``, and ``yield_image_files_index(...)`` for
-dataset-specific selection and iteration. :class:`nav.dataset.dataset_pds3.DataSetPDS3`
-provides volume and index-based iteration for archives, while instrument-specific
-subclasses tailor parsing and volume sets. Instrument-specific dataset classes include
-:class:`nav.dataset.dataset_pds3_cassini_iss.DataSetPDS3CassiniISS`,
-:class:`nav.dataset.dataset_pds3_voyager_iss.DataSetPDS3VoyagerISS`,
+dataset-specific selection and iteration. For PDS4 bundle generation, it also defines
+methods ``pds4_bundle_template_dir()``, ``pds4_bundle_name()``,
+``pds4_bundle_path_for_image()``, ``pds4_path_stub()``, ``pds4_template_variables()``,
+``pds4_image_name_to_data_lidvid()``, and ``pds4_image_name_to_browse_lidvid()``.
+:class:`nav.dataset.dataset_pds3.DataSetPDS3` provides volume and index-based iteration
+for archives, while instrument-specific subclasses tailor parsing and volume sets.
+Instrument-specific dataset classes include
+:class:`nav.dataset.dataset_pds3_cassini_iss.DataSetPDS3CassiniISS` (base class for all
+Cassini ISS volumes), :class:`nav.dataset.dataset_pds3_cassini_iss.DataSetPDS3CassiniISSCruise`
+(volumes 1001-1009), :class:`nav.dataset.dataset_pds3_cassini_iss.DataSetPDS3CassiniISSSaturn`
+(volumes 2001-2116), :class:`nav.dataset.dataset_pds3_voyager_iss.DataSetPDS3VoyagerISS`,
 :class:`nav.dataset.dataset_pds3_galileo_ssi.DataSetPDS3GalileoSSI`,
 :class:`nav.dataset.dataset_pds3_newhorizons_lorri.DataSetPDS3NewHorizonsLORRI`, and
 :class:`nav.dataset.dataset_sim.DataSetSim` (for simulated images). Dataset name mapping
-is defined in ``nav.dataset.__init__`` (``coiss``, ``gossi``, ``nhlorri``, ``vgiss``,
-their ``*_pds3`` aliases, and ``sim``). Cassini ISS adds ``--camera`` (NAC or WAC) and
-supports a ``botsim`` grouping that pairs NAC/WAC images when available.
+is defined in ``nav.dataset.__init__`` (``coiss``, ``coiss_cruise``, ``coiss_saturn``,
+``gossi``, ``nhlorri``, ``vgiss``, their ``*_pds3`` aliases, and ``sim``). Cassini ISS
+adds ``--camera`` (NAC or WAC) and supports a ``botsim`` grouping that pairs NAC/WAC
+images when available.
 
 Obs and ObsSnapshot
 -------------------

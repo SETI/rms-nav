@@ -61,3 +61,29 @@ class DataSetSim(DataSet):
     @staticmethod
     def supported_grouping() -> list[str]:
         return []
+
+    def pds4_bundle_template_dir(self) -> str:
+        """Returns absolute path to template directory for PDS4 bundle generation."""
+        raise NotImplementedError('Bundle generation not supported for sim dataset')
+
+    def pds4_bundle_name(self) -> str:
+        """Returns bundle name for PDS4 bundle generation."""
+        raise NotImplementedError('Bundle generation not supported for sim dataset')
+
+    @staticmethod
+    def pds4_bundle_path_for_image(image_name: str) -> str:
+        """Maps image name to bundle directory path."""
+        raise NotImplementedError('Bundle generation not supported for sim dataset')
+
+    def pds4_path_stub(self, image_file: ImageFile) -> str:
+        """Returns PDS4 path stub for bundle directory structure."""
+        raise NotImplementedError('Bundle generation not supported for sim dataset')
+
+    def pds4_template_variables(
+        self,
+        image_file: ImageFile,
+        nav_metadata: dict[str, Any],
+        backplane_metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Returns template variables for PDS4 label generation."""
+        raise NotImplementedError('Bundle generation not supported for sim dataset')

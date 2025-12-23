@@ -13,6 +13,7 @@ Welcome to the Documentation for RMS-NAV!
 
    user_guide_navigation
    user_guide_backplanes
+   user_guide_pds4_bundle
    developer_guide
    api_reference
    contributing

@@ -4,32 +4,35 @@ from filecache import FCPath
 from astropy.io import fits
 import numpy as np
 from pdslogger import PdsLogger
-import pdstemplate
 
 from nav.config import Config
 from nav.config.logger import DEFAULT_LOGGER
 from nav.obs import ObsSnapshot
-from pathlib import Path
+from nav.support.file import json_as_string
 
 
-def write_fits_and_label(
+def write_fits(
     *,
     fits_file_path: FCPath,
-    label_file_path: FCPath,
     snapshot: ObsSnapshot,
     master_by_type: dict[str, np.ndarray],
     body_id_map: np.ndarray,
     config: Config,
+    bodies_result: dict[str, Any],
+    rings_result: dict[str, Any] | None = None,
     logger: PdsLogger = DEFAULT_LOGGER,
 ) -> None:
-    """Write FITS and PDS4 label using FCPath.
+    """Write FITS file and backplane metadata JSON using FCPath.
 
     Parameters:
         fits_file_path: The FITS file path.
-        label_file_path: The PDS4 label file path.
         snapshot: The observation snapshot.
         master_by_type: The master by type.
         body_id_map: The body id map.
+        config: The configuration.
+        bodies_result: Result from create_body_backplanes containing statistics.
+        rings_result: Result from create_ring_backplanes containing statistics.
+        logger: Logger for diagnostic messages.
     """
 
     hdus: list[fits.ImageHDU | fits.PrimaryHDU] = []
@@ -65,28 +68,57 @@ def write_fits_and_label(
     hdul.writeto(local_path, overwrite=True)
     fits_file_path.upload()
 
-    # PDS4 label via PdsTemplate
-    # TODO Everything here will need to be updated once we have a real label template
-    try:
-        template_path = Path(__file__).resolve().parent / 'templates' / 'backplanes.lblx'
-        template = pdstemplate.PdsTemplate(str(template_path))
-        xml_meta: dict[str, Any] = {
-            'PRODUCT_ID': fits_file_path.name,
-            'FILE_NAME': fits_file_path.name,
-            'LINES': snapshot.data.shape[0],
-            'LINE_SAMPLES': snapshot.data.shape[1],
-            # + BODY_ID_MAP if present
-            'BANDS': len(filtered_master) + (1 if has_body_id_map else 0),
-            'BACKPLANE_TYPES': sorted([k.upper() for k in filtered_master.keys()]),
-            'TARGETS': [],
-        }
-        # Populate targets if mapping exists (optional)
-        target_lids = getattr(config.backplanes, 'target_lids', {})
-        for naif_id, lid in target_lids.items():
-            xml_meta.setdefault('TARGETS', []).append({'NAIF_ID': int(naif_id), 'LID': lid})
+    # Write backplane metadata JSON file
+    metadata_file_path = fits_file_path.parent / (
+        fits_file_path.stem.replace('_backplanes', '') + '_backplane_metadata.json')
+    backplane_metadata: dict[str, Any] = {
+        'bodies': {},
+        'rings': {},
+    }
 
-        local_label = label_file_path.get_local_path()
-        template.write(xml_meta, local_label)
-        label_file_path.upload()
-    except Exception as e:
-        logger.error('Failed to write PDS4 label for %s: %s', fits_file_path, e)
+    # Get inventory information for all bodies
+    # TODO Clean this up
+    if snapshot.is_simulated:
+        inv = snapshot.sim_inventory
+    else:
+        closest_planet = snapshot.closest_planet
+        if closest_planet:
+            body_list = [closest_planet, *config.satellites(closest_planet)]
+            inv = snapshot.inventory(body_list, return_type='full')
+        else:
+            inv = {}
+
+    # Extract body statistics and inventory information per body
+    for body_name, body_data in bodies_result.items():
+        body_entry: dict[str, Any] = {}
+        if 'statistics' in body_data:
+            body_entry['backplanes'] = body_data['statistics']
+
+        # Add inventory information for this body
+        if body_name in inv:
+            inv_data = inv[body_name]
+            # center_uv is [u, v] but we need [v, u]
+            center_uv = inv_data.get('center_uv', None)
+            if center_uv is not None:
+                body_entry['center_uv'] = [
+                    float(center_uv[1]), float(center_uv[0])]
+            # center_range from range
+            center_range = inv_data.get('range', None)
+            if center_range is not None:
+                body_entry['center_range'] = float(center_range)
+            # size_uv from u_pixel_size and v_pixel_size
+            u_pixel_size = inv_data.get('u_pixel_size', None)
+            v_pixel_size = inv_data.get('v_pixel_size', None)
+            if u_pixel_size is not None and v_pixel_size is not None:
+                body_entry['size_uv'] = [
+                    float(u_pixel_size), float(v_pixel_size)]
+
+        if body_entry:
+            backplane_metadata['bodies'][body_name] = body_entry
+
+    # Extract ring statistics
+    if rings_result and 'statistics' in rings_result:
+        backplane_metadata['rings'] = {'backplanes': rings_result['statistics']}
+
+    metadata_file_path.write_text(json_as_string(backplane_metadata))
+    logger.debug('Wrote backplane metadata: %s', metadata_file_path)
