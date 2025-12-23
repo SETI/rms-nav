@@ -50,13 +50,12 @@ class DataSetPDS3(DataSet):
         super().__init__(config=config)
 
         if index_filecache is None:
-            self._index_filecache = FileCache('nav_pds3_index')  # This is multiprocess safe
+            self._index_filecache = FileCache('nav_pds3_index')  # Index shared; MP safe
         else:
             self._index_filecache = index_filecache
 
         if pds3_holdings_filecache is None:
-            # This is multiprocess safe
-            self._pds3_holdings_filecache = FileCache(None)
+            self._pds3_holdings_filecache = FileCache(None)  # Data not shared
         else:
             self._pds3_holdings_filecache = pds3_holdings_filecache
 
