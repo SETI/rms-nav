@@ -316,7 +316,6 @@ def generate_global_index_files(
             logger.exception('Error creating label global_index_rings.lblx: %s',
                              rings_label)
             raise
-        rings_label.upload()
         logger.info('Generated global_index_rings.lblx')
 
     logger.info('Generated global index files: %d body rows, %d ring rows',

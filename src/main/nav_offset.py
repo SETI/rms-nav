@@ -28,7 +28,8 @@ from nav.dataset import (dataset_names,
                          dataset_name_to_class,
                          dataset_name_to_inst_name)
 from nav.config import (DEFAULT_CONFIG, DEFAULT_LOGGER,
-                        get_nav_results_root)
+                        get_nav_results_root,
+                        load_default_and_user_config)
 from nav.support.file import json_as_string
 from nav.obs import inst_name_to_obs_class
 from nav.navigate_image_files import navigate_image_files
@@ -163,17 +164,7 @@ def main() -> None:
         pr = cProfile.Profile()
         pr.enable()
 
-    # Read the default configuration file and then any override files provided
-    # on the command line
-    DEFAULT_CONFIG.read_config()
-    if arguments.config_file:
-        for config_file in arguments.config_file:
-            DEFAULT_CONFIG.update_config(config_file)
-    else:
-        try:
-            DEFAULT_CONFIG.update_config('nav_default_config.yaml')
-        except FileNotFoundError:
-            pass
+    load_default_and_user_config(arguments, DEFAULT_CONFIG)
 
     # Derive the results root
     nav_results_root_str = get_nav_results_root(arguments, DEFAULT_CONFIG)

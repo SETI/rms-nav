@@ -227,7 +227,7 @@ class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
         """Returns the browse LIDVID for the given image name.
 
         Parameters:
-            image_name: The image name to convert to a browse LID.
+            image_name: The image name to convert to a browse LIDVID.
 
         Returns:
             The browse LIDVID.
@@ -249,7 +249,7 @@ class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
         """Returns the data LIDVID for the given image name.
 
         Parameters:
-            image_name: The image name to convert to a data LID.
+            image_name: The image name to convert to a data LIDVID.
 
         Returns:
             The data LIDVID.
@@ -258,6 +258,7 @@ class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
 
     def pds4_template_variables(
         self,
+        *,
         image_file: ImageFile,
         nav_metadata: dict[str, Any],
         backplane_metadata: dict[str, Any],

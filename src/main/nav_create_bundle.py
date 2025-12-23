@@ -25,7 +25,8 @@ from nav.dataset import dataset_names, dataset_name_to_class
 from nav.config import (DEFAULT_CONFIG, DEFAULT_LOGGER,
                         get_backplane_results_root,
                         get_nav_results_root,
-                        get_pds4_bundle_results_root)
+                        get_pds4_bundle_results_root,
+                        load_default_and_user_config)
 
 from pds4.bundle_data import generate_bundle_data_files
 from pds4.collections import generate_collection_files, generate_global_index_files
@@ -37,6 +38,7 @@ MAIN_LOGGER: pdslogger.PdsLogger | None = None
 
 
 def add_common_arguments(parser: argparse.ArgumentParser,
+                         *,
                          for_labels: bool = False) -> None:
     """Add common arguments to an argument parser.
 
@@ -140,15 +142,7 @@ def main_labels() -> None:
     arguments = parse_args_labels(command_list)
 
     # Read configuration files
-    DEFAULT_CONFIG.read_config()
-    if arguments.config_file:
-        for config_file in arguments.config_file:
-            DEFAULT_CONFIG.update_config(config_file)
-    else:
-        try:
-            DEFAULT_CONFIG.update_config('nav_default_config.yaml')
-        except FileNotFoundError:
-            pass
+    load_default_and_user_config(arguments, DEFAULT_CONFIG)
 
     # Derive roots
     nav_results_root_str = get_nav_results_root(arguments, DEFAULT_CONFIG)

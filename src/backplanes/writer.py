@@ -85,6 +85,8 @@ def write_fits(
         if closest_planet:
             body_list = [closest_planet, *config.satellites(closest_planet)]
             inv = snapshot.inventory(body_list, return_type='full')
+        else:
+            inv = {}
 
     # Extract body statistics and inventory information per body
     for body_name, body_data in bodies_result.items():

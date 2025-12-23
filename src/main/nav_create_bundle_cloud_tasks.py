@@ -24,8 +24,8 @@ from nav.dataset import dataset_name_to_class
 from nav.config import (DEFAULT_CONFIG, DEFAULT_LOGGER,
                         get_backplane_results_root,
                         get_nav_results_root,
-                        get_pds4_bundle_results_root)
-
+                        get_pds4_bundle_results_root,
+                        load_default_and_user_config)
 from pds4.bundle_data import generate_bundle_data_files
 
 
@@ -34,16 +34,8 @@ def process_task(
 ) -> tuple[bool, Any]:
     """Generate bundle files for a single batch of image files."""
 
-    DEFAULT_CONFIG.read_config()
     arguments = cast(argparse.Namespace, worker_data.args)
-    if arguments.config_file:
-        for config_file in arguments.config_file:
-            DEFAULT_CONFIG.update_config(config_file)
-    else:
-        try:
-            DEFAULT_CONFIG.update_config('nav_default_config.yaml')
-        except FileNotFoundError:
-            pass
+    load_default_and_user_config(arguments, DEFAULT_CONFIG)
 
     # Derive roots
     try:

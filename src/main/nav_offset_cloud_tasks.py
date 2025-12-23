@@ -23,7 +23,8 @@ sys.path.insert(0, package_source_path)
 from nav.dataset.dataset import ImageFile, ImageFiles
 from nav.dataset import dataset_name_to_inst_name
 from nav.config import (DEFAULT_CONFIG,
-                        get_nav_results_root)
+                        get_nav_results_root,
+                        load_default_and_user_config)
 from nav.obs import inst_name_to_obs_class
 from nav.navigate_image_files import navigate_image_files
 
@@ -53,18 +54,8 @@ def process_task(
         Tuple of (retry, result)
     """
 
-    # Read the default configuration file and then any override files provided
-    # on the command line
-    DEFAULT_CONFIG.read_config()
     arguments = cast(argparse.Namespace, worker_data.args)
-    if arguments.config_file:
-        for config_file in arguments.config_file:
-            DEFAULT_CONFIG.update_config(config_file)
-    else:
-        try:
-            DEFAULT_CONFIG.update_config('nav_default_config.yaml')
-        except FileNotFoundError:
-            pass
+    load_default_and_user_config(arguments, DEFAULT_CONFIG)
 
     try:
         nav_results_root_str = get_nav_results_root(arguments, DEFAULT_CONFIG)

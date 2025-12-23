@@ -91,7 +91,7 @@ Environment options:
 * ``--config-file PATH`` (repeatable): one or more configuration file paths to override
   defaults.
 * ``--bundle-results-root PATH``: root directory where bundle results will be written,
-  overriding both the ``BUNDLE_RESULTS_ROOT`` environment variable and any corresponding
+  overriding both the ``NAV_PDS4_BUNDLE_RESULTS_ROOT`` environment variable and any corresponding
   configuration setting.
 
 Navigation and backplane options:
@@ -177,7 +177,7 @@ Environment options:
 * ``--config-file PATH`` (repeatable): one or more configuration file paths to override
   defaults.
 * ``--bundle-results-root PATH``: root directory where bundle results are located.
-  If not provided, uses the ``BUNDLE_RESULTS_ROOT`` environment variable or the
+  If not provided, uses the ``NAV_PDS4_BUNDLE_RESULTS_ROOT`` environment variable or the
   ``bundle_results_root`` configuration setting.
 
 Examples
@@ -289,7 +289,7 @@ Bundle Results Root
 The bundle results root can be specified via:
 
 1. Configuration file: ``environment.bundle_results_root``
-2. Environment variable: ``BUNDLE_RESULTS_ROOT``
+2. Environment variable: ``NAV_PDS4_BUNDLE_RESULTS_ROOT``
 3. Command-line argument: ``--bundle-results-root``
 
 Command-line arguments have the highest priority, followed by environment variables,

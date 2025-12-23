@@ -24,8 +24,8 @@ Two drivers mirror the offset drivers:
 
 Common flags:
 
-- ``--nav-results-root``: Root containing prior navigation results (e.g., ``*_metadata.json``). This was previously referred to as "metadata root".
-- ``--backplane-results-root``: Root to write backplane outputs (FITS and PDS4). This was previously "results root".
+- ``--nav-results-root``: Root containing prior navigation results (e.g., ``*_metadata.json``).
+- ``--backplane-results-root``: Root to write backplane outputs (FITS and PDS4).
 - Dataset selection flags are the same as in the offset drivers.
 
 Examples

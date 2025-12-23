@@ -8,9 +8,13 @@ def get_backplane_results_root(arguments: argparse.Namespace,
                                config: Config) -> str:
     """Get the backplane results root from the arguments, configuration, or environment.
 
+    First look in arguments.backplane_results_root, then in
+    config.environment.backplane_results_root, then in the environment variable
+    NAV_BACKPLANE_RESULTS_ROOT.
+
     Parameters:
-        arguments: The parsed arguments.
-        config: The configuration possibly containing the environment section.
+        arguments: The parsed arguments. config: The configuration possibly containing the
+        environment section.
 
     Returns:
         The backplane results root.
@@ -32,7 +36,7 @@ def get_backplane_results_root(arguments: argparse.Namespace,
         backplane_results_root_str = os.getenv('NAV_BACKPLANE_RESULTS_ROOT')
     if backplane_results_root_str is None:
         raise ValueError('One of --backplane-results-root, the configuration variable '
-                         '"environment.backplane_results_root", or the BACKPLANE_RESULTS_ROOT '
+                         '"environment.backplane_results_root", or the NAV_BACKPLANE_RESULTS_ROOT '
                          'environment variable must be set'
                          )
     return backplane_results_root_str
@@ -42,9 +46,12 @@ def get_nav_results_root(arguments: argparse.Namespace,
                          config: Config) -> str:
     """Get the navigation root from the arguments, configuration, or environment.
 
+    First look in arguments.nav_results_root, then in config.environment.nav_results_root,
+    then in the environment variable NAV_RESULTS_ROOT.
+
     Parameters:
-        arguments: The parsed arguments.
-        config: The configuration possibly containing the environment section.
+        arguments: The parsed arguments. config: The configuration possibly containing the
+        environment section.
 
     Returns:
         The navigation results root.
@@ -76,9 +83,13 @@ def get_pds4_bundle_results_root(arguments: argparse.Namespace,
                                  config: Config) -> str:
     """Get the PDS4 bundle root from the arguments, configuration, or environment.
 
+    First look in arguments.bundle_results_root, then in
+    config.environment.bundle_results_root, then in the environment variable
+    BUNDLE_RESULTS_ROOT.
+
     Parameters:
-        arguments: The parsed arguments.
-        config: The configuration possibly containing the environment section.
+        arguments: The parsed arguments. config: The configuration possibly containing the
+        environment section.
 
     Returns:
         The PDS4 bundle root.
@@ -88,19 +99,43 @@ def get_pds4_bundle_results_root(arguments: argparse.Namespace,
     """
     pds4_bundle_root_str = None
     try:
-        pds4_bundle_root_str = arguments.pds4_bundle_root
+        pds4_bundle_root_str = arguments.bundle_results_root
     except AttributeError:
         pass
     if pds4_bundle_root_str is None:
         try:
-            pds4_bundle_root_str = config.environment.pds4_bundle_root
+            pds4_bundle_root_str = config.environment.bundle_results_root
         except AttributeError:
             pass
     if pds4_bundle_root_str is None:
-        pds4_bundle_root_str = os.getenv('NAV_PDS4_BUNDLE_ROOT')
+        pds4_bundle_root_str = os.getenv('NAV_BUNDLE_RESULTS_ROOT')
     if pds4_bundle_root_str is None:
-        raise ValueError('One of --pds4-bundle-root, the configuration variable '
-                         '"environment.pds4_bundle_root", or the NAV_PDS4_BUNDLE_ROOT '
+        raise ValueError('One of --bundle-results-root, the configuration variable '
+                         '"environment.bundle_results_root", or the NAV_BUNDLE_RESULTS_ROOT '
                          'environment variable must be set'
                          )
     return pds4_bundle_root_str
+
+
+def load_default_and_user_config(arguments: argparse.Namespace,
+                                 config: Config) -> None:
+    """Load the default and user configuration (if any).
+
+    Parameters:
+        arguments: The parsed arguments containing the config_file argument.
+        config: The configuration to update.
+    """
+    config.read_config()
+    # If the user specified one or more config files, load them
+    try:
+        if arguments.config_file:
+            for config_file in arguments.config_file:
+                config.update_config(config_file)
+        return
+    except AttributeError:
+        pass
+    # If they didn't, load the default config file
+    try:
+        config.update_config('nav_default_config.yaml')
+    except FileNotFoundError:
+        pass
