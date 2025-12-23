@@ -31,9 +31,6 @@ def generate_backplanes_image_files(
         nav_results_root: Root containing previously written navigation metadata JSONs.
         backplane_results_root: Destination root for FITS and label files.
         write_output_files: Whether to write outputs to storage.
-
-    Returns:
-        A dictionary containing the backplane metadata.
     """
 
     logger = DEFAULT_LOGGER
@@ -64,7 +61,7 @@ def generate_backplanes_image_files(
         # TODO We only support snapshots for backplane generation for now
         obs = obs_class.from_file(image_path, extfov_margin_vu=(0, 0))
         if not isinstance(obs, ObsSnapshot):
-            raise ValueError(f'Expected ObsSnapshot, got {type(obs).__name__}')
+            raise TypeError(f'Expected ObsSnapshot, got {type(obs).__name__}')
         snapshot = obs
 
         # Apply offset via OffsetFOV; metadata uses (dv, du)

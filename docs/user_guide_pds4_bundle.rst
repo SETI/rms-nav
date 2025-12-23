@@ -38,13 +38,13 @@ Each bundle follows a standard PDS4 directory structure:
 
    <bundle_name>/
    ├── browse/
-   │   ├── collection_browse.csv
+   │   ├── collection_browse.tab
    │   ├── collection_browse.lblx
    │   └── <directory_structure>/
    │       └── <image_name>_summary.lblx
    │       └── <image_name>_summary.png
    ├── data/
-   │   ├── collection_data.csv
+   │   ├── collection_data.tab
    │   ├── collection_data.lblx
    │   └── <directory_structure>/
    │       └── <image_name>_backplanes.lblx
@@ -152,7 +152,8 @@ Each task payload must be a JSON object with the following fields:
   (lists or ``null``).
 * ``files``: an array of objects, each containing required fields ``image_file_url``,
   ``label_file_url``, and ``results_path_stub``, and optional fields ``index_file_row``
-  (metadata) and ``extra_params`` (a JSON object/dictionary of arbitrary key/value pairs).
+  (metadata) and ``extra_params`` (a JSON object/dictionary of arbitrary key/value pairs
+  that will be passed through to the observation class's from_file method when the file is read).
 
 Summary Pass
 ------------
@@ -175,8 +176,9 @@ Environment options:
 
 * ``--config-file PATH`` (repeatable): one or more configuration file paths to override
   defaults.
-* ``--bundle-results-root PATH`` (required): root directory where bundle results are
-  located.
+* ``--bundle-results-root PATH``: root directory where bundle results are located.
+  If not provided, uses the ``BUNDLE_RESULTS_ROOT`` environment variable or the
+  ``bundle_results_root`` configuration setting.
 
 Examples
 ^^^^^^^^
@@ -238,21 +240,22 @@ The summary pass generates:
 
 * **Collection Data Files**:
 
-  * ``collection_data.csv``: CSV file listing all data products in the bundle
+  * ``collection_data.tab``: CSV file listing all data products in the bundle
   * ``collection_data.lblx``: PDS4 label for the data collection
 
 * **Collection Browse Files**:
 
-  * ``collection_browse.csv``: CSV file listing all browse products in the bundle
+  * ``collection_browse.tab``: CSV file listing all browse products in the bundle
   * ``collection_browse.lblx``: PDS4 label for the browse collection
 
 * **Global Index Files**:
 
-  * ``global_index_bodies.tab``: Tab-separated file with one row per image/body
-    combination, containing min/max values for each configured backplane type
+  * ``global_index_bodies.tab``: CSV file with one row per image/body combination,
+    containing min/max values for each configured backplane type (formatted to 5 decimal
+    places)
   * ``global_index_bodies.lblx``: PDS4 label for the bodies index
-  * ``global_index_rings.tab``: Tab-separated file with one row per image, containing
-    min/max values for each configured ring backplane type
+  * ``global_index_rings.tab``: CSV file with one row per image, containing min/max
+    values for each configured ring backplane type (formatted to 5 decimal places)
   * ``global_index_rings.lblx``: PDS4 label for the rings index
 
 Configuration
@@ -320,6 +323,8 @@ Each dataset class implements PDS4 bundle generation methods:
 * ``pds4_bundle_path_for_image()``: Maps image name to bundle directory path
 * ``pds4_path_stub()``: Returns the full path stub (directory + filename prefix)
 * ``pds4_template_variables()``: Returns template variable dictionary
+* ``pds4_image_name_to_data_lidvid()``: Converts image name to data product LIDVID
+* ``pds4_image_name_to_browse_lidvid()``: Converts image name to browse product LIDVID
 
 Cassini ISS datasets (``coiss_cruise``, ``coiss_saturn``) provide complete
 implementations that map PDS3 index columns to PDS4 ``cassini:`` namespace variables.

@@ -219,6 +219,50 @@ class DataSetPDS3VoyagerISS(DataSetPDS3):
         """Returns PDS4 path stub for bundle directory structure."""
         raise NotImplementedError
 
+    def pds4_image_name_to_browse_lid(self, image_name: str) -> str:
+        """Returns the browse LID for the given image name.
+
+        Parameters:
+            image_name: The image name to convert to a browse LID.
+
+        Returns:
+            The browse LID.
+        """
+        raise NotImplementedError
+
+    def pds4_image_name_to_browse_lidvid(self, image_name: str) -> str:
+        """Returns the browse LIDVID for the given image name.
+
+        Parameters:
+            image_name: The image name to convert to a browse LID.
+
+        Returns:
+            The browse LIDVID.
+        """
+        raise NotImplementedError
+
+    def pds4_image_name_to_data_lid(self, image_name: str) -> str:
+        """Returns the data LID for the given image name.
+
+        Parameters:
+            image_name: The image name to convert to a data LID.
+
+        Returns:
+            The data LID.
+        """
+        raise NotImplementedError
+
+    def pds4_image_name_to_data_lidvid(self, image_name: str) -> str:
+        """Returns the data LIDVID for the given image name.
+
+        Parameters:
+            image_name: The image name to convert to a data LID.
+
+        Returns:
+            The data LIDVID.
+        """
+        raise NotImplementedError
+
     def pds4_template_variables(
         self,
         image_file: ImageFile,
@@ -226,4 +270,4 @@ class DataSetPDS3VoyagerISS(DataSetPDS3):
         backplane_metadata: dict[str, Any],
     ) -> dict[str, Any]:
         """Returns template variables for PDS4 label generation."""
-        return {}
+        raise NotImplementedError

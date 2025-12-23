@@ -103,9 +103,6 @@ def generate_bundle_data_files(
 
         # Generate PDS4 label file
         template_path = Path(template_dir) / 'data.lblx'
-        if not template_path.exists():
-            raise FileNotFoundError(f'Template file not found: {template_path}')
-
         template = pdstemplate.PdsTemplate(str(template_path))
         template.write(template_vars, label_file_path)
         logger.info('Generated PDS4 label: %s', label_file_path)

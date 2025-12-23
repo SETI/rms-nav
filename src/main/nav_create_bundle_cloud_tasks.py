@@ -21,14 +21,16 @@ sys.path.insert(0, package_source_path)
 
 from nav.dataset.dataset import ImageFile, ImageFiles
 from nav.dataset import dataset_name_to_class
-from nav.config import DEFAULT_CONFIG
-from nav.config.logger import DEFAULT_LOGGER
+from nav.config import (DEFAULT_CONFIG, DEFAULT_LOGGER,
+                        get_backplane_results_root,
+                        get_nav_results_root,
+                        get_pds4_bundle_results_root)
 
 from pds4.bundle_data import generate_bundle_data_files
 
 
 def process_task(
-    task_id: str, task_data: dict[str, Any], worker_data: WorkerData
+    _task_id: str, task_data: dict[str, Any], worker_data: WorkerData
 ) -> tuple[bool, Any]:
     """Generate bundle files for a single batch of image files."""
 
@@ -44,54 +46,32 @@ def process_task(
             pass
 
     # Derive roots
-    nav_results_root_str = arguments.nav_results_root
-    if nav_results_root_str is None:
+    try:
+        nav_results_root_str = get_nav_results_root(arguments, DEFAULT_CONFIG)
+    except ValueError:
         return False, {
             'status': 'error',
             'status_error': 'no_nav_root'
         }
-        nav_results_root_str = os.getenv('NAV_RESULTS_ROOT')
-    if nav_results_root_str is None:
-        try:
-            nav_results_root_str = DEFAULT_CONFIG.environment.nav_results_root
-        except AttributeError:
-            pass
-    if nav_results_root_str is None:
-        return False, {
-            'status': 'error',
-            'status_error': 'no_nav_root'
-        }
-    nav_results_root = FileCache().new_path(nav_results_root_str)
+    nav_results_root = FileCache(None).new_path(nav_results_root_str)
 
-    backplane_results_root_str = arguments.backplane_results_root
-    if backplane_results_root_str is None:
-        try:
-            backplane_results_root_str = DEFAULT_CONFIG.environment.backplane_results_root
-        except AttributeError:
-            pass
-    if backplane_results_root_str is None:
-        backplane_results_root_str = os.getenv('BACKPLANE_RESULTS_ROOT')
-    if backplane_results_root_str is None:
+    try:
+        backplane_results_root_str = get_backplane_results_root(arguments, DEFAULT_CONFIG)
+    except ValueError:
         return False, {
             'status': 'error',
             'status_error': 'no_backplane_root'
         }
-    backplane_results_root = FileCache().new_path(backplane_results_root_str)
+    backplane_results_root = FileCache(None).new_path(backplane_results_root_str)
 
-    bundle_results_root_str = arguments.bundle_results_root
-    if bundle_results_root_str is None:
-        try:
-            bundle_results_root_str = DEFAULT_CONFIG.environment.bundle_results_root
-        except AttributeError:
-            pass
-    if bundle_results_root_str is None:
-        bundle_results_root_str = os.getenv('BUNDLE_RESULTS_ROOT')
-    if bundle_results_root_str is None:
+    try:
+        bundle_results_root_str = get_pds4_bundle_results_root(arguments, DEFAULT_CONFIG)
+    except ValueError:
         return False, {
             'status': 'error',
             'status_error': 'no_bundle_root'
         }
-    bundle_results_root = FileCache().new_path(bundle_results_root_str)
+    bundle_results_root = FileCache(None).new_path(bundle_results_root_str)
 
     dataset_name = task_data.get('dataset_name', None)
     if dataset_name is None:
@@ -152,7 +132,7 @@ def process_task(
         logger=DEFAULT_LOGGER
     )
 
-    return False, None  # No retry under any circumstances
+    return False, {'status': 'success'}  # No retry under any circumstances
 
 
 async def main() -> None:

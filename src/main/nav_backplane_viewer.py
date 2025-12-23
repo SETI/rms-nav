@@ -38,8 +38,9 @@ from PyQt6.QtWidgets import (
 package_source_path = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, package_source_path)
 
-from nav.config import DEFAULT_CONFIG, Config
-from nav.config.logger import DEFAULT_LOGGER
+from nav.config import (DEFAULT_CONFIG, DEFAULT_LOGGER, Config,
+                        get_backplane_results_root,
+                        get_nav_results_root)
 from nav.dataset import (dataset_names,
                          dataset_name_to_class,
                          dataset_name_to_inst_name)
@@ -1438,33 +1439,11 @@ def main() -> None:
             pass
 
     # Roots
-    nav_results_root_str = arguments.nav_results_root
-    if nav_results_root_str is None:
-        try:
-            nav_results_root_str = DEFAULT_CONFIG.environment.nav_results_root
-        except AttributeError:
-            pass
-    if nav_results_root_str is None:
-        nav_results_root_str = os.getenv('NAV_RESULTS_ROOT')
-    if nav_results_root_str is None:
-        raise ValueError('One of --nav-results-root, the configuration variable '
-                         '"nav_results_root", or the NAV_RESULTS_ROOT environment variable must be '
-                         'set')
-    nav_results_root = FileCache().new_path(nav_results_root_str)
+    nav_results_root_str = get_nav_results_root(arguments, DEFAULT_CONFIG)
+    nav_results_root = FileCache(None).new_path(nav_results_root_str)
 
-    backplane_results_root_str = arguments.backplane_results_root
-    if backplane_results_root_str is None:
-        try:
-            backplane_results_root_str = DEFAULT_CONFIG.environment.backplane_results_root
-        except AttributeError:
-            pass
-    if backplane_results_root_str is None:
-        backplane_results_root_str = os.getenv('BACKPLANE_RESULTS_ROOT')
-    if backplane_results_root_str is None:
-        raise ValueError('One of --backplane-results-root, the configuration variable '
-                         '"backplane_results_root", or the BACKPLANE_RESULTS_ROOT environment '
-                         'variable must be set')
-    backplane_results_root = FileCache().new_path(backplane_results_root_str)
+    backplane_results_root_str = get_backplane_results_root(arguments, DEFAULT_CONFIG)
+    backplane_results_root = FileCache(None).new_path(backplane_results_root_str)
 
     dataset: DataSet = arguments._dataset
 

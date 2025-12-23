@@ -59,7 +59,7 @@ def generate_collection_files(
         writer = csv.writer(f)
         writer.writerow(['Member Status', 'LIDVID_LID'])
         for label_file in label_files:
-            image_name = label_file.stem.replace('_backplanes.lblx', '')
+            image_name = label_file.stem.replace('_backplanes', '')
             lidvid = dataset.pds4_image_name_to_data_lidvid(image_name)
             writer.writerow(['P', lidvid])
     collection_data_csv.upload()
@@ -89,7 +89,6 @@ def generate_collection_files(
         collection_data_label.upload()
         logger.info('Generated "collection_data.lblx"')
 
-    print(label_files)
     # Generate collection_browse.tab (must be written before collection_browse.lblx)
     collection_browse_csv = bundle_root / 'browse' / 'collection_browse.tab'
     collection_browse_local = cast(Path, collection_browse_csv.get_local_path())
@@ -98,7 +97,7 @@ def generate_collection_files(
         writer = csv.writer(f)
         writer.writerow(['Member Status', 'LIDVID_LID'])
         for label_file in label_files:
-            image_name = label_file.stem.replace('_backplanes.lblx', '')
+            image_name = label_file.stem.replace('_backplanes', '')
             lidvid = dataset.pds4_image_name_to_browse_lidvid(image_name)
             writer.writerow(['P', lidvid])
     collection_browse_csv.upload()
@@ -292,17 +291,15 @@ def generate_global_index_files(
     if bodies_template.exists():
         template = pdstemplate.PdsTemplate(str(bodies_template))
         bodies_label = supplemental_dir / 'global_index_bodies.lblx'
-        bodies_label_local = cast(Path, bodies_label.get_local_path())
         template_vars = {
             'FILE_RECORDS': len(body_index_rows),
         }
         try:
-            template.write(template_vars, str(bodies_label_local))
+            template.write(template_vars, bodies_label)
         except Exception:
             logger.exception('Error creating label global_index_bodies.lblx: %s',
-                             bodies_label_local)
+                             bodies_label)
             raise
-        bodies_label.upload()
         logger.info('Generated global_index_bodies.lblx')
 
     # Global index rings label
@@ -310,11 +307,15 @@ def generate_global_index_files(
     if rings_template.exists():
         template = pdstemplate.PdsTemplate(str(rings_template))
         rings_label = supplemental_dir / 'global_index_rings.lblx'
-        rings_label_local = cast(Path, rings_label.get_local_path())
         template_vars = {
             'FILE_RECORDS': len(ring_index_rows),
         }
-        template.write(template_vars, str(rings_label_local))
+        try:
+            template.write(template_vars, rings_label)
+        except Exception:
+            logger.exception('Error creating label global_index_rings.lblx: %s',
+                             rings_label)
+            raise
         rings_label.upload()
         logger.info('Generated global_index_rings.lblx')
 

@@ -78,18 +78,13 @@ def write_fits(
 
     # Get inventory information for all bodies
     # TODO Clean this up
-    inv: dict[str, Any] = {}
-    try:
-        if snapshot.is_simulated:
-            inv = snapshot.sim_inventory
-        else:
-            closest_planet = snapshot.closest_planet
-            if closest_planet:
-                body_list = [closest_planet] + list(
-                    config.satellites(closest_planet))
-                inv = snapshot.inventory(body_list, return_type='full')
-    except Exception as e:
-        logger.debug('Could not get inventory data: %s', e)
+    if snapshot.is_simulated:
+        inv = snapshot.sim_inventory
+    else:
+        closest_planet = snapshot.closest_planet
+        if closest_planet:
+            body_list = [closest_planet, *config.satellites(closest_planet)]
+            inv = snapshot.inventory(body_list, return_type='full')
 
     # Extract body statistics and inventory information per body
     for body_name, body_data in bodies_result.items():

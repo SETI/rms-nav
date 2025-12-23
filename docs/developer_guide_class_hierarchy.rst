@@ -30,6 +30,8 @@ The following Mermaid diagram shows the complete class hierarchy of the RMS-NAV 
           +pds4_bundle_path_for_image(name)*
           +pds4_path_stub(image_file)*
           +pds4_template_variables(...)*
+          +pds4_image_name_to_data_lidvid(name)*
+          +pds4_image_name_to_browse_lidvid(name)*
       }
 
       class DataSetPDS3 {
@@ -46,6 +48,8 @@ The following Mermaid diagram shows the complete class hierarchy of the RMS-NAV 
           +pds4_bundle_path_for_image(name)
           +pds4_path_stub(image_file)
           +pds4_template_variables(...)
+          +pds4_image_name_to_data_lidvid(name)
+          +pds4_image_name_to_browse_lidvid(name)
       }
 
       class DataSetPDS3CassiniISSCruise {
@@ -331,8 +335,9 @@ Dataset
 defines ``_img_name_valid(...)``, ``add_selection_arguments(...)``,
 ``yield_image_files_from_arguments(...)``, and ``yield_image_files_index(...)`` for
 dataset-specific selection and iteration. For PDS4 bundle generation, it also defines
-abstract methods ``pds4_bundle_template_dir()``, ``pds4_bundle_name()``,
-``pds4_bundle_path_for_image()``, ``pds4_path_stub()``, and ``pds4_template_variables()``.
+methods ``pds4_bundle_template_dir()``, ``pds4_bundle_name()``,
+``pds4_bundle_path_for_image()``, ``pds4_path_stub()``, ``pds4_template_variables()``,
+``pds4_image_name_to_data_lidvid()``, and ``pds4_image_name_to_browse_lidvid()``.
 :class:`nav.dataset.dataset_pds3.DataSetPDS3` provides volume and index-based iteration
 for archives, while instrument-specific subclasses tailor parsing and volume sets.
 Instrument-specific dataset classes include

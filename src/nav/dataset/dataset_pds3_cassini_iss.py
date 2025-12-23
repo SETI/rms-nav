@@ -397,13 +397,13 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         return f'urn:nasa:pds:{self.pds4_bundle_name()}:browse:{image_lid_part}'
 
     def pds4_image_name_to_browse_lidvid(self, image_name: str) -> str:
-        """Returns the browse LID for the given image name.
+        """Returns the browse LIDVID for the given image name.
 
         Parameters:
             image_name: The image name to convert to a browse LID.
 
         Returns:
-            The browse LID.
+            The browse LIDVID.
         """
         image_name = image_name.split('_', 1)[0].split('.', 1)[0]
         image_lid_part = image_name[1:] + image_name[0].lower()
@@ -423,13 +423,13 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         return f'urn:nasa:pds:{self.pds4_bundle_name()}:data:{image_lid_part}'
 
     def pds4_image_name_to_data_lidvid(self, image_name: str) -> str:
-        """Returns the data LID for the given image name.
+        """Returns the data LIDVID for the given image name.
 
         Parameters:
             image_name: The image name to convert to a data LID.
 
         Returns:
-            The data LID.
+            The data LIDVID.
         """
         image_name = image_name.split('_', 1)[0].split('.', 1)[0]
         image_lid_part = image_name[1:] + image_name[0].lower()
@@ -490,8 +490,9 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         vars_dict['TITLE'] = f'Backplanes for {image_file.image_file_name}'
         vars_dict['DESCRIPTION'] = f'Backplanes for navigated image {image_file.image_file_name}'
         vars_dict['COMMENT'] = 'Generated from navigated image data'
-        # TODO Placeholder LIDVID
-        vars_dict['SOURCE_IMAGE_LIDVID'] = 'urn:nasa:pds:cassini_iss_saturn:data:placeholder::1.0'
+        vars_dict['SOURCE_IMAGE_LIDVID'] = (
+            f'urn:nasa:pds:{pds4_bundle_name}:data:{image_lid_part}::1.0'
+        )
 
         # Extract from index_file_row if available
         index_row = image_file.index_file_row

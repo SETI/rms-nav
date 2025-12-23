@@ -16,10 +16,12 @@ class ImageFile:
     """Represents a single image file with its metadata and lazy-loaded paths.
 
     Attributes:
-        image_file_url: Remote URL for the image file
-        label_file_url: Remote URL for the label file
-        results_path_stub: Local path stub for storing results
-        index_file_row: Optional metadata from index files
+        image_file_url: Remote URL for the image file.
+        label_file_url: Remote URL for the label file.
+        results_path_stub: Local path stub for storing results.
+        index_file_row: Optional metadata from index files.
+        extra_params: Optional extra parameters that will be passed to the observation
+            class's from_file method when the file is read.
     """
 
     image_file_url: FCPath
@@ -218,7 +220,7 @@ class DataSet(ABC, NavBase):
         raise NotImplementedError
 
     def pds4_image_name_to_browse_lidvid(self, image_name: str) -> str:
-        """Returns the browse LID for the given image name.
+        """Returns the browse LIDVID for the given image name.
 
         Parameters:
             image_name: The image name to convert to a browse LID.
@@ -244,7 +246,7 @@ class DataSet(ABC, NavBase):
         raise NotImplementedError
 
     def pds4_image_name_to_data_lidvid(self, image_name: str) -> str:
-        """Returns the data LID for the given image name.
+        """Returns the data LIDVID for the given image name.
 
         Parameters:
             image_name: The image name to convert to a data LID.

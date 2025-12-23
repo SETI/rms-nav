@@ -111,7 +111,7 @@ def create_body_backplanes(snapshot: ObsSnapshot,
     # If "method" is not provided, it defaults to the same as "name"
     bodies_cfg = getattr(config.backplanes, 'bodies', None)
     if bodies_cfg is None:
-        raise ValueError('Configuration has bodies section for backplanes')
+        raise ValueError('Configuration has no bodies section for backplanes')
 
     # For each body, create a restricted meshgrid and evaluate configured backplanes
     for body_name, inv_info in bodies_by_range:
@@ -152,21 +152,19 @@ def create_body_backplanes(snapshot: ObsSnapshot,
                 full, full_mask = _create_simulated_body_backplane(
                     snapshot, body_name, bp_name, v0, v1, u0, u1
                 )
-                per_type_arrays[bp_name] = full
-                per_type_masks[bp_name] = full_mask
-                continue
 
-            # This will raise an exception if the backplane is not available
-            func = getattr(bp, method)
-            vals = func(body_name)
-            # Convert to masked array via .mvals to preserve mask
-            mvals = vals.mvals  # masked numpy array
-            # Embed into full-frame arrays
-            full = np.zeros(snapshot.data.shape, dtype=np.float32)
-            full_mask = np.zeros(snapshot.data.shape, dtype=bool)
-            full[v0:v1 + 1, u0:u1 + 1] = np.ma.filled(mvals, fill_value=0.0).astype(np.float32)
-            mask = ~np.ma.getmaskarray(mvals)
-            full_mask[v0:v1 + 1, u0:u1 + 1] = mask  # True where valid
+            else:
+                # This will raise an exception if the backplane is not available
+                func = getattr(bp, method)
+                vals = func(body_name)
+                # Convert to masked array via .mvals to preserve mask
+                mvals = vals.mvals  # masked numpy array
+                # Embed into full-frame arrays
+                full = np.zeros(snapshot.data.shape, dtype=np.float32)
+                full_mask = np.zeros(snapshot.data.shape, dtype=bool)
+                full[v0:v1 + 1, u0:u1 + 1] = np.ma.filled(mvals, fill_value=0.0).astype(np.float32)
+                mask = ~np.ma.getmaskarray(mvals)
+                full_mask[v0:v1 + 1, u0:u1 + 1] = mask  # True where valid
 
             per_type_arrays[bp_name] = full
             per_type_masks[bp_name] = full_mask
@@ -181,11 +179,11 @@ def create_body_backplanes(snapshot: ObsSnapshot,
                 max_val = float(np.nanmax(valid_values))
                 body_stats[bp_name] = {'min': min_val, 'max': max_val}
 
-            result[body_name] = {
-                'arrays': per_type_arrays,
-                'masks': per_type_masks,
-                'distance': float(inv_info['range']),
-                'statistics': body_stats,
-            }
+        result[body_name] = {
+            'arrays': per_type_arrays,
+            'masks': per_type_masks,
+            'distance': float(inv_info['range']),
+            'statistics': body_stats,
+        }
 
     return result

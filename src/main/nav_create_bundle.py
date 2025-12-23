@@ -11,7 +11,7 @@ import argparse
 import os
 import sys
 
-from filecache import FileCache, FCPath
+from filecache import FileCache
 import pdslogger
 import pdstemplate
 
@@ -22,8 +22,10 @@ sys.path.insert(0, package_source_path)
 
 from nav.dataset.dataset import DataSet
 from nav.dataset import dataset_names, dataset_name_to_class
-from nav.config import DEFAULT_CONFIG
-from nav.config.logger import DEFAULT_LOGGER
+from nav.config import (DEFAULT_CONFIG, DEFAULT_LOGGER,
+                        get_backplane_results_root,
+                        get_nav_results_root,
+                        get_pds4_bundle_results_root)
 
 from pds4.bundle_data import generate_bundle_data_files
 from pds4.collections import generate_collection_files, generate_global_index_files
@@ -128,35 +130,8 @@ def parse_args_summary(command_list: list[str]) -> argparse.Namespace:
 
     arguments = cmdparser.parse_args(command_list[1:])
     # Store dataset_name in arguments for use in main_summary
-    arguments.dataset_name = dataset_name
+    arguments.dataset_name = dataset_name.lower()
     return arguments
-
-
-def derive_bundle_results_root(arguments: argparse.Namespace) -> FCPath:
-    """Derive bundle results root with priority: command line > env > config.
-
-    Parameters:
-        arguments: Parsed arguments.
-
-    Returns:
-        FCPath for bundle results root.
-
-    Raises:
-        ValueError: If bundle_results_root cannot be determined.
-    """
-    bundle_results_root_str = arguments.bundle_results_root
-    if bundle_results_root_str is None:
-        try:
-            bundle_results_root_str = DEFAULT_CONFIG.environment.bundle_results_root
-        except AttributeError:
-            pass
-    if bundle_results_root_str is None:
-        bundle_results_root_str = os.getenv('BUNDLE_RESULTS_ROOT')
-    if bundle_results_root_str is None:
-        raise ValueError('One of --bundle-results-root, the configuration variable '
-                         '"bundle_results_root", or the BUNDLE_RESULTS_ROOT environment '
-                         'variable must be set')
-    return FileCache().new_path(bundle_results_root_str)
 
 
 def main_labels() -> None:
@@ -176,35 +151,14 @@ def main_labels() -> None:
             pass
 
     # Derive roots
-    nav_results_root_str = arguments.nav_results_root
-    if nav_results_root_str is None:
-        try:
-            nav_results_root_str = DEFAULT_CONFIG.environment.nav_results_root
-        except AttributeError:
-            pass
-    if nav_results_root_str is None:
-        nav_results_root_str = os.getenv('NAV_RESULTS_ROOT')
-    if nav_results_root_str is None:
-        raise ValueError('One of --nav-results-root, the configuration variable '
-                         '"nav_results_root", or the NAV_RESULTS_ROOT environment variable must be '
-                         'set')
-    nav_results_root = FileCache().new_path(nav_results_root_str)
+    nav_results_root_str = get_nav_results_root(arguments, DEFAULT_CONFIG)
+    nav_results_root = FileCache(None).new_path(nav_results_root_str)
 
-    backplane_results_root_str = arguments.backplane_results_root
-    if backplane_results_root_str is None:
-        try:
-            backplane_results_root_str = DEFAULT_CONFIG.environment.backplane_results_root
-        except AttributeError:
-            pass
-    if backplane_results_root_str is None:
-        backplane_results_root_str = os.getenv('BACKPLANE_RESULTS_ROOT')
-    if backplane_results_root_str is None:
-        raise ValueError('One of --backplane-results-root, the configuration variable '
-                         '"backplane_results_root", or the BACKPLANE_RESULTS_ROOT environment '
-                         'variable must be set')
-    backplane_results_root = FileCache().new_path(backplane_results_root_str)
+    backplane_results_root_str = get_backplane_results_root(arguments, DEFAULT_CONFIG)
+    backplane_results_root = FileCache(None).new_path(backplane_results_root_str)
 
-    bundle_results_root = derive_bundle_results_root(arguments)
+    bundle_results_root_str = get_pds4_bundle_results_root(arguments, DEFAULT_CONFIG)
+    bundle_results_root = FileCache(None).new_path(bundle_results_root_str)
 
     global MAIN_LOGGER
     MAIN_LOGGER = DEFAULT_LOGGER
@@ -249,21 +203,16 @@ def main_summary() -> None:
         except FileNotFoundError:
             pass
 
-    bundle_results_root = derive_bundle_results_root(arguments)
+    bundle_results_root_str = get_pds4_bundle_results_root(arguments, DEFAULT_CONFIG)
+    bundle_results_root = FileCache(None).new_path(bundle_results_root_str)
 
     global MAIN_LOGGER
     MAIN_LOGGER = DEFAULT_LOGGER
 
     pdstemplate.PdsTemplate.set_logger(MAIN_LOGGER)
 
-    # Get dataset instance
-    dataset_name = arguments.dataset_name.lower()
-    try:
-        dataset = dataset_name_to_class(dataset_name)()
-    except KeyError:
-        print(f'Unknown dataset "{dataset_name}"')
-        print(f'Valid datasets are: {", ".join(dataset_names())}')
-        sys.exit(1)
+    dataset_name = arguments.dataset_name
+    dataset = dataset_name_to_class(dataset_name)()
 
     # Generate collection files
     try:

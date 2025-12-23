@@ -50,7 +50,7 @@ def create_ring_backplanes(snapshot: ObsSnapshot,
 
     rings_cfg = getattr(config.backplanes, 'rings', None)
     if rings_cfg is None:
-        raise ValueError('Configuration has rings section for backplanes')
+        raise ValueError('Configuration has no rings section for backplanes')
 
     # Use planet name - this is a bit of a kludge to handle Saturn's main rings TODO
     target_key = f'{closest_planet}_RING_SYSTEM'
@@ -68,7 +68,7 @@ def create_ring_backplanes(snapshot: ObsSnapshot,
         method = bp_cfg.get('method')
         if method is None:
             raise ValueError(f'Ring backplane "method" is required: {bp_name}')
-        units = bp_cfg.get('units', '')
+        units = bp_cfg.get('units')
         if units is None:
             raise ValueError(f'Ring backplane "units" is required: {bp_name}')
 
@@ -98,7 +98,7 @@ def create_ring_backplanes(snapshot: ObsSnapshot,
             max_val = float(np.nanmax(valid_values))
             ring_stats[bp_name] = {'min': min_val, 'max': max_val}
 
-        result['statistics'] = ring_stats
+    result['statistics'] = ring_stats
 
     # Ensure distance is present
     if result['distance'] is None:

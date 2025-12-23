@@ -21,7 +21,9 @@ sys.path.insert(0, package_source_path)
 
 from nav.dataset.dataset import ImageFile, ImageFiles
 from nav.dataset import dataset_name_to_inst_name
-from nav.config import DEFAULT_CONFIG
+from nav.config import (DEFAULT_CONFIG,
+                        get_backplane_results_root,
+                        get_nav_results_root)
 from nav.obs import inst_name_to_obs_class
 from backplanes.backplanes import generate_backplanes_image_files
 
@@ -43,35 +45,23 @@ def process_task(
             pass
 
     # Derive roots
-    nav_results_root_str = arguments.nav_results_root
-    if nav_results_root_str is None:
-        try:
-            nav_results_root_str = DEFAULT_CONFIG.environment.nav_results_root
-        except AttributeError:
-            pass
-    if nav_results_root_str is None:
-        nav_results_root_str = os.getenv('NAV_RESULTS_ROOT')
-    if nav_results_root_str is None:
+    try:
+        nav_results_root_str = get_nav_results_root(arguments, DEFAULT_CONFIG)
+    except ValueError:
         return False, {
             'status': 'error',
             'status_error': 'no_nav_root'
         }
-    nav_results_root = FileCache().new_path(nav_results_root_str)
+    nav_results_root = FileCache(None).new_path(nav_results_root_str)
 
-    backplane_results_root_str = arguments.backplane_results_root
-    if backplane_results_root_str is None:
-        try:
-            backplane_results_root_str = DEFAULT_CONFIG.environment.backplane_results_root
-        except AttributeError:
-            pass
-    if backplane_results_root_str is None:
-        backplane_results_root_str = os.getenv('BACKPLANE_RESULTS_ROOT')
-    if backplane_results_root_str is None:
+    try:
+        backplane_results_root_str = get_backplane_results_root(arguments, DEFAULT_CONFIG)
+    except ValueError:
         return False, {
             'status': 'error',
             'status_error': 'no_backplane_root'
         }
-    backplane_results_root = FileCache().new_path(backplane_results_root_str)
+    backplane_results_root = FileCache(None).new_path(backplane_results_root_str)
 
     dataset_name = task_data.get('dataset_name', None)
     if dataset_name is None:
