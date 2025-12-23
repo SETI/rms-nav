@@ -3,7 +3,7 @@
 # nav_create_bundle.py
 #
 # Top-level driver for PDS4 bundle generation. Enumerates images via datasets
-# and for each, generates PDS4 labels and metadata files. Also supports
+# and, for each, generates PDS4 labels and metadata files. Also supports
 # generating collection files and global index files.
 ################################################################################
 
@@ -13,6 +13,7 @@ import sys
 
 from filecache import FileCache, FCPath
 import pdslogger
+import pdstemplate
 
 # Make CLI runnable from source tree with
 #    python src/package
@@ -24,7 +25,7 @@ from nav.dataset import dataset_names, dataset_name_to_class
 from nav.config import DEFAULT_CONFIG
 from nav.config.logger import DEFAULT_LOGGER
 
-from pds4.data import generate_bundle_data_files
+from pds4.bundle_data import generate_bundle_data_files
 from pds4.collections import generate_collection_files, generate_global_index_files
 
 
@@ -33,7 +34,8 @@ DATASET_NAME: str | None = None
 MAIN_LOGGER: pdslogger.PdsLogger | None = None
 
 
-def add_common_arguments(parser: argparse.ArgumentParser) -> None:
+def add_common_arguments(parser: argparse.ArgumentParser,
+                         for_labels: bool = False) -> None:
     """Add common arguments to an argument parser.
 
     Parameters:
@@ -51,6 +53,19 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
         help="""Root directory for bundle results; overrides the BUNDLE_RESULTS_ROOT
         environment variable and the bundle_results_root configuration variable""")
 
+    if for_labels:
+        environment_group.add_argument(
+            '--pds3-holdings-root', type=str, default=None,
+            help='Root directory of PDS3 holdings; overrides PDS3_HOLDINGS_DIR or config')
+        environment_group.add_argument(
+            '--nav-results-root', type=str, default=None,
+            help="""Root directory for prior navigation metadata files (_metadata.json);
+            overrides NAV_RESULTS_ROOT and the nav_results_root configuration variable""")
+        environment_group.add_argument(
+            '--backplane-results-root', type=str, default=None,
+            help="""Root directory for backplane results; overrides the BACKPLANE_RESULTS_ROOT
+            environment variable and the backplane_results_root configuration variable""")
+
 
 def parse_args_labels(command_list: list[str]) -> argparse.Namespace:
     """Parse arguments for the labels subcommand."""
@@ -58,7 +73,7 @@ def parse_args_labels(command_list: list[str]) -> argparse.Namespace:
     global DATASET_NAME
 
     if len(command_list) < 1:
-        print('Usage: python nav_create_bundle.py labels <dataset_name> [args]')
+        print('Usage: nav_create_bundle labels <dataset_name> [args]')
         sys.exit(1)
 
     DATASET_NAME = command_list[0].lower()
@@ -66,7 +81,7 @@ def parse_args_labels(command_list: list[str]) -> argparse.Namespace:
     if DATASET_NAME not in dataset_names():
         print(f'Unknown dataset "{DATASET_NAME}"')
         print(f'Valid datasets are: {", ".join(dataset_names())}')
-        print('Usage: python nav_create_bundle.py labels <dataset_name> [args]')
+        print('Usage: nav_create_bundle labels <dataset_name> [args]')
         sys.exit(1)
 
     DATASET = dataset_name_to_class(DATASET_NAME)()
@@ -76,22 +91,7 @@ def parse_args_labels(command_list: list[str]) -> argparse.Namespace:
         epilog="""Generate PDS4 labels and metadata files for selected images.""")
 
     # Common arguments
-    add_common_arguments(cmdparser)
-
-    # Environment (additional arguments specific to labels)
-    # TODO there is already an environment group with common arguments
-    environment_group = cmdparser.add_argument_group('Environment')
-    environment_group.add_argument(
-        '--pds3-holdings-root', type=str, default=None,
-        help='Root directory of PDS3 holdings; overrides PDS3_HOLDINGS_DIR or config')
-    environment_group.add_argument(
-        '--nav-results-root', type=str, default=None,
-        help="""Root directory for prior navigation metadata files (_metadata.json);
-        overrides NAV_RESULTS_ROOT and the nav_results_root configuration variable""")
-    environment_group.add_argument(
-        '--backplane-results-root', type=str, default=None,
-        help="""Root directory for backplane results; overrides the BACKPLANE_RESULTS_ROOT
-        environment variable and the backplane_results_root configuration variable""")
+    add_common_arguments(cmdparser, for_labels=True)
 
     # Output
     output_group = cmdparser.add_argument_group('Output')
@@ -109,7 +109,7 @@ def parse_args_labels(command_list: list[str]) -> argparse.Namespace:
 def parse_args_summary(command_list: list[str]) -> argparse.Namespace:
     """Parse arguments for the summary subcommand."""
     if len(command_list) < 1:
-        print('Usage: python nav_create_bundle.py summary <dataset_name> [args]')
+        print('Usage: nav_create_bundle summary <dataset_name> [args]')
         sys.exit(1)
 
     dataset_name = command_list[0].lower()
@@ -117,7 +117,7 @@ def parse_args_summary(command_list: list[str]) -> argparse.Namespace:
     if dataset_name not in dataset_names():
         print(f'Unknown dataset "{dataset_name}"')
         print(f'Valid datasets are: {", ".join(dataset_names())}')
-        print('Usage: python nav_create_bundle.py summary <dataset_name> [args]')
+        print('Usage: nav_create_bundle summary <dataset_name> [args]')
         sys.exit(1)
 
     cmdparser = argparse.ArgumentParser(
@@ -146,17 +146,17 @@ def derive_bundle_results_root(arguments: argparse.Namespace) -> FCPath:
     """
     bundle_results_root_str = arguments.bundle_results_root
     if bundle_results_root_str is None:
-        bundle_results_root_str = os.getenv('BUNDLE_RESULTS_ROOT')
-    if bundle_results_root_str is None:
         try:
             bundle_results_root_str = DEFAULT_CONFIG.environment.bundle_results_root
         except AttributeError:
             pass
     if bundle_results_root_str is None:
+        bundle_results_root_str = os.getenv('BUNDLE_RESULTS_ROOT')
+    if bundle_results_root_str is None:
         raise ValueError('One of --bundle-results-root, the configuration variable '
-                         '"bundle_results_root" or the BUNDLE_RESULTS_ROOT environment '
+                         '"bundle_results_root", or the BUNDLE_RESULTS_ROOT environment '
                          'variable must be set')
-    return FileCache('bundle_results').new_path(bundle_results_root_str)
+    return FileCache().new_path(bundle_results_root_str)
 
 
 def main_labels() -> None:
@@ -186,9 +186,9 @@ def main_labels() -> None:
         nav_results_root_str = os.getenv('NAV_RESULTS_ROOT')
     if nav_results_root_str is None:
         raise ValueError('One of --nav-results-root, the configuration variable '
-                         '"nav_results_root" or the NAV_RESULTS_ROOT environment variable must be '
+                         '"nav_results_root", or the NAV_RESULTS_ROOT environment variable must be '
                          'set')
-    nav_results_root = FileCache('nav_results').new_path(nav_results_root_str)
+    nav_results_root = FileCache().new_path(nav_results_root_str)
 
     backplane_results_root_str = arguments.backplane_results_root
     if backplane_results_root_str is None:
@@ -200,14 +200,16 @@ def main_labels() -> None:
         backplane_results_root_str = os.getenv('BACKPLANE_RESULTS_ROOT')
     if backplane_results_root_str is None:
         raise ValueError('One of --backplane-results-root, the configuration variable '
-                         '"backplane_results_root" or the BACKPLANE_RESULTS_ROOT environment '
+                         '"backplane_results_root", or the BACKPLANE_RESULTS_ROOT environment '
                          'variable must be set')
-    backplane_results_root = FileCache('backplane_results').new_path(backplane_results_root_str)
+    backplane_results_root = FileCache().new_path(backplane_results_root_str)
 
     bundle_results_root = derive_bundle_results_root(arguments)
 
     global MAIN_LOGGER
     MAIN_LOGGER = DEFAULT_LOGGER
+
+    pdstemplate.PdsTemplate.set_logger(MAIN_LOGGER)
 
     assert DATASET is not None
 
@@ -221,18 +223,14 @@ def main_labels() -> None:
                              imagefiles.image_files[0].label_file_url.as_posix())
             continue
 
-        ok, metadata = generate_bundle_data_files(
+        generate_bundle_data_files(
             dataset=DATASET,
             image_files=imagefiles,
             nav_results_root=nav_results_root,
             backplane_results_root=backplane_results_root,
             bundle_results_root=bundle_results_root,
-            logger=MAIN_LOGGER,
-            write_output_files=not arguments.dry_run,  # TODO Not needed with above continue
+            logger=MAIN_LOGGER
         )
-        if not ok:
-            MAIN_LOGGER.info('Skipped: %s',
-                             imagefiles.image_files[0].label_file_url.as_posix())
 
 
 def main_summary() -> None:
@@ -256,6 +254,8 @@ def main_summary() -> None:
     global MAIN_LOGGER
     MAIN_LOGGER = DEFAULT_LOGGER
 
+    pdstemplate.PdsTemplate.set_logger(MAIN_LOGGER)
+
     # Get dataset instance
     dataset_name = arguments.dataset_name.lower()
     try:
@@ -267,25 +267,22 @@ def main_summary() -> None:
 
     # Generate collection files
     try:
-        metadata = generate_collection_files(
+        generate_collection_files(
             bundle_results_root=bundle_results_root,
             dataset=dataset,
             logger=MAIN_LOGGER,
         )
-        MAIN_LOGGER.info('Generated collection files: %d products', metadata['num_products'])
     except Exception:
         MAIN_LOGGER.exception('Failed to generate collection files')
         sys.exit(1)
 
     # Generate global index files
     try:
-        metadata = generate_global_index_files(
+        generate_global_index_files(
             bundle_results_root=bundle_results_root,
             dataset=dataset,
             logger=MAIN_LOGGER,
         )
-        MAIN_LOGGER.info('Generated global index files: %d body rows, %d ring rows',
-                         metadata['num_body_rows'], metadata['num_ring_rows'])
     except Exception:
         MAIN_LOGGER.exception('Failed to generate global index files')
         sys.exit(1)
@@ -296,7 +293,7 @@ def main_summary() -> None:
 def main() -> None:
     """Main entry point with subparsers."""
     if len(sys.argv) < 2:
-        print('Usage: python nav_create_bundle.py <labels|summary> [args]')
+        print('Usage: nav_create_bundle <labels|summary> [args]')
         sys.exit(1)
 
     subcommand = sys.argv[1].lower()
@@ -307,7 +304,7 @@ def main() -> None:
         main_summary()
     else:
         print(f'Unknown subcommand "{subcommand}"')
-        print('Usage: python nav_create_bundle.py <labels|summary> [args]')
+        print('Usage: nav_create_bundle <labels|summary> [args]')
         sys.exit(1)
 
 

@@ -1445,9 +1445,12 @@ def main() -> None:
         except AttributeError:
             pass
     if nav_results_root_str is None:
-        raise ValueError('One of --nav-results-root or configuration variable "nav_results_root" '
-                         'must be set')
-    nav_results_root = FileCache('nav_results').new_path(nav_results_root_str)
+        nav_results_root_str = os.getenv('NAV_RESULTS_ROOT')
+    if nav_results_root_str is None:
+        raise ValueError('One of --nav-results-root, the configuration variable '
+                         '"nav_results_root", or the NAV_RESULTS_ROOT environment variable must be '
+                         'set')
+    nav_results_root = FileCache().new_path(nav_results_root_str)
 
     backplane_results_root_str = arguments.backplane_results_root
     if backplane_results_root_str is None:
@@ -1456,9 +1459,12 @@ def main() -> None:
         except AttributeError:
             pass
     if backplane_results_root_str is None:
-        raise ValueError('One of --backplane-results-root or configuration variable '
-                         '"backplane_results_root" must be set')
-    backplane_results_root = FileCache('backplane_results').new_path(backplane_results_root_str)
+        backplane_results_root_str = os.getenv('BACKPLANE_RESULTS_ROOT')
+    if backplane_results_root_str is None:
+        raise ValueError('One of --backplane-results-root, the configuration variable '
+                         '"backplane_results_root", or the BACKPLANE_RESULTS_ROOT environment '
+                         'variable must be set')
+    backplane_results_root = FileCache().new_path(backplane_results_root_str)
 
     dataset: DataSet = arguments._dataset
 

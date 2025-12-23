@@ -16,7 +16,7 @@ def main():
     assert sim_json.exists(), f'Missing simulated JSON: {sim_json}'
 
     # FileCache roots
-    fc = FileCache('backplane_results')
+    fc = FileCache()
     results_root = fc.new_path('/tmp/nav_backplanes_results')
     metadata_root = fc.new_path('/tmp/nav_backplanes_metadata')
 

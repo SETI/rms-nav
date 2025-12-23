@@ -54,7 +54,7 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     global DATASET_NAME
 
     if len(command_list) < 1:
-        print('Usage: python nav_main_offset.py <dataset_name> [args]')
+        print('Usage: nav_main_offset <dataset_name> [args]')
         sys.exit(1)
 
     DATASET_NAME = command_list[0].lower()
@@ -62,7 +62,7 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     if DATASET_NAME not in dataset_names():
         print(f'Unknown dataset "{DATASET_NAME}"')
         print(f'Valid datasets are: {", ".join(dataset_names())}')
-        print('Usage: python nav_main_offset.py <dataset_name> [args]')
+        print('Usage: nav_main_offset <dataset_name> [args]')
         sys.exit(1)
 
     try:
@@ -70,7 +70,7 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     except KeyError:
         print(f'Unknown dataset "{DATASET_NAME}"')
         print(f'Valid datasets are: {", ".join(dataset_names())}')
-        print('Usage: python nav_main_offset.py <dataset_name> [args]')
+        print('Usage: nav_main_offset <dataset_name> [args]')
         sys.exit(1)
 
     cmdparser = argparse.ArgumentParser(
@@ -188,7 +188,7 @@ def main() -> None:
         raise ValueError('One of --nav-results-root, the configuration variable '
                          '"nav_results_root" or the NAV_RESULTS_ROOT environment variable must be '
                          'set')
-    nav_results_root = FileCache('nav_results').new_path(nav_results_root_str)
+    nav_results_root = FileCache().new_path(nav_results_root_str)
 
     # main_log_path = arguments.main_logfile
     # main_log_path_local = main_log_path

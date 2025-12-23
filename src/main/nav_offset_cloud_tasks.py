@@ -74,25 +74,36 @@ def process_task(
     if nav_results_root_str is None:
         nav_results_root_str = os.getenv('NAV_RESULTS_ROOT')
     if nav_results_root_str is None:
-        return False, (f'{task_id}: One of --nav-results-root, the configuration variable '
-                       '"nav_results_root" or the NAV_RESULTS_ROOT environment variable must be '
-                       'set')
-    nav_results_root = FileCache('nav_results').new_path(nav_results_root_str)
+        return False, {
+            'status': 'error',
+            'status_error': 'no_nav_root'
+        }
+    nav_results_root = FileCache().new_path(nav_results_root_str)
 
     nav_models = task_data.get('arguments', {}).get('nav_models', None)
     nav_techniques = task_data.get('arguments', {}).get('nav_techniques', None)
     dataset_name = task_data.get('dataset_name', None)
     if dataset_name is None:
-        return False, f'{task_id}: "dataset_name" field is required'
+        return False, {
+            'status': 'error',
+            'status_error': 'no_dataset_name'
+        }
     try:
         inst_name = dataset_name_to_inst_name(dataset_name)
     except KeyError:
-        return False, f'{task_id}: Unknown dataset "{dataset_name}"'
+        return False, {
+            'status': 'error',
+            'status_error': 'unknown_dataset',
+            'status_exception': f'Unknown dataset "{dataset_name}"'
+        }
 
     obs_class = inst_name_to_obs_class(inst_name)
     files = task_data.get('files', None)
     if files is None:
-        return False, f'{task_id}: "files" field is required'
+        return False, {
+            'status': 'error',
+            'status_error': 'no_files'
+        }
 
     image_files = []
     for file in files:
@@ -102,11 +113,20 @@ def process_task(
         index_file_row = file.get('index_file_row', None)
         extra_params = file.get('extra_params', {})
         if image_file_url is None:
-            return False, f'{task_id}: "image_file_url" field is required'
+            return False, {
+                'status': 'error',
+                'status_error': 'no_image_file_url'
+            }
         if label_file_url is None:
-            return False, f'{task_id}: "label_file_url" field is required'
+            return False, {
+                'status': 'error',
+                'status_error': 'no_label_file_url'
+            }
         if results_path_stub is None:
-            return False, f'{task_id}: "results_path_stub" field is required'
+            return False, {
+                'status': 'error',
+                'status_error': 'no_results_path_stub'
+            }
         image_file = ImageFile(
             image_file_url=FCPath(image_file_url),
             label_file_url=FCPath(label_file_url),

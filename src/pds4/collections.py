@@ -14,19 +14,15 @@ def generate_collection_files(
     bundle_results_root: FCPath,
     dataset: DataSet,
     logger: PdsLogger,
-) -> dict[str, Any]:
+) -> None:
     """Generate collection CSV and label files for the bundle.
 
     Parameters:
-        bundle_results_root: Root directory of the bundle.
+        bundle_results_root: Root directory of the bundle. The bundle data directory
+            will be scanned for all backplane label files.
         dataset: The dataset instance for bundle-specific methods.
         logger: Logger for diagnostic messages.
-
-    Returns:
-        Metadata dictionary with 'num_products' key.
     """
-
-    pdstemplate.PdsTemplate.set_logger(logger)
 
     bundle_name = dataset.pds4_bundle_name()
     template_dir = dataset.pds4_bundle_template_dir()
@@ -35,13 +31,12 @@ def generate_collection_files(
     # Scan for all label files in data directory
     data_dir = bundle_root / 'data'
     label_files: list[FCPath] = []
-    lidvids: list[str] = []
 
     if not data_dir.exists():
         raise FileNotFoundError(f'Data directory does not exist: {data_dir}')
 
     # Recursively scan for .lblx files
-    for label_file in data_dir.rglob('*.lblx'):
+    for label_file in data_dir.rglob('*_backplanes.lblx'):
         label_files.append(label_file)
 
     # Sort by image name (extracted from filename)
@@ -56,26 +51,21 @@ def generate_collection_files(
     label_files.sort(key=get_image_name_from_label)
     logger.info('Found %d label files in bundle', len(label_files))
 
-    # Extract LIDVIDs from label files (this would need to parse XML or
-    # read from metadata - for now, generate placeholder)
-    # TODO: Parse actual LIDVIDs from label files
-    for label_file in label_files:
-        # TODO Placeholder: would need to parse XML to get actual LIDVID
-        lidvids.append(f'urn:nasa:pds:{bundle_name}:data:placeholder::1.0')
-
-    # Generate collection_data.csv
-    collection_data_csv = bundle_root / 'data' / 'collection_data.csv'
+    # Generate collection_data.tab
+    collection_data_csv = bundle_root / 'data' / 'collection_data.tab'
     collection_data_local = cast(Path, collection_data_csv.get_local_path())
     collection_data_local.parent.mkdir(parents=True, exist_ok=True)
     with collection_data_local.open('w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(['Member Status', 'LIDVID_LID'])
-        for lidvid in lidvids:
+        for label_file in label_files:
+            image_name = label_file.stem.replace('_backplanes.lblx', '')
+            lidvid = dataset.pds4_image_name_to_data_lidvid(image_name)
             writer.writerow(['P', lidvid])
     collection_data_csv.upload()
-    logger.info('Generated collection_data.csv: %s', collection_data_csv)
+    logger.info('Generated "collection_data.tab": %s', collection_data_csv)
 
-    # Generate collection label files using templates
+    # Generate collection label files using template
     template_base = Path(template_dir)
 
     # Collection data label
@@ -93,26 +83,26 @@ def generate_collection_files(
         try:
             template.write(template_vars, str(collection_data_label_local))
         except Exception:
-            logger.exception('Error creating label collection_data.lblx: %s',
+            logger.exception('Error creating label "collection_data.lblx": %s',
                              collection_data_label_local)
             raise
         collection_data_label.upload()
-        logger.info('Generated collection_data.lblx')
+        logger.info('Generated "collection_data.lblx"')
 
-    # Generate collection_browse.csv (must be written before collection_browse.lblx)
-    collection_browse_csv = bundle_root / 'browse' / 'collection_browse.csv'
+    print(label_files)
+    # Generate collection_browse.tab (must be written before collection_browse.lblx)
+    collection_browse_csv = bundle_root / 'browse' / 'collection_browse.tab'
     collection_browse_local = cast(Path, collection_browse_csv.get_local_path())
     collection_browse_local.parent.mkdir(parents=True, exist_ok=True)
     with collection_browse_local.open('w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(['Member Status', 'LIDVID_LID'])
-        # Browse products would be extracted similarly
-        # For now, placeholder
-        for lidvid in lidvids:
-            browse_lidvid = lidvid.replace(':data:', ':browse:')
-            writer.writerow(['P', browse_lidvid])
+        for label_file in label_files:
+            image_name = label_file.stem.replace('_backplanes.lblx', '')
+            lidvid = dataset.pds4_image_name_to_browse_lidvid(image_name)
+            writer.writerow(['P', lidvid])
     collection_browse_csv.upload()
-    logger.info('Generated collection_browse.csv: %s', collection_browse_csv)
+    logger.info('Generated "collection_browse.tab": %s', collection_browse_csv)
 
     # Collection browse label
     collection_browse_template = template_base / 'collection_browse.lblx'
@@ -127,31 +117,27 @@ def generate_collection_files(
         try:
             template.write(template_vars, str(collection_browse_label_local))
         except Exception:
-            logger.exception('Error creating label collection_browse.lblx: %s',
+            logger.exception('Error creating label "collection_browse.lblx": %s',
                              collection_browse_label_local)
             raise
         collection_browse_label.upload()
-        logger.info('Generated collection_browse.lblx')
+        logger.info('Generated "collection_browse.lblx"')
 
-    return {
-        'num_products': len(lidvids),
-    }
+    logger.info('Generated collection files: %d products', len(label_files))
 
 
 def generate_global_index_files(
     bundle_results_root: FCPath,
     dataset: DataSet,
     logger: PdsLogger,
-) -> dict[str, Any]:
+) -> None:
     """Generate global index files for bodies and rings.
 
     Parameters:
-        bundle_results_root: Root directory of the bundle.
+        bundle_results_root: Root directory of the bundle. The bundle data directory
+            will be scanned for all supplemental text files.
         dataset: The dataset instance for bundle-specific methods.
         logger: Logger for diagnostic messages.
-
-    Returns:
-        Metadata dictionary with 'num_body_rows' and 'num_ring_rows' keys.
     """
 
     bundle_name = dataset.pds4_bundle_name()
@@ -184,6 +170,8 @@ def generate_global_index_files(
     body_index_rows: list[dict[str, Any]] = []
     ring_index_rows: list[dict[str, Any]] = []
 
+    pds4_bundle_name = dataset.pds4_bundle_name()
+
     for suppl_file in supplemental_files:
         try:
             suppl_text = suppl_file.read_text()
@@ -198,19 +186,16 @@ def generate_global_index_files(
         rings = backplanes.get('rings', {})
 
         # Derive pds4_path_stub from supplemental file path
-        # Supplemental file is at: bundle_root/data/pds4_path_stub_supplemental.txt
-        # Get relative path from data directory and remove _supplemental.txt suffix
+        # Supplemental file is at: bundle_root/data/<pds4_path_stub>_supplemental.txt
         suppl_relative = suppl_file.relative_to(data_dir)
         pds4_path_stub = str(suppl_relative).replace('_supplemental.txt', '')
-        # Replace path separators with forward slashes for consistency
         pds4_path_stub = pds4_path_stub.replace('\\', '/')
 
-        # Extract LID from metadata or filename
-        # TODO: Parse actual LID from label files
-        lid = f'urn:nasa:pds:{bundle_name}:data:placeholder::1.0'
+        image_name = suppl_file.stem.replace('_supplemental', '')
+        lid = f'{pds4_bundle_name}:data:{image_name}'
         # pds4_path_stub includes path and filename prefix
         # Path relative to data directory
-        path_to_image = f'{pds4_path_stub}_backplanes.fits'
+        path_to_image = f'data/{pds4_path_stub}_backplanes.lblx'
 
         # Body index: one line per image per body
         for body_name, body_data in bodies.items():
@@ -245,9 +230,8 @@ def generate_global_index_files(
     supplemental_dir = bundle_root / 'document' / 'supplemental'
     bodies_tab = supplemental_dir / 'global_index_bodies.tab'
     bodies_tab_local = cast(Path, bodies_tab.get_local_path())
-    bodies_tab_local.parent.mkdir(parents=True, exist_ok=True)
     with bodies_tab_local.open('w', newline='') as f:
-        writer = csv.writer(f, delimiter='\t')
+        writer = csv.writer(f)
         # Build header: LID, body_name, path_to_image_file, then min/max for each backplane type
         header = ['LID', 'body_name', 'path_to_image_file']
         for bp_type in body_backplane_types:
@@ -258,8 +242,15 @@ def generate_global_index_files(
         for row in body_index_rows:
             row_data = [row['LID'], row['body_name'], row['path_to_image_file']]
             for bp_type in body_backplane_types:
-                row_data.append(row.get(f'{bp_type}_min', ''))
-                row_data.append(row.get(f'{bp_type}_max', ''))
+                # TODO Need an appropriate sentinel value for missing data
+                min_val = row.get(f'{bp_type}_min', '')
+                max_val = row.get(f'{bp_type}_max', '')
+                if isinstance(min_val, (int, float)):
+                    min_val = f'{min_val:.5f}'
+                if isinstance(max_val, (int, float)):
+                    max_val = f'{max_val:.5f}'
+                row_data.append(min_val)
+                row_data.append(max_val)
             writer.writerow(row_data)
     bodies_tab.upload()
     logger.info('Generated global_index_bodies.tab with %d rows', len(body_index_rows))
@@ -269,9 +260,10 @@ def generate_global_index_files(
     rings_tab_local = cast(Path, rings_tab.get_local_path())
     rings_tab_local.parent.mkdir(parents=True, exist_ok=True)
     with rings_tab_local.open('w', newline='') as f:
-        writer = csv.writer(f, delimiter='\t')
+        writer = csv.writer(f)
         # Build header: LID, path_to_image_file, then min/max for each ring type
         header = ['LID', 'path_to_image_file']
+        # TODO Add planet name to rings table
         for ring_type in ring_backplane_types:
             header.append(f'{ring_type}_min')
             header.append(f'{ring_type}_max')
@@ -280,8 +272,14 @@ def generate_global_index_files(
         for row in ring_index_rows:
             row_data = [row['LID'], row['path_to_image_file']]
             for ring_type in ring_backplane_types:
-                row_data.append(row.get(f'{ring_type}_min', ''))
-                row_data.append(row.get(f'{ring_type}_max', ''))
+                min_val = row.get(f'{ring_type}_min', '')
+                max_val = row.get(f'{ring_type}_max', '')
+                if isinstance(min_val, (int, float)):
+                    min_val = f'{min_val:.5f}'
+                if isinstance(max_val, (int, float)):
+                    max_val = f'{max_val:.5f}'
+                row_data.append(min_val)
+                row_data.append(max_val)
             writer.writerow(row_data)
     rings_tab.upload()
     logger.info('Generated global_index_rings.tab with %d rows', len(ring_index_rows))
@@ -320,7 +318,5 @@ def generate_global_index_files(
         rings_label.upload()
         logger.info('Generated global_index_rings.lblx')
 
-    return {
-        'num_body_rows': len(body_index_rows),
-        'num_ring_rows': len(ring_index_rows),
-    }
+    logger.info('Generated global index files: %d body rows, %d ring rows',
+                len(body_index_rows), len(ring_index_rows))

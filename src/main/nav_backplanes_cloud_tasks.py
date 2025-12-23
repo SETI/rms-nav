@@ -45,7 +45,6 @@ def process_task(
     # Derive roots
     nav_results_root_str = arguments.nav_results_root
     if nav_results_root_str is None:
-        # Allow config override if present
         try:
             nav_results_root_str = DEFAULT_CONFIG.environment.nav_results_root
         except AttributeError:
@@ -53,10 +52,11 @@ def process_task(
     if nav_results_root_str is None:
         nav_results_root_str = os.getenv('NAV_RESULTS_ROOT')
     if nav_results_root_str is None:
-        raise ValueError('One of --nav-results-root, the configuration variable '
-                         '"nav_results_root" or the NAV_RESULTS_ROOT environment variable must be '
-                         'set')
-    nav_results_root = FileCache('nav_results').new_path(nav_results_root_str)
+        return False, {
+            'status': 'error',
+            'status_error': 'no_nav_root'
+        }
+    nav_results_root = FileCache().new_path(nav_results_root_str)
 
     backplane_results_root_str = arguments.backplane_results_root
     if backplane_results_root_str is None:
@@ -67,22 +67,33 @@ def process_task(
     if backplane_results_root_str is None:
         backplane_results_root_str = os.getenv('BACKPLANE_RESULTS_ROOT')
     if backplane_results_root_str is None:
-        return False, ('One of --backplane-results-root, the configuration variable '
-                       '"backplane_results_root" or the BACKPLANE_RESULTS_ROOT environment '
-                       'variable must be set')
-    backplane_results_root = FileCache('backplane_results').new_path(backplane_results_root_str)
+        return False, {
+            'status': 'error',
+            'status_error': 'no_backplane_root'
+        }
+    backplane_results_root = FileCache().new_path(backplane_results_root_str)
 
     dataset_name = task_data.get('dataset_name', None)
     if dataset_name is None:
-        return False, f'{task_id}: "dataset_name" field is required'
+        return False, {
+            'status': 'error',
+            'status_error': 'no_dataset_name'
+        }
     try:
         inst_name = dataset_name_to_inst_name(dataset_name)
     except KeyError:
-        return False, f'{task_id}: Unknown dataset "{dataset_name}"'
+        return False, {
+            'status': 'error',
+            'status_error': 'unknown_dataset',
+            'status_exception': f'Unknown dataset "{dataset_name}"'
+        }
     obs_class = inst_name_to_obs_class(inst_name)
     files = task_data.get('files', None)
     if files is None:
-        return False, f'{task_id}: "files" field is required'
+        return False, {
+            'status': 'error',
+            'status_error': 'no_files'
+        }
     image_files = []
     for file in files:
         image_file_url = file.get('image_file_url', None)
@@ -90,11 +101,20 @@ def process_task(
         results_path_stub = file.get('results_path_stub', None)
         index_file_row = file.get('index_file_row', None)
         if image_file_url is None:
-            return False, f'{task_id}: "image_file_url" field is required'
+            return False, {
+                'status': 'error',
+                'status_error': 'no_image_file_url'
+            }
         if label_file_url is None:
-            return False, f'{task_id}: "label_file_url" field is required'
+            return False, {
+                'status': 'error',
+                'status_error': 'no_label_file_url'
+            }
         if results_path_stub is None:
-            return False, f'{task_id}: "results_path_stub" field is required'
+            return False, {
+                'status': 'error',
+                'status_error': 'no_results_path_stub'
+            }
         image_file = ImageFile(
             image_file_url=FCPath(image_file_url),
             label_file_url=FCPath(label_file_url),
@@ -103,7 +123,7 @@ def process_task(
         )
         image_files.append(image_file)
 
-    _, metadata = generate_backplanes_image_files(
+    generate_backplanes_image_files(
         obs_class,
         ImageFiles(image_files=image_files),
         nav_results_root=nav_results_root,
@@ -111,7 +131,7 @@ def process_task(
         write_output_files=True
     )
 
-    return False, metadata  # No retry under any circumstances
+    return False, None  # No retry under any circumstances
 
 
 async def main() -> None:

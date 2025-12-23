@@ -40,7 +40,7 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     global DATASET_NAME
 
     if len(command_list) < 1:
-        print('Usage: python nav_main_backplanes.py <dataset_name> [args]')
+        print('Usage: nav_main_backplanes <dataset_name> [args]')
         sys.exit(1)
 
     DATASET_NAME = command_list[0].lower()
@@ -48,7 +48,7 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     if DATASET_NAME not in dataset_names():
         print(f'Unknown dataset "{DATASET_NAME}"')
         print(f'Valid datasets are: {", ".join(dataset_names())}')
-        print('Usage: python nav_main_backplanes.py <dataset_name> [args]')
+        print('Usage: nav_main_backplanes <dataset_name> [args]')
         sys.exit(1)
 
     try:
@@ -56,7 +56,7 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     except KeyError:
         print(f'Unknown dataset "{DATASET_NAME}"')
         print(f'Valid datasets are: {", ".join(dataset_names())}')
-        print('Usage: python nav_main_backplanes.py <dataset_name> [args]')
+        print('Usage: nav_main_backplanes <dataset_name> [args]')
         sys.exit(1)
 
     cmdparser = argparse.ArgumentParser(
@@ -122,7 +122,6 @@ def main() -> None:
     # Derive roots
     nav_results_root_str = arguments.nav_results_root
     if nav_results_root_str is None:
-        # Allow config override if present
         try:
             nav_results_root_str = DEFAULT_CONFIG.environment.nav_results_root
         except AttributeError:
@@ -131,9 +130,9 @@ def main() -> None:
         nav_results_root_str = os.getenv('NAV_RESULTS_ROOT')
     if nav_results_root_str is None:
         raise ValueError('One of --nav-results-root, the configuration variable '
-                         '"nav_results_root" or the NAV_RESULTS_ROOT environment variable must be '
+                         '"nav_results_root", or the NAV_RESULTS_ROOT environment variable must be '
                          'set')
-    nav_results_root = FileCache('nav_results').new_path(nav_results_root_str)
+    nav_results_root = FileCache().new_path(nav_results_root_str)
 
     backplane_results_root_str = arguments.backplane_results_root
     if backplane_results_root_str is None:
@@ -145,12 +144,20 @@ def main() -> None:
         backplane_results_root_str = os.getenv('BACKPLANE_RESULTS_ROOT')
     if backplane_results_root_str is None:
         raise ValueError('One of --backplane-results-root, the configuration variable '
-                         '"backplane_results_root" or the BACKPLANE_RESULTS_ROOT environment '
+                         '"backplane_results_root", or the BACKPLANE_RESULTS_ROOT environment '
                          'variable must be set')
-    backplane_results_root = FileCache('backplane_results').new_path(backplane_results_root_str)
+    backplane_results_root = FileCache().new_path(backplane_results_root_str)
 
     global MAIN_LOGGER
     MAIN_LOGGER = DEFAULT_LOGGER
+
+    MAIN_LOGGER.info('Starting backplanes generation')
+    MAIN_LOGGER.info('Dataset: %s', DATASET_NAME)
+    MAIN_LOGGER.info('Nav results root: %s', nav_results_root.as_posix())
+    MAIN_LOGGER.info('Backplane results root: %s', backplane_results_root.as_posix())
+    MAIN_LOGGER.info('Dry run: %s', arguments.dry_run)
+    MAIN_LOGGER.info('No write output files: %s', arguments.no_write_output_files)
+    MAIN_LOGGER.info('Arguments: %s', command_list)
 
     assert DATASET is not None
     inst_name = dataset_name_to_inst_name(cast(str, DATASET_NAME))
@@ -163,17 +170,19 @@ def main() -> None:
                              imagefiles.image_files[0].label_file_url.as_posix())
             continue
 
-        ok, metadata = generate_backplanes_image_files(
-            obs_class,
-            imagefiles,
-            nav_results_root=nav_results_root,
-            backplane_results_root=backplane_results_root,
-            write_output_files=not arguments.no_write_output_files
-        )
-        if not ok:
-            MAIN_LOGGER.info('Skipped: %s (%s)',
-                             imagefiles.image_files[0].label_file_url.as_posix(),
-                             metadata.get('status_error', ''))
+        try:
+            generate_backplanes_image_files(
+                obs_class,
+                imagefiles,
+                nav_results_root=nav_results_root,
+                backplane_results_root=backplane_results_root,
+                write_output_files=not arguments.no_write_output_files
+            )
+        except FileNotFoundError as e:
+            MAIN_LOGGER.error('Skipped due to missing metadata: %s (%s)',
+                              imagefiles.image_files[0].label_file_url.as_posix(),
+                              str(e))
+            continue
 
 
 if __name__ == '__main__':

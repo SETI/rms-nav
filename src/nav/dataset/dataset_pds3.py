@@ -56,7 +56,7 @@ class DataSetPDS3(DataSet):
 
         if pds3_holdings_filecache is None:
             # This is multiprocess safe
-            self._pds3_holdings_filecache = FileCache('nav_pds3_holdings')
+            self._pds3_holdings_filecache = FileCache()
         else:
             self._pds3_holdings_filecache = pds3_holdings_filecache
 

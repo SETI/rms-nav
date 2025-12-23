@@ -376,11 +376,64 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         Returns:
             Path stub relative to bundle root (e.g., "1234xxxxxx/123456xxxx/1234567890w").
         """
-        image_name = image_file.image_file_name.rsplit('.', 1)[0]
+        image_name = image_file.image_file_name.split('_', 1)[0].split('.', 1)[0]
+        image_lid_part = image_name[1:] + image_name[0].lower()
         bundle_path = self.pds4_bundle_path_for_image(image_name)
         if bundle_path:
-            return f'{bundle_path.rstrip("/")}/{image_name}'
-        return image_name
+            return f'{bundle_path.rstrip("/")}/{image_lid_part}'
+        return image_lid_part
+
+    def pds4_image_name_to_browse_lid(self, image_name: str) -> str:
+        """Returns the browse LID for the given image name.
+
+        Parameters:
+            image_name: The image name to convert to a browse LID.
+
+        Returns:
+            The browse LID.
+        """
+        image_name = image_name.split('_', 1)[0].split('.', 1)[0]
+        image_lid_part = image_name[1:] + image_name[0].lower()
+        return f'urn:nasa:pds:{self.pds4_bundle_name()}:browse:{image_lid_part}'
+
+    def pds4_image_name_to_browse_lidvid(self, image_name: str) -> str:
+        """Returns the browse LID for the given image name.
+
+        Parameters:
+            image_name: The image name to convert to a browse LID.
+
+        Returns:
+            The browse LID.
+        """
+        image_name = image_name.split('_', 1)[0].split('.', 1)[0]
+        image_lid_part = image_name[1:] + image_name[0].lower()
+        return f'urn:nasa:pds:{self.pds4_bundle_name()}:browse:{image_lid_part}::1.0'
+
+    def pds4_image_name_to_data_lid(self, image_name: str) -> str:
+        """Returns the data LID for the given image name.
+
+        Parameters:
+            image_name: The image name to convert to a data LID.
+
+        Returns:
+            The data LID.
+        """
+        image_name = image_name.split('_', 1)[0].split('.', 1)[0]
+        image_lid_part = image_name[1:] + image_name[0].lower()
+        return f'urn:nasa:pds:{self.pds4_bundle_name()}:data:{image_lid_part}'
+
+    def pds4_image_name_to_data_lidvid(self, image_name: str) -> str:
+        """Returns the data LID for the given image name.
+
+        Parameters:
+            image_name: The image name to convert to a data LID.
+
+        Returns:
+            The data LID.
+        """
+        image_name = image_name.split('_', 1)[0].split('.', 1)[0]
+        image_lid_part = image_name[1:] + image_name[0].lower()
+        return f'urn:nasa:pds:{self.pds4_bundle_name()}:data:{image_lid_part}::1.0'
 
     def pds4_template_variables(
         self,
@@ -401,6 +454,44 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
             substitution.
         """
         vars_dict: dict[str, Any] = {}
+
+        # Camera information from image name
+        img_name = image_file.image_file_name.upper()
+        if img_name.startswith('N'):
+            vars_dict['CAMERA_WIDTH'] = 'Narrow'
+            vars_dict['CAMERA_WN_UC'] = 'N'
+            vars_dict['CAMERA_WN_LC'] = 'n'
+        elif img_name.startswith('W'):
+            vars_dict['CAMERA_WIDTH'] = 'Wide'
+            vars_dict['CAMERA_WN_UC'] = 'W'
+            vars_dict['CAMERA_WN_LC'] = 'w'
+        else:
+            vars_dict['CAMERA_WIDTH'] = 'Unknown'
+            vars_dict['CAMERA_WN_UC'] = ''
+            vars_dict['CAMERA_WN_LC'] = ''
+
+        # Time information from navigation metadata
+        if 'observation' in nav_metadata:
+            obs = nav_metadata['observation']
+            vars_dict['START_DATE_TIME'] = obs.get('start_time', '')
+            vars_dict['STOP_DATE_TIME'] = obs.get('stop_time', '')
+            vars_dict['IMAGE_MID_TIME'] = obs.get('mid_time', '')
+
+        # Placeholder values for required template variables
+        pds4_bundle_name = self.pds4_bundle_name()
+        image_name = image_file.image_file_name.split('_', 1)[0].split('.', 1)[0]
+        image_lid_part = image_name[1:] + image_name[0].lower()
+        vars_dict['BUNDLE_LID'] = f'urn:nasa:pds:{pds4_bundle_name}'
+        vars_dict['BUNDLE_LIDVID'] = f'urn:nasa:pds:{pds4_bundle_name}::1.0'
+        vars_dict['BROWSE_LID'] = f'urn:nasa:pds:{pds4_bundle_name}:browse:{image_lid_part}'
+        vars_dict['BROWSE_LIDVID'] = f'urn:nasa:pds:{pds4_bundle_name}:browse:{image_lid_part}::1.0'
+        vars_dict['DATA_LID'] = f'urn:nasa:pds:{pds4_bundle_name}:data:{image_lid_part}'
+        vars_dict['DATA_LIDVID'] = f'urn:nasa:pds:{pds4_bundle_name}:data:{image_lid_part}::1.0'
+        vars_dict['TITLE'] = f'Backplanes for {image_file.image_file_name}'
+        vars_dict['DESCRIPTION'] = f'Backplanes for navigated image {image_file.image_file_name}'
+        vars_dict['COMMENT'] = 'Generated from navigated image data'
+        # TODO Placeholder LIDVID
+        vars_dict['SOURCE_IMAGE_LIDVID'] = 'urn:nasa:pds:cassini_iss_saturn:data:placeholder::1.0'
 
         # Extract from index_file_row if available
         index_row = image_file.index_file_row
@@ -502,36 +593,6 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
                 'VALID_MAXIMUM_FULL_WELL', '-1')
             vars_dict['cassini:valid_maximum_DN_sat'] = index_row.get(
                 'VALID_MAXIMUM_DN_SAT', '-1')
-
-        # Camera information from image name
-        img_name = image_file.image_file_name.upper()
-        if img_name.startswith('N'):
-            vars_dict['CAMERA_WIDTH'] = 'Narrow'
-            vars_dict['CAMERA_WN_UC'] = 'N'
-            vars_dict['CAMERA_WN_LC'] = 'n'
-        elif img_name.startswith('W'):
-            vars_dict['CAMERA_WIDTH'] = 'Wide'
-            vars_dict['CAMERA_WN_UC'] = 'W'
-            vars_dict['CAMERA_WN_LC'] = 'w'
-        else:
-            vars_dict['CAMERA_WIDTH'] = 'Unknown'
-            vars_dict['CAMERA_WN_UC'] = ''
-            vars_dict['CAMERA_WN_LC'] = ''
-
-        # Time information from navigation metadata
-        if 'observation' in nav_metadata:
-            obs = nav_metadata['observation']
-            vars_dict['START_DATE_TIME'] = obs.get('start_time', '')
-            vars_dict['STOP_DATE_TIME'] = obs.get('stop_time', '')
-            vars_dict['IMAGE_MID_TIME'] = obs.get('mid_time', '')
-
-        # Placeholder values for required template variables
-        vars_dict['LID'] = f'urn:nasa:pds:{self.pds4_bundle_name()}'
-        vars_dict['TITLE'] = f'Backplanes for {image_file.image_file_name}'
-        vars_dict['DESCRIPTION'] = f'Backplanes for navigated image {image_file.image_file_name}'
-        vars_dict['COMMENT'] = 'Generated from navigated image data'
-        # TODO Placeholder LIDVID
-        vars_dict['SOURCE_IMAGE_LIDVID'] = 'urn:nasa:pds:cassini_iss_saturn:data:placeholder::1.0'
 
         return vars_dict
 

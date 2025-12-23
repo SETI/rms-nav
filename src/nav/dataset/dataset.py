@@ -204,6 +204,58 @@ class DataSet(ABC, NavBase):
         # a DataSet that doesn't support PDS4 bundle generation
         raise NotImplementedError
 
+    def pds4_image_name_to_browse_lid(self, image_name: str) -> str:
+        """Returns the browse LID for the given image name.
+
+        Parameters:
+            image_name: The image name to convert to a browse LID.
+
+        Returns:
+            The browse LID.
+        """
+        # We don't make PDS4 methods as @abstractmethod because it's possible to make
+        # a DataSet that doesn't support PDS4 bundle generation
+        raise NotImplementedError
+
+    def pds4_image_name_to_browse_lidvid(self, image_name: str) -> str:
+        """Returns the browse LID for the given image name.
+
+        Parameters:
+            image_name: The image name to convert to a browse LID.
+
+        Returns:
+            The browse LID.
+        """
+        # We don't make PDS4 methods as @abstractmethod because it's possible to make
+        # a DataSet that doesn't support PDS4 bundle generation
+        raise NotImplementedError
+
+    def pds4_image_name_to_data_lid(self, image_name: str) -> str:
+        """Returns the data LID for the given image name.
+
+        Parameters:
+            image_name: The image name to convert to a data LID.
+
+        Returns:
+            The data LID.
+        """
+        # We don't make PDS4 methods as @abstractmethod because it's possible to make
+        # a DataSet that doesn't support PDS4 bundle generation
+        raise NotImplementedError
+
+    def pds4_image_name_to_data_lidvid(self, image_name: str) -> str:
+        """Returns the data LID for the given image name.
+
+        Parameters:
+            image_name: The image name to convert to a data LID.
+
+        Returns:
+            The data LID.
+        """
+        # We don't make PDS4 methods as @abstractmethod because it's possible to make
+        # a DataSet that doesn't support PDS4 bundle generation
+        raise NotImplementedError
+
     def pds4_template_variables(
         self,
         *,

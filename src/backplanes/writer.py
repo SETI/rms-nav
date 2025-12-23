@@ -18,7 +18,7 @@ def write_fits(
     master_by_type: dict[str, np.ndarray],
     body_id_map: np.ndarray,
     config: Config,
-    bodies_result: dict[str, Any] | None = None,
+    bodies_result: dict[str, Any],
     rings_result: dict[str, Any] | None = None,
     logger: PdsLogger = DEFAULT_LOGGER,
 ) -> None:
@@ -92,33 +92,32 @@ def write_fits(
         logger.debug('Could not get inventory data: %s', e)
 
     # Extract body statistics and inventory information per body
-    if bodies_result and 'per_body' in bodies_result:
-        for body_name, body_data in bodies_result['per_body'].items():
-            body_entry: dict[str, Any] = {}
-            if 'statistics' in body_data:
-                body_entry['backplanes'] = body_data['statistics']
+    for body_name, body_data in bodies_result.items():
+        body_entry: dict[str, Any] = {}
+        if 'statistics' in body_data:
+            body_entry['backplanes'] = body_data['statistics']
 
-            # Add inventory information for this body
-            if body_name in inv:
-                inv_data = inv[body_name]
-                # center_uv is [u, v] but we need [v, u]
-                center_uv = inv_data.get('center_uv', None)
-                if center_uv is not None:
-                    body_entry['center_uv'] = [
-                        float(center_uv[1]), float(center_uv[0])]
-                # center_range from range
-                center_range = inv_data.get('range', None)
-                if center_range is not None:
-                    body_entry['center_range'] = float(center_range)
-                # size_uv from u_pixel_size and v_pixel_size
-                u_pixel_size = inv_data.get('u_pixel_size', None)
-                v_pixel_size = inv_data.get('v_pixel_size', None)
-                if u_pixel_size is not None and v_pixel_size is not None:
-                    body_entry['size_uv'] = [
-                        float(u_pixel_size), float(v_pixel_size)]
+        # Add inventory information for this body
+        if body_name in inv:
+            inv_data = inv[body_name]
+            # center_uv is [u, v] but we need [v, u]
+            center_uv = inv_data.get('center_uv', None)
+            if center_uv is not None:
+                body_entry['center_uv'] = [
+                    float(center_uv[1]), float(center_uv[0])]
+            # center_range from range
+            center_range = inv_data.get('range', None)
+            if center_range is not None:
+                body_entry['center_range'] = float(center_range)
+            # size_uv from u_pixel_size and v_pixel_size
+            u_pixel_size = inv_data.get('u_pixel_size', None)
+            v_pixel_size = inv_data.get('v_pixel_size', None)
+            if u_pixel_size is not None and v_pixel_size is not None:
+                body_entry['size_uv'] = [
+                    float(u_pixel_size), float(v_pixel_size)]
 
-            if body_entry:
-                backplane_metadata['bodies'][body_name] = body_entry
+        if body_entry:
+            backplane_metadata['bodies'][body_name] = body_entry
 
     # Extract ring statistics
     if rings_result and 'statistics' in rings_result:
