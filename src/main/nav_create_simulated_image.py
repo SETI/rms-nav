@@ -269,6 +269,24 @@ class CreateSimulatedBodyModel(QMainWindow):
         self._closest_planet_combo.currentTextChanged.connect(self._on_closest_planet)
         gen_layout.addRow('Closest planet:', self._closest_planet_combo)
 
+        # Time (TDB seconds)
+        self._time_spin = QDoubleSpinBox()
+        self._time_spin.setRange(-1e10, 1e10)
+        self._time_spin.setDecimals(1)
+        self._time_spin.setValue(self.sim_params.get('time', 0.0))
+        self._time_spin.setToolTip('Current time in TDB seconds for ring calculations')
+        self._time_spin.valueChanged.connect(self._on_time)
+        gen_layout.addRow('Time (TDB sec):', self._time_spin)
+
+        # Epoch (TDB seconds)
+        self._epoch_spin = QDoubleSpinBox()
+        self._epoch_spin.setRange(-1e10, 1e10)
+        self._epoch_spin.setDecimals(1)
+        self._epoch_spin.setValue(self.sim_params.get('epoch', 0.0))
+        self._epoch_spin.setToolTip('Epoch time in TDB seconds for ring mode calculations')
+        self._epoch_spin.valueChanged.connect(self._on_epoch)
+        gen_layout.addRow('Epoch (TDB sec):', self._epoch_spin)
+
         # Background noise slider with min/max labels and spinbox
         noise_row = QHBoxLayout()
         noise_row.setSpacing(4)
@@ -595,6 +613,14 @@ class CreateSimulatedBodyModel(QMainWindow):
             self.sim_params['closest_planet'] = text.strip().upper()
         else:
             self.sim_params['closest_planet'] = None
+        self._updater.request_update()
+
+    def _on_time(self, value: float) -> None:
+        self.sim_params['time'] = value
+        self._updater.request_update()
+
+    def _on_epoch(self, value: float) -> None:
+        self.sim_params['epoch'] = value
         self._updater.request_update()
 
     def _on_background_noise_slider(self, value: int) -> None:
@@ -2128,6 +2154,9 @@ class CreateSimulatedBodyModel(QMainWindow):
                 self._offset_v_spin.setValue(self.sim_params['offset_v'])
                 self._offset_u_spin.setValue(self.sim_params['offset_u'])
                 self._random_seed_spin.setValue(self.sim_params['random_seed'])
+                # Update time and epoch
+                self._time_spin.setValue(self.sim_params.get('time', 0.0))
+                self._epoch_spin.setValue(self.sim_params.get('epoch', 0.0))
                 # Update closest planet
                 closest_planet = self.sim_params.get('closest_planet', '')
                 if closest_planet:
