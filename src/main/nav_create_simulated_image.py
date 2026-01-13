@@ -19,6 +19,7 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import (
     QApplication,
+    QComboBox,
     QMainWindow,
     QWidget,
     QVBoxLayout,
@@ -117,8 +118,11 @@ class CreateSimulatedBodyModel(QMainWindow):
             'background_stars_num': 0,
             'background_stars_psf_sigma': 0.9,
             'background_stars_distribution_exponent': 2.5,
+            'time': 0.0,
+            'epoch': 0.0,
             'stars': [],
             'bodies': [],
+            'rings': [],
         }
 
         # Render cache/meta
@@ -250,6 +254,20 @@ class CreateSimulatedBodyModel(QMainWindow):
         self._random_seed_spin.setValue(self.sim_params['random_seed'])
         self._random_seed_spin.valueChanged.connect(self._on_random_seed)
         gen_layout.addRow('Random seed:', self._random_seed_spin)
+
+        # Closest planet (for ring models)
+        self._closest_planet_combo = QComboBox()
+        self._closest_planet_combo.setEditable(True)
+        self._closest_planet_combo.addItems(['', 'SATURN', 'JUPITER', 'URANUS', 'NEPTUNE'])
+        closest_planet = self.sim_params.get('closest_planet', '')
+        if closest_planet:
+            index = self._closest_planet_combo.findText(closest_planet)
+            if index >= 0:
+                self._closest_planet_combo.setCurrentIndex(index)
+            else:
+                self._closest_planet_combo.setCurrentText(closest_planet)
+        self._closest_planet_combo.currentTextChanged.connect(self._on_closest_planet)
+        gen_layout.addRow('Closest planet:', self._closest_planet_combo)
 
         # Background noise slider with min/max labels and spinbox
         noise_row = QHBoxLayout()
@@ -571,6 +589,14 @@ class CreateSimulatedBodyModel(QMainWindow):
         self.sim_params['random_seed'] = value
         self._updater.request_update()
 
+    def _on_closest_planet(self, text: str) -> None:
+        # Store as None if empty, otherwise store the text (uppercase)
+        if text.strip():
+            self.sim_params['closest_planet'] = text.strip().upper()
+        else:
+            self.sim_params['closest_planet'] = None
+        self._updater.request_update()
+
     def _on_background_noise_slider(self, value: int) -> None:
         noise_val = value / 1000.0
         self._background_noise_spin.blockSignals(True)
@@ -744,6 +770,7 @@ class CreateSimulatedBodyModel(QMainWindow):
         msg.setText('Add what type of model?')
         body_btn = msg.addButton('Body', QMessageBox.ButtonRole.AcceptRole)
         star_btn = msg.addButton('Star', QMessageBox.ButtonRole.AcceptRole)
+        ring_btn = msg.addButton('Ring', QMessageBox.ButtonRole.AcceptRole)
         msg.addButton('Cancel', QMessageBox.ButtonRole.RejectRole)
         msg.exec()
         clicked = msg.clickedButton()
@@ -753,13 +780,16 @@ class CreateSimulatedBodyModel(QMainWindow):
         elif clicked == star_btn:
             self._add_star_tab()
             return True
+        elif clicked == ring_btn:
+            self._add_ring_tab()
+            return True
         else:
             return False
 
     def _find_unique_name(self, base_name: str) -> str:
         """Find a unique name by incrementing the number suffix if needed.
 
-        Checks both bodies and stars to ensure the name is unique.
+        Checks bodies, stars, and rings to ensure the name is unique.
         """
         # Collect all existing names (case-insensitive)
         existing_names = set()
@@ -767,6 +797,8 @@ class CreateSimulatedBodyModel(QMainWindow):
             existing_names.add(body.get('name', '').lower())
         for star in self.sim_params.get('stars', []):
             existing_names.add(star.get('name', '').lower())
+        for ring in self.sim_params.get('rings', []):
+            existing_names.add(ring.get('name', '').lower())
 
         # Try the base name first
         if base_name.lower() not in existing_names:
@@ -851,6 +883,44 @@ class CreateSimulatedBodyModel(QMainWindow):
             self._tabs.setCurrentIndex(tab_idx)
         self._updater.request_update()
 
+    def _add_ring_tab(self, params: Optional[dict[str, Any]] = None) -> None:
+        if params is None:
+            default_name = f'Ring{len(self.sim_params["rings"])+1}'
+            unique_name = self._find_unique_name(default_name)
+            p = {
+                'name': unique_name,
+                'feature_type': 'RINGLET',
+                'center_v': self.sim_params['size_v'] // 2 + 0.5,
+                'center_u': self.sim_params['size_u'] // 2 + 0.5,
+                'inner_data': [{
+                    'mode': 1,
+                    'a': 100.0,
+                    'rms': 1.0,
+                    'ae': 0.0,
+                    'long_peri': 0.0,
+                    'rate_peri': 0.0,
+                }],
+                'outer_data': [{
+                    'mode': 1,
+                    'a': 120.0,
+                    'rms': 1.0,
+                    'ae': 0.0,
+                    'long_peri': 0.0,
+                    'rate_peri': 0.0,
+                }],
+            }
+        else:
+            p = params
+        idx = len(self.sim_params['rings'])
+        self.sim_params['rings'].append(p)
+        # Rebuild tabs to ensure consistency and proper ordering
+        self._rebuild_dynamic_tabs()
+        # Find and select the newly added tab
+        tab_idx = self._find_tab_by_properties('ring', idx)
+        if tab_idx is not None:
+            self._tabs.setCurrentIndex(tab_idx)
+        self._updater.request_update()
+
     def _find_tab_by_properties(self, kind: str, data_index: int) -> Optional[int]:
         """Find tab index by kind and data_index properties.
 
@@ -907,6 +977,9 @@ class CreateSimulatedBodyModel(QMainWindow):
         elif kind == 'star':
             if 0 <= data_index < len(self.sim_params['stars']):
                 del self.sim_params['stars'][data_index]
+        elif kind == 'ring':
+            if 0 <= data_index < len(self.sim_params['rings']):
+                del self.sim_params['rings'][data_index]
 
         # Block signals before removing tab to prevent unwanted tab change events
         self._tabs.blockSignals(True)
@@ -951,6 +1024,11 @@ class CreateSimulatedBodyModel(QMainWindow):
                             star_name = self.sim_params['stars'][widget_data_index].get(
                                 'name', f'Star{widget_data_index+1}')
                             target_tab_name = star_name
+                    elif widget_kind == 'ring' and widget_data_index is not None:
+                        if 0 <= widget_data_index < len(self.sim_params['rings']):
+                            ring_name = self.sim_params['rings'][widget_data_index].get(
+                                'name', f'Ring{widget_data_index+1}')
+                            target_tab_name = ring_name
 
         # Block signals during rebuild to prevent tab change handler from firing
         self._tabs.blockSignals(True)
@@ -960,7 +1038,7 @@ class CreateSimulatedBodyModel(QMainWindow):
             self._tabs.removeTab(0)
 
         # Re-add in correct order: General first, then bodies (sorted by range),
-        # then stars (sorted by name), then "+"
+        # then rings (sorted by name), then stars (sorted by name), then "+"
         if general_widget is not None:
             self._tabs.addTab(general_widget, 'General')
 
@@ -975,6 +1053,16 @@ class CreateSimulatedBodyModel(QMainWindow):
         for i in body_indices:
             tab = self._build_body_tab(i)
             tab_name = self.sim_params['bodies'][i].get('name', f'Body{i+1}')
+            self._tabs.addTab(tab, tab_name)
+
+        # Add ring tabs (sorted by name)
+        ring_indices = list(range(len(self.sim_params['rings'])))
+        ring_indices.sort(
+            key=lambda i: self.sim_params['rings'][i].get('name', f'Ring{i+1}').lower()
+        )
+        for i in ring_indices:
+            tab = self._build_ring_tab(i)
+            tab_name = self.sim_params['rings'][i].get('name', f'Ring{i+1}')
             self._tabs.addTab(tab, tab_name)
 
         # Add star tabs (sorted by name)
@@ -1390,6 +1478,138 @@ class CreateSimulatedBodyModel(QMainWindow):
 
         return w
 
+    # ---- Build ring tab ----
+    def _build_ring_tab(self, idx: int) -> QWidget:
+        p = self.sim_params['rings'][idx]
+        w = QWidget()
+        w.setProperty('kind', 'ring')
+        w.setProperty('data_index', idx)
+        main_layout = QVBoxLayout(w)
+        fl = QFormLayout()
+        main_layout.addLayout(fl)
+
+        name_edit = QLineEdit(p.get('name', ''))
+        name_edit.textChanged.connect(lambda t, i=idx: self._on_ring_name(i, t))
+        fl.addRow('Name:', name_edit)
+
+        # Feature type (RINGLET or GAP)
+        feature_type_combo = QComboBox()
+        feature_type_combo.addItems(['RINGLET', 'GAP'])
+        feature_type = p.get('feature_type', 'RINGLET')
+        feature_type_combo.setCurrentText(feature_type)
+        feature_type_combo.currentTextChanged.connect(
+            lambda t, i=idx: self._on_ring_field(i, 'feature_type', t)
+        )
+        fl.addRow('Feature type:', feature_type_combo)
+
+        center_v = QDoubleSpinBox()
+        center_v.setRange(0.0, 10000.0)
+        center_v.setDecimals(1)
+        center_v.setValue(p.get('center_v', 0.0))
+        center_v.valueChanged.connect(
+            lambda v, i=idx: self._on_ring_field(i, 'center_v', v)
+        )
+        fl.addRow('Center V:', center_v)
+        center_u = QDoubleSpinBox()
+        center_u.setRange(0.0, 10000.0)
+        center_u.setDecimals(1)
+        center_u.setValue(p.get('center_u', 0.0))
+        center_u.valueChanged.connect(
+            lambda v, i=idx: self._on_ring_field(i, 'center_u', v)
+        )
+        fl.addRow('Center U:', center_u)
+        # Keep references so drag updates can sync the UI
+        w.center_v_spin = center_v  # type: ignore
+        w.center_u_spin = center_u  # type: ignore
+
+        # Inner edge mode 1 parameters
+        inner_data = p.get('inner_data', [])
+        inner_mode1 = next((m for m in inner_data if m.get('mode') == 1), {})
+        fl.addRow(QLabel('<b>Inner Edge (Mode 1)</b>'), QLabel(''))
+        inner_a = QDoubleSpinBox()
+        inner_a.setRange(1.0, 10000.0)
+        inner_a.setDecimals(1)
+        inner_a.setValue(inner_mode1.get('a', 100.0))
+        inner_a.valueChanged.connect(
+            lambda v, i=idx: self._on_ring_inner_mode1(i, 'a', v)
+        )
+        fl.addRow('Inner a:', inner_a)
+        inner_ae = QDoubleSpinBox()
+        inner_ae.setRange(0.0, 1000.0)
+        inner_ae.setDecimals(2)
+        inner_ae.setValue(inner_mode1.get('ae', 0.0))
+        inner_ae.valueChanged.connect(
+            lambda v, i=idx: self._on_ring_inner_mode1(i, 'ae', v)
+        )
+        fl.addRow('Inner ae:', inner_ae)
+        inner_long_peri = QDoubleSpinBox()
+        inner_long_peri.setRange(0.0, 360.0)
+        inner_long_peri.setDecimals(1)
+        inner_long_peri.setSuffix('°')
+        inner_long_peri.setValue(inner_mode1.get('long_peri', 0.0))
+        inner_long_peri.valueChanged.connect(
+            lambda v, i=idx: self._on_ring_inner_mode1(i, 'long_peri', v)
+        )
+        fl.addRow('Inner long_peri:', inner_long_peri)
+        inner_rate_peri = QDoubleSpinBox()
+        inner_rate_peri.setRange(-1000.0, 1000.0)
+        inner_rate_peri.setDecimals(3)
+        inner_rate_peri.setSuffix('°/day')
+        inner_rate_peri.setValue(inner_mode1.get('rate_peri', 0.0))
+        inner_rate_peri.valueChanged.connect(
+            lambda v, i=idx: self._on_ring_inner_mode1(i, 'rate_peri', v)
+        )
+        fl.addRow('Inner rate_peri:', inner_rate_peri)
+
+        # Outer edge mode 1 parameters
+        outer_data = p.get('outer_data', [])
+        outer_mode1 = next((m for m in outer_data if m.get('mode') == 1), {})
+        fl.addRow(QLabel('<b>Outer Edge (Mode 1)</b>'), QLabel(''))
+        outer_a = QDoubleSpinBox()
+        outer_a.setRange(1.0, 10000.0)
+        outer_a.setDecimals(1)
+        outer_a.setValue(outer_mode1.get('a', 120.0))
+        outer_a.valueChanged.connect(
+            lambda v, i=idx: self._on_ring_outer_mode1(i, 'a', v)
+        )
+        fl.addRow('Outer a:', outer_a)
+        outer_ae = QDoubleSpinBox()
+        outer_ae.setRange(0.0, 1000.0)
+        outer_ae.setDecimals(2)
+        outer_ae.setValue(outer_mode1.get('ae', 0.0))
+        outer_ae.valueChanged.connect(
+            lambda v, i=idx: self._on_ring_outer_mode1(i, 'ae', v)
+        )
+        fl.addRow('Outer ae:', outer_ae)
+        outer_long_peri = QDoubleSpinBox()
+        outer_long_peri.setRange(0.0, 360.0)
+        outer_long_peri.setDecimals(1)
+        outer_long_peri.setSuffix('°')
+        outer_long_peri.setValue(outer_mode1.get('long_peri', 0.0))
+        outer_long_peri.valueChanged.connect(
+            lambda v, i=idx: self._on_ring_outer_mode1(i, 'long_peri', v)
+        )
+        fl.addRow('Outer long_peri:', outer_long_peri)
+        outer_rate_peri = QDoubleSpinBox()
+        outer_rate_peri.setRange(-1000.0, 1000.0)
+        outer_rate_peri.setDecimals(3)
+        outer_rate_peri.setSuffix('°/day')
+        outer_rate_peri.setValue(outer_mode1.get('rate_peri', 0.0))
+        outer_rate_peri.valueChanged.connect(
+            lambda v, i=idx: self._on_ring_outer_mode1(i, 'rate_peri', v)
+        )
+        fl.addRow('Outer rate_peri:', outer_rate_peri)
+
+        # Delete button at bottom
+        delete_btn = QPushButton('Delete')
+        delete_btn.clicked.connect(
+            lambda checked=False, i=idx: self._delete_tab_by_index('ring', i)
+        )
+        main_layout.addStretch()
+        main_layout.addWidget(delete_btn)
+
+        return w
+
     # ---- Field handlers ----
     def _on_body_field(self,
                        idx: int,
@@ -1521,6 +1741,55 @@ class CreateSimulatedBodyModel(QMainWindow):
         if 0 <= idx < len(self.sim_params['stars']):
             self.sim_params['stars'][idx]['name'] = text
             self._update_tab_titles()
+            self._updater.request_update()
+
+    def _on_ring_field(self, idx: int, key: str, value: Any) -> None:
+        if 0 <= idx < len(self.sim_params['rings']):
+            self.sim_params['rings'][idx][key] = (
+                float(value) if isinstance(value, (int, float)) else value
+            )
+            self._updater.request_update()
+
+    def _on_ring_name(self, idx: int, text: str) -> None:
+        if 0 <= idx < len(self.sim_params['rings']):
+            self.sim_params['rings'][idx]['name'] = text
+            self._update_tab_titles()
+            self._updater.request_update()
+
+    def _on_ring_inner_mode1(self, idx: int, key: str, value: float) -> None:
+        if 0 <= idx < len(self.sim_params['rings']):
+            ring = self.sim_params['rings'][idx]
+            if 'inner_data' not in ring:
+                ring['inner_data'] = []
+            inner_data = ring['inner_data']
+            # Find or create mode 1
+            mode1 = next((m for m in inner_data if m.get('mode') == 1), None)
+            if mode1 is None:
+                mode1 = {'mode': 1, 'a': 100.0, 'rms': 1.0, 'ae': 0.0,
+                        'long_peri': 0.0, 'rate_peri': 0.0}
+                inner_data.append(mode1)
+            mode1[key] = float(value)
+            # Ensure rms is always present
+            if 'rms' not in mode1:
+                mode1['rms'] = 1.0
+            self._updater.request_update()
+
+    def _on_ring_outer_mode1(self, idx: int, key: str, value: float) -> None:
+        if 0 <= idx < len(self.sim_params['rings']):
+            ring = self.sim_params['rings'][idx]
+            if 'outer_data' not in ring:
+                ring['outer_data'] = []
+            outer_data = ring['outer_data']
+            # Find or create mode 1
+            mode1 = next((m for m in outer_data if m.get('mode') == 1), None)
+            if mode1 is None:
+                mode1 = {'mode': 1, 'a': 120.0, 'rms': 1.0, 'ae': 0.0,
+                        'long_peri': 0.0, 'rate_peri': 0.0}
+                outer_data.append(mode1)
+            mode1[key] = float(value)
+            # Ensure rms is always present
+            if 'rms' not in mode1:
+                mode1['rms'] = 1.0
             self._updater.request_update()
 
     def _on_body_crater_fill_slider(self, idx: int, value: int) -> None:
@@ -1811,7 +2080,7 @@ class CreateSimulatedBodyModel(QMainWindow):
         filename, _ = QFileDialog.getSaveFileName(
             self,
             'Save Parameters',
-            'simulated_body_params.json',
+            'simulated_image_params.json',
             'JSON Files (*.json)',
         )
         if filename:
@@ -1846,8 +2115,12 @@ class CreateSimulatedBodyModel(QMainWindow):
                         params.get('background_stars_psf_sigma', 0.9)),
                     'background_stars_distribution_exponent': float(
                         params.get('background_stars_distribution_exponent', 2.5)),
+                    'time': float(params.get('time', 0.0)),
+                    'epoch': float(params.get('epoch', 0.0)),
+                    'closest_planet': params.get('closest_planet'),
                     'bodies': list(params.get('bodies', [])),
                     'stars': list(params.get('stars', [])),
+                    'rings': list(params.get('rings', [])),
                 }
                 # Update general UI
                 self._size_v_spin.setValue(self.sim_params['size_v'])
@@ -1855,6 +2128,16 @@ class CreateSimulatedBodyModel(QMainWindow):
                 self._offset_v_spin.setValue(self.sim_params['offset_v'])
                 self._offset_u_spin.setValue(self.sim_params['offset_u'])
                 self._random_seed_spin.setValue(self.sim_params['random_seed'])
+                # Update closest planet
+                closest_planet = self.sim_params.get('closest_planet', '')
+                if closest_planet:
+                    index = self._closest_planet_combo.findText(closest_planet)
+                    if index >= 0:
+                        self._closest_planet_combo.setCurrentIndex(index)
+                    else:
+                        self._closest_planet_combo.setCurrentText(closest_planet)
+                else:
+                    self._closest_planet_combo.setCurrentIndex(0)  # Empty
                 # Update background noise controls
                 self._background_noise_slider.blockSignals(True)
                 noise_slider_val = int(self.sim_params['background_noise_intensity'] * 1000)

@@ -12,9 +12,11 @@ from nav.nav_model import (NavModel,
                            NavModelBodySimulated,
                            NavModelCombined,
                            NavModelRings,
+                           NavModelRingsSimulated,
                            NavModelStars,
                            NavModelTitan)
 from nav.nav_model.nav_model_body_base import NavModelBodyBase
+from nav.nav_model.nav_model_rings_base import NavModelRingsBase
 from nav.nav_technique import NavTechniqueCorrelateAll
 from nav.nav_technique import NavTechniqueManual
 from nav.support.nav_base import NavBase
@@ -72,7 +74,7 @@ class NavMaster(NavBase):
         self._offsets: dict[str, Any] = {}  # TODO Type
         self._star_models: list[NavModelStars] | None = None
         self._body_models: list[NavModelBodyBase] | None = None
-        self._ring_models: list[NavModelRings] | None = None
+        self._ring_models: list[NavModelRingsBase] | None = None
         self._titan_models: list[NavModelTitan] | None = None
 
         self._combined_model: NavModelCombined | None = None
@@ -134,7 +136,7 @@ class NavMaster(NavBase):
         return self._body_models
 
     @property
-    def ring_models(self) -> list[NavModelRings]:
+    def ring_models(self) -> list[NavModelRingsBase]:
         """Returns the list of ring navigation models, computing them if necessary."""
         self.compute_ring_models()
         assert self._ring_models is not None
@@ -287,21 +289,33 @@ class NavMaster(NavBase):
         if obs.closest_planet is None:
             logger.info('No closest planet found - skipping ring models')
             return
-        # Check if rings are configured for this planet
-        rings_config = config.rings
-        ring_features_dict = getattr(rings_config, 'ring_features', None)
-        if not ring_features_dict:
-            logger.info('No ring features configured - skipping ring models')
-            return
 
-        if obs.closest_planet not in ring_features_dict:
-            logger.info('No ring features configured for planet %s - skipping ring models',
-                        obs.closest_planet)
-            return
-
-        # Create ring model
         model_name = 'rings'
-        ring_model = NavModelRings(model_name, obs, config=config)
+
+        if obs.is_simulated:
+            # Use simulated rings from observation
+            sim_rings = getattr(obs, 'sim_rings', [])
+            if not sim_rings:
+                logger.info('No simulated rings defined - skipping ring models')
+                return
+            ring_model = NavModelRingsSimulated(
+                model_name, obs, sim_rings, config=config)
+        else:
+            # Check if rings are configured for this planet
+            rings_config = config.rings
+            ring_features_dict = getattr(rings_config, 'ring_features', None)
+            if not ring_features_dict:
+                logger.info('No ring features configured - skipping ring models')
+                return
+
+            if obs.closest_planet not in ring_features_dict:
+                logger.info('No ring features configured for planet %s - skipping ring models',
+                            obs.closest_planet)
+                return
+
+            # Create ring model from configuration
+            ring_model = NavModelRings(model_name, obs, config=config)
+
         ring_model.create_model()
         self._ring_models.append(ring_model)
         self._metadata['models']['ring_model'] = ring_model.metadata

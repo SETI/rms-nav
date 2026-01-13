@@ -32,10 +32,10 @@ from nav.config import Config
 from nav.support.time import now_dt, utc_to_et
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
-from .nav_model import NavModel
+from .nav_model_rings_base import NavModelRingsBase
 
 
-class NavModelRings(NavModel):
+class NavModelRings(NavModelRingsBase):
     """Navigation model for planetary rings based on ephemeris data.
 
     This class creates navigation models for planetary rings by rendering
@@ -273,8 +273,41 @@ class NavModelRings(NavModel):
 
         # Create annotations if requested
         if create_annotations:
-            self._annotations = self._create_annotations(
-                obs, features, ring_target, epoch, model_mask)
+            # Collect edge information for annotation
+            edge_info_list: list[tuple[Backplane, float, str, str]] = []
+
+            for feature in features:
+                feature_type = feature.get('feature_type')
+                feature_name = feature.get('name') or 'UNNAMED'
+                inner_data = feature.get('inner_data')
+                outer_data = feature.get('outer_data')
+
+                if inner_data is not None:
+                    inner_radii_bp = self._compute_edge_radii(
+                        obs, ring_target, mode_data=inner_data, epoch=epoch)
+                    inner_a = self._get_base_radius(inner_data)
+                    if inner_radii_bp is not None and inner_a is not None:
+                        edge_label = ('IEG' if feature_type == 'GAP' else 'IER')
+                        label_text = f'{feature_name} {edge_label}'
+                        # Compute edge mask from backplane
+                        edge_mask = (obs.ext_bp.border_atop(inner_radii_bp.key, inner_a)
+                                     .mvals.astype('bool').filled(False))
+                        edge_info_list.append((edge_mask, label_text, edge_label))
+
+                if outer_data is not None:
+                    outer_radii_bp = self._compute_edge_radii(
+                        obs, ring_target, mode_data=outer_data, epoch=epoch)
+                    outer_a = self._get_base_radius(outer_data)
+                    if outer_radii_bp is not None and outer_a is not None:
+                        edge_label = ('OEG' if feature_type == 'GAP' else 'OER')
+                        label_text = f'{feature_name} {edge_label}'
+                        # Compute edge mask from backplane
+                        edge_mask = (obs.ext_bp.border_atop(outer_radii_bp.key, outer_a)
+                                     .mvals.astype('bool').filled(False))
+                        edge_info_list.append((edge_mask, label_text, edge_label))
+
+            self._annotations = self._create_edge_annotations(
+                obs, edge_info_list, model_mask)
 
         self._model_img = model
         self._model_mask = model_mask
@@ -947,160 +980,3 @@ class NavModelRings(NavModel):
             fade_mask = (new_model - model) > 0.0
             model[:, :] = new_model
             model_mask[fade_mask] = True
-
-    def _create_annotations(self,
-                            obs: oops.Observation,
-                            features: list[dict[str, Any]],
-                            ring_target: str,
-                            epoch: float,
-                            model_mask: NDArrayBoolType) -> Annotations:
-        """Create annotation objects for ring edges.
-
-        Parameters:
-            obs: The observation object.
-            features: List of feature dictionaries.
-            ring_target: Ring target key.
-            epoch: Epoch time for mode calculations.
-            model_mask: Model mask array.
-
-        Returns:
-            Annotations object containing all ring edge annotations.
-        """
-
-        annotations = Annotations()
-        rings_config = self._config.rings
-        bodies_config = self._config.bodies
-
-        # Get annotation configuration (use body defaults if not specified) TODO
-        label_font = getattr(rings_config, 'label_font', bodies_config.label_font)
-        label_font_size = getattr(rings_config, 'label_font_size', bodies_config.label_font_size)
-        label_font_color = getattr(rings_config, 'label_font_color', bodies_config.label_font_color)
-        label_limb_color = getattr(rings_config, 'label_limb_color', bodies_config.label_limb_color)
-
-        # Collect edge information for annotation
-        edge_info_list: list[tuple[Backplane, float, str, str]] = []
-
-        for feature in features:
-            feature_type = feature.get('feature_type')
-            feature_name = feature.get('name') or 'UNNAMED'
-            inner_data = feature.get('inner_data')
-            outer_data = feature.get('outer_data')
-
-            if inner_data is not None:
-                inner_radii_bp = self._compute_edge_radii(
-                    obs, ring_target, mode_data=inner_data, epoch=epoch)
-                inner_a = self._get_base_radius(inner_data)
-                if inner_radii_bp is not None and inner_a is not None:
-                    edge_label = ('IEG' if feature_type == 'GAP' else 'IER')
-                    edge_info_list.append((
-                        inner_radii_bp, inner_a,
-                        f'{feature_name} {edge_label}', edge_label))
-
-            if outer_data is not None:
-                outer_radii_bp = self._compute_edge_radii(
-                    obs, ring_target, mode_data=outer_data, epoch=epoch)
-                outer_a = self._get_base_radius(outer_data)
-                if outer_radii_bp is not None and outer_a is not None:
-                    edge_label = ('OEG' if feature_type == 'GAP' else 'OER')
-                    edge_info_list.append((
-                        outer_radii_bp, outer_a,
-                        f'{feature_name} {edge_label}', edge_label))
-
-        # Get gap configuration from bodies config (for label placement)
-        label_horiz_gap = getattr(rings_config, 'label_horiz_gap', bodies_config.label_horiz_gap)
-        label_vert_gap = getattr(rings_config, 'label_vert_gap', bodies_config.label_vert_gap)
-
-        # Create annotations for each edge
-        for radii_bp, edge_radius, label_text, edge_type in edge_info_list:
-            # Find pixels along edge using border_atop
-            edge_mask = (obs.ext_bp.border_atop(radii_bp.key, edge_radius)
-                            .mvals.astype('bool').filled(False))
-
-            if not np.any(edge_mask):
-                continue
-
-            # Find candidate text locations along edge
-            edge_v, edge_u = np.where(edge_mask)
-            if len(edge_v) == 0:
-                continue
-
-            # Create text location candidates with offsets from edge. Sample more candidates and
-            # offsets in multiple directions
-            text_loc: list[TextLocInfo] = []
-
-            # Sample more edge points (up to 50, spaced evenly)
-            num_samples = min(50, len(edge_v))
-            step = max(1, len(edge_v) // num_samples)
-            sampled_indices = range(0, len(edge_v), step)
-
-            for idx in sampled_indices:
-                v = edge_v[idx]
-                u = edge_u[idx]
-
-                # Determine which side of image this edge point is on
-                u_center = model_mask.shape[1] // 2
-                v_center = model_mask.shape[0] // 2
-
-                # Calculate angle from center to edge point
-                angle = math.degrees(math.atan2(v - v_center, u - u_center)) % 360
-
-                # Create candidates with offsets in appropriate directions
-                # Left side (135-225 degrees)
-                if 135 < angle < 225:
-                    # Offset left from edge
-                    u_offset = max(0, u - label_horiz_gap)
-                    text_loc.append(TextLocInfo(TEXTINFO_LEFT_ARROW, v, u_offset))
-                # Right side (315-45 degrees, wrapping)
-                elif angle > 315 or angle < 45:
-                    # Offset right from edge
-                    u_offset = min(model_mask.shape[1] - 1, u + label_horiz_gap)
-                    text_loc.append(TextLocInfo(TEXTINFO_RIGHT_ARROW, v, u_offset))
-                # Top side (225-315 degrees)
-                elif 225 <= angle <= 315:
-                    # Offset up from edge
-                    v_offset = max(0, v - label_vert_gap)
-                    text_loc.append(TextLocInfo(TEXTINFO_TOP_ARROW, v_offset, u))
-                # Bottom side (45-135 degrees)
-                else:  # 45 <= angle <= 135
-                    # Offset down from edge
-                    v_offset = min(model_mask.shape[0] - 1, v + label_vert_gap)
-                    text_loc.append(TextLocInfo(TEXTINFO_BOTTOM_ARROW, v_offset, u))
-
-                # Also add candidates without offset for more options
-                if u < u_center:
-                    text_loc.append(TextLocInfo(TEXTINFO_LEFT_ARROW, v, u))
-                else:
-                    text_loc.append(TextLocInfo(TEXTINFO_RIGHT_ARROW, v, u))
-
-            if not text_loc:
-                continue
-
-            # Create text info
-            text_info = AnnotationTextInfo(
-                label_text,
-                text_loc=text_loc,
-                ref_vu=None,
-                font=label_font,
-                font_size=label_font_size,
-                color=label_font_color)
-
-            # Create avoid mask from model_mask to avoid placing text on rings
-            # Use a small enlargement to avoid text too close to ring edges
-            label_mask_enlarge = getattr(rings_config, 'label_mask_enlarge',
-                                         bodies_config.label_mask_enlarge)
-            text_avoid_mask = ndimage.maximum_filter(
-                model_mask.astype(np.float32), label_mask_enlarge).astype(bool)
-
-            # Create annotation
-            annotation = Annotation(
-                obs,
-                edge_mask,
-                label_limb_color,
-                thicken_overlay=0,
-                avoid_mask=text_avoid_mask,
-                text_info=text_info,
-                config=self._config)
-
-            annotations.add_annotations(annotation)
-
-        return annotations

@@ -9,6 +9,7 @@ from scipy import ndimage
 from starcat import Star
 
 from nav.sim.sim_body import create_simulated_body
+from nav.sim.sim_ring import render_ring
 from nav.support.types import MutableStar
 
 
@@ -517,8 +518,15 @@ def _render_combined_model_cached(
 
     stars_params = sim_params.get('stars', []) or []
     bodies_params = sim_params.get('bodies', []) or []
+    rings_params = sim_params.get('rings', []) or []
 
     img, sim_star_list, star_info = render_stars(img, stars_params, offset_v, offset_u)
+
+    # Render rings before bodies (rings are further away)
+    time = float(sim_params.get('time', 0.0))
+    epoch = float(sim_params.get('epoch', 0.0))
+    for ring_params in rings_params:
+        render_ring(img, ring_params, offset_v, offset_u, time=time, epoch=epoch)
 
     # Pass seed to render_bodies for crater generation
     bodies_result = render_bodies(img, bodies_params, offset_v, offset_u, seed=random_seed)
@@ -532,6 +540,7 @@ def _render_combined_model_cached(
     meta: dict[str, Any] = {
         'stars': sim_star_list,
         'bodies': body_models,
+        'rings': rings_params,
         'inventory': inventory,
         'star_info': star_info,
         'body_masks': body_masks,

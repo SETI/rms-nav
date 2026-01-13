@@ -83,14 +83,17 @@ class ObsSim(ObsSnapshotInst):
         snapshot.sim_params = sim_params
         snapshot.sim_offset_v = offset_v
         snapshot.sim_offset_u = offset_u
+        snapshot.sim_time = float(sim_params.get('time', 0.0))
+        snapshot.sim_epoch = float(sim_params.get('epoch', 0.0))
 
-        # Render combined model (stars then bodies)
+        # Render combined model (rings, stars, then bodies)
         logger.debug('Rendering combined simulated model')
         img_rendered, meta = render_combined_model(sim_params)
         snapshot.insert_subfield('data', img_rendered)
         # Attach metadata similar to previous attributes
         snapshot.sim_star_list = meta.get('stars', [])
         snapshot.sim_body_models = meta.get('bodies', {})
+        snapshot.sim_rings = meta.get('rings', [])
         snapshot.sim_inventory = meta.get('inventory', {})
         snapshot.sim_body_order_near_to_far = meta.get('order_near_to_far', [])
         snapshot.sim_body_index_map = meta.get('body_index_map', None)
