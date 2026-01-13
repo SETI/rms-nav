@@ -5,7 +5,6 @@ including annotation creation helpers.
 """
 
 import math
-from typing import Any, Optional
 
 import numpy as np
 from scipy import ndimage
@@ -20,8 +19,7 @@ from nav.annotation import (Annotation,
                             TEXTINFO_RIGHT_ARROW,
                             TEXTINFO_BOTTOM_ARROW,
                             TEXTINFO_TOP_ARROW)
-from nav.config import Config
-from nav.support.types import NDArrayBoolType, NDArrayFloatType
+from nav.support.types import NDArrayBoolType
 
 from .nav_model import NavModel
 
@@ -140,8 +138,10 @@ class NavModelRingsBase(NavModel):
                 tangent_angle_deg = math.degrees(tangent_angle)
 
                 # Determine label placement based on tangent direction
-                # If tangent is mostly horizontal (near 0° or 180°), edge runs horizontally → label up/down
-                # If tangent is mostly vertical (near 90° or 270°), edge runs vertically → label left/right
+                # If tangent is mostly horizontal (near 0° or 180°),
+                #   edge runs horizontally → label up/down
+                # If tangent is mostly vertical (near 90° or 270°),
+                #   edge runs vertically → label left/right
 
                 # Normalize angle to 0-360 range
                 tangent_angle_deg = tangent_angle_deg % 360

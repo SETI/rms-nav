@@ -74,7 +74,7 @@ def _calculate_fade_integral_shade_above(edge_radius, width, pixel_lower, pixel_
     # Integral formula matching implementation: [(1+a0/w)*a - a^2/(2w)] from a0 to a1
     integral = (((1.0 + edge_radius / width) * (integration_end - integration_start) +
                 (integration_start**2 - integration_end**2) / (2.0 * width)) /
-               resolution)
+                resolution)
     return integral
 
 
@@ -120,7 +120,7 @@ def _calculate_fade_integral_shade_below(edge_radius, width, pixel_lower, pixel_
     # Integral formula matching implementation: [(1-a0/w)*a + a^2/(2w)] from a0 to a1
     integral = (((1.0 - edge_radius / width) * (integration_end - integration_start) +
                 (integration_end**2 - integration_start**2) / (2.0 * width)) /
-               resolution)
+                resolution)
     return integral
 
 

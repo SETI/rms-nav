@@ -298,7 +298,7 @@ class NavMaster(NavBase):
             if not sim_rings:
                 logger.info('No simulated rings defined - skipping ring models')
                 return
-            ring_model = NavModelRingsSimulated(
+            ring_model: NavModelRingsBase = NavModelRingsSimulated(
                 model_name, obs, sim_rings, config=config)
         else:
             # Check if rings are configured for this planet

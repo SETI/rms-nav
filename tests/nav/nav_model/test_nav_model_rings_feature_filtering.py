@@ -63,7 +63,8 @@ def test_load_features_no_date_range(ring_model):
         }
     }
 
-    features = ring_model._load_ring_features(planet_config, ring_model.obs.midtime, min_radius=0.0, max_radius=1e6)
+    features = ring_model._load_ring_features(planet_config, ring_model.obs.midtime,
+                                              min_radius=0.0, max_radius=1e6)
     assert len(features) == 1
     assert features[0]['name'] == 'Test Ringlet'
 
@@ -100,7 +101,8 @@ def test_load_features_within_date_range():
         }
     }
 
-    features = ring_model._load_ring_features(planet_config, ring_model.obs.midtime, min_radius=0.0, max_radius=1e6)
+    features = ring_model._load_ring_features(planet_config, ring_model.obs.midtime,
+                                              min_radius=0.0, max_radius=1e6)
     assert len(features) == 1
 
 
@@ -136,7 +138,8 @@ def test_load_features_before_date_range():
         }
     }
 
-    features = ring_model._load_ring_features(planet_config, ring_model.obs.midtime, min_radius=0.0, max_radius=1e6)
+    features = ring_model._load_ring_features(planet_config, ring_model.obs.midtime,
+                                              min_radius=0.0, max_radius=1e6)
     assert len(features) == 0
 
 
@@ -172,7 +175,8 @@ def test_load_features_after_date_range():
         }
     }
 
-    features = ring_model._load_ring_features(planet_config, ring_model.obs.midtime, min_radius=0.0, max_radius=1e6)
+    features = ring_model._load_ring_features(planet_config, ring_model.obs.midtime,
+                                              min_radius=0.0, max_radius=1e6)
     assert len(features) == 0
 
 
@@ -207,7 +211,8 @@ def test_load_features_only_start_date():
         }
     }
 
-    features = ring_model._load_ring_features(planet_config, ring_model.obs.midtime, min_radius=0.0, max_radius=1e6)
+    features = ring_model._load_ring_features(planet_config, ring_model.obs.midtime,
+                                              min_radius=0.0, max_radius=1e6)
     assert len(features) == 1
 
 
@@ -242,7 +247,8 @@ def test_load_features_only_end_date():
         }
     }
 
-    features = ring_model._load_ring_features(planet_config, ring_model.obs.midtime, min_radius=0.0, max_radius=1e6)
+    features = ring_model._load_ring_features(planet_config, ring_model.obs.midtime,
+                                              min_radius=0.0, max_radius=1e6)
     assert len(features) == 1
 
 
@@ -264,7 +270,8 @@ def test_load_features_invalid_type(ring_model):
         }
     }
 
-    features = ring_model._load_ring_features(planet_config, ring_model.obs.midtime, min_radius=0.0, max_radius=1e6)
+    features = ring_model._load_ring_features(planet_config, ring_model.obs.midtime,
+                                              min_radius=0.0, max_radius=1e6)
     assert len(features) == 0
 
 
@@ -279,7 +286,8 @@ def test_load_features_no_edges(ring_model):
         }
     }
 
-    features = ring_model._load_ring_features(planet_config, ring_model.obs.midtime, min_radius=0.0, max_radius=1e6)
+    features = ring_model._load_ring_features(planet_config, ring_model.obs.midtime,
+                                              min_radius=0.0, max_radius=1e6)
     assert len(features) == 0
 
 
@@ -294,7 +302,8 @@ def test_validate_mode_data_valid(ring_model):
         'rate_peri': 0.0
     }]
 
-    assert ring_model._validate_mode_data(mode_data, feature_key='test_feature', edge_type='inner', min_radius=0.0, max_radius=1e6)
+    assert ring_model._validate_mode_data(mode_data, feature_key='test_feature', edge_type='inner',
+                                          min_radius=0.0, max_radius=1e6)
 
 
 def test_validate_mode_data_missing_mode(ring_model):

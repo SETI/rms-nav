@@ -1524,7 +1524,7 @@ class CreateSimulatedBodyModel(QMainWindow):
 
         # Inner edge mode 1 parameters
         inner_data = p.get('inner_data', [])
-        inner_mode1 = next((m for m in inner_data if m.get('mode') == 1), {})
+        inner_mode1: dict[str, Any] = next((m for m in inner_data if m.get('mode') == 1), {})
         fl.addRow(QLabel('<b>Inner Edge (Mode 1)</b>'), QLabel(''))
         inner_a = QDoubleSpinBox()
         inner_a.setRange(1.0, 10000.0)
@@ -1563,7 +1563,7 @@ class CreateSimulatedBodyModel(QMainWindow):
 
         # Outer edge mode 1 parameters
         outer_data = p.get('outer_data', [])
-        outer_mode1 = next((m for m in outer_data if m.get('mode') == 1), {})
+        outer_mode1: dict[str, Any] = next((m for m in outer_data if m.get('mode') == 1), {})
         fl.addRow(QLabel('<b>Outer Edge (Mode 1)</b>'), QLabel(''))
         outer_a = QDoubleSpinBox()
         outer_a.setRange(1.0, 10000.0)
@@ -1766,7 +1766,7 @@ class CreateSimulatedBodyModel(QMainWindow):
             mode1 = next((m for m in inner_data if m.get('mode') == 1), None)
             if mode1 is None:
                 mode1 = {'mode': 1, 'a': 100.0, 'rms': 1.0, 'ae': 0.0,
-                        'long_peri': 0.0, 'rate_peri': 0.0}
+                         'long_peri': 0.0, 'rate_peri': 0.0}
                 inner_data.append(mode1)
             mode1[key] = float(value)
             # Ensure rms is always present
@@ -1784,7 +1784,7 @@ class CreateSimulatedBodyModel(QMainWindow):
             mode1 = next((m for m in outer_data if m.get('mode') == 1), None)
             if mode1 is None:
                 mode1 = {'mode': 1, 'a': 120.0, 'rms': 1.0, 'ae': 0.0,
-                        'long_peri': 0.0, 'rate_peri': 0.0}
+                         'long_peri': 0.0, 'rate_peri': 0.0}
                 outer_data.append(mode1)
             mode1[key] = float(value)
             # Ensure rms is always present

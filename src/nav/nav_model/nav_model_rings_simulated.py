@@ -14,7 +14,7 @@ from nav.annotation import Annotations
 from nav.config import Config
 from nav.sim.sim_ring import render_ring
 from nav.support.time import now_dt
-from nav.support.types import NDArrayBoolType, NDArrayFloatType
+from nav.support.types import NDArrayBoolType
 
 from .nav_model_rings_base import NavModelRingsBase
 
@@ -222,8 +222,9 @@ class NavModelRingsSimulated(NavModelRingsBase):
 
                     # Embed into extended FOV
                     edge_mask_extfov = obs.make_extfov_false()
-                    edge_mask_extfov[obs.extfov_margin_v:obs.extfov_margin_v + data_size_v,
-                                     obs.extfov_margin_u:obs.extfov_margin_u + data_size_u] = edge_mask
+                    edge_mask_extfov[
+                        obs.extfov_margin_v:obs.extfov_margin_v + data_size_v,
+                        obs.extfov_margin_u:obs.extfov_margin_u + data_size_u] = edge_mask
 
                     edge_info_list.append((edge_mask_extfov, label_text, edge_label))
 
@@ -246,8 +247,9 @@ class NavModelRingsSimulated(NavModelRingsBase):
 
                     # Embed into extended FOV
                     edge_mask_extfov = obs.make_extfov_false()
-                    edge_mask_extfov[obs.extfov_margin_v:obs.extfov_margin_v + data_size_v,
-                                     obs.extfov_margin_u:obs.extfov_margin_u + data_size_u] = edge_mask
+                    edge_mask_extfov[
+                        obs.extfov_margin_v:obs.extfov_margin_v + data_size_v,
+                        obs.extfov_margin_u:obs.extfov_margin_u + data_size_u] = edge_mask
 
                     edge_info_list.append((edge_mask_extfov, label_text, edge_label))
 

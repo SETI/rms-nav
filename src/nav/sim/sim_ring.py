@@ -6,9 +6,11 @@ with anti-aliased edges.
 """
 
 import math
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
+
+from nav.support.types import NDArrayBoolType
 
 
 def compute_edge_radius_mode1(
@@ -116,7 +118,7 @@ def compute_border_atop_simulated(
     rate_peri: float,
     epoch: float,
     time: float,
-) -> np.ndarray:
+) -> NDArrayBoolType:
     """Compute border_atop mask for simulated ring edge.
 
     This simulates the border_atop backplane function for simulated rings by
@@ -192,7 +194,7 @@ def compute_border_atop_simulated(
     border[:, :-1] |= ((sign_u == -sign_u_next) & (abs_diff_u <= abs_diff_u_next))
     border[:, 1:] |= ((sign_u_next == -sign_u) & (abs_diff_u_next <= abs_diff_u))
 
-    return border
+    return cast(NDArrayBoolType, border)
 
 
 def render_ring(

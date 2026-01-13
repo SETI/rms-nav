@@ -15,19 +15,10 @@ from typing import Any, Optional
 
 import numpy as np
 import numpy.ma as ma
-from scipy import ndimage
 
 import oops
 from oops.backplane import Backplane
 
-from nav.annotation import (Annotation,
-                            Annotations,
-                            AnnotationTextInfo,
-                            TextLocInfo,
-                            TEXTINFO_LEFT_ARROW,
-                            TEXTINFO_RIGHT_ARROW,
-                            TEXTINFO_TOP_ARROW,
-                            TEXTINFO_BOTTOM_ARROW)
 from nav.config import Config
 from nav.support.time import now_dt, utc_to_et
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
@@ -274,7 +265,7 @@ class NavModelRings(NavModelRingsBase):
         # Create annotations if requested
         if create_annotations:
             # Collect edge information for annotation
-            edge_info_list: list[tuple[Backplane, float, str, str]] = []
+            edge_info_list: list[tuple[NDArrayBoolType, str, str]] = []
 
             for feature in features:
                 feature_type = feature.get('feature_type')
