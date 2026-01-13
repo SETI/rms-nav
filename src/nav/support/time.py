@@ -51,3 +51,18 @@ def et_to_utc(et: float, digits: int = 3) -> str:
     """
 
     return cast(str, julian.iso_from_tai(julian.tai_from_tdb(et), digits=digits))
+
+
+def utc_to_et(utc: str) -> float:
+    """Returns the ET time (TDB seconds) for a given UTC time string.
+
+    Parameters:
+        utc: The UTC time as an ISO 8601 formatted string (e.g.,
+            "2008-01-01 12:00:00" or "2008-01-01T12:00:00").
+
+    Returns:
+        The SPICE ET time (equivalent to TDB) in seconds as a float.
+    """
+
+    result = julian.tdb_from_tai(julian.tai_from_iso(utc))
+    return float(result)

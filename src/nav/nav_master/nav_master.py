@@ -276,9 +276,36 @@ class NavMaster(NavBase):
             # Keep cached version
             return
 
+        obs = self._obs
+        config = self._config
+        logger = self._logger
+
         self._ring_models = []
         self._metadata['models']['ring_model'] = {}
-        # TODO Ring models
+
+        # Check if rings should be computed
+        if obs.closest_planet is None:
+            logger.info('No closest planet found - skipping ring models')
+            return
+        # Check if rings are configured for this planet
+        rings_config = config.rings
+        ring_features_dict = getattr(rings_config, 'ring_features', None)
+        if not ring_features_dict:
+            logger.info('No ring features configured - skipping ring models')
+            return
+
+        if obs.closest_planet not in ring_features_dict:
+            logger.info('No ring features configured for planet %s - skipping ring models',
+                        obs.closest_planet)
+            return
+
+        # Create ring model
+        model_name = 'rings'
+        ring_model = NavModelRings(model_name, obs, config=config)
+        ring_model.create_model()
+        self._ring_models.append(ring_model)
+        self._metadata['models']['ring_model'] = ring_model.metadata
+        logger.info('Ring model created successfully')
 
     def compute_titan_models(self) -> None:
         """Creates Titan-specific navigation models for the observation.

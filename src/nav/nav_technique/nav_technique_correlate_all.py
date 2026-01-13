@@ -101,6 +101,10 @@ class NavTechniqueCorrelateAll(NavTechnique):
             if combined_model.model_mask is None:
                 raise ValueError('Combined model mask is None')
 
+            if True:  # TODO
+                import matplotlib.pyplot as plt
+                plt.imshow(combined_model.model_img)
+                plt.show()
             result = navigate_with_pyramid_kpeaks(
                 obs.extdata, combined_model.model_img, combined_model.model_mask,
                 upsample_factor=self.config.offset.correlation_fft_upsample_factor)
