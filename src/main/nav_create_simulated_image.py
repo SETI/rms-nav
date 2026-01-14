@@ -1784,13 +1784,6 @@ class CreateSimulatedImageModel(QMainWindow):
         if 0 <= idx < len(self.sim_params['bodies']):
             self.sim_params['bodies'][idx]['crater_fill'] = value
             self._updater.request_update()
-        slider = tab_w.crater_fill_slider  # type: ignore
-        slider.blockSignals(True)
-        slider.setValue(slider_val)
-        slider.blockSignals(False)
-        if 0 <= idx < len(self.sim_params['bodies']):
-            self.sim_params['bodies'][idx]['crater_fill'] = value
-            self._updater.request_update()
 
     def _on_body_anti_aliasing_slider(self, idx: int, value: int) -> None:
         aa_val = value / 1000.0
