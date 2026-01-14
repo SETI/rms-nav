@@ -26,7 +26,7 @@ class NavModelRingsBase(NavModel):
     """Base class for ring navigation models.
 
     Provides shared helpers for creating annotations consistent with the standard
-    ring model implementation, and computing anti-aliasing and edge fading.
+    ring model implementation and computing anti-aliasing.
     """
 
     def _compute_antialiasing(self,
@@ -62,131 +62,12 @@ class NavModelRingsBase(NavModel):
         shade = 1.0 - shade_sign * (radii - edge_radius) / resolutions
         shade -= 0.5
 
-        # Clip to valid range (note: old code had shade[shade > 1.] = 0.
-        # which seems like a bug, but we'll match it for compatibility)
+        # Clip to valid range
         shade[shade < 0.0] = 0.0
-        shade[shade > 1.0] = 0.0
+        shade[shade > 1.0] = 1.0
         shade *= max_value
 
         return np.asarray(shade, dtype=np.float64)
-
-    def _compute_edge_fade(self,
-                           *,
-                           model: NDArrayFloatType,
-                           radii: NDArrayFloatType,
-                           edge_radius: float,
-                           shade_above: bool,
-                           fade_width: float,
-                           resolutions: NDArrayFloatType) -> NDArrayFloatType:
-        """Compute linear fade from a single edge.
-
-        Creates a linear fade from the edge over the specified width. The fade provides a
-        smooth gradient for correlation while avoiding false edges.
-
-        Parameters:
-            model: Current model array to add fade to.
-            radii: Array of ring radii at pixel centers (km or pixels).
-            edge_radius: Target edge radius (km or pixels).
-            shade_above: If True, fade towards larger radii; if False, fade towards smaller radii.
-            fade_width: Fade width in same units as radii (km or pixels).
-            resolutions: Array of radial resolutions at each pixel (km or pixels).
-
-        Returns:
-            Updated model array with fade applied.
-        """
-
-        # Create fade array
-        shade = np.zeros(radii.shape, dtype=np.float64)
-
-        if shade_above:
-            # Fade from edge_radius to edge_radius + width
-            # Shade function: 1 - (a - a0) / w for a in [a0, a0+w]
-            # Integral: Z = [(1+a0/w)*a - a^2/(2w)] / s
-            def int_func(a0: NDArrayFloatType, a1: NDArrayFloatType) -> NDArrayFloatType:
-                """Integrate fade function for shade_above case."""
-                result = (((1.0 + edge_radius / fade_width) * (a1 - a0) +
-                          (a0**2 - a1**2) / (2.0 * fade_width)) /
-                          resolutions)
-                return np.asarray(result, dtype=np.float64)
-
-            # Case analysis for pixel coverage
-            pixel_lower = radii - resolutions / 2.0
-            pixel_upper = radii + resolutions / 2.0
-
-            # Case 1: Edge and fade end both within pixel
-            eq2 = np.logical_and(pixel_lower <= edge_radius,
-                                 edge_radius < pixel_upper)
-            eq3 = np.logical_and(pixel_lower <= edge_radius + fade_width,
-                                 edge_radius + fade_width < pixel_upper)
-            eq_case1 = np.logical_and(eq2, eq3)
-            case1 = int_func(np.full_like(radii, edge_radius),
-                             np.full_like(radii, edge_radius + fade_width))
-            shade[eq_case1] = case1[eq_case1]
-
-            # Case 4: Edge before pixel, fade end after pixel (full coverage)
-            eq_case4 = np.logical_and(edge_radius < pixel_lower,
-                                      edge_radius + fade_width > pixel_upper)
-            case4 = int_func(pixel_lower, pixel_upper)
-            shade[eq_case4] = case4[eq_case4]
-
-            # Case 2: Edge within pixel, fade end extends beyond
-            eq_case2 = np.logical_and(eq2, np.logical_not(eq_case1))
-            case2 = int_func(np.full_like(radii, edge_radius), pixel_upper)
-            shade[eq_case2] = case2[eq_case2]
-
-            # Case 3: Edge before pixel, fade end within pixel
-            eq_case3 = np.logical_and(eq3, np.logical_not(eq_case1))
-            case3 = int_func(pixel_lower,
-                             np.full_like(radii, edge_radius + fade_width))
-            shade[eq_case3] = case3[eq_case3]
-
-        else:
-            # Fade from edge_radius - width to edge_radius
-            # Shade function: 1 - (a0 - a) / w for a in [a0-w, a0]
-            # Integral: Z = [(1-a0/w)*a + a^2/(2w)] / s
-            def int_func2(a0: NDArrayFloatType, a1: NDArrayFloatType) -> NDArrayFloatType:
-                """Integrate fade function for shade_below case."""
-                result = (((1.0 - edge_radius / fade_width) * (a1 - a0) +
-                          (a1**2 - a0**2) / (2.0 * fade_width)) /
-                          resolutions)
-                return np.asarray(result, dtype=np.float64)
-
-            # Case analysis for pixel coverage
-            pixel_lower = radii - resolutions / 2.0
-            pixel_upper = radii + resolutions / 2.0
-
-            # Case 1: Fade start and edge both within pixel
-            eq2 = np.logical_and(pixel_lower < edge_radius,
-                                 edge_radius <= pixel_upper)
-            eq3 = np.logical_and(pixel_lower < edge_radius - fade_width,
-                                 edge_radius - fade_width <= pixel_upper)
-            eq_case1 = np.logical_and(eq2, eq3)
-            case1 = int_func2(np.full_like(radii, edge_radius - fade_width),
-                              np.full_like(radii, edge_radius))
-            shade[eq_case1] = case1[eq_case1]
-
-            # Case 4: Fade start before pixel, edge after pixel (full coverage)
-            eq_case4 = np.logical_and(edge_radius > pixel_upper,
-                                      edge_radius - fade_width < pixel_lower)
-            case4 = int_func2(pixel_lower, pixel_upper)
-            shade[eq_case4] = case4[eq_case4]
-
-            # Case 2: Edge within pixel, fade start before pixel
-            eq_case2 = np.logical_and(eq2, np.logical_not(eq_case1))
-            case2 = int_func2(pixel_lower, np.full_like(radii, edge_radius))
-            shade[eq_case2] = case2[eq_case2]
-
-            # Case 3: Fade start within pixel, edge after pixel
-            eq_case3 = np.logical_and(eq3, np.logical_not(eq_case1))
-            case3 = int_func2(np.full_like(radii, edge_radius - fade_width),
-                              pixel_upper)
-            shade[eq_case3] = case3[eq_case3]
-
-        # Clip shade to valid range and add to model
-        shade = np.clip(shade, 0.0, 1.0)
-        new_model = model + shade
-
-        return new_model
 
     def _create_edge_annotations(self,
                                  obs: oops.Observation,
@@ -324,7 +205,7 @@ class NavModelRingsBase(NavModel):
 
             # Create avoid mask from model_mask to avoid placing text on rings
             text_avoid_mask = ndimage.maximum_filter(
-                model_mask.astype(np.float32), label_mask_enlarge).astype(bool)
+                model_mask.astype(np.float32), int(label_mask_enlarge)).astype(bool)
 
             # Create annotation
             annotation = Annotation(

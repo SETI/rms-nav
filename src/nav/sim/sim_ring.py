@@ -90,8 +90,7 @@ def compute_edge_radius_at_angle(
     # Compute true anomaly (angle relative to pericenter)
     true_anomaly = angle - current_long_peri
 
-    # Compute radius using elliptical orbit equation: r = a(1 - e^2) / (1 + e*cos(ν))
-    # where e = ae / a
+    # Compute radius using elliptical orbit equation
     e = ae / a if a > 0 else 0.0
     if e >= 1.0:
         e = 0.99  # Clamp eccentricity to valid range
@@ -189,14 +188,15 @@ def compute_border_atop_simulated(
     angles = np.arctan2(dv, du)
 
     # Compute edge radius at each angle using elliptical orbit equation
-    e = ae / a if a > 0 else 0.0
-    if e >= 1.0:
-        e = 0.99
-
-    days_since_epoch = (time - epoch) / 86400.0
-    long_peri_rad = math.radians(long_peri + rate_peri * days_since_epoch)
-    true_anomaly = angles - long_peri_rad
-    edge_radii = a * (1.0 - e * e) / (1.0 + e * np.cos(true_anomaly))
+    edge_radii = _compute_edge_radii_array(
+        angles,
+        a=a,
+        ae=ae,
+        long_peri=long_peri,
+        rate_peri=rate_peri,
+        epoch=epoch,
+        time=time,
+    )
 
     # Compute difference from target edge radius
     # Use the computed edge radius at each angle, not the constant edge_radius
@@ -260,6 +260,9 @@ def _compute_fade_factor(edge_dist: NDArrayFloatType,
         Fade factor [0, 1] where 1.0 is at the edge and 0.0 is at shading_distance away.
     """
     fade_dist = np.maximum(0.0, edge_dist)
+    if shading_distance <= 0.0:
+        # Step-function fade: 1.0 for edge_dist <= 0, else 0.0
+        return cast(NDArrayFloatType, (edge_dist <= 0.0).astype(np.float64))
     return cast(NDArrayFloatType, np.clip(1.0 - fade_dist / shading_distance, 0.0, 1.0))
 
 

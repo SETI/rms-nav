@@ -96,5 +96,5 @@ distributed processing:
 
 These cloud tasks variants read task payloads from a queue and process batches
 of files, making them suitable for large-scale processing in cloud
-environments. The standard command-line programs can generate cloud tasks JSON
-files using the ``--output-cloud-tasks-file`` option.
+environments. The ``nav_offset`` program can generate cloud tasks JSON files
+using the ``--output-cloud-tasks-file`` option.

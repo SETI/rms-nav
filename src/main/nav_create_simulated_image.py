@@ -1357,7 +1357,7 @@ class CreateSimulatedImageModel(QMainWindow):
         # Delete button at bottom
         delete_btn = QPushButton('Delete')
         delete_btn.clicked.connect(
-            lambda checked=False, i=idx: self._delete_tab_by_index('body', i)
+            lambda _checked=False, i=idx: self._delete_tab_by_index('body', i)
         )
         main_layout.addStretch()
         main_layout.addWidget(delete_btn)
@@ -1584,7 +1584,7 @@ class CreateSimulatedImageModel(QMainWindow):
         # Delete button at bottom
         delete_btn = QPushButton('Delete')
         delete_btn.clicked.connect(
-            lambda checked=False, i=idx: self._delete_tab_by_index('ring', i)
+            lambda _checked=False, i=idx: self._delete_tab_by_index('ring', i)
         )
         main_layout.addStretch()
         main_layout.addWidget(delete_btn)
@@ -1760,11 +1760,13 @@ class CreateSimulatedImageModel(QMainWindow):
     def _on_body_crater_fill_slider(self, idx: int, value: int) -> None:
         fill_val = value / 1000.0
         tab_idx = self._find_tab_by_properties('body', idx)
-        tab_w = self._tabs.widget(tab_idx)  # type: ignore
-        spin = tab_w.crater_fill_spin  # type: ignore
-        spin.blockSignals(True)
-        spin.setValue(fill_val)
-        spin.blockSignals(False)
+        if tab_idx is not None:
+            tab_w = self._tabs.widget(tab_idx)  # type: ignore
+            if tab_w is not None:
+                spin = tab_w.crater_fill_spin  # type: ignore
+                spin.blockSignals(True)
+                spin.setValue(fill_val)
+                spin.blockSignals(False)
         if 0 <= idx < len(self.sim_params['bodies']):
             self.sim_params['bodies'][idx]['crater_fill'] = fill_val
             self._updater.request_update()
@@ -1772,7 +1774,16 @@ class CreateSimulatedImageModel(QMainWindow):
     def _on_body_crater_fill_spin(self, idx: int, value: float) -> None:
         slider_val = int(value * 1000)
         tab_idx = self._find_tab_by_properties('body', idx)
-        tab_w = self._tabs.widget(tab_idx)  # type: ignore
+        if tab_idx is not None:
+            tab_w = self._tabs.widget(tab_idx)  # type: ignore
+            if tab_w is not None:
+                slider = tab_w.crater_fill_slider  # type: ignore
+                slider.blockSignals(True)
+                slider.setValue(slider_val)
+                slider.blockSignals(False)
+        if 0 <= idx < len(self.sim_params['bodies']):
+            self.sim_params['bodies'][idx]['crater_fill'] = value
+            self._updater.request_update()
         slider = tab_w.crater_fill_slider  # type: ignore
         slider.blockSignals(True)
         slider.setValue(slider_val)
@@ -1784,11 +1795,13 @@ class CreateSimulatedImageModel(QMainWindow):
     def _on_body_anti_aliasing_slider(self, idx: int, value: int) -> None:
         aa_val = value / 1000.0
         tab_idx = self._find_tab_by_properties('body', idx)
-        tab_w = self._tabs.widget(tab_idx)  # type: ignore
-        spin = tab_w.anti_aliasing_spin  # type: ignore
-        spin.blockSignals(True)
-        spin.setValue(aa_val)
-        spin.blockSignals(False)
+        if tab_idx is not None:
+            tab_w = self._tabs.widget(tab_idx)  # type: ignore
+            if tab_w is not None:
+                spin = tab_w.anti_aliasing_spin  # type: ignore
+                spin.blockSignals(True)
+                spin.setValue(aa_val)
+                spin.blockSignals(False)
         if 0 <= idx < len(self.sim_params['bodies']):
             self.sim_params['bodies'][idx]['anti_aliasing'] = aa_val
             self._updater.request_update()
@@ -1796,11 +1809,13 @@ class CreateSimulatedImageModel(QMainWindow):
     def _on_body_anti_aliasing_spin(self, idx: int, value: float) -> None:
         slider_val = int(value * 1000)
         tab_idx = self._find_tab_by_properties('body', idx)
-        tab_w = self._tabs.widget(tab_idx)  # type: ignore
-        slider = tab_w.anti_aliasing_slider  # type: ignore
-        slider.blockSignals(True)
-        slider.setValue(slider_val)
-        slider.blockSignals(False)
+        if tab_idx is not None:
+            tab_w = self._tabs.widget(tab_idx)  # type: ignore
+            if tab_w is not None:
+                slider = tab_w.anti_aliasing_slider  # type: ignore
+                slider.blockSignals(True)
+                slider.setValue(slider_val)
+                slider.blockSignals(False)
         if 0 <= idx < len(self.sim_params['bodies']):
             self.sim_params['bodies'][idx]['anti_aliasing'] = value
             self._updater.request_update()
