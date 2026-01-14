@@ -1,7 +1,4 @@
-==========================================
-Developer Guide: Class Hierarchy
-==========================================
-
+===============
 Class Hierarchy
 ===============
 
@@ -175,8 +172,19 @@ The following Mermaid diagram shows the complete class hierarchy of the RMS-NAV 
           +create_model(always_create_model=False, never_create_model=False, create_annotations=True)
       }
 
+      class NavModelRingsBase {
+          <<abstract>>
+          +__init__(name, obs, *, config=None)
+          +create_model(always_create_model=False, never_create_model=False, create_annotations=True)*
+      }
+
       class NavModelRings {
           +__init__(name, obs, *, config=None)
+          +create_model(always_create_model=False, never_create_model=False, create_annotations=True)
+      }
+
+      class NavModelRingsSimulated {
+          +__init__(name, obs, sim_rings, *, config=None)
           +create_model(always_create_model=False, never_create_model=False, create_annotations=True)
       }
 
@@ -270,12 +278,15 @@ The following Mermaid diagram shows the complete class hierarchy of the RMS-NAV 
 
       NavModel <|-- NavModelStars
       NavModel <|-- NavModelBodyBase
-      NavModel <|-- NavModelRings
+      NavModel <|-- NavModelRingsBase
       NavModel <|-- NavModelTitan
       NavModel <|-- NavModelCombined
 
       NavModelBodyBase <|-- NavModelBody
       NavModelBodyBase <|-- NavModelBodySimulated
+
+      NavModelRingsBase <|-- NavModelRings
+      NavModelRingsBase <|-- NavModelRingsSimulated
 
       NavTechnique <|-- NavTechniqueCorrelateAll
       NavTechnique <|-- NavTechniqueManual
@@ -315,9 +326,10 @@ annotations. Public properties include the model name and snapshot (``name``,
 ``obs``), arrays (``model_img``, ``model_mask``, ``range``), optional quality
 measures (``uncertainty``, ``blur_amount``, ``confidence``), optional packed
 ``stretch_regions`` for per-region contrast, and ``annotations``. Implementations
-include complete classes for stars, bodies (including a simulated variant), rings,
-and Titan, plus a combined model used to merge the nearest visible model at each
-pixel.
+include complete classes for stars, bodies (including a simulated variant), rings
+(including a base class with shared functionality and subclasses for real and
+simulated rings), and Titan, plus a combined model used to merge the nearest
+visible model at each pixel.
 
 NavTechnique
 ------------

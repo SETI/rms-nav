@@ -73,7 +73,10 @@ class NavModelCombined(NavModel):
             rng = model.range
             if not isinstance(rng, np.ndarray):
                 rng = 0 if rng is None else rng
-                rng = np.zeros_like(model.model_img) + rng
+                rng_arr = self.obs.make_extfov_zeros()
+                rng_arr[:, :] = np.inf
+                rng_arr[model.model_mask] = rng
+                rng = rng_arr
             elif rng.shape != model.model_img.shape:
                 raise ValueError(f'Range shape differs from model image shape: {rng.shape} != '
                                  f'{model.model_img.shape}')

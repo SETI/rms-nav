@@ -27,12 +27,13 @@ from nav.nav_model import NavModelCombined
 from nav.obs import ObsSnapshot
 from nav.support.correlate import masked_ncc, navigate_with_pyramid_kpeaks
 from nav.ui.common import ZoomPanController, build_stretch_controls
+from nav.support.types import NDArrayFloatType, NDArrayUint8Type
 
 
-def _apply_stretch_gamma(image: np.ndarray,
+def _apply_stretch_gamma(image: NDArrayFloatType,
                          black: float,
                          white: float,
-                         gamma: float) -> np.ndarray:
+                         gamma: float) -> NDArrayUint8Type:
     """Apply black/white/gamma to a float image and return uint8 mono."""
     if white <= black:
         white = black + 1e-6
@@ -40,10 +41,10 @@ def _apply_stretch_gamma(image: np.ndarray,
     if gamma <= 0:
         gamma = 1.0
     scaled = np.power(scaled, 1.0 / gamma)
-    return (scaled * 255.0).astype(np.uint8)
+    return cast(NDArrayUint8Type, (scaled * 255.0).astype(np.uint8))
 
 
-def _bilinear_sample_periodic(arr: np.ndarray, y: float, x: float) -> float:
+def _bilinear_sample_periodic(arr: NDArrayFloatType, y: float, x: float) -> float:
     """Periodic bilinear sample on 2D array arr at float indices (y, x)."""
     h, w = arr.shape
     # Wrap

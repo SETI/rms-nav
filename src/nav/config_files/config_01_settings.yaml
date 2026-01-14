@@ -157,6 +157,15 @@ rings:
   emission_use_threshold: 0.2
   remove_saturn_shadow: true
   remove_body_shadows: false
+  label_font: liberation2/LiberationMono-Bold.ttf
+  label_font_size: 18
+    # 512: 18
+  label_font_color: [255, 0, 0]  # Red
+  # label_font_color: [255, 255, 0]  # Yellow
+  label_mask_enlarge: 10  # Number of pixels around a ring to avoid for label placement
+  label_horiz_gap: 7  # Horizontal gap between limb and head of arrow (left/right)
+  label_vert_gap: 5   # Vertical gap between limb and head of arrow (top/bottom)
+  label_limb_color: [255, 0, 0]  # Red
   # font:
   #   256: *id001
   #   512: *id001

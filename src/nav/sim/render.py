@@ -9,7 +9,8 @@ from scipy import ndimage
 from starcat import Star
 
 from nav.sim.sim_body import create_simulated_body
-from nav.support.types import MutableStar
+from nav.sim.sim_ring import render_ring
+from nav.support.types import MutableStar, NDArrayBoolType, NDArrayFloatType, NDArrayIntType
 
 
 @lru_cache(maxsize=1)
@@ -120,11 +121,11 @@ def _render_stars_cached(
     return (img, sim_star_list, star_info)
 
 
-def render_stars(img: np.ndarray,
+def render_stars(img: NDArrayFloatType,
                  stars_params: list[dict[str, Any]],
                  offset_v: float,
                  offset_u: float
-                 ) -> tuple[np.ndarray, list[MutableStar], list[dict[str, Any]]]:
+                 ) -> tuple[NDArrayFloatType, list[MutableStar], list[dict[str, Any]]]:
     """Render stars into img. Returns (img, sim_star_list, star_render_info)."""
     size_v, size_u = img.shape
     stars_params_json = json.dumps(stars_params, sort_keys=True)
@@ -154,7 +155,7 @@ def _render_body_shape_cached(
     crater_relief_scale: float,
     anti_aliasing: float,
     body_seed: Optional[int],
-) -> np.ndarray:
+) -> NDArrayFloatType:
     """First layer cache: compute body shape at reference center (image center).
 
     Caches body shapes based on all parameters except center_v/center_u.
@@ -228,9 +229,9 @@ def _render_bodies_positioned_cached(
 
     inventory: dict[str, dict[str, float]] = {}
     body_model_dict: dict[str, dict[str, Any]] = {}
-    body_masks: list[np.ndarray] = []
-    body_mask_map: dict[str, np.ndarray] = {}
-    body_index_map = np.zeros((size_v, size_u), dtype=np.int32)
+    body_masks: list[NDArrayBoolType] = []
+    body_mask_map: dict[str, NDArrayBoolType] = {}
+    body_index_map: NDArrayIntType = np.zeros((size_v, size_u), dtype=np.int32)
 
     ref_center_v = size_v / 2.0
     ref_center_u = size_u / 2.0
@@ -310,8 +311,96 @@ def _render_bodies_positioned_cached(
     }
 
 
+def _render_single_body(
+    img: NDArrayFloatType,
+    body_params: dict[str, Any],
+    offset_v: float,
+    offset_u: float,
+    *,
+    seed: Optional[int] = None,
+    ref_center_v: float,
+    ref_center_u: float,
+) -> tuple[NDArrayBoolType, dict[str, Any]]:
+    """Render a single body into the image.
+
+    Parameters:
+        img: Image array to modify in-place.
+        body_params: Body parameters dictionary.
+        offset_v: V offset to apply.
+        offset_u: U offset to apply.
+        seed: Random seed for crater generation.
+        ref_center_v: Reference center V for body shape caching.
+        ref_center_u: Reference center U for body shape caching.
+
+    Returns:
+        Tuple of (body_mask, body_info_dict) where body_info_dict contains
+        name, inventory item, and model params.
+    """
+    size_v, size_u = img.shape
+    body_name = body_params.get('name', 'SIM-BODY').upper()
+
+    center_v = float(body_params.get('center_v', size_v / 2.0)) + offset_v
+    center_u = float(body_params.get('center_u', size_u / 2.0)) + offset_u
+
+    axis1 = float(body_params.get('axis1', 0.0))
+    axis2 = float(body_params.get('axis2', 0.0))
+    axis3 = float(body_params.get('axis3', min(axis1, axis2)))
+
+    rotation_z = np.radians(body_params.get('rotation_z', 0.0))
+    rotation_tilt = np.radians(body_params.get('rotation_tilt', 0.0))
+    illumination_angle = np.radians(body_params.get('illumination_angle', 0.0))
+    phase_angle = np.radians(body_params.get('phase_angle', 0.0))
+
+    crater_fill = float(body_params.get('crater_fill', 0.0))
+    crater_min_radius = float(body_params.get('crater_min_radius', 0.05))
+    crater_max_radius = float(body_params.get('crater_max_radius', 0.25))
+    crater_power_law_exponent = float(body_params.get('crater_power_law_exponent', 3.0))
+    crater_relief_scale = float(body_params.get('crater_relief_scale', 0.6))
+    anti_aliasing = float(body_params.get('anti_aliasing', 1.0))
+    body_seed = seed if seed is not None else body_params.get('seed')
+
+    # Get cached body shape (at reference center)
+    body_shape = _render_body_shape_cached(
+        size_v, size_u, axis1, axis2, axis3,
+        rotation_z, rotation_tilt, illumination_angle, phase_angle,
+        crater_fill, crater_min_radius, crater_max_radius,
+        crater_power_law_exponent, crater_relief_scale, anti_aliasing,
+        body_seed
+    )
+
+    # Translate body from reference center to actual center
+    dv = center_v - ref_center_v
+    du = center_u - ref_center_u
+
+    # Create positioned body by translating the cached shape
+    positioned_body = ndimage.shift(
+        body_shape, (dv, du), order=1, mode='constant', cval=0.0
+    )
+
+    # Composition: overwrite where body contributes
+    mask = positioned_body > 0
+    img[mask] = positioned_body[mask]
+
+    max_dim = max(axis1, axis2, axis3) / 2.0
+    inventory_item = {
+        'v_min_unclipped': center_v - max_dim,
+        'v_max_unclipped': center_v + max_dim,
+        'u_min_unclipped': center_u - max_dim,
+        'u_max_unclipped': center_u + max_dim,
+        'v_pixel_size': 2 * max_dim,
+        'u_pixel_size': 2 * max_dim,
+        'range': body_params.get('range', 1.0),
+    }
+
+    return mask, {
+        'name': body_name,
+        'inventory': inventory_item,
+        'params': body_params,
+    }
+
+
 def render_bodies(
-    img: np.ndarray,
+    img: NDArrayFloatType,
     bodies_params: list[dict[str, Any]],
     offset_v: float,
     offset_u: float,
@@ -322,12 +411,12 @@ def render_bodies(
 
     Returns: a dict with keys:
 
-      - img: np.ndarray the rendered image
+      - img: NDArrayFloatType the rendered image
       - bodies: dict[str, dict[str, Any]]
       - inventory: dict[str, dict[str, float]]
-      - body_masks: list[np.ndarray]
+      - body_masks: list[NDArrayBoolType]
       - order_near_to_far: list[str]
-      - body_index_map: np.ndarray (int32), 1-based index into order_near_to_far or 0 if none
+      - body_index_map: NDArrayIntType (int32), 1-based index into order_near_to_far or 0 if none
     """
     size_v, size_u = img.shape
 
@@ -370,14 +459,14 @@ def _render_background_noise_cached(
     size_u: int,
     noise_level: float,
     seed: int,
-) -> np.ndarray:
+) -> NDArrayFloatType:
     """Internal cached function to compute background noise."""
     rng = np.random.RandomState(seed)
     noise = rng.normal(0.0, noise_level, size=(size_v, size_u))
     return noise
 
 
-def render_background_noise(img: np.ndarray, noise_level: float, seed: int) -> None:
+def render_background_noise(img: NDArrayFloatType, noise_level: float, seed: int) -> None:
     """Add Gaussian background noise to the image.
 
     Parameters:
@@ -400,7 +489,7 @@ def _render_background_stars_cached(
     seed: int,
     psf_sigma: float,
     distribution_exponent: float,
-) -> np.ndarray:
+) -> NDArrayFloatType:
     """Internal cached function to compute background star additions."""
     rng = np.random.RandomState(seed)
     star_additions = np.zeros((size_v, size_u), dtype=np.float64)
@@ -456,7 +545,7 @@ def _render_background_stars_cached(
 
 
 def render_background_stars(
-        img: np.ndarray, n_stars: int, seed: int, psf_sigma: float = 0.9,
+        img: NDArrayFloatType, n_stars: int, seed: int, psf_sigma: float = 0.9,
         distribution_exponent: float = 2.5) -> None:
     """Add random background stars to the image.
 
@@ -482,7 +571,7 @@ def _render_combined_model_cached(
     sim_params_json: str,
     *,
     ignore_offset: bool,
-) -> tuple[np.ndarray, dict[str, Any]]:
+) -> tuple[NDArrayFloatType, dict[str, Any]]:
     """Internal cached function to compute combined model rendering."""
     sim_params = json.loads(sim_params_json)
     size_v = int(sim_params['size_v'])
@@ -494,7 +583,7 @@ def _render_combined_model_cached(
         offset_v = 0.0
         offset_u = 0.0
 
-    img = np.zeros((size_v, size_u), dtype=np.float64)
+    img = cast(NDArrayFloatType, np.zeros((size_v, size_u), dtype=np.float64))
 
     # Get random seed for background effects
     random_seed = int(sim_params.get('random_seed', 42))
@@ -517,24 +606,139 @@ def _render_combined_model_cached(
 
     stars_params = sim_params.get('stars', []) or []
     bodies_params = sim_params.get('bodies', []) or []
+    rings_params = sim_params.get('rings', []) or []
 
     img, sim_star_list, star_info = render_stars(img, stars_params, offset_v, offset_u)
 
-    # Pass seed to render_bodies for crater generation
-    bodies_result = render_bodies(img, bodies_params, offset_v, offset_u, seed=random_seed)
-    img = bodies_result['img']
-    body_models = bodies_result['bodies']
-    inventory = bodies_result['inventory']
-    body_masks = bodies_result['body_masks']
-    order_near_to_far = bodies_result['order_near_to_far']
-    body_index_map = bodies_result['body_index_map']
+    # Process rings: assign default ranges
+    for ring_number, ring_params in enumerate(rings_params):
+        if 'range' in ring_params:
+            ring_params['range'] = float(ring_params['range'])
+        else:
+            # Default range: start after bodies (assuming bodies use 1, 2, 3, ...)
+            # Use a large starting value to ensure rings are behind bodies by default
+            ring_params['range'] = float(ring_number + 1000.0)
+
+    # Process bodies: assign default ranges
+    bodies_with_ranges = []
+    for body_number, body_params in enumerate(bodies_params):
+        body_params_copy = dict(body_params)
+        if 'range' in body_params_copy:
+            body_params_copy['range'] = float(body_params_copy['range'])
+        else:
+            body_params_copy['range'] = float(body_number + 1)
+        bodies_with_ranges.append(body_params_copy)
+
+    # Combine rings and bodies, sort by range (far to near)
+    render_items: list[tuple[float, str, Any, int]] = []
+    for idx, ring_params in enumerate(rings_params):
+        render_items.append((ring_params['range'], 'ring', ring_params, idx))
+    for idx, body_params in enumerate(bodies_with_ranges):
+        render_items.append((body_params['range'], 'body', body_params, idx))
+
+    # Sort all items by range (far to near)
+    render_items.sort(key=lambda x: x[0], reverse=True)
+
+    # Render in range order (far to near)
+    time = float(sim_params.get('time', 0.0))
+    epoch = float(sim_params.get('ring_epoch', 0.0))
+    # Get shade_solid_rings setting from sim_params
+    shade_solid = bool(sim_params.get('shade_solid_rings', False))
+    ring_masks: list[NDArrayBoolType] = []
+    # Track ring masks in original order for click detection
+    ring_mask_map: dict[int, NDArrayBoolType] = {}
+
+    # Track body data for final metadata
+    body_models_dict: dict[str, dict[str, Any]] = {}
+    # Store body masks by original index, not render order
+    body_mask_map_by_idx: dict[int, NDArrayBoolType] = {}
+    body_mask_map_dict: dict[str, NDArrayBoolType] = {}
+    inventory_dict: dict[str, dict[str, float]] = {}
+    body_index_map: NDArrayIntType = np.zeros((size_v, size_u), dtype=np.int32)
+
+    ref_center_v = size_v / 2.0
+    ref_center_u = size_u / 2.0
+
+    # Build order_near_to_far for bodies (needed for body_index_map)
+    sorted_bodies_by_range = sorted(bodies_with_ranges, key=lambda x: x['range'])
+    order_near_to_far = [
+        bp.get('name', f'SIM-BODY-{i+1}').upper()
+        for i, bp in enumerate(sorted_bodies_by_range)
+    ]
+
+    for _range_val, item_type, item_params, orig_idx in render_items:
+        if item_type == 'ring':
+            feature_type = item_params.get('feature_type', 'RINGLET')
+
+            # Render ring into temporary image to extract coverage
+            # For proper range-based composition, we need the ring contribution only
+            if feature_type == 'RINGLET':
+                # For RINGLET: render into empty image to get ring_coverage
+                ring_img = np.zeros((size_v, size_u), dtype=np.float64)
+                render_ring(ring_img, item_params, offset_v, offset_u, time=time, epoch=epoch,
+                            shade_solid=shade_solid)
+                # ring_img now contains just the ring_coverage (since 0 + coverage = coverage)
+                ring_mask = ring_img > 0.0
+                ring_mask_map[orig_idx] = ring_mask
+                # Add ring to main image (proper range-based: lower range overwrites)
+                img[ring_mask] = ring_img[ring_mask]
+            else:  # GAP
+                # For GAP: render into image with known background to extract coverage
+                # Use 1.0 as background so we can see what was subtracted
+                temp_bg = np.ones((size_v, size_u), dtype=np.float64)
+                render_ring(temp_bg, item_params, offset_v, offset_u, time=time, epoch=epoch,
+                            shade_solid=shade_solid)
+                # gap_coverage is what was subtracted: 1.0 - result
+                ring_mask = temp_bg < 1.0
+                ring_mask_map[orig_idx] = ring_mask
+                # Subtract gap from main image (proper range-based: lower range overwrites)
+                img[ring_mask] = temp_bg[ring_mask]
+        elif item_type == 'body':
+            # Render single body
+            body_mask, body_info = _render_single_body(
+                img, item_params, offset_v, offset_u,
+                seed=random_seed, ref_center_v=ref_center_v, ref_center_u=ref_center_u)
+            # Store mask by original index for proper ordering
+            body_mask_map_by_idx[orig_idx] = body_mask
+            body_mask_map_dict[body_info['name']] = body_mask
+            body_models_dict[body_info['name']] = body_info['params']
+            inventory_dict[body_info['name']] = body_info['inventory']
+            # Index into near-to-far order is 1-based
+            near_index = order_near_to_far.index(body_info['name']) + 1
+            body_index_map[body_mask] = near_index
+
+    # Build body_masks_list in original order (matching bodies_params)
+    body_masks_list: list[NDArrayBoolType] = []
+    for idx in range(len(bodies_with_ranges)):
+        if idx in body_mask_map_by_idx:
+            body_masks_list.append(body_mask_map_by_idx[idx])
+        else:
+            # Should not happen, but create empty mask if missing
+            body_masks_list.append(np.zeros((size_v, size_u), dtype=np.bool_))
+
+    # Build ring_masks in original order for click detection
+    for idx in range(len(rings_params)):
+        if idx in ring_mask_map:
+            ring_masks.append(ring_mask_map[idx])
+        else:
+            # Should not happen, but create empty mask if missing
+            ring_masks.append(np.zeros((size_v, size_u), dtype=np.bool_))
+
+    # Create bodies_result dict in the same format as render_bodies
+    # Note: img is already the correct variable, no need to reassign
+    body_models = body_models_dict
+    inventory = inventory_dict
+    body_masks = body_masks_list
+    # order_near_to_far and body_index_map are already defined above
 
     meta: dict[str, Any] = {
         'stars': sim_star_list,
         'bodies': body_models,
+        'rings': rings_params,
         'inventory': inventory,
         'star_info': star_info,
         'body_masks': body_masks,
+        'ring_masks': ring_masks,
         'order_near_to_far': order_near_to_far,
         'body_index_map': body_index_map,
     }
@@ -545,7 +749,7 @@ def render_combined_model(
     sim_params: dict[str, Any],
     *,
     ignore_offset: bool = False
-) -> tuple[np.ndarray, dict[str, Any]]:
+) -> tuple[NDArrayFloatType, dict[str, Any]]:
     """Render stars then bodies from a full sim_params dict. Returns (img, meta).
 
     ignore_offset = True should be used when rendering the image in the GUI, but not
