@@ -11,6 +11,7 @@ Welcome to the Documentation for RMS-NAV!
    :maxdepth: 2
    :caption: Contents:
 
+   introduction
    user_guide
    developer_guide
    api_reference

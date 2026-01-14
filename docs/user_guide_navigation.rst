@@ -99,7 +99,7 @@ Configuration System
 RMS-NAV uses a hierarchical YAML-based configuration system. For detailed
 information about the configuration system, including its structure, default
 YAML files, and how to override settings using configuration files and
-command-line options, see :doc:`user_guide_configuration`.
+command-line options, see :doc:`introduction_configuration`.
 
 Command-Line Interface
 ======================
@@ -124,7 +124,7 @@ Environment options
 ^^^^^^^^^^^^^^^^^^^
 
 * ``--config-file PATH`` (repeatable): one or more configuration file paths to
-  override defaults. See :doc:`user_guide_configuration` for details.
+  override defaults. See :doc:`introduction_configuration` for details.
 
 * ``--pds3-holdings-root PATH``: root directory or URL for PDS3 holdings,
   overriding both the ``PDS3_HOLDINGS_DIR`` environment variable and any
@@ -283,7 +283,7 @@ Simulated Images
 RMS-NAV supports simulated images created using the simulated image creation GUI.
 For detailed information about the GUI, the JSON parameter file structure
 including all supported fields, and how to run navigation with simulated images,
-see :doc:`user_guide_simulated_images`.
+see :doc:`introduction_simulated_images`.
 
 Navigation Techniques
 =====================
