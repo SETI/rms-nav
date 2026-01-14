@@ -290,16 +290,23 @@ class NavMaster(NavBase):
             logger.info('No closest planet found - skipping ring models')
             return
 
-        model_name = 'rings'
-
         if obs.is_simulated:
             # Use simulated rings from observation
             sim_rings = getattr(obs, 'sim_rings', [])
             if not sim_rings:
                 logger.info('No simulated rings defined - skipping ring models')
                 return
-            ring_model: NavModelRingsBase = NavModelRingsSimulated(
-                model_name, obs, sim_rings, config=config)
+            for ring_params in sim_rings:
+                ring_name = ring_params.get('name', 'UNNAMED')
+                model_name = f'ring:{ring_name}'
+                if not any(fnmatch.fnmatch(model_name.lower(), x.lower())
+                           for x in self._nav_models_to_use):
+                    continue
+                ring_model: NavModelRingsBase = NavModelRingsSimulated(
+                    model_name, obs, ring_name, ring_params, config=config)
+                ring_model.create_model()
+                self._ring_models.append(ring_model)
+                self._metadata['models']['ring_model'][model_name] = ring_model.metadata
         else:
             # Check if rings are configured for this planet
             rings_config = config.rings
@@ -314,12 +321,12 @@ class NavMaster(NavBase):
                 return
 
             # Create ring model from configuration
+            model_name = 'rings'
             ring_model = NavModelRings(model_name, obs, config=config)
 
-        ring_model.create_model()
-        self._ring_models.append(ring_model)
-        self._metadata['models']['ring_model'] = ring_model.metadata
-        logger.info('Ring model created successfully')
+            ring_model.create_model()
+            self._ring_models.append(ring_model)
+            self._metadata['models']['ring_model'] = ring_model.metadata
 
     def compute_titan_models(self) -> None:
         """Creates Titan-specific navigation models for the observation.

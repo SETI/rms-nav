@@ -42,7 +42,7 @@ class NavModelBodyBase(NavModel):
         """
         obs = self._obs
         body_name = getattr(self, '_body_name', 'BODY')
-        config = self._config.bodies
+        body_config = self._config.bodies
 
         text_loc: list[TextLocInfo] = []
         v_center_extfov = v_center + obs.extfov_margin_v
@@ -65,7 +65,7 @@ class NavModelBodyBase(NavModel):
 
         # Scan around center to place labels on limb
         for orig_dist in range(0, max(body_mask_v_ctr - body_mask_v_min,
-                                      config.label_scan_v)):
+                                      body_config.label_scan_v)):
             for neg in [-1, 1]:
                 dist = orig_dist * neg
                 v = body_mask_v_ctr + dist
@@ -78,13 +78,13 @@ class NavModelBodyBase(NavModel):
                     angle = np.rad2deg(np.arctan2(v - v_center_extfov, u - u_center_extfov)) % 360
                     if 135 < angle < 225:  # Left side
                         text_loc.append(TextLocInfo(TEXTINFO_LEFT_ARROW,
-                                                    v, u - config.label_horiz_gap))
+                                                    v, u - body_config.label_horiz_gap))
                     elif angle >= 225:  # Top side
                         text_loc.append(TextLocInfo(TEXTINFO_TOP_ARROW,
-                                                    v - config.label_vert_gap, u))
+                                                    v - body_config.label_vert_gap, u))
                     else:  # Bottom side
                         text_loc.append(TextLocInfo(TEXTINFO_BOTTOM_ARROW,
-                                                    v + config.label_vert_gap, u))
+                                                    v + body_config.label_vert_gap, u))
 
                 # Right side
                 u = body_mask.shape[1] - int(np.argmax(body_mask[v, ::-1])) - 1
@@ -92,31 +92,32 @@ class NavModelBodyBase(NavModel):
                     angle = np.rad2deg(np.arctan2(v - v_center_extfov, u - u_center_extfov)) % 360
                     if angle > 315 or angle < 45:  # Right side
                         text_loc.append(TextLocInfo(TEXTINFO_RIGHT_ARROW,
-                                                    v, u + config.label_horiz_gap))
+                                                    v, u + body_config.label_horiz_gap))
                     elif angle >= 225:  # Top side
                         text_loc.append(TextLocInfo(TEXTINFO_TOP_ARROW,
-                                                    v - config.label_vert_gap, u))
+                                                    v - body_config.label_vert_gap, u))
                     else:  # Bottom side
                         text_loc.append(TextLocInfo(TEXTINFO_BOTTOM_ARROW,
-                                                    v + config.label_vert_gap, u))
+                                                    v + body_config.label_vert_gap, u))
 
                 if orig_dist == 0:
                     text_loc.append(TextLocInfo(TEXTINFO_TOP_ARROW,
-                                                body_mask_v_min - config.label_vert_gap,
+                                                body_mask_v_min - body_config.label_vert_gap,
                                                 body_mask_u_ctr))
                     text_loc.append(TextLocInfo(TEXTINFO_BOTTOM_ARROW,
-                                                body_mask_v_max + config.label_vert_gap,
+                                                body_mask_v_max + body_config.label_vert_gap,
                                                 body_mask_u_ctr))
                     break
 
         # Coarse scan for additional candidates
-        for v_orig_dist in range(0, body_mask_v_ctr - body_mask_v_min, config.label_grid_v):
+        for v_orig_dist in range(0, body_mask_v_ctr - body_mask_v_min, body_config.label_grid_v):
             for v_neg in [-1, 1]:
                 v_dist = v_orig_dist * v_neg
                 v = body_mask_v_ctr + v_dist
                 if not 0 <= v < body_mask.shape[0]:
                     continue
-                for u_orig_dist in range(0, body_mask_u_ctr - body_mask_u_min, config.label_grid_u):
+                for u_orig_dist in range(0, body_mask_u_ctr - body_mask_u_min,
+                                         body_config.label_grid_u):
                     for u_neg in [-1, 1]:
                         u_dist = u_orig_dist * u_neg
                         u = body_mask_u_ctr + u_dist
@@ -133,15 +134,15 @@ class NavModelBodyBase(NavModel):
 
         text_info = AnnotationTextInfo(body_name, text_loc=text_loc,
                                        ref_vu=None,
-                                       font=config.label_font,
-                                       font_size=config.label_font_size,
-                                       color=config.label_font_color)
+                                       font=body_config.label_font,
+                                       font_size=body_config.label_font_size,
+                                       color=body_config.label_font_color)
 
-        text_avoid_mask = ndimage.maximum_filter(body_mask, config.label_mask_enlarge)
+        text_avoid_mask = ndimage.maximum_filter(body_mask, body_config.label_mask_enlarge)
 
         annotation = Annotation(obs, limb_mask,
-                                config.label_limb_color,
-                                thicken_overlay=config.outline_thicken,
+                                body_config.label_limb_color,
+                                thicken_overlay=body_config.outline_thicken,
                                 avoid_mask=text_avoid_mask,
                                 text_info=text_info, config=self._config)
 

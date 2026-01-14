@@ -257,7 +257,7 @@ def test_edge_fade_conflict_detection(ring_model):
     # Create radii array that varies from 90 to 115 km
     u_coords = np.arange(20)
     v_coords = np.arange(20)
-    u_grid, v_grid = np.meshgrid(u_coords, v_coords)
+    u_grid, _v_grid = np.meshgrid(u_coords, v_coords)
     # Map to radial distances: center at 100 km, extend outward
     radii = 100.0 + (u_grid - 10) * 0.5  # 90 to 110 km range
     edge_radius = 100.0
@@ -296,7 +296,7 @@ def test_edge_fade_no_conflict(ring_model):
     # Create radii array that varies from 80 to 130 km to cover full fade extent
     u_coords = np.arange(30)
     v_coords = np.arange(30)
-    u_grid, v_grid = np.meshgrid(u_coords, v_coords)
+    u_grid, _v_grid = np.meshgrid(u_coords, v_coords)
     # Map to radial distances: center at 100 km, extend outward
     # Fade extends from 100 to 120 km, so we need coverage up to at least 120 km
     radii = 100.0 + (u_grid - 15) * 1.5  # 77.5 to 122.5 km range

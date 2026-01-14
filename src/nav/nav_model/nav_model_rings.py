@@ -14,7 +14,6 @@ import math
 from typing import Any, Optional
 
 import numpy as np
-import numpy.ma as ma
 
 import oops
 from oops.backplane import Backplane
@@ -118,7 +117,7 @@ class NavModelRings(NavModelRingsBase):
         # Get planet-specific configuration
         epoch_str = planet_config.get('epoch')  # only relevant for rings with multiple modes
         if epoch_str is None:
-            raise ValueError('No epoch configured for planet {planet}')
+            raise ValueError(f'No epoch configured for planet {planet}')
         epoch = utc_to_et(epoch_str)
 
         feature_width_pix = planet_config.get('feature_width', 100)
@@ -176,7 +175,6 @@ class NavModelRings(NavModelRingsBase):
             return
 
         # Get backplanes
-        radii_mvals = bp_radii.mvals
         resolutions = obs.ext_bp.ring_radial_resolution(ring_target).vals
 
         # Initialize model arrays
@@ -221,7 +219,7 @@ class NavModelRings(NavModelRingsBase):
                     self._render_full_ringlet(
                         obs, model, model_mask,
                         ring_target=ring_target, inner_data=inner_data,
-                        outer_data=outer_data, epoch=epoch, radii_mvals=radii_mvals,
+                        outer_data=outer_data, epoch=epoch,
                         resolutions=resolutions, feature_name=feature_name)
                 else:
                     # Single edge or gap
@@ -231,7 +229,6 @@ class NavModelRings(NavModelRingsBase):
                             ring_target=ring_target,
                             edge_data=inner_data,
                             epoch=epoch,
-                            radii_mvals=radii_mvals,
                             resolutions=resolutions,
                             feature_width_pix=feature_width_pix,
                             min_fade_width_multiplier=min_fade_width_multiplier,
@@ -245,7 +242,6 @@ class NavModelRings(NavModelRingsBase):
                             ring_target=ring_target,
                             edge_data=outer_data,
                             epoch=epoch,
-                            radii_mvals=radii_mvals,
                             resolutions=resolutions,
                             feature_width_pix=feature_width_pix,
                             min_fade_width_multiplier=min_fade_width_multiplier,
@@ -650,7 +646,7 @@ class NavModelRings(NavModelRingsBase):
 
         return np.asarray(shade, dtype=np.float64)
 
-    def _compute_edge_fade(self,
+    def _compute_edge_fade(self,  # type: ignore[override]
                            *,
                            model: NDArrayFloatType,
                            radii: np.ndarray,
@@ -804,7 +800,6 @@ class NavModelRings(NavModelRingsBase):
                              inner_data: list[dict[str, Any]],
                              outer_data: list[dict[str, Any]],
                              epoch: float,
-                             radii_mvals: ma.MaskedArray,
                              resolutions: np.ndarray,
                              feature_name: Optional[str]) -> None:
         """Render a complete ringlet with both inner and outer edges.
@@ -817,7 +812,6 @@ class NavModelRings(NavModelRingsBase):
             inner_data: Inner edge mode data.
             outer_data: Outer edge mode data.
             epoch: Epoch time for mode calculations.
-            radii_mvals: Masked array of ring radii.
             resolutions: Array of radial resolutions.
             feature_name: Optional feature name for logging.
         """
@@ -885,7 +879,6 @@ class NavModelRings(NavModelRingsBase):
                             ring_target: str,
                             edge_data: list[dict[str, Any]],
                             epoch: float,
-                            radii_mvals: ma.MaskedArray,
                             resolutions: np.ndarray,
                             feature_width_pix: float,
                             min_fade_width_multiplier: float,
@@ -902,12 +895,10 @@ class NavModelRings(NavModelRingsBase):
             ring_target: Ring target key.
             edge_data: Edge mode data.
             epoch: Epoch time for mode calculations.
-            radii_mvals: Masked array of ring radii.
             resolutions: Array of radial resolutions.
             feature_width_pix: Feature width in pixels.
             min_fade_width_multiplier: Minimum fade width multiplier.
-            feature_list_by_a: List of (radius, type) tuples for conflict
-                checking.
+            feature_list_by_a: List of (radius, type) tuples for conflict checking.
             feature_type: 'GAP' or 'RINGLET'.
             feature_name: Optional feature name for logging.
             edge_type: 'inner' or 'outer'.
@@ -941,7 +932,7 @@ class NavModelRings(NavModelRingsBase):
             shade_above = (edge_type == 'outer')
 
         # Get resolution at this radius
-        min_res, max_res = self._find_resolutions_by_a(obs, ring_target, a=edge_a)
+        min_res, _max_res = self._find_resolutions_by_a(obs, ring_target, a=edge_a)
         if min_res == 0.0:
             self._logger.warning(
                 f'Could not find resolution for edge at {edge_a:.2f} km')

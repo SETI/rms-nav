@@ -1,9 +1,6 @@
-========================================
-Developer Guide: Backplanes Architecture
-========================================
-
-Backplanes Architecture
-=======================
+==========
+Backplanes
+==========
 
 Modules
 ~~~~~~~

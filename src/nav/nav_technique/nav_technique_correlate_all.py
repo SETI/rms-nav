@@ -101,7 +101,7 @@ class NavTechniqueCorrelateAll(NavTechnique):
             if combined_model.model_mask is None:
                 raise ValueError('Combined model mask is None')
 
-            if False:  # TODO
+            if True:  # TODO
                 import matplotlib.pyplot as plt
                 plt.imshow(combined_model.model_img)
                 plt.show()

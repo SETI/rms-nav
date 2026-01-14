@@ -10,7 +10,7 @@ from typing import Any, cast
 
 import numpy as np
 
-from nav.support.types import NDArrayBoolType
+from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
 
 def compute_edge_radius_mode1(
@@ -48,21 +48,15 @@ def compute_edge_radius_mode1(
     du = pixel_u - center_u
     angle = math.atan2(dv, du)
 
-    # Compute current longitude of pericenter
-    days_since_epoch = (time - epoch) / 86400.0
-    current_long_peri = math.radians(long_peri + rate_peri * days_since_epoch)
-
-    # Compute true anomaly (angle relative to pericenter)
-    true_anomaly = angle - current_long_peri
-
-    # Compute radius using elliptical orbit equation: r = a(1 - e^2) / (1 + e*cos(ν))
-    # where e = ae / a
-    e = ae / a if a > 0 else 0.0
-    if e >= 1.0:
-        e = 0.99  # Clamp eccentricity to valid range
-    r = a * (1.0 - e * e) / (1.0 + e * math.cos(true_anomaly))
-
-    return r
+    # Delegate to compute_edge_radius_at_angle which contains the shared ellipse formula
+    return compute_edge_radius_at_angle(
+        angle=angle,
+        a=a,
+        ae=ae,
+        long_peri=long_peri,
+        rate_peri=rate_peri,
+        epoch=epoch,
+        time=time)
 
 
 def compute_edge_radius_at_angle(
@@ -106,6 +100,47 @@ def compute_edge_radius_at_angle(
     return r
 
 
+def _compute_edge_radii_array(
+    angles: np.ndarray,
+    *,
+    a: float,
+    ae: float,
+    long_peri: float,
+    rate_peri: float,
+    epoch: float,
+    time: float,
+) -> NDArrayFloatType:
+    """Compute edge radii array for all angles using mode 1 parameters.
+
+    Parameters:
+        angles: Array of angles in radians from center.
+        a: Semi-major axis in pixels.
+        ae: Eccentricity times semi-major axis in pixels.
+        long_peri: Longitude of pericenter in degrees.
+        rate_peri: Rate of precession in degrees/day.
+        epoch: Epoch time (TDB seconds).
+        time: Current time (TDB seconds).
+
+    Returns:
+        Array of edge radii in pixels at the given angles.
+    """
+    # Compute current longitude of pericenter
+    days_since_epoch = (time - epoch) / 86400.0
+    current_long_peri = math.radians(long_peri + rate_peri * days_since_epoch)
+
+    # Compute true anomaly (angle relative to pericenter)
+    true_anomaly = angles - current_long_peri
+
+    # Compute radius using elliptical orbit equation: r = a(1 - e^2) / (1 + e*cos(ν))
+    # where e = ae / a
+    e = ae / a if a > 0 else 0.0
+    if e >= 1.0:
+        e = 0.99  # Clamp eccentricity to valid range
+    r = a * (1.0 - e * e) / (1.0 + e * np.cos(true_anomaly))
+
+    return cast(NDArrayFloatType, r)
+
+
 def compute_border_atop_simulated(
     size_v: int,
     size_u: int,
@@ -140,12 +175,12 @@ def compute_border_atop_simulated(
     Returns:
         Boolean array where True indicates pixels at the edge.
     """
-    # Create coordinate grids
-    v_coords = np.arange(size_v, dtype=np.float64)
-    u_coords = np.arange(size_u, dtype=np.float64)
+    # Create coordinate grids at pixel centers (0.5 offset from integer coordinates)
+    v_coords = np.arange(size_v, dtype=np.float64) + 0.5
+    u_coords = np.arange(size_u, dtype=np.float64) + 0.5
     v_grid, u_grid = np.meshgrid(v_coords, u_coords, indexing='ij')
 
-    # Compute distances from center
+    # Compute distances from center at pixel centers
     dv = v_grid - center_v
     du = u_grid - center_u
     distances = np.sqrt(dv * dv + du * du)
@@ -197,6 +232,45 @@ def compute_border_atop_simulated(
     return cast(NDArrayBoolType, border)
 
 
+def _compute_antialiasing_shade(edge_dist: np.ndarray, resolution: float) -> np.ndarray:
+    """Compute anti-aliasing shade from edge distance.
+
+    Parameters:
+        edge_dist: Distance from pixel center to edge (positive = outside, negative = inside).
+        resolution: Pixel resolution for anti-aliasing.
+
+    Returns:
+        Anti-aliasing shade value [0, 1] where 0.5 means pixel center is at edge.
+    """
+    shade = 0.5 + edge_dist / resolution
+    shade[shade < 0.0] = 0.0
+    shade[shade > 1.0] = 1.0
+    return shade
+
+
+def _compute_fade_factor(edge_dist: np.ndarray,
+                         shading_distance: float,
+                         fade_outward: bool) -> NDArrayFloatType:
+    """Compute fade factor for edge shading.
+
+    Parameters:
+        edge_dist: Distance from pixel center to edge (positive = outside, negative = inside).
+        shading_distance: Distance in pixels for edge fading.
+        fade_outward: If True, fade outward from edge (positive edge_dist); if False, fade inward
+            (negative edge_dist).
+
+    Returns:
+        Fade factor [0, 1] where 1.0 is at the edge and 0.0 is at shading_distance away.
+    """
+    if fade_outward:
+        # Fade outward: distance outside edge (positive edge_dist)
+        fade_dist = np.maximum(0.0, edge_dist)
+    else:
+        # Fade inward: distance inside edge (negative edge_dist)
+        fade_dist = np.maximum(0.0, -edge_dist)
+    return cast(NDArrayFloatType, np.clip(1.0 - fade_dist / shading_distance, 0.0, 1.0))
+
+
 def render_ring(
     img: np.ndarray,
     ring_params: dict[str, Any],
@@ -205,6 +279,7 @@ def render_ring(
     *,
     time: float = 0.0,
     epoch: float = 0.0,
+    shade_solid: bool = False,
 ) -> None:
     """Render a single ring or gap into the image.
 
@@ -215,12 +290,15 @@ def render_ring(
             - feature_type: str, 'RINGLET' or 'GAP'
             - center_v: float, V coordinate of ring center
             - center_u: float, U coordinate of ring center
+            - shading_distance: float, distance in pixels for edge fading
             - inner_data: list[dict], mode data for inner edge (mode 1 required)
             - outer_data: list[dict], mode data for outer edge (mode 1 required)
         offset_v: V offset to apply.
         offset_u: U offset to apply.
         time: Current time in TDB seconds (default 0.0).
         epoch: Epoch time in TDB seconds (default 0.0).
+        shade_solid: If True, solid rings (with both edges) are shaded on both sides
+            as if they were two rings (one with inner edge only, one with outer edge only).
     """
     size_v, size_u = img.shape
     feature_type = ring_params.get('feature_type', 'RINGLET')
@@ -231,40 +309,30 @@ def render_ring(
     inner_data = ring_params.get('inner_data', [])
     outer_data = ring_params.get('outer_data', [])
 
-    # Find mode 1 for inner edge
-    inner_mode1 = None
-    for mode in inner_data:
-        if mode.get('mode') == 1:
-            inner_mode1 = mode
-            break
+    inner_mode1 = next((m for m in inner_data if m.get('mode') == 1), None)
+    outer_mode1 = next((m for m in outer_data if m.get('mode') == 1), None)
 
-    # Find mode 1 for outer edge
-    outer_mode1 = None
-    for mode in outer_data:
-        if mode.get('mode') == 1:
-            outer_mode1 = mode
-            break
+    # At least one edge must be specified
+    if inner_mode1 is None and outer_mode1 is None:
+        raise ValueError('At least one edge (inner or outer) must be specified')
 
-    if inner_mode1 is None or outer_mode1 is None:
-        return  # Skip if mode 1 not found
+    # Extract mode 1 parameters (use defaults if not present)
+    inner_a = float(inner_mode1.get('a', 0.0)) if inner_mode1 is not None else 0.0
+    inner_ae = float(inner_mode1.get('ae', 0.0)) if inner_mode1 is not None else 0.0
+    inner_long_peri = float(inner_mode1.get('long_peri', 0.0)) if inner_mode1 is not None else 0.0
+    inner_rate_peri = float(inner_mode1.get('rate_peri', 0.0)) if inner_mode1 is not None else 0.0
 
-    # Extract mode 1 parameters
-    inner_a = float(inner_mode1.get('a', 0.0))
-    inner_ae = float(inner_mode1.get('ae', 0.0))
-    inner_long_peri = float(inner_mode1.get('long_peri', 0.0))
-    inner_rate_peri = float(inner_mode1.get('rate_peri', 0.0))
+    outer_a = float(outer_mode1.get('a', 0.0)) if outer_mode1 is not None else 0.0
+    outer_ae = float(outer_mode1.get('ae', 0.0)) if outer_mode1 is not None else 0.0
+    outer_long_peri = float(outer_mode1.get('long_peri', 0.0)) if outer_mode1 is not None else 0.0
+    outer_rate_peri = float(outer_mode1.get('rate_peri', 0.0)) if outer_mode1 is not None else 0.0
 
-    outer_a = float(outer_mode1.get('a', 0.0))
-    outer_ae = float(outer_mode1.get('ae', 0.0))
-    outer_long_peri = float(outer_mode1.get('long_peri', 0.0))
-    outer_rate_peri = float(outer_mode1.get('rate_peri', 0.0))
-
-    # Create coordinate grids
-    v_coords = np.arange(size_v, dtype=np.float64)
-    u_coords = np.arange(size_u, dtype=np.float64)
+    # Create coordinate grids at pixel centers (0.5 offset from integer coordinates)
+    v_coords = np.arange(size_v, dtype=np.float64) + 0.5
+    u_coords = np.arange(size_u, dtype=np.float64) + 0.5
     v_grid, u_grid = np.meshgrid(v_coords, u_coords, indexing='ij')
 
-    # Compute distances from center
+    # Compute distances from center at pixel centers
     dv = v_grid - center_v
     du = u_grid - center_u
     distances = np.sqrt(dv * dv + du * du)
@@ -272,53 +340,102 @@ def render_ring(
     # Compute angles
     angles = np.arctan2(dv, du)
 
-    # Compute inner and outer edge radii at each angle
-    # For simplicity, use circular approximation (ae=0) or basic elliptical
-    inner_e = inner_ae / inner_a if inner_a > 0 else 0.0
-    if inner_e >= 1.0:
-        inner_e = 0.99
-    outer_e = outer_ae / outer_a if outer_a > 0 else 0.0
-    if outer_e >= 1.0:
-        outer_e = 0.99
+    # Compute edge radii at each angle
+    resolution = 1.0  # Pixel resolution for anti-aliasing
 
-    # Compute current longitude of pericenter
-    days_since_epoch = (time - epoch) / 86400.0
-    inner_long_peri_rad = math.radians(inner_long_peri + inner_rate_peri * days_since_epoch)
-    outer_long_peri_rad = math.radians(outer_long_peri + outer_rate_peri * days_since_epoch)
+    # Get shading distance parameter (default 20.0 pixels)
+    shading_distance = float(ring_params.get('shading_distance', 20.0))
 
-    # Compute true anomaly for each pixel
-    inner_true_anomaly = angles - inner_long_peri_rad
-    outer_true_anomaly = angles - outer_long_peri_rad
+    # Initialize model array for this ring
+    ring_model = np.zeros((size_v, size_u), dtype=np.float64)
 
-    # Compute edge radii using elliptical orbit equation
-    inner_radii = (inner_a * (1.0 - inner_e * inner_e) /
-                   (1.0 + inner_e * np.cos(inner_true_anomaly)))
-    outer_radii = (outer_a * (1.0 - outer_e * outer_e) /
-                   (1.0 + outer_e * np.cos(outer_true_anomaly)))
+    # Compute inner edge radii if inner edge is specified
+    if inner_mode1 is not None:
+        inner_radii = _compute_edge_radii_array(
+            angles,
+            a=inner_a,
+            ae=inner_ae,
+            long_peri=inner_long_peri,
+            rate_peri=inner_rate_peri,
+            epoch=epoch,
+            time=time,
+        )
+    else:
+        inner_radii = None
 
-    # Apply anti-aliasing at edges
-    # Compute fractional coverage for pixels near edges
-    inner_edge_dist = distances - inner_radii
-    outer_edge_dist = distances - outer_radii
+    # Compute outer edge radii if outer edge is specified
+    if outer_mode1 is not None:
+        outer_radii = _compute_edge_radii_array(
+            angles,
+            a=outer_a,
+            ae=outer_ae,
+            long_peri=outer_long_peri,
+            rate_peri=outer_rate_peri,
+            epoch=epoch,
+            time=time,
+        )
+    else:
+        outer_radii = None
 
-    # Use 1 pixel width for anti-aliasing
-    aa_width = 1.0
-
-    # For inner edge: fade from 0 (outside, distance < inner_radius) to 1 (inside)
-    # Pixel is fully inside if distance >= inner_radius + aa_width
-    inner_fade = np.clip((inner_edge_dist + aa_width) / aa_width, 0.0, 1.0)
-
-    # For outer edge: fade from 1 (inside, distance < outer_radius) to 0 (outside)
-    # Pixel is fully outside if distance >= outer_radius + aa_width
-    outer_fade = np.clip(1.0 - outer_edge_dist / aa_width, 0.0, 1.0)
-
-    # Ring coverage is minimum of the two fades (must be inside both edges)
-    ring_coverage = np.minimum(inner_fade, outer_fade)
-
-    # Apply ring or gap
+    # Apply anti-aliasing and shading based on edge configuration and feature type
+    # Anti-aliasing formula matches base class:
+    #   shade = 0.5 + sign * (edge_radius - radii) / resolution
+    # When pixel center is at edge (radii == edge_radius), shade = 0.5
     if feature_type == 'RINGLET':
-        # Ringlet: add brightness where ring exists
-        img[:] = np.clip(img + ring_coverage, 0.0, 1.0)
+        # For ringlets: fill region between edges (if both), or shade from single edge
+        if inner_radii is not None and outer_radii is not None:
+            if shade_solid:
+                # Both edges with shade_solid: shade on both sides as if two rings
+                inner_edge_dist = distances - inner_radii
+                inner_shade = _compute_antialiasing_shade(inner_edge_dist, resolution)
+                inner_fade = _compute_fade_factor(inner_edge_dist, shading_distance,
+                                                  fade_outward=True)
+
+                outer_edge_dist = outer_radii - distances
+                outer_shade = _compute_antialiasing_shade(outer_edge_dist, resolution)
+                outer_fade = _compute_fade_factor(outer_edge_dist, shading_distance,
+                                                  fade_outward=True)
+                ring_model = np.maximum(inner_shade * inner_fade, outer_shade * outer_fade)
+            else:
+                # Both edges: no shading, just fill the entire region with anti-aliasing
+                inner_edge_dist = distances - inner_radii
+                inner_shade = _compute_antialiasing_shade(inner_edge_dist, resolution)
+                outer_edge_dist = outer_radii - distances
+                outer_shade = _compute_antialiasing_shade(outer_edge_dist, resolution)
+                # Coverage is minimum (must be inside both edges)
+                ring_model = np.minimum(inner_shade, outer_shade)
+        elif inner_radii is not None:
+            # Only inner edge: shade outward from inner edge
+            inner_edge_dist = distances - inner_radii
+            inner_shade = _compute_antialiasing_shade(inner_edge_dist, resolution)
+            inner_fade = _compute_fade_factor(inner_edge_dist, shading_distance, fade_outward=True)
+            ring_model = inner_shade * inner_fade
+        else:  # outer_radii is not None
+            # Only outer edge: shade inward from outer edge
+            outer_edge_dist = outer_radii - distances
+            outer_shade = _compute_antialiasing_shade(outer_edge_dist, resolution)
+            outer_fade = _compute_fade_factor(outer_edge_dist, shading_distance, fade_outward=True)
+            ring_model = outer_shade * outer_fade
+        # Apply ringlet: add brightness where ring exists
+        img[:] = np.clip(img + ring_model, 0.0, 1.0)
     else:  # GAP
-        # Gap: subtract brightness where gap exists
-        img[:] = np.clip(img - ring_coverage, 0.0, 1.0)
+        # For gaps: shading extends beyond the defined ring area
+        gap_model = cast(NDArrayFloatType, np.zeros((size_v, size_u), dtype=np.float64))
+        if inner_radii is not None and outer_radii is not None:
+            # Both edges: shade inward from inner edge AND outward from outer edge
+            inner_edge_dist = distances - inner_radii
+            inner_fade = _compute_fade_factor(inner_edge_dist, shading_distance, fade_outward=False)
+            outer_edge_dist = distances - outer_radii
+            outer_fade = _compute_fade_factor(outer_edge_dist, shading_distance, fade_outward=True)
+            # Combine both fades (maximum to get shading from either edge)
+            gap_model = np.maximum(inner_fade, outer_fade)
+        elif inner_radii is not None:
+            # Only inner edge: shade inward from inner edge (beyond the edge)
+            inner_edge_dist = distances - inner_radii
+            gap_model = _compute_fade_factor(inner_edge_dist, shading_distance, fade_outward=False)
+        else:  # outer_radii is not None
+            # Only outer edge: shade outward from outer edge (beyond the edge)
+            outer_edge_dist = distances - outer_radii
+            gap_model = _compute_fade_factor(outer_edge_dist, shading_distance, fade_outward=True)
+        # Apply gap: subtract brightness where gap shading exists
+        img[:] = np.clip(img - gap_model, 0.0, 1.0)

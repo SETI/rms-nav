@@ -25,11 +25,13 @@ class NavModelBodySimulated(NavModelBodyBase):
             obs: Observation containing image geometry (used for output shapes/margins).
             body_name: Logical body name for metadata/labels.
             sim_params: Dictionary of parameters saved by the GUI JSON. Expected keys:
-                center_v, center_u, axis1, axis2, axis3,
+                name, center_v, center_u, range,
+                axis1, axis2, axis3,
                 rotation_z (deg), rotation_tilt (deg),
                 illumination_angle (deg), phase_angle (deg),
                 crater_fill, crater_min_radius, crater_max_radius,
-                crater_power_law_exponent, crater_relief_scale, anti_aliasing.
+                crater_power_law_exponent, crater_relief_scale,
+                anti_aliasing.
                 Extra keys are ignored.
                 Note that anti_aliasing is always set to the max when creating this model
                 and the anti_aliasing parameter is ignored.
@@ -135,16 +137,7 @@ class NavModelBodySimulated(NavModelBodyBase):
         self._model_mask = body_mask_full
 
         # Range: optionally provided via parameters; set inside body, inf elsewhere
-        self._range = self.obs.make_extfov_zeros()
-        self._range[:, :] = np.inf
-        opt_range = self._sim_params.get('range', None)
-        if opt_range is not None:
-            try:
-                rng_val = float(opt_range)
-                self._range[body_mask_full] = rng_val
-            except (TypeError, ValueError):
-                # Ignore invalid range; keep infinity
-                pass
+        self._range = self._sim_params.get('range', np.inf)
 
         if create_annotations:
             v_center_data = int(round(center_v))

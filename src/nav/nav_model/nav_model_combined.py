@@ -63,6 +63,8 @@ class NavModelCombined(NavModel):
             if model.blur_amount is not None:
                 model_img = gaussian_blur_cov(model_img, cast(NDArrayFloatType, model.blur_amount))
             model_img *= model.confidence
+            # plt.figure(); plt.imshow(model_img); plt.title('After normalization')
+            # plt.show()
             wt_model_mask = model.model_mask.astype(np.float64) * model.confidence
             total_w += model.confidence
             model_imgs.append(model_img)
@@ -73,7 +75,10 @@ class NavModelCombined(NavModel):
             rng = model.range
             if not isinstance(rng, np.ndarray):
                 rng = 0 if rng is None else rng
-                rng = np.zeros_like(model.model_img) + rng
+                rng_arr = self.obs.make_extfov_zeros()
+                rng_arr[:, :] = np.inf
+                rng_arr[model.model_mask] = rng
+                rng = rng_arr
             elif rng.shape != model.model_img.shape:
                 raise ValueError(f'Range shape differs from model image shape: {rng.shape} != '
                                  f'{model.model_img.shape}')
