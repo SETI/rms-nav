@@ -119,12 +119,12 @@ def test_antialiasing_value_range(ring_model):
         radii=radii, edge_radius=edge_radius, shade_above=False, resolutions=resolutions)
 
     # Calculate expected values for shade_above=True
-    # Match the actual implementation: shade[shade > 1.0] = 0.0 (not 1.0)
+    # Match the actual implementation: shade[shade > 1.0] = 1.0
     shade_sign_above = 1.0
     expected_above = 1.0 - shade_sign_above * (radii - edge_radius) / resolutions
     expected_above -= 0.5
     expected_above[expected_above < 0.0] = 0.0
-    expected_above[expected_above > 1.0] = 0.0  # Match implementation behavior
+    expected_above[expected_above > 1.0] = 1.0  # Match implementation behavior
     expected_above *= 1.0  # max_value
 
     # Calculate expected values for shade_above=False
@@ -132,7 +132,7 @@ def test_antialiasing_value_range(ring_model):
     expected_below = 1.0 - shade_sign_below * (radii - edge_radius) / resolutions
     expected_below -= 0.5
     expected_below[expected_below < 0.0] = 0.0
-    expected_below[expected_below > 1.0] = 0.0  # Match implementation behavior
+    expected_below[expected_below > 1.0] = 1.0  # Match implementation behavior
     expected_below *= 1.0  # max_value
 
     # Check each value individually
@@ -168,7 +168,7 @@ def test_antialiasing_array_input(ring_model):
     expected = 1.0 - shade_sign * (radii - edge_radius) / resolutions
     expected -= 0.5
     expected[expected < 0.0] = 0.0
-    expected[expected > 1.0] = 0.0  # Match implementation behavior
+    expected[expected > 1.0] = 1.0  # Match implementation behavior
     expected *= 1.0  # max_value
 
     assert shade.shape == radii.shape

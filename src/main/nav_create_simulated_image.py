@@ -1761,7 +1761,7 @@ class CreateSimulatedImageModel(QMainWindow):
         fill_val = value / 1000.0
         tab_idx = self._find_tab_by_properties('body', idx)
         if tab_idx is not None:
-            tab_w = self._tabs.widget(tab_idx)  # type: ignore
+            tab_w = self._tabs.widget(tab_idx)
             if tab_w is not None:
                 spin = tab_w.crater_fill_spin  # type: ignore
                 spin.blockSignals(True)
@@ -1775,7 +1775,7 @@ class CreateSimulatedImageModel(QMainWindow):
         slider_val = int(value * 1000)
         tab_idx = self._find_tab_by_properties('body', idx)
         if tab_idx is not None:
-            tab_w = self._tabs.widget(tab_idx)  # type: ignore
+            tab_w = self._tabs.widget(tab_idx)
             if tab_w is not None:
                 slider = tab_w.crater_fill_slider  # type: ignore
                 slider.blockSignals(True)
@@ -1796,7 +1796,7 @@ class CreateSimulatedImageModel(QMainWindow):
         aa_val = value / 1000.0
         tab_idx = self._find_tab_by_properties('body', idx)
         if tab_idx is not None:
-            tab_w = self._tabs.widget(tab_idx)  # type: ignore
+            tab_w = self._tabs.widget(tab_idx)
             if tab_w is not None:
                 spin = tab_w.anti_aliasing_spin  # type: ignore
                 spin.blockSignals(True)
@@ -1810,7 +1810,7 @@ class CreateSimulatedImageModel(QMainWindow):
         slider_val = int(value * 1000)
         tab_idx = self._find_tab_by_properties('body', idx)
         if tab_idx is not None:
-            tab_w = self._tabs.widget(tab_idx)  # type: ignore
+            tab_w = self._tabs.widget(tab_idx)
             if tab_w is not None:
                 slider = tab_w.anti_aliasing_slider  # type: ignore
                 slider.blockSignals(True)

@@ -604,7 +604,7 @@ class NavModelRings(NavModelRingsBase):
         max_val = res_set.max().vals
         return min_val, max_val
 
-    def _compute_edge_fade(self,  # type: ignore[override]
+    def _compute_edge_fade(self,
                            *,
                            model: NDArrayFloatType,
                            radii: NDArrayFloatType,
