@@ -63,8 +63,6 @@ class NavModelCombined(NavModel):
             if model.blur_amount is not None:
                 model_img = gaussian_blur_cov(model_img, cast(NDArrayFloatType, model.blur_amount))
             model_img *= model.confidence
-            # plt.figure(); plt.imshow(model_img); plt.title('After normalization')
-            # plt.show()
             wt_model_mask = model.model_mask.astype(np.float64) * model.confidence
             total_w += model.confidence
             model_imgs.append(model_img)

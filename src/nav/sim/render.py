@@ -10,7 +10,7 @@ from starcat import Star
 
 from nav.sim.sim_body import create_simulated_body
 from nav.sim.sim_ring import render_ring
-from nav.support.types import MutableStar, NDArrayFloatType
+from nav.support.types import MutableStar, NDArrayBoolType, NDArrayFloatType, NDArrayIntType
 
 
 @lru_cache(maxsize=1)
@@ -229,9 +229,9 @@ def _render_bodies_positioned_cached(
 
     inventory: dict[str, dict[str, float]] = {}
     body_model_dict: dict[str, dict[str, Any]] = {}
-    body_masks: list[np.ndarray] = []
-    body_mask_map: dict[str, np.ndarray] = {}
-    body_index_map = np.zeros((size_v, size_u), dtype=np.int32)
+    body_masks: list[NDArrayBoolType] = []
+    body_mask_map: dict[str, NDArrayBoolType] = {}
+    body_index_map: NDArrayIntType = np.zeros((size_v, size_u), dtype=np.int32)
 
     ref_center_v = size_v / 2.0
     ref_center_u = size_u / 2.0
@@ -312,7 +312,7 @@ def _render_bodies_positioned_cached(
 
 
 def _render_single_body(
-    img: np.ndarray,
+    img: NDArrayFloatType,
     body_params: dict[str, Any],
     offset_v: float,
     offset_u: float,
@@ -320,7 +320,7 @@ def _render_single_body(
     seed: Optional[int] = None,
     ref_center_v: float,
     ref_center_u: float,
-) -> tuple[np.ndarray, dict[str, Any]]:
+) -> tuple[NDArrayBoolType, dict[str, Any]]:
     """Render a single body into the image.
 
     Parameters:
@@ -400,7 +400,7 @@ def _render_single_body(
 
 
 def render_bodies(
-    img: np.ndarray,
+    img: NDArrayFloatType,
     bodies_params: list[dict[str, Any]],
     offset_v: float,
     offset_u: float,
@@ -411,12 +411,12 @@ def render_bodies(
 
     Returns: a dict with keys:
 
-      - img: np.ndarray the rendered image
+      - img: NDArrayFloatType the rendered image
       - bodies: dict[str, dict[str, Any]]
       - inventory: dict[str, dict[str, float]]
-      - body_masks: list[np.ndarray]
+      - body_masks: list[NDArrayBoolType]
       - order_near_to_far: list[str]
-      - body_index_map: np.ndarray (int32), 1-based index into order_near_to_far or 0 if none
+      - body_index_map: NDArrayIntType (int32), 1-based index into order_near_to_far or 0 if none
     """
     size_v, size_u = img.shape
 
@@ -459,14 +459,14 @@ def _render_background_noise_cached(
     size_u: int,
     noise_level: float,
     seed: int,
-) -> np.ndarray:
+) -> NDArrayFloatType:
     """Internal cached function to compute background noise."""
     rng = np.random.RandomState(seed)
     noise = rng.normal(0.0, noise_level, size=(size_v, size_u))
     return noise
 
 
-def render_background_noise(img: np.ndarray, noise_level: float, seed: int) -> None:
+def render_background_noise(img: NDArrayFloatType, noise_level: float, seed: int) -> None:
     """Add Gaussian background noise to the image.
 
     Parameters:
@@ -489,7 +489,7 @@ def _render_background_stars_cached(
     seed: int,
     psf_sigma: float,
     distribution_exponent: float,
-) -> np.ndarray:
+) -> NDArrayFloatType:
     """Internal cached function to compute background star additions."""
     rng = np.random.RandomState(seed)
     star_additions = np.zeros((size_v, size_u), dtype=np.float64)
@@ -545,7 +545,7 @@ def _render_background_stars_cached(
 
 
 def render_background_stars(
-        img: np.ndarray, n_stars: int, seed: int, psf_sigma: float = 0.9,
+        img: NDArrayFloatType, n_stars: int, seed: int, psf_sigma: float = 0.9,
         distribution_exponent: float = 2.5) -> None:
     """Add random background stars to the image.
 
@@ -571,7 +571,7 @@ def _render_combined_model_cached(
     sim_params_json: str,
     *,
     ignore_offset: bool,
-) -> tuple[np.ndarray, dict[str, Any]]:
+) -> tuple[NDArrayFloatType, dict[str, Any]]:
     """Internal cached function to compute combined model rendering."""
     sim_params = json.loads(sim_params_json)
     size_v = int(sim_params['size_v'])
@@ -644,17 +644,17 @@ def _render_combined_model_cached(
     epoch = float(sim_params.get('ring_epoch', 0.0))
     # Get shade_solid_rings setting from sim_params
     shade_solid = bool(sim_params.get('shade_solid_rings', False))
-    ring_masks: list[np.ndarray] = []
+    ring_masks: list[NDArrayBoolType] = []
     # Track ring masks in original order for click detection
-    ring_mask_map: dict[int, np.ndarray] = {}
+    ring_mask_map: dict[int, NDArrayBoolType] = {}
 
     # Track body data for final metadata
     body_models_dict: dict[str, dict[str, Any]] = {}
     # Store body masks by original index, not render order
-    body_mask_map_by_idx: dict[int, np.ndarray] = {}
-    body_mask_map_dict: dict[str, np.ndarray] = {}
+    body_mask_map_by_idx: dict[int, NDArrayBoolType] = {}
+    body_mask_map_dict: dict[str, NDArrayBoolType] = {}
     inventory_dict: dict[str, dict[str, float]] = {}
-    body_index_map = np.zeros((size_v, size_u), dtype=np.int32)
+    body_index_map: NDArrayIntType = np.zeros((size_v, size_u), dtype=np.int32)
 
     ref_center_v = size_v / 2.0
     ref_center_u = size_u / 2.0
@@ -666,7 +666,7 @@ def _render_combined_model_cached(
         for i, bp in enumerate(sorted_bodies_by_range)
     ]
 
-    for range_val, item_type, item_params, orig_idx in render_items:
+    for _range_val, item_type, item_params, orig_idx in render_items:
         if item_type == 'ring':
             feature_type = item_params.get('feature_type', 'RINGLET')
 
@@ -689,11 +689,10 @@ def _render_combined_model_cached(
                 render_ring(temp_bg, item_params, offset_v, offset_u, time=time, epoch=epoch,
                             shade_solid=shade_solid)
                 # gap_coverage is what was subtracted: 1.0 - result
-                gap_coverage = 1.0 - temp_bg
-                ring_mask = gap_coverage > 0.0
+                ring_mask = temp_bg < 1.0
                 ring_mask_map[orig_idx] = ring_mask
                 # Subtract gap from main image (proper range-based: lower range overwrites)
-                img[ring_mask] = gap_coverage[ring_mask]
+                img[ring_mask] = temp_bg[ring_mask]
         elif item_type == 'body':
             # Render single body
             body_mask, body_info = _render_single_body(
@@ -709,13 +708,13 @@ def _render_combined_model_cached(
             body_index_map[body_mask] = near_index
 
     # Build body_masks_list in original order (matching bodies_params)
-    body_masks_list: list[np.ndarray] = []
+    body_masks_list: list[NDArrayBoolType] = []
     for idx in range(len(bodies_with_ranges)):
         if idx in body_mask_map_by_idx:
             body_masks_list.append(body_mask_map_by_idx[idx])
         else:
             # Should not happen, but create empty mask if missing
-            body_masks_list.append(np.zeros((size_v, size_u), dtype=bool))
+            body_masks_list.append(np.zeros((size_v, size_u), dtype=np.bool_))
 
     # Build ring_masks in original order for click detection
     for idx in range(len(rings_params)):
@@ -723,7 +722,7 @@ def _render_combined_model_cached(
             ring_masks.append(ring_mask_map[idx])
         else:
             # Should not happen, but create empty mask if missing
-            ring_masks.append(np.zeros((size_v, size_u), dtype=bool))
+            ring_masks.append(np.zeros((size_v, size_u), dtype=np.bool_))
 
     # Create bodies_result dict in the same format as render_bodies
     # Note: img is already the correct variable, no need to reassign
@@ -750,7 +749,7 @@ def render_combined_model(
     sim_params: dict[str, Any],
     *,
     ignore_offset: bool = False
-) -> tuple[np.ndarray, dict[str, Any]]:
+) -> tuple[NDArrayFloatType, dict[str, Any]]:
     """Render stars then bodies from a full sim_params dict. Returns (img, meta).
 
     ignore_offset = True should be used when rendering the image in the GUI, but not

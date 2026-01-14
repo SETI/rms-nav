@@ -86,7 +86,7 @@ class ObsSim(ObsSnapshotInst):
         snapshot.sim_time = float(sim_params.get('time', 0.0))
         snapshot.sim_epoch = float(sim_params.get('epoch', 0.0))
 
-        # Render combined model (rings, stars, then bodies)
+        # Render combined model
         logger.debug('Rendering combined simulated model')
         img_rendered, meta = render_combined_model(sim_params)
         snapshot.insert_subfield('data', img_rendered)

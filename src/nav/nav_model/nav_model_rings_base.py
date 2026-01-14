@@ -31,11 +31,11 @@ class NavModelRingsBase(NavModel):
 
     def _compute_antialiasing(self,
                               *,
-                              radii: np.ndarray,
+                              radii: NDArrayFloatType,
                               edge_radius: float,
                               shade_above: bool,
-                              resolutions: np.ndarray,
-                              max_value: float = 1.0) -> np.ndarray:
+                              resolutions: NDArrayFloatType,
+                              max_value: float = 1.0) -> NDArrayFloatType:
         """Compute anti-aliasing shade at pixel boundaries.
 
         Creates smooth transitions at pixel boundaries where the ring edge crosses. The
@@ -73,11 +73,11 @@ class NavModelRingsBase(NavModel):
     def _compute_edge_fade(self,
                            *,
                            model: NDArrayFloatType,
-                           radii: np.ndarray,
+                           radii: NDArrayFloatType,
                            edge_radius: float,
                            shade_above: bool,
                            fade_width: float,
-                           resolutions: np.ndarray) -> NDArrayFloatType:
+                           resolutions: NDArrayFloatType) -> NDArrayFloatType:
         """Compute linear fade from a single edge.
 
         Creates a linear fade from the edge over the specified width. The fade provides a
@@ -102,7 +102,7 @@ class NavModelRingsBase(NavModel):
             # Fade from edge_radius to edge_radius + width
             # Shade function: 1 - (a - a0) / w for a in [a0, a0+w]
             # Integral: Z = [(1+a0/w)*a - a^2/(2w)] / s
-            def int_func(a0: np.ndarray, a1: np.ndarray) -> np.ndarray:
+            def int_func(a0: NDArrayFloatType, a1: NDArrayFloatType) -> NDArrayFloatType:
                 """Integrate fade function for shade_above case."""
                 result = (((1.0 + edge_radius / fade_width) * (a1 - a0) +
                           (a0**2 - a1**2) / (2.0 * fade_width)) /
@@ -144,7 +144,7 @@ class NavModelRingsBase(NavModel):
             # Fade from edge_radius - width to edge_radius
             # Shade function: 1 - (a0 - a) / w for a in [a0-w, a0]
             # Integral: Z = [(1-a0/w)*a + a^2/(2w)] / s
-            def int_func2(a0: np.ndarray, a1: np.ndarray) -> np.ndarray:
+            def int_func2(a0: NDArrayFloatType, a1: NDArrayFloatType) -> NDArrayFloatType:
                 """Integrate fade function for shade_below case."""
                 result = (((1.0 - edge_radius / fade_width) * (a1 - a0) +
                           (a1**2 - a0**2) / (2.0 * fade_width)) /

@@ -25,13 +25,18 @@ class NavModelBodySimulated(NavModelBodyBase):
             obs: Observation containing image geometry (used for output shapes/margins).
             body_name: Logical body name for metadata/labels.
             sim_params: Dictionary of parameters saved by the GUI JSON. Expected keys:
-                name, center_v, center_u, range,
-                axis1, axis2, axis3,
-                rotation_z (deg), rotation_tilt (deg),
-                illumination_angle (deg), phase_angle (deg),
-                crater_fill, crater_min_radius, crater_max_radius,
-                crater_power_law_exponent, crater_relief_scale,
-                anti_aliasing.
+
+                - name, center_v, center_u, range,
+                - axis1, axis2, axis3,
+                - rotation_z (deg), rotation_tilt (deg),
+                - illumination_angle (deg), phase_angle (deg),
+
+                Ignored keys:
+
+                - crater_fill, crater_min_radius, crater_max_radius,
+                - crater_power_law_exponent, crater_relief_scale,
+                - anti_aliasing.
+
                 Extra keys are ignored.
                 Note that anti_aliasing is always set to the max when creating this model
                 and the anti_aliasing parameter is ignored.

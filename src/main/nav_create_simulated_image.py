@@ -1006,7 +1006,7 @@ class CreateSimulatedImageModel(QMainWindow):
             if 0 <= data_index < len(self.sim_params['stars']):
                 del self.sim_params['stars'][data_index]
         else:
-            assert False, f'Unknown kind: {kind}'
+            raise AssertionError(f'Unknown kind: {kind}')
 
         # Block signals before removing tab to prevent unwanted tab change events
         self._tabs.blockSignals(True)
@@ -1057,7 +1057,7 @@ class CreateSimulatedImageModel(QMainWindow):
                                 'name', f'Star{widget_data_index+1}')
                             target_tab_name = star_name
                     else:
-                        assert False, f'Unknown kind: {widget_kind}'
+                        raise AssertionError(f'Unknown kind: {widget_kind}')
 
         # Block signals during rebuild to prevent tab change handler from firing
         self._tabs.blockSignals(True)
@@ -1728,7 +1728,7 @@ class CreateSimulatedImageModel(QMainWindow):
         # Delete button at bottom
         delete_btn = QPushButton('Delete')
         delete_btn.clicked.connect(
-            lambda checked=False, i=idx: self._delete_tab_by_index('star', i)
+            lambda _checked=False, i=idx: self._delete_tab_by_index('star', i)
         )
         main_layout.addStretch()
         main_layout.addWidget(delete_btn)
@@ -2286,7 +2286,7 @@ class CreateSimulatedImageModel(QMainWindow):
         objects.sort(key=lambda x: x[0])
 
         # Check objects in order (near to far), select first match
-        for range_val, kind, idx, mask in objects:
+        for _, kind, idx, mask in objects:
             if mask is not None and bool(mask[v_i, u_i]):
                 self._selected_model_key = (kind, idx)
                 tab_idx = self._find_tab_by_properties(kind, idx)
@@ -2333,11 +2333,13 @@ class CreateSimulatedImageModel(QMainWindow):
             )
             # Sync the tab spin boxes for this body
             tab_idx = self._find_tab_by_properties('body', idx)
-            tab_w = self._tabs.widget(tab_idx)  # type: ignore
-            cv_spin = tab_w.center_v_spin  # type: ignore
-            cu_spin = tab_w.center_u_spin  # type: ignore
-            cv_spin.setValue(self.sim_params['bodies'][idx]['center_v'])
-            cu_spin.setValue(self.sim_params['bodies'][idx]['center_u'])
+            if tab_idx is not None:
+                tab_w = self._tabs.widget(tab_idx)
+                if tab_w is not None:
+                    cv_spin = tab_w.center_v_spin  # type: ignore
+                    cu_spin = tab_w.center_u_spin  # type: ignore
+                    cv_spin.setValue(self.sim_params['bodies'][idx]['center_v'])
+                    cu_spin.setValue(self.sim_params['bodies'][idx]['center_u'])
             self._updater.immediate_update()
         elif kind == 'ring' and 0 <= idx < len(self.sim_params['rings']):
             self.sim_params['rings'][idx]['center_v'] = float(
@@ -2348,11 +2350,13 @@ class CreateSimulatedImageModel(QMainWindow):
             )
             # Sync the tab spin boxes for this ring
             tab_idx = self._find_tab_by_properties('ring', idx)
-            tab_w = self._tabs.widget(tab_idx)  # type: ignore
-            cv_spin = tab_w.center_v_spin  # type: ignore
-            cu_spin = tab_w.center_u_spin  # type: ignore
-            cv_spin.setValue(self.sim_params['rings'][idx]['center_v'])
-            cu_spin.setValue(self.sim_params['rings'][idx]['center_u'])
+            if tab_idx is not None:
+                tab_w = self._tabs.widget(tab_idx)
+                if tab_w is not None:
+                    cv_spin = tab_w.center_v_spin  # type: ignore
+                    cu_spin = tab_w.center_u_spin  # type: ignore
+                    cv_spin.setValue(self.sim_params['rings'][idx]['center_v'])
+                    cu_spin.setValue(self.sim_params['rings'][idx]['center_u'])
             self._updater.immediate_update()
         elif kind == 'star' and 0 <= idx < len(self.sim_params['stars']):
             self.sim_params['stars'][idx]['v'] = float(
@@ -2363,14 +2367,16 @@ class CreateSimulatedImageModel(QMainWindow):
             )
             # Sync the tab spin boxes for this star
             tab_idx = self._find_tab_by_properties('star', idx)
-            tab_w = self._tabs.widget(tab_idx)  # type: ignore
-            v_spin = tab_w.v_spin  # type: ignore
-            u_spin = tab_w.u_spin  # type: ignore
-            v_spin.setValue(self.sim_params['stars'][idx]['v'])
-            u_spin.setValue(self.sim_params['stars'][idx]['u'])
+            if tab_idx is not None:
+                tab_w = self._tabs.widget(tab_idx)
+                if tab_w is not None:
+                    v_spin = tab_w.v_spin  # type: ignore
+                    u_spin = tab_w.u_spin  # type: ignore
+                    v_spin.setValue(self.sim_params['stars'][idx]['v'])
+                    u_spin.setValue(self.sim_params['stars'][idx]['u'])
             self._updater.immediate_update()
         else:
-            assert False, f'Unknown kind: {kind}'
+            raise AssertionError(f'Unknown kind: {kind}')
         self._last_drag_img_vu = (img_v, img_u)
 
     # ---- Save/Load ----
@@ -2450,15 +2456,12 @@ class CreateSimulatedImageModel(QMainWindow):
                 self._time_spin.setValue(self.sim_params.get('time', 0.0))
                 self._epoch_spin.setValue(self.sim_params.get('ring_epoch', 0.0))
                 # Update closest planet
-                closest_planet = self.sim_params.get('closest_planet', '')
-                if closest_planet:
-                    index = self._closest_planet_combo.findText(closest_planet)
-                    if index >= 0:
-                        self._closest_planet_combo.setCurrentIndex(index)
-                    else:
-                        self._closest_planet_combo.setCurrentText(closest_planet)
+                closest_planet = self.sim_params.get('closest_planet', 'SATURN')
+                index = self._closest_planet_combo.findText(closest_planet)
+                if index >= 0:
+                    self._closest_planet_combo.setCurrentIndex(index)
                 else:
-                    self._closest_planet_combo.setCurrentIndex(0)  # Empty
+                    self._closest_planet_combo.setCurrentText(closest_planet)
                 # Update background noise controls
                 self._background_noise_slider.blockSignals(True)
                 noise_slider_val = int(self.sim_params['background_noise_intensity'] * 1000)

@@ -1,6 +1,6 @@
-===========
+==========
 User Guide
-===========
+==========
 
 This guide provides comprehensive documentation for using RMS-NAV, including
 navigation workflows, backplanes, PDS4 bundle creation, and instrument-specific

@@ -604,57 +604,15 @@ class NavModelRings(NavModelRingsBase):
         max_val = res_set.max().vals
         return min_val, max_val
 
-    def _compute_antialiasing(self,
-                              *,
-                              radii: np.ndarray,
-                              edge_radius: float,
-                              shade_above: bool,
-                              resolutions: np.ndarray,
-                              max_value: float = 1.0) -> np.ndarray:
-        """Compute anti-aliasing shade at pixel boundaries.
-
-        Creates smooth transitions at pixel boundaries where the ring edge crosses. The
-        shade value represents the fraction of the pixel that is covered by the ring.
-
-        Parameters:
-            radii: Array of ring radii at pixel centers (km).
-            edge_radius: Target edge radius (km).
-            shade_above: If True, shade towards larger radii; if False, shade towards smaller radii.
-            resolutions: Array of radial resolutions at each pixel (km).
-            max_value: Maximum shade value (default 1.0).
-
-        Returns:
-            Array of shade values [0, max_value] for anti-aliasing.
-        """
-
-        if shade_above:
-            shade_sign = 1.0
-        else:
-            shade_sign = -1.0
-
-        # Compute shade based on distance from edge
-        # When radii == edge_radius, shade should be 0.5 (pixel center at edge)
-        # When edge is 0.5*resolution beyond pixel center, shade should be 1.0
-        shade = 1.0 - shade_sign * (radii - edge_radius) / resolutions
-        shade -= 0.5
-
-        # Clip to valid range (note: old code had shade[shade > 1.] = 0.
-        # which seems like a bug, but we'll match it for compatibility)
-        shade[shade < 0.0] = 0.0
-        shade[shade > 1.0] = 0.0
-        shade *= max_value
-
-        return np.asarray(shade, dtype=np.float64)
-
     def _compute_edge_fade(self,  # type: ignore[override]
                            *,
                            model: NDArrayFloatType,
-                           radii: np.ndarray,
+                           radii: NDArrayFloatType,
                            edge_radius: float,
                            shade_above: bool,
                            radius_width_km: float,
                            min_radius_width_km: float,
-                           resolutions: np.ndarray,
+                           resolutions: NDArrayFloatType,
                            feature_list_by_a: list[tuple[float, str]]
                            ) -> NDArrayFloatType | None:
         """Compute linear fade from a single edge.
@@ -705,7 +663,7 @@ class NavModelRings(NavModelRingsBase):
             # Fade from edge_radius to edge_radius + width
             # Shade function: 1 - (a - a0) / w for a in [a0, a0+w]
             # Integral: Z = [(1+a0/w)*a - a^2/(2w)] / s
-            def int_func(a0: np.ndarray, a1: np.ndarray) -> np.ndarray:
+            def int_func(a0: NDArrayFloatType, a1: NDArrayFloatType) -> NDArrayFloatType:
                 """Integrate fade function for shade_above case."""
                 result = (((1.0 + edge_radius / adjusted_width) * (a1 - a0) +
                           (a0**2 - a1**2) / (2.0 * adjusted_width)) /
@@ -747,7 +705,7 @@ class NavModelRings(NavModelRingsBase):
             # Fade from edge_radius - width to edge_radius
             # Shade function: 1 - (a0 - a) / w for a in [a0-w, a0]
             # Integral: Z = [(1-a0/w)*a + a^2/(2w)] / s
-            def int_func2(a0: np.ndarray, a1: np.ndarray) -> np.ndarray:
+            def int_func2(a0: NDArrayFloatType, a1: NDArrayFloatType) -> NDArrayFloatType:
                 """Integrate fade function for shade_below case."""
                 result = (((1.0 - edge_radius / adjusted_width) * (a1 - a0) +
                           (a1**2 - a0**2) / (2.0 * adjusted_width)) /
@@ -800,7 +758,7 @@ class NavModelRings(NavModelRingsBase):
                              inner_data: list[dict[str, Any]],
                              outer_data: list[dict[str, Any]],
                              epoch: float,
-                             resolutions: np.ndarray,
+                             resolutions: NDArrayFloatType,
                              feature_name: Optional[str]) -> None:
         """Render a complete ringlet with both inner and outer edges.
 
@@ -879,7 +837,7 @@ class NavModelRings(NavModelRingsBase):
                             ring_target: str,
                             edge_data: list[dict[str, Any]],
                             epoch: float,
-                            resolutions: np.ndarray,
+                            resolutions: NDArrayFloatType,
                             feature_width_pix: float,
                             min_fade_width_multiplier: float,
                             feature_list_by_a: list[tuple[float, str]],

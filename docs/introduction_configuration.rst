@@ -27,6 +27,9 @@ overriding earlier ones:
    * ``config_33_vgiss.yaml``: Voyager ISS instrument-specific settings
    * ``config_40_sim.yaml``: Simulated image settings
    * ``config_90_backplanes.yaml``: Backplane generation settings
+   * ``config_95_pds4.yaml``: PDS4 metadata and export settings for generated
+     products, overrides for PDS4 label templates and mapping of internal fields
+     to PDS4 keys
 
 2. **User Default Configuration**: If present, the file
    ``nav_default_config.yaml`` in the current working directory is loaded. This

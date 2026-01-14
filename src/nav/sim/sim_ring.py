@@ -101,7 +101,7 @@ def compute_edge_radius_at_angle(
 
 
 def _compute_edge_radii_array(
-    angles: np.ndarray,
+    angles: NDArrayFloatType,
     *,
     a: float,
     ae: float,
@@ -232,7 +232,7 @@ def compute_border_atop_simulated(
     return cast(NDArrayBoolType, border)
 
 
-def _compute_antialiasing_shade(edge_dist: np.ndarray, resolution: float) -> np.ndarray:
+def _compute_antialiasing_shade(edge_dist: NDArrayFloatType, resolution: float) -> NDArrayFloatType:
     """Compute anti-aliasing shade from edge distance.
 
     Parameters:
@@ -248,31 +248,23 @@ def _compute_antialiasing_shade(edge_dist: np.ndarray, resolution: float) -> np.
     return shade
 
 
-def _compute_fade_factor(edge_dist: np.ndarray,
-                         shading_distance: float,
-                         fade_outward: bool) -> NDArrayFloatType:
+def _compute_fade_factor(edge_dist: NDArrayFloatType,
+                         shading_distance: float) -> NDArrayFloatType:
     """Compute fade factor for edge shading.
 
     Parameters:
         edge_dist: Distance from pixel center to edge (positive = outside, negative = inside).
         shading_distance: Distance in pixels for edge fading.
-        fade_outward: If True, fade outward from edge (positive edge_dist); if False, fade inward
-            (negative edge_dist).
 
     Returns:
         Fade factor [0, 1] where 1.0 is at the edge and 0.0 is at shading_distance away.
     """
-    if fade_outward:
-        # Fade outward: distance outside edge (positive edge_dist)
-        fade_dist = np.maximum(0.0, edge_dist)
-    else:
-        # Fade inward: distance inside edge (negative edge_dist)
-        fade_dist = np.maximum(0.0, -edge_dist)
+    fade_dist = np.maximum(0.0, edge_dist)
     return cast(NDArrayFloatType, np.clip(1.0 - fade_dist / shading_distance, 0.0, 1.0))
 
 
 def render_ring(
-    img: np.ndarray,
+    img: NDArrayFloatType,
     ring_params: dict[str, Any],
     offset_v: float,
     offset_u: float,
@@ -388,13 +380,11 @@ def render_ring(
                 # Both edges with shade_solid: shade on both sides as if two rings
                 inner_edge_dist = distances - inner_radii
                 inner_shade = _compute_antialiasing_shade(inner_edge_dist, resolution)
-                inner_fade = _compute_fade_factor(inner_edge_dist, shading_distance,
-                                                  fade_outward=True)
+                inner_fade = _compute_fade_factor(inner_edge_dist, shading_distance)
 
                 outer_edge_dist = outer_radii - distances
                 outer_shade = _compute_antialiasing_shade(outer_edge_dist, resolution)
-                outer_fade = _compute_fade_factor(outer_edge_dist, shading_distance,
-                                                  fade_outward=True)
+                outer_fade = _compute_fade_factor(outer_edge_dist, shading_distance)
                 ring_model = np.maximum(inner_shade * inner_fade, outer_shade * outer_fade)
             else:
                 # Both edges: no shading, just fill the entire region with anti-aliasing
@@ -408,13 +398,13 @@ def render_ring(
             # Only inner edge: shade outward from inner edge
             inner_edge_dist = distances - inner_radii
             inner_shade = _compute_antialiasing_shade(inner_edge_dist, resolution)
-            inner_fade = _compute_fade_factor(inner_edge_dist, shading_distance, fade_outward=True)
+            inner_fade = _compute_fade_factor(inner_edge_dist, shading_distance)
             ring_model = inner_shade * inner_fade
         else:  # outer_radii is not None
             # Only outer edge: shade inward from outer edge
             outer_edge_dist = outer_radii - distances
             outer_shade = _compute_antialiasing_shade(outer_edge_dist, resolution)
-            outer_fade = _compute_fade_factor(outer_edge_dist, shading_distance, fade_outward=True)
+            outer_fade = _compute_fade_factor(outer_edge_dist, shading_distance)
             ring_model = outer_shade * outer_fade
         # Apply ringlet: add brightness where ring exists
         img[:] = np.clip(img + ring_model, 0.0, 1.0)
@@ -423,19 +413,25 @@ def render_ring(
         gap_model = cast(NDArrayFloatType, np.zeros((size_v, size_u), dtype=np.float64))
         if inner_radii is not None and outer_radii is not None:
             # Both edges: shade inward from inner edge AND outward from outer edge
-            inner_edge_dist = distances - inner_radii
-            inner_fade = _compute_fade_factor(inner_edge_dist, shading_distance, fade_outward=False)
+            inner_edge_dist = inner_radii - distances
+            inner_shade = _compute_antialiasing_shade(inner_edge_dist, resolution)
+            inner_fade = 1 - _compute_fade_factor(inner_edge_dist, shading_distance)
+
             outer_edge_dist = distances - outer_radii
-            outer_fade = _compute_fade_factor(outer_edge_dist, shading_distance, fade_outward=True)
-            # Combine both fades (maximum to get shading from either edge)
-            gap_model = np.maximum(inner_fade, outer_fade)
+            outer_shade = _compute_antialiasing_shade(outer_edge_dist, resolution)
+            outer_fade = 1 - _compute_fade_factor(outer_edge_dist, shading_distance)
+            gap_model = np.maximum(inner_shade * inner_fade, outer_shade * outer_fade)
         elif inner_radii is not None:
             # Only inner edge: shade inward from inner edge (beyond the edge)
-            inner_edge_dist = distances - inner_radii
-            gap_model = _compute_fade_factor(inner_edge_dist, shading_distance, fade_outward=False)
+            inner_edge_dist = inner_radii - distances
+            inner_shade = _compute_antialiasing_shade(inner_edge_dist, resolution)
+            inner_fade = 1 - _compute_fade_factor(inner_edge_dist, shading_distance)
+            gap_model = inner_shade * inner_fade
         else:  # outer_radii is not None
             # Only outer edge: shade outward from outer edge (beyond the edge)
             outer_edge_dist = distances - outer_radii
-            gap_model = _compute_fade_factor(outer_edge_dist, shading_distance, fade_outward=True)
+            outer_shade = _compute_antialiasing_shade(outer_edge_dist, resolution)
+            outer_fade = 1 - _compute_fade_factor(outer_edge_dist, shading_distance)
+            gap_model = outer_shade * outer_fade
         # Apply gap: subtract brightness where gap shading exists
         img[:] = np.clip(img - gap_model, 0.0, 1.0)

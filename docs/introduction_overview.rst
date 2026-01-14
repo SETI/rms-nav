@@ -41,7 +41,7 @@ This installs the package and all command-line programs into your Python
 environment.
 
 Using pipx
----------
+----------
 
 .. code-block:: bash
 

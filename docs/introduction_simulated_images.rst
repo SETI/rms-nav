@@ -144,8 +144,8 @@ Each body in the ``bodies`` array is a dictionary with the following fields:
 
 * ``axis2`` (float, default: 80.0): Second axis (semi-minor axis) in pixels.
 
-* ``axis3`` (float, default: 80.0): Third axis (depth) in pixels. Defaults to
-  the minimum of axis1 and axis2 if not specified.
+* ``axis3`` (float): Third axis (depth) in pixels. GUI default: 80.0; if not
+  provided programmatically, defaults to min(axis1, axis2).
 
 * ``rotation_z`` (float, default: 0.0): Rotation around Z axis in degrees.
 
