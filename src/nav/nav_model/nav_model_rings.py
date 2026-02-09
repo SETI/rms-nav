@@ -498,8 +498,9 @@ class NavModelRings(NavModelRingsBase):
             if mode_num > 90:
                 continue
 
-            if mode_num == 1:
-                # Mode 1: base radius with eccentricity
+            if 'a' in mode:
+                if mode_num != 1:
+                    raise ValueError(f'Mode {mode_num} has illegal "a" field')
                 a = mode['a']
                 ae = mode['ae']
                 long_peri = mode['long_peri']
@@ -551,11 +552,9 @@ class NavModelRings(NavModelRingsBase):
 
         # Apply modes sequentially
         for mode_info in parsed_modes:
-            if mode_info[0] == 1:
-                # Mode 1: special handling
+            if len(mode_info) == 5:  # TODO Clean this up
                 mode, a, ae, long_peri_rad, rate_peri_rad_per_sec = mode_info
-                # For mode 1, we use the base radius 'a' and apply
-                # eccentricity 'ae' as amplitude
+                # We use the base radius 'a' and apply eccentricity 'ae' as amplitude
                 radii_bp = obs.ext_bp.radial_mode(
                     radii_bp.key,
                     mode,

@@ -1,0 +1,40 @@
+---
+alwaysApply: true
+description: Environment, tooling, and CI/CD standards for reproducible Python library development.
+---
+
+# Environment Best Practices
+
+## 1. Source Control
+
+- ALWAYS use **git** for all source code.
+- Commit early and often with meaningful messages (see `git_workflow.mdc`).
+
+## 2. CI/CD
+
+- ALWAYS use **GitHub Actions** for continuous integration and publishing.
+- Every PR MUST pass lint (`ruff`), type-check (`mypy`), and test (`pytest`) jobs before merge.
+- Pin action versions to a major tag (e.g., `actions/checkout@v6`) to balance stability and security updates.
+- Publishing to PyPI is triggered by creating a GitHub Release from a version tag on `main`.
+
+## 3. Environment Isolation
+
+- ALWAYS use `python -m venv` (or `virtualenv`) to create an isolated virtual environment. Activate it before any `pip install`.
+- NEVER install project dependencies into the system Python.
+- Record the supported Python version range in `pyproject.toml` via `requires-python` (e.g., `>=3.10`).
+- Test across all supported Python versions in CI using a matrix strategy.
+
+## 4. Editor Settings (VSCode / Cursor)
+
+The repository includes `.vscode/settings.json` so all contributors get consistent formatting:
+
+- **Indent**: 4 spaces (no tabs).
+- **Trailing whitespace**: Trimmed on save.
+- **Final newline**: Exactly one newline at end of file; excess trailing blank lines removed on save.
+- **Line length**: Rulers at 80 and 90 characters (max 100 enforced by Ruff).
+
+## 5. Secrets and Configuration
+
+- NEVER commit secrets, tokens, or credentials. Use environment variables or GitHub Secrets.
+- Use `.env` files for local development only; ensure `.env` is in `.gitignore`.
+- Validate required environment variables at startup with clear error messages.

@@ -2005,33 +2005,6 @@ class CreateSimulatedImageModel(QMainWindow):
 
             self._updater.request_update()
 
-    def _validate_ring_edges(self, idx: int) -> None:
-        """Validate that at least one edge is enabled for a ring."""
-        if 0 <= idx < len(self.sim_params['rings']):
-            ring = self.sim_params['rings'][idx]
-            inner_data = ring.get('inner_data', [])
-            outer_data = ring.get('outer_data', [])
-            has_inner = len(inner_data) > 0 and any(m.get('mode') == 1 for m in inner_data)
-            has_outer = len(outer_data) > 0 and any(m.get('mode') == 1 for m in outer_data)
-
-            if not has_inner and not has_outer:
-                # At least one must be enabled - re-enable inner if both are disabled
-                if 'inner_data' not in ring:
-                    ring['inner_data'] = []
-                inner_data = ring['inner_data']
-                self._get_or_create_mode1(inner_data, 100.0)
-
-                # Update checkbox and controls
-                tab_idx = self._find_tab_by_properties('ring', idx)
-                if tab_idx is not None:
-                    tab_widget = self._tabs.widget(tab_idx)
-                    if tab_widget is not None:
-                        tab_widget.inner_checkbox.blockSignals(True)  # type: ignore
-                        tab_widget.inner_checkbox.setChecked(True)  # type: ignore
-                        tab_widget.inner_checkbox.blockSignals(False)  # type: ignore
-                        for control in tab_widget.inner_controls:  # type: ignore
-                            control.setEnabled(True)
-
     def _on_star_field(self, idx: int, key: str, value: Any) -> None:
         if 0 <= idx < len(self.sim_params['stars']):
             self.sim_params['stars'][idx][key] = (

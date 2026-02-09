@@ -1,0 +1,60 @@
+---
+alwaysApply: true
+description: GitHub Pull Request template and best practices for clear, reviewable submissions.
+---
+
+# Pull Request Standards
+
+## 1. General Principles
+
+1. **Descriptive title** — Summarize the change in an imperative sentence (e.g., "Add caching to profile lookup").
+2. **Purpose first** — Explain *why* the change is needed before *how* it was done.
+3. **Scope** — One logical change per PR. Split unrelated changes into separate PRs.
+4. **Testing evidence** — Document automated and manual testing performed.
+5. **Impact assessment** — Note potential effects on the public API, performance, or dependent packages.
+6. **Linked issues** — Reference related GitHub issues using `Closes #NNN` syntax.
+
+## 2. GitHub PR Template
+
+Place this in `.github/PULL_REQUEST_TEMPLATE.md` for automatic use.
+
+```markdown
+## Purpose
+
+<!-- Why is this change needed? What problem does it solve? -->
+
+Closes #<!-- issue number -->
+
+## Implementation
+
+<!-- How was it implemented? Why were specific approaches chosen? -->
+
+## Testing
+
+### Automated
+- [ ] Unit tests added/updated
+- [ ] Integration tests added/updated
+
+### Manual
+<!-- Steps to manually verify the change, if applicable. -->
+
+## Potential Impacts
+
+<!-- Effects on the public API, backward compatibility, performance, or downstream packages. -->
+
+## Review Checklist
+
+- [ ] Code follows project style guidelines (PEP 8, 100-char line length)
+- [ ] All CI checks pass (ruff, mypy, pytest)
+- [ ] Documentation and docstrings updated (if applicable)
+- [ ] No new warnings, errors, or security issues introduced
+- [ ] Version-sensitive changes noted (breaking changes flagged)
+```
+
+## 3. Customization Guidance
+
+Adapt the template by considering:
+
+- **Library-specific fields** — Public API changes, deprecation notices, migration notes.
+- **Required reviewers** — Tag maintainers for changes to core modules.
+- **Brevity vs. completeness** — Keep the template short enough that authors fill it out fully.

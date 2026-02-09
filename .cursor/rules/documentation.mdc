@@ -1,0 +1,33 @@
+---
+alwaysApply: true
+description: Standards for Python library documentation using Sphinx, ReadTheDocs, and docstrings.
+---
+
+# Documentation Standards
+
+## 1. Documentation System
+
+- Use **Sphinx** for all project documentation, hosted on **ReadTheDocs**.
+- After any code or doc change, run `sphinx-build` on the full documentation tree and fix all warnings and errors before delivering.
+
+## 2. Required Documentation
+
+| Document | Contents | Keep up-to-date? |
+|----------|----------|-------------------|
+| **Module index** | Every module that exists or is planned (placeholders for future modules). | Yes |
+| **Architecture overview** | Class hierarchy, public API surface, and interface contracts. | Yes |
+| **Install guide** | `pip install` instructions, supported Python versions, optional dependencies. | Yes |
+| **Usage examples** | Common workflows with code snippets and expected output. | Yes |
+| **README** | Project summary, PyPI/ReadTheDocs badges, quickstart, and links to full docs. | Yes |
+
+## 3. Docstrings
+
+- EVERY class, method, function, and module MUST have a descriptive docstring.
+- Follow **PEP 257** using **Google style** with `Parameters:` (not `Args:`).
+- Include `Returns:`, `Raises:`, and behavioral notes sufficient to write a black-box test.
+- Wrap docstring text to **90** characters.
+
+## 4. Change Discipline
+
+- Any code change MUST update the relevant docstrings and the README if affected.
+- NEVER leave stale or contradictory documentation. If a feature is removed, remove its docs.
