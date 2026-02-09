@@ -440,7 +440,9 @@ class NavMaster(NavBase):
         annotations = Annotations()
 
         for model in self.all_models:
-            annotations.add_annotations(model.annotations)
+            for result in model.models:
+                if result.annotations is not None:
+                    annotations.add_annotations(result.annotations)
 
         offset = (0., 0.)
         if self._final_offset is not None:
@@ -488,21 +490,24 @@ class NavMaster(NavBase):
             return img_stretched
 
         already_stretched_mask = np.zeros(img.shape, dtype=bool)
-        for model_index, model in enumerate(self.all_models):
-            if model.stretch_regions is not None:
-                for stretch_region_packed in model.stretch_regions:
-                    stretch_region = np.unpackbits(stretch_region_packed, axis=0).astype(bool)
-                    stretch_region = self.obs.unpad_array_to_extfov(stretch_region)
-                    stretch_region = self._obs.extract_offset_array(stretch_region, offset)
-                    if not np.any(stretch_region):
-                        continue
-                    # We stretch this region by itself if we haven't already stretched
-                    # any part of it and all of it is the closest model in the view for those
-                    # pixels.
-                    if (not np.any(already_stretched_mask[stretch_region]) and
-                        np.all(min_index[stretch_region] == model_index)):
-                        bw_res[stretch_region] = _stretch_region(img[stretch_region])
-                        already_stretched_mask |= stretch_region
+        result_flat_index = 0
+        for model in self.all_models:
+            for result in model.models:
+                if result.stretch_regions is not None:
+                    for stretch_region_packed in result.stretch_regions:
+                        stretch_region = np.unpackbits(stretch_region_packed, axis=0).astype(bool)
+                        stretch_region = self.obs.unpad_array_to_extfov(stretch_region)
+                        stretch_region = self._obs.extract_offset_array(stretch_region, offset)
+                        if not np.any(stretch_region):
+                            continue
+                        # We stretch this region by itself if we haven't already stretched
+                        # any part of it and all of it is the closest result in the view for
+                        # those pixels.
+                        if (not np.any(already_stretched_mask[stretch_region]) and
+                            np.all(min_index[stretch_region] == result_flat_index)):
+                            bw_res[stretch_region] = _stretch_region(img[stretch_region])
+                            already_stretched_mask |= stretch_region
+                result_flat_index += 1
 
         # Now stretch the rest of the image
         bw_res[~already_stretched_mask] = _stretch_region(img[~already_stretched_mask])

@@ -38,10 +38,9 @@ class NavTechniqueManual(NavTechnique):
                 self.logger.info('Manual navigation technique failed - no models available')
                 return
 
-            if combined_model.model_img is None:
-                raise ValueError('Combined model image is None')
-            if combined_model.model_mask is None:
-                raise ValueError('Combined model mask is None')
+            if (len(combined_model.models) == 0 or combined_model.models[0].model_img is None or
+                    combined_model.models[0].model_mask is None):
+                raise ValueError('Combined model has no result or missing image/mask')
 
             # Import here to avoid importing PyQt6 unless needed
             from PyQt6.QtWidgets import QApplication

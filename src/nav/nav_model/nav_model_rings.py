@@ -23,6 +23,7 @@ from nav.support.time import now_dt, utc_to_et
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
 from .nav_model_rings_base import NavModelRingsBase
+from .nav_model_result import NavModelResult
 
 
 class NavModelRings(NavModelRingsBase):
@@ -70,9 +71,7 @@ class NavModelRings(NavModelRingsBase):
         metadata['elapsed_time_sec'] = None
 
         self._metadata = metadata
-        self._annotations = None
-        self._uncertainty = 0.
-        self._confidence = 1.0
+        self._models.clear()
 
         with self._logger.open('CREATE RINGS MODEL'):
             self._create_model(always_create_model=always_create_model,
@@ -140,10 +139,21 @@ class NavModelRings(NavModelRingsBase):
             self._logger.info('No rings visible in observation')
             if not always_create_model:
                 return
-            self._model_img = obs.make_extfov_zeros()
-            self._model_mask = obs.make_extfov_false()
-            self._range = obs.make_extfov_zeros()
-            self._range[:, :] = math.inf
+            empty_img = obs.make_extfov_zeros()
+            empty_mask = obs.make_extfov_false()
+            empty_range = obs.make_extfov_zeros()
+            empty_range[:, :] = math.inf
+            self._models.append(NavModelResult(
+                model_img=empty_img,
+                model_mask=empty_mask,
+                weighted_mask=None,
+                range=empty_range,
+                blur_amount=None,
+                uncertainty=0.0,
+                confidence=1.0,
+                stretch_regions=None,
+                annotations=None,
+            ))
             return
 
         min_radius = bp_radii.min().vals
@@ -157,10 +167,21 @@ class NavModelRings(NavModelRingsBase):
             self._logger.warning('No ring features available')
             if not always_create_model:
                 return
-            self._model_img = obs.make_extfov_zeros()
-            self._model_mask = obs.make_extfov_false()
-            self._range = obs.make_extfov_zeros()
-            self._range[:, :] = math.inf
+            empty_img = obs.make_extfov_zeros()
+            empty_mask = obs.make_extfov_false()
+            empty_range = obs.make_extfov_zeros()
+            empty_range[:, :] = math.inf
+            self._models.append(NavModelResult(
+                model_img=empty_img,
+                model_mask=empty_mask,
+                weighted_mask=None,
+                range=empty_range,
+                blur_amount=None,
+                uncertainty=0.0,
+                confidence=1.0,
+                stretch_regions=None,
+                annotations=None,
+            ))
             return
 
         self._logger.info(f'Loaded {len(features)} ring features')
@@ -253,12 +274,13 @@ class NavModelRings(NavModelRingsBase):
         # Compute range
         bp_distance = obs.ext_bp.distance(ring_target, direction='dep')
         distance_mvals = bp_distance.mvals
-        self._range = obs.make_extfov_zeros()
-        self._range[:, :] = distance_mvals.filled(math.inf)
+        range_arr = obs.make_extfov_zeros()
+        range_arr[:, :] = distance_mvals.filled(math.inf)
         # Set range to inf where rings are not present
-        self._range[~model_mask] = math.inf
+        range_arr[~model_mask] = math.inf
 
         # Create annotations if requested
+        annotations = None
         if create_annotations:
             # Collect edge information for annotation
             edge_info_list: list[tuple[NDArrayBoolType, str, str]] = []
@@ -293,11 +315,21 @@ class NavModelRings(NavModelRingsBase):
                                      .mvals.astype('bool').filled(False))
                         edge_info_list.append((edge_mask, label_text, edge_label))
 
-            self._annotations = self._create_edge_annotations(
+            annotations = self._create_edge_annotations(
                 obs, edge_info_list, model_mask)
 
-        self._model_img = model
-        self._model_mask = model_mask
+        result = NavModelResult(
+            model_img=model,
+            model_mask=model_mask,
+            weighted_mask=None,
+            range=range_arr,
+            blur_amount=None,
+            uncertainty=0.0,
+            confidence=1.0,
+            stretch_regions=None,
+            annotations=annotations,
+        )
+        self._models.append(result)
 
         # Update metadata
         self._metadata['planet'] = planet

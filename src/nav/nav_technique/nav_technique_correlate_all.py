@@ -96,13 +96,18 @@ class NavTechniqueCorrelateAll(NavTechnique):
                 self.logger.info('correlate_all navigation technique failed - no models available')
                 return
 
-            if combined_model.model_img is None:
-                raise ValueError('Combined model image is None')
-            if combined_model.model_mask is None:
-                raise ValueError('Combined model mask is None')
+            if (len(combined_model.models) == 0 or combined_model.models[0].model_img is None or
+                    combined_model.models[0].model_mask is None):
+                raise ValueError('Combined model has no result or missing image/mask')
 
+            import matplotlib.pyplot as plt
+            plt.imshow(combined_model.models[0].model_img)
+            plt.figure()
+            plt.imshow(combined_model.models[0].model_mask)
+            plt.show()
             result = navigate_with_pyramid_kpeaks(
-                obs.extdata, combined_model.model_img, combined_model.model_mask,
+                obs.extdata, combined_model.models[0].model_img,
+                combined_model.models[0].model_mask,
                 upsample_factor=self.config.offset.correlation_fft_upsample_factor)
 
             corr_offset = (float(result['offset'][0]), float(result['offset'][1]))

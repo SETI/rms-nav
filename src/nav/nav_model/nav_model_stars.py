@@ -33,6 +33,7 @@ from nav.support.flux import clean_sclass
 from nav.support.types import MutableStar
 
 from .nav_model import NavModel
+from .nav_model_result import NavModelResult
 
 
 _DEBUG_STARS_MODEL_IMGDISP = False
@@ -544,6 +545,7 @@ class NavModelStars(NavModel):
         """
 
         metadata: dict[str, Any] = {}
+        self._models.clear()
 
         start_time = now_dt()
         metadata['start_time'] = start_time.isoformat()
@@ -732,19 +734,27 @@ class NavModelStars(NavModel):
                                     text_info=text_info_list)
             annotations = Annotations()
             annotations.add_annotations(annotation)
-            self._annotations = annotations
+            annotations_result: Annotations | None = annotations
+        else:
+            annotations_result = None
 
-        self._model_img = model
-        self._model_mask = self._model_img != 0
-        self._range = np.inf
-        self._blur_amount = None
-        self._uncertainty = 0.
-        self._confidence = 1.
-        self._stretch_regions = stretch_regions
         self._metadata = metadata
 
-        self.logger.debug(f'  Star model min: {np.min(self._model_img)}, '
-                          f'max: {np.max(self._model_img)}')
+        result = NavModelResult(
+            model_img=model,
+            model_mask=model != 0,
+            weighted_mask=None,
+            range=np.inf,
+            blur_amount=None,
+            uncertainty=0.0,
+            confidence=1.0,
+            stretch_regions=stretch_regions,
+            annotations=annotations_result,
+        )
+        self._models.append(result)
+
+        self.logger.debug(f'  Star model min: {np.min(model)}, '
+                          f'max: {np.max(model)}')
 
 # ==============================================================================
 #

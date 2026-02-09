@@ -114,10 +114,11 @@ class ManualNavDialog(QDialog):
         # Image and model arrays
         self._img_fov = obs.data  # V x U, float64
         self._img_ext = obs.extdata  # for correlation
-        if self._model.model_img is None or self._model.model_mask is None:
+        if (len(self._model.models) == 0 or self._model.models[0].model_img is None or
+                self._model.models[0].model_mask is None):
             raise ValueError('Combined model is missing image or mask')
-        self._model_img_ext = self._model.model_img
-        self._model_mask_ext = self._model.model_mask
+        self._model_img_ext = self._model.models[0].model_img
+        self._model_mask_ext = self._model.models[0].model_mask
 
         # Stretch/gamma parameters
         self._black = float(np.quantile(self._img_fov, 0.001))

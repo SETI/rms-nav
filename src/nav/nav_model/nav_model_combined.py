@@ -3,10 +3,15 @@ from typing import Optional, cast
 import numpy as np
 
 from nav.config import Config
-from nav.nav_model import NavModel
 from nav.obs import ObsSnapshot
-from nav.support.image import gaussian_blur_cov, normalize_array
+
+from .nav_model import NavModel
+from .nav_model_result import NavModelResult
+from nav.support.image import gaussian_blur_cov
 from nav.support.types import NDArrayBoolType, NDArrayFloatType, NDArrayUint32Type
+
+# Epsilon to avoid division by zero when scaling model images to peak 1
+_COMBINE_SCALE_EPS = 1e-12
 
 
 class NavModelCombined(NavModel):
@@ -29,59 +34,75 @@ class NavModelCombined(NavModel):
 
         super().__init__(name, obs, config=config)
 
-        self._models = models
+        self._input_models = models
         self._closest_model_index: NDArrayUint32Type | None = None
 
         if len(models) == 0:
             return
 
-        shape = None
+        # Collect all NavModelResult instances from all input models
+        results: list[NavModelResult] = [
+            r for m in models for r in m.models
+        ]
 
+        if len(results) == 0:
+            return
+
+        shape = None
         model_imgs: list[NDArrayFloatType] = []
         model_masks: list[NDArrayBoolType] = []
         weighted_model_masks: list[NDArrayFloatType] = []
         ranges: list[NDArrayFloatType] = []
         total_w = 0.
-        valid_model_indices: list[int] = []
-        for model_idx, model in enumerate(models):
-            if model.model_img is None:
-                continue
-            if model.model_mask is None:
-                raise ValueError(f'Model mask is None for model: {model.name}')
-            if model.confidence is None:
-                raise ValueError(f'Model confidence is None for model: {model.name}')
-            if shape is None:
-                shape = model.model_img.shape
-            elif shape != model.model_img.shape:
-                raise ValueError(f'Model image shapes differ: {shape} != '
-                                 f'{model.model_img.shape}')
-            if model.model_mask is None or model.model_mask.shape != shape:
-                raise ValueError(f'Model image and mask shapes differ: {shape} != '
-                                 f'{model.model_mask.shape}')
+        valid_result_indices: list[int] = []
 
-            model_img = normalize_array(model.model_img)
-            if model.blur_amount is not None:
-                model_img = gaussian_blur_cov(model_img, cast(NDArrayFloatType, model.blur_amount))
-            model_img *= model.confidence
-            wt_model_mask = model.model_mask.astype(np.float64) * model.confidence
-            total_w += model.confidence
+        for result_idx, result in enumerate(results):
+            if result.model_img is None:
+                continue
+            if result.model_mask is None:
+                raise ValueError('Result model mask is None')
+            if result.confidence is None:
+                raise ValueError('Result confidence is None')
+            if shape is None:
+                shape = result.model_img.shape
+            elif shape != result.model_img.shape:
+                raise ValueError(f'Result image shapes differ: {shape} != '
+                                 f'{result.model_img.shape}')
+            if result.model_mask.shape != shape:
+                raise ValueError(f'Result image and mask shapes differ: {shape} != '
+                                 f'{result.model_mask.shape}')
+
+            # Scale each result so masked pixels have max ~1 for consistent combined range
+            raw = result.model_img
+            mask = result.model_mask
+            masked_max = float(np.max(raw[mask])) if np.any(mask) else 1.0
+            scale = max(masked_max, _COMBINE_SCALE_EPS)
+            model_img = np.zeros_like(raw, dtype=np.float64)
+            model_img[mask] = raw[mask] / scale
+
+            if result.blur_amount is not None:
+                model_img = gaussian_blur_cov(
+                    model_img, cast(NDArrayFloatType, result.blur_amount))
+            model_img *= result.confidence
+            wt_model_mask = result.model_mask.astype(np.float64) * result.confidence
+            total_w += result.confidence
             model_imgs.append(model_img)
-            model_masks.append(model.model_mask)
+            model_masks.append(result.model_mask)
             weighted_model_masks.append(wt_model_mask)
 
             # Range can just be a float if the entire model is at the same distance
-            rng = model.range
+            rng = result.range
             if not isinstance(rng, np.ndarray):
-                rng = 0 if rng is None else rng
+                rng_val = np.inf if rng is None else rng
                 rng_arr = self.obs.make_extfov_zeros()
                 rng_arr[:, :] = np.inf
-                rng_arr[model.model_mask] = rng
+                rng_arr[result.model_mask] = rng_val
                 rng = rng_arr
-            elif rng.shape != model.model_img.shape:
-                raise ValueError(f'Range shape differs from model image shape: {rng.shape} != '
-                                 f'{model.model_img.shape}')
+            elif rng.shape != result.model_img.shape:
+                raise ValueError(f'Range shape differs from result image shape: {rng.shape} != '
+                                 f'{result.model_img.shape}')
             ranges.append(rng)
-            valid_model_indices.append(model_idx)
+            valid_result_indices.append(result_idx)
 
         if len(model_imgs) == 0:
             return
@@ -92,7 +113,7 @@ class NavModelCombined(NavModel):
         ranges_arr = np.stack(ranges, axis=0)
 
         min_indices = np.argmin(ranges_arr, axis=0)
-        index_lookup = np.asarray(valid_model_indices, dtype=np.uint32)
+        index_lookup = np.asarray(valid_result_indices, dtype=np.uint32)
         row_idx, col_idx = np.indices(min_indices.shape)
         final_model = model_imgs_arr[min_indices, row_idx, col_idx]
         final_mask = model_masks_arr[min_indices, row_idx, col_idx]
@@ -103,10 +124,18 @@ class NavModelCombined(NavModel):
             final_weighted_mask /= total_w
 
         final_weighted_mask = np.clip(final_weighted_mask, 0.0, 1.0)
-        self._model_img = final_model
-        self._model_mask = final_mask
-        self._weighted_mask = final_weighted_mask
-        self._range = ranges_arr[min_indices, row_idx, col_idx]
+        combined_result = NavModelResult(
+            model_img=final_model,
+            model_mask=final_mask,
+            weighted_mask=final_weighted_mask,
+            range=ranges_arr[min_indices, row_idx, col_idx],
+            blur_amount=None,
+            uncertainty=None,
+            confidence=None,
+            stretch_regions=None,
+            annotations=None,
+        )
+        self._models.append(combined_result)
         self._closest_model_index = index_lookup[min_indices]
 
     @property

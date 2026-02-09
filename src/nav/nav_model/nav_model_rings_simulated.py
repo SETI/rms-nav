@@ -12,7 +12,9 @@ from nav.config import Config
 from nav.sim.sim_ring import compute_border_atop_simulated, render_ring
 from nav.support.time import now_dt
 from nav.support.types import NDArrayBoolType
+
 from .nav_model_rings_base import NavModelRingsBase
+from .nav_model_result import NavModelResult
 
 
 class NavModelRingsSimulated(NavModelRingsBase):
@@ -71,9 +73,7 @@ class NavModelRingsSimulated(NavModelRingsBase):
         metadata['elapsed_time_sec'] = None
 
         self._metadata = metadata
-        self._annotations = None
-        self._uncertainty = 0.
-        self._confidence = 1.0
+        self._models.clear()
 
         with self._logger.open(f'CREATE SIMULATED RINGS MODEL FOR: {self._ring_name}'):
             self._create_model(always_create_model=always_create_model,
@@ -126,18 +126,28 @@ class NavModelRingsSimulated(NavModelRingsBase):
         # Update model and mask
         ring_mask = sim_img != 0.0
 
-        self._model_img = sim_img
-        self._model_mask = ring_mask
-
         # Range: set to a constant value for all ring pixels
-        self._range = p.get('range', 0.0)
+        range_val = p.get('range', 0.0)
 
         # Create annotations if requested
+        annotations = None
         if create_annotations:
-            self._annotations = self._create_simulated_edge_annotations(obs, ring_mask)
+            annotations = self._create_simulated_edge_annotations(obs, ring_mask)
 
         self._metadata['confidence'] = 1.0
-        self._confidence = 1.0
+
+        result = NavModelResult(
+            model_img=sim_img,
+            model_mask=ring_mask,
+            weighted_mask=None,
+            range=range_val,
+            blur_amount=None,
+            uncertainty=0.0,
+            confidence=1.0,
+            stretch_regions=None,
+            annotations=annotations,
+        )
+        self._models.append(result)
 
     def _create_simulated_edge_annotations(self,
                                            obs: oops.Observation,

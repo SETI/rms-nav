@@ -17,6 +17,7 @@ from nav.support.time import now_dt
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
 from .nav_model_body_base import NavModelBodyBase
+from .nav_model_result import NavModelResult
 
 # Sometimes the bounding box returned by "inventory" is not quite big enough
 BODIES_POSITION_SLOP_FRAC = 0.05  # TODO Move to config
@@ -72,8 +73,7 @@ class NavModelBody(NavModelBodyBase):
         metadata['elapsed_time_sec'] = None
 
         self._metadata = metadata
-        self._annotations = None
-        self._uncertainty = 0.
+        self._models.clear()
 
         with self._logger.open(f'CREATE BODY MODEL FOR: {self._body_name}'):
             self._create_model(always_create_model=always_create_model,
@@ -256,32 +256,36 @@ class NavModelBody(NavModelBodyBase):
 
         # This is much faster than calculating the range at each pixel and we never
         # need to know the precise range at that level of detail
-        self._range = obs.make_extfov_zeros()
-        self._range[:, :] = inventory['range'] * body_mask
-        self._range[self._range == 0] = math.inf
+        range_arr = obs.make_extfov_zeros()
+        range_arr[:, :] = inventory['range'] * body_mask
+        range_arr[range_arr == 0] = math.inf
 
-        self._confidence = 1.
         metadata['confidence'] = 1.
 
         ########################################################################
         # Figure out all the location where we might want to label the body
         ########################################################################
 
+        annotations = None
         if create_annotations:
-            self._annotations = self._create_annotations(u_center, v_center, model_img,
-                                                         limb_mask, body_mask)
+            annotations = self._create_annotations(u_center, v_center, model_img,
+                                                   limb_mask, body_mask)
 
-        self._model_img = model_img
-        self._model_mask = body_mask
+        result = NavModelResult(
+            model_img=model_img,
+            model_mask=body_mask,
+            weighted_mask=None,
+            range=range_arr,
+            blur_amount=None,
+            uncertainty=0.0,
+            confidence=1.0,
+            stretch_regions=None,
+            annotations=annotations,
+        )
+        self._models.append(result)
 
-        # import matplotlib.pyplot as plt
-        # plt.imshow(self._model_img)
-        # plt.figure()
-        # plt.imshow(self._model_mask)
-        # plt.show()
-
-        self._logger.debug(f'  Body model min: {np.min(self._model_img)}, '
-                           f'max: {np.max(self._model_img)}')
+        self._logger.debug(f'  Body model min: {np.min(model_img)}, '
+                           f'max: {np.max(model_img)}')
 
     def _create_backplane_model(self,
                                 *,
