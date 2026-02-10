@@ -2,11 +2,11 @@
 import json
 from pathlib import Path
 
-from filecache import FileCache, FCPath
+from filecache import FCPath, FileCache
 
-from nav.dataset.dataset import ImageFiles, ImageFile
-from nav.obs import inst_name_to_obs_class
 from backplanes.backplanes import generate_backplanes_image_files
+from nav.dataset.dataset import ImageFile, ImageFiles
+from nav.obs import inst_name_to_obs_class
 
 
 def main():

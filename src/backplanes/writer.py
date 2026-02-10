@@ -1,8 +1,8 @@
 from typing import Any
 
-from filecache import FCPath
-from astropy.io import fits
 import numpy as np
+from astropy.io import fits
+from filecache import FCPath
 from pdslogger import PdsLogger
 
 from nav.config import Config
@@ -59,7 +59,7 @@ def write_fits(
 
     for name, arr in filtered_master.items():
         hdu = fits.ImageHDU(data=arr.astype('float32'), name=name.upper())
-        if name in units_map and units_map[name]:
+        if units_map.get(name):
             hdu.header['BUNIT'] = units_map[name]
         hdus.append(hdu)
 

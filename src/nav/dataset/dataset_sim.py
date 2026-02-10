@@ -1,12 +1,13 @@
 import argparse
 from collections.abc import Iterator
-from typing import Any, Optional
+from typing import Any
 
 from filecache import FCPath
 
-from .dataset import DataSet, ImageFile, ImageFiles
 from nav.config import Config
 from nav.support.misc import flatten_list
+
+from .dataset import DataSet, ImageFile, ImageFiles
 
 
 class DataSetSim(DataSet):
@@ -23,7 +24,7 @@ class DataSetSim(DataSet):
 
     # Public methods
 
-    def __init__(self, *, config: Optional[Config] = None) -> None:
+    def __init__(self, *, config: Config | None = None) -> None:
         """Initializes a simulated dataset.
 
         Parameters:
@@ -34,7 +35,7 @@ class DataSetSim(DataSet):
     @staticmethod
     def add_selection_arguments(
         cmdparser: argparse.ArgumentParser,
-        group: Optional[argparse._ArgumentGroup] = None,
+        group: argparse._ArgumentGroup | None = None,
     ) -> None:
         if group is None:
             group = cmdparser.add_argument_group('Image selection (sim-specific)')
@@ -60,9 +61,7 @@ class DataSetSim(DataSet):
             yield ImageFiles(image_files=[imagefile])
 
     def yield_image_files_index(self, **kwargs: Any) -> Iterator[ImageFiles]:
-        raise NotImplementedError(
-            'yield_image_files_index is not implemented for sim dataset'
-        )
+        raise NotImplementedError('yield_image_files_index is not implemented for sim dataset')
 
     @staticmethod
     def supported_grouping() -> list[str]:

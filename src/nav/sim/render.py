@@ -1,7 +1,7 @@
 import copy
 import json
 from functools import lru_cache
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 import numpy as np
 from psfmodel import GaussianPSF
@@ -70,9 +70,7 @@ def _render_stars_cached(
         psf_size_half_v = int(star.psf_size[0] + np.round(abs(star.move_v))) // 2
 
         max_move_steps = 1  # TODO configurable
-        move_gran = max(
-            abs(star.move_u) / max_move_steps, abs(star.move_v) / max_move_steps
-        )
+        move_gran = max(abs(star.move_u) / max_move_steps, abs(star.move_v) / max_move_steps)
         move_gran = np.clip(move_gran, 0.1, 1.0)
 
         sigma = star_params.get('psf_sigma', 3.0)
@@ -171,7 +169,7 @@ def _render_body_shape_cached(
     crater_power_law_exponent: float,
     crater_relief_scale: float,
     anti_aliasing: float,
-    body_seed: Optional[int],
+    body_seed: int | None,
 ) -> NDArrayFloatType:
     """First layer cache: compute body shape at reference center (image center).
 
@@ -211,7 +209,7 @@ def _render_bodies_positioned_cached(
     centers_json: str,
     offset_v: float,
     offset_u: float,
-    seed: Optional[int],
+    seed: int | None,
 ) -> dict[str, Any]:
     """Second layer cache: position cached body shapes based on u,v coordinates.
 
@@ -302,9 +300,7 @@ def _render_bodies_positioned_cached(
 
         # Create positioned body by translating the cached shape
         # Use scipy for sub-pixel translation
-        positioned_body = ndimage.shift(
-            body_shape, (dv, du), order=1, mode='constant', cval=0.0
-        )
+        positioned_body = ndimage.shift(body_shape, (dv, du), order=1, mode='constant', cval=0.0)
 
         # Composition: overwrite where body contributes
         mask = positioned_body > 0
@@ -315,9 +311,7 @@ def _render_bodies_positioned_cached(
         near_index = order_near_to_far.index(body_name) + 1
         body_index_map[mask] = near_index
 
-        max_dim = (
-            max(axis1, axis2, axis3) / 2.0
-        )  # Convert to half-width for dimension calculation
+        max_dim = max(axis1, axis2, axis3) / 2.0  # Convert to half-width for dimension calculation
         inventory_item = {
             'v_min_unclipped': center_v - max_dim,
             'v_max_unclipped': center_v + max_dim,
@@ -347,7 +341,7 @@ def _render_single_body(
     offset_v: float,
     offset_u: float,
     *,
-    seed: Optional[int] = None,
+    seed: int | None = None,
     ref_center_v: float,
     ref_center_u: float,
 ) -> tuple[NDArrayBoolType, dict[str, Any]]:
@@ -414,9 +408,7 @@ def _render_single_body(
     du = center_u - ref_center_u
 
     # Create positioned body by translating the cached shape
-    positioned_body = ndimage.shift(
-        body_shape, (dv, du), order=1, mode='constant', cval=0.0
-    )
+    positioned_body = ndimage.shift(body_shape, (dv, du), order=1, mode='constant', cval=0.0)
 
     # Composition: overwrite where body contributes
     mask = positioned_body > 0
@@ -446,7 +438,7 @@ def render_bodies(
     offset_v: float,
     offset_u: float,
     *,
-    seed: Optional[int] = None,
+    seed: int | None = None,
 ) -> dict[str, Any]:
     """Render bodies over img and return fields by name.
 
@@ -493,9 +485,7 @@ def render_bodies(
         'bodies': cached_result['bodies'],
         'inventory': cached_result['inventory'],
         'body_masks': [m.copy() for m in cached_result['body_masks']],
-        'body_mask_map': {
-            k: v.copy() for k, v in cached_result['body_mask_map'].items()
-        },
+        'body_mask_map': {k: v.copy() for k, v in cached_result['body_mask_map'].items()},
         'order_near_to_far': cached_result['order_near_to_far'],
         'body_index_map': cached_result['body_index_map'].copy(),
     }
@@ -514,9 +504,7 @@ def _render_background_noise_cached(
     return noise
 
 
-def render_background_noise(
-    img: NDArrayFloatType, noise_level: float, seed: int
-) -> None:
+def render_background_noise(img: NDArrayFloatType, noise_level: float, seed: int) -> None:
     """Add Gaussian background noise to the image.
 
     Parameters:
@@ -649,16 +637,12 @@ def _render_combined_model_cached(
     random_seed = int(sim_params.get('random_seed', 42))
 
     # Apply background noise first
-    background_noise_intensity = float(
-        sim_params.get('background_noise_intensity', 0.0)
-    )
+    background_noise_intensity = float(sim_params.get('background_noise_intensity', 0.0))
     render_background_noise(img, background_noise_intensity, random_seed)
 
     # Then background stars
     background_stars_num = int(sim_params.get('background_stars_num', 0))
-    background_stars_psf_sigma = float(
-        sim_params.get('background_stars_psf_sigma', 0.9)
-    )
+    background_stars_psf_sigma = float(sim_params.get('background_stars_psf_sigma', 0.9))
     background_stars_distribution_exponent = float(
         sim_params.get('background_stars_distribution_exponent', 2.5)
     )
@@ -728,8 +712,7 @@ def _render_combined_model_cached(
     # Build order_near_to_far for bodies (needed for body_index_map)
     sorted_bodies_by_range = sorted(bodies_with_ranges, key=lambda x: x['range'])
     order_near_to_far = [
-        bp.get('name', f'SIM-BODY-{i + 1}').upper()
-        for i, bp in enumerate(sorted_bodies_by_range)
+        bp.get('name', f'SIM-BODY-{i + 1}').upper() for i, bp in enumerate(sorted_bodies_by_range)
     ]
 
     for _range_val, item_type, item_params, orig_idx in render_items:
@@ -850,9 +833,7 @@ def render_combined_model(
     params_for_hash = dict(sim_params)
     if ignore_offset:
         params_for_hash = {
-            k: v
-            for k, v in params_for_hash.items()
-            if k not in ('offset_v', 'offset_u')
+            k: v for k, v in params_for_hash.items() if k not in ('offset_v', 'offset_u')
         }
     sim_params_json = json.dumps(params_for_hash, sort_keys=True)
     cached_img, cached_meta = _render_combined_model_cached(

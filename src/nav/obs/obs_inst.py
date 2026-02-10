@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
-from typing import Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from psfmodel import GaussianPSF, PSF
+from psfmodel import PSF, GaussianPSF
 from starcat import Star
 
 from nav.config import Config
@@ -34,8 +34,8 @@ class ObsInst(ABC):
     def from_file(
         path: PathLike,
         *,
-        config: Optional[Config] = None,
-        extfov_margin_vu: Optional[tuple[int, int]] = None,
+        config: Config | None = None,
+        extfov_margin_vu: tuple[int, int] | None = None,
         **kwargs: Any,
     ) -> 'Obs':
         """Creates an instrument instance from an image file.

@@ -1,7 +1,7 @@
-from abc import ABC
 import argparse
+from abc import ABC
 from collections.abc import Iterator
-from typing import Any, Optional
+from typing import Any
 
 from .dataset import DataSet, ImageFiles
 
@@ -19,7 +19,7 @@ class DataSetPDS4(DataSet, ABC):
     @staticmethod
     def add_selection_arguments(
         cmdparser: argparse.ArgumentParser,
-        group: Optional[argparse._ArgumentGroup] = None,
+        group: argparse._ArgumentGroup | None = None,
     ) -> None:
         raise NotImplementedError('PDS4 datasets are not yet implemented')
 

@@ -1,9 +1,9 @@
 import json
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, cast
 
-from filecache import FCPath
 import oops
+from filecache import FCPath
 from oops.observation.snapshot import Snapshot
 
 from nav.config import DEFAULT_CONFIG, DEFAULT_LOGGER, Config
@@ -22,8 +22,8 @@ class ObsSim(ObsSnapshotInst):
     def from_file(
         path: PathLike,
         *,
-        config: Optional[Config] = None,
-        extfov_margin_vu: Optional[tuple[int, int]] = None,
+        config: Config | None = None,
+        extfov_margin_vu: tuple[int, int] | None = None,
         **kwargs: Any,
     ) -> 'ObsSim':
         """Creates an ObsSim from a JSON file.
@@ -40,7 +40,7 @@ class ObsSim(ObsSnapshotInst):
         config = config or DEFAULT_CONFIG
         logger = DEFAULT_LOGGER
 
-        provided_sim_params = kwargs.get('sim_params', None)
+        provided_sim_params = kwargs.get('sim_params')
         json_path = FCPath(path)
         abspath = cast(Path, json_path.get_local_path()).absolute()
         if provided_sim_params is None:
@@ -113,9 +113,7 @@ class ObsSim(ObsSnapshotInst):
                 extfov_margin_vu = extfov_margin_vu_entry
 
         snapshot._closest_planet = sim_params.get('closest_planet', None)
-        new_obs = ObsSim(
-            snapshot, config=config, extfov_margin_vu=extfov_margin_vu, simulated=True
-        )
+        new_obs = ObsSim(snapshot, config=config, extfov_margin_vu=extfov_margin_vu, simulated=True)
         new_obs._inst_config = inst_config
 
         new_obs.spice_kernels = ['fake_kernel1.txt', 'fake_kernel2.txt']

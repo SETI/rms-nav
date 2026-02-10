@@ -36,9 +36,13 @@ def test_nav_model_result_with_values() -> None:
     )
     assert result.model_img is img
     assert result.model_mask is mask
+    assert result.weighted_mask is None
     assert result.range == 1000.0
+    assert result.blur_amount is None
     assert result.uncertainty == 0.5
     assert result.confidence == 1.0
+    assert result.stretch_regions is None
+    assert result.annotations is None
 
 
 def test_nav_model_result_range_array() -> None:

@@ -9,8 +9,8 @@ template but with different offset_u and offset_v values.
 import argparse
 import json
 
-from filecache import FCPath
 import numpy as np
+from filecache import FCPath
 
 
 def positive_float(value: str) -> float:
@@ -56,9 +56,7 @@ def parse_slice(slice_str: str) -> tuple[float, float, float]:
     except ValueError as e:
         raise ValueError(f'Invalid slice format: {slice_str}. {e}') from e
     if stride <= 0:
-        raise ValueError(
-            f'Stride must be positive, got: {stride} in slice "{slice_str}"'
-        )
+        raise ValueError(f'Stride must be positive, got: {stride} in slice "{slice_str}"')
     return (min_val, max_val, stride)
 
 

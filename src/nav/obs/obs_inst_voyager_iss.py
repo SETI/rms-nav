@@ -1,8 +1,8 @@
-from typing import Any, Optional, cast
-
-from filecache import FCPath
-import numpy as np
 from pathlib import Path
+from typing import Any, cast
+
+import numpy as np
+from filecache import FCPath
 
 from nav.config import DEFAULT_CONFIG, DEFAULT_LOGGER, Config
 from nav.support.time import et_to_utc
@@ -22,7 +22,7 @@ class ObsVoyagerISS(ObsSnapshotInst):
     def from_file(
         path: PathLike,
         *,
-        config: Optional[Config] = None,
+        config: Config | None = None,
         extfov_margin_vu: tuple[int, int] | None = None,
         **_kwargs: Any,
     ) -> 'ObsVoyagerISS':
@@ -52,9 +52,7 @@ class ObsVoyagerISS(ObsSnapshotInst):
 
         inst_config = config.category('voyager_iss')
 
-        label3 = obs.dict['LABEL3'].replace(
-            'FOR (I/F)*10000., MULTIPLY DN VALUE BY', ''
-        )
+        label3 = obs.dict['LABEL3'].replace('FOR (I/F)*10000., MULTIPLY DN VALUE BY', '')
         factor = float(label3)
         obs.data = obs.data * factor / 10000
         # TODO Beware - Voyager 1 @ Saturn requires data to be multiplied by 3.345

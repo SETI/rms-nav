@@ -1,17 +1,16 @@
 # mypy: ignore-errors
 # TODO Clean up typing
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
-from numpy.fft import fft2, ifft2, fftfreq, ifftshift
+from numpy.fft import fft2, fftfreq, ifft2, ifftshift
 from pdslogger import PdsLogger
 from scipy.ndimage import gaussian_filter
 
 from nav.config import DEFAULT_LOGGER
 from nav.support.image import crop_center, normalize_array, pad_top_left
 from nav.support.misc import mad_std
-from nav.support.types import NDArrayFloatType, NDArrayBoolType
-
+from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
 # ==============================================================
 # Small utilities
@@ -180,9 +179,7 @@ def per_metric(corr: NDArrayFloatType, peak_val: float) -> float:
     return peak_val / (np.sqrt(np.sum(corr**2)) + 1e-12)
 
 
-def nms_topk(
-    corr: NDArrayFloatType, k: int = 5, radius: int = 5
-) -> list[tuple[int, int, float]]:
+def nms_topk(corr: NDArrayFloatType, k: int = 5, radius: int = 5) -> list[tuple[int, int, float]]:
     """Non-maximum suppression to get top-k peaks."""
     corr_v, corr_u = corr.shape
     work = corr.copy()
@@ -206,9 +203,7 @@ def nms_topk(
 # ==============================================================
 
 
-def fisher_covariance(
-    model_aligned: NDArrayFloatType, sigma_n: float
-) -> NDArrayFloatType:
+def fisher_covariance(model_aligned: NDArrayFloatType, sigma_n: float) -> NDArrayFloatType:
     sy = np.gradient(model_aligned, axis=0)
     sx = np.gradient(model_aligned, axis=1)
     Sxx = np.sum(sx * sx)
@@ -341,7 +336,7 @@ def navigate_single_scale_kpeaks(
     image: NDArrayFloatType,
     model: NDArrayFloatType,
     mask: NDArrayBoolType,
-    logger: Optional[PdsLogger],
+    logger: PdsLogger | None,
     max_peaks: int = 5,
     upsample_factor: int = 16,
     metric: str = 'psr',
@@ -446,7 +441,7 @@ def navigate_with_pyramid_kpeaks(
     consistency_tol: float = 2.0,
     nms_radius: int = 5,
     prior_weight_final: float = 0.25,
-    logger: Optional[PdsLogger] = None,
+    logger: PdsLogger | None = None,
 ) -> dict[str, Any]:
     """TODO Clean this up
     Build class-aware effective model + mask, run coarse->fine, then evaluate K peaks at final

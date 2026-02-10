@@ -3,7 +3,7 @@
 This module provides a navigation model for simulated rings created in the GUI.
 """
 
-from typing import Any, Optional
+from typing import Any
 
 import oops
 
@@ -13,8 +13,8 @@ from nav.sim.sim_ring import compute_border_atop_simulated, render_ring
 from nav.support.time import now_dt
 from nav.support.types import NDArrayBoolType
 
-from .nav_model_rings_base import NavModelRingsBase
 from .nav_model_result import NavModelResult
+from .nav_model_rings_base import NavModelRingsBase
 
 
 class NavModelRingsSimulated(NavModelRingsBase):
@@ -32,7 +32,7 @@ class NavModelRingsSimulated(NavModelRingsBase):
         ring_name: str,
         sim_params: dict[str, Any],
         *,
-        config: Optional[Config] = None,
+        config: Config | None = None,
     ) -> None:
         """Creates a navigation model for simulated rings.
 

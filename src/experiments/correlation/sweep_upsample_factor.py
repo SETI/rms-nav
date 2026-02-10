@@ -3,9 +3,7 @@ import numpy as np
 from nav.support.correlate import navigate_with_pyramid_kpeaks
 
 
-def gaussian_patch(
-    shape: tuple[int, int], sigma: float, offset: tuple[float, float]
-) -> np.ndarray:
+def gaussian_patch(shape: tuple[int, int], sigma: float, offset: tuple[float, float]) -> np.ndarray:
     v_size, u_size = shape
     ov, ou = offset
     cv = (v_size - 1) / 2.0

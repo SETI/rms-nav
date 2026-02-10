@@ -1,14 +1,14 @@
 from collections.abc import Callable
-from typing import Optional, Any
+from typing import Any
 
 import numpy as np
-from PyQt6.QtCore import Qt, QPoint
+from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtGui import QMouseEvent, QWheelEvent
 from PyQt6.QtWidgets import (
-    QLabel,
-    QScrollArea,
     QFormLayout,
     QHBoxLayout,
+    QLabel,
+    QScrollArea,
     QSlider,
     QWidget,
 )
@@ -36,7 +36,7 @@ class ZoomPanController:
         get_zoom: Callable[[], float],
         set_zoom: Callable[[float], None],
         update_display: Callable[[], None],
-        set_zoom_label_text: Optional[Callable[[str], None]] = None,
+        set_zoom_label_text: Callable[[str], None] | None = None,
     ) -> None:
         self._label = label
         self._scroll = scroll_area
@@ -45,8 +45,8 @@ class ZoomPanController:
         self._update_display = update_display
         self._set_zoom_label_text = set_zoom_label_text
 
-        self._drag_start_pos: Optional[QPoint] = None
-        self._drag_start_scroll_xy: Optional[tuple[int, int]] = None
+        self._drag_start_pos: QPoint | None = None
+        self._drag_start_scroll_xy: tuple[int, int] | None = None
 
     # Event handlers (UI should call these from its own handlers)
     def on_mouse_press(self, event: QMouseEvent) -> None:
@@ -66,14 +66,10 @@ class ZoomPanController:
             sh = self._scroll.horizontalScrollBar()
             sv = self._scroll.verticalScrollBar()
             if sh is not None:
-                new_h = int(
-                    max(0, min(sh.maximum(), self._drag_start_scroll_xy[0] - delta.x()))
-                )
+                new_h = int(max(0, min(sh.maximum(), self._drag_start_scroll_xy[0] - delta.x())))
                 sh.setValue(new_h)
             if sv is not None:
-                new_v = int(
-                    max(0, min(sv.maximum(), self._drag_start_scroll_xy[1] - delta.y()))
-                )
+                new_v = int(max(0, min(sv.maximum(), self._drag_start_scroll_xy[1] - delta.y())))
                 sv.setValue(new_v)
 
     def on_mouse_release(self, _event: QMouseEvent) -> None:
@@ -284,11 +280,7 @@ def build_stretch_controls(
     def set_range(new_img_min: float, new_img_max: float) -> None:
         nonlocal lo, hi
         lo = float(new_img_min)
-        hi = (
-            float(new_img_max)
-            if new_img_max > new_img_min
-            else (float(new_img_min) + 1.0)
-        )
+        hi = float(new_img_max) if new_img_max > new_img_min else (float(new_img_min) + 1.0)
 
     return {
         'slider_black': slider_black,

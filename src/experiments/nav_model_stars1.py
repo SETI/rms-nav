@@ -1,12 +1,11 @@
-from pathlib import Path
 import sys
-
+from pathlib import Path
 
 # Add the repository root to the path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from nav.obs import inst_name_to_obs_class
 from nav.nav_master import NavMaster
+from nav.obs import inst_name_to_obs_class
 from tests.config import (
     URL_CASSINI_ISS_STARS_01,
 )

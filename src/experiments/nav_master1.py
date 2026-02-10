@@ -1,14 +1,15 @@
-from pathlib import Path
 import sys
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 from PIL import Image
 
 # Add the repository root to the path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from nav.config import DEFAULT_CONFIG
-
 from nav.inst import inst_name_to_class
+
+from nav.config import DEFAULT_CONFIG
 from nav.nav_master import NavMaster
 
 

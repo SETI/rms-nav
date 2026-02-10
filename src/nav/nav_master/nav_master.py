@@ -1,12 +1,12 @@
 import fnmatch
-from typing import Any, Optional, Sequence, cast
+from collections.abc import Sequence
+from typing import Any, cast
 
-from oops import Observation
 import numpy as np
+from oops import Observation
 
 from nav.annotation import Annotations
 from nav.config import Config
-from nav.support.file import clean_obj
 from nav.nav_model import (
     NavModel,
     NavModelBody,
@@ -19,8 +19,8 @@ from nav.nav_model import (
 )
 from nav.nav_model.nav_model_body_base import NavModelBodyBase
 from nav.nav_model.nav_model_rings_base import NavModelRingsBase
-from nav.nav_technique import NavTechniqueCorrelateAll
-from nav.nav_technique import NavTechniqueManual
+from nav.nav_technique import NavTechniqueCorrelateAll, NavTechniqueManual
+from nav.support.file import clean_obj
 from nav.support.nav_base import NavBase
 from nav.support.types import NDArrayFloatType, NDArrayUint8Type
 
@@ -42,9 +42,9 @@ class NavMaster(NavBase):
         self,
         obs: Observation,
         *,
-        nav_models: Optional[list[str]] = None,
-        nav_techniques: Optional[list[str]] = None,
-        config: Optional[Config] = None,
+        nav_models: list[str] | None = None,
+        nav_techniques: list[str] | None = None,
+        config: Config | None = None,
     ) -> None:
         """Initializes a navigation master object for an observation.
 
@@ -191,7 +191,7 @@ class NavMaster(NavBase):
         self._star_models = [stars_model]
         self._metadata['models']['star_model'] = stars_model.metadata
 
-        # import matplotlib.pyplot as plt  # noqa: F401
+        # import matplotlib.pyplot as plt
         # plt.imshow(stars_model.model_img)
         # plt.show()
 
@@ -262,8 +262,7 @@ class NavMaster(NavBase):
         for body_name, inventory in large_bodies_by_range:
             model_name = f'body:{body_name.upper()}'
             if not any(
-                fnmatch.fnmatch(model_name.lower(), x.lower())
-                for x in self._nav_models_to_use
+                fnmatch.fnmatch(model_name.lower(), x.lower()) for x in self._nav_models_to_use
             ):
                 continue
             if obs.is_simulated:
@@ -317,8 +316,7 @@ class NavMaster(NavBase):
                 ring_name = ring_params.get('name', 'UNNAMED')
                 model_name = f'ring:{ring_name}'
                 if not any(
-                    fnmatch.fnmatch(model_name.lower(), x.lower())
-                    for x in self._nav_models_to_use
+                    fnmatch.fnmatch(model_name.lower(), x.lower()) for x in self._nav_models_to_use
                 ):
                     continue
                 ring_model: NavModelRingsBase = NavModelRingsSimulated(
@@ -395,10 +393,7 @@ class NavMaster(NavBase):
 
         self._metadata['navigation_techniques'] = {}
 
-        if any(
-            fnmatch.fnmatch('correlate_all', x.lower())
-            for x in self._nav_techniques_to_use
-        ):
+        if any(fnmatch.fnmatch('correlate_all', x.lower()) for x in self._nav_techniques_to_use):
             nav_all = NavTechniqueCorrelateAll(self)
             nav_all.navigate()
             correlate_all_combined_model = nav_all.combined_model()
@@ -412,15 +407,11 @@ class NavMaster(NavBase):
                 # plt.show()
                 # plt.imshow(correlate_all_combined_model.weighted_mask)
                 # plt.show()
-                self._metadata['navigation_techniques']['correlate_all'] = (
-                    nav_all.metadata
-                )
+                self._metadata['navigation_techniques']['correlate_all'] = nav_all.metadata
                 self._offsets['correlate_all'] = nav_all.offset
                 if nav_all.offset is not None:
                     if nav_all.confidence is None:
-                        raise ValueError(
-                            'Correlate all navigation technique confidence is None'
-                        )
+                        raise ValueError('Correlate all navigation technique confidence is None')
                     if nav_all.confidence > prevailing_confidence:
                         prevailing_confidence = nav_all.confidence
                         self._final_offset = nav_all.offset
@@ -428,9 +419,7 @@ class NavMaster(NavBase):
             self._offsets['correlate_all'] = None
 
         # Manual technique
-        if any(
-            fnmatch.fnmatch('manual', x.lower()) for x in self._nav_techniques_to_use
-        ):
+        if any(fnmatch.fnmatch('manual', x.lower()) for x in self._nav_techniques_to_use):
             nav_manual = NavTechniqueManual(self)
             nav_manual.navigate()
             manual_combined_model = nav_manual.combined_model()
@@ -454,8 +443,7 @@ class NavMaster(NavBase):
             self.logger.info('Final offset: NONE')
         else:
             self.logger.info(
-                f'Final offset: dU {self._final_offset[1]:.3f}, '
-                f'dV {self._final_offset[0]:.3f}'
+                f'Final offset: dU {self._final_offset[1]:.3f}, dV {self._final_offset[0]:.3f}'
             )
             self.logger.info(f'Final confidence: {self._final_confidence:.5f}')
 
@@ -498,16 +486,12 @@ class NavMaster(NavBase):
         # ends up being more complicated. This needs to be revisited.
         if self.combined_model is None:
             # If we never created a combined model earlier, we need one now for the overlay
-            self._combined_model = NavModelCombined(
-                'combined', self.obs, list(self.all_models)
-            )
+            self._combined_model = NavModelCombined('combined', self.obs, list(self.all_models))
         if self.combined_model is None:
             raise ValueError('Combined model is None')
         if self.combined_model.closest_model_index is None:
             raise ValueError('Combined model closest model index is None')
-        min_index = self.obs.extract_offset_array(
-            self.combined_model.closest_model_index, offset
-        )
+        min_index = self.obs.extract_offset_array(self.combined_model.closest_model_index, offset)
 
         def _stretch_region(sub_img: NDArrayFloatType) -> NDArrayUint8Type:
             """Stretches a region of the image."""
@@ -518,9 +502,7 @@ class NavMaster(NavBase):
             gamma = 1  # 0.5
 
             img_stretched = np.floor(
-                (np.maximum(sub_img - blackpoint, 0) / (whitepoint - blackpoint))
-                ** gamma
-                * 256
+                (np.maximum(sub_img - blackpoint, 0) / (whitepoint - blackpoint)) ** gamma * 256
             )
             img_stretched = np.clip(img_stretched, 0, 255)
             img_stretched = cast(NDArrayUint8Type, img_stretched.astype(np.uint8))
@@ -532,24 +514,18 @@ class NavMaster(NavBase):
             for result in model.models:
                 if result.stretch_regions is not None:
                     for stretch_region_packed in result.stretch_regions:
-                        stretch_region = np.unpackbits(
-                            stretch_region_packed, axis=0
-                        ).astype(bool)
+                        stretch_region = np.unpackbits(stretch_region_packed, axis=0).astype(bool)
                         stretch_region = self.obs.unpad_array_to_extfov(stretch_region)
-                        stretch_region = self._obs.extract_offset_array(
-                            stretch_region, offset
-                        )
+                        stretch_region = self._obs.extract_offset_array(stretch_region, offset)
                         if not np.any(stretch_region):
                             continue
                         # We stretch this region by itself if we haven't already stretched
                         # any part of it and all of it is the closest result in the view for
                         # those pixels.
-                        if not np.any(
-                            already_stretched_mask[stretch_region]
-                        ) and np.all(min_index[stretch_region] == result_flat_index):
-                            bw_res[stretch_region] = _stretch_region(
-                                img[stretch_region]
-                            )
+                        if not np.any(already_stretched_mask[stretch_region]) and np.all(
+                            min_index[stretch_region] == result_flat_index
+                        ):
+                            bw_res[stretch_region] = _stretch_region(img[stretch_region])
                             already_stretched_mask |= stretch_region
                 result_flat_index += 1
 

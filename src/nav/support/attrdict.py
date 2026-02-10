@@ -15,7 +15,7 @@ class AttrDict(dict[str, Any]):
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super(AttrDict, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.__dict__ = self
 
     # This is a stupid thing to do, but it's necessary to avoid mypy from complaining

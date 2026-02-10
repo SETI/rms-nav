@@ -233,9 +233,7 @@ def compute_border_atop_simulated(
     return cast(NDArrayBoolType, border)
 
 
-def _compute_antialiasing_shade(
-    edge_dist: NDArrayFloatType, resolution: float
-) -> NDArrayFloatType:
+def _compute_antialiasing_shade(edge_dist: NDArrayFloatType, resolution: float) -> NDArrayFloatType:
     """Compute anti-aliasing shade from edge distance.
 
     Parameters:
@@ -251,9 +249,7 @@ def _compute_antialiasing_shade(
     return shade
 
 
-def _compute_fade_factor(
-    edge_dist: NDArrayFloatType, shading_distance: float
-) -> NDArrayFloatType:
+def _compute_fade_factor(edge_dist: NDArrayFloatType, shading_distance: float) -> NDArrayFloatType:
     """Compute fade factor for edge shading.
 
     Parameters:
@@ -318,21 +314,13 @@ def render_ring(
     # Extract mode 1 parameters (use defaults if not present)
     inner_a = float(inner_mode1.get('a', 0.0)) if inner_mode1 is not None else 0.0
     inner_ae = float(inner_mode1.get('ae', 0.0)) if inner_mode1 is not None else 0.0
-    inner_long_peri = (
-        float(inner_mode1.get('long_peri', 0.0)) if inner_mode1 is not None else 0.0
-    )
-    inner_rate_peri = (
-        float(inner_mode1.get('rate_peri', 0.0)) if inner_mode1 is not None else 0.0
-    )
+    inner_long_peri = float(inner_mode1.get('long_peri', 0.0)) if inner_mode1 is not None else 0.0
+    inner_rate_peri = float(inner_mode1.get('rate_peri', 0.0)) if inner_mode1 is not None else 0.0
 
     outer_a = float(outer_mode1.get('a', 0.0)) if outer_mode1 is not None else 0.0
     outer_ae = float(outer_mode1.get('ae', 0.0)) if outer_mode1 is not None else 0.0
-    outer_long_peri = (
-        float(outer_mode1.get('long_peri', 0.0)) if outer_mode1 is not None else 0.0
-    )
-    outer_rate_peri = (
-        float(outer_mode1.get('rate_peri', 0.0)) if outer_mode1 is not None else 0.0
-    )
+    outer_long_peri = float(outer_mode1.get('long_peri', 0.0)) if outer_mode1 is not None else 0.0
+    outer_rate_peri = float(outer_mode1.get('rate_peri', 0.0)) if outer_mode1 is not None else 0.0
 
     # Create coordinate grids at pixel centers (0.5 offset from integer coordinates)
     v_coords = np.arange(size_v, dtype=np.float64) + 0.5
@@ -400,9 +388,7 @@ def render_ring(
                 outer_edge_dist = outer_radii - distances
                 outer_shade = _compute_antialiasing_shade(outer_edge_dist, resolution)
                 outer_fade = _compute_fade_factor(outer_edge_dist, shading_distance)
-                ring_model = np.maximum(
-                    inner_shade * inner_fade, outer_shade * outer_fade
-                )
+                ring_model = np.maximum(inner_shade * inner_fade, outer_shade * outer_fade)
             else:
                 # Both edges: no shading, just fill the entire region with anti-aliasing
                 inner_edge_dist = distances - inner_radii

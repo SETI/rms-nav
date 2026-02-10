@@ -1,20 +1,19 @@
 import argparse
-from functools import partial
 import json
 import multiprocessing
 import sys
-from typing import Any, Optional, cast
+from functools import partial
+from typing import Any, cast
 
 import filecache
-from filecache import FCPath
 import matplotlib.pyplot as plt
 import numpy as np
-
+from filecache import FCPath
+from nav.inst import inst_name_to_class
 from psfmodel import PSF, GaussianPSF
 from starcat import Star
 
 from nav.config import DEFAULT_CONFIG, DEFAULT_LOGGER
-from nav.inst import inst_name_to_class
 from nav.nav_master import NavMaster
 from nav.obs import ObsSnapshot
 
@@ -28,7 +27,7 @@ def _analyze_star(
     img: np.ndarray,
     psf: PSF,
     uv_list: list[tuple[float, float, float, float]],
-    verbose: Optional[bool] = False,
+    verbose: bool = False,
 ) -> bool:
     """Filter and analyze one star.
 
@@ -73,12 +72,7 @@ def _analyze_star(
             f'Star {star.unique_number} VMAG {star.vmag} Searched at {u:.3f}, {v:.3f} '
             f'found at {opt_u:.3f}, {opt_v:.3f}'
         )
-    if (
-        opt_u < clip
-        or opt_u > img.shape[1] - clip
-        or opt_v < clip
-        or opt_v > img.shape[0] - clip
-    ):
+    if opt_u < clip or opt_u > img.shape[1] - clip or opt_v < clip or opt_v > img.shape[0] - clip:
         if verbose:
             print(f'Star {star.unique_number} VMAG {star.vmag} clipped')
         return False
@@ -86,9 +80,7 @@ def _analyze_star(
     diff_v = float(opt_v - v)
     if abs(diff_u) > 1.5 or abs(diff_v) > 1.5:
         if verbose:
-            print(
-                f'Star {star.unique_number} VMAG {star.vmag} offset {diff_u}, {diff_v} too large'
-            )
+            print(f'Star {star.unique_number} VMAG {star.vmag} offset {diff_u}, {diff_v} too large')
         return False
     bkgnd = np.median(metadata['subimg'])
     psf_u = int(diff_u + psf_size[1] // 2)
@@ -105,9 +97,7 @@ def _analyze_star(
         print(f'Star {star.unique_number} VMAG {star.vmag} peak {peak} bkgnd {bkgnd}')
     uv_list.append((u, v, diff_u, diff_v))
     if verbose:
-        print(
-            f'Star {star.unique_number} VMAG {star.vmag} offset {diff_u}, {diff_v} OK'
-        )
+        print(f'Star {star.unique_number} VMAG {star.vmag} offset {diff_u}, {diff_v} OK')
     return True
 
 
@@ -277,14 +267,12 @@ def find_error_one_twist(
     # Calculate the angle between these vectors and the perfect vector to the center.
     u_diff_arr_perfect = img.shape[1] / 2 - u_arr
     v_diff_arr_perfect = img.shape[0] / 2 - v_arr
-    angle_arr_perfect = (np.arctan2(v_diff_arr_perfect, u_diff_arr_perfect) + np.pi) % (
-        2 * np.pi
-    )
+    angle_arr_perfect = (np.arctan2(v_diff_arr_perfect, u_diff_arr_perfect) + np.pi) % (2 * np.pi)
     angle_arr = (np.arctan2(v_diff_arr, u_diff_arr) + np.pi) % (2 * np.pi)
     # Diff the angles always getting a number between -pi and pi
     angle_diff_arr = np.arctan2(
         np.sin(angle_arr - angle_arr_perfect), np.cos(angle_arr - angle_arr_perfect)
-    )  # Diff the angles always getting a number between -pi and pi
+    )
     # Compute the final error as a combination of the magnitude of the error vector
     # and the difference in the angle. Normalize for the number of stars.
     error = np.sqrt(np.sum((mag_arr * angle_diff_arr) ** 2)) / len(mag_arr)
@@ -324,7 +312,7 @@ def plot_with_arrows(
     twist: float,
     offset: tuple[float, float],
     img_name: str,
-    plot_path: Optional[FCPath] = None,
+    plot_path: FCPath | None = None,
 ) -> None:
     """Plot an image with arrows and optionally save it to a file.
 
@@ -360,9 +348,7 @@ def plot_with_arrows(
                 color='#80ff80',
                 alpha=0.6,
             )
-    plt.title(
-        f'{img_name} (Twist {twist:.5f}, Offset {offset[1]:.3f}, {offset[0]:.3f})'
-    )
+    plt.title(f'{img_name} (Twist {twist:.5f}, Offset {offset[1]:.3f}, {offset[0]:.3f})')
     if plot_path is None:
         plt.show()
     else:
@@ -480,9 +466,7 @@ def optimize_one_image(
 
             best_error, best_twist, best_ret = best_result
 
-            print(
-                f'{img_name:15s} Best twist: {best_twist:8.5f}, Error: {best_error:9.5f}'
-            )
+            print(f'{img_name:15s} Best twist: {best_twist:8.5f}, Error: {best_error:9.5f}')
             log_fp.write(f'Best twist: {best_twist:8.5f}, Error: {best_error:9.5f}\n')
 
             if delta_twist <= precision:
@@ -507,9 +491,7 @@ def optimize_one_image(
         print()
         log_fp.write('\n\n')
 
-        corner_dist = np.sqrt(
-            (orig_obs.data.shape[0] / 2) ** 2 + (orig_obs.data.shape[1] / 2) ** 2
-        )
+        corner_dist = np.sqrt((orig_obs.data.shape[0] / 2) ** 2 + (orig_obs.data.shape[1] / 2) ** 2)
         rotation_error = np.sin(np.radians(best_twist)) * corner_dist
         print(
             f'{img_name:15s} FINAL Best Twist: {best_twist:8.5f} deg '
@@ -561,9 +543,7 @@ def optimize_one_image(
 
 def main(command_list: list[str]) -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        'config_file', help='The config file containing the star field data.'
-    )
+    parser.add_argument('config_file', help='The config file containing the star field data.')
     parser.add_argument(
         'nthreads',
         type=int,
@@ -618,7 +598,7 @@ def main(command_list: list[str]) -> None:
     if args.debug:
         filecache.set_easy_logger()
 
-    with open(args.config_file, 'r') as f:
+    with open(args.config_file) as f:
         twist_config = json.load(f)
 
     dataset = args.config_file.split('/')[-1].split('.')[0]

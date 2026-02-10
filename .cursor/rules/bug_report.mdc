@@ -45,7 +45,7 @@ Every bug report MUST include:
 [Level] — [Brief justification]
 
 ## Steps to Reproduce
-1. Install: `pip install rms-xxx==0.3.1`
+1. Install: `pip install rms-nav==0.3.1`
 2. Run:
    ```python
    from nav import SomeClass
@@ -60,7 +60,7 @@ Every bug report MUST include:
 [What actually happens, including the full traceback.]
 
 ## Traceback / Logs
-<!-- Paste full traceback or relevant log output. -->
+[Paste full traceback or relevant log output here]
 
 ## Additional Notes
 [Workarounds, frequency, related issues.]

@@ -2,17 +2,18 @@ import numpy as np
 import scipy.ndimage as ndimage
 
 from nav.annotation import (
+    TEXTINFO_BOTTOM_ARROW,
+    TEXTINFO_LEFT_ARROW,
+    TEXTINFO_RIGHT_ARROW,
+    TEXTINFO_TOP_ARROW,
     Annotation,
     Annotations,
     AnnotationTextInfo,
     TextLocInfo,
-    TEXTINFO_LEFT_ARROW,
-    TEXTINFO_RIGHT_ARROW,
-    TEXTINFO_BOTTOM_ARROW,
-    TEXTINFO_TOP_ARROW,
 )
 from nav.support.image import shift_array
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
+
 from .nav_model import NavModel
 
 
@@ -23,9 +24,7 @@ class NavModelBodyBase(NavModel):
     consistent with the standard body model implementation.
     """
 
-    def _compute_limb_mask_from_body_mask(
-        self, body_mask: NDArrayBoolType
-    ) -> NDArrayBoolType:
+    def _compute_limb_mask_from_body_mask(self, body_mask: NDArrayBoolType) -> NDArrayBoolType:
         """Compute limb mask as body pixels adjacent to at least one non-body neighbor."""
         neighbor = (
             shift_array(~body_mask, (-1, 0))
@@ -64,27 +63,17 @@ class NavModelBodyBase(NavModel):
         else:
             body_mask_u_min = int(np.argmax(body_mask[v_center_extfov_clipped]))
             body_mask_u_max = int(
-                (
-                    body_mask.shape[1]
-                    - np.argmax(body_mask[v_center_extfov_clipped, ::-1])
-                    - 1
-                )
+                body_mask.shape[1] - np.argmax(body_mask[v_center_extfov_clipped, ::-1]) - 1
             )
         body_mask_v_min = int(np.argmax(body_mask[:, u_center_extfov_clipped]))
         body_mask_v_max = int(
-            (
-                body_mask.shape[0]
-                - np.argmax(body_mask[::-1, u_center_extfov_clipped])
-                - 1
-            )
+            body_mask.shape[0] - np.argmax(body_mask[::-1, u_center_extfov_clipped]) - 1
         )
         body_mask_u_ctr = (body_mask_u_min + body_mask_u_max) // 2
         body_mask_v_ctr = (body_mask_v_min + body_mask_v_max) // 2
 
         # Scan around center to place labels on limb
-        for orig_dist in range(
-            0, max(body_mask_v_ctr - body_mask_v_min, body_config.label_scan_v)
-        ):
+        for orig_dist in range(0, max(body_mask_v_ctr - body_mask_v_min, body_config.label_scan_v)):
             for neg in [-1, 1]:
                 dist = orig_dist * neg
                 v = body_mask_v_ctr + dist
@@ -94,53 +83,35 @@ class NavModelBodyBase(NavModel):
                 # Left side
                 u = int(np.argmax(body_mask[v]))
                 if u > 0:
-                    angle = (
-                        np.rad2deg(np.arctan2(v - v_center_extfov, u - u_center_extfov))
-                        % 360
-                    )
+                    angle = np.rad2deg(np.arctan2(v - v_center_extfov, u - u_center_extfov)) % 360
                     if 135 < angle < 225:  # Left side
                         text_loc.append(
-                            TextLocInfo(
-                                TEXTINFO_LEFT_ARROW, v, u - body_config.label_horiz_gap
-                            )
+                            TextLocInfo(TEXTINFO_LEFT_ARROW, v, u - body_config.label_horiz_gap)
                         )
                     elif angle >= 225:  # Top side
                         text_loc.append(
-                            TextLocInfo(
-                                TEXTINFO_TOP_ARROW, v - body_config.label_vert_gap, u
-                            )
+                            TextLocInfo(TEXTINFO_TOP_ARROW, v - body_config.label_vert_gap, u)
                         )
                     else:  # Bottom side
                         text_loc.append(
-                            TextLocInfo(
-                                TEXTINFO_BOTTOM_ARROW, v + body_config.label_vert_gap, u
-                            )
+                            TextLocInfo(TEXTINFO_BOTTOM_ARROW, v + body_config.label_vert_gap, u)
                         )
 
                 # Right side
                 u = body_mask.shape[1] - int(np.argmax(body_mask[v, ::-1])) - 1
                 if u < body_mask.shape[1] - 1:
-                    angle = (
-                        np.rad2deg(np.arctan2(v - v_center_extfov, u - u_center_extfov))
-                        % 360
-                    )
+                    angle = np.rad2deg(np.arctan2(v - v_center_extfov, u - u_center_extfov)) % 360
                     if angle > 315 or angle < 45:  # Right side
                         text_loc.append(
-                            TextLocInfo(
-                                TEXTINFO_RIGHT_ARROW, v, u + body_config.label_horiz_gap
-                            )
+                            TextLocInfo(TEXTINFO_RIGHT_ARROW, v, u + body_config.label_horiz_gap)
                         )
                     elif angle >= 225:  # Top side
                         text_loc.append(
-                            TextLocInfo(
-                                TEXTINFO_TOP_ARROW, v - body_config.label_vert_gap, u
-                            )
+                            TextLocInfo(TEXTINFO_TOP_ARROW, v - body_config.label_vert_gap, u)
                         )
                     else:  # Bottom side
                         text_loc.append(
-                            TextLocInfo(
-                                TEXTINFO_BOTTOM_ARROW, v + body_config.label_vert_gap, u
-                            )
+                            TextLocInfo(TEXTINFO_BOTTOM_ARROW, v + body_config.label_vert_gap, u)
                         )
 
                 if orig_dist == 0:
@@ -161,9 +132,7 @@ class NavModelBodyBase(NavModel):
                     break
 
         # Coarse scan for additional candidates
-        for v_orig_dist in range(
-            0, body_mask_v_ctr - body_mask_v_min, body_config.label_grid_v
-        ):
+        for v_orig_dist in range(0, body_mask_v_ctr - body_mask_v_min, body_config.label_grid_v):
             for v_neg in [-1, 1]:
                 v_dist = v_orig_dist * v_neg
                 v = body_mask_v_ctr + v_dist
@@ -195,9 +164,7 @@ class NavModelBodyBase(NavModel):
             color=body_config.label_font_color,
         )
 
-        text_avoid_mask = ndimage.maximum_filter(
-            body_mask, body_config.label_mask_enlarge
-        )
+        text_avoid_mask = ndimage.maximum_filter(body_mask, body_config.label_mask_enlarge)
 
         annotation = Annotation(
             obs,

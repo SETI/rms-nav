@@ -27,7 +27,7 @@ Apply these rules to ALL new and modified Python code. This project is a Python 
 - ALWAYS keep modules under 1000 lines. Split larger modules into a package with multiple files.
 - ALWAYS write simple, clear code; avoid unnecessary complexity.
 - NEVER hardcode magic constants. Define them as module-level constants, in a config module, or via environment variables.
-- ALWAYS catch exceptions at the smallest granularity possible. Do NOT wrap large blocks in a single `try`/`except`. NEVER allow an uncaught exception to reach the top level. ALWAYS preserve the full traceback for debugging.
+- ALWAYS catch exceptions at the smallest granularity possible. Do NOT wrap large blocks in a single `try`/`except`. In library code, let exceptions propagate unless you are adding context, converting to a library-specific exception, or the exception represents a recoverable internal state. When re-raising, use `raise ... from` to preserve the full traceback for debugging.
 - ALWAYS include meaningful, structured logging (use the `logging` module) that can be disabled or redirected. NEVER use bare `print()` for diagnostic output in library code.
 - Avoid mutable global variables. If unavoidable, document purpose and limit scope. Prefer module-level constants (ALL_CAPS) or dependency injection.
 - ALWAYS prefer comprehensions (list, dict, set, generator) over manual loops when the result is a new collection and the expression remains readable.

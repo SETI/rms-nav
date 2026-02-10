@@ -5,19 +5,18 @@ including annotation creation helpers.
 """
 
 import numpy as np
+import oops
 from scipy import ndimage
 
-import oops
-
 from nav.annotation import (
+    TEXTINFO_BOTTOM_ARROW,
+    TEXTINFO_LEFT_ARROW,
+    TEXTINFO_RIGHT_ARROW,
+    TEXTINFO_TOP_ARROW,
     Annotation,
     Annotations,
     AnnotationTextInfo,
     TextLocInfo,
-    TEXTINFO_LEFT_ARROW,
-    TEXTINFO_RIGHT_ARROW,
-    TEXTINFO_BOTTOM_ARROW,
-    TEXTINFO_TOP_ARROW,
 )
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
@@ -161,14 +160,10 @@ class NavModelRingsBase(NavModel):
                 if dv_var > du_var:
                     # Edge runs more vertically (v varies more)
                     du_norm = 0.0
-                    dv_norm = (
-                        1.0 if np.average(nearby_v_rel, weights=weights) >= 0 else -1.0
-                    )
+                    dv_norm = 1.0 if np.average(nearby_v_rel, weights=weights) >= 0 else -1.0
                 else:
                     # Edge runs more horizontally (u varies more)
-                    du_norm = (
-                        1.0 if np.average(nearby_u_rel, weights=weights) >= 0 else -1.0
-                    )
+                    du_norm = 1.0 if np.average(nearby_u_rel, weights=weights) >= 0 else -1.0
                     dv_norm = 0.0
 
                 # Check if tangent is more horizontal or vertical

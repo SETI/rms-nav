@@ -27,12 +27,8 @@ def main():
     image_psf_half_size_u = int(image_psf_size[1] // 2)
     image_psf_half_size_v = int(image_psf_size[0] // 2)
     image[
-        image_center_v - image_psf_half_size_v : image_center_v
-        + image_psf_half_size_v
-        + 1,
-        image_center_u - image_psf_half_size_u : image_center_u
-        + image_psf_half_size_u
-        + 1,
+        image_center_v - image_psf_half_size_v : image_center_v + image_psf_half_size_v + 1,
+        image_center_u - image_psf_half_size_u : image_center_u + image_psf_half_size_u + 1,
     ] = image_psf
 
     model_psf = gauss_psf.eval_rect(model_psf_size, offset=model_offset, scale=1.0)
@@ -42,21 +38,13 @@ def main():
     model_psf_half_size_u = int(model_psf_size[1] // 2)
     model_psf_half_size_v = int(model_psf_size[0] // 2)
     model[
-        model_center_v - model_psf_half_size_v : model_center_v
-        + model_psf_half_size_v
-        + 1,
-        model_center_u - model_psf_half_size_u : model_center_u
-        + model_psf_half_size_u
-        + 1,
+        model_center_v - model_psf_half_size_v : model_center_v + model_psf_half_size_v + 1,
+        model_center_u - model_psf_half_size_u : model_center_u + model_psf_half_size_u + 1,
     ] = model_psf
     mask = np.zeros(model_size)
     mask[
-        model_center_v - model_psf_half_size_v : model_center_v
-        + model_psf_half_size_v
-        + 1,
-        model_center_u - model_psf_half_size_u : model_center_u
-        + model_psf_half_size_u
-        + 1,
+        model_center_v - model_psf_half_size_v : model_center_v + model_psf_half_size_v + 1,
+        model_center_u - model_psf_half_size_u : model_center_u + model_psf_half_size_u + 1,
     ] = 1.0
 
     # plt.imshow(image)

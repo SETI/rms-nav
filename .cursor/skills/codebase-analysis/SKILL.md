@@ -19,7 +19,7 @@ Produce a structured analysis and recommendations report. Do not implement chang
 ### 1. Structure and layout
 
 - Package/module boundaries: clear separation, no circular imports, src-layout vs flat.
-- File and module size: modules &gt; ~500–1000 lines; single-file “god” modules.
+- File and module size: modules > ~500–1000 lines; single-file "god" modules.
 - Naming: consistent with language norms (e.g. Python: lowercase_with_underscores, TitleCase for classes).
 - Dead or orphaned code: unused modules, commented-out blocks, unreachable branches.
 - Duplication: copy-paste, similar logic that could be shared (DRY).
@@ -33,7 +33,7 @@ Compare against project rules when present (e.g. `.cursor/rules/python_best_prac
 - Naming (builtin shadowing, private `_` prefix, ALL_CAPS for module-level constants).
 - Explicit checks vs exception-based control flow; falsy checks (`is None`, `len(x) == 0`).
 - Imports: top of file, grouped and sorted; no wildcard imports.
-- Function shape: ≤3 positional args, keyword-only for the rest; RORO for complex I/O.
+- Function shape: ≤3 positional args, keyword-only for the rest. Return an object rather than a tuple of many results.
 - Constants: no magic numbers/strings; config or env for tunables.
 - Error handling: narrow try/except; no bare except; logging over print in libraries.
 - Public API: clear `__all__`, `py.typed` for typed packages, separation of public vs `_private`.

@@ -1,6 +1,5 @@
 from pdslogger import PdsLogger
 
-
 # Default logger instance for image processing operations
 DEFAULT_LOGGER = PdsLogger('default', lognames=False, digits=3)
 

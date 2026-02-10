@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Any
 
 from nav.config import Config
 from nav.obs import ObsSnapshot
@@ -11,9 +11,7 @@ from .nav_model_result import NavModelResult
 class NavModel(ABC, NavBase):
     """Base class for navigation models used to generate synthetic images."""
 
-    def __init__(
-        self, name: str, obs: ObsSnapshot, *, config: Optional[Config] = None
-    ) -> None:
+    def __init__(self, name: str, obs: ObsSnapshot, *, config: Config | None = None) -> None:
         """Initializes a navigation model with observation data.
 
         Parameters:

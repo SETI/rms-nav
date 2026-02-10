@@ -15,26 +15,25 @@ import sys
 import time
 from typing import cast
 
-from filecache import FileCache, FCPath
 import pdslogger
+from filecache import FCPath, FileCache
 
 # Make CLI runnable from source tree with
 #    python src/package
 package_source_path = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, package_source_path)
 
-from nav.dataset.dataset import DataSet
-from nav.dataset import dataset_names, dataset_name_to_class, dataset_name_to_inst_name
 from nav.config import (
     DEFAULT_CONFIG,
     DEFAULT_LOGGER,
     get_nav_results_root,
     load_default_and_user_config,
 )
-from nav.support.file import json_as_string
-from nav.obs import inst_name_to_obs_class
+from nav.dataset import dataset_name_to_class, dataset_name_to_inst_name, dataset_names
+from nav.dataset.dataset import DataSet
 from nav.navigate_image_files import navigate_image_files
-
+from nav.obs import inst_name_to_obs_class
+from nav.support.file import json_as_string
 
 DATASET: DataSet | None = None
 DATASET_NAME: str | None = None
@@ -256,13 +255,9 @@ def main() -> None:
 
     obs_class = inst_name_to_obs_class(INST_NAME)
 
-    nav_models = (
-        arguments.nav_models.split(',') if arguments.nav_models is not None else None
-    )
+    nav_models = arguments.nav_models.split(',') if arguments.nav_models is not None else None
     nav_techniques = (
-        arguments.nav_techniques.split(',')
-        if arguments.nav_techniques is not None
-        else None
+        arguments.nav_techniques.split(',') if arguments.nav_techniques is not None else None
     )
 
     assert DATASET is not None  # just for type checking

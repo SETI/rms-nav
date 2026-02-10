@@ -1,11 +1,10 @@
 from typing import Any, cast
 
 import numpy as np
-from numpy.fft import fft2, ifft2, fftfreq
+from numpy.fft import fft2, fftfreq, ifft2
 import scipy.ndimage as ndimage
 
-from nav.support.types import NDArrayType, NDArrayFloatType, NPType
-
+from nav.support.types import NDArrayFloatType, NDArrayType, NPType
 
 # ==============================================================================
 #
@@ -37,8 +36,7 @@ def shift_array(
 
     if array.ndim != len(offset):
         raise ValueError(
-            f'Array ({array.ndim}) and offset ({len(offset)}) must have '
-            'same number of dimensions'
+            f'Array ({array.ndim}) and offset ({len(offset)}) must have same number of dimensions'
         )
 
     if all(x == 0 for x in offset):
@@ -80,8 +78,7 @@ def pad_array(
 
     if array.ndim != len(margin):
         raise ValueError(
-            f'Array ({array.ndim}) and offset ({len(margin)}) must have '
-            'same number of dimensions'
+            f'Array ({array.ndim}) and offset ({len(margin)}) must have same number of dimensions'
         )
 
     if all(x == 0 for x in margin):
@@ -111,8 +108,7 @@ def unpad_array(
 
     if array.ndim != len(margin):
         raise ValueError(
-            f'Array ({array.ndim}) and margin ({len(margin)}) must have '
-            'same number of dimensions'
+            f'Array ({array.ndim}) and margin ({len(margin)}) must have same number of dimensions'
         )
 
     if all(x == 0 for x in margin):
@@ -120,16 +116,12 @@ def unpad_array(
 
     # See https://stackoverflow.com/questions/24806174/
     # is-there-an-opposite-inverse-to-numpy-pad-function
-    reversed_padding = tuple(
-        [slice(pad, dim - pad) for (pad, dim) in zip(margin, array.shape)]
-    )
+    reversed_padding = tuple([slice(pad, dim - pad) for (pad, dim) in zip(margin, array.shape)])
 
     return array[reversed_padding]
 
 
-def pad_top_left(
-    array: NDArrayType[NPType], v_size: int, u_size: int
-) -> NDArrayType[NPType]:
+def pad_top_left(array: NDArrayType[NPType], v_size: int, u_size: int) -> NDArrayType[NPType]:
     """Place array at (0,0) inside zeros(v_size, u_size).
 
     Parameters:
@@ -150,9 +142,7 @@ def pad_top_left(
     return ret
 
 
-def crop_center(
-    img: NDArrayType[NPType], out_shape: tuple[int, int]
-) -> NDArrayType[NPType]:
+def crop_center(img: NDArrayType[NPType], out_shape: tuple[int, int]) -> NDArrayType[NPType]:
     """Center crop to out_shape (h,w).
 
     Parameters:
@@ -171,9 +161,7 @@ def crop_center(
     img_v, img_u = img.shape
     out_v, out_u = out_shape
     if out_v > img_v or out_u > img_u:
-        raise ValueError(
-            f'Output shape {out_shape} cannot be larger than image shape {img.shape}'
-        )
+        raise ValueError(f'Output shape {out_shape} cannot be larger than image shape {img.shape}')
     sy = (img_v - out_v) // 2
     sx = (img_u - out_u) // 2
     return img[sy : sy + out_v, sx : sx + out_u]
@@ -263,9 +251,7 @@ def pad_array_to_power_of_2(
 #     return ret_data
 
 
-def array_zoom(
-    a: NDArrayType[NPType], factor: list[int] | tuple[int, ...]
-) -> NDArrayType[NPType]:
+def array_zoom(a: NDArrayType[NPType], factor: list[int] | tuple[int, ...]) -> NDArrayType[NPType]:
     """Zooms an array by the specified factor using array indexing.
 
     Parameters:
@@ -456,12 +442,12 @@ def filter_sub_median(
             else:
                 footprint_arr = np.zeros((median_boxsize, median_boxsize), dtype='bool')
                 box_half = median_boxsize // 2
-                x = np.tile(
-                    np.arange(median_boxsize) - box_half, median_boxsize
-                ).reshape((median_boxsize, median_boxsize))
-                y = np.repeat(
-                    np.arange(median_boxsize) - box_half, median_boxsize
-                ).reshape((median_boxsize, median_boxsize))
+                x = np.tile(np.arange(median_boxsize) - box_half, median_boxsize).reshape(
+                    (median_boxsize, median_boxsize)
+                )
+                y = np.repeat(np.arange(median_boxsize) - box_half, median_boxsize).reshape(
+                    (median_boxsize, median_boxsize)
+                )
                 dist = np.sqrt(x**2 + y**2)
                 footprint_arr[dist <= box_half + 0.5] = 1
                 _FOOTPRINT_CACHE[median_boxsize] = footprint_arr
@@ -473,9 +459,7 @@ def filter_sub_median(
     return data - sub
 
 
-def filter_downsample(
-    arr: NDArrayFloatType, amt_y: int, amt_x: int
-) -> NDArrayFloatType:
+def filter_downsample(arr: NDArrayFloatType, amt_y: int, amt_x: int) -> NDArrayFloatType:
     """Downsamples an array by averaging blocks of pixels.
 
     Parameters:
@@ -503,9 +487,7 @@ def filter_downsample(
     return cast(NDArrayFloatType, ret)
 
 
-def gaussian_blur_cov(
-    img: NDArrayFloatType, sigma: NDArrayFloatType
-) -> NDArrayFloatType:
+def gaussian_blur_cov(img: NDArrayFloatType, sigma: NDArrayFloatType) -> NDArrayFloatType:
     """Blur by anisotropic Gaussian with covariance matrix in frequency domain.
 
     Parameters:
@@ -828,25 +810,13 @@ def draw_circle(
         while x < 0:
             for xoff in off_list:
                 for yoff in off_list:
-                    if (
-                        0 <= y0 + y + yoff < img.shape[0]
-                        and 0 <= x0 - x + xoff < img.shape[1]
-                    ):
+                    if 0 <= y0 + y + yoff < img.shape[0] and 0 <= x0 - x + xoff < img.shape[1]:
                         img[int(y0 + y + yoff), int(x0 - x + xoff)] = color
-                    if (
-                        0 <= y0 - x + yoff < img.shape[0]
-                        and 0 <= x0 - y + xoff < img.shape[1]
-                    ):
+                    if 0 <= y0 - x + yoff < img.shape[0] and 0 <= x0 - y + xoff < img.shape[1]:
                         img[int(y0 - x + yoff), int(x0 - y + xoff)] = color
-                    if (
-                        0 <= y0 - y + yoff < img.shape[0]
-                        and 0 <= x0 + x + xoff < img.shape[1]
-                    ):
+                    if 0 <= y0 - y + yoff < img.shape[0] and 0 <= x0 + x + xoff < img.shape[1]:
                         img[int(y0 - y + yoff), int(x0 + x + xoff)] = color
-                    if (
-                        0 <= y0 + x + yoff < img.shape[0]
-                        and 0 <= x0 + y + xoff < img.shape[1]
-                    ):
+                    if 0 <= y0 + x + yoff < img.shape[0] and 0 <= x0 + y + xoff < img.shape[1]:
                         img[int(y0 + x + yoff), int(x0 + y + xoff)] = color
             r = err
             if r <= y:

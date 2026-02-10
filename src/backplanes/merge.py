@@ -118,9 +118,7 @@ def merge_sources_into_master(
 
         for bp_type in sorted(ring_arrays.keys()):
             if bp_type not in ring_arrays or bp_type not in ring_masks:
-                raise ValueError(
-                    f'Backplane type {bp_type} array or mask not found for rings'
-                )
+                raise ValueError(f'Backplane type {bp_type} array or mask not found for rings')
             master = np.full((height, width), np.nan, dtype=np.float32)
             src_vals = ring_arrays[bp_type]
             src_mask = ring_masks[bp_type]

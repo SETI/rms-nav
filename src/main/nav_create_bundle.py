@@ -11,17 +11,15 @@ import argparse
 import os
 import sys
 
-from filecache import FileCache
 import pdslogger
 import pdstemplate
+from filecache import FileCache
 
 # Make CLI runnable from source tree with
 #    python src/package
 package_source_path = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, package_source_path)
 
-from nav.dataset.dataset import DataSet
-from nav.dataset import dataset_names, dataset_name_to_class
 from nav.config import (
     DEFAULT_CONFIG,
     DEFAULT_LOGGER,
@@ -30,19 +28,17 @@ from nav.config import (
     get_pds4_bundle_results_root,
     load_default_and_user_config,
 )
-
+from nav.dataset import dataset_name_to_class, dataset_names
+from nav.dataset.dataset import DataSet
 from pds4.bundle_data import generate_bundle_data_files
 from pds4.collections import generate_collection_files, generate_global_index_files
-
 
 DATASET: DataSet | None = None
 DATASET_NAME: str | None = None
 MAIN_LOGGER: pdslogger.PdsLogger | None = None
 
 
-def add_common_arguments(
-    parser: argparse.ArgumentParser, *, for_labels: bool = False
-) -> None:
+def add_common_arguments(parser: argparse.ArgumentParser, *, for_labels: bool = False) -> None:
     """Add common arguments to an argument parser.
 
     Parameters:

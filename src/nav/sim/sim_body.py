@@ -5,7 +5,7 @@ astronomical objects for testing navigation algorithms without requiring real
 image files and SPICE kernels.
 """
 
-from typing import Optional, cast
+from typing import cast
 
 import numpy as np
 
@@ -29,7 +29,7 @@ def create_simulated_body(
     crater_power_law_exponent: float = 3.0,
     crater_relief_scale: float = 0.6,
     anti_aliasing: float = 0.0,
-    seed: Optional[int] = None,
+    seed: int | None = None,
 ) -> NDArrayFloatType:
     """Create a simulated planetary body as an ellipsoid with shading and surface features.
 
@@ -135,9 +135,7 @@ def create_simulated_body(
     if anti_aliasing > 0:
         # Smooth transition zone: about 1 pixel at work resolution, only at edge
         edge_width = 3.0
-        ellipse_mask = np.clip(
-            1.0 - np.maximum(0, ellipse_dist - 1.0) / edge_width, 0.0, 1.0
-        )
+        ellipse_mask = np.clip(1.0 - np.maximum(0, ellipse_dist - 1.0) / edge_width, 0.0, 1.0)
     else:
         ellipse_mask = (ellipse_dist <= 1.0).astype(float)
 
@@ -194,9 +192,7 @@ def create_simulated_body(
     # Downsample if anti-aliasing was used
     if aa_scale > 1:
         # Simple box filter downsampling
-        intensity = intensity.reshape(size_v, aa_scale, size_u, aa_scale).mean(
-            axis=(1, 3)
-        )
+        intensity = intensity.reshape(size_v, aa_scale, size_u, aa_scale).mean(axis=(1, 3))
 
     # Ensure values are in [0, 1] range
     intensity = np.clip(intensity, 0.0, 1.0)
@@ -290,9 +286,7 @@ def _lambertian_shading(
 
     # Compute cosine of incidence angle (Lambertian shading)
     # cos(incidence) = dot(normal, illumination_direction)
-    cos_incidence = (
-        normal_v * illum_v_3d + normal_u * illum_u_3d + normal_z * illum_z_norm
-    )
+    cos_incidence = normal_v * illum_v_3d + normal_u * illum_u_3d + normal_z * illum_z_norm
 
     # Lambertian shading: I = I₀ * max(0, cos(incidence))
     # Only apply to visible hemisphere and clip to [0, 1] range
@@ -346,7 +340,7 @@ def _add_craters_and_shading(
         R_min: float,
         R_max: float,
         alpha: float,
-        size: Optional[int] = None,
+        size: int | None = None,
     ) -> NDArrayFloatType:
         """Sample R from p(R) ∝ R^(-alpha) on [R_min, R_max], alpha > 1."""
         if alpha <= 1:
@@ -424,9 +418,7 @@ def _add_craters_and_shading(
 
         # Central bowl / floor (parabolic-ish)
         inside_floor = r <= R_floor
-        local_profile[inside_floor] = -crater_depth * (
-            1.0 - (r[inside_floor] / R_floor) ** 2
-        )
+        local_profile[inside_floor] = -crater_depth * (1.0 - (r[inside_floor] / R_floor) ** 2)
 
         # Wall up to rim
         wall = (r > R_floor) & (r <= R_rim)
@@ -478,9 +470,7 @@ def _add_craters_and_shading(
     cos_incidence = nx * lx + ny * ly + nz_ * lz
     dark_side_illum_strength = 0.01  # TODO make config parameter
     light_side_illum_gamma = 1  # TODO make config parameter
-    lambert = np.where(
-        visible, np.clip(cos_incidence, dark_side_illum_strength, 1.0), 0.0
-    )
+    lambert = np.where(visible, np.clip(cos_incidence, dark_side_illum_strength, 1.0), 0.0)
     lambert **= light_side_illum_gamma
 
     # Apply ellipse mask (with AA edge)

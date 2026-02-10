@@ -1,8 +1,9 @@
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
-from .nav_technique import NavTechnique
 from nav.config import Config
 from nav.nav_model import NavModelCombined
+
+from .nav_technique import NavTechnique
 
 if TYPE_CHECKING:
     from nav.nav_master import NavMaster
@@ -17,9 +18,7 @@ class NavTechniqueManual(NavTechnique):
     correlate_all technique.
     """
 
-    def __init__(
-        self, nav_master: 'NavMaster', *, config: Optional[Config] = None
-    ) -> None:
+    def __init__(self, nav_master: 'NavMaster', *, config: Config | None = None) -> None:
         super().__init__(nav_master, config=config)
         self._combined_model: NavModelCombined | None = None
 
@@ -34,9 +33,7 @@ class NavTechniqueManual(NavTechnique):
             combined_model = self._combine_models(['*'])
             self._combined_model = combined_model
             if combined_model is None:
-                self.logger.info(
-                    'Manual navigation technique failed - no models available'
-                )
+                self.logger.info('Manual navigation technique failed - no models available')
                 return
 
             if (
@@ -48,6 +45,7 @@ class NavTechniqueManual(NavTechnique):
 
             # Import here to avoid importing PyQt6 unless needed
             from PyQt6.QtWidgets import QApplication
+
             from nav.ui.manual_nav_dialog import ManualNavDialog
 
             obs = self.nav_master.obs

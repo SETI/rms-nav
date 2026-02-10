@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from ruamel.yaml import YAML
 
@@ -49,17 +49,13 @@ class Config:
         """Loads a YAML file and returns a dictionary mapping."""
 
         yaml = YAML(typ='safe')
-        with open(config_path, 'r', encoding='utf-8') as f:
+        with open(config_path, encoding='utf-8') as f:
             loaded = yaml.load(f) or {}
         if not isinstance(loaded, dict):
-            raise ValueError(
-                f'Config "{config_path}" did not parse to a dictionary mapping'
-            )
+            raise ValueError(f'Config "{config_path}" did not parse to a dictionary mapping')
         return loaded
 
-    def read_config(
-        self, config_path: Optional[str | Path] = None, reread: bool = False
-    ) -> None:
+    def read_config(self, config_path: str | Path | None = None, reread: bool = False) -> None:
         """Reads configuration from the specified YAML file.
 
         Parameters:
@@ -137,9 +133,7 @@ class Config:
         """
 
         self.read_config()
-        return cast(
-            list[str], self._config_dict.get('satellites', {}).get(planet.upper(), [])
-        )
+        return cast(list[str], self._config_dict.get('satellites', {}).get(planet.upper(), []))
 
     def fuzzy_satellites(self, planet: str) -> list[str]:
         """Returns the list of fuzzy satellites for the specified planet.

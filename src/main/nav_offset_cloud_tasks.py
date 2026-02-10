@@ -13,22 +13,22 @@ import sys
 from typing import Any, cast
 
 from cloud_tasks.worker import Worker, WorkerData
-from filecache import FileCache, FCPath
+from filecache import FCPath, FileCache
 
 # Make CLI runnable from source tree with
 #    python src/package
 package_source_path = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, package_source_path)
 
-from nav.dataset.dataset import ImageFile, ImageFiles
-from nav.dataset import dataset_name_to_inst_name
 from nav.config import (
     DEFAULT_CONFIG,
     get_nav_results_root,
     load_default_and_user_config,
 )
-from nav.obs import inst_name_to_obs_class
+from nav.dataset import dataset_name_to_inst_name
+from nav.dataset.dataset import ImageFile, ImageFiles
 from nav.navigate_image_files import navigate_image_files
+from nav.obs import inst_name_to_obs_class
 
 
 def process_task(
@@ -67,7 +67,7 @@ def process_task(
 
     nav_models = task_data.get('arguments', {}).get('nav_models', None)
     nav_techniques = task_data.get('arguments', {}).get('nav_techniques', None)
-    dataset_name = task_data.get('dataset_name', None)
+    dataset_name = task_data.get('dataset_name')
     if dataset_name is None:
         return False, {'status': 'error', 'status_error': 'no_dataset_name'}
     try:
@@ -80,7 +80,7 @@ def process_task(
         }
 
     obs_class = inst_name_to_obs_class(inst_name)
-    files = task_data.get('files', None)
+    files = task_data.get('files')
     if files is None:
         return False, {'status': 'error', 'status_error': 'no_files'}
 
@@ -119,8 +119,7 @@ def process_task(
 
 async def async_main() -> None:
     argparser = argparse.ArgumentParser(
-        description='Navigation & Backplane Main Interface for Offsets '
-        'Cloud Tasks version)'
+        description='Navigation & Backplane Main Interface for Offsets Cloud Tasks version)'
     )
 
     # Arguments about the environment

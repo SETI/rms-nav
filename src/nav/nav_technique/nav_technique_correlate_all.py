@@ -1,14 +1,15 @@
 import copy
-from typing import Optional, TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
-from .nav_technique import NavTechnique
 from nav.config import Config
 from nav.nav_model import NavModelCombined, NavModelStars
 from nav.support.correlate import navigate_with_pyramid_kpeaks
 from nav.support.misc import mad_std
 from nav.support.types import MutableStar, NDArrayFloatType, NDArrayIntType
+
+from .nav_technique import NavTechnique
 
 if TYPE_CHECKING:
     from nav.nav_master import NavMaster
@@ -17,9 +18,7 @@ if TYPE_CHECKING:
 class NavTechniqueCorrelateAll(NavTechnique):
     """Implements navigation technique using correlation across all available models."""
 
-    def __init__(
-        self, nav_master: 'NavMaster', *, config: Optional[Config] = None
-    ) -> None:
+    def __init__(self, nav_master: 'NavMaster', *, config: Config | None = None) -> None:
         """Initializes a navigation technique using correlation across all available models.
 
         Parameters:
@@ -81,24 +80,18 @@ class NavTechniqueCorrelateAll(NavTechnique):
             log_level = self.config.general.log_level_nav_correlate_all
         except AttributeError:
             log_level = None
-        with self.logger.open(
-            'NAVIGATION PASS: ALL MODELS CORRELATION', log_level=log_level
-        ):
+        with self.logger.open('NAVIGATION PASS: ALL MODELS CORRELATION', log_level=log_level):
             obs = self.nav_master.obs
 
             #
             # The first thing we do is create the combined model with ALL models available
             #
             used_model_names = ', '.join([x.name for x in self.nav_master.all_models])
-            self.logger.info(
-                f'Initial correlation using all models: {used_model_names}'
-            )
+            self.logger.info(f'Initial correlation using all models: {used_model_names}')
             combined_model = self._combine_models(['*'])
             self._combined_model = combined_model
             if combined_model is None:
-                self.logger.info(
-                    'correlate_all navigation technique failed - no models available'
-                )
+                self.logger.info('correlate_all navigation technique failed - no models available')
                 return
 
             if (
@@ -139,9 +132,7 @@ class NavTechniqueCorrelateAll(NavTechnique):
 
             star_models = self._filter_models(['stars'])
             if len(star_models) == 1:
-                ret = self._refine_stars(
-                    cast(NavModelStars, star_models[0]), corr_offset
-                )
+                ret = self._refine_stars(cast(NavModelStars, star_models[0]), corr_offset)
                 if ret is not None:
                     self._offset, self._uncertainty = ret
 
@@ -195,10 +186,7 @@ class NavTechniqueCorrelateAll(NavTechnique):
             outliers = np.where(score > threshold)[0]
             return outliers
 
-        if (
-            not self.config.offset.star_refinement_enabled
-            or len(star_model.star_list) == 0
-        ):
+        if not self.config.offset.star_refinement_enabled or len(star_model.star_list) == 0:
             return None
 
         obs = self.nav_master.obs
@@ -304,17 +292,13 @@ class NavTechniqueCorrelateAll(NavTechnique):
         # Note vmag is guaranteed to have a value because of if it doesn't the star
         # isn't added to the original star list.
         # TODO clean this up
-        reliability = [
-            1 - (cast(float, x.vmag) - min_vmag) / vmag_spread / 2 for x in uv_star_list
-        ]
+        reliability = [1 - (cast(float, x.vmag) - min_vmag) / vmag_spread / 2 for x in uv_star_list]
         u_outliers = detect_outliers(u_diff_list, reliability, nsigma)
         v_outliers = detect_outliers(v_diff_list, reliability, nsigma)
         final_u_diff_list = []
         final_v_diff_list = []
         final_uv_star_list = []
-        for idx, (u_diff, v_diff, star) in enumerate(
-            zip(u_diff_list, v_diff_list, uv_star_list)
-        ):
+        for idx, (u_diff, v_diff, star) in enumerate(zip(u_diff_list, v_diff_list, uv_star_list)):
             if idx in u_outliers or idx in v_outliers:
                 self.logger.debug(
                     f'Star {star.pretty_name:9s} VMAG {star.vmag:6.3f} '

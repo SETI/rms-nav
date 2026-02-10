@@ -1,6 +1,7 @@
 """Dataclass encapsulating the result of a navigation model computation."""
 
 from dataclasses import dataclass
+
 from nav.annotation import Annotations
 from nav.support.types import NDArrayBoolType, NDArrayFloatType, NDArrayUint8Type
 
@@ -23,7 +24,7 @@ class NavModelResult:
     weighted_mask: NDArrayFloatType | None = None
 
     # The range from the observer to each point in the model in km; inf if infinitely far
-    range: NDArrayFloatType | float | None = None  # noqa: A001
+    range: NDArrayFloatType | float | None = None
 
     # Optional amount to blur the model (2x2 covariance or single value)
     blur_amount: NDArrayFloatType | float | None = None

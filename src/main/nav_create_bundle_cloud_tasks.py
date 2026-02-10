@@ -12,15 +12,13 @@ import sys
 from typing import Any, cast
 
 from cloud_tasks.worker import Worker, WorkerData
-from filecache import FileCache, FCPath
+from filecache import FCPath, FileCache
 
 # Make CLI runnable from source tree with
 #    python src/package
 package_source_path = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, package_source_path)
 
-from nav.dataset.dataset import ImageFile, ImageFiles
-from nav.dataset import dataset_name_to_class
 from nav.config import (
     DEFAULT_CONFIG,
     DEFAULT_LOGGER,
@@ -29,6 +27,8 @@ from nav.config import (
     get_pds4_bundle_results_root,
     load_default_and_user_config,
 )
+from nav.dataset import dataset_name_to_class
+from nav.dataset.dataset import ImageFile, ImageFiles
 from pds4.bundle_data import generate_bundle_data_files
 
 
@@ -48,22 +48,18 @@ def process_task(
     nav_results_root = FileCache(None).new_path(nav_results_root_str)
 
     try:
-        backplane_results_root_str = get_backplane_results_root(
-            arguments, DEFAULT_CONFIG
-        )
+        backplane_results_root_str = get_backplane_results_root(arguments, DEFAULT_CONFIG)
     except ValueError:
         return False, {'status': 'error', 'status_error': 'no_backplane_root'}
     backplane_results_root = FileCache(None).new_path(backplane_results_root_str)
 
     try:
-        bundle_results_root_str = get_pds4_bundle_results_root(
-            arguments, DEFAULT_CONFIG
-        )
+        bundle_results_root_str = get_pds4_bundle_results_root(arguments, DEFAULT_CONFIG)
     except ValueError:
         return False, {'status': 'error', 'status_error': 'no_bundle_root'}
     bundle_results_root = FileCache(None).new_path(bundle_results_root_str)
 
-    dataset_name = task_data.get('dataset_name', None)
+    dataset_name = task_data.get('dataset_name')
     if dataset_name is None:
         return False, {'status': 'error', 'status_error': 'no_dataset_name'}
     try:
@@ -75,7 +71,7 @@ def process_task(
             'status_exception': f'Unknown dataset "{dataset_name}"',
         }
 
-    files = task_data.get('files', None)
+    files = task_data.get('files')
     if files is None:
         return False, {'status': 'error', 'status_error': 'no_files'}
     image_files = []

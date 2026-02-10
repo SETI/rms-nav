@@ -1,9 +1,9 @@
 from pathlib import Path
-from typing import Any, Optional, Protocol, TypeVar
+from typing import Any, Protocol, TypeVar
 
-from filecache import FCPath
 import numpy as np
 import numpy.typing as npt
+from filecache import FCPath
 
 NDArrayLike = npt.ArrayLike
 DTypeLike = npt.DTypeLike
@@ -19,7 +19,7 @@ PathLike = str | Path | FCPath
 
 
 class MutableStar(Protocol):
-    unique_number: Optional[int]
+    unique_number: int | None
     catalog_name: str
     pretty_name: str
     name: str
@@ -36,7 +36,7 @@ class MutableStar(Protocol):
     johnson_mag_v: float | None
     johnson_mag_b: float | None
     johnson_mag_faked: bool
-    spectral_class: Optional[str]
+    spectral_class: str | None
     temperature: float | None
     temperature_faked: bool
 

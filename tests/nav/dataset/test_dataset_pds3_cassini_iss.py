@@ -154,15 +154,12 @@ def test_cassini_iss_camera_invalid(
     ds_cassini_iss: dscoiss.DataSetPDS3CassiniISS,
 ) -> None:
     arguments = argparse.Namespace(camera='foo')
-    try:
+    with pytest.raises(ValueError):
         next(
             ds_cassini_iss.yield_image_files_index(
                 max_filenames=1, volumes=['COISS_1001'], arguments=arguments
             )
         )
-        pytest.fail('Expected ValueError for invalid camera')
-    except ValueError:
-        pass
 
 
 def test_cassini_iss_group_botsim(

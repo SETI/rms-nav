@@ -1,8 +1,8 @@
-from typing import Any, Optional, cast
-
-from filecache import FCPath
-import numpy as np
 from pathlib import Path
+from typing import Any, cast
+
+import numpy as np
+from filecache import FCPath
 
 from nav.config import DEFAULT_CONFIG, DEFAULT_LOGGER, Config
 from nav.support.time import et_to_utc
@@ -22,7 +22,7 @@ class ObsNewHorizonsLORRI(ObsSnapshotInst):
     def from_file(
         path: PathLike,
         *,
-        config: Optional[Config] = None,
+        config: Config | None = None,
         extfov_margin_vu: tuple[int, int] | None = None,
         **_kwargs: Any,
     ) -> 'ObsNewHorizonsLORRI':
@@ -64,9 +64,7 @@ class ObsNewHorizonsLORRI(ObsSnapshotInst):
         logger.debug(f'  Extfov margin vu: {extfov_margin_vu}')
         logger.debug(f'  Data min: {np.min(obs.data)}, max: {np.max(obs.data)}')
 
-        new_obs = ObsNewHorizonsLORRI(
-            obs, config=config, extfov_margin_vu=extfov_margin_vu
-        )
+        new_obs = ObsNewHorizonsLORRI(obs, config=config, extfov_margin_vu=extfov_margin_vu)
         new_obs._inst_config = inst_config
         return new_obs
 

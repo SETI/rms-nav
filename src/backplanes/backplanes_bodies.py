@@ -1,8 +1,8 @@
 from typing import Any
 
 import numpy as np
-from oops.meshgrid import Meshgrid
 from oops.backplane import Backplane
+from oops.meshgrid import Meshgrid
 from pdslogger import PdsLogger
 
 from nav.config import Config
@@ -166,9 +166,9 @@ def create_body_backplanes(
                 # Embed into full-frame arrays
                 full = np.zeros(snapshot.data.shape, dtype=np.float32)
                 full_mask = np.zeros(snapshot.data.shape, dtype=bool)
-                full[v0 : v1 + 1, u0 : u1 + 1] = np.ma.filled(
-                    mvals, fill_value=0.0
-                ).astype(np.float32)
+                full[v0 : v1 + 1, u0 : u1 + 1] = np.ma.filled(mvals, fill_value=0.0).astype(
+                    np.float32
+                )
                 mask = ~np.ma.getmaskarray(mvals)
                 full_mask[v0 : v1 + 1, u0 : u1 + 1] = mask  # True where valid
 

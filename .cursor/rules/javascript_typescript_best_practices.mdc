@@ -27,7 +27,7 @@ Apply these rules to ALL new and modified JavaScript and TypeScript code.
 - Prefer **early returns** and guard clauses over deep nesting. Put the happy path last when it improves readability.
 - Prefer **functional style** (pure functions, `map`/`filter`/`reduce`, no side effects in helpers) unless an imperative style is clearly simpler.
 - Use **constants** for magic strings and numbers; define them at module scope or in a shared config. Add types for constants when using TypeScript.
-- Keep **files and functions** focused. Split large files (e.g. &gt; 300–400 lines) into smaller modules. Prefer single responsibility per function.
+- Keep **files and functions** focused. Split large files (e.g. > 300–400 lines) into smaller modules. Prefer single responsibility per function.
 - **Function ordering**: Place higher-level or orchestrating functions above the helpers they call, or group by concern so the file reads top-to-bottom.
 
 ## 3. Types (TypeScript)

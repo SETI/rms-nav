@@ -1,9 +1,9 @@
-from abc import ABC, abstractmethod
 import argparse
+from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from filecache import FCPath
 
@@ -30,8 +30,8 @@ class ImageFile:
     # Convert this to use a default factory
     index_file_row: dict[str, Any] = field(default_factory=dict)
     extra_params: dict[str, Any] = field(default_factory=dict)
-    _image_file_path: Optional[Path] = None
-    _label_file_path: Optional[Path] = None
+    _image_file_path: Path | None = None
+    _label_file_path: Path | None = None
 
     @property
     def image_file_name(self) -> str:
@@ -80,7 +80,7 @@ class ImageFiles:
 
 
 class DataSet(ABC, NavBase):
-    def __init__(self, *, config: Optional[Config] = None) -> None:
+    def __init__(self, *, config: Config | None = None) -> None:
         """Initializes a dataset.
 
         Parameters:
@@ -105,7 +105,7 @@ class DataSet(ABC, NavBase):
     @abstractmethod
     def add_selection_arguments(
         cmdparser: argparse.ArgumentParser,
-        group: Optional[argparse._ArgumentGroup] = None,
+        group: argparse._ArgumentGroup | None = None,
     ) -> None:
         """Adds dataset-specific command-line arguments for image selection.
 

@@ -1,7 +1,7 @@
-from typing import Any, Optional
+from typing import Any
 
-from oops import Observation
 import numpy as np
+from oops import Observation
 
 from nav.config import Config
 from nav.sim.sim_body import create_simulated_body
@@ -19,7 +19,7 @@ class NavModelBodySimulated(NavModelBodyBase):
         body_name: str,
         sim_params: dict[str, Any],
         *,
-        config: Optional[Config] = None,
+        config: Config | None = None,
     ) -> None:
         """Navigation model that uses simulated body parameters to build a model/mask.
 
@@ -140,7 +140,7 @@ class NavModelBodySimulated(NavModelBodyBase):
         body_mask_full[slice_v, slice_u] = body_mask
 
         # Range: optionally provided via parameters; set inside body, inf elsewhere
-        range_val = self._sim_params.get('range', np.inf)
+        range_val = p.get('range', np.inf)
 
         annotations = None
         if create_annotations:

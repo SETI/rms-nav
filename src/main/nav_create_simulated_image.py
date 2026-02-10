@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-from collections.abc import Callable
 import json
 import os
 import re
 import sys
-from typing import Any, Optional, cast
+from collections.abc import Callable
+from typing import Any, cast
 
 import numpy as np
-from PyQt6.QtCore import QTimer, Qt, pyqtSignal, QObject, QPoint
+from PyQt6.QtCore import QObject, QPoint, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (
     QColor,
     QImage,
@@ -51,7 +51,7 @@ from nav.ui.common import ZoomPanController
 class ImageLabel(QLabel):
     def __init__(
         self,
-        parent: Optional[QWidget],
+        parent: QWidget | None,
         on_press: Callable[[QMouseEvent], None],
         on_move: Callable[[QMouseEvent], None],
         on_release: Callable[[QMouseEvent], None],
@@ -128,16 +128,16 @@ class CreateSimulatedImageModel(QMainWindow):
         }
 
         # Render cache/meta
-        self._current_image: Optional[np.ndarray] = None
+        self._current_image: np.ndarray | None = None
         self._last_meta: dict[str, Any] = {}
-        self._base_pixmap: Optional[QPixmap] = None
+        self._base_pixmap: QPixmap | None = None
 
         # View state
         self._zoom_factor = 1.0
         self._right_drag_active = False
         # ('body'/'star'/'ring', index)
-        self._selected_model_key: Optional[tuple[str, int]] = None
-        self._last_drag_img_vu: Optional[tuple[float, float]] = None
+        self._selected_model_key: tuple[str, int] | None = None
+        self._last_drag_img_vu: tuple[float, float] | None = None
         # Track last valid (non-"+") tab for cancel behavior
         self._last_valid_tab_index = 0  # Start with General tab
 
@@ -300,9 +300,7 @@ class CreateSimulatedImageModel(QMainWindow):
         self._epoch_spin.setRange(-1e10, 1e10)
         self._epoch_spin.setDecimals(1)
         self._epoch_spin.setValue(self.sim_params.get('ring_epoch', 0.0))
-        self._epoch_spin.setToolTip(
-            'Ring epoch time in TDB seconds for ring mode calculations'
-        )
+        self._epoch_spin.setToolTip('Ring epoch time in TDB seconds for ring mode calculations')
         self._epoch_spin.valueChanged.connect(self._on_epoch)
         gen_layout.addRow('Ring Epoch (TDB sec):', self._epoch_spin)
 
@@ -312,30 +310,20 @@ class CreateSimulatedImageModel(QMainWindow):
         noise_row.setContentsMargins(0, 0, 0, 0)
         noise_min_label = QLabel('0.0')
         noise_min_label.setFixedWidth(35)
-        noise_min_label.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-        )
+        noise_min_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         noise_max_label = QLabel('1.0')
         noise_max_label.setFixedWidth(35)
-        noise_max_label.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        )
+        noise_max_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self._background_noise_slider = QSlider(Qt.Orientation.Horizontal)
         self._background_noise_slider.setRange(0, 1000)
-        noise_slider_init_val = int(
-            self.sim_params['background_noise_intensity'] * 1000
-        )
+        noise_slider_init_val = int(self.sim_params['background_noise_intensity'] * 1000)
         self._background_noise_slider.setValue(noise_slider_init_val)
-        self._background_noise_slider.valueChanged.connect(
-            self._on_background_noise_slider
-        )
+        self._background_noise_slider.valueChanged.connect(self._on_background_noise_slider)
         self._background_noise_spin = QDoubleSpinBox()
         self._background_noise_spin.setRange(0.0, 1.0)
         self._background_noise_spin.setDecimals(3)
         self._background_noise_spin.setSingleStep(0.001)
-        self._background_noise_spin.setValue(
-            self.sim_params['background_noise_intensity']
-        )
+        self._background_noise_spin.setValue(self.sim_params['background_noise_intensity'])
         self._background_noise_spin.valueChanged.connect(self._on_background_noise_spin)
         noise_row.addWidget(noise_min_label)
         noise_row.addWidget(self._background_noise_slider, stretch=1)
@@ -351,20 +339,14 @@ class CreateSimulatedImageModel(QMainWindow):
         stars_row.setContentsMargins(0, 0, 0, 0)
         stars_min_label = QLabel('0')
         stars_min_label.setFixedWidth(35)
-        stars_min_label.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-        )
+        stars_min_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         stars_max_label = QLabel('1000')
         stars_max_label.setFixedWidth(40)
-        stars_max_label.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        )
+        stars_max_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self._background_stars_slider = QSlider(Qt.Orientation.Horizontal)
         self._background_stars_slider.setRange(0, 1000)
         self._background_stars_slider.setValue(self.sim_params['background_stars_num'])
-        self._background_stars_slider.valueChanged.connect(
-            self._on_background_stars_slider
-        )
+        self._background_stars_slider.valueChanged.connect(self._on_background_stars_slider)
         self._background_stars_spin = QSpinBox()
         self._background_stars_spin.setRange(0, 1000)
         self._background_stars_spin.setValue(self.sim_params['background_stars_num'])
@@ -388,9 +370,7 @@ class CreateSimulatedImageModel(QMainWindow):
         )
         psf_sigma_max_label = QLabel('3.0')
         psf_sigma_max_label.setFixedWidth(40)
-        psf_sigma_max_label.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        )
+        psf_sigma_max_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self._background_stars_psf_sigma_slider = QSlider(Qt.Orientation.Horizontal)
         # 0.1 to 3.0 with 0.01 steps
         self._background_stars_psf_sigma_slider.setRange(1, 300)
@@ -422,20 +402,14 @@ class CreateSimulatedImageModel(QMainWindow):
         dist_exp_row.setContentsMargins(0, 0, 0, 0)
         dist_exp_min_label = QLabel('1.0')
         dist_exp_min_label.setFixedWidth(35)
-        dist_exp_min_label.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-        )
+        dist_exp_min_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         dist_exp_max_label = QLabel('4.0')
         dist_exp_max_label.setFixedWidth(40)
-        dist_exp_max_label.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        )
+        dist_exp_max_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self._background_stars_dist_exp_slider = QSlider(Qt.Orientation.Horizontal)
         # 1.0 to 4.0 with 0.01 steps
         self._background_stars_dist_exp_slider.setRange(100, 400)
-        dist_exp_slider_val = int(
-            self.sim_params['background_stars_distribution_exponent'] * 100
-        )
+        dist_exp_slider_val = int(self.sim_params['background_stars_distribution_exponent'] * 100)
         self._background_stars_dist_exp_slider.setValue(dist_exp_slider_val)
         self._background_stars_dist_exp_slider.valueChanged.connect(
             self._on_background_stars_dist_exp_slider
@@ -496,12 +470,8 @@ class CreateSimulatedImageModel(QMainWindow):
         self._zoom_sharp_check.stateChanged.connect(self._toggle_zoom_sharp)
         vis_row.addWidget(self._zoom_sharp_check)
         self._shade_solid_rings_check = QCheckBox('Shade solid rings')
-        self._shade_solid_rings_check.setChecked(
-            self.sim_params.get('shade_solid_rings', False)
-        )
-        self._shade_solid_rings_check.stateChanged.connect(
-            self._toggle_shade_solid_rings
-        )
+        self._shade_solid_rings_check.setChecked(self.sim_params.get('shade_solid_rings', False))
+        self._shade_solid_rings_check.stateChanged.connect(self._toggle_shade_solid_rings)
         vis_row.addWidget(self._shade_solid_rings_check)
         vis_row.addStretch()
         exit_btn = QPushButton('Exit')
@@ -622,9 +592,7 @@ class CreateSimulatedImageModel(QMainWindow):
             v0 = int(img_v)
             u0 = int(img_u)
             val = self._current_image[v0, u0]
-            self._status_label.setText(
-                f'V, U: {img_v:8.2f}, {img_u:8.2f}  Value: {val:9.6f}'
-            )
+            self._status_label.setText(f'V, U: {img_v:8.2f}, {img_u:8.2f}  Value: {val:9.6f}')
         else:
             self._status_label.setText('V, U: --------, --------  Value: --')
 
@@ -896,7 +864,7 @@ class CreateSimulatedImageModel(QMainWindow):
                 return candidate
             num += 1
 
-    def _add_body_tab(self, params: Optional[dict[str, Any]] = None) -> None:
+    def _add_body_tab(self, params: dict[str, Any] | None = None) -> None:
         if params is None:
             default_name = f'Body{len(self.sim_params["bodies"]) + 1}'
             unique_name = self._find_unique_name(default_name)
@@ -932,7 +900,7 @@ class CreateSimulatedImageModel(QMainWindow):
         self._validate_ranges()
         self._updater.request_update()
 
-    def _add_ring_tab(self, params: Optional[dict[str, Any]] = None) -> None:
+    def _add_ring_tab(self, params: dict[str, Any] | None = None) -> None:
         if params is None:
             default_name = f'Ring{len(self.sim_params["rings"]) + 1}'
             unique_name = self._find_unique_name(default_name)
@@ -976,7 +944,7 @@ class CreateSimulatedImageModel(QMainWindow):
             self._tabs.setCurrentIndex(tab_idx)
         self._updater.request_update()
 
-    def _add_star_tab(self, params: Optional[dict[str, Any]] = None) -> None:
+    def _add_star_tab(self, params: dict[str, Any] | None = None) -> None:
         if params is None:
             default_name = f'Star{len(self.sim_params["stars"]) + 1}'
             unique_name = self._find_unique_name(default_name)
@@ -1001,7 +969,7 @@ class CreateSimulatedImageModel(QMainWindow):
             self._tabs.setCurrentIndex(tab_idx)
         self._updater.request_update()
 
-    def _find_tab_by_properties(self, kind: str, data_index: int) -> Optional[int]:
+    def _find_tab_by_properties(self, kind: str, data_index: int) -> int | None:
         """Find tab index by kind and data_index properties.
 
         Returns the tab index if found, None otherwise.
@@ -1100,9 +1068,9 @@ class CreateSimulatedImageModel(QMainWindow):
                     widget_data_index = widget.property('data_index')
                     if widget_kind == 'body' and widget_data_index is not None:
                         if 0 <= widget_data_index < len(self.sim_params['bodies']):
-                            body_name = self.sim_params['bodies'][
-                                widget_data_index
-                            ].get('name', f'Body{widget_data_index + 1}')
+                            body_name = self.sim_params['bodies'][widget_data_index].get(
+                                'name', f'Body{widget_data_index + 1}'
+                            )
                             target_tab_name = body_name
                     elif widget_kind == 'ring' and widget_data_index is not None:
                         if 0 <= widget_data_index < len(self.sim_params['rings']):
@@ -1147,9 +1115,7 @@ class CreateSimulatedImageModel(QMainWindow):
         # Add ring tabs (sorted by name)
         ring_indices = list(range(len(self.sim_params['rings'])))
         ring_indices.sort(
-            key=lambda i: (
-                self.sim_params['rings'][i].get('name', f'Ring{i + 1}').lower()
-            )
+            key=lambda i: self.sim_params['rings'][i].get('name', f'Ring{i + 1}').lower()
         )
         for i in ring_indices:
             tab = self._build_ring_tab(i)
@@ -1159,9 +1125,7 @@ class CreateSimulatedImageModel(QMainWindow):
         # Add star tabs (sorted by name)
         star_indices = list(range(len(self.sim_params['stars'])))
         star_indices.sort(
-            key=lambda i: (
-                self.sim_params['stars'][i].get('name', f'Star{i + 1}').lower()
-            )
+            key=lambda i: self.sim_params['stars'][i].get('name', f'Star{i + 1}').lower()
         )
         for i in star_indices:
             tab = self._build_star_tab(i)
@@ -1223,17 +1187,13 @@ class CreateSimulatedImageModel(QMainWindow):
         center_v.setRange(-10000.0, 20000.0)
         center_v.setDecimals(1)
         center_v.setValue(p.get('center_v', 0.0))
-        center_v.valueChanged.connect(
-            lambda v, i=idx: self._on_body_field(i, 'center_v', v)
-        )
+        center_v.valueChanged.connect(lambda v, i=idx: self._on_body_field(i, 'center_v', v))
         fl.addRow('Center V:', center_v)
         center_u = QDoubleSpinBox()
         center_u.setRange(-10000.0, 20000.0)
         center_u.setDecimals(1)
         center_u.setValue(p.get('center_u', 0.0))
-        center_u.valueChanged.connect(
-            lambda v, i=idx: self._on_body_field(i, 'center_u', v)
-        )
+        center_u.valueChanged.connect(lambda v, i=idx: self._on_body_field(i, 'center_u', v))
         fl.addRow('Center U:', center_u)
         # Keep references so drag updates can sync the UI
         w.center_v_spin = center_v  # type: ignore
@@ -1273,18 +1233,14 @@ class CreateSimulatedImageModel(QMainWindow):
         rz.setDecimals(1)
         rz.setSuffix('°')
         rz.setValue(p.get('rotation_z', 0.0))
-        rz.valueChanged.connect(
-            lambda v, i=idx: self._on_body_field(i, 'rotation_z', v)
-        )
+        rz.valueChanged.connect(lambda v, i=idx: self._on_body_field(i, 'rotation_z', v))
         fl.addRow('Rotation Z:', rz)
         rt = QDoubleSpinBox()
         rt.setRange(0.0, 90.0)
         rt.setDecimals(1)
         rt.setSuffix('°')
         rt.setValue(p.get('rotation_tilt', 0.0))
-        rt.valueChanged.connect(
-            lambda v, i=idx: self._on_body_field(i, 'rotation_tilt', v)
-        )
+        rt.valueChanged.connect(lambda v, i=idx: self._on_body_field(i, 'rotation_tilt', v))
         fl.addRow('Rotation Tilt:', rt)
 
         illum = QDoubleSpinBox()
@@ -1292,18 +1248,14 @@ class CreateSimulatedImageModel(QMainWindow):
         illum.setDecimals(1)
         illum.setSuffix('°')
         illum.setValue(p.get('illumination_angle', 0.0))
-        illum.valueChanged.connect(
-            lambda v, i=idx: self._on_body_field(i, 'illumination_angle', v)
-        )
+        illum.valueChanged.connect(lambda v, i=idx: self._on_body_field(i, 'illumination_angle', v))
         fl.addRow('Illumination angle:', illum)
         phase = QDoubleSpinBox()
         phase.setRange(0.0, 180.0)
         phase.setDecimals(1)
         phase.setSuffix('°')
         phase.setValue(p.get('phase_angle', 0.0))
-        phase.valueChanged.connect(
-            lambda v, i=idx: self._on_body_field(i, 'phase_angle', v)
-        )
+        phase.valueChanged.connect(lambda v, i=idx: self._on_body_field(i, 'phase_angle', v))
         fl.addRow('Phase angle:', phase)
 
         # Crater fill slider with min/max labels and spinbox
@@ -1312,28 +1264,20 @@ class CreateSimulatedImageModel(QMainWindow):
         cf_row.setContentsMargins(0, 0, 0, 0)
         cf_min_label = QLabel('0.0')
         cf_min_label.setFixedWidth(35)
-        cf_min_label.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-        )
+        cf_min_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         cf_max_label = QLabel('10.0')
         cf_max_label.setFixedWidth(40)
-        cf_max_label.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        )
+        cf_max_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         cf_slider = QSlider(Qt.Orientation.Horizontal)
         cf_slider.setRange(0, 10000)  # 0.0 to 10.0 with 0.001 steps
         cf_slider.setValue(int(p.get('crater_fill', 0.0) * 1000))
-        cf_slider.valueChanged.connect(
-            lambda v, i=idx: self._on_body_crater_fill_slider(i, v)
-        )
+        cf_slider.valueChanged.connect(lambda v, i=idx: self._on_body_crater_fill_slider(i, v))
         cf_spin = QDoubleSpinBox()
         cf_spin.setRange(0.0, 10.0)
         cf_spin.setDecimals(3)
         cf_spin.setSingleStep(0.01)
         cf_spin.setValue(p.get('crater_fill', 0.0))
-        cf_spin.valueChanged.connect(
-            lambda v, i=idx: self._on_body_crater_fill_spin(i, v)
-        )
+        cf_spin.valueChanged.connect(lambda v, i=idx: self._on_body_crater_fill_spin(i, v))
         cf_row.addWidget(cf_min_label)
         cf_row.addWidget(cf_slider, stretch=1)
         cf_row.addWidget(cf_max_label)
@@ -1349,18 +1293,14 @@ class CreateSimulatedImageModel(QMainWindow):
         cmin.setDecimals(3)
         cmin.setSingleStep(0.005)
         cmin.setValue(p.get('crater_min_radius', 0.05))
-        cmin.valueChanged.connect(
-            lambda v, i=idx: self._on_body_field(i, 'crater_min_radius', v)
-        )
+        cmin.valueChanged.connect(lambda v, i=idx: self._on_body_field(i, 'crater_min_radius', v))
         fl.addRow('Crater min radius:', cmin)
         cmax = QDoubleSpinBox()
         cmax.setRange(0.01, 0.25)
         cmax.setDecimals(3)
         cmax.setSingleStep(0.005)
         cmax.setValue(p.get('crater_max_radius', 0.25))
-        cmax.valueChanged.connect(
-            lambda v, i=idx: self._on_body_field(i, 'crater_max_radius', v)
-        )
+        cmax.valueChanged.connect(lambda v, i=idx: self._on_body_field(i, 'crater_max_radius', v))
         fl.addRow('Crater max radius:', cmax)
         cexp = QDoubleSpinBox()
         cexp.setRange(1.1, 5.0)
@@ -1376,9 +1316,7 @@ class CreateSimulatedImageModel(QMainWindow):
         crs.setDecimals(3)
         crs.setSingleStep(0.01)
         crs.setValue(p.get('crater_relief_scale', 0.6))
-        crs.valueChanged.connect(
-            lambda v, i=idx: self._on_body_field(i, 'crater_relief_scale', v)
-        )
+        crs.valueChanged.connect(lambda v, i=idx: self._on_body_field(i, 'crater_relief_scale', v))
         fl.addRow('Crater relief scale:', crs)
 
         # Anti-aliasing slider with min/max labels and spinbox
@@ -1387,28 +1325,20 @@ class CreateSimulatedImageModel(QMainWindow):
         aa_row.setContentsMargins(0, 0, 0, 0)
         aa_min_label = QLabel('0.0')
         aa_min_label.setFixedWidth(35)
-        aa_min_label.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-        )
+        aa_min_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         aa_max_label = QLabel('1.0')
         aa_max_label.setFixedWidth(35)
-        aa_max_label.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
-        )
+        aa_max_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         aa_slider = QSlider(Qt.Orientation.Horizontal)
         aa_slider.setRange(0, 1000)  # 0.0 to 1.0 with 0.001 steps
         aa_slider.setValue(int(p.get('anti_aliasing', 0.5) * 1000))
-        aa_slider.valueChanged.connect(
-            lambda v, i=idx: self._on_body_anti_aliasing_slider(i, v)
-        )
+        aa_slider.valueChanged.connect(lambda v, i=idx: self._on_body_anti_aliasing_slider(i, v))
         aa_spin = QDoubleSpinBox()
         aa_spin.setRange(0.0, 1.0)
         aa_spin.setDecimals(3)
         aa_spin.setSingleStep(0.01)
         aa_spin.setValue(p.get('anti_aliasing', 0.5))
-        aa_spin.valueChanged.connect(
-            lambda v, i=idx: self._on_body_anti_aliasing_spin(i, v)
-        )
+        aa_spin.valueChanged.connect(lambda v, i=idx: self._on_body_anti_aliasing_spin(i, v))
         aa_row.addWidget(aa_min_label)
         aa_row.addWidget(aa_slider, stretch=1)
         aa_row.addWidget(aa_max_label)
@@ -1458,17 +1388,13 @@ class CreateSimulatedImageModel(QMainWindow):
         center_v.setRange(-10000.0, 20000.0)
         center_v.setDecimals(1)
         center_v.setValue(p.get('center_v', 0.0))
-        center_v.valueChanged.connect(
-            lambda v, i=idx: self._on_ring_field(i, 'center_v', v)
-        )
+        center_v.valueChanged.connect(lambda v, i=idx: self._on_ring_field(i, 'center_v', v))
         fl.addRow('Center V:', center_v)
         center_u = QDoubleSpinBox()
         center_u.setRange(-10000.0, 20000.0)
         center_u.setDecimals(1)
         center_u.setValue(p.get('center_u', 0.0))
-        center_u.valueChanged.connect(
-            lambda v, i=idx: self._on_ring_field(i, 'center_u', v)
-        )
+        center_u.valueChanged.connect(lambda v, i=idx: self._on_ring_field(i, 'center_u', v))
         fl.addRow('Center U:', center_u)
         # Keep references so drag updates can sync the UI
         w.center_v_spin = center_v  # type: ignore
@@ -1479,9 +1405,7 @@ class CreateSimulatedImageModel(QMainWindow):
         rng.setRange(-1e9, 1e9)
         rng.setDecimals(3)
         # Default range: start after bodies (assuming bodies use 1, 2, 3, ...)
-        default_range = (
-            len(self.sim_params['rings']) + len(self.sim_params['bodies']) + 1
-        )
+        default_range = len(self.sim_params['rings']) + len(self.sim_params['bodies']) + 1
         rng.setValue(p.get('range', default_range))
         rng.valueChanged.connect(lambda v, i=idx: self._on_ring_field(i, 'range', v))
         fl.addRow('Range:', rng)
@@ -1500,16 +1424,12 @@ class CreateSimulatedImageModel(QMainWindow):
         # Inner edge checkbox and mode 1 parameters
         inner_data = p.get('inner_data', [])
         has_inner = len(inner_data) > 0 and any(m.get('mode') == 1 for m in inner_data)
-        inner_mode1: dict[str, Any] = next(
-            (m for m in inner_data if m.get('mode') == 1), {}
-        )
+        inner_mode1: dict[str, Any] = next((m for m in inner_data if m.get('mode') == 1), {})
 
         inner_checkbox = QCheckBox('Enable Inner Edge')
         inner_checkbox.setChecked(has_inner)
         inner_checkbox.clicked.connect(
-            lambda checked, i=idx, cb=inner_checkbox: self._on_ring_inner_enabled(
-                i, checked, cb
-            )
+            lambda checked, i=idx, cb=inner_checkbox: self._on_ring_inner_enabled(i, checked, cb)
         )
         fl.addRow(inner_checkbox, QLabel(''))
 
@@ -1521,18 +1441,14 @@ class CreateSimulatedImageModel(QMainWindow):
         inner_a.setDecimals(1)
         inner_a.setValue(inner_mode1.get('a', 100.0))
         inner_a.setEnabled(has_inner)
-        inner_a.valueChanged.connect(
-            lambda v, i=idx: self._on_ring_inner_mode1(i, 'a', v)
-        )
+        inner_a.valueChanged.connect(lambda v, i=idx: self._on_ring_inner_mode1(i, 'a', v))
         fl.addRow('Inner a:', inner_a)
         inner_ae = QDoubleSpinBox()
         inner_ae.setRange(0.0, 1000.0)
         inner_ae.setDecimals(2)
         inner_ae.setValue(inner_mode1.get('ae', 0.0))
         inner_ae.setEnabled(has_inner)
-        inner_ae.valueChanged.connect(
-            lambda v, i=idx: self._on_ring_inner_mode1(i, 'ae', v)
-        )
+        inner_ae.valueChanged.connect(lambda v, i=idx: self._on_ring_inner_mode1(i, 'ae', v))
         fl.addRow('Inner ae:', inner_ae)
         inner_long_peri = QDoubleSpinBox()
         inner_long_peri.setRange(0.0, 360.0)
@@ -1559,9 +1475,7 @@ class CreateSimulatedImageModel(QMainWindow):
         inner_rms.setDecimals(3)
         inner_rms.setValue(inner_mode1.get('rms', 1.0))
         inner_rms.setEnabled(has_inner)
-        inner_rms.valueChanged.connect(
-            lambda v, i=idx: self._on_ring_inner_mode1(i, 'rms', v)
-        )
+        inner_rms.valueChanged.connect(lambda v, i=idx: self._on_ring_inner_mode1(i, 'rms', v))
         fl.addRow('Inner rms:', inner_rms)
 
         # Store references for enabling/disabling
@@ -1584,16 +1498,12 @@ class CreateSimulatedImageModel(QMainWindow):
         # Outer edge checkbox and mode 1 parameters
         outer_data = p.get('outer_data', [])
         has_outer = len(outer_data) > 0 and any(m.get('mode') == 1 for m in outer_data)
-        outer_mode1: dict[str, Any] = next(
-            (m for m in outer_data if m.get('mode') == 1), {}
-        )
+        outer_mode1: dict[str, Any] = next((m for m in outer_data if m.get('mode') == 1), {})
 
         outer_checkbox = QCheckBox('Enable Outer Edge')
         outer_checkbox.setChecked(has_outer)
         outer_checkbox.clicked.connect(
-            lambda checked, i=idx, cb=outer_checkbox: self._on_ring_outer_enabled(
-                i, checked, cb
-            )
+            lambda checked, i=idx, cb=outer_checkbox: self._on_ring_outer_enabled(i, checked, cb)
         )
         fl.addRow(outer_checkbox, QLabel(''))
 
@@ -1605,18 +1515,14 @@ class CreateSimulatedImageModel(QMainWindow):
         outer_a.setDecimals(1)
         outer_a.setValue(outer_mode1.get('a', 120.0))
         outer_a.setEnabled(has_outer)
-        outer_a.valueChanged.connect(
-            lambda v, i=idx: self._on_ring_outer_mode1(i, 'a', v)
-        )
+        outer_a.valueChanged.connect(lambda v, i=idx: self._on_ring_outer_mode1(i, 'a', v))
         fl.addRow('Outer a:', outer_a)
         outer_ae = QDoubleSpinBox()
         outer_ae.setRange(0.0, 1000.0)
         outer_ae.setDecimals(2)
         outer_ae.setValue(outer_mode1.get('ae', 0.0))
         outer_ae.setEnabled(has_outer)
-        outer_ae.valueChanged.connect(
-            lambda v, i=idx: self._on_ring_outer_mode1(i, 'ae', v)
-        )
+        outer_ae.valueChanged.connect(lambda v, i=idx: self._on_ring_outer_mode1(i, 'ae', v))
         fl.addRow('Outer ae:', outer_ae)
         outer_long_peri = QDoubleSpinBox()
         outer_long_peri.setRange(0.0, 360.0)
@@ -1643,9 +1549,7 @@ class CreateSimulatedImageModel(QMainWindow):
         outer_rms.setDecimals(3)
         outer_rms.setValue(outer_mode1.get('rms', 1.0))
         outer_rms.setEnabled(has_outer)
-        outer_rms.valueChanged.connect(
-            lambda v, i=idx: self._on_ring_outer_mode1(i, 'rms', v)
-        )
+        outer_rms.valueChanged.connect(lambda v, i=idx: self._on_ring_outer_mode1(i, 'rms', v))
         fl.addRow('Outer rms:', outer_rms)
 
         # Store references for enabling/disabling
@@ -1712,17 +1616,13 @@ class CreateSimulatedImageModel(QMainWindow):
         vmag.valueChanged.connect(lambda v, i=idx: self._on_star_field(i, 'vmag', v))
         fl.addRow('Magnitude (V):', vmag)
         sclass = QLineEdit(p.get('spectral_class', 'G2'))
-        sclass.textChanged.connect(
-            lambda t, i=idx: self._on_star_field(i, 'spectral_class', t)
-        )
+        sclass.textChanged.connect(lambda t, i=idx: self._on_star_field(i, 'spectral_class', t))
         fl.addRow('Spectral class:', sclass)
         psf = QDoubleSpinBox()
         psf.setRange(0.1, 20.0)
         psf.setDecimals(2)
         psf.setValue(p.get('psf_sigma', 3.0))
-        psf.valueChanged.connect(
-            lambda v, i=idx: self._on_star_field(i, 'psf_sigma', v)
-        )
+        psf.valueChanged.connect(lambda v, i=idx: self._on_star_field(i, 'psf_sigma', v))
         fl.addRow('PSF sigma:', psf)
 
         # PSF size V slider with min/max labels and spinbox
@@ -1753,9 +1653,7 @@ class CreateSimulatedImageModel(QMainWindow):
         psf_size_v_spin.setRange(1, 23)
         psf_size_v_spin.setSingleStep(2)  # Step by 2 to keep odd
         psf_size_v_spin.setValue(psf_size_v_default)
-        psf_size_v_spin.valueChanged.connect(
-            lambda v, i=idx: self._on_star_psf_size_v_spin(i, v)
-        )
+        psf_size_v_spin.valueChanged.connect(lambda v, i=idx: self._on_star_psf_size_v_spin(i, v))
         psf_size_v_row.addWidget(psf_size_v_min_label)
         psf_size_v_row.addWidget(psf_size_v_slider, stretch=1)
         psf_size_v_row.addWidget(psf_size_v_max_label)
@@ -1795,9 +1693,7 @@ class CreateSimulatedImageModel(QMainWindow):
         psf_size_u_spin.setRange(1, 23)
         psf_size_u_spin.setSingleStep(2)  # Step by 2 to keep odd
         psf_size_u_spin.setValue(psf_size_u_default)
-        psf_size_u_spin.valueChanged.connect(
-            lambda v, i=idx: self._on_star_psf_size_u_spin(i, v)
-        )
+        psf_size_u_spin.valueChanged.connect(lambda v, i=idx: self._on_star_psf_size_u_spin(i, v))
         psf_size_u_row.addWidget(psf_size_u_min_label)
         psf_size_u_row.addWidget(psf_size_u_slider, stretch=1)
         psf_size_u_row.addWidget(psf_size_u_max_label)
@@ -1958,9 +1854,7 @@ class CreateSimulatedImageModel(QMainWindow):
                 mode1['rms'] = 1.0
             self._updater.request_update()
 
-    def _on_ring_inner_enabled(
-        self, idx: int, enabled: bool, checkbox: QCheckBox
-    ) -> None:
+    def _on_ring_inner_enabled(self, idx: int, enabled: bool, checkbox: QCheckBox) -> None:
         """Handle inner edge checkbox state change.
 
         Parameters:
@@ -2027,9 +1921,7 @@ class CreateSimulatedImageModel(QMainWindow):
 
             self._updater.request_update()
 
-    def _on_ring_outer_enabled(
-        self, idx: int, enabled: bool, checkbox: QCheckBox
-    ) -> None:
+    def _on_ring_outer_enabled(self, idx: int, enabled: bool, checkbox: QCheckBox) -> None:
         """Handle outer edge checkbox state change.
 
         Parameters:
@@ -2171,18 +2063,14 @@ class CreateSimulatedImageModel(QMainWindow):
             if tab_w is not None:
                 # Update spinbox if value was adjusted
                 if odd_value != value:
-                    spin_attr = (
-                        'psf_size_v_spin' if dimension == 0 else 'psf_size_u_spin'
-                    )
+                    spin_attr = 'psf_size_v_spin' if dimension == 0 else 'psf_size_u_spin'
                     spin = getattr(tab_w, spin_attr, None)
                     if spin is not None:
                         spin.blockSignals(True)
                         spin.setValue(odd_value)
                         spin.blockSignals(False)
                 # Convert odd value to slider position: (value - 1) // 2
-                slider_attr = (
-                    'psf_size_v_slider' if dimension == 0 else 'psf_size_u_slider'
-                )
+                slider_attr = 'psf_size_v_slider' if dimension == 0 else 'psf_size_u_slider'
                 slider = getattr(tab_w, slider_attr, None)
                 if slider is not None:
                     slider.blockSignals(True)
@@ -2242,9 +2130,7 @@ class CreateSimulatedImageModel(QMainWindow):
             if range_val is not None:
                 ranges.append(float(range_val))
         duplicates = len(ranges) != len(set(ranges))
-        self._warning_label.setText(
-            'Warning: duplicate body ranges' if duplicates else ''
-        )
+        self._warning_label.setText('Warning: duplicate body ranges' if duplicates else '')
 
     # ---- Rendering ----
     def _update_image(self) -> None:
@@ -2255,7 +2141,7 @@ class CreateSimulatedImageModel(QMainWindow):
             self._last_meta = meta
             self._display_image()
         except Exception as e:
-            QMessageBox.critical(self, 'Error', f'Failed to render image:\n{str(e)}')
+            QMessageBox.critical(self, 'Error', f'Failed to render image:\n{e!s}')
 
     def _display_image(self) -> None:
         if self._current_image is None:
@@ -2476,12 +2362,10 @@ class CreateSimulatedImageModel(QMainWindow):
             try:
                 from PIL import Image
 
-                img_uint8 = (np.clip(self._current_image, 0.0, 1.0) * 255).astype(
-                    np.uint8
-                )
+                img_uint8 = (np.clip(self._current_image, 0.0, 1.0) * 255).astype(np.uint8)
                 Image.fromarray(img_uint8, mode='L').save(filename)
             except Exception as e:
-                QMessageBox.critical(self, 'Error', f'Failed to save image:\n{str(e)}')
+                QMessageBox.critical(self, 'Error', f'Failed to save image:\n{e!s}')
 
     def _save_parameters(self) -> None:
         filename, _ = QFileDialog.getSaveFileName(
@@ -2495,9 +2379,7 @@ class CreateSimulatedImageModel(QMainWindow):
                 with open(filename, 'w') as f:
                     json.dump(self.sim_params, f, indent=2)
             except Exception as e:
-                QMessageBox.critical(
-                    self, 'Error', f'Failed to save parameters:\n{str(e)}'
-                )
+                QMessageBox.critical(self, 'Error', f'Failed to save parameters:\n{e!s}')
 
     def _load_parameters(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
@@ -2551,26 +2433,18 @@ class CreateSimulatedImageModel(QMainWindow):
                     self._closest_planet_combo.setCurrentText(closest_planet)
                 # Update background noise controls
                 self._background_noise_slider.blockSignals(True)
-                noise_slider_val = int(
-                    self.sim_params['background_noise_intensity'] * 1000
-                )
+                noise_slider_val = int(self.sim_params['background_noise_intensity'] * 1000)
                 self._background_noise_slider.setValue(noise_slider_val)
                 self._background_noise_slider.blockSignals(False)
                 self._background_noise_spin.blockSignals(True)
-                self._background_noise_spin.setValue(
-                    self.sim_params['background_noise_intensity']
-                )
+                self._background_noise_spin.setValue(self.sim_params['background_noise_intensity'])
                 self._background_noise_spin.blockSignals(False)
                 # Update background stars controls
                 self._background_stars_slider.blockSignals(True)
-                self._background_stars_slider.setValue(
-                    self.sim_params['background_stars_num']
-                )
+                self._background_stars_slider.setValue(self.sim_params['background_stars_num'])
                 self._background_stars_slider.blockSignals(False)
                 self._background_stars_spin.blockSignals(True)
-                self._background_stars_spin.setValue(
-                    self.sim_params['background_stars_num']
-                )
+                self._background_stars_spin.setValue(self.sim_params['background_stars_num'])
                 self._background_stars_spin.blockSignals(False)
                 # Update background stars PSF sigma controls
                 self._background_stars_psf_sigma_slider.blockSignals(True)
@@ -2589,9 +2463,7 @@ class CreateSimulatedImageModel(QMainWindow):
                 self._background_stars_dist_exp_slider.setValue(dist_exp_slider_val)
                 self._background_stars_dist_exp_slider.blockSignals(False)
                 self._background_stars_dist_exp_spin.blockSignals(True)
-                dist_exp_spin_val = self.sim_params[
-                    'background_stars_distribution_exponent'
-                ]
+                dist_exp_spin_val = self.sim_params['background_stars_distribution_exponent']
                 self._background_stars_dist_exp_spin.setValue(dist_exp_spin_val)
                 self._background_stars_dist_exp_spin.blockSignals(False)
                 # Rebuild tabs
@@ -2600,9 +2472,7 @@ class CreateSimulatedImageModel(QMainWindow):
                 self._validate_ranges()
                 self._updater.immediate_update()
             except Exception as e:
-                QMessageBox.critical(
-                    self, 'Error', f'Failed to load parameters:\n{str(e)}'
-                )
+                QMessageBox.critical(self, 'Error', f'Failed to load parameters:\n{e!s}')
 
     # ---- Visual toggles ----
     def _toggle_visual_aids(self, state: Any) -> None:

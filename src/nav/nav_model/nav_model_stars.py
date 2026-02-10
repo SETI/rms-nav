@@ -1,44 +1,40 @@
 import copy
-
-from nav.support.image import draw_rect
-from nav.support.time import now_dt
-
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 import numpy as np
-
+import polymath
 from oops import Event, Meshgrid, Observation
 from oops.backplane import Backplane
-import polymath
 from starcat import (
-    SCLASS_TO_SURFACE_TEMP,
     SCLASS_TO_B_MINUS_V,
+    SCLASS_TO_SURFACE_TEMP,
     SpiceStarCatalog,
     UCAC4StarCatalog,
     YBSCStarCatalog,
 )
 
 from nav.annotation import (
+    TEXTINFO_BOTTOM,
+    TEXTINFO_BOTTOM_LEFT,
+    TEXTINFO_BOTTOM_RIGHT,
+    TEXTINFO_LEFT,
+    TEXTINFO_RIGHT,
+    TEXTINFO_TOP,
+    TEXTINFO_TOP_LEFT,
+    TEXTINFO_TOP_RIGHT,
     Annotation,
     Annotations,
     AnnotationTextInfo,
     TextLocInfo,
-    TEXTINFO_LEFT,
-    TEXTINFO_RIGHT,
-    TEXTINFO_BOTTOM,
-    TEXTINFO_TOP,
-    TEXTINFO_TOP_LEFT,
-    TEXTINFO_TOP_RIGHT,
-    TEXTINFO_BOTTOM_LEFT,
-    TEXTINFO_BOTTOM_RIGHT,
 )
 from nav.config import Config
 from nav.support.flux import clean_sclass
+from nav.support.image import draw_rect
+from nav.support.time import now_dt
 from nav.support.types import MutableStar
 
 from .nav_model import NavModel
 from .nav_model_result import NavModelResult
-
 
 _DEBUG_STARS_MODEL_IMGDISP = False
 
@@ -77,8 +73,8 @@ class NavModelStars(NavModel):
         name: str,
         obs: Observation,
         *,
-        star_list: Optional[list[MutableStar]] = None,
-        config: Optional[Config] = None,
+        star_list: list[MutableStar] | None = None,
+        config: Config | None = None,
     ) -> None:
         """Creates a navigation model for stars.
 
@@ -152,7 +148,7 @@ class NavModelStars(NavModel):
         dec_max: float,
         mag_min: float,
         mag_max: float,
-        radec_movement: Optional[tuple[float, float]] = None,
+        radec_movement: tuple[float, float] | None = None,
         **kwargs: Any,
     ) -> list[MutableStar]:
         """Return a list of stars with the given constraints.
@@ -195,8 +191,7 @@ class NavModelStars(NavModel):
         obs = self._obs
 
         self.logger.debug(
-            f'Retrieving stars from {catalog_name} with VMAG range '
-            f'{mag_min:.4f} to {mag_max:.4f}'
+            f'Retrieving stars from {catalog_name} with VMAG range {mag_min:.4f} to {mag_max:.4f}'
         )
 
         # Get a list of all reasonable stars within the given magnitude range
@@ -315,10 +310,7 @@ class NavModelStars(NavModel):
 
         ra_dec_pm_list = cast(
             list[tuple[float, float]],
-            [
-                cast(tuple[float, float], x.ra_dec_with_pm(obs.midtime))
-                for x in star_list2
-            ],
+            [cast(tuple[float, float], x.ra_dec_with_pm(obs.midtime)) for x in star_list2],
         )
 
         ra_dec_list: list[tuple[float, float]]
@@ -401,7 +393,7 @@ class NavModelStars(NavModel):
         return star_list3
 
     def stars_list_for_obs(
-        self, radec_movement: Optional[tuple[float, float]] = None, **kwargs: Any
+        self, radec_movement: tuple[float, float] | None = None, **kwargs: Any
     ) -> list[MutableStar]:
         """Return a list of stars in the FOV of the obs.
 
@@ -520,13 +512,9 @@ class NavModelStars(NavModel):
                             # Don't need to iterate any further
                             break
                         if (
-                            abs(prev_star.dec_pm - star.dec_pm)
-                            < duplicate_ra_dec_threshold
-                            and abs(prev_star.ra_pm - star.ra_pm)
-                            < duplicate_ra_dec_threshold
-                            and abs(
-                                (cast(float, prev_star.vmag)) - (cast(float, star.vmag))
-                            )
+                            abs(prev_star.dec_pm - star.dec_pm) < duplicate_ra_dec_threshold
+                            and abs(prev_star.ra_pm - star.ra_pm) < duplicate_ra_dec_threshold
+                            and abs((cast(float, prev_star.vmag)) - (cast(float, star.vmag)))
                             < duplicate_vmag_threshold
                         ):
                             # Some catalogs like YBSC have a nice name, but others don't.
@@ -568,14 +556,8 @@ class NavModelStars(NavModel):
         if len(full_star_list) > 1:
             for i in range(len(full_star_list)):
                 for j in range(i + 1, len(full_star_list)):
-                    u_gap = (
-                        full_star_list[i].psf_size[1] / 2
-                        + full_star_list[j].psf_size[1] / 2
-                    )
-                    v_gap = (
-                        full_star_list[i].psf_size[0] / 2
-                        + full_star_list[j].psf_size[0] / 2
-                    )
+                    u_gap = full_star_list[i].psf_size[1] / 2 + full_star_list[j].psf_size[1] / 2
+                    v_gap = full_star_list[i].psf_size[0] / 2 + full_star_list[j].psf_size[0] / 2
                     if (
                         abs(full_star_list[i].v - full_star_list[j].v) < v_gap
                         and abs(full_star_list[i].u - full_star_list[j].u) < u_gap
@@ -590,23 +572,15 @@ class NavModelStars(NavModel):
                             full_star_list[i].conflicts = 'STAR'
                             full_star_list[j].conflicts = 'STAR'
                             self.logger.debug('Marking both overlapping stars:')
-                            self.logger.debug(
-                                '  %s', self._star_short_info(full_star_list[i])
-                            )
-                            self.logger.debug(
-                                '  %s', self._star_short_info(full_star_list[j])
-                            )
+                            self.logger.debug('  %s', self._star_short_info(full_star_list[i]))
+                            self.logger.debug('  %s', self._star_short_info(full_star_list[j]))
                         else:
                             # Stars overlap but the VMAGs are far enough apart that one will
                             # overwhelm the other
                             full_star_list[j].conflicts = 'STAR'
                             self.logger.debug('Marking one overlapping star:')
-                            self.logger.debug(
-                                '  %s', self._star_short_info(full_star_list[i])
-                            )
-                            self.logger.debug(
-                                '  %s', self._star_short_info(full_star_list[j])
-                            )
+                            self.logger.debug('  %s', self._star_short_info(full_star_list[i]))
+                            self.logger.debug('  %s', self._star_short_info(full_star_list[j]))
 
         # Sort the list with the brightest stars first.
         full_star_list.sort(key=lambda x: x.dn, reverse=True)
@@ -676,7 +650,7 @@ class NavModelStars(NavModel):
     def _create_model(
         self,
         metadata: dict[str, Any],
-        ra_dec_predicted: Optional[tuple[float, ...]],
+        ra_dec_predicted: tuple[float, ...] | None,
         ignore_conflicts: bool = False,
         always_create_model: bool = False,
         never_create_model: bool = False,
@@ -741,9 +715,7 @@ class NavModelStars(NavModel):
             psf_size_half_u = int(star.psf_size[1] + np.round(abs(star.move_u))) // 2
             psf_size_half_v = int(star.psf_size[0] + np.round(abs(star.move_v))) // 2
 
-            move_gran = max(
-                abs(star.move_u) / max_move_steps, abs(star.move_v) / max_move_steps
-            )
+            move_gran = max(abs(star.move_u) / max_move_steps, abs(star.move_v) / max_move_steps)
             move_gran = np.clip(move_gran, 0.1, 1.0)
 
             psf = self.obs.star_psf()
@@ -771,6 +743,7 @@ class NavModelStars(NavModel):
 
         if _DEBUG_STARS_MODEL_IMGDISP:
             import tkinter as tk
+
             from imgdisp import ImageDisp
 
             cast(Any, ImageDisp)(
@@ -843,21 +816,13 @@ class NavModelStars(NavModel):
                 text_loc.append(TextLocInfo(TEXTINFO_TOP, v - label_margin, u))
                 text_loc.append(TextLocInfo(TEXTINFO_LEFT, v, u - label_margin))
                 text_loc.append(TextLocInfo(TEXTINFO_RIGHT, v, u + label_margin))
+                text_loc.append(TextLocInfo(TEXTINFO_TOP_LEFT, v - label_margin, u - label_margin))
+                text_loc.append(TextLocInfo(TEXTINFO_TOP_RIGHT, v - label_margin, u + label_margin))
                 text_loc.append(
-                    TextLocInfo(TEXTINFO_TOP_LEFT, v - label_margin, u - label_margin)
+                    TextLocInfo(TEXTINFO_BOTTOM_LEFT, v + label_margin, u - label_margin)
                 )
                 text_loc.append(
-                    TextLocInfo(TEXTINFO_TOP_RIGHT, v - label_margin, u + label_margin)
-                )
-                text_loc.append(
-                    TextLocInfo(
-                        TEXTINFO_BOTTOM_LEFT, v + label_margin, u - label_margin
-                    )
-                )
-                text_loc.append(
-                    TextLocInfo(
-                        TEXTINFO_BOTTOM_RIGHT, v + label_margin, u + label_margin
-                    )
+                    TextLocInfo(TEXTINFO_BOTTOM_RIGHT, v + label_margin, u + label_margin)
                 )
 
                 text_info = AnnotationTextInfo(
@@ -907,9 +872,7 @@ class NavModelStars(NavModel):
     #
     # ==============================================================================
 
-    def _mark_conflicts_obj(
-        self, star: MutableStar, rings_can_conflict: bool
-    ) -> bool:  # TODO
+    def _mark_conflicts_obj(self, star: MutableStar, rings_can_conflict: bool) -> bool:  # TODO
         """Check if a star conflicts with known bodies or rings.
 
         Sets star.conflicts to a string describing why the Star conflicted.

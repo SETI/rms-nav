@@ -1,12 +1,12 @@
 import math
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
-# import matplotlib.pyplot as plt
+import polymath
 
+# import matplotlib.pyplot as plt
 from oops import Meshgrid, Observation
 from oops.backplane import Backplane
-import polymath
 
 from nav.config import Config
 from nav.support.attrdict import AttrDict
@@ -29,8 +29,8 @@ class NavModelBody(NavModelBodyBase):
         obs: Observation,
         body_name: str,
         *,
-        inventory: Optional[dict[str, Any]] = None,
-        config: Optional[Config] = None,
+        inventory: dict[str, Any] | None = None,
+        config: Config | None = None,
     ):
         """Creates a navigation model for a planetary body.
 
@@ -47,9 +47,7 @@ class NavModelBody(NavModelBodyBase):
         self._body_name = body_name.upper()
 
         if inventory is None:
-            inventory = self.obs.inventory([self._body_name], return_type='full')[
-                body_name
-            ]
+            inventory = self.obs.inventory([self._body_name], return_type='full')[body_name]
         self._inventory = inventory
 
     def create_model(
@@ -132,28 +130,16 @@ class NavModelBody(NavModelBodyBase):
         # metadata['confidence'] = None
 
         # Single-valued metadata
-        metadata['sub_solar_lon'] = np.degrees(
-            ext_bp.sub_solar_longitude(body_name).vals
-        )
-        metadata['sub_solar_lat'] = np.degrees(
-            ext_bp.sub_solar_latitude(body_name).vals
-        )
-        metadata['sub_observer_lon'] = np.degrees(
-            ext_bp.sub_observer_longitude(body_name).vals
-        )
-        metadata['sub_observer_lat'] = np.degrees(
-            ext_bp.sub_observer_latitude(body_name).vals
-        )
+        metadata['sub_solar_lon'] = np.degrees(ext_bp.sub_solar_longitude(body_name).vals)
+        metadata['sub_solar_lat'] = np.degrees(ext_bp.sub_solar_latitude(body_name).vals)
+        metadata['sub_observer_lon'] = np.degrees(ext_bp.sub_observer_longitude(body_name).vals)
+        metadata['sub_observer_lat'] = np.degrees(ext_bp.sub_observer_latitude(body_name).vals)
         metadata['phase_angle'] = np.degrees(ext_bp.center_phase_angle(body_name).vals)
 
         self._logger.info(f'Sub-solar longitude      {metadata["sub_solar_lon"]:6.2f}')
         self._logger.info(f'Sub-solar latitude       {metadata["sub_solar_lat"]:6.2f}')
-        self._logger.info(
-            f'Sub-observer longitude   {metadata["sub_observer_lon"]:6.2f}'
-        )
-        self._logger.info(
-            f'Sub-observer latitude    {metadata["sub_observer_lat"]:6.2f}'
-        )
+        self._logger.info(f'Sub-observer longitude   {metadata["sub_observer_lon"]:6.2f}')
+        self._logger.info(f'Sub-observer latitude    {metadata["sub_observer_lat"]:6.2f}')
         self._logger.info(f'Phase angle              {metadata["phase_angle"]:6.2f}')
 
         ########################################################################
@@ -170,9 +156,7 @@ class NavModelBody(NavModelBodyBase):
         else:
             metadata['size_ok'] = False
             if not always_create_model:
-                self._logger.info(
-                    'Bounding box is too small to bother with - aborting early'
-                )
+                self._logger.info('Bounding box is too small to bother with - aborting early')
                 return
 
         # # Create a Meshgrid that only covers the center pixel of the body
@@ -230,10 +214,12 @@ class NavModelBody(NavModelBodyBase):
         # Figure out the bounding box with some slop and see whether or not the body is
         # going to be entirely visible even in the case of maximum offset
 
-        u_min -= int((u_max - u_min) * BODIES_POSITION_SLOP_FRAC)
-        u_max += int((u_max - u_min) * BODIES_POSITION_SLOP_FRAC)
-        v_min -= int((v_max - v_min) * BODIES_POSITION_SLOP_FRAC)
-        v_max += int((v_max - v_min) * BODIES_POSITION_SLOP_FRAC)
+        u_slop = int((u_max - u_min) * BODIES_POSITION_SLOP_FRAC)
+        v_slop = int((v_max - v_min) * BODIES_POSITION_SLOP_FRAC)
+        u_min -= u_slop
+        u_max += u_slop
+        v_min -= v_slop
+        v_max += v_slop
 
         u_min, v_min = obs.clip_extfov(u_min, v_min)
         u_max, v_max = obs.clip_extfov(u_max, v_max)
@@ -248,9 +234,7 @@ class NavModelBody(NavModelBodyBase):
         if v_min == v_max and v_min == obs.extfov_v_min:
             v_max += 1
 
-        self._logger.debug(
-            f'Original bounding box U {u_min} to {u_max}, V {v_min} to {v_max}'
-        )
+        self._logger.debug(f'Original bounding box U {u_min} to {u_max}, V {v_min} to {v_max}')
         self._logger.debug(
             f'Image size {obs.data_shape_u} x {obs.data_shape_v}; '
             f'subrect w/slop U {u_min} to {u_max}, V {v_min} to {v_max}'
@@ -266,13 +250,9 @@ class NavModelBody(NavModelBodyBase):
             # Body is entirely visible - no part is off the edge even when shifting
             # the extended FOV
             guaranteed_visible_in_fov = True
-            self._logger.info(
-                'All of body is guaranteed visible even after maximum offset'
-            )
+            self._logger.info('All of body is guaranteed visible even after maximum offset')
         else:
-            self._logger.info(
-                'Not all of body guaranteed to be visible after maximum offset'
-            )
+            self._logger.info('Not all of body guaranteed to be visible after maximum offset')
         metadata['guaranteed_visible_in_fov'] = guaranteed_visible_in_fov
 
         if never_create_model:
@@ -322,9 +302,7 @@ class NavModelBody(NavModelBodyBase):
         )
         self._models.append(result)
 
-        self._logger.debug(
-            f'  Body model min: {np.min(model_img)}, max: {np.max(model_img)}'
-        )
+        self._logger.debug(f'  Body model min: {np.min(model_img)}, max: {np.max(model_img)}')
 
     def _create_backplane_model(
         self,
@@ -359,8 +337,7 @@ class NavModelBody(NavModelBodyBase):
         restr_oversample_u = max(
             int(
                 np.floor(
-                    body_config.oversample_edge_limit
-                    / max(np.ceil(inventory['u_pixel_size']), 1)
+                    body_config.oversample_edge_limit / max(np.ceil(inventory['u_pixel_size']), 1)
                 )
             ),
             1,
@@ -368,17 +345,14 @@ class NavModelBody(NavModelBodyBase):
         restr_oversample_v = max(
             int(
                 np.floor(
-                    body_config.oversample_edge_limit
-                    / max(np.ceil(inventory['v_pixel_size']), 1)
+                    body_config.oversample_edge_limit / max(np.ceil(inventory['v_pixel_size']), 1)
                 )
             ),
             1,
         )
         restr_oversample_u = min(restr_oversample_u, body_config.oversample_maximum)
         restr_oversample_v = min(restr_oversample_v, body_config.oversample_maximum)
-        self._logger.debug(
-            f'Oversampling by {restr_oversample_u} x {restr_oversample_v}'
-        )
+        self._logger.debug(f'Oversampling by {restr_oversample_u} x {restr_oversample_v}')
         restr_u_min = u_min + 1.0 / (2 * restr_oversample_u)
         restr_u_max = u_max + 1 - 1.0 / (2 * restr_oversample_u)
         restr_v_min = v_min + 1.0 / (2 * restr_oversample_v)
@@ -427,9 +401,7 @@ class NavModelBody(NavModelBodyBase):
             limb_incidence_min = np.degrees(restr_incidence_limb.min().vals)
             limb_incidence_max = np.degrees(restr_incidence_limb.max().vals)
             self._logger.info(
-                'Limb incidence angle '
-                f'min {limb_incidence_min:.2f}, '
-                f'max {limb_incidence_max:.2f}'
+                f'Limb incidence angle min {limb_incidence_min:.2f}, max {limb_incidence_max:.2f}'
             )
 
             # limb_threshold = config['limb_incidence_threshold']
@@ -559,12 +531,8 @@ class NavModelBody(NavModelBodyBase):
         # Put the small model back in the right place in the full-size model
         ########################################################################
 
-        model_slice_0 = slice(
-            v_min + obs.extfov_margin_v, v_max + obs.extfov_margin_v + 1
-        )
-        model_slice_1 = slice(
-            u_min + obs.extfov_margin_u, u_max + obs.extfov_margin_u + 1
-        )
+        model_slice_0 = slice(v_min + obs.extfov_margin_v, v_max + obs.extfov_margin_v + 1)
+        model_slice_1 = slice(u_min + obs.extfov_margin_u, u_max + obs.extfov_margin_u + 1)
         model_img = obs.make_extfov_zeros()
         model_img[model_slice_0, model_slice_1] = restr_model
         limb_mask = obs.make_extfov_false()

@@ -63,12 +63,24 @@ pythonpath = [
 ]
 
 [tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+# Explicit rule set (recommended for library projects). Categories:
+# E, W = pycodestyle errors/warnings; F = Pyflakes; I = isort; UP = pyupgrade;
+# B = bugbear; SIM = simplify; C4 = comprehensions; A = builtins (no shadowing);
+# N = pep8-naming; PT = pytest-style; RUF = Ruff-specific (e.g. unused noqa).
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "A", "N", "PT", "RUF"]
+
 [tool.ruff.lint.per-file-ignores]
 # Entry-point scripts add package to path before importing nav
 "src/main/*.py" = ["E402"]
 
 [tool.ruff.format]
 quote-style = "single"
+
+[tool.ruff.lint.isort]
+order-by-type = true
 
 [tool.setuptools]
 [tool.setuptools.packages.find]

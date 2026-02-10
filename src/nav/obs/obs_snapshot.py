@@ -1,18 +1,18 @@
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 import numpy as np
 import oops
-from oops.observation.snapshot import Snapshot
-from oops.meshgrid import Meshgrid
 from oops.backplane import Backplane
+from oops.meshgrid import Meshgrid
+from oops.observation.snapshot import Snapshot
 
 from nav.config import Config
 from nav.support.image import pad_array
 from nav.support.types import (
     DTypeLike,
-    NDArrayType,
-    NDArrayFloatType,
     NDArrayBoolType,
+    NDArrayFloatType,
+    NDArrayType,
     NPType,
 )
 
@@ -30,8 +30,8 @@ class ObsSnapshot(Obs, Snapshot):
         self,
         snapshot: Snapshot,
         *,
-        extfov_margin_vu: Optional[int | tuple[int, int]] = None,
-        config: Optional[Config] = None,
+        extfov_margin_vu: int | tuple[int, int] | None = None,
+        config: Config | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize an ObsSnapshot by wrapping an existing Snapshot.
@@ -434,8 +434,7 @@ class ObsSnapshot(Obs, Snapshot):
 
         if array.shape != self.extdata_shape_vu:
             raise ValueError(
-                f'array shape {array.shape} must equal extdata shape '
-                f'{self.extdata_shape_vu}'
+                f'array shape {array.shape} must equal extdata shape {self.extdata_shape_vu}'
             )
         if offset is None:
             offset = (0, 0)
@@ -444,12 +443,7 @@ class ObsSnapshot(Obs, Snapshot):
         u0 = self.extfov_margin_u - int(np.round(offset[1]))
         v1 = v0 + self.data_shape_v
         u1 = u0 + self.data_shape_u
-        if (
-            v0 < 0
-            or u0 < 0
-            or v0 + self.data_shape_v > v_size
-            or u0 + self.data_shape_u > u_size
-        ):
+        if v0 < 0 or u0 < 0 or v0 + self.data_shape_v > v_size or u0 + self.data_shape_u > u_size:
             raise ValueError('offset produces out-of-bounds subimage slice')
         return array[v0:v1, u0:u1]
 
@@ -503,9 +497,7 @@ class ObsSnapshot(Obs, Snapshot):
 
         return self._ra_dec_limits(self.corner_bp, apparent=apparent)
 
-    def ra_dec_limits_ext(
-        self, apparent: bool = True
-    ) -> tuple[float, float, float, float]:
+    def ra_dec_limits_ext(self, apparent: bool = True) -> tuple[float, float, float, float]:
         """Finds the right ascension and declination limits of the observation using the
         extended FOV.
 

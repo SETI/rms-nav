@@ -1,6 +1,6 @@
-from collections import namedtuple
 import functools
 import os
+from collections import namedtuple
 from typing import cast
 
 import numpy as np
@@ -9,7 +9,6 @@ from PIL import ImageDraw, ImageFont
 from nav.config import DEFAULT_CONFIG
 from nav.support.image import draw_line_arrow
 from nav.support.types import NDArrayBoolType, NDArrayIntType
-
 
 TEXTINFO_LEFT = 'left'
 TEXTINFO_LEFT_ARROW = 'left_arrow'
@@ -297,12 +296,7 @@ class AnnotationTextInfo:
                 assert arrow_v1 is not None
                 # Calculate head width from angle and add a little margin of error
                 head_width = (
-                    int(
-                        np.ceil(
-                            arrow_head_length * np.sin(np.deg2rad(arrow_head_angle)) * 2
-                        )
-                    )
-                    + 2
+                    int(np.ceil(arrow_head_length * np.sin(np.deg2rad(arrow_head_angle)) * 2)) + 2
                 )
                 if arrow_v0 == arrow_v1:  # Horizontal arrow
                     arrow_box_v0 = arrow_v0 - head_width // 2

@@ -1,12 +1,13 @@
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from filecache import FCPath, FileCache
 
-from .dataset import ImageFile
-from .dataset_pds3 import DataSetPDS3
 from nav.config import Config
 from nav.support.misc import safe_lstrip_zero
+
+from .dataset import ImageFile
+from .dataset_pds3 import DataSetPDS3
 
 
 class DataSetPDS3GalileoSSI(DataSetPDS3):
@@ -119,9 +120,7 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
         ):
             img_name = parts[2]
         else:
-            raise ValueError(
-                f'Bad Primary File Spec "{filespec}" - bad target directory'
-            )
+            raise ValueError(f'Bad Primary File Spec "{filespec}" - bad target directory')
         # Intentionally uppercase only
         if not img_name.endswith('.LBL'):
             return None
@@ -213,11 +212,11 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
 
     def __init__(
         self,
-        pds3_holdings_root: Optional[str | Path | FCPath] = None,
+        pds3_holdings_root: str | Path | FCPath | None = None,
         *,
-        index_filecache: Optional[FileCache] = None,
-        pds3_holdings_filecache: Optional[FileCache] = None,
-        config: Optional[Config] = None,
+        index_filecache: FileCache | None = None,
+        pds3_holdings_filecache: FileCache | None = None,
+        config: Config | None = None,
     ) -> None:
         """Initializes a Galileo SSI dataset handler.
 
@@ -249,9 +248,7 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
         if Path(template_dir).is_absolute():
             return template_dir
 
-        pds4_templates_dir = (
-            Path(__file__).resolve().parent.parent.parent / 'pds4' / 'templates'
-        )
+        pds4_templates_dir = Path(__file__).resolve().parent.parent.parent / 'pds4' / 'templates'
         return str(pds4_templates_dir / template_dir)
 
     def pds4_bundle_name(self) -> str:

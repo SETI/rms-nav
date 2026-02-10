@@ -1,14 +1,15 @@
 import argparse
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from filecache import FCPath, FileCache
 
-from .dataset import ImageFile, ImageFiles
-from .dataset_pds3 import DataSetPDS3
 from nav.config import Config
 from nav.support.misc import safe_lstrip_zero
+
+from .dataset import ImageFile, ImageFiles
+from .dataset_pds3 import DataSetPDS3
 
 
 class DataSetPDS3CassiniISS(DataSetPDS3):
@@ -80,17 +81,14 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
 
         parts = filespec.split('/')
         if len(parts) != 3:
-            raise ValueError(
-                f'Bad Primary File Spec "{filespec}" - expected 3 directory levels'
-            )
+            raise ValueError(f'Bad Primary File Spec "{filespec}" - expected 3 directory levels')
         if parts[0].upper() != 'DATA':
             raise ValueError(f'Bad Primary File Spec "{filespec}" - expected "DATA"')
         range_dir = parts[1]
         img_name = parts[2]
         if len(range_dir) != 21 or range_dir[10] != '_':
             raise ValueError(
-                f'Bad Primary File Spec "{filespec}" - '
-                'expected "DATA/dddddddddd_dddddddddd"'
+                f'Bad Primary File Spec "{filespec}" - expected "DATA/dddddddddd_dddddddddd"'
             )
         img_name = img_name.rsplit('.')[0]
         return img_name
@@ -187,7 +185,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         _img_path: str,
         img_name: str,
         _img_num: int,
-        arguments: Optional[argparse.Namespace] = None,
+        arguments: argparse.Namespace | None = None,
     ) -> bool:
         """Check additional image selection criteria.
 
@@ -213,11 +211,11 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
 
     def __init__(
         self,
-        pds3_holdings_root: Optional[str | Path | FCPath] = None,
+        pds3_holdings_root: str | Path | FCPath | None = None,
         *,
-        index_filecache: Optional[FileCache] = None,
-        pds3_holdings_filecache: Optional[FileCache] = None,
-        config: Optional[Config] = None,
+        index_filecache: FileCache | None = None,
+        pds3_holdings_filecache: FileCache | None = None,
+        config: Config | None = None,
     ) -> None:
         """Initializes a Cassini ISS dataset handler.
 
@@ -239,7 +237,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
     @staticmethod
     def add_selection_arguments(
         cmdparser: argparse.ArgumentParser,
-        group: Optional[argparse._ArgumentGroup] = None,
+        group: argparse._ArgumentGroup | None = None,
     ) -> None:
         """Adds Cassini ISS-specific command-line arguments for image selection.
 
@@ -252,9 +250,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         DataSetPDS3.add_selection_arguments(cmdparser, group)
 
         if group is None:
-            group = cmdparser.add_argument_group(
-                'Image selection (Cassini ISS-specific)'
-            )
+            group = cmdparser.add_argument_group('Image selection (Cassini ISS-specific)')
         group.add_argument(
             '--camera',
             type=str,
@@ -347,9 +343,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
             return template_dir
 
         # Otherwise, make it relative to pds4/templates
-        pds4_templates_dir = (
-            Path(__file__).resolve().parent.parent.parent / 'pds4' / 'templates'
-        )
+        pds4_templates_dir = Path(__file__).resolve().parent.parent.parent / 'pds4' / 'templates'
         return str(pds4_templates_dir / template_dir)
 
     def pds4_bundle_name(self) -> str:
@@ -503,20 +497,12 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         image_lid_part = image_name[1:] + image_name[0].lower()
         vars_dict['BUNDLE_LID'] = f'urn:nasa:pds:{pds4_bundle_name}'
         vars_dict['BUNDLE_LIDVID'] = f'urn:nasa:pds:{pds4_bundle_name}::1.0'
-        vars_dict['BROWSE_LID'] = (
-            f'urn:nasa:pds:{pds4_bundle_name}:browse:{image_lid_part}'
-        )
-        vars_dict['BROWSE_LIDVID'] = (
-            f'urn:nasa:pds:{pds4_bundle_name}:browse:{image_lid_part}::1.0'
-        )
+        vars_dict['BROWSE_LID'] = f'urn:nasa:pds:{pds4_bundle_name}:browse:{image_lid_part}'
+        vars_dict['BROWSE_LIDVID'] = f'urn:nasa:pds:{pds4_bundle_name}:browse:{image_lid_part}::1.0'
         vars_dict['DATA_LID'] = f'urn:nasa:pds:{pds4_bundle_name}:data:{image_lid_part}'
-        vars_dict['DATA_LIDVID'] = (
-            f'urn:nasa:pds:{pds4_bundle_name}:data:{image_lid_part}::1.0'
-        )
+        vars_dict['DATA_LIDVID'] = f'urn:nasa:pds:{pds4_bundle_name}:data:{image_lid_part}::1.0'
         vars_dict['TITLE'] = f'Backplanes for {image_file.image_file_name}'
-        vars_dict['DESCRIPTION'] = (
-            f'Backplanes for navigated image {image_file.image_file_name}'
-        )
+        vars_dict['DESCRIPTION'] = f'Backplanes for navigated image {image_file.image_file_name}'
         vars_dict['COMMENT'] = 'Generated from navigated image data'
         vars_dict['SOURCE_IMAGE_LIDVID'] = (
             f'urn:nasa:pds:{pds4_bundle_name}:data:{image_lid_part}::1.0'
@@ -528,9 +514,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
             # Map PDS3 index columns to PDS4 cassini: namespace variables
             # Based on COISS index file structure from
             # https://pds-rings.seti.org/holdings/metadata/COISS_2xxx/COISS_2001/COISS_2001_index.lbl
-            vars_dict['cassini:mission_phase_name'] = index_row.get(
-                'MISSION_PHASE_NAME', ''
-            )
+            vars_dict['cassini:mission_phase_name'] = index_row.get('MISSION_PHASE_NAME', '')
             vars_dict['cassini:spacecraft_clock_count_partition'] = index_row.get(
                 'SPACECRAFT_CLOCK_COUNT_PARTITION', ''
             )
@@ -548,25 +532,15 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
             vars_dict['cassini:calibration_lamp_state_flag'] = index_row.get(
                 'CALIBRATION_LAMP_STATE_FLAG', ''
             )
-            vars_dict['cassini:command_file_name'] = index_row.get(
-                'COMMAND_FILE_NAME', ''
-            )
+            vars_dict['cassini:command_file_name'] = index_row.get('COMMAND_FILE_NAME', '')
             vars_dict['cassini:command_sequence_number'] = index_row.get(
                 'COMMAND_SEQUENCE_NUMBER', ''
             )
             vars_dict['cassini:dark_strip_mean'] = index_row.get('DARK_STRIP_MEAN', '')
-            vars_dict['cassini:data_conversion_type'] = index_row.get(
-                'DATA_CONVERSION_TYPE', ''
-            )
-            vars_dict['cassini:delayed_readout_flag'] = index_row.get(
-                'DELAYED_READOUT_FLAG', ''
-            )
-            vars_dict['cassini:detector_temperature'] = index_row.get(
-                'DETECTOR_TEMPERATURE', ''
-            )
-            vars_dict['cassini:electronics_bias'] = index_row.get(
-                'ELECTRONICS_BIAS', ''
-            )
+            vars_dict['cassini:data_conversion_type'] = index_row.get('DATA_CONVERSION_TYPE', '')
+            vars_dict['cassini:delayed_readout_flag'] = index_row.get('DELAYED_READOUT_FLAG', '')
+            vars_dict['cassini:detector_temperature'] = index_row.get('DETECTOR_TEMPERATURE', '')
+            vars_dict['cassini:electronics_bias'] = index_row.get('ELECTRONICS_BIAS', '')
             vars_dict['cassini:earth_received_start_time'] = index_row.get(
                 'EARTH_RECEIVED_START_TIME', ''
             )
@@ -579,17 +553,11 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
             vars_dict['cassini:expected_maximum_DN_sat'] = index_row.get(
                 'EXPECTED_MAXIMUM_DN_SAT', '-1'
             )
-            vars_dict['cassini:expected_packets'] = index_row.get(
-                'EXPECTED_PACKETS', '-1'
-            )
-            vars_dict['cassini:exposure_duration'] = index_row.get(
-                'EXPOSURE_DURATION', ''
-            )
+            vars_dict['cassini:expected_packets'] = index_row.get('EXPECTED_PACKETS', '-1')
+            vars_dict['cassini:exposure_duration'] = index_row.get('EXPOSURE_DURATION', '')
             vars_dict['cassini:filter_name_1'] = index_row.get('FILTER1', '')
             vars_dict['cassini:filter_name_2'] = index_row.get('FILTER2', '')
-            vars_dict['cassini:filter_temperature'] = index_row.get(
-                'FILTER_TEMPERATURE', ''
-            )
+            vars_dict['cassini:filter_temperature'] = index_row.get('FILTER_TEMPERATURE', '')
             vars_dict['cassini:flight_software_version_id'] = index_row.get(
                 'FLIGHT_SOFTWARE_VERSION_ID', ''
             )
@@ -603,12 +571,8 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
             vars_dict['cassini:image_observation_type'] = index_row.get(
                 'IMAGE_OBSERVATION_TYPE', ''
             )
-            vars_dict['cassini:instrument_data_rate'] = index_row.get(
-                'INSTRUMENT_DATA_RATE', ''
-            )
-            vars_dict['cassini:instrument_mode_id'] = index_row.get(
-                'INSTRUMENT_MODE_ID', ''
-            )
+            vars_dict['cassini:instrument_data_rate'] = index_row.get('INSTRUMENT_DATA_RATE', '')
+            vars_dict['cassini:instrument_mode_id'] = index_row.get('INSTRUMENT_MODE_ID', '')
             vars_dict['cassini:inst_cmprs_type'] = index_row.get('INST_CMPRS_TYPE', '')
             vars_dict['cassini:inst_cmprs_param_malgo'] = '999'
             vars_dict['cassini:inst_cmprs_param_tb'] = '999'
@@ -620,21 +584,15 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
             vars_dict['cassini:inst_cmprs_rate_actual_bits'] = index_row.get(
                 'INST_CMPRS_RATE_ACTUAL_BITS', '-1.'
             )
-            vars_dict['cassini:inst_cmprs_ratio'] = index_row.get(
-                'INST_CMPRS_RATIO', ''
-            )
+            vars_dict['cassini:inst_cmprs_ratio'] = index_row.get('INST_CMPRS_RATIO', '')
             vars_dict['cassini:light_flood_state_flag'] = index_row.get(
                 'LIGHT_FLOOD_STATE_FLAG', ''
             )
             vars_dict['cassini:method_description'] = index_row.get('METHOD_DESC', '')
             vars_dict['cassini:missing_lines'] = index_row.get('MISSING_LINES', '0')
-            vars_dict['cassini:missing_packet_flag'] = index_row.get(
-                'MISSING_PACKET_FLAG', 'NO'
-            )
+            vars_dict['cassini:missing_packet_flag'] = index_row.get('MISSING_PACKET_FLAG', 'NO')
             vars_dict['cassini:observation_id'] = index_row.get('OBSERVATION_ID', '')
-            vars_dict['cassini:optics_temperature_front'] = index_row.get(
-                'OPTICS_TEMPERATURE', ''
-            )
+            vars_dict['cassini:optics_temperature_front'] = index_row.get('OPTICS_TEMPERATURE', '')
             vars_dict['cassini:optics_temperature_back'] = index_row.get(
                 'OPTICS_TEMPERATURE_BACK', '-999.'
             )
@@ -654,38 +612,24 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
             vars_dict['cassini:pre-pds_version_number'] = index_row.get(
                 'PRE_PDS_VERSION_NUMBER', '2'
             )
-            vars_dict['cassini:prepare_cycle_index'] = index_row.get(
-                'PREPARE_CYCLE_INDEX', ''
-            )
-            vars_dict['cassini:readout_cycle_index'] = index_row.get(
-                'READOUT_CYCLE_INDEX', ''
-            )
-            vars_dict['cassini:received_packets'] = index_row.get(
-                'RECEIVED_PACKETS', '-1'
-            )
+            vars_dict['cassini:prepare_cycle_index'] = index_row.get('PREPARE_CYCLE_INDEX', '')
+            vars_dict['cassini:readout_cycle_index'] = index_row.get('READOUT_CYCLE_INDEX', '')
+            vars_dict['cassini:received_packets'] = index_row.get('RECEIVED_PACKETS', '-1')
             vars_dict['cassini:sensor_head_electronics_temperature'] = index_row.get(
                 'SENSOR_HEAD_ELEC_TEMPERATURE', ''
             )
             vars_dict['cassini:sequence_id'] = index_row.get('SEQUENCE_ID', '')
-            vars_dict['cassini:sequence_number'] = index_row.get(
-                'SEQUENCE_NUMBER', '-1'
-            )
+            vars_dict['cassini:sequence_number'] = index_row.get('SEQUENCE_NUMBER', '-1')
             vars_dict['cassini:sequence_title'] = index_row.get('SEQUENCE_TITLE', '')
             vars_dict['cassini:shutter_mode_id'] = index_row.get('SHUTTER_MODE_ID', '')
-            vars_dict['cassini:shutter_state_id'] = index_row.get(
-                'SHUTTER_STATE_ID', ''
-            )
+            vars_dict['cassini:shutter_state_id'] = index_row.get('SHUTTER_STATE_ID', '')
             vars_dict['cassini:start_time_doy'] = index_row.get('START_TIME_DOY', '')
             vars_dict['cassini:stop_time_doy'] = index_row.get('STOP_TIME_DOY', '')
-            vars_dict['cassini:telemetry_format_id'] = index_row.get(
-                'TELEMETRY_FORMAT_ID', ''
-            )
+            vars_dict['cassini:telemetry_format_id'] = index_row.get('TELEMETRY_FORMAT_ID', '')
             vars_dict['cassini:valid_maximum_full_well'] = index_row.get(
                 'VALID_MAXIMUM_FULL_WELL', '-1'
             )
-            vars_dict['cassini:valid_maximum_DN_sat'] = index_row.get(
-                'VALID_MAXIMUM_DN_SAT', '-1'
-            )
+            vars_dict['cassini:valid_maximum_DN_sat'] = index_row.get('VALID_MAXIMUM_DN_SAT', '-1')
 
         return vars_dict
 
@@ -695,9 +639,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         Returns:
             Dataset name for config (e.g., "coiss_cruise" or "coiss_saturn").
         """
-        raise NotImplementedError(
-            'PDS4 bundle generation not supported for this dataset'
-        )
+        raise NotImplementedError('PDS4 bundle generation not supported for this dataset')
 
     def _default_pds4_template_dir(self) -> str:
         """Returns the default template directory name.
@@ -705,9 +647,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         Returns:
             Default template directory name.
         """
-        raise NotImplementedError(
-            'PDS4 bundle generation not supported for this dataset'
-        )
+        raise NotImplementedError('PDS4 bundle generation not supported for this dataset')
 
     def _default_pds4_bundle_name(self) -> str:
         """Returns the default bundle name.
@@ -715,9 +655,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         Returns:
             Default bundle name.
         """
-        raise NotImplementedError(
-            'PDS4 bundle generation not supported for this dataset'
-        )
+        raise NotImplementedError('PDS4 bundle generation not supported for this dataset')
 
 
 class DataSetPDS3CassiniISSCruise(DataSetPDS3CassiniISS):
@@ -725,9 +663,7 @@ class DataSetPDS3CassiniISSCruise(DataSetPDS3CassiniISS):
 
     _MIN_1xxx_VOL = 1001
     _MAX_1xxx_VOL = 1009
-    _ALL_VOLUME_NAMES = tuple(
-        f'COISS_{x:04d}' for x in range(_MIN_1xxx_VOL, _MAX_1xxx_VOL + 1)
-    )
+    _ALL_VOLUME_NAMES = tuple(f'COISS_{x:04d}' for x in range(_MIN_1xxx_VOL, _MAX_1xxx_VOL + 1))
 
     def _dataset_name_for_pds4_config(self) -> str:
         return 'coiss_cruise'
@@ -744,9 +680,7 @@ class DataSetPDS3CassiniISSSaturn(DataSetPDS3CassiniISS):
 
     _MIN_2xxx_VOL = 2001
     _MAX_2xxx_VOL = 2116
-    _ALL_VOLUME_NAMES = tuple(
-        f'COISS_{x:04d}' for x in range(_MIN_2xxx_VOL, _MAX_2xxx_VOL + 1)
-    )
+    _ALL_VOLUME_NAMES = tuple(f'COISS_{x:04d}' for x in range(_MIN_2xxx_VOL, _MAX_2xxx_VOL + 1))
 
     def _dataset_name_for_pds4_config(self) -> str:
         return 'coiss_saturn'

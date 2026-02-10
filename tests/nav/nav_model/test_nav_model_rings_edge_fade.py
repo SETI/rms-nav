@@ -5,6 +5,7 @@ and conflict detection.
 """
 
 import numpy as np
+import numpy.typing as npt
 import pytest
 
 from nav.nav_model.nav_model_rings import NavModelRings
@@ -18,10 +19,10 @@ class MockObservation:
         self.midtime = 0.0
         self.extdata_shape_vu = (100, 100)
 
-    def make_extfov_zeros(self) -> np.ndarray[tuple[int, int], np.dtype[np.float64]]:
+    def make_extfov_zeros(self) -> npt.NDArray[np.float64]:
         return np.zeros((100, 100), dtype=np.float64)
 
-    def make_extfov_false(self) -> np.ndarray[tuple[int, int], np.dtype[np.bool_]]:
+    def make_extfov_false(self) -> npt.NDArray[np.bool_]:
         return np.zeros((100, 100), dtype=bool)
 
 

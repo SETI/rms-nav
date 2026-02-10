@@ -1,14 +1,14 @@
-from typing import Any, Optional, cast
-
-from filecache import FCPath
-import numpy as np
 from pathlib import Path
+from typing import Any, cast
 
-from .obs_snapshot_inst import ObsSnapshotInst
+import numpy as np
+from filecache import FCPath
 
 from nav.config import DEFAULT_CONFIG, DEFAULT_LOGGER, Config
 from nav.support.time import et_to_utc
 from nav.support.types import PathLike
+
+from .obs_snapshot_inst import ObsSnapshotInst
 
 
 class ObsCassiniISS(ObsSnapshotInst):
@@ -22,7 +22,7 @@ class ObsCassiniISS(ObsSnapshotInst):
     def from_file(
         path: PathLike,
         *,
-        config: Optional[Config] = None,
+        config: Config | None = None,
         extfov_margin_vu: tuple[int, int] | None = None,
         **kwargs: Any,
     ) -> 'ObsCassiniISS':

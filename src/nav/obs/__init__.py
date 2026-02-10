@@ -1,13 +1,11 @@
-from .obs import Obs  # noqa: F401
-from .obs_snapshot import ObsSnapshot  # noqa: F401
-from .obs_snapshot_inst import ObsSnapshotInst  # noqa: F401
-
+from .obs import Obs
 from .obs_inst_cassini_iss import ObsCassiniISS
 from .obs_inst_galileo_ssi import ObsGalileoSSI
 from .obs_inst_newhorizons_lorri import ObsNewHorizonsLORRI
 from .obs_inst_sim import ObsSim
 from .obs_inst_voyager_iss import ObsVoyagerISS
-
+from .obs_snapshot import ObsSnapshot
+from .obs_snapshot_inst import ObsSnapshotInst
 
 _INST_NAME_TO_OBS_CLASS_MAPPING: dict[str, type[ObsSnapshotInst]] = {
     'coiss': ObsCassiniISS,
@@ -37,13 +35,13 @@ def inst_name_to_obs_class(name: str) -> type[ObsSnapshotInst]:
 
 __all__ = [
     'Obs',
-    'ObsSnapshot',
-    'ObsSnapshotInst',
     'ObsCassiniISS',
     'ObsGalileoSSI',
     'ObsNewHorizonsLORRI',
     'ObsSim',
+    'ObsSnapshot',
+    'ObsSnapshotInst',
     'ObsVoyagerISS',
-    'inst_names',
     'inst_name_to_obs_class',
+    'inst_names',
 ]

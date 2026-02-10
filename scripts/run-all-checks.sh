@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# REPONAME - Run All Checks Script
+# rms-nav - Run All Checks Script
 #
 # This script runs linting, type checking, tests, and documentation build
-# for the REPONAME project.
+# for the rms-nav project.
 #
 # Usage:
 #   ./scripts/run-all-checks.sh [options]
@@ -288,7 +288,7 @@ run_markdown_checks() {
     source "$VENV/bin/activate"
 
     print_info "Running PyMarkdown scan (docs/, .cursor/, root *.md)..."
-    if python -m pymarkdown scan docs/ .cursor/ README.md CONTRIBUTING.md 2>/dev/null; then
+    if python -m pymarkdown scan docs/ .cursor/ README.md CONTRIBUTING.md; then
         print_success "PyMarkdown scan passed"
     else
         print_error "PyMarkdown scan failed"

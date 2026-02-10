@@ -20,7 +20,7 @@ Use this when you need concrete examples for a dimension or wording guidance.
 - **Finding**: Config is re-read from disk inside a loop in `process_batch`. **Evidence**: `src/batch.py` `process_batch` calls `load_config()` per item. **Suggestion**: Load config once outside the loop and pass it in or use a module-level cache.
 
 **Maintainability**
-- **Finding**: Feature flags and environment checks are scattered across 12 files. **Evidence**: Grep for `os.getenv("FEATURE_`)`. **Suggestion**: Centralize in a `config` or `features` module and inject into call sites.
+- **Finding**: Feature flags and environment checks are scattered across 12 files. **Evidence**: Grep for `os.getenv("FEATURE_")`. **Suggestion**: Centralize in a `config` or `features` module and inject into call sites.
 
 **Security**
 - **Finding**: Subprocess is invoked with `shell=True` and user-controlled input. **Evidence**: `src/runner.py` line 67. **Suggestion**: Use list form of arguments and avoid `shell=True`; validate/sanitize input.

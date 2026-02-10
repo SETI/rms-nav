@@ -1,8 +1,8 @@
 import json
 from typing import Any, cast
 
-from filecache import FCPath
 import oops
+from filecache import FCPath
 
 from nav.config import DEFAULT_CONFIG
 from nav.config.logger import DEFAULT_LOGGER
@@ -44,11 +44,9 @@ def generate_backplanes_image_files(
     image_file = image_files.image_files[0]
     image_path = image_file.image_file_path.absolute()
     metadata_file = nav_results_root / (image_file.results_path_stub + '_metadata.json')
-    fits_file_path = backplane_results_root / (
-        image_file.results_path_stub + '_backplanes.fits'
-    )
+    fits_file_path = backplane_results_root / (image_file.results_path_stub + '_backplanes.fits')
 
-    with logger.open(f'Processing image: {str(image_path)}'):
+    with logger.open(f'Processing image: {image_path!s}'):
         # This will raise an exception if the metadata file is not found or not valid JSON
         metadata_text = metadata_file.read_text()
         nav_metadata = cast(dict[str, Any], json.loads(metadata_text))
@@ -78,9 +76,7 @@ def generate_backplanes_image_files(
             dv, du = 0, 0
         else:
             dv, du = nav_metadata['offset']
-        snapshot.fov = oops.fov.OffsetFOV(
-            snapshot.fov, uv_offset=(float(du), float(dv))
-        )
+        snapshot.fov = oops.fov.OffsetFOV(snapshot.fov, uv_offset=(float(du), float(dv)))
 
         # Compute bodies backplanes
         bodies_result = create_body_backplanes(snapshot, config, logger=logger)

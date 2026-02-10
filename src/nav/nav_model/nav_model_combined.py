@@ -1,14 +1,14 @@
-from typing import Optional, cast
+from typing import cast
 
 import numpy as np
 
 from nav.config import Config
 from nav.obs import ObsSnapshot
+from nav.support.image import gaussian_blur_cov
+from nav.support.types import NDArrayBoolType, NDArrayFloatType, NDArrayUint32Type
 
 from .nav_model import NavModel
 from .nav_model_result import NavModelResult
-from nav.support.image import gaussian_blur_cov
-from nav.support.types import NDArrayBoolType, NDArrayFloatType, NDArrayUint32Type
 
 # Epsilon to avoid division by zero when scaling model images to peak 1
 _COMBINE_SCALE_EPS = 1e-12
@@ -23,7 +23,7 @@ class NavModelCombined(NavModel):
         obs: ObsSnapshot,
         models: list[NavModel],
         *,
-        config: Optional[Config] = None,
+        config: Config | None = None,
     ) -> None:
         """A combined navigation model created by combining multiple models.
 
@@ -66,13 +66,10 @@ class NavModelCombined(NavModel):
             if shape is None:
                 shape = result.model_img.shape
             elif shape != result.model_img.shape:
-                raise ValueError(
-                    f'Result image shapes differ: {shape} != {result.model_img.shape}'
-                )
+                raise ValueError(f'Result image shapes differ: {shape} != {result.model_img.shape}')
             if result.model_mask.shape != shape:
                 raise ValueError(
-                    f'Result image and mask shapes differ: {shape} != '
-                    f'{result.model_mask.shape}'
+                    f'Result image and mask shapes differ: {shape} != {result.model_mask.shape}'
                 )
 
             # Scale each result so masked pixels have max ~1 for consistent combined range
@@ -85,9 +82,7 @@ class NavModelCombined(NavModel):
 
             if result.blur_amount is not None:
                 model_img = np.asarray(
-                    gaussian_blur_cov(
-                        model_img, cast(NDArrayFloatType, result.blur_amount)
-                    ),
+                    gaussian_blur_cov(model_img, cast(NDArrayFloatType, result.blur_amount)),
                     dtype=np.float64,
                 )
             model_img *= result.confidence

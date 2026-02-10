@@ -1,18 +1,19 @@
 # mypy: ignore-errors
 import pprint
-from typing import Callable, Optional, cast
+import tkinter as tk
+from collections.abc import Callable
+from typing import cast
 
-from imgdisp import ImageDisp
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.linalg as linalg
-from pdslogger import PdsLogger
 import psfmodel.gaussian as gauss_psf
 import scipy.fftpack as fftpack
-import tkinter as tk
+from imgdisp import ImageDisp
+from pdslogger import PdsLogger
 
 from nav.config import DEFAULT_CONFIG
-from nav.support.image import unpad_array, pad_array_to_power_of_2
+from nav.support.image import pad_array_to_power_of_2, unpad_array
 from nav.support.types import NDArrayFloatType
 
 
@@ -64,9 +65,7 @@ def correlate2d(
 
     if DEBUG_CORRELATE_IMGDISP:
         print('correlated2d: image, model')
-        _ = ImageDisp(
-            [image, model], canvas_size=(512, 512), enlarge_limit=10, auto_update=True
-        )
+        _ = ImageDisp([image, model], canvas_size=(512, 512), enlarge_limit=10, auto_update=True)
         tk.mainloop()
 
     # Padding to a power of 2 makes FFT _much_ faster
@@ -324,10 +323,7 @@ def corr_log_xy_err(logger, psf_details):
     """
 
     if psf_details['xy_rot_err_1'] is None:
-        logger.info(
-            '  dX %.3f dY %.3f (uncertainty failed)'
-            % (psf_details['x'], psf_details['y'])
-        )
+        logger.info('  dX %.3f dY %.3f (uncertainty failed)' % (psf_details['x'], psf_details['y']))
     else:
         logger.info(
             '  dX %.3f dY %.3f (%.3fx%.3f @ %.3f)',
@@ -459,12 +455,8 @@ def _find_correlated_offset(
     # make a "hole" in the center to represent the minimum search size.
     # Note: SLICE is a Python built-in!
     slyce = corr[
-        corr.shape[0] // 2 - search_size_max_v : corr.shape[0] // 2
-        + search_size_max_v
-        + 1,
-        corr.shape[1] // 2 - search_size_max_u : corr.shape[1] // 2
-        + search_size_max_u
-        + 1,
+        corr.shape[0] // 2 - search_size_max_v : corr.shape[0] // 2 + search_size_max_v + 1,
+        corr.shape[1] // 2 - search_size_max_u : corr.shape[1] // 2 + search_size_max_u + 1,
     ]
     slyce = slyce.copy()
 
@@ -472,16 +464,12 @@ def _find_correlated_offset(
 
     if search_size_min_u != 0 and search_size_min_v != 0:
         slyce[
-            slyce.shape[0] // 2 - search_size_min_v + 1 : slyce.shape[0] // 2
-            + search_size_min_v,
-            slyce.shape[1] // 2 - search_size_min_u + 1 : slyce.shape[1] // 2
-            + search_size_min_u,
+            slyce.shape[0] // 2 - search_size_min_v + 1 : slyce.shape[0] // 2 + search_size_min_v,
+            slyce.shape[1] // 2 - search_size_min_u + 1 : slyce.shape[1] // 2 + search_size_min_u,
         ] = global_min
 
     # Iteratively search for the next peak.
-    ret_list: list[
-        tuple[tuple[int, int], float, tuple[NDArrayFloatType, int, int]] | None
-    ] = []
+    ret_list: list[tuple[tuple[int, int], float, tuple[NDArrayFloatType, int, int]] | None] = []
     all_offset_u = []
     all_offset_v = []
 
@@ -494,12 +482,8 @@ def _find_correlated_offset(
             plt.jet()
             plt.imshow(slyce, interpolation='none')
             # plt.contour(slyce)
-            plt.plot(
-                (search_size_max_u, search_size_max_u), (0, 2 * search_size_max_v), 'k'
-            )
-            plt.plot(
-                (0, 2 * search_size_max_u), (search_size_max_v, search_size_max_v), 'k'
-            )
+            plt.plot((search_size_max_u, search_size_max_u), (0, 2 * search_size_max_v), 'k')
+            plt.plot((0, 2 * search_size_max_u), (search_size_max_v, search_size_max_v), 'k')
             if len(peak[0]) == 1:
                 print('Including sole peak')
                 plt.plot(peak[1], peak[0], 'wo')
@@ -508,23 +492,15 @@ def _find_correlated_offset(
             x_n_ticks = 5
             x_tick_step = max(int(search_size_max_u / x_n_ticks), 1)
             x_ticks = list(
-                range(
-                    -x_tick_step * x_n_ticks, x_tick_step * x_n_ticks + 1, x_tick_step
-                )
+                range(-x_tick_step * x_n_ticks, x_tick_step * x_n_ticks + 1, x_tick_step)
             )
-            plt.xticks(
-                [x + search_size_max_u for x in x_ticks], [str(x) for x in x_ticks]
-            )
+            plt.xticks([x + search_size_max_u for x in x_ticks], [str(x) for x in x_ticks])
             y_n_ticks = 5
             y_tick_step = max(int(search_size_max_v / y_n_ticks), 1)
             y_ticks = list(
-                range(
-                    -y_tick_step * y_n_ticks, y_tick_step * y_n_ticks + 1, y_tick_step
-                )
+                range(-y_tick_step * y_n_ticks, y_tick_step * y_n_ticks + 1, y_tick_step)
             )
-            plt.yticks(
-                [x + search_size_max_v for x in y_ticks], [str(x) for x in y_ticks]
-            )
+            plt.yticks([x + search_size_max_v for x in y_ticks], [str(x) for x in y_ticks])
             plt.xlabel('X')
             plt.ylabel('Y')
             plt.tight_layout()
@@ -554,9 +530,7 @@ def _find_correlated_offset(
         offset_u = peak_u - search_size_max_u
         peak_val = slyce[peak_v, peak_u]
 
-        logger.debug(
-            f'Peak #{peak_num} - Trial offset {offset_v},{offset_u} CORR {peak_val:.7f}'
-        )
+        logger.debug(f'Peak #{peak_num} - Trial offset {offset_v},{offset_u} CORR {peak_val:.7f}')
 
         if peak_val <= 0:
             logger.debug(f'Peak #{peak_num} - Correlation value is negative - aborting')
@@ -568,18 +542,10 @@ def _find_correlated_offset(
         if peak_num < max_offsets:
             # Eliminating this peak from future consideration if we're going
             # to be looping again.
-            min_u = np.clip(
-                offset_u - peak_margin + slyce.shape[1] // 2, 0, slyce.shape[1] - 1
-            )
-            max_u = np.clip(
-                offset_u + peak_margin + slyce.shape[1] // 2, 0, slyce.shape[1] - 1
-            )
-            min_v = np.clip(
-                offset_v - peak_margin + slyce.shape[0] // 2, 0, slyce.shape[0] - 1
-            )
-            max_v = np.clip(
-                offset_v + peak_margin + slyce.shape[0] // 2, 0, slyce.shape[0] - 1
-            )
+            min_u = np.clip(offset_u - peak_margin + slyce.shape[1] // 2, 0, slyce.shape[1] - 1)
+            max_u = np.clip(offset_u + peak_margin + slyce.shape[1] // 2, 0, slyce.shape[1] - 1)
+            min_v = np.clip(offset_v - peak_margin + slyce.shape[0] // 2, 0, slyce.shape[0] - 1)
+            max_v = np.clip(offset_v + peak_margin + slyce.shape[0] // 2, 0, slyce.shape[0] - 1)
             slyce[min_v : max_v + 1, min_u : max_u + 1] = np.min(slyce)
 
         if abs(offset_v) == search_size_max_v or abs(offset_u) == search_size_max_u:
@@ -604,9 +570,7 @@ def _find_correlated_offset(
                 )
                 and offset_u - peak_margin <= all_offset_u[i] <= offset_u + peak_margin
             ):
-                logger.debug(
-                    f'Peak #{peak_num} - Offset at edge of previous blackout area - BAD'
-                )
+                logger.debug(f'Peak #{peak_num} - Offset at edge of previous blackout area - BAD')
                 ret_list.append(None)
                 break
         else:
@@ -634,13 +598,13 @@ def find_correlation_and_offset(
     model: NDArrayFloatType,
     *,
     search_size_min: int | tuple[int, int] = 0,
-    search_size_max: Optional[int | tuple[int, int]] = None,
+    search_size_max: int | tuple[int, int] | None = None,
     max_offsets: int = 1,
     peak_margin: int = 3,
     extfov_margin_vu: tuple[int, int] = (0, 0),
-    image_filter: Optional[Callable] = None,
-    model_filter: Optional[Callable] = None,
-    logger: Optional[PdsLogger] = None,
+    image_filter: Callable | None = None,
+    model_filter: Callable | None = None,
+    logger: PdsLogger | None = None,
 ) -> list[tuple[tuple[int, int], float, tuple[NDArrayFloatType, int, int]]]:
     """Finds the offset that best aligns an image and a model through correlation analysis.
 
@@ -718,9 +682,7 @@ def find_correlation_and_offset(
     #         assert search_size_max_u == extend_fov_u
 
     if image.shape != model.shape:
-        raise ValueError(
-            f'Image ({image.shape}) and model ({model.shape}) must be the same shape'
-        )
+        raise ValueError(f'Image ({image.shape}) and model ({model.shape}) must be the same shape')
 
     # Get the original image and maybe filter it.
     sub_image = image[
@@ -781,16 +743,10 @@ def find_correlation_and_offset(
                         abs(new_offset_v) < search_size_max_v
                         and abs(new_offset_u) < search_size_max_u
                     ):
-                        logger.debug(
-                            f'Adding possible offset {new_offset_v},{new_offset_u}'
-                        )
-                        new_ret_list.append(
-                            ((new_offset_v, new_offset_u), peak, details)
-                        )
+                        logger.debug(f'Adding possible offset {new_offset_v},{new_offset_u}')
+                        new_ret_list.append(((new_offset_v, new_offset_u), peak, details))
                     else:
-                        logger.debug(
-                            f'Offset beyond search limits {new_offset_v},{new_offset_u}'
-                        )
+                        logger.debug(f'Offset beyond search limits {new_offset_v},{new_offset_u}')
 
     # Sort the offsets in descending order by correlation peak value.
     # Truncate the (possibly longer) list to the maximum number of requested
@@ -802,8 +758,6 @@ def find_correlation_and_offset(
         logger.debug('No offsets to return')
     else:
         for i, ((offset_v, offset_u), peak, details) in enumerate(new_ret_list):
-            logger.debug(
-                f'Returning Peak {i + 1} offset {offset_v},{offset_u} CORR {peak:.7f}'
-            )
+            logger.debug(f'Returning Peak {i + 1} offset {offset_v},{offset_u} CORR {peak:.7f}')
 
     return new_ret_list

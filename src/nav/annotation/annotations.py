@@ -1,13 +1,14 @@
-from typing import Optional, Union, cast
+from typing import Union, cast
 
 import numpy as np
 from PIL import Image, ImageDraw
 
 from nav.config import Config
 from nav.obs import ObsSnapshot
-from .annotation import Annotation
 from nav.support.nav_base import NavBase
 from nav.support.types import NDArrayBoolType, NDArrayIntType
+
+from .annotation import Annotation
 
 
 class Annotations(NavBase):
@@ -17,7 +18,7 @@ class Annotations(NavBase):
     overlay image and handle text placement.
     """
 
-    def __init__(self, *, config: Optional[Config] = None) -> None:
+    def __init__(self, *, config: Config | None = None) -> None:
         """Initializes an empty annotations collection."""
         super().__init__(config=config)
         self._annotations: list[Annotation] = []
@@ -180,14 +181,11 @@ class Annotations(NavBase):
                     )
                 if not found_place:
                     self.logger.warning(
-                        'Could not find final place for text annotation '
-                        f'{text_info.text!r}'
+                        f'Could not find final place for text annotation {text_info.text!r}'
                     )
 
         # This ensures text_layer is writeable
-        text_layer = (
-            np.array(text_im.getdata()).astype(np.uint8).reshape(text_layer.shape)
-        )
+        text_layer = np.array(text_im.getdata()).astype(np.uint8).reshape(text_layer.shape)
         text_layer[graphic_layer != 0] = graphic_layer[graphic_layer != 0]
 
         res[text_layer != 0] = text_layer[text_layer != 0]

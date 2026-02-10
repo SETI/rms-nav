@@ -4,6 +4,7 @@ Tests date-based feature filtering and validation of feature data structures.
 """
 
 import numpy as np
+from numpy.typing import NDArray
 import pytest
 
 from nav.nav_model.nav_model_rings import NavModelRings
@@ -22,10 +23,10 @@ class MockObservation:
             self.midtime = midtime
         self.extdata_shape_vu = (100, 100)
 
-    def make_extfov_zeros(self) -> np.ndarray[tuple[int, int], np.dtype[np.float64]]:
+    def make_extfov_zeros(self) -> NDArray[np.float64]:
         return np.zeros((100, 100), dtype=np.float64)
 
-    def make_extfov_false(self) -> np.ndarray[tuple[int, int], np.dtype[np.bool_]]:
+    def make_extfov_false(self) -> NDArray[np.bool_]:
         return np.zeros((100, 100), dtype=bool)
 
 
