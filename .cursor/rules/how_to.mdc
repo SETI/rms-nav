@@ -1,6 +1,6 @@
 ---
-alwaysApply: true
-description: Standards for writing user-facing "How To" guides for Python libraries and CLI tools.
+description: Guidelines for writing user-facing how-to documentation with steps, prerequisites, and troubleshooting.
+alwaysApply: false
 ---
 
 # How-To Documentation

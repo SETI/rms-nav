@@ -1232,10 +1232,7 @@ class NavBackplaneViewer(QDialog):
             if np.any(valid):
                 mode_id = (
                     'Absolute'
-                    if (
-                        getattr(self, '_body_id_mode_abs', None)
-                        and self._body_id_mode_abs.isChecked()
-                    )
+                    if self._body_id_mode_abs.isChecked()
                     else 'Relative'
                 )
                 if mode_id == 'Absolute':

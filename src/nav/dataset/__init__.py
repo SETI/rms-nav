@@ -93,5 +93,6 @@ __all__ = [
     'DataSetPDS3VoyagerISS',
     'DataSetSim',
     'dataset_name_to_class',
+    'dataset_name_to_inst_name',
     'dataset_names',
 ]

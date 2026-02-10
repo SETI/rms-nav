@@ -21,6 +21,7 @@ class ObsGalileoSSI(ObsSnapshotInst):
     @staticmethod
     def from_file(
         path: PathLike,
+        *,
         config: Config | None = None,
         extfov_margin_vu: tuple[int, int] | None = None,
         **_kwargs: Any,

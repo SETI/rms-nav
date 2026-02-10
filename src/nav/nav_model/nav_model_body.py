@@ -47,7 +47,7 @@ class NavModelBody(NavModelBodyBase):
         self._body_name = body_name.upper()
 
         if inventory is None:
-            inventory = self.obs.inventory([self._body_name], return_type='full')[body_name]
+            inventory = self.obs.inventory([self._body_name], return_type='full')[self._body_name]
         self._inventory = inventory
 
     def create_model(

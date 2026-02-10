@@ -100,7 +100,7 @@ class ObsSim(ObsSnapshotInst):
         snapshot.sim_rings = meta.get('rings', [])
         snapshot.sim_inventory = meta.get('inventory', {})
         snapshot.sim_body_order_near_to_far = meta.get('order_near_to_far', [])
-        snapshot.sim_body_index_map = meta.get('body_index_map', None)
+        snapshot.sim_body_index_map = meta.get('body_index_map')
         snapshot.sim_body_mask_map = meta.get('body_mask_map', {})
 
         # Determine extfov margins
@@ -112,7 +112,7 @@ class ObsSim(ObsSnapshotInst):
             else:
                 extfov_margin_vu = extfov_margin_vu_entry
 
-        snapshot._closest_planet = sim_params.get('closest_planet', None)
+        snapshot._closest_planet = sim_params.get('closest_planet')
         new_obs = ObsSim(snapshot, config=config, extfov_margin_vu=extfov_margin_vu, simulated=True)
         new_obs._inst_config = inst_config
 

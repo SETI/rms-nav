@@ -119,7 +119,7 @@ def process_task(
 
 async def async_main() -> None:
     argparser = argparse.ArgumentParser(
-        description='Navigation & Backplane Main Interface for Offsets Cloud Tasks version)'
+        description='Navigation & Backplane Main Interface for Offsets (Cloud Tasks version)'
     )
 
     # Arguments about the environment

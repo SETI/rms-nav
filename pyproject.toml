@@ -72,7 +72,62 @@ Source = "https://github.com/SETI/rms-nav"
 Issues = "https://github.com/SETI/rms-nav/issues"
 
 [tool.mypy]
+strict = true
+disallow_subclassing_any = false
+exclude = ["src/experiments"]
 mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = "nav._version"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "astropy.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "cspyce.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "imgdisp.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "julian.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "oops.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "pdslogger.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "pdstable.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "pdstemplate.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "polymath.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "psfmodel.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "scipy.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "starcat.*"
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 pythonpath = [

@@ -1,6 +1,6 @@
 ---
-alwaysApply: true
-description: Git commit, branching, and merge standards for a clean, auditable history.
+description: Conventional commits, branching, and PR workflow for source control and code review.
+alwaysApply: false
 ---
 
 # Git Workflow
@@ -20,7 +20,7 @@ Use the **Conventional Commits** format:
 ### Allowed types
 
 | Type | When to use |
-|------|-------------|
+|---|----|
 | `feat` | New user-facing feature or public API addition. |
 | `fix` | Bug fix. |
 | `docs` | Documentation-only change. |

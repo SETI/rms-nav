@@ -11,7 +11,7 @@ on:
     - cron: "21 11 * * 0"
 
 jobs:
-  flake8:
+  lint:
     name: Lint rms-nav
     runs-on: ubuntu-latest
     steps:

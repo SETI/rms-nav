@@ -9,7 +9,7 @@
 #   ./scripts/run-all-checks.sh [options]
 #
 # Options:
-#   -p, --parallel    Run code checks and docs build in parallel (faster, default)
+#   -p, --parallel    Run all enabled scopes (code, docs, markdown) in parallel (faster, default)
 #   -s, --sequential Run all checks sequentially (easier to debug)
 #   -c, --code       Run only code checks (ruff, mypy, pytest)
 #   -d, --docs       Run only documentation build (Sphinx + PyMarkdown lint)
@@ -65,6 +65,7 @@ EXIT_CODE=0
 TEMP_DIR=$(mktemp -d)
 code_pid=""
 docs_pid=""
+markdown_pid=""
 
 # Grace period (seconds) to wait for process to exit after SIGTERM before SIGKILL
 CLEANUP_GRACE_PERIOD=${CLEANUP_GRACE_PERIOD:-5}
@@ -96,6 +97,10 @@ _cleanup() {
     if [ -n "${docs_pid}" ]; then
         _wait_or_kill "$docs_pid"
         docs_pid=""
+    fi
+    if [ -n "${markdown_pid}" ]; then
+        _wait_or_kill "$markdown_pid"
+        markdown_pid=""
     fi
     rm -rf "$TEMP_DIR"
 }
@@ -338,14 +343,12 @@ run_docs_build() {
         sphinx_failed=true
     fi
 
-    if [ "$sphinx_failed" = false ]; then
-        print_info "Running PyMarkdown scan (docs/, .cursor/, root *.md)..."
-        if python -m pymarkdown scan docs/ .cursor/ README.md CONTRIBUTING.md 2>/dev/null; then
-            print_success "PyMarkdown scan passed"
-        else
-            print_error "PyMarkdown scan failed"
-            pymarkdown_failed=true
-        fi
+    print_info "Running PyMarkdown scan (docs/, .cursor/, root *.md)..."
+    if python -m pymarkdown scan docs/ .cursor/ README.md CONTRIBUTING.md; then
+        print_success "PyMarkdown scan passed"
+    else
+        print_error "PyMarkdown scan failed"
+        pymarkdown_failed=true
     fi
 
     deactivate 2>/dev/null || true
@@ -365,27 +368,35 @@ run_docs_build() {
 }
 
 # Run checks based on mode
-if [ "$PARALLEL" = true ] && [ "$RUN_CODE" = true ] && [ "$RUN_DOCS" = true ]; then
-    # Run code and docs in parallel
+if [ "$PARALLEL" = true ] && { [ "$RUN_CODE" = true ] || [ "$RUN_DOCS" = true ] || [ "$RUN_MARKDOWN" = true ]; }; then
+    # Run all enabled scopes in parallel with distinct output/status files
     code_output="$TEMP_DIR/code.log"
     code_status="$TEMP_DIR/code.status"
     docs_output="$TEMP_DIR/docs.log"
     docs_status="$TEMP_DIR/docs.status"
+    markdown_output="$TEMP_DIR/markdown.log"
+    markdown_status="$TEMP_DIR/markdown.status"
 
-    print_info "Running code checks and docs build in parallel, please wait..."
-    run_code_checks "$code_output" "$code_status" &
-    code_pid=$!
-    run_docs_build "$docs_output" "$docs_status" &
-    docs_pid=$!
+    print_info "Running enabled checks in parallel, please wait..."
 
-    if ! wait "$code_pid"; then
-        EXIT_CODE=1
+    if [ "$RUN_CODE" = true ]; then
+        run_code_checks "$code_output" "$code_status" &
+        code_pid=$!
     fi
-    if ! wait "$docs_pid"; then
-        EXIT_CODE=1
+    if [ "$RUN_DOCS" = true ]; then
+        run_docs_build "$docs_output" "$docs_status" &
+        docs_pid=$!
+    fi
+    if [ "$RUN_MARKDOWN" = true ]; then
+        run_markdown_checks "$markdown_output" "$markdown_status" &
+        markdown_pid=$!
     fi
 
-    for status_file in "$code_status" "$docs_status"; do
+    [ -n "$code_pid" ]    && { wait "$code_pid"    || EXIT_CODE=1; }
+    [ -n "$docs_pid" ]    && { wait "$docs_pid"    || EXIT_CODE=1; }
+    [ -n "$markdown_pid" ] && { wait "$markdown_pid" || EXIT_CODE=1; }
+
+    for status_file in "$code_status" "$docs_status" "$markdown_status"; do
         if [ -f "$status_file" ]; then
             while IFS= read -r line; do
                 [ -n "$line" ] && FAILED_CHECKS+=("$line")
@@ -394,8 +405,9 @@ if [ "$PARALLEL" = true ] && [ "$RUN_CODE" = true ] && [ "$RUN_DOCS" = true ]; t
     done
 
     echo ""
-    [ -f "$code_output" ] && cat "$code_output"
-    [ -f "$docs_output" ] && cat "$docs_output"
+    [ -f "$code_output" ]    && cat "$code_output"
+    [ -f "$docs_output" ]    && cat "$docs_output"
+    [ -f "$markdown_output" ] && cat "$markdown_output"
 else
     # Sequential (or only one scope)
     if [ "$RUN_CODE" = true ]; then

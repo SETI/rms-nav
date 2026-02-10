@@ -1,6 +1,6 @@
 ---
-alwaysApply: true
-description: GitHub Pull Request template and best practices for clear, reviewable submissions.
+description: PR structure, purpose, implementation details, testing evidence, and review checklist.
+alwaysApply: false
 ---
 
 # Pull Request Standards

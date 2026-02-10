@@ -81,8 +81,11 @@ class NavModelCombined(NavModel):
             model_img[mask] = raw[mask] / scale
 
             if result.blur_amount is not None:
+                blur = result.blur_amount
+                if isinstance(blur, (int, float)):
+                    blur = np.array([[blur, 0.0], [0.0, blur]], dtype=np.float64)
                 model_img = np.asarray(
-                    gaussian_blur_cov(model_img, cast(NDArrayFloatType, result.blur_amount)),
+                    gaussian_blur_cov(model_img, blur),
                     dtype=np.float64,
                 )
             model_img *= result.confidence

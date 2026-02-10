@@ -92,7 +92,6 @@ def create_body_backplanes(
     if snapshot.is_simulated:
         # Guaranteed present for simulated bodies
         inv = snapshot.sim_inventory
-        candidate_names = list(inv.keys())
     else:
         closest_planet = snapshot.closest_planet
         if closest_planet is None:
@@ -100,13 +99,13 @@ def create_body_backplanes(
             return result
         body_list = [closest_planet, *config.satellites(closest_planet)]
         inv = snapshot.inventory(body_list, return_type='full')
-        candidate_names = list(inv.keys())
 
+    candidate_names = list(inv.keys())
     # Filter and sort by distance
     bodies_by_range = [
         (name, inv[name])
         for name in candidate_names
-        if name in inv and snapshot.inventory_body_in_fov(inv[name])
+        if snapshot.inventory_body_in_fov(inv[name])
     ]
     bodies_by_range.sort(key=lambda x: x[1]['range'])
 

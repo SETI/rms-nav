@@ -1,6 +1,6 @@
 ---
-alwaysApply: true
-description: Standards for writing clear, actionable bug reports for Python library issues.
+description: Standards for writing clear, reproducible bug reports with severity, evidence, and environment details.
+alwaysApply: false
 ---
 
 # Bug Report Standards
@@ -19,7 +19,7 @@ Every bug report MUST include:
 ## 2. Severity Scale
 
 | Level | Criteria |
-|-------|----------|
+|----|----|
 | **Critical** | Crash, data corruption, silent wrong results, or security vulnerability. |
 | **High** | Major feature broken or blocking for many users. |
 | **Medium** | Non-critical feature broken or produces degraded results. |

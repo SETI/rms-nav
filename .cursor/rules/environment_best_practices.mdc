@@ -1,6 +1,6 @@
 ---
+description: Git, CI/CD (GitHub Actions), virtual environments, and tooling for development and publishing.
 alwaysApply: true
-description: Environment, tooling, and CI/CD standards for reproducible Python library development.
 ---
 
 # Environment Best Practices

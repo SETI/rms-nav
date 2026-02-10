@@ -197,13 +197,13 @@ def pad_array_to_power_of_2(
 
     p2 = [next_power_of_2(x) for x in data.shape]
 
-    if all(s1 == s2 for s1, s2 in zip(p2, data.shape, strict=False)):
+    if all(s1 == s2 for s1, s2 in zip(p2, data.shape, strict=True)):
         return data, (0, 0)
 
     if any((s != 1) and (s & 1) for s in data.shape):
         raise ValueError(f'shape must be power of 2 or even: {data.shape}')
 
-    padding = tuple([(s - dim) // 2 for s, dim in zip(p2, data.shape, strict=False)])
+    padding = tuple([(s - dim) // 2 for s, dim in zip(p2, data.shape, strict=True)])
     return pad_array(data, padding), padding
 
 
@@ -265,7 +265,7 @@ def array_zoom(a: NDArrayType[NPType], factor: list[int] | tuple[int, ...]) -> N
     """
 
     a = np.asarray(a)
-    slices = [slice(0, old, 1 / float(f)) for (f, old) in zip(factor, a.shape, strict=False)]
+    slices = [slice(0, old, 1 / float(f)) for (f, old) in zip(factor, a.shape, strict=True)]
     idxs = (np.mgrid[slices]).astype('i')
     return cast(NDArrayType[NPType], a[tuple(idxs)])
 
