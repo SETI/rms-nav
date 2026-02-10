@@ -3,9 +3,9 @@ import shutil
 from pathlib import Path
 from typing import Any, cast
 
+import pdstemplate
 from filecache import FCPath
 from pdslogger import PdsLogger
-import pdstemplate
 
 from nav.dataset.dataset import DataSet, ImageFiles
 from nav.support.file import json_as_string
@@ -45,7 +45,7 @@ def generate_bundle_data_files(
         results_path_stub + '_backplane_metadata.json'
     )
 
-    with logger.open(f'Generating PDS4 bundle data files for {str(image_path)}'):
+    with logger.open(f'Generating PDS4 bundle data files for {image_path!s}'):
         # Read navigation metadata
         metadata_text = metadata_file.read_text()
         nav_metadata = cast(dict[str, Any], json.loads(metadata_text))
@@ -94,13 +94,9 @@ def generate_bundle_data_files(
         browse_image_path = browse_dir / (pds4_path_stub + '_summary.png')
 
         # Add file path variables to template_vars
-        fits_file_path = backplane_results_root / (
-            results_path_stub + '_backplanes.fits'
-        )
+        fits_file_path = backplane_results_root / (results_path_stub + '_backplanes.fits')
         summary_png_source = nav_results_root / (results_path_stub + '_summary.png')
-        template_vars['BACKPLANE_FILENAME'] = label_file_path.name.replace(
-            '.lblx', '.fits'
-        )
+        template_vars['BACKPLANE_FILENAME'] = label_file_path.name.replace('.lblx', '.fits')
         template_vars['BACKPLANE_PATH'] = str(fits_file_path)
         template_vars['BACKPLANE_SUPPL_FILENAME'] = suppl_file_path.name
         template_vars['BACKPLANE_SUPPL_PATH'] = str(suppl_file_path)

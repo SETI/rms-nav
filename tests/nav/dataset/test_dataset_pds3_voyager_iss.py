@@ -29,9 +29,7 @@ def test_voyager_iss_yield_basic(ds_voyager_iss: dsvgiss.DataSetPDS3VoyagerISS) 
 def test_voyager_iss_yield_vol_start(
     ds_voyager_iss: dsvgiss.DataSetPDS3VoyagerISS,
 ) -> None:
-    ret = list(
-        ds_voyager_iss.yield_image_files_index(max_filenames=1, vol_start='VGISS_8201')
-    )
+    ret = list(ds_voyager_iss.yield_image_files_index(max_filenames=1, vol_start='VGISS_8201'))
     assert len(ret) == 1
     assert (
         ret[0]
@@ -57,16 +55,10 @@ def test_voyager_iss_yield_vol_end(
 def test_voyager_iss_yield_img_start_num(
     ds_voyager_iss: dsvgiss.DataSetPDS3VoyagerISS,
 ) -> None:
-    ret = list(
-        ds_voyager_iss.yield_image_files_index(max_filenames=2, img_start_num=1469548)
-    )
+    ret = list(ds_voyager_iss.yield_image_files_index(max_filenames=2, img_start_num=1469548))
     assert len(ret) == 2
-    assert (
-        ret[0].image_files[0].label_file_url.as_posix().endswith('C1469548_GEOMED.LBL')
-    )
-    assert (
-        ret[1].image_files[0].label_file_url.as_posix().endswith('C1469550_GEOMED.LBL')
-    )
+    assert ret[0].image_files[0].label_file_url.as_posix().endswith('C1469548_GEOMED.LBL')
+    assert ret[1].image_files[0].label_file_url.as_posix().endswith('C1469550_GEOMED.LBL')
 
 
 def test_voyager_iss_yield_img_end_num(
@@ -91,9 +83,7 @@ def test_voyager_iss_yield_img_end_num(
 def test_voyager_iss_yield_volumes(
     ds_voyager_iss: dsvgiss.DataSetPDS3VoyagerISS,
 ) -> None:
-    ret = list(
-        ds_voyager_iss.yield_image_files_index(volumes=['VGISS_5101', 'VGISS_8201'])
-    )
+    ret = list(ds_voyager_iss.yield_image_files_index(volumes=['VGISS_5101', 'VGISS_8201']))
     assert len(ret) == 1403
     ret2 = [x.image_files[0].label_file_url.as_posix() for x in ret]
     ret3 = [x for x in ret2 if 'VGISS_5101' not in x and 'VGISS_8201' not in x]

@@ -98,7 +98,7 @@ def create_body_backplanes(
         if closest_planet is None:
             # No planet, no bodies
             return result
-        body_list = [closest_planet] + config.satellites(closest_planet)
+        body_list = [closest_planet, *config.satellites(closest_planet)]
         inv = snapshot.inventory(body_list, return_type='full')
         candidate_names = list(inv.keys())
 

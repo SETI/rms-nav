@@ -212,7 +212,7 @@ class NavMaster(NavBase):
         logger = self._logger
 
         if obs.closest_planet is not None:
-            body_list = [obs.closest_planet] + config.satellites(obs.closest_planet)
+            body_list = [obs.closest_planet, *config.satellites(obs.closest_planet)]
         else:
             body_list = []
 
@@ -476,7 +476,7 @@ class NavMaster(NavBase):
         )
         img = self._obs.data.astype(np.float64)
 
-        res = np.zeros(img.shape + (3,), dtype=np.uint8)
+        res = np.zeros((*img.shape, 3), dtype=np.uint8)
         bw_res = np.zeros(img.shape, dtype=np.uint8)
 
         # Create a min_index that is the size of the original image, properly offset.

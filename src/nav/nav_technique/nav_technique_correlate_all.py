@@ -234,7 +234,7 @@ class NavTechniqueCorrelateAll(NavTechnique):
                 )
                 star.conflicts = 'REFINEMENT FAILED'
                 continue
-            opt_v, opt_u, opt_metadata = ret
+            opt_v, opt_u, _opt_metadata = ret
             self.logger.debug(
                 f'Star {star.pretty_name:9s} VMAG {star.vmag:6.3f} '
                 f'Searched at {star_u:8.3f}, {star_v:8.3f} '
@@ -298,7 +298,9 @@ class NavTechniqueCorrelateAll(NavTechnique):
         final_u_diff_list = []
         final_v_diff_list = []
         final_uv_star_list = []
-        for idx, (u_diff, v_diff, star) in enumerate(zip(u_diff_list, v_diff_list, uv_star_list)):
+        for idx, (u_diff, v_diff, star) in enumerate(
+            zip(u_diff_list, v_diff_list, uv_star_list, strict=True)
+        ):
             if idx in u_outliers or idx in v_outliers:
                 self.logger.debug(
                     f'Star {star.pretty_name:9s} VMAG {star.vmag:6.3f} '

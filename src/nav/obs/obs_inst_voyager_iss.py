@@ -104,8 +104,12 @@ class ObsVoyagerISS(ObsSnapshotInst):
         return {
             'image_path': self.image_url,
             'image_name': self.abspath.name,
-            'instrument_host_lid': f'urn:nasa:pds:context:instrument_host:spacecraft.vg{spacecraft}',
-            'instrument_lid': f'urn:nasa:pds:context:instrument:vg{spacecraft}.iss{self.detector[0].lower()}',
+            'instrument_host_lid': (
+                f'urn:nasa:pds:context:instrument_host:spacecraft.vg{spacecraft}'
+            ),
+            'instrument_lid': (
+                f'urn:nasa:pds:context:instrument:vg{spacecraft}.iss{self.detector[0].lower()}'
+            ),
             'start_time_utc': et_to_utc(self.time[0]),
             'midtime_utc': et_to_utc(self.midtime),
             'end_time_utc': et_to_utc(self.time[1]),

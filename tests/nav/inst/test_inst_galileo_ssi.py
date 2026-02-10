@@ -1,5 +1,6 @@
-import nav.obs.obs_inst_galileo_ssi as obstgossi
 from tests.config import URL_GALILEO_SSI_IO_01
+
+import nav.obs.obs_inst_galileo_ssi as obstgossi
 
 
 def test_galileo_ssi_basic() -> None:

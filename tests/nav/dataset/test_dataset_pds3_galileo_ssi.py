@@ -29,9 +29,7 @@ def test_galileo_ssi_yield_basic(ds_galileo_ssi: dsgossi.DataSetPDS3GalileoSSI) 
 def test_galileo_ssi_yield_vol_start(
     ds_galileo_ssi: dsgossi.DataSetPDS3GalileoSSI,
 ) -> None:
-    ret = list(
-        ds_galileo_ssi.yield_image_files_index(max_filenames=1, vol_start='GO_0020')
-    )
+    ret = list(ds_galileo_ssi.yield_image_files_index(max_filenames=1, vol_start='GO_0020'))
     assert len(ret) == 1
     assert (
         ret[0]
@@ -57,9 +55,7 @@ def test_galileo_ssi_yield_vol_end(
 def test_galileo_ssi_yield_img_start_num(
     ds_galileo_ssi: dsgossi.DataSetPDS3GalileoSSI,
 ) -> None:
-    ret = list(
-        ds_galileo_ssi.yield_image_files_index(max_filenames=2, img_start_num=59468500)
-    )
+    ret = list(ds_galileo_ssi.yield_image_files_index(max_filenames=2, img_start_num=59468500))
     assert len(ret) == 2
     assert ret[0].image_files[0].label_file_url.as_posix().endswith('C0059468500R.LBL')
     assert ret[1].image_files[0].label_file_url.as_posix().endswith('C0059468545R.LBL')

@@ -49,7 +49,9 @@ URL_GALILEO_SSI_IO_01 = (
 # Filter: Green
 # Exposure: 0.0063 sec
 # https://opus.pds-rings.seti.org/#/view=detail&detail=go-ssi-c0059750900
-URL_GALILEO_SSI_STARS_01 = 'https://pds-rings.seti.org/holdings/volumes/GO_0xxx/GO_0002/RAW_CAL/C0059750900R.IMG'
+URL_GALILEO_SSI_STARS_01 = (
+    'https://pds-rings.seti.org/holdings/volumes/GO_0xxx/GO_0002/RAW_CAL/C0059750900R.IMG'
+)
 
 # Image of a star field
 # Camera: Galileo SSI
@@ -57,7 +59,9 @@ URL_GALILEO_SSI_STARS_01 = 'https://pds-rings.seti.org/holdings/volumes/GO_0xxx/
 # Filter: Clear
 # Exposure: 0.1 sec
 # https://opus.pds-rings.seti.org/#/view=detail&detail=go-ssi-c0059881700
-URL_GALILEO_SSI_STARS_02 = 'https://pds-rings.seti.org/holdings/volumes/GO_0xxx/GO_0002/RAW_CAL/C0059881700R.IMG'
+URL_GALILEO_SSI_STARS_02 = (
+    'https://pds-rings.seti.org/holdings/volumes/GO_0xxx/GO_0002/RAW_CAL/C0059881700R.IMG'
+)
 
 # Image of Charon
 # Camera: New Horizons LORRI

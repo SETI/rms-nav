@@ -98,9 +98,7 @@ def test_unpad_array() -> None:
     unpad1 = np.array([3])
     assert np.all(unpad_array(arr1, (2,)) == unpad1)
 
-    arr2 = np.array(
-        [arr1, arr1 + 10, arr1 + 20, arr1 + 30, arr1 + 40, arr1 + 50, arr1 + 60]
-    )
+    arr2 = np.array([arr1, arr1 + 10, arr1 + 20, arr1 + 30, arr1 + 40, arr1 + 50, arr1 + 60])
     unpad2 = np.array([unpad1 + 10, unpad1 + 20, unpad1 + 30, unpad1 + 40, unpad1 + 50])
     assert np.all(unpad_array(arr2, (1, 2)) == unpad2)
 

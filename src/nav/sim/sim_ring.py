@@ -131,7 +131,7 @@ def _compute_edge_radii_array(
     # Compute true anomaly (angle relative to pericenter)
     true_anomaly = angles - current_long_peri
 
-    # Compute radius using elliptical orbit equation: r = a(1 - e^2) / (1 + e*cos(ν))
+    # Compute radius using elliptical orbit equation: r = a(1 - e^2) / (1 + e*cos(v))
     # where e = ae / a
     e = ae / a if a > 0 else 0.0
     if e >= 1.0:

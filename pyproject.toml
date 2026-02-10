@@ -63,6 +63,8 @@ pythonpath = [
 ]
 
 [tool.ruff]
+src = ["src", "tests"]
+extend-exclude = ["src/experiments", "src/nav/support/correlate_old.py"]
 line-length = 100
 
 [tool.ruff.lint]
@@ -71,6 +73,14 @@ line-length = 100
 # B = bugbear; SIM = simplify; C4 = comprehensions; A = builtins (no shadowing);
 # N = pep8-naming; PT = pytest-style; RUF = Ruff-specific (e.g. unused noqa).
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "A", "N", "PT", "RUF"]
+# N802 - Function name should be lowercase.
+# N803 - Argument name should be lowercase.
+# N806 - Variable name should be lowercase.
+# PT011 - pytest.raises is too broad.
+# SIM105 - Use contextlib.suppress for suppressions.
+# SIM108 - Use ternary operator for simple if/else.
+extend-ignore = ["N802", "N803", "N806", "PT011", "SIM105", "SIM108"]
+
 
 [tool.ruff.lint.per-file-ignores]
 # Entry-point scripts add package to path before importing nav

@@ -399,25 +399,23 @@ class NavModelRings(NavModelRingsBase):
                 continue
 
             # Validate mode data structure
-            if inner_data is not None:
-                if not self._validate_mode_data(
-                    inner_data,
-                    feature_key=feature_key,
-                    edge_type='inner',
-                    min_radius=min_radius,
-                    max_radius=max_radius,
-                ):
-                    continue
+            if inner_data is not None and not self._validate_mode_data(
+                inner_data,
+                feature_key=feature_key,
+                edge_type='inner',
+                min_radius=min_radius,
+                max_radius=max_radius,
+            ):
+                continue
 
-            if outer_data is not None:
-                if not self._validate_mode_data(
-                    outer_data,
-                    feature_key=feature_key,
-                    edge_type='outer',
-                    min_radius=min_radius,
-                    max_radius=max_radius,
-                ):
-                    continue
+            if outer_data is not None and not self._validate_mode_data(
+                outer_data,
+                feature_key=feature_key,
+                edge_type='outer',
+                min_radius=min_radius,
+                max_radius=max_radius,
+            ):
+                continue
 
             features.append(feature_data)
 

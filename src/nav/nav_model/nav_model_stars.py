@@ -1,4 +1,5 @@
 import copy
+import itertools
 from typing import Any, cast
 
 import numpy as np
@@ -121,22 +122,14 @@ class NavModelStars(NavModel):
     def _star_short_info(star: MutableStar) -> str:
         """Return a short string containing information about a star suitable for logging."""
         return (
-            'Star %6s/%9s U %9.3f+/-%7.3f V %9.3f+/-%7.3f VMAG %6.3f JBMAG %6.3f '
-            'JVMAG %6.3f SCLASS %3s TEMP %6.0f DN %7.2f CONFLICT %s'
-        ) % (
-            star.catalog_name,
-            star.pretty_name,
-            star.u,
-            abs(star.move_u),
-            star.v,
-            abs(star.move_v),
-            -1.0 if star.vmag is None else star.vmag,
-            0 if star.johnson_mag_b is None else star.johnson_mag_b,
-            0 if star.johnson_mag_v is None else star.johnson_mag_v,
-            clean_sclass(star.spectral_class),
-            0.0 if star.temperature is None else star.temperature,
-            0,
-            star.conflicts,
+            f'Star {star.catalog_name:>6s}/{star.pretty_name:>9s} '
+            f'U {star.u:9.3f}+/-{abs(star.move_u):7.3f} V {star.v:9.3f}+/-{abs(star.move_v):7.3f} '
+            f'VMAG {(-1.0 if star.vmag is None else star.vmag):6.3f} '
+            f'JBMAG {(0 if star.johnson_mag_b is None else star.johnson_mag_b):6.3f} '
+            f'JVMAG {(0 if star.johnson_mag_v is None else star.johnson_mag_v):6.3f} '
+            f'SCLASS {clean_sclass(star.spectral_class):>3s} '
+            f'TEMP {(0.0 if star.temperature is None else star.temperature):6.0f} '
+            f'DN {0:7.2f} CONFLICT {star.conflicts}'
         )  # TODO star.dn)
 
     def _stars_list_for_obs(
@@ -470,7 +463,7 @@ class NavModelStars(NavModel):
         for catalog_name in self._stars_config.catalogs:
             self.logger.debug(f'Retrieving star list from {catalog_name}')
             full_star_list = []
-            for mag_min, mag_max in zip(magnitude_list[:-1], magnitude_list[1:]):
+            for mag_min, mag_max in itertools.pairwise(magnitude_list):
                 if mag_min > mag_vmax:
                     break
                 if mag_max < mag_vmin:

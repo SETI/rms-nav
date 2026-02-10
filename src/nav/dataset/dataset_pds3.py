@@ -401,7 +401,7 @@ class DataSetPDS3(DataSet):
         # last_image_name = None
         # last_image_path = None
 
-        for ret in self.yield_image_files_index(
+        yield from self.yield_image_files_index(
             img_start_num=first_image_number,
             img_end_num=last_image_number,
             vol_start=first_volume_number,
@@ -420,8 +420,7 @@ class DataSetPDS3(DataSet):
             # selection_expr=arguments.selection_expr,
             choose_random_images=arguments.choose_random_images,
             arguments=arguments,
-        ):
-            yield ret
+        )
         #     # Before returning a matching image, see if we need to combine BOTSIM
         #     # images. We do this by looking at adjacent pairs of returned images to
         #     # see if they match.
@@ -450,7 +449,7 @@ class DataSetPDS3(DataSet):
         #     else:
         #         yield last_image_path
 
-    @lru_cache(maxsize=3)
+    @lru_cache(maxsize=3)  # noqa: B019 # small cache; dataset instances are long-lived
     def _read_pds_table(self, fn: str, columns: tuple[str, ...] | None = None) -> PdsTable:
         """Reads a PDS table file with caching.
 
@@ -714,9 +713,10 @@ class DataSetPDS3(DataSet):
                     img_filespec = self._get_image_filespec_from_label_filespec(label_filespec)
 
                     # Check that the image filespec is in the requested list
-                    if img_filespec_list:
-                        if label_filespec.rsplit('.', maxsplit=1)[0] not in img_filespec_list:
-                            continue
+                    if img_filespec_list and (
+                        label_filespec.rsplit('.', maxsplit=1)[0] not in img_filespec_list
+                    ):
+                        continue
 
                     # Get the image name
                     try:

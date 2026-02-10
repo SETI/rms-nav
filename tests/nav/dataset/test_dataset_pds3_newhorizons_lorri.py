@@ -36,9 +36,7 @@ def test_newhorizons_lorri_yield_vol_start(
     ds_newhorizons_lorri: dsnhlor.DataSetPDS3NewHorizonsLORRI,
 ) -> None:
     ret = list(
-        ds_newhorizons_lorri.yield_image_files_index(
-            max_filenames=1, vol_start='NHLALO_2001'
-        )
+        ds_newhorizons_lorri.yield_image_files_index(max_filenames=1, vol_start='NHLALO_2001')
     )
     assert len(ret) == 1
     assert (
@@ -70,23 +68,11 @@ def test_newhorizons_lorri_yield_img_start_num(
     ds_newhorizons_lorri: dsnhlor.DataSetPDS3NewHorizonsLORRI,
 ) -> None:
     ret = list(
-        ds_newhorizons_lorri.yield_image_files_index(
-            max_filenames=2, img_start_num=19683707
-        )
+        ds_newhorizons_lorri.yield_image_files_index(max_filenames=2, img_start_num=19683707)
     )
     assert len(ret) == 2
-    assert (
-        ret[0]
-        .image_files[0]
-        .label_file_url.as_posix()
-        .endswith('lor_0019683707_0x630_sci.lbl')
-    )
-    assert (
-        ret[1]
-        .image_files[0]
-        .label_file_url.as_posix()
-        .endswith('lor_0019683711_0x630_sci.lbl')
-    )
+    assert ret[0].image_files[0].label_file_url.as_posix().endswith('lor_0019683707_0x630_sci.lbl')
+    assert ret[1].image_files[0].label_file_url.as_posix().endswith('lor_0019683711_0x630_sci.lbl')
 
 
 def test_newhorizons_lorri_yield_img_end_num(
@@ -115,11 +101,7 @@ def test_newhorizons_lorri_yield_img_end_num(
 def test_newhorizons_lorri_yield_volumes(
     ds_newhorizons_lorri: dsnhlor.DataSetPDS3NewHorizonsLORRI,
 ) -> None:
-    ret = list(
-        ds_newhorizons_lorri.yield_image_files_index(
-            volumes=['NHLALO_2001', 'NHJULO_2001']
-        )
-    )
+    ret = list(ds_newhorizons_lorri.yield_image_files_index(volumes=['NHLALO_2001', 'NHJULO_2001']))
     assert len(ret) == 2364
     ret2 = [x.image_files[0].label_file_url.as_posix() for x in ret]
     ret3 = [x for x in ret2 if 'NHLALO_2001' not in x and 'NHJULO_2001' not in x]

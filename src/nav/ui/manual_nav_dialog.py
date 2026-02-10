@@ -49,8 +49,8 @@ def _bilinear_sample_periodic(arr: NDArrayFloatType, y: float, x: float) -> floa
     # Wrap
     x = x % w
     y = y % h
-    x0 = int(math.floor(x))
-    y0 = int(math.floor(y))
+    x0 = math.floor(x)
+    y0 = math.floor(y)
     x1 = (x0 + 1) % w
     y1 = (y0 + 1) % h
     dx = x - x0
@@ -269,7 +269,7 @@ class ManualNavDialog(QDialog):
         # Transparency slider 0..100 -> alpha 0..1
         self._slider_alpha = QSlider(Qt.Orientation.Horizontal)
         self._slider_alpha.setRange(0, 100)
-        self._slider_alpha.setValue(int(round(self._alpha * 100)))
+        self._slider_alpha.setValue(round(self._alpha * 100))
         self._lbl_alpha = QLabel(f'{self._alpha:.2f}')
         self._slider_alpha.valueChanged.connect(lambda v: self._on_alpha_changed(v / 100.0))
         row_a = QHBoxLayout()
@@ -355,7 +355,7 @@ class ManualNavDialog(QDialog):
             if (self._stretch_max > self._stretch_min)
             else 1.0
         )
-        return int(round(1000.0 * (val - self._stretch_min) / denom))
+        return round(1000.0 * (val - self._stretch_min) / denom)
 
     def _on_reset_stretch(self) -> None:
         # Recompute defaults from current image

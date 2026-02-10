@@ -3,9 +3,9 @@ import json
 from pathlib import Path
 from typing import Any, cast
 
+import pdstemplate
 from filecache import FCPath
 from pdslogger import PdsLogger
-import pdstemplate
 
 from nav.dataset.dataset import DataSet
 
@@ -109,9 +109,7 @@ def generate_collection_files(
     if collection_browse_template.exists():
         template = pdstemplate.PdsTemplate(str(collection_browse_template))
         collection_browse_label = bundle_root / 'browse' / 'collection_browse.lblx'
-        collection_browse_label_local = cast(
-            Path, collection_browse_label.get_local_path()
-        )
+        collection_browse_label_local = cast(Path, collection_browse_label.get_local_path())
         template_vars = {
             'COLLECTION_BROWSE_CSV_PATH': str(collection_browse_csv),
         }
@@ -301,9 +299,7 @@ def generate_global_index_files(
         try:
             template.write(template_vars, bodies_label)
         except Exception:
-            logger.exception(
-                'Error creating label global_index_bodies.lblx: %s', bodies_label
-            )
+            logger.exception('Error creating label global_index_bodies.lblx: %s', bodies_label)
             raise
         logger.info('Generated global_index_bodies.lblx')
 
@@ -318,9 +314,7 @@ def generate_global_index_files(
         try:
             template.write(template_vars, rings_label)
         except Exception:
-            logger.exception(
-                'Error creating label global_index_rings.lblx: %s', rings_label
-            )
+            logger.exception('Error creating label global_index_rings.lblx: %s', rings_label)
             raise
         logger.info('Generated global_index_rings.lblx')
 

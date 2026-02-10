@@ -44,7 +44,9 @@ def navigate_image_files(
         return False, {
             'status': 'error',
             'status_error': 'expected_one_image_per_batch',
-            'status_exception': f'Expected exactly one image per batch; got {len(image_files.image_files)}',
+            'status_exception': (
+                f'Expected exactly one image per batch; got {len(image_files.image_files)}'
+            ),
         }
 
     image_file = image_files.image_files[0]

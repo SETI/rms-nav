@@ -45,9 +45,8 @@ class Annotations(NavBase):
         else:
             ann_list = annotations
         for ann in ann_list:
-            if len(self._annotations):
-                if ann.obs != self._annotations[-1].obs:
-                    raise ValueError('Annotation does not have same Obs as previous')
+            if len(self._annotations) and ann.obs != self._annotations[-1].obs:
+                raise ValueError('Annotation does not have same Obs as previous')
             self._annotations.append(ann)
 
     @property
@@ -87,7 +86,7 @@ class Annotations(NavBase):
 
             data_shape = obs.data_shape_vu
 
-            res = np.zeros(data_shape + (3,), dtype=np.uint8)
+            res = np.zeros((*data_shape, 3), dtype=np.uint8)
             all_avoid_mask = np.zeros(data_shape, dtype=bool)
 
             for annotation in self.annotations:

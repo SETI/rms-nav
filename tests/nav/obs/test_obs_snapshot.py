@@ -2,16 +2,16 @@ from typing import Any
 
 import oops
 import pytest
-
-import nav.obs.obs_inst_cassini_iss as obstcoiss
-import nav.obs.obs_inst_voyager_iss as obstvgiss
-import nav.obs.obs_snapshot as obs_snapshot
 from tests.config import (
     URL_CASSINI_ISS_STARS_01,
     URL_CASSINI_ISS_TITAN_01,
     URL_VOYAGER_ISS_IO_01,
     URL_VOYAGER_ISS_URANUS_01,
 )
+
+import nav.obs.obs_inst_cassini_iss as obstcoiss
+import nav.obs.obs_inst_voyager_iss as obstvgiss
+import nav.obs.obs_snapshot as obs_snapshot
 
 
 @pytest.fixture

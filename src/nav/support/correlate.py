@@ -101,7 +101,7 @@ def masked_ncc(
 Fix masked NCC math; current normalization is incorrect
 
 The numerator misses the symmetric mean terms and the denominator uses a scalar varM
-but omits shift‑wise varI properly. Use standard masked NCC with shift‑wise sums via FFT.
+but omits shift-wise varI properly. Use standard masked NCC with shift-wise sums via FFT.
 
 -def masked_ncc(I, M, W):
 +def masked_ncc(I, M, W):

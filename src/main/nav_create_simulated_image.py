@@ -787,16 +787,15 @@ class CreateSimulatedImageModel(QMainWindow):
             result = self._add_tab_dialog()
             # If canceled, we've already switched back, so we're done
             # If successful, the new tab will be created and automatically selected
-            if not result:
+            if not result and (
+                prev_tab >= 0
+                and prev_tab < self._tabs.count()
+                and self._tabs.tabText(prev_tab) != '+'
+            ):
                 # Make sure we're still on the previous tab (should already be, but be explicit)
-                if (
-                    prev_tab >= 0
-                    and prev_tab < self._tabs.count()
-                    and self._tabs.tabText(prev_tab) != '+'
-                ):
-                    self._tabs.blockSignals(True)
-                    self._tabs.setCurrentIndex(prev_tab)
-                    self._tabs.blockSignals(False)
+                self._tabs.blockSignals(True)
+                self._tabs.setCurrentIndex(prev_tab)
+                self._tabs.blockSignals(False)
         else:
             # This is a valid tab, remember it
             self._last_valid_tab_index = index
@@ -1160,11 +1159,14 @@ class CreateSimulatedImageModel(QMainWindow):
 
         # Ensure we're on a valid tab (not "+") before unblocking signals
         current_idx = self._tabs.currentIndex()
-        if current_idx >= 0 and current_idx < self._tabs.count():
-            if self._tabs.tabText(current_idx) == '+':
-                # Shouldn't happen, but be safe
-                self._tabs.setCurrentIndex(0)
-                self._last_valid_tab_index = 0
+        if (
+            current_idx >= 0
+            and current_idx < self._tabs.count()
+            and self._tabs.tabText(current_idx) == '+'
+        ):
+            # Shouldn't happen, but be safe
+            self._tabs.setCurrentIndex(0)
+            self._last_valid_tab_index = 0
 
         # Unblock signals - this might emit currentChanged, but we're on General so it's safe
         self._tabs.blockSignals(False)
@@ -2220,8 +2222,8 @@ class CreateSimulatedImageModel(QMainWindow):
         """
         height = int(self.sim_params['size_v'])
         width = int(self.sim_params['size_u'])
-        v_i = int(round(img_v))
-        u_i = int(round(img_u))
+        v_i = round(img_v)
+        u_i = round(img_u)
         if not (0 <= v_i < height and 0 <= u_i < width):
             self._selected_model_key = None
             return

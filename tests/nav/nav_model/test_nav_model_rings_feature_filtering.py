@@ -4,8 +4,8 @@ Tests date-based feature filtering and validation of feature data structures.
 """
 
 import numpy as np
-from numpy.typing import NDArray
 import pytest
+from numpy.typing import NDArray
 
 from nav.nav_model.nav_model_rings import NavModelRings
 from nav.support.time import utc_to_et

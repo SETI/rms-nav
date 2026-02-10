@@ -144,8 +144,8 @@ class NavModelBodySimulated(NavModelBodyBase):
 
         annotations = None
         if create_annotations:
-            v_center_data = int(round(center_v))
-            u_center_data = int(round(center_u))
+            v_center_data = round(center_v)
+            u_center_data = round(center_u)
             annotations = self._create_annotations(
                 u_center_data,
                 v_center_data,

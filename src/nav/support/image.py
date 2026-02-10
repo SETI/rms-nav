@@ -1,8 +1,8 @@
 from typing import Any, cast
 
 import numpy as np
-from numpy.fft import fft2, fftfreq, ifft2
 import scipy.ndimage as ndimage
+from numpy.fft import fft2, fftfreq, ifft2
 
 from nav.support.types import NDArrayFloatType, NDArrayType, NPType
 
@@ -116,7 +116,9 @@ def unpad_array(
 
     # See https://stackoverflow.com/questions/24806174/
     # is-there-an-opposite-inverse-to-numpy-pad-function
-    reversed_padding = tuple([slice(pad, dim - pad) for (pad, dim) in zip(margin, array.shape)])
+    reversed_padding = tuple(
+        slice(pad, dim - pad) for (pad, dim) in zip(margin, array.shape, strict=True)
+    )
 
     return array[reversed_padding]
 
@@ -195,13 +197,13 @@ def pad_array_to_power_of_2(
 
     p2 = [next_power_of_2(x) for x in data.shape]
 
-    if all(s1 == s2 for s1, s2 in zip(p2, data.shape)):
+    if all(s1 == s2 for s1, s2 in zip(p2, data.shape, strict=False)):
         return data, (0, 0)
 
     if any((s != 1) and (s & 1) for s in data.shape):
         raise ValueError(f'shape must be power of 2 or even: {data.shape}')
 
-    padding = tuple([(s - dim) // 2 for s, dim in zip(p2, data.shape)])
+    padding = tuple([(s - dim) // 2 for s, dim in zip(p2, data.shape, strict=False)])
     return pad_array(data, padding), padding
 
 
@@ -263,7 +265,7 @@ def array_zoom(a: NDArrayType[NPType], factor: list[int] | tuple[int, ...]) -> N
     """
 
     a = np.asarray(a)
-    slices = [slice(0, old, 1 / float(f)) for (f, old) in zip(factor, a.shape)]
+    slices = [slice(0, old, 1 / float(f)) for (f, old) in zip(factor, a.shape, strict=False)]
     idxs = (np.mgrid[slices]).astype('i')
     return cast(NDArrayType[NPType], a[tuple(idxs)])
 

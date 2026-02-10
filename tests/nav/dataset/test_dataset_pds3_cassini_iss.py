@@ -1,4 +1,5 @@
 import argparse
+
 import pytest
 
 import nav.dataset.dataset_pds3_cassini_iss as dscoiss
@@ -34,9 +35,7 @@ def test_cassini_iss_yield_basic(ds_cassini_iss: dscoiss.DataSetPDS3CassiniISS) 
 def test_cassini_iss_yield_vol_start(
     ds_cassini_iss: dscoiss.DataSetPDS3CassiniISS,
 ) -> None:
-    ret = list(
-        ds_cassini_iss.yield_image_files_index(max_filenames=1, vol_start='COISS_2009')
-    )
+    ret = list(ds_cassini_iss.yield_image_files_index(max_filenames=1, vol_start='COISS_2009'))
     assert len(ret) == 1
     assert (
         ret[0]
@@ -66,24 +65,10 @@ def test_cassini_iss_yield_vol_end(
 def test_cassini_iss_yield_img_start_num(
     ds_cassini_iss: dscoiss.DataSetPDS3CassiniISS,
 ) -> None:
-    ret = list(
-        ds_cassini_iss.yield_image_files_index(
-            max_filenames=2, img_start_num=1353634555
-        )
-    )
+    ret = list(ds_cassini_iss.yield_image_files_index(max_filenames=2, img_start_num=1353634555))
     assert len(ret) == 2
-    assert (
-        ret[0]
-        .image_files[0]
-        .label_file_url.as_posix()
-        .endswith('N1353634555_1_CALIB.LBL')
-    )
-    assert (
-        ret[1]
-        .image_files[0]
-        .label_file_url.as_posix()
-        .endswith('W1353634555_1_CALIB.LBL')
-    )
+    assert ret[0].image_files[0].label_file_url.as_posix().endswith('N1353634555_1_CALIB.LBL')
+    assert ret[1].image_files[0].label_file_url.as_posix().endswith('W1353634555_1_CALIB.LBL')
 
 
 def test_cassini_iss_yield_img_end_num(
@@ -112,9 +97,7 @@ def test_cassini_iss_yield_img_end_num(
 def test_cassini_iss_yield_volumes(
     ds_cassini_iss: dscoiss.DataSetPDS3CassiniISS,
 ) -> None:
-    ret = list(
-        ds_cassini_iss.yield_image_files_index(volumes=['COISS_1001', 'COISS_2009'])
-    )
+    ret = list(ds_cassini_iss.yield_image_files_index(volumes=['COISS_1001', 'COISS_2009']))
     assert len(ret) == 8421
     ret2 = [x.image_files[0].label_file_url.as_posix() for x in ret]
     ret3 = [x for x in ret2 if 'COISS_1001' not in x and 'COISS_2009' not in x]
@@ -129,12 +112,7 @@ def test_cassini_iss_camera(ds_cassini_iss: dscoiss.DataSetPDS3CassiniISS) -> No
         )
     )
     assert len(ret) == 1
-    assert (
-        ret[0]
-        .image_files[0]
-        .label_file_url.as_posix()
-        .endswith('W1294561143_1_CALIB.LBL')
-    )
+    assert ret[0].image_files[0].label_file_url.as_posix().endswith('W1294561143_1_CALIB.LBL')
     arguments = argparse.Namespace(camera='NAC')
     ret = list(
         ds_cassini_iss.yield_image_files_index(
@@ -142,12 +120,7 @@ def test_cassini_iss_camera(ds_cassini_iss: dscoiss.DataSetPDS3CassiniISS) -> No
         )
     )
     assert len(ret) == 1
-    assert (
-        ret[0]
-        .image_files[0]
-        .label_file_url.as_posix()
-        .endswith('N1294562651_1_CALIB.LBL')
-    )
+    assert ret[0].image_files[0].label_file_url.as_posix().endswith('N1294562651_1_CALIB.LBL')
 
 
 def test_cassini_iss_camera_invalid(
@@ -174,27 +147,7 @@ def test_cassini_iss_group_botsim(
     assert len(ret[0].image_files) == 1
     assert len(ret[1].image_files) == 2
     assert len(ret[2].image_files) == 1
-    assert (
-        ret[0]
-        .image_files[0]
-        .label_file_url.as_posix()
-        .endswith('N1294562768_1_CALIB.LBL')
-    )
-    assert (
-        ret[1]
-        .image_files[0]
-        .label_file_url.as_posix()
-        .endswith('N1294562836_1_CALIB.LBL')
-    )
-    assert (
-        ret[1]
-        .image_files[1]
-        .label_file_url.as_posix()
-        .endswith('W1294562835_1_CALIB.LBL')
-    )
-    assert (
-        ret[2]
-        .image_files[0]
-        .label_file_url.as_posix()
-        .endswith('W1294562949_1_CALIB.LBL')
-    )
+    assert ret[0].image_files[0].label_file_url.as_posix().endswith('N1294562768_1_CALIB.LBL')
+    assert ret[1].image_files[0].label_file_url.as_posix().endswith('N1294562836_1_CALIB.LBL')
+    assert ret[1].image_files[1].label_file_url.as_posix().endswith('W1294562835_1_CALIB.LBL')
+    assert ret[2].image_files[0].label_file_url.as_posix().endswith('W1294562949_1_CALIB.LBL')
