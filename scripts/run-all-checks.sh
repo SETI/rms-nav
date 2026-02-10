@@ -343,12 +343,14 @@ run_docs_build() {
         sphinx_failed=true
     fi
 
-    print_info "Running PyMarkdown scan (docs/, .cursor/, root *.md)..."
-    if python -m pymarkdown scan docs/ .cursor/ README.md CONTRIBUTING.md; then
-        print_success "PyMarkdown scan passed"
-    else
-        print_error "PyMarkdown scan failed"
-        pymarkdown_failed=true
+    if [ "$RUN_MARKDOWN" != true ]; then
+        print_info "Running PyMarkdown scan (docs/, .cursor/, root *.md)..."
+        if python -m pymarkdown scan docs/ .cursor/ README.md CONTRIBUTING.md; then
+            print_success "PyMarkdown scan passed"
+        else
+            print_error "PyMarkdown scan failed"
+            pymarkdown_failed=true
+        fi
     fi
 
     deactivate 2>/dev/null || true

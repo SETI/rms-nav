@@ -31,6 +31,10 @@ jobs:
         run: |
           ruff check src tests
 
+      - name: Ruff (format)
+        run: |
+          ruff format --check src tests
+
       - name: Mypy
         run: |
           mypy src tests

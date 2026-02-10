@@ -767,7 +767,7 @@ class NavBackplaneViewer(QDialog):
                 self,
                 'FITS File Not Found',
                 f'Backplane FITS file not found:\n{fits_file}\n\n'
-                f'All backplane data will be unavailable.',
+                'All backplane data will be unavailable.',
             )
             self._logger.warning('FITS file not found: %s', fits_file)
             self._fits_hdus = []
