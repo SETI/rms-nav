@@ -103,9 +103,7 @@ def create_body_backplanes(
     candidate_names = list(inv.keys())
     # Filter and sort by distance
     bodies_by_range = [
-        (name, inv[name])
-        for name in candidate_names
-        if snapshot.inventory_body_in_fov(inv[name])
+        (name, inv[name]) for name in candidate_names if snapshot.inventory_body_in_fov(inv[name])
     ]
     bodies_by_range.sort(key=lambda x: x[1]['range'])
 

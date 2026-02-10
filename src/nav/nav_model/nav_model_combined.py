@@ -1,5 +1,3 @@
-from typing import cast
-
 import numpy as np
 
 from nav.config import Config

@@ -1230,11 +1230,7 @@ class NavBackplaneViewer(QDialog):
             valid = idmap > 0
             ids = idmap.astype(np.int32)
             if np.any(valid):
-                mode_id = (
-                    'Absolute'
-                    if self._body_id_mode_abs.isChecked()
-                    else 'Relative'
-                )
+                mode_id = 'Absolute' if self._body_id_mode_abs.isChecked() else 'Relative'
                 if mode_id == 'Absolute':
                     id_min = 0
                     id_max = int(np.max(ids))
