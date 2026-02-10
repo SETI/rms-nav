@@ -47,6 +47,23 @@ classifiers = [
   "Operating System :: Microsoft :: Windows"
 ]
 
+[project.optional-dependencies]
+dev = [
+  "coverage",
+  "mypy",
+  "myst-parser",
+  "pyinstrument",
+  "pymarkdownlnt>=0.9.35",
+  "pytest",
+  "pytest-cov",
+  "pytest-profiling",
+  "pytest-xdist",
+  "ruff",
+  "sphinx",
+  "sphinxcontrib-mermaid",
+  "sphinx-rtd-theme"
+]
+
 [project.urls]
 Homepage = "https://github.com/SETI/rms-nav"
 Documentation = "https://rms-nav.readthedocs.io/en/latest"
@@ -80,7 +97,6 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "A", "N", "PT", "RUF"]
 # SIM105 - Use contextlib.suppress for suppressions.
 # SIM108 - Use ternary operator for simple if/else.
 extend-ignore = ["N802", "N803", "N806", "PT011", "SIM105", "SIM108"]
-
 
 [tool.ruff.lint.per-file-ignores]
 # Entry-point scripts add package to path before importing nav

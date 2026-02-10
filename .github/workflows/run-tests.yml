@@ -12,7 +12,7 @@ on:
 
 jobs:
   flake8:
-    name: Lint nav
+    name: Lint rms-nav
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -25,22 +25,26 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install -r requirements.txt
+          python -m pip install -e ".[dev]"
 
-      - name: Flake8
+      - name: Ruff (lint)
         run: |
-          flake8 src
+          ruff check src tests
 
       - name: Mypy
         run: |
-          mypy src
+          mypy src tests
 
       - name: Sphinx
         run: |
           sphinx-build -b html docs docs/_build
 
+      - name: PyMarkdown
+        run: |
+          pymarkdown scan docs/ .cursor/ README.md CONTRIBUTING.md
+  
   test:
-    name: Test nav
+    name: Test rms-nav
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -61,7 +65,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install -r requirements.txt
+          python -m pip install -e ".[dev]"
 
       - name: Test with coverage
         run: |
@@ -70,7 +74,7 @@ jobs:
           export OOPS_RESOURCES=https://storage.googleapis.com/rms-node-oops-resources
           export UCAC4_PATH=https://storage.googleapis.com/rms-node-star-catalogs/UCAC4
           export YBSC_PATH=https://storage.googleapis.com/rms-node-star-catalogs/YBSC
-          python -m pytest --cov
+          python -m pytest --cov -n auto
 
       - name: Print coverage report
         run: |
