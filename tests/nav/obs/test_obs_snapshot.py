@@ -1,40 +1,44 @@
+from typing import Any
+
 import oops
 import pytest
 
 import nav.obs.obs_inst_cassini_iss as obstcoiss
 import nav.obs.obs_inst_voyager_iss as obstvgiss
 import nav.obs.obs_snapshot as obs_snapshot
-from tests.config import (URL_CASSINI_ISS_STARS_01,
-                          URL_CASSINI_ISS_TITAN_01,
-                          URL_VOYAGER_ISS_IO_01,
-                          URL_VOYAGER_ISS_URANUS_01)
+from tests.config import (
+    URL_CASSINI_ISS_STARS_01,
+    URL_CASSINI_ISS_TITAN_01,
+    URL_VOYAGER_ISS_IO_01,
+    URL_VOYAGER_ISS_URANUS_01,
+)
 
 
 @pytest.fixture
-def obs_coiss_stars_01(config_fixture):
+def obs_coiss_stars_01(config_fixture: Any) -> obstcoiss.ObsCassiniISS:
     """Cassini ISS observation instance for testing."""
     return obstcoiss.ObsCassiniISS.from_file(URL_CASSINI_ISS_STARS_01)
 
 
 @pytest.fixture
-def obs_coiss_titan_01(config_fixture):
+def obs_coiss_titan_01(config_fixture: Any) -> obstcoiss.ObsCassiniISS:
     """Cassini ISS observation instance for testing."""
     return obstcoiss.ObsCassiniISS.from_file(URL_CASSINI_ISS_TITAN_01)
 
 
 @pytest.fixture
-def obs_vgiss_io_01(config_fixture):
+def obs_vgiss_io_01(config_fixture: Any) -> obstvgiss.ObsVoyagerISS:
     """Voyager ISS Io observation instance for testing."""
     return obstvgiss.ObsVoyagerISS.from_file(URL_VOYAGER_ISS_IO_01)
 
 
 @pytest.fixture
-def obs_vgiss_uranus_01(config_fixture):
+def obs_vgiss_uranus_01(config_fixture: Any) -> obstvgiss.ObsVoyagerISS:
     """Voyager ISS Uranus observation instance for testing."""
     return obstvgiss.ObsVoyagerISS.from_file(URL_VOYAGER_ISS_URANUS_01)
 
 
-def test_obs_snapshot_init(obs_coiss_stars_01) -> None:
+def test_obs_snapshot_init(obs_coiss_stars_01: obstcoiss.ObsCassiniISS) -> None:
     s = obs_snapshot.ObsSnapshot(obs_coiss_stars_01)
     assert s.data_shape_uv == (1024, 1024)
     assert s.fov_vu_min == (0, 0)
@@ -66,7 +70,7 @@ def test_obs_snapshot_init(obs_coiss_stars_01) -> None:
     assert s.extfov_vu_max == (1033, 1043)
 
 
-def test_obs_snapshot_bp_mg(obs_coiss_stars_01) -> None:
+def test_obs_snapshot_bp_mg(obs_coiss_stars_01: obstcoiss.ObsCassiniISS) -> None:
     s = obs_snapshot.ObsSnapshot(obs_coiss_stars_01)
     assert s.bp is s.bp
     assert s.bp.meshgrid.shape == (1024, 1024)
@@ -118,7 +122,9 @@ def test_obs_snapshot_bp_mg(obs_coiss_stars_01) -> None:
     assert s.center_bp.meshgrid.uv.vals[0, 0, 1] == 512
 
 
-def test_obs_snapshot_ra_dec_limits_wrap(obs_coiss_titan_01) -> None:
+def test_obs_snapshot_ra_dec_limits_wrap(
+    obs_coiss_titan_01: obstcoiss.ObsCassiniISS,
+) -> None:
     s = obs_snapshot.ObsSnapshot(obs_coiss_titan_01)
     ra_min, ra_max, dec_min, dec_max = s.ra_dec_limits()
     assert ra_min * oops.DPR == pytest.approx(358.2124125206211)
@@ -127,7 +133,9 @@ def test_obs_snapshot_ra_dec_limits_wrap(obs_coiss_titan_01) -> None:
     assert dec_max * oops.DPR == pytest.approx(-45.044159571378906)
 
 
-def test_obs_snapshot_ra_dec_limits_ext_wrap(obs_coiss_titan_01) -> None:
+def test_obs_snapshot_ra_dec_limits_ext_wrap(
+    obs_coiss_titan_01: obstcoiss.ObsCassiniISS,
+) -> None:
     s = obs_snapshot.ObsSnapshot(obs_coiss_titan_01, extfov_margin_vu=10)
     ra_min, ra_max, dec_min, dec_max = s.ra_dec_limits_ext()
     assert ra_min * oops.DPR == pytest.approx(358.1569510257557)
@@ -136,7 +144,9 @@ def test_obs_snapshot_ra_dec_limits_ext_wrap(obs_coiss_titan_01) -> None:
     assert dec_max * oops.DPR == pytest.approx(-45.0037137426367)
 
 
-def test_obs_snapshot_ra_dec_limits(obs_vgiss_uranus_01) -> None:
+def test_obs_snapshot_ra_dec_limits(
+    obs_vgiss_uranus_01: obstvgiss.ObsVoyagerISS,
+) -> None:
     s = obs_snapshot.ObsSnapshot(obs_vgiss_uranus_01)
     ra_min, ra_max, dec_min, dec_max = s.ra_dec_limits()
     assert ra_min * oops.DPR == pytest.approx(115.13781882464525)
@@ -145,7 +155,9 @@ def test_obs_snapshot_ra_dec_limits(obs_vgiss_uranus_01) -> None:
     assert dec_max * oops.DPR == pytest.approx(18.814618908448328)
 
 
-def test_obs_snapshot_ra_dec_limits_ext(obs_vgiss_uranus_01) -> None:
+def test_obs_snapshot_ra_dec_limits_ext(
+    obs_vgiss_uranus_01: obstvgiss.ObsVoyagerISS,
+) -> None:
     s = obs_snapshot.ObsSnapshot(obs_vgiss_uranus_01, extfov_margin_vu=10)
     ra_min, ra_max, dec_min, dec_max = s.ra_dec_limits_ext()
     assert ra_min * oops.DPR == pytest.approx(115.13272208854077)
@@ -154,7 +166,7 @@ def test_obs_snapshot_ra_dec_limits_ext(obs_vgiss_uranus_01) -> None:
     assert dec_max * oops.DPR == pytest.approx(18.819456881754636)
 
 
-def test_obs_snapshot_distance(obs_vgiss_io_01) -> None:
+def test_obs_snapshot_distance(obs_vgiss_io_01: obstvgiss.ObsVoyagerISS) -> None:
     s = obs_snapshot.ObsSnapshot(obs_vgiss_io_01)
     assert s.sun_body_distance('JUPITER') == pytest.approx(797366152.953817)
     assert s.body_distance('IO') == pytest.approx(1338438.5304067382)

@@ -6,13 +6,14 @@ from tests.config import URL_CASSINI_ISS_RHEA_01
 
 
 @pytest.fixture
-def obs_rhea(config_fixture):
+def obs_rhea(config_fixture: None) -> obstcoiss.ObsCassiniISS:
     """Cassini ISS Rhea observation instance for testing."""
-    return obstcoiss.ObsCassiniISS.from_file(URL_CASSINI_ISS_RHEA_01,
-                                             extfov_margin_vu=(200, 100))
+    return obstcoiss.ObsCassiniISS.from_file(
+        URL_CASSINI_ISS_RHEA_01, extfov_margin_vu=(200, 100)
+    )
 
 
-def test_nav_model_body(obs_rhea) -> None:
+def test_nav_model_body(obs_rhea: obstcoiss.ObsCassiniISS) -> None:
     """Body model creates one NavModelResult in models after create_model."""
     body = NavModelBody('body:rhea', obs_rhea, 'RHEA')
     body.create_model()

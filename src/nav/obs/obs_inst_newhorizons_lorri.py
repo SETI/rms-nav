@@ -19,11 +19,13 @@ class ObsNewHorizonsLORRI(ObsSnapshotInst):
     """
 
     @staticmethod
-    def from_file(path: PathLike,
-                  *,
-                  config: Optional[Config] = None,
-                  extfov_margin_vu: tuple[int, int] | None = None,
-                  **_kwargs: Any) -> 'ObsNewHorizonsLORRI':
+    def from_file(
+        path: PathLike,
+        *,
+        config: Optional[Config] = None,
+        extfov_margin_vu: tuple[int, int] | None = None,
+        **_kwargs: Any,
+    ) -> 'ObsNewHorizonsLORRI':
         """Creates an ObsNewHorizonsLORRI from a New Horizons LORRI image file.
 
         Parameters:
@@ -62,7 +64,9 @@ class ObsNewHorizonsLORRI(ObsSnapshotInst):
         logger.debug(f'  Extfov margin vu: {extfov_margin_vu}')
         logger.debug(f'  Data min: {np.min(obs.data)}, max: {np.max(obs.data)}')
 
-        new_obs = ObsNewHorizonsLORRI(obs, config=config, extfov_margin_vu=extfov_margin_vu)
+        new_obs = ObsNewHorizonsLORRI(
+            obs, config=config, extfov_margin_vu=extfov_margin_vu
+        )
         new_obs._inst_config = inst_config
         return new_obs
 
@@ -72,7 +76,7 @@ class ObsNewHorizonsLORRI(ObsSnapshotInst):
         Returns:
             The minimum usable magnitude for stars in this observation.
         """
-        return 0.
+        return 0.0
 
     def star_max_usable_vmag(self) -> float:
         """Returns the maximum usable magnitude for stars in this observation.

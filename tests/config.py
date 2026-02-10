@@ -39,7 +39,9 @@ URL_CASSINI_ISS_STARS_02 = 'https://pds-rings.seti.org/holdings/calibrated/COISS
 # Filter: RED
 # Exposure: 0.0625 sec
 # https://opus.pds-rings.seti.org/opus/#/view=detail&detail=go-ssi-c0349673965
-URL_GALILEO_SSI_IO_01 = 'https://pds-rings.seti.org/holdings/volumes/GO_0xxx/GO_0017/G1/IO/C0349673965R.IMG'
+URL_GALILEO_SSI_IO_01 = (
+    'https://pds-rings.seti.org/holdings/volumes/GO_0xxx/GO_0017/G1/IO/C0349673965R.IMG'
+)
 
 # Image of a star field
 # Camera: Galileo SSI

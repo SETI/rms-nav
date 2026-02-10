@@ -16,19 +16,15 @@ class Annotations(NavBase):
     This class provides functionality to combine multiple annotations into a single
     overlay image and handle text placement.
     """
-    def __init__(self,
-                 *,
-                 config: Optional[Config] = None) -> None:
+
+    def __init__(self, *, config: Optional[Config] = None) -> None:
         """Initializes an empty annotations collection."""
         super().__init__(config=config)
         self._annotations: list[Annotation] = []
 
-    def add_annotations(self,
-                        annotations: Union[Annotation,
-                                           list[Annotation],
-                                           'Annotations',
-                                           None]
-                        ) -> None:
+    def add_annotations(
+        self, annotations: Union[Annotation, list[Annotation], 'Annotations', None]
+    ) -> None:
         """Adds one or more annotations to this collection.
 
         Parameters:
@@ -58,13 +54,14 @@ class Annotations(NavBase):
         """Return the list of annotations."""
         return self._annotations
 
-    def combine(self,
-                offset: tuple[float, float] = (0., 0.),
-                include_text: bool = True,
-                text_use_avoid_mask: bool = True,
-                text_avoid_other_text: bool = True,
-                text_show_all_positions: bool = False
-                ) -> NDArrayIntType | None:
+    def combine(
+        self,
+        offset: tuple[float, float] = (0.0, 0.0),
+        include_text: bool = True,
+        text_use_avoid_mask: bool = True,
+        text_avoid_other_text: bool = True,
+        text_show_all_positions: bool = False,
+    ) -> NDArrayIntType | None:
         """Combines all annotations into a single graphic overlay image.
 
         Parameters:
@@ -104,18 +101,26 @@ class Annotations(NavBase):
                     all_avoid_mask |= avoid_mask
 
             if include_text:
-                self._add_text(obs, res, offset, all_avoid_mask,
-                               text_avoid_other_text, text_show_all_positions)
+                self._add_text(
+                    obs,
+                    res,
+                    offset,
+                    all_avoid_mask,
+                    text_avoid_other_text,
+                    text_show_all_positions,
+                )
 
             return res
 
-    def _add_text(self,
-                  obs: ObsSnapshot,
-                  res: NDArrayIntType,
-                  offset: tuple[float, float],
-                  avoid_mask: NDArrayBoolType,
-                  text_avoid_other_text: bool,
-                  text_show_all_positions: bool) -> None:
+    def _add_text(
+        self,
+        obs: ObsSnapshot,
+        res: NDArrayIntType,
+        offset: tuple[float, float],
+        avoid_mask: NDArrayBoolType,
+        text_avoid_other_text: bool,
+        text_show_all_positions: bool,
+    ) -> None:
         """Adds label text to an existing overlay image.
 
         Parameters:
@@ -154,30 +159,35 @@ class Annotations(NavBase):
             for text_info in annotation.text_info_list:
                 found_place = False
                 for avoid in [True, False]:
-                    ret = text_info._draw_text(ann_num=ann_num,
-                                               extfov=obs.extfov_margin_vu,
-                                               offset=offset,
-                                               avoid_mask=avoid_mask if avoid else None,
-                                               text_layer=text_layer,
-                                               graphic_layer=graphic_layer,
-                                               ann_num_mask=ann_num_mask,
-                                               text_draw=text_draw,
-                                               tt_dir=tt_dir,
-                                               show_all_positions=text_show_all_positions)
+                    ret = text_info._draw_text(
+                        ann_num=ann_num,
+                        extfov=obs.extfov_margin_vu,
+                        offset=offset,
+                        avoid_mask=avoid_mask if avoid else None,
+                        text_layer=text_layer,
+                        graphic_layer=graphic_layer,
+                        ann_num_mask=ann_num_mask,
+                        text_draw=text_draw,
+                        tt_dir=tt_dir,
+                        show_all_positions=text_show_all_positions,
+                    )
                     if ret:
                         found_place = True
                         break
                     self.logger.debug(
                         'Could not find place avoiding other items for text annotation '
-                        f'{text_info.text!r}')
+                        f'{text_info.text!r}'
+                    )
                 if not found_place:
                     self.logger.warning(
                         'Could not find final place for text annotation '
-                        f'{text_info.text!r}')
+                        f'{text_info.text!r}'
+                    )
 
         # This ensures text_layer is writeable
-        text_layer = (np.array(text_im.getdata()).astype(np.uint8)
-                      .reshape(text_layer.shape))
+        text_layer = (
+            np.array(text_im.getdata()).astype(np.uint8).reshape(text_layer.shape)
+        )
         text_layer[graphic_layer != 0] = graphic_layer[graphic_layer != 0]
 
         res[text_layer != 0] = text_layer[text_layer != 0]

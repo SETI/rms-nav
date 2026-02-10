@@ -32,7 +32,7 @@ def parse_filename(filename: str) -> Optional[tuple[str, float, float]]:
         print(f'Warning: Filename does not end with "_metadata.json": {filename}')
         return None
 
-    base = filename[:-len('_metadata.json')]
+    base = filename[: -len('_metadata.json')]
 
     # Try to find the last two numbers (offsets) in the filename
     # Pattern: name followed by _number_number
@@ -123,16 +123,22 @@ def collect_results(
         # Offset format is [dv, du] according to nav_master.py
         # Explicitly validate type and length
         if not isinstance(offset, (list, tuple)):
-            print(f'Warning: Invalid offset type in {metadata_file.name}: {type(offset)}')
+            print(
+                f'Warning: Invalid offset type in {metadata_file.name}: {type(offset)}'
+            )
             continue
         if len(offset) != 2:
-            print(f'Warning: Invalid offset length in {metadata_file.name}: {len(offset)}')
+            print(
+                f'Warning: Invalid offset length in {metadata_file.name}: {len(offset)}'
+            )
             continue
 
         try:
             found_v, found_u = float(offset[0]), float(offset[1])
         except (ValueError, TypeError) as e:
-            print(f'Warning: Could not convert offset values to float in {metadata_file.name}: {e}')
+            print(
+                f'Warning: Could not convert offset values to float in {metadata_file.name}: {e}'
+            )
             continue
 
         # Store result
@@ -214,11 +220,15 @@ def create_heatmaps(
     # Fill in error values
     for (orig_u, orig_v), (found_u, found_v) in results.items():
         # Find indices (handle case where we padded single values)
-        u_idx = u_values.index(orig_u) if orig_u in u_values else min(
-            range(len(u_values)), key=lambda i: abs(u_values[i] - orig_u)
+        u_idx = (
+            u_values.index(orig_u)
+            if orig_u in u_values
+            else min(range(len(u_values)), key=lambda i: abs(u_values[i] - orig_u))
         )
-        v_idx = v_values.index(orig_v) if orig_v in v_values else min(
-            range(len(v_values)), key=lambda i: abs(v_values[i] - orig_v)
+        v_idx = (
+            v_values.index(orig_v)
+            if orig_v in v_values
+            else min(range(len(v_values)), key=lambda i: abs(v_values[i] - orig_v))
         )
 
         # Compute errors
@@ -348,8 +358,12 @@ def main() -> None:
     results = collect_results(nav_results_root, args.template_name)
 
     # Filter results by U/V ranges if specified
-    if (args.u_min is not None or args.u_max is not None or
-            args.v_min is not None or args.v_max is not None):
+    if (
+        args.u_min is not None
+        or args.u_max is not None
+        or args.v_min is not None
+        or args.v_max is not None
+    ):
         results = filter_results(
             results,
             u_min=args.u_min,

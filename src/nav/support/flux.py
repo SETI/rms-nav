@@ -1,16 +1,12 @@
 # import logging
 
-import os
 
-import numpy as np
 # import scipy.constants as const
-import scipy.interpolate as interp
 # import scipy.integrate as integrate
 
 # import oops
 # from psfmodel.gaussian import GaussianPSF
 
-import matplotlib.pyplot as plt
 
 # import nav.config
 # from nav.misc import simple_filter_name_f1f2
@@ -19,11 +15,11 @@ import matplotlib.pyplot as plt
 # _LOGGING_NAME = 'cb.' + __name__
 
 
-#===============================================================================
+# ===============================================================================
 #
 # FILTER CONVOLUTIONS
 #
-#===============================================================================
+# ===============================================================================
 
 # def _interpolate_and_convolve_2(x1, y1, x2, y2):
 #     """Convolve two tabulations and return the intersected interval."""
@@ -49,11 +45,11 @@ import matplotlib.pyplot as plt
 #     return new_x, new_y1*new_y2*new_y3
 
 
-#===============================================================================
+# ===============================================================================
 #
 # CISSCAL-Related Functions
 #
-#===============================================================================
+# ===============================================================================
 
 # The steps taken by CISSCAL for radiometric calibration
 # (cassimg__radiomcalib.pro) are:
@@ -366,7 +362,7 @@ import matplotlib.pyplot as plt
 
 #     return eff_fact
 
-#===============================================================================
+# ===============================================================================
 
 # _IOF_FLUX_CONVERSION_FACTOR_CACHE = {}
 
@@ -405,11 +401,11 @@ import matplotlib.pyplot as plt
 #     return obs.data * factor
 
 
-#===============================================================================
+# ===============================================================================
 #
 # CASSINI FILTER TRANSMISSION FUNCTIONS
 #
-#===============================================================================
+# ===============================================================================
 
 # _CASSINI_FILTER_TRANSMISSION = {}
 
@@ -528,11 +524,11 @@ import matplotlib.pyplot as plt
 #     plt.show()
 
 
-#===============================================================================
+# ===============================================================================
 #
 # STANDARD PHOTOMETRIC FILTER TABLES
 #
-#===============================================================================
+# ===============================================================================
 
 # From Bessel 1990
 # _JOHNSON_B_WL = np.arange(360.,561.,10)
@@ -555,11 +551,12 @@ import matplotlib.pyplot as plt
 #     plt.show()
 
 
-#===============================================================================
+# ===============================================================================
 #
 # OPERATIONS ON STELLAR SPECTRA
 #
-#===============================================================================
+# ===============================================================================
+
 
 def clean_sclass(sclass: str | None) -> str:
     """Return a clean stellar classification such as A0 or M8."""
@@ -569,6 +566,7 @@ def clean_sclass(sclass: str | None) -> str:
         sclass = sclass[1:]
     sclass = sclass[:2]
     return sclass
+
 
 # _STELLAR_SPECTRUM_FILES = {
 #     'O0': None,

@@ -9,9 +9,7 @@ from .obs_snapshot import ObsSnapshot
 class ObsSnapshotInst(ObsSnapshot, ObsInst):
     """Mix-in of ObsSnapshot and ObsInst."""
 
-    def __init__(self,
-                 snapshot: Snapshot,
-                 **kwargs: Any) -> None:
+    def __init__(self, snapshot: Snapshot, **kwargs: Any) -> None:
         """Initializes a new ObsSnapshotInst instance.
 
         Parameters:

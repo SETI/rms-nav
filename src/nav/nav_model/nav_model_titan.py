@@ -7,11 +7,9 @@ from .nav_model import NavModel
 
 
 class NavModelTitan(NavModel):
-    def __init__(self,
-                 name: str,
-                 obs: Observation,
-                 *,
-                 config: Optional[Config] = None) -> None:
+    def __init__(
+        self, name: str, obs: Observation, *, config: Optional[Config] = None
+    ) -> None:
         """Creates a navigation model for Titan with specialized features.
 
         Parameters:

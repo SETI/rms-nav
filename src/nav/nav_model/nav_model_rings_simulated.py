@@ -25,13 +25,15 @@ class NavModelRingsSimulated(NavModelRingsBase):
     than computing them from ephemeris data.
     """
 
-    def __init__(self,
-                 name: str,
-                 obs: oops.Observation,
-                 ring_name: str,
-                 sim_params: dict[str, Any],
-                 *,
-                 config: Optional[Config] = None) -> None:
+    def __init__(
+        self,
+        name: str,
+        obs: oops.Observation,
+        ring_name: str,
+        sim_params: dict[str, Any],
+        *,
+        config: Optional[Config] = None,
+    ) -> None:
         """Creates a navigation model for simulated rings.
 
         Parameters:
@@ -52,11 +54,13 @@ class NavModelRingsSimulated(NavModelRingsBase):
         self._ring_name = ring_name.upper()
         self._sim_params = sim_params.copy()
 
-    def create_model(self,
-                     *,
-                     always_create_model: bool = False,
-                     never_create_model: bool = False,
-                     create_annotations: bool = True) -> None:
+    def create_model(
+        self,
+        *,
+        always_create_model: bool = False,
+        never_create_model: bool = False,
+        create_annotations: bool = True,
+    ) -> None:
         """Creates the internal model representation for simulated rings.
 
         Parameters:
@@ -76,18 +80,22 @@ class NavModelRingsSimulated(NavModelRingsBase):
         self._models.clear()
 
         with self._logger.open(f'CREATE SIMULATED RINGS MODEL FOR: {self._ring_name}'):
-            self._create_model(always_create_model=always_create_model,
-                               never_create_model=never_create_model,
-                               create_annotations=create_annotations)
+            self._create_model(
+                always_create_model=always_create_model,
+                never_create_model=never_create_model,
+                create_annotations=create_annotations,
+            )
 
         end_time = now_dt()
         metadata['end_time'] = end_time.isoformat()
         metadata['elapsed_time_sec'] = (end_time - start_time).total_seconds()
 
-    def _create_model(self,
-                      always_create_model: bool,
-                      never_create_model: bool,
-                      create_annotations: bool) -> None:
+    def _create_model(
+        self,
+        always_create_model: bool,
+        never_create_model: bool,
+        create_annotations: bool,
+    ) -> None:
         """Creates the internal model representation for simulated rings.
 
         Parameters:
@@ -121,7 +129,15 @@ class NavModelRingsSimulated(NavModelRingsBase):
         ring_params_extfov['center_u'] = center_u_extfov
         # To fake the normal ring modeling process, we shade solid rings because we
         # don't know what else is in the area between the edges
-        render_ring(sim_img, ring_params_extfov, 0.0, 0.0, time=time, epoch=epoch, shade_solid=True)
+        render_ring(
+            sim_img,
+            ring_params_extfov,
+            0.0,
+            0.0,
+            time=time,
+            epoch=epoch,
+            shade_solid=True,
+        )
 
         # Update model and mask
         ring_mask = sim_img != 0.0
@@ -149,9 +165,9 @@ class NavModelRingsSimulated(NavModelRingsBase):
         )
         self._models.append(result)
 
-    def _create_simulated_edge_annotations(self,
-                                           obs: oops.Observation,
-                                           model_mask: NDArrayBoolType) -> Annotations:
+    def _create_simulated_edge_annotations(
+        self, obs: oops.Observation, model_mask: NDArrayBoolType
+    ) -> Annotations:
         """Create annotations for simulated ring edges using the unified base method.
 
         Parameters:
@@ -193,20 +209,29 @@ class NavModelRingsSimulated(NavModelRingsBase):
                 inner_long_peri = float(inner_mode1.get('long_peri', 0.0))
                 inner_rate_peri = float(inner_mode1.get('rate_peri', 0.0))
 
-                edge_label = ('IEG' if feature_type == 'GAP' else 'IER')
+                edge_label = 'IEG' if feature_type == 'GAP' else 'IER'
                 label_text = f'{feature_name} {edge_label}'
 
                 # Compute edge mask using simulated border_atop
                 edge_mask = compute_border_atop_simulated(
-                    data_size_v, data_size_u, center_v, center_u,
-                    a=inner_a, ae=inner_ae, long_peri=inner_long_peri,
-                    rate_peri=inner_rate_peri, epoch=epoch, time=time)
+                    data_size_v,
+                    data_size_u,
+                    center_v,
+                    center_u,
+                    a=inner_a,
+                    ae=inner_ae,
+                    long_peri=inner_long_peri,
+                    rate_peri=inner_rate_peri,
+                    epoch=epoch,
+                    time=time,
+                )
 
                 # Embed into extended FOV
                 edge_mask_extfov = obs.make_extfov_false()
                 edge_mask_extfov[
-                    obs.extfov_margin_v:obs.extfov_margin_v + data_size_v,
-                    obs.extfov_margin_u:obs.extfov_margin_u + data_size_u] = edge_mask
+                    obs.extfov_margin_v : obs.extfov_margin_v + data_size_v,
+                    obs.extfov_margin_u : obs.extfov_margin_u + data_size_u,
+                ] = edge_mask
 
                 edge_info_list.append((edge_mask_extfov, label_text, edge_label))
 
@@ -218,20 +243,29 @@ class NavModelRingsSimulated(NavModelRingsBase):
                 outer_long_peri = float(outer_mode1.get('long_peri', 0.0))
                 outer_rate_peri = float(outer_mode1.get('rate_peri', 0.0))
 
-                edge_label = ('OEG' if feature_type == 'GAP' else 'OER')
+                edge_label = 'OEG' if feature_type == 'GAP' else 'OER'
                 label_text = f'{feature_name} {edge_label}'
 
                 # Compute edge mask using simulated border_atop
                 edge_mask = compute_border_atop_simulated(
-                    data_size_v, data_size_u, center_v, center_u,
-                    a=outer_a, ae=outer_ae, long_peri=outer_long_peri,
-                    rate_peri=outer_rate_peri, epoch=epoch, time=time)
+                    data_size_v,
+                    data_size_u,
+                    center_v,
+                    center_u,
+                    a=outer_a,
+                    ae=outer_ae,
+                    long_peri=outer_long_peri,
+                    rate_peri=outer_rate_peri,
+                    epoch=epoch,
+                    time=time,
+                )
 
                 # Embed into extended FOV
                 edge_mask_extfov = obs.make_extfov_false()
                 edge_mask_extfov[
-                    obs.extfov_margin_v:obs.extfov_margin_v + data_size_v,
-                    obs.extfov_margin_u:obs.extfov_margin_u + data_size_u] = edge_mask
+                    obs.extfov_margin_v : obs.extfov_margin_v + data_size_v,
+                    obs.extfov_margin_u : obs.extfov_margin_u + data_size_u,
+                ] = edge_mask
 
                 edge_info_list.append((edge_mask_extfov, label_text, edge_label))
 

@@ -9,13 +9,15 @@ from nav.config import Config
 from nav.obs import ObsSnapshot
 
 
-def _create_simulated_body_backplane(snapshot: ObsSnapshot,
-                                     body_name: str,
-                                     backplane_name: str,
-                                     v0: int,
-                                     v1: int,
-                                     u0: int,
-                                     u1: int) -> tuple[np.ndarray, np.ndarray]:
+def _create_simulated_body_backplane(
+    snapshot: ObsSnapshot,
+    body_name: str,
+    backplane_name: str,
+    v0: int,
+    v1: int,
+    u0: int,
+    u1: int,
+) -> tuple[np.ndarray, np.ndarray]:
     """Create a simulated backplane array and mask for a body.
 
     Parameters:
@@ -43,29 +45,28 @@ def _create_simulated_body_backplane(snapshot: ObsSnapshot,
     mask_map = snapshot.sim_body_mask_map
     mask = mask_map.get(str(body_name).upper(), None)
     if mask is not None:
-        sub_mask = mask[v0:v1 + 1, u0:u1 + 1].astype(bool)
+        sub_mask = mask[v0 : v1 + 1, u0 : u1 + 1].astype(bool)
     if sub_mask is None:
         try:
             # Build robust name list for matching
             order_names = [str(n).upper() for n in snapshot.sim_body_order_near_to_far]
             body_idx = order_names.index(str(body_name).upper()) + 1
             sim_map = snapshot.sim_body_index_map
-            sub_mask = (sim_map[v0:v1 + 1, u0:u1 + 1] == body_idx)
+            sub_mask = sim_map[v0 : v1 + 1, u0 : u1 + 1] == body_idx
         except Exception:
             # Fallback: fill entire rect (last resort)
             sub_mask = np.ones((v1 - v0 + 1, u1 - u0 + 1), dtype=bool)
-    full_slice = full[v0:v1 + 1, u0:u1 + 1]
+    full_slice = full[v0 : v1 + 1, u0 : u1 + 1]
     # Only fill where this body contributed
     full_slice[sub_mask] = val
-    full[v0:v1 + 1, u0:u1 + 1] = full_slice
-    full_mask[v0:v1 + 1, u0:u1 + 1] = sub_mask
+    full[v0 : v1 + 1, u0 : u1 + 1] = full_slice
+    full_mask[v0 : v1 + 1, u0 : u1 + 1] = sub_mask
     return full, full_mask
 
 
-def create_body_backplanes(snapshot: ObsSnapshot,
-                           config: Config,
-                           *,
-                           logger: PdsLogger) -> dict[str, Any]:
+def create_body_backplanes(
+    snapshot: ObsSnapshot, config: Config, *, logger: PdsLogger
+) -> dict[str, Any]:
     """Create configured body backplanes embedded in full-frame arrays.
 
     Parameters:
@@ -102,8 +103,11 @@ def create_body_backplanes(snapshot: ObsSnapshot,
         candidate_names = list(inv.keys())
 
     # Filter and sort by distance
-    bodies_by_range = [(name, inv[name]) for name in candidate_names
-                       if name in inv and snapshot.inventory_body_in_fov(inv[name])]
+    bodies_by_range = [
+        (name, inv[name])
+        for name in candidate_names
+        if name in inv and snapshot.inventory_body_in_fov(inv[name])
+    ]
     bodies_by_range.sort(key=lambda x: x[1]['range'])
 
     # Configured backplanes for bodies
@@ -129,7 +133,7 @@ def create_body_backplanes(snapshot: ObsSnapshot,
             snapshot.fov,
             origin=(u0 + 0.5, v0 + 0.5),
             limit=(u1 + 0.5, v1 + 0.5),
-            swap=True
+            swap=True,
         )
         bp = Backplane(snapshot, meshgrid=meshgrid)
 
@@ -162,9 +166,11 @@ def create_body_backplanes(snapshot: ObsSnapshot,
                 # Embed into full-frame arrays
                 full = np.zeros(snapshot.data.shape, dtype=np.float32)
                 full_mask = np.zeros(snapshot.data.shape, dtype=bool)
-                full[v0:v1 + 1, u0:u1 + 1] = np.ma.filled(mvals, fill_value=0.0).astype(np.float32)
+                full[v0 : v1 + 1, u0 : u1 + 1] = np.ma.filled(
+                    mvals, fill_value=0.0
+                ).astype(np.float32)
                 mask = ~np.ma.getmaskarray(mvals)
-                full_mask[v0:v1 + 1, u0:u1 + 1] = mask  # True where valid
+                full_mask[v0 : v1 + 1, u0 : u1 + 1] = mask  # True where valid
 
             per_type_arrays[bp_name] = full
             per_type_masks[bp_name] = full_mask

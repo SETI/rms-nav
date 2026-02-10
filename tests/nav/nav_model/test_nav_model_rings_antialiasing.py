@@ -13,59 +13,62 @@ from nav.nav_model.nav_model_rings import NavModelRings
 class MockObservation:
     """Mock observation for testing."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.closest_planet = 'SATURN'
         self.midtime = 0.0
         self.extdata_shape_vu = (100, 100)
 
-    def make_extfov_zeros(self):
+    def make_extfov_zeros(self) -> np.ndarray[tuple[int, int], np.dtype[np.float64]]:
         return np.zeros((100, 100), dtype=np.float64)
 
-    def make_extfov_false(self):
+    def make_extfov_false(self) -> np.ndarray[tuple[int, int], np.dtype[np.bool_]]:
         return np.zeros((100, 100), dtype=bool)
 
 
 @pytest.fixture
-def ring_model():
+def ring_model() -> NavModelRings:
     """Create a NavModelRings instance for testing."""
     obs = MockObservation()
     return NavModelRings('test_rings', obs)
 
 
-def test_antialiasing_pixel_center_at_edge(ring_model):
+def test_antialiasing_pixel_center_at_edge(ring_model: NavModelRings) -> None:
     """Test anti-aliasing when pixel center is exactly at edge."""
     radii = np.array([100.0])
     edge_radius = 100.0
     resolutions = np.array([10.0])
 
     shade = ring_model._compute_antialiasing(
-        radii=radii, edge_radius=edge_radius, shade_above=True, resolutions=resolutions)
+        radii=radii, edge_radius=edge_radius, shade_above=True, resolutions=resolutions
+    )
     assert shade[0] == pytest.approx(0.5, abs=1e-6)
 
 
-def test_antialiasing_edge_half_resolution_above(ring_model):
+def test_antialiasing_edge_half_resolution_above(ring_model: NavModelRings) -> None:
     """Test anti-aliasing when edge is 0.5*resolution above pixel center."""
     radii = np.array([100.0])
     edge_radius = 105.0  # 0.5 * resolution above
     resolutions = np.array([10.0])
 
     shade = ring_model._compute_antialiasing(
-        radii=radii, edge_radius=edge_radius, shade_above=True, resolutions=resolutions)
+        radii=radii, edge_radius=edge_radius, shade_above=True, resolutions=resolutions
+    )
     assert shade[0] == pytest.approx(1.0, abs=1e-6)
 
 
-def test_antialiasing_edge_half_resolution_below(ring_model):
+def test_antialiasing_edge_half_resolution_below(ring_model: NavModelRings) -> None:
     """Test anti-aliasing when edge is 0.5*resolution below pixel center."""
     radii = np.array([100.0])
     edge_radius = 95.0  # 0.5 * resolution below
     resolutions = np.array([10.0])
 
     shade = ring_model._compute_antialiasing(
-        radii=radii, edge_radius=edge_radius, shade_above=False, resolutions=resolutions)
+        radii=radii, edge_radius=edge_radius, shade_above=False, resolutions=resolutions
+    )
     assert shade[0] == pytest.approx(1.0, abs=1e-6)
 
 
-def test_antialiasing_shade_above_true(ring_model):
+def test_antialiasing_shade_above_true(ring_model: NavModelRings) -> None:
     """Test anti-aliasing with shade_above=True.
 
     When shade_above=True, we're shading the object above the edge, so
@@ -77,7 +80,8 @@ def test_antialiasing_shade_above_true(ring_model):
     resolutions = np.array([10.0, 10.0, 10.0])
 
     shade = ring_model._compute_antialiasing(
-        radii=radii, edge_radius=edge_radius, shade_above=True, resolutions=resolutions)
+        radii=radii, edge_radius=edge_radius, shade_above=True, resolutions=resolutions
+    )
     # First pixel: 5 km below edge, shade = 1.0 - 1*(95-100)/10 - 0.5 = 1.0
     assert shade[0] == pytest.approx(1.0, abs=1e-6)
     # Second pixel: center at edge, should be 0.5
@@ -86,7 +90,7 @@ def test_antialiasing_shade_above_true(ring_model):
     assert shade[2] == pytest.approx(0.0, abs=1e-6)
 
 
-def test_antialiasing_shade_above_false(ring_model):
+def test_antialiasing_shade_above_false(ring_model: NavModelRings) -> None:
     """Test anti-aliasing with shade_above=False.
 
     When shade_above=False, we're shading the object below the edge, so
@@ -98,7 +102,8 @@ def test_antialiasing_shade_above_false(ring_model):
     resolutions = np.array([10.0, 10.0, 10.0])
 
     shade = ring_model._compute_antialiasing(
-        radii=radii, edge_radius=edge_radius, shade_above=False, resolutions=resolutions)
+        radii=radii, edge_radius=edge_radius, shade_above=False, resolutions=resolutions
+    )
     # First pixel: 5 km below edge, should be 0 (in object, no anti-aliasing)
     assert shade[0] == pytest.approx(0.0, abs=1e-6)
     # Second pixel: center at edge, should be 0.5
@@ -107,16 +112,18 @@ def test_antialiasing_shade_above_false(ring_model):
     assert shade[2] == pytest.approx(1.0, abs=1e-6)
 
 
-def test_antialiasing_value_range(ring_model):
+def test_antialiasing_value_range(ring_model: NavModelRings) -> None:
     """Test that anti-aliasing values are always in [0, 1] range."""
     radii = np.linspace(80.0, 120.0, 100)
     edge_radius = 100.0
     resolutions = np.full(100, 10.0)
 
     shade_above = ring_model._compute_antialiasing(
-        radii=radii, edge_radius=edge_radius, shade_above=True, resolutions=resolutions)
+        radii=radii, edge_radius=edge_radius, shade_above=True, resolutions=resolutions
+    )
     shade_below = ring_model._compute_antialiasing(
-        radii=radii, edge_radius=edge_radius, shade_above=False, resolutions=resolutions)
+        radii=radii, edge_radius=edge_radius, shade_above=False, resolutions=resolutions
+    )
 
     # Calculate expected values for shade_above=True
     # Match the actual implementation: shade[shade > 1.0] = 1.0
@@ -141,7 +148,7 @@ def test_antialiasing_value_range(ring_model):
         assert shade_below[i] == pytest.approx(expected_below[i], abs=1e-6)
 
 
-def test_antialiasing_max_value_parameter(ring_model):
+def test_antialiasing_max_value_parameter(ring_model: NavModelRings) -> None:
     """Test anti-aliasing with custom max_value parameter."""
     radii = np.array([100.0])
     edge_radius = 100.0
@@ -149,19 +156,24 @@ def test_antialiasing_max_value_parameter(ring_model):
     max_value = 0.5
 
     shade = ring_model._compute_antialiasing(
-        radii=radii, edge_radius=edge_radius, shade_above=True,
-        resolutions=resolutions, max_value=max_value)
+        radii=radii,
+        edge_radius=edge_radius,
+        shade_above=True,
+        resolutions=resolutions,
+        max_value=max_value,
+    )
     assert shade[0] == pytest.approx(0.25, abs=1e-6)  # 0.5 * max_value
 
 
-def test_antialiasing_array_input(ring_model):
+def test_antialiasing_array_input(ring_model: NavModelRings) -> None:
     """Test anti-aliasing with 2-D array inputs."""
     radii = np.array([[100.0, 105.0], [95.0, 100.0]])
     edge_radius = 100.0
     resolutions = np.array([[10.0, 10.0], [10.0, 10.0]])
 
     shade = ring_model._compute_antialiasing(
-        radii=radii, edge_radius=edge_radius, shade_above=True, resolutions=resolutions)
+        radii=radii, edge_radius=edge_radius, shade_above=True, resolutions=resolutions
+    )
 
     # Calculate expected values matching the implementation
     shade_sign = 1.0

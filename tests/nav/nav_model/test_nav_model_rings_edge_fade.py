@@ -13,26 +13,32 @@ from nav.nav_model.nav_model_rings import NavModelRings
 class MockObservation:
     """Mock observation for testing."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.closest_planet = 'SATURN'
         self.midtime = 0.0
         self.extdata_shape_vu = (100, 100)
 
-    def make_extfov_zeros(self):
+    def make_extfov_zeros(self) -> np.ndarray[tuple[int, int], np.dtype[np.float64]]:
         return np.zeros((100, 100), dtype=np.float64)
 
-    def make_extfov_false(self):
+    def make_extfov_false(self) -> np.ndarray[tuple[int, int], np.dtype[np.bool_]]:
         return np.zeros((100, 100), dtype=bool)
 
 
 @pytest.fixture
-def ring_model():
+def ring_model() -> NavModelRings:
     """Create a NavModelRings instance for testing."""
     obs = MockObservation()
     return NavModelRings('test_rings', obs)
 
 
-def _calculate_fade_integral_shade_above(edge_radius, width, pixel_lower, pixel_upper, resolution):
+def _calculate_fade_integral_shade_above(
+    edge_radius: float,
+    width: float,
+    pixel_lower: float,
+    pixel_upper: float,
+    resolution: float,
+) -> float:
     """Calculate fade integral for shade_above case matching implementation logic.
 
     Matches the case-based logic in the implementation:
@@ -72,13 +78,20 @@ def _calculate_fade_integral_shade_above(edge_radius, width, pixel_lower, pixel_
         return 0.0
 
     # Integral formula matching implementation: [(1+a0/w)*a - a^2/(2w)] from a0 to a1
-    integral = (((1.0 + edge_radius / width) * (integration_end - integration_start) +
-                (integration_start**2 - integration_end**2) / (2.0 * width)) /
-                resolution)
+    integral = (
+        (1.0 + edge_radius / width) * (integration_end - integration_start)
+        + (integration_start**2 - integration_end**2) / (2.0 * width)
+    ) / resolution
     return integral
 
 
-def _calculate_fade_integral_shade_below(edge_radius, width, pixel_lower, pixel_upper, resolution):
+def _calculate_fade_integral_shade_below(
+    edge_radius: float,
+    width: float,
+    pixel_lower: float,
+    pixel_upper: float,
+    resolution: float,
+) -> float:
     """Calculate fade integral for shade_below case matching implementation logic.
 
     Matches the case-based logic in the implementation:
@@ -118,20 +131,21 @@ def _calculate_fade_integral_shade_below(edge_radius, width, pixel_lower, pixel_
         return 0.0
 
     # Integral formula matching implementation: [(1-a0/w)*a + a^2/(2w)] from a0 to a1
-    integral = (((1.0 - edge_radius / width) * (integration_end - integration_start) +
-                (integration_end**2 - integration_start**2) / (2.0 * width)) /
-                resolution)
+    integral = (
+        (1.0 - edge_radius / width) * (integration_end - integration_start)
+        + (integration_end**2 - integration_start**2) / (2.0 * width)
+    ) / resolution
     return integral
 
 
-def test_edge_fade_shade_above_basic(ring_model):
+def test_edge_fade_shade_above_basic(ring_model: NavModelRings) -> None:
     """Test basic edge fade with shade_above=True using multiple radii and edge cases."""
     # Create a 5x5 grid with various radii to test different scenarios
     model = np.zeros((5, 5), dtype=np.float64)
     edge_radius = 100.0
     radius_width_km = 20.0
     min_radius_width_km = 5.0
-    feature_list_by_a = []
+    feature_list_by_a: list[tuple[float, str]] = []
 
     # Test various pixel positions:
     # - Pixel exactly at edge (100.0)
@@ -140,27 +154,37 @@ def test_edge_fade_shade_above_basic(ring_model):
     # - Pixel above fade region (125.0, 130.0)
     # - Pixel with non-integer center (97.5, 102.5)
     # - Pixel with odd resolution (7.0, 13.0) to test non-even division
-    radii = np.array([
-        [90.0, 95.0, 100.0, 105.0, 110.0],
-        [92.5, 97.5, 100.0, 102.5, 107.5],
-        [95.0, 100.0, 100.0, 115.0, 120.0],
-        [100.0, 105.0, 110.0, 115.0, 125.0],
-        [110.0, 115.0, 120.0, 125.0, 130.0]
-    ])
+    radii = np.array(
+        [
+            [90.0, 95.0, 100.0, 105.0, 110.0],
+            [92.5, 97.5, 100.0, 102.5, 107.5],
+            [95.0, 100.0, 100.0, 115.0, 120.0],
+            [100.0, 105.0, 110.0, 115.0, 125.0],
+            [110.0, 115.0, 120.0, 125.0, 130.0],
+        ]
+    )
 
     # Use different resolutions to test edge cases
-    resolutions = np.array([
-        [10.0, 10.0, 10.0, 10.0, 10.0],
-        [7.0, 10.0, 10.0, 10.0, 13.0],  # Odd resolutions
-        [10.0, 10.0, 10.0, 10.0, 10.0],
-        [10.0, 10.0, 10.0, 10.0, 10.0],
-        [10.0, 10.0, 10.0, 10.0, 10.0]
-    ])
+    resolutions = np.array(
+        [
+            [10.0, 10.0, 10.0, 10.0, 10.0],
+            [7.0, 10.0, 10.0, 10.0, 13.0],  # Odd resolutions
+            [10.0, 10.0, 10.0, 10.0, 10.0],
+            [10.0, 10.0, 10.0, 10.0, 10.0],
+            [10.0, 10.0, 10.0, 10.0, 10.0],
+        ]
+    )
 
     result = ring_model._compute_edge_fade(
-        model=model, radii=radii, edge_radius=edge_radius, shade_above=True,
-        radius_width_km=radius_width_km, min_radius_width_km=min_radius_width_km,
-        resolutions=resolutions, feature_list_by_a=feature_list_by_a)
+        model=model,
+        radii=radii,
+        edge_radius=edge_radius,
+        shade_above=True,
+        radius_width_km=radius_width_km,
+        min_radius_width_km=min_radius_width_km,
+        resolutions=resolutions,
+        feature_list_by_a=feature_list_by_a,
+    )
 
     assert result is not None
 
@@ -171,21 +195,27 @@ def test_edge_fade_shade_above_basic(ring_model):
             pixel_lower = pixel_center - resolutions[i, j] / 2.0
             pixel_upper = pixel_center + resolutions[i, j] / 2.0
             expected_shade = _calculate_fade_integral_shade_above(
-                edge_radius, radius_width_km, pixel_lower, pixel_upper, resolutions[i, j])
+                edge_radius,
+                radius_width_km,
+                pixel_lower,
+                pixel_upper,
+                resolutions[i, j],
+            )
             expected_value = model[i, j] + np.clip(expected_shade, 0.0, 1.0)
             assert result[i, j] == pytest.approx(expected_value, abs=1e-6), (
                 f'Pixel at ({i}, {j}) with center={pixel_center:.1f}, '
-                f'resolution={resolutions[i, j]:.1f} failed')
+                f'resolution={resolutions[i, j]:.1f} failed'
+            )
 
 
-def test_edge_fade_shade_above_false(ring_model):
+def test_edge_fade_shade_above_false(ring_model: NavModelRings) -> None:
     """Test basic edge fade with shade_above=False using multiple radii and edge cases."""
     # Create a 5x5 grid with various radii to test different scenarios
     model = np.zeros((5, 5), dtype=np.float64)
     edge_radius = 100.0
     radius_width_km = 20.0
     min_radius_width_km = 5.0
-    feature_list_by_a = []
+    feature_list_by_a: list[tuple[float, str]] = []
 
     # Test various pixel positions:
     # - Pixel exactly at edge (100.0)
@@ -194,27 +224,37 @@ def test_edge_fade_shade_above_false(ring_model):
     # - Pixel below fade region (70.0, 75.0, 80.0)
     # - Pixel with non-integer center (97.5, 102.5)
     # - Pixel with odd resolution (7.0, 13.0) to test non-even division
-    radii = np.array([
-        [70.0, 80.0, 85.0, 90.0, 95.0],
-        [75.0, 85.0, 90.0, 95.0, 100.0],
-        [80.0, 90.0, 100.0, 100.0, 110.0],
-        [92.5, 97.5, 100.0, 102.5, 107.5],
-        [95.0, 100.0, 105.0, 110.0, 115.0]
-    ])
+    radii = np.array(
+        [
+            [70.0, 80.0, 85.0, 90.0, 95.0],
+            [75.0, 85.0, 90.0, 95.0, 100.0],
+            [80.0, 90.0, 100.0, 100.0, 110.0],
+            [92.5, 97.5, 100.0, 102.5, 107.5],
+            [95.0, 100.0, 105.0, 110.0, 115.0],
+        ]
+    )
 
     # Use different resolutions to test edge cases
-    resolutions = np.array([
-        [10.0, 10.0, 10.0, 10.0, 10.0],
-        [10.0, 10.0, 10.0, 10.0, 10.0],
-        [10.0, 10.0, 10.0, 10.0, 10.0],
-        [7.0, 10.0, 10.0, 10.0, 13.0],  # Odd resolutions
-        [10.0, 10.0, 10.0, 10.0, 10.0]
-    ])
+    resolutions = np.array(
+        [
+            [10.0, 10.0, 10.0, 10.0, 10.0],
+            [10.0, 10.0, 10.0, 10.0, 10.0],
+            [10.0, 10.0, 10.0, 10.0, 10.0],
+            [7.0, 10.0, 10.0, 10.0, 13.0],  # Odd resolutions
+            [10.0, 10.0, 10.0, 10.0, 10.0],
+        ]
+    )
 
     result = ring_model._compute_edge_fade(
-        model=model, radii=radii, edge_radius=edge_radius, shade_above=False,
-        radius_width_km=radius_width_km, min_radius_width_km=min_radius_width_km,
-        resolutions=resolutions, feature_list_by_a=feature_list_by_a)
+        model=model,
+        radii=radii,
+        edge_radius=edge_radius,
+        shade_above=False,
+        radius_width_km=radius_width_km,
+        min_radius_width_km=min_radius_width_km,
+        resolutions=resolutions,
+        feature_list_by_a=feature_list_by_a,
+    )
 
     assert result is not None
 
@@ -225,14 +265,20 @@ def test_edge_fade_shade_above_false(ring_model):
             pixel_lower = pixel_center - resolutions[i, j] / 2.0
             pixel_upper = pixel_center + resolutions[i, j] / 2.0
             expected_shade = _calculate_fade_integral_shade_below(
-                edge_radius, radius_width_km, pixel_lower, pixel_upper, resolutions[i, j])
+                edge_radius,
+                radius_width_km,
+                pixel_lower,
+                pixel_upper,
+                resolutions[i, j],
+            )
             expected_value = model[i, j] + np.clip(expected_shade, 0.0, 1.0)
             assert result[i, j] == pytest.approx(expected_value, abs=1e-6), (
                 f'Pixel at ({i}, {j}) with center={pixel_center:.1f}, '
-                f'resolution={resolutions[i, j]:.1f} failed')
+                f'resolution={resolutions[i, j]:.1f} failed'
+            )
 
 
-def test_edge_fade_too_narrow(ring_model):
+def test_edge_fade_too_narrow(ring_model: NavModelRings) -> None:
     """Test edge fade when width is too narrow."""
     model = np.zeros((10, 10), dtype=np.float64)
     radii = np.full((10, 10), 100.0)
@@ -240,17 +286,23 @@ def test_edge_fade_too_narrow(ring_model):
     radius_width_km = 2.0
     min_radius_width_km = 5.0  # Larger than width
     resolutions = np.full((10, 10), 10.0)
-    feature_list_by_a = []
+    feature_list_by_a: list[tuple[float, str]] = []
 
     result = ring_model._compute_edge_fade(
-        model=model, radii=radii, edge_radius=edge_radius, shade_above=True,
-        radius_width_km=radius_width_km, min_radius_width_km=min_radius_width_km,
-        resolutions=resolutions, feature_list_by_a=feature_list_by_a)
+        model=model,
+        radii=radii,
+        edge_radius=edge_radius,
+        shade_above=True,
+        radius_width_km=radius_width_km,
+        min_radius_width_km=min_radius_width_km,
+        resolutions=resolutions,
+        feature_list_by_a=feature_list_by_a,
+    )
 
     assert result is None
 
 
-def test_edge_fade_conflict_detection(ring_model):
+def test_edge_fade_conflict_detection(ring_model: NavModelRings) -> None:
     """Test edge fade conflict detection with nearby feature."""
     # Create a model with varying radii to properly test fade width
     model = np.zeros((20, 20), dtype=np.float64)
@@ -268,9 +320,15 @@ def test_edge_fade_conflict_detection(ring_model):
     feature_list_by_a = [(110.0, 'IER')]
 
     result = ring_model._compute_edge_fade(
-        model=model, radii=radii, edge_radius=edge_radius, shade_above=True,
-        radius_width_km=radius_width_km, min_radius_width_km=min_radius_width_km,
-        resolutions=resolutions, feature_list_by_a=feature_list_by_a)
+        model=model,
+        radii=radii,
+        edge_radius=edge_radius,
+        shade_above=True,
+        radius_width_km=radius_width_km,
+        min_radius_width_km=min_radius_width_km,
+        resolutions=resolutions,
+        feature_list_by_a=feature_list_by_a,
+    )
 
     assert result is not None
 
@@ -284,12 +342,13 @@ def test_edge_fade_conflict_detection(ring_model):
             pixel_lower = pixel_center - resolutions[i, j] / 2.0
             pixel_upper = pixel_center + resolutions[i, j] / 2.0
             expected_shade = _calculate_fade_integral_shade_above(
-                edge_radius, adjusted_width, pixel_lower, pixel_upper, resolutions[i, j])
+                edge_radius, adjusted_width, pixel_lower, pixel_upper, resolutions[i, j]
+            )
             expected_value = model[i, j] + np.clip(expected_shade, 0.0, 1.0)
             assert result[i, j] == pytest.approx(expected_value, abs=1e-6)
 
 
-def test_edge_fade_no_conflict(ring_model):
+def test_edge_fade_no_conflict(ring_model: NavModelRings) -> None:
     """Test edge fade when no conflicts exist."""
     # Create a model with varying radii to properly test fade width
     model = np.zeros((30, 30), dtype=np.float64)
@@ -308,9 +367,15 @@ def test_edge_fade_no_conflict(ring_model):
     feature_list_by_a = [(150.0, 'IER')]
 
     result = ring_model._compute_edge_fade(
-        model=model, radii=radii, edge_radius=edge_radius, shade_above=True,
-        radius_width_km=radius_width_km, min_radius_width_km=min_radius_width_km,
-        resolutions=resolutions, feature_list_by_a=feature_list_by_a)
+        model=model,
+        radii=radii,
+        edge_radius=edge_radius,
+        shade_above=True,
+        radius_width_km=radius_width_km,
+        min_radius_width_km=min_radius_width_km,
+        resolutions=resolutions,
+        feature_list_by_a=feature_list_by_a,
+    )
 
     assert result is not None
 
@@ -324,12 +389,13 @@ def test_edge_fade_no_conflict(ring_model):
             pixel_lower = pixel_center - resolutions[i, j] / 2.0
             pixel_upper = pixel_center + resolutions[i, j] / 2.0
             expected_shade = _calculate_fade_integral_shade_above(
-                edge_radius, adjusted_width, pixel_lower, pixel_upper, resolutions[i, j])
+                edge_radius, adjusted_width, pixel_lower, pixel_upper, resolutions[i, j]
+            )
             expected_value = model[i, j] + np.clip(expected_shade, 0.0, 1.0)
             assert result[i, j] == pytest.approx(expected_value, abs=1e-6)
 
 
-def test_edge_fade_value_range(ring_model):
+def test_edge_fade_value_range(ring_model: NavModelRings) -> None:
     """Test that fade values are always in [0, 1] range."""
     model = np.zeros((10, 10), dtype=np.float64)
     radii = np.linspace(80.0, 120.0, 100).reshape(10, 10)
@@ -337,12 +403,18 @@ def test_edge_fade_value_range(ring_model):
     radius_width_km = 20.0
     min_radius_width_km = 5.0
     resolutions = np.full((10, 10), 10.0)
-    feature_list_by_a = []
+    feature_list_by_a: list[tuple[float, str]] = []
 
     result = ring_model._compute_edge_fade(
-        model=model, radii=radii, edge_radius=edge_radius, shade_above=True,
-        radius_width_km=radius_width_km, min_radius_width_km=min_radius_width_km,
-        resolutions=resolutions, feature_list_by_a=feature_list_by_a)
+        model=model,
+        radii=radii,
+        edge_radius=edge_radius,
+        shade_above=True,
+        radius_width_km=radius_width_km,
+        min_radius_width_km=min_radius_width_km,
+        resolutions=resolutions,
+        feature_list_by_a=feature_list_by_a,
+    )
 
     assert result is not None
 
@@ -353,12 +425,17 @@ def test_edge_fade_value_range(ring_model):
             pixel_lower = pixel_center - resolutions[i, j] / 2.0
             pixel_upper = pixel_center + resolutions[i, j] / 2.0
             expected_shade = _calculate_fade_integral_shade_above(
-                edge_radius, radius_width_km, pixel_lower, pixel_upper, resolutions[i, j])
+                edge_radius,
+                radius_width_km,
+                pixel_lower,
+                pixel_upper,
+                resolutions[i, j],
+            )
             expected_value = model[i, j] + np.clip(expected_shade, 0.0, 1.0)
             assert result[i, j] == pytest.approx(expected_value, abs=1e-6)
 
 
-def test_edge_fade_adds_to_model(ring_model):
+def test_edge_fade_adds_to_model(ring_model: NavModelRings) -> None:
     """Test that fade adds to existing model values."""
     model = np.ones((10, 10), dtype=np.float64) * 0.5
     radii = np.full((10, 10), 100.0)
@@ -366,12 +443,18 @@ def test_edge_fade_adds_to_model(ring_model):
     radius_width_km = 20.0
     min_radius_width_km = 5.0
     resolutions = np.full((10, 10), 10.0)
-    feature_list_by_a = []
+    feature_list_by_a: list[tuple[float, str]] = []
 
     result = ring_model._compute_edge_fade(
-        model=model, radii=radii, edge_radius=edge_radius, shade_above=True,
-        radius_width_km=radius_width_km, min_radius_width_km=min_radius_width_km,
-        resolutions=resolutions, feature_list_by_a=feature_list_by_a)
+        model=model,
+        radii=radii,
+        edge_radius=edge_radius,
+        shade_above=True,
+        radius_width_km=radius_width_km,
+        min_radius_width_km=min_radius_width_km,
+        resolutions=resolutions,
+        feature_list_by_a=feature_list_by_a,
+    )
 
     assert result is not None
 
@@ -379,7 +462,8 @@ def test_edge_fade_adds_to_model(ring_model):
     pixel_lower = 100.0 - 10.0 / 2.0  # 95.0
     pixel_upper = 100.0 + 10.0 / 2.0  # 105.0
     expected_shade = _calculate_fade_integral_shade_above(
-        edge_radius, radius_width_km, pixel_lower, pixel_upper, 10.0)
+        edge_radius, radius_width_km, pixel_lower, pixel_upper, 10.0
+    )
     expected_value = model[0, 0] + np.clip(expected_shade, 0.0, 1.0)
 
     # All pixels should have the same value

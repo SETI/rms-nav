@@ -18,7 +18,8 @@ def generate_bundle_data_files(
     nav_results_root: FCPath,
     backplane_results_root: FCPath,
     bundle_results_root: FCPath,
-    logger: PdsLogger) -> None:
+    logger: PdsLogger,
+) -> None:
     """Generate PDS4 bundle data files for a single image batch.
 
     Parameters:
@@ -32,7 +33,8 @@ def generate_bundle_data_files(
 
     if len(image_files.image_files) != 1:
         raise ValueError(
-            f'Expected exactly one image per batch; got {len(image_files.image_files)}')
+            f'Expected exactly one image per batch; got {len(image_files.image_files)}'
+        )
 
     image_file = image_files.image_files[0]
     image_path = image_file.image_file_path.absolute()
@@ -40,7 +42,8 @@ def generate_bundle_data_files(
 
     metadata_file = nav_results_root / (results_path_stub + '_metadata.json')
     backplane_metadata_file = backplane_results_root / (
-        results_path_stub + '_backplane_metadata.json')
+        results_path_stub + '_backplane_metadata.json'
+    )
 
     with logger.open(f'Generating PDS4 bundle data files for {str(image_path)}'):
         # Read navigation metadata
@@ -50,9 +53,12 @@ def generate_bundle_data_files(
         status = nav_metadata.get('status', None)
         if status != 'success':
             # TODO Figure out what to do with non-navigated images
-            logger.warning('Skipping bundle generation for "%s": status=%s error=%s',
-                           image_path, status,
-                           nav_metadata.get('status_error', 'unknown'))
+            logger.warning(
+                'Skipping bundle generation for "%s": status=%s error=%s',
+                image_path,
+                status,
+                nav_metadata.get('status_error', 'unknown'),
+            )
             return
 
         # Read backplane metadata
@@ -88,9 +94,13 @@ def generate_bundle_data_files(
         browse_image_path = browse_dir / (pds4_path_stub + '_summary.png')
 
         # Add file path variables to template_vars
-        fits_file_path = backplane_results_root / (results_path_stub + '_backplanes.fits')
+        fits_file_path = backplane_results_root / (
+            results_path_stub + '_backplanes.fits'
+        )
         summary_png_source = nav_results_root / (results_path_stub + '_summary.png')
-        template_vars['BACKPLANE_FILENAME'] = label_file_path.name.replace('.lblx', '.fits')
+        template_vars['BACKPLANE_FILENAME'] = label_file_path.name.replace(
+            '.lblx', '.fits'
+        )
         template_vars['BACKPLANE_PATH'] = str(fits_file_path)
         template_vars['BACKPLANE_SUPPL_FILENAME'] = suppl_file_path.name
         template_vars['BACKPLANE_SUPPL_PATH'] = str(suppl_file_path)

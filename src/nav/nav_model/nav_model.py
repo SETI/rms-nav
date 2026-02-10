@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
-from nav.annotation import Annotations
 from nav.config import Config
 from nav.obs import ObsSnapshot
 from nav.support.nav_base import NavBase
@@ -12,11 +11,9 @@ from .nav_model_result import NavModelResult
 class NavModel(ABC, NavBase):
     """Base class for navigation models used to generate synthetic images."""
 
-    def __init__(self,
-                 name: str,
-                 obs: ObsSnapshot,
-                 *,
-                 config: Optional[Config] = None) -> None:
+    def __init__(
+        self, name: str, obs: ObsSnapshot, *, config: Optional[Config] = None
+    ) -> None:
         """Initializes a navigation model with observation data.
 
         Parameters:
@@ -60,11 +57,13 @@ class NavModel(ABC, NavBase):
         return self._models
 
     @abstractmethod
-    def create_model(self,
-                     *,
-                     always_create_model: bool = False,
-                     never_create_model: bool = False,
-                     create_annotations: bool = True) -> None:
+    def create_model(
+        self,
+        *,
+        always_create_model: bool = False,
+        never_create_model: bool = False,
+        create_annotations: bool = True,
+    ) -> None:
         """Creates the internal model representation for a navigation model.
 
         Parameters:

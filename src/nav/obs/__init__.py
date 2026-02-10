@@ -35,13 +35,15 @@ def inst_name_to_obs_class(name: str) -> type[ObsSnapshotInst]:
     return _INST_NAME_TO_OBS_CLASS_MAPPING[name.lower()]
 
 
-__all__ = ['Obs',
-           'ObsSnapshot',
-           'ObsSnapshotInst',
-           'ObsCassiniISS',
-           'ObsGalileoSSI',
-           'ObsNewHorizonsLORRI',
-           'ObsSim',
-           'ObsVoyagerISS',
-           'inst_names',
-           'inst_name_to_obs_class']
+__all__ = [
+    'Obs',
+    'ObsSnapshot',
+    'ObsSnapshotInst',
+    'ObsCassiniISS',
+    'ObsGalileoSSI',
+    'ObsNewHorizonsLORRI',
+    'ObsSim',
+    'ObsVoyagerISS',
+    'inst_names',
+    'inst_name_to_obs_class',
+]

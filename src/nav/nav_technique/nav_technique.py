@@ -14,10 +14,9 @@ if TYPE_CHECKING:
 class NavTechnique(ABC, NavBase):
     """Base class for navigation techniques."""
 
-    def __init__(self,
-                 nav_master: 'NavMaster',
-                 *,
-                 config: Optional[Config] = None) -> None:
+    def __init__(
+        self, nav_master: 'NavMaster', *, config: Optional[Config] = None
+    ) -> None:
         """Initializes a navigation technique.
 
         Parameters:
@@ -75,8 +74,12 @@ class NavTechnique(ABC, NavBase):
     def _filter_models(self, model_names: list[str]) -> list['NavModel']:
         """Filters the available models using glob patterns."""
         models = [
-            x for x in self.nav_master.all_models
-            if any(fnmatch.fnmatch(x.name.upper(), pattern.upper()) for pattern in model_names)
+            x
+            for x in self.nav_master.all_models
+            if any(
+                fnmatch.fnmatch(x.name.upper(), pattern.upper())
+                for pattern in model_names
+            )
         ]
         return models
 

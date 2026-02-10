@@ -27,7 +27,7 @@ def ra_rad_to_hms(ra: float) -> str:
     ra_deg = ra * oops.DPR / 15  # In hours
     hh = int(ra_deg)
     mm = int((ra_deg - hh) * 60)
-    ss = int((ra_deg - hh - mm / 60.) * 3600 * 1000 + .5) / 1000
+    ss = int((ra_deg - hh - mm / 60.0) * 3600 * 1000 + 0.5) / 1000
     if ss >= 60:
         mm += 1
         ss -= 60
@@ -37,7 +37,7 @@ def ra_rad_to_hms(ra: float) -> str:
     if hh >= 24:
         hh -= 24
 
-    return f"{hh:02d}h{mm:02d}m{ss:06.3f}s"
+    return f'{hh:02d}h{mm:02d}m{ss:06.3f}s'
 
 
 def dec_rad_to_dms(dec: float) -> str:
@@ -57,7 +57,7 @@ def dec_rad_to_dms(dec: float) -> str:
         dec_deg = -dec_deg
     dd = int(dec_deg)
     mm = int((dec_deg - dd) * 60)
-    ss = int((dec_deg - dd - mm / 60.) * 3600 * 1000 + .5) / 1000
+    ss = int((dec_deg - dd - mm / 60.0) * 3600 * 1000 + 0.5) / 1000
     if ss >= 60:
         mm += 1
         ss -= 60
@@ -74,7 +74,7 @@ def dec_rad_to_dms(dec: float) -> str:
         dd = -dd
     neg = '-' if is_neg else '+'
 
-    return f"{neg}{dd:03d}d{mm:02d}m{ss:06.3f}s"
+    return f'{neg}{dd:03d}d{mm:02d}m{ss:06.3f}s'
 
 
 def flatten_list(lst: list[Any]) -> list[Any]:

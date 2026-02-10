@@ -52,4 +52,5 @@ class MutableStar(Protocol):
     conflicts: str
     diff_u: float
     diff_v: float
+
     def ra_dec_with_pm(self, tdb: float) -> tuple[float, float] | tuple[None, None]: ...

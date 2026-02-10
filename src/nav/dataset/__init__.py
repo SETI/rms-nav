@@ -44,9 +44,9 @@ _DATASET_NAME_TO_INST_NAME_MAPPING = {
 }
 
 
-assert (sorted(_DATASET_NAME_TO_CLASS_MAPPING.keys()) ==
-        sorted(_DATASET_NAME_TO_INST_NAME_MAPPING.keys())), \
-            'Dataset names are inconsistent'
+assert sorted(_DATASET_NAME_TO_CLASS_MAPPING.keys()) == sorted(
+    _DATASET_NAME_TO_INST_NAME_MAPPING.keys()
+), 'Dataset names are inconsistent'
 
 
 def dataset_names() -> list[str]:
@@ -84,13 +84,15 @@ def dataset_name_to_inst_name(name: str) -> str:
     return _DATASET_NAME_TO_INST_NAME_MAPPING[name.lower()]
 
 
-__all__ = ['DataSet',
-           'DataSetPDS3CassiniISS',
-           'DataSetPDS3CassiniISSCruise',
-           'DataSetPDS3CassiniISSSaturn',
-           'DataSetPDS3GalileoSSI',
-           'DataSetPDS3NewHorizonsLORRI',
-           'DataSetPDS3VoyagerISS',
-           'DataSetSim',
-           'dataset_names',
-           'dataset_name_to_class']
+__all__ = [
+    'DataSet',
+    'DataSetPDS3CassiniISS',
+    'DataSetPDS3CassiniISSCruise',
+    'DataSetPDS3CassiniISSSaturn',
+    'DataSetPDS3GalileoSSI',
+    'DataSetPDS3NewHorizonsLORRI',
+    'DataSetPDS3VoyagerISS',
+    'DataSetSim',
+    'dataset_names',
+    'dataset_name_to_class',
+]

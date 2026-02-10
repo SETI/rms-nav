@@ -5,9 +5,9 @@ from nav.support.correlate import upsampled_dft
 from nav.support.types import NDArrayFloatType
 
 
-def _gaussian(shape: tuple[int, int],
-              sigma: float,
-              offset: tuple[float, float]) -> NDArrayFloatType:
+def _gaussian(
+    shape: tuple[int, int], sigma: float, offset: tuple[float, float]
+) -> NDArrayFloatType:
     v, u = shape
     ov, ou = offset
     cv = (v - 1) / 2.0
@@ -25,7 +25,8 @@ def _estimate_dy(usfac: int, region: int) -> float:
     X = fft2(A) * np.conj(fft2(B))
     dy_i = 0
     oy = region // 2
-    Up = upsampled_dft(X, usfac, (region, region), (oy - dy_i*usfac, oy))
+    # upsampled_dft accepts cross-power (complex); signature is float for historical reasons
+    Up = upsampled_dft(X, usfac, (region, region), (oy - dy_i * usfac, oy))  # type: ignore[arg-type]
     upy, _ = np.unravel_index(np.argmax(np.abs(Up)), Up.shape)
     dy = dy_i + (upy - oy) / usfac
     return float(dy)

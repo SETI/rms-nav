@@ -135,7 +135,9 @@ def create_simulated_body(
     if anti_aliasing > 0:
         # Smooth transition zone: about 1 pixel at work resolution, only at edge
         edge_width = 3.0
-        ellipse_mask = np.clip(1.0 - np.maximum(0, ellipse_dist - 1.0) / edge_width, 0.0, 1.0)
+        ellipse_mask = np.clip(
+            1.0 - np.maximum(0, ellipse_dist - 1.0) / edge_width, 0.0, 1.0
+        )
     else:
         ellipse_mask = (ellipse_dist <= 1.0).astype(float)
 
@@ -158,7 +160,7 @@ def create_simulated_body(
             ellipse_mask_nz,
             v_coords,
             u_coords,
-            nz,                 # indices of non-zero ellipse pixels (list/array of (v,u))
+            nz,  # indices of non-zero ellipse pixels (list/array of (v,u))
             rng,
             n_craters,
             crater_min_radius * semi_major_axis,
@@ -168,8 +170,8 @@ def create_simulated_body(
             work_center_v,
             work_center_u,
             aa_scale,
-            illumination_angle,     # 0 = from top, pi/2 = from right
-            phase_angle,        # 0 = from front, pi/2 = from side, pi = from back
+            illumination_angle,  # 0 = from top, pi/2 = from right
+            phase_angle,  # 0 = from front, pi/2 = from side, pi = from back
             ellipse_mask=ellipse_mask,
             z_coords=z_coords,
         )
@@ -192,7 +194,9 @@ def create_simulated_body(
     # Downsample if anti-aliasing was used
     if aa_scale > 1:
         # Simple box filter downsampling
-        intensity = intensity.reshape(size_v, aa_scale, size_u, aa_scale).mean(axis=(1, 3))
+        intensity = intensity.reshape(size_v, aa_scale, size_u, aa_scale).mean(
+            axis=(1, 3)
+        )
 
     # Ensure values are in [0, 1] range
     intensity = np.clip(intensity, 0.0, 1.0)
@@ -200,17 +204,19 @@ def create_simulated_body(
     return intensity
 
 
-def _lambertian_shading(ellipse_mask: NDArrayFloatType,
-                        v_rot: NDArrayFloatType,
-                        u_rot: NDArrayFloatType,
-                        z_coords: NDArrayFloatType,
-                        work_semi_major: float,
-                        work_semi_minor: float,
-                        work_semi_c: float,
-                        illumination_angle: float,
-                        phase_angle: float,
-                        cos_rz: float,
-                        sin_rz: float) -> NDArrayFloatType:
+def _lambertian_shading(
+    ellipse_mask: NDArrayFloatType,
+    v_rot: NDArrayFloatType,
+    u_rot: NDArrayFloatType,
+    z_coords: NDArrayFloatType,
+    work_semi_major: float,
+    work_semi_minor: float,
+    work_semi_c: float,
+    illumination_angle: float,
+    phase_angle: float,
+    cos_rz: float,
+    sin_rz: float,
+) -> NDArrayFloatType:
     """Add Lambertian shading to the intensity."""
     # Apply Lambertian shading for 3D ellipsoid
     # For a 3D ellipsoid, the surface normal at point (v, u, z) is:
@@ -223,12 +229,12 @@ def _lambertian_shading(ellipse_mask: NDArrayFloatType,
 
     # Only compute normals for points inside the ellipsoid
     inside_mask = ellipse_mask > 0
-    normal_v_local[inside_mask] = v_rot[inside_mask] / (work_semi_major ** 2)
-    normal_u_local[inside_mask] = u_rot[inside_mask] / (work_semi_minor ** 2)
-    normal_z_local[inside_mask] = z_coords[inside_mask] / (work_semi_c ** 2)
+    normal_v_local[inside_mask] = v_rot[inside_mask] / (work_semi_major**2)
+    normal_u_local[inside_mask] = u_rot[inside_mask] / (work_semi_minor**2)
+    normal_z_local[inside_mask] = z_coords[inside_mask] / (work_semi_c**2)
 
     # Normalize the normal vectors
-    normal_mag = np.sqrt(normal_v_local ** 2 + normal_u_local ** 2 + normal_z_local ** 2)
+    normal_mag = np.sqrt(normal_v_local**2 + normal_u_local**2 + normal_z_local**2)
     normal_mag = np.maximum(normal_mag, 1e-10)  # Avoid division by zero
     normal_v_local /= normal_mag
     normal_u_local /= normal_mag
@@ -270,7 +276,7 @@ def _lambertian_shading(ellipse_mask: NDArrayFloatType,
     illum_u_3d = illum_u_2d * illum_scale_2d
 
     # Normalize the 3D illumination direction
-    illum_mag = np.sqrt(illum_v_3d ** 2 + illum_u_3d ** 2 + illum_z ** 2)
+    illum_mag = np.sqrt(illum_v_3d**2 + illum_u_3d**2 + illum_z**2)
     if illum_mag > 1e-10:
         illum_v_3d /= illum_mag
         illum_u_3d /= illum_mag
@@ -284,16 +290,17 @@ def _lambertian_shading(ellipse_mask: NDArrayFloatType,
 
     # Compute cosine of incidence angle (Lambertian shading)
     # cos(incidence) = dot(normal, illumination_direction)
-    cos_incidence = (normal_v * illum_v_3d +
-                     normal_u * illum_u_3d +
-                     normal_z * illum_z_norm)
+    cos_incidence = (
+        normal_v * illum_v_3d + normal_u * illum_u_3d + normal_z * illum_z_norm
+    )
 
     # Lambertian shading: I = I₀ * max(0, cos(incidence))
     # Only apply to visible hemisphere and clip to [0, 1] range
     dark_side_illum_strength = 0.01  # TODO make config parameter
     light_side_illum_gamma = 1  # TODO make config parameter
-    illum_strength = np.where(visible_hemisphere,
-                              np.clip(cos_incidence, dark_side_illum_strength, 1.0), 0.0)
+    illum_strength = np.where(
+        visible_hemisphere, np.clip(cos_incidence, dark_side_illum_strength, 1.0), 0.0
+    )
     illum_strength **= light_side_illum_gamma
 
     # Base intensity from Lambertian shading (only inside the ellipsoid and visible hemisphere)
@@ -302,25 +309,26 @@ def _lambertian_shading(ellipse_mask: NDArrayFloatType,
     return intensity
 
 
-def _add_craters_and_shading(ellipse_mask_nz: NDArrayBoolType,
-                             v_coords: NDArrayFloatType,
-                             u_coords: NDArrayFloatType,
-                             nz: NDArrayIntType,
-                             rng: np.random.RandomState,
-                             n_craters: int,
-                             R_min: float,
-                             R_max: float,
-                             crater_power_law_exponent: float,
-                             crater_relief_scale: float,
-                             work_center_v: float,
-                             work_center_u: float,
-                             aa_scale: int,
-                             lighting_angle: float,
-                             phase_angle: float,
-                             *,
-                             ellipse_mask: NDArrayFloatType,
-                             z_coords: NDArrayFloatType
-                             ) -> NDArrayFloatType:
+def _add_craters_and_shading(
+    ellipse_mask_nz: NDArrayBoolType,
+    v_coords: NDArrayFloatType,
+    u_coords: NDArrayFloatType,
+    nz: NDArrayIntType,
+    rng: np.random.RandomState,
+    n_craters: int,
+    R_min: float,
+    R_max: float,
+    crater_power_law_exponent: float,
+    crater_relief_scale: float,
+    work_center_v: float,
+    work_center_u: float,
+    aa_scale: int,
+    lighting_angle: float,
+    phase_angle: float,
+    *,
+    ellipse_mask: NDArrayFloatType,
+    z_coords: NDArrayFloatType,
+) -> NDArrayFloatType:
     """
     Returns new intensity with craters + lighting applied.
     """
@@ -333,17 +341,19 @@ def _add_craters_and_shading(ellipse_mask_nz: NDArrayBoolType,
     # ------------------------------------------------------------------
     # 1. Radius distribution: power law in [R_min, R_max]
     # ------------------------------------------------------------------
-    def power_law_radius(rng: np.random.RandomState,
-                         R_min: float,
-                         R_max: float,
-                         alpha: float,
-                         size: Optional[int] = None) -> NDArrayFloatType:
+    def power_law_radius(
+        rng: np.random.RandomState,
+        R_min: float,
+        R_max: float,
+        alpha: float,
+        size: Optional[int] = None,
+    ) -> NDArrayFloatType:
         """Sample R from p(R) ∝ R^(-alpha) on [R_min, R_max], alpha > 1."""
         if alpha <= 1:
-            raise ValueError("alpha must be > 1 for a proper power law.")
+            raise ValueError('alpha must be > 1 for a proper power law.')
         a = 1.0 - alpha
-        R_min_a = R_min ** a
-        R_max_a = R_max ** a
+        R_min_a = R_min**a
+        R_max_a = R_max**a
         u = rng.uniform(0.0, 1.0, size=size)
         R = (R_min_a + u * (R_max_a - R_min_a)) ** (1.0 / a)
         return cast(NDArrayFloatType, R)
@@ -356,8 +366,9 @@ def _add_craters_and_shading(ellipse_mask_nz: NDArrayBoolType,
         v_crater, u_crater = nz[rng.randint(len(nz))]
 
         # Radius from power-law distribution
-        crater_radius = power_law_radius(rng, R_min * aa_scale, R_max * aa_scale,
-                                         crater_power_law_exponent)
+        crater_radius = power_law_radius(
+            rng, R_min * aa_scale, R_max * aa_scale, crater_power_law_exponent
+        )
 
         # Compute distances from crater center.
         # v_coords/u_coords are in centered pixel coordinates: (index + 0.5 - work_center_*).
@@ -405,14 +416,14 @@ def _add_craters_and_shading(ellipse_mask_nz: NDArrayBoolType,
         # 2b. Geometric profile: bowl + walls + raised rim
         # ------------------------------------------------------------------
         # TODO make config parameters
-        R_floor = 0.6 * crater_radius     # flat-ish floor
-        R_rim = crater_radius             # inner rim radius
-        R_outer = 1.3 * crater_radius     # where rim merges back to surface
+        R_floor = 0.6 * crater_radius  # flat-ish floor
+        R_rim = crater_radius  # inner rim radius
+        R_outer = 1.3 * crater_radius  # where rim merges back to surface
 
         local_profile = np.zeros_like(r)
 
         # Central bowl / floor (parabolic-ish)
-        inside_floor = (r <= R_floor)
+        inside_floor = r <= R_floor
         local_profile[inside_floor] = -crater_depth * (
             1.0 - (r[inside_floor] / R_floor) ** 2
         )
@@ -453,7 +464,7 @@ def _add_craters_and_shading(ellipse_mask_nz: NDArrayBoolType,
     nz_ /= norm
 
     # Illumination direction in image coordinates
-    lx_2d = np.sin(lighting_angle)   # +u to the right
+    lx_2d = np.sin(lighting_angle)  # +u to the right
     ly_2d = -np.cos(lighting_angle)  # -v is up (v increases downward)
     lx = lx_2d * np.sin(phase_angle)
     ly = ly_2d * np.sin(phase_angle)
@@ -467,7 +478,9 @@ def _add_craters_and_shading(ellipse_mask_nz: NDArrayBoolType,
     cos_incidence = nx * lx + ny * ly + nz_ * lz
     dark_side_illum_strength = 0.01  # TODO make config parameter
     light_side_illum_gamma = 1  # TODO make config parameter
-    lambert = np.where(visible, np.clip(cos_incidence, dark_side_illum_strength, 1.0), 0.0)
+    lambert = np.where(
+        visible, np.clip(cos_incidence, dark_side_illum_strength, 1.0), 0.0
+    )
     lambert **= light_side_illum_gamma
 
     # Apply ellipse mask (with AA edge)

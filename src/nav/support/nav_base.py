@@ -15,10 +15,7 @@ class NavBase:
         config: Configuration object for this instance. Uses DEFAULT_CONFIG if not provided.
     """
 
-    def __init__(self,
-                 *,
-                 config: Optional[Config] = None,
-                 **kwargs: Any) -> None:
+    def __init__(self, *, config: Optional[Config] = None, **kwargs: Any) -> None:
         """Initializes a new NavBase instance.
 
         Parameters:

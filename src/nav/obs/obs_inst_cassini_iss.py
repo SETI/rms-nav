@@ -19,11 +19,13 @@ class ObsCassiniISS(ObsSnapshotInst):
     """
 
     @staticmethod
-    def from_file(path: PathLike,
-                  *,
-                  config: Optional[Config] = None,
-                  extfov_margin_vu: tuple[int, int] | None = None,
-                  **kwargs: Any) -> 'ObsCassiniISS':
+    def from_file(
+        path: PathLike,
+        *,
+        config: Optional[Config] = None,
+        extfov_margin_vu: tuple[int, int] | None = None,
+        **kwargs: Any,
+    ) -> 'ObsCassiniISS':
         """Creates an ObsCassiniISS from a Cassini ISS image file.
 
         Parameters:
@@ -52,9 +54,9 @@ class ObsCassiniISS(ObsSnapshotInst):
         logger.debug(f'Reading Cassini ISS image {path}')
         logger.debug(f'  Fast distortion: {fast_distortion}')
         logger.debug(f'  Return all planets: {return_all_planets}')
-        obs = oops.hosts.cassini.iss.from_file(path,
-                                               fast_distortion=fast_distortion,
-                                               return_all_planets=return_all_planets)
+        obs = oops.hosts.cassini.iss.from_file(
+            path, fast_distortion=fast_distortion, return_all_planets=return_all_planets
+        )
         fc_path = FCPath(path)
         obs.abspath = cast(Path, fc_path.get_local_path()).absolute()
         obs.image_url = str(fc_path.absolute())
@@ -85,9 +87,9 @@ class ObsCassiniISS(ObsSnapshotInst):
         """
 
         if self.detector == 'WAC':
-            return 0.
+            return 0.0
 
-        return 0.
+        return 0.0
 
     def star_max_usable_vmag(self) -> float:
         """Returns the maximum usable magnitude for stars in this observation.
@@ -114,8 +116,8 @@ class ObsCassiniISS(ObsSnapshotInst):
             A dictionary containing the public metadata for Cassini ISS.
         """
 
-        scet_start = float(self.dict["SPACECRAFT_CLOCK_START_COUNT"])
-        scet_end = float(self.dict["SPACECRAFT_CLOCK_STOP_COUNT"])
+        scet_start = float(self.dict['SPACECRAFT_CLOCK_START_COUNT'])
+        scet_end = float(self.dict['SPACECRAFT_CLOCK_STOP_COUNT'])
 
         return {
             'image_path': self.image_url,
@@ -137,6 +139,6 @@ class ObsCassiniISS(ObsSnapshotInst):
             'filters': [self.filter1, self.filter2],
             'sampling': self.sampling,
             'gain_mode': self.gain_mode,
-            'description': self.dict.get("DESCRIPTION", None),
-            'observation_id': self.dict.get("OBSERVATION_ID", None)
+            'description': self.dict.get('DESCRIPTION', None),
+            'observation_id': self.dict.get('OBSERVATION_ID', None),
         }

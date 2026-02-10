@@ -29,8 +29,7 @@ TextLocInfo = namedtuple('TextLocInfo', ['label', 'label_v', 'label_u'])
 
 
 @functools.cache
-def _load_font(path: str,
-               size: int) -> ImageFont.FreeTypeFont:
+def _load_font(path: str, size: int) -> ImageFont.FreeTypeFont:
     """Loads and caches a font for text rendering.
 
     Parameters:
@@ -46,14 +45,16 @@ def _load_font(path: str,
 
 
 class AnnotationTextInfo:
-    def __init__(self,
-                 text: str,
-                 text_loc: list[TextLocInfo],
-                 ref_vu: tuple[int, int] | None,
-                 *,
-                 color: tuple[int, ...],
-                 font: str,
-                 font_size: int):
+    def __init__(
+        self,
+        text: str,
+        text_loc: list[TextLocInfo],
+        ref_vu: tuple[int, int] | None,
+        *,
+        color: tuple[int, ...],
+        font: str,
+        font_size: int,
+    ):
         """Initializes text annotation information.
 
         Parameters:
@@ -105,11 +106,13 @@ class AnnotationTextInfo:
 
     def __str__(self) -> str:
         """Returns a string representation of the text annotation information."""
-        ret = ('AnnotationTextInfo\n'
-               f'Text: {self.text}\n'
-               f'Ref vu: {self.ref_vu}, Color: {self.color}, Font: {self.font}, '
-               f'Font size: {self.font_size}\n'
-               'Text loc: ')
+        ret = (
+            'AnnotationTextInfo\n'
+            f'Text: {self.text}\n'
+            f'Ref vu: {self.ref_vu}, Color: {self.color}, Font: {self.font}, '
+            f'Font size: {self.font_size}\n'
+            'Text loc: '
+        )
         for loc in self.text_loc[:10]:
             ret += f'{loc} '
         if len(self.text_loc) > 10:
@@ -120,18 +123,20 @@ class AnnotationTextInfo:
         """Returns a string representation of the text annotation information."""
         return self.__str__()
 
-    def _draw_text(self,
-                   *,
-                   ann_num: int,
-                   extfov: tuple[int, int],
-                   offset: tuple[float, float],
-                   avoid_mask: NDArrayBoolType | None,
-                   text_layer: NDArrayIntType,
-                   graphic_layer: NDArrayIntType,
-                   ann_num_mask: NDArrayIntType | None,
-                   text_draw: ImageDraw.ImageDraw,
-                   tt_dir: str,
-                   show_all_positions: bool) -> bool:
+    def _draw_text(
+        self,
+        *,
+        ann_num: int,
+        extfov: tuple[int, int],
+        offset: tuple[float, float],
+        avoid_mask: NDArrayBoolType | None,
+        text_layer: NDArrayIntType,
+        graphic_layer: NDArrayIntType,
+        ann_num_mask: NDArrayIntType | None,
+        text_draw: ImageDraw.ImageDraw,
+        tt_dir: str,
+        show_all_positions: bool,
+    ) -> bool:
         """Try to place the text in a location that doesn't conflict with other elements.
 
         Parameters:
@@ -155,19 +160,21 @@ class AnnotationTextInfo:
         ext_offset_v = int(np.round(offset[0])) - extfov[0]
         ext_offset_u = int(np.round(offset[1])) - extfov[1]
 
-        if (self.ref_vu is not None and
-            (self.ref_vu[0] + ext_offset_v < 0 or
-             self.ref_vu[0] + ext_offset_v >= text_layer.shape[0] or
-             self.ref_vu[1] + ext_offset_u < 0 or
-             self.ref_vu[1] + ext_offset_u >= text_layer.shape[1])):
+        if self.ref_vu is not None and (
+            self.ref_vu[0] + ext_offset_v < 0
+            or self.ref_vu[0] + ext_offset_v >= text_layer.shape[0]
+            or self.ref_vu[1] + ext_offset_u < 0
+            or self.ref_vu[1] + ext_offset_u >= text_layer.shape[1]
+        ):
             # The thing we're labeling isn't in the FOV, so don't bother labeling it
             return True
 
         font = _load_font(os.path.join(tt_dir, self.font), self.font_size)
 
-        text_size = cast(tuple[int, int, int, int],
-                         text_draw.textbbox((0, 0), self.text,
-                                            anchor='la', font=font))
+        text_size = cast(
+            tuple[int, int, int, int],
+            text_draw.textbbox((0, 0), self.text, anchor='la', font=font),
+        )
         text_offset_u = text_size[0]
         text_offset_v = text_size[1]
         text_width_u = text_size[2] - text_size[0]
@@ -264,17 +271,23 @@ class AnnotationTextInfo:
             v1_margin = v - text_offset_v + text_width_v + text_margin
             u0_margin = u - text_offset_u - text_margin
             u1_margin = u - text_offset_u + text_width_u + text_margin
-            if (v0_margin < v_margin_min or v1_margin > v_margin_max or
-                u0_margin < u_margin_min or u1_margin > u_margin_max):
+            if (
+                v0_margin < v_margin_min
+                or v1_margin > v_margin_max
+                or u0_margin < u_margin_min
+                or u1_margin > u_margin_max
+            ):
                 # Text would run off edge
                 continue
 
-            if (avoid_mask is not None and
-                np.any(avoid_mask[v0_margin:v1_margin, u0_margin:u1_margin])):
+            if avoid_mask is not None and np.any(
+                avoid_mask[v0_margin:v1_margin, u0_margin:u1_margin]
+            ):
                 # Conflicts with something the program doesn't want us to overwrite
                 continue
-            if (ann_num_mask is not None and
-                np.any(ann_num_mask[v0_margin:v1_margin, u0_margin:u1_margin])):
+            if ann_num_mask is not None and np.any(
+                ann_num_mask[v0_margin:v1_margin, u0_margin:u1_margin]
+            ):
                 # Conflicts with text or arrows we've already drawn
                 continue
 
@@ -283,8 +296,14 @@ class AnnotationTextInfo:
                 assert arrow_v0 is not None
                 assert arrow_v1 is not None
                 # Calculate head width from angle and add a little margin of error
-                head_width = int(np.ceil(
-                    arrow_head_length * np.sin(np.deg2rad(arrow_head_angle)) * 2)) + 2
+                head_width = (
+                    int(
+                        np.ceil(
+                            arrow_head_length * np.sin(np.deg2rad(arrow_head_angle)) * 2
+                        )
+                    )
+                    + 2
+                )
                 if arrow_v0 == arrow_v1:  # Horizontal arrow
                     arrow_box_v0 = arrow_v0 - head_width // 2
                     arrow_box_v1 = arrow_v0 + head_width // 2
@@ -295,35 +314,57 @@ class AnnotationTextInfo:
                     arrow_box_u1 = arrow_u0 + head_width // 2
                     arrow_box_v0 = arrow_v0
                     arrow_box_v1 = arrow_v1
-                arrow_box_v0, arrow_box_v1 = (min(arrow_box_v0, arrow_box_v1),
-                                              max(arrow_box_v0, arrow_box_v1))
-                arrow_box_u0, arrow_box_u1 = (min(arrow_box_u0, arrow_box_u1),
-                                              max(arrow_box_u0, arrow_box_u1))
+                arrow_box_v0, arrow_box_v1 = (
+                    min(arrow_box_v0, arrow_box_v1),
+                    max(arrow_box_v0, arrow_box_v1),
+                )
+                arrow_box_u0, arrow_box_u1 = (
+                    min(arrow_box_u0, arrow_box_u1),
+                    max(arrow_box_u0, arrow_box_u1),
+                )
 
-                if (not v_margin_min <= arrow_box_v0 <= v_margin_max or
-                    not v_margin_min <= arrow_box_v1 <= v_margin_max or
-                    not u_margin_min <= arrow_box_u0 <= u_margin_max or
-                    not u_margin_min <= arrow_box_u1 <= u_margin_max):
+                if (
+                    not v_margin_min <= arrow_box_v0 <= v_margin_max
+                    or not v_margin_min <= arrow_box_v1 <= v_margin_max
+                    or not u_margin_min <= arrow_box_u0 <= u_margin_max
+                    or not u_margin_min <= arrow_box_u1 <= u_margin_max
+                ):
                     # Arrow would run off edge
                     continue
 
                 if ann_num_mask is not None:
-                    if np.any(ann_num_mask[arrow_box_v0:arrow_box_v1+1,
-                                           arrow_box_u0:arrow_box_u1+1]):
+                    if np.any(
+                        ann_num_mask[
+                            arrow_box_v0 : arrow_box_v1 + 1,
+                            arrow_box_u0 : arrow_box_u1 + 1,
+                        ]
+                    ):
                         # Conflicts with text or arrows we've already drawn
                         continue
-                    ann_num_mask[arrow_box_v0:arrow_box_v1+1,
-                                 arrow_box_u0:arrow_box_u1+1] = ann_num+1
-                draw_line_arrow(graphic_layer, self.color,
-                                arrow_u0, arrow_v0, arrow_u1, arrow_v1,
-                                thickness=arrow_thickness,
-                                arrow_head_length=arrow_head_length,
-                                arrow_head_angle=arrow_head_angle)
+                    ann_num_mask[
+                        arrow_box_v0 : arrow_box_v1 + 1, arrow_box_u0 : arrow_box_u1 + 1
+                    ] = ann_num + 1
+                draw_line_arrow(
+                    graphic_layer,
+                    self.color,
+                    arrow_u0,
+                    arrow_v0,
+                    arrow_u1,
+                    arrow_v1,
+                    thickness=arrow_thickness,
+                    arrow_head_length=arrow_head_length,
+                    arrow_head_angle=arrow_head_angle,
+                )
 
-            text_draw.text((u - text_offset_u, v - text_offset_v), self.text,
-                           anchor='la', fill=self.color, font=font)
+            text_draw.text(
+                (u - text_offset_u, v - text_offset_v),
+                self.text,
+                anchor='la',
+                fill=self.color,
+                font=font,
+            )
             if ann_num_mask is not None:
-                ann_num_mask[v0_margin:v1_margin, u0_margin:u1_margin] = ann_num+1
+                ann_num_mask[v0_margin:v1_margin, u0_margin:u1_margin] = ann_num + 1
 
             if not show_all_positions:
                 break

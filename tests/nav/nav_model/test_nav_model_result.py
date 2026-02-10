@@ -1,7 +1,6 @@
 """Unit tests for NavModelResult dataclass."""
 
 import numpy as np
-import pytest
 
 from nav.nav_model.nav_model_result import NavModelResult
 

@@ -30,9 +30,7 @@ def positive_float(value: str) -> float:
     except ValueError as e:
         raise argparse.ArgumentTypeError(f'Invalid float value: {value}') from e
     if fval <= 0:
-        raise argparse.ArgumentTypeError(
-            f'Stride must be positive, got: {value}'
-        )
+        raise argparse.ArgumentTypeError(f'Stride must be positive, got: {value}')
     return fval
 
 

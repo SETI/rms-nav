@@ -8,9 +8,7 @@ from pdslogger import PdsLogger
 from scipy.ndimage import gaussian_filter
 
 from nav.config import DEFAULT_LOGGER
-from nav.support.image import (crop_center,
-                               normalize_array,
-                               pad_top_left)
+from nav.support.image import crop_center, normalize_array, pad_top_left
 from nav.support.misc import mad_std
 from nav.support.types import NDArrayFloatType, NDArrayBoolType
 
@@ -19,27 +17,31 @@ from nav.support.types import NDArrayFloatType, NDArrayBoolType
 # Small utilities
 # ==============================================================
 
+
 def int_to_signed(idx, size):
     """Map [0..size-1] argmax index to signed displacement coordinate."""
-    return idx if idx < size//2 else idx - size
+    return idx if idx < size // 2 else idx - size
 
 
 # ==============================================================
 # Fourier helpers
 # ==============================================================
 
+
 def fourier_shift(img: NDArrayFloatType, dy: float, dx: float) -> NDArrayFloatType:
     """Subpixel shift via Fourier shift theorem (positive = down/right)."""
     fy = fftfreq(img.shape[0])[:, None]
     fx = fftfreq(img.shape[1])[None, :]
-    phase = np.exp(-2j * np.pi * (dy*fy + dx*fx))
+    phase = np.exp(-2j * np.pi * (dy * fy + dx * fx))
     return np.real(ifft2(fft2(img) * phase))
 
 
-def upsampled_dft(X: NDArrayFloatType,
-                  up_factor: int,
-                  region_sz: tuple[int, int],
-                  offsets: tuple[int, int]) -> NDArrayFloatType:
+def upsampled_dft(
+    X: NDArrayFloatType,
+    up_factor: int,
+    region_sz: tuple[int, int],
+    offsets: tuple[int, int],
+) -> NDArrayFloatType:
     """Localized upsampled DFT.
 
     From Guizar-Sicairos, 2008. "Efficient subpixel image registration via cross-correlation."
@@ -54,8 +56,8 @@ def upsampled_dft(X: NDArrayFloatType,
     b = np.arange(region_u) - ox
     j2pi = 1j * 2.0 * np.pi
     # Use +j sign to evaluate localized inverse DFT samples (consistent with ifft).
-    Er = np.exp((j2pi / (X_v_size*up_factor)) * (a[:, None] @ ky[None, :]))
-    Ec = np.exp((j2pi / (X_u_size*up_factor)) * (kx[:, None] @ b[None, :]))
+    Er = np.exp((j2pi / (X_v_size * up_factor)) * (a[:, None] @ ky[None, :]))
+    Ec = np.exp((j2pi / (X_u_size * up_factor)) * (kx[:, None] @ b[None, :]))
     return Er @ X @ Ec
 
 
@@ -63,9 +65,10 @@ def upsampled_dft(X: NDArrayFloatType,
 # Masked NCC (linear correlation via padding)
 # ==============================================================
 
-def masked_ncc(image: NDArrayFloatType,
-               model: NDArrayFloatType,
-               mask: NDArrayBoolType) -> NDArrayFloatType:
+
+def masked_ncc(
+    image: NDArrayFloatType, model: NDArrayFloatType, mask: NDArrayBoolType
+) -> NDArrayFloatType:
     """
     Masked normalized cross-correlation surface between image and model
     with mask.
@@ -83,15 +86,15 @@ def masked_ncc(image: NDArrayFloatType,
     sumI2 = ifft2(fft2(image**2) * np.conj(mask_fft))
 
     sumW = np.sum(mask)
-    meanM = np.sum(model*mask) / (sumW + 1e-12)
-    varM = np.sum(((model*mask) - meanM)**2) / (sumW + 1e-12)
+    meanM = np.sum(model * mask) / (sumW + 1e-12)
+    varM = np.sum(((model * mask) - meanM) ** 2) / (sumW + 1e-12)
 
     meanI = sumI / (sumW + 1e-12)
-    varI = (sumI2/(sumW + 1e-12)) - meanI**2
+    varI = (sumI2 / (sumW + 1e-12)) - meanI**2
     varI[varI < 0] = 0.0
 
     denom = np.sqrt(varI * varM + 1e-12)
-    return (num - np.real(meanI)*np.sum(model*mask)) / (denom + 1e-12)
+    return (num - np.real(meanI) * np.sum(model * mask)) / (denom + 1e-12)
 
 
 """CodeRabbit says:
@@ -158,14 +161,13 @@ but omits shift‑wise varI properly. Use standard masked NCC with shift‑wise 
 # Peak metrics & selection
 # ==============================================================
 
-def psr_metric(corr: NDArrayFloatType,
-               rc: tuple[int, int],
-               guard: int = 5) -> float:
+
+def psr_metric(corr: NDArrayFloatType, rc: tuple[int, int], guard: int = 5) -> float:
     corr_v, corr_u = corr.shape
     row, col = rc
     peak = corr[row, col]
     y, x = np.ogrid[:corr_v, :corr_u]
-    mask = (y-row)**2 + (x-col)**2 > guard**2
+    mask = (y - row) ** 2 + (x - col) ** 2 > guard**2
     bg = corr[mask]
     return (peak - bg.mean()) / (bg.std() + 1e-12)
 
@@ -178,9 +180,9 @@ def per_metric(corr: NDArrayFloatType, peak_val: float) -> float:
     return peak_val / (np.sqrt(np.sum(corr**2)) + 1e-12)
 
 
-def nms_topk(corr: NDArrayFloatType,
-             k: int = 5,
-             radius: int = 5) -> list[tuple[int, int, float]]:
+def nms_topk(
+    corr: NDArrayFloatType, k: int = 5, radius: int = 5
+) -> list[tuple[int, int, float]]:
     """Non-maximum suppression to get top-k peaks."""
     corr_v, corr_u = corr.shape
     work = corr.copy()
@@ -195,7 +197,7 @@ def nms_topk(corr: NDArrayFloatType,
         row, col = np.unravel_index(idx, work.shape)
         peaks.append((row, col, v))
         y, x = np.ogrid[:corr_v, :corr_u]
-        work[(y-row)**2 + (x-col)**2 <= radius**2] = -np.inf
+        work[(y - row) ** 2 + (x - col) ** 2 <= radius**2] = -np.inf
     return peaks
 
 
@@ -203,37 +205,42 @@ def nms_topk(corr: NDArrayFloatType,
 # Fisher / CRLB
 # ==============================================================
 
-def fisher_covariance(model_aligned: NDArrayFloatType,
-                      sigma_n: float) -> NDArrayFloatType:
+
+def fisher_covariance(
+    model_aligned: NDArrayFloatType, sigma_n: float
+) -> NDArrayFloatType:
     sy = np.gradient(model_aligned, axis=0)
     sx = np.gradient(model_aligned, axis=1)
     Sxx = np.sum(sx * sx)
     Syy = np.sum(sy * sy)
     Sxy = np.sum(sx * sy)
-    F = (1.0/(sigma_n**2 + 1e-18)) * np.array([[Sxx, Sxy], [Sxy, Syy]])
+    F = (1.0 / (sigma_n**2 + 1e-18)) * np.array([[Sxx, Sxy], [Sxy, Syy]])
     if np.linalg.cond(F) > 1e10:
         # Degenerate case: return large uncertainty
         return np.diag([1e6, 1e6])
-    return np.linalg.pinv(F + 1e-12*np.eye(2))
+    return np.linalg.pinv(F + 1e-12 * np.eye(2))
 
 
 # ==============================================================
 # Single-scale, K-peak evaluation (with optional prior)
 # ==============================================================
 
-def evaluate_candidate(*,
-                       image_pad: NDArrayFloatType,
-                       model_pad: NDArrayFloatType,
-                       mask_pad: NDArrayBoolType,
-                       corr: NDArrayFloatType,
-                       rc: tuple[int, int],
-                       upsample_factor: int,
-                       model_shape: tuple[int, int],
-                       image_shape: tuple[int, int],
-                       logger: PdsLogger,
-                       prior_shift: tuple[float, float] | None = None,
-                       prior_weight: float = 0.0,
-                       metric: str = 'psr') -> dict[str, Any]:
+
+def evaluate_candidate(
+    *,
+    image_pad: NDArrayFloatType,
+    model_pad: NDArrayFloatType,
+    mask_pad: NDArrayBoolType,
+    corr: NDArrayFloatType,
+    rc: tuple[int, int],
+    upsample_factor: int,
+    model_shape: tuple[int, int],
+    image_shape: tuple[int, int],
+    logger: PdsLogger,
+    prior_shift: tuple[float, float] | None = None,
+    prior_weight: float = 0.0,
+    metric: str = 'psr',
+) -> dict[str, Any]:
     """
     Evaluate a candidate for the navigation.
 
@@ -269,8 +276,12 @@ def evaluate_candidate(*,
     region_u = upsample_factor + 1
     oy = region_v // 2
     ox = region_u // 2
-    Up = upsampled_dft(spec, upsample_factor, (region_v, region_u),
-                       [oy - dy_i*upsample_factor, ox - dx_i*upsample_factor])
+    Up = upsampled_dft(
+        spec,
+        upsample_factor,
+        (region_v, region_u),
+        [oy - dy_i * upsample_factor, ox - dx_i * upsample_factor],
+    )
     upy, upx = np.unravel_index(np.argmax(np.abs(Up)), Up.shape)
     dy = dy_i + (upy - oy) / upsample_factor
     dx = dx_i + (upx - ox) / upsample_factor
@@ -316,26 +327,28 @@ def evaluate_candidate(*,
         quality -= prior_weight * dist
 
     return {
-        "offset": (float(dy), float(dx)),
-        "cov": cov,
-        "sigma_xy": (float(np.sqrt(cov[0, 0])), float(np.sqrt(cov[1, 1]))),
-        "quality": float(quality.real),
-        "peak_val": float(peak_val.real),
-        "rc": (int(p), int(q))
+        'offset': (float(dy), float(dx)),
+        'cov': cov,
+        'sigma_xy': (float(np.sqrt(cov[0, 0])), float(np.sqrt(cov[1, 1]))),
+        'quality': float(quality.real),
+        'peak_val': float(peak_val.real),
+        'rc': (int(p), int(q)),
     }
 
 
-def navigate_single_scale_kpeaks(*,
-                                 image: NDArrayFloatType,
-                                 model: NDArrayFloatType,
-                                 mask: NDArrayBoolType,
-                                 logger: Optional[PdsLogger],
-                                 max_peaks: int = 5,
-                                 upsample_factor: int = 16,
-                                 metric: str = 'psr',
-                                 prior_shift: tuple[float, float] | None = None,
-                                 prior_weight: float = 0.0,
-                                 nms_radius: int = 5) -> dict[str, Any]:
+def navigate_single_scale_kpeaks(
+    *,
+    image: NDArrayFloatType,
+    model: NDArrayFloatType,
+    mask: NDArrayBoolType,
+    logger: Optional[PdsLogger],
+    max_peaks: int = 5,
+    upsample_factor: int = 16,
+    metric: str = 'psr',
+    prior_shift: tuple[float, float] | None = None,
+    prior_weight: float = 0.0,
+    nms_radius: int = 5,
+) -> dict[str, Any]:
     """
     One-scale masked NCC + top-K candidate evaluation.
 
@@ -378,21 +391,30 @@ def navigate_single_scale_kpeaks(*,
 
     candidates = []
     for p, q, _ in peaks:
-        evaluation = evaluate_candidate(image_pad=image_pad, model_pad=model_pad, mask_pad=mask_pad,
-                                        corr=corr, rc=(p, q),
-                                        upsample_factor=upsample_factor,
-                                        model_shape=(model_h, model_w),
-                                        image_shape=(image_h, image_w),
-                                        prior_shift=prior_shift, prior_weight=prior_weight,
-                                        metric=metric, logger=logger)
+        evaluation = evaluate_candidate(
+            image_pad=image_pad,
+            model_pad=model_pad,
+            mask_pad=mask_pad,
+            corr=corr,
+            rc=(p, q),
+            upsample_factor=upsample_factor,
+            model_shape=(model_h, model_w),
+            image_shape=(image_h, image_w),
+            prior_shift=prior_shift,
+            prior_weight=prior_weight,
+            metric=metric,
+            logger=logger,
+        )
         candidates.append(evaluation)
         if logger is not None:
-            logger.debug(f'  Candidate {p}, {q} results: '
-                         f'offset {evaluation["offset"][0]:.3f}, {evaluation["offset"][1]:.3f}; '
-                         f'sigma_xy {evaluation["sigma_xy"][0]:.3f}, '
-                         f'{evaluation["sigma_xy"][1]:.3f}; '
-                         f'quality {evaluation["quality"]:.3f}; '
-                         f'peak_val {evaluation["peak_val"]:.3f}')
+            logger.debug(
+                f'  Candidate {p}, {q} results: '
+                f'offset {evaluation["offset"][0]:.3f}, {evaluation["offset"][1]:.3f}; '
+                f'sigma_xy {evaluation["sigma_xy"][0]:.3f}, '
+                f'{evaluation["sigma_xy"][1]:.3f}; '
+                f'quality {evaluation["quality"]:.3f}; '
+                f'peak_val {evaluation["peak_val"]:.3f}'
+            )
 
     if not candidates:
         # TODO When no candidates are found, the function returns cov: np.diag([1e6, 1e6])
@@ -404,25 +426,28 @@ def navigate_single_scale_kpeaks(*,
             'sigma_xy': (1e3, 1e3),
             'quality': -np.inf,
         }
-    return max(candidates, key=lambda r: r["quality"])
+    return max(candidates, key=lambda r: r['quality'])
 
 
 # ==============================================================
 # Pyramid wrapper with K-peak final selection
 # ==============================================================
 
-def navigate_with_pyramid_kpeaks(image: NDArrayFloatType,
-                                 model: NDArrayFloatType,
-                                 mask: NDArrayBoolType,
-                                 pyramid_levels: int = 3,
-                                 max_peaks: int = 5,
-                                 upsample_factor: int = 128,
-                                 metric: str = 'psr',
-                                 quality_thresh: float = 6.0,
-                                 consistency_tol: float = 2.0,
-                                 nms_radius: int = 5,
-                                 prior_weight_final: float = 0.25,
-                                 logger: Optional[PdsLogger] = None) -> dict[str, Any]:
+
+def navigate_with_pyramid_kpeaks(
+    image: NDArrayFloatType,
+    model: NDArrayFloatType,
+    mask: NDArrayBoolType,
+    pyramid_levels: int = 3,
+    max_peaks: int = 5,
+    upsample_factor: int = 128,
+    metric: str = 'psr',
+    quality_thresh: float = 6.0,
+    consistency_tol: float = 2.0,
+    nms_radius: int = 5,
+    prior_weight_final: float = 0.25,
+    logger: Optional[PdsLogger] = None,
+) -> dict[str, Any]:
     """TODO Clean this up
     Build class-aware effective model + mask, run coarse->fine, then evaluate K peaks at final
     scale.
@@ -487,9 +512,9 @@ def navigate_with_pyramid_kpeaks(image: NDArrayFloatType,
     # Coarse-to-fine prior sequence
     level_shifts = []
     for lvl in range(pyramid_levels, 0, -1):
-        s = 2**(lvl-1)
+        s = 2 ** (lvl - 1)
         # Anti-alias the image prior to decimation to avoid peak shifts at coarse levels
-        image_blurred = gaussian_filter(image, sigma=s/2.0)
+        image_blurred = gaussian_filter(image, sigma=s / 2.0)
         image_downsampled = image_blurred[::s, ::s]
 
         # Downsample model & mask with anti-aliasing
@@ -499,22 +524,30 @@ def navigate_with_pyramid_kpeaks(image: NDArrayFloatType,
         model_blurred = gaussian_filter(model, sigma=sigma)
         mask_blurred = gaussian_filter(mask.astype(float), sigma=sigma)
         model_downsampled = model_blurred[::s, ::s]
-        mask_downsampled = (mask_blurred[::s, ::s] > 0.5)
+        mask_downsampled = mask_blurred[::s, ::s] > 0.5
 
         res_lvl = navigate_single_scale_kpeaks(
-            image=image_downsampled, model=model_downsampled, mask=mask_downsampled,
-            max_peaks=1, upsample_factor=upsample_factor,
-            metric=metric, prior_shift=None, prior_weight=0.0,
-            nms_radius=nms_radius, logger=logger
+            image=image_downsampled,
+            model=model_downsampled,
+            mask=mask_downsampled,
+            max_peaks=1,
+            upsample_factor=upsample_factor,
+            metric=metric,
+            prior_shift=None,
+            prior_weight=0.0,
+            nms_radius=nms_radius,
+            logger=logger,
         )
-        logger.debug(f'Correlation pyramid level {lvl} results: '
-                     f'offset {res_lvl["offset"][0]*s:.3f}, {res_lvl["offset"][1]*s:.3f}; '
-                     f'sigma_xy {res_lvl["sigma_xy"][0]*s:.3f}, {res_lvl["sigma_xy"][1]*s:.3f}; '
-                     f'quality {res_lvl["quality"]:.3f}; '
-                     f'peak_val {res_lvl["peak_val"]:.3f}')
+        logger.debug(
+            f'Correlation pyramid level {lvl} results: '
+            f'offset {res_lvl["offset"][0] * s:.3f}, {res_lvl["offset"][1] * s:.3f}; '
+            f'sigma_xy {res_lvl["sigma_xy"][0] * s:.3f}, {res_lvl["sigma_xy"][1] * s:.3f}; '
+            f'quality {res_lvl["quality"]:.3f}; '
+            f'peak_val {res_lvl["peak_val"]:.3f}'
+        )
 
         # Scale shift back to full res
-        level_shifts.append((res_lvl['offset'][0]*s, res_lvl['offset'][1]*s))
+        level_shifts.append((res_lvl['offset'][0] * s, res_lvl['offset'][1] * s))
 
     # Consistency: max deviation to last level's shift
     shifts_arr = np.array(level_shifts, dtype=np.float64)
@@ -526,28 +559,36 @@ def navigate_with_pyramid_kpeaks(image: NDArrayFloatType,
 
     # Final level: K-peak evaluation with prior penalty
     result = navigate_single_scale_kpeaks(
-        image=image, model=model, mask=mask,
-        max_peaks=max_peaks, upsample_factor=upsample_factor,
-        metric=metric, prior_shift=final_prior, prior_weight=prior_weight_final,
-        nms_radius=nms_radius, logger=logger
+        image=image,
+        model=model,
+        mask=mask,
+        max_peaks=max_peaks,
+        upsample_factor=upsample_factor,
+        metric=metric,
+        prior_shift=final_prior,
+        prior_weight=prior_weight_final,
+        nms_radius=nms_radius,
+        logger=logger,
     )
 
-    spurious = (result["quality"] < quality_thresh) or (consistency > consistency_tol)
+    spurious = (result['quality'] < quality_thresh) or (consistency > consistency_tol)
 
     ret = {
-        "offset": result["offset"],
-        "cov": result["cov"],
-        "sigma_xy": result["sigma_xy"],
-        "quality": result["quality"],
-        "metric": metric,
-        "consistency": consistency,
-        "spurious": bool(spurious)
+        'offset': result['offset'],
+        'cov': result['cov'],
+        'sigma_xy': result['sigma_xy'],
+        'quality': result['quality'],
+        'metric': metric,
+        'consistency': consistency,
+        'spurious': bool(spurious),
     }
 
-    logger.debug(f'Correlation result: '
-                 f'offset dU {result["offset"][1]:.3f}, dV {result["offset"][0]:.3f}; '
-                 f'sigma U {result["sigma_xy"][1]:.3f}, V {result["sigma_xy"][0]:.3f}; '
-                 f'consistency {consistency:.3f}; '
-                 f'spurious {spurious}')
+    logger.debug(
+        f'Correlation result: '
+        f'offset dU {result["offset"][1]:.3f}, dV {result["offset"][0]:.3f}; '
+        f'sigma U {result["sigma_xy"][1]:.3f}, V {result["sigma_xy"][0]:.3f}; '
+        f'consistency {consistency:.3f}; '
+        f'spurious {spurious}'
+    )
 
     return ret

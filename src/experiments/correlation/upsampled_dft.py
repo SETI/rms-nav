@@ -28,7 +28,7 @@ def estimate_subpixel_shift(usfac: int, frac: float) -> float:
     region = usfac + 1
     dy_i = 0 if frac <= 0.5 else -1
     oy = region // 2
-    Up = upsampled_dft(X, usfac, (region, region), (oy - dy_i*usfac, oy))
+    Up = upsampled_dft(X, usfac, (region, region), (oy - dy_i * usfac, oy))
     upy, _ = np.unravel_index(np.argmax(np.abs(Up)), Up.shape)
     dy = dy_i + (upy - oy) / usfac
     return float(dy)
@@ -38,8 +38,25 @@ if __name__ == '__main__':
     usfacs = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32]
     # Include grid-aligned fractions and additional non-aligned fractions
     fracs = [
-        0.00, 0.125, 0.25, 0.375, 0.50, 0.625, 0.75, 0.875,
-        0.07, 0.11, 0.19, 0.23, 0.31, 0.44, 0.58, 0.67, 0.73, 0.86, 0.99
+        0.00,
+        0.125,
+        0.25,
+        0.375,
+        0.50,
+        0.625,
+        0.75,
+        0.875,
+        0.07,
+        0.11,
+        0.19,
+        0.23,
+        0.31,
+        0.44,
+        0.58,
+        0.67,
+        0.73,
+        0.86,
+        0.99,
     ]
     print('usfac, frac, est_dy, gt_signed, abs_err')
     for usfac in usfacs:
@@ -47,4 +64,4 @@ if __name__ == '__main__':
             gt_signed = frac if frac <= 0.5 else frac - 1.0
             dy = estimate_subpixel_shift(usfac, frac)
             err = abs(dy - gt_signed)
-            print(f"{usfac:>5d}, {frac:5.3f}, {dy:8.4f}, {gt_signed:8.4f}, {err:8.5f}")
+            print(f'{usfac:>5d}, {frac:5.3f}, {dy:8.4f}, {gt_signed:8.4f}, {err:8.5f}')

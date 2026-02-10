@@ -9,14 +9,16 @@ from scipy import ndimage
 
 import oops
 
-from nav.annotation import (Annotation,
-                            Annotations,
-                            AnnotationTextInfo,
-                            TextLocInfo,
-                            TEXTINFO_LEFT_ARROW,
-                            TEXTINFO_RIGHT_ARROW,
-                            TEXTINFO_BOTTOM_ARROW,
-                            TEXTINFO_TOP_ARROW)
+from nav.annotation import (
+    Annotation,
+    Annotations,
+    AnnotationTextInfo,
+    TextLocInfo,
+    TEXTINFO_LEFT_ARROW,
+    TEXTINFO_RIGHT_ARROW,
+    TEXTINFO_BOTTOM_ARROW,
+    TEXTINFO_TOP_ARROW,
+)
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
 from .nav_model import NavModel
@@ -29,13 +31,15 @@ class NavModelRingsBase(NavModel):
     ring model implementation and computing anti-aliasing.
     """
 
-    def _compute_antialiasing(self,
-                              *,
-                              radii: NDArrayFloatType,
-                              edge_radius: float,
-                              shade_above: bool,
-                              resolutions: NDArrayFloatType,
-                              max_value: float = 1.0) -> NDArrayFloatType:
+    def _compute_antialiasing(
+        self,
+        *,
+        radii: NDArrayFloatType,
+        edge_radius: float,
+        shade_above: bool,
+        resolutions: NDArrayFloatType,
+        max_value: float = 1.0,
+    ) -> NDArrayFloatType:
         """Compute anti-aliasing shade at pixel boundaries.
 
         Creates smooth transitions at pixel boundaries where the ring edge crosses. The
@@ -69,10 +73,12 @@ class NavModelRingsBase(NavModel):
 
         return np.asarray(shade, dtype=np.float64)
 
-    def _create_edge_annotations(self,
-                                 obs: oops.Observation,
-                                 edge_info_list: list[tuple[NDArrayBoolType, str, str]],
-                                 model_mask: NDArrayBoolType) -> Annotations:
+    def _create_edge_annotations(
+        self,
+        obs: oops.Observation,
+        edge_info_list: list[tuple[NDArrayBoolType, str, str]],
+        model_mask: NDArrayBoolType,
+    ) -> Annotations:
         """Create annotation objects for ring edges.
 
         Parameters:
@@ -129,7 +135,7 @@ class NavModelRingsBase(NavModel):
                 # Calculate tangent direction by looking at neighboring edge points
                 # Find nearby edge points within a small radius
                 search_radius = 5.0  # pixels
-                distances = np.sqrt((edge_v - v)**2 + (edge_u - u)**2)
+                distances = np.sqrt((edge_v - v) ** 2 + (edge_u - u) ** 2)
                 nearby_mask = (distances > 0.5) & (distances <= search_radius)
                 nearby_indices = np.where(nearby_mask)[0]
 
@@ -155,10 +161,14 @@ class NavModelRingsBase(NavModel):
                 if dv_var > du_var:
                     # Edge runs more vertically (v varies more)
                     du_norm = 0.0
-                    dv_norm = 1.0 if np.average(nearby_v_rel, weights=weights) >= 0 else -1.0
+                    dv_norm = (
+                        1.0 if np.average(nearby_v_rel, weights=weights) >= 0 else -1.0
+                    )
                 else:
                     # Edge runs more horizontally (u varies more)
-                    du_norm = 1.0 if np.average(nearby_u_rel, weights=weights) >= 0 else -1.0
+                    du_norm = (
+                        1.0 if np.average(nearby_u_rel, weights=weights) >= 0 else -1.0
+                    )
                     dv_norm = 0.0
 
                 # Check if tangent is more horizontal or vertical
@@ -201,11 +211,13 @@ class NavModelRingsBase(NavModel):
                 ref_vu=None,
                 font=label_font,
                 font_size=label_font_size,
-                color=label_font_color)
+                color=label_font_color,
+            )
 
             # Create avoid mask from model_mask to avoid placing text on rings
             text_avoid_mask = ndimage.maximum_filter(
-                model_mask.astype(np.float32), int(label_mask_enlarge)).astype(bool)
+                model_mask.astype(np.float32), int(label_mask_enlarge)
+            ).astype(bool)
 
             # Create annotation
             annotation = Annotation(
@@ -215,7 +227,8 @@ class NavModelRingsBase(NavModel):
                 thicken_overlay=0,
                 avoid_mask=text_avoid_mask,
                 text_info=text_info,
-                config=self._config)
+                config=self._config,
+            )
 
             annotations.add_annotations(annotation)
 

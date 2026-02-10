@@ -19,11 +19,13 @@ class ObsVoyagerISS(ObsSnapshotInst):
     """
 
     @staticmethod
-    def from_file(path: PathLike,
-                  *,
-                  config: Optional[Config] = None,
-                  extfov_margin_vu: tuple[int, int] | None = None,
-                  **_kwargs: Any) -> 'ObsVoyagerISS':
+    def from_file(
+        path: PathLike,
+        *,
+        config: Optional[Config] = None,
+        extfov_margin_vu: tuple[int, int] | None = None,
+        **_kwargs: Any,
+    ) -> 'ObsVoyagerISS':
         """Creates an ObsVoyagerISS from a Voyager ISS image file.
 
         Parameters:
@@ -50,7 +52,9 @@ class ObsVoyagerISS(ObsSnapshotInst):
 
         inst_config = config.category('voyager_iss')
 
-        label3 = obs.dict['LABEL3'].replace('FOR (I/F)*10000., MULTIPLY DN VALUE BY', '')
+        label3 = obs.dict['LABEL3'].replace(
+            'FOR (I/F)*10000., MULTIPLY DN VALUE BY', ''
+        )
         factor = float(label3)
         obs.data = obs.data * factor / 10000
         # TODO Beware - Voyager 1 @ Saturn requires data to be multiplied by 3.345
@@ -77,7 +81,7 @@ class ObsVoyagerISS(ObsSnapshotInst):
         Returns:
             The minimum usable magnitude for stars in this observation.
         """
-        return 0.
+        return 0.0
 
     def star_max_usable_vmag(self) -> float:
         """Returns the maximum usable magnitude for stars in this observation.
@@ -102,10 +106,8 @@ class ObsVoyagerISS(ObsSnapshotInst):
         return {
             'image_path': self.image_url,
             'image_name': self.abspath.name,
-            'instrument_host_lid':
-                f'urn:nasa:pds:context:instrument_host:spacecraft.vg{spacecraft}',
-            'instrument_lid':
-                f'urn:nasa:pds:context:instrument:vg{spacecraft}.iss{self.detector[0].lower()}',
+            'instrument_host_lid': f'urn:nasa:pds:context:instrument_host:spacecraft.vg{spacecraft}',
+            'instrument_lid': f'urn:nasa:pds:context:instrument:vg{spacecraft}.iss{self.detector[0].lower()}',
             'start_time_utc': et_to_utc(self.time[0]),
             'midtime_utc': et_to_utc(self.midtime),
             'end_time_utc': et_to_utc(self.time[1]),

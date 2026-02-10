@@ -1,10 +1,12 @@
 """Pytest configuration and shared fixtures."""
 
+from collections.abc import Generator
+
 import pytest
 from nav.config import DEFAULT_CONFIG
 
 
-def ensure_config_loaded():
+def ensure_config_loaded() -> None:
     """Ensure DEFAULT_CONFIG is loaded.
 
     This function can be called to ensure the configuration is loaded
@@ -16,7 +18,7 @@ def ensure_config_loaded():
 
 
 @pytest.fixture(autouse=True)
-def config_fixture():
+def config_fixture() -> Generator[None, None, None]:
     """Ensure DEFAULT_CONFIG is loaded before each test.
 
     This fixture automatically runs before each test to ensure the configuration

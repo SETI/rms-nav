@@ -19,10 +19,12 @@ class ObsGalileoSSI(ObsSnapshotInst):
     """
 
     @staticmethod
-    def from_file(path: PathLike,
-                  config: Optional[Config] = None,
-                  extfov_margin_vu: tuple[int, int] | None = None,
-                  **_kwargs: Any) -> 'ObsGalileoSSI':
+    def from_file(
+        path: PathLike,
+        config: Optional[Config] = None,
+        extfov_margin_vu: tuple[int, int] | None = None,
+        **_kwargs: Any,
+    ) -> 'ObsGalileoSSI':
         """Creates an ObsGalileoSSI from a Galileo SSI image file.
 
         Parameters:
@@ -68,7 +70,7 @@ class ObsGalileoSSI(ObsSnapshotInst):
         Returns:
             The minimum usable magnitude for stars in this observation.
         """
-        return 0.
+        return 0.0
 
     def star_max_usable_vmag(self) -> float:
         """Returns the maximum usable magnitude for stars in this observation.

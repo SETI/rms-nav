@@ -26,12 +26,14 @@ class DataSetPDS3(DataSet):
     _INDEX_COLUMNS: tuple[str, ...] = ()
     _VOLUMES_DIR_NAME: str = ''
 
-    def __init__(self,
-                 pds3_holdings_root: Optional[str | Path | FCPath] = None,
-                 *,
-                 index_filecache: Optional[FileCache] = None,
-                 pds3_holdings_filecache: Optional[FileCache] = None,
-                 config: Optional[Config] = None) -> None:
+    def __init__(
+        self,
+        pds3_holdings_root: Optional[str | Path | FCPath] = None,
+        *,
+        index_filecache: Optional[FileCache] = None,
+        pds3_holdings_filecache: Optional[FileCache] = None,
+        config: Optional[Config] = None,
+    ) -> None:
         """Initializes a PDS3 dataset with directory and cache settings.
 
         Parameters:
@@ -60,8 +62,9 @@ class DataSetPDS3(DataSet):
             self._pds3_holdings_filecache = pds3_holdings_filecache
 
         if pds3_holdings_root is not None:
-            self._pds3_holdings_root: FCPath | None = self._pds3_holdings_filecache.new_path(
-                pds3_holdings_root)
+            self._pds3_holdings_root: FCPath | None = (
+                self._pds3_holdings_filecache.new_path(pds3_holdings_root)
+            )
         else:
             self._pds3_holdings_root = None
 
@@ -79,9 +82,13 @@ class DataSetPDS3(DataSet):
         if pds3_holdings_root is None:
             pds3_holdings_root = os.getenv('PDS3_HOLDINGS_DIR')
         if pds3_holdings_root is None:
-            raise ValueError('One of configuration variable "pds3_holdings_root" or '
-                             'PDS3_HOLDINGS_DIR environment variable must be set')
-        self._pds3_holdings_root = self._pds3_holdings_filecache.new_path(pds3_holdings_root)
+            raise ValueError(
+                'One of configuration variable "pds3_holdings_root" or '
+                'PDS3_HOLDINGS_DIR environment variable must be set'
+            )
+        self._pds3_holdings_root = self._pds3_holdings_filecache.new_path(
+            pds3_holdings_root
+        )
 
         return self._pds3_holdings_root
 
@@ -187,13 +194,14 @@ class DataSetPDS3(DataSet):
     @staticmethod
     @abstractmethod
     def _results_path_stub(volume: str, filespec: str) -> str:
-        """Get the results path stub for an image filespec.
-        """
+        """Get the results path stub for an image filespec."""
         raise NotImplementedError
 
     @staticmethod
-    def add_selection_arguments(cmdparser: argparse.ArgumentParser,
-                                group: Optional[argparse._ArgumentGroup] = None) -> None:
+    def add_selection_arguments(
+        cmdparser: argparse.ArgumentParser,
+        group: Optional[argparse._ArgumentGroup] = None,
+    ) -> None:
         """Adds PDS3-specific command-line arguments for image selection.
 
         Parameters:
@@ -204,43 +212,69 @@ class DataSetPDS3(DataSet):
         if group is None:
             group = cmdparser.add_argument_group('Image selection (PDS3-specific)')
         group.add_argument(
-            'img_name', action='append', nargs='*', type=str,
-            help='Specific image name(s) to process')
+            'img_name',
+            action='append',
+            nargs='*',
+            type=str,
+            help='Specific image name(s) to process',
+        )
         # group.add_argument(
         #     '--planet', default='saturn',
         #     type=_validate_planet,
         #     help=f"""Which planet to process: jupiter, saturn, uranus, neptune
         #              (saturn is the default)""")
         group.add_argument(
-            '--first-image-num', type=int, default=None, metavar='IMAGE_NUM',
+            '--first-image-num',
+            type=int,
+            default=None,
+            metavar='IMAGE_NUM',
             help="""The starting image number; only images with this number or greater will be
-            processed""")
+            processed""",
+        )
         group.add_argument(
-            '--last-image-num', type=int, default=None, metavar='IMAGE_NUM',
+            '--last-image-num',
+            type=int,
+            default=None,
+            metavar='IMAGE_NUM',
             help="""The ending image number; only images with this number or less will be
-            processed""")
+            processed""",
+        )
         group.add_argument(
-            '--volumes', action='append',
+            '--volumes',
+            action='append',
             help="""One or more entire PDS3 volume names; only images in these
             volumes or volume subdirectories will be processed. Can accept multiple values
-            separated by commas or multiple arguments.""")
+            separated by commas or multiple arguments.""",
+        )
         group.add_argument(
-            '--first-volume', type=str, default=None, metavar='VOL_NAME',
+            '--first-volume',
+            type=str,
+            default=None,
+            metavar='VOL_NAME',
             help="""The starting PDS3 volume name; only images in this volume or chronologically
-            later will be processed""")
+            later will be processed""",
+        )
         group.add_argument(
-            '--last-volume', type=str, default=None, metavar='VOL_NAME',
+            '--last-volume',
+            type=str,
+            default=None,
+            metavar='VOL_NAME',
             help="""The ending PDS3 volume name; only images in this volume or chronologically
-            earlier will be processed""")
+            earlier will be processed""",
+        )
         group.add_argument(
-            '--image-filespec-csv', action='append',
+            '--image-filespec-csv',
+            action='append',
             help="""A CSV file that contains filespecs of images to process; a header row
             is required and must contain a column named 'Primary File Spec' or 'primaryfilespec'.
-            The list is still subject to other selection criteria.""")
+            The list is still subject to other selection criteria.""",
+        )
         group.add_argument(
-            '--image-file-list', action='append',
+            '--image-file-list',
+            action='append',
             help="""A file that contains filespecs or names of images to process;
-            the list is still subject to other selection criteria.""")
+            the list is still subject to other selection criteria.""",
+        )
         # group.add_argument(
         #     '--has-offset-file', action='store_true', default=False,
         #     help='Only process images that already have an offset file')
@@ -269,16 +303,19 @@ class DataSetPDS3(DataSet):
         #     '--selection-expr', type=str, metavar='EXPR',
         #     help='Expression to evaluate to decide whether to reprocess an offset')
         group.add_argument(
-            '--choose-random-images', type=int, default=None, metavar='N',
-            help='Choose N random images to process within other constraints')
+            '--choose-random-images',
+            type=int,
+            default=None,
+            metavar='N',
+            help='Choose N random images to process within other constraints',
+        )
         # group.add_argument(
         #     '--show-image-list-only', action='store_true', default=False,
         #     help="""Just show a list of files that would be processed without doing
         #             any actual processing"""
         # )
 
-    def _validate_selection_arguments(self,
-                                      arguments: argparse.Namespace) -> None:
+    def _validate_selection_arguments(self, arguments: argparse.Namespace) -> None:
         """Validates user arguments that can't be checked during initial parsing.
 
         Parameters:
@@ -288,13 +325,12 @@ class DataSetPDS3(DataSet):
         # TODO This method is currently unused and should be used
         # For some reason mypy can't see the img_name field
         for img_name in flatten_list(arguments.img_name):
-
             if not self._img_name_valid(img_name):
                 raise argparse.ArgumentTypeError(f'Invalid image name {img_name}')
 
-    def yield_image_files_from_arguments(self,
-                                         arguments: argparse.Namespace
-                                         ) -> Iterator[ImageFiles]:
+    def yield_image_files_from_arguments(
+        self, arguments: argparse.Namespace
+    ) -> Iterator[ImageFiles]:
         """Given parsed arguments, yield all selected filenames.
 
         Parameters:
@@ -321,12 +357,16 @@ class DataSetPDS3(DataSet):
                     csvreader = csv.reader(csvfile)
                     header = next(csvreader)
                     for colnum in range(len(header)):
-                        if (header[colnum] == 'Primary File Spec' or
-                            header[colnum] == 'primaryfilespec'):
+                        if (
+                            header[colnum] == 'Primary File Spec'
+                            or header[colnum] == 'primaryfilespec'
+                        ):
                             break
                     else:
-                        raise ValueError(f'Badly formatted CSV file "{filename}" '
-                                         '- no Primary File Spec header')
+                        raise ValueError(
+                            f'Badly formatted CSV file "{filename}" '
+                            '- no Primary File Spec header'
+                        )
                     for row in csvreader:
                         filespec = row[colnum]
                         img_filespec_list.append(filespec)
@@ -342,7 +382,9 @@ class DataSetPDS3(DataSet):
                         # Ignore anything after the filename
                         filename = line.split(' ')[0]
                         if not self._img_name_valid(filename):
-                            raise ValueError(f'Bad filename in filelist file "{filename}": {line}')
+                            raise ValueError(
+                                f'Bad filename in filelist file "{filename}": {line}'
+                            )
                         img_name_list.append(filename)
 
         first_image_number = arguments.first_image_num
@@ -363,24 +405,25 @@ class DataSetPDS3(DataSet):
         # last_image_path = None
 
         for ret in self.yield_image_files_index(
-                    img_start_num=first_image_number,
-                    img_end_num=last_image_number,
-                    vol_start=first_volume_number,
-                    vol_end=last_volume_number,
-                    volumes=volumes,
-                    img_name_list=img_name_list,
-                    img_filespec_list=img_filespec_list,
-                    # TODO
-                    # force_has_offset_file=arguments.has_offset_file,
-                    # force_has_no_offset_file=arguments.has_no_offset_file,
-                    # force_has_png_file=arguments.has_png_file,
-                    # force_has_no_png_file=arguments.has_no_png_file,
-                    # force_has_offset_error=arguments.has_offset_error,
-                    # force_has_offset_spice_error=arguments.has_offset_spice_error,
-                    # force_has_offset_nonspice_error=arguments.has_offset_nonspice_error,
-                    # selection_expr=arguments.selection_expr,
-                    choose_random_images=arguments.choose_random_images,
-                    arguments=arguments):
+            img_start_num=first_image_number,
+            img_end_num=last_image_number,
+            vol_start=first_volume_number,
+            vol_end=last_volume_number,
+            volumes=volumes,
+            img_name_list=img_name_list,
+            img_filespec_list=img_filespec_list,
+            # TODO
+            # force_has_offset_file=arguments.has_offset_file,
+            # force_has_no_offset_file=arguments.has_no_offset_file,
+            # force_has_png_file=arguments.has_png_file,
+            # force_has_no_png_file=arguments.has_no_png_file,
+            # force_has_offset_error=arguments.has_offset_error,
+            # force_has_offset_spice_error=arguments.has_offset_spice_error,
+            # force_has_offset_nonspice_error=arguments.has_offset_nonspice_error,
+            # selection_expr=arguments.selection_expr,
+            choose_random_images=arguments.choose_random_images,
+            arguments=arguments,
+        ):
             yield ret
         #     # Before returning a matching image, see if we need to combine BOTSIM
         #     # images. We do this by looking at adjacent pairs of returned images to
@@ -411,9 +454,9 @@ class DataSetPDS3(DataSet):
         #         yield last_image_path
 
     @lru_cache(maxsize=3)
-    def _read_pds_table(self,
-                        fn: str,
-                        columns: Optional[tuple[str, ...]] = None) -> PdsTable:
+    def _read_pds_table(
+        self, fn: str, columns: Optional[tuple[str, ...]] = None
+    ) -> PdsTable:
         """Reads a PDS table file with caching.
 
         Parameters:
@@ -478,7 +521,9 @@ class DataSetPDS3(DataSet):
         choose_random_images: Optional[int] = kwargs.pop('choose_random_images', None)
         max_filenames: Optional[int] = kwargs.pop('max_filenames', None)
         arguments: Optional[argparse.Namespace] = kwargs.pop('arguments', None)
-        additional_index_columns: tuple[str, ...] = kwargs.pop('additional_index_columns', ())
+        additional_index_columns: tuple[str, ...] = kwargs.pop(
+            'additional_index_columns', ()
+        )
 
         if len(kwargs) > 0:
             raise ValueError(f'Unexpected keyword arguments: {kwargs}')
@@ -532,11 +577,14 @@ class DataSetPDS3(DataSet):
             vol_start_idx = all_volume_names.index(vol_start)
         if vol_end is not None:
             vol_end_idx = all_volume_names.index(vol_end)
-        valid_volumes = [v for v in valid_volumes
-                         if ((vol_start is None or
-                              vol_start_idx <= all_volume_names.index(v)) and
-                             (vol_end is None or
-                              all_volume_names.index(v) <= vol_end_idx))]
+        valid_volumes = [
+            v
+            for v in valid_volumes
+            if (
+                (vol_start is None or vol_start_idx <= all_volume_names.index(v))
+                and (vol_end is None or all_volume_names.index(v) <= vol_end_idx)
+            )
+        ]
 
         # URLs to the volume raw directory and index directory
         volume_raw_dir_url = self.pds3_holdings_root / volumes_dir_name
@@ -550,22 +598,34 @@ class DataSetPDS3(DataSet):
         if img_filespec_list:
             for explicit_img_filespec in img_filespec_list:
                 if not self._get_img_name_from_label_filespec(explicit_img_filespec):
-                    raise ValueError(f'Invalid image filespec "{explicit_img_filespec}"')
-            img_filespec_list = [x.rsplit('.', maxsplit=1)[0] for x in img_filespec_list]
+                    raise ValueError(
+                        f'Invalid image filespec "{explicit_img_filespec}"'
+                    )
+            img_filespec_list = [
+                x.rsplit('.', maxsplit=1)[0] for x in img_filespec_list
+            ]
 
         # Optimize the first and last image number based on image_name_list and image_filespec_list
         # This is just to improve performance
         if img_name_list:
-            img_start_num = max(0 if img_start_num is None else img_start_num,
-                                min([self._extract_img_number(x) for x in img_name_list]))
-            img_end_num = min(999999999999 if img_end_num is None else img_end_num,
-                              max([self._extract_img_number(x) for x in img_name_list]))
+            img_start_num = max(
+                0 if img_start_num is None else img_start_num,
+                min([self._extract_img_number(x) for x in img_name_list]),
+            )
+            img_end_num = min(
+                999999999999 if img_end_num is None else img_end_num,
+                max([self._extract_img_number(x) for x in img_name_list]),
+            )
 
         if img_filespec_list:
-            img_start_num = max(0 if img_start_num is None else img_start_num,
-                                min([self._extract_img_number(x) for x in img_filespec_list]))
-            img_end_num = min(999999999999 if img_end_num is None else img_end_num,
-                              max([self._extract_img_number(x) for x in img_filespec_list]))
+            img_start_num = max(
+                0 if img_start_num is None else img_start_num,
+                min([self._extract_img_number(x) for x in img_filespec_list]),
+            )
+            img_end_num = min(
+                999999999999 if img_end_num is None else img_end_num,
+                max([self._extract_img_number(x) for x in img_filespec_list]),
+            )
 
         # TODO When yielding via an index, we don't get to optimize searching for
         # offset/png files. We just always look through the index files, and then check
@@ -625,7 +685,10 @@ class DataSetPDS3(DataSet):
             valid_volumes_to_use = valid_volumes
             if choose_random_images:
                 valid_volumes_to_use = [
-                    valid_volumes_to_use[random.randint(0, len(valid_volumes_to_use) - 1)]]
+                    valid_volumes_to_use[
+                        random.randint(0, len(valid_volumes_to_use) - 1)
+                    ]
+                ]
 
             for search_vol in valid_volumes_to_use:
                 # Find and retrieve the volume index label/table
@@ -639,8 +702,9 @@ class DataSetPDS3(DataSet):
                 # for pds3_holdings_root, it will be overriden by self._index_filecache.
                 # TODO Needs to return exceptions instead of a single FileNotFoundError
                 # so we can tell the user what's actually going on.
-                ret = self._index_filecache.retrieve([index_label_url.as_posix(),
-                                                      index_tab_url.as_posix()])
+                ret = self._index_filecache.retrieve(
+                    [index_label_url.as_posix(), index_tab_url.as_posix()]
+                )
                 index_label_localpath, _ = cast(list[Path], ret)
 
                 # if search_volume_path is not None:
@@ -651,7 +715,9 @@ class DataSetPDS3(DataSet):
                 #         continue
 
                 # Read the index table
-                index_tab = self._read_pds_table(index_label_localpath, columns=index_columns)
+                index_tab = self._read_pds_table(
+                    index_label_localpath, columns=index_columns
+                )
                 rows = index_tab.dicts_by_row()
 
                 # If choosing random images, replace the rows with a single random row
@@ -660,19 +726,29 @@ class DataSetPDS3(DataSet):
 
                 for row in rows:
                     label_filespec = self._get_label_filespec_from_index(row)
-                    img_filespec = self._get_image_filespec_from_label_filespec(label_filespec)
+                    img_filespec = self._get_image_filespec_from_label_filespec(
+                        label_filespec
+                    )
 
                     # Check that the image filespec is in the requested list
                     if img_filespec_list:
-                        if label_filespec.rsplit('.', maxsplit=1)[0] not in img_filespec_list:
+                        if (
+                            label_filespec.rsplit('.', maxsplit=1)[0]
+                            not in img_filespec_list
+                        ):
                             continue
 
                     # Get the image name
                     try:
-                        img_name = self._get_img_name_from_label_filespec(label_filespec)
+                        img_name = self._get_img_name_from_label_filespec(
+                            label_filespec
+                        )
                     except ValueError:
-                        logger.error('IMGNAME: Index file "%s" contains bad Primary File Spec "%s"',
-                                     index_tab_url, label_filespec)
+                        logger.error(
+                            'IMGNAME: Index file "%s" contains bad Primary File Spec "%s"',
+                            index_tab_url,
+                            label_filespec,
+                        )
                         continue
                     if img_name is None:
                         continue  # Not a name we should process
@@ -696,7 +772,8 @@ class DataSetPDS3(DataSet):
                     except ValueError as err:
                         raise ValueError(
                             f'IMGNUM: Index file "{index_tab_url}" contains bad '
-                            f'path "{label_filespec}"') from err
+                            f'path "{label_filespec}"'
+                        ) from err
                     if img_end_num is not None and img_num > img_end_num:
                         if choose_random_images:
                             continue
@@ -709,13 +786,19 @@ class DataSetPDS3(DataSet):
 
                     # Check that the image meets any additional selection criteria specific
                     # to this dataset
-                    label_url = (volume_raw_dir_url / self._volset_and_volume(search_vol) /
-                                 label_filespec)
-                    img_url = (volume_raw_dir_url / self._volset_and_volume(search_vol) /
-                               img_filespec)
-                    if not self._check_additional_image_selection_criteria(img_url.as_posix(),
-                                                                           img_name,
-                                                                           img_num, arguments):
+                    label_url = (
+                        volume_raw_dir_url
+                        / self._volset_and_volume(search_vol)
+                        / label_filespec
+                    )
+                    img_url = (
+                        volume_raw_dir_url
+                        / self._volset_and_volume(search_vol)
+                        / img_filespec
+                    )
+                    if not self._check_additional_image_selection_criteria(
+                        img_url.as_posix(), img_name, img_num, arguments
+                    ):
                         continue
 
                     # if force_has_offset_file:
@@ -758,11 +841,14 @@ class DataSetPDS3(DataSet):
                     #                 overlay=False)
                     #     if metadata is None or not eval(selection_expr):
                     #         continue
-                    imagefile = ImageFile(image_file_url=img_url,
-                                          label_file_url=label_url,
-                                          index_file_row=row,
-                                          results_path_stub=self._results_path_stub(search_vol,
-                                                                                    label_filespec))
+                    imagefile = ImageFile(
+                        image_file_url=img_url,
+                        label_file_url=label_url,
+                        index_file_row=row,
+                        results_path_stub=self._results_path_stub(
+                            search_vol, label_filespec
+                        ),
+                    )
                     yield imagefile
 
                     num_yields += 1
@@ -776,12 +862,13 @@ class DataSetPDS3(DataSet):
             if not choose_random_images:
                 break
 
-    def _check_additional_image_selection_criteria(self,
-                                                   img_path: str,
-                                                   img_name: str,
-                                                   img_num: int,
-                                                   arguments: Optional[argparse.Namespace] = None
-                                                   ) -> bool:
+    def _check_additional_image_selection_criteria(
+        self,
+        img_path: str,
+        img_name: str,
+        img_num: int,
+        arguments: Optional[argparse.Namespace] = None,
+    ) -> bool:
         """Check additional image selection criteria. Overridden by subclasses.
 
         Parameters:

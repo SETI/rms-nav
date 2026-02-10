@@ -80,9 +80,7 @@ class ImageFiles:
 
 
 class DataSet(ABC, NavBase):
-    def __init__(self,
-                 *,
-                 config: Optional[Config] = None) -> None:
+    def __init__(self, *, config: Optional[Config] = None) -> None:
         """Initializes a dataset.
 
         Parameters:
@@ -105,8 +103,10 @@ class DataSet(ABC, NavBase):
 
     @staticmethod
     @abstractmethod
-    def add_selection_arguments(cmdparser: argparse.ArgumentParser,
-                                group: Optional[argparse._ArgumentGroup] = None) -> None:
+    def add_selection_arguments(
+        cmdparser: argparse.ArgumentParser,
+        group: Optional[argparse._ArgumentGroup] = None,
+    ) -> None:
         """Adds dataset-specific command-line arguments for image selection.
 
         Parameters:
@@ -116,9 +116,9 @@ class DataSet(ABC, NavBase):
         ...
 
     @abstractmethod
-    def yield_image_files_from_arguments(self,
-                                         arguments: argparse.Namespace
-                                         ) -> Iterator[ImageFiles]:
+    def yield_image_files_from_arguments(
+        self, arguments: argparse.Namespace
+    ) -> Iterator[ImageFiles]:
         """Yields image filenames based on provided command-line arguments.
 
         Parameters:
@@ -130,8 +130,7 @@ class DataSet(ABC, NavBase):
         ...
 
     @abstractmethod
-    def yield_image_files_index(self,
-                                **kwargs: Any) -> Iterator[ImageFiles]:
+    def yield_image_files_index(self, **kwargs: Any) -> Iterator[ImageFiles]:
         """Yields image filenames based on index information.
 
         Parameters:

@@ -17,12 +17,14 @@ _COMBINE_SCALE_EPS = 1e-12
 class NavModelCombined(NavModel):
     """A NavModel representing a combination of multiple other models."""
 
-    def __init__(self,
-                 name: str,
-                 obs: ObsSnapshot,
-                 models: list[NavModel],
-                 *,
-                 config: Optional[Config] = None) -> None:
+    def __init__(
+        self,
+        name: str,
+        obs: ObsSnapshot,
+        models: list[NavModel],
+        *,
+        config: Optional[Config] = None,
+    ) -> None:
         """A combined navigation model created by combining multiple models.
 
         Parameters:
@@ -41,9 +43,7 @@ class NavModelCombined(NavModel):
             return
 
         # Collect all NavModelResult instances from all input models
-        results: list[NavModelResult] = [
-            r for m in models for r in m.models
-        ]
+        results: list[NavModelResult] = [r for m in models for r in m.models]
 
         if len(results) == 0:
             return
@@ -53,7 +53,7 @@ class NavModelCombined(NavModel):
         model_masks: list[NDArrayBoolType] = []
         weighted_model_masks: list[NDArrayFloatType] = []
         ranges: list[NDArrayFloatType] = []
-        total_w = 0.
+        total_w = 0.0
         valid_result_indices: list[int] = []
 
         for result_idx, result in enumerate(results):
@@ -66,11 +66,14 @@ class NavModelCombined(NavModel):
             if shape is None:
                 shape = result.model_img.shape
             elif shape != result.model_img.shape:
-                raise ValueError(f'Result image shapes differ: {shape} != '
-                                 f'{result.model_img.shape}')
+                raise ValueError(
+                    f'Result image shapes differ: {shape} != {result.model_img.shape}'
+                )
             if result.model_mask.shape != shape:
-                raise ValueError(f'Result image and mask shapes differ: {shape} != '
-                                 f'{result.model_mask.shape}')
+                raise ValueError(
+                    f'Result image and mask shapes differ: {shape} != '
+                    f'{result.model_mask.shape}'
+                )
 
             # Scale each result so masked pixels have max ~1 for consistent combined range
             raw = result.model_img
@@ -81,8 +84,12 @@ class NavModelCombined(NavModel):
             model_img[mask] = raw[mask] / scale
 
             if result.blur_amount is not None:
-                model_img = gaussian_blur_cov(
-                    model_img, cast(NDArrayFloatType, result.blur_amount))
+                model_img = np.asarray(
+                    gaussian_blur_cov(
+                        model_img, cast(NDArrayFloatType, result.blur_amount)
+                    ),
+                    dtype=np.float64,
+                )
             model_img *= result.confidence
             wt_model_mask = result.model_mask.astype(np.float64) * result.confidence
             total_w += result.confidence
@@ -99,8 +106,10 @@ class NavModelCombined(NavModel):
                 rng_arr[result.model_mask] = rng_val
                 rng = rng_arr
             elif rng.shape != result.model_img.shape:
-                raise ValueError(f'Range shape differs from result image shape: {rng.shape} != '
-                                 f'{result.model_img.shape}')
+                raise ValueError(
+                    f'Range shape differs from result image shape: {rng.shape} != '
+                    f'{result.model_img.shape}'
+                )
             ranges.append(rng)
             valid_result_indices.append(result_idx)
 
@@ -143,11 +152,13 @@ class NavModelCombined(NavModel):
         """Returns the index of the closest object for each pixel."""
         return self._closest_model_index
 
-    def create_model(self,
-                     *,
-                     always_create_model: bool = False,
-                     never_create_model: bool = False,
-                     create_annotations: bool = True) -> None:
+    def create_model(
+        self,
+        *,
+        always_create_model: bool = False,
+        never_create_model: bool = False,
+        create_annotations: bool = True,
+    ) -> None:
         """Creates the combined model.
 
         Doesn't do anything here because the model is already created.

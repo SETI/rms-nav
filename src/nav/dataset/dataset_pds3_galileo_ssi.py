@@ -18,7 +18,7 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
 
     _MIN_VOL = 2
     _MAX_VOL = 23
-    _ALL_VOLUME_NAMES = tuple(f'GO_{x:04d}' for x in range(_MIN_VOL, _MAX_VOL+1))
+    _ALL_VOLUME_NAMES = tuple(f'GO_{x:04d}' for x in range(_MIN_VOL, _MAX_VOL + 1))
     _INDEX_COLUMNS = ('FILE_SPECIFICATION_NAME',)
     _VOLUMES_DIR_NAME = 'volumes'
 
@@ -38,8 +38,7 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
         filespec = cast(str, row['FILE_SPECIFICATION_NAME'])
         # Intentionally uppercase only
         if not filespec.endswith('.LBL'):
-            raise ValueError(f'Bad Primary File Spec "{filespec}" - '
-                             'expected ".LBL"')
+            raise ValueError(f'Bad Primary File Spec "{filespec}" - expected ".LBL"')
         # Intentionally uppercase only
         return filespec
 
@@ -69,22 +68,60 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
 
         parts = filespec.split('/')
         if not (2 <= len(parts) <= 4):
-            raise ValueError(f'Bad Primary File Spec "{filespec}" - expected 2 to 4 '
-                             'directory levels')
+            raise ValueError(
+                f'Bad Primary File Spec "{filespec}" - expected 2 to 4 directory levels'
+            )
         if parts[0].upper() == 'REDO':
             parts = parts[1:]
-        if parts[0].upper() in ('RAW_CAL', 'VENUS', 'EARTH', 'MOON',
-                                'GASPRA', 'IDA', 'SL9', 'EMCONJ', 'GOPEX'):
+        if parts[0].upper() in (
+            'RAW_CAL',
+            'VENUS',
+            'EARTH',
+            'MOON',
+            'GASPRA',
+            'IDA',
+            'SL9',
+            'EMCONJ',
+            'GOPEX',
+        ):
             img_name = parts[1]
-        elif parts[0].upper() in ('C3', 'C9', 'C10', 'C20', 'C21', 'C22', 'C30',
-                                  'E4', 'E6', 'E11', 'E12', 'E14', 'E15',
-                                  'E17', 'E18', 'E19', 'E26',
-                                  'G1', 'G2', 'G7', 'G8', 'G28', 'G29',
-                                  'I24', 'I25', 'I27', 'I31', 'I32', 'I33',
-                                  'J0'):
+        elif parts[0].upper() in (
+            'C3',
+            'C9',
+            'C10',
+            'C20',
+            'C21',
+            'C22',
+            'C30',
+            'E4',
+            'E6',
+            'E11',
+            'E12',
+            'E14',
+            'E15',
+            'E17',
+            'E18',
+            'E19',
+            'E26',
+            'G1',
+            'G2',
+            'G7',
+            'G8',
+            'G28',
+            'G29',
+            'I24',
+            'I25',
+            'I27',
+            'I31',
+            'I32',
+            'I33',
+            'J0',
+        ):
             img_name = parts[2]
         else:
-            raise ValueError(f'Bad Primary File Spec "{filespec}" - bad target directory')
+            raise ValueError(
+                f'Bad Primary File Spec "{filespec}" - bad target directory'
+            )
         # Intentionally uppercase only
         if not img_name.endswith('.LBL'):
             return None
@@ -174,12 +211,14 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
 
     # Public methods
 
-    def __init__(self,
-                 pds3_holdings_root: Optional[str | Path | FCPath] = None,
-                 *,
-                 index_filecache: Optional[FileCache] = None,
-                 pds3_holdings_filecache: Optional[FileCache] = None,
-                 config: Optional[Config] = None) -> None:
+    def __init__(
+        self,
+        pds3_holdings_root: Optional[str | Path | FCPath] = None,
+        *,
+        index_filecache: Optional[FileCache] = None,
+        pds3_holdings_filecache: Optional[FileCache] = None,
+        config: Optional[Config] = None,
+    ) -> None:
         """Initializes a Galileo SSI dataset handler.
 
         Parameters:
@@ -190,10 +229,12 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
                 creates a new one.
             config: Configuration object to use. If None, uses DEFAULT_CONFIG.
         """
-        super().__init__(pds3_holdings_root=pds3_holdings_root,
-                         index_filecache=index_filecache,
-                         pds3_holdings_filecache=pds3_holdings_filecache,
-                         config=config)
+        super().__init__(
+            pds3_holdings_root=pds3_holdings_root,
+            index_filecache=index_filecache,
+            pds3_holdings_filecache=pds3_holdings_filecache,
+            config=config,
+        )
 
     def pds4_bundle_template_dir(self) -> str:
         """Returns absolute path to template directory for PDS4 bundle generation."""
@@ -208,8 +249,9 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
         if Path(template_dir).is_absolute():
             return template_dir
 
-        pds4_templates_dir = (Path(__file__).resolve().parent.parent.parent / 'pds4' /
-                              'templates')
+        pds4_templates_dir = (
+            Path(__file__).resolve().parent.parent.parent / 'pds4' / 'templates'
+        )
         return str(pds4_templates_dir / template_dir)
 
     def pds4_bundle_name(self) -> str:

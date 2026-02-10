@@ -12,10 +12,7 @@ class Obs(ABC, NavBase):
     including configuration and logging capabilities.
     """
 
-    def __init__(self,
-                 *,
-                 config: Optional[Config] = None,
-                 **kwargs: Any) -> None:
+    def __init__(self, *, config: Optional[Config] = None, **kwargs: Any) -> None:
         """Initializes a new observation instance.
 
         Parameters:

@@ -23,9 +23,7 @@ class DataSetSim(DataSet):
 
     # Public methods
 
-    def __init__(self,
-                 *,
-                 config: Optional[Config] = None) -> None:
+    def __init__(self, *, config: Optional[Config] = None) -> None:
         """Initializes a simulated dataset.
 
         Parameters:
@@ -34,17 +32,23 @@ class DataSetSim(DataSet):
         super().__init__(config=config)
 
     @staticmethod
-    def add_selection_arguments(cmdparser: argparse.ArgumentParser,
-                                group: Optional[argparse._ArgumentGroup] = None) -> None:
+    def add_selection_arguments(
+        cmdparser: argparse.ArgumentParser,
+        group: Optional[argparse._ArgumentGroup] = None,
+    ) -> None:
         if group is None:
             group = cmdparser.add_argument_group('Image selection (sim-specific)')
         group.add_argument(
-            'img_path', action='append', nargs='*', type=str,
-            help='Paths to JSON files containing simulated images to process')
+            'img_path',
+            action='append',
+            nargs='*',
+            type=str,
+            help='Paths to JSON files containing simulated images to process',
+        )
 
-    def yield_image_files_from_arguments(self,
-                                         arguments: argparse.Namespace
-                                         ) -> Iterator[ImageFiles]:
+    def yield_image_files_from_arguments(
+        self, arguments: argparse.Namespace
+    ) -> Iterator[ImageFiles]:
         img_path_list = flatten_list(arguments.img_path)
         for img_path in img_path_list:
             json_fcpath = FCPath(img_path)
@@ -56,7 +60,9 @@ class DataSetSim(DataSet):
             yield ImageFiles(image_files=[imagefile])
 
     def yield_image_files_index(self, **kwargs: Any) -> Iterator[ImageFiles]:
-        raise NotImplementedError('yield_image_files_index is not implemented for sim dataset')
+        raise NotImplementedError(
+            'yield_image_files_index is not implemented for sim dataset'
+        )
 
     @staticmethod
     def supported_grouping() -> list[str]:

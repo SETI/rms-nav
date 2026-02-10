@@ -30,10 +30,9 @@ from nav.ui.common import ZoomPanController, build_stretch_controls
 from nav.support.types import NDArrayFloatType, NDArrayUint8Type
 
 
-def _apply_stretch_gamma(image: NDArrayFloatType,
-                         black: float,
-                         white: float,
-                         gamma: float) -> NDArrayUint8Type:
+def _apply_stretch_gamma(
+    image: NDArrayFloatType, black: float, white: float, gamma: float
+) -> NDArrayUint8Type:
     """Apply black/white/gamma to a float image and return uint8 mono."""
     if white <= black:
         white = black + 1e-6
@@ -61,10 +60,10 @@ def _bilinear_sample_periodic(arr: NDArrayFloatType, y: float, x: float) -> floa
     v10 = arr[y1, x0]
     v11 = arr[y1, x1]
     return float(
-        v00 * (1 - dx) * (1 - dy) +
-        v01 * dx * (1 - dy) +
-        v10 * (1 - dx) * dy +
-        v11 * dx * dy
+        v00 * (1 - dx) * (1 - dy)
+        + v01 * dx * (1 - dy)
+        + v10 * (1 - dx) * dy
+        + v11 * dx * dy
     )
 
 
@@ -95,12 +94,14 @@ class _ImageLabel(QLabel):
 class ManualNavDialog(QDialog):
     """Manual navigation dialog for overlaying image and combined model."""
 
-    def __init__(self,
-                 *,
-                 obs: ObsSnapshot,
-                 combined_model: NavModelCombined,
-                 config: Optional[Config],
-                 parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self,
+        *,
+        obs: ObsSnapshot,
+        combined_model: NavModelCombined,
+        config: Optional[Config],
+        parent: Optional[QWidget] = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle('Manual Navigation')
         self.setMinimumSize(1200, 800)
@@ -114,8 +115,11 @@ class ManualNavDialog(QDialog):
         # Image and model arrays
         self._img_fov = obs.data  # V x U, float64
         self._img_ext = obs.extdata  # for correlation
-        if (len(self._model.models) == 0 or self._model.models[0].model_img is None or
-                self._model.models[0].model_mask is None):
+        if (
+            len(self._model.models) == 0
+            or self._model.models[0].model_img is None
+            or self._model.models[0].model_mask is None
+        ):
             raise ValueError('Combined model is missing image or mask')
         self._model_img_ext = self._model.models[0].model_img
         self._model_mask_ext = self._model.models[0].model_mask
@@ -271,7 +275,8 @@ class ManualNavDialog(QDialog):
         self._slider_alpha.setValue(int(round(self._alpha * 100)))
         self._lbl_alpha = QLabel(f'{self._alpha:.2f}')
         self._slider_alpha.valueChanged.connect(
-            lambda v: self._on_alpha_changed(v / 100.0))
+            lambda v: self._on_alpha_changed(v / 100.0)
+        )
         row_a = QHBoxLayout()
         row_a.addWidget(self._slider_alpha)
         row_a.addWidget(self._lbl_alpha)
@@ -389,12 +394,16 @@ class ManualNavDialog(QDialog):
             model=self._model_img_ext,
             mask=self._model_mask_ext,
             upsample_factor=up_factor,
-            logger=None
+            logger=None,
         )
         dv, du = float(res['offset'][0]), float(res['offset'][1])
         # Clamp to extfov bounds
-        dv = float(np.clip(dv, -self._obs.extfov_margin_v + 1, self._obs.extfov_margin_v - 1))
-        du = float(np.clip(du, -self._obs.extfov_margin_u + 1, self._obs.extfov_margin_u - 1))
+        dv = float(
+            np.clip(dv, -self._obs.extfov_margin_v + 1, self._obs.extfov_margin_v - 1)
+        )
+        du = float(
+            np.clip(du, -self._obs.extfov_margin_u + 1, self._obs.extfov_margin_u - 1)
+        )
         self._dv, self._du = dv, du
         self._spin_dv.blockSignals(True)
         self._spin_du.blockSignals(True)
@@ -425,16 +434,20 @@ class ManualNavDialog(QDialog):
                 du = self._drag_start_offset[1] + (delta.x() / max(self._zoom, 1e-6))
                 dv = self._drag_start_offset[0] + (delta.y() / max(self._zoom, 1e-6))
                 # Clamp within extfov bounds (minus 1 to keep slices valid after rounding)
-                dv = float(np.clip(
-                    dv,
-                    -self._obs.extfov_margin_v + 1,
-                    self._obs.extfov_margin_v - 1
-                ))
-                du = float(np.clip(
-                    du,
-                    -self._obs.extfov_margin_u + 1,
-                    self._obs.extfov_margin_u - 1
-                ))
+                dv = float(
+                    np.clip(
+                        dv,
+                        -self._obs.extfov_margin_v + 1,
+                        self._obs.extfov_margin_v - 1,
+                    )
+                )
+                du = float(
+                    np.clip(
+                        du,
+                        -self._obs.extfov_margin_u + 1,
+                        self._obs.extfov_margin_u - 1,
+                    )
+                )
                 self._dv, self._du = dv, du
                 # Update spin boxes without feedback loop
                 self._spin_dv.blockSignals(True)
@@ -490,12 +503,9 @@ class ManualNavDialog(QDialog):
         scaled_y = cy + sv.value()
         self._zoom_at_point(1.0 / 1.2, cx, cy, scaled_x, scaled_y)
 
-    def _zoom_at_point(self,
-                       factor: float,
-                       vx: int,
-                       vy: int,
-                       scaled_x: float,
-                       scaled_y: float) -> None:
+    def _zoom_at_point(
+        self, factor: float, vx: int, vy: int, scaled_x: float, scaled_y: float
+    ) -> None:
         if self._pixmap_base is None:
             return
         old_zoom = self._zoom
@@ -515,11 +525,15 @@ class ManualNavDialog(QDialog):
     def _compose_overlay_pixmap(self) -> None:
         """Compose the RGB overlay pixmap based on current stretch/offset/alpha."""
         # Primary image (FOV) -> red channel (mono repeated into RGB then tinted)
-        img_u8 = _apply_stretch_gamma(self._img_fov, self._black, self._white, self._gamma)
+        img_u8 = _apply_stretch_gamma(
+            self._img_fov, self._black, self._white, self._gamma
+        )
         h, w = img_u8.shape
         # Extract model slice at current (dv, du)
         # Note: extract_offset_array will round inside; for display that's acceptable
-        model_slice = self._obs.extract_offset_array(self._model_img_ext, (self._dv, self._du))
+        model_slice = self._obs.extract_offset_array(
+            self._model_img_ext, (self._dv, self._du)
+        )
         model_u8 = (np.clip(model_slice, 0.0, 1.0) * 255.0).astype(np.uint8)
 
         # Build RGB with red for image, green for model
@@ -527,10 +541,9 @@ class ManualNavDialog(QDialog):
         rgb[:, :, 0] = img_u8
         # Alpha composite model into green channel
         # composite = (1-A)*image + A*model
-        green = (
-            (1.0 - self._alpha) * img_u8.astype(np.float32)
-            + self._alpha * model_u8.astype(np.float32)
-        )
+        green = (1.0 - self._alpha) * img_u8.astype(
+            np.float32
+        ) + self._alpha * model_u8.astype(np.float32)
         rgb[:, :, 1] = np.clip(green, 0, 255).astype(np.uint8)
         rgb[:, :, 2] = img_u8
 
@@ -549,12 +562,13 @@ class ManualNavDialog(QDialog):
             return
         scaled_w = int(self._pixmap_base.width() * self._zoom)
         scaled_h = int(self._pixmap_base.height() * self._zoom)
-        transform_mode = (Qt.TransformationMode.FastTransformation
-                          if self._zoom_sharp else Qt.TransformationMode.SmoothTransformation)
+        transform_mode = (
+            Qt.TransformationMode.FastTransformation
+            if self._zoom_sharp
+            else Qt.TransformationMode.SmoothTransformation
+        )
         scaled = self._pixmap_base.scaled(
-            scaled_w, scaled_h,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            transform_mode
+            scaled_w, scaled_h, Qt.AspectRatioMode.KeepAspectRatio, transform_mode
         )
         self._label.setPixmap(scaled)
         self._label.resize(scaled_w, scaled_h)
@@ -584,10 +598,10 @@ class ManualNavDialog(QDialog):
             dv = img_v - v0
             du = img_u - u0
             val = (
-                self._img_fov[v0, u0] * (1 - du) * (1 - dv) +
-                self._img_fov[v0, u1] * du * (1 - dv) +
-                self._img_fov[v1, u0] * (1 - du) * dv +
-                self._img_fov[v1, u1] * du * dv
+                self._img_fov[v0, u0] * (1 - du) * (1 - dv)
+                + self._img_fov[v0, u1] * du * (1 - dv)
+                + self._img_fov[v1, u0] * (1 - du) * dv
+                + self._img_fov[v1, u1] * du * dv
             )
             corr_val = self._current_corr_value()
             self._status_label.setText(
@@ -608,7 +622,7 @@ class ManualNavDialog(QDialog):
             app = QApplication([])
             app_created = True
         result = self.exec()
-        accepted = (result == QDialog.DialogCode.Accepted)
+        accepted = result == QDialog.DialogCode.Accepted
         chosen = (self._dv, self._du) if accepted else None
         corr = self._current_corr_value() if accepted else None
         if app_created:
@@ -618,7 +632,7 @@ class ManualNavDialog(QDialog):
 
     # ---- Zoom options ----
     def _toggle_zoom_sharp(self, state: Any) -> None:
-        self._zoom_sharp = (state == int(cast(int, Qt.CheckState.Checked.value)))
+        self._zoom_sharp = state == int(cast(int, Qt.CheckState.Checked.value))
         self._update_display_only()
 
     # Internal buffers

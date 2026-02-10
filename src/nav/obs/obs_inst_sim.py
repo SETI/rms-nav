@@ -15,17 +15,17 @@ from nav.support.types import PathLike
 class ObsSim(ObsSnapshotInst):
     """Observation backed by a description of simulated bodies and stars."""
 
-    def __init__(self,
-                 snapshot: Snapshot,
-                 **kwargs: Any) -> None:
+    def __init__(self, snapshot: Snapshot, **kwargs: Any) -> None:
         super().__init__(snapshot, **kwargs)
 
     @staticmethod
-    def from_file(path: PathLike,
-                  *,
-                  config: Optional[Config] = None,
-                  extfov_margin_vu: Optional[tuple[int, int]] = None,
-                  **kwargs: Any) -> 'ObsSim':
+    def from_file(
+        path: PathLike,
+        *,
+        config: Optional[Config] = None,
+        extfov_margin_vu: Optional[tuple[int, int]] = None,
+        **kwargs: Any,
+    ) -> 'ObsSim':
         """Creates an ObsSim from a JSON file.
 
         Parameters:
@@ -59,12 +59,16 @@ class ObsSim(ObsSnapshotInst):
             offset_u = float(sim_params.get('offset_u', 0.0))
         except (KeyError, TypeError, ValueError) as e:
             if provided_sim_params is None:
-                raise ValueError('Invalid or missing size/offset field in simulated image '
-                                 f'JSON file "{json_path}": {e}') from e
+                raise ValueError(
+                    'Invalid or missing size/offset field in simulated image '
+                    f'JSON file "{json_path}": {e}'
+                ) from e
             else:
-                raise ValueError('Invalid or missing size/offset field in provided '
-                                 'sim_params for simulated image JSON file '
-                                 f'"{json_path}": {e}') from e
+                raise ValueError(
+                    'Invalid or missing size/offset field in provided '
+                    'sim_params for simulated image JSON file '
+                    f'"{json_path}": {e}'
+                ) from e
 
         # Build a basic Snapshot with a flat FOV and dummy geometry
         fov = oops.fov.FlatFOV((1.0, 1.0), (size_u, size_v))
@@ -109,8 +113,9 @@ class ObsSim(ObsSnapshotInst):
                 extfov_margin_vu = extfov_margin_vu_entry
 
         snapshot._closest_planet = sim_params.get('closest_planet', None)
-        new_obs = ObsSim(snapshot, config=config, extfov_margin_vu=extfov_margin_vu,
-                         simulated=True)
+        new_obs = ObsSim(
+            snapshot, config=config, extfov_margin_vu=extfov_margin_vu, simulated=True
+        )
         new_obs._inst_config = inst_config
 
         new_obs.spice_kernels = ['fake_kernel1.txt', 'fake_kernel2.txt']

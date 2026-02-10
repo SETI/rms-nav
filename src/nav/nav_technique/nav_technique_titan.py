@@ -10,10 +10,9 @@ if TYPE_CHECKING:
 class NavTechniqueTitan(NavTechnique):
     """Implements navigation technique specific to Titan observations."""
 
-    def __init__(self,
-                 nav_master: 'NavMaster',
-                 *,
-                 config: Optional[Config] = None) -> None:
+    def __init__(
+        self, nav_master: 'NavMaster', *, config: Optional[Config] = None
+    ) -> None:
         """Initializes a navigation technique specific to Titan observations.
 
         Parameters:

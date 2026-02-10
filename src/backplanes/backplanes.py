@@ -38,12 +38,15 @@ def generate_backplanes_image_files(
 
     if len(image_files.image_files) != 1:
         raise ValueError(
-            f'Expected exactly one image per batch; got {len(image_files.image_files)}')
+            f'Expected exactly one image per batch; got {len(image_files.image_files)}'
+        )
 
     image_file = image_files.image_files[0]
     image_path = image_file.image_file_path.absolute()
     metadata_file = nav_results_root / (image_file.results_path_stub + '_metadata.json')
-    fits_file_path = backplane_results_root / (image_file.results_path_stub + '_backplanes.fits')
+    fits_file_path = backplane_results_root / (
+        image_file.results_path_stub + '_backplanes.fits'
+    )
 
     with logger.open(f'Processing image: {str(image_path)}'):
         # This will raise an exception if the metadata file is not found or not valid JSON
@@ -52,9 +55,12 @@ def generate_backplanes_image_files(
 
         status = nav_metadata.get('status', None)
         if status != 'success':
-            logger.warning('Skipping backplanes for "%s": status=%s error=%s',
-                           image_path, status,
-                           nav_metadata.get('status_error', 'unknown'))
+            logger.warning(
+                'Skipping backplanes for "%s": status=%s error=%s',
+                image_path,
+                status,
+                nav_metadata.get('status_error', 'unknown'),
+            )
             return
 
         # Build observation in original FOV
@@ -72,7 +78,9 @@ def generate_backplanes_image_files(
             dv, du = 0, 0
         else:
             dv, du = nav_metadata['offset']
-        snapshot.fov = oops.fov.OffsetFOV(snapshot.fov, uv_offset=(float(du), float(dv)))
+        snapshot.fov = oops.fov.OffsetFOV(
+            snapshot.fov, uv_offset=(float(du), float(dv))
+        )
 
         # Compute bodies backplanes
         bodies_result = create_body_backplanes(snapshot, config, logger=logger)

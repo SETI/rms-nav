@@ -31,11 +31,13 @@ class ObsInst(ABC):
 
     @staticmethod
     @abstractmethod
-    def from_file(path: PathLike,
-                  *,
-                  config: Optional[Config] = None,
-                  extfov_margin_vu: Optional[tuple[int, int]] = None,
-                  **kwargs: Any) -> 'Obs':
+    def from_file(
+        path: PathLike,
+        *,
+        config: Optional[Config] = None,
+        extfov_margin_vu: Optional[tuple[int, int]] = None,
+        **kwargs: Any,
+    ) -> 'Obs':
         """Creates an instrument instance from an image file.
 
         Parameters:

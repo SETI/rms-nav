@@ -17,10 +17,9 @@ class NavTechniqueManual(NavTechnique):
     correlate_all technique.
     """
 
-    def __init__(self,
-                 nav_master: 'NavMaster',
-                 *,
-                 config: Optional[Config] = None) -> None:
+    def __init__(
+        self, nav_master: 'NavMaster', *, config: Optional[Config] = None
+    ) -> None:
         super().__init__(nav_master, config=config)
         self._combined_model: NavModelCombined | None = None
 
@@ -35,11 +34,16 @@ class NavTechniqueManual(NavTechnique):
             combined_model = self._combine_models(['*'])
             self._combined_model = combined_model
             if combined_model is None:
-                self.logger.info('Manual navigation technique failed - no models available')
+                self.logger.info(
+                    'Manual navigation technique failed - no models available'
+                )
                 return
 
-            if (len(combined_model.models) == 0 or combined_model.models[0].model_img is None or
-                    combined_model.models[0].model_mask is None):
+            if (
+                len(combined_model.models) == 0
+                or combined_model.models[0].model_img is None
+                or combined_model.models[0].model_mask is None
+            ):
                 raise ValueError('Combined model has no result or missing image/mask')
 
             # Import here to avoid importing PyQt6 unless needed
@@ -57,10 +61,7 @@ class NavTechniqueManual(NavTechnique):
 
             # Launch the dialog, allowing the user to select offset
             dialog = ManualNavDialog(
-                obs=obs,
-                combined_model=combined_model,
-                config=self.config,
-                parent=None
+                obs=obs, combined_model=combined_model, config=self.config, parent=None
             )
 
             accepted, chosen_offset, _last_corr = dialog.run_modal()
