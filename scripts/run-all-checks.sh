@@ -246,7 +246,7 @@ run_code_checks() {
 
     # Pytest
     print_info "Running pytest..."
-    if python -m pytest tests -q; then
+    if python -m pytest tests -q --cov -n auto; then
         print_success "Pytest passed"
     else
         print_error "Pytest failed"
@@ -394,10 +394,10 @@ if [ "$PARALLEL" = true ] && { [ "$RUN_CODE" = true ] || [ "$RUN_DOCS" = true ] 
         markdown_pid=$!
     fi
 
-    [ -n "$code_pid" ]    && { wait "$code_pid"    || EXIT_CODE=1; }
-    [ -n "$docs_pid" ]    && { wait "$docs_pid"    || EXIT_CODE=1; }
-    [ -n "$markdown_pid" ] && { wait "$markdown_pid" || EXIT_CODE=1; }
-
+    [ -n "$code_pid" ]    && { wait "$code_pid"    || EXIT_CODE=1; code_pid=""; }
+    [ -n "$docs_pid" ]    && { wait "$docs_pid"    || EXIT_CODE=1; docs_pid=""; }
+    [ -n "$markdown_pid" ] && { wait "$markdown_pid" || EXIT_CODE=1; markdown_pid=""; }
+    
     for status_file in "$code_status" "$docs_status" "$markdown_status"; do
         if [ -f "$status_file" ]; then
             while IFS= read -r line; do
