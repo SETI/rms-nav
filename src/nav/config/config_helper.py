@@ -4,8 +4,7 @@ import os
 from .config import Config
 
 
-def get_backplane_results_root(arguments: argparse.Namespace,
-                               config: Config) -> str:
+def get_backplane_results_root(arguments: argparse.Namespace, config: Config) -> str:
     """Get the backplane results root from the arguments, configuration, or environment.
 
     First look in arguments.backplane_results_root, then in
@@ -35,15 +34,15 @@ def get_backplane_results_root(arguments: argparse.Namespace,
     if backplane_results_root_str is None:
         backplane_results_root_str = os.getenv('NAV_BACKPLANE_RESULTS_ROOT')
     if backplane_results_root_str is None:
-        raise ValueError('One of --backplane-results-root, the configuration variable '
-                         '"environment.backplane_results_root", or the NAV_BACKPLANE_RESULTS_ROOT '
-                         'environment variable must be set'
-                         )
+        raise ValueError(
+            'One of --backplane-results-root, the configuration variable '
+            '"environment.backplane_results_root", or the NAV_BACKPLANE_RESULTS_ROOT '
+            'environment variable must be set'
+        )
     return backplane_results_root_str
 
 
-def get_nav_results_root(arguments: argparse.Namespace,
-                         config: Config) -> str:
+def get_nav_results_root(arguments: argparse.Namespace, config: Config) -> str:
     """Get the navigation root from the arguments, configuration, or environment.
 
     First look in arguments.nav_results_root, then in config.environment.nav_results_root,
@@ -72,15 +71,15 @@ def get_nav_results_root(arguments: argparse.Namespace,
     if nav_results_root_str is None:
         nav_results_root_str = os.getenv('NAV_RESULTS_ROOT')
     if nav_results_root_str is None:
-        raise ValueError('One of --nav-results-root, the configuration variable '
-                         '"environment.nav_results_root", or the NAV_RESULTS_ROOT '
-                         'environment variable must be set'
-                         )
+        raise ValueError(
+            'One of --nav-results-root, the configuration variable '
+            '"environment.nav_results_root", or the NAV_RESULTS_ROOT '
+            'environment variable must be set'
+        )
     return nav_results_root_str
 
 
-def get_pds4_bundle_results_root(arguments: argparse.Namespace,
-                                 config: Config) -> str:
+def get_pds4_bundle_results_root(arguments: argparse.Namespace, config: Config) -> str:
     """Get the PDS4 bundle root from the arguments, configuration, or environment.
 
     First look in arguments.bundle_results_root, then in
@@ -110,15 +109,15 @@ def get_pds4_bundle_results_root(arguments: argparse.Namespace,
     if pds4_bundle_root_str is None:
         pds4_bundle_root_str = os.getenv('NAV_BUNDLE_RESULTS_ROOT')
     if pds4_bundle_root_str is None:
-        raise ValueError('One of --bundle-results-root, the configuration variable '
-                         '"environment.bundle_results_root", or the NAV_BUNDLE_RESULTS_ROOT '
-                         'environment variable must be set'
-                         )
+        raise ValueError(
+            'One of --bundle-results-root, the configuration variable '
+            '"environment.bundle_results_root", or the NAV_BUNDLE_RESULTS_ROOT '
+            'environment variable must be set'
+        )
     return pds4_bundle_root_str
 
 
-def load_default_and_user_config(arguments: argparse.Namespace,
-                                 config: Config) -> None:
+def load_default_and_user_config(arguments: argparse.Namespace, config: Config) -> None:
     """Load the default and user configuration (if any).
 
     Parameters:

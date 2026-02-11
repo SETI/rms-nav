@@ -1,23 +1,25 @@
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from filecache import FCPath
 from PIL import Image
 
 from nav.config import DEFAULT_LOGGER
-from nav.obs import ObsSnapshotInst
 from nav.dataset.dataset import ImageFiles
 from nav.nav_master import NavMaster
+from nav.obs import ObsSnapshotInst
 from nav.support.file import json_as_string
 
 
-def navigate_image_files(obs_class: type[ObsSnapshotInst],
-                         image_files: ImageFiles,
-                         nav_results_root: FCPath,
-                         *,
-                         nav_models: Optional[list[str]] = None,
-                         nav_techniques: Optional[list[str]] = None,
-                         write_output_files: bool = True) -> tuple[bool, dict[str, Any]]:
+def navigate_image_files(
+    obs_class: type[ObsSnapshotInst],
+    image_files: ImageFiles,
+    nav_results_root: FCPath,
+    *,
+    nav_models: list[str] | None = None,
+    nav_techniques: list[str] | None = None,
+    write_output_files: bool = True,
+) -> tuple[bool, dict[str, Any]]:
     """Navigate a set of image files.
 
     Parameters:
@@ -38,12 +40,13 @@ def navigate_image_files(obs_class: type[ObsSnapshotInst],
     logger = DEFAULT_LOGGER
 
     if len(image_files.image_files) != 1:
-        logger.error("Expected exactly one image per batch; got %d", len(image_files.image_files))
+        logger.error('Expected exactly one image per batch; got %d', len(image_files.image_files))
         return False, {
             'status': 'error',
             'status_error': 'expected_one_image_per_batch',
-            'status_exception':
-                f'Expected exactly one image per batch; got {len(image_files.image_files)}',
+            'status_exception': (
+                f'Expected exactly one image per batch; got {len(image_files.image_files)}'
+            ),
         }
 
     image_file = image_files.image_files[0]
@@ -58,9 +61,11 @@ def navigate_image_files(obs_class: type[ObsSnapshotInst],
         try:
             snapshot = obs_class.from_file(image_url, **extra_params)
         except (OSError, RuntimeError) as e:
-            if ('SPICE(CKINSUFFDATA)' in str(e) or
-                'SPICE(SPKINSUFFDATA)' in str(e) or
-                'SPICE(NOFRAMECONNECT)' in str(e)):
+            if (
+                'SPICE(CKINSUFFDATA)' in str(e)
+                or 'SPICE(SPKINSUFFDATA)' in str(e)
+                or 'SPICE(NOFRAMECONNECT)' in str(e)
+            ):
                 logger.exception('No SPICE kernel available for "%s": %s', image_path, str(e))
                 metadata = {
                     'status': 'error',
@@ -69,7 +74,7 @@ def navigate_image_files(obs_class: type[ObsSnapshotInst],
                     'observation': {
                         'image_path': str(image_path),
                         'image_name': image_name,
-                    }
+                    },
                 }
             else:
                 logger.exception('Error reading image "%s": %s', image_path, str(e))
@@ -80,7 +85,7 @@ def navigate_image_files(obs_class: type[ObsSnapshotInst],
                     'observation': {
                         'image_path': str(image_path),
                         'image_name': image_name,
-                    }
+                    },
                 }
             public_metadata_file.write_text(json_as_string(metadata))
             return False, metadata

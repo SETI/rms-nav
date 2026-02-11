@@ -1,5 +1,6 @@
-import nav.obs.obs_inst_cassini_iss as obstcoiss
 from tests.config import URL_CASSINI_ISS_RHEA_01
+
+import nav.obs.obs_inst_cassini_iss as obstcoiss
 
 
 def test_cassini_iss_basic() -> None:

@@ -5,7 +5,7 @@ Welcome to the Documentation for RMS-NAV!
 
 .. include:: ../README.md
    :parser: myst_parser.sphinx_
-   :start-after: forks/SETI/rms-nav)
+   :start-after: <!-- start-after-point -->
 
 .. toctree::
    :maxdepth: 2

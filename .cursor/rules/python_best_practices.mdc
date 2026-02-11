@@ -1,0 +1,141 @@
+---
+alwaysApply: true
+description: Python coding standards for writing correct, readable, maintainable, and well-tested library code.
+---
+
+# Python Best Practices
+
+Apply these rules to ALL new and modified Python code. This project is a Python library published on PyPI and documented on ReadTheDocs. **Minimum Python version: 3.10.**
+
+## 1. Naming and Style
+
+- **Maximum line length**: 100 characters. Enforce via Ruff; use editor rulers at 80 and 90 as visual guides.
+- **Functions and local variables**: Use `lowercase_with_underscores`.
+- **Class names**: Use `TitleCase`.
+- **Module-level constants (global variables)**: Use `ALL_CAPS_WITH_UNDERSCORES`.
+- **Private names**: Prepend a single underscore for names that are not part of the public API: private attributes (e.g. `_cache`), module-private global variables, and non-public helper functions (e.g. `_parse_header`). Public API names have no leading underscore.
+- **Built-in names**: Do NOT use variable or function names that shadow Python built-ins (e.g. `float`, `filter`, `id`, `list`, `type`). If you must use such a name, append a single underscore (e.g. `filter_`, `type_`).
+- **Falsy checks**: Be explicit about what you are testing. Do NOT rely on truthiness when the intent could be ambiguous. Prefer:
+  - `if x is None:` for None checks (not `if not x:` when 0 or [] could occur).
+  - `if len(seq) == 0:` or `if not seq:` only when you explicitly mean "empty sequence" and other falsy values (0, None) are not possible; when in doubt, use `if len(seq) == 0:` for sequences.
+  - For dicts: `if key in d:` then use `d[key]`; avoid `d.get(key)` when you need to distinguish "missing" from "present with a falsy value" unless that is the intent.
+- **Explicit checks over exceptions**: Prefer explicit membership or presence checks over catching exceptions for control flow. Example: use `if "a" in b: x = b["a"]` (or a clear `get` with a sentinel) rather than `try: x = b["a"]` / `except KeyError: ...` for normal flow. Use exceptions for genuinely exceptional conditions.
+
+## 2. General Coding
+
+- NEVER include backwards-compatibility code unless explicitly requested.
+- ALWAYS keep modules under 1000 lines. Split larger modules into a package with multiple files.
+- ALWAYS write simple, clear code; avoid unnecessary complexity.
+- NEVER hardcode magic constants. Define them as module-level constants, in a config module, or via environment variables.
+- ALWAYS catch exceptions at the smallest granularity possible. Do NOT wrap large blocks in a single `try`/`except`. In library code, let exceptions propagate unless you are adding context, converting to a library-specific exception, or the exception represents a recoverable internal state. When re-raising, use `raise ... from` to preserve the full traceback for debugging.
+- ALWAYS include meaningful, structured logging (use the `logging` module) that can be disabled or redirected. NEVER use bare `print()` for diagnostic output in library code.
+- Avoid mutable global variables. If unavoidable, document purpose and limit scope. Prefer module-level constants (ALL_CAPS) or dependency injection.
+- ALWAYS prefer comprehensions (list, dict, set, generator) over manual loops when the result is a new collection and the expression remains readable.
+- ALWAYS make the minimal changes necessary. NEVER modify code outside the scope of the current task.
+- ALWAYS apply DRY. NEVER duplicate code. Place reusable logic in a utility module. Search existing utilities before writing new functions. Parameterize utility functions to increase generality.
+- ALWAYS place imports at the top of the file in three alphabetically-sorted groups separated by a blank line: (1) standard library, (2) third-party, (3) local project. Inline imports are permitted only to avoid heavy optional dependencies (e.g., GUI libraries).
+- Limit new functions to at most three positional parameters. Additional parameters MUST be keyword-only (after `*`). Group positional parameters logically.
+- Use the Receive-an-Object, Return-an-Object (RORO) pattern when a function takes or returns more than a few related values: accept a dataclass or TypedDict and return one, rather than long positional tuples.
+
+## 3. Public API Design
+
+- Clearly separate public API from internal implementation. Prefix internal functions, classes, and modules with `_`.
+- Use `__all__` in `__init__.py` to explicitly declare the public API surface.
+- Design for stability: think carefully before adding to the public API, because removing it later is a breaking change.
+- Include a `py.typed` marker file so downstream users get type-checking support.
+
+## 4. Comments
+
+- ALWAYS write self-documenting code: meaningful names, simple structure, limited nesting.
+- NEVER include comments that merely restate the code, reference user requests, or describe modification history.
+- ALWAYS include comments that explain the **rationale** behind non-obvious or complex logic.
+- ALWAYS preserve existing comments that are still accurate and relevant. Remove or update stale comments.
+
+## 5. Lint and Type Checking
+
+### Types
+
+- ALWAYS annotate all function/method parameters and return values, including `-> None` for functions (and `__init__`) that return nothing.
+- Use modern generic syntax (`list[str]`, `dict[str, int]`, `X | None`) for Python 3.10+.
+
+### Mypy
+
+- ALWAYS run `mypy` on the full codebase (including tests) after changes. Fix all errors before delivering.
+- NEVER add global type exclusions. "Global type exclusions" means:
+  - Module-level `# type: ignore` without a specific error code.
+  - `ignore_errors = True` in mypy config.
+  - Broad `exclude` patterns that skip entire packages.
+- In exceptional, unfixable cases use a minimal line-level ignore: `# type: ignore[error-code]  # <brief justification>`.
+
+### Ruff / Linting
+
+- ALWAYS run `ruff check` and `ruff format` on the full codebase after changes. Fix all errors.
+- Maximum line length is **100** characters.
+- Follow PEP 8 for all formatting and naming conventions.
+- Use the project's explicit Ruff rule set in `pyproject.toml` (see **Ruff rule categories** below). Do not disable categories that enforce project conventions (e.g. **A** for no builtin shadowing, **N** for naming).
+
+## 6. Docstrings
+
+- ALWAYS include a docstring for every module, class, function, and method.
+- Follow **PEP 257** using **Google style**. Use `Parameters:` (not `Args:`).
+- Include `Returns:`, `Raises:`, and any important behavioral notes.
+- NEVER mention backwards compatibility or user requests in docstrings.
+- Docstrings MUST be detailed enough to write a black-box test from the docstring alone.
+- Wrap docstring text to **90** characters.
+- ALWAYS update docstrings when the associated code changes.
+
+## 7. Testing
+
+### Test-driven development (TDD)
+
+- Use **test-driven development**: write tests first, then implement. Red → green → refactor.
+- Write tests BEFORE implementation based on stated requirements. If requirements are unclear, ask.
+- Run tests to confirm they fail, then implement, re-run, and fix until green.
+- After implementation, review tests to strengthen coverage.
+
+### Framework
+
+- ALWAYS include type annotations on test functions.
+- ALWAYS use `pytest` with `pytest-cov`.
+- ALWAYS use `pytest` with `pytest-xdist` and run tests with "-n auto".
+- ALWAYS write tests to be independent so that tests can be run in parallel.
+
+### Coverage and correctness
+
+- Target at least **80%** line coverage measured over the entire test suite (not a subset). Skipping hard-to-hit exception paths is acceptable.
+- NEVER write tests whose sole purpose is exercising code paths without asserting correctness.
+- Each `assert` MUST test exactly one condition (no `and` in assertions).
+- ALWAYS test for precise expected values, not ranges or existence checks. If the expected value is only known after implementation, update the test accordingly.
+- When multiple tests call the same function, use distinct inputs to maximize branch coverage, including edge cases and boundary values.
+- If two tests invoke the same code path but assert on different parts of the result, combine them into one test.
+- When testing exceptions, ALWAYS use `pytest.raises` as a context manager and assert on the exception **message content**, not just the exception type.
+
+### Test hygiene
+
+- If a test mutates a global, use a fixture or `try`/`finally` to restore the original value.
+- NEVER write a test that passes by ignoring an incorrect result or swallowing an exception. If the code is wrong, leave the failing test and explain why.
+- NEVER include line numbers, verbose rationale, or modification history in test comments. Keep comments to short (1-2 sentence) summaries useful for future maintainers.
+
+### Debugging
+
+- NEVER guess at bug causes. Use logic, stack traces, and targeted logging. If stuck in a fix loop, revert and re-approach from first principles.
+
+## 8. Ruff Rule Categories (Default Set)
+
+The template enables these Ruff lint categories in `pyproject.toml`. Use them as the default for new repos; add or ignore specific codes as needed.
+
+| Code | Source | Purpose |
+|------|--------|---------|
+| **E**, **W** | pycodestyle | Style and formatting (indent, whitespace, line length). |
+| **F** | Pyflakes | Unused imports, undefined names, syntax issues. |
+| **I** | isort | Import sorting and grouping. |
+| **UP** | pyupgrade | Prefer modern Python (e.g. 3.10+ syntax). |
+| **B** | flake8-bugbear | Common bugs (mutable defaults, assert, loop vars). |
+| **SIM** | flake8-simplify | Simpler alternatives (e.g. `in` instead of `not x == y`). |
+| **C4** | flake8-comprehensions | Prefer comprehensions over loops where clear. |
+| **A** | flake8-builtins | No shadowing of builtins (`id`, `filter`, `type`, etc.). |
+| **N** | pep8-naming | Class = TitleCase, functions/variables = lowercase_with_underscores. |
+| **PT** | flake8-pytest-style | Pytest best practices (fixtures, parametrize, raises). |
+| **RUF** | Ruff | Ruff-specific (e.g. unused noqa, deprecated). |
+
+Optional categories to consider adding later: **D** (pydocstyle) or **DOC** (pydoclint) for docstring linting; **PTH** (pathlib); **RET** (return simplification); **PERF** (perflint). Enable only if the team agrees to fix or ignore the resulting diagnostics.

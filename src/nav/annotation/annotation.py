@@ -1,6 +1,4 @@
-from typing import Optional
-
-from nav.config import Config, DEFAULT_CONFIG
+from nav.config import DEFAULT_CONFIG, Config
 from nav.obs import ObsSnapshot
 from nav.support.image import shift_array
 from nav.support.types import NDArrayBoolType
@@ -23,17 +21,21 @@ class Annotation:
         avoid_mask: Boolean mask indicating areas where text should not be placed
         config: Configuration object
     """
-    def __init__(self,
-                 obs: ObsSnapshot,
-                 overlay: NDArrayBoolType,
-                 overlay_color: tuple[int, int, int],
-                 *,
-                 thicken_overlay: int = 0,
-                 text_info: Optional[AnnotationTextInfo |
-                                     list[AnnotationTextInfo] |
-                                     tuple[AnnotationTextInfo, ...]] = None,
-                 avoid_mask: Optional[NDArrayBoolType] = None,
-                 config: Optional[Config] = None) -> None:
+
+    def __init__(
+        self,
+        obs: ObsSnapshot,
+        overlay: NDArrayBoolType,
+        overlay_color: tuple[int, int, int],
+        *,
+        thicken_overlay: int = 0,
+        text_info: AnnotationTextInfo
+        | list[AnnotationTextInfo]
+        | tuple[AnnotationTextInfo, ...]
+        | None = None,
+        avoid_mask: NDArrayBoolType | None = None,
+        config: Config | None = None,
+    ) -> None:
 
         self._config = config or DEFAULT_CONFIG
         self._obs = obs
@@ -45,8 +47,7 @@ class Annotation:
                 for v_offset in range(-thicken_overlay, thicken_overlay + 1):
                     if u_offset == 0 and v_offset == 0:
                         continue
-                    self._overlay = (self._overlay |
-                                     shift_array(overlay, (v_offset, u_offset)))
+                    self._overlay = self._overlay | shift_array(overlay, (v_offset, u_offset))
 
         if text_info is not None:
             if isinstance(text_info, (list, tuple)):
@@ -59,7 +60,8 @@ class Annotation:
         if overlay.shape != obs.extdata_shape_vu:
             raise ValueError(
                 f'Annotation overlay shape ({overlay.shape}) does not agree with Obs '
-                f'shape ({obs.extdata_shape_vu})')
+                f'shape ({obs.extdata_shape_vu})'
+            )
 
     @property
     def config(self) -> Config:
@@ -91,10 +93,10 @@ class Annotation:
         """Returns the list of text annotation information objects."""
         return self._text_info
 
-    def add_text_info(self,
-                      text_info: (AnnotationTextInfo |
-                                  list[AnnotationTextInfo] |
-                                  tuple[AnnotationTextInfo, ...])) -> None:
+    def add_text_info(
+        self,
+        text_info: (AnnotationTextInfo | list[AnnotationTextInfo] | tuple[AnnotationTextInfo, ...]),
+    ) -> None:
         """Adds text annotation information to this annotation.
 
         Parameters:

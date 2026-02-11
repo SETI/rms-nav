@@ -1,14 +1,20 @@
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 import numpy as np
 import oops
-from oops.observation.snapshot import Snapshot
-from oops.meshgrid import Meshgrid
 from oops.backplane import Backplane
+from oops.meshgrid import Meshgrid
+from oops.observation.snapshot import Snapshot
 
 from nav.config import Config
 from nav.support.image import pad_array
-from nav.support.types import DTypeLike, NDArrayType, NDArrayFloatType, NDArrayBoolType, NPType
+from nav.support.types import (
+    DTypeLike,
+    NDArrayBoolType,
+    NDArrayFloatType,
+    NDArrayType,
+    NPType,
+)
 
 from .obs import Obs
 
@@ -20,12 +26,14 @@ class ObsSnapshot(Obs, Snapshot):
     for snapshot observations, including FOV management and backplane caching.
     """
 
-    def __init__(self,
-                 snapshot: Snapshot,
-                 *,
-                 extfov_margin_vu: Optional[int | tuple[int, int]] = None,
-                 config: Optional[Config] = None,
-                 **kwargs: Any) -> None:
+    def __init__(
+        self,
+        snapshot: Snapshot,
+        *,
+        extfov_margin_vu: int | tuple[int, int] | None = None,
+        config: Config | None = None,
+        **kwargs: Any,
+    ) -> None:
         """Initialize an ObsSnapshot by wrapping an existing Snapshot.
 
         Parameters:
@@ -40,7 +48,7 @@ class ObsSnapshot(Obs, Snapshot):
         """
 
         if not isinstance(snapshot, Snapshot):
-            raise TypeError(f"Expected Snapshot, got {type(snapshot).__name__}")
+            raise TypeError(f'Expected Snapshot, got {type(snapshot).__name__}')
 
         # Because the oops image read routines create a Snapshot and not a
         # Navigation class, we need to create a Navigation class that looks
@@ -57,14 +65,17 @@ class ObsSnapshot(Obs, Snapshot):
         self._data_shape_uv = cast(tuple[int, int], self.data.shape[::-1])
         self._data_shape_vu = cast(tuple[int, int], self.data.shape)
         self._fov_vu_min = (0, 0)
-        self._fov_vu_max = (self._data_shape_vu[0]-1, self._data_shape_vu[1]-1)
+        self._fov_vu_max = (self._data_shape_vu[0] - 1, self._data_shape_vu[1] - 1)
 
         if extfov_margin_vu is None:
             self._extfov_margin_vu = (0, 0)
         elif isinstance(extfov_margin_vu, int):
             self._extfov_margin_vu = (int(extfov_margin_vu), int(extfov_margin_vu))
         else:
-            self._extfov_margin_vu = (int(extfov_margin_vu[0]), int(extfov_margin_vu[1]))
+            self._extfov_margin_vu = (
+                int(extfov_margin_vu[0]),
+                int(extfov_margin_vu[1]),
+            )
 
         if self._extfov_margin_vu[0] < 0 or self._extfov_margin_vu[1] < 0:
             raise ValueError('extfov_margin_vu must be non-negative (v,u).')
@@ -73,8 +84,10 @@ class ObsSnapshot(Obs, Snapshot):
         self._extdata_shape_uv = cast(tuple[int, int], self._extdata.shape[::-1])
         self._extdata_shape_vu = cast(tuple[int, int], self._extdata.shape)
         self._extfov_vu_min = (-self._extfov_margin_vu[0], -self._extfov_margin_vu[1])
-        self._extfov_vu_max = (self._data_shape_vu[0] + self._extfov_margin_vu[0] - 1,
-                               self._data_shape_vu[1] + self._extfov_margin_vu[1] - 1)
+        self._extfov_vu_max = (
+            self._data_shape_vu[0] + self._extfov_margin_vu[0] - 1,
+            self._data_shape_vu[1] + self._extfov_margin_vu[1] - 1,
+        )
         self.reset_all()
 
         try:
@@ -91,8 +104,7 @@ class ObsSnapshot(Obs, Snapshot):
 
             self._closest_planet = closest_planet
 
-    def make_fov_zeros(self,
-                       dtype: DTypeLike = np.float64) -> NDArrayFloatType:
+    def make_fov_zeros(self, dtype: DTypeLike = np.float64) -> NDArrayFloatType:
         """Creates a zero-filled array matching the original FOV dimensions.
 
         Parameters:
@@ -103,8 +115,7 @@ class ObsSnapshot(Obs, Snapshot):
         """
         return np.zeros(self.data.shape, dtype=dtype)
 
-    def make_extfov_zeros(self,
-                          dtype: DTypeLike = np.float64) -> NDArrayFloatType:
+    def make_extfov_zeros(self, dtype: DTypeLike = np.float64) -> NDArrayFloatType:
         """Creates a zero-filled array matching the extended FOV dimensions.
 
         Parameters:
@@ -123,8 +134,7 @@ class ObsSnapshot(Obs, Snapshot):
         """
         return np.zeros(self.extdata.shape, dtype=bool)
 
-    def unpad_array_to_extfov(self,
-                              array: NDArrayType[NPType]) -> NDArrayType[NPType]:
+    def unpad_array_to_extfov(self, array: NDArrayType[NPType]) -> NDArrayType[NPType]:
         """Unpads an array to be the size of the extended FOV.
 
         This is most useful for using the result of np.unpackbits.
@@ -132,11 +142,9 @@ class ObsSnapshot(Obs, Snapshot):
         Returns:
             The unpadded array.
         """
-        return array[:self.extdata_shape_vu[0], :self.extdata_shape_vu[1]]
+        return array[: self.extdata_shape_vu[0], : self.extdata_shape_vu[1]]
 
-    def clip_fov(self,
-                 u: int,
-                 v: int) -> tuple[int, int]:
+    def clip_fov(self, u: int, v: int) -> tuple[int, int]:
         """Clips coordinates to ensure they are within the original FOV boundaries.
 
         Parameters:
@@ -146,12 +154,14 @@ class ObsSnapshot(Obs, Snapshot):
         Returns:
             A tuple of (u, v) coordinates clipped to the FOV boundaries.
         """
-        return (int(np.clip(u, self.fov_u_min, self.fov_u_max)),
-                int(np.clip(v, self.fov_v_min, self.fov_v_max)))
+        return (
+            int(np.clip(u, self.fov_u_min, self.fov_u_max)),
+            int(np.clip(v, self.fov_v_min, self.fov_v_max)),
+        )
 
-    def clip_rect_fov(self,
-                      u_min: int, u_max: int,
-                      v_min: int, v_max: int) -> tuple[int, int, int, int]:
+    def clip_rect_fov(
+        self, u_min: int, u_max: int, v_min: int, v_max: int
+    ) -> tuple[int, int, int, int]:
         """Clip a rectangle to the original FOV bounds.
 
         Returns:
@@ -166,15 +176,13 @@ class ObsSnapshot(Obs, Snapshot):
     def inventory_body_in_fov(self, inv: dict[str, Any]) -> bool:
         """Returns True if an inventory box overlaps the original FOV."""
         return bool(
-            inv['u_max_unclipped'] >= self.fov_u_min and
-            inv['u_min_unclipped'] <= self.fov_u_max and
-            inv['v_max_unclipped'] >= self.fov_v_min and
-            inv['v_min_unclipped'] <= self.fov_v_max
+            inv['u_max_unclipped'] >= self.fov_u_min
+            and inv['u_min_unclipped'] <= self.fov_u_max
+            and inv['v_max_unclipped'] >= self.fov_v_min
+            and inv['v_min_unclipped'] <= self.fov_v_max
         )
 
-    def clip_extfov(self,
-                    u: int,
-                    v: int) -> tuple[int, int]:
+    def clip_extfov(self, u: int, v: int) -> tuple[int, int]:
         """Clips coordinates to ensure they are within the extended FOV boundaries.
 
         Parameters:
@@ -184,12 +192,14 @@ class ObsSnapshot(Obs, Snapshot):
         Returns:
             A tuple of (u, v) coordinates clipped to the extended FOV boundaries.
         """
-        return (int(np.clip(u, self.extfov_u_min, self.extfov_u_max)),
-                int(np.clip(v, self.extfov_v_min, self.extfov_v_max)))
+        return (
+            int(np.clip(u, self.extfov_u_min, self.extfov_u_max)),
+            int(np.clip(v, self.extfov_v_min, self.extfov_v_max)),
+        )
 
-    def clip_rect_extfov(self,
-                         u_min: int, u_max: int,
-                         v_min: int, v_max: int) -> tuple[int, int, int, int]:
+    def clip_rect_extfov(
+        self, u_min: int, u_max: int, v_min: int, v_max: int
+    ) -> tuple[int, int, int, int]:
         """Clip a rectangle to the extended FOV bounds.
 
         Returns:
@@ -204,10 +214,10 @@ class ObsSnapshot(Obs, Snapshot):
     def inventory_body_in_extfov(self, inv: dict[str, Any]) -> bool:
         """Returns True if an inventory box overlaps the extended FOV."""
         return bool(
-            inv['u_max_unclipped'] >= self.extfov_u_min and
-            inv['u_min_unclipped'] <= self.extfov_u_max and
-            inv['v_max_unclipped'] >= self.extfov_v_min and
-            inv['v_min_unclipped'] <= self.extfov_v_max
+            inv['u_max_unclipped'] >= self.extfov_u_min
+            and inv['u_min_unclipped'] <= self.extfov_u_max
+            and inv['v_max_unclipped'] >= self.extfov_v_min
+            and inv['v_min_unclipped'] <= self.extfov_v_max
         )
 
     @property
@@ -347,9 +357,10 @@ class ObsSnapshot(Obs, Snapshot):
             else:
                 ext_meshgrid = Meshgrid.for_fov(
                     self.fov,
-                    origin=(self.extfov_u_min+.5, self.extfov_v_min+.5),
-                    limit=(self.extfov_u_max+.5, self.extfov_v_max+.5),
-                    swap=True)
+                    origin=(self.extfov_u_min + 0.5, self.extfov_v_min + 0.5),
+                    limit=(self.extfov_u_max + 0.5, self.extfov_v_max + 0.5),
+                    swap=True,
+                )
                 self._ext_bp = Backplane(self, meshgrid=ext_meshgrid)
 
         return self._ext_bp
@@ -364,7 +375,8 @@ class ObsSnapshot(Obs, Snapshot):
                 origin=(0, 0),
                 limit=self._data_shape_uv,
                 undersample=self._data_shape_uv,
-                swap=True)
+                swap=True,
+            )
             self._corner_bp = Backplane(self, meshgrid=corner_meshgrid)
 
         return self._corner_bp
@@ -380,9 +392,10 @@ class ObsSnapshot(Obs, Snapshot):
                 ext_corner_meshgrid = Meshgrid.for_fov(
                     self.fov,
                     origin=(self.extfov_u_min, self.extfov_v_min),
-                    limit=(self.extfov_u_max+1, self.extfov_v_max+1),
+                    limit=(self.extfov_u_max + 1, self.extfov_v_max + 1),
                     undersample=(self._extdata_shape_uv[0], self._extdata_shape_uv[1]),
-                    swap=True)
+                    swap=True,
+                )
                 self._ext_corner_bp = Backplane(self, meshgrid=ext_corner_meshgrid)
 
         return self._ext_corner_bp
@@ -394,16 +407,18 @@ class ObsSnapshot(Obs, Snapshot):
         if self._center_bp is None:
             center_meshgrid = Meshgrid.for_fov(
                 self.fov,
-                origin=(self._data_shape_uv[0]//2, self._data_shape_uv[1]//2),
-                limit=(self._data_shape_uv[0]//2, self._data_shape_uv[1]//2),
-                swap=True)
+                origin=(self._data_shape_uv[0] // 2, self._data_shape_uv[1] // 2),
+                limit=(self._data_shape_uv[0] // 2, self._data_shape_uv[1] // 2),
+                swap=True,
+            )
             self._center_bp = Backplane(self, meshgrid=center_meshgrid)
         return self._center_bp
 
-    def extract_offset_array(self,
-                             array: NDArrayType[NPType],
-                             offset: tuple[float, float] | tuple[int, int] | None
-                             ) -> NDArrayType[NPType]:
+    def extract_offset_array(
+        self,
+        array: NDArrayType[NPType],
+        offset: tuple[float, float] | tuple[int, int] | None,
+    ) -> NDArrayType[NPType]:
         """Extracts a full-size array from the given extended FOV array.
 
         Parameters:
@@ -418,8 +433,9 @@ class ObsSnapshot(Obs, Snapshot):
         """
 
         if array.shape != self.extdata_shape_vu:
-            raise ValueError(f'array shape {array.shape} must equal extdata shape '
-                             f'{self.extdata_shape_vu}')
+            raise ValueError(
+                f'array shape {array.shape} must equal extdata shape {self.extdata_shape_vu}'
+            )
         if offset is None:
             offset = (0, 0)
         v_size, u_size = self.extdata_shape_vu
@@ -427,15 +443,13 @@ class ObsSnapshot(Obs, Snapshot):
         u0 = self.extfov_margin_u - int(np.round(offset[1]))
         v1 = v0 + self.data_shape_v
         u1 = u0 + self.data_shape_u
-        if (v0 < 0 or u0 < 0 or
-            v0 + self.data_shape_v > v_size or
-            u0 + self.data_shape_u > u_size):
+        if v0 < 0 or u0 < 0 or v0 + self.data_shape_v > v_size or u0 + self.data_shape_u > u_size:
             raise ValueError('offset produces out-of-bounds subimage slice')
         return array[v0:v1, u0:u1]
 
-    def _ra_dec_limits(self,
-                       bp: Backplane,
-                       apparent: bool = True) -> tuple[float, float, float, float]:
+    def _ra_dec_limits(
+        self, bp: Backplane, apparent: bool = True
+    ) -> tuple[float, float, float, float]:
         """Find the RA and DEC limits of an observation.
 
         Parameters:
@@ -451,14 +465,14 @@ class ObsSnapshot(Obs, Snapshot):
 
         ra_min = ra.min()
         ra_max = ra.max()
-        if ra_max-ra_min > np.pi:
+        if ra_max - ra_min > np.pi:
             # Wrap around
             ra_min = ra[np.where(ra > np.pi)].min()
             ra_max = ra[np.where(ra < np.pi)].max()
 
         dec_min = dec.min()
         dec_max = dec.max()
-        if dec_max-dec_min > np.pi:
+        if dec_max - dec_min > np.pi:
             # Wrap around
             dec_min = dec[np.where(dec > np.pi)].min()
             dec_max = dec[np.where(dec < np.pi)].max()
@@ -470,8 +484,7 @@ class ObsSnapshot(Obs, Snapshot):
 
         return ra_min, ra_max, dec_min, dec_max
 
-    def ra_dec_limits(self,
-                      apparent: bool = True) -> tuple[float, float, float, float]:
+    def ra_dec_limits(self, apparent: bool = True) -> tuple[float, float, float, float]:
         """Finds the right ascension and declination limits of the observation using the
         standard FOV.
 
@@ -484,8 +497,7 @@ class ObsSnapshot(Obs, Snapshot):
 
         return self._ra_dec_limits(self.corner_bp, apparent=apparent)
 
-    def ra_dec_limits_ext(self,
-                          apparent: bool = True) -> tuple[float, float, float, float]:
+    def ra_dec_limits_ext(self, apparent: bool = True) -> tuple[float, float, float, float]:
         """Finds the right ascension and declination limits of the observation using the
         extended FOV.
 
@@ -498,8 +510,7 @@ class ObsSnapshot(Obs, Snapshot):
 
         return self._ra_dec_limits(self.ext_corner_bp, apparent=apparent)
 
-    def sun_body_distance(self,
-                          body: str) -> float:
+    def sun_body_distance(self, body: str) -> float:
         """Computes the distance from the Sun to the specified celestial body in
         kilometers.
 
@@ -514,8 +525,7 @@ class ObsSnapshot(Obs, Snapshot):
         sun_event = target_sun_path.event_at_time(self.midtime)
         return cast(float, sun_event.pos.norm().vals)
 
-    def body_distance(self,
-                      body: str) -> float:
+    def body_distance(self, body: str) -> float:
         """Computes the distance from the spacecraft to the specified celestial body.
 
         Parameters:

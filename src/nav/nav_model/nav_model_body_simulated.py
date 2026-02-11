@@ -1,23 +1,26 @@
-from typing import Any, Optional
+from typing import Any
 
-from oops import Observation
 import numpy as np
+from oops import Observation
 
 from nav.config import Config
 from nav.sim.sim_body import create_simulated_body
-from nav.support.types import NDArrayBoolType, NDArrayFloatType
 from nav.support.time import now_dt
+
 from .nav_model_body_base import NavModelBodyBase
+from .nav_model_result import NavModelResult
 
 
 class NavModelBodySimulated(NavModelBodyBase):
-    def __init__(self,
-                 name: str,
-                 obs: Observation,
-                 body_name: str,
-                 sim_params: dict[str, Any],
-                 *,
-                 config: Optional[Config] = None) -> None:
+    def __init__(
+        self,
+        name: str,
+        obs: Observation,
+        body_name: str,
+        sim_params: dict[str, Any],
+        *,
+        config: Config | None = None,
+    ) -> None:
         """Navigation model that uses simulated body parameters to build a model/mask.
 
         Parameters:
@@ -47,19 +50,13 @@ class NavModelBodySimulated(NavModelBodyBase):
         self._body_name = body_name.upper()
         self._sim_params = sim_params.copy()
 
-        # Internal results
-        self._model_img: NDArrayFloatType | None = None
-        self._model_mask: NDArrayBoolType | None = None
-        self._range = None
-        self._confidence = 1.0
-        self._annotations = None
-        self._metadata: dict[str, Any] = {}
-
-    def create_model(self,
-                     *,
-                     always_create_model: bool = False,
-                     never_create_model: bool = False,
-                     create_annotations: bool = True) -> None:
+    def create_model(
+        self,
+        *,
+        always_create_model: bool = False,
+        never_create_model: bool = False,
+        create_annotations: bool = True,
+    ) -> None:
         """Create the simulated model, mask, limb, and annotations."""
 
         metadata: dict[str, Any] = {}
@@ -69,22 +66,26 @@ class NavModelBodySimulated(NavModelBodyBase):
         metadata['elapsed_time_sec'] = None
         metadata['body_name'] = self._body_name
         self._metadata = metadata
-        self._annotations = None
+        self._models.clear()
 
         with self._logger.open(f'CREATE SIMULATED BODY MODEL FOR: {self._body_name}'):
-            self._create_model(always_create_model=always_create_model,
-                               never_create_model=never_create_model,
-                               create_annotations=create_annotations)
+            self._create_model(
+                always_create_model=always_create_model,
+                never_create_model=never_create_model,
+                create_annotations=create_annotations,
+            )
 
         end_time = now_dt()
         metadata['end_time'] = end_time.isoformat()
         metadata['elapsed_time_sec'] = (end_time - start_time).total_seconds()
 
-    def _create_model(self,
-                      *,
-                      always_create_model: bool,
-                      never_create_model: bool,
-                      create_annotations: bool) -> None:
+    def _create_model(
+        self,
+        *,
+        always_create_model: bool,
+        never_create_model: bool,
+        create_annotations: bool,
+    ) -> None:
         """Generate the model image from the saved GUI parameters and build masks."""
 
         p = self._sim_params
@@ -138,19 +139,32 @@ class NavModelBodySimulated(NavModelBodyBase):
         limb_mask_full[slice_v, slice_u] = limb_mask
         body_mask_full[slice_v, slice_u] = body_mask
 
-        self._model_img = model_img_full
-        self._model_mask = body_mask_full
-
         # Range: optionally provided via parameters; set inside body, inf elsewhere
-        self._range = self._sim_params.get('range', np.inf)
+        range_val = p.get('range', np.inf)
 
+        annotations = None
         if create_annotations:
-            v_center_data = int(round(center_v))
-            u_center_data = int(round(center_u))
-            self._annotations = self._create_annotations(u_center_data, v_center_data,
-                                                         self._model_img,
-                                                         limb_mask_full,
-                                                         body_mask_full)
+            v_center_data = round(center_v)
+            u_center_data = round(center_u)
+            annotations = self._create_annotations(
+                u_center_data,
+                v_center_data,
+                model_img_full,
+                limb_mask_full,
+                body_mask_full,
+            )
 
         self._metadata['confidence'] = 1.0
-        self._confidence = 1.0
+
+        result = NavModelResult(
+            model_img=model_img_full,
+            model_mask=body_mask_full,
+            weighted_mask=None,
+            range=range_val,
+            blur_amount=None,
+            uncertainty=None,
+            confidence=1.0,
+            stretch_regions=None,
+            annotations=annotations,
+        )
+        self._models.append(result)

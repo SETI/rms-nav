@@ -1,12 +1,13 @@
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from filecache import FCPath, FileCache
 
-from .dataset import ImageFile
-from .dataset_pds3 import DataSetPDS3
 from nav.config import Config
 from nav.support.misc import safe_lstrip_zero
+
+from .dataset import ImageFile
+from .dataset_pds3 import DataSetPDS3
 
 
 class DataSetPDS3VoyagerISS(DataSetPDS3):
@@ -29,13 +30,15 @@ class DataSetPDS3VoyagerISS(DataSetPDS3):
     _MIN_8xxx_VOL2 = 8201
     _MAX_8xxx_VOL2 = 8210
 
-    _ALL_VOLUME_NAMES = tuple(f'VGISS_{x:04d}' for x in
-                              list(range(_MIN_5xxx_VOL1, _MAX_5xxx_VOL1+1)) +
-                              list(range(_MIN_5xxx_VOL2, _MAX_5xxx_VOL2+1)) +
-                              list(range(_MIN_6xxx_VOL1, _MAX_6xxx_VOL1+1)) +
-                              list(range(_MIN_6xxx_VOL2, _MAX_6xxx_VOL2+1)) +
-                              list(range(_MIN_7xxx_VOL2, _MAX_7xxx_VOL2+1)) +
-                              list(range(_MIN_8xxx_VOL2, _MAX_8xxx_VOL2+1)))
+    _ALL_VOLUME_NAMES = tuple(
+        f'VGISS_{x:04d}'
+        for x in list(range(_MIN_5xxx_VOL1, _MAX_5xxx_VOL1 + 1))
+        + list(range(_MIN_5xxx_VOL2, _MAX_5xxx_VOL2 + 1))
+        + list(range(_MIN_6xxx_VOL1, _MAX_6xxx_VOL1 + 1))
+        + list(range(_MIN_6xxx_VOL2, _MAX_6xxx_VOL2 + 1))
+        + list(range(_MIN_7xxx_VOL2, _MAX_7xxx_VOL2 + 1))
+        + list(range(_MIN_8xxx_VOL2, _MAX_8xxx_VOL2 + 1))
+    )
     _INDEX_COLUMNS = ('FILE_SPECIFICATION_NAME',)
     _VOLUMES_DIR_NAME = 'volumes'
 
@@ -54,8 +57,7 @@ class DataSetPDS3VoyagerISS(DataSetPDS3):
 
         filespec = cast(str, row['FILE_SPECIFICATION_NAME'])
         if not filespec.endswith('.LBL'):
-            raise ValueError(f'Bad Primary File Spec "{filespec}" - '
-                             'expected ".LBL"')
+            raise ValueError(f'Bad Primary File Spec "{filespec}" - expected ".LBL"')
         return filespec
 
     @staticmethod
@@ -83,8 +85,7 @@ class DataSetPDS3VoyagerISS(DataSetPDS3):
 
         parts = filespec.split('/')
         if len(parts) != 3:
-            raise ValueError(f'Bad Primary File Spec "{filespec}" - expected 3 '
-                             'directory levels')
+            raise ValueError(f'Bad Primary File Spec "{filespec}" - expected 3 directory levels')
         if parts[0].upper() != 'DATA':
             raise ValueError(f'Bad Primary File Spec "{filespec}" - expected "DATA"')
         range_dir = parts[1]
@@ -165,12 +166,14 @@ class DataSetPDS3VoyagerISS(DataSetPDS3):
         """
         return str(Path(f'{volume}/{filespec}').with_suffix(''))
 
-    def __init__(self,
-                 pds3_holdings_root: Optional[str | Path | FCPath] = None,
-                 *,
-                 index_filecache: Optional[FileCache] = None,
-                 pds3_holdings_filecache: Optional[FileCache] = None,
-                 config: Optional[Config] = None) -> None:
+    def __init__(
+        self,
+        pds3_holdings_root: str | Path | FCPath | None = None,
+        *,
+        index_filecache: FileCache | None = None,
+        pds3_holdings_filecache: FileCache | None = None,
+        config: Config | None = None,
+    ) -> None:
         """Initializes a Voyager ISS dataset handler.
 
         Parameters:
@@ -181,10 +184,12 @@ class DataSetPDS3VoyagerISS(DataSetPDS3):
                 creates a new one.
             config: Configuration object to use. If None, uses DEFAULT_CONFIG.
         """
-        super().__init__(pds3_holdings_root=pds3_holdings_root,
-                         index_filecache=index_filecache,
-                         pds3_holdings_filecache=pds3_holdings_filecache,
-                         config=config)
+        super().__init__(
+            pds3_holdings_root=pds3_holdings_root,
+            index_filecache=index_filecache,
+            pds3_holdings_filecache=pds3_holdings_filecache,
+            config=config,
+        )
 
     def pds4_bundle_template_dir(self) -> str:
         """Returns absolute path to template directory for PDS4 bundle generation."""
@@ -199,8 +204,7 @@ class DataSetPDS3VoyagerISS(DataSetPDS3):
         if Path(template_dir).is_absolute():
             return template_dir
 
-        pds4_templates_dir = (Path(__file__).resolve().parent.parent.parent / 'pds4' /
-                              'templates')
+        pds4_templates_dir = Path(__file__).resolve().parent.parent.parent / 'pds4' / 'templates'
         return str(pds4_templates_dir / template_dir)
 
     def pds4_bundle_name(self) -> str:

@@ -1,8 +1,9 @@
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
-from .nav_technique import NavTechnique
 from nav.config import Config
 from nav.nav_model import NavModelCombined
+
+from .nav_technique import NavTechnique
 
 if TYPE_CHECKING:
     from nav.nav_master import NavMaster
@@ -17,10 +18,7 @@ class NavTechniqueManual(NavTechnique):
     correlate_all technique.
     """
 
-    def __init__(self,
-                 nav_master: 'NavMaster',
-                 *,
-                 config: Optional[Config] = None) -> None:
+    def __init__(self, nav_master: 'NavMaster', *, config: Config | None = None) -> None:
         super().__init__(nav_master, config=config)
         self._combined_model: NavModelCombined | None = None
 
@@ -38,13 +36,16 @@ class NavTechniqueManual(NavTechnique):
                 self.logger.info('Manual navigation technique failed - no models available')
                 return
 
-            if combined_model.model_img is None:
-                raise ValueError('Combined model image is None')
-            if combined_model.model_mask is None:
-                raise ValueError('Combined model mask is None')
+            if (
+                len(combined_model.models) == 0
+                or combined_model.models[0].model_img is None
+                or combined_model.models[0].model_mask is None
+            ):
+                raise ValueError('Combined model has no result or missing image/mask')
 
             # Import here to avoid importing PyQt6 unless needed
             from PyQt6.QtWidgets import QApplication
+
             from nav.ui.manual_nav_dialog import ManualNavDialog
 
             obs = self.nav_master.obs
@@ -58,10 +59,7 @@ class NavTechniqueManual(NavTechnique):
 
             # Launch the dialog, allowing the user to select offset
             dialog = ManualNavDialog(
-                obs=obs,
-                combined_model=combined_model,
-                config=self.config,
-                parent=None
+                obs=obs, combined_model=combined_model, config=self.config, parent=None
             )
 
             accepted, chosen_offset, _last_corr = dialog.run_modal()

@@ -11,10 +11,9 @@ models for navigation offset determination.
 """
 
 import math
-from typing import Any, Optional
+from typing import Any, cast
 
 import numpy as np
-
 import oops
 from oops.backplane import Backplane
 
@@ -22,6 +21,7 @@ from nav.config import Config
 from nav.support.time import now_dt, utc_to_et
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
+from .nav_model_result import NavModelResult
 from .nav_model_rings_base import NavModelRingsBase
 
 
@@ -34,11 +34,7 @@ class NavModelRings(NavModelRingsBase):
     and can be filtered by observation date.
     """
 
-    def __init__(self,
-                 name: str,
-                 obs: oops.Observation,
-                 *,
-                 config: Optional[Config] = None) -> None:
+    def __init__(self, name: str, obs: oops.Observation, *, config: Config | None = None) -> None:
         """Creates a navigation model for planetary rings.
 
         Parameters:
@@ -49,11 +45,13 @@ class NavModelRings(NavModelRingsBase):
 
         super().__init__(name, obs, config=config)
 
-    def create_model(self,
-                     *,
-                     always_create_model: bool = False,
-                     never_create_model: bool = False,
-                     create_annotations: bool = True) -> None:
+    def create_model(
+        self,
+        *,
+        always_create_model: bool = False,
+        never_create_model: bool = False,
+        create_annotations: bool = True,
+    ) -> None:
         """Creates the internal model representation for planetary rings.
 
         Parameters:
@@ -70,23 +68,44 @@ class NavModelRings(NavModelRingsBase):
         metadata['elapsed_time_sec'] = None
 
         self._metadata = metadata
-        self._annotations = None
-        self._uncertainty = 0.
-        self._confidence = 1.0
+        self._models.clear()
 
         with self._logger.open('CREATE RINGS MODEL'):
-            self._create_model(always_create_model=always_create_model,
-                               never_create_model=never_create_model,
-                               create_annotations=create_annotations)
+            self._create_model(
+                always_create_model=always_create_model,
+                never_create_model=never_create_model,
+                create_annotations=create_annotations,
+            )
 
         end_time = now_dt()
         metadata['end_time'] = end_time.isoformat()
         metadata['elapsed_time_sec'] = (end_time - start_time).total_seconds()
 
-    def _create_model(self,
-                      always_create_model: bool,
-                      never_create_model: bool,
-                      create_annotations: bool) -> None:
+    def _create_empty_model_result(self) -> NavModelResult:
+        """Returns an empty NavModelResult with zeros image/mask and inf range."""
+        obs = self.obs
+        empty_img = obs.make_extfov_zeros()
+        empty_mask = obs.make_extfov_false()
+        empty_range = obs.make_extfov_zeros()
+        empty_range[:, :] = math.inf
+        return NavModelResult(
+            model_img=empty_img,
+            model_mask=empty_mask,
+            weighted_mask=None,
+            range=empty_range,
+            blur_amount=None,
+            uncertainty=0.0,
+            confidence=1.0,
+            stretch_regions=None,
+            annotations=None,
+        )
+
+    def _create_model(
+        self,
+        always_create_model: bool,
+        never_create_model: bool,
+        create_annotations: bool,
+    ) -> None:
         """Creates the internal model representation for planetary rings.
 
         Parameters:
@@ -128,8 +147,10 @@ class NavModelRings(NavModelRingsBase):
         if min_fade_width_multiplier <= 0:
             raise ValueError(f'Invalid rings min_fade_width_multiplier {min_fade_width_multiplier}')
 
-        self._logger.info(f'Planet: {planet}, Epoch for modes: {epoch_str}, '
-                          f'Feature width: {feature_width_pix} pixels')
+        self._logger.info(
+            f'Planet: {planet}, Epoch for modes: {epoch_str}, '
+            f'Feature width: {feature_width_pix} pixels'
+        )
 
         # Determine ring target key
         ring_target = f'{planet.lower()}:ring'
@@ -140,10 +161,7 @@ class NavModelRings(NavModelRingsBase):
             self._logger.info('No rings visible in observation')
             if not always_create_model:
                 return
-            self._model_img = obs.make_extfov_zeros()
-            self._model_mask = obs.make_extfov_false()
-            self._range = obs.make_extfov_zeros()
-            self._range[:, :] = math.inf
+            self._models.append(self._create_empty_model_result())
             return
 
         min_radius = bp_radii.min().vals
@@ -151,16 +169,14 @@ class NavModelRings(NavModelRingsBase):
         self._logger.info(f'Ring radii: min={min_radius:.2f} km, max={max_radius:.2f} km')
 
         # Load and filter features by date
-        features = self._load_ring_features(planet_config, obs.midtime,
-                                            min_radius=min_radius, max_radius=max_radius)
+        features = self._load_ring_features(
+            planet_config, obs.midtime, min_radius=min_radius, max_radius=max_radius
+        )
         if not features:
             self._logger.warning('No ring features available')
             if not always_create_model:
                 return
-            self._model_img = obs.make_extfov_zeros()
-            self._model_mask = obs.make_extfov_false()
-            self._range = obs.make_extfov_zeros()
-            self._range[:, :] = math.inf
+            self._models.append(self._create_empty_model_result())
             return
 
         self._logger.info(f'Loaded {len(features)} ring features')
@@ -170,18 +186,16 @@ class NavModelRings(NavModelRingsBase):
             self._metadata['epoch'] = epoch_str
             self._metadata['feature_count'] = len(features)
             self._metadata['features'] = [
-                {'name': f.get('name'), 'type': f.get('feature_type')}
-                for f in features]
+                {'name': f.get('name'), 'type': f.get('feature_type')} for f in features
+            ]
             return
 
-        # Get backplanes
+        # Get backplanes (resolutions and distance used for all features)
         resolutions = obs.ext_bp.ring_radial_resolution(ring_target).vals
+        bp_distance = obs.ext_bp.distance(ring_target, direction='dep')
+        distance_mvals = bp_distance.mvals
 
-        # Initialize model arrays
-        model = obs.make_extfov_zeros()
-        model_mask = obs.make_extfov_false()
-
-        # Process features: gaps first, then ringlets
+        # Build sorted list of all edges for conflict detection in fade logic
         feature_list_by_a: list[tuple[float, str]] = []
         for feature in features:
             feature_type = feature.get('feature_type')
@@ -191,130 +205,127 @@ class NavModelRings(NavModelRingsBase):
             if inner_data:
                 inner_a = self._get_base_radius(inner_data)
                 if inner_a is not None:
-                    feature_list_by_a.append((
-                        inner_a,
-                        'IEG' if feature_type == 'GAP' else 'IER'))
+                    feature_list_by_a.append((inner_a, 'IEG' if feature_type == 'GAP' else 'IER'))
             if outer_data:
                 outer_a = self._get_base_radius(outer_data)
                 if outer_a is not None:
-                    feature_list_by_a.append((
-                        outer_a,
-                        'OEG' if feature_type == 'GAP' else 'OER'))
+                    feature_list_by_a.append((outer_a, 'OEG' if feature_type == 'GAP' else 'OER'))
 
         feature_list_by_a.sort(key=lambda x: x[0], reverse=True)
 
-        # Render features
-        for feature_type in ('GAP', 'RINGLET'):
-            for feature in features:
-                if feature.get('feature_type') != feature_type:
-                    continue
+        # Render each edge as a separate result (IEG/OEG or IER/OER per edge; full
+        # ringlet band stays one result).
+        for feature in features:
+            feature_type = feature.get('feature_type')
+            inner_data = feature.get('inner_data')
+            outer_data = feature.get('outer_data')
+            feature_name = feature.get('name')
 
-                inner_data = feature.get('inner_data')
-                outer_data = feature.get('outer_data')
-                feature_name = feature.get('name')
-
-                if (inner_data is not None and outer_data is not None and
-                        feature_type == 'RINGLET'):
-                    # Full ringlet - render both edges
-                    self._render_full_ringlet(
-                        obs, model, model_mask,
-                        ring_target=ring_target, inner_data=inner_data,
-                        outer_data=outer_data, epoch=epoch,
-                        resolutions=resolutions, feature_name=feature_name)
-                else:
-                    # Single edge or gap
-                    if inner_data is not None:
-                        self._render_single_edge(
-                            obs, model, model_mask,
-                            ring_target=ring_target,
-                            edge_data=inner_data,
-                            epoch=epoch,
-                            resolutions=resolutions,
-                            feature_width_pix=feature_width_pix,
-                            min_fade_width_multiplier=min_fade_width_multiplier,
-                            feature_list_by_a=feature_list_by_a,
-                            feature_type=feature_type,
-                            feature_name=feature_name,
-                            edge_type='inner')
-                    if outer_data is not None:
-                        self._render_single_edge(
-                            obs, model, model_mask,
-                            ring_target=ring_target,
-                            edge_data=outer_data,
-                            epoch=epoch,
-                            resolutions=resolutions,
-                            feature_width_pix=feature_width_pix,
-                            min_fade_width_multiplier=min_fade_width_multiplier,
-                            feature_list_by_a=feature_list_by_a,
-                            feature_type=feature_type,
-                            feature_name=feature_name,
-                            edge_type='outer')
-
-        # Compute range
-        bp_distance = obs.ext_bp.distance(ring_target, direction='dep')
-        distance_mvals = bp_distance.mvals
-        self._range = obs.make_extfov_zeros()
-        self._range[:, :] = distance_mvals.filled(math.inf)
-        # Set range to inf where rings are not present
-        self._range[~model_mask] = math.inf
-
-        # Create annotations if requested
-        if create_annotations:
-            # Collect edge information for annotation
-            edge_info_list: list[tuple[NDArrayBoolType, str, str]] = []
-
-            for feature in features:
-                feature_type = feature.get('feature_type')
-                feature_name = feature.get('name') or 'UNNAMED'
-                inner_data = feature.get('inner_data')
-                outer_data = feature.get('outer_data')
-
-                if inner_data is not None:
-                    inner_radii_bp = self._compute_edge_radii(
-                        obs, ring_target, mode_data=inner_data, epoch=epoch)
-                    inner_a = self._get_base_radius(inner_data)
-                    if inner_radii_bp is not None and inner_a is not None:
-                        edge_label = ('IEG' if feature_type == 'GAP' else 'IER')
-                        label_text = f'{feature_name} {edge_label}'
-                        # Compute edge mask from backplane
-                        edge_mask = (obs.ext_bp.border_atop(inner_radii_bp.key, inner_a)
-                                     .mvals.astype('bool').filled(False))
-                        edge_info_list.append((edge_mask, label_text, edge_label))
-
-                if outer_data is not None:
-                    outer_radii_bp = self._compute_edge_radii(
-                        obs, ring_target, mode_data=outer_data, epoch=epoch)
-                    outer_a = self._get_base_radius(outer_data)
-                    if outer_radii_bp is not None and outer_a is not None:
-                        edge_label = ('OEG' if feature_type == 'GAP' else 'OER')
-                        label_text = f'{feature_name} {edge_label}'
-                        # Compute edge mask from backplane
-                        edge_mask = (obs.ext_bp.border_atop(outer_radii_bp.key, outer_a)
-                                     .mvals.astype('bool').filled(False))
-                        edge_info_list.append((edge_mask, label_text, edge_label))
-
-            self._annotations = self._create_edge_annotations(
-                obs, edge_info_list, model_mask)
-
-        self._model_img = model
-        self._model_mask = model_mask
+            if inner_data is not None and outer_data is not None and feature_type == 'RINGLET':
+                # Full ringlet: one result for the band between inner and outer edges
+                feat_model = obs.make_extfov_zeros()
+                feat_mask = obs.make_extfov_false()
+                self._render_full_ringlet(
+                    obs,
+                    feat_model,
+                    feat_mask,
+                    ring_target=ring_target,
+                    inner_data=inner_data,
+                    outer_data=outer_data,
+                    epoch=epoch,
+                    resolutions=resolutions,
+                    feature_name=feature_name,
+                )
+                range_arr = obs.make_extfov_zeros()
+                range_arr[:, :] = distance_mvals.filled(math.inf)
+                range_arr[~feat_mask] = math.inf
+                annotations = None
+                if create_annotations:
+                    edge_info_list = self._edge_info_list_for_feature(
+                        obs, ring_target, feature, epoch
+                    )
+                    annotations = self._create_edge_annotations(obs, edge_info_list, feat_mask)
+                self._models.append(
+                    NavModelResult(
+                        model_img=feat_model,
+                        model_mask=feat_mask,
+                        weighted_mask=None,
+                        range=range_arr,
+                        blur_amount=None,
+                        uncertainty=0.0,
+                        confidence=1.0,
+                        stretch_regions=None,
+                        annotations=annotations,
+                    )
+                )
+            else:
+                # GAP or single-edge: one result per edge (IEG, OEG, IER, or OER)
+                for edge_type, edge_data in [
+                    ('inner', inner_data),
+                    ('outer', outer_data),
+                ]:
+                    if edge_data is None:
+                        continue
+                    feat_model = obs.make_extfov_zeros()
+                    feat_mask = obs.make_extfov_false()
+                    self._render_single_edge(
+                        obs,
+                        feat_model,
+                        feat_mask,
+                        ring_target=ring_target,
+                        edge_data=edge_data,
+                        epoch=epoch,
+                        resolutions=resolutions,
+                        feature_width_pix=feature_width_pix,
+                        min_fade_width_multiplier=min_fade_width_multiplier,
+                        feature_list_by_a=feature_list_by_a,
+                        feature_type=cast(str, feature_type),
+                        feature_name=feature_name,
+                        edge_type=edge_type,
+                    )
+                    range_arr = obs.make_extfov_zeros()
+                    range_arr[:, :] = distance_mvals.filled(math.inf)
+                    range_arr[~feat_mask] = math.inf
+                    annotations = None
+                    if create_annotations:
+                        edge_info_list = self._edge_info_list_for_feature_edge(
+                            obs, ring_target, feature, epoch, edge_type
+                        )
+                        annotations = self._create_edge_annotations(obs, edge_info_list, feat_mask)
+                    self._models.append(
+                        NavModelResult(
+                            model_img=feat_model,
+                            model_mask=feat_mask,
+                            weighted_mask=None,
+                            range=range_arr,
+                            blur_amount=None,
+                            uncertainty=0.0,
+                            confidence=1.0,
+                            stretch_regions=None,
+                            annotations=annotations,
+                        )
+                    )
 
         # Update metadata
         self._metadata['planet'] = planet
         self._metadata['epoch'] = epoch_str
         self._metadata['feature_count'] = len(features)
         self._metadata['features'] = [
-            {'name': f.get('name'), 'type': f.get('feature_type')}
-            for f in features]
+            {'name': f.get('name'), 'type': f.get('feature_type')} for f in features
+        ]
 
         self._logger.info('Model created')
+        n = len(self._models)
+        self._logger.info(f'Generated {n} result{"s" if n != 1 else ""}')
 
-    def _load_ring_features(self,
-                            planet_config: dict[str, Any],
-                            obs_time: float,
-                            *,
-                            min_radius: float,
-                            max_radius: float) -> list[dict[str, Any]]:
+    def _load_ring_features(
+        self,
+        planet_config: dict[str, Any],
+        obs_time: float,
+        *,
+        min_radius: float,
+        max_radius: float,
+    ) -> list[dict[str, Any]]:
         """Load and filter ring features from configuration by date.
 
         Parameters:
@@ -327,8 +338,11 @@ class NavModelRings(NavModelRingsBase):
         """
 
         features: list[dict[str, Any]] = []
-        feature_dict = {k: v for k, v in planet_config.items()  # TODO Not fond of this
-                        if k not in ('epoch', 'feature_width', 'min_fade_width_multiplier')}
+        feature_dict = {
+            k: v
+            for k, v in planet_config.items()  # TODO Not fond of this
+            if k not in ('epoch', 'feature_width', 'min_fade_width_multiplier')
+        }
 
         for feature_key, feature_data in feature_dict.items():
             if not isinstance(feature_data, dict):  # TODO Too forgiving
@@ -344,8 +358,8 @@ class NavModelRings(NavModelRingsBase):
                         start_et = utc_to_et(start_date)
                     except Exception as e:
                         self._logger.warning(
-                            f'Invalid start_date "{start_date}" for feature '
-                            f'{feature_key}: {e}')
+                            f'Invalid start_date "{start_date}" for feature {feature_key}: {e}'
+                        )
                         continue
                 else:
                     start_et = None
@@ -355,8 +369,8 @@ class NavModelRings(NavModelRingsBase):
                         end_et = utc_to_et(end_date)
                     except Exception as e:
                         self._logger.warning(
-                            f'Invalid end_date "{end_date}" for feature '
-                            f'{feature_key}: {e}')
+                            f'Invalid end_date "{end_date}" for feature {feature_key}: {e}'
+                        )
                         continue
                 else:
                     end_et = None
@@ -371,7 +385,8 @@ class NavModelRings(NavModelRingsBase):
             feature_type = feature_data.get('feature_type')
             if feature_type not in ('GAP', 'RINGLET'):
                 self._logger.warning(
-                    f'Invalid feature_type "{feature_type}" for feature {feature_key}, skipping')
+                    f'Invalid feature_type "{feature_type}" for feature {feature_key}, skipping'
+                )
                 continue
 
             inner_data = feature_data.get('inner_data')
@@ -379,33 +394,119 @@ class NavModelRings(NavModelRingsBase):
 
             if inner_data is None and outer_data is None:
                 self._logger.warning(
-                    f'Feature {feature_key} has neither inner_data nor outer_data, skipping')
+                    f'Feature {feature_key} has neither inner_data nor outer_data, skipping'
+                )
                 continue
 
             # Validate mode data structure
-            if inner_data is not None:
-                if not self._validate_mode_data(inner_data, feature_key=feature_key,
-                                                edge_type='inner',
-                                                min_radius=min_radius, max_radius=max_radius):
-                    continue
+            if inner_data is not None and not self._validate_mode_data(
+                inner_data,
+                feature_key=feature_key,
+                edge_type='inner',
+                min_radius=min_radius,
+                max_radius=max_radius,
+            ):
+                continue
 
-            if outer_data is not None:
-                if not self._validate_mode_data(outer_data, feature_key=feature_key,
-                                                edge_type='outer',
-                                                min_radius=min_radius, max_radius=max_radius):
-                    continue
+            if outer_data is not None and not self._validate_mode_data(
+                outer_data,
+                feature_key=feature_key,
+                edge_type='outer',
+                min_radius=min_radius,
+                max_radius=max_radius,
+            ):
+                continue
 
             features.append(feature_data)
 
         return features
 
-    def _validate_mode_data(self,
-                            mode_data: list[dict[str, Any]],
-                            *,
-                            feature_key: str,
-                            edge_type: str,
-                            min_radius: float,
-                            max_radius: float) -> bool:
+    def _edge_info_list_for_feature(
+        self,
+        obs: oops.Observation,
+        ring_target: str,
+        feature: dict[str, Any],
+        epoch: float,
+    ) -> list[tuple[NDArrayBoolType, str, str]]:
+        """Build edge info list (edge_mask, label_text, edge_label) for a single feature.
+
+        Used to create annotations for one ring feature result.
+        """
+        edge_info_list: list[tuple[NDArrayBoolType, str, str]] = []
+        feature_type = feature.get('feature_type')
+        feature_name = feature.get('name') or 'UNNAMED'
+        inner_data = feature.get('inner_data')
+        outer_data = feature.get('outer_data')
+
+        if inner_data is not None:
+            inner_radii_bp = self._compute_edge_radii(
+                obs, ring_target, mode_data=inner_data, epoch=epoch
+            )
+            inner_a = self._get_base_radius(inner_data)
+            if inner_radii_bp is not None and inner_a is not None:
+                edge_label = 'IEG' if feature_type == 'GAP' else 'IER'
+                label_text = f'{feature_name} {edge_label}'
+                edge_mask = (
+                    obs.ext_bp.border_atop(inner_radii_bp.key, inner_a)
+                    .mvals.astype('bool')
+                    .filled(False)
+                )
+                edge_info_list.append((edge_mask, label_text, edge_label))
+
+        if outer_data is not None:
+            outer_radii_bp = self._compute_edge_radii(
+                obs, ring_target, mode_data=outer_data, epoch=epoch
+            )
+            outer_a = self._get_base_radius(outer_data)
+            if outer_radii_bp is not None and outer_a is not None:
+                edge_label = 'OEG' if feature_type == 'GAP' else 'OER'
+                label_text = f'{feature_name} {edge_label}'
+                edge_mask = (
+                    obs.ext_bp.border_atop(outer_radii_bp.key, outer_a)
+                    .mvals.astype('bool')
+                    .filled(False)
+                )
+                edge_info_list.append((edge_mask, label_text, edge_label))
+
+        return edge_info_list
+
+    def _edge_info_list_for_feature_edge(
+        self,
+        obs: oops.Observation,
+        ring_target: str,
+        feature: dict[str, Any],
+        epoch: float,
+        edge_type: str,
+    ) -> list[tuple[NDArrayBoolType, str, str]]:
+        """Build edge info list for a single edge (inner or outer) of a feature."""
+        edge_info_list: list[tuple[NDArrayBoolType, str, str]] = []
+        feature_type = feature.get('feature_type')
+        feature_name = feature.get('name') or 'UNNAMED'
+        if edge_type == 'inner':
+            edge_data = feature.get('inner_data')
+            edge_label = 'IEG' if feature_type == 'GAP' else 'IER'
+        else:
+            edge_data = feature.get('outer_data')
+            edge_label = 'OEG' if feature_type == 'GAP' else 'OER'
+        if edge_data is None:
+            return edge_info_list
+        radii_bp = self._compute_edge_radii(obs, ring_target, mode_data=edge_data, epoch=epoch)
+        a = self._get_base_radius(edge_data)
+        if radii_bp is not None and a is not None:
+            label_text = f'{feature_name} {edge_label}'
+            edge_mask = obs.ext_bp.border_atop(radii_bp.key, a).mvals.astype('bool').filled(False)
+            edge_info_list.append((edge_mask, label_text, edge_label))
+        return edge_info_list
+
+    def _validate_mode_data(
+        self,
+        mode_data: list[dict[str, Any]],
+        *,
+        feature_key: str,
+        edge_type: str,
+        min_radius: float,
+        max_radius: float,
+    ) -> bool:
         """Validate mode data structure for a ring edge.
 
         Parameters:
@@ -419,19 +520,22 @@ class NavModelRings(NavModelRingsBase):
 
         if not isinstance(mode_data, list) or len(mode_data) == 0:
             self._logger.warning(
-                f'Feature {feature_key} {edge_type}_data is not a non-empty list, skipping')
+                f'Feature {feature_key} {edge_type}_data is not a non-empty list, skipping'
+            )
             return False
 
         for i, mode in enumerate(mode_data):
             if not isinstance(mode, dict):
                 self._logger.warning(
-                    f'Feature {feature_key} {edge_type}_data[{i}] is not a dict, skipping')
+                    f'Feature {feature_key} {edge_type}_data[{i}] is not a dict, skipping'
+                )
                 return False
 
             mode_num = mode.get('mode')
             if mode_num is None:
                 self._logger.warning(
-                    f'Feature {feature_key} {edge_type}_data[{i}] missing mode, skipping')
+                    f'Feature {feature_key} {edge_type}_data[{i}] missing mode, skipping'
+                )
                 return False
 
             # TODO
@@ -452,12 +556,12 @@ class NavModelRings(NavModelRingsBase):
                 if mode['a'] <= 0:
                     self._logger.warning(
                         f'Feature {feature_key} {edge_type}_data[{i}] mode 1 '
-                        f'has non-positive a={mode["a"]}, skipping')
+                        f'has non-positive a={mode["a"]}, skipping'
+                    )
                     return False
         return True
 
-    def _get_base_radius(self,
-                         mode_data: list[dict[str, Any]]) -> Optional[float]:
+    def _get_base_radius(self, mode_data: list[dict[str, Any]]) -> float | None:
         """Get the base radius (semi-major axis) from mode data.
 
         Parameters:
@@ -477,8 +581,7 @@ class NavModelRings(NavModelRingsBase):
 
         return None
 
-    def _parse_mode_data(self,
-                         mode_data: list[dict[str, Any]]) -> list[tuple[Any, ...]]:
+    def _parse_mode_data(self, mode_data: list[dict[str, Any]]) -> list[tuple[Any, ...]]:
         """Parse mode data into format suitable for radial_mode computation.
 
         Parameters:
@@ -498,8 +601,9 @@ class NavModelRings(NavModelRingsBase):
             if mode_num > 90:
                 continue
 
-            if mode_num == 1:
-                # Mode 1: base radius with eccentricity
+            if 'a' in mode:
+                if mode_num != 1:
+                    raise ValueError(f'Mode {mode_num} has illegal "a" field')
                 a = mode['a']
                 ae = mode['ae']
                 long_peri = mode['long_peri']
@@ -526,12 +630,14 @@ class NavModelRings(NavModelRingsBase):
 
         return parsed_modes
 
-    def _compute_edge_radii(self,
-                            obs: oops.Observation,
-                            ring_target: str,
-                            *,
-                            mode_data: list[dict[str, Any]],
-                            epoch: float) -> Backplane:
+    def _compute_edge_radii(
+        self,
+        obs: oops.Observation,
+        ring_target: str,
+        *,
+        mode_data: list[dict[str, Any]],
+        epoch: float,
+    ) -> Backplane:
         """Compute multi-mode edge radius using radial_mode.
 
         Parameters:
@@ -551,11 +657,9 @@ class NavModelRings(NavModelRingsBase):
 
         # Apply modes sequentially
         for mode_info in parsed_modes:
-            if mode_info[0] == 1:
-                # Mode 1: special handling
+            if len(mode_info) == 5:  # TODO Clean this up
                 mode, a, ae, long_peri_rad, rate_peri_rad_per_sec = mode_info
-                # For mode 1, we use the base radius 'a' and apply
-                # eccentricity 'ae' as amplitude
+                # We use the base radius 'a' and apply eccentricity 'ae' as amplitude
                 radii_bp = obs.ext_bp.radial_mode(
                     radii_bp.key,
                     mode,
@@ -563,25 +667,20 @@ class NavModelRings(NavModelRingsBase):
                     ae,  # amplitude
                     long_peri_rad,  # phase
                     rate_peri_rad_per_sec,  # speed
-                    a0=a)  # reference semi-major axis
+                    a0=a,
+                )  # reference semi-major axis
             else:
                 # Other modes
                 mode, amplitude, phase_rad, speed_rad_per_sec = mode_info
                 radii_bp = obs.ext_bp.radial_mode(
-                    radii_bp.key,
-                    mode,
-                    epoch,
-                    amplitude,
-                    phase_rad,
-                    speed_rad_per_sec)
+                    radii_bp.key, mode, epoch, amplitude, phase_rad, speed_rad_per_sec
+                )
 
         return radii_bp
 
-    def _find_resolutions_by_a(self,
-                               obs: oops.Observation,
-                               ring_target: str,
-                               *,
-                               a: float) -> tuple[float, float]:
+    def _find_resolutions_by_a(
+        self, obs: oops.Observation, ring_target: str, *, a: float
+    ) -> tuple[float, float]:
         """Find the minimum and maximum resolutions at a given semi-major axis.
 
         Parameters:
@@ -604,17 +703,18 @@ class NavModelRings(NavModelRingsBase):
         max_val = res_set.max().vals
         return min_val, max_val
 
-    def _compute_edge_fade(self,
-                           *,
-                           model: NDArrayFloatType,
-                           radii: NDArrayFloatType,
-                           edge_radius: float,
-                           shade_above: bool,
-                           radius_width_km: float,
-                           min_radius_width_km: float,
-                           resolutions: NDArrayFloatType,
-                           feature_list_by_a: list[tuple[float, str]]
-                           ) -> NDArrayFloatType | None:
+    def _compute_edge_fade(
+        self,
+        *,
+        model: NDArrayFloatType,
+        radii: NDArrayFloatType,
+        edge_radius: float,
+        shade_above: bool,
+        radius_width_km: float,
+        min_radius_width_km: float,
+        resolutions: NDArrayFloatType,
+        feature_list_by_a: list[tuple[float, str]],
+    ) -> NDArrayFloatType | None:
         """Compute linear fade from a single edge.
 
         Creates a linear fade from the edge over the specified width. The fade provides a
@@ -648,12 +748,14 @@ class NavModelRings(NavModelRingsBase):
                 adjusted_width = abs(other_a - edge_radius) / 2
                 self._logger.debug(
                     f'Adjusting fade width for feature at {edge_radius:.2f} '
-                    f'vs {other_a:.2f}, new width {adjusted_width:.2f} km')
+                    f'vs {other_a:.2f}, new width {adjusted_width:.2f} km'
+                )
 
         if adjusted_width < min_radius_width_km:
             self._logger.debug(
                 f'Skipping feature at {edge_radius:.2f} due to close proximity (width '
-                f'{adjusted_width:.2f} < min {min_radius_width_km:.2f} km)')
+                f'{adjusted_width:.2f} < min {min_radius_width_km:.2f} km)'
+            )
             return None
 
         # Create fade array
@@ -665,9 +767,10 @@ class NavModelRings(NavModelRingsBase):
             # Integral: Z = [(1+a0/w)*a - a^2/(2w)] / s
             def int_func(a0: NDArrayFloatType, a1: NDArrayFloatType) -> NDArrayFloatType:
                 """Integrate fade function for shade_above case."""
-                result = (((1.0 + edge_radius / adjusted_width) * (a1 - a0) +
-                          (a0**2 - a1**2) / (2.0 * adjusted_width)) /
-                          resolutions)
+                result = (
+                    (1.0 + edge_radius / adjusted_width) * (a1 - a0)
+                    + (a0**2 - a1**2) / (2.0 * adjusted_width)
+                ) / resolutions
                 return np.asarray(result, dtype=np.float64)
 
             # Case analysis for pixel coverage
@@ -675,18 +778,22 @@ class NavModelRings(NavModelRingsBase):
             pixel_upper = radii + resolutions / 2.0
 
             # Case 1: Edge and fade end both within pixel
-            eq2 = np.logical_and(pixel_lower <= edge_radius,
-                                 edge_radius < pixel_upper)
-            eq3 = np.logical_and(pixel_lower <= edge_radius + adjusted_width,
-                                 edge_radius + adjusted_width < pixel_upper)
+            eq2 = np.logical_and(pixel_lower <= edge_radius, edge_radius < pixel_upper)
+            eq3 = np.logical_and(
+                pixel_lower <= edge_radius + adjusted_width,
+                edge_radius + adjusted_width < pixel_upper,
+            )
             eq_case1 = np.logical_and(eq2, eq3)
-            case1 = int_func(np.full_like(radii, edge_radius),
-                             np.full_like(radii, edge_radius + adjusted_width))
+            case1 = int_func(
+                np.full_like(radii, edge_radius),
+                np.full_like(radii, edge_radius + adjusted_width),
+            )
             shade[eq_case1] = case1[eq_case1]
 
             # Case 4: Edge before pixel, fade end after pixel (full coverage)
-            eq_case4 = np.logical_and(edge_radius < pixel_lower,
-                                      edge_radius + adjusted_width > pixel_upper)
+            eq_case4 = np.logical_and(
+                edge_radius < pixel_lower, edge_radius + adjusted_width > pixel_upper
+            )
             case4 = int_func(pixel_lower, pixel_upper)
             shade[eq_case4] = case4[eq_case4]
 
@@ -697,8 +804,7 @@ class NavModelRings(NavModelRingsBase):
 
             # Case 3: Edge before pixel, fade end within pixel
             eq_case3 = np.logical_and(eq3, np.logical_not(eq_case1))
-            case3 = int_func(pixel_lower,
-                             np.full_like(radii, edge_radius + adjusted_width))
+            case3 = int_func(pixel_lower, np.full_like(radii, edge_radius + adjusted_width))
             shade[eq_case3] = case3[eq_case3]
 
         else:
@@ -707,9 +813,10 @@ class NavModelRings(NavModelRingsBase):
             # Integral: Z = [(1-a0/w)*a + a^2/(2w)] / s
             def int_func2(a0: NDArrayFloatType, a1: NDArrayFloatType) -> NDArrayFloatType:
                 """Integrate fade function for shade_below case."""
-                result = (((1.0 - edge_radius / adjusted_width) * (a1 - a0) +
-                          (a1**2 - a0**2) / (2.0 * adjusted_width)) /
-                          resolutions)
+                result = (
+                    (1.0 - edge_radius / adjusted_width) * (a1 - a0)
+                    + (a1**2 - a0**2) / (2.0 * adjusted_width)
+                ) / resolutions
                 return np.asarray(result, dtype=np.float64)
 
             # Case analysis for pixel coverage
@@ -717,18 +824,22 @@ class NavModelRings(NavModelRingsBase):
             pixel_upper = radii + resolutions / 2.0
 
             # Case 1: Fade start and edge both within pixel
-            eq2 = np.logical_and(pixel_lower < edge_radius,
-                                 edge_radius <= pixel_upper)
-            eq3 = np.logical_and(pixel_lower < edge_radius - adjusted_width,
-                                 edge_radius - adjusted_width <= pixel_upper)
+            eq2 = np.logical_and(pixel_lower < edge_radius, edge_radius <= pixel_upper)
+            eq3 = np.logical_and(
+                pixel_lower < edge_radius - adjusted_width,
+                edge_radius - adjusted_width <= pixel_upper,
+            )
             eq_case1 = np.logical_and(eq2, eq3)
-            case1 = int_func2(np.full_like(radii, edge_radius - adjusted_width),
-                              np.full_like(radii, edge_radius))
+            case1 = int_func2(
+                np.full_like(radii, edge_radius - adjusted_width),
+                np.full_like(radii, edge_radius),
+            )
             shade[eq_case1] = case1[eq_case1]
 
             # Case 4: Fade start before pixel, edge after pixel (full coverage)
-            eq_case4 = np.logical_and(edge_radius > pixel_upper,
-                                      edge_radius - adjusted_width < pixel_lower)
+            eq_case4 = np.logical_and(
+                edge_radius > pixel_upper, edge_radius - adjusted_width < pixel_lower
+            )
             case4 = int_func2(pixel_lower, pixel_upper)
             shade[eq_case4] = case4[eq_case4]
 
@@ -739,8 +850,7 @@ class NavModelRings(NavModelRingsBase):
 
             # Case 3: Fade start within pixel, edge after pixel
             eq_case3 = np.logical_and(eq3, np.logical_not(eq_case1))
-            case3 = int_func2(np.full_like(radii, edge_radius - adjusted_width),
-                              pixel_upper)
+            case3 = int_func2(np.full_like(radii, edge_radius - adjusted_width), pixel_upper)
             shade[eq_case3] = case3[eq_case3]
 
         # Clip shade to valid range and add to model
@@ -749,17 +859,19 @@ class NavModelRings(NavModelRingsBase):
 
         return new_model
 
-    def _render_full_ringlet(self,
-                             obs: oops.Observation,
-                             model: NDArrayFloatType,
-                             model_mask: NDArrayBoolType,
-                             *,
-                             ring_target: str,
-                             inner_data: list[dict[str, Any]],
-                             outer_data: list[dict[str, Any]],
-                             epoch: float,
-                             resolutions: NDArrayFloatType,
-                             feature_name: Optional[str]) -> None:
+    def _render_full_ringlet(
+        self,
+        obs: oops.Observation,
+        model: NDArrayFloatType,
+        model_mask: NDArrayBoolType,
+        *,
+        ring_target: str,
+        inner_data: list[dict[str, Any]],
+        outer_data: list[dict[str, Any]],
+        epoch: float,
+        resolutions: NDArrayFloatType,
+        feature_name: str | None,
+    ) -> None:
         """Render a complete ringlet with both inner and outer edges.
 
         Parameters:
@@ -775,9 +887,11 @@ class NavModelRings(NavModelRingsBase):
         """
 
         inner_radii_bp = self._compute_edge_radii(
-            obs, ring_target, mode_data=inner_data, epoch=epoch)
+            obs, ring_target, mode_data=inner_data, epoch=epoch
+        )
         outer_radii_bp = self._compute_edge_radii(
-            obs, ring_target, mode_data=outer_data, epoch=epoch)
+            obs, ring_target, mode_data=outer_data, epoch=epoch
+        )
 
         if inner_radii_bp is None or outer_radii_bp is None:
             self._logger.warning(f'Could not compute edge radii for ringlet {feature_name}')
@@ -790,17 +904,16 @@ class NavModelRings(NavModelRingsBase):
         outer_a = self._get_base_radius(outer_data)
 
         if inner_a is None or outer_a is None:
-            self._logger.warning(
-                f'Could not get base radii for ringlet {feature_name}')
+            self._logger.warning(f'Could not get base radii for ringlet {feature_name}')
             return
 
         self._logger.debug(
-            f'Rendering full ringlet {feature_name} from {inner_a:.2f} to '
-            f'{outer_a:.2f} km')
+            f'Rendering full ringlet {feature_name} from {inner_a:.2f} to {outer_a:.2f} km'
+        )
 
         # Fill solid region between edges
-        inner_above = (inner_radii - resolutions / 2.0 >= inner_a)
-        outer_below = (outer_radii + resolutions / 2.0 <= outer_a)
+        inner_above = inner_radii - resolutions / 2.0 >= inner_a
+        outer_below = outer_radii + resolutions / 2.0 <= outer_a
         solid_ringlet = np.logical_and(inner_above, outer_below).filled(False)
         model[solid_ringlet] += 1.0
         model_mask[solid_ringlet] = True
@@ -808,15 +921,29 @@ class NavModelRings(NavModelRingsBase):
         # Apply anti-aliasing at edges
         inner_radii_vals = inner_radii.filled(0.0)
         outer_radii_vals = outer_radii.filled(0.0)
-        inner_mask = (~inner_radii.mask if hasattr(inner_radii, 'mask')
-                      else np.ones_like(inner_radii_vals, dtype=bool))
-        outer_mask = (~outer_radii.mask if hasattr(outer_radii, 'mask')
-                      else np.ones_like(outer_radii_vals, dtype=bool))
+        inner_mask = (
+            ~inner_radii.mask
+            if hasattr(inner_radii, 'mask')
+            else np.ones_like(inner_radii_vals, dtype=bool)
+        )
+        outer_mask = (
+            ~outer_radii.mask
+            if hasattr(outer_radii, 'mask')
+            else np.ones_like(outer_radii_vals, dtype=bool)
+        )
 
         inner_shade = self._compute_antialiasing(
-            radii=inner_radii_vals, edge_radius=inner_a, shade_above=False, resolutions=resolutions)
+            radii=inner_radii_vals,
+            edge_radius=inner_a,
+            shade_above=False,
+            resolutions=resolutions,
+        )
         outer_shade = self._compute_antialiasing(
-            radii=outer_radii_vals, edge_radius=outer_a, shade_above=True, resolutions=resolutions)
+            radii=outer_radii_vals,
+            edge_radius=outer_a,
+            shade_above=True,
+            resolutions=resolutions,
+        )
 
         # Apply shades only where not already solid and where radii are valid
         inner_shade_mask = ~solid_ringlet & inner_mask
@@ -826,24 +953,26 @@ class NavModelRings(NavModelRingsBase):
         model[outer_shade_mask] += outer_shade[outer_shade_mask]
 
         # Update mask for shaded regions
-        model_mask[inner_shade_mask] |= (inner_shade[inner_shade_mask] > 0.0)
-        model_mask[outer_shade_mask] |= (outer_shade[outer_shade_mask] > 0.0)
+        model_mask[inner_shade_mask] |= inner_shade[inner_shade_mask] > 0.0
+        model_mask[outer_shade_mask] |= outer_shade[outer_shade_mask] > 0.0
 
-    def _render_single_edge(self,
-                            obs: oops.Observation,
-                            model: NDArrayFloatType,
-                            model_mask: NDArrayBoolType,
-                            *,
-                            ring_target: str,
-                            edge_data: list[dict[str, Any]],
-                            epoch: float,
-                            resolutions: NDArrayFloatType,
-                            feature_width_pix: float,
-                            min_fade_width_multiplier: float,
-                            feature_list_by_a: list[tuple[float, str]],
-                            feature_type: str,
-                            feature_name: Optional[str],
-                            edge_type: str) -> None:
+    def _render_single_edge(
+        self,
+        obs: oops.Observation,
+        model: NDArrayFloatType,
+        model_mask: NDArrayBoolType,
+        *,
+        ring_target: str,
+        edge_data: list[dict[str, Any]],
+        epoch: float,
+        resolutions: NDArrayFloatType,
+        feature_width_pix: float,
+        min_fade_width_multiplier: float,
+        feature_list_by_a: list[tuple[float, str]],
+        feature_type: str,
+        feature_name: str | None,
+        edge_type: str,
+    ) -> None:
         """Render a single edge with fading.
 
         Parameters:
@@ -866,8 +995,8 @@ class NavModelRings(NavModelRingsBase):
 
         if edge_radii_bp is None:
             self._logger.warning(
-                f'Could not compute edge radii for {edge_type} edge of '
-                f'{feature_name}')
+                f'Could not compute edge radii for {edge_type} edge of {feature_name}'
+            )
             return
 
         edge_radii = edge_radii_bp.mvals
@@ -875,25 +1004,24 @@ class NavModelRings(NavModelRingsBase):
 
         if edge_a is None:
             self._logger.warning(
-                f'Could not get base radius for {edge_type} edge of '
-                f'{feature_name}')
+                f'Could not get base radius for {edge_type} edge of {feature_name}'
+            )
             return
 
         # Determine fade direction
         if feature_type == 'RINGLET':
             # Ringlet inner edge: fade outward (shade_above=True)
             # Ringlet outer edge: fade inward (shade_above=False)
-            shade_above = (edge_type == 'inner')
+            shade_above = edge_type == 'inner'
         else:
             # Gap inner edge: fade inward (shade_above=False)
             # Gap outer edge: fade outward (shade_above=True)
-            shade_above = (edge_type == 'outer')
+            shade_above = edge_type == 'outer'
 
         # Get resolution at this radius
         min_res, _max_res = self._find_resolutions_by_a(obs, ring_target, a=edge_a)
         if min_res == 0.0:
-            self._logger.warning(
-                f'Could not find resolution for edge at {edge_a:.2f} km')
+            self._logger.warning(f'Could not find resolution for edge at {edge_a:.2f} km')
             return
 
         # Calculate fade width
@@ -902,7 +1030,8 @@ class NavModelRings(NavModelRingsBase):
 
         self._logger.debug(
             f'Rendering {edge_type} edge of {feature_type} {feature_name} at '
-            f'{edge_a:.2f} km, fade width {radius_width_km:.2f} km')
+            f'{edge_a:.2f} km, fade width {radius_width_km:.2f} km'
+        )
 
         # Apply fade
         new_model = self._compute_edge_fade(
@@ -913,7 +1042,8 @@ class NavModelRings(NavModelRingsBase):
             radius_width_km=radius_width_km,
             min_radius_width_km=min_radius_width_km,
             resolutions=resolutions,
-            feature_list_by_a=feature_list_by_a)
+            feature_list_by_a=feature_list_by_a,
+        )
 
         if new_model is not None:
             # Update mask for faded region

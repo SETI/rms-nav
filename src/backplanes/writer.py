@@ -1,8 +1,8 @@
 from typing import Any
 
-from filecache import FCPath
-from astropy.io import fits
 import numpy as np
+from astropy.io import fits
+from filecache import FCPath
 from pdslogger import PdsLogger
 
 from nav.config import Config
@@ -59,7 +59,7 @@ def write_fits(
 
     for name, arr in filtered_master.items():
         hdu = fits.ImageHDU(data=arr.astype('float32'), name=name.upper())
-        if name in units_map and units_map[name]:
+        if units_map.get(name):
             hdu.header['BUNIT'] = units_map[name]
         hdus.append(hdu)
 
@@ -70,7 +70,8 @@ def write_fits(
 
     # Write backplane metadata JSON file
     metadata_file_path = fits_file_path.parent / (
-        fits_file_path.stem.replace('_backplanes', '') + '_backplane_metadata.json')
+        fits_file_path.stem.replace('_backplanes', '') + '_backplane_metadata.json'
+    )
     backplane_metadata: dict[str, Any] = {
         'bodies': {},
         'rings': {},
@@ -100,8 +101,7 @@ def write_fits(
             # center_uv is [u, v] but we need [v, u]
             center_uv = inv_data.get('center_uv', None)
             if center_uv is not None:
-                body_entry['center_uv'] = [
-                    float(center_uv[1]), float(center_uv[0])]
+                body_entry['center_uv'] = [float(center_uv[1]), float(center_uv[0])]
             # center_range from range
             center_range = inv_data.get('range', None)
             if center_range is not None:
@@ -110,8 +110,7 @@ def write_fits(
             u_pixel_size = inv_data.get('u_pixel_size', None)
             v_pixel_size = inv_data.get('v_pixel_size', None)
             if u_pixel_size is not None and v_pixel_size is not None:
-                body_entry['size_uv'] = [
-                    float(u_pixel_size), float(v_pixel_size)]
+                body_entry['size_uv'] = [float(u_pixel_size), float(v_pixel_size)]
 
         if body_entry:
             backplane_metadata['bodies'][body_name] = body_entry

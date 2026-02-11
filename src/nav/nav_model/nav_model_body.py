@@ -1,35 +1,37 @@
 import math
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
-# import matplotlib.pyplot as plt
+import polymath
 
+# import matplotlib.pyplot as plt
 from oops import Meshgrid, Observation
 from oops.backplane import Backplane
-import polymath
 
 from nav.config import Config
 from nav.support.attrdict import AttrDict
 from nav.support.constants import HALFPI
-from nav.support.image import (filter_downsample,
-                               shift_array)
+from nav.support.image import filter_downsample, shift_array
 from nav.support.time import now_dt
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
 from .nav_model_body_base import NavModelBodyBase
+from .nav_model_result import NavModelResult
 
 # Sometimes the bounding box returned by "inventory" is not quite big enough
 BODIES_POSITION_SLOP_FRAC = 0.05  # TODO Move to config
 
 
 class NavModelBody(NavModelBodyBase):
-    def __init__(self,
-                 name: str,
-                 obs: Observation,
-                 body_name: str,
-                 *,
-                 inventory: Optional[dict[str, Any]] = None,
-                 config: Optional[Config] = None):
+    def __init__(
+        self,
+        name: str,
+        obs: Observation,
+        body_name: str,
+        *,
+        inventory: dict[str, Any] | None = None,
+        config: Config | None = None,
+    ):
         """Creates a navigation model for a planetary body.
 
         Parameters:
@@ -45,16 +47,16 @@ class NavModelBody(NavModelBodyBase):
         self._body_name = body_name.upper()
 
         if inventory is None:
-            inventory = self.obs.inventory([self._body_name],
-                                           return_type='full')[body_name]
+            inventory = self.obs.inventory([self._body_name], return_type='full')[self._body_name]
         self._inventory = inventory
 
-    def create_model(self,
-                     *,
-                     always_create_model: bool = False,
-                     never_create_model: bool = False,
-                     create_annotations: bool = True
-                     ) -> None:
+    def create_model(
+        self,
+        *,
+        always_create_model: bool = False,
+        never_create_model: bool = False,
+        create_annotations: bool = True,
+    ) -> None:
         """Creates a navigation model for a planetary body with optional text overlay.
 
         Parameters:
@@ -72,23 +74,25 @@ class NavModelBody(NavModelBodyBase):
         metadata['elapsed_time_sec'] = None
 
         self._metadata = metadata
-        self._annotations = None
-        self._uncertainty = 0.
+        self._models.clear()
 
         with self._logger.open(f'CREATE BODY MODEL FOR: {self._body_name}'):
-            self._create_model(always_create_model=always_create_model,
-                               never_create_model=never_create_model,
-                               create_annotations=create_annotations)
+            self._create_model(
+                always_create_model=always_create_model,
+                never_create_model=never_create_model,
+                create_annotations=create_annotations,
+            )
 
         end_time = now_dt()
         metadata['end_time'] = end_time.isoformat()
         metadata['elapsed_time_sec'] = (end_time - start_time).total_seconds()
 
-    def _create_model(self,
-                      always_create_model: bool,
-                      never_create_model: bool,
-                      create_annotations: bool
-                      ) -> None:
+    def _create_model(
+        self,
+        always_create_model: bool,
+        never_create_model: bool,
+        create_annotations: bool,
+    ) -> None:
         """Creates the internal model representation for a planetary body.
 
         Parameters:
@@ -143,8 +147,10 @@ class NavModelBody(NavModelBodyBase):
         ########################################################################
 
         bb_area = inventory['u_pixel_size'] * inventory['v_pixel_size']
-        self._logger.info(f'Pixel size {inventory["u_pixel_size"]:.2f} x '
-                          f'{inventory["v_pixel_size"]:.2f}, bounding box area {bb_area:.2f}')
+        self._logger.info(
+            f'Pixel size {inventory["u_pixel_size"]:.2f} x '
+            f'{inventory["v_pixel_size"]:.2f}, bounding box area {bb_area:.2f}'
+        )
         if bb_area >= body_config.min_bounding_box_area:
             metadata['size_ok'] = True
         else:
@@ -208,10 +214,12 @@ class NavModelBody(NavModelBodyBase):
         # Figure out the bounding box with some slop and see whether or not the body is
         # going to be entirely visible even in the case of maximum offset
 
-        u_min -= int((u_max-u_min) * BODIES_POSITION_SLOP_FRAC)
-        u_max += int((u_max-u_min) * BODIES_POSITION_SLOP_FRAC)
-        v_min -= int((v_max-v_min) * BODIES_POSITION_SLOP_FRAC)
-        v_max += int((v_max-v_min) * BODIES_POSITION_SLOP_FRAC)
+        u_slop = int((u_max - u_min) * BODIES_POSITION_SLOP_FRAC)
+        v_slop = int((v_max - v_min) * BODIES_POSITION_SLOP_FRAC)
+        u_min -= u_slop
+        u_max += u_slop
+        v_min -= v_slop
+        v_max += v_slop
 
         u_min, v_min = obs.clip_extfov(u_min, v_min)
         u_max, v_max = obs.clip_extfov(u_max, v_max)
@@ -227,14 +235,18 @@ class NavModelBody(NavModelBodyBase):
             v_max += 1
 
         self._logger.debug(f'Original bounding box U {u_min} to {u_max}, V {v_min} to {v_max}')
-        self._logger.debug(f'Image size {obs.data_shape_u} x {obs.data_shape_v}; '
-                           f'subrect w/slop U {u_min} to {u_max}, V {v_min} to {v_max}')
+        self._logger.debug(
+            f'Image size {obs.data_shape_u} x {obs.data_shape_v}; '
+            f'subrect w/slop U {u_min} to {u_max}, V {v_min} to {v_max}'
+        )
 
         guaranteed_visible_in_fov = False
-        if (u_min >= obs.extfov_margin_u and
-            u_max <= obs.data_shape_u-1 - obs.extfov_margin_u and
-            v_min >= obs.extfov_margin_v and
-            v_max <= obs.data_shape_v-1 - obs.extfov_margin_v):
+        if (
+            u_min >= obs.extfov_margin_u
+            and u_max <= obs.data_shape_u - 1 - obs.extfov_margin_u
+            and v_min >= obs.extfov_margin_v
+            and v_max <= obs.data_shape_v - 1 - obs.extfov_margin_v
+        ):
             # Body is entirely visible - no part is off the edge even when shifting
             # the extended FOV
             guaranteed_visible_in_fov = True
@@ -246,53 +258,64 @@ class NavModelBody(NavModelBodyBase):
         if never_create_model:
             return
 
-        model_img, limb_mask = self._create_backplane_model(body_name=body_name, obs=obs,
-                                                            body_config=body_config,
-                                                            inventory=inventory,
-                                                            u_min=u_min, u_max=u_max,
-                                                            v_min=v_min, v_max=v_max)
+        model_img, limb_mask = self._create_backplane_model(
+            body_name=body_name,
+            obs=obs,
+            body_config=body_config,
+            inventory=inventory,
+            u_min=u_min,
+            u_max=u_max,
+            v_min=v_min,
+            v_max=v_max,
+        )
 
         body_mask = model_img != 0
 
         # This is much faster than calculating the range at each pixel and we never
         # need to know the precise range at that level of detail
-        self._range = obs.make_extfov_zeros()
-        self._range[:, :] = inventory['range'] * body_mask
-        self._range[self._range == 0] = math.inf
+        range_arr = obs.make_extfov_zeros()
+        range_arr[:, :] = inventory['range'] * body_mask
+        range_arr[range_arr == 0] = math.inf
 
-        self._confidence = 1.
-        metadata['confidence'] = 1.
+        metadata['confidence'] = 1.0
 
         ########################################################################
         # Figure out all the location where we might want to label the body
         ########################################################################
 
+        annotations = None
         if create_annotations:
-            self._annotations = self._create_annotations(u_center, v_center, model_img,
-                                                         limb_mask, body_mask)
+            annotations = self._create_annotations(
+                u_center, v_center, model_img, limb_mask, body_mask
+            )
 
-        self._model_img = model_img
-        self._model_mask = body_mask
+        result = NavModelResult(
+            model_img=model_img,
+            model_mask=body_mask,
+            weighted_mask=None,
+            range=range_arr,
+            blur_amount=None,
+            uncertainty=0.0,
+            confidence=1.0,
+            stretch_regions=None,
+            annotations=annotations,
+        )
+        self._models.append(result)
 
-        # import matplotlib.pyplot as plt
-        # plt.imshow(self._model_img)
-        # plt.figure()
-        # plt.imshow(self._model_mask)
-        # plt.show()
+        self._logger.debug(f'  Body model min: {np.min(model_img)}, max: {np.max(model_img)}')
 
-        self._logger.debug(f'  Body model min: {np.min(self._model_img)}, '
-                           f'max: {np.max(self._model_img)}')
-
-    def _create_backplane_model(self,
-                                *,
-                                body_name: str,
-                                obs: Observation,
-                                body_config: AttrDict,
-                                inventory: dict[str, Any],
-                                u_min: int,
-                                u_max: int,
-                                v_min: int,
-                                v_max: int) -> tuple[NDArrayFloatType, NDArrayBoolType]:
+    def _create_backplane_model(
+        self,
+        *,
+        body_name: str,
+        obs: Observation,
+        body_config: AttrDict,
+        inventory: dict[str, Any],
+        u_min: int,
+        u_max: int,
+        v_min: int,
+        v_max: int,
+    ) -> tuple[NDArrayFloatType, NDArrayBoolType]:
         """Create a model for a planetary body using a backplane.
 
         Parameters:
@@ -311,27 +334,36 @@ class NavModelBody(NavModelBodyBase):
         # as necessary so we can do anti-aliasing
         ########################################################################
 
-        restr_oversample_u = max(int(np.floor(body_config.oversample_edge_limit /
-                                              max(np.ceil(inventory['u_pixel_size']),
-                                                  1))),
-                                 1)
-        restr_oversample_v = max(int(np.floor(body_config.oversample_edge_limit /
-                                              max(np.ceil(inventory['v_pixel_size']),
-                                                  1))),
-                                 1)
+        restr_oversample_u = max(
+            int(
+                np.floor(
+                    body_config.oversample_edge_limit / max(np.ceil(inventory['u_pixel_size']), 1)
+                )
+            ),
+            1,
+        )
+        restr_oversample_v = max(
+            int(
+                np.floor(
+                    body_config.oversample_edge_limit / max(np.ceil(inventory['v_pixel_size']), 1)
+                )
+            ),
+            1,
+        )
         restr_oversample_u = min(restr_oversample_u, body_config.oversample_maximum)
         restr_oversample_v = min(restr_oversample_v, body_config.oversample_maximum)
         self._logger.debug(f'Oversampling by {restr_oversample_u} x {restr_oversample_v}')
-        restr_u_min = u_min + 1./(2*restr_oversample_u)
-        restr_u_max = u_max + 1 - 1./(2*restr_oversample_u)
-        restr_v_min = v_min + 1./(2*restr_oversample_v)
-        restr_v_max = v_max + 1 - 1./(2*restr_oversample_v)
-        restr_o_meshgrid = Meshgrid.for_fov(obs.fov,
-                                            origin=(restr_u_min, restr_v_min),
-                                            limit=(restr_u_max, restr_v_max),
-                                            oversample=(restr_oversample_u,
-                                                        restr_oversample_v),
-                                            swap=True)
+        restr_u_min = u_min + 1.0 / (2 * restr_oversample_u)
+        restr_u_max = u_max + 1 - 1.0 / (2 * restr_oversample_u)
+        restr_v_min = v_min + 1.0 / (2 * restr_oversample_v)
+        restr_v_max = v_max + 1 - 1.0 / (2 * restr_oversample_v)
+        restr_o_meshgrid = Meshgrid.for_fov(
+            obs.fov,
+            origin=(restr_u_min, restr_v_min),
+            limit=(restr_u_max, restr_v_max),
+            oversample=(restr_oversample_u, restr_oversample_v),
+            swap=True,
+        )
         restr_o_bp = Backplane(obs, meshgrid=restr_o_meshgrid)
 
         ########################################################################
@@ -339,9 +371,9 @@ class NavModelBody(NavModelBodyBase):
         ########################################################################
 
         restr_o_incidence_mvals = restr_o_bp.incidence_angle(body_name).mvals
-        restr_incidence_mvals = filter_downsample(restr_o_incidence_mvals,
-                                                  restr_oversample_v,
-                                                  restr_oversample_u)
+        restr_incidence_mvals = filter_downsample(
+            restr_o_incidence_mvals, restr_oversample_v, restr_oversample_u
+        )
         restr_incidence = polymath.Scalar(restr_incidence_mvals)
 
         ########################################################################
@@ -353,10 +385,12 @@ class NavModelBody(NavModelBodyBase):
 
         # If the inv mask is true, but any of its neighbors are false, then
         # this is an edge
-        restr_limb_mask_neighbor = (shift_array(restr_body_mask_invalid, (-1,  0)) |
-                                    shift_array(restr_body_mask_invalid, ( 1,  0)) |
-                                    shift_array(restr_body_mask_invalid, ( 0, -1)) |
-                                    shift_array(restr_body_mask_invalid, ( 0,  1)))
+        restr_limb_mask_neighbor = (
+            shift_array(restr_body_mask_invalid, (-1, 0))
+            | shift_array(restr_body_mask_invalid, (1, 0))
+            | shift_array(restr_body_mask_invalid, (0, -1))
+            | shift_array(restr_body_mask_invalid, (0, 1))
+        )
         # This valid mask will be a single series of pixels just inside the limb
         restr_limb_mask = restr_body_mask_valid & restr_limb_mask_neighbor
 
@@ -366,9 +400,9 @@ class NavModelBody(NavModelBodyBase):
             restr_incidence_limb = restr_incidence.mask_where(~restr_limb_mask)
             limb_incidence_min = np.degrees(restr_incidence_limb.min().vals)
             limb_incidence_max = np.degrees(restr_incidence_limb.max().vals)
-            self._logger.info('Limb incidence angle '
-                              f'min {limb_incidence_min:.2f}, '
-                              f'max {limb_incidence_max:.2f}')
+            self._logger.info(
+                f'Limb incidence angle min {limb_incidence_min:.2f}, max {limb_incidence_max:.2f}'
+            )
 
             # limb_threshold = config['limb_incidence_threshold']
             # limb_frac = config['limb_incidence_frac']
@@ -459,8 +493,10 @@ class NavModelBody(NavModelBodyBase):
         ########################################################################
 
         restr_model = None
-        if (not restr_body_mask_valid.any() or
-            restr_incidence[restr_body_mask_valid].min() >= HALFPI):
+        if (
+            not restr_body_mask_valid.any()
+            or restr_incidence[restr_body_mask_valid].min() >= HALFPI
+        ):
             self._logger.debug('Looking only at back side - making a faint glow')
             # Make a slight glow even on the back side
             restr_model = np.zeros(restr_body_mask_valid.shape)
@@ -471,23 +507,22 @@ class NavModelBody(NavModelBodyBase):
             if body_config.use_lambert:
                 # Make an oversampled Lambert, then downsample to get a nice anti-aliased
                 # edge
-                restr_o_lambert = restr_o_bp.lambert_law(body_name).mvals.filled(0.)
-                restr_model = filter_downsample(restr_o_lambert,
-                                                restr_oversample_v,
-                                                restr_oversample_u)
+                restr_o_lambert = restr_o_bp.lambert_law(body_name).mvals.filled(0.0)
+                restr_model = filter_downsample(
+                    restr_o_lambert, restr_oversample_v, restr_oversample_u
+                )
                 # if body_name == 'TITAN':
                 #     # Special case for Titan because of the atmospheric glow at
                 #     # high phase angles. The model won't be used for correlation,
                 #     # only for making the pretty offset PNG.
                 #     restr_model = restr_model+filt.maximum_filter(limb_mask, 3)
                 # Make a slight glow even past the terminator
-                restr_model = restr_model+0.05  # TODO Move to config
+                restr_model = restr_model + 0.05  # TODO Move to config
                 restr_model[restr_body_mask_invalid] = 0.0
             else:
                 restr_model = restr_body_mask_valid.astype(float)
 
-            if (body_config.use_albedo and
-                body_name in body_config.geometric_albedo):
+            if body_config.use_albedo and body_name in body_config.geometric_albedo:
                 albedo = body_config.geometric_albedo[body_name]
                 self._logger.info(f'Applying albedo {albedo:.6f}')
                 restr_model *= albedo
@@ -496,8 +531,8 @@ class NavModelBody(NavModelBodyBase):
         # Put the small model back in the right place in the full-size model
         ########################################################################
 
-        model_slice_0 = slice(v_min+obs.extfov_margin_v, v_max+obs.extfov_margin_v+1)
-        model_slice_1 = slice(u_min+obs.extfov_margin_u, u_max+obs.extfov_margin_u+1)
+        model_slice_0 = slice(v_min + obs.extfov_margin_v, v_max + obs.extfov_margin_v + 1)
+        model_slice_1 = slice(u_min + obs.extfov_margin_u, u_max + obs.extfov_margin_u + 1)
         model_img = obs.make_extfov_zeros()
         model_img[model_slice_0, model_slice_1] = restr_model
         limb_mask = obs.make_extfov_false()

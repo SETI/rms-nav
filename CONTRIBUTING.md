@@ -1,11 +1,12 @@
 # Contributing to RMS-NAV
 
-Thank you for your interest in contributing to RMS-NAV! This document provides guidelines and instructions for contributing to the project.
+Thank you for your interest in contributing to RMS-NAV! This document provides
+guidelines and instructions for contributing to the project.
 
 ## Code of Conduct
 
-We expect all contributors to follow our Code of Conduct, which ensures a welcoming and inclusive environment for everyone.
-See CODE_OF_CONDUCT.md.
+We expect all contributors to follow our Code of Conduct, which ensures a
+welcoming and inclusive environment for everyone. See CODE_OF_CONDUCT.md.
 
 ## Getting Started
 
@@ -16,6 +17,7 @@ See CODE_OF_CONDUCT.md.
    git clone https://github.com/your-username/rms-nav.git
    cd rms-nav
    ```
+
 3. Create a virtual environment and install dependencies:
 
    ```bash
@@ -67,15 +69,19 @@ See CODE_OF_CONDUCT.md.
 We follow these standards for all code contributions:
 
 * **Python Style**: Follow PEP 8
-* **Type Hints**: Use type hints for all function parameters and return values
-* **Docstrings**: Document all classes and methods with docstrings following the Google style
+* **Type Hints**: Use type hints for all function parameters and return
+  values
+* **Docstrings**: Document all classes and methods with docstrings following
+  the Google style
 * **Testing**: Include unit tests for new functionality
 * **Compatibility**: Ensure compatibility with Python 3.10+
 
 Example of a well-formatted function:
 
 ```python
-def calculate_offset(image: NDArrayFloatType, model: NDArrayFloatType) -> tuple[float, float]:
+def calculate_offset(
+    image: NDArrayFloatType, model: NDArrayFloatType
+) -> tuple[float, float]:
     """Calculate the offset between an image and a model.
 
     Parameters:
@@ -93,7 +99,7 @@ def calculate_offset(image: NDArrayFloatType, model: NDArrayFloatType) -> tuple[
 
 1. Ensure all tests pass
 2. Update documentation if necessary
-3. Make sure your code is properly formatted and passes both flake8 and mypy
+3. Make sure your code is properly formatted and passes both ruff and mypy
 4. Request a review from a maintainer
 5. Address any feedback from reviewers
 

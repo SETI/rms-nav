@@ -1,24 +1,26 @@
 import fnmatch
-from typing import Any, Optional, Sequence, cast
+from collections.abc import Sequence
+from typing import Any, cast
 
-from oops import Observation
 import numpy as np
+from oops import Observation
 
 from nav.annotation import Annotations
 from nav.config import Config
-from nav.support.file import clean_obj
-from nav.nav_model import (NavModel,
-                           NavModelBody,
-                           NavModelBodySimulated,
-                           NavModelCombined,
-                           NavModelRings,
-                           NavModelRingsSimulated,
-                           NavModelStars,
-                           NavModelTitan)
+from nav.nav_model import (
+    NavModel,
+    NavModelBody,
+    NavModelBodySimulated,
+    NavModelCombined,
+    NavModelRings,
+    NavModelRingsSimulated,
+    NavModelStars,
+    NavModelTitan,
+)
 from nav.nav_model.nav_model_body_base import NavModelBodyBase
 from nav.nav_model.nav_model_rings_base import NavModelRingsBase
-from nav.nav_technique import NavTechniqueCorrelateAll
-from nav.nav_technique import NavTechniqueManual
+from nav.nav_technique import NavTechniqueCorrelateAll, NavTechniqueManual
+from nav.support.file import clean_obj
 from nav.support.nav_base import NavBase
 from nav.support.types import NDArrayFloatType, NDArrayUint8Type
 
@@ -36,12 +38,14 @@ class NavMaster(NavBase):
     up and to the right (positive v and u).
     """
 
-    def __init__(self,
-                 obs: Observation,
-                 *,
-                 nav_models: Optional[list[str]] = None,
-                 nav_techniques: Optional[list[str]] = None,
-                 config: Optional[Config] = None) -> None:
+    def __init__(
+        self,
+        obs: Observation,
+        *,
+        nav_models: list[str] | None = None,
+        nav_techniques: list[str] | None = None,
+        config: Config | None = None,
+    ) -> None:
         """Initializes a navigation master object for an observation.
 
         Parameters:
@@ -152,10 +156,12 @@ class NavMaster(NavBase):
     @property
     def all_models(self) -> Sequence[NavModel]:
         """Returns a sequence containing all navigation models."""
-        return (cast(list[NavModel], self.star_models) +
-                cast(list[NavModel], self.body_models) +
-                cast(list[NavModel], self.ring_models) +
-                cast(list[NavModel], self.titan_models))
+        return (
+            cast(list[NavModel], self.star_models)
+            + cast(list[NavModel], self.body_models)
+            + cast(list[NavModel], self.ring_models)
+            + cast(list[NavModel], self.titan_models)
+        )
 
     @property
     def combined_model(self) -> NavModelCombined | None:
@@ -168,8 +174,9 @@ class NavMaster(NavBase):
         If star models have already been computed, does nothing.
         """
 
-        if (self._nav_models_to_use is not None and
-            not any(fnmatch.fnmatch('stars', x) for x in self._nav_models_to_use)):
+        if self._nav_models_to_use is not None and not any(
+            fnmatch.fnmatch('stars', x) for x in self._nav_models_to_use
+        ):
             self._star_models = []
             return
 
@@ -184,7 +191,7 @@ class NavMaster(NavBase):
         self._star_models = [stars_model]
         self._metadata['models']['star_model'] = stars_model.metadata
 
-        # import matplotlib.pyplot as plt  # noqa: F401
+        # import matplotlib.pyplot as plt
         # plt.imshow(stars_model.model_img)
         # plt.show()
 
@@ -205,7 +212,7 @@ class NavMaster(NavBase):
         logger = self._logger
 
         if obs.closest_planet is not None:
-            body_list = [obs.closest_planet] + config.satellites(obs.closest_planet)
+            body_list = [obs.closest_planet, *config.satellites(obs.closest_planet)]
         else:
             body_list = []
 
@@ -216,8 +223,7 @@ class NavMaster(NavBase):
 
         # Make a list sorted by range, with the closest body first, limiting to bodies
         # that are actually in the FOV
-        def _body_in_fov(obs: Observation,
-                         inv: dict[str, Any]) -> bool:
+        def _body_in_fov(obs: Observation, inv: dict[str, Any]) -> bool:
             """Determines if a body is within the extended field of view.
 
             Parameters:
@@ -227,38 +233,47 @@ class NavMaster(NavBase):
             Returns:
                 True if the body is at least partially within the extended field of view.
             """
-            return cast(bool,
-                        (inv['u_max_unclipped'] >= obs.extfov_u_min and
-                         inv['u_min_unclipped'] <= obs.extfov_u_max and
-                         inv['v_max_unclipped'] >= obs.extfov_v_min and
-                         inv['v_min_unclipped'] <= obs.extfov_v_max))
+            return cast(
+                bool,
+                (
+                    inv['u_max_unclipped'] >= obs.extfov_u_min
+                    and inv['u_min_unclipped'] <= obs.extfov_u_max
+                    and inv['v_max_unclipped'] >= obs.extfov_v_min
+                    and inv['v_min_unclipped'] <= obs.extfov_v_max
+                ),
+            )
 
-        large_bodies_by_range = [(x, large_body_dict[x])
-                                 for x in large_body_dict
-                                 if _body_in_fov(obs, large_body_dict[x])]
+        large_bodies_by_range = [
+            (x, large_body_dict[x])
+            for x in large_body_dict
+            if _body_in_fov(obs, large_body_dict[x])
+        ]
         large_bodies_by_range.sort(key=lambda x: x[1]['range'])
 
         logger.info('Closest planet: %s', obs.closest_planet)
-        logger.info('Large body inventory by increasing range: %s',
-                    ', '.join([x[0] for x in large_bodies_by_range]))
+        logger.info(
+            'Large body inventory by increasing range: %s',
+            ', '.join([x[0] for x in large_bodies_by_range]),
+        )
 
         self._body_models = []
         self._metadata['models']['body_models'] = {}
 
         for body_name, inventory in large_bodies_by_range:
             model_name = f'body:{body_name.upper()}'
-            if not any(fnmatch.fnmatch(model_name.lower(), x.lower())
-                       for x in self._nav_models_to_use):
+            if not any(
+                fnmatch.fnmatch(model_name.lower(), x.lower()) for x in self._nav_models_to_use
+            ):
                 continue
             if obs.is_simulated:
                 sim_params = obs.sim_body_models[body_name]
-                body_model: NavModelBodyBase = NavModelBodySimulated(model_name, obs,
-                                                                     body_name, sim_params,
-                                                                     config=config)
+                body_model: NavModelBodyBase = NavModelBodySimulated(
+                    model_name, obs, body_name, sim_params, config=config
+                )
             else:
-                body_model = NavModelBody(model_name, obs, body_name,
-                                          inventory=inventory,
-                                          config=config)
+                body_model = NavModelBody(
+                    model_name, obs, body_name, inventory=inventory, config=config
+                )
             body_model.create_model()
             self._body_models.append(body_model)
             self._metadata['models']['body_models'][body_name] = body_model.metadata
@@ -269,8 +284,9 @@ class NavMaster(NavBase):
         If ring models have already been computed, does nothing.
         """
 
-        if (self._nav_models_to_use is not None and
-            not any(fnmatch.fnmatch('rings', x.lower()) for x in self._nav_models_to_use)):
+        if self._nav_models_to_use is not None and not any(
+            fnmatch.fnmatch('rings', x.lower()) for x in self._nav_models_to_use
+        ):
             self._ring_models = []
             return
 
@@ -299,11 +315,13 @@ class NavMaster(NavBase):
             for ring_params in sim_rings:
                 ring_name = ring_params.get('name', 'UNNAMED')
                 model_name = f'ring:{ring_name}'
-                if not any(fnmatch.fnmatch(model_name.lower(), x.lower())
-                           for x in self._nav_models_to_use):
+                if not any(
+                    fnmatch.fnmatch(model_name.lower(), x.lower()) for x in self._nav_models_to_use
+                ):
                     continue
                 ring_model: NavModelRingsBase = NavModelRingsSimulated(
-                    model_name, obs, ring_name, ring_params, config=config)
+                    model_name, obs, ring_name, ring_params, config=config
+                )
                 ring_model.create_model()
                 self._ring_models.append(ring_model)
                 self._metadata['models']['ring_model'][model_name] = ring_model.metadata
@@ -316,8 +334,10 @@ class NavMaster(NavBase):
                 return
 
             if obs.closest_planet not in ring_features_dict:
-                logger.info('No ring features configured for planet %s - skipping ring models',
-                            obs.closest_planet)
+                logger.info(
+                    'No ring features configured for planet %s - skipping ring models',
+                    obs.closest_planet,
+                )
                 return
 
             # Create ring model from configuration
@@ -334,8 +354,9 @@ class NavMaster(NavBase):
         If Titan models have already been computed, does nothing.
         """
 
-        if (self._nav_models_to_use is not None and
-            not any(fnmatch.fnmatch('titan', x.lower()) for x in self._nav_models_to_use)):
+        if self._nav_models_to_use is not None and not any(
+            fnmatch.fnmatch('titan', x.lower()) for x in self._nav_models_to_use
+        ):
             self._titan_models = []
             return
 
@@ -365,15 +386,14 @@ class NavMaster(NavBase):
         navigation techniques. Determines the final offset based on the results.
         """
 
-        prevailing_confidence = 0.
+        prevailing_confidence = 0.0
         self._final_offset = None
 
         self.compute_all_models()
 
         self._metadata['navigation_techniques'] = {}
 
-        if any(fnmatch.fnmatch('correlate_all', x.lower())
-               for x in self._nav_techniques_to_use):
+        if any(fnmatch.fnmatch('correlate_all', x.lower()) for x in self._nav_techniques_to_use):
             nav_all = NavTechniqueCorrelateAll(self)
             nav_all.navigate()
             correlate_all_combined_model = nav_all.combined_model()
@@ -399,8 +419,7 @@ class NavMaster(NavBase):
             self._offsets['correlate_all'] = None
 
         # Manual technique
-        if any(fnmatch.fnmatch('manual', x.lower())
-               for x in self._nav_techniques_to_use):
+        if any(fnmatch.fnmatch('manual', x.lower()) for x in self._nav_techniques_to_use):
             nav_manual = NavTechniqueManual(self)
             nav_manual.navigate()
             manual_combined_model = nav_manual.combined_model()
@@ -423,8 +442,9 @@ class NavMaster(NavBase):
         if self._final_offset is None:
             self.logger.info('Final offset: NONE')
         else:
-            self.logger.info(f'Final offset: dU {self._final_offset[1]:.3f}, '
-                             f'dV {self._final_offset[0]:.3f}')
+            self.logger.info(
+                f'Final offset: dU {self._final_offset[1]:.3f}, dV {self._final_offset[0]:.3f}'
+            )
             self.logger.info(f'Final confidence: {self._final_confidence:.5f}')
 
         self._metadata['offset'] = self._final_offset
@@ -440,20 +460,23 @@ class NavMaster(NavBase):
         annotations = Annotations()
 
         for model in self.all_models:
-            annotations.add_annotations(model.annotations)
+            for result in model.models:
+                if result.annotations is not None:
+                    annotations.add_annotations(result.annotations)
 
-        offset = (0., 0.)
+        offset = (0.0, 0.0)
         if self._final_offset is not None:
             offset = self._final_offset
 
-        overlay = annotations.combine(offset=offset,
-                                      #   text_use_avoid_mask=False,
-                                      #   text_show_all_positions=True,
-                                      #   text_avoid_other_text=False
-                                      )
+        overlay = annotations.combine(
+            offset=offset,
+            #   text_use_avoid_mask=False,
+            #   text_show_all_positions=True,
+            #   text_avoid_other_text=False
+        )
         img = self._obs.data.astype(np.float64)
 
-        res = np.zeros(img.shape + (3,), dtype=np.uint8)
+        res = np.zeros((*img.shape, 3), dtype=np.uint8)
         bw_res = np.zeros(img.shape, dtype=np.uint8)
 
         # Create a min_index that is the size of the original image, properly offset.
@@ -463,46 +486,48 @@ class NavMaster(NavBase):
         # ends up being more complicated. This needs to be revisited.
         if self.combined_model is None:
             # If we never created a combined model earlier, we need one now for the overlay
-            self._combined_model = NavModelCombined('combined',
-                                                    self.obs,
-                                                    list(self.all_models))
+            self._combined_model = NavModelCombined('combined', self.obs, list(self.all_models))
         if self.combined_model is None:
             raise ValueError('Combined model is None')
         if self.combined_model.closest_model_index is None:
             raise ValueError('Combined model closest model index is None')
-        min_index = self.obs.extract_offset_array(self.combined_model.closest_model_index,
-                                                  offset)
+        min_index = self.obs.extract_offset_array(self.combined_model.closest_model_index, offset)
 
         def _stretch_region(sub_img: NDArrayFloatType) -> NDArrayUint8Type:
             """Stretches a region of the image."""
             blackpoint = float(np.quantile(sub_img, 0.001))
             whitepoint = float(np.quantile(sub_img, 0.999))
             if blackpoint == whitepoint:
-                whitepoint = blackpoint + .01
+                whitepoint = blackpoint + 0.01
             gamma = 1  # 0.5
 
-            img_stretched = np.floor((np.maximum(sub_img-blackpoint, 0) /
-                                     (whitepoint-blackpoint))**gamma*256)
+            img_stretched = np.floor(
+                (np.maximum(sub_img - blackpoint, 0) / (whitepoint - blackpoint)) ** gamma * 256
+            )
             img_stretched = np.clip(img_stretched, 0, 255)
             img_stretched = cast(NDArrayUint8Type, img_stretched.astype(np.uint8))
             return img_stretched
 
         already_stretched_mask = np.zeros(img.shape, dtype=bool)
-        for model_index, model in enumerate(self.all_models):
-            if model.stretch_regions is not None:
-                for stretch_region_packed in model.stretch_regions:
-                    stretch_region = np.unpackbits(stretch_region_packed, axis=0).astype(bool)
-                    stretch_region = self.obs.unpad_array_to_extfov(stretch_region)
-                    stretch_region = self._obs.extract_offset_array(stretch_region, offset)
-                    if not np.any(stretch_region):
-                        continue
-                    # We stretch this region by itself if we haven't already stretched
-                    # any part of it and all of it is the closest model in the view for those
-                    # pixels.
-                    if (not np.any(already_stretched_mask[stretch_region]) and
-                        np.all(min_index[stretch_region] == model_index)):
-                        bw_res[stretch_region] = _stretch_region(img[stretch_region])
-                        already_stretched_mask |= stretch_region
+        result_flat_index = 0
+        for model in self.all_models:
+            for result in model.models:
+                if result.stretch_regions is not None:
+                    for stretch_region_packed in result.stretch_regions:
+                        stretch_region = np.unpackbits(stretch_region_packed, axis=0).astype(bool)
+                        stretch_region = self.obs.unpad_array_to_extfov(stretch_region)
+                        stretch_region = self._obs.extract_offset_array(stretch_region, offset)
+                        if not np.any(stretch_region):
+                            continue
+                        # We stretch this region by itself if we haven't already stretched
+                        # any part of it and all of it is the closest result in the view for
+                        # those pixels.
+                        if not np.any(already_stretched_mask[stretch_region]) and np.all(
+                            min_index[stretch_region] == result_flat_index
+                        ):
+                            bw_res[stretch_region] = _stretch_region(img[stretch_region])
+                            already_stretched_mask |= stretch_region
+                result_flat_index += 1
 
         # Now stretch the rest of the image
         bw_res[~already_stretched_mask] = _stretch_region(img[~already_stretched_mask])

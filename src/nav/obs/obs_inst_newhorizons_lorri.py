@@ -1,8 +1,8 @@
-from typing import Any, Optional, cast
-
-from filecache import FCPath
-import numpy as np
 from pathlib import Path
+from typing import Any, cast
+
+import numpy as np
+from filecache import FCPath
 
 from nav.config import DEFAULT_CONFIG, DEFAULT_LOGGER, Config
 from nav.support.time import et_to_utc
@@ -19,11 +19,13 @@ class ObsNewHorizonsLORRI(ObsSnapshotInst):
     """
 
     @staticmethod
-    def from_file(path: PathLike,
-                  *,
-                  config: Optional[Config] = None,
-                  extfov_margin_vu: tuple[int, int] | None = None,
-                  **_kwargs: Any) -> 'ObsNewHorizonsLORRI':
+    def from_file(
+        path: PathLike,
+        *,
+        config: Config | None = None,
+        extfov_margin_vu: tuple[int, int] | None = None,
+        **_kwargs: Any,
+    ) -> 'ObsNewHorizonsLORRI':
         """Creates an ObsNewHorizonsLORRI from a New Horizons LORRI image file.
 
         Parameters:
@@ -72,7 +74,7 @@ class ObsNewHorizonsLORRI(ObsSnapshotInst):
         Returns:
             The minimum usable magnitude for stars in this observation.
         """
-        return 0.
+        return 0.0
 
     def star_max_usable_vmag(self) -> float:
         """Returns the maximum usable magnitude for stars in this observation.

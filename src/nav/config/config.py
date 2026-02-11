@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from ruamel.yaml import YAML
 
@@ -45,21 +45,17 @@ class Config:
         self._config_backplanes = AttrDict(self._config_dict.get('backplanes', {}))
         self._config_pds4 = AttrDict(self._config_dict.get('pds4', {}))
 
-    def _load_yaml(self,
-                   config_path: str | Path) -> dict[str, Any]:
-        """Loads a YAML file and returns a dictionary mapping.
-        """
+    def _load_yaml(self, config_path: str | Path) -> dict[str, Any]:
+        """Loads a YAML file and returns a dictionary mapping."""
 
         yaml = YAML(typ='safe')
-        with open(config_path, 'r', encoding='utf-8') as f:
+        with open(config_path, encoding='utf-8') as f:
             loaded = yaml.load(f) or {}
         if not isinstance(loaded, dict):
             raise ValueError(f'Config "{config_path}" did not parse to a dictionary mapping')
         return loaded
 
-    def read_config(self,
-                    config_path: Optional[str | Path] = None,
-                    reread: bool = False) -> None:
+    def read_config(self, config_path: str | Path | None = None, reread: bool = False) -> None:
         """Reads configuration from the specified YAML file.
 
         Parameters:
@@ -80,9 +76,7 @@ class Config:
         self._config_dict = self._load_yaml(config_path)
         self._update_attrdicts()
 
-    def update_config(self,
-                      config_path: str | Path,
-                      read_default: bool = True) -> None:
+    def update_config(self, config_path: str | Path, read_default: bool = True) -> None:
         """Updates the current configuration with values from the specified YAML file.
 
         Parameters:
@@ -101,8 +95,7 @@ class Config:
                 self._config_dict[key] = new_config[key]
         self._update_attrdicts()
 
-    def category(self,
-                 category: str) -> AttrDict:
+    def category(self, category: str) -> AttrDict:
         """Returns the configuration settings for the specified category."""
 
         self.read_config()
@@ -129,8 +122,7 @@ class Config:
         self.read_config()
         return cast(list[str], self._config_dict.get('planets', []))
 
-    def satellites(self,
-                   planet: str) -> list[str]:
+    def satellites(self, planet: str) -> list[str]:
         """Returns the list of satellites for the specified planet.
 
         Parameters:
@@ -141,11 +133,9 @@ class Config:
         """
 
         self.read_config()
-        return cast(list[str],
-                    self._config_dict.get('satellites', {}).get(planet.upper(), []))
+        return cast(list[str], self._config_dict.get('satellites', {}).get(planet.upper(), []))
 
-    def fuzzy_satellites(self,
-                         planet: str) -> list[str]:
+    def fuzzy_satellites(self, planet: str) -> list[str]:
         """Returns the list of fuzzy satellites for the specified planet.
 
         Parameters:
@@ -156,11 +146,12 @@ class Config:
         """
 
         self.read_config()
-        return cast(list[str],
-                    self._config_dict.get('fuzzy_satellites', {}).get(planet.upper(), []))
+        return cast(
+            list[str],
+            self._config_dict.get('fuzzy_satellites', {}).get(planet.upper(), []),
+        )
 
-    def ring_satellites(self,
-                        planet: str) -> list[str]:
+    def ring_satellites(self, planet: str) -> list[str]:
         """Returns the list of ring satellites for the specified planet.
 
         Parameters:
@@ -171,8 +162,10 @@ class Config:
         """
 
         self.read_config()
-        return cast(list[str],
-                    self._config_dict.get('ring_satellites', {}).get(planet.upper(), []))
+        return cast(
+            list[str],
+            self._config_dict.get('ring_satellites', {}).get(planet.upper(), []),
+        )
 
     @property
     def offset(self) -> Any:

@@ -1,7 +1,7 @@
 import copy
 import json
 from functools import lru_cache
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 import numpy as np
 from psfmodel import GaussianPSF
@@ -10,7 +10,12 @@ from starcat import Star
 
 from nav.sim.sim_body import create_simulated_body
 from nav.sim.sim_ring import render_ring
-from nav.support.types import MutableStar, NDArrayBoolType, NDArrayFloatType, NDArrayIntType
+from nav.support.types import (
+    MutableStar,
+    NDArrayBoolType,
+    NDArrayFloatType,
+    NDArrayIntType,
+)
 
 
 @lru_cache(maxsize=1)
@@ -31,7 +36,7 @@ def _render_stars_cached(
         star = cast(MutableStar, Star())
         star.unique_number = i + 1
         star.catalog_name = str(star_params.get('catalog_name', 'SIM'))
-        star.pretty_name = str(star_params.get('name', f'SIM-{i+1}'))
+        star.pretty_name = str(star_params.get('name', f'SIM-{i + 1}'))
         star.name = star.pretty_name
         star.v = float(star_params.get('v', size_v / 2))
         star.u = float(star_params.get('u', size_u / 2))
@@ -40,7 +45,7 @@ def _render_stars_cached(
         star.vmag = float(star_params.get('vmag', 8.0))
         star.spectral_class = str(star_params.get('spectral_class', 'G2'))
         star.temperature = Star.temperature_from_sclass(star.spectral_class)
-        star.temperature_faked = (star.temperature is None)
+        star.temperature_faked = star.temperature is None
         if star.temperature is None:
             star.temperature = 5780.0
         star.johnson_mag_v = star.vmag
@@ -65,8 +70,7 @@ def _render_stars_cached(
         psf_size_half_v = int(star.psf_size[0] + np.round(abs(star.move_v))) // 2
 
         max_move_steps = 1  # TODO configurable
-        move_gran = max(abs(star.move_u) / max_move_steps,
-                        abs(star.move_v) / max_move_steps)
+        move_gran = max(abs(star.move_u) / max_move_steps, abs(star.move_v) / max_move_steps)
         move_gran = np.clip(move_gran, 0.1, 1.0)
 
         sigma = star_params.get('psf_sigma', 3.0)
@@ -74,27 +78,33 @@ def _render_stars_cached(
 
         # Stars where any part of the PSF would be off the edge of the image are ignored.
         # This is because PSF fitting will not work in these cases.
-        if (u_int < psf_size_half_u or
-            u_int >= img.shape[1]-psf_size_half_u or
-            v_int < psf_size_half_v or
-            v_int >= img.shape[0]-psf_size_half_v):
+        if (
+            u_int < psf_size_half_u
+            or u_int >= img.shape[1] - psf_size_half_u
+            or v_int < psf_size_half_v
+            or v_int >= img.shape[0] - psf_size_half_v
+        ):
             # Still collect info for hit-testing
-            star_info.append({
-                'name': star.name,
-                'center_v': star_offset_v,
-                'center_u': star_offset_u,
-                'sigma': sigma,
-                'psf_half_v': psf_size_half_v,
-                'psf_half_u': psf_size_half_u,
-            })
+            star_info.append(
+                {
+                    'name': star.name,
+                    'center_v': star_offset_v,
+                    'center_u': star_offset_u,
+                    'sigma': sigma,
+                    'psf_half_v': psf_size_half_v,
+                    'psf_half_u': psf_size_half_u,
+                }
+            )
             continue
 
         # Evaluate PSF with scale=1.0 first to get unnormalized PSF
-        star_psf = psf.eval_rect((psf_size_half_v*2+1, psf_size_half_u*2+1),
-                                 offset=(v_frac, u_frac),
-                                 scale=1.0,
-                                 movement=(star.move_v, star.move_u),
-                                 movement_granularity=move_gran)
+        star_psf = psf.eval_rect(
+            (psf_size_half_v * 2 + 1, psf_size_half_u * 2 + 1),
+            offset=(v_frac, u_frac),
+            scale=1.0,
+            movement=(star.move_v, star.move_u),
+            movement_granularity=move_gran,
+        )
 
         # Normalize PSF so peak is 1.0, then scale by magnitude
         psf_max = np.max(star_psf)
@@ -103,29 +113,34 @@ def _render_stars_cached(
         # Scale so that vmag=0 results in peak=1.0
         # star.dn = 2.512^-(vmag - 4.0), so for vmag=0: star.dn = 2.512^4
         # We want vmag=0 → peak=1, so scale by star.dn / (2.512^4)
-        scale_factor = star.dn / (2.512 ** 4.0)
+        scale_factor = star.dn / (2.512**4.0)
         star_psf = star_psf * scale_factor
 
-        img[v_int-psf_size_half_v:v_int+psf_size_half_v+1,
-            u_int-psf_size_half_u:u_int+psf_size_half_u+1] += star_psf
+        img[
+            v_int - psf_size_half_v : v_int + psf_size_half_v + 1,
+            u_int - psf_size_half_u : u_int + psf_size_half_u + 1,
+        ] += star_psf
 
-        star_info.append({
-            'name': star.name,
-            'center_v': star_offset_v,
-            'center_u': star_offset_u,
-            'sigma': sigma,
-            'psf_half_v': psf_size_half_v,
-            'psf_half_u': psf_size_half_u,
-        })
+        star_info.append(
+            {
+                'name': star.name,
+                'center_v': star_offset_v,
+                'center_u': star_offset_u,
+                'sigma': sigma,
+                'psf_half_v': psf_size_half_v,
+                'psf_half_u': psf_size_half_u,
+            }
+        )
 
     return (img, sim_star_list, star_info)
 
 
-def render_stars(img: NDArrayFloatType,
-                 stars_params: list[dict[str, Any]],
-                 offset_v: float,
-                 offset_u: float
-                 ) -> tuple[NDArrayFloatType, list[MutableStar], list[dict[str, Any]]]:
+def render_stars(
+    img: NDArrayFloatType,
+    stars_params: list[dict[str, Any]],
+    offset_v: float,
+    offset_u: float,
+) -> tuple[NDArrayFloatType, list[MutableStar], list[dict[str, Any]]]:
     """Render stars into img. Returns (img, sim_star_list, star_render_info)."""
     size_v, size_u = img.shape
     stars_params_json = json.dumps(stars_params, sort_keys=True)
@@ -154,7 +169,7 @@ def _render_body_shape_cached(
     crater_power_law_exponent: float,
     crater_relief_scale: float,
     anti_aliasing: float,
-    body_seed: Optional[int],
+    body_seed: int | None,
 ) -> NDArrayFloatType:
     """First layer cache: compute body shape at reference center (image center).
 
@@ -194,7 +209,7 @@ def _render_bodies_positioned_cached(
     centers_json: str,
     offset_v: float,
     offset_u: float,
-    seed: Optional[int],
+    seed: int | None,
 ) -> dict[str, Any]:
     """Second layer cache: position cached body shapes based on u,v coordinates.
 
@@ -223,7 +238,7 @@ def _render_bodies_positioned_cached(
     # Sort by range: far to near for composition; also prepare near-to-far order for hit-test
     sorted_body_models = sorted(body_models, key=lambda x: x['range'], reverse=True)
     order_near_to_far = [
-        bp.get('name', f'SIM-BODY-{i+1}').upper()
+        bp.get('name', f'SIM-BODY-{i + 1}').upper()
         for i, bp in enumerate(sorted(body_models, key=lambda x: x['range']))
     ]
 
@@ -237,7 +252,7 @@ def _render_bodies_positioned_cached(
     ref_center_u = size_u / 2.0
 
     for body_number, params in enumerate(sorted_body_models):
-        body_name = params.get('name', f'SIM-BODY-{body_number+1}').upper()
+        body_name = params.get('name', f'SIM-BODY-{body_number + 1}').upper()
 
         center_v = float(params.get('center_v', size_v / 2.0)) + offset_v
         center_u = float(params.get('center_u', size_u / 2.0)) + offset_u
@@ -261,11 +276,22 @@ def _render_bodies_positioned_cached(
 
         # Get cached body shape (at reference center)
         body_shape = _render_body_shape_cached(
-            size_v, size_u, axis1, axis2, axis3,
-            rotation_z, rotation_tilt, illumination_angle, phase_angle,
-            crater_fill, crater_min_radius, crater_max_radius,
-            crater_power_law_exponent, crater_relief_scale, anti_aliasing,
-            body_seed
+            size_v,
+            size_u,
+            axis1,
+            axis2,
+            axis3,
+            rotation_z,
+            rotation_tilt,
+            illumination_angle,
+            phase_angle,
+            crater_fill,
+            crater_min_radius,
+            crater_max_radius,
+            crater_power_law_exponent,
+            crater_relief_scale,
+            anti_aliasing,
+            body_seed,
         )
 
         # Translate body from reference center to actual center
@@ -274,9 +300,7 @@ def _render_bodies_positioned_cached(
 
         # Create positioned body by translating the cached shape
         # Use scipy for sub-pixel translation
-        positioned_body = ndimage.shift(
-            body_shape, (dv, du), order=1, mode='constant', cval=0.0
-        )
+        positioned_body = ndimage.shift(body_shape, (dv, du), order=1, mode='constant', cval=0.0)
 
         # Composition: overwrite where body contributes
         mask = positioned_body > 0
@@ -317,7 +341,7 @@ def _render_single_body(
     offset_v: float,
     offset_u: float,
     *,
-    seed: Optional[int] = None,
+    seed: int | None = None,
     ref_center_v: float,
     ref_center_u: float,
 ) -> tuple[NDArrayBoolType, dict[str, Any]]:
@@ -361,11 +385,22 @@ def _render_single_body(
 
     # Get cached body shape (at reference center)
     body_shape = _render_body_shape_cached(
-        size_v, size_u, axis1, axis2, axis3,
-        rotation_z, rotation_tilt, illumination_angle, phase_angle,
-        crater_fill, crater_min_radius, crater_max_radius,
-        crater_power_law_exponent, crater_relief_scale, anti_aliasing,
-        body_seed
+        size_v,
+        size_u,
+        axis1,
+        axis2,
+        axis3,
+        rotation_z,
+        rotation_tilt,
+        illumination_angle,
+        phase_angle,
+        crater_fill,
+        crater_min_radius,
+        crater_max_radius,
+        crater_power_law_exponent,
+        crater_relief_scale,
+        anti_aliasing,
+        body_seed,
     )
 
     # Translate body from reference center to actual center
@@ -373,9 +408,7 @@ def _render_single_body(
     du = center_u - ref_center_u
 
     # Create positioned body by translating the cached shape
-    positioned_body = ndimage.shift(
-        body_shape, (dv, du), order=1, mode='constant', cval=0.0
-    )
+    positioned_body = ndimage.shift(body_shape, (dv, du), order=1, mode='constant', cval=0.0)
 
     # Composition: overwrite where body contributes
     mask = positioned_body > 0
@@ -405,7 +438,7 @@ def render_bodies(
     offset_v: float,
     offset_u: float,
     *,
-    seed: Optional[int] = None,
+    seed: int | None = None,
 ) -> dict[str, Any]:
     """Render bodies over img and return fields by name.
 
@@ -434,8 +467,13 @@ def render_bodies(
     centers_json = json.dumps(centers, sort_keys=True)
 
     cached_result = _render_bodies_positioned_cached(
-        size_v, size_u, bodies_params_no_center_json, centers_json,
-        offset_v, offset_u, seed
+        size_v,
+        size_u,
+        bodies_params_no_center_json,
+        centers_json,
+        offset_v,
+        offset_u,
+        seed,
     )
     # Overwrite with bodies where they exist (preserve background noise/stars elsewhere)
     body_img = cached_result['img']
@@ -497,7 +535,7 @@ def _render_background_stars_cached(
     # Power law for intensity: weight toward dimmer stars
     # intensity = uniform^power where power > 1 makes dimmer stars more common
     uniform_samples = rng.uniform(0.0, 1.0, size=n_stars)
-    intensities = uniform_samples ** distribution_exponent
+    intensities = uniform_samples**distribution_exponent
 
     # PSF size: at least 11x11, but scale with sigma
     # Use at least 3*sigma pixels on each side, minimum 6 for 11x11
@@ -516,8 +554,12 @@ def _render_background_stars_cached(
         u_frac = u - u_int
 
         # Skip if too close to edge
-        if (u_int < psf_size_half or u_int >= size_u - psf_size_half or
-            v_int < psf_size_half or v_int >= size_v - psf_size_half):
+        if (
+            u_int < psf_size_half
+            or u_int >= size_u - psf_size_half
+            or v_int < psf_size_half
+            or v_int >= size_v - psf_size_half
+        ):
             continue
 
         # Generate PSF (normalized so peak is 1.0)
@@ -526,7 +568,7 @@ def _render_background_stars_cached(
             offset=(v_frac, u_frac),
             scale=1.0,  # Use scale=1.0 to get normalized PSF
             movement=(0.0, 0.0),
-            movement_granularity=1.0
+            movement_granularity=1.0,
         )
 
         # Normalize PSF to have peak value of 1.0, then scale by intensity
@@ -538,15 +580,21 @@ def _render_background_stars_cached(
             star_psf = star_psf * intensities[i]
 
         # Add to star additions accumulator
-        star_additions[v_int - psf_size_half:v_int + psf_size_half + 1,
-                       u_int - psf_size_half:u_int + psf_size_half + 1] += star_psf
+        star_additions[
+            v_int - psf_size_half : v_int + psf_size_half + 1,
+            u_int - psf_size_half : u_int + psf_size_half + 1,
+        ] += star_psf
 
     return star_additions
 
 
 def render_background_stars(
-        img: NDArrayFloatType, n_stars: int, seed: int, psf_sigma: float = 0.9,
-        distribution_exponent: float = 2.5) -> None:
+    img: NDArrayFloatType,
+    n_stars: int,
+    seed: int,
+    psf_sigma: float = 0.9,
+    distribution_exponent: float = 2.5,
+) -> None:
     """Add random background stars to the image.
 
     Parameters:
@@ -589,20 +637,22 @@ def _render_combined_model_cached(
     random_seed = int(sim_params.get('random_seed', 42))
 
     # Apply background noise first
-    background_noise_intensity = float(
-        sim_params.get('background_noise_intensity', 0.0))
+    background_noise_intensity = float(sim_params.get('background_noise_intensity', 0.0))
     render_background_noise(img, background_noise_intensity, random_seed)
 
     # Then background stars
     background_stars_num = int(sim_params.get('background_stars_num', 0))
-    background_stars_psf_sigma = float(
-        sim_params.get('background_stars_psf_sigma', 0.9))
+    background_stars_psf_sigma = float(sim_params.get('background_stars_psf_sigma', 0.9))
     background_stars_distribution_exponent = float(
-        sim_params.get('background_stars_distribution_exponent', 2.5))
+        sim_params.get('background_stars_distribution_exponent', 2.5)
+    )
     render_background_stars(
-        img, background_stars_num, random_seed,
+        img,
+        background_stars_num,
+        random_seed,
         psf_sigma=background_stars_psf_sigma,
-        distribution_exponent=background_stars_distribution_exponent)
+        distribution_exponent=background_stars_distribution_exponent,
+    )
 
     stars_params = sim_params.get('stars', []) or []
     bodies_params = sim_params.get('bodies', []) or []
@@ -662,8 +712,7 @@ def _render_combined_model_cached(
     # Build order_near_to_far for bodies (needed for body_index_map)
     sorted_bodies_by_range = sorted(bodies_with_ranges, key=lambda x: x['range'])
     order_near_to_far = [
-        bp.get('name', f'SIM-BODY-{i+1}').upper()
-        for i, bp in enumerate(sorted_bodies_by_range)
+        bp.get('name', f'SIM-BODY-{i + 1}').upper() for i, bp in enumerate(sorted_bodies_by_range)
     ]
 
     for _range_val, item_type, item_params, orig_idx in render_items:
@@ -675,8 +724,15 @@ def _render_combined_model_cached(
             if feature_type == 'RINGLET':
                 # For RINGLET: render into empty image to get ring_coverage
                 ring_img = np.zeros((size_v, size_u), dtype=np.float64)
-                render_ring(ring_img, item_params, offset_v, offset_u, time=time, epoch=epoch,
-                            shade_solid=shade_solid)
+                render_ring(
+                    ring_img,
+                    item_params,
+                    offset_v,
+                    offset_u,
+                    time=time,
+                    epoch=epoch,
+                    shade_solid=shade_solid,
+                )
                 # ring_img now contains just the ring_coverage (since 0 + coverage = coverage)
                 ring_mask = ring_img > 0.0
                 ring_mask_map[orig_idx] = ring_mask
@@ -686,8 +742,15 @@ def _render_combined_model_cached(
                 # For GAP: render into image with known background to extract coverage
                 # Use 1.0 as background so we can see what was subtracted
                 temp_bg = np.ones((size_v, size_u), dtype=np.float64)
-                render_ring(temp_bg, item_params, offset_v, offset_u, time=time, epoch=epoch,
-                            shade_solid=shade_solid)
+                render_ring(
+                    temp_bg,
+                    item_params,
+                    offset_v,
+                    offset_u,
+                    time=time,
+                    epoch=epoch,
+                    shade_solid=shade_solid,
+                )
                 # gap_coverage is what was subtracted: 1.0 - result
                 ring_mask = temp_bg < 1.0
                 ring_mask_map[orig_idx] = ring_mask
@@ -696,8 +759,14 @@ def _render_combined_model_cached(
         elif item_type == 'body':
             # Render single body
             body_mask, body_info = _render_single_body(
-                img, item_params, offset_v, offset_u,
-                seed=random_seed, ref_center_v=ref_center_v, ref_center_u=ref_center_u)
+                img,
+                item_params,
+                offset_v,
+                offset_u,
+                seed=random_seed,
+                ref_center_v=ref_center_v,
+                ref_center_u=ref_center_u,
+            )
             # Store mask by original index for proper ordering
             body_mask_map_by_idx[orig_idx] = body_mask
             body_mask_map_dict[body_info['name']] = body_mask
@@ -746,9 +815,7 @@ def _render_combined_model_cached(
 
 
 def render_combined_model(
-    sim_params: dict[str, Any],
-    *,
-    ignore_offset: bool = False
+    sim_params: dict[str, Any], *, ignore_offset: bool = False
 ) -> tuple[NDArrayFloatType, dict[str, Any]]:
     """Render stars then bodies from a full sim_params dict. Returns (img, meta).
 
@@ -765,8 +832,9 @@ def render_combined_model(
     # Create cache key from parameters (exclude offset if ignore_offset is True)
     params_for_hash = dict(sim_params)
     if ignore_offset:
-        params_for_hash = {k: v for k, v in params_for_hash.items()
-                           if k not in ('offset_v', 'offset_u')}
+        params_for_hash = {
+            k: v for k, v in params_for_hash.items() if k not in ('offset_v', 'offset_u')
+        }
     sim_params_json = json.dumps(params_for_hash, sort_keys=True)
     cached_img, cached_meta = _render_combined_model_cached(
         sim_params_json, ignore_offset=ignore_offset

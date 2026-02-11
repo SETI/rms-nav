@@ -1,8 +1,8 @@
 import json
 from typing import Any, cast
 
-from filecache import FCPath
 import oops
+from filecache import FCPath
 
 from nav.config import DEFAULT_CONFIG
 from nav.config.logger import DEFAULT_LOGGER
@@ -38,23 +38,27 @@ def generate_backplanes_image_files(
 
     if len(image_files.image_files) != 1:
         raise ValueError(
-            f'Expected exactly one image per batch; got {len(image_files.image_files)}')
+            f'Expected exactly one image per batch; got {len(image_files.image_files)}'
+        )
 
     image_file = image_files.image_files[0]
     image_path = image_file.image_file_path.absolute()
     metadata_file = nav_results_root / (image_file.results_path_stub + '_metadata.json')
     fits_file_path = backplane_results_root / (image_file.results_path_stub + '_backplanes.fits')
 
-    with logger.open(f'Processing image: {str(image_path)}'):
+    with logger.open(f'Processing image: {image_path!s}'):
         # This will raise an exception if the metadata file is not found or not valid JSON
         metadata_text = metadata_file.read_text()
         nav_metadata = cast(dict[str, Any], json.loads(metadata_text))
 
         status = nav_metadata.get('status', None)
         if status != 'success':
-            logger.warning('Skipping backplanes for "%s": status=%s error=%s',
-                           image_path, status,
-                           nav_metadata.get('status_error', 'unknown'))
+            logger.warning(
+                'Skipping backplanes for "%s": status=%s error=%s',
+                image_path,
+                status,
+                nav_metadata.get('status_error', 'unknown'),
+            )
             return
 
         # Build observation in original FOV

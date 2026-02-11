@@ -1,12 +1,13 @@
-from pathlib import Path
 import sys
+from pathlib import Path
 
 # Add the repository root to the path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from nav.inst import inst_name_to_class
+
 from nav.nav_master import NavMaster
-from tests.config import URL_CASSINI_ISS_RHEA_01
+
 
 def main():
     extfov_margin_vu = (300, 300)
@@ -20,7 +21,9 @@ def main():
     # inst_id = 'gossi'; URL = 'https://opus.pds-rings.seti.org/holdings/volumes/GO_0xxx/GO_0022/I24/IO/C0520821352R.IMG'; bodies = ['IO', 'JUPITER']
     # inst_id = 'gossi'; URL = 'https://opus.pds-rings.seti.org/holdings/volumes/GO_0xxx/GO_0023/I31/IO/C0615816324R.IMG'; bodies = ['IO']
     # inst_id = 'gossi'; URL = 'https://opus.pds-rings.seti.org/holdings/volumes/GO_0xxx/GO_0003/MOON/C0061059500R.IMG'; bodies = ['MOON']
-    inst_id = 'gossi'; URL = 'https://opus.pds-rings.seti.org/holdings/volumes/GO_0xxx/GO_0005/EARTH/C0061498700R.IMG'; bodies = ['EARTH']
+    inst_id = 'gossi'
+    URL = 'https://opus.pds-rings.seti.org/holdings/volumes/GO_0xxx/GO_0005/EARTH/C0061498700R.IMG'
+    # bodies = ['EARTH']  # config for this run (unused by script)
     # inst_id = 'gossi'; URL = 'https://opus.pds-rings.seti.org/holdings/volumes/GO_0xxx/GO_0019/C10/EUROPA/C0416073113R.IMG'; bodies = ['EUROPA']
 
     # inst_id = 'vgiss'; URL = 'https://opus.pds-rings.seti.org/holdings/volumes/VGISS_5xxx/VGISS_5112/DATA/C16101XX/C1610143_GEOMED.IMG'; bodies = ['EUROPA', 'IO', 'JUPITER']; offset = (-46, 131)

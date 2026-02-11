@@ -1,10 +1,9 @@
-from abc import ABC, abstractmethod
 import fnmatch
-from typing import Any, Optional, TYPE_CHECKING
-
-from nav.nav_model import NavModel, NavModelCombined
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Any
 
 from nav.config import Config
+from nav.nav_model import NavModel, NavModelCombined
 from nav.support.nav_base import NavBase
 
 if TYPE_CHECKING:
@@ -14,10 +13,7 @@ if TYPE_CHECKING:
 class NavTechnique(ABC, NavBase):
     """Base class for navigation techniques."""
 
-    def __init__(self,
-                 nav_master: 'NavMaster',
-                 *,
-                 config: Optional[Config] = None) -> None:
+    def __init__(self, nav_master: 'NavMaster', *, config: Config | None = None) -> None:
         """Initializes a navigation technique.
 
         Parameters:
@@ -75,7 +71,8 @@ class NavTechnique(ABC, NavBase):
     def _filter_models(self, model_names: list[str]) -> list['NavModel']:
         """Filters the available models using glob patterns."""
         models = [
-            x for x in self.nav_master.all_models
+            x
+            for x in self.nav_master.all_models
             if any(fnmatch.fnmatch(x.name.upper(), pattern.upper()) for pattern in model_names)
         ]
         return models

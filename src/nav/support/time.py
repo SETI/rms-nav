@@ -24,8 +24,7 @@ def now_dt() -> datetime.datetime:
     return datetime.datetime.now().astimezone()
 
 
-def dt_delta_str(start_time: datetime.datetime,
-                 end_time: datetime.datetime) -> str:
+def dt_delta_str(start_time: datetime.datetime, end_time: datetime.datetime) -> str:
     """Returns the difference between two datetime objects as a string representation.
 
     Parameters:

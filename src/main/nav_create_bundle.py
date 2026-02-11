@@ -11,35 +11,34 @@ import argparse
 import os
 import sys
 
-from filecache import FileCache
 import pdslogger
 import pdstemplate
+from filecache import FileCache
 
 # Make CLI runnable from source tree with
 #    python src/package
 package_source_path = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, package_source_path)
 
+from nav.config import (
+    DEFAULT_CONFIG,
+    DEFAULT_LOGGER,
+    get_backplane_results_root,
+    get_nav_results_root,
+    get_pds4_bundle_results_root,
+    load_default_and_user_config,
+)
+from nav.dataset import dataset_name_to_class, dataset_names
 from nav.dataset.dataset import DataSet
-from nav.dataset import dataset_names, dataset_name_to_class
-from nav.config import (DEFAULT_CONFIG, DEFAULT_LOGGER,
-                        get_backplane_results_root,
-                        get_nav_results_root,
-                        get_pds4_bundle_results_root,
-                        load_default_and_user_config)
-
 from pds4.bundle_data import generate_bundle_data_files
 from pds4.collections import generate_collection_files, generate_global_index_files
-
 
 DATASET: DataSet | None = None
 DATASET_NAME: str | None = None
 MAIN_LOGGER: pdslogger.PdsLogger | None = None
 
 
-def add_common_arguments(parser: argparse.ArgumentParser,
-                         *,
-                         for_labels: bool = False) -> None:
+def add_common_arguments(parser: argparse.ArgumentParser, *, for_labels: bool = False) -> None:
     """Add common arguments to an argument parser.
 
     Parameters:
@@ -47,28 +46,43 @@ def add_common_arguments(parser: argparse.ArgumentParser,
     """
     environment_group = parser.add_argument_group('Environment')
     environment_group.add_argument(
-        '--config-file', action='append', default=None,
+        '--config-file',
+        action='append',
+        default=None,
         help="""The configuration file(s) to use to override default settings;
         may be specified multiple times. If not provided, attempts to load
-        ./nav_default_config.yaml if present.""")
+        ./nav_default_config.yaml if present.""",
+    )
     environment_group.add_argument(
-        '--bundle-results-root', type=str, default=None,
+        '--bundle-results-root',
+        type=str,
+        default=None,
         required=False,
         help="""Root directory for bundle results; overrides the BUNDLE_RESULTS_ROOT
-        environment variable and the bundle_results_root configuration variable""")
+        environment variable and the bundle_results_root configuration variable""",
+    )
 
     if for_labels:
         environment_group.add_argument(
-            '--pds3-holdings-root', type=str, default=None,
-            help='Root directory of PDS3 holdings; overrides PDS3_HOLDINGS_DIR or config')
+            '--pds3-holdings-root',
+            type=str,
+            default=None,
+            help='Root directory of PDS3 holdings; overrides PDS3_HOLDINGS_DIR or config',
+        )
         environment_group.add_argument(
-            '--nav-results-root', type=str, default=None,
+            '--nav-results-root',
+            type=str,
+            default=None,
             help="""Root directory for prior navigation metadata files (_metadata.json);
-            overrides NAV_RESULTS_ROOT and the nav_results_root configuration variable""")
+            overrides NAV_RESULTS_ROOT and the nav_results_root configuration variable""",
+        )
         environment_group.add_argument(
-            '--backplane-results-root', type=str, default=None,
+            '--backplane-results-root',
+            type=str,
+            default=None,
             help="""Root directory for backplane results; overrides the BACKPLANE_RESULTS_ROOT
-            environment variable and the backplane_results_root configuration variable""")
+            environment variable and the backplane_results_root configuration variable""",
+        )
 
 
 def parse_args_labels(command_list: list[str]) -> argparse.Namespace:
@@ -92,7 +106,8 @@ def parse_args_labels(command_list: list[str]) -> argparse.Namespace:
 
     cmdparser = argparse.ArgumentParser(
         description='PDS4 Bundle Generation - Labels',
-        epilog="""Generate PDS4 labels and metadata files for selected images.""")
+        epilog="""Generate PDS4 labels and metadata files for selected images.""",
+    )
 
     # Common arguments
     add_common_arguments(cmdparser, for_labels=True)
@@ -100,8 +115,11 @@ def parse_args_labels(command_list: list[str]) -> argparse.Namespace:
     # Output
     output_group = cmdparser.add_argument_group('Output')
     output_group.add_argument(
-        '--dry-run', action='store_true', default=False,
-        help="Don't process images, just print what would be done")
+        '--dry-run',
+        action='store_true',
+        default=False,
+        help="Don't process images, just print what would be done",
+    )
 
     # Dataset selection
     DATASET.add_selection_arguments(cmdparser)
@@ -126,7 +144,8 @@ def parse_args_summary(command_list: list[str]) -> argparse.Namespace:
 
     cmdparser = argparse.ArgumentParser(
         description='PDS4 Bundle Generation - Summary',
-        epilog="""Generate collection files and global index files for completed bundle.""")
+        epilog="""Generate collection files and global index files for completed bundle.""",
+    )
 
     add_common_arguments(cmdparser)
 
@@ -163,12 +182,16 @@ def main_labels() -> None:
 
     for imagefiles in DATASET.yield_image_files_from_arguments(arguments):
         if len(imagefiles.image_files) != 1:
-            MAIN_LOGGER.error('Expected 1 image file, got %d for %s',
-                              len(imagefiles.image_files), imagefiles)
+            MAIN_LOGGER.error(
+                'Expected 1 image file, got %d for %s',
+                len(imagefiles.image_files),
+                imagefiles,
+            )
             continue
         if arguments.dry_run:
-            MAIN_LOGGER.info('Would process: %s',
-                             imagefiles.image_files[0].label_file_url.as_posix())
+            MAIN_LOGGER.info(
+                'Would process: %s', imagefiles.image_files[0].label_file_url.as_posix()
+            )
             continue
 
         generate_bundle_data_files(
@@ -177,7 +200,7 @@ def main_labels() -> None:
             nav_results_root=nav_results_root,
             backplane_results_root=backplane_results_root,
             bundle_results_root=bundle_results_root,
-            logger=MAIN_LOGGER
+            logger=MAIN_LOGGER,
         )
 
 

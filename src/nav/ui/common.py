@@ -1,10 +1,17 @@
 from collections.abc import Callable
-from typing import Optional, Any
+from typing import Any
 
 import numpy as np
-from PyQt6.QtCore import Qt, QPoint
+from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtGui import QMouseEvent, QWheelEvent
-from PyQt6.QtWidgets import QLabel, QScrollArea, QFormLayout, QHBoxLayout, QSlider, QWidget
+from PyQt6.QtWidgets import (
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QScrollArea,
+    QSlider,
+    QWidget,
+)
 
 
 class ZoomPanController:
@@ -21,14 +28,16 @@ class ZoomPanController:
     The controller adjusts scrollbars for panning and zoom anchoring.
     """
 
-    def __init__(self,
-                 *,
-                 label: QLabel,
-                 scroll_area: QScrollArea,
-                 get_zoom: Callable[[], float],
-                 set_zoom: Callable[[float], None],
-                 update_display: Callable[[], None],
-                 set_zoom_label_text: Optional[Callable[[str], None]] = None) -> None:
+    def __init__(
+        self,
+        *,
+        label: QLabel,
+        scroll_area: QScrollArea,
+        get_zoom: Callable[[], float],
+        set_zoom: Callable[[float], None],
+        update_display: Callable[[], None],
+        set_zoom_label_text: Callable[[str], None] | None = None,
+    ) -> None:
         self._label = label
         self._scroll = scroll_area
         self._get_zoom = get_zoom
@@ -36,8 +45,8 @@ class ZoomPanController:
         self._update_display = update_display
         self._set_zoom_label_text = set_zoom_label_text
 
-        self._drag_start_pos: Optional[QPoint] = None
-        self._drag_start_scroll_xy: Optional[tuple[int, int]] = None
+        self._drag_start_pos: QPoint | None = None
+        self._drag_start_scroll_xy: tuple[int, int] | None = None
 
     # Event handlers (UI should call these from its own handlers)
     def on_mouse_press(self, event: QMouseEvent) -> None:
@@ -45,8 +54,10 @@ class ZoomPanController:
             self._drag_start_pos = event.globalPosition().toPoint()
             sh = self._scroll.horizontalScrollBar()
             sv = self._scroll.verticalScrollBar()
-            self._drag_start_scroll_xy = (sh.value() if sh is not None else 0,
-                                          sv.value() if sv is not None else 0)
+            self._drag_start_scroll_xy = (
+                sh.value() if sh is not None else 0,
+                sv.value() if sv is not None else 0,
+            )
 
     def on_mouse_move(self, event: QMouseEvent) -> None:
         if self._drag_start_pos is not None and self._drag_start_scroll_xy is not None:
@@ -118,12 +129,14 @@ class ZoomPanController:
         self._update_display()
 
     # Public zoom-at-point API
-    def zoom_at_point(self,
-                      factor: float,
-                      viewport_x: int,
-                      viewport_y: int,
-                      scaled_x: float,
-                      scaled_y: float) -> None:
+    def zoom_at_point(
+        self,
+        factor: float,
+        viewport_x: int,
+        viewport_y: int,
+        scaled_x: float,
+        scaled_y: float,
+    ) -> None:
         """
         Zoom by a factor anchored at the given viewport coordinates, where
         scaled_x/y are the corresponding coordinates in the scaled image space.
@@ -131,12 +144,9 @@ class ZoomPanController:
         self._zoom_at_point(factor, viewport_x, viewport_y, scaled_x, scaled_y)
 
     # Internal
-    def _zoom_at_point(self,
-                       factor: float,
-                       vx: int,
-                       vy: int,
-                       scaled_x: float,
-                       scaled_y: float) -> None:
+    def _zoom_at_point(
+        self, factor: float, vx: int, vy: int, scaled_x: float, scaled_y: float
+    ) -> None:
         old_zoom = self._get_zoom()
         new_zoom = float(np.clip(old_zoom * factor, 0.1, 50.0))
         if new_zoom == old_zoom:
@@ -158,16 +168,18 @@ class ZoomPanController:
         self._update_display()
 
 
-def build_stretch_controls(form: QFormLayout,
-                           *,
-                           img_min: float,
-                           img_max: float,
-                           black_init: float,
-                           white_init: float,
-                           gamma_init: float,
-                           on_black_changed: Callable[[float], None],
-                           on_white_changed: Callable[[float], None],
-                           on_gamma_changed: Callable[[float], None]) -> dict[str, Any]:
+def build_stretch_controls(
+    form: QFormLayout,
+    *,
+    img_min: float,
+    img_max: float,
+    black_init: float,
+    white_init: float,
+    gamma_init: float,
+    on_black_changed: Callable[[float], None],
+    on_white_changed: Callable[[float], None],
+    on_gamma_changed: Callable[[float], None],
+) -> dict[str, Any]:
     """
     Construct black/white/gamma controls matching manual_nav_dialog behavior with shared formatting.
     Returns dict with widgets and mappers:

@@ -15,25 +15,25 @@ import sys
 import time
 from typing import cast
 
-from filecache import FileCache, FCPath
 import pdslogger
+from filecache import FCPath, FileCache
 
 # Make CLI runnable from source tree with
 #    python src/package
 package_source_path = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, package_source_path)
 
+from nav.config import (
+    DEFAULT_CONFIG,
+    DEFAULT_LOGGER,
+    get_nav_results_root,
+    load_default_and_user_config,
+)
+from nav.dataset import dataset_name_to_class, dataset_name_to_inst_name, dataset_names
 from nav.dataset.dataset import DataSet
-from nav.dataset import (dataset_names,
-                         dataset_name_to_class,
-                         dataset_name_to_inst_name)
-from nav.config import (DEFAULT_CONFIG, DEFAULT_LOGGER,
-                        get_nav_results_root,
-                        load_default_and_user_config)
-from nav.support.file import json_as_string
-from nav.obs import inst_name_to_obs_class
 from nav.navigate_image_files import navigate_image_files
-
+from nav.obs import inst_name_to_obs_class
+from nav.support.file import json_as_string
 
 DATASET: DataSet | None = None
 DATASET_NAME: str | None = None
@@ -49,6 +49,7 @@ START_TIME: float = 0.0
 # ARGUMENT PARSING
 #
 ################################################################################
+
 
 def parse_args(command_list: list[str]) -> argparse.Namespace:
     global DATASET
@@ -77,32 +78,48 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     cmdparser = argparse.ArgumentParser(
         description='Navigation & Backplane Main Interface for Offsets',
         epilog="""Default behavior is to perform an offset pass on all Cassini images
-                that don't have associated offset files""")
+                that don't have associated offset files""",
+    )
 
     # Arguments about the environment
     environment_group = cmdparser.add_argument_group('Environment')
     environment_group.add_argument(
-        '--config-file', action='append', default=None,
+        '--config-file',
+        action='append',
+        default=None,
         help="""The configuration file(s) to use to override default settings;
         may be specified multiple times. If not provided, attempts to load
-        ./nav_default_config.yaml if present.""")
+        ./nav_default_config.yaml if present.""",
+    )
     environment_group.add_argument(
-        '--pds3-holdings-root', type=str, default=None,
+        '--pds3-holdings-root',
+        type=str,
+        default=None,
         help="""The root directory of the PDS3 holdings; overrides the PDS3_HOLDINGS_DIR
-        environment variable and the pds3_holdings_root configuration variable""")
+        environment variable and the pds3_holdings_root configuration variable""",
+    )
     environment_group.add_argument(
-        '--nav-results-root', type=str, default=None,
+        '--nav-results-root',
+        type=str,
+        default=None,
         help="""The root directory of the navigation results; overrides the NAV_RESULTS_ROOT
-        environment variable and the nav_results_root configuration variable""")
+        environment variable and the nav_results_root configuration variable""",
+    )
 
     # Arguments about the general navigation process
     nav_group = cmdparser.add_argument_group('Navigation')
     nav_group.add_argument(
-        '--nav-models', type=str, default=None,
-        help='Comma-separated list of model names to use')
+        '--nav-models',
+        type=str,
+        default=None,
+        help='Comma-separated list of model names to use',
+    )
     nav_group.add_argument(
-        '--nav-techniques', type=str, default=None,
-        help='Comma-separated list of navigation technique names to use')
+        '--nav-techniques',
+        type=str,
+        default=None,
+        help='Comma-separated list of navigation technique names to use',
+    )
 
     # Arguments about output file generation
     output_group = cmdparser.add_argument_group('Output')
@@ -116,15 +133,24 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     #     '--write-png-file', action=argparse.BooleanOptionalAction, default=True,
     #     help='Generate a PNG file')
     output_group.add_argument(
-        '--output-cloud-tasks-file', type=str, default=None,
+        '--output-cloud-tasks-file',
+        type=str,
+        default=None,
         help="""Write a JSON file containing task descriptions for all selected images that
-        is suitable for loading into a cloud_tasks queue; do not perform any other processing.""")
+        is suitable for loading into a cloud_tasks queue; do not perform any other processing.""",
+    )
     output_group.add_argument(
-        '--dry-run', action='store_true', default=False,
-        help="Don't actually process the images, just print what would be done")
+        '--dry-run',
+        action='store_true',
+        default=False,
+        help="Don't actually process the images, just print what would be done",
+    )
     output_group.add_argument(
-        '--no-write-output-files', action='store_true', default=False,
-        help="Don't write any output files")
+        '--no-write-output-files',
+        action='store_true',
+        default=False,
+        help="Don't write any output files",
+    )
 
     # Add all the arguments related to selecting files
     DATASET.add_selection_arguments(cmdparser)
@@ -132,8 +158,11 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     # Misc arguments
     misc_group = cmdparser.add_argument_group('Miscellaneous')
     misc_group.add_argument(
-        '--profile', action=argparse.BooleanOptionalAction, default=False,
-        help='Do performance profiling')
+        '--profile',
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help='Do performance profiling',
+    )
 
     arguments = cmdparser.parse_args(command_list[1:])
 
@@ -154,6 +183,7 @@ def exit_processing() -> None:
 # MAIN
 #
 ###############################################################################
+
 
 def main() -> None:
 
@@ -226,8 +256,9 @@ def main() -> None:
     obs_class = inst_name_to_obs_class(INST_NAME)
 
     nav_models = arguments.nav_models.split(',') if arguments.nav_models is not None else None
-    nav_techniques = (arguments.nav_techniques.split(',')
-                      if arguments.nav_techniques is not None else None)
+    nav_techniques = (
+        arguments.nav_techniques.split(',') if arguments.nav_techniques is not None else None
+    )
 
     assert DATASET is not None  # just for type checking
 
@@ -238,23 +269,26 @@ def main() -> None:
         }
         tasks_json = []
         for imagefile_idx, imagefiles in enumerate(
-                DATASET.yield_image_files_from_arguments(arguments)):
+            DATASET.yield_image_files_from_arguments(arguments)
+        ):
             task_id = f'{DATASET_NAME}-{imagefiles.image_files[0].label_file_name}-{imagefile_idx}'
             task_files = []
             for image_file in imagefiles.image_files:
-                task_files.append({
-                    'image_file_url': image_file.image_file_url.as_posix(),
-                    'label_file_url': image_file.label_file_url.as_posix(),
-                    'results_path_stub': image_file.results_path_stub,
-                    'index_file_row': image_file.index_file_row,
-                })
+                task_files.append(
+                    {
+                        'image_file_url': image_file.image_file_url.as_posix(),
+                        'label_file_url': image_file.label_file_url.as_posix(),
+                        'results_path_stub': image_file.results_path_stub,
+                        'index_file_row': image_file.index_file_row,
+                    }
+                )
             task_info = {
                 'task_id': task_id,
                 'data': {
                     'arguments': task_arguments,
                     'dataset_name': DATASET_NAME,
                     'files': task_files,
-                }
+                },
             }
             tasks_json.append(task_info)
 
@@ -267,18 +301,19 @@ def main() -> None:
     for imagefiles in DATASET.yield_image_files_from_arguments(arguments):
         assert len(imagefiles.image_files) == 1
         if arguments.dry_run:
-            MAIN_LOGGER.info('Would process: %s',
-                             imagefiles.image_files[0].label_file_url.as_posix())
+            MAIN_LOGGER.info(
+                'Would process: %s', imagefiles.image_files[0].label_file_url.as_posix()
+            )
             continue
 
         if navigate_image_files(
-                obs_class,
-                imagefiles,
-                nav_results_root=nav_results_root,
-                nav_models=nav_models,
-                nav_techniques=nav_techniques,
-                write_output_files=not arguments.no_write_output_files
-                ):
+            obs_class,
+            imagefiles,
+            nav_results_root=nav_results_root,
+            nav_models=nav_models,
+            nav_techniques=nav_techniques,
+            write_output_files=not arguments.no_write_output_files,
+        ):
             NUM_FILES_PROCESSED += 1
         else:
             NUM_FILES_SKIPPED += 1

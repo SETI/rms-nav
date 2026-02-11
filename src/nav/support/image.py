@@ -1,21 +1,21 @@
 from typing import Any, cast
 
 import numpy as np
-from numpy.fft import fft2, ifft2, fftfreq
 import scipy.ndimage as ndimage
+from numpy.fft import fft2, fftfreq, ifft2
 
-from nav.support.types import NDArrayType, NDArrayFloatType, NPType
+from nav.support.types import NDArrayFloatType, NDArrayType, NPType
 
-
-#==============================================================================
+# ==============================================================================
 #
 # ARRAY MANIPULATION
 #
-#==============================================================================
+# ==============================================================================
 
-def shift_array(array: NDArrayType[NPType],
-                offset: int | list[int] | tuple[int, ...],
-                fill: Any = 0) -> NDArrayType[NPType]:
+
+def shift_array(
+    array: NDArrayType[NPType], offset: int | list[int] | tuple[int, ...], fill: Any = 0
+) -> NDArrayType[NPType]:
     """Shift an array by an offset, filling with zeros or a specified value.
 
     Parameters:
@@ -35,8 +35,9 @@ def shift_array(array: NDArrayType[NPType],
         offset = [offset]
 
     if array.ndim != len(offset):
-        raise ValueError(f'Array ({array.ndim}) and offset ({len(offset)}) must have '
-                         'same number of dimensions')
+        raise ValueError(
+            f'Array ({array.ndim}) and offset ({len(offset)}) must have same number of dimensions'
+        )
 
     if all(x == 0 for x in offset):
         return array
@@ -49,16 +50,16 @@ def shift_array(array: NDArrayType[NPType],
         if offset[axis] != 0:
             rolled_array = np.rollaxis(array, axis)
             if offset[axis] < 0:
-                rolled_array[offset[axis]:, ...] = fill
+                rolled_array[offset[axis] :, ...] = fill
             else:
-                rolled_array[:offset[axis], ...] = fill
+                rolled_array[: offset[axis], ...] = fill
 
     return array
 
 
-def pad_array(array: NDArrayType[NPType],
-              margin: list[int] | tuple[int, ...],
-              fill: Any = 0) -> NDArrayType[NPType]:
+def pad_array(
+    array: NDArrayType[NPType], margin: list[int] | tuple[int, ...], fill: Any = 0
+) -> NDArrayType[NPType]:
     """Pad an array by the given margin at each edge.
 
     Parameters:
@@ -76,8 +77,9 @@ def pad_array(array: NDArrayType[NPType],
     """
 
     if array.ndim != len(margin):
-        raise ValueError(f'Array ({array.ndim}) and offset ({len(margin)}) must have '
-                         'same number of dimensions')
+        raise ValueError(
+            f'Array ({array.ndim}) and offset ({len(margin)}) must have same number of dimensions'
+        )
 
     if all(x == 0 for x in margin):
         return array
@@ -86,8 +88,9 @@ def pad_array(array: NDArrayType[NPType],
     return np.pad(array, padding, mode='constant', constant_values=fill)
 
 
-def unpad_array(array: NDArrayType[NPType],
-                margin: list[int] | tuple[int, ...]) -> NDArrayType[NPType]:
+def unpad_array(
+    array: NDArrayType[NPType], margin: list[int] | tuple[int, ...]
+) -> NDArrayType[NPType]:
     """Remove a padded margin from each edge.
 
     Parameters:
@@ -104,17 +107,18 @@ def unpad_array(array: NDArrayType[NPType],
     """
 
     if array.ndim != len(margin):
-        raise ValueError(f'Array ({array.ndim}) and margin ({len(margin)}) must have '
-                         'same number of dimensions')
+        raise ValueError(
+            f'Array ({array.ndim}) and margin ({len(margin)}) must have same number of dimensions'
+        )
 
     if all(x == 0 for x in margin):
         return array
 
     # See https://stackoverflow.com/questions/24806174/
     # is-there-an-opposite-inverse-to-numpy-pad-function
-    reversed_padding = tuple([
-        slice(pad, dim - pad) for (pad, dim) in zip(margin, array.shape)
-    ])
+    reversed_padding = tuple(
+        slice(pad, dim - pad) for (pad, dim) in zip(margin, array.shape, strict=True)
+    )
 
     return array[reversed_padding]
 
@@ -136,7 +140,7 @@ def pad_top_left(array: NDArrayType[NPType], v_size: int, u_size: int) -> NDArra
         raise ValueError(f'Array must be 2-dimensional, got {array.ndim}')
     ret = np.zeros((v_size, u_size), dtype=array.dtype)
     v, u = array.shape
-    ret[:min(v, v_size), :min(u, u_size)] = array[:min(v, v_size), :min(u, u_size)]
+    ret[: min(v, v_size), : min(u, u_size)] = array[: min(v, v_size), : min(u, u_size)]
     return ret
 
 
@@ -160,9 +164,9 @@ def crop_center(img: NDArrayType[NPType], out_shape: tuple[int, int]) -> NDArray
     out_v, out_u = out_shape
     if out_v > img_v or out_u > img_u:
         raise ValueError(f'Output shape {out_shape} cannot be larger than image shape {img.shape}')
-    sy = (img_v - out_v)//2
-    sx = (img_u - out_u)//2
-    return img[sy:sy+out_v, sx:sx+out_u]
+    sy = (img_v - out_v) // 2
+    sx = (img_u - out_u) // 2
+    return img[sy : sy + out_v, sx : sx + out_u]
 
 
 def next_power_of_2(n: int) -> int:
@@ -176,13 +180,14 @@ def next_power_of_2(n: int) -> int:
     """
 
     s = bin(n)[2:]
-    if s.count('1') == 1: # Already power of 2
+    if s.count('1') == 1:  # Already power of 2
         return n
     return 1 << len(s)
 
 
-def pad_array_to_power_of_2(data: NDArrayType[NPType]
-                           ) -> tuple[NDArrayType[NPType], tuple[int, ...]]:
+def pad_array_to_power_of_2(
+    data: NDArrayType[NPType],
+) -> tuple[NDArrayType[NPType], tuple[int, ...]]:
     """Zero-pad a 2-D array on all sides to be a power of 2 in each dimension.
 
     If the original array has a side that is not a power of 2, it must be even.
@@ -192,13 +197,13 @@ def pad_array_to_power_of_2(data: NDArrayType[NPType]
 
     p2 = [next_power_of_2(x) for x in data.shape]
 
-    if all(s1 == s2 for s1, s2 in zip(p2, data.shape)):
+    if all(s1 == s2 for s1, s2 in zip(p2, data.shape, strict=True)):
         return data, (0, 0)
 
     if any((s != 1) and (s & 1) for s in data.shape):
         raise ValueError(f'shape must be power of 2 or even: {data.shape}')
 
-    padding = tuple([(s - dim) // 2 for s, dim in zip(p2, data.shape)])
+    padding = tuple([(s - dim) // 2 for s, dim in zip(p2, data.shape, strict=True)])
     return pad_array(data, padding), padding
 
 
@@ -247,8 +252,8 @@ def pad_array_to_power_of_2(data: NDArrayType[NPType]
 #     ret_data[good_mask] = data_mean[good_mask]
 #     return ret_data
 
-def array_zoom(a: NDArrayType[NPType],
-               factor: list[int] | tuple[int, ...]) -> NDArrayType[NPType]:
+
+def array_zoom(a: NDArrayType[NPType], factor: list[int] | tuple[int, ...]) -> NDArrayType[NPType]:
     """Zooms an array by the specified factor using array indexing.
 
     Parameters:
@@ -260,15 +265,16 @@ def array_zoom(a: NDArrayType[NPType],
     """
 
     a = np.asarray(a)
-    slices = [slice(0, old, 1/float(f))
-                  for (f, old) in zip(factor, a.shape)]
+    slices = [slice(0, old, 1 / float(f)) for (f, old) in zip(factor, a.shape, strict=True)]
     idxs = (np.mgrid[slices]).astype('i')
     return cast(NDArrayType[NPType], a[tuple(idxs)])
 
 
-def array_unzoom(array: NDArrayType[NPType],
-                 factor: int | list[int] | tuple[int, ...],
-                 method: str = 'mean') -> NDArrayType[NPType]:
+def array_unzoom(
+    array: NDArrayType[NPType],
+    factor: int | list[int] | tuple[int, ...],
+    method: str = 'mean',
+) -> NDArrayType[NPType]:
     """Zoom down by an integer factor. Returned arrays are floating-point."""
 
     if len(array.shape) == 1:
@@ -321,19 +327,23 @@ def array_unzoom(array: NDArrayType[NPType],
 
     return cast(NDArrayType[NPType], unzoomed)
 
-#==============================================================================
+
+# ==============================================================================
 #
 # FILTERS
 #
-#==============================================================================
+# ==============================================================================
 
-def filter_local_maximum(data: NDArrayType[NPType],
-                         maximum_boxsize: int = 3,
-                         median_boxsize: int = 11,
-                         maximum_blur: int = 0,
-                         maximum_tolerance: float = 1.,
-                         minimum_boxsize: int = 0,
-                         gaussian_blur: float = 0.) -> NDArrayType[NPType]:
+
+def filter_local_maximum(
+    data: NDArrayType[NPType],
+    maximum_boxsize: int = 3,
+    median_boxsize: int = 11,
+    maximum_blur: int = 0,
+    maximum_tolerance: float = 1.0,
+    minimum_boxsize: int = 0,
+    gaussian_blur: float = 0.0,
+) -> NDArrayType[NPType]:
     """Filter an array to find local maxima.
 
     Process:
@@ -398,10 +408,13 @@ def filter_local_maximum(data: NDArrayType[NPType],
 
 _FOOTPRINT_CACHE: dict[int, Any] = {}
 
-def filter_sub_median(data: NDArrayFloatType,
-                      median_boxsize: int = 11,
-                      gaussian_blur: float = 0.,
-                      footprint: str= 'square') -> NDArrayFloatType:
+
+def filter_sub_median(
+    data: NDArrayFloatType,
+    median_boxsize: int = 11,
+    gaussian_blur: float = 0.0,
+    footprint: str = 'square',
+) -> NDArrayFloatType:
     """Compute the median-subtracted value for each pixel.
 
     Parameters:
@@ -429,15 +442,16 @@ def filter_sub_median(data: NDArrayFloatType,
             if median_boxsize in _FOOTPRINT_CACHE:
                 footprint_arr = _FOOTPRINT_CACHE[median_boxsize]
             else:
-                footprint_arr = np.zeros((median_boxsize, median_boxsize),
-                                         dtype='bool')
+                footprint_arr = np.zeros((median_boxsize, median_boxsize), dtype='bool')
                 box_half = median_boxsize // 2
-                x = (np.tile(np.arange(median_boxsize)-box_half, median_boxsize).
-                     reshape((median_boxsize, median_boxsize)))
-                y = (np.repeat(np.arange(median_boxsize)-box_half, median_boxsize).
-                     reshape((median_boxsize, median_boxsize)))
+                x = np.tile(np.arange(median_boxsize) - box_half, median_boxsize).reshape(
+                    (median_boxsize, median_boxsize)
+                )
+                y = np.repeat(np.arange(median_boxsize) - box_half, median_boxsize).reshape(
+                    (median_boxsize, median_boxsize)
+                )
                 dist = np.sqrt(x**2 + y**2)
-                footprint_arr[dist <= box_half+.5] = 1
+                footprint_arr[dist <= box_half + 0.5] = 1
                 _FOOTPRINT_CACHE[median_boxsize] = footprint_arr
             sub = ndimage.median_filter(sub, footprint=footprint_arr)
 
@@ -447,9 +461,7 @@ def filter_sub_median(data: NDArrayFloatType,
     return data - sub
 
 
-def filter_downsample(arr: NDArrayFloatType,
-                      amt_y: int,
-                      amt_x: int) -> NDArrayFloatType:
+def filter_downsample(arr: NDArrayFloatType, amt_y: int, amt_x: int) -> NDArrayFloatType:
     """Downsamples an array by averaging blocks of pixels.
 
     Parameters:
@@ -469,13 +481,15 @@ def filter_downsample(arr: NDArrayFloatType,
     assert arr.shape[1] % amt_x == 0
     ny = arr.shape[0] // amt_y
     nx = arr.shape[1] // amt_x
-    ret = (np.swapaxes(arr.reshape(ny, amt_y, nx, amt_x), 1, 2).
-           reshape(ny, nx, amt_x*amt_y).mean(axis=2))
+    ret = (
+        np.swapaxes(arr.reshape(ny, amt_y, nx, amt_x), 1, 2)
+        .reshape(ny, nx, amt_x * amt_y)
+        .mean(axis=2)
+    )
     return cast(NDArrayFloatType, ret)
 
 
-def gaussian_blur_cov(img: NDArrayFloatType,
-                      sigma: NDArrayFloatType) -> NDArrayFloatType:
+def gaussian_blur_cov(img: NDArrayFloatType, sigma: NDArrayFloatType) -> NDArrayFloatType:
     """Blur by anisotropic Gaussian with covariance matrix in frequency domain.
 
     Parameters:
@@ -497,7 +511,7 @@ def gaussian_blur_cov(img: NDArrayFloatType,
     fx = fftfreq(img.shape[1])[None, :]
     Syy, Syx = sigma[0, 0], sigma[0, 1]
     Sxy, Sxx = sigma[1, 0], sigma[1, 1]
-    q = Syy*(fy*fy) + (Syx+Sxy)*(fy*fx) + Sxx*(fx*fx)
+    q = Syy * (fy * fy) + (Syx + Sxy) * (fy * fx) + Sxx * (fx * fx)
     H = np.exp(-2.0 * (np.pi**2) * q)
     return np.real(ifft2(fft2(img) * H))
 
@@ -535,21 +549,24 @@ def gradient_magnitude(img: NDArrayFloatType) -> NDArrayFloatType:
     return cast(NDArrayFloatType, np.hypot(gy, gx))
 
 
-#==============================================================================
+# ==============================================================================
 #
 # DRAWING ROUTINES
 #
-#==============================================================================
+# ==============================================================================
 
-def draw_line_arrow(img: NDArrayType[NPType],
-                    color: int | float | list[int | float] | tuple[int | float, ...],
-                    x0: int | float,
-                    y0: int | float,
-                    x1: int | float,
-                    y1: int | float,
-                    thickness: float = 1.,
-                    arrow_head_length: int = 10,
-                    arrow_head_angle: int = 45) -> None:
+
+def draw_line_arrow(
+    img: NDArrayType[NPType],
+    color: int | float | list[int | float] | tuple[int | float, ...],
+    x0: int | float,
+    y0: int | float,
+    x1: int | float,
+    y1: int | float,
+    thickness: float = 1.0,
+    arrow_head_length: int = 10,
+    arrow_head_angle: int = 45,
+) -> None:
     """Draws a line with an arrow head at the end point.
 
     Parameters:
@@ -566,7 +583,7 @@ def draw_line_arrow(img: NDArrayType[NPType],
 
     draw_line(img, color, x0, y0, x1, y1, thickness)
 
-    line_angle = -np.atan2((y1-y0), (x0-x1))
+    line_angle = -np.atan2((y1 - y0), (x0 - x1))
     angle = line_angle + np.deg2rad(arrow_head_angle)
     x2 = x1 + np.round(arrow_head_length * np.cos(angle))
     y2 = y1 + np.round(arrow_head_length * np.sin(angle))
@@ -578,13 +595,15 @@ def draw_line_arrow(img: NDArrayType[NPType],
     draw_line(img, color, x1, y1, x2, y2, thickness)
 
 
-def draw_line(img: NDArrayType[NPType],
-              color: int | float | list[int | float] | tuple[int | float, ...],
-              x0: int | float,
-              y0: int | float,
-              x1: int | float,
-              y1: int | float,
-              thickness: float = 1.) -> None:
+def draw_line(
+    img: NDArrayType[NPType],
+    color: int | float | list[int | float] | tuple[int | float, ...],
+    x0: int | float,
+    y0: int | float,
+    x1: int | float,
+    y1: int | float,
+    thickness: float = 1.0,
+) -> None:
     """Draw a line using Bresenham's algorithm with the given thickness.
 
     The line is drawn by drawing each point as a line perpendicular to
@@ -605,8 +624,8 @@ def draw_line(img: NDArrayType[NPType],
 
     if thickness == 1:
         # Do the simple version
-        dx = abs(x1-x0)
-        dy = abs(y1-y0)
+        dx = abs(x1 - x0)
+        dy = abs(y1 - y0)
         if x0 < x1:
             sx = 1
         else:
@@ -615,14 +634,14 @@ def draw_line(img: NDArrayType[NPType],
             sy = 1
         else:
             sy = -1
-        err = dx-dy
+        err = dx - dy
 
         while True:
             if 0 <= y0 < img.shape[0] and 0 <= x0 < img.shape[1]:
                 img[y0, x0] = color
             if x0 == x1 and y0 == y1:
                 break
-            e2 = 2*err
+            e2 = 2 * err
             if e2 > -dy:
                 err = err - dy
                 x0 = x0 + sx
@@ -632,13 +651,13 @@ def draw_line(img: NDArrayType[NPType],
         return
 
     # Find the perpendicular angle
-    angle = np.arctan2(y1-y0, x1-x0)
+    angle = np.arctan2(y1 - y0, x1 - x0)
     x_offset = int(np.round(np.cos(angle)))
     y_offset = int(np.round(np.sin(angle)))
-    perp_angle = angle + np.pi/2
-    perp_x1 = int(np.round(thickness/2.*np.cos(perp_angle)))
+    perp_angle = angle + np.pi / 2
+    perp_x1 = int(np.round(thickness / 2.0 * np.cos(perp_angle)))
     perp_x0 = -perp_x1
-    perp_y1 = int(np.round(thickness/2.*np.sin(perp_angle)))
+    perp_y1 = int(np.round(thickness / 2.0 * np.sin(perp_angle)))
     perp_y0 = -perp_y1
     if perp_x0 == perp_x1 and perp_y0 == perp_y1:
         draw_line(img, color, x0, y0, x1, y1)
@@ -648,8 +667,8 @@ def draw_line(img: NDArrayType[NPType],
     perp_offsets_x = []
     perp_offsets_y = []
 
-    dx = abs(perp_x1-perp_x0)
-    dy = abs(perp_y1-perp_y0)
+    dx = abs(perp_x1 - perp_x0)
+    dy = abs(perp_y1 - perp_y0)
     if perp_x0 < perp_x1:
         sx = 1
     else:
@@ -658,22 +677,22 @@ def draw_line(img: NDArrayType[NPType],
         sy = 1
     else:
         sy = -1
-    err = dx-dy
+    err = dx - dy
 
     while True:
         # There's a better way to do this, but it's patented by IBM!
         # So just do something brute force instead
         perp_offsets_x.append(perp_x0)
         perp_offsets_y.append(perp_y0)
-        perp_offsets_x.append(perp_x0+x_offset)
+        perp_offsets_x.append(perp_x0 + x_offset)
         perp_offsets_y.append(perp_y0)
         perp_offsets_x.append(perp_x0)
-        perp_offsets_y.append(perp_y0+y_offset)
-        perp_offsets_x.append(perp_x0+x_offset)
-        perp_offsets_y.append(perp_y0+y_offset)
+        perp_offsets_y.append(perp_y0 + y_offset)
+        perp_offsets_x.append(perp_x0 + x_offset)
+        perp_offsets_y.append(perp_y0 + y_offset)
         if perp_x0 == perp_x1 and perp_y0 == perp_y1:
             break
-        e2 = 2*err
+        e2 = 2 * err
         if e2 > -dy:
             err = err - dy
             perp_x0 = perp_x0 + sx
@@ -682,8 +701,8 @@ def draw_line(img: NDArrayType[NPType],
             perp_y0 = perp_y0 + sy
 
     # Now draw the final line applying the offsets
-    dx = abs(x1-x0)
-    dy = abs(y1-y0)
+    dx = abs(x1 - x0)
+    dy = abs(y1 - y0)
     if x0 < x1:
         sx = 1
     else:
@@ -692,7 +711,7 @@ def draw_line(img: NDArrayType[NPType],
         sy = 1
     else:
         sy = -1
-    err = dx-dy
+    err = dx - dy
 
     while True:
         for i in range(len(perp_offsets_x)):
@@ -702,7 +721,7 @@ def draw_line(img: NDArrayType[NPType],
                 img[yy, xx] = color
         if x0 == x1 and y0 == y1:
             break
-        e2 = 2*err
+        e2 = 2 * err
         if e2 > -dy:
             err = err - dy
             x0 = x0 + sx
@@ -711,14 +730,16 @@ def draw_line(img: NDArrayType[NPType],
             y0 = y0 + sy
 
 
-def draw_rect(img: NDArrayType[NPType],
-              color: bool | int | float | list[int | float] | tuple[int | float, ...],
-              xctr: int,
-              yctr: int,
-              xhalfwidth: int,
-              yhalfwidth: int,
-              thickness: int = 1,
-              dot_spacing: int = 1) -> None:
+def draw_rect(
+    img: NDArrayType[NPType],
+    color: bool | int | float | list[int | float] | tuple[int | float, ...],
+    xctr: int,
+    yctr: int,
+    xhalfwidth: int,
+    yhalfwidth: int,
+    thickness: int = 1,
+    dot_spacing: int = 1,
+) -> None:
     """Draw a rectangle with the given line thickness.
 
     Parameters:
@@ -733,25 +754,35 @@ def draw_rect(img: NDArrayType[NPType],
     """
 
     # Top
-    img[yctr-yhalfwidth-thickness+1:yctr-yhalfwidth+1,
-        xctr-xhalfwidth-thickness+1:xctr+xhalfwidth+thickness:dot_spacing] = color
+    img[
+        yctr - yhalfwidth - thickness + 1 : yctr - yhalfwidth + 1,
+        xctr - xhalfwidth - thickness + 1 : xctr + xhalfwidth + thickness : dot_spacing,
+    ] = color
     # Bottom
-    img[yctr+yhalfwidth:yctr+yhalfwidth+thickness,
-        xctr-xhalfwidth-thickness+1:xctr+xhalfwidth+thickness:dot_spacing] = color
+    img[
+        yctr + yhalfwidth : yctr + yhalfwidth + thickness,
+        xctr - xhalfwidth - thickness + 1 : xctr + xhalfwidth + thickness : dot_spacing,
+    ] = color
     # Left
-    img[yctr-yhalfwidth-thickness+1:yctr+yhalfwidth+thickness,
-        xctr-xhalfwidth-thickness+1:xctr-xhalfwidth+1:dot_spacing] = color
+    img[
+        yctr - yhalfwidth - thickness + 1 : yctr + yhalfwidth + thickness,
+        xctr - xhalfwidth - thickness + 1 : xctr - xhalfwidth + 1 : dot_spacing,
+    ] = color
     # Right
-    img[yctr-yhalfwidth-thickness+1:yctr+yhalfwidth+thickness,
-        xctr+xhalfwidth:xctr+xhalfwidth+thickness:dot_spacing] = color
+    img[
+        yctr - yhalfwidth - thickness + 1 : yctr + yhalfwidth + thickness,
+        xctr + xhalfwidth : xctr + xhalfwidth + thickness : dot_spacing,
+    ] = color
 
 
-def draw_circle(img: NDArrayType[NPType],
-                color: int | float | list[int | float] | tuple[int | float, ...],
-                x0: int,
-                y0: int,
-                r: int,
-                thickness: int = 1) -> None:
+def draw_circle(
+    img: NDArrayType[NPType],
+    color: int | float | list[int | float] | tuple[int | float, ...],
+    x0: int,
+    y0: int,
+    r: int,
+    thickness: int = 1,
+) -> None:
     """Draw a circle using Bresenham's algorithm with the given thickness.
 
     Parameters:
@@ -762,15 +793,17 @@ def draw_circle(img: NDArrayType[NPType],
         thickness: The thickness (total width) of the circle.
     """
 
-    def _draw_circle(img: NDArrayType[NPType],
-                     color: int | float | list[int | float] | tuple[int | float, ...],
-                     x0: int,
-                     y0: int,
-                     r: float | np.floating[Any],
-                     bigpixel: bool) -> None:
+    def _draw_circle(
+        img: NDArrayType[NPType],
+        color: int | float | list[int | float] | tuple[int | float, ...],
+        x0: int,
+        y0: int,
+        r: float | np.floating[Any],
+        bigpixel: bool,
+    ) -> None:
         x = -r
         y = 0
-        err = 2-2*r
+        err = 2 - 2 * r
         if bigpixel:
             off_list = [-1, 0, 1]
         else:
@@ -779,25 +812,21 @@ def draw_circle(img: NDArrayType[NPType],
         while x < 0:
             for xoff in off_list:
                 for yoff in off_list:
-                    if (0 <= y0+y+yoff < img.shape[0] and
-                            0 <= x0-x+xoff < img.shape[1]):
-                        img[int(y0+y+yoff), int(x0-x+xoff)] = color
-                    if (0 <= y0-x+yoff < img.shape[0] and
-                            0 <= x0-y+xoff < img.shape[1]):
-                        img[int(y0-x+yoff), int(x0-y+xoff)] = color
-                    if (0 <= y0-y+yoff < img.shape[0] and
-                            0 <= x0+x+xoff < img.shape[1]):
-                        img[int(y0-y+yoff), int(x0+x+xoff)] = color
-                    if (0 <= y0+x+yoff < img.shape[0] and
-                            0 <= x0+y+xoff < img.shape[1]):
-                        img[int(y0+x+yoff), int(x0+y+xoff)] = color
+                    if 0 <= y0 + y + yoff < img.shape[0] and 0 <= x0 - x + xoff < img.shape[1]:
+                        img[int(y0 + y + yoff), int(x0 - x + xoff)] = color
+                    if 0 <= y0 - x + yoff < img.shape[0] and 0 <= x0 - y + xoff < img.shape[1]:
+                        img[int(y0 - x + yoff), int(x0 - y + xoff)] = color
+                    if 0 <= y0 - y + yoff < img.shape[0] and 0 <= x0 + x + xoff < img.shape[1]:
+                        img[int(y0 - y + yoff), int(x0 + x + xoff)] = color
+                    if 0 <= y0 + x + yoff < img.shape[0] and 0 <= x0 + y + xoff < img.shape[1]:
+                        img[int(y0 + x + yoff), int(x0 + y + xoff)] = color
             r = err
             if r <= y:
-                y = y+1
-                err = err+y*2+1
+                y = y + 1
+                err = err + y * 2 + 1
             if r > x or err > y:
-                x = x+1
-                err = err+x*2+1
+                x = x + 1
+                err = err + x * 2 + 1
 
     x0 = int(x0)
     y0 = int(y0)
@@ -812,14 +841,15 @@ def draw_circle(img: NDArrayType[NPType],
         return
 
     # This is not perfect, but it's simple
-    for r_offset in np.arange(-(thickness-2)/2., (thickness-2)/2.+0.5, 0.5):
-        _draw_circle(img, color, x0, y0, r+r_offset, True)
+    for r_offset in np.arange(-(thickness - 2) / 2.0, (thickness - 2) / 2.0 + 0.5, 0.5):
+        _draw_circle(img, color, x0, y0, r + r_offset, True)
 
-#==============================================================================
+
+# ==============================================================================
 #
 # MISC
 #
-#==============================================================================
+# ==============================================================================
 
 # def hsv_to_rgb(data: NDArrayType[NPType]) -> NDArrayType[NPType]:
 #     """Convert an array [...,3] of HSV values into RGB values.

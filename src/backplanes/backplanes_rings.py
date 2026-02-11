@@ -7,10 +7,9 @@ from nav.config import Config
 from nav.obs import ObsSnapshot
 
 
-def create_ring_backplanes(snapshot: ObsSnapshot,
-                           config: Config,
-                           *,
-                           logger: PdsLogger) -> dict[str, Any] | None:
+def create_ring_backplanes(
+    snapshot: ObsSnapshot, config: Config, *, logger: PdsLogger
+) -> dict[str, Any] | None:
     """Create configured ring backplanes over the full image, if applicable.
 
     Returns an empty dict if no rings are configured or closest planet is None.

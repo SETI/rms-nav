@@ -1,15 +1,17 @@
-from pathlib import Path
 import sys
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 from PIL import Image
 
 # Add the repository root to the path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from nav.config import DEFAULT_CONFIG
-
 from nav.inst import inst_name_to_class
+
+from nav.config import DEFAULT_CONFIG
 from nav.nav_master import NavMaster
+
 
 def main():
     DEFAULT_CONFIG.read_config()
@@ -31,14 +33,14 @@ def main():
     # inst_id = 'gossi'; URL = 'https://opus.pds-rings.seti.org/holdings/volumes/GO_0xxx/GO_0017/C3/IO/C0368641300R.IMG'  # Io
     # inst_id = 'gossi'; URL = 'https://opus.pds-rings.seti.org/holdings/volumes/GO_0xxx/GO_0021/C21/IO/C0506465900R.IMG'  # Io
 
-
     # inst_id = 'vgiss'; URL = 'https://opus.pds-rings.seti.org/holdings/volumes/VGISS_5xxx/VGISS_5112/DATA/C16101XX/C1610143_GEOMED.IMG'; bodies = ['EUROPA', 'IO', 'JUPITER']
     # inst_id = 'vgiss'; URL = 'https://opus.pds-rings.seti.org/holdings/volumes/VGISS_8xxx/VGISS_8209/DATA/C11661XX/C1166148_GEOMED.IMG'  # Neptune crescent with Triton hidden on top
     # inst_id = 'vgiss'; URL = 'https://opus.pds-rings.seti.org/holdings/volumes/VGISS_8xxx/VGISS_8208/DATA/C11488XX/C1148852_GEOMED.IMG'  # Triton next to Neptune
 
     # inst_id = 'nhlorri'; URL = 'https://opus.pds-rings.seti.org/holdings/volumes/NHxxLO_xxxx/NHPELO_2001/data/20150625_029751/lor_0297516223_0x633_sci.fit'; bodies = ['CHARON', 'PLUTO']
     # inst_id = 'nhlorri'; URL = 'https://opus.pds-rings.seti.org/holdings/volumes/NHxxLO_xxxx/NHPELO_1001/data/20150625_029751/lor_0297516223_0x633_eng.fit'; bodies = ['CHARON', 'PLUTO', 'STYX']
-    inst_id = 'nhlorri'; URL = 'https://opus.pds-rings.seti.org/holdings/volumes/NHxxLO_xxxx/NHPELO_2001/data/20150707_029861/lor_0298615084_0x630_sci.fit'
+    inst_id = 'nhlorri'
+    URL = 'https://opus.pds-rings.seti.org/holdings/volumes/NHxxLO_xxxx/NHPELO_2001/data/20150707_029861/lor_0298615084_0x630_sci.fit'
 
     inst_class = inst_name_to_class(inst_id)
     s = inst_class.from_file(URL)

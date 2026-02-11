@@ -6,6 +6,11 @@ nav.nav_model
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: nav.nav_model.nav_model_result
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: nav.nav_model.nav_model_stars
    :members:
    :undoc-members:

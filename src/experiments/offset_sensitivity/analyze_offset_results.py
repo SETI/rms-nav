@@ -9,15 +9,13 @@ in the metadata, and creates heatmaps showing the U and V offset errors.
 import argparse
 import json
 import re
-from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
-
 from filecache import FCPath
 
 
-def parse_filename(filename: str) -> Optional[tuple[str, float, float]]:
+def parse_filename(filename: str) -> tuple[str, float, float] | None:
     """Parse a metadata filename to extract template name and offsets.
 
     Expected format: {template_name}_{u_offset}_{v_offset}_metadata.json
@@ -32,7 +30,7 @@ def parse_filename(filename: str) -> Optional[tuple[str, float, float]]:
         print(f'Warning: Filename does not end with "_metadata.json": {filename}')
         return None
 
-    base = filename[:-len('_metadata.json')]
+    base = filename[: -len('_metadata.json')]
 
     # Try to find the last two numbers (offsets) in the filename
     # Pattern: name followed by _number_number
@@ -56,7 +54,7 @@ def parse_filename(filename: str) -> Optional[tuple[str, float, float]]:
 
 def collect_results(
     nav_results_root: FCPath,
-    template_name_filter: Optional[str] = None,
+    template_name_filter: str | None = None,
 ) -> dict[tuple[float, float], tuple[float, float]]:
     """Collect results from metadata files.
 
@@ -144,10 +142,10 @@ def collect_results(
 
 def filter_results(
     results: dict[tuple[float, float], tuple[float, float]],
-    u_min: Optional[float] = None,
-    u_max: Optional[float] = None,
-    v_min: Optional[float] = None,
-    v_max: Optional[float] = None,
+    u_min: float | None = None,
+    u_max: float | None = None,
+    v_min: float | None = None,
+    v_max: float | None = None,
 ) -> dict[tuple[float, float], tuple[float, float]]:
     """Filter results by U and V offset ranges.
 
@@ -177,7 +175,7 @@ def filter_results(
 
 def create_heatmaps(
     results: dict[tuple[float, float], tuple[float, float]],
-    output_path: Optional[FCPath] = None,
+    output_path: FCPath | None = None,
     show: str = 'both',
 ) -> None:
     """Create heatmaps showing U and V offset errors.
@@ -192,8 +190,8 @@ def create_heatmaps(
         return
 
     # Extract all unique U and V values
-    u_values = sorted({u for u, v in results.keys()})
-    v_values = sorted({v for u, v in results.keys()})
+    u_values = sorted({u for u, v in results})
+    v_values = sorted({v for u, v in results})
 
     # Handle edge case: pcolormesh needs at least 2 points in each dimension
     # Add a small padding if there's only one value, keeping the original value
@@ -214,11 +212,15 @@ def create_heatmaps(
     # Fill in error values
     for (orig_u, orig_v), (found_u, found_v) in results.items():
         # Find indices (handle case where we padded single values)
-        u_idx = u_values.index(orig_u) if orig_u in u_values else min(
-            range(len(u_values)), key=lambda i: abs(u_values[i] - orig_u)
+        u_idx = (
+            u_values.index(orig_u)
+            if orig_u in u_values
+            else min(range(len(u_values)), key=lambda i: abs(u_values[i] - orig_u))
         )
-        v_idx = v_values.index(orig_v) if orig_v in v_values else min(
-            range(len(v_values)), key=lambda i: abs(v_values[i] - orig_v)
+        v_idx = (
+            v_values.index(orig_v)
+            if orig_v in v_values
+            else min(range(len(v_values)), key=lambda i: abs(v_values[i] - orig_v))
         )
 
         # Compute errors
@@ -348,8 +350,12 @@ def main() -> None:
     results = collect_results(nav_results_root, args.template_name)
 
     # Filter results by U/V ranges if specified
-    if (args.u_min is not None or args.u_max is not None or
-            args.v_min is not None or args.v_max is not None):
+    if (
+        args.u_min is not None
+        or args.u_max is not None
+        or args.v_min is not None
+        or args.v_max is not None
+    ):
         results = filter_results(
             results,
             u_min=args.u_min,

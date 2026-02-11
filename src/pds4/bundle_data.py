@@ -3,9 +3,9 @@ import shutil
 from pathlib import Path
 from typing import Any, cast
 
+import pdstemplate
 from filecache import FCPath
 from pdslogger import PdsLogger
-import pdstemplate
 
 from nav.dataset.dataset import DataSet, ImageFiles
 from nav.support.file import json_as_string
@@ -18,7 +18,8 @@ def generate_bundle_data_files(
     nav_results_root: FCPath,
     backplane_results_root: FCPath,
     bundle_results_root: FCPath,
-    logger: PdsLogger) -> None:
+    logger: PdsLogger,
+) -> None:
     """Generate PDS4 bundle data files for a single image batch.
 
     Parameters:
@@ -32,7 +33,8 @@ def generate_bundle_data_files(
 
     if len(image_files.image_files) != 1:
         raise ValueError(
-            f'Expected exactly one image per batch; got {len(image_files.image_files)}')
+            f'Expected exactly one image per batch; got {len(image_files.image_files)}'
+        )
 
     image_file = image_files.image_files[0]
     image_path = image_file.image_file_path.absolute()
@@ -40,9 +42,10 @@ def generate_bundle_data_files(
 
     metadata_file = nav_results_root / (results_path_stub + '_metadata.json')
     backplane_metadata_file = backplane_results_root / (
-        results_path_stub + '_backplane_metadata.json')
+        results_path_stub + '_backplane_metadata.json'
+    )
 
-    with logger.open(f'Generating PDS4 bundle data files for {str(image_path)}'):
+    with logger.open(f'Generating PDS4 bundle data files for {image_path!s}'):
         # Read navigation metadata
         metadata_text = metadata_file.read_text()
         nav_metadata = cast(dict[str, Any], json.loads(metadata_text))
@@ -50,9 +53,12 @@ def generate_bundle_data_files(
         status = nav_metadata.get('status', None)
         if status != 'success':
             # TODO Figure out what to do with non-navigated images
-            logger.warning('Skipping bundle generation for "%s": status=%s error=%s',
-                           image_path, status,
-                           nav_metadata.get('status_error', 'unknown'))
+            logger.warning(
+                'Skipping bundle generation for "%s": status=%s error=%s',
+                image_path,
+                status,
+                nav_metadata.get('status_error', 'unknown'),
+            )
             return
 
         # Read backplane metadata

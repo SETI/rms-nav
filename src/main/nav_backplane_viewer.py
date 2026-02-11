@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 import argparse
-from collections.abc import Callable
 import os
 import sys
-from typing import Any, Optional, cast
+from collections.abc import Callable
+from typing import Any, cast
 
-from astropy.io import fits
 import cspyce
-from filecache import FileCache, FCPath
 import numpy as np
+from astropy.io import fits
+from filecache import FCPath, FileCache
 from PIL import Image
-from PyQt6.QtCore import Qt, QPoint, QTimer, pyqtSignal, QObject
-from PyQt6.QtGui import QImage, QPixmap, QMouseEvent, QWheelEvent
+from PyQt6.QtCore import QObject, QPoint, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QImage, QMouseEvent, QPixmap, QWheelEvent
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -19,11 +19,11 @@ from PyQt6.QtWidgets import (
     QDialog,
     QDoubleSpinBox,
     QFileDialog,
-    QMessageBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QRadioButton,
     QScrollArea,
@@ -38,29 +38,33 @@ from PyQt6.QtWidgets import (
 package_source_path = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, package_source_path)
 
-from nav.config import (DEFAULT_CONFIG, DEFAULT_LOGGER, Config,
-                        get_backplane_results_root,
-                        get_nav_results_root)
-from nav.dataset import (dataset_names,
-                         dataset_name_to_class,
-                         dataset_name_to_inst_name)
-from nav.dataset.dataset import DataSet, ImageFiles
-from nav.obs import inst_name_to_obs_class, ObsSnapshot
-from nav.ui.common import ZoomPanController, build_stretch_controls
-
 import matplotlib.cm as cm
 from matplotlib import colormaps as mpl_colormaps
+
+from nav.config import (
+    DEFAULT_CONFIG,
+    DEFAULT_LOGGER,
+    Config,
+    get_backplane_results_root,
+    get_nav_results_root,
+)
+from nav.dataset import dataset_name_to_class, dataset_name_to_inst_name, dataset_names
+from nav.dataset.dataset import DataSet, ImageFiles
+from nav.obs import ObsSnapshot, inst_name_to_obs_class
+from nav.ui.common import ZoomPanController, build_stretch_controls
 
 
 class _ImageLabel(QLabel):
     """Event-forwarding image label; behavior copied from create_simulated_body_model."""
 
-    def __init__(self,
-                 parent: Optional[QWidget],
-                 on_press: Callable[[QMouseEvent], None],
-                 on_move: Callable[[QMouseEvent], None],
-                 on_release: Callable[[QMouseEvent], None],
-                 on_wheel: Callable[[QWheelEvent], None]) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None,
+        on_press: Callable[[QMouseEvent], None],
+        on_move: Callable[[QMouseEvent], None],
+        on_release: Callable[[QMouseEvent], None],
+        on_wheel: Callable[[QWheelEvent], None],
+    ) -> None:
         super().__init__(parent)
         self._on_press = on_press
         self._on_move = on_move
@@ -125,8 +129,7 @@ def _rad_to_deg_if_units(name: str, units: str | None, arr: np.ndarray) -> np.nd
     return arr
 
 
-def _absolute_range_for(name: str,
-                        arr_deg_or_native: np.ndarray) -> tuple[float, float]:
+def _absolute_range_for(name: str, arr_deg_or_native: np.ndarray) -> tuple[float, float]:
     lname = name.lower()
     if 'longitude' in lname:
         return (0.0, 360.0)
@@ -158,9 +161,9 @@ def _load_colormap(cmap_name: Any) -> Any:
     return mpl_colormaps.get(str(cmap_name))
 
 
-def _alpha_blend_layer(dst_rgba: np.ndarray,
-                       src_rgb: np.ndarray,
-                       alpha_mask: np.ndarray) -> np.ndarray:
+def _alpha_blend_layer(
+    dst_rgba: np.ndarray, src_rgb: np.ndarray, alpha_mask: np.ndarray
+) -> np.ndarray:
     """Alpha-blend src_rgb over dst_rgba using per-pixel alpha in [0,1].
 
     dst_rgba is modified in-place and also returned.
@@ -171,8 +174,7 @@ def _alpha_blend_layer(dst_rgba: np.ndarray,
     a = alpha_mask.astype(np.float32)
     out_a = a + dst_a * (1.0 - a)
     with np.errstate(invalid='ignore'):
-        out_rgb = (src_rgb_f * a[..., None] +
-                   dst_rgb * dst_a[..., None] * (1.0 - a[..., None]))
+        out_rgb = src_rgb_f * a[..., None] + dst_rgb * dst_a[..., None] * (1.0 - a[..., None])
         mask = out_a > 0
         out_rgb[mask] = out_rgb[mask] / out_a[mask, None]
         out_rgb[~mask] = 0.0
@@ -184,14 +186,16 @@ def _alpha_blend_layer(dst_rgba: np.ndarray,
 class NavBackplaneViewer(QDialog):
     """Interactive backplane viewer with dataset-driven file discovery."""
 
-    def __init__(self,
-                 *,
-                 dataset: DataSet,
-                 inst_name: str,
-                 image_groups: list[ImageFiles],
-                 nav_results_root: FCPath,
-                 backplane_results_root: FCPath,
-                 config: Optional[Config]) -> None:
+    def __init__(
+        self,
+        *,
+        dataset: DataSet,
+        inst_name: str,
+        image_groups: list[ImageFiles],
+        nav_results_root: FCPath,
+        backplane_results_root: FCPath,
+        config: Config | None,
+    ) -> None:
         super().__init__(None)
         self.setWindowTitle('Backplane Viewer')
         # Minimum size: scroll area (900x800) + right panel (~400) + margins
@@ -211,12 +215,12 @@ class NavBackplaneViewer(QDialog):
         self._current_index = 0
 
         # Image data
-        self._img_float: Optional[np.ndarray] = None
-        self._summary_rgba: Optional[np.ndarray] = None  # HxWx4 uint8
+        self._img_float: np.ndarray | None = None
+        self._summary_rgba: np.ndarray | None = None  # HxWx4 uint8
         self._fits_hdus: list[fits.ImageHDU | fits.PrimaryHDU] = []
-        self._body_id_map: Optional[np.ndarray] = None
+        self._body_id_map: np.ndarray | None = None
         # one per HDU (excluding primary and BODY_ID_MAP)
-        self._last_rgba: Optional[np.ndarray] = None
+        self._last_rgba: np.ndarray | None = None
 
         # Stretch controls
         self._black = 0.0
@@ -281,8 +285,9 @@ class NavBackplaneViewer(QDialog):
         self._scroll.setStyleSheet('background-color: black;')
         self._scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self._label = _ImageLabel(self, self._on_press, self._on_move,
-                                  self._on_release, self._on_wheel)
+        self._label = _ImageLabel(
+            self, self._on_press, self._on_move, self._on_release, self._on_wheel
+        )
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._label.setStyleSheet('background-color: black;')
         self._label.setMouseTracking(True)
@@ -327,11 +332,13 @@ class NavBackplaneViewer(QDialog):
         summary_alpha_min_label = QLabel('0.0')
         summary_alpha_min_label.setFixedWidth(30)
         summary_alpha_min_label.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
         summary_alpha_max_label = QLabel('1.0')
         summary_alpha_max_label.setFixedWidth(35)
         summary_alpha_max_label.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
         self._summary_alpha_slider = QSlider(Qt.Orientation.Horizontal)
         self._summary_alpha_slider.setRange(0, 1000)  # 0.0 to 1.0 with 0.001 steps
         self._summary_alpha_slider.setValue(500)  # 0.5
@@ -372,11 +379,13 @@ class NavBackplaneViewer(QDialog):
         body_id_alpha_min_label = QLabel('0.0')
         body_id_alpha_min_label.setFixedWidth(30)
         body_id_alpha_min_label.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
         body_id_alpha_max_label = QLabel('1.0')
         body_id_alpha_max_label.setFixedWidth(35)
         body_id_alpha_max_label.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
         self._body_id_alpha = QSlider(Qt.Orientation.Horizontal)
         self._body_id_alpha.setRange(0, 1000)  # 0.0 to 1.0 with 0.001 steps
         self._body_id_alpha.setValue(500)  # 0.5
@@ -456,11 +465,13 @@ class NavBackplaneViewer(QDialog):
         body_alpha_min_label = QLabel('0.0')
         body_alpha_min_label.setFixedWidth(30)
         body_alpha_min_label.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
         body_alpha_max_label = QLabel('1.0')
         body_alpha_max_label.setFixedWidth(35)
         body_alpha_max_label.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
         self._body_alpha = QSlider(Qt.Orientation.Horizontal)
         self._body_alpha.setRange(0, 1000)  # 0.0 to 1.0 with 0.001 steps
         self._body_alpha.setValue(500)  # 0.5
@@ -540,11 +551,13 @@ class NavBackplaneViewer(QDialog):
         ring_alpha_min_label = QLabel('0.0')
         ring_alpha_min_label.setFixedWidth(30)
         ring_alpha_min_label.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
         ring_alpha_max_label = QLabel('1.0')
         ring_alpha_max_label.setFixedWidth(35)
         ring_alpha_max_label.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
         self._ring_alpha = QSlider(Qt.Orientation.Horizontal)
         self._ring_alpha.setRange(0, 1000)  # 0.0 to 1.0 with 0.001 steps
         self._ring_alpha.setValue(500)  # 0.5
@@ -691,12 +704,14 @@ class NavBackplaneViewer(QDialog):
                     rgba = im.convert('RGBA')
                     self._summary_rgba = np.array(rgba)
                 if self._summary_rgba is not None:
-                    self._logger.info('Loaded summary overlay "%s" size=%dx%d',
-                                      png_local,
-                                      self._summary_rgba.shape[1], self._summary_rgba.shape[0])
+                    self._logger.info(
+                        'Loaded summary overlay "%s" size=%dx%d',
+                        png_local,
+                        self._summary_rgba.shape[1],
+                        self._summary_rgba.shape[0],
+                    )
             except Exception:
-                self._logger.exception('Failed to load summary overlay from %s',
-                                       summary_png_file)
+                self._logger.exception('Failed to load summary overlay from %s', summary_png_file)
                 self._summary_rgba = None
         # Enable/disable summary checkbox based on availability
         has_summary = self._summary_rgba is not None
@@ -714,8 +729,11 @@ class NavBackplaneViewer(QDialog):
             local_path = cast(str, fits_file.get_local_path())
             with fits.open(local_path) as hdul:
                 self._fits_hdus = list(hdul)
-                self._logger.info('Opened backplanes FITS file "%s" with %d HDUs',
-                                  local_path, len(self._fits_hdus))
+                self._logger.info(
+                    'Opened backplanes FITS file "%s" with %d HDUs',
+                    local_path,
+                    len(self._fits_hdus),
+                )
                 # Parse HDUs: locate BODY_ID_MAP and backplanes
                 for hdu in self._fits_hdus[1:]:
                     name = (hdu.name or '').upper()
@@ -723,16 +741,18 @@ class NavBackplaneViewer(QDialog):
                         try:
                             self._body_id_map = np.asarray(hdu.data, dtype=np.int32)
                         except Exception:
-                            self._logger.exception('Failed to parse BODY_ID_MAP from HDU '
-                                                   f'for {fits_file}')
+                            self._logger.exception(
+                                f'Failed to parse BODY_ID_MAP from HDU for {fits_file}'
+                            )
                             self._body_id_map = None
                     else:
-                        arr: Optional[np.ndarray] = None
+                        arr: np.ndarray | None = None
                         try:
                             arr = np.asarray(hdu.data, dtype=np.float64)
                         except Exception:
-                            self._logger.exception(f'Failed to parse {name} from HDU '
-                                                   f'for {fits_file}')
+                            self._logger.exception(
+                                f'Failed to parse {name} from HDU for {fits_file}'
+                            )
                             arr = None
                         if arr is None:
                             continue
@@ -747,7 +767,8 @@ class NavBackplaneViewer(QDialog):
                 self,
                 'FITS File Not Found',
                 f'Backplane FITS file not found:\n{fits_file}\n\n'
-                f'All backplane data will be unavailable.')
+                'All backplane data will be unavailable.',
+            )
             self._logger.warning('FITS file not found: %s', fits_file)
             self._fits_hdus = []
             self._bp_body_map.clear()
@@ -801,10 +822,9 @@ class NavBackplaneViewer(QDialog):
         try:
             qimg.save(path, 'PNG')
         except Exception as e:
-            QMessageBox.critical(self, 'Save Error',
-                                 f'Failed to save PNG to:\n{path}\n\n{e}')
+            QMessageBox.critical(self, 'Save Error', f'Failed to save PNG to:\n{path}\n\n{e}')
 
-    def _render_full_rgba(self) -> Optional[np.ndarray]:
+    def _render_full_rgba(self) -> np.ndarray | None:
         if self._img_float is None:
             return None
         h, w = self._img_float.shape
@@ -855,14 +875,17 @@ class NavBackplaneViewer(QDialog):
         # Body and Ring backplanes (shared helper)
         # Body
         body_name = self._body_combo.currentText()
-        if (self._body_show.isChecked() and body_name in self._bp_body_map
-                and body_name != 'None'):
+        if self._body_show.isChecked() and body_name in self._bp_body_map and body_name != 'None':
             arr, units = self._bp_body_map[body_name]
             if arr.shape == (h, w):
-                valid = np.isfinite(arr) & ((self._body_id_map != 0)
-                                            if self._body_id_map is not None else True)
+                valid = np.isfinite(arr) & (
+                    (self._body_id_map != 0) if self._body_id_map is not None else True
+                )
                 rgba = self._composite_scalar_layer(
-                    rgba, arr, units, body_name,
+                    rgba,
+                    arr,
+                    units,
+                    body_name,
                     valid_mask=valid,
                     mode=('Absolute' if self._body_mode_abs.isChecked() else 'Relative'),
                     alpha=float(self._body_alpha.value()) / 1000.0,
@@ -870,14 +893,17 @@ class NavBackplaneViewer(QDialog):
                 )
         # Ring
         ring_name = self._ring_combo.currentText()
-        if (self._ring_show.isChecked() and ring_name in self._bp_ring_map
-                and ring_name != 'None'):
+        if self._ring_show.isChecked() and ring_name in self._bp_ring_map and ring_name != 'None':
             arr, units = self._bp_ring_map[ring_name]
             if arr.shape == (h, w):
-                valid = np.isfinite(arr) & ((self._body_id_map == 0)
-                                            if self._body_id_map is not None else True)
+                valid = np.isfinite(arr) & (
+                    (self._body_id_map == 0) if self._body_id_map is not None else True
+                )
                 rgba = self._composite_scalar_layer(
-                    rgba, arr, units, ring_name,
+                    rgba,
+                    arr,
+                    units,
+                    ring_name,
                     valid_mask=valid,
                     mode=('Absolute' if self._ring_mode_abs.isChecked() else 'Relative'),
                     alpha=float(self._ring_alpha.value()) / 1000.0,
@@ -928,16 +954,18 @@ class NavBackplaneViewer(QDialog):
         self._body_combo.blockSignals(False)
         self._ring_combo.blockSignals(False)
 
-    def _composite_scalar_layer(self,
-                                rgba: np.ndarray,
-                                arr: np.ndarray,
-                                units: str,
-                                name: str,
-                                *,
-                                valid_mask: np.ndarray,
-                                mode: str,
-                                alpha: float,
-                                cmap_name: Any) -> np.ndarray:
+    def _composite_scalar_layer(
+        self,
+        rgba: np.ndarray,
+        arr: np.ndarray,
+        units: str,
+        name: str,
+        *,
+        valid_mask: np.ndarray,
+        mode: str,
+        alpha: float,
+        cmap_name: Any,
+    ) -> np.ndarray:
         h, w, _ = rgba.shape
         arr_disp = _rad_to_deg_if_units(name, units, arr)
         if mode == 'Absolute':
@@ -1138,15 +1166,17 @@ class NavBackplaneViewer(QDialog):
         self._compose_and_display()
 
     def _toggle_zoom_sharp(self, state: Any) -> None:
-        self._zoom_sharp = (state == int(cast(int, Qt.CheckState.Checked.value)))
+        self._zoom_sharp = state == int(cast(int, Qt.CheckState.Checked.value))
         self._compose_and_display()
 
-    def _zoom_at_point(self,
-                       factor: float,
-                       viewport_x: int,
-                       viewport_y: int,
-                       scaled_x: float,
-                       scaled_y: float) -> None:
+    def _zoom_at_point(
+        self,
+        factor: float,
+        viewport_x: int,
+        viewport_y: int,
+        scaled_x: float,
+        scaled_y: float,
+    ) -> None:
         # Delegate to controller's internal method via wheel interface
         # Simulate a wheel event-based zoom by computing factor and calling controller
         old_zoom = self._zoom_factor
@@ -1185,8 +1215,9 @@ class NavBackplaneViewer(QDialog):
                 dst_a = rgba[..., 3].astype(np.float32) / 255.0
                 out_a = s_a + dst_a * (1.0 - s_a)
                 with np.errstate(invalid='ignore'):
-                    out_rgb = (s_rgb * s_a[..., None] +
-                               dst_rgb * dst_a[..., None] * (1.0 - s_a[..., None]))
+                    out_rgb = s_rgb * s_a[..., None] + dst_rgb * dst_a[..., None] * (
+                        1.0 - s_a[..., None]
+                    )
                     mask = out_a > 0
                     out_rgb[mask] = out_rgb[mask] / out_a[mask, None]
                     out_rgb[~mask] = 0.0
@@ -1199,8 +1230,7 @@ class NavBackplaneViewer(QDialog):
             valid = idmap > 0
             ids = idmap.astype(np.int32)
             if np.any(valid):
-                mode_id = 'Absolute' if (getattr(self, '_body_id_mode_abs', None) and
-                                         self._body_id_mode_abs.isChecked()) else 'Relative'
+                mode_id = 'Absolute' if self._body_id_mode_abs.isChecked() else 'Relative'
                 if mode_id == 'Absolute':
                     id_min = 0
                     id_max = int(np.max(ids))
@@ -1236,8 +1266,7 @@ class NavBackplaneViewer(QDialog):
                 dst_a = rgba[..., 3].astype(np.float32) / 255.0
                 out_a = a + dst_a * (1.0 - a)
                 src_rgb = rgb.astype(np.float32)
-                out_rgb = (src_rgb * a[..., None] +
-                           dst_rgb * dst_a[..., None] * (1.0 - a[..., None]))
+                out_rgb = src_rgb * a[..., None] + dst_rgb * dst_a[..., None] * (1.0 - a[..., None])
                 mask = out_a > 0
                 out_rgb[mask] = out_rgb[mask] / out_a[mask, None]
                 out_rgb[~mask] = 0.0
@@ -1249,15 +1278,19 @@ class NavBackplaneViewer(QDialog):
         if self._body_show.isChecked() and body_name in self._bp_body_map and body_name != 'None':
             arr, units = self._bp_body_map[body_name]
             if arr.shape == (h, w):
-                valid = np.isfinite(arr) & ((self._body_id_map != 0)
-                                            if self._body_id_map is not None else True)
-                rgba = self._composite_scalar_layer(rgba, arr, units, body_name,
-                                                    valid_mask=valid,
-                                                    mode=('Absolute'
-                                                          if self._body_mode_abs.isChecked()
-                                                          else 'Relative'),
-                                                    alpha=float(self._body_alpha.value()) / 1000.0,
-                                                    cmap_name=self._body_cmap.currentData())
+                valid = np.isfinite(arr) & (
+                    (self._body_id_map != 0) if self._body_id_map is not None else True
+                )
+                rgba = self._composite_scalar_layer(
+                    rgba,
+                    arr,
+                    units,
+                    body_name,
+                    valid_mask=valid,
+                    mode=('Absolute' if self._body_mode_abs.isChecked() else 'Relative'),
+                    alpha=float(self._body_alpha.value()) / 1000.0,
+                    cmap_name=self._body_cmap.currentData(),
+                )
 
         # Selected Ring backplane
         ring_name = self._ring_combo.currentText()
@@ -1265,30 +1298,43 @@ class NavBackplaneViewer(QDialog):
             arr, units = self._bp_ring_map[ring_name]
             if arr.shape == (h, w):
                 valid = np.isfinite(arr) & (
-                    (self._body_id_map == 0)
-                    if self._body_id_map is not None
-                    else True
+                    (self._body_id_map == 0) if self._body_id_map is not None else True
                 )
-                rgba = self._composite_scalar_layer(rgba, arr, units, ring_name,
-                                                    valid_mask=valid,
-                                                    mode=('Absolute'
-                                                          if self._ring_mode_abs.isChecked()
-                                                          else 'Relative'),
-                                                    alpha=float(self._ring_alpha.value()) / 1000.0,
-                                                    cmap_name=self._ring_cmap.currentData())
+                rgba = self._composite_scalar_layer(
+                    rgba,
+                    arr,
+                    units,
+                    ring_name,
+                    valid_mask=valid,
+                    mode=('Absolute' if self._ring_mode_abs.isChecked() else 'Relative'),
+                    alpha=float(self._ring_alpha.value()) / 1000.0,
+                    cmap_name=self._ring_cmap.currentData(),
+                )
 
         # Scale/translate for zoom/pan
         # Ensure buffer lifetime while QImage uses it
         self._last_rgba = rgba
-        qimg = QImage(bytes(self._last_rgba.data), w, h,
-                      self._last_rgba.strides[0], QImage.Format.Format_RGBA8888)
+        qimg = QImage(
+            bytes(self._last_rgba.data),
+            w,
+            h,
+            self._last_rgba.strides[0],
+            QImage.Format.Format_RGBA8888,
+        )
         pixmap = QPixmap.fromImage(qimg)
         if self._zoom_factor != 1.0:
             # Prefer smooth transform only when not sharp
-            transform_mode = (Qt.TransformationMode.FastTransformation
-                              if self._zoom_sharp else Qt.TransformationMode.SmoothTransformation)
-            pixmap = pixmap.scaled(int(w * self._zoom_factor), int(h * self._zoom_factor),
-                                   Qt.AspectRatioMode.IgnoreAspectRatio, transform_mode)
+            transform_mode = (
+                Qt.TransformationMode.FastTransformation
+                if self._zoom_sharp
+                else Qt.TransformationMode.SmoothTransformation
+            )
+            pixmap = pixmap.scaled(
+                int(w * self._zoom_factor),
+                int(h * self._zoom_factor),
+                Qt.AspectRatioMode.IgnoreAspectRatio,
+                transform_mode,
+            )
         # Pan by setting margins via QLabel alignment offset approximation: use contents margins
         self._label.setPixmap(pixmap)
         # Ensure label matches pixmap size so it is not displayed tiny
@@ -1320,15 +1366,19 @@ class NavBackplaneViewer(QDialog):
         val = float(self._img_float[v, u])
         self._status_label.setText(f'V, U: {v}, {u}  Value: {val:.6g}')
         # Update BODY_ID value regardless of visibility
-        if (self._body_id_map is not None and
-            0 <= v < self._body_id_map.shape[0] and 0 <= u < self._body_id_map.shape[1]):
+        if (
+            self._body_id_map is not None
+            and 0 <= v < self._body_id_map.shape[0]
+            and 0 <= u < self._body_id_map.shape[1]
+        ):
             bid = int(self._body_id_map[v, u])
             try:
                 bid_name = cspyce.bodc2n(bid)
             except Exception:
                 bid_name = 'unknown'
-            self._body_id_val_label.setText(f'Object: {bid_name} ({bid})'
-                                            if bid != 0 else 'Object: --')
+            self._body_id_val_label.setText(
+                f'Object: {bid_name} ({bid})' if bid != 0 else 'Object: --'
+            )
         else:
             self._body_id_val_label.setText('Object: --')
         # Update selected body/ring labels
@@ -1402,17 +1452,29 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
 
     env = cmdparser.add_argument_group('Environment')
     env.add_argument(
-        '--config-file', action='append', default=None,
-        help='Configuration override file(s) (default: ./nav_default_config.yaml)')
+        '--config-file',
+        action='append',
+        default=None,
+        help='Configuration override file(s) (default: ./nav_default_config.yaml)',
+    )
     env.add_argument(
-        '--pds3-holdings-root', type=str, default=None,
-        help='Root directory of PDS3 holdings; overrides env/config')
+        '--pds3-holdings-root',
+        type=str,
+        default=None,
+        help='Root directory of PDS3 holdings; overrides env/config',
+    )
     env.add_argument(
-        '--nav-results-root', type=str, default=None,
-        help='Root containing navigation outputs (metadata, summary.png)')
+        '--nav-results-root',
+        type=str,
+        default=None,
+        help='Root containing navigation outputs (metadata, summary.png)',
+    )
     env.add_argument(
-        '--backplane-results-root', type=str, default=None,
-        help='Root containing backplane outputs (FITS, XML)')
+        '--backplane-results-root',
+        type=str,
+        default=None,
+        help='Root containing backplane outputs (FITS, XML)',
+    )
 
     # Dataset selection args
     dataset.add_selection_arguments(cmdparser)
@@ -1447,8 +1509,7 @@ def main() -> None:
 
     dataset: DataSet = arguments._dataset
 
-    image_groups: list[ImageFiles] = list(
-        dataset.yield_image_files_from_arguments(arguments))
+    image_groups: list[ImageFiles] = list(dataset.yield_image_files_from_arguments(arguments))
     if not image_groups:
         print('No images matched selection.')
         sys.exit(1)

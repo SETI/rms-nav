@@ -1,12 +1,13 @@
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 from filecache import FCPath, FileCache
 
-from .dataset import ImageFile
-from .dataset_pds3 import DataSetPDS3
 from nav.config import Config
 from nav.support.misc import safe_lstrip_zero
+
+from .dataset import ImageFile
+from .dataset_pds3 import DataSetPDS3
 
 
 class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
@@ -17,10 +18,15 @@ class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
     Horizons LORRI image data stored in PDS3 format.
     """
 
-    _ALL_VOLUME_NAMES = ('NHLALO_2001', 'NHJULO_2001',
-                         'NHPCLO_2001', 'NHPELO_2001',
-                         'NHKCLO_2001', 'NHKELO_2001',
-                         'NHK2LO_2001')
+    _ALL_VOLUME_NAMES = (
+        'NHLALO_2001',
+        'NHJULO_2001',
+        'NHPCLO_2001',
+        'NHPELO_2001',
+        'NHKCLO_2001',
+        'NHKELO_2001',
+        'NHK2LO_2001',
+    )
     _INDEX_COLUMNS = ('FILE_SPECIFICATION_NAME',)
     _VOLUMES_DIR_NAME = 'volumes'
 
@@ -40,8 +46,9 @@ class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
         filespec = cast(str, row['FILE_SPECIFICATION_NAME'])
         # Intentionally lowercase only
         if not filespec.endswith(('_sci.lbl', '_eng.lbl')):
-            raise ValueError(f'Bad Primary File Spec "{filespec}" - '
-                             'expected "_sci.lbl" or "_eng.lbl"')
+            raise ValueError(
+                f'Bad Primary File Spec "{filespec}" - expected "_sci.lbl" or "_eng.lbl"'
+            )
         return filespec
 
     @staticmethod
@@ -70,19 +77,20 @@ class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
 
         parts = filespec.split('/')
         if len(parts) != 3:
-            raise ValueError(f'Bad Primary File Spec "{filespec}" - expected 3 '
-                             'directory levels')
+            raise ValueError(f'Bad Primary File Spec "{filespec}" - expected 3 directory levels')
         if parts[0].upper() != 'DATA':
             raise ValueError(f'Bad Primary File Spec "{filespec}" - expected "DATA"')
         range_dir = parts[1]
         img_name = parts[2]
         if len(range_dir) != 15 or range_dir[8] != '_':
-            raise ValueError(f'Bad Primary File Spec "{filespec}" - '
-                             'expected "DATA/ddddddd_ddddddd"')
+            raise ValueError(
+                f'Bad Primary File Spec "{filespec}" - expected "DATA/ddddddd_ddddddd"'
+            )
         # Intentionally lowercase only
         if not img_name.endswith(('_sci.lbl', '_eng.lbl')):
-            raise ValueError(f'Bad Primary File Spec "{filespec}" - '
-                             'expected "_sci.lbl" or "_eng.lbl"')
+            raise ValueError(
+                f'Bad Primary File Spec "{filespec}" - expected "_sci.lbl" or "_eng.lbl"'
+            )
         return img_name[:14]
 
     @staticmethod
@@ -158,12 +166,14 @@ class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
 
     # Public methods
 
-    def __init__(self,
-                 pds3_holdings_root: Optional[str | Path | FCPath] = None,
-                 *,
-                 index_filecache: Optional[FileCache] = None,
-                 pds3_holdings_filecache: Optional[FileCache] = None,
-                 config: Optional[Config] = None) -> None:
+    def __init__(
+        self,
+        pds3_holdings_root: str | Path | FCPath | None = None,
+        *,
+        index_filecache: FileCache | None = None,
+        pds3_holdings_filecache: FileCache | None = None,
+        config: Config | None = None,
+    ) -> None:
         """Initializes a New Horizons LORRI dataset handler.
 
         Parameters:
@@ -174,10 +184,12 @@ class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
                 creates a new one.
             config: Configuration object to use. If None, uses DEFAULT_CONFIG.
         """
-        super().__init__(pds3_holdings_root=pds3_holdings_root,
-                         index_filecache=index_filecache,
-                         pds3_holdings_filecache=pds3_holdings_filecache,
-                         config=config)
+        super().__init__(
+            pds3_holdings_root=pds3_holdings_root,
+            index_filecache=index_filecache,
+            pds3_holdings_filecache=pds3_holdings_filecache,
+            config=config,
+        )
 
     def pds4_bundle_template_dir(self) -> str:
         """Returns absolute path to template directory for PDS4 bundle generation."""
@@ -192,8 +204,7 @@ class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
         if Path(template_dir).is_absolute():
             return template_dir
 
-        pds4_templates_dir = (Path(__file__).resolve().parent.parent.parent / 'pds4' /
-                              'templates')
+        pds4_templates_dir = Path(__file__).resolve().parent.parent.parent / 'pds4' / 'templates'
         return str(pds4_templates_dir / template_dir)
 
     def pds4_bundle_name(self) -> str:

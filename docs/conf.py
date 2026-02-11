@@ -5,8 +5,10 @@
 
 # -- Path setup --------------------------------------------------------------
 
+import importlib.metadata
 import os
 import sys
+
 sys.path.insert(0, os.path.abspath('../src'))
 
 # -- Project information -----------------------------------------------------
@@ -14,8 +16,6 @@ sys.path.insert(0, os.path.abspath('../src'))
 project = 'RMS-NAV'
 copyright = '2025, SETI Institute'
 author = 'SETI Institute'
-
-import importlib.metadata
 
 # The full version, including alpha/beta/rc tags
 try:
@@ -57,7 +57,9 @@ html_theme = 'sphinx_rtd_theme'
 html_static_path = ['_static']
 
 add_module_names = False
-autodoc_typehints_format = "short"
+autodoc_typehints_format = 'short'
+# Mock PyQt6 so autodoc can import nav.ui modules without display/OpenGL (e.g. in CI).
+autodoc_mock_imports = ['PyQt6']
 
 # -- Extension configuration -------------------------------------------------
 
@@ -86,10 +88,10 @@ intersphinx_mapping = {
 
 # MyST-Parser settings
 myst_enable_extensions = [
-    "colon_fence",
-    "deflist",
+    'colon_fence',
+    'deflist',
 ]
 
-# Mermaid settings
-mermaid_output_format = "svg"
+# Mermaid settings: use default client-side rendering (no mmdc/Chromium) so docs
+# build in headless CI; diagrams render in the browser via mermaid.js.
 mermaid_d3_zoom = True

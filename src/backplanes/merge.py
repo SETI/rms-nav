@@ -52,14 +52,16 @@ def merge_sources_into_master(
                 naif_id = 10000 + (abs(hash(body_name)) % 20000)
             else:
                 raise  # This is a real problem
-        body_sources.append({
-            'name': body_name,
-            'naif_id': naif_id,
-            'distance': distance,
-            'mask': any_mask,
-            'arrays': entry['arrays'],
-            'masks': entry['masks'],
-        })
+        body_sources.append(
+            {
+                'name': body_name,
+                'naif_id': naif_id,
+                'distance': distance,
+                'mask': any_mask,
+                'arrays': entry['arrays'],
+                'masks': entry['masks'],
+            }
+        )
 
     if not body_sources and not rings_result:
         return master_by_type, body_id_map
@@ -71,8 +73,8 @@ def merge_sources_into_master(
         body_dist_stack = np.stack([x['distance'] for x in body_sources], axis=0)
         nearest_body_idx = np.argmin(body_dist_stack, axis=0)
         nearest_body_distance = np.take_along_axis(
-                body_dist_stack, nearest_body_idx[None, ...], axis=0
-            )[0]
+            body_dist_stack, nearest_body_idx[None, ...], axis=0
+        )[0]
 
         # Build a union mask indicating if any body has presence at each pixel (any body mask True)
         for body_source in body_sources:
@@ -90,8 +92,10 @@ def merge_sources_into_master(
                 arrays = body_source['arrays']
                 masks = body_source['masks']
                 if bp_type not in arrays or bp_type not in masks:
-                    raise ValueError(f'Backplane type {bp_type} array or mask not found for body '
-                                     f'{body_source["name"]}')
+                    raise ValueError(
+                        f'Backplane type {bp_type} array or mask not found for body '
+                        f'{body_source["name"]}'
+                    )
                 src_vals = arrays[bp_type]
                 src_mask = masks[bp_type]
                 take = (nearest_body_idx == body_idx) & src_mask
@@ -123,8 +127,10 @@ def merge_sources_into_master(
             valid = src_mask & (~occluded)
             master[valid] = src_vals[valid]
             if bp_type in master_by_type:
-                raise ValueError(f'Ring backplane type {bp_type} already exists in master_by_type '
-                                 'because it is also a body backplane type')
+                raise ValueError(
+                    f'Ring backplane type {bp_type} already exists in master_by_type '
+                    'because it is also a body backplane type'
+                )
             master_by_type[bp_type] = master
 
     return master_by_type, body_id_map

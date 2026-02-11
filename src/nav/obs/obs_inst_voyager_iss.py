@@ -1,8 +1,8 @@
-from typing import Any, Optional, cast
-
-from filecache import FCPath
-import numpy as np
 from pathlib import Path
+from typing import Any, cast
+
+import numpy as np
+from filecache import FCPath
 
 from nav.config import DEFAULT_CONFIG, DEFAULT_LOGGER, Config
 from nav.support.time import et_to_utc
@@ -19,11 +19,13 @@ class ObsVoyagerISS(ObsSnapshotInst):
     """
 
     @staticmethod
-    def from_file(path: PathLike,
-                  *,
-                  config: Optional[Config] = None,
-                  extfov_margin_vu: tuple[int, int] | None = None,
-                  **_kwargs: Any) -> 'ObsVoyagerISS':
+    def from_file(
+        path: PathLike,
+        *,
+        config: Config | None = None,
+        extfov_margin_vu: tuple[int, int] | None = None,
+        **_kwargs: Any,
+    ) -> 'ObsVoyagerISS':
         """Creates an ObsVoyagerISS from a Voyager ISS image file.
 
         Parameters:
@@ -77,7 +79,7 @@ class ObsVoyagerISS(ObsSnapshotInst):
         Returns:
             The minimum usable magnitude for stars in this observation.
         """
-        return 0.
+        return 0.0
 
     def star_max_usable_vmag(self) -> float:
         """Returns the maximum usable magnitude for stars in this observation.
@@ -102,10 +104,12 @@ class ObsVoyagerISS(ObsSnapshotInst):
         return {
             'image_path': self.image_url,
             'image_name': self.abspath.name,
-            'instrument_host_lid':
-                f'urn:nasa:pds:context:instrument_host:spacecraft.vg{spacecraft}',
-            'instrument_lid':
-                f'urn:nasa:pds:context:instrument:vg{spacecraft}.iss{self.detector[0].lower()}',
+            'instrument_host_lid': (
+                f'urn:nasa:pds:context:instrument_host:spacecraft.vg{spacecraft}'
+            ),
+            'instrument_lid': (
+                f'urn:nasa:pds:context:instrument:vg{spacecraft}.iss{self.detector[0].lower()}'
+            ),
             'start_time_utc': et_to_utc(self.time[0]),
             'midtime_utc': et_to_utc(self.midtime),
             'end_time_utc': et_to_utc(self.time[1]),

@@ -56,7 +56,8 @@ def compute_edge_radius_mode1(
         long_peri=long_peri,
         rate_peri=rate_peri,
         epoch=epoch,
-        time=time)
+        time=time,
+    )
 
 
 def compute_edge_radius_at_angle(
@@ -130,7 +131,7 @@ def _compute_edge_radii_array(
     # Compute true anomaly (angle relative to pericenter)
     true_anomaly = angles - current_long_peri
 
-    # Compute radius using elliptical orbit equation: r = a(1 - e^2) / (1 + e*cos(ν))
+    # Compute radius using elliptical orbit equation: r = a(1 - e^2) / (1 + e*cos(v))
     # where e = ae / a
     e = ae / a if a > 0 else 0.0
     if e >= 1.0:
@@ -206,7 +207,7 @@ def compute_border_atop_simulated(
     abs_diff = np.abs(diff)
 
     # Initialize border mask (pixels exactly at edge)
-    border = (abs_diff == 0.0)
+    border = abs_diff == 0.0
 
     # Find transitions: pixels where sign changes between neighbors
     # Check vertical neighbors
@@ -216,8 +217,8 @@ def compute_border_atop_simulated(
     abs_diff_v_next = abs_diff[1:, :]
 
     # Pixels where sign flips and current pixel is closer to edge
-    border[:-1, :] |= ((sign_v == -sign_v_next) & (abs_diff_v <= abs_diff_v_next))
-    border[1:, :] |= ((sign_v_next == -sign_v) & (abs_diff_v_next <= abs_diff_v))
+    border[:-1, :] |= (sign_v == -sign_v_next) & (abs_diff_v <= abs_diff_v_next)
+    border[1:, :] |= (sign_v_next == -sign_v) & (abs_diff_v_next <= abs_diff_v)
 
     # Check horizontal neighbors
     sign_u = sign[:, :-1]
@@ -226,8 +227,8 @@ def compute_border_atop_simulated(
     abs_diff_u_next = abs_diff[:, 1:]
 
     # Pixels where sign flips and current pixel is closer to edge
-    border[:, :-1] |= ((sign_u == -sign_u_next) & (abs_diff_u <= abs_diff_u_next))
-    border[:, 1:] |= ((sign_u_next == -sign_u) & (abs_diff_u_next <= abs_diff_u))
+    border[:, :-1] |= (sign_u == -sign_u_next) & (abs_diff_u <= abs_diff_u_next)
+    border[:, 1:] |= (sign_u_next == -sign_u) & (abs_diff_u_next <= abs_diff_u)
 
     return cast(NDArrayBoolType, border)
 
@@ -248,8 +249,7 @@ def _compute_antialiasing_shade(edge_dist: NDArrayFloatType, resolution: float) 
     return shade
 
 
-def _compute_fade_factor(edge_dist: NDArrayFloatType,
-                         shading_distance: float) -> NDArrayFloatType:
+def _compute_fade_factor(edge_dist: NDArrayFloatType, shading_distance: float) -> NDArrayFloatType:
     """Compute fade factor for edge shading.
 
     Parameters:

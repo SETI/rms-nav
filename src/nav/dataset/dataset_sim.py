@@ -1,12 +1,13 @@
 import argparse
 from collections.abc import Iterator
-from typing import Any, Optional
+from typing import Any
 
 from filecache import FCPath
 
-from .dataset import DataSet, ImageFile, ImageFiles
 from nav.config import Config
 from nav.support.misc import flatten_list
+
+from .dataset import DataSet, ImageFile, ImageFiles
 
 
 class DataSetSim(DataSet):
@@ -23,9 +24,7 @@ class DataSetSim(DataSet):
 
     # Public methods
 
-    def __init__(self,
-                 *,
-                 config: Optional[Config] = None) -> None:
+    def __init__(self, *, config: Config | None = None) -> None:
         """Initializes a simulated dataset.
 
         Parameters:
@@ -34,17 +33,23 @@ class DataSetSim(DataSet):
         super().__init__(config=config)
 
     @staticmethod
-    def add_selection_arguments(cmdparser: argparse.ArgumentParser,
-                                group: Optional[argparse._ArgumentGroup] = None) -> None:
+    def add_selection_arguments(
+        cmdparser: argparse.ArgumentParser,
+        group: argparse._ArgumentGroup | None = None,
+    ) -> None:
         if group is None:
             group = cmdparser.add_argument_group('Image selection (sim-specific)')
         group.add_argument(
-            'img_path', action='append', nargs='*', type=str,
-            help='Paths to JSON files containing simulated images to process')
+            'img_path',
+            action='append',
+            nargs='*',
+            type=str,
+            help='Paths to JSON files containing simulated images to process',
+        )
 
-    def yield_image_files_from_arguments(self,
-                                         arguments: argparse.Namespace
-                                         ) -> Iterator[ImageFiles]:
+    def yield_image_files_from_arguments(
+        self, arguments: argparse.Namespace
+    ) -> Iterator[ImageFiles]:
         img_path_list = flatten_list(arguments.img_path)
         for img_path in img_path_list:
             json_fcpath = FCPath(img_path)
