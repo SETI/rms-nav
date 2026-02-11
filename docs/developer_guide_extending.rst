@@ -34,7 +34,7 @@ Implementing PDS4 Bundle Generation Methods
 ---------------------------------------------
 
 To support PDS4 bundle generation, datasets must implement the following abstract methods
-from :class:`nav.dataset.dataset.DataSet`:
+from :class:`~nav.dataset.dataset.DataSet`:
 
 * ``pds4_bundle_template_dir()``: Returns the absolute path to the template directory
   for PDS4 label generation. If a relative name is provided in config, it should be
@@ -68,7 +68,7 @@ from :class:`nav.dataset.dataset.DataSet`:
   ``"urn:nasa:pds:<bundle_name>:browse:<image_name>::1.0"``).
 
 For datasets that do not support PDS4 bundle generation, these methods should raise
-``NotImplementedError``. See :class:`nav.dataset.dataset_pds3_cassini_iss.DataSetPDS3CassiniISS`
+``NotImplementedError``. See :class:`~nav.dataset.dataset_pds3_cassini_iss.DataSetPDS3CassiniISS`
 for a complete implementation example.
 
 Adding a New Instrument

@@ -301,7 +301,7 @@ Key Components
 NavBase
 -------
 
-:class:`nav.support.nav_base.NavBase` is the base class for most components in the
+:class:`~nav.support.nav_base.NavBase` is the base class for most components in the
 system. It provides access to configuration settings and a logger via the ``config``
 and ``logger`` properties. All subclasses call ``super().__init__(config=...)`` to
 ensure the shared state is initialized.
@@ -309,8 +309,8 @@ ensure the shared state is initialized.
 NavMaster
 ---------
 
-:class:`nav.nav_master.nav_master.NavMaster` coordinates the navigation process. It
-initializes with an :class:`oops.observation.snapshot.Snapshot`-backed observation
+:class:`~nav.nav_master.nav_master.NavMaster` coordinates the navigation process. It
+initializes with a :class:`~oops.observation.snapshot.Snapshot`-backed observation
 and optional lists of navigation models and techniques (``nav_models`` and
 ``nav_techniques``). It computes models, applies techniques (for example,
 ``correlate_all`` and ``manual``), determines the prevailing offset based on
@@ -320,7 +320,7 @@ confidence, and produces both a summary PNG image and JSON-serializable metadata
 NavModel
 --------
 
-:class:`nav.nav_model.nav_model.NavModel` is the abstract base for synthetic model
+:class:`~nav.nav_model.nav_model.NavModel` is the abstract base for synthetic model
 generators. Subclasses implement ``create_model(...)`` to populate arrays and
 annotations. Public properties include the model name and snapshot (``name``,
 ``obs``), arrays (``model_img``, ``model_mask``, ``range``), optional quality
@@ -334,7 +334,7 @@ visible model at each pixel.
 NavTechnique
 ------------
 
-:class:`nav.nav_technique.nav_technique.NavTechnique` is the abstract base for
+:class:`~nav.nav_technique.nav_technique.NavTechnique` is the abstract base for
 navigation algorithms that estimate offsets from models and the observation.
 Techniques are selected by name and record technique-specific metadata. Current
 implementations include ``correlate_all`` (automated correlation), ``manual``
@@ -343,23 +343,23 @@ implementations include ``correlate_all`` (automated correlation), ``manual``
 Dataset
 -------
 
-:class:`nav.dataset.dataset.DataSet` handles access to image files and metadata. It
+:class:`~nav.dataset.dataset.DataSet` handles access to image files and metadata. It
 defines ``_img_name_valid(...)``, ``add_selection_arguments(...)``,
 ``yield_image_files_from_arguments(...)``, and ``yield_image_files_index(...)`` for
 dataset-specific selection and iteration. For PDS4 bundle generation, it also defines
 methods ``pds4_bundle_template_dir()``, ``pds4_bundle_name()``,
 ``pds4_bundle_path_for_image()``, ``pds4_path_stub()``, ``pds4_template_variables()``,
 ``pds4_image_name_to_data_lidvid()``, and ``pds4_image_name_to_browse_lidvid()``.
-:class:`nav.dataset.dataset_pds3.DataSetPDS3` provides volume and index-based iteration
+:class:`~nav.dataset.dataset_pds3.DataSetPDS3` provides volume and index-based iteration
 for archives, while instrument-specific subclasses tailor parsing and volume sets.
 Instrument-specific dataset classes include
-:class:`nav.dataset.dataset_pds3_cassini_iss.DataSetPDS3CassiniISS` (base class for all
-Cassini ISS volumes), :class:`nav.dataset.dataset_pds3_cassini_iss.DataSetPDS3CassiniISSCruise`
-(volumes 1001-1009), :class:`nav.dataset.dataset_pds3_cassini_iss.DataSetPDS3CassiniISSSaturn`
-(volumes 2001-2116), :class:`nav.dataset.dataset_pds3_voyager_iss.DataSetPDS3VoyagerISS`,
-:class:`nav.dataset.dataset_pds3_galileo_ssi.DataSetPDS3GalileoSSI`,
-:class:`nav.dataset.dataset_pds3_newhorizons_lorri.DataSetPDS3NewHorizonsLORRI`, and
-:class:`nav.dataset.dataset_sim.DataSetSim` (for simulated images). Dataset name mapping
+:class:`~nav.dataset.dataset_pds3_cassini_iss.DataSetPDS3CassiniISS` (base class for all
+Cassini ISS volumes), :class:`~nav.dataset.dataset_pds3_cassini_iss.DataSetPDS3CassiniISSCruise`
+(volumes 1001-1009), :class:`~nav.dataset.dataset_pds3_cassini_iss.DataSetPDS3CassiniISSSaturn`
+(volumes 2001-2116), :class:`~nav.dataset.dataset_pds3_voyager_iss.DataSetPDS3VoyagerISS`,
+:class:`~nav.dataset.dataset_pds3_galileo_ssi.DataSetPDS3GalileoSSI`,
+:class:`~nav.dataset.dataset_pds3_newhorizons_lorri.DataSetPDS3NewHorizonsLORRI`, and
+:class:`~nav.dataset.dataset_sim.DataSetSim` (for simulated images). Dataset name mapping
 is defined in ``nav.dataset.__init__`` (``coiss``, ``coiss_cruise``, ``coiss_saturn``,
 ``gossi``, ``nhlorri``, ``vgiss``, their ``*_pds3`` aliases, and ``sim``). Cassini ISS
 adds ``--camera`` (NAC or WAC) and supports a ``botsim`` grouping that pairs NAC/WAC
@@ -368,22 +368,22 @@ images when available.
 Obs and ObsSnapshot
 -------------------
 
-:class:`nav.obs.obs.Obs` is the abstract base class for observations.
-:class:`nav.obs.obs_snapshot.ObsSnapshot` extends it with backplane handling and
-accessors, while :class:`nav.obs.obs_inst.ObsInst` defines the instrument-specific
+:class:`~nav.obs.obs.Obs` is the abstract base class for observations.
+:class:`~nav.obs.obs_snapshot.ObsSnapshot` extends it with backplane handling and
+accessors, while :class:`~nav.obs.obs_inst.ObsInst` defines the instrument-specific
 contract with a ``from_file(...)`` constructor and metadata helpers. Instrument
-snapshots extend :class:`nav.obs.obs_snapshot_inst.ObsSnapshotInst` and must accept
+snapshots extend :class:`~nav.obs.obs_snapshot_inst.ObsSnapshotInst` and must accept
 ``config`` and ``extfov_margin_vu`` keyword arguments. Instrument classes include
-:class:`nav.obs.obs_inst_cassini_iss.ObsCassiniISS`,
-:class:`nav.obs.obs_inst_voyager_iss.ObsVoyagerISS`,
-:class:`nav.obs.obs_inst_galileo_ssi.ObsGalileoSSI`,
-:class:`nav.obs.obs_inst_newhorizons_lorri.ObsNewHorizonsLORRI`, and
-:class:`nav.obs.obs_inst_sim.ObsSim` (for simulated images).
+:class:`~nav.obs.obs_inst_cassini_iss.ObsCassiniISS`,
+:class:`~nav.obs.obs_inst_voyager_iss.ObsVoyagerISS`,
+:class:`~nav.obs.obs_inst_galileo_ssi.ObsGalileoSSI`,
+:class:`~nav.obs.obs_inst_newhorizons_lorri.ObsNewHorizonsLORRI`, and
+:class:`~nav.obs.obs_inst_sim.ObsSim` (for simulated images).
 
 Annotation
 ----------
 
 The annotation subsystem composes labels and graphical elements into an overlay used by
-the final PNG. :class:`nav.annotation.annotations.Annotations` aggregates
+the final PNG. :class:`~nav.annotation.annotations.Annotations` aggregates
 model-provided annotations and renders them with appropriate coloring and contrast
 stretching, optionally using per-region stretching via ``stretch_regions``.

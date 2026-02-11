@@ -92,6 +92,6 @@ myst_enable_extensions = [
     'deflist',
 ]
 
-# Mermaid settings
-mermaid_output_format = 'svg'
+# Mermaid settings: use default client-side rendering (no mmdc/Chromium) so docs
+# build in headless CI; diagrams render in the browser via mermaid.js.
 mermaid_d3_zoom = True
