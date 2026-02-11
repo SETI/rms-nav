@@ -58,6 +58,8 @@ html_static_path = ['_static']
 
 add_module_names = False
 autodoc_typehints_format = 'short'
+# Mock PyQt6 so autodoc can import nav.ui modules without display/OpenGL (e.g. in CI).
+autodoc_mock_imports = ['PyQt6']
 
 # -- Extension configuration -------------------------------------------------
 
