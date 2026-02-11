@@ -69,7 +69,7 @@ def _bilinear_sample_periodic(arr: NDArrayFloatType, y: float, x: float) -> floa
 class _ImageLabel(QLabel):
     """Image label that forwards input events to the dialog handlers."""
 
-    def __init__(self, owner_dialog: 'ManualNavDialog') -> None:
+    def __init__(self, owner_dialog: ManualNavDialog) -> None:
         super().__init__()
         self._owner = owner_dialog
 
