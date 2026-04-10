@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Sequence
+from typing import Literal
 
 from .ring_feature import RingFeature
 from .ring_types import RingFeatureType
@@ -86,7 +87,40 @@ class RingFeatureFilter:
                 conflict reduction. Edges adjusted below this threshold are excluded.
             min_feature_pixels: Minimum resolvable feature width in pixels. Two-edge
                 features narrower than ``min_feature_pixels * min_res`` km are excluded.
+
+        Raises:
+            TypeError: If a parameter has an invalid type.
+            ValueError: If numeric parameters violate range constraints.
         """
+        if isinstance(obs_time_et, bool) or not isinstance(obs_time_et, (int, float)):
+            raise TypeError(f'obs_time_et must be int or float, not {type(obs_time_et).__name__}')
+        if isinstance(min_radius, bool) or not isinstance(min_radius, (int, float)):
+            raise TypeError(f'min_radius must be int or float, not {type(min_radius).__name__}')
+        if isinstance(max_radius, bool) or not isinstance(max_radius, (int, float)):
+            raise TypeError(f'max_radius must be int or float, not {type(max_radius).__name__}')
+        if min_radius > max_radius:
+            raise ValueError(
+                f'min_radius must be <= max_radius, got min_radius={min_radius}, '
+                f'max_radius={max_radius}'
+            )
+        if not callable(min_res_at_radius):
+            raise TypeError('min_res_at_radius must be callable')
+        for name, val in (
+            ('fade_width_pix', fade_width_pix),
+            ('min_allowed_fade_width_pix', min_allowed_fade_width_pix),
+            ('min_feature_pixels', min_feature_pixels),
+        ):
+            if isinstance(val, bool) or not isinstance(val, (int, float)):
+                raise TypeError(f'{name} must be int or float, not {type(val).__name__}')
+            if val < 0:
+                raise ValueError(f'{name} must be non-negative, got {val}')
+        if min_allowed_fade_width_pix > fade_width_pix:
+            raise ValueError(
+                'min_allowed_fade_width_pix must be <= fade_width_pix, got '
+                f'min_allowed_fade_width_pix={min_allowed_fade_width_pix}, '
+                f'fade_width_pix={fade_width_pix}'
+            )
+
         self._obs_time_et = obs_time_et
         self._min_radius = min_radius
         self._max_radius = max_radius
@@ -108,14 +142,32 @@ class RingFeatureFilter:
         Returns:
             Filtered list of features, possibly with some edges trimmed to None.
         """
+        feature_seq = list(features)
+        _logger.debug('RingFeatureFilter: starting with %d feature(s)', len(feature_seq))
+
         # Pass 1: date
-        after_date = [f for f in features if self._passes_date(f)]
+        after_date = [f for f in feature_seq if self._passes_date(f)]
+        _logger.debug(
+            'RingFeatureFilter: after date pass, %d / %d feature(s)',
+            len(after_date),
+            len(feature_seq),
+        )
 
         # Pass 2: radius
         after_radius = [f for f in after_date if self._passes_radius(f)]
+        _logger.debug(
+            'RingFeatureFilter: after radius pass, %d / %d feature(s)',
+            len(after_radius),
+            len(after_date),
+        )
 
         # Pass 3: resolvability (two-edge features only)
         after_res = [f for f in after_radius if self._passes_resolvability(f)]
+        _logger.debug(
+            'RingFeatureFilter: after resolvability pass, %d / %d feature(s)',
+            len(after_res),
+            len(after_radius),
+        )
 
         # Build all_edge_radii from pass-2 survivors for conflict detection in pass 4.
         # Using pass-2 survivors (not pass-3) so that a narrowly excluded two-edge
@@ -134,6 +186,11 @@ class RingFeatureFilter:
             if trimmed is not None:
                 result.append(trimmed)
 
+        _logger.debug(
+            'RingFeatureFilter: after fade pass, %d / %d feature(s)',
+            len(result),
+            len(after_res),
+        )
         return result
 
     # ------------------------------------------------------------------
@@ -197,6 +254,10 @@ class RingFeatureFilter:
         if outer_res is None or outer_res == 0.0:
             outer_res = inner_res
 
+        # Fallback above copies a valid resolution when one side is None or 0.0, so
+        # both sides stay aligned. The only ambiguous case left is still-missing
+        # inner_res, or inner_res == 0.0 (outer_res cannot be 0.0 unless inner_res is
+        # too); exclude and log via _logger / feature.key like other pass-3 skips.
         if inner_res is None or inner_res == 0.0 or outer_res is None:
             _logger.debug(
                 'Pass 3 (resolvability): excluding %r -- could not determine resolution',
@@ -259,6 +320,19 @@ class RingFeatureFilter:
             )
             return None
 
+        dropped_edges: list[str] = []
+        if feature.inner_edge is not None and not keep_inner:
+            dropped_edges.append('inner')
+        if feature.outer_edge is not None and not keep_outer:
+            dropped_edges.append('outer')
+        if dropped_edges:
+            _logger.debug(
+                'Pass 4 (fade conflict): trimming %r -- dropping %s edge(s) (fade too '
+                'narrow after neighbor conflict)',
+                feature.key,
+                ' and '.join(dropped_edges),
+            )
+
         # One real edge excluded: return a trimmed feature.
         # RingFeature is frozen, so reconstruct with the excluded edge set to None.
         return RingFeature(
@@ -274,7 +348,7 @@ class RingFeatureFilter:
     def _edge_passes_fade(
         self,
         feature: RingFeature,
-        edge_type: str,
+        edge_type: Literal['inner', 'outer'],
         all_edge_radii: list[tuple[float, str]],
     ) -> bool:
         """Return True if this edge passes the fade conflict check.

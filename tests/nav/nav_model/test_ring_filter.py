@@ -290,10 +290,12 @@ class TestPass3Resolvability:
     def test_single_edge_feature_skips_pass3(self) -> None:
         """Single-edge feature is never filtered by pass 3 (no width to check)."""
         feature = _make_single_edge_ringlet(inner_a=100_000.0)
-        res = {100_000.0: 100.0}  # very coarse resolution
+        res = {100_000.0: 100.0}  # very coarse resolution (km/px); excludes two-edge
         flt = _make_filter(
             min_res_at_radius=res,
-            min_feature_pixels=1.0,  # large: would exclude two-edge feature
+            # Small cutoff; exclusion of two-edge features here is due to coarse res,
+            # not this threshold.
+            min_feature_pixels=1.0,
         )
         result = flt.filter([feature])
         assert len(result) == 1

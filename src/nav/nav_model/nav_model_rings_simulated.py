@@ -26,6 +26,7 @@ correct trade-off.
 
 from typing import Any
 
+import numpy as np
 import oops
 
 from nav.annotation import Annotations
@@ -35,7 +36,7 @@ from nav.support.time import now_dt
 from nav.support.types import NDArrayBoolType
 
 from .nav_model_result import NavModelResult
-from .nav_model_rings_base import NavModelRingsBase
+from .nav_model_rings_base import NavModelRingsBase, rings_subpackage_log_level
 from .rings import RingFeature
 
 
@@ -97,7 +98,14 @@ class NavModelRingsSimulated(NavModelRingsBase):
         self._metadata = metadata
         self._models.clear()
 
-        with self._logger.open(f'CREATE SIMULATED RINGS MODEL FOR: {self._ring_name}'):
+        log_level = self._config.general.get('log_level_model_rings')
+        with (
+            self._logger.open(
+                f'CREATE SIMULATED RINGS MODEL FOR: {self._ring_name}',
+                level=log_level,
+            ),
+            rings_subpackage_log_level(log_level),
+        ):
             self._create_model(
                 always_create_model=always_create_model,
                 never_create_model=never_create_model,
@@ -136,6 +144,11 @@ class NavModelRingsSimulated(NavModelRingsBase):
         # behavior when the field was absent.
         feature_config = _sim_params_to_feature_config(p)
         ring_feature = RingFeature.from_config(self._ring_name, feature_config)
+        self._logger.debug(
+            'Simulated rings: parsed feature %r type=%s',
+            self._ring_name,
+            ring_feature.feature_type.value,
+        )
 
         # Render via sim_ring (pixel-space, not backplane-based)
         sim_img = obs.make_extfov_zeros()
@@ -146,6 +159,11 @@ class NavModelRingsSimulated(NavModelRingsBase):
         ring_params_extfov = dict(p)
         ring_params_extfov['center_v'] = center_v_extfov
         ring_params_extfov['center_u'] = center_u_extfov
+        self._logger.debug(
+            'Simulated rings: render_ring at extfov center (%.2f, %.2f) shade_solid=True',
+            center_v_extfov,
+            center_u_extfov,
+        )
         render_ring(
             sim_img,
             ring_params_extfov,
@@ -157,6 +175,11 @@ class NavModelRingsSimulated(NavModelRingsBase):
         )
 
         ring_mask = sim_img != 0.0
+        self._logger.debug(
+            'Simulated rings: render complete, %d / %d pixels in mask',
+            int(np.count_nonzero(ring_mask)),
+            ring_mask.size,
+        )
         range_val = p.get('range', 0.0)
 
         annotations = None
@@ -272,12 +295,6 @@ def _sim_params_to_feature_config(p: dict[str, Any]) -> dict[str, Any]:
     """
     raw_inner = p.get('inner_data') or None
     raw_outer = p.get('outer_data') or None
-
-    # Normalize empty lists to None so from_config sees them as absent
-    if isinstance(raw_inner, list) and len(raw_inner) == 0:
-        raw_inner = None
-    if isinstance(raw_outer, list) and len(raw_outer) == 0:
-        raw_outer = None
 
     feature_type_raw = p.get('feature_type', 'RINGLET')
 

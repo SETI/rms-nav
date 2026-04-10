@@ -25,7 +25,7 @@ The PR template is in `.github/pull_request_template.md` and is applied automati
 - **Purpose** — Why the change is needed; link issue with `Closes #NNN`.
 - **Changes / Implementation Details** — What changed and how it was implemented; technical approaches chosen and non-obvious design decisions.
 - **Type of Change** — Check all that apply (bug fix, feature, breaking, refactor, docs, tests, CI/build).
- **Testing** — Check boxes for unit tests, integration tests, E2E tests run; describe new tests added and manual verification performed.
+- **Testing** — Check boxes for unit tests, integration tests, E2E tests run; describe new tests added and manual verification performed.
 - **Potential Impacts** — Public API, backward compatibility, performance, downstream; write "None" if straightforward.
 - **Checklist** — Style, mypy, docs, CHANGES.md, no debug code, no secrets/credentials, no warnings/errors, performance impact assessed, breaking changes flagged.
 - **Notes** — Optional; delete only if not needed (tricky areas, follow-up work).

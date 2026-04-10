@@ -38,8 +38,9 @@ on feature type and edge availability:
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 
@@ -96,7 +97,9 @@ class RingFeature:
         fields are truly frozen.
 
         Raises:
-            ValueError: If both inner_edge and outer_edge are None.
+            ValueError: If both inner_edge and outer_edge are None, or if both
+                dates convert to ET and ``start_date`` does not strictly precede
+                ``end_date``.
         """
         if self.inner_edge is None and self.outer_edge is None:
             raise ValueError(
@@ -109,6 +112,11 @@ class RingFeature:
             start_et = utc_to_et(self.start_date)
         if self.end_date is not None:
             end_et = utc_to_et(self.end_date)
+        if start_et is not None and end_et is not None and start_et >= end_et:
+            raise ValueError(
+                f'RingFeature {self.key!r}: start_date must be strictly before end_date '
+                f'([start_date, end_date) is half-open)'
+            )
         object.__setattr__(self, '_start_et', start_et)
         object.__setattr__(self, '_end_et', end_et)
 
@@ -199,7 +207,14 @@ class RingFeature:
 
         Returns:
             True if this edge uses fade rendering by structure.
+
+        Raises:
+            ValueError: If ``edge_type`` is not exactly ``'inner'`` or ``'outer'``.
         """
+        if edge_type not in ('inner', 'outer'):
+            raise ValueError(
+                f"edge_type must be 'inner' or 'outer' (case-sensitive), got {edge_type!r}"
+            )
         if self.feature_type is RingFeatureType.GAP:
             return True
         # RINGLET: uses fade only when this is a single-edge feature
@@ -277,15 +292,23 @@ class RingFeature:
         labels = self.edge_labels
         results: list[RingRenderResult] = []
 
-        if (self.feature_type is RingFeatureType.RINGLET
-                and inner_radii_bp is not None
-                and outer_radii_bp is not None):
-            result = self._render_full_ringlet(
-                context, inner_radii_bp, outer_radii_bp, labels
+        if (
+            self.feature_type is RingFeatureType.RINGLET
+            and inner_radii_bp is not None
+            and outer_radii_bp is not None
+        ):
+            _logger.debug(
+                'RingFeature %r: rendering full ringlet (solid band + edge anti-aliasing)',
+                self.key,
             )
+            result = self._render_full_ringlet(context, inner_radii_bp, outer_radii_bp, labels)
             if result is not None:
                 results.append(result)
         else:
+            _logger.debug(
+                'RingFeature %r: rendering per-edge (GAP or partial/single-edge RINGLET)',
+                self.key,
+            )
             # GAP or single-edge: one result per edge
             for edge_data, radii_bp, edge_type in [
                 (self.inner_edge, inner_radii_bp, 'inner'),
@@ -293,26 +316,24 @@ class RingFeature:
             ]:
                 if edge_data is None or radii_bp is None:
                     continue
-                result = self._render_single_edge(
-                    context, edge_data, radii_bp, edge_type, labels
-                )
+                result = self._render_single_edge(context, edge_data, radii_bp, edge_type, labels)
                 if result is not None:
                     results.append(result)
 
         return results
 
-    def _compute_edge_radii(
-        self, context: RingsRenderContext, edge: RingEdgeData
-    ) -> Any:
+    def _compute_edge_radii(self, context: RingsRenderContext, edge: RingEdgeData) -> Any:
         """Compute multi-mode edge radius backplane.
 
         Uses ``RingEdgeData.parsed_modes_for_backplane()`` to get the mode
         tuples, then applies them sequentially via
         ``context.obs.ext_bp.radial_mode()``.
 
-        The first mode (mode 1, base orbit) uses ``radial_mode`` with 5
-        arguments including ``a0`` (reference semi-major axis). Subsequent
-        modes use the 4-argument form.
+        The first mode (mode 1, base orbit) calls ``radial_mode`` with the
+        backplane key, mode number, epoch, ``ae``, longitude and rate of
+        periapsis (radians / rad/s), plus ``a0=<semi-major axis>`` as a keyword
+        argument (six positional values plus ``a0``). Subsequent modes use the
+        four-argument perturbation form.
 
         Parameters:
             context: Current rendering context.
@@ -339,8 +360,12 @@ class RingFeature:
             else:
                 mode, amplitude, phase_rad, speed_rad_per_sec = mode_info
                 radii_bp = context.obs.ext_bp.radial_mode(
-                    radii_bp.key, mode, context.epoch,
-                    amplitude, phase_rad, speed_rad_per_sec,
+                    radii_bp.key,
+                    mode,
+                    context.epoch,
+                    amplitude,
+                    phase_rad,
+                    speed_rad_per_sec,
                 )
 
         return radii_bp
@@ -373,12 +398,20 @@ class RingFeature:
         Returns:
             ``RingRenderResult`` or None if edge radii could not be determined.
         """
-        assert self.inner_edge is not None  # assured by caller
-        assert self.outer_edge is not None
+        if self.inner_edge is None:
+            raise ValueError(f'RingFeature {self.key!r}: _render_full_ringlet requires inner_edge')
+        if self.outer_edge is None:
+            raise ValueError(f'RingFeature {self.key!r}: _render_full_ringlet requires outer_edge')
 
         inner_a = self.inner_edge.base_radius
         outer_a = self.outer_edge.base_radius
         resolutions = context.resolutions
+        _logger.debug(
+            'RingFeature %r: full ringlet inner_a=%.3f km outer_a=%.3f km (solid + AA)',
+            self.key,
+            inner_a,
+            outer_a,
+        )
 
         inner_radii = inner_radii_bp.mvals.filled(0.0)
         outer_radii = outer_radii_bp.mvals.filled(0.0)
@@ -435,8 +468,7 @@ class RingFeature:
             label = labels[edge_type]
             feature_name = self.name or 'UNNAMED'
             edge_mask = (
-                context.obs.ext_bp.border_atop(edge_bp.key, a)
-                .mvals.astype('bool').filled(False)
+                context.obs.ext_bp.border_atop(edge_bp.key, a).mvals.astype('bool').filled(False)
             )
             edge_info_list.append((edge_mask, f'{feature_name} {label}', label))
 
@@ -489,6 +521,16 @@ class RingFeature:
         else:
             shade_above = edge_type == 'outer'
 
+        _logger.debug(
+            'RingFeature %r: single-edge %s fade (edge_a=%.3f km, shade_above=%s, '
+            'fade_width_pix=%.2f)',
+            self.key,
+            edge_type,
+            edge_a,
+            shade_above,
+            context.fade_width_pix,
+        )
+
         model = np.zeros(shape, dtype=np.float64)
         new_model = compute_edge_fade(
             model=model,
@@ -507,8 +549,7 @@ class RingFeature:
         label = labels[edge_type]
         feature_name = self.name or 'UNNAMED'
         edge_mask: NDArrayBoolType = (
-            context.obs.ext_bp.border_atop(radii_bp.key, edge_a)
-            .mvals.astype('bool').filled(False)
+            context.obs.ext_bp.border_atop(radii_bp.key, edge_a).mvals.astype('bool').filled(False)
         )
         edge_info_list: list[tuple[NDArrayBoolType, str, str]] = [
             (edge_mask, f'{feature_name} {label}', label)
@@ -526,7 +567,7 @@ class RingFeature:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_config(cls, key: str, data: dict[str, Any]) -> 'RingFeature':
+    def from_config(cls, key: str, data: dict[str, Any]) -> RingFeature:
         """Construct a RingFeature from a YAML feature dictionary.
 
         Validates all fields at construction time. This follows the principle
@@ -559,10 +600,9 @@ class RingFeature:
         raw_type = data.get('feature_type')
         try:
             feature_type = RingFeatureType(raw_type)
-        except (ValueError, KeyError) as exc:
+        except ValueError as exc:
             raise ValueError(
-                f'Feature {key!r}: invalid feature_type {raw_type!r}; '
-                f'expected "GAP" or "RINGLET"'
+                f'Feature {key!r}: invalid feature_type {raw_type!r}; expected "GAP" or "RINGLET"'
             ) from exc
 
         name: str | None = data.get('name')
@@ -633,9 +673,7 @@ def _parse_edge_data(feature_key: str, edge_type: str, mode_list: Any) -> RingEd
 
         mode_num = mode.get('mode')
         if mode_num is None:
-            raise ValueError(
-                f'Feature {feature_key!r} {edge_type}_data[{i}]: missing "mode" field'
-            )
+            raise ValueError(f'Feature {feature_key!r} {edge_type}_data[{i}]: missing "mode" field')
 
         if 'a' in mode:
             # Mode 1 base orbit
@@ -647,9 +685,18 @@ def _parse_edge_data(feature_key: str, edge_type: str, mode_list: Any) -> RingEd
                 rms = float(mode.get('rms', 0.0))
             except (TypeError, ValueError) as exc:
                 raise ValueError(
-                    f'Feature {feature_key!r} {edge_type}_data[{i}]: '
-                    f'invalid numeric value -- {exc}'
+                    f'Feature {feature_key!r} {edge_type}_data[{i}]: invalid numeric value -- {exc}'
                 ) from exc
+            if a <= 0:
+                raise ValueError(
+                    f'Feature {feature_key!r} {edge_type}_data[{i}]: '
+                    f"mode-1 data missing or has non-positive 'a'"
+                )
+            if rms < 0:
+                raise ValueError(
+                    f'Feature {feature_key!r} {edge_type}_data[{i}]: '
+                    f'invalid numeric value -- rms must be non-negative'
+                )
             base_orbit = RingBaseOrbitMode(
                 a=a, ae=ae, long_peri=long_peri, rate_peri=rate_peri, rms=rms
             )
@@ -662,20 +709,20 @@ def _parse_edge_data(feature_key: str, edge_type: str, mode_list: Any) -> RingEd
                 pattern_speed = float(mode.get('pattern_speed', 0.0))
             except (TypeError, ValueError) as exc:
                 raise ValueError(
-                    f'Feature {feature_key!r} {edge_type}_data[{i}]: '
-                    f'invalid numeric value -- {exc}'
+                    f'Feature {feature_key!r} {edge_type}_data[{i}]: invalid numeric value -- {exc}'
                 ) from exc
             perturbations.append(
                 RingPerturbationMode(
-                    mode_num=mode_n, amplitude=amplitude,
-                    phase=phase, pattern_speed=pattern_speed,
+                    mode_num=mode_n,
+                    amplitude=amplitude,
+                    phase=phase,
+                    pattern_speed=pattern_speed,
                 )
             )
 
     if base_orbit is None:
         raise ValueError(
-            f'Feature {feature_key!r} {edge_type}_data: '
-            f'missing mode 1 (base orbit with "a" field)'
+            f'Feature {feature_key!r} {edge_type}_data: missing mode 1 (base orbit with "a" field)'
         )
 
     return RingEdgeData(base_orbit=base_orbit, perturbations=tuple(perturbations))
@@ -686,7 +733,7 @@ def _parse_edge_data(feature_key: str, edge_type: str, mode_list: Any) -> RingEd
 # ---------------------------------------------------------------------------
 
 
-def validate_no_date_overlaps(features: Sequence['RingFeature']) -> None:
+def validate_no_date_overlaps(features: Sequence[RingFeature]) -> None:
     """Cross-feature validation: detect date-range overlaps in the same radial region.
 
     Two features "overlap" if their date ranges intersect AND their radial
@@ -708,7 +755,7 @@ def validate_no_date_overlaps(features: Sequence['RingFeature']) -> None:
     """
     feature_list = list(features)
     for i, feat_a in enumerate(feature_list):
-        for feat_b in feature_list[i + 1:]:
+        for feat_b in feature_list[i + 1 :]:
             if _radial_extents_overlap(feat_a, feat_b) and _dates_overlap(feat_a, feat_b):
                 raise ValueError(
                     f'Ring config error: features {feat_a.key!r} and {feat_b.key!r} '
@@ -718,7 +765,7 @@ def validate_no_date_overlaps(features: Sequence['RingFeature']) -> None:
                 )
 
 
-def _radial_extents_overlap(a: 'RingFeature', b: 'RingFeature') -> bool:
+def _radial_extents_overlap(a: RingFeature, b: RingFeature) -> bool:
     """Return True if the radial extents of two features overlap."""
     radii_a = [r for r, _ in a.all_base_radii()]
     radii_b = [r for r, _ in b.all_base_radii()]
@@ -731,7 +778,7 @@ def _radial_extents_overlap(a: 'RingFeature', b: 'RingFeature') -> bool:
     return max_a >= min_b and max_b >= min_a
 
 
-def _dates_overlap(a: 'RingFeature', b: 'RingFeature') -> bool:
+def _dates_overlap(a: RingFeature, b: RingFeature) -> bool:
     """Return True if two features with explicit date ranges overlap.
 
     Only checks features that BOTH have explicit date ranges. If either feature

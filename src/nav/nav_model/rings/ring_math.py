@@ -37,11 +37,17 @@ minimum is handled upstream by ``RingFeatureFilter`` before rendering. This
 function therefore always produces a valid result.
 """
 
+import logging
 from collections.abc import Sequence
 
 import numpy as np
 
 from nav.support.types import NDArrayFloatType
+
+# Smallest positive float used to avoid division by zero in per-pixel formulas.
+_FLOAT64_MIN_POS = float(np.finfo(np.float64).tiny)
+
+_logger = logging.getLogger(__name__)
 
 
 def compute_antialiasing(
@@ -76,15 +82,19 @@ def compute_antialiasing(
 
     Returns:
         Array of shade values in [0, max_value], same shape as ``radii``.
+
+    Zero entries in ``resolutions`` are replaced with a tiny positive value before
+    dividing so shades stay finite; results are clipped to [0, ``max_value``].
     """
     shade_sign = 1.0 if shade_above else -1.0
 
-    shade = 1.0 - shade_sign * (radii - edge_radius) / resolutions
+    res = np.asarray(resolutions, dtype=np.float64)
+    res_safe = np.maximum(res, _FLOAT64_MIN_POS)
+
+    shade = 1.0 - shade_sign * (radii - edge_radius) / res_safe
     shade -= 0.5
 
-    shade_arr = np.asarray(shade, dtype=np.float64)
-    shade_arr[shade_arr < 0.0] = 0.0
-    shade_arr[shade_arr > 1.0] = 1.0
+    shade_arr = np.clip(np.asarray(shade, dtype=np.float64), 0.0, 1.0)
     shade_arr *= max_value
 
     return shade_arr
@@ -127,10 +137,14 @@ def compute_fade_integral(
 
     Returns:
         Per-pixel integral values, same shape as ``a0``.
+
+    Elements of ``width`` must be non-negative; each is clamped to a tiny
+    positive value before dividing so ``compute_edge_fade`` (which may supply
+    ``half_dist == 0``) does not produce NaNs or infinities.
     """
+    w = np.maximum(np.asarray(width, dtype=np.float64), _FLOAT64_MIN_POS)
     result = (
-        (1.0 + shade_sign * edge_radius / width) * (a1 - a0)
-        + shade_sign * (a0**2 - a1**2) / (2.0 * width)
+        (1.0 + shade_sign * edge_radius / w) * (a1 - a0) + shade_sign * (a0**2 - a1**2) / (2.0 * w)
     ) / resolutions
     return np.asarray(result, dtype=np.float64)
 
@@ -197,10 +211,11 @@ def compute_edge_fade(
         [0, 1] before adding, so the result may exceed 1.0 if the model
         already has non-zero values).
     """
-    shade_sign = 1 if shade_above else -1
+    shade_sign = 1.0 if shade_above else -1.0
 
     # Per-pixel fade width in km
     fade_width_km: NDArrayFloatType = (fade_width_pix * resolutions).astype(np.float64)
+    requested_fade_km = fade_width_km.copy()
 
     # Conflict detection: reduce fade_width_km when a neighbor is in the shade
     # direction. np.minimum handles all neighbors correctly -- a very distant
@@ -213,6 +228,18 @@ def compute_edge_fade(
         if signed_dist > 0:
             half_dist = signed_dist / 2.0
             fade_width_km = np.minimum(fade_width_km, half_dist)
+
+    narrowed = fade_width_km < requested_fade_km
+    if np.any(narrowed):
+        n_narrowed = int(np.count_nonzero(narrowed))
+        _logger.debug(
+            'compute_edge_fade: neighbor edges narrowed fade width at %d / %d pixels '
+            '(edge_radius=%.3f km, shade_above=%s)',
+            n_narrowed,
+            narrowed.size,
+            edge_radius,
+            shade_above,
+        )
 
     # Per-pixel fade zone boundaries
     pixel_lower = radii - resolutions / 2.0
@@ -238,83 +265,90 @@ def compute_edge_fade(
     eq_case3 = eq3 & ~eq_case1
 
     shade = np.zeros(radii.shape, dtype=np.float64)
+    edge_arr = np.full_like(radii, edge_radius)
 
     if shade_above:
-        edge_arr = np.full_like(radii, edge_radius)
         if np.any(eq_case1):
-            shade[eq_case1] = compute_fade_integral(
-                edge_arr,
-                fade_end,
+            m = eq_case1
+            shade[m] = compute_fade_integral(
+                edge_arr[m],
+                fade_end[m],
                 edge_radius=edge_radius,
-                width=fade_width_km,
-                resolutions=resolutions,
+                width=fade_width_km[m],
+                resolutions=resolutions[m],
                 shade_sign=1.0,
-            )[eq_case1]
+            )
         if np.any(eq_case4):
-            shade[eq_case4] = compute_fade_integral(
-                pixel_lower,
-                pixel_upper,
+            m = eq_case4
+            shade[m] = compute_fade_integral(
+                pixel_lower[m],
+                pixel_upper[m],
                 edge_radius=edge_radius,
-                width=fade_width_km,
-                resolutions=resolutions,
+                width=fade_width_km[m],
+                resolutions=resolutions[m],
                 shade_sign=1.0,
-            )[eq_case4]
+            )
         if np.any(eq_case2):
-            shade[eq_case2] = compute_fade_integral(
-                edge_arr,
-                pixel_upper,
+            m = eq_case2
+            shade[m] = compute_fade_integral(
+                edge_arr[m],
+                pixel_upper[m],
                 edge_radius=edge_radius,
-                width=fade_width_km,
-                resolutions=resolutions,
+                width=fade_width_km[m],
+                resolutions=resolutions[m],
                 shade_sign=1.0,
-            )[eq_case2]
+            )
         if np.any(eq_case3):
-            shade[eq_case3] = compute_fade_integral(
-                pixel_lower,
-                fade_end,
+            m = eq_case3
+            shade[m] = compute_fade_integral(
+                pixel_lower[m],
+                fade_end[m],
                 edge_radius=edge_radius,
-                width=fade_width_km,
-                resolutions=resolutions,
+                width=fade_width_km[m],
+                resolutions=resolutions[m],
                 shade_sign=1.0,
-            )[eq_case3]
+            )
     else:
-        edge_arr = np.full_like(radii, edge_radius)
         if np.any(eq_case1):
-            shade[eq_case1] = compute_fade_integral(
-                fade_end,
-                edge_arr,
+            m = eq_case1
+            shade[m] = compute_fade_integral(
+                fade_end[m],
+                edge_arr[m],
                 edge_radius=edge_radius,
-                width=fade_width_km,
-                resolutions=resolutions,
+                width=fade_width_km[m],
+                resolutions=resolutions[m],
                 shade_sign=-1.0,
-            )[eq_case1]
+            )
         if np.any(eq_case4):
-            shade[eq_case4] = compute_fade_integral(
-                pixel_lower,
-                pixel_upper,
+            m = eq_case4
+            shade[m] = compute_fade_integral(
+                pixel_lower[m],
+                pixel_upper[m],
                 edge_radius=edge_radius,
-                width=fade_width_km,
-                resolutions=resolutions,
+                width=fade_width_km[m],
+                resolutions=resolutions[m],
                 shade_sign=-1.0,
-            )[eq_case4]
+            )
         if np.any(eq_case2):
-            shade[eq_case2] = compute_fade_integral(
-                pixel_lower,
-                edge_arr,
+            m = eq_case2
+            shade[m] = compute_fade_integral(
+                pixel_lower[m],
+                edge_arr[m],
                 edge_radius=edge_radius,
-                width=fade_width_km,
-                resolutions=resolutions,
+                width=fade_width_km[m],
+                resolutions=resolutions[m],
                 shade_sign=-1.0,
-            )[eq_case2]
+            )
         if np.any(eq_case3):
-            shade[eq_case3] = compute_fade_integral(
-                fade_end,
-                pixel_upper,
+            m = eq_case3
+            shade[m] = compute_fade_integral(
+                fade_end[m],
+                pixel_upper[m],
                 edge_radius=edge_radius,
-                width=fade_width_km,
-                resolutions=resolutions,
+                width=fade_width_km[m],
+                resolutions=resolutions[m],
                 shade_sign=-1.0,
-            )[eq_case3]
+            )
 
     shade = np.clip(shade, 0.0, 1.0)
     return np.asarray(model + shade, dtype=np.float64)

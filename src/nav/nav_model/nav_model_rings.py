@@ -19,6 +19,9 @@ configuration loading, backplane access, and ``NavModelResult`` construction.
 
 **Config key names** (as of this version):
 
+- ``general.log_level_model_rings``: Log level for the ``CREATE RINGS MODEL``
+  ``PdsLogger.open()`` block and for the stdlib ``nav.nav_model.rings`` logger
+  during model creation (filter, feature render, fade math at ``logging.debug``).
 - ``epoch``: UTC epoch string for radial mode calculations (required).
 - ``fade_width_pix``: Desired fade extent in pixels for single-edge features.
 - ``min_allowed_fade_width_pix``: Minimum allowed fade after conflict reduction.
@@ -38,7 +41,7 @@ from nav.support.time import now_dt, utc_to_et
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
 from .nav_model_result import NavModelResult
-from .nav_model_rings_base import NavModelRingsBase
+from .nav_model_rings_base import NavModelRingsBase, rings_subpackage_log_level
 from .rings import (
     RingFeature,
     RingFeatureFilter,
@@ -99,7 +102,11 @@ class NavModelRings(NavModelRingsBase):
         self._metadata = metadata
         self._models.clear()
 
-        with self._logger.open('CREATE RINGS MODEL'):
+        log_level = self._config.general.get('log_level_model_rings')
+        with (
+            self._logger.open('CREATE RINGS MODEL', level=log_level),
+            rings_subpackage_log_level(log_level),
+        ):
             self._create_model(
                 always_create_model=always_create_model,
                 never_create_model=never_create_model,
@@ -111,7 +118,14 @@ class NavModelRings(NavModelRingsBase):
         metadata['elapsed_time_sec'] = (end_time - start_time).total_seconds()
 
     def _create_empty_model_result(self) -> NavModelResult:
-        """Return an empty NavModelResult with zeros image/mask and inf range."""
+        """Build a placeholder ``NavModelResult`` when no ring content is rendered.
+
+        Returns:
+            ``NavModelResult`` with ``model_img`` and ``model_mask`` as extended-FOV
+            zero arrays from the observation, ``range`` filled with ``math.inf``,
+            ``uncertainty`` 0.0, ``confidence`` 1.0, and other optional fields unset
+            (``weighted_mask``, ``blur_amount``, ``stretch_regions``, ``annotations``).
+        """
         obs = self.obs
         empty_img = obs.make_extfov_zeros()
         empty_mask = obs.make_extfov_false()
@@ -142,6 +156,18 @@ class NavModelRings(NavModelRingsBase):
                 useful contents.
             never_create_model: If True, only creates metadata without rendering.
             create_annotations: If True, creates text annotations for the model.
+
+        Returns:
+            None. Appends ``NavModelResult`` entries to ``self._models`` when
+            features are rendered; leaves ``self._models`` empty when returning
+            early or when ``never_create_model`` is True (after updating
+            ``self._metadata``).
+
+        Raises:
+            ValueError: If the planet config is missing ``epoch``, numeric
+                parameters are out of range, a feature dict is malformed, or
+                ``RingFeature.from_config`` / ``validate_no_date_overlaps`` rejects
+                the configuration.
         """
         obs = self.obs
         planet = obs.closest_planet
@@ -188,7 +214,7 @@ class NavModelRings(NavModelRingsBase):
         if min_feature_pixels <= 0:
             raise ValueError(f'Invalid min_feature_pixels {min_feature_pixels} for planet {planet}')
 
-        self._logger.info(
+        self._logger.debug(
             'Planet: %s, epoch: %s, fade_width_pix: %.1f',
             planet,
             epoch_str,
@@ -214,7 +240,7 @@ class NavModelRings(NavModelRingsBase):
             features.append(RingFeature.from_config(key, data))
 
         validate_no_date_overlaps(features)
-        self._logger.info('Loaded %d ring features for %s', len(features), planet)
+        self._logger.debug('Loaded %d ring features for %s', len(features), planet)
 
         # ------------------------------------------------------------------
         # Check ring visibility
@@ -222,7 +248,7 @@ class NavModelRings(NavModelRingsBase):
         ring_target = f'{planet.lower()}:ring'
         bp_radii = obs.ext_bp.ring_radius(ring_target)
         if bp_radii.is_all_masked():
-            self._logger.info('No rings visible in observation')
+            self._logger.debug('No rings visible in observation')
             if not always_create_model:
                 return
             self._models.append(self._create_empty_model_result())
@@ -230,7 +256,7 @@ class NavModelRings(NavModelRingsBase):
 
         min_radius = float(bp_radii.min().vals)
         max_radius = float(bp_radii.max().vals)
-        self._logger.info('Ring radii: min=%.2f km, max=%.2f km', min_radius, max_radius)
+        self._logger.debug('Ring radii: min=%.2f km, max=%.2f km', min_radius, max_radius)
 
         # ------------------------------------------------------------------
         # Build resolutions backplane and resolution-at-radius lookup
@@ -264,12 +290,12 @@ class NavModelRings(NavModelRingsBase):
         )
         surviving = feature_filter.filter(features)
         if not surviving:
-            self._logger.warning('No ring features survived filtering')
+            self._logger.debug('No ring features survived filtering')
             if always_create_model:
                 self._models.append(self._create_empty_model_result())
             return
 
-        self._logger.info('%d features survived filtering', len(surviving))
+        self._logger.debug('%d features survived filtering', len(surviving))
 
         # ------------------------------------------------------------------
         # Handle never_create_model
@@ -300,16 +326,26 @@ class NavModelRings(NavModelRingsBase):
         # ------------------------------------------------------------------
         # Render each surviving feature
         # ------------------------------------------------------------------
+        render_context = RingsRenderContext(
+            obs=obs,
+            ring_target=ring_target,
+            epoch=epoch,
+            resolutions=resolutions,
+            fade_width_pix=fade_width_pix,
+            all_edge_radii=tuple(all_edge_radii),
+        )
         for feature in surviving:
-            context = RingsRenderContext(
-                obs=obs,
-                ring_target=ring_target,
-                epoch=epoch,
-                resolutions=resolutions,
-                fade_width_pix=fade_width_pix,
-                all_edge_radii=tuple(all_edge_radii),
+            self._logger.debug(
+                'Rendering ring feature %r type=%s',
+                feature.key,
+                feature.feature_type.value,
             )
-            render_results = feature.render(context)
+            render_results = feature.render(render_context)
+            self._logger.debug(
+                'Ring feature %r produced %d render result(s)',
+                feature.key,
+                len(render_results),
+            )
 
             for render_result in render_results:
                 feat_model = render_result.model_img
@@ -350,4 +386,4 @@ class NavModelRings(NavModelRingsBase):
         ]
 
         n = len(self._models)
-        self._logger.info('Model created: %d result%s', n, 's' if n != 1 else '')
+        self._logger.debug('Model created: %d result%s', n, 's' if n != 1 else '')

@@ -126,7 +126,7 @@ Feature-Level Parameters
      - Optional UTC date string. The feature is active only for observations
        strictly before this date.
 
-Edge Mode Parameters (mode 1 — base orbit)
+Edge Mode Parameters (mode 1 - base orbit)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. list-table::
@@ -149,7 +149,7 @@ Edge Mode Parameters (mode 1 — base orbit)
      - Edge position uncertainty, in km (1-sigma RMS). Used for
        ``NavModelResult.uncertainty``.
 
-Edge Mode Parameters (mode > 1 — perturbation modes)
+Edge Mode Parameters (mode > 1 - perturbation modes)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. list-table::
@@ -159,7 +159,7 @@ Edge Mode Parameters (mode > 1 — perturbation modes)
    * - Field
      - Description
    * - ``mode``
-     - Mode number. Values 2–90 are radial perturbations (supported).
+     - Mode number. Values 2-90 are radial perturbations (supported).
        Values > 90 are inclination modes (stored but silently skipped during
        rendering because the current backplane API does not support them).
    * - ``amplitude``

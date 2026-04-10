@@ -64,7 +64,7 @@ class RingBaseOrbitMode:
             Used as the uncertainty measure for navigation.
 
     Raises:
-        ValueError: If ``a`` <= 0 or ``rms`` < 0.
+        ValueError: If ``a`` <= 0, ``ae`` < 0, or ``rms`` < 0.
     """
 
     a: float
@@ -77,6 +77,8 @@ class RingBaseOrbitMode:
         """Validate field ranges at construction time."""
         if self.a <= 0:
             raise ValueError(f'RingBaseOrbitMode.a must be > 0, got {self.a}')
+        if self.ae < 0:
+            raise ValueError(f'RingBaseOrbitMode.ae must be >= 0, got {self.ae}')
         if self.rms < 0:
             raise ValueError(f'RingBaseOrbitMode.rms must be >= 0, got {self.rms}')
 
@@ -96,16 +98,36 @@ class RingPerturbationMode:
     ``RingEdgeData.radial_perturbations()`` to filter them out.
 
     Parameters:
-        mode_num: Perturbation mode number. Values > 90 indicate inclination modes.
+        mode_num: Perturbation mode number passed to ``oops.ext_bp.radial_mode``.
+            Values > 90 indicate inclination modes. Mission ring tables also use
+            non-positive indices (e.g. ``0`` or negative modes in Saturn YAML).
         amplitude: Perturbation amplitude in km.
         phase: Perturbation phase in degrees.
         pattern_speed: Pattern speed in degrees/day.
+
+    Raises:
+        ValueError: If ``mode_num`` is not an integer (``bool`` is rejected) or
+            ``amplitude`` is negative or not a real number.
     """
 
     mode_num: int
     amplitude: float
     phase: float
     pattern_speed: float
+
+    def __post_init__(self) -> None:
+        """Validate mode number and amplitude at construction time."""
+        if isinstance(self.mode_num, bool) or not isinstance(self.mode_num, int):
+            raise ValueError(
+                f'RingPerturbationMode.mode_num must be int (not bool), got {self.mode_num!r}'
+            )
+        if isinstance(self.amplitude, bool) or not isinstance(self.amplitude, (int, float)):
+            raise ValueError(
+                f'RingPerturbationMode.amplitude must be a non-negative number, '
+                f'got {self.amplitude!r}'
+            )
+        if self.amplitude < 0:
+            raise ValueError(f'RingPerturbationMode.amplitude must be >= 0, got {self.amplitude}')
 
     @property
     def is_inclination_mode(self) -> bool:

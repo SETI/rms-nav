@@ -11,6 +11,11 @@ metadata (image shape, config font settings) that is naturally owned by the
 ``NavModel`` base class -- it is not a pure math function.
 """
 
+import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import Any
+
 import numpy as np
 import oops
 from scipy import ndimage
@@ -28,6 +33,37 @@ from nav.annotation import (
 from nav.support.types import NDArrayBoolType
 
 from .nav_model import NavModel
+
+
+@contextmanager
+def rings_subpackage_log_level(level_name: Any) -> Iterator[None]:
+    """Apply a stdlib log level to the ``nav.nav_model.rings`` logger hierarchy.
+
+    Child loggers (e.g. ``nav.nav_model.rings.ring_filter``) inherit this level
+    while their own level is ``logging.NOTSET``, so ``logging.debug`` calls in the
+    rings subpackage follow ``general.log_level_model_rings`` during ring model
+    creation.
+
+    Parameters:
+        level_name: Name such as ``'DEBUG'`` or ``'INFO'``, or ``None`` to skip.
+
+    Yields:
+        None.
+    """
+    if level_name is None:
+        yield
+        return
+    level = getattr(logging, str(level_name).upper(), None)
+    if not isinstance(level, int):
+        yield
+        return
+    pkg_log = logging.getLogger('nav.nav_model.rings')
+    previous = pkg_log.level
+    pkg_log.setLevel(level)
+    try:
+        yield
+    finally:
+        pkg_log.setLevel(previous)
 
 
 class NavModelRingsBase(NavModel):

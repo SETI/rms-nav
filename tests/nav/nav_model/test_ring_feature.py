@@ -197,7 +197,7 @@ def test_from_config_negative_a_raises() -> None:
         'inner_data': [{'mode': 1, 'a': -100.0, 'rms': 1.0, 'ae': 0.0,
                         'long_peri': 0.0, 'rate_peri': 0.0}],
     }
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=r"non-positive|'a'"):
         RingFeature.from_config('neg_a', data)
 
 
@@ -218,7 +218,7 @@ def test_from_config_negative_rms_raises() -> None:
         'inner_data': [{'mode': 1, 'a': 100_000.0, 'rms': -1.0, 'ae': 0.0,
                         'long_peri': 0.0, 'rate_peri': 0.0}],
     }
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=r'(?i)rms.*non-negative'):
         RingFeature.from_config('neg_rms', data)
 
 
@@ -228,7 +228,7 @@ def test_from_config_empty_mode_list_raises() -> None:
         'feature_type': 'RINGLET',
         'inner_data': [],
     }
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=r'non-empty'):
         RingFeature.from_config('empty_modes', data)
 
 

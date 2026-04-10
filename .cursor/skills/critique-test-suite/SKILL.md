@@ -141,7 +141,7 @@ Apply these criteria when reviewing each test file and each test case.
 
 - **Target:** At least 90% line coverage for the package under test (or the project's stated target).
 - **Scope:** Coverage should cover almost all non-exception lines; exception branches may be excluded from the percentage but should still be tested where they represent distinct behavior.
-- **Measurement:** Coverage must be checked by running the **entire test suite** (e.g. `pytest tests/ --cov=src --cov-report=term-missing`), not a subset. Note if 80% is met and whether measurement is full-suite.
+- **Measurement:** Coverage must be checked by running the **entire test suite** (e.g. `pytest tests/ --cov=src --cov-report=term-missing`), not a subset. Note if 90% is met and whether measurement is full-suite.
 - **Report:** List modules or packages below the target or with significant uncovered non-exception lines.
 
 ### 19. Pytest markers and registration
@@ -189,7 +189,7 @@ Produce a single markdown report with the following structure. Do **not** edit a
 
 ## Executive summary
 - Overall assessment (strengths, main gaps).
-- **Coverage:** At least 80% and almost all non-exception lines; measured by running the **entire test suite**. Note if met and whether measurement is full-suite.
+- **Coverage:** At least 90% and almost all non-exception lines; measured by running the **entire test suite**. Note if met and whether measurement is full-suite.
 - **Exception messages:** When testing exceptions with defined messages, tests must assert on message contents (e.g. `pytest.raises(...) as exc_info`, `str(exc_info.value)`), not only that the exception was raised.
 - High-priority fixes vs. nice-to-have.
 
@@ -245,7 +245,7 @@ Produce a single markdown report with the following structure. Do **not** edit a
 [Clarity, speed, assertion messages, AAA, logic in tests.]
 
 ## 18. Code coverage
-[Target 80%; full-suite measurement; modules below target.]
+[Target 90%; full-suite measurement; modules below target.]
 
 ## 19. Pytest markers
 [Unregistered marks, strict-markers, xfail audit, stale skips, categorization.]
@@ -266,7 +266,7 @@ Produce a single markdown report with the following structure. Do **not** edit a
 
 [Self-contained prompt for an AI to apply the fixes. Include:
 - Report sections as context.
-- **Coverage:** Run coverage using the entire test suite; ensure at least 80% and cover almost all non-exception lines.
+- **Coverage:** Run coverage using the entire test suite; ensure at least 90% and cover almost all non-exception lines.
 - **Exception messages:** When testing exceptions with defined messages, assert on message contents (e.g. `pytest.raises(...) as exc_info`, `str(exc_info.value)`).
 - Instruction to fix tests according to the report without changing production code.
 - Instruction to preserve existing passing behavior and only add/change assertions and test structure.]

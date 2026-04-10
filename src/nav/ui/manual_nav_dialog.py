@@ -46,10 +46,19 @@ def _apply_stretch_gamma(
 
 
 def _bilinear_interpolate_fov(arr: NDArrayFloatType, img_v: float, img_u: float) -> float:
-    """Bilinear sample a 2D FOV array at fractional pixel (img_v, img_u)."""
+    """Bilinear sample a 2D FOV array at fractional pixel ``(img_v, img_u)``.
+
+    Parameters:
+        arr: 2-D float image in FOV coordinates.
+        img_v: Fractional row index (v).
+        img_u: Fractional column index (u).
+
+    Returns:
+        Interpolated sample as a scalar ``float``.
+    """
     h, w = arr.shape
-    v0 = int(img_v)
-    u0 = int(img_u)
+    v0 = math.floor(img_v)
+    u0 = math.floor(img_u)
     v1 = min(v0 + 1, h - 1)
     u1 = min(u0 + 1, w - 1)
     dv = img_v - v0
@@ -431,6 +440,11 @@ class ManualNavDialog(QDialog):
 
     # ---- Event handlers ----
 
+    @staticmethod
+    def _is_checked(state: int) -> bool:
+        """Return True if ``state`` is the Qt Checked checkbox state."""
+        return state == int(cast(int, Qt.CheckState.Checked.value))
+
     def _on_black_changed(self, val: float) -> None:
         self._black = float(val)
         self._lbl_black.setText(f'{self._black:.5f}')
@@ -468,11 +482,11 @@ class ManualNavDialog(QDialog):
         self._refresh_overlay()
 
     def _on_show_image_changed(self, state: Any) -> None:
-        self._show_image = state == int(cast(int, Qt.CheckState.Checked.value))
+        self._show_image = self._is_checked(state)
         self._refresh_overlay()
 
     def _on_show_model_changed(self, state: Any) -> None:
-        self._show_model = state == int(cast(int, Qt.CheckState.Checked.value))
+        self._show_model = self._is_checked(state)
         self._slider_model_transparency.setEnabled(self._show_model)
         self._lbl_model_transparency.setEnabled(self._show_model)
         self._refresh_overlay()
@@ -759,7 +773,7 @@ class ManualNavDialog(QDialog):
 
     # ---- Zoom options ----
     def _toggle_zoom_sharp(self, state: Any) -> None:
-        self._zoom_sharp = state == int(cast(int, Qt.CheckState.Checked.value))
+        self._zoom_sharp = self._is_checked(state)
         self._update_display_only()
 
     # Internal buffers

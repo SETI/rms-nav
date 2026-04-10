@@ -10,7 +10,6 @@ All oops backplane calls are mocked so these tests run without OOPS_RESOURCES.
 
 from __future__ import annotations
 
-import math
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -53,6 +52,10 @@ def _make_bp(obs: MagicMock, *, radii_all_masked: bool = False) -> MagicMock:
     Parameters:
         obs: Mock observation to wire.
         radii_all_masked: If True, ring_radius returns an all-masked backplane.
+
+    Returns:
+        The ``MagicMock`` for ``ring_radius`` (``bp_radii``) attached at
+        ``obs.ext_bp.ring_radius``.
     """
     shape = obs.extdata_shape_vu
 
@@ -86,6 +89,15 @@ def _make_bp(obs: MagicMock, *, radii_all_masked: bool = False) -> MagicMock:
 
 
 def _make_edge_data(a: float = 100_000.0) -> list[dict[str, Any]]:
+    """Build a one-element inner/outer edge mode list for tests.
+
+    Parameters:
+        a: Mode-1 semi-major axis in km (default ``100_000.0``).
+
+    Returns:
+        ``list[dict[str, Any]]`` with keys ``mode``, ``a``, ``rms``, ``ae``,
+        ``long_peri``, and ``rate_peri``.
+    """
     return [{'mode': 1, 'a': a, 'rms': 1.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0}]
 
 
@@ -97,7 +109,21 @@ def _make_planet_config(
     min_feature: float = 2.0,
     features: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Return a planet_config dict using the new YAML format."""
+    """Return a planet_config dict using the new YAML format.
+
+    Parameters:
+        epoch: Reference UTC epoch string (default ``2008-01-01 12:00:00``).
+        fade_width_pix: Nominal fade width in pixels (default ``100.0``).
+        min_allowed: ``min_allowed_fade_width_pix`` (default ``3.0``).
+        min_feature: ``min_feature_pixels`` (default ``2.0``).
+        features: Optional map of feature key to feature spec dicts; each spec
+            includes ``feature_type``, ``name``, ``inner_data``, and ``outer_data``
+            when both edges are present.
+
+    Returns:
+        Dict with keys ``epoch``, ``fade_width_pix``, ``min_allowed_fade_width_pix``,
+        ``min_feature_pixels``, and ``features``.
+    """
     if features is None:
         features = {
             'test_ringlet': {
@@ -137,7 +163,7 @@ def _make_rings_model(
     model._models = []
     model._metadata = {}
     model._logger = MagicMock()
-    model._logger.open.return_value.__enter__ = lambda s: None
+    model._logger.open.return_value.__enter__ = lambda self: None
     model._logger.open.return_value.__exit__ = MagicMock(return_value=False)
     return model
 
@@ -429,6 +455,5 @@ class TestNeverCreateModel:
             )
 
         assert model._models == []
-        assert 'planet' in model._metadata
-        assert 'feature_count' in model._metadata
+        assert model._metadata['planet'] == 'SATURN'
         assert model._metadata['feature_count'] == 1

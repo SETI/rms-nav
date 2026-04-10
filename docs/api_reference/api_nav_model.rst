@@ -49,6 +49,9 @@ nav.nav_model
 nav.nav_model.rings
 -------------------
 
+The ``nav.nav_model.rings`` subpackage provides types, features, filters, and
+rendering support for planetary ring models.
+
 .. automodule:: nav.nav_model.rings
    :members:
    :undoc-members:

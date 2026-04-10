@@ -51,6 +51,7 @@ Configuration files use YAML format and are organized into sections:
      pds3_holdings_root: /path/to/pds3
 
    general:
+     log_level_model_rings: DEBUG
      log_level_nav_correlate_all: DEBUG
 
    offset:
@@ -63,6 +64,10 @@ Configuration files use YAML format and are organized into sections:
 
 Each section can contain multiple settings. When multiple configuration files
 define the same setting, the value from the last file loaded takes precedence.
+
+The ``general.log_level_model_rings`` key controls verbosity while building real
+or simulated ring navigation models (``DEBUG`` enables filter, render, and
+fade-narrowing diagnostics under the ``nav.nav_model.rings`` loggers).
 
 Creating a User Configuration File
 ===================================

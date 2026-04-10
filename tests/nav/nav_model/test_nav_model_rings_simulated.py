@@ -15,13 +15,12 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import numpy as np
-import pytest
 
 from nav.nav_model.nav_model_rings_simulated import (
     NavModelRingsSimulated,
     _sim_params_to_feature_config,
 )
-from nav.nav_model.rings import RingFeatureType
+from nav.nav_model.rings import RingFeature, RingFeatureType
 
 
 # ---------------------------------------------------------------------------
@@ -94,7 +93,7 @@ def _make_simulated_model(
     model._ring_name = ring_name
     model._sim_params = sim_params.copy()
     model._logger = MagicMock()
-    model._logger.open.return_value.__enter__ = lambda s: None
+    model._logger.open.return_value.__enter__ = lambda self: None
     model._logger.open.return_value.__exit__ = MagicMock(return_value=False)
     return model
 
@@ -247,8 +246,6 @@ class TestFeatureTypeDetection:
     def test_gap_feature_type(self) -> None:
         """GAP sim_params produces a GAP feature type (validated by from_config)."""
         p = _make_sim_params(feature_type='GAP')
-        from nav.nav_model.nav_model_rings_simulated import _sim_params_to_feature_config
-        from nav.nav_model.rings import RingFeature
         cfg = _sim_params_to_feature_config(p)
         feature = RingFeature.from_config('test', cfg)
         assert feature.feature_type is RingFeatureType.GAP
@@ -256,8 +253,6 @@ class TestFeatureTypeDetection:
     def test_ringlet_feature_type(self) -> None:
         """RINGLET sim_params produces a RINGLET feature type."""
         p = _make_sim_params(feature_type='RINGLET')
-        from nav.nav_model.nav_model_rings_simulated import _sim_params_to_feature_config
-        from nav.nav_model.rings import RingFeature
         cfg = _sim_params_to_feature_config(p)
         feature = RingFeature.from_config('test', cfg)
         assert feature.feature_type is RingFeatureType.RINGLET

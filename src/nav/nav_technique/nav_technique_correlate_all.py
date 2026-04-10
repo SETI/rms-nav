@@ -101,16 +101,6 @@ class NavTechniqueCorrelateAll(NavTechnique):
             ):
                 raise ValueError('Combined model has no result or missing image/mask')
 
-            import matplotlib.pyplot as plt
-
-            plt.figure()
-            plt.imshow(obs.data, cmap='gray')
-            plt.figure()
-            plt.imshow(combined_model.models[0].model_img, cmap='gray')
-            plt.figure()
-            plt.imshow(combined_model.models[0].model_mask, cmap='gray')
-            plt.show()
-
             result = navigate_with_pyramid_kpeaks(
                 obs.extdata,
                 combined_model.models[0].model_img,

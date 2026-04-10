@@ -13,6 +13,9 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+# Pixel spacing between sliders and value labels in ``build_stretch_controls`` rows.
+STRETCH_CONTROLS_ROW_SPACING = 4
+
 
 class ZoomPanController:
     """
@@ -192,7 +195,24 @@ def build_stretch_controls(
         value_label_min_width: Minimum width for numeric value labels (smaller leaves more
             room for the slider when paired with slider_horizontal_stretch).
         slider_horizontal_stretch: If 1, sliders expand in the row layout (Qt stretch factor).
+
+    Raises:
+        TypeError: If ``value_label_min_width`` or ``slider_horizontal_stretch`` is not int.
+        ValueError: If ``value_label_min_width`` or ``slider_horizontal_stretch`` is out of range.
     """
+    if not isinstance(value_label_min_width, int):
+        raise TypeError(
+            f'value_label_min_width must be int, not {type(value_label_min_width).__name__}'
+        )
+    if value_label_min_width <= 0:
+        raise ValueError(f'value_label_min_width must be > 0, got {value_label_min_width}')
+    if not isinstance(slider_horizontal_stretch, int):
+        raise TypeError(
+            f'slider_horizontal_stretch must be int, not {type(slider_horizontal_stretch).__name__}'
+        )
+    if slider_horizontal_stretch < 0:
+        raise ValueError(f'slider_horizontal_stretch must be >= 0, got {slider_horizontal_stretch}')
+
     # Sliders
     slider_black = QSlider(Qt.Orientation.Horizontal)
     slider_black.setRange(0, 1000)
@@ -249,15 +269,15 @@ def build_stretch_controls(
 
     # Rows in form (optional stretch gives sliders more width vs. value labels)
     row_b = QHBoxLayout()
-    row_b.setSpacing(4)
+    row_b.setSpacing(STRETCH_CONTROLS_ROW_SPACING)
     row_b.addWidget(slider_black, stretch=slider_horizontal_stretch)
     row_b.addWidget(label_black)
     row_w = QHBoxLayout()
-    row_w.setSpacing(4)
+    row_w.setSpacing(STRETCH_CONTROLS_ROW_SPACING)
     row_w.addWidget(slider_white, stretch=slider_horizontal_stretch)
     row_w.addWidget(label_white)
     row_g = QHBoxLayout()
-    row_g.setSpacing(4)
+    row_g.setSpacing(STRETCH_CONTROLS_ROW_SPACING)
     row_g.addWidget(slider_gamma, stretch=slider_horizontal_stretch)
     row_g.addWidget(label_gamma)
 

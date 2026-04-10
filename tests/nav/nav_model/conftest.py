@@ -62,9 +62,7 @@ class MockObservation:
 
     def make_extfov_inf(self) -> npt.NDArray[np.float64]:
         """Return an inf-filled float64 array (used for range arrays)."""
-        arr = np.zeros(self.extdata_shape_vu, dtype=np.float64)
-        arr[:, :] = math.inf
-        return arr
+        return np.full(self.extdata_shape_vu, math.inf, dtype=np.float64)
 
 
 @pytest.fixture
@@ -87,10 +85,23 @@ def make_mode1_data(
     a: float = 100_000.0,
     rms: float = 1.0,
     ae: float = 10.0,
+    *,
     long_peri: float = 0.0,
     rate_peri: float = 0.0,
 ) -> list[dict[str, Any]]:
-    """Return a single-mode mode-1 list (base orbit only)."""
+    """Return a single-mode mode-1 list (base orbit only).
+
+    Parameters:
+        a: Semi-major axis in km.
+        rms: Edge RMS uncertainty in km.
+        ae: Eccentricity amplitude in km.
+        long_peri: Longitude of periapsis in degrees.
+        rate_peri: Periapsis precession rate in degrees per year.
+
+    Returns:
+        ``list[dict[str, Any]]`` with one mode-1 entry (``mode``, ``a``, ``rms``,
+        ``ae``, ``long_peri``, ``rate_peri`` keys).
+    """
     return [{'mode': 1, 'a': a, 'rms': rms, 'ae': ae,
              'long_peri': long_peri, 'rate_peri': rate_peri}]
 
@@ -99,6 +110,7 @@ def make_mode1_with_perturbation(
     a: float = 100_000.0,
     rms: float = 1.0,
     ae: float = 10.0,
+    *,
     long_peri: float = 0.0,
     rate_peri: float = 0.0,
     mode_num: int = 2,
@@ -106,7 +118,22 @@ def make_mode1_with_perturbation(
     phase: float = 45.0,
     pattern_speed: float = 1.0,
 ) -> list[dict[str, Any]]:
-    """Return mode data with a base orbit plus one perturbation mode."""
+    """Return mode data with a base orbit plus one perturbation mode.
+
+    Parameters:
+        a: Semi-major axis in km.
+        rms: Edge RMS uncertainty in km.
+        ae: Eccentricity amplitude in km.
+        long_peri: Longitude of periapsis in degrees.
+        rate_peri: Periapsis precession rate in degrees per year.
+        mode_num: Perturbation mode number.
+        amplitude: Perturbation amplitude in km.
+        phase: Phase in degrees.
+        pattern_speed: Pattern speed in degrees per year.
+
+    Returns:
+        ``list[dict[str, Any]]``: mode-1 dict followed by one perturbation dict.
+    """
     return [
         {'mode': 1, 'a': a, 'rms': rms, 'ae': ae,
          'long_peri': long_peri, 'rate_peri': rate_peri},

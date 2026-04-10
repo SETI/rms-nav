@@ -6,7 +6,6 @@ RingEdgeData. Written using TDD: tests are defined before implementation.
 
 import math
 
-import numpy as np
 import pytest
 
 # These imports will fail until ring_types.py is created
@@ -16,7 +15,6 @@ from nav.nav_model.rings.ring_types import (
     RingFeatureType,
     RingPerturbationMode,
 )
-
 
 # ---------------------------------------------------------------------------
 # RingFeatureType
@@ -93,6 +91,12 @@ def test_base_orbit_mode_zero_ae_valid() -> None:
     assert m.ae == 0.0
 
 
+def test_base_orbit_mode_negative_ae_raises() -> None:
+    """Construction with ae < 0 raises ValueError."""
+    with pytest.raises(ValueError, match='ae'):
+        RingBaseOrbitMode(a=50_000.0, ae=-1.0, long_peri=0.0, rate_peri=0.0, rms=0.5)
+
+
 # ---------------------------------------------------------------------------
 # RingPerturbationMode
 # ---------------------------------------------------------------------------
@@ -130,10 +134,18 @@ def test_perturbation_mode_inclination_true_for_high_modes() -> None:
     assert mode100.is_inclination_mode
 
 
-def test_perturbation_mode_negative_amplitude_valid() -> None:
-    """Negative amplitude is allowed (it's a perturbation, can oppose the base)."""
-    m = RingPerturbationMode(mode_num=3, amplitude=-2.0, phase=0.0, pattern_speed=0.0)
-    assert m.amplitude == -2.0
+def test_perturbation_mode_negative_amplitude_raises() -> None:
+    """Negative amplitude is rejected at construction time."""
+    with pytest.raises(ValueError, match=r'amplitude must be >= 0'):
+        RingPerturbationMode(mode_num=3, amplitude=-2.0, phase=0.0, pattern_speed=0.0)
+
+
+def test_perturbation_mode_zero_and_negative_indices_valid() -> None:
+    """Mode numbers may be zero or negative (Saturn ring YAML / oops conventions)."""
+    m0 = RingPerturbationMode(mode_num=0, amplitude=1.0, phase=0.0, pattern_speed=0.0)
+    assert m0.mode_num == 0
+    mn = RingPerturbationMode(mode_num=-5, amplitude=0.45, phase=60.0, pattern_speed=1.0)
+    assert mn.mode_num == -5
 
 
 # ---------------------------------------------------------------------------
@@ -217,9 +229,7 @@ def test_edge_data_radial_perturbations_all_radial() -> None:
 
 def test_parsed_modes_base_only() -> None:
     """parsed_modes_for_backplane returns one mode-1 tuple when no perturbations."""
-    base = RingBaseOrbitMode(
-        a=100_000.0, ae=10.0, long_peri=45.0, rate_peri=180.0, rms=1.0
-    )
+    base = RingBaseOrbitMode(a=100_000.0, ae=10.0, long_peri=45.0, rate_peri=180.0, rms=1.0)
     edge = RingEdgeData(base_orbit=base, perturbations=())
     modes = edge.parsed_modes_for_backplane()
     assert len(modes) == 1
@@ -278,9 +288,9 @@ def test_parsed_modes_multiple_perturbations_ordering() -> None:
     edge = RingEdgeData(base_orbit=base, perturbations=(p3, p2))
     modes = edge.parsed_modes_for_backplane()
     assert len(modes) == 3
-    assert modes[0][0] == 1   # base first
-    assert modes[1][0] == 3   # then p3
-    assert modes[2][0] == 2   # then p2
+    assert modes[0][0] == 1  # base first
+    assert modes[1][0] == 3  # then p3
+    assert modes[2][0] == 2  # then p2
 
 
 def test_base_orbit_mode_equality() -> None:

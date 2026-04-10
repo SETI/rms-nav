@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
 
-@dataclass
+@dataclass(slots=True)
 class RingRenderResult:
     """Result of rendering a single ring feature edge or band.
 

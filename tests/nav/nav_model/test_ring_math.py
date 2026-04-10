@@ -191,7 +191,21 @@ def _direct_integral(
     resolution: float,
     shade_sign: float,
 ) -> float:
-    """Direct evaluation of the unified fade integral formula."""
+    """Direct evaluation of the unified fade integral formula.
+
+    Parameters:
+        a0: Lower integration bound (km).
+        a1: Upper integration bound (km).
+        edge_radius: Ring edge radius (km).
+        width: Fade width (km), must be positive for finite results.
+        resolution: Radial resolution (km per pixel).
+        shade_sign: +1.0 or -1.0 matching ``compute_fade_integral``.
+
+    Returns:
+        Scalar integral value (average shade contribution over the pixel interval),
+        same units as the ``compute_fade_integral`` output (dimensionless 0-1 scale
+        before clipping in ``compute_edge_fade``).
+    """
     return (
         (1.0 + shade_sign * edge_radius / width) * (a1 - a0)
         + shade_sign * (a0**2 - a1**2) / (2.0 * width)

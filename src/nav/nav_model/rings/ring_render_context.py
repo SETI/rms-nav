@@ -25,12 +25,9 @@ whose adjusted fade is still acceptable but narrower than the requested
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from nav.support.types import NDArrayFloatType
-
-if TYPE_CHECKING:
-    pass
 
 
 @dataclass(frozen=True)

@@ -54,7 +54,7 @@ def test_context_fields_set_correctly() -> None:
 def test_context_is_frozen() -> None:
     """RingsRenderContext is frozen: attribute assignment raises an error."""
     ctx = _make_context()
-    with pytest.raises(AttributeError):
+    with pytest.raises(AttributeError, match=r"cannot assign to field 'epoch'"):
         ctx.epoch = 999.0  # type: ignore[misc]
 
 
@@ -115,15 +115,20 @@ def test_result_fields_set_correctly() -> None:
     assert len(result.edge_info_list) == 1
 
 
-def test_result_uncertainty_stored() -> None:
-    """Uncertainty value is preserved exactly."""
-    result = _make_result(uncertainty=7.89)
-    assert result.uncertainty == pytest.approx(7.89)
+@pytest.mark.parametrize(
+    'uncertainty',
+    [0.0, -0.5, 1.0e100],
+    ids=['zero', 'negative', 'large'],
+)
+def test_result_uncertainty_edge_cases(uncertainty: float) -> None:
+    """Uncertainty field stores the given float including edge magnitudes."""
+    result = _make_result(uncertainty=uncertainty)
+    assert result.uncertainty == pytest.approx(uncertainty)
 
 
 def test_result_empty_edge_info_list_default() -> None:
-    """edge_info_list defaults to empty list."""
-    result = _make_result(edge_info_list=[])
+    """Default ``edge_info_list`` is an empty list when omitted."""
+    result = _make_result()
     assert result.edge_info_list == []
 
 
