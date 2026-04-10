@@ -1,0 +1,109 @@
+---
+alwaysApply: true
+description: JavaScript and TypeScript coding standards for correct, readable, maintainable, and well-typed code. Use for all JS/TS in this project.
+---
+
+# JavaScript / TypeScript Best Practices
+
+Apply these rules to ALL new and modified JavaScript and TypeScript code.
+
+## 1. Naming and Style
+
+- **Functions and variables**: Use `camelCase`. Use `SCREAMING_SNAKE_CASE` only for true constants (e.g. config flags, enum-like values).
+- **Classes, types, interfaces, and React components**: Use `PascalCase`.
+- **Private or module-internal**: Prefix with a single underscore (e.g. `_internalHelper`) where convention is used; or use `#` private class fields when targeting supported environments.
+- **Event handlers (UI)**: Prefix with `handle` (e.g. `handleClick`, `handleSubmit`). For callbacks passed as props use `on` (e.g. `onClick`, `onChange`).
+- **Boolean variables**: Use `is`, `has`, `should`, `can` (e.g. `isLoading`, `hasError`, `shouldRetry`).
+- **Maximum line length**: Prefer 100 characters; enforce with Prettier or ESLint. Break long lines at logical points.
+- **Falsy checks**: Be explicit. Use `x === null` or `x === undefined` (or `x == null` for both) when that is the intent; avoid relying on truthiness when `0`, `""`, or `false` are valid. For optional chaining prefer `?.` over manual null checks where it improves readability.
+- **Immutability**: Prefer `const`; use `let` only when reassignment is needed. Avoid mutating arguments; copy before mutating when necessary. Prefer spread and new arrays/objects over in-place mutation.
+
+## 2. General Coding
+
+- ALWAYS write simple, clear code; avoid unnecessary complexity.
+- NEVER include backwards-compatibility code (e.g. IE11) unless explicitly requested.
+- ALWAYS apply DRY. Extract repeated logic into named functions or shared modules; parameterize to generalize.
+- ALWAYS make the minimal changes necessary. Do NOT refactor or “clean up” code outside the scope of the task.
+- Prefer **early returns** and guard clauses over deep nesting. Put the happy path last when it improves readability.
+- Prefer **functional style** (pure functions, `map`/`filter`/`reduce`, no side effects in helpers) unless an imperative style is clearly simpler.
+- Use **constants** for magic strings and numbers; define them at module scope or in a shared config. Add types for constants when using TypeScript.
+- Keep **files and functions** focused. Split large files (e.g. > 300–400 lines) into smaller modules. Prefer single responsibility per function.
+- **Function ordering**: Place higher-level or orchestrating functions above the helpers they call, or group by concern so the file reads top-to-bottom.
+
+## 3. Types (TypeScript)
+
+- ALWAYS enable **strict** mode in `tsconfig.json` (`strict: true` or equivalent).
+- ALWAYS annotate **function parameters and return types** for exported and public API functions. Use inference for obvious local variables.
+- Prefer **`interface`** for object shapes; use **`type`** for unions, intersections, and mapped types.
+- Avoid **`any`**. Use **`unknown`** when the type is truly unknown and narrow with type guards. Use **`never`** for exhaustive checks.
+- Use **discriminated unions** for state or result types (e.g. `{ status: 'loading' } | { status: 'error'; error: Error }`).
+- Use **generic constraints** instead of `any` when types are parameterized. Prefer `Record<string, unknown>` over `Record<string, any>` for generic objects.
+- In **JSDoc**, use `@param`, `@returns`, and `@throws` where they add value; keep types in TypeScript syntax when using TS.
+
+## 4. Modules and Imports
+
+- Use **ES modules** (`import`/`export`). Use default exports only for single-purpose modules (e.g. a single React component per file); prefer named exports for utilities and libraries.
+- Group imports: (1) standard/library, (2) third-party, (3) local/aliased. Separate groups with a blank line. Sort alphabetically within groups or use the project’s formatter/linter.
+- Avoid **barrel files** that re-export everything; they can hurt tree-shaking and clarity. Re-export only the public API surface when needed.
+- Do NOT use **circular dependencies**. If A imports B and B imports A, extract shared code to a third module or invert the dependency.
+
+## 5. Functions and Control Flow
+
+- Keep **parameter lists short** (e.g. ≤ 3–4). For more options, use a single **options object** with typed properties.
+- Prefer **arrow functions** for callbacks and when `this` binding is not needed; use **function declarations** for top-level or named functions that benefit from hoisting.
+- Use **optional chaining** (`?.`) and **nullish coalescing** (`??`) instead of long conditional chains where they improve readability.
+- Use **template literals** for string interpolation; avoid string concatenation with `+` for dynamic strings.
+- Use **destructuring** for function parameters and return values when it reduces noise (e.g. `function run({ env, timeout }: Options)`).
+
+## 6. Error Handling and Async
+
+- Prefer **try/catch** for synchronous code that can throw; catch at the smallest scope needed. Do NOT swallow errors: log and/or rethrow or return a typed error result.
+- For **async code**, use **async/await** over raw Promises. Use `Promise.all` or `Promise.allSettled` for concurrent work; avoid sequential awaits when operations are independent.
+- Handle **rejected promises**: ensure async entry points (e.g. route handlers, event handlers) use try/catch or `.catch()` so unhandled rejections do not escape.
+- Use **typed Error** subclasses or **result types** (e.g. `{ ok: true; data: T } | { ok: false; error: Error }`) when callers need to handle errors explicitly.
+
+## 7. Comments and Documentation
+
+- ALWAYS write **self-documenting code**: clear names, small functions, minimal nesting.
+- NEVER add comments that only restate the code, reference user requests, or describe modification history.
+- ADD comments when they explain **rationale**, **non-obvious behavior**, or **trade-offs**. Keep them short and accurate.
+- Use **JSDoc** for all **exported** functions and public APIs: `@param`, `@returns`, and `@throws` (or equivalent) where useful. In TypeScript, types in the signature are the source of truth; JSDoc can add description and examples.
+- UPDATE or remove comments when code changes. Remove stale or misleading comments.
+
+## 8. Lint and Format
+
+- ALWAYS run the project’s **linter** (e.g. ESLint) and **formatter** (e.g. Prettier) on changed code. Fix all reported errors before delivering.
+- Use the project’s **ESLint config** and rule set. Do not disable rules that enforce project conventions (e.g. no `any`, consistent naming) without a documented exception.
+- Enforce **consistent quoting** (single vs double), **semicolons** (or their absence), and **trailing commas** via config; do not mix styles.
+- For **React**: enable React hooks rules (e.g. `react-hooks/rules-of-hooks`, `react-hooks/exhaustive-deps`) and follow the project’s React style.
+
+## 9. Testing
+
+- ALWAYS write **tests** for new behavior and when fixing bugs. Prefer **unit tests** for pure logic; use **integration or component tests** where behavior depends on DOM or I/O.
+- Use the project’s test framework (e.g. Vitest, Jest) and assertion style. Prefer **one logical assertion per test** (or one behavior); avoid testing multiple unrelated things in one test.
+- Name tests **descriptively** (e.g. `it('returns 404 when resource is missing', ...)`). Test **edge cases** and **error paths**, not only the happy path.
+- Prefer **isolated tests**: no shared mutable state, no reliance on order. Mock external dependencies (APIs, time) when appropriate.
+- NEVER change a test to make it pass by weakening assertions or ignoring failures. If the implementation is wrong, fix the implementation.
+
+## 10. React and UI (when applicable)
+
+- Prefer **function components** and **hooks**. Use **custom hooks** to encapsulate stateful logic; keep components focused on rendering and composition.
+- Keep **components small** and composable. Extract subcomponents or hooks when a single component grows large or has multiple responsibilities.
+- Use **key** correctly in lists (stable, unique identity); avoid array index as key when list order can change.
+- Prefer **controlled components** for form state when you need to validate or transform input; use local state for truly uncontrolled UI.
+- Do NOT mutate **state** or **props**. Update state via the setter (e.g. `setState`, `useState` updater); copy objects/arrays when updating nested state.
+
+## 11. Debugging and TODOs
+
+- Fix **bugs** as soon as they are found. If a fix is deferred, create a **tracked issue** and reference it in a short comment (e.g. `// TODO(issue-123): ...`) instead of a bare TODO.
+- Do NOT guess at bug causes. Use **logging**, **breakpoints**, and **reproduction steps** to identify root cause. If stuck, revert and re-approach from first principles.
+
+## Summary: Quick Reference
+
+| Area | Do | Avoid |
+|------|----|--------|
+| Naming | camelCase (vars/fns), PascalCase (classes/types), handle* (handlers) | any, vague names, mutating params |
+| Types | strict TS, explicit return types, unknown over any | any, untyped exports |
+| Style | const, early returns, small functions, explicit null checks | Deep nesting, magic values, large files |
+| Async | async/await, Promise.all for concurrency, catch at boundary | Unhandled rejections, sequential awaits when parallel is possible |
+| Tests | One behavior per test, descriptive names, isolate and mock | Weakening assertions to make tests pass |

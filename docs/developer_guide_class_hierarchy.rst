@@ -188,6 +188,51 @@ The following Mermaid diagram shows the complete class hierarchy of the RMS-NAV 
           +create_model(always_create_model=False, never_create_model=False, create_annotations=True)
       }
 
+      class RingFeature {
+          <<frozen dataclass>>
+          +key: str
+          +feature_type: RingFeatureType
+          +inner_edge: RingEdgeData | None
+          +outer_edge: RingEdgeData | None
+          +is_visible_at(obs_time_et) bool
+          +is_in_radius_range(min_r, max_r) bool
+          +uncertainty: float
+          +all_base_radii() Sequence
+          +from_config(key, data)$ RingFeature
+          +render(context) list[RingRenderResult]
+      }
+
+      class RingEdgeData {
+          <<frozen dataclass>>
+          +base_orbit: RingBaseOrbitMode
+          +perturbations: tuple
+          +base_radius: float
+          +rms: float
+          +parsed_modes_for_backplane() list
+      }
+
+      class RingFeatureFilter {
+          +__init__(obs_time_et, min_radius, max_radius, ...)
+          +filter(features) list[RingFeature]
+      }
+
+      class RingsRenderContext {
+          <<frozen dataclass>>
+          +obs
+          +ring_target: str
+          +epoch: float
+          +resolutions: ndarray
+          +fade_width_pix: float
+          +all_edge_radii: tuple
+      }
+
+      class RingRenderResult {
+          +model_img: ndarray
+          +model_mask: ndarray
+          +uncertainty: float
+          +edge_info_list: list
+      }
+
       class NavModelTitan {
           +__init__(name, obs, *, config=None)
           +create_model(always_create_model=False, never_create_model=False, create_annotations=True)
@@ -288,6 +333,12 @@ The following Mermaid diagram shows the complete class hierarchy of the RMS-NAV 
       NavModelRingsBase <|-- NavModelRings
       NavModelRingsBase <|-- NavModelRingsSimulated
 
+      NavModelRings --> RingFeature : loads & renders
+      RingFeature --> RingEdgeData : inner/outer edge
+      NavModelRings --> RingFeatureFilter : filters
+      RingFeature --> RingsRenderContext : render input
+      RingFeature --> RingRenderResult : render output
+
       NavTechnique <|-- NavTechniqueCorrelateAll
       NavTechnique <|-- NavTechniqueManual
       NavTechnique <|-- NavTechniqueTitan
@@ -330,6 +381,92 @@ include complete classes for stars, bodies (including a simulated variant), ring
 (including a base class with shared functionality and subclasses for real and
 simulated rings), and Titan, plus a combined model used to merge the nearest
 visible model at each pixel.
+
+Ring Domain Model
+-----------------
+
+The ``nav.nav_model.rings`` subpackage contains the domain model for planetary ring
+features. Its design separates validation, filtering, and rendering into distinct
+objects to make each concern testable in isolation.
+
+:class:`~nav.nav_model.rings.ring_types.RingFeatureType` is a two-value enum
+(``RINGLET``, ``GAP``) that controls how the shaded region is oriented relative to the
+known edge when only one edge is present.
+
+:class:`~nav.nav_model.rings.ring_types.RingBaseOrbitMode` and
+:class:`~nav.nav_model.rings.ring_types.RingPerturbationMode` are frozen dataclasses
+that hold the orbital parameters for an edge.
+:class:`~nav.nav_model.rings.ring_types.RingPerturbationMode` exposes an
+``is_inclination_mode`` property (mode number > 90) that the rendering path uses to
+skip inclination modes that require a different backplane not yet supported.
+
+:class:`~nav.nav_model.rings.ring_types.RingEdgeData` bundles the base orbit and zero
+or more perturbation modes for a single ring edge. Its ``base_radius`` and ``rms``
+properties extract the canonical radius and uncertainty from the base orbit.
+``parsed_modes_for_backplane()`` returns the list of ``(mode, amplitude, phase,
+pattern_speed)`` tuples that the ``oops`` backplane API consumes, omitting inclination
+modes.
+
+:class:`~nav.nav_model.rings.ring_feature.RingFeature` is the core domain object — a
+frozen dataclass that owns a single ring feature (ringlet or gap) with optional inner
+and outer edges. It is constructed via ``from_config(key, data)`` which validates the
+YAML dictionary immediately and raises ``ValueError`` on any malformed input. Derived
+cached fields (``_start_et``, ``_end_et``) are computed in ``__post_init__`` using
+``object.__setattr__()`` because the dataclass is frozen. Query methods
+(``is_visible_at``, ``is_in_radius_range``, ``uncertainty``, ``all_base_radii``,
+``uses_fade_for_edge``) allow the filter to make decisions without coupling to the
+rendering path. The ``render(context)`` method dispatches to either
+``_render_full_ringlet()`` (for two-edge features) or ``_render_single_edge()`` (for
+one-edge features) and returns one or two
+:class:`~nav.nav_model.rings.ring_render_result.RingRenderResult` instances.
+
+``validate_no_date_overlaps(features)`` is a module-level function that enforces
+authoring invariants: if two features with explicit date ranges share overlapping radii,
+their date ranges must not overlap. This is checked as a hard error at YAML load time to
+catch mistakes before any rendering occurs.
+
+Ring Filtering Pipeline
+-----------------------
+
+:class:`~nav.nav_model.rings.ring_filter.RingFeatureFilter` applies a four-pass
+decision pipeline to a list of ``RingFeature`` objects and returns only the features
+that should be rendered:
+
+.. list-table:: Filter Passes
+   :header-rows: 1
+   :widths: 10 25 65
+
+   * - Pass
+     - Name
+     - Decision
+   * - 1
+     - Date
+     - Exclude the feature if the observation time is outside its ``[start_date, end_date)``
+       window. Features without explicit dates are always kept.
+   * - 2
+     - Radius
+     - Exclude the feature if neither edge falls within ``[min_radius, max_radius]``.
+       Partially visible features (one edge in range) are kept so the renderer can
+       handle the partial case.
+   * - 3
+     - Resolvability
+     - For two-edge features (RINGLETs and GAPs where both edges are in the FOV), exclude
+       the feature if the gap width ``outer.base_radius - inner.base_radius`` is smaller
+       than ``min_feature_pixels * min_resolution`` along the feature. The motivation is
+       that an unresolvable gap provides no useful navigational information—shading its
+       surroundings without a visible gap would be misleading.
+   * - 4
+     - Fade conflict
+     - For each edge that uses a fade, check whether a neighboring edge's ``all_edge_radii``
+       would push the conflict-adjusted fade width below ``min_allowed_fade_width_pix *
+       min_resolution`` at best resolution. If so, exclude that edge. A feature whose only
+       remaining edge is excluded is dropped entirely. A feature retaining at least one edge
+       is passed through with the excluded edge set to ``None`` (a trimmed feature).
+
+The filter logs every exclusion decision at ``DEBUG`` level with the feature key,
+pass number, and reason, allowing detailed inspection without polluting ``INFO`` output.
+Exclusion and trimming are kept in the filter rather than in the renderer so that each
+concern can be tested independently.
 
 NavTechnique
 ------------

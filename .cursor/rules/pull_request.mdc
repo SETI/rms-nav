@@ -5,56 +5,33 @@ alwaysApply: false
 
 # Pull Request Standards
 
-## 1. General Principles
+## Scope of review
+
+Treat the PR as a **single unit of change**. The diff to review is the set of all commits on the current branch back to its **immediate root** (the merge-base with the target branch). Consider the net result of those commits together; do **not** comment on differences that exist only between commits within the PR (e.g. "you fixed X in a later commit" or "commit 2 undid part of commit 1"). Review the final state of the branch against the base.
+
+## Principles
 
 1. **Descriptive title** — Summarize the change in an imperative sentence (e.g., "Add caching to profile lookup").
 2. **Purpose first** — Explain *why* the change is needed before *how* it was done.
 3. **Scope** — One logical change per PR. Split unrelated changes into separate PRs.
 4. **Testing evidence** — Document automated and manual testing performed.
-5. **Impact assessment** — Note potential effects on the public API, performance, or dependent packages.
+5. **Impact assessment** — Note potential effects on the public API, performance, or dependent packages (Potential Impacts section).
 6. **Linked issues** — Reference related GitHub issues using `Closes #NNN` syntax.
 
-## 2. GitHub PR Template
+## Template
 
-Place this in `.github/PULL_REQUEST_TEMPLATE.md` for automatic use.
+The PR template is in `.github/pull_request_template.md` and is applied automatically when a new PR is opened. Fill out every section:
 
-```markdown
-## Purpose
+- **Purpose** — Why the change is needed; link issue with `Closes #NNN`.
+- **Changes / Implementation Details** — What changed and how it was implemented; technical approaches chosen and non-obvious design decisions.
+- **Type of Change** — Check all that apply (bug fix, feature, breaking, refactor, docs, tests, CI/build).
+ **Testing** — Check boxes for unit tests, integration tests, E2E tests run; describe new tests added and manual verification performed.
+- **Potential Impacts** — Public API, backward compatibility, performance, downstream; write "None" if straightforward.
+- **Checklist** — Style, mypy, docs, CHANGES.md, no debug code, no secrets/credentials, no warnings/errors, performance impact assessed, breaking changes flagged.
+- **Notes** — Optional; delete only if not needed (tricky areas, follow-up work).
 
-<!-- Why is this change needed? What problem does it solve? -->
+## Guidance
 
-Closes #<!-- issue number -->
-
-## Implementation
-
-<!-- How was it implemented? Why were specific approaches chosen? -->
-
-## Testing
-
-### Automated
-- [ ] Unit tests added/updated
-- [ ] Integration tests added/updated
-
-### Manual
-<!-- Steps to manually verify the change, if applicable. -->
-
-## Potential Impacts
-
-<!-- Effects on the public API, backward compatibility, performance, or downstream packages. -->
-
-## Review Checklist
-
-- [ ] Code follows project style guidelines (PEP 8, 100-char line length)
-- [ ] All CI checks pass (ruff, mypy, pytest)
-- [ ] Documentation and docstrings updated (if applicable)
-- [ ] No new warnings, errors, or security issues introduced
-- [ ] Version-sensitive changes noted (breaking changes flagged)
-```
-
-## 3. Customization Guidance
-
-Adapt the template by considering:
-
-- **Library-specific fields** — Public API changes, deprecation notices, migration notes.
+- **Library-specific** — Call out public API changes, deprecations, and migration notes in Potential Impacts.
 - **Required reviewers** — Tag maintainers for changes to core modules.
-- **Brevity vs. completeness** — Keep the template short enough that authors fill it out fully.
+- **Brevity vs. completeness** — Short enough that authors fill everything out; detailed enough for a reviewer with no other context.

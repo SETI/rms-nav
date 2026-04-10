@@ -1,9 +1,9 @@
 ---
-name: codebase-analysis
-description: Analyzes a codebase and produces high-level recommendations for restructuring, refactoring, and alignment with modern best practices. Use when the user asks to analyze the codebase, audit code quality, suggest improvements, refactoring ideas, or assess maintainability, performance, testability, or technical debt.
+name: python-codebase-analysis
+description: Analyzes a Python codebase and produces high-level recommendations for restructuring, refactoring, and alignment with modern best practices. Use when the user asks to analyze the codebase, audit code quality, suggest improvements, refactoring ideas, or assess maintainability, performance, testability, or technical debt.
 ---
 
-# Codebase Analysis
+# Python Codebase Analysis
 
 Produce a structured analysis and recommendations report. Do not implement changes unless the user asks; focus on **high-level findings and actionable suggestions**.
 
@@ -37,8 +37,11 @@ Compare against project rules when present (e.g. `.cursor/rules/python_best_prac
 - Constants: no magic numbers/strings; config or env for tunables.
 - Error handling: narrow try/except; no bare except; logging over print in libraries.
 - Public API: clear `__all__`, `py.typed` for typed packages, separation of public vs `_private`.
+- Library hygiene: use `logging.getLogger(__name__)`, never configure the root logger, set `NullHandler` in top-level `__init__.py`. No `print()` in library code (only in explicit CLI entry points). No `sys.exit()` in library code; raise exceptions instead.
+- Error message quality: exceptions include enough context to diagnose (`ValueError("x must be positive, got -3")` not `ValueError("bad value")`). Custom base exception class (e.g. `class ReponameError(Exception)`) so callers can catch library errors specifically. Appropriate use of `warnings.warn()` with `DeprecationWarning`/`FutureWarning` for planned changes.
+- Encoding and I/O: explicit `encoding='utf-8'` on `open()` calls (platform default varies). Consistent use of `pathlib.Path` over `os.path` string manipulation. Accept `str | Path` in public API. Context managers for all files and connections.
 
-**Evidence**: Rule name or quote, example file:line or pattern.
+**Evidence**: Rule name or quote, example file:line or pattern. Grep for `print(`, `sys.exit`, `sys.stdout`, `open(` without `encoding=`, `logging.basicConfig` in non-CLI code.
 
 ### 3. Types and static checks
 
@@ -64,17 +67,18 @@ Compare against project rules when present (e.g. `.cursor/rules/python_best_prac
 - I/O: blocking calls in async code; missing timeouts; large files read into memory.
 - Caching: repeated computation or lookups that could be cached or memoized.
 - Dependencies: heavy or unused libraries; optional features that could be lazy-loaded.
+- Concurrency and thread safety: module-level mutable state (dicts, lists, caches) without locking. Lazy-initialized globals that are not thread-safe. Whether the library documents its thread-safety guarantees (or lack thereof). Reentrancy issues in functions that modify shared state.
 
-**Evidence**: File:line or function name; no profiling required unless user provides data.
+**Evidence**: File:line or function name; no profiling required unless user provides data. Grep for module-level mutable assignments (e.g. `_cache = {}`, `_registry = []`).
 
 ### 6. Maintainability and extensibility
 
 - Coupling: tight dependencies between modules; hard-coded dependencies instead of injection.
 - Cohesion: modules/classes with a single responsibility; clear boundaries.
 - Extensibility: adding features without editing many files; use of hooks, plugins, or strategy-style patterns where appropriate.
-- Documentation: README, architecture overview, contribution guide; docstrings and comments where logic is non-obvious.
+- Documentation quality: README accuracy (do install/usage instructions match the current API?). Sphinx build health (does it pass with `-W`?). Public API coverage in docs (every public class/function in `__all__` should appear in Sphinx `automodule`/`autofunction`). Broken cross-references or missing doc pages for public modules.
 
-**Evidence**: Import structure, example functions or classes.
+**Evidence**: Import structure, example functions or classes. Compare `__all__` exports against Sphinx `.. automodule` directives. Check README examples against actual API.
 
 ### 7. Security and robustness
 
@@ -90,8 +94,10 @@ Compare against project rules when present (e.g. `.cursor/rules/python_best_prac
 - Declared deps: single source of truth (e.g. `pyproject.toml`); optional groups (dev, docs).
 - Version policy: minimum versions, avoidance of global pins for libraries.
 - Tooling: consistent formatter and linter; CI runs checks and tests; no obsolete or conflicting config (e.g. both `setup.py` and `pyproject.toml` without clear roles).
+- CI/CD pipeline consistency: Python version matrix in CI matches `requires-python` in `pyproject.toml`. CI runs the same checks as the local `run-all-checks.sh` (ruff, mypy, pytest, Sphinx, PyMarkdown). Publishing workflow present and correctly triggered (tag-based, Trusted Publishers or token auth).
+- Configuration consistency: tool configs in `pyproject.toml` (ruff, mypy, pytest) are consistent with each other and with project rules. No stale config sections for tools no longer used (e.g. `[tool.black]` or `[tool.isort]` when ruff handles both). Line-length and target-version settings agree across tools.
 
-**Evidence**: `pyproject.toml`, `requirements*.txt`, CI config.
+**Evidence**: `pyproject.toml`, `requirements*.txt`, CI config (`.github/workflows/`). Compare `requires-python` against CI matrix. Grep for stale `[tool.*]` sections.
 
 ### 9. Technical debt and risk
 
@@ -101,6 +107,16 @@ Compare against project rules when present (e.g. `.cursor/rules/python_best_prac
 - Compatibility: Python version support; platform assumptions (e.g. paths, encoding).
 
 **Evidence**: Grep for deprecation warnings, TODO/FIXME; example complex function.
+
+### 10. Packaging and distribution
+
+- Metadata completeness: `pyproject.toml` has classifiers, project URLs (`Homepage`, `Repository`, `Documentation`), license expression (PEP 639), `description`, `requires-python`.
+- Version single source of truth: one canonical version (`importlib.metadata`, `setuptools-scm`, or `_version.py`); `__version__` in the package is consistent.
+- Build system: correct `[build-system]` table; package installs cleanly with `pip install -e .`; no stale `setup.py`/`setup.cfg` alongside a complete `pyproject.toml`.
+- Package contents: `__init__.py` exports match the public API. `py.typed` marker present for typed packages. Correct `[tool.setuptools.packages.find]` or equivalent so subpackages and data files are included.
+- Distribution hygiene: no build artifacts, test data, or large files accidentally included in the sdist/wheel. `.gitignore` and/or `MANIFEST.in` configured appropriately.
+
+**Evidence**: `pyproject.toml` metadata fields, `pip install -e .` output, `py.typed` presence, `find_packages` config. Compare `__init__.py` exports against `__all__`.
 
 ## Output template
 
@@ -138,6 +154,9 @@ Use this structure for the report. Omit sections with no findings; keep each ite
 ...
 
 ## 9. Technical debt and risk
+...
+
+## 10. Packaging and distribution
 ...
 
 ## Recommended priorities

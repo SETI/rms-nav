@@ -1,7 +1,14 @@
 """Base class for ring navigation models.
 
-This module provides shared functionality for both real and simulated ring models,
-including annotation creation helpers.
+This module provides the annotation creation helper shared by both the real ring
+model (``NavModelRings``) and the simulated ring model (``NavModelRingsSimulated``).
+
+The anti-aliasing function previously in this module has been moved to
+``nav.nav_model.rings.ring_math.compute_antialiasing``, which is used directly
+by ``RingFeature._render_full_ringlet()``. This base class retains only the
+annotation logic because annotation creation requires access to observation
+metadata (image shape, config font settings) that is naturally owned by the
+``NavModel`` base class -- it is not a pure math function.
 """
 
 import numpy as np
@@ -18,7 +25,7 @@ from nav.annotation import (
     AnnotationTextInfo,
     TextLocInfo,
 )
-from nav.support.types import NDArrayBoolType, NDArrayFloatType
+from nav.support.types import NDArrayBoolType
 
 from .nav_model import NavModel
 
@@ -26,51 +33,10 @@ from .nav_model import NavModel
 class NavModelRingsBase(NavModel):
     """Base class for ring navigation models.
 
-    Provides shared helpers for creating annotations consistent with the standard
-    ring model implementation and computing anti-aliasing.
+    Provides the ``_create_edge_annotations`` helper for creating annotations
+    consistent between the real and simulated ring model implementations.
+    Anti-aliasing math is in ``nav.nav_model.rings.ring_math``.
     """
-
-    def _compute_antialiasing(
-        self,
-        *,
-        radii: NDArrayFloatType,
-        edge_radius: float,
-        shade_above: bool,
-        resolutions: NDArrayFloatType,
-        max_value: float = 1.0,
-    ) -> NDArrayFloatType:
-        """Compute anti-aliasing shade at pixel boundaries.
-
-        Creates smooth transitions at pixel boundaries where the ring edge crosses. The
-        shade value represents the fraction of the pixel that is covered by the ring.
-
-        Parameters:
-            radii: Array of ring radii at pixel centers (km or pixels).
-            edge_radius: Target edge radius (km or pixels).
-            shade_above: If True, shade towards larger radii; if False, shade towards smaller radii.
-            resolutions: Array of radial resolutions at each pixel (km or pixels).
-            max_value: Maximum shade value (default 1.0).
-
-        Returns:
-            Array of shade values [0, max_value] for anti-aliasing.
-        """
-        if shade_above:
-            shade_sign = 1.0
-        else:
-            shade_sign = -1.0
-
-        # Compute shade based on distance from edge
-        # When radii == edge_radius, shade should be 0.5 (pixel center at edge)
-        # When edge is 0.5*resolution beyond pixel center, shade should be 1.0
-        shade = 1.0 - shade_sign * (radii - edge_radius) / resolutions
-        shade -= 0.5
-
-        # Clip to valid range
-        shade[shade < 0.0] = 0.0
-        shade[shade > 1.0] = 1.0
-        shade *= max_value
-
-        return np.asarray(shade, dtype=np.float64)
 
     def _create_edge_annotations(
         self,

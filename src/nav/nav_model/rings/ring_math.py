@@ -1,0 +1,320 @@
+"""Pure mathematical functions for ring edge rendering.
+
+This module contains standalone functions for computing ring edge fade gradients
+and anti-aliasing. Extracting these from the monolithic ``NavModelRings`` class
+serves several purposes:
+
+1. **Testability**: Pure functions with no rendering context are trivially unit-tested
+   with numpy arrays. The backplane-integration tests in ``NavModelRings`` are
+   eliminated; math correctness is verified here.
+
+2. **Reuse**: Both the real ring model (backplane rendering) and the simulated ring
+   model share the same anti-aliasing logic. A single implementation in this module
+   avoids the current duplication between ``NavModelRingsBase._compute_antialiasing``
+   and ``SimRing._compute_antialiasing_shade``.
+
+3. **Single responsibility**: Rendering orchestration (choosing which edges to render,
+   building result objects) stays in ``RingFeature.render()``; math stays here.
+
+Design notes
+------------
+**Per-pixel fade width**: ``compute_edge_fade`` accepts ``fade_width_pix`` (a scalar
+pixel count) and a per-pixel ``resolutions`` array, computing
+``fade_width_km = fade_width_pix * resolutions`` element-wise. This ensures the
+fade spans exactly ``fade_width_pix`` pixels everywhere in the image, regardless
+of the local radial resolution. The integration bounds therefore vary per pixel.
+
+**Unified shade direction**: The two historically duplicated code paths
+(``shade_above=True`` and ``shade_above=False``) are unified via an internal
+``shade_sign`` parameter (+1 or -1) in ``compute_fade_integral``. The two
+formulas differ only in the sign of two terms, which eliminates ~80 lines of
+near-duplicate code.
+
+**Conflict detection vs exclusion**: ``compute_edge_fade`` handles *width reduction*
+when a neighboring feature's edge falls within the fade zone (halving the fade at
+the conflict boundary). Exclusion of edges whose adjusted width falls below the
+minimum is handled upstream by ``RingFeatureFilter`` before rendering. This
+function therefore always produces a valid result.
+"""
+
+from collections.abc import Sequence
+
+import numpy as np
+
+from nav.support.types import NDArrayFloatType
+
+
+def compute_antialiasing(
+    *,
+    radii: NDArrayFloatType,
+    edge_radius: float,
+    shade_above: bool,
+    resolutions: NDArrayFloatType,
+    max_value: float = 1.0,
+) -> NDArrayFloatType:
+    """Compute anti-aliasing shade at pixel boundaries near a ring edge.
+
+    Creates smooth sub-pixel transitions at the pixel boundary where the ring
+    edge crosses. The shade value represents the fraction of the pixel that is
+    covered by the ring, linearly interpolated between 0.0 and ``max_value``
+    as the edge moves from one side of the pixel to the other.
+
+    When the pixel center is exactly at the edge, shade = 0.5 * max_value.
+    When the edge is half a resolution unit past the pixel center (in the
+    shade direction), shade = max_value (full coverage). When the edge is
+    half a resolution unit in the opposite direction, shade = 0.0.
+
+    Parameters:
+        radii: Array of ring radii at pixel centers (km).
+        edge_radius: Target edge radius (km).
+        shade_above: If True, shading is applied on the low-radius side of the
+            edge (the object is above the edge, anti-aliasing goes below). If
+            False, shading is applied on the high-radius side.
+        resolutions: Array of radial resolutions at each pixel (km/pixel).
+        max_value: Maximum shade value (default 1.0). Use values < 1.0 for
+            partial-opacity rendering.
+
+    Returns:
+        Array of shade values in [0, max_value], same shape as ``radii``.
+    """
+    shade_sign = 1.0 if shade_above else -1.0
+
+    shade = 1.0 - shade_sign * (radii - edge_radius) / resolutions
+    shade -= 0.5
+
+    shade_arr = np.asarray(shade, dtype=np.float64)
+    shade_arr[shade_arr < 0.0] = 0.0
+    shade_arr[shade_arr > 1.0] = 1.0
+    shade_arr *= max_value
+
+    return shade_arr
+
+
+def compute_fade_integral(
+    a0: NDArrayFloatType,
+    a1: NDArrayFloatType,
+    *,
+    edge_radius: float,
+    width: NDArrayFloatType,
+    resolutions: NDArrayFloatType,
+    shade_sign: float,
+) -> NDArrayFloatType:
+    """Compute the definite integral of the linear fade function over a pixel.
+
+    The fade function is a linear gradient from 1.0 at the edge to 0.0 at
+    ``edge_radius + shade_sign * width``. The integral gives the average shade
+    value for the portion of the pixel that overlaps the fade zone, which is
+    what a properly anti-aliased renderer should compute.
+
+    The two historically separate integration formulas (``int_func`` for
+    ``shade_above=True`` and ``int_func2`` for ``shade_above=False``) are
+    unified here via ``shade_sign`` (+1 or -1). They differ only in the sign
+    of two terms:
+
+    .. code-block:: text
+
+        result = ((1 + shade_sign * edge_radius / width) * (a1 - a0)
+                  + shade_sign * (a0² - a1²) / (2 * width)) / resolutions
+
+    Parameters:
+        a0: Lower integration bounds per pixel (km).
+        a1: Upper integration bounds per pixel (km).
+        edge_radius: Fixed edge radius (km).
+        width: Per-pixel fade width in km. Varies per pixel because
+            ``fade_width_km = fade_width_pix * resolutions``.
+        resolutions: Per-pixel radial resolution (km/pixel).
+        shade_sign: +1.0 for shade_above, -1.0 for shade_below.
+
+    Returns:
+        Per-pixel integral values, same shape as ``a0``.
+    """
+    result = (
+        (1.0 + shade_sign * edge_radius / width) * (a1 - a0)
+        + shade_sign * (a0**2 - a1**2) / (2.0 * width)
+    ) / resolutions
+    return np.asarray(result, dtype=np.float64)
+
+
+def compute_edge_fade(
+    *,
+    model: NDArrayFloatType,
+    radii: NDArrayFloatType,
+    edge_radius: float,
+    shade_above: bool,
+    fade_width_pix: float,
+    resolutions: NDArrayFloatType,
+    all_edge_radii: Sequence[tuple[float, str]],
+) -> NDArrayFloatType:
+    """Compute a linear fade from a single ring edge with per-pixel fade width.
+
+    This function produces a linear gradient from full brightness at a known
+    ring edge to zero over a configurable distance. The fade is necessary when
+    a ring feature has only one known edge -- without it, the model image would
+    show a false sharp boundary where the ring ceases to be defined. The
+    gradient provides a smooth signal that works well for correlation-based
+    navigation.
+
+    **Per-pixel fade width**: The fade width in km varies per pixel:
+    ``fade_width_km = fade_width_pix * resolutions``. This ensures the fade
+    always spans exactly ``fade_width_pix`` pixels at every location in the
+    image, regardless of the local radial resolution. At the ansae (fine
+    resolution) the fade covers fewer km; at foreshortened regions (coarse
+    resolution) it covers more km.
+
+    **Conflict detection and width reduction**: When a neighboring feature's
+    edge falls within the fade zone, the fade width is reduced per pixel to
+    half the distance to the neighbor, matching current behavior. The
+    ``RingFeatureFilter`` has already excluded edges where this reduction falls
+    below ``min_allowed_fade_width_pix``, so this function always produces a
+    result.
+
+    **Shade direction unified**: Shade direction is determined by ``shade_above``
+    and internally represented as ``shade_sign`` (+1 or -1). This eliminates
+    the historical duplication of the two integration code paths.
+
+    The integration uses four cases for pixel coverage (matching the historical
+    implementation):
+
+    - Case 1: Both edge and fade end within the pixel.
+    - Case 2: Edge within pixel, fade end extends beyond.
+    - Case 3: Edge before pixel, fade end within pixel.
+    - Case 4: Full coverage (edge before pixel, fade end after pixel).
+
+    Parameters:
+        model: Current model image array. The fade is added to this.
+        radii: Per-pixel ring radius array from the backplane (km).
+        edge_radius: Nominal radius of the ring edge (km).
+        shade_above: If True, shade toward larger radii (away from planet);
+            if False, shade toward smaller radii (toward planet).
+        fade_width_pix: Desired fade extent in pixels (from config).
+        resolutions: Per-pixel radial resolution (km/pixel).
+        all_edge_radii: Sorted sequence of (radius, label) pairs for all
+            surviving feature edges. Used to detect conflict and reduce fade
+            width when a neighboring edge falls within the fade zone.
+
+    Returns:
+        Updated model image with the fade added (values are clipped to
+        [0, 1] before adding, so the result may exceed 1.0 if the model
+        already has non-zero values).
+    """
+    shade_sign = 1 if shade_above else -1
+
+    # Per-pixel fade width in km
+    fade_width_km: NDArrayFloatType = (fade_width_pix * resolutions).astype(np.float64)
+
+    # Conflict detection: reduce fade_width_km when a neighbor is in the shade
+    # direction. np.minimum handles all neighbors correctly -- a very distant
+    # neighbor has a large half_dist that won't reduce anything; only a close
+    # neighbor produces a meaningful reduction. Processing all neighbors and
+    # taking the minimum is equivalent to the original sequential approach but
+    # correctly handles multiple neighbors regardless of processing order.
+    for other_a, _ in all_edge_radii:
+        signed_dist = shade_sign * (other_a - edge_radius)
+        if signed_dist > 0:
+            half_dist = signed_dist / 2.0
+            fade_width_km = np.minimum(fade_width_km, half_dist)
+
+    # Per-pixel fade zone boundaries
+    pixel_lower = radii - resolutions / 2.0
+    pixel_upper = radii + resolutions / 2.0
+
+    if shade_above:
+        fade_end = edge_radius + fade_width_km  # per-pixel
+        eq2 = (pixel_lower <= edge_radius) & (edge_radius < pixel_upper)
+        eq3 = (pixel_lower <= fade_end) & (fade_end < pixel_upper)
+    else:
+        fade_end = edge_radius - fade_width_km  # per-pixel
+        eq2 = (pixel_lower < edge_radius) & (edge_radius <= pixel_upper)
+        eq3 = (pixel_lower < fade_end) & (fade_end <= pixel_upper)
+
+    eq_case1 = eq2 & eq3
+    eq_case4 = ~eq2 & ~eq3
+    if shade_above:
+        eq_case4 = eq_case4 & (edge_radius < pixel_lower) & (fade_end > pixel_upper)
+    else:
+        eq_case4 = eq_case4 & (edge_radius > pixel_upper) & (fade_end < pixel_lower)
+
+    eq_case2 = eq2 & ~eq_case1
+    eq_case3 = eq3 & ~eq_case1
+
+    shade = np.zeros(radii.shape, dtype=np.float64)
+
+    if shade_above:
+        edge_arr = np.full_like(radii, edge_radius)
+        if np.any(eq_case1):
+            shade[eq_case1] = compute_fade_integral(
+                edge_arr,
+                fade_end,
+                edge_radius=edge_radius,
+                width=fade_width_km,
+                resolutions=resolutions,
+                shade_sign=1.0,
+            )[eq_case1]
+        if np.any(eq_case4):
+            shade[eq_case4] = compute_fade_integral(
+                pixel_lower,
+                pixel_upper,
+                edge_radius=edge_radius,
+                width=fade_width_km,
+                resolutions=resolutions,
+                shade_sign=1.0,
+            )[eq_case4]
+        if np.any(eq_case2):
+            shade[eq_case2] = compute_fade_integral(
+                edge_arr,
+                pixel_upper,
+                edge_radius=edge_radius,
+                width=fade_width_km,
+                resolutions=resolutions,
+                shade_sign=1.0,
+            )[eq_case2]
+        if np.any(eq_case3):
+            shade[eq_case3] = compute_fade_integral(
+                pixel_lower,
+                fade_end,
+                edge_radius=edge_radius,
+                width=fade_width_km,
+                resolutions=resolutions,
+                shade_sign=1.0,
+            )[eq_case3]
+    else:
+        edge_arr = np.full_like(radii, edge_radius)
+        if np.any(eq_case1):
+            shade[eq_case1] = compute_fade_integral(
+                fade_end,
+                edge_arr,
+                edge_radius=edge_radius,
+                width=fade_width_km,
+                resolutions=resolutions,
+                shade_sign=-1.0,
+            )[eq_case1]
+        if np.any(eq_case4):
+            shade[eq_case4] = compute_fade_integral(
+                pixel_lower,
+                pixel_upper,
+                edge_radius=edge_radius,
+                width=fade_width_km,
+                resolutions=resolutions,
+                shade_sign=-1.0,
+            )[eq_case4]
+        if np.any(eq_case2):
+            shade[eq_case2] = compute_fade_integral(
+                pixel_lower,
+                edge_arr,
+                edge_radius=edge_radius,
+                width=fade_width_km,
+                resolutions=resolutions,
+                shade_sign=-1.0,
+            )[eq_case2]
+        if np.any(eq_case3):
+            shade[eq_case3] = compute_fade_integral(
+                fade_end,
+                pixel_upper,
+                edge_radius=edge_radius,
+                width=fade_width_km,
+                resolutions=resolutions,
+                shade_sign=-1.0,
+            )[eq_case3]
+
+    shade = np.clip(shade, 0.0, 1.0)
+    return np.asarray(model + shade, dtype=np.float64)

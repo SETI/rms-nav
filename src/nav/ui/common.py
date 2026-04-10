@@ -179,12 +179,19 @@ def build_stretch_controls(
     on_black_changed: Callable[[float], None],
     on_white_changed: Callable[[float], None],
     on_gamma_changed: Callable[[float], None],
+    value_label_min_width: int = 80,
+    slider_horizontal_stretch: int = 0,
 ) -> dict[str, Any]:
     """
     Construct black/white/gamma controls matching manual_nav_dialog behavior with shared formatting.
     Returns dict with widgets and mappers:
       slider_black, label_black, slider_white, label_white, slider_gamma, label_gamma,
       to_slider(val)->int, from_slider(pos)->float, set_values(black, white, gamma)
+
+    Parameters:
+        value_label_min_width: Minimum width for numeric value labels (smaller leaves more
+            room for the slider when paired with slider_horizontal_stretch).
+        slider_horizontal_stretch: If 1, sliders expand in the row layout (Qt stretch factor).
     """
     # Sliders
     slider_black = QSlider(Qt.Orientation.Horizontal)
@@ -203,7 +210,7 @@ def build_stretch_controls(
     label_gamma = QLabel(f'{gamma_init:.5f}')
     for lbl in (label_black, label_white, label_gamma):
         lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        lbl.setMinimumWidth(80)
+        lbl.setMinimumWidth(value_label_min_width)
 
     # Mapping helpers
     lo = img_min
@@ -240,15 +247,18 @@ def build_stretch_controls(
     slider_white.valueChanged.connect(_white_slot)
     slider_gamma.valueChanged.connect(_gamma_slot)
 
-    # Rows in form
+    # Rows in form (optional stretch gives sliders more width vs. value labels)
     row_b = QHBoxLayout()
-    row_b.addWidget(slider_black)
+    row_b.setSpacing(4)
+    row_b.addWidget(slider_black, stretch=slider_horizontal_stretch)
     row_b.addWidget(label_black)
     row_w = QHBoxLayout()
-    row_w.addWidget(slider_white)
+    row_w.setSpacing(4)
+    row_w.addWidget(slider_white, stretch=slider_horizontal_stretch)
     row_w.addWidget(label_white)
     row_g = QHBoxLayout()
-    row_g.addWidget(slider_gamma)
+    row_g.setSpacing(4)
+    row_g.addWidget(slider_gamma, stretch=slider_horizontal_stretch)
     row_g.addWidget(label_gamma)
 
     # Workaround: QFormLayout requires QWidget; build holders

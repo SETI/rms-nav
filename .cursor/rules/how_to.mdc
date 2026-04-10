@@ -70,5 +70,5 @@ When turning docstrings, test scripts, or internal notes into How-To guides:
 
 - **When to use**: Multi-step workflows, data pipelines, or architecture that is clearer as a visual.
 - **Placement**: Inline, immediately after the relevant step or section.
-- **Format**: Prefer Mermaid diagrams (rendered by Sphinx via `sphinxcontrib-mermaid`) for process flows. Use PNG/SVG for screenshots or data visualizations.
+- **Format**: Prefer Mermaid diagrams (e.g., rendered by Sphinx via `sphinxcontrib-mermaid`, MkDocs via `mkdocs-mermaid2-plugin`, or similar) for process flows. Use PNG/SVG for screenshots or data visualizations.
 - **Naming**: Descriptive filenames (e.g., `backplane-pipeline.svg`). Include alt text for accessibility.

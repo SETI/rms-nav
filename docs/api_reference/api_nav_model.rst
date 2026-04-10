@@ -46,6 +46,44 @@ nav.nav_model
    :undoc-members:
    :show-inheritance:
 
+nav.nav_model.rings
+-------------------
+
+.. automodule:: nav.nav_model.rings
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: nav.nav_model.rings.ring_types
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: nav.nav_model.rings.ring_feature
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: nav.nav_model.rings.ring_filter
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: nav.nav_model.rings.ring_math
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: nav.nav_model.rings.ring_render_context
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: nav.nav_model.rings.ring_render_result
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: nav.nav_model.nav_model_titan
    :members:
    :undoc-members:

@@ -1,6 +1,27 @@
 """Simulated ring navigation model.
 
 This module provides a navigation model for simulated rings created in the GUI.
+
+The simulated ring model uses a different rendering path from the real ring model
+(``NavModelRings``): instead of computing backplane-based ring radii and applying
+``RingFeature.render()``, it delegates image generation to
+``nav.sim.sim_ring.render_ring()``, which operates entirely in pixel space.
+
+The data model types (``RingFeature``, ``RingEdgeData``) are shared with the real
+model for two purposes:
+
+1. **Validation**: ``RingFeature.from_config()`` validates ``sim_params`` structure
+   at construction time, catching authoring errors in the same way as the YAML config
+   path.
+2. **Annotations**: ``_create_edge_annotations`` requires an ``edge_info_list``; the
+   feature's ``uncertainty`` field is wired to ``NavModelResult.uncertainty``.
+
+The rendering path itself is NOT shared because simulated rings use pixel-space
+geometry rather than backplane geometry. Unifying the two paths would require either
+adding pixel-space backplane support to ``RingFeature`` (which would break its clear
+single responsibility) or moving simulation physics into the rings subpackage (which
+would couple the domain model to the simulator). Keeping them separate is the
+correct trade-off.
 """
 
 from typing import Any
@@ -15,14 +36,14 @@ from nav.support.types import NDArrayBoolType
 
 from .nav_model_result import NavModelResult
 from .nav_model_rings_base import NavModelRingsBase
+from .rings import RingFeature
 
 
 class NavModelRingsSimulated(NavModelRingsBase):
     """Navigation model for simulated rings created in the GUI.
 
-    This class creates navigation models for rings that were defined in the
-    simulated image creation GUI, using the ring parameters directly rather
-    than computing them from ephemeris data.
+    Uses ``render_ring()`` for image generation (pixel-space) and
+    ``RingFeature``/``RingEdgeData`` for annotation data and uncertainty.
     """
 
     def __init__(
@@ -34,22 +55,19 @@ class NavModelRingsSimulated(NavModelRingsBase):
         *,
         config: Config | None = None,
     ) -> None:
-        """Creates a navigation model for simulated rings.
+        """Create a navigation model for simulated rings.
 
         Parameters:
             name: The name of the model.
             obs: The Observation object containing image data.
             ring_name: The name of the ring.
             sim_params: Dictionary of parameters saved by the GUI JSON. Expected keys:
-                name, feature_type, center_v, center_u, range,
-                shading_distance,
-                inner_data, outer_data.
-                inner_data and outer_data are lists of dictionaries with the following keys:
-                    mode, a, rms, ae, long_peri, rate_peri.
-                Extra keys are ignored.
+                name, feature_type, center_v, center_u, range, shading_distance,
+                inner_data, outer_data. inner_data and outer_data are lists of dicts
+                with keys: mode, a, rms, ae, long_peri, rate_peri. Extra keys are
+                ignored.
             config: Configuration object to use. If None, uses DEFAULT_CONFIG.
         """
-
         super().__init__(name, obs, config=config)
         self._ring_name = ring_name.upper()
         self._sim_params = sim_params.copy()
@@ -61,15 +79,15 @@ class NavModelRingsSimulated(NavModelRingsBase):
         never_create_model: bool = False,
         create_annotations: bool = True,
     ) -> None:
-        """Creates the internal model representation for simulated rings.
+        """Create the internal model representation for simulated rings.
 
         Parameters:
-            always_create_model: If True, creates a model even if it won't have useful contents.
-            never_create_model: If True, only creates metadata without generating a model or
-                annotations.
+            always_create_model: If True, creates a model even if it won't have
+                useful contents.
+            never_create_model: If True, only creates metadata without generating
+                a model or annotations.
             create_annotations: If True, creates text annotations for the model.
         """
-
         metadata: dict[str, Any] = {}
         start_time = now_dt()
         metadata['start_time'] = start_time.isoformat()
@@ -96,39 +114,38 @@ class NavModelRingsSimulated(NavModelRingsBase):
         never_create_model: bool,
         create_annotations: bool,
     ) -> None:
-        """Creates the internal model representation for simulated rings.
+        """Create the internal model for simulated rings.
 
         Parameters:
-            always_create_model: If True, creates a model even if it won't have useful contents.
-            never_create_model: If True, only creates metadata without generating a model.
+            always_create_model: If True, creates a model even if it won't have
+                useful contents.
+            never_create_model: If True, only creates metadata without rendering.
             create_annotations: If True, creates text annotations for the model.
         """
-
         obs = self.obs
         p = self._sim_params
 
-        # Get time and epoch from observation or use defaults
         time = obs.sim_time
         epoch = obs.sim_epoch
 
-        # Get data size for center coordinate calculation
         data_size_v = int(obs.data_shape_v)
         data_size_u = int(obs.data_shape_u)
 
-        # Create a temporary image for this ring in extended FOV
+        # Parse sim_params into a RingFeature for validation and annotations.
+        # The feature_type defaults to RINGLET if not specified, to match historical
+        # behavior when the field was absent.
+        feature_config = _sim_params_to_feature_config(p)
+        ring_feature = RingFeature.from_config(self._ring_name, feature_config)
+
+        # Render via sim_ring (pixel-space, not backplane-based)
         sim_img = obs.make_extfov_zeros()
-        # Get center coordinates in data coordinates
         center_v_data = float(p.get('center_v', data_size_v / 2.0))
         center_u_data = float(p.get('center_u', data_size_u / 2.0))
-        # Convert to extended FOV coordinates by adding margins
         center_v_extfov = center_v_data + obs.extfov_margin_v
         center_u_extfov = center_u_data + obs.extfov_margin_u
-        # Create modified params with adjusted center for extended FOV coordinates
         ring_params_extfov = dict(p)
         ring_params_extfov['center_v'] = center_v_extfov
         ring_params_extfov['center_u'] = center_u_extfov
-        # To fake the normal ring modeling process, we shade solid rings because we
-        # don't know what else is in the area between the edges
         render_ring(
             sim_img,
             ring_params_extfov,
@@ -139,135 +156,138 @@ class NavModelRingsSimulated(NavModelRingsBase):
             shade_solid=True,
         )
 
-        # Update model and mask
         ring_mask = sim_img != 0.0
-
-        # Range: set to a constant value for all ring pixels
         range_val = p.get('range', 0.0)
 
-        # Create annotations if requested
         annotations = None
         if create_annotations:
-            annotations = self._create_simulated_edge_annotations(obs, ring_mask)
+            annotations = self._create_simulated_edge_annotations(
+                obs,
+                ring_feature,
+                ring_mask,
+                center_v=float(p.get('center_v', data_size_v / 2.0)),
+                center_u=float(p.get('center_u', data_size_u / 2.0)),
+                time=time,
+                epoch=epoch,
+            )
 
         self._metadata['confidence'] = 1.0
 
-        result = NavModelResult(
-            model_img=sim_img,
-            model_mask=ring_mask,
-            weighted_mask=None,
-            range=range_val,
-            blur_amount=None,
-            uncertainty=0.0,
-            confidence=1.0,
-            stretch_regions=None,
-            annotations=annotations,
+        self._models.append(
+            NavModelResult(
+                model_img=sim_img,
+                model_mask=ring_mask,
+                weighted_mask=None,
+                range=range_val,
+                blur_amount=None,
+                uncertainty=ring_feature.uncertainty,
+                confidence=1.0,
+                stretch_regions=None,
+                annotations=annotations,
+            )
         )
-        self._models.append(result)
 
     def _create_simulated_edge_annotations(
-        self, obs: oops.Observation, model_mask: NDArrayBoolType
+        self,
+        obs: oops.Observation,
+        ring_feature: RingFeature,
+        model_mask: NDArrayBoolType,
+        *,
+        center_v: float,
+        center_u: float,
+        time: float,
+        epoch: float,
     ) -> Annotations:
-        """Create annotations for simulated ring edges using the unified base method.
+        """Create annotations for simulated ring edges.
 
         Parameters:
             obs: The observation object.
+            ring_feature: Parsed ring feature providing edge data and labels.
             model_mask: Model mask array.
+            center_v: Ring center v-coordinate in data coordinates.
+            center_u: Ring center u-coordinate in data coordinates.
+            time: Observation time in TDB seconds.
+            epoch: Epoch for mode calculations in TDB seconds.
 
         Returns:
-            Annotations object containing all ring edge annotations.
+            Annotations for all present ring edges.
         """
-
-        # Get time and epoch
-        time = obs.sim_time
-        epoch = obs.sim_epoch
-
         data_size_v = int(obs.data_shape_v)
         data_size_u = int(obs.data_shape_u)
-
-        # Build edge_info_list for the base class method
         edge_info_list: list[tuple[NDArrayBoolType, str, str]] = []
+        labels = ring_feature.edge_labels
+        feature_name = ring_feature.name or 'UNNAMED'
 
-        p = self._sim_params
-        feature_name = p.get('name', 'UNNAMED')
-        feature_type = p.get('feature_type', 'RINGLET')
-        center_v = float(p.get('center_v', data_size_v / 2.0))
-        center_u = float(p.get('center_u', data_size_u / 2.0))
+        for edge_data, edge_type in [
+            (ring_feature.inner_edge, 'inner'),
+            (ring_feature.outer_edge, 'outer'),
+        ]:
+            if edge_data is None:
+                continue
+            label = labels[edge_type]
+            label_text = f'{feature_name} {label}'
 
-        # Get inner and outer edge mode 1 data
-        inner_data = p.get('inner_data', [])
-        outer_data = p.get('outer_data', [])
+            base = edge_data.base_orbit
+            edge_mask = compute_border_atop_simulated(
+                data_size_v,
+                data_size_u,
+                center_v,
+                center_u,
+                a=base.a,
+                ae=base.ae,
+                long_peri=base.long_peri,
+                rate_peri=base.rate_peri,
+                epoch=epoch,
+                time=time,
+            )
 
-        inner_mode1 = next((m for m in inner_data if m.get('mode') == 1), None)
-        outer_mode1 = next((m for m in outer_data if m.get('mode') == 1), None)
+            edge_mask_extfov: NDArrayBoolType = obs.make_extfov_false()
+            edge_mask_extfov[
+                obs.extfov_margin_v : obs.extfov_margin_v + data_size_v,
+                obs.extfov_margin_u : obs.extfov_margin_u + data_size_u,
+            ] = edge_mask
 
-        # Process inner edge
-        if inner_mode1 is not None:
-            inner_a = float(inner_mode1.get('a', 0.0))
-            if inner_a > 0:
-                inner_ae = float(inner_mode1.get('ae', 0.0))
-                inner_long_peri = float(inner_mode1.get('long_peri', 0.0))
-                inner_rate_peri = float(inner_mode1.get('rate_peri', 0.0))
+            edge_info_list.append((edge_mask_extfov, label_text, label))
 
-                edge_label = 'IEG' if feature_type == 'GAP' else 'IER'
-                label_text = f'{feature_name} {edge_label}'
-
-                # Compute edge mask using simulated border_atop
-                edge_mask = compute_border_atop_simulated(
-                    data_size_v,
-                    data_size_u,
-                    center_v,
-                    center_u,
-                    a=inner_a,
-                    ae=inner_ae,
-                    long_peri=inner_long_peri,
-                    rate_peri=inner_rate_peri,
-                    epoch=epoch,
-                    time=time,
-                )
-
-                # Embed into extended FOV
-                edge_mask_extfov = obs.make_extfov_false()
-                edge_mask_extfov[
-                    obs.extfov_margin_v : obs.extfov_margin_v + data_size_v,
-                    obs.extfov_margin_u : obs.extfov_margin_u + data_size_u,
-                ] = edge_mask
-
-                edge_info_list.append((edge_mask_extfov, label_text, edge_label))
-
-        # Process outer edge
-        if outer_mode1 is not None:
-            outer_a = float(outer_mode1.get('a', 0.0))
-            if outer_a > 0:
-                outer_ae = float(outer_mode1.get('ae', 0.0))
-                outer_long_peri = float(outer_mode1.get('long_peri', 0.0))
-                outer_rate_peri = float(outer_mode1.get('rate_peri', 0.0))
-
-                edge_label = 'OEG' if feature_type == 'GAP' else 'OER'
-                label_text = f'{feature_name} {edge_label}'
-
-                # Compute edge mask using simulated border_atop
-                edge_mask = compute_border_atop_simulated(
-                    data_size_v,
-                    data_size_u,
-                    center_v,
-                    center_u,
-                    a=outer_a,
-                    ae=outer_ae,
-                    long_peri=outer_long_peri,
-                    rate_peri=outer_rate_peri,
-                    epoch=epoch,
-                    time=time,
-                )
-
-                # Embed into extended FOV
-                edge_mask_extfov = obs.make_extfov_false()
-                edge_mask_extfov[
-                    obs.extfov_margin_v : obs.extfov_margin_v + data_size_v,
-                    obs.extfov_margin_u : obs.extfov_margin_u + data_size_u,
-                ] = edge_mask
-
-                edge_info_list.append((edge_mask_extfov, label_text, edge_label))
-
-        # Use the unified base class method
         return self._create_edge_annotations(obs, edge_info_list, model_mask)
+
+
+# ---------------------------------------------------------------------------
+# Private helper
+# ---------------------------------------------------------------------------
+
+
+def _sim_params_to_feature_config(p: dict[str, Any]) -> dict[str, Any]:
+    """Convert GUI sim_params dict to a feature config dict for RingFeature.from_config().
+
+    The GUI stores ring parameters in a flat dict with inner_data / outer_data lists.
+    This function adapts that format to the canonical feature config format expected by
+    ``from_config()``, which validates all fields.
+
+    Parameters:
+        p: GUI sim_params dictionary.
+
+    Returns:
+        Feature config dict suitable for ``RingFeature.from_config()``.
+    """
+    raw_inner = p.get('inner_data') or None
+    raw_outer = p.get('outer_data') or None
+
+    # Normalize empty lists to None so from_config sees them as absent
+    if isinstance(raw_inner, list) and len(raw_inner) == 0:
+        raw_inner = None
+    if isinstance(raw_outer, list) and len(raw_outer) == 0:
+        raw_outer = None
+
+    feature_type_raw = p.get('feature_type', 'RINGLET')
+
+    config: dict[str, Any] = {
+        'feature_type': feature_type_raw,
+        'name': p.get('name'),
+    }
+    if raw_inner is not None:
+        config['inner_data'] = raw_inner
+    if raw_outer is not None:
+        config['outer_data'] = raw_outer
+
+    return config

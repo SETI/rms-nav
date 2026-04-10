@@ -45,6 +45,23 @@ def _apply_stretch_gamma(
     return cast(NDArrayUint8Type, (scaled * 255.0).astype(np.uint8))
 
 
+def _bilinear_interpolate_fov(arr: NDArrayFloatType, img_v: float, img_u: float) -> float:
+    """Bilinear sample a 2D FOV array at fractional pixel (img_v, img_u)."""
+    h, w = arr.shape
+    v0 = int(img_v)
+    u0 = int(img_u)
+    v1 = min(v0 + 1, h - 1)
+    u1 = min(u0 + 1, w - 1)
+    dv = img_v - v0
+    du = img_u - u0
+    return float(
+        arr[v0, u0] * (1 - du) * (1 - dv)
+        + arr[v0, u1] * du * (1 - dv)
+        + arr[v1, u0] * (1 - du) * dv
+        + arr[v1, u1] * du * dv
+    )
+
+
 def _bilinear_sample_periodic(arr: NDArrayFloatType, y: float, x: float) -> float:
     """Periodic bilinear sample on 2D array arr at float indices (y, x)."""
     h, w = arr.shape
@@ -91,7 +108,12 @@ class _ImageLabel(QLabel):
 
 
 class ManualNavDialog(QDialog):
-    """Manual navigation dialog for overlaying image and combined model."""
+    """Manual navigation dialog for overlaying image and combined model.
+
+    The viewport uses false color (image in red/blue, blend in green). Separate
+    **Image Stretch** and **Model Stretch** groups each provide black/white/gamma
+    and a display toggle. Model transparency sits under model stretch.
+    """
 
     def __init__(
         self,
@@ -123,14 +145,31 @@ class ManualNavDialog(QDialog):
         self._model_img_ext = self._model.models[0].model_img
         self._model_mask_ext = self._model.models[0].model_mask
 
-        # Stretch/gamma parameters
+        # Stretch/gamma parameters (image)
         self._black = float(np.quantile(self._img_fov, 0.001))
         self._white = float(np.quantile(self._img_fov, 0.999))
         if self._black >= self._white:
             self._white = self._black + 0.01
         self._gamma = 1.0
-        self._alpha = 0.5  # transparency of model overlay
-        # For slider mapping
+        # Model stretch (defaults from model at offset (0, 0))
+        _m0 = np.asarray(
+            self._obs.extract_offset_array(self._model_img_ext, (0.0, 0.0)),
+            dtype=np.float64,
+        )
+        self._model_stretch_min = float(np.min(_m0))
+        self._model_stretch_max = float(np.max(_m0))
+        if self._model_stretch_min >= self._model_stretch_max:
+            self._model_stretch_max = self._model_stretch_min + 1e-6
+        self._model_black = float(np.quantile(_m0, 0.001))
+        self._model_white = float(np.quantile(_m0, 0.999))
+        if self._model_black >= self._model_white:
+            self._model_white = self._model_black + 1e-6
+        self._model_gamma = 1.0
+        # 0 = fully opaque model in green blend, 1 = fully transparent (image only)
+        self._model_transparency = 0.5
+        self._show_image = True  # show observation in R/B (and base of G)
+        self._show_model = True  # show model contribution in green blend
+        # For slider mapping (image)
         self._stretch_min = float(np.min(self._img_fov))
         self._stretch_max = float(np.max(self._img_fov))
 
@@ -145,6 +184,9 @@ class ManualNavDialog(QDialog):
         self._drag_start_offset: tuple[float, float] | None = None
         # Zoom rendering mode
         self._zoom_sharp = True
+
+        # Model slice in FOV coords (aligned with _img_fov); for status bar sampling
+        self._model_slice_fov: NDArrayFloatType | None = None
 
         # Precompute correlation surface once for status bar display
         self._precompute_correlation_surface()
@@ -228,7 +270,7 @@ class ManualNavDialog(QDialog):
 
         # Status bar (within dialog)
         status = QStatusBar()
-        self._status_label = QLabel('V, U: --, --  Value: --  Correlation: --')
+        self._status_label = QLabel('V, U: --, --  Image: --  Model: --  Correlation: --')
         self._zoom_label = QLabel('Zoom: 1.00x')
         status.addWidget(self._status_label)
         status.addPermanentWidget(self._zoom_label)
@@ -236,9 +278,16 @@ class ManualNavDialog(QDialog):
 
         # Right: controls
         right = QVBoxLayout()
-        # Stretch group (common controls)
+        # Image Stretch
         stretch_group = QGroupBox('Image Stretch')
         stretch_form = QFormLayout()
+        self._check_show_image = QCheckBox('Display image')
+        self._check_show_image.setChecked(True)
+        self._check_show_image.setToolTip(
+            'Show the stretched observation in red/blue channels (and as the base in green).'
+        )
+        self._check_show_image.stateChanged.connect(self._on_show_image_changed)
+        stretch_form.addRow(self._check_show_image)
         controls = build_stretch_controls(
             stretch_form,
             img_min=self._stretch_min,
@@ -249,8 +298,9 @@ class ManualNavDialog(QDialog):
             on_black_changed=self._on_black_changed,
             on_white_changed=self._on_white_changed,
             on_gamma_changed=self._on_gamma_changed,
+            value_label_min_width=52,
+            slider_horizontal_stretch=1,
         )
-        # Keep attribute names for downstream code
         self._slider_black = controls['slider_black']
         self._slider_white = controls['slider_white']
         self._slider_gamma = controls['slider_gamma']
@@ -258,28 +308,78 @@ class ManualNavDialog(QDialog):
         self._lbl_white = controls['label_white']
         self._lbl_gamma = controls['label_gamma']
         self._stretch_controls = controls
-        # Reset stretch button
-        self._btn_reset_stretch = QPushButton('Reset Stretch')
+        self._btn_reset_stretch = QPushButton('Reset Image Stretch')
         self._btn_reset_stretch.clicked.connect(self._on_reset_stretch)
-        stretch_form.addRow('', self._btn_reset_stretch)
+        reset_img_row = QHBoxLayout()
+        reset_img_row.addStretch(1)
+        reset_img_row.addWidget(self._btn_reset_stretch)
+        reset_img_row.addStretch(1)
+        reset_img_holder = QWidget()
+        reset_img_holder.setLayout(reset_img_row)
+        stretch_form.addRow(reset_img_holder)
         stretch_group.setLayout(stretch_form)
         right.addWidget(stretch_group)
 
-        # Overlay group
-        overlay_group = QGroupBox('Overlay')
-        overlay_form = QFormLayout()
-        # Transparency slider 0..100 -> alpha 0..1
-        self._slider_alpha = QSlider(Qt.Orientation.Horizontal)
-        self._slider_alpha.setRange(0, 100)
-        self._slider_alpha.setValue(round(self._alpha * 100))
-        self._lbl_alpha = QLabel(f'{self._alpha:.2f}')
-        self._slider_alpha.valueChanged.connect(lambda v: self._on_alpha_changed(v / 100.0))
+        # Model Stretch (same controls as image + transparency)
+        model_stretch_group = QGroupBox('Model Stretch')
+        model_stretch_form = QFormLayout()
+        self._check_show_model = QCheckBox('Display model')
+        self._check_show_model.setChecked(True)
+        self._check_show_model.setToolTip(
+            'Show the stretched navigation model in the green channel (blended with the image).'
+        )
+        self._check_show_model.stateChanged.connect(self._on_show_model_changed)
+        model_stretch_form.addRow(self._check_show_model)
+        model_controls = build_stretch_controls(
+            model_stretch_form,
+            img_min=self._model_stretch_min,
+            img_max=self._model_stretch_max,
+            black_init=self._model_black,
+            white_init=self._model_white,
+            gamma_init=self._model_gamma,
+            on_black_changed=self._on_model_black_changed,
+            on_white_changed=self._on_model_white_changed,
+            on_gamma_changed=self._on_model_gamma_changed,
+            value_label_min_width=52,
+            slider_horizontal_stretch=1,
+        )
+        self._slider_model_black = model_controls['slider_black']
+        self._slider_model_white = model_controls['slider_white']
+        self._slider_model_gamma = model_controls['slider_gamma']
+        self._lbl_model_black = model_controls['label_black']
+        self._lbl_model_white = model_controls['label_white']
+        self._lbl_model_gamma = model_controls['label_gamma']
+        self._model_stretch_controls = model_controls
+        self._slider_model_transparency = QSlider(Qt.Orientation.Horizontal)
+        self._slider_model_transparency.setRange(0, 100)
+        self._slider_model_transparency.setValue(round(self._model_transparency * 100))
+        self._lbl_model_transparency = QLabel(f'{self._model_transparency:.2f}')
+        self._lbl_model_transparency.setMinimumWidth(52)
+        self._lbl_model_transparency.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        self._slider_model_transparency.valueChanged.connect(
+            lambda v: self._on_model_transparency_changed(v / 100.0)
+        )
+        self._slider_model_transparency.setToolTip(
+            '0 = fully opaque model, 1 = fully transparent (image only in the blend).'
+        )
         row_a = QHBoxLayout()
-        row_a.addWidget(self._slider_alpha)
-        row_a.addWidget(self._lbl_alpha)
-        overlay_form.addRow('Model transparency:', row_a)
-        overlay_group.setLayout(overlay_form)
-        right.addWidget(overlay_group)
+        row_a.setSpacing(4)
+        row_a.addWidget(self._slider_model_transparency, stretch=1)
+        row_a.addWidget(self._lbl_model_transparency)
+        model_stretch_form.addRow('Model transparency:', row_a)
+        self._btn_reset_model_stretch = QPushButton('Reset Model Stretch')
+        self._btn_reset_model_stretch.clicked.connect(self._on_reset_model_stretch)
+        reset_model_row = QHBoxLayout()
+        reset_model_row.addStretch(1)
+        reset_model_row.addWidget(self._btn_reset_model_stretch)
+        reset_model_row.addStretch(1)
+        reset_model_holder = QWidget()
+        reset_model_holder.setLayout(reset_model_row)
+        model_stretch_form.addRow(reset_model_holder)
+        model_stretch_group.setLayout(model_stretch_form)
+        right.addWidget(model_stretch_group)
 
         # Offsets
         offset_group = QGroupBox('Offset (pixels)')
@@ -346,18 +446,36 @@ class ManualNavDialog(QDialog):
         self._lbl_gamma.setText(f'{self._gamma:.5f}')
         self._refresh_overlay()
 
-    def _on_alpha_changed(self, val: float) -> None:
-        self._alpha = float(np.clip(val, 0.0, 1.0))
-        self._lbl_alpha.setText(f'{self._alpha:.2f}')
+    def _on_model_black_changed(self, val: float) -> None:
+        self._model_black = float(val)
+        self._lbl_model_black.setText(f'{self._model_black:.5f}')
         self._refresh_overlay()
 
-    def _stretch_to_slider(self, val: float) -> int:
-        denom = (
-            self._stretch_max - self._stretch_min
-            if (self._stretch_max > self._stretch_min)
-            else 1.0
-        )
-        return round(1000.0 * (val - self._stretch_min) / denom)
+    def _on_model_white_changed(self, val: float) -> None:
+        self._model_white = float(val)
+        self._lbl_model_white.setText(f'{self._model_white:.5f}')
+        self._refresh_overlay()
+
+    def _on_model_gamma_changed(self, val: float) -> None:
+        self._model_gamma = float(val)
+        self._lbl_model_gamma.setText(f'{self._model_gamma:.5f}')
+        self._refresh_overlay()
+
+    def _on_model_transparency_changed(self, val: float) -> None:
+        """Update model transparency: 0 = opaque model, 1 = fully transparent."""
+        self._model_transparency = float(np.clip(val, 0.0, 1.0))
+        self._lbl_model_transparency.setText(f'{self._model_transparency:.2f}')
+        self._refresh_overlay()
+
+    def _on_show_image_changed(self, state: Any) -> None:
+        self._show_image = state == int(cast(int, Qt.CheckState.Checked.value))
+        self._refresh_overlay()
+
+    def _on_show_model_changed(self, state: Any) -> None:
+        self._show_model = state == int(cast(int, Qt.CheckState.Checked.value))
+        self._slider_model_transparency.setEnabled(self._show_model)
+        self._lbl_model_transparency.setEnabled(self._show_model)
+        self._refresh_overlay()
 
     def _on_reset_stretch(self) -> None:
         # Recompute defaults from current image
@@ -369,6 +487,22 @@ class ManualNavDialog(QDialog):
         # Update UI via common helper
         self._stretch_controls['set_values'](self._black, self._white, self._gamma)
         # Redraw
+        self._refresh_overlay()
+
+    def _on_reset_model_stretch(self) -> None:
+        """Reset model black/white/gamma from quantiles of the current model slice."""
+        ms = np.asarray(
+            self._obs.extract_offset_array(self._model_img_ext, (self._dv, self._du)),
+            dtype=np.float64,
+        )
+        self._model_black = float(np.quantile(ms, 0.001))
+        self._model_white = float(np.quantile(ms, 0.999))
+        if self._model_black >= self._model_white:
+            self._model_white = self._model_black + 1e-6
+        self._model_gamma = 1.0
+        self._model_stretch_controls['set_values'](
+            self._model_black, self._model_white, self._model_gamma
+        )
         self._refresh_overlay()
 
     def _on_spin_dv(self, val: float) -> None:
@@ -520,21 +654,33 @@ class ManualNavDialog(QDialog):
         # Primary image (FOV) -> red channel (mono repeated into RGB then tinted)
         img_u8 = _apply_stretch_gamma(self._img_fov, self._black, self._white, self._gamma)
         h, w = img_u8.shape
+        img_layer = img_u8 if self._show_image else np.zeros((h, w), dtype=np.uint8)
         # Extract model slice at current (dv, du)
         # Note: extract_offset_array will round inside; for display that's acceptable
         model_slice = self._obs.extract_offset_array(self._model_img_ext, (self._dv, self._du))
-        model_u8 = (np.clip(model_slice, 0.0, 1.0) * 255.0).astype(np.uint8)
-
-        # Build RGB with red for image, green for model
-        rgb = np.zeros((h, w, 3), dtype=np.uint8)
-        rgb[:, :, 0] = img_u8
-        # Alpha composite model into green channel
-        # composite = (1-A)*image + A*model
-        green = (1.0 - self._alpha) * img_u8.astype(np.float32) + self._alpha * model_u8.astype(
-            np.float32
+        self._model_slice_fov = np.asarray(model_slice, dtype=np.float64)
+        model_u8 = _apply_stretch_gamma(
+            self._model_slice_fov,
+            self._model_black,
+            self._model_white,
+            self._model_gamma,
         )
-        rgb[:, :, 1] = np.clip(green, 0, 255).astype(np.uint8)
-        rgb[:, :, 2] = img_u8
+
+        # Build RGB with red for image, green for model blend, blue for image
+        rgb = np.zeros((h, w, 3), dtype=np.uint8)
+        rgb[:, :, 0] = img_layer
+        # Green: blend image and model when both visible; image only if model hidden;
+        # model-tinted black if image hidden but model visible
+        if self._show_model:
+            img_f = img_layer.astype(np.float32)
+            mod_f = model_u8.astype(np.float32)
+            # transparency 0 => opaque model; 1 => model invisible (image only in green)
+            t = self._model_transparency
+            green = t * img_f + (1.0 - t) * mod_f
+            rgb[:, :, 1] = np.clip(green, 0, 255).astype(np.uint8)
+        else:
+            rgb[:, :, 1] = img_layer
+        rgb[:, :, 2] = img_layer
 
         # Create QImage/QPixmap
         qimage = QImage(rgb.tobytes(), w, h, 3 * w, QImage.Format.Format_RGB888).copy()
@@ -563,7 +709,7 @@ class ManualNavDialog(QDialog):
         self._label.resize(scaled_w, scaled_h)
         # Update status bar with latest corr (no mouse move)
         self._status_label.setText(
-            f'V, U: --, --  Value: --  Correlation: {self._current_corr_value():.6f}'
+            f'V, U: --, --  Image: --  Model: --  Correlation: {self._current_corr_value():.6f}'
         )
 
     def _refresh_overlay(self) -> None:
@@ -579,26 +725,18 @@ class ManualNavDialog(QDialog):
         img_u = scaled_x / max(self._zoom, 1e-6)
         img_v = scaled_y / max(self._zoom, 1e-6)
         h, w = self._img_fov.shape
-        if 0 <= img_v < h and 0 <= img_u < w:
-            v0 = int(img_v)
-            u0 = int(img_u)
-            v1 = min(v0 + 1, h - 1)
-            u1 = min(u0 + 1, w - 1)
-            dv = img_v - v0
-            du = img_u - u0
-            val = (
-                self._img_fov[v0, u0] * (1 - du) * (1 - dv)
-                + self._img_fov[v0, u1] * du * (1 - dv)
-                + self._img_fov[v1, u0] * (1 - du) * dv
-                + self._img_fov[v1, u1] * du * dv
-            )
+        mod_arr = self._model_slice_fov
+        if 0 <= img_v < h and 0 <= img_u < w and mod_arr is not None and mod_arr.shape == (h, w):
+            val_img = _bilinear_interpolate_fov(self._img_fov, img_v, img_u)
+            val_model = _bilinear_interpolate_fov(mod_arr, img_v, img_u)
             corr_val = self._current_corr_value()
             self._status_label.setText(
-                f'V, U: {img_v:.2f}, {img_u:.2f}  Value: {val:.6f}  Correlation: {corr_val:.6f}'
+                f'V, U: {img_v:.2f}, {img_u:.2f}  '
+                f'Image: {val_img:.6f}  Model: {val_model:.6f}  Correlation: {corr_val:.6f}'
             )
         else:
             self._status_label.setText(
-                f'V, U: --, --  Value: --  Correlation: {self._current_corr_value():.6f}'
+                f'V, U: --, --  Image: --  Model: --  Correlation: {self._current_corr_value():.6f}'
             )
 
     # ---- Dialog control ----
