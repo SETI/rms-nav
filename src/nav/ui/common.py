@@ -1,3 +1,4 @@
+import math
 from collections.abc import Callable
 from typing import Any
 
@@ -15,6 +16,16 @@ from PyQt6.QtWidgets import (
 
 # Pixel spacing between sliders and value labels in ``build_stretch_controls`` rows.
 STRETCH_CONTROLS_ROW_SPACING = 4
+
+
+def _require_finite_int_or_float(name: str, value: object) -> None:
+    """Validate stretch control numeric parameters at the public API boundary."""
+    if isinstance(value, bool):
+        raise TypeError(f'{name} must be int or float, not bool')
+    if not isinstance(value, (int, float)):
+        raise TypeError(f'{name} must be int or float, not {type(value).__name__}')
+    if not math.isfinite(float(value)):
+        raise ValueError(f'{name} must be a finite number, got {value!r}')
 
 
 class ZoomPanController:
@@ -196,13 +207,15 @@ def build_stretch_controls(
         form: Target ``QFormLayout``; three rows are appended (Black point, White
             point, Gamma).
         img_min: Lower end of the linear range mapped to slider position 0 for
-            black/white sliders. Should be a finite float; invalid ranges are not
-            validated here but affect ``to_slider`` / ``from_slider``.
+            black/white sliders. Must be a finite ``int`` or ``float`` (not ``bool``).
+            When ``img_max <= img_min``, the effective upper bound is ``img_min + 1.0``
+            (same as ``to_slider`` / ``from_slider``).
         img_max: Upper end of that range when ``img_max > img_min``; otherwise
-            the effective upper bound is ``img_min + 1.0``.
-        black_init: Initial black level (float) shown on the black slider and label.
-        white_init: Initial white level (float) for the white control.
-        gamma_init: Initial gamma (float); the slider stores ``round(gamma * 100)``.
+            the effective upper bound is ``img_min + 1.0``. Same type rules as ``img_min``.
+        black_init: Initial black level shown on the black slider and label.
+        white_init: Initial white level for the white control.
+        gamma_init: Initial gamma; the slider stores ``round(gamma * 100)``.
+            Same type rules as ``img_min``.
         on_black_changed: Called with the mapped float when the black slider moves.
         on_white_changed: Called with the mapped float when the white slider moves.
         on_gamma_changed: Called with gamma (``>= 0.10`` after clamp) when gamma moves.
@@ -233,10 +246,13 @@ def build_stretch_controls(
             ``img_min``/``img_max`` for degenerate max).
 
     Raises:
-        TypeError: If ``value_label_min_width`` or ``slider_horizontal_stretch`` is
-            not an ``int``, or either is a ``bool``.
-        ValueError: If ``value_label_min_width <= 0`` or
-            ``slider_horizontal_stretch < 0``.
+        TypeError: If ``img_min``, ``img_max``, ``black_init``, ``white_init``, or
+            ``gamma_init`` is not an ``int`` or ``float``, or any of those is a
+            ``bool``; or if ``value_label_min_width`` or ``slider_horizontal_stretch``
+            is not an ``int``, or either layout arg is a ``bool``.
+        ValueError: If any of ``img_min``, ``img_max``, ``black_init``,
+            ``white_init``, or ``gamma_init`` is not finite; or if
+            ``value_label_min_width <= 0`` or ``slider_horizontal_stretch < 0``.
     """
     if isinstance(value_label_min_width, bool):
         raise TypeError('value_label_min_width must be int, not bool')
@@ -254,6 +270,12 @@ def build_stretch_controls(
         )
     if slider_horizontal_stretch < 0:
         raise ValueError(f'slider_horizontal_stretch must be >= 0, got {slider_horizontal_stretch}')
+
+    _require_finite_int_or_float('img_min', img_min)
+    _require_finite_int_or_float('img_max', img_max)
+    _require_finite_int_or_float('black_init', black_init)
+    _require_finite_int_or_float('white_init', white_init)
+    _require_finite_int_or_float('gamma_init', gamma_init)
 
     # Sliders
     slider_black = QSlider(Qt.Orientation.Horizontal)

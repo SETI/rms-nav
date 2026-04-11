@@ -30,13 +30,13 @@ Supported Missions
 
 RMS-NAV currently supports multiple instruments, organized by dataset names you will pass on the command line. Dataset names are case-insensitive and map to instrument-specific handlers. The complete set is:
 
-* ``coiss`` and ``coiss_pds3`` -- Cassini Imaging Science Subsystem (all volumes)
-* ``coiss_cruise`` and ``coiss_cruise_pds3`` -- Cassini Imaging Science Subsystem (Cruise volumes 1001-1009)
-* ``coiss_saturn`` and ``coiss_saturn_pds3`` -- Cassini Imaging Science Subsystem (Saturn volumes 2001-2116)
-* ``gossi`` and ``gossi_pds3`` -- Galileo Solid State Imager
-* ``nhlorri`` and ``nhlorri_pds3`` -- New Horizons Long Range Reconnaissance Imager
-* ``vgiss`` and ``vgiss_pds3`` -- Voyager Imaging Science Subsystem
-* ``sim`` -- simulated images
+* ``coiss`` and ``coiss_pds3`` — Cassini Imaging Science Subsystem (all volumes)
+* ``coiss_cruise`` and ``coiss_cruise_pds3`` — Cassini Imaging Science Subsystem (Cruise volumes 1001-1009)
+* ``coiss_saturn`` and ``coiss_saturn_pds3`` — Cassini Imaging Science Subsystem (Saturn volumes 2001-2116)
+* ``gossi`` and ``gossi_pds3`` — Galileo Solid State Imager
+* ``nhlorri`` and ``nhlorri_pds3`` — New Horizons Long Range Reconnaissance Imager
+* ``vgiss`` and ``vgiss_pds3`` — Voyager Imaging Science Subsystem
+* ``sim`` — simulated images
 
 Installation and Setup
 ======================
@@ -83,15 +83,15 @@ Environment Setup
    .. code-block:: text
 
       $PDS3_HOLDINGS_DIR/
-      +-- volumes/
-      |   +-- [volume_set]/
-      |       +-- [volume]/
-      |           +-- [data directories]/
-      +-- metadata/
-          +-- [volume_set]/
-              +-- [volume]/
-                  +-- [volume]_index.lbl
-                  +-- [volume]_index.tab
+      ├── volumes/
+      │   └── [volume_set]/
+      │       └── [volume]/
+      │           └── [data directories]/
+      └── metadata/
+          └── [volume_set]/
+              └── [volume]/
+                  ├── [volume]_index.lbl
+                  └── [volume]_index.tab
 
 Configuration System
 ====================

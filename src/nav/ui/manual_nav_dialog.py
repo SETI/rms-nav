@@ -461,31 +461,156 @@ class ManualNavDialog(QDialog):
         self._refresh_overlay()
 
     def _on_model_black_changed(self, val: float) -> None:
+        """Apply a new model black-point level from the Model Stretch black slider.
+
+        Updates the in-memory model stretch lower bound used when compositing the
+        navigation model into the overlay, keeps the model black value label in
+        sync with the slider mapping, and redraws the RGB overlay.
+
+        Parameters:
+            val: Black level in data units after ``build_stretch_controls`` maps the
+                slider position through ``from_slider`` (same linear range as
+                ``_model_stretch_min`` / ``_model_stretch_max``).
+
+        Returns:
+            None.
+
+        Raises:
+            None. This handler does not raise.
+
+        Notes:
+            Sets ``self._model_black`` to ``float(val)``, sets
+            ``self._lbl_model_black`` to five decimal places, and calls
+            ``self._refresh_overlay()``. Does not change checkbox or transparency
+            widget enabled state.
+        """
         self._model_black = float(val)
         self._lbl_model_black.setText(f'{self._model_black:.5f}')
         self._refresh_overlay()
 
     def _on_model_white_changed(self, val: float) -> None:
+        """Apply a new model white-point level from the Model Stretch white slider.
+
+        Updates the in-memory model stretch upper bound used when compositing the
+        model, refreshes the model white value label, and redraws the overlay.
+
+        Parameters:
+            val: White level in data units from the slider mapping (see
+                ``_on_model_black_changed``).
+
+        Returns:
+            None.
+
+        Raises:
+            None. This handler does not raise.
+
+        Notes:
+            Sets ``self._model_white`` to ``float(val)``, updates
+            ``self._lbl_model_white`` with five decimal places, and calls
+            ``self._refresh_overlay()``.
+        """
         self._model_white = float(val)
         self._lbl_model_white.setText(f'{self._model_white:.5f}')
         self._refresh_overlay()
 
     def _on_model_gamma_changed(self, val: float) -> None:
+        """Apply a new model gamma from the Model Stretch gamma slider.
+
+        The shared stretch helper clamps gamma to at least ``0.10`` before this
+        callback runs; this handler stores the value and redraws the overlay.
+
+        Parameters:
+            val: Gamma factor (``>= 0.10``) after ``build_stretch_controls`` gamma
+                slot applies ``max(0.10, v / 100.0)``.
+
+        Returns:
+            None.
+
+        Raises:
+            None. This handler does not raise.
+
+        Notes:
+            Sets ``self._model_gamma`` to ``float(val)``, updates
+            ``self._lbl_model_gamma`` with five decimal places, and calls
+            ``self._refresh_overlay()``.
+        """
         self._model_gamma = float(val)
         self._lbl_model_gamma.setText(f'{self._model_gamma:.5f}')
         self._refresh_overlay()
 
     def _on_model_transparency_changed(self, val: float) -> None:
-        """Update model transparency: 0 = opaque model, 1 = fully transparent."""
+        """Apply model transparency for the green-channel blend (0 opaque, 1 clear).
+
+        Values are clipped to ``[0.0, 1.0]`` so the overlay stays well-defined even
+        if the caller passes an out-of-range float.
+
+        Parameters:
+            val: Nominal transparency in ``[0, 1]``. The model transparency slider
+                connects via ``lambda v: self._on_model_transparency_changed(v /
+                100.0)``, so ``val`` is the slider position divided by ``100``.
+
+        Returns:
+            None.
+
+        Raises:
+            None. This handler does not raise.
+
+        Notes:
+            Sets ``self._model_transparency`` to ``float(np.clip(val, 0.0, 1.0))``,
+            updates ``self._lbl_model_transparency`` with two decimal places, and
+            calls ``self._refresh_overlay()``. Does not enable or disable widgets.
+        """
         self._model_transparency = float(np.clip(val, 0.0, 1.0))
         self._lbl_model_transparency.setText(f'{self._model_transparency:.2f}')
         self._refresh_overlay()
 
     def _on_show_image_changed(self, state: Any) -> None:
+        """Toggle whether the stretched observation contributes to the overlay.
+
+        When unchecked, the image channel contribution can be suppressed while the
+        model and correlation readout behavior follow ``_refresh_overlay``.
+
+        Parameters:
+            state: ``QCheckBox.stateChanged`` argument (typically an ``int`` Qt check
+                state). Interpreted via ``_is_checked`` as ``True`` only for
+                ``Qt.CheckState.Checked``.
+
+        Returns:
+            None.
+
+        Raises:
+            None. This handler does not raise.
+
+        Notes:
+            Sets ``self._show_image`` to the checked result and calls
+            ``self._refresh_overlay()``. Does not modify other widget enabled flags.
+        """
         self._show_image = self._is_checked(state)
         self._refresh_overlay()
 
     def _on_show_model_changed(self, state: Any) -> None:
+        """Toggle model visibility and enablement of the transparency controls.
+
+        When the model is hidden, the transparency slider and label are disabled so
+        the user cannot adjust a blend that is not shown.
+
+        Parameters:
+            state: Same contract as ``_on_show_image_changed`` for the ``Display
+                model`` checkbox.
+
+        Returns:
+            None.
+
+        Raises:
+            None. This handler does not raise.
+
+        Notes:
+            Sets ``self._show_model`` from ``_is_checked(state)``, sets
+            ``self._slider_model_transparency.setEnabled`` and
+            ``self._lbl_model_transparency.setEnabled`` to that boolean (both
+            widgets enabled when the model is shown, both disabled when hidden),
+            then calls ``self._refresh_overlay()``.
+        """
         self._show_model = self._is_checked(state)
         self._slider_model_transparency.setEnabled(self._show_model)
         self._lbl_model_transparency.setEnabled(self._show_model)
@@ -778,6 +903,31 @@ class ManualNavDialog(QDialog):
 
     # ---- Zoom options ----
     def _toggle_zoom_sharp(self, state: Any) -> None:
+        """Turn sharp (pixel-crisp) zoom scaling on or off.
+
+        When enabled, the image pixmap is rescaled with a mode that preserves sharp
+        edges at high zoom; when disabled, a smoother filter is used. This affects
+        only how the label pixmap is scaled, not stretch or offset state.
+
+        Parameters:
+            state: ``QCheckBox.stateChanged`` argument for the ``Sharp zoom``
+                checkbox. ``True`` means ``Qt.CheckState.Checked`` per
+                ``_is_checked``.
+
+        Returns:
+            None.
+
+        Raises:
+            None. This handler does not raise.
+
+        Notes:
+            Sets ``self._zoom_sharp`` to the checked result and calls
+            ``self._update_display_only()`` (not ``_refresh_overlay()``), so
+            ``_compose_overlay_pixmap()`` does not run. The label pixmap rescale uses
+            ``FastTransformation`` when sharp is on and ``SmoothTransformation``
+            when off. ``_update_display_only()`` also refreshes ``self._status_label``
+            to the default no-cursor line (correlation only).
+        """
         self._zoom_sharp = self._is_checked(state)
         self._update_display_only()
 

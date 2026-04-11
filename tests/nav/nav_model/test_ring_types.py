@@ -1,4 +1,4 @@
-"""Tests for ``RingBaseOrbitMode`` and ``RingPerturbationMode`` validation."""
+"""Tests for ``RingBaseOrbitMode``, ``RingPerturbationMode``, and ``RingEdgeData``."""
 
 from __future__ import annotations
 
@@ -8,7 +8,11 @@ from typing import Any
 
 import pytest
 
-from nav.nav_model.rings.ring_types import RingBaseOrbitMode, RingPerturbationMode
+from nav.nav_model.rings.ring_types import (
+    RingBaseOrbitMode,
+    RingEdgeData,
+    RingPerturbationMode,
+)
 
 
 def test_ring_base_orbit_mode_rejects_bool_a() -> None:
@@ -110,4 +114,71 @@ def test_perturbation_mode_non_numeric_amplitude() -> None:
             amplitude='x',  # type: ignore[arg-type]
             phase=0.0,
             pattern_speed=0.0,
+        )
+
+
+def _sample_base_orbit() -> RingBaseOrbitMode:
+    return RingBaseOrbitMode(a=1.0, ae=0.0, long_peri=0.0, rate_peri=0.0, rms=0.0)
+
+
+def _sample_perturbation() -> RingPerturbationMode:
+    return RingPerturbationMode(mode_num=2, amplitude=1.0, phase=0.0, pattern_speed=0.0)
+
+
+def test_ring_edge_data_none_base_orbit_raises() -> None:
+    """``RingEdgeData`` rejects ``None`` for ``base_orbit``."""
+    with pytest.raises(ValueError, match=r'RingEdgeData: base_orbit must not be None'):
+        RingEdgeData(base_orbit=None, perturbations=())  # type: ignore[arg-type]
+
+
+def test_ring_edge_data_wrong_base_orbit_type_raises() -> None:
+    """``RingEdgeData`` requires ``RingBaseOrbitMode`` for ``base_orbit``."""
+    with pytest.raises(
+        TypeError,
+        match=r'RingEdgeData: base_orbit must be an instance of RingBaseOrbitMode',
+    ):
+        RingEdgeData(
+            base_orbit='not an orbit',  # type: ignore[arg-type]
+            perturbations=(),
+        )
+
+
+def test_ring_edge_data_none_perturbations_raises() -> None:
+    """``RingEdgeData`` rejects ``None`` for ``perturbations``."""
+    with pytest.raises(ValueError, match=r'RingEdgeData: perturbations must not be None'):
+        RingEdgeData(base_orbit=_sample_base_orbit(), perturbations=None)  # type: ignore[arg-type]
+
+
+def test_ring_edge_data_list_perturbations_becomes_tuple() -> None:
+    """A list of perturbations is normalized to a ``tuple``."""
+    p = _sample_perturbation()
+    edge = RingEdgeData(
+        base_orbit=_sample_base_orbit(),
+        perturbations=[p],  # type: ignore[arg-type]
+    )
+    assert isinstance(edge.perturbations, tuple)
+    assert edge.perturbations == (p,)
+
+
+def test_ring_edge_data_perturbation_wrong_element_type_raises() -> None:
+    """Each perturbation entry must be a ``RingPerturbationMode``."""
+    with pytest.raises(
+        TypeError,
+        match=r'RingEdgeData: perturbations\[0\] must be RingPerturbationMode',
+    ):
+        RingEdgeData(
+            base_orbit=_sample_base_orbit(),
+            perturbations=(1.0,),  # type: ignore[arg-type]
+        )
+
+
+def test_ring_edge_data_perturbations_str_raises() -> None:
+    """``str`` is not a valid ``perturbations`` sequence."""
+    with pytest.raises(
+        TypeError,
+        match=r'RingEdgeData: perturbations must be a sequence of RingPerturbationMode',
+    ):
+        RingEdgeData(
+            base_orbit=_sample_base_orbit(),
+            perturbations='bad',  # type: ignore[arg-type]
         )

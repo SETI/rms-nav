@@ -1,9 +1,11 @@
-"""Unit tests for RingsRenderContext and RingRenderResult.
+"""Unit tests for ``RingsRenderContext`` and ``RingRenderResult``.
 
-Simple construction and field-access tests. Both are plain dataclasses;
-no complex logic to test beyond that fields are correctly set and that
-RingsRenderContext is frozen.
+Construction and field-access tests. ``RingsRenderContext`` is frozen and
+requires a non-``None`` ``logger`` (the orchestrator passes the model's
+``PdsLogger``). ``RingRenderResult`` is mutable and holds render outputs.
 """
+
+from typing import Any
 
 import numpy as np
 import pytest
@@ -16,6 +18,16 @@ from nav.nav_model.rings.ring_render_result import RingRenderResult
 # ---------------------------------------------------------------------------
 
 
+class _CtxTestLogger:
+    """Minimal logger stub with ``debug`` for ``RingsRenderContext`` construction tests."""
+
+    def debug(self, *_a: Any, **_k: Any) -> None:
+        pass
+
+
+_CTX_TEST_LOGGER = _CtxTestLogger()
+
+
 def _make_context(**kwargs: object) -> RingsRenderContext:
     """Create a minimal RingsRenderContext with sensible defaults."""
     defaults: dict[str, object] = {
@@ -25,6 +37,7 @@ def _make_context(**kwargs: object) -> RingsRenderContext:
         'resolutions': np.ones((10, 10), dtype=np.float64),
         'fade_width_pix': 100.0,
         'all_edge_radii': (),
+        'logger': _CTX_TEST_LOGGER,
     }
     defaults.update(kwargs)
     return RingsRenderContext(**defaults)  # type: ignore[arg-type]
@@ -42,6 +55,7 @@ def test_context_fields_set_correctly() -> None:
         resolutions=resolutions,
         fade_width_pix=50.0,
         all_edge_radii=edge_radii,
+        logger=_CTX_TEST_LOGGER,
     )
     assert ctx.obs is obs
     assert ctx.ring_target == 'uranus:ring'
@@ -79,6 +93,20 @@ def test_context_multiple_edge_radii() -> None:
     assert len(ctx.all_edge_radii) == 3
     assert ctx.all_edge_radii[0] == (100_000.0, 'IEG')
     assert ctx.all_edge_radii[2] == (120_000.0, 'IER')
+
+
+def test_context_logger_required() -> None:
+    """logger must not be None."""
+    with pytest.raises(ValueError, match='logger'):
+        RingsRenderContext(
+            obs=object(),
+            ring_target='saturn:ring',
+            epoch=1.0,
+            resolutions=np.ones((2, 2), dtype=np.float64),
+            fade_width_pix=1.0,
+            all_edge_radii=(),
+            logger=None,
+        )
 
 
 # ---------------------------------------------------------------------------

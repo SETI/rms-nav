@@ -17,11 +17,7 @@ model for two purposes:
    feature's ``uncertainty`` field is wired to ``NavModelResult.uncertainty``.
 
 The rendering path itself is NOT shared because simulated rings use pixel-space
-geometry rather than backplane geometry. Unifying the two paths would require either
-adding pixel-space backplane support to ``RingFeature`` (which would break its clear
-single responsibility) or moving simulation physics into the rings subpackage (which
-would couple the domain model to the simulator). Keeping them separate is the
-correct trade-off.
+geometry rather than backplane geometry.
 """
 
 from typing import Any
@@ -36,7 +32,7 @@ from nav.support.time import now_dt
 from nav.support.types import NDArrayBoolType
 
 from .nav_model_result import NavModelResult
-from .nav_model_rings_base import NavModelRingsBase, rings_subpackage_log_level
+from .nav_model_rings_base import NavModelRingsBase
 from .rings import RingFeature
 
 
@@ -99,12 +95,9 @@ class NavModelRingsSimulated(NavModelRingsBase):
         self._models.clear()
 
         log_level = self._config.general.get('log_level_model_rings')
-        with (
-            self._logger.open(
-                f'CREATE SIMULATED RINGS MODEL FOR: {self._ring_name}',
-                level=log_level,
-            ),
-            rings_subpackage_log_level(log_level),
+        with self._logger.open(
+            f'CREATE SIMULATED RINGS MODEL FOR: {self._ring_name}',
+            level=log_level,
         ):
             self._create_model(
                 always_create_model=always_create_model,
@@ -140,8 +133,6 @@ class NavModelRingsSimulated(NavModelRingsBase):
         data_size_u = int(obs.data_shape_u)
 
         # Parse sim_params into a RingFeature for validation and annotations.
-        # The feature_type defaults to RINGLET if not specified, to match historical
-        # behavior when the field was absent.
         feature_config = _sim_params_to_feature_config(p)
         ring_feature = RingFeature.from_config(self._ring_name, feature_config)
         self._logger.debug(

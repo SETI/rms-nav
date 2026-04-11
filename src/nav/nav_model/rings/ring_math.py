@@ -1,20 +1,16 @@
 """Pure mathematical functions for ring edge rendering.
 
-This module contains standalone functions for computing ring edge fade gradients
-and anti-aliasing. Extracting these from the monolithic ``NavModelRings`` class
-serves several purposes:
+This module provides standalone functions for ring edge fade gradients and
+anti-aliasing. Keeping the numerics here separate from orchestration gives:
 
-1. **Testability**: Pure functions with no rendering context are trivially unit-tested
-   with numpy arrays. The backplane-integration tests in ``NavModelRings`` are
-   eliminated; math correctness is verified here.
+1. **Testability**: Pure functions are exercised with numpy arrays without
+   backplane-heavy integration tests.
 
-2. **Reuse**: Both the real ring model (backplane rendering) and the simulated ring
-   model share the same anti-aliasing logic. A single implementation in this module
-   avoids the current duplication between ``NavModelRingsBase._compute_antialiasing``
-   and ``SimRing._compute_antialiasing_shade``.
+2. **Reuse**: Backplane-based ring rendering and ``nav.sim.sim_ring`` both rely on
+   the same anti-aliasing and fade logic defined here.
 
-3. **Single responsibility**: Rendering orchestration (choosing which edges to render,
-   building result objects) stays in ``RingFeature.render()``; math stays here.
+3. **Single responsibility**: ``RingFeature.render()`` chooses what to render and
+   assembles results; this module performs the mathematical work.
 
 Design notes
 ------------
@@ -24,11 +20,10 @@ pixel count) and a per-pixel ``resolutions`` array, computing
 fade spans exactly ``fade_width_pix`` pixels everywhere in the image, regardless
 of the local radial resolution. The integration bounds therefore vary per pixel.
 
-**Unified shade direction**: The two historically duplicated code paths
-(``shade_above=True`` and ``shade_above=False``) are unified via an internal
-``shade_sign`` parameter (+1 or -1) in ``compute_fade_integral``. The two
-formulas differ only in the sign of two terms, which eliminates ~80 lines of
-near-duplicate code.
+**Shade direction**: ``shade_above=True`` and ``shade_above=False`` share one
+implementation through an internal ``shade_sign`` (+1 or -1) in
+``compute_fade_integral``. The two directions differ only in the sign of two
+terms in the closed form.
 
 **Conflict detection vs exclusion**: ``compute_edge_fade`` handles *width reduction*
 when a neighboring feature's edge falls within the fade zone (halving the fade at
@@ -37,7 +32,6 @@ minimum is handled upstream by ``RingFeatureFilter`` before rendering. This
 function therefore always produces a valid result.
 """
 
-import logging
 import math
 from collections.abc import Sequence
 from typing import Any
@@ -45,11 +39,6 @@ from typing import Any
 import numpy as np
 
 from nav.support.types import NDArrayFloatType
-
-# Smallest positive float used to avoid division by zero in per-pixel formulas.
-_FLOAT64_MIN_POS = float(np.finfo(np.float64).tiny)
-
-_logger = logging.getLogger(__name__)
 
 
 def _as_finite_float64(name: str, arr: NDArrayFloatType) -> np.ndarray:
@@ -107,14 +96,13 @@ def compute_antialiasing(
             partial-opacity rendering.
 
     Returns:
-        Array of shade values in [0, max_value], same shape as ``radii``.
-
-    Zero entries in ``resolutions`` are replaced with a tiny positive value before
-    dividing so shades stay finite; results are clipped to [0, ``max_value``].
+        Array of shade values in [0, max_value], same shape as ``radii``. Results
+        are clipped to [0, ``max_value``].
 
     Raises:
-        ValueError: If ``radii`` and ``resolutions`` differ in shape or contain
-            non-finite values, or ``max_value`` is not finite and non-negative.
+        ValueError: If ``radii`` and ``resolutions`` differ in shape, contain
+            non-finite values, or any resolution is not strictly positive; or if
+            ``max_value`` is not finite and non-negative.
     """
     if isinstance(max_value, bool) or not isinstance(max_value, (int, float)):
         raise TypeError('max_value must be int or float')
@@ -126,9 +114,13 @@ def compute_antialiasing(
     rad = _as_finite_float64('radii', radii)
     res = _as_finite_float64('resolutions', resolutions)
     _require_matching_shapes(('radii', rad), ('resolutions', res))
+    if np.any(res <= 0.0):
+        raise ValueError(
+            'compute_antialiasing: resolutions must be strictly positive at every pixel'
+        )
 
     shade_sign = 1.0 if shade_above else -1.0
-    res_safe = np.maximum(res, _FLOAT64_MIN_POS)
+    res_safe = res
 
     shade = 1.0 - shade_sign * (rad - edge_radius) / res_safe
     shade -= 0.5
@@ -155,10 +147,8 @@ def compute_fade_integral(
     value for the portion of the pixel that overlaps the fade zone, which is
     what a properly anti-aliased renderer should compute.
 
-    The two historically separate integration formulas (``int_func`` for
-    ``shade_above=True`` and ``int_func2`` for ``shade_above=False``) are
-    unified here via ``shade_sign`` (+1 or -1). They differ only in the sign
-    of two terms:
+    ``shade_sign`` is +1.0 or -1.0 according to fade direction. The closed form
+    depends on ``shade_sign`` only through the sign of two terms:
 
     .. code-block:: text
 
@@ -177,13 +167,22 @@ def compute_fade_integral(
     Returns:
         Per-pixel integral values, same shape as ``a0``.
 
-    Elements of ``width`` and ``resolutions`` must be non-negative; each is clamped
-    to a tiny positive value before dividing so ``compute_edge_fade`` (which may
-    supply ``half_dist == 0`` or zero resolution) does not produce NaNs or
-    infinities.
+    Raises:
+        ValueError: If ``width`` or ``resolutions`` contain a non-finite value or
+            any element that is not strictly positive.
     """
-    w = np.maximum(np.asarray(width, dtype=np.float64), _FLOAT64_MIN_POS)
-    res_c = np.maximum(np.asarray(resolutions, dtype=np.float64), _FLOAT64_MIN_POS)
+    w = np.asarray(width, dtype=np.float64)
+    res_c = np.asarray(resolutions, dtype=np.float64)
+    if not np.all(np.isfinite(w)):
+        raise ValueError('compute_fade_integral: width must contain only finite values')
+    if not np.all(np.isfinite(res_c)):
+        raise ValueError('compute_fade_integral: resolutions must contain only finite values')
+    if np.any(w <= 0.0):
+        raise ValueError('compute_fade_integral: width must be strictly positive at every element')
+    if np.any(res_c <= 0.0):
+        raise ValueError(
+            'compute_fade_integral: resolutions must be strictly positive at every element'
+        )
     result = (
         (1.0 + shade_sign * edge_radius / w) * (a1 - a0) + shade_sign * (a0**2 - a1**2) / (2.0 * w)
     ) / res_c
@@ -199,6 +198,7 @@ def compute_edge_fade(
     fade_width_pix: float,
     resolutions: NDArrayFloatType,
     all_edge_radii: Sequence[tuple[float, str]],
+    logger: Any,
 ) -> NDArrayFloatType:
     """Compute a linear fade from a single ring edge with per-pixel fade width.
 
@@ -218,17 +218,14 @@ def compute_edge_fade(
 
     **Conflict detection and width reduction**: When a neighboring feature's
     edge falls within the fade zone, the fade width is reduced per pixel to
-    half the distance to the neighbor, matching current behavior. The
-    ``RingFeatureFilter`` has already excluded edges where this reduction falls
-    below ``min_allowed_fade_width_pix``, so this function always produces a
-    result.
+    half the distance to the neighbor. The ``RingFeatureFilter`` has already
+    excluded edges where this reduction falls below
+    ``min_allowed_fade_width_pix``, so this function always produces a result.
 
-    **Shade direction unified**: Shade direction is determined by ``shade_above``
-    and internally represented as ``shade_sign`` (+1 or -1). This eliminates
-    the historical duplication of the two integration code paths.
+    **Shade direction**: ``shade_above`` maps to an internal ``shade_sign``
+    (+1 or -1) used by ``compute_fade_integral``.
 
-    The integration uses four cases for pixel coverage (matching the historical
-    implementation):
+    The integration uses four cases for pixel coverage:
 
     - Case 1: Both edge and fade end within the pixel.
     - Case 2: Edge within pixel, fade end extends beyond.
@@ -246,6 +243,9 @@ def compute_edge_fade(
         all_edge_radii: Sorted sequence of (radius, label) pairs for all
             surviving feature edges. Used to detect conflict and reduce fade
             width when a neighboring edge falls within the fade zone.
+        logger: ``PdsLogger`` from the ring ``NavModel`` (same as
+            ``RingsRenderContext.logger``) for optional debug output when fade
+            width is narrowed by neighbor edges.
 
     Returns:
         Updated model image: per-pixel fade contribution is clipped to
@@ -253,8 +253,8 @@ def compute_edge_fade(
         ``1.0`` if the model already had large values.
 
     Raises:
-        ValueError: If array shapes differ, values are non-finite, or scalar
-            parameters are out of range.
+        ValueError: If array shapes differ, values are non-finite, any resolution
+            is not strictly positive, or scalar parameters are out of range.
         TypeError: If ``fade_width_pix`` has an invalid type.
     """
     if isinstance(fade_width_pix, bool) or not isinstance(fade_width_pix, (int, float)):
@@ -264,11 +264,15 @@ def compute_edge_fade(
         raise ValueError(f'fade_width_pix must be finite and non-negative, got {fade_width_pix!r}')
     if not math.isfinite(float(edge_radius)):
         raise ValueError(f'edge_radius must be finite, got {edge_radius!r}')
+    if logger is None:
+        raise ValueError('logger must not be None')
 
     model_f64 = _as_finite_float64('model', model)
     r = _as_finite_float64('radii', radii)
     res = _as_finite_float64('resolutions', resolutions)
     _require_matching_shapes(('model', model_f64), ('radii', r), ('resolutions', res))
+    if np.any(res <= 0.0):
+        raise ValueError('compute_edge_fade: resolutions must be strictly positive at every pixel')
 
     for j, pair in enumerate(all_edge_radii):
         if not isinstance(pair, tuple) or len(pair) != 2:
@@ -292,9 +296,9 @@ def compute_edge_fade(
     # Conflict detection: reduce fade_width_km when a neighbor is in the shade
     # direction. np.minimum handles all neighbors correctly -- a very distant
     # neighbor has a large half_dist that won't reduce anything; only a close
-    # neighbor produces a meaningful reduction. Processing all neighbors and
-    # taking the minimum is equivalent to the original sequential approach but
-    # correctly handles multiple neighbors regardless of processing order.
+    # neighbor produces a meaningful reduction. Taking the element-wise minimum
+    # over all neighbors yields the correct narrowed width regardless of neighbor
+    # order when several edges conflict.
     for other_a, _ in all_edge_radii:
         signed_dist = shade_sign * (other_a - edge_radius)
         if signed_dist > 0:
@@ -304,7 +308,7 @@ def compute_edge_fade(
     narrowed = fade_width_km < requested_fade_km
     if np.any(narrowed):
         n_narrowed = int(np.count_nonzero(narrowed))
-        _logger.debug(
+        logger.debug(
             'compute_edge_fade: neighbor edges narrowed fade width at %d / %d pixels '
             '(edge_radius=%.3f km, shade_above=%s)',
             n_narrowed,

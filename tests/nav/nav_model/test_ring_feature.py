@@ -1,11 +1,9 @@
-"""Unit tests for RingFeature and validate_no_date_overlaps.
+"""Unit tests for ``RingFeature`` and ``validate_no_date_overlaps``.
 
-Tests cover from_config() construction and validation, query methods
-(is_visible_at, is_in_radius_range, all_base_radii, uses_fade_for_edge,
-uncertainty, edge_labels), render() dispatch via mocked backplanes, and
-cross-feature date overlap validation.
-
-Adapted from test_nav_model_rings_feature_filtering.py with the new typed API.
+Tests cover ``from_config`` construction and validation, query methods
+(``is_visible_at``, ``is_in_radius_range``, ``all_base_radii``,
+``uses_fade_for_edge``, ``uncertainty``, ``edge_labels``), ``render`` dispatch
+via mocked backplanes, and cross-feature date overlap validation.
 """
 
 from __future__ import annotations
@@ -165,6 +163,22 @@ def test_from_config_with_perturbation_mode() -> None:
     assert feature.inner_edge is not None
     assert len(feature.inner_edge.perturbations) == 1
     assert feature.inner_edge.perturbations[0].mode_num == 2
+
+
+def test_from_config_perturbation_missing_field_raises() -> None:
+    """Perturbation entries must list amplitude, phase, and pattern_speed explicitly."""
+    data: dict[str, Any] = {
+        'feature_type': 'RINGLET',
+        'inner_data': [
+            {'mode': 1, 'a': 100_000.0, 'rms': 1.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0},
+            {'mode': 2, 'phase': 0.0, 'pattern_speed': 0.0},
+        ],
+    }
+    with pytest.raises(ValueError) as exc_info:
+        RingFeature.from_config('pert_miss', data)
+    msg = str(exc_info.value)
+    assert "Feature 'pert_miss' inner_data[1]:" in msg
+    assert "missing required key 'amplitude'" in msg
 
 
 # ---------------------------------------------------------------------------
@@ -686,6 +700,7 @@ def _make_mock_context(
         resolutions=resolutions,
         fade_width_pix=fade_width_pix,
         all_edge_radii=(),
+        logger=MagicMock(),
     )
     return ctx, obs
 

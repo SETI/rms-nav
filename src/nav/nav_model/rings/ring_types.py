@@ -189,10 +189,54 @@ class RingEdgeData:
         perturbations: Tuple of higher-order perturbation modes. May be empty.
             Inclination modes (mode_num > 90) are accepted here but excluded
             from backplane computation -- see ``radial_perturbations()``.
+            A mutable sequence (e.g. ``list``) is accepted at construction and
+            stored as an immutable ``tuple``.
+
+    Raises:
+        ValueError: If ``base_orbit`` or ``perturbations`` is ``None``.
+        TypeError: If ``base_orbit`` is not a ``RingBaseOrbitMode``, if
+            ``perturbations`` is not a non-string sequence, or if any sequence
+            element is not a ``RingPerturbationMode``.
     """
 
     base_orbit: RingBaseOrbitMode
     perturbations: tuple['RingPerturbationMode', ...]
+
+    def __post_init__(self) -> None:
+        """Validate types and freeze ``perturbations`` as a ``tuple``."""
+        bo = self.base_orbit
+        if bo is None:
+            raise ValueError('RingEdgeData: base_orbit must not be None')
+        if not isinstance(bo, RingBaseOrbitMode):
+            raise TypeError(
+                'RingEdgeData: base_orbit must be an instance of RingBaseOrbitMode, '
+                f'got {type(bo).__name__!r}'
+            )
+
+        pert_raw = self.perturbations
+        if pert_raw is None:
+            raise ValueError('RingEdgeData: perturbations must not be None')
+        if isinstance(pert_raw, (str, bytes)):
+            raise TypeError(
+                'RingEdgeData: perturbations must be a sequence of RingPerturbationMode, '
+                f'got {type(pert_raw).__name__!r}'
+            )
+        try:
+            pert_seq = tuple(pert_raw)
+        except TypeError as exc:
+            raise TypeError(
+                'RingEdgeData: perturbations must be a sequence of RingPerturbationMode, '
+                f'got {type(pert_raw).__name__!r}'
+            ) from exc
+
+        for i, item in enumerate(pert_seq):
+            if not isinstance(item, RingPerturbationMode):
+                raise TypeError(
+                    f'RingEdgeData: perturbations[{i}] must be RingPerturbationMode, '
+                    f'got {type(item).__name__!r}'
+                )
+
+        object.__setattr__(self, 'perturbations', pert_seq)
 
     @property
     def base_radius(self) -> float:

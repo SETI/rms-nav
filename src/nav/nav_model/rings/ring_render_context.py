@@ -65,6 +65,8 @@ class RingsRenderContext:
         all_edge_radii: Sorted tuple of ``(radius_km, edge_label)`` pairs for
             all edges of all features that survived filtering. Used by
             ``compute_edge_fade`` for conflict detection and width reduction.
+        logger: ``PdsLogger`` from the ring ``NavModel`` (same instance as
+            ``NavModelRings._logger``).
     """
 
     obs: Any  # oops.Observation; typed as Any to avoid oops import at module level
@@ -73,6 +75,7 @@ class RingsRenderContext:
     resolutions: NDArrayFloatType
     fade_width_pix: float
     all_edge_radii: tuple[tuple[float, str], ...]
+    logger: Any
 
     def __post_init__(self) -> None:
         """Validate fields at construction (frozen dataclass: no mutation)."""
@@ -106,6 +109,9 @@ class RingsRenderContext:
                 f'RingsRenderContext.fade_width_pix must be finite and non-negative, got '
                 f'{fwp_raw!r}'
             )
+
+        if self.logger is None:
+            raise ValueError('RingsRenderContext.logger must not be None')
 
         if not isinstance(self.all_edge_radii, tuple):
             raise TypeError('RingsRenderContext.all_edge_radii must be a tuple')

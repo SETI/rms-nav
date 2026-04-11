@@ -1,9 +1,8 @@
 """Ring feature domain model for planetary navigation.
 
-This subpackage implements typed domain objects for ring feature data, rendering,
-and filtering. It replaces the untyped ``dict[str, Any]`` approach in the legacy
-``nav_model_rings.py`` with immutable dataclasses that carry validation at
-construction time and rendering intelligence as methods.
+This subpackage defines typed domain objects for ring feature data, rendering, and
+filtering: immutable dataclasses with validation at construction time and
+rendering behavior on ``RingFeature``.
 
 Architecture overview:
 

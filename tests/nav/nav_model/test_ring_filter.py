@@ -1,12 +1,16 @@
-"""Unit tests for RingFeatureFilter 4-pass pipeline.
+"""Unit tests for ``RingFeatureFilter`` (four-pass pipeline).
 
 Tests cover each pass independently and in combination:
-- Pass 1 (date): is_visible_at checks
-- Pass 2 (radius): is_in_radius_range checks, partial visibility
-- Pass 3 (resolvability): two-edge feature width vs min_feature_pixels * min_res
-- Pass 4 (fade conflict): adjusted fade width vs min_allowed_fade_width_pix
 
-Debug-level logging of exclusions is tested via caplog.
+- Pass 1 (date): ``is_visible_at`` checks
+- Pass 2 (radius): ``is_in_radius_range`` checks, partial visibility
+- Pass 3 (resolvability): two-edge feature width vs
+  ``min_feature_pixels * min_res``
+- Pass 4 (fade conflict): adjusted fade width vs ``min_allowed_fade_width_pix``
+
+Production code passes the navigation model's ``PdsLogger`` as ``logger``.
+These tests use ``logging.getLogger('nav.nav_model.rings.ring_filter')`` so
+pytest ``caplog`` can capture DEBUG exclusion messages.
 """
 
 from __future__ import annotations
@@ -97,7 +101,7 @@ def _make_filter(
     min_allowed_fade_width_pix: float = 10.0,
     min_feature_pixels: float = 2.0,
 ) -> RingFeatureFilter:
-    """Build a RingFeatureFilter with test-friendly defaults.
+    """Build a ``RingFeatureFilter`` with test-friendly defaults.
 
     Parameters:
         obs_time_et: Observation time in TDB seconds. Defaults to 2008-01-01 12:00:00 UTC.
@@ -108,6 +112,9 @@ def _make_filter(
         fade_width_pix: Desired fade width in pixels.
         min_allowed_fade_width_pix: Minimum allowed fade width in pixels.
         min_feature_pixels: Minimum feature width in pixels for pass 3.
+
+    A stdlib logger named ``nav.nav_model.rings.ring_filter`` is supplied so
+    caplog-based tests can enable DEBUG on that logger.
     """
     if obs_time_et is None:
         obs_time_et = utc_to_et('2008-01-01 12:00:00')
@@ -124,6 +131,7 @@ def _make_filter(
         fade_width_pix=fade_width_pix,
         min_allowed_fade_width_pix=min_allowed_fade_width_pix,
         min_feature_pixels=min_feature_pixels,
+        logger=logging.getLogger('nav.nav_model.rings.ring_filter'),
     )
 
 

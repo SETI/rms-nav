@@ -36,14 +36,11 @@ features that survive the cheaper passes.
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable, Sequence
-from typing import Literal
+from typing import Any, Literal
 
 from .ring_feature import RingFeature
 from .ring_types import RingFeatureType
-
-_logger = logging.getLogger(__name__)
 
 
 class RingFeatureFilter:
@@ -72,6 +69,7 @@ class RingFeatureFilter:
         fade_width_pix: float,
         min_allowed_fade_width_pix: float,
         min_feature_pixels: float,
+        logger: Any,
     ) -> None:
         """Initialize the filter with observation-specific parameters.
 
@@ -87,6 +85,8 @@ class RingFeatureFilter:
                 conflict reduction. Edges adjusted below this threshold are excluded.
             min_feature_pixels: Minimum resolvable feature width in pixels. Two-edge
                 features narrower than ``min_feature_pixels * min_res`` km are excluded.
+            logger: ``PdsLogger`` from the ring ``NavModel`` (same as
+                ``NavModelRings._logger``) for filter pass debug output.
 
         Raises:
             TypeError: If a parameter has an invalid type.
@@ -120,6 +120,8 @@ class RingFeatureFilter:
                 f'min_allowed_fade_width_pix={min_allowed_fade_width_pix}, '
                 f'fade_width_pix={fade_width_pix}'
             )
+        if logger is None:
+            raise ValueError('logger must not be None')
 
         self._obs_time_et = obs_time_et
         self._min_radius = min_radius
@@ -128,6 +130,7 @@ class RingFeatureFilter:
         self._fade_width_pix = fade_width_pix
         self._min_allowed_fade_width_pix = min_allowed_fade_width_pix
         self._min_feature_pixels = min_feature_pixels
+        self._logger = logger
 
     def filter(self, features: Sequence[RingFeature]) -> list[RingFeature]:
         """Run the four-pass filter and return surviving features.
@@ -137,17 +140,17 @@ class RingFeatureFilter:
         None.
 
         Parameters:
-            features: All ring features loaded from the YAML config for a planet.
+            features: Ring features retrieved from configuration for the planet.
 
         Returns:
             Filtered list of features, possibly with some edges trimmed to None.
         """
         feature_seq = list(features)
-        _logger.debug('RingFeatureFilter: starting with %d feature(s)', len(feature_seq))
+        self._logger.debug('RingFeatureFilter: starting with %d feature(s)', len(feature_seq))
 
         # Pass 1: date
         after_date = [f for f in feature_seq if self._passes_date(f)]
-        _logger.debug(
+        self._logger.debug(
             'RingFeatureFilter: after date pass, %d / %d feature(s)',
             len(after_date),
             len(feature_seq),
@@ -155,7 +158,7 @@ class RingFeatureFilter:
 
         # Pass 2: radius
         after_radius = [f for f in after_date if self._passes_radius(f)]
-        _logger.debug(
+        self._logger.debug(
             'RingFeatureFilter: after radius pass, %d / %d feature(s)',
             len(after_radius),
             len(after_date),
@@ -163,7 +166,7 @@ class RingFeatureFilter:
 
         # Pass 3: resolvability (two-edge features only)
         after_res = [f for f in after_radius if self._passes_resolvability(f)]
-        _logger.debug(
+        self._logger.debug(
             'RingFeatureFilter: after resolvability pass, %d / %d feature(s)',
             len(after_res),
             len(after_radius),
@@ -186,7 +189,7 @@ class RingFeatureFilter:
             if trimmed is not None:
                 result.append(trimmed)
 
-        _logger.debug(
+        self._logger.debug(
             'RingFeatureFilter: after fade pass, %d / %d feature(s)',
             len(result),
             len(after_res),
@@ -200,7 +203,7 @@ class RingFeatureFilter:
     def _passes_date(self, feature: RingFeature) -> bool:
         """Return True if the feature is valid at the observation time."""
         if not feature.is_visible_at(self._obs_time_et):
-            _logger.debug(
+            self._logger.debug(
                 'Pass 1 (date): excluding %r -- not active at observation time',
                 feature.key,
             )
@@ -210,7 +213,7 @@ class RingFeatureFilter:
     def _passes_radius(self, feature: RingFeature) -> bool:
         """Return True if at least one feature edge is within the visible radius range."""
         if not feature.is_in_radius_range(self._min_radius, self._max_radius):
-            _logger.debug(
+            self._logger.debug(
                 'Pass 2 (radius): excluding %r -- no edges in range [%.1f, %.1f] km',
                 feature.key,
                 self._min_radius,
@@ -257,9 +260,9 @@ class RingFeatureFilter:
         # Fallback above copies a valid resolution when one side is None or 0.0, so
         # both sides stay aligned. The only ambiguous case left is still-missing
         # inner_res, or inner_res == 0.0 (outer_res cannot be 0.0 unless inner_res is
-        # too); exclude and log via _logger / feature.key like other pass-3 skips.
+        # too); exclude and log like other pass-3 skips.
         if inner_res is None or inner_res == 0.0 or outer_res is None:
-            _logger.debug(
+            self._logger.debug(
                 'Pass 3 (resolvability): excluding %r -- could not determine resolution',
                 feature.key,
             )
@@ -269,7 +272,7 @@ class RingFeatureFilter:
         threshold_km = self._min_feature_pixels * min_res
 
         if width_km < threshold_km:
-            _logger.debug(
+            self._logger.debug(
                 'Pass 3 (resolvability): excluding %r -- width %.1f km < '
                 '%.1f px * %.2f km/px = %.1f km threshold',
                 feature.key,
@@ -314,7 +317,7 @@ class RingFeatureFilter:
         # If both resulting edges are None (either explicitly excluded or were already
         # None on the original feature), exclude the feature entirely.
         if new_inner is None and new_outer is None:
-            _logger.debug(
+            self._logger.debug(
                 'Pass 4 (fade conflict): excluding %r -- all fade edges excluded',
                 feature.key,
             )
@@ -326,7 +329,7 @@ class RingFeatureFilter:
         if feature.outer_edge is not None and not keep_outer:
             dropped_edges.append('outer')
         if dropped_edges:
-            _logger.debug(
+            self._logger.debug(
                 'Pass 4 (fade conflict): trimming %r -- dropping %s edge(s) (fade too '
                 'narrow after neighbor conflict)',
                 feature.key,
@@ -394,7 +397,7 @@ class RingFeatureFilter:
 
         min_res = self._min_res_at_radius(edge_a)
         if min_res is None or min_res == 0.0:
-            _logger.debug(
+            self._logger.debug(
                 'Pass 4 (fade conflict): excluding %r %s edge -- resolution unavailable',
                 feature.key,
                 edge_type,
@@ -415,7 +418,7 @@ class RingFeatureFilter:
 
         min_allowed_km = self._min_allowed_fade_width_pix * min_res
         if fade_width_km < min_allowed_km:
-            _logger.debug(
+            self._logger.debug(
                 'Pass 4 (fade conflict): excluding %r %s edge at %.1f km -- '
                 'adjusted fade %.2f km < min %.2f km',
                 feature.key,

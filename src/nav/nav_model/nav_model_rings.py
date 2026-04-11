@@ -3,29 +3,35 @@
 This module implements the orchestrator for the planetary ring navigation model.
 It is a thin coordinator that:
 
-1. Reads ring configuration from YAML (``rings.ring_features.<PLANET>``).
+1. Reads ring configuration from the merged config (``rings.ring_features.<PLANET>``).
 2. Constructs typed ``RingFeature`` objects via ``RingFeature.from_config()``,
    raising ``ValueError`` immediately on malformed config.
 3. Validates no two features have overlapping date ranges over the same radial region.
-4. Checks whether rings are visible in the current observation.
-5. Filters features through the four-pass ``RingFeatureFilter`` pipeline.
+4. Checks whether rings are visible in the current observation (before retrieving
+   feature entries from config).
+5. Retrieves and validates feature dicts, then filters through the four-pass
+   ``RingFeatureFilter`` pipeline.
 6. Renders each surviving feature by calling ``feature.render(context)``.
 7. Wraps each render result in a ``NavModelResult`` with annotations.
 
 **Design principle**: This module contains no physics, no math, and no rendering
 logic. All of that lives in the ``rings`` subpackage (``ring_feature``,
 ``ring_math``, ``ring_filter``). The orchestrator's only job is to wire together
-configuration loading, backplane access, and ``NavModelResult`` construction.
+configuration retrieval, backplane access, and ``NavModelResult`` construction.
 
-**Config key names** (as of this version):
+**Planet ring block keys** (under ``rings.ring_features.<PLANET>``):
 
 - ``general.log_level_model_rings``: Log level for the ``CREATE RINGS MODEL``
-  ``PdsLogger.open()`` block and for the stdlib ``nav.nav_model.rings`` logger
-  during model creation (filter, feature render, fade math at ``logging.debug``).
+  ``PdsLogger.open()`` block. Ring filtering, feature rendering, and fade math log
+  through the same ``PdsLogger`` as this model (``debug`` for internals,
+  ``info`` for summaries on the orchestrator).
 - ``epoch``: UTC epoch string for radial mode calculations (required).
-- ``fade_width_pix``: Desired fade extent in pixels for single-edge features.
-- ``min_allowed_fade_width_pix``: Minimum allowed fade after conflict reduction.
-- ``min_feature_pixels``: Minimum resolvable feature width in pixels.
+- ``fade_width_pix``: Desired fade extent in pixels for single-edge features
+  (required; no default).
+- ``min_allowed_fade_width_pix``: Minimum allowed fade after conflict reduction
+  (required; no default).
+- ``min_feature_pixels``: Minimum resolvable feature width in pixels (required;
+  no default).
 - ``features``: Dict of feature key -> feature dict (parsed via
   ``RingFeature.from_config``).
 """
@@ -41,7 +47,7 @@ from nav.support.time import now_dt, utc_to_et
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
 from .nav_model_result import NavModelResult
-from .nav_model_rings_base import NavModelRingsBase, rings_subpackage_log_level
+from .nav_model_rings_base import NavModelRingsBase
 from .rings import (
     RingFeature,
     RingFeatureFilter,
@@ -49,17 +55,18 @@ from .rings import (
     validate_no_date_overlaps,
 )
 
-# Config parameters with defaults
-_DEFAULT_FADE_WIDTH_PIX = 100.0
-_DEFAULT_MIN_ALLOWED_FADE_WIDTH_PIX = 3.0
-_DEFAULT_MIN_FEATURE_PIXELS = 2.0
 
-
-def _positive_finite_planet_scalar(
-    planet: str, key: str, planet_config: dict[str, Any], default: float
+def _require_positive_finite_planet_scalar(
+    planet: str, key: str, planet_config: dict[str, Any]
 ) -> float:
-    """Return a positive finite float from ``planet_config[key]`` or ``default``."""
-    raw: Any = planet_config.get(key, default)
+    """Return a positive finite float from ``planet_config[key]``.
+
+    Raises:
+        ValueError: If ``key`` is missing or the value is not a positive finite float.
+    """
+    if key not in planet_config:
+        raise ValueError(f'Missing required ring configuration key {key!r} for planet {planet}')
+    raw: Any = planet_config[key]
     if isinstance(raw, bool):
         raise ValueError(
             f'Invalid {key} for planet {planet}: expected a finite numeric value, got bool'
@@ -80,10 +87,10 @@ def _positive_finite_planet_scalar(
 class NavModelRings(NavModelRingsBase):
     """Navigation model for planetary rings based on ephemeris data.
 
-    Loads ring features from a YAML config file, filters them for the current
-    observation (date, visibility, resolvability, fade conflicts), renders each
-    surviving feature via ``RingFeature.render()``, and appends the results to
-    ``self._models`` as ``NavModelResult`` instances.
+    Retrieves ring feature definitions from the merged configuration, filters them
+    for the current observation (date, visibility, resolvability, fade conflicts),
+    renders each surviving feature via ``RingFeature.render()``, and appends the
+    results to ``self._models`` as ``NavModelResult`` instances.
 
     Each rendered edge becomes a separate ``NavModelResult`` so the navigator can
     independently offset-correct individual ring features.
@@ -125,10 +132,7 @@ class NavModelRings(NavModelRingsBase):
         self._models.clear()
 
         log_level = self._config.general.get('log_level_model_rings')
-        with (
-            self._logger.open('CREATE RINGS MODEL', level=log_level),
-            rings_subpackage_log_level(log_level),
-        ):
+        with self._logger.open('CREATE RINGS MODEL', level=log_level):
             self._create_model(
                 always_create_model=always_create_model,
                 never_create_model=never_create_model,
@@ -186,10 +190,11 @@ class NavModelRings(NavModelRingsBase):
             ``self._metadata``).
 
         Raises:
-            ValueError: If the planet config is missing ``epoch``, numeric
-                parameters are out of range, a feature dict is malformed, or
-                ``RingFeature.from_config`` / ``validate_no_date_overlaps`` rejects
-                the configuration.
+            ValueError: If the planet block under ``rings.ring_features`` is not a
+                mapping, ``features`` is missing or not a dict, ``epoch`` or a
+                required numeric key is missing, numeric parameters are out of range,
+                a feature entry is not a dict, or ``RingFeature.from_config`` /
+                ``validate_no_date_overlaps`` rejects the configuration.
         """
         obs = self.obs
         planet = obs.closest_planet
@@ -208,63 +213,69 @@ class NavModelRings(NavModelRingsBase):
             return
 
         planet_config = ring_features_dict[planet]
+        if not isinstance(planet_config, dict):
+            raise ValueError(
+                f'Ring config error: rings.ring_features entry for planet {planet!r} must be '
+                f'a dict (got {type(planet_config).__name__!r})'
+            )
 
         # ------------------------------------------------------------------
-        # Read planet-level config parameters
+        # Read planet-level config parameters (all required; no defaults)
         # ------------------------------------------------------------------
         epoch_str: str | None = planet_config.get('epoch')
         if epoch_str is None:
             raise ValueError(f'No epoch configured for planet {planet}')
         epoch = utc_to_et(epoch_str)
 
-        fade_width_pix = _positive_finite_planet_scalar(
-            planet, 'fade_width_pix', planet_config, _DEFAULT_FADE_WIDTH_PIX
+        fade_width_pix = _require_positive_finite_planet_scalar(
+            planet, 'fade_width_pix', planet_config
         )
-        min_allowed_fade_width_pix = _positive_finite_planet_scalar(
+        min_allowed_fade_width_pix = _require_positive_finite_planet_scalar(
             planet,
             'min_allowed_fade_width_pix',
             planet_config,
-            _DEFAULT_MIN_ALLOWED_FADE_WIDTH_PIX,
         )
-        min_feature_pixels = _positive_finite_planet_scalar(
-            planet, 'min_feature_pixels', planet_config, _DEFAULT_MIN_FEATURE_PIXELS
+        min_feature_pixels = _require_positive_finite_planet_scalar(
+            planet, 'min_feature_pixels', planet_config
         )
 
         self._logger.debug(
-            'Planet: %s, epoch: %s, fade_width_pix: %.1f',
+            'Rings config: planet=%s epoch=%s fade_width_pix=%.1f '
+            'min_allowed_fade_width_pix=%.1f min_feature_pixels=%.1f',
             planet,
             epoch_str,
             fade_width_pix,
+            min_allowed_fade_width_pix,
+            min_feature_pixels,
         )
 
         # ------------------------------------------------------------------
-        # Load features from the 'features' sub-dict
+        # Feature map (validate before backplanes: must be a dict of feature dicts)
         # ------------------------------------------------------------------
-        features_dict: dict[str, Any] = planet_config.get('features', {})
+        if 'features' not in planet_config:
+            raise ValueError(
+                f'Missing required ring configuration key "features" for planet {planet}'
+            )
+        features_raw: Any = planet_config['features']
+        if not isinstance(features_raw, dict):
+            raise ValueError(
+                f'Ring config error: "features" for planet {planet!r} must be a dict '
+                f'(got {type(features_raw).__name__!r})'
+            )
+        features_dict: dict[str, Any] = features_raw
         if not features_dict:
             self._logger.warning('No features found under rings.ring_features.%s.features', planet)
             if always_create_model:
                 self._models.append(self._create_empty_model_result())
             return
 
-        features: list[RingFeature] = []
-        for key, data in features_dict.items():
-            if not isinstance(data, dict):
-                raise ValueError(
-                    f'Ring config error: features.{key} is not a dict (got {type(data).__name__!r})'
-                )
-            features.append(RingFeature.from_config(key, data))
-
-        validate_no_date_overlaps(features)
-        self._logger.debug('Loaded %d ring features for %s', len(features), planet)
-
         # ------------------------------------------------------------------
-        # Check ring visibility
+        # Ring visibility (before building ``RingFeature`` instances from config)
         # ------------------------------------------------------------------
         ring_target = f'{planet.lower()}:ring'
         bp_radii = obs.ext_bp.ring_radius(ring_target)
         if bp_radii.is_all_masked():
-            self._logger.debug('No rings visible in observation')
+            self._logger.info('No rings visible in observation')
             if not always_create_model:
                 return
             self._models.append(self._create_empty_model_result())
@@ -272,7 +283,26 @@ class NavModelRings(NavModelRingsBase):
 
         min_radius = float(bp_radii.min().vals)
         max_radius = float(bp_radii.max().vals)
-        self._logger.debug('Ring radii: min=%.2f km, max=%.2f km', min_radius, max_radius)
+        self._logger.info(
+            'Ring radii in field of view: min=%.2f km, max=%.2f km',
+            min_radius,
+            max_radius,
+        )
+
+        # ------------------------------------------------------------------
+        # Retrieve RingFeature objects from the validated feature map
+        # ------------------------------------------------------------------
+        features: list[RingFeature] = []
+        for key, data in features_dict.items():
+            if not isinstance(data, dict):
+                raise ValueError(
+                    f'Ring config error: planet {planet!r} features.{key!r} must be a dict '
+                    f'(got {type(data).__name__!r})'
+                )
+            features.append(RingFeature.from_config(key, data))
+
+        validate_no_date_overlaps(features)
+        self._logger.info('Retrieved %d ring feature(s) for %s', len(features), planet)
 
         # ------------------------------------------------------------------
         # Build resolutions backplane and resolution-at-radius lookup
@@ -314,15 +344,16 @@ class NavModelRings(NavModelRingsBase):
             fade_width_pix=fade_width_pix,
             min_allowed_fade_width_pix=min_allowed_fade_width_pix,
             min_feature_pixels=min_feature_pixels,
+            logger=self._logger,
         )
         surviving = feature_filter.filter(features)
         if not surviving:
-            self._logger.debug('No ring features survived filtering')
+            self._logger.info('No ring features passed filter for this observation')
             if always_create_model:
                 self._models.append(self._create_empty_model_result())
             return
 
-        self._logger.debug('%d features survived filtering', len(surviving))
+        self._logger.info('%d ring feature(s) passed filter', len(surviving))
 
         # ------------------------------------------------------------------
         # Handle never_create_model
@@ -360,6 +391,7 @@ class NavModelRings(NavModelRingsBase):
             resolutions=resolutions,
             fade_width_pix=fade_width_pix,
             all_edge_radii=tuple(all_edge_radii),
+            logger=self._logger,
         )
         for feature in surviving:
             self._logger.debug(
@@ -413,4 +445,4 @@ class NavModelRings(NavModelRingsBase):
         ]
 
         n = len(self._models)
-        self._logger.debug('Model created: %d result%s', n, 's' if n != 1 else '')
+        self._logger.info('Ring model created: %d NavModelResult%s', n, 's' if n != 1 else '')

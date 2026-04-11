@@ -1,11 +1,24 @@
-"""Unit tests for the NavModelRings orchestrator.
+"""Unit tests for the ``NavModelRings`` orchestrator.
 
-Tests cover config loading with the new 'features:' key structure, validation
-(missing epoch, invalid params, cross-feature date overlap), ring visibility
-check, filter integration, NavModelResult.uncertainty wiring, and the
-never_create_model / always_create_model flags.
+Tests cover config retrieval (planet block under ``rings.ring_features`` with a
+required ``features`` mapping), validation (missing keys, invalid params,
+cross-feature date overlap), ring visibility before feature construction, the
+``RingFeatureFilter`` pipeline, ``RingsRenderContext`` construction with the
+model logger, ``NavModelResult.uncertainty`` wiring, and the
+``never_create_model`` / ``always_create_model`` flags.
 
-All oops backplane calls are mocked so these tests run without OOPS_RESOURCES.
+Parameters:
+    N/A. Module-level test collection only.
+
+Returns:
+    N/A.
+
+Raises:
+    N/A.
+
+Notes:
+    All oops backplane calls are mocked so these tests run without
+    OOPS_RESOURCES.
 """
 
 from __future__ import annotations
@@ -109,7 +122,7 @@ def _make_planet_config(
     min_feature: float = 2.0,
     features: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Return a planet_config dict using the new YAML format.
+    """Return a planet block dict as used under ``rings.ring_features`` (YAML shape).
 
     Parameters:
         epoch: Reference UTC epoch string (default ``2008-01-01 12:00:00``).
@@ -122,7 +135,7 @@ def _make_planet_config(
 
     Returns:
         Dict with keys ``epoch``, ``fade_width_pix``, ``min_allowed_fade_width_pix``,
-        ``min_feature_pixels``, and ``features``.
+        ``min_feature_pixels``, and ``features`` (all required by the orchestrator).
     """
     if features is None:
         features = {
@@ -185,15 +198,43 @@ def _make_rings_model(
 
 
 # ---------------------------------------------------------------------------
-# Config loading
+# Config retrieval
 # ---------------------------------------------------------------------------
 
 
-class TestConfigLoading:
-    """Test config loading from the new 'features:' structure."""
+class TestConfigRetrieval:
+    """Exercise ``NavModelRings._create_model`` config and visibility gating.
+
+    Covers missing planet, invalid planet block shape, required planet keys,
+    ``features`` map validation, scalar validation, per-feature parsing, and
+    all-masked ring-radius backplanes with ``always_create_model``.
+
+    Parameters:
+        N/A. Pytest collects instance methods from this class.
+
+    Returns:
+        N/A.
+
+    Raises:
+        N/A.
+    """
 
     def test_no_closest_planet_returns_early(self) -> None:
-        """No planet means no model created."""
+        """Exit before config lookup when ``obs.closest_planet`` is missing.
+
+        Parameters:
+            None.
+
+        Returns:
+            None.
+
+        Raises:
+            None.
+
+        Notes:
+            Asserts ``model._models`` stays empty; no ``RingFeatureFilter`` or
+            rendering path runs.
+        """
         obs = _make_obs(planet=None)
         model = _make_rings_model(obs)
         model._create_model(
@@ -204,7 +245,21 @@ class TestConfigLoading:
         assert model._models == []
 
     def test_missing_planet_config_returns_early(self) -> None:
-        """Planet not in ring_features means no model."""
+        """Exit when the closest planet has no entry under ``rings.ring_features``.
+
+        Parameters:
+            None.
+
+        Returns:
+            None.
+
+        Raises:
+            None.
+
+        Notes:
+            Uses ``URANUS`` as closest planet while the mock config only defines
+            ``SATURN``. Asserts ``model._models`` is empty.
+        """
         obs = _make_obs(planet='URANUS')
         model = _make_rings_model(obs)  # config only has SATURN
         model._create_model(
@@ -214,8 +269,56 @@ class TestConfigLoading:
         )
         assert model._models == []
 
+    def test_planet_ring_block_not_dict_raises(self) -> None:
+        """Reject a non-mapping planet block under ``rings.ring_features``.
+
+        Parameters:
+            None.
+
+        Returns:
+            None.
+
+        Raises:
+            None. ``pytest.raises`` expects ``ValueError`` from ``_create_model``.
+
+        Notes:
+            Planet entry is a list; message must name ``SATURN`` and require a dict.
+        """
+        obs = _make_obs()
+        cfg = MagicMock()
+        cfg.rings.ring_features = {'SATURN': ['not', 'a', 'dict']}
+        with patch.object(NavModelRings, '__init__', _noop_nav_model_rings_init):
+            model = NavModelRings('test_rings', obs, config=cfg)
+        model._config = cfg
+        model._obs = obs
+        model._models = []
+        model._metadata = {}
+        model._logger = MagicMock()
+        model._logger.open.return_value.__enter__ = lambda self: None
+        model._logger.open.return_value.__exit__ = MagicMock(return_value=False)
+        with pytest.raises(ValueError, match=r"planet 'SATURN'.*must be a dict"):
+            model._create_model(
+                always_create_model=False,
+                never_create_model=False,
+                create_annotations=False,
+            )
+
     def test_missing_epoch_raises(self) -> None:
-        """Missing epoch raises ValueError."""
+        """Require ``epoch`` on the planet ring block.
+
+        Parameters:
+            None.
+
+        Returns:
+            None.
+
+        Raises:
+            None. ``pytest.raises`` expects ``ValueError`` mentioning ``epoch``.
+
+        Notes:
+            Removes ``epoch`` from an otherwise valid planet config before calling
+            ``_create_model``.
+        """
         obs = _make_obs()
         planet_config = _make_planet_config()
         del planet_config['epoch']
@@ -227,8 +330,155 @@ class TestConfigLoading:
                 create_annotations=False,
             )
 
+    def test_missing_fade_width_pix_raises(self) -> None:
+        """Require ``fade_width_pix`` on the planet ring block.
+
+        Parameters:
+            None.
+
+        Returns:
+            None.
+
+        Raises:
+            None. ``pytest.raises`` expects ``ValueError`` for the missing key.
+
+        Notes:
+            Deletes ``fade_width_pix`` from the planet dict before ``_create_model``.
+        """
+        obs = _make_obs()
+        planet_config = _make_planet_config()
+        del planet_config['fade_width_pix']
+        model = _make_rings_model(obs, planet_config)
+        with pytest.raises(ValueError, match='fade_width_pix'):
+            model._create_model(
+                always_create_model=False,
+                never_create_model=False,
+                create_annotations=False,
+            )
+
+    def test_missing_min_allowed_fade_width_pix_raises(self) -> None:
+        """Require ``min_allowed_fade_width_pix`` on the planet ring block.
+
+        Parameters:
+            None.
+
+        Returns:
+            None.
+
+        Raises:
+            None. ``pytest.raises`` expects ``ValueError`` for the missing key.
+
+        Notes:
+            Deletes that key before ``_create_model``.
+        """
+        obs = _make_obs()
+        planet_config = _make_planet_config()
+        del planet_config['min_allowed_fade_width_pix']
+        model = _make_rings_model(obs, planet_config)
+        with pytest.raises(ValueError, match='min_allowed_fade_width_pix'):
+            model._create_model(
+                always_create_model=False,
+                never_create_model=False,
+                create_annotations=False,
+            )
+
+    def test_missing_min_feature_pixels_raises(self) -> None:
+        """Require ``min_feature_pixels`` on the planet ring block.
+
+        Parameters:
+            None.
+
+        Returns:
+            None.
+
+        Raises:
+            None. ``pytest.raises`` expects ``ValueError`` for the missing key.
+
+        Notes:
+            Deletes ``min_feature_pixels`` before ``_create_model``.
+        """
+        obs = _make_obs()
+        planet_config = _make_planet_config()
+        del planet_config['min_feature_pixels']
+        model = _make_rings_model(obs, planet_config)
+        with pytest.raises(ValueError, match='min_feature_pixels'):
+            model._create_model(
+                always_create_model=False,
+                never_create_model=False,
+                create_annotations=False,
+            )
+
+    def test_missing_features_key_raises(self) -> None:
+        """Require a ``features`` key on the planet ring block.
+
+        Parameters:
+            None.
+
+        Returns:
+            None.
+
+        Raises:
+            None. ``pytest.raises`` expects ``ValueError`` mentioning ``features``.
+
+        Notes:
+            Ring backplanes are mocked so validation runs before visibility-only
+            short-circuit paths.
+        """
+        obs = _make_obs()
+        _make_bp(obs)
+        planet_config = _make_planet_config()
+        del planet_config['features']
+        model = _make_rings_model(obs, planet_config)
+        with pytest.raises(ValueError, match='features'):
+            model._create_model(
+                always_create_model=False,
+                never_create_model=False,
+                create_annotations=False,
+            )
+
+    def test_features_not_dict_raises(self) -> None:
+        """Require ``features`` to be a mapping, not a sequence or scalar.
+
+        Parameters:
+            None.
+
+        Returns:
+            None.
+
+        Raises:
+            None. ``pytest.raises`` expects ``ValueError`` with ``must be a dict``.
+
+        Notes:
+            Sets ``planet_config['features']`` to a list before ``_create_model``.
+        """
+        obs = _make_obs()
+        _make_bp(obs)
+        planet_config = _make_planet_config()
+        planet_config['features'] = ['not', 'a', 'dict']
+        model = _make_rings_model(obs, planet_config)
+        with pytest.raises(ValueError, match='must be a dict'):
+            model._create_model(
+                always_create_model=False,
+                never_create_model=False,
+                create_annotations=False,
+            )
+
     def test_invalid_fade_width_pix_raises(self) -> None:
-        """Non-positive fade_width_pix raises ValueError."""
+        """Reject non-positive ``fade_width_pix`` scalars.
+
+        Parameters:
+            None.
+
+        Returns:
+            None.
+
+        Raises:
+            None. ``pytest.raises`` expects ``ValueError`` mentioning
+            ``fade_width_pix``.
+
+        Notes:
+            Uses ``fade_width_pix=0.0`` in the planet config.
+        """
         obs = _make_obs()
         model = _make_rings_model(obs, _make_planet_config(fade_width_pix=0.0))
         with pytest.raises(ValueError, match='fade_width_pix'):
@@ -239,7 +489,20 @@ class TestConfigLoading:
             )
 
     def test_invalid_min_allowed_raises(self) -> None:
-        """Non-positive min_allowed_fade_width_pix raises ValueError."""
+        """Reject non-positive ``min_allowed_fade_width_pix`` scalars.
+
+        Parameters:
+            None.
+
+        Returns:
+            None.
+
+        Raises:
+            None. ``pytest.raises`` expects ``ValueError`` for that key.
+
+        Notes:
+            Sets ``min_allowed_fade_width_pix`` to ``-1.0``.
+        """
         obs = _make_obs()
         model = _make_rings_model(obs, _make_planet_config(min_allowed=-1.0))
         with pytest.raises(ValueError, match='min_allowed_fade_width_pix'):
@@ -250,7 +513,20 @@ class TestConfigLoading:
             )
 
     def test_bool_fade_width_pix_raises(self) -> None:
-        """Boolean fade_width_pix is rejected (would coerce via float)."""
+        """Reject boolean ``fade_width_pix`` (must not pass as numeric).
+
+        Parameters:
+            None.
+
+        Returns:
+            None.
+
+        Raises:
+            None. ``pytest.raises`` expects ``ValueError`` mentioning bool.
+
+        Notes:
+            Assigns ``True`` to ``fade_width_pix`` in the planet dict.
+        """
         obs = _make_obs()
         cfg = _make_planet_config()
         cfg['fade_width_pix'] = True
@@ -263,7 +539,20 @@ class TestConfigLoading:
             )
 
     def test_nan_min_feature_pixels_raises(self) -> None:
-        """Non-finite min_feature_pixels raises ValueError."""
+        """Reject non-finite ``min_feature_pixels`` (e.g. NaN).
+
+        Parameters:
+            None.
+
+        Returns:
+            None.
+
+        Raises:
+            None. ``pytest.raises`` expects ``ValueError`` for ``min_feature_pixels``.
+
+        Notes:
+            Sets ``min_feature_pixels`` to ``float('nan')``.
+        """
         obs = _make_obs()
         cfg = _make_planet_config()
         cfg['min_feature_pixels'] = float('nan')
@@ -276,8 +565,23 @@ class TestConfigLoading:
             )
 
     def test_malformed_feature_raises(self) -> None:
-        """A feature with invalid config raises ValueError during load."""
+        """Fail when ``RingFeature.from_config`` rejects a feature entry.
+
+        Parameters:
+            None.
+
+        Returns:
+            None.
+
+        Raises:
+            None. ``pytest.raises`` expects ``ValueError`` mentioning ``feature_type``.
+
+        Notes:
+            Supplies an invalid ``feature_type`` string under a feature key while
+            edge data is otherwise valid.
+        """
         obs = _make_obs()
+        _make_bp(obs)
         planet_config = _make_planet_config(
             features={'bad': {'feature_type': 'INVALID_TYPE', 'inner_data': _make_edge_data()}}
         )
@@ -290,11 +594,26 @@ class TestConfigLoading:
             )
 
     def test_non_dict_feature_raises(self) -> None:
-        """A feature entry that isn't a dict raises ValueError."""
+        """Reject feature map values that are not dicts.
+
+        Parameters:
+            None.
+
+        Returns:
+            None.
+
+        Raises:
+            None. ``pytest.raises`` expects ``ValueError`` naming planet, feature
+            key, and ``must be a dict``.
+
+        Notes:
+            Sets ``features['bad']`` to a string before ``_create_model``.
+        """
         obs = _make_obs()
+        _make_bp(obs)
         planet_config = _make_planet_config(features={'bad': 'not_a_dict'})
         model = _make_rings_model(obs, planet_config)
-        with pytest.raises(ValueError, match='not a dict'):
+        with pytest.raises(ValueError, match=r"planet 'SATURN'.*'bad'.*must be a dict"):
             model._create_model(
                 always_create_model=False,
                 never_create_model=False,
@@ -302,7 +621,22 @@ class TestConfigLoading:
             )
 
     def test_no_ring_visibility_returns_empty_model(self) -> None:
-        """All-masked ring backplane returns empty model when always_create_model."""
+        """When the ring radius backplane is all-masked, optionally emit an empty model.
+
+        Parameters:
+            None.
+
+        Returns:
+            None.
+
+        Raises:
+            None.
+
+        Notes:
+            Uses ``radii_all_masked=True`` on the mock backplane and
+            ``always_create_model=True``. Asserts one ``NavModelResult`` with a
+            zero image array.
+        """
         obs = _make_obs()
         _make_bp(obs, radii_all_masked=True)
         model = _make_rings_model(obs)
@@ -315,7 +649,21 @@ class TestConfigLoading:
         assert np.all(model._models[0].model_img == 0.0)
 
     def test_no_ring_visibility_no_model_when_not_always(self) -> None:
-        """All-masked ring backplane with always_create_model=False returns no model."""
+        """When all-masked and ``always_create_model`` is false, append no models.
+
+        Parameters:
+            None.
+
+        Returns:
+            None.
+
+        Raises:
+            None.
+
+        Notes:
+            Same backplane mock as the ``always_create_model`` case but expects
+            ``model._models`` to remain empty.
+        """
         obs = _make_obs()
         _make_bp(obs, radii_all_masked=True)
         model = _make_rings_model(obs)
@@ -333,10 +681,38 @@ class TestConfigLoading:
 
 
 class TestCrossFeatureValidation:
-    """validate_no_date_overlaps is called during _create_model."""
+    """Cross-feature date overlap checks during ``_create_model``.
+
+    Ensures ``validate_no_date_overlaps`` rejects overlapping validity intervals
+    when radial extents intersect.
+
+    Parameters:
+        N/A.
+
+    Returns:
+        N/A.
+
+    Raises:
+        N/A.
+    """
 
     def test_overlapping_dated_features_raises(self) -> None:
-        """Two dated features with overlapping dates and radii raise ValueError."""
+        """Raise when two dated ringlets share a radial band with overlapping dates.
+
+        Parameters:
+            None.
+
+        Returns:
+            None.
+
+        Raises:
+            None. ``pytest.raises`` expects ``ValueError`` with ``overlapping date
+            ranges``.
+
+        Notes:
+            Builds two ``RINGLET`` features with identical radii and half-open date
+            ranges that intersect; ``_create_model`` must fail before filtering.
+        """
         obs = _make_obs()
         _make_bp(obs)
         features = {
@@ -372,10 +748,37 @@ class TestCrossFeatureValidation:
 
 
 class TestFilterIntegration:
-    """Tests that the filter pipeline integrates correctly."""
+    """Orchestrator wiring for ``RingFeatureFilter`` and ``RingsRenderContext``.
+
+    Mocks the filter and render context while asserting logger threading and
+    ``NavModelResult`` creation when features survive filtering.
+
+    Parameters:
+        N/A.
+
+    Returns:
+        N/A.
+
+    Raises:
+        N/A.
+    """
 
     def _make_render_result(self, shape: tuple[int, int]) -> MagicMock:
-        """Return a mock RingRenderResult."""
+        """Build a stand-in ``RingRenderResult`` for patched ``render`` calls.
+
+        Parameters:
+            shape: ``(height, width)`` for ``model_img`` and ``model_mask``.
+
+        Returns:
+            ``MagicMock`` with ``model_img``, ``model_mask``, ``uncertainty``, and
+            empty ``edge_info_list``.
+
+        Raises:
+            None.
+
+        Notes:
+            ``uncertainty`` is fixed at ``2.5`` for the happy-path integration test.
+        """
         result = MagicMock()
         result.model_img = np.ones(shape, dtype=np.float64) * 0.5
         result.model_mask = np.ones(shape, dtype=bool)
@@ -384,15 +787,33 @@ class TestFilterIntegration:
         return result
 
     def test_surviving_feature_creates_model_result(self) -> None:
-        """A feature that survives filtering produces a NavModelResult."""
+        """Create one ``NavModelResult`` when the filter returns a renderable feature.
+
+        Parameters:
+            None.
+
+        Returns:
+            None.
+
+        Raises:
+            None.
+
+        Notes:
+            Patches ``RingFeatureFilter`` and ``RingsRenderContext``. Asserts each
+            is constructed once with ``logger=model._logger``, and that the result
+            ``uncertainty`` matches the mocked ``RingRenderResult.uncertainty``.
+        """
         shape = (10, 10)
         obs = _make_obs(shape=shape)
         _make_bp(obs)
         render_result = self._make_render_result(shape)
 
-        with patch('nav.nav_model.nav_model_rings.RingFeatureFilter') as MockFilter:
+        with (
+            patch('nav.nav_model.nav_model_rings.RingFeatureFilter') as mock_filter_cls,
+            patch('nav.nav_model.nav_model_rings.RingsRenderContext') as mock_render_context_cls,
+        ):
             mock_filter_inst = MagicMock()
-            MockFilter.return_value = mock_filter_inst
+            mock_filter_cls.return_value = mock_filter_inst
 
             mock_feature = MagicMock()
             mock_feature.render.return_value = [render_result]
@@ -408,16 +829,35 @@ class TestFilterIntegration:
                 create_annotations=False,
             )
 
+        assert mock_filter_cls.call_count == 1
+        assert mock_filter_cls.call_args.kwargs['logger'] is model._logger
+        assert mock_render_context_cls.call_count == 1
+        assert mock_render_context_cls.call_args.kwargs['logger'] is model._logger
         assert len(model._models) == 1
         assert model._models[0].uncertainty == 2.5
 
     def test_all_features_filtered_out_no_model(self) -> None:
-        """If no features survive filtering, no model is created."""
+        """Append no models when the filter returns an empty feature list.
+
+        Parameters:
+            None.
+
+        Returns:
+            None.
+
+        Raises:
+            None.
+
+        Notes:
+            Patches ``RingFeatureFilter`` so ``filter`` returns ``[]``. Asserts
+            ``model._models`` is empty and the filter still receives
+            ``logger=model._logger``.
+        """
         obs = _make_obs()
         _make_bp(obs)
-        with patch('nav.nav_model.nav_model_rings.RingFeatureFilter') as MockFilter:
+        with patch('nav.nav_model.nav_model_rings.RingFeatureFilter') as mock_filter_cls:
             mock_filter_inst = MagicMock()
-            MockFilter.return_value = mock_filter_inst
+            mock_filter_cls.return_value = mock_filter_inst
             mock_filter_inst.filter.return_value = []
 
             model = _make_rings_model(obs)
@@ -427,6 +867,8 @@ class TestFilterIntegration:
                 create_annotations=False,
             )
 
+        assert mock_filter_cls.call_count == 1
+        assert mock_filter_cls.call_args.kwargs['logger'] is model._logger
         assert model._models == []
 
 
@@ -436,10 +878,35 @@ class TestFilterIntegration:
 
 
 class TestUncertaintyWiring:
-    """NavModelResult.uncertainty is taken from render_result.uncertainty."""
+    """Propagation of per-feature render uncertainty into ``NavModelResult``.
+
+    Parameters:
+        N/A.
+
+    Returns:
+        N/A.
+
+    Raises:
+        N/A.
+    """
 
     def test_uncertainty_wired_from_render_result(self) -> None:
-        """uncertainty in NavModelResult matches the render result's uncertainty."""
+        """Copy ``render_result.uncertainty`` onto the appended ``NavModelResult``.
+
+        Parameters:
+            None.
+
+        Returns:
+            None.
+
+        Raises:
+            None.
+
+        Notes:
+            Uses a mocked ``GAP`` feature returning a render result with
+            ``uncertainty=7.3``. Asserts ``model._models[0].uncertainty`` matches
+            and ``RingFeatureFilter`` gets ``logger=model._logger``.
+        """
         shape = (10, 10)
         obs = _make_obs(shape=shape)
         _make_bp(obs)
@@ -450,9 +917,9 @@ class TestUncertaintyWiring:
         render_result.uncertainty = 7.3
         render_result.edge_info_list = []
 
-        with patch('nav.nav_model.nav_model_rings.RingFeatureFilter') as MockFilter:
+        with patch('nav.nav_model.nav_model_rings.RingFeatureFilter') as mock_filter_cls:
             mock_filter_inst = MagicMock()
-            MockFilter.return_value = mock_filter_inst
+            mock_filter_cls.return_value = mock_filter_inst
             mock_feature = MagicMock()
             mock_feature.render.return_value = [render_result]
             mock_filter_inst.filter.return_value = [mock_feature]
@@ -467,6 +934,8 @@ class TestUncertaintyWiring:
                 create_annotations=False,
             )
 
+        assert mock_filter_cls.call_count == 1
+        assert mock_filter_cls.call_args.kwargs['logger'] is model._logger
         assert len(model._models) == 1
         assert model._models[0].uncertainty == 7.3
 
@@ -477,20 +946,46 @@ class TestUncertaintyWiring:
 
 
 class TestNeverCreateModel:
-    """never_create_model=True populates metadata but creates no model images."""
+    """``never_create_model`` metadata path without image generation.
+
+    Parameters:
+        N/A.
+
+    Returns:
+        N/A.
+
+    Raises:
+        N/A.
+    """
 
     def test_never_create_model_no_images(self) -> None:
-        """never_create_model=True skips rendering."""
+        """Populate ``_metadata`` and skip ``NavModelResult`` list growth.
+
+        Parameters:
+            None.
+
+        Returns:
+            None.
+
+        Raises:
+            None.
+
+        Notes:
+            Sets ``never_create_model=True`` after resetting ``model._metadata``.
+            Filter still runs (one surviving mock feature). Asserts
+            ``model._models`` is empty, ``feature_count`` metadata is ``1``, and
+            ``RingFeatureFilter`` receives ``logger=model._logger``.
+        """
         obs = _make_obs()
         _make_bp(obs)
 
-        with patch('nav.nav_model.nav_model_rings.RingFeatureFilter') as MockFilter:
+        with patch('nav.nav_model.nav_model_rings.RingFeatureFilter') as mock_filter_cls:
             mock_feature = MagicMock()
             mock_feature.name = 'Test'
             mock_feature.feature_type.value = 'RINGLET'
             mock_feature.all_base_radii.return_value = []
             mock_filter_inst = MagicMock()
-            MockFilter.return_value = mock_filter_inst
+            mock_filter_cls.return_value = mock_filter_inst
             mock_filter_inst.filter.return_value = [mock_feature]
 
             model = _make_rings_model(obs)
@@ -501,6 +996,8 @@ class TestNeverCreateModel:
                 create_annotations=False,
             )
 
+        assert mock_filter_cls.call_count == 1
+        assert mock_filter_cls.call_args.kwargs['logger'] is model._logger
         assert model._models == []
         assert model._metadata['planet'] == 'SATURN'
         assert model._metadata['feature_count'] == 1

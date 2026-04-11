@@ -1,8 +1,7 @@
-"""Unit tests for nav.nav_model.rings.ring_math.
+"""Unit tests for ``nav.nav_model.rings.ring_math``.
 
-Tests cover compute_antialiasing, compute_fade_integral, and compute_edge_fade.
-Adapted from test_nav_model_rings_antialiasing.py and test_nav_model_rings_edge_fade.py
-with the new per-pixel width API.
+Tests cover ``compute_antialiasing``, ``compute_fade_integral``, and
+``compute_edge_fade`` (including the required ``logger`` argument).
 """
 
 import numpy as np
@@ -13,6 +12,16 @@ from nav.nav_model.rings.ring_math import (
     compute_edge_fade,
     compute_fade_integral,
 )
+
+
+class _NoopLogger:
+    """Minimal logger stub for ``compute_edge_fade`` tests (``debug`` no-op)."""
+
+    def debug(self, *_a: object, **_k: object) -> None:
+        pass
+
+
+_EDGE_FADE_TEST_LOGGER = _NoopLogger()
 
 # ---------------------------------------------------------------------------
 # Helper: compute expected fade integral for a single pixel
@@ -178,6 +187,19 @@ def test_antialiasing_2d_array() -> None:
     assert shade[1, 0] == pytest.approx(1.0, abs=1e-6)  # below edge by 0.5*res
 
 
+def test_antialiasing_non_positive_resolution_raises() -> None:
+    """``compute_antialiasing`` rejects non-positive resolutions."""
+    radii = np.array([100.0, 100.0])
+    resolutions = np.array([10.0, 0.0])
+    with pytest.raises(ValueError, match='compute_antialiasing: resolutions must be strictly'):
+        compute_antialiasing(
+            radii=radii,
+            edge_radius=100.0,
+            shade_above=True,
+            resolutions=resolutions,
+        )
+
+
 # ---------------------------------------------------------------------------
 # compute_fade_integral
 # ---------------------------------------------------------------------------
@@ -272,9 +294,64 @@ def test_fade_integral_per_pixel_width() -> None:
     assert result[0] != pytest.approx(result[1], abs=1e-6)
 
 
+def test_fade_integral_non_positive_width_raises() -> None:
+    """``compute_fade_integral`` rejects non-positive width entries."""
+    a0 = np.array([100.0])
+    a1 = np.array([110.0])
+    width = np.array([0.0])
+    resolutions = np.array([10.0])
+    with pytest.raises(ValueError, match='compute_fade_integral: width must be strictly'):
+        compute_fade_integral(
+            a0,
+            a1,
+            edge_radius=90.0,
+            width=width,
+            resolutions=resolutions,
+            shade_sign=1.0,
+        )
+
+
+def test_fade_integral_non_positive_resolution_raises() -> None:
+    """``compute_fade_integral`` rejects non-positive resolution entries."""
+    a0 = np.array([100.0])
+    a1 = np.array([110.0])
+    width = np.array([20.0])
+    resolutions = np.array([0.0])
+    with pytest.raises(
+        ValueError,
+        match='compute_fade_integral: resolutions must be strictly',
+    ):
+        compute_fade_integral(
+            a0,
+            a1,
+            edge_radius=90.0,
+            width=width,
+            resolutions=resolutions,
+            shade_sign=1.0,
+        )
+
+
 # ---------------------------------------------------------------------------
 # compute_edge_fade - basic fade with per-pixel width
 # ---------------------------------------------------------------------------
+
+
+def test_edge_fade_non_positive_resolution_raises() -> None:
+    """``compute_edge_fade`` rejects non-positive resolutions."""
+    model = np.zeros((2, 2), dtype=np.float64)
+    radii = np.full((2, 2), 100.0)
+    resolutions = np.array([[10.0, 10.0], [10.0, 0.0]])
+    with pytest.raises(ValueError, match='compute_edge_fade: resolutions must be strictly'):
+        compute_edge_fade(
+            model=model,
+            radii=radii,
+            edge_radius=100.0,
+            shade_above=True,
+            fade_width_pix=2.0,
+            resolutions=resolutions,
+            all_edge_radii=(),
+            logger=_EDGE_FADE_TEST_LOGGER,
+        )
 
 
 def test_edge_fade_shade_above_uniform_resolution() -> None:
@@ -303,6 +380,7 @@ def test_edge_fade_shade_above_uniform_resolution() -> None:
         fade_width_pix=fade_width_pix,
         resolutions=resolutions,
         all_edge_radii=(),
+        logger=_EDGE_FADE_TEST_LOGGER,
     )
 
     # Per-pixel width = fade_width_pix * resolution = 20.0 km for all pixels
@@ -345,6 +423,7 @@ def test_edge_fade_shade_below_uniform_resolution() -> None:
         fade_width_pix=fade_width_pix,
         resolutions=resolutions,
         all_edge_radii=(),
+        logger=_EDGE_FADE_TEST_LOGGER,
     )
 
     for i in range(5):
@@ -384,6 +463,7 @@ def test_edge_fade_varying_resolution() -> None:
         fade_width_pix=fade_width_pix,
         resolutions=resolutions,
         all_edge_radii=(),
+        logger=_EDGE_FADE_TEST_LOGGER,
     )
 
     # Each pixel has different expected fade width
@@ -405,7 +485,7 @@ def test_edge_fade_always_returns_result() -> None:
     model = np.zeros((5, 5), dtype=np.float64)
     radii = np.full((5, 5), 100.0)
     resolutions = np.full((5, 5), 1.0)
-    # Very narrow fade width pix (would have caused None in old code)
+    # Very narrow fade width in pixels
     result = compute_edge_fade(
         model=model,
         radii=radii,
@@ -414,6 +494,7 @@ def test_edge_fade_always_returns_result() -> None:
         fade_width_pix=0.1,
         resolutions=resolutions,
         all_edge_radii=(),
+        logger=_EDGE_FADE_TEST_LOGGER,
     )
     assert result is not None
     assert result.shape == (5, 5)
@@ -435,6 +516,7 @@ def test_edge_fade_adds_to_existing_model() -> None:
         fade_width_pix=fade_width_pix,
         resolutions=resolutions,
         all_edge_radii=(),
+        logger=_EDGE_FADE_TEST_LOGGER,
     )
 
     # All pixels at edge center: expect model + fade_integral(at edge)
@@ -463,6 +545,7 @@ def test_edge_fade_value_range() -> None:
         fade_width_pix=2.0,
         resolutions=resolutions,
         all_edge_radii=(),
+        logger=_EDGE_FADE_TEST_LOGGER,
     )
 
     assert np.all(result >= 0.0)
@@ -497,6 +580,7 @@ def test_edge_fade_conflict_reduces_width() -> None:
         fade_width_pix=fade_width_pix,
         resolutions=resolutions,
         all_edge_radii=all_edge_radii,
+        logger=_EDGE_FADE_TEST_LOGGER,
     )
 
     # Adjusted width = abs(110 - 100) / 2 = 5.0 km (scalar reduction)
@@ -541,6 +625,7 @@ def test_edge_fade_no_conflict_when_outside_fade_zone() -> None:
         fade_width_pix=fade_width_pix,
         resolutions=resolutions,
         all_edge_radii=all_edge_radii,
+        logger=_EDGE_FADE_TEST_LOGGER,
     )
 
     # No adjustment: width = fade_width_pix * res = 2.0 km
@@ -581,6 +666,7 @@ def test_edge_fade_conflict_on_wrong_side_ignored() -> None:
         fade_width_pix=fade_width_pix,
         resolutions=resolutions,
         all_edge_radii=all_edge_radii,
+        logger=_EDGE_FADE_TEST_LOGGER,
     )
 
     result_no_conflict = compute_edge_fade(
@@ -591,6 +677,7 @@ def test_edge_fade_conflict_on_wrong_side_ignored() -> None:
         fade_width_pix=fade_width_pix,
         resolutions=resolutions,
         all_edge_radii=(),
+        logger=_EDGE_FADE_TEST_LOGGER,
     )
 
     np.testing.assert_array_almost_equal(result_with_conflict, result_no_conflict)
@@ -610,6 +697,7 @@ def test_edge_fade_output_shape_preserved() -> None:
         fade_width_pix=1.0,
         resolutions=resolutions,
         all_edge_radii=(),
+        logger=_EDGE_FADE_TEST_LOGGER,
     )
     assert result.shape == (7, 13)
 
@@ -636,6 +724,7 @@ def test_edge_fade_multiple_conflicts_takes_tightest() -> None:
         fade_width_pix=fade_width_pix,
         resolutions=resolutions,
         all_edge_radii=all_edge_radii,
+        logger=_EDGE_FADE_TEST_LOGGER,
     )
 
     # Effective adjusted_km = min(7.5, 4.0) = 4.0

@@ -37,7 +37,6 @@ on feature type and edge availability:
 
 from __future__ import annotations
 
-import logging
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -58,8 +57,6 @@ from .ring_types import RingBaseOrbitMode, RingEdgeData, RingFeatureType, RingPe
 # ``not_solid`` pixel would paint a half-plane of constant model and a nearly
 # all-True mask; we keep contributions only in the edge band.
 _AA_EDGE_BAND_HALF_WIDTH = 0.5
-
-_logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -298,7 +295,7 @@ class RingFeature:
             and inner_radii_bp is not None
             and outer_radii_bp is not None
         ):
-            _logger.debug(
+            context.logger.debug(
                 'RingFeature %r: rendering full ringlet (solid band + edge anti-aliasing)',
                 self.key,
             )
@@ -306,7 +303,7 @@ class RingFeature:
             if result is not None:
                 results.append(result)
         else:
-            _logger.debug(
+            context.logger.debug(
                 'RingFeature %r: rendering per-edge (GAP or partial/single-edge RINGLET)',
                 self.key,
             )
@@ -407,7 +404,7 @@ class RingFeature:
         inner_a = self.inner_edge.base_radius
         outer_a = self.outer_edge.base_radius
         resolutions = context.resolutions
-        _logger.debug(
+        context.logger.debug(
             'RingFeature %r: full ringlet inner_a=%.3f km outer_a=%.3f km (solid + AA)',
             self.key,
             inner_a,
@@ -522,7 +519,7 @@ class RingFeature:
         else:
             shade_above = edge_type == 'outer'
 
-        _logger.debug(
+        context.logger.debug(
             'RingFeature %r: single-edge %s fade (edge_a=%.3f km, shade_above=%s, '
             'fade_width_pix=%.2f)',
             self.key,
@@ -541,6 +538,7 @@ class RingFeature:
             fade_width_pix=context.fade_width_pix,
             resolutions=resolutions,
             all_edge_radii=context.all_edge_radii,
+            logger=context.logger,
         )
 
         fade_mask = (new_model - model) > 0.0
@@ -671,7 +669,8 @@ def _parse_edge_data(feature_key: str, edge_type: str, mode_list: Any) -> RingEd
         Parsed ``RingEdgeData``.
 
     Raises:
-        ValueError: On any structural or value error.
+        ValueError: On any structural or value error, including perturbation mode
+            dicts that omit ``amplitude``, ``phase``, or ``pattern_speed``.
     """
     if not isinstance(mode_list, list) or len(mode_list) == 0:
         raise ValueError(
@@ -715,14 +714,21 @@ def _parse_edge_data(feature_key: str, edge_type: str, mode_list: Any) -> RingEd
                 rms=mode.get('rms', 0.0),
             )
         else:
-            # Perturbation mode: types and finiteness enforced by RingPerturbationMode.
+            # Perturbation mode: require explicit YAML keys; validation by
+            # ``RingPerturbationMode.__post_init__`` (no silent 0.0 defaults).
             mode_n = _integral_mode_num(feature_key, edge_type, i, mode_num)
+            for field_name in ('amplitude', 'phase', 'pattern_speed'):
+                if field_name not in mode:
+                    raise ValueError(
+                        f'Feature {feature_key!r} {edge_type}_data[{i}]: '
+                        f'perturbation mode dict missing required key {field_name!r}'
+                    )
             perturbations.append(
                 RingPerturbationMode(
                     mode_num=mode_n,
-                    amplitude=mode.get('amplitude', 0.0),
-                    phase=mode.get('phase', 0.0),
-                    pattern_speed=mode.get('pattern_speed', 0.0),
+                    amplitude=mode['amplitude'],
+                    phase=mode['phase'],
+                    pattern_speed=mode['pattern_speed'],
                 )
             )
 

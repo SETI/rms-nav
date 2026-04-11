@@ -167,3 +167,4 @@ prof/
 _work/
 **/_version.py
 nav_default_config.yaml
+uv.lock

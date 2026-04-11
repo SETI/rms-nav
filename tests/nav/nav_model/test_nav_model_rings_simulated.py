@@ -1,12 +1,10 @@
-"""Unit tests for NavModelRingsSimulated.
+"""Unit tests for ``NavModelRingsSimulated``.
 
-Tests cover:
-- Successful model creation with inner and outer edges
-- Uncertainty wiring from RingFeature to NavModelResult
-- Handling of sim_params with various configurations (no outer, no inner, defaults)
-- _sim_params_to_feature_config helper
+Tests cover successful model creation (inner/outer edges), uncertainty wiring
+from ``RingFeature`` to ``NavModelResult``, ``sim_params`` edge cases (no outer,
+no inner), and ``_sim_params_to_feature_config``.
 
-All rendering (render_ring, compute_border_atop_simulated) is mocked.
+``render_ring`` and ``compute_border_atop_simulated`` are mocked.
 """
 
 from __future__ import annotations

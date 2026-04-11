@@ -1,20 +1,14 @@
 """Base class for ring navigation models.
 
-This module provides the annotation creation helper shared by both the real ring
-model (``NavModelRings``) and the simulated ring model (``NavModelRingsSimulated``).
+This module provides the annotation creation helper shared by the real ring model
+(``NavModelRings``) and the simulated ring model (``NavModelRingsSimulated``).
 
-The anti-aliasing function previously in this module has been moved to
-``nav.nav_model.rings.ring_math.compute_antialiasing``, which is used directly
-by ``RingFeature._render_full_ringlet()``. This base class retains only the
-annotation logic because annotation creation requires access to observation
-metadata (image shape, config font settings) that is naturally owned by the
-``NavModel`` base class -- it is not a pure math function.
+Anti-aliasing is implemented in
+``nav.nav_model.rings.ring_math.compute_antialiasing`` and is invoked from
+``RingFeature._render_full_ringlet()``. Annotation helpers live here because they
+need observation metadata (image shape, config font settings) that belongs with
+``NavModel``, unlike the pure math in ``ring_math``.
 """
-
-import logging
-from collections.abc import Iterator
-from contextlib import contextmanager
-from typing import Any
 
 import numpy as np
 import oops
@@ -33,37 +27,6 @@ from nav.annotation import (
 from nav.support.types import NDArrayBoolType
 
 from .nav_model import NavModel
-
-
-@contextmanager
-def rings_subpackage_log_level(level_name: Any) -> Iterator[None]:
-    """Apply a stdlib log level to the ``nav.nav_model.rings`` logger hierarchy.
-
-    Child loggers (e.g. ``nav.nav_model.rings.ring_filter``) inherit this level
-    while their own level is ``logging.NOTSET``, so ``logging.debug`` calls in the
-    rings subpackage follow ``general.log_level_model_rings`` during ring model
-    creation.
-
-    Parameters:
-        level_name: Name such as ``'DEBUG'`` or ``'INFO'``, or ``None`` to skip.
-
-    Yields:
-        None.
-    """
-    if level_name is None:
-        yield
-        return
-    level = getattr(logging, str(level_name).upper(), None)
-    if not isinstance(level, int):
-        yield
-        return
-    pkg_log = logging.getLogger('nav.nav_model.rings')
-    previous = pkg_log.level
-    pkg_log.setLevel(level)
-    try:
-        yield
-    finally:
-        pkg_log.setLevel(previous)
 
 
 class NavModelRingsBase(NavModel):
