@@ -23,10 +23,10 @@ class ZoomPanController:
     Plug into an existing UI by providing:
       - label: QLabel showing the image (mouse events are routed by the UI)
       - scroll_area: QScrollArea containing the label
-      - get_zoom(): float — returns current zoom factor
-      - set_zoom(z: float): None — sets zoom factor and updates any labels
-      - update_display(): None — applies current zoom/pan to the UI
-      - set_zoom_label_text(label: str): Optional[Callable[[str], None]] — optional
+      - get_zoom(): float -- returns current zoom factor
+      - set_zoom(z: float): None -- sets zoom factor and updates any labels
+      - update_display(): None -- applies current zoom/pan to the UI
+      - set_zoom_label_text(label: str): Optional[Callable[[str], None]] -- optional
         callback that receives the fully formatted zoom label string to display
     The controller adjusts scrollbars for panning and zoom anchoring.
     """

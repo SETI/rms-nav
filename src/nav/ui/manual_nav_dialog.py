@@ -441,9 +441,9 @@ class ManualNavDialog(QDialog):
     # ---- Event handlers ----
 
     @staticmethod
-    def _is_checked(state: int) -> bool:
+    def _is_checked(state: Any) -> bool:
         """Return True if ``state`` is the Qt Checked checkbox state."""
-        return state == int(cast(int, Qt.CheckState.Checked.value))
+        return Qt.CheckState(state) == Qt.CheckState.Checked
 
     def _on_black_changed(self, val: float) -> None:
         self._black = float(val)

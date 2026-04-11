@@ -65,7 +65,7 @@ class RingBaseOrbitMode:
             Used as the uncertainty measure for navigation.
 
     Raises:
-        TypeError: If ``a``, ``ae``, or ``rms`` is not a real number (``bool`` is
+        TypeError: If any numeric field is not a finite real number (``bool`` is
             rejected because it is a subclass of ``int``).
         ValueError: If ``a`` <= 0, ``ae`` < 0, or ``rms`` < 0.
     """
@@ -77,13 +77,18 @@ class RingBaseOrbitMode:
     rms: float
 
     def __post_init__(self) -> None:
-        """Validate numeric types and field ranges at construction time."""
-        for field_name in ('a', 'ae', 'rms'):
+        """Validate numeric types, finiteness, and field ranges at construction time."""
+        for field_name in ('a', 'ae', 'long_peri', 'rate_peri', 'rms'):
             value = getattr(self, field_name)
             if not isinstance(value, numbers.Real) or isinstance(value, bool):
                 raise TypeError(
                     f'RingBaseOrbitMode.{field_name} must be a real number, '
                     f'got {type(value).__name__}'
+                )
+            fv = float(value)
+            if not math.isfinite(fv):
+                raise TypeError(
+                    f'RingBaseOrbitMode.{field_name} must be a finite number, got {value!r}'
                 )
         if self.a <= 0:
             raise ValueError(f'RingBaseOrbitMode.a must be > 0, got {self.a}')
@@ -116,9 +121,10 @@ class RingPerturbationMode:
         pattern_speed: Pattern speed in degrees/day.
 
     Raises:
-        ValueError: If ``mode_num`` is not an integer (``bool`` is rejected) or
-            ``amplitude`` is negative or not an ``int``/``float`` (``bool`` rejected),
-            or if ``phase`` or ``pattern_speed`` is not a finite ``int``/``float``.
+        ValueError: If ``mode_num`` is not an integer (``bool`` is rejected), if
+            ``amplitude`` is not an ``int``/``float`` (``bool`` rejected), is not
+            finite, or is negative, or if ``phase`` or ``pattern_speed`` is not a
+            finite ``int``/``float``.
     """
 
     mode_num: int
@@ -134,10 +140,15 @@ class RingPerturbationMode:
             )
         if isinstance(self.amplitude, bool) or not isinstance(self.amplitude, (int, float)):
             raise ValueError(
-                f'RingPerturbationMode.amplitude must be a non-negative number, '
-                f'got {self.amplitude!r}'
+                f'RingPerturbationMode.amplitude must be int or float (not bool), '
+                f'got {type(self.amplitude).__name__}'
             )
-        if self.amplitude < 0:
+        fa = float(self.amplitude)
+        if not math.isfinite(fa):
+            raise ValueError(
+                f'RingPerturbationMode.amplitude must be a finite number, got {self.amplitude!r}'
+            )
+        if fa < 0:
             raise ValueError(f'RingPerturbationMode.amplitude must be >= 0, got {self.amplitude}')
 
         for field_name in ('phase', 'pattern_speed'):

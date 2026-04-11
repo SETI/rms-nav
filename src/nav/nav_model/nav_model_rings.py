@@ -55,6 +55,28 @@ _DEFAULT_MIN_ALLOWED_FADE_WIDTH_PIX = 3.0
 _DEFAULT_MIN_FEATURE_PIXELS = 2.0
 
 
+def _positive_finite_planet_scalar(
+    planet: str, key: str, planet_config: dict[str, Any], default: float
+) -> float:
+    """Return a positive finite float from ``planet_config[key]`` or ``default``."""
+    raw: Any = planet_config.get(key, default)
+    if isinstance(raw, bool):
+        raise ValueError(
+            f'Invalid {key} for planet {planet}: expected a finite numeric value, got bool'
+        )
+    try:
+        v = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f'Invalid {key} for planet {planet}: expected a finite numeric value, got {raw!r}'
+        ) from exc
+    if not math.isfinite(v):
+        raise ValueError(f'Invalid {key} {v} for planet {planet} (must be finite)')
+    if v <= 0.0:
+        raise ValueError(f'Invalid {key} {v} for planet {planet}')
+    return v
+
+
 class NavModelRings(NavModelRingsBase):
     """Navigation model for planetary rings based on ephemeris data.
 
@@ -195,24 +217,18 @@ class NavModelRings(NavModelRingsBase):
             raise ValueError(f'No epoch configured for planet {planet}')
         epoch = utc_to_et(epoch_str)
 
-        fade_width_pix = float(planet_config.get('fade_width_pix', _DEFAULT_FADE_WIDTH_PIX))
-        if fade_width_pix <= 0:
-            raise ValueError(f'Invalid fade_width_pix {fade_width_pix} for planet {planet}')
-
-        min_allowed_fade_width_pix = float(
-            planet_config.get('min_allowed_fade_width_pix', _DEFAULT_MIN_ALLOWED_FADE_WIDTH_PIX)
+        fade_width_pix = _positive_finite_planet_scalar(
+            planet, 'fade_width_pix', planet_config, _DEFAULT_FADE_WIDTH_PIX
         )
-        if min_allowed_fade_width_pix <= 0:
-            raise ValueError(
-                f'Invalid min_allowed_fade_width_pix {min_allowed_fade_width_pix} '
-                f'for planet {planet}'
-            )
-
-        min_feature_pixels = float(
-            planet_config.get('min_feature_pixels', _DEFAULT_MIN_FEATURE_PIXELS)
+        min_allowed_fade_width_pix = _positive_finite_planet_scalar(
+            planet,
+            'min_allowed_fade_width_pix',
+            planet_config,
+            _DEFAULT_MIN_ALLOWED_FADE_WIDTH_PIX,
         )
-        if min_feature_pixels <= 0:
-            raise ValueError(f'Invalid min_feature_pixels {min_feature_pixels} for planet {planet}')
+        min_feature_pixels = _positive_finite_planet_scalar(
+            planet, 'min_feature_pixels', planet_config, _DEFAULT_MIN_FEATURE_PIXELS
+        )
 
         self._logger.debug(
             'Planet: %s, epoch: %s, fade_width_pix: %.1f',
@@ -277,11 +293,14 @@ class NavModelRings(NavModelRingsBase):
                 obs.ext_bp.border_atop(bp_radii.key, a).mvals.astype('bool').filled(False)
             )
             res_at_edge = resolutions[border_arr]
-            if len(res_at_edge) == 0:
+            res_ma = np.ma.asarray(res_at_edge)
+            if res_ma.count() == 0:
                 return None
-            if hasattr(res_at_edge, 'is_all_masked') and res_at_edge.is_all_masked():
+            vals = np.asarray(res_ma.compressed(), dtype=np.float64)
+            vals = vals[np.isfinite(vals)]
+            if vals.size == 0:
                 return None
-            min_val = float(np.min(res_at_edge))
+            min_val = float(np.min(vals))
             return min_val if min_val > 0.0 else None
 
         # ------------------------------------------------------------------

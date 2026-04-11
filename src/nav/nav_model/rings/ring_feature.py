@@ -38,6 +38,7 @@ on feature type and edge availability:
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -641,6 +642,23 @@ class RingFeature:
 # ---------------------------------------------------------------------------
 
 
+def _integral_mode_num(feature_key: str, edge_type: str, index: int, mode_num: Any) -> int:
+    """Parse YAML ``mode`` as ``int``; reject ``bool`` and non-integral floats."""
+    if isinstance(mode_num, bool):
+        raise ValueError(
+            f'Feature {feature_key!r} {edge_type}_data[{index}]: '
+            f'mode_num must be int (not bool), got {mode_num!r}'
+        )
+    if isinstance(mode_num, int):
+        return mode_num
+    if isinstance(mode_num, float) and math.isfinite(mode_num) and mode_num == math.floor(mode_num):
+        return int(mode_num)
+    raise ValueError(
+        f'Feature {feature_key!r} {edge_type}_data[{index}]: '
+        f'mode_num must be an integer, got {mode_num!r}'
+    )
+
+
 def _parse_edge_data(feature_key: str, edge_type: str, mode_list: Any) -> RingEdgeData:
     """Parse a list of mode dicts into a RingEdgeData.
 
@@ -677,58 +695,34 @@ def _parse_edge_data(feature_key: str, edge_type: str, mode_list: Any) -> RingEd
 
         if 'a' in mode:
             # Base-orbit entry: must be mode 1 (semi-major axis and related fields).
-            try:
-                mode_n_base = int(mode_num)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(
-                    f'Feature {feature_key!r} {edge_type}_data[{i}]: invalid "mode" for base orbit '
-                    f'-- {exc}'
-                ) from exc
+            mode_n_base = _integral_mode_num(feature_key, edge_type, i, mode_num)
             if mode_n_base != 1:
                 raise ValueError(
                     f'Feature {feature_key!r} {edge_type}_data[{i}]: entry with "a" must use '
                     f'mode 1 (base orbit), got mode {mode_num!r}'
                 )
-            try:
-                a = float(mode['a'])
-                ae = float(mode.get('ae', 0.0))
-                long_peri = float(mode.get('long_peri', 0.0))
-                rate_peri = float(mode.get('rate_peri', 0.0))
-                rms = float(mode.get('rms', 0.0))
-            except (TypeError, ValueError) as exc:
+            if base_orbit is not None:
                 raise ValueError(
-                    f'Feature {feature_key!r} {edge_type}_data[{i}]: invalid numeric value -- {exc}'
-                ) from exc
-            if a <= 0:
-                raise ValueError(
-                    f'Feature {feature_key!r} {edge_type}_data[{i}]: '
-                    f"mode-1 data missing or has non-positive 'a'"
-                )
-            if rms < 0:
-                raise ValueError(
-                    f'Feature {feature_key!r} {edge_type}_data[{i}]: '
-                    f'invalid numeric value -- rms must be non-negative'
+                    f'Feature {feature_key!r} {edge_type}_data[{i}]: duplicate base-orbit entry '
+                    f'(only one mode dict with "a" allowed per edge); '
+                    f'earlier entry already defined the mode-1 base orbit'
                 )
             base_orbit = RingBaseOrbitMode(
-                a=a, ae=ae, long_peri=long_peri, rate_peri=rate_peri, rms=rms
+                a=mode['a'],
+                ae=mode.get('ae', 0.0),
+                long_peri=mode.get('long_peri', 0.0),
+                rate_peri=mode.get('rate_peri', 0.0),
+                rms=mode.get('rms', 0.0),
             )
         else:
-            # Perturbation mode
-            try:
-                mode_n = int(mode_num)
-                amplitude = float(mode.get('amplitude', 0.0))
-                phase = float(mode.get('phase', 0.0))
-                pattern_speed = float(mode.get('pattern_speed', 0.0))
-            except (TypeError, ValueError) as exc:
-                raise ValueError(
-                    f'Feature {feature_key!r} {edge_type}_data[{i}]: invalid numeric value -- {exc}'
-                ) from exc
+            # Perturbation mode: types and finiteness enforced by RingPerturbationMode.
+            mode_n = _integral_mode_num(feature_key, edge_type, i, mode_num)
             perturbations.append(
                 RingPerturbationMode(
                     mode_num=mode_n,
-                    amplitude=amplitude,
-                    phase=phase,
-                    pattern_speed=pattern_speed,
+                    amplitude=mode.get('amplitude', 0.0),
+                    phase=mode.get('phase', 0.0),
+                    pattern_speed=mode.get('pattern_speed', 0.0),
                 )
             )
 

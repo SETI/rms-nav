@@ -15,8 +15,6 @@ planets:
 
 general:
   truetype_font_dir: /usr/share/fonts/truetype  # TODO
-  # Verbose ring pipeline (filter passes, fade narrowing, per-feature render): use DEBUG
-  log_level_model_rings: DEBUG
 
 ####################
 # OFFSET SETTINGS #

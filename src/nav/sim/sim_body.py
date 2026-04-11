@@ -45,15 +45,15 @@ def create_simulated_body(
         center: Tuple of (v, u) giving the center position in floating-point pixels.
             (0.0, 0.0) is the top-left corner of pixel (0,0), (0.5, 0.5) is the
             center of pixel (0,0).
-        rotation_z: Rotation angle around the viewing axis (z-axis) in radians (0 to 2π).
-        rotation_tilt: Tilt angle of the ellipsoid in radians (0 to π/2).
+        rotation_z: Rotation angle around the viewing axis (z-axis) in radians (0 to 2pi).
+        rotation_tilt: Tilt angle of the ellipsoid in radians (0 to pi/2).
             Controls how much the ellipsoid is tilted toward/away from the viewer.
-        illumination_angle: Direction of illumination in the image plane in radians (0 to 2π).
-            0 radians is at the top of the image, π/2 is to the right.
-        phase_angle: Phase angle in radians (0 to π).
+        illumination_angle: Direction of illumination in the image plane in radians (0 to 2pi).
+            0 radians is at the top of the image, pi/2 is to the right.
+        phase_angle: Phase angle in radians (0 to pi).
             0 = head-on illumination (fully illuminated),
-            π/2 = side illumination (half illuminated),
-            π = back illumination (no visible illumination).
+            pi/2 = side illumination (half illuminated),
+            pi = back illumination (no visible illumination).
         crater_fill: Approximate fraction of the ellipse to fill with craters.
         crater_min_radius: Minimum radius of a crater as a fraction of axis1.
         crater_max_radius: Maximum radius of a crater as a fraction of axis1.
@@ -216,7 +216,7 @@ def _lambertian_shading(
     """Add Lambertian shading to the intensity."""
     # Apply Lambertian shading for 3D ellipsoid
     # For a 3D ellipsoid, the surface normal at point (v, u, z) is:
-    # n = (v/a², u/b², z/c²) normalized
+    # n = (v/a^2, u/b^2, z/c^2) normalized
 
     # Compute 3D surface normal in local coordinates
     normal_v_local = np.zeros_like(v_rot)
@@ -244,26 +244,26 @@ def _lambertian_shading(
     normal_z = normal_z_local  # z is perpendicular to image plane
 
     # Illumination direction in 3D space
-    # illumination_angle: 0 = top, π/2 = right, π = bottom, 3π/2 = left
+    # illumination_angle: 0 = top, pi/2 = right, pi = bottom, 3pi/2 = left
     # This is the direction in the image plane
     illum_v_2d = -np.cos(illumination_angle)  # Negative because v increases downward
     illum_u_2d = np.sin(illumination_angle)
 
     # Phase angle: angle between observer-body-sun
     # phase_angle = 0: full moon (observer and sun on same side, visible face fully lit)
-    # phase_angle = π/2: quarter moon (observer and sun perpendicular)
-    # phase_angle = π: new moon (observer and sun opposite, visible face dark/backlit)
+    # phase_angle = pi/2: quarter moon (observer and sun perpendicular)
+    # phase_angle = pi: new moon (observer and sun opposite, visible face dark/backlit)
     #
     # The illumination vector points from body toward sun.
     # For phase_angle = 0: sun is behind observer, so illumination comes from direction
     #   that lights the visible face (positive dot product with visible normals).
-    # For phase_angle = π: sun is behind body, so illumination comes from direction
+    # For phase_angle = pi: sun is behind body, so illumination comes from direction
     #   that doesn't light the visible face (negative dot product with visible normals).
     #
-    # The z-component of illumination: when phase_angle = π, we want backlit (dark),
+    # The z-component of illumination: when phase_angle = pi, we want backlit (dark),
     # so z should be negative (illumination away from observer) to make dot product negative.
     # When phase_angle = 0, we want fully lit, so z should be positive to make dot product positive.
-    # So: z = cos(phase_angle) gives phase_angle=0 -> z=+1, phase_angle=π -> z=-1
+    # So: z = cos(phase_angle) gives phase_angle=0 -> z=+1, phase_angle=pi -> z=-1
     illum_z = np.cos(phase_angle)
 
     # The in-plane component magnitude
@@ -288,7 +288,7 @@ def _lambertian_shading(
     # cos(incidence) = dot(normal, illumination_direction)
     cos_incidence = normal_v * illum_v_3d + normal_u * illum_u_3d + normal_z * illum_z_norm
 
-    # Lambertian shading: I = I₀ * max(0, cos(incidence))
+    # Lambertian shading: I = I_0 * max(0, cos(incidence))
     # Only apply to visible hemisphere and clip to [0, 1] range
     dark_side_illum_strength = 0.01  # TODO make config parameter
     light_side_illum_gamma = 1  # TODO make config parameter
@@ -342,7 +342,7 @@ def _add_craters_and_shading(
         alpha: float,
         size: int | None = None,
     ) -> NDArrayFloatType:
-        """Sample R from p(R) ∝ R^(-alpha) on [R_min, R_max], alpha > 1."""
+        """Sample R from p(R) ~ R^(-alpha) on [R_min, R_max], alpha > 1."""
         if alpha <= 1:
             raise ValueError('alpha must be > 1 for a proper power law.')
         a = 1.0 - alpha
@@ -397,7 +397,7 @@ def _add_craters_and_shading(
 
         # Blend factor in [0,1]
         t = np.clip((D - D_small) / (D_large - D_small + 1e-9), 0.0, 1.0)
-        # d/D: small → 0.20, large → 0.07
+        # d/D: small -> 0.20, large -> 0.07
         d_over_D_mean = (1.0 - t) * 0.20 + t * 0.07
 
         # Multiplicative noise around mean
@@ -443,7 +443,7 @@ def _add_craters_and_shading(
     # ----------------------------------------------------------------------
     z_with_craters = z_coords + height
 
-    # Approximate surface normal from height field: n ∝ (-dz/du, -dz/dv, 1)
+    # Approximate surface normal from height field: n ~ (-dz/du, -dz/dv, 1)
     dz_dv, dz_du = np.gradient(z_with_craters)
     nx = -dz_du
     ny = -dz_dv

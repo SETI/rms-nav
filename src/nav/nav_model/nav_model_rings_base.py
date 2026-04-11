@@ -170,8 +170,8 @@ class NavModelRingsBase(NavModel):
 
                 # Check if tangent is more horizontal or vertical
                 # du_norm and dv_norm are the normalized direction components
-                # If |du| > |dv|, tangent is more horizontal (edge runs left-right) → label up/down
-                # If |dv| > |du|, tangent is more vertical (edge runs up-down) → label left/right
+                # If |du| > |dv|, tangent is more horizontal (edge runs left-right) -> label up/down
+                # If |dv| > |du|, tangent is more vertical (edge runs up-down) -> label left/right
                 abs_du = abs(du_norm)
                 abs_dv = abs(dv_norm)
 

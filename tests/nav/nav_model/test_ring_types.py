@@ -17,6 +17,18 @@ def test_ring_base_orbit_mode_rejects_bool_a() -> None:
         RingBaseOrbitMode(a=True, ae=0.0, long_peri=0.0, rate_peri=0.0, rms=0.0)
 
 
+def test_ring_base_orbit_mode_rejects_non_finite_long_peri() -> None:
+    """``long_peri`` must be finite."""
+    with pytest.raises(TypeError, match=r'RingBaseOrbitMode\.long_peri must be a finite'):
+        RingBaseOrbitMode(
+            a=1.0,
+            ae=0.0,
+            long_peri=float('nan'),
+            rate_peri=0.0,
+            rms=0.0,
+        )
+
+
 def test_ring_base_orbit_mode_rejects_non_numeric_ae() -> None:
     """Non-real ``ae`` raises TypeError before range checks."""
     with pytest.raises(TypeError, match=r'RingBaseOrbitMode\.ae must be a real number'):
@@ -33,6 +45,12 @@ def test_ring_perturbation_mode_rejects_non_finite_phase() -> None:
     """``phase`` must be finite so ``parsed_modes_for_backplane`` stays safe."""
     with pytest.raises(ValueError, match=r'RingPerturbationMode\.phase must be a finite'):
         RingPerturbationMode(mode_num=2, amplitude=1.0, phase=float('nan'), pattern_speed=0.0)
+
+
+def test_ring_perturbation_mode_rejects_non_finite_amplitude() -> None:
+    """``amplitude`` must be finite."""
+    with pytest.raises(ValueError, match=r'RingPerturbationMode\.amplitude must be a finite'):
+        RingPerturbationMode(mode_num=2, amplitude=float('nan'), phase=0.0, pattern_speed=0.0)
 
 
 def test_ring_perturbation_mode_rejects_bool_pattern_speed() -> None:

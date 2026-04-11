@@ -16,7 +16,7 @@ Execute all project checks (lint, typecheck, test, Markdown lint, docs) and fix 
 
 ## Check Commands
 
-Run from **project root** with the project **virtual environment activated** (e.g. `source venv/bin/activate` or `pip install -e ".[dev]"`).
+Run from **project root** with the project **virtual environment activated** (e.g. `source venv/bin/activate` or create a new venv and then `pip install -e ".[dev]"`).
 
 ### Code (ruff, mypy, pytest)
 
@@ -65,6 +65,7 @@ Options:
 - `-d, --docs`: Only Sphinx build and PyMarkdown scan.
 - `-m, --markdown`: Only PyMarkdown scan.
 - `-s, --sequential`: Run code and docs sequentially (easier to read output).
+- `-p, --parallel`: Run code and docs in parallel (the default).
 - `-h, --help`: Show usage.
 
 Set `VENV` or `VENV_PATH` to point to the virtual environment if it is not at `./venv`.

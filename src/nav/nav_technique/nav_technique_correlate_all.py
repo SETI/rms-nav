@@ -180,7 +180,7 @@ class NavTechniqueCorrelateAll(NavTechnique):
             # Robust z-scores (standard deviation units)
             z = 0.6745 * (data_array - median) / mad  # 0.6745 ~ Phi^-1(0.75)
 
-            # Make later points “more suspicious” by dividing by reliability
+            # Make later points "more suspicious" by dividing by reliability
             score = np.abs(z) / reliability
 
             outliers = np.where(score > threshold)[0]

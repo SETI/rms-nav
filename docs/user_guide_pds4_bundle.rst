@@ -37,25 +37,25 @@ Each bundle follows a standard PDS4 directory structure:
 .. code-block:: text
 
    <bundle_name>/
-   ├── browse/
-   │   ├── collection_browse.tab
-   │   ├── collection_browse.lblx
-   │   └── <directory_structure>/
-   │       └── <image_name>_summary.lblx
-   │       └── <image_name>_summary.png
-   ├── data/
-   │   ├── collection_data.tab
-   │   ├── collection_data.lblx
-   │   └── <directory_structure>/
-   │       └── <image_name>_backplanes.lblx
-   │       └── <image_name>_supplemental.txt
-   ├── document/
-   │   └── supplemental/
-   │       ├── global_index_bodies.lblx
-   │       ├── global_index_bodies.tab
-   │       ├── global_index_rings.lblx
-   │       └── global_index_rings.tab
-   └── bundle.lblx
+   +-- browse/
+   |   +-- collection_browse.tab
+   |   +-- collection_browse.lblx
+   |   +-- <directory_structure>/
+   |       +-- <image_name>_summary.lblx
+   |       +-- <image_name>_summary.png
+   +-- data/
+   |   +-- collection_data.tab
+   |   +-- collection_data.lblx
+   |   +-- <directory_structure>/
+   |       +-- <image_name>_backplanes.lblx
+   |       +-- <image_name>_supplemental.txt
+   +-- document/
+   |   +-- supplemental/
+   |       +-- global_index_bodies.lblx
+   |       +-- global_index_bodies.tab
+   |       +-- global_index_rings.lblx
+   |       +-- global_index_rings.tab
+   +-- bundle.lblx
 
 The directory structure within ``data/`` and ``browse/`` mirrors the structure of the
 original PDS4 dataset (if it existed), with paths derived from image names using
@@ -66,8 +66,8 @@ Command-Line Interfaces
 
 Two main programs support bundle generation:
 
-* ``nav_create_bundle`` (local/CLI) — supports both labels and summary passes
-* ``nav_create_bundle_cloud_tasks`` (Cloud Tasks) — parallel processing for labels pass
+* ``nav_create_bundle`` (local/CLI) -- supports both labels and summary passes
+* ``nav_create_bundle_cloud_tasks`` (Cloud Tasks) -- parallel processing for labels pass
 
 Labels Pass
 -----------

@@ -62,7 +62,7 @@ Apply these criteria when reviewing each test file and each test case.
 - **Pure logic:** Unit tests for pure business logic should not require a database or network; note functions that could be unit-tested but only have integration tests.
 - **Environment variables:** Tests should not depend on real `.env` or env values; note tests that would fail with different env configs.
 - **Patch target location:** `mock.patch` must target where the name is *looked up*, not where it is *defined* (e.g. `mock.patch("module_under_test.requests.get")`, not `mock.patch("requests.get")`). Note patches that target the wrong module.
-- **`monkeypatch` vs `mock.patch` consistency:** The project should pick one approach and use it consistently. Mixing both in the same test file or for the same pattern makes tests harder to follow.
+- **`monkeypatch` vs `mock.patch` usage:** Prefer a consistent default per test file, but allow either tool where it is the clearer fit (e.g., env/process state with `monkeypatch`, call assertions/spies with `mock.patch`). Flag only inconsistent usage that reduces clarity.
 - **Patch scope:** Decorator-level `mock.patch` applies for the whole test; context-manager form limits scope. Note patches broader than needed or too narrow (missing setup/teardown).
 - **Mock return values:** Mocks that return `MagicMock()` by default can hide type bugs (a function expected to return `str` returns a `MagicMock` and downstream code doesn't fail because it's truthy). Note mocks in critical paths without explicit `return_value` or `side_effect`.
 
@@ -135,7 +135,7 @@ Apply these criteria when reviewing each test file and each test case.
 - **Assertion messages:** Use clear messages where it helps (e.g. `assert x == y, f"Expected {x} to equal {y}"`); note assertions that would be hard to debug on failure.
 - **Single responsibility:** Each test should verify one behavior; note tests that assert unrelated things or have multiple "acts".
 - **Arrange-Act-Assert:** Tests should follow AAA pattern; note tests with interleaved setup and assertions.
-- **No logic in tests:** Tests should not contain conditionals (`if`), loops, or complex logic; note tests that do and suggest splitting or parameterizing.
+- **Keep test logic minimal:** Avoid complex control flow in tests. Simple loops and branching are acceptable when they improve clarity (e.g., table-driven checks); flag only logic that obscures intent or masks failures.
 
 ### 18. Code coverage
 
@@ -274,7 +274,7 @@ Produce a single markdown report with the following structure. Do **not** edit a
 
 ## Execution steps
 
-1. **Gather:** List all test files under `tests/` and any `conftest.py`. Also read `pyproject.toml` for pytest configuration, markers, and plugin list.
+1. **Gather:** List all test files under `tests/` and any `conftest.py`. Read pytest config (pyproject.toml or pytest.ini if present) for markers and addopts. For plugins, check declared entry points in dependencies, the PYTEST_PLUGINS environment variable, and any pytest_plugins references in conftest.py files.
 2. **Read:** For each file, read test names, docstrings, assertion patterns (focus on `assert`, return checks, fixtures, marks, `mock.patch`, `monkeypatch`, `caplog`, `pytest.warns`).
 3. **Classify:** For each criterion (1–23), note specific file names, test names, and line references or short quotes.
 4. **Write:** Produce the full report in the format above, including the "Prompt for an AI agent" section at the end.

@@ -112,7 +112,7 @@ def _render_stars_cached(
             star_psf = star_psf / psf_max
         # Scale so that vmag=0 results in peak=1.0
         # star.dn = 2.512^-(vmag - 4.0), so for vmag=0: star.dn = 2.512^4
-        # We want vmag=0 → peak=1, so scale by star.dn / (2.512^4)
+        # We want vmag=0 -> peak=1, so scale by star.dn / (2.512^4)
         scale_factor = star.dn / (2.512**4.0)
         star_psf = star_psf * scale_factor
 

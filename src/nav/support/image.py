@@ -542,7 +542,7 @@ def gradient_magnitude(img: NDArrayFloatType) -> NDArrayFloatType:
         img: The input array.
 
     Returns:
-        The gradient magnitude at each pixel, computed as sqrt(gx² + gy²).
+        The gradient magnitude at each pixel, computed as sqrt(gx^2 + gy^2).
     """
     gy = np.gradient(img, axis=0)
     gx = np.gradient(img, axis=1)

@@ -407,7 +407,7 @@ properties extract the canonical radius and uncertainty from the base orbit.
 pattern_speed)`` tuples that the ``oops`` backplane API consumes, omitting inclination
 modes.
 
-:class:`~nav.nav_model.rings.ring_feature.RingFeature` is the core domain object — a
+:class:`~nav.nav_model.rings.ring_feature.RingFeature` is the core domain object -- a
 frozen dataclass that owns a single ring feature (ringlet or gap) with optional inner
 and outer edges. It is constructed via ``from_config(key, data)`` which validates the
 YAML dictionary immediately and raises ``ValueError`` on any malformed input. Derived
@@ -453,7 +453,7 @@ that should be rendered:
      - For two-edge features (RINGLETs and GAPs where both edges are in the FOV), exclude
        the feature if the gap width ``outer.base_radius - inner.base_radius`` is smaller
        than ``min_feature_pixels * min_resolution`` along the feature. The motivation is
-       that an unresolvable gap provides no useful navigational information—shading its
+       that an unresolvable gap provides no useful navigational information--shading its
        surroundings without a visible gap would be misleading.
    * - 4
      - Fade conflict

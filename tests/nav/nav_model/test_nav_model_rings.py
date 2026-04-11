@@ -249,6 +249,32 @@ class TestConfigLoading:
                 create_annotations=False,
             )
 
+    def test_bool_fade_width_pix_raises(self) -> None:
+        """Boolean fade_width_pix is rejected (would coerce via float)."""
+        obs = _make_obs()
+        cfg = _make_planet_config()
+        cfg['fade_width_pix'] = True
+        model = _make_rings_model(obs, cfg)
+        with pytest.raises(ValueError, match=r'fade_width_pix.*bool'):
+            model._create_model(
+                always_create_model=False,
+                never_create_model=False,
+                create_annotations=False,
+            )
+
+    def test_nan_min_feature_pixels_raises(self) -> None:
+        """Non-finite min_feature_pixels raises ValueError."""
+        obs = _make_obs()
+        cfg = _make_planet_config()
+        cfg['min_feature_pixels'] = float('nan')
+        model = _make_rings_model(obs, cfg)
+        with pytest.raises(ValueError, match='min_feature_pixels'):
+            model._create_model(
+                always_create_model=False,
+                never_create_model=False,
+                create_annotations=False,
+            )
+
     def test_malformed_feature_raises(self) -> None:
         """A feature with invalid config raises ValueError during load."""
         obs = _make_obs()

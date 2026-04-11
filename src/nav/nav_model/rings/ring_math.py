@@ -163,7 +163,7 @@ def compute_fade_integral(
     .. code-block:: text
 
         result = ((1 + shade_sign * edge_radius / width) * (a1 - a0)
-                  + shade_sign * (a0² - a1²) / (2 * width)) / resolutions
+                  + shade_sign * (a0^2 - a1^2) / (2 * width)) / resolutions
 
     Parameters:
         a0: Lower integration bounds per pixel (km).

@@ -27,7 +27,7 @@ Use this when you need concrete examples for a dimension or wording guidance.
 - **Finding**: Public API in `api.py` has no return type annotations; mypy is not run in CI. **Evidence**: `pyproject.toml` has no `[tool.mypy]`; `api.py` functions lack `->`. **Suggestion**: Add mypy to CI, enable strict mode, and annotate public functions first.
 
 **Testing**
-- **Finding**: Coverage is ~45%; module `core/solver.py` has no direct tests. **Evidence**: `coverage report`; no `tests/test_solver.py`. **Suggestion**: Add unit tests for solver entry points and key branches; aim for ≥90% on core.
+- **Finding**: Coverage is ~45%; module `core/solver.py` has no direct tests. **Evidence**: `coverage report`; no `tests/test_solver.py`. **Suggestion**: Add unit tests for solver entry points and key branches; aim for ≥80% on core.
 
 **Performance**
 - **Finding**: Config is re-read from disk inside a loop in `process_batch`. **Evidence**: `src/batch.py` `process_batch` calls `load_config()` per item. **Suggestion**: Load config once outside the loop and pass it in or use a module-level cache.
@@ -54,7 +54,7 @@ Use this when you need concrete examples for a dimension or wording guidance.
 - **Finding**: CI does not run Sphinx build or PyMarkdown; only ruff and pytest. **Evidence**: `.github/workflows/run-tests.yml`. **Suggestion**: Add Sphinx and PyMarkdown steps to match the local `run-all-checks.sh` so documentation issues are caught before merge.
 
 **Dependencies – configuration consistency**
-- **Finding**: Ruff is configured with `line-length = 120` but the project rule says 100. **Evidence**: `pyproject.toml` `[tool.ruff]` vs `.cursor/rules/python_best_practices.mdc`. **Suggestion**: Align `line-length` across ruff, formatter, and project rules to 100 characters.
+- **Finding**: Ruff is configured with `line-length = 88` but mypy uses no line-length setting and the project rule says 100. **Evidence**: `pyproject.toml` `[tool.ruff]` vs `.cursor/rules/python_best_practices.mdc`. **Suggestion**: Align `line-length` across ruff, formatter, and project rules to a single value.
 - **Finding**: Stale `[tool.black]` section remains in `pyproject.toml` after migration to Ruff. **Evidence**: `pyproject.toml` line 45. **Suggestion**: Remove the `[tool.black]` section; Ruff format replaces Black.
 
 **Technical debt**

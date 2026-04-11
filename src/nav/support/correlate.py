@@ -290,7 +290,7 @@ def evaluate_candidate(
     resid = normalize_array(image_crop) - normalize_array(model_crop)
     sigma_n = mad_std(resid)
     if sigma_n <= 1e-12:
-        # When mad_std(resid) returns a value ≤ 1e-12, the code falls back to
+        # When mad_std(resid) returns a value <= 1e-12, the code falls back to
         # max(resid.std(), 1e-6). This might indicate a perfect match or a numerical
         # issue, but the fallback silently continues. Consider logging this condition
         # or investigating why the residual variance is zero.

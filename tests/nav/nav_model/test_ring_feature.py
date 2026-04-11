@@ -197,7 +197,7 @@ def test_from_config_negative_a_raises() -> None:
             {'mode': 1, 'a': -100.0, 'rms': 1.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0}
         ],
     }
-    with pytest.raises(ValueError, match=r"non-positive|'a'"):
+    with pytest.raises(ValueError, match=r'RingBaseOrbitMode\.a must be > 0'):
         RingFeature.from_config('neg_a', data)
 
 
@@ -231,8 +231,21 @@ def test_from_config_negative_rms_raises() -> None:
             {'mode': 1, 'a': 100_000.0, 'rms': -1.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0}
         ],
     }
-    with pytest.raises(ValueError, match=r'(?i)rms.*non-negative'):
+    with pytest.raises(ValueError, match=r'RingBaseOrbitMode\.rms must be >= 0'):
         RingFeature.from_config('neg_rms', data)
+
+
+def test_from_config_duplicate_base_orbit_raises() -> None:
+    """from_config rejects two mode dicts with ``a`` on the same edge."""
+    data: dict[str, Any] = {
+        'feature_type': 'RINGLET',
+        'inner_data': [
+            {'mode': 1, 'a': 100_000.0, 'rms': 1.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0},
+            {'mode': 1, 'a': 100_500.0, 'rms': 1.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0},
+        ],
+    }
+    with pytest.raises(ValueError, match=r'duplicate base-orbit'):
+        RingFeature.from_config('dup_base', data)
 
 
 def test_from_config_empty_mode_list_raises() -> None:

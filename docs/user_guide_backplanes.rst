@@ -55,7 +55,7 @@ Backplanes are configured in YAML (see ``src/nav/config_files/config_90_backplan
 
 - ``backplanes.bodies``: list of backplane entries with ``name``, ``method``, and optional ``units``.
 - ``backplanes.rings``: list of ring backplanes; the special ``distance`` entry is used only for per-pixel ordering and is not written as an HDU.
-- ``backplanes.target_lids``: optional NAIF ID → LID mapping for PDS4 label target references.
+- ``backplanes.target_lids``: optional NAIF ID -> LID mapping for PDS4 label target references.
 
 Outputs
 -------
@@ -93,14 +93,14 @@ Features
 - Backplane layers:
 
   - Lists all FITS image HDUs: ``BODY_ID_MAP`` (int32) plus each backplane (float32).
-  - Each backplane can be toggled with a checkbox, assigned transparency 0–1, a colormap, and scaling mode (Absolute or Relative).
+  - Each backplane can be toggled with a checkbox, assigned transparency 0-1, a colormap, and scaling mode (Absolute or Relative).
   - Relative mode computes min/max using only pixels where ``BODY_ID_MAP != 0`` (numeric zeros are not treated specially).
   - Absolute mode:
 
-    - Longitudes: 0–360°; Latitudes: −90–90°.
-    - Incidence/Emission/Phase: 0–180°.
+    - Longitudes: 0-360 deg; Latitudes: -90-90 deg.
+    - Incidence/Emission/Phase: 0-180 deg.
     - Radius: 0 to observed max.
-    - Resolution and others: observed min–max.
+    - Resolution and others: observed min-max.
 
 - Live readout: Shows the science image value at the cursor and, for each backplane row, the current value at the cursor (angles are converted from radians to degrees when applicable).
 
