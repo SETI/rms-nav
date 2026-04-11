@@ -518,9 +518,7 @@ class ManualNavDialog(QDialog):
         self._model_stretch_max = float(np.max(ms))
         if self._model_stretch_min >= self._model_stretch_max:
             self._model_stretch_max = self._model_stretch_min + 1e-6
-        self._model_stretch_controls['set_range'](
-            self._model_stretch_min, self._model_stretch_max
-        )
+        self._model_stretch_controls['set_range'](self._model_stretch_min, self._model_stretch_max)
         self._model_stretch_controls['set_values'](
             self._model_black, self._model_white, self._model_gamma
         )

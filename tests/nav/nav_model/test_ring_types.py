@@ -32,9 +32,7 @@ def test_ring_base_orbit_mode_rejects_non_numeric_ae() -> None:
 def test_ring_perturbation_mode_rejects_non_finite_phase() -> None:
     """``phase`` must be finite so ``parsed_modes_for_backplane`` stays safe."""
     with pytest.raises(ValueError, match=r'RingPerturbationMode\.phase must be a finite'):
-        RingPerturbationMode(
-            mode_num=2, amplitude=1.0, phase=float('nan'), pattern_speed=0.0
-        )
+        RingPerturbationMode(mode_num=2, amplitude=1.0, phase=float('nan'), pattern_speed=0.0)
 
 
 def test_ring_perturbation_mode_rejects_bool_pattern_speed() -> None:

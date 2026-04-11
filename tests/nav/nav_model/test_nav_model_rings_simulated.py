@@ -22,10 +22,10 @@ from nav.nav_model.nav_model_rings_simulated import (
 )
 from nav.nav_model.rings import RingFeature, RingFeatureType
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_obs(shape: tuple[int, int] = (10, 10)) -> MagicMock:
     """Return a minimal mock observation."""
@@ -59,13 +59,11 @@ def _make_sim_params(
     }
     if inner_a is not None:
         params['inner_data'] = [
-            {'mode': 1, 'a': inner_a, 'rms': 2.0, 'ae': 0.0,
-             'long_peri': 0.0, 'rate_peri': 0.0}
+            {'mode': 1, 'a': inner_a, 'rms': 2.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0}
         ]
     if outer_a is not None:
         params['outer_data'] = [
-            {'mode': 1, 'a': outer_a, 'rms': 3.0, 'ae': 0.0,
-             'long_peri': 0.0, 'rate_peri': 0.0}
+            {'mode': 1, 'a': outer_a, 'rms': 3.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0}
         ]
     return params
 
@@ -101,6 +99,7 @@ def _make_simulated_model(
 # ---------------------------------------------------------------------------
 # _sim_params_to_feature_config
 # ---------------------------------------------------------------------------
+
 
 class TestSimParamsToFeatureConfig:
     """Test the helper that adapts sim_params to RingFeature.from_config() format."""
@@ -150,6 +149,7 @@ class TestSimParamsToFeatureConfig:
 # Model creation
 # ---------------------------------------------------------------------------
 
+
 class TestModelCreation:
     """NavModelRingsSimulated creates NavModelResult entries."""
 
@@ -160,10 +160,12 @@ class TestModelCreation:
         sim_img[3:7, 3:7] = 0.5  # some non-zero pixels
 
         model = _make_simulated_model(obs, _make_sim_params())
-        with patch('nav.nav_model.nav_model_rings_simulated.render_ring') as mock_render, \
-             patch(
-                 'nav.nav_model.nav_model_rings_simulated.compute_border_atop_simulated'
-             ) as mock_border:
+        with (
+            patch('nav.nav_model.nav_model_rings_simulated.render_ring') as mock_render,
+            patch(
+                'nav.nav_model.nav_model_rings_simulated.compute_border_atop_simulated'
+            ) as mock_border,
+        ):
             mock_render.side_effect = lambda img, *a, **kw: img.__setitem__(
                 (slice(3, 7), slice(3, 7)), 0.5
             )
@@ -183,9 +185,12 @@ class TestModelCreation:
         """Single-edge ringlet (inner only) produces one model result."""
         obs = _make_obs()
         model = _make_simulated_model(obs, _make_sim_params(outer_a=None))
-        with patch('nav.nav_model.nav_model_rings_simulated.render_ring'), \
-             patch('nav.nav_model.nav_model_rings_simulated.compute_border_atop_simulated') \
-                 as mock_border:
+        with (
+            patch('nav.nav_model.nav_model_rings_simulated.render_ring'),
+            patch(
+                'nav.nav_model.nav_model_rings_simulated.compute_border_atop_simulated'
+            ) as mock_border,
+        ):
             mock_border.return_value = np.zeros((10, 10), dtype=bool)
             model._create_model(
                 always_create_model=False,
@@ -199,6 +204,7 @@ class TestModelCreation:
 # Uncertainty wiring
 # ---------------------------------------------------------------------------
 
+
 class TestUncertaintyWiring:
     """NavModelResult.uncertainty is max RMS from the feature's edges."""
 
@@ -207,9 +213,12 @@ class TestUncertaintyWiring:
         # inner_data rms=2.0, outer_data rms=3.0 -> max = 3.0
         obs = _make_obs()
         model = _make_simulated_model(obs, _make_sim_params(inner_a=100_000.0, outer_a=101_000.0))
-        with patch('nav.nav_model.nav_model_rings_simulated.render_ring'), \
-             patch('nav.nav_model.nav_model_rings_simulated.compute_border_atop_simulated') \
-                 as mock_border:
+        with (
+            patch('nav.nav_model.nav_model_rings_simulated.render_ring'),
+            patch(
+                'nav.nav_model.nav_model_rings_simulated.compute_border_atop_simulated'
+            ) as mock_border,
+        ):
             mock_border.return_value = np.zeros((10, 10), dtype=bool)
             model._create_model(
                 always_create_model=False,
@@ -223,9 +232,12 @@ class TestUncertaintyWiring:
         """NavModelResult.uncertainty = rms of the single present edge."""
         obs = _make_obs()
         model = _make_simulated_model(obs, _make_sim_params(outer_a=None))
-        with patch('nav.nav_model.nav_model_rings_simulated.render_ring'), \
-             patch('nav.nav_model.nav_model_rings_simulated.compute_border_atop_simulated') \
-                 as mock_border:
+        with (
+            patch('nav.nav_model.nav_model_rings_simulated.render_ring'),
+            patch(
+                'nav.nav_model.nav_model_rings_simulated.compute_border_atop_simulated'
+            ) as mock_border,
+        ):
             mock_border.return_value = np.zeros((10, 10), dtype=bool)
             model._create_model(
                 always_create_model=False,
@@ -239,6 +251,7 @@ class TestUncertaintyWiring:
 # ---------------------------------------------------------------------------
 # Feature type detection
 # ---------------------------------------------------------------------------
+
 
 class TestFeatureTypeDetection:
     """RingFeature is constructed with the correct feature type."""

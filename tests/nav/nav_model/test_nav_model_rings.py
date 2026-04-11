@@ -18,10 +18,10 @@ import pytest
 
 from nav.nav_model.nav_model_rings import NavModelRings
 
-
 # ---------------------------------------------------------------------------
 # Helpers: build mock configs and observations
 # ---------------------------------------------------------------------------
+
 
 def _make_obs(
     planet: str | None = 'SATURN',
@@ -188,6 +188,7 @@ def _make_rings_model(
 # Config loading
 # ---------------------------------------------------------------------------
 
+
 class TestConfigLoading:
     """Test config loading from the new 'features:' structure."""
 
@@ -251,9 +252,9 @@ class TestConfigLoading:
     def test_malformed_feature_raises(self) -> None:
         """A feature with invalid config raises ValueError during load."""
         obs = _make_obs()
-        planet_config = _make_planet_config(features={
-            'bad': {'feature_type': 'INVALID_TYPE', 'inner_data': _make_edge_data()}
-        })
+        planet_config = _make_planet_config(
+            features={'bad': {'feature_type': 'INVALID_TYPE', 'inner_data': _make_edge_data()}}
+        )
         model = _make_rings_model(obs, planet_config)
         with pytest.raises(ValueError, match='feature_type'):
             model._create_model(
@@ -304,6 +305,7 @@ class TestConfigLoading:
 # Cross-feature date validation
 # ---------------------------------------------------------------------------
 
+
 class TestCrossFeatureValidation:
     """validate_no_date_overlaps is called during _create_model."""
 
@@ -330,7 +332,7 @@ class TestCrossFeatureValidation:
             },
         }
         model = _make_rings_model(obs, _make_planet_config(features=features))
-        with pytest.raises(ValueError, match="overlapping date ranges"):
+        with pytest.raises(ValueError, match='overlapping date ranges'):
             model._create_model(
                 always_create_model=False,
                 never_create_model=False,
@@ -341,6 +343,7 @@ class TestCrossFeatureValidation:
 # ---------------------------------------------------------------------------
 # Filter integration and model generation
 # ---------------------------------------------------------------------------
+
 
 class TestFilterIntegration:
     """Tests that the filter pipeline integrates correctly."""
@@ -405,6 +408,7 @@ class TestFilterIntegration:
 # NavModelResult.uncertainty wiring
 # ---------------------------------------------------------------------------
 
+
 class TestUncertaintyWiring:
     """NavModelResult.uncertainty is taken from render_result.uncertainty."""
 
@@ -444,6 +448,7 @@ class TestUncertaintyWiring:
 # ---------------------------------------------------------------------------
 # never_create_model flag
 # ---------------------------------------------------------------------------
+
 
 class TestNeverCreateModel:
     """never_create_model=True populates metadata but creates no model images."""

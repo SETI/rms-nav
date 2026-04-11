@@ -41,9 +41,7 @@ class MockObservation:
             shape: (rows, cols) of the extended FOV array.
         """
         self.closest_planet = 'SATURN'
-        self.midtime: float = (
-            midtime if midtime is not None else utc_to_et('2008-01-01 12:00:00')
-        )
+        self.midtime: float = midtime if midtime is not None else utc_to_et('2008-01-01 12:00:00')
         self.extdata_shape_vu: tuple[int, int] = shape
         self.extfov_margin_v: int = 0
         self.extfov_margin_u: int = 0
@@ -81,6 +79,7 @@ def mock_obs_2009() -> MockObservation:
 # Common ring feature data factories
 # ---------------------------------------------------------------------------
 
+
 def make_mode1_data(
     a: float = 100_000.0,
     rms: float = 1.0,
@@ -102,8 +101,9 @@ def make_mode1_data(
         ``list[dict[str, Any]]`` with one mode-1 entry (``mode``, ``a``, ``rms``,
         ``ae``, ``long_peri``, ``rate_peri`` keys).
     """
-    return [{'mode': 1, 'a': a, 'rms': rms, 'ae': ae,
-             'long_peri': long_peri, 'rate_peri': rate_peri}]
+    return [
+        {'mode': 1, 'a': a, 'rms': rms, 'ae': ae, 'long_peri': long_peri, 'rate_peri': rate_peri}
+    ]
 
 
 def make_mode1_with_perturbation(
@@ -135,8 +135,6 @@ def make_mode1_with_perturbation(
         ``list[dict[str, Any]]``: mode-1 dict followed by one perturbation dict.
     """
     return [
-        {'mode': 1, 'a': a, 'rms': rms, 'ae': ae,
-         'long_peri': long_peri, 'rate_peri': rate_peri},
-        {'mode': mode_num, 'amplitude': amplitude, 'phase': phase,
-         'pattern_speed': pattern_speed},
+        {'mode': 1, 'a': a, 'rms': rms, 'ae': ae, 'long_peri': long_peri, 'rate_peri': rate_peri},
+        {'mode': mode_num, 'amplitude': amplitude, 'phase': phase, 'pattern_speed': pattern_speed},
     ]

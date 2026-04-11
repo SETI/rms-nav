@@ -97,13 +97,14 @@ class RingsRenderContext:
         if np.any(res64 <= 0.0):
             raise ValueError('RingsRenderContext.resolutions must be positive everywhere')
 
-        if isinstance(self.fade_width_pix, bool) or not isinstance(self.fade_width_pix, (int, float)):
+        fwp_raw = self.fade_width_pix
+        if isinstance(fwp_raw, bool) or not isinstance(fwp_raw, (int, float)):
             raise TypeError('RingsRenderContext.fade_width_pix must be int or float')
-        fwp = float(self.fade_width_pix)
+        fwp = float(fwp_raw)
         if not math.isfinite(fwp) or fwp < 0.0:
             raise ValueError(
                 f'RingsRenderContext.fade_width_pix must be finite and non-negative, got '
-                f'{self.fade_width_pix!r}'
+                f'{fwp_raw!r}'
             )
 
         if not isinstance(self.all_edge_radii, tuple):

@@ -79,15 +79,11 @@ class RingRenderResult:
             if not isinstance(em, np.ndarray):
                 raise TypeError(f'RingRenderResult.edge_info_list[{k}][0] must be ndarray')
             if not np.issubdtype(em.dtype, np.bool_):
-                raise ValueError(
-                    f'RingRenderResult.edge_info_list[{k}][0] must have boolean dtype'
-                )
+                raise ValueError(f'RingRenderResult.edge_info_list[{k}][0] must have boolean dtype')
             if em.shape != self.model_mask.shape:
                 raise ValueError(
                     f'RingRenderResult.edge_info_list[{k}][0] shape {em.shape} must match '
                     f'model_mask shape {self.model_mask.shape}'
                 )
             if not isinstance(t1, str) or not isinstance(t2, str):
-                raise TypeError(
-                    f'RingRenderResult.edge_info_list[{k}][1] and [2] must be str'
-                )
+                raise TypeError(f'RingRenderResult.edge_info_list[{k}][1] and [2] must be str')

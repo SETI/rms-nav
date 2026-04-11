@@ -686,8 +686,8 @@ def _parse_edge_data(feature_key: str, edge_type: str, mode_list: Any) -> RingEd
                 ) from exc
             if mode_n_base != 1:
                 raise ValueError(
-                    f'Feature {feature_key!r} {edge_type}_data[{i}]: entry with "a" must use mode 1 '
-                    f'(base orbit), got mode {mode_num!r}'
+                    f'Feature {feature_key!r} {edge_type}_data[{i}]: entry with "a" must use '
+                    f'mode 1 (base orbit), got mode {mode_num!r}'
                 )
             try:
                 a = float(mode['a'])
