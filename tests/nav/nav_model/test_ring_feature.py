@@ -10,22 +10,21 @@ Adapted from test_nav_model_rings_feature_filtering.py with the new typed API.
 
 from __future__ import annotations
 
-import math
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 
 from nav.nav_model.rings.ring_feature import RingFeature, validate_no_date_overlaps
 from nav.nav_model.rings.ring_render_context import RingsRenderContext
-from nav.nav_model.rings.ring_types import RingEdgeData, RingFeatureType
+from nav.nav_model.rings.ring_types import RingFeatureType
 from nav.support.time import utc_to_et
-
 
 # ---------------------------------------------------------------------------
 # Helper factories
 # ---------------------------------------------------------------------------
+
 
 def _make_edge_data(
     a: float = 100_000.0,
@@ -35,8 +34,9 @@ def _make_edge_data(
     rate_peri: float = 0.0,
 ) -> list[dict[str, Any]]:
     """Return a YAML edge mode list for a single-mode edge."""
-    return [{'mode': 1, 'a': a, 'rms': rms, 'ae': ae,
-             'long_peri': long_peri, 'rate_peri': rate_peri}]
+    return [
+        {'mode': 1, 'a': a, 'rms': rms, 'ae': ae, 'long_peri': long_peri, 'rate_peri': rate_peri}
+    ]
 
 
 def _make_ringlet_data(
@@ -157,8 +157,7 @@ def test_from_config_with_perturbation_mode() -> None:
         'feature_type': 'RINGLET',
         'name': 'Perturbed',
         'inner_data': [
-            {'mode': 1, 'a': 100_000.0, 'rms': 1.0, 'ae': 5.0,
-             'long_peri': 0.0, 'rate_peri': 0.0},
+            {'mode': 1, 'a': 100_000.0, 'rms': 1.0, 'ae': 5.0, 'long_peri': 0.0, 'rate_peri': 0.0},
             {'mode': 2, 'amplitude': 3.0, 'phase': 45.0, 'pattern_speed': 1.0},
         ],
     }
@@ -194,11 +193,24 @@ def test_from_config_negative_a_raises() -> None:
     """from_config raises ValueError when mode-1 a is non-positive."""
     data: dict[str, Any] = {
         'feature_type': 'RINGLET',
-        'inner_data': [{'mode': 1, 'a': -100.0, 'rms': 1.0, 'ae': 0.0,
-                        'long_peri': 0.0, 'rate_peri': 0.0}],
+        'inner_data': [
+            {'mode': 1, 'a': -100.0, 'rms': 1.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0}
+        ],
     }
     with pytest.raises(ValueError, match=r"non-positive|'a'"):
         RingFeature.from_config('neg_a', data)
+
+
+def test_from_config_base_orbit_wrong_mode_raises() -> None:
+    """from_config rejects entries with 'a' when mode is not 1."""
+    data: dict[str, Any] = {
+        'feature_type': 'RINGLET',
+        'inner_data': [
+            {'mode': 2, 'a': 100_000.0, 'rms': 1.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0}
+        ],
+    }
+    with pytest.raises(ValueError, match=r'mode 1|base orbit'):
+        RingFeature.from_config('wrong_mode_a', data)
 
 
 def test_from_config_missing_mode_1_raises() -> None:
@@ -215,8 +227,9 @@ def test_from_config_negative_rms_raises() -> None:
     """from_config raises ValueError when rms is negative."""
     data: dict[str, Any] = {
         'feature_type': 'RINGLET',
-        'inner_data': [{'mode': 1, 'a': 100_000.0, 'rms': -1.0, 'ae': 0.0,
-                        'long_peri': 0.0, 'rate_peri': 0.0}],
+        'inner_data': [
+            {'mode': 1, 'a': 100_000.0, 'rms': -1.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0}
+        ],
     }
     with pytest.raises(ValueError, match=r'(?i)rms.*non-negative'):
         RingFeature.from_config('neg_rms', data)
@@ -364,9 +377,7 @@ def test_is_in_radius_range_single_edge_out() -> None:
 
 def test_all_base_radii_ringlet() -> None:
     """all_base_radii returns correct (radius, label) pairs for a RINGLET."""
-    feature = RingFeature.from_config(
-        'r', _make_ringlet_data(inner_a=100_000.0, outer_a=101_000.0)
-    )
+    feature = RingFeature.from_config('r', _make_ringlet_data(inner_a=100_000.0, outer_a=101_000.0))
     radii = feature.all_base_radii()
     assert len(radii) == 2
     radii_dict = {label: r for r, label in radii}
@@ -376,9 +387,7 @@ def test_all_base_radii_ringlet() -> None:
 
 def test_all_base_radii_gap() -> None:
     """all_base_radii returns IEG/OEG labels for a GAP."""
-    feature = RingFeature.from_config(
-        'g', _make_gap_data(inner_a=100_000.0, outer_a=101_000.0)
-    )
+    feature = RingFeature.from_config('g', _make_gap_data(inner_a=100_000.0, outer_a=101_000.0))
     radii = feature.all_base_radii()
     radii_dict = {label: r for r, label in radii}
     assert 'IEG' in radii_dict
@@ -440,10 +449,12 @@ def test_uncertainty_both_edges_max_rms() -> None:
     """uncertainty is max(inner.rms, outer.rms)."""
     data: dict[str, Any] = {
         'feature_type': 'RINGLET',
-        'inner_data': [{'mode': 1, 'a': 100_000.0, 'rms': 1.5, 'ae': 0.0,
-                        'long_peri': 0.0, 'rate_peri': 0.0}],
-        'outer_data': [{'mode': 1, 'a': 101_000.0, 'rms': 3.7, 'ae': 0.0,
-                        'long_peri': 0.0, 'rate_peri': 0.0}],
+        'inner_data': [
+            {'mode': 1, 'a': 100_000.0, 'rms': 1.5, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0}
+        ],
+        'outer_data': [
+            {'mode': 1, 'a': 101_000.0, 'rms': 3.7, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0}
+        ],
     }
     feature = RingFeature.from_config('unc', data)
     assert feature.uncertainty == pytest.approx(3.7)
@@ -453,8 +464,9 @@ def test_uncertainty_single_inner_edge() -> None:
     """uncertainty is the inner edge rms when outer edge absent."""
     data: dict[str, Any] = {
         'feature_type': 'RINGLET',
-        'inner_data': [{'mode': 1, 'a': 100_000.0, 'rms': 2.2, 'ae': 0.0,
-                        'long_peri': 0.0, 'rate_peri': 0.0}],
+        'inner_data': [
+            {'mode': 1, 'a': 100_000.0, 'rms': 2.2, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0}
+        ],
     }
     feature = RingFeature.from_config('unc_s', data)
     assert feature.uncertainty == pytest.approx(2.2)
@@ -464,8 +476,9 @@ def test_uncertainty_single_outer_edge() -> None:
     """uncertainty is the outer edge rms when inner edge absent."""
     data: dict[str, Any] = {
         'feature_type': 'GAP',
-        'outer_data': [{'mode': 1, 'a': 100_000.0, 'rms': 0.8, 'ae': 0.0,
-                        'long_peri': 0.0, 'rate_peri': 0.0}],
+        'outer_data': [
+            {'mode': 1, 'a': 100_000.0, 'rms': 0.8, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0}
+        ],
     }
     feature = RingFeature.from_config('unc_outer', data)
     assert feature.uncertainty == pytest.approx(0.8)
@@ -513,15 +526,19 @@ def test_validate_no_overlaps_non_overlapping_dates() -> None:
         RingFeature.from_config(
             'a',
             _make_ringlet_data(
-                inner_a=100_000.0, outer_a=101_000.0,
-                start_date='2008-01-01 12:00:00', end_date='2010-01-01 12:00:00',
+                inner_a=100_000.0,
+                outer_a=101_000.0,
+                start_date='2008-01-01 12:00:00',
+                end_date='2010-01-01 12:00:00',
             ),
         ),
         RingFeature.from_config(
             'b',
             _make_ringlet_data(
-                inner_a=100_000.0, outer_a=101_000.0,
-                start_date='2010-01-01 12:00:00', end_date='2012-01-01 12:00:00',
+                inner_a=100_000.0,
+                outer_a=101_000.0,
+                start_date='2010-01-01 12:00:00',
+                end_date='2012-01-01 12:00:00',
             ),
         ),
     ]
@@ -534,15 +551,19 @@ def test_validate_no_overlaps_different_radial_regions_with_dates() -> None:
         RingFeature.from_config(
             'a',
             _make_ringlet_data(
-                inner_a=100_000.0, outer_a=101_000.0,
-                start_date='2008-01-01 12:00:00', end_date='2011-01-01 12:00:00',
+                inner_a=100_000.0,
+                outer_a=101_000.0,
+                start_date='2008-01-01 12:00:00',
+                end_date='2011-01-01 12:00:00',
             ),
         ),
         RingFeature.from_config(
             'b',
             _make_ringlet_data(
-                inner_a=200_000.0, outer_a=201_000.0,
-                start_date='2008-01-01 12:00:00', end_date='2011-01-01 12:00:00',
+                inner_a=200_000.0,
+                outer_a=201_000.0,
+                start_date='2008-01-01 12:00:00',
+                end_date='2011-01-01 12:00:00',
             ),
         ),
     ]
@@ -555,15 +576,19 @@ def test_validate_raises_on_overlap() -> None:
         RingFeature.from_config(
             'a',
             _make_ringlet_data(
-                inner_a=100_000.0, outer_a=101_000.0,
-                start_date='2008-01-01 12:00:00', end_date='2011-01-01 12:00:00',
+                inner_a=100_000.0,
+                outer_a=101_000.0,
+                start_date='2008-01-01 12:00:00',
+                end_date='2011-01-01 12:00:00',
             ),
         ),
         RingFeature.from_config(
             'b',
             _make_ringlet_data(
-                inner_a=100_500.0, outer_a=101_500.0,
-                start_date='2009-01-01 12:00:00', end_date='2012-01-01 12:00:00',
+                inner_a=100_500.0,
+                outer_a=101_500.0,
+                start_date='2009-01-01 12:00:00',
+                end_date='2012-01-01 12:00:00',
             ),
         ),
     ]
@@ -577,15 +602,19 @@ def test_validate_raises_message_contains_feature_keys() -> None:
         RingFeature.from_config(
             'alpha_ring',
             _make_ringlet_data(
-                inner_a=100_000.0, outer_a=101_000.0,
-                start_date='2008-01-01 12:00:00', end_date='2011-01-01 12:00:00',
+                inner_a=100_000.0,
+                outer_a=101_000.0,
+                start_date='2008-01-01 12:00:00',
+                end_date='2011-01-01 12:00:00',
             ),
         ),
         RingFeature.from_config(
             'beta_ring',
             _make_ringlet_data(
-                inner_a=100_000.0, outer_a=101_000.0,
-                start_date='2009-01-01 12:00:00', end_date='2012-01-01 12:00:00',
+                inner_a=100_000.0,
+                outer_a=101_000.0,
+                start_date='2009-01-01 12:00:00',
+                end_date='2012-01-01 12:00:00',
             ),
         ),
     ]
@@ -701,10 +730,12 @@ def test_render_result_uncertainty_matches_feature() -> None:
     """uncertainty in result matches feature.uncertainty."""
     data: dict[str, Any] = {
         'feature_type': 'RINGLET',
-        'inner_data': [{'mode': 1, 'a': 100_000.0, 'rms': 4.0, 'ae': 0.0,
-                        'long_peri': 0.0, 'rate_peri': 0.0}],
-        'outer_data': [{'mode': 1, 'a': 101_000.0, 'rms': 2.5, 'ae': 0.0,
-                        'long_peri': 0.0, 'rate_peri': 0.0}],
+        'inner_data': [
+            {'mode': 1, 'a': 100_000.0, 'rms': 4.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0}
+        ],
+        'outer_data': [
+            {'mode': 1, 'a': 101_000.0, 'rms': 2.5, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0}
+        ],
     }
     ctx, _obs = _make_mock_context()
     feature = RingFeature.from_config('unc', data)

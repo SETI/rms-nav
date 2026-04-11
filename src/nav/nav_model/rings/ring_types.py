@@ -30,6 +30,7 @@ Design notes:
 
 import enum
 import math
+import numbers
 from dataclasses import dataclass
 from typing import Any
 
@@ -64,6 +65,8 @@ class RingBaseOrbitMode:
             Used as the uncertainty measure for navigation.
 
     Raises:
+        TypeError: If ``a``, ``ae``, or ``rms`` is not a real number (``bool`` is
+            rejected because it is a subclass of ``int``).
         ValueError: If ``a`` <= 0, ``ae`` < 0, or ``rms`` < 0.
     """
 
@@ -74,7 +77,14 @@ class RingBaseOrbitMode:
     rms: float
 
     def __post_init__(self) -> None:
-        """Validate field ranges at construction time."""
+        """Validate numeric types and field ranges at construction time."""
+        for field_name in ('a', 'ae', 'rms'):
+            value = getattr(self, field_name)
+            if not isinstance(value, numbers.Real) or isinstance(value, bool):
+                raise TypeError(
+                    f'RingBaseOrbitMode.{field_name} must be a real number, '
+                    f'got {type(value).__name__}'
+                )
         if self.a <= 0:
             raise ValueError(f'RingBaseOrbitMode.a must be > 0, got {self.a}')
         if self.ae < 0:
@@ -107,7 +117,8 @@ class RingPerturbationMode:
 
     Raises:
         ValueError: If ``mode_num`` is not an integer (``bool`` is rejected) or
-            ``amplitude`` is negative or not a real number.
+            ``amplitude`` is negative or not an ``int``/``float`` (``bool`` rejected),
+            or if ``phase`` or ``pattern_speed`` is not a finite ``int``/``float``.
     """
 
     mode_num: int
@@ -116,7 +127,7 @@ class RingPerturbationMode:
     pattern_speed: float
 
     def __post_init__(self) -> None:
-        """Validate mode number and amplitude at construction time."""
+        """Validate mode number, amplitude, phase, and pattern_speed."""
         if isinstance(self.mode_num, bool) or not isinstance(self.mode_num, int):
             raise ValueError(
                 f'RingPerturbationMode.mode_num must be int (not bool), got {self.mode_num!r}'
@@ -128,6 +139,19 @@ class RingPerturbationMode:
             )
         if self.amplitude < 0:
             raise ValueError(f'RingPerturbationMode.amplitude must be >= 0, got {self.amplitude}')
+
+        for field_name in ('phase', 'pattern_speed'):
+            value = getattr(self, field_name)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(
+                    f'RingPerturbationMode.{field_name} must be int or float (not bool), '
+                    f'got {type(value).__name__}'
+                )
+            fv = float(value)
+            if not math.isfinite(fv):
+                raise ValueError(
+                    f'RingPerturbationMode.{field_name} must be a finite number, got {value!r}'
+                )
 
     @property
     def is_inclination_mode(self) -> bool:

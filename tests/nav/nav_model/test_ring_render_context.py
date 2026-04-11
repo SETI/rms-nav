@@ -87,12 +87,15 @@ def test_context_multiple_edge_radii() -> None:
 
 
 def _make_result(**kwargs: object) -> RingRenderResult:
-    """Create a minimal RingRenderResult with sensible defaults."""
+    """Create a minimal RingRenderResult with sensible defaults.
+
+    Omits ``edge_info_list`` from defaults so tests can exercise the dataclass
+    field default; pass ``edge_info_list=...`` when a non-default list is needed.
+    """
     defaults: dict[str, object] = {
         'model_img': np.zeros((10, 10), dtype=np.float64),
         'model_mask': np.zeros((10, 10), dtype=bool),
         'uncertainty': 1.5,
-        'edge_info_list': [],
     }
     defaults.update(kwargs)
     return RingRenderResult(**defaults)  # type: ignore[arg-type]
@@ -117,17 +120,27 @@ def test_result_fields_set_correctly() -> None:
 
 @pytest.mark.parametrize(
     'uncertainty',
-    [0.0, -0.5, 1.0e100],
-    ids=['zero', 'negative', 'large'],
+    [0.0, 1.0e100],
+    ids=['zero', 'large'],
 )
 def test_result_uncertainty_edge_cases(uncertainty: float) -> None:
-    """Uncertainty field stores the given float including edge magnitudes."""
+    """Uncertainty (km RMS) may be zero or very large if finite and non-negative."""
     result = _make_result(uncertainty=uncertainty)
     assert result.uncertainty == pytest.approx(uncertainty)
 
 
-def test_result_empty_edge_info_list_default() -> None:
-    """Default ``edge_info_list`` is an empty list when omitted."""
+def test_result_negative_uncertainty_raises() -> None:
+    """Negative uncertainty is rejected (RMS must be non-negative)."""
+    with pytest.raises(ValueError, match='uncertainty'):
+        _make_result(uncertainty=-0.5)
+
+
+def test_result_edge_info_list_dataclass_default() -> None:
+    """``RingRenderResult.edge_info_list`` defaults to ``[]`` when omitted.
+
+    ``_make_result`` does not pass ``edge_info_list``, so the dataclass default
+    factory runs (not an explicit empty list argument).
+    """
     result = _make_result()
     assert result.edge_info_list == []
 
@@ -141,7 +154,8 @@ def test_result_is_not_frozen() -> None:
 
 
 def test_result_model_img_shape() -> None:
-    """model_img shape is preserved."""
+    """model_img shape is preserved when mask matches."""
     img = np.zeros((7, 13), dtype=np.float64)
-    result = _make_result(model_img=img)
+    mask = np.zeros((7, 13), dtype=bool)
+    result = _make_result(model_img=img, model_mask=mask)
     assert result.model_img.shape == (7, 13)

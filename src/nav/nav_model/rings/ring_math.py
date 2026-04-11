@@ -38,7 +38,9 @@ function therefore always produces a valid result.
 """
 
 import logging
+import math
 from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 
@@ -48,6 +50,30 @@ from nav.support.types import NDArrayFloatType
 _FLOAT64_MIN_POS = float(np.finfo(np.float64).tiny)
 
 _logger = logging.getLogger(__name__)
+
+
+def _as_finite_float64(name: str, arr: NDArrayFloatType) -> np.ndarray:
+    """Convert to float64 ndarray and require all elements finite."""
+    out = np.asarray(arr, dtype=np.float64)
+    if not np.all(np.isfinite(out)):
+        raise ValueError(f'{name} must contain only finite values')
+    return out
+
+
+def _require_matching_shapes(
+    *pairs: tuple[str, np.ndarray],
+) -> None:
+    """Raise ValueError if arrays do not share the same shape."""
+    if len(pairs) < 2:
+        return
+    ref_shape = pairs[0][1].shape
+    for label, arr in pairs[1:]:
+        if arr.shape != ref_shape:
+            names = ', '.join(f'{n} {a.shape}' for n, a in pairs)
+            raise ValueError(
+                'compute_edge_fade / compute_antialiasing: arrays must have identical shapes '
+                f'({names})'
+            )
 
 
 def compute_antialiasing(
@@ -85,13 +111,26 @@ def compute_antialiasing(
 
     Zero entries in ``resolutions`` are replaced with a tiny positive value before
     dividing so shades stay finite; results are clipped to [0, ``max_value``].
-    """
-    shade_sign = 1.0 if shade_above else -1.0
 
-    res = np.asarray(resolutions, dtype=np.float64)
+    Raises:
+        ValueError: If ``radii`` and ``resolutions`` differ in shape or contain
+            non-finite values, or ``max_value`` is not finite and non-negative.
+    """
+    if isinstance(max_value, bool) or not isinstance(max_value, (int, float)):
+        raise TypeError('max_value must be int or float')
+    if not math.isfinite(float(max_value)) or float(max_value) < 0.0:
+        raise ValueError(f'max_value must be finite and non-negative, got {max_value!r}')
+    if not math.isfinite(float(edge_radius)):
+        raise ValueError(f'edge_radius must be finite, got {edge_radius!r}')
+
+    rad = _as_finite_float64('radii', radii)
+    res = _as_finite_float64('resolutions', resolutions)
+    _require_matching_shapes(('radii', rad), ('resolutions', res))
+
+    shade_sign = 1.0 if shade_above else -1.0
     res_safe = np.maximum(res, _FLOAT64_MIN_POS)
 
-    shade = 1.0 - shade_sign * (radii - edge_radius) / res_safe
+    shade = 1.0 - shade_sign * (rad - edge_radius) / res_safe
     shade -= 0.5
 
     shade_arr = np.clip(np.asarray(shade, dtype=np.float64), 0.0, 1.0)
@@ -138,14 +177,16 @@ def compute_fade_integral(
     Returns:
         Per-pixel integral values, same shape as ``a0``.
 
-    Elements of ``width`` must be non-negative; each is clamped to a tiny
-    positive value before dividing so ``compute_edge_fade`` (which may supply
-    ``half_dist == 0``) does not produce NaNs or infinities.
+    Elements of ``width`` and ``resolutions`` must be non-negative; each is clamped
+    to a tiny positive value before dividing so ``compute_edge_fade`` (which may
+    supply ``half_dist == 0`` or zero resolution) does not produce NaNs or
+    infinities.
     """
     w = np.maximum(np.asarray(width, dtype=np.float64), _FLOAT64_MIN_POS)
+    res_c = np.maximum(np.asarray(resolutions, dtype=np.float64), _FLOAT64_MIN_POS)
     result = (
         (1.0 + shade_sign * edge_radius / w) * (a1 - a0) + shade_sign * (a0**2 - a1**2) / (2.0 * w)
-    ) / resolutions
+    ) / res_c
     return np.asarray(result, dtype=np.float64)
 
 
@@ -210,11 +251,42 @@ def compute_edge_fade(
         Updated model image with the fade added (values are clipped to
         [0, 1] before adding, so the result may exceed 1.0 if the model
         already has non-zero values).
+
+    Raises:
+        ValueError: If array shapes differ, values are non-finite, or scalar
+            parameters are out of range.
+        TypeError: If ``fade_width_pix`` has an invalid type.
     """
+    if isinstance(fade_width_pix, bool) or not isinstance(fade_width_pix, (int, float)):
+        raise TypeError(f'fade_width_pix must be int or float, got {type(fade_width_pix).__name__}')
+    fwp = float(fade_width_pix)
+    if not math.isfinite(fwp) or fwp < 0.0:
+        raise ValueError(f'fade_width_pix must be finite and non-negative, got {fade_width_pix!r}')
+    if not math.isfinite(float(edge_radius)):
+        raise ValueError(f'edge_radius must be finite, got {edge_radius!r}')
+
+    m = _as_finite_float64('model', model)
+    r = _as_finite_float64('radii', radii)
+    res = _as_finite_float64('resolutions', resolutions)
+    _require_matching_shapes(('model', m), ('radii', r), ('resolutions', res))
+
+    for j, pair in enumerate(all_edge_radii):
+        if not isinstance(pair, tuple) or len(pair) != 2:
+            raise ValueError(
+                f'all_edge_radii[{j}] must be a (radius, label) pair, got {type(pair).__name__!r}'
+            )
+        rad_km, label = pair
+        if isinstance(rad_km, bool) or not isinstance(rad_km, (int, float)):
+            raise TypeError(f'all_edge_radii[{j}][0] must be numeric')
+        if not math.isfinite(float(rad_km)):
+            raise ValueError(f'all_edge_radii[{j}][0] must be finite, got {rad_km!r}')
+        if not isinstance(label, str):
+            raise TypeError(f'all_edge_radii[{j}][1] must be str, got {type(label).__name__}')
+
     shade_sign = 1.0 if shade_above else -1.0
 
     # Per-pixel fade width in km
-    fade_width_km: NDArrayFloatType = (fade_width_pix * resolutions).astype(np.float64)
+    fade_width_km: Any = (fwp * res).astype(np.float64)
     requested_fade_km = fade_width_km.copy()
 
     # Conflict detection: reduce fade_width_km when a neighbor is in the shade
@@ -242,8 +314,8 @@ def compute_edge_fade(
         )
 
     # Per-pixel fade zone boundaries
-    pixel_lower = radii - resolutions / 2.0
-    pixel_upper = radii + resolutions / 2.0
+    pixel_lower = r - res / 2.0
+    pixel_upper = r + res / 2.0
 
     if shade_above:
         fade_end = edge_radius + fade_width_km  # per-pixel
@@ -264,8 +336,8 @@ def compute_edge_fade(
     eq_case2 = eq2 & ~eq_case1
     eq_case3 = eq3 & ~eq_case1
 
-    shade = np.zeros(radii.shape, dtype=np.float64)
-    edge_arr = np.full_like(radii, edge_radius)
+    shade = np.zeros(r.shape, dtype=np.float64)
+    edge_arr = np.full_like(r, edge_radius)
 
     if shade_above:
         if np.any(eq_case1):
@@ -275,7 +347,7 @@ def compute_edge_fade(
                 fade_end[m],
                 edge_radius=edge_radius,
                 width=fade_width_km[m],
-                resolutions=resolutions[m],
+                resolutions=res[m],
                 shade_sign=1.0,
             )
         if np.any(eq_case4):
@@ -285,7 +357,7 @@ def compute_edge_fade(
                 pixel_upper[m],
                 edge_radius=edge_radius,
                 width=fade_width_km[m],
-                resolutions=resolutions[m],
+                resolutions=res[m],
                 shade_sign=1.0,
             )
         if np.any(eq_case2):
@@ -295,7 +367,7 @@ def compute_edge_fade(
                 pixel_upper[m],
                 edge_radius=edge_radius,
                 width=fade_width_km[m],
-                resolutions=resolutions[m],
+                resolutions=res[m],
                 shade_sign=1.0,
             )
         if np.any(eq_case3):
@@ -305,7 +377,7 @@ def compute_edge_fade(
                 fade_end[m],
                 edge_radius=edge_radius,
                 width=fade_width_km[m],
-                resolutions=resolutions[m],
+                resolutions=res[m],
                 shade_sign=1.0,
             )
     else:
@@ -316,7 +388,7 @@ def compute_edge_fade(
                 edge_arr[m],
                 edge_radius=edge_radius,
                 width=fade_width_km[m],
-                resolutions=resolutions[m],
+                resolutions=res[m],
                 shade_sign=-1.0,
             )
         if np.any(eq_case4):
@@ -326,7 +398,7 @@ def compute_edge_fade(
                 pixel_upper[m],
                 edge_radius=edge_radius,
                 width=fade_width_km[m],
-                resolutions=resolutions[m],
+                resolutions=res[m],
                 shade_sign=-1.0,
             )
         if np.any(eq_case2):
@@ -336,7 +408,7 @@ def compute_edge_fade(
                 edge_arr[m],
                 edge_radius=edge_radius,
                 width=fade_width_km[m],
-                resolutions=resolutions[m],
+                resolutions=res[m],
                 shade_sign=-1.0,
             )
         if np.any(eq_case3):
@@ -346,9 +418,9 @@ def compute_edge_fade(
                 pixel_upper[m],
                 edge_radius=edge_radius,
                 width=fade_width_km[m],
-                resolutions=resolutions[m],
+                resolutions=res[m],
                 shade_sign=-1.0,
             )
 
     shade = np.clip(shade, 0.0, 1.0)
-    return np.asarray(model + shade, dtype=np.float64)
+    return np.asarray(m + shade, dtype=np.float64)

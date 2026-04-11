@@ -185,27 +185,69 @@ def build_stretch_controls(
     value_label_min_width: int = 80,
     slider_horizontal_stretch: int = 0,
 ) -> dict[str, Any]:
-    """
-    Construct black/white/gamma controls matching manual_nav_dialog behavior with shared formatting.
-    Returns dict with widgets and mappers:
-      slider_black, label_black, slider_white, label_white, slider_gamma, label_gamma,
-      to_slider(val)->int, from_slider(pos)->float, set_values(black, white, gamma)
+    """Build black-point, white-point, and gamma stretch controls for a form layout.
+
+    Layout and signal wiring match ``manual_nav_dialog``: horizontal sliders with
+    right-aligned numeric labels, shared linear mapping for black/white on
+    ``[0, 1000]``, and gamma on ``[10, 500]`` (displayed as ``0.10``..``5.00``,
+    with values below ``0.10`` clamped in the gamma change handler).
 
     Parameters:
-        value_label_min_width: Minimum width for numeric value labels (smaller leaves more
-            room for the slider when paired with slider_horizontal_stretch).
-        slider_horizontal_stretch: If 1, sliders expand in the row layout (Qt stretch factor).
+        form: Target ``QFormLayout``; three rows are appended (Black point, White
+            point, Gamma).
+        img_min: Lower end of the linear range mapped to slider position 0 for
+            black/white sliders. Should be a finite float; invalid ranges are not
+            validated here but affect ``to_slider`` / ``from_slider``.
+        img_max: Upper end of that range when ``img_max > img_min``; otherwise
+            the effective upper bound is ``img_min + 1.0``.
+        black_init: Initial black level (float) shown on the black slider and label.
+        white_init: Initial white level (float) for the white control.
+        gamma_init: Initial gamma (float); the slider stores ``round(gamma * 100)``.
+        on_black_changed: Called with the mapped float when the black slider moves.
+        on_white_changed: Called with the mapped float when the white slider moves.
+        on_gamma_changed: Called with gamma (``>= 0.10`` after clamp) when gamma moves.
+        value_label_min_width: Minimum width in pixels for the three value ``QLabel``
+            widgets. Must be a strict ``int`` (not ``bool``) and ``> 0``.
+        slider_horizontal_stretch: Qt row stretch factor for each slider in its
+            ``QHBoxLayout`` (``0`` = fixed, ``1`` lets sliders grow). Must be a
+            strict ``int`` (not ``bool``) and ``>= 0``.
+
+    Returns:
+        A ``dict`` with the following keys:
+
+        - ``slider_black``, ``slider_white``, ``slider_gamma`` (``QSlider``):
+            Horizontal sliders; black/white range ``0``..``1000``, gamma ``10``..``500``.
+        - ``label_black``, ``label_white``, ``label_gamma`` (``QLabel``):
+            Right-aligned labels showing five decimal places; minimum width set from
+            ``value_label_min_width``.
+        - ``to_slider`` (``Callable[[float], int]``): Maps a data value in
+            ``[img_min, img_max]`` (after internal ``lo``/``hi``) to slider position
+            ``0``..``1000`` for black/white.
+        - ``from_slider`` (``Callable[[int], float]``): Inverse of ``to_slider`` for
+            black/white positions.
+        - ``set_values`` (``Callable[[float, float, float], None]``): Sets black,
+            white, and gamma without emitting redundant signals (signals blocked
+            around ``setValue``), and refreshes all three labels.
+        - ``set_range`` (``Callable[[float, float], None]``): Updates the internal
+            ``lo``/``hi`` used by ``to_slider`` and ``from_slider`` (same rule as
+            ``img_min``/``img_max`` for degenerate max).
 
     Raises:
-        TypeError: If ``value_label_min_width`` or ``slider_horizontal_stretch`` is not int.
-        ValueError: If ``value_label_min_width`` or ``slider_horizontal_stretch`` is out of range.
+        TypeError: If ``value_label_min_width`` or ``slider_horizontal_stretch`` is
+            not an ``int``, or either is a ``bool``.
+        ValueError: If ``value_label_min_width <= 0`` or
+            ``slider_horizontal_stretch < 0``.
     """
+    if isinstance(value_label_min_width, bool):
+        raise TypeError('value_label_min_width must be int, not bool')
     if not isinstance(value_label_min_width, int):
         raise TypeError(
             f'value_label_min_width must be int, not {type(value_label_min_width).__name__}'
         )
     if value_label_min_width <= 0:
         raise ValueError(f'value_label_min_width must be > 0, got {value_label_min_width}')
+    if isinstance(slider_horizontal_stretch, bool):
+        raise TypeError('slider_horizontal_stretch must be int, not bool')
     if not isinstance(slider_horizontal_stretch, int):
         raise TypeError(
             f'slider_horizontal_stretch must be int, not {type(slider_horizontal_stretch).__name__}'

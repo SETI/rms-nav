@@ -149,15 +149,31 @@ def _make_mock_config(planet_config: dict[str, Any]) -> MagicMock:
     return cfg
 
 
+def _noop_nav_model_rings_init(
+    self: NavModelRings, name: str, obs: Any, *, config: Any = None
+) -> None:
+    """Test helper: skip ``NavModelRings`` / ``NavModel`` ``__init__``.
+
+    Callers assign ``_config``, ``_obs``, ``_models``, ``_metadata``, and
+    ``_logger`` to match production layout without running real initialization.
+    """
+
+
 def _make_rings_model(
     obs: MagicMock,
     planet_config: dict[str, Any] | None = None,
 ) -> NavModelRings:
-    """Return a NavModelRings instance with mocked config."""
+    """Return a ``NavModelRings`` constructed with ``__init__`` patched to a no-op.
+
+    Sets ``_config``, ``_obs``, ``_models``, ``_metadata``, and ``_logger`` so
+    ``_create_model`` tests match the attributes the real constructor would
+    populate, while avoiding ``NavModel`` / ``NavBase`` setup.
+    """
     if planet_config is None:
         planet_config = _make_planet_config()
     mock_cfg = _make_mock_config(planet_config)
-    model = NavModelRings.__new__(NavModelRings)
+    with patch.object(NavModelRings, '__init__', _noop_nav_model_rings_init):
+        model = NavModelRings('test_rings', obs, config=mock_cfg)
     model._config = mock_cfg
     model._obs = obs
     model._models = []

@@ -264,7 +264,15 @@ class NavModelRings(NavModelRingsBase):
         resolutions: NDArrayFloatType = obs.ext_bp.ring_radial_resolution(ring_target).vals
 
         def min_res_at_radius(a: float) -> float | None:
-            """Return the minimum radial resolution (km/pixel) at radius ``a``."""
+            """Minimum radial resolution (km/pixel) among pixels whose ring radius is ``a``.
+
+            Uses ``obs.ext_bp.border_atop(bp_radii.key, a)`` to build a boolean mask of
+            pixels whose nominal ring radius equals ``a`` (edge of the discrete radius
+            sampling). ``resolutions`` is indexed by that mask; if no pixels are selected,
+            the masked slice is empty, or it is entirely masked, returns ``None``.
+            Otherwise returns the smallest positive finite value in the slice, or
+            ``None`` if that minimum is not positive.
+            """
             border_arr: NDArrayBoolType = (
                 obs.ext_bp.border_atop(bp_radii.key, a).mvals.astype('bool').filled(False)
             )

@@ -24,8 +24,11 @@ whose adjusted fade is still acceptable but narrower than the requested
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any
+
+import numpy as np
 
 from nav.support.types import NDArrayFloatType
 
@@ -70,3 +73,55 @@ class RingsRenderContext:
     resolutions: NDArrayFloatType
     fade_width_pix: float
     all_edge_radii: tuple[tuple[float, str], ...]
+
+    def __post_init__(self) -> None:
+        """Validate fields at construction (frozen dataclass: no mutation)."""
+        if self.obs is None:
+            raise ValueError('RingsRenderContext.obs must not be None')
+        if not isinstance(self.ring_target, str) or self.ring_target.strip() == '':
+            raise ValueError('RingsRenderContext.ring_target must be a non-empty string')
+        if isinstance(self.epoch, bool) or not isinstance(self.epoch, (int, float)):
+            raise TypeError('RingsRenderContext.epoch must be int or float')
+        if not math.isfinite(float(self.epoch)):
+            raise ValueError(f'RingsRenderContext.epoch must be finite, got {self.epoch!r}')
+
+        if not isinstance(self.resolutions, np.ndarray):
+            raise TypeError('RingsRenderContext.resolutions must be a numpy ndarray')
+        if not np.issubdtype(self.resolutions.dtype, np.number):
+            raise TypeError('RingsRenderContext.resolutions must have a numeric dtype')
+        if self.resolutions.size == 0:
+            raise ValueError('RingsRenderContext.resolutions must not be empty')
+        res64 = np.asarray(self.resolutions, dtype=np.float64)
+        if not np.all(np.isfinite(res64)):
+            raise ValueError('RingsRenderContext.resolutions must contain only finite values')
+        if np.any(res64 <= 0.0):
+            raise ValueError('RingsRenderContext.resolutions must be positive everywhere')
+
+        if isinstance(self.fade_width_pix, bool) or not isinstance(self.fade_width_pix, (int, float)):
+            raise TypeError('RingsRenderContext.fade_width_pix must be int or float')
+        fwp = float(self.fade_width_pix)
+        if not math.isfinite(fwp) or fwp < 0.0:
+            raise ValueError(
+                f'RingsRenderContext.fade_width_pix must be finite and non-negative, got '
+                f'{self.fade_width_pix!r}'
+            )
+
+        if not isinstance(self.all_edge_radii, tuple):
+            raise TypeError('RingsRenderContext.all_edge_radii must be a tuple')
+        for j, pair in enumerate(self.all_edge_radii):
+            if not isinstance(pair, tuple) or len(pair) != 2:
+                raise ValueError(
+                    f'RingsRenderContext.all_edge_radii[{j}] must be (radius_km, label) pair'
+                )
+            rad, label = pair
+            if isinstance(rad, bool) or not isinstance(rad, (int, float)):
+                raise TypeError(f'RingsRenderContext.all_edge_radii[{j}][0] must be numeric')
+            if not math.isfinite(float(rad)) or float(rad) <= 0.0:
+                raise ValueError(
+                    f'RingsRenderContext.all_edge_radii[{j}][0] must be finite and positive, '
+                    f'got {rad!r}'
+                )
+            if not isinstance(label, str) or label.strip() == '':
+                raise ValueError(
+                    f'RingsRenderContext.all_edge_radii[{j}][1] must be a non-empty string'
+                )

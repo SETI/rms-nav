@@ -676,7 +676,19 @@ def _parse_edge_data(feature_key: str, edge_type: str, mode_list: Any) -> RingEd
             raise ValueError(f'Feature {feature_key!r} {edge_type}_data[{i}]: missing "mode" field')
 
         if 'a' in mode:
-            # Mode 1 base orbit
+            # Base-orbit entry: must be mode 1 (semi-major axis and related fields).
+            try:
+                mode_n_base = int(mode_num)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f'Feature {feature_key!r} {edge_type}_data[{i}]: invalid "mode" for base orbit '
+                    f'-- {exc}'
+                ) from exc
+            if mode_n_base != 1:
+                raise ValueError(
+                    f'Feature {feature_key!r} {edge_type}_data[{i}]: entry with "a" must use mode 1 '
+                    f'(base orbit), got mode {mode_num!r}'
+                )
             try:
                 a = float(mode['a'])
                 ae = float(mode.get('ae', 0.0))
