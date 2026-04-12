@@ -274,19 +274,6 @@ def compute_edge_fade(
     if np.any(res <= 0.0):
         raise ValueError('compute_edge_fade: resolutions must be strictly positive at every pixel')
 
-    for j, pair in enumerate(all_edge_radii):
-        if not isinstance(pair, tuple) or len(pair) != 2:
-            raise ValueError(
-                f'all_edge_radii[{j}] must be a (radius, label) pair, got {type(pair).__name__!r}'
-            )
-        rad_km, label = pair
-        if isinstance(rad_km, bool) or not isinstance(rad_km, (int, float)):
-            raise TypeError(f'all_edge_radii[{j}][0] must be numeric')
-        if not math.isfinite(float(rad_km)):
-            raise ValueError(f'all_edge_radii[{j}][0] must be finite, got {rad_km!r}')
-        if not isinstance(label, str):
-            raise TypeError(f'all_edge_radii[{j}][1] must be str, got {type(label).__name__}')
-
     shade_sign = 1.0 if shade_above else -1.0
 
     # Per-pixel fade width in km

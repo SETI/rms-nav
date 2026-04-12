@@ -126,9 +126,11 @@ class NavModelRingsSimulated(NavModelRingsBase):
         obs = self.obs
         p = self._sim_params
 
+        # Get time and epoch from observation or use defaults
         time = obs.sim_time
         epoch = obs.sim_epoch
 
+        # Get data size for center coordinate calculation
         data_size_v = int(obs.data_shape_v)
         data_size_u = int(obs.data_shape_u)
 
@@ -143,10 +145,13 @@ class NavModelRingsSimulated(NavModelRingsBase):
 
         # Render via sim_ring (pixel-space, not backplane-based)
         sim_img = obs.make_extfov_zeros()
+        # Get center coordinates in data coordinates
         center_v_data = float(p.get('center_v', data_size_v / 2.0))
         center_u_data = float(p.get('center_u', data_size_u / 2.0))
+        # Convert to extended FOV coordinates by adding margins
         center_v_extfov = center_v_data + obs.extfov_margin_v
         center_u_extfov = center_u_data + obs.extfov_margin_u
+        # Create modified params with adjusted center for extended FOV coordinates
         ring_params_extfov = dict(p)
         ring_params_extfov['center_v'] = center_v_extfov
         ring_params_extfov['center_u'] = center_u_extfov
@@ -155,6 +160,8 @@ class NavModelRingsSimulated(NavModelRingsBase):
             center_v_extfov,
             center_u_extfov,
         )
+        # To fake the normal ring modeling process, we shade solid rings because we
+        # don't know what else is in the area between the edges
         render_ring(
             sim_img,
             ring_params_extfov,
@@ -228,6 +235,7 @@ class NavModelRingsSimulated(NavModelRingsBase):
         """
         data_size_v = int(obs.data_shape_v)
         data_size_u = int(obs.data_shape_u)
+        # Build edge_info_list for the base class method
         edge_info_list: list[tuple[NDArrayBoolType, str, str]] = []
         labels = ring_feature.edge_labels
         feature_name = ring_feature.name or 'UNNAMED'
@@ -242,6 +250,7 @@ class NavModelRingsSimulated(NavModelRingsBase):
             label_text = f'{feature_name} {label}'
 
             base = edge_data.base_orbit
+            # Compute edge mask using simulated border_atop
             edge_mask = compute_border_atop_simulated(
                 data_size_v,
                 data_size_u,
@@ -255,6 +264,7 @@ class NavModelRingsSimulated(NavModelRingsBase):
                 time=time,
             )
 
+            # Embed into extended FOV
             edge_mask_extfov: NDArrayBoolType = obs.make_extfov_false()
             edge_mask_extfov[
                 obs.extfov_margin_v : obs.extfov_margin_v + data_size_v,
@@ -263,6 +273,7 @@ class NavModelRingsSimulated(NavModelRingsBase):
 
             edge_info_list.append((edge_mask_extfov, label_text, label))
 
+        # Use the unified base class method
         return self._create_edge_annotations(obs, edge_info_list, model_mask)
 
 

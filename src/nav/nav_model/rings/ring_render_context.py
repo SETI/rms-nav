@@ -115,20 +115,3 @@ class RingsRenderContext:
 
         if not isinstance(self.all_edge_radii, tuple):
             raise TypeError('RingsRenderContext.all_edge_radii must be a tuple')
-        for j, pair in enumerate(self.all_edge_radii):
-            if not isinstance(pair, tuple) or len(pair) != 2:
-                raise ValueError(
-                    f'RingsRenderContext.all_edge_radii[{j}] must be (radius_km, label) pair'
-                )
-            rad, label = pair
-            if isinstance(rad, bool) or not isinstance(rad, (int, float)):
-                raise TypeError(f'RingsRenderContext.all_edge_radii[{j}][0] must be numeric')
-            if not math.isfinite(float(rad)) or float(rad) <= 0.0:
-                raise ValueError(
-                    f'RingsRenderContext.all_edge_radii[{j}][0] must be finite and positive, '
-                    f'got {rad!r}'
-                )
-            if not isinstance(label, str) or label.strip() == '':
-                raise ValueError(
-                    f'RingsRenderContext.all_edge_radii[{j}][1] must be a non-empty string'
-                )

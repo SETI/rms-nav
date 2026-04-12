@@ -3,16 +3,20 @@
 This module implements the orchestrator for the planetary ring navigation model.
 It is a thin coordinator that:
 
-1. Reads ring configuration from the merged config (``rings.ring_features.<PLANET>``).
-2. Constructs typed ``RingFeature`` objects via ``RingFeature.from_config()``,
-   raising ``ValueError`` immediately on malformed config.
-3. Validates no two features have overlapping date ranges over the same radial region.
-4. Checks whether rings are visible in the current observation (before retrieving
-   feature entries from config).
-5. Retrieves and validates feature dicts, then filters through the four-pass
-   ``RingFeatureFilter`` pipeline.
-6. Renders each surviving feature by calling ``feature.render(context)``.
-7. Wraps each render result in a ``NavModelResult`` with annotations.
+1. Reads the planet block from merged config (``rings.ring_features.<PLANET>``),
+   including required planet-level parameters (``epoch``, fade settings, etc.).
+2. Requires a non-empty ``features`` dict under that block (each entry is
+   validated when passed to ``RingFeature.from_config()``).
+3. Checks ring visibility via the ``ring_radius`` backplane **before** calling
+   ``RingFeature.from_config()``, so feature parsing is skipped when no ring
+   radii appear in the FOV.
+4. Constructs typed ``RingFeature`` objects via ``RingFeature.from_config()``,
+   raising ``ValueError`` on malformed feature entries.
+5. Validates no two features have overlapping date ranges over the same radial
+   region (``validate_no_date_overlaps``).
+6. Filters through the four-pass ``RingFeatureFilter`` pipeline.
+7. Renders each surviving feature via ``feature.render(context)`` and wraps
+   each result in a ``NavModelResult`` with annotations.
 
 **Design principle**: This module contains no physics, no math, and no rendering
 logic. All of that lives in the ``rings`` subpackage (``ring_feature``,
@@ -269,9 +273,9 @@ class NavModelRings(NavModelRingsBase):
                 self._models.append(self._create_empty_model_result())
             return
 
-        # ------------------------------------------------------------------
+        # -----------------------------------------------------------------------
         # Ring visibility (before building ``RingFeature`` instances from config)
-        # ------------------------------------------------------------------
+        # -----------------------------------------------------------------------
         ring_target = f'{planet.lower()}:ring'
         bp_radii = obs.ext_bp.ring_radius(ring_target)
         if bp_radii.is_all_masked():
@@ -289,9 +293,9 @@ class NavModelRings(NavModelRingsBase):
             max_radius,
         )
 
-        # ------------------------------------------------------------------
+        # -----------------------------------------------------------------------
         # Retrieve RingFeature objects from the validated feature map
-        # ------------------------------------------------------------------
+        # -----------------------------------------------------------------------
         features: list[RingFeature] = []
         for key, data in features_dict.items():
             if not isinstance(data, dict):
@@ -304,9 +308,9 @@ class NavModelRings(NavModelRingsBase):
         validate_no_date_overlaps(features)
         self._logger.info('Retrieved %d ring feature(s) for %s', len(features), planet)
 
-        # ------------------------------------------------------------------
+        # -----------------------------------------------------------------------
         # Build resolutions backplane and resolution-at-radius lookup
-        # ------------------------------------------------------------------
+        # -----------------------------------------------------------------------
         resolutions: NDArrayFloatType = obs.ext_bp.ring_radial_resolution(ring_target).vals
 
         def min_res_at_radius(a: float) -> float | None:
@@ -333,9 +337,9 @@ class NavModelRings(NavModelRingsBase):
             min_val = float(np.min(vals))
             return min_val if min_val > 0.0 else None
 
-        # ------------------------------------------------------------------
+        # -----------------------------------------------------------------------
         # Filter features
-        # ------------------------------------------------------------------
+        # -----------------------------------------------------------------------
         feature_filter = RingFeatureFilter(
             obs_time_et=obs.midtime,
             min_radius=min_radius,
@@ -355,9 +359,9 @@ class NavModelRings(NavModelRingsBase):
 
         self._logger.info('%d ring feature(s) passed filter', len(surviving))
 
-        # ------------------------------------------------------------------
+        # -----------------------------------------------------------------------
         # Handle never_create_model
-        # ------------------------------------------------------------------
+        # -----------------------------------------------------------------------
         if never_create_model:
             self._metadata['planet'] = planet
             self._metadata['epoch'] = epoch_str
@@ -367,23 +371,23 @@ class NavModelRings(NavModelRingsBase):
             ]
             return
 
-        # ------------------------------------------------------------------
+        # -----------------------------------------------------------------------
         # Build all_edge_radii for fade-conflict width reduction in render
-        # ------------------------------------------------------------------
+        # -----------------------------------------------------------------------
         all_edge_radii: list[tuple[float, str]] = []
         for feat in surviving:
             all_edge_radii.extend(feat.all_base_radii())
         all_edge_radii.sort(key=lambda x: x[0])
 
-        # ------------------------------------------------------------------
+        # -----------------------------------------------------------------------
         # Distance backplane for range field in NavModelResult
-        # ------------------------------------------------------------------
+        # -----------------------------------------------------------------------
         bp_distance = obs.ext_bp.distance(ring_target, direction='dep')
         distance_arr = bp_distance.mvals.filled(math.inf)
 
-        # ------------------------------------------------------------------
+        # -----------------------------------------------------------------------
         # Render each surviving feature
-        # ------------------------------------------------------------------
+        # -----------------------------------------------------------------------
         render_context = RingsRenderContext(
             obs=obs,
             ring_target=ring_target,

@@ -155,11 +155,11 @@ class ManualNavDialog(QDialog):
         self._model_mask_ext = self._model.models[0].model_mask
 
         # Stretch/gamma parameters (image)
-        self._black = float(np.quantile(self._img_fov, 0.001))
-        self._white = float(np.quantile(self._img_fov, 0.999))
-        if self._black >= self._white:
-            self._white = self._black + 0.01
-        self._gamma = 1.0
+        self._image_black = float(np.quantile(self._img_fov, 0.001))
+        self._image_white = float(np.quantile(self._img_fov, 0.999))
+        if self._image_black >= self._image_white:
+            self._image_white = self._image_black + 0.01
+        self._image_gamma = 1.0
         # Model stretch (defaults from model at offset (0, 0))
         _m0 = np.asarray(
             self._obs.extract_offset_array(self._model_img_ext, (0.0, 0.0)),
@@ -301,21 +301,21 @@ class ManualNavDialog(QDialog):
             stretch_form,
             img_min=self._stretch_min,
             img_max=self._stretch_max,
-            black_init=self._black,
-            white_init=self._white,
-            gamma_init=self._gamma,
-            on_black_changed=self._on_black_changed,
-            on_white_changed=self._on_white_changed,
-            on_gamma_changed=self._on_gamma_changed,
+            black_init=self._image_black,
+            white_init=self._image_white,
+            gamma_init=self._image_gamma,
+            on_black_changed=self._on_image_black_changed,
+            on_white_changed=self._on_image_white_changed,
+            on_gamma_changed=self._on_image_gamma_changed,
             value_label_min_width=52,
             slider_horizontal_stretch=1,
         )
-        self._slider_black = controls['slider_black']
-        self._slider_white = controls['slider_white']
-        self._slider_gamma = controls['slider_gamma']
-        self._lbl_black = controls['label_black']
-        self._lbl_white = controls['label_white']
-        self._lbl_gamma = controls['label_gamma']
+        self._slider_image_black = controls['slider_black']
+        self._slider_image_white = controls['slider_white']
+        self._slider_image_gamma = controls['slider_gamma']
+        self._lbl_image_black = controls['label_black']
+        self._lbl_image_white = controls['label_white']
+        self._lbl_image_gamma = controls['label_gamma']
         self._stretch_controls = controls
         self._btn_reset_stretch = QPushButton('Reset Image Stretch')
         self._btn_reset_stretch.clicked.connect(self._on_reset_stretch)
@@ -445,19 +445,19 @@ class ManualNavDialog(QDialog):
         """Return True if ``state`` is the Qt Checked checkbox state."""
         return Qt.CheckState(state) == Qt.CheckState.Checked
 
-    def _on_black_changed(self, val: float) -> None:
-        self._black = float(val)
-        self._lbl_black.setText(f'{self._black:.5f}')
+    def _on_image_black_changed(self, val: float) -> None:
+        self._image_black = float(val)
+        self._lbl_image_black.setText(f'{self._image_black:.5f}')
         self._refresh_overlay()
 
-    def _on_white_changed(self, val: float) -> None:
-        self._white = float(val)
-        self._lbl_white.setText(f'{self._white:.5f}')
+    def _on_image_white_changed(self, val: float) -> None:
+        self._image_white = float(val)
+        self._lbl_image_white.setText(f'{self._image_white:.5f}')
         self._refresh_overlay()
 
-    def _on_gamma_changed(self, val: float) -> None:
-        self._gamma = float(val)
-        self._lbl_gamma.setText(f'{self._gamma:.5f}')
+    def _on_image_gamma_changed(self, val: float) -> None:
+        self._image_gamma = float(val)
+        self._lbl_image_gamma.setText(f'{self._image_gamma:.5f}')
         self._refresh_overlay()
 
     def _on_model_black_changed(self, val: float) -> None:
@@ -471,18 +471,6 @@ class ManualNavDialog(QDialog):
             val: Black level in data units after ``build_stretch_controls`` maps the
                 slider position through ``from_slider`` (same linear range as
                 ``_model_stretch_min`` / ``_model_stretch_max``).
-
-        Returns:
-            None.
-
-        Raises:
-            None. This handler does not raise.
-
-        Notes:
-            Sets ``self._model_black`` to ``float(val)``, sets
-            ``self._lbl_model_black`` to five decimal places, and calls
-            ``self._refresh_overlay()``. Does not change checkbox or transparency
-            widget enabled state.
         """
         self._model_black = float(val)
         self._lbl_model_black.setText(f'{self._model_black:.5f}')
@@ -497,17 +485,6 @@ class ManualNavDialog(QDialog):
         Parameters:
             val: White level in data units from the slider mapping (see
                 ``_on_model_black_changed``).
-
-        Returns:
-            None.
-
-        Raises:
-            None. This handler does not raise.
-
-        Notes:
-            Sets ``self._model_white`` to ``float(val)``, updates
-            ``self._lbl_model_white`` with five decimal places, and calls
-            ``self._refresh_overlay()``.
         """
         self._model_white = float(val)
         self._lbl_model_white.setText(f'{self._model_white:.5f}')
@@ -522,17 +499,6 @@ class ManualNavDialog(QDialog):
         Parameters:
             val: Gamma factor (``>= 0.10``) after ``build_stretch_controls`` gamma
                 slot applies ``max(0.10, v / 100.0)``.
-
-        Returns:
-            None.
-
-        Raises:
-            None. This handler does not raise.
-
-        Notes:
-            Sets ``self._model_gamma`` to ``float(val)``, updates
-            ``self._lbl_model_gamma`` with five decimal places, and calls
-            ``self._refresh_overlay()``.
         """
         self._model_gamma = float(val)
         self._lbl_model_gamma.setText(f'{self._model_gamma:.5f}')
@@ -548,17 +514,6 @@ class ManualNavDialog(QDialog):
             val: Nominal transparency in ``[0, 1]``. The model transparency slider
                 connects via ``lambda v: self._on_model_transparency_changed(v /
                 100.0)``, so ``val`` is the slider position divided by ``100``.
-
-        Returns:
-            None.
-
-        Raises:
-            None. This handler does not raise.
-
-        Notes:
-            Sets ``self._model_transparency`` to ``float(np.clip(val, 0.0, 1.0))``,
-            updates ``self._lbl_model_transparency`` with two decimal places, and
-            calls ``self._refresh_overlay()``. Does not enable or disable widgets.
         """
         self._model_transparency = float(np.clip(val, 0.0, 1.0))
         self._lbl_model_transparency.setText(f'{self._model_transparency:.2f}')
@@ -567,23 +522,10 @@ class ManualNavDialog(QDialog):
     def _on_show_image_changed(self, state: Any) -> None:
         """Toggle whether the stretched observation contributes to the overlay.
 
-        When unchecked, the image channel contribution can be suppressed while the
-        model and correlation readout behavior follow ``_refresh_overlay``.
-
         Parameters:
             state: ``QCheckBox.stateChanged`` argument (typically an ``int`` Qt check
                 state). Interpreted via ``_is_checked`` as ``True`` only for
                 ``Qt.CheckState.Checked``.
-
-        Returns:
-            None.
-
-        Raises:
-            None. This handler does not raise.
-
-        Notes:
-            Sets ``self._show_image`` to the checked result and calls
-            ``self._refresh_overlay()``. Does not modify other widget enabled flags.
         """
         self._show_image = self._is_checked(state)
         self._refresh_overlay()
@@ -597,19 +539,6 @@ class ManualNavDialog(QDialog):
         Parameters:
             state: Same contract as ``_on_show_image_changed`` for the ``Display
                 model`` checkbox.
-
-        Returns:
-            None.
-
-        Raises:
-            None. This handler does not raise.
-
-        Notes:
-            Sets ``self._show_model`` from ``_is_checked(state)``, sets
-            ``self._slider_model_transparency.setEnabled`` and
-            ``self._lbl_model_transparency.setEnabled`` to that boolean (both
-            widgets enabled when the model is shown, both disabled when hidden),
-            then calls ``self._refresh_overlay()``.
         """
         self._show_model = self._is_checked(state)
         self._slider_model_transparency.setEnabled(self._show_model)
@@ -617,14 +546,16 @@ class ManualNavDialog(QDialog):
         self._refresh_overlay()
 
     def _on_reset_stretch(self) -> None:
-        # Recompute defaults from current image
-        self._black = float(np.quantile(self._img_fov, 0.001))
-        self._white = float(np.quantile(self._img_fov, 0.999))
-        if self._black >= self._white:
-            self._white = self._black + 0.01
-        self._gamma = 1.0
+        # Recompute defaults from current image (FOV only; extended margins are zero)
+        self._image_black = float(np.quantile(self._img_fov, 0.001))
+        self._image_white = float(np.quantile(self._img_fov, 0.999))
+        if self._image_black >= self._image_white:
+            self._image_white = self._image_black + 0.01
+        self._image_gamma = 1.0
         # Update UI via common helper
-        self._stretch_controls['set_values'](self._black, self._white, self._gamma)
+        self._stretch_controls['set_values'](
+            self._image_black, self._image_white, self._image_gamma
+        )
         # Redraw
         self._refresh_overlay()
 
@@ -796,7 +727,9 @@ class ManualNavDialog(QDialog):
     def _compose_overlay_pixmap(self) -> None:
         """Compose the RGB overlay pixmap based on current stretch/offset/alpha."""
         # Primary image (FOV) -> red channel (mono repeated into RGB then tinted)
-        img_u8 = _apply_stretch_gamma(self._img_fov, self._black, self._white, self._gamma)
+        img_u8 = _apply_stretch_gamma(
+            self._img_fov, self._image_black, self._image_white, self._image_gamma
+        )
         h, w = img_u8.shape
         img_layer = img_u8 if self._show_image else np.zeros((h, w), dtype=np.uint8)
         # Extract model slice at current (dv, du)
@@ -913,20 +846,6 @@ class ManualNavDialog(QDialog):
             state: ``QCheckBox.stateChanged`` argument for the ``Sharp zoom``
                 checkbox. ``True`` means ``Qt.CheckState.Checked`` per
                 ``_is_checked``.
-
-        Returns:
-            None.
-
-        Raises:
-            None. This handler does not raise.
-
-        Notes:
-            Sets ``self._zoom_sharp`` to the checked result and calls
-            ``self._update_display_only()`` (not ``_refresh_overlay()``), so
-            ``_compose_overlay_pixmap()`` does not run. The label pixmap rescale uses
-            ``FastTransformation`` when sharp is on and ``SmoothTransformation``
-            when off. ``_update_display_only()`` also refreshes ``self._status_label``
-            to the default no-cursor line (correlation only).
         """
         self._zoom_sharp = self._is_checked(state)
         self._update_display_only()
