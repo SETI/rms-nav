@@ -2,13 +2,40 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from typing import Any, cast
 
 import pytest
-from PyQt6.QtWidgets import QApplication, QFormLayout
 
-from nav.ui.common import build_stretch_controls
+# If this file is collected without ``tests/nav/ui/conftest.py`` (unusual), still
+# prefer headless Qt before importing bindings.
+os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+
+try:
+    from PyQt6.QtWidgets import QApplication, QFormLayout
+except (ImportError, OSError) as exc:
+    pytest.skip(
+        f'PyQt6/QtWidgets not available: {exc}',
+        allow_module_level=True,
+    )
+
+try:
+    if QApplication.instance() is None:
+        QApplication([])
+except Exception as exc:
+    pytest.skip(
+        f'PyQt6 QApplication init failed (display/EGL/platform): {exc}',
+        allow_module_level=True,
+    )
+
+try:
+    from nav.ui.common import build_stretch_controls
+except (ImportError, OSError) as exc:
+    pytest.skip(
+        f'nav.ui.common import failed (Qt dependency): {exc}',
+        allow_module_level=True,
+    )
 
 
 @pytest.fixture

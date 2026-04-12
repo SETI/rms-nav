@@ -85,7 +85,10 @@ jobs:
           export OOPS_RESOURCES=https://storage.googleapis.com/rms-node-oops-resources
           export UCAC4_PATH=https://storage.googleapis.com/rms-node-star-catalogs/UCAC4
           export YBSC_PATH=https://storage.googleapis.com/rms-node-star-catalogs/YBSC
-          python -m pytest --cov -n auto
+          # loadfile keeps each test file on one xdist worker; PyQt6 + default load
+          # scheduling has caused worker crashes when tests from the same file ran
+          # in different processes.
+          python -m pytest --cov -n auto --dist=loadfile
 
       - name: Print coverage report
         run: |
