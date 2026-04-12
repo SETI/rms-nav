@@ -46,7 +46,7 @@ jobs:
       - name: PyMarkdown
         run: |
           pymarkdown scan docs/ .cursor/ README.md CONTRIBUTING.md
-  
+
   test:
     name: Test rms-nav
     runs-on: ${{ matrix.os }}
@@ -66,6 +66,13 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
+
+      # PyQt6 loads EGL at import time; ubuntu-latest images omit it by default.
+      - name: Install EGL for PyQt6 (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1
 
       - name: Install dependencies
         run: |
