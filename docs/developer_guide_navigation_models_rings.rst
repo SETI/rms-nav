@@ -121,7 +121,7 @@ YAML structure
                  a: 77870.0              # Semi-major axis in km
                  ae: 100.0              # Amplitude of eccentricity (km)
                  long_peri: 195.0        # Longitude of periapsis (degrees)
-                 rate_peri: 0.0          # Precession rate (degrees/year)
+                 rate_peri: 0.0          # Precession rate (degrees/day)
                  rms: 2.0               # Edge uncertainty (km, 1-sigma RMS)
            titan_ringlet:
              feature_type: RINGLET
@@ -215,7 +215,7 @@ Edge mode parameters (mode 1 — base orbit)
    * - ``long_peri``
      - Longitude of periapsis at the reference epoch, in degrees.
    * - ``rate_peri``
-     - Precession rate of periapsis, in degrees per year.
+     - Precession rate of periapsis, in degrees per day.
    * - ``rms``
      - Edge position uncertainty, in km (1-sigma RMS). Used for
        ``NavModelResult.uncertainty``.
@@ -238,7 +238,7 @@ Edge mode parameters (mode > 1 — perturbation modes)
    * - ``phase``
      - Phase angle at the reference epoch, in degrees.
    * - ``pattern_speed``
-     - Pattern speed in degrees per year.
+     - Pattern speed in degrees per day.
 
 Validation and loading
 ^^^^^^^^^^^^^^^^^^^^^^

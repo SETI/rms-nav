@@ -34,6 +34,9 @@ import numbers
 from dataclasses import dataclass
 from typing import Any
 
+# Seconds per day: degrees/day (or similar) to radians/second for backplane tuples.
+SECONDS_PER_DAY = 86400.0
+
 
 class RingFeatureType(enum.Enum):
     """Classification of a ring feature as a gap or ringlet.
@@ -290,7 +293,7 @@ class RingEdgeData:
 
         # Base orbit: convert degrees and degrees/day to radians and radians/second
         long_peri_rad = math.radians(self.base_orbit.long_peri)
-        rate_peri_rad_per_sec = math.radians(self.base_orbit.rate_peri) / 86400.0
+        rate_peri_rad_per_sec = math.radians(self.base_orbit.rate_peri) / SECONDS_PER_DAY
         result.append(
             (1, self.base_orbit.a, self.base_orbit.ae, long_peri_rad, rate_peri_rad_per_sec)
         )
@@ -298,7 +301,7 @@ class RingEdgeData:
         # Radial perturbation modes
         for p in self.radial_perturbations():
             phase_rad = math.radians(p.phase)
-            speed_rad_per_sec = math.radians(p.pattern_speed) / 86400.0
+            speed_rad_per_sec = math.radians(p.pattern_speed) / SECONDS_PER_DAY
             result.append((p.mode_num, p.amplitude, phase_rad, speed_rad_per_sec))
 
         return result

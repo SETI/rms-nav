@@ -90,7 +90,9 @@ class RingFeatureFilter:
 
         Raises:
             TypeError: If a parameter has an invalid type.
-            ValueError: If numeric parameters violate range constraints.
+            ValueError: If ``logger`` is None, numeric parameters violate range
+                constraints (including ``fade_width_pix`` not strictly positive), or
+                ``min_allowed_fade_width_pix`` exceeds ``fade_width_pix``.
         """
         if isinstance(obs_time_et, bool) or not isinstance(obs_time_et, (int, float)):
             raise TypeError(f'obs_time_et must be int or float, not {type(obs_time_et).__name__}')
@@ -114,6 +116,8 @@ class RingFeatureFilter:
                 raise TypeError(f'{name} must be int or float, not {type(val).__name__}')
             if val < 0:
                 raise ValueError(f'{name} must be non-negative, got {val}')
+        if float(fade_width_pix) <= 0.0:
+            raise ValueError(f'fade_width_pix must be > 0, got {fade_width_pix}')
         if min_allowed_fade_width_pix > fade_width_pix:
             raise ValueError(
                 'min_allowed_fade_width_pix must be <= fade_width_pix, got '
@@ -292,9 +296,18 @@ class RingFeatureFilter:
     ) -> RingFeature | None:
         """Apply pass 4 fade conflict check to a feature.
 
-        For each edge that uses fade rendering, compute the adjusted fade width
-        after conflict reduction and compare against ``min_allowed_fade_width_pix``.
-        Excluded edges are set to None. If all edges are excluded, return None.
+        Before running the fade conflict check, trim any out-of-range edge from a
+        RINGLET that has both edges structurally present. This implements the
+        partial-visibility handling promised by ``RingFeature.uses_fade_for_edge``'s
+        docstring: the in-range edge is then treated as a single-edge (fade-using)
+        feature and receives correct conflict detection, while ``render()`` naturally
+        takes the single-edge fade path instead of producing a solid band that
+        extends to an off-screen edge.
+
+        For each edge that uses fade rendering (after any partial-visibility trim),
+        compute the adjusted fade width after conflict reduction and compare against
+        ``min_allowed_fade_width_pix``. Excluded edges are set to None. If all edges
+        are excluded, return None.
 
         Parameters:
             feature: Feature to check.
@@ -304,6 +317,41 @@ class RingFeatureFilter:
         Returns:
             The (possibly trimmed) feature, or None if all edges were excluded.
         """
+        # Partial-visibility trim: for a RINGLET with both edges, remove any edge
+        # whose base radius is outside the visible range. Pass 2 guarantees at least
+        # one edge is in range, so the trimmed feature always has one valid edge.
+        if (
+            feature.feature_type is RingFeatureType.RINGLET
+            and feature.inner_edge is not None
+            and feature.outer_edge is not None
+        ):
+            inner_in_range = self._min_radius <= feature.inner_edge.base_radius <= self._max_radius
+            outer_in_range = self._min_radius <= feature.outer_edge.base_radius <= self._max_radius
+            if not (inner_in_range and outer_in_range):
+                out_of_range_side = 'inner' if not inner_in_range else 'outer'
+                self._logger.debug(
+                    'Pass 4 (partial visibility): trimming %r -- %s edge (%.1f km) '
+                    'outside visible range [%.1f, %.1f] km',
+                    feature.key,
+                    out_of_range_side,
+                    (
+                        feature.inner_edge.base_radius
+                        if not inner_in_range
+                        else feature.outer_edge.base_radius
+                    ),
+                    self._min_radius,
+                    self._max_radius,
+                )
+                feature = RingFeature(
+                    key=feature.key,
+                    name=feature.name,
+                    feature_type=feature.feature_type,
+                    inner_edge=feature.inner_edge if inner_in_range else None,
+                    outer_edge=feature.outer_edge if outer_in_range else None,
+                    start_date=feature.start_date,
+                    end_date=feature.end_date,
+                )
+
         keep_inner = self._edge_passes_fade(feature, 'inner', all_edge_radii)
         keep_outer = self._edge_passes_fade(feature, 'outer', all_edge_radii)
 

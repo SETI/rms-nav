@@ -168,7 +168,8 @@ def compute_fade_integral(
         Per-pixel integral values, same shape as ``a0``.
 
     Raises:
-        ValueError: If ``width`` or ``resolutions`` contain a non-finite value or
+        ValueError: If ``a0`` or ``a1`` contain a non-finite value, if array shapes
+            differ, or if ``width`` or ``resolutions`` contain a non-finite value or
             any element that is not strictly positive.
     """
     w = np.asarray(width, dtype=np.float64)
@@ -183,8 +184,23 @@ def compute_fade_integral(
         raise ValueError(
             'compute_fade_integral: resolutions must be strictly positive at every element'
         )
+
+    a0_a = np.asarray(a0, dtype=np.float64)
+    a1_a = np.asarray(a1, dtype=np.float64)
+    if not np.all(np.isfinite(a0_a)):
+        raise ValueError('compute_fade_integral: a0 must contain only finite values')
+    if not np.all(np.isfinite(a1_a)):
+        raise ValueError('compute_fade_integral: a1 must contain only finite values')
+    _require_matching_shapes(
+        ('a0', a0_a),
+        ('a1', a1_a),
+        ('width', w),
+        ('resolutions', res_c),
+    )
+
     result = (
-        (1.0 + shade_sign * edge_radius / w) * (a1 - a0) + shade_sign * (a0**2 - a1**2) / (2.0 * w)
+        (1.0 + shade_sign * edge_radius / w) * (a1_a - a0_a)
+        + shade_sign * (a0_a**2 - a1_a**2) / (2.0 * w)
     ) / res_c
     return np.asarray(result, dtype=np.float64)
 
@@ -238,7 +254,9 @@ def compute_edge_fade(
         edge_radius: Nominal radius of the ring edge (km).
         shade_above: If True, shade toward larger radii (away from planet);
             if False, shade toward smaller radii (toward planet).
-        fade_width_pix: Desired fade extent in pixels (from config).
+        fade_width_pix: Desired fade extent in pixels (from config); must be
+            strictly positive (zero would yield zero per-pixel width and break
+            integration).
         resolutions: Per-pixel radial resolution (km/pixel).
         all_edge_radii: Sorted sequence of (radius, label) pairs for all
             surviving feature edges. Used to detect conflict and reduce fade
@@ -254,14 +272,15 @@ def compute_edge_fade(
 
     Raises:
         ValueError: If array shapes differ, values are non-finite, any resolution
-            is not strictly positive, or scalar parameters are out of range.
+            is not strictly positive, ``fade_width_pix`` is not finite or is not
+            strictly positive, or ``edge_radius`` is not finite.
         TypeError: If ``fade_width_pix`` has an invalid type.
     """
     if isinstance(fade_width_pix, bool) or not isinstance(fade_width_pix, (int, float)):
         raise TypeError(f'fade_width_pix must be int or float, got {type(fade_width_pix).__name__}')
     fwp = float(fade_width_pix)
-    if not math.isfinite(fwp) or fwp < 0.0:
-        raise ValueError(f'fade_width_pix must be finite and non-negative, got {fade_width_pix!r}')
+    if not math.isfinite(fwp) or fwp <= 0.0:
+        raise ValueError(f'fade_width_pix must be finite and > 0, got {fade_width_pix!r}')
     if not math.isfinite(float(edge_radius)):
         raise ValueError(f'edge_radius must be finite, got {edge_radius!r}')
     if logger is None:
@@ -320,9 +339,9 @@ def compute_edge_fade(
     eq_case1 = eq2 & eq3
     eq_case4 = ~eq2 & ~eq3
     if shade_above:
-        eq_case4 = eq_case4 & (edge_radius < pixel_lower) & (fade_end > pixel_upper)
+        eq_case4 = eq_case4 & (edge_radius <= pixel_lower) & (fade_end >= pixel_upper)
     else:
-        eq_case4 = eq_case4 & (edge_radius > pixel_upper) & (fade_end < pixel_lower)
+        eq_case4 = eq_case4 & (edge_radius >= pixel_upper) & (fade_end <= pixel_lower)
 
     eq_case2 = eq2 & ~eq_case1
     eq_case3 = eq3 & ~eq_case1

@@ -82,8 +82,8 @@ def test_build_stretch_controls_accepts_valid_numeric_args(qapp: QApplication) -
     """Typical finite numeric arguments construct sliders and labels."""
     form = QFormLayout()
     result = build_stretch_controls(form, **_base_stretch_kwargs())
-    assert result['slider_black'].value() == pytest.approx(100)
-    assert result['slider_white'].value() == pytest.approx(900)
+    assert result['slider_black'].value() == 100
+    assert result['slider_white'].value() == 900
 
 
 def test_build_stretch_controls_rejects_bool_black_init(qapp: QApplication) -> None:
@@ -108,6 +108,34 @@ def test_build_stretch_controls_rejects_non_finite_gamma_init(qapp: QApplication
     kw = _base_stretch_kwargs()
     kw['gamma_init'] = float('inf')
     with pytest.raises(ValueError, match=r'gamma_init must be a finite number'):
+        build_stretch_controls(form, **kw)
+
+
+def test_build_stretch_controls_rejects_bool_value_label_min_width(qapp: QApplication) -> None:
+    form = QFormLayout()
+    kw = _base_stretch_kwargs()
+    kw['value_label_min_width'] = True
+    with pytest.raises(TypeError, match='value_label_min_width must be int, not bool'):
+        build_stretch_controls(form, **kw)
+
+
+def test_build_stretch_controls_rejects_non_positive_value_label_min_width(
+    qapp: QApplication,
+) -> None:
+    form = QFormLayout()
+    kw = _base_stretch_kwargs()
+    kw['value_label_min_width'] = 0
+    with pytest.raises(ValueError, match='value_label_min_width must be > 0, got 0'):
+        build_stretch_controls(form, **kw)
+
+
+def test_build_stretch_controls_rejects_negative_slider_horizontal_stretch(
+    qapp: QApplication,
+) -> None:
+    form = QFormLayout()
+    kw = _base_stretch_kwargs()
+    kw['slider_horizontal_stretch'] = -1
+    with pytest.raises(ValueError, match='slider_horizontal_stretch must be >= 0, got -1'):
         build_stretch_controls(form, **kw)
 
 

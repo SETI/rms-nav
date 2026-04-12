@@ -226,10 +226,21 @@ class NavModelRings(NavModelRingsBase):
         # ------------------------------------------------------------------
         # Read planet-level config parameters (all required; no defaults)
         # ------------------------------------------------------------------
-        epoch_str: str | None = planet_config.get('epoch')
+        epoch_str = planet_config.get('epoch')
         if epoch_str is None:
             raise ValueError(f'No epoch configured for planet {planet}')
-        epoch = utc_to_et(epoch_str)
+        if not isinstance(epoch_str, str):
+            raise ValueError(
+                f'Ring config error: epoch for planet {planet!r} must be a string, '
+                f'got {type(epoch_str).__name__!r}'
+            )
+        try:
+            epoch = utc_to_et(epoch_str)
+        except ValueError as exc:
+            raise ValueError(
+                f'Ring config error: epoch for planet {planet!r} is not a valid UTC '
+                f'string ({epoch_str!r}): {exc}'
+            ) from exc
 
         fade_width_pix = _require_positive_finite_planet_scalar(
             planet, 'fade_width_pix', planet_config

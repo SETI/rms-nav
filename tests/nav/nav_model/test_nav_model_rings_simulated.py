@@ -71,7 +71,12 @@ def _make_simulated_model(
     sim_params: dict[str, Any],
     ring_name: str = 'SATURN',
 ) -> NavModelRingsSimulated:
-    """Return a NavModelRingsSimulated instance with mocked config."""
+    """Return a ``NavModelRingsSimulated`` with mocked config and logger.
+
+    Uses the real constructor so base-class invariants stay aligned; the process
+    logger is patched so ``create_model`` / ``_logger.open`` can be asserted
+    without touching global ``DEFAULT_LOGGER``.
+    """
     cfg = MagicMock()
     cfg.rings.label_font = 'Arial'
     cfg.rings.label_font_size = 12
@@ -81,17 +86,18 @@ def _make_simulated_model(
     cfg.rings.label_vert_gap = 5
     cfg.rings.label_mask_enlarge = 3
 
-    model = NavModelRingsSimulated.__new__(NavModelRingsSimulated)
-    model._config = cfg
-    model._obs = obs
-    model._models = []
-    model._metadata = {}
-    model._ring_name = ring_name
-    model._sim_params = sim_params.copy()
-    model._logger = MagicMock()
-    model._logger.open.return_value.__enter__ = lambda self: None
-    model._logger.open.return_value.__exit__ = MagicMock(return_value=False)
-    return model
+    mock_logger = MagicMock()
+    mock_logger.open.return_value.__enter__ = MagicMock(return_value=None)
+    mock_logger.open.return_value.__exit__ = MagicMock(return_value=False)
+
+    with patch('nav.support.nav_base.DEFAULT_LOGGER', mock_logger):
+        return NavModelRingsSimulated(
+            'simulated-rings-test',
+            obs,
+            ring_name,
+            sim_params,
+            config=cfg,
+        )
 
 
 # ---------------------------------------------------------------------------

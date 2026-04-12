@@ -230,12 +230,38 @@ class TestPass2Radius:
         result = flt.filter([feature])
         assert len(result) == 1
 
+    def test_partial_visibility_inner_in_range_outer_trimmed(self) -> None:
+        """RINGLET with outer edge off-screen has outer edge set to None (trimmed)."""
+        feature = _make_ringlet(inner_a=100_000.0, outer_a=200_000.0)
+        flt = _make_filter(min_radius=99_000.0, max_radius=105_000.0)
+        result = flt.filter([feature])
+        assert result[0].inner_edge is not None
+        assert result[0].outer_edge is None
+
     def test_partial_visibility_outer_in_range_passes(self) -> None:
         """RINGLET with outer edge in range but inner edge out of range passes (partial)."""
         feature = _make_ringlet(inner_a=50_000.0, outer_a=100_000.0)
         flt = _make_filter(min_radius=99_000.0, max_radius=102_000.0)
         result = flt.filter([feature])
         assert len(result) == 1
+
+    def test_partial_visibility_outer_in_range_inner_trimmed(self) -> None:
+        """RINGLET with inner edge off-screen has inner edge set to None (trimmed)."""
+        feature = _make_ringlet(inner_a=50_000.0, outer_a=100_000.0)
+        flt = _make_filter(min_radius=99_000.0, max_radius=102_000.0)
+        result = flt.filter([feature])
+        assert result[0].inner_edge is None
+        assert result[0].outer_edge is not None
+
+    def test_partial_visibility_trim_logged_at_debug(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Partial-visibility edge trimming is logged at DEBUG level."""
+        feature = _make_ringlet(key='partial', inner_a=100_000.0, outer_a=200_000.0)
+        flt = _make_filter(min_radius=99_000.0, max_radius=105_000.0)
+        with caplog.at_level(logging.DEBUG, logger='nav.nav_model.rings.ring_filter'):
+            flt.filter([feature])
+        assert any('partial' in r.message and 'outer' in r.message for r in caplog.records)
 
     def test_radius_exclusion_logged_at_debug(self, caplog: pytest.LogCaptureFixture) -> None:
         """Radius exclusion is logged at DEBUG level."""

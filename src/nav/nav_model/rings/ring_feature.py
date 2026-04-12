@@ -268,8 +268,9 @@ class RingFeature:
           per edge -> one result per edge
 
         For RINGLETs with one edge out of the visible radius range (partial
-        visibility), ``render()`` degrades to single-edge behavior: the
-        out-of-range edge is rendered using ``_render_single_edge`` with a fade.
+        visibility), ``RingFeatureFilter`` trims the out-of-range edge to ``None``
+        before this method is called, so ``render()`` naturally takes the
+        single-edge path for the remaining in-range edge (fade rendering).
 
         Parameters:
             context: Immutable rendering context with obs, ring_target, epoch,
@@ -587,6 +588,7 @@ class RingFeature:
             Constructed ``RingFeature`` instance.
 
         Raises:
+            TypeError: If ``key`` is not a ``str`` or ``data`` is not a ``dict``.
             ValueError: On any structural or value error:
                 - feature_type not 'GAP' or 'RINGLET'
                 - neither inner_data nor outer_data present
@@ -595,6 +597,11 @@ class RingFeature:
                 - rms < 0
                 - perturbation mode missing required fields
         """
+        if not isinstance(key, str):
+            raise TypeError(f'Feature key must be str, got {type(key).__name__}')
+        if not isinstance(data, dict):
+            raise TypeError(f'Feature {key!r}: data must be a dict, got {type(data).__name__}')
+
         # Validate feature_type
         raw_type = data.get('feature_type')
         try:

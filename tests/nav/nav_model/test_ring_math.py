@@ -35,20 +35,29 @@ def _expected_fade_integral_shade_above(
     pixel_upper: float,
     resolution: float,
 ) -> float:
-    """Expected shade_above fade integral for one pixel (shade_sign = +1)."""
+    """Expected shade_above fade integral for one pixel (shade_sign = +1).
+
+    Mirrors the case split in ``compute_edge_fade`` (including inclusive bounds
+    for case 4 when ``fade_end`` equals ``pixel_upper`` or ``edge_radius`` equals
+    ``pixel_lower``).
+    """
     fade_start = edge_radius
     fade_end = edge_radius + width
 
     eq2 = pixel_lower <= fade_start < pixel_upper
     eq3 = pixel_lower <= fade_end < pixel_upper
+    eq_case1 = eq2 and eq3
+    eq_case4 = (not eq2) and (not eq3) and (fade_start <= pixel_lower) and (fade_end >= pixel_upper)
+    eq_case2 = eq2 and (not eq_case1)
+    eq_case3 = eq3 and (not eq_case1)
 
-    if eq2 and eq3:
+    if eq_case1:
         a0, a1 = fade_start, fade_end
-    elif fade_start < pixel_lower and fade_end > pixel_upper:
+    elif eq_case4:
         a0, a1 = pixel_lower, pixel_upper
-    elif eq2:
+    elif eq_case2:
         a0, a1 = fade_start, pixel_upper
-    elif eq3:
+    elif eq_case3:
         a0, a1 = pixel_lower, fade_end
     else:
         return 0.0
@@ -66,21 +75,28 @@ def _expected_fade_integral_shade_below(
     pixel_upper: float,
     resolution: float,
 ) -> float:
-    """Expected shade_below fade integral for one pixel (shade_sign = -1)."""
-    fade_start = edge_radius - width
-    fade_end = edge_radius
+    """Expected shade_below fade integral for one pixel (shade_sign = -1).
 
-    eq2 = pixel_lower < fade_end <= pixel_upper
-    eq3 = pixel_lower < fade_start <= pixel_upper
+    Mirrors ``compute_edge_fade`` for ``shade_above=False`` (inner fade end is
+    ``edge_radius - width``, matching the implementation's ``fade_end`` name).
+    """
+    inner = edge_radius - width
 
-    if eq2 and eq3:
-        a0, a1 = fade_start, fade_end
-    elif fade_end > pixel_upper and fade_start < pixel_lower:
+    eq2 = pixel_lower < edge_radius <= pixel_upper
+    eq3 = pixel_lower < inner <= pixel_upper
+    eq_case1 = eq2 and eq3
+    eq_case4 = (not eq2) and (not eq3) and (edge_radius >= pixel_upper) and (inner <= pixel_lower)
+    eq_case2 = eq2 and (not eq_case1)
+    eq_case3 = eq3 and (not eq_case1)
+
+    if eq_case1:
+        a0, a1 = inner, edge_radius
+    elif eq_case4:
         a0, a1 = pixel_lower, pixel_upper
-    elif eq2:
-        a0, a1 = pixel_lower, fade_end
-    elif eq3:
-        a0, a1 = fade_start, pixel_upper
+    elif eq_case2:
+        a0, a1 = pixel_lower, edge_radius
+    elif eq_case3:
+        a0, a1 = inner, pixel_upper
     else:
         return 0.0
 

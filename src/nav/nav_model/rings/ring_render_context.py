@@ -60,8 +60,8 @@ class RingsRenderContext:
             Shape matches the extended FOV. Used to compute per-pixel fade
             widths: ``fade_width_km = fade_width_pix * resolutions``.
         fade_width_pix: Fade extent in pixels as configured in the YAML
-            (``fade_width_pix`` key). A scalar; per-pixel km extent is computed
-            at render time from this value and ``resolutions``.
+            (``fade_width_pix`` key). Must be finite and strictly positive; per-pixel
+            km extent is computed at render time from this value and ``resolutions``.
         all_edge_radii: Sorted tuple of ``(radius_km, edge_label)`` pairs for
             all edges of all features that survived filtering. Used by
             ``compute_edge_fade`` for conflict detection and width reduction.
@@ -90,6 +90,8 @@ class RingsRenderContext:
 
         if not isinstance(self.resolutions, np.ndarray):
             raise TypeError('RingsRenderContext.resolutions must be a numpy ndarray')
+        if self.resolutions.ndim != 2:
+            raise ValueError('RingsRenderContext.resolutions must be a 2-D array')
         if not np.issubdtype(self.resolutions.dtype, np.number):
             raise TypeError('RingsRenderContext.resolutions must have a numeric dtype')
         if self.resolutions.size == 0:
@@ -104,10 +106,9 @@ class RingsRenderContext:
         if isinstance(fwp_raw, bool) or not isinstance(fwp_raw, (int, float)):
             raise TypeError('RingsRenderContext.fade_width_pix must be int or float')
         fwp = float(fwp_raw)
-        if not math.isfinite(fwp) or fwp < 0.0:
+        if not math.isfinite(fwp) or fwp <= 0.0:
             raise ValueError(
-                f'RingsRenderContext.fade_width_pix must be finite and non-negative, got '
-                f'{fwp_raw!r}'
+                f'RingsRenderContext.fade_width_pix must be finite and > 0, got {fwp_raw!r}'
             )
 
         if self.logger is None:
@@ -115,3 +116,29 @@ class RingsRenderContext:
 
         if not isinstance(self.all_edge_radii, tuple):
             raise TypeError('RingsRenderContext.all_edge_radii must be a tuple')
+
+        prev_rad: float | None = None
+        for j, pair in enumerate(self.all_edge_radii):
+            if not isinstance(pair, tuple) or len(pair) != 2:
+                raise ValueError(
+                    f'RingsRenderContext.all_edge_radii[{j}] must be (radius_km, label) pair'
+                )
+            rad, label = pair
+            if isinstance(rad, bool) or not isinstance(rad, (int, float)):
+                raise TypeError(f'RingsRenderContext.all_edge_radii[{j}][0] must be numeric')
+            if not math.isfinite(float(rad)) or float(rad) <= 0.0:
+                raise ValueError(
+                    f'RingsRenderContext.all_edge_radii[{j}][0] must be finite and positive, '
+                    f'got {rad!r}'
+                )
+            if not isinstance(label, str) or label.strip() == '':
+                raise ValueError(
+                    f'RingsRenderContext.all_edge_radii[{j}][1] must be a non-empty string'
+                )
+            rad_f = float(rad)
+            if prev_rad is not None and rad_f < prev_rad:
+                raise ValueError(
+                    'RingsRenderContext.all_edge_radii radii must be sorted in non-decreasing '
+                    f'order; index {j} has radius {rad_f} km < previous {prev_rad} km'
+                )
+            prev_rad = rad_f
