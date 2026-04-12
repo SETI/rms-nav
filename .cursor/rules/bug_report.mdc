@@ -19,7 +19,7 @@ Every bug report MUST include:
 ## 2. Severity Scale
 
 | Level | Criteria |
-|----|----|
+|-------|----------|
 | **Critical** | Crash, data corruption, silent wrong results, or security vulnerability. |
 | **High** | Major feature broken or blocking for many users. |
 | **Medium** | Non-critical feature broken or produces degraded results. |
@@ -37,20 +37,17 @@ Every bug report MUST include:
 ## Environment
 - **Python version**: [e.g., 3.12.4]
 - **OS**: [e.g., Ubuntu 24.04, macOS 14.5, Windows 11]
-- **Package version**: [e.g., rms-xxx 0.3.1]
+- **Package version**: [e.g., REPONAME 0.3.1]
 - **Key dependency versions**: [e.g., numpy 2.2.1, scipy 1.14.0]
-- **Installation method**: [e.g., pip install rms-xxx, editable install]
+- **Installation method**: [e.g., pip install REPONAME, editable install]
 
 ## Severity
 [Level] — [Brief justification]
 
 ## Steps to Reproduce
-1. Install: `pip install rms-nav==0.3.1`
+1. Install: `pip install REPONAME==0.3.1`
 2. Run:
-   ```python
-   from nav import SomeClass
-   result = SomeClass.method(args)
-   ```
+   (Example)
 3. Observe the error.
 
 ## Expected Behavior

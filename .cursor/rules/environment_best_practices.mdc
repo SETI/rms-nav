@@ -13,7 +13,7 @@ alwaysApply: true
 ## 2. CI/CD
 
 - ALWAYS use **GitHub Actions** for continuous integration and publishing.
-- Every PR MUST pass lint (`ruff`), type-check (`mypy`), and test (`pytest`) jobs before merge.
+- Every PR MUST pass lint (`ruff`), type-check (`mypy`), test (`pytest`), Markdown lint (`PyMarkdown`), and documentation build (`sphinx-build`) jobs before merge.
 - Pin action versions to a major tag (e.g., `actions/checkout@v6`) to balance stability and security updates.
 - Publishing to PyPI is triggered by creating a GitHub Release from a version tag on `main`.
 
@@ -31,7 +31,7 @@ The repository includes `.vscode/settings.json` so all contributors get consiste
 - **Indent**: 4 spaces (no tabs).
 - **Trailing whitespace**: Trimmed on save.
 - **Final newline**: Exactly one newline at end of file; excess trailing blank lines removed on save.
-- **Line length**: Rulers at 80 and 90 characters (max 100 enforced by Ruff).
+- **Line length**: Rulers at 80, 90, and 100 characters (max 100 enforced by Ruff).
 
 ## 5. Secrets and Configuration
 

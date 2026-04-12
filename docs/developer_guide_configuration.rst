@@ -22,3 +22,6 @@ The configuration system uses a hierarchical structure with sections for:
 * Model-specific settings
 * Technique-specific settings
 * Instrument-specific settings
+
+Planetary ring YAML (planet sections, features, fade parameters, and validation
+rules) is specified in :doc:`developer_guide_navigation_models_rings`.

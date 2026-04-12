@@ -10,7 +10,11 @@ description: Standards for Python library documentation using Sphinx, ReadTheDoc
 - Use **Sphinx** for all project documentation, hosted on **ReadTheDocs**.
 - After any code or doc change, run `sphinx-build` on the full documentation tree and fix all warnings and errors before delivering.
 
-## 2. Required Documentation
+## 2. Documentation Standard
+
+- NEVER use unicode characters such as smart quotes, em-dashes, or arrows in source code files (such as .py) in docstrings or comments. They are acceptable in .rst and .md files. They are also acceptable in source code strings when needed to present special characters to the user such as degree signs or arrows at runtime.
+
+## 3. Required Documentation
 
 | Document | Contents | Keep up-to-date? |
 |----------|----------|-------------------|
@@ -20,14 +24,14 @@ description: Standards for Python library documentation using Sphinx, ReadTheDoc
 | **Usage examples** | Common workflows with code snippets and expected output. | Yes |
 | **README** | Project summary, PyPI/ReadTheDocs badges, quickstart, and links to full docs. | Yes |
 
-## 3. Docstrings
+## 4. Docstrings
 
 - EVERY class, method, function, and module MUST have a descriptive docstring.
 - Follow **PEP 257** using **Google style** with `Parameters:` (not `Args:`).
 - Include `Returns:`, `Raises:`, and behavioral notes sufficient to write a black-box test.
 - Wrap docstring text to **90** characters.
 
-## 4. Change Discipline
+## 5. Change Discipline
 
 - Any code change MUST update the relevant docstrings and the README if affected.
 - NEVER leave stale or contradictory documentation. If a feature is removed, remove its docs.

@@ -51,6 +51,7 @@ Configuration files use YAML format and are organized into sections:
      pds3_holdings_root: /path/to/pds3
 
    general:
+     log_level_model_rings: DEBUG
      log_level_nav_correlate_all: DEBUG
 
    offset:

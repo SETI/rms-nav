@@ -46,7 +46,7 @@ jobs:
       - name: PyMarkdown
         run: |
           pymarkdown scan docs/ .cursor/ README.md CONTRIBUTING.md
-  
+
   test:
     name: Test rms-nav
     runs-on: ${{ matrix.os }}
@@ -67,6 +67,13 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      # PyQt6 loads EGL at import time; ubuntu-latest images omit it by default.
+      - name: Install EGL for PyQt6 (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1
+
       - name: Install dependencies
         run: |
           python -m pip install -e ".[dev]"
@@ -78,7 +85,10 @@ jobs:
           export OOPS_RESOURCES=https://storage.googleapis.com/rms-node-oops-resources
           export UCAC4_PATH=https://storage.googleapis.com/rms-node-star-catalogs/UCAC4
           export YBSC_PATH=https://storage.googleapis.com/rms-node-star-catalogs/YBSC
-          python -m pytest --cov -n auto
+          # loadfile keeps each test file on one xdist worker; PyQt6 + default load
+          # scheduling has caused worker crashes when tests from the same file ran
+          # in different processes.
+          python -m pytest --cov -n auto --dist=loadfile
 
       - name: Print coverage report
         run: |

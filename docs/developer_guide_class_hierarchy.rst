@@ -188,6 +188,77 @@ The following Mermaid diagram shows the complete class hierarchy of the RMS-NAV 
           +create_model(always_create_model=False, never_create_model=False, create_annotations=True)
       }
 
+      class RingFeatureType {
+          <<enumeration>>
+          GAP
+          RINGLET
+      }
+
+      class RingBaseOrbitMode {
+          <<frozen dataclass>>
+          +a: float
+          +ae: float
+          +long_peri: float
+          +rate_peri: float
+          +rms: float
+      }
+
+      class RingPerturbationMode {
+          <<frozen dataclass>>
+          +mode_num: int
+          +amplitude: float
+          +phase: float
+          +pattern_speed: float
+      }
+
+      class RingFeature {
+          <<frozen dataclass>>
+          +key: str
+          +name: str | None
+          +feature_type: RingFeatureType
+          +inner_edge: RingEdgeData | None
+          +outer_edge: RingEdgeData | None
+          +is_visible_at(obs_time_et) bool
+          +is_in_radius_range(min_r, max_r) bool
+          +uncertainty: float
+          +all_base_radii() Sequence
+          +from_config(key, data)$ RingFeature
+          +render(context) list[RingRenderResult]
+      }
+
+      class RingEdgeData {
+          <<frozen dataclass>>
+          +base_orbit: RingBaseOrbitMode
+          +perturbations: tuple[RingPerturbationMode, ...]
+          +base_radius: float
+          +rms: float
+          +radial_perturbations() tuple
+          +parsed_modes_for_backplane() list
+      }
+
+      class RingFeatureFilter {
+          +__init__(obs_time_et, min_radius, max_radius, ..., logger)
+          +filter(features) list[RingFeature]
+      }
+
+      class RingsRenderContext {
+          <<frozen dataclass>>
+          +obs
+          +ring_target: str
+          +epoch: float
+          +resolutions: ndarray
+          +fade_width_pix: float
+          +all_edge_radii: tuple
+          +logger
+      }
+
+      class RingRenderResult {
+          +model_img: ndarray
+          +model_mask: ndarray
+          +uncertainty: float
+          +edge_info_list: list
+      }
+
       class NavModelTitan {
           +__init__(name, obs, *, config=None)
           +create_model(always_create_model=False, never_create_model=False, create_annotations=True)
@@ -288,6 +359,17 @@ The following Mermaid diagram shows the complete class hierarchy of the RMS-NAV 
       NavModelRingsBase <|-- NavModelRings
       NavModelRingsBase <|-- NavModelRingsSimulated
 
+      RingFeature --> RingFeatureType : feature_type
+      RingEdgeData *-- RingBaseOrbitMode : base_orbit
+      RingEdgeData "1" o-- "0..*" RingPerturbationMode : perturbations
+
+      NavModelRings --> RingFeature : retrieves & renders
+      RingFeature --> RingEdgeData : inner_edge / outer_edge
+      NavModelRings --> RingFeatureFilter : constructs
+      RingFeature ..> RingFeatureFilter : filter pipeline
+      RingFeature --> RingsRenderContext : render(context)
+      RingFeature --> RingRenderResult : render() returns
+
       NavTechnique <|-- NavTechniqueCorrelateAll
       NavTechnique <|-- NavTechniqueManual
       NavTechnique <|-- NavTechniqueTitan
@@ -329,7 +411,8 @@ measures (``uncertainty``, ``blur_amount``, ``confidence``), optional packed
 include complete classes for stars, bodies (including a simulated variant), rings
 (including a base class with shared functionality and subclasses for real and
 simulated rings), and Titan, plus a combined model used to merge the nearest
-visible model at each pixel.
+visible model at each pixel. :doc:`developer_guide_navigation_models` covers each
+navigation model family.
 
 NavTechnique
 ------------
