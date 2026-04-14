@@ -234,7 +234,74 @@ class NavTechniqueCorrelateAll(NavTechnique):
                 )
                 star.conflicts = 'REFINEMENT FAILED'
                 continue
-            opt_v, opt_u, _opt_metadata = ret
+            opt_v, opt_u, opt_metadata = ret
+            reduced_chi2 = opt_metadata['reduced_chi2']
+            peak_snr = opt_metadata['peak_snr']
+            x_err = opt_metadata['x_err']
+            y_err = opt_metadata['y_err']
+            scale = opt_metadata['scale']
+            noise_rms = opt_metadata['noise_rms']
+            max_chi2 = self.config.offset.star_refinement_max_reduced_chi2
+            min_chi2 = self.config.offset.star_refinement_min_reduced_chi2
+            min_snr = self.config.offset.star_refinement_min_peak_snr
+            max_pos_err = self.config.offset.star_refinement_max_pos_err
+            if self.config.offset.log_star_refinement_detail:
+                self.logger.debug(
+                    f'Star {star.pretty_name:9s} VMAG {star.vmag:6.3f} '
+                    f'found at U {opt_u:8.3f} V {opt_v:8.3f} | '
+                    f'scale {scale:.4f} noise {noise_rms:.4f} '
+                    f'[limit: scale>noise] | '
+                    f'chi2 {reduced_chi2:.3f} '
+                    f'[limit: {min_chi2:.1f}<chi2<{max_chi2:.1f}] | '
+                    f'snr {peak_snr:.2f} '
+                    f'[limit: >{min_snr:.1f}] | '
+                    f'x_err {x_err:.4f} y_err {y_err:.4f} '
+                    f'[limit: <{max_pos_err:.2f}]'
+                )
+            # Scale at or below the noise RMS means no real signal is present.
+            if scale <= noise_rms:
+                self.logger.debug(
+                    f'Star {star.pretty_name:9s} VMAG {star.vmag:6.3f} '
+                    f'U {star_u:8.3f}, V {star_v:8.3f} scale {scale:.4f} '
+                    f'at or below noise floor {noise_rms:.4f}'
+                )
+                star.conflicts = 'REFINEMENT NO STAR'
+                continue
+            # chi2 near zero means the background polynomial has consumed the signal;
+            # chi2 >> 1 means the model cannot fit the data at all.
+            if reduced_chi2 < min_chi2:
+                self.logger.debug(
+                    f'Star {star.pretty_name:9s} VMAG {star.vmag:6.3f} '
+                    f'U {star_u:8.3f}, V {star_v:8.3f} '
+                    f'reduced_chi2 {reduced_chi2:.3f} below floor {min_chi2:.2f} '
+                    f'(background overfitting)'
+                )
+                star.conflicts = 'REFINEMENT CHI2 LOW'
+                continue
+            if reduced_chi2 > max_chi2:
+                self.logger.debug(
+                    f'Star {star.pretty_name:9s} VMAG {star.vmag:6.3f} '
+                    f'U {star_u:8.3f}, V {star_v:8.3f} '
+                    f'reduced_chi2 {reduced_chi2:.2f} exceeds limit {max_chi2:.2f}'
+                )
+                star.conflicts = 'REFINEMENT CHI2'
+                continue
+            if peak_snr < min_snr:
+                self.logger.debug(
+                    f'Star {star.pretty_name:9s} VMAG {star.vmag:6.3f} '
+                    f'U {star_u:8.3f}, V {star_v:8.3f} '
+                    f'peak_snr {peak_snr:.2f} below limit {min_snr:.2f}'
+                )
+                star.conflicts = 'REFINEMENT SNR'
+                continue
+            if x_err > max_pos_err or y_err > max_pos_err:
+                self.logger.debug(
+                    f'Star {star.pretty_name:9s} VMAG {star.vmag:6.3f} '
+                    f'U {star_u:8.3f}, V {star_v:8.3f} '
+                    f'pos err ({x_err:.4f}, {y_err:.4f}) exceeds limit {max_pos_err:.4f}'
+                )
+                star.conflicts = 'REFINEMENT POS_ERR'
+                continue
             self.logger.debug(
                 f'Star {star.pretty_name:9s} VMAG {star.vmag:6.3f} '
                 f'Searched at {star_u:8.3f}, {star_v:8.3f} '

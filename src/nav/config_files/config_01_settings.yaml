@@ -24,6 +24,11 @@ offset:
   star_refinement_enabled: true
   star_refinement_nsigma: 3
   star_refinement_search_limit: [2.5, 2.5]
+  star_refinement_max_reduced_chi2: 10.0  # reject fits with poor goodness-of-fit
+  star_refinement_min_reduced_chi2: 0.1   # reject fits where background overfits the signal (chi2 near 0)
+  star_refinement_min_peak_snr: 5.0       # reject fits below this amplitude SNR
+  star_refinement_max_pos_err: 0.5        # reject if 1-sigma position uncertainty exceeds this (pixels)
+  log_star_refinement_detail: false       # log all fit metrics and thresholds per star for rejection debugging
   correlation_fft_upsample_factor: 128
   default_gaussian_blur: 0.25
   maximum_blur: 100.0
