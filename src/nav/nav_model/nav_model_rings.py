@@ -15,13 +15,24 @@ It is a thin coordinator that:
 5. Validates no two features have overlapping date ranges over the same radial
    region (``validate_no_date_overlaps``).
 6. Filters through the four-pass ``RingFeatureFilter`` pipeline.
-7. Renders each surviving feature via ``feature.render(context)`` and wraps
-   each result in a ``NavModelResult`` with annotations.
+7. Renders each surviving feature via ``feature.render(context)``.
+8. Optionally removes planet-shadow pixels from each rendered result when
+   ``rings.remove_planet_shadow`` is ``True`` (shadow computed once via
+   ``obs.ext_bp.where_inside_shadow``).
+9. Wraps each result in a ``NavModelResult`` with annotations.
 
 **Design principle**: This module contains no physics, no math, and no rendering
 logic. All of that lives in the ``rings`` subpackage (``ring_feature``,
 ``ring_math``, ``ring_filter``). The orchestrator's only job is to wire together
 configuration retrieval, backplane access, and ``NavModelResult`` construction.
+
+**Top-level rings keys** (under ``rings``):
+
+- ``remove_planet_shadow``: Boolean (default ``False``). When ``True``, pixels
+  that lie inside the nearest planet's own shadow are zeroed out of each
+  rendered feature's model image and excluded from its model mask before the
+  ``NavModelResult`` is constructed.  A warning is logged and shadow removal is
+  skipped if the backplane call fails.
 
 **Planet ring block keys** (under ``rings.ring_features.<PLANET>``):
 
@@ -199,6 +210,11 @@ class NavModelRings(NavModelRingsBase):
                 required numeric key is missing, numeric parameters are out of range,
                 a feature entry is not a dict, or ``RingFeature.from_config`` /
                 ``validate_no_date_overlaps`` rejects the configuration.
+
+        Note:
+            Planet-shadow removal (``rings.remove_planet_shadow``) is applied
+            after rendering.  Failures in the shadow backplane call are logged as
+            warnings and do not abort model creation.
         """
         obs = self.obs
         planet = obs.closest_planet
@@ -397,6 +413,26 @@ class NavModelRings(NavModelRingsBase):
         distance_arr = bp_distance.mvals.filled(math.inf)
 
         # -----------------------------------------------------------------------
+        # Planet shadow mask (computed once; applied to every rendered feature)
+        # -----------------------------------------------------------------------
+        shadow_mask: NDArrayBoolType | None = None
+        if bool(self._config.rings.get('remove_planet_shadow', False)):
+            try:
+                raw_shadow = obs.ext_bp.where_inside_shadow(ring_target, planet.lower())
+                shadow_mask = raw_shadow.mvals.filled(False).astype(bool)
+                self._logger.info(
+                    'Planet shadow removal: %d pixel(s) inside %s shadow will be masked',
+                    int(np.sum(shadow_mask)),
+                    planet,
+                )
+            except Exception:
+                self._logger.warning(
+                    'Failed to compute planet shadow for %s; shadow removal skipped',
+                    planet,
+                    exc_info=True,
+                )
+
+        # -----------------------------------------------------------------------
         # Render each surviving feature
         # -----------------------------------------------------------------------
         render_context = RingsRenderContext(
@@ -424,6 +460,10 @@ class NavModelRings(NavModelRingsBase):
             for render_result in render_results:
                 feat_model = render_result.model_img
                 feat_mask = render_result.model_mask
+
+                if shadow_mask is not None:
+                    feat_model = np.where(shadow_mask, 0.0, feat_model)
+                    feat_mask = feat_mask & ~shadow_mask
 
                 range_arr = obs.make_extfov_zeros()
                 range_arr[:, :] = distance_arr
