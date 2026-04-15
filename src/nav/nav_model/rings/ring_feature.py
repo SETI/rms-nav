@@ -165,6 +165,27 @@ class RingFeature:
                 return True
         return False
 
+    @property
+    def max_extent_radius(self) -> float:
+        """Maximum possible radius (a + ae) across all present edges.
+
+        Returns the outermost radius the feature could occupy at any longitude,
+        accounting for eccentricity. Used for a fast pre-filter check: if the
+        minimum observed ring radius in the FOV exceeds this value, none of the
+        feature can appear in the image regardless of orientation.
+
+        Returns:
+            Maximum of (base_orbit.a + base_orbit.ae) for all present edges.
+        """
+        extents: list[float] = []
+        if self.inner_edge is not None:
+            bo = self.inner_edge.base_orbit
+            extents.append(bo.a + bo.ae)
+        if self.outer_edge is not None:
+            bo = self.outer_edge.base_orbit
+            extents.append(bo.a + bo.ae)
+        return max(extents)
+
     def all_base_radii(self) -> list[tuple[float, str]]:
         """Return (radius_km, edge_label) pairs for all present edges.
 

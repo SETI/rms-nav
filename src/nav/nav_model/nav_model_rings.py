@@ -14,6 +14,9 @@ It is a thin coordinator that:
    raising ``ValueError`` on malformed feature entries.
 5. Validates no two features have overlapping date ranges over the same radial
    region (``validate_no_date_overlaps``).
+5a. Performs a fast extent check: if the minimum radius in the FOV exceeds the
+    maximum ``a + ae`` across all features, no ring can be visible and the model
+    returns before the expensive resolutions backplane and filter pipeline.
 6. Filters through the four-pass ``RingFeatureFilter`` pipeline.
 7. Renders each surviving feature via ``feature.render(context)``.
 8. Optionally removes planet-shadow pixels from each rendered result when
@@ -334,6 +337,25 @@ class NavModelRings(NavModelRingsBase):
 
         validate_no_date_overlaps(features)
         self._logger.info('Retrieved %d ring feature(s) for %s', len(features), planet)
+
+        # -----------------------------------------------------------------------
+        # Quick extent check: bail before expensive backplane calls if the entire
+        # FOV is beyond the outermost possible ring location.  Each edge can reach
+        # at most (a + ae) km from the planet centre; if even the closest visible
+        # pixel (min_radius) is farther out than every feature's maximum extent,
+        # no ring can appear in the image.
+        # -----------------------------------------------------------------------
+        max_feature_extent = max(f.max_extent_radius for f in features)
+        if min_radius > max_feature_extent:
+            self._logger.info(
+                'No ring features possible: FOV min radius %.2f km exceeds '
+                'max feature extent %.2f km',
+                min_radius,
+                max_feature_extent,
+            )
+            if always_create_model:
+                self._models.append(self._create_empty_model_result())
+            return
 
         # -----------------------------------------------------------------------
         # Build resolutions backplane and resolution-at-radius lookup
