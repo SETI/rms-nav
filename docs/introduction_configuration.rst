@@ -17,14 +17,22 @@ overriding earlier ones:
    ``src/nav/config_files/`` directory are loaded in alphabetical order. These
    files provide default settings for:
 
-   * ``config_01_settings.yaml``: General settings, offset parameters, and body
-     defaults
-   * ``config_10_satellites.yaml``: Satellite definitions for planets
-   * ``config_20_saturn_rings.yaml``: Saturn ring system parameters
-   * ``config_30_coiss.yaml``: Cassini ISS instrument-specific settings
-   * ``config_31_gossi.yaml``: Galileo SSI instrument-specific settings
-   * ``config_32_nhlorri.yaml``: New Horizons LORRI instrument-specific settings
-   * ``config_33_vgiss.yaml``: Voyager ISS instrument-specific settings
+   * ``config_01_general.yaml``: General settings including all logging levels
+   * ``config_02_offset.yaml``: Offset-finding and star refinement parameters
+   * ``config_03_stars.yaml``: Star-model and ring-occlusion parameters
+   * ``config_04_bodies.yaml``: Body (planet/moon) rendering parameters
+   * ``config_05_rings.yaml``: Ring model parameters
+   * ``config_06_titan.yaml``: Titan-specific navigation parameters
+   * ``config_07_bootstrap.yaml``: Bootstrap navigation parameters
+   * ``config_10_satellites.yaml``: Satellite definitions for each planet
+   * ``config_20_jupiter_rings.yaml``: Jupiter ring system parameters
+   * ``config_21_saturn_rings.yaml``: Saturn ring system parameters
+   * ``config_22_uranus_rings.yaml``: Uranus ring system parameters
+   * ``config_23_neptune_rings.yaml``: Neptune ring system parameters
+   * ``config_30_inst_coiss.yaml``: Cassini ISS instrument-specific settings
+   * ``config_31_inst_gossi.yaml``: Galileo SSI instrument-specific settings
+   * ``config_32_inst_nhlorri.yaml``: New Horizons LORRI instrument-specific settings
+   * ``config_33_inst_vgiss.yaml``: Voyager ISS instrument-specific settings
    * ``config_40_sim.yaml``: Simulated image settings
    * ``config_90_backplanes.yaml``: Backplane generation settings
    * ``config_95_pds4.yaml``: PDS4 metadata and export settings for generated
@@ -64,6 +72,56 @@ Configuration files use YAML format and are organized into sections:
 
 Each section can contain multiple settings. When multiple configuration files
 define the same setting, the value from the last file loaded takes precedence.
+
+Logging Configuration
+---------------------
+
+All logging levels are set in the ``general`` section of ``config_01_general.yaml``.
+Each key accepts a standard log-level string: ``DEBUG``, ``INFO``, ``WARNING``,
+``ERROR``, or ``CRITICAL``.
+
+**Main logger** (``nav_offset`` -- top-level program events):
+
+* ``general.log_level_main_console`` (default: ``INFO``): Level for output written
+  to stdout while the program runs.
+* ``general.log_level_main_file`` (default: ``INFO``): Level for the timestamped
+  logfile written to ``$NAV_RESULTS_ROOT/logs/nav_offset/``.
+
+**Image logger** (``nav_image`` -- per-image processing events, active only while
+an image is being processed):
+
+* ``general.log_level_image_console`` (default: ``INFO``): Level for output written
+  to stdout during image processing.
+* ``general.log_level_image_file`` (default: ``INFO``): Level for the per-image
+  logfile written to ``$NAV_RESULTS_ROOT/logs/{results_path_stub}.log``.
+
+**Navigation model loggers**:
+
+* ``general.log_level_model_bodies`` (default: ``INFO``): Logging level for the
+  body (planet and moon) navigation model.
+* ``general.log_level_model_stars`` (default: ``INFO``): Logging level for the
+  star navigation model.
+* ``general.log_level_model_rings`` (default: ``INFO``): Logging level for the
+  ring navigation model.
+
+**Navigation technique loggers**:
+
+* ``general.log_level_nav_correlate_all`` (default: ``INFO``): Logging level for
+  the ``correlate_all`` technique, including star refinement.
+
+**Annotation**:
+
+* ``general.log_level_annotate`` (default: ``ERROR``): Logging level for the
+  image annotation step.
+
+Example -- enable verbose output for star and ring models while keeping other
+components at the default level:
+
+.. code-block:: yaml
+
+   general:
+     log_level_model_stars: DEBUG
+     log_level_model_rings: DEBUG
 
 Creating a User Configuration File
 ===================================
@@ -129,6 +187,27 @@ Navigation Options
 * ``--nav-techniques LIST``: Overrides any default technique selection. This
   is a comma-separated list of navigation techniques to apply. Valid entries
   include ``correlate_all`` and ``manual``.
+
+Logging Options
+---------------
+
+All four logging-level options override the corresponding ``general.*`` config
+key for that run. Each accepts a standard log-level string: ``DEBUG``, ``INFO``,
+``WARNING``, ``ERROR``, or ``CRITICAL``.
+
+* ``--log-level-main-console LEVEL``: Override ``general.log_level_main_console``
+  -- the level at which the main logger writes to stdout.
+
+* ``--log-level-main-file LEVEL``: Override ``general.log_level_main_file``
+  -- the level at which the main logger writes to its logfile under
+  ``$NAV_RESULTS_ROOT/logs/nav_offset/``.
+
+* ``--log-level-image-console LEVEL``: Override ``general.log_level_image_console``
+  -- the level at which the image logger writes to stdout during image processing.
+
+* ``--log-level-image-file LEVEL``: Override ``general.log_level_image_file``
+  -- the level at which the image logger writes to the per-image logfile under
+  ``$NAV_RESULTS_ROOT/logs/{results_path_stub}.log``.
 
 These command-line options provide the highest priority override mechanism,
 taking precedence over all configuration files, including those specified with

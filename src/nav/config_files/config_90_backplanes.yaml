@@ -1,7 +1,3 @@
-########################
-# BACKPLANES SETTINGS  #
-########################
-
 backplanes:
   bodies:
     - name: body_longitude

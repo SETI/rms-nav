@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 ################################################################################
-# nav_main_offset.py
+# nav_offset.py
 #
 # This is the main top-level driver for offset finding. It enumerates one or
 # more images either from scanning an index file, a holdings directory,
@@ -15,7 +15,6 @@ import sys
 import time
 from typing import cast
 
-import pdslogger
 from filecache import FCPath, FileCache
 
 # Make CLI runnable from source tree with
@@ -25,19 +24,20 @@ sys.path.insert(0, package_source_path)
 
 from nav.config import (
     DEFAULT_CONFIG,
-    DEFAULT_LOGGER,
+    MAIN_LOGGER,
     get_nav_results_root,
     load_default_and_user_config,
+    setup_logging,
 )
 from nav.dataset import dataset_name_to_class, dataset_name_to_inst_name, dataset_names
 from nav.dataset.dataset import DataSet
 from nav.navigate_image_files import navigate_image_files
 from nav.obs import inst_name_to_obs_class
 from nav.support.file import json_as_string
+from nav.support.misc import log_run_environment
 
 DATASET: DataSet | None = None
 DATASET_NAME: str | None = None
-MAIN_LOGGER: pdslogger.PdsLogger | None = None
 NUM_FILES_PROCESSED: int = 0
 NUM_FILES_SKIPPED: int = 0
 NUM_FILES_COMPLETED: int = 0
@@ -155,6 +155,43 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     # Add all the arguments related to selecting files
     DATASET.add_selection_arguments(cmdparser)
 
+    # Logging arguments
+    logging_group = cmdparser.add_argument_group('Logging')
+    logging_group.add_argument(
+        '--log-level-main-console',
+        type=str,
+        default=None,
+        metavar='LEVEL',
+        help="""Log level for main logger console output to stdout (DEBUG, INFO, WARNING,
+        ERROR, CRITICAL). Defaults to config general.log_level_main_console or INFO.""",
+    )
+    logging_group.add_argument(
+        '--log-level-main-file',
+        type=str,
+        default=None,
+        metavar='LEVEL',
+        help="""Log level for the main logfile written to
+        ${NAV_RESULTS_ROOT}/logs/nav_offset/ (DEBUG, INFO, WARNING, ERROR, CRITICAL).
+        Defaults to config general.log_level_main_file or INFO.""",
+    )
+    logging_group.add_argument(
+        '--log-level-image-console',
+        type=str,
+        default=None,
+        metavar='LEVEL',
+        help="""Log level for image logger console output to stdout (DEBUG, INFO, WARNING,
+        ERROR, CRITICAL). Defaults to config general.log_level_image_console or INFO.""",
+    )
+    logging_group.add_argument(
+        '--log-level-image-file',
+        type=str,
+        default=None,
+        metavar='LEVEL',
+        help="""Log level for per-image log files written to
+        ${NAV_RESULTS_ROOT}/logs/{results_path_stub}.log (DEBUG, INFO, WARNING, ERROR,
+        CRITICAL). Defaults to config general.log_level_image_file or INFO.""",
+    )
+
     # Misc arguments
     misc_group = cmdparser.add_argument_group('Miscellaneous')
     misc_group.add_argument(
@@ -170,7 +207,6 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
 
 
 def exit_processing() -> None:
-    assert MAIN_LOGGER is not None
     MAIN_LOGGER.info('Total files processed %d', NUM_FILES_PROCESSED)
     MAIN_LOGGER.info('Total files skipped %d', NUM_FILES_SKIPPED)
     MAIN_LOGGER.info('Total elapsed time %.2f sec', time.time() - START_TIME)
@@ -200,29 +236,7 @@ def main() -> None:
     nav_results_root_str = get_nav_results_root(arguments, DEFAULT_CONFIG)
     nav_results_root = FileCache(None).new_path(nav_results_root_str)
 
-    # main_log_path = arguments.main_logfile
-    # main_log_path_local = main_log_path
-    # if (arguments.results_in_s3 and
-    #     arguments.main_loglevel.upper() != 'NONE' and
-    #     main_log_path is None):
-    #     main_log_path_local = '/tmp/mainlog.txt' # For CloudWatch logs
-    #     main_log_datetime = datetime.datetime.now().isoformat()[:-7]
-    #     main_log_datetime = main_log_datetime.replace(':','-')
-    #     main_log_path = 'logs/'+MAIN_LOG_NAME+'/'+main_log_datetime+'-'
-    #     if nav.aws.AWS_HOST_INSTANCE_ID is not None:
-    #         main_log_path += nav.aws.AWS_HOST_INSTANCE_ID
-    #     else:
-    #         main_log_path += '-'+str(os.getpid())
-    #     main_log_path += '.log'
-
-    global MAIN_LOGGER
-    MAIN_LOGGER = DEFAULT_LOGGER
-    # main_logger, image_logger = nav.logging_setup.setup_main_logging(
-    #             MAIN_LOG_NAME, arguments.main_logfile_level,
-    #             arguments.main_console_level, main_log_path_local,
-    #             arguments.image_logfile_level, arguments.image_console_level)
-
-    # image_loglevel = nav.logging_setup.decode_level(arguments.image_logfile_level)
+    setup_logging(arguments, DEFAULT_CONFIG, nav_results_root_str)
 
     global START_TIME, NUM_FILES_PROCESSED, NUM_FILES_SKIPPED, NUM_FILES_COMPLETED
     START_TIME = time.time()
@@ -230,21 +244,11 @@ def main() -> None:
     NUM_FILES_SKIPPED = 0
     NUM_FILES_COMPLETED = 0
 
-    # main_logger.info('**********************************')
-    # main_logger.info('*** BEGINNING MAIN OFFSET PASS ***')
-    # main_logger.info('**********************************')
-    # main_logger.info('')
-    # main_logger.info('Host Local Name: %s', nav.aws.AWS_HOST_FQDN)
-    # if nav.aws.AWS_ON_EC2_INSTANCE:
-    #     main_logger.info('Host Public Name: %s (%s) in %s', nav.aws.AWS_HOST_PUBLIC_NAME,
-    #                      nav.aws.AWS_HOST_PUBLIC_IPV4, nav.aws.AWS_HOST_ZONE)
-    #     main_logger.info('Host AMI ID: %s', nav.aws.AWS_HOST_AMI_ID)
-    #     main_logger.info('Host Instance Type: %s', nav.aws.AWS_HOST_INSTANCE_TYPE)
-    #     main_logger.info('Host Instance ID: %s', nav.aws.AWS_HOST_INSTANCE_ID)
-    # main_logger.info('GIT Status:   %s', nav.misc.current_git_version())
-    # main_logger.info('')
-    # main_logger.info('Command line: %s', ' '.join(command_list))
-    # main_logger.info('')
+    MAIN_LOGGER.info('**********************************')
+    MAIN_LOGGER.info('*** BEGINNING MAIN OFFSET PASS ***')
+    MAIN_LOGGER.info('**********************************')
+    MAIN_LOGGER.info('')
+    log_run_environment(MAIN_LOGGER, command_list)
 
     try:
         INST_NAME = dataset_name_to_inst_name(cast(str, DATASET_NAME))
@@ -306,6 +310,10 @@ def main() -> None:
             )
             continue
 
+        MAIN_LOGGER.info(
+            'Processing: %s',
+            ', '.join(f.image_file_url.as_posix() for f in imagefiles.image_files),
+        )
         if navigate_image_files(
             obs_class,
             imagefiles,
@@ -313,6 +321,7 @@ def main() -> None:
             nav_models=nav_models,
             nav_techniques=nav_techniques,
             write_output_files=not arguments.no_write_output_files,
+            log_arguments=arguments,
         ):
             NUM_FILES_PROCESSED += 1
         else:

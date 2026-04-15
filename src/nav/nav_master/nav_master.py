@@ -250,33 +250,34 @@ class NavMaster(NavBase):
         ]
         large_bodies_by_range.sort(key=lambda x: x[1]['range'])
 
-        logger.info('Closest planet: %s', obs.closest_planet)
-        logger.info(
-            'Large body inventory by increasing range: %s',
-            ', '.join([x[0] for x in large_bodies_by_range]),
-        )
+        with logger.open('CREATE BODY MODELS'):
+            logger.info('Closest planet: %s', obs.closest_planet)
+            logger.info(
+                'Large body inventory by increasing range: %s',
+                ', '.join([x[0] for x in large_bodies_by_range]),
+            )
 
-        self._body_models = []
-        self._metadata['models']['body_models'] = {}
+            self._body_models = []
+            self._metadata['models']['body_models'] = {}
 
-        for body_name, inventory in large_bodies_by_range:
-            model_name = f'body:{body_name.upper()}'
-            if not any(
-                fnmatch.fnmatch(model_name.lower(), x.lower()) for x in self._nav_models_to_use
-            ):
-                continue
-            if obs.is_simulated:
-                sim_params = obs.sim_body_models[body_name]
-                body_model: NavModelBodyBase = NavModelBodySimulated(
-                    model_name, obs, body_name, sim_params, config=config
-                )
-            else:
-                body_model = NavModelBody(
-                    model_name, obs, body_name, inventory=inventory, config=config
-                )
-            body_model.create_model()
-            self._body_models.append(body_model)
-            self._metadata['models']['body_models'][body_name] = body_model.metadata
+            for body_name, inventory in large_bodies_by_range:
+                model_name = f'body:{body_name.upper()}'
+                if not any(
+                    fnmatch.fnmatch(model_name.lower(), x.lower()) for x in self._nav_models_to_use
+                ):
+                    continue
+                if obs.is_simulated:
+                    sim_params = obs.sim_body_models[body_name]
+                    body_model: NavModelBodyBase = NavModelBodySimulated(
+                        model_name, obs, body_name, sim_params, config=config
+                    )
+                else:
+                    body_model = NavModelBody(
+                        model_name, obs, body_name, inventory=inventory, config=config
+                    )
+                body_model.create_model()
+                self._body_models.append(body_model)
+                self._metadata['models']['body_models'][body_name] = body_model.metadata
 
     def compute_ring_models(self) -> None:
         """Creates navigation models for planetary rings in the observation.

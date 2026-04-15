@@ -173,6 +173,29 @@ Miscellaneous
 
 * ``--profile`` / ``--no-profile``: enable or disable runtime profiling (default is disabled).
 
+Logging options
+^^^^^^^^^^^^^^^
+
+All four options accept a standard log-level string (``DEBUG``, ``INFO``, ``WARNING``,
+``ERROR``, or ``CRITICAL``) and override the corresponding ``general.*`` configuration
+key for that run. For full details and the config-file equivalents see
+:doc:`introduction_configuration`.
+
+* ``--log-level-main-console LEVEL``: stdout level for the main logger (overrides
+  ``general.log_level_main_console``; default ``INFO``).
+
+* ``--log-level-main-file LEVEL``: logfile level for the main logger written to
+  ``$NAV_RESULTS_ROOT/logs/nav_offset/`` (overrides ``general.log_level_main_file``;
+  default ``INFO``).
+
+* ``--log-level-image-console LEVEL``: stdout level for the image logger, active
+  only while each image is being processed (overrides
+  ``general.log_level_image_console``; default ``INFO``).
+
+* ``--log-level-image-file LEVEL``: level for the per-image logfile written to
+  ``$NAV_RESULTS_ROOT/logs/{results_path_stub}.log`` (overrides
+  ``general.log_level_image_file``; default ``INFO``).
+
 Example Commands
 ----------------
 
@@ -312,7 +335,7 @@ The ``correlate_all`` technique performs automated navigation by correlating the
 
 **Configuration Options:**
 
-The following configuration options in ``config_01_settings.yaml`` control the behavior of ``correlate_all``:
+The following configuration options in ``config_01_general.yaml`` control the behavior of ``correlate_all``:
 
 * ``offset.correlation_fft_upsample_factor`` (default: 128): The upsampling factor used in the FFT-based correlation. Higher values provide finer sub-pixel resolution but increase computation time.
 
