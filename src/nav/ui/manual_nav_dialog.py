@@ -4,6 +4,9 @@ import math
 from typing import Any, cast
 
 import numpy as np
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
+from matplotlib.figure import Figure
+from matplotlib.patches import Circle
 from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtGui import QImage, QMouseEvent, QPainter, QPixmap, QWheelEvent
 from PyQt6.QtWidgets import (
@@ -90,6 +93,100 @@ def _bilinear_sample_periodic(arr: NDArrayFloatType, y: float, x: float) -> floa
     return float(
         v00 * (1 - dx) * (1 - dy) + v01 * dx * (1 - dy) + v10 * (1 - dx) * dy + v11 * dx * dy
     )
+
+
+class _CorrMapDialog(QDialog):
+    """Modal popup showing the full 2-D normalized cross-correlation (NCC) surface.
+
+    The surface is rearranged via ``np.fft.fftshift`` so that zero offset is at
+    the center of the plot. Axes are labeled in offset pixels (dU for columns,
+    dV for rows). The offset supplied at construction time is overlaid as a red
+    cross marker and displayed in the legend.
+    """
+
+    def __init__(
+        self,
+        *,
+        corr_surface: NDArrayFloatType,
+        dv: float,
+        du: float,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle('Correlation Map')
+        self.setMinimumSize(550, 520)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(2)
+
+        h, w = corr_surface.shape
+        shifted = np.fft.fftshift(corr_surface)
+
+        # Map FFT index ranges to signed offset extents for imshow axes.
+        du_min = -(w // 2)
+        du_max = (w - 1) // 2
+        dv_min = -(h // 2)
+        dv_max = (h - 1) // 2
+
+        # Locate the global peak in offset coordinates.
+        peak_row, peak_col = np.unravel_index(np.argmax(shifted), shifted.shape)
+        peak_dv = dv_min + int(peak_row)
+        peak_du = du_min + int(peak_col)
+
+        fig = Figure(figsize=(5.8, 5.0))
+        fig.subplots_adjust(left=0.12, right=0.95, top=0.93, bottom=0.10)
+        canvas = FigureCanvasQTAgg(fig)
+        toolbar = NavigationToolbar2QT(canvas, self)
+        ax = fig.add_subplot(111)
+
+        # extent=[left, right, bottom, top] with origin='upper' places dv_min at
+        # the top and dv_max at the bottom, consistent with image-row convention.
+        extent = [du_min - 0.5, du_max + 0.5, dv_max + 0.5, dv_min - 0.5]
+        im = ax.imshow(
+            shifted,
+            origin='upper',
+            extent=extent,
+            aspect='equal',
+            cmap='viridis',
+            interpolation='nearest',
+        )
+        fig.colorbar(im, ax=ax, label='Normalized Cross-Correlation (NCC)')
+
+        ax.axhline(0, color='white', linewidth=0.5, alpha=0.5)
+        ax.axvline(0, color='white', linewidth=0.5, alpha=0.5)
+
+        # Circle around peak; radius scaled to ~4 % of the shorter axis.
+        radius = max(2, min(h, w) * 0.04)
+        ax.add_patch(Circle(
+            (peak_du, peak_dv), radius=radius,
+            fill=False, edgecolor='lime', linewidth=1.5,
+        ))
+        ax.annotate(
+            f'peak  dV={peak_dv:+d}, dU={peak_du:+d}',
+            xy=(peak_du, peak_dv),
+            xytext=(8, 8),
+            textcoords='offset points',
+            color='lime',
+            fontsize=8,
+        )
+
+        ax.plot(du, dv, 'r+', markersize=14, markeredgewidth=2,
+                label=f'current  dV={dv:.3f}, dU={du:.3f}')
+        ax.legend(loc='upper right', fontsize=8, framealpha=0.7)
+        ax.set_xlabel('dU (column offset, pixels)')
+        ax.set_ylabel('dV (row offset, pixels)\n[positive = down]')
+        ax.set_title('Normalized Cross-Correlation Map')
+
+        layout.addWidget(toolbar)
+        layout.addWidget(canvas)
+
+        close_btn = QPushButton('Close')
+        close_btn.clicked.connect(self.accept)
+        close_row = QHBoxLayout()
+        close_row.addStretch()
+        close_row.addWidget(close_btn)
+        layout.addLayout(close_row)
 
 
 class _ImageLabel(QLabel):
@@ -213,7 +310,7 @@ class ManualNavDialog(QDialog):
         mask = np.asarray(self._model_mask_ext, dtype=bool)
         # Pad to correlation convention used elsewhere (masked_ncc handles padding-independent math)
         # Here we directly compute the full NCC surface.
-        self._corr_surface = masked_ncc(image, model, mask)
+        self._corr_surface = np.real(masked_ncc(image, model, mask))
         self._corr_h, self._corr_w = self._corr_surface.shape
 
     def _offset_to_corr_indices(self, dv: float, du: float) -> tuple[float, float]:
@@ -412,15 +509,18 @@ class ManualNavDialog(QDialog):
         offset_group.setLayout(offset_form)
         right.addWidget(offset_group)
 
-        # Buttons: Auto, OK/Cancel
+        # Buttons: Correlation Map, Auto, OK/Cancel
         btn_row = QHBoxLayout()
+        self._btn_corr_map = QPushButton('Correlation Map...')
         self._btn_auto = QPushButton('Auto')
         self._btn_ok = QPushButton('OK')
         self._btn_cancel = QPushButton('Cancel')
+        self._btn_corr_map.clicked.connect(self._on_show_corr_map)
         self._btn_auto.clicked.connect(self._on_auto)
         self._btn_ok.clicked.connect(self.accept)
         self._btn_cancel.clicked.connect(self.reject)
         btn_row.addStretch()
+        btn_row.addWidget(self._btn_corr_map)
         btn_row.addWidget(self._btn_auto)
         btn_row.addWidget(self._btn_ok)
         btn_row.addWidget(self._btn_cancel)
@@ -587,6 +687,21 @@ class ManualNavDialog(QDialog):
     def _on_spin_du(self, val: float) -> None:
         self._du = float(val)
         self._refresh_overlay()
+
+    def _on_show_corr_map(self) -> None:
+        """Open a modal dialog displaying the NCC surface with the current offset marked.
+
+        The correlation surface is fftshift-ed so zero offset is at the center.
+        Axes are labeled in offset pixels: X = dU (cols), Y = dV (rows). The
+        current ``(dV, dU)`` offset is overlaid as a red cross marker.
+        """
+        dlg = _CorrMapDialog(
+            corr_surface=self._corr_surface,
+            dv=self._dv,
+            du=self._du,
+            parent=self,
+        )
+        dlg.exec()
 
     def _on_auto(self) -> None:
         # Call the same KPeaks correlation used by correlate_all

@@ -460,6 +460,63 @@ The technique produces:
 * Confidence score of 1.0 (user-accepted result)
 * Uncertainty set to None (manual determination)
 
+Ring Navigation Model
+=====================
+
+The ring navigation model generates theoretical brightness profiles for
+planetary ring edges.  Two configuration options in ``config_05_rings.yaml``
+control whether ring pixels that lie in shadow are excluded from the model
+before navigation is performed.
+
+Planet shadow removal
+---------------------
+
+When a planet casts a shadow across part of its own ring system, those ring
+arcs appear dark in the image.  If the model still shows those arcs as bright,
+the navigator will try to align a bright model against a dark image region,
+which introduces a systematic pointing error.
+
+The ``rings.remove_planet_shadow`` option (default ``true``) instructs the
+ring model to zero out all ring pixels that fall inside the planet's own
+shadow:
+
+.. code-block:: yaml
+
+   rings:
+     remove_planet_shadow: true   # default
+
+When active, the ring model logs the number of masked pixels at ``INFO`` level:
+
+.. code-block::
+
+   Planet shadow removal: 1284 pixel(s) inside SATURN shadow will be masked
+
+If the shadow geometry cannot be computed for a particular observation (for
+example, because the illumination geometry is degenerate), a warning is logged
+and the full unmasked ring model is used instead.  Navigation proceeds
+normally; no output files are suppressed.
+
+To disable shadow removal entirely -- for example, to compare navigation
+quality with and without the mask -- set the option to ``false`` in a
+``--config-file`` override:
+
+.. code-block:: yaml
+
+   rings:
+     remove_planet_shadow: false
+
+Body shadow removal (future)
+-----------------------------
+
+The ``rings.remove_body_shadows`` option (default ``false``) is reserved for a
+future enhancement that will remove ring pixels shadowed by moons.  Setting it
+to ``true`` has no effect in the current release.
+
+.. code-block:: yaml
+
+   rings:
+     remove_body_shadows: false   # default; not yet implemented
+
 Troubleshooting
 ===============
 
