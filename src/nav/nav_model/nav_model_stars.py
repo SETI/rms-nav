@@ -91,6 +91,7 @@ class NavModelStars(NavModel):
 
         self._obs = obs
         self._conflict_body_list: list[str] | None = None
+        self._ring_occlusion_annuli: dict[str, list[tuple[float, float]]] | None = None
         self._star_list = star_list
         self._stars_config = self._config.stars
 
@@ -581,7 +582,7 @@ class NavModelStars(NavModel):
 
         for star in full_star_list:
             # Mark all the bodies (or rings) that are conflicting
-            rings_can_conflict = True  # TODO
+            rings_can_conflict = self._stars_config.ring_occlusion_enabled
             self._mark_conflicts_obj(star, rings_can_conflict)
 
         self.logger.info('Final star list (total %d):', len(full_star_list))
@@ -865,10 +866,18 @@ class NavModelStars(NavModel):
     #
     # ==============================================================================
 
-    def _mark_conflicts_obj(self, star: MutableStar, rings_can_conflict: bool) -> bool:  # TODO
+    def _mark_conflicts_obj(self, star: MutableStar, rings_can_conflict: bool) -> bool:
         """Check if a star conflicts with known bodies or rings.
 
         Sets star.conflicts to a string describing why the Star conflicted.
+
+        Body intercept is checked first; if a body conflict is found the ring
+        check is skipped (body limb takes precedence).
+
+        The ring-plane check samples the ``ring_radius`` backplane at the
+        star's predicted image position. If the sampled radius falls inside
+        any of the configured annuli for the observation's closest planet the
+        star receives a ``RING: <PLANET>`` conflict string.
 
         Parameters:
             star: The star to check for conflicts.
@@ -887,6 +896,22 @@ class NavModelStars(NavModel):
             body_list += config.satellites(closest or '')
             self._conflict_body_list = body_list
 
+        if self._ring_occlusion_annuli is None:
+            raw: dict[str, list[list[float]]] = self._stars_config.ring_occlusion_radii_km or {}
+            annuli: dict[str, list[tuple[float, float]]] = {}
+            for planet_key, pairs in raw.items():
+                validated: list[tuple[float, float]] = []
+                for pair in pairs:
+                    inner, outer = float(pair[0]), float(pair[1])
+                    if inner >= outer:
+                        raise ValueError(
+                            f'ring_occlusion_radii_km: invalid annulus for {planet_key}: '
+                            f'inner {inner} km >= outer {outer} km'
+                        )
+                    validated.append((inner, outer))
+                annuli[planet_key.upper()] = validated
+            self._ring_occlusion_annuli = annuli
+
         # Create a Meshgrid for the area around the star. Give slop on each side - we
         # don't want a star to even be close to a large object.
         star_slop = self._stars_config.body_conflict_margin
@@ -897,7 +922,7 @@ class NavModelStars(NavModel):
         )
         backplane = Backplane(obs, meshgrid)
 
-        # Check for planet and moons
+        # Check for planet and moons; body limb takes precedence over rings.
         for body_name in self._conflict_body_list:
             intercepted = backplane.where_intercepted(body_name)
             if intercepted.any():
@@ -907,5 +932,25 @@ class NavModelStars(NavModel):
                 )
                 star.conflicts = f'BODY: {body_name}'
                 return True
+
+        # Check ring-plane occlusion when enabled and the planet has configured annuli.
+        if rings_can_conflict and obs.closest_planet is not None:
+            planet_upper = obs.closest_planet.upper()
+            annuli_for_planet = self._ring_occlusion_annuli.get(planet_upper, [])
+            if annuli_for_planet:
+                ring_target = f'{obs.closest_planet.lower()}:ring'
+                bp_radii = backplane.ring_radius(ring_target)
+                if not bp_radii.is_all_masked():
+                    radius_km = float(bp_radii.median().vals)
+                    for inner_km, outer_km in annuli_for_planet:
+                        if inner_km <= radius_km <= outer_km:
+                            self.logger.debug(
+                                f'Star {star.pretty_name:9s} U {star.u:9.3f} V '
+                                f'{star.v:9.3f} in ring plane of {obs.closest_planet} '
+                                f'at radius {radius_km:.1f} km '
+                                f'(annulus {inner_km:.0f}-{outer_km:.0f} km)'
+                            )
+                            star.conflicts = f'RING: {obs.closest_planet}'
+                            return True
 
         return False

@@ -303,6 +303,7 @@ The ``correlate_all`` technique performs automated navigation by correlating the
 
 3. **Star Refinement** (optional): If star models are available and star refinement is enabled in the configuration, the technique performs a second pass to refine the offset by precisely locating individual stars in the image. This refinement:
    - Searches for each star's position using the instrument's point spread function (PSF)
+   - Applies photometric gates to reject non-stellar signal (scale/noise, chi-squared, SNR, position error)
    - Computes the median offset from all successfully located stars
    - Removes outliers using a robust statistical method
    - Updates the final offset with the refined value
@@ -321,7 +322,56 @@ The following configuration options in ``config_01_settings.yaml`` control the b
 
 * ``offset.star_refinement_search_limit`` (default: [2.5, 2.5]): The search radius in pixels (v, u) when locating individual stars.
 
+* ``offset.star_refinement_max_reduced_chi2`` (default: 10.0): Reject PSF fits with reduced chi-squared above this threshold. A high chi-squared indicates the PSF model cannot describe the data, suggesting a non-stellar source.
+
+* ``offset.star_refinement_min_reduced_chi2`` (default: 0.1): Reject PSF fits with reduced chi-squared below this threshold. A value near zero indicates the background polynomial has absorbed the signal (overfitting).
+
+* ``offset.star_refinement_min_peak_snr`` (default: 5.0): Reject PSF fits with peak signal-to-noise ratio below this value. Low SNR indicates the fit may have locked onto noise or a non-stellar feature.
+
+* ``offset.star_refinement_max_pos_err`` (default: 0.5 pixels): Reject PSF fits where the 1-sigma position uncertainty in either axis exceeds this limit.
+
+* ``offset.log_star_refinement_detail`` (default: false): Log all fit metrics and gate thresholds per star at DEBUG level. Useful for diagnosing unexpected rejection behavior.
+
 * ``general.log_level_nav_correlate_all``: Logging level for this technique (can be set to DEBUG, INFO, WARNING, ERROR, or NONE).
+
+**Star conflict strings from refinement:**
+
+Stars that fail a gate receive one of the following ``conflicts`` strings and are excluded from offset statistics:
+
+* ``REFINEMENT EDGE``: Star is too close to the image edge for PSF fitting.
+* ``REFINEMENT FAILED``: PSF optimizer returned no result.
+* ``REFINEMENT NO STAR``: Fit scale at or below the noise floor; no real signal present.
+* ``REFINEMENT CHI2 LOW``: Reduced chi-squared below minimum; background polynomial overfit the signal.
+* ``REFINEMENT CHI2``: Reduced chi-squared above maximum; PSF model cannot describe the data.
+* ``REFINEMENT SNR``: Peak SNR below minimum.
+* ``REFINEMENT POS_ERR``: Position uncertainty exceeds the maximum.
+* ``REFINEMENT OUTLIER``: Passed all photometric gates but identified as a spatial outlier by the robust rejection step.
+
+**Star ring-plane occlusion:**
+
+Before entering the star model or refinement loop, each star is checked against the ring-plane backplane for the observation's closest planet. Stars whose predicted image position falls within a configured opaque ring annulus receive a ``RING: <PLANET>`` conflict string and are excluded from the star model and refinement. Body intercept (``BODY: <NAME>``) takes precedence: if a star is already behind a planet or moon the ring check is skipped.
+
+The ring annuli are configured per planet under ``stars.ring_occlusion_radii_km``. Each planet maps to a list of ``[inner_km, outer_km]`` pairs. A star is occluded if the sampled ring-plane radius falls inside any pair for that planet. Planets not listed have no ring occlusion.
+
+Example from ``config_01_settings.yaml``:
+
+.. code-block:: yaml
+
+   stars:
+     ring_occlusion_enabled: true
+     ring_occlusion_radii_km:
+       SATURN:
+         - [74490.0, 91980.0]    # C ring
+         - [91980.0, 117580.0]   # B ring
+         - [122170.0, 136780.0]  # A ring (Cassini Division excluded)
+       URANUS:
+         - [41837.0, 51149.0]
+       NEPTUNE:
+         - [40900.0, 62933.0]
+
+* ``stars.ring_occlusion_enabled`` (default: true): Master switch. Set to ``false`` to disable ring-plane occlusion for all planets.
+
+* ``stars.ring_occlusion_radii_km``: Dict mapping uppercase planet names to lists of ``[inner_km, outer_km]`` annulus pairs. Each pair defines a radial range that is treated as opaque. Multiple pairs per planet allow gaps (e.g., the Cassini Division) to remain transparent.
 
 **When to use:**
 
