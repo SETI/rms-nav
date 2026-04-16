@@ -174,7 +174,7 @@ def log_run_environment(logger: pdslogger.PdsLogger, command_list: list[str]) ->
     """
     with logger.open('RUN-TIME ENVIRONMENT'):
         logger.info('*' * 40)
-        logger.info('Host Local Name: %s', socket.getfqdn())
+        logger.info('Host Local Name: %s', get_local_host_name())
         # if nav.aws.AWS_ON_EC2_INSTANCE:
         #     logger.info('Host Public Name: %s (%s) in %s', nav.aws.AWS_HOST_PUBLIC_NAME,
         #                  nav.aws.AWS_HOST_PUBLIC_IPV4, nav.aws.AWS_HOST_ZONE)

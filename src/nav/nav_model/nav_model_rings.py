@@ -438,7 +438,7 @@ class NavModelRings(NavModelRingsBase):
         # Planet shadow mask (computed once; applied to every rendered feature)
         # -----------------------------------------------------------------------
         shadow_mask: NDArrayBoolType | None = None
-        if bool(self._config.rings.get('remove_planet_shadow', False)):
+        if self._config.rings.get('remove_planet_shadow', False):
             try:
                 raw_shadow = obs.ext_bp.where_inside_shadow(ring_target, planet.lower())
                 shadow_mask = raw_shadow.mvals.filled(False).astype(bool)

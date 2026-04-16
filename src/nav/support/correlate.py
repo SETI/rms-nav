@@ -152,10 +152,38 @@ def per_metric(corr: NDArrayFloatType, peak_val: float) -> float:
     return peak_val / (np.sqrt(np.sum(corr**2)) + 1e-12)
 
 
-def nms_topk(corr: NDArrayFloatType, k: int = 5, radius: int = 5) -> list[tuple[int, int, float]]:
-    """Non-maximum suppression to get top-k peaks."""
+def nms_topk(
+    corr: NDArrayFloatType,
+    k: int = 5,
+    radius: int = 5,
+    max_offset_vu: tuple[int, int] | None = None,
+) -> list[tuple[int, int, float]]:
+    """Non-maximum suppression to get top-k peaks.
+
+    Parameters:
+        corr: 2-D correlation surface (V x U).
+        k: Maximum number of peaks to return.
+        radius: Suppression radius around each selected peak in pixels.
+        max_offset_vu: If given, only positions whose signed offset
+            satisfies ``|dV| <= max_offset_vu[0]`` and
+            ``|dU| <= max_offset_vu[1]`` are eligible.  Signed offsets
+            are derived from the FFT-convention wrap-around used by
+            :func:`int_to_signed`.
+
+    Returns:
+        List of ``(row, col, value)`` tuples for up to ``k`` peaks.
+    """
     corr_v, corr_u = corr.shape
     work = corr.copy()
+    if max_offset_vu is not None:
+        max_v, max_u = max_offset_vu
+        rows = np.arange(corr_v)
+        cols = np.arange(corr_u)
+        # Signed offsets via FFT wrap-around convention (same as int_to_signed).
+        signed_rows = np.where(rows < corr_v // 2, rows, rows - corr_v)
+        signed_cols = np.where(cols < corr_u // 2, cols, cols - corr_u)
+        work[np.abs(signed_rows) > max_v, :] = -np.inf
+        work[:, np.abs(signed_cols) > max_u] = -np.inf
     peaks = []
     if not np.any(np.isfinite(work)):
         return peaks
@@ -316,6 +344,7 @@ def navigate_single_scale_kpeaks(
     prior_shift: tuple[float, float] | None = None,
     prior_weight: float = 0.0,
     nms_radius: int = 5,
+    max_offset_vu: tuple[int, int] | None = None,
 ) -> dict[str, Any]:
     """
     One-scale masked NCC + top-K candidate evaluation.
@@ -331,6 +360,11 @@ def navigate_single_scale_kpeaks(
         prior_weight: The prior weight to use for the navigation.
         nms_radius: The radius to use for the non-maximum suppression.
         logger: The logger to use for the navigation.
+        max_offset_vu: If given, only correlation peaks whose signed
+            (V, U) offset satisfies ``|dV| <= max_offset_vu[0]`` and
+            ``|dU| <= max_offset_vu[1]`` are considered candidates.
+            Typically set to the extended-FOV margins so that offsets
+            outside the physically-plausible range are never evaluated.
 
     Returns:
         A dictionary containing the navigation result.
@@ -354,7 +388,7 @@ def navigate_single_scale_kpeaks(
     # sparse relative to the mask (e.g. single star).  The numerator scales
     # with image variance under the mask, so it peaks sharply only where the
     # image actually contains the target signal.
-    peaks = nms_topk(corr_num, k=max_peaks, radius=nms_radius)
+    peaks = nms_topk(corr_num, k=max_peaks, radius=nms_radius, max_offset_vu=max_offset_vu)
 
     if logger is not None:
         logger.debug('Correlation peaks:')
@@ -416,6 +450,7 @@ def navigate_with_pyramid_kpeaks(
     consistency_tol: float = 2.0,
     nms_radius: int = 5,
     prior_weight_final: float = 0.25,
+    max_offset_vu: tuple[int, int] | None = None,
     logger: PdsLogger | None = None,
 ) -> dict[str, Any]:
     """TODO Clean this up
@@ -438,6 +473,12 @@ def navigate_with_pyramid_kpeaks(
         consistency_tol: The consistency tolerance to use for the navigation.
         nms_radius: The radius to use for the non-maximum suppression.
         prior_weight_final: The prior weight to use for the final navigation.
+        max_offset_vu: Maximum permitted signed offset as ``(max_dV, max_dU)`` in
+            full-resolution pixels.  When given, correlation peaks outside this
+            range are excluded at every pyramid level (the limit is scaled by the
+            downsample factor at each level).  Pass ``obs.extfov_margin_vu`` to
+            restrict the search to offsets that are physically reachable given the
+            extended FOV padding.
         logger: The logger to use for the navigation.
 
     Returns:
@@ -478,6 +519,8 @@ def navigate_with_pyramid_kpeaks(
     logger.debug(f'  Consistency tolerance: {consistency_tol}')
     logger.debug(f'  NMS radius: {nms_radius}')
     logger.debug(f'  Prior weight final: {prior_weight_final}')
+    if max_offset_vu is not None:
+        logger.debug(f'  Max offset V: {max_offset_vu[0]}, U: {max_offset_vu[1]}')
 
     # Coarse-to-fine prior sequence.  Each level passes its result as the prior
     # for the next finer level so that a bad coarse estimate is penalised at
@@ -506,6 +549,15 @@ def navigate_with_pyramid_kpeaks(
             else None
         )
 
+        # Scale the max offset limit to the current pyramid level.  Floor each
+        # component to at least 1 so coarse levels still allow a 1-pixel search
+        # tolerance when margins // s would otherwise be 0.
+        max_offset_at_scale: tuple[int, int] | None = (
+            (max(1, max_offset_vu[0] // s), max(1, max_offset_vu[1] // s))
+            if max_offset_vu is not None
+            else None
+        )
+
         # At the coarsest level (no prior), a single peak suffices.
         # At finer levels, evaluate multiple candidates so the prior
         # from the coarser level can steer selection toward the correct peak.
@@ -521,6 +573,7 @@ def navigate_with_pyramid_kpeaks(
             prior_shift=prior_at_scale,
             prior_weight=prior_weight_final if prior_at_scale is not None else 0.0,
             nms_radius=nms_radius,
+            max_offset_vu=max_offset_at_scale,
             logger=logger,
         )
         logger.debug(
@@ -555,6 +608,7 @@ def navigate_with_pyramid_kpeaks(
         prior_shift=final_prior,
         prior_weight=prior_weight_final,
         nms_radius=nms_radius,
+        max_offset_vu=max_offset_vu,
         logger=logger,
     )
 

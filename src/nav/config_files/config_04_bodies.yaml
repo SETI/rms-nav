@@ -63,7 +63,7 @@ bodies:
   label_limb_color: [255, 0, 0]  # Red
   label_font: liberation2/LiberationMono-Bold.ttf
   label_font_size: 18
-    # 512: 18
+  # 512: 18
   label_font_color: [255, 0, 0]  # Red
   # label_font_color: [255, 255, 0]  # Yellow
   label_horiz_gap: 7  # Horizontal gap between limb and head of arrow (left/right)

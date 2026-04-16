@@ -902,6 +902,11 @@ class NavModelStars(NavModel):
             for planet_key, pairs in raw.items():
                 validated: list[tuple[float, float]] = []
                 for pair in pairs:
+                    if len(pair) < 2:
+                        raise ValueError(
+                            f'invalid annulus: expected 2 elements, got {len(pair)} for '
+                            f'{planet_key!r}: {pair!r}'
+                        )
                     inner, outer = float(pair[0]), float(pair[1])
                     if inner >= outer:
                         raise ValueError(

@@ -7,6 +7,7 @@ from nav.support.correlate import (
     masked_ncc,
     navigate_single_scale_kpeaks,
     navigate_with_pyramid_kpeaks,
+    nms_topk,
 )
 from nav.support.image import pad_top_left
 
@@ -347,3 +348,77 @@ class TestPyramid:
         dy, dx = result['offset']
         assert dy == pytest.approx(0.0, abs=0.05)
         assert dx == pytest.approx(0.0, abs=0.05)
+
+
+# =========================================================================
+# max_offset_vu tests
+# =========================================================================
+
+
+class TestMaxOffsetVu:
+    """Tests that max_offset_vu correctly restricts the correlation search."""
+
+    def test_nms_topk_excludes_out_of_bounds_peaks(self) -> None:
+        """nms_topk must not return peaks outside max_offset_vu."""
+        rng = np.random.default_rng(42)
+        corr = rng.standard_normal((64, 64))
+        # Plant a large value far outside the allowed region.
+        corr[30, 30] = 1000.0  # signed offset (30-64, 30-64) = (-34, -34) -- outside (10,10)
+        # Plant a smaller value inside the allowed region.
+        corr[5, 3] = 500.0  # signed offset (5, 3) -- inside (10, 10)
+
+        peaks = nms_topk(corr, k=3, radius=2, max_offset_vu=(10, 10))
+        rows = [r for r, _c, _v in peaks]
+        cols = [c for _r, c, _v in peaks]
+        # The out-of-bounds peak at (30, 30) must not appear.
+        for r, c in zip(rows, cols, strict=True):
+            dv = r if r < 32 else r - 64
+            du = c if c < 32 else c - 64
+            assert abs(dv) <= 10
+            assert abs(du) <= 10
+
+    def test_nms_topk_no_limit_returns_out_of_bounds(self) -> None:
+        """Without max_offset_vu the large out-of-bounds peak is selected first."""
+        corr = np.zeros((64, 64))
+        corr[30, 30] = 1000.0
+        peaks = nms_topk(corr, k=1, radius=2, max_offset_vu=None)
+        assert len(peaks) == 1
+        assert int(peaks[0][0]) == 30
+        assert int(peaks[0][1]) == 30
+
+    def test_single_scale_with_max_offset_finds_correct_peak(self) -> None:
+        """max_offset_vu forces the single-scale search to the correct small offset."""
+        image, model, mask = _make_single_star(image_offset=(2.0, 0.0))
+        result = navigate_single_scale_kpeaks(
+            image=image,
+            model=model,
+            mask=mask,
+            max_peaks=5,
+            upsample_factor=16,
+            metric='psr',
+            max_offset_vu=(10, 10),
+            logger=None,
+        )
+        dy, dx = result['offset']
+        assert dy == pytest.approx(2.0, abs=0.1)
+        assert dx == pytest.approx(0.0, abs=0.1)
+
+    def test_pyramid_with_max_offset_not_spurious(self) -> None:
+        """Pyramid with extfov-style max_offset_vu still converges cleanly."""
+        image, model, mask = _make_single_star(image_offset=(1.0, 0.0))
+        result = navigate_with_pyramid_kpeaks(
+            image,
+            model,
+            mask,
+            pyramid_levels=3,
+            max_peaks=5,
+            upsample_factor=16,
+            metric='psr',
+            quality_thresh=6.0,
+            consistency_tol=2.0,
+            max_offset_vu=(20, 20),
+        )
+        assert not result['spurious']
+        dy, dx = result['offset']
+        assert dy == pytest.approx(1.0, abs=0.1)
+        assert dx == pytest.approx(0.0, abs=0.1)

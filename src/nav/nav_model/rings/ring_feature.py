@@ -176,6 +176,10 @@ class RingFeature:
 
         Returns:
             Maximum of (base_orbit.a + base_orbit.ae) for all present edges.
+
+        Raises:
+            ValueError: If both ``inner_edge`` and ``outer_edge`` are ``None``,
+                so ``max_extent_radius`` cannot be computed.
         """
         extents: list[float] = []
         if self.inner_edge is not None:
@@ -184,6 +188,11 @@ class RingFeature:
         if self.outer_edge is not None:
             bo = self.outer_edge.base_orbit
             extents.append(bo.a + bo.ae)
+        if len(extents) == 0:
+            raise ValueError(
+                'RingFeature has no edges; cannot compute max_extent_radius '
+                '(both inner_edge and outer_edge are None)'
+            )
         return max(extents)
 
     def all_base_radii(self) -> list[tuple[float, str]]:

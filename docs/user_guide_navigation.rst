@@ -376,7 +376,7 @@ Before entering the star model or refinement loop, each star is checked against 
 
 The ring annuli are configured per planet under ``stars.ring_occlusion_radii_km``. Each planet maps to a list of ``[inner_km, outer_km]`` pairs. A star is occluded if the sampled ring-plane radius falls inside any pair for that planet. Planets not listed have no ring occlusion.
 
-Example from ``config_01_settings.yaml``:
+Example from ``config_01_general.yaml``:
 
 .. code-block:: yaml
 

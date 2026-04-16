@@ -35,6 +35,15 @@ from nav.support.correlate import masked_ncc, navigate_with_pyramid_kpeaks
 from nav.support.types import NDArrayFloatType, NDArrayUint8Type
 from nav.ui.common import ZoomPanController, build_stretch_controls
 
+# Correlation map popup (_CorrMapDialog) layout sizing
+_CORR_MAP_MIN_WIDTH = 550
+_CORR_MAP_MIN_HEIGHT = 520
+_CORR_MAP_MARGIN = 4
+_CORR_MAP_SPACING = 2
+
+# Semi-transparent white tint when overlaying the binary model mask on RGB
+_MASK_OVERLAY_ALPHA = 0.4
+
 
 def _apply_stretch_gamma(
     image: NDArrayFloatType, black: float, white: float, gamma: float
@@ -115,11 +124,12 @@ class _CorrMapDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle('Correlation Map')
-        self.setMinimumSize(550, 520)
+        self.setMinimumSize(_CORR_MAP_MIN_WIDTH, _CORR_MAP_MIN_HEIGHT)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(2)
+        m = _CORR_MAP_MARGIN
+        layout.setContentsMargins(m, m, m, m)
+        layout.setSpacing(_CORR_MAP_SPACING)
 
         h, w = corr_surface.shape
         shifted = np.fft.fftshift(corr_surface)
@@ -755,12 +765,10 @@ class ManualNavDialog(QDialog):
             model=self._model_img_ext,
             mask=self._model_mask_ext,
             upsample_factor=up_factor,
+            max_offset_vu=self._obs.extfov_margin_vu,
             logger=None,
         )
         dv, du = float(res['offset'][0]), float(res['offset'][1])
-        # Clamp to extfov bounds
-        dv = float(np.clip(dv, -self._obs.extfov_margin_v + 1, self._obs.extfov_margin_v - 1))
-        du = float(np.clip(du, -self._obs.extfov_margin_u + 1, self._obs.extfov_margin_u - 1))
         self._dv, self._du = dv, du
         self._spin_dv.blockSignals(True)
         self._spin_du.blockSignals(True)
@@ -918,10 +926,11 @@ class ManualNavDialog(QDialog):
         if self._show_mask:
             mask_raw = self._obs.extract_offset_array(self._model_mask_ext, (self._dv, self._du))
             mask_slice = np.asarray(mask_raw, dtype=np.float64) > 0.5
-            alpha = 0.4
             for c in range(3):
                 ch = rgb[:, :, c].astype(np.float32)
-                ch[mask_slice] = ch[mask_slice] * (1.0 - alpha) + 255.0 * alpha
+                ch[mask_slice] = (
+                    ch[mask_slice] * (1.0 - _MASK_OVERLAY_ALPHA) + 255.0 * _MASK_OVERLAY_ALPHA
+                )
                 rgb[:, :, c] = np.clip(ch, 0, 255).astype(np.uint8)
 
         # Create QImage/QPixmap

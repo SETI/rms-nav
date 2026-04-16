@@ -106,6 +106,7 @@ class NavTechniqueCorrelateAll(NavTechnique):
                 combined_model.models[0].model_img,
                 combined_model.models[0].model_mask,
                 upsample_factor=self.config.offset.correlation_fft_upsample_factor,
+                max_offset_vu=obs.extfov_margin_vu,
             )
 
             corr_offset = (float(result['offset'][0]), float(result['offset'][1]))
@@ -358,7 +359,12 @@ class NavTechniqueCorrelateAll(NavTechnique):
         vmag_spread = max_vmag - min_vmag
         # Convert vmag to a reliability between 1 and 0.5.
         # vmag is guaranteed to have a value; stars without one are excluded from the list.
-        reliability = [1 - (cast(float, x.vmag) - min_vmag) / vmag_spread / 2 for x in uv_star_list]
+        if vmag_spread <= 0.0:
+            reliability = [1.0 for _ in uv_star_list]
+        else:
+            reliability = [
+                1 - (cast(float, x.vmag) - min_vmag) / vmag_spread / 2 for x in uv_star_list
+            ]
         u_outliers = detect_outliers(u_diff_list, reliability, nsigma)
         v_outliers = detect_outliers(v_diff_list, reliability, nsigma)
         final_u_diff_list = []
