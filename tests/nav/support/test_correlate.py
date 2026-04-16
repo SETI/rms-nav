@@ -149,7 +149,8 @@ class TestMaskedNcc:
         ncc, _ = masked_ncc(ip, mp, wp)
 
         peak_idx = np.unravel_index(np.argmax(ncc), ncc.shape)
-        assert peak_idx == (2, 0)
+        assert int(peak_idx[0]) == 2
+        assert int(peak_idx[1]) == 0
 
     def test_ncc_real_valued(self) -> None:
         """NCC output must be a real-valued (non-complex) array."""
@@ -184,10 +185,11 @@ class TestMaskedNcc:
         ip = pad_top_left(image, ih + mh, iw + mw)
         mp = pad_top_left(model, ih + mh, iw + mw)
         wp = pad_top_left(mask, ih + mh, iw + mw)
-        ncc, num = masked_ncc(ip, mp, wp)
+        _ncc, num = masked_ncc(ip, mp, wp)
 
         num_peak = np.unravel_index(np.argmax(num), num.shape)
-        assert num_peak == (3, ip.shape[1] - 2)
+        assert int(num_peak[0]) == 3
+        assert int(num_peak[1]) == ip.shape[1] - 2
 
     def test_ncc_mask_excludes_padding(self) -> None:
         """Changing model values outside mask must not alter the NCC."""

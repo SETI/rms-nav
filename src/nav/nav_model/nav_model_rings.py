@@ -14,15 +14,15 @@ It is a thin coordinator that:
    raising ``ValueError`` on malformed feature entries.
 5. Validates no two features have overlapping date ranges over the same radial
    region (``validate_no_date_overlaps``).
-5a. Performs a fast extent check: if the minimum radius in the FOV exceeds the
-    maximum ``a + ae`` across all features, no ring can be visible and the model
-    returns before the expensive resolutions backplane and filter pipeline.
-6. Filters through the four-pass ``RingFeatureFilter`` pipeline.
-7. Renders each surviving feature via ``feature.render(context)``.
-8. Optionally removes planet-shadow pixels from each rendered result when
+6. Performs a fast extent check: if the minimum radius in the FOV exceeds the
+   maximum ``a + ae`` across all features, no ring can be visible and the model
+   returns before the expensive resolutions backplane and filter pipeline.
+7. Filters through the four-pass ``RingFeatureFilter`` pipeline.
+8. Renders each surviving feature via ``feature.render(context)``.
+9. Optionally removes planet-shadow pixels from each rendered result when
    ``rings.remove_planet_shadow`` is ``True`` (shadow computed once via
    ``obs.ext_bp.where_inside_shadow``).
-9. Wraps each result in a ``NavModelResult`` with annotations.
+10. Wraps each result in a ``NavModelResult`` with annotations.
 
 **Design principle**: This module contains no physics, no math, and no rendering
 logic. All of that lives in the ``rings`` subpackage (``ring_feature``,

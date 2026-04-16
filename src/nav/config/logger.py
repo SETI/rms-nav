@@ -17,10 +17,10 @@ from __future__ import annotations
 
 import argparse
 import logging
-from filecache import FCPath
 from typing import TYPE_CHECKING, cast
 
 import pdslogger
+from filecache import FCPath
 
 if TYPE_CHECKING:
     from .config import Config
@@ -32,12 +32,12 @@ DEFAULT_LOGGER = IMAGE_LOGGER
 _FALLBACK_LEVEL = 'INFO'
 
 
-def _resolve_level(attr_name: str, arguments: argparse.Namespace, config: Config) -> str:
+def _resolve_level(attr_name: str, arguments: argparse.Namespace | None, config: Config) -> str:
     """Return the log level for ``attr_name``, checking args then config then fallback.
 
     Parameters:
         attr_name: Name of the config key and argparse attribute (underscore form).
-        arguments: Parsed CLI arguments.
+        arguments: Parsed CLI arguments, or None to skip the args check.
         config: Navigation configuration.
 
     Returns:
@@ -87,7 +87,7 @@ def setup_logging(
 
 def image_log_handlers(
     image_log_path: FCPath,
-    arguments: argparse.Namespace,
+    arguments: argparse.Namespace | None,
     config: Config,
 ) -> list[logging.Handler]:
     """Create local handlers for a single image: a stdout handler and a file handler.
@@ -99,7 +99,7 @@ def image_log_handlers(
 
     Parameters:
         image_log_path: Destination path for this image's log file.
-        arguments: Parsed CLI arguments.
+        arguments: Parsed CLI arguments, or None to fall back entirely to config.
         config: Navigation configuration.
 
     Returns:

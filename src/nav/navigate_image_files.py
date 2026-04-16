@@ -68,9 +68,7 @@ def navigate_image_files(
 
     timestamp = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
     image_log_path = (
-        nav_results_root
-        / 'logs'
-        / (image_file.results_path_stub + '_' + timestamp + '.log')
+        nav_results_root / 'logs' / (image_file.results_path_stub + '_' + timestamp + '.log')
     )
     local_handlers = image_log_handlers(image_log_path, log_arguments, DEFAULT_CONFIG)
 

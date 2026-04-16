@@ -135,9 +135,9 @@ def current_git_version() -> str:
     if _GIT_VERSION_CACHE is not None:
         return _GIT_VERSION_CACHE
     try:
-        ret = subprocess.check_output(['git', 'describe', '--all', '--long',
-                                       '--dirty', '--abbrev=40',
-                                       '--tags']).strip()
+        ret = subprocess.check_output(
+            ['git', 'describe', '--all', '--long', '--dirty', '--abbrev=40', '--tags']
+        ).strip()
         _GIT_VERSION_CACHE = ret.decode('ascii')
     except Exception:
         _GIT_VERSION_CACHE = 'GIT DESCRIBE FAILED'
@@ -160,9 +160,7 @@ def get_local_host_name() -> str:
     return _LOCAL_HOST_NAME_CACHE
 
 
-def log_run_environment(
-    logger: pdslogger.PdsLogger, command_list: list[str]
-) -> None:
+def log_run_environment(logger: pdslogger.PdsLogger, command_list: list[str]) -> None:
     """Log host, git, and command-line context to the given logger.
 
     Intended to be called once on the main logger at startup and again on each

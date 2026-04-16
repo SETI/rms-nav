@@ -4,7 +4,8 @@ import math
 from typing import Any, cast
 
 import numpy as np
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg, NavigationToolbar2QT
+from matplotlib.backends.backend_qt import NavigationToolbar2QT
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle
 from PyQt6.QtCore import QPoint, Qt
@@ -136,17 +137,22 @@ class _CorrMapDialog(QDialog):
 
         fig = Figure(figsize=(5.8, 5.0))
         fig.subplots_adjust(left=0.12, right=0.95, top=0.93, bottom=0.10)
-        canvas = FigureCanvasQTAgg(fig)
-        toolbar = NavigationToolbar2QT(canvas, self)
+        canvas = FigureCanvasQTAgg(fig)  # type: ignore[no-untyped-call]
+        toolbar = NavigationToolbar2QT(canvas, self)  # type: ignore[no-untyped-call]
         ax = fig.add_subplot(111)
 
         # extent=[left, right, bottom, top] with origin='upper' places dv_min at
         # the top and dv_max at the bottom, consistent with image-row convention.
-        extent = [du_min - 0.5, du_max + 0.5, dv_max + 0.5, dv_min - 0.5]
+        extent_arg: tuple[float, float, float, float] = (
+            du_min - 0.5,
+            du_max + 0.5,
+            dv_max + 0.5,
+            dv_min - 0.5,
+        )
         im = ax.imshow(
             shifted,
             origin='upper',
-            extent=extent,
+            extent=extent_arg,
             aspect='equal',
             cmap='viridis',
             interpolation='nearest',
@@ -158,10 +164,15 @@ class _CorrMapDialog(QDialog):
 
         # Circle around peak; radius scaled to ~4 % of the shorter axis.
         radius = max(2, min(h, w) * 0.04)
-        ax.add_patch(Circle(
-            (peak_du, peak_dv), radius=radius,
-            fill=False, edgecolor='lime', linewidth=1.5,
-        ))
+        ax.add_patch(
+            Circle(
+                (peak_du, peak_dv),
+                radius=radius,
+                fill=False,
+                edgecolor='lime',
+                linewidth=1.5,
+            )
+        )
         ax.annotate(
             f'peak  dV={peak_dv:+d}, dU={peak_du:+d}',
             xy=(peak_du, peak_dv),
@@ -171,8 +182,14 @@ class _CorrMapDialog(QDialog):
             fontsize=8,
         )
 
-        ax.plot(du, dv, 'r+', markersize=14, markeredgewidth=2,
-                label=f'current  dV={dv:.3f}, dU={du:.3f}')
+        ax.plot(
+            du,
+            dv,
+            'r+',
+            markersize=14,
+            markeredgewidth=2,
+            label=f'current  dV={dv:.3f}, dU={du:.3f}',
+        )
         ax.legend(loc='upper right', fontsize=8, framealpha=0.7)
         ax.set_xlabel('dU (column offset, pixels)')
         ax.set_ylabel('dV (row offset, pixels)\n[positive = down]')

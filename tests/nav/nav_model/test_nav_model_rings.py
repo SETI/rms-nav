@@ -159,6 +159,9 @@ def _make_mock_config(planet_config: dict[str, Any]) -> MagicMock:
     """Return a mock Config whose rings.ring_features contains planet_config."""
     cfg = MagicMock()
     cfg.rings.ring_features = {'SATURN': planet_config}
+    # Prevent MagicMock().get() from returning a truthy MagicMock; the shadow-
+    # removal path only runs when 'remove_planet_shadow' is explicitly True.
+    cfg.rings.get.return_value = False
     return cfg
 
 
