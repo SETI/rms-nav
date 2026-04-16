@@ -218,7 +218,8 @@ class ManualNavDialog(QDialog):
 
     The viewport uses false color (image in red/blue, blend in green). Separate
     **Image Stretch** and **Model Stretch** groups each provide black/white/gamma
-    and a display toggle. Model transparency sits under model stretch.
+    and a display toggle. Model transparency and an optional binary mask overlay
+    sit under model stretch.
     """
 
     def __init__(
@@ -275,6 +276,7 @@ class ManualNavDialog(QDialog):
         self._model_transparency = 0.5
         self._show_image = True  # show observation in R/B (and base of G)
         self._show_model = True  # show model contribution in green blend
+        self._show_mask = False  # overlay model mask as a binary white tint
         # For slider mapping (image)
         self._stretch_min = float(np.min(self._img_fov))
         self._stretch_max = float(np.max(self._img_fov))
@@ -310,7 +312,7 @@ class ManualNavDialog(QDialog):
         mask = np.asarray(self._model_mask_ext, dtype=bool)
         # Pad to correlation convention used elsewhere (masked_ncc handles padding-independent math)
         # Here we directly compute the full NCC surface.
-        self._corr_surface = np.real(masked_ncc(image, model, mask))
+        self._corr_surface, _ = masked_ncc(image, model, mask)
         self._corr_h, self._corr_w = self._corr_surface.shape
 
     def _offset_to_corr_indices(self, dv: float, du: float) -> tuple[float, float]:
@@ -436,6 +438,13 @@ class ManualNavDialog(QDialog):
         )
         self._check_show_model.stateChanged.connect(self._on_show_model_changed)
         model_stretch_form.addRow(self._check_show_model)
+        self._check_show_mask = QCheckBox('Display mask')
+        self._check_show_mask.setChecked(False)
+        self._check_show_mask.setToolTip(
+            'Overlay the model mask (binary) as a semi-transparent white tint on the image.'
+        )
+        self._check_show_mask.stateChanged.connect(self._on_show_mask_changed)
+        model_stretch_form.addRow(self._check_show_mask)
         model_controls = build_stretch_controls(
             model_stretch_form,
             img_min=self._model_stretch_min,
@@ -643,6 +652,20 @@ class ManualNavDialog(QDialog):
         self._show_model = self._is_checked(state)
         self._slider_model_transparency.setEnabled(self._show_model)
         self._lbl_model_transparency.setEnabled(self._show_model)
+        self._refresh_overlay()
+
+    def _on_show_mask_changed(self, state: Any) -> None:
+        """Toggle overlay of the binary model mask on the composited image.
+
+        When enabled, pixels where the model mask is ``True`` are highlighted with a
+        semi-transparent white tint so the mask boundary is clearly visible against
+        the false-color composite.
+
+        Parameters:
+            state: ``QCheckBox.stateChanged`` argument. Interpreted via
+                ``_is_checked`` as ``True`` only for ``Qt.CheckState.Checked``.
+        """
+        self._show_mask = self._is_checked(state)
         self._refresh_overlay()
 
     def _on_reset_stretch(self) -> None:
@@ -873,6 +896,16 @@ class ManualNavDialog(QDialog):
         else:
             rgb[:, :, 1] = img_layer
         rgb[:, :, 2] = img_layer
+
+        # Overlay binary model mask as a semi-transparent white tint when enabled
+        if self._show_mask:
+            mask_raw = self._obs.extract_offset_array(self._model_mask_ext, (self._dv, self._du))
+            mask_slice = np.asarray(mask_raw, dtype=np.float64) > 0.5
+            alpha = 0.4
+            for c in range(3):
+                ch = rgb[:, :, c].astype(np.float32)
+                ch[mask_slice] = ch[mask_slice] * (1.0 - alpha) + 255.0 * alpha
+                rgb[:, :, c] = np.clip(ch, 0, 255).astype(np.uint8)
 
         # Create QImage/QPixmap
         qimage = QImage(rgb.tobytes(), w, h, 3 * w, QImage.Format.Format_RGB888).copy()

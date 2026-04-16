@@ -267,9 +267,10 @@ class NavTechniqueCorrelateAll(NavTechnique):
                 )
                 star.conflicts = 'REFINEMENT NO STAR'
                 continue
-            # chi2 near zero means the background polynomial has consumed the signal;
-            # chi2 >> 1 means the model cannot fit the data at all.
-            if reduced_chi2 < min_chi2:
+            # chi2 near zero with a weak star means the background polynomial
+            # has consumed the signal.  A bright star (high SNR) with low chi2
+            # is simply a good fit — not overfitting.
+            if reduced_chi2 < min_chi2 and peak_snr < min_snr:
                 self.logger.debug(
                     f'Star {star.pretty_name:9s} VMAG {star.vmag:6.3f} '
                     f'U {star_u:8.3f}, V {star_v:8.3f} '
