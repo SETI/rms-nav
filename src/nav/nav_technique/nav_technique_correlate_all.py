@@ -235,13 +235,29 @@ class NavTechniqueCorrelateAll(NavTechnique):
                 )
                 star.conflicts = 'REFINEMENT FAILED'
                 continue
-            opt_v, opt_u, opt_metadata = ret
-            reduced_chi2 = opt_metadata['reduced_chi2']
-            peak_snr = opt_metadata['peak_snr']
-            x_err = opt_metadata['x_err']
-            y_err = opt_metadata['y_err']
-            scale = opt_metadata['scale']
-            noise_rms = opt_metadata['noise_rms']
+            try:
+                opt_v, opt_u, opt_metadata = ret
+                if not isinstance(opt_metadata, dict):
+                    raise TypeError(
+                        f'opt_metadata from psfmodel.PSF.find_position() must be a dict, '
+                        f'got {type(opt_metadata).__name__}'
+                    )
+                reduced_chi2 = opt_metadata['reduced_chi2']
+                peak_snr = opt_metadata['peak_snr']
+                x_err = opt_metadata['x_err']
+                y_err = opt_metadata['y_err']
+                scale = opt_metadata['scale']
+                noise_rms = opt_metadata['noise_rms']
+            except (KeyError, TypeError) as exc:
+                key_name = exc.args[0] if isinstance(exc, KeyError) else None
+                detail = f'key {key_name!r}' if key_name is not None else str(exc)
+                self.logger.debug(
+                    f'Star {star.pretty_name:9s} VMAG {star.vmag:6.3f} '
+                    f'U {star_u:8.3f}, V {star_v:8.3f} refinement metadata invalid '
+                    f'({detail}) from psfmodel.PSF.find_position()'
+                )
+                star.conflicts = 'REFINEMENT METADATA'
+                continue
             max_chi2 = self.config.offset.star_refinement_max_reduced_chi2
             min_chi2 = self.config.offset.star_refinement_min_reduced_chi2
             min_snr = self.config.offset.star_refinement_min_peak_snr

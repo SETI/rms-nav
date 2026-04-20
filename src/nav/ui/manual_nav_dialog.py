@@ -108,8 +108,10 @@ def _bilinear_sample_periodic(arr: NDArrayFloatType, y: float, x: float) -> floa
 class _CorrMapDialog(QDialog):
     """Modal popup showing the full 2-D normalized cross-correlation (NCC) surface.
 
-    The surface is rearranged via ``np.fft.fftshift`` so that zero offset is at
-    the center of the plot. Axes are labeled in offset pixels (dU for columns,
+    The NCC surface is rearranged via ``np.fft.fftshift`` for display. The global
+    peak marker uses ``np.argmax`` on the fftshifted NCC *numerator* from
+    :func:`~nav.support.correlate.masked_ncc` so plateaus in the NCC itself do not
+    pick an arbitrary peak. Axes are labeled in offset pixels (dU for columns,
     dV for rows). The offset supplied at construction time is overlaid as a red
     cross marker and displayed in the legend.
     """
@@ -118,6 +120,7 @@ class _CorrMapDialog(QDialog):
         self,
         *,
         corr_surface: NDArrayFloatType,
+        numerator_surface: NDArrayFloatType,
         dv: float,
         du: float,
         parent: QWidget | None = None,
@@ -133,6 +136,7 @@ class _CorrMapDialog(QDialog):
 
         h, w = corr_surface.shape
         shifted = np.fft.fftshift(corr_surface)
+        shifted_num = np.fft.fftshift(numerator_surface)
 
         # Map FFT index ranges to signed offset extents for imshow axes.
         du_min = -(w // 2)
@@ -140,8 +144,8 @@ class _CorrMapDialog(QDialog):
         dv_min = -(h // 2)
         dv_max = (h - 1) // 2
 
-        # Locate the global peak in offset coordinates.
-        peak_row, peak_col = np.unravel_index(np.argmax(shifted), shifted.shape)
+        # Locate the global peak from the covariance numerator (not NCC plateaus).
+        peak_row, peak_col = np.unravel_index(np.argmax(shifted_num), shifted_num.shape)
         peak_dv = dv_min + int(peak_row)
         peak_du = du_min + int(peak_col)
 
@@ -339,7 +343,7 @@ class ManualNavDialog(QDialog):
         mask = np.asarray(self._model_mask_ext, dtype=bool)
         # Pad to correlation convention used elsewhere (masked_ncc handles padding-independent math)
         # Here we directly compute the full NCC surface.
-        self._corr_surface, _ = masked_ncc(image, model, mask)
+        self._corr_surface, self._corr_numerator = masked_ncc(image, model, mask)
         self._corr_h, self._corr_w = self._corr_surface.shape
 
     def _offset_to_corr_indices(self, dv: float, du: float) -> tuple[float, float]:
@@ -747,6 +751,7 @@ class ManualNavDialog(QDialog):
         """
         dlg = _CorrMapDialog(
             corr_surface=self._corr_surface,
+            numerator_surface=self._corr_numerator,
             dv=self._dv,
             du=self._du,
             parent=self,

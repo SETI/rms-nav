@@ -1,5 +1,7 @@
 import copy
 import itertools
+import math
+from collections.abc import Sequence
 from typing import Any, cast
 
 import numpy as np
@@ -38,6 +40,52 @@ from .nav_model import NavModel
 from .nav_model_result import NavModelResult
 
 _DEBUG_STARS_MODEL_IMGDISP = False
+
+
+def _ring_occlusion_annulus_pair(pair: object, planet_key: str) -> tuple[float, float]:
+    """Parse one ``ring_occlusion_radii_km`` annulus into finite inner/outer radii in km.
+
+    Parameters:
+        pair: Sequence of two numeric values (not strings or bytes).
+        planet_key: Planet name from YAML (for error messages).
+
+    Returns:
+        ``(inner_km, outer_km)`` as finite floats.
+
+    Raises:
+        ValueError: If ``pair`` is not a length-2 sequence of finite real numbers.
+    """
+    if isinstance(pair, (str, bytes)) or not isinstance(pair, Sequence):
+        raise ValueError(
+            f'ring_occlusion_radii_km: annulus for {planet_key!r} must be a length-2 '
+            f'sequence of numbers, got {type(pair).__name__}: {pair!r}'
+        )
+    if len(pair) != 2:
+        raise ValueError(
+            f'ring_occlusion_radii_km: annulus for {planet_key!r} must have exactly 2 '
+            f'elements, got {len(pair)}: {pair!r}'
+        )
+    radii_km: list[float] = []
+    for label, raw in (('inner', pair[0]), ('outer', pair[1])):
+        if isinstance(raw, bool):
+            raise ValueError(
+                f'ring_occlusion_radii_km: {label} radius for {planet_key!r} must be '
+                f'numeric, got bool: {raw!r}'
+            )
+        if not isinstance(raw, (int, float, np.integer, np.floating)):
+            raise ValueError(
+                f'ring_occlusion_radii_km: {label} radius for {planet_key!r} must be '
+                f'numeric, got {type(raw).__name__}: {raw!r}'
+            )
+        val = float(raw)
+        if not math.isfinite(val):
+            raise ValueError(
+                f'ring_occlusion_radii_km: {label} radius for {planet_key!r} must be '
+                f'finite, got {raw!r}'
+            )
+        radii_km.append(val)
+    return radii_km[0], radii_km[1]
+
 
 _STAR_CATALOG_UCAC4: UCAC4StarCatalog | None = None
 _STAR_CATALOG_TYCHO2: SpiceStarCatalog | None = None
@@ -902,12 +950,7 @@ class NavModelStars(NavModel):
             for planet_key, pairs in raw.items():
                 validated: list[tuple[float, float]] = []
                 for pair in pairs:
-                    if len(pair) < 2:
-                        raise ValueError(
-                            f'invalid annulus: expected 2 elements, got {len(pair)} for '
-                            f'{planet_key!r}: {pair!r}'
-                        )
-                    inner, outer = float(pair[0]), float(pair[1])
+                    inner, outer = _ring_occlusion_annulus_pair(pair, planet_key)
                     if inner >= outer:
                         raise ValueError(
                             f'ring_occlusion_radii_km: invalid annulus for {planet_key}: '

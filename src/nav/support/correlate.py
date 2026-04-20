@@ -12,6 +12,9 @@ from nav.support.image import crop_center, normalize_array, pad_top_left
 from nav.support.misc import mad_std
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
+# Floor for masked NCC denominators and weight sums (avoid divide-by-zero).
+_NCC_EPS = 1e-12
+
 # ==============================================================
 # Small utilities
 # ==============================================================
@@ -98,8 +101,7 @@ def masked_ncc(
     model_mask_fft = fft2(model * mask)
 
     sum_w: float = float(np.sum(mask))
-    eps = 1e-12
-    safe_w = sum_w + eps
+    safe_w = sum_w + _NCC_EPS
 
     # Shift-wise sums via FFT (take real to discard floating-point imaginary noise)
     sum_iw = np.real(ifft2(image_fft * np.conj(mask_fft)))
@@ -109,7 +111,7 @@ def masked_ncc(
     # Model stats (constant over shifts)
     sum_mw: float = float(np.sum(model * mask))
     mean_m: float = sum_mw / safe_w
-    ssd_mw: float = float(np.sum(((model - mean_m) * mask) ** 2)) + eps
+    ssd_mw: float = float(np.sum(((model - mean_m) * mask) ** 2)) + _NCC_EPS
 
     # Shift-wise image mean
     mean_i = sum_iw / safe_w
@@ -118,12 +120,12 @@ def masked_ncc(
     num = sum_imw - mean_i * sum_mw
 
     # Denominator: sqrt( SSD_I(s) * SSD_M )
-    # Epsilon inside the sqrt so the floor is sqrt(eps) (~1e-6) rather than
-    # eps (~1e-12); this prevents floating-point noise in the numerator from
+    # Epsilon inside the sqrt so the floor is sqrt(_NCC_EPS) rather than
+    # _NCC_EPS; this prevents floating-point noise in the numerator from
     # producing |NCC| >> 1 at shifts where the image variance is zero.
     ssd_iw = sum_i2w - sum_iw**2 / safe_w
     ssd_iw[ssd_iw < 0] = 0.0
-    denom = np.sqrt(ssd_iw * ssd_mw + eps)
+    denom = np.sqrt(ssd_iw * ssd_mw + _NCC_EPS)
 
     ncc = num / denom
     return ncc, num
@@ -571,6 +573,10 @@ def navigate_with_pyramid_kpeaks(
             upsample_factor=upsample_factor,
             metric=metric,
             prior_shift=prior_at_scale,
+            # When ``coarser_prior_fullres`` is still None (coarsest pyramid level),
+            # ``prior_at_scale`` is None: set ``prior_weight`` to 0.0 so the coarsest
+            # level's quality score has no prior penalty. Finer levels pass
+            # ``prior_shift`` and use ``prior_weight_final``.
             prior_weight=prior_weight_final if prior_at_scale is not None else 0.0,
             nms_radius=nms_radius,
             max_offset_vu=max_offset_at_scale,

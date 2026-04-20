@@ -236,7 +236,11 @@ def main() -> None:
     nav_results_root_str = get_nav_results_root(arguments, DEFAULT_CONFIG)
     nav_results_root = FileCache(None).new_path(nav_results_root_str)
 
-    setup_logging(arguments, DEFAULT_CONFIG, nav_results_root_str)
+    try:
+        setup_logging(arguments, DEFAULT_CONFIG, nav_results_root_str)
+    except (TypeError, ValueError) as exc:
+        print(f'Invalid logging configuration: {exc}', file=sys.stderr)
+        sys.exit(1)
 
     global START_TIME, NUM_FILES_PROCESSED, NUM_FILES_SKIPPED, NUM_FILES_COMPLETED
     START_TIME = time.time()

@@ -9,8 +9,9 @@ Provides two PdsLogger instances:
   ``logger.open()`` context so they are active only while that image is being processed.
 - ``DEFAULT_LOGGER`` -- alias for ``IMAGE_LOGGER`` retained for backward compatibility.
 
-Call ``setup_logging()`` once in ``main()`` after the nav-results root and CLI
-arguments have been resolved.
+Call ``setup_logging()`` from ``main()`` after the nav-results root and CLI
+arguments have been resolved. It is safe to call more than once: existing
+``MAIN_LOGGER`` handlers are removed before new ones are attached.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ IMAGE_LOGGER = pdslogger.PdsLogger('nav_image', lognames=False, digits=3)
 DEFAULT_LOGGER = IMAGE_LOGGER
 
 _FALLBACK_LEVEL = 'INFO'
+_ALLOWED_LOG_LEVELS = frozenset({'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'})
 
 
 def _resolve_level(attr_name: str, arguments: argparse.Namespace | None, config: Config) -> str:
@@ -42,13 +44,31 @@ def _resolve_level(attr_name: str, arguments: argparse.Namespace | None, config:
 
     Returns:
         A log-level string (e.g. ``"INFO"``).
+
+    Raises:
+        TypeError: If a non-``None`` value from arguments or config is not a string.
+        ValueError: If the string is empty after stripping or is not a known level name.
     """
-    level: str | None = getattr(arguments, attr_name, None)
+    level: object | None
+    if arguments is not None:
+        level = getattr(arguments, attr_name, None)
+    else:
+        level = None
     if level is None:
         level = getattr(config.general, attr_name, None)
     if level is None:
-        level = _FALLBACK_LEVEL
-    return level.upper()
+        return _FALLBACK_LEVEL
+    if not isinstance(level, str):
+        raise TypeError(f'log level {attr_name!r} must be str or None, got {type(level).__name__}')
+    normalized = level.strip().upper()
+    if normalized == '':
+        raise ValueError(f'log level {attr_name!r} is empty or whitespace only')
+    if normalized not in _ALLOWED_LOG_LEVELS:
+        raise ValueError(
+            f'log level {attr_name!r} must be one of '
+            f'{sorted(_ALLOWED_LOG_LEVELS)}, got {normalized!r}'
+        )
+    return normalized
 
 
 def setup_logging(
@@ -71,9 +91,18 @@ def setup_logging(
             ``log_level_main_file`` attributes.
         config: Navigation configuration providing ``general.*`` fallback values.
         nav_results_root_str: Local filesystem path to the navigation results root.
+
+    Raises:
+        TypeError: If a configured log level is not a string or ``None``.
+        ValueError: If a configured log level string is empty or not a standard name.
     """
     main_console_level = _resolve_level('log_level_main_console', arguments, config)
     main_file_level = _resolve_level('log_level_main_file', arguments, config)
+
+    # Replace any existing handlers so repeated setup does not duplicate log lines.
+    for existing in list(MAIN_LOGGER.handlers):
+        MAIN_LOGGER.removeHandler(existing)
+        existing.close()
 
     MAIN_LOGGER.add_handler(pdslogger.stream_handler(level=main_console_level))
 
@@ -104,6 +133,10 @@ def image_log_handlers(
 
     Returns:
         A list containing a stdout stream handler and a file handler for the image log.
+
+    Raises:
+        TypeError: If a configured log level is not a string or ``None``.
+        ValueError: If a configured log level string is empty or not a standard name.
     """
     image_console_level = _resolve_level('log_level_image_console', arguments, config)
     image_file_level = _resolve_level('log_level_image_file', arguments, config)

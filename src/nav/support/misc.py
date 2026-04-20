@@ -148,7 +148,22 @@ _LOCAL_HOST_NAME_CACHE: str | None = None
 
 
 def get_local_host_name() -> str:
-    """Get the local host name."""
+    """Return this machine's fully qualified domain name as a string.
+
+    The value is obtained from ``socket.getfqdn()`` on the first call and stored
+    in the module-level ``_LOCAL_HOST_NAME_CACHE`` so later calls return the same
+    string without calling ``getfqdn`` again.
+
+    Returns:
+        The FQDN string on success, or the literal ``'LOCAL HOST NAME FAILED'`` if
+        ``socket.getfqdn()`` raises any exception.
+
+    Side effects:
+        On the first successful call, sets ``_LOCAL_HOST_NAME_CACHE`` to the FQDN.
+        On the first failing call, sets ``_LOCAL_HOST_NAME_CACHE`` to
+        ``'LOCAL HOST NAME FAILED'``. Subsequent calls return the cached value and do
+        not call ``socket.getfqdn()`` again.
+    """
     global _LOCAL_HOST_NAME_CACHE
     if _LOCAL_HOST_NAME_CACHE is not None:
         return _LOCAL_HOST_NAME_CACHE
