@@ -14,8 +14,6 @@ arguments have been resolved. It is safe to call more than once: existing
 ``MAIN_LOGGER`` handlers are removed before new ones are attached.
 """
 
-from __future__ import annotations
-
 import argparse
 import logging
 from typing import TYPE_CHECKING, cast
@@ -107,7 +105,6 @@ def setup_logging(
     MAIN_LOGGER.add_handler(pdslogger.stream_handler(level=main_console_level))
 
     log_dir = FCPath(nav_results_root_str) / 'logs' / 'nav_offset'
-    log_dir.mkdir(parents=True, exist_ok=True)
     log_base = log_dir / 'nav_offset.log'
     MAIN_LOGGER.add_handler(
         pdslogger.file_handler(log_base, level=main_file_level, rotation='ymdhms')

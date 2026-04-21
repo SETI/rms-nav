@@ -1,7 +1,5 @@
 """Tests for ``nav.ui.common``."""
 
-from __future__ import annotations
-
 import os
 from collections.abc import Callable
 from typing import Any, cast

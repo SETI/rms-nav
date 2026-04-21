@@ -7,8 +7,6 @@ no inner), and ``_sim_params_to_feature_config``.
 ``render_ring`` and ``compute_border_atop_simulated`` are mocked.
 """
 
-from __future__ import annotations
-
 from typing import Any
 from unittest.mock import MagicMock, patch
 

@@ -22,8 +22,6 @@ whose adjusted fade is still acceptable but narrower than the requested
 ``fade_width_pix``).
 """
 
-from __future__ import annotations
-
 import math
 from dataclasses import dataclass
 from typing import Any

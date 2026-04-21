@@ -13,8 +13,6 @@ These tests use ``logging.getLogger('nav.nav_model.rings.ring_filter')`` so
 pytest ``caplog`` can capture DEBUG exclusion messages.
 """
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 

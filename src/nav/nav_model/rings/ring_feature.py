@@ -35,8 +35,6 @@ on feature type and edge availability:
   per present edge -> one ``RingRenderResult`` per edge
 """
 
-from __future__ import annotations
-
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
