@@ -33,7 +33,7 @@ _N_RADIUS = 5  # ceil((1020-1000 + slop) / 5.0) = 5
 
 def _make_ring_repro(
     *,
-    planet_name: str = 'SATURN',
+    body_name: str = 'SATURN',
     longitude_resolution: float = _LON_RES,
     radius_resolution: float = _RAD_RES,
     radius_inner: float = _RADIUS_INNER,
@@ -86,7 +86,7 @@ def _make_ring_repro(
         return np.asarray(v, dtype=np.float32)
 
     return RingReprojResult(
-        planet_name=planet_name,
+        body_name=body_name,
         longitude_resolution=longitude_resolution,
         radius_resolution=radius_resolution,
         radius_inner=radius_inner,
@@ -100,6 +100,8 @@ def _make_ring_repro(
         incidence=incidence,
         time=time,
         orbit_model=None,
+        image_dtype=np.dtype(np.float32),
+        metadata_dtype=np.dtype(np.float32),
     )
 
 
@@ -177,9 +179,9 @@ class TestRingMosaicConstructor:
     """Tests for RingMosaic constructor parameter derivation and storage."""
 
     def test_ring_body_name_derived_from_planet(self) -> None:
-        """ring_body_name is lowercased planet_name + ':ring'."""
+        """ring_body_name is lowercased body_name + ':ring'."""
         mosaic = RingMosaic(
-            planet_name='SATURN',
+            body_name='SATURN',
             radius_inner=_RADIUS_INNER,
             radius_outer=_RADIUS_OUTER,
             longitude_resolution=_LON_RES,
@@ -190,7 +192,7 @@ class TestRingMosaicConstructor:
     def test_shadow_body_name_derived_from_planet(self) -> None:
         """shadow_body_name is the lowercased planet name."""
         mosaic = RingMosaic(
-            planet_name='SATURN',
+            body_name='SATURN',
             radius_inner=_RADIUS_INNER,
             radius_outer=_RADIUS_OUTER,
             longitude_resolution=_LON_RES,
@@ -198,21 +200,21 @@ class TestRingMosaicConstructor:
         )
         assert mosaic.shadow_body_name == 'saturn'
 
-    def test_planet_name_stored(self) -> None:
-        """planet_name attribute is preserved."""
+    def test_body_name_stored(self) -> None:
+        """body_name attribute is preserved."""
         mosaic = RingMosaic(
-            planet_name='URANUS',
+            body_name='URANUS',
             radius_inner=_RADIUS_INNER,
             radius_outer=_RADIUS_OUTER,
             longitude_resolution=_LON_RES,
             radius_resolution=_RAD_RES,
         )
-        assert mosaic.planet_name == 'URANUS'
+        assert mosaic.body_name == 'URANUS'
 
     def test_empty_mosaic_antimask_all_false(self) -> None:
         """A freshly created mosaic has an all-False longitude antimask."""
         mosaic = RingMosaic(
-            planet_name='SATURN',
+            body_name='SATURN',
             radius_inner=_RADIUS_INNER,
             radius_outer=_RADIUS_OUTER,
             longitude_resolution=_LON_RES,
@@ -224,7 +226,7 @@ class TestRingMosaicConstructor:
     def test_empty_mosaic_has_none_bounds(self) -> None:
         """Bounds is None when no data has been added."""
         mosaic = RingMosaic(
-            planet_name='SATURN',
+            body_name='SATURN',
             radius_inner=_RADIUS_INNER,
             radius_outer=_RADIUS_OUTER,
             longitude_resolution=_LON_RES,
@@ -243,7 +245,7 @@ class TestRingMosaicAddAndRetrieve:
 
     def _make_mosaic(self) -> RingMosaic:
         return RingMosaic(
-            planet_name='SATURN',
+            body_name='SATURN',
             radius_inner=_RADIUS_INNER,
             radius_outer=_RADIUS_OUTER,
             longitude_resolution=_LON_RES,
@@ -362,7 +364,7 @@ class TestSparseGrowth:
 
     def _make_mosaic(self) -> RingMosaic:
         return RingMosaic(
-            planet_name='SATURN',
+            body_name='SATURN',
             radius_inner=_RADIUS_INNER,
             radius_outer=_RADIUS_OUTER,
             longitude_resolution=_LON_RES,
@@ -433,7 +435,7 @@ class TestRingMergeSstrategies:
         strategy: RingMosaicMergeStrategy = RingMosaicMergeStrategy.BEST_RESOLUTION,
     ) -> RingMosaic:
         return RingMosaic(
-            planet_name='SATURN',
+            body_name='SATURN',
             radius_inner=_RADIUS_INNER,
             radius_outer=_RADIUS_OUTER,
             longitude_resolution=_LON_RES,
@@ -502,7 +504,7 @@ class TestRingMosaicMetadata:
 
     def _make_mosaic(self) -> RingMosaic:
         return RingMosaic(
-            planet_name='SATURN',
+            body_name='SATURN',
             radius_inner=_RADIUS_INNER,
             radius_outer=_RADIUS_OUTER,
             longitude_resolution=_LON_RES,
@@ -533,12 +535,12 @@ class TestRingMosaicMetadata:
         assert int(result.image_number.data[5]) == 0
         assert int(result.image_number.data[9]) == 1
 
-    def test_planet_name_in_result(self) -> None:
-        """planet_name is preserved in the mosaic data result."""
+    def test_body_name_in_result(self) -> None:
+        """body_name is preserved in the mosaic data result."""
         mosaic = self._make_mosaic()
         mosaic.add(_make_ring_repro(valid_lon_bins=[5]))
         result = mosaic.to_sparse()
-        assert result.planet_name == 'SATURN'
+        assert result.body_name == 'SATURN'
 
     def test_ring_body_name_in_result(self) -> None:
         """ring_body_name appears in the mosaic data result."""

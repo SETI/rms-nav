@@ -1,0 +1,541 @@
+"""Serialization helpers for nav.reproj result dataclasses.
+
+Provides format-agnostic save/load utilities used by BodyReprojResult,
+BodyMosaicData, RingReprojResult, and RingMosaicData.
+
+All path arguments accept ``str``, :class:`pathlib.Path`, or :class:`filecache.FCPath`.
+Each path is normalized to an :class:`~filecache.FCPath` at entry. Writes use
+:meth:`~filecache.FCPath.get_local_path`, then NumPy or Astropy to write the
+file, then :meth:`~filecache.FCPath.upload`. Reads resolve a local cache path
+via :meth:`~filecache.FCPath.get_local_path` before loading.
+
+Supported formats
+-----------------
+npz
+    NumPy's native compressed (``np.savez_compressed``) or uncompressed
+    (``np.savez``) archive. MaskedArrays are stored as two entries:
+    ``<name>__data`` (the underlying array) and ``<name>__mask`` (bool).
+    Scalars and strings are stored as 0-D unicode or numeric arrays.
+    Tuples (length 2) are stored as 1-D length-2 arrays.
+    ``image_dtype`` / ``metadata_dtype`` are stored as 0-D unicode arrays
+    containing the dtype ``str`` attribute (e.g. ``'<f8'``).
+
+fits
+    FITS via ``astropy.io.fits``. Scalar metadata (strings, numbers,
+    dtype names, tuples encoded as paired keys) are stored in the
+    PrimaryHDU header. Each array (and its mask when applicable) occupies
+    a separate ImageHDU named ``<FIELDNAME>`` and ``<FIELDNAME>_MASK``.
+
+Schema evolution
+----------------
+Every file includes a ``__kind__`` key/header card identifying the
+dataclass (e.g. ``'BodyMosaicData'``) and a ``__version__`` integer
+(currently ``1``). ``load()`` raises ``ValueError`` when ``__kind__``
+does not match the expected kind. Future schema changes should bump
+``__version__`` and handle older versions inside the appropriate
+``load()`` implementation.
+"""
+
+from pathlib import Path
+from typing import Any, cast
+
+import numpy as np
+import numpy.ma as ma
+from astropy.io import fits
+from filecache import FCPath
+
+from nav.reproj.ring_orbit_model import RingOrbitModel
+from nav.support.types import PathLike
+
+_CURRENT_VERSION = 1
+
+
+def _as_fcpath(path: PathLike) -> FCPath:
+    """Normalize a path-like value to :class:`~filecache.FCPath`."""
+    if isinstance(path, FCPath):
+        return path
+    return FCPath(path)
+
+
+# ---------------------------------------------------------------------------
+# Format inference
+# ---------------------------------------------------------------------------
+
+
+def infer_format(
+    path: PathLike,
+    format: str | None,  # noqa: A002
+) -> str:
+    """Infer the serialization format from the file extension or explicit override.
+
+    Parameters:
+        path: File path (``str``, ``Path``, or ``FCPath``); used for extension-based
+            inference when format is None.
+        format: Explicit format string ('npz' or 'fits'). When not None, this
+            value is returned verbatim after validation.
+
+    Returns:
+        'npz' or 'fits'.
+
+    Raises:
+        ValueError: If the format cannot be inferred or is not supported.
+    """
+    if format is not None:
+        if format not in ('npz', 'fits'):
+            raise ValueError(f"format must be 'npz' or 'fits', got {format!r}")
+        return format
+
+    fcpath = _as_fcpath(path)
+    suffix = fcpath.suffix.lower()
+    if suffix in ('.npz',):
+        return 'npz'
+    if suffix in ('.fits', '.fit', '.fits.gz', '.fz'):
+        return 'fits'
+
+    # Try removing a second extension (e.g. .fits.gz → .fits)
+    stem = fcpath.stem
+    second_suffix = Path(stem).suffix.lower()
+    if second_suffix in ('.fits', '.fit'):
+        return 'fits'
+
+    raise ValueError(
+        f'Cannot infer format from path {fcpath!r}. '
+        "Use format='npz' or format='fits' to specify explicitly."
+    )
+
+
+# ---------------------------------------------------------------------------
+# RingOrbitModel serialization helpers
+# ---------------------------------------------------------------------------
+
+
+def orbit_model_to_dict(om: RingOrbitModel | None) -> dict[str, Any]:
+    """Serialize a RingOrbitModel to a plain dict of primitives.
+
+    Parameters:
+        om: The orbit model to serialize, or None.
+
+    Returns:
+        Dict with keys ``name``, ``a``, ``e``, ``w0``, ``dw``,
+        ``mean_motion``, ``epoch_utc``, and ``is_none`` (bool flag).
+    """
+    if om is None:
+        return {'is_none': True}
+    return {
+        'is_none': False,
+        'name': om.name,
+        'a': om.a,
+        'e': om.e,
+        'w0': om.w0,
+        'dw': om.dw,
+        'mean_motion': om.mean_motion,
+        'epoch_utc': om.epoch_utc,
+    }
+
+
+def orbit_model_from_dict(d: dict[str, Any]) -> RingOrbitModel | None:
+    """Deserialize a RingOrbitModel from a plain dict.
+
+    Parameters:
+        d: Dict produced by ``orbit_model_to_dict``.
+
+    Returns:
+        RingOrbitModel instance, or None if the original was None.
+    """
+    if d.get('is_none'):
+        return None
+    return RingOrbitModel(
+        name=str(d['name']),
+        a=float(d['a']),
+        e=float(d['e']),
+        w0=float(d['w0']),
+        dw=float(d['dw']),
+        mean_motion=float(d['mean_motion']),
+        epoch_utc=str(d['epoch_utc']),
+    )
+
+
+# ---------------------------------------------------------------------------
+# npz helpers
+# ---------------------------------------------------------------------------
+
+
+def save_npz(
+    path: PathLike,
+    kind: str,
+    version: int,
+    payload: dict[str, Any],
+    *,
+    compress: bool,
+) -> None:
+    """Save a payload dict to an npz archive.
+
+    MaskedArrays are split into ``<name>__data`` and ``<name>__mask``
+    entries. Tuples of length 2 are stored as 1-D length-2 arrays. Strings
+    and dtype names are stored as 0-D unicode arrays. Dicts (e.g. from
+    ``orbit_model_to_dict``) are flattened with ``<name>__<key>`` entries.
+
+    Parameters:
+        path: Output path (``str``, ``Path``, or ``FCPath``).
+        kind: Dataclass kind string (e.g. 'BodyMosaicData').
+        version: Schema version integer.
+        payload: Mapping of field name → value. Supported types: ndarray,
+            MaskedArray, tuple[2], str, float, int, bool, np.dtype, dict,
+            None.
+        compress: If True use ``np.savez_compressed``; otherwise
+            ``np.savez``.
+    """
+    fcpath = _as_fcpath(path)
+    local_path = cast(Path, fcpath.get_local_path())
+
+    arrays: dict[str, np.ndarray] = {}
+    arrays['__kind__'] = np.array(kind)
+    arrays['__version__'] = np.array(version)
+
+    for name, value in payload.items():
+        _npz_encode_value(arrays, name, value)
+
+    save_fn = np.savez_compressed if compress else np.savez
+    save_fn(local_path, **arrays)  # type: ignore[arg-type]
+    fcpath.upload()
+
+
+def _npz_encode_value(arrays: dict[str, np.ndarray], name: str, value: Any) -> None:
+    """Encode a single payload value into the arrays dict for npz storage.
+
+    Internal helper called only within this module. Not intended for import.
+
+    Parameters:
+        arrays: Target dict being built for np.savez / np.savez_compressed.
+        name: Key name for this value.
+        value: Value to encode.
+    """
+    if value is None:
+        arrays[name + '__none'] = np.array(True)
+    elif isinstance(value, ma.MaskedArray):
+        arrays[name + '__data'] = np.asarray(value.data)
+        arrays[name + '__mask'] = np.asarray(ma.getmaskarray(value))
+    elif isinstance(value, np.ndarray):
+        arrays[name] = value
+    elif isinstance(value, np.dtype):
+        arrays[name] = np.array(value.str)
+    elif isinstance(value, tuple):
+        arrays[name] = np.array(value)
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            _npz_encode_value(arrays, f'{name}__{k}', v)
+    elif isinstance(value, (bool, int, float, str)):
+        arrays[name] = np.array(value)
+    else:
+        arrays[name] = np.array(value)
+
+
+def load_npz(
+    path: PathLike,
+    expected_kind: str,
+) -> dict[str, Any]:
+    """Load an npz archive and reassemble MaskedArrays.
+
+    Parameters:
+        path: Input path (``str``, ``Path``, or ``FCPath``).
+        expected_kind: The expected dataclass kind string. Raises
+            ``ValueError`` if the file's ``__kind__`` does not match.
+
+    Returns:
+        Dict with MaskedArrays reassembled from ``__data`` / ``__mask``
+        pairs. Other arrays are returned as plain ndarrays or scalars
+        unwrapped from 0-D arrays.
+
+    Raises:
+        ValueError: If ``__kind__`` mismatches or the file is missing
+            required keys.
+    """
+    fcpath = _as_fcpath(path)
+    local_path = cast(Path, fcpath.get_local_path())
+    raw = np.load(local_path, allow_pickle=False)
+
+    kind = str(raw['__kind__'])
+    if kind != expected_kind:
+        raise ValueError(f'Kind mismatch: file contains {kind!r}, expected {expected_kind!r}')
+
+    version = int(raw['__version__'])
+    _ = version  # retained for future schema migration
+
+    # Collect all keys; reconstruct MaskedArrays and None sentinels
+    result: dict[str, Any] = {}
+    keys = set(raw.files)
+    keys.discard('__kind__')
+    keys.discard('__version__')
+
+    # First pass: identify MA pairs and None sentinels
+    data_keys = {k[:-6] for k in keys if k.endswith('__data')}
+    mask_keys = {k[:-6] for k in keys if k.endswith('__mask')}
+    none_keys = {k[:-6] for k in keys if k.endswith('__none')}
+    ma_keys = data_keys & mask_keys
+
+    handled: set[str] = set()
+    for base in ma_keys:
+        result[base] = ma.MaskedArray(
+            np.array(raw[base + '__data']),
+            mask=np.array(raw[base + '__mask']),
+        )
+        handled.add(base + '__data')
+        handled.add(base + '__mask')
+
+    for base in none_keys:
+        result[base] = None
+        handled.add(base + '__none')
+
+    for k in keys - handled:
+        arr = raw[k]
+        if arr.ndim == 0:
+            # Unwrap scalars: unicode → str, others → Python scalar
+            v = arr.item()
+            result[k] = v
+        else:
+            result[k] = np.array(arr)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# FITS helpers
+# ---------------------------------------------------------------------------
+
+
+def save_fits(
+    path: PathLike,
+    kind: str,
+    version: int,
+    payload: dict[str, Any],
+) -> None:
+    """Save a payload dict to a FITS file.
+
+    Scalar metadata (strings, numbers, tuples encoded as two header cards,
+    dtype names) are stored in the PrimaryHDU header. Each array and its mask
+    (for MaskedArrays) are stored as separate ImageHDUs with EXTNAME set to
+    ``<FIELDNAME>`` and ``<FIELDNAME>_MASK`` respectively.
+
+    Parameters:
+        path: Output path (``str``, ``Path``, or ``FCPath``).
+        kind: Dataclass kind string (e.g. 'BodyMosaicData').
+        version: Schema version integer.
+        payload: Mapping of field name → value.
+    """
+    fcpath = _as_fcpath(path)
+    local_path = cast(Path, fcpath.get_local_path())
+
+    primary_hdr = fits.Header()
+    primary_hdr['KIND'] = kind
+    primary_hdr['VERSION'] = version
+
+    hdus: list[fits.ImageHDU] = []
+
+    for name, value in payload.items():
+        _fits_encode_value(primary_hdr, hdus, name.upper(), value)
+
+    hdul = fits.HDUList([fits.PrimaryHDU(header=primary_hdr), *hdus])
+    hdul.writeto(local_path, overwrite=True)
+    fcpath.upload()
+
+
+def _fits_encode_value(
+    hdr: Any,
+    hdus: list[Any],
+    name: str,
+    value: Any,
+) -> None:
+    """Encode a single payload value into a FITS header or HDU list.
+
+    Internal helper called only within this module. Not intended for import.
+
+    Parameters:
+        hdr: The PrimaryHDU header (for scalar values).
+        hdus: List of ImageHDUs being built (for array values).
+        name: Field name in UPPER_CASE.
+        value: Value to encode.
+    """
+    if value is None:
+        hdr[name + '_NONE'] = True
+    elif isinstance(value, ma.MaskedArray):
+        hdus.append(fits.ImageHDU(data=np.asarray(value.data), name=name))
+        hdus.append(
+            fits.ImageHDU(
+                data=ma.getmaskarray(value).astype(np.uint8),
+                name=name + '_MASK',
+            )
+        )
+    elif isinstance(value, np.ndarray):
+        hdus.append(fits.ImageHDU(data=value, name=name))
+    elif isinstance(value, np.dtype):
+        hdr[name] = value.str
+    elif isinstance(value, tuple):
+        hdr[name + '_0'] = value[0]
+        hdr[name + '_1'] = value[1]
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            _fits_encode_value(hdr, hdus, f'{name}__{k.upper()}', v)
+    elif isinstance(value, (bool, int, float)):
+        hdr[name] = bool(value) if isinstance(value, bool) else value
+    elif isinstance(value, str):
+        hdr[name] = value
+    else:
+        hdr[name] = str(value)
+
+
+def load_fits(
+    path: PathLike,
+    expected_kind: str,
+) -> dict[str, Any]:
+    """Load a FITS file and reassemble MaskedArrays.
+
+    Parameters:
+        path: Input path (``str``, ``Path``, or ``FCPath``).
+        expected_kind: The expected dataclass kind string.
+
+    Returns:
+        Dict with MaskedArrays, plain ndarrays, and scalar values
+        reconstructed from the FITS file.
+
+    Raises:
+        ValueError: If the file's ``KIND`` header card does not match
+            ``expected_kind``.
+    """
+    fcpath = _as_fcpath(path)
+    local_path = cast(Path, fcpath.get_local_path())
+    with fits.open(local_path) as hdul:
+        primary_hdr = hdul[0].header
+
+        kind = str(primary_hdr['KIND'])
+        if kind != expected_kind:
+            raise ValueError(f'Kind mismatch: file contains {kind!r}, expected {expected_kind!r}')
+
+        version = int(primary_hdr['VERSION'])
+        _ = version  # retained for future schema migration
+
+        # Collect ImageHDUs by EXTNAME
+        hdu_map: dict[str, Any] = {}
+        for hdu in hdul[1:]:
+            hdu_map[hdu.name] = hdu.data
+
+        result: dict[str, Any] = {}
+
+        # Scalars from primary header
+        skip_cards = {'SIMPLE', 'BITPIX', 'NAXIS', 'EXTEND', 'KIND', 'VERSION', 'END'}
+        for card in primary_hdr.cards:
+            key = card.keyword
+            if not key or key in skip_cards:
+                continue
+            result[key] = card.value
+
+        # Reconstruct MaskedArrays from HDU pairs
+        for name, _data in list(hdu_map.items()):
+            if name.endswith('_MASK'):
+                base = name[:-5]
+                if base in hdu_map:
+                    result[base] = ma.MaskedArray(hdu_map[base], mask=hdu_map[name].astype(bool))
+                    hdu_map.pop(base, None)
+                    hdu_map.pop(name, None)
+
+        for name, data in hdu_map.items():
+            if name not in result:
+                result[name] = data
+
+    # Post-process header scalars: reconstruct tuples and None sentinels
+    keys_to_delete: list[str] = []
+    keys_to_add: dict[str, Any] = {}
+    for k in list(result.keys()):
+        if k.endswith('_NONE'):
+            base = k[:-5]
+            keys_to_add[base] = None
+            keys_to_delete.append(k)
+        elif k.endswith('_0'):
+            base = k[:-2]
+            k1 = base + '_1'
+            if k1 in result:
+                keys_to_add[base] = (result[k], result[k1])
+                keys_to_delete.append(k)
+                keys_to_delete.append(k1)
+
+    for k in keys_to_delete:
+        result.pop(k, None)
+    result.update(keys_to_add)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Dtype verification helper
+# ---------------------------------------------------------------------------
+
+
+def verify_dtype(
+    arrays: dict[str, ma.MaskedArray | np.ndarray],
+    image_dtype: np.dtype,
+    metadata_dtype: np.dtype,
+    image_fields: list[str],
+    metadata_fields: list[str],
+    float64_fields: list[str] | None = None,
+) -> None:
+    """Verify that loaded arrays have the expected dtypes.
+
+    Parameters:
+        arrays: Dict of field name → array.
+        image_dtype: Expected dtype for image arrays.
+        metadata_dtype: Expected dtype for metadata arrays.
+        image_fields: List of field names that should have ``image_dtype``.
+        metadata_fields: List of field names that should have
+            ``metadata_dtype``.
+        float64_fields: Optional list of field names that must always be
+            ``float64`` regardless of ``metadata_dtype`` (e.g. ``time``).
+
+    Raises:
+        ValueError: If any array dtype does not match its expected dtype,
+            or if ``image_number`` is not ``uint16``, or if any mask is
+            not ``bool_``.
+    """
+    for fname in image_fields:
+        arr = arrays.get(fname)
+        if arr is None:
+            continue
+        actual = np.array(arr).dtype
+        if actual != image_dtype:
+            raise ValueError(
+                f'image_dtype mismatch for field {fname!r}: '
+                f'file declares {image_dtype} but array is {actual}'
+            )
+
+    for fname in metadata_fields:
+        arr = arrays.get(fname)
+        if arr is None:
+            continue
+        actual = np.array(arr).dtype
+        if actual != metadata_dtype:
+            raise ValueError(
+                f'metadata_dtype mismatch for field {fname!r}: '
+                f'file declares {metadata_dtype} but array is {actual}'
+            )
+
+    if float64_fields:
+        for fname in float64_fields:
+            arr = arrays.get(fname)
+            if arr is None:
+                continue
+            actual = np.array(arr).dtype
+            if actual != np.dtype(np.float64):
+                raise ValueError(
+                    f'dtype mismatch for field {fname!r}: must be float64, got {actual}'
+                )
+
+    imgnum = arrays.get('image_number')
+    if imgnum is not None:
+        actual = np.array(imgnum).dtype
+        if actual != np.dtype(np.uint16):
+            raise ValueError(f'image_number must be uint16, got {actual}')
+
+    for fname, arr in arrays.items():
+        if not isinstance(arr, ma.MaskedArray):
+            continue
+        mask = ma.getmaskarray(arr)
+        if mask.dtype != np.dtype(np.bool_):
+            raise ValueError(f'Mask for field {fname!r} must be bool_, got {mask.dtype}')

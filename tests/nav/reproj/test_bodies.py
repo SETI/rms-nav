@@ -86,6 +86,8 @@ def _make_repro(
         incidence=_fill(0.4),
         time=time,
         photometric_model_name=None,
+        image_dtype=np.dtype(np.float32),
+        metadata_dtype=np.dtype(np.float32),
     )
 
 
@@ -167,25 +169,29 @@ class TestBodyMosaicConstructor:
         with pytest.raises(ValueError, match='lon_direction'):
             BodyMosaic(body_name='MIMAS', lon_direction='north')  # type: ignore[arg-type]
 
-    def test_dynamic_false_no_lat_range_raises(self) -> None:
-        """dynamic=False with lat_range=None raises ValueError."""
-        with pytest.raises(ValueError, match='lat_range'):
-            BodyMosaic(
-                body_name='MIMAS',
-                dynamic=False,
-                lat_range=None,
-                lon_range=(0.0, 1.0),
-            )
+    def test_dynamic_false_none_lat_range_uses_full_valid_lat(self) -> None:
+        """dynamic=False with lat_range=None uses the full valid latitude extent."""
+        mosaic = BodyMosaic(
+            body_name='MIMAS',
+            lat_resolution=_LAT_RES,
+            lon_resolution=_LON_RES,
+            dynamic=False,
+            lat_range=None,
+            lon_range=(0.0, 1.0),
+        )
+        assert mosaic is not None
 
-    def test_dynamic_false_no_lon_range_raises(self) -> None:
-        """dynamic=False with lon_range=None raises ValueError."""
-        with pytest.raises(ValueError, match='lon_range'):
-            BodyMosaic(
-                body_name='MIMAS',
-                dynamic=False,
-                lat_range=(0.0, 1.0),
-                lon_range=None,
-            )
+    def test_dynamic_false_none_lon_range_uses_full_valid_lon(self) -> None:
+        """dynamic=False with lon_range=None uses the full valid longitude extent."""
+        mosaic = BodyMosaic(
+            body_name='MIMAS',
+            lat_resolution=_LAT_RES,
+            lon_resolution=_LON_RES,
+            dynamic=False,
+            lat_range=(0.0, 1.0),
+            lon_range=None,
+        )
+        assert mosaic is not None
 
     def test_valid_defaults_construct_successfully(self) -> None:
         """Default constructor with only body_name succeeds."""

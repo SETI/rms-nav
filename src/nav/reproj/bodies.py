@@ -2,10 +2,6 @@
 
 This module provides the BodyMosaic class for reprojecting planetary body
 images onto latitude/longitude grids and accumulating them into mosaics.
-
-Thread safety: BodyMosaic.reproject() is not thread-safe because it may
-temporarily mutate obs.fov (global observation state). Concurrent calls from
-separate threads will interfere.
 """
 
 import enum
@@ -20,9 +16,17 @@ import oops
 import polymath
 from scipy.ndimage import maximum_filter
 
+from nav.reproj._serialization import (
+    infer_format,
+    load_fits,
+    load_npz,
+    save_fits,
+    save_npz,
+    verify_dtype,
+)
 from nav.reproj.photometric_model import PhotometricModel
 from nav.support.image import array_zoom
-from nav.support.types import NDArrayBoolType, NDArrayFloatType, NDArrayIntType
+from nav.support.types import NDArrayBoolType, NDArrayFloatType, NDArrayIntType, PathLike
 
 _LOGGING_NAME = 'nav.' + __name__
 
@@ -72,13 +76,14 @@ class BodyReprojResult:
 
     Attributes:
         body_name: The name of the body.
+        img: Reprojected image [latitude, longitude].
         lat_resolution: Latitude resolution (rad/pixel).
         lon_resolution: Longitude resolution (rad/pixel).
-        latlon_type: Latitude/longitude coordinate system type.
-        lon_direction: Longitude direction convention.
         lat_idx_range: (min, max) latitude bin indices in the full grid.
         lon_idx_range: (min, max) longitude bin indices in the full grid.
-        img: Reprojected image [latitude, longitude].
+        latlon_type: Latitude/longitude coordinate system type ('centric',
+            'graphic', 'squashed').
+        lon_direction: Longitude direction convention ('east', 'west').
         resolution: Radial resolution (km/pixel) at each pixel.
         eff_resolution: Effective resolution (km/pixel), includes nav error.
         phase: Phase angle (rad) at each pixel.
@@ -86,16 +91,19 @@ class BodyReprojResult:
         incidence: Incidence angle (rad) at each pixel.
         time: Midtime of the observation (TDB seconds).
         photometric_model_name: Name of the photometric model applied, or None.
+        image_dtype: NumPy dtype used for the ``img`` array.
+        metadata_dtype: NumPy dtype used for geometry arrays (``resolution``,
+            ``eff_resolution``, ``phase``, ``emission``, ``incidence``).
     """
 
     body_name: str
+    img: ma.MaskedArray
     lat_resolution: float
     lon_resolution: float
-    latlon_type: Literal['centric', 'graphic', 'squashed']
-    lon_direction: Literal['east', 'west']
     lat_idx_range: tuple[int, int]
     lon_idx_range: tuple[int, int]
-    img: ma.MaskedArray
+    latlon_type: Literal['centric', 'graphic', 'squashed']
+    lon_direction: Literal['east', 'west']
     resolution: ma.MaskedArray
     eff_resolution: ma.MaskedArray
     phase: ma.MaskedArray
@@ -103,6 +111,141 @@ class BodyReprojResult:
     incidence: ma.MaskedArray
     time: float
     photometric_model_name: str | None
+    image_dtype: np.dtype
+    metadata_dtype: np.dtype
+
+    def save(
+        self,
+        path: PathLike,
+        *,
+        format: str | None = None,  # noqa: A002
+        compress: bool = True,
+    ) -> None:
+        """Save this BodyReprojResult to a file.
+
+        Parameters:
+            path: Output path (``str``, ``pathlib.Path``, or ``filecache.FCPath``).
+                The format is inferred from the extension (.npz for NumPy archive,
+                .fits/.fit for FITS) unless ``format`` is given.
+            format: Explicit format: ``'npz'`` or ``'fits'``. Overrides
+                extension-based inference.
+            compress: If True (default), use compressed npz. Ignored for
+                FITS.
+
+        Raises:
+            ValueError: If the format cannot be inferred or is not
+                supported.
+
+        Example::
+
+            result = mosaic.reproject(obs)
+            result.save('reprojection.npz')
+            result.save('reprojection.fits', format='fits')
+            reloaded = BodyReprojResult.load('reprojection.npz')
+        """
+        fmt = infer_format(path, format)
+        payload: dict[str, Any] = {
+            'body_name': self.body_name,
+            'img': self.img,
+            'lat_resolution': self.lat_resolution,
+            'lon_resolution': self.lon_resolution,
+            'lat_idx_range': self.lat_idx_range,
+            'lon_idx_range': self.lon_idx_range,
+            'latlon_type': self.latlon_type,
+            'lon_direction': self.lon_direction,
+            'resolution': self.resolution,
+            'eff_resolution': self.eff_resolution,
+            'phase': self.phase,
+            'emission': self.emission,
+            'incidence': self.incidence,
+            'time': self.time,
+            'photometric_model_name': self.photometric_model_name,
+            'image_dtype': self.image_dtype,
+            'metadata_dtype': self.metadata_dtype,
+        }
+        if fmt == 'npz':
+            save_npz(path, 'BodyReprojResult', 1, payload, compress=compress)
+        else:
+            save_fits(path, 'BodyReprojResult', 1, payload)
+
+    @classmethod
+    def load(
+        cls,
+        path: PathLike,
+        *,
+        format: str | None = None,  # noqa: A002
+    ) -> 'BodyReprojResult':
+        """Load a BodyReprojResult from a file.
+
+        Parameters:
+            path: Input path (``str``, ``pathlib.Path``, or ``filecache.FCPath``).
+            format: Explicit format (``'npz'`` or ``'fits'``). If None,
+                inferred from the file extension.
+
+        Returns:
+            A new BodyReprojResult with the loaded data.
+
+        Raises:
+            ValueError: If the file's kind does not match, or if any array
+                dtype does not match the declared ``image_dtype`` /
+                ``metadata_dtype``, or if ``image_number`` is not uint16.
+
+        Example::
+
+            result = BodyReprojResult.load('reprojection.npz')
+        """
+        fmt = infer_format(path, format)
+        d = (
+            load_npz(path, 'BodyReprojResult')
+            if fmt == 'npz'
+            else load_fits(path, 'BodyReprojResult')
+        )
+
+        image_dtype = np.dtype(str(d['image_dtype']))
+        metadata_dtype = np.dtype(str(d['metadata_dtype']))
+
+        verify_dtype(
+            {
+                k: d[k]
+                for k in ('img', 'resolution', 'eff_resolution', 'phase', 'emission', 'incidence')
+            },
+            image_dtype,
+            metadata_dtype,
+            image_fields=['img'],
+            metadata_fields=['resolution', 'eff_resolution', 'phase', 'emission', 'incidence'],
+        )
+
+        lat_idx = d['lat_idx_range']
+        lat_idx_range: tuple[int, int] = (int(lat_idx[0]), int(lat_idx[1]))
+        lon_idx = d['lon_idx_range']
+        lon_idx_range: tuple[int, int] = (int(lon_idx[0]), int(lon_idx[1]))
+
+        phot = d.get('photometric_model_name')
+        photometric_model_name: str | None
+        if phot is not None and str(phot) != 'None':
+            photometric_model_name = str(phot)
+        else:
+            photometric_model_name = None
+
+        return cls(
+            body_name=str(d['body_name']),
+            img=d['img'],
+            lat_resolution=float(d['lat_resolution']),
+            lon_resolution=float(d['lon_resolution']),
+            lat_idx_range=lat_idx_range,
+            lon_idx_range=lon_idx_range,
+            latlon_type=str(d['latlon_type']),  # type: ignore[arg-type]
+            lon_direction=str(d['lon_direction']),  # type: ignore[arg-type]
+            resolution=d['resolution'],
+            eff_resolution=d['eff_resolution'],
+            phase=d['phase'],
+            emission=d['emission'],
+            incidence=d['incidence'],
+            time=float(d['time']),
+            photometric_model_name=photometric_model_name,
+            image_dtype=image_dtype,
+            metadata_dtype=metadata_dtype,
+        )
 
 
 @dataclass(frozen=True)
@@ -110,35 +253,193 @@ class BodyMosaicData:
     """Mosaic data returned by BodyMosaic retrieval methods.
 
     Attributes:
+        body_name: The name of the body.
         img: Reprojected mosaic image [latitude, longitude]. Masked where no
             data has been contributed.
+        lat_resolution: Latitude resolution (rad/pixel).
+        lon_resolution: Longitude resolution (rad/pixel).
         lat_range: (min, max) latitude extents of the returned image (rad).
         lon_range: (min, max) longitude extents of the returned image (rad).
+        latlon_type: Latitude/longitude coordinate system type ('centric',
+            'graphic', 'squashed').
+        lon_direction: Longitude direction convention ('east', 'west').
         resolution: Resolution (km/pixel) at each mosaic pixel.
         eff_resolution: Effective resolution (km/pixel) at each mosaic pixel.
         phase: Phase angle (rad) at each mosaic pixel.
         emission: Emission angle (rad) at each mosaic pixel.
         incidence: Incidence angle (rad) at each mosaic pixel.
+        time: Observation midtime (TDB seconds) for each mosaic pixel. Always
+            stored as ``float64`` regardless of ``metadata_dtype``.
         image_number: Index into the image list for the contributing image.
-        time: Observation midtime (TDB seconds) for each mosaic pixel.
-        lat_resolution: Latitude resolution (rad/pixel).
-        lon_resolution: Longitude resolution (rad/pixel).
+            Always stored as ``uint16``, capping a single mosaic at 65 535
+            contributing images.
         photometric_model_name: Name of the photometric model, or None.
+        image_dtype: NumPy dtype used for the ``img`` array.
+        metadata_dtype: NumPy dtype used for geometry arrays (``resolution``,
+            ``eff_resolution``, ``phase``, ``emission``, ``incidence``).
     """
 
+    body_name: str
     img: ma.MaskedArray
+    lat_resolution: float
+    lon_resolution: float
     lat_range: tuple[float, float]
     lon_range: tuple[float, float]
+    latlon_type: Literal['centric', 'graphic', 'squashed']
+    lon_direction: Literal['east', 'west']
     resolution: ma.MaskedArray
     eff_resolution: ma.MaskedArray
     phase: ma.MaskedArray
     emission: ma.MaskedArray
     incidence: ma.MaskedArray
-    image_number: ma.MaskedArray
     time: ma.MaskedArray
-    lat_resolution: float
-    lon_resolution: float
+    image_number: ma.MaskedArray
     photometric_model_name: str | None
+    image_dtype: np.dtype
+    metadata_dtype: np.dtype
+
+    def save(
+        self,
+        path: PathLike,
+        *,
+        format: str | None = None,  # noqa: A002
+        compress: bool = True,
+    ) -> None:
+        """Save this BodyMosaicData to a file.
+
+        Parameters:
+            path: Output path (``str``, ``pathlib.Path``, or ``filecache.FCPath``).
+                The format is inferred from the extension (.npz for NumPy archive,
+                .fits/.fit for FITS) unless ``format`` is given.
+            format: Explicit format: ``'npz'`` or ``'fits'``. Overrides
+                extension-based inference.
+            compress: If True (default), use compressed npz. Ignored for
+                FITS.
+
+        Raises:
+            ValueError: If the format cannot be inferred or is not
+                supported.
+
+        Example::
+
+            data = mosaic.to_bounded()
+            data.save('mimas.npz')
+            data.save('mimas.fits', format='fits')
+            data.save('mimas.npz', compress=False)
+            reloaded = BodyMosaicData.load('mimas.npz')
+        """
+        fmt = infer_format(path, format)
+        payload: dict[str, Any] = {
+            'body_name': self.body_name,
+            'img': self.img,
+            'lat_resolution': self.lat_resolution,
+            'lon_resolution': self.lon_resolution,
+            'lat_range': self.lat_range,
+            'lon_range': self.lon_range,
+            'latlon_type': self.latlon_type,
+            'lon_direction': self.lon_direction,
+            'resolution': self.resolution,
+            'eff_resolution': self.eff_resolution,
+            'phase': self.phase,
+            'emission': self.emission,
+            'incidence': self.incidence,
+            'time': self.time,
+            'image_number': self.image_number,
+            'photometric_model_name': self.photometric_model_name,
+            'image_dtype': self.image_dtype,
+            'metadata_dtype': self.metadata_dtype,
+        }
+        if fmt == 'npz':
+            save_npz(path, 'BodyMosaicData', 1, payload, compress=compress)
+        else:
+            save_fits(path, 'BodyMosaicData', 1, payload)
+
+    @classmethod
+    def load(
+        cls,
+        path: PathLike,
+        *,
+        format: str | None = None,  # noqa: A002
+    ) -> 'BodyMosaicData':
+        """Load a BodyMosaicData from a file.
+
+        Parameters:
+            path: Input path (``str``, ``pathlib.Path``, or ``filecache.FCPath``).
+            format: Explicit format (``'npz'`` or ``'fits'``). If None,
+                inferred from the file extension.
+
+        Returns:
+            A new BodyMosaicData with the loaded data.
+
+        Raises:
+            ValueError: If the file's kind does not match, or if any array
+                dtype does not match the declared ``image_dtype`` /
+                ``metadata_dtype``, or if ``image_number`` is not uint16,
+                or if ``time`` is not float64.
+
+        Example::
+
+            data = BodyMosaicData.load('mimas.npz')
+        """
+        fmt = infer_format(path, format)
+        d = load_npz(path, 'BodyMosaicData') if fmt == 'npz' else load_fits(path, 'BodyMosaicData')
+
+        image_dtype = np.dtype(str(d['image_dtype']))
+        metadata_dtype = np.dtype(str(d['metadata_dtype']))
+
+        verify_dtype(
+            {
+                k: d[k]
+                for k in (
+                    'img',
+                    'resolution',
+                    'eff_resolution',
+                    'phase',
+                    'emission',
+                    'incidence',
+                    'time',
+                    'image_number',
+                )
+            },
+            image_dtype,
+            metadata_dtype,
+            image_fields=['img'],
+            metadata_fields=['resolution', 'eff_resolution', 'phase', 'emission', 'incidence'],
+            float64_fields=['time'],
+        )
+
+        lat_r = d['lat_range']
+        lat_range: tuple[float, float] = (float(lat_r[0]), float(lat_r[1]))
+        lon_r = d['lon_range']
+        lon_range: tuple[float, float] = (float(lon_r[0]), float(lon_r[1]))
+
+        phot = d.get('photometric_model_name')
+        photometric_model_name: str | None
+        if phot is not None and str(phot) != 'None':
+            photometric_model_name = str(phot)
+        else:
+            photometric_model_name = None
+
+        return cls(
+            body_name=str(d['body_name']),
+            img=d['img'],
+            lat_resolution=float(d['lat_resolution']),
+            lon_resolution=float(d['lon_resolution']),
+            lat_range=lat_range,
+            lon_range=lon_range,
+            latlon_type=str(d['latlon_type']),  # type: ignore[arg-type]
+            lon_direction=str(d['lon_direction']),  # type: ignore[arg-type]
+            resolution=d['resolution'],
+            eff_resolution=d['eff_resolution'],
+            phase=d['phase'],
+            emission=d['emission'],
+            incidence=d['incidence'],
+            time=d['time'],
+            image_number=d['image_number'],
+            photometric_model_name=photometric_model_name,
+            image_dtype=image_dtype,
+            metadata_dtype=metadata_dtype,
+        )
 
 
 class BodyMosaic:
@@ -188,6 +489,8 @@ class BodyMosaic:
         lon_direction: Literal['east', 'west'] = 'east',
         photometric_model: PhotometricModel | None = None,
         merge_strategy: BodyMosaicMergeStrategy = BodyMosaicMergeStrategy.BEST_RESOLUTION,
+        image_dtype: np.typing.DTypeLike = np.float64,
+        metadata_dtype: np.typing.DTypeLike = np.float32,
     ) -> None:
         """Initialize a BodyMosaic.
 
@@ -195,19 +498,19 @@ class BodyMosaic:
             body_name: The name of the body (e.g. 'MIMAS').
             lat_resolution: Latitude resolution (rad/pixel).
             lon_resolution: Longitude resolution (rad/pixel).
-            lat_range: If provided, the (min_lat, max_lat) extent of the mosaic
-                in radians. If None and dynamic=True, starts empty and grows.
-                If None and dynamic=False, raises ValueError.
-            lon_range: If provided, the (min_lon, max_lon) longitude extent.
-                Behaviour mirrors lat_range.
+            lat_range: (min_lat, max_lat) extent of the mosaic in radians.
+                If None, use the full valid lat range.
+            lon_range: (min_lon, max_lon) longitude extent in radians.
+                If None, use the full valid lon range.
             dynamic: If True, the internal arrays grow when add() receives data
                 outside the current bounds. If False, out-of-bounds data is
-                silently clipped. With dynamic=False, both lat_range and
-                lon_range must be provided.
+                silently clipped to the configured lat_range / lon_range.
             max_incidence: Maximum incidence angle (rad) for valid pixels. None
                 means no constraint.
-            max_emission: Maximum emission angle (rad) for valid pixels.
-            max_resolution: Maximum resolution (km/pixel) for valid pixels.
+            max_emission: Maximum emission angle (rad) for valid pixels. None
+                means no constraint.
+            max_resolution: Maximum resolution (km/pixel) for valid pixels. None
+                means no constraint.
             edge_margin: Number of edge pixels to discard (ISS images have
                 garbage near the edges).
             zoom: Zoom factor for sub-pixel interpolation during reprojection.
@@ -217,10 +520,20 @@ class BodyMosaic:
             photometric_model: Photometric correction to apply during
                 reproject(). None (default) means no correction.
             merge_strategy: Strategy for resolving pixel conflicts during add().
+            image_dtype: NumPy dtype for the reprojected brightness ``img``
+                array. Defaults to ``np.float64``.
+            metadata_dtype: NumPy dtype for geometry arrays (``resolution``,
+                ``eff_resolution``, ``phase``, ``emission``, ``incidence``).
+                Defaults to ``np.float32``.
 
         Raises:
-            ValueError: If latlon_type or lon_direction is invalid, or if
-                dynamic=False and a required range is missing.
+            ValueError: If latlon_type or lon_direction is invalid.
+
+        Note:
+            ``time`` is always stored as ``float64`` regardless of
+            ``metadata_dtype``. ``image_number`` is always stored as
+            ``uint16``, capping a single mosaic at 65 535 contributing images.
+            ``add()`` raises ``OverflowError`` if that limit is exceeded.
         """
         if latlon_type not in ('centric', 'graphic', 'squashed'):
             raise ValueError(
@@ -228,10 +541,6 @@ class BodyMosaic:
             )
         if lon_direction not in ('east', 'west'):
             raise ValueError(f"lon_direction must be 'east' or 'west', got {lon_direction!r}")
-        if not dynamic and lat_range is None:
-            raise ValueError('lat_range must be specified when dynamic=False')
-        if not dynamic and lon_range is None:
-            raise ValueError('lon_range must be specified when dynamic=False')
 
         self.body_name = body_name
         self._lat_resolution = lat_resolution
@@ -248,20 +557,22 @@ class BodyMosaic:
         self._lon_direction = lon_direction
         self._photometric_model = photometric_model
         self._merge_strategy = merge_strategy
+        self._image_dtype: np.dtype = np.dtype(image_dtype)
+        self._metadata_dtype: np.dtype = np.dtype(metadata_dtype)
 
         # Full-grid dimensions
         self._n_full_lat = int(math.pi / lat_resolution)
         self._n_full_lon = int(2.0 * math.pi / lon_resolution)
 
         # Internal mosaic arrays (empty = not yet initialized)
-        self._img: NDArrayFloatType = np.empty((0, 0), dtype=np.float32)
-        self._resolution: NDArrayFloatType = np.empty((0, 0), dtype=np.float32)
-        self._eff_resolution: NDArrayFloatType = np.empty((0, 0), dtype=np.float32)
-        self._phase: NDArrayFloatType = np.empty((0, 0), dtype=np.float32)
-        self._emission: NDArrayFloatType = np.empty((0, 0), dtype=np.float32)
-        self._incidence: NDArrayFloatType = np.empty((0, 0), dtype=np.float32)
-        self._image_number: NDArrayIntType = np.empty((0, 0), dtype=np.int32)
+        self._img: NDArrayFloatType = np.empty((0, 0), dtype=self._image_dtype)
+        self._resolution: NDArrayFloatType = np.empty((0, 0), dtype=self._metadata_dtype)
+        self._eff_resolution: NDArrayFloatType = np.empty((0, 0), dtype=self._metadata_dtype)
+        self._phase: NDArrayFloatType = np.empty((0, 0), dtype=self._metadata_dtype)
+        self._emission: NDArrayFloatType = np.empty((0, 0), dtype=self._metadata_dtype)
+        self._incidence: NDArrayFloatType = np.empty((0, 0), dtype=self._metadata_dtype)
         self._time: NDArrayFloatType = np.empty((0, 0), dtype=np.float64)
+        self._image_number: NDArrayIntType = np.empty((0, 0), dtype=np.uint16)
         self._has_data: NDArrayBoolType = np.empty((0, 0), dtype=np.bool_)
 
         # Current buffer dimensions
@@ -273,8 +584,8 @@ class BodyMosaic:
         # Count of images added
         self._image_count: int = 0
 
-        # Pre-allocate if ranges provided
-        if lat_range is not None or lon_range is not None:
+        # Pre-allocate if not dynamic, or if explicit ranges provided
+        if not dynamic or lat_range is not None or lon_range is not None:
             self._preallocate(lat_range, lon_range)
 
     # -----------------------------------------------------------------------
@@ -399,59 +710,39 @@ class BodyMosaic:
 
         Returns:
             BodyReprojResult with the reprojected data.
+
+        Note:
+            The image data is taken from the zoomed, interpolated image, while
+            the incidence, emission, phase, and resolution are taken from the
+            original non-interpolated data and thus will be slightly more
+            coarse-grained.
         """
         logger = logging.getLogger(_LOGGING_NAME + '.reproject')
 
         if data is None:
             data = obs.data
 
-        return self._reproject_impl(
-            obs,
-            data=data,
-            navigation_uncertainty=navigation_uncertainty,
-            mask_only=mask_only,
-            override_backplane=override_backplane,
-            subimage_edges=subimage_edges,
-            mask_bad_areas=mask_bad_areas,
-            logger=logger,
-        )
-
-    def _reproject_impl(
-        self,
-        obs: Any,
-        *,
-        data: NDArrayFloatType,
-        navigation_uncertainty: float,
-        mask_only: bool,
-        override_backplane: Any,
-        subimage_edges: tuple[int, int, int, int] | None,
-        mask_bad_areas: bool,
-        logger: logging.Logger,
-    ) -> BodyReprojResult:
-        """Core reprojection implementation."""
-
         bp = override_backplane if override_backplane is not None else oops.backplane.Backplane(obs)
 
         if self._max_incidence is not None or not mask_only:
-            bp.lambert_law(self.body_name).mvals.astype('float32')
-            bp_incidence = bp.incidence_angle(self.body_name).mvals.astype('float32')
+            bp_incidence = bp.incidence_angle(self.body_name).mvals.astype(self._metadata_dtype)
 
         if self._max_emission is not None or not mask_only:
-            bp_emission = bp.emission_angle(self.body_name).mvals.astype('float32')
+            bp_emission = bp.emission_angle(self.body_name).mvals.astype(self._metadata_dtype)
 
         if not mask_only:
-            bp_phase = bp.phase_angle(self.body_name).mvals.astype('float32')
+            bp_phase = bp.phase_angle(self.body_name).mvals.astype(self._metadata_dtype)
             center_resolution = bp.center_resolution(self.body_name).vals
             resolution = center_resolution / np.cos(bp_emission)
 
         bp_latitude = bp.latitude(self.body_name, lat_type=self._latlon_type)
         body_mask_inv = ma.getmaskarray(bp_latitude.mvals).copy()
-        bp_latitude = bp_latitude.mvals.astype('float32')
+        bp_latitude = bp_latitude.mvals.astype(self._metadata_dtype)
 
         bp_longitude = bp.longitude(
             self.body_name, direction=self._lon_direction, lon_type=self._latlon_type
         )
-        bp_longitude = bp_longitude.mvals.astype('float32')
+        bp_longitude = bp_longitude.mvals.astype(self._metadata_dtype)
 
         if subimage_edges is not None:
             u_min, u_max, v_min, v_max = subimage_edges
@@ -466,9 +757,7 @@ class BodyMosaic:
         if not mask_only:
             zero_mask = subimg == 0.0
             if mask_bad_areas:
-                from scipy.ndimage import maximum_filter as _mf
-
-                zero_mask = _mf(zero_mask, 3)
+                zero_mask = maximum_filter(zero_mask, 3)
 
         edge_margin = self._edge_margin
         if edge_margin > 0:
@@ -526,6 +815,37 @@ class BodyMosaic:
             self._latlon_type,
             self._lon_direction,
         )
+        if empty_mask:
+            logger.info('Empty body mask')
+        else:
+            logger.info(
+                'Latitude range       %8.2f %8.2f',
+                math.degrees(np.min(bp_latitude[ok_body_mask])),
+                math.degrees(np.max(bp_latitude[ok_body_mask])),
+            )
+            logger.debug(
+                'Latitude bin range  %8.2f %8.2f',
+                math.degrees(np.min(lat_bins_act)),
+                math.degrees(np.max(lat_bins_act)),
+            )
+            logger.info(
+                'Longitude range      %8.2f %8.2f',
+                math.degrees(np.min(bp_longitude[ok_body_mask])),
+                math.degrees(np.max(bp_longitude[ok_body_mask])),
+            )
+            logger.debug(
+                'Longitude bin range %8.2f %8.2f',
+                math.degrees(np.min(lon_bins_act)),
+                math.degrees(np.max(lon_bins_act)),
+            )
+            if not mask_only:
+                logger.info(
+                    'Resolution range     %8.2f %8.2f',
+                    math.degrees(np.min(resolution[ok_body_mask])),
+                    math.degrees(np.max(resolution[ok_body_mask])),
+                )
+            logger.debug('Latitude pixel range %d %d', int(min_lat_pixel), int(max_lat_pixel))
+            logger.debug('Longitude pixel range %d %d', int(min_lon_pixel), int(max_lon_pixel))
 
         uv = self.latitude_longitude_to_pixels(obs, lat_bins_act, lon_bins_act)
         u_sv, v_sv = uv.to_scalars()
@@ -543,7 +863,7 @@ class BodyMosaic:
         good_lon = lon_bins[goodmask]
 
         shape = (latitude_pixels, longitude_pixels)
-        empty_ma = ma.zeros(shape, dtype=np.float32)
+        empty_ma = ma.zeros(shape, dtype=self._metadata_dtype)
         empty_ma.mask = True
         empty_sub = empty_ma[min_lat_pixel : max_lat_pixel + 1, min_lon_pixel : max_lon_pixel + 1]
 
@@ -553,13 +873,13 @@ class BodyMosaic:
             # Return an abbreviated result; img contains the bool mask
             return BodyReprojResult(
                 body_name=self.body_name,
+                img=ma.MaskedArray(repro_img.astype(self._image_dtype)),
                 lat_resolution=self._lat_resolution,
                 lon_resolution=self._lon_resolution,
-                latlon_type=self._latlon_type,
-                lon_direction=self._lon_direction,
                 lat_idx_range=(min_lat_pixel, max_lat_pixel),
                 lon_idx_range=(min_lon_pixel, max_lon_pixel),
-                img=ma.MaskedArray(repro_img.astype(np.float32)),
+                latlon_type=self._latlon_type,
+                lon_direction=self._lon_direction,
                 resolution=empty_sub.copy(),
                 eff_resolution=empty_sub.copy(),
                 phase=empty_sub.copy(),
@@ -567,6 +887,8 @@ class BodyMosaic:
                 incidence=empty_sub.copy(),
                 time=obs.midtime,
                 photometric_model_name=None,
+                image_dtype=self._image_dtype,
+                metadata_dtype=self._metadata_dtype,
             )
 
         # Filter additional bad data
@@ -602,24 +924,32 @@ class BodyMosaic:
                 interp_data, incidence=inc, emission=emi, phase=pha
             )
 
-        def _make_repro_array() -> ma.MaskedArray:
-            arr = ma.zeros((latitude_pixels, longitude_pixels), dtype=np.float32)
+        def _make_repro_array(dtype: np.dtype) -> ma.MaskedArray:
+            """Return a fully-masked MaskedArray of shape (latitude_pixels, longitude_pixels).
+
+            Parameters:
+                dtype: NumPy dtype for the array data.
+
+            Returns:
+                Fully-masked zero array of the requested dtype.
+            """
+            arr = ma.zeros((latitude_pixels, longitude_pixels), dtype=dtype)
             arr.mask = True
             return arr
 
-        repro_img_full = _make_repro_array()
+        repro_img_full = _make_repro_array(self._image_dtype)
         repro_img_full[good_lat, good_lon] = interp_data
 
-        repro_res_full = _make_repro_array()
+        repro_res_full = _make_repro_array(self._metadata_dtype)
         repro_res_full[good_lat, good_lon] = resolution[good_v, good_u]
 
-        repro_phase_full = _make_repro_array()
+        repro_phase_full = _make_repro_array(self._metadata_dtype)
         repro_phase_full[good_lat, good_lon] = bp_phase[good_v, good_u]
 
-        repro_emission_full = _make_repro_array()
+        repro_emission_full = _make_repro_array(self._metadata_dtype)
         repro_emission_full[good_lat, good_lon] = bp_emission[good_v, good_u]
 
-        repro_incidence_full = _make_repro_array()
+        repro_incidence_full = _make_repro_array(self._metadata_dtype)
         repro_incidence_full[good_lat, good_lon] = bp_incidence[good_v, good_u]
 
         sub = slice(min_lat_pixel, max_lat_pixel + 1), slice(min_lon_pixel, max_lon_pixel + 1)
@@ -633,13 +963,13 @@ class BodyMosaic:
 
         return BodyReprojResult(
             body_name=self.body_name,
+            img=repro_img_full[sub].copy(),
             lat_resolution=self._lat_resolution,
             lon_resolution=self._lon_resolution,
-            latlon_type=self._latlon_type,
-            lon_direction=self._lon_direction,
             lat_idx_range=(min_lat_pixel, max_lat_pixel),
             lon_idx_range=(min_lon_pixel, max_lon_pixel),
-            img=repro_img_full[sub].copy(),
+            latlon_type=self._latlon_type,
+            lon_direction=self._lon_direction,
             resolution=repro_res_full[sub].copy(),
             eff_resolution=eff_res,
             phase=repro_phase_full[sub].copy(),
@@ -647,6 +977,8 @@ class BodyMosaic:
             incidence=repro_incidence_full[sub].copy(),
             time=obs.midtime,
             photometric_model_name=phot_name,
+            image_dtype=self._image_dtype,
+            metadata_dtype=self._metadata_dtype,
         )
 
     # -----------------------------------------------------------------------
@@ -674,9 +1006,17 @@ class BodyMosaic:
                 also copy, reducing isolated-pixel artifacts.
 
         Raises:
+            OverflowError: If the number of images added would exceed the
+                uint16 maximum of 65 535.
             ValueError: If repro's resolution or coordinate system does not
                 match the mosaic's configuration.
         """
+        if self._image_count > np.iinfo(np.uint16).max:
+            raise OverflowError(
+                f'image_count {self._image_count} exceeds uint16 max '
+                f'{np.iinfo(np.uint16).max}; cannot add more images'
+            )
+
         self._validate_repro(repro)
 
         lat_min = repro.lat_idx_range[0]
@@ -885,7 +1225,16 @@ class BodyMosaic:
         lat_range: tuple[float, float] | None,
         lon_range: tuple[float, float] | None,
     ) -> None:
-        """Pre-allocate internal arrays based on given ranges."""
+        """Pre-allocate internal arrays based on given ranges.
+
+        When a range is None, the full valid range is used so that
+        ``dynamic=False`` with no explicit range produces a fully-allocated
+        global mosaic rather than an empty one.
+
+        Parameters:
+            lat_range: (min_lat, max_lat) in radians, or None for full range.
+            lon_range: (min_lon, max_lon) in radians, or None for full range.
+        """
         if lat_range is not None:
             lat_min_bin = math.ceil((lat_range[0] + math.pi / 2.0) / self._lat_resolution)
             lat_max_bin = math.floor((lat_range[1] + math.pi / 2.0) / self._lat_resolution)
@@ -894,7 +1243,8 @@ class BodyMosaic:
             n_lat = lat_max_bin - lat_min_bin + 1
         else:
             lat_min_bin = 0
-            n_lat = 0
+            lat_max_bin = self._n_full_lat - 1
+            n_lat = self._n_full_lat
 
         if lon_range is not None:
             lon_min_bin = math.ceil(lon_range[0] / self._lon_resolution)
@@ -904,7 +1254,8 @@ class BodyMosaic:
             n_lon = lon_max_bin - lon_min_bin + 1
         else:
             lon_min_bin = 0
-            n_lon = 0
+            lon_max_bin = self._n_full_lon - 1
+            n_lon = self._n_full_lon
 
         self._lat_min_bin = lat_min_bin
         self._lon_min_bin = lon_min_bin
@@ -916,14 +1267,14 @@ class BodyMosaic:
 
     def _allocate(self, n_lat: int, n_lon: int) -> None:
         """Allocate fresh internal arrays of the given shape."""
-        self._img = np.zeros((n_lat, n_lon), dtype=np.float32)
-        self._resolution = np.zeros((n_lat, n_lon), dtype=np.float32)
-        self._eff_resolution = np.zeros((n_lat, n_lon), dtype=np.float32)
-        self._phase = np.zeros((n_lat, n_lon), dtype=np.float32)
-        self._emission = np.zeros((n_lat, n_lon), dtype=np.float32)
-        self._incidence = np.zeros((n_lat, n_lon), dtype=np.float32)
-        self._image_number = np.zeros((n_lat, n_lon), dtype=np.int32)
+        self._img = np.zeros((n_lat, n_lon), dtype=self._image_dtype)
+        self._resolution = np.zeros((n_lat, n_lon), dtype=self._metadata_dtype)
+        self._eff_resolution = np.zeros((n_lat, n_lon), dtype=self._metadata_dtype)
+        self._phase = np.zeros((n_lat, n_lon), dtype=self._metadata_dtype)
+        self._emission = np.zeros((n_lat, n_lon), dtype=self._metadata_dtype)
+        self._incidence = np.zeros((n_lat, n_lon), dtype=self._metadata_dtype)
         self._time = np.zeros((n_lat, n_lon), dtype=np.float64)
+        self._image_number = np.zeros((n_lat, n_lon), dtype=np.uint16)
         self._has_data = np.zeros((n_lat, n_lon), dtype=np.bool_)
 
     def _expand_to_include(self, lat_min: int, lat_max: int, lon_min: int, lon_max: int) -> None:
@@ -954,14 +1305,14 @@ class BodyMosaic:
         n_new = new_max - new_min + 1
         row_offset = old_lat_min - new_min
 
-        new_img = np.zeros((n_new, self._n_lon), dtype=np.float32)
-        new_res = np.zeros_like(new_img)
-        new_eff = np.zeros_like(new_img)
-        new_phase = np.zeros_like(new_img)
-        new_emi = np.zeros_like(new_img)
-        new_inc = np.zeros_like(new_img)
-        new_imgnum = np.zeros((n_new, self._n_lon), dtype=np.int32)
+        new_img = np.zeros((n_new, self._n_lon), dtype=self._image_dtype)
+        new_res = np.zeros((n_new, self._n_lon), dtype=self._metadata_dtype)
+        new_eff = np.zeros((n_new, self._n_lon), dtype=self._metadata_dtype)
+        new_phase = np.zeros((n_new, self._n_lon), dtype=self._metadata_dtype)
+        new_emi = np.zeros((n_new, self._n_lon), dtype=self._metadata_dtype)
+        new_inc = np.zeros((n_new, self._n_lon), dtype=self._metadata_dtype)
         new_time = np.zeros((n_new, self._n_lon), dtype=np.float64)
+        new_imgnum = np.zeros((n_new, self._n_lon), dtype=np.uint16)
         new_has = np.zeros((n_new, self._n_lon), dtype=np.bool_)
 
         sl = slice(row_offset, row_offset + self._n_lat)
@@ -971,8 +1322,8 @@ class BodyMosaic:
         new_phase[sl] = self._phase
         new_emi[sl] = self._emission
         new_inc[sl] = self._incidence
-        new_imgnum[sl] = self._image_number
         new_time[sl] = self._time
+        new_imgnum[sl] = self._image_number
         new_has[sl] = self._has_data
 
         self._img = new_img
@@ -981,8 +1332,8 @@ class BodyMosaic:
         self._phase = new_phase
         self._emission = new_emi
         self._incidence = new_inc
-        self._image_number = new_imgnum
         self._time = new_time
+        self._image_number = new_imgnum
         self._has_data = new_has
         self._lat_min_bin = new_min
         self._n_lat = n_new
@@ -1031,14 +1382,14 @@ class BodyMosaic:
             n_new: Total new number of columns.
             new_lon_min: New longitude min bin (only set when shifting left).
         """
-        new_img = np.zeros((self._n_lat, n_new), dtype=np.float32)
-        new_res = np.zeros_like(new_img)
-        new_eff = np.zeros_like(new_img)
-        new_phase = np.zeros_like(new_img)
-        new_emi = np.zeros_like(new_img)
-        new_inc = np.zeros_like(new_img)
-        new_imgnum = np.zeros((self._n_lat, n_new), dtype=np.int32)
+        new_img = np.zeros((self._n_lat, n_new), dtype=self._image_dtype)
+        new_res = np.zeros((self._n_lat, n_new), dtype=self._metadata_dtype)
+        new_eff = np.zeros((self._n_lat, n_new), dtype=self._metadata_dtype)
+        new_phase = np.zeros((self._n_lat, n_new), dtype=self._metadata_dtype)
+        new_emi = np.zeros((self._n_lat, n_new), dtype=self._metadata_dtype)
+        new_inc = np.zeros((self._n_lat, n_new), dtype=self._metadata_dtype)
         new_time = np.zeros((self._n_lat, n_new), dtype=np.float64)
+        new_imgnum = np.zeros((self._n_lat, n_new), dtype=np.uint16)
         new_has = np.zeros((self._n_lat, n_new), dtype=np.bool_)
 
         sl = slice(shift_left, shift_left + self._n_lon)
@@ -1048,8 +1399,8 @@ class BodyMosaic:
         new_phase[:, sl] = self._phase
         new_emi[:, sl] = self._emission
         new_inc[:, sl] = self._incidence
-        new_imgnum[:, sl] = self._image_number
         new_time[:, sl] = self._time
+        new_imgnum[:, sl] = self._image_number
         new_has[:, sl] = self._has_data
 
         self._img = new_img
@@ -1058,8 +1409,8 @@ class BodyMosaic:
         self._phase = new_phase
         self._emission = new_emi
         self._incidence = new_inc
-        self._image_number = new_imgnum
         self._time = new_time
+        self._image_number = new_imgnum
         self._has_data = new_has
         self._n_lon = n_new
         if new_lon_min is not None:
@@ -1087,14 +1438,14 @@ class BodyMosaic:
         Returns:
             BodyMosaicData for the specified region.
         """
-        out_img = np.zeros((n_out_lat, n_out_lon), dtype=np.float32)
-        out_res = np.zeros_like(out_img)
-        out_eff = np.zeros_like(out_img)
-        out_phase = np.zeros_like(out_img)
-        out_emi = np.zeros_like(out_img)
-        out_inc = np.zeros_like(out_img)
-        out_imgnum = np.zeros((n_out_lat, n_out_lon), dtype=np.int32)
+        out_img = np.zeros((n_out_lat, n_out_lon), dtype=self._image_dtype)
+        out_res = np.zeros((n_out_lat, n_out_lon), dtype=self._metadata_dtype)
+        out_eff = np.zeros((n_out_lat, n_out_lon), dtype=self._metadata_dtype)
+        out_phase = np.zeros((n_out_lat, n_out_lon), dtype=self._metadata_dtype)
+        out_emi = np.zeros((n_out_lat, n_out_lon), dtype=self._metadata_dtype)
+        out_inc = np.zeros((n_out_lat, n_out_lon), dtype=self._metadata_dtype)
         out_time = np.zeros((n_out_lat, n_out_lon), dtype=np.float64)
+        out_imgnum = np.zeros((n_out_lat, n_out_lon), dtype=np.uint16)
         out_has = np.zeros((n_out_lat, n_out_lon), dtype=np.bool_)
 
         if self._has_data is not None:
@@ -1113,8 +1464,8 @@ class BodyMosaic:
                         out_phase[out_row, out_col] = self._phase[row, col]
                         out_emi[out_row, out_col] = self._emission[row, col]
                         out_inc[out_row, out_col] = self._incidence[row, col]
-                        out_imgnum[out_row, out_col] = self._image_number[row, col]
                         out_time[out_row, out_col] = self._time[row, col]
+                        out_imgnum[out_row, out_col] = self._image_number[row, col]
                         out_has[out_row, out_col] = True
 
         mask = ~out_has
@@ -1122,19 +1473,24 @@ class BodyMosaic:
         phot_name = self._photometric_model.name if self._photometric_model is not None else None
 
         return BodyMosaicData(
+            body_name=self.body_name,
             img=ma.MaskedArray(out_img, mask=mask),
+            lat_resolution=self._lat_resolution,
+            lon_resolution=self._lon_resolution,
             lat_range=lat_range,
             lon_range=lon_range,
+            latlon_type=self._latlon_type,
+            lon_direction=self._lon_direction,
             resolution=ma.MaskedArray(out_res, mask=mask),
             eff_resolution=ma.MaskedArray(out_eff, mask=mask),
             phase=ma.MaskedArray(out_phase, mask=mask),
             emission=ma.MaskedArray(out_emi, mask=mask),
             incidence=ma.MaskedArray(out_inc, mask=mask),
-            image_number=ma.MaskedArray(out_imgnum, mask=mask),
             time=ma.MaskedArray(out_time, mask=mask),
-            lat_resolution=self._lat_resolution,
-            lon_resolution=self._lon_resolution,
+            image_number=ma.MaskedArray(out_imgnum, mask=mask),
             photometric_model_name=phot_name,
+            image_dtype=self._image_dtype,
+            metadata_dtype=self._metadata_dtype,
         )
 
     def _validate_repro(self, repro: BodyReprojResult) -> None:

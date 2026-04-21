@@ -47,6 +47,10 @@ each new reprojected image. You can pre-allocate a specific region::
         dynamic=False,
     )
 
+When ``lat_range`` or ``lon_range`` is ``None`` (the default), the mosaic uses
+the full valid range for that axis. If ``dynamic=False`` and no range is
+specified, the mosaic is pre-allocated to the full global grid.
+
 Coordinate systems
 ^^^^^^^^^^^^^^^^^^
 
@@ -56,6 +60,30 @@ system is controlled by two parameters:
 - ``latlon_type``: one of ``'centric'`` (default), ``'graphic'``, or
   ``'squashed'``.
 - ``lon_direction``: ``'east'`` (default) or ``'west'``.
+
+Choosing dtypes
+^^^^^^^^^^^^^^^
+
+By default, the reprojected brightness image uses ``float64`` and all geometry
+arrays (resolution, phase, emission, incidence) and the ``time`` array use
+``float32``::
+
+    from nav.reproj import BodyMosaic
+    import numpy as np
+
+    # Defaults: image in float64, geometry in float32
+    mosaic = BodyMosaic(body_name='MIMAS')
+
+    # All float64 for maximum precision
+    mosaic = BodyMosaic(
+        body_name='MIMAS',
+        image_dtype=np.float32,     # smaller image storage
+        metadata_dtype=np.float64,  # full-precision geometry
+    )
+
+The ``time`` field is always stored as ``float64`` regardless of ``metadata_dtype``.
+The ``image_number`` field is always ``uint16``, capping a single mosaic at
+65 535 contributing images.
 
 Photometric correction
 ^^^^^^^^^^^^^^^^^^^^^^
@@ -123,7 +151,7 @@ fraction of the ring plane is observed::
 
     from nav.reproj import RingMosaic
 
-    mosaic = RingMosaic(planet_name='SATURN')
+    mosaic = RingMosaic('SATURN', radius_inner=70000, radius_outer=140000)
     for obs in observations:
         result = mosaic.reproject(obs)
         mosaic.add(result)
@@ -132,6 +160,20 @@ fraction of the ring plane is observed::
 
 The ``longitude_antimask`` field in the result indicates which full-grid
 longitude bins are present in the sparse storage.
+
+Choosing dtypes (rings)
+^^^^^^^^^^^^^^^^^^^^^^^
+
+The same ``image_dtype`` / ``metadata_dtype`` kwargs are available on
+:class:`~nav.reproj.rings.RingMosaic`::
+
+    import numpy as np
+    from nav.reproj import RingMosaic
+
+    mosaic = RingMosaic(
+        'SATURN', radius_inner=70000, radius_outer=140000,
+        metadata_dtype=np.float64,  # full-precision geometry
+    )
 
 Orbit model
 ^^^^^^^^^^^
@@ -142,19 +184,21 @@ are available::
 
     from nav.reproj import FRING_CORE, BRING_OUTER_EDGE
 
-Pass a custom model via the ``ring_orbit_model`` parameter::
+Pass a custom model via the ``orbit_model`` parameter::
 
     from nav.reproj import RingMosaic, RingOrbitModel
 
     my_orbit = RingOrbitModel(
+        name='MY-RING',
         a=140220.0,
-        ae=0.0,
         e=0.0,
-        long_peri=0.0,
-        precession_rate=0.0,
-        epoch_et=0.0,
+        w0=0.0,
+        dw=0.0,
+        mean_motion=581.964 * 3.14159 / 180.0,
+        epoch_utc='2007-01-01',
     )
-    mosaic = RingMosaic(planet_name='SATURN', ring_orbit_model=my_orbit)
+    mosaic = RingMosaic('SATURN', radius_inner=70000, radius_outer=140000,
+                        orbit_model=my_orbit)
 
 Merge strategy
 ^^^^^^^^^^^^^^
@@ -165,7 +209,7 @@ when multiple observations overlap::
     from nav.reproj import RingMosaic, RingMosaicMergeStrategy
 
     mosaic = RingMosaic(
-        planet_name='SATURN',
+        'SATURN', radius_inner=70000, radius_outer=140000,
         merge_strategy=RingMosaicMergeStrategy.BEST_RESOLUTION,
     )
 
@@ -185,6 +229,71 @@ Retrieval methods
   a longitude range.
 - :meth:`~nav.reproj.rings.RingMosaic.to_full` -- dense full 0 to 2\ |pi|
   longitude grid.
+
+Saving and loading
+------------------
+
+All four result dataclasses (:class:`~nav.reproj.bodies.BodyMosaicData`,
+:class:`~nav.reproj.bodies.BodyReprojResult`,
+:class:`~nav.reproj.rings.RingMosaicData`,
+:class:`~nav.reproj.rings.RingReprojResult`) support ``save()`` and ``load()``
+methods. Two file formats are supported:
+
+- **npz** (NumPy archive, default) — format inferred from a ``.npz``
+  extension.
+- **FITS** — format inferred from a ``.fits`` or ``.fit`` extension. Requires
+  the ``astropy`` package (included as a runtime dependency).
+
+Paths may be a string, a :class:`pathlib.Path`, or a :class:`filecache.FCPath`
+(for example ``gs://…`` URIs handled by the project’s ``FileCache``). Remote
+paths are fetched into the local cache on ``load()`` and written locally then
+uploaded on ``save()``.
+
+Body mosaic examples::
+
+    from nav.reproj import BodyMosaic, BodyMosaicData
+
+    data = mosaic.to_bounded()
+
+    # Save — format inferred from extension
+    data.save('mimas.npz')                    # compressed npz
+    data.save('mimas.npz', compress=False)    # uncompressed npz (faster I/O)
+    data.save('mimas.fits')                   # FITS
+    data.save('mimas.fits', format='fits')    # explicit format
+
+    # Load
+    reloaded = BodyMosaicData.load('mimas.npz')
+    reloaded = BodyMosaicData.load('mimas.fits')
+
+Body reprojection result::
+
+    from nav.reproj import BodyReprojResult
+
+    result = mosaic.reproject(obs)
+    result.save('reproj.npz')
+    reloaded = BodyReprojResult.load('reproj.npz')
+
+Ring mosaic examples::
+
+    import math
+    from nav.reproj import RingMosaicData
+
+    data = ring_mosaic.to_bounded(longitude_range=(0.0, math.pi))
+    data.save('saturn_rings.npz')
+    reloaded = RingMosaicData.load('saturn_rings.npz')
+
+Ring reprojection result::
+
+    from nav.reproj import RingReprojResult
+
+    result = ring_mosaic.reproject(obs)
+    result.save('ring_reproj.fits')
+    reloaded = RingReprojResult.load('ring_reproj.fits')
+
+When loading, the dtypes of all arrays are verified against the ``image_dtype``
+and ``metadata_dtype`` fields stored in the file. A ``ValueError`` is raised if
+any mismatch is detected, guarding against files produced by external tools
+that may have coerced dtypes.
 
 Cartographic navigation model
 -------------------------------

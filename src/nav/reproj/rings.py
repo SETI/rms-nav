@@ -21,9 +21,19 @@ import scipy.ndimage as nd
 from polymath import Scalar, Vector3
 
 from nav.reproj._context_managers import _reduced_oops_precision
+from nav.reproj._serialization import (
+    infer_format,
+    load_fits,
+    load_npz,
+    orbit_model_from_dict,
+    orbit_model_to_dict,
+    save_fits,
+    save_npz,
+    verify_dtype,
+)
 from nav.reproj.ring_orbit_model import RingOrbitModel
 from nav.support.image import array_unzoom, array_zoom
-from nav.support.types import NDArrayBoolType, NDArrayFloatType, NDArrayIntType
+from nav.support.types import NDArrayBoolType, NDArrayFloatType, NDArrayIntType, PathLike
 
 _LOGGING_NAME = 'nav.' + __name__
 
@@ -69,7 +79,8 @@ class RingReprojResult:
     ``longitude_antimask`` to reconstruct the actual longitude values.
 
     Attributes:
-        planet_name: The name of the planet whose ring was reprojected.
+        body_name: The name of the planet whose ring was reprojected.
+        img: Sparse reprojected image [radius, valid_longitude].
         longitude_resolution: Longitude resolution (rad/pixel).
         radius_resolution: Radius resolution (km/pixel).
         radius_inner: Inner radius of the reprojection (km).
@@ -77,7 +88,6 @@ class RingReprojResult:
         longitude_antimask: Boolean array of length ``n_full_lon`` (the
             total number of longitude bins from 0 to 2*pi). True at each
             longitude bin that has reprojected data.
-        img: Sparse reprojected image [radius, valid_longitude].
         mean_radial_resolution: Mean radial resolution per valid longitude
             (km/pixel).
         mean_angular_resolution: Mean angular resolution per valid longitude
@@ -88,15 +98,20 @@ class RingReprojResult:
         time: Midtime of the observation (TDB seconds).
         orbit_model: The RingOrbitModel used for co-rotating longitude
             conversion, or None for inertial longitude.
+        image_dtype: NumPy dtype used for the ``img`` array.
+        metadata_dtype: NumPy dtype used for geometry arrays
+            (``mean_radial_resolution``, ``mean_angular_resolution``,
+            ``mean_phase``, ``mean_emission``). Mosaic ``time`` columns are
+            always ``float64`` regardless of this setting.
     """
 
-    planet_name: str
+    body_name: str
+    img: ma.MaskedArray
     longitude_resolution: float
     radius_resolution: float
     radius_inner: float
     radius_outer: float
     longitude_antimask: NDArrayBoolType
-    img: ma.MaskedArray
     mean_radial_resolution: NDArrayFloatType
     mean_angular_resolution: NDArrayFloatType
     mean_phase: NDArrayFloatType
@@ -104,6 +119,144 @@ class RingReprojResult:
     incidence: float
     time: float
     orbit_model: RingOrbitModel | None
+    image_dtype: np.dtype
+    metadata_dtype: np.dtype
+
+    def save(
+        self,
+        path: PathLike,
+        *,
+        format: str | None = None,  # noqa: A002
+        compress: bool = True,
+    ) -> None:
+        """Save this RingReprojResult to a file.
+
+        Parameters:
+            path: Output path (``str``, ``pathlib.Path``, or ``filecache.FCPath``).
+                The format is inferred from the extension (.npz for NumPy archive,
+                .fits/.fit for FITS) unless ``format`` is given.
+            format: Explicit format: ``'npz'`` or ``'fits'``.
+            compress: If True (default), use compressed npz. Ignored for
+                FITS.
+
+        Raises:
+            ValueError: If the format cannot be inferred or is not
+                supported.
+
+        Example::
+
+            result = ring_mosaic.reproject(obs)
+            result.save('ring_reproj.npz')
+            reloaded = RingReprojResult.load('ring_reproj.npz')
+        """
+        fmt = infer_format(path, format)
+        payload: dict[str, Any] = {
+            'body_name': self.body_name,
+            'img': self.img,
+            'longitude_resolution': self.longitude_resolution,
+            'radius_resolution': self.radius_resolution,
+            'radius_inner': self.radius_inner,
+            'radius_outer': self.radius_outer,
+            'longitude_antimask': self.longitude_antimask,
+            'mean_radial_resolution': self.mean_radial_resolution,
+            'mean_angular_resolution': self.mean_angular_resolution,
+            'mean_phase': self.mean_phase,
+            'mean_emission': self.mean_emission,
+            'incidence': self.incidence,
+            'time': self.time,
+            'orbit_model': orbit_model_to_dict(self.orbit_model),
+            'image_dtype': self.image_dtype,
+            'metadata_dtype': self.metadata_dtype,
+        }
+        if fmt == 'npz':
+            save_npz(path, 'RingReprojResult', 1, payload, compress=compress)
+        else:
+            save_fits(path, 'RingReprojResult', 1, payload)
+
+    @classmethod
+    def load(
+        cls,
+        path: PathLike,
+        *,
+        format: str | None = None,  # noqa: A002
+    ) -> 'RingReprojResult':
+        """Load a RingReprojResult from a file.
+
+        Parameters:
+            path: Input path (``str``, ``pathlib.Path``, or ``filecache.FCPath``).
+            format: Explicit format (``'npz'`` or ``'fits'``). If None,
+                inferred from the file extension.
+
+        Returns:
+            A new RingReprojResult with the loaded data.
+
+        Raises:
+            ValueError: If the file's kind does not match, or if any array
+                dtype does not match the declared ``image_dtype`` /
+                ``metadata_dtype``.
+
+        Example::
+
+            result = RingReprojResult.load('ring_reproj.npz')
+        """
+        fmt = infer_format(path, format)
+        d = (
+            load_npz(path, 'RingReprojResult')
+            if fmt == 'npz'
+            else load_fits(path, 'RingReprojResult')
+        )
+
+        image_dtype = np.dtype(str(d['image_dtype']))
+        metadata_dtype = np.dtype(str(d['metadata_dtype']))
+
+        verify_dtype(
+            {
+                k: d[k]
+                for k in (
+                    'img',
+                    'mean_radial_resolution',
+                    'mean_angular_resolution',
+                    'mean_phase',
+                    'mean_emission',
+                )
+            },
+            image_dtype,
+            metadata_dtype,
+            image_fields=['img'],
+            metadata_fields=[
+                'mean_radial_resolution',
+                'mean_angular_resolution',
+                'mean_phase',
+                'mean_emission',
+            ],
+        )
+
+        # Reconstruct orbit model from flattened dict keys
+        orbit_d: dict[str, Any] = {}
+        prefix = 'orbit_model__'
+        for k, v in d.items():
+            if k.startswith(prefix):
+                orbit_d[k[len(prefix) :]] = v
+        orbit_model = orbit_model_from_dict(orbit_d) if orbit_d else None
+
+        return cls(
+            body_name=str(d['body_name']),
+            img=d['img'],
+            longitude_resolution=float(d['longitude_resolution']),
+            radius_resolution=float(d['radius_resolution']),
+            radius_inner=float(d['radius_inner']),
+            radius_outer=float(d['radius_outer']),
+            longitude_antimask=np.asarray(d['longitude_antimask'], dtype=np.bool_),
+            mean_radial_resolution=d['mean_radial_resolution'],
+            mean_angular_resolution=d['mean_angular_resolution'],
+            mean_phase=d['mean_phase'],
+            mean_emission=d['mean_emission'],
+            incidence=float(d['incidence']),
+            time=float(d['time']),
+            orbit_model=orbit_model,
+            image_dtype=image_dtype,
+            metadata_dtype=metadata_dtype,
+        )
 
 
 @dataclass(frozen=True)
@@ -111,7 +264,7 @@ class RingMosaicData:
     """Mosaic data returned by RingMosaic retrieval methods.
 
     Attributes:
-        planet_name: The name of the planet.
+        body_name: The name of the planet.
         ring_body_name: The oops body name for the ring plane
             (e.g. 'saturn:ring').
         shadow_body_name: The oops body name for the shadow-casting planet
@@ -133,12 +286,17 @@ class RingMosaicData:
         mean_emission: Mean emission angle per column as a MaskedArray (rad).
         mean_incidence: Scalar mean incidence angle (rad) over all images.
         image_number: Per-longitude index identifying which add() call
-            contributed the data, as a MaskedArray.
+            contributed the data, as a MaskedArray. Always stored as
+            ``uint16``, capping a single mosaic at 65 535 contributing images.
         time: Per-longitude observation midtime (TDB seconds) as a
-            MaskedArray.
+            MaskedArray. Always stored as ``float64``.
+        image_dtype: NumPy dtype used for the ``img`` array.
+        metadata_dtype: NumPy dtype used for geometry arrays
+            (``mean_radial_resolution``, ``mean_angular_resolution``,
+            ``mean_phase``, ``mean_emission``).
     """
 
-    planet_name: str
+    body_name: str
     ring_body_name: str
     shadow_body_name: str
     longitude_resolution: float
@@ -155,6 +313,150 @@ class RingMosaicData:
     mean_incidence: float
     image_number: ma.MaskedArray
     time: ma.MaskedArray
+    image_dtype: np.dtype
+    metadata_dtype: np.dtype
+
+    def save(
+        self,
+        path: PathLike,
+        *,
+        format: str | None = None,  # noqa: A002
+        compress: bool = True,
+    ) -> None:
+        """Save this RingMosaicData to a file.
+
+        Parameters:
+            path: Output path (``str``, ``pathlib.Path``, or ``filecache.FCPath``).
+                The format is inferred from the extension (.npz for NumPy archive,
+                .fits/.fit for FITS) unless ``format`` is given.
+            format: Explicit format: ``'npz'`` or ``'fits'``.
+            compress: If True (default), use compressed npz. Ignored for
+                FITS.
+
+        Raises:
+            ValueError: If the format cannot be inferred or is not
+                supported.
+
+        Example::
+
+            data = ring_mosaic.to_bounded(longitude_range=(0.0, math.pi))
+            data.save('saturn_rings.npz')
+            data.save('saturn_rings.fits', format='fits')
+            reloaded = RingMosaicData.load('saturn_rings.npz')
+        """
+        fmt = infer_format(path, format)
+        payload: dict[str, Any] = {
+            'body_name': self.body_name,
+            'ring_body_name': self.ring_body_name,
+            'shadow_body_name': self.shadow_body_name,
+            'longitude_resolution': self.longitude_resolution,
+            'radius_resolution': self.radius_resolution,
+            'radius_inner': self.radius_inner,
+            'radius_outer': self.radius_outer,
+            'longitude_antimask': self.longitude_antimask,
+            'img': self.img,
+            'longitude_range': self.longitude_range,
+            'mean_radial_resolution': self.mean_radial_resolution,
+            'mean_angular_resolution': self.mean_angular_resolution,
+            'mean_phase': self.mean_phase,
+            'mean_emission': self.mean_emission,
+            'mean_incidence': self.mean_incidence,
+            'image_number': self.image_number,
+            'time': self.time,
+            'image_dtype': self.image_dtype,
+            'metadata_dtype': self.metadata_dtype,
+        }
+        if fmt == 'npz':
+            save_npz(path, 'RingMosaicData', 1, payload, compress=compress)
+        else:
+            save_fits(path, 'RingMosaicData', 1, payload)
+
+    @classmethod
+    def load(
+        cls,
+        path: PathLike,
+        *,
+        format: str | None = None,  # noqa: A002
+    ) -> 'RingMosaicData':
+        """Load a RingMosaicData from a file.
+
+        Parameters:
+            path: Input path (``str``, ``pathlib.Path``, or ``filecache.FCPath``).
+            format: Explicit format (``'npz'`` or ``'fits'``). If None,
+                inferred from the file extension.
+
+        Returns:
+            A new RingMosaicData with the loaded data.
+
+        Raises:
+            ValueError: If the file's kind does not match, or if any array
+                dtype does not match the declared ``image_dtype`` /
+                ``metadata_dtype``, or if ``image_number`` is not uint16,
+                or if ``time`` is not float64.
+
+        Example::
+
+            data = RingMosaicData.load('saturn_rings.npz')
+        """
+        fmt = infer_format(path, format)
+        d = load_npz(path, 'RingMosaicData') if fmt == 'npz' else load_fits(path, 'RingMosaicData')
+
+        image_dtype = np.dtype(str(d['image_dtype']))
+        metadata_dtype = np.dtype(str(d['metadata_dtype']))
+
+        verify_dtype(
+            {
+                k: d[k]
+                for k in (
+                    'img',
+                    'mean_radial_resolution',
+                    'mean_angular_resolution',
+                    'mean_phase',
+                    'mean_emission',
+                    'time',
+                    'image_number',
+                )
+            },
+            image_dtype,
+            metadata_dtype,
+            image_fields=['img'],
+            metadata_fields=[
+                'mean_radial_resolution',
+                'mean_angular_resolution',
+                'mean_phase',
+                'mean_emission',
+            ],
+            float64_fields=['time'],
+        )
+
+        lon_range_raw = d.get('longitude_range')
+        longitude_range: tuple[float, float] | None
+        if lon_range_raw is None:
+            longitude_range = None
+        else:
+            longitude_range = (float(lon_range_raw[0]), float(lon_range_raw[1]))
+
+        return cls(
+            body_name=str(d['body_name']),
+            ring_body_name=str(d['ring_body_name']),
+            shadow_body_name=str(d['shadow_body_name']),
+            longitude_resolution=float(d['longitude_resolution']),
+            radius_resolution=float(d['radius_resolution']),
+            radius_inner=float(d['radius_inner']),
+            radius_outer=float(d['radius_outer']),
+            longitude_antimask=np.asarray(d['longitude_antimask'], dtype=np.bool_),
+            img=d['img'],
+            longitude_range=longitude_range,
+            mean_radial_resolution=d['mean_radial_resolution'],
+            mean_angular_resolution=d['mean_angular_resolution'],
+            mean_phase=d['mean_phase'],
+            mean_emission=d['mean_emission'],
+            mean_incidence=float(d['mean_incidence']),
+            image_number=d['image_number'],
+            time=d['time'],
+            image_dtype=image_dtype,
+            metadata_dtype=metadata_dtype,
+        )
 
 
 class RingMosaic:
@@ -166,7 +468,7 @@ class RingMosaic:
     inserted in sorted order using batched ``np.insert`` calls.
 
     Parameters:
-        planet_name: The planet name (e.g. 'SATURN'). Used to derive the
+        body_name: The planet name (e.g. 'SATURN'). Used to derive the
             oops ring body name and shadow body name for backplane calls.
         radius_inner: Inner radius of the mosaic (km).
         radius_outer: Outer radius of the mosaic (km).
@@ -176,15 +478,25 @@ class RingMosaic:
             column appears in multiple reprojections.
         orbit_model: Default RingOrbitModel for co-rotating frame
             reprojections. Can be overridden per-call in reproject().
+        image_dtype: NumPy dtype for the reprojected brightness ``img``
+            array. Defaults to ``np.float64``.
+        metadata_dtype: NumPy dtype for geometry arrays
+            (``mean_radial_resolution``, ``mean_angular_resolution``,
+            ``mean_phase``, ``mean_emission``). Defaults to ``np.float32``.
 
     Notes:
         reproject() is not thread-safe because it mutates obs.fov and oops
         global precision settings.
+
+        ``time`` is always stored as ``float64`` regardless of
+        ``metadata_dtype``. ``image_number`` is always stored as
+        ``uint16``, capping a single mosaic at 65 535 contributing images.
+        ``add()`` raises ``OverflowError`` if that limit is exceeded.
     """
 
     def __init__(
         self,
-        planet_name: str,
+        body_name: str,
         radius_inner: float,
         radius_outer: float,
         *,
@@ -194,17 +506,21 @@ class RingMosaic:
             RingMosaicMergeStrategy.MOST_COVERAGE_THEN_RESOLUTION
         ),
         orbit_model: RingOrbitModel | None = None,
+        image_dtype: np.typing.DTypeLike = np.float64,
+        metadata_dtype: np.typing.DTypeLike = np.float32,
     ) -> None:
         """Initialize an empty RingMosaic."""
-        self._planet_name = planet_name
-        self._ring_body_name = planet_name.lower() + ':ring'
-        self._shadow_body_name = planet_name.lower()
+        self._body_name = body_name
+        self._ring_body_name = body_name.lower() + ':ring'
+        self._shadow_body_name = body_name.lower()
         self._radius_inner = radius_inner
         self._radius_outer = radius_outer
         self._lon_resolution = longitude_resolution
         self._rad_resolution = radius_resolution
         self._merge_strategy = merge_strategy
         self._orbit_model = orbit_model
+        self._image_dtype: np.dtype = np.dtype(image_dtype)
+        self._metadata_dtype: np.dtype = np.dtype(metadata_dtype)
 
         self._n_radius = math.ceil((radius_outer - radius_inner + _RADIUS_SLOP) / radius_resolution)
         self._n_full_lon = int(math.pi * 2.0 / longitude_resolution)
@@ -213,16 +529,16 @@ class RingMosaic:
         # _antimask[i] is True iff longitude bin i has data.
         self._antimask: NDArrayBoolType = np.zeros(self._n_full_lon, dtype=np.bool_)
         self._img_sparse: ma.MaskedArray = ma.MaskedArray(
-            np.empty((self._n_radius, 0), dtype=np.float32),
+            np.empty((self._n_radius, 0), dtype=self._image_dtype),
             mask=np.ones((self._n_radius, 0), dtype=np.bool_),
         )
-        self._mean_radial_res: NDArrayFloatType = np.empty(0, dtype=np.float32)
-        self._mean_angular_res: NDArrayFloatType = np.empty(0, dtype=np.float32)
-        self._mean_phase: NDArrayFloatType = np.empty(0, dtype=np.float32)
-        self._mean_emission: NDArrayFloatType = np.empty(0, dtype=np.float32)
+        self._mean_radial_res: NDArrayFloatType = np.empty(0, dtype=self._metadata_dtype)
+        self._mean_angular_res: NDArrayFloatType = np.empty(0, dtype=self._metadata_dtype)
+        self._mean_phase: NDArrayFloatType = np.empty(0, dtype=self._metadata_dtype)
+        self._mean_emission: NDArrayFloatType = np.empty(0, dtype=self._metadata_dtype)
         self._mean_incidence: float = 0.0
-        self._image_number: NDArrayIntType = np.empty(0, dtype=np.int32)
-        self._time: NDArrayFloatType = np.empty(0, dtype=np.float32)
+        self._image_number: NDArrayIntType = np.empty(0, dtype=np.uint16)
+        self._time: NDArrayFloatType = np.empty(0, dtype=np.float64)
         self._image_count: int = 0
 
     # ------------------------------------------------------------------
@@ -230,9 +546,9 @@ class RingMosaic:
     # ------------------------------------------------------------------
 
     @property
-    def planet_name(self) -> str:
+    def body_name(self) -> str:
         """The planet name supplied at construction."""
-        return self._planet_name
+        return self._body_name
 
     @property
     def ring_body_name(self) -> str:
@@ -742,7 +1058,7 @@ class RingMosaic:
 
         restr_data = data[v_pix_zoom, u_pix_zoom]
         repro_img: ma.MaskedArray = ma.zeros(
-            (n_radius_bins_zoom, n_lon_bins_zoom), dtype=np.float32
+            (n_radius_bins_zoom, n_lon_bins_zoom), dtype=self._image_dtype
         )
         repro_img[:, :] = ma.masked
         repro_img[good_rad_zoom, good_lon_zoom] = restr_data
@@ -750,21 +1066,21 @@ class RingMosaic:
 
         good_lon_antimask = ~ma.getmaskarray(ma.sum(repro_img, axis=0))
 
-        repro_radial_res = ma.zeros((n_radius_bins, n_lon_bins), dtype=np.float32)
+        repro_radial_res = ma.zeros((n_radius_bins, n_lon_bins), dtype=self._metadata_dtype)
         repro_radial_res[:] = ma.masked
         repro_radial_res[good_rad, good_lon] = bp_radial_res.mvals[v_pix, u_pix]
         radial_res_antimask = ~ma.getmaskarray(ma.mean(repro_radial_res, axis=0))
         good_lon_antimask &= radial_res_antimask
 
-        repro_angular_res = ma.zeros((n_radius_bins, n_lon_bins), dtype=np.float32)
+        repro_angular_res = ma.zeros((n_radius_bins, n_lon_bins), dtype=self._metadata_dtype)
         repro_angular_res[:] = ma.masked
         repro_angular_res[good_rad, good_lon] = bp_angular_res.mvals[v_pix, u_pix]
 
-        repro_phase = ma.zeros((n_radius_bins, n_lon_bins), dtype=np.float32)
+        repro_phase = ma.zeros((n_radius_bins, n_lon_bins), dtype=self._metadata_dtype)
         repro_phase[:] = ma.masked
         repro_phase[good_rad, good_lon] = bp_phase.mvals[v_pix, u_pix]
 
-        repro_emission = ma.zeros((n_radius_bins, n_lon_bins), dtype=np.float32)
+        repro_emission = ma.zeros((n_radius_bins, n_lon_bins), dtype=self._metadata_dtype)
         repro_emission[:] = ma.masked
         repro_emission[good_rad, good_lon] = bp_emission.mvals[v_pix, u_pix]
 
@@ -786,20 +1102,22 @@ class RingMosaic:
         logger.debug('Reprojection complete: %d valid longitudes', int(good_lon_antimask.sum()))
 
         return RingReprojResult(
-            planet_name=self._planet_name,
+            body_name=self._body_name,
             longitude_resolution=self._lon_resolution,
             radius_resolution=self._rad_resolution,
             radius_inner=radius_inner,
             radius_outer=radius_outer,
             longitude_antimask=new_antimask,
             img=repro_img,
-            mean_radial_resolution=np.asarray(repro_mean_radial_res, dtype=np.float32),
-            mean_angular_resolution=np.asarray(repro_mean_angular_res, dtype=np.float32),
-            mean_phase=np.asarray(repro_mean_phase, dtype=np.float32),
-            mean_emission=np.asarray(repro_mean_emission, dtype=np.float32),
+            mean_radial_resolution=np.asarray(repro_mean_radial_res, dtype=self._metadata_dtype),
+            mean_angular_resolution=np.asarray(repro_mean_angular_res, dtype=self._metadata_dtype),
+            mean_phase=np.asarray(repro_mean_phase, dtype=self._metadata_dtype),
+            mean_emission=np.asarray(repro_mean_emission, dtype=self._metadata_dtype),
             incidence=repro_incidence,
             time=obs.midtime,
             orbit_model=orbit_model,
+            image_dtype=self._image_dtype,
+            metadata_dtype=self._metadata_dtype,
         )
 
     # ------------------------------------------------------------------
@@ -815,7 +1133,17 @@ class RingMosaic:
 
         Parameters:
             repro: Sparse reprojection result from reproject().
+
+        Raises:
+            OverflowError: If the number of images added would exceed the
+                uint16 maximum of 65 535.
         """
+        if self._image_count > np.iinfo(np.uint16).max:
+            raise OverflowError(
+                f'image_count {self._image_count} exceeds uint16 max '
+                f'{np.iinfo(np.uint16).max}; cannot add more images'
+            )
+
         valid_bins = np.where(repro.longitude_antimask)[0]
         if len(valid_bins) == 0:
             return
@@ -877,10 +1205,12 @@ class RingMosaic:
         self._image_number = np.insert(
             self._image_number,
             insert_positions,
-            np.full(len(new_bins), self._image_count, dtype=np.int32),
+            np.full(len(new_bins), self._image_count, dtype=np.uint16),
         )
         self._time = np.insert(
-            self._time, insert_positions, np.full(len(new_bins), repro.time, dtype=np.float32)
+            self._time,
+            insert_positions,
+            np.full(len(new_bins), repro.time, dtype=np.float64),
         )
 
     def _update_existing_columns(
@@ -956,14 +1286,14 @@ class RingMosaic:
         Returns:
             RingMosaicData with a full-circle dense array.
         """
-        full_img_data = np.zeros((self._n_radius, self._n_full_lon), dtype=np.float32)
+        full_img_data = np.zeros((self._n_radius, self._n_full_lon), dtype=self._image_dtype)
         full_img_mask = np.ones((self._n_radius, self._n_full_lon), dtype=np.bool_)
-        full_mean_rad_res = np.zeros(self._n_full_lon, dtype=np.float32)
-        full_mean_ang_res = np.zeros(self._n_full_lon, dtype=np.float32)
-        full_mean_phase = np.zeros(self._n_full_lon, dtype=np.float32)
-        full_mean_emission = np.zeros(self._n_full_lon, dtype=np.float32)
-        full_img_number = np.zeros(self._n_full_lon, dtype=np.int32) - 1
-        full_time = np.zeros(self._n_full_lon, dtype=np.float32)
+        full_mean_rad_res = np.zeros(self._n_full_lon, dtype=self._metadata_dtype)
+        full_mean_ang_res = np.zeros(self._n_full_lon, dtype=self._metadata_dtype)
+        full_mean_phase = np.zeros(self._n_full_lon, dtype=self._metadata_dtype)
+        full_mean_emission = np.zeros(self._n_full_lon, dtype=self._metadata_dtype)
+        full_img_number = np.zeros(self._n_full_lon, dtype=np.uint16)
+        full_time = np.zeros(self._n_full_lon, dtype=np.float64)
 
         full_mask_1d = np.ones(self._n_full_lon, dtype=np.bool_)
 
@@ -980,7 +1310,7 @@ class RingMosaic:
             full_mask_1d[valid_bins] = False
 
         return RingMosaicData(
-            planet_name=self._planet_name,
+            body_name=self._body_name,
             ring_body_name=self._ring_body_name,
             shadow_body_name=self._shadow_body_name,
             longitude_resolution=self._lon_resolution,
@@ -997,6 +1327,8 @@ class RingMosaic:
             mean_incidence=self._mean_incidence,
             image_number=ma.MaskedArray(full_img_number, mask=full_mask_1d),
             time=ma.MaskedArray(full_time, mask=full_mask_1d),
+            image_dtype=self._image_dtype,
+            metadata_dtype=self._metadata_dtype,
         )
 
     def to_bounded(
@@ -1021,14 +1353,14 @@ class RingMosaic:
         end_bin = round(lon_end / self._lon_resolution)
         n_bins = end_bin - start_bin + 1
 
-        bounded_img_data = np.zeros((self._n_radius, n_bins), dtype=np.float32)
+        bounded_img_data = np.zeros((self._n_radius, n_bins), dtype=self._image_dtype)
         bounded_img_mask = np.ones((self._n_radius, n_bins), dtype=np.bool_)
-        bounded_mean_rad_res = np.zeros(n_bins, dtype=np.float32)
-        bounded_mean_ang_res = np.zeros(n_bins, dtype=np.float32)
-        bounded_mean_phase = np.zeros(n_bins, dtype=np.float32)
-        bounded_mean_emission = np.zeros(n_bins, dtype=np.float32)
-        bounded_img_number = np.full(n_bins, -1, dtype=np.int32)
-        bounded_time = np.zeros(n_bins, dtype=np.float32)
+        bounded_mean_rad_res = np.zeros(n_bins, dtype=self._metadata_dtype)
+        bounded_mean_ang_res = np.zeros(n_bins, dtype=self._metadata_dtype)
+        bounded_mean_phase = np.zeros(n_bins, dtype=self._metadata_dtype)
+        bounded_mean_emission = np.zeros(n_bins, dtype=self._metadata_dtype)
+        bounded_img_number = np.zeros(n_bins, dtype=np.uint16)
+        bounded_time = np.zeros(n_bins, dtype=np.float64)
         bounded_mask_1d = np.ones(n_bins, dtype=np.bool_)
 
         bounded_antimask = np.zeros(self._n_full_lon, dtype=np.bool_)
@@ -1052,7 +1384,7 @@ class RingMosaic:
             bounded_antimask[gb] = True
 
         return RingMosaicData(
-            planet_name=self._planet_name,
+            body_name=self._body_name,
             ring_body_name=self._ring_body_name,
             shadow_body_name=self._shadow_body_name,
             longitude_resolution=self._lon_resolution,
@@ -1069,6 +1401,8 @@ class RingMosaic:
             mean_incidence=self._mean_incidence,
             image_number=ma.MaskedArray(bounded_img_number, mask=bounded_mask_1d),
             time=ma.MaskedArray(bounded_time, mask=bounded_mask_1d),
+            image_dtype=self._image_dtype,
+            metadata_dtype=self._metadata_dtype,
         )
 
     def _build_result(
@@ -1086,7 +1420,7 @@ class RingMosaic:
             mask_1d = np.ones(img.shape[1], dtype=np.bool_)
 
         return RingMosaicData(
-            planet_name=self._planet_name,
+            body_name=self._body_name,
             ring_body_name=self._ring_body_name,
             shadow_body_name=self._shadow_body_name,
             longitude_resolution=self._lon_resolution,
@@ -1103,4 +1437,6 @@ class RingMosaic:
             mean_incidence=self._mean_incidence,
             image_number=ma.MaskedArray(self._image_number.copy(), mask=mask_1d),
             time=ma.MaskedArray(self._time.copy(), mask=mask_1d),
+            image_dtype=self._image_dtype,
+            metadata_dtype=self._metadata_dtype,
         )

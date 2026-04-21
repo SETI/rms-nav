@@ -48,19 +48,24 @@ def _make_mosaic(
     data_mask = np.zeros(shape, dtype=bool)
 
     return BodyMosaicData(
+        body_name='MIMAS',
         img=ma.MaskedArray(img_data, mask=img_mask),
+        lat_resolution=_LAT_RES,
+        lon_resolution=_LON_RES,
         lat_range=(lat_min, lat_max),
         lon_range=(lon_min, lon_max),
+        latlon_type='centric',
+        lon_direction='east',
         resolution=ma.MaskedArray(np.ones(shape, dtype=np.float32), mask=data_mask),
         eff_resolution=ma.MaskedArray(np.full(shape, eff_res, dtype=np.float32), mask=data_mask),
         phase=ma.MaskedArray(np.zeros(shape, dtype=np.float32), mask=data_mask),
         emission=ma.MaskedArray(np.zeros(shape, dtype=np.float32), mask=data_mask),
         incidence=ma.MaskedArray(np.zeros(shape, dtype=np.float32), mask=data_mask),
-        image_number=ma.MaskedArray(np.zeros(shape, dtype=np.int32), mask=data_mask),
         time=ma.MaskedArray(np.zeros(shape, dtype=np.float64), mask=data_mask),
-        lat_resolution=_LAT_RES,
-        lon_resolution=_LON_RES,
+        image_number=ma.MaskedArray(np.zeros(shape, dtype=np.uint16), mask=data_mask),
         photometric_model_name=None,
+        image_dtype=np.dtype(np.float64),
+        metadata_dtype=np.dtype(np.float32),
     )
 
 
@@ -267,9 +272,14 @@ class TestResolutionRatio:
         data_mask = np.zeros(shape, dtype=bool)
         img_mask = np.zeros(shape, dtype=bool)
         mosaic = BodyMosaicData(
+            body_name='MIMAS',
             img=ma.MaskedArray(np.ones(shape, dtype=np.float32), mask=img_mask),
+            lat_resolution=_LAT_RES,
+            lon_resolution=_LON_RES,
             lat_range=(-0.2, -0.2 + (n_lat - 1) * _LAT_RES),
             lon_range=(0.5, 0.5 + (n_lon - 1) * _LON_RES),
+            latlon_type='centric',
+            lon_direction='east',
             resolution=ma.MaskedArray(np.ones(shape, dtype=np.float32), mask=data_mask),
             eff_resolution=ma.MaskedArray(
                 np.ones(shape, dtype=np.float32), mask=np.ones(shape, dtype=bool)
@@ -277,11 +287,11 @@ class TestResolutionRatio:
             phase=ma.MaskedArray(np.zeros(shape, dtype=np.float32), mask=data_mask),
             emission=ma.MaskedArray(np.zeros(shape, dtype=np.float32), mask=data_mask),
             incidence=ma.MaskedArray(np.zeros(shape, dtype=np.float32), mask=data_mask),
-            image_number=ma.MaskedArray(np.zeros(shape, dtype=np.int32), mask=data_mask),
             time=ma.MaskedArray(np.zeros(shape, dtype=np.float64), mask=data_mask),
-            lat_resolution=_LAT_RES,
-            lon_resolution=_LON_RES,
+            image_number=ma.MaskedArray(np.zeros(shape, dtype=np.uint16), mask=data_mask),
             photometric_model_name=None,
+            image_dtype=np.dtype(np.float64),
+            metadata_dtype=np.dtype(np.float32),
         )
         obs = MagicMock()
         img_shape = (4, 5)

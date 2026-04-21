@@ -19,6 +19,7 @@ Module layout
         ring_orbit_model.py      # RingOrbitModel frozen dataclass
         photometric_model.py     # PhotometricModel protocol + implementations
         _context_managers.py     # _reduced_oops_precision
+        _serialization.py        # Save/load helpers shared by all result dataclasses
 
 Thread safety
 -------------
@@ -76,6 +77,119 @@ The always-sparse design means that ``reproject()`` always returns a
 :class:`~nav.reproj.rings.RingReprojResult` with only the valid longitude
 columns populated. There is no ``compress_longitude`` flag; sparsity is the
 invariant.
+
+dtype propagation
+-----------------
+
+Each ``BodyMosaic`` and ``RingMosaic`` instance holds two authoritative dtype
+attributes set at construction:
+
+- ``_image_dtype`` (default ``np.float64``) — dtype for reprojected brightness
+  ``img`` arrays.
+- ``_metadata_dtype`` (default ``np.float32``) — dtype for all geometry arrays
+  (``resolution``, ``eff_resolution``, ``phase``, ``emission``, ``incidence``)
+  **and** for ``time``.
+
+These propagate through the pipeline as follows:
+
+1. ``_allocate`` / ``_expand_lat`` / ``_expand_lon_impl`` allocate internal
+   arrays using these dtypes directly.
+2. ``reproject()`` casts backplane arrays with
+   ``bp_xyz.mvals.astype(self._metadata_dtype)`` and constructs per-pixel
+   intermediate arrays at ``_image_dtype`` (for ``img``) or
+   ``_metadata_dtype`` (for all geometry).
+3. Every ``BodyReprojResult`` and ``BodyMosaicData`` (and ring equivalents)
+   carries explicit ``image_dtype`` and ``metadata_dtype`` fields so that the
+   dtype contract is self-describing and survives a save/load round-trip.
+
+``time`` is always ``float64`` regardless of the dtype kwargs, preserving
+sub-second precision for Cassini ET values (~5×10⁸ s). ``image_number`` is
+always ``uint16`` regardless of the dtype kwargs, capping a single mosaic at
+65,535 contributing images. ``add()`` raises ``OverflowError`` when that
+limit is exceeded.
+
+Serialization
+-------------
+
+The ``_serialization`` module provides the format helpers used by all four
+dataclass ``save()`` / ``load()`` methods. It is a private module (not
+exported from ``__init__.py``).
+
+Path arguments may be ``str``, :class:`pathlib.Path`, or
+:class:`filecache.FCPath`. Each is normalized to ``FCPath`` on entry. Writes
+resolve a local path with :meth:`filecache.FCPath.get_local_path`, write with
+NumPy or Astropy, then call :meth:`filecache.FCPath.upload`. Reads resolve a
+local path the same way (retrieving remote objects into the cache when needed)
+before loading.
+
+Supported formats
+^^^^^^^^^^^^^^^^^
+
+npz
+    ``np.savez`` / ``np.savez_compressed``. Each ``MaskedArray`` is split into
+    two npz entries: ``<name>__data`` (the underlying array at its declared
+    dtype) and ``<name>__mask`` (a ``bool_`` array). Tuples of length 2 are
+    stored as 1-D length-2 arrays. Strings, dtype names, and scalar floats/ints
+    are stored as 0-D unicode or numeric arrays.
+
+fits
+    ``astropy.io.fits``. Scalar metadata (strings, numbers, dtype names) go
+    into the PrimaryHDU header. Each array occupies a separate ImageHDU with
+    ``EXTNAME = <FIELDNAME>``; masks are stored as a companion ImageHDU with
+    ``EXTNAME = <FIELDNAME>_MASK`` (uint8, 0 = valid).
+
+Format inference
+^^^^^^^^^^^^^^^^
+
+When ``format=None`` (the default), the format is inferred from the file
+extension:
+
+- ``.npz`` → ``'npz'``
+- ``.fits``, ``.fit``, ``.fits.gz``, ``.fz`` → ``'fits'``
+
+An explicit ``format='npz'`` or ``format='fits'`` keyword overrides inference.
+
+kind / version scheme
+^^^^^^^^^^^^^^^^^^^^^
+
+Every file includes two sentinel values:
+
+- ``__kind__`` — a string identifying the dataclass (e.g.
+  ``'BodyMosaicData'``). ``load()`` raises ``ValueError`` when this does not
+  match the expected kind.
+- ``__version__`` — an integer (currently ``1``). Reserved for future schema
+  migrations.
+
+To add a field in a future version: bump ``__version__`` to ``2``, write the
+new field in ``save()``, and handle ``version == 1`` (missing field) in
+``load()`` by supplying a sensible default.
+
+Load-time dtype verification
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+After reconstructing the dataclass in ``load()``, ``verify_dtype`` checks:
+
+- The ``img`` array dtype matches the file's declared ``image_dtype``.
+- Each metadata array (``resolution``, ``eff_resolution``, ``phase``,
+  ``emission``, ``incidence``, and for rings ``mean_radial_*`` etc.) dtype
+  matches ``metadata_dtype``.
+- The ``time`` array (mosaic data only) is ``float64``.
+- ``image_number`` is ``uint16``.
+- All mask arrays are ``bool_``.
+
+A ``ValueError`` is raised on the first mismatch, naming the offending field
+and both the expected and actual dtypes. This catches files produced by
+external tools that may have coerced dtypes on write.
+
+RingOrbitModel serialization
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``RingOrbitModel`` is not a plain array; it is serialized flat via
+``orbit_model_to_dict`` / ``orbit_model_from_dict``:
+
+- In **npz**: fields are stored as ``orbit_model__<field>`` entries.
+- In **FITS**: stored as ``ORBIT_MODEL__<FIELD>`` header cards.
+- When ``orbit_model=None``, a single ``is_none=True`` sentinel is written.
 
 Photometric models
 ------------------
