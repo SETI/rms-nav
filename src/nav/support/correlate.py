@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 # TODO Clean up typing
+import math
 from typing import Any
 
 import numpy as np
@@ -551,11 +552,14 @@ def navigate_with_pyramid_kpeaks(
             else None
         )
 
-        # Scale the max offset limit to the current pyramid level.  Floor each
-        # component to at least 1 so coarse levels still allow a 1-pixel search
-        # tolerance when margins // s would otherwise be 0.
+        # Scale the max offset limit to the current pyramid level.  Use ceiling
+        # division so a fractional full-res margin still maps to a non-zero window
+        # at coarse scales; clamp each component to at least 1 pixel.
         max_offset_at_scale: tuple[int, int] | None = (
-            (max(1, max_offset_vu[0] // s), max(1, max_offset_vu[1] // s))
+            (
+                max(1, math.ceil(max_offset_vu[0] / s)),
+                max(1, math.ceil(max_offset_vu[1] / s)),
+            )
             if max_offset_vu is not None
             else None
         )

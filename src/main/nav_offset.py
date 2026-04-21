@@ -318,7 +318,7 @@ def main() -> None:
             'Processing: %s',
             ', '.join(f.image_file_url.as_posix() for f in imagefiles.image_files),
         )
-        if navigate_image_files(
+        success, metadata = navigate_image_files(
             obs_class,
             imagefiles,
             nav_results_root=nav_results_root,
@@ -326,10 +326,15 @@ def main() -> None:
             nav_techniques=nav_techniques,
             write_output_files=not arguments.no_write_output_files,
             log_arguments=arguments,
-        ):
+        )
+        if success:
             NUM_FILES_PROCESSED += 1
         else:
             NUM_FILES_SKIPPED += 1
+            MAIN_LOGGER.debug(
+                'Navigation failed; metadata keys: %s',
+                sorted(metadata.keys(), key=str),
+            )
 
     exit_processing()
 
