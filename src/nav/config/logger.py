@@ -51,7 +51,7 @@ def _resolve_level(attr_name: str, arguments: argparse.Namespace | None, config:
     """
     level: object | None
     if arguments is not None:
-        level = vars(arguments).get(attr_name)
+        level = getattr(arguments, attr_name, None)
     else:
         level = None
     if level is None:
