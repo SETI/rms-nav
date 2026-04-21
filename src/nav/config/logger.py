@@ -14,6 +14,8 @@ arguments have been resolved. It is safe to call more than once: existing
 ``MAIN_LOGGER`` handlers are removed before new ones are attached.
 """
 
+from __future__ import annotations
+
 import argparse
 import logging
 from typing import TYPE_CHECKING, cast
@@ -82,11 +84,15 @@ def setup_logging(
 
     IMAGE_LOGGER handlers are **not** configured here; both its console and per-image
     file handlers are attached as local handlers inside each ``IMAGE_LOGGER.open()``
-    context via ``image_log_handlers()``.
+    context via ``image_log_handlers()``.  However, the image log levels from
+    ``--log-level-image-console`` and ``--log-level-image-file`` are validated here
+    so that invalid values are caught at startup (before the batch loop) alongside
+    the main-level validation.
 
     Parameters:
-        arguments: Parsed CLI arguments; may carry ``log_level_main_console`` and
-            ``log_level_main_file`` attributes.
+        arguments: Parsed CLI arguments; may carry ``log_level_main_console``,
+            ``log_level_main_file``, ``log_level_image_console``, and
+            ``log_level_image_file`` attributes.
         config: Navigation configuration providing ``general.*`` fallback values.
         nav_results_root_str: Local filesystem path to the navigation results root.
 
@@ -96,6 +102,11 @@ def setup_logging(
     """
     main_console_level = _resolve_level('log_level_main_console', arguments, config)
     main_file_level = _resolve_level('log_level_main_file', arguments, config)
+    # Validate image log levels now so --log-level-image-console and
+    # --log-level-image-file errors surface at startup via the same try/except
+    # block in main() that guards this call, not on the first image in the batch loop.
+    _resolve_level('log_level_image_console', arguments, config)
+    _resolve_level('log_level_image_file', arguments, config)
 
     # Replace any existing handlers so repeated setup does not duplicate log lines.
     for existing in list(MAIN_LOGGER.handlers):
