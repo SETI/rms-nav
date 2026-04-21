@@ -1,0 +1,70 @@
+rings:
+  model_source: ephemeris
+  fiducial_feature_threshold: 3
+  fiducial_rms_gain: 2
+  fiducial_min_feature_width: 2
+  one_sided_feature_width: 30.0
+  fiducial_ephemeris_width: 100
+  min_curvature_low_confidence:
+    - 0.0
+    - 0.5
+  min_curvature_high_confidence:
+    - 0.17
+    - 1.0
+  curvature_to_reduce_features: 1.5707963267948966
+  curvature_reduced_features: 1
+  emission_fiducial_threshold: 0.75
+  emission_use_threshold: 0.2
+  remove_planet_shadow: true
+  remove_body_shadows: false
+  label_font: liberation2/LiberationMono-Bold.ttf
+  label_font_size: 18
+    # 512: 18
+  label_font_color: [255, 0, 0]  # Red
+  # label_font_color: [255, 255, 0]  # Yellow
+  label_mask_enlarge: 10  # Number of pixels around a ring to avoid for label placement
+  label_horiz_gap: 7  # Horizontal gap between limb and head of arrow (left/right)
+  label_vert_gap: 5   # Vertical gap between limb and head of arrow (top/bottom)
+  label_limb_color: [255, 0, 0]  # Red
+  # font:
+  #   256: *id001
+  #   512: *id001
+  #   1000: *id002
+  #   1024: *id002
+  # parameter_font:
+  #   256: *id001
+  #   512: *id001
+  #   1000: &id003
+  #     - /usr/share/fonts/truetype/liberation2/LiberationMono-Bold.ttf
+  #     - 12
+  #   1024: *id003
+  # parameter_overlay_start:
+  #   512: &id004
+  #     - 10
+  #     - 30
+  #   1000: *id004
+  #   1024: *id004
+  # parameter_overlay_step:
+  #   512:
+  #     - 100
+  #     - 100
+  #   1000: &id005
+  #     - 150
+  #     - 100
+  #   1024: *id005
+  # parameter_overlay_line_len_thickness:
+  #   512:
+  #     - 10
+  #     - 1
+  #   1000: &id006
+  #     - 20
+  #     - 1
+  #   1024: *id006
+  # parameter_overlay_box_size:
+  #   512:
+  #     - 1
+  #     - 0
+  #   1000: &id007
+  #     - 2
+  #     - 1
+  #   1024: *id007

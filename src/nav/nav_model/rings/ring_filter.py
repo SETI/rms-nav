@@ -34,8 +34,6 @@ Processing in this order means expensive operations run only on the smaller set 
 features that survive the cheaper passes.
 """
 
-from __future__ import annotations
-
 from collections.abc import Callable, Sequence
 from typing import Any, Literal
 

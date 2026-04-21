@@ -1,8 +1,11 @@
 import math
+import socket
+import subprocess
 from typing import Any, cast
 
 import numpy as np
 import oops
+import pdslogger
 
 from nav.support.types import NDArrayFloatType
 
@@ -114,3 +117,85 @@ def mad_std(a: NDArrayFloatType | list[float]) -> float:
     a_array = cast(NDArrayFloatType, np.asarray(a))
     m = np.median(a_array)
     return 1.4826 * float(np.median(np.abs(a_array - m)))
+
+
+_GIT_VERSION_CACHE: str | None = None
+
+
+def current_git_version() -> str:
+    """Return the git version of the current repo, caching the result.
+
+    The result is cached because the git version cannot change during a single
+    program run.
+
+    Returns:
+        The git describe string, or 'GIT DESCRIBE FAILED' if the command fails.
+    """
+    global _GIT_VERSION_CACHE
+    if _GIT_VERSION_CACHE is not None:
+        return _GIT_VERSION_CACHE
+    try:
+        ret = subprocess.check_output(
+            ['git', 'describe', '--all', '--long', '--dirty', '--abbrev=40', '--tags']
+        ).strip()
+        _GIT_VERSION_CACHE = ret.decode('ascii')
+    except Exception:
+        _GIT_VERSION_CACHE = 'GIT DESCRIBE FAILED'
+    return _GIT_VERSION_CACHE
+
+
+_LOCAL_HOST_NAME_CACHE: str | None = None
+
+
+def get_local_host_name() -> str:
+    """Return this machine's fully qualified domain name as a string.
+
+    The value is obtained from ``socket.getfqdn()`` on the first call and stored
+    in the module-level ``_LOCAL_HOST_NAME_CACHE`` so later calls return the same
+    string without calling ``getfqdn`` again.
+
+    Returns:
+        The FQDN string on success, or the literal ``'LOCAL HOST NAME FAILED'`` if
+        ``socket.getfqdn()`` raises any exception.
+
+    Side effects:
+        On the first successful call, sets ``_LOCAL_HOST_NAME_CACHE`` to the FQDN.
+        On the first failing call, sets ``_LOCAL_HOST_NAME_CACHE`` to
+        ``'LOCAL HOST NAME FAILED'``. Subsequent calls return the cached value and do
+        not call ``socket.getfqdn()`` again.
+    """
+    global _LOCAL_HOST_NAME_CACHE
+    if _LOCAL_HOST_NAME_CACHE is not None:
+        return _LOCAL_HOST_NAME_CACHE
+    try:
+        ret = socket.getfqdn()
+        _LOCAL_HOST_NAME_CACHE = ret
+    except Exception:
+        _LOCAL_HOST_NAME_CACHE = 'LOCAL HOST NAME FAILED'
+    return _LOCAL_HOST_NAME_CACHE
+
+
+def log_run_environment(logger: pdslogger.PdsLogger, command_list: list[str]) -> None:
+    """Log host, git, and command-line context to the given logger.
+
+    Intended to be called once on the main logger at startup and again on each
+    per-image logger when it is opened, so that every log file contains the
+    full run context.
+
+    Parameters:
+        logger: The logger to write to.
+        command_list: The command-line arguments for the current run
+            (typically ``sys.argv[1:]``).
+    """
+    with logger.open('RUN-TIME ENVIRONMENT'):
+        logger.info('*' * 40)
+        logger.info('Host Local Name: %s', get_local_host_name())
+        # if nav.aws.AWS_ON_EC2_INSTANCE:
+        #     logger.info('Host Public Name: %s (%s) in %s', nav.aws.AWS_HOST_PUBLIC_NAME,
+        #                  nav.aws.AWS_HOST_PUBLIC_IPV4, nav.aws.AWS_HOST_ZONE)
+        #     logger.info('Host AMI ID: %s', nav.aws.AWS_HOST_AMI_ID)
+        #     logger.info('Host Instance Type: %s', nav.aws.AWS_HOST_INSTANCE_TYPE)
+        #     logger.info('Host Instance ID: %s', nav.aws.AWS_HOST_INSTANCE_ID)
+        logger.info('GIT Status:      %s', current_git_version())
+        logger.info('Command line:    %s', ' '.join(command_list))
+        logger.info('*' * 40)

@@ -1,0 +1,54 @@
+stars:
+  catalogs: [ucac4, tycho2, ybsc]  # Order of most precise to least
+  body_conflict_margin: 5
+  default_star_class: G0
+  stellar_aberration: true
+  proper_motion: true
+  max_stars: 100
+  max_movement_steps: 50
+  label_font: liberation2/LiberationMono-Bold.ttf
+  label_font_size: 18
+  label_font_color: [255, 0, 0]  # Red
+  label_star_color: [255, 0, 0]  # Red
+  duplicate_ra_dec_threshold_arcsec: 5  # Closer than this - stars are true duplicates
+  duplicate_vmag_threshold: 3  # Less than this - stars are true duplicates
+  overlapping_vmag_threshold: 2  # Less than this - remove both stars when visually overlapping
+
+  calibrated_data: true
+  float_psf_sigma: false
+  search_multipliers:
+    - 0.25
+    - 0.5
+    - 0.75
+    - 1.0
+  perform_photometry: true
+  try_without_photometry: false
+  min_stars_low_confidence:
+    - 3
+    - 0.75
+  min_stars_high_confidence:
+    - 6
+    - 1.0
+  min_confidence: 0.9
+  psf_gain:
+    - 5000
+    - 4
+  max_smear: 100
+  min_vmag: 5.0
+  max_vmag: 15.0
+  vmag_increment: 0.5
+  max_star_dn: 100000.0
+  min_dn_force_one_star: 25000.0
+  star_body_conflict_margin: 3
+  too_bright_dn: 1000
+  too_bright_factor: 1  # TODO
+  ring_occlusion_enabled: true
+  ring_occlusion_radii_km:
+    SATURN:
+      - [74490.0, 91980.0]    # C ring
+      - [91980.0, 117580.0]   # B ring
+      - [122170.0, 136780.0]  # A ring
+    URANUS:
+      - [41837.0, 51149.0]    # main ring system (6, 5, 4, alpha, beta, eta, gamma, delta, epsilon)
+    NEPTUNE:
+      - [40900.0, 62933.0]    # Galle through Adams rings

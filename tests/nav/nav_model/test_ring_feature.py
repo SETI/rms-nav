@@ -6,8 +6,6 @@ Tests cover ``from_config`` construction and validation, query methods
 via mocked backplanes, and cross-feature date overlap validation.
 """
 
-from __future__ import annotations
-
 from typing import Any
 from unittest.mock import MagicMock
 

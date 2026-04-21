@@ -4,6 +4,10 @@ import math
 from typing import Any, cast
 
 import numpy as np
+from matplotlib.backends.backend_qt import NavigationToolbar2QT
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from matplotlib.figure import Figure
+from matplotlib.patches import Circle
 from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtGui import QImage, QMouseEvent, QPainter, QPixmap, QWheelEvent
 from PyQt6.QtWidgets import (
@@ -30,6 +34,15 @@ from nav.obs import ObsSnapshot
 from nav.support.correlate import masked_ncc, navigate_with_pyramid_kpeaks
 from nav.support.types import NDArrayFloatType, NDArrayUint8Type
 from nav.ui.common import ZoomPanController, build_stretch_controls
+
+# Correlation map popup (_CorrMapDialog) layout sizing
+_CORR_MAP_MIN_WIDTH = 550
+_CORR_MAP_MIN_HEIGHT = 520
+_CORR_MAP_MARGIN = 4
+_CORR_MAP_SPACING = 2
+
+# Semi-transparent white tint when overlaying the binary model mask on RGB
+_MASK_OVERLAY_ALPHA = 0.4
 
 
 def _apply_stretch_gamma(
@@ -92,6 +105,121 @@ def _bilinear_sample_periodic(arr: NDArrayFloatType, y: float, x: float) -> floa
     )
 
 
+class _CorrMapDialog(QDialog):
+    """Modal popup showing the full 2-D normalized cross-correlation (NCC) surface.
+
+    The NCC surface is rearranged via ``np.fft.fftshift`` for display. The global
+    peak marker uses ``np.argmax`` on the fftshifted NCC *numerator* from
+    :func:`~nav.support.correlate.masked_ncc` so plateaus in the NCC itself do not
+    pick an arbitrary peak. Axes are labeled in offset pixels (dU for columns,
+    dV for rows). The offset supplied at construction time is overlaid as a red
+    cross marker and displayed in the legend.
+    """
+
+    def __init__(
+        self,
+        *,
+        corr_surface: NDArrayFloatType,
+        numerator_surface: NDArrayFloatType,
+        dv: float,
+        du: float,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle('Correlation Map')
+        self.setMinimumSize(_CORR_MAP_MIN_WIDTH, _CORR_MAP_MIN_HEIGHT)
+
+        layout = QVBoxLayout(self)
+        m = _CORR_MAP_MARGIN
+        layout.setContentsMargins(m, m, m, m)
+        layout.setSpacing(_CORR_MAP_SPACING)
+
+        h, w = corr_surface.shape
+        shifted = np.fft.fftshift(corr_surface)
+        shifted_num = np.fft.fftshift(numerator_surface)
+
+        # Map FFT index ranges to signed offset extents for imshow axes.
+        du_min = -(w // 2)
+        du_max = (w - 1) // 2
+        dv_min = -(h // 2)
+        dv_max = (h - 1) // 2
+
+        # Locate the global peak from the covariance numerator (not NCC plateaus).
+        peak_row, peak_col = np.unravel_index(np.argmax(shifted_num), shifted_num.shape)
+        peak_dv = dv_min + int(peak_row)
+        peak_du = du_min + int(peak_col)
+
+        fig = Figure(figsize=(5.8, 5.0))
+        fig.subplots_adjust(left=0.12, right=0.95, top=0.93, bottom=0.10)
+        canvas = FigureCanvasQTAgg(fig)  # type: ignore[no-untyped-call]
+        toolbar = NavigationToolbar2QT(canvas, self)  # type: ignore[no-untyped-call]
+        ax = fig.add_subplot(111)
+
+        # extent=[left, right, bottom, top] with origin='upper' places dv_min at
+        # the top and dv_max at the bottom, consistent with image-row convention.
+        extent_arg: tuple[float, float, float, float] = (
+            du_min - 0.5,
+            du_max + 0.5,
+            dv_max + 0.5,
+            dv_min - 0.5,
+        )
+        im = ax.imshow(
+            shifted,
+            origin='upper',
+            extent=extent_arg,
+            aspect='equal',
+            cmap='viridis',
+            interpolation='nearest',
+        )
+        fig.colorbar(im, ax=ax, label='Normalized Cross-Correlation (NCC)')
+
+        ax.axhline(0, color='white', linewidth=0.5, alpha=0.5)
+        ax.axvline(0, color='white', linewidth=0.5, alpha=0.5)
+
+        # Circle around peak; radius scaled to ~4 % of the shorter axis.
+        radius = max(2, min(h, w) * 0.04)
+        ax.add_patch(
+            Circle(
+                (peak_du, peak_dv),
+                radius=radius,
+                fill=False,
+                edgecolor='lime',
+                linewidth=1.5,
+            )
+        )
+        ax.annotate(
+            f'peak  dV={peak_dv:+d}, dU={peak_du:+d}',
+            xy=(peak_du, peak_dv),
+            xytext=(8, 8),
+            textcoords='offset points',
+            color='lime',
+            fontsize=8,
+        )
+
+        ax.plot(
+            du,
+            dv,
+            'r+',
+            markersize=14,
+            markeredgewidth=2,
+            label=f'current  dV={dv:.3f}, dU={du:.3f}',
+        )
+        ax.legend(loc='upper right', fontsize=8, framealpha=0.7)
+        ax.set_xlabel('dU (column offset, pixels)')
+        ax.set_ylabel('dV (row offset, pixels)\n[positive = down]')
+        ax.set_title('Normalized Cross-Correlation Map')
+
+        layout.addWidget(toolbar)
+        layout.addWidget(canvas)
+
+        close_btn = QPushButton('Close')
+        close_btn.clicked.connect(self.accept)
+        close_row = QHBoxLayout()
+        close_row.addStretch()
+        close_row.addWidget(close_btn)
+        layout.addLayout(close_row)
+
+
 class _ImageLabel(QLabel):
     """Image label that forwards input events to the dialog handlers."""
 
@@ -121,7 +249,8 @@ class ManualNavDialog(QDialog):
 
     The viewport uses false color (image in red/blue, blend in green). Separate
     **Image Stretch** and **Model Stretch** groups each provide black/white/gamma
-    and a display toggle. Model transparency sits under model stretch.
+    and a display toggle. Model transparency and an optional binary mask overlay
+    sit under model stretch.
     """
 
     def __init__(
@@ -178,6 +307,7 @@ class ManualNavDialog(QDialog):
         self._model_transparency = 0.5
         self._show_image = True  # show observation in R/B (and base of G)
         self._show_model = True  # show model contribution in green blend
+        self._show_mask = False  # overlay model mask as a binary white tint
         # For slider mapping (image)
         self._stretch_min = float(np.min(self._img_fov))
         self._stretch_max = float(np.max(self._img_fov))
@@ -213,7 +343,7 @@ class ManualNavDialog(QDialog):
         mask = np.asarray(self._model_mask_ext, dtype=bool)
         # Pad to correlation convention used elsewhere (masked_ncc handles padding-independent math)
         # Here we directly compute the full NCC surface.
-        self._corr_surface = masked_ncc(image, model, mask)
+        self._corr_surface, self._corr_numerator = masked_ncc(image, model, mask)
         self._corr_h, self._corr_w = self._corr_surface.shape
 
     def _offset_to_corr_indices(self, dv: float, du: float) -> tuple[float, float]:
@@ -339,6 +469,13 @@ class ManualNavDialog(QDialog):
         )
         self._check_show_model.stateChanged.connect(self._on_show_model_changed)
         model_stretch_form.addRow(self._check_show_model)
+        self._check_show_mask = QCheckBox('Display mask')
+        self._check_show_mask.setChecked(False)
+        self._check_show_mask.setToolTip(
+            'Overlay the model mask (binary) as a semi-transparent white tint on the image.'
+        )
+        self._check_show_mask.stateChanged.connect(self._on_show_mask_changed)
+        model_stretch_form.addRow(self._check_show_mask)
         model_controls = build_stretch_controls(
             model_stretch_form,
             img_min=self._model_stretch_min,
@@ -412,15 +549,18 @@ class ManualNavDialog(QDialog):
         offset_group.setLayout(offset_form)
         right.addWidget(offset_group)
 
-        # Buttons: Auto, OK/Cancel
+        # Buttons: Correlation Map, Auto, OK/Cancel
         btn_row = QHBoxLayout()
+        self._btn_corr_map = QPushButton('Correlation Map...')
         self._btn_auto = QPushButton('Auto')
         self._btn_ok = QPushButton('OK')
         self._btn_cancel = QPushButton('Cancel')
+        self._btn_corr_map.clicked.connect(self._on_show_corr_map)
         self._btn_auto.clicked.connect(self._on_auto)
         self._btn_ok.clicked.connect(self.accept)
         self._btn_cancel.clicked.connect(self.reject)
         btn_row.addStretch()
+        btn_row.addWidget(self._btn_corr_map)
         btn_row.addWidget(self._btn_auto)
         btn_row.addWidget(self._btn_ok)
         btn_row.addWidget(self._btn_cancel)
@@ -545,6 +685,20 @@ class ManualNavDialog(QDialog):
         self._lbl_model_transparency.setEnabled(self._show_model)
         self._refresh_overlay()
 
+    def _on_show_mask_changed(self, state: Any) -> None:
+        """Toggle overlay of the binary model mask on the composited image.
+
+        When enabled, pixels where the model mask is ``True`` are highlighted with a
+        semi-transparent white tint so the mask boundary is clearly visible against
+        the false-color composite.
+
+        Parameters:
+            state: ``QCheckBox.stateChanged`` argument. Interpreted via
+                ``_is_checked`` as ``True`` only for ``Qt.CheckState.Checked``.
+        """
+        self._show_mask = self._is_checked(state)
+        self._refresh_overlay()
+
     def _on_reset_stretch(self) -> None:
         # Recompute defaults from current image (FOV only; extended margins are zero)
         self._image_black = float(np.quantile(self._img_fov, 0.001))
@@ -588,6 +742,22 @@ class ManualNavDialog(QDialog):
         self._du = float(val)
         self._refresh_overlay()
 
+    def _on_show_corr_map(self) -> None:
+        """Open a modal dialog displaying the NCC surface with the current offset marked.
+
+        The correlation surface is fftshift-ed so zero offset is at the center.
+        Axes are labeled in offset pixels: X = dU (cols), Y = dV (rows). The
+        current ``(dV, dU)`` offset is overlaid as a red cross marker.
+        """
+        dlg = _CorrMapDialog(
+            corr_surface=self._corr_surface,
+            numerator_surface=self._corr_numerator,
+            dv=self._dv,
+            du=self._du,
+            parent=self,
+        )
+        dlg.exec()
+
     def _on_auto(self) -> None:
         # Call the same KPeaks correlation used by correlate_all
         up_factor = (
@@ -600,12 +770,10 @@ class ManualNavDialog(QDialog):
             model=self._model_img_ext,
             mask=self._model_mask_ext,
             upsample_factor=up_factor,
+            max_offset_vu=self._obs.extfov_margin_vu,
             logger=None,
         )
         dv, du = float(res['offset'][0]), float(res['offset'][1])
-        # Clamp to extfov bounds
-        dv = float(np.clip(dv, -self._obs.extfov_margin_v + 1, self._obs.extfov_margin_v - 1))
-        du = float(np.clip(du, -self._obs.extfov_margin_u + 1, self._obs.extfov_margin_u - 1))
         self._dv, self._du = dv, du
         self._spin_dv.blockSignals(True)
         self._spin_du.blockSignals(True)
@@ -758,6 +926,17 @@ class ManualNavDialog(QDialog):
         else:
             rgb[:, :, 1] = img_layer
         rgb[:, :, 2] = img_layer
+
+        # Overlay binary model mask as a semi-transparent white tint when enabled
+        if self._show_mask:
+            mask_raw = self._obs.extract_offset_array(self._model_mask_ext, (self._dv, self._du))
+            mask_slice = np.asarray(mask_raw, dtype=np.float64) > 0.5
+            for c in range(3):
+                ch = rgb[:, :, c].astype(np.float32)
+                ch[mask_slice] = (
+                    ch[mask_slice] * (1.0 - _MASK_OVERLAY_ALPHA) + 255.0 * _MASK_OVERLAY_ALPHA
+                )
+                rgb[:, :, c] = np.clip(ch, 0, 255).astype(np.uint8)
 
         # Create QImage/QPixmap
         qimage = QImage(rgb.tobytes(), w, h, 3 * w, QImage.Format.Format_RGB888).copy()

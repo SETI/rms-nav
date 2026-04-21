@@ -1,0 +1,75 @@
+bodies:
+  min_bounding_box_area: 9
+  min_emission_ring_body: 20
+  oversample_edge_limit: 512
+  oversample_maximum: 2
+  curvature_threshold_frac: 0.02
+  curvature_threshold_pixels: 20
+  limb_incidence_threshold: 1.53588974175501
+  limb_incidence_frac: 0.4
+  surface_bumpiness:
+    SATURN: 50.0
+    PAN: 7.0
+    DAPHNIS: 3.0
+    ATLAS: 12.0
+    PROMETHEUS: 25.0
+    PANDORA: 20.0
+    EPIMETHEUS: 13.0
+    JANUS: 20.0
+    MIMAS: 5.0
+    ENCELADUS: 0.5
+    TETHYS: 5.0
+    TELESTO: 5.0
+    CALYPSO: 7.0
+    DIONE: 0.75
+    HELENE: 45.0
+    RHEA: 0.75
+    TITAN: 0.0
+    HYPERION: 350.0
+    IAPETUS: 35.0
+    PHOEBE: 40.0
+  geometric_albedo:
+    SATURN: 0.342
+    PAN: 0.5
+    DAPHNIS: 0.5
+    ATLAS: 0.8
+    PROMETHEUS: 0.5
+    PANDORA: 0.7
+    EPIMETHEUS: 0.8
+    JANUS: 0.9
+    MIMAS: 0.6
+    ENCELADUS: 1.0
+    TETHYS: 0.8
+    TELESTO: 1.0
+    CALYPSO: 1.0
+    DIONE: 0.7
+    HELENE: 0.7
+    RHEA: 0.7
+    TITAN: 0.22
+    HYPERION: 0.3
+    IAPETUS: 0.275
+    PHOEBE: 0.08
+  use_lambert: true
+  use_albedo: false
+  min_reproj_seed_area: 40000
+  min_reproj_candidate_area: 2500
+  reproj_lon_resolution: 0.017453292519943295
+  reproj_lat_resolution: 0.017453292519943295
+  reproj_latlon_type: centric
+  reproj_lon_direction: east
+  min_text_area: 0.003
+  # Details of labels placed on bodies
+  label_mask_enlarge: 10  # Number of pixels around a body to avoid for label placement
+  label_limb_color: [255, 0, 0]  # Red
+  label_font: liberation2/LiberationMono-Bold.ttf
+  label_font_size: 18
+  # 512: 18
+  label_font_color: [255, 0, 0]  # Red
+  # label_font_color: [255, 255, 0]  # Yellow
+  label_horiz_gap: 7  # Horizontal gap between limb and head of arrow (left/right)
+  label_vert_gap: 5   # Vertical gap between limb and head of arrow (top/bottom)
+  label_scan_v: 1     # Granularity in V when scanning a limb to find places to put labels
+  label_grid_v: 10    # Coarse grid for labeling a body if everything else fails
+  label_grid_u: 10
+  # Details of outline around bodies
+  outline_thicken: 0

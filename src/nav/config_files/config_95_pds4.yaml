@@ -1,7 +1,3 @@
-##############################################
-# PDS4 BUNDLE DEFAULT CONFIGURATION SETTINGS #
-##############################################
-
 pds4:
   coiss_saturn:
     template_dir: cassini_iss_saturn_1.0

@@ -1,14 +1,18 @@
+import argparse
+import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
 
 from filecache import FCPath
 from PIL import Image
 
-from nav.config import DEFAULT_LOGGER
+from nav.config import DEFAULT_CONFIG, IMAGE_LOGGER, MAIN_LOGGER, image_log_handlers
 from nav.dataset.dataset import ImageFiles
 from nav.nav_master import NavMaster
 from nav.obs import ObsSnapshotInst
 from nav.support.file import json_as_string
+from nav.support.misc import log_run_environment
 
 
 def navigate_image_files(
@@ -19,25 +23,30 @@ def navigate_image_files(
     nav_models: list[str] | None = None,
     nav_techniques: list[str] | None = None,
     write_output_files: bool = True,
+    log_arguments: argparse.Namespace | None = None,
 ) -> tuple[bool, dict[str, Any]]:
     """Navigate a set of image files.
 
     Parameters:
         obs_class: The observation snapshot class.
         image_files: The image files to navigate.
-        nav_results_root: The directory to write the navigation results to; may be a FileCache URL.
-        nav_models: The models to use for navigation; or None if all models are to be used.
-        nav_techniques: The techniques to use for navigation; or None if all techniques are to be
+        nav_results_root: The directory to write the navigation results to; may be a
+            FileCache URL.
+        nav_models: The models to use for navigation; or None if all models are to be
             used.
-        write_output_files: Whether to write output files. False performs the navigation as
-            a dry run but doesn't write any results.
+        nav_techniques: The techniques to use for navigation; or None if all techniques
+            are to be used.
+        write_output_files: Whether to write output files. False performs the navigation
+            as a dry run but doesn't write any results.
+        log_arguments: Parsed CLI arguments used to resolve the image log file level.
+            If None, the config default (INFO) is used.
 
     Returns:
-        A tuple containing a boolean indicating success or failure and a dictionary containing the
-        public metadata for the navigation.
+        A tuple containing a boolean indicating success or failure and a dictionary
+        containing the public metadata for the navigation.
     """
 
-    logger = DEFAULT_LOGGER
+    logger = IMAGE_LOGGER
 
     if len(image_files.image_files) != 1:
         logger.error('Expected exactly one image per batch; got %d', len(image_files.image_files))
@@ -57,7 +66,14 @@ def navigate_image_files(
     public_metadata_file = nav_results_root / (image_file.results_path_stub + '_metadata.json')
     summary_png_file = nav_results_root / (image_file.results_path_stub + '_summary.png')
 
-    with logger.open(str(image_url)):
+    timestamp = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
+    image_log_path = (
+        nav_results_root / 'logs' / (image_file.results_path_stub + '_' + timestamp + '.log')
+    )
+    local_handlers = image_log_handlers(image_log_path, log_arguments, DEFAULT_CONFIG)
+
+    with logger.open(str(image_url), handler=local_handlers):
+        log_run_environment(logger, sys.argv[1:])
         try:
             snapshot = obs_class.from_file(image_url, **extra_params)
         except (OSError, RuntimeError) as e:
@@ -88,24 +104,28 @@ def navigate_image_files(
                     },
                 }
             public_metadata_file.write_text(json_as_string(metadata))
-            return False, metadata
+            MAIN_LOGGER.info('Wrote log to %s', image_log_path)
+            result: tuple[bool, dict[str, Any]] = False, metadata
+        else:
+            nm = NavMaster(snapshot, nav_models=nav_models, nav_techniques=nav_techniques)
+            nm.compute_all_models()
 
-        nm = NavMaster(snapshot, nav_models=nav_models, nav_techniques=nav_techniques)
-        nm.compute_all_models()
+            nm.navigate()
 
-        nm.navigate()
+            metadata = nm.metadata_serializable()
+            metadata['status'] = 'success'
 
-        metadata = nm.metadata_serializable()
-        metadata['status'] = 'success'
+            if write_output_files:
+                logger.info(f'Writing metadata to {public_metadata_file}')
+                public_metadata_file.write_text(json_as_string(metadata))
+                overlay = nm.create_overlay()
+                png_local = cast(Path, summary_png_file.get_local_path())
+                im = Image.fromarray(overlay)
+                logger.info(f'Writing summary PNG to {summary_png_file}')
+                im.save(png_local)
+                summary_png_file.upload()
 
-        if write_output_files:
-            logger.info(f'Writing metadata to {public_metadata_file}')
-            public_metadata_file.write_text(json_as_string(metadata))
-            overlay = nm.create_overlay()
-            png_local = cast(Path, summary_png_file.get_local_path())
-            im = Image.fromarray(overlay)
-            logger.info(f'Writing summary PNG to {summary_png_file}')
-            im.save(png_local)
-            summary_png_file.upload()
+            MAIN_LOGGER.info('Wrote log to %s', image_log_path)
+            result = True, metadata
 
-        return True, metadata
+    return result

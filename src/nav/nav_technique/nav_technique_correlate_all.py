@@ -80,7 +80,7 @@ class NavTechniqueCorrelateAll(NavTechnique):
             log_level = self.config.general.log_level_nav_correlate_all
         except AttributeError:
             log_level = None
-        with self.logger.open('NAVIGATION PASS: ALL MODELS CORRELATION', log_level=log_level):
+        with self.logger.open('NAVIGATION PASS: ALL MODELS CORRELATION', level=log_level):
             obs = self.nav_master.obs
 
             #
@@ -106,6 +106,7 @@ class NavTechniqueCorrelateAll(NavTechnique):
                 combined_model.models[0].model_img,
                 combined_model.models[0].model_mask,
                 upsample_factor=self.config.offset.correlation_fft_upsample_factor,
+                max_offset_vu=obs.extfov_margin_vu,
             )
 
             corr_offset = (float(result['offset'][0]), float(result['offset'][1]))
@@ -234,7 +235,91 @@ class NavTechniqueCorrelateAll(NavTechnique):
                 )
                 star.conflicts = 'REFINEMENT FAILED'
                 continue
-            opt_v, opt_u, _opt_metadata = ret
+            try:
+                opt_v, opt_u, opt_metadata = ret
+                if not isinstance(opt_metadata, dict):
+                    raise TypeError(
+                        f'opt_metadata from psfmodel.PSF.find_position() must be a dict, '
+                        f'got {type(opt_metadata).__name__}'
+                    )
+                reduced_chi2 = opt_metadata['reduced_chi2']
+                peak_snr = opt_metadata['peak_snr']
+                x_err = opt_metadata['x_err']
+                y_err = opt_metadata['y_err']
+                scale = opt_metadata['scale']
+                noise_rms = opt_metadata['noise_rms']
+            except (KeyError, TypeError) as exc:
+                key_name = exc.args[0] if isinstance(exc, KeyError) else None
+                detail = f'key {key_name!r}' if key_name is not None else str(exc)
+                self.logger.debug(
+                    f'Star {star.pretty_name:9s} VMAG {star.vmag:6.3f} '
+                    f'U {star_u:8.3f}, V {star_v:8.3f} refinement metadata invalid '
+                    f'({detail}) from psfmodel.PSF.find_position()'
+                )
+                star.conflicts = 'REFINEMENT METADATA'
+                continue
+            max_chi2 = self.config.offset.star_refinement_max_reduced_chi2
+            min_chi2 = self.config.offset.star_refinement_min_reduced_chi2
+            min_snr = self.config.offset.star_refinement_min_peak_snr
+            max_pos_err = self.config.offset.star_refinement_max_pos_err
+            if self.config.offset.log_star_refinement_detail:
+                self.logger.debug(
+                    f'Star {star.pretty_name:9s} VMAG {star.vmag:6.3f} '
+                    f'found at U {opt_u:8.3f} V {opt_v:8.3f} | '
+                    f'scale {scale:.4f} noise {noise_rms:.4f} '
+                    f'[limit: scale>noise] | '
+                    f'chi2 {reduced_chi2:.3f} '
+                    f'[limit: {min_chi2:.1f}<chi2<{max_chi2:.1f}] | '
+                    f'snr {peak_snr:.2f} '
+                    f'[limit: >{min_snr:.1f}] | '
+                    f'x_err {x_err:.4f} y_err {y_err:.4f} '
+                    f'[limit: <{max_pos_err:.2f}]'
+                )
+            # Scale at or below the noise RMS means no real signal is present.
+            if scale <= noise_rms:
+                self.logger.debug(
+                    f'Star {star.pretty_name:9s} VMAG {star.vmag:6.3f} '
+                    f'U {star_u:8.3f}, V {star_v:8.3f} scale {scale:.4f} '
+                    f'at or below noise floor {noise_rms:.4f}'
+                )
+                star.conflicts = 'REFINEMENT NO STAR'
+                continue
+            # chi2 near zero with a weak star means the background polynomial
+            # has consumed the signal.  A bright star (high SNR) with low chi2
+            # is simply a good fit — not overfitting.
+            if reduced_chi2 < min_chi2 and peak_snr < min_snr:
+                self.logger.debug(
+                    f'Star {star.pretty_name:9s} VMAG {star.vmag:6.3f} '
+                    f'U {star_u:8.3f}, V {star_v:8.3f} '
+                    f'reduced_chi2 {reduced_chi2:.3f} below floor {min_chi2:.2f} '
+                    f'(background overfitting)'
+                )
+                star.conflicts = 'REFINEMENT CHI2 LOW'
+                continue
+            if reduced_chi2 > max_chi2:
+                self.logger.debug(
+                    f'Star {star.pretty_name:9s} VMAG {star.vmag:6.3f} '
+                    f'U {star_u:8.3f}, V {star_v:8.3f} '
+                    f'reduced_chi2 {reduced_chi2:.2f} exceeds limit {max_chi2:.2f}'
+                )
+                star.conflicts = 'REFINEMENT CHI2'
+                continue
+            if peak_snr < min_snr:
+                self.logger.debug(
+                    f'Star {star.pretty_name:9s} VMAG {star.vmag:6.3f} '
+                    f'U {star_u:8.3f}, V {star_v:8.3f} '
+                    f'peak_snr {peak_snr:.2f} below limit {min_snr:.2f}'
+                )
+                star.conflicts = 'REFINEMENT SNR'
+                continue
+            if x_err > max_pos_err or y_err > max_pos_err:
+                self.logger.debug(
+                    f'Star {star.pretty_name:9s} VMAG {star.vmag:6.3f} '
+                    f'U {star_u:8.3f}, V {star_v:8.3f} '
+                    f'pos err ({x_err:.4f}, {y_err:.4f}) exceeds limit {max_pos_err:.4f}'
+                )
+                star.conflicts = 'REFINEMENT POS_ERR'
+                continue
             self.logger.debug(
                 f'Star {star.pretty_name:9s} VMAG {star.vmag:6.3f} '
                 f'Searched at {star_u:8.3f}, {star_v:8.3f} '
@@ -285,14 +370,17 @@ class NavTechniqueCorrelateAll(NavTechnique):
         nsigma = self.config.offset.star_refinement_nsigma
 
         # Roughly mark dimmer stars as less reliable and thus more likely to be outliers
-        min_vmag = 6  # TODO Fix this
+        min_vmag = self.config.stars.min_vmag
         max_vmag = obs.star_max_usable_vmag()
         vmag_spread = max_vmag - min_vmag
         # Convert vmag to a reliability between 1 and 0.5.
-        # Note vmag is guaranteed to have a value because of if it doesn't the star
-        # isn't added to the original star list.
-        # TODO clean this up
-        reliability = [1 - (cast(float, x.vmag) - min_vmag) / vmag_spread / 2 for x in uv_star_list]
+        # vmag is guaranteed to have a value; stars without one are excluded from the list.
+        if vmag_spread <= 0.0:
+            reliability = [1.0 for _ in uv_star_list]
+        else:
+            reliability = [
+                1 - (cast(float, x.vmag) - min_vmag) / vmag_spread / 2 for x in uv_star_list
+            ]
         u_outliers = detect_outliers(u_diff_list, reliability, nsigma)
         v_outliers = detect_outliers(v_diff_list, reliability, nsigma)
         final_u_diff_list = []

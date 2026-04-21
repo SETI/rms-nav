@@ -1,0 +1,23 @@
+planets:
+  - MERCURY
+  - VENUS
+  - EARTH
+  - MARS
+  - JUPITER
+  - SATURN
+  - URANUS
+  - NEPTUNE
+  - PLUTO
+
+general:
+  truetype_font_dir: /usr/share/fonts/truetype  # TODO
+  log_level_main_console: INFO
+  log_level_main_file: INFO
+  log_level_image_console: INFO
+  log_level_image_file: INFO
+  log_level_model_stars: INFO
+  log_level_model_bodies: INFO
+  log_level_model_rings: INFO
+  log_level_model_titan: INFO
+  log_level_nav_correlate_all: INFO
+  log_level_annotate: ERROR

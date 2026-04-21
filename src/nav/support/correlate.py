@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 # TODO Clean up typing
+import math
 from typing import Any
 
 import numpy as np
@@ -11,6 +12,9 @@ from nav.config import DEFAULT_LOGGER
 from nav.support.image import crop_center, normalize_array, pad_top_left
 from nav.support.misc import mad_std
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
+
+# Floor for masked NCC denominators and weight sums (avoid divide-by-zero).
+_NCC_EPS = 1e-12
 
 # ==============================================================
 # Small utilities
@@ -67,93 +71,65 @@ def upsampled_dft(
 
 def masked_ncc(
     image: NDArrayFloatType, model: NDArrayFloatType, mask: NDArrayBoolType
-) -> NDArrayFloatType:
-    """
-    Masked normalized cross-correlation surface between image and model
-    with mask.
-    All must be same padded shape.
+) -> tuple[NDArrayFloatType, NDArrayFloatType]:
+    """Masked normalized cross-correlation surface between image and model.
+
+    Computes shift-wise NCC (Pearson r) using FFT-based sums. Also
+    returns the unnormalized NCC numerator (mean-subtracted
+    covariance), which is better suited for peak localization when
+    the template is sparse relative to the mask.
+
+    The NCC surface contains values in [-1, 1] at every shift where
+    the mask overlaps non-constant image content.  The numerator
+    surface scales with both pattern-match quality *and* signal
+    amplitude, so it reliably peaks at the true offset even when a
+    sparse PSF template causes the NCC itself to plateau near 1.0 at
+    many shifts.
+
+    Parameters:
+        image: Padded image array.
+        model: Padded model array (same shape as image).
+        mask: Padded boolean mask (same shape as image).  True where
+            model pixels are valid.
+
+    Returns:
+        Tuple of (ncc, numerator) arrays, each with the same shape
+        as the inputs.  ``ncc`` is the Pearson-r surface; ``numerator``
+        is the mean-subtracted cross-covariance (unnormalized).
     """
     image_fft = fft2(image)
-    model_fft = fft2(model * mask)
     mask_fft = fft2(mask)
+    model_mask_fft = fft2(model * mask)
 
-    # numerator
-    num = np.real(ifft2(image_fft * np.conj(model_fft)))
+    sum_w: float = float(np.sum(mask))
+    safe_w = sum_w + _NCC_EPS
 
-    # local stats for I over mask support
-    sumI = ifft2(image_fft * np.conj(mask_fft))
-    sumI2 = ifft2(fft2(image**2) * np.conj(mask_fft))
+    # Shift-wise sums via FFT (take real to discard floating-point imaginary noise)
+    sum_iw = np.real(ifft2(image_fft * np.conj(mask_fft)))
+    sum_i2w = np.real(ifft2(fft2(image**2) * np.conj(mask_fft)))
+    sum_imw = np.real(ifft2(image_fft * np.conj(model_mask_fft)))
 
-    sumW = np.sum(mask)
-    meanM = np.sum(model * mask) / (sumW + 1e-12)
-    varM = np.sum(((model * mask) - meanM) ** 2) / (sumW + 1e-12)
+    # Model stats (constant over shifts)
+    sum_mw: float = float(np.sum(model * mask))
+    mean_m: float = sum_mw / safe_w
+    ssd_mw: float = float(np.sum(((model - mean_m) * mask) ** 2)) + _NCC_EPS
 
-    meanI = sumI / (sumW + 1e-12)
-    varI = (sumI2 / (sumW + 1e-12)) - meanI**2
-    varI[varI < 0] = 0.0
+    # Shift-wise image mean
+    mean_i = sum_iw / safe_w
 
-    denom = np.sqrt(varI * varM + 1e-12)
-    return (num - np.real(meanI) * np.sum(model * mask)) / (denom + 1e-12)
+    # Numerator: sum of (I - mean_I)(M - mean_M) * W over the mask
+    num = sum_imw - mean_i * sum_mw
 
+    # Denominator: sqrt( SSD_I(s) * SSD_M )
+    # Epsilon inside the sqrt so the floor is sqrt(_NCC_EPS) rather than
+    # _NCC_EPS; this prevents floating-point noise in the numerator from
+    # producing |NCC| >> 1 at shifts where the image variance is zero.
+    ssd_iw = sum_i2w - sum_iw**2 / safe_w
+    ssd_iw[ssd_iw < 0] = 0.0
+    denom = np.sqrt(ssd_iw * ssd_mw + _NCC_EPS)
 
-"""CodeRabbit says:
-
-Fix masked NCC math; current normalization is incorrect
-
-The numerator misses the symmetric mean terms and the denominator uses a scalar varM
-but omits shift-wise varI properly. Use standard masked NCC with shift-wise sums via FFT.
-
--def masked_ncc(I, M, W):
-+def masked_ncc(I, M, W):
-@@
--    FI = fft2(I)
--    FM = fft2(M * W)
--    FW = fft2(W)
--
--    # numerator
--    num = np.real(ifft2(FI * np.conj(FM)))
--
--    # local stats for I over mask support
--    sumI = ifft2(FI * np.conj(FW))
--    sumI2 = ifft2(fft2(I**2) * np.conj(FW))
--
--    sumW = np.sum(W)
--    meanM = np.sum(M*W) / (sumW + 1e-12)
--    varM = np.sum(((M*W) - meanM)**2) / (sumW + 1e-12)
--
--    meanI = sumI / (sumW + 1e-12)
--    varI = (sumI2/(sumW + 1e-12)) - meanI**2
--    varI[varI < 0] = 0.0
--
--    denom = np.sqrt(varI * varM + 1e-12)
--    return (num - np.real(meanI)*np.sum(M*W)) / (denom + 1e-12)
-+    FI = fft2(I)
-+    FW = fft2(W)
-+    FMW = fft2(M * W)
-+
-+    # Sums over shifting mask support
-+    sumW = np.sum(W) + 1e-12
-+    sumIW = ifft2(FI * np.conj(FW))
-+    sumI2W = ifft2(fft2(I**2) * np.conj(FW))
-+
-+    # Model stats (constant over shifts)
-+    sumMW = np.sum(M * W)
-+    meanM = sumMW / sumW
-+    varMW = np.sum(((M - meanM) * W)**2) + 1e-12
-+
-+    # Cross and means
-+    sumIMW = ifft2(FI * np.conj(FMW))
-+    meanI = sumIW / sumW
-+
-+    # Numerator of NCC
-+    num = sumIMW - meanI * sumMW - meanM * sumIW + meanI * meanM * sumW
-+
-+    # Denominator: sqrt( var_I(s) * var_M ), with var_I(s) under mask W
-+    varI = sumI2W - 2.0 * meanI * sumIW + (meanI**2) * sumW
-+    varI[varI < 0] = 0.0
-+    denom = np.sqrt(varI * varMW) + 1e-12
-+    return np.real(num) / denom
-"""
+    ncc = num / denom
+    return ncc, num
 
 
 # ==============================================================
@@ -179,10 +155,38 @@ def per_metric(corr: NDArrayFloatType, peak_val: float) -> float:
     return peak_val / (np.sqrt(np.sum(corr**2)) + 1e-12)
 
 
-def nms_topk(corr: NDArrayFloatType, k: int = 5, radius: int = 5) -> list[tuple[int, int, float]]:
-    """Non-maximum suppression to get top-k peaks."""
+def nms_topk(
+    corr: NDArrayFloatType,
+    k: int = 5,
+    radius: int = 5,
+    max_offset_vu: tuple[int, int] | None = None,
+) -> list[tuple[int, int, float]]:
+    """Non-maximum suppression to get top-k peaks.
+
+    Parameters:
+        corr: 2-D correlation surface (V x U).
+        k: Maximum number of peaks to return.
+        radius: Suppression radius around each selected peak in pixels.
+        max_offset_vu: If given, only positions whose signed offset
+            satisfies ``|dV| <= max_offset_vu[0]`` and
+            ``|dU| <= max_offset_vu[1]`` are eligible.  Signed offsets
+            are derived from the FFT-convention wrap-around used by
+            :func:`int_to_signed`.
+
+    Returns:
+        List of ``(row, col, value)`` tuples for up to ``k`` peaks.
+    """
     corr_v, corr_u = corr.shape
     work = corr.copy()
+    if max_offset_vu is not None:
+        max_v, max_u = max_offset_vu
+        rows = np.arange(corr_v)
+        cols = np.arange(corr_u)
+        # Signed offsets via FFT wrap-around convention (same as int_to_signed).
+        signed_rows = np.where(rows < corr_v // 2, rows, rows - corr_v)
+        signed_cols = np.where(cols < corr_u // 2, cols, cols - corr_u)
+        work[np.abs(signed_rows) > max_v, :] = -np.inf
+        work[:, np.abs(signed_cols) > max_u] = -np.inf
     peaks = []
     if not np.any(np.isfinite(work)):
         return peaks
@@ -343,6 +347,7 @@ def navigate_single_scale_kpeaks(
     prior_shift: tuple[float, float] | None = None,
     prior_weight: float = 0.0,
     nms_radius: int = 5,
+    max_offset_vu: tuple[int, int] | None = None,
 ) -> dict[str, Any]:
     """
     One-scale masked NCC + top-K candidate evaluation.
@@ -358,6 +363,11 @@ def navigate_single_scale_kpeaks(
         prior_weight: The prior weight to use for the navigation.
         nms_radius: The radius to use for the non-maximum suppression.
         logger: The logger to use for the navigation.
+        max_offset_vu: If given, only correlation peaks whose signed
+            (V, U) offset satisfies ``|dV| <= max_offset_vu[0]`` and
+            ``|dU| <= max_offset_vu[1]`` are considered candidates.
+            Typically set to the extended-FOV margins so that offsets
+            outside the physically-plausible range are never evaluated.
 
     Returns:
         A dictionary containing the navigation result.
@@ -375,11 +385,13 @@ def navigate_single_scale_kpeaks(
     model_pad = pad_top_left(model, padded_h, padded_w)
     mask_pad = pad_top_left(mask, padded_h, padded_w)
 
-    corr = masked_ncc(image_pad, model_pad, mask_pad)
-    # Use unnormalized correlation numerator for peak localization to match
-    # the refinement surface computed in evaluate_candidate.
-    corr_num = np.real(ifft2(fft2(image_pad) * np.conj(fft2(model_pad * mask_pad))))
-    peaks = nms_topk(corr_num, k=max_peaks, radius=nms_radius)
+    corr, corr_num = masked_ncc(image_pad, model_pad, mask_pad)
+    # Use the NCC numerator (mean-subtracted covariance) for peak localization.
+    # The NCC itself can plateau near 1.0 at many shifts when the template is
+    # sparse relative to the mask (e.g. single star).  The numerator scales
+    # with image variance under the mask, so it peaks sharply only where the
+    # image actually contains the target signal.
+    peaks = nms_topk(corr_num, k=max_peaks, radius=nms_radius, max_offset_vu=max_offset_vu)
 
     if logger is not None:
         logger.debug('Correlation peaks:')
@@ -441,6 +453,7 @@ def navigate_with_pyramid_kpeaks(
     consistency_tol: float = 2.0,
     nms_radius: int = 5,
     prior_weight_final: float = 0.25,
+    max_offset_vu: tuple[int, int] | None = None,
     logger: PdsLogger | None = None,
 ) -> dict[str, Any]:
     """TODO Clean this up
@@ -463,6 +476,12 @@ def navigate_with_pyramid_kpeaks(
         consistency_tol: The consistency tolerance to use for the navigation.
         nms_radius: The radius to use for the non-maximum suppression.
         prior_weight_final: The prior weight to use for the final navigation.
+        max_offset_vu: Maximum permitted signed offset as ``(max_dV, max_dU)`` in
+            full-resolution pixels.  When given, correlation peaks outside this
+            range are excluded at every pyramid level (the limit is scaled by the
+            downsample factor at each level).  Pass ``obs.extfov_margin_vu`` to
+            restrict the search to offsets that are physically reachable given the
+            extended FOV padding.
         logger: The logger to use for the navigation.
 
     Returns:
@@ -503,9 +522,14 @@ def navigate_with_pyramid_kpeaks(
     logger.debug(f'  Consistency tolerance: {consistency_tol}')
     logger.debug(f'  NMS radius: {nms_radius}')
     logger.debug(f'  Prior weight final: {prior_weight_final}')
+    if max_offset_vu is not None:
+        logger.debug(f'  Max offset V: {max_offset_vu[0]}, U: {max_offset_vu[1]}')
 
-    # Coarse-to-fine prior sequence
+    # Coarse-to-fine prior sequence.  Each level passes its result as the prior
+    # for the next finer level so that a bad coarse estimate is penalised at
+    # the finer scale rather than allowed to set an unconstrained starting point.
     level_shifts = []
+    coarser_prior_fullres: tuple[float, float] | None = None
     for lvl in range(pyramid_levels, 0, -1):
         s = 2 ** (lvl - 1)
         # Anti-alias the image prior to decimation to avoid peak shifts at coarse levels
@@ -521,16 +545,45 @@ def navigate_with_pyramid_kpeaks(
         model_downsampled = model_blurred[::s, ::s]
         mask_downsampled = mask_blurred[::s, ::s] > 0.5
 
+        # Scale the full-res prior down to the current pyramid level's coordinates.
+        prior_at_scale: tuple[float, float] | None = (
+            (coarser_prior_fullres[0] / s, coarser_prior_fullres[1] / s)
+            if coarser_prior_fullres is not None
+            else None
+        )
+
+        # Scale the max offset limit to the current pyramid level.  Use ceiling
+        # division so a fractional full-res margin still maps to a non-zero window
+        # at coarse scales; clamp each component to at least 1 pixel.
+        max_offset_at_scale: tuple[int, int] | None = (
+            (
+                max(1, math.ceil(max_offset_vu[0] / s)),
+                max(1, math.ceil(max_offset_vu[1] / s)),
+            )
+            if max_offset_vu is not None
+            else None
+        )
+
+        # At the coarsest level (no prior), a single peak suffices.
+        # At finer levels, evaluate multiple candidates so the prior
+        # from the coarser level can steer selection toward the correct peak.
+        level_max_peaks = 1 if coarser_prior_fullres is None else max_peaks
+
         res_lvl = navigate_single_scale_kpeaks(
             image=image_downsampled,
             model=model_downsampled,
             mask=mask_downsampled,
-            max_peaks=1,
+            max_peaks=level_max_peaks,
             upsample_factor=upsample_factor,
             metric=metric,
-            prior_shift=None,
-            prior_weight=0.0,
+            prior_shift=prior_at_scale,
+            # When ``coarser_prior_fullres`` is still None (coarsest pyramid level),
+            # ``prior_at_scale`` is None: set ``prior_weight`` to 0.0 so the coarsest
+            # level's quality score has no prior penalty. Finer levels pass
+            # ``prior_shift`` and use ``prior_weight_final``.
+            prior_weight=prior_weight_final if prior_at_scale is not None else 0.0,
             nms_radius=nms_radius,
+            max_offset_vu=max_offset_at_scale,
             logger=logger,
         )
         logger.debug(
@@ -541,8 +594,10 @@ def navigate_with_pyramid_kpeaks(
             f'peak_val {res_lvl["peak_val"]:.3f}'
         )
 
-        # Scale shift back to full res
-        level_shifts.append((res_lvl['offset'][0] * s, res_lvl['offset'][1] * s))
+        # Scale shift back to full res and record for the next finer level.
+        shift_fullres = (res_lvl['offset'][0] * s, res_lvl['offset'][1] * s)
+        level_shifts.append(shift_fullres)
+        coarser_prior_fullres = shift_fullres
 
     # Consistency: max deviation to last level's shift
     shifts_arr = np.array(level_shifts, dtype=np.float64)
@@ -563,6 +618,7 @@ def navigate_with_pyramid_kpeaks(
         prior_shift=final_prior,
         prior_weight=prior_weight_final,
         nms_radius=nms_radius,
+        max_offset_vu=max_offset_vu,
         logger=logger,
     )
 
