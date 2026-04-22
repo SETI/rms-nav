@@ -28,22 +28,7 @@ from nav.reproj.photometric_model import PhotometricModel
 from nav.support.image import array_zoom
 from nav.support.types import NDArrayBoolType, NDArrayFloatType, NDArrayIntType, PathLike
 
-_LOGGING_NAME = 'nav.' + __name__
-
-
-class BodyMosaicMergeStrategy(enum.Enum):
-    """Strategy for resolving per-pixel conflicts when adding data to a BodyMosaic.
-
-    Members:
-        BEST_RESOLUTION: Replace existing data only when the new data has
-            strictly better effective resolution at each pixel.
-        MOST_COVERAGE_THEN_RESOLUTION: Fill masked (empty) pixels first;
-            for already-filled pixels, replace only when the new data has
-            better effective resolution.
-    """
-
-    BEST_RESOLUTION = 'best_resolution'
-    MOST_COVERAGE_THEN_RESOLUTION = 'most_coverage_then_resolution'
+_LOGGING_NAME = __name__
 
 
 # Slop values: must be smaller than the smallest resolution we will ever use
@@ -68,6 +53,18 @@ DEFAULT_ZOOM = 1
 # reprojection. If the emission angle is too large we can't see over the crater
 # lip.
 _LAMBERT_THRESHOLD = 0.0001
+
+
+class BodyMosaicMergeStrategy(enum.Enum):
+    """Strategy for resolving per-pixel conflicts when adding data to a BodyMosaic.
+
+    Members:
+        BEST_RESOLUTION: Replace an existing pixel only when the new data has
+            strictly better effective resolution, or if the existing pixel is
+            empty (masked).
+    """
+
+    BEST_RESOLUTION = 'best_resolution'
 
 
 @dataclass(frozen=True)
@@ -188,7 +185,7 @@ class BodyReprojResult:
         Raises:
             ValueError: If the file's kind does not match, or if any array
                 dtype does not match the declared ``image_dtype`` /
-                ``metadata_dtype``, or if ``image_number`` is not uint16.
+                ``metadata_dtype``.
 
         Example::
 
@@ -209,8 +206,8 @@ class BodyReprojResult:
                 k: d[k]
                 for k in ('img', 'resolution', 'eff_resolution', 'phase', 'emission', 'incidence')
             },
-            image_dtype,
-            metadata_dtype,
+            image_dtype=image_dtype,
+            metadata_dtype=metadata_dtype,
             image_fields=['img'],
             metadata_fields=['resolution', 'eff_resolution', 'phase', 'emission', 'incidence'],
         )
@@ -227,6 +224,15 @@ class BodyReprojResult:
         else:
             photometric_model_name = None
 
+        latlon_type_val = str(d['latlon_type'])
+        if latlon_type_val not in ('centric', 'graphic', 'squashed'):
+            raise ValueError(
+                f"latlon_type {latlon_type_val!r} is not one of 'centric', 'graphic', 'squashed'"
+            )
+        lon_direction_val = str(d['lon_direction'])
+        if lon_direction_val not in ('east', 'west'):
+            raise ValueError(f"lon_direction {lon_direction_val!r} is not one of 'east', 'west'")
+
         return cls(
             body_name=str(d['body_name']),
             img=d['img'],
@@ -234,8 +240,8 @@ class BodyReprojResult:
             lon_resolution=float(d['lon_resolution']),
             lat_idx_range=lat_idx_range,
             lon_idx_range=lon_idx_range,
-            latlon_type=str(d['latlon_type']),  # type: ignore[arg-type]
-            lon_direction=str(d['lon_direction']),  # type: ignore[arg-type]
+            latlon_type=latlon_type_val,  # type: ignore[arg-type]
+            lon_direction=lon_direction_val,  # type: ignore[arg-type]
             resolution=d['resolution'],
             eff_resolution=d['eff_resolution'],
             phase=d['phase'],
@@ -401,8 +407,8 @@ class BodyMosaicData:
                     'image_number',
                 )
             },
-            image_dtype,
-            metadata_dtype,
+            image_dtype=image_dtype,
+            metadata_dtype=metadata_dtype,
             image_fields=['img'],
             metadata_fields=['resolution', 'eff_resolution', 'phase', 'emission', 'incidence'],
             float64_fields=['time'],
@@ -420,6 +426,15 @@ class BodyMosaicData:
         else:
             photometric_model_name = None
 
+        latlon_type_val = str(d['latlon_type'])
+        if latlon_type_val not in ('centric', 'graphic', 'squashed'):
+            raise ValueError(
+                f"latlon_type {latlon_type_val!r} is not one of 'centric', 'graphic', 'squashed'"
+            )
+        lon_direction_val = str(d['lon_direction'])
+        if lon_direction_val not in ('east', 'west'):
+            raise ValueError(f"lon_direction {lon_direction_val!r} is not one of 'east', 'west'")
+
         return cls(
             body_name=str(d['body_name']),
             img=d['img'],
@@ -427,8 +442,8 @@ class BodyMosaicData:
             lon_resolution=float(d['lon_resolution']),
             lat_range=lat_range,
             lon_range=lon_range,
-            latlon_type=str(d['latlon_type']),  # type: ignore[arg-type]
-            lon_direction=str(d['lon_direction']),  # type: ignore[arg-type]
+            latlon_type=latlon_type_val,  # type: ignore[arg-type]
+            lon_direction=lon_direction_val,  # type: ignore[arg-type]
             resolution=d['resolution'],
             eff_resolution=d['eff_resolution'],
             phase=d['phase'],
@@ -519,7 +534,9 @@ class BodyMosaic:
             lon_direction: Longitude direction. One of 'east' or 'west'.
             photometric_model: Photometric correction to apply during
                 reproject(). None (default) means no correction.
-            merge_strategy: Strategy for resolving pixel conflicts during add().
+            merge_strategy: How to resolve conflicts when the same pixel
+                appears in multiple reprojections. Defaults to
+                ``BodyMosaicMergeStrategy.BEST_RESOLUTION``.
             image_dtype: NumPy dtype for the reprojected brightness ``img``
                 array. Defaults to ``np.float64``.
             metadata_dtype: NumPy dtype for geometry arrays (``resolution``,
@@ -527,7 +544,7 @@ class BodyMosaic:
                 Defaults to ``np.float32``.
 
         Raises:
-            ValueError: If latlon_type or lon_direction is invalid.
+            ValueError: If latlon_type, lon_direction, or merge_strategy is invalid.
 
         Note:
             ``time`` is always stored as ``float64`` regardless of
@@ -541,6 +558,10 @@ class BodyMosaic:
             )
         if lon_direction not in ('east', 'west'):
             raise ValueError(f"lon_direction must be 'east' or 'west', got {lon_direction!r}")
+        if not isinstance(merge_strategy, BodyMosaicMergeStrategy):
+            raise ValueError(
+                f'merge_strategy must be a BodyMosaicMergeStrategy member, got {merge_strategy!r}'
+            )
 
         self.body_name = body_name
         self._lat_resolution = lat_resolution
@@ -661,7 +682,7 @@ class BodyMosaic:
         longitude = polymath.Scalar.as_scalar(longitude)
 
         if len(longitude) == 0:
-            return np.array([]), np.array([])
+            return polymath.Pair(np.empty((0, 2)))
 
         moon_surface = oops.Body.lookup(self.body_name).surface
 
@@ -727,13 +748,15 @@ class BodyMosaic:
         if self._max_incidence is not None or not mask_only:
             bp_incidence = bp.incidence_angle(self.body_name).mvals.astype(self._metadata_dtype)
 
-        if self._max_emission is not None or not mask_only:
+        if self._max_emission is not None or not mask_only or self._max_resolution is not None:
             bp_emission = bp.emission_angle(self.body_name).mvals.astype(self._metadata_dtype)
+
+        if not mask_only or self._max_resolution is not None:
+            center_resolution = bp.center_resolution(self.body_name).vals
+            resolution = center_resolution / np.cos(bp_emission)
 
         if not mask_only:
             bp_phase = bp.phase_angle(self.body_name).mvals.astype(self._metadata_dtype)
-            center_resolution = bp.center_resolution(self.body_name).vals
-            resolution = center_resolution / np.cos(bp_emission)
 
         bp_latitude = bp.latitude(self.body_name, lat_type=self._latlon_type)
         body_mask_inv = ma.getmaskarray(bp_latitude.mvals).copy()
@@ -841,8 +864,8 @@ class BodyMosaic:
             if not mask_only:
                 logger.info(
                     'Resolution range     %8.2f %8.2f',
-                    math.degrees(np.min(resolution[ok_body_mask])),
-                    math.degrees(np.max(resolution[ok_body_mask])),
+                    np.min(resolution[ok_body_mask]),
+                    np.max(resolution[ok_body_mask]),
                 )
             logger.debug('Latitude pixel range %d %d', int(min_lat_pixel), int(max_lat_pixel))
             logger.debug('Longitude pixel range %d %d', int(min_lon_pixel), int(max_lon_pixel))
@@ -1061,7 +1084,6 @@ class BodyMosaic:
             return
 
         # Build flat index into repro arrays
-        lat_max - lat_min + 1
         repro_n_lon = lon_max - lon_min + 1
         repro_flat = (valid_lat[in_range] - lat_min) * repro_n_lon + (valid_lon[in_range] - lon_min)
 
@@ -1073,7 +1095,7 @@ class BodyMosaic:
         repro_emission_flat = repro.emission.data.ravel()[repro_flat]
         repro_incidence_flat = repro.incidence.data.ravel()[repro_flat]
 
-        # Determine which pixels to replace based on merge strategy
+        # Determine which pixels to replace based on the merge strategy.
         existing_has_data = self._has_data[rows, cols]
         existing_eff_res = self._eff_resolution[rows, cols]
 
@@ -1082,14 +1104,10 @@ class BodyMosaic:
                 ~existing_has_data,
                 repro_eff_res_flat * resolution_threshold < existing_eff_res,
             )
-        else:  # MOST_COVERAGE_THEN_RESOLUTION
-            replace_mask = np.logical_or(
-                ~existing_has_data,
-                repro_eff_res_flat * resolution_threshold < existing_eff_res,
+        else:
+            raise NotImplementedError(
+                f'Unsupported merge strategy: {self._merge_strategy!r}'
             )
-            # Both strategies effectively do the same at the per-pixel level;
-            # the difference is at the column level for rings. For bodies, both
-            # reduce to: fill empty first, then replace with better resolution.
 
         if copy_slop > 0:
             # Expand the replace mask using the slop radius
@@ -1448,7 +1466,7 @@ class BodyMosaic:
         out_imgnum = np.zeros((n_out_lat, n_out_lon), dtype=np.uint16)
         out_has = np.zeros((n_out_lat, n_out_lon), dtype=np.bool_)
 
-        if self._has_data is not None:
+        if self._has_data.any():
             for out_col, lon_bin in enumerate(lon_bins):
                 col = (lon_bin - self._lon_min_bin) % self._n_full_lon
                 if col >= self._n_lon:

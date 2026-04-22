@@ -32,8 +32,25 @@ def _make_mosaic(
     img_values: float | np.ndarray = 0.5,
     mask_all: bool = False,
     eff_res: float = 2.0,
+    eff_res_mask_all: bool = False,
 ) -> BodyMosaicData:
-    """Build a synthetic BodyMosaicData for testing."""
+    """Build a synthetic BodyMosaicData for testing.
+
+    Parameters:
+        n_lat: Number of latitude rows.
+        n_lon: Number of longitude columns.
+        lat_min: Minimum latitude in radians.
+        lon_min: Minimum longitude in radians.
+        img_values: Scalar or array filling the ``img`` data.
+        mask_all: If True, mask every ``img`` pixel (simulate empty mosaic).
+        eff_res: Scalar effective resolution (km/pixel) for all unmasked pixels.
+        eff_res_mask_all: If True, mask every ``eff_resolution`` pixel while
+            leaving ``img`` unmasked (useful for testing the all-masked
+            resolution-ratio fallback).
+
+    Returns:
+        BodyMosaicData populated with the given parameters.
+    """
     shape = (n_lat, n_lon)
     lat_max = lat_min + (n_lat - 1) * _LAT_RES
     lon_max = lon_min + (n_lon - 1) * _LON_RES
@@ -46,6 +63,7 @@ def _make_mosaic(
 
     img_mask = np.ones(shape, dtype=bool) if mask_all else np.zeros(shape, dtype=bool)
     data_mask = np.zeros(shape, dtype=bool)
+    eff_res_mask = np.ones(shape, dtype=bool) if eff_res_mask_all else data_mask
 
     return BodyMosaicData(
         body_name='MIMAS',
@@ -57,7 +75,7 @@ def _make_mosaic(
         latlon_type='centric',
         lon_direction='east',
         resolution=ma.MaskedArray(np.ones(shape, dtype=np.float32), mask=data_mask),
-        eff_resolution=ma.MaskedArray(np.full(shape, eff_res, dtype=np.float32), mask=data_mask),
+        eff_resolution=ma.MaskedArray(np.full(shape, eff_res, dtype=np.float32), mask=eff_res_mask),
         phase=ma.MaskedArray(np.zeros(shape, dtype=np.float32), mask=data_mask),
         emission=ma.MaskedArray(np.zeros(shape, dtype=np.float32), mask=data_mask),
         incidence=ma.MaskedArray(np.zeros(shape, dtype=np.float32), mask=data_mask),
@@ -78,7 +96,17 @@ def _setup_mock_backplane(
     lon_col: int = 3,
     center_res: float = 2.0,
 ) -> None:
-    """Configure mock backplane to map every image pixel to (lat_row, lon_col) in mosaic."""
+    """Configure a mock Backplane to map every image pixel to a single mosaic cell.
+
+    Parameters:
+        mock_bp: MagicMock acting as the oops Backplane instance.
+        img_shape: (n_rows, n_cols) shape of the synthetic image.
+        mosaic: BodyMosaicData used to derive the target latitude/longitude.
+        lat_row: Mosaic row index (0-based) to map all pixels to. Defaults to 2.
+        lon_col: Mosaic column index (0-based) to map all pixels to. Defaults to 3.
+        center_res: Scalar resolution (km/pixel) returned by
+            ``mock_bp.center_resolution``. Defaults to 2.0.
+    """
     lat_val = mosaic.lat_range[0] + lat_row * mosaic.lat_resolution
     lat_arr = np.full(img_shape, lat_val, dtype=np.float64)
     mock_lat = MagicMock()
@@ -100,6 +128,12 @@ def _setup_mock_backplane(
 
 
 class TestReturnNone:
+    """Verify that create_cartographic_model returns None when the mosaic is fully masked.
+
+    Uses _make_mosaic(mask_all=True) and a mock Observation; confirms the
+    function short-circuits before creating a Backplane.
+    """
+
     def test_returns_none_when_mosaic_all_masked(self) -> None:
         """Returns None immediately if every mosaic pixel is masked."""
         mosaic = _make_mosaic(mask_all=True)
@@ -122,6 +156,9 @@ class TestReturnNone:
 
 
 class TestModelImage:
+    """Tests for the shape, sampling, and masking of the model image produced by
+    create_cartographic_model."""
+
     def test_model_img_shape_matches_backplane(self) -> None:
         """Output model shape matches the backplane latitude array shape."""
         mosaic = _make_mosaic()
@@ -217,6 +254,13 @@ class TestModelImage:
 
 
 class TestResolutionRatio:
+    """Tests for the resolution_ratio field returned by create_cartographic_model.
+
+    Verifies that the ratio of mosaic effective resolution to image center
+    resolution is computed correctly for equal, coarser, and finer mosaics,
+    and defaults to 1.0 when all eff_resolution values are masked.
+    """
+
     def test_resolution_ratio_equal_resolution(self) -> None:
         """Resolution ratio is 1.0 when mosaic and image resolutions match."""
         mosaic = _make_mosaic(eff_res=3.0)
@@ -267,32 +311,7 @@ class TestResolutionRatio:
 
     def test_resolution_ratio_is_one_when_eff_resolution_all_masked(self) -> None:
         """Resolution ratio defaults to 1.0 when mosaic eff_resolution is all masked."""
-        n_lat, n_lon = 5, 10
-        shape = (n_lat, n_lon)
-        data_mask = np.zeros(shape, dtype=bool)
-        img_mask = np.zeros(shape, dtype=bool)
-        mosaic = BodyMosaicData(
-            body_name='MIMAS',
-            img=ma.MaskedArray(np.ones(shape, dtype=np.float32), mask=img_mask),
-            lat_resolution=_LAT_RES,
-            lon_resolution=_LON_RES,
-            lat_range=(-0.2, -0.2 + (n_lat - 1) * _LAT_RES),
-            lon_range=(0.5, 0.5 + (n_lon - 1) * _LON_RES),
-            latlon_type='centric',
-            lon_direction='east',
-            resolution=ma.MaskedArray(np.ones(shape, dtype=np.float32), mask=data_mask),
-            eff_resolution=ma.MaskedArray(
-                np.ones(shape, dtype=np.float32), mask=np.ones(shape, dtype=bool)
-            ),
-            phase=ma.MaskedArray(np.zeros(shape, dtype=np.float32), mask=data_mask),
-            emission=ma.MaskedArray(np.zeros(shape, dtype=np.float32), mask=data_mask),
-            incidence=ma.MaskedArray(np.zeros(shape, dtype=np.float32), mask=data_mask),
-            time=ma.MaskedArray(np.zeros(shape, dtype=np.float64), mask=data_mask),
-            image_number=ma.MaskedArray(np.zeros(shape, dtype=np.uint16), mask=data_mask),
-            photometric_model_name=None,
-            image_dtype=np.dtype(np.float64),
-            metadata_dtype=np.dtype(np.float32),
-        )
+        mosaic = _make_mosaic(eff_res_mask_all=True)
         obs = MagicMock()
         img_shape = (4, 5)
 
@@ -313,6 +332,8 @@ class TestResolutionRatio:
 
 
 class TestCartographicModelResult:
+    """Tests for the CartographicModelResult frozen dataclass (field access and immutability)."""
+
     def test_frozen_dataclass(self) -> None:
         """CartographicModelResult is immutable (frozen dataclass)."""
         img = np.zeros((3, 4), dtype=np.float32)

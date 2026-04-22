@@ -102,23 +102,13 @@ Available models are :class:`~nav.reproj.photometric_model.LambertModel`,
 :class:`~nav.reproj.photometric_model.MinnaertModel`. When ``photometric_model``
 is ``None`` (the default), pixel values are reprojected without correction.
 
-Merge strategy
-^^^^^^^^^^^^^^
+Pixel conflict resolution
+^^^^^^^^^^^^^^^^^^^^^^^^^
 
-When multiple observations overlap, the ``merge_strategy`` parameter controls
-which pixel wins::
-
-    from nav.reproj import BodyMosaic, BodyMosaicMergeStrategy
-
-    mosaic = BodyMosaic(
-        body_name='MIMAS',
-        merge_strategy=BodyMosaicMergeStrategy.MOST_COVERAGE_THEN_RESOLUTION,
-    )
-
-- ``BEST_RESOLUTION`` (default): the image with the highest resolution (lowest
-  km/pixel) wins at each pixel.
-- ``MOST_COVERAGE_THEN_RESOLUTION``: prefer the image with the most total
-  coverage; break ties using resolution.
+``BodyMosaic`` uses the ``BEST_RESOLUTION`` strategy (see
+:class:`~nav.reproj.bodies.BodyMosaicMergeStrategy`): empty (masked) pixels are
+filled unconditionally and existing data is replaced only when the new
+observation has strictly better effective resolution (lower km/pixel).
 
 Longitude wraparound
 ^^^^^^^^^^^^^^^^^^^^

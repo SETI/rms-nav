@@ -29,25 +29,9 @@ class TestBodyMosaicMergeStrategy:
         strategy = BodyMosaicMergeStrategy.BEST_RESOLUTION
         assert strategy == BodyMosaicMergeStrategy.BEST_RESOLUTION
 
-    def test_most_coverage_then_resolution_member_exists(self) -> None:
-        """MOST_COVERAGE_THEN_RESOLUTION is a valid enum member."""
-        strategy = BodyMosaicMergeStrategy.MOST_COVERAGE_THEN_RESOLUTION
-        assert strategy == BodyMosaicMergeStrategy.MOST_COVERAGE_THEN_RESOLUTION
-
-    def test_members_are_distinct(self) -> None:
-        """The two strategies are not equal to each other."""
-        assert (
-            BodyMosaicMergeStrategy.BEST_RESOLUTION  # type: ignore[comparison-overlap]
-            != BodyMosaicMergeStrategy.MOST_COVERAGE_THEN_RESOLUTION
-        )
-
-    def test_value_strings(self) -> None:
-        """Enum values are the expected string keys."""
+    def test_value_string(self) -> None:
+        """Enum value is the expected string key."""
         assert BodyMosaicMergeStrategy.BEST_RESOLUTION.value == 'best_resolution'
-        assert (
-            BodyMosaicMergeStrategy.MOST_COVERAGE_THEN_RESOLUTION.value
-            == 'most_coverage_then_resolution'
-        )
 
 
 # =========================================================================
@@ -92,7 +76,17 @@ class TestRingMosaicMergeStrategy:
 def _angles(
     incidence_deg: float, emission_deg: float, phase_deg: float
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return scalar arrays of the three photometric angles in radians."""
+    """Return scalar arrays of the three photometric angles converted to radians.
+
+    Parameters:
+        incidence_deg: Incidence angle in degrees.
+        emission_deg: Emission angle in degrees.
+        phase_deg: Phase angle in degrees.
+
+    Returns:
+        Tuple of (incidence, emission, phase), each a 1-D numpy array of
+        length 1 containing the corresponding angle in radians.
+    """
     return (
         np.array([math.radians(incidence_deg)]),
         np.array([math.radians(emission_deg)]),
@@ -238,8 +232,10 @@ class TestRingOrbitModel:
 
     def test_frozen_dataclass_immutable(self) -> None:
         """RingOrbitModel is frozen (immutable)."""
-        with pytest.raises((AttributeError, TypeError)):
+        with pytest.raises((AttributeError, TypeError)) as exc_info:
             FRING_CORE.a = 1.0  # type: ignore[misc]
+        msg = str(exc_info.value).lower()
+        assert 'cannot' in msg or 'frozen' in msg or 'immutable' in msg
 
     def test_negative_a_raises(self) -> None:
         """Constructing a RingOrbitModel with negative semi-major axis raises ValueError."""

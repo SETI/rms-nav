@@ -64,14 +64,14 @@ def _as_fcpath(path: PathLike) -> FCPath:
 
 def infer_format(
     path: PathLike,
-    format: str | None,  # noqa: A002
+    format_: str | None,
 ) -> str:
     """Infer the serialization format from the file extension or explicit override.
 
     Parameters:
         path: File path (``str``, ``Path``, or ``FCPath``); used for extension-based
-            inference when format is None.
-        format: Explicit format string ('npz' or 'fits'). When not None, this
+            inference when format_ is None.
+        format_: Explicit format string ('npz' or 'fits'). When not None, this
             value is returned verbatim after validation.
 
     Returns:
@@ -80,16 +80,16 @@ def infer_format(
     Raises:
         ValueError: If the format cannot be inferred or is not supported.
     """
-    if format is not None:
-        if format not in ('npz', 'fits'):
-            raise ValueError(f"format must be 'npz' or 'fits', got {format!r}")
-        return format
+    if format_ is not None:
+        if format_ not in ('npz', 'fits'):
+            raise ValueError(f"format must be 'npz' or 'fits', got {format_!r}")
+        return format_
 
     fcpath = _as_fcpath(path)
     suffix = fcpath.suffix.lower()
     if suffix in ('.npz',):
         return 'npz'
-    if suffix in ('.fits', '.fit', '.fits.gz', '.fz'):
+    if suffix in ('.fits', '.fit', '.fz'):
         return 'fits'
 
     # Try removing a second extension (e.g. .fits.gz → .fits)
@@ -227,7 +227,9 @@ def _npz_encode_value(arrays: dict[str, np.ndarray], name: str, value: Any) -> N
     elif isinstance(value, (bool, int, float, str)):
         arrays[name] = np.array(value)
     else:
-        arrays[name] = np.array(value)
+        raise TypeError(
+            f'Unsupported type for npz serialization: {type(value).__name__!r} for field {name!r}'
+        )
 
 
 def load_npz(
@@ -370,6 +372,11 @@ def _fits_encode_value(
     elif isinstance(value, np.dtype):
         hdr[name] = value.str
     elif isinstance(value, tuple):
+        if len(value) != 2:
+            raise ValueError(
+                f'Field {name!r}: only 2-tuples are supported for FITS header encoding, '
+                f'got tuple of length {len(value)}'
+            )
         hdr[name + '_0'] = value[0]
         hdr[name + '_1'] = value[1]
     elif isinstance(value, dict):
@@ -380,7 +387,10 @@ def _fits_encode_value(
     elif isinstance(value, str):
         hdr[name] = value
     else:
-        hdr[name] = str(value)
+        raise TypeError(
+            f'Unsupported type for FITS header serialization: {type(value).__name__!r} '
+            f'for field {name!r}'
+        )
 
 
 def load_fits(
@@ -471,6 +481,7 @@ def load_fits(
 
 def verify_dtype(
     arrays: dict[str, ma.MaskedArray | np.ndarray],
+    *,
     image_dtype: np.dtype,
     metadata_dtype: np.dtype,
     image_fields: list[str],
@@ -498,7 +509,7 @@ def verify_dtype(
         arr = arrays.get(fname)
         if arr is None:
             continue
-        actual = np.array(arr).dtype
+        actual = arr.dtype
         if actual != image_dtype:
             raise ValueError(
                 f'image_dtype mismatch for field {fname!r}: '
@@ -509,7 +520,7 @@ def verify_dtype(
         arr = arrays.get(fname)
         if arr is None:
             continue
-        actual = np.array(arr).dtype
+        actual = arr.dtype
         if actual != metadata_dtype:
             raise ValueError(
                 f'metadata_dtype mismatch for field {fname!r}: '
@@ -521,7 +532,7 @@ def verify_dtype(
             arr = arrays.get(fname)
             if arr is None:
                 continue
-            actual = np.array(arr).dtype
+            actual = arr.dtype
             if actual != np.dtype(np.float64):
                 raise ValueError(
                     f'dtype mismatch for field {fname!r}: must be float64, got {actual}'
@@ -529,7 +540,7 @@ def verify_dtype(
 
     imgnum = arrays.get('image_number')
     if imgnum is not None:
-        actual = np.array(imgnum).dtype
+        actual = imgnum.dtype
         if actual != np.dtype(np.uint16):
             raise ValueError(f'image_number must be uint16, got {actual}')
 

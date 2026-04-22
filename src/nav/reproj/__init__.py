@@ -9,9 +9,9 @@ body mosaic back onto image coordinates for navigation correlation.
 Public API:
 
     BodyMosaic                   -- accumulates body reprojections onto lat/lon grids
+    BodyMosaicMergeStrategy      -- enum controlling how BodyMosaic conflicts are resolved
     BodyReprojResult             -- data returned by BodyMosaic.reproject()
     BodyMosaicData               -- mosaic data returned by BodyMosaic retrieval methods
-    BodyMosaicMergeStrategy      -- enum controlling how BodyMosaic conflicts are resolved
     CartographicModelResult      -- result from create_cartographic_model()
     create_cartographic_model    -- project a body mosaic onto image coordinates
     RingMosaic                   -- accumulates ring reprojections onto sparse rad/lon grids

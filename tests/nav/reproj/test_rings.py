@@ -244,6 +244,7 @@ class TestRingMosaicAddAndRetrieve:
     """Tests for add(), to_sparse(), to_bounded(), and to_full()."""
 
     def _make_mosaic(self) -> RingMosaic:
+        """Create and return a RingMosaic for SATURN with predefined radii and resolution."""
         return RingMosaic(
             body_name='SATURN',
             radius_inner=_RADIUS_INNER,
@@ -427,13 +428,14 @@ class TestSparseGrowth:
 # =========================================================================
 
 
-class TestRingMergeSstrategies:
+class TestRingMergeStrategies:
     """Tests for BEST_RESOLUTION and MOST_COVERAGE_THEN_RESOLUTION merge strategies."""
 
     def _make_mosaic(
         self,
         strategy: RingMosaicMergeStrategy = RingMosaicMergeStrategy.BEST_RESOLUTION,
     ) -> RingMosaic:
+        """Create and return a RingMosaic for SATURN with predefined radii and resolution."""
         return RingMosaic(
             body_name='SATURN',
             radius_inner=_RADIUS_INNER,

@@ -22,7 +22,7 @@ from scipy.ndimage import map_coordinates
 from nav.reproj.bodies import BodyMosaicData
 from nav.support.types import NDArrayFloatType
 
-_LOGGING_NAME = 'nav.' + __name__
+_LOGGING_NAME = __name__
 
 
 @dataclass(frozen=True)
@@ -79,6 +79,15 @@ def create_cartographic_model(
     """
     logger = logging.getLogger(_LOGGING_NAME + '.create_cartographic_model')
 
+    if not body_name:
+        raise ValueError('body_name must be a non-empty string')
+    if latlon_type not in ('centric', 'graphic', 'squashed'):
+        raise ValueError(
+            f"latlon_type must be 'centric', 'graphic', or 'squashed', got {latlon_type!r}"
+        )
+    if lon_direction not in ('east', 'west'):
+        raise ValueError(f"lon_direction must be 'east' or 'west', got {lon_direction!r}")
+
     mosaic_mask = ma.getmaskarray(mosaic_data.img)
     if mosaic_mask.all():
         logger.info('Mosaic is entirely masked; returning None')
@@ -102,7 +111,8 @@ def create_cartographic_model(
     lon_res = mosaic_data.lon_resolution
 
     # Map each image pixel to fractional row/col in the mosaic.
-    # Longitude uses modular arithmetic to handle wraparound transparently.
+    # All values are in radians: bp_latitude, bp_longitude, lat_min, lon_min,
+    # lat_res, and lon_res. Longitude uses modular arithmetic for wraparound.
     row_coords = (bp_latitude - lat_min) / lat_res
     col_coords = ((bp_longitude - lon_min) % (2.0 * math.pi)) / lon_res
 

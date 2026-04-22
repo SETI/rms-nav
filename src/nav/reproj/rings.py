@@ -206,6 +206,26 @@ class RingReprojResult:
             else load_fits(path, 'RingReprojResult')
         )
 
+        _REQUIRED_KEYS_REPROJ = {
+            'image_dtype',
+            'metadata_dtype',
+            'body_name',
+            'img',
+            'longitude_resolution',
+            'radius_resolution',
+            'radius_inner',
+            'radius_outer',
+            'longitude_antimask',
+            'mean_radial_resolution',
+            'mean_angular_resolution',
+            'mean_phase',
+            'mean_emission',
+            'incidence',
+        }
+        missing = _REQUIRED_KEYS_REPROJ - d.keys()
+        if missing:
+            raise ValueError(f'RingReprojResult file is missing required keys: {sorted(missing)}')
+
         image_dtype = np.dtype(str(d['image_dtype']))
         metadata_dtype = np.dtype(str(d['metadata_dtype']))
 
@@ -220,8 +240,8 @@ class RingReprojResult:
                     'mean_emission',
                 )
             },
-            image_dtype,
-            metadata_dtype,
+            image_dtype=image_dtype,
+            metadata_dtype=metadata_dtype,
             image_fields=['img'],
             metadata_fields=[
                 'mean_radial_resolution',
@@ -401,6 +421,29 @@ class RingMosaicData:
         fmt = infer_format(path, format)
         d = load_npz(path, 'RingMosaicData') if fmt == 'npz' else load_fits(path, 'RingMosaicData')
 
+        _REQUIRED_KEYS_MOSAIC = {
+            'image_dtype',
+            'metadata_dtype',
+            'body_name',
+            'ring_body_name',
+            'shadow_body_name',
+            'img',
+            'longitude_resolution',
+            'radius_resolution',
+            'radius_inner',
+            'radius_outer',
+            'longitude_antimask',
+            'mean_radial_resolution',
+            'mean_angular_resolution',
+            'mean_phase',
+            'mean_emission',
+            'time',
+            'image_number',
+        }
+        missing = _REQUIRED_KEYS_MOSAIC - d.keys()
+        if missing:
+            raise ValueError(f'RingMosaicData file is missing required keys: {sorted(missing)}')
+
         image_dtype = np.dtype(str(d['image_dtype']))
         metadata_dtype = np.dtype(str(d['metadata_dtype']))
 
@@ -417,8 +460,8 @@ class RingMosaicData:
                     'image_number',
                 )
             },
-            image_dtype,
-            metadata_dtype,
+            image_dtype=image_dtype,
+            metadata_dtype=metadata_dtype,
             image_fields=['img'],
             metadata_fields=[
                 'mean_radial_resolution',
@@ -510,6 +553,16 @@ class RingMosaic:
         metadata_dtype: np.typing.DTypeLike = np.float32,
     ) -> None:
         """Initialize an empty RingMosaic."""
+        if radius_inner >= radius_outer:
+            raise ValueError(
+                f'radius_inner ({radius_inner}) must be less than radius_outer ({radius_outer})'
+            )
+        if longitude_resolution <= 0 or longitude_resolution >= 2 * math.pi:
+            raise ValueError(
+                f'longitude_resolution must be positive and < 2*pi, got {longitude_resolution!r}'
+            )
+        if radius_resolution <= 0:
+            raise ValueError(f'radius_resolution must be positive, got {radius_resolution!r}')
         self._body_name = body_name
         self._ring_body_name = body_name.lower() + ':ring'
         self._shadow_body_name = body_name.lower()
@@ -597,6 +650,8 @@ class RingMosaic:
             1-D array of longitudes (rad) on resolution boundaries, with no
             value less than longitude_start or greater than longitude_end.
         """
+        if longitude_resolution <= 0:
+            raise ValueError(f'longitude_resolution must be positive, got {longitude_resolution!r}')
         start_idx = math.ceil(longitude_start / longitude_resolution)
         end_idx = math.floor(longitude_end / longitude_resolution)
         return np.arange(start_idx, end_idx + 1) * longitude_resolution
@@ -619,6 +674,12 @@ class RingMosaic:
             1-D array of radii (km) starting at radius_inner with step
             radius_resolution, ending at or just before radius_outer.
         """
+        if radius_resolution <= 0:
+            raise ValueError(f'radius_resolution must be positive, got {radius_resolution!r}')
+        if radius_outer < radius_inner:
+            raise ValueError(
+                f'radius_outer ({radius_outer}) must be >= radius_inner ({radius_inner})'
+            )
         n = math.ceil((radius_outer - radius_inner + _RADIUS_SLOP) / radius_resolution)
         return np.arange(n) * radius_resolution + radius_inner
 
@@ -659,7 +720,7 @@ class RingMosaic:
             longitude = orbit_model.corotating_to_inertial(longitude, obs.midtime)
 
         if len(longitude) == 0:
-            return Scalar([]), Scalar([])
+            return np.zeros(0, dtype=float), np.zeros(0, dtype=float)
 
         ring_surface = oops.Body.lookup(ring_body_name.replace(':', '_').upper()).surface
         obs_event = oops.Event(obs.midtime, (Vector3.ZERO, Vector3.ZERO), obs.path, obs.frame)
@@ -779,6 +840,9 @@ class RingMosaic:
             zoom_amt,
         )
 
+        if margin < 1:
+            raise ValueError(f'margin must be >= 1, got {margin!r}')
+
         if orbit_model is None:
             orbit_model = self._orbit_model
 
@@ -860,7 +924,7 @@ class RingMosaic:
         start_u = 0
         end_u = obs.data_shape_xy[0] - 1
         start_v = 0
-        end_v = obs.data_shape_xy[1]
+        end_v = obs.data_shape_xy[1] - 1
         if uv_range is not None:
             start_u, end_u, start_v, end_v = uv_range
             meshgrid = oops.Meshgrid.for_fov(
@@ -1084,7 +1148,8 @@ class RingMosaic:
         repro_emission[:] = ma.masked
         repro_emission[good_rad, good_lon] = bp_emission.mvals[v_pix, u_pix]
 
-        repro_incidence = float(ma.mean(bp_incidence.mvals[v_pix, u_pix]))
+        mean_incidence = ma.mean(bp_incidence.mvals[v_pix, u_pix])
+        repro_incidence = float(mean_incidence) if mean_incidence is not ma.masked else 0.0
 
         # Compress to sparse representation
         repro_img = repro_img[:, good_lon_antimask]
@@ -1156,6 +1221,9 @@ class RingMosaic:
 
         if len(new_bins) > 0:
             self._insert_new_columns(new_bins, valid_bins, repro)
+            # Update antimask immediately so _update_existing_columns
+            # sees the correct sparse column offsets.
+            self._antimask[new_bins] = True
 
         if len(old_bins) > 0:
             self._update_existing_columns(old_bins, valid_bins, existing_bins, repro)
@@ -1369,19 +1437,19 @@ class RingMosaic:
         in_range = (valid_global_bins >= start_bin) & (valid_global_bins <= end_bin)
         range_global_bins = valid_global_bins[in_range]
 
-        for _k, gb in enumerate(range_global_bins):
-            lb = gb - start_bin
-            sparse_k = int(np.searchsorted(valid_global_bins, gb))
-            bounded_img_data[:, lb] = ma.getdata(self._img_sparse)[:, sparse_k]
-            bounded_img_mask[:, lb] = ma.getmaskarray(self._img_sparse)[:, sparse_k]
-            bounded_mean_rad_res[lb] = self._mean_radial_res[sparse_k]
-            bounded_mean_ang_res[lb] = self._mean_angular_res[sparse_k]
-            bounded_mean_phase[lb] = self._mean_phase[sparse_k]
-            bounded_mean_emission[lb] = self._mean_emission[sparse_k]
-            bounded_img_number[lb] = self._image_number[sparse_k]
-            bounded_time[lb] = self._time[sparse_k]
-            bounded_mask_1d[lb] = False
-            bounded_antimask[gb] = True
+        if len(range_global_bins) > 0:
+            lbs = range_global_bins - start_bin
+            sparse_idxs = np.searchsorted(valid_global_bins, range_global_bins)
+            bounded_img_data[:, lbs] = ma.getdata(self._img_sparse)[:, sparse_idxs]
+            bounded_img_mask[:, lbs] = ma.getmaskarray(self._img_sparse)[:, sparse_idxs]
+            bounded_mean_rad_res[lbs] = self._mean_radial_res[sparse_idxs]
+            bounded_mean_ang_res[lbs] = self._mean_angular_res[sparse_idxs]
+            bounded_mean_phase[lbs] = self._mean_phase[sparse_idxs]
+            bounded_mean_emission[lbs] = self._mean_emission[sparse_idxs]
+            bounded_img_number[lbs] = self._image_number[sparse_idxs]
+            bounded_time[lbs] = self._time[sparse_idxs]
+            bounded_mask_1d[lbs] = False
+            bounded_antimask[range_global_bins] = True
 
         return RingMosaicData(
             body_name=self._body_name,

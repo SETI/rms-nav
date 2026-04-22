@@ -13,7 +13,7 @@ import numpy as np
 import numpy.ma as ma
 import pytest
 
-from nav.reproj.bodies import BodyMosaic, BodyMosaicData, BodyMosaicMergeStrategy, BodyReprojResult
+from nav.reproj.bodies import BodyMosaic, BodyMosaicData, BodyReprojResult
 
 # Convenient resolution (rad/pixel) for tests: 0.1 rad ~ 5.7 deg
 _LAT_RES = 0.1  # rad/pixel
@@ -46,18 +46,27 @@ def _make_repro(
     """Build a synthetic BodyReprojResult for use in tests.
 
     Parameters:
+        body_name: Name of the body (e.g. ``'MIMAS'``).
         lat_range: (min_lat_bin, max_lat_bin) in full-grid coordinates.
         lon_range: (min_lon_bin, max_lon_bin) in full-grid coordinates.
         img_values: Scalar or array for image pixel values.
         eff_res_values: Scalar or array for effective resolution.
         res_values: Scalar or array for resolution (defaults to eff_res_values).
         mask: Boolean mask array; True means invalid.
+        latlon_type: Latitude/longitude coordinate system (``'centric'``,
+            ``'graphic'``, or ``'squashed'``).
+        lon_direction: Longitude direction (``'east'`` or ``'west'``).
+        lat_resolution: Latitude bin size in radians per pixel.
+        lon_resolution: Longitude bin size in radians per pixel.
+        time: Scalar observation midtime (TDB seconds).
     """
     n_lat = lat_range[1] - lat_range[0] + 1
     n_lon = lon_range[1] - lon_range[0] + 1
     shape = (n_lat, n_lon)
 
     def _fill(v: float | np.ndarray | None, default: float = 0.0) -> ma.MaskedArray:
+        """Return a masked array of shape ``shape`` filled with v (or default) and masked by
+        ``mask``."""
         if v is None:
             v = default
         if np.isscalar(v):
@@ -315,15 +324,14 @@ class TestBodyMosaicAddAndRetrieve:
 
 
 class TestMergeStrategies:
-    """Tests for BEST_RESOLUTION and MOST_COVERAGE_THEN_RESOLUTION strategies."""
+    """Tests for pixel conflict resolution during add()."""
 
-    def test_best_resolution_better_wins(self) -> None:
-        """BEST_RESOLUTION: new pixel replaces existing when resolution is better."""
+    def test_better_resolution_wins(self) -> None:
+        """New pixel replaces existing when its effective resolution is better."""
         mosaic = BodyMosaic(
             body_name='MIMAS',
             lat_resolution=_LAT_RES,
             lon_resolution=_LON_RES,
-            merge_strategy=BodyMosaicMergeStrategy.BEST_RESOLUTION,
         )
         first = _make_repro(
             lat_range=(5, 5), lon_range=(10, 10), img_values=1.0, eff_res_values=2.0
@@ -337,13 +345,12 @@ class TestMergeStrategies:
         result = mosaic.to_bounded()
         assert pytest.approx(float(result.img.data[0, 0])) == 9.0
 
-    def test_best_resolution_worse_does_not_win(self) -> None:
-        """BEST_RESOLUTION: worse resolution does not replace existing data."""
+    def test_worse_resolution_does_not_win(self) -> None:
+        """Worse resolution does not replace existing data."""
         mosaic = BodyMosaic(
             body_name='MIMAS',
             lat_resolution=_LAT_RES,
             lon_resolution=_LON_RES,
-            merge_strategy=BodyMosaicMergeStrategy.BEST_RESOLUTION,
         )
         first = _make_repro(
             lat_range=(5, 5), lon_range=(10, 10), img_values=1.0, eff_res_values=0.5
@@ -357,13 +364,12 @@ class TestMergeStrategies:
         result = mosaic.to_bounded()
         assert pytest.approx(float(result.img.data[0, 0])) == 1.0
 
-    def test_most_coverage_fills_empty_pixels(self) -> None:
-        """MOST_COVERAGE: empty pixels are always filled regardless of resolution."""
+    def test_empty_pixels_filled_regardless_of_resolution(self) -> None:
+        """Empty pixels are always filled, even with worse resolution data."""
         mosaic = BodyMosaic(
             body_name='MIMAS',
             lat_resolution=_LAT_RES,
             lon_resolution=_LON_RES,
-            merge_strategy=BodyMosaicMergeStrategy.MOST_COVERAGE_THEN_RESOLUTION,
         )
         # First add fills rows 0-1 only (partial coverage)
         mask1 = np.array([[False, False], [True, True]])

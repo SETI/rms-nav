@@ -16,6 +16,8 @@ import numpy as np
 
 from nav.support.types import NDArrayFloatType
 
+_SECONDS_PER_DAY = 86400.0
+
 
 def _utc2et(s: str) -> float:
     """Convert a UTC string to ephemeris time (TDB seconds)."""
@@ -76,7 +78,7 @@ class RingOrbitModel:
         Returns:
             Radius in km at each element of longitude.
         """
-        curly_w = self.w0 + self.dw * et / 86400.0
+        curly_w = self.w0 + self.dw * et / _SECONDS_PER_DAY
         result: NDArrayFloatType = (
             self.a * (1.0 - self.e**2) / (1.0 + self.e * np.cos(longitude - curly_w))
         )
@@ -96,7 +98,7 @@ class RingOrbitModel:
         """
         # Explicit parentheses to clarify precedence: negate, then mod.
         # TODO: Verify sign convention matches original project intent.
-        return (-(self.mean_motion * ((et - self._epoch_et) / 86400.0))) % (2.0 * math.pi)
+        return (-(self.mean_motion * ((et - self._epoch_et) / _SECONDS_PER_DAY))) % (2.0 * math.pi)
 
     def inertial_to_corotating(self, longitude: NDArrayFloatType, et: float) -> NDArrayFloatType:
         """Convert inertial longitude (rad) to co-rotating longitude (rad).
@@ -134,7 +136,14 @@ class RingOrbitModel:
         Returns:
             Tuple of (longitudes, radii) arrays, each of length
             int(2*pi / step).
+
+        Raises:
+            ValueError: If step is not a finite positive number.
         """
+        if not (math.isfinite(step) and step > 0):
+            raise ValueError(
+                f'longitude_radius step must be a finite positive number, got {step!r}'
+            )
         n = int(2.0 * math.pi / step)
         longitudes: NDArrayFloatType = np.arange(n) * step
         radii = self.radius_at_longitude(longitudes, et)
