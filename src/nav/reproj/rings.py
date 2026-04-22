@@ -94,7 +94,8 @@ class RingReprojResult:
             (rad/pixel).
         mean_phase: Mean phase angle per valid longitude (rad).
         mean_emission: Mean emission angle per valid longitude (rad).
-        incidence: Scalar incidence angle over the ring plane (rad).
+        incidence: Scalar incidence angle over the ring plane (rad). NaN if
+            no valid incidence data was available for this reprojection.
         time: Midtime of the observation (TDB seconds).
         orbit_model: The RingOrbitModel used for co-rotating longitude
             conversion, or None for inertial longitude.
@@ -221,6 +222,7 @@ class RingReprojResult:
             'mean_phase',
             'mean_emission',
             'incidence',
+            'time',
         }
         missing = _REQUIRED_KEYS_REPROJ - d.keys()
         if missing:
@@ -437,6 +439,7 @@ class RingMosaicData:
             'mean_angular_resolution',
             'mean_phase',
             'mean_emission',
+            'mean_incidence',
             'time',
             'image_number',
         }
@@ -1149,7 +1152,7 @@ class RingMosaic:
         repro_emission[good_rad, good_lon] = bp_emission.mvals[v_pix, u_pix]
 
         mean_incidence = ma.mean(bp_incidence.mvals[v_pix, u_pix])
-        repro_incidence = float(mean_incidence) if mean_incidence is not ma.masked else 0.0
+        repro_incidence = float(mean_incidence) if mean_incidence is not ma.masked else float('nan')
 
         # Compress to sparse representation
         repro_img = repro_img[:, good_lon_antimask]

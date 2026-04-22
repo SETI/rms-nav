@@ -240,6 +240,8 @@ class BodyReprojResult:
             lon_resolution=float(d['lon_resolution']),
             lat_idx_range=lat_idx_range,
             lon_idx_range=lon_idx_range,
+            # latlon_type_val / lon_direction_val: validated against allowed literals above;
+            # mypy cannot narrow str to the Literal field types.
             latlon_type=latlon_type_val,  # type: ignore[arg-type]
             lon_direction=lon_direction_val,  # type: ignore[arg-type]
             resolution=d['resolution'],
@@ -442,6 +444,8 @@ class BodyMosaicData:
             lon_resolution=float(d['lon_resolution']),
             lat_range=lat_range,
             lon_range=lon_range,
+            # latlon_type_val / lon_direction_val: validated against allowed literals above;
+            # mypy cannot narrow str to the Literal field types.
             latlon_type=latlon_type_val,  # type: ignore[arg-type]
             lon_direction=lon_direction_val,  # type: ignore[arg-type]
             resolution=d['resolution'],
@@ -1105,9 +1109,7 @@ class BodyMosaic:
                 repro_eff_res_flat * resolution_threshold < existing_eff_res,
             )
         else:
-            raise NotImplementedError(
-                f'Unsupported merge strategy: {self._merge_strategy!r}'
-            )
+            raise NotImplementedError(f'Unsupported merge strategy: {self._merge_strategy!r}')
 
         if copy_slop > 0:
             # Expand the replace mask using the slop radius
