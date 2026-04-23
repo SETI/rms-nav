@@ -13,7 +13,7 @@ from nav.inst import inst_name_to_class
 from psfmodel import PSF, GaussianPSF
 from starcat import Star
 
-from nav.config import DEFAULT_CONFIG, IMAGE_LOGGER
+from nav.config import DEFAULT_CONFIG, MAIN_LOGGER
 from nav.nav_master import NavMaster
 from nav.obs import ObsSnapshot
 
@@ -594,7 +594,7 @@ def main(command_list: list[str]) -> None:
     )
     args = parser.parse_args(command_list[1:])
     DEFAULT_CONFIG.read_config()
-    IMAGE_LOGGER.set_level('DEBUG' if args.debug else 'WARNING')
+    MAIN_LOGGER.set_level('DEBUG' if args.debug else 'WARNING')
     if args.debug:
         filecache.set_easy_logger()
 

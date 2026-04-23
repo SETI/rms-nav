@@ -92,6 +92,10 @@ strict = true
 disallow_subclassing_any = false
 exclude = ["src/experiments"]
 mypy_path = "src"
+# Third-party science stack is largely untyped or stub-incomplete; per-module
+# ``ignore_missing_imports`` below covers missing packages; this silences
+# ``import-untyped`` for installed packages without ``py.typed`` (e.g. oops, scipy).
+disable_error_code = ["import-untyped"]
 
 [[tool.mypy.overrides]]
 module = "nav._version"
