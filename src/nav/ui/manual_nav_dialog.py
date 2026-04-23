@@ -33,7 +33,11 @@ from nav.nav_model import NavModelCombined
 from nav.obs import ObsSnapshot
 from nav.support.correlate import masked_ncc, navigate_with_pyramid_kpeaks
 from nav.support.types import NDArrayFloatType, NDArrayUint8Type
-from nav.ui.common import ZoomPanController, build_stretch_controls
+from nav.ui.common import (
+    ZoomPanController,
+    apply_linear_gamma_stretch,
+    build_stretch_controls,
+)
 
 # Correlation map popup (_CorrMapDialog) layout sizing
 _CORR_MAP_MIN_WIDTH = 550
@@ -49,12 +53,7 @@ def _apply_stretch_gamma(
     image: NDArrayFloatType, black: float, white: float, gamma: float
 ) -> NDArrayUint8Type:
     """Apply black/white/gamma to a float image and return uint8 mono."""
-    if white <= black:
-        white = black + 1e-6
-    scaled = np.clip((image - black) / (white - black), 0.0, 1.0)
-    if gamma <= 0:
-        gamma = 1.0
-    scaled = np.power(scaled, 1.0 / gamma)
+    scaled = apply_linear_gamma_stretch(image, black=black, white=white, gamma=gamma)
     return cast(NDArrayUint8Type, (scaled * 255.0).astype(np.uint8))
 
 
@@ -109,20 +108,21 @@ class _CorrMapDialog(QDialog):
     """Modal popup showing the full 2-D normalized cross-correlation (NCC) surface.
 
     The NCC surface is rearranged via ``np.fft.fftshift`` for display. The global
-    peak marker uses ``np.argmax`` on the fftshifted NCC *numerator* from
-    :func:`~nav.support.correlate.masked_ncc` so plateaus in the NCC itself do not
-    pick an arbitrary peak. Axes are labeled in offset pixels (dU for columns,
-    dV for rows). The offset supplied at construction time is overlaid as a red
-    cross marker and displayed in the legend.
+    peak marker uses ``np.argmax`` on the NCC surface itself, restricted (if
+    ``max_offset_vu`` is provided) to the physically plausible offset range, so
+    it matches the peak that the pyramid auto-search would find. Axes are labeled
+    in offset pixels (dU for columns, dV for rows). The offset supplied at
+    construction time is overlaid as a red cross marker and displayed in the
+    legend.
     """
 
     def __init__(
         self,
         *,
         corr_surface: NDArrayFloatType,
-        numerator_surface: NDArrayFloatType,
         dv: float,
         du: float,
+        max_offset_vu: tuple[int, int] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -136,7 +136,6 @@ class _CorrMapDialog(QDialog):
 
         h, w = corr_surface.shape
         shifted = np.fft.fftshift(corr_surface)
-        shifted_num = np.fft.fftshift(numerator_surface)
 
         # Map FFT index ranges to signed offset extents for imshow axes.
         du_min = -(w // 2)
@@ -144,8 +143,17 @@ class _CorrMapDialog(QDialog):
         dv_min = -(h // 2)
         dv_max = (h - 1) // 2
 
-        # Locate the global peak from the covariance numerator (not NCC plateaus).
-        peak_row, peak_col = np.unravel_index(np.argmax(shifted_num), shifted_num.shape)
+        # Locate the global peak from the NCC surface; restrict the search to
+        # the same signed-offset window the pyramid uses so the highlighted peak
+        # matches what an auto-navigate would pick.
+        search = shifted
+        if max_offset_vu is not None:
+            search = shifted.copy()
+            dv_range = np.arange(dv_min, dv_max + 1)
+            du_range = np.arange(du_min, du_max + 1)
+            search[np.abs(dv_range) > max_offset_vu[0], :] = -np.inf
+            search[:, np.abs(du_range) > max_offset_vu[1]] = -np.inf
+        peak_row, peak_col = np.unravel_index(np.argmax(search), search.shape)
         peak_dv = dv_min + int(peak_row)
         peak_du = du_min + int(peak_col)
 
@@ -343,7 +351,7 @@ class ManualNavDialog(QDialog):
         mask = np.asarray(self._model_mask_ext, dtype=bool)
         # Pad to correlation convention used elsewhere (masked_ncc handles padding-independent math)
         # Here we directly compute the full NCC surface.
-        self._corr_surface, self._corr_numerator = masked_ncc(image, model, mask)
+        self._corr_surface, _ = masked_ncc(image, model, mask)
         self._corr_h, self._corr_w = self._corr_surface.shape
 
     def _offset_to_corr_indices(self, dv: float, du: float) -> tuple[float, float]:
@@ -751,9 +759,9 @@ class ManualNavDialog(QDialog):
         """
         dlg = _CorrMapDialog(
             corr_surface=self._corr_surface,
-            numerator_surface=self._corr_numerator,
             dv=self._dv,
             du=self._du,
+            max_offset_vu=self._obs.extfov_margin_vu,
             parent=self,
         )
         dlg.exec()

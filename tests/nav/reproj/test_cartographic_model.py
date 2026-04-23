@@ -84,6 +84,7 @@ def _make_mosaic(
         photometric_model_name=None,
         image_dtype=np.dtype(np.float64),
         metadata_dtype=np.dtype(np.float32),
+        contributing_image_names=(),
     )
 
 

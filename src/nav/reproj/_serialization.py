@@ -16,15 +16,18 @@ npz
     (``np.savez``) archive. MaskedArrays are stored as two entries:
     ``<name>__data`` (the underlying array) and ``<name>__mask`` (bool).
     Scalars and strings are stored as 0-D unicode or numeric arrays.
-    Tuples (length 2) are stored as 1-D length-2 arrays.
+    Tuples of length 2 of numeric types are stored as 1-D length-2 arrays.
+    Tuples of strings (including empty) are stored as a 1-D Unicode string array.
     ``image_dtype`` / ``metadata_dtype`` are stored as 0-D unicode arrays
     containing the dtype ``str`` attribute (e.g. ``'<f8'``).
 
 fits
     FITS via ``astropy.io.fits``. Scalar metadata (strings, numbers,
-    dtype names, tuples encoded as paired keys) are stored in the
+    dtype names, 2-tuples of scalars encoded as paired header keys) are stored in the
     PrimaryHDU header. Each array (and its mask when applicable) occupies
     a separate ImageHDU named ``<FIELDNAME>`` and ``<FIELDNAME>_MASK``.
+    Tuple-of-string payloads use a 1-D ``uint8`` ImageHDU (UTF-8 with ``NUL``
+    separators between entries).
 
 Schema evolution
 ----------------
@@ -36,12 +39,14 @@ does not match the expected kind. Future schema changes should bump
 ``load()`` implementation.
 """
 
+import warnings
 from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
 import numpy.ma as ma
 from astropy.io import fits
+from astropy.io.fits.verify import VerifyWarning
 from filecache import FCPath
 
 from nav.reproj.ring_orbit_model import RingOrbitModel
@@ -57,9 +62,39 @@ def _as_fcpath(path: PathLike) -> FCPath:
     return FCPath(path)
 
 
+def tuple_of_strings_field(value: Any) -> tuple[str, ...]:
+    """Normalize a loaded ``contributing_image_names`` value to ``tuple[str, ...]``."""
+    if value is None:
+        return ()
+    if isinstance(value, np.ndarray):
+        flat = np.ravel(value)
+        if flat.size == 0:
+            return ()
+        # FITS: UTF-8 bytes written by ``_fits_encode_value`` for tuple-of-strings fields.
+        if flat.dtype == np.uint8:
+            raw = flat.astype(np.uint8, copy=False).tobytes()
+            if not raw:
+                return ()
+            return tuple(p.decode('utf-8', errors='replace') for p in raw.split(b'\0'))
+        return tuple(str(x) for x in flat.tolist())
+    if isinstance(value, (list, tuple)):
+        return tuple(str(x) for x in value)
+    return (str(value),)
+
+
 # ---------------------------------------------------------------------------
 # Format inference
 # ---------------------------------------------------------------------------
+
+
+def _path_starts_with_zip_magic(fcpath: FCPath) -> bool:
+    """True if the local file begins with ZIP magic (NumPy ``.npz`` archives)."""
+    try:
+        local = cast(Path, fcpath.get_local_path())
+        with local.open('rb') as fb:
+            return fb.read(4) == b'PK\x03\x04'
+    except OSError:
+        return False
 
 
 def infer_format(
@@ -89,13 +124,19 @@ def infer_format(
     suffix = fcpath.suffix.lower()
     if suffix in ('.npz',):
         return 'npz'
-    if suffix in ('.fits', '.fit', '.fz'):
+    if suffix in ('.fits', '.fit'):
+        if _path_starts_with_zip_magic(fcpath):
+            return 'npz'
+        return 'fits'
+    if suffix in ('.fz',):
         return 'fits'
 
     # Try removing a second extension (e.g. .fits.gz → .fits)
     stem = fcpath.stem
     second_suffix = Path(stem).suffix.lower()
     if second_suffix in ('.fits', '.fit'):
+        if _path_starts_with_zip_magic(fcpath):
+            return 'npz'
         return 'fits'
 
     raise ValueError(
@@ -171,7 +212,8 @@ def save_npz(
     """Save a payload dict to an npz archive.
 
     MaskedArrays are split into ``<name>__data`` and ``<name>__mask``
-    entries. Tuples of length 2 are stored as 1-D length-2 arrays. Strings
+    entries. Tuples of length 2 of numeric types are stored as 1-D length-2 arrays.
+    Tuples of strings are stored as a 1-D Unicode string array. Strings
     and dtype names are stored as 0-D unicode arrays. Dicts (e.g. from
     ``orbit_model_to_dict``) are flattened with ``<name>__<key>`` entries.
 
@@ -180,8 +222,8 @@ def save_npz(
         kind: Dataclass kind string (e.g. 'BodyMosaicData').
         version: Schema version integer.
         payload: Mapping of field name → value. Supported types: ndarray,
-            MaskedArray, tuple[2], str, float, int, bool, np.dtype, dict,
-            None.
+            MaskedArray, numeric 2-tuples, tuple[str, ...] (including empty),
+            str, float, int, bool, np.dtype, dict, None.
         compress: If True use ``np.savez_compressed``; otherwise
             ``np.savez``.
     """
@@ -220,7 +262,12 @@ def _npz_encode_value(arrays: dict[str, np.ndarray], name: str, value: Any) -> N
     elif isinstance(value, np.dtype):
         arrays[name] = np.array(value.str)
     elif isinstance(value, tuple):
-        arrays[name] = np.array(value)
+        if len(value) > 0 and isinstance(value[0], str):
+            arrays[name] = np.asarray(value, dtype=np.str_)
+        elif len(value) == 0:
+            arrays[name] = np.array([], dtype=np.str_)
+        else:
+            arrays[name] = np.array(value)
     elif isinstance(value, dict):
         for k, v in value.items():
             _npz_encode_value(arrays, f'{name}__{k}', v)
@@ -305,6 +352,25 @@ def load_npz(
 # ---------------------------------------------------------------------------
 
 
+def _fits_load_key_to_payload(key: str) -> str:
+    """Normalize a FITS header or HDU name to the lowercase keys used in npz payloads."""
+    k = key.strip()
+    if k.upper().startswith('HIERARCH '):
+        k = k[9:].strip()
+    return k.lower()
+
+
+def _fits_image_hdu_data(arr: np.ndarray) -> np.ndarray:
+    """Return ``arr`` suitable for :class:`astropy.io.fits.ImageHDU` (no bool dtype).
+
+    Astropy's FITS stack has no BITPIX for numpy bool; store booleans as ``uint8``
+    (0/1). Callers that reload should cast back to ``bool_`` when needed.
+    """
+    if arr.dtype.kind == 'b':
+        return arr.astype(np.uint8, copy=False)
+    return arr
+
+
 def save_fits(
     path: PathLike,
     kind: str,
@@ -313,31 +379,37 @@ def save_fits(
 ) -> None:
     """Save a payload dict to a FITS file.
 
-    Scalar metadata (strings, numbers, tuples encoded as two header cards,
+    Scalar metadata (strings, numbers, 2-tuples of scalars as paired header cards,
     dtype names) are stored in the PrimaryHDU header. Each array and its mask
     (for MaskedArrays) are stored as separate ImageHDUs with EXTNAME set to
-    ``<FIELDNAME>`` and ``<FIELDNAME>_MASK`` respectively.
+    ``<FIELDNAME>`` and ``<FIELDNAME>_MASK`` respectively. Tuple-of-string fields
+    use a 1-D string ImageHDU.
 
     Parameters:
         path: Output path (``str``, ``Path``, or ``FCPath``).
         kind: Dataclass kind string (e.g. 'BodyMosaicData').
         version: Schema version integer.
-        payload: Mapping of field name → value.
+        payload: Mapping of field name → value (same supported types as :func:`save_npz`,
+            with tuple-of-strings encoded as an ImageHDU).
     """
     fcpath = _as_fcpath(path)
     local_path = cast(Path, fcpath.get_local_path())
 
-    primary_hdr = fits.Header()
-    primary_hdr['KIND'] = kind
-    primary_hdr['VERSION'] = version
+    # Long / mixed-case scalar keys become FITS HIERARCH cards; astropy warns by
+    # default even though the output is standards-conformant for modern FITS.
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', VerifyWarning)
+        primary_hdr = fits.Header()
+        primary_hdr['KIND'] = kind
+        primary_hdr['VERSION'] = version
 
-    hdus: list[fits.ImageHDU] = []
+        hdus: list[fits.ImageHDU] = []
 
-    for name, value in payload.items():
-        _fits_encode_value(primary_hdr, hdus, name.upper(), value)
+        for name, value in payload.items():
+            _fits_encode_value(primary_hdr, hdus, name.upper(), value)
 
-    hdul = fits.HDUList([fits.PrimaryHDU(header=primary_hdr), *hdus])
-    hdul.writeto(local_path, overwrite=True)
+        hdul = fits.HDUList([fits.PrimaryHDU(header=primary_hdr), *hdus])
+        hdul.writeto(local_path, overwrite=True)
     fcpath.upload()
 
 
@@ -360,7 +432,9 @@ def _fits_encode_value(
     if value is None:
         hdr[name + '_NONE'] = True
     elif isinstance(value, ma.MaskedArray):
-        hdus.append(fits.ImageHDU(data=np.asarray(value.data), name=name))
+        hdus.append(
+            fits.ImageHDU(data=_fits_image_hdu_data(np.asarray(value.data)), name=name)
+        )
         hdus.append(
             fits.ImageHDU(
                 data=ma.getmaskarray(value).astype(np.uint8),
@@ -368,9 +442,17 @@ def _fits_encode_value(
             )
         )
     elif isinstance(value, np.ndarray):
-        hdus.append(fits.ImageHDU(data=value, name=name))
+        hdus.append(fits.ImageHDU(data=_fits_image_hdu_data(value), name=name))
     elif isinstance(value, np.dtype):
         hdr[name] = value.str
+    elif isinstance(value, tuple) and (len(value) == 0 or isinstance(value[0], str)):
+        # ImageHDU cannot represent NumPy Unicode dtypes; store UTF-8 bytes (uint8).
+        if len(value) == 0:
+            raw_arr = np.zeros((0,), dtype=np.uint8)
+        else:
+            raw = '\0'.join(str(s) for s in value).encode('utf-8')
+            raw_arr = np.frombuffer(raw, dtype=np.uint8).copy()
+        hdus.append(fits.ImageHDU(data=_fits_image_hdu_data(raw_arr), name=name))
     elif isinstance(value, tuple):
         if len(value) != 2:
             raise ValueError(
@@ -405,7 +487,10 @@ def load_fits(
 
     Returns:
         Dict with MaskedArrays, plain ndarrays, and scalar values
-        reconstructed from the FITS file.
+        reconstructed from the FITS file. Keys are lowercased to match
+        :func:`load_npz` / dataclass ``load()`` conventions. Header ``*_NONE``
+        sentinels for top-level ``None`` values do not collide with flattened
+        nested keys such as ``orbit_model__is_none``.
 
     Raises:
         ValueError: If the file's ``KIND`` header card does not match
@@ -423,20 +508,45 @@ def load_fits(
         version = int(primary_hdr['VERSION'])
         _ = version  # retained for future schema migration
 
-        # Collect ImageHDUs by EXTNAME
+        # Collect ImageHDUs by EXTNAME (avoid clobbering when EXTNAME is missing/blank).
         hdu_map: dict[str, Any] = {}
-        for hdu in hdul[1:]:
-            hdu_map[hdu.name] = hdu.data
+        for idx, hdu in enumerate(hdul[1:], start=1):
+            extname = (hdu.name or '').strip()
+            if not extname:
+                extname = str(hdu.header.get('EXTNAME', '') or '').strip()
+            if not extname:
+                extname = f'__UNNAMED{idx}'
+            hdu_map[extname] = hdu.data
 
         result: dict[str, Any] = {}
 
-        # Scalars from primary header
-        skip_cards = {'SIMPLE', 'BITPIX', 'NAXIS', 'EXTEND', 'KIND', 'VERSION', 'END'}
-        for card in primary_hdr.cards:
-            key = card.keyword
-            if not key or key in skip_cards:
+        # Scalars from primary header (iterate keywords; more reliable than ``.cards``
+        # for COMMENT/HIERARCH edge cases).
+        skip_cards = {
+            'SIMPLE',
+            'BITPIX',
+            'NAXIS',
+            'NAXIS1',
+            'NAXIS2',
+            'NAXIS3',
+            'NAXIS4',
+            'EXTEND',
+            'XTENSION',
+            'PCOUNT',
+            'GCOUNT',
+            'EXTNAME',
+            'EXTVER',
+            'LONGSTRN',
+            'COMMENT',
+            'HISTORY',
+            'KIND',
+            'VERSION',
+            'END',
+        }
+        for kw in primary_hdr:
+            if kw in skip_cards:
                 continue
-            result[key] = card.value
+            result[kw] = primary_hdr[kw]
 
         # Reconstruct MaskedArrays from HDU pairs
         for name, _data in list(hdu_map.items()):
@@ -457,6 +567,11 @@ def load_fits(
     for k in list(result.keys()):
         if k.endswith('_NONE'):
             base = k[:-5]
+            # Flattened nested dict keys look like ORBIT_MODEL__IS_NONE (``is_none``
+            # under ``orbit_model``); only top-level-None sentinels are ``FIELD_NONE``
+            # with no ``__`` in the base segment.
+            if '__' in base:
+                continue
             keys_to_add[base] = None
             keys_to_delete.append(k)
         elif k.endswith('_0'):
@@ -471,12 +586,24 @@ def load_fits(
         result.pop(k, None)
     result.update(keys_to_add)
 
-    return result
+    return {_fits_load_key_to_payload(k): v for k, v in result.items()}
 
 
 # ---------------------------------------------------------------------------
 # Dtype verification helper
 # ---------------------------------------------------------------------------
+
+
+def _dtype_matches_declared(actual: np.dtype, declared: np.dtype) -> bool:
+    """True if ``actual`` matches ``declared`` up to byte order (FITS is often big-endian)."""
+    if actual == declared:
+        return True
+    a = np.dtype(actual)
+    d = np.dtype(declared)
+    if a.kind != d.kind or a.itemsize != d.itemsize:
+        return False
+    # Distinguish int vs unsigned when sizes match (e.g. int32 vs uint32).
+    return not (a.kind in 'iu' and d.kind in 'iu' and a.kind != d.kind)
 
 
 def verify_dtype(
@@ -510,7 +637,7 @@ def verify_dtype(
         if arr is None:
             continue
         actual = arr.dtype
-        if actual != image_dtype:
+        if not _dtype_matches_declared(actual, image_dtype):
             raise ValueError(
                 f'image_dtype mismatch for field {fname!r}: '
                 f'file declares {image_dtype} but array is {actual}'
@@ -521,7 +648,7 @@ def verify_dtype(
         if arr is None:
             continue
         actual = arr.dtype
-        if actual != metadata_dtype:
+        if not _dtype_matches_declared(actual, metadata_dtype):
             raise ValueError(
                 f'metadata_dtype mismatch for field {fname!r}: '
                 f'file declares {metadata_dtype} but array is {actual}'
@@ -533,7 +660,7 @@ def verify_dtype(
             if arr is None:
                 continue
             actual = arr.dtype
-            if actual != np.dtype(np.float64):
+            if not (actual.kind == 'f' and actual.itemsize == 8):
                 raise ValueError(
                     f'dtype mismatch for field {fname!r}: must be float64, got {actual}'
                 )
@@ -541,7 +668,7 @@ def verify_dtype(
     imgnum = arrays.get('image_number')
     if imgnum is not None:
         actual = imgnum.dtype
-        if actual != np.dtype(np.uint16):
+        if not (actual.kind == 'u' and actual.itemsize == 2):
             raise ValueError(f'image_number must be uint16, got {actual}')
 
     for fname, arr in arrays.items():

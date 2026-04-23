@@ -174,6 +174,16 @@ are available::
 
     from nav.reproj import FRING_CORE, BRING_OUTER_EDGE
 
+**Longitude convention.** When no orbit model is specified
+(``orbit_model=None``, which is the default), the longitudes stored in
+reprojection results and mosaics are **inertial J2000 ring longitudes** —
+measured eastward from the ascending node of the ring plane on the J2000
+reference plane.  When an orbit model is supplied, each inertial longitude is
+converted to the **co-rotating frame** of the model before binning; mosaic
+column *i* then corresponds to co-rotating longitude ``i ×
+longitude_resolution``.  See also :ref:`orbit-model-longitude` in the
+command-line reference.
+
 Pass a custom model via the ``orbit_model`` parameter::
 
     from nav.reproj import RingMosaic, RingOrbitModel
@@ -259,7 +269,7 @@ Body reprojection result::
 
     from nav.reproj import BodyReprojResult
 
-    result = mosaic.reproject(obs)
+    result = mosaic.reproject(obs, image_name='N1234567890')
     result.save('reproj.npz')
     reloaded = BodyReprojResult.load('reproj.npz')
 
@@ -276,7 +286,7 @@ Ring reprojection result::
 
     from nav.reproj import RingReprojResult
 
-    result = ring_mosaic.reproject(obs)
+    result = ring_mosaic.reproject(obs, image_name='N1234567890')
     result.save('ring_reproj.fits')
     reloaded = RingReprojResult.load('ring_reproj.fits')
 
@@ -284,6 +294,30 @@ When loading, the dtypes of all arrays are verified against the ``image_dtype``
 and ``metadata_dtype`` fields stored in the file. A ``ValueError`` is raised if
 any mismatch is detected, guarding against files produced by external tools
 that may have coerced dtypes.
+
+Image labels (reprojection and mosaic)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Each :class:`~nav.reproj.rings.RingReprojResult` and
+:class:`~nav.reproj.bodies.BodyReprojResult` carries an ``image_name`` string
+(typically the source image stem). It is written by ``save()`` and restored by
+``load()``; files produced before this field existed load with ``image_name``
+equal to ``''``.
+
+Each :class:`~nav.reproj.rings.RingMosaicData` and
+:class:`~nav.reproj.bodies.BodyMosaicData` carries ``contributing_image_names``,
+a tuple of strings in the same order as the ``image_number`` indices stored in
+the mosaic (pixel value ``k`` refers to ``contributing_image_names[k]`` when
+``k`` is in range). The tuple grows by one entry each time ``mosaic.add()``
+finishes incorporating a reprojection and advances the internal image counter.
+Older mosaic files without this field load with an empty tuple.
+In FITS mosaic files, ``contributing_image_names`` is stored as a 1-D ``uint8``
+array of UTF-8 bytes with ``NUL`` bytes between names (not a Unicode FITS image).
+
+In Python, pass ``image_name=...`` to :meth:`~nav.reproj.rings.RingMosaic.reproject`
+and :meth:`~nav.reproj.bodies.BodyMosaic.reproject`. The ``nav_mosaic`` CLI
+stores the dataset image stem per file by default; pass ``--image-name LABEL``
+to use the same label for every image in the run instead.
 
 Cartographic navigation model
 -------------------------------
@@ -308,3 +342,315 @@ by the image center resolution; a value greater than 1.0 means the model
 will be blurrier than the image.
 
 .. |pi| replace:: *π*
+
+.. _cli-mosaic:
+
+Command-line mosaic generation
+-------------------------------
+
+The ``nav_mosaic_rings`` and ``nav_mosaic_body`` commands (entry points into
+the single ``nav_mosaic`` program) reproject a dataset of images and combine
+them into a mosaic using a two-pass workflow:
+
+1. **Reprojection pass** — for each image in the dataset, load the observation,
+   optionally apply a pre-computed navigation offset, call
+   ``BodyMosaic.reproject()`` / ``RingMosaic.reproject()`` (with ``image_name``
+   set to that image's file stem, or to ``--image-name`` when that option is
+   given), and save the result as
+   ``<output-dir>/<prefix>_<body_or_planet>_<image_stem>_reproj.<fmt>`` (body
+   name for ``nav_mosaic body``, planet name for ``nav_mosaic rings``). Existing
+   files are skipped unless ``--overwrite`` is given, enabling interrupted runs
+   to be resumed.
+
+2. **Mosaic pass** — re-iterate the same image list, load each reprojection file
+   that exists, call ``mosaic.add()`` (which extends ``contributing_image_names``
+   in lockstep with ``image_number``), and save the final mosaic as
+   ``<output-dir>/<prefix>_<body_or_planet>_mosaic.<fmt>``.
+
+Either pass may be skipped with ``--skip-reproject`` / ``--skip-mosaic``.
+
+Ring mosaics quick example::
+
+    nav_mosaic_rings coiss_saturn \
+        --volumes COISS_2001 \
+        --pds3-holdings-root /data/pds3 \
+        --nav-results-root /data/nav_results \
+        --planet SATURN \
+        --radius-inner 139500 \
+        --radius-outer 140220 \
+        --output-dir /data/mosaics \
+        --prefix fring_2004
+
+Body mosaics quick example::
+
+    nav_mosaic_body coiss_saturn \
+        --volumes COISS_2001 \
+        --pds3-holdings-root /data/pds3 \
+        --nav-results-root /data/nav_results \
+        --body-name MIMAS \
+        --output-dir /data/mosaics \
+        --prefix mimas_2004
+
+Offset application
+^^^^^^^^^^^^^^^^^^
+
+When ``--nav-results-root`` is provided, ``nav_mosaic`` looks up a
+``_metadata.json`` file for each image (written by ``nav_offset``).  If the
+file exists and has ``status == 'success'``, the stored ``(dv, du)`` offset is
+applied to the observation's FOV via ``oops.fov.OffsetFOV`` before reprojection.
+If the file is absent, invalid JSON, or has a non-success status, a warning is
+logged and uncorrected pointing is used.
+
+Output format
+^^^^^^^^^^^^^
+
+The default output format is FITS (``.fits``).  Pass ``--format npz`` to use
+compressed NumPy archives instead.  Reprojection and mosaic files live directly
+under ``<output-dir>``; the only subdirectory used is ``logs/`` for per-image
+reprojection logs from pass 1:
+
+- Per-image reprojection: ``<output-dir>/<prefix>_<body_or_planet>_<image_stem>_reproj.<fmt>``
+- Per-image reprojection log: ``<output-dir>/logs/<results_path_stub>_<timestamp>.log``
+- Final mosaic: ``<output-dir>/<prefix>_<body_or_planet>_mosaic.<fmt>``
+
+If ``--prefix`` is empty (the default), the leading underscore is omitted.
+
+Common options reference
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. list-table::
+   :header-rows: 1
+
+   * - Option
+     - Default
+     - Description
+   * - ``--output-dir DIR``
+     - *(required)*
+     - Directory for output files.
+   * - ``--prefix STR``
+     - ``''``
+     - Filename prefix.
+   * - ``--format {fits,npz}``
+     - ``fits``
+     - Output file format.
+   * - ``--overwrite``
+     - ``False``
+     - Re-compute and overwrite existing per-image reprojection files.
+   * - ``--skip-reproject``
+     - ``False``
+     - Skip the reprojection pass.
+   * - ``--skip-mosaic``
+     - ``False``
+     - Skip the mosaic-building pass.
+   * - ``--nav-results-root DIR``
+     - ``None``
+     - Root written by ``nav_offset``; enables offset application.
+   * - ``--dry-run``
+     - ``False``
+     - Print what would be done without writing files.
+   * - ``--image-name LABEL``
+     - *(use each file's stem)*
+     - Override the ``image_name`` stored on every reprojection and the names
+       listed in ``contributing_image_names`` on the mosaic.
+
+Ring-specific options
+~~~~~~~~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+
+   * - Option
+     - Default
+     - Description
+   * - ``--planet NAME``
+     - *(required)*
+     - Planet name (e.g. ``SATURN``).
+   * - ``--radius-inner KM``
+     - *(required)*
+     - Inner mosaic radius (km).
+   * - ``--radius-outer KM``
+     - *(required)*
+     - Outer mosaic radius (km).
+   * - ``--longitude-resolution DEG``
+     - ``0.02``
+     - Column pitch (degrees/pixel).
+   * - ``--radius-resolution KM``
+     - ``5.0``
+     - Row pitch (km/pixel).
+   * - ``--orbit-model {none,fring_core,bring_outer_edge}``
+     - ``none``
+     - Ring orbit model for co-rotating longitude (see below).
+   * - ``--merge-strategy {best_resolution,most_coverage_then_resolution}``
+     - ``most_coverage_then_resolution``
+     - Conflict-resolution strategy.
+   * - ``--margin N``
+     - ``3``
+     - Edge pixels to exclude.
+   * - ``--zoom N or R,L``
+     - ``1``
+     - Zoom factor for sub-pixel interpolation.
+   * - ``--no-omit-shadow``
+     - *(flag; default: shadow masked)*
+     - Include pixels inside the planet shadow.
+   * - ``--longitude-range START END``
+     - ``None``
+     - Restrict reprojected longitude range (degrees).
+   * - ``--radius-range INNER OUTER``
+     - ``None``
+     - Restrict reprojected radius range (km).
+   * - ``--image-dtype DTYPE``
+     - ``float64``
+     - NumPy dtype for the brightness array.
+   * - ``--metadata-dtype DTYPE``
+     - ``float32``
+     - NumPy dtype for geometry metadata arrays.
+   * - ``--photometric-model {none,lambert,lommel-seeliger,minnaert}``
+     - ``none``
+     - Photometric correction during ring ``reproject()`` (optional; same models as body).
+
+.. _orbit-model-longitude:
+
+Orbit model and longitude convention
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When ``--orbit-model none`` (the default), the longitude values stored in both
+the per-image reprojection files and the final mosaic are **inertial J2000 ring
+longitudes** — measured eastward from the ascending node of the ring plane on
+the J2000 reference plane, in degrees (internally radians).  This is the
+default behavior of ``oops.backplane.Backplane.ring_longitude``.
+
+When an orbit model is supplied (``--orbit-model fring_core`` or
+``--orbit-model bring_outer_edge``), each inertial longitude is transformed
+to the **co-rotating frame** of that model before binning.  In the resulting
+file, mosaic column *i* corresponds to co-rotating longitude
+``i × longitude_resolution``; the column index no longer has a fixed
+relationship to J2000 north.  All files in the same mosaic must use the same
+orbit model setting.
+
+Body-specific options
+~~~~~~~~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+
+   * - Option
+     - Default
+     - Description
+   * - ``--body-name NAME``
+     - *(required)*
+     - Body to reproject (e.g. ``MIMAS``).
+   * - ``--lat-resolution DEG``
+     - ``0.1``
+     - Row pitch (degrees/pixel).
+   * - ``--lon-resolution DEG``
+     - ``0.1``
+     - Column pitch (degrees/pixel).
+   * - ``--lat-range MIN MAX``
+     - ``None``
+     - Latitude extent (degrees); default full range.
+   * - ``--lon-range MIN MAX``
+     - ``None``
+     - Longitude extent (degrees); default full range.
+   * - ``--max-incidence DEG``
+     - ``70``
+     - Maximum incidence angle for valid pixels.
+   * - ``--max-emission DEG``
+     - ``70``
+     - Maximum emission angle for valid pixels.
+   * - ``--max-resolution KM``
+     - ``None``
+     - Maximum resolution (km/pixel) for valid pixels.
+   * - ``--edge-margin N``
+     - ``3``
+     - Edge pixels to discard.
+   * - ``--zoom N``
+     - ``1``
+     - Sub-pixel zoom factor.
+   * - ``--latlon-type {centric,graphic,squashed}``
+     - ``centric``
+     - Latitude/longitude coordinate system.
+   * - ``--lon-direction {east,west}``
+     - ``east``
+     - Longitude direction convention.
+   * - ``--photometric-model {none,lambert,lommel-seeliger,minnaert}``
+     - ``none``
+     - Photometric correction to apply.
+   * - ``--no-dynamic``
+     - *(flag; default: dynamic growth enabled)*
+     - Disable dynamic mosaic growth.
+   * - ``--resolution-threshold F``
+     - ``1.0``
+     - Improvement factor required to overwrite a pixel.
+   * - ``--copy-slop N``
+     - ``0``
+     - Extra pixels around each copied pixel to reduce artefacts.
+   * - ``--image-dtype DTYPE``
+     - ``float64``
+     - NumPy dtype for the brightness array.
+   * - ``--metadata-dtype DTYPE``
+     - ``float32``
+     - NumPy dtype for geometry metadata arrays.
+
+Command-line mosaic display
+----------------------------
+
+The ``nav_mosaic_display_rings`` and ``nav_mosaic_display_body`` commands
+(entry points into the single ``nav_mosaic_display`` program) open an
+interactive PyQt6 window for browsing reprojection and mosaic files.  Multiple
+files can be passed; the window shows one file at a time and includes
+**Prev / Next** navigation buttons.
+
+Ring display quick example::
+
+    nav_mosaic_display_rings /data/mosaics/fring_2004_mosaic.fits
+
+Body display quick example::
+
+    nav_mosaic_display_body /data/mosaics/mimas_2004_reproj_N1234567890.fits
+
+Display options
+^^^^^^^^^^^^^^^
+
+.. list-table::
+   :header-rows: 1
+
+   * - Option
+     - Default
+     - Description
+   * - ``--stretch-black F``
+     - auto
+     - Initial black-point for image stretch.
+   * - ``--stretch-white F``
+     - auto
+     - Initial white-point for image stretch.
+   * - ``--stretch-gamma F``
+     - ``0.5``
+     - Initial gamma (``data ** gamma`` convention; < 1 brightens mid-tones).
+   * - ``--show-radii``
+     - ``False``
+     - (Rings) Overlay green horizontal lines at user-configured radii.
+   * - ``--show-parallels``
+     - ``False``
+     - (Bodies) Overlay latitude parallel lines.
+   * - ``--show-meridians``
+     - ``False``
+     - (Bodies) Overlay longitude meridian lines.
+
+Interactive controls
+^^^^^^^^^^^^^^^^^^^^
+
+- **Scroll wheel** — zoom both axes simultaneously.
+- **Shift + scroll** — zoom the X axis (longitude) only.
+- **Ctrl + scroll** — zoom the Y axis (radius / latitude) only.
+- **Shift + left-drag** — rubber-band zoom to a selected region.
+- **Left-drag** — pan.
+- **Right-click** (rings only) — display a radial profile at the clicked
+  longitude column.
+- **Save FOV** button — save the current viewport to a PNG file.
+- **Stretch sliders** (Black / White / Gamma) — adjust contrast.
+- **Color by** radio buttons — tint the image by a per-column or per-pixel
+  metadata field (radial resolution, angular resolution, phase, emission,
+  image number, etc.).  On the ring window, options that required ephemeris
+  columns not present in the file (inertial longitude, true anomaly) are omitted.
+- **Cursor info** — for mosaics, the source-image line uses stored contributing
+  names in the form ``imagename (#k)`` when available.

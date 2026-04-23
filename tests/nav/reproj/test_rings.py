@@ -12,7 +12,10 @@ import numpy as np
 import numpy.ma as ma
 import pytest
 
-from nav.reproj.rings import RingMosaic, RingMosaicMergeStrategy, RingReprojResult
+from nav.reproj.photometric_model import LambertModel
+from nav.reproj.ring_orbit_model import RingOrbitModel
+from nav.reproj.rings import RingMosaic, RingMosaicData, RingMosaicMergeStrategy, RingReprojResult
+from nav.ui.mosaic_viewer.common import load_ring_file
 
 # Convenient resolution values for tests.
 # pi/16 gives exactly 32 full-circle longitude bins (2*pi / (pi/16) = 32).
@@ -48,6 +51,7 @@ def _make_ring_repro(
     time: float = 0.0,
     n_full_lon: int = _N_FULL_LON,
     n_radius: int = _N_RADIUS,
+    image_name: str = '',
 ) -> RingReprojResult:
     """Build a synthetic RingReprojResult for use in tests.
 
@@ -59,6 +63,7 @@ def _make_ring_repro(
         mean_radial_resolution: Scalar or 1-D array [len(valid_lon_bins)].
         n_full_lon: Total number of longitude bins in 0..2pi.
         n_radius: Number of radius bins.
+        image_name: Label carried on the synthetic reprojection result.
     """
     n_valid = len(valid_lon_bins)
 
@@ -102,6 +107,7 @@ def _make_ring_repro(
         orbit_model=None,
         image_dtype=np.dtype(np.float32),
         metadata_dtype=np.dtype(np.float32),
+        image_name=image_name,
     )
 
 
@@ -550,3 +556,113 @@ class TestRingMosaicMetadata:
         mosaic.add(_make_ring_repro(valid_lon_bins=[5]))
         result = mosaic.to_sparse()
         assert result.ring_body_name == 'saturn:ring'
+
+
+# =========================================================================
+# Contributing image names
+# =========================================================================
+
+
+class TestContributingImageNamesRings:
+    """Tests for ``contributing_image_names`` on ring mosaics."""
+
+    def _make_mosaic(self) -> RingMosaic:
+        return RingMosaic(
+            body_name='SATURN',
+            radius_inner=_RADIUS_INNER,
+            radius_outer=_RADIUS_OUTER,
+            longitude_resolution=_LON_RES,
+            radius_resolution=_RAD_RES,
+        )
+
+    def test_two_adds_record_names_in_order(self) -> None:
+        """Each successful add appends repro.image_name to the mosaic list."""
+        mosaic = self._make_mosaic()
+        mosaic.add(_make_ring_repro(valid_lon_bins=[1, 2], image_name='cassini_001'))
+        mosaic.add(_make_ring_repro(valid_lon_bins=[10, 11], image_name='cassini_002'))
+        data = mosaic.to_sparse()
+        assert data.contributing_image_names == ('cassini_001', 'cassini_002')
+
+    def test_contributing_image_names_npz_roundtrip(self, tmp_path) -> None:
+        """contributing_image_names survives RingMosaicData npz save/load."""
+        mosaic = self._make_mosaic()
+        mosaic.add(_make_ring_repro(valid_lon_bins=[5, 6], image_name='stem_a'))
+        path = tmp_path / 'ring_mosaic.npz'
+        mosaic.to_sparse().save(path)
+        loaded = RingMosaicData.load(path)
+        assert loaded.contributing_image_names == ('stem_a',)
+
+    def test_contributing_image_names_fits_roundtrip(self, tmp_path) -> None:
+        """contributing_image_names survives RingMosaicData FITS save/load."""
+        mosaic = self._make_mosaic()
+        mosaic.add(_make_ring_repro(valid_lon_bins=[4], image_name='N999'))
+        path = tmp_path / 'ring_mosaic.fits'
+        mosaic.to_sparse().save(path, format='fits')
+        loaded = RingMosaicData.load(path, format='fits')
+        assert loaded.contributing_image_names == ('N999',)
+
+    def test_load_ring_file_passes_contributing_names(self, tmp_path) -> None:
+        """RingDisplayData from load_ring_file includes contributing_image_names."""
+        mosaic = self._make_mosaic()
+        mosaic.add(_make_ring_repro(valid_lon_bins=[3], image_name='cassini_img'))
+        path = tmp_path / 'for_display.fits'
+        mosaic.to_sparse().save(path, format='fits')
+        dd = load_ring_file(str(path))
+        assert dd.is_mosaic is True
+        assert dd.contributing_image_names == ('cassini_img',)
+
+    def test_orbit_model_name_npz_roundtrip(self, tmp_path) -> None:
+        """RingMosaicData saves and restores orbit_model_name for display metadata."""
+        model = RingOrbitModel(
+            name='test_ring_model',
+            a=100000.0,
+            e=0.0,
+            w0=0.0,
+            dw=0.0,
+            mean_motion=1.0,
+            epoch_utc='2000-01-01T12:00:00',
+        )
+        mosaic = RingMosaic(
+            body_name='SATURN',
+            radius_inner=_RADIUS_INNER,
+            radius_outer=_RADIUS_OUTER,
+            longitude_resolution=_LON_RES,
+            radius_resolution=_RAD_RES,
+            orbit_model=model,
+        )
+        mosaic.add(_make_ring_repro(valid_lon_bins=[5]))
+        path = tmp_path / 'with_om.npz'
+        mosaic.to_sparse().save(path)
+        loaded = RingMosaicData.load(path)
+        assert loaded.orbit_model_name == 'test_ring_model'
+
+        dd = load_ring_file(str(path))
+        assert dd.orbit_model_name == 'test_ring_model'
+
+    def test_photometric_model_name_npz_roundtrip(self, tmp_path) -> None:
+        """RingMosaicData saves photometric_model_name; load_ring_file exposes it."""
+        mosaic = RingMosaic(
+            body_name='SATURN',
+            radius_inner=_RADIUS_INNER,
+            radius_outer=_RADIUS_OUTER,
+            longitude_resolution=_LON_RES,
+            radius_resolution=_RAD_RES,
+            photometric_model=LambertModel(),
+        )
+        mosaic.add(_make_ring_repro(valid_lon_bins=[5]))
+        path = tmp_path / 'with_ph.npz'
+        mosaic.to_sparse().save(path)
+        loaded = RingMosaicData.load(path)
+        assert loaded.photometric_model_name == 'lambert'
+        dd = load_ring_file(str(path))
+        assert dd.photometric_model_name == 'lambert'
+
+    def test_load_ring_file_longitude_origin_sparse_reproj(self, tmp_path) -> None:
+        """Sparse ring reproj columns map to global bins, not longitude starting at 0."""
+        repro = _make_ring_repro(valid_lon_bins=[10, 11, 12])
+        path = tmp_path / 'lon_sparse.npz'
+        repro.save(path)
+        dd = load_ring_file(str(path))
+        step_deg = _LON_RES * 180.0 / math.pi
+        assert dd.longitude_column_origin_deg == pytest.approx(10 * step_deg)
+        assert dd.longitude_extent_hi_deg == pytest.approx(10 * step_deg + 3 * step_deg)

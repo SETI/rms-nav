@@ -1,0 +1,446 @@
+"""Data-loading helpers for nav.ui.mosaic_viewer.
+
+Provides ``load_ring_file`` and ``load_body_file`` that read any of the four
+reprojection / mosaic dataclasses (``RingReprojResult``, ``RingMosaicData``,
+``BodyReprojResult``, ``BodyMosaicData``) and return a normalised
+``DisplayData`` object ready for use in the ring or body window.
+"""
+
+import logging
+import math
+from dataclasses import dataclass
+from pathlib import Path
+from typing import cast
+
+import astropy.io.fits as pyfits
+import numpy as np
+import numpy.ma as ma
+from filecache import FCPath
+
+from nav.reproj._serialization import infer_format
+from nav.reproj.bodies import BodyMosaicData, BodyReprojResult
+from nav.reproj.rings import RingMosaicData, RingReprojResult
+
+logger = logging.getLogger(__name__)
+
+
+def _ring_longitude_column_origin_and_extent_hi_deg(
+    *,
+    n_cols: int,
+    lon_res_rad: float,
+    longitude_antimask: np.ndarray,
+    longitude_range: tuple[float, float] | None,
+) -> tuple[float, float]:
+    """Longitude (deg) at column 0 and upper extent for ring sparse/dense grids.
+
+    Sparse ring columns map to global bins ``np.flatnonzero(longitude_antimask)``
+    in sorted order.  Dense full-circle mosaics have one column per bin starting
+    at longitude 0.  Bounded mosaics use ``longitude_range`` to fix the bin grid.
+    """
+    lon_res_deg = lon_res_rad * 180.0 / math.pi
+    n_full = int(longitude_antimask.shape[0])
+    if longitude_range is not None:
+        lon_start, _lon_end = longitude_range
+        start_bin = round(lon_start / lon_res_rad)
+        origin_deg = float(start_bin * lon_res_rad * 180.0 / math.pi)
+        return origin_deg, origin_deg + float(n_cols * lon_res_deg)
+    if n_cols == n_full:
+        return 0.0, float(n_cols * lon_res_deg)
+    global_bins = np.flatnonzero(longitude_antimask)
+    if global_bins.size != n_cols:
+        logger.warning(
+            'Ring longitude antimask length %s does not match image columns %s; '
+            'assuming longitudes start at 0 deg for display.',
+            int(global_bins.size),
+            int(n_cols),
+        )
+        return 0.0, float(n_cols * lon_res_deg)
+    origin_deg = float(global_bins[0] * lon_res_rad * 180.0 / math.pi)
+    return origin_deg, origin_deg + float(n_cols * lon_res_deg)
+
+
+def _peek_kind(path: str | FCPath) -> str:
+    """Read the dataclass kind from a reproj/mosaic file without loading full arrays.
+
+    For ``.npz`` archives this is the ``__kind__`` array entry; for FITS it is the
+    primary header keyword ``KIND`` (see :func:`nav.reproj._serialization.save_fits`).
+    """
+    fmt = infer_format(path, None)
+    if fmt == 'npz':
+        local = cast(Path, FCPath(path).get_local_path())
+        with np.load(local, allow_pickle=False) as raw:
+            kind = str(raw['__kind__'])
+    else:
+        local = cast(Path, FCPath(path).get_local_path())
+        with pyfits.open(local) as hdul:
+            hdr = hdul[0].header
+            kind = str(hdr.get('KIND', '')).strip()
+    if not kind:
+        raise ValueError(
+            f'No KIND header found in {path!r}; expected a nav.reproj FITS export.'
+        )
+    return kind
+
+
+# ---------------------------------------------------------------------------
+# Ring DisplayData
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RingDisplayData:
+    """All display data extracted from a ring reprojection or mosaic file.
+
+    Attributes:
+        title: Short title for the window bar (filename stem).
+        image_ma: 2-D masked array (n_radius, n_longitude), row 0 = inner.
+        longitude_resolution_deg: Column pitch in degrees.
+        radius_resolution_km: Row pitch in km.
+        radius_inner: Inner radius (km).
+        radius_outer: Outer radius (km).
+        n_radii: Number of radius rows.
+        n_longitude: Number of longitude columns stored in ``image_ma``.
+        mean_radial_resolution: Per-column masked array (km/pixel).
+        mean_angular_resolution: Per-column masked array (deg/pixel).
+        mean_phase: Per-column masked array (deg).
+        mean_emission: Per-column masked array (deg).
+        image_number: Per-column masked uint16 (mosaic only; None for reproj).
+        orbit_model_name: Name of the orbit model when longitudes are co-rotating
+            and radial distance is offset from the mean core; ``None`` for inertial
+            longitudes and absolute ring radius (also ``None`` in older mosaic files
+            that omit this field).
+        vmin: Minimum valid image value.
+        vmax: Maximum valid image value.
+        is_mosaic: True if loaded from a RingMosaicData.
+        longitude_antimask: For reproj, full-circle antimask; for mosaic,
+            antimask of populated columns.
+        body_name: Planet / host body name when stored in the file.
+        mean_incidence_deg: Mean incidence angle (deg), when available.
+        photometric_model_name: Model applied when the file was written, if any.
+        observation_time_tdb: Per-column TDB seconds past J2000, when present.
+        longitude_column_origin_deg: Longitude (deg) at image column 0 (left edge of
+            that bin), for sparse reprojections and mosaics whose first column is not
+            at 0 deg.
+        longitude_extent_hi_deg: Upper cap for longitude (deg) for EW x-axis sync
+            and cursor clipping (exclusive upper edge of the last column bin in deg).
+        contributing_image_names: Names in ``image_number`` order (mosaic); for a single
+            reproj, at most one entry when ``image_name`` was stored on save.
+    """
+
+    title: str
+    image_ma: ma.MaskedArray
+    longitude_resolution_deg: float
+    radius_resolution_km: float
+    radius_inner: float
+    radius_outer: float
+    n_radii: int
+    n_longitude: int
+    mean_radial_resolution: ma.MaskedArray
+    mean_angular_resolution: ma.MaskedArray
+    mean_phase: ma.MaskedArray
+    mean_emission: ma.MaskedArray
+    image_number: ma.MaskedArray | None
+    orbit_model_name: str | None
+    vmin: float
+    vmax: float
+    is_mosaic: bool
+    longitude_antimask: np.ndarray
+    body_name: str | None = None
+    mean_incidence_deg: float | None = None
+    photometric_model_name: str | None = None
+    observation_time_tdb: ma.MaskedArray | None = None
+    longitude_column_origin_deg: float = 0.0
+    longitude_extent_hi_deg: float | None = None
+    contributing_image_names: tuple[str, ...] = ()
+
+
+def _ring_vmin_vmax(image_ma: ma.MaskedArray) -> tuple[float, float]:
+    valid = image_ma.compressed()
+    if valid.size > 0:
+        return float(np.nanmin(valid)), float(np.nanmax(valid))
+    return 0.0, 1.0
+
+
+def load_ring_file(path: str) -> RingDisplayData:
+    """Load a ring reprojection or mosaic file and return ``RingDisplayData``.
+
+    Accepts all four ring result types: ``RingReprojResult`` and
+    ``RingMosaicData``.
+
+    Parameters:
+        path: Local file path (str or anything :class:`filecache.FCPath`-like).
+
+    Returns:
+        ``RingDisplayData`` ready to be passed to ``RingMosaicWindow``.
+
+    Raises:
+        ValueError: If the file kind is not a supported ring type.
+    """
+    title = Path(str(path)).stem
+    kind = _peek_kind(path)
+
+    if kind == 'RingReprojResult':
+        result = RingReprojResult.load(path)
+        image_ma = result.img  # (n_radius, n_valid_lon)
+        lon_res_deg = result.longitude_resolution * 180.0 / math.pi
+        rad_res_km = result.radius_resolution
+        orbit_model_name = result.orbit_model.name if result.orbit_model else None
+        n_radii, n_lon = image_ma.shape
+        # Build 1-D per-column metadata masked arrays (same length as sparse img cols)
+        mrr = ma.MaskedArray(result.mean_radial_resolution)
+        mar = ma.MaskedArray(result.mean_angular_resolution * 180.0 / math.pi)
+        mphase = ma.MaskedArray(result.mean_phase * 180.0 / math.pi)
+        memission = ma.MaskedArray(result.mean_emission * 180.0 / math.pi)
+        vmin, vmax = _ring_vmin_vmax(image_ma)
+        inc_deg = (
+            float(result.incidence * 180.0 / math.pi)
+            if np.isfinite(result.incidence)
+            else None
+        )
+        if np.isfinite(result.time):
+            obs_tdb = ma.MaskedArray(
+                np.full(n_lon, float(result.time), dtype=np.float64),
+                mask=np.zeros(n_lon, dtype=bool),
+            )
+        else:
+            obs_tdb = None
+        lon_origin_deg, lon_hi = _ring_longitude_column_origin_and_extent_hi_deg(
+            n_cols=n_lon,
+            lon_res_rad=result.longitude_resolution,
+            longitude_antimask=result.longitude_antimask,
+            longitude_range=None,
+        )
+        return RingDisplayData(
+            title=title,
+            image_ma=image_ma,
+            longitude_resolution_deg=lon_res_deg,
+            radius_resolution_km=rad_res_km,
+            radius_inner=result.radius_inner,
+            radius_outer=result.radius_outer,
+            n_radii=n_radii,
+            n_longitude=n_lon,
+            mean_radial_resolution=mrr,
+            mean_angular_resolution=mar,
+            mean_phase=mphase,
+            mean_emission=memission,
+            image_number=None,
+            orbit_model_name=orbit_model_name,
+            vmin=vmin,
+            vmax=vmax,
+            is_mosaic=False,
+            longitude_antimask=result.longitude_antimask,
+            body_name=result.body_name,
+            mean_incidence_deg=inc_deg,
+            photometric_model_name=result.photometric_model_name,
+            observation_time_tdb=obs_tdb,
+            longitude_column_origin_deg=lon_origin_deg,
+            longitude_extent_hi_deg=lon_hi,
+            contributing_image_names=(result.image_name,) if result.image_name else (),
+        )
+
+    if kind == 'RingMosaicData':
+        result_m = RingMosaicData.load(path)
+        image_ma = result_m.img  # (n_radius, n_sparse_lon)
+        lon_res_deg = result_m.longitude_resolution * 180.0 / math.pi
+        rad_res_km = result_m.radius_resolution
+        orbit_model_name = result_m.orbit_model_name
+        n_radii, n_lon = image_ma.shape
+        mrr = result_m.mean_radial_resolution
+        mar = ma.MaskedArray(result_m.mean_angular_resolution * 180.0 / math.pi)
+        mphase = ma.MaskedArray(result_m.mean_phase * 180.0 / math.pi)
+        memission = ma.MaskedArray(result_m.mean_emission * 180.0 / math.pi)
+        vmin, vmax = _ring_vmin_vmax(image_ma)
+        inc_deg = (
+            float(result_m.mean_incidence * 180.0 / math.pi)
+            if np.isfinite(result_m.mean_incidence)
+            else None
+        )
+        lon_origin_deg, lon_hi = _ring_longitude_column_origin_and_extent_hi_deg(
+            n_cols=n_lon,
+            lon_res_rad=result_m.longitude_resolution,
+            longitude_antimask=result_m.longitude_antimask,
+            longitude_range=result_m.longitude_range,
+        )
+        return RingDisplayData(
+            title=title,
+            image_ma=image_ma,
+            longitude_resolution_deg=lon_res_deg,
+            radius_resolution_km=rad_res_km,
+            radius_inner=result_m.radius_inner,
+            radius_outer=result_m.radius_outer,
+            n_radii=n_radii,
+            n_longitude=n_lon,
+            mean_radial_resolution=mrr,
+            mean_angular_resolution=mar,
+            mean_phase=mphase,
+            mean_emission=memission,
+            image_number=result_m.image_number,
+            orbit_model_name=orbit_model_name,
+            vmin=vmin,
+            vmax=vmax,
+            is_mosaic=True,
+            longitude_antimask=result_m.longitude_antimask,
+            body_name=result_m.body_name,
+            mean_incidence_deg=inc_deg,
+            photometric_model_name=result_m.photometric_model_name,
+            observation_time_tdb=result_m.time,
+            longitude_column_origin_deg=lon_origin_deg,
+            longitude_extent_hi_deg=lon_hi,
+            contributing_image_names=result_m.contributing_image_names,
+        )
+
+    raise ValueError(f'Expected RingReprojResult or RingMosaicData in {path!r}, got kind={kind!r}')
+
+
+# ---------------------------------------------------------------------------
+# Body DisplayData
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class BodyDisplayData:
+    """All display data extracted from a body reprojection or mosaic file.
+
+    Attributes:
+        title: Short title for the window bar (filename stem).
+        image_ma: 2-D masked array (n_lat, n_lon), row 0 = first latitude bin.
+        lat_resolution_deg: Row pitch in degrees.
+        lon_resolution_deg: Column pitch in degrees.
+        lat_range_deg: (min_lat, max_lat) in degrees.
+        lon_range_deg: (min_lon, max_lon) in degrees.
+        latlon_type: Coordinate type ('centric', 'graphic', 'squashed').
+        lon_direction: Longitude direction ('east', 'west').
+        resolution: Per-pixel resolution (km/pixel) as masked array.
+        eff_resolution: Per-pixel effective resolution as masked array.
+        phase: Per-pixel phase angle (deg) as masked array.
+        emission: Per-pixel emission angle (deg) as masked array.
+        incidence: Per-pixel incidence angle (deg) as masked array.
+        image_number: Per-pixel uint16 (mosaic only; None for reproj).
+        body_name: The body name (upper-case).
+        vmin: Minimum valid image value.
+        vmax: Maximum valid image value.
+        is_mosaic: True if loaded from a BodyMosaicData.
+        contributing_image_names: Names in ``image_number`` order (mosaic); for reproj,
+            optional single entry when ``image_name`` was stored on save.
+        photometric_model_name: Model applied when the file was written, if any.
+    """
+
+    title: str
+    image_ma: ma.MaskedArray
+    lat_resolution_deg: float
+    lon_resolution_deg: float
+    lat_range_deg: tuple[float, float]
+    lon_range_deg: tuple[float, float]
+    latlon_type: str
+    lon_direction: str
+    resolution: ma.MaskedArray
+    eff_resolution: ma.MaskedArray
+    phase: ma.MaskedArray
+    emission: ma.MaskedArray
+    incidence: ma.MaskedArray
+    image_number: ma.MaskedArray | None
+    body_name: str
+    vmin: float
+    vmax: float
+    is_mosaic: bool
+    photometric_model_name: str | None = None
+    contributing_image_names: tuple[str, ...] = ()
+
+
+def _body_vmin_vmax(image_ma: ma.MaskedArray) -> tuple[float, float]:
+    valid = image_ma.compressed()
+    if valid.size > 0:
+        return float(np.nanmin(valid)), float(np.nanmax(valid))
+    return 0.0, 1.0
+
+
+def load_body_file(path: str) -> BodyDisplayData:
+    """Load a body reprojection or mosaic file and return ``BodyDisplayData``.
+
+    Parameters:
+        path: Local file path.
+
+    Returns:
+        ``BodyDisplayData`` ready to be passed to ``BodyMosaicWindow``.
+
+    Raises:
+        ValueError: If the file kind is not a supported body type.
+    """
+    title = Path(str(path)).stem
+    kind = _peek_kind(path)
+
+    def _rad_to_deg_ma(arr: ma.MaskedArray) -> ma.MaskedArray:
+        return ma.MaskedArray(arr * 180.0 / math.pi, mask=ma.getmaskarray(arr))
+
+    if kind == 'BodyReprojResult':
+        result = BodyReprojResult.load(path)
+        image_ma = result.img
+        lat_res_deg = result.lat_resolution * 180.0 / math.pi
+        lon_res_deg = result.lon_resolution * 180.0 / math.pi
+        # Reconstruct spatial extent from idx_range
+        lat_min = result.lat_idx_range[0] * result.lat_resolution * 180.0 / math.pi
+        lat_max = (result.lat_idx_range[1]) * result.lat_resolution * 180.0 / math.pi
+        lon_min = result.lon_idx_range[0] * result.lon_resolution * 180.0 / math.pi
+        lon_max = (result.lon_idx_range[1]) * result.lon_resolution * 180.0 / math.pi
+        vmin, vmax = _body_vmin_vmax(image_ma)
+        return BodyDisplayData(
+            title=title,
+            image_ma=image_ma,
+            lat_resolution_deg=lat_res_deg,
+            lon_resolution_deg=lon_res_deg,
+            lat_range_deg=(lat_min, lat_max),
+            lon_range_deg=(lon_min, lon_max),
+            latlon_type=result.latlon_type,
+            lon_direction=result.lon_direction,
+            resolution=result.resolution,
+            eff_resolution=result.eff_resolution,
+            phase=_rad_to_deg_ma(result.phase),
+            emission=_rad_to_deg_ma(result.emission),
+            incidence=_rad_to_deg_ma(result.incidence),
+            image_number=None,
+            body_name=result.body_name,
+            vmin=vmin,
+            vmax=vmax,
+            is_mosaic=False,
+            photometric_model_name=result.photometric_model_name,
+            contributing_image_names=(result.image_name,) if result.image_name else (),
+        )
+
+    if kind == 'BodyMosaicData':
+        result_m = BodyMosaicData.load(path)
+        image_ma = result_m.img
+        lat_res_deg = result_m.lat_resolution * 180.0 / math.pi
+        lon_res_deg = result_m.lon_resolution * 180.0 / math.pi
+        lat_range_deg = (
+            result_m.lat_range[0] * 180.0 / math.pi,
+            result_m.lat_range[1] * 180.0 / math.pi,
+        )
+        lon_range_deg = (
+            result_m.lon_range[0] * 180.0 / math.pi,
+            result_m.lon_range[1] * 180.0 / math.pi,
+        )
+        vmin, vmax = _body_vmin_vmax(image_ma)
+        return BodyDisplayData(
+            title=title,
+            image_ma=image_ma,
+            lat_resolution_deg=lat_res_deg,
+            lon_resolution_deg=lon_res_deg,
+            lat_range_deg=lat_range_deg,
+            lon_range_deg=lon_range_deg,
+            latlon_type=result_m.latlon_type,
+            lon_direction=result_m.lon_direction,
+            resolution=result_m.resolution,
+            eff_resolution=result_m.eff_resolution,
+            phase=_rad_to_deg_ma(result_m.phase),
+            emission=_rad_to_deg_ma(result_m.emission),
+            incidence=_rad_to_deg_ma(result_m.incidence),
+            image_number=result_m.image_number,
+            body_name=result_m.body_name,
+            vmin=vmin,
+            vmax=vmax,
+            is_mosaic=True,
+            photometric_model_name=result_m.photometric_model_name,
+            contributing_image_names=result_m.contributing_image_names,
+        )
+
+    raise ValueError(f'Expected BodyReprojResult or BodyMosaicData in {path!r}, got kind={kind!r}')

@@ -1,0 +1,467 @@
+#!/usr/bin/env python3
+"""nav_mosaic -- reproject a dataset of images and combine them into a mosaic.
+
+Entry points
+------------
+nav_mosaic         -- dispatches on the first positional argument (``rings`` or ``body``)
+nav_mosaic_rings   -- equivalent to ``nav_mosaic rings ...``
+nav_mosaic_body    -- equivalent to ``nav_mosaic body ...``
+
+Two-pass workflow
+-----------------
+1. Reprojection pass: for each image in the dataset, load the observation,
+   optionally apply a navigation offset from ``--nav-results-root``, call
+   ``BodyMosaic.reproject()`` / ``RingMosaic.reproject()``, and save the result.
+   Per-image logs are written under ``<output-dir>/logs/``. Existing files are
+   skipped unless ``--overwrite`` is given.
+
+2. Mosaic pass: re-iterate the same image list, load each reprojection file
+   that exists, call ``mosaic.add()``, then save the final mosaic.
+
+Either pass may be skipped with ``--skip-reproject`` / ``--skip-mosaic``.
+"""
+
+import argparse
+import cProfile
+import logging
+import os
+import sys
+import time
+import traceback
+from datetime import datetime
+from typing import cast
+
+from filecache import FCPath, FileCache
+
+# Allow running directly from the source tree:
+#   python src/main/nav_mosaic.py rings ...
+package_source_path = os.path.dirname(os.path.dirname(__file__))
+sys.path.insert(0, package_source_path)
+
+from nav.config import (
+    DEFAULT_CONFIG,
+    IMAGE_LOGGER,
+    MAIN_LOGGER,
+    get_nav_results_root,
+    image_log_handlers,
+    load_default_and_user_config,
+    setup_logging,
+)
+from nav.dataset import dataset_name_to_class, dataset_name_to_inst_name, dataset_names
+from nav.dataset.dataset import DataSet, ImageFile
+from nav.obs import ObsSnapshotInst, inst_name_to_obs_class
+from nav.reproj.bodies import BodyMosaicData, BodyReprojResult
+from nav.reproj.rings import RingMosaicData, RingReprojResult
+from nav.support.misc import log_run_environment
+from reproj_cli.args import (
+    add_body_args,
+    add_common_env_args,
+    add_common_output_args,
+    add_ring_args,
+)
+from reproj_cli.factories import build_body_mosaic, build_ring_mosaic
+from reproj_cli.offsets import apply_offset_to_obs, load_offset_if_any
+from reproj_cli.paths import mosaic_output_path, per_image_output_path
+from reproj_cli.reproject import reproject_one_body, reproject_one_ring
+
+_logger = logging.getLogger(__name__)
+
+
+def _reproject_image_log_handlers(
+    output_dir: FCPath,
+    image_file: ImageFile,
+    args: argparse.Namespace,
+) -> tuple[list[logging.Handler], FCPath]:
+    """Return ``(handlers, log_path)`` for per-image reprojection logs.
+
+    Writes a timestamped file next to the npz/fits products, under
+    ``<output_dir>/logs/``, using the same ``output_dir`` as
+    :func:`reproj_cli.paths.per_image_output_path`.
+    """
+    timestamp = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
+    image_log_path = FCPath(output_dir) / 'logs' / (
+        image_file.results_path_stub + '_' + timestamp + '.log'
+    )
+    image_log_path.parent.mkdir(parents=True, exist_ok=True)
+    return image_log_handlers(image_log_path, args, DEFAULT_CONFIG), image_log_path
+
+
+def _log_main_exception(msg: str, *args: object) -> None:
+    """Log an exception with full traceback (frames plus final error line).
+
+    ``PdsLogger.exception()`` records only ``traceback.format_tb``, which omits
+    the ``SomeError: ...`` line at the end. Pass ``traceback.format_exc()`` as
+    ``more=`` and disable the default partial stack to avoid duplicating frames.
+    """
+    MAIN_LOGGER.exception(msg, *args, stacktrace=False, more=traceback.format_exc())
+
+
+DATASET: DataSet | None = None
+DATASET_NAME: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Argument parsing
+# ---------------------------------------------------------------------------
+
+
+def _build_parser(mode: str) -> argparse.ArgumentParser:
+    """Build an ArgumentParser for the given mode (``'rings'`` or ``'body'``)."""
+    description = {
+        'rings': 'Reproject ring images and build a ring mosaic.',
+        'body': 'Reproject body images and build a body mosaic.',
+    }[mode]
+
+    parser = argparse.ArgumentParser(
+        prog=f'nav_mosaic_{mode}',
+        description=description,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    add_common_env_args(parser)
+    add_common_output_args(parser)
+    if mode == 'rings':
+        add_ring_args(parser)
+    else:
+        add_body_args(parser)
+    return parser
+
+
+def parse_args(command_list: list[str]) -> tuple[str, argparse.Namespace]:
+    """Parse ``command_list`` (the portion after the program name).
+
+    Returns:
+        A ``(mode, args)`` tuple where ``mode`` is ``'rings'`` or ``'body'``.
+    """
+    global DATASET, DATASET_NAME
+
+    if len(command_list) < 1 or command_list[0] not in ('rings', 'body'):
+        print('Usage: nav_mosaic <rings|body> <dataset_name> [options]')
+        sys.exit(1)
+
+    mode = command_list[0]
+    rest = command_list[1:]
+
+    if len(rest) < 1:
+        print(f'Usage: nav_mosaic {mode} <dataset_name> [options]')
+        sys.exit(1)
+
+    DATASET_NAME = rest[0].lower()
+    if DATASET_NAME not in dataset_names():
+        print(f'Unknown dataset "{DATASET_NAME}"')
+        print(f'Valid datasets: {", ".join(dataset_names())}')
+        sys.exit(1)
+
+    try:
+        DATASET = dataset_name_to_class(DATASET_NAME)()
+    except KeyError:
+        print(f'Unknown dataset "{DATASET_NAME}"')
+        sys.exit(1)
+
+    parser = _build_parser(mode)
+    # The dataset class adds its own selection arguments (index file, volume, etc.)
+    DATASET.add_selection_arguments(parser)
+    args = parser.parse_args(rest[1:])
+    return mode, args
+
+
+# ---------------------------------------------------------------------------
+# Body workflow
+# ---------------------------------------------------------------------------
+
+
+def _run_body(args: argparse.Namespace, nav_results_root_path: FCPath | None) -> None:
+    assert DATASET is not None
+
+    inst_name = dataset_name_to_inst_name(DATASET_NAME)  # type: ignore[arg-type]
+    obs_class = inst_name_to_obs_class(inst_name)
+
+    mosaic = build_body_mosaic(args)
+    output_dir = FCPath(args.output_dir)
+    prefix: str = args.prefix
+    fmt: str = args.format
+
+    # ---- Pass 1: reprojection ------------------------------------------------
+    if not args.skip_reproject:
+        MAIN_LOGGER.info('=== Reprojection pass (body=%s) ===', mosaic.body_name)
+        n_done = 0
+        n_skipped = 0
+        for imagefiles in DATASET.yield_image_files_from_arguments(args):
+            image_file = imagefiles.image_files[0]
+            out_path = per_image_output_path(
+                output_dir, prefix, image_file, fmt, subject_name=mosaic.body_name
+            )
+
+            if not args.overwrite and out_path.exists():
+                MAIN_LOGGER.debug('Skipping (exists): %s', out_path)
+                n_skipped += 1
+                continue
+
+            if args.dry_run:
+                MAIN_LOGGER.info(
+                    '[dry-run] Would reproject %s -> %s', image_file.image_file_url, out_path
+                )
+                continue
+
+            local_handlers, image_log_path = _reproject_image_log_handlers(
+                output_dir, image_file, args
+            )
+            with IMAGE_LOGGER.open(
+                f'REPROJECT {image_file.image_file_url}',
+                handler=local_handlers,
+            ):
+                try:
+                    image_path = image_file.image_file_path.absolute()
+                    obs = obs_class.from_file(image_path, extfov_margin_vu=(0, 0))
+
+                    # Apply navigation offset if available
+                    offset = load_offset_if_any(nav_results_root_path, image_file)
+                    if offset is not None:
+                        apply_offset_to_obs(cast(ObsSnapshotInst, obs), offset[0], offset[1])
+
+                    img_label = (
+                        args.image_name
+                        if args.image_name is not None
+                        else image_file.image_file_path.stem
+                    )
+                    result = reproject_one_body(obs, mosaic, image_name=img_label)
+
+                    if not args.no_write_output_files:
+                        out_path.parent.mkdir(parents=True, exist_ok=True)
+                        result.save(out_path)
+                        MAIN_LOGGER.info('Saved reproj: %s', out_path)
+                    n_done += 1
+                except Exception:
+                    _log_main_exception('Error reprojecting %s', image_file.image_file_url)
+                finally:
+                    if local_handlers:
+                        MAIN_LOGGER.info('Wrote reprojection log to %s', image_log_path)
+
+        MAIN_LOGGER.info('Reprojection pass complete: %d done, %d skipped.', n_done, n_skipped)
+
+    # ---- Pass 2: mosaic ------------------------------------------------------
+    if not args.skip_mosaic:
+        MAIN_LOGGER.info('=== Mosaic pass (body=%s) ===', mosaic.body_name)
+        n_added = 0
+        for imagefiles in DATASET.yield_image_files_from_arguments(args):
+            image_file = imagefiles.image_files[0]
+            reproj_path = per_image_output_path(
+                output_dir, prefix, image_file, fmt, subject_name=mosaic.body_name
+            )
+            if not reproj_path.exists():
+                MAIN_LOGGER.info(
+                    'Skipping mosaic add for %s: no reprojection file at %s.',
+                    image_file.image_file_url,
+                    reproj_path,
+                )
+                continue
+            try:
+                result = BodyReprojResult.load(reproj_path)
+                mosaic.add(
+                    result,
+                    resolution_threshold=float(args.resolution_threshold),
+                    copy_slop=int(args.copy_slop),
+                )
+                n_added += 1
+            except Exception:
+                MAIN_LOGGER.info(
+                    'Skipping mosaic add for %s: failed while loading or adding reproj from %s.',
+                    image_file.image_file_url,
+                    reproj_path,
+                )
+                _log_main_exception('Error loading reproj %s', reproj_path)
+
+        MAIN_LOGGER.info('Added %d reprojections to mosaic.', n_added)
+
+        if n_added > 0 and not args.dry_run and not args.no_write_output_files:
+            mosaic_data: BodyMosaicData = mosaic.to_bounded()
+            out_mosaic = mosaic_output_path(
+                output_dir, prefix, fmt, subject_name=mosaic.body_name
+            )
+            out_mosaic.parent.mkdir(parents=True, exist_ok=True)
+            mosaic_data.save(out_mosaic)
+            MAIN_LOGGER.info('Saved mosaic: %s', out_mosaic)
+
+
+# ---------------------------------------------------------------------------
+# Ring workflow
+# ---------------------------------------------------------------------------
+
+
+def _run_rings(args: argparse.Namespace, nav_results_root_path: FCPath | None) -> None:
+    assert DATASET is not None
+
+    inst_name = dataset_name_to_inst_name(DATASET_NAME)  # type: ignore[arg-type]
+    obs_class = inst_name_to_obs_class(inst_name)
+
+    mosaic = build_ring_mosaic(args)
+    output_dir = FCPath(args.output_dir)
+    prefix: str = args.prefix
+    fmt: str = args.format
+
+    # ---- Pass 1: reprojection ------------------------------------------------
+    if not args.skip_reproject:
+        MAIN_LOGGER.info('=== Reprojection pass (rings, planet=%s) ===', mosaic.body_name)
+        n_done = 0
+        n_skipped = 0
+        for imagefiles in DATASET.yield_image_files_from_arguments(args):
+            image_file = imagefiles.image_files[0]
+            out_path = per_image_output_path(
+                output_dir, prefix, image_file, fmt, subject_name=mosaic.body_name
+            )
+
+            if not args.overwrite and out_path.exists():
+                MAIN_LOGGER.debug('Skipping (exists): %s', out_path)
+                n_skipped += 1
+                continue
+
+            if args.dry_run:
+                MAIN_LOGGER.info(
+                    '[dry-run] Would reproject %s -> %s', image_file.image_file_url, out_path
+                )
+                continue
+
+            local_handlers, image_log_path = _reproject_image_log_handlers(
+                output_dir, image_file, args
+            )
+            with IMAGE_LOGGER.open(
+                f'REPROJECT {image_file.image_file_url}',
+                handler=local_handlers,
+            ):
+                try:
+                    image_path = image_file.image_file_path.absolute()
+                    obs = obs_class.from_file(image_path, extfov_margin_vu=(0, 0))
+
+                    offset = load_offset_if_any(nav_results_root_path, image_file)
+                    if offset is not None:
+                        apply_offset_to_obs(cast(ObsSnapshotInst, obs), offset[0], offset[1])
+
+                    img_label = (
+                        args.image_name
+                        if args.image_name is not None
+                        else image_file.image_file_path.stem
+                    )
+                    result = reproject_one_ring(obs, args, mosaic, image_name=img_label)
+
+                    if not args.no_write_output_files:
+                        out_path.parent.mkdir(parents=True, exist_ok=True)
+                        result.save(out_path)
+                        MAIN_LOGGER.info('Saved reproj: %s', out_path)
+                    n_done += 1
+                except Exception:
+                    _log_main_exception('Error reprojecting %s', image_file.image_file_url)
+                finally:
+                    if local_handlers:
+                        MAIN_LOGGER.info('Wrote reprojection log to %s', image_log_path)
+
+        MAIN_LOGGER.info('Reprojection pass complete: %d done, %d skipped.', n_done, n_skipped)
+
+    # ---- Pass 2: mosaic ------------------------------------------------------
+    if not args.skip_mosaic:
+        MAIN_LOGGER.info('=== Mosaic pass (rings, planet=%s) ===', mosaic.body_name)
+        n_added = 0
+        for imagefiles in DATASET.yield_image_files_from_arguments(args):
+            image_file = imagefiles.image_files[0]
+            reproj_path = per_image_output_path(
+                output_dir, prefix, image_file, fmt, subject_name=mosaic.body_name
+            )
+            if not reproj_path.exists():
+                MAIN_LOGGER.info(
+                    'Skipping mosaic add for %s: no reprojection file at %s.',
+                    image_file.image_file_url,
+                    reproj_path,
+                )
+                continue
+            try:
+                result = RingReprojResult.load(reproj_path)
+                mosaic.add(result)
+                n_added += 1
+            except Exception:
+                MAIN_LOGGER.info(
+                    'Skipping mosaic add for %s: failed while loading or adding reproj from %s.',
+                    image_file.image_file_url,
+                    reproj_path,
+                )
+                _log_main_exception('Error loading reproj %s', reproj_path)
+
+        MAIN_LOGGER.info('Added %d reprojections to mosaic.', n_added)
+
+        if n_added > 0 and not args.dry_run and not args.no_write_output_files:
+            mosaic_data: RingMosaicData = mosaic.to_sparse()
+            out_mosaic = mosaic_output_path(
+                output_dir, prefix, fmt, subject_name=mosaic.body_name
+            )
+            out_mosaic.parent.mkdir(parents=True, exist_ok=True)
+            mosaic_data.save(out_mosaic)
+            MAIN_LOGGER.info('Saved mosaic: %s', out_mosaic)
+
+
+# ---------------------------------------------------------------------------
+# Main entry points
+# ---------------------------------------------------------------------------
+
+
+def main() -> None:
+    """Dispatch on ``rings`` or ``body`` first positional argument."""
+    command_list = sys.argv[1:]
+    mode, args = parse_args(command_list)
+
+    if args.profile:
+        pr = cProfile.Profile()
+        pr.enable()
+
+    load_default_and_user_config(args, DEFAULT_CONFIG)
+
+    nav_results_root_str: str | None = None
+    if getattr(args, 'nav_results_root', None) is not None:
+        nav_results_root_str = args.nav_results_root
+    else:
+        nav_results_root_str = get_nav_results_root(args, DEFAULT_CONFIG)
+
+    nav_results_root_path: FCPath | None = None
+    if nav_results_root_str is not None:
+        nav_results_root_path = FileCache(None).new_path(nav_results_root_str)
+
+    try:
+        setup_logging(args, DEFAULT_CONFIG, nav_results_root_str or '')
+    except (TypeError, ValueError) as exc:
+        print(f'Invalid logging configuration: {exc}', file=sys.stderr)
+        sys.exit(1)
+
+    # Set log level if --log-level was specified
+    log_level = getattr(args, 'log_level', None)
+    if log_level is not None:
+        numeric = getattr(logging, log_level.upper(), None)
+        if numeric is not None:
+            logging.getLogger().setLevel(numeric)
+            MAIN_LOGGER.setLevel(numeric)
+
+    start = time.time()
+    log_run_environment(MAIN_LOGGER, sys.argv[1:])
+
+    try:
+        if mode == 'body':
+            _run_body(args, nav_results_root_path)
+        else:
+            _run_rings(args, nav_results_root_path)
+    finally:
+        if args.profile:
+            pr.disable()
+            pr.print_stats(sort='cumulative')
+
+    MAIN_LOGGER.info('Total elapsed time %.2f sec', time.time() - start)
+
+
+def rings_main() -> None:
+    """Entry point for ``nav_mosaic_rings``; prepends ``rings`` to argv."""
+    sys.argv = [sys.argv[0], 'rings', *sys.argv[1:]]
+    main()
+
+
+def body_main() -> None:
+    """Entry point for ``nav_mosaic_body``; prepends ``body`` to argv."""
+    sys.argv = [sys.argv[0], 'body', *sys.argv[1:]]
+    main()
+
+
+if __name__ == '__main__':
+    main()

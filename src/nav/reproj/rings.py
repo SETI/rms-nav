@@ -29,13 +29,38 @@ from nav.reproj._serialization import (
     orbit_model_to_dict,
     save_fits,
     save_npz,
+    tuple_of_strings_field,
     verify_dtype,
 )
+from nav.reproj.photometric_model import PhotometricModel
 from nav.reproj.ring_orbit_model import RingOrbitModel
 from nav.support.image import array_unzoom, array_zoom
 from nav.support.types import NDArrayBoolType, NDArrayFloatType, NDArrayIntType, PathLike
 
 _LOGGING_NAME = 'nav.' + __name__
+
+
+def _ring_plane_surface(ring_body_name: str) -> Any:
+    """Return the oops ring surface used for longitude/radius ↔ pixel conversion.
+
+    Nav and oops backplanes use names like ``'saturn:ring'``. The corresponding
+    ``oops.Body`` registry entry for the unbounded plane is ``SATURN_RING_PLANE``,
+    not ``SATURN_RING``; the parent planet's ``ring_body`` attribute points at the
+    correct body. For a two-part ``name:ring`` string we use that; otherwise we
+    treat ``ring_body_name`` as a direct ``Body.lookup`` key (underscores for
+    colons, uppercased), e.g. ``SATURN_MAIN_RINGS``.
+    """
+    parts = ring_body_name.lower().split(':')
+    if len(parts) == 2 and parts[1] == 'ring':
+        parent = oops.Body.lookup(parts[0].upper())
+        ring_body = parent.ring_body
+        if ring_body is None:
+            raise ValueError(
+                f'No ring plane is defined for body {parts[0]!r} '
+                f'(ring_body_name was {ring_body_name!r})'
+            )
+        return ring_body.surface
+    return oops.Body.lookup(ring_body_name.replace(':', '_').upper()).surface
 
 
 class RingMosaicMergeStrategy(enum.Enum):
@@ -104,6 +129,9 @@ class RingReprojResult:
             (``mean_radial_resolution``, ``mean_angular_resolution``,
             ``mean_phase``, ``mean_emission``). Mosaic ``time`` columns are
             always ``float64`` regardless of this setting.
+        photometric_model_name: Name of the photometric model applied to ``img`` on
+            save, or ``None`` if brightness was stored without photometric correction.
+        image_name: Label for this reprojection (e.g. source image stem); may be empty.
     """
 
     body_name: str
@@ -122,6 +150,8 @@ class RingReprojResult:
     orbit_model: RingOrbitModel | None
     image_dtype: np.dtype
     metadata_dtype: np.dtype
+    photometric_model_name: str | None = None
+    image_name: str = ''
 
     def save(
         self,
@@ -168,6 +198,8 @@ class RingReprojResult:
             'orbit_model': orbit_model_to_dict(self.orbit_model),
             'image_dtype': self.image_dtype,
             'metadata_dtype': self.metadata_dtype,
+            'photometric_model_name': self.photometric_model_name,
+            'image_name': self.image_name,
         }
         if fmt == 'npz':
             save_npz(path, 'RingReprojResult', 1, payload, compress=compress)
@@ -226,7 +258,13 @@ class RingReprojResult:
         }
         missing = _REQUIRED_KEYS_REPROJ - d.keys()
         if missing:
-            raise ValueError(f'RingReprojResult file is missing required keys: {sorted(missing)}')
+            raise ValueError(
+                f'RingReprojResult file is missing required keys: {sorted(missing)}. '
+                f'Found keys: {sorted(d.keys())!r}. '
+                'If this path ends in .fits but the file is actually an npz archive, '
+                'rename it to .npz or pass format= explicitly; otherwise the file may be '
+                'truncated or not written by RingReprojResult.save().'
+            )
 
         image_dtype = np.dtype(str(d['image_dtype']))
         metadata_dtype = np.dtype(str(d['metadata_dtype']))
@@ -261,6 +299,12 @@ class RingReprojResult:
                 orbit_d[k[len(prefix) :]] = v
         orbit_model = orbit_model_from_dict(orbit_d) if orbit_d else None
 
+        phot = d.get('photometric_model_name')
+        if phot is None or (isinstance(phot, str) and phot.strip() == ''):
+            photometric_model_name: str | None = None
+        else:
+            photometric_model_name = str(phot)
+
         return cls(
             body_name=str(d['body_name']),
             img=d['img'],
@@ -278,6 +322,8 @@ class RingReprojResult:
             orbit_model=orbit_model,
             image_dtype=image_dtype,
             metadata_dtype=metadata_dtype,
+            photometric_model_name=photometric_model_name,
+            image_name=str(d.get('image_name', '') or ''),
         )
 
 
@@ -316,6 +362,13 @@ class RingMosaicData:
         metadata_dtype: NumPy dtype used for geometry arrays
             (``mean_radial_resolution``, ``mean_angular_resolution``,
             ``mean_phase``, ``mean_emission``).
+        contributing_image_names: Names of contributing reprojections in ``image_number``
+            order (index ``k`` corresponds to pixels tagged with ``image_number == k``).
+        orbit_model_name: Name of the default ring orbit model used when building the
+            mosaic (co-rotating longitude and radius offset from core), or ``None``
+            when the mosaic used inertial longitudes and absolute ring radii.
+        photometric_model_name: Photometric model applied during ``reproject()``, if
+            any; ``None`` when brightness was accumulated without photometric correction.
     """
 
     body_name: str
@@ -337,6 +390,9 @@ class RingMosaicData:
     time: ma.MaskedArray
     image_dtype: np.dtype
     metadata_dtype: np.dtype
+    contributing_image_names: tuple[str, ...] = ()
+    orbit_model_name: str | None = None
+    photometric_model_name: str | None = None
 
     def save(
         self,
@@ -387,6 +443,9 @@ class RingMosaicData:
             'time': self.time,
             'image_dtype': self.image_dtype,
             'metadata_dtype': self.metadata_dtype,
+            'contributing_image_names': self.contributing_image_names,
+            'orbit_model_name': self.orbit_model_name,
+            'photometric_model_name': self.photometric_model_name,
         }
         if fmt == 'npz':
             save_npz(path, 'RingMosaicData', 1, payload, compress=compress)
@@ -445,7 +504,12 @@ class RingMosaicData:
         }
         missing = _REQUIRED_KEYS_MOSAIC - d.keys()
         if missing:
-            raise ValueError(f'RingMosaicData file is missing required keys: {sorted(missing)}')
+            raise ValueError(
+                f'RingMosaicData file is missing required keys: {sorted(missing)}. '
+                f'Found keys: {sorted(d.keys())!r}. '
+                'If the path ends in .fits but the payload is npz (ZIP), rename to .npz '
+                'or pass format=; otherwise the file may be corrupt or from another tool.'
+            )
 
         image_dtype = np.dtype(str(d['image_dtype']))
         metadata_dtype = np.dtype(str(d['metadata_dtype']))
@@ -482,6 +546,15 @@ class RingMosaicData:
         else:
             longitude_range = (float(lon_range_raw[0]), float(lon_range_raw[1]))
 
+        contributing_image_names = tuple_of_strings_field(d.get('contributing_image_names'))
+        om_raw = d.get('orbit_model_name')
+        orbit_model_name = None if om_raw is None else str(om_raw)
+        pm_raw = d.get('photometric_model_name')
+        if pm_raw is None or (isinstance(pm_raw, str) and pm_raw.strip() == ''):
+            photometric_model_name: str | None = None
+        else:
+            photometric_model_name = str(pm_raw)
+
         return cls(
             body_name=str(d['body_name']),
             ring_body_name=str(d['ring_body_name']),
@@ -502,6 +575,9 @@ class RingMosaicData:
             time=d['time'],
             image_dtype=image_dtype,
             metadata_dtype=metadata_dtype,
+            contributing_image_names=contributing_image_names,
+            orbit_model_name=orbit_model_name,
+            photometric_model_name=photometric_model_name,
         )
 
 
@@ -529,6 +605,8 @@ class RingMosaic:
         metadata_dtype: NumPy dtype for geometry arrays
             (``mean_radial_resolution``, ``mean_angular_resolution``,
             ``mean_phase``, ``mean_emission``). Defaults to ``np.float32``.
+        photometric_model: Optional photometric correction applied to ``img`` in
+            ``reproject()`` before accumulation. ``None`` means raw brightness.
 
     Notes:
         reproject() is not thread-safe because it mutates obs.fov and oops
@@ -554,6 +632,7 @@ class RingMosaic:
         orbit_model: RingOrbitModel | None = None,
         image_dtype: np.typing.DTypeLike = np.float64,
         metadata_dtype: np.typing.DTypeLike = np.float32,
+        photometric_model: PhotometricModel | None = None,
     ) -> None:
         """Initialize an empty RingMosaic."""
         if radius_inner >= radius_outer:
@@ -577,6 +656,7 @@ class RingMosaic:
         self._orbit_model = orbit_model
         self._image_dtype: np.dtype = np.dtype(image_dtype)
         self._metadata_dtype: np.dtype = np.dtype(metadata_dtype)
+        self._photometric_model = photometric_model
 
         self._n_radius = math.ceil((radius_outer - radius_inner + _RADIUS_SLOP) / radius_resolution)
         self._n_full_lon = int(math.pi * 2.0 / longitude_resolution)
@@ -596,6 +676,7 @@ class RingMosaic:
         self._image_number: NDArrayIntType = np.empty(0, dtype=np.uint16)
         self._time: NDArrayFloatType = np.empty(0, dtype=np.float64)
         self._image_count: int = 0
+        self._contributing_image_names: list[str] = []
 
     # ------------------------------------------------------------------
     # Public read-only properties
@@ -725,7 +806,7 @@ class RingMosaic:
         if len(longitude) == 0:
             return np.zeros(0, dtype=float), np.zeros(0, dtype=float)
 
-        ring_surface = oops.Body.lookup(ring_body_name.replace(':', '_').upper()).surface
+        ring_surface = _ring_plane_surface(ring_body_name)
         obs_event = oops.Event(obs.midtime, (Vector3.ZERO, Vector3.ZERO), obs.path, obs.frame)
         _, obs_event = ring_surface.photon_to_event_by_coords(obs_event, (radius, longitude))
 
@@ -760,8 +841,8 @@ class RingMosaic:
         bp = obs.ext_bp
         u_min = 0
         v_min = 0
-        u_max = obs.extdata_shape_xy[0] - 1
-        v_max = obs.extdata_shape_xy[1] - 1
+        u_max = obs.extdata_shape_uv[0] - 1
+        v_max = obs.extdata_shape_uv[1] - 1
 
         bp_radius = bp.ring_radius(ring_body_name)
         bp_longitude = bp.ring_longitude(ring_body_name)
@@ -800,6 +881,7 @@ class RingMosaic:
         orbit_model: RingOrbitModel | None = None,
         uv_range: tuple[int, int, int, int] | None = None,
         omit_shadow: bool = True,
+        image_name: str = '',
     ) -> RingReprojResult:
         """Reproject the ring in an image to a sparse radius/longitude grid.
 
@@ -825,6 +907,7 @@ class RingMosaic:
             uv_range: (start_u, end_u, start_v, end_v) to restrict the
                 image region reprojected.
             omit_shadow: If True, mask pixels inside the planet's shadow.
+            image_name: Optional label stored on the result (e.g. source image stem).
 
         Returns:
             RingReprojResult with sparse image and metadata arrays.
@@ -896,6 +979,7 @@ class RingMosaic:
                 uv_range=uv_range,
                 omit_shadow=omit_shadow,
                 logger=logger,
+                image_name=image_name,
             )
 
     def _reproject_inner(
@@ -916,6 +1000,7 @@ class RingMosaic:
         uv_range: tuple[int, int, int, int] | None,
         omit_shadow: bool,
         logger: logging.Logger,
+        image_name: str,
     ) -> RingReprojResult:
         """Inner reprojection logic, runs with reduced oops precision."""
         if r_spline_order != 0 or l_spline_order != 0:
@@ -925,9 +1010,9 @@ class RingMosaic:
 
         meshgrid = None
         start_u = 0
-        end_u = obs.data_shape_xy[0] - 1
+        end_u = obs.data_shape_uv[0] - 1
         start_v = 0
-        end_v = obs.data_shape_xy[1] - 1
+        end_v = obs.data_shape_uv[1] - 1
         if uv_range is not None:
             start_u, end_u, start_v, end_v = uv_range
             meshgrid = oops.Meshgrid.for_fov(
@@ -1169,6 +1254,36 @@ class RingMosaic:
 
         logger.debug('Reprojection complete: %d valid longitudes', int(good_lon_antimask.sum()))
 
+        photometric_model_name: str | None = None
+        if self._photometric_model is not None:
+            photometric_model_name = self._photometric_model.name
+            n_rad_sparse, n_lon_sparse = repro_img.shape
+            phase_2d = np.broadcast_to(
+                np.asarray(repro_mean_phase, dtype=np.float64)[np.newaxis, :],
+                (n_rad_sparse, n_lon_sparse),
+            )
+            emission_2d = np.broadcast_to(
+                np.asarray(repro_mean_emission, dtype=np.float64)[np.newaxis, :],
+                (n_rad_sparse, n_lon_sparse),
+            )
+            incidence_2d = np.broadcast_to(
+                np.asarray(repro_incidence, dtype=np.float64),
+                (n_rad_sparse, n_lon_sparse),
+            )
+            mask_img = ma.getmaskarray(repro_img)
+            d_work = np.asarray(repro_img.filled(np.nan), dtype=np.float64)
+            d_work = np.nan_to_num(d_work, nan=0.0)
+            inc_w = np.nan_to_num(incidence_2d, nan=0.0)
+            emi_w = np.nan_to_num(emission_2d, nan=0.0)
+            pha_w = np.nan_to_num(phase_2d, nan=0.0)
+            corr = self._photometric_model.correct(
+                d_work, incidence=inc_w, emission=emi_w, phase=pha_w
+            )
+            out_dtype = repro_img.dtype
+            corr = np.asarray(corr, dtype=out_dtype)
+            corr = np.where(mask_img, np.nan, corr)
+            repro_img = ma.masked_array(corr, mask=mask_img)
+
         return RingReprojResult(
             body_name=self._body_name,
             longitude_resolution=self._lon_resolution,
@@ -1186,6 +1301,8 @@ class RingMosaic:
             orbit_model=orbit_model,
             image_dtype=self._image_dtype,
             metadata_dtype=self._metadata_dtype,
+            photometric_model_name=photometric_model_name,
+            image_name=image_name,
         )
 
     # ------------------------------------------------------------------
@@ -1232,6 +1349,7 @@ class RingMosaic:
             self._update_existing_columns(old_bins, valid_bins, existing_bins, repro)
 
         self._antimask[valid_bins] = True
+        self._contributing_image_names.append(repro.image_name)
         self._image_count += 1
         self._mean_incidence = repro.incidence
 
@@ -1400,6 +1518,11 @@ class RingMosaic:
             time=ma.MaskedArray(full_time, mask=full_mask_1d),
             image_dtype=self._image_dtype,
             metadata_dtype=self._metadata_dtype,
+            contributing_image_names=tuple(self._contributing_image_names),
+            orbit_model_name=self._orbit_model.name if self._orbit_model else None,
+            photometric_model_name=(
+                self._photometric_model.name if self._photometric_model is not None else None
+            ),
         )
 
     def to_bounded(
@@ -1474,6 +1597,11 @@ class RingMosaic:
             time=ma.MaskedArray(bounded_time, mask=bounded_mask_1d),
             image_dtype=self._image_dtype,
             metadata_dtype=self._metadata_dtype,
+            contributing_image_names=tuple(self._contributing_image_names),
+            orbit_model_name=self._orbit_model.name if self._orbit_model else None,
+            photometric_model_name=(
+                self._photometric_model.name if self._photometric_model is not None else None
+            ),
         )
 
     def _build_result(
@@ -1510,4 +1638,9 @@ class RingMosaic:
             time=ma.MaskedArray(self._time.copy(), mask=mask_1d),
             image_dtype=self._image_dtype,
             metadata_dtype=self._metadata_dtype,
+            contributing_image_names=tuple(self._contributing_image_names),
+            orbit_model_name=self._orbit_model.name if self._orbit_model else None,
+            photometric_model_name=(
+                self._photometric_model.name if self._photometric_model is not None else None
+            ),
         )

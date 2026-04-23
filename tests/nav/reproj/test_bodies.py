@@ -7,6 +7,7 @@ BodyReprojResult objects.
 """
 
 import math
+from types import SimpleNamespace
 from typing import Literal
 
 import numpy as np
@@ -14,6 +15,7 @@ import numpy.ma as ma
 import pytest
 
 from nav.reproj.bodies import BodyMosaic, BodyMosaicData, BodyReprojResult
+from nav.ui.mosaic_viewer.common import load_body_file
 
 # Convenient resolution (rad/pixel) for tests: 0.1 rad ~ 5.7 deg
 _LAT_RES = 0.1  # rad/pixel
@@ -42,6 +44,7 @@ def _make_repro(
     lat_resolution: float = _LAT_RES,
     lon_resolution: float = _LON_RES,
     time: float = 0.0,
+    image_name: str = '',
 ) -> BodyReprojResult:
     """Build a synthetic BodyReprojResult for use in tests.
 
@@ -59,6 +62,7 @@ def _make_repro(
         lat_resolution: Latitude bin size in radians per pixel.
         lon_resolution: Longitude bin size in radians per pixel.
         time: Scalar observation midtime (TDB seconds).
+        image_name: Label carried on the synthetic reprojection result.
     """
     n_lat = lat_range[1] - lat_range[0] + 1
     n_lon = lon_range[1] - lon_range[0] + 1
@@ -97,7 +101,34 @@ def _make_repro(
         photometric_model_name=None,
         image_dtype=np.dtype(np.float32),
         metadata_dtype=np.dtype(np.float32),
+        image_name=image_name,
     )
+
+
+# =========================================================================
+# Outside-FOV early exit
+# =========================================================================
+
+
+class TestBodyReprojOutsideFov:
+    """Tests for ``_body_reproj_result_outside_fov`` empty result."""
+
+    def test_empty_result_shape_and_masked_img(self) -> None:
+        """Non-mask-only empty result matches minimal idx range and is fully masked."""
+        mosaic = BodyMosaic(body_name='MIMAS', lat_resolution=_LAT_RES, lon_resolution=_LON_RES)
+        obs = SimpleNamespace(midtime=123.45)
+        r = mosaic._body_reproj_result_outside_fov(
+            obs,
+            mask_only=False,
+            image_name='stem',
+            navigation_uncertainty=0.0,
+        )
+        assert r.time == pytest.approx(123.45)
+        assert r.image_name == 'stem'
+        assert r.lat_idx_range == (0, 1)
+        assert r.lon_idx_range == (0, 1)
+        assert r.img.shape == (2, 2)
+        assert bool(ma.getmaskarray(r.img).all())
 
 
 # =========================================================================
@@ -618,3 +649,43 @@ class TestBodyMosaicMetadata:
         mosaic.add(_make_repro(lat_range=(5, 5), lon_range=(10, 10)))
         result = mosaic.to_bounded()
         assert result.photometric_model_name is None
+
+
+class TestContributingImageNamesBodies:
+    """Tests for ``contributing_image_names`` on body mosaics."""
+
+    def test_two_adds_record_names_in_order(self) -> None:
+        """Each add that bumps image_count appends repro.image_name."""
+        mosaic = BodyMosaic(body_name='MIMAS', lat_resolution=_LAT_RES, lon_resolution=_LON_RES)
+        mosaic.add(_make_repro(lat_range=(5, 5), lon_range=(10, 10), image_name='obs_a'))
+        mosaic.add(_make_repro(lat_range=(6, 6), lon_range=(15, 15), image_name='obs_b'))
+        result = mosaic.to_bounded()
+        assert result.contributing_image_names == ('obs_a', 'obs_b')
+
+    def test_contributing_image_names_npz_roundtrip(self, tmp_path) -> None:
+        """contributing_image_names survives BodyMosaicData npz save/load."""
+        mosaic = BodyMosaic(body_name='MIMAS', lat_resolution=_LAT_RES, lon_resolution=_LON_RES)
+        mosaic.add(_make_repro(lat_range=(5, 5), lon_range=(10, 10), image_name='stem_x'))
+        path = tmp_path / 'body_mosaic.npz'
+        mosaic.to_bounded().save(path)
+        loaded = BodyMosaicData.load(path)
+        assert loaded.contributing_image_names == ('stem_x',)
+
+    def test_contributing_image_names_fits_roundtrip(self, tmp_path) -> None:
+        """contributing_image_names survives BodyMosaicData FITS save/load."""
+        mosaic = BodyMosaic(body_name='MIMAS', lat_resolution=_LAT_RES, lon_resolution=_LON_RES)
+        mosaic.add(_make_repro(lat_range=(5, 5), lon_range=(10, 10), image_name='N888'))
+        path = tmp_path / 'body_mosaic.fits'
+        mosaic.to_bounded().save(path, format='fits')
+        loaded = BodyMosaicData.load(path, format='fits')
+        assert loaded.contributing_image_names == ('N888',)
+
+    def test_load_body_file_passes_contributing_names(self, tmp_path) -> None:
+        """BodyDisplayData from load_body_file includes contributing_image_names."""
+        mosaic = BodyMosaic(body_name='MIMAS', lat_resolution=_LAT_RES, lon_resolution=_LON_RES)
+        mosaic.add(_make_repro(lat_range=(5, 5), lon_range=(10, 10), image_name='mimas_obs'))
+        path = tmp_path / 'body_for_display.fits'
+        mosaic.to_bounded().save(path, format='fits')
+        dd = load_body_file(str(path))
+        assert dd.is_mosaic is True
+        assert dd.contributing_image_names == ('mimas_obs',)

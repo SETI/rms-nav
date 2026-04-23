@@ -2,14 +2,14 @@
 
 All models implement the PhotometricModel protocol and apply a correction to
 raw pixel brightness based on the local illumination and viewing geometry.
-Default is no correction (pass photometric_model=None to BodyMosaic or
-RingMosaic).
+Default is no correction (pass ``photometric_model=None`` to ``BodyMosaic`` or
+``RingMosaic``).
 
 All angles are in radians throughout.
 """
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, cast
 
 import numpy as np
 
@@ -90,6 +90,18 @@ class LambertModel:
         cos_i = np.maximum(np.cos(incidence), self.min_cos_incidence)
         return data / cos_i
 
+    def uncorrect(
+        self,
+        data: NDArrayFloatType,
+        *,
+        incidence: NDArrayFloatType,
+        emission: NDArrayFloatType,
+        phase: NDArrayFloatType,
+    ) -> NDArrayFloatType:
+        """Inverse of :meth:`correct` using the same incidence clamping."""
+        cos_i = np.maximum(np.cos(incidence), self.min_cos_incidence)
+        return data * cos_i
+
 
 @dataclass
 class LommelSeeligerModel:
@@ -132,6 +144,21 @@ class LommelSeeligerModel:
         cos_e = np.cos(emission)
         result: NDArrayFloatType = data * (cos_i + cos_e) / (2.0 * cos_i)
         return result
+
+    def uncorrect(
+        self,
+        data: NDArrayFloatType,
+        *,
+        incidence: NDArrayFloatType,
+        emission: NDArrayFloatType,
+        phase: NDArrayFloatType,
+    ) -> NDArrayFloatType:
+        """Inverse of :meth:`correct` using the same incidence clamping."""
+        cos_i = np.maximum(np.cos(incidence), self.min_cos_incidence)
+        cos_e = np.cos(emission)
+        denom = cos_i + cos_e
+        denom = np.where(np.abs(denom) < 1e-15, 1e-15, denom)
+        return cast(NDArrayFloatType, data * (2.0 * cos_i) / denom)
 
 
 @dataclass
@@ -177,3 +204,34 @@ class MinnaertModel:
         cos_i = np.maximum(np.cos(incidence), self.min_cos_incidence)
         cos_e = np.maximum(np.cos(emission), self.min_cos_emission)
         return data / (cos_i**self.k * cos_e ** (self.k - 1.0))
+
+    def uncorrect(
+        self,
+        data: NDArrayFloatType,
+        *,
+        incidence: NDArrayFloatType,
+        emission: NDArrayFloatType,
+        phase: NDArrayFloatType,
+    ) -> NDArrayFloatType:
+        """Inverse of :meth:`correct` using the same cosine clamping."""
+        cos_i = np.maximum(np.cos(incidence), self.min_cos_incidence)
+        cos_e = np.maximum(np.cos(emission), self.min_cos_emission)
+        return data * (cos_i**self.k * cos_e ** (self.k - 1.0))
+
+
+def photometric_model_from_name(
+    name: str | None,
+) -> LambertModel | LommelSeeligerModel | MinnaertModel | None:
+    """Return a photometric model instance for a saved ``name``, or ``None`` if unknown / none."""
+    if name is None:
+        return None
+    n = str(name).strip().lower().replace('-', '_').replace(' ', '_')
+    if n in ('', 'none', 'null'):
+        return None
+    if n == 'lambert':
+        return LambertModel()
+    if n in ('lommel_seeliger', 'lommelseeliger'):
+        return LommelSeeligerModel()
+    if n == 'minnaert':
+        return MinnaertModel()
+    return None

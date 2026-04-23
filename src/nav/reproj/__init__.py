@@ -34,6 +34,7 @@ from nav.reproj.photometric_model import (
     LommelSeeligerModel,
     MinnaertModel,
     PhotometricModel,
+    photometric_model_from_name,
 )
 from nav.reproj.ring_orbit_model import (
     BRING_OUTER_EDGE,
@@ -54,6 +55,7 @@ __all__ = [
     'LommelSeeligerModel',
     'MinnaertModel',
     'PhotometricModel',
+    'photometric_model_from_name',
     'RingMosaic',
     'RingMosaicData',
     'RingMosaicMergeStrategy',

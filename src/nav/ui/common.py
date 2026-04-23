@@ -1,6 +1,6 @@
 import math
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 from PyQt6.QtCore import QPoint, Qt
@@ -14,8 +14,42 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from nav.support.types import NDArrayFloatType
+
 # Pixel spacing between sliders and value labels in ``build_stretch_controls`` rows.
 STRETCH_CONTROLS_ROW_SPACING = 4
+
+
+def apply_linear_gamma_stretch(
+    data: NDArrayFloatType,
+    *,
+    black: float,
+    white: float,
+    gamma: float,
+) -> NDArrayFloatType:
+    """Apply black/white/gamma stretch and return a float array in ``[0, 1]``.
+
+    Uses the convention ``((clip(data, black, white) - black) / (white - black)) ** gamma``.
+    A ``gamma`` of 1.0 is linear; values below 1.0 brighten the mid-tones
+    (common for display) and values above 1.0 darken them.
+
+    Parameters:
+        data: Input float array (any shape).
+        black: Black-point; input values at or below this map to 0.
+        white: White-point; input values at or above this map to 1.
+            If ``white <= black`` the range is clamped to ``black + 1e-6``.
+        gamma: Exponent applied after linear normalisation.  Must be > 0;
+            values <= 0 are clamped to 1.0.
+
+    Returns:
+        Float array of the same shape as ``data`` with values in ``[0, 1]``.
+    """
+    if white <= black:
+        white = black + 1e-6
+    if gamma <= 0:
+        gamma = 1.0
+    normalized = np.clip((data - black) / (white - black), 0.0, 1.0)
+    return cast(NDArrayFloatType, np.power(normalized, gamma))
 
 
 def _require_finite_int_or_float(name: str, value: object) -> None:

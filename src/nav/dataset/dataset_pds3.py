@@ -588,10 +588,13 @@ class DataSetPDS3(DataSet):
                 if not self._img_name_valid(explicit_img_name):
                     raise ValueError(f'Invalid image name "{explicit_img_name}"')
         if img_filespec_list:
+            new_img_filespec_list = []
             for explicit_img_filespec in img_filespec_list:
-                if not self._get_img_name_from_label_filespec(explicit_img_filespec):
+                new_img_filespec = self._get_img_name_from_label_filespec(explicit_img_filespec)
+                if new_img_filespec is None:
                     raise ValueError(f'Invalid image filespec "{explicit_img_filespec}"')
-            img_filespec_list = [x.rsplit('.', maxsplit=1)[0] for x in img_filespec_list]
+                new_img_filespec_list.append(new_img_filespec)
+            img_filespec_list = new_img_filespec_list
 
         # Optimize the first and last image number based on image_name_list and image_filespec_list
         # This is just to improve performance
@@ -712,12 +715,6 @@ class DataSetPDS3(DataSet):
                     label_filespec = self._get_label_filespec_from_index(row)
                     img_filespec = self._get_image_filespec_from_label_filespec(label_filespec)
 
-                    # Check that the image filespec is in the requested list
-                    if img_filespec_list and (
-                        label_filespec.rsplit('.', maxsplit=1)[0] not in img_filespec_list
-                    ):
-                        continue
-
                     # Get the image name
                     try:
                         img_name = self._get_img_name_from_label_filespec(label_filespec)
@@ -730,6 +727,10 @@ class DataSetPDS3(DataSet):
                         continue
                     if img_name is None:
                         continue  # Not a name we should process
+
+                    # Check that the image filespec is in the requested list
+                    if img_filespec_list and img_name not in img_filespec_list:
+                        continue
 
                     # Check that the image name is in the requested list
                     if img_name_list:

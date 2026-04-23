@@ -72,6 +72,10 @@ When ``add()`` receives a :class:`~nav.reproj.rings.RingReprojResult`, it:
    ``np.insert(..., axis=1)`` call per array to avoid repeated reallocations.
 3. Updates ``_sparse_lon_mask``.
 4. Applies the :class:`~nav.reproj.rings.RingMosaicMergeStrategy` to resolve conflicts on existing columns.
+5. If at least one valid longitude column was present, appends
+   ``repro.image_name`` to ``_contributing_image_names`` and increments
+   ``_image_count`` (so ``contributing_image_names[k]`` matches pixels tagged
+   with ``image_number == k``).
 
 The always-sparse design means that ``reproject()`` always returns a
 :class:`~nav.reproj.rings.RingReprojResult` with only the valid longitude
@@ -128,15 +132,20 @@ Supported formats
 npz
     ``np.savez`` / ``np.savez_compressed``. Each ``MaskedArray`` is split into
     two npz entries: ``<name>__data`` (the underlying array at its declared
-    dtype) and ``<name>__mask`` (a ``bool_`` array). Tuples of length 2 are
-    stored as 1-D length-2 arrays. Strings, dtype names, and scalar floats/ints
-    are stored as 0-D unicode or numeric arrays.
+    dtype) and ``<name>__mask`` (a ``bool_`` array). Tuples of length 2 of
+    numeric types are stored as 1-D length-2 arrays. Tuples of strings (e.g.
+    ``contributing_image_names``) are stored as a 1-D Unicode string array.
+    Strings, dtype names, and scalar floats/ints are stored as 0-D unicode or
+    numeric arrays.
 
 fits
-    ``astropy.io.fits``. Scalar metadata (strings, numbers, dtype names) go
-    into the PrimaryHDU header. Each array occupies a separate ImageHDU with
+    ``astropy.io.fits``. Scalar metadata (strings, numbers, dtype names) go into
+    the PrimaryHDU header. Each array occupies a separate ImageHDU with
     ``EXTNAME = <FIELDNAME>``; masks are stored as a companion ImageHDU with
-    ``EXTNAME = <FIELDNAME>_MASK`` (uint8, 0 = valid).
+    ``EXTNAME = <FIELDNAME>_MASK`` (uint8, 0 = valid).     Tuple-of-string
+    fields (``contributing_image_names``) are stored as a 1-D ``uint8`` ImageHDU
+    of UTF-8 bytes with ``NUL`` (``\\0``) separators between entries (empty
+    tuple → length-0 array).
 
 Format inference
 ^^^^^^^^^^^^^^^^
@@ -273,3 +282,149 @@ Longitude wraparound is handled by the formula::
 This is correct for both non-wrapping and wrapping ``lon_range`` values.
 
 .. |pi| replace:: *π*
+
+Command-line layer
+-------------------
+
+The command-line tools are composed of three layers:
+
+**Entry-point scripts** (``src/main/``)
+   - ``nav_mosaic.py`` — :func:`main` dispatches on the first positional
+     argument (``rings`` or ``body``) and calls ``_run_rings`` / ``_run_body``.
+     ``rings_main`` and ``body_main`` are thin wrappers that prepend the
+     subcommand to ``sys.argv`` and call ``main``.
+   - ``nav_mosaic_display.py`` — same pattern for the display tools.
+
+**Shared CLI helpers** (``src/reproj_cli/``)
+   This top-level package (sibling of ``nav/``, ``backplanes/``, ``pds4/``)
+   contains all the reusable CLI logic:
+
+   - ``args.py`` — ``add_common_env_args``, ``add_common_output_args``,
+     ``add_ring_args``, ``add_body_args``, ``add_display_args``.  Adding a new
+     command-line option to rings or body mode only requires editing the
+     corresponding ``add_*_args`` function here.
+   - ``factories.py`` — ``build_ring_mosaic(args)`` / ``build_body_mosaic(args)``
+     translate parsed ``argparse.Namespace`` into ``RingMosaic`` /
+     ``BodyMosaic`` instances.  Add a new constructor parameter here when the
+     underlying classes gain a new option.
+   - ``paths.py`` — ``per_image_output_path`` / ``mosaic_output_path`` define
+     the output-file naming convention; pass-1 image logs go under
+     ``<output-dir>/logs/`` (see ``nav_mosaic._reproject_image_log_handlers``).
+   - ``offsets.py`` — ``load_offset_if_any`` reads the ``_metadata.json`` file
+     written by ``nav_offset`` and returns ``(dv, du)`` when ``status ==
+     'success'``.  ``apply_offset_to_obs`` wraps the result in
+     ``oops.fov.OffsetFOV``.  This mirrors the same pattern used in
+     ``src/backplanes/backplanes.py``.
+   - ``reproject.py`` — ``reproject_one_body`` / ``reproject_one_ring`` thin
+     wrappers that translate ring-specific CLI args (zoom, longitude range,
+     radius range, margin) into keyword arguments for
+     ``RingMosaic.reproject()`` / ``BodyMosaic.reproject()``, including the
+     per-image ``image_name`` string (from the CLI or from ``args.image_name``).
+
+**Dataset enumeration**
+   Both ``nav_mosaic.py`` and the existing ``nav_offset.py`` / ``nav_backplanes.py``
+   scripts enumerate images via
+   :meth:`DataSet.yield_image_files_from_arguments`.  The dataset class is
+   instantiated from ``DATASET_NAME = sys.argv[1]`` via
+   :func:`~nav.dataset.dataset_name_to_class`, which also provides
+   :meth:`~nav.dataset.DataSet.add_selection_arguments` to add dataset-specific
+   filtering flags to the parser.
+
+Two-pass workflow
+^^^^^^^^^^^^^^^^^
+
+The reprojection pass loops over
+``DATASET.yield_image_files_from_arguments(args)`` and for each ``ImageFile``:
+
+1. Compute ``per_image_output_path(..., subject_name=mosaic.body_name)`` (body
+   or planet name in the filename).
+2. Skip if the file exists and ``--overwrite`` is not set.
+3. Open ``IMAGE_LOGGER`` handlers writing to ``<output-dir>/logs/…``.
+4. Load the observation via ``obs_class.from_file(image_path)``.
+5. Optionally apply a navigation offset via ``load_offset_if_any`` + ``apply_offset_to_obs``.
+6. Call ``reproject_one_body`` / ``reproject_one_ring`` with the computed
+   ``image_name`` (file stem or ``--image-name``).
+7. Save the ``BodyReprojResult`` / ``RingReprojResult`` to disk.
+
+The mosaic pass then iterates the same list a second time, loads each existing
+reprojection file, calls ``mosaic.add()``, and saves the final
+``BodyMosaicData`` / ``RingMosaicData`` via ``mosaic_output_path`` (same
+``subject_name=mosaic.body_name`` convention).
+
+Display layer
+--------------
+
+**Package layout** — ``src/nav/ui/mosaic_viewer/``
+
+   - ``tiled_image_widget.py`` — :class:`~nav.ui.mosaic_viewer.tiled_image_widget.TiledImageWidget`.
+     A generalized :class:`QAbstractScrollArea` that:
+
+     - Renders only the visible viewport tiles on each paint event (tile-granular
+       repaint), keeping memory usage independent of zoom level.
+     - Supports independent X and Y zoom factors.
+     - Handles Shift+scroll (X only), Ctrl+scroll (Y only), both-axes scroll.
+     - Rubber-band zoom (Shift+left-drag).
+     - Left-drag pan.
+     - Green horizontal/vertical line overlays (show-radii / show-parallels /
+       show-meridians) via ``set_show_rows`` / ``set_show_cols``.
+     - Optional axis-tick overlays (longitude at bottom, radius/latitude at left)
+       via ``set_axis_tick_options``.
+     - ``y_flip=True`` for ring mosaics (array row 0 = inner radius, displayed at
+       bottom); ``y_flip=False`` for body mosaics (row 0 = top of display).
+     - Uses :func:`nav.ui.common.apply_linear_gamma_stretch` for image contrast,
+       ensuring a consistent ``data ** gamma`` convention across all viewers.
+     - Does *not* use :class:`nav.ui.common.ZoomPanController` — that helper
+       assumes a pre-scaled ``QLabel`` inside a ``QScrollArea``, which is
+       incompatible with tile-paint independent X/Y zoom.
+
+   - ``common.py`` — :func:`~nav.ui.mosaic_viewer.common.load_ring_file` /
+     :func:`~nav.ui.mosaic_viewer.common.load_body_file`.  Peeks at the
+     ``__kind__`` header in an npz or FITS file, then delegates to the
+     appropriate ``*.load()`` classmethod and normalises the result into a
+     :class:`~nav.ui.mosaic_viewer.common.RingDisplayData` /
+     :class:`~nav.ui.mosaic_viewer.common.BodyDisplayData` dataclass ready
+     for the window.
+
+   - ``ring_window.py`` — :class:`~nav.ui.mosaic_viewer.ring_window.RingMosaicWindow`.
+     Includes: stretch controls (via :func:`nav.ui.common.build_stretch_controls`),
+     color-by panel (radial/angular resolution, phase, emission, image number;
+     ephemeris-only options are omitted), EW-profile Matplotlib panel,
+     radial-slice Matplotlib panel (right-click on mosaic), show-radii overlay,
+     longitude/radius axis ticks, Prev/Next file navigation, and Save-FOV.
+     ``RingDisplayData.contributing_image_names`` feeds the cursor **Source image**
+     line for mosaics and single reprojections.
+
+   - ``body_window.py`` — :class:`~nav.ui.mosaic_viewer.body_window.BodyMosaicWindow`.
+     Header row for latitude/longitude axis tick toggles, image area with
+     parallels/meridians overlays in the sidebar, lower strip with stretch
+     presets, log-style zoom controls, a four-column **Cursor Info** grid, and
+     a **Color By** radio grid (resolution, effective resolution, phase, emission,
+     incidence, image number when present).
+
+Adding a new display feature
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+1. If the feature requires a new per-column or per-pixel metadata array, extend
+   the ``RingDisplayData`` / ``BodyDisplayData`` dataclass in
+   ``nav/ui/mosaic_viewer/common.py`` and populate it in
+   ``load_ring_file`` / ``load_body_file`` (including fields sourced from
+   ``RingMosaicData`` / ``BodyMosaicData`` such as ``contributing_image_names``).
+
+2. If the feature needs a new image overlay (e.g. contour lines), implement it
+   as a new signal-driven ``set_*`` method on ``TiledImageWidget`` and call it
+   from the window.
+
+3. If the feature adds a new UI control (e.g. checkbox or slider), add it in the
+   relevant window's ``_build_right_panel``, ``_build_plot_panels`` / header row,
+   or ``_build_control_panel`` method and
+   wire the callback.
+
+Gamma stretch convention
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+All viewers use the ``((clip - black) / (white - black)) ** gamma`` convention
+implemented by :func:`nav.ui.common.apply_linear_gamma_stretch`.  A gamma of
+``1.0`` is linear; values below ``1.0`` brighten mid-tones (the common display
+choice).  This convention is now uniformly applied across
+``TiledImageWidget``, ``manual_nav_dialog``, ``nav_backplane_viewer``, and
+``nav_create_simulated_image``.
