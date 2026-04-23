@@ -173,8 +173,8 @@ def _body_sphere_lon_bin_to_dc_map(
     n_full_lon = max(1, int(2.0 * math.pi / lon_res_rad))
     lon_min_rad = lon_min_deg * (math.pi / 180.0)
     lon_max_rad = lon_max_deg * (math.pi / 180.0)
-    lon_min_bin = int(round(lon_min_rad / lon_res_rad))
-    lon_max_bin = int(round(lon_max_rad / lon_res_rad))
+    lon_min_bin = round(lon_min_rad / lon_res_rad)
+    lon_max_bin = round(lon_max_rad / lon_res_rad)
     if lon_min_deg <= lon_max_deg + 1e-9:
         if lon_max_bin >= lon_min_bin:
             lon_bins = np.arange(lon_min_bin, lon_max_bin + 1, dtype=np.int64)
@@ -465,7 +465,10 @@ class TiledImageWidget(QAbstractScrollArea):
         return self._body_sphere
 
     def body_sphere_data_indices(self, lon_deg: float, lat_deg: float) -> tuple[int, int, bool]:
-        """Map display lon/lat (deg) to ``(data_col, data_row, inside)`` for full-sphere body mode."""
+        """Map display lon/lat (deg) to ``(data_col, data_row, inside)`` for full-sphere body.
+
+        Returns ``(data_col, data_row, inside)``.
+        """
         if not self._body_sphere or self._body_lon_bin_to_dc is None:
             return -1, -1, False
         lon_rad = math.fmod(float(lon_deg), 360.0) * (math.pi / 180.0)
@@ -475,10 +478,10 @@ class TiledImageWidget(QAbstractScrollArea):
         if lon_rad >= twopi - 1e-15:
             lon_rad = math.fmod(lon_rad, twopi)
         lr = self._body_lon_res_rad
-        k = int(math.floor(min(lon_rad / lr, twopi / lr - 1e-15)))
+        k = math.floor(min(lon_rad / lr, twopi / lr - 1e-15))
         k = max(0, min(k, self._body_n_full_lon - 1))
         dc = int(self._body_lon_bin_to_dc[k])
-        dr = int(math.floor((float(lat_deg) - self._body_lat_min) / self._y_interval))
+        dr = math.floor((float(lat_deg) - self._body_lat_min) / self._y_interval)
         inside = dc >= 0 and 0 <= dr < self._body_data_n_rows and 0 <= dc < self._body_data_n_cols
         return dc, dr, inside
 
@@ -1018,7 +1021,7 @@ class TiledImageWidget(QAbstractScrollArea):
                 py = (90.0 - lat) / self._y_interval
                 sy = float(py * yz - vv)
                 if -1.0 <= sy <= float(vh) + 1.0:
-                    y = int(round(sy))
+                    y = round(sy)
                     painter.drawLine(0, y, vw, y)
                 lat += step
 
@@ -1029,7 +1032,7 @@ class TiledImageWidget(QAbstractScrollArea):
                 px = (lon - self._x_origin_deg) / self._x_interval
                 sx = float(px * xz - hv)
                 if -1.0 <= sx <= float(vw) + 1.0:
-                    x = int(round(sx))
+                    x = round(sx)
                     painter.drawLine(x, 0, x, vh)
                 lon += step
 

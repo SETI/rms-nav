@@ -17,9 +17,7 @@ def _dummy_image_file(stem: str) -> ImageFile:
 
 def test_per_image_output_includes_subject_with_prefix() -> None:
     img = _dummy_image_file('N1635282917_1_CALIB')
-    p = per_image_output_path(
-        '/out', 'mimas_2004', img, 'fits', subject_name='MIMAS'
-    )
+    p = per_image_output_path('/out', 'mimas_2004', img, 'fits', subject_name='MIMAS')
     assert p.name == 'mimas_2004_MIMAS_N1635282917_1_CALIB_reproj.fits'
 
 

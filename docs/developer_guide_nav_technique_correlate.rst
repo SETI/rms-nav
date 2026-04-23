@@ -73,17 +73,24 @@ deviations.  All shift-wise sums (``sum_iw``, ``sum_i2w``,
 ``sum_imw``) are computed in O(N log N) via FFT convolution.
 
 ``numerator`` -- the mean-subtracted cross-covariance (the NCC
-numerator without the denominator normalization).
+numerator without the denominator normalization).  Returned as a
+diagnostic only; it must **not** be used for peak localization
+when the template is dense (see below).
 
-**Why two surfaces?**  For a single bright star, the PSF footprint
-covers only a small fraction of the mask area.  At most shifts the
-image under the mask is flat (near-zero background), so the Pearson
-denominator is tiny and NCC plateaus near 1.0 across many shifts.
-The numerator, however, scales with *both* pattern-match quality and
-image signal amplitude: it is large only where the star actually is.
-Peak localization in :func:`~nav.support.correlate.nms_topk` therefore
-uses the numerator surface, while the NCC surface is used only for
-the PSR quality metric (which requires bounded [-1, 1] values).
+**Why two surfaces?**  The NCC (Pearson-*r*) surface is scale
+invariant and is always the correct surface for peak localization.
+The numerator is related to the NCC by
+:math:`\text{num}(s) = \text{NCC}(s) \cdot \sqrt{\text{SSD}_I(s)\, \text{SSD}_M}`
+and therefore scales with sqrt of the image variance under the
+shifted mask.  For *dense* templates -- body discs, Lambert-shaded
+limbs, ring models -- that variance changes systematically with
+shift because the fixed body-shaped mask straddles more or less of
+the bright/dark boundary at different shifts, producing a
+"scale bias" that can move the numerator's peak several pixels
+away from the true alignment while the NCC peak is correct.
+Peak localization in :func:`~nav.support.correlate.nms_topk`
+therefore uses the NCC surface; the numerator is kept as an
+internal diagnostic (e.g. for the manual-nav correlation map).
 
 **Numerical stability.**  Epsilon is placed *inside* the square root:
 
@@ -100,15 +107,18 @@ Peak selection and subpixel refinement
 ---------------------------------------
 
 :func:`~nav.support.correlate.nms_topk` applies non-maximum suppression
-on the numerator surface to obtain up to ``max_peaks`` candidate
-integer-pixel offsets.
+on the NCC surface to obtain up to ``max_peaks`` candidate
+integer-pixel offsets.  The search is restricted to the extended-FOV
+offset range (``max_offset_vu``); this also protects against the
+classic NCC failure mode where noise-only shifts produce spurious
+\|NCC\| plateaus outside the physically plausible window.
 
 Each candidate is refined to sub-pixel precision by
 :func:`~nav.support.correlate.evaluate_candidate` using a localized
 upsampled DFT of the correlation spectrum (Guizar-Sicairos 2008).
-The PSR quality metric is computed from the NCC surface (not the
-numerator) so that the score is scale-invariant and comparable across
-brightness levels.
+The PSR quality metric is also computed from the NCC surface so
+that the score is scale-invariant and comparable across brightness
+levels.
 
 When a prior shift is supplied, candidates far from the prior are
 penalized:

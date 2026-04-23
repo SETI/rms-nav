@@ -7,6 +7,7 @@ BodyReprojResult objects.
 """
 
 import math
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Literal
 
@@ -662,7 +663,7 @@ class TestContributingImageNamesBodies:
         result = mosaic.to_bounded()
         assert result.contributing_image_names == ('obs_a', 'obs_b')
 
-    def test_contributing_image_names_npz_roundtrip(self, tmp_path) -> None:
+    def test_contributing_image_names_npz_roundtrip(self, tmp_path: Path) -> None:
         """contributing_image_names survives BodyMosaicData npz save/load."""
         mosaic = BodyMosaic(body_name='MIMAS', lat_resolution=_LAT_RES, lon_resolution=_LON_RES)
         mosaic.add(_make_repro(lat_range=(5, 5), lon_range=(10, 10), image_name='stem_x'))
@@ -671,7 +672,7 @@ class TestContributingImageNamesBodies:
         loaded = BodyMosaicData.load(path)
         assert loaded.contributing_image_names == ('stem_x',)
 
-    def test_contributing_image_names_fits_roundtrip(self, tmp_path) -> None:
+    def test_contributing_image_names_fits_roundtrip(self, tmp_path: Path) -> None:
         """contributing_image_names survives BodyMosaicData FITS save/load."""
         mosaic = BodyMosaic(body_name='MIMAS', lat_resolution=_LAT_RES, lon_resolution=_LON_RES)
         mosaic.add(_make_repro(lat_range=(5, 5), lon_range=(10, 10), image_name='N888'))
@@ -680,7 +681,7 @@ class TestContributingImageNamesBodies:
         loaded = BodyMosaicData.load(path, format='fits')
         assert loaded.contributing_image_names == ('N888',)
 
-    def test_load_body_file_passes_contributing_names(self, tmp_path) -> None:
+    def test_load_body_file_passes_contributing_names(self, tmp_path: Path) -> None:
         """BodyDisplayData from load_body_file includes contributing_image_names."""
         mosaic = BodyMosaic(body_name='MIMAS', lat_resolution=_LAT_RES, lon_resolution=_LON_RES)
         mosaic.add(_make_repro(lat_range=(5, 5), lon_range=(10, 10), image_name='mimas_obs'))

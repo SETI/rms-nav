@@ -874,7 +874,8 @@ class BodyMosaic:
         # No surface point on the detector: skip grid construction and image sampling.
         if not np.any(np.logical_not(np.logical_or(body_mask_inv, lon_mask_inv))):
             logger.info(
-                'Body %s has no valid lat/lon on the detector (outside FOV); skipping reprojection.',
+                'Body %s has no valid lat/lon on the detector (outside FOV); '
+                'skipping reprojection.',
                 self.body_name,
             )
             return self._body_reproj_result_outside_fov(

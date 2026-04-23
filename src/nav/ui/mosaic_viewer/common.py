@@ -76,9 +76,7 @@ def _peek_kind(path: str | FCPath) -> str:
             hdr = hdul[0].header
             kind = str(hdr.get('KIND', '')).strip()
     if not kind:
-        raise ValueError(
-            f'No KIND header found in {path!r}; expected a nav.reproj FITS export.'
-        )
+        raise ValueError(f'No KIND header found in {path!r}; expected a nav.reproj FITS export.')
     return kind
 
 
@@ -193,9 +191,7 @@ def load_ring_file(path: str) -> RingDisplayData:
         memission = ma.MaskedArray(result.mean_emission * 180.0 / math.pi)
         vmin, vmax = _ring_vmin_vmax(image_ma)
         inc_deg = (
-            float(result.incidence * 180.0 / math.pi)
-            if np.isfinite(result.incidence)
-            else None
+            float(result.incidence * 180.0 / math.pi) if np.isfinite(result.incidence) else None
         )
         if np.isfinite(result.time):
             obs_tdb = ma.MaskedArray(

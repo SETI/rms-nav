@@ -7,6 +7,7 @@ constructed RingReprojResult objects.
 """
 
 import math
+from pathlib import Path
 
 import numpy as np
 import numpy.ma as ma
@@ -583,7 +584,7 @@ class TestContributingImageNamesRings:
         data = mosaic.to_sparse()
         assert data.contributing_image_names == ('cassini_001', 'cassini_002')
 
-    def test_contributing_image_names_npz_roundtrip(self, tmp_path) -> None:
+    def test_contributing_image_names_npz_roundtrip(self, tmp_path: Path) -> None:
         """contributing_image_names survives RingMosaicData npz save/load."""
         mosaic = self._make_mosaic()
         mosaic.add(_make_ring_repro(valid_lon_bins=[5, 6], image_name='stem_a'))
@@ -592,7 +593,7 @@ class TestContributingImageNamesRings:
         loaded = RingMosaicData.load(path)
         assert loaded.contributing_image_names == ('stem_a',)
 
-    def test_contributing_image_names_fits_roundtrip(self, tmp_path) -> None:
+    def test_contributing_image_names_fits_roundtrip(self, tmp_path: Path) -> None:
         """contributing_image_names survives RingMosaicData FITS save/load."""
         mosaic = self._make_mosaic()
         mosaic.add(_make_ring_repro(valid_lon_bins=[4], image_name='N999'))
@@ -601,7 +602,7 @@ class TestContributingImageNamesRings:
         loaded = RingMosaicData.load(path, format='fits')
         assert loaded.contributing_image_names == ('N999',)
 
-    def test_load_ring_file_passes_contributing_names(self, tmp_path) -> None:
+    def test_load_ring_file_passes_contributing_names(self, tmp_path: Path) -> None:
         """RingDisplayData from load_ring_file includes contributing_image_names."""
         mosaic = self._make_mosaic()
         mosaic.add(_make_ring_repro(valid_lon_bins=[3], image_name='cassini_img'))
@@ -611,7 +612,7 @@ class TestContributingImageNamesRings:
         assert dd.is_mosaic is True
         assert dd.contributing_image_names == ('cassini_img',)
 
-    def test_orbit_model_name_npz_roundtrip(self, tmp_path) -> None:
+    def test_orbit_model_name_npz_roundtrip(self, tmp_path: Path) -> None:
         """RingMosaicData saves and restores orbit_model_name for display metadata."""
         model = RingOrbitModel(
             name='test_ring_model',
@@ -639,7 +640,7 @@ class TestContributingImageNamesRings:
         dd = load_ring_file(str(path))
         assert dd.orbit_model_name == 'test_ring_model'
 
-    def test_photometric_model_name_npz_roundtrip(self, tmp_path) -> None:
+    def test_photometric_model_name_npz_roundtrip(self, tmp_path: Path) -> None:
         """RingMosaicData saves photometric_model_name; load_ring_file exposes it."""
         mosaic = RingMosaic(
             body_name='SATURN',
@@ -657,7 +658,7 @@ class TestContributingImageNamesRings:
         dd = load_ring_file(str(path))
         assert dd.photometric_model_name == 'lambert'
 
-    def test_load_ring_file_longitude_origin_sparse_reproj(self, tmp_path) -> None:
+    def test_load_ring_file_longitude_origin_sparse_reproj(self, tmp_path: Path) -> None:
         """Sparse ring reproj columns map to global bins, not longitude starting at 0."""
         repro = _make_ring_repro(valid_lon_bins=[10, 11, 12])
         path = tmp_path / 'lon_sparse.npz'

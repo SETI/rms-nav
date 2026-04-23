@@ -349,9 +349,12 @@ class ManualNavDialog(QDialog):
         image = np.asarray(self._img_ext, dtype=np.float64)
         model = np.asarray(self._model_img_ext, dtype=np.float64)
         mask = np.asarray(self._model_mask_ext, dtype=bool)
-        # Pad to correlation convention used elsewhere (masked_ncc handles padding-independent math)
-        # Here we directly compute the full NCC surface.
-        self._corr_surface, _ = masked_ncc(image, model, mask)
+        # Use the bi-directional (data-mask aware) NCC so the surface the user
+        # sees -- and the peak the Auto button finds -- matches what the
+        # correlate_all pipeline produces; without data_mask the zero-padded
+        # extfov margin biases the peak toward |dV| = extfov_margin_v.
+        data_mask = self._obs.extfov_data_sensor_mask()
+        self._corr_surface, _ = masked_ncc(image, model, mask, data_mask=data_mask)
         self._corr_h, self._corr_w = self._corr_surface.shape
 
     def _offset_to_corr_indices(self, dv: float, du: float) -> tuple[float, float]:
@@ -767,7 +770,10 @@ class ManualNavDialog(QDialog):
         dlg.exec()
 
     def _on_auto(self) -> None:
-        # Call the same KPeaks correlation used by correlate_all
+        # Call the same KPeaks correlation used by correlate_all, including
+        # the bi-directional data_mask so that a body model extending into
+        # the extfov zero-padded margin does not bias the peak toward
+        # |dV| = extfov_margin_v.
         up_factor = (
             getattr(self._config.offset, 'correlation_fft_upsample_factor', 128)
             if self._config
@@ -779,6 +785,7 @@ class ManualNavDialog(QDialog):
             mask=self._model_mask_ext,
             upsample_factor=up_factor,
             max_offset_vu=self._obs.extfov_margin_vu,
+            data_mask=self._obs.extfov_data_sensor_mask(),
             logger=None,
         )
         dv, du = float(res['offset'][0]), float(res['offset'][1])

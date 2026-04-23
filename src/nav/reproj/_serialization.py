@@ -432,9 +432,7 @@ def _fits_encode_value(
     if value is None:
         hdr[name + '_NONE'] = True
     elif isinstance(value, ma.MaskedArray):
-        hdus.append(
-            fits.ImageHDU(data=_fits_image_hdu_data(np.asarray(value.data)), name=name)
-        )
+        hdus.append(fits.ImageHDU(data=_fits_image_hdu_data(np.asarray(value.data)), name=name))
         hdus.append(
             fits.ImageHDU(
                 data=ma.getmaskarray(value).astype(np.uint8),

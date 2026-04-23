@@ -26,7 +26,8 @@ def compute_body_display_image(
 
     Parameters:
         mode: ``'as_saved'`` (file pixels), ``'intrinsic'`` (undo file model only),
-            or a model name understood by :func:`~nav.reproj.photometric_model.photometric_model_from_name`
+            or a model name understood by
+            :func:`~nav.reproj.photometric_model.photometric_model_from_name`
             (undo file model, then apply that model).
         image_ma: Stored image (possibly already corrected when saved).
         photometric_model_name: Model name stored with the file, if any.
@@ -57,9 +58,7 @@ def compute_body_display_image(
     work = np.nan_to_num(data, nan=0.0)
 
     if file_model is not None:
-        intrinsic = file_model.uncorrect(
-            work, incidence=inc_w, emission=emi_w, phase=pha_w
-        )
+        intrinsic = file_model.uncorrect(work, incidence=inc_w, emission=emi_w, phase=pha_w)
     else:
         intrinsic = work
 
@@ -71,9 +70,7 @@ def compute_body_display_image(
             out = intrinsic
         else:
             incore = np.nan_to_num(intrinsic, nan=0.0)
-            out = view_model.correct(
-                incore, incidence=inc_w, emission=emi_w, phase=pha_w
-            )
+            out = view_model.correct(incore, incidence=inc_w, emission=emi_w, phase=pha_w)
 
     out = np.asarray(out, dtype=np.asarray(image_ma).dtype)
     out = np.where(mask, np.nan, out)

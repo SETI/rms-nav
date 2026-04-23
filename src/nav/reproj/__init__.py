@@ -55,11 +55,11 @@ __all__ = [
     'LommelSeeligerModel',
     'MinnaertModel',
     'PhotometricModel',
-    'photometric_model_from_name',
     'RingMosaic',
     'RingMosaicData',
     'RingMosaicMergeStrategy',
     'RingOrbitModel',
     'RingReprojResult',
     'create_cartographic_model',
+    'photometric_model_from_name',
 ]

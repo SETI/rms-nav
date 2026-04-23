@@ -9,7 +9,6 @@ import math
 
 from nav.reproj.bodies import BodyMosaic, BodyReprojResult
 from nav.reproj.rings import RingMosaic, RingReprojResult
-
 from reproj_cli.factories import parse_zoom_arg
 
 

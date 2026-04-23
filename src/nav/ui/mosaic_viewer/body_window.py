@@ -3,7 +3,7 @@
 import logging
 import math
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import numpy.ma as ma
@@ -33,9 +33,9 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from nav.ui.mosaic_viewer.photometric_display import compute_body_display_image
 from nav.ui.common import build_stretch_controls
 from nav.ui.mosaic_viewer.common import BodyDisplayData, load_body_file
+from nav.ui.mosaic_viewer.photometric_display import compute_body_display_image
 from nav.ui.mosaic_viewer.tiled_image_widget import TiledImageWidget, slider_to_zoom, zoom_to_slider
 
 logger = logging.getLogger(__name__)
@@ -112,7 +112,7 @@ class _SyncedSlider:
         if self._hi <= self._lo:
             return 0
         pos = (val - self._lo) / (self._hi - self._lo) * 1000.0
-        return int(round(np.clip(pos, 0, 1000)))
+        return round(float(np.clip(pos, 0, 1000)))
 
     def _from_slider(self, pos: int) -> float:
         return self._lo + (self._hi - self._lo) * pos / 1000.0
@@ -396,7 +396,7 @@ class BodyMosaicWindow(QMainWindow):
         btn_row = QHBoxLayout()
         self._zoom_info_lbl = QLabel('1.00x / 1.00x')
         btn_zi = QPushButton('+')
-        btn_zo = QPushButton('−')
+        btn_zo = QPushButton('\N{MINUS SIGN}')  # U+2212 for symmetric glyph next to '+'
         btn_zr = QPushButton('Reset')
         btn_sf = QPushButton('Save FOV')
         btn_zi.setMaximumWidth(28)
@@ -502,7 +502,7 @@ class BodyMosaicWindow(QMainWindow):
         self._photometry_group = QButtonGroup()
         photometry_rows: list[list[tuple[str, str]]] = [
             [('as_saved', 'As saved'), ('intrinsic', 'Uncorrected')],
-            [('lambert', 'Lambert'), ('lommel_seeliger', 'Lommel–Seeliger')],
+            [('lambert', 'Lambert'), ('lommel_seeliger', 'Lommel\N{EN DASH}Seeliger')],
             [('minnaert', 'Minnaert')],
         ]
         for row_idx, row in enumerate(photometry_rows):
@@ -763,7 +763,7 @@ class BodyMosaicWindow(QMainWindow):
         col = self._compute_color_column(str(key), self._display_data)
         self._image_widget.set_color_column(col)
 
-    def _compute_color_column(self, key: str, dd: BodyDisplayData) -> Optional[np.ndarray]:
+    def _compute_color_column(self, key: str, dd: BodyDisplayData) -> np.ndarray | None:
         if key == 'none':
             return None
         n_cols = dd.image_ma.shape[1]

@@ -7,7 +7,7 @@ Info grid and Color By controls in the lower strip, and status-bar readouts.
 
 import logging
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 import numpy as np
 import numpy.ma as ma
@@ -40,11 +40,11 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from nav.ui.mosaic_viewer.photometric_display import compute_ring_display_image
 from nav.support.time import et_to_utc
 from nav.ui.common import build_stretch_controls
 from nav.ui.mosaic_viewer.common import RingDisplayData, load_ring_file
 from nav.ui.mosaic_viewer.matplotlib_qt import canvas_draw_idle, new_figure_canvas_qtagg
+from nav.ui.mosaic_viewer.photometric_display import compute_ring_display_image
 from nav.ui.mosaic_viewer.tiled_image_widget import TiledImageWidget, slider_to_zoom, zoom_to_slider
 
 logger = logging.getLogger(__name__)
@@ -165,7 +165,7 @@ class _SyncedSlider:
         if self._hi <= self._lo:
             return 0
         pos = (val - self._lo) / (self._hi - self._lo) * 1000.0
-        return int(round(np.clip(pos, 0, 1000)))
+        return round(float(np.clip(pos, 0, 1000)))
 
     def _from_slider(self, pos: int) -> float:
         return self._lo + (self._hi - self._lo) * pos / 1000.0
@@ -326,7 +326,9 @@ class RingMosaicWindow(QMainWindow):
         self._image_widget.mouse_moved.connect(self._on_mouse_moved)
         self._image_widget.zoom_changed.connect(self._on_zoom_changed)
         self._image_widget.zoom_changed.connect(self._sync_ew_xlim_from_mosaic)
-        self._image_widget.horizontalScrollBar().valueChanged.connect(self._sync_ew_xlim_from_mosaic)
+        self._image_widget.horizontalScrollBar().valueChanged.connect(
+            self._sync_ew_xlim_from_mosaic
+        )
         self._image_widget.verticalScrollBar().rangeChanged.connect(self._sync_ew_xlim_from_mosaic)
         self._image_widget.ctrl_clicked.connect(self._on_ctrl_click)
 
@@ -545,7 +547,7 @@ class RingMosaicWindow(QMainWindow):
         btn_row = QHBoxLayout()
         self._zoom_info_lbl = QLabel('1.00x / 1.00x')
         btn_zi = QPushButton('+')
-        btn_zo = QPushButton('−')
+        btn_zo = QPushButton('\N{MINUS SIGN}')  # U+2212 for symmetric glyph next to '+'
         btn_zr = QPushButton('Reset')
         btn_sf = QPushButton('Save FOV')
         btn_zi.setMaximumWidth(28)
@@ -598,9 +600,9 @@ class RingMosaicWindow(QMainWindow):
                 ('image', 'Source image:'),
                 ('date', 'Observation date (UTC):'),
                 ('long_ew', 'EW at longitude:'),
-                ('long_ewmu', 'EW×μ at longitude:'),
+                ('long_ewmu', 'EW\N{MULTIPLICATION SIGN}\N{GREEK SMALL LETTER MU} at longitude:'),
                 ('full_ew', 'Full mosaic EW:'),
-                ('full_ewmu', 'Full mosaic EW×μ:'),
+                ('full_ewmu', 'Full mosaic EW\N{MULTIPLICATION SIGN}\N{GREEK SMALL LETTER MU}:'),
             ],
         ]
         self._info: dict[str, QLabel] = {}
@@ -633,7 +635,10 @@ class RingMosaicWindow(QMainWindow):
         colorby_rows.append([('none', 'None'), ('image_no', 'Image number')])
         colorby_rows.extend(
             [
-                [('rel_rad_res', 'Radial resolution (rel)'), ('rel_ang_res', 'Longitudinal resolution (rel)')],
+                [
+                    ('rel_rad_res', 'Radial resolution (rel)'),
+                    ('rel_ang_res', 'Longitudinal resolution (rel)'),
+                ],
                 [('abs_phase', 'Phase (abs)'), ('rel_phase', 'Phase (rel)')],
                 [('abs_emission', 'Emission (abs)'), ('rel_emission', 'Emission (rel)')],
             ]
@@ -657,7 +662,7 @@ class RingMosaicWindow(QMainWindow):
         self._photometry_group = QButtonGroup()
         photometry_rows: list[list[tuple[str, str]]] = [
             [('as_saved', 'As saved'), ('intrinsic', 'Uncorrected')],
-            [('lambert', 'Lambert'), ('lommel_seeliger', 'Lommel–Seeliger')],
+            [('lambert', 'Lambert'), ('lommel_seeliger', 'Lommel\N{EN DASH}Seeliger')],
             [('minnaert', 'Minnaert')],
         ]
         for row_idx, row in enumerate(photometry_rows):
@@ -733,14 +738,8 @@ class RingMosaicWindow(QMainWindow):
             img,
             x_interval=dd.longitude_resolution_deg,
             y_interval=dd.radius_resolution_km,
-            x_label=(
-                'Co-rotating longitude (°)' if corot else 'Inertial longitude (°)'
-            ),
-            y_label=(
-                'Radius offset from mean core (km)'
-                if corot
-                else 'Radius (km)'
-            ),
+            x_label=('Co-rotating longitude (°)' if corot else 'Inertial longitude (°)'),
+            y_label=('Radius offset from mean core (km)' if corot else 'Radius (km)'),
             y_flip=True,
             x_axis_max=float(lon_max),
             x_origin_deg=float(dd.longitude_column_origin_deg),
@@ -865,7 +864,9 @@ class RingMosaicWindow(QMainWindow):
         if getattr(self, '_chk_corot_use_ewmu', None) is None:
             return
         self._ew_ax.set_ylabel(
-            'EW×μ (km)' if self._chk_corot_use_ewmu.isChecked() else 'EW (km)',
+            'EW\N{MULTIPLICATION SIGN}\N{GREEK SMALL LETTER MU} (km)'
+            if self._chk_corot_use_ewmu.isChecked()
+            else 'EW (km)',
             fontsize=8,
         )
 
@@ -971,7 +972,7 @@ class RingMosaicWindow(QMainWindow):
         if use_mu:
             yfull = self._ew_mu_data.filled(np.nan) if self._ew_mu_data is not None else np.nan
             stat = f'{self._ewmu_mean:.4f} ± {self._ewmu_std:.4f} km'
-            tag = 'Full (EW×μ)'
+            tag = 'Full (EW\N{MULTIPLICATION SIGN}\N{GREEK SMALL LETTER MU})'
         else:
             yfull = self._ew_data.filled(np.nan)
             stat = f'{self._ew_mean:.4f} ± {self._ew_std:.4f} km'
@@ -1058,18 +1059,13 @@ class RingMosaicWindow(QMainWindow):
             x_plot = rel
             r_span = max(abs(rel_lo), abs(rel_hi), 1e-6)
             x_lo, x_hi = -r_span, r_span
-            ax_xlabel = (
-                'Radius offset from mean core at co-rotating longitude '
-                f'{lon_deg:.2f}° (km)'
-            )
+            ax_xlabel = f'Radius offset from mean core at co-rotating longitude {lon_deg:.2f}° (km)'
         else:
             x_plot = rel + mean_core
             x_lo, x_hi = abs_lo, abs_hi
             if x_hi <= x_lo:
                 x_hi = x_lo + 1e-6
-            ax_xlabel = (
-                f'Absolute radius at inertial longitude {lon_deg:.2f}° (km)'
-            )
+            ax_xlabel = f'Absolute radius at inertial longitude {lon_deg:.2f}° (km)'
         y_lo, y_hi = self._image_vmin, self._image_vmax
         if y_hi <= y_lo:
             y_hi = y_lo + 1e-6
@@ -1079,7 +1075,7 @@ class RingMosaicWindow(QMainWindow):
         if need_new:
             ax.clear()
             self._init_radial_axes()
-            self._radial_profile_line, = ax.plot(x_plot, y, 'b-', lw=0.9)
+            (self._radial_profile_line,) = ax.plot(x_plot, y, 'b-', lw=0.9)
         else:
             line.set_data(x_plot, y)
         ax.set_xlim(x_lo, x_hi)
@@ -1300,7 +1296,7 @@ class RingMosaicWindow(QMainWindow):
         col = self._compute_color_column(str(key), self._display_data)
         self._image_widget.set_color_column(col)
 
-    def _compute_color_column(self, key: str, dd: RingDisplayData) -> Optional[np.ndarray]:
+    def _compute_color_column(self, key: str, dd: RingDisplayData) -> np.ndarray | None:
         if key == 'none':
             return None
         if key == 'image_no':
@@ -1418,9 +1414,13 @@ class RingMosaicWindow(QMainWindow):
 
         ew_v = self._ew_data[ix] if self._ew_data is not None else ma.masked
         ewmu_v = self._ew_mu_data[ix] if self._ew_mu_data is not None else ma.masked
-        ew_str = f'{float(ew_v):.5f}' if self._ew_data is not None and not ma.is_masked(ew_v) else '---'
+        ew_str = (
+            f'{float(ew_v):.5f}' if self._ew_data is not None and not ma.is_masked(ew_v) else '---'
+        )
         ewmu_str = (
-            f'{float(ewmu_v):.5f}' if self._ew_mu_data is not None and not ma.is_masked(ewmu_v) else '---'
+            f'{float(ewmu_v):.5f}'
+            if self._ew_mu_data is not None and not ma.is_masked(ewmu_v)
+            else '---'
         )
 
         inc_str = f'{dd.mean_incidence_deg:.3f}' if dd.mean_incidence_deg is not None else '---'

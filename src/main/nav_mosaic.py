@@ -79,8 +79,8 @@ def _reproject_image_log_handlers(
     :func:`reproj_cli.paths.per_image_output_path`.
     """
     timestamp = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
-    image_log_path = FCPath(output_dir) / 'logs' / (
-        image_file.results_path_stub + '_' + timestamp + '.log'
+    image_log_path = (
+        FCPath(output_dir) / 'logs' / (image_file.results_path_stub + '_' + timestamp + '.log')
     )
     image_log_path.parent.mkdir(parents=True, exist_ok=True)
     return image_log_handlers(image_log_path, args, DEFAULT_CONFIG), image_log_path
@@ -274,9 +274,7 @@ def _run_body(args: argparse.Namespace, nav_results_root_path: FCPath | None) ->
 
         if n_added > 0 and not args.dry_run and not args.no_write_output_files:
             mosaic_data: BodyMosaicData = mosaic.to_bounded()
-            out_mosaic = mosaic_output_path(
-                output_dir, prefix, fmt, subject_name=mosaic.body_name
-            )
+            out_mosaic = mosaic_output_path(output_dir, prefix, fmt, subject_name=mosaic.body_name)
             out_mosaic.parent.mkdir(parents=True, exist_ok=True)
             mosaic_data.save(out_mosaic)
             MAIN_LOGGER.info('Saved mosaic: %s', out_mosaic)
@@ -387,9 +385,7 @@ def _run_rings(args: argparse.Namespace, nav_results_root_path: FCPath | None) -
 
         if n_added > 0 and not args.dry_run and not args.no_write_output_files:
             mosaic_data: RingMosaicData = mosaic.to_sparse()
-            out_mosaic = mosaic_output_path(
-                output_dir, prefix, fmt, subject_name=mosaic.body_name
-            )
+            out_mosaic = mosaic_output_path(output_dir, prefix, fmt, subject_name=mosaic.body_name)
             out_mosaic.parent.mkdir(parents=True, exist_ok=True)
             mosaic_data.save(out_mosaic)
             MAIN_LOGGER.info('Saved mosaic: %s', out_mosaic)
