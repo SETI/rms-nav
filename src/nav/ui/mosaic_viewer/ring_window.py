@@ -6,6 +6,7 @@ Info grid and Color By controls in the lower strip, and status-bar readouts.
 """
 
 import logging
+import math
 from pathlib import Path
 from typing import Any, cast
 
@@ -247,6 +248,7 @@ class RingMosaicWindow(QMainWindow):
         self._ew_radial_ranges: list[tuple[int, int]] = []
         self._pending_fit = False
         self._radial_profile_line: Any = None
+        self._colorby_alpha: float = 1.0
 
         self._ew_data: ma.MaskedArray | None = None
         self._ew_mu_data: ma.MaskedArray | None = None
@@ -584,8 +586,9 @@ class RingMosaicWindow(QMainWindow):
 
         info_columns: list[list[tuple[str, str]]] = [
             [
+                ('orbit_model', 'Orbit model:'),
                 ('corot', 'Corotating longitude:'),
-                ('rel_r', 'Relative radius:'),
+                ('rel_r', 'Radial offset from center:'),
                 ('inert', 'Inertial longitude:'),
                 ('core_r', 'Core radius:'),
             ],
@@ -593,8 +596,8 @@ class RingMosaicWindow(QMainWindow):
                 ('incidence', 'Incidence angle:'),
                 ('phase', 'Phase angle:'),
                 ('emission', 'Emission angle:'),
-                ('rad_res', 'Radial resolution (rel):'),
-                ('long_res', 'Longitudinal resolution (rel):'),
+                ('rad_res', 'Radial resolution:'),
+                ('long_res', 'Longitudinal resolution:'),
             ],
             [
                 ('image', 'Source image:'),
@@ -652,6 +655,15 @@ class RingMosaicWindow(QMainWindow):
                 if key == 'none':
                     btn.setChecked(True)
         self._colorby_group.buttonClicked.connect(self._on_colorby_changed)
+        alpha_row = QHBoxLayout()
+        alpha_row.setContentsMargins(0, 2, 0, 0)
+        alpha_row.addWidget(QLabel('Alpha:'))
+        self._colorby_alpha_slider = QSlider(Qt.Orientation.Horizontal)
+        self._colorby_alpha_slider.setRange(0, 100)
+        self._colorby_alpha_slider.setValue(100)
+        self._colorby_alpha_slider.valueChanged.connect(self._on_colorby_alpha_changed)
+        alpha_row.addWidget(self._colorby_alpha_slider)
+        cb_grid.addLayout(alpha_row, len(colorby_rows), 0, 1, 2)
         lower_h.addWidget(colorby_box)
 
         photometry_box = QGroupBox('Photometric')
@@ -739,12 +751,13 @@ class RingMosaicWindow(QMainWindow):
             x_interval=dd.longitude_resolution_deg,
             y_interval=dd.radius_resolution_km,
             x_label=('Co-rotating longitude (°)' if corot else 'Inertial longitude (°)'),
-            y_label=('Radius offset from mean core (km)' if corot else 'Radius (km)'),
+            y_label=('Radial offset from center (km)' if corot else 'Radius (km)'),
             y_flip=True,
             x_axis_max=float(lon_max),
             x_origin_deg=float(dd.longitude_column_origin_deg),
             ring_radial_axis_absolute=not corot,
             ring_radial_mid_km=mid,
+            ring_full_lon=True,
             preserve_view=preserve_view,
         )
 
@@ -884,10 +897,11 @@ class RingMosaicWindow(QMainWindow):
         )
 
     def _sync_ring_cursor_row_labels(self, dd: RingDisplayData) -> None:
+        self._info['orbit_model'].setText(dd.orbit_model_name if dd.orbit_model_name else '---')
         if _ring_longitude_corotating(dd):
             self._info_name['corot'].setText('Co-rotating longitude:')
             self._info_name['inert'].setText('Inertial longitude:')
-            self._info_name['rel_r'].setText('Radius offset from mean core (km):')
+            self._info_name['rel_r'].setText('Radial offset from center (km):')
             self._info_name['core_r'].setText('Absolute radius (km):')
         else:
             self._info_name['corot'].setText('Co-rotating longitude:')
@@ -1003,7 +1017,7 @@ class RingMosaicWindow(QMainWindow):
         rel_min = (arr_min - (dd.n_radii - 1) / 2.0) * dd.radius_resolution_km
         rel_max = (arr_max - (dd.n_radii - 1) / 2.0) * dd.radius_resolution_km
         if _ring_longitude_corotating(dd):
-            band = f'{rel_min:.0f} to {rel_max:.0f} km (offset from mean core)'
+            band = f'{rel_min:.0f} to {rel_max:.0f} km (radial offset from center)'
         else:
             mean_core = (dd.radius_inner + dd.radius_outer) / 2.0
             band = f'{rel_min + mean_core:.0f} to {rel_max + mean_core:.0f} km (absolute radius)'
@@ -1059,7 +1073,7 @@ class RingMosaicWindow(QMainWindow):
             x_plot = rel
             r_span = max(abs(rel_lo), abs(rel_hi), 1e-6)
             x_lo, x_hi = -r_span, r_span
-            ax_xlabel = f'Radius offset from mean core at co-rotating longitude {lon_deg:.2f}° (km)'
+            ax_xlabel = f'Radial offset from center at co-rotating longitude {lon_deg:.2f}° (km)'
         else:
             x_plot = rel + mean_core
             x_lo, x_hi = abs_lo, abs_hi
@@ -1290,11 +1304,30 @@ class RingMosaicWindow(QMainWindow):
 
     def _on_colorby_changed(self, btn: Any) -> None:
         if btn is None or self._display_data is None:
-            self._image_widget.set_color_column(None)
+            self._image_widget.set_color_tint(None)
             return
+        dd = self._display_data
         key = btn.property('colorby_key')
-        col = self._compute_color_column(str(key), self._display_data)
-        self._image_widget.set_color_column(col)
+        col = self._compute_color_column(str(key), dd)
+        if col is None:
+            self._image_widget.set_color_tint(None)
+            return
+        # Broadcast per-column (n_cols, 3) tint to (n_rows, n_cols, 3)
+        n_rows = dd.n_radii
+        tint = np.ascontiguousarray(
+            np.broadcast_to(col[np.newaxis, :, :], (n_rows, col.shape[0], 3)),
+            dtype=np.float32,
+        )
+        self._image_widget.set_color_tint(self._tint_with_alpha(tint))
+
+    def _on_colorby_alpha_changed(self, value: int) -> None:
+        self._colorby_alpha = value / 100.0
+        self._on_colorby_changed(self._colorby_group.checkedButton())
+
+    def _tint_with_alpha(self, tint: np.ndarray | None) -> np.ndarray | None:
+        if tint is None or self._colorby_alpha >= 1.0:
+            return tint
+        return (self._colorby_alpha * tint + (1.0 - self._colorby_alpha)).astype(np.float32)
 
     def _compute_color_column(self, key: str, dd: RingDisplayData) -> np.ndarray | None:
         if key == 'none':
@@ -1428,11 +1461,19 @@ class RingMosaicWindow(QMainWindow):
         x_str = f'{px:8.2f}'
         y_str = f'{py:7.2f}'
         self._cursor_status_lbl.setText(f'X: {x_str}  Y: {y_str}  Value: {value_str}')
+        self._info['orbit_model'].setText(dd.orbit_model_name if dd.orbit_model_name else '---')
         if _ring_longitude_corotating(dd):
+            inert_str = '---'
+            if dd.orbit_model is not None and dd.observation_time_tdb is not None:
+                tdb_v = dd.observation_time_tdb[ix]
+                if not ma.is_masked(tdb_v):
+                    corot_rad = np.array([lon_deg * math.pi / 180.0])
+                    inert_rad = dd.orbit_model.corotating_to_inertial(corot_rad, float(tdb_v))
+                    inert_str = f'{math.degrees(float(inert_rad[0])):.4f}°'
             self._info['rel_r'].setText(f'{y_axis:.2f} km')
             self._info['core_r'].setText(f'{core_abs:.2f} km')
             self._info['corot'].setText(f'{lon_deg:.4f}°')
-            self._info['inert'].setText('---')
+            self._info['inert'].setText(inert_str)
         else:
             self._info['rel_r'].setText(f'{y_axis:.2f} km')
             self._info['core_r'].setText(f'{offset_from_mean:+.2f} km')
@@ -1467,7 +1508,7 @@ class RingMosaicWindow(QMainWindow):
             return
         _, r_val = self._image_widget.pixel_to_physical(px, py)
         if _ring_longitude_corotating(dd):
-            r_desc = 'radius offset from mean core'
+            r_desc = 'radial offset from center'
         else:
             r_desc = 'absolute radius'
         if self._ew_phase == 0:

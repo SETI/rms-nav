@@ -353,7 +353,7 @@ class DataSetPDS3(DataSet):
         # Also limit to the list of images in the FileSpec CSV file, if any
         if arguments.image_filespec_csv:
             for filename in arguments.image_filespec_csv:
-                with open(filename) as csvfile:
+                with open(filename, encoding='utf-8') as csvfile:
                     csvreader = csv.reader(csvfile)
                     header = next(csvreader)
                     for colnum in range(len(header)):
@@ -373,7 +373,7 @@ class DataSetPDS3(DataSet):
         # Also limit to the list of images in the filelist file, if any
         if arguments.image_file_list:
             for filename in arguments.image_file_list:
-                with open(filename) as fp:
+                with open(filename, encoding='utf-8') as fp:
                     for line in fp:
                         line = line.strip()
                         if len(line) == 0 or line[0] == '#':

@@ -7,7 +7,7 @@ images onto latitude/longitude grids and accumulating them into mosaics.
 import enum
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import numpy as np
@@ -43,9 +43,9 @@ _MAX_LONGITUDE = math.pi * 2.0 - _LONGITUDE_SLOP * 2
 # Module-level defaults for BodyMosaic parameters
 DEFAULT_LAT_RESOLUTION = 0.1 * math.pi / 180.0  # 0.1 degrees in rad
 DEFAULT_LON_RESOLUTION = 0.1 * math.pi / 180.0
-DEFAULT_MAX_INCIDENCE = 70.0 * math.pi / 180.0
-DEFAULT_MAX_EMISSION = 70.0 * math.pi / 180.0
-DEFAULT_MAX_RESOLUTION = None
+DEFAULT_MAX_INCIDENCE: float | None = None
+DEFAULT_MAX_EMISSION: float | None = None
+DEFAULT_MAX_RESOLUTION: float | None = None
 DEFAULT_EDGE_MARGIN = 3
 DEFAULT_ZOOM = 1
 
@@ -93,6 +93,10 @@ class BodyReprojResult:
         metadata_dtype: NumPy dtype used for geometry arrays (``resolution``,
             ``eff_resolution``, ``phase``, ``emission``, ``incidence``).
         image_name: Label for this reprojection (e.g. source image stem); may be empty.
+        sub_solar_lon: Sub-solar longitude on the body (rad) for this observation.
+        sub_solar_lat: Sub-solar latitude (rad) for this observation.
+        sub_observer_lon: Sub-observer longitude on the body (rad) for this observation.
+        sub_observer_lat: Sub-observer latitude (rad) for this observation.
     """
 
     body_name: str
@@ -113,6 +117,10 @@ class BodyReprojResult:
     image_dtype: np.dtype
     metadata_dtype: np.dtype
     image_name: str = ''
+    sub_solar_lon: float = 0.0
+    sub_solar_lat: float = 0.0
+    sub_observer_lon: float = 0.0
+    sub_observer_lat: float = 0.0
 
     def save(
         self,
@@ -163,6 +171,10 @@ class BodyReprojResult:
             'image_dtype': self.image_dtype,
             'metadata_dtype': self.metadata_dtype,
             'image_name': self.image_name,
+            'sub_solar_lon': self.sub_solar_lon,
+            'sub_solar_lat': self.sub_solar_lat,
+            'sub_observer_lon': self.sub_observer_lon,
+            'sub_observer_lat': self.sub_observer_lat,
         }
         if fmt == 'npz':
             save_npz(path, 'BodyReprojResult', 1, payload, compress=compress)
@@ -258,6 +270,10 @@ class BodyReprojResult:
             image_dtype=image_dtype,
             metadata_dtype=metadata_dtype,
             image_name=str(d.get('image_name', '') or ''),
+            sub_solar_lon=float(d.get('sub_solar_lon', 0.0)),
+            sub_solar_lat=float(d.get('sub_solar_lat', 0.0)),
+            sub_observer_lon=float(d.get('sub_observer_lon', 0.0)),
+            sub_observer_lat=float(d.get('sub_observer_lat', 0.0)),
         )
 
 
@@ -292,6 +308,11 @@ class BodyMosaicData:
             ``eff_resolution``, ``phase``, ``emission``, ``incidence``).
         contributing_image_names: Names of contributing reprojections in ``image_number``
             order (index ``k`` corresponds to pixels tagged with ``image_number == k``).
+        sub_solar_lon_per_image: 1-D float64 array (length = number of contributing
+            images) of sub-solar longitudes in radians, indexed by image number.
+        sub_solar_lat_per_image: Matching sub-solar latitudes (rad), same indexing.
+        sub_observer_lon_per_image: Sub-observer longitudes (rad) per contributing image.
+        sub_observer_lat_per_image: Sub-observer latitudes (rad), same indexing.
     """
 
     body_name: str
@@ -313,6 +334,18 @@ class BodyMosaicData:
     image_dtype: np.dtype
     metadata_dtype: np.dtype
     contributing_image_names: tuple[str, ...] = ()
+    sub_solar_lon_per_image: np.ndarray = field(
+        default_factory=lambda: np.empty((0,), dtype=np.float64)
+    )
+    sub_solar_lat_per_image: np.ndarray = field(
+        default_factory=lambda: np.empty((0,), dtype=np.float64)
+    )
+    sub_observer_lon_per_image: np.ndarray = field(
+        default_factory=lambda: np.empty((0,), dtype=np.float64)
+    )
+    sub_observer_lat_per_image: np.ndarray = field(
+        default_factory=lambda: np.empty((0,), dtype=np.float64)
+    )
 
     def save(
         self,
@@ -365,6 +398,10 @@ class BodyMosaicData:
             'image_dtype': self.image_dtype,
             'metadata_dtype': self.metadata_dtype,
             'contributing_image_names': self.contributing_image_names,
+            'sub_solar_lon_per_image': self.sub_solar_lon_per_image,
+            'sub_solar_lat_per_image': self.sub_solar_lat_per_image,
+            'sub_observer_lon_per_image': self.sub_observer_lon_per_image,
+            'sub_observer_lat_per_image': self.sub_observer_lat_per_image,
         }
         if fmt == 'npz':
             save_npz(path, 'BodyMosaicData', 1, payload, compress=compress)
@@ -448,6 +485,32 @@ class BodyMosaicData:
 
         contributing_image_names = tuple_of_strings_field(d.get('contributing_image_names'))
 
+        _raw_ssl_lon = d.get('sub_solar_lon_per_image')
+        _raw_ssl_lat = d.get('sub_solar_lat_per_image')
+        sub_solar_lon_per_image = (
+            np.asarray(_raw_ssl_lon, dtype=np.float64)
+            if _raw_ssl_lon is not None
+            else np.empty((0,), dtype=np.float64)
+        )
+        sub_solar_lat_per_image = (
+            np.asarray(_raw_ssl_lat, dtype=np.float64)
+            if _raw_ssl_lat is not None
+            else np.empty((0,), dtype=np.float64)
+        )
+
+        _raw_sol_lon = d.get('sub_observer_lon_per_image')
+        _raw_sol_lat = d.get('sub_observer_lat_per_image')
+        sub_observer_lon_per_image = (
+            np.asarray(_raw_sol_lon, dtype=np.float64)
+            if _raw_sol_lon is not None
+            else np.empty((0,), dtype=np.float64)
+        )
+        sub_observer_lat_per_image = (
+            np.asarray(_raw_sol_lat, dtype=np.float64)
+            if _raw_sol_lat is not None
+            else np.empty((0,), dtype=np.float64)
+        )
+
         return cls(
             body_name=str(d['body_name']),
             img=d['img'],
@@ -470,6 +533,10 @@ class BodyMosaicData:
             image_dtype=image_dtype,
             metadata_dtype=metadata_dtype,
             contributing_image_names=contributing_image_names,
+            sub_solar_lon_per_image=sub_solar_lon_per_image,
+            sub_solar_lat_per_image=sub_solar_lat_per_image,
+            sub_observer_lon_per_image=sub_observer_lon_per_image,
+            sub_observer_lat_per_image=sub_observer_lat_per_image,
         )
 
 
@@ -621,6 +688,10 @@ class BodyMosaic:
         # Count of images added
         self._image_count: int = 0
         self._contributing_image_names: list[str] = []
+        self._sub_solar_lons: list[float] = []
+        self._sub_solar_lats: list[float] = []
+        self._sub_observer_lons: list[float] = []
+        self._sub_observer_lats: list[float] = []
 
         # Pre-allocate if not dynamic, or if explicit ranges provided
         if not dynamic or lat_range is not None or lon_range is not None:
@@ -722,6 +793,10 @@ class BodyMosaic:
         mask_only: bool,
         image_name: str,
         navigation_uncertainty: float,
+        sub_solar_lon: float = 0.0,
+        sub_solar_lat: float = 0.0,
+        sub_observer_lon: float = 0.0,
+        sub_observer_lat: float = 0.0,
     ) -> BodyReprojResult:
         """Return an empty reprojection when the body has no valid lat/lon on the detector."""
         min_lat_pixel, max_lat_pixel = 0, 1
@@ -754,6 +829,10 @@ class BodyMosaic:
                 image_dtype=self._image_dtype,
                 metadata_dtype=self._metadata_dtype,
                 image_name=image_name,
+                sub_solar_lon=sub_solar_lon,
+                sub_solar_lat=sub_solar_lat,
+                sub_observer_lon=sub_observer_lon,
+                sub_observer_lat=sub_observer_lat,
             )
 
         def _make_repro_array(dtype: np.dtype) -> ma.MaskedArray:
@@ -792,6 +871,10 @@ class BodyMosaic:
             image_dtype=self._image_dtype,
             metadata_dtype=self._metadata_dtype,
             image_name=image_name,
+            sub_solar_lon=sub_solar_lon,
+            sub_solar_lat=sub_solar_lat,
+            sub_observer_lon=sub_observer_lon,
+            sub_observer_lat=sub_observer_lat,
         )
 
     # -----------------------------------------------------------------------
@@ -851,6 +934,11 @@ class BodyMosaic:
 
         bp = override_backplane if override_backplane is not None else oops.backplane.Backplane(obs)
 
+        sub_solar_lon = float(bp.sub_solar_longitude(self.body_name).vals)
+        sub_solar_lat = float(bp.sub_solar_latitude(self.body_name).vals)
+        sub_observer_lon = float(bp.sub_observer_longitude(self.body_name).vals)
+        sub_observer_lat = float(bp.sub_observer_latitude(self.body_name).vals)
+
         if self._max_incidence is not None or not mask_only:
             bp_incidence = bp.incidence_angle(self.body_name).mvals.astype(self._metadata_dtype)
 
@@ -886,6 +974,10 @@ class BodyMosaic:
                 mask_only=mask_only,
                 image_name=image_name,
                 navigation_uncertainty=navigation_uncertainty,
+                sub_solar_lon=sub_solar_lon,
+                sub_solar_lat=sub_solar_lat,
+                sub_observer_lon=sub_observer_lon,
+                sub_observer_lat=sub_observer_lat,
             )
 
         if subimage_edges is not None:
@@ -1061,6 +1153,10 @@ class BodyMosaic:
                 image_dtype=self._image_dtype,
                 metadata_dtype=self._metadata_dtype,
                 image_name=image_name,
+                sub_solar_lon=sub_solar_lon,
+                sub_solar_lat=sub_solar_lat,
+                sub_observer_lon=sub_observer_lon,
+                sub_observer_lat=sub_observer_lat,
             )
 
         # Filter additional bad data
@@ -1163,6 +1259,10 @@ class BodyMosaic:
             image_dtype=self._image_dtype,
             metadata_dtype=self._metadata_dtype,
             image_name=image_name,
+            sub_solar_lon=sub_solar_lon,
+            sub_solar_lat=sub_solar_lat,
+            sub_observer_lon=sub_observer_lon,
+            sub_observer_lat=sub_observer_lat,
         )
 
     # -----------------------------------------------------------------------
@@ -1229,6 +1329,10 @@ class BodyMosaic:
 
         if len(valid_lat) == 0:
             self._contributing_image_names.append(repro.image_name)
+            self._sub_solar_lons.append(repro.sub_solar_lon)
+            self._sub_solar_lats.append(repro.sub_solar_lat)
+            self._sub_observer_lons.append(repro.sub_observer_lon)
+            self._sub_observer_lats.append(repro.sub_observer_lat)
             self._image_count += 1
             return
 
@@ -1243,6 +1347,10 @@ class BodyMosaic:
 
         if len(rows) == 0:
             self._contributing_image_names.append(repro.image_name)
+            self._sub_solar_lons.append(repro.sub_solar_lon)
+            self._sub_solar_lats.append(repro.sub_solar_lat)
+            self._sub_observer_lons.append(repro.sub_observer_lon)
+            self._sub_observer_lats.append(repro.sub_observer_lat)
             self._image_count += 1
             return
 
@@ -1292,6 +1400,10 @@ class BodyMosaic:
         self._has_data[r_rows, r_cols] = True
 
         self._contributing_image_names.append(repro.image_name)
+        self._sub_solar_lons.append(repro.sub_solar_lon)
+        self._sub_solar_lats.append(repro.sub_solar_lat)
+        self._sub_observer_lons.append(repro.sub_observer_lon)
+        self._sub_observer_lats.append(repro.sub_observer_lat)
         self._image_count += 1
 
     # -----------------------------------------------------------------------
@@ -1629,24 +1741,29 @@ class BodyMosaic:
         out_has = np.zeros((n_out_lat, n_out_lon), dtype=np.bool_)
 
         if self._has_data.any():
-            for out_col, lon_bin in enumerate(lon_bins):
-                col = (lon_bin - self._lon_min_bin) % self._n_full_lon
-                if col >= self._n_lon:
-                    continue
-                for out_row, lat_bin in enumerate(lat_bins):
-                    row = lat_bin - self._lat_min_bin
-                    if row < 0 or row >= self._n_lat:
-                        continue
-                    if self._has_data[row, col]:
-                        out_img[out_row, out_col] = self._img[row, col]
-                        out_res[out_row, out_col] = self._resolution[row, col]
-                        out_eff[out_row, out_col] = self._eff_resolution[row, col]
-                        out_phase[out_row, out_col] = self._phase[row, col]
-                        out_emi[out_row, out_col] = self._emission[row, col]
-                        out_inc[out_row, out_col] = self._incidence[row, col]
-                        out_time[out_row, out_col] = self._time[row, col]
-                        out_imgnum[out_row, out_col] = self._image_number[row, col]
-                        out_has[out_row, out_col] = True
+            cols = (lon_bins - self._lon_min_bin) % self._n_full_lon
+            rows = lat_bins - self._lat_min_bin
+            col_valid = cols < self._n_lon
+            row_valid = (rows >= 0) & (rows < self._n_lat)
+            cols_c = np.clip(cols, 0, self._n_lon - 1)
+            rows_c = np.clip(rows, 0, self._n_lat - 1)
+            valid = (
+                row_valid[:, np.newaxis]
+                & col_valid[np.newaxis, :]
+                & self._has_data[rows_c[:, np.newaxis], cols_c[np.newaxis, :]]
+            )
+            out_r, out_c = np.nonzero(valid)
+            src_r = rows_c[out_r]
+            src_c = cols_c[out_c]
+            out_img[out_r, out_c] = self._img[src_r, src_c]
+            out_res[out_r, out_c] = self._resolution[src_r, src_c]
+            out_eff[out_r, out_c] = self._eff_resolution[src_r, src_c]
+            out_phase[out_r, out_c] = self._phase[src_r, src_c]
+            out_emi[out_r, out_c] = self._emission[src_r, src_c]
+            out_inc[out_r, out_c] = self._incidence[src_r, src_c]
+            out_time[out_r, out_c] = self._time[src_r, src_c]
+            out_imgnum[out_r, out_c] = self._image_number[src_r, src_c]
+            out_has[out_r, out_c] = True
 
         mask = ~out_has
 
@@ -1672,6 +1789,10 @@ class BodyMosaic:
             image_dtype=self._image_dtype,
             metadata_dtype=self._metadata_dtype,
             contributing_image_names=tuple(self._contributing_image_names),
+            sub_solar_lon_per_image=np.array(self._sub_solar_lons, dtype=np.float64),
+            sub_solar_lat_per_image=np.array(self._sub_solar_lats, dtype=np.float64),
+            sub_observer_lon_per_image=np.array(self._sub_observer_lons, dtype=np.float64),
+            sub_observer_lat_per_image=np.array(self._sub_observer_lats, dtype=np.float64),
         )
 
     def _validate_repro(self, repro: BodyReprojResult) -> None:

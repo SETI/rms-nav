@@ -8,7 +8,7 @@ reprojection / mosaic dataclasses (``RingReprojResult``, ``RingMosaicData``,
 
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
@@ -19,6 +19,7 @@ from filecache import FCPath
 
 from nav.reproj._serialization import infer_format
 from nav.reproj.bodies import BodyMosaicData, BodyReprojResult
+from nav.reproj.ring_orbit_model import RingOrbitModel, get_orbit_model_by_name
 from nav.reproj.rings import RingMosaicData, RingReprojResult
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,9 @@ class RingDisplayData:
             and radial distance is offset from the mean core; ``None`` for inertial
             longitudes and absolute ring radius (also ``None`` in older mosaic files
             that omit this field).
+        orbit_model: The :class:`~nav.reproj.ring_orbit_model.RingOrbitModel` object
+            when available (loaded from reproj file or looked up by name); ``None``
+            otherwise.
         vmin: Minimum valid image value.
         vmax: Maximum valid image value.
         is_mosaic: True if loaded from a RingMosaicData.
@@ -139,6 +143,7 @@ class RingDisplayData:
     mean_emission: ma.MaskedArray
     image_number: ma.MaskedArray | None
     orbit_model_name: str | None
+    orbit_model: RingOrbitModel | None
     vmin: float
     vmax: float
     is_mosaic: bool
@@ -183,6 +188,7 @@ def load_ring_file(path: str) -> RingDisplayData:
         lon_res_deg = result.longitude_resolution * 180.0 / math.pi
         rad_res_km = result.radius_resolution
         orbit_model_name = result.orbit_model.name if result.orbit_model else None
+        orbit_model: RingOrbitModel | None = result.orbit_model
         n_radii, n_lon = image_ma.shape
         # Build 1-D per-column metadata masked arrays (same length as sparse img cols)
         mrr = ma.MaskedArray(result.mean_radial_resolution)
@@ -221,6 +227,7 @@ def load_ring_file(path: str) -> RingDisplayData:
             mean_emission=memission,
             image_number=None,
             orbit_model_name=orbit_model_name,
+            orbit_model=orbit_model,
             vmin=vmin,
             vmax=vmax,
             is_mosaic=False,
@@ -240,6 +247,7 @@ def load_ring_file(path: str) -> RingDisplayData:
         lon_res_deg = result_m.longitude_resolution * 180.0 / math.pi
         rad_res_km = result_m.radius_resolution
         orbit_model_name = result_m.orbit_model_name
+        orbit_model = get_orbit_model_by_name(orbit_model_name) if orbit_model_name else None
         n_radii, n_lon = image_ma.shape
         mrr = result_m.mean_radial_resolution
         mar = ma.MaskedArray(result_m.mean_angular_resolution * 180.0 / math.pi)
@@ -272,6 +280,7 @@ def load_ring_file(path: str) -> RingDisplayData:
             mean_emission=memission,
             image_number=result_m.image_number,
             orbit_model_name=orbit_model_name,
+            orbit_model=orbit_model,
             vmin=vmin,
             vmax=vmax,
             is_mosaic=True,
@@ -319,6 +328,13 @@ class BodyDisplayData:
         contributing_image_names: Names in ``image_number`` order (mosaic); for reproj,
             optional single entry when ``image_name`` was stored on save.
         photometric_model_name: Model applied when the file was written, if any.
+        sub_solar_lon_per_image_deg: Sub-solar longitude (deg) indexed by image number.
+            Single-element for reproj; one entry per contributing image for mosaics.
+            Empty array if not available.
+        sub_solar_lat_per_image_deg: Sub-solar latitude (deg), same indexing.
+        sub_observer_lon_per_image_deg: Sub-observer longitude (deg), same indexing as
+            the sub-solar arrays.
+        sub_observer_lat_per_image_deg: Sub-observer latitude (deg), same indexing.
     """
 
     title: str
@@ -341,6 +357,18 @@ class BodyDisplayData:
     is_mosaic: bool
     photometric_model_name: str | None = None
     contributing_image_names: tuple[str, ...] = ()
+    sub_solar_lon_per_image_deg: np.ndarray = field(
+        default_factory=lambda: np.empty((0,), dtype=np.float64)
+    )
+    sub_solar_lat_per_image_deg: np.ndarray = field(
+        default_factory=lambda: np.empty((0,), dtype=np.float64)
+    )
+    sub_observer_lon_per_image_deg: np.ndarray = field(
+        default_factory=lambda: np.empty((0,), dtype=np.float64)
+    )
+    sub_observer_lat_per_image_deg: np.ndarray = field(
+        default_factory=lambda: np.empty((0,), dtype=np.float64)
+    )
 
 
 def _body_vmin_vmax(image_ma: ma.MaskedArray) -> tuple[float, float]:
@@ -400,6 +428,18 @@ def load_body_file(path: str) -> BodyDisplayData:
             is_mosaic=False,
             photometric_model_name=result.photometric_model_name,
             contributing_image_names=(result.image_name,) if result.image_name else (),
+            sub_solar_lon_per_image_deg=np.array(
+                [result.sub_solar_lon * 180.0 / math.pi], dtype=np.float64
+            ),
+            sub_solar_lat_per_image_deg=np.array(
+                [result.sub_solar_lat * 180.0 / math.pi], dtype=np.float64
+            ),
+            sub_observer_lon_per_image_deg=np.array(
+                [result.sub_observer_lon * 180.0 / math.pi], dtype=np.float64
+            ),
+            sub_observer_lat_per_image_deg=np.array(
+                [result.sub_observer_lat * 180.0 / math.pi], dtype=np.float64
+            ),
         )
 
     if kind == 'BodyMosaicData':
@@ -437,6 +477,10 @@ def load_body_file(path: str) -> BodyDisplayData:
             is_mosaic=True,
             photometric_model_name=result_m.photometric_model_name,
             contributing_image_names=result_m.contributing_image_names,
+            sub_solar_lon_per_image_deg=result_m.sub_solar_lon_per_image * 180.0 / math.pi,
+            sub_solar_lat_per_image_deg=result_m.sub_solar_lat_per_image * 180.0 / math.pi,
+            sub_observer_lon_per_image_deg=result_m.sub_observer_lon_per_image * 180.0 / math.pi,
+            sub_observer_lat_per_image_deg=result_m.sub_observer_lat_per_image * 180.0 / math.pi,
         )
 
     raise ValueError(f'Expected BodyReprojResult or BodyMosaicData in {path!r}, got kind={kind!r}')

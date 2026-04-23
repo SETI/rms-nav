@@ -22,7 +22,7 @@ sys.path.insert(0, package_source_path)
 from backplanes.backplanes import generate_backplanes_image_files
 from nav.config import (
     DEFAULT_CONFIG,
-    DEFAULT_LOGGER,
+    MAIN_LOGGER,
     get_backplane_results_root,
     get_nav_results_root,
     load_default_and_user_config,
@@ -33,7 +33,6 @@ from nav.obs import inst_name_to_obs_class
 
 DATASET: DataSet | None = None
 DATASET_NAME: str | None = None
-MAIN_LOGGER: pdslogger.PdsLogger | None = None
 
 
 def parse_args(command_list: list[str]) -> argparse.Namespace:
@@ -138,9 +137,6 @@ def main() -> None:
 
     backplane_results_root_str = get_backplane_results_root(arguments, DEFAULT_CONFIG)
     backplane_results_root = FileCache(None).new_path(backplane_results_root_str)
-
-    global MAIN_LOGGER
-    MAIN_LOGGER = DEFAULT_LOGGER
 
     MAIN_LOGGER.info('Starting backplanes generation')
     MAIN_LOGGER.info('Dataset: %s', DATASET_NAME)

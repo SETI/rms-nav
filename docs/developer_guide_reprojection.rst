@@ -399,7 +399,9 @@ Display layer
      parallels/meridians overlays in the sidebar, lower strip with stretch
      presets, log-style zoom controls, a four-column **Cursor Info** grid, and
      a **Color By** radio grid (resolution, effective resolution, phase, emission,
-     incidence, image number when present).
+     incidence, image number when present).  The cursor grid includes sub-solar
+     and sub-observer longitude and latitude (degrees), resolved from
+     ``BodyDisplayData`` per-image arrays populated by :func:`~nav.ui.mosaic_viewer.common.load_body_file`.
 
 Adding a new display feature
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -408,7 +410,8 @@ Adding a new display feature
    the ``RingDisplayData`` / ``BodyDisplayData`` dataclass in
    ``nav/ui/mosaic_viewer/common.py`` and populate it in
    ``load_ring_file`` / ``load_body_file`` (including fields sourced from
-   ``RingMosaicData`` / ``BodyMosaicData`` such as ``contributing_image_names``).
+   ``RingMosaicData`` / ``BodyMosaicData`` such as ``contributing_image_names``,
+   ``sub_solar_*_per_image``, ``sub_observer_*_per_image``, etc.).
 
 2. If the feature needs a new image overlay (e.g. contour lines), implement it
    as a new signal-driven ``set_*`` method on ``TiledImageWidget`` and call it

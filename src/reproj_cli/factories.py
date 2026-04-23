@@ -63,8 +63,12 @@ def build_body_mosaic(args: argparse.Namespace) -> BodyMosaic:
         lat_range=lat_range,
         lon_range=lon_range,
         dynamic=args.dynamic,
-        max_incidence=_deg_to_rad(float(args.max_incidence)),
-        max_emission=_deg_to_rad(float(args.max_emission)),
+        max_incidence=(
+            _deg_to_rad(float(args.max_incidence)) if args.max_incidence is not None else None
+        ),
+        max_emission=(
+            _deg_to_rad(float(args.max_emission)) if args.max_emission is not None else None
+        ),
         max_resolution=float(args.max_resolution) if args.max_resolution is not None else None,
         edge_margin=int(args.edge_margin),
         zoom=int(args.zoom),

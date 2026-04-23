@@ -43,7 +43,7 @@ from matplotlib import colormaps as mpl_colormaps
 
 from nav.config import (
     DEFAULT_CONFIG,
-    DEFAULT_LOGGER,
+    IMAGE_LOGGER,
     Config,
     get_backplane_results_root,
     get_nav_results_root,
@@ -206,7 +206,7 @@ class NavBackplaneViewer(QDialog):
         self._nav_results_root = nav_results_root
         self._backplane_results_root = backplane_results_root
         self._config = config or DEFAULT_CONFIG
-        self._logger = DEFAULT_LOGGER
+        self._logger = IMAGE_LOGGER
 
         self._obs_class = inst_name_to_obs_class(inst_name)
 

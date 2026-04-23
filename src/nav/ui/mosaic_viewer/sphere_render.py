@@ -1,0 +1,149 @@
+"""Software renderer for non-rectangular body-mosaic projections.
+
+:func:`render_to_image` converts a (lon_deg, lat_deg, valid) coordinate grid
+-- produced by :mod:`~nav.ui.mosaic_viewer.projections` -- into a
+``QImage`` (Format_RGB888) using nearest-neighbour texture lookup, the same
+contrast-stretch pipeline as the existing rectangular render path, and optional
+per-pixel metadata tinting.
+
+The function is intentionally stateless and side-effect-free so it can be
+called from any paint method without lock concerns.
+"""
+
+import math
+
+import numpy as np
+import numpy.ma as ma
+from PyQt6.QtGui import QImage
+
+from nav.ui.common import apply_linear_gamma_stretch
+
+
+def render_to_image(
+    image_ma: ma.MaskedArray,
+    *,
+    lon_deg: np.ndarray,
+    lat_deg: np.ndarray,
+    valid: np.ndarray,
+    lon_min_deg: float,
+    lat_min_deg: float,
+    d_lon_deg: float,
+    d_lat_deg: float,
+    lon_bin_to_dc: np.ndarray,
+    n_full_lon: int,
+    n_data_rows: int,
+    n_data_cols: int,
+    black: float,
+    white: float,
+    gamma: float,
+    color_tint: np.ndarray | None,
+) -> QImage:
+    """Render a mosaic texture onto an arbitrary projection grid.
+
+    Parameters:
+        image_ma: 2-D masked array (n_data_rows, n_data_cols) with the
+            photometrically-corrected mosaic data.
+        lon_deg: 2-D float64 array of longitudes (deg) for every output pixel,
+            in [0, 360).
+        lat_deg: 2-D float64 array of latitudes (deg), in [-90, 90].
+        valid: 2-D bool array; False pixels are painted black (off-projection
+            background).  True pixels with no usable data (outside the file's
+            lat/lon extent or explicitly masked) are painted dark red.
+        lon_min_deg: Geographic minimum longitude of the data grid (deg).
+        lat_min_deg: Geographic minimum latitude of the data grid (deg).
+        d_lon_deg: Longitude resolution of the data grid (deg/column).
+        d_lat_deg: Latitude resolution of the data grid (deg/row).
+        lon_bin_to_dc: 1-D int32 array mapping full-circle longitude bin index
+            to data column index (-1 = absent).
+        n_full_lon: Length of ``lon_bin_to_dc``.
+        n_data_rows: Number of rows in ``image_ma``.
+        n_data_cols: Number of columns in ``image_ma``.
+        black: Stretch black point.
+        white: Stretch white point.
+        gamma: Stretch gamma (applied as power).
+        color_tint: Optional per-pixel RGB tint, shape
+            (n_data_rows, n_data_cols, 3), float32 in [0, 1].  None = greyscale.
+
+    Returns:
+        A QImage in Format_RGB888 matching the shape of ``lon_deg`` / ``lat_deg``.
+    """
+    out_h, out_w = lon_deg.shape
+
+    # ------------------------------------------------------------------
+    # Map (lon_deg, lat_deg) -> (dc, dr) data indices
+    # ------------------------------------------------------------------
+    lon_r = np.deg2rad(lon_deg)
+    lon_res_rad = math.radians(d_lon_deg)
+    twopi = 2.0 * math.pi
+
+    lon_r_mod = np.mod(lon_r, twopi)
+    k = np.floor(np.minimum(lon_r_mod / lon_res_rad, float(n_full_lon) - 1e-9)).astype(np.int64)
+    k = np.clip(k, 0, n_full_lon - 1)
+    dc = lon_bin_to_dc[k]  # data column, -1 if absent
+
+    dr = np.floor((lat_deg - lat_min_deg) / d_lat_deg).astype(np.int64)
+
+    inside = valid & (dc >= 0) & (dc < n_data_cols) & (dr >= 0) & (dr < n_data_rows)
+
+    # ------------------------------------------------------------------
+    # Sample texture
+    # ------------------------------------------------------------------
+    tile_data = np.zeros((out_h, out_w), dtype=np.float32)
+    tile_mask = np.ones((out_h, out_w), dtype=bool)
+
+    if np.any(inside):
+        dr_v = np.clip(dr[inside], 0, n_data_rows - 1)
+        dc_v = np.clip(dc[inside], 0, n_data_cols - 1)
+        sub = image_ma[dr_v, dc_v]
+        tile_data[inside] = np.asarray(np.nan_to_num(sub.filled(0.0), nan=0.0), dtype=np.float32)
+        tile_mask[inside] = ma.getmaskarray(sub)
+
+    # ------------------------------------------------------------------
+    # Apply stretch
+    # ------------------------------------------------------------------
+    stretched = apply_linear_gamma_stretch(tile_data, black=black, white=white, gamma=gamma).astype(
+        np.float32
+    )
+    gray = (stretched * 255.0).astype(np.uint8)
+
+    # ------------------------------------------------------------------
+    # Build RGB with optional per-pixel tint
+    # ------------------------------------------------------------------
+    if color_tint is not None and np.any(inside):
+        rgb = np.zeros((out_h, out_w, 3), dtype=np.uint8)
+        dr_c = np.clip(dr, 0, n_data_rows - 1)
+        dc_c = np.clip(dc, 0, n_data_cols - 1)
+        # Default: neutral tint (1.0) everywhere
+        tint = np.ones((out_h, out_w, 3), dtype=np.float32)
+        tint[inside] = color_tint[dr_c[inside], dc_c[inside]]
+        gray_f = gray[:, :, np.newaxis].astype(np.float32)
+        rgb = np.clip(gray_f * tint, 0, 255).astype(np.uint8)
+    else:
+        rgb = np.stack([gray, gray, gray], axis=2)
+
+    # Background (off-projection) pixels -> black
+    background = ~valid
+    if np.any(background):
+        rgb[background, 0] = 0
+        rgb[background, 1] = 0
+        rgb[background, 2] = 0
+
+    # Any valid projection pixel with no usable data (explicitly masked or
+    # simply outside the file's lat/lon extent) -> dark red.
+    no_data = valid & (~inside | tile_mask)
+    if np.any(no_data):
+        rgb[no_data, 0] = 180
+        rgb[no_data, 1] = 0
+        rgb[no_data, 2] = 0
+
+    # ------------------------------------------------------------------
+    # Build QImage from contiguous RGB buffer
+    # ------------------------------------------------------------------
+    rgb_c = np.ascontiguousarray(rgb)
+    return QImage(
+        rgb_c.tobytes(),
+        out_w,
+        out_h,
+        3 * out_w,
+        QImage.Format.Format_RGB888,
+    )

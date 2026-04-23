@@ -139,9 +139,16 @@ class NavTechniqueCorrelateAll(NavTechnique):
 
             star_models = self._filter_models(['stars'])
             if len(star_models) == 1:
-                ret = self._refine_stars(cast(NavModelStars, star_models[0]), corr_offset)
-                if ret is not None:
-                    self._offset, self._uncertainty = ret
+                first_model = star_models[0]
+                if isinstance(first_model, NavModelStars):
+                    ret = self._refine_stars(first_model, corr_offset)
+                    if ret is not None:
+                        self._offset, self._uncertainty = ret
+                else:
+                    self.logger.warning(
+                        'Expected NavModelStars for stars filter, got %s; skipping star refinement',
+                        type(first_model).__name__,
+                    )
 
         if (
             abs(int(np.round(self._offset[0]))) > obs.extfov_margin_v

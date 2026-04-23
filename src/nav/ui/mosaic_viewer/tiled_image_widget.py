@@ -1,7 +1,9 @@
 """TiledImageWidget: efficient tiled rendering of large mosaic images.
 
 Supports ring geometry (radius versus longitude) and body geometry (latitude
-versus longitude) via ``y_flip`` and axis labels.
+versus longitude) via ``y_flip`` and axis labels.  Body mosaics additionally
+support alternate 2-D projections (Polar Stereographic N/S, Mollweide) and a
+3-D orthographic sphere view via :meth:`set_projection`.
 
 Image pixel coordinate convention (ring mode):
     pixel_x  0 .. n_cols-1   increasing right  = increasing longitude
@@ -20,7 +22,7 @@ from typing import cast
 
 import numpy as np
 import numpy.ma as ma
-from PyQt6.QtCore import QEvent, QPoint, QRect, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QEvent, QPoint, QPointF, QRect, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import (
     QColor,
     QCursor,
@@ -29,12 +31,21 @@ from PyQt6.QtGui import (
     QMouseEvent,
     QPainter,
     QPen,
+    QPolygonF,
     QResizeEvent,
     QWheelEvent,
 )
 from PyQt6.QtWidgets import QAbstractScrollArea, QRubberBand, QScrollBar, QSizePolicy, QWidget
 
 from nav.ui.common import apply_linear_gamma_stretch
+from nav.ui.mosaic_viewer.graticule import graticule_label_anchors, graticule_polylines
+from nav.ui.mosaic_viewer.projections import (
+    ProjectionKind,
+    ProjectionParams,
+    display_to_lonlat,
+    fit_scale,
+)
+from nav.ui.mosaic_viewer.sphere_render import render_to_image
 
 # Zoom slider maps to log scale: slider 1..1000  →  zoom 0.05x..100x
 _ZOOM_LOG_LO = np.log10(0.05)
@@ -77,13 +88,18 @@ def _nice_tick_values(lo: float, hi: float, max_ticks: int) -> np.ndarray:
 
 
 def _nice_sphere_overlay_degree_step(span: float, max_lines: int = 8) -> float:
-    """Pick a round step in degrees for globe parallels/meridians."""
+    """Pick a round step in degrees for globe parallels/meridians.
+
+    Returns the smallest "nice" step value that produces at most ``max_lines``
+    lines across ``span`` degrees.
+    """
     if span <= 0:
         return 10.0
     raw = span / max_lines
-    preferred = [90, 60, 45, 30, 20, 15, 10, 5, 4, 3, 2, 1, 0.5]
+    # Ascending order: return the first (smallest) nice step >= raw.
+    preferred = [0.5, 1, 2, 3, 4, 5, 10, 15, 20, 30, 45, 60, 90]
     for s in preferred:
-        if raw <= s:
+        if s >= raw:
             return s
     return raw
 
@@ -287,6 +303,10 @@ class TiledImageWidget(QAbstractScrollArea):
         self._y_flip: bool = True
         # Cap for the X axis in display units (e.g. 360 for a full ring).
         self._x_axis_max: float | None = None
+        # Virtual column count for min-zoom and scroll-range when the axis should
+        # span a full circle regardless of how many data columns are present.
+        # 0 means "use _n_cols".
+        self._ring_full_lon_cols: int = 0
         # Longitude (deg) at column 0 when columns are not anchored at 0 (ring sparse).
         self._x_origin_deg: float = 0.0
         # Body: virtual canvas covering 360 deg longitude and 180 deg latitude.
@@ -310,8 +330,8 @@ class TiledImageWidget(QAbstractScrollArea):
         self._x_zoom: float = 1.0
         self._y_zoom: float = 1.0
 
-        # Color-by: (n_cols, 3) float32 in [0,1], or None for greyscale
-        self._color_column: np.ndarray | None = None
+        # Color-by: (n_data_rows, n_data_cols, 3) float32 in [0,1], or None for greyscale
+        self._color_tint: np.ndarray | None = None
 
         # Show-rows overlay (ring: show_radii; body full-sphere uses viewport geo lines)
         # pixel_y rows drawn as green horizontal lines
@@ -342,6 +362,22 @@ class TiledImageWidget(QAbstractScrollArea):
         # Keep numpy array alive while QImage uses its buffer
         self._last_rgb: np.ndarray | None = None
 
+        # Non-rectangular projection state (POLAR_N, POLAR_S, MOLLWEIDE, SPHERE_3D)
+        # For RECT the existing x_zoom/y_zoom/scrollbar path is used instead.
+        self._proj_kind: ProjectionKind = ProjectionKind.RECT
+        self._proj_scale: float = 200.0  # pixels per normalized unit
+        self._proj_cx: float = 0.0  # viewport-pixel centre X
+        self._proj_cy: float = 0.0  # viewport-pixel centre Y
+        self._yaw_deg: float = 0.0  # SPHERE_3D: longitude at view centre
+        self._pitch_deg: float = 0.0  # SPHERE_3D: latitude at view centre
+        # Mouse state for non-RECT drag
+        self._proj_drag_start: QPoint | None = None
+        self._proj_drag_start_cx: float = 0.0
+        self._proj_drag_start_cy: float = 0.0
+        self._proj_drag_start_yaw: float = 0.0
+        self._proj_drag_start_pitch: float = 0.0
+        self._proj_drag_is_pan: bool = False  # True = Shift+drag (pan), False = yaw/pitch
+
         self.horizontalScrollBar().valueChanged.connect(lambda _: self.viewport().update())
         self.verticalScrollBar().valueChanged.connect(lambda _: self.viewport().update())
 
@@ -362,6 +398,7 @@ class TiledImageWidget(QAbstractScrollArea):
         x_origin_deg: float = 0.0,
         ring_radial_axis_absolute: bool = False,
         ring_radial_mid_km: float = 0.0,
+        ring_full_lon: bool = False,
         body_full_sphere_canvas: bool = False,
         body_lon_range_deg: tuple[float, float] | None = None,
         body_lat_range_deg: tuple[float, float] | None = None,
@@ -385,6 +422,9 @@ class TiledImageWidget(QAbstractScrollArea):
                 Y is the offset from the mean radial center (km).
             ring_radial_mid_km: Mean radius (km), i.e. ``(radius_inner + radius_outer) / 2``,
                 used when ``ring_radial_axis_absolute`` is True.
+            ring_full_lon: If True, the minimum zoom and scroll range are sized so that
+                360 degrees of longitude are always reachable, even when the data covers
+                only a fraction of the full circle.
             body_full_sphere_canvas: If True (with ``y_flip=False``), use a virtual image
                 large enough to show longitude ``[0, 360]`` deg and latitude
                 ``[+90, -90]`` deg at the same resolution as the data, so you can zoom
@@ -409,6 +449,9 @@ class TiledImageWidget(QAbstractScrollArea):
         self._x_origin_deg = float(x_origin_deg)
         self._ring_pixel_y_absolute = bool(ring_radial_axis_absolute) and y_flip
         self._ring_radial_mid_km = float(ring_radial_mid_km) if self._ring_pixel_y_absolute else 0.0
+        self._ring_full_lon_cols = (
+            max(self._n_cols, int(360.0 / x_interval)) if ring_full_lon and x_interval > 0 else 0
+        )
         self._body_sphere = False
         self._body_n_full_lon = 0
         self._body_lon_res_rad = 0.0
@@ -508,11 +551,23 @@ class TiledImageWidget(QAbstractScrollArea):
         anchor_img_x: float | None = None,
         anchor_img_y: float | None = None,
     ) -> None:
-        """Set zoom, optionally anchoring a viewport point to an image coord."""
+        """Set zoom, optionally anchoring a viewport point to an image coord.
+
+        For non-RECT projections both ``x_zoom`` and ``y_zoom`` are averaged
+        to a single isotropic scale (anchor parameters are ignored).
+        """
+        if self._proj_kind != ProjectionKind.RECT:
+            self.set_proj_scale((x_zoom + y_zoom) / 2.0)
+            return
         self._apply_zoom(x_zoom, y_zoom, anchor_vx, anchor_vy, anchor_img_x, anchor_img_y)
 
     def get_zoom(self) -> tuple[float, float]:
-        """Return current ``(x_zoom, y_zoom)``."""
+        """Return current ``(x_zoom, y_zoom)``.
+
+        For non-RECT projections returns ``(proj_scale, proj_scale)``.
+        """
+        if self._proj_kind != ProjectionKind.RECT:
+            return self._proj_scale, self._proj_scale
         return self._x_zoom, self._y_zoom
 
     def get_min_zoom(self) -> tuple[float, float]:
@@ -528,35 +583,135 @@ class TiledImageWidget(QAbstractScrollArea):
         return vp
 
     def _min_zoom_xy(self) -> tuple[float, float]:
+        if self._proj_kind != ProjectionKind.RECT:
+            vw = max(1, self.viewport().width())
+            vh = max(1, self.viewport().height())
+            min_scale = fit_scale(self._proj_kind, vw, vh) * 0.5
+            return min_scale, min_scale
         if self._image_ma is None or self._n_cols < 1 or self._n_rows < 1:
             return (0.05, 0.05)
         vw = max(1, self.viewport().width())
         vh = max(1, self.viewport().height())
-        return (float(vw) / float(self._n_cols), float(vh) / float(self._n_rows))
+        x_cols = self._ring_full_lon_cols if self._ring_full_lon_cols > 0 else self._n_cols
+        return (float(vw) / float(x_cols), float(vh) / float(self._n_rows))
 
-    def set_color_column(self, color_column: np.ndarray | None) -> None:
-        """Set per-column RGB tinting (n_cols, 3) float32 in [0,1], or None."""
-        if color_column is None:
-            self._color_column = None
+    def set_color_tint(self, color_tint: np.ndarray | None) -> None:
+        """Set per-pixel RGB tinting, shape (n_rows, n_cols, 3) float32 in [0,1].
+
+        Parameters:
+            color_tint: Array of shape (n_data_rows, n_data_cols, 3) with
+                values in [0, 1], or None to revert to greyscale.
+
+        Raises:
+            ValueError: If the array has the wrong shape or values out of range.
+        """
+        if color_tint is None:
+            self._color_tint = None
             self.viewport().update()
             return
-        if not isinstance(color_column, np.ndarray):
+        if not isinstance(color_tint, np.ndarray):
+            raise ValueError(f'color_tint must be None or numpy.ndarray, got {type(color_tint)}')
+        if color_tint.ndim != 3 or color_tint.shape[2] != 3:
             raise ValueError(
-                f'color_column must be None or numpy.ndarray, got {type(color_column)}'
+                f'color_tint must have shape (n_rows, n_cols, 3), got {color_tint.shape}'
             )
-        if color_column.ndim != 2 or color_column.shape[1] != 3:
+        n_rows = self._body_data_n_rows if self._body_sphere else self._n_rows
+        n_cols = self._body_data_n_cols if self._body_sphere else self._n_cols
+        if (
+            n_rows > 0
+            and n_cols > 0
+            and (color_tint.shape[0] != n_rows or color_tint.shape[1] != n_cols)
+        ):
             raise ValueError(
-                f'color_column must have shape (n_cols, 3), got shape {color_column.shape}'
+                f'color_tint shape {color_tint.shape[:2]} does not match '
+                f'data shape ({n_rows}, {n_cols})'
             )
-        n_cc = self._body_data_n_cols if self._body_sphere else self._n_cols
-        if n_cc > 0 and color_column.shape[0] != n_cc:
-            raise ValueError(
-                f'color_column length {color_column.shape[0]} does not match n_cols={n_cc}'
-            )
-        cc = np.asarray(color_column, dtype=np.float64)
-        if np.any(cc < 0.0) or np.any(cc > 1.0):
-            raise ValueError('color_column values must lie in [0, 1]')
-        self._color_column = cc.astype(np.float32)
+        ct = np.asarray(color_tint, dtype=np.float64)
+        if np.any(ct < 0.0) or np.any(ct > 1.0):
+            raise ValueError('color_tint values must lie in [0, 1]')
+        self._color_tint = ct.astype(np.float32)
+        self.viewport().update()
+
+    def set_projection(self, kind: ProjectionKind, *, preserve_view: bool = False) -> None:
+        """Switch to a different projection mode.
+
+        For non-RECT modes the projection is rendered full-viewport (no tiled
+        scroll canvas); zoom and pan are managed via :attr:`_proj_scale`,
+        :attr:`_proj_cx`, and :attr:`_proj_cy`.
+
+        Parameters:
+            kind: Desired projection.
+            preserve_view: If True, keep the current ``_proj_scale`` and
+                centre; otherwise reset to the fit-in-window zoom.
+        """
+        self._proj_kind = kind
+        if kind != ProjectionKind.RECT:
+            # Hide scrollbars; projection uses its own pan state
+            self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            if not preserve_view:
+                vw = self.viewport().width()
+                vh = self.viewport().height()
+                self._proj_scale = fit_scale(kind, max(vw, 1), max(vh, 1))
+                self._proj_cx = vw / 2.0
+                self._proj_cy = vh / 2.0
+                self._yaw_deg = 0.0
+                self._pitch_deg = 0.0
+        else:
+            self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.viewport().update()
+
+    def viewport_to_lonlat(self, vx: int, vy: int) -> tuple[float, float, bool]:
+        """Convert a viewport pixel to (lon_deg, lat_deg, on_surface).
+
+        Works for all non-RECT projection kinds.  For RECT use
+        :meth:`pixel_to_physical` combined with :meth:`viewport_to_pixel`.
+
+        Parameters:
+            vx: Viewport X in pixels.
+            vy: Viewport Y in pixels.
+
+        Returns:
+            Tuple ``(lon_deg, lat_deg, on_surface)`` where ``on_surface`` is
+            False when the cursor is on the projection background (e.g. outside
+            the sphere disk).
+        """
+        params = self._make_proj_params()
+        vx_arr = np.array([float(vx)])
+        vy_arr = np.array([float(vy)])
+        lon_arr, lat_arr, valid_arr = display_to_lonlat(vx_arr, vy_arr, params)
+        return float(lon_arr[0]), float(lat_arr[0]), bool(valid_arr[0])
+
+    def get_proj_scale(self) -> float:
+        """Return the current isotropic projection scale (pixels per unit)."""
+        return self._proj_scale
+
+    def set_proj_scale(self, scale: float) -> None:
+        """Set the isotropic projection scale and repaint.
+
+        Parameters:
+            scale: New scale in pixels per normalized unit; clamped to [1, 4000].
+        """
+        self._proj_scale = float(np.clip(scale, 1.0, 4000.0))
+        self.zoom_changed.emit(self._proj_scale, self._proj_scale)
+        self.viewport().update()
+
+    def fit_projection_to_window(self) -> None:
+        """Reset the non-RECT projection scale and centre to fit the viewport.
+
+        Preserves yaw and pitch (3-D rotation state).  No-op in RECT mode.
+        """
+        if self._proj_kind == ProjectionKind.RECT:
+            return
+        vw = self.viewport().width()
+        vh = self.viewport().height()
+        if vw <= 0 or vh <= 0:
+            return
+        self._proj_scale = fit_scale(self._proj_kind, vw, vh)
+        self._proj_cx = vw / 2.0
+        self._proj_cy = vh / 2.0
+        self.zoom_changed.emit(self._proj_scale, self._proj_scale)
         self.viewport().update()
 
     def set_show_rows(self, pixel_ys: list[int]) -> None:
@@ -694,17 +849,31 @@ class TiledImageWidget(QAbstractScrollArea):
         return super().viewportEvent(event)
 
     def wheelEvent(self, event: QWheelEvent | None) -> None:
-        """Zoom at cursor: both axes, or X-only with Shift, or Y-only with Ctrl."""
+        """Zoom at cursor: both axes, or X-only with Shift, or Y-only with Ctrl.
+
+        For non-RECT projections only isotropic zoom is supported; the Shift
+        and Ctrl modifiers have no effect.
+        """
         if event is None:
             super().wheelEvent(event)
             return
         if self._image_ma is None:
             event.accept()
             return
+        factor = 1.2 if event.angleDelta().y() > 0 else (1.0 / 1.2)
+
+        if self._proj_kind != ProjectionKind.RECT:
+            min_s, _ = self._min_zoom_xy()
+            new_scale = float(np.clip(self._proj_scale * factor, min_s, 4000.0))
+            self._proj_scale = new_scale
+            self.zoom_changed.emit(new_scale, new_scale)
+            self.viewport().update()
+            event.accept()
+            return
+
         pos = event.position().toPoint()
         vp_pos = self.viewport().mapFromParent(pos)
         vx, vy = vp_pos.x(), vp_pos.y()
-        factor = 1.2 if event.angleDelta().y() > 0 else (1.0 / 1.2)
         img_x, img_y = self.viewport_to_pixel(vx, vy)
         min_x, min_y = self._min_zoom_xy()
         mods = event.modifiers()
@@ -723,9 +892,18 @@ class TiledImageWidget(QAbstractScrollArea):
         event.accept()
 
     def resizeEvent(self, event: QResizeEvent | None) -> None:
+        if event is not None and self._proj_kind != ProjectionKind.RECT:
+            # Shift projection centre so it stays at the same relative position
+            old_w = event.oldSize().width()
+            old_h = event.oldSize().height()
+            if old_w > 0 and old_h > 0:
+                new_w = event.size().width()
+                new_h = event.size().height()
+                self._proj_cx += (new_w - old_w) / 2.0
+                self._proj_cy += (new_h - old_h) / 2.0
         super().resizeEvent(event)
         self._update_scroll_range()
-        if self._image_ma is not None:
+        if self._proj_kind == ProjectionKind.RECT and self._image_ma is not None:
             min_x, min_y = self._min_zoom_xy()
             if self._x_zoom < min_x - 1e-12 or self._y_zoom < min_y - 1e-12:
                 self._apply_zoom(
@@ -741,7 +919,8 @@ class TiledImageWidget(QAbstractScrollArea):
             return
         vw = self.viewport().width()
         vh = self.viewport().height()
-        virtual_w = max(1, int(self._n_cols * self._x_zoom))
+        x_cols = self._ring_full_lon_cols if self._ring_full_lon_cols > 0 else self._n_cols
+        virtual_w = max(1, int(x_cols * self._x_zoom))
         virtual_h = max(1, int(self._n_rows * self._y_zoom))
         hbar = self.horizontalScrollBar()
         hbar.setRange(0, max(0, virtual_w - vw))
@@ -849,11 +1028,11 @@ class TiledImageWidget(QAbstractScrollArea):
         ).astype(np.float32)
         gray = (stretched * 255.0).astype(np.uint8)
 
-        if self._color_column is not None and len(self._color_column) > 0:
+        if self._color_tint is not None and np.any(valid):
             tint = np.ones((tile_h, tile_w, 3), dtype=np.float32)
-            if np.any(valid):
-                dc_safe = np.clip(dc, 0, len(self._color_column) - 1)
-                tint[valid] = self._color_column[dc_safe[valid]].astype(np.float32)
+            dr_c = np.clip(dr, 0, self._body_data_n_rows - 1)
+            dc_c = np.clip(dc, 0, self._body_data_n_cols - 1)
+            tint[valid] = self._color_tint[dr_c[valid], dc_c[valid]]
             gray_f = gray[:, :, np.newaxis].astype(np.float32)
             rgb = np.clip(gray_f * tint, 0, 255).astype(np.uint8)
         else:
@@ -894,6 +1073,11 @@ class TiledImageWidget(QAbstractScrollArea):
         vv = self.verticalScrollBar().value()
         xz = self._x_zoom
         yz = self._y_zoom
+
+        # Non-RECT projections (Polar N/S, Mollweide, 3-D sphere)
+        if self._proj_kind != ProjectionKind.RECT:
+            self._do_paint_projection(painter, vw, vh)
+            return
 
         if self._body_sphere:
             self._do_paint_body_sphere(painter, vw, vh, hv, vv, xz, yz)
@@ -936,16 +1120,18 @@ class TiledImageWidget(QAbstractScrollArea):
         ).astype(np.float32)
         gray = (stretched * 255.0).astype(np.uint8)
 
-        # Build RGB (apply colour-by tinting if active)
-        if self._color_column is not None and len(self._color_column) > 0:
-            col_idx = np.clip(
-                np.arange(px_start, px_end + 1, dtype=np.intp),
-                0,
-                len(self._color_column) - 1,
-            )
-            tint = self._color_column[col_idx].astype(np.float32)  # (w, 3)
-            gray_f = gray[:, :, np.newaxis].astype(np.float32)  # (h, w, 1)
-            rgb = np.clip(gray_f * tint[np.newaxis, :, :], 0, 255).astype(np.uint8)
+        # Build RGB (apply per-pixel colour-by tinting if active)
+        if self._color_tint is not None:
+            n_r, n_c = self._n_rows, self._n_cols
+            rows = np.clip(np.arange(py_start, py_end + 1, dtype=np.intp), 0, n_r - 1)
+            cols = np.clip(np.arange(px_start, px_end + 1, dtype=np.intp), 0, n_c - 1)
+            if self._y_flip:
+                arr_rows = np.clip((n_r - 1) - rows, 0, n_r - 1)[::-1]
+            else:
+                arr_rows = rows
+            tint = self._color_tint[np.ix_(arr_rows, cols)]  # (tile_h, tile_w, 3)
+            gray_f = gray[:, :, np.newaxis].astype(np.float32)
+            rgb = np.clip(gray_f * tint.astype(np.float32), 0, 255).astype(np.uint8)
         else:
             rgb = np.stack([gray, gray, gray], axis=2)
 
@@ -1036,6 +1222,124 @@ class TiledImageWidget(QAbstractScrollArea):
                     painter.drawLine(x, 0, x, vh)
                 lon += step
 
+    # ------------------------------------------------------------------ #
+    #  Non-rectangular projection rendering                               #
+    # ------------------------------------------------------------------ #
+
+    def _make_proj_params(self) -> ProjectionParams:
+        """Return a :class:`ProjectionParams` reflecting the current state."""
+        return ProjectionParams(
+            kind=self._proj_kind,
+            cx=self._proj_cx,
+            cy=self._proj_cy,
+            scale=self._proj_scale,
+            yaw_deg=self._yaw_deg,
+            pitch_deg=self._pitch_deg,
+        )
+
+    def _do_paint_projection(self, painter: QPainter, vw: int, vh: int) -> None:
+        """Paint a non-RECT projection (Polar N/S, Mollweide, or Sphere-3D)."""
+        if self._image_ma is None or self._body_lon_bin_to_dc is None:
+            return
+
+        params = self._make_proj_params()
+
+        # Build lon/lat grids for every viewport pixel
+        xs = np.arange(vw, dtype=np.float64)
+        ys = np.arange(vh, dtype=np.float64)
+        vx_grid, vy_grid = np.meshgrid(xs, ys)  # (vh, vw)
+
+        lon_deg, lat_deg, valid = display_to_lonlat(vx_grid, vy_grid, params)
+
+        qimg = render_to_image(
+            self._image_ma,
+            lon_deg=lon_deg,
+            lat_deg=lat_deg,
+            valid=valid,
+            lon_min_deg=self._body_lon_min,
+            lat_min_deg=self._body_lat_min,
+            d_lon_deg=self._x_interval,
+            d_lat_deg=self._y_interval,
+            lon_bin_to_dc=self._body_lon_bin_to_dc,
+            n_full_lon=self._body_n_full_lon,
+            n_data_rows=self._body_data_n_rows,
+            n_data_cols=self._body_data_n_cols,
+            black=self._black,
+            white=self._white,
+            gamma=self._gamma,
+            color_tint=self._color_tint,
+        )
+        # Keep reference alive while painter holds the buffer
+        self._last_rgb = None  # cleared; QImage owns its own copy via tobytes()
+        painter.drawImage(0, 0, qimg)
+
+        if self._body_geo_parallels or self._body_geo_meridians:
+            self._draw_proj_graticule(painter, vw, vh, params)
+
+    def _draw_proj_graticule(
+        self,
+        painter: QPainter,
+        vw: int,
+        vh: int,
+        params: ProjectionParams,
+    ) -> None:
+        """Draw curved lat/lon graticule for non-RECT projections."""
+        # Target ~50 px between lines.  For Mollweide the lat span is 2*sqrt(2)*scale;
+        # for sphere/polar it is 2*scale (the disk diameter).
+        if self._proj_kind == ProjectionKind.MOLLWEIDE:
+            lat_span_px = 2.0 * math.sqrt(2.0) * self._proj_scale
+        else:
+            lat_span_px = 2.0 * self._proj_scale
+        max_lat = max(3, int(lat_span_px / 50.0))
+        lat_step = _nice_sphere_overlay_degree_step(180.0, max_lines=max_lat)
+        lon_step = _nice_sphere_overlay_degree_step(360.0, max_lines=max_lat * 2)
+
+        par_lines, mer_lines = graticule_polylines(
+            params,
+            lat_step_deg=lat_step if self._body_geo_parallels else 0.0,
+            lon_step_deg=lon_step if self._body_geo_meridians else 0.0,
+        )
+
+        pen = QPen(QColor(0, 220, 0))
+        pen.setWidth(1)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        for seg in par_lines + mer_lines:
+            if len(seg) < 2:
+                continue
+            poly = QPolygonF([QPointF(x, y) for x, y in seg])
+            painter.drawPolyline(poly)
+
+        # Draw labels on graticule lines when axis-ticks are requested
+        if self._show_x_ticks or self._show_y_ticks:
+            par_anch, mer_anch = graticule_label_anchors(
+                params,
+                lat_step_deg=lat_step if self._body_geo_parallels else 0.0,
+                lon_step_deg=lon_step if self._body_geo_meridians else 0.0,
+            )
+            painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+            pen_txt = QPen(QColor(220, 220, 220))
+            painter.setPen(pen_txt)
+            font = QFont()
+            font.setPointSize(9)
+            painter.setFont(font)
+            bg = QColor(25, 25, 28, 210)
+            fm = painter.fontMetrics()
+            anchors = []
+            if self._show_y_ticks:
+                anchors.extend(par_anch)
+            if self._show_x_ticks:
+                anchors.extend(mer_anch)
+            for ax, ay, txt in anchors:
+                tw = fm.horizontalAdvance(txt)
+                th = fm.height()
+                tx = int(np.clip(ax - tw / 2, 4, vw - tw - 4))
+                ty = int(np.clip(ay - th / 2, 4, vh - th - 4))
+                painter.fillRect(tx - 2, ty - 2, tw + 4, th + 4, bg)
+                painter.drawText(tx, ty + fm.ascent(), txt)
+
     def _draw_axis_tick_overlays(
         self,
         painter: QPainter,
@@ -1116,10 +1420,9 @@ class TiledImageWidget(QAbstractScrollArea):
             font_y = QFont()
             font_y.setPointSize(10)
             painter.setFont(font_y)
+            fm_y = painter.fontMetrics()
             label_h = 22
             half_h = label_h // 2
-            text_left = EDGE
-            text_w = max(1, _TICK_X - 4 - text_left)
 
             py0 = vv / yz
             py1 = (vv + vh) / yz
@@ -1139,13 +1442,10 @@ class TiledImageWidget(QAbstractScrollArea):
             else:
                 off_lo, off_hi = lo - center, hi - center
                 tick_vals = _nice_tick_values(off_lo, off_hi, 8) + center
+
+            # Pre-format all labels so we can measure the widest before drawing.
+            tick_items: list[tuple[float, str]] = []
             for abs_val in tick_vals:
-                sy = self._y_physical_to_screen_y(abs_val, yz, vv)
-                if not (-20 < sy < vh + 20):
-                    continue
-                iy = round(sy)
-                if not (0 <= iy < vh):
-                    continue
                 if self._y_tick_labels_absolute:
                     if self._body_sphere:
                         txt = f'{abs_val:.0f}°'
@@ -1154,15 +1454,31 @@ class TiledImageWidget(QAbstractScrollArea):
                 else:
                     off = abs_val - center
                     txt = f'{off:.0f}'
-                tr = QRect(text_left, iy - half_h, text_w, label_h)
+                tick_items.append((abs_val, txt))
+
+            max_label_w = max((fm_y.horizontalAdvance(t) for _, t in tick_items), default=1)
+            y_tick_stub = 4
+            y_text_left = EDGE
+            y_text_w = max(max_label_w, 1)
+            y_tick_x = y_text_left + y_text_w + 4
+            y_left = y_tick_x + y_tick_stub
+
+            for abs_val, txt in tick_items:
+                sy = self._y_physical_to_screen_y(abs_val, yz, vv)
+                if not (-20 < sy < vh + 20):
+                    continue
+                iy = round(sy)
+                if not (0 <= iy < vh):
+                    continue
+                tr = QRect(y_text_left, iy - half_h, y_text_w, label_h)
                 if tr.top() < EDGE:
                     tr.moveTop(EDGE)
                 if tr.bottom() > vh - EDGE:
                     tr.moveBottom(vh - EDGE)
-                line_r = QRect(_TICK_X, iy, max(1, _LEFT - _TICK_X), 1)
+                line_r = QRect(y_tick_x, iy, max(1, y_left - y_tick_x), 1)
                 bg_r = line_r.united(tr).adjusted(-pad, -pad, pad, pad)
                 painter.fillRect(bg_r, bg_col)
-                painter.drawLine(_TICK_X, iy, _LEFT, iy)
+                painter.drawLine(y_tick_x, iy, y_left, iy)
                 painter.drawText(
                     tr, int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter), txt
                 )
@@ -1197,6 +1513,47 @@ class TiledImageWidget(QAbstractScrollArea):
         mods = event.modifiers()
         vx = int(event.position().x())
         vy = int(event.position().y())
+
+        # Non-RECT projections handle left-drag for yaw/pitch or pan
+        if self._proj_kind != ProjectionKind.RECT:
+            if btn == Qt.MouseButton.LeftButton:
+                if mods & Qt.KeyboardModifier.ControlModifier:
+                    return  # ctrl-click not meaningful in projection mode
+                shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
+                is_3d = self._proj_kind == ProjectionKind.SPHERE_3D
+                if is_3d and not shift:
+                    # 3D plain left-drag: rotate (yaw / pitch)
+                    self._proj_drag_start = QPoint(vx, vy)
+                    self._proj_drag_start_yaw = self._yaw_deg
+                    self._proj_drag_start_pitch = self._pitch_deg
+                    self._proj_drag_is_pan = False
+                    self.viewport().setCursor(QCursor(Qt.CursorShape.ClosedHandCursor))
+                elif is_3d and shift:
+                    # 3D Shift+left-drag: pan sphere centre
+                    self._proj_drag_start = QPoint(vx, vy)
+                    self._proj_drag_start_cx = self._proj_cx
+                    self._proj_drag_start_cy = self._proj_cy
+                    self._proj_drag_is_pan = True
+                    self.viewport().setCursor(QCursor(Qt.CursorShape.ClosedHandCursor))
+                elif not is_3d and shift:
+                    # 2D non-RECT Shift+left-drag: zoom-to-rect rubber band
+                    origin = QPoint(vx, vy)
+                    self._rubber_origin = origin
+                    if self._rubber_band is None:
+                        self._rubber_band = QRubberBand(
+                            QRubberBand.Shape.Rectangle, self.viewport()
+                        )
+                    self._rubber_band.setGeometry(QRect(origin, QSize()))
+                    self._rubber_band.show()
+                else:
+                    # 2D non-RECT plain left-drag: pan
+                    self._proj_drag_start = QPoint(vx, vy)
+                    self._proj_drag_start_cx = self._proj_cx
+                    self._proj_drag_start_cy = self._proj_cy
+                    self._proj_drag_is_pan = True
+                    self.viewport().setCursor(QCursor(Qt.CursorShape.ClosedHandCursor))
+            return
+
         px, py = self.viewport_to_pixel(vx, vy)
         in_bounds = self._image_ma is not None and 0 <= px < self._n_cols and 0 <= py < self._n_rows
 
@@ -1231,11 +1588,45 @@ class TiledImageWidget(QAbstractScrollArea):
     def _mouse_move(self, event: QMouseEvent) -> None:
         vx = int(event.position().x())
         vy = int(event.position().y())
+        mods = event.modifiers()
+
+        if self._proj_kind != ProjectionKind.RECT:
+            # Emit viewport coords; body_window.py calls viewport_to_lonlat for geo lookup
+            _, _, on_surface = self.viewport_to_lonlat(vx, vy)
+            self.mouse_moved.emit(float(vx), float(vy), on_surface)
+
+            # Handle rubber-band (2D non-RECT Shift+left)
+            if (
+                self._rubber_origin is not None
+                and self._rubber_band is not None
+                and mods & Qt.KeyboardModifier.ShiftModifier
+            ):
+                self._rubber_band.setGeometry(
+                    QRect(self._rubber_origin, QPoint(vx, vy)).normalized()
+                )
+                return
+
+            if self._proj_drag_start is not None:
+                dx = vx - self._proj_drag_start.x()
+                dy = vy - self._proj_drag_start.y()
+                if self._proj_drag_is_pan:
+                    self._proj_cx = self._proj_drag_start_cx + dx
+                    self._proj_cy = self._proj_drag_start_cy + dy
+                else:
+                    # 3D rotation: drag right → yaw decreases (see more west);
+                    # drag down → pitch increases (see more north).
+                    k = 180.0 / (math.pi * max(self._proj_scale, 1.0))
+                    self._yaw_deg = self._proj_drag_start_yaw - dx * k
+                    self._pitch_deg = float(
+                        np.clip(self._proj_drag_start_pitch + dy * k, -90.0, 90.0)
+                    )
+                self.viewport().update()
+            return
+
         px, py = self.viewport_to_pixel(vx, vy)
         in_bounds = self._image_ma is not None and 0 <= px < self._n_cols and 0 <= py < self._n_rows
         self.mouse_moved.emit(px, py, in_bounds)
 
-        mods = event.modifiers()
         if (
             self._rubber_origin is not None
             and self._rubber_band is not None
@@ -1258,9 +1649,15 @@ class TiledImageWidget(QAbstractScrollArea):
             rect = self._rubber_band.geometry()
             self._rubber_band.hide()
             self._rubber_origin = None
-            self._apply_zoom_to_rect(rect)
+            if self._proj_kind != ProjectionKind.RECT:
+                self._apply_zoom_to_rect_proj(rect)
+            else:
+                self._apply_zoom_to_rect(rect)
             return
-        self._drag_start_global = None
+        if self._proj_kind != ProjectionKind.RECT:
+            self._proj_drag_start = None
+        else:
+            self._drag_start_global = None
         self.viewport().setCursor(QCursor(Qt.CursorShape.ArrowCursor))
 
     def _apply_zoom_to_rect(self, viewport_rect: QRect) -> None:
@@ -1293,4 +1690,31 @@ class TiledImageWidget(QAbstractScrollArea):
         hbar.setValue(hx)
         vbar.setValue(hy)
         self.zoom_changed.emit(self._x_zoom, self._y_zoom)
+        self.viewport().update()
+
+    def _apply_zoom_to_rect_proj(self, viewport_rect: QRect) -> None:
+        """Zoom the non-RECT projection so the rubber-band fills the viewport.
+
+        Parameters:
+            viewport_rect: Selected rectangle in viewport pixel coordinates.
+        """
+        if viewport_rect.width() < 4 or viewport_rect.height() < 4:
+            return
+        vw = self.viewport().width()
+        vh = self.viewport().height()
+        min_s, _ = self._min_zoom_xy()
+        ratio = min(
+            float(vw) / float(viewport_rect.width()),
+            float(vh) / float(viewport_rect.height()),
+        )
+        new_scale = float(np.clip(self._proj_scale * ratio, min_s, 4000.0))
+        # Keep the rect centre pinned to the new viewport centre
+        rect_cx = float(viewport_rect.center().x())
+        rect_cy = float(viewport_rect.center().y())
+        norm_cx = (rect_cx - self._proj_cx) / self._proj_scale
+        norm_cy = (rect_cy - self._proj_cy) / self._proj_scale
+        self._proj_cx = vw / 2.0 - norm_cx * new_scale
+        self._proj_cy = vh / 2.0 - norm_cy * new_scale
+        self._proj_scale = new_scale
+        self.zoom_changed.emit(new_scale, new_scale)
         self.viewport().update()

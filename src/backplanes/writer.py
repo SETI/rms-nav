@@ -6,7 +6,7 @@ from filecache import FCPath
 from pdslogger import PdsLogger
 
 from nav.config import Config
-from nav.config.logger import DEFAULT_LOGGER
+from nav.config.logger import IMAGE_LOGGER
 from nav.obs import ObsSnapshot
 from nav.support.file import json_as_string
 
@@ -20,7 +20,7 @@ def write_fits(
     config: Config,
     bodies_result: dict[str, Any],
     rings_result: dict[str, Any] | None = None,
-    logger: PdsLogger = DEFAULT_LOGGER,
+    logger: PdsLogger = IMAGE_LOGGER,
 ) -> None:
     """Write FITS file and backplane metadata JSON using FCPath.
 

@@ -7,15 +7,6 @@ cross-feature date overlap), ring visibility before feature construction, the
 model logger, ``NavModelResult.uncertainty`` wiring, and the
 ``never_create_model`` / ``always_create_model`` flags.
 
-Parameters:
-    N/A. Module-level test collection only.
-
-Returns:
-    N/A.
-
-Raises:
-    N/A.
-
 Notes:
     All oops backplane calls are mocked so these tests run without
     OOPS_RESOURCES.
@@ -209,28 +200,10 @@ class TestConfigRetrieval:
     Covers missing planet, invalid planet block shape, required planet keys,
     ``features`` map validation, scalar validation, per-feature parsing, and
     all-masked ring-radius backplanes with ``always_create_model``.
-
-    Parameters:
-        N/A. Pytest collects instance methods from this class.
-
-    Returns:
-        N/A.
-
-    Raises:
-        N/A.
     """
 
     def test_no_closest_planet_returns_early(self) -> None:
         """Exit before config lookup when ``obs.closest_planet`` is missing.
-
-        Parameters:
-            None.
-
-        Returns:
-            None.
-
-        Raises:
-            None.
 
         Notes:
             Asserts ``model._models`` stays empty; no ``RingFeatureFilter`` or
@@ -248,15 +221,6 @@ class TestConfigRetrieval:
     def test_missing_planet_config_returns_early(self) -> None:
         """Exit when the closest planet has no entry under ``rings.ring_features``.
 
-        Parameters:
-            None.
-
-        Returns:
-            None.
-
-        Raises:
-            None.
-
         Notes:
             Uses ``URANUS`` as closest planet while the mock config only defines
             ``SATURN``. Asserts ``model._models`` is empty.
@@ -272,15 +236,6 @@ class TestConfigRetrieval:
 
     def test_planet_ring_block_not_dict_raises(self) -> None:
         """Reject a non-mapping planet block under ``rings.ring_features``.
-
-        Parameters:
-            None.
-
-        Returns:
-            None.
-
-        Raises:
-            None. ``pytest.raises`` expects ``ValueError`` from ``_create_model``.
 
         Notes:
             Planet entry is a list; message must name ``SATURN`` and require a dict.
@@ -307,15 +262,6 @@ class TestConfigRetrieval:
     def test_missing_epoch_raises(self) -> None:
         """Require ``epoch`` on the planet ring block.
 
-        Parameters:
-            None.
-
-        Returns:
-            None.
-
-        Raises:
-            None. ``pytest.raises`` expects ``ValueError`` mentioning ``epoch``.
-
         Notes:
             Removes ``epoch`` from an otherwise valid planet config before calling
             ``_create_model``.
@@ -334,15 +280,6 @@ class TestConfigRetrieval:
     def test_missing_fade_width_pix_raises(self) -> None:
         """Require ``fade_width_pix`` on the planet ring block.
 
-        Parameters:
-            None.
-
-        Returns:
-            None.
-
-        Raises:
-            None. ``pytest.raises`` expects ``ValueError`` for the missing key.
-
         Notes:
             Deletes ``fade_width_pix`` from the planet dict before ``_create_model``.
         """
@@ -359,15 +296,6 @@ class TestConfigRetrieval:
 
     def test_missing_min_allowed_fade_width_pix_raises(self) -> None:
         """Require ``min_allowed_fade_width_pix`` on the planet ring block.
-
-        Parameters:
-            None.
-
-        Returns:
-            None.
-
-        Raises:
-            None. ``pytest.raises`` expects ``ValueError`` for the missing key.
 
         Notes:
             Deletes that key before ``_create_model``.
@@ -386,15 +314,6 @@ class TestConfigRetrieval:
     def test_missing_min_feature_pixels_raises(self) -> None:
         """Require ``min_feature_pixels`` on the planet ring block.
 
-        Parameters:
-            None.
-
-        Returns:
-            None.
-
-        Raises:
-            None. ``pytest.raises`` expects ``ValueError`` for the missing key.
-
         Notes:
             Deletes ``min_feature_pixels`` before ``_create_model``.
         """
@@ -411,15 +330,6 @@ class TestConfigRetrieval:
 
     def test_missing_features_key_raises(self) -> None:
         """Require a ``features`` key on the planet ring block.
-
-        Parameters:
-            None.
-
-        Returns:
-            None.
-
-        Raises:
-            None. ``pytest.raises`` expects ``ValueError`` mentioning ``features``.
 
         Notes:
             Ring backplanes are mocked so validation runs before visibility-only
@@ -440,15 +350,6 @@ class TestConfigRetrieval:
     def test_features_not_dict_raises(self) -> None:
         """Require ``features`` to be a mapping, not a sequence or scalar.
 
-        Parameters:
-            None.
-
-        Returns:
-            None.
-
-        Raises:
-            None. ``pytest.raises`` expects ``ValueError`` with ``must be a dict``.
-
         Notes:
             Sets ``planet_config['features']`` to a list before ``_create_model``.
         """
@@ -467,16 +368,6 @@ class TestConfigRetrieval:
     def test_invalid_fade_width_pix_raises(self) -> None:
         """Reject non-positive ``fade_width_pix`` scalars.
 
-        Parameters:
-            None.
-
-        Returns:
-            None.
-
-        Raises:
-            None. ``pytest.raises`` expects ``ValueError`` mentioning
-            ``fade_width_pix``.
-
         Notes:
             Uses ``fade_width_pix=0.0`` in the planet config.
         """
@@ -492,15 +383,6 @@ class TestConfigRetrieval:
     def test_invalid_min_allowed_raises(self) -> None:
         """Reject non-positive ``min_allowed_fade_width_pix`` scalars.
 
-        Parameters:
-            None.
-
-        Returns:
-            None.
-
-        Raises:
-            None. ``pytest.raises`` expects ``ValueError`` for that key.
-
         Notes:
             Sets ``min_allowed_fade_width_pix`` to ``-1.0``.
         """
@@ -515,15 +397,6 @@ class TestConfigRetrieval:
 
     def test_bool_fade_width_pix_raises(self) -> None:
         """Reject boolean ``fade_width_pix`` (must not pass as numeric).
-
-        Parameters:
-            None.
-
-        Returns:
-            None.
-
-        Raises:
-            None. ``pytest.raises`` expects ``ValueError`` mentioning bool.
 
         Notes:
             Assigns ``True`` to ``fade_width_pix`` in the planet dict.
@@ -542,15 +415,6 @@ class TestConfigRetrieval:
     def test_nan_min_feature_pixels_raises(self) -> None:
         """Reject non-finite ``min_feature_pixels`` (e.g. NaN).
 
-        Parameters:
-            None.
-
-        Returns:
-            None.
-
-        Raises:
-            None. ``pytest.raises`` expects ``ValueError`` for ``min_feature_pixels``.
-
         Notes:
             Sets ``min_feature_pixels`` to ``float('nan')``.
         """
@@ -567,15 +431,6 @@ class TestConfigRetrieval:
 
     def test_malformed_feature_raises(self) -> None:
         """Fail when ``RingFeature.from_config`` rejects a feature entry.
-
-        Parameters:
-            None.
-
-        Returns:
-            None.
-
-        Raises:
-            None. ``pytest.raises`` expects ``ValueError`` mentioning ``feature_type``.
 
         Notes:
             Supplies an invalid ``feature_type`` string under a feature key while
@@ -597,16 +452,6 @@ class TestConfigRetrieval:
     def test_non_dict_feature_raises(self) -> None:
         """Reject feature map values that are not dicts.
 
-        Parameters:
-            None.
-
-        Returns:
-            None.
-
-        Raises:
-            None. ``pytest.raises`` expects ``ValueError`` naming planet, feature
-            key, and ``must be a dict``.
-
         Notes:
             Sets ``features['bad']`` to a string before ``_create_model``.
         """
@@ -623,15 +468,6 @@ class TestConfigRetrieval:
 
     def test_no_ring_visibility_returns_empty_model(self) -> None:
         """When the ring radius backplane is all-masked, optionally emit an empty model.
-
-        Parameters:
-            None.
-
-        Returns:
-            None.
-
-        Raises:
-            None.
 
         Notes:
             Uses ``radii_all_masked=True`` on the mock backplane and
@@ -651,15 +487,6 @@ class TestConfigRetrieval:
 
     def test_no_ring_visibility_no_model_when_not_always(self) -> None:
         """When all-masked and ``always_create_model`` is false, append no models.
-
-        Parameters:
-            None.
-
-        Returns:
-            None.
-
-        Raises:
-            None.
 
         Notes:
             Same backplane mock as the ``always_create_model`` case but expects
@@ -686,29 +513,10 @@ class TestCrossFeatureValidation:
 
     Ensures ``validate_no_date_overlaps`` rejects overlapping validity intervals
     when radial extents intersect.
-
-    Parameters:
-        N/A.
-
-    Returns:
-        N/A.
-
-    Raises:
-        N/A.
     """
 
     def test_overlapping_dated_features_raises(self) -> None:
         """Raise when two dated ringlets share a radial band with overlapping dates.
-
-        Parameters:
-            None.
-
-        Returns:
-            None.
-
-        Raises:
-            None. ``pytest.raises`` expects ``ValueError`` with ``overlapping date
-            ranges``.
 
         Notes:
             Builds two ``RINGLET`` features with identical radii and half-open date
@@ -753,15 +561,6 @@ class TestFilterIntegration:
 
     Mocks the filter and render context while asserting logger threading and
     ``NavModelResult`` creation when features survive filtering.
-
-    Parameters:
-        N/A.
-
-    Returns:
-        N/A.
-
-    Raises:
-        N/A.
     """
 
     def _make_render_result(self, shape: tuple[int, int]) -> MagicMock:
@@ -773,9 +572,6 @@ class TestFilterIntegration:
         Returns:
             ``MagicMock`` with ``model_img``, ``model_mask``, ``uncertainty``, and
             empty ``edge_info_list``.
-
-        Raises:
-            None.
 
         Notes:
             ``uncertainty`` is fixed at ``2.5`` for the happy-path integration test.
@@ -789,15 +585,6 @@ class TestFilterIntegration:
 
     def test_surviving_feature_creates_model_result(self) -> None:
         """Create one ``NavModelResult`` when the filter returns a renderable feature.
-
-        Parameters:
-            None.
-
-        Returns:
-            None.
-
-        Raises:
-            None.
 
         Notes:
             Patches ``RingFeatureFilter`` and ``RingsRenderContext``. Asserts each
@@ -840,15 +627,6 @@ class TestFilterIntegration:
     def test_all_features_filtered_out_no_model(self) -> None:
         """Append no models when the filter returns an empty feature list.
 
-        Parameters:
-            None.
-
-        Returns:
-            None.
-
-        Raises:
-            None.
-
         Notes:
             Patches ``RingFeatureFilter`` so ``filter`` returns ``[]``. Asserts
             ``model._models`` is empty and the filter still receives
@@ -879,29 +657,10 @@ class TestFilterIntegration:
 
 
 class TestUncertaintyWiring:
-    """Propagation of per-feature render uncertainty into ``NavModelResult``.
-
-    Parameters:
-        N/A.
-
-    Returns:
-        N/A.
-
-    Raises:
-        N/A.
-    """
+    """Propagation of per-feature render uncertainty into ``NavModelResult``."""
 
     def test_uncertainty_wired_from_render_result(self) -> None:
         """Copy ``render_result.uncertainty`` onto the appended ``NavModelResult``.
-
-        Parameters:
-            None.
-
-        Returns:
-            None.
-
-        Raises:
-            None.
 
         Notes:
             Uses a mocked ``GAP`` feature returning a render result with
@@ -947,29 +706,10 @@ class TestUncertaintyWiring:
 
 
 class TestNeverCreateModel:
-    """``never_create_model`` metadata path without image generation.
-
-    Parameters:
-        N/A.
-
-    Returns:
-        N/A.
-
-    Raises:
-        N/A.
-    """
+    """``never_create_model`` metadata path without image generation."""
 
     def test_never_create_model_no_images(self) -> None:
         """Populate ``_metadata`` and skip ``NavModelResult`` list growth.
-
-        Parameters:
-            None.
-
-        Returns:
-            None.
-
-        Raises:
-            None.
 
         Notes:
             Sets ``never_create_model=True`` after resetting ``model._metadata``.

@@ -122,7 +122,9 @@ Retrieval methods
 
 All retrieval methods return a :class:`~nav.reproj.bodies.BodyMosaicData`
 frozen dataclass with masked arrays for image data, resolution, phase,
-emission, incidence, and observation metadata:
+emission, incidence, observation time and image-number metadata, plus
+per-contributing-image sub-solar and sub-observer longitudes and latitudes
+(see below):
 
 - :meth:`~nav.reproj.bodies.BodyMosaic.to_bounded` -- return the mosaic
   clipped to the data bounds or a user-specified range.
@@ -314,6 +316,32 @@ In Python, pass ``image_name=...`` to :meth:`~nav.reproj.rings.RingMosaic.reproj
 and :meth:`~nav.reproj.bodies.BodyMosaic.reproject`.  The ``nav_mosaic`` CLI
 stores the dataset image stem per file by default; pass ``--image-name LABEL``
 to use the same label for every image in the run instead.
+
+Sub-solar and sub-observer geometry (body reprojection and mosaics)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For bodies only, each :class:`~nav.reproj.bodies.BodyReprojResult` records the
+sub-solar and sub-observer longitude and latitude on the body at the
+observation midtime, using the same ``latlon_type`` and ``lon_direction`` as
+the reprojection.  Fields are ``sub_solar_lon``, ``sub_solar_lat``,
+``sub_observer_lon``, and ``sub_observer_lat`` (all **radians**).  They are
+written by ``save()`` / ``load()`` alongside the image and geometry arrays.
+
+Each :class:`~nav.reproj.bodies.BodyMosaicData` adds parallel **per-image**
+1-D ``float64`` arrays—``sub_solar_lon_per_image``,
+``sub_solar_lat_per_image``, ``sub_observer_lon_per_image``, and
+``sub_observer_lat_per_image``—with length equal to the number of contributing
+images.  Index ``k`` matches ``contributing_image_names[k]`` and pixels whose
+``image_number`` equals ``k``.
+
+Older mosaic or reprojection files that omit the sub-observer fields load with
+those values set to zero.  Files that omit the per-image arrays load with empty
+arrays for those fields.
+
+The body mosaic viewer (:class:`~nav.ui.mosaic_viewer.body_window.BodyMosaicWindow`)
+shows sub-solar and sub-observer longitude and latitude in degrees in the
+**Cursor Info** panel, indexed by the contributing image for the pixel under
+the cursor (or image index ``0`` for a single reprojection file).
 
 Cartographic navigation model
 -------------------------------
@@ -650,3 +678,75 @@ Interactive controls
   columns not present in the file (inertial longitude, true anomaly) are omitted.
 - **Cursor info** — for mosaics, the source-image line uses stored contributing
   names in the form ``imagename (#k)`` when available.
+
+Projection selector (body mosaics)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The **Projection** combo box in the body-mosaic window header selects how the
+360 x 180 degree lat/lon grid is displayed.  Five modes are available:
+
+.. list-table::
+   :widths: 20 80
+   :header-rows: 1
+
+   * - Mode
+     - Description
+   * - Rectangular
+     - Default equirectangular (plate carrée) display.  All existing
+       controls work as before.
+   * - Polar North Stereographic
+     - Stereographic projection centred on the north pole.  Best for
+       inspecting polar features with low distortion.
+   * - Polar South Stereographic
+     - Same as Polar North but centred on the south pole.
+   * - Mollweide
+     - Equal-area global projection.  Polar regions are far less distorted
+       than in Rectangular mode.
+   * - 3D Sphere
+     - Orthographic sphere view.  Left-drag rotates the globe
+       (yaw/pitch); Shift+Left-drag pans the sphere within the
+       viewport; scroll wheel zooms; **Reset Zoom** fits the sphere to
+       the window.
+
+In all non-rectangular modes the graticule (parallels and meridians) is drawn
+as curved polylines that follow the projection geometry.  The **Show parallels**
+and **Show meridians** checkboxes in the Overlays panel and the **Latitude axis
+ticks** / **Longitude axis ticks** checkboxes in the header control the overlay
+in every mode.
+
+The ``nav_mosaic_display_body`` command accepts a ``--projection`` flag to
+start in a non-default mode::
+
+    nav_mosaic_display_body --projection sphere3d my_mosaic.npz
+    nav_mosaic_display_body --projection polar_n  polar_mosaic.npz
+
+Valid values for ``--projection`` are ``rect``, ``polar_n``, ``polar_s``,
+``mollweide``, and ``sphere3d``.
+
+Mouse bindings summary
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. list-table::
+   :widths: 20 20 20 20 20
+   :header-rows: 1
+
+   * - Mode
+     - Left drag
+     - Shift+Left drag
+     - Wheel
+     - Reset Zoom
+   * - Rectangular
+     - Pan
+     - Zoom to region
+     - Zoom both axes
+     - Fit image
+   * - Polar N/S / Mollweide
+     - Pan
+     - Zoom to region
+     - Zoom
+     - Fit projection
+   * - 3D Sphere
+     - Rotate (yaw/pitch)
+     - Pan sphere
+     - Zoom
+     - Fit sphere

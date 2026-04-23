@@ -29,8 +29,17 @@ sys.path.insert(0, package_source_path)
 from PyQt6.QtWidgets import QApplication
 
 from nav.ui.mosaic_viewer.body_window import BodyMosaicWindow
+from nav.ui.mosaic_viewer.projections import ProjectionKind
 from nav.ui.mosaic_viewer.ring_window import RingMosaicWindow
 from reproj_cli.args import add_display_args
+
+_PROJ_CHOICES = {
+    'rect': ProjectionKind.RECT,
+    'polar_n': ProjectionKind.POLAR_N,
+    'polar_s': ProjectionKind.POLAR_S,
+    'mollweide': ProjectionKind.MOLLWEIDE,
+    'sphere3d': ProjectionKind.SPHERE_3D,
+}
 
 
 def _build_parser(mode: str) -> argparse.ArgumentParser:
@@ -60,6 +69,18 @@ def _build_parser(mode: str) -> argparse.ArgumentParser:
         help='One or more reprojection or mosaic files to display.',
     )
     add_display_args(parser)
+    if mode == 'body':
+        parser.add_argument(
+            '--projection',
+            choices=list(_PROJ_CHOICES),
+            default='rect',
+            metavar='PROJ',
+            help=(
+                'Initial display projection: rect (rectangular), polar_n '
+                '(Polar North Stereographic), polar_s (Polar South Stereographic), '
+                'mollweide (Mollweide), sphere3d (3D Sphere). Default: rect.'
+            ),
+        )
     return parser
 
 
@@ -79,6 +100,7 @@ def _run_rings(args: argparse.Namespace) -> None:
 
 def _run_body(args: argparse.Namespace) -> None:
     app = QApplication.instance() or QApplication(sys.argv[:1])
+    proj_kind = _PROJ_CHOICES.get(getattr(args, 'projection', 'rect'), ProjectionKind.RECT)
     win = BodyMosaicWindow(
         file_paths=args.files,
         initial_black=args.stretch_black,
@@ -88,6 +110,7 @@ def _run_body(args: argparse.Namespace) -> None:
         show_meridians=args.show_meridians,
         show_lat_ticks=True,
         show_lon_ticks=True,
+        initial_projection=proj_kind,
     )
     win.show()
     sys.exit(app.exec())

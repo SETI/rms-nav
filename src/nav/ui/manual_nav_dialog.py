@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import math
 from typing import Any, cast
 
@@ -231,7 +229,7 @@ class _CorrMapDialog(QDialog):
 class _ImageLabel(QLabel):
     """Image label that forwards input events to the dialog handlers."""
 
-    def __init__(self, owner_dialog: ManualNavDialog) -> None:
+    def __init__(self, owner_dialog: 'ManualNavDialog') -> None:
         super().__init__()
         self._owner = owner_dialog
 

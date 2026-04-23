@@ -90,10 +90,7 @@ class ObsSnapshot(Obs, Snapshot):
         )
         self.reset_all()
 
-        try:
-            # Will already be set for simulated observations
-            _ = self._closest_planet  # type: ignore
-        except AttributeError:
+        if not hasattr(self, '_closest_planet'):
             closest_planet = None
             closest_dist = 1e38
             for planet in self._config.planets:

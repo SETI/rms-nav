@@ -7,7 +7,7 @@ from numpy.fft import fft2, fftfreq, ifft2, ifftshift
 from pdslogger import PdsLogger
 from scipy.ndimage import gaussian_filter
 
-from nav.config import DEFAULT_LOGGER
+from nav.config import IMAGE_LOGGER
 from nav.support.image import crop_center, normalize_array, pad_top_left
 from nav.support.misc import mad_std
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
@@ -654,7 +654,7 @@ def navigate_with_pyramid_kpeaks(
     """
 
     if logger is None:
-        logger = DEFAULT_LOGGER
+        logger = IMAGE_LOGGER
 
     logger.debug('Navigating with pyramid kpeaks:')
     logger.debug(f'  Pyramid levels: {pyramid_levels}')

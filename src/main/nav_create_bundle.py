@@ -22,7 +22,7 @@ sys.path.insert(0, package_source_path)
 
 from nav.config import (
     DEFAULT_CONFIG,
-    DEFAULT_LOGGER,
+    MAIN_LOGGER,
     get_backplane_results_root,
     get_nav_results_root,
     get_pds4_bundle_results_root,
@@ -35,7 +35,6 @@ from pds4.collections import generate_collection_files, generate_global_index_fi
 
 DATASET: DataSet | None = None
 DATASET_NAME: str | None = None
-MAIN_LOGGER: pdslogger.PdsLogger | None = None
 
 
 def add_common_arguments(parser: argparse.ArgumentParser, *, for_labels: bool = False) -> None:
@@ -173,9 +172,6 @@ def main_labels() -> None:
     bundle_results_root_str = get_pds4_bundle_results_root(arguments, DEFAULT_CONFIG)
     bundle_results_root = FileCache(None).new_path(bundle_results_root_str)
 
-    global MAIN_LOGGER
-    MAIN_LOGGER = DEFAULT_LOGGER
-
     pdstemplate.PdsTemplate.set_logger(MAIN_LOGGER)
 
     assert DATASET is not None
@@ -222,9 +218,6 @@ def main_summary() -> None:
 
     bundle_results_root_str = get_pds4_bundle_results_root(arguments, DEFAULT_CONFIG)
     bundle_results_root = FileCache(None).new_path(bundle_results_root_str)
-
-    global MAIN_LOGGER
-    MAIN_LOGGER = DEFAULT_LOGGER
 
     pdstemplate.PdsTemplate.set_logger(MAIN_LOGGER)
 

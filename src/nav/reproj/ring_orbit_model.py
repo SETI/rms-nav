@@ -171,3 +171,19 @@ BRING_OUTER_EDGE = RingOrbitModel(
     mean_motion=758.768 * math.pi / 180.0,
     epoch_utc='2009-08-11',
 )
+
+_KNOWN_ORBIT_MODELS: dict[str, RingOrbitModel] = {
+    m.name: m for m in (FRING_CORE, BRING_OUTER_EDGE)
+}
+
+
+def get_orbit_model_by_name(name: str) -> RingOrbitModel | None:
+    """Return a pre-defined :class:`RingOrbitModel` by its name, or ``None``.
+
+    Parameters:
+        name: Model name (e.g. ``'FRING-CORE'``).
+
+    Returns:
+        The matching :class:`RingOrbitModel`, or ``None`` if unknown.
+    """
+    return _KNOWN_ORBIT_MODELS.get(name)

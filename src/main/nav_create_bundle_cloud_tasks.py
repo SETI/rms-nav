@@ -21,7 +21,7 @@ sys.path.insert(0, package_source_path)
 
 from nav.config import (
     DEFAULT_CONFIG,
-    DEFAULT_LOGGER,
+    IMAGE_LOGGER,
     get_backplane_results_root,
     get_nav_results_root,
     get_pds4_bundle_results_root,
@@ -100,7 +100,7 @@ def process_task(
         nav_results_root=nav_results_root,
         backplane_results_root=backplane_results_root,
         bundle_results_root=bundle_results_root,
-        logger=DEFAULT_LOGGER,
+        logger=IMAGE_LOGGER,
     )
 
     return False, {'status': 'success'}  # No retry under any circumstances

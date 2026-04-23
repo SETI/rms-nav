@@ -5,7 +5,7 @@ import oops
 from filecache import FCPath
 
 from nav.config import DEFAULT_CONFIG
-from nav.config.logger import DEFAULT_LOGGER
+from nav.config.logger import IMAGE_LOGGER
 from nav.dataset.dataset import ImageFiles
 from nav.obs import ObsSnapshot, ObsSnapshotInst
 
@@ -33,7 +33,7 @@ def generate_backplanes_image_files(
         write_output_files: Whether to write outputs to storage.
     """
 
-    logger = DEFAULT_LOGGER
+    logger = IMAGE_LOGGER
     config = DEFAULT_CONFIG
 
     if len(image_files.image_files) != 1:

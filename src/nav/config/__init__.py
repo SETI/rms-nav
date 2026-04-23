@@ -6,7 +6,6 @@ from .config_helper import (
     load_default_and_user_config,
 )
 from .logger import (
-    DEFAULT_LOGGER,
     IMAGE_LOGGER,
     MAIN_LOGGER,
     image_log_handlers,
@@ -15,7 +14,6 @@ from .logger import (
 
 __all__ = [
     'DEFAULT_CONFIG',
-    'DEFAULT_LOGGER',
     'IMAGE_LOGGER',
     'MAIN_LOGGER',
     'Config',

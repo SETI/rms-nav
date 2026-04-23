@@ -162,16 +162,16 @@ def add_body_args(parser: argparse.ArgumentParser) -> None:
     grp.add_argument(
         '--max-incidence',
         type=float,
-        default=70.0,
+        default=None,
         metavar='DEG',
-        help='Maximum incidence angle (deg) for valid pixels. Default: 70.',
+        help='Maximum incidence angle (deg) for valid pixels. Default: no limit.',
     )
     grp.add_argument(
         '--max-emission',
         type=float,
-        default=70.0,
+        default=None,
         metavar='DEG',
-        help='Maximum emission angle (deg) for valid pixels. Default: 70.',
+        help='Maximum emission angle (deg) for valid pixels. Default: no limit.',
     )
     grp.add_argument(
         '--max-resolution',

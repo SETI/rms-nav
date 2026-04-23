@@ -12,6 +12,7 @@ from PyQt6.QtGui import QFontMetrics, QResizeEvent
 from PyQt6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
+    QComboBox,
     QFileDialog,
     QFormLayout,
     QGridLayout,
@@ -36,14 +37,29 @@ from PyQt6.QtWidgets import (
 from nav.ui.common import build_stretch_controls
 from nav.ui.mosaic_viewer.common import BodyDisplayData, load_body_file
 from nav.ui.mosaic_viewer.photometric_display import compute_body_display_image
+from nav.ui.mosaic_viewer.projections import ProjectionKind
 from nav.ui.mosaic_viewer.tiled_image_widget import TiledImageWidget, slider_to_zoom, zoom_to_slider
 
 logger = logging.getLogger(__name__)
 
-STATUS_HINT = (
-    'Mouse wheel zooms both axes (Shift+wheel: X only, Ctrl+wheel: Y only). '
-    'Shift+Left to zoom to region, Left drag to pan.'
-)
+_STATUS_HINTS: dict[ProjectionKind, str] = {
+    ProjectionKind.RECT: (
+        'Mouse wheel zooms both axes (Shift+wheel: X only, Ctrl+wheel: Y only). '
+        'Shift+Left to zoom to region, Left drag to pan.'
+    ),
+    ProjectionKind.POLAR_N: (
+        'Polar North Stereographic. Left drag pans, Shift+Left zooms to region, wheel zooms.'
+    ),
+    ProjectionKind.POLAR_S: (
+        'Polar South Stereographic. Left drag pans, Shift+Left zooms to region, wheel zooms.'
+    ),
+    ProjectionKind.MOLLWEIDE: (
+        'Mollweide projection. Left drag pans, Shift+Left zooms to region, wheel zooms.'
+    ),
+    ProjectionKind.SPHERE_3D: (
+        'Left drag rotates (yaw/pitch). Shift+Left drag pans. Wheel zooms. Reset Zoom fits sphere.'
+    ),
+}
 
 
 def _percentile_stretch(
@@ -59,30 +75,36 @@ def _percentile_stretch(
     return black, white
 
 
-def _colorby_column(
+def _colorby_tint(
     data: np.ndarray | ma.MaskedArray,
-    n_cols: int,
     *,
     vmin: float | None = None,
     vmax: float | None = None,
 ) -> np.ndarray:
+    """Return per-pixel RGB tint (n_rows, n_cols, 3) float32 from a 2-D metadata array.
+
+    Parameters:
+        data: 2-D array (or masked array) of per-pixel scalar metadata values.
+        vmin: Lower clamp for the colour ramp; defaults to nanmin.
+        vmax: Upper clamp for the colour ramp; defaults to nanmax.
+
+    Returns:
+        Array of shape ``(n_rows, n_cols, 3)`` with float32 values in ``[0, 1]``.
+        Masked / NaN pixels receive the neutral tint ``(0.5, 0.5, 0.5)``.
+    """
     arr = np.asarray(data, dtype=np.float64)
     if isinstance(data, ma.MaskedArray):
-        mask = ma.getmaskarray(data)
-        arr = np.where(mask, np.nan, arr)
-    col_means = np.nanmean(arr, axis=0)
-    if col_means.size < n_cols:
-        col_means = np.resize(col_means, n_cols)
-    lo = float(np.nanmin(col_means)) if vmin is None else vmin
-    hi = float(np.nanmax(col_means)) if vmax is None else vmax
+        arr = np.where(ma.getmaskarray(data), np.nan, arr)
+    lo = float(np.nanmin(arr)) if vmin is None else vmin
+    hi = float(np.nanmax(arr)) if vmax is None else vmax
     if hi <= lo:
         hi = lo + 1e-6
-    t = np.clip((col_means - lo) / (hi - lo), 0.0, 1.0)
+    t = np.clip((arr - lo) / (hi - lo), 0.0, 1.0)
     r = np.clip(1.5 * t - 0.5, 0.0, 1.0).astype(np.float32)
     g = np.clip(np.where(t < 0.5, 2.0 * t, 2.0 - 2.0 * t), 0.0, 1.0).astype(np.float32)
-    b = np.clip(0.5 - 1.5 * (t - 0.5 / 1.5), 0.0, 1.0).astype(np.float32)
-    rgb = np.stack([r, g, b], axis=1)
-    rgb[np.isnan(col_means)] = 0.5
+    b = np.clip(0.5 - 1.5 * (t - 1.0 / 3.0), 0.0, 1.0).astype(np.float32)
+    rgb = np.stack([r, g, b], axis=2)  # (n_rows, n_cols, 3)
+    rgb[np.isnan(arr)] = 0.5
     return rgb
 
 
@@ -173,6 +195,7 @@ class BodyMosaicWindow(QMainWindow):
         show_meridians: bool = False,
         show_lat_ticks: bool = False,
         show_lon_ticks: bool = False,
+        initial_projection: ProjectionKind = ProjectionKind.RECT,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -192,10 +215,21 @@ class BodyMosaicWindow(QMainWindow):
         self._stretch_controls: dict[str, Any] = {}
         self._pending_fit = False
         self._body_view_ma: ma.MaskedArray | None = None
+        self._proj_kind: ProjectionKind = initial_projection
+        self._colorby_alpha: float = 1.0
         self._setup_ui()
         self._chk_lat_ticks.setChecked(show_lat_ticks)
         self._chk_lon_ticks.setChecked(show_lon_ticks)
+        # Sync the combo to the initial projection without triggering the slot yet
+        self._proj_combo.blockSignals(True)
+        idx = self._proj_combo.findData(initial_projection)
+        if idx >= 0:
+            self._proj_combo.setCurrentIndex(idx)
+        self._proj_combo.blockSignals(False)
         self._load_file(0)
+        # Apply non-RECT projection after the first file is loaded
+        if self._proj_kind != ProjectionKind.RECT:
+            self._on_projection_changed()
 
     def statusBar(self) -> QStatusBar:
         bar = super().statusBar()
@@ -235,6 +269,28 @@ class BodyMosaicWindow(QMainWindow):
         self._chk_lon_ticks.toggled.connect(self._update_axis_ticks)
         hh.addWidget(self._chk_lat_ticks)
         hh.addWidget(self._chk_lon_ticks)
+        hh.addSpacing(16)
+        self._chk_parallels = QCheckBox('Show parallels (lat)')
+        self._chk_parallels.setChecked(self._show_parallels)
+        self._chk_parallels.toggled.connect(self._update_overlays)
+        self._chk_meridians = QCheckBox('Show meridians (lon)')
+        self._chk_meridians.setChecked(self._show_meridians)
+        self._chk_meridians.toggled.connect(self._update_overlays)
+        hh.addWidget(self._chk_parallels)
+        hh.addWidget(self._chk_meridians)
+        hh.addSpacing(16)
+        hh.addWidget(QLabel('Projection:'))
+        self._proj_combo = QComboBox()
+        for _kind, _label in [
+            (ProjectionKind.RECT, 'Rectangular'),
+            (ProjectionKind.POLAR_N, 'Polar North Stereographic'),
+            (ProjectionKind.POLAR_S, 'Polar South Stereographic'),
+            (ProjectionKind.MOLLWEIDE, 'Mollweide'),
+            (ProjectionKind.SPHERE_3D, '3D Sphere'),
+        ]:
+            self._proj_combo.addItem(_label, _kind)
+        self._proj_combo.currentIndexChanged.connect(self._on_projection_changed)
+        hh.addWidget(self._proj_combo)
         hh.addStretch()
         left_layout.addWidget(header)
 
@@ -258,7 +314,7 @@ class BodyMosaicWindow(QMainWindow):
         self._cursor_status_lbl = QLabel('')
         self._cursor_status_lbl.setStyleSheet('font-family: monospace;')
         self.statusBar().addPermanentWidget(self._cursor_status_lbl)
-        self.statusBar().showMessage(STATUS_HINT)
+        self.statusBar().showMessage(_STATUS_HINTS[ProjectionKind.RECT])
 
     def _build_right_panel(self) -> QWidget:
         right = QWidget()
@@ -286,18 +342,6 @@ class BodyMosaicWindow(QMainWindow):
         self._file_list.currentRowChanged.connect(self._on_file_list_row_changed)
         v.addWidget(self._file_list, stretch=1)
         self._populate_file_list()
-
-        overlay_box = QGroupBox('Overlays')
-        overlay_v = QVBoxLayout(overlay_box)
-        self._chk_parallels = QCheckBox('Show parallels (lat)')
-        self._chk_parallels.setChecked(self._show_parallels)
-        self._chk_parallels.toggled.connect(self._update_overlays)
-        self._chk_meridians = QCheckBox('Show meridians (lon)')
-        self._chk_meridians.setChecked(self._show_meridians)
-        self._chk_meridians.toggled.connect(self._update_overlays)
-        overlay_v.addWidget(self._chk_parallels)
-        overlay_v.addWidget(self._chk_meridians)
-        v.addWidget(overlay_box)
         return right
 
     def _populate_file_list(self) -> None:
@@ -446,13 +490,17 @@ class BodyMosaicWindow(QMainWindow):
             ],
             [
                 ('eff_res', 'Eff. resolution (km/px):'),
+                ('ssl_lon', 'Sub-solar lon:'),
+                ('ssl_lat', 'Sub-solar lat:'),
+                ('subobs_lon', 'Sub-observer lon:'),
+                ('subobs_lat', 'Sub-observer lat:'),
             ],
             [
                 ('image', 'Source image:'),
             ],
         ]
         self._info: dict[str, QLabel] = {}
-        name_w = 120
+        name_w = 150
         val_w_default = 132
         val_w_image = 300
         for col_idx, col in enumerate(info_columns):
@@ -468,6 +516,7 @@ class BodyMosaicWindow(QMainWindow):
                 info_grid.addWidget(nl, row_idx, base)
                 info_grid.addWidget(vl, row_idx, base + 1)
                 self._info[key] = vl
+        info_grid.setColumnStretch(len(info_columns) * 2, 1)
         lower_h.addWidget(info_box, stretch=1)
 
         colorby_box = QGroupBox('Color By')
@@ -492,6 +541,15 @@ class BodyMosaicWindow(QMainWindow):
                 if key == 'none':
                     btn.setChecked(True)
         self._colorby_group.buttonClicked.connect(self._on_colorby_changed)
+        alpha_row = QHBoxLayout()
+        alpha_row.setContentsMargins(0, 2, 0, 0)
+        alpha_row.addWidget(QLabel('Alpha:'))
+        self._colorby_alpha_slider = QSlider(Qt.Orientation.Horizontal)
+        self._colorby_alpha_slider.setRange(0, 100)
+        self._colorby_alpha_slider.setValue(100)
+        self._colorby_alpha_slider.valueChanged.connect(self._on_colorby_alpha_changed)
+        alpha_row.addWidget(self._colorby_alpha_slider)
+        cb_grid.addLayout(alpha_row, len(colorby_rows), 0, 1, 2)
         lower_h.addWidget(colorby_box)
 
         photometry_box = QGroupBox('Photometric')
@@ -580,6 +638,17 @@ class BodyMosaicWindow(QMainWindow):
             preserve_view=preserve_view,
         )
 
+    def _on_projection_changed(self, _idx: int = 0) -> None:
+        """Switch the display projection and reset the view."""
+        kind = self._proj_combo.currentData()
+        if kind is None:
+            return
+        self._proj_kind = kind
+        self._image_widget.set_projection(kind)
+        self.statusBar().showMessage(_STATUS_HINTS.get(kind, ''))
+        self._fit_zoom_to_window()
+        self._sync_zoom_ui()
+
     def _on_photometry_changed(self, _btn: Any = None) -> None:
         if self._display_data is None:
             return
@@ -645,7 +714,7 @@ class BodyMosaicWindow(QMainWindow):
         self._update_overlays(self._chk_parallels.isChecked())
         self._fit_zoom_to_window()
         self._sync_zoom_ui()
-        self.statusBar().showMessage(STATUS_HINT)
+        self.statusBar().showMessage(_STATUS_HINTS.get(self._proj_kind, ''))
         self._refresh_file_list_selection()
 
     # ------------------------------------------------------------------
@@ -689,16 +758,19 @@ class BodyMosaicWindow(QMainWindow):
         dd = self._display_data
         if dd is None:
             return
-        if self._image_widget.is_body_full_sphere_canvas():
-            n_rows, n_cols = self._image_widget.display_grid_shape()
-        else:
-            n_rows, n_cols = dd.image_ma.shape
         vw = self._image_widget.viewport().width()
         vh = self._image_widget.viewport().height()
         if vw <= 0 or vh <= 0:
             self._pending_fit = True
             return
         self._pending_fit = False
+        if self._proj_kind != ProjectionKind.RECT:
+            self._image_widget.fit_projection_to_window()
+            return
+        if self._image_widget.is_body_full_sphere_canvas():
+            n_rows, n_cols = self._image_widget.display_grid_shape()
+        else:
+            n_rows, n_cols = dd.image_ma.shape
         x_zoom = min(float(vw) / max(n_cols, 1), 100.0)
         y_zoom = min(float(vh) / max(n_rows, 1), 100.0)
         self._image_widget.set_zoom(x_zoom, y_zoom)
@@ -757,16 +829,34 @@ class BodyMosaicWindow(QMainWindow):
 
     def _on_colorby_changed(self, btn: Any) -> None:
         if btn is None or self._display_data is None:
-            self._image_widget.set_color_column(None)
+            self._image_widget.set_color_tint(None)
             return
         key = btn.property('colorby_key')
-        col = self._compute_color_column(str(key), self._display_data)
-        self._image_widget.set_color_column(col)
+        tint = self._compute_color_tint(str(key), self._display_data)
+        self._image_widget.set_color_tint(self._tint_with_alpha(tint))
 
-    def _compute_color_column(self, key: str, dd: BodyDisplayData) -> np.ndarray | None:
+    def _on_colorby_alpha_changed(self, value: int) -> None:
+        self._colorby_alpha = value / 100.0
+        self._on_colorby_changed(self._colorby_group.checkedButton())
+
+    def _tint_with_alpha(self, tint: np.ndarray | None) -> np.ndarray | None:
+        if tint is None or self._colorby_alpha >= 1.0:
+            return tint
+        return (self._colorby_alpha * tint + (1.0 - self._colorby_alpha)).astype(np.float32)
+
+    def _compute_color_tint(self, key: str, dd: BodyDisplayData) -> np.ndarray | None:
+        """Return per-pixel RGB tint (n_rows, n_cols, 3) float32, or None for greyscale.
+
+        Parameters:
+            key: Colorby radio button key string.
+            dd: Current display data containing metadata arrays.
+
+        Returns:
+            Float32 array of shape ``(n_rows, n_cols, 3)`` with values in
+            ``[0, 1]``, or ``None`` when no colorisation is requested.
+        """
         if key == 'none':
             return None
-        n_cols = dd.image_ma.shape[1]
         if key == 'image_no':
             if dd.image_number is None:
                 return None
@@ -774,28 +864,27 @@ class BodyMosaicWindow(QMainWindow):
             valid = ma.array(vals, mask=ma.getmaskarray(dd.image_number)).compressed()
             if valid.size == 0:
                 return None
-            return _colorby_column(
+            return _colorby_tint(
                 dd.image_number,
-                n_cols,
                 vmin=float(valid.min()),
                 vmax=float(valid.max()),
             )
         if key == 'res':
-            return _colorby_column(dd.resolution, n_cols)
+            return _colorby_tint(dd.resolution)
         if key == 'eff_res':
-            return _colorby_column(dd.eff_resolution, n_cols)
+            return _colorby_tint(dd.eff_resolution)
         if key == 'abs_phase':
-            return _colorby_column(dd.phase, n_cols, vmin=0.0, vmax=180.0)
+            return _colorby_tint(dd.phase, vmin=0.0, vmax=180.0)
         if key == 'rel_phase':
-            return _colorby_column(dd.phase, n_cols)
+            return _colorby_tint(dd.phase)
         if key == 'abs_emission':
-            return _colorby_column(dd.emission, n_cols, vmin=0.0, vmax=90.0)
+            return _colorby_tint(dd.emission, vmin=0.0, vmax=90.0)
         if key == 'rel_emission':
-            return _colorby_column(dd.emission, n_cols)
+            return _colorby_tint(dd.emission)
         if key == 'abs_incidence':
-            return _colorby_column(dd.incidence, n_cols, vmin=0.0, vmax=90.0)
+            return _colorby_tint(dd.incidence, vmin=0.0, vmax=90.0)
         if key == 'rel_incidence':
-            return _colorby_column(dd.incidence, n_cols)
+            return _colorby_tint(dd.incidence)
         return None
 
     def _update_colorby_widgets_for_mosaic(self, is_mosaic: bool) -> None:
@@ -892,28 +981,40 @@ class BodyMosaicWindow(QMainWindow):
             self._clear_info()
             return
         dd = self._display_data
+        n_c = dd.image_ma.shape[1]
+        n_r = dd.image_ma.shape[0]
+
+        if self._proj_kind != ProjectionKind.RECT:
+            # px/py are viewport coords; convert to geographic
+            lon_deg, lat_deg, on_surface = self._image_widget.viewport_to_lonlat(int(px), int(py))
+            if not on_surface:
+                self._clear_info()
+                return
+            dc, dr, inside = self._image_widget.body_sphere_data_indices(lon_deg, lat_deg)
+            coord_str = f'Lon: {lon_deg:9.4f}°  Lat: {lat_deg:8.4f}°'
+        else:
+            x_phys, y_phys = self._image_widget.pixel_to_physical(px, py)
+            lon_deg = float(x_phys)
+            lat_deg = float(y_phys)
+            lon_min, lon_max = dd.lon_range_deg
+            lat_min, _lat_max = dd.lat_range_deg
+            d_lon = dd.lon_resolution_deg
+            if self._image_widget.is_body_full_sphere_canvas():
+                dc, dr, inside = self._image_widget.body_sphere_data_indices(lon_deg, lat_deg)
+            else:
+                lm = lon_deg % 360.0
+                dc = -1
+                for cand in (lm, lm - 360.0, lm + 360.0):
+                    if lon_min - 1e-9 <= cand <= lon_max + 1e-9:
+                        dc = int(np.floor((cand - lon_min) / d_lon))
+                        break
+                dr = int(np.floor((lat_deg - lat_min) / dd.lat_resolution_deg))
+                inside = 0 <= dc < n_c and 0 <= dr < n_r
+            coord_str = f'X: {px:8.2f}  Y: {py:7.2f}'
+
         self._info['body'].setText(dd.body_name)
         self._info['latlon'].setText(f'{dd.latlon_type} / {dd.lon_direction}')
 
-        x_phys, y_phys = self._image_widget.pixel_to_physical(px, py)
-        lon_deg = float(x_phys)
-        lat_deg = float(y_phys)
-        lon_min, lon_max = dd.lon_range_deg
-        lat_min, _lat_max = dd.lat_range_deg
-        d_lon = dd.lon_resolution_deg
-        n_c = dd.image_ma.shape[1]
-        n_r = dd.image_ma.shape[0]
-        if self._image_widget.is_body_full_sphere_canvas():
-            dc, dr, inside = self._image_widget.body_sphere_data_indices(lon_deg, lat_deg)
-        else:
-            lm = lon_deg % 360.0
-            dc = -1
-            for cand in (lm, lm - 360.0, lm + 360.0):
-                if lon_min - 1e-9 <= cand <= lon_max + 1e-9:
-                    dc = int(np.floor((cand - lon_min) / d_lon))
-                    break
-            dr = int(np.floor((lat_deg - lat_min) / dd.lat_resolution_deg))
-            inside = 0 <= dc < n_c and 0 <= dr < n_r
         ix = int(np.clip(dc, 0, n_c - 1))
         iy = int(np.clip(dr, 0, n_r - 1))
 
@@ -943,13 +1044,30 @@ class BodyMosaicWindow(QMainWindow):
             else:
                 n0 = dd.contributing_image_names[0] if dd.contributing_image_names else ''
                 img_s = f'{n0} (#0)' if n0 else dd.title
+            # Sub-solar / sub-observer lon/lat: index by image_number for mosaics, or 0 for reproj
+            ssl_arr_lon = dd.sub_solar_lon_per_image_deg
+            ssl_arr_lat = dd.sub_solar_lat_per_image_deg
+            sol_arr_lon = dd.sub_observer_lon_per_image_deg
+            sol_arr_lat = dd.sub_observer_lat_per_image_deg
+            if dd.image_number is not None and not ma.is_masked(dd.image_number[iy, ix]):
+                geom_idx = int(dd.image_number[iy, ix])
+            else:
+                geom_idx = 0
+            if geom_idx < len(ssl_arr_lon):
+                ssl_lon_s = f'{ssl_arr_lon[geom_idx]:.4f}°'
+                ssl_lat_s = f'{ssl_arr_lat[geom_idx]:.4f}°'
+            else:
+                ssl_lon_s = ssl_lat_s = '---'
+            if geom_idx < len(sol_arr_lon):
+                subobs_lon_s = f'{sol_arr_lon[geom_idx]:.4f}°'
+                subobs_lat_s = f'{sol_arr_lat[geom_idx]:.4f}°'
+            else:
+                subobs_lon_s = subobs_lat_s = '---'
         else:
             ph = em = inc = res = eff = '---'
-            img_s = '---'
+            img_s = ssl_lon_s = ssl_lat_s = subobs_lon_s = subobs_lat_s = '---'
 
-        x_str = f'{px:8.2f}'
-        y_str = f'{py:7.2f}'
-        self._cursor_status_lbl.setText(f'X: {x_str}  Y: {y_str}  Value: {value_str}')
+        self._cursor_status_lbl.setText(f'{coord_str}  Value: {value_str}')
         self._info['lat'].setText(f'{lat_deg:.4f}°')
         self._info['lon'].setText(f'{lon_deg:.4f}°')
         self._info['phase'].setText(self._fmt_deg_label(ph))
@@ -957,6 +1075,10 @@ class BodyMosaicWindow(QMainWindow):
         self._info['incidence'].setText(self._fmt_deg_label(inc))
         self._info['res'].setText(f'{res} km/px' if res != '---' else '---')
         self._info['eff_res'].setText(f'{eff} km/px' if eff != '---' else '---')
+        self._info['ssl_lon'].setText(ssl_lon_s)
+        self._info['ssl_lat'].setText(ssl_lat_s)
+        self._info['subobs_lon'].setText(subobs_lon_s)
+        self._info['subobs_lat'].setText(subobs_lat_s)
         img_lbl = self._info['image']
         iw = img_lbl.width()
         if iw > 0 and img_s != '---':
@@ -969,8 +1091,9 @@ def _nice_overlay_step(span: float, max_lines: int = 8) -> float:
     if span <= 0:
         return 10.0
     raw = span / max_lines
-    preferred = [90, 60, 45, 30, 20, 15, 10, 5, 4, 3, 2, 1, 0.5]
+    # Ascending order: return the first (smallest) nice step >= raw.
+    preferred = [0.5, 1, 2, 3, 4, 5, 10, 15, 20, 30, 45, 60, 90]
     for s in preferred:
-        if raw <= s:
+        if s >= raw:
             return s
     return raw
