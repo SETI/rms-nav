@@ -11,7 +11,6 @@ import os
 import sys
 from typing import cast
 
-import pdslogger
 from filecache import FileCache
 
 # Make CLI runnable from source tree with

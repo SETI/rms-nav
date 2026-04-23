@@ -2,6 +2,7 @@
 
 import logging
 import math
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -38,7 +39,11 @@ from nav.ui.common import build_stretch_controls
 from nav.ui.mosaic_viewer.common import BodyDisplayData, load_body_file
 from nav.ui.mosaic_viewer.photometric_display import compute_body_display_image
 from nav.ui.mosaic_viewer.projections import ProjectionKind
-from nav.ui.mosaic_viewer.tiled_image_widget import TiledImageWidget, slider_to_zoom, zoom_to_slider
+from nav.ui.mosaic_viewer.tiled_image_widget import (
+    TiledImageWidget,
+    _slider_to_zoom,
+    _zoom_to_slider,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +70,18 @@ _STATUS_HINTS: dict[ProjectionKind, str] = {
 def _percentile_stretch(
     image_ma: ma.MaskedArray, lo_pct: float = 0.0, hi_pct: float = 98.0
 ) -> tuple[float, float]:
+    """Compute black/white stretch limits from valid pixels of a masked image.
+
+    Parameters:
+        image_ma: Input image; masked entries are ignored.
+        lo_pct: Lower percentile for black (default ``0.0``).
+        hi_pct: Upper percentile for white (default ``98.0``).
+
+    Returns:
+        ``(black, white)`` as ``tuple[float, float]``. If there are no valid pixels,
+        returns ``(0.0, 1.0)``. If ``white <= black`` after percentiles, ``white`` is
+        bumped to ``black + 1e-6``.
+    """
     valid = image_ma.compressed()
     if valid.size == 0:
         return 0.0, 1.0
@@ -118,8 +135,18 @@ class _SyncedSlider:
         lo: float,
         hi: float,
         fmt: str = '%.4f',
-        on_change: Any = None,
+        on_change: Callable[[float], None] | None = None,
     ) -> None:
+        """Wire ``line_edit`` and ``slider`` to the same numeric range ``[lo, hi]``.
+
+        Parameters:
+            line_edit: Text field showing the current value.
+            slider: Horizontal slider mapped linearly to ``[lo, hi]``.
+            lo: Lower bound of the numeric range.
+            hi: Upper bound of the numeric range.
+            fmt: ``printf``-style format for the line edit (default four decimals).
+            on_change: Optional callback invoked with the new float after each edit.
+        """
         self._le = line_edit
         self._sl = slider
         self._lo = lo
@@ -165,16 +192,19 @@ class _SyncedSlider:
             self._on_change(val)
 
     def set_range(self, lo: float, hi: float) -> None:
+        """Update the mapped numeric range without changing the current value text."""
         self._lo = lo
         self._hi = hi
 
     def set_value(self, val: float) -> None:
+        """Set slider and line edit to ``val`` (clamped by prior ``set_range`` calls)."""
         self._updating = True
         self._sl.setValue(self._to_slider(val))
         self._le.setText(self._fmt % val)
         self._updating = False
 
     def get_value(self) -> float:
+        """Return the current value, preferring a valid float from the line edit."""
         try:
             return float(self._le.text())
         except ValueError:
@@ -198,6 +228,25 @@ class BodyMosaicWindow(QMainWindow):
         initial_projection: ProjectionKind = ProjectionKind.RECT,
         parent: QWidget | None = None,
     ) -> None:
+        """PyQt6 viewer for a list of body reprojection or mosaic files.
+
+        Parameters:
+            file_paths: Non-empty list of paths to body ``.npz`` / ``.fits`` data.
+            initial_black: Optional fixed black level for stretch; ``None`` uses
+                percentile stretch after load.
+            initial_white: Optional fixed white level for stretch; ``None`` uses
+                percentile stretch after load.
+            initial_gamma: Initial display gamma (default ``0.5``).
+            show_parallels: Pre-check graticule parallels overlay.
+            show_meridians: Pre-check graticule meridians overlay.
+            show_lat_ticks: Pre-check latitude axis ticks.
+            show_lon_ticks: Pre-check longitude axis ticks.
+            initial_projection: Initial map projection kind.
+            parent: Optional Qt parent widget.
+
+        Raises:
+            ValueError: If ``file_paths`` is empty.
+        """
         super().__init__(parent)
         if not file_paths:
             raise ValueError('file_paths must contain at least one path')
@@ -237,8 +286,9 @@ class BodyMosaicWindow(QMainWindow):
         return bar
 
     def resizeEvent(self, event: QResizeEvent | None) -> None:
+        """Qt resize hook: finish a deferred fit-to-window when the viewport gets size."""
         super().resizeEvent(event)
-        if getattr(self, '_pending_fit', False):
+        if self._pending_fit:
             self._fit_zoom_to_window()
 
     # ------------------------------------------------------------------
@@ -246,6 +296,12 @@ class BodyMosaicWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _setup_ui(self) -> None:
+        """Build the main window UI (layouts, header, projection, image, splitter, controls).
+
+        Connects ``TiledImageWidget`` signals to ``_on_mouse_moved``, ``_on_zoom_changed``,
+        and wires ``_proj_combo`` to ``_on_projection_changed``; shows default RECT status
+        hint on the status bar.
+        """
         self.setWindowTitle('Body Mosaic Viewer')
         self.resize(1400, 900)
 
@@ -317,6 +373,7 @@ class BodyMosaicWindow(QMainWindow):
         self.statusBar().showMessage(_STATUS_HINTS[ProjectionKind.RECT])
 
     def _build_right_panel(self) -> QWidget:
+        """Build the right-hand file navigation panel (prev/next, list, labels)."""
         right = QWidget()
         right.setMinimumWidth(200)
         right.setMaximumWidth(300)
@@ -345,6 +402,7 @@ class BodyMosaicWindow(QMainWindow):
         return right
 
     def _populate_file_list(self) -> None:
+        """Fill the file list widget from ``self._file_paths``."""
         self._file_list.clear()
         for i, p in enumerate(self._file_paths):
             name = Path(p).name
@@ -353,6 +411,7 @@ class BodyMosaicWindow(QMainWindow):
             self._file_list.addItem(item)
 
     def _refresh_file_list_selection(self) -> None:
+        """Highlight and scroll to ``self._current_idx`` in the file list without firing signals."""
         self._file_list.blockSignals(True)
         self._file_list.setCurrentRow(self._current_idx)
         cur = self._file_list.currentItem()
@@ -361,6 +420,7 @@ class BodyMosaicWindow(QMainWindow):
         self._file_list.blockSignals(False)
 
     def _on_file_list_row_changed(self, row: int) -> None:
+        """Handle list selection change by loading the chosen file index when it changes."""
         if row < 0 or row >= len(self._file_paths):
             return
         if row == self._current_idx:
@@ -368,6 +428,7 @@ class BodyMosaicWindow(QMainWindow):
         self._load_file(row)
 
     def _build_control_panel(self) -> QWidget:
+        """Assemble the bottom control panel (stretch, zoom, cursor info, color-by, photometry)."""
         ctrl = QWidget()
         ctrl_layout = QVBoxLayout(ctrl)
         ctrl_layout.setContentsMargins(4, 2, 4, 2)
@@ -578,6 +639,8 @@ class BodyMosaicWindow(QMainWindow):
         return ctrl
 
     def _make_zoom_sync(self, le: QLineEdit, sl: QSlider, axis: str) -> _SyncedSlider:
+        """Create a zoom slider/edit pair synced to ``TiledImageWidget`` for one axis."""
+
         def _on_change(zoom_val: float) -> None:
             iw = self._image_widget
             xz, yz = iw.get_zoom()
@@ -588,23 +651,24 @@ class BodyMosaicWindow(QMainWindow):
 
         class _ZoomSync(_SyncedSlider):
             def _to_slider(self, val: float) -> int:
-                return zoom_to_slider(val)
+                return _zoom_to_slider(val)
 
             def _from_slider(self, pos: int) -> float:
-                return slider_to_zoom(pos)
+                return _slider_to_zoom(pos)
 
         sync = _ZoomSync(le, sl, 0.05, 100.0, '%.2f', on_change=_on_change)
         sync.set_value(1.0)
         return sync
 
     def _photometry_mode(self) -> str:
+        """Return the photometry radio key string (default ``as_saved`` if none checked)."""
         btn = self._photometry_group.checkedButton()
         if btn is None:
             return 'as_saved'
         return str(btn.property('photometry_key'))
 
     def _sync_photometry_ui(self, dd: BodyDisplayData) -> None:
-        """Reset photometric display to file pixels when loading a new file."""
+        """Reset photometric display to file pixels when loading a new file (``as_saved``)."""
         _ = dd
         for b in self._photometry_group.buttons():
             if b.property('photometry_key') == 'as_saved':
@@ -612,6 +676,7 @@ class BodyMosaicWindow(QMainWindow):
                 break
 
     def _apply_body_display_image(self, *, preserve_view: bool) -> None:
+        """Recompute photometry-corrected pixels and push them to the image widget."""
         dd = self._display_data
         if dd is None:
             return
@@ -650,6 +715,7 @@ class BodyMosaicWindow(QMainWindow):
         self._sync_zoom_ui()
 
     def _on_photometry_changed(self, _btn: Any = None) -> None:
+        """Refresh display image and restretch after the photometry mode radio changes."""
         if self._display_data is None:
             return
         self._apply_body_display_image(preserve_view=True)
@@ -667,12 +733,19 @@ class BodyMosaicWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_prev(self) -> None:
+        """Load the previous file in the list."""
         self._load_file(self._current_idx - 1)
 
     def _on_next(self) -> None:
+        """Load the next file in the list."""
         self._load_file(self._current_idx + 1)
 
     def _load_file(self, idx: int) -> None:
+        """Load body data at index ``idx``, refresh UI, overlays, and stretch.
+
+        No-op if ``idx`` is out of range. On ``load_body_file`` failure, logs the
+        exception and shows a status-bar message without changing the current file.
+        """
         if not (0 <= idx < len(self._file_paths)):
             return
         path = self._file_paths[idx]
@@ -722,12 +795,14 @@ class BodyMosaicWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _apply_stretch(self) -> None:
+        """Apply black/white/gamma from the stretch sliders to the image widget."""
         b = self._stretch_controls['from_slider'](self._stretch_controls['slider_black'].value())
         w = self._stretch_controls['from_slider'](self._stretch_controls['slider_white'].value())
         g = max(0.1, self._stretch_controls['slider_gamma'].value() / 100.0)
         self._image_widget.set_stretch(b, w, g)
 
     def _on_stretch_preset_reset(self) -> None:
+        """Reset stretch to a 0-98 percentile of the current display image."""
         dd = self._display_data
         if dd is None:
             return
@@ -738,6 +813,7 @@ class BodyMosaicWindow(QMainWindow):
         self._apply_stretch()
 
     def _on_stretch_preset_full(self) -> None:
+        """Stretch across the file's full ``vmin``-``vmax`` dynamic range."""
         dd = self._display_data
         if dd is None:
             return
@@ -745,6 +821,7 @@ class BodyMosaicWindow(QMainWindow):
         self._image_widget.set_stretch(dd.vmin, dd.vmax, self._default_gamma)
 
     def _on_stretch_preset_bright(self) -> None:
+        """Percentile stretch with a 2-98% window for a brighter default view."""
         dd = self._display_data
         if dd is None:
             return
@@ -755,6 +832,7 @@ class BodyMosaicWindow(QMainWindow):
         self._apply_stretch()
 
     def _fit_zoom_to_window(self) -> None:
+        """Fit zoom so the image fills the viewport (or defer if size not yet known)."""
         dd = self._display_data
         if dd is None:
             return
@@ -776,31 +854,37 @@ class BodyMosaicWindow(QMainWindow):
         self._image_widget.set_zoom(x_zoom, y_zoom)
 
     def _on_zoom_in(self) -> None:
+        """Multiply both zoom factors by 1.5 and refresh slider UI."""
         xz, yz = self._image_widget.get_zoom()
         self._image_widget.set_zoom(xz * 1.5, yz * 1.5)
         self._sync_zoom_ui()
 
     def _on_zoom_out(self) -> None:
+        """Divide both zoom factors by 1.5 and refresh slider UI."""
         xz, yz = self._image_widget.get_zoom()
         self._image_widget.set_zoom(xz / 1.5, yz / 1.5)
         self._sync_zoom_ui()
 
     def _on_zoom_reset(self) -> None:
+        """Re-run fit-to-window and sync zoom readouts."""
         self._fit_zoom_to_window()
         self._sync_zoom_ui()
 
     def _on_zoom_changed(self, xz: float, yz: float) -> None:
+        """Keep zoom sliders and the summary label in sync with widget zoom."""
         self._update_zoom_slider_ranges()
         self._xzoom_sync.set_value(xz)
         self._yzoom_sync.set_value(yz)
         self._zoom_info_lbl.setText(f'{xz:.2f}x / {yz:.2f}x')
 
     def _update_zoom_slider_ranges(self) -> None:
+        """Expand slider ranges to the widget's current minimum zoom limits."""
         min_x, min_y = self._image_widget.get_min_zoom()
         self._xzoom_sync.set_range(min_x, 100.0)
         self._yzoom_sync.set_range(min_y, 100.0)
 
     def _sync_zoom_ui(self) -> None:
+        """Read zoom from the widget and push it into both axis controls."""
         self._update_zoom_slider_ranges()
         xz, yz = self._image_widget.get_zoom()
         self._xzoom_sync.set_value(xz)
@@ -808,6 +892,7 @@ class BodyMosaicWindow(QMainWindow):
         self._zoom_info_lbl.setText(f'{xz:.2f}x / {yz:.2f}x')
 
     def _on_save_fov(self) -> None:
+        """Prompt for a path and save the current viewport as PNG/JPEG."""
         dd = self._display_data
         if dd is None:
             return
@@ -828,6 +913,7 @@ class BodyMosaicWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_colorby_changed(self, btn: Any) -> None:
+        """Apply or clear the metadata colour tint on the image from the color-by choice."""
         if btn is None or self._display_data is None:
             self._image_widget.set_color_tint(None)
             return
@@ -836,10 +922,12 @@ class BodyMosaicWindow(QMainWindow):
         self._image_widget.set_color_tint(self._tint_with_alpha(tint))
 
     def _on_colorby_alpha_changed(self, value: int) -> None:
+        """Update color-by tint blend strength and refresh the overlay."""
         self._colorby_alpha = value / 100.0
         self._on_colorby_changed(self._colorby_group.checkedButton())
 
     def _tint_with_alpha(self, tint: np.ndarray | None) -> np.ndarray | None:
+        """Blend ``tint`` toward grey using ``self._colorby_alpha`` (or pass through)."""
         if tint is None or self._colorby_alpha >= 1.0:
             return tint
         return (self._colorby_alpha * tint + (1.0 - self._colorby_alpha)).astype(np.float32)
@@ -888,6 +976,7 @@ class BodyMosaicWindow(QMainWindow):
         return None
 
     def _update_colorby_widgets_for_mosaic(self, is_mosaic: bool) -> None:
+        """Enable/disable mosaic-only color-by options (e.g. image number)."""
         for btn in self._colorby_group.buttons():
             key = btn.property('colorby_key')
             if key == 'image_no':
@@ -903,6 +992,7 @@ class BodyMosaicWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _update_overlays(self, _checked: bool = False) -> None:
+        """Update graticule / row-column overlays from checkbox state and projection mode."""
         dd = self._display_data
         if dd is None:
             self._image_widget.set_body_sphere_geo_overlays(False, False)
@@ -946,6 +1036,7 @@ class BodyMosaicWindow(QMainWindow):
             self._image_widget.set_show_cols([])
 
     def _update_axis_ticks(self, _checked: bool = False) -> None:
+        """Push latitude/longitude tick visibility to the image widget."""
         dd = self._display_data
         if dd is None:
             return
@@ -962,6 +1053,7 @@ class BodyMosaicWindow(QMainWindow):
 
     @staticmethod
     def _fmt_ma(arr: ma.MaskedArray, iy: int, ix: int, fmt: str) -> str:
+        """Format one masked-array sample, or ``'---'`` when masked."""
         v = arr[iy, ix]
         if ma.is_masked(v):
             return '---'
@@ -969,14 +1061,29 @@ class BodyMosaicWindow(QMainWindow):
 
     @staticmethod
     def _fmt_deg_label(s: str) -> str:
+        """Append a degree sign to a numeric angle string unless it is ``'---'``."""
         return f'{s}°' if s != '---' else '---'
 
     def _clear_info(self) -> None:
+        """Clear the cursor status line and reset all info labels to placeholders."""
         self._cursor_status_lbl.setText('')
         for lbl in self._info.values():
             lbl.setText('---')
 
     def _on_mouse_moved(self, px: float, py: float, in_bounds: bool) -> None:
+        """Handle pointer moves: map to lon/lat or pixel coords and refresh the info panel.
+
+        Parameters:
+            px: Pointer X in widget coordinates.
+            py: Pointer Y in widget coordinates.
+            in_bounds: False when the cursor leaves the image; clears info via
+                ``_clear_info`` and returns early.
+
+        Side effects:
+            Updates ``self._cursor_status_lbl`` and ``self._info`` labels from
+            ``self._display_data`` and ``self._proj_kind`` (RECT vs projected modes).
+            No exceptions are raised; out-of-bounds or off-surface positions clear info.
+        """
         if not in_bounds or self._display_data is None:
             self._clear_info()
             return
@@ -1088,6 +1195,12 @@ class BodyMosaicWindow(QMainWindow):
 
 
 def _nice_overlay_step(span: float, max_lines: int = 8) -> float:
+    """Pick a human-readable overlay tick step from ``span`` and ``max_lines``.
+
+    Units match ``span`` (e.g. degrees). Tries preferred steps
+    ``[0.5, 1, 2, ...]`` in ascending order and returns the smallest step ``>= span /
+    max_lines``, or ``raw`` if none qualify. Non-positive ``span`` returns ``10.0``.
+    """
     if span <= 0:
         return 10.0
     raw = span / max_lines

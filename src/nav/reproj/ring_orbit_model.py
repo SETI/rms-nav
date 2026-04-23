@@ -172,9 +172,7 @@ BRING_OUTER_EDGE = RingOrbitModel(
     epoch_utc='2009-08-11',
 )
 
-_KNOWN_ORBIT_MODELS: dict[str, RingOrbitModel] = {
-    m.name: m for m in (FRING_CORE, BRING_OUTER_EDGE)
-}
+_KNOWN_ORBIT_MODELS: dict[str, RingOrbitModel] = {m.name: m for m in (FRING_CORE, BRING_OUTER_EDGE)}
 
 
 def get_orbit_model_by_name(name: str) -> RingOrbitModel | None:
@@ -184,6 +182,15 @@ def get_orbit_model_by_name(name: str) -> RingOrbitModel | None:
         name: Model name (e.g. ``'FRING-CORE'``).
 
     Returns:
-        The matching :class:`RingOrbitModel`, or ``None`` if unknown.
+        The matching :class:`RingOrbitModel` from :data:`_KNOWN_ORBIT_MODELS`, or
+        ``None`` if the name is not found.
+
+    Raises:
+        TypeError: If ``name`` is not a :class:`str`.
+        ValueError: If ``name`` is empty or whitespace-only.
     """
+    if not isinstance(name, str):
+        raise TypeError(f'get_orbit_model_by_name expects str, got {type(name).__name__}')
+    if not name.strip():
+        raise ValueError('get_orbit_model_by_name: name must be a non-empty string')
     return _KNOWN_ORBIT_MODELS.get(name)

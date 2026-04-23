@@ -64,8 +64,6 @@ from reproj_cli.offsets import apply_offset_to_obs, load_offset_if_any
 from reproj_cli.paths import mosaic_output_path, per_image_output_path
 from reproj_cli.reproject import reproject_one_body, reproject_one_ring
 
-_logger = logging.getLogger(__name__)
-
 
 def _reproject_image_log_handlers(
     output_dir: FCPath,
@@ -135,26 +133,26 @@ def parse_args(command_list: list[str]) -> tuple[str, argparse.Namespace]:
     global DATASET, DATASET_NAME
 
     if len(command_list) < 1 or command_list[0] not in ('rings', 'body'):
-        print('Usage: nav_mosaic <rings|body> <dataset_name> [options]')
+        print('Usage: nav_mosaic <rings|body> <dataset_name> [options]', file=sys.stderr)
         sys.exit(1)
 
     mode = command_list[0]
     rest = command_list[1:]
 
     if len(rest) < 1:
-        print(f'Usage: nav_mosaic {mode} <dataset_name> [options]')
+        print(f'Usage: nav_mosaic {mode} <dataset_name> [options]', file=sys.stderr)
         sys.exit(1)
 
     DATASET_NAME = rest[0].lower()
     if DATASET_NAME not in dataset_names():
-        print(f'Unknown dataset "{DATASET_NAME}"')
-        print(f'Valid datasets: {", ".join(dataset_names())}')
+        print(f'Unknown dataset "{DATASET_NAME}"', file=sys.stderr)
+        print(f'Valid datasets: {", ".join(dataset_names())}', file=sys.stderr)
         sys.exit(1)
 
     try:
         DATASET = dataset_name_to_class(DATASET_NAME)()
     except KeyError:
-        print(f'Unknown dataset "{DATASET_NAME}"')
+        print(f'Unknown dataset "{DATASET_NAME}"', file=sys.stderr)
         sys.exit(1)
 
     parser = _build_parser(mode)
@@ -172,7 +170,7 @@ def parse_args(command_list: list[str]) -> tuple[str, argparse.Namespace]:
 def _run_body(args: argparse.Namespace, nav_results_root_path: FCPath | None) -> None:
     assert DATASET is not None
 
-    inst_name = dataset_name_to_inst_name(DATASET_NAME)  # type: ignore[arg-type]
+    inst_name = dataset_name_to_inst_name(DATASET_NAME)  # type: ignore[arg-type]  # DATASET_NAME is set at runtime from argv; dataset_name_to_inst_name is typed for a Literal union of known dataset keys only (false-positive arg-type).
     obs_class = inst_name_to_obs_class(inst_name)
 
     mosaic = build_body_mosaic(args)
@@ -223,7 +221,9 @@ def _run_body(args: argparse.Namespace, nav_results_root_path: FCPath | None) ->
                         if args.image_name is not None
                         else image_file.image_file_path.stem
                     )
-                    result = reproject_one_body(obs, mosaic, image_name=img_label)
+                    result = reproject_one_body(
+                        cast(ObsSnapshotInst, obs), mosaic, image_name=img_label
+                    )
 
                     if not args.no_write_output_files:
                         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -288,7 +288,7 @@ def _run_body(args: argparse.Namespace, nav_results_root_path: FCPath | None) ->
 def _run_rings(args: argparse.Namespace, nav_results_root_path: FCPath | None) -> None:
     assert DATASET is not None
 
-    inst_name = dataset_name_to_inst_name(DATASET_NAME)  # type: ignore[arg-type]
+    inst_name = dataset_name_to_inst_name(DATASET_NAME)  # type: ignore[arg-type]  # DATASET_NAME is set at runtime from argv; dataset_name_to_inst_name is typed for a Literal union of known dataset keys only (false-positive arg-type).
     obs_class = inst_name_to_obs_class(inst_name)
 
     mosaic = build_ring_mosaic(args)
@@ -338,7 +338,9 @@ def _run_rings(args: argparse.Namespace, nav_results_root_path: FCPath | None) -
                         if args.image_name is not None
                         else image_file.image_file_path.stem
                     )
-                    result = reproject_one_ring(obs, args, mosaic, image_name=img_label)
+                    result = reproject_one_ring(
+                        cast(ObsSnapshotInst, obs), args, mosaic, image_name=img_label
+                    )
 
                     if not args.no_write_output_files:
                         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -408,7 +410,7 @@ def main() -> None:
     load_default_and_user_config(args, DEFAULT_CONFIG)
 
     nav_results_root_str: str | None = None
-    if getattr(args, 'nav_results_root', None) is not None:
+    if args.nav_results_root is not None:
         nav_results_root_str = args.nav_results_root
     else:
         nav_results_root_str = get_nav_results_root(args, DEFAULT_CONFIG)
@@ -424,8 +426,8 @@ def main() -> None:
         sys.exit(1)
 
     # Set log level if --log-level was specified
-    log_level = getattr(args, 'log_level', None)
-    if log_level is not None:
+    log_level = args.log_level
+    if log_level is not None and isinstance(log_level, str):
         numeric = getattr(logging, log_level.upper(), None)
         if numeric is not None:
             logging.getLogger().setLevel(numeric)

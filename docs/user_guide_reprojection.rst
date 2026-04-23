@@ -180,10 +180,10 @@ are available::
 (``orbit_model=None``, which is the default), the longitudes stored in
 reprojection results and mosaics are **inertial J2000 ring longitudes** —
 measured eastward from the ascending node of the ring plane on the J2000
-reference plane.  When an orbit model is supplied, each inertial longitude is
+reference plane. When an orbit model is supplied, each inertial longitude is
 converted to the **co-rotating frame** of the model before binning; mosaic
 column *i* then corresponds to co-rotating longitude ``i ×
-longitude_resolution``.  See also :ref:`orbit-model-longitude` in the
+longitude_resolution``. See also :ref:`orbit-model-longitude` in the
 command-line reference.
 
 Pass a custom model via the ``orbit_model`` parameter::
@@ -302,18 +302,18 @@ Image labels (reprojection and mosaic)
 
 Each :class:`~nav.reproj.rings.RingReprojResult` and
 :class:`~nav.reproj.bodies.BodyReprojResult` carries an ``image_name`` string
-(typically the source image stem).  The ``save()`` and ``load()`` methods
+(typically the source image stem). The ``save()`` and ``load()`` methods
 preserve this value.
 
 Each :class:`~nav.reproj.rings.RingMosaicData` and
 :class:`~nav.reproj.bodies.BodyMosaicData` carries ``contributing_image_names``,
 a tuple of strings in the same order as the ``image_number`` indices stored in
 the mosaic (pixel value ``k`` refers to ``contributing_image_names[k]`` when
-``k`` is in range).  The tuple grows by one entry each time ``mosaic.add()``
+``k`` is in range). The tuple grows by one entry each time ``mosaic.add()``
 finishes incorporating a reprojection and advances the internal image counter.
 
 In Python, pass ``image_name=...`` to :meth:`~nav.reproj.rings.RingMosaic.reproject`
-and :meth:`~nav.reproj.bodies.BodyMosaic.reproject`.  The ``nav_mosaic`` CLI
+and :meth:`~nav.reproj.bodies.BodyMosaic.reproject`. The ``nav_mosaic`` CLI
 stores the dataset image stem per file by default; pass ``--image-name LABEL``
 to use the same label for every image in the run instead.
 
@@ -323,19 +323,19 @@ Sub-solar and sub-observer geometry (body reprojection and mosaics)
 For bodies only, each :class:`~nav.reproj.bodies.BodyReprojResult` records the
 sub-solar and sub-observer longitude and latitude on the body at the
 observation midtime, using the same ``latlon_type`` and ``lon_direction`` as
-the reprojection.  Fields are ``sub_solar_lon``, ``sub_solar_lat``,
-``sub_observer_lon``, and ``sub_observer_lat`` (all **radians**).  They are
+the reprojection. Fields are ``sub_solar_lon``, ``sub_solar_lat``,
+``sub_observer_lon``, and ``sub_observer_lat`` (all **radians**). They are
 written by ``save()`` / ``load()`` alongside the image and geometry arrays.
 
 Each :class:`~nav.reproj.bodies.BodyMosaicData` adds parallel **per-image**
 1-D ``float64`` arrays—``sub_solar_lon_per_image``,
 ``sub_solar_lat_per_image``, ``sub_observer_lon_per_image``, and
 ``sub_observer_lat_per_image``—with length equal to the number of contributing
-images.  Index ``k`` matches ``contributing_image_names[k]`` and pixels whose
+images. Index ``k`` matches ``contributing_image_names[k]`` and pixels whose
 ``image_number`` equals ``k``.
 
 Older mosaic or reprojection files that omit the sub-observer fields load with
-those values set to zero.  Files that omit the per-image arrays load with empty
+those values set to zero. Files that omit the per-image arrays load with empty
 arrays for those fields.
 
 The body mosaic viewer (:class:`~nav.ui.mosaic_viewer.body_window.BodyMosaicWindow`)
@@ -419,7 +419,7 @@ Offset application
 ^^^^^^^^^^^^^^^^^^
 
 When ``--nav-results-root`` is provided, ``nav_mosaic`` looks up a
-``_metadata.json`` file for each image (written by ``nav_offset``).  If the
+``_metadata.json`` file for each image (written by ``nav_offset``). If the
 file exists and has ``status == 'success'``, the stored ``(dv, du)`` offset is
 applied to the observation's FOV via ``oops.fov.OffsetFOV`` before reprojection.
 If the file is absent, invalid JSON, or has a non-success status, a warning is
@@ -428,8 +428,8 @@ logged and uncorrected pointing is used.
 Output format
 ^^^^^^^^^^^^^
 
-The default output format is FITS (``.fits``).  Pass ``--format npz`` to use
-compressed NumPy archives instead.  Reprojection and mosaic files live directly
+The default output format is FITS (``.fits``). Pass ``--format npz`` to use
+compressed NumPy archives instead. Reprojection and mosaic files live directly
 under ``<output-dir>``; the only subdirectory used is ``logs/`` for per-image
 reprojection logs from pass 1:
 
@@ -540,15 +540,15 @@ Orbit model and longitude convention
 When ``--orbit-model none`` (the default), the longitude values stored in both
 the per-image reprojection files and the final mosaic are **inertial J2000 ring
 longitudes** — measured eastward from the ascending node of the ring plane on
-the J2000 reference plane, in degrees (internally radians).  This is the
+the J2000 reference plane, in degrees (internally radians). This is the
 default behavior of ``oops.backplane.Backplane.ring_longitude``.
 
 When an orbit model is supplied (``--orbit-model fring_core`` or
 ``--orbit-model bring_outer_edge``), each inertial longitude is transformed
-to the **co-rotating frame** of that model before binning.  In the resulting
+to the **co-rotating frame** of that model before binning. In the resulting
 file, mosaic column *i* corresponds to co-rotating longitude
 ``i × longitude_resolution``; the column index no longer has a fixed
-relationship to J2000 north.  All files in the same mosaic must use the same
+relationship to J2000 north. All files in the same mosaic must use the same
 orbit model setting.
 
 Body-specific options
@@ -620,7 +620,7 @@ Command-line mosaic display
 
 The ``nav_mosaic_display_rings`` and ``nav_mosaic_display_body`` commands
 (entry points into the single ``nav_mosaic_display`` program) open an
-interactive PyQt6 window for browsing reprojection and mosaic files.  Multiple
+interactive PyQt6 window for browsing reprojection and mosaic files. Multiple
 files can be passed; the window shows one file at a time and includes
 **Prev / Next** navigation buttons.
 
@@ -674,7 +674,7 @@ Interactive controls
 - **Stretch sliders** (Black / White / Gamma) — adjust contrast.
 - **Color by** radio buttons — tint the image by a per-column or per-pixel
   metadata field (radial resolution, angular resolution, phase, emission,
-  image number, etc.).  On the ring window, options that required ephemeris
+  image number, etc.). On the ring window, options that required ephemeris
   columns not present in the file (inertial longitude, true anomaly) are omitted.
 - **Cursor info** — for mosaics, the source-image line uses stored contributing
   names in the form ``imagename (#k)`` when available.
@@ -683,7 +683,7 @@ Projection selector (body mosaics)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The **Projection** combo box in the body-mosaic window header selects how the
-360 x 180 degree lat/lon grid is displayed.  Five modes are available:
+360 x 180 degree lat/lon grid is displayed. Five modes are available:
 
 .. list-table::
    :widths: 20 80
@@ -692,24 +692,24 @@ The **Projection** combo box in the body-mosaic window header selects how the
    * - Mode
      - Description
    * - Rectangular
-     - Default equirectangular (plate carrée) display.  All existing
+     - Default equirectangular (plate carrée) display. All existing
        controls work as before.
    * - Polar North Stereographic
-     - Stereographic projection centred on the north pole.  Best for
+     - Stereographic projection centred on the north pole. Best for
        inspecting polar features with low distortion.
    * - Polar South Stereographic
      - Same as Polar North but centred on the south pole.
    * - Mollweide
-     - Equal-area global projection.  Polar regions are far less distorted
+     - Equal-area global projection. Polar regions are far less distorted
        than in Rectangular mode.
    * - 3D Sphere
-     - Orthographic sphere view.  Left-drag rotates the globe
+     - Orthographic sphere view. Left-drag rotates the globe
        (yaw/pitch); Shift+Left-drag pans the sphere within the
        viewport; scroll wheel zooms; **Reset Zoom** fits the sphere to
        the window.
 
 In all non-rectangular modes the graticule (parallels and meridians) is drawn
-as curved polylines that follow the projection geometry.  The **Show parallels**
+as curved polylines that follow the projection geometry. The **Show parallels**
 and **Show meridians** checkboxes in the Overlays panel and the **Latitude axis
 ticks** / **Longitude axis ticks** checkboxes in the header control the overlay
 in every mode.

@@ -11,7 +11,6 @@ import argparse
 import os
 import sys
 
-import pdslogger
 import pdstemplate
 from filecache import FileCache
 

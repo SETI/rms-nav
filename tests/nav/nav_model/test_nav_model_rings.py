@@ -657,7 +657,14 @@ class TestFilterIntegration:
 
 
 class TestUncertaintyWiring:
-    """Propagation of per-feature render uncertainty into ``NavModelResult``."""
+    """Tests for how per-feature render uncertainty reaches ``NavModelResult``.
+
+    Covers the path where ``RingFeatureFilter`` yields mock ring-gap features,
+    ``render`` returns a ``RenderResult`` with a numeric ``uncertainty``, and
+    ``_create_model`` copies that value onto the stored ``NavModelResult``. Also
+    asserts filter wiring (``RingFeatureFilter`` constructed with
+    ``logger=model._logger``) and single-result list growth.
+    """
 
     def test_uncertainty_wired_from_render_result(self) -> None:
         """Copy ``render_result.uncertainty`` onto the appended ``NavModelResult``.
@@ -706,7 +713,13 @@ class TestUncertaintyWiring:
 
 
 class TestNeverCreateModel:
-    """``never_create_model`` metadata path without image generation."""
+    """Tests for ``never_create_model=True`` on ring nav models.
+
+    Exercises the metadata-only path: ``_create_model`` runs the feature filter but
+    skips building ``NavModelResult`` image entries, leaving ``model._models`` empty
+    while still recording feature counts in ``_metadata``. Verifies logger is passed
+    through to ``RingFeatureFilter`` and that no image-generation side effects occur.
+    """
 
     def test_never_create_model_no_images(self) -> None:
         """Populate ``_metadata`` and skip ``NavModelResult`` list growth.

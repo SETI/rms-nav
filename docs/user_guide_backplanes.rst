@@ -7,7 +7,7 @@ Overview
 
 Backplanes are per-pixel geometry products (longitude, latitude, incidence
 angle, emission angle, phase angle, resolution, etc.) derived from a
-navigated image.  The system reads prior navigation metadata to apply the
+navigated image. The system reads prior navigation metadata to apply the
 image offset, then computes body and ring backplanes, merges them per-pixel
 by distance, and writes a multi-HDU FITS file along with a JSON metadata
 file.
@@ -23,7 +23,7 @@ Key properties:
   follow the simulated body shapes.
 
 Backplane generation only writes the FITS file and the associated metadata
-JSON.  PDS4 labels for the backplane products are produced in a later step
+JSON. PDS4 labels for the backplane products are produced in a later step
 by ``nav_create_bundle labels`` (see :doc:`user_guide_pds4_bundle`).
 
 Command-Line Interfaces
@@ -68,11 +68,11 @@ Configuration
 Backplanes are configured under ``backplanes`` in
 ``src/nav/config_files/config_90_backplanes.yaml``:
 
-- ``backplanes.bodies``: list of body backplane entries.  Each entry has
+- ``backplanes.bodies``: list of body backplane entries. Each entry has
   ``name`` (the FITS HDU name), ``method`` (the ``oops.Backplane`` method to
   call), and optional ``units`` (written to the ``BUNIT`` FITS header).
 - ``backplanes.rings``: list of ring backplane entries with the same
-  structure.  The special ``distance`` entry is used only for per-pixel
+  structure. The special ``distance`` entry is used only for per-pixel
   merge ordering and is not written as an HDU.
 
 Outputs

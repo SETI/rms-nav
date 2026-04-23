@@ -11,9 +11,28 @@ Functions:
 
 import argparse
 
+# Defaults for :func:`add_body_args` (single source of truth for CLI literals).
+DEFAULT_LAT_RESOLUTION: float = 0.1
+DEFAULT_LON_RESOLUTION: float = 0.1
+DEFAULT_EDGE_MARGIN: int = 3
+DEFAULT_BODY_ZOOM: int = 1
+DEFAULT_RESOLUTION_THRESHOLD: float = 1.0
+DEFAULT_COPY_SLOP: int = 0
+
 
 def add_common_env_args(parser: argparse.ArgumentParser) -> None:
-    """Add environment / config-file / logging arguments."""
+    """Add environment / config-file / logging arguments.
+
+    Parameters:
+        parser: Target ``argparse.ArgumentParser`` (or subparser) to extend.
+
+    Side effects:
+        Adds three groups (``Environment``, ``Logging``, ``Miscellaneous``) with
+        flags ``--config-file`` (appendable), ``--pds3-holdings-root``,
+        ``--nav-results-root``, ``--log-level``, and ``--profile``. Defaults do not
+        read the environment implicitly beyond what downstream nav code does when
+        these flags are omitted. No files are read at parse time. Does not raise.
+    """
     env = parser.add_argument_group('Environment')
     env.add_argument(
         '--config-file',
@@ -55,7 +74,18 @@ def add_common_env_args(parser: argparse.ArgumentParser) -> None:
 
 
 def add_common_output_args(parser: argparse.ArgumentParser) -> None:
-    """Add output-directory / format / pass-control arguments."""
+    """Add output-directory / format / pass-control arguments.
+
+    Parameters:
+        parser: Target ``argparse.ArgumentParser`` (or subparser) to extend.
+
+    Side effects:
+        Adds an ``Output`` group with ``--output-dir`` (required), ``--prefix``,
+        ``--format`` (``fits`` or ``npz``), ``--overwrite``, ``--skip-reproject``,
+        ``--skip-mosaic``, ``--dry-run``, ``--no-write-output-files``, and
+        ``--image-name``. Boolean flags use argparse store_true / false patterns as
+        defined below. Parsing does not touch the filesystem. Does not raise.
+    """
     out = parser.add_argument_group('Output')
     out.add_argument(
         '--output-dir',
@@ -121,7 +151,18 @@ def add_common_output_args(parser: argparse.ArgumentParser) -> None:
 
 
 def add_body_args(parser: argparse.ArgumentParser) -> None:
-    """Add BodyMosaic-specific arguments."""
+    """Add BodyMosaic-specific arguments.
+
+    Parameters:
+        parser: Target ``argparse.ArgumentParser`` (or subparser) to extend.
+
+    Side effects:
+        Adds a ``Body reprojection`` group covering body name, lat/lon grid,
+        incidence/emission/resolution limits, margins, integer ``--zoom``,
+        photometric model, dtypes, merge-related thresholds, and ``--copy-slop``.
+        Defaults use module constants (e.g. :data:`DEFAULT_LAT_RESOLUTION`). Does
+        not raise during registration.
+    """
     grp = parser.add_argument_group('Body reprojection')
     grp.add_argument(
         '--body-name',
@@ -132,16 +173,16 @@ def add_body_args(parser: argparse.ArgumentParser) -> None:
     grp.add_argument(
         '--lat-resolution',
         type=float,
-        default=0.1,
+        default=DEFAULT_LAT_RESOLUTION,
         metavar='DEG',
-        help='Latitude resolution in degrees/pixel. Default: 0.1.',
+        help=f'Latitude resolution in degrees/pixel. Default: {DEFAULT_LAT_RESOLUTION}.',
     )
     grp.add_argument(
         '--lon-resolution',
         type=float,
-        default=0.1,
+        default=DEFAULT_LON_RESOLUTION,
         metavar='DEG',
-        help='Longitude resolution in degrees/pixel. Default: 0.1.',
+        help=f'Longitude resolution in degrees/pixel. Default: {DEFAULT_LON_RESOLUTION}.',
     )
     grp.add_argument(
         '--lat-range',
@@ -183,14 +224,17 @@ def add_body_args(parser: argparse.ArgumentParser) -> None:
     grp.add_argument(
         '--edge-margin',
         type=int,
-        default=3,
-        help='Number of edge pixels to discard. Default: 3.',
+        default=DEFAULT_EDGE_MARGIN,
+        help=f'Number of edge pixels to discard. Default: {DEFAULT_EDGE_MARGIN}.',
     )
     grp.add_argument(
         '--zoom',
         type=int,
-        default=1,
-        help='Zoom factor for sub-pixel interpolation during reprojection. Default: 1.',
+        default=DEFAULT_BODY_ZOOM,
+        help=(
+            'Zoom factor for sub-pixel interpolation during reprojection (integer). '
+            f'Default: {DEFAULT_BODY_ZOOM}.'
+        ),
     )
     grp.add_argument(
         '--latlon-type',
@@ -232,21 +276,42 @@ def add_body_args(parser: argparse.ArgumentParser) -> None:
     grp.add_argument(
         '--resolution-threshold',
         type=float,
-        default=1.0,
-        help='Effective-resolution improvement factor required to overwrite a pixel. Default: 1.0.',
+        default=DEFAULT_RESOLUTION_THRESHOLD,
+        help=(
+            'Effective-resolution improvement factor required to overwrite a pixel. '
+            f'Default: {DEFAULT_RESOLUTION_THRESHOLD}.'
+        ),
     )
     grp.add_argument(
         '--copy-slop',
         type=int,
-        default=0,
+        default=DEFAULT_COPY_SLOP,
         help=(
-            'Extra pixels around each copied pixel to reduce isolated-pixel artefacts. Default: 0.'
+            'Extra pixels around each copied pixel to reduce isolated-pixel artefacts. '
+            f'Default: {DEFAULT_COPY_SLOP}.'
         ),
     )
 
 
 def add_ring_args(parser: argparse.ArgumentParser) -> None:
-    """Add RingMosaic-specific arguments."""
+    """Add RingMosaic-specific arguments.
+
+    Parameters:
+        parser: Target ``argparse.ArgumentParser`` (or subparser) to extend.
+
+    Side effects:
+        Adds a ``Ring reprojection`` group with planet/radius bounds, resolutions,
+        merge strategy, orbit model, margins, string ``--zoom`` (see note below),
+        shadow handling, optional lon/radius ranges, dtypes, and photometric model.
+        Does not raise during registration.
+
+    Note:
+        ``--zoom`` is registered as ``type=str`` (default ``'1'``) so values may be
+        either a single integer string or ``\"R,L\"`` for separate radial and
+        longitudinal zoom. :func:`add_body_args` registers body ``--zoom`` as
+        ``type=int`` instead, because body reprojection only supports a single scalar
+        zoom factor.
+    """
     grp = parser.add_argument_group('Ring reprojection')
     grp.add_argument(
         '--planet',
@@ -256,17 +321,41 @@ def add_ring_args(parser: argparse.ArgumentParser) -> None:
     )
     grp.add_argument(
         '--radius-inner',
-        required=True,
+        required=False,
+        default=None,
         type=float,
         metavar='KM',
-        help='Inner radius of the mosaic (km).',
+        help='Inner radius of the mosaic (km). Required when --orbit-model is none.',
     )
     grp.add_argument(
         '--radius-outer',
-        required=True,
+        required=False,
+        default=None,
         type=float,
         metavar='KM',
-        help='Outer radius of the mosaic (km).',
+        help='Outer radius of the mosaic (km). Required when --orbit-model is none.',
+    )
+    grp.add_argument(
+        '--radius-inner-offset',
+        required=False,
+        default=None,
+        type=float,
+        metavar='KM',
+        help=(
+            'Inner radius offset from the orbit model semi-major axis (km). '
+            'Required when --orbit-model is not none; must not be used otherwise.'
+        ),
+    )
+    grp.add_argument(
+        '--radius-outer-offset',
+        required=False,
+        default=None,
+        type=float,
+        metavar='KM',
+        help=(
+            'Outer radius offset from the orbit model semi-major axis (km). '
+            'Required when --orbit-model is not none; must not be used otherwise.'
+        ),
     )
     grp.add_argument(
         '--longitude-resolution',
@@ -307,6 +396,8 @@ def add_ring_args(parser: argparse.ArgumentParser) -> None:
         default=3,
         help='Number of edge pixels to exclude during reprojection. Default: 3.',
     )
+    # String type: accepts "N" or "R,L" (parsed by reproj_cli.factories.parse_zoom_arg).
+    # Contrast add_body_args, where --zoom is type=int for a single scalar factor.
     grp.add_argument(
         '--zoom',
         type=str,
@@ -364,7 +455,16 @@ def add_ring_args(parser: argparse.ArgumentParser) -> None:
 
 
 def add_display_args(parser: argparse.ArgumentParser) -> None:
-    """Add nav_mosaic_display arguments (stretch, overlays, verbosity)."""
+    """Add nav_mosaic_display arguments (stretch, overlays, verbosity).
+
+    Parameters:
+        parser: Target ``argparse.ArgumentParser`` (or subparser) to extend.
+
+    Side effects:
+        Adds a ``Display`` group with stretch black/white/gamma defaults and
+        optional body/ring overlay toggles plus ``--verbose``. Defaults match the
+        viewer's auto-stretch behaviour when black/white are omitted. Does not raise.
+    """
     disp = parser.add_argument_group('Display')
     disp.add_argument(
         '--stretch-black',

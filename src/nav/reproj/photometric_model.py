@@ -98,7 +98,20 @@ class LambertModel:
         emission: NDArrayFloatType,
         phase: NDArrayFloatType,
     ) -> NDArrayFloatType:
-        """Inverse of :meth:`correct` using the same incidence clamping."""
+        """Undo :meth:`correct` (multiply by clamped ``cos(incidence)``).
+
+        Parameters:
+            data: Corrected radiance / reflectance (same shape as in :meth:`correct`).
+            incidence: Incidence angle per pixel (rad); ``cos`` is clamped with
+                ``self.min_cos_incidence`` like :meth:`correct`.
+            emission: Accepted for API symmetry with :meth:`correct`; not used.
+            phase: Accepted for API symmetry; not used.
+
+        Returns:
+            Uncorrected values ``data * max(cos(incidence), min_cos_incidence)``,
+            ``NDArrayFloatType``, same shape as ``data`` (inverse of division in
+            :meth:`correct` using the same clamping).
+        """
         cos_i = np.maximum(np.cos(incidence), self.min_cos_incidence)
         return data * cos_i
 
@@ -119,6 +132,7 @@ class LommelSeeligerModel:
 
     name: str = 'lommel_seeliger'
     min_cos_incidence: float = 0.01
+    min_denom: float = 1e-15
 
     def correct(
         self,
@@ -153,11 +167,22 @@ class LommelSeeligerModel:
         emission: NDArrayFloatType,
         phase: NDArrayFloatType,
     ) -> NDArrayFloatType:
-        """Inverse of :meth:`correct` using the same incidence clamping."""
+        """Undo :meth:`correct` using the same incidence clamping and denominator floor.
+
+        Parameters:
+            data: Values after Lommel-Seeliger :meth:`correct`.
+            incidence: Incidence angles (rad); cosine clamped with ``min_cos_incidence``.
+            emission: Emission angles (rad); ``cos(emission)`` contributes to the denominator.
+            phase: Accepted for API symmetry; not used.
+
+        Returns:
+            ``NDArrayFloatType`` of same shape as ``data``, ``data * (2*cos_i) / denom``
+            where ``denom = max(|cos_i+cos_e|, min_denom)`` preserves sign.
+        """
         cos_i = np.maximum(np.cos(incidence), self.min_cos_incidence)
         cos_e = np.cos(emission)
         denom = cos_i + cos_e
-        denom = np.where(np.abs(denom) < 1e-15, 1e-15, denom)
+        denom = np.where(np.abs(denom) < self.min_denom, self.min_denom, denom)
         return cast(NDArrayFloatType, data * (2.0 * cos_i) / denom)
 
 
@@ -213,7 +238,18 @@ class MinnaertModel:
         emission: NDArrayFloatType,
         phase: NDArrayFloatType,
     ) -> NDArrayFloatType:
-        """Inverse of :meth:`correct` using the same cosine clamping."""
+        """Undo :meth:`correct` using the same ``min_cos_incidence`` / ``min_cos_emission`` clamps.
+
+        Parameters:
+            data: Corrected radiance / reflectance (same shape as for :meth:`correct`).
+            incidence: Incidence angles (rad); ``cos`` clamped to ``min_cos_incidence``.
+            emission: Emission angles (rad); ``cos`` clamped to ``min_cos_emission``.
+            phase: Accepted for API symmetry; not used.
+
+        Returns:
+            ``NDArrayFloatType``, same shape as ``data``, multiplying by
+            ``cos_i**k * cos_e**(k-1)`` with the same clamped cosines as :meth:`correct`.
+        """
         cos_i = np.maximum(np.cos(incidence), self.min_cos_incidence)
         cos_e = np.maximum(np.cos(emission), self.min_cos_emission)
         return data * (cos_i**self.k * cos_e ** (self.k - 1.0))
@@ -222,7 +258,23 @@ class MinnaertModel:
 def photometric_model_from_name(
     name: str | None,
 ) -> LambertModel | LommelSeeligerModel | MinnaertModel | None:
-    """Return a photometric model instance for a saved ``name``, or ``None`` if unknown / none."""
+    """Return a :class:`LambertModel`, :class:`LommelSeeligerModel`, or :class:`MinnaertModel`.
+
+    Parameters:
+        name: Stored model label from a reprojection/mosaic file, or ``None``.
+
+    Returns:
+        A fresh model instance, or ``None`` when ``name`` is ``None`` or normalizes
+        to an empty string / ``none`` / ``null`` (explicit “no model”).
+
+    Raises:
+        ValueError: If ``name`` is non-empty after normalization but not one of the
+            supported aliases (see Notes).
+
+    Notes:
+        Accepted aliases (case-insensitive, spaces and hyphens map to underscores):
+        ``lambert``; ``lommel_seeliger`` / ``lommelseeliger``; ``minnaert``.
+    """
     if name is None:
         return None
     n = str(name).strip().lower().replace('-', '_').replace(' ', '_')
@@ -234,4 +286,7 @@ def photometric_model_from_name(
         return LommelSeeligerModel()
     if n == 'minnaert':
         return MinnaertModel()
-    return None
+    raise ValueError(
+        f'Unknown photometric model name {name!r}; expected None, "", "none", "null", '
+        f'or one of lambert, lommel_seeliger, minnaert (see photometric_model_from_name).'
+    )

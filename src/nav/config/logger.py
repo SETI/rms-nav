@@ -30,9 +30,7 @@ _FALLBACK_LEVEL = 'INFO'
 _ALLOWED_LOG_LEVELS = frozenset({'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'})
 
 
-def _resolve_level(
-    attr_name: str, arguments: argparse.Namespace | None, config: 'Config'
-) -> str:
+def _resolve_level(attr_name: str, arguments: argparse.Namespace | None, config: 'Config') -> str:
     """Return the log level for ``attr_name``, checking args then config then fallback.
 
     Parameters:

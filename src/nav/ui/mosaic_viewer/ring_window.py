@@ -7,6 +7,7 @@ Info grid and Color By controls in the lower strip, and status-bar readouts.
 
 import logging
 import math
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -46,7 +47,11 @@ from nav.ui.common import build_stretch_controls
 from nav.ui.mosaic_viewer.common import RingDisplayData, load_ring_file
 from nav.ui.mosaic_viewer.matplotlib_qt import canvas_draw_idle, new_figure_canvas_qtagg
 from nav.ui.mosaic_viewer.photometric_display import compute_ring_display_image
-from nav.ui.mosaic_viewer.tiled_image_widget import TiledImageWidget, slider_to_zoom, zoom_to_slider
+from nav.ui.mosaic_viewer.tiled_image_widget import (
+    TiledImageWidget,
+    _slider_to_zoom,
+    _zoom_to_slider,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -84,15 +89,41 @@ _COLORBY_ABS_RANGE: dict[str, tuple[str, float, float]] = {
 
 
 def _compute_ew(image_ma: ma.MaskedArray, radial_resolution_km: float) -> ma.MaskedArray:
+    """Column-sum the sparse ring image and scale by radial bin width (km).
+
+    Parameters:
+        image_ma: 2-D masked ring image (radius x longitude).
+        radial_resolution_km: Radial bin width in km.
+
+    Returns:
+        1-D masked array (length = number of longitude columns), EW brightness proxy.
+    """
     return cast(ma.MaskedArray, ma.sum(image_ma, axis=0) * radial_resolution_km)
 
 
 def _compute_ewmu(ew: ma.MaskedArray, emission_deg: ma.MaskedArray) -> ma.MaskedArray:
+    """Weight EW columns by ``|cos(emission)|`` (mu factor).
+
+    Parameters:
+        ew: East-west integrated brightness per column (see :func:`_compute_ew`).
+        emission_deg: Per-column mean emission angle in degrees (masked array).
+
+    Returns:
+        1-D masked ``ma.MaskedArray`` of ``ew * mu``.
+    """
     mu = np.abs(np.cos(np.radians(emission_deg.filled(0.0))))
     return cast(ma.MaskedArray, ew * mu)
 
 
 def _mean_std_masked_1d(arr: ma.MaskedArray) -> tuple[float, float]:
+    """Mean and standard deviation of unmasked samples in a 1-D masked array.
+
+    Parameters:
+        arr: Input masked vector.
+
+    Returns:
+        ``(mean, std)`` as floats; ``(0.0, 0.0)`` when there are no valid points.
+    """
     valid = arr.compressed()
     if valid.size == 0:
         return 0.0, 0.0
@@ -107,6 +138,16 @@ def _ring_longitude_corotating(dd: RingDisplayData) -> bool:
 def _percentile_stretch(
     image_ma: ma.MaskedArray, lo_pct: float = 0.0, hi_pct: float = 98.0
 ) -> tuple[float, float]:
+    """Percentile-based black/white levels for stretch controls.
+
+    Parameters:
+        image_ma: 2-D masked ring image; masked pixels ignored.
+        lo_pct: Lower percentile for black level.
+        hi_pct: Upper percentile for white level.
+
+    Returns:
+        ``(black, white)`` floats; widens ``white`` slightly if ``white <= black``.
+    """
     valid = image_ma.compressed()
     if valid.size == 0:
         return 0.0, 1.0
@@ -123,6 +164,16 @@ def _colorby_column(
     vmin: float | None = None,
     vmax: float | None = None,
 ) -> np.ndarray:
+    """Map a 1-D metadata column to RGB rows for the Color By overlay.
+
+    Parameters:
+        data_1d: Per-column scalar values (numpy or masked 1-D).
+        vmin: Optional lower ramp bound; default uses ``nanmin``.
+        vmax: Optional upper ramp bound; default uses ``nanmax``.
+
+    Returns:
+        ``np.ndarray`` of shape ``(len(data_1d), 3)``, float32 in ``[0, 1]``.
+    """
     arr = np.asarray(data_1d, dtype=np.float64)
     if isinstance(data_1d, ma.MaskedArray):
         mask = ma.getmaskarray(data_1d)
@@ -150,8 +201,18 @@ class _SyncedSlider:
         lo: float,
         hi: float,
         fmt: str = '%.4f',
-        on_change: Any = None,
+        on_change: Callable[[float], None] | None = None,
     ) -> None:
+        """Wire ``line_edit`` and ``slider`` over ``[lo, hi]`` with optional ``on_change``.
+
+        Parameters:
+            line_edit: Numeric text field.
+            slider: 0..1000 slider mapped linearly to ``[lo, hi]``.
+            lo: Lower bound of the mapped range.
+            hi: Upper bound of the mapped range.
+            fmt: ``printf`` format for the line edit.
+            on_change: Called with the new float after slider or edit updates.
+        """
         self._le = line_edit
         self._sl = slider
         self._lo = lo
@@ -163,15 +224,18 @@ class _SyncedSlider:
         self._le.editingFinished.connect(self._edit_done)
 
     def _to_slider(self, val: float) -> int:
+        """Map ``val`` in ``[lo, hi]`` to a slider position in ``[0, 1000]``."""
         if self._hi <= self._lo:
             return 0
         pos = (val - self._lo) / (self._hi - self._lo) * 1000.0
         return round(float(np.clip(pos, 0, 1000)))
 
     def _from_slider(self, pos: int) -> float:
+        """Map slider position ``pos`` (0..1000) back to a float in ``[lo, hi]``."""
         return self._lo + (self._hi - self._lo) * pos / 1000.0
 
     def _slider_moved(self, pos: int) -> None:
+        """Mirror slider motion into the line edit and invoke ``on_change``."""
         if self._updating:
             return
         val = self._from_slider(pos)
@@ -182,6 +246,7 @@ class _SyncedSlider:
             self._on_change(val)
 
     def _edit_done(self) -> None:
+        """Parse the line edit, clamp to ``[lo, hi]``, sync the slider, call ``on_change``."""
         if self._updating:
             return
         try:
@@ -197,16 +262,19 @@ class _SyncedSlider:
             self._on_change(val)
 
     def set_range(self, lo: float, hi: float) -> None:
+        """Update ``lo``/``hi`` without changing the displayed value."""
         self._lo = lo
         self._hi = hi
 
     def set_value(self, val: float) -> None:
+        """Programmatically set both widgets to ``val`` (clamped by current range)."""
         self._updating = True
         self._sl.setValue(self._to_slider(val))
         self._le.setText(self._fmt % val)
         self._updating = False
 
     def get_value(self) -> float:
+        """Return the line-edit float if valid, otherwise infer from the slider."""
         try:
             return float(self._le.text())
         except ValueError:
@@ -214,7 +282,33 @@ class _SyncedSlider:
 
 
 class RingMosaicWindow(QMainWindow):
-    """Viewer for a list of ring reprojection / mosaic files (``RingDisplayData``)."""
+    """PyQt6 viewer for ring reprojections and ring mosaics (``RingDisplayData``).
+
+    Displays a sparse or dense ring image with optional EW/radial profile plots,
+    stretch and zoom controls, cursor metadata, and color-by overlays. All UI
+    updates run on the GUI thread; the window does not mutate caller-owned paths
+    or file contents.
+
+    Parameters:
+        file_paths: Non-empty list of paths to ``RingReprojResult`` / ``RingMosaicData``
+            files (see :func:`~nav.ui.mosaic_viewer.common.load_ring_file`).
+        initial_black: Optional fixed stretch black; ``None`` uses percentile stretch.
+        initial_white: Optional fixed stretch white; ``None`` uses percentile stretch.
+        initial_gamma: Initial gamma for the stretch controls (default ``0.5``).
+        show_radii_km: Radii (km) for horizontal guide lines; ``None`` uses ``[]``.
+        show_longitude_ticks: Pre-check longitude axis tick overlay.
+        show_radius_ticks: Pre-check radius axis tick overlay.
+        parent: Optional Qt parent widget.
+
+    Behavior:
+        Navigation uses ``_load_file`` and list/prev/next controls; closing the
+        window releases child widgets and Matplotlib canvases normally. Signals
+        from ``TiledImageWidget`` drive zoom readouts and cursor handling.
+
+    Notes:
+        EW matplotlib interaction and ``eventFilter`` resize handling expect the
+        window to remain on the main Qt thread.
+    """
 
     def __init__(
         self,
@@ -228,6 +322,21 @@ class RingMosaicWindow(QMainWindow):
         show_radius_ticks: bool = False,
         parent: QWidget | None = None,
     ) -> None:
+        """Open the ring mosaic UI for ``file_paths``.
+
+        Parameters:
+            file_paths: At least one ring ``.npz`` / ``.fits`` path.
+            initial_black: Optional stretch black override after load.
+            initial_white: Optional stretch white override after load.
+            initial_gamma: Initial display gamma (default ``0.5``).
+            show_radii_km: Overlay radii in km; ``None`` becomes an empty list.
+            show_longitude_ticks: Enable longitude tick overlay on first paint.
+            show_radius_ticks: Enable radius tick overlay on first paint.
+            parent: Optional Qt parent.
+
+        Raises:
+            ValueError: If ``file_paths`` is empty.
+        """
         super().__init__(parent)
         if not file_paths:
             raise ValueError('file_paths must contain at least one path')
@@ -588,8 +697,8 @@ class RingMosaicWindow(QMainWindow):
             [
                 ('orbit_model', 'Orbit model:'),
                 ('corot', 'Corotating longitude:'),
-                ('rel_r', 'Radial offset from center:'),
                 ('inert', 'Inertial longitude:'),
+                ('rel_r', 'Radial offset from center:'),
                 ('core_r', 'Core radius:'),
             ],
             [
@@ -702,10 +811,10 @@ class RingMosaicWindow(QMainWindow):
 
         class _ZoomSync(_SyncedSlider):
             def _to_slider(self, val: float) -> int:
-                return zoom_to_slider(val)
+                return _zoom_to_slider(val)
 
             def _from_slider(self, pos: int) -> float:
-                return slider_to_zoom(pos)
+                return _slider_to_zoom(pos)
 
         sync = _ZoomSync(le, sl, 0.05, 100.0, '%.2f', on_change=_on_change)
         sync.set_value(1.0)
@@ -907,7 +1016,7 @@ class RingMosaicWindow(QMainWindow):
             self._info_name['corot'].setText('Co-rotating longitude:')
             self._info_name['inert'].setText('Inertial longitude:')
             self._info_name['rel_r'].setText('Radius (km):')
-            self._info_name['core_r'].setText('Offset from mean (km):')
+            self._info_name['core_r'].setText('Radial offset from model (km):')
 
     def _on_rad_profile_toggled(self, checked: bool) -> None:
         self._rad_wrap.setVisible(checked)
@@ -1249,6 +1358,9 @@ class RingMosaicWindow(QMainWindow):
         x_zoom = min(float(vw) / dd.n_longitude, 100.0)
         y_zoom = min(float(vh) / dd.n_radii, 100.0)
         self._image_widget.set_zoom(x_zoom, y_zoom)
+        # Scroll to place the data at the left edge of the viewport (nop when
+        # ring_x_col_offset is 0, but essential when the mosaic doesn't start at 0°).
+        self._image_widget.scroll_to_pixel(dd.n_longitude / 2.0, dd.n_radii / 2.0)
 
     def _on_zoom_in(self) -> None:
         xz, yz = self._image_widget.get_zoom()
@@ -1418,8 +1530,6 @@ class RingMosaicWindow(QMainWindow):
         rad_r = self._format_ma_at_ix(dd.mean_radial_resolution, ix, '%.3f')
         lng_r = self._format_ma_at_ix(dd.mean_angular_resolution, ix, '%.5f')
         core_abs = dd.radius_inner + arr_row * dd.radius_resolution_km
-        mean_core = (dd.radius_inner + dd.radius_outer) / 2.0
-        offset_from_mean = core_abs - mean_core
 
         if dd.image_number is not None:
             img_idx_v = dd.image_number[ix]
@@ -1461,22 +1571,26 @@ class RingMosaicWindow(QMainWindow):
         x_str = f'{px:8.2f}'
         y_str = f'{py:7.2f}'
         self._cursor_status_lbl.setText(f'X: {x_str}  Y: {y_str}  Value: {value_str}')
-        self._info['orbit_model'].setText(dd.orbit_model_name if dd.orbit_model_name else '---')
         if _ring_longitude_corotating(dd):
             inert_str = '---'
+            core_r_str = f'{core_abs:.2f} km'
+            rel_r_str = f'{y_axis:.2f} km'
             if dd.orbit_model is not None and dd.observation_time_tdb is not None:
                 tdb_v = dd.observation_time_tdb[ix]
                 if not ma.is_masked(tdb_v):
                     corot_rad = np.array([lon_deg * math.pi / 180.0])
                     inert_rad = dd.orbit_model.corotating_to_inertial(corot_rad, float(tdb_v))
                     inert_str = f'{math.degrees(float(inert_rad[0])):.4f}°'
-            self._info['rel_r'].setText(f'{y_axis:.2f} km')
-            self._info['core_r'].setText(f'{core_abs:.2f} km')
+                    model_r = float(dd.orbit_model.radius_at_longitude(inert_rad, float(tdb_v))[0])
+                    core_r_str = f'{model_r:.2f} km'
+                    rel_r_str = f'{core_abs - model_r:+.2f} km'
+            self._info['rel_r'].setText(rel_r_str)
+            self._info['core_r'].setText(core_r_str)
             self._info['corot'].setText(f'{lon_deg:.4f}°')
             self._info['inert'].setText(inert_str)
         else:
             self._info['rel_r'].setText(f'{y_axis:.2f} km')
-            self._info['core_r'].setText(f'{offset_from_mean:+.2f} km')
+            self._info['core_r'].setText('---')
             self._info['inert'].setText(f'{lon_deg:.4f}°')
             self._info['corot'].setText('---')
         self._info['incidence'].setText(self._fmt_deg(inc_str))
@@ -1499,8 +1613,10 @@ class RingMosaicWindow(QMainWindow):
 
     def _clear_info(self) -> None:
         self._cursor_status_lbl.setText('')
-        for lbl in self._info.values():
-            lbl.setText('---')
+        _STATIC_INFO_KEYS = frozenset({'orbit_model', 'full_ew', 'full_ewmu'})
+        for key, lbl in self._info.items():
+            if key not in _STATIC_INFO_KEYS:
+                lbl.setText('---')
 
     def _on_ctrl_click(self, px: float, py: float) -> None:
         dd = self._display_data

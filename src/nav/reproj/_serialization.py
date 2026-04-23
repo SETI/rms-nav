@@ -39,6 +39,7 @@ does not match the expected kind. Future schema changes should bump
 ``load()`` implementation.
 """
 
+import logging
 import warnings
 from pathlib import Path
 from typing import Any, cast
@@ -53,6 +54,7 @@ from nav.reproj.ring_orbit_model import RingOrbitModel
 from nav.support.types import PathLike
 
 _CURRENT_VERSION = 1
+_logger = logging.getLogger(__name__)
 
 
 def _as_fcpath(path: PathLike) -> FCPath:
@@ -72,10 +74,17 @@ def tuple_of_strings_field(value: Any) -> tuple[str, ...]:
             return ()
         # FITS: UTF-8 bytes written by ``_fits_encode_value`` for tuple-of-strings fields.
         if flat.dtype == np.uint8:
-            raw = flat.astype(np.uint8, copy=False).tobytes()
+            raw = flat.tobytes()
             if not raw:
                 return ()
-            return tuple(p.decode('utf-8', errors='replace') for p in raw.split(b'\0'))
+            try:
+                return tuple(p.decode('utf-8') for p in raw.split(b'\0'))
+            except UnicodeDecodeError as exc:
+                _logger.error(
+                    'Invalid UTF-8 in FITS tuple-of-strings buffer (%d bytes)',
+                    len(raw),
+                )
+                raise ValueError('Invalid UTF-8 in tuple-of-strings FITS payload') from exc
         return tuple(str(x) for x in flat.tolist())
     if isinstance(value, (list, tuple)):
         return tuple(str(x) for x in value)
@@ -508,12 +517,19 @@ def load_fits(
 
         # Collect ImageHDUs by EXTNAME (avoid clobbering when EXTNAME is missing/blank).
         hdu_map: dict[str, Any] = {}
+        extname_first_index: dict[str, int] = {}
         for idx, hdu in enumerate(hdul[1:], start=1):
             extname = (hdu.name or '').strip()
             if not extname:
                 extname = str(hdu.header.get('EXTNAME', '') or '').strip()
             if not extname:
                 extname = f'__UNNAMED{idx}'
+            if extname in hdu_map:
+                raise ValueError(
+                    f'Duplicate FITS EXTNAME {extname!r}: HDU indices '
+                    f'{extname_first_index[extname]} and {idx}'
+                )
+            extname_first_index[extname] = idx
             hdu_map[extname] = hdu.data
 
         result: dict[str, Any] = {}
@@ -565,9 +581,9 @@ def load_fits(
     for k in list(result.keys()):
         if k.endswith('_NONE'):
             base = k[:-5]
-            # Flattened nested dict keys look like ORBIT_MODEL__IS_NONE (``is_none``
-            # under ``orbit_model``); only top-level-None sentinels are ``FIELD_NONE``
-            # with no ``__`` in the base segment.
+            # ``__`` in ``base`` marks flattened nested keys, e.g. ``ORBIT_MODEL__IS_NONE``
+            # from ``orbit_model.is_none``; skip those. True top-level None sentinels look
+            # like ``FIELD_NONE`` (``base`` has no ``__``) and map the field to Python ``None``.
             if '__' in base:
                 continue
             keys_to_add[base] = None
@@ -598,10 +614,10 @@ def _dtype_matches_declared(actual: np.dtype, declared: np.dtype) -> bool:
         return True
     a = np.dtype(actual)
     d = np.dtype(declared)
-    if a.kind != d.kind or a.itemsize != d.itemsize:
+    if a.itemsize != d.itemsize:
         return False
-    # Distinguish int vs unsigned when sizes match (e.g. int32 vs uint32).
-    return not (a.kind in 'iu' and d.kind in 'iu' and a.kind != d.kind)
+    # Same width: kinds must match (endian swap ok; reject int32 vs uint32, float vs int, ...).
+    return a.kind == d.kind
 
 
 def verify_dtype(

@@ -3,7 +3,7 @@ Simulated Images
 ================
 
 RMS-NAV supports simulated images created with the
-``nav_create_simulated_image`` GUI.  Simulated images share the same
+``nav_create_simulated_image`` GUI. Simulated images share the same
 navigation pipeline as real images; they are selected by passing the
 ``sim`` dataset name and a path to a JSON parameter file on the command
 line.

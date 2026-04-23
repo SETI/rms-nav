@@ -79,6 +79,8 @@ def create_cartographic_model(
     """
     logger = logging.getLogger(_LOGGING_NAME + '.create_cartographic_model')
 
+    if not isinstance(body_name, str):
+        raise TypeError(f'body_name must be str, not {type(body_name).__name__}')
     if not body_name or not body_name.strip():
         raise ValueError('body_name must be a non-empty string')
     if latlon_type not in ('centric', 'graphic', 'squashed'):

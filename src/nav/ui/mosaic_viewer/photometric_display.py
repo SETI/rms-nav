@@ -12,6 +12,31 @@ import numpy.ma as ma
 
 from nav.reproj.photometric_model import photometric_model_from_name
 
+_KNOWN_PHOTOMETRY_MODES: frozenset[str] = frozenset(
+    {
+        'as_saved',
+        'intrinsic',
+        'lambert',
+        'lommel_seeliger',
+        'lommelseeliger',
+        'minnaert',
+    }
+)
+
+
+def _normalize_photometry_mode(mode: str) -> str:
+    return str(mode).strip().lower().replace('-', '_').replace(' ', '_')
+
+
+def _validate_photometry_mode(mode: str) -> str:
+    n = _normalize_photometry_mode(mode)
+    if n not in _KNOWN_PHOTOMETRY_MODES:
+        raise ValueError(
+            f'Unknown photometric display mode {mode!r}; expected one of '
+            f'{sorted(_KNOWN_PHOTOMETRY_MODES)} (see photometric_model_from_name).'
+        )
+    return n
+
 
 def compute_body_display_image(
     *,
@@ -25,19 +50,18 @@ def compute_body_display_image(
     """Return image data for the mosaic viewer for a photometric display mode.
 
     Parameters:
-        mode: ``'as_saved'`` (file pixels), ``'intrinsic'`` (undo file model only),
-            or a model name understood by
-            :func:`~nav.reproj.photometric_model.photometric_model_from_name`
-            (undo file model, then apply that model).
+        mode: ``'as_saved'``, ``'intrinsic'``, or a supported model name
+            (``lambert``, ``lommel_seeliger`` / ``lommelseeliger``, ``minnaert``).
         image_ma: Stored image (possibly already corrected when saved).
         photometric_model_name: Model name stored with the file, if any.
         phase_deg, emission_deg, incidence_deg: Per-pixel angles in **degrees**
             (same shape as ``image_ma``).
 
     Returns:
-        Masked array of the same shape and dtype as ``image_ma``.
+        Masked array, same shape as ``image_ma``. ``as_saved`` returns ``image_ma``
+        unchanged. Other modes return float64 pixel values under the original mask.
     """
-    mode_l = str(mode).strip().lower()
+    mode_l = _validate_photometry_mode(mode)
     if mode_l == 'as_saved':
         return image_ma
 
@@ -47,7 +71,10 @@ def compute_body_display_image(
     emi = np.deg2rad(np.asarray(emission_deg.filled(np.nan), dtype=np.float64))
     pha = np.deg2rad(np.asarray(phase_deg.filled(np.nan), dtype=np.float64))
 
-    file_model = photometric_model_from_name(photometric_model_name)
+    try:
+        file_model = photometric_model_from_name(photometric_model_name)
+    except ValueError:
+        file_model = None
     inc_w = np.nan_to_num(inc, nan=0.0)
     emi_w = np.nan_to_num(emi, nan=0.0)
     pha_w = np.nan_to_num(pha, nan=0.0)
@@ -66,15 +93,12 @@ def compute_body_display_image(
         out = intrinsic
     else:
         view_model = photometric_model_from_name(mode_l)
-        if view_model is None:
-            out = intrinsic
-        else:
-            incore = np.nan_to_num(intrinsic, nan=0.0)
-            out = view_model.correct(incore, incidence=inc_w, emission=emi_w, phase=pha_w)
+        assert view_model is not None
+        incore = np.nan_to_num(intrinsic, nan=0.0)
+        out = view_model.correct(incore, incidence=inc_w, emission=emi_w, phase=pha_w)
 
-    out = np.asarray(out, dtype=np.asarray(image_ma).dtype)
-    out = np.where(mask, np.nan, out)
-    out_ma = ma.masked_array(out, mask=mask)
+    out_f = np.asarray(out, dtype=np.float64)
+    out_ma = ma.masked_array(out_f, mask=mask)
     if hasattr(image_ma, 'fill_value'):
         out_ma.fill_value = image_ma.fill_value
     return out_ma
@@ -96,10 +120,31 @@ def compute_ring_display_image(
     scalar mean (deg) for the reprojection / mosaic slice. If incidence is unknown,
     modes other than ``as_saved`` return the stored image unchanged (same geometry
     cannot be inferred for undo/apply).
+
+    Parameters:
+        mode: Same values as :func:`compute_body_display_image` (e.g. ``as_saved``,
+            ``intrinsic``, ``lambert``).
+        image_ma: 2-D ring image (radius x longitude), masked array.
+        photometric_model_name: Model name stored with the file, if any.
+        mean_phase_deg: 1-D masked array of mean phase (deg) per longitude column.
+        mean_emission_deg: 1-D masked array of mean emission (deg) per longitude column.
+        mean_incidence_deg: Scalar mean incidence (deg), or ``None`` / non-finite when
+            unknown.
+
+    Returns:
+        ``ma.MaskedArray`` with the same shape and dtype semantics as
+        :func:`compute_body_display_image`. When ``mean_incidence_deg`` is missing or
+        not finite, returns ``image_ma`` unchanged for any mode other than ``as_saved``.
     """
-    mode_l = str(mode).strip().lower()
+    mode_l = _validate_photometry_mode(mode)
     if mode_l == 'as_saved':
         return image_ma
+
+    if image_ma.ndim != 2:
+        raise ValueError(
+            f'compute_ring_display_image: image_ma must be 2-D for broadcast with '
+            f'mean_phase_deg / mean_emission_deg; got shape {image_ma.shape}'
+        )
 
     if mean_incidence_deg is None or not math.isfinite(float(mean_incidence_deg)):
         return image_ma

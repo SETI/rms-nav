@@ -568,6 +568,14 @@ class TestContributingImageNamesRings:
     """Tests for ``contributing_image_names`` on ring mosaics."""
 
     def _make_mosaic(self) -> RingMosaic:
+        """Return a small ``RingMosaic`` for SATURN using module test constants.
+
+        Uses ``_RADIUS_INNER``, ``_RADIUS_OUTER``, ``_LON_RES``, and ``_RAD_RES`` for
+        the radial/longitude grid; no orbit model or photometry.
+
+        Returns:
+            A fresh :class:`~nav.reproj.rings.RingMosaic` instance.
+        """
         return RingMosaic(
             body_name='SATURN',
             radius_inner=_RADIUS_INNER,

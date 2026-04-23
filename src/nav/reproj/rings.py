@@ -41,7 +41,7 @@ _LOGGING_NAME = 'nav.' + __name__
 
 
 def _ring_plane_surface(ring_body_name: str) -> Any:
-    """Return the oops ring surface used for longitude/radius ↔ pixel conversion.
+    """Return the oops ring surface used for longitude/radius <-> pixel conversion.
 
     Nav and oops backplanes use names like ``'saturn:ring'``. The corresponding
     ``oops.Body`` registry entry for the unbounded plane is ``SATURN_RING_PLANE``,
@@ -1255,7 +1255,7 @@ class RingMosaic:
         logger.debug('Reprojection complete: %d valid longitudes', int(good_lon_antimask.sum()))
 
         photometric_model_name: str | None = None
-        if self._photometric_model is not None:
+        if self._photometric_model is not None and math.isfinite(float(repro_incidence)):
             photometric_model_name = self._photometric_model.name
             n_rad_sparse, n_lon_sparse = repro_img.shape
             phase_2d = np.broadcast_to(

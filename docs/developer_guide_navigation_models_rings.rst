@@ -101,7 +101,7 @@ Top-level ring model parameters
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 These keys sit directly under the ``rings:`` section (not under
-``rings.ring_features.<PLANET>``).  They are shared across all planets and
+``rings.ring_features.<PLANET>``). They are shared across all planets and
 control post-render processing that is applied to every feature before the
 ``NavModelResult`` is constructed.
 
@@ -116,25 +116,25 @@ control post-render processing that is applied to every feature before the
      - ``true``
      - When ``true``, pixels of each rendered ring feature that fall inside the
        shadow of the nearest planet are zeroed out of the model image and
-       removed from the model mask.  The shadow boundary is computed once per
+       removed from the model mask. The shadow boundary is computed once per
        observation via
        ``obs.ext_bp.where_inside_shadow(ring_target, planet.lower())``, where
        *ring_target* is ``<planet>:ring`` (e.g. ``saturn:ring``) and *planet*
-       is ``obs.closest_planet``.  If the backplane call raises an exception
+       is ``obs.closest_planet``. If the backplane call raises an exception
        (e.g. degenerate illumination geometry), a warning is logged and shadow
-       removal is skipped for that observation.  Removing shadowed pixels
+       removal is skipped for that observation. Removing shadowed pixels
        prevents the navigator from matching bright model arcs against the dark
        shadow region, which would introduce a systematic offset bias.
    * - ``remove_body_shadows``
      - ``false``
-     - Reserved for future implementation.  When set, it will zero out ring
-       model pixels that lie in the shadows cast by moons.  The flag is
+     - Reserved for future implementation. When set, it will zero out ring
+       model pixels that lie in the shadows cast by moons. The flag is
        accepted by the configuration parser but has no effect in the current
        release.
 
 Shadow removal is applied **after** rendering and **before**
 ``NavModelResult`` construction, so the ``model_img`` and ``model_mask``
-stored in each result already reflect the masking.  At ``INFO`` log level the
+stored in each result already reflect the masking. At ``INFO`` log level the
 orchestrator reports the shadow pixel count:
 
 .. code-block::

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import cast
 
 import numpy as np
@@ -24,7 +26,7 @@ class Annotations(NavBase):
         self._annotations: list[Annotation] = []
 
     def add_annotations(
-        self, annotations: Annotation | list[Annotation] | 'Annotations' | None
+        self, annotations: Annotation | list[Annotation] | Annotations | None
     ) -> None:
         """Adds one or more annotations to this collection.
 

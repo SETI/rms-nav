@@ -20,6 +20,9 @@ from nav.ui.mosaic_viewer.projections import ProjectionKind, ProjectionParams, l
 # the antimeridian.
 _MAX_STEP_SQ: float = 100.0**2  # 100 px gap
 
+# Meridian label radius in polar projections, as a fraction of ``ProjectionParams.scale``.
+_POLAR_MERIDIAN_LABEL_RADIUS_FRAC: float = 0.55
+
 
 def graticule_polylines(
     params: ProjectionParams,
@@ -49,7 +52,18 @@ def graticule_polylines(
         Tuple ``(parallel_lines, meridian_lines)`` where each element is a
         list of polyline segments.  A segment is a list of ``(vx, vy)``
         float tuples.
+
+    Raises:
+        TypeError: If ``params`` is ``None``.
+        ValueError: If ``lat_step_deg`` or ``lon_step_deg`` is negative, or if
+            ``samples_per_line`` is less than 2.
     """
+    if params is None:
+        raise TypeError('graticule_polylines: params must not be None')
+    if lat_step_deg < 0 or lon_step_deg < 0:
+        raise ValueError('graticule_polylines: lat_step_deg and lon_step_deg must be non-negative')
+    if samples_per_line < 2:
+        raise ValueError('graticule_polylines: samples_per_line must be at least 2')
     parallel_segs: list[list[tuple[float, float]]] = []
     meridian_segs: list[list[tuple[float, float]]] = []
 
@@ -94,7 +108,17 @@ def graticule_label_anchors(
     Returns:
         Tuple ``(parallel_anchors, meridian_anchors)``.  Each anchor is
         ``(vx, vy, label_text)``.
+
+    Raises:
+        ValueError: If ``params`` is ``None``, or if ``lat_step_deg`` or
+            ``lon_step_deg`` is negative.
     """
+    if params is None:
+        raise ValueError('graticule_label_anchors: params must not be None')
+    if lat_step_deg < 0 or lon_step_deg < 0:
+        raise ValueError(
+            'graticule_label_anchors: lat_step_deg and lon_step_deg must be non-negative'
+        )
     parallel_anchors: list[tuple[float, float, str]] = []
     meridian_anchors: list[tuple[float, float, str]] = []
     cx, cy = params.cx, params.cy
@@ -126,7 +150,9 @@ def graticule_label_anchors(
                 # Meridians converge at the pole (the projection centre), so
                 # nearest-to-centre puts every label on top of every other.
                 # Instead place each label at ~55 % of the projection radius.
-                anchor = _at_target_radius(vx, vy, vis, cx, cy, 0.55 * params.scale)
+                anchor = _at_target_radius(
+                    vx, vy, vis, cx, cy, _POLAR_MERIDIAN_LABEL_RADIUS_FRAC * params.scale
+                )
             else:
                 anchor = _nearest_visible_to_centre(vx, vy, vis, cx, cy)
             if anchor is not None:

@@ -43,6 +43,17 @@ _PROJ_CHOICES = {
 
 
 def _build_parser(mode: str) -> argparse.ArgumentParser:
+    """Build the :class:`argparse.ArgumentParser` for ``nav_mosaic_display``.
+
+    Parameters:
+        mode: ``'rings'`` or ``'body'``. Selects description text, program name,
+            and whether ``--projection`` is registered (body only).
+
+    Returns:
+        Parser with a required ``files`` positional (one or more mosaic/reproj
+        paths), display/stretch options from :func:`reproj_cli.args.add_display_args`,
+        and for ``mode='body'`` only, ``--projection`` (initial map projection).
+    """
     description = {
         'rings': (
             'Display ring reprojection or mosaic files produced by nav_mosaic_rings. '
@@ -85,6 +96,17 @@ def _build_parser(mode: str) -> argparse.ArgumentParser:
 
 
 def _run_rings(args: argparse.Namespace) -> None:
+    """Open a :class:`~nav.ui.mosaic_viewer.ring_window.RingMosaicWindow` and run Qt.
+
+    Ensures a :class:`~PyQt6.QtWidgets.QApplication` exists, constructs the
+    window from ``args.files`` and stretch settings ``args.stretch_black`` /
+    ``args.stretch_white`` / ``args.stretch_gamma``, enables radius and
+    longitude axis ticks, shows the window, and calls ``sys.exit(app.exec())``
+    (does not return under normal operation).
+
+    Parameters:
+        args: Namespace produced by :func:`_build_parser` with ``mode='rings'``.
+    """
     app = QApplication.instance() or QApplication(sys.argv[:1])
     win = RingMosaicWindow(
         file_paths=args.files,
@@ -99,8 +121,18 @@ def _run_rings(args: argparse.Namespace) -> None:
 
 
 def _run_body(args: argparse.Namespace) -> None:
+    """Open a :class:`~nav.ui.mosaic_viewer.body_window.BodyMosaicWindow` and run Qt.
+
+    Same application bootstrap as :func:`_run_rings`. Maps ``args.projection``
+    through :data:`_PROJ_CHOICES` (body mode always defines ``--projection``),
+    passes parallel/meridian tick flags and stretch fields from ``args``, then
+    ``sys.exit(app.exec())``.
+
+    Parameters:
+        args: Namespace from :func:`_build_parser` with ``mode='body'``.
+    """
     app = QApplication.instance() or QApplication(sys.argv[:1])
-    proj_kind = _PROJ_CHOICES.get(getattr(args, 'projection', 'rect'), ProjectionKind.RECT)
+    proj_kind = _PROJ_CHOICES[args.projection]
     win = BodyMosaicWindow(
         file_paths=args.files,
         initial_black=args.stretch_black,
@@ -120,8 +152,9 @@ def main() -> None:
     """Dispatch on ``rings`` or ``body`` first positional argument."""
     args_list = sys.argv[1:]
     if not args_list or args_list[0] not in ('rings', 'body'):
-        print('Usage: nav_mosaic_display <rings|body> [options] FILE [FILE ...]')
-        sys.exit(1)
+        argparse.ArgumentParser(prog='nav_mosaic_display').error(
+            'Usage: nav_mosaic_display <rings|body> [options] FILE [FILE ...]'
+        )
     mode = args_list[0]
     parser = _build_parser(mode)
     args = parser.parse_args(args_list[1:])

@@ -18,7 +18,7 @@ arbitrary zoom levels are memory-efficient.
 """
 
 import math
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 import numpy.ma as ma
@@ -47,19 +47,21 @@ from nav.ui.mosaic_viewer.projections import (
 )
 from nav.ui.mosaic_viewer.sphere_render import render_to_image
 
-# Zoom slider maps to log scale: slider 1..1000  →  zoom 0.05x..100x
+# Zoom slider maps to log scale: slider 1..1000  →  zoom 0.05x.._ZOOM_MAX
+_ZOOM_MAX = 100.0
 _ZOOM_LOG_LO = np.log10(0.05)
-_ZOOM_LOG_HI = np.log10(100.0)
+_ZOOM_LOG_HI = np.log10(_ZOOM_MAX)
+_PROJ_SCALE_MAX = 4000.0
 
 
-def zoom_to_slider(zoom: float) -> int:
+def _zoom_to_slider(zoom: float) -> int:
     """Convert zoom value to slider integer 1..1000."""
     log = np.log10(max(zoom, 1e-6))
     pos = (log - _ZOOM_LOG_LO) / (_ZOOM_LOG_HI - _ZOOM_LOG_LO) * 999.0 + 1.0
     return round(float(np.clip(pos, 1, 1000)))
 
 
-def slider_to_zoom(pos: int) -> float:
+def _slider_to_zoom(pos: int) -> float:
     """Convert slider integer 1..1000 to zoom value."""
     log = _ZOOM_LOG_LO + (pos - 1) / 999.0 * (_ZOOM_LOG_HI - _ZOOM_LOG_LO)
     return float(10.0**log)
@@ -281,6 +283,16 @@ class TiledImageWidget(QAbstractScrollArea):
     # ------------------------------------------------------------------ #
 
     def __init__(self, parent: QWidget | None = None) -> None:
+        """Create an empty tiled image viewer.
+
+        Parameters:
+            parent: Optional Qt parent widget.
+
+        Initial state includes no image (``_image_ma`` is ``None``, ``_n_rows`` /
+        ``_n_cols`` are 0), default RECT projection (``_proj_kind``, ``_proj_scale``,
+        ``_proj_cx``, ``_proj_cy``), unit X/Y zoom and pan placeholders, and scrollbar
+        connections that repaint the viewport on scroll.
+        """
         super().__init__(parent)
         self.setViewportMargins(0, 0, 0, 0)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -294,7 +306,7 @@ class TiledImageWidget(QAbstractScrollArea):
         self._n_rows: int = 0
         self._n_cols: int = 0
 
-        # Physical axis: x = column (longitude or longitude), y = row (radius or latitude)
+        # Physical axis: x = column (longitude or azimuth), y = row (radius or latitude)
         self._x_interval: float = 1.0  # degrees or km per pixel (column)
         self._y_interval: float = 1.0  # degrees or km per pixel (row)
         self._x_label: str = 'Longitude (°)'
@@ -307,6 +319,9 @@ class TiledImageWidget(QAbstractScrollArea):
         # span a full circle regardless of how many data columns are present.
         # 0 means "use _n_cols".
         self._ring_full_lon_cols: int = 0
+        # For full-360 ring displays: how many virtual columns lie to the LEFT of
+        # data column 0 (= round(x_origin_deg / x_interval)).  0 when not active.
+        self._ring_x_col_offset: int = 0
         # Longitude (deg) at column 0 when columns are not anchored at 0 (ring sparse).
         self._x_origin_deg: float = 0.0
         # Body: virtual canvas covering 360 deg longitude and 180 deg latitude.
@@ -359,7 +374,7 @@ class TiledImageWidget(QAbstractScrollArea):
         self._rubber_band: QRubberBand | None = None
         self._rubber_origin: QPoint | None = None
 
-        # Keep numpy array alive while QImage uses its buffer
+        # Contiguous RGB buffer retained while QImage references it (see paint paths).
         self._last_rgb: np.ndarray | None = None
 
         # Non-rectangular projection state (POLAR_N, POLAR_S, MOLLWEIDE, SPHERE_3D)
@@ -438,6 +453,10 @@ class TiledImageWidget(QAbstractScrollArea):
             raise ValueError(
                 f'image_ma must be 2-D, got ndim={image_ma.ndim}, shape={image_ma.shape}'
             )
+        if x_interval <= 0:
+            raise ValueError(f'x_interval must be > 0, got {x_interval!r}')
+        if y_interval <= 0:
+            raise ValueError(f'y_interval must be > 0, got {y_interval!r}')
         self._image_ma = image_ma
         self._n_rows, self._n_cols = image_ma.shape
         self._x_interval = x_interval
@@ -451,6 +470,11 @@ class TiledImageWidget(QAbstractScrollArea):
         self._ring_radial_mid_km = float(ring_radial_mid_km) if self._ring_pixel_y_absolute else 0.0
         self._ring_full_lon_cols = (
             max(self._n_cols, int(360.0 / x_interval)) if ring_full_lon and x_interval > 0 else 0
+        )
+        self._ring_x_col_offset = (
+            round(self._x_origin_deg / x_interval)
+            if self._ring_full_lon_cols > 0 and x_interval > 0
+            else 0
         )
         self._body_sphere = False
         self._body_n_full_lon = 0
@@ -501,6 +525,9 @@ class TiledImageWidget(QAbstractScrollArea):
             self._update_scroll_range()
             hbar.setValue(int(np.clip(prev_hv, 0, max(0, hbar.maximum()))))
             vbar.setValue(int(np.clip(prev_vv, 0, max(0, vbar.maximum()))))
+        elif self._ring_x_col_offset > 0:
+            # Scroll to place the data at the left edge of the viewport.
+            hbar.setValue(min(self._ring_x_col_offset, hbar.maximum()))
         self.viewport().update()
 
     def is_body_full_sphere_canvas(self) -> bool:
@@ -691,9 +718,9 @@ class TiledImageWidget(QAbstractScrollArea):
         """Set the isotropic projection scale and repaint.
 
         Parameters:
-            scale: New scale in pixels per normalized unit; clamped to [1, 4000].
+            scale: New scale in pixels per normalized unit; clamped to ``[1, _PROJ_SCALE_MAX]``.
         """
-        self._proj_scale = float(np.clip(scale, 1.0, 4000.0))
+        self._proj_scale = float(np.clip(scale, 1.0, _PROJ_SCALE_MAX))
         self.zoom_changed.emit(self._proj_scale, self._proj_scale)
         self.viewport().update()
 
@@ -761,7 +788,7 @@ class TiledImageWidget(QAbstractScrollArea):
         """Convert viewport screen coords to image pixel coords."""
         hv = self.horizontalScrollBar().value()
         vv = self.verticalScrollBar().value()
-        return (hv + vx) / self._x_zoom, (vv + vy) / self._y_zoom
+        return (hv + vx) / self._x_zoom - self._ring_x_col_offset, (vv + vy) / self._y_zoom
 
     def pixel_to_physical(self, pixel_x: float, pixel_y: float) -> tuple[float, float]:
         """Return ``(x_physical, y_physical)`` from image pixel coords.
@@ -807,7 +834,7 @@ class TiledImageWidget(QAbstractScrollArea):
         vh = self.viewport().height()
         hbar = self.horizontalScrollBar()
         vbar = self.verticalScrollBar()
-        h = int(pixel_x * self._x_zoom - vw / 2)
+        h = int((pixel_x + self._ring_x_col_offset) * self._x_zoom - vw / 2)
         v = int(pixel_y * self._y_zoom - vh / 2)
         hbar.setValue(max(0, min(hbar.maximum(), h)))
         vbar.setValue(max(0, min(vbar.maximum(), v)))
@@ -864,7 +891,7 @@ class TiledImageWidget(QAbstractScrollArea):
 
         if self._proj_kind != ProjectionKind.RECT:
             min_s, _ = self._min_zoom_xy()
-            new_scale = float(np.clip(self._proj_scale * factor, min_s, 4000.0))
+            new_scale = float(np.clip(self._proj_scale * factor, min_s, _PROJ_SCALE_MAX))
             self._proj_scale = new_scale
             self.zoom_changed.emit(new_scale, new_scale)
             self.viewport().update()
@@ -880,14 +907,14 @@ class TiledImageWidget(QAbstractScrollArea):
         shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
         ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
         if shift and not ctrl:
-            new_xz = float(np.clip(self._x_zoom * factor, min_x, 100.0))
+            new_xz = float(np.clip(self._x_zoom * factor, min_x, _ZOOM_MAX))
             new_yz = self._y_zoom
         elif ctrl and not shift:
             new_xz = self._x_zoom
-            new_yz = float(np.clip(self._y_zoom * factor, min_y, 100.0))
+            new_yz = float(np.clip(self._y_zoom * factor, min_y, _ZOOM_MAX))
         else:
-            new_xz = float(np.clip(self._x_zoom * factor, min_x, 100.0))
-            new_yz = float(np.clip(self._y_zoom * factor, min_y, 100.0))
+            new_xz = float(np.clip(self._x_zoom * factor, min_x, _ZOOM_MAX))
+            new_yz = float(np.clip(self._y_zoom * factor, min_y, _ZOOM_MAX))
         self._apply_zoom(new_xz, new_yz, vx, vy, img_x, img_y)
         event.accept()
 
@@ -939,15 +966,15 @@ class TiledImageWidget(QAbstractScrollArea):
         anchor_img_y: float | None,
     ) -> None:
         min_x, min_y = self._min_zoom_xy()
-        new_xz = float(np.clip(new_xz, min_x, 100.0))
-        new_yz = float(np.clip(new_yz, min_y, 100.0))
+        new_xz = float(np.clip(new_xz, min_x, _ZOOM_MAX))
+        new_yz = float(np.clip(new_yz, min_y, _ZOOM_MAX))
         hbar = self.horizontalScrollBar()
         vbar = self.verticalScrollBar()
         vw = self.viewport().width()
         vh = self.viewport().height()
 
         if anchor_vx is not None and anchor_img_x is not None:
-            new_hv = int(anchor_img_x * new_xz - anchor_vx)
+            new_hv = int((anchor_img_x + self._ring_x_col_offset) * new_xz - anchor_vx)
         else:
             cx = (hbar.value() + vw / 2) / self._x_zoom
             new_hv = int(cx * new_xz - vw / 2)
@@ -1048,9 +1075,9 @@ class TiledImageWidget(QAbstractScrollArea):
         dest_w = max(1, round((px_end + 1) * xz) - hv - dest_x)
         dest_h = max(1, round((py_end + 1) * yz) - vv - dest_y)
 
-        self._last_rgb = np.ascontiguousarray(rgb)
+        self._last_rgb = np.ascontiguousarray(rgb, dtype=np.uint8)
         qimg = QImage(
-            self._last_rgb.tobytes(),
+            cast(Any, self._last_rgb.data),
             tile_w,
             tile_h,
             3 * tile_w,
@@ -1090,11 +1117,14 @@ class TiledImageWidget(QAbstractScrollArea):
         if self._n_cols == 0 or self._n_rows == 0:
             return
 
-        # Visible range in image pixel coords
-        px_start = max(0, int(np.floor(hv / xz)))
-        px_end = min(self._n_cols - 1, int(np.ceil((hv + vw) / xz)))
+        # Visible range in image pixel coords.  When ring_full_lon is active,
+        # virtual column vp = data_col + _ring_x_col_offset, so we subtract
+        # the offset to convert viewport pixel positions to data columns.
+        offset = self._ring_x_col_offset
         py_start = max(0, int(np.floor(vv / yz)))
         py_end = min(self._n_rows - 1, int(np.ceil((vv + vh) / yz)))
+        px_start = max(0, int(np.floor(hv / xz)) - offset)
+        px_end = min(self._n_cols - 1, int(np.ceil((hv + vw) / xz)) - offset)
 
         if px_start > px_end or py_start > py_end:
             return
@@ -1159,15 +1189,15 @@ class TiledImageWidget(QAbstractScrollArea):
                     rgb[:, tile_col, 1] = 220
                     rgb[:, tile_col, 2] = 0
 
-        # Screen destination rectangle
-        dest_x = round(px_start * xz) - hv
+        # Screen destination rectangle; offset shifts data into the virtual 360° canvas.
+        dest_x = round((px_start + offset) * xz) - hv
         dest_y = round(py_start * yz) - vv
-        dest_w = max(1, round((px_end + 1) * xz) - hv - dest_x)
+        dest_w = max(1, round((px_end + 1 + offset) * xz) - hv - dest_x)
         dest_h = max(1, round((py_end + 1) * yz) - vv - dest_y)
 
-        self._last_rgb = np.ascontiguousarray(rgb)
+        self._last_rgb = np.ascontiguousarray(rgb, dtype=np.uint8)
         qimg = QImage(
-            self._last_rgb.tobytes(),
+            cast(Any, self._last_rgb.data),
             tile_w,
             tile_h,
             3 * tile_w,
@@ -1269,8 +1299,8 @@ class TiledImageWidget(QAbstractScrollArea):
             gamma=self._gamma,
             color_tint=self._color_tint,
         )
-        # Keep reference alive while painter holds the buffer
-        self._last_rgb = None  # cleared; QImage owns its own copy via tobytes()
+        # ``render_to_image`` returns a QImage backed by its own contiguous buffer.
+        self._last_rgb = None
         painter.drawImage(0, 0, qimg)
 
         if self._body_geo_parallels or self._body_geo_meridians:
@@ -1388,6 +1418,12 @@ class TiledImageWidget(QAbstractScrollArea):
                 raw0 = self._x_origin_deg + px0 * self._x_interval
                 raw1 = self._x_origin_deg + px1 * self._x_interval
                 tick_iter = _nice_longitude_ticks_wrapped_0_360(raw0, raw1, 14)
+            elif self._ring_x_col_offset > 0:
+                # Full-360 virtual canvas: virtual column vp = data_col + offset,
+                # so longitude at left-viewport virtual column px0 = px0 * x_interval.
+                c0 = float(np.clip(px0 * self._x_interval, 0.0, 360.0))
+                c1 = float(np.clip(px1 * self._x_interval, 0.0, 360.0))
+                tick_iter = _nice_longitude_tick_degrees(c0, c1, 14)
             else:
                 hi = self._x_axis_max_val()
                 lo = float(self._x_origin_deg)
@@ -1397,7 +1433,7 @@ class TiledImageWidget(QAbstractScrollArea):
 
             for val in tick_iter:
                 img_x = (val - self._x_origin_deg) / self._x_interval
-                sx = float(img_x * xz - hv)
+                sx = float((img_x + self._ring_x_col_offset) * xz - hv)
                 if not (-20 < sx < vp_w + 20):
                     continue
                 ix = round(sx)
@@ -1677,8 +1713,8 @@ class TiledImageWidget(QAbstractScrollArea):
         pix_w = max(px_r - px_l, 0.5)
         pix_h = max(py_b - py_t, 0.5)
         min_x, min_y = self._min_zoom_xy()
-        new_xz = float(np.clip(vw / pix_w, min_x, 100.0))
-        new_yz = float(np.clip(vh / pix_h, min_y, 100.0))
+        new_xz = float(np.clip(vw / pix_w, min_x, _ZOOM_MAX))
+        new_yz = float(np.clip(vh / pix_h, min_y, _ZOOM_MAX))
 
         self._x_zoom = new_xz
         self._y_zoom = new_yz
@@ -1707,7 +1743,7 @@ class TiledImageWidget(QAbstractScrollArea):
             float(vw) / float(viewport_rect.width()),
             float(vh) / float(viewport_rect.height()),
         )
-        new_scale = float(np.clip(self._proj_scale * ratio, min_s, 4000.0))
+        new_scale = float(np.clip(self._proj_scale * ratio, min_s, _PROJ_SCALE_MAX))
         # Keep the rect centre pinned to the new viewport centre
         rect_cx = float(viewport_rect.center().x())
         rect_cy = float(viewport_rect.center().y())

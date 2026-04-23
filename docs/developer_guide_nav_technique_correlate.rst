@@ -37,14 +37,14 @@ Coarse-to-fine levels
 
 The image and model are successively downsampled by powers of two,
 starting at ``2^(pyramid_levels-1)`` (coarsest) down to ``2^0 = 1``
-(full resolution).  Before downsampling, both image and model are
+(full resolution). Before downsampling, both image and model are
 blurred with a Gaussian (``sigma = scale / 2``) to prevent aliasing.
 
 At each level, :func:`~nav.support.correlate.navigate_single_scale_kpeaks`
-is called.  The coarsest level searches freely.  Every subsequent
+is called. The coarsest level searches freely. Every subsequent
 finer level receives the previous level's result as a *prior shift*
 so that the prior-penalty term in the quality score steers candidate
-selection toward the coarse solution.  This prevents the finer-scale
+selection toward the coarse solution. This prevents the finer-scale
 search from wandering to entirely wrong peaks.
 
 At levels where a prior exists, ``max_peaks`` candidates are evaluated
@@ -69,11 +69,11 @@ shape), the function returns two surfaces:
 where :math:`W` is the mask, :math:`\bar{I}(s)` is the shift-wise
 image mean under the mask, :math:`\bar{M}` is the constant model
 mean, and the SSD terms are the corresponding sums-of-squared
-deviations.  All shift-wise sums (``sum_iw``, ``sum_i2w``,
+deviations. All shift-wise sums (``sum_iw``, ``sum_i2w``,
 ``sum_imw``) are computed in O(N log N) via FFT convolution.
 
 ``numerator`` -- the mean-subtracted cross-covariance (the NCC
-numerator without the denominator normalization).  Returned as a
+numerator without the denominator normalization). Returned as a
 diagnostic only; it must **not** be used for peak localization
 when the template is dense (see below).
 
@@ -82,7 +82,7 @@ invariant and is always the correct surface for peak localization.
 The numerator is related to the NCC by
 :math:`\text{num}(s) = \text{NCC}(s) \cdot \sqrt{\text{SSD}_I(s)\, \text{SSD}_M}`
 and therefore scales with sqrt of the image variance under the
-shifted mask.  For *dense* templates -- body discs, Lambert-shaded
+shifted mask. For *dense* templates -- body discs, Lambert-shaded
 limbs, ring models -- that variance changes systematically with
 shift because the fixed body-shaped mask straddles more or less of
 the bright/dark boundary at different shifts, producing a
@@ -108,7 +108,7 @@ Peak selection and subpixel refinement
 
 :func:`~nav.support.correlate.nms_topk` applies non-maximum suppression
 on the NCC surface to obtain up to ``max_peaks`` candidate
-integer-pixel offsets.  The search is restricted to the extended-FOV
+integer-pixel offsets. The search is restricted to the extended-FOV
 offset range (``max_offset_vu``); this also protects against the
 classic NCC failure mode where noise-only shifts produce spurious
 \|NCC\| plateaus outside the physically plausible window.
@@ -146,7 +146,7 @@ Final pass and spurious check
 
 After all pyramid levels, the finest-level prior is passed to a full-
 resolution ``navigate_single_scale_kpeaks`` call that evaluates
-``max_peaks`` candidates at full resolution.  The result is marked
+``max_peaks`` candidates at full resolution. The result is marked
 ``spurious`` when either:
 
 * ``quality < quality_thresh``, or
@@ -159,7 +159,7 @@ Star position refinement
 
 After correlation, each star in the model is refined independently by
 fitting a PSF model to a small sub-image centered on the predicted
-star location.  The fit is performed by
+star location. The fit is performed by
 ``psfmodel.PSF.find_position``, which returns the optimized (U, V)
 position and a set of quality metrics.
 
@@ -167,7 +167,7 @@ Rejection criteria
 ------------------
 
 A star is rejected (and marked with a ``conflicts`` flag) when any of
-the following conditions is true.  All threshold values are
+the following conditions is true. All threshold values are
 configurable (see :doc:`developer_guide_configuration`).
 
 +----------------------------+----------------------------------+-----------------------------+
@@ -206,10 +206,10 @@ Note on ``reduced_chi2``
 
 ``reduced_chi2`` from ``psfmodel`` is computed as ``RSS / DOF``
 where ``RSS`` is the sum of squared residuals and ``DOF = n_valid_pixels
-- n_params``.  This has units of (pixel value)^2 and is *not*
-dimensionless.  For calibrated I/F images with noise_rms ~ 1e-3,
+- n_params``. This has units of (pixel value)^2 and is *not*
+dimensionless. For calibrated I/F images with noise_rms ~ 1e-3,
 ``reduced_chi2`` is typically ~ 1e-6 for a high-SNR star, which is far
-below the default ``min_chi2 = 0.10`` floor.  The combined condition
+below the default ``min_chi2 = 0.10`` floor. The combined condition
 ``reduced_chi2 < min_chi2 and peak_snr < min_snr`` avoids incorrectly
 rejecting bright, well-fit stars on these grounds.
 
@@ -218,6 +218,6 @@ Combining star offsets
 
 The per-star U and V position differences are combined using the
 robust median (with MAD-based scatter) after iterative outlier
-rejection at ``star_refinement_nsigma`` sigma.  Stars are weighted
+rejection at ``star_refinement_nsigma`` sigma. Stars are weighted
 by a function of their V magnitude to reduce the influence of
 fainter, less reliable measurements.

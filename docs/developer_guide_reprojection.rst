@@ -142,7 +142,7 @@ fits
     ``astropy.io.fits``. Scalar metadata (strings, numbers, dtype names) go into
     the PrimaryHDU header. Each array occupies a separate ImageHDU with
     ``EXTNAME = <FIELDNAME>``; masks are stored as a companion ImageHDU with
-    ``EXTNAME = <FIELDNAME>_MASK`` (uint8, 0 = valid).     Tuple-of-string
+    ``EXTNAME = <FIELDNAME>_MASK`` (uint8, 0 = valid). Tuple-of-string
     fields (``contributing_image_names``) are stored as a 1-D ``uint8`` ImageHDU
     of UTF-8 bytes with ``NUL`` (``\\0``) separators between entries (empty
     tuple → length-0 array).
@@ -300,20 +300,20 @@ The command-line tools are composed of three layers:
    contains all the reusable CLI logic:
 
    - ``args.py`` — ``add_common_env_args``, ``add_common_output_args``,
-     ``add_ring_args``, ``add_body_args``, ``add_display_args``.  Adding a new
+     ``add_ring_args``, ``add_body_args``, ``add_display_args``. Adding a new
      command-line option to rings or body mode only requires editing the
      corresponding ``add_*_args`` function here.
    - ``factories.py`` — ``build_ring_mosaic(args)`` / ``build_body_mosaic(args)``
      translate parsed ``argparse.Namespace`` into ``RingMosaic`` /
-     ``BodyMosaic`` instances.  Add a new constructor parameter here when the
+     ``BodyMosaic`` instances. Add a new constructor parameter here when the
      underlying classes gain a new option.
    - ``paths.py`` — ``per_image_output_path`` / ``mosaic_output_path`` define
      the output-file naming convention; pass-1 image logs go under
      ``<output-dir>/logs/`` (see ``nav_mosaic._reproject_image_log_handlers``).
    - ``offsets.py`` — ``load_offset_if_any`` reads the ``_metadata.json`` file
      written by ``nav_offset`` and returns ``(dv, du)`` when ``status ==
-     'success'``.  ``apply_offset_to_obs`` wraps the result in
-     ``oops.fov.OffsetFOV``.  This mirrors the same pattern used in
+     'success'``. ``apply_offset_to_obs`` wraps the result in
+     ``oops.fov.OffsetFOV``. This mirrors the same pattern used in
      ``src/backplanes/backplanes.py``.
    - ``reproject.py`` — ``reproject_one_body`` / ``reproject_one_ring`` thin
      wrappers that translate ring-specific CLI args (zoom, longitude range,
@@ -324,7 +324,7 @@ The command-line tools are composed of three layers:
 **Dataset enumeration**
    Both ``nav_mosaic.py`` and the existing ``nav_offset.py`` / ``nav_backplanes.py``
    scripts enumerate images via
-   :meth:`DataSet.yield_image_files_from_arguments`.  The dataset class is
+   :meth:`DataSet.yield_image_files_from_arguments`. The dataset class is
    instantiated from ``DATASET_NAME = sys.argv[1]`` via
    :func:`~nav.dataset.dataset_name_to_class`, which also provides
    :meth:`~nav.dataset.DataSet.add_selection_arguments` to add dataset-specific
@@ -378,7 +378,7 @@ Display layer
        incompatible with tile-paint independent X/Y zoom.
 
    - ``common.py`` — :func:`~nav.ui.mosaic_viewer.common.load_ring_file` /
-     :func:`~nav.ui.mosaic_viewer.common.load_body_file`.  Peeks at the
+     :func:`~nav.ui.mosaic_viewer.common.load_body_file`. Peeks at the
      ``__kind__`` header in an npz or FITS file, then delegates to the
      appropriate ``*.load()`` classmethod and normalises the result into a
      :class:`~nav.ui.mosaic_viewer.common.RingDisplayData` /
@@ -399,7 +399,7 @@ Display layer
      parallels/meridians overlays in the sidebar, lower strip with stretch
      presets, log-style zoom controls, a four-column **Cursor Info** grid, and
      a **Color By** radio grid (resolution, effective resolution, phase, emission,
-     incidence, image number when present).  The cursor grid includes sub-solar
+     incidence, image number when present). The cursor grid includes sub-solar
      and sub-observer longitude and latitude (degrees), resolved from
      ``BodyDisplayData`` per-image arrays populated by :func:`~nav.ui.mosaic_viewer.common.load_body_file`.
 
@@ -426,8 +426,8 @@ Gamma stretch convention
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
 All viewers use the ``((clip - black) / (white - black)) ** gamma`` convention
-implemented by :func:`nav.ui.common.apply_linear_gamma_stretch`.  A gamma of
+implemented by :func:`nav.ui.common.apply_linear_gamma_stretch`. A gamma of
 ``1.0`` is linear; values below ``1.0`` brighten mid-tones (the common display
-choice).  This convention is now uniformly applied across
+choice). This convention is now uniformly applied across
 ``TiledImageWidget``, ``manual_nav_dialog``, ``nav_backplane_viewer``, and
 ``nav_create_simulated_image``.

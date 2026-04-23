@@ -24,6 +24,28 @@ from nav.reproj.rings import RingMosaicData, RingReprojResult
 
 logger = logging.getLogger(__name__)
 
+_RAD_TO_DEG: float = 180.0 / math.pi
+
+
+def _rad_to_deg_ma(arr: ma.MaskedArray) -> ma.MaskedArray:
+    """Convert masked array values from radians to degrees (mask preserved)."""
+    return ma.MaskedArray(np.rad2deg(arr.data), mask=ma.getmaskarray(arr))
+
+
+def _compute_vmin_vmax(image_ma: ma.MaskedArray) -> tuple[float, float]:
+    """Return ``(vmin, vmax)`` from valid (unmasked) pixels of ``image_ma``.
+
+    Parameters:
+        image_ma: 2-D masked image; masked entries are ignored.
+
+    Returns:
+        ``(min, max)`` of compressed valid data, or ``(0.0, 1.0)`` when empty.
+    """
+    valid = image_ma.compressed()
+    if valid.size > 0:
+        return float(np.nanmin(valid)), float(np.nanmax(valid))
+    return 0.0, 1.0
+
 
 def _ring_longitude_column_origin_and_extent_hi_deg(
     *,
@@ -37,13 +59,23 @@ def _ring_longitude_column_origin_and_extent_hi_deg(
     Sparse ring columns map to global bins ``np.flatnonzero(longitude_antimask)``
     in sorted order.  Dense full-circle mosaics have one column per bin starting
     at longitude 0.  Bounded mosaics use ``longitude_range`` to fix the bin grid.
+
+    Parameters:
+        n_cols: Number of longitude columns in the stored image.
+        lon_res_rad: Longitude bin width in radians.
+        longitude_antimask: Boolean array marking which global longitude bins exist.
+        longitude_range: Optional ``(start, end)`` mosaic longitude bounds (rad).
+
+    Returns:
+        ``(origin_deg, extent_deg)``: longitude in degrees at column 0 and the
+        high edge of the last column (same units as ``lon_res_deg`` scaling).
     """
-    lon_res_deg = lon_res_rad * 180.0 / math.pi
+    lon_res_deg = lon_res_rad * _RAD_TO_DEG
     n_full = int(longitude_antimask.shape[0])
     if longitude_range is not None:
         lon_start, _lon_end = longitude_range
         start_bin = round(lon_start / lon_res_rad)
-        origin_deg = float(start_bin * lon_res_rad * 180.0 / math.pi)
+        origin_deg = float(start_bin * lon_res_rad * _RAD_TO_DEG)
         return origin_deg, origin_deg + float(n_cols * lon_res_deg)
     if n_cols == n_full:
         return 0.0, float(n_cols * lon_res_deg)
@@ -56,7 +88,7 @@ def _ring_longitude_column_origin_and_extent_hi_deg(
             int(n_cols),
         )
         return 0.0, float(n_cols * lon_res_deg)
-    origin_deg = float(global_bins[0] * lon_res_rad * 180.0 / math.pi)
+    origin_deg = float(global_bins[0] * lon_res_rad * _RAD_TO_DEG)
     return origin_deg, origin_deg + float(n_cols * lon_res_deg)
 
 
@@ -65,6 +97,17 @@ def _peek_kind(path: str | FCPath) -> str:
 
     For ``.npz`` archives this is the ``__kind__`` array entry; for FITS it is the
     primary header keyword ``KIND`` (see :func:`nav.reproj._serialization.save_fits`).
+    Uses :func:`infer_format` and resolves ``path`` via :class:`filecache.FCPath`.
+
+    Parameters:
+        path: Local or remote path to ``.npz`` / ``.fits`` (``str`` or ``FCPath``).
+
+    Returns:
+        Kind string (e.g. ``'BodyMosaicData'``) read from the file header.
+
+    Raises:
+        ValueError: If no ``KIND`` / ``__kind__`` entry is present for this format.
+        OSError: If the file cannot be opened (propagated from NumPy or Astropy).
     """
     fmt = infer_format(path, None)
     if fmt == 'npz':
@@ -157,13 +200,6 @@ class RingDisplayData:
     contributing_image_names: tuple[str, ...] = ()
 
 
-def _ring_vmin_vmax(image_ma: ma.MaskedArray) -> tuple[float, float]:
-    valid = image_ma.compressed()
-    if valid.size > 0:
-        return float(np.nanmin(valid)), float(np.nanmax(valid))
-    return 0.0, 1.0
-
-
 def load_ring_file(path: str) -> RingDisplayData:
     """Load a ring reprojection or mosaic file and return ``RingDisplayData``.
 
@@ -185,20 +221,18 @@ def load_ring_file(path: str) -> RingDisplayData:
     if kind == 'RingReprojResult':
         result = RingReprojResult.load(path)
         image_ma = result.img  # (n_radius, n_valid_lon)
-        lon_res_deg = result.longitude_resolution * 180.0 / math.pi
+        lon_res_deg = result.longitude_resolution * _RAD_TO_DEG
         rad_res_km = result.radius_resolution
         orbit_model_name = result.orbit_model.name if result.orbit_model else None
         orbit_model: RingOrbitModel | None = result.orbit_model
         n_radii, n_lon = image_ma.shape
         # Build 1-D per-column metadata masked arrays (same length as sparse img cols)
         mrr = ma.MaskedArray(result.mean_radial_resolution)
-        mar = ma.MaskedArray(result.mean_angular_resolution * 180.0 / math.pi)
-        mphase = ma.MaskedArray(result.mean_phase * 180.0 / math.pi)
-        memission = ma.MaskedArray(result.mean_emission * 180.0 / math.pi)
-        vmin, vmax = _ring_vmin_vmax(image_ma)
-        inc_deg = (
-            float(result.incidence * 180.0 / math.pi) if np.isfinite(result.incidence) else None
-        )
+        mar = ma.MaskedArray(result.mean_angular_resolution * _RAD_TO_DEG)
+        mphase = ma.MaskedArray(result.mean_phase * _RAD_TO_DEG)
+        memission = ma.MaskedArray(result.mean_emission * _RAD_TO_DEG)
+        vmin, vmax = _compute_vmin_vmax(image_ma)
+        inc_deg = float(result.incidence * _RAD_TO_DEG) if np.isfinite(result.incidence) else None
         if np.isfinite(result.time):
             obs_tdb = ma.MaskedArray(
                 np.full(n_lon, float(result.time), dtype=np.float64),
@@ -244,18 +278,18 @@ def load_ring_file(path: str) -> RingDisplayData:
     if kind == 'RingMosaicData':
         result_m = RingMosaicData.load(path)
         image_ma = result_m.img  # (n_radius, n_sparse_lon)
-        lon_res_deg = result_m.longitude_resolution * 180.0 / math.pi
+        lon_res_deg = result_m.longitude_resolution * _RAD_TO_DEG
         rad_res_km = result_m.radius_resolution
         orbit_model_name = result_m.orbit_model_name
         orbit_model = get_orbit_model_by_name(orbit_model_name) if orbit_model_name else None
         n_radii, n_lon = image_ma.shape
         mrr = result_m.mean_radial_resolution
-        mar = ma.MaskedArray(result_m.mean_angular_resolution * 180.0 / math.pi)
-        mphase = ma.MaskedArray(result_m.mean_phase * 180.0 / math.pi)
-        memission = ma.MaskedArray(result_m.mean_emission * 180.0 / math.pi)
-        vmin, vmax = _ring_vmin_vmax(image_ma)
+        mar = ma.MaskedArray(result_m.mean_angular_resolution * _RAD_TO_DEG)
+        mphase = ma.MaskedArray(result_m.mean_phase * _RAD_TO_DEG)
+        memission = ma.MaskedArray(result_m.mean_emission * _RAD_TO_DEG)
+        vmin, vmax = _compute_vmin_vmax(image_ma)
         inc_deg = (
-            float(result_m.mean_incidence * 180.0 / math.pi)
+            float(result_m.mean_incidence * _RAD_TO_DEG)
             if np.isfinite(result_m.mean_incidence)
             else None
         )
@@ -371,13 +405,6 @@ class BodyDisplayData:
     )
 
 
-def _body_vmin_vmax(image_ma: ma.MaskedArray) -> tuple[float, float]:
-    valid = image_ma.compressed()
-    if valid.size > 0:
-        return float(np.nanmin(valid)), float(np.nanmax(valid))
-    return 0.0, 1.0
-
-
 def load_body_file(path: str) -> BodyDisplayData:
     """Load a body reprojection or mosaic file and return ``BodyDisplayData``.
 
@@ -393,20 +420,17 @@ def load_body_file(path: str) -> BodyDisplayData:
     title = Path(str(path)).stem
     kind = _peek_kind(path)
 
-    def _rad_to_deg_ma(arr: ma.MaskedArray) -> ma.MaskedArray:
-        return ma.MaskedArray(arr * 180.0 / math.pi, mask=ma.getmaskarray(arr))
-
     if kind == 'BodyReprojResult':
         result = BodyReprojResult.load(path)
         image_ma = result.img
-        lat_res_deg = result.lat_resolution * 180.0 / math.pi
-        lon_res_deg = result.lon_resolution * 180.0 / math.pi
+        lat_res_deg = result.lat_resolution * _RAD_TO_DEG
+        lon_res_deg = result.lon_resolution * _RAD_TO_DEG
         # Reconstruct spatial extent from idx_range
-        lat_min = result.lat_idx_range[0] * result.lat_resolution * 180.0 / math.pi
-        lat_max = (result.lat_idx_range[1]) * result.lat_resolution * 180.0 / math.pi
-        lon_min = result.lon_idx_range[0] * result.lon_resolution * 180.0 / math.pi
-        lon_max = (result.lon_idx_range[1]) * result.lon_resolution * 180.0 / math.pi
-        vmin, vmax = _body_vmin_vmax(image_ma)
+        lat_min = result.lat_idx_range[0] * result.lat_resolution * _RAD_TO_DEG
+        lat_max = (result.lat_idx_range[1]) * result.lat_resolution * _RAD_TO_DEG
+        lon_min = result.lon_idx_range[0] * result.lon_resolution * _RAD_TO_DEG
+        lon_max = (result.lon_idx_range[1]) * result.lon_resolution * _RAD_TO_DEG
+        vmin, vmax = _compute_vmin_vmax(image_ma)
         return BodyDisplayData(
             title=title,
             image_ma=image_ma,
@@ -429,33 +453,33 @@ def load_body_file(path: str) -> BodyDisplayData:
             photometric_model_name=result.photometric_model_name,
             contributing_image_names=(result.image_name,) if result.image_name else (),
             sub_solar_lon_per_image_deg=np.array(
-                [result.sub_solar_lon * 180.0 / math.pi], dtype=np.float64
+                [result.sub_solar_lon * _RAD_TO_DEG], dtype=np.float64
             ),
             sub_solar_lat_per_image_deg=np.array(
-                [result.sub_solar_lat * 180.0 / math.pi], dtype=np.float64
+                [result.sub_solar_lat * _RAD_TO_DEG], dtype=np.float64
             ),
             sub_observer_lon_per_image_deg=np.array(
-                [result.sub_observer_lon * 180.0 / math.pi], dtype=np.float64
+                [result.sub_observer_lon * _RAD_TO_DEG], dtype=np.float64
             ),
             sub_observer_lat_per_image_deg=np.array(
-                [result.sub_observer_lat * 180.0 / math.pi], dtype=np.float64
+                [result.sub_observer_lat * _RAD_TO_DEG], dtype=np.float64
             ),
         )
 
     if kind == 'BodyMosaicData':
         result_m = BodyMosaicData.load(path)
         image_ma = result_m.img
-        lat_res_deg = result_m.lat_resolution * 180.0 / math.pi
-        lon_res_deg = result_m.lon_resolution * 180.0 / math.pi
+        lat_res_deg = result_m.lat_resolution * _RAD_TO_DEG
+        lon_res_deg = result_m.lon_resolution * _RAD_TO_DEG
         lat_range_deg = (
-            result_m.lat_range[0] * 180.0 / math.pi,
-            result_m.lat_range[1] * 180.0 / math.pi,
+            result_m.lat_range[0] * _RAD_TO_DEG,
+            result_m.lat_range[1] * _RAD_TO_DEG,
         )
         lon_range_deg = (
-            result_m.lon_range[0] * 180.0 / math.pi,
-            result_m.lon_range[1] * 180.0 / math.pi,
+            result_m.lon_range[0] * _RAD_TO_DEG,
+            result_m.lon_range[1] * _RAD_TO_DEG,
         )
-        vmin, vmax = _body_vmin_vmax(image_ma)
+        vmin, vmax = _compute_vmin_vmax(image_ma)
         return BodyDisplayData(
             title=title,
             image_ma=image_ma,
@@ -477,10 +501,10 @@ def load_body_file(path: str) -> BodyDisplayData:
             is_mosaic=True,
             photometric_model_name=result_m.photometric_model_name,
             contributing_image_names=result_m.contributing_image_names,
-            sub_solar_lon_per_image_deg=result_m.sub_solar_lon_per_image * 180.0 / math.pi,
-            sub_solar_lat_per_image_deg=result_m.sub_solar_lat_per_image * 180.0 / math.pi,
-            sub_observer_lon_per_image_deg=result_m.sub_observer_lon_per_image * 180.0 / math.pi,
-            sub_observer_lat_per_image_deg=result_m.sub_observer_lat_per_image * 180.0 / math.pi,
+            sub_solar_lon_per_image_deg=result_m.sub_solar_lon_per_image * _RAD_TO_DEG,
+            sub_solar_lat_per_image_deg=result_m.sub_solar_lat_per_image * _RAD_TO_DEG,
+            sub_observer_lon_per_image_deg=result_m.sub_observer_lon_per_image * _RAD_TO_DEG,
+            sub_observer_lat_per_image_deg=result_m.sub_observer_lat_per_image * _RAD_TO_DEG,
         )
 
     raise ValueError(f'Expected BodyReprojResult or BodyMosaicData in {path!r}, got kind={kind!r}')

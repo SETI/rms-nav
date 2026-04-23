@@ -23,7 +23,16 @@ _NCC_EPS = 1e-12
 
 
 def int_to_signed(idx: int, size: int) -> int:
-    """Map [0..size-1] argmax index to signed displacement coordinate."""
+    """Map ``[0 .. size-1]`` argmax index to a signed displacement coordinate.
+
+    Parameters:
+        idx: Peak index from correlation search in ``[0, size)``.
+        size: FFT / correlation length (modulus for wrapping).
+
+    Returns:
+        ``int`` signed offset equivalent to ``idx`` when ``idx < size // 2``, else
+        ``idx - size`` (negative branch for peaks in the second half).
+    """
     return idx if idx < size // 2 else idx - size
 
 
@@ -128,6 +137,17 @@ def masked_ncc(
         When ``data_mask`` is provided, shifts with degenerate
         overlap or variance are set to ``-inf`` in the NCC surface.
     """
+    ref_shape = image.shape
+    if image.shape != model.shape or image.shape != mask.shape:
+        raise ValueError(
+            'masked_ncc: image, model, and mask must have the same shape; '
+            f'got image {image.shape}, model {model.shape}, mask {mask.shape}.'
+        )
+    if data_mask is not None and data_mask.shape != ref_shape:
+        raise ValueError(
+            'masked_ncc: data_mask must match image shape '
+            f'{ref_shape}; got data_mask {data_mask.shape}.'
+        )
     if data_mask is not None:
         return _masked_ncc_bidir(image, model, mask, data_mask)
 

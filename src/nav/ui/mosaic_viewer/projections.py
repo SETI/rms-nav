@@ -38,6 +38,13 @@ from enum import Enum
 
 import numpy as np
 
+_MOLLWEIDE_MAX_ITERATIONS = 10
+_MOLLWEIDE_DENOM_EPSILON = 1e-14
+_MOLLWEIDE_COS_EPSILON = 1e-10
+_MOLLWEIDE_ELLIPSE_TOLERANCE = 1e-9
+_FIT_SCALE_MARGIN = 0.9
+_PROJECTION_SCALE_MIN = 1e-15
+
 
 class ProjectionKind(Enum):
     """Available projection modes for the body mosaic viewer."""
@@ -47,6 +54,9 @@ class ProjectionKind(Enum):
     POLAR_S = 'polar_s'
     MOLLWEIDE = 'mollweide'
     SPHERE_3D = 'sphere_3d'
+
+
+_KNOWN_PROJECTION_KINDS: frozenset[ProjectionKind] = frozenset(ProjectionKind)
 
 
 @dataclass
@@ -108,7 +118,16 @@ def _sphere_rotation_matrix(yaw_deg: float, pitch_deg: float) -> np.ndarray:
 
 
 def _cartesian_from_lonlat(lon_deg: np.ndarray, lat_deg: np.ndarray) -> np.ndarray:
-    """Convert (lon_deg, lat_deg) to unit-sphere Cartesian, shape (..., 3)."""
+    """Convert geographic degrees to unit-sphere Cartesian coordinates.
+
+    Parameters:
+        lon_deg: Longitudes in degrees, any broadcastable shape against ``lat_deg``.
+        lat_deg: Latitudes in degrees, same shape as ``lon_deg`` after broadcasting.
+
+    Returns:
+        ``np.ndarray`` of dtype float64, shape ``(..., 3)``, unit vectors
+        ``(x, y, z)`` on the sphere.
+    """
     lon_r = np.deg2rad(lon_deg)
     lat_r = np.deg2rad(lat_deg)
     cos_lat = np.cos(lat_r)
@@ -126,7 +145,7 @@ def _cartesian_from_lonlat(lon_deg: np.ndarray, lat_deg: np.ndarray) -> np.ndarr
 def _mollweide_theta_forward(lat_rad: np.ndarray) -> np.ndarray:
     """Solve 2*theta + sin(2*theta) = pi*sin(lat) by Newton-Raphson.
 
-    Converges in fewer than 10 iterations for any latitude.
+    Converges in fewer than ``_MOLLWEIDE_MAX_ITERATIONS`` iterations for any latitude.
 
     Parameters:
         lat_rad: Latitude array in radians, shape (...).
@@ -136,10 +155,10 @@ def _mollweide_theta_forward(lat_rad: np.ndarray) -> np.ndarray:
     """
     theta = lat_rad.copy()
     target = math.pi * np.sin(lat_rad)
-    for _ in range(10):
+    for _ in range(_MOLLWEIDE_MAX_ITERATIONS):
         sin2t = np.sin(2.0 * theta)
         denom = 2.0 + 2.0 * np.cos(2.0 * theta)
-        denom = np.where(np.abs(denom) < 1e-14, 1e-14, denom)
+        denom = np.where(np.abs(denom) < _MOLLWEIDE_DENOM_EPSILON, _MOLLWEIDE_DENOM_EPSILON, denom)
         theta -= (2.0 * theta + sin2t - target) / denom
     return theta
 
@@ -152,8 +171,8 @@ def _mollweide_theta_forward(lat_rad: np.ndarray) -> np.ndarray:
 def fit_scale(kind: ProjectionKind, vw: int, vh: int) -> float:
     """Return a scale (pixels per normalized unit) that fits the projection.
 
-    The result leaves a small margin (10 %) around the projection so it does
-    not touch the viewport edge at the initial zoom level.
+    The result leaves a margin ``_FIT_SCALE_MARGIN`` (10 % inset) around the
+    projection so it does not touch the viewport edge at the initial zoom level.
 
     Parameters:
         kind: Projection kind.
@@ -162,15 +181,20 @@ def fit_scale(kind: ProjectionKind, vw: int, vh: int) -> float:
 
     Returns:
         Scale in pixels per normalized unit.
+
+    Raises:
+        ValueError: If ``vw`` or ``vh`` is not strictly positive.
     """
-    margin = 0.9
+    if vw <= 0 or vh <= 0:
+        raise ValueError(f'fit_scale requires vw and vh > 0; got vw={vw}, vh={vh}')
+    margin = _FIT_SCALE_MARGIN
     if kind in (ProjectionKind.POLAR_N, ProjectionKind.POLAR_S, ProjectionKind.SPHERE_3D):
         return min(vw, vh) * 0.5 * margin
     if kind == ProjectionKind.MOLLWEIDE:
         sqrt2 = math.sqrt(2.0)
         return min(vw / (4.0 * sqrt2), vh / (2.0 * sqrt2)) * margin
     # RECT: uses x_zoom/y_zoom rather than proj_scale; return a placeholder
-    return float(min(vw, vh)) * 0.5
+    return float(min(vw, vh)) * 0.5 * margin
 
 
 # ---------------------------------------------------------------------------
@@ -194,7 +218,17 @@ def lonlat_to_display(
         Tuple ``(vx, vy, visible)`` where ``vx`` and ``vy`` are float64
         arrays of viewport pixel coordinates and ``visible`` is a bool array
         (False for points not representable in this projection at ``params``).
+
+    Raises:
+        ValueError: If ``params.kind`` is unknown or ``params.scale`` is zero / non-finite.
     """
+    if params.kind not in _KNOWN_PROJECTION_KINDS:
+        raise ValueError(f'Unknown ProjectionKind: {params.kind!r}')
+    sc = float(params.scale)
+    if not math.isfinite(sc) or abs(sc) < _PROJECTION_SCALE_MIN:
+        raise ValueError(
+            f'lonlat_to_display requires non-zero finite params.scale; got {params.scale!r}'
+        )
     lon = np.asarray(lon_deg, dtype=np.float64)
     lat = np.asarray(lat_deg, dtype=np.float64)
     kind = params.kind
@@ -245,8 +279,8 @@ def lonlat_to_display(
     else:
         raise ValueError(f'Unknown ProjectionKind: {kind!r}')
 
-    vx = xn * params.scale + params.cx
-    vy = yn * params.scale + params.cy
+    vx = xn * sc + params.cx
+    vy = yn * sc + params.cy
     return vx, vy, vis
 
 
@@ -270,9 +304,19 @@ def display_to_lonlat(
     Returns:
         Tuple ``(lon_deg, lat_deg, valid)`` where ``valid`` is a bool mask
         (False for pixels outside the valid domain of the projection).
+
+    Raises:
+        ValueError: If ``params.kind`` is unknown or ``params.scale`` is zero / non-finite.
     """
-    xn = (np.asarray(vx, dtype=np.float64) - params.cx) / params.scale
-    yn = (np.asarray(vy, dtype=np.float64) - params.cy) / params.scale
+    if params.kind not in _KNOWN_PROJECTION_KINDS:
+        raise ValueError(f'Unknown ProjectionKind: {params.kind!r}')
+    sc = float(params.scale)
+    if not math.isfinite(sc) or abs(sc) < _PROJECTION_SCALE_MIN:
+        raise ValueError(
+            f'display_to_lonlat requires non-zero finite params.scale; got {params.scale!r}'
+        )
+    xn = (np.asarray(vx, dtype=np.float64) - params.cx) / sc
+    yn = (np.asarray(vy, dtype=np.float64) - params.cy) / sc
     kind = params.kind
 
     if kind == ProjectionKind.RECT:
@@ -307,12 +351,12 @@ def display_to_lonlat(
         # lon from x: xn = (2*sqrt2/pi)*lon_r*cos(theta)
         denom = (2.0 * sqrt2 / math.pi) * cos_theta
         # Avoid division by zero at poles (cos_theta ~ 0)
-        safe_denom = np.where(np.abs(cos_theta) > 1e-10, denom, 1.0)
-        lon_r = np.where(np.abs(cos_theta) > 1e-10, xn / safe_denom, 0.0)
+        safe_denom = np.where(np.abs(cos_theta) > _MOLLWEIDE_COS_EPSILON, denom, 1.0)
+        lon_r = np.where(np.abs(cos_theta) > _MOLLWEIDE_COS_EPSILON, xn / safe_denom, 0.0)
         lon_r = np.clip(lon_r, -math.pi, math.pi)
         lon_deg = np.mod(np.degrees(lon_r), 360.0)
         # Inside the Mollweide ellipse: (x/(2*sqrt2))^2 + (y/sqrt2)^2 <= 1
-        valid = (xn / (2.0 * sqrt2)) ** 2 + (yn / sqrt2) ** 2 <= 1.0 + 1e-9
+        valid = (xn / (2.0 * sqrt2)) ** 2 + (yn / sqrt2) ** 2 <= 1.0 + _MOLLWEIDE_ELLIPSE_TOLERANCE
         return lon_deg, lat_deg, valid
 
     if kind == ProjectionKind.SPHERE_3D:
@@ -338,9 +382,22 @@ def sphere_pixel_to_lonlat(
 
     Returns:
         Tuple ``(lon_deg, lat_deg, hit)``.
+
+    Raises:
+        ValueError: If ``params.kind`` is not ``SPHERE_3D`` or ``params.scale`` is zero
+            / non-finite.
     """
-    xn = (np.asarray(vx, dtype=np.float64) - params.cx) / params.scale
-    yn = (np.asarray(vy, dtype=np.float64) - params.cy) / params.scale
+    if params.kind != ProjectionKind.SPHERE_3D:
+        raise ValueError(
+            f'sphere_pixel_to_lonlat requires params.kind SPHERE_3D, got {params.kind!r}'
+        )
+    sc = float(params.scale)
+    if not math.isfinite(sc) or abs(sc) < _PROJECTION_SCALE_MIN:
+        raise ValueError(
+            f'sphere_pixel_to_lonlat requires non-zero finite params.scale; got {params.scale!r}'
+        )
+    xn = (np.asarray(vx, dtype=np.float64) - params.cx) / sc
+    yn = (np.asarray(vy, dtype=np.float64) - params.cy) / sc
     r2 = xn**2 + yn**2
     hit = r2 <= 1.0
 

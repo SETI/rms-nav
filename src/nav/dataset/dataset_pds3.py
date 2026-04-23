@@ -485,7 +485,9 @@ class DataSetPDS3(DataSet):
             volumes: Optional[list[str]] = None,
             camera: Optional[str] = None,
             img_name_list: Optional[list[str]] = None,
-            image_filespec_list: Optional[list[str]] = None,
+            img_filespec_list: Optional[list[str]] = None,
+                Label filespecs; each is resolved to an image base name into local
+                ``img_name_filter_list`` (unresolvable entries skipped).
             force_has_offset_file: bool = False,
             force_has_no_offset_file: bool = False,
             force_has_png_file: bool = False,
@@ -511,7 +513,7 @@ class DataSetPDS3(DataSet):
         volumes: list[str] | None = kwargs.pop('volumes', None)
         camera: str | None = kwargs.pop('camera', None)
         img_name_list: list[str] | None = kwargs.pop('img_name_list', None)
-        img_filespec_list: list[str] | None = kwargs.pop('img_filespec_list', None)
+        img_name_filter_list: list[str] | None = kwargs.pop('img_filespec_list', None)
         choose_random_images: int | None = kwargs.pop('choose_random_images', None)
         max_filenames: int | None = kwargs.pop('max_filenames', None)
         arguments: argparse.Namespace | None = kwargs.pop('arguments', None)
@@ -539,9 +541,9 @@ class DataSetPDS3(DataSet):
             logger.info('*** Explicit image names:')
             for explicit_img_name in img_name_list:
                 logger.info(f'        {explicit_img_name}')
-        if img_filespec_list:
-            logger.info('*** Explicit image filespecs:')
-            for explicit_img_filespec in img_filespec_list:
+        if img_name_filter_list:
+            logger.info('*** Explicit image filespecs (resolved to name filters):')
+            for explicit_img_filespec in img_name_filter_list:
                 logger.info(f'        {explicit_img_filespec}')
         if volumes is not None and volumes != []:
             logger.info('*** Images restricted to volumes:')
@@ -582,21 +584,21 @@ class DataSetPDS3(DataSet):
         volume_raw_dir_url = self.pds3_holdings_root / volumes_dir_name
         index_dir_url = self.pds3_holdings_root / 'metadata'
 
-        # Validate the image_name_list and image_filespec_list
+        # Validate the image_name_list and img_name_filter_list (from img_filespec_list kwarg)
         if img_name_list:
             for explicit_img_name in img_name_list:
                 if not self._img_name_valid(explicit_img_name):
                     raise ValueError(f'Invalid image name "{explicit_img_name}"')
-        if img_filespec_list:
-            new_img_filespec_list = []
-            for explicit_img_filespec in img_filespec_list:
-                new_img_filespec = self._get_img_name_from_label_filespec(explicit_img_filespec)
-                if new_img_filespec is None:
-                    raise ValueError(f'Invalid image filespec "{explicit_img_filespec}"')
-                new_img_filespec_list.append(new_img_filespec)
-            img_filespec_list = new_img_filespec_list
+        if img_name_filter_list:
+            new_img_name_filter_list: list[str] = []
+            for explicit_img_filespec in img_name_filter_list:
+                new_img_name = self._get_img_name_from_label_filespec(explicit_img_filespec)
+                if new_img_name is None:
+                    continue
+                new_img_name_filter_list.append(new_img_name)
+            img_name_filter_list = new_img_name_filter_list
 
-        # Optimize the first and last image number based on image_name_list and image_filespec_list
+        # Optimize the first and last image number based on image_name_list and img_name_filter_list
         # This is just to improve performance
         if img_name_list:
             img_start_num = max(
@@ -608,14 +610,14 @@ class DataSetPDS3(DataSet):
                 max([self._extract_img_number(x) for x in img_name_list]),
             )
 
-        if img_filespec_list:
+        if img_name_filter_list:
             img_start_num = max(
                 0 if img_start_num is None else img_start_num,
-                min([self._extract_img_number(x) for x in img_filespec_list]),
+                min([self._extract_img_number(x) for x in img_name_filter_list]),
             )
             img_end_num = min(
                 999999999999 if img_end_num is None else img_end_num,
-                max([self._extract_img_number(x) for x in img_filespec_list]),
+                max([self._extract_img_number(x) for x in img_name_filter_list]),
             )
 
         # TODO When yielding via an index, we don't get to optimize searching for
@@ -729,7 +731,7 @@ class DataSetPDS3(DataSet):
                         continue  # Not a name we should process
 
                     # Check that the image filespec is in the requested list
-                    if img_filespec_list and img_name not in img_filespec_list:
+                    if img_name_filter_list and img_name not in img_name_filter_list:
                         continue
 
                     # Check that the image name is in the requested list

@@ -1,3 +1,13 @@
+"""YAML-backed configuration for RMS-NAV.
+
+Loads and merges settings from bundled defaults and optional user YAML files
+using :class:`ruamel.yaml.YAML` (safe typ), then exposes sections as
+:class:`nav.support.attrdict.AttrDict` for attribute-style access. The
+:class:`Config` class is the main public entry; helpers such as
+:func:`_as_str_list` validate list-shaped YAML fragments used when building
+config structures.
+"""
+
 from pathlib import Path
 from typing import Any
 
@@ -7,7 +17,18 @@ from nav.support.attrdict import AttrDict
 
 
 def _as_str_list(value: Any, *, location: str) -> list[str]:
-    """Return ``value`` as ``list[str]`` or raise if YAML shape is wrong."""
+    """Coerce a YAML list value to ``list[str]``.
+
+    Parameters:
+        value: Parsed YAML fragment expected to be a list of strings.
+        location: Human-readable path (e.g. config key path) for error messages.
+
+    Returns:
+        A new ``list[str]`` containing each element of ``value`` as ``str``.
+
+    Raises:
+        TypeError: If ``value`` is not a list, or if any element is not a ``str``.
+    """
 
     if not isinstance(value, list):
         raise TypeError(f'{location}: expected a list of strings, got {type(value).__name__}')

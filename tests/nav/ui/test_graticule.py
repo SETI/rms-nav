@@ -127,8 +127,12 @@ class TestPolarNParallelCircle:
 
     def test_expected_radius_value(self) -> None:
         """The expected radius equals scale * tan(15 deg) numerically."""
-        expected_r = SCALE * math.tan(math.radians(15.0))
-        assert expected_r == pytest.approx(SCALE * math.tan(math.radians(15.0)))
+        lat_r = math.radians(60.0)
+        half_angle = 0.5 * (0.5 * math.pi - lat_r)
+        expected_r = SCALE * math.tan(half_angle)
+        # Reference: SCALE * tan(15°) (same geometry as the parallel at lat=60°).
+        ref_r = 40.192378864668406
+        assert expected_r == pytest.approx(ref_r, rel=1e-12)
 
     def test_no_meridian_segments_returned(self) -> None:
         """show_meridians=False yields an empty meridian list."""

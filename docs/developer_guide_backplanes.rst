@@ -38,7 +38,7 @@ Modules
   - Excludes any backplane that is entirely zero from the FITS file
   - Writes a companion ``*_backplane_metadata.json`` containing per-body
     inventory and per-backplane min/max statistics; this JSON is consumed
-    by ``nav_create_bundle`` when generating PDS4 labels.  The backplanes
+    by ``nav_create_bundle`` when generating PDS4 labels. The backplanes
     step itself does not produce any PDS4 labels.
 
 Snapshot Helpers

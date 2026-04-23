@@ -56,6 +56,13 @@ DEFAULT_ZOOM = 1
 _LAMBERT_THRESHOLD = 0.0001
 
 
+def _create_repro_array(n_lat: int, n_lon: int, dtype: np.dtype) -> ma.MaskedArray:
+    """Return an ``n_lat`` x ``n_lon`` zero array that is fully masked (reprojection grid slot)."""
+    arr = ma.zeros((n_lat, n_lon), dtype=dtype)
+    arr.mask = True
+    return arr
+
+
 class BodyMosaicMergeStrategy(enum.Enum):
     """Strategy for resolving per-pixel conflicts when adding data to a BodyMosaic.
 
@@ -798,7 +805,28 @@ class BodyMosaic:
         sub_observer_lon: float = 0.0,
         sub_observer_lat: float = 0.0,
     ) -> BodyReprojResult:
-        """Return an empty reprojection when the body has no valid lat/lon on the detector."""
+        """Build a placeholder :class:`BodyReprojResult` when the body is off the detector.
+
+        Used when no valid latitude/longitude samples fall on the detector (outside
+        FOV or fully masked). Geometry arrays are fully masked; ``img`` is either a
+        small fully-masked float mosaic slice or a boolean mask grid when
+        ``mask_only`` is True. Scalar metadata (``time``, ``image_name``, sub-solar /
+        sub-observer lon/lat, dtypes) is still populated so callers can merge counters
+        and serialize consistently with normal reprojections.
+
+        Parameters:
+            obs: Observation (midtime read from ``obs.midtime``).
+            mask_only: If True, ``img`` encodes a boolean valid-pixel mask; else a
+                masked float subgrid.
+            image_name: Label stored on the result.
+            navigation_uncertainty: Scales ``eff_resolution`` when not ``mask_only``.
+            sub_solar_lon, sub_solar_lat: Sub-solar coordinates (rad) for this obs.
+            sub_observer_lon, sub_observer_lat: Sub-observer coordinates (rad).
+
+        Returns:
+            A :class:`BodyReprojResult` with minimal lat/lon index ranges and masked
+            geometry fields suitable for ``BodyMosaic.add()`` bookkeeping.
+        """
         min_lat_pixel, max_lat_pixel = 0, 1
         min_lon_pixel, max_lon_pixel = 0, 1
         latitude_pixels = self._n_full_lat
@@ -835,16 +863,19 @@ class BodyMosaic:
                 sub_observer_lat=sub_observer_lat,
             )
 
-        def _make_repro_array(dtype: np.dtype) -> ma.MaskedArray:
-            arr = ma.zeros((latitude_pixels, longitude_pixels), dtype=dtype)
-            arr.mask = True
-            return arr
-
-        repro_img_full = _make_repro_array(self._image_dtype)
-        repro_res_full = _make_repro_array(self._metadata_dtype)
-        repro_phase_full = _make_repro_array(self._metadata_dtype)
-        repro_emission_full = _make_repro_array(self._metadata_dtype)
-        repro_incidence_full = _make_repro_array(self._metadata_dtype)
+        repro_img_full = _create_repro_array(latitude_pixels, longitude_pixels, self._image_dtype)
+        repro_res_full = _create_repro_array(
+            latitude_pixels, longitude_pixels, self._metadata_dtype
+        )
+        repro_phase_full = _create_repro_array(
+            latitude_pixels, longitude_pixels, self._metadata_dtype
+        )
+        repro_emission_full = _create_repro_array(
+            latitude_pixels, longitude_pixels, self._metadata_dtype
+        )
+        repro_incidence_full = _create_repro_array(
+            latitude_pixels, longitude_pixels, self._metadata_dtype
+        )
         sub = slice(min_lat_pixel, max_lat_pixel + 1), slice(min_lon_pixel, max_lon_pixel + 1)
         eff_res = repro_res_full[sub].copy()
         if navigation_uncertainty != 0.0:
@@ -963,7 +994,7 @@ class BodyMosaic:
         bp_longitude = bp_lon_ma.mvals.astype(self._metadata_dtype)
 
         # No surface point on the detector: skip grid construction and image sampling.
-        if not np.any(np.logical_not(np.logical_or(body_mask_inv, lon_mask_inv))):
+        if np.all(np.logical_or(body_mask_inv, lon_mask_inv)):
             logger.info(
                 'Body %s has no valid lat/lon on the detector (outside FOV); '
                 'skipping reprojection.',
@@ -1203,32 +1234,27 @@ class BodyMosaic:
                 interp_data, incidence=inc, emission=emi, phase=pha
             )
 
-        def _make_repro_array(dtype: np.dtype) -> ma.MaskedArray:
-            """Return a fully-masked MaskedArray of shape (latitude_pixels, longitude_pixels).
-
-            Parameters:
-                dtype: NumPy dtype for the array data.
-
-            Returns:
-                Fully-masked zero array of the requested dtype.
-            """
-            arr = ma.zeros((latitude_pixels, longitude_pixels), dtype=dtype)
-            arr.mask = True
-            return arr
-
-        repro_img_full = _make_repro_array(self._image_dtype)
+        repro_img_full = _create_repro_array(latitude_pixels, longitude_pixels, self._image_dtype)
         repro_img_full[good_lat, good_lon] = interp_data
 
-        repro_res_full = _make_repro_array(self._metadata_dtype)
+        repro_res_full = _create_repro_array(
+            latitude_pixels, longitude_pixels, self._metadata_dtype
+        )
         repro_res_full[good_lat, good_lon] = resolution[good_v, good_u]
 
-        repro_phase_full = _make_repro_array(self._metadata_dtype)
+        repro_phase_full = _create_repro_array(
+            latitude_pixels, longitude_pixels, self._metadata_dtype
+        )
         repro_phase_full[good_lat, good_lon] = bp_phase[good_v, good_u]
 
-        repro_emission_full = _make_repro_array(self._metadata_dtype)
+        repro_emission_full = _create_repro_array(
+            latitude_pixels, longitude_pixels, self._metadata_dtype
+        )
         repro_emission_full[good_lat, good_lon] = bp_emission[good_v, good_u]
 
-        repro_incidence_full = _make_repro_array(self._metadata_dtype)
+        repro_incidence_full = _create_repro_array(
+            latitude_pixels, longitude_pixels, self._metadata_dtype
+        )
         repro_incidence_full[good_lat, good_lon] = bp_incidence[good_v, good_u]
 
         sub = slice(min_lat_pixel, max_lat_pixel + 1), slice(min_lon_pixel, max_lon_pixel + 1)

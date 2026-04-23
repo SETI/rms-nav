@@ -6,6 +6,7 @@ read the ``_metadata.json`` file for an image and apply the stored
 """
 
 import json
+from collections.abc import Sequence
 from typing import Any, cast
 
 import oops
@@ -14,6 +15,29 @@ from filecache import FCPath
 from nav.config import MAIN_LOGGER
 from nav.dataset.dataset import ImageFile
 from nav.obs import ObsSnapshotInst
+
+
+def _parse_nav_offset_pair(offset: object) -> tuple[float, float] | None:
+    """Parse ``offset`` from nav metadata JSON into ``(dv, du)`` floats.
+
+    Returns:
+        A pair of floats on success, or ``None`` if ``offset`` is not a two-element
+        sequence (excluding strings/bytes) or values are not convertible to float.
+    """
+    if offset is None or isinstance(offset, (str, bytes)):
+        return None
+    if not isinstance(offset, Sequence):
+        return None
+    if len(offset) != 2:
+        return None
+    try:
+        dv_raw, du_raw = offset[0], offset[1]
+    except (TypeError, ValueError, KeyError, IndexError):
+        return None
+    try:
+        return float(dv_raw), float(du_raw)
+    except (TypeError, ValueError):
+        return None
 
 
 def load_offset_if_any(
@@ -80,8 +104,14 @@ def load_offset_if_any(
         )
         return None
 
-    dv, du = offset
-    return (float(dv), float(du))
+    parsed = _parse_nav_offset_pair(offset)
+    if parsed is None:
+        MAIN_LOGGER.warning(
+            'Nav metadata for %s has malformed offset field; using uncorrected pointing.',
+            image_file.image_file_url,
+        )
+        return None
+    return parsed
 
 
 def apply_offset_to_obs(obs: ObsSnapshotInst, dv: float, du: float) -> None:

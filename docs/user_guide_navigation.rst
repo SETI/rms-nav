@@ -293,7 +293,7 @@ Simulated Images
 ================
 
 RMS-NAV supports simulated images created with the
-``nav_create_simulated_image`` GUI.  Simulated images share the same
+``nav_create_simulated_image`` GUI. Simulated images share the same
 navigation pipeline as real images; they are selected by passing the ``sim``
 dataset name and a path to the JSON parameter file on the command line:
 
@@ -460,7 +460,7 @@ Ring Navigation Model
 =====================
 
 The ring navigation model generates theoretical brightness profiles for
-planetary ring edges.  Two configuration options in ``config_05_rings.yaml``
+planetary ring edges. Two configuration options in ``config_05_rings.yaml``
 control whether ring pixels that lie in shadow are excluded from the model
 before navigation is performed.
 
@@ -468,7 +468,7 @@ Planet shadow removal
 ---------------------
 
 When a planet casts a shadow across part of its own ring system, those ring
-arcs appear dark in the image.  If the model still shows those arcs as bright,
+arcs appear dark in the image. If the model still shows those arcs as bright,
 the navigator will try to align a bright model against a dark image region,
 which introduces a systematic pointing error.
 
@@ -489,7 +489,7 @@ When active, the ring model logs the number of masked pixels at ``INFO`` level:
 
 If the shadow geometry cannot be computed for a particular observation (for
 example, because the illumination geometry is degenerate), a warning is logged
-and the full unmasked ring model is used instead.  Navigation proceeds
+and the full unmasked ring model is used instead. Navigation proceeds
 normally; no output files are suppressed.
 
 To disable shadow removal entirely -- for example, to compare navigation
@@ -505,7 +505,7 @@ Body shadow removal (future)
 -----------------------------
 
 The ``rings.remove_body_shadows`` option (default ``false``) is reserved for a
-future enhancement that will remove ring pixels shadowed by moons.  Setting it
+future enhancement that will remove ring pixels shadowed by moons. Setting it
 to ``true`` has no effect in the current release.
 
 .. code-block:: yaml

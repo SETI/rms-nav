@@ -2,7 +2,7 @@
 Configuration System
 ====================
 
-RMS-NAV uses a YAML-based configuration system.  The default configuration
+RMS-NAV uses a YAML-based configuration system. The default configuration
 files ship under ``src/nav/config_files/`` and are loaded in alphabetical
 order; see :doc:`introduction_configuration` for the list of files and for
 the full precedence between default files, ``nav_default_config.yaml``,
@@ -12,7 +12,7 @@ Using :class:`~nav.config.config.Config` directly
 -------------------------------------------------
 
 The :class:`~nav.config.config.Config` class takes no constructor arguments
-and loads the standard files lazily.  Additional YAML files can be merged in
+and loads the standard files lazily. Additional YAML files can be merged in
 via :meth:`~nav.config.config.Config.update_config`:
 
 .. code-block:: python

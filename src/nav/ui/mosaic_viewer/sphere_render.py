@@ -66,7 +66,30 @@ def render_to_image(
 
     Returns:
         A QImage in Format_RGB888 matching the shape of ``lon_deg`` / ``lat_deg``.
+
+    Raises:
+        ValueError: If ``d_lon_deg`` or ``d_lat_deg`` is zero, if ``gamma`` is not
+            positive, if ``len(lon_bin_to_dc) != n_full_lon``, or if ``lon_deg``,
+            ``lat_deg``, and ``valid`` do not share the same shape.
     """
+    if d_lon_deg == 0 or d_lat_deg == 0:
+        raise ValueError(
+            f'render_to_image requires non-zero d_lon_deg and d_lat_deg; '
+            f'got d_lon_deg={d_lon_deg!r}, d_lat_deg={d_lat_deg!r}'
+        )
+    if gamma <= 0:
+        raise ValueError(f'render_to_image requires gamma > 0; got gamma={gamma!r}')
+    if lon_deg.shape != lat_deg.shape or lon_deg.shape != valid.shape:
+        raise ValueError(
+            'render_to_image: lon_deg, lat_deg, and valid must have identical shapes; '
+            f'got lon_deg {lon_deg.shape}, lat_deg {lat_deg.shape}, valid {valid.shape}'
+        )
+    if len(lon_bin_to_dc) != n_full_lon:
+        raise ValueError(
+            f'render_to_image: len(lon_bin_to_dc) must equal n_full_lon; '
+            f'got len(lon_bin_to_dc)={len(lon_bin_to_dc)}, n_full_lon={n_full_lon}'
+        )
+
     out_h, out_w = lon_deg.shape
 
     # ------------------------------------------------------------------
@@ -110,7 +133,6 @@ def render_to_image(
     # Build RGB with optional per-pixel tint
     # ------------------------------------------------------------------
     if color_tint is not None and np.any(inside):
-        rgb = np.zeros((out_h, out_w, 3), dtype=np.uint8)
         dr_c = np.clip(dr, 0, n_data_rows - 1)
         dc_c = np.clip(dc, 0, n_data_cols - 1)
         # Default: neutral tint (1.0) everywhere
@@ -137,9 +159,9 @@ def render_to_image(
         rgb[no_data, 2] = 0
 
     # ------------------------------------------------------------------
-    # Build QImage from contiguous RGB buffer
+    # Build QImage from an owned byte buffer (``QImage`` copies ``tobytes()``).
     # ------------------------------------------------------------------
-    rgb_c = np.ascontiguousarray(rgb)
+    rgb_c = np.ascontiguousarray(rgb, dtype=np.uint8)
     return QImage(
         rgb_c.tobytes(),
         out_w,

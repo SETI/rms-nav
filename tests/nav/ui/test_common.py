@@ -164,12 +164,14 @@ def test_apply_linear_gamma_stretch_linear_gamma_one() -> None:
 
 
 def test_apply_linear_gamma_stretch_clips_below_black() -> None:
+    """Verify values below ``black`` clip to 0.0; zero and mid-range values stay scaled."""
     data = np.array([-1.0, 0.0, 0.5])
     result = apply_linear_gamma_stretch(data, black=0.0, white=1.0, gamma=1.0)
     np.testing.assert_allclose(result, [0.0, 0.0, 0.5])
 
 
 def test_apply_linear_gamma_stretch_clips_above_white() -> None:
+    """Verify values above ``white`` clip to 1.0; values at or below ``white`` stay scaled."""
     data = np.array([0.5, 1.0, 2.0])
     result = apply_linear_gamma_stretch(data, black=0.0, white=1.0, gamma=1.0)
     np.testing.assert_allclose(result, [0.5, 1.0, 1.0])
