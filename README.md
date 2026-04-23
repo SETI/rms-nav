@@ -130,6 +130,44 @@ nav_create_bundle labels coiss_saturn \
   --volumes COISS_2001
 ```
 
+### Mosaicing
+
+Reproject a set of ring images and combine them into a mosaic:
+
+```bash
+nav_mosaic_rings coiss_saturn \
+  --volumes COISS_2001 \
+  --pds3-holdings-root /path/to/pds3 \
+  --nav-results-root /path/to/nav_results \
+  --planet SATURN \
+  --radius-inner 139500 \
+  --radius-outer 140220 \
+  --output-dir /path/to/mosaic_results \
+  --prefix saturn_fring_2004
+```
+
+Display the resulting mosaic (or any individual reprojection file):
+
+```bash
+nav_mosaic_display_rings /path/to/mosaic_results/saturn_fring_2004_mosaic.fits
+```
+
+Reproject body images (e.g. Mimas):
+
+```bash
+nav_mosaic_body coiss_saturn \
+  --volumes COISS_2001 \
+  --pds3-holdings-root /path/to/pds3 \
+  --nav-results-root /path/to/nav_results \
+  --body-name MIMAS \
+  --output-dir /path/to/mosaic_results \
+  --prefix mimas_2004
+```
+
+See the
+[Reprojection user guide](https://rms-nav.readthedocs.io/en/latest/user_guide_reprojection.html)
+for full option references and more examples.
+
 ## Documentation
 
 Comprehensive documentation is available in the `docs` directory. To build
