@@ -839,7 +839,10 @@ class BodyMosaic:
             The image data is taken from the zoomed, interpolated image, while
             the incidence, emission, phase, and resolution are taken from the
             original non-interpolated data and thus will be slightly more
-            coarse-grained.
+            coarse-grained. Backplane masks and limit tests are folded into
+            ``ok_body_mask`` (see below); scatter uses that same mask so ``img``
+            is never valid where ``phase``, ``emission``, ``incidence``, or
+            ``resolution`` would be masked or beyond configured limits.
         """
         logger = logging.getLogger(_LOGGING_NAME + '.reproject')
 
@@ -908,14 +911,41 @@ class BodyMosaic:
             body_mask_inv[:, -edge_margin:] = True
 
         ok_body_mask_inv = body_mask_inv
-        if self._max_incidence is not None:
-            ok_body_mask_inv = np.logical_or(ok_body_mask_inv, bp_incidence > self._max_incidence)
-        if self._max_emission is not None:
-            ok_body_mask_inv = np.logical_or(ok_body_mask_inv, bp_emission > self._max_emission)
-        if self._max_resolution is not None:
-            ok_body_mask_inv = np.logical_or(ok_body_mask_inv, resolution > self._max_resolution)
+
+        # Invalid detector pixels: explicit MaskedArray mask bits, plus limit
+        # tests. Plain ``bp_* > limit`` drops mask on comparisons, so use
+        # ``ma.filled(..., True)`` so masked elements count as invalid.
+        if self._max_incidence is not None or not mask_only:
+            bad_inc = ma.getmaskarray(bp_incidence)
+            if self._max_incidence is not None:
+                bad_inc = np.logical_or(
+                    bad_inc,
+                    ma.filled(bp_incidence > self._max_incidence, True),
+                )
+            ok_body_mask_inv = np.logical_or(ok_body_mask_inv, bad_inc)
+
+        if self._max_emission is not None or not mask_only or self._max_resolution is not None:
+            bad_emi = ma.getmaskarray(bp_emission)
+            if self._max_emission is not None:
+                bad_emi = np.logical_or(
+                    bad_emi,
+                    ma.filled(bp_emission > self._max_emission, True),
+                )
+            ok_body_mask_inv = np.logical_or(ok_body_mask_inv, bad_emi)
+
+        if not mask_only or self._max_resolution is not None:
+            bad_res = ma.getmaskarray(resolution)
+            if self._max_resolution is not None:
+                bad_res = np.logical_or(
+                    bad_res,
+                    ma.filled(resolution > self._max_resolution, True),
+                )
+            ok_body_mask_inv = np.logical_or(ok_body_mask_inv, bad_res)
+
         if not mask_only:
+            ok_body_mask_inv = np.logical_or(ok_body_mask_inv, ma.getmaskarray(bp_phase))
             ok_body_mask_inv = np.logical_or(ok_body_mask_inv, zero_mask)
+
         ok_body_mask = np.logical_not(ok_body_mask_inv)
 
         empty_mask = not np.any(ok_body_mask)
@@ -1039,6 +1069,14 @@ class BodyMosaic:
         good_v = good_v[goodmask2]
         good_lat = good_lat[goodmask2]
         good_lon = good_lon[goodmask2]
+
+        # Lat/lon bin centers can map to (u, v) that are outside ``ok_body_mask``;
+        # keep scatter aligned with the same invalid mask as incidence/emission/etc.
+        ok_on_detector = ok_body_mask[good_v + v_min, good_u + u_min]
+        good_u = good_u[ok_on_detector]
+        good_v = good_v[ok_on_detector]
+        good_lat = good_lat[ok_on_detector]
+        good_lon = good_lon[ok_on_detector]
 
         # Zoom for interpolation (always copy when zoom==1: ``subimg`` may alias
         # ``obs.data``, which can be read-only mmap, and we must not mutate the obs.)
