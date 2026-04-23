@@ -300,22 +300,18 @@ Image labels (reprojection and mosaic)
 
 Each :class:`~nav.reproj.rings.RingReprojResult` and
 :class:`~nav.reproj.bodies.BodyReprojResult` carries an ``image_name`` string
-(typically the source image stem). It is written by ``save()`` and restored by
-``load()``; files produced before this field existed load with ``image_name``
-equal to ``''``.
+(typically the source image stem).  The ``save()`` and ``load()`` methods
+preserve this value.
 
 Each :class:`~nav.reproj.rings.RingMosaicData` and
 :class:`~nav.reproj.bodies.BodyMosaicData` carries ``contributing_image_names``,
 a tuple of strings in the same order as the ``image_number`` indices stored in
 the mosaic (pixel value ``k`` refers to ``contributing_image_names[k]`` when
-``k`` is in range). The tuple grows by one entry each time ``mosaic.add()``
+``k`` is in range).  The tuple grows by one entry each time ``mosaic.add()``
 finishes incorporating a reprojection and advances the internal image counter.
-Older mosaic files without this field load with an empty tuple.
-In FITS mosaic files, ``contributing_image_names`` is stored as a 1-D ``uint8``
-array of UTF-8 bytes with ``NUL`` bytes between names (not a Unicode FITS image).
 
 In Python, pass ``image_name=...`` to :meth:`~nav.reproj.rings.RingMosaic.reproject`
-and :meth:`~nav.reproj.bodies.BodyMosaic.reproject`. The ``nav_mosaic`` CLI
+and :meth:`~nav.reproj.bodies.BodyMosaic.reproject`.  The ``nav_mosaic`` CLI
 stores the dataset image stem per file by default; pass ``--image-name LABEL``
 to use the same label for every image in the run instead.
 

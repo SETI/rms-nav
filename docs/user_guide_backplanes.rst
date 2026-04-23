@@ -5,14 +5,26 @@ Backplane Generation
 Overview
 ========
 
-Backplanes are per-pixel geometry products (e.g., longitude, latitude, incidence angle) generated for each image. The system reads prior navigation metadata to apply the image offset, then computes body and ring backplanes, merges them per-pixel, and writes a multi-HDU FITS along with a PDS4 label.
+Backplanes are per-pixel geometry products (longitude, latitude, incidence
+angle, emission angle, phase angle, resolution, etc.) derived from a
+navigated image.  The system reads prior navigation metadata to apply the
+image offset, then computes body and ring backplanes, merges them per-pixel
+by distance, and writes a multi-HDU FITS file along with a JSON metadata
+file.
 
 Key properties:
 
-- Output FITS places BODY_ID_MAP as the first image HDU (after the primary HDU).
-- Only non-empty backplanes (not all zeros) are included in the FITS and label.
-- The list of backplanes is configured under ``backplanes`` in YAML (see config_90_backplanes.yaml).
-- For simulations, fake backplanes are synthesized and masks follow simulated body shapes.
+- The output FITS places ``BODY_ID_MAP`` as the first image HDU (after the
+  primary HDU).
+- Backplanes that are entirely zero are omitted from the FITS file.
+- The list of backplanes to generate is configured under ``backplanes`` in
+  ``src/nav/config_files/config_90_backplanes.yaml``.
+- For simulated observations, synthetic backplanes are produced whose masks
+  follow the simulated body shapes.
+
+Backplane generation only writes the FITS file and the associated metadata
+JSON.  PDS4 labels for the backplane products are produced in a later step
+by ``nav_create_bundle labels`` (see :doc:`user_guide_pds4_bundle`).
 
 Command-Line Interfaces
 ========================
@@ -24,9 +36,11 @@ Two drivers mirror the offset drivers:
 
 Common flags:
 
-- ``--nav-results-root``: Root containing prior navigation results (e.g., ``*_metadata.json``).
-- ``--backplane-results-root``: Root to write backplane outputs (FITS and PDS4).
-- Dataset selection flags are the same as in the offset drivers.
+- ``--nav-results-root``: Root containing prior navigation results
+  (``*_metadata.json``).
+- ``--backplane-results-root``: Root directory for the backplane outputs.
+- Dataset selection flags are the same as for ``nav_offset`` (see
+  :doc:`user_guide_navigation`).
 
 Examples
 --------
@@ -35,7 +49,7 @@ Generate backplanes locally for a dataset:
 
 .. code-block:: bash
 
-    nav_backplanes COISS \
+    nav_backplanes coiss_saturn \
       --nav-results-root /data/nav/results \
       --backplane-results-root /data/nav/backplanes \
       --volumes COISS_2001 --first-image-num 1454000000 --last-image-num 1454999999
@@ -51,22 +65,32 @@ Cloud Tasks variant (arguments come from the queue):
 Configuration
 -------------
 
-Backplanes are configured in YAML (see ``src/nav/config_files/config_90_backplanes.yaml``):
+Backplanes are configured under ``backplanes`` in
+``src/nav/config_files/config_90_backplanes.yaml``:
 
-- ``backplanes.bodies``: list of backplane entries with ``name``, ``method``, and optional ``units``.
-- ``backplanes.rings``: list of ring backplanes; the special ``distance`` entry is used only for per-pixel ordering and is not written as an HDU.
-- ``backplanes.target_lids``: optional NAIF ID -> LID mapping for PDS4 label target references.
+- ``backplanes.bodies``: list of body backplane entries.  Each entry has
+  ``name`` (the FITS HDU name), ``method`` (the ``oops.Backplane`` method to
+  call), and optional ``units`` (written to the ``BUNIT`` FITS header).
+- ``backplanes.rings``: list of ring backplane entries with the same
+  structure.  The special ``distance`` entry is used only for per-pixel
+  merge ordering and is not written as an HDU.
 
 Outputs
 -------
 
-- FITS: ``<results_path_stub>_backplanes.fits`` with:
+For each processed image, ``nav_backplanes`` writes two files under
+``--backplane-results-root``:
 
-  - Primary HDU.
-  - BODY_ID_MAP (int32) as the first image HDU.
-  - One ``ImageHDU`` per non-empty master backplane array. ``BUNIT`` is set from config when provided.
+- ``<results_path_stub>_backplanes.fits`` containing:
 
-- PDS4 label: ``<results_path_stub>_backplanes.xml``, generated from a local template (``src/backplanes/templates/backplanes.lblx``), referencing the output FITS and including target references when configured.
+  - A primary HDU.
+  - ``BODY_ID_MAP`` (int32) as the first image HDU.
+  - One ``ImageHDU`` per non-empty backplane array, with ``BUNIT`` set when
+    configured.
+
+- ``<results_path_stub>_backplane_metadata.json`` containing per-body
+  inventory information and per-backplane ``min``/``max`` statistics
+  (consumed by ``nav_create_bundle`` when generating PDS4 labels).
 
 Backplane Viewer GUI
 ====================
@@ -78,7 +102,7 @@ Run
 
 .. code-block:: bash
 
-    nav_backplane_viewer COISS \
+    nav_backplane_viewer coiss_saturn \
       --nav-results-root /data/nav/results \
       --backplane-results-root /data/nav/backplanes \
       --volumes COISS_2001 \

@@ -11,7 +11,7 @@ Modules
   - Builds ``ObsSnapshot`` with ``extfov_margin_vu=(0, 0)`` and applies ``OffsetFOV``
   - Computes bodies and rings backplanes
   - Merges sources per-pixel by distance
-  - Writes FITS + PDS4 via writer
+  - Writes the FITS file and a companion metadata JSON via the writer
 
 - ``src/backplanes/backplanes_bodies.py``: Body backplanes
 
@@ -35,8 +35,11 @@ Modules
 - ``src/backplanes/writer.py``: Output writer
 
   - Writes BODY_ID_MAP as the first image HDU
-  - Excludes any backplane that is entirely zeros from FITS and label
-  - Uses ``src/backplanes/templates/backplanes.lblx`` via ``PdsTemplate``
+  - Excludes any backplane that is entirely zero from the FITS file
+  - Writes a companion ``*_backplane_metadata.json`` containing per-body
+    inventory and per-backplane min/max statistics; this JSON is consumed
+    by ``nav_create_bundle`` when generating PDS4 labels.  The backplanes
+    step itself does not produce any PDS4 labels.
 
 Snapshot Helpers
 ~~~~~~~~~~~~~~~~
@@ -67,8 +70,9 @@ Configuration
 
 ``src/nav/config_files/config_90_backplanes.yaml`` defines:
 
-- ``backplanes.bodies`` and ``backplanes.rings`` (name, method, units)
-- ``backplanes.target_lids`` (optional) to populate PDS4 target references
+- ``backplanes.bodies`` and ``backplanes.rings``: each entry has ``name``
+  (FITS HDU name), ``method`` (``oops.Backplane`` method name), and
+  optional ``units`` (copied to the FITS ``BUNIT`` header card).
 
 Testing
 ~~~~~~~

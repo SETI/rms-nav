@@ -146,7 +146,7 @@ trace.
 
 Planetary ring features are defined in separate YAML files under
 ``src/nav/config_files/``. The default Saturn configuration is in
-``config_20_saturn_rings.yaml``.
+``config_21_saturn_rings.yaml``.
 
 YAML structure
 ^^^^^^^^^^^^^^

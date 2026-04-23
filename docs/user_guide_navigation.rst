@@ -41,57 +41,46 @@ RMS-NAV currently supports multiple instruments, organized by dataset names you 
 Installation and Setup
 ======================
 
-Prerequisites
--------------
-
-Before using RMS-NAV, you need to have:
-
-* Python 3.10 or higher
-* SPICE toolkit and kernels for the relevant missions
-* Dependencies installed from ``requirements.txt``
+See :doc:`introduction_overview` for package installation with ``pip`` or
+``pipx``.
 
 Environment Setup
 -----------------
 
-1. Clone the repository and navigate to the project directory
-2. Create and activate a virtual environment (recommended)
-3. Install the required packages:
+In addition to installing the package, the following external resources are
+needed at runtime.
 
-   .. code-block:: bash
+**SPICE kernels.**  Download the SPICE kernels required for your mission and
+set ``SPICE_PATH`` to the directory that contains them:
 
-      pip install -r requirements.txt
+.. code-block:: bash
 
-4. Set up SPICE kernels:
+   export SPICE_PATH=/path/to/your/spice/kernels
 
-   * Download the required SPICE kernels for your mission
-   * Set the ``SPICE_PATH`` environment variable:
+**PDS3 holdings.**  For PDS3 datasets (all currently supported missions), set
+``PDS3_HOLDINGS_DIR`` to the root of a PDS3 holdings tree (or pass
+``--pds3-holdings-root`` on the command line):
 
-   .. code-block:: bash
+.. code-block:: bash
 
-      export SPICE_PATH=/path/to/your/spice/kernels
+   export PDS3_HOLDINGS_DIR=/path/to/your/pds3/data
 
-5. Set up PDS3 data access:
+The holdings tree follows the layout used by the PDS Ring-Moon Systems Node::
 
-   * For PDS3 formatted datasets (most missions), set the ``PDS3_HOLDINGS_DIR`` environment variable:
+   $PDS3_HOLDINGS_DIR/
+       volumes/
+           <volume_set>/
+               <volume>/
+                   <data directories>/
+       metadata/
+           <volume_set>/
+               <volume>/
+                   <volume>_index.lbl
+                   <volume>_index.tab
 
-   .. code-block:: bash
-
-      export PDS3_HOLDINGS_DIR=/path/to/your/pds3/data
-
-   The PDS3 data should be organized in a standard structure:
-
-   .. code-block:: text
-
-      $PDS3_HOLDINGS_DIR/
-      ├── volumes/
-      │   └── [volume_set]/
-      │       └── [volume]/
-      │           └── [data directories]/
-      └── metadata/
-          └── [volume_set]/
-              └── [volume]/
-                  ├── [volume]_index.lbl
-                  └── [volume]_index.tab
+Remote holdings are supported: ``PDS3_HOLDINGS_DIR`` and
+``--pds3-holdings-root`` accept any URL understood by ``filecache.FCPath``
+(for example ``https://pds-rings.seti.org/holdings``).
 
 Configuration System
 ====================
@@ -303,10 +292,17 @@ The key information in the results is:
 Simulated Images
 ================
 
-RMS-NAV supports simulated images created using the simulated image creation GUI.
-For detailed information about the GUI, the JSON parameter file structure
-including all supported fields, and how to run navigation with simulated images,
-see :doc:`introduction_simulated_images`.
+RMS-NAV supports simulated images created with the
+``nav_create_simulated_image`` GUI.  Simulated images share the same
+navigation pipeline as real images; they are selected by passing the ``sim``
+dataset name and a path to the JSON parameter file on the command line:
+
+.. code-block:: bash
+
+   nav_offset sim /path/to/simulated_image.json
+
+For a full description of the GUI, the JSON parameter file structure, and
+every supported field, see :doc:`user_guide_simulated_images`.
 
 Navigation Techniques
 =====================
@@ -335,7 +331,7 @@ The ``correlate_all`` technique performs automated navigation by correlating the
 
 **Configuration Options:**
 
-The following configuration options in ``config_01_general.yaml`` control the behavior of ``correlate_all``:
+The following configuration options in ``config_02_offset.yaml`` control the behavior of ``correlate_all``:
 
 * ``offset.correlation_fft_upsample_factor`` (default: 128): The upsampling factor used in the FFT-based correlation. Higher values provide finer sub-pixel resolution but increase computation time.
 
@@ -355,7 +351,7 @@ The following configuration options in ``config_01_general.yaml`` control the be
 
 * ``offset.log_star_refinement_detail`` (default: false): Log all fit metrics and gate thresholds per star at DEBUG level. Useful for diagnosing unexpected rejection behavior.
 
-* ``general.log_level_nav_correlate_all``: Logging level for this technique (can be set to DEBUG, INFO, WARNING, ERROR, or NONE).
+* ``general.log_level_nav_correlate_all`` (default: ``INFO``, from ``config_01_general.yaml``): Logging level for this technique. Accepts ``DEBUG``, ``INFO``, ``WARNING``, ``ERROR``, or ``CRITICAL``.
 
 **Star conflict strings from refinement:**
 
@@ -376,7 +372,7 @@ Before entering the star model or refinement loop, each star is checked against 
 
 The ring annuli are configured per planet under ``stars.ring_occlusion_radii_km``. Each planet maps to a list of ``[inner_km, outer_km]`` pairs. A star is occluded if the sampled ring-plane radius falls inside any pair for that planet. Planets not listed have no ring occlusion.
 
-Example from ``config_01_general.yaml``:
+Example from ``config_03_stars.yaml``:
 
 .. code-block:: yaml
 

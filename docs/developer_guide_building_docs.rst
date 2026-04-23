@@ -5,11 +5,15 @@ Building the Documentation
 Prerequisites
 -------------
 
-1. Install the required Python packages:
+1. Install the package together with the documentation dependencies
+   (Sphinx, ``myst-parser``, ``sphinx-rtd-theme``, and
+   ``sphinxcontrib-mermaid``) from an editable checkout of the repository:
 
    .. code-block:: bash
 
-      pip install -r requirements.txt
+      pip install -e ".[docs]"
+
+   Using ``".[dev]"`` instead also pulls in the docs group.
 
 Building HTML Documentation
 ---------------------------
@@ -66,15 +70,15 @@ Example Mermaid diagram syntax:
 
       classDiagram
          class NavBase {
-             +__init__(config, logger_name)
+             +__init__(*, config=None, **kwargs)
              +logger
              +config
          }
          class DataSet {
              <<abstract>>
-             +__init__(config, logger_name)
-             +image_name_valid(name)*
-             +yield_image_filenames_from_arguments(args)*
+             +__init__(*, config=None)
+             +_img_name_valid(name)*
+             +yield_image_files_from_arguments(args)*
          }
          NavBase <|-- DataSet
 
