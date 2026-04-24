@@ -327,6 +327,15 @@ The command-line tools are composed of three layers:
      argument (``rings`` or ``body``) and calls ``_run_rings`` / ``_run_body``.
      ``rings_main`` and ``body_main`` are thin wrappers that prepend the
      subcommand to ``sys.argv`` and call ``main``.
+   - ``nav_mosaic_cloud_tasks.py`` — Cloud Tasks worker that runs the
+     reprojection pass only. Uses the same ``rings`` / ``body`` dispatch as
+     ``nav_mosaic.py`` (captured in module-level ``_MODE`` before the Worker
+     starts so the right ``add_ring_args`` / ``add_body_args`` are registered).
+     ``process_task`` calls the same ``reproj_cli`` helpers
+     (``build_*_mosaic``, ``per_image_output_path``, ``load_offset_if_any``,
+     ``apply_offset_to_obs``, ``reproject_one_*``) as the local driver.
+     Mosaic combination is not performed here; run ``nav_mosaic <mode>
+     --skip-reproject`` after the queue drains.
    - ``nav_mosaic_display.py`` — same pattern for the display tools.
 
 **Shared CLI helpers** (``src/reproj_cli/``)

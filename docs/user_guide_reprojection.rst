@@ -488,6 +488,118 @@ reprojection logs from pass 1:
 
 If ``--prefix`` is empty (the default), the leading underscore is omitted.
 
+Cloud-tasks entry point
+^^^^^^^^^^^^^^^^^^^^^^^
+
+Queue-driven reprojection is supported by ``nav_mosaic_rings_cloud_tasks`` and
+``nav_mosaic_body_cloud_tasks`` (entry points into the single
+``nav_mosaic_cloud_tasks`` program). Each task payload names one or more
+images *and* carries every per-task parameter (output directory, mosaic
+geometry, body/planet, etc.); the worker reprojects the named images and
+writes per-image files under the task's ``output_dir`` using the same naming
+convention as the local driver. The final mosaic-combination pass is **not**
+performed by the cloud-tasks worker; after all tasks complete, run the local
+driver with ``--skip-reproject`` to assemble the mosaic from the accumulated
+reprojection files.
+
+Unlike the local drivers, the cloud-tasks drivers accept only two CLI flags,
+both environment/credential scoped and shared across every task the worker
+handles:
+
+* ``--config-file PATH`` (may be repeated)
+* ``--nav-results-root PATH``
+
+All other parameters that the local ``nav_mosaic_rings`` /
+``nav_mosaic_body`` accept (``--output-dir``, ``--prefix``, ``--format``,
+``--overwrite``, ``--image-name``, ``--no-write-output-files``, and the full
+ring-/body-mosaic configuration such as ``--planet``, ``--body-name``,
+``--radius-inner``, ``--lat-resolution``, ``--photometric-model`` etc.) are
+passed per-task inside the task JSON. Invoke the worker with:
+
+.. code-block:: bash
+
+   nav_mosaic_rings_cloud_tasks [--config-file PATH] [--nav-results-root PATH]
+
+   nav_mosaic_body_cloud_tasks  [--config-file PATH] [--nav-results-root PATH]
+
+To build a ready-to-load task-queue JSON file from the local driver without
+running any reprojection, use ``--output-cloud-tasks-file``:
+
+.. code-block:: bash
+
+   nav_mosaic_rings coiss_saturn \
+       --volumes COISS_2001 \
+       --planet SATURN \
+       --radius-inner 70000 --radius-outer 140000 \
+       --output-dir /data/mosaics --prefix saturn_main_rings_2004 \
+       --output-cloud-tasks-file rings_tasks.json
+
+   nav_mosaic_body coiss_saturn \
+       --volumes COISS_2001 \
+       --body-name MIMAS \
+       --output-dir /data/mosaics --prefix mimas_2004 \
+       --output-cloud-tasks-file mimas_tasks.json
+
+The task file is a JSON array of task objects:
+
+.. code-block:: json
+
+    {
+        "task_id": "<dataset_name>-<label_file_name>-<index>",
+        "data": {
+            "dataset_name": "<dataset_name>",
+            "arguments": {
+                "output_dir": "<path or URL>",
+                "prefix": "<prefix>",
+                "format": "fits",
+                "overwrite": false,
+                "no_write_output_files": false,
+                "image_name": null,
+                "body_name": "MIMAS",
+                "lat_resolution": 0.1,
+                "lon_resolution": 0.1,
+                "...": "<all remaining mosaic-configuration fields>"
+            },
+            "files": [
+                {
+                    "image_file_url": "<path or URL to image file>",
+                    "label_file_url": "<path or URL to label file>",
+                    "results_path_stub": "<relative stub used to name outputs>",
+                    "index_file_row": {"<column>": "<value>", "...": "..."}
+                }
+            ]
+        }
+    }
+
+Fields:
+
+* ``task_id``: unique string identifier built from the dataset name, the
+  first image's label filename, and the enumeration index.
+* ``data.dataset_name``: one of the supported dataset names.
+* ``data.arguments``: a dictionary whose keys are the argparse destinations
+  produced by the local driver's Output group plus either the body- or
+  ring-mosaic group (``body_name`` / ``lat_resolution`` / ... for body mode;
+  ``planet`` / ``radius_inner`` / ``radius_outer`` / ... for rings). Every
+  non-flow-control argument of the local ``nav_mosaic`` driver is copied
+  here verbatim by ``--output-cloud-tasks-file`` so that the worker can
+  reconstruct the exact same reprojection configuration.
+* ``data.files``: one or more file descriptors with required fields
+  ``image_file_url``, ``label_file_url``, ``results_path_stub``, and an
+  optional ``index_file_row`` (metadata, may be ``null``).
+
+When all reprojection tasks have drained, assemble the mosaic with the local
+driver using the same ``--output-dir`` / ``--prefix`` / ``--format`` and the
+same mosaic-configuration flags (so the expected output file names match):
+
+.. code-block:: bash
+
+   nav_mosaic_rings coiss_saturn \
+       --skip-reproject \
+       --volumes COISS_2001 \
+       --planet SATURN \
+       --radius-inner 70000 --radius-outer 140000 \
+       --output-dir /data/mosaics --prefix saturn_main_rings_2004
+
 Common options reference
 ^^^^^^^^^^^^^^^^^^^^^^^^
 

@@ -53,6 +53,7 @@ from nav.dataset.dataset import DataSet, ImageFile
 from nav.obs import ObsSnapshotInst, inst_name_to_obs_class
 from nav.reproj.bodies import BodyMosaicData, BodyReprojResult
 from nav.reproj.rings import RingMosaicData, RingReprojResult
+from nav.support.file import json_as_string
 from nav.support.misc import log_run_environment
 from reproj_cli.args import (
     add_body_args,
@@ -201,11 +202,104 @@ def _build_parser(mode: str) -> argparse.ArgumentParser:
     )
     add_common_env_args(parser)
     add_common_output_args(parser)
+    parser.add_argument(
+        '--output-cloud-tasks-file',
+        type=str,
+        default=None,
+        help=(
+            'Write a JSON task descriptions file suitable for loading into a '
+            'cloud_tasks queue (consumed by nav_mosaic_{rings,body}_cloud_tasks); '
+            'do not perform any reprojection or mosaic passes.'
+        ),
+    )
     if mode == 'rings':
         add_ring_args(parser)
     else:
         add_body_args(parser)
     return parser
+
+
+# Keys that live on the CLI namespace but must NOT be forwarded to cloud_tasks
+# workers: environment/logging controls handled by the worker's own CLI, and
+# nav_mosaic flow-control flags that have no meaning for a single per-image
+# task. Dataset-selection arguments (added dynamically by each DataSet) are
+# excluded because we iterate them here and the worker only sees concrete file
+# URLs.
+_CLI_ONLY_TASK_EXCLUDES: frozenset[str] = frozenset(
+    {
+        'config_file',
+        'nav_results_root',
+        'pds3_holdings_root',
+        'log_level',
+        'profile',
+        'skip_reproject',
+        'skip_mosaic',
+        'dry_run',
+        'output_cloud_tasks_file',
+    }
+)
+
+
+def _task_argument_keys(mode: str) -> list[str]:
+    """Return the argparse destinations that belong in each task's ``arguments`` dict.
+
+    Built by re-applying the same output/body/ring arg-group helpers to a throw-away
+    parser, so the list stays in sync with :mod:`reproj_cli.args`.
+
+    Parameters:
+        mode: ``'rings'`` or ``'body'``.
+
+    Returns:
+        A list of argparse ``dest`` names, in declaration order.
+    """
+    aux = argparse.ArgumentParser(add_help=False)
+    add_common_output_args(aux)
+    if mode == 'rings':
+        add_ring_args(aux)
+    else:
+        add_body_args(aux)
+    return [a.dest for a in aux._actions if a.dest not in {'help', *_CLI_ONLY_TASK_EXCLUDES}]
+
+
+def _write_cloud_tasks_file(mode: str, args: argparse.Namespace) -> None:
+    """Write a cloud_tasks JSON file describing one task per selected image group.
+
+    Parameters:
+        mode: ``'rings'`` or ``'body'``.
+        args: Parsed CLI namespace; ``args.output_cloud_tasks_file`` is the target path.
+    """
+    assert DATASET is not None
+    assert DATASET_NAME is not None
+
+    task_keys = _task_argument_keys(mode)
+    task_arguments = {k: getattr(args, k) for k in task_keys if hasattr(args, k)}
+
+    tasks_json = []
+    for imagefile_idx, imagefiles in enumerate(DATASET.yield_image_files_from_arguments(args)):
+        task_id = f'{DATASET_NAME}-{imagefiles.image_files[0].label_file_name}-{imagefile_idx}'
+        task_files = [
+            {
+                'image_file_url': f.image_file_url.as_posix(),
+                'label_file_url': f.label_file_url.as_posix(),
+                'results_path_stub': f.results_path_stub,
+                'index_file_row': f.index_file_row,
+            }
+            for f in imagefiles.image_files
+        ]
+        tasks_json.append(
+            {
+                'task_id': task_id,
+                'data': {
+                    'arguments': task_arguments,
+                    'dataset_name': DATASET_NAME,
+                    'files': task_files,
+                },
+            }
+        )
+
+    cloud_tasks_path = FCPath(args.output_cloud_tasks_file)
+    with cloud_tasks_path.open('w') as f:
+        f.write(json_as_string(tasks_json))
 
 
 def parse_args(command_list: list[str]) -> tuple[str, argparse.Namespace]:
@@ -434,6 +528,14 @@ def main() -> None:
 
     start = time.time()
     log_run_environment(MAIN_LOGGER, sys.argv[1:])
+
+    if args.output_cloud_tasks_file:
+        _write_cloud_tasks_file(mode, args)
+        MAIN_LOGGER.info('Wrote cloud_tasks file to %s', args.output_cloud_tasks_file)
+        if args.profile:
+            pr.disable()
+            pr.print_stats(sort='cumulative')
+        return
 
     try:
         if mode == 'body':

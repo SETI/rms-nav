@@ -227,11 +227,46 @@ Queue-driven processing is supported by ``nav_offset_cloud_tasks``. This variant
 
    nav_offset_cloud_tasks [--config-file PATH] [--nav-results-root PATH]
 
-Each task payload must be a JSON object with the following fields:
+Cloud-tasks JSON schema
+^^^^^^^^^^^^^^^^^^^^^^^
 
-* ``dataset_name``: one of the supported dataset names.
-* ``arguments``: an object with optional keys ``nav_models`` and ``nav_techniques`` (lists or ``null``).
-* ``files``: an array of objects, each containing required fields ``image_file_url``, ``label_file_url``, and ``results_path_stub``, and optional fields ``index_file_row`` (metadata) and ``extra_params`` (a JSON object/dictionary of arbitrary key/value pairs that will be passed through to the task implementation; optional, may be null or omitted).
+The file produced by ``--output-cloud-tasks-file`` is a JSON array of task
+objects. Each task is:
+
+.. code-block:: json
+
+    {
+        "task_id": "<dataset_name>-<label_file_name>-<index>",
+        "data": {
+            "dataset_name": "<dataset_name>",
+            "arguments": {
+                "nav_models": ["bodies", "rings", "stars"],
+                "nav_techniques": ["correlate_all"]
+            },
+            "files": [
+                {
+                    "image_file_url": "<path or URL to image file>",
+                    "label_file_url": "<path or URL to label file>",
+                    "results_path_stub": "<relative stub used to name outputs>",
+                    "index_file_row": {"<column>": "<value>", "...": "..."},
+                    "extra_params": {"<key>": "<value>"}
+                }
+            ]
+        }
+    }
+
+Fields:
+
+* ``task_id``: unique string identifier built from the dataset name, the
+  first image's label filename, and the enumeration index.
+* ``data.dataset_name``: one of the supported dataset names.
+* ``data.arguments``: an object with optional keys ``nav_models`` and
+  ``nav_techniques`` (each a list of strings, or ``null``).
+* ``data.files``: one or more file descriptors with required fields
+  ``image_file_url``, ``label_file_url``, and ``results_path_stub``, and
+  optional ``index_file_row`` (metadata from the source index file, may be
+  ``null``) and ``extra_params`` (arbitrary key/value dictionary forwarded
+  to the task implementation; optional, may be ``null`` or omitted).
 
 Inputs and Outputs
 ==================

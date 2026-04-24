@@ -1,5 +1,6 @@
 """Tests for ``nav.ui.common``."""
 
+import math
 import os
 from collections.abc import Callable
 from typing import Any, cast
@@ -191,16 +192,26 @@ def test_apply_linear_gamma_stretch_gamma_two_darkens_midtones() -> None:
     np.testing.assert_allclose(result, [0.0, 0.25, 1.0], atol=1e-7)
 
 
-def test_apply_linear_gamma_stretch_rejects_white_equal_black() -> None:
+def test_apply_linear_gamma_stretch_white_equal_black_uses_epsilon_denominator() -> None:
+    """``white == black`` is adjusted so the stretch never divides by zero."""
     data = np.array([5.0, 5.0, 6.0])
-    with pytest.raises(ValueError, match='white must be greater than black'):
-        apply_linear_gamma_stretch(data, black=5.0, white=5.0, gamma=1.0)
+    result = apply_linear_gamma_stretch(data, black=5.0, white=5.0, gamma=1.0)
+    assert np.all((result >= 0.0) & (result <= 1.0))
+    np.testing.assert_array_less(result[:2], result[2])
 
 
-def test_apply_linear_gamma_stretch_rejects_white_less_than_black() -> None:
+def test_apply_linear_gamma_stretch_white_less_than_black_is_silently_clipped() -> None:
+    """Inverted black/white is treated as ``white`` just above ``black``."""
     data = np.array([0.0, 0.5, 1.0])
-    with pytest.raises(ValueError, match='white must be greater than black'):
-        apply_linear_gamma_stretch(data, black=0.5, white=0.25, gamma=1.0)
+    result = apply_linear_gamma_stretch(data, black=0.5, white=0.25, gamma=1.0)
+    assert np.all((result >= 0.0) & (result <= 1.0))
+    expected = apply_linear_gamma_stretch(
+        data,
+        black=0.5,
+        white=math.nextafter(0.5, math.inf),
+        gamma=1.0,
+    )
+    np.testing.assert_allclose(result, expected)
 
 
 def test_apply_linear_gamma_stretch_rejects_non_positive_gamma() -> None:

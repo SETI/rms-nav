@@ -36,8 +36,10 @@ def apply_linear_gamma_stretch(
     Parameters:
         data: Input float array (any shape).
         black: Black-point; input values at or below this map to 0.
-        white: White-point; input values at or above this map to 1. Must be
-            strictly greater than ``black``.
+        white: White-point; input values at or above this map to 1. If
+            ``white <= black`` (including accidental UI equality), ``white`` is
+            raised silently to the next representable float above ``black`` so
+            the linear scale denominator is never zero.
         gamma: Exponent applied after linear normalisation; must be finite and
             strictly greater than zero.
 
@@ -48,7 +50,7 @@ def apply_linear_gamma_stretch(
         TypeError: If ``black``, ``white``, or ``gamma`` is not an ``int`` or
             ``float``, or any of them is a ``bool``.
         ValueError: If any of ``black``, ``white``, or ``gamma`` is not finite;
-            if ``white <= black``; or if ``gamma <= 0``.
+            or if ``gamma <= 0``.
     """
     _require_finite_int_or_float('black', black)
     _require_finite_int_or_float('white', white)
@@ -57,7 +59,7 @@ def apply_linear_gamma_stretch(
     w = float(white)
     g = float(gamma)
     if w <= b:
-        raise ValueError(f'white must be greater than black, got white={w!r}, black={b!r}')
+        w = math.nextafter(b, math.inf)
     if g <= 0.0:
         raise ValueError(f'gamma must be greater than 0, got {g!r}')
     normalized = np.clip((data - b) / (w - b), 0.0, 1.0)

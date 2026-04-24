@@ -54,13 +54,59 @@ Generate backplanes locally for a dataset:
       --backplane-results-root /data/nav/backplanes \
       --volumes COISS_2001 --first-image-num 1454000000 --last-image-num 1454999999
 
-Cloud Tasks variant (arguments come from the queue):
+To generate a cloud-tasks JSON file for all selected images without actually
+generating any backplanes, use ``--output-cloud-tasks-file``:
+
+.. code-block:: bash
+
+    nav_backplanes coiss_saturn \
+      --volumes COISS_2001 \
+      --output-cloud-tasks-file backplanes_tasks.json
+
+Cloud Tasks variant (file list comes from the queue):
 
 .. code-block:: bash
 
     nav_backplanes_cloud_tasks \
       --nav-results-root /data/nav/results \
       --backplane-results-root /data/nav/backplanes
+
+Cloud-tasks JSON schema
+^^^^^^^^^^^^^^^^^^^^^^^
+
+The file produced by ``--output-cloud-tasks-file`` is a JSON array of task
+objects. Each task is:
+
+.. code-block:: json
+
+    {
+        "task_id": "<dataset_name>-<label_file_name>-<index>",
+        "data": {
+            "dataset_name": "<dataset_name>",
+            "files": [
+                {
+                    "image_file_url": "<path or URL to image file>",
+                    "label_file_url": "<path or URL to label file>",
+                    "results_path_stub": "<relative stub used to name outputs>",
+                    "index_file_row": {"<column>": "<value>", "...": "..."}
+                }
+            ]
+        }
+    }
+
+Fields:
+
+* ``task_id``: unique string identifier built from the dataset name, the
+  first image's label filename, and the enumeration index.
+* ``data.dataset_name``: one of the supported dataset names (same value as
+  the positional argument to ``nav_backplanes``).
+* ``data.files``: one or more file descriptors. Each descriptor has required
+  fields ``image_file_url``, ``label_file_url``, ``results_path_stub``, and
+  an optional ``index_file_row`` (metadata from the source index file, may
+  be ``null``). The ``nav_backplanes_cloud_tasks`` worker accepts no other
+  task-level parameters; all other settings come from its own
+  ``--config-file``, ``--nav-results-root``, and ``--backplane-results-root``
+  CLI flags, which apply to every task the worker handles.
 
 Configuration
 -------------

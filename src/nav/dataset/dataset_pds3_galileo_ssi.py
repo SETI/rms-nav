@@ -68,6 +68,8 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
         """
 
         parts = filespec.split('/')
+        if parts[0].startswith('GO_'):
+            parts = parts[1:]
         if not (2 <= len(parts) <= 4):
             raise ValueError(
                 f'Bad Primary File Spec "{filespec}" - expected 2 to 4 directory levels'
