@@ -390,7 +390,10 @@ The reprojection pass loops over
 7. Save the ``BodyReprojResult`` / ``RingReprojResult`` to disk.
 
 The mosaic pass then iterates the same list a second time, loads each existing
-reprojection file, calls ``mosaic.add()``, and saves the final
+reprojection file, calls ``mosaic.add()`` (for body mode, passing
+``resolution_threshold``, ``copy_slop``, and the body ``--max-incidence`` /
+``--max-emission`` / ``--max-resolution`` limits explicitly so accumulation
+matches the CLI even when reprojection was skipped), and saves the final
 ``BodyMosaicData`` / ``RingMosaicData`` via ``mosaic_output_path`` (same
 ``subject_name=mosaic.body_name`` convention).
 
@@ -434,8 +437,9 @@ Display layer
      ephemeris-only options are omitted), EW-profile Matplotlib panel,
      radial-slice Matplotlib panel (right-click on mosaic), show-radii overlay,
      longitude/radius axis ticks, Prev/Next file navigation, and Save-FOV.
-     ``RingDisplayData.contributing_image_names`` feeds the cursor **Source image**
-     line for mosaics and single reprojections.
+     ``RingDisplayData.contributing_image_names`` and per-longitude observation time
+     feed the cursor **Source image** line (name and UTC time combined) for mosaics
+     and single reprojections.
 
    - ``body_window.py`` — :class:`~nav.ui.mosaic_viewer.body_window.BodyMosaicWindow`.
      Header row for latitude/longitude axis tick toggles, image area with
@@ -445,6 +449,8 @@ Display layer
      incidence, image number when present). The cursor grid includes sub-solar
      and sub-observer longitude and latitude (degrees), resolved from
      ``BodyDisplayData`` per-image arrays populated by :func:`~nav.ui.mosaic_viewer.common.load_body_file`.
+     The **Source image** line shows the contributing name (or file stem) together
+     with the pixel observation time in UTC when available.
 
 Adding a new display feature
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

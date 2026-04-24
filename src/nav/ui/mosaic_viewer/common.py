@@ -369,6 +369,8 @@ class BodyDisplayData:
         is_mosaic: True if loaded from a BodyMosaicData.
         contributing_image_names: Names in ``image_number`` order (mosaic); for reproj,
             optional single entry when ``image_name`` was stored on save.
+        observation_time_tdb: Per-pixel TDB seconds past J2000 (same shape as ``image_ma``),
+            or ``None`` if unavailable. Built from ``BodyReprojResult.time`` for reproj files.
         photometric_model_name: Model applied when the file was written, if any.
         sub_solar_lon_per_image_deg: Sub-solar longitude (deg) indexed by image number.
             Single-element for reproj; one entry per contributing image for mosaics.
@@ -399,6 +401,7 @@ class BodyDisplayData:
     is_mosaic: bool
     photometric_model_name: str | None = None
     contributing_image_names: tuple[str, ...] = ()
+    observation_time_tdb: ma.MaskedArray | None = None
     sub_solar_lon_per_image_deg: np.ndarray = field(
         default_factory=lambda: np.empty((0,), dtype=np.float64)
     )
@@ -439,6 +442,10 @@ def load_body_file(path: str) -> BodyDisplayData:
         lon_min = result.lon_idx_range[0] * result.lon_resolution * _RAD_TO_DEG
         lon_max = result.lon_idx_range[1] * result.lon_resolution * _RAD_TO_DEG
         vmin, vmax = _compute_vmin_vmax(image_ma)
+        obs_time_tdb = ma.MaskedArray(
+            np.full(image_ma.shape, float(result.time), dtype=np.float64),
+            mask=ma.getmaskarray(image_ma),
+        )
         return BodyDisplayData(
             title=title,
             image_ma=image_ma,
@@ -460,6 +467,7 @@ def load_body_file(path: str) -> BodyDisplayData:
             is_mosaic=False,
             photometric_model_name=result.photometric_model_name,
             contributing_image_names=(result.image_name,) if result.image_name else (),
+            observation_time_tdb=obs_time_tdb,
             sub_solar_lon_per_image_deg=np.array(
                 [result.sub_solar_lon * _RAD_TO_DEG], dtype=np.float64
             ),
@@ -509,6 +517,7 @@ def load_body_file(path: str) -> BodyDisplayData:
             is_mosaic=True,
             photometric_model_name=result_m.photometric_model_name,
             contributing_image_names=result_m.contributing_image_names,
+            observation_time_tdb=result_m.time,
             sub_solar_lon_per_image_deg=result_m.sub_solar_lon_per_image * _RAD_TO_DEG,
             sub_solar_lat_per_image_deg=result_m.sub_solar_lat_per_image * _RAD_TO_DEG,
             sub_observer_lon_per_image_deg=result_m.sub_observer_lon_per_image * _RAD_TO_DEG,

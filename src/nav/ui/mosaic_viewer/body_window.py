@@ -35,6 +35,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from nav.support.time import et_to_utc
 from nav.ui.common import build_stretch_controls
 from nav.ui.mosaic_viewer.common import BodyDisplayData, load_body_file
 from nav.ui.mosaic_viewer.photometric_display import compute_body_display_image
@@ -578,7 +579,7 @@ class BodyMosaicWindow(QMainWindow):
         self._info: dict[str, QLabel] = {}
         name_w = 150
         val_w_default = 132
-        val_w_image = 300
+        val_w_image = 420
         for col_idx, col in enumerate(info_columns):
             base = col_idx * 2
             for row_idx, (key, name) in enumerate(col):
@@ -1146,6 +1147,7 @@ class BodyMosaicWindow(QMainWindow):
         else:
             value_str = f'{float(raw_val):11.8f}'
 
+        time_s = '---'
         if inside:
             ph = self._fmt_ma(dd.phase, iy, ix, '%.3f')
             em = self._fmt_ma(dd.emission, iy, ix, '%.3f')
@@ -1185,6 +1187,13 @@ class BodyMosaicWindow(QMainWindow):
                 subobs_lat_s = f'{sol_arr_lat[geom_idx]:.4f}°'
             else:
                 subobs_lon_s = subobs_lat_s = '---'
+            if dd.observation_time_tdb is not None:
+                tv = dd.observation_time_tdb[iy, ix]
+                if not ma.is_masked(tv) and np.isfinite(float(tv)):
+                    try:
+                        time_s = et_to_utc(float(tv))
+                    except (ValueError, OverflowError, RuntimeError, TypeError):
+                        time_s = '---'
         else:
             ph = em = inc = res = eff = '---'
             img_s = ssl_lon_s = ssl_lat_s = subobs_lon_s = subobs_lat_s = '---'
@@ -1201,12 +1210,16 @@ class BodyMosaicWindow(QMainWindow):
         self._info['ssl_lat'].setText(ssl_lat_s)
         self._info['subobs_lon'].setText(subobs_lon_s)
         self._info['subobs_lat'].setText(subobs_lat_s)
+        if img_s != '---' and time_s != '---':
+            source_display = f'{img_s}  \N{MIDDLE DOT}  {time_s}'
+        else:
+            source_display = img_s
         img_lbl = self._info['image']
         iw = img_lbl.width()
-        if iw > 0 and img_s != '---':
+        if iw > 0 and source_display != '---':
             fm = QFontMetrics(img_lbl.font())
-            img_s = fm.elidedText(img_s, Qt.TextElideMode.ElideRight, iw)
-        img_lbl.setText(img_s)
+            source_display = fm.elidedText(source_display, Qt.TextElideMode.ElideRight, iw)
+        img_lbl.setText(source_display)
 
 
 def _nice_overlay_step(span: float, max_lines: int = 8) -> float:

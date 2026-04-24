@@ -16,7 +16,9 @@ Two-pass workflow
    skipped unless ``--overwrite`` is given.
 
 2. Mosaic pass: re-iterate the same image list, load each reprojection file
-   that exists, call ``mosaic.add()``, then save the final mosaic.
+   that exists, call ``mosaic.add()`` (body mode passes resolution merge
+   parameters and max incidence/emission/resolution from the CLI explicitly),
+   then save the final mosaic.
 
 Either pass may be skipped with ``--skip-reproject`` / ``--skip-mosaic``.
 """
@@ -24,6 +26,7 @@ Either pass may be skipped with ``--skip-reproject`` / ``--skip-mosaic``.
 import argparse
 import cProfile
 import logging
+import math
 import os
 import sys
 import time
@@ -51,7 +54,7 @@ from nav.config import (
 from nav.dataset import dataset_name_to_class, dataset_name_to_inst_name, dataset_names
 from nav.dataset.dataset import DataSet, ImageFile
 from nav.obs import ObsSnapshotInst, inst_name_to_obs_class
-from nav.reproj.bodies import BodyMosaicData, BodyReprojResult
+from nav.reproj.bodies import USE_MOSAIC_LIMITS, BodyMosaicData, BodyReprojResult
 from nav.reproj.rings import RingMosaicData, RingReprojResult
 from nav.support.file import json_as_string
 from nav.support.misc import log_run_environment
@@ -395,6 +398,21 @@ def _run_body(args: argparse.Namespace, nav_results_root_path: FCPath | None) ->
                     result,
                     resolution_threshold=float(args.resolution_threshold),
                     copy_slop=int(args.copy_slop),
+                    max_incidence=(
+                        math.radians(float(args.max_incidence))
+                        if args.max_incidence is not None
+                        else USE_MOSAIC_LIMITS
+                    ),
+                    max_emission=(
+                        math.radians(float(args.max_emission))
+                        if args.max_emission is not None
+                        else USE_MOSAIC_LIMITS
+                    ),
+                    max_resolution=(
+                        float(args.max_resolution)
+                        if args.max_resolution is not None
+                        else USE_MOSAIC_LIMITS
+                    ),
                 )
                 n_added += 1
             except Exception:

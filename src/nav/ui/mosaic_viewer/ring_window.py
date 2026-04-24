@@ -714,7 +714,6 @@ class RingMosaicWindow(QMainWindow):
             ],
             [
                 ('image', 'Source image:'),
-                ('date', 'Observation date (UTC):'),
                 ('long_ew', 'EW at longitude:'),
                 ('long_ewmu', 'EW\N{MULTIPLICATION SIGN}\N{GREEK SMALL LETTER MU} at longitude:'),
                 ('full_ew', 'Full mosaic EW:'),
@@ -726,7 +725,7 @@ class RingMosaicWindow(QMainWindow):
         # First column carries the orbit model name (e.g.
         # ``F-RING-CORE-ALBERS-2007``) which is wider than a numeric value.
         name_w = 168
-        val_w = (200, 118, 320)
+        val_w = (200, 118, 400)
         for col_idx, col in enumerate(info_columns):
             base = col_idx * 2
             for row_idx, (key, name) in enumerate(col):
@@ -1625,13 +1624,16 @@ class RingMosaicWindow(QMainWindow):
         self._info['emission'].setText(self._fmt_deg(emiss))
         self._info['rad_res'].setText(f'{rad_r} km/px' if rad_r != '---' else '---')
         self._info['long_res'].setText(f'{lng_r} deg/px' if lng_r != '---' else '---')
+        if img_name != '---' and date_str != '---':
+            source_display = f'{img_name}  \N{MIDDLE DOT}  {date_str}'
+        else:
+            source_display = img_name
         img_lbl = self._info['image']
         iw = img_lbl.width()
-        if iw > 0 and img_name != '---':
+        if iw > 0 and source_display != '---':
             fm = QFontMetrics(img_lbl.font())
-            img_name = fm.elidedText(img_name, Qt.TextElideMode.ElideRight, iw)
-        img_lbl.setText(img_name)
-        self._info['date'].setText(date_str)
+            source_display = fm.elidedText(source_display, Qt.TextElideMode.ElideRight, iw)
+        img_lbl.setText(source_display)
         self._info['long_ew'].setText(ew_str)
         self._info['long_ewmu'].setText(ewmu_str)
 

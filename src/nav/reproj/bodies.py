@@ -8,7 +8,7 @@ import enum
 import logging
 import math
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Final, Literal, cast
 
 import numpy as np
 import numpy.ma as ma
@@ -58,6 +58,22 @@ _INTEGRAL_SCALAR_TYPES = (int, np.integer)
 # reprojection. If the emission angle is too large we can't see over the crater
 # lip.
 _LAMBERT_THRESHOLD = 0.0001
+
+
+class _UseMosaicLimitsSentinel:
+    """Singleton marker for :meth:`BodyMosaic.add` max-* keyword defaults."""
+
+    __slots__ = ()
+
+    def __repr__(self) -> str:
+        return 'USE_MOSAIC_LIMITS'
+
+
+USE_MOSAIC_LIMITS: Final[_UseMosaicLimitsSentinel] = _UseMosaicLimitsSentinel()
+"""Pass to :meth:`BodyMosaic.add` for ``max_incidence`` / ``max_emission`` / ``max_resolution``.
+
+Uses the :class:`BodyMosaic` constructor limits instead of per-call overrides.
+"""
 
 
 def _create_repro_array(n_lat: int, n_lon: int, dtype: np.dtype) -> ma.MaskedArray:
@@ -1328,6 +1344,9 @@ class BodyMosaic:
         *,
         resolution_threshold: float = 1.0,
         copy_slop: int = 0,
+        max_incidence: float | None | _UseMosaicLimitsSentinel = USE_MOSAIC_LIMITS,
+        max_emission: float | None | _UseMosaicLimitsSentinel = USE_MOSAIC_LIMITS,
+        max_resolution: float | None | _UseMosaicLimitsSentinel = USE_MOSAIC_LIMITS,
     ) -> None:
         """Add a reprojected image to the mosaic.
 
@@ -1341,6 +1360,13 @@ class BodyMosaic:
                 >= 1.0 (higher = stricter).
             copy_slop: Number of additional pixels around each copied pixel to
                 also copy, reducing isolated-pixel artifacts.
+            max_incidence: Maximum incidence angle (rad) for pixels that may be
+                written. :data:`USE_MOSAIC_LIMITS` (default) uses the mosaic's
+                constructor value; an explicit ``float`` overrides for this call
+                only; ``None`` disables the incidence cutoff for this call.
+            max_emission: Same pattern for emission angle (rad).
+            max_resolution: Same pattern for center resolution in km/pixel
+                (compared to ``repro.resolution``, as in :meth:`reproject`).
 
         Raises:
             OverflowError: If the number of images added would exceed the
@@ -1430,6 +1456,45 @@ class BodyMosaic:
             )
         else:
             raise NotImplementedError(f'Unsupported merge strategy: {self._merge_strategy!r}')
+
+        eff_mi = (
+            self._max_incidence
+            if max_incidence is USE_MOSAIC_LIMITS
+            else cast(float | None, max_incidence)
+        )
+        eff_me = (
+            self._max_emission
+            if max_emission is USE_MOSAIC_LIMITS
+            else cast(float | None, max_emission)
+        )
+        eff_mr = (
+            self._max_resolution
+            if max_resolution is USE_MOSAIC_LIMITS
+            else cast(float | None, max_resolution)
+        )
+
+        n_cand = len(rows)
+        limits_ok = np.ones(n_cand, dtype=np.bool_)
+        if eff_mi is not None:
+            inc_mask = ma.getmaskarray(repro.incidence).ravel()[repro_flat]
+            inc_data = repro.incidence.data.ravel()[repro_flat]
+            bad = np.logical_or(inc_mask, ~np.isfinite(inc_data))
+            bad = np.logical_or(bad, inc_data > eff_mi)
+            limits_ok &= ~bad
+        if eff_me is not None:
+            emi_mask = ma.getmaskarray(repro.emission).ravel()[repro_flat]
+            emi_data = repro.emission.data.ravel()[repro_flat]
+            bad = np.logical_or(emi_mask, ~np.isfinite(emi_data))
+            bad = np.logical_or(bad, emi_data > eff_me)
+            limits_ok &= ~bad
+        if eff_mr is not None:
+            res_mask = ma.getmaskarray(repro.resolution).ravel()[repro_flat]
+            res_data = repro.resolution.data.ravel()[repro_flat]
+            bad = np.logical_or(res_mask, ~np.isfinite(res_data))
+            bad = np.logical_or(bad, res_data > eff_mr)
+            limits_ok &= ~bad
+
+        replace_mask = np.logical_and(replace_mask, limits_ok)
 
         if copy_slop > 0:
             # Expand the replace mask using the slop radius

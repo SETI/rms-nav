@@ -15,7 +15,12 @@ import numpy as np
 import numpy.ma as ma
 import pytest
 
-from nav.reproj.bodies import BodyMosaic, BodyMosaicData, BodyReprojResult
+from nav.reproj.bodies import (
+    USE_MOSAIC_LIMITS,
+    BodyMosaic,
+    BodyMosaicData,
+    BodyReprojResult,
+)
 from nav.ui.mosaic_viewer.common import load_body_file
 
 # Convenient resolution (rad/pixel) for tests: 0.1 rad ~ 5.7 deg
@@ -46,6 +51,8 @@ def _make_repro(
     lon_resolution: float = _LON_RES,
     time: float = 0.0,
     image_name: str = '',
+    incidence_values: float | np.ndarray | None = None,
+    emission_values: float | np.ndarray | None = None,
 ) -> BodyReprojResult:
     """Build a synthetic BodyReprojResult for use in tests.
 
@@ -64,6 +71,8 @@ def _make_repro(
         lon_resolution: Longitude bin size in radians per pixel.
         time: Scalar observation midtime (TDB seconds).
         image_name: Label carried on the synthetic reprojection result.
+        incidence_values: Incidence angle (rad) per pixel; default 0.4 scalar.
+        emission_values: Emission angle (rad) per pixel; default 0.3 scalar.
     """
     n_lat = lat_range[1] - lat_range[0] + 1
     n_lon = lon_range[1] - lon_range[0] + 1
@@ -83,6 +92,10 @@ def _make_repro(
 
     if res_values is None:
         res_values = eff_res_values
+    if incidence_values is None:
+        incidence_values = 0.4
+    if emission_values is None:
+        emission_values = 0.3
 
     return BodyReprojResult(
         body_name=body_name,
@@ -96,8 +109,8 @@ def _make_repro(
         resolution=_fill(res_values),
         eff_resolution=_fill(eff_res_values),
         phase=_fill(0.5),
-        emission=_fill(0.3),
-        incidence=_fill(0.4),
+        emission=_fill(emission_values),
+        incidence=_fill(incidence_values),
         time=time,
         photometric_model_name=None,
         image_dtype=np.dtype(np.float32),
@@ -425,6 +438,140 @@ class TestMergeStrategies:
 
 
 # =========================================================================
+# add() geometry limits (incidence / emission / resolution)
+# =========================================================================
+
+
+class TestBodyMosaicAddMaxFilters:
+    """Optional ``max_*`` on :meth:`BodyMosaic.add` vs constructor limits."""
+
+    def test_add_skips_pixels_over_class_max_incidence(self) -> None:
+        """USE_MOSAIC_LIMITS applies constructor max_incidence when adding."""
+        mosaic = BodyMosaic(
+            body_name='MIMAS',
+            lat_resolution=_LAT_RES,
+            lon_resolution=_LON_RES,
+            max_incidence=0.5,
+        )
+        repro = _make_repro(
+            lat_range=(5, 5),
+            lon_range=(10, 10),
+            img_values=9.0,
+            eff_res_values=0.1,
+            incidence_values=1.2,
+        )
+        mosaic.add(repro)
+        assert mosaic.bounds is None
+
+    def test_add_max_incidence_override_stricter(self) -> None:
+        """Explicit ``max_incidence`` on add can be stricter than the mosaic default."""
+        mosaic = BodyMosaic(
+            body_name='MIMAS',
+            lat_resolution=_LAT_RES,
+            lon_resolution=_LON_RES,
+            max_incidence=2.0,
+        )
+        repro = _make_repro(
+            lat_range=(5, 5),
+            lon_range=(10, 10),
+            img_values=9.0,
+            eff_res_values=0.1,
+            incidence_values=1.0,
+        )
+        mosaic.add(repro, max_incidence=0.5)
+        assert mosaic.bounds is None
+
+    def test_add_max_incidence_none_disables_for_call(self) -> None:
+        """``max_incidence=None`` on add disables the cutoff for that call."""
+        mosaic = BodyMosaic(
+            body_name='MIMAS',
+            lat_resolution=_LAT_RES,
+            lon_resolution=_LON_RES,
+            max_incidence=0.2,
+        )
+        repro = _make_repro(
+            lat_range=(5, 5),
+            lon_range=(10, 10),
+            img_values=9.0,
+            eff_res_values=0.1,
+            incidence_values=1.0,
+        )
+        mosaic.add(repro, max_incidence=None)
+        data = mosaic.to_bounded()
+        assert not ma.getmaskarray(data.img)[0, 0]
+        assert pytest.approx(float(data.img.data[0, 0])) == 9.0
+
+    def test_add_max_resolution_filters(self) -> None:
+        """``max_resolution`` on add rejects pixels with coarser km/pixel."""
+        mosaic = BodyMosaic(
+            body_name='MIMAS',
+            lat_resolution=_LAT_RES,
+            lon_resolution=_LON_RES,
+        )
+        repro = _make_repro(
+            lat_range=(5, 5),
+            lon_range=(10, 10),
+            img_values=3.0,
+            eff_res_values=0.1,
+            res_values=10.0,
+        )
+        mosaic.add(repro, max_resolution=5.0)
+        assert mosaic.bounds is None
+
+    def test_add_max_emission_override(self) -> None:
+        """Explicit ``max_emission`` on add filters emission angle."""
+        mosaic = BodyMosaic(
+            body_name='MIMAS',
+            lat_resolution=_LAT_RES,
+            lon_resolution=_LON_RES,
+        )
+        repro = _make_repro(
+            lat_range=(5, 5),
+            lon_range=(10, 10),
+            img_values=2.0,
+            eff_res_values=0.1,
+            emission_values=1.0,
+        )
+        mosaic.add(repro, max_emission=0.2)
+        assert mosaic.bounds is None
+
+    def test_explicit_use_mosaic_limits_matches_omitted(self) -> None:
+        """``max_incidence=USE_MOSAIC_LIMITS`` matches the default keyword behavior."""
+        repro = _make_repro(
+            lat_range=(5, 5),
+            lon_range=(10, 10),
+            img_values=4.0,
+            eff_res_values=0.1,
+            incidence_values=1.0,
+        )
+        m_default = BodyMosaic(
+            body_name='MIMAS',
+            lat_resolution=_LAT_RES,
+            lon_resolution=_LON_RES,
+            max_incidence=0.5,
+        )
+        m_explicit = BodyMosaic(
+            body_name='MIMAS',
+            lat_resolution=_LAT_RES,
+            lon_resolution=_LON_RES,
+            max_incidence=0.5,
+        )
+        m_default.add(repro)
+        m_explicit.add(
+            _make_repro(
+                lat_range=(5, 5),
+                lon_range=(10, 10),
+                img_values=4.0,
+                eff_res_values=0.1,
+                incidence_values=1.0,
+            ),
+            max_incidence=USE_MOSAIC_LIMITS,
+        )
+        assert m_default.bounds is None
+        assert m_explicit.bounds is None
+
+
+# =========================================================================
 # Dynamic expansion tests
 # =========================================================================
 
@@ -690,6 +837,8 @@ class TestContributingImageNamesBodies:
         dd = load_body_file(str(path))
         assert dd.is_mosaic is True
         assert dd.contributing_image_names == ('mimas_obs',)
+        assert dd.observation_time_tdb is not None
+        assert dd.observation_time_tdb.shape == dd.image_ma.shape
 
     def test_load_body_file_reproj_result_extent(self, tmp_path: Path) -> None:
         """BodyReprojResult FITS round-trip: idx ranges map to physical lat/lon in deg."""
@@ -708,6 +857,8 @@ class TestContributingImageNamesBodies:
         dd = load_body_file(str(path))
         assert dd.is_mosaic is False
         assert dd.contributing_image_names == ('x',)
+        assert dd.observation_time_tdb is not None
+        assert dd.observation_time_tdb.shape == dd.image_ma.shape
         exp_lat_min_deg = (lat_bins[0] * _LAT_RES - math.pi / 2.0) * rad_to_deg
         exp_lat_max_deg = (lat_bins[1] * _LAT_RES - math.pi / 2.0) * rad_to_deg
         exp_lon_min_deg = lon_bins[0] * _LON_RES * rad_to_deg

@@ -15,10 +15,14 @@ nav_mosaic_display_body  [options] FILE [FILE ...]
 Multiple files are browsed one at a time with Prev/Next or by choosing a
 file in the sidebar list (hover for the full path).
 Accepts local paths, ``file://`` URLs, and ``gs://`` paths via FileCache.
+
+Ctrl+C sends SIGINT, which is handled so the process exits via the Qt event loop
+instead of aborting (which could previously core-dump on some platforms).
 """
 
 import argparse
 import os
+import signal
 import sys
 
 # Allow running directly from the source tree:
@@ -26,12 +30,37 @@ import sys
 package_source_path = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, package_source_path)
 
+from PyQt6.QtCore import QCoreApplication, QTimer
 from PyQt6.QtWidgets import QApplication
 
 from nav.ui.mosaic_viewer.body_window import BodyMosaicWindow
 from nav.ui.mosaic_viewer.projections import ProjectionKind
 from nav.ui.mosaic_viewer.ring_window import RingMosaicWindow
 from reproj_cli.args import add_display_args
+
+
+def _run_qt_event_loop(app: QCoreApplication) -> int:
+    """Run ``app.exec()`` with SIGINT wired to a clean quit.
+
+    Without this, Ctrl+C during ``exec()`` often lets the default SIGINT handler
+    race the Qt event loop and can abort with a core dump on Linux. A periodic
+    no-op timer yields to Python so the installed handler runs and calls
+    ``app.quit()`` instead of raising inside native Qt code.
+    """
+    previous = signal.getsignal(signal.SIGINT)
+
+    def _sigint_handler(_signum: int, _frame: object | None) -> None:
+        app.quit()
+
+    signal.signal(signal.SIGINT, _sigint_handler)
+    poll = QTimer(app)
+    poll.timeout.connect(lambda: None)
+    poll.start(200)
+    try:
+        return int(app.exec())
+    finally:
+        signal.signal(signal.SIGINT, previous)
+
 
 _PROJ_CHOICES = {
     'rect': ProjectionKind.RECT,
@@ -101,8 +130,8 @@ def _run_rings(args: argparse.Namespace) -> None:
     Ensures a :class:`~PyQt6.QtWidgets.QApplication` exists, constructs the
     window from ``args.files`` and stretch settings ``args.stretch_black`` /
     ``args.stretch_white`` / ``args.stretch_gamma``, enables radius and
-    longitude axis ticks, shows the window, and calls ``sys.exit(app.exec())``
-    (does not return under normal operation).
+    longitude axis ticks, shows the window, and calls ``sys.exit`` with the
+    return code from :func:`_run_qt_event_loop` (does not return under normal operation).
 
     Parameters:
         args: Namespace produced by :func:`_build_parser` with ``mode='rings'``.
@@ -117,7 +146,7 @@ def _run_rings(args: argparse.Namespace) -> None:
         show_radius_ticks=True,
     )
     win.show()
-    sys.exit(app.exec())
+    sys.exit(_run_qt_event_loop(app))
 
 
 def _run_body(args: argparse.Namespace) -> None:
@@ -126,7 +155,7 @@ def _run_body(args: argparse.Namespace) -> None:
     Same application bootstrap as :func:`_run_rings`. Maps ``args.projection``
     through :data:`_PROJ_CHOICES` (body mode always defines ``--projection``),
     passes parallel/meridian tick flags and stretch fields from ``args``, then
-    ``sys.exit(app.exec())``.
+    ``sys.exit`` with the code from :func:`_run_qt_event_loop`.
 
     Parameters:
         args: Namespace from :func:`_build_parser` with ``mode='body'``.
@@ -145,7 +174,7 @@ def _run_body(args: argparse.Namespace) -> None:
         initial_projection=proj_kind,
     )
     win.show()
-    sys.exit(app.exec())
+    sys.exit(_run_qt_event_loop(app))
 
 
 def main() -> None:

@@ -110,6 +110,29 @@ Pixel conflict resolution
 filled unconditionally and existing data is replaced only when the new
 observation has strictly better effective resolution (lower km/pixel).
 
+Geometry limits when adding
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+:meth:`~nav.reproj.bodies.BodyMosaic.reproject` applies ``max_incidence``,
+``max_emission``, and ``max_resolution`` from the mosaic constructor so saved
+per-image products stay within those bounds. :meth:`~nav.reproj.bodies.BodyMosaic.add`
+can apply the **same** limits again when merging saved
+:class:`~nav.reproj.bodies.BodyReprojResult` objects (for example after
+``--skip-reproject``), and can optionally **override** them per call.
+
+Keyword-only arguments ``max_incidence``, ``max_emission``, and ``max_resolution``
+default to :data:`~nav.reproj.USE_MOSAIC_LIMITS`, meaning each limit matches the
+value given when the ``BodyMosaic`` was constructed. Pass a numeric value in
+**radians** (incidence/emission) or **km/pixel** (resolution) to use a
+different cutoff for that ``add()`` only; pass ``None`` to disable that cutoff
+for that call (pixels are still constrained by the merge strategy and valid
+``repro.img`` mask).
+
+The ``nav_mosaic body`` CLI always passes these three arguments explicitly,
+using the same ``--max-incidence``, ``--max-emission``, and ``--max-resolution``
+values as for reprojection (degrees / km/pixel on the CLI; incidence and
+emission are converted to radians before ``add()``).
+
 Longitude wraparound
 ^^^^^^^^^^^^^^^^^^^^
 

@@ -8,6 +8,7 @@ body mosaic back onto image coordinates for navigation correlation.
 
 Public API:
 
+    USE_MOSAIC_LIMITS            -- sentinel for :meth:`BodyMosaic.add` max-* defaults
     BodyMosaic                   -- accumulates body reprojections onto lat/lon grids
     BodyMosaicMergeStrategy      -- enum controlling how BodyMosaic conflicts are resolved
     BodyReprojResult             -- data returned by BodyMosaic.reproject()
@@ -27,7 +28,13 @@ Public API:
     BRING_OUTER_EDGE             -- pre-defined B ring outer edge orbit model
 """
 
-from nav.reproj.bodies import BodyMosaic, BodyMosaicData, BodyMosaicMergeStrategy, BodyReprojResult
+from nav.reproj.bodies import (
+    USE_MOSAIC_LIMITS,
+    BodyMosaic,
+    BodyMosaicData,
+    BodyMosaicMergeStrategy,
+    BodyReprojResult,
+)
 from nav.reproj.cartographic_model import CartographicModelResult, create_cartographic_model
 from nav.reproj.photometric_model import (
     LambertModel,
@@ -46,6 +53,7 @@ from nav.reproj.rings import RingMosaic, RingMosaicData, RingMosaicMergeStrategy
 __all__ = [
     'BRING_OUTER_EDGE',
     'FRING_CORE',
+    'USE_MOSAIC_LIMITS',
     'BodyMosaic',
     'BodyMosaicData',
     'BodyMosaicMergeStrategy',
