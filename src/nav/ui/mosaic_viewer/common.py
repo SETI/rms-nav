@@ -228,7 +228,9 @@ def load_ring_file(path: str) -> RingDisplayData:
         image_ma = result.img  # (n_radius, n_valid_lon)
         lon_res_deg = result.longitude_resolution * _RAD_TO_DEG
         rad_res_km = result.radius_resolution
-        orbit_model_name = result.orbit_model.name if result.orbit_model else None
+        orbit_model_name = (
+            result.orbit_model.name if result.orbit_model is not None else None
+        )
         orbit_model: RingOrbitModel | None = result.orbit_model
         n_radii, n_lon = image_ma.shape
         # Build 1-D per-column metadata masked arrays (same length as sparse img cols)
@@ -286,7 +288,12 @@ def load_ring_file(path: str) -> RingDisplayData:
         lon_res_deg = result_m.longitude_resolution * _RAD_TO_DEG
         rad_res_km = result_m.radius_resolution
         orbit_model_name = result_m.orbit_model_name
-        orbit_model = get_orbit_model_by_name(orbit_model_name) if orbit_model_name else None
+        if orbit_model_name is None:
+            orbit_model = None
+        elif not orbit_model_name.strip():
+            orbit_model = None
+        else:
+            orbit_model = get_orbit_model_by_name(orbit_model_name)
         n_radii, n_lon = image_ma.shape
         mrr = result_m.mean_radial_resolution
         mar = ma.MaskedArray(result_m.mean_angular_resolution * _RAD_TO_DEG)
@@ -430,11 +437,11 @@ def load_body_file(path: str) -> BodyDisplayData:
         image_ma = result.img
         lat_res_deg = result.lat_resolution * _RAD_TO_DEG
         lon_res_deg = result.lon_resolution * _RAD_TO_DEG
-        # Reconstruct spatial extent from idx_range
-        lat_min = result.lat_idx_range[0] * result.lat_resolution * _RAD_TO_DEG
-        lat_max = (result.lat_idx_range[1]) * result.lat_resolution * _RAD_TO_DEG
+        # Reconstruct spatial extent from idx_range (same convention as ``BodyMosaic.bounds``).
+        lat_min = (result.lat_idx_range[0] * result.lat_resolution - math.pi / 2.0) * _RAD_TO_DEG
+        lat_max = (result.lat_idx_range[1] * result.lat_resolution - math.pi / 2.0) * _RAD_TO_DEG
         lon_min = result.lon_idx_range[0] * result.lon_resolution * _RAD_TO_DEG
-        lon_max = (result.lon_idx_range[1]) * result.lon_resolution * _RAD_TO_DEG
+        lon_max = result.lon_idx_range[1] * result.lon_resolution * _RAD_TO_DEG
         vmin, vmax = _compute_vmin_vmax(image_ma)
         return BodyDisplayData(
             title=title,

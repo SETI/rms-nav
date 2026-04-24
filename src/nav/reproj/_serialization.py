@@ -310,50 +310,49 @@ def load_npz(
     """
     fcpath = _as_fcpath(path)
     local_path = cast(Path, fcpath.get_local_path())
-    raw = np.load(local_path, allow_pickle=False)
+    with np.load(local_path, allow_pickle=False) as raw:
+        kind = str(raw['__kind__'])
+        if kind != expected_kind:
+            raise ValueError(f'Kind mismatch: file contains {kind!r}, expected {expected_kind!r}')
 
-    kind = str(raw['__kind__'])
-    if kind != expected_kind:
-        raise ValueError(f'Kind mismatch: file contains {kind!r}, expected {expected_kind!r}')
+        version = int(raw['__version__'])
+        _ = version  # retained for future schema migration
 
-    version = int(raw['__version__'])
-    _ = version  # retained for future schema migration
+        # Collect all keys; reconstruct MaskedArrays and None sentinels
+        result: dict[str, Any] = {}
+        keys = set(raw.files)
+        keys.discard('__kind__')
+        keys.discard('__version__')
 
-    # Collect all keys; reconstruct MaskedArrays and None sentinels
-    result: dict[str, Any] = {}
-    keys = set(raw.files)
-    keys.discard('__kind__')
-    keys.discard('__version__')
+        # First pass: identify MA pairs and None sentinels
+        data_keys = {k[:-6] for k in keys if k.endswith('__data')}
+        mask_keys = {k[:-6] for k in keys if k.endswith('__mask')}
+        none_keys = {k[:-6] for k in keys if k.endswith('__none')}
+        ma_keys = data_keys & mask_keys
 
-    # First pass: identify MA pairs and None sentinels
-    data_keys = {k[:-6] for k in keys if k.endswith('__data')}
-    mask_keys = {k[:-6] for k in keys if k.endswith('__mask')}
-    none_keys = {k[:-6] for k in keys if k.endswith('__none')}
-    ma_keys = data_keys & mask_keys
+        handled: set[str] = set()
+        for base in ma_keys:
+            result[base] = ma.MaskedArray(
+                np.array(raw[base + '__data']),
+                mask=np.array(raw[base + '__mask']),
+            )
+            handled.add(base + '__data')
+            handled.add(base + '__mask')
 
-    handled: set[str] = set()
-    for base in ma_keys:
-        result[base] = ma.MaskedArray(
-            np.array(raw[base + '__data']),
-            mask=np.array(raw[base + '__mask']),
-        )
-        handled.add(base + '__data')
-        handled.add(base + '__mask')
+        for base in none_keys:
+            result[base] = None
+            handled.add(base + '__none')
 
-    for base in none_keys:
-        result[base] = None
-        handled.add(base + '__none')
+        for k in keys - handled:
+            arr = raw[k]
+            if arr.ndim == 0:
+                # Unwrap scalars: unicode → str, others → Python scalar
+                v = arr.item()
+                result[k] = v
+            else:
+                result[k] = np.array(arr)
 
-    for k in keys - handled:
-        arr = raw[k]
-        if arr.ndim == 0:
-            # Unwrap scalars: unicode → str, others → Python scalar
-            v = arr.item()
-            result[k] = v
-        else:
-            result[k] = np.array(arr)
-
-    return result
+        return result
 
 
 # ---------------------------------------------------------------------------

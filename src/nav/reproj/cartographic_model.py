@@ -29,14 +29,11 @@ _LOGGING_NAME = __name__
 class CartographicModelResult:
     """Result returned by create_cartographic_model().
 
-    Attributes:
-        model_img: Model image in observation pixel coordinates [v, u].
-            Pixels outside the mosaic coverage or where the body is not
-            visible on the surface have value 0.0.
-        resolution_ratio: Ratio of the median mosaic effective resolution
-            to the image center resolution (both in km/pixel). A value of
-            1.0 means equal resolution; values greater than 1.0 indicate
-            the mosaic is coarser (blurrier) than the image.
+    This is a :func:`dataclasses.dataclass`; ``model_img`` is the model image in
+    observation pixel coordinates ``[v, u]`` (0.0 outside mosaic coverage or
+    where the body is not visible), and ``resolution_ratio`` is the ratio of the
+    median mosaic effective resolution to the image-center resolution (both
+    km/pixel; 1.0 means equal, greater than 1.0 means the mosaic is coarser).
     """
 
     model_img: NDArrayFloatType
@@ -131,7 +128,10 @@ def create_cartographic_model(
     mosaic_fill = np.where(~mosaic_mask, mosaic_data.img.data, 0.0).astype(np.float64)
 
     # Bilinear interpolation of the mosaic at each image pixel's coordinates.
-    coords = np.array([row_coords.ravel(), col_coords.ravel()])
+    # map_coordinates must not see NaNs from masked lat/lon; fill masked entries.
+    row_samp = np.asarray(ma.filled(row_coords, 0.0), dtype=np.float64)
+    col_samp = np.asarray(ma.filled(col_coords, 0.0), dtype=np.float64)
+    coords = np.array([row_samp.ravel(), col_samp.ravel()])
     sampled = map_coordinates(mosaic_fill, coords, order=1, mode='constant', cval=0.0)
     model_img = sampled.reshape(n_v, n_u).astype(np.float32)
     model_img[~in_bounds] = 0.0

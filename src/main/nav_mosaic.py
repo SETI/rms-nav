@@ -28,6 +28,7 @@ import os
 import sys
 import time
 import traceback
+from collections.abc import Callable
 from datetime import datetime
 from typing import cast
 
@@ -92,6 +93,89 @@ def _log_main_exception(msg: str, *args: object) -> None:
     ``more=`` and disable the default partial stack to avoid duplicating frames.
     """
     MAIN_LOGGER.exception(msg, *args, stacktrace=False, more=traceback.format_exc())
+
+
+def _run_reproject_pass(
+    *,
+    args: argparse.Namespace,
+    nav_results_root_path: FCPath | None,
+    output_dir: FCPath,
+    prefix: str,
+    fmt: str,
+    subject_name: str,
+    obs_class: type[ObsSnapshotInst],
+    reproject_fn: Callable[[ObsSnapshotInst, str], BodyReprojResult | RingReprojResult],
+) -> tuple[int, int]:
+    """Reproject each selected image: path checks, per-image logs, offset, save.
+
+    Parameters:
+        args: Parsed CLI namespace.
+        nav_results_root_path: Optional root for ``nav_offset`` metadata (offsets).
+        output_dir: Mosaic / per-image output directory.
+        prefix: Output filename prefix.
+        fmt: Output format (``fits`` or ``npz``).
+        subject_name: Body or planet segment for :func:`per_image_output_path`.
+        obs_class: Observation class for :meth:`~nav.obs.ObsSnapshotInst.from_file`.
+        reproject_fn: Callable taking ``(obs, image_name)`` and returning a
+            reprojection result with ``save()``.
+
+    Returns:
+        ``(n_done, n_skipped)`` counts for the pass (dry-run does not increment
+        ``n_done``; skipped-existing increments ``n_skipped``).
+    """
+    assert DATASET is not None
+    n_done = 0
+    n_skipped = 0
+    for imagefiles in DATASET.yield_image_files_from_arguments(args):
+        image_file = imagefiles.image_files[0]
+        out_path = per_image_output_path(
+            output_dir, prefix, image_file, fmt, subject_name=subject_name
+        )
+
+        if not args.overwrite and out_path.exists():
+            MAIN_LOGGER.debug('Skipping (exists): %s', out_path)
+            n_skipped += 1
+            continue
+
+        if args.dry_run:
+            MAIN_LOGGER.info(
+                '[dry-run] Would reproject %s -> %s', image_file.image_file_url, out_path
+            )
+            continue
+
+        local_handlers, image_log_path = _reproject_image_log_handlers(output_dir, image_file, args)
+        with IMAGE_LOGGER.open(
+            f'REPROJECT {image_file.image_file_url}',
+            handler=local_handlers,
+        ):
+            try:
+                image_path = image_file.image_file_path.absolute()
+                obs = obs_class.from_file(image_path, extfov_margin_vu=(0, 0))
+
+                offset = load_offset_if_any(nav_results_root_path, image_file)
+                if offset is not None:
+                    apply_offset_to_obs(cast(ObsSnapshotInst, obs), offset[0], offset[1])
+
+                img_label = (
+                    args.image_name
+                    if args.image_name is not None
+                    else image_file.image_file_path.stem
+                )
+                obs_inst = cast(ObsSnapshotInst, obs)
+                result = reproject_fn(obs_inst, img_label)
+
+                if not args.no_write_output_files:
+                    out_path.parent.mkdir(parents=True, exist_ok=True)
+                    result.save(out_path)
+                    MAIN_LOGGER.info('Saved reproj: %s', out_path)
+                n_done += 1
+            except Exception:
+                _log_main_exception('Error reprojecting %s', image_file.image_file_url)
+            finally:
+                if local_handlers:
+                    MAIN_LOGGER.info('Wrote reprojection log to %s', image_log_path)
+
+    return n_done, n_skipped
 
 
 DATASET: DataSet | None = None
@@ -181,61 +265,18 @@ def _run_body(args: argparse.Namespace, nav_results_root_path: FCPath | None) ->
     # ---- Pass 1: reprojection ------------------------------------------------
     if not args.skip_reproject:
         MAIN_LOGGER.info('=== Reprojection pass (body=%s) ===', mosaic.body_name)
-        n_done = 0
-        n_skipped = 0
-        for imagefiles in DATASET.yield_image_files_from_arguments(args):
-            image_file = imagefiles.image_files[0]
-            out_path = per_image_output_path(
-                output_dir, prefix, image_file, fmt, subject_name=mosaic.body_name
-            )
-
-            if not args.overwrite and out_path.exists():
-                MAIN_LOGGER.debug('Skipping (exists): %s', out_path)
-                n_skipped += 1
-                continue
-
-            if args.dry_run:
-                MAIN_LOGGER.info(
-                    '[dry-run] Would reproject %s -> %s', image_file.image_file_url, out_path
-                )
-                continue
-
-            local_handlers, image_log_path = _reproject_image_log_handlers(
-                output_dir, image_file, args
-            )
-            with IMAGE_LOGGER.open(
-                f'REPROJECT {image_file.image_file_url}',
-                handler=local_handlers,
-            ):
-                try:
-                    image_path = image_file.image_file_path.absolute()
-                    obs = obs_class.from_file(image_path, extfov_margin_vu=(0, 0))
-
-                    # Apply navigation offset if available
-                    offset = load_offset_if_any(nav_results_root_path, image_file)
-                    if offset is not None:
-                        apply_offset_to_obs(cast(ObsSnapshotInst, obs), offset[0], offset[1])
-
-                    img_label = (
-                        args.image_name
-                        if args.image_name is not None
-                        else image_file.image_file_path.stem
-                    )
-                    result = reproject_one_body(
-                        cast(ObsSnapshotInst, obs), mosaic, image_name=img_label
-                    )
-
-                    if not args.no_write_output_files:
-                        out_path.parent.mkdir(parents=True, exist_ok=True)
-                        result.save(out_path)
-                        MAIN_LOGGER.info('Saved reproj: %s', out_path)
-                    n_done += 1
-                except Exception:
-                    _log_main_exception('Error reprojecting %s', image_file.image_file_url)
-                finally:
-                    if local_handlers:
-                        MAIN_LOGGER.info('Wrote reprojection log to %s', image_log_path)
-
+        n_done, n_skipped = _run_reproject_pass(
+            args=args,
+            nav_results_root_path=nav_results_root_path,
+            output_dir=output_dir,
+            prefix=prefix,
+            fmt=fmt,
+            subject_name=mosaic.body_name,
+            obs_class=obs_class,
+            reproject_fn=lambda obs, image_name: reproject_one_body(
+                obs, mosaic, image_name=image_name
+            ),
+        )
         MAIN_LOGGER.info('Reprojection pass complete: %d done, %d skipped.', n_done, n_skipped)
 
     # ---- Pass 2: mosaic ------------------------------------------------------
@@ -299,60 +340,18 @@ def _run_rings(args: argparse.Namespace, nav_results_root_path: FCPath | None) -
     # ---- Pass 1: reprojection ------------------------------------------------
     if not args.skip_reproject:
         MAIN_LOGGER.info('=== Reprojection pass (rings, planet=%s) ===', mosaic.body_name)
-        n_done = 0
-        n_skipped = 0
-        for imagefiles in DATASET.yield_image_files_from_arguments(args):
-            image_file = imagefiles.image_files[0]
-            out_path = per_image_output_path(
-                output_dir, prefix, image_file, fmt, subject_name=mosaic.body_name
-            )
-
-            if not args.overwrite and out_path.exists():
-                MAIN_LOGGER.debug('Skipping (exists): %s', out_path)
-                n_skipped += 1
-                continue
-
-            if args.dry_run:
-                MAIN_LOGGER.info(
-                    '[dry-run] Would reproject %s -> %s', image_file.image_file_url, out_path
-                )
-                continue
-
-            local_handlers, image_log_path = _reproject_image_log_handlers(
-                output_dir, image_file, args
-            )
-            with IMAGE_LOGGER.open(
-                f'REPROJECT {image_file.image_file_url}',
-                handler=local_handlers,
-            ):
-                try:
-                    image_path = image_file.image_file_path.absolute()
-                    obs = obs_class.from_file(image_path, extfov_margin_vu=(0, 0))
-
-                    offset = load_offset_if_any(nav_results_root_path, image_file)
-                    if offset is not None:
-                        apply_offset_to_obs(cast(ObsSnapshotInst, obs), offset[0], offset[1])
-
-                    img_label = (
-                        args.image_name
-                        if args.image_name is not None
-                        else image_file.image_file_path.stem
-                    )
-                    result = reproject_one_ring(
-                        cast(ObsSnapshotInst, obs), args, mosaic, image_name=img_label
-                    )
-
-                    if not args.no_write_output_files:
-                        out_path.parent.mkdir(parents=True, exist_ok=True)
-                        result.save(out_path)
-                        MAIN_LOGGER.info('Saved reproj: %s', out_path)
-                    n_done += 1
-                except Exception:
-                    _log_main_exception('Error reprojecting %s', image_file.image_file_url)
-                finally:
-                    if local_handlers:
-                        MAIN_LOGGER.info('Wrote reprojection log to %s', image_log_path)
-
+        n_done, n_skipped = _run_reproject_pass(
+            args=args,
+            nav_results_root_path=nav_results_root_path,
+            output_dir=output_dir,
+            prefix=prefix,
+            fmt=fmt,
+            subject_name=mosaic.body_name,
+            obs_class=obs_class,
+            reproject_fn=lambda obs, image_name: reproject_one_ring(
+                obs, args, mosaic, image_name=image_name
+            ),
+        )
         MAIN_LOGGER.info('Reprojection pass complete: %d done, %d skipped.', n_done, n_skipped)
 
     # ---- Pass 2: mosaic ------------------------------------------------------

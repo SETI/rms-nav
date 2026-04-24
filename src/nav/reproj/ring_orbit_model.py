@@ -28,23 +28,20 @@ def _utc2et(s: str) -> float:
 class RingOrbitModel:
     """Keplerian orbit model for a ring feature with apsidal precession.
 
-    All angular parameters are in radians. Rate parameters (dw, mean_motion)
-    are in radians per day; they are converted to per-second internally when
-    needed.
+    All angular parameters are in radians. Rate parameters (``dw``,
+    ``mean_motion``) are in radians per day; they are converted to per-second
+    internally when needed.
 
-    Attributes:
-        name: Human-readable name identifying this ring/model.
-        a: Semi-major axis in km. Must be positive.
-        e: Orbital eccentricity. Must be in [0, 1).
-        w0: Longitude of pericenter at J2000 (rad). The pericenter direction
-            at observation time ``et`` is ``w0 + dw * et / 86400`` (with
-            ``et`` in TDB seconds). Note this is at J2000, not at
-            ``epoch_utc``: the two epochs are independent, with
-            ``epoch_utc`` anchoring only the co-rotating mean-motion frame.
-        dw: Apsidal precession rate (rad/day), integrated from J2000.
-        mean_motion: Mean motion (rad/day) used for the co-rotating frame.
-        epoch_utc: Epoch for the co-rotating frame, as an ISO UTC string.
-            Independent from the apsidal precession reference (J2000).
+    ``a`` (km) is the semi-major axis (positive). ``e`` is eccentricity in
+    ``[0, 1)``. ``w0`` is the longitude of pericenter at J2000 (rad); at
+    observation time ``et`` (TDB seconds) the pericenter direction is
+    ``w0 + dw * et / 86400``. ``dw`` is apsidal precession (rad/day) from J2000.
+    ``mean_motion`` (rad/day) drives the co-rotating frame. ``epoch_utc`` is an
+    ISO UTC string anchoring that frame, independent of the J2000 apsidal
+    reference.
+
+    This is a :func:`dataclasses.dataclass`; fields are documented on each member
+    below.
     """
 
     name: str
@@ -105,8 +102,7 @@ class RingOrbitModel:
         Returns:
             Longitude shift in radians (wrapped to [0, 2*pi)).
         """
-        # Explicit parentheses to clarify precedence: negate, then mod.
-        # TODO: Verify sign convention matches original project intent.
+        # Explicit parentheses: negate mean-motion × elapsed days, then mod.
         return (-(self.mean_motion * ((et - self._epoch_et) / _SECONDS_PER_DAY))) % (2.0 * math.pi)
 
     def inertial_to_corotating(self, longitude: NDArrayFloatType, et: float) -> NDArrayFloatType:

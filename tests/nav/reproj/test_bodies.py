@@ -22,8 +22,8 @@ from nav.ui.mosaic_viewer.common import load_body_file
 _LAT_RES = 0.1  # rad/pixel
 _LON_RES = 0.1  # rad/pixel
 
-_N_FULL_LAT = int(math.pi / _LAT_RES)  # 31 for 0.1 rad
-_N_FULL_LON = int(2.0 * math.pi / _LON_RES)  # 62 for 0.1 rad
+_N_FULL_LAT = int(math.floor(math.pi / _LAT_RES)) + 1  # 32 for 0.1 rad
+_N_FULL_LON = int(math.floor(2.0 * math.pi / _LON_RES)) + 1  # 63 for 0.1 rad
 
 
 # =========================================================================
@@ -531,7 +531,7 @@ class TestLongitudeWraparound:
             body_name='MIMAS', lat_resolution=_LAT_RES, lon_resolution=_LON_RES, dynamic=True
         )
         # Add data near the end of the circle (last few bins)
-        last_bins = _N_FULL_LON - 3  # e.g. 59 for N=62
+        last_bins = _N_FULL_LON - 3  # e.g. 60 for N=63
         mosaic.add(
             _make_repro(
                 lat_range=(5, 5),
@@ -581,7 +581,7 @@ class TestLongitudeWraparound:
         mosaic = BodyMosaic(
             body_name='MIMAS', lat_resolution=_LAT_RES, lon_resolution=_LON_RES, dynamic=True
         )
-        last_bins = _N_FULL_LON - 2  # bins at 60, 61
+        last_bins = _N_FULL_LON - 2  # bins at 61, 62 when N=63
         mosaic.add(
             _make_repro(
                 lat_range=(5, 5),
@@ -690,3 +690,29 @@ class TestContributingImageNamesBodies:
         dd = load_body_file(str(path))
         assert dd.is_mosaic is True
         assert dd.contributing_image_names == ('mimas_obs',)
+
+    def test_load_body_file_reproj_result_extent(self, tmp_path: Path) -> None:
+        """BodyReprojResult FITS round-trip: idx ranges map to physical lat/lon in deg."""
+        rad_to_deg = 180.0 / math.pi
+        lat_bins = (5, 7)
+        lon_bins = (10, 12)
+        repro = _make_repro(
+            lat_range=lat_bins,
+            lon_range=lon_bins,
+            image_name='x',
+            lat_resolution=_LAT_RES,
+            lon_resolution=_LON_RES,
+        )
+        path = tmp_path / 'body_reproj.fits'
+        repro.save(path, format='fits')
+        dd = load_body_file(str(path))
+        assert dd.is_mosaic is False
+        assert dd.contributing_image_names == ('x',)
+        exp_lat_min_deg = (lat_bins[0] * _LAT_RES - math.pi / 2.0) * rad_to_deg
+        exp_lat_max_deg = (lat_bins[1] * _LAT_RES - math.pi / 2.0) * rad_to_deg
+        exp_lon_min_deg = lon_bins[0] * _LON_RES * rad_to_deg
+        exp_lon_max_deg = lon_bins[1] * _LON_RES * rad_to_deg
+        assert dd.lat_range_deg[0] == pytest.approx(exp_lat_min_deg)
+        assert dd.lat_range_deg[1] == pytest.approx(exp_lat_max_deg)
+        assert dd.lon_range_deg[0] == pytest.approx(exp_lon_min_deg)
+        assert dd.lon_range_deg[1] == pytest.approx(exp_lon_max_deg)

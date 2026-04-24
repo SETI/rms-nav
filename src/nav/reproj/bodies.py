@@ -79,31 +79,8 @@ class BodyMosaicMergeStrategy(enum.Enum):
 class BodyReprojResult:
     """Data returned by BodyMosaic.reproject().
 
-    Attributes:
-        body_name: The name of the body.
-        img: Reprojected image [latitude, longitude].
-        lat_resolution: Latitude resolution (rad/pixel).
-        lon_resolution: Longitude resolution (rad/pixel).
-        lat_idx_range: (min, max) latitude bin indices in the full grid.
-        lon_idx_range: (min, max) longitude bin indices in the full grid.
-        latlon_type: Latitude/longitude coordinate system type ('centric',
-            'graphic', 'squashed').
-        lon_direction: Longitude direction convention ('east', 'west').
-        resolution: Radial resolution (km/pixel) at each pixel.
-        eff_resolution: Effective resolution (km/pixel), includes nav error.
-        phase: Phase angle (rad) at each pixel.
-        emission: Emission angle (rad) at each pixel.
-        incidence: Incidence angle (rad) at each pixel.
-        time: Midtime of the observation (TDB seconds).
-        photometric_model_name: Name of the photometric model applied, or None.
-        image_dtype: NumPy dtype used for the ``img`` array.
-        metadata_dtype: NumPy dtype used for geometry arrays (``resolution``,
-            ``eff_resolution``, ``phase``, ``emission``, ``incidence``).
-        image_name: Label for this reprojection (e.g. source image stem); may be empty.
-        sub_solar_lon: Sub-solar longitude on the body (rad) for this observation.
-        sub_solar_lat: Sub-solar latitude (rad) for this observation.
-        sub_observer_lon: Sub-observer longitude on the body (rad) for this observation.
-        sub_observer_lat: Sub-observer latitude (rad) for this observation.
+    This is a :func:`dataclasses.dataclass`; each field is documented on its own
+    member entry below.
     """
 
     body_name: str
@@ -288,38 +265,8 @@ class BodyReprojResult:
 class BodyMosaicData:
     """Mosaic data returned by BodyMosaic retrieval methods.
 
-    Attributes:
-        body_name: The name of the body.
-        img: Reprojected mosaic image [latitude, longitude]. Masked where no
-            data has been contributed.
-        lat_resolution: Latitude resolution (rad/pixel).
-        lon_resolution: Longitude resolution (rad/pixel).
-        lat_range: (min, max) latitude extents of the returned image (rad).
-        lon_range: (min, max) longitude extents of the returned image (rad).
-        latlon_type: Latitude/longitude coordinate system type ('centric',
-            'graphic', 'squashed').
-        lon_direction: Longitude direction convention ('east', 'west').
-        resolution: Resolution (km/pixel) at each mosaic pixel.
-        eff_resolution: Effective resolution (km/pixel) at each mosaic pixel.
-        phase: Phase angle (rad) at each mosaic pixel.
-        emission: Emission angle (rad) at each mosaic pixel.
-        incidence: Incidence angle (rad) at each mosaic pixel.
-        time: Observation midtime (TDB seconds) for each mosaic pixel. Always
-            stored as ``float64`` regardless of ``metadata_dtype``.
-        image_number: Index into the image list for the contributing image.
-            Always stored as ``uint16``, capping a single mosaic at 65 535
-            contributing images.
-        photometric_model_name: Name of the photometric model, or None.
-        image_dtype: NumPy dtype used for the ``img`` array.
-        metadata_dtype: NumPy dtype used for geometry arrays (``resolution``,
-            ``eff_resolution``, ``phase``, ``emission``, ``incidence``).
-        contributing_image_names: Names of contributing reprojections in ``image_number``
-            order (index ``k`` corresponds to pixels tagged with ``image_number == k``).
-        sub_solar_lon_per_image: 1-D float64 array (length = number of contributing
-            images) of sub-solar longitudes in radians, indexed by image number.
-        sub_solar_lat_per_image: Matching sub-solar latitudes (rad), same indexing.
-        sub_observer_lon_per_image: Sub-observer longitudes (rad) per contributing image.
-        sub_observer_lat_per_image: Sub-observer latitudes (rad), same indexing.
+    This is a :func:`dataclasses.dataclass`; each field is documented on its own
+    member entry below.
     """
 
     body_name: str
@@ -671,9 +618,10 @@ class BodyMosaic:
         self._image_dtype: np.dtype = np.dtype(image_dtype)
         self._metadata_dtype: np.dtype = np.dtype(metadata_dtype)
 
-        # Full-grid dimensions
-        self._n_full_lat = int(math.pi / lat_resolution)
-        self._n_full_lon = int(2.0 * math.pi / lon_resolution)
+        # Full-grid dimensions: floor(span/res)+1 so the last bin is not dropped
+        # (matches ``RingMosaic`` longitude count and avoids int() truncation).
+        self._n_full_lat = int(math.floor(math.pi / lat_resolution)) + 1
+        self._n_full_lon = int(math.floor(2.0 * math.pi / lon_resolution)) + 1
 
         # Internal mosaic arrays (empty = not yet initialized)
         self._img: NDArrayFloatType = np.empty((0, 0), dtype=self._image_dtype)
@@ -808,9 +756,10 @@ class BodyMosaic:
         """Build a placeholder :class:`BodyReprojResult` when the body is off the detector.
 
         Used when no valid latitude/longitude samples fall on the detector (outside
-        FOV or fully masked). Geometry arrays are fully masked; ``img`` is either a
-        small fully-masked float mosaic slice or a boolean mask grid when
-        ``mask_only`` is True. Scalar metadata (``time``, ``image_name``, sub-solar /
+        FOV or fully masked). Allocates only the minimal 2×2 placeholder window
+        (``lat_idx_range`` / ``lon_idx_range`` ``(0, 1)``). Geometry arrays are fully
+        masked; ``img`` is either a small fully-masked float grid or a boolean mask
+        grid when ``mask_only`` is True. Scalar metadata (``time``, ``image_name``, sub-solar /
         sub-observer lon/lat, dtypes) is still populated so callers can merge counters
         and serialize consistently with normal reprojections.
 
@@ -829,15 +778,14 @@ class BodyMosaic:
         """
         min_lat_pixel, max_lat_pixel = 0, 1
         min_lon_pixel, max_lon_pixel = 0, 1
-        latitude_pixels = self._n_full_lat
-        longitude_pixels = self._n_full_lon
-        shape = (latitude_pixels, longitude_pixels)
-        empty_ma = ma.zeros(shape, dtype=self._metadata_dtype)
+        n_sub_lat = max_lat_pixel - min_lat_pixel + 1
+        n_sub_lon = max_lon_pixel - min_lon_pixel + 1
+
+        empty_ma = ma.zeros((n_sub_lat, n_sub_lon), dtype=self._metadata_dtype)
         empty_ma.mask = True
-        empty_sub = empty_ma[min_lat_pixel : max_lat_pixel + 1, min_lon_pixel : max_lon_pixel + 1]
 
         if mask_only:
-            repro_img = np.zeros(shape, dtype=np.bool_)
+            repro_img = np.zeros((n_sub_lat, n_sub_lon), dtype=np.bool_)
             return BodyReprojResult(
                 body_name=self.body_name,
                 img=ma.MaskedArray(repro_img.astype(self._image_dtype)),
@@ -847,11 +795,11 @@ class BodyMosaic:
                 lon_idx_range=(min_lon_pixel, max_lon_pixel),
                 latlon_type=self._latlon_type,
                 lon_direction=self._lon_direction,
-                resolution=empty_sub.copy(),
-                eff_resolution=empty_sub.copy(),
-                phase=empty_sub.copy(),
-                emission=empty_sub.copy(),
-                incidence=empty_sub.copy(),
+                resolution=empty_ma.copy(),
+                eff_resolution=empty_ma.copy(),
+                phase=empty_ma.copy(),
+                emission=empty_ma.copy(),
+                incidence=empty_ma.copy(),
                 time=obs.midtime,
                 photometric_model_name=None,
                 image_dtype=self._image_dtype,
@@ -863,21 +811,12 @@ class BodyMosaic:
                 sub_observer_lat=sub_observer_lat,
             )
 
-        repro_img_full = _create_repro_array(latitude_pixels, longitude_pixels, self._image_dtype)
-        repro_res_full = _create_repro_array(
-            latitude_pixels, longitude_pixels, self._metadata_dtype
-        )
-        repro_phase_full = _create_repro_array(
-            latitude_pixels, longitude_pixels, self._metadata_dtype
-        )
-        repro_emission_full = _create_repro_array(
-            latitude_pixels, longitude_pixels, self._metadata_dtype
-        )
-        repro_incidence_full = _create_repro_array(
-            latitude_pixels, longitude_pixels, self._metadata_dtype
-        )
-        sub = slice(min_lat_pixel, max_lat_pixel + 1), slice(min_lon_pixel, max_lon_pixel + 1)
-        eff_res = repro_res_full[sub].copy()
+        repro_img = _create_repro_array(n_sub_lat, n_sub_lon, self._image_dtype)
+        repro_res = _create_repro_array(n_sub_lat, n_sub_lon, self._metadata_dtype)
+        repro_phase = _create_repro_array(n_sub_lat, n_sub_lon, self._metadata_dtype)
+        repro_emission = _create_repro_array(n_sub_lat, n_sub_lon, self._metadata_dtype)
+        repro_incidence = _create_repro_array(n_sub_lat, n_sub_lon, self._metadata_dtype)
+        eff_res = repro_res.copy()
         if navigation_uncertainty != 0.0:
             eff_res = ma.MaskedArray(
                 eff_res.data * (1.0 + navigation_uncertainty), mask=eff_res.mask
@@ -885,18 +824,18 @@ class BodyMosaic:
         phot_name = self._photometric_model.name if self._photometric_model is not None else None
         return BodyReprojResult(
             body_name=self.body_name,
-            img=repro_img_full[sub].copy(),
+            img=repro_img.copy(),
             lat_resolution=self._lat_resolution,
             lon_resolution=self._lon_resolution,
             lat_idx_range=(min_lat_pixel, max_lat_pixel),
             lon_idx_range=(min_lon_pixel, max_lon_pixel),
             latlon_type=self._latlon_type,
             lon_direction=self._lon_direction,
-            resolution=repro_res_full[sub].copy(),
+            resolution=repro_res.copy(),
             eff_resolution=eff_res,
-            phase=repro_phase_full[sub].copy(),
-            emission=repro_emission_full[sub].copy(),
-            incidence=repro_incidence_full[sub].copy(),
+            phase=repro_phase.copy(),
+            emission=repro_emission.copy(),
+            incidence=repro_incidence.copy(),
             time=obs.midtime,
             photometric_model_name=phot_name,
             image_dtype=self._image_dtype,
@@ -1199,7 +1138,14 @@ class BodyMosaic:
 
         # Lat/lon bin centers can map to (u, v) that are outside ``ok_body_mask``;
         # keep scatter aligned with the same invalid mask as incidence/emission/etc.
-        ok_on_detector = ok_body_mask[good_v + v_min, good_u + u_min]
+        # ``good_u`` / ``good_v`` are subimage-relative (``subimg`` = ``data`` when
+        # ``subimage_edges`` is None). ``ok_body_mask`` matches ``subimg`` when the
+        # backplane (e.g. ``override_backplane``) is built on the subimage; otherwise
+        # it is full-frame like ``data`` and needs ``u_min`` / ``v_min``.
+        if ok_body_mask.shape == subimg.shape:
+            ok_on_detector = ok_body_mask[good_v, good_u]
+        else:
+            ok_on_detector = ok_body_mask[good_v + v_min, good_u + u_min]
         good_u = good_u[ok_on_detector]
         good_v = good_v[ok_on_detector]
         good_lat = good_lat[ok_on_detector]
@@ -1318,8 +1264,8 @@ class BodyMosaic:
         Raises:
             OverflowError: If the number of images added would exceed the
                 uint16 maximum of 65 535.
-            ValueError: If repro's resolution or coordinate system does not
-                match the mosaic's configuration.
+            ValueError: If repro's resolution, coordinate system, or
+                photometric model name does not match the mosaic's configuration.
         """
         if self._image_count > np.iinfo(np.uint16).max:
             raise OverflowError(
@@ -1845,4 +1791,12 @@ class BodyMosaic:
             raise ValueError(
                 f'lon_direction mismatch: mosaic={self._lon_direction!r}, '
                 f'repro={repro.lon_direction!r}'
+            )
+        mosaic_phot_name = (
+            self._photometric_model.name if self._photometric_model is not None else None
+        )
+        if repro.photometric_model_name != mosaic_phot_name:
+            raise ValueError(
+                f'photometric_model_name mismatch: mosaic={mosaic_phot_name!r}, '
+                f'repro={repro.photometric_model_name!r}'
             )

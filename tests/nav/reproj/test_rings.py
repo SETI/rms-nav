@@ -19,14 +19,14 @@ from nav.reproj.rings import RingMosaic, RingMosaicData, RingMosaicMergeStrategy
 from nav.ui.mosaic_viewer.common import load_ring_file
 
 # Convenient resolution values for tests.
-# pi/16 gives exactly 32 full-circle longitude bins (2*pi / (pi/16) = 32).
+# pi/16: RingMosaic uses floor(2π/res)+1 longitude bins (see rings.RingMosaic.__init__).
 _LON_RES = math.pi / 16  # rad/pixel -- ~11.25 deg/pix
 _RAD_RES = 5.0  # km/pixel
 _RADIUS_INNER = 1000.0  # km
 _RADIUS_OUTER = 1020.0  # km
 
 # Derived constants
-_N_FULL_LON = 32  # int(2*pi / _LON_RES) = int(32.0) = 32
+_N_FULL_LON = int(math.floor(2.0 * math.pi / _LON_RES)) + 1  # 33 for _LON_RES = π/16
 _N_RADIUS = 5  # ceil((1020-1000 + slop) / 5.0) = 5
 
 
@@ -55,6 +55,8 @@ def _make_ring_repro(
     image_name: str = '',
     orbit_model: RingOrbitModel | None = None,
     photometric_model_name: str | None = None,
+    image_dtype: np.dtype = np.dtype(np.float64),
+    metadata_dtype: np.dtype = np.dtype(np.float32),
 ) -> RingReprojResult:
     """Build a synthetic RingReprojResult for use in tests.
 
@@ -79,19 +81,19 @@ def _make_ring_repro(
     def _fill_2d(v: float | np.ndarray) -> ma.MaskedArray:
         if isinstance(v, ma.MaskedArray):
             return ma.MaskedArray(
-                np.asarray(v.data, dtype=np.float32),
+                np.asarray(v.data, dtype=image_dtype),
                 mask=ma.getmaskarray(v),
             )
         if np.isscalar(v):
-            arr = np.full(shape, v, dtype=np.float32)
+            arr = np.full(shape, v, dtype=image_dtype)
         else:
-            arr = np.asarray(v, dtype=np.float32)
+            arr = np.asarray(v, dtype=image_dtype)
         return ma.MaskedArray(arr)
 
     def _fill_1d(v: float | np.ndarray) -> np.ndarray:
         if np.isscalar(v):
-            return np.full(n_valid, v, dtype=np.float32)
-        return np.asarray(v, dtype=np.float32)
+            return np.full(n_valid, v, dtype=metadata_dtype)
+        return np.asarray(v, dtype=metadata_dtype)
 
     return RingReprojResult(
         body_name=body_name,
@@ -108,8 +110,8 @@ def _make_ring_repro(
         incidence=incidence,
         time=time,
         orbit_model=orbit_model,
-        image_dtype=np.dtype(np.float32),
-        metadata_dtype=np.dtype(np.float32),
+        image_dtype=image_dtype,
+        metadata_dtype=metadata_dtype,
         photometric_model_name=photometric_model_name,
         image_name=image_name,
     )
@@ -364,6 +366,16 @@ class TestRingMosaicAddAndRetrieve:
         result = mosaic.to_sparse()
         assert isinstance(result.img, ma.MaskedArray)
 
+    def test_mean_incidence_averaged_across_adds(self) -> None:
+        """RingMosaicData.mean_incidence is the mean of per-image repro.incidence values."""
+        mosaic = self._make_mosaic()
+        mosaic.add(_make_ring_repro(valid_lon_bins=[5], incidence=0.2))
+        assert mosaic.to_sparse().mean_incidence == pytest.approx(0.2)
+        mosaic.add(_make_ring_repro(valid_lon_bins=[6], incidence=0.4))
+        assert mosaic.to_sparse().mean_incidence == pytest.approx(0.3)
+        mosaic.add(_make_ring_repro(valid_lon_bins=[7], incidence=1.0))
+        assert mosaic.to_full().mean_incidence == pytest.approx((0.2 + 0.4 + 1.0) / 3.0)
+
 
 # =========================================================================
 # Sparse growth via batched insert tests
@@ -481,7 +493,7 @@ class TestRingMergeStrategies:
 
         # First: all radii masked except 2
         img1 = ma.MaskedArray(
-            np.ones((_N_RADIUS, 1), dtype=np.float32) * 1.0,
+            np.ones((_N_RADIUS, 1), dtype=np.float64) * 1.0,  # matches RingMosaic default image_dtype
             mask=np.array([[True], [True], [True], [False], [False]]),
         )
         mosaic.add(
@@ -844,6 +856,60 @@ class TestRingMosaicAddCompatibility:
         )
         repro = _make_ring_repro(valid_lon_bins=[5], photometric_model_name='lambert')
         with pytest.raises(ValueError, match='photometric model does not match'):
+            mosaic.add(repro)
+
+
+class TestRingMosaicAddGridValidation:
+    """add() rejects reprojections whose body, grid, or dtype metadata differ from the mosaic."""
+
+    def test_body_mismatch_raises(self) -> None:
+        mosaic = RingMosaic(
+            body_name='SATURN',
+            radius_inner=_RADIUS_INNER,
+            radius_outer=_RADIUS_OUTER,
+            longitude_resolution=_LON_RES,
+            radius_resolution=_RAD_RES,
+        )
+        repro = _make_ring_repro(valid_lon_bins=[5], body_name='JUPITER')
+        with pytest.raises(ValueError, match='body mismatch'):
+            mosaic.add(repro)
+
+    def test_longitude_resolution_mismatch_raises(self) -> None:
+        mosaic = RingMosaic(
+            body_name='SATURN',
+            radius_inner=_RADIUS_INNER,
+            radius_outer=_RADIUS_OUTER,
+            longitude_resolution=_LON_RES,
+            radius_resolution=_RAD_RES,
+        )
+        repro = _make_ring_repro(
+            valid_lon_bins=[5], longitude_resolution=_LON_RES * 0.5, n_full_lon=_N_FULL_LON * 2
+        )
+        with pytest.raises(ValueError, match='longitude_resolution'):
+            mosaic.add(repro)
+
+    def test_image_dtype_mismatch_raises(self) -> None:
+        mosaic = RingMosaic(
+            body_name='SATURN',
+            radius_inner=_RADIUS_INNER,
+            radius_outer=_RADIUS_OUTER,
+            longitude_resolution=_LON_RES,
+            radius_resolution=_RAD_RES,
+        )
+        repro = _make_ring_repro(valid_lon_bins=[5], image_dtype=np.dtype(np.float32))
+        with pytest.raises(ValueError, match='image_dtype'):
+            mosaic.add(repro)
+
+    def test_metadata_dtype_mismatch_raises(self) -> None:
+        mosaic = RingMosaic(
+            body_name='SATURN',
+            radius_inner=_RADIUS_INNER,
+            radius_outer=_RADIUS_OUTER,
+            longitude_resolution=_LON_RES,
+            radius_resolution=_RAD_RES,
+        )
+        repro = _make_ring_repro(valid_lon_bins=[5], metadata_dtype=np.dtype(np.float64))
+        with pytest.raises(ValueError, match='metadata_dtype'):
             mosaic.add(repro)
 
 

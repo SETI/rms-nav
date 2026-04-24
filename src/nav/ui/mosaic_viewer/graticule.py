@@ -110,11 +110,11 @@ def graticule_label_anchors(
         ``(vx, vy, label_text)``.
 
     Raises:
-        ValueError: If ``params`` is ``None``, or if ``lat_step_deg`` or
-            ``lon_step_deg`` is negative.
+        TypeError: If ``params`` is ``None``.
+        ValueError: If ``lat_step_deg`` or ``lon_step_deg`` is negative.
     """
     if params is None:
-        raise ValueError('graticule_label_anchors: params must not be None')
+        raise TypeError('graticule_label_anchors: params must not be None')
     if lat_step_deg < 0 or lon_step_deg < 0:
         raise ValueError(
             'graticule_label_anchors: lat_step_deg and lon_step_deg must be non-negative'

@@ -214,6 +214,7 @@ Examples::
 
 Pass a custom model via the ``orbit_model`` parameter::
 
+    import math
     from nav.reproj import RingMosaic, RingOrbitModel
 
     my_orbit = RingOrbitModel(
@@ -222,7 +223,7 @@ Pass a custom model via the ``orbit_model`` parameter::
         e=0.0,
         w0=0.0,
         dw=0.0,
-        mean_motion=581.964 * 3.14159 / 180.0,
+        mean_motion=math.radians(581.964),
         epoch_utc='2007-01-01',
     )
     mosaic = RingMosaic('SATURN', radius_inner=-1000, radius_outer=1000,
@@ -717,7 +718,7 @@ Ring display quick example::
 
 Body display quick example::
 
-    nav_mosaic_display_body /data/mosaics/mimas_2004_reproj_N1234567890.fits
+    nav_mosaic_display_body /data/mosaics/mimas_2004_MIMAS_N1234567890_reproj.fits
 
 Display options
 ^^^^^^^^^^^^^^^

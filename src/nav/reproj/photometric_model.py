@@ -59,10 +59,8 @@ class LambertModel:
     is independent. Near-grazing incidence is clamped to avoid division by
     near-zero values.
 
-    Attributes:
-        min_cos_incidence: Minimum value of cos(incidence) used as the
-            denominator. Pixels where cos(incidence) is below this threshold
-            are clamped to this value. Defaults to 0.01 (~84 degrees).
+    ``min_cos_incidence`` (default 0.01, ~84°) clamps the Lambert denominator;
+    see the member entry below.
     """
 
     name: str = 'lambert'
@@ -125,9 +123,7 @@ class LommelSeeligerModel:
     The correction factor applied to the data is (mu0 + mu) / (2 * mu0), which
     normalizes out this scattering model.
 
-    Attributes:
-        min_cos_incidence: Minimum value of cos(incidence) for clamping.
-            Defaults to 0.01.
+    ``min_cos_incidence`` defaults to 0.01; see the member entry below.
     """
 
     name: str = 'lommel_seeliger'
@@ -196,10 +192,8 @@ class MinnaertModel:
 
     The correction divides data by cos(incidence)^k * cos(emission)^(k-1).
 
-    Attributes:
-        k: Minnaert limb-darkening exponent. Default 0.5.
-        min_cos_incidence: Minimum cos(incidence) for clamping. Defaults to 0.01.
-        min_cos_emission: Minimum cos(emission) for clamping. Defaults to 0.01.
+    Defaults: ``k`` = 0.5, ``min_cos_incidence`` = ``min_cos_emission`` = 0.01;
+    see member entries below.
     """
 
     name: str = 'minnaert'

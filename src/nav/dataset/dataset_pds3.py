@@ -592,7 +592,15 @@ class DataSetPDS3(DataSet):
         if img_name_filter_list:
             new_img_name_filter_list: list[str] = []
             for explicit_img_filespec in img_name_filter_list:
-                new_img_name = self._get_img_name_from_label_filespec(explicit_img_filespec)
+                try:
+                    new_img_name = self._get_img_name_from_label_filespec(explicit_img_filespec)
+                except ValueError as exc:
+                    logger.warning(
+                        'Skipping explicit image filespec %r: %s',
+                        explicit_img_filespec,
+                        exc,
+                    )
+                    continue
                 if new_img_name is None:
                     continue
                 new_img_name_filter_list.append(new_img_name)

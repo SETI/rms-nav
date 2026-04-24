@@ -26,7 +26,6 @@ from filecache import FCPath
 from nav.dataset.dataset import ImageFile
 
 _ALLOWED_OUTPUT_FMTS: frozenset[str] = frozenset({'fits', 'npz'})
-_INVALID_FILENAME_CHARS = re.compile(r'[\x00-\x1f\x7f<>:"|?*\\/]+')
 _PREFIX_INVALID = re.compile(r'[\x00-\x1f\x7f/\\\\]')
 
 
@@ -42,11 +41,7 @@ def _subject_filename_segment(subject_name: str) -> str:
         and leading/trailing underscores stripped. Returns ``'unknown'`` when the
         result would otherwise be empty (e.g. ``_subject_filename_segment('   ')``).
     """
-    s = _INVALID_FILENAME_CHARS.sub('_', subject_name.strip())
-    s = s.replace(' ', '_')
-    while '__' in s:
-        s = s.replace('__', '_')
-    s = s.strip('_')
+    s = subject_name.strip()
     out = ''.join(ch if (ch.isalnum() or ch in '._-') else '_' for ch in s)
     while '__' in out:
         out = out.replace('__', '_')
@@ -99,7 +94,7 @@ def per_image_output_path(
         output_dir: Directory that will contain the output files.
         prefix: Optional filename prefix (may be empty).
         image_file: The source image file object; its URL stem is used.
-        fmt: File format extension, either ``'fits'`` or ``'npz``.
+        fmt: File format extension, either ``'fits'`` or ``'npz'``.
         subject_name: Body or planet name from the mosaic (e.g. ``MIMAS``, ``SATURN``).
 
     Returns:
@@ -132,7 +127,7 @@ def mosaic_output_path(
     Parameters:
         output_dir: Directory that will contain the output files.
         prefix: Optional filename prefix (may be empty).
-        fmt: File format extension, either ``'fits'`` or ``'npz``.
+        fmt: File format extension, either ``'fits'`` or ``'npz'``.
         subject_name: Body or planet name from the mosaic (e.g. ``MIMAS``, ``SATURN``).
 
     Returns:

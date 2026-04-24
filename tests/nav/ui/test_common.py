@@ -191,18 +191,37 @@ def test_apply_linear_gamma_stretch_gamma_two_darkens_midtones() -> None:
     np.testing.assert_allclose(result, [0.0, 0.25, 1.0], atol=1e-7)
 
 
-def test_apply_linear_gamma_stretch_degenerate_range() -> None:
-    """When white <= black, range is clamped to black + 1e-6; all non-black values -> 1."""
+def test_apply_linear_gamma_stretch_rejects_white_equal_black() -> None:
     data = np.array([5.0, 5.0, 6.0])
-    result = apply_linear_gamma_stretch(data, black=5.0, white=5.0, gamma=1.0)
-    assert result[0] == pytest.approx(0.0)
-    assert result[1] == pytest.approx(0.0)
-    assert result[2] == pytest.approx(1.0)
+    with pytest.raises(ValueError, match='white must be greater than black'):
+        apply_linear_gamma_stretch(data, black=5.0, white=5.0, gamma=1.0)
 
 
-def test_apply_linear_gamma_stretch_non_positive_gamma_treated_as_one() -> None:
-    """gamma <= 0 is treated as 1.0."""
+def test_apply_linear_gamma_stretch_rejects_white_less_than_black() -> None:
     data = np.array([0.0, 0.5, 1.0])
-    result_bad = apply_linear_gamma_stretch(data, black=0.0, white=1.0, gamma=0.0)
-    result_ref = apply_linear_gamma_stretch(data, black=0.0, white=1.0, gamma=1.0)
-    np.testing.assert_allclose(result_bad, result_ref)
+    with pytest.raises(ValueError, match='white must be greater than black'):
+        apply_linear_gamma_stretch(data, black=0.5, white=0.25, gamma=1.0)
+
+
+def test_apply_linear_gamma_stretch_rejects_non_positive_gamma() -> None:
+    data = np.array([0.0, 0.5, 1.0])
+    with pytest.raises(ValueError, match='gamma must be greater than 0'):
+        apply_linear_gamma_stretch(data, black=0.0, white=1.0, gamma=0.0)
+
+
+def test_apply_linear_gamma_stretch_rejects_negative_gamma() -> None:
+    data = np.array([0.0, 0.5, 1.0])
+    with pytest.raises(ValueError, match='gamma must be greater than 0'):
+        apply_linear_gamma_stretch(data, black=0.0, white=1.0, gamma=-0.5)
+
+
+def test_apply_linear_gamma_stretch_rejects_non_finite_black() -> None:
+    data = np.array([0.0, 1.0])
+    with pytest.raises(ValueError, match='black must be a finite number'):
+        apply_linear_gamma_stretch(data, black=float('nan'), white=1.0, gamma=1.0)
+
+
+def test_apply_linear_gamma_stretch_rejects_bool_black() -> None:
+    data = np.array([0.0, 1.0])
+    with pytest.raises(TypeError, match='black must be int or float, not bool'):
+        apply_linear_gamma_stretch(data, black=True, white=1.0, gamma=1.0)  # type: ignore[arg-type]

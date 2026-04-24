@@ -112,6 +112,9 @@ def _colorby_tint(
     arr = np.asarray(data, dtype=np.float64)
     if isinstance(data, ma.MaskedArray):
         arr = np.where(ma.getmaskarray(data), np.nan, arr)
+    n_rows, n_cols = arr.shape
+    if not np.isfinite(arr).any():
+        return np.full((n_rows, n_cols, 3), 0.5, dtype=np.float32)
     lo = float(np.nanmin(arr)) if vmin is None else vmin
     hi = float(np.nanmax(arr)) if vmax is None else vmax
     if hi <= lo:

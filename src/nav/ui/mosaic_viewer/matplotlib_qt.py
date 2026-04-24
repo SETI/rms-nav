@@ -1,7 +1,5 @@
 """Matplotlib QtAgg helpers (third-party constructors lack usable stubs under mypy)."""
 
-from typing import Any
-
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 
@@ -20,14 +18,15 @@ def new_figure_canvas_qtagg(fig: Figure) -> FigureCanvasQTAgg:
     return FigureCanvasQTAgg(fig)  # type: ignore[no-untyped-call]
 
 
-def canvas_draw_idle(canvas: FigureCanvasQTAgg | Any) -> None:
+def canvas_draw_idle(canvas: FigureCanvasQTAgg | object) -> None:
     """Schedule a deferred redraw on a Qt Agg canvas.
 
     Parameters:
-        canvas: ``FigureCanvasQTAgg``, or any object with a callable ``draw_idle`` method.
-
-    Returns:
-        ``None``.
+        canvas: A :class:`~matplotlib.backends.backend_qtagg.FigureCanvasQTAgg`, or any
+            object that exposes a callable ``draw_idle`` like
+            :meth:`FigureCanvasQTAgg.draw_idle` (defers painting until the Qt event loop
+            runs). Callers should narrow with ``isinstance(..., FigureCanvasQTAgg)`` before
+            using canvas-specific APIs beyond ``draw_idle``.
     """
     if isinstance(canvas, FigureCanvasQTAgg):
         canvas.draw_idle()  # type: ignore[no-untyped-call]

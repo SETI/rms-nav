@@ -688,6 +688,8 @@ class TiledImageWidget(QAbstractScrollArea):
             self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
             self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.viewport().update()
+        xz, yz = self.get_zoom()
+        self.zoom_changed.emit(xz, yz)
 
     def viewport_to_lonlat(self, vx: int, vy: int) -> tuple[float, float, bool]:
         """Convert a viewport pixel to (lon_deg, lat_deg, on_surface).
@@ -827,6 +829,31 @@ class TiledImageWidget(QAbstractScrollArea):
         if self._y_flip:
             return (self._n_rows - 1) - int(cy)
         return int(cy)
+
+    def pixel_x_to_arr_col(self, pixel_x: float, pixel_y: float) -> int:
+        """Map image pixel X to data column index (same longitude axis as :meth:`pixel_to_physical`).
+
+        ``pixel_x`` / ``pixel_y`` are in the same space as :meth:`viewport_to_pixel`
+        (including ring virtual-column offset and zoom). For rectangular ring/body
+        images this uses the configured X origin and column pitch; for
+        ``body_full_sphere_canvas`` it uses :meth:`body_sphere_data_indices` when the
+        cursor lies on data, otherwise falls back to rounding ``pixel_x`` in virtual
+        column space.
+        """
+        if self._n_cols < 1:
+            return 0
+        lon_deg, lat_deg = self.pixel_to_physical(pixel_x, pixel_y)
+        if self._body_sphere:
+            dc, _dr, inside = self.body_sphere_data_indices(lon_deg, lat_deg)
+            if inside and dc >= 0:
+                return int(np.clip(dc, 0, self._body_data_n_cols - 1))
+            return int(np.clip(round(pixel_x), 0, self._n_cols - 1))
+        lo = float(self._x_origin_deg)
+        res = float(self._x_interval)
+        n_c = self._n_cols
+        edges = lo + np.arange(n_c + 1, dtype=np.float64) * res
+        ix = int(np.searchsorted(edges, lon_deg, side='right') - 1)
+        return int(np.clip(ix, 0, n_c - 1))
 
     def scroll_to_pixel(self, pixel_x: float, pixel_y: float) -> None:
         """Scroll so that the given image pixel is centred in the viewport."""
@@ -1299,7 +1326,7 @@ class TiledImageWidget(QAbstractScrollArea):
             gamma=self._gamma,
             color_tint=self._color_tint,
         )
-        # ``render_to_image`` returns a QImage backed by its own contiguous buffer.
+        # ``render_to_image`` returns a QImage whose pixel memory is pinned on ``_buf``.
         self._last_rgb = None
         painter.drawImage(0, 0, qimg)
 

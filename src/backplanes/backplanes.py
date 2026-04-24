@@ -4,8 +4,7 @@ from typing import Any, cast
 import oops
 from filecache import FCPath
 
-from nav.config import DEFAULT_CONFIG
-from nav.config.logger import IMAGE_LOGGER
+from nav.config import DEFAULT_CONFIG, IMAGE_LOGGER
 from nav.dataset.dataset import ImageFiles
 from nav.obs import ObsSnapshot, ObsSnapshotInst
 

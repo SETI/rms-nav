@@ -115,39 +115,8 @@ class RingReprojResult:
       offset semantics make an eccentric ring appear as a straight line in
       the reprojection.
 
-    Attributes:
-        body_name: The name of the planet whose ring was reprojected.
-        img: Sparse reprojected image [radius, valid_longitude].
-        longitude_resolution: Longitude resolution (rad/pixel).
-        radius_resolution: Radius resolution (km/pixel).
-        radius_inner: Inner radius (km, absolute) when ``orbit_model is None``;
-            signed offset (km) from the orbital radius at each (longitude,
-            time) when an orbit model is set.
-        radius_outer: Outer radius (km, absolute) when ``orbit_model is None``;
-            signed offset (km) from the orbital radius at each (longitude,
-            time) when an orbit model is set.
-        longitude_antimask: Boolean array of length ``n_full_lon`` (the
-            total number of longitude bins from 0 to 2*pi). True at each
-            longitude bin that has reprojected data.
-        mean_radial_resolution: Mean radial resolution per valid longitude
-            (km/pixel).
-        mean_angular_resolution: Mean angular resolution per valid longitude
-            (rad/pixel).
-        mean_phase: Mean phase angle per valid longitude (rad).
-        mean_emission: Mean emission angle per valid longitude (rad).
-        incidence: Scalar incidence angle over the ring plane (rad). NaN if
-            no valid incidence data was available for this reprojection.
-        time: Midtime of the observation (TDB seconds).
-        orbit_model: The RingOrbitModel used for co-rotating longitude
-            conversion, or None for inertial longitude.
-        image_dtype: NumPy dtype used for the ``img`` array.
-        metadata_dtype: NumPy dtype used for geometry arrays
-            (``mean_radial_resolution``, ``mean_angular_resolution``,
-            ``mean_phase``, ``mean_emission``). Mosaic ``time`` columns are
-            always ``float64`` regardless of this setting.
-        photometric_model_name: Name of the photometric model applied to ``img`` on
-            save, or ``None`` if brightness was stored without photometric correction.
-        image_name: Label for this reprojection (e.g. source image stem); may be empty.
+    This is a :func:`dataclasses.dataclass`; each field is documented on its own
+    member entry below.
     """
 
     body_name: str
@@ -358,50 +327,8 @@ class RingMosaicData:
       signed offsets in km from the orbital radius at each (longitude, time)
       — i.e. from ``orbit_model.radius_at_longitude(inertial_lon, et)``.
 
-    Attributes:
-        body_name: The name of the planet.
-        ring_body_name: The oops body name for the ring plane
-            (e.g. 'saturn:ring').
-        shadow_body_name: The oops body name for the shadow-casting planet
-            (e.g. 'saturn').
-        longitude_resolution: Longitude resolution (rad/pixel).
-        radius_resolution: Radius resolution (km/pixel).
-        radius_inner: Inner radius (km, absolute) when ``orbit_model_name is
-            None``; signed offset (km) from the orbital radius at each
-            (longitude, time) otherwise.
-        radius_outer: Outer radius (km, absolute) when ``orbit_model_name is
-            None``; signed offset (km) from the orbital radius at each
-            (longitude, time) otherwise.
-        longitude_antimask: Boolean array of length ``n_full_lon``.
-            True at longitude bins that have data.
-        img: Mosaic image [radius, longitude] as a MaskedArray.
-        longitude_range: (start, end) of longitudes in img (rad), or None
-            for the full circle.
-        mean_radial_resolution: Mean radial resolution per longitude column
-            as a MaskedArray.
-        mean_angular_resolution: Mean angular resolution per column as a
-            MaskedArray.
-        mean_phase: Mean phase angle per column as a MaskedArray (rad).
-        mean_emission: Mean emission angle per column as a MaskedArray (rad).
-        mean_incidence: Scalar mean incidence angle (rad) over all images.
-        image_number: Per-longitude index identifying which add() call
-            contributed the data, as a MaskedArray. Always stored as
-            ``uint16``, capping a single mosaic at 65 535 contributing images.
-        time: Per-longitude observation midtime (TDB seconds) as a
-            MaskedArray. Always stored as ``float64``.
-        image_dtype: NumPy dtype used for the ``img`` array.
-        metadata_dtype: NumPy dtype used for geometry arrays
-            (``mean_radial_resolution``, ``mean_angular_resolution``,
-            ``mean_phase``, ``mean_emission``).
-        contributing_image_names: Names of contributing reprojections in ``image_number``
-            order (index ``k`` corresponds to pixels tagged with ``image_number == k``).
-        orbit_model_name: Name of the orbit model used when building the mosaic
-            (co-rotating longitudes; ``radius_inner`` / ``radius_outer`` are
-            signed offsets from the orbital radius at each (longitude, time)).
-            ``None`` when the mosaic used inertial longitudes and absolute ring
-            radii.
-        photometric_model_name: Photometric model applied during ``reproject()``, if
-            any; ``None`` when brightness was accumulated without photometric correction.
+    This is a :func:`dataclasses.dataclass`; each field is documented on its own
+    member entry below.
     """
 
     body_name: str
@@ -713,7 +640,9 @@ class RingMosaic:
         self._photometric_model = photometric_model
 
         self._n_radius = math.ceil((radius_outer - radius_inner + _RADIUS_SLOP) / radius_resolution)
-        self._n_full_lon = int(math.pi * 2.0 / longitude_resolution)
+        # int(2π / res) truncates when the ratio is not exactly representable; use
+        # floor(2π / res) + 1 so bin indices through floor(_MAX_LONGITUDE / res) fit.
+        self._n_full_lon = int(math.floor(2.0 * math.pi / longitude_resolution)) + 1
 
         # Sparse storage: only valid longitude columns are held.
         # _antimask[i] is True iff longitude bin i has data.
@@ -726,6 +655,7 @@ class RingMosaic:
         self._mean_angular_res: NDArrayFloatType = np.empty(0, dtype=self._metadata_dtype)
         self._mean_phase: NDArrayFloatType = np.empty(0, dtype=self._metadata_dtype)
         self._mean_emission: NDArrayFloatType = np.empty(0, dtype=self._metadata_dtype)
+        self._mean_incidence_sum: float = 0.0
         self._mean_incidence: float = 0.0
         self._image_number: NDArrayIntType = np.empty(0, dtype=np.uint16)
         self._time: NDArrayFloatType = np.empty(0, dtype=np.float64)
@@ -1117,6 +1047,14 @@ class RingMosaic:
             logger.debug('Computing shadow mask')
             shadow = bp.where_inside_shadow(self._ring_body_name, self._shadow_body_name).vals
             data = ma.masked_where(shadow, data)
+            # Match image masking so per-column geometry means exclude shadowed pixels.
+            bp_radius = bp_radius.remask_or(shadow)
+            bp_longitude = bp_longitude.remask_or(shadow)
+            bp_radial_res = bp_radial_res.remask_or(shadow)
+            bp_angular_res = bp_angular_res.remask_or(shadow)
+            bp_phase = bp_phase.remask_or(shadow)
+            bp_emission = bp_emission.remask_or(shadow)
+            bp_incidence = bp_incidence.remask_or(shadow)
 
         if orbit_model is not None:
             # Per-pixel signed offset from the orbit model's radius at each
@@ -1390,6 +1328,73 @@ class RingMosaic:
     # Mosaic accumulation
     # ------------------------------------------------------------------
 
+    def _validate_repro_compatible(self, repro: RingReprojResult) -> None:
+        """Raise ``ValueError`` if ``repro`` does not match this mosaic's grid and dtypes."""
+        if repro.body_name != self._body_name:
+            raise ValueError(
+                'RingMosaic.add(): body mismatch (field body): '
+                f'mosaic={self._body_name!r}, repro={repro.body_name!r}'
+            )
+        if abs(repro.longitude_resolution - self._lon_resolution) > 1e-12:
+            raise ValueError(
+                'RingMosaic.add(): grid resolution mismatch (field longitude_resolution): '
+                f'mosaic={self._lon_resolution!r}, repro={repro.longitude_resolution!r}'
+            )
+        if abs(repro.radius_resolution - self._rad_resolution) > 1e-9:
+            raise ValueError(
+                'RingMosaic.add(): grid resolution mismatch (field radius_resolution): '
+                f'mosaic={self._rad_resolution!r}, repro={repro.radius_resolution!r}'
+            )
+        if not math.isclose(repro.radius_inner, self._radius_inner, rel_tol=0.0, abs_tol=1e-9):
+            raise ValueError(
+                'RingMosaic.add(): radius bounds mismatch (field radius_inner): '
+                f'mosaic={self._radius_inner!r}, repro={repro.radius_inner!r}'
+            )
+        if not math.isclose(repro.radius_outer, self._radius_outer, rel_tol=0.0, abs_tol=1e-9):
+            raise ValueError(
+                'RingMosaic.add(): radius bounds mismatch (field radius_outer): '
+                f'mosaic={self._radius_outer!r}, repro={repro.radius_outer!r}'
+            )
+        if np.dtype(repro.image_dtype) != np.dtype(self._image_dtype):
+            raise ValueError(
+                'RingMosaic.add(): dtype mismatch (field image_dtype): '
+                f'mosaic={self._image_dtype!r}, repro={repro.image_dtype!r}'
+            )
+        if np.dtype(repro.metadata_dtype) != np.dtype(self._metadata_dtype):
+            raise ValueError(
+                'RingMosaic.add(): dtype mismatch (field metadata_dtype): '
+                f'mosaic={self._metadata_dtype!r}, repro={repro.metadata_dtype!r}'
+            )
+        if repro.longitude_antimask.shape != (self._n_full_lon,):
+            raise ValueError(
+                'RingMosaic.add(): grid mismatch (field longitude_antimask length): '
+                f'mosaic expects {self._n_full_lon} longitude bins, repro has '
+                f'{int(np.size(repro.longitude_antimask))}'
+            )
+        if repro.img.ndim != 2:
+            raise ValueError(
+                'RingMosaic.add(): repro.img must be 2-D '
+                f'(field sparse img), got shape {repro.img.shape!r}'
+            )
+        if repro.img.shape[0] != self._n_radius:
+            raise ValueError(
+                'RingMosaic.add(): grid mismatch (field radius bin count): '
+                f'mosaic has {self._n_radius} radius bins, repro.img.shape[0]={repro.img.shape[0]}'
+            )
+        n_valid = int(repro.img.shape[1])
+        for field_name, arr in (
+            ('mean_radial_resolution', repro.mean_radial_resolution),
+            ('mean_angular_resolution', repro.mean_angular_resolution),
+            ('mean_phase', repro.mean_phase),
+            ('mean_emission', repro.mean_emission),
+        ):
+            if arr.ndim != 1 or int(arr.shape[0]) != n_valid:
+                raise ValueError(
+                    'RingMosaic.add(): sparse column count mismatch '
+                    f'(field {field_name} vs repro.img): '
+                    f'img has {n_valid} columns, {field_name}.shape={arr.shape!r}'
+                )
+
     def add(self, repro: RingReprojResult) -> None:
         """Add a reprojected image to the mosaic.
 
@@ -1410,9 +1415,11 @@ class RingMosaic:
         Raises:
             OverflowError: If the number of images added would exceed the
                 uint16 maximum of 65 535.
-            ValueError: If the reprojection's orbit model or photometric
-                model does not match the mosaic's.
+            ValueError: If the reprojection's body name, grid resolution, radius
+                bounds, dtypes, sparse shapes, orbit model, or photometric model
+                does not match the mosaic's.
         """
+        self._validate_repro_compatible(repro)
         # RingOrbitModel is a frozen dataclass with value-based equality
         # (auto-generated __eq__), so a model loaded from disk is equal to
         # but not identical to the in-memory mosaic instance. Compare by
@@ -1465,7 +1472,8 @@ class RingMosaic:
         self._antimask[valid_bins] = True
         self._contributing_image_names.append(repro.image_name)
         self._image_count += 1
-        self._mean_incidence = repro.incidence
+        self._mean_incidence_sum += float(repro.incidence)
+        self._mean_incidence = self._mean_incidence_sum / float(self._image_count)
 
     def _insert_new_columns(
         self,

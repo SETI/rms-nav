@@ -309,14 +309,47 @@ class TestRingOrbitModel:
         expected_peri = FRING_CORE.a * (1.0 - FRING_CORE.e)
         assert pytest.approx(float(r_peri[0]), rel=1e-9) == expected_peri
 
-    def test_corotating_round_trip(self) -> None:
-        """inertial_to_corotating followed by corotating_to_inertial is identity."""
-        model = FRING_CORE
-        et = 1e8
+    def test_corotating_round_trip_multiple_et(self) -> None:
+        """Co-rotating ↔ inertial transforms round-trip for several times far from epoch."""
         longitudes = np.linspace(0.0, 2 * math.pi, 36, endpoint=False)
-        co = model.inertial_to_corotating(longitudes, et)
-        back = model.corotating_to_inertial(co, et)
-        np.testing.assert_allclose(back % (2 * math.pi), longitudes % (2 * math.pi), atol=1e-10)
+        for model in (FRING_CORE, BRING_OUTER_EDGE):
+            epoch_et = model._epoch_et  # noqa: SLF001
+            for et in (
+                epoch_et - 5.0e8,
+                epoch_et + 1.0e8,
+                epoch_et + 2.5e7,
+                0.0,
+            ):
+                co = model.inertial_to_corotating(longitudes, et)
+                back = model.corotating_to_inertial(co, et)
+                np.testing.assert_allclose(
+                    back % (2 * math.pi), longitudes % (2 * math.pi), atol=1e-9
+                )
+                co2 = model.inertial_to_corotating(model.corotating_to_inertial(longitudes, et), et)
+                np.testing.assert_allclose(
+                    co2 % (2 * math.pi), longitudes % (2 * math.pi), atol=1e-9
+                )
+
+    def test_longitude_shift_zero_at_epoch(self) -> None:
+        """At the co-rotation epoch ET, the longitude shift is exactly zero."""
+        for model in (FRING_CORE, BRING_OUTER_EDGE):
+            assert model._longitude_shift(model._epoch_et) == pytest.approx(0.0)  # noqa: SLF001
+
+    def test_longitude_shift_regression_reference_fring_core(self) -> None:
+        """Regression: shift at epoch + 100 d matches precomputed Albers mean-motion value.
+
+        Precomputed with ``mean_motion`` rad/day and ``epoch_utc='2007-01-01'`` as in
+        :data:`FRING_CORE`; catches accidental sign flip in ``_longitude_shift``.
+        """
+        et = FRING_CORE._epoch_et + 100.0 * 86400.0  # noqa: SLF001
+        shift = FRING_CORE._longitude_shift(et)  # noqa: SLF001
+        assert shift == pytest.approx(2.15722695546485, abs=1e-12)
+
+    def test_longitude_shift_regression_reference_bring_outer_edge(self) -> None:
+        """Regression: shift at epoch + 1 d for :data:`BRING_OUTER_EDGE` (mean motion rad/day)."""
+        et = BRING_OUTER_EDGE._epoch_et + 86400.0  # noqa: SLF001
+        shift = BRING_OUTER_EDGE._longitude_shift(et)  # noqa: SLF001
+        assert shift == pytest.approx(5.606556062766424, abs=1e-12)
 
     def test_longitude_radius_length(self) -> None:
         """longitude_radius returns arrays of the expected length."""

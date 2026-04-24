@@ -151,6 +151,26 @@ def _run_body(args: argparse.Namespace) -> None:
 def main() -> None:
     """Dispatch on ``rings`` or ``body`` first positional argument."""
     args_list = sys.argv[1:]
+    if ('-h' in args_list or '--help' in args_list) and (
+        not args_list or args_list[0] not in ('rings', 'body')
+    ):
+        top_parser = argparse.ArgumentParser(
+            prog='nav_mosaic_display',
+            description=(
+                'Interactive PyQt6 viewer for ring or body reprojection/mosaic files. '
+                'The first argument must be rings or body; remaining arguments are '
+                'passed to that mode (see nav_mosaic_display_rings / '
+                'nav_mosaic_display_body).'
+            ),
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            epilog=(
+                'Usage:\n'
+                '  nav_mosaic_display rings [options] FILE [FILE ...]\n'
+                '  nav_mosaic_display body  [options] FILE [FILE ...]'
+            ),
+        )
+        top_parser.print_help()
+        sys.exit(0)
     if not args_list or args_list[0] not in ('rings', 'body'):
         argparse.ArgumentParser(prog='nav_mosaic_display').error(
             'Usage: nav_mosaic_display <rings|body> [options] FILE [FILE ...]'

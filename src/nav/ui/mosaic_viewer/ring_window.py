@@ -1523,7 +1523,8 @@ class RingMosaicWindow(QMainWindow):
             self._clear_info()
             return
         dd = self._display_data
-        ix = int(np.clip(round(px), 0, dd.n_longitude - 1))
+        ix = self._image_widget.pixel_x_to_arr_col(px, py)
+        ix = int(np.clip(ix, 0, dd.n_longitude - 1))
         self._last_profile_lon_ix = ix
         arr_row = self._image_widget.pixel_y_to_arr_row(py)
         arr_row = int(np.clip(arr_row, 0, dd.n_radii - 1))

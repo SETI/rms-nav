@@ -5,8 +5,7 @@ from astropy.io import fits
 from filecache import FCPath
 from pdslogger import PdsLogger
 
-from nav.config import Config
-from nav.config.logger import IMAGE_LOGGER
+from nav.config import IMAGE_LOGGER, Config
 from nav.obs import ObsSnapshot
 from nav.support.file import json_as_string
 

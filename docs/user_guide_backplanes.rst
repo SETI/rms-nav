@@ -85,7 +85,7 @@ For each processed image, ``nav_backplanes`` writes two files under
 
   - A primary HDU.
   - ``BODY_ID_MAP`` (int32) as the first image HDU.
-  - One ``ImageHDU`` per non-empty backplane array, with ``BUNIT`` set when
+  - One ``ImageHDU`` per non-all-zero backplane array, with ``BUNIT`` set when
     configured.
 
 - ``<results_path_stub>_backplane_metadata.json`` containing per-body

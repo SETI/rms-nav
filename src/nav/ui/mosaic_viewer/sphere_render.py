@@ -44,8 +44,11 @@ def render_to_image(
         image_ma: 2-D masked array (n_data_rows, n_data_cols) with the
             photometrically-corrected mosaic data.
         lon_deg: 2-D float64 array of longitudes (deg) for every output pixel,
-            in [0, 360).
-        lat_deg: 2-D float64 array of latitudes (deg), in [-90, 90].
+            in [0, 360).  After binning to ``k``, any pixel with ``lon_bin_to_dc[k] == -1``
+            has no data column and is off-grid (no-data when ``valid`` is True).
+        lat_deg: 2-D float64 array of latitudes (deg), in [-90, 90].  Latitudes outside
+            ``[lat_min_deg, lat_min_deg + n_data_rows * d_lat_deg)`` map to ``dr`` outside
+            ``[0, n_data_rows)`` and are off-grid (no-data when ``valid`` is True).
         valid: 2-D bool array; False pixels are painted black (off-projection
             background).  True pixels with no usable data (outside the file's
             lat/lon extent or explicitly masked) are painted dark red.
@@ -159,13 +162,17 @@ def render_to_image(
         rgb[no_data, 2] = 0
 
     # ------------------------------------------------------------------
-    # Build QImage from an owned byte buffer (``QImage`` copies ``tobytes()``).
+    # Build QImage from a persistent buffer (constructor keeps a pointer; do not
+    # pass a temporary ``tobytes()`` result without pinning the backing bytes).
     # ------------------------------------------------------------------
     rgb_c = np.ascontiguousarray(rgb, dtype=np.uint8)
-    return QImage(
-        rgb_c.tobytes(),
+    buf = bytearray(rgb_c.tobytes())
+    qimg = QImage(
+        buf,
         out_w,
         out_h,
         3 * out_w,
         QImage.Format.Format_RGB888,
     )
+    qimg._buf = buf
+    return qimg

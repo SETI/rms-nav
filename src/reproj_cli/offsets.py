@@ -7,8 +7,6 @@ read the ``_metadata.json`` file for an image and apply the stored
 
 import json
 from collections.abc import Sequence
-from typing import Any, cast
-
 import oops
 from filecache import FCPath
 
@@ -78,12 +76,21 @@ def load_offset_if_any(
         return None
 
     try:
-        nav_metadata = cast(dict[str, Any], json.loads(text))
+        nav_metadata = json.loads(text)
     except json.JSONDecodeError as exc:
         MAIN_LOGGER.warning(
             'Invalid JSON in metadata for %s (%s); using uncorrected pointing.',
             image_file.image_file_url,
             exc,
+        )
+        return None
+
+    if not isinstance(nav_metadata, dict):
+        MAIN_LOGGER.warning(
+            'Nav metadata for %s is not a JSON object (type=%s, value=%r); using uncorrected pointing.',
+            image_file.image_file_url,
+            type(nav_metadata).__name__,
+            nav_metadata,
         )
         return None
 
