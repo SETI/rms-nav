@@ -64,14 +64,15 @@ system is controlled by two parameters:
 Choosing dtypes
 ^^^^^^^^^^^^^^^
 
-By default, the reprojected brightness image uses ``float64`` and all geometry
-arrays (resolution, phase, emission, incidence) and the ``time`` array use
-``float32``::
+By default, the reprojected brightness image uses ``float64``, the geometry
+arrays (resolution, phase, emission, incidence) use ``float32`` (via the default
+``metadata_dtype``), and the ``time`` field is always stored as ``float64``
+regardless of the ``metadata_dtype`` argument to ``BodyMosaic``::
 
     from nav.reproj import BodyMosaic
     import numpy as np
 
-    # Defaults: image in float64, geometry in float32
+    # Defaults: image in float64, geometry in float32, time in float64
     mosaic = BodyMosaic(body_name='MIMAS')
 
     # All float64 for maximum precision
@@ -81,7 +82,6 @@ arrays (resolution, phase, emission, incidence) and the ``time`` array use
         metadata_dtype=np.float64,  # full-precision geometry
     )
 
-The ``time`` field is always stored as ``float64`` regardless of ``metadata_dtype``.
 The ``image_number`` field is always ``uint16``, capping a single mosaic at
 65 535 contributing images.
 
@@ -297,7 +297,7 @@ Body mosaic examples::
     data.save('mimas.npz')                    # compressed npz
     data.save('mimas.npz', compress=False)    # uncompressed npz (faster I/O)
     data.save('mimas.fits')                   # FITS
-    data.save('mimas.fits', format='fits')    # explicit format
+    data.save('mimas.fits', format_='fits')    # explicit format
 
     # Load
     reloaded = BodyMosaicData.load('mimas.npz')

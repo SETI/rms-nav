@@ -625,8 +625,8 @@ class TestContributingImageNamesRings:
         mosaic = self._make_mosaic()
         mosaic.add(_make_ring_repro(valid_lon_bins=[4], image_name='N999'))
         path = tmp_path / 'ring_mosaic.fits'
-        mosaic.to_sparse().save(path, format='fits')
-        loaded = RingMosaicData.load(path, format='fits')
+        mosaic.to_sparse().save(path, format_='fits')
+        loaded = RingMosaicData.load(path, format_='fits')
         assert loaded.contributing_image_names == ('N999',)
 
     def test_load_ring_file_passes_contributing_names(self, tmp_path: Path) -> None:
@@ -634,7 +634,7 @@ class TestContributingImageNamesRings:
         mosaic = self._make_mosaic()
         mosaic.add(_make_ring_repro(valid_lon_bins=[3], image_name='cassini_img'))
         path = tmp_path / 'for_display.fits'
-        mosaic.to_sparse().save(path, format='fits')
+        mosaic.to_sparse().save(path, format_='fits')
         dd = load_ring_file(str(path))
         assert dd.is_mosaic is True
         assert dd.contributing_image_names == ('cassini_img',)

@@ -19,7 +19,6 @@ If ``prefix`` is empty the leading underscore is omitted before ``subject``, e.g
 """
 
 import re
-from pathlib import Path
 
 from filecache import FCPath
 
@@ -68,7 +67,7 @@ def _ensure_output_under_dir(output_dir: str | FCPath, filename: str) -> FCPath:
         raise ValueError(f'invalid output filename: {filename!r}')
     if '/' in filename or '\\' in filename:
         raise ValueError(f'filename must not contain path separators: {filename!r}')
-    base = Path(str(FCPath(output_dir))).expanduser().resolve()
+    base = FCPath(output_dir).expanduser().resolve()
     candidate = (base / filename).resolve()
     try:
         candidate.relative_to(base)
@@ -77,7 +76,7 @@ def _ensure_output_under_dir(output_dir: str | FCPath, filename: str) -> FCPath:
             f'Refusing output path outside output_dir={output_dir!r} for filename={filename!r} '
             f'(resolves to {candidate!r})'
         ) from exc
-    return FCPath(str(candidate))
+    return candidate
 
 
 def per_image_output_path(

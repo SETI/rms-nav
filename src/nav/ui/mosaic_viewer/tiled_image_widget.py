@@ -1184,7 +1184,10 @@ class TiledImageWidget(QAbstractScrollArea):
             rows = np.clip(np.arange(py_start, py_end + 1, dtype=np.intp), 0, n_r - 1)
             cols = np.clip(np.arange(px_start, px_end + 1, dtype=np.intp), 0, n_c - 1)
             if self._y_flip:
-                arr_rows = np.clip((n_r - 1) - rows, 0, n_r - 1)[::-1]
+                # ``rows`` is ascending in stored row index ``py``; each visible tile
+                # row ``i`` maps to image row ``(n_r - 1) - (py_start + i)``, matching
+                # ``tile = tile_raw[::-1, :]`` without an extra reversal of tint indices.
+                arr_rows = np.clip((n_r - 1) - rows, 0, n_r - 1)
             else:
                 arr_rows = rows
             tint = self._color_tint[np.ix_(arr_rows, cols)]  # (tile_h, tile_w, 3)

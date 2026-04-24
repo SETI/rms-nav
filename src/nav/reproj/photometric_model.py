@@ -130,6 +130,24 @@ class LommelSeeligerModel:
     min_cos_incidence: float = 0.01
     min_denom: float = 1e-15
 
+    def _signed_sum_denom(
+        self, cos_i: NDArrayFloatType, cos_e: NDArrayFloatType
+    ) -> NDArrayFloatType:
+        """Return ``cos_i + cos_e`` with magnitude floored to ``min_denom`` but sign preserved.
+
+        When ``raw = cos_i + cos_e`` has ``abs(raw) < min_denom``, replace it with
+        ``sign(raw) * min_denom``; when ``raw == 0``, use ``+min_denom`` so the
+        value is never an unsigned zero denominator.
+        """
+        raw_denom = cos_i + cos_e
+        too_small = np.abs(raw_denom) < self.min_denom
+        sign_mag = np.where(
+            raw_denom == 0,
+            self.min_denom,
+            np.sign(raw_denom) * self.min_denom,
+        )
+        return cast(NDArrayFloatType, np.where(too_small, sign_mag, raw_denom))
+
     def correct(
         self,
         data: NDArrayFloatType,
@@ -147,13 +165,15 @@ class LommelSeeligerModel:
             phase: Phase angle at each pixel (rad). Not used.
 
         Returns:
-            Data multiplied by (cos_i + cos_e) / (2 * cos_i), where cos_i
-            and cos_e are the cosines of incidence and emission respectively.
+            Data multiplied by ``denom / (2 * cos_i)``, where ``cos_i`` is
+            ``max(cos(incidence), min_cos_incidence)``, ``cos_e = cos(emission)``,
+            and ``denom`` is ``cos_i + cos_e`` with magnitude floored to
+            ``min_denom`` while preserving sign (same rule as :meth:`uncorrect`).
         """
         cos_i = np.maximum(np.cos(incidence), self.min_cos_incidence)
         cos_e = np.cos(emission)
-        result: NDArrayFloatType = data * (cos_i + cos_e) / (2.0 * cos_i)
-        return result
+        denom = self._signed_sum_denom(cos_i, cos_e)
+        return cast(NDArrayFloatType, data * denom / (2.0 * cos_i))
 
     def uncorrect(
         self,
@@ -163,7 +183,7 @@ class LommelSeeligerModel:
         emission: NDArrayFloatType,
         phase: NDArrayFloatType,
     ) -> NDArrayFloatType:
-        """Undo :meth:`correct` using the same incidence clamping and denominator floor.
+        """Undo :meth:`correct` using the same incidence clamping and signed denom floor.
 
         Parameters:
             data: Values after Lommel-Seeliger :meth:`correct`.
@@ -173,12 +193,11 @@ class LommelSeeligerModel:
 
         Returns:
             ``NDArrayFloatType`` of same shape as ``data``, ``data * (2*cos_i) / denom``
-            where ``denom = max(|cos_i+cos_e|, min_denom)`` preserves sign.
+            where ``denom`` is ``cos_i + cos_e`` with the same signed floor as :meth:`correct`.
         """
         cos_i = np.maximum(np.cos(incidence), self.min_cos_incidence)
         cos_e = np.cos(emission)
-        denom = cos_i + cos_e
-        denom = np.where(np.abs(denom) < self.min_denom, self.min_denom, denom)
+        denom = self._signed_sum_denom(cos_i, cos_e)
         return cast(NDArrayFloatType, data * (2.0 * cos_i) / denom)
 
 

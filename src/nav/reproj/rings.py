@@ -88,6 +88,92 @@ _RADIUS_SLOP = 1e-6  # km
 
 _MAX_LONGITUDE = math.pi * 2.0 - _LONGITUDE_SLOP * 2
 
+# ``bool`` subclasses ``int``; reject for range endpoints.
+_REAL_SCALAR_TYPES = (int, float, np.integer, np.floating)
+
+
+def _validate_reproject_longitude_range(longitude_range: object) -> tuple[float, float]:
+    """Validate ``RingMosaic.reproject(..., longitude_range=...)``; return finite floats."""
+    if not isinstance(longitude_range, (tuple, list)):
+        raise TypeError(
+            'reproject() longitude_range must be a tuple or list of two numbers (rad), '
+            f'got {type(longitude_range).__name__}'
+        )
+    if len(longitude_range) != 2:
+        raise ValueError(
+            'reproject() longitude_range must have exactly two elements (start, end) in radians, '
+            f'got length {len(longitude_range)}'
+        )
+    lon_start, lon_end = longitude_range[0], longitude_range[1]
+    for label, x in (('start', lon_start), ('end', lon_end)):
+        if isinstance(x, bool) or not isinstance(x, _REAL_SCALAR_TYPES):
+            raise TypeError(
+                f'reproject() longitude_range {label} must be int or float, got {type(x).__name__}'
+            )
+    lon_start_f = float(lon_start)
+    lon_end_f = float(lon_end)
+    if not math.isfinite(lon_start_f) or not math.isfinite(lon_end_f):
+        raise ValueError(
+            'reproject() longitude_range values must be finite; '
+            f'got start={longitude_range[0]!r}, end={longitude_range[1]!r}'
+        )
+    if lon_start_f < 0.0 or lon_start_f > _MAX_LONGITUDE:
+        raise ValueError(
+            'reproject() longitude_range start must satisfy 0 <= start <= _MAX_LONGITUDE (rad); '
+            f'got start={lon_start_f!r}'
+        )
+    if lon_end_f < 0.0 or lon_end_f > _MAX_LONGITUDE:
+        raise ValueError(
+            'reproject() longitude_range end must satisfy 0 <= end <= _MAX_LONGITUDE (rad); '
+            f'got end={lon_end_f!r}'
+        )
+    if lon_start_f > lon_end_f:
+        raise ValueError(
+            'reproject() longitude_range must have start <= end (rad); '
+            f'got start={lon_start_f!r}, end={lon_end_f!r}'
+        )
+    return lon_start_f, lon_end_f
+
+
+def _validate_reproject_radius_range(radius_range: object) -> tuple[float, float]:
+    """Validate ``RingMosaic.reproject(..., radius_range=...)``; return finite floats.
+
+    ``inner < outer`` is required in both modes: absolute radii (km) when
+    ``orbit_model is None``, or signed offsets (km) from the orbital radius when
+    a model is used.
+    """
+    if not isinstance(radius_range, (tuple, list)):
+        raise TypeError(
+            'reproject() radius_range must be a tuple or list of two numbers (km), '
+            f'got {type(radius_range).__name__}'
+        )
+    if len(radius_range) != 2:
+        raise ValueError(
+            'reproject() radius_range must have exactly two elements (inner, outer) in km, '
+            f'got length {len(radius_range)}'
+        )
+    ri, ro = radius_range[0], radius_range[1]
+    for label, x in (('inner', ri), ('outer', ro)):
+        if isinstance(x, bool) or not isinstance(x, _REAL_SCALAR_TYPES):
+            raise TypeError(
+                f'reproject() radius_range {label} must be int or float, got {type(x).__name__}'
+            )
+    ri_f = float(ri)
+    ro_f = float(ro)
+    if not math.isfinite(ri_f) or not math.isfinite(ro_f):
+        raise ValueError(
+            'reproject() radius_range values must be finite; '
+            f'got inner={radius_range[0]!r}, outer={radius_range[1]!r}'
+        )
+    if ri_f >= ro_f:
+        raise ValueError(
+            'reproject() radius_range must have inner < outer (km). With orbit_model=None '
+            'these are absolute radii; with a model they are signed offsets from the orbital '
+            f'radius at each (longitude, time). Got inner={ri_f!r}, outer={ro_f!r}.'
+        )
+    return ri_f, ro_f
+
+
 # Module-level defaults for RingMosaic parameters
 DEFAULT_LONGITUDE_RESOLUTION = 0.02 * math.pi / 180.0  # 0.02 degrees in rad
 DEFAULT_RADIUS_RESOLUTION = 5.0  # km
@@ -142,7 +228,7 @@ class RingReprojResult:
         self,
         path: PathLike,
         *,
-        format: str | None = None,  # noqa: A002
+        format_: str | None = None,
         compress: bool = True,
     ) -> None:
         """Save this RingReprojResult to a file.
@@ -150,8 +236,8 @@ class RingReprojResult:
         Parameters:
             path: Output path (``str``, ``pathlib.Path``, or ``filecache.FCPath``).
                 The format is inferred from the extension (.npz for NumPy archive,
-                .fits/.fit for FITS) unless ``format`` is given.
-            format: Explicit format: ``'npz'`` or ``'fits'``.
+                .fits/.fit for FITS) unless ``format_`` is given.
+            format_: Explicit format: ``'npz'`` or ``'fits'``.
             compress: If True (default), use compressed npz. Ignored for
                 FITS.
 
@@ -165,7 +251,7 @@ class RingReprojResult:
             result.save('ring_reproj.npz')
             reloaded = RingReprojResult.load('ring_reproj.npz')
         """
-        fmt = infer_format(path, format)
+        fmt = infer_format(path, format_)
         payload: dict[str, Any] = {
             'body_name': self.body_name,
             'img': self.img,
@@ -196,13 +282,13 @@ class RingReprojResult:
         cls,
         path: PathLike,
         *,
-        format: str | None = None,  # noqa: A002
+        format_: str | None = None,
     ) -> 'RingReprojResult':
         """Load a RingReprojResult from a file.
 
         Parameters:
             path: Input path (``str``, ``pathlib.Path``, or ``filecache.FCPath``).
-            format: Explicit format (``'npz'`` or ``'fits'``). If None,
+            format_: Explicit format (``'npz'`` or ``'fits'``). If None,
                 inferred from the file extension.
 
         Returns:
@@ -217,7 +303,7 @@ class RingReprojResult:
 
             result = RingReprojResult.load('ring_reproj.npz')
         """
-        fmt = infer_format(path, format)
+        fmt = infer_format(path, format_)
         d = (
             load_npz(path, 'RingReprojResult')
             if fmt == 'npz'
@@ -247,7 +333,7 @@ class RingReprojResult:
                 f'RingReprojResult file is missing required keys: {sorted(missing)}. '
                 f'Found keys: {sorted(d.keys())!r}. '
                 'If this path ends in .fits but the file is actually an npz archive, '
-                'rename it to .npz or pass format= explicitly; otherwise the file may be '
+                'rename it to .npz or pass format_= explicitly; otherwise the file may be '
                 'truncated or not written by RingReprojResult.save().'
             )
 
@@ -358,7 +444,7 @@ class RingMosaicData:
         self,
         path: PathLike,
         *,
-        format: str | None = None,  # noqa: A002
+        format_: str | None = None,
         compress: bool = True,
     ) -> None:
         """Save this RingMosaicData to a file.
@@ -366,8 +452,8 @@ class RingMosaicData:
         Parameters:
             path: Output path (``str``, ``pathlib.Path``, or ``filecache.FCPath``).
                 The format is inferred from the extension (.npz for NumPy archive,
-                .fits/.fit for FITS) unless ``format`` is given.
-            format: Explicit format: ``'npz'`` or ``'fits'``.
+                .fits/.fit for FITS) unless ``format_`` is given.
+            format_: Explicit format: ``'npz'`` or ``'fits'``.
             compress: If True (default), use compressed npz. Ignored for
                 FITS.
 
@@ -379,10 +465,10 @@ class RingMosaicData:
 
             data = ring_mosaic.to_bounded(longitude_range=(0.0, math.pi))
             data.save('saturn_rings.npz')
-            data.save('saturn_rings.fits', format='fits')
+            data.save('saturn_rings.fits', format_='fits')
             reloaded = RingMosaicData.load('saturn_rings.npz')
         """
-        fmt = infer_format(path, format)
+        fmt = infer_format(path, format_)
         payload: dict[str, Any] = {
             'body_name': self.body_name,
             'ring_body_name': self.ring_body_name,
@@ -417,13 +503,13 @@ class RingMosaicData:
         cls,
         path: PathLike,
         *,
-        format: str | None = None,  # noqa: A002
+        format_: str | None = None,
     ) -> 'RingMosaicData':
         """Load a RingMosaicData from a file.
 
         Parameters:
             path: Input path (``str``, ``pathlib.Path``, or ``filecache.FCPath``).
-            format: Explicit format (``'npz'`` or ``'fits'``). If None,
+            format_: Explicit format (``'npz'`` or ``'fits'``). If None,
                 inferred from the file extension.
 
         Returns:
@@ -439,7 +525,7 @@ class RingMosaicData:
 
             data = RingMosaicData.load('saturn_rings.npz')
         """
-        fmt = infer_format(path, format)
+        fmt = infer_format(path, format_)
         d = load_npz(path, 'RingMosaicData') if fmt == 'npz' else load_fits(path, 'RingMosaicData')
 
         _REQUIRED_KEYS_MOSAIC = {
@@ -468,7 +554,7 @@ class RingMosaicData:
                 f'RingMosaicData file is missing required keys: {sorted(missing)}. '
                 f'Found keys: {sorted(d.keys())!r}. '
                 'If the path ends in .fits but the payload is npz (ZIP), rename to .npz '
-                'or pass format=; otherwise the file may be corrupt or from another tool.'
+                'or pass format_=; otherwise the file may be corrupt or from another tool.'
             )
 
         image_dtype = np.dtype(str(d['image_dtype']))
@@ -899,8 +985,13 @@ class RingMosaic:
         Raises:
             NotImplementedError: If negative zoom_amt (spline order) is
                 requested.
-            ValueError: If n_longitude_bins_zoom is not a multiple of
-                l_zoom_amt (internal consistency check).
+            TypeError: If ``longitude_range`` or ``radius_range`` is not a
+                tuple/list of numeric endpoints, or an endpoint has the wrong type.
+            ValueError: If ``longitude_range`` or ``radius_range`` has wrong
+                length, non-finite values, longitudes outside
+                ``[0, _MAX_LONGITUDE]``, ``start > end``, ``radius_inner >= radius_outer``,
+                if ``n_longitude_bins_zoom`` is not a multiple of ``l_zoom_amt``, or
+                for other argument errors.
         """
         logger = logging.getLogger(_LOGGING_NAME + '.reproject')
         logger.debug(
@@ -933,14 +1024,13 @@ class RingMosaic:
             # radius_range uses the same convention as the constructor's
             # radius_inner / radius_outer: absolute km if orbit_model is None,
             # signed offsets from orbit_model.a otherwise.
-            radius_inner = float(radius_range[0])
-            radius_outer = float(radius_range[1])
+            radius_inner, radius_outer = _validate_reproject_radius_range(radius_range)
 
         if longitude_range is None:
             longitude_start = 0.0
             longitude_end = _MAX_LONGITUDE
         else:
-            longitude_start, longitude_end = longitude_range
+            longitude_start, longitude_end = _validate_reproject_longitude_range(longitude_range)
 
         if not isinstance(zoom_amt, (list, tuple)):
             zoom_amt = (zoom_amt, zoom_amt)
@@ -1416,10 +1506,20 @@ class RingMosaic:
             OverflowError: If the number of images added would exceed the
                 uint16 maximum of 65 535.
             ValueError: If the reprojection's body name, grid resolution, radius
-                bounds, dtypes, sparse shapes, orbit model, or photometric model
-                does not match the mosaic's.
+                bounds, dtypes, sparse shapes, ``longitude_antimask`` true count vs.
+                sparse column count, orbit model, or photometric model does not match
+                the mosaic's.
         """
         self._validate_repro_compatible(repro)
+        n_lon_true = int(np.count_nonzero(repro.longitude_antimask))
+        n_sparse_cols = int(repro.img.shape[1])
+        if n_lon_true != n_sparse_cols:
+            raise ValueError(
+                'RingMosaic.add(): RingReprojResult.longitude_antimask must have one True '
+                'entry per sparse column in repro.img; '
+                f'count_nonzero(longitude_antimask)={n_lon_true}, '
+                f'repro.img.shape[1]={n_sparse_cols}'
+            )
         # RingOrbitModel is a frozen dataclass with value-based equality
         # (auto-generated __eq__), so a model loaded from disk is equal to
         # but not identical to the in-memory mosaic instance. Compare by

@@ -80,12 +80,10 @@ Issues = "https://github.com/SETI/rms-nav/issues"
 [tool.mypy]
 strict = true
 disallow_subclassing_any = false
-exclude = ["src/experiments"]
+exclude = ["src/experiments", "^build/"]
 mypy_path = "src"
 # Third-party science stack is largely untyped or stub-incomplete; per-module
-# ``ignore_missing_imports`` below covers missing packages; this silences
-# ``import-untyped`` for installed packages without ``py.typed`` (e.g. oops, scipy).
-disable_error_code = ["import-untyped"]
+# ``ignore_missing_imports`` below covers missing packages.
 
 [[tool.mypy.overrides]]
 module = "nav._version"
@@ -169,6 +167,8 @@ extend-ignore = ["N802", "N803", "N806", "PT011", "SIM105", "SIM108"]
 [tool.ruff.lint.per-file-ignores]
 # Entry-point scripts add package to path before importing nav
 "src/main/*.py" = ["E402"]
+# Sphinx reads ``copyright`` from conf by name (builtin shadowing is unavoidable).
+"docs/conf.py" = ["A001"]
 
 [tool.ruff.format]
 quote-style = "single"

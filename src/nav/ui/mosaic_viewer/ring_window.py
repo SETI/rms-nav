@@ -109,9 +109,12 @@ def _compute_ewmu(ew: ma.MaskedArray, emission_deg: ma.MaskedArray) -> ma.Masked
         emission_deg: Per-column mean emission angle in degrees (masked array).
 
     Returns:
-        1-D masked ``ma.MaskedArray`` of ``ew * mu``.
+        1-D masked ``ma.MaskedArray`` of ``ew * mu``. Masked emission angles stay
+        masked (no fill to 0°); the result combines ``ew`` and ``emission_deg``
+        masks so ``EW * mu`` does not invent unmasked values where emission is unknown.
     """
-    mu = np.abs(np.cos(np.radians(emission_deg.filled(0.0))))
+    emi_rad = np.radians(emission_deg)
+    mu = cast(ma.MaskedArray, np.abs(np.cos(emi_rad)))
     return cast(ma.MaskedArray, ew * mu)
 
 
@@ -946,7 +949,7 @@ class RingMosaicWindow(QMainWindow):
             return
         # The image widget always builds a virtual full-circle canvas for
         # rings (``ring_full_lon=True``), so virtual column 0 is at longitude
-        # 0° regardless of where the stored data starts. The viewport's left
+        # 0 deg regardless of where the stored data starts. The viewport's left
         # and right edges sit at virtual columns ``hv / xz`` and
         # ``(hv + vw) / xz``; converting straight to longitude (without any
         # data-range clipping) lets the EW xlim track the viewport into

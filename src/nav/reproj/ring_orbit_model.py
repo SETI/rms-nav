@@ -59,13 +59,24 @@ class RingOrbitModel:
             raise ValueError(f'RingOrbitModel semi-major axis must be positive, got {self.a}')
         if not (0.0 <= self.e < 1.0):
             raise ValueError(f'RingOrbitModel eccentricity must be in [0, 1), got {self.e}')
+        if not isinstance(self.epoch_utc, str):
+            raise TypeError(
+                'RingOrbitModel epoch_utc must be str (ISO UTC), got '
+                f'{type(self.epoch_utc).__name__}'
+            )
         # frozen=True prevents direct assignment; use object.__setattr__.
-        # _utc2et may raise TypeError when julian is mocked (e.g. Sphinx docs build);
-        # fall back to 0.0 in that case since the value will never be used.
         try:
-            epoch_et: float = _utc2et(self.epoch_utc)
-        except TypeError:
-            epoch_et = 0.0
+            epoch_et = _utc2et(self.epoch_utc)
+        except TypeError as exc:
+            raise TypeError(
+                'RingOrbitModel epoch_utc could not be converted to ephemeris time (TDB seconds); '
+                f'check epoch_utc is valid calendar data for julian: {self.epoch_utc!r}'
+            ) from exc
+        if not math.isfinite(epoch_et):
+            raise ValueError(
+                'RingOrbitModel epoch_utc produced a non-finite ephemeris time (TDB seconds); '
+                f'epoch_utc={self.epoch_utc!r}, et={epoch_et!r}'
+            )
         object.__setattr__(self, '_epoch_et', epoch_et)
 
     def radius_at_longitude(self, longitude: NDArrayFloatType, et: float) -> NDArrayFloatType:

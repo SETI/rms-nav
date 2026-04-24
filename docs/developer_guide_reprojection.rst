@@ -184,13 +184,13 @@ fits
 Format inference
 ^^^^^^^^^^^^^^^^
 
-When ``format=None`` (the default), the format is inferred from the file
+When ``format_=None`` (the default), the format is inferred from the file
 extension:
 
 - ``.npz`` → ``'npz'``
 - ``.fits``, ``.fit``, ``.fits.gz``, ``.fz`` → ``'fits'``
 
-An explicit ``format='npz'`` or ``format='fits'`` keyword overrides inference.
+An explicit ``format_='npz'`` or ``format_='fits'`` keyword overrides inference.
 
 kind / version scheme
 ^^^^^^^^^^^^^^^^^^^^^

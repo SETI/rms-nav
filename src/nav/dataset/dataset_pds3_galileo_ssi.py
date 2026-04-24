@@ -68,7 +68,7 @@ class DataSetPDS3GalileoSSI(DataSetPDS3):
         """
 
         parts = filespec.split('/')
-        if parts[0].startswith('GO_'):
+        if parts[0].upper().startswith('GO_'):
             parts = parts[1:]
         if not (2 <= len(parts) <= 4):
             raise ValueError(

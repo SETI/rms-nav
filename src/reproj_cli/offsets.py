@@ -68,7 +68,7 @@ def load_offset_if_any(
             image_file.image_file_url,
         )
         return None
-    except Exception as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         MAIN_LOGGER.warning(
             'Could not read metadata for %s (%s); using uncorrected pointing.',
             image_file.image_file_url,

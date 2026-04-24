@@ -284,6 +284,18 @@ class BodyMosaicWindow(QMainWindow):
             self._on_projection_changed()
 
     def statusBar(self) -> QStatusBar:
+        """Return this window's status bar as a non-optional ``QStatusBar``.
+
+        Overrides ``QMainWindow.statusBar`` from Qt. Delegates to
+        ``super().statusBar()`` and asserts the result is not ``None`` so callers
+        may rely on a concrete ``QStatusBar`` (not ``Optional``); the first use
+        in this class is from :meth:`_setup_ui`, which materializes the bar.
+
+        Returns:
+            The ``QStatusBar`` from the base implementation. The
+            ``assert bar is not None`` narrows the type from ``QStatusBar | None``
+            (Qt's return contract) to ``QStatusBar`` for static analysis and callers.
+        """
         bar = super().statusBar()
         assert bar is not None
         return bar

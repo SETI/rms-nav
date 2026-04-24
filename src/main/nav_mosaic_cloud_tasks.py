@@ -54,6 +54,15 @@ from reproj_cli.reproject import reproject_one_body, reproject_one_ring
 _MODE: str = ''
 
 
+def _resolve_nav_results_root_fcpath(cli_args: argparse.Namespace) -> FCPath | None:
+    """Return the nav results root as an ``FCPath``, or ``None`` if unset."""
+    try:
+        nav_results_root_str = get_nav_results_root(cli_args, DEFAULT_CONFIG)
+    except ValueError:
+        return None
+    return FileCache(None).new_path(nav_results_root_str)
+
+
 def _log_main_exception(msg: str, *args: object) -> None:
     """Log an exception with full traceback (frames plus final error line)."""
     MAIN_LOGGER.exception(msg, *args, stacktrace=False, more=traceback.format_exc())
@@ -84,7 +93,9 @@ def process_task(
               :func:`reproj_cli.factories.build_ring_mosaic` and
               :func:`reproj_cli.reproject.reproject_one_ring`.
         worker_data: The data for the worker (parsed CLI namespace in ``args``,
-            which holds only ``config_file`` and ``nav_results_root``).
+            which holds only ``config_file`` and ``nav_results_root``). After worker
+            startup, ``nav_results_root_path`` may be set to a precomputed
+            :class:`filecache.FCPath` for offset loading.
 
     Returns:
         Tuple of ``(retry, result)``. ``retry`` is always ``False``; ``result`` is
@@ -93,13 +104,7 @@ def process_task(
     cli_args = cast(argparse.Namespace, worker_data.args)
     load_default_and_user_config(cli_args, DEFAULT_CONFIG)
 
-    nav_results_root_path: FCPath | None = None
-    try:
-        nav_results_root_str = get_nav_results_root(cli_args, DEFAULT_CONFIG)
-    except ValueError:
-        nav_results_root_str = None
-    if nav_results_root_str:
-        nav_results_root_path = FileCache(None).new_path(nav_results_root_str)
+    nav_results_root_path = cast(FCPath | None, getattr(worker_data, 'nav_results_root_path', None))
 
     dataset_name = task_data.get('dataset_name')
     if dataset_name is None:
@@ -121,24 +126,24 @@ def process_task(
     task_arguments = task_data.get('arguments')
     if task_arguments is None:
         return False, {'status': 'error', 'status_error': 'no_arguments'}
-    task_args = argparse.Namespace(**task_arguments)
 
-    output_dir_str = getattr(task_args, 'output_dir', None)
+    output_dir_str = task_arguments.get('output_dir')
     if output_dir_str is None:
         return False, {'status': 'error', 'status_error': 'no_output_dir'}
 
+    prefix: str = task_arguments.get('prefix', '')
+    fmt: str = task_arguments.get('format', 'fits')
+    overwrite: bool = task_arguments.get('overwrite', False)
+    no_write_output_files: bool = task_arguments.get('no_write_output_files', False)
+    image_name_override: str | None = task_arguments.get('image_name', None)
+
+    output_dir = FCPath(output_dir_str)
+    task_args = argparse.Namespace(**task_arguments)
     mosaic: BodyMosaic | RingMosaic
     if _MODE == 'body':
         mosaic = build_body_mosaic(task_args)
     else:
         mosaic = build_ring_mosaic(task_args)
-
-    output_dir = FCPath(output_dir_str)
-    prefix: str = getattr(task_args, 'prefix', '')
-    fmt: str = getattr(task_args, 'format', 'fits')
-    overwrite: bool = getattr(task_args, 'overwrite', False)
-    no_write_output_files: bool = getattr(task_args, 'no_write_output_files', False)
-    image_name_override: str | None = getattr(task_args, 'image_name', None)
 
     for file in files:
         image_file_url = file.get('image_file_url', None)
@@ -214,6 +219,20 @@ def process_task(
 
 
 async def async_main() -> None:
+    """Async CLI entry for the cloud_tasks reprojection worker.
+
+    Reads ``sys.argv`` without modifying it: the first token after the script name
+    must be ``rings`` or ``body``. That value is stored in the module-level
+    ``_MODE`` for ``process_task``. Remaining tokens are passed to the
+    cloud_tasks ``Worker``, which parses only ``--config-file`` and
+    ``--nav-results-root`` (see the ``ArgumentParser`` built here). Before the
+    worker starts, default and user config are loaded and
+    ``worker._data.nav_results_root_path`` is precomputed for tasks.
+
+    If the mode is missing or invalid, prints usage to stderr and calls
+    ``sys.exit(1)``. Otherwise awaits ``worker.start()`` until the worker stops
+    and returns normally, or lets exceptions propagate.
+    """
     global _MODE
 
     argv = sys.argv[1:]
@@ -255,10 +274,31 @@ async def async_main() -> None:
     )
 
     worker = Worker(process_task, args=rest, argparser=argparser)
+    init_cli_args = cast(argparse.Namespace, worker._data.args)
+    load_default_and_user_config(init_cli_args, DEFAULT_CONFIG)
+    # ``WorkerData`` has no typed field; ``process_task`` reads via ``getattr``.
+    setattr(
+        worker._data,
+        'nav_results_root_path',
+        _resolve_nav_results_root_fcpath(init_cli_args),
+    )
     await worker.start()
 
 
 def main() -> None:  # Required for setuptools entry points
+    """Synchronous entry point (setuptools and ``python -m`` / ``if __name__``).
+
+    Runs ``asyncio.run(async_main())`` so the cloud_tasks worker runs under an
+    event loop. This function does not parse arguments or set ``_MODE`` itself;
+    ``async_main`` reads ``sys.argv`` (first argument ``rings`` or ``body``),
+    assigns ``_MODE``, and leaves further parsing to the ``Worker``. Companion
+    entry points ``rings_main`` and ``body_main`` prepend the mode to
+    ``sys.argv`` before calling ``main``; ``main`` does not change ``sys.argv``.
+
+    Returns when ``async_main`` completes. If ``async_main`` (or the worker)
+    calls ``sys.exit``, the interpreter exits with that status and this call
+    does not return. Uncaught exceptions propagate out of ``asyncio.run``.
+    """
     asyncio.run(async_main())
 
 

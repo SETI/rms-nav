@@ -49,6 +49,10 @@ DEFAULT_MAX_RESOLUTION: float | None = None
 DEFAULT_EDGE_MARGIN = 3
 DEFAULT_ZOOM = 1
 
+# ``BodyMosaic.__init__`` numeric validation (``bool`` subclasses ``int``).
+_REAL_SCALAR_TYPES = (int, float, np.integer, np.floating)
+_INTEGRAL_SCALAR_TYPES = (int, np.integer)
+
 # Lambert is set mainly based on the depth of craters - if the incidence angle
 # is too large the crater interior is too shadowed and we don't get a good
 # reprojection. If the emission angle is too large we can't see over the crater
@@ -110,7 +114,7 @@ class BodyReprojResult:
         self,
         path: PathLike,
         *,
-        format: str | None = None,  # noqa: A002
+        format_: str | None = None,
         compress: bool = True,
     ) -> None:
         """Save this BodyReprojResult to a file.
@@ -118,8 +122,8 @@ class BodyReprojResult:
         Parameters:
             path: Output path (``str``, ``pathlib.Path``, or ``filecache.FCPath``).
                 The format is inferred from the extension (.npz for NumPy archive,
-                .fits/.fit for FITS) unless ``format`` is given.
-            format: Explicit format: ``'npz'`` or ``'fits'``. Overrides
+                .fits/.fit for FITS) unless ``format_`` is given.
+            format_: Explicit format: ``'npz'`` or ``'fits'``. Overrides
                 extension-based inference.
             compress: If True (default), use compressed npz. Ignored for
                 FITS.
@@ -132,10 +136,10 @@ class BodyReprojResult:
 
             result = mosaic.reproject(obs)
             result.save('reprojection.npz')
-            result.save('reprojection.fits', format='fits')
+            result.save('reprojection.fits', format_='fits')
             reloaded = BodyReprojResult.load('reprojection.npz')
         """
-        fmt = infer_format(path, format)
+        fmt = infer_format(path, format_)
         payload: dict[str, Any] = {
             'body_name': self.body_name,
             'img': self.img,
@@ -170,13 +174,13 @@ class BodyReprojResult:
         cls,
         path: PathLike,
         *,
-        format: str | None = None,  # noqa: A002
+        format_: str | None = None,
     ) -> 'BodyReprojResult':
         """Load a BodyReprojResult from a file.
 
         Parameters:
             path: Input path (``str``, ``pathlib.Path``, or ``filecache.FCPath``).
-            format: Explicit format (``'npz'`` or ``'fits'``). If None,
+            format_: Explicit format (``'npz'`` or ``'fits'``). If None,
                 inferred from the file extension.
 
         Returns:
@@ -191,7 +195,7 @@ class BodyReprojResult:
 
             result = BodyReprojResult.load('reprojection.npz')
         """
-        fmt = infer_format(path, format)
+        fmt = infer_format(path, format_)
         d = (
             load_npz(path, 'BodyReprojResult')
             if fmt == 'npz'
@@ -305,7 +309,7 @@ class BodyMosaicData:
         self,
         path: PathLike,
         *,
-        format: str | None = None,  # noqa: A002
+        format_: str | None = None,
         compress: bool = True,
     ) -> None:
         """Save this BodyMosaicData to a file.
@@ -313,8 +317,8 @@ class BodyMosaicData:
         Parameters:
             path: Output path (``str``, ``pathlib.Path``, or ``filecache.FCPath``).
                 The format is inferred from the extension (.npz for NumPy archive,
-                .fits/.fit for FITS) unless ``format`` is given.
-            format: Explicit format: ``'npz'`` or ``'fits'``. Overrides
+                .fits/.fit for FITS) unless ``format_`` is given.
+            format_: Explicit format: ``'npz'`` or ``'fits'``. Overrides
                 extension-based inference.
             compress: If True (default), use compressed npz. Ignored for
                 FITS.
@@ -327,11 +331,11 @@ class BodyMosaicData:
 
             data = mosaic.to_bounded()
             data.save('mimas.npz')
-            data.save('mimas.fits', format='fits')
+            data.save('mimas.fits', format_='fits')
             data.save('mimas.npz', compress=False)
             reloaded = BodyMosaicData.load('mimas.npz')
         """
-        fmt = infer_format(path, format)
+        fmt = infer_format(path, format_)
         payload: dict[str, Any] = {
             'body_name': self.body_name,
             'img': self.img,
@@ -367,13 +371,13 @@ class BodyMosaicData:
         cls,
         path: PathLike,
         *,
-        format: str | None = None,  # noqa: A002
+        format_: str | None = None,
     ) -> 'BodyMosaicData':
         """Load a BodyMosaicData from a file.
 
         Parameters:
             path: Input path (``str``, ``pathlib.Path``, or ``filecache.FCPath``).
-            format: Explicit format (``'npz'`` or ``'fits'``). If None,
+            format_: Explicit format (``'npz'`` or ``'fits'``). If None,
                 inferred from the file extension.
 
         Returns:
@@ -389,7 +393,7 @@ class BodyMosaicData:
 
             data = BodyMosaicData.load('mimas.npz')
         """
-        fmt = infer_format(path, format)
+        fmt = infer_format(path, format_)
         d = load_npz(path, 'BodyMosaicData') if fmt == 'npz' else load_fits(path, 'BodyMosaicData')
 
         image_dtype = np.dtype(str(d['image_dtype']))
@@ -581,7 +585,11 @@ class BodyMosaic:
                 Defaults to ``np.float32``.
 
         Raises:
-            ValueError: If latlon_type, lon_direction, or merge_strategy is invalid.
+            TypeError: If ``lat_resolution``, ``lon_resolution``, ``zoom``,
+                ``edge_margin``, or optional angle / resolution limits have an
+                invalid type.
+            ValueError: If latlon_type, lon_direction, merge_strategy, or any
+                numeric parameter is out of range.
 
         Note:
             ``time`` is always stored as ``float64`` regardless of
@@ -600,17 +608,82 @@ class BodyMosaic:
                 f'merge_strategy must be a BodyMosaicMergeStrategy member, got {merge_strategy!r}'
             )
 
+        if isinstance(lat_resolution, bool) or not isinstance(lat_resolution, _REAL_SCALAR_TYPES):
+            raise TypeError(
+                f'lat_resolution must be int or float, got {type(lat_resolution).__name__}'
+            )
+        if isinstance(lon_resolution, bool) or not isinstance(lon_resolution, _REAL_SCALAR_TYPES):
+            raise TypeError(
+                f'lon_resolution must be int or float, got {type(lon_resolution).__name__}'
+            )
+        lat_res_f = float(lat_resolution)
+        lon_res_f = float(lon_resolution)
+        if not math.isfinite(lat_res_f) or lat_res_f <= 0:
+            raise ValueError(f'lat_resolution must be finite and > 0, got {lat_resolution!r}')
+        if not math.isfinite(lon_res_f) or lon_res_f <= 0:
+            raise ValueError(f'lon_resolution must be finite and > 0, got {lon_resolution!r}')
+
+        if isinstance(zoom, bool) or not isinstance(zoom, _INTEGRAL_SCALAR_TYPES):
+            raise TypeError(f'zoom must be an int, got {type(zoom).__name__}')
+        zoom_i = int(zoom)
+        if zoom_i < 1:
+            raise ValueError(f'zoom must be >= 1, got {zoom!r}')
+
+        if isinstance(edge_margin, bool) or not isinstance(edge_margin, _INTEGRAL_SCALAR_TYPES):
+            raise TypeError(f'edge_margin must be an int, got {type(edge_margin).__name__}')
+        edge_margin_i = int(edge_margin)
+        if edge_margin_i < 0:
+            raise ValueError(f'edge_margin must be >= 0, got {edge_margin!r}')
+
+        if max_incidence is not None:
+            if isinstance(max_incidence, bool) or not isinstance(max_incidence, _REAL_SCALAR_TYPES):
+                raise TypeError(
+                    'max_incidence must be int or float or None, got '
+                    f'{type(max_incidence).__name__}'
+                )
+            mi = float(max_incidence)
+            if not math.isfinite(mi) or mi < 0.0 or mi > math.pi:
+                raise ValueError(
+                    f'max_incidence must be in [0, pi] radians when set, got {max_incidence!r}'
+                )
+
+        if max_emission is not None:
+            if isinstance(max_emission, bool) or not isinstance(max_emission, _REAL_SCALAR_TYPES):
+                raise TypeError(
+                    f'max_emission must be int or float or None, got {type(max_emission).__name__}'
+                )
+            me = float(max_emission)
+            if not math.isfinite(me) or me < 0.0 or me > math.pi:
+                raise ValueError(
+                    f'max_emission must be in [0, pi] radians when set, got {max_emission!r}'
+                )
+
+        if max_resolution is not None:
+            if isinstance(max_resolution, bool) or not isinstance(
+                max_resolution, _REAL_SCALAR_TYPES
+            ):
+                raise TypeError(
+                    'max_resolution must be int or float or None, got '
+                    f'{type(max_resolution).__name__}'
+                )
+            mr = float(max_resolution)
+            if not math.isfinite(mr) or mr <= 0.0:
+                raise ValueError(
+                    'max_resolution (km/pixel) must be finite and > 0 when set, got '
+                    f'{max_resolution!r}'
+                )
+
         self.body_name = body_name
-        self._lat_resolution = lat_resolution
-        self._lon_resolution = lon_resolution
+        self._lat_resolution = lat_res_f
+        self._lon_resolution = lon_res_f
         self._lat_range_init = lat_range
         self._lon_range_init = lon_range
         self._dynamic = dynamic
-        self._max_incidence = max_incidence
-        self._max_emission = max_emission
-        self._max_resolution = max_resolution
-        self._edge_margin = edge_margin
-        self._zoom = zoom
+        self._max_incidence = None if max_incidence is None else float(max_incidence)
+        self._max_emission = None if max_emission is None else float(max_emission)
+        self._max_resolution = None if max_resolution is None else float(max_resolution)
+        self._edge_margin = edge_margin_i
+        self._zoom = zoom_i
         self._latlon_type = latlon_type
         self._lon_direction = lon_direction
         self._photometric_model = photometric_model
@@ -620,8 +693,8 @@ class BodyMosaic:
 
         # Full-grid dimensions: floor(span/res)+1 so the last bin is not dropped
         # (matches ``RingMosaic`` longitude count and avoids int() truncation).
-        self._n_full_lat = math.floor(math.pi / lat_resolution) + 1
-        self._n_full_lon = math.floor(2.0 * math.pi / lon_resolution) + 1
+        self._n_full_lat = math.floor(math.pi / lat_res_f) + 1
+        self._n_full_lon = math.floor(2.0 * math.pi / lon_res_f) + 1
 
         # Internal mosaic arrays (empty = not yet initialized)
         self._img: NDArrayFloatType = np.empty((0, 0), dtype=self._image_dtype)
@@ -1151,6 +1224,14 @@ class BodyMosaic:
         good_lat = good_lat[ok_on_detector]
         good_lon = good_lon[ok_on_detector]
 
+        # ``good_u`` / ``good_v`` index the cropped ``subimg``; backplanes built on
+        # the full detector use full-frame shapes (same as ``ok_body_mask`` when it
+        # differs from ``subimg``). Align sampling indices with ``bp_*`` / ``resolution``.
+        if ok_body_mask.shape == subimg.shape:
+            bp_v, bp_u = good_v, good_u
+        else:
+            bp_v, bp_u = good_v + v_min, good_u + u_min
+
         # Zoom for interpolation (always copy when zoom==1: ``subimg`` may alias
         # ``obs.data``, which can be read-only mmap, and we must not mutate the obs.)
         if self._zoom == 1:
@@ -1173,9 +1254,9 @@ class BodyMosaic:
 
         # Apply photometric correction if requested
         if self._photometric_model is not None:
-            inc = bp_incidence[good_v, good_u]
-            emi = bp_emission[good_v, good_u]
-            pha = bp_phase[good_v, good_u]
+            inc = bp_incidence[bp_v, bp_u]
+            emi = bp_emission[bp_v, bp_u]
+            pha = bp_phase[bp_v, bp_u]
             interp_data = self._photometric_model.correct(
                 interp_data, incidence=inc, emission=emi, phase=pha
             )
@@ -1186,22 +1267,22 @@ class BodyMosaic:
         repro_res_full = _create_repro_array(
             latitude_pixels, longitude_pixels, self._metadata_dtype
         )
-        repro_res_full[good_lat, good_lon] = resolution[good_v, good_u]
+        repro_res_full[good_lat, good_lon] = resolution[bp_v, bp_u]
 
         repro_phase_full = _create_repro_array(
             latitude_pixels, longitude_pixels, self._metadata_dtype
         )
-        repro_phase_full[good_lat, good_lon] = bp_phase[good_v, good_u]
+        repro_phase_full[good_lat, good_lon] = bp_phase[bp_v, bp_u]
 
         repro_emission_full = _create_repro_array(
             latitude_pixels, longitude_pixels, self._metadata_dtype
         )
-        repro_emission_full[good_lat, good_lon] = bp_emission[good_v, good_u]
+        repro_emission_full[good_lat, good_lon] = bp_emission[bp_v, bp_u]
 
         repro_incidence_full = _create_repro_array(
             latitude_pixels, longitude_pixels, self._metadata_dtype
         )
-        repro_incidence_full[good_lat, good_lon] = bp_incidence[good_v, good_u]
+        repro_incidence_full[good_lat, good_lon] = bp_incidence[bp_v, bp_u]
 
         sub = slice(min_lat_pixel, max_lat_pixel + 1), slice(min_lon_pixel, max_lon_pixel + 1)
         eff_res = repro_res_full[sub].copy()

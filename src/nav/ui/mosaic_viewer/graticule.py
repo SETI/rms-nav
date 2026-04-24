@@ -68,22 +68,23 @@ def graticule_polylines(
     meridian_segs: list[list[tuple[float, float]]] = []
 
     if show_parallels and lat_step_deg > 0:
-        lat = math.ceil(-90.0 / lat_step_deg) * lat_step_deg
-        while lat <= 90.0 + 1e-9:
+        i_lat_min = math.ceil(-90.0 / lat_step_deg)
+        i_lat_max = math.floor((90.0 + 1e-9) / lat_step_deg)
+        for i_lat in range(i_lat_min, i_lat_max + 1):
+            lat = i_lat * lat_step_deg
             lons = np.linspace(0.0, 360.0, samples_per_line)
             lats = np.full_like(lons, lat)
             vx, vy, vis = lonlat_to_display(lons, lats, params)
             parallel_segs.extend(_split_polyline(vx, vy, vis))
-            lat += lat_step_deg
 
     if show_meridians and lon_step_deg > 0:
-        lon = 0.0
-        while lon < 360.0 - 1e-6:
+        i_lon_max = math.floor((360.0 - 1e-6) / lon_step_deg)
+        for i_lon in range(0, i_lon_max + 1):
+            lon = i_lon * lon_step_deg
             lats = np.linspace(-90.0, 90.0, samples_per_line)
             lons = np.full_like(lats, lon)
             vx, vy, vis = lonlat_to_display(lons, lats, params)
             meridian_segs.extend(_split_polyline(vx, vy, vis))
-            lon += lon_step_deg
 
     return parallel_segs, meridian_segs
 
@@ -125,8 +126,10 @@ def graticule_label_anchors(
     is_polar = params.kind in (ProjectionKind.POLAR_N, ProjectionKind.POLAR_S)
 
     if lat_step_deg > 0:
-        lat = math.ceil(-90.0 / lat_step_deg) * lat_step_deg
-        while lat <= 90.0 + 1e-9:
+        i_lat_min = math.ceil(-90.0 / lat_step_deg)
+        i_lat_max = math.floor((90.0 + 1e-9) / lat_step_deg)
+        for i_lat in range(i_lat_min, i_lat_max + 1):
+            lat = i_lat * lat_step_deg
             lons = np.linspace(0.0, 360.0, 181)
             lats = np.full_like(lons, lat)
             vx, vy, vis = lonlat_to_display(lons, lats, params)
@@ -138,11 +141,11 @@ def graticule_label_anchors(
                 anchor = _nearest_visible_to_centre(vx, vy, vis, cx, cy)
             if anchor is not None:
                 parallel_anchors.append((anchor[0], anchor[1], f'{lat:.0f}°'))
-            lat += lat_step_deg
 
     if lon_step_deg > 0:
-        lon = 0.0
-        while lon < 360.0 - 1e-6:
+        i_lon_max = math.floor((360.0 - 1e-6) / lon_step_deg)
+        for i_lon in range(0, i_lon_max + 1):
+            lon = i_lon * lon_step_deg
             lats = np.linspace(-90.0, 90.0, 181)
             lons = np.full_like(lats, lon)
             vx, vy, vis = lonlat_to_display(lons, lats, params)
@@ -157,7 +160,6 @@ def graticule_label_anchors(
                 anchor = _nearest_visible_to_centre(vx, vy, vis, cx, cy)
             if anchor is not None:
                 meridian_anchors.append((anchor[0], anchor[1], f'{lon:.0f}°'))
-            lon += lon_step_deg
 
     return parallel_anchors, meridian_anchors
 

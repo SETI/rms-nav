@@ -82,8 +82,8 @@ def test_ring_reproj_result_fits_roundtrip(tmp_path: Path) -> None:
         image_name='N123456',
     )
     path = tmp_path / 'ring.fits'
-    r1.save(path, format='fits')
-    r2 = RingReprojResult.load(path, format='fits')
+    r1.save(path, format_='fits')
+    r2 = RingReprojResult.load(path, format_='fits')
     assert r2.body_name == r1.body_name
     assert r2.longitude_resolution == pytest.approx(r1.longitude_resolution)
     assert r2.radius_resolution == pytest.approx(r1.radius_resolution)

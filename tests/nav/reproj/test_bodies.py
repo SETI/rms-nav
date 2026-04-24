@@ -677,8 +677,8 @@ class TestContributingImageNamesBodies:
         mosaic = BodyMosaic(body_name='MIMAS', lat_resolution=_LAT_RES, lon_resolution=_LON_RES)
         mosaic.add(_make_repro(lat_range=(5, 5), lon_range=(10, 10), image_name='N888'))
         path = tmp_path / 'body_mosaic.fits'
-        mosaic.to_bounded().save(path, format='fits')
-        loaded = BodyMosaicData.load(path, format='fits')
+        mosaic.to_bounded().save(path, format_='fits')
+        loaded = BodyMosaicData.load(path, format_='fits')
         assert loaded.contributing_image_names == ('N888',)
 
     def test_load_body_file_passes_contributing_names(self, tmp_path: Path) -> None:
@@ -686,7 +686,7 @@ class TestContributingImageNamesBodies:
         mosaic = BodyMosaic(body_name='MIMAS', lat_resolution=_LAT_RES, lon_resolution=_LON_RES)
         mosaic.add(_make_repro(lat_range=(5, 5), lon_range=(10, 10), image_name='mimas_obs'))
         path = tmp_path / 'body_for_display.fits'
-        mosaic.to_bounded().save(path, format='fits')
+        mosaic.to_bounded().save(path, format_='fits')
         dd = load_body_file(str(path))
         assert dd.is_mosaic is True
         assert dd.contributing_image_names == ('mimas_obs',)
@@ -704,7 +704,7 @@ class TestContributingImageNamesBodies:
             lon_resolution=_LON_RES,
         )
         path = tmp_path / 'body_reproj.fits'
-        repro.save(path, format='fits')
+        repro.save(path, format_='fits')
         dd = load_body_file(str(path))
         assert dd.is_mosaic is False
         assert dd.contributing_image_names == ('x',)

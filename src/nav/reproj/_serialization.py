@@ -150,7 +150,7 @@ def infer_format(
 
     raise ValueError(
         f'Cannot infer format from path {fcpath!r}. '
-        "Use format='npz' or format='fits' to specify explicitly."
+        "Use format_='npz' or format_='fits' to specify explicitly."
     )
 
 
@@ -305,12 +305,18 @@ def load_npz(
         unwrapped from 0-D arrays.
 
     Raises:
-        ValueError: If ``__kind__`` mismatches or the file is missing
-            required keys.
+        ValueError: If sentinels are missing, ``__kind__`` mismatches, or the
+            file is missing other required keys.
     """
     fcpath = _as_fcpath(path)
     local_path = cast(Path, fcpath.get_local_path())
     with np.load(local_path, allow_pickle=False) as raw:
+        if '__kind__' not in raw:
+            raise ValueError('Missing file sentinel __kind__ - file is truncated or wrong format')
+        if '__version__' not in raw:
+            raise ValueError(
+                'Missing file sentinel __version__ - file is truncated or wrong format'
+            )
         kind = str(raw['__kind__'])
         if kind != expected_kind:
             raise ValueError(f'Kind mismatch: file contains {kind!r}, expected {expected_kind!r}')
@@ -499,14 +505,18 @@ def load_fits(
         nested keys such as ``orbit_model__is_none``.
 
     Raises:
-        ValueError: If the file's ``KIND`` header card does not match
-            ``expected_kind``.
+        ValueError: If required sentinels are missing or the file's ``KIND``
+            header card does not match ``expected_kind``.
     """
     fcpath = _as_fcpath(path)
     local_path = cast(Path, fcpath.get_local_path())
     with fits.open(local_path) as hdul:
         primary_hdr = hdul[0].header
 
+        if 'KIND' not in primary_hdr:
+            raise ValueError('Missing file sentinel KIND - file is truncated or wrong format')
+        if 'VERSION' not in primary_hdr:
+            raise ValueError('Missing file sentinel VERSION - file is truncated or wrong format')
         kind = str(primary_hdr['KIND'])
         if kind != expected_kind:
             raise ValueError(f'Kind mismatch: file contains {kind!r}, expected {expected_kind!r}')
