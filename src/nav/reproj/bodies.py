@@ -620,8 +620,8 @@ class BodyMosaic:
 
         # Full-grid dimensions: floor(span/res)+1 so the last bin is not dropped
         # (matches ``RingMosaic`` longitude count and avoids int() truncation).
-        self._n_full_lat = int(math.floor(math.pi / lat_resolution)) + 1
-        self._n_full_lon = int(math.floor(2.0 * math.pi / lon_resolution)) + 1
+        self._n_full_lat = math.floor(math.pi / lat_resolution) + 1
+        self._n_full_lon = math.floor(2.0 * math.pi / lon_resolution) + 1
 
         # Internal mosaic arrays (empty = not yet initialized)
         self._img: NDArrayFloatType = np.empty((0, 0), dtype=self._image_dtype)
@@ -756,7 +756,7 @@ class BodyMosaic:
         """Build a placeholder :class:`BodyReprojResult` when the body is off the detector.
 
         Used when no valid latitude/longitude samples fall on the detector (outside
-        FOV or fully masked). Allocates only the minimal 2×2 placeholder window
+        FOV or fully masked). Allocates only the minimal 2x2 placeholder window
         (``lat_idx_range`` / ``lon_idx_range`` ``(0, 1)``). Geometry arrays are fully
         masked; ``img`` is either a small fully-masked float grid or a boolean mask
         grid when ``mask_only`` is True. Scalar metadata (``time``, ``image_name``, sub-solar /

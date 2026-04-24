@@ -102,7 +102,7 @@ class RingOrbitModel:
         Returns:
             Longitude shift in radians (wrapped to [0, 2*pi)).
         """
-        # Explicit parentheses: negate mean-motion × elapsed days, then mod.
+        # Explicit parentheses: negate mean-motion x elapsed days, then mod.
         return (-(self.mean_motion * ((et - self._epoch_et) / _SECONDS_PER_DAY))) % (2.0 * math.pi)
 
     def inertial_to_corotating(self, longitude: NDArrayFloatType, et: float) -> NDArrayFloatType:

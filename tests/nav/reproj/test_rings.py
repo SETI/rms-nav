@@ -26,8 +26,11 @@ _RADIUS_INNER = 1000.0  # km
 _RADIUS_OUTER = 1020.0  # km
 
 # Derived constants
-_N_FULL_LON = int(math.floor(2.0 * math.pi / _LON_RES)) + 1  # 33 for _LON_RES = π/16
+_N_FULL_LON = math.floor(2.0 * math.pi / _LON_RES) + 1  # 33 for _LON_RES = π/16
 _N_RADIUS = 5  # ceil((1020-1000 + slop) / 5.0) = 5
+
+_DEFAULT_IMAGE_DTYPE = np.dtype(np.float64)
+_DEFAULT_METADATA_DTYPE = np.dtype(np.float32)
 
 
 # =========================================================================
@@ -55,8 +58,8 @@ def _make_ring_repro(
     image_name: str = '',
     orbit_model: RingOrbitModel | None = None,
     photometric_model_name: str | None = None,
-    image_dtype: np.dtype = np.dtype(np.float64),
-    metadata_dtype: np.dtype = np.dtype(np.float32),
+    image_dtype: np.dtype = _DEFAULT_IMAGE_DTYPE,
+    metadata_dtype: np.dtype = _DEFAULT_METADATA_DTYPE,
 ) -> RingReprojResult:
     """Build a synthetic RingReprojResult for use in tests.
 
@@ -493,7 +496,8 @@ class TestRingMergeStrategies:
 
         # First: all radii masked except 2
         img1 = ma.MaskedArray(
-            np.ones((_N_RADIUS, 1), dtype=np.float64) * 1.0,  # matches RingMosaic default image_dtype
+            np.ones((_N_RADIUS, 1), dtype=np.float64)
+            * 1.0,  # matches RingMosaic default image_dtype
             mask=np.array([[True], [True], [True], [False], [False]]),
         )
         mosaic.add(

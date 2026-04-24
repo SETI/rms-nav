@@ -642,7 +642,7 @@ class RingMosaic:
         self._n_radius = math.ceil((radius_outer - radius_inner + _RADIUS_SLOP) / radius_resolution)
         # int(2π / res) truncates when the ratio is not exactly representable; use
         # floor(2π / res) + 1 so bin indices through floor(_MAX_LONGITUDE / res) fit.
-        self._n_full_lon = int(math.floor(2.0 * math.pi / longitude_resolution)) + 1
+        self._n_full_lon = math.floor(2.0 * math.pi / longitude_resolution) + 1
 
         # Sparse storage: only valid longitude columns are held.
         # _antimask[i] is True iff longitude bin i has data.

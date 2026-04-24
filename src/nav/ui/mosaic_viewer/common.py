@@ -228,9 +228,7 @@ def load_ring_file(path: str) -> RingDisplayData:
         image_ma = result.img  # (n_radius, n_valid_lon)
         lon_res_deg = result.longitude_resolution * _RAD_TO_DEG
         rad_res_km = result.radius_resolution
-        orbit_model_name = (
-            result.orbit_model.name if result.orbit_model is not None else None
-        )
+        orbit_model_name = result.orbit_model.name if result.orbit_model is not None else None
         orbit_model: RingOrbitModel | None = result.orbit_model
         n_radii, n_lon = image_ma.shape
         # Build 1-D per-column metadata masked arrays (same length as sparse img cols)
@@ -288,9 +286,7 @@ def load_ring_file(path: str) -> RingDisplayData:
         lon_res_deg = result_m.longitude_resolution * _RAD_TO_DEG
         rad_res_km = result_m.radius_resolution
         orbit_model_name = result_m.orbit_model_name
-        if orbit_model_name is None:
-            orbit_model = None
-        elif not orbit_model_name.strip():
+        if orbit_model_name is None or not orbit_model_name.strip():
             orbit_model = None
         else:
             orbit_model = get_orbit_model_by_name(orbit_model_name)

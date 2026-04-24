@@ -235,4 +235,4 @@ def test_apply_linear_gamma_stretch_rejects_non_finite_black() -> None:
 def test_apply_linear_gamma_stretch_rejects_bool_black() -> None:
     data = np.array([0.0, 1.0])
     with pytest.raises(TypeError, match='black must be int or float, not bool'):
-        apply_linear_gamma_stretch(data, black=True, white=1.0, gamma=1.0)  # type: ignore[arg-type]
+        apply_linear_gamma_stretch(data, black=True, white=1.0, gamma=1.0)

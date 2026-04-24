@@ -11,6 +11,7 @@ called from any paint method without lock concerns.
 """
 
 import math
+from typing import cast
 
 import numpy as np
 import numpy.ma as ma
@@ -168,11 +169,11 @@ def render_to_image(
     rgb_c = np.ascontiguousarray(rgb, dtype=np.uint8)
     buf = bytearray(rgb_c.tobytes())
     qimg = QImage(
-        buf,
+        cast(bytes, buf),
         out_w,
         out_h,
         3 * out_w,
         QImage.Format.Format_RGB888,
     )
-    qimg._buf = buf
+    qimg._buf = buf  # type: ignore[attr-defined]  # pin buffer lifetime for QImage ctor
     return qimg

@@ -831,7 +831,8 @@ class TiledImageWidget(QAbstractScrollArea):
         return int(cy)
 
     def pixel_x_to_arr_col(self, pixel_x: float, pixel_y: float) -> int:
-        """Map image pixel X to data column index (same longitude axis as :meth:`pixel_to_physical`).
+        """Map image pixel X to data column index (same longitude axis as
+        :meth:`pixel_to_physical`).
 
         ``pixel_x`` / ``pixel_y`` are in the same space as :meth:`viewport_to_pixel`
         (including ring virtual-column offset and zoom). For rectangular ring/body

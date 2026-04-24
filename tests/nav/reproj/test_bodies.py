@@ -22,8 +22,8 @@ from nav.ui.mosaic_viewer.common import load_body_file
 _LAT_RES = 0.1  # rad/pixel
 _LON_RES = 0.1  # rad/pixel
 
-_N_FULL_LAT = int(math.floor(math.pi / _LAT_RES)) + 1  # 32 for 0.1 rad
-_N_FULL_LON = int(math.floor(2.0 * math.pi / _LON_RES)) + 1  # 63 for 0.1 rad
+_N_FULL_LAT = math.floor(math.pi / _LAT_RES) + 1  # 32 for 0.1 rad
+_N_FULL_LON = math.floor(2.0 * math.pi / _LON_RES) + 1  # 63 for 0.1 rad
 
 
 # =========================================================================
