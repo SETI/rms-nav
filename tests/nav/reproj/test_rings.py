@@ -53,6 +53,8 @@ def _make_ring_repro(
     n_full_lon: int = _N_FULL_LON,
     n_radius: int = _N_RADIUS,
     image_name: str = '',
+    orbit_model: RingOrbitModel | None = None,
+    photometric_model_name: str | None = None,
 ) -> RingReprojResult:
     """Build a synthetic RingReprojResult for use in tests.
 
@@ -105,9 +107,10 @@ def _make_ring_repro(
         mean_emission=_fill_1d(mean_emission),
         incidence=incidence,
         time=time,
-        orbit_model=None,
+        orbit_model=orbit_model,
         image_dtype=np.dtype(np.float32),
         metadata_dtype=np.dtype(np.float32),
+        photometric_model_name=photometric_model_name,
         image_name=image_name,
     )
 
@@ -633,13 +636,20 @@ class TestContributingImageNamesRings:
         )
         mosaic = RingMosaic(
             body_name='SATURN',
-            radius_inner=_RADIUS_INNER,
-            radius_outer=_RADIUS_OUTER,
+            radius_inner=-10.0,
+            radius_outer=10.0,
             longitude_resolution=_LON_RES,
             radius_resolution=_RAD_RES,
             orbit_model=model,
         )
-        mosaic.add(_make_ring_repro(valid_lon_bins=[5]))
+        mosaic.add(
+            _make_ring_repro(
+                valid_lon_bins=[5],
+                radius_inner=-10.0,
+                radius_outer=10.0,
+                orbit_model=model,
+            )
+        )
         path = tmp_path / 'with_om.npz'
         mosaic.to_sparse().save(path)
         loaded = RingMosaicData.load(path)
@@ -658,7 +668,7 @@ class TestContributingImageNamesRings:
             radius_resolution=_RAD_RES,
             photometric_model=LambertModel(),
         )
-        mosaic.add(_make_ring_repro(valid_lon_bins=[5]))
+        mosaic.add(_make_ring_repro(valid_lon_bins=[5], photometric_model_name='lambert'))
         path = tmp_path / 'with_ph.npz'
         mosaic.to_sparse().save(path)
         loaded = RingMosaicData.load(path)
@@ -675,3 +685,204 @@ class TestContributingImageNamesRings:
         step_deg = _LON_RES * 180.0 / math.pi
         assert dd.longitude_column_origin_deg == pytest.approx(10 * step_deg)
         assert dd.longitude_extent_hi_deg == pytest.approx(10 * step_deg + 3 * step_deg)
+
+
+# =========================================================================
+# Compatibility validation in RingMosaic.add()
+# =========================================================================
+
+
+def _make_test_orbit_model(name: str = 'test-orbit') -> RingOrbitModel:
+    """Build a synthetic orbit model for compatibility tests."""
+    return RingOrbitModel(
+        name=name,
+        a=100000.0,
+        e=0.0,
+        w0=0.0,
+        dw=0.0,
+        mean_motion=1.0,
+        epoch_utc='2000-01-01T12:00:00',
+    )
+
+
+class TestRingMosaicAddCompatibility:
+    """add() rejects reprojections whose orbit/photometric model differ from the mosaic."""
+
+    def test_orbit_model_mismatch_repro_none_raises(self) -> None:
+        """Mosaic has an orbit model; reprojection has none → ValueError."""
+        model = _make_test_orbit_model()
+        mosaic = RingMosaic(
+            body_name='SATURN',
+            radius_inner=-10.0,
+            radius_outer=10.0,
+            longitude_resolution=_LON_RES,
+            radius_resolution=_RAD_RES,
+            orbit_model=model,
+        )
+        repro = _make_ring_repro(
+            valid_lon_bins=[5],
+            radius_inner=-10.0,
+            radius_outer=10.0,
+            orbit_model=None,
+        )
+        with pytest.raises(ValueError, match='orbit model does not match'):
+            mosaic.add(repro)
+
+    def test_orbit_model_mismatch_mosaic_none_raises(self) -> None:
+        """Mosaic has no orbit model; reprojection has one → ValueError."""
+        model = _make_test_orbit_model()
+        mosaic = RingMosaic(
+            body_name='SATURN',
+            radius_inner=_RADIUS_INNER,
+            radius_outer=_RADIUS_OUTER,
+            longitude_resolution=_LON_RES,
+            radius_resolution=_RAD_RES,
+        )
+        repro = _make_ring_repro(valid_lon_bins=[5], orbit_model=model)
+        with pytest.raises(ValueError, match='orbit model does not match'):
+            mosaic.add(repro)
+
+    def test_orbit_model_different_values_raises(self) -> None:
+        """Orbit models that differ in any field (e.g. ``a``) are rejected."""
+        model_a = _make_test_orbit_model()
+        model_b = RingOrbitModel(
+            name=model_a.name,
+            a=model_a.a + 1.0,  # only ``a`` differs
+            e=model_a.e,
+            w0=model_a.w0,
+            dw=model_a.dw,
+            mean_motion=model_a.mean_motion,
+            epoch_utc=model_a.epoch_utc,
+        )
+        mosaic = RingMosaic(
+            body_name='SATURN',
+            radius_inner=-10.0,
+            radius_outer=10.0,
+            longitude_resolution=_LON_RES,
+            radius_resolution=_RAD_RES,
+            orbit_model=model_a,
+        )
+        repro = _make_ring_repro(
+            valid_lon_bins=[5],
+            radius_inner=-10.0,
+            radius_outer=10.0,
+            orbit_model=model_b,
+        )
+        with pytest.raises(ValueError, match='orbit model does not match'):
+            mosaic.add(repro)
+
+    def test_orbit_model_equal_distinct_instance_succeeds(self) -> None:
+        """A separately-constructed but value-equal orbit model is accepted.
+
+        Important for save/load round-trips: ``RingReprojResult.load`` rebuilds
+        the orbit model from disk, producing a fresh instance that is ``==`` to
+        but not ``is`` the mosaic's; the validation must not reject it.
+        """
+        model_a = _make_test_orbit_model()
+        model_b = _make_test_orbit_model()
+        assert model_a == model_b
+        assert model_a is not model_b
+        mosaic = RingMosaic(
+            body_name='SATURN',
+            radius_inner=-10.0,
+            radius_outer=10.0,
+            longitude_resolution=_LON_RES,
+            radius_resolution=_RAD_RES,
+            orbit_model=model_a,
+        )
+        repro = _make_ring_repro(
+            valid_lon_bins=[5],
+            radius_inner=-10.0,
+            radius_outer=10.0,
+            orbit_model=model_b,
+        )
+        mosaic.add(repro)
+        assert mosaic.to_sparse().orbit_model_name == 'test-orbit'
+
+    def test_orbit_model_match_succeeds(self) -> None:
+        """add() accepts a reprojection with the same orbit model instance."""
+        model = _make_test_orbit_model()
+        mosaic = RingMosaic(
+            body_name='SATURN',
+            radius_inner=-10.0,
+            radius_outer=10.0,
+            longitude_resolution=_LON_RES,
+            radius_resolution=_RAD_RES,
+            orbit_model=model,
+        )
+        repro = _make_ring_repro(
+            valid_lon_bins=[5],
+            radius_inner=-10.0,
+            radius_outer=10.0,
+            orbit_model=model,
+        )
+        mosaic.add(repro)
+        assert mosaic.to_sparse().orbit_model_name == 'test-orbit'
+
+    def test_photometric_model_mismatch_repro_none_raises(self) -> None:
+        """Mosaic has a photometric model; reprojection has none → ValueError."""
+        mosaic = RingMosaic(
+            body_name='SATURN',
+            radius_inner=_RADIUS_INNER,
+            radius_outer=_RADIUS_OUTER,
+            longitude_resolution=_LON_RES,
+            radius_resolution=_RAD_RES,
+            photometric_model=LambertModel(),
+        )
+        repro = _make_ring_repro(valid_lon_bins=[5], photometric_model_name=None)
+        with pytest.raises(ValueError, match='photometric model does not match'):
+            mosaic.add(repro)
+
+    def test_photometric_model_mismatch_mosaic_none_raises(self) -> None:
+        """Mosaic has no photometric model; reprojection records one → ValueError."""
+        mosaic = RingMosaic(
+            body_name='SATURN',
+            radius_inner=_RADIUS_INNER,
+            radius_outer=_RADIUS_OUTER,
+            longitude_resolution=_LON_RES,
+            radius_resolution=_RAD_RES,
+        )
+        repro = _make_ring_repro(valid_lon_bins=[5], photometric_model_name='lambert')
+        with pytest.raises(ValueError, match='photometric model does not match'):
+            mosaic.add(repro)
+
+
+# =========================================================================
+# Radius semantics (absolute vs offset)
+# =========================================================================
+
+
+class TestRadiusSemantics:
+    """Constructor radius_inner / radius_outer interpretation by orbit model."""
+
+    def test_offset_radii_accepted_when_orbit_model_set(self) -> None:
+        """When an orbit model is provided, radius_inner may be negative (offset)."""
+        model = _make_test_orbit_model()
+        # Build with offsets centered on the orbit (radius_inner < 0).
+        mosaic = RingMosaic(
+            body_name='SATURN',
+            radius_inner=-1000.0,
+            radius_outer=1000.0,
+            longitude_resolution=_LON_RES,
+            radius_resolution=_RAD_RES,
+            orbit_model=model,
+        )
+        # The mosaic stores the offset values verbatim (no shift by orbit_model.a).
+        sparse = mosaic.to_sparse()
+        assert sparse.radius_inner == pytest.approx(-1000.0)
+        assert sparse.radius_outer == pytest.approx(1000.0)
+        assert sparse.orbit_model_name == 'test-orbit'
+
+    def test_absolute_radii_when_no_orbit_model(self) -> None:
+        """Without an orbit model, radii are absolute and stored verbatim."""
+        mosaic = RingMosaic(
+            body_name='SATURN',
+            radius_inner=139500.0,
+            radius_outer=140500.0,
+            longitude_resolution=_LON_RES,
+            radius_resolution=_RAD_RES,
+        )
+        sparse = mosaic.to_sparse()
+        assert sparse.radius_inner == pytest.approx(139500.0)
+        assert sparse.radius_outer == pytest.approx(140500.0)
+        assert sparse.orbit_model_name is None

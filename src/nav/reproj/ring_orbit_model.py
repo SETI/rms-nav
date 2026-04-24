@@ -36,10 +36,15 @@ class RingOrbitModel:
         name: Human-readable name identifying this ring/model.
         a: Semi-major axis in km. Must be positive.
         e: Orbital eccentricity. Must be in [0, 1).
-        w0: Longitude of pericenter at epoch (rad).
-        dw: Apsidal precession rate (rad/day).
+        w0: Longitude of pericenter at J2000 (rad). The pericenter direction
+            at observation time ``et`` is ``w0 + dw * et / 86400`` (with
+            ``et`` in TDB seconds). Note this is at J2000, not at
+            ``epoch_utc``: the two epochs are independent, with
+            ``epoch_utc`` anchoring only the co-rotating mean-motion frame.
+        dw: Apsidal precession rate (rad/day), integrated from J2000.
         mean_motion: Mean motion (rad/day) used for the co-rotating frame.
         epoch_utc: Epoch for the co-rotating frame, as an ISO UTC string.
+            Independent from the apsidal precession reference (J2000).
     """
 
     name: str
@@ -70,6 +75,10 @@ class RingOrbitModel:
         """Return the ring radius (km) at each inertial longitude and time.
 
         Uses the standard Keplerian orbit equation with a precessing pericenter.
+        The pericenter direction at time ``et`` is ``w0 + dw * et``: ``w0`` is
+        the value of curly-pi at J2000 (the standard epoch), and ``dw`` is
+        integrated from J2000. The independent ``epoch_utc`` field anchors only
+        the co-rotating mean-motion frame (see ``_longitude_shift``).
 
         Parameters:
             longitude: Inertial (true) longitude array (rad).
@@ -153,7 +162,7 @@ class RingOrbitModel:
 # Pre-defined instances for Saturn ring features
 
 FRING_CORE = RingOrbitModel(
-    name='FRING-CORE',
+    name='F-RING-CORE-ALBERS-2007',
     a=140221.3,
     e=0.00235,
     w0=24.2 * math.pi / 180.0,
@@ -161,6 +170,12 @@ FRING_CORE = RingOrbitModel(
     mean_motion=581.964 * math.pi / 180.0,
     epoch_utc='2007-01-01',
 )
+"""F ring core orbit model from Albers et al. 2012 Table 3 Fit #2.
+
+``epoch_utc='2007-01-01'`` anchors the co-rotating mean-motion frame; ``w0``
+is the longitude of pericenter at J2000 (not at ``epoch_utc``). The ``2007``
+in the name refers to the co-rotation epoch.
+"""
 
 BRING_OUTER_EDGE = RingOrbitModel(
     name='BRING-OUTER-EDGE',
@@ -179,7 +194,7 @@ def get_orbit_model_by_name(name: str) -> RingOrbitModel | None:
     """Return a pre-defined :class:`RingOrbitModel` by its name, or ``None``.
 
     Parameters:
-        name: Model name (e.g. ``'FRING-CORE'``).
+        name: Model name (e.g. ``'F-RING-CORE-ALBERS-2007'``).
 
     Returns:
         The matching :class:`RingOrbitModel` from :data:`_KNOWN_ORBIT_MODELS`, or

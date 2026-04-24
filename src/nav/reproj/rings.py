@@ -103,13 +103,29 @@ class RingReprojResult:
     longitude columns with valid data are included. Use
     ``longitude_antimask`` to reconstruct the actual longitude values.
 
+    The interpretation of ``radius_inner`` / ``radius_outer`` and longitudes
+    depends on whether ``orbit_model`` is ``None``:
+
+    - ``orbit_model is None``: longitudes are inertial J2000 ring longitudes;
+      ``radius_inner`` and ``radius_outer`` are absolute ring radii in km.
+    - ``orbit_model is not None``: longitudes are co-rotating; ``radius_inner``
+      and ``radius_outer`` are signed offsets in km from the orbit's actual
+      radial position at each (longitude, time). For an eccentric orbit, that
+      radial position varies between ``a (1 - e)`` and ``a (1 + e)``; the
+      offset semantics make an eccentric ring appear as a straight line in
+      the reprojection.
+
     Attributes:
         body_name: The name of the planet whose ring was reprojected.
         img: Sparse reprojected image [radius, valid_longitude].
         longitude_resolution: Longitude resolution (rad/pixel).
         radius_resolution: Radius resolution (km/pixel).
-        radius_inner: Inner radius of the reprojection (km).
-        radius_outer: Outer radius of the reprojection (km).
+        radius_inner: Inner radius (km, absolute) when ``orbit_model is None``;
+            signed offset (km) from the orbital radius at each (longitude,
+            time) when an orbit model is set.
+        radius_outer: Outer radius (km, absolute) when ``orbit_model is None``;
+            signed offset (km) from the orbital radius at each (longitude,
+            time) when an orbit model is set.
         longitude_antimask: Boolean array of length ``n_full_lon`` (the
             total number of longitude bins from 0 to 2*pi). True at each
             longitude bin that has reprojected data.
@@ -331,6 +347,17 @@ class RingReprojResult:
 class RingMosaicData:
     """Mosaic data returned by RingMosaic retrieval methods.
 
+    The meaning of ``radius_inner`` / ``radius_outer`` and longitudes depends
+    on whether ``orbit_model_name`` is ``None``:
+
+    - ``orbit_model_name is None``: longitudes are inertial J2000 ring
+      longitudes; ``radius_inner`` and ``radius_outer`` are absolute ring
+      radii in km.
+    - ``orbit_model_name is not None``: longitudes are co-rotating in the
+      named orbit model's frame; ``radius_inner`` and ``radius_outer`` are
+      signed offsets in km from the orbital radius at each (longitude, time)
+      — i.e. from ``orbit_model.radius_at_longitude(inertial_lon, et)``.
+
     Attributes:
         body_name: The name of the planet.
         ring_body_name: The oops body name for the ring plane
@@ -339,8 +366,12 @@ class RingMosaicData:
             (e.g. 'saturn').
         longitude_resolution: Longitude resolution (rad/pixel).
         radius_resolution: Radius resolution (km/pixel).
-        radius_inner: Inner radius (km).
-        radius_outer: Outer radius (km).
+        radius_inner: Inner radius (km, absolute) when ``orbit_model_name is
+            None``; signed offset (km) from the orbital radius at each
+            (longitude, time) otherwise.
+        radius_outer: Outer radius (km, absolute) when ``orbit_model_name is
+            None``; signed offset (km) from the orbital radius at each
+            (longitude, time) otherwise.
         longitude_antimask: Boolean array of length ``n_full_lon``.
             True at longitude bins that have data.
         img: Mosaic image [radius, longitude] as a MaskedArray.
@@ -364,9 +395,11 @@ class RingMosaicData:
             ``mean_phase``, ``mean_emission``).
         contributing_image_names: Names of contributing reprojections in ``image_number``
             order (index ``k`` corresponds to pixels tagged with ``image_number == k``).
-        orbit_model_name: Name of the default ring orbit model used when building the
-            mosaic (co-rotating longitude and radius offset from core), or ``None``
-            when the mosaic used inertial longitudes and absolute ring radii.
+        orbit_model_name: Name of the orbit model used when building the mosaic
+            (co-rotating longitudes; ``radius_inner`` / ``radius_outer`` are
+            signed offsets from the orbital radius at each (longitude, time)).
+            ``None`` when the mosaic used inertial longitudes and absolute ring
+            radii.
         photometric_model_name: Photometric model applied during ``reproject()``, if
             any; ``None`` when brightness was accumulated without photometric correction.
     """
@@ -589,17 +622,38 @@ class RingMosaic:
     that actually contain reprojected data are stored; new columns are
     inserted in sorted order using batched ``np.insert`` calls.
 
+    The interpretation of ``radius_inner`` / ``radius_outer`` and longitudes
+    depends on ``orbit_model``:
+
+    - ``orbit_model is None`` (default): longitudes are inertial J2000 ring
+      longitudes; ``radius_inner`` and ``radius_outer`` are absolute ring
+      radii in km.
+    - ``orbit_model is not None``: longitudes are co-rotating in the model's
+      frame; ``radius_inner`` and ``radius_outer`` are signed offsets in km
+      from the orbital radius at each (longitude, time). For an eccentric
+      orbit, that radial position varies between ``a (1 - e)`` and
+      ``a (1 + e)``. The offset semantics make an eccentric ring appear as a
+      straight line in the reprojection. A typical 2000 km wide window
+      centred on the orbit uses ``radius_inner = -1000`` and
+      ``radius_outer = +1000``.
+
     Parameters:
         body_name: The planet name (e.g. 'SATURN'). Used to derive the
             oops ring body name and shadow body name for backplane calls.
-        radius_inner: Inner radius of the mosaic (km).
-        radius_outer: Outer radius of the mosaic (km).
+        radius_inner: Inner radius (km, absolute) when ``orbit_model is
+            None``; signed offset (km) from the orbital radius at each
+            (longitude, time) otherwise.
+        radius_outer: Outer radius (km, absolute) when ``orbit_model is
+            None``; signed offset (km) from the orbital radius at each
+            (longitude, time) otherwise. Must be greater than ``radius_inner``.
         longitude_resolution: Longitude bin width (rad/pixel).
         radius_resolution: Radius bin height (km/pixel).
         merge_strategy: How to resolve conflicts when the same longitude
             column appears in multiple reprojections.
         orbit_model: Default RingOrbitModel for co-rotating frame
-            reprojections. Can be overridden per-call in reproject().
+            reprojections; selects the offset-radius semantics described above.
+            Can be overridden per-call in reproject(); the override must agree
+            with this default.
         image_dtype: NumPy dtype for the reprojected brightness ``img``
             array. Defaults to ``np.float64``.
         metadata_dtype: NumPy dtype for geometry arrays
@@ -931,13 +985,26 @@ class RingMosaic:
 
         if orbit_model is None:
             orbit_model = self._orbit_model
+        elif orbit_model != self._orbit_model:
+            raise ValueError(
+                'reproject() orbit_model must match the orbit_model passed to '
+                "RingMosaic's constructor (radius_inner / radius_outer semantics "
+                'are tied to that choice).'
+            )
 
         if data is None:
             data = obs.data
         data = data.view(ma.MaskedArray)
 
-        radius_inner = self._radius_inner if radius_range is None else radius_range[0]
-        radius_outer = self._radius_outer if radius_range is None else radius_range[1]
+        if radius_range is None:
+            radius_inner = self._radius_inner
+            radius_outer = self._radius_outer
+        else:
+            # radius_range uses the same convention as the constructor's
+            # radius_inner / radius_outer: absolute km if orbit_model is None,
+            # signed offsets from orbit_model.a otherwise.
+            radius_inner = float(radius_range[0])
+            radius_outer = float(radius_range[1])
 
         if longitude_range is None:
             longitude_start = 0.0
@@ -1052,7 +1119,19 @@ class RingMosaic:
             data = ma.masked_where(shadow, data)
 
         if orbit_model is not None:
+            # Per-pixel signed offset from the orbit model's radius at each
+            # pixel's inertial longitude. The radius filter uses these offsets
+            # because radius_inner / radius_outer are themselves offsets from
+            # the orbital radius at each (longitude, time) in the orbit-model
+            # semantics. ``radius_at_longitude`` calls ``np.cos`` internally,
+            # which does not handle polymath Scalars, so we feed it the raw
+            # numpy values; subtracting the resulting numpy array from the
+            # ``bp_radius`` Scalar preserves the existing mask.
+            model_radii = orbit_model.radius_at_longitude(bp_longitude.vals, obs.midtime)
+            bp_radius_filter = bp_radius - model_radii
             bp_longitude = orbit_model.inertial_to_corotating(bp_longitude, obs.midtime)
+        else:
+            bp_radius_filter = bp_radius
 
         n_radius_bins = math.ceil(
             (radius_outer - radius_inner + _RADIUS_SLOP) / self._rad_resolution
@@ -1066,8 +1145,8 @@ class RingMosaic:
         restr_bp_lon = bp_longitude[
             (bp_longitude >= longitude_start)
             & (bp_longitude <= longitude_end)
-            & (bp_radius >= radius_inner)
-            & (bp_radius <= radius_outer)
+            & (bp_radius_filter >= radius_inner)
+            & (bp_radius_filter <= radius_outer)
         ]
 
         bp_lon_binned = np.floor(
@@ -1127,11 +1206,14 @@ class RingMosaic:
         rad_bins_act: NDArrayFloatType
         rad_bins_act_zoom: NDArrayFloatType
         if orbit_model is not None:
+            # radius_inner is a signed offset from the orbital radius at each
+            # (longitude, time); the absolute radius at column c, row r is
+            # (offset_at_row_r) + model_r(c). This makes an eccentric ring
+            # appear as a straight line in the reprojection.
             inertial_lons_act = orbit_model.corotating_to_inertial(long_bins_act, obs.midtime)
             rad_bins_act = (
                 rad_bins * self._rad_resolution
                 + radius_inner
-                - orbit_model.a
                 + orbit_model.radius_at_longitude(inertial_lons_act, obs.midtime)
             )
             if r_zoom_amt == 1 and l_zoom_amt == 1:
@@ -1144,7 +1226,6 @@ class RingMosaic:
                 rad_bins_act_zoom = (
                     rad_bins_zoom / float(r_zoom_amt) * self._rad_resolution
                     + radius_inner
-                    - orbit_model.a
                     + rad_offset_zoom
                 )
         else:
@@ -1316,13 +1397,46 @@ class RingMosaic:
         single batched ``np.insert`` call. Existing columns are updated
         according to the merge strategy.
 
+        The reprojection's orbit model and photometric model must match the
+        mosaic's. ``orbit_model`` must be the same instance (or both ``None``);
+        ``photometric_model_name`` must equal the mosaic's photometric model
+        name (or both ``None``). Mixing different settings would silently
+        corrupt the mosaic because radii and longitudes have different
+        meanings under different orbit models.
+
         Parameters:
             repro: Sparse reprojection result from reproject().
 
         Raises:
             OverflowError: If the number of images added would exceed the
                 uint16 maximum of 65 535.
+            ValueError: If the reprojection's orbit model or photometric
+                model does not match the mosaic's.
         """
+        # RingOrbitModel is a frozen dataclass with value-based equality
+        # (auto-generated __eq__), so a model loaded from disk is equal to
+        # but not identical to the in-memory mosaic instance. Compare by
+        # value, not identity.
+        if repro.orbit_model != self._orbit_model:
+            mosaic_name = self._orbit_model.name if self._orbit_model is not None else None
+            repro_name = repro.orbit_model.name if repro.orbit_model is not None else None
+            raise ValueError(
+                'RingMosaic.add(): reprojection orbit model does not match '
+                f'mosaic orbit model (mosaic={mosaic_name!r}, repro={repro_name!r}). '
+                'All reprojections added to a mosaic must use the same orbit '
+                'model so that radius and longitude semantics agree.'
+            )
+
+        mosaic_phot_name = (
+            self._photometric_model.name if self._photometric_model is not None else None
+        )
+        if repro.photometric_model_name != mosaic_phot_name:
+            raise ValueError(
+                'RingMosaic.add(): reprojection photometric model does not match '
+                f'mosaic photometric model (mosaic={mosaic_phot_name!r}, '
+                f'repro={repro.photometric_model_name!r}).'
+            )
+
         if self._image_count > np.iinfo(np.uint16).max:
             raise OverflowError(
                 f'image_count {self._image_count} exceeds uint16 max '

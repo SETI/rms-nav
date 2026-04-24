@@ -12,7 +12,7 @@ from nav.reproj.photometric_model import (
     MinnaertModel,
     PhotometricModel,
 )
-from nav.reproj.ring_orbit_model import BRING_OUTER_EDGE, FRING_CORE
+from nav.reproj.ring_orbit_model import BRING_OUTER_EDGE, FRING_CORE, RingOrbitModel
 from nav.reproj.rings import RingMosaic, RingMosaicMergeStrategy
 
 
@@ -121,9 +121,10 @@ def build_ring_mosaic(args: argparse.Namespace) -> RingMosaic:
             (see :func:`_parse_photometric_model`).
     """
     orbit_model_name: str = args.orbit_model
+    orbit_model: RingOrbitModel | None
     if orbit_model_name == 'none':
         orbit_model = None
-    elif orbit_model_name == 'fring_core':
+    elif orbit_model_name == 'f_ring_core_albers_2007':
         orbit_model = FRING_CORE
     elif orbit_model_name == 'bring_outer_edge':
         orbit_model = BRING_OUTER_EDGE
@@ -159,8 +160,9 @@ def build_ring_mosaic(args: argparse.Namespace) -> RingMosaic:
                 '--radius-inner and --radius-outer must not be used when --orbit-model is '
                 'specified; use --radius-inner-offset and --radius-outer-offset instead'
             )
-        radius_inner = orbit_model.a + float(args.radius_inner_offset)
-        radius_outer = orbit_model.a + float(args.radius_outer_offset)
+        # RingMosaic stores offsets directly when an orbit model is set.
+        radius_inner = float(args.radius_inner_offset)
+        radius_outer = float(args.radius_outer_offset)
 
     merge_strategy_name: str = args.merge_strategy
     if merge_strategy_name == 'best_resolution':

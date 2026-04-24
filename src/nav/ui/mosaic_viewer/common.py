@@ -138,8 +138,12 @@ class RingDisplayData:
         image_ma: 2-D masked array (n_radius, n_longitude), row 0 = inner.
         longitude_resolution_deg: Column pitch in degrees.
         radius_resolution_km: Row pitch in km.
-        radius_inner: Inner radius (km).
-        radius_outer: Outer radius (km).
+        radius_inner: Inner radius (km, absolute) when ``orbit_model_name`` is
+            ``None``; signed offset (km) from the orbital radius at each
+            (longitude, time) otherwise.
+        radius_outer: Outer radius (km, absolute) when ``orbit_model_name`` is
+            ``None``; signed offset (km) from the orbital radius at each
+            (longitude, time) otherwise.
         n_radii: Number of radius rows.
         n_longitude: Number of longitude columns stored in ``image_ma``.
         mean_radial_resolution: Per-column masked array (km/pixel).
@@ -147,10 +151,11 @@ class RingDisplayData:
         mean_phase: Per-column masked array (deg).
         mean_emission: Per-column masked array (deg).
         image_number: Per-column masked uint16 (mosaic only; None for reproj).
-        orbit_model_name: Name of the orbit model when longitudes are co-rotating
-            and radial distance is offset from the mean core; ``None`` for inertial
-            longitudes and absolute ring radius (also ``None`` in older mosaic files
-            that omit this field).
+        orbit_model_name: Name of the orbit model when longitudes are
+            co-rotating and ``radius_inner`` / ``radius_outer`` are signed
+            offsets from the orbital radius at each (longitude, time);
+            ``None`` for inertial longitudes and absolute ring radii (also
+            ``None`` in older mosaic files that omit this field).
         orbit_model: The :class:`~nav.reproj.ring_orbit_model.RingOrbitModel` object
             when available (loaded from reproj file or looked up by name); ``None``
             otherwise.

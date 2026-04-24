@@ -176,15 +176,41 @@ are available::
 
     from nav.reproj import FRING_CORE, BRING_OUTER_EDGE
 
-**Longitude convention.** When no orbit model is specified
-(``orbit_model=None``, which is the default), the longitudes stored in
-reprojection results and mosaics are **inertial J2000 ring longitudes** —
-measured eastward from the ascending node of the ring plane on the J2000
-reference plane. When an orbit model is supplied, each inertial longitude is
-converted to the **co-rotating frame** of the model before binning; mosaic
-column *i* then corresponds to co-rotating longitude ``i ×
-longitude_resolution``. See also :ref:`orbit-model-longitude` in the
-command-line reference.
+The :data:`~nav.reproj.ring_orbit_model.FRING_CORE` instance has
+``name='F-RING-CORE-ALBERS-2007'`` and uses the Albers et al. 2012 Table 3
+Fit #2 elements; the ``2007`` suffix marks the epoch (2007-01-01T00:00:00Z)
+at which the co-rotating frame is anchored.
+
+**Longitude and radius conventions.** The interpretation of longitudes and of
+``radius_inner`` / ``radius_outer`` depends on whether an orbit model is
+supplied:
+
+* ``orbit_model=None`` (the default): longitudes stored in reprojection
+  results and mosaics are **inertial J2000 ring longitudes** — measured
+  eastward from the ascending node of the ring plane on the J2000 reference
+  plane — and ``radius_inner`` / ``radius_outer`` are **absolute ring radii
+  in km**.
+* ``orbit_model`` is set: each inertial longitude is converted to the
+  **co-rotating frame** of the model before binning (mosaic column *i*
+  corresponds to co-rotating longitude ``i × longitude_resolution``), and
+  ``radius_inner`` / ``radius_outer`` are **signed offsets in km from the
+  orbital radius at each (longitude, time)**. For an eccentric orbit the
+  orbital radius varies between ``a (1 - e)`` and ``a (1 + e)``; the offset
+  semantics make an eccentric ring appear as a **straight line** in the
+  reprojection. ``radius_inner`` is therefore typically negative.
+
+Examples::
+
+    from nav.reproj import RingMosaic, FRING_CORE
+
+    # Inertial / absolute (no orbit model)
+    mosaic_abs = RingMosaic('SATURN', radius_inner=70000, radius_outer=140000)
+
+    # Co-rotating / offset window centred on the F ring core
+    mosaic_off = RingMosaic(
+        'SATURN', radius_inner=-1000, radius_outer=1000,
+        orbit_model=FRING_CORE,
+    )
 
 Pass a custom model via the ``orbit_model`` parameter::
 
@@ -199,8 +225,17 @@ Pass a custom model via the ``orbit_model`` parameter::
         mean_motion=581.964 * 3.14159 / 180.0,
         epoch_utc='2007-01-01',
     )
-    mosaic = RingMosaic('SATURN', radius_inner=70000, radius_outer=140000,
+    mosaic = RingMosaic('SATURN', radius_inner=-1000, radius_outer=1000,
                         orbit_model=my_orbit)
+
+Mosaic compatibility
+^^^^^^^^^^^^^^^^^^^^
+
+:meth:`~nav.reproj.rings.RingMosaic.add` validates that the reprojection it
+is being given was produced with the **same** orbit model and the **same**
+photometric model as the mosaic. Mixing settings would silently corrupt the
+mosaic because radii and longitudes carry different meanings under different
+orbit models. Mismatches raise :class:`ValueError`.
 
 Merge strategy
 ^^^^^^^^^^^^^^
@@ -393,15 +428,28 @@ them into a mosaic using a two-pass workflow:
 
 Either pass may be skipped with ``--skip-reproject`` / ``--skip-mosaic``.
 
-Ring mosaics quick example::
+Ring mosaics quick example (absolute radii, no orbit model)::
 
     nav_mosaic_rings coiss_saturn \
         --volumes COISS_2001 \
         --pds3-holdings-root /data/pds3 \
         --nav-results-root /data/nav_results \
         --planet SATURN \
-        --radius-inner 139500 \
-        --radius-outer 140220 \
+        --radius-inner 70000 \
+        --radius-outer 140000 \
+        --output-dir /data/mosaics \
+        --prefix saturn_main_rings_2004
+
+F ring mosaic example (offsets relative to the F ring core orbit)::
+
+    nav_mosaic_rings coiss_saturn \
+        --volumes COISS_2001 \
+        --pds3-holdings-root /data/pds3 \
+        --nav-results-root /data/nav_results \
+        --planet SATURN \
+        --orbit-model f_ring_core_albers_2007 \
+        --radius-inner-offset -1000 \
+        --radius-outer-offset 1000 \
         --output-dir /data/mosaics \
         --prefix fring_2004
 
@@ -490,20 +538,33 @@ Ring-specific options
      - *(required)*
      - Planet name (e.g. ``SATURN``).
    * - ``--radius-inner KM``
-     - *(required)*
-     - Inner mosaic radius (km).
+     - *(required when ``--orbit-model none``)*
+     - Inner mosaic radius (absolute km). Mutually exclusive with
+       ``--radius-inner-offset``.
    * - ``--radius-outer KM``
-     - *(required)*
-     - Outer mosaic radius (km).
+     - *(required when ``--orbit-model none``)*
+     - Outer mosaic radius (absolute km). Mutually exclusive with
+       ``--radius-outer-offset``.
+   * - ``--radius-inner-offset KM``
+     - *(required when ``--orbit-model`` is not ``none``)*
+     - Inner-radius offset (km) from the orbit model radius at each
+       (longitude, time); typically negative (e.g. ``-1000``). Mutually
+       exclusive with ``--radius-inner``.
+   * - ``--radius-outer-offset KM``
+     - *(required when ``--orbit-model`` is not ``none``)*
+     - Outer-radius offset (km) from the orbit model radius at each
+       (longitude, time); typically positive. Mutually exclusive with
+       ``--radius-outer``.
    * - ``--longitude-resolution DEG``
      - ``0.02``
      - Column pitch (degrees/pixel).
    * - ``--radius-resolution KM``
      - ``5.0``
      - Row pitch (km/pixel).
-   * - ``--orbit-model {none,fring_core,bring_outer_edge}``
+   * - ``--orbit-model {none,f_ring_core_albers_2007,bring_outer_edge}``
      - ``none``
-     - Ring orbit model for co-rotating longitude (see below).
+     - Ring orbit model for co-rotating longitude and offset radii (see
+       below).
    * - ``--merge-strategy {best_resolution,most_coverage_then_resolution}``
      - ``most_coverage_then_resolution``
      - Conflict-resolution strategy.
@@ -534,22 +595,48 @@ Ring-specific options
 
 .. _orbit-model-longitude:
 
-Orbit model and longitude convention
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Orbit model, longitude, and radius conventions
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-When ``--orbit-model none`` (the default), the longitude values stored in both
-the per-image reprojection files and the final mosaic are **inertial J2000 ring
-longitudes** — measured eastward from the ascending node of the ring plane on
-the J2000 reference plane, in degrees (internally radians). This is the
-default behavior of ``oops.backplane.Backplane.ring_longitude``.
+Two coordinate conventions are tied to ``--orbit-model``:
 
-When an orbit model is supplied (``--orbit-model fring_core`` or
-``--orbit-model bring_outer_edge``), each inertial longitude is transformed
-to the **co-rotating frame** of that model before binning. In the resulting
-file, mosaic column *i* corresponds to co-rotating longitude
-``i × longitude_resolution``; the column index no longer has a fixed
-relationship to J2000 north. All files in the same mosaic must use the same
-orbit model setting.
+**No orbit model (``--orbit-model none``, the default).**
+
+* Longitudes stored in per-image reprojection files and the final mosaic are
+  **inertial J2000 ring longitudes** — measured eastward from the ascending
+  node of the ring plane on the J2000 reference plane, in degrees
+  (internally radians). This is the default behaviour of
+  ``oops.backplane.Backplane.ring_longitude``.
+* Radii are **absolute km**. The mosaic bounds are set by ``--radius-inner``
+  and ``--radius-outer``; ``--radius-inner-offset`` /
+  ``--radius-outer-offset`` are not allowed.
+* Co-rotating longitude and the radial offset from the orbit are not
+  defined; the viewer marks those fields as unavailable.
+
+**With an orbit model (``--orbit-model f_ring_core_albers_2007`` or
+``--orbit-model bring_outer_edge``).**
+
+* Each inertial longitude is transformed to the **co-rotating frame** of
+  that model before binning. Mosaic column *i* corresponds to co-rotating
+  longitude ``i × longitude_resolution``; the column index no longer has a
+  fixed relationship to J2000 north. The inertial longitude can be
+  recovered from the co-rotating longitude using the orbit model and the
+  per-column observation time.
+* Radii are **signed offsets in km from the orbital radius at each
+  (longitude, time)**. For an eccentric orbit, the orbital radius varies
+  between ``a (1 - e)`` and ``a (1 + e)``; using offsets makes an
+  eccentric ring appear as a straight line in the reprojection. The mosaic
+  bounds are set by ``--radius-inner-offset`` (typically negative) and
+  ``--radius-outer-offset`` (typically positive); ``--radius-inner`` /
+  ``--radius-outer`` are not allowed.
+
+All reprojections added to the same mosaic must agree on the orbit model
+(and on the photometric model). ``RingMosaic.add()`` raises
+:class:`ValueError` on a mismatch.
+
+The pre-defined :data:`~nav.reproj.ring_orbit_model.FRING_CORE` instance is
+named ``F-RING-CORE-ALBERS-2007`` (Albers et al. 2012 Table 3 Fit #2; the
+``2007`` indicates the co-rotation epoch, 2007-01-01T00:00:00Z).
 
 Body-specific options
 ~~~~~~~~~~~~~~~~~~~~~

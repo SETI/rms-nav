@@ -342,8 +342,12 @@ def add_ring_args(parser: argparse.ArgumentParser) -> None:
         type=float,
         metavar='KM',
         help=(
-            'Inner radius offset from the orbit model semi-major axis (km). '
-            'Required when --orbit-model is not none; must not be used otherwise.'
+            'Inner-radius offset (km) from the orbit model radius at each '
+            '(longitude, time). For an eccentric orbit that radius varies '
+            'between a*(1-e) and a*(1+e) with longitude; using offsets makes '
+            'the eccentric ring appear as a straight line in the reprojection. '
+            'Typically negative (e.g. -1000). Required when --orbit-model is '
+            'not none; must not be used otherwise.'
         ),
     )
     grp.add_argument(
@@ -353,8 +357,10 @@ def add_ring_args(parser: argparse.ArgumentParser) -> None:
         type=float,
         metavar='KM',
         help=(
-            'Outer radius offset from the orbit model semi-major axis (km). '
-            'Required when --orbit-model is not none; must not be used otherwise.'
+            'Outer-radius offset (km) from the orbit model radius at each '
+            '(longitude, time). See --radius-inner-offset for details. '
+            'Required when --orbit-model is not none; must not be used '
+            'otherwise.'
         ),
     )
     grp.add_argument(
@@ -379,15 +385,19 @@ def add_ring_args(parser: argparse.ArgumentParser) -> None:
     )
     grp.add_argument(
         '--orbit-model',
-        choices=['none', 'fring_core', 'bring_outer_edge'],
+        choices=['none', 'f_ring_core_albers_2007', 'bring_outer_edge'],
         default='none',
         help=(
             'Ring orbit model for co-rotating longitude conversion. '
             'When "none" (the default), longitudes are inertial (J2000-aligned) '
             'ring longitudes measured eastward from the ascending node. '
             'When an orbit model is specified, longitudes are converted to the '
-            'co-rotating frame of that model before binning. '
-            'Choices: none, fring_core, bring_outer_edge. Default: none.'
+            'co-rotating frame of that model before binning, and '
+            '--radius-inner-offset / --radius-outer-offset (rather than '
+            '--radius-inner / --radius-outer) supply the radial bounds as '
+            'signed offsets from the orbital radius at each (longitude, time). '
+            'Choices: none, f_ring_core_albers_2007 (Albers et al. 2012 Table 3 '
+            'Fit #2; epoch 2007-01-01T00:00:00Z), bring_outer_edge. Default: none.'
         ),
     )
     grp.add_argument(
@@ -421,7 +431,10 @@ def add_ring_args(parser: argparse.ArgumentParser) -> None:
         nargs=2,
         default=None,
         metavar=('START_DEG', 'END_DEG'),
-        help='Longitude range to reproject (deg). Default: full 0..360.',
+        help=(
+            'Longitude range to reproject (deg). With --orbit-model none these are '
+            'inertial; with an orbit model they are co-rotating. Default: full 0..360.'
+        ),
     )
     grp.add_argument(
         '--radius-range',
@@ -429,7 +442,13 @@ def add_ring_args(parser: argparse.ArgumentParser) -> None:
         nargs=2,
         default=None,
         metavar=('INNER_KM', 'OUTER_KM'),
-        help='Radius range to reproject (km). Default: mosaic radius bounds.',
+        help=(
+            'Radius range to reproject (km). With --orbit-model none these are '
+            'absolute ring radii; with an orbit model they are signed offsets from '
+            'the orbit model radius at each (longitude, time) (same convention as '
+            '--radius-inner-offset / --radius-outer-offset). Default: mosaic '
+            'radius bounds.'
+        ),
     )
     grp.add_argument(
         '--image-dtype',

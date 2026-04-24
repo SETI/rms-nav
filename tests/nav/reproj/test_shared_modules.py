@@ -224,7 +224,7 @@ class TestRingOrbitModel:
 
     def test_fring_core_predefined_instance(self) -> None:
         """FRING_CORE predefined instance has the expected name."""
-        assert FRING_CORE.name == 'FRING-CORE'
+        assert FRING_CORE.name == 'F-RING-CORE-ALBERS-2007'
 
     def test_bring_outer_edge_predefined_instance(self) -> None:
         """BRING_OUTER_EDGE predefined instance has the expected name."""
@@ -281,10 +281,13 @@ class TestRingOrbitModel:
             assert pytest.approx(float(r[0]), rel=1e-6) == 100000.0
 
     def test_radius_at_longitude_eccentric(self) -> None:
-        """Eccentric orbit: radius at pericenter is a*(1-e), at apocenter a*(1+e)."""
+        """Eccentric orbit: radius at pericenter is a*(1-e), at apocenter a*(1+e).
+
+        Pericenter sits at ``w0`` at J2000 (``et = 0``); the precession term
+        ``dw * et / SECONDS_PER_DAY`` is zero there.
+        """
         model = FRING_CORE
         et = 0.0
-        # Pericenter is at w0 (longitude of pericenter at epoch, dw*0=0)
         w0 = FRING_CORE.w0
         r_peri = model.radius_at_longitude(np.array([w0]), et)
         r_apo = model.radius_at_longitude(np.array([w0 + math.pi]), et)
@@ -292,6 +295,19 @@ class TestRingOrbitModel:
         expected_apo = FRING_CORE.a * (1.0 + FRING_CORE.e)
         assert pytest.approx(float(r_peri[0]), rel=1e-4) == expected_peri
         assert pytest.approx(float(r_apo[0]), rel=1e-4) == expected_apo
+
+    def test_radius_at_longitude_pericenter_precesses(self) -> None:
+        """Apsidal precession shifts the pericenter direction by ``dw * dt``."""
+        model = FRING_CORE
+        # One day past J2000, the pericenter should have advanced by exactly
+        # ``dw`` (rad/day). Sample r at the precessed pericenter direction
+        # and verify it equals a*(1-e).
+        one_day = 86400.0
+        et = one_day
+        precessed_w = FRING_CORE.w0 + FRING_CORE.dw  # rad/day * 1 day
+        r_peri = model.radius_at_longitude(np.array([precessed_w]), et)
+        expected_peri = FRING_CORE.a * (1.0 - FRING_CORE.e)
+        assert pytest.approx(float(r_peri[0]), rel=1e-9) == expected_peri
 
     def test_corotating_round_trip(self) -> None:
         """inertial_to_corotating followed by corotating_to_inertial is identity."""

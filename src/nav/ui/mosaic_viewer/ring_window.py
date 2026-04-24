@@ -696,10 +696,11 @@ class RingMosaicWindow(QMainWindow):
         info_columns: list[list[tuple[str, str]]] = [
             [
                 ('orbit_model', 'Orbit model:'),
-                ('corot', 'Corotating longitude:'),
+                ('corot', 'Co-rotating longitude:'),
                 ('inert', 'Inertial longitude:'),
-                ('rel_r', 'Radial offset from center:'),
-                ('core_r', 'Core radius:'),
+                ('abs_r', 'Radius (km):'),
+                ('rel_r', 'Radial offset from orbit (km):'),
+                ('core_r', 'Orbital model radius (km):'),
             ],
             [
                 ('incidence', 'Incidence angle:'),
@@ -719,8 +720,10 @@ class RingMosaicWindow(QMainWindow):
         ]
         self._info: dict[str, QLabel] = {}
         self._info_name: dict[str, QLabel] = {}
+        # First column carries the orbit model name (e.g.
+        # ``F-RING-CORE-ALBERS-2007``) which is wider than a numeric value.
         name_w = 168
-        val_w = (118, 118, 320)
+        val_w = (200, 118, 320)
         for col_idx, col in enumerate(info_columns):
             base = col_idx * 2
             for row_idx, (key, name) in enumerate(col):
@@ -733,7 +736,7 @@ class RingMosaicWindow(QMainWindow):
                 info_grid.addWidget(nl, row_idx, base)
                 info_grid.addWidget(vl, row_idx, base + 1)
                 self._info[key] = vl
-                if key in ('corot', 'inert', 'rel_r', 'core_r'):
+                if key in ('corot', 'inert', 'abs_r', 'rel_r', 'core_r'):
                     self._info_name[key] = nl
         lower_h.addWidget(info_box, stretch=1)
 
@@ -860,7 +863,7 @@ class RingMosaicWindow(QMainWindow):
             x_interval=dd.longitude_resolution_deg,
             y_interval=dd.radius_resolution_km,
             x_label=('Co-rotating longitude (°)' if corot else 'Inertial longitude (°)'),
-            y_label=('Radial offset from center (km)' if corot else 'Radius (km)'),
+            y_label=('Radial offset from orbit (km)' if corot else 'Radius (km)'),
             y_flip=True,
             x_axis_max=float(lon_max),
             x_origin_deg=float(dd.longitude_column_origin_deg),
@@ -941,17 +944,19 @@ class RingMosaicWindow(QMainWindow):
         xz, _ = iw.get_zoom()
         if vw <= 0 or xz <= 0:
             return
-        px0 = hv / xz
-        px1 = (hv + vw) / xz
-        hi = dd.longitude_extent_hi_deg
-        if hi is None:
-            hi = dd.longitude_column_origin_deg + float(
-                dd.n_longitude * dd.longitude_resolution_deg
-            )
-        lo = float(dd.longitude_column_origin_deg)
+        # The image widget always builds a virtual full-circle canvas for
+        # rings (``ring_full_lon=True``), so virtual column 0 is at longitude
+        # 0° regardless of where the stored data starts. The viewport's left
+        # and right edges sit at virtual columns ``hv / xz`` and
+        # ``(hv + vw) / xz``; converting straight to longitude (without any
+        # data-range clipping) lets the EW xlim track the viewport into
+        # empty regions of the ring as the user pans, which is what the user
+        # needs for inspecting gaps in the mosaic.
         res = dd.longitude_resolution_deg
-        c0 = float(np.clip(lo + px0 * res, lo, hi))
-        c1 = float(np.clip(lo + px1 * res, lo, hi))
+        c0 = (hv / xz) * res
+        c1 = ((hv + vw) / xz) * res
+        if c1 <= c0:
+            return
         self._ew_ax.set_xlim(c0, c1)
         canvas_draw_idle(self._ew_canvas)
 
@@ -1006,17 +1011,16 @@ class RingMosaicWindow(QMainWindow):
         )
 
     def _sync_ring_cursor_row_labels(self, dd: RingDisplayData) -> None:
+        # Labels are fixed; only the orbit model name and the per-cursor
+        # values vary. Without an orbit model the orbit-relative rows
+        # (co-rotating longitude, radial offset, orbital model radius)
+        # show ``---`` because they cannot be computed.
         self._info['orbit_model'].setText(dd.orbit_model_name if dd.orbit_model_name else '---')
-        if _ring_longitude_corotating(dd):
-            self._info_name['corot'].setText('Co-rotating longitude:')
-            self._info_name['inert'].setText('Inertial longitude:')
-            self._info_name['rel_r'].setText('Radial offset from center (km):')
-            self._info_name['core_r'].setText('Absolute radius (km):')
-        else:
-            self._info_name['corot'].setText('Co-rotating longitude:')
-            self._info_name['inert'].setText('Inertial longitude:')
-            self._info_name['rel_r'].setText('Radius (km):')
-            self._info_name['core_r'].setText('Radial offset from model (km):')
+        self._info_name['corot'].setText('Co-rotating longitude:')
+        self._info_name['inert'].setText('Inertial longitude:')
+        self._info_name['abs_r'].setText('Radius (km):')
+        self._info_name['rel_r'].setText('Radial offset from orbit (km):')
+        self._info_name['core_r'].setText('Orbital model radius (km):')
 
     def _on_rad_profile_toggled(self, checked: bool) -> None:
         self._rad_wrap.setVisible(checked)
@@ -1126,7 +1130,7 @@ class RingMosaicWindow(QMainWindow):
         rel_min = (arr_min - (dd.n_radii - 1) / 2.0) * dd.radius_resolution_km
         rel_max = (arr_max - (dd.n_radii - 1) / 2.0) * dd.radius_resolution_km
         if _ring_longitude_corotating(dd):
-            band = f'{rel_min:.0f} to {rel_max:.0f} km (radial offset from center)'
+            band = f'{rel_min:+.0f} to {rel_max:+.0f} km (radial offset from orbit)'
         else:
             mean_core = (dd.radius_inner + dd.radius_outer) / 2.0
             band = f'{rel_min + mean_core:.0f} to {rel_max + mean_core:.0f} km (absolute radius)'
@@ -1182,7 +1186,7 @@ class RingMosaicWindow(QMainWindow):
             x_plot = rel
             r_span = max(abs(rel_lo), abs(rel_hi), 1e-6)
             x_lo, x_hi = -r_span, r_span
-            ax_xlabel = f'Radial offset from center at co-rotating longitude {lon_deg:.2f}° (km)'
+            ax_xlabel = f'Radial offset from orbit at co-rotating longitude {lon_deg:.2f}° (km)'
         else:
             x_plot = rel + mean_core
             x_lo, x_hi = abs_lo, abs_hi
@@ -1484,6 +1488,12 @@ class RingMosaicWindow(QMainWindow):
         if dd is None or not checked or not self._show_radii_km:
             self._image_widget.set_show_rows([])
             return
+        if _ring_longitude_corotating(dd):
+            # When an orbit model is set, the absolute radius at each row
+            # varies with longitude (offset semantics), so a fixed absolute
+            # radius cannot be drawn as a single guide row.
+            self._image_widget.set_show_rows([])
+            return
         mid = (dd.radius_inner + dd.radius_outer) / 2.0
         n_rows = dd.n_radii
         pixel_ys = []
@@ -1517,7 +1527,7 @@ class RingMosaicWindow(QMainWindow):
         self._last_profile_lon_ix = ix
         arr_row = self._image_widget.pixel_y_to_arr_row(py)
         arr_row = int(np.clip(arr_row, 0, dd.n_radii - 1))
-        lon_deg, y_axis = self._image_widget.pixel_to_physical(px, py)
+        lon_deg, _y_axis = self._image_widget.pixel_to_physical(px, py)
         img = self._ring_view_ma if self._ring_view_ma is not None else dd.image_ma
         raw_val = img[arr_row, ix]
         if ma.is_masked(raw_val):
@@ -1529,7 +1539,10 @@ class RingMosaicWindow(QMainWindow):
         emiss = self._format_ma_at_ix(dd.mean_emission, ix, '%.3f')
         rad_r = self._format_ma_at_ix(dd.mean_radial_resolution, ix, '%.3f')
         lng_r = self._format_ma_at_ix(dd.mean_angular_resolution, ix, '%.5f')
-        core_abs = dd.radius_inner + arr_row * dd.radius_resolution_km
+        # row_value matches dd.radius_inner / dd.radius_outer semantics:
+        # absolute km when no orbit model; signed offset (km) from the
+        # orbital radius at this (longitude, time) when one is set.
+        row_value = dd.radius_inner + arr_row * dd.radius_resolution_km
 
         if dd.image_number is not None:
             img_idx_v = dd.image_number[ix]
@@ -1572,9 +1585,14 @@ class RingMosaicWindow(QMainWindow):
         y_str = f'{py:7.2f}'
         self._cursor_status_lbl.setText(f'X: {x_str}  Y: {y_str}  Value: {value_str}')
         if _ring_longitude_corotating(dd):
+            # row_value is the pixel's signed offset (km) from the orbital
+            # radius at this (longitude, time); orbit model radius itself
+            # varies with longitude/time, and the absolute radius at the
+            # cursor is model_r + offset.
             inert_str = '---'
-            core_r_str = f'{core_abs:.2f} km'
-            rel_r_str = f'{y_axis:.2f} km'
+            core_r_str = '---'
+            abs_r_str = '---'
+            rel_r_str = f'{row_value:+.2f}'
             if dd.orbit_model is not None and dd.observation_time_tdb is not None:
                 tdb_v = dd.observation_time_tdb[ix]
                 if not ma.is_masked(tdb_v):
@@ -1582,14 +1600,19 @@ class RingMosaicWindow(QMainWindow):
                     inert_rad = dd.orbit_model.corotating_to_inertial(corot_rad, float(tdb_v))
                     inert_str = f'{math.degrees(float(inert_rad[0])):.4f}°'
                     model_r = float(dd.orbit_model.radius_at_longitude(inert_rad, float(tdb_v))[0])
-                    core_r_str = f'{model_r:.2f} km'
-                    rel_r_str = f'{core_abs - model_r:+.2f} km'
+                    core_r_str = f'{model_r:.2f}'
+                    abs_r_str = f'{model_r + row_value:.2f}'
+            self._info['abs_r'].setText(abs_r_str)
             self._info['rel_r'].setText(rel_r_str)
             self._info['core_r'].setText(core_r_str)
             self._info['corot'].setText(f'{lon_deg:.4f}°')
             self._info['inert'].setText(inert_str)
         else:
-            self._info['rel_r'].setText(f'{y_axis:.2f} km')
+            # No orbit model: row_value is the absolute radius (km); the
+            # orbit-relative quantities (offset, model radius) are not
+            # defined.
+            self._info['abs_r'].setText(f'{row_value:.2f}')
+            self._info['rel_r'].setText('---')
             self._info['core_r'].setText('---')
             self._info['inert'].setText(f'{lon_deg:.4f}°')
             self._info['corot'].setText('---')
@@ -1624,7 +1647,7 @@ class RingMosaicWindow(QMainWindow):
             return
         _, r_val = self._image_widget.pixel_to_physical(px, py)
         if _ring_longitude_corotating(dd):
-            r_desc = 'radial offset from center'
+            r_desc = 'radial offset from orbit'
         else:
             r_desc = 'absolute radius'
         if self._ew_phase == 0:

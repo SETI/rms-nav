@@ -82,6 +82,40 @@ The always-sparse design means that ``reproject()`` always returns a
 columns populated. There is no ``compress_longitude`` flag; sparsity is the
 invariant.
 
+Ring radius and longitude semantics
+-----------------------------------
+
+The interpretation of ``RingMosaic.radius_inner`` / ``radius_outer`` (and the
+matching fields on :class:`~nav.reproj.rings.RingReprojResult` and
+:class:`~nav.reproj.rings.RingMosaicData`) depends on whether the mosaic was
+constructed with an ``orbit_model``:
+
+- ``orbit_model is None``: longitudes are inertial J2000; radii are
+  **absolute km**.
+- ``orbit_model`` is set: longitudes are co-rotating in that model's frame;
+  radii are **signed offsets in km from the orbital radius at each
+  (longitude, time)** — i.e. from
+  ``orbit_model.radius_at_longitude(inertial_lon, et)``. This makes an
+  eccentric ring appear as a straight line in the reprojection.
+
+Implementation notes:
+
+- ``_reproject_inner`` evaluates ``rad_bins_act = rad_bins * rad_res +
+  radius_inner + model_r(inertial_lon, midtime)`` for each (row, column)
+  when an orbit model is set, so ``radius_inner`` enters as a per-pixel
+  offset added to the per-column orbital radius.
+- The radius filter on ``bp_radius`` first computes per-pixel offsets
+  ``bp_radius_filter = bp_radius - model_r(inertial_lon, midtime)`` so the
+  ``[radius_inner, radius_outer]`` test compares offsets to offsets.
+- ``RingMosaic.reproject()`` rejects a per-call ``orbit_model`` that
+  differs from the constructor's, because radius semantics are tied to
+  that choice.
+- ``RingMosaic.add()`` validates that the reprojection's ``orbit_model``
+  is value-equal to the mosaic's (``RingOrbitModel`` is a frozen dataclass
+  with auto-generated ``__eq__``, so a model rebuilt from disk compares
+  equal to the in-memory instance) and that ``photometric_model_name``
+  matches; mismatches raise ``ValueError``.
+
 dtype propagation
 -----------------
 
