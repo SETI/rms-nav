@@ -26,14 +26,14 @@ def _dummy_image_file(stem: str) -> ImageFile:
 def test_per_image_output_includes_subject_with_prefix() -> None:
     """Verify per-image output filename includes subject with prefix."""
     img = _dummy_image_file('N1635282917_1_CALIB')
-    p = per_image_output_path('/out', 'mimas_2004', img, 'fits', subject_name='MIMAS')
+    p = per_image_output_path('/out', 'mimas_2004', img, fmt='fits', subject_name='MIMAS')
     assert p.name == 'mimas_2004_MIMAS_N1635282917_1_CALIB_reproj.fits'
 
 
 def test_per_image_output_includes_subject_no_prefix() -> None:
     """Verify per-image output uses subject and stem when prefix is empty."""
     img = _dummy_image_file('N1')
-    p = per_image_output_path(FCPath('/tmp'), '', img, 'npz', subject_name='ENCELADUS')
+    p = per_image_output_path(FCPath('/tmp'), '', img, fmt='npz', subject_name='ENCELADUS')
     assert p.name == 'ENCELADUS_N1_reproj.npz'
 
 
@@ -52,5 +52,5 @@ def test_mosaic_output_subject_only() -> None:
 def test_subject_name_sanitizes_separators() -> None:
     """Verify subject colons and slashes become underscores in the output basename."""
     img = _dummy_image_file('x')
-    p = per_image_output_path('/o', 'p', img, 'fits', subject_name='foo:bar/baz')
+    p = per_image_output_path('/o', 'p', img, fmt='fits', subject_name='foo:bar/baz')
     assert p.name == 'p_foo_bar_baz_x_reproj.fits'

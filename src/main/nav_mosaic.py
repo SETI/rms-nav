@@ -133,7 +133,7 @@ def _run_reproject_pass(
     for imagefiles in DATASET.yield_image_files_from_arguments(args):
         image_file = imagefiles.image_files[0]
         out_path = per_image_output_path(
-            output_dir, prefix, image_file, fmt, subject_name=subject_name
+            output_dir, prefix, image_file, fmt=fmt, subject_name=subject_name
         )
 
         if not args.overwrite and out_path.exists():
@@ -383,7 +383,11 @@ def _run_body(args: argparse.Namespace, nav_results_root_path: FCPath | None) ->
         for imagefiles in DATASET.yield_image_files_from_arguments(args):
             image_file = imagefiles.image_files[0]
             reproj_path = per_image_output_path(
-                output_dir, prefix, image_file, fmt, subject_name=mosaic.body_name
+                output_dir,
+                prefix,
+                image_file,
+                fmt=fmt,
+                subject_name=mosaic.body_name,
             )
             if not reproj_path.exists():
                 MAIN_LOGGER.info(
@@ -473,7 +477,11 @@ def _run_rings(args: argparse.Namespace, nav_results_root_path: FCPath | None) -
         for imagefiles in DATASET.yield_image_files_from_arguments(args):
             image_file = imagefiles.image_files[0]
             reproj_path = per_image_output_path(
-                output_dir, prefix, image_file, fmt, subject_name=mosaic.body_name
+                output_dir,
+                prefix,
+                image_file,
+                fmt=fmt,
+                subject_name=mosaic.body_name,
             )
             if not reproj_path.exists():
                 MAIN_LOGGER.info(

@@ -174,6 +174,42 @@ def _validate_reproject_radius_range(radius_range: object) -> tuple[float, float
     return ri_f, ro_f
 
 
+def _validate_reproject_zoom_amt(zoom_amt: object) -> tuple[int, int]:
+    """Validate ``RingMosaic.reproject(..., zoom_amt=...)``; return ``(radial, longitude)`` ints."""
+    if isinstance(zoom_amt, (list, tuple)):
+        if len(zoom_amt) != 2:
+            raise ValueError(
+                'reproject() zoom_amt as a sequence must have exactly two elements '
+                f'(radial, longitude zoom factors), got length {len(zoom_amt)}'
+            )
+        out: list[int] = []
+        for i, z in enumerate(zoom_amt, start=1):
+            if isinstance(z, (bool, np.bool_)):
+                raise TypeError(
+                    f'reproject() zoom_amt element {i} must be int-like (not bool), got bool'
+                )
+            if not isinstance(z, (int, np.integer)):
+                raise TypeError(
+                    f'reproject() zoom_amt element {i} must be int or numpy integer, '
+                    f'got {type(z).__name__}'
+                )
+            out.append(int(z))
+        return (out[0], out[1])
+
+    if isinstance(zoom_amt, (bool, np.bool_)):
+        raise TypeError(
+            'reproject() zoom_amt must be int (not bool) or a tuple/list of two ints, got bool'
+        )
+    if isinstance(zoom_amt, (int, np.integer)):
+        z = int(zoom_amt)
+        return (z, z)
+
+    raise TypeError(
+        'reproject() zoom_amt must be int (not bool) or a tuple/list of two ints, '
+        f'got {type(zoom_amt).__name__}'
+    )
+
+
 # Module-level defaults for RingMosaic parameters
 DEFAULT_LONGITUDE_RESOLUTION = 0.02 * math.pi / 180.0  # 0.02 degrees in rad
 DEFAULT_RADIUS_RESOLUTION = 5.0  # km
@@ -726,9 +762,9 @@ class RingMosaic:
         self._photometric_model = photometric_model
 
         self._n_radius = math.ceil((radius_outer - radius_inner + _RADIUS_SLOP) / radius_resolution)
-        # int(2π / res) truncates when the ratio is not exactly representable; use
-        # floor(2π / res) + 1 so bin indices through floor(_MAX_LONGITUDE / res) fit.
-        self._n_full_lon = math.floor(2.0 * math.pi / longitude_resolution) + 1
+        # Span [0, _MAX_LONGITUDE] (slightly below 2π); matches bin indexing that clamps to
+        # ``_MAX_LONGITUDE`` (e.g. ``longitude_valid_range(..., longitude_end=_MAX_LONGITUDE)``).
+        self._n_full_lon = math.floor(_MAX_LONGITUDE / longitude_resolution) + 1
 
         # Sparse storage: only valid longitude columns are held.
         # _antimask[i] is True iff longitude bin i has data.
@@ -990,8 +1026,11 @@ class RingMosaic:
             ValueError: If ``longitude_range`` or ``radius_range`` has wrong
                 length, non-finite values, longitudes outside
                 ``[0, _MAX_LONGITUDE]``, ``start > end``, ``radius_inner >= radius_outer``,
+                if ``zoom_amt`` is a sequence with length other than 2,
                 if ``n_longitude_bins_zoom`` is not a multiple of ``l_zoom_amt``, or
                 for other argument errors.
+            TypeError: If ``zoom_amt`` is not an int (excluding ``bool``) or a
+                length-2 tuple/list of ints, or an element is not int-like.
         """
         logger = logging.getLogger(_LOGGING_NAME + '.reproject')
         logger.debug(
@@ -1032,22 +1071,21 @@ class RingMosaic:
         else:
             longitude_start, longitude_end = _validate_reproject_longitude_range(longitude_range)
 
-        if not isinstance(zoom_amt, (list, tuple)):
-            zoom_amt = (zoom_amt, zoom_amt)
+        zoom_radial, zoom_longitude = _validate_reproject_zoom_amt(zoom_amt)
 
-        if zoom_amt[0] > 0:
-            r_zoom_amt: int = int(zoom_amt[0])
+        if zoom_radial > 0:
+            r_zoom_amt: int = zoom_radial
             r_spline_order = 0
         else:
             r_zoom_amt = 1
-            r_spline_order = -int(zoom_amt[0])
+            r_spline_order = -zoom_radial
 
-        if zoom_amt[1] > 0:
-            l_zoom_amt: int = int(zoom_amt[1])
+        if zoom_longitude > 0:
+            l_zoom_amt: int = zoom_longitude
             l_spline_order = 0
         else:
             l_zoom_amt = 1
-            l_spline_order = -int(zoom_amt[1])
+            l_spline_order = -zoom_longitude
 
         with _reduced_oops_precision():
             return self._reproject_inner(
@@ -1763,10 +1801,16 @@ class RingMosaic:
 
         Returns:
             RingMosaicData covering exactly the requested longitude range.
+
+        Raises:
+            TypeError: If ``longitude_range`` is not a tuple/list of two numbers, or an
+                endpoint has the wrong type (same rules as :meth:`reproject`).
+            ValueError: If endpoints are non-finite, outside ``[0, _MAX_LONGITUDE]``,
+                or ``start > end`` (same rules as :meth:`reproject`).
         """
-        lon_start, lon_end = longitude_range
-        start_bin = round(lon_start / self._lon_resolution)
-        end_bin = round(lon_end / self._lon_resolution)
+        lon_start_f, lon_end_f = _validate_reproject_longitude_range(longitude_range)
+        start_bin = round(lon_start_f / self._lon_resolution)
+        end_bin = round(lon_end_f / self._lon_resolution)
         n_bins = end_bin - start_bin + 1
 
         bounded_img_data = np.zeros((self._n_radius, n_bins), dtype=self._image_dtype)
@@ -1809,7 +1853,7 @@ class RingMosaic:
             radius_outer=self._radius_outer,
             longitude_antimask=bounded_antimask,
             img=ma.MaskedArray(bounded_img_data, mask=bounded_img_mask),
-            longitude_range=longitude_range,
+            longitude_range=(lon_start_f, lon_end_f),
             mean_radial_resolution=ma.MaskedArray(bounded_mean_rad_res, mask=bounded_mask_1d),
             mean_angular_resolution=ma.MaskedArray(bounded_mean_ang_res, mask=bounded_mask_1d),
             mean_phase=ma.MaskedArray(bounded_mean_phase, mask=bounded_mask_1d),

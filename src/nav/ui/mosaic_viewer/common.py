@@ -110,9 +110,12 @@ def _peek_kind(path: str | FCPath) -> str:
         OSError: If the file cannot be opened (propagated from NumPy or Astropy).
     """
     fmt = infer_format(path, None)
+    _missing_kind_msg = f'No KIND header found in {path!r}; expected a nav.reproj FITS export.'
     if fmt == 'npz':
         local = cast(Path, FCPath(path).get_local_path())
         with np.load(local, allow_pickle=False) as raw:
+            if '__kind__' not in raw:
+                raise ValueError(_missing_kind_msg)
             kind = str(raw['__kind__'])
     else:
         local = cast(Path, FCPath(path).get_local_path())
@@ -120,7 +123,7 @@ def _peek_kind(path: str | FCPath) -> str:
             hdr = hdul[0].header
             kind = str(hdr.get('KIND', '')).strip()
     if not kind:
-        raise ValueError(f'No KIND header found in {path!r}; expected a nav.reproj FITS export.')
+        raise ValueError(_missing_kind_msg)
     return kind
 
 

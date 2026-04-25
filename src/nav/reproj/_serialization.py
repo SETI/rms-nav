@@ -158,6 +158,16 @@ def infer_format(
 # RingOrbitModel serialization helpers
 # ---------------------------------------------------------------------------
 
+_ORBIT_MODEL_FROM_DICT_KEYS: tuple[str, ...] = (
+    'name',
+    'a',
+    'e',
+    'w0',
+    'dw',
+    'mean_motion',
+    'epoch_utc',
+)
+
 
 def orbit_model_to_dict(om: RingOrbitModel | None) -> dict[str, Any]:
     """Serialize a RingOrbitModel to a plain dict of primitives.
@@ -191,9 +201,20 @@ def orbit_model_from_dict(d: dict[str, Any]) -> RingOrbitModel | None:
 
     Returns:
         RingOrbitModel instance, or None if the original was None.
+
+    Raises:
+        ValueError: If ``is_none`` is not true but required keys are missing
+            (see :func:`orbit_model_to_dict` for the expected schema).
     """
-    if d.get('is_none'):
+    if d.get('is_none') is True:
         return None
+    missing = [k for k in _ORBIT_MODEL_FROM_DICT_KEYS if k not in d]
+    if missing:
+        raise ValueError(
+            'orbit_model dict is missing required key(s) '
+            f'{missing!r}; when is_none is not True, keys must match those emitted by '
+            'orbit_model_to_dict() (name, a, e, w0, dw, mean_motion, epoch_utc).'
+        )
     return RingOrbitModel(
         name=str(d['name']),
         a=float(d['a']),

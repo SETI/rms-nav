@@ -68,6 +68,35 @@ def _log_main_exception(msg: str, *args: object) -> None:
     MAIN_LOGGER.exception(msg, *args, stacktrace=False, more=traceback.format_exc())
 
 
+def _safe_stub_for_image_log(results_path_stub: object, *, default: str = 'image') -> str:
+    """Reduce ``results_path_stub`` to one filename-safe segment (no directory components)."""
+    if not isinstance(results_path_stub, str):
+        return default
+    if '\x00' in results_path_stub:
+        return default
+    base = os.path.basename(results_path_stub.replace('\\', '/'))
+    if not base:
+        return default
+    safe = ''.join(ch if (ch.isalnum() or ch in '._-') else '_' for ch in base)
+    safe = safe.strip('._') or default
+    return safe[:200]
+
+
+def _resolved_image_log_path(
+    output_dir: FCPath, results_path_stub: object, timestamp: str
+) -> FCPath:
+    """Resolve ``<output_dir>/logs/<stub>_<timestamp>.log`` and ensure it stays under ``logs``."""
+    logs_dir = (output_dir / 'logs').resolve()
+    for stub in (
+        _safe_stub_for_image_log(results_path_stub),
+        _safe_stub_for_image_log('', default='image'),
+    ):
+        candidate = (output_dir / 'logs' / f'{stub}_{timestamp}.log').resolve()
+        if candidate.is_relative_to(logs_dir):
+            return candidate
+    raise ValueError(f'Refusing image log path outside output_dir/logs (root={logs_dir!r})')
+
+
 def process_task(
     task_id: str, task_data: dict[str, Any], worker_data: WorkerData
 ) -> tuple[bool, Any]:
@@ -98,9 +127,13 @@ def process_task(
             :class:`filecache.FCPath` for offset loading.
 
     Returns:
-        Tuple of ``(retry, result)``. ``retry`` is always ``False``; ``result`` is
-        ``None`` on success or a ``{'status': 'error', ...}`` dict on failure.
+        Tuple of ``(retry, result)``. ``retry`` is always ``False``. ``result`` is
+        ``{'status': 'success'}`` on success, or ``{'status': 'error', 'status_error': ...}``
+        (and optionally ``status_exception``) on failure.
     """
+    if not isinstance(task_data, dict):
+        return False, {'status': 'error', 'status_error': 'invalid_task_data_type'}
+
     cli_args = cast(argparse.Namespace, worker_data.args)
     load_default_and_user_config(cli_args, DEFAULT_CONFIG)
 
@@ -122,14 +155,20 @@ def process_task(
     files = task_data.get('files')
     if files is None:
         return False, {'status': 'error', 'status_error': 'no_files'}
+    if not isinstance(files, list):
+        return False, {'status': 'error', 'status_error': 'invalid_files_type'}
 
     task_arguments = task_data.get('arguments')
     if task_arguments is None:
         return False, {'status': 'error', 'status_error': 'no_arguments'}
+    if not isinstance(task_arguments, dict):
+        return False, {'status': 'error', 'status_error': 'invalid_arguments_type'}
 
     output_dir_str = task_arguments.get('output_dir')
     if output_dir_str is None:
         return False, {'status': 'error', 'status_error': 'no_output_dir'}
+    if not isinstance(output_dir_str, str):
+        return False, {'status': 'error', 'status_error': 'invalid_output_dir_type'}
 
     prefix: str = task_arguments.get('prefix', '')
     fmt: str = task_arguments.get('format', 'fits')
@@ -146,10 +185,15 @@ def process_task(
         mosaic = build_ring_mosaic(task_args)
 
     for file in files:
+        if not isinstance(file, dict):
+            return False, {'status': 'error', 'status_error': 'invalid_file_entry_type'}
         image_file_url = file.get('image_file_url', None)
         label_file_url = file.get('label_file_url', None)
         results_path_stub = file.get('results_path_stub', None)
         index_file_row = file.get('index_file_row', None)
+        if index_file_row is not None and not isinstance(index_file_row, dict):
+            return False, {'status': 'error', 'status_error': 'invalid_index_file_row_type'}
+        index_row: dict[str, Any] = index_file_row if isinstance(index_file_row, dict) else {}
         if image_file_url is None:
             return False, {'status': 'error', 'status_error': 'no_image_file_url'}
         if label_file_url is None:
@@ -160,11 +204,15 @@ def process_task(
             image_file_url=FCPath(image_file_url),
             label_file_url=FCPath(label_file_url),
             results_path_stub=results_path_stub,
-            index_file_row=index_file_row,
+            index_file_row=index_row,
         )
 
         out_path = per_image_output_path(
-            output_dir, prefix, image_file, fmt, subject_name=mosaic.body_name
+            output_dir,
+            prefix,
+            image_file,
+            fmt=fmt,
+            subject_name=mosaic.body_name,
         )
 
         if not overwrite and out_path.exists():
@@ -172,9 +220,16 @@ def process_task(
             continue
 
         timestamp = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
-        image_log_path = (
-            FCPath(output_dir) / 'logs' / (image_file.results_path_stub + '_' + timestamp + '.log')
-        )
+        try:
+            image_log_path = _resolved_image_log_path(
+                output_dir, image_file.results_path_stub, timestamp
+            )
+        except ValueError as exc:
+            return False, {
+                'status': 'error',
+                'status_error': 'invalid_image_log_path',
+                'status_exception': str(exc),
+            }
         image_log_path.parent.mkdir(parents=True, exist_ok=True)
         local_handlers = image_log_handlers(image_log_path, cli_args, DEFAULT_CONFIG)
 
@@ -215,7 +270,7 @@ def process_task(
             finally:
                 MAIN_LOGGER.info('Wrote reprojection log to %s', image_log_path)
 
-    return False, None  # No retry under any circumstances
+    return False, {'status': 'success'}  # No retry under any circumstances
 
 
 async def async_main() -> None:

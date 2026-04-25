@@ -53,6 +53,28 @@ DEFAULT_ZOOM = 1
 _REAL_SCALAR_TYPES = (int, float, np.integer, np.floating)
 _INTEGRAL_SCALAR_TYPES = (int, np.integer)
 
+
+def _validate_navigation_uncertainty(value: object) -> float:
+    """Validate ``navigation_uncertainty`` for :meth:`BodyMosaic.reproject`.
+
+    Returns:
+        ``float(value)`` when valid.
+
+    Raises:
+        TypeError: If ``value`` is not a real scalar (``bool`` is rejected).
+        ValueError: If ``value`` is not finite or is negative.
+    """
+    if isinstance(value, bool) or not isinstance(value, _REAL_SCALAR_TYPES):
+        raise TypeError(f'navigation_uncertainty must be a real number, got {type(value).__name__}')
+    nu = float(value)
+    if not math.isfinite(nu) or nu < 0.0:
+        raise ValueError(
+            'navigation_uncertainty must be finite and >= 0 (effective resolution uses '
+            'resolution * (1.0 + navigation_uncertainty)).'
+        )
+    return nu
+
+
 # Lambert is set mainly based on the depth of craters - if the incidence angle
 # is too large the crater interior is too shadowed and we don't get a good
 # reprojection. If the emission angle is too large we can't see over the crater
@@ -985,8 +1007,15 @@ class BodyMosaic:
             ``ok_body_mask`` (see below); scatter uses that same mask so ``img``
             is never valid where ``phase``, ``emission``, ``incidence``, or
             ``resolution`` would be masked or beyond configured limits.
+
+        Raises:
+            TypeError: If ``navigation_uncertainty`` is not a real number (``bool`` is not
+                accepted).
+            ValueError: If ``navigation_uncertainty`` is not finite or is ``< 0``.
         """
         logger = logging.getLogger(_LOGGING_NAME + '.reproject')
+
+        navigation_uncertainty = _validate_navigation_uncertainty(navigation_uncertainty)
 
         if data is None:
             data = obs.data
@@ -1190,12 +1219,15 @@ class BodyMosaic:
         empty_sub = empty_ma[min_lat_pixel : max_lat_pixel + 1, min_lon_pixel : max_lon_pixel + 1]
 
         if mask_only:
-            repro_img = np.zeros(shape, dtype=np.bool_)
-            repro_img[good_lat, good_lon] = True
-            # Return an abbreviated result; img contains the bool mask
+            repro_img_full = np.zeros(shape, dtype=np.bool_)
+            repro_img_full[good_lat, good_lon] = True
+            repro_img_sub = repro_img_full[
+                min_lat_pixel : max_lat_pixel + 1, min_lon_pixel : max_lon_pixel + 1
+            ]
+            # Return an abbreviated result; img is the bool mask on the same crop as metadata
             return BodyReprojResult(
                 body_name=self.body_name,
-                img=ma.MaskedArray(repro_img.astype(self._image_dtype)),
+                img=ma.MaskedArray(repro_img_sub.astype(self._image_dtype)),
                 lat_resolution=self._lat_resolution,
                 lon_resolution=self._lon_resolution,
                 lat_idx_range=(min_lat_pixel, max_lat_pixel),

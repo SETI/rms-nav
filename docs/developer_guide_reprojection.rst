@@ -124,25 +124,29 @@ attributes set at construction:
 
 - ``_image_dtype`` (default ``np.float64``) — dtype for reprojected brightness
   ``img`` arrays.
-- ``_metadata_dtype`` (default ``np.float32``) — dtype for all geometry arrays
-  (``resolution``, ``eff_resolution``, ``phase``, ``emission``, ``incidence``)
-  **and** for ``time``.
+- ``_metadata_dtype`` (default ``np.float32``) — dtype for geometry arrays on
+  the reprojection grid (``resolution``, ``eff_resolution``, ``phase``,
+  ``emission``, ``incidence``). Detector backplane samples feeding those
+  quantities (for example incidence, emission, phase, latitude, longitude)
+  are cast with ``.astype(self._metadata_dtype)`` inside ``reproject()`` before
+  binning and masking; they are **not** applied to observation epoch ``time``.
 
 These propagate through the pipeline as follows:
 
 1. ``_allocate`` / ``_expand_lat`` / ``_expand_lon_impl`` allocate internal
-   arrays using these dtypes directly.
-2. ``reproject()`` casts backplane arrays with
-   ``bp_xyz.mvals.astype(self._metadata_dtype)`` and constructs per-pixel
-   intermediate arrays at ``_image_dtype`` (for ``img``) or
-   ``_metadata_dtype`` (for all geometry).
+   arrays using these dtypes directly (mosaic ``_time`` buffers use
+   ``float64``, not ``_metadata_dtype``).
+2. ``reproject()`` builds per-pixel ``img`` at ``_image_dtype`` and the
+   geometry fields above at ``_metadata_dtype``. Scalar ``time`` on
+   ``BodyReprojResult`` is a Python ``float`` (IEEE double); ring/body mosaic
+   ``time`` grids are ``numpy.float64`` arrays regardless of ``metadata_dtype``.
 3. Every ``BodyReprojResult`` and ``BodyMosaicData`` (and ring equivalents)
-   carries explicit ``image_dtype`` and ``metadata_dtype`` fields so that the
-   dtype contract is self-describing and survives a save/load round-trip.
+   carries explicit ``image_dtype`` and ``metadata_dtype`` fields describing
+   the stored image and geometry dtypes; ``time`` is never governed by
+   ``metadata_dtype``. That contract is self-describing and survives a
+   save/load round-trip.
 
-``time`` is always ``float64`` regardless of the dtype kwargs, preserving
-sub-second precision for Cassini ET values (~5×10⁸ s). ``image_number`` is
-always ``uint16`` regardless of the dtype kwargs, capping a single mosaic at
+``image_number`` is always ``uint16`` regardless of the dtype kwargs, capping a single mosaic at
 65,535 contributing images. ``add()`` raises ``OverflowError`` when that
 limit is exceeded.
 
@@ -379,8 +383,8 @@ Two-pass workflow
 The reprojection pass loops over
 ``DATASET.yield_image_files_from_arguments(args)`` and for each ``ImageFile``:
 
-1. Compute ``per_image_output_path(..., subject_name=mosaic.body_name)`` (body
-   or planet name in the filename).
+1. Compute ``per_image_output_path(output_dir, prefix, image_file, fmt=…, subject_name=mosaic.body_name)``
+   (body or planet name in the filename; ``fmt`` and ``subject_name`` are keyword-only).
 2. Skip if the file exists and ``--overwrite`` is not set.
 3. Open ``IMAGE_LOGGER`` handlers writing to ``<output-dir>/logs/…``.
 4. Load the observation via ``obs_class.from_file(image_path)``.

@@ -55,6 +55,10 @@ class RingOrbitModel:
 
     def __post_init__(self) -> None:
         """Validate parameters and cache the epoch in ET."""
+        for fname in ('a', 'e', 'w0', 'dw', 'mean_motion'):
+            v = getattr(self, fname)
+            if not math.isfinite(v):
+                raise ValueError(f'RingOrbitModel {fname} must be finite, got {v!r}')
         if self.a <= 0.0:
             raise ValueError(f'RingOrbitModel semi-major axis must be positive, got {self.a}')
         if not (0.0 <= self.e < 1.0):

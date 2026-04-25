@@ -1104,8 +1104,9 @@ class BodyMosaicWindow(QMainWindow):
             self._clear_info()
             return
         dd = self._display_data
-        n_c = dd.image_ma.shape[1]
-        n_r = dd.image_ma.shape[0]
+        view_ma = self._body_view_ma if self._body_view_ma is not None else dd.image_ma
+        n_c = view_ma.shape[1]
+        n_r = view_ma.shape[0]
 
         if self._proj_kind != ProjectionKind.RECT:
             # px/py are viewport coords; convert to geographic
@@ -1141,7 +1142,7 @@ class BodyMosaicWindow(QMainWindow):
         ix = int(np.clip(dc, 0, n_c - 1))
         iy = int(np.clip(dr, 0, n_r - 1))
 
-        raw_val = dd.image_ma[iy, ix] if inside else ma.masked
+        raw_val = view_ma[iy, ix] if inside else ma.masked
         if ma.is_masked(raw_val):
             value_str = f'{"masked":>11}'
         else:

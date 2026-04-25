@@ -49,6 +49,8 @@ def _subject_filename_segment(subject_name: str) -> str:
 
 
 def _validate_output_prefix(prefix: str) -> None:
+    if not isinstance(prefix, str):
+        raise TypeError(f'prefix must be str, got {type(prefix).__name__}')
     if '\x00' in prefix:
         raise ValueError('prefix must not contain null bytes')
     if _PREFIX_INVALID.search(prefix):
@@ -56,6 +58,8 @@ def _validate_output_prefix(prefix: str) -> None:
 
 
 def _validate_output_fmt(fmt: str) -> str:
+    if not isinstance(fmt, str):
+        raise TypeError(f'fmt must be str, got {type(fmt).__name__}')
     ext = fmt.lower()
     if ext not in _ALLOWED_OUTPUT_FMTS:
         raise ValueError(f'fmt must be one of {sorted(_ALLOWED_OUTPUT_FMTS)}, got {fmt!r}')
@@ -83,8 +87,8 @@ def per_image_output_path(
     output_dir: str | FCPath,
     prefix: str,
     image_file: ImageFile,
-    fmt: str,
     *,
+    fmt: str,
     subject_name: str,
 ) -> FCPath:
     """Return the output path for a single reprojected image.
@@ -100,6 +104,7 @@ def per_image_output_path(
         An :class:`filecache.FCPath` pointing to the reprojection file.
 
     Raises:
+        TypeError: If ``prefix`` or ``fmt`` is not a :class:`str`.
         ValueError: If ``fmt`` or ``prefix`` is invalid or the resolved path would
             escape ``output_dir``.
     """
@@ -133,6 +138,7 @@ def mosaic_output_path(
         An :class:`filecache.FCPath` pointing to the mosaic file.
 
     Raises:
+        TypeError: If ``prefix`` or ``fmt`` is not a :class:`str`.
         ValueError: If ``fmt`` or ``prefix`` is invalid or the resolved path would
             escape ``output_dir``.
     """

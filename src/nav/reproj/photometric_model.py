@@ -8,12 +8,41 @@ Default is no correction (pass ``photometric_model=None`` to ``BodyMosaic`` or
 All angles are in radians throughout.
 """
 
+import math
 from dataclasses import dataclass
 from typing import Protocol, cast
 
 import numpy as np
 
 from nav.support.types import NDArrayFloatType
+
+# Smallest allowed positive cosine clamp / denominator floor (matches ``min_denom`` scale).
+_TINY_POSITIVE: float = 1e-15
+_PHOTOMETRIC_REAL = (int, float, np.integer, np.floating)
+
+
+def _photometric_real_scalar(field: str, value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, _PHOTOMETRIC_REAL):
+        raise TypeError(f'{field} must be a real number, got {type(value).__name__}')
+    x = float(value)
+    if not math.isfinite(x):
+        raise ValueError(f'{field} must be finite, got {value!r}')
+    return x
+
+
+def _validate_cos_clamp(field: str, value: object) -> None:
+    """Cosine floor used with ``np.maximum(cos(angle), value)``; must be in ``(0, 1]``."""
+    x = _photometric_real_scalar(field, value)
+    if x < _TINY_POSITIVE or x > 1.0:
+        raise ValueError(
+            f'{field} must be finite with {_TINY_POSITIVE} <= {field} <= 1.0, got {value!r}'
+        )
+
+
+def _validate_positive_floor(field: str, value: object) -> None:
+    x = _photometric_real_scalar(field, value)
+    if x < _TINY_POSITIVE:
+        raise ValueError(f'{field} must be finite and >= {_TINY_POSITIVE}, got {value!r}')
 
 
 class PhotometricModel(Protocol):
@@ -61,10 +90,18 @@ class LambertModel:
 
     ``min_cos_incidence`` (default 0.01, ~84°) clamps the Lambert denominator;
     see the member entry below.
+
+    Raises:
+        TypeError: If ``min_cos_incidence`` is not a real scalar (``bool`` is rejected).
+        ValueError: If ``min_cos_incidence`` is not finite or is not in ``[1e-15, 1]``
+            (valid cosine clamp range).
     """
 
     name: str = 'lambert'
     min_cos_incidence: float = 0.01
+
+    def __post_init__(self) -> None:
+        _validate_cos_clamp('min_cos_incidence', self.min_cos_incidence)
 
     def correct(
         self,
@@ -124,11 +161,19 @@ class LommelSeeligerModel:
     normalizes out this scattering model.
 
     ``min_cos_incidence`` defaults to 0.01; see the member entry below.
+
+    Raises:
+        TypeError: If a numeric field is not a real scalar (``bool`` is rejected).
+        ValueError: If a field is not finite or is outside its allowed range.
     """
 
     name: str = 'lommel_seeliger'
     min_cos_incidence: float = 0.01
     min_denom: float = 1e-15
+
+    def __post_init__(self) -> None:
+        _validate_cos_clamp('min_cos_incidence', self.min_cos_incidence)
+        _validate_positive_floor('min_denom', self.min_denom)
 
     def _signed_sum_denom(
         self, cos_i: NDArrayFloatType, cos_e: NDArrayFloatType
@@ -213,12 +258,21 @@ class MinnaertModel:
 
     Defaults: ``k`` = 0.5, ``min_cos_incidence`` = ``min_cos_emission`` = 0.01;
     see member entries below.
+
+    Raises:
+        TypeError: If a numeric field is not a real scalar (``bool`` is rejected).
+        ValueError: If a field is not finite or cosine clamps are outside ``(0, 1]``.
     """
 
     name: str = 'minnaert'
     k: float = 0.5
     min_cos_incidence: float = 0.01
     min_cos_emission: float = 0.01
+
+    def __post_init__(self) -> None:
+        _photometric_real_scalar('k', self.k)
+        _validate_cos_clamp('min_cos_incidence', self.min_cos_incidence)
+        _validate_cos_clamp('min_cos_emission', self.min_cos_emission)
 
     def correct(
         self,

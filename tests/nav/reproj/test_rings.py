@@ -15,18 +15,24 @@ import pytest
 
 from nav.reproj.photometric_model import LambertModel
 from nav.reproj.ring_orbit_model import RingOrbitModel
-from nav.reproj.rings import RingMosaic, RingMosaicData, RingMosaicMergeStrategy, RingReprojResult
+from nav.reproj.rings import (
+    _MAX_LONGITUDE,
+    RingMosaic,
+    RingMosaicData,
+    RingMosaicMergeStrategy,
+    RingReprojResult,
+)
 from nav.ui.mosaic_viewer.common import load_ring_file
 
 # Convenient resolution values for tests.
-# pi/16: RingMosaic uses floor(2π/res)+1 longitude bins (see rings.RingMosaic.__init__).
+# pi/16: RingMosaic uses floor(_MAX_LONGITUDE/res)+1 longitude bins (see rings.RingMosaic.__init__).
 _LON_RES = math.pi / 16  # rad/pixel -- ~11.25 deg/pix
 _RAD_RES = 5.0  # km/pixel
 _RADIUS_INNER = 1000.0  # km
 _RADIUS_OUTER = 1020.0  # km
 
-# Derived constants
-_N_FULL_LON = math.floor(2.0 * math.pi / _LON_RES) + 1  # 33 for _LON_RES = π/16
+# Derived constants (must match ``RingMosaic`` full-longitude bin count)
+_N_FULL_LON = math.floor(_MAX_LONGITUDE / _LON_RES) + 1
 _N_RADIUS = 5  # ceil((1020-1000 + slop) / 5.0) = 5
 
 _DEFAULT_IMAGE_DTYPE = np.dtype(np.float64)

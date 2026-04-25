@@ -75,7 +75,7 @@ regardless of the ``metadata_dtype`` argument to ``BodyMosaic``::
     # Defaults: image in float64, geometry in float32, time in float64
     mosaic = BodyMosaic(body_name='MIMAS')
 
-    # All float64 for maximum precision
+    # Float32 image storage, float64 geometry (metadata); time stays float64
     mosaic = BodyMosaic(
         body_name='MIMAS',
         image_dtype=np.float32,     # smaller image storage

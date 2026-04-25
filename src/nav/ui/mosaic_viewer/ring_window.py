@@ -113,9 +113,11 @@ def _compute_ewmu(ew: ma.MaskedArray, emission_deg: ma.MaskedArray) -> ma.Masked
         masked (no fill to 0°); the result combines ``ew`` and ``emission_deg``
         masks so ``EW * mu`` does not invent unmasked values where emission is unknown.
     """
+    # ``np.radians`` on ``ma.MaskedArray`` preserves ``emission_deg.mask`` (there is
+    # no ``ma.radians``); ``ma.cos`` / ``np.abs`` keep the mask through ``mu``.
     emi_rad = np.radians(emission_deg)
-    mu = cast(ma.MaskedArray, np.abs(np.cos(emi_rad)))
-    return cast(ma.MaskedArray, ew * mu)
+    mu = cast(ma.MaskedArray, np.abs(ma.cos(emi_rad)))
+    return cast(ma.MaskedArray, ma.asarray(ew) * mu)
 
 
 def _mean_std_masked_1d(arr: ma.MaskedArray) -> tuple[float, float]:
@@ -1083,9 +1085,7 @@ class RingMosaicWindow(QMainWindow):
 
     def _column_band_ewmu(self, dd: RingDisplayData, arr_min: int, arr_max: int) -> ma.MaskedArray:
         ew = self._column_band_ew(dd, arr_min, arr_max)
-        em = dd.mean_emission
-        mu = np.abs(np.cos(np.radians(em.filled(0.0))))
-        return cast(ma.MaskedArray, ma.asarray(ew) * mu)
+        return _compute_ewmu(ew, dd.mean_emission)
 
     def _replot_corot_ew_panel(self) -> None:
         dd = self._display_data

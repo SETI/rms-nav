@@ -7,6 +7,7 @@ read the ``_metadata.json`` file for an image and apply the stored
 
 import json
 from collections.abc import Sequence
+from pathlib import Path
 
 import oops
 from filecache import FCPath
@@ -14,6 +15,42 @@ from filecache import FCPath
 from nav.config import MAIN_LOGGER
 from nav.dataset.dataset import ImageFile
 from nav.obs import ObsSnapshotInst
+
+
+def _resolved_nav_metadata_path(
+    nav_results_root: str | FCPath,
+    image_file: ImageFile,
+) -> FCPath | None:
+    """Resolve ``<nav_results_root>/<stub>_metadata.json`` and ensure it stays under root.
+
+    Rejects null bytes, absolute ``results_path_stub`` fragments, and any resolved
+    path that escapes ``nav_results_root`` (e.g. ``..`` segments in ``stub``).
+    """
+    rel_name = f'{image_file.results_path_stub}_metadata.json'
+    if '\x00' in rel_name:
+        MAIN_LOGGER.warning(
+            'nav_results_root: metadata path contains null byte; refusing offset load for %s.',
+            image_file.image_file_url,
+        )
+        return None
+    if Path(rel_name).is_absolute():
+        MAIN_LOGGER.warning(
+            'nav_results_root: metadata path fragment is absolute; refusing offset load for %s.',
+            image_file.image_file_url,
+        )
+        return None
+    root = FCPath(nav_results_root).expanduser().resolve()
+    candidate = (root / rel_name).resolve()
+    if not candidate.is_relative_to(root):
+        MAIN_LOGGER.warning(
+            'nav_results_root: resolved metadata path %s is outside root %s; refusing '
+            'offset load for %s (check results_path_stub for path traversal).',
+            candidate,
+            root,
+            image_file.image_file_url,
+        )
+        return None
+    return candidate
 
 
 def _parse_nav_offset_pair(offset: object) -> tuple[float, float] | None:
@@ -53,12 +90,15 @@ def load_offset_if_any(
     Returns:
         ``(dv, du)`` as floats when the metadata file exists, is valid JSON,
         and has ``status == 'success'`` with a non-null ``offset`` field.
-        Returns ``None`` (with a warning) in all other cases.
+        Returns ``None`` (with a warning) in all other cases, including when
+        ``results_path_stub`` would resolve outside ``nav_results_root``.
     """
     if nav_results_root is None:
         return None
 
-    metadata_path = FCPath(nav_results_root) / (image_file.results_path_stub + '_metadata.json')
+    metadata_path = _resolved_nav_metadata_path(nav_results_root, image_file)
+    if metadata_path is None:
+        return None
 
     try:
         text = metadata_path.read_text()

@@ -188,7 +188,7 @@ def _body_sphere_lon_bin_to_dc_map(
     lon_res_rad = lon_res_deg * (math.pi / 180.0)
     if lon_res_rad <= 0:
         raise ValueError('longitude resolution (deg) must be positive')
-    n_full_lon = max(1, int(2.0 * math.pi / lon_res_rad))
+    n_full_lon = max(1, math.floor(2.0 * math.pi / lon_res_rad) + 1)
     lon_min_rad = lon_min_deg * (math.pi / 180.0)
     lon_max_rad = lon_max_deg * (math.pi / 180.0)
     lon_min_bin = round(lon_min_rad / lon_res_rad)

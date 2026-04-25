@@ -40,9 +40,10 @@ _N_DATA_COLS = 8
 # Viewport dimensions
 _VP = 20
 
-# Simple 1:1 lon_bin_to_dc for a full 0-360 grid with 8 columns at 45 deg/col
-_N_FULL_LON = 8
-_LON_BIN_TO_DC = np.arange(_N_FULL_LON, dtype=np.int32)
+# Longitude bin map for 0-360 deg at ``_D_LON`` with ``_N_DATA_COLS`` columns (matches helper).
+_N_FULL_LON, _, _LON_BIN_TO_DC = _body_sphere_lon_bin_to_dc_map(
+    _LON_MIN, _LON_MAX, _D_LON, _N_DATA_COLS
+)
 
 
 def _viewport_grids() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -399,7 +400,7 @@ def test_deterministic_rendering_same_size() -> None:
 
 
 def test_lon_bin_to_dc_map_helper_produces_correct_n_full_lon() -> None:
-    """_body_sphere_lon_bin_to_dc_map returns n_full_lon matching 360/d_lon."""
+    """_body_sphere_lon_bin_to_dc_map returns ``n_full_lon`` consistent with shared constants."""
     n_full_lon, _lon_res_rad, _bin_to_dc = _body_sphere_lon_bin_to_dc_map(
         _LON_MIN, _LON_MAX, _D_LON, _N_DATA_COLS
     )
