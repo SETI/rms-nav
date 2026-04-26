@@ -1094,10 +1094,7 @@ class RingMosaicWindow(QMainWindow):
         self._ew_ax.cla()
         self._init_corot_ew_axes()
         use_mu = self._chk_corot_use_ewmu.isChecked()
-        longs = (
-            dd.longitude_column_origin_deg
-            + np.arange(dd.n_longitude, dtype=np.float64) * dd.longitude_resolution_deg
-        )
+        longs = self._column_longitudes_deg(dd)
         if use_mu:
             yfull = self._ew_mu_data.filled(np.nan) if self._ew_mu_data is not None else np.nan
             stat = f'{self._ewmu_mean:.4f} ± {self._ewmu_std:.4f} km'
@@ -1125,10 +1122,7 @@ class RingMosaicWindow(QMainWindow):
             ew_data = self._column_band_ewmu(dd, arr_min, arr_max)
         else:
             ew_data = self._column_band_ew(dd, arr_min, arr_max)
-        longs = (
-            dd.longitude_column_origin_deg
-            + np.arange(dd.n_longitude, dtype=np.float64) * dd.longitude_resolution_deg
-        )
+        longs = self._column_longitudes_deg(dd)
         rel_min = (arr_min - (dd.n_radii - 1) / 2.0) * dd.radius_resolution_km
         rel_max = (arr_max - (dd.n_radii - 1) / 2.0) * dd.radius_resolution_km
         if _ring_longitude_corotating(dd):
@@ -1156,14 +1150,31 @@ class RingMosaicWindow(QMainWindow):
         return float(np.min(abs_r)), float(np.max(abs_r))
 
     @staticmethod
-    def _corot_longitude_for_column(dd: RingDisplayData, ix: int) -> float:
+    def _column_longitudes_deg(dd: 'RingDisplayData') -> np.ndarray:
+        """Return a 1-D float64 array of longitude (deg) for each image column.
+
+        Uses ``longitude_global_bins`` for non-contiguous sparse mosaics so that
+        the mapping is bin-accurate rather than ``origin + ix * resolution``.
+        """
+        if dd.longitude_global_bins is not None:
+            return dd.longitude_global_bins * dd.longitude_resolution_deg
+        return (
+            dd.longitude_column_origin_deg
+            + np.arange(dd.n_longitude, dtype=np.float64) * dd.longitude_resolution_deg
+        )
+
+    @staticmethod
+    def _corot_longitude_for_column(dd: 'RingDisplayData', ix: int) -> float:
         hi = dd.longitude_extent_hi_deg
         if hi is None:
             hi = dd.longitude_column_origin_deg + float(
                 dd.n_longitude * dd.longitude_resolution_deg
             )
         lo = float(dd.longitude_column_origin_deg)
-        lon = lo + float(ix) * dd.longitude_resolution_deg
+        if dd.longitude_global_bins is not None and 0 <= ix < len(dd.longitude_global_bins):
+            lon = float(dd.longitude_global_bins[ix]) * dd.longitude_resolution_deg
+        else:
+            lon = lo + float(ix) * dd.longitude_resolution_deg
         return float(np.clip(lon, lo, hi))
 
     def _update_radial_profile_plot(self, ix: int) -> None:
@@ -1354,6 +1365,9 @@ class RingMosaicWindow(QMainWindow):
     def _fit_zoom_to_window(self) -> None:
         dd = self._display_data
         if dd is None:
+            return
+        if dd.n_longitude == 0 or dd.n_radii == 0:
+            self._pending_fit = False
             return
         vw = self._image_widget.viewport().width()
         vh = self._image_widget.viewport().height()

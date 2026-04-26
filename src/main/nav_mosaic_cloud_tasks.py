@@ -4,10 +4,13 @@
 #
 # Reprojection driver when image batches are provided by cloud_tasks. Each task
 # reprojects the images it names and writes per-image reprojection files under
-# the task's ``output_dir``. The mosaic-combination pass (accumulating
-# reprojections into a final mosaic) is not performed here; run ``nav_mosaic
-# <mode> --skip-reproject`` after all tasks complete to produce the final
-# mosaic.
+# the task's ``output_dir``. The mode (``'rings'`` or ``'body'``) is read from
+# each task's ``task_data['mode']`` field, so a single worker process can
+# handle mixed ring and body tasks from the same queue.
+#
+# The mosaic-combination pass (accumulating reprojections into a final mosaic)
+# is not performed here; run ``nav_mosaic <mode> --skip-reproject`` after all
+# tasks complete to produce the final mosaic.
 #
 # CLI accepts only ``--config-file`` and ``--nav-results-root``. Every other
 # parameter (output directory, format, mosaic geometry, body/planet selection,
@@ -47,11 +50,6 @@ from reproj_cli.factories import build_body_mosaic, build_ring_mosaic
 from reproj_cli.offsets import apply_offset_to_obs, load_offset_if_any
 from reproj_cli.paths import per_image_output_path
 from reproj_cli.reproject import reproject_one_body, reproject_one_ring
-
-# Mode (``'rings'`` or ``'body'``) captured from argv before the Worker is
-# started. ``process_task`` reads this to pick the right mosaic factory and
-# reprojection function.
-_MODE: str = ''
 
 
 def _resolve_nav_results_root_fcpath(cli_args: argparse.Namespace) -> FCPath | None:
@@ -105,6 +103,8 @@ def process_task(
     Parameters:
         task_id: The ID of the task.
         task_data: The data for the task. It is expected to contain the following keys:
+            - "mode": ``'rings'`` or ``'body'``. Selects the mosaic factory and
+              reprojection function for this task.
             - "dataset_name": The name of the dataset.
             - "files": The files to process. Each is a dict with the keys:
                 - "image_file_url": The URL of the image file.
@@ -134,6 +134,16 @@ def process_task(
     if not isinstance(task_data, dict):
         return False, {'status': 'error', 'status_error': 'invalid_task_data_type'}
 
+    mode = task_data.get('mode')
+    if mode is None:
+        return False, {'status': 'error', 'status_error': 'no_mode'}
+    if mode not in ('rings', 'body'):
+        return False, {
+            'status': 'error',
+            'status_error': 'invalid_mode',
+            'status_exception': f'mode must be "rings" or "body", got {mode!r}',
+        }
+
     cli_args = cast(argparse.Namespace, worker_data.args)
     load_default_and_user_config(cli_args, DEFAULT_CONFIG)
 
@@ -142,6 +152,8 @@ def process_task(
     dataset_name = task_data.get('dataset_name')
     if dataset_name is None:
         return False, {'status': 'error', 'status_error': 'no_dataset_name'}
+    if not isinstance(dataset_name, str):
+        return False, {'status': 'error', 'status_error': 'invalid_dataset_name'}
     try:
         inst_name = dataset_name_to_inst_name(dataset_name)
     except KeyError:
@@ -179,7 +191,7 @@ def process_task(
     output_dir = FCPath(output_dir_str)
     task_args = argparse.Namespace(**task_arguments)
     mosaic: BodyMosaic | RingMosaic
-    if _MODE == 'body':
+    if mode == 'body':
         mosaic = build_body_mosaic(task_args)
     else:
         mosaic = build_ring_mosaic(task_args)
@@ -196,10 +208,16 @@ def process_task(
         index_row: dict[str, Any] = index_file_row if isinstance(index_file_row, dict) else {}
         if image_file_url is None:
             return False, {'status': 'error', 'status_error': 'no_image_file_url'}
+        if not isinstance(image_file_url, str):
+            return False, {'status': 'error', 'status_error': 'invalid_image_file_url'}
         if label_file_url is None:
             return False, {'status': 'error', 'status_error': 'no_label_file_url'}
+        if not isinstance(label_file_url, str):
+            return False, {'status': 'error', 'status_error': 'invalid_label_file_url'}
         if results_path_stub is None:
             return False, {'status': 'error', 'status_error': 'no_results_path_stub'}
+        if not isinstance(results_path_stub, str):
+            return False, {'status': 'error', 'status_error': 'invalid_results_path_stub'}
         image_file = ImageFile(
             image_file_url=FCPath(image_file_url),
             label_file_url=FCPath(label_file_url),
@@ -252,7 +270,7 @@ def process_task(
                 )
                 obs_inst = cast(ObsSnapshotInst, obs)
                 result: BodyReprojResult | RingReprojResult
-                if _MODE == 'body':
+                if mode == 'body':
                     result = reproject_one_body(
                         obs_inst, cast(BodyMosaic, mosaic), image_name=img_label
                     )
@@ -276,37 +294,16 @@ def process_task(
 async def async_main() -> None:
     """Async CLI entry for the cloud_tasks reprojection worker.
 
-    Reads ``sys.argv`` without modifying it: the first token after the script name
-    must be ``rings`` or ``body``. That value is stored in the module-level
-    ``_MODE`` for ``process_task``. Remaining tokens are passed to the
-    cloud_tasks ``Worker``, which parses only ``--config-file`` and
-    ``--nav-results-root`` (see the ``ArgumentParser`` built here). Before the
-    worker starts, default and user config are loaded and
+    Parses only ``--config-file`` and ``--nav-results-root`` from ``sys.argv``;
+    all other parameters (mode, output directory, mosaic geometry, etc.) are
+    read per-task from ``task_data``. A single worker process can therefore
+    handle a queue that mixes ring and body tasks. Before the worker starts,
+    default and user config are loaded and
     ``worker._data.nav_results_root_path`` is precomputed for tasks.
-
-    If the mode is missing or invalid, prints usage to stderr and calls
-    ``sys.exit(1)``. Otherwise awaits ``worker.start()`` until the worker stops
-    and returns normally, or lets exceptions propagate.
     """
-    global _MODE
-
-    argv = sys.argv[1:]
-    if not argv or argv[0] not in ('rings', 'body'):
-        print(
-            'Usage: nav_mosaic_cloud_tasks <rings|body> [options]',
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    _MODE = argv[0]
-    rest = argv[1:]
-
     argparser = argparse.ArgumentParser(
-        prog=f'nav_mosaic_{_MODE}_cloud_tasks',
-        description=(
-            'Reproject ring images (Cloud Tasks version).'
-            if _MODE == 'rings'
-            else 'Reproject body images (Cloud Tasks version).'
-        ),
+        prog='nav_mosaic_cloud_tasks',
+        description='Cloud Tasks reprojection worker for ring and body mosaics.',
     )
     env = argparser.add_argument_group('Environment')
     env.add_argument(
@@ -328,7 +325,7 @@ async def async_main() -> None:
         ),
     )
 
-    worker = Worker(process_task, args=rest, argparser=argparser)
+    worker = Worker(process_task, args=sys.argv[1:], argparser=argparser)
     init_cli_args = cast(argparse.Namespace, worker._data.args)
     load_default_and_user_config(init_cli_args, DEFAULT_CONFIG)
     # ``WorkerData`` has no typed field; ``process_task`` reads via ``getattr``.
@@ -337,32 +334,8 @@ async def async_main() -> None:
 
 
 def main() -> None:  # Required for setuptools entry points
-    """Synchronous entry point (setuptools and ``python -m`` / ``if __name__``).
-
-    Runs ``asyncio.run(async_main())`` so the cloud_tasks worker runs under an
-    event loop. This function does not parse arguments or set ``_MODE`` itself;
-    ``async_main`` reads ``sys.argv`` (first argument ``rings`` or ``body``),
-    assigns ``_MODE``, and leaves further parsing to the ``Worker``. Companion
-    entry points ``rings_main`` and ``body_main`` prepend the mode to
-    ``sys.argv`` before calling ``main``; ``main`` does not change ``sys.argv``.
-
-    Returns when ``async_main`` completes. If ``async_main`` (or the worker)
-    calls ``sys.exit``, the interpreter exits with that status and this call
-    does not return. Uncaught exceptions propagate out of ``asyncio.run``.
-    """
+    """Synchronous entry point; runs ``asyncio.run(async_main())``."""
     asyncio.run(async_main())
-
-
-def rings_main() -> None:
-    """Entry point for ``nav_mosaic_rings_cloud_tasks``; prepends ``rings`` to argv."""
-    sys.argv = [sys.argv[0], 'rings', *sys.argv[1:]]
-    main()
-
-
-def body_main() -> None:
-    """Entry point for ``nav_mosaic_body_cloud_tasks``; prepends ``body`` to argv."""
-    sys.argv = [sys.argv[0], 'body', *sys.argv[1:]]
-    main()
 
 
 if __name__ == '__main__':

@@ -6,6 +6,7 @@ read the ``_metadata.json`` file for an image and apply the stored
 """
 
 import json
+import math
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -59,6 +60,10 @@ def _parse_nav_offset_pair(offset: object) -> tuple[float, float] | None:
     Returns:
         A pair of floats on success, or ``None`` if ``offset`` is not a two-element
         sequence (excluding strings/bytes) or values are not convertible to float.
+
+    Raises:
+        TypeError: If either element is a ``bool`` (booleans are not valid pixel offsets).
+        ValueError: If either element converts to a non-finite float (NaN or Infinity).
     """
     if offset is None or isinstance(offset, (str, bytes)):
         return None
@@ -70,10 +75,20 @@ def _parse_nav_offset_pair(offset: object) -> tuple[float, float] | None:
         dv_raw, du_raw = offset[0], offset[1]
     except (TypeError, ValueError, KeyError, IndexError):
         return None
+    if isinstance(dv_raw, bool) or isinstance(du_raw, bool):
+        raise TypeError(
+            f'Offset elements must not be bool; got dv={dv_raw!r}, du={du_raw!r}'
+        )
     try:
-        return float(dv_raw), float(du_raw)
+        dv = float(dv_raw)
+        du = float(du_raw)
     except (TypeError, ValueError):
         return None
+    if not math.isfinite(dv) or not math.isfinite(du):
+        raise ValueError(
+            f'Offset elements must be finite floats; got dv={dv!r}, du={du!r}'
+        )
+    return dv, du
 
 
 def load_offset_if_any(
@@ -153,7 +168,22 @@ def load_offset_if_any(
         )
         return None
 
-    parsed = _parse_nav_offset_pair(offset)
+    try:
+        parsed = _parse_nav_offset_pair(offset)
+    except TypeError as exc:
+        MAIN_LOGGER.warning(
+            'Nav metadata for %s has invalid offset type (%s); using uncorrected pointing.',
+            image_file.image_file_url,
+            exc,
+        )
+        return None
+    except ValueError as exc:
+        MAIN_LOGGER.warning(
+            'Nav metadata for %s has non-finite offset (%s); using uncorrected pointing.',
+            image_file.image_file_url,
+            exc,
+        )
+        return None
     if parsed is None:
         MAIN_LOGGER.warning(
             'Nav metadata for %s has malformed offset field; using uncorrected pointing.',
@@ -161,7 +191,6 @@ def load_offset_if_any(
         )
         return None
     return parsed
-
 
 def apply_offset_to_obs(obs: ObsSnapshotInst, dv: float, du: float) -> None:
     """Apply a navigation offset in-place to an observation's FOV.

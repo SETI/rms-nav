@@ -94,8 +94,9 @@ distributed processing:
 * ``nav_create_bundle_cloud_tasks`` - Cloud tasks worker for PDS4 bundle
   creation.
 
-* ``nav_mosaic_rings_cloud_tasks`` / ``nav_mosaic_body_cloud_tasks`` - Cloud
-  tasks workers for the reprojection pass of ring / body mosaic generation.
+* ``nav_mosaic_cloud_tasks`` - Cloud tasks worker for the reprojection pass
+  of ring and body mosaic generation. A single worker process handles both
+  ring and body tasks; the mode is encoded per-task in the task payload.
   (Mosaic combination remains a single-node step; see
   :doc:`user_guide_reprojection`.)
 

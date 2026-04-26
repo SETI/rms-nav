@@ -357,6 +357,14 @@ def load_npz(
         none_keys = {k[:-6] for k in keys if k.endswith('__none')}
         ma_keys = data_keys & mask_keys
 
+        orphan_keys = data_keys.symmetric_difference(mask_keys)
+        if orphan_keys:
+            raise ValueError(
+                f'Unmatched "__data"/"__mask" sentinel pairs in npz file. '
+                f'Orphaned base names: {sorted(orphan_keys)!r}. '
+                'Each "<name>__data" entry must have a matching "<name>__mask" and vice versa.'
+            )
+
         handled: set[str] = set()
         for base in ma_keys:
             result[base] = ma.MaskedArray(
@@ -593,6 +601,15 @@ def load_fits(
             result[kw] = primary_hdr[kw]
 
         # Reconstruct MaskedArrays from HDU pairs
+        orphan_masks = [
+            name[:-5] for name in hdu_map if name.endswith('_MASK') and name[:-5] not in hdu_map
+        ]
+        if orphan_masks:
+            raise ValueError(
+                f'Orphaned "_MASK" HDUs in FITS file with no matching base HDU. '
+                f'Missing base names: {sorted(orphan_masks)!r}. '
+                'Each "<NAME>_MASK" HDU must have a corresponding "<NAME>" HDU.'
+            )
         for name, _data in list(hdu_map.items()):
             if name.endswith('_MASK'):
                 base = name[:-5]

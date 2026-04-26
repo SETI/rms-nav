@@ -293,6 +293,7 @@ def _write_cloud_tasks_file(mode: str, args: argparse.Namespace) -> None:
             {
                 'task_id': task_id,
                 'data': {
+                    'mode': mode,
                     'arguments': task_arguments,
                     'dataset_name': DATASET_NAME,
                     'files': task_files,

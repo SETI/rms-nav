@@ -332,14 +332,21 @@ The command-line tools are composed of three layers:
      ``rings_main`` and ``body_main`` are thin wrappers that prepend the
      subcommand to ``sys.argv`` and call ``main``.
    - ``nav_mosaic_cloud_tasks.py`` — Cloud Tasks worker that runs the
-     reprojection pass only. Uses the same ``rings`` / ``body`` dispatch as
-     ``nav_mosaic.py`` (captured in module-level ``_MODE`` before the Worker
-     starts so the right ``add_ring_args`` / ``add_body_args`` are registered).
+     reprojection pass only. The mode (``'rings'`` or ``'body'``) is read
+     from each task's ``task_data['mode']`` field, so a single worker process
+     can handle a queue that mixes ring and body tasks. The worker's CLI
+     parser is minimal: it exposes only ``--config-file`` and
+     ``--nav-results-root`` and does **not** register ``add_ring_args`` /
+     ``add_body_args``. Every other parameter (output directory, format,
+     mosaic geometry, body/planet selection, etc.) is read directly from each
+     task's ``task_data['arguments']`` dict.
      ``process_task`` calls the same ``reproj_cli`` helpers
      (``build_*_mosaic``, ``per_image_output_path``, ``load_offset_if_any``,
      ``apply_offset_to_obs``, ``reproject_one_*``) as the local driver.
-     Mosaic combination is not performed here; run ``nav_mosaic <mode>
-     --skip-reproject`` after the queue drains.
+     Mosaic combination is not performed here; run
+     ``nav_mosaic <mode> <dataset_name> --skip-reproject`` after the queue
+     drains (note that ``nav_mosaic.py`` requires both the mode and the
+     ``<dataset_name>`` positional arguments).
    - ``nav_mosaic_display.py`` — same pattern for the display tools.
 
 **Shared CLI helpers** (``src/reproj_cli/``)

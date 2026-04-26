@@ -717,8 +717,10 @@ class RingMosaic:
 
         ``time`` is always stored as ``float64`` regardless of
         ``metadata_dtype``. ``image_number`` is always stored as
-        ``uint16``, capping a single mosaic at 65 535 contributing images.
-        ``add()`` raises ``OverflowError`` if that limit is exceeded.
+        ``uint16``; ``_image_count`` is stored as the image_number before
+        incrementing, so valid image_number values span 0..65535 (a total
+        of 65,536 images). ``add()`` raises ``OverflowError`` after the
+        65,536th image is added.
     """
 
     def __init__(
@@ -778,6 +780,7 @@ class RingMosaic:
         self._mean_phase: NDArrayFloatType = np.empty(0, dtype=self._metadata_dtype)
         self._mean_emission: NDArrayFloatType = np.empty(0, dtype=self._metadata_dtype)
         self._mean_incidence_sum: float = 0.0
+        self._mean_incidence_count: int = 0
         self._mean_incidence: float = 0.0
         self._image_number: NDArrayIntType = np.empty(0, dtype=np.uint16)
         self._time: NDArrayFloatType = np.empty(0, dtype=np.float64)
@@ -1610,8 +1613,14 @@ class RingMosaic:
         self._antimask[valid_bins] = True
         self._contributing_image_names.append(repro.image_name)
         self._image_count += 1
-        self._mean_incidence_sum += float(repro.incidence)
-        self._mean_incidence = self._mean_incidence_sum / float(self._image_count)
+        if math.isfinite(repro.incidence):
+            self._mean_incidence_sum += float(repro.incidence)
+            self._mean_incidence_count += 1
+        self._mean_incidence = (
+            self._mean_incidence_sum / float(self._mean_incidence_count)
+            if self._mean_incidence_count > 0
+            else 0.0
+        )
 
     def _insert_new_columns(
         self,

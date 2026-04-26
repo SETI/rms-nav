@@ -215,7 +215,25 @@ class _SyncedSlider:
             return self._from_slider(self._sl.value())
 
 
-class BodyMosaicWindow(QMainWindow):
+class _ZoomSync(_SyncedSlider):
+    """A :class:`_SyncedSlider` that uses logarithmic zoom mapping.
+
+    Converts between the zoom float value and a 0-1000 slider integer using
+    :func:`~nav.ui.mosaic_viewer.tiled_image_widget._zoom_to_slider` and
+    :func:`~nav.ui.mosaic_viewer.tiled_image_widget._slider_to_zoom` so that
+    zooming feels perceptually uniform.
+    """
+
+    def _to_slider(self, val: float) -> int:
+        """Convert zoom value to slider integer position via ``_zoom_to_slider``."""
+        return _zoom_to_slider(val)
+
+    def _from_slider(self, pos: int) -> float:
+        """Convert slider integer position to zoom value via ``_slider_to_zoom``."""
+        return _slider_to_zoom(pos)
+
+
+
     """Viewer window for a list of body reprojection / mosaic files."""
 
     def __init__(
@@ -664,13 +682,6 @@ class BodyMosaicWindow(QMainWindow):
                 iw.set_zoom(zoom_val, yz)
             else:
                 iw.set_zoom(xz, zoom_val)
-
-        class _ZoomSync(_SyncedSlider):
-            def _to_slider(self, val: float) -> int:
-                return _zoom_to_slider(val)
-
-            def _from_slider(self, pos: int) -> float:
-                return _slider_to_zoom(pos)
 
         sync = _ZoomSync(le, sl, 0.05, 100.0, '%.2f', on_change=_on_change)
         sync.set_value(1.0)

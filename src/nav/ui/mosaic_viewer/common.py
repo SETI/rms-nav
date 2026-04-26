@@ -53,7 +53,7 @@ def _ring_longitude_column_origin_and_extent_hi_deg(
     lon_res_rad: float,
     longitude_antimask: np.ndarray,
     longitude_range: tuple[float, float] | None,
-) -> tuple[float, float]:
+) -> tuple[float, float, np.ndarray | None]:
     """Longitude (deg) at column 0 and upper extent for ring sparse/dense grids.
 
     Sparse ring columns map to global bins ``np.flatnonzero(longitude_antimask)``
@@ -67,8 +67,14 @@ def _ring_longitude_column_origin_and_extent_hi_deg(
         longitude_range: Optional ``(start, end)`` mosaic longitude bounds (rad).
 
     Returns:
-        ``(origin_deg, extent_deg)``: longitude in degrees at column 0 and the
-        high edge of the last column (same units as ``lon_res_deg`` scaling).
+        ``(origin_deg, extent_deg, global_bins)`` where ``origin_deg`` is the
+        longitude in degrees at column 0 and ``extent_deg`` is the high edge of
+        the last column.  ``global_bins`` is ``None`` when columns map
+        contiguously from ``origin_deg`` (i.e. origin + ix * resolution is
+        correct); when the populated bins have gaps, ``global_bins`` is the
+        ``np.flatnonzero(longitude_antimask)`` array and callers must use
+        ``global_bins[ix] * lon_res_rad * _RAD_TO_DEG`` for per-column
+        longitude instead of the linear formula.
     """
     lon_res_deg = lon_res_rad * _RAD_TO_DEG
     n_full = int(longitude_antimask.shape[0])
@@ -76,9 +82,9 @@ def _ring_longitude_column_origin_and_extent_hi_deg(
         lon_start, _lon_end = longitude_range
         start_bin = round(lon_start / lon_res_rad)
         origin_deg = float(start_bin * lon_res_rad * _RAD_TO_DEG)
-        return origin_deg, origin_deg + float(n_cols * lon_res_deg)
+        return origin_deg, origin_deg + float(n_cols * lon_res_deg), None
     if n_cols == n_full:
-        return 0.0, float(n_cols * lon_res_deg)
+        return 0.0, float(n_cols * lon_res_deg), None
     global_bins = np.flatnonzero(longitude_antimask)
     if global_bins.size != n_cols:
         logger.warning(
@@ -87,9 +93,15 @@ def _ring_longitude_column_origin_and_extent_hi_deg(
             int(global_bins.size),
             int(n_cols),
         )
-        return 0.0, float(n_cols * lon_res_deg)
+        return 0.0, float(n_cols * lon_res_deg), None
+    # Check for contiguous bins: diff should be all-ones.
+    if global_bins.size > 1 and not bool(np.all(np.diff(global_bins) == 1)):
+        # Non-contiguous: return sentinel so callers use per-column bin lookup.
+        origin_deg = float(global_bins[0] * lon_res_rad * _RAD_TO_DEG)
+        extent_deg = float((global_bins[-1] + 1) * lon_res_rad * _RAD_TO_DEG)
+        return origin_deg, extent_deg, global_bins
     origin_deg = float(global_bins[0] * lon_res_rad * _RAD_TO_DEG)
-    return origin_deg, origin_deg + float(n_cols * lon_res_deg)
+    return origin_deg, origin_deg + float(n_cols * lon_res_deg), None
 
 
 def _peek_kind(path: str | FCPath) -> str:
@@ -178,6 +190,12 @@ class RingDisplayData:
             and cursor clipping (exclusive upper edge of the last column bin in deg).
         contributing_image_names: Names in ``image_number`` order (mosaic); for a single
             reproj, at most one entry when ``image_name`` was stored on save.
+        longitude_global_bins: For sparse mosaics with non-contiguous populated bins,
+            the sorted global bin indices (``np.flatnonzero(longitude_antimask)``).
+            When set, per-column longitude must be computed as
+            ``longitude_global_bins[col] * longitude_resolution_rad * RAD_TO_DEG``
+            rather than ``longitude_column_origin_deg + col * longitude_resolution_deg``.
+            ``None`` when bins are contiguous (the linear formula is correct).
     """
 
     title: str
@@ -206,6 +224,7 @@ class RingDisplayData:
     longitude_column_origin_deg: float = 0.0
     longitude_extent_hi_deg: float | None = None
     contributing_image_names: tuple[str, ...] = ()
+    longitude_global_bins: np.ndarray | None = None
 
 
 def load_ring_file(path: str) -> RingDisplayData:
@@ -248,7 +267,7 @@ def load_ring_file(path: str) -> RingDisplayData:
             )
         else:
             obs_tdb = None
-        lon_origin_deg, lon_hi = _ring_longitude_column_origin_and_extent_hi_deg(
+        lon_origin_deg, lon_hi, lon_global_bins = _ring_longitude_column_origin_and_extent_hi_deg(
             n_cols=n_lon,
             lon_res_rad=result.longitude_resolution,
             longitude_antimask=result.longitude_antimask,
@@ -281,6 +300,7 @@ def load_ring_file(path: str) -> RingDisplayData:
             longitude_column_origin_deg=lon_origin_deg,
             longitude_extent_hi_deg=lon_hi,
             contributing_image_names=(result.image_name,) if result.image_name else (),
+            longitude_global_bins=lon_global_bins,
         )
 
     if kind == 'RingMosaicData':
@@ -304,7 +324,7 @@ def load_ring_file(path: str) -> RingDisplayData:
             if np.isfinite(result_m.mean_incidence)
             else None
         )
-        lon_origin_deg, lon_hi = _ring_longitude_column_origin_and_extent_hi_deg(
+        lon_origin_deg, lon_hi, lon_global_bins = _ring_longitude_column_origin_and_extent_hi_deg(
             n_cols=n_lon,
             lon_res_rad=result_m.longitude_resolution,
             longitude_antimask=result_m.longitude_antimask,
@@ -337,6 +357,7 @@ def load_ring_file(path: str) -> RingDisplayData:
             longitude_column_origin_deg=lon_origin_deg,
             longitude_extent_hi_deg=lon_hi,
             contributing_image_names=result_m.contributing_image_names,
+            longitude_global_bins=lon_global_bins,
         )
 
     raise ValueError(f'Expected RingReprojResult or RingMosaicData in {path!r}, got kind={kind!r}')

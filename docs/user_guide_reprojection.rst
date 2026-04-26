@@ -514,20 +514,19 @@ If ``--prefix`` is empty (the default), the leading underscore is omitted.
 Cloud-tasks entry point
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-Queue-driven reprojection is supported by ``nav_mosaic_rings_cloud_tasks`` and
-``nav_mosaic_body_cloud_tasks`` (entry points into the single
-``nav_mosaic_cloud_tasks`` program). Each task payload names one or more
-images *and* carries every per-task parameter (output directory, mosaic
-geometry, body/planet, etc.); the worker reprojects the named images and
-writes per-image files under the task's ``output_dir`` using the same naming
-convention as the local driver. The final mosaic-combination pass is **not**
-performed by the cloud-tasks worker; after all tasks complete, run the local
-driver with ``--skip-reproject`` to assemble the mosaic from the accumulated
-reprojection files.
+Queue-driven reprojection is supported by ``nav_mosaic_cloud_tasks``. Each
+task payload names one or more images, carries every per-task parameter
+(output directory, mosaic geometry, body/planet, etc.), and declares its
+``mode`` (``"rings"`` or ``"body"``). A single worker process can therefore
+drain a queue that mixes ring and body tasks. The worker reprojects the named
+images and writes per-image files under the task's ``output_dir`` using the
+same naming convention as the local driver. The final mosaic-combination pass
+is **not** performed by the cloud-tasks worker; after all tasks complete, run
+the local driver with ``--skip-reproject`` to assemble the mosaic from the
+accumulated reprojection files.
 
-Unlike the local drivers, the cloud-tasks drivers accept only two CLI flags,
-both environment/credential scoped and shared across every task the worker
-handles:
+The cloud-tasks worker accepts only two CLI flags, both environment/credential
+scoped and shared across every task the worker handles:
 
 * ``--config-file PATH`` (may be repeated)
 * ``--nav-results-root PATH``
@@ -541,9 +540,7 @@ passed per-task inside the task JSON. Invoke the worker with:
 
 .. code-block:: bash
 
-   nav_mosaic_rings_cloud_tasks [--config-file PATH] [--nav-results-root PATH]
-
-   nav_mosaic_body_cloud_tasks  [--config-file PATH] [--nav-results-root PATH]
+   nav_mosaic_cloud_tasks [--config-file PATH] [--nav-results-root PATH]
 
 To build a ready-to-load task-queue JSON file from the local driver without
 running any reprojection, use ``--output-cloud-tasks-file``:
@@ -570,6 +567,7 @@ The task file is a JSON array of task objects:
     {
         "task_id": "<dataset_name>-<label_file_name>-<index>",
         "data": {
+            "mode": "rings",
             "dataset_name": "<dataset_name>",
             "arguments": {
                 "output_dir": "<path or URL>",
@@ -578,9 +576,9 @@ The task file is a JSON array of task objects:
                 "overwrite": false,
                 "no_write_output_files": false,
                 "image_name": null,
-                "body_name": "MIMAS",
-                "lat_resolution": 0.1,
-                "lon_resolution": 0.1,
+                "planet": "SATURN",
+                "radius_inner": 70000,
+                "radius_outer": 140000,
                 "...": "<all remaining mosaic-configuration fields>"
             },
             "files": [
@@ -598,6 +596,10 @@ Fields:
 
 * ``task_id``: unique string identifier built from the dataset name, the
   first image's label filename, and the enumeration index.
+* ``data.mode``: ``"rings"`` or ``"body"``. Selects the mosaic factory and
+  reprojection function for this task. Because the mode is per-task, a single
+  ``nav_mosaic_cloud_tasks`` worker can drain a queue that contains both ring
+  and body tasks.
 * ``data.dataset_name``: one of the supported dataset names.
 * ``data.arguments``: a dictionary whose keys are the argparse destinations
   produced by the local driver's Output group plus either the body- or
