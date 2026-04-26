@@ -80,6 +80,8 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         """
 
         parts = filespec.split('/')
+        if parts[0].upper().startswith('COISS_'):  # Volume name
+            parts = parts[1:]
         if len(parts) != 3:
             raise ValueError(f'Bad Primary File Spec "{filespec}" - expected 3 directory levels')
         if parts[0].upper() != 'DATA':
@@ -90,7 +92,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
             raise ValueError(
                 f'Bad Primary File Spec "{filespec}" - expected "DATA/dddddddddd_dddddddddd"'
             )
-        img_name = img_name.rsplit('.')[0]
+        img_name = img_name.rsplit('.')[0].rsplit('_')[0]
         return img_name
 
     @staticmethod
@@ -106,7 +108,7 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
 
         img_name = img_name.upper()
         img_name = img_name.replace('_CALIB', '')
-
+        img_name = img_name.replace('.IMG', '')
         # [NW]dddddddddd[_d[d]]
         if img_name[0] not in 'NW':
             return False

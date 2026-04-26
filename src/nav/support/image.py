@@ -264,10 +264,11 @@ def array_zoom(a: NDArrayType[NPType], factor: list[int] | tuple[int, ...]) -> N
         The zoomed array with dimensions multiplied by the corresponding factors.
     """
 
-    a = np.asarray(a)
-    slices = [slice(0, old, 1 / float(f)) for (f, old) in zip(factor, a.shape, strict=True)]
-    idxs = (np.mgrid[slices]).astype('i')
-    return cast(NDArrayType[NPType], a[tuple(idxs)])
+    result: np.ndarray = np.asarray(a)
+    for ax, f in enumerate(factor):
+        if f > 1:
+            result = np.repeat(result, f, axis=ax)
+    return cast(NDArrayType[NPType], result)
 
 
 def array_unzoom(

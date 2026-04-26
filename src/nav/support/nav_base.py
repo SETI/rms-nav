@@ -2,7 +2,7 @@ from typing import Any
 
 from pdslogger import PdsLogger
 
-from nav.config import DEFAULT_CONFIG, DEFAULT_LOGGER, Config
+from nav.config import DEFAULT_CONFIG, IMAGE_LOGGER, Config
 
 
 class NavBase:
@@ -24,7 +24,7 @@ class NavBase:
         """
 
         self._config = config or DEFAULT_CONFIG
-        self._logger = DEFAULT_LOGGER
+        self._logger = IMAGE_LOGGER
 
     @property
     def config(self) -> Config:

@@ -4,7 +4,7 @@ from typing import Any, cast
 import numpy as np
 from filecache import FCPath
 
-from nav.config import DEFAULT_CONFIG, DEFAULT_LOGGER, Config
+from nav.config import DEFAULT_CONFIG, IMAGE_LOGGER, Config
 from nav.support.time import et_to_utc
 from nav.support.types import PathLike
 
@@ -42,7 +42,7 @@ class ObsVoyagerISS(ObsSnapshotInst):
         import oops.hosts.voyager.iss
 
         config = config or DEFAULT_CONFIG
-        logger = DEFAULT_LOGGER
+        logger = IMAGE_LOGGER
 
         logger.debug(f'Reading Voyager ISS image {path}')
         obs = oops.hosts.voyager.iss.from_file(path)

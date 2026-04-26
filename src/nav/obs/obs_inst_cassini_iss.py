@@ -4,7 +4,7 @@ from typing import Any, cast
 import numpy as np
 from filecache import FCPath
 
-from nav.config import DEFAULT_CONFIG, DEFAULT_LOGGER, Config
+from nav.config import DEFAULT_CONFIG, IMAGE_LOGGER, Config
 from nav.support.time import et_to_utc
 from nav.support.types import PathLike
 
@@ -46,7 +46,7 @@ class ObsCassiniISS(ObsSnapshotInst):
         import oops.hosts.cassini.iss
 
         config = config or DEFAULT_CONFIG
-        logger = DEFAULT_LOGGER
+        logger = IMAGE_LOGGER
 
         fast_distortion = kwargs.get('fast_distortion', True)
         return_all_planets = kwargs.get('return_all_planets', True)

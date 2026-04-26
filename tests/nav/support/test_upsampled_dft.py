@@ -23,12 +23,10 @@ def _estimate_dy(usfac: int, region: int) -> float:
     A = _gaussian(shape, sigma=2.0, offset=(0.5, 0.0))
     B = _gaussian(shape, sigma=2.0, offset=(0.0, 0.0))
     X = fft2(A) * np.conj(fft2(B))
-    dy_i = 0
     oy = region // 2
-    # upsampled_dft accepts cross-power (complex); signature is float for historical reasons
-    Up = upsampled_dft(X, usfac, (region, region), (oy - dy_i * usfac, oy))  # type: ignore[arg-type]
+    Up = upsampled_dft(X, usfac, (region, region), (oy, oy))
     upy, _ = np.unravel_index(np.argmax(np.abs(Up)), Up.shape)
-    dy = dy_i + (upy - oy) / usfac
+    dy = (upy - oy) / usfac
     return float(dy)
 
 

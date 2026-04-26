@@ -1,17 +1,18 @@
-# mypy: ignore-errors
-# TODO Clean up typing
 import math
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
+import numpy.typing as npt
 from numpy.fft import fft2, fftfreq, ifft2, ifftshift
 from pdslogger import PdsLogger
 from scipy.ndimage import gaussian_filter
 
-from nav.config import DEFAULT_LOGGER
+from nav.config import IMAGE_LOGGER
 from nav.support.image import crop_center, normalize_array, pad_top_left
 from nav.support.misc import mad_std
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
+
+_NDArrayComplexType = npt.NDArray[np.complexfloating[Any, Any]]
 
 # Floor for masked NCC denominators and weight sums (avoid divide-by-zero).
 _NCC_EPS = 1e-12
@@ -21,8 +22,17 @@ _NCC_EPS = 1e-12
 # ==============================================================
 
 
-def int_to_signed(idx, size):
-    """Map [0..size-1] argmax index to signed displacement coordinate."""
+def int_to_signed(idx: int, size: int) -> int:
+    """Map ``[0 .. size-1]`` argmax index to a signed displacement coordinate.
+
+    Parameters:
+        idx: Peak index from correlation search in ``[0, size)``.
+        size: FFT / correlation length (modulus for wrapping).
+
+    Returns:
+        ``int`` signed offset equivalent to ``idx`` when ``idx < size // 2``, else
+        ``idx - size`` (negative branch for peaks in the second half).
+    """
     return idx if idx < size // 2 else idx - size
 
 
@@ -40,11 +50,11 @@ def fourier_shift(img: NDArrayFloatType, dy: float, dx: float) -> NDArrayFloatTy
 
 
 def upsampled_dft(
-    X: NDArrayFloatType,
+    X: _NDArrayComplexType,
     up_factor: int,
     region_sz: tuple[int, int],
     offsets: tuple[int, int],
-) -> NDArrayFloatType:
+) -> _NDArrayComplexType:
     """Localized upsampled DFT.
 
     From Guizar-Sicairos, 2008. "Efficient subpixel image registration via cross-correlation."
@@ -61,7 +71,7 @@ def upsampled_dft(
     # Use +j sign to evaluate localized inverse DFT samples (consistent with ifft).
     Er = np.exp((j2pi / (X_v_size * up_factor)) * (a[:, None] @ ky[None, :]))
     Ec = np.exp((j2pi / (X_u_size * up_factor)) * (kx[:, None] @ b[None, :]))
-    return Er @ X @ Ec
+    return cast(_NDArrayComplexType, Er @ X @ Ec)
 
 
 # ==============================================================
@@ -69,34 +79,78 @@ def upsampled_dft(
 # ==============================================================
 
 
+# Default overlap and variance floors for the bi-directional masked NCC
+# (only used when ``data_mask`` is provided).  ``w_frac_min`` rejects
+# shifts whose effective-overlap weight w(s) is less than this fraction of
+# max(w); ``var_frac_min`` similarly rejects shifts where the image or
+# model variance under the mask is a tiny fraction of the best case, which
+# is where floating-point noise in the denominator would otherwise produce
+# spurious |NCC| >> 1.
+_NCC_BIDIR_W_FRAC_MIN: float = 0.3
+_NCC_BIDIR_VAR_FRAC_MIN: float = 0.1
+
+
 def masked_ncc(
-    image: NDArrayFloatType, model: NDArrayFloatType, mask: NDArrayBoolType
+    image: NDArrayFloatType,
+    model: NDArrayFloatType,
+    mask: NDArrayBoolType,
+    data_mask: NDArrayBoolType | None = None,
 ) -> tuple[NDArrayFloatType, NDArrayFloatType]:
     """Masked normalized cross-correlation surface between image and model.
 
     Computes shift-wise NCC (Pearson r) using FFT-based sums. Also
     returns the unnormalized NCC numerator (mean-subtracted
-    covariance), which is better suited for peak localization when
-    the template is sparse relative to the mask.
+    covariance) as a diagnostic.
 
     The NCC surface contains values in [-1, 1] at every shift where
-    the mask overlaps non-constant image content.  The numerator
-    surface scales with both pattern-match quality *and* signal
-    amplitude, so it reliably peaks at the true offset even when a
-    sparse PSF template causes the NCC itself to plateau near 1.0 at
-    many shifts.
+    the mask overlaps non-constant image content, and is the
+    primary peak-selection surface: it is invariant to the image
+    variance under the shifted mask and therefore does not suffer
+    from the "scale bias" that causes the numerator to prefer shifts
+    where the fixed template mask straddles bright/dark boundaries
+    in the image (e.g., the limb of a Lambert-shaded body disc).
+    The numerator surface scales with sqrt(image-variance-under-mask)
+    times the NCC, which is useful as a sanity check but must not
+    be used for peak finding when the template is dense.
 
     Parameters:
         image: Padded image array.
         model: Padded model array (same shape as image).
         mask: Padded boolean mask (same shape as image).  True where
             model pixels are valid.
+        data_mask: Optional padded boolean mask indicating where
+            ``image`` contains real sensor data (True) versus
+            zero-padded margin (False).  When provided, the NCC is
+            computed in its bi-directional form so that pixel pairs
+            where the shifted model mask straddles zero-padded image
+            pixels do not bias the normalization.  This removes the
+            edge-ridge artifact that otherwise appears at
+            ``|dV| = extfov_margin_v`` when the body model extends
+            into the extfov margin.  When ``None``, the standard
+            (single-mask) NCC formula is used.
 
     Returns:
         Tuple of (ncc, numerator) arrays, each with the same shape
-        as the inputs.  ``ncc`` is the Pearson-r surface; ``numerator``
-        is the mean-subtracted cross-covariance (unnormalized).
+        as the inputs.  ``ncc`` is the Pearson-r surface used for
+        peak localization; ``numerator`` is the mean-subtracted
+        cross-covariance (unnormalized) returned as a diagnostic.
+        When ``data_mask`` is provided, shifts with degenerate
+        overlap or variance are set to ``-inf`` in the NCC surface.
     """
+    ref_shape = image.shape
+    if image.shape != model.shape or image.shape != mask.shape:
+        raise ValueError(
+            'masked_ncc: image, model, and mask must have the same shape; '
+            f'got image {image.shape}, model {model.shape}, mask {mask.shape}.'
+        )
+    if data_mask is not None and data_mask.shape != ref_shape:
+        raise ValueError(
+            'masked_ncc: data_mask must match image shape '
+            f'{ref_shape}; got data_mask {data_mask.shape}.'
+        )
+    if data_mask is not None:
+        return _masked_ncc_bidir(image, model, mask, data_mask)
+
     image_fft = fft2(image)
     mask_fft = fft2(mask)
     model_mask_fft = fft2(model * mask)
@@ -132,6 +186,77 @@ def masked_ncc(
     return ncc, num
 
 
+def _masked_ncc_bidir(
+    image: NDArrayFloatType,
+    model: NDArrayFloatType,
+    mask: NDArrayBoolType,
+    data_mask: NDArrayBoolType,
+) -> tuple[NDArrayFloatType, NDArrayFloatType]:
+    """Bi-directional (data-mask aware) masked NCC; see :func:`masked_ncc`.
+
+    The weight at shift s is w(s) = sum_i data_mask(i) * mask(i - s) rather
+    than a constant sum(mask); image and model statistics under the mask are
+    computed likewise with data_mask(i) as a per-pixel inclusion factor.
+    This eliminates the zero-padding bias that drives a spurious peak at
+    ``|dV| = extfov_margin_v`` when the model extends into the padded
+    margin.  Shifts with small overlap or degenerate variance are set to
+    ``-inf`` so that peak finding does not chase floating-point noise.
+    """
+    image = np.asarray(image, np.float64)
+    model = np.asarray(model, np.float64)
+    mask_f = mask.astype(np.float64)
+    dmask_f = data_mask.astype(np.float64)
+
+    image_fft = fft2(image)
+    image2_fft = fft2(image * image)
+    dmask_fft = fft2(dmask_f)
+    mask_fft = fft2(mask_f)
+    model_mask_fft = fft2(model * mask_f)
+    model2_mask_fft = fft2((model * model) * mask_f)
+
+    # Effective overlap weight at each shift.
+    w_d = np.real(ifft2(dmask_fft * np.conj(mask_fft)))
+    w_d_max = float(w_d.max())
+    w_floor = max(_NCC_BIDIR_W_FRAC_MIN * w_d_max, _NCC_EPS)
+    overlap_ok = w_d >= w_floor
+
+    # Shift-wise sums.  ``image`` is already zero outside data_mask, so the
+    # I*mask and I^2*mask sums are equivalent to dmask*I*mask and
+    # dmask*I^2*mask respectively.
+    sum_iw = np.real(ifft2(image_fft * np.conj(mask_fft)))
+    sum_i2w = np.real(ifft2(image2_fft * np.conj(mask_fft)))
+    sum_imw = np.real(ifft2(image_fft * np.conj(model_mask_fft)))
+    # Model stats are shift-dependent because dmask selects which model
+    # pixels participate at each shift.
+    sum_mw = np.real(ifft2(dmask_fft * np.conj(model_mask_fft)))
+    sum_m2w = np.real(ifft2(dmask_fft * np.conj(model2_mask_fft)))
+
+    safe_w = np.where(overlap_ok, w_d, w_floor)
+    mean_i = sum_iw / safe_w
+
+    num = sum_imw - mean_i * sum_mw
+    ssd_iw = np.maximum(sum_i2w - sum_iw**2 / safe_w, 0.0)
+    ssd_mw = np.maximum(sum_m2w - sum_mw**2 / safe_w, 0.0)
+
+    # Reject shifts where the image or model has near-constant content
+    # under the effective mask; their NCC is dominated by floating-point
+    # noise in the denominator.
+    ssd_i_max = float(ssd_iw.max())
+    ssd_m_max = float(ssd_mw.max())
+    var_ok = (ssd_iw > _NCC_BIDIR_VAR_FRAC_MIN * ssd_i_max) & (
+        ssd_mw > _NCC_BIDIR_VAR_FRAC_MIN * ssd_m_max
+    )
+    valid = overlap_ok & var_ok
+
+    denom = np.sqrt(ssd_iw * ssd_mw)
+    ncc = np.where(valid, num / np.maximum(denom, _NCC_EPS), 0.0)
+    # Mathematically |NCC| <= 1; floating-point error can push it slightly
+    # above, so clamp before invalidating.
+    ncc = np.clip(ncc, -1.0, 1.0)
+    ncc[~valid] = -np.inf
+    return ncc, num
+
+
 # ==============================================================
 # Peak metrics & selection
 # ==============================================================
@@ -144,15 +269,26 @@ def psr_metric(corr: NDArrayFloatType, rc: tuple[int, int], guard: int = 5) -> f
     y, x = np.ogrid[:corr_v, :corr_u]
     mask = (y - row) ** 2 + (x - col) ** 2 > guard**2
     bg = corr[mask]
-    return (peak - bg.mean()) / (bg.std() + 1e-12)
+    # Exclude invalidated-shift sentinels (-inf) before computing background stats;
+    # otherwise ``bg.mean()`` collapses to -inf and PSR becomes NaN.
+    bg = bg[np.isfinite(bg)]
+    if bg.size == 0:
+        return float('nan')
+    return float((peak - bg.mean()) / (bg.std() + 1e-12))
 
 
 def pmr_metric(corr: NDArrayFloatType, peak_val: float) -> float:
-    return peak_val / (corr.mean() + 1e-12)
+    finite = corr[np.isfinite(corr)]
+    if finite.size == 0:
+        return float('nan')
+    return float(peak_val / (finite.mean() + 1e-12))
 
 
 def per_metric(corr: NDArrayFloatType, peak_val: float) -> float:
-    return peak_val / (np.sqrt(np.sum(corr**2)) + 1e-12)
+    finite = corr[np.isfinite(corr)]
+    if finite.size == 0:
+        return float('nan')
+    return float(peak_val / (np.sqrt(np.sum(finite**2)) + 1e-12))
 
 
 def nms_topk(
@@ -187,15 +323,16 @@ def nms_topk(
         signed_cols = np.where(cols < corr_u // 2, cols, cols - corr_u)
         work[np.abs(signed_rows) > max_v, :] = -np.inf
         work[:, np.abs(signed_cols) > max_u] = -np.inf
-    peaks = []
+    peaks: list[tuple[int, int, float]] = []
     if not np.any(np.isfinite(work)):
         return peaks
     for _ in range(k):
-        idx = np.argmax(work)
-        v = work.flat[idx]
+        idx = int(np.argmax(work))
+        v = float(work.flat[idx])
         if not np.isfinite(v):
             break
-        row, col = np.unravel_index(idx, work.shape)
+        row_i, col_i = np.unravel_index(idx, work.shape)
+        row, col = int(row_i), int(col_i)
         peaks.append((row, col, v))
         y, x = np.ogrid[:corr_v, :corr_u]
         work[(y - row) ** 2 + (x - col) ** 2 <= radius**2] = -np.inf
@@ -279,7 +416,7 @@ def evaluate_candidate(
         spec,
         upsample_factor,
         (region_v, region_u),
-        [oy - dy_i * upsample_factor, ox - dx_i * upsample_factor],
+        (oy - dy_i * upsample_factor, ox - dx_i * upsample_factor),
     )
     upy, upx = np.unravel_index(np.argmax(np.abs(Up)), Up.shape)
     dy = dy_i + (upy - oy) / upsample_factor
@@ -348,6 +485,7 @@ def navigate_single_scale_kpeaks(
     prior_weight: float = 0.0,
     nms_radius: int = 5,
     max_offset_vu: tuple[int, int] | None = None,
+    data_mask: NDArrayBoolType | None = None,
 ) -> dict[str, Any]:
     """
     One-scale masked NCC + top-K candidate evaluation.
@@ -368,6 +506,12 @@ def navigate_single_scale_kpeaks(
             ``|dU| <= max_offset_vu[1]`` are considered candidates.
             Typically set to the extended-FOV margins so that offsets
             outside the physically-plausible range are never evaluated.
+        data_mask: Optional boolean mask (same shape as ``image``) that
+            is True where the image contains real sensor data and False
+            inside the zero-padded extended-FOV margin.  When provided,
+            the NCC is computed in its bi-directional form so that the
+            model extending into the padded margin does not bias the
+            peak toward ``|dV| = margin_v``.
 
     Returns:
         A dictionary containing the navigation result.
@@ -384,14 +528,26 @@ def navigate_single_scale_kpeaks(
     image_pad = pad_top_left(image_orig, padded_h, padded_w)
     model_pad = pad_top_left(model, padded_h, padded_w)
     mask_pad = pad_top_left(mask, padded_h, padded_w)
+    data_mask_pad: NDArrayBoolType | None = None
+    if data_mask is not None:
+        data_mask_pad = pad_top_left(data_mask.astype(bool), padded_h, padded_w)
 
-    corr, corr_num = masked_ncc(image_pad, model_pad, mask_pad)
-    # Use the NCC numerator (mean-subtracted covariance) for peak localization.
-    # The NCC itself can plateau near 1.0 at many shifts when the template is
-    # sparse relative to the mask (e.g. single star).  The numerator scales
-    # with image variance under the mask, so it peaks sharply only where the
-    # image actually contains the target signal.
-    peaks = nms_topk(corr_num, k=max_peaks, radius=nms_radius, max_offset_vu=max_offset_vu)
+    corr, _corr_num = masked_ncc(image_pad, model_pad, mask_pad, data_mask=data_mask_pad)
+    # Use the NCC (Pearson r) itself for peak localization, not the unnormalized
+    # numerator.  The numerator scales with sqrt(image-variance-under-mask), and
+    # for dense templates -- body discs, Lambert-shaded limbs, rings, etc. -- that
+    # variance changes systematically with shift because the fixed body-shaped
+    # mask straddles more or less of the bright/dark boundary at different shifts.
+    # This produces a "scale bias" that can move the numerator's peak several
+    # pixels away from the true alignment even though the NCC peak is correct
+    # (reproduced on Enceladus N1500045859 where the numerator peak was at
+    # (dV, dU) = (+11, +22) but the NCC peak -- and the correct answer -- is at
+    # (dV, dU) = (-2, -6)).
+    #
+    # Restricting to ``max_offset_vu`` prevents the classic NCC failure mode --
+    # plateaus at 1.0 over shifts where the mask covers pure noise -- because
+    # such shifts are outside any physically plausible offset range.
+    peaks = nms_topk(corr, k=max_peaks, radius=nms_radius, max_offset_vu=max_offset_vu)
 
     if logger is not None:
         logger.debug('Correlation peaks:')
@@ -454,6 +610,7 @@ def navigate_with_pyramid_kpeaks(
     nms_radius: int = 5,
     prior_weight_final: float = 0.25,
     max_offset_vu: tuple[int, int] | None = None,
+    data_mask: NDArrayBoolType | None = None,
     logger: PdsLogger | None = None,
 ) -> dict[str, Any]:
     """TODO Clean this up
@@ -482,6 +639,12 @@ def navigate_with_pyramid_kpeaks(
             downsample factor at each level).  Pass ``obs.extfov_margin_vu`` to
             restrict the search to offsets that are physically reachable given the
             extended FOV padding.
+        data_mask: Optional boolean mask (same shape as ``image``) that is True
+            where the image contains real sensor data and False inside the
+            zero-padded extended-FOV margin.  When provided, the NCC is computed
+            in its bi-directional form at every pyramid level so that a body
+            model extending into the extfov margin does not bias the peak toward
+            ``|dV| = margin_v``.  Pass ``obs.extfov_data_sensor_mask()``.
         logger: The logger to use for the navigation.
 
     Returns:
@@ -511,7 +674,7 @@ def navigate_with_pyramid_kpeaks(
     """
 
     if logger is None:
-        logger = DEFAULT_LOGGER
+        logger = IMAGE_LOGGER
 
     logger.debug('Navigating with pyramid kpeaks:')
     logger.debug(f'  Pyramid levels: {pyramid_levels}')
@@ -544,6 +707,11 @@ def navigate_with_pyramid_kpeaks(
         mask_blurred = gaussian_filter(mask.astype(float), sigma=sigma)
         model_downsampled = model_blurred[::s, ::s]
         mask_downsampled = mask_blurred[::s, ::s] > 0.5
+
+        data_mask_downsampled: NDArrayBoolType | None = None
+        if data_mask is not None:
+            data_mask_blurred = gaussian_filter(data_mask.astype(float), sigma=sigma)
+            data_mask_downsampled = data_mask_blurred[::s, ::s] > 0.5
 
         # Scale the full-res prior down to the current pyramid level's coordinates.
         prior_at_scale: tuple[float, float] | None = (
@@ -584,6 +752,7 @@ def navigate_with_pyramid_kpeaks(
             prior_weight=prior_weight_final if prior_at_scale is not None else 0.0,
             nms_radius=nms_radius,
             max_offset_vu=max_offset_at_scale,
+            data_mask=data_mask_downsampled,
             logger=logger,
         )
         logger.debug(
@@ -619,6 +788,7 @@ def navigate_with_pyramid_kpeaks(
         prior_weight=prior_weight_final,
         nms_radius=nms_radius,
         max_offset_vu=max_offset_vu,
+        data_mask=data_mask,
         logger=logger,
     )
 

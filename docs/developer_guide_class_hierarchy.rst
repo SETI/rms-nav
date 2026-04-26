@@ -22,19 +22,21 @@ The following Mermaid diagram shows the complete class hierarchy of the RMS-NAV 
           +yield_image_files_from_arguments(args)*
           +yield_image_files_index(**kwargs)*
           +supported_grouping()
-          +pds4_bundle_template_dir()*
-          +pds4_bundle_name()*
-          +pds4_bundle_path_for_image(name)*
-          +pds4_path_stub(image_file)*
-          +pds4_template_variables(...)*
-          +pds4_image_name_to_data_lidvid(name)*
-          +pds4_image_name_to_browse_lidvid(name)*
+          +pds4_bundle_template_dir()
+          +pds4_bundle_name()
+          +pds4_bundle_path_for_image(name)
+          +pds4_path_stub(image_file)
+          +pds4_template_variables(...)
+          +pds4_image_name_to_data_lid(name)
+          +pds4_image_name_to_data_lidvid(name)
+          +pds4_image_name_to_browse_lid(name)
+          +pds4_image_name_to_browse_lidvid(name)
       }
 
       class DataSetPDS3 {
-          +__init__(*, config=None)
+          +__init__(pds3_holdings_root=None, *, index_filecache=None, pds3_holdings_filecache=None, config=None)
           +_img_name_valid(name)
-          +read_pds3_file(path)
+          +yield_image_files_index(**kwargs)
       }
 
       class DataSetPDS3CassiniISS {
@@ -45,7 +47,9 @@ The following Mermaid diagram shows the complete class hierarchy of the RMS-NAV 
           +pds4_bundle_path_for_image(name)
           +pds4_path_stub(image_file)
           +pds4_template_variables(...)
+          +pds4_image_name_to_data_lid(name)
           +pds4_image_name_to_data_lidvid(name)
+          +pds4_image_name_to_browse_lid(name)
           +pds4_image_name_to_browse_lidvid(name)
       }
 
@@ -95,8 +99,10 @@ The following Mermaid diagram shows the complete class hierarchy of the RMS-NAV 
           +inventory_body_in_extfov(inv)
           +clip_rect_fov(u_min, u_max, v_min, v_max)
           +clip_rect_extfov(u_min, u_max, v_min, v_max)
-          +backplanes*
-          +get_backplane(name)
+          +bp
+          +ext_bp
+          +corner_bp
+          +center_bp
       }
 
       class ObsInst {
@@ -144,9 +150,10 @@ The following Mermaid diagram shows the complete class hierarchy of the RMS-NAV 
       class NavModel {
           <<abstract>>
           +__init__(name, obs, *, config=None)
+          +name
           +obs
-          +model_img
-          +model_mask
+          +models
+          +metadata
           +create_model(always_create_model=False, never_create_model=False, create_annotations=True)*
       }
 
@@ -184,7 +191,7 @@ The following Mermaid diagram shows the complete class hierarchy of the RMS-NAV 
       }
 
       class NavModelRingsSimulated {
-          +__init__(name, obs, sim_rings, *, config=None)
+          +__init__(name, obs, ring_name, sim_params, *, config=None)
           +create_model(always_create_model=False, never_create_model=False, create_annotations=True)
       }
 
@@ -429,10 +436,13 @@ Dataset
 :class:`~nav.dataset.dataset.DataSet` handles access to image files and metadata. It
 defines ``_img_name_valid(...)``, ``add_selection_arguments(...)``,
 ``yield_image_files_from_arguments(...)``, and ``yield_image_files_index(...)`` for
-dataset-specific selection and iteration. For PDS4 bundle generation, it also defines
-methods ``pds4_bundle_template_dir()``, ``pds4_bundle_name()``,
-``pds4_bundle_path_for_image()``, ``pds4_path_stub()``, ``pds4_template_variables()``,
-``pds4_image_name_to_data_lidvid()``, and ``pds4_image_name_to_browse_lidvid()``.
+dataset-specific selection and iteration. For PDS4 bundle generation, it defines
+non-abstract stubs (each raising ``NotImplementedError``) that subclasses may
+override: ``pds4_bundle_template_dir()``, ``pds4_bundle_name()``,
+``pds4_bundle_path_for_image()``, ``pds4_path_stub()``,
+``pds4_template_variables()``, and the four LID/LIDVID converters
+(``pds4_image_name_to_{data,browse}_{lid,lidvid}()``). Datasets that do not
+yet support PDS4 bundle generation leave these as the default stubs.
 :class:`~nav.dataset.dataset_pds3.DataSetPDS3` provides volume and index-based iteration
 for archives, while instrument-specific subclasses tailor parsing and volume sets.
 Instrument-specific dataset classes include

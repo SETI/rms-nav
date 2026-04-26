@@ -178,9 +178,9 @@ def get_local_host_name() -> str:
 def log_run_environment(logger: pdslogger.PdsLogger, command_list: list[str]) -> None:
     """Log host, git, and command-line context to the given logger.
 
-    Intended to be called once on the main logger at startup and again on each
-    per-image logger when it is opened, so that every log file contains the
-    full run context.
+    Call once at process startup on the main logger (e.g. ``nav_mosaic`` after
+    ``setup_logging``). Per-image loggers may omit this to avoid duplicating the
+    same block on the console when handlers mirror output to ``MAIN_LOGGER``.
 
     Parameters:
         logger: The logger to write to.

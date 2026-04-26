@@ -73,7 +73,7 @@ def _make_simulated_model(
 
     Uses the real constructor so base-class invariants stay aligned; the process
     logger is patched so ``create_model`` / ``_logger.open`` can be asserted
-    without touching global ``DEFAULT_LOGGER``.
+    without touching global ``IMAGE_LOGGER``.
     """
     cfg = MagicMock()
     cfg.rings.label_font = 'Arial'
@@ -88,7 +88,7 @@ def _make_simulated_model(
     mock_logger.open.return_value.__enter__ = MagicMock(return_value=None)
     mock_logger.open.return_value.__exit__ = MagicMock(return_value=False)
 
-    with patch('nav.support.nav_base.DEFAULT_LOGGER', mock_logger):
+    with patch('nav.support.nav_base.IMAGE_LOGGER', mock_logger):
         return NavModelRingsSimulated(
             'simulated-rings-test',
             obs,

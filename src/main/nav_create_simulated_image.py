@@ -1198,8 +1198,8 @@ class CreateSimulatedImageModel(QMainWindow):
         center_u.valueChanged.connect(lambda v, i=idx: self._on_body_field(i, 'center_u', v))
         fl.addRow('Center U:', center_u)
         # Keep references so drag updates can sync the UI
-        w.center_v_spin = center_v  # type: ignore
-        w.center_u_spin = center_u  # type: ignore
+        w.center_v_spin = center_v  # type: ignore[attr-defined]
+        w.center_u_spin = center_u  # type: ignore[attr-defined]
 
         # Range field (for layering/ordering)
         rng = QDoubleSpinBox()
@@ -1288,8 +1288,8 @@ class CreateSimulatedImageModel(QMainWindow):
         cf_holder.setLayout(cf_row)
         fl.addRow('Crater fill (0-10):', cf_holder)
         # Store references for sync
-        w.crater_fill_slider = cf_slider  # type: ignore
-        w.crater_fill_spin = cf_spin  # type: ignore
+        w.crater_fill_slider = cf_slider  # type: ignore[attr-defined]
+        w.crater_fill_spin = cf_spin  # type: ignore[attr-defined]
         cmin = QDoubleSpinBox()
         cmin.setRange(0.01, 0.25)
         cmin.setDecimals(3)
@@ -1349,8 +1349,8 @@ class CreateSimulatedImageModel(QMainWindow):
         aa_holder.setLayout(aa_row)
         fl.addRow('Anti-aliasing:', aa_holder)
         # Store references for sync
-        w.anti_aliasing_slider = aa_slider  # type: ignore
-        w.anti_aliasing_spin = aa_spin  # type: ignore
+        w.anti_aliasing_slider = aa_slider  # type: ignore[attr-defined]
+        w.anti_aliasing_spin = aa_spin  # type: ignore[attr-defined]
 
         # Delete button at bottom
         delete_btn = QPushButton('Delete')
@@ -1399,8 +1399,8 @@ class CreateSimulatedImageModel(QMainWindow):
         center_u.valueChanged.connect(lambda v, i=idx: self._on_ring_field(i, 'center_u', v))
         fl.addRow('Center U:', center_u)
         # Keep references so drag updates can sync the UI
-        w.center_v_spin = center_v  # type: ignore
-        w.center_u_spin = center_u  # type: ignore
+        w.center_v_spin = center_v  # type: ignore[attr-defined]
+        w.center_u_spin = center_u  # type: ignore[attr-defined]
 
         # Range field (for layering/ordering)
         rng = QDoubleSpinBox()
@@ -1491,11 +1491,11 @@ class CreateSimulatedImageModel(QMainWindow):
             inner_rms,
         ]
         # Store individual spinbox references for reading values
-        w.inner_a = inner_a  # type: ignore
-        w.inner_ae = inner_ae  # type: ignore
-        w.inner_long_peri = inner_long_peri  # type: ignore
-        w.inner_rate_peri = inner_rate_peri  # type: ignore
-        w.inner_rms = inner_rms  # type: ignore
+        w.inner_a = inner_a  # type: ignore[attr-defined]
+        w.inner_ae = inner_ae  # type: ignore[attr-defined]
+        w.inner_long_peri = inner_long_peri  # type: ignore[attr-defined]
+        w.inner_rate_peri = inner_rate_peri  # type: ignore[attr-defined]
+        w.inner_rms = inner_rms  # type: ignore[attr-defined]
 
         # Outer edge checkbox and mode 1 parameters
         outer_data = p.get('outer_data', [])
@@ -1742,7 +1742,7 @@ class CreateSimulatedImageModel(QMainWindow):
         if tab_idx is not None:
             tab_w = self._tabs.widget(tab_idx)
             if tab_w is not None:
-                spin = tab_w.crater_fill_spin  # type: ignore
+                spin = tab_w.crater_fill_spin  # type: ignore[attr-defined]
                 spin.blockSignals(True)
                 spin.setValue(fill_val)
                 spin.blockSignals(False)
@@ -1756,7 +1756,7 @@ class CreateSimulatedImageModel(QMainWindow):
         if tab_idx is not None:
             tab_w = self._tabs.widget(tab_idx)
             if tab_w is not None:
-                slider = tab_w.crater_fill_slider  # type: ignore
+                slider = tab_w.crater_fill_slider  # type: ignore[attr-defined]
                 slider.blockSignals(True)
                 slider.setValue(slider_val)
                 slider.blockSignals(False)
@@ -1770,7 +1770,7 @@ class CreateSimulatedImageModel(QMainWindow):
         if tab_idx is not None:
             tab_w = self._tabs.widget(tab_idx)
             if tab_w is not None:
-                spin = tab_w.anti_aliasing_spin  # type: ignore
+                spin = tab_w.anti_aliasing_spin  # type: ignore[attr-defined]
                 spin.blockSignals(True)
                 spin.setValue(aa_val)
                 spin.blockSignals(False)
@@ -1784,7 +1784,7 @@ class CreateSimulatedImageModel(QMainWindow):
         if tab_idx is not None:
             tab_w = self._tabs.widget(tab_idx)
             if tab_w is not None:
-                slider = tab_w.anti_aliasing_slider  # type: ignore
+                slider = tab_w.anti_aliasing_slider  # type: ignore[attr-defined]
                 slider.blockSignals(True)
                 slider.setValue(slider_val)
                 slider.blockSignals(False)
@@ -1872,7 +1872,7 @@ class CreateSimulatedImageModel(QMainWindow):
             if tab_idx is not None:
                 tab_widget = self._tabs.widget(tab_idx)
                 if tab_widget is not None:
-                    outer_checkbox = tab_widget.outer_checkbox  # type: ignore
+                    outer_checkbox = tab_widget.outer_checkbox  # type: ignore[attr-defined]
                     has_outer_checked = outer_checkbox.isChecked()
                 else:
                     # Fallback to data model if widget not found
@@ -1905,11 +1905,11 @@ class CreateSimulatedImageModel(QMainWindow):
                 if tab_idx is not None:
                     tab_widget = self._tabs.widget(tab_idx)
                     if tab_widget is not None:
-                        mode1['a'] = float(tab_widget.inner_a.value())  # type: ignore
-                        mode1['ae'] = float(tab_widget.inner_ae.value())  # type: ignore
-                        mode1['long_peri'] = float(tab_widget.inner_long_peri.value())  # type: ignore
-                        mode1['rate_peri'] = float(tab_widget.inner_rate_peri.value())  # type: ignore
-                        mode1['rms'] = float(tab_widget.inner_rms.value())  # type: ignore
+                        mode1['a'] = float(tab_widget.inner_a.value())  # type: ignore[attr-defined]
+                        mode1['ae'] = float(tab_widget.inner_ae.value())  # type: ignore[attr-defined]
+                        mode1['long_peri'] = float(tab_widget.inner_long_peri.value())  # type: ignore[attr-defined]
+                        mode1['rate_peri'] = float(tab_widget.inner_rate_peri.value())  # type: ignore[attr-defined]
+                        mode1['rms'] = float(tab_widget.inner_rms.value())  # type: ignore[attr-defined]
             else:
                 # Disable inner edge - remove inner_data
                 ring.pop('inner_data', None)
@@ -1918,7 +1918,7 @@ class CreateSimulatedImageModel(QMainWindow):
             if tab_idx is not None:
                 tab_widget = self._tabs.widget(tab_idx)
                 if tab_widget is not None:
-                    for control in tab_widget.inner_controls:  # type: ignore
+                    for control in tab_widget.inner_controls:  # type: ignore[attr-defined]
                         control.setEnabled(enabled)
 
             self._updater.request_update()
@@ -1939,7 +1939,7 @@ class CreateSimulatedImageModel(QMainWindow):
             if tab_idx is not None:
                 tab_widget = self._tabs.widget(tab_idx)
                 if tab_widget is not None:
-                    inner_checkbox = tab_widget.inner_checkbox  # type: ignore
+                    inner_checkbox = tab_widget.inner_checkbox  # type: ignore[attr-defined]
                     has_inner_checked = inner_checkbox.isChecked()
                 else:
                     # Fallback to data model if widget not found
@@ -1972,11 +1972,11 @@ class CreateSimulatedImageModel(QMainWindow):
                 if tab_idx is not None:
                     tab_widget = self._tabs.widget(tab_idx)
                     if tab_widget is not None:
-                        mode1['a'] = float(tab_widget.outer_a.value())  # type: ignore
-                        mode1['ae'] = float(tab_widget.outer_ae.value())  # type: ignore
-                        mode1['long_peri'] = float(tab_widget.outer_long_peri.value())  # type: ignore
-                        mode1['rate_peri'] = float(tab_widget.outer_rate_peri.value())  # type: ignore
-                        mode1['rms'] = float(tab_widget.outer_rms.value())  # type: ignore
+                        mode1['a'] = float(tab_widget.outer_a.value())  # type: ignore[attr-defined]
+                        mode1['ae'] = float(tab_widget.outer_ae.value())  # type: ignore[attr-defined]
+                        mode1['long_peri'] = float(tab_widget.outer_long_peri.value())  # type: ignore[attr-defined]
+                        mode1['rate_peri'] = float(tab_widget.outer_rate_peri.value())  # type: ignore[attr-defined]
+                        mode1['rms'] = float(tab_widget.outer_rms.value())  # type: ignore[attr-defined]
             else:
                 # Disable outer edge - remove outer_data
                 ring.pop('outer_data', None)
@@ -1985,7 +1985,7 @@ class CreateSimulatedImageModel(QMainWindow):
             if tab_idx is not None:
                 tab_widget = self._tabs.widget(tab_idx)
                 if tab_widget is not None:
-                    for control in tab_widget.outer_controls:  # type: ignore
+                    for control in tab_widget.outer_controls:  # type: ignore[attr-defined]
                         control.setEnabled(enabled)
 
             self._updater.request_update()
@@ -2306,8 +2306,8 @@ class CreateSimulatedImageModel(QMainWindow):
             if tab_idx is not None:
                 tab_w = self._tabs.widget(tab_idx)
                 if tab_w is not None:
-                    cv_spin = tab_w.center_v_spin  # type: ignore
-                    cu_spin = tab_w.center_u_spin  # type: ignore
+                    cv_spin = tab_w.center_v_spin  # type: ignore[attr-defined]
+                    cu_spin = tab_w.center_u_spin  # type: ignore[attr-defined]
                     cv_spin.setValue(self.sim_params['bodies'][idx]['center_v'])
                     cu_spin.setValue(self.sim_params['bodies'][idx]['center_u'])
             self._updater.immediate_update()
@@ -2323,8 +2323,8 @@ class CreateSimulatedImageModel(QMainWindow):
             if tab_idx is not None:
                 tab_w = self._tabs.widget(tab_idx)
                 if tab_w is not None:
-                    cv_spin = tab_w.center_v_spin  # type: ignore
-                    cu_spin = tab_w.center_u_spin  # type: ignore
+                    cv_spin = tab_w.center_v_spin  # type: ignore[attr-defined]
+                    cu_spin = tab_w.center_u_spin  # type: ignore[attr-defined]
                     cv_spin.setValue(self.sim_params['rings'][idx]['center_v'])
                     cu_spin.setValue(self.sim_params['rings'][idx]['center_u'])
             self._updater.immediate_update()
@@ -2340,8 +2340,8 @@ class CreateSimulatedImageModel(QMainWindow):
             if tab_idx is not None:
                 tab_w = self._tabs.widget(tab_idx)
                 if tab_w is not None:
-                    v_spin = tab_w.v_spin  # type: ignore
-                    u_spin = tab_w.u_spin  # type: ignore
+                    v_spin = tab_w.v_spin  # type: ignore[attr-defined]
+                    u_spin = tab_w.u_spin  # type: ignore[attr-defined]
                     v_spin.setValue(self.sim_params['stars'][idx]['v'])
                     u_spin.setValue(self.sim_params['stars'][idx]['u'])
             self._updater.immediate_update()
@@ -2378,7 +2378,7 @@ class CreateSimulatedImageModel(QMainWindow):
         )
         if filename:
             try:
-                with open(filename, 'w') as f:
+                with open(filename, 'w', encoding='utf-8') as f:
                     json.dump(self.sim_params, f, indent=2)
             except Exception as e:
                 QMessageBox.critical(self, 'Error', f'Failed to save parameters:\n{e!s}')
@@ -2392,7 +2392,7 @@ class CreateSimulatedImageModel(QMainWindow):
         )
         if filename:
             try:
-                with open(filename) as f:
+                with open(filename, encoding='utf-8') as f:
                     params = json.load(f)
                 background_noise_val = params.get('background_noise_intensity', 0.0)
                 background_stars_val = params.get('background_stars_num', 0)

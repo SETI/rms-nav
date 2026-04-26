@@ -7,14 +7,11 @@ Provides two PdsLogger instances:
 - ``IMAGE_LOGGER`` (``"nav_image"``) -- per-image processing events; both its stdout
   handler and its per-image logfile handler are attached as local handlers inside each
   ``logger.open()`` context so they are active only while that image is being processed.
-- ``DEFAULT_LOGGER`` -- alias for ``IMAGE_LOGGER`` retained for backward compatibility.
 
 Call ``setup_logging()`` from ``main()`` after the nav-results root and CLI
 arguments have been resolved. It is safe to call more than once: existing
 ``MAIN_LOGGER`` handlers are removed before new ones are attached.
 """
-
-from __future__ import annotations
 
 import argparse
 import logging
@@ -28,13 +25,12 @@ if TYPE_CHECKING:
 
 MAIN_LOGGER = pdslogger.PdsLogger('nav_offset', lognames=False, digits=3)
 IMAGE_LOGGER = pdslogger.PdsLogger('nav_image', lognames=False, digits=3)
-DEFAULT_LOGGER = IMAGE_LOGGER
 
 _FALLBACK_LEVEL = 'INFO'
 _ALLOWED_LOG_LEVELS = frozenset({'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'})
 
 
-def _resolve_level(attr_name: str, arguments: argparse.Namespace | None, config: Config) -> str:
+def _resolve_level(attr_name: str, arguments: argparse.Namespace | None, config: 'Config') -> str:
     """Return the log level for ``attr_name``, checking args then config then fallback.
 
     Parameters:
@@ -73,7 +69,7 @@ def _resolve_level(attr_name: str, arguments: argparse.Namespace | None, config:
 
 def setup_logging(
     arguments: argparse.Namespace,
-    config: Config,
+    config: 'Config',
     nav_results_root_str: str,
 ) -> None:
     """Configure MAIN_LOGGER with stdout and a timestamped file handler.
@@ -125,7 +121,7 @@ def setup_logging(
 def image_log_handlers(
     image_log_path: FCPath,
     arguments: argparse.Namespace | None,
-    config: Config,
+    config: 'Config',
 ) -> list[logging.Handler]:
     """Create local handlers for a single image: a stdout handler and a file handler.
 

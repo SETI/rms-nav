@@ -11,8 +11,7 @@ import os
 import sys
 from typing import cast
 
-import pdslogger
-from filecache import FileCache
+from filecache import FCPath, FileCache
 
 # Make CLI runnable from source tree with
 #    python src/package
@@ -22,7 +21,7 @@ sys.path.insert(0, package_source_path)
 from backplanes.backplanes import generate_backplanes_image_files
 from nav.config import (
     DEFAULT_CONFIG,
-    DEFAULT_LOGGER,
+    MAIN_LOGGER,
     get_backplane_results_root,
     get_nav_results_root,
     load_default_and_user_config,
@@ -30,10 +29,10 @@ from nav.config import (
 from nav.dataset import dataset_name_to_class, dataset_name_to_inst_name, dataset_names
 from nav.dataset.dataset import DataSet
 from nav.obs import inst_name_to_obs_class
+from nav.support.file import json_as_string
 
 DATASET: DataSet | None = None
 DATASET_NAME: str | None = None
-MAIN_LOGGER: pdslogger.PdsLogger | None = None
 
 
 def parse_args(command_list: list[str]) -> argparse.Namespace:
@@ -100,6 +99,14 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
     # Output
     output_group = cmdparser.add_argument_group('Output')
     output_group.add_argument(
+        '--output-cloud-tasks-file',
+        type=str,
+        default=None,
+        help="""Write a JSON task descriptions file suitable for loading into a
+        cloud_tasks queue (consumed by nav_backplanes_cloud_tasks); do not
+        generate any backplanes.""",
+    )
+    output_group.add_argument(
         '--dry-run',
         action='store_true',
         default=False,
@@ -139,9 +146,6 @@ def main() -> None:
     backplane_results_root_str = get_backplane_results_root(arguments, DEFAULT_CONFIG)
     backplane_results_root = FileCache(None).new_path(backplane_results_root_str)
 
-    global MAIN_LOGGER
-    MAIN_LOGGER = DEFAULT_LOGGER
-
     MAIN_LOGGER.info('Starting backplanes generation')
     MAIN_LOGGER.info('Dataset: %s', DATASET_NAME)
     MAIN_LOGGER.info('Nav results root: %s', nav_results_root.as_posix())
@@ -153,6 +157,37 @@ def main() -> None:
     assert DATASET is not None
     inst_name = dataset_name_to_inst_name(cast(str, DATASET_NAME))
     obs_class = inst_name_to_obs_class(inst_name)
+
+    if arguments.output_cloud_tasks_file:
+        tasks_json = []
+        for imagefile_idx, imagefiles in enumerate(
+            DATASET.yield_image_files_from_arguments(arguments)
+        ):
+            task_id = f'{DATASET_NAME}-{imagefiles.image_files[0].label_file_name}-{imagefile_idx}'
+            task_files = [
+                {
+                    'image_file_url': f.image_file_url.as_posix(),
+                    'label_file_url': f.label_file_url.as_posix(),
+                    'results_path_stub': f.results_path_stub,
+                    'index_file_row': f.index_file_row,
+                }
+                for f in imagefiles.image_files
+            ]
+            tasks_json.append(
+                {
+                    'task_id': task_id,
+                    'data': {
+                        'dataset_name': DATASET_NAME,
+                        'files': task_files,
+                    },
+                }
+            )
+
+        cloud_tasks_path = FCPath(arguments.output_cloud_tasks_file)
+        with cloud_tasks_path.open('w') as f:
+            f.write(json_as_string(tasks_json))
+        MAIN_LOGGER.info('Wrote cloud_tasks file to %s', arguments.output_cloud_tasks_file)
+        return
 
     for imagefiles in DATASET.yield_image_files_from_arguments(arguments):
         assert len(imagefiles.image_files) == 1

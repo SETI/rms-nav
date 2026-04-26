@@ -41,57 +41,46 @@ RMS-NAV currently supports multiple instruments, organized by dataset names you 
 Installation and Setup
 ======================
 
-Prerequisites
--------------
-
-Before using RMS-NAV, you need to have:
-
-* Python 3.10 or higher
-* SPICE toolkit and kernels for the relevant missions
-* Dependencies installed from ``requirements.txt``
+See :doc:`introduction_overview` for package installation with ``pip`` or
+``pipx``.
 
 Environment Setup
 -----------------
 
-1. Clone the repository and navigate to the project directory
-2. Create and activate a virtual environment (recommended)
-3. Install the required packages:
+In addition to installing the package, the following external resources are
+needed at runtime.
 
-   .. code-block:: bash
+**SPICE kernels.**  Download the SPICE kernels required for your mission and
+set ``SPICE_PATH`` to the directory that contains them:
 
-      pip install -r requirements.txt
+.. code-block:: bash
 
-4. Set up SPICE kernels:
+   export SPICE_PATH=/path/to/your/spice/kernels
 
-   * Download the required SPICE kernels for your mission
-   * Set the ``SPICE_PATH`` environment variable:
+**PDS3 holdings.**  For PDS3 datasets (all currently supported missions), set
+``PDS3_HOLDINGS_DIR`` to the root of a PDS3 holdings tree (or pass
+``--pds3-holdings-root`` on the command line):
 
-   .. code-block:: bash
+.. code-block:: bash
 
-      export SPICE_PATH=/path/to/your/spice/kernels
+   export PDS3_HOLDINGS_DIR=/path/to/your/pds3/data
 
-5. Set up PDS3 data access:
+The holdings tree follows the layout used by the PDS Ring-Moon Systems Node::
 
-   * For PDS3 formatted datasets (most missions), set the ``PDS3_HOLDINGS_DIR`` environment variable:
+   $PDS3_HOLDINGS_DIR/
+       volumes/
+           <volume_set>/
+               <volume>/
+                   <data directories>/
+       metadata/
+           <volume_set>/
+               <volume>/
+                   <volume>_index.lbl
+                   <volume>_index.tab
 
-   .. code-block:: bash
-
-      export PDS3_HOLDINGS_DIR=/path/to/your/pds3/data
-
-   The PDS3 data should be organized in a standard structure:
-
-   .. code-block:: text
-
-      $PDS3_HOLDINGS_DIR/
-      ├── volumes/
-      │   └── [volume_set]/
-      │       └── [volume]/
-      │           └── [data directories]/
-      └── metadata/
-          └── [volume_set]/
-              └── [volume]/
-                  ├── [volume]_index.lbl
-                  └── [volume]_index.tab
+Remote holdings are supported: ``PDS3_HOLDINGS_DIR`` and
+``--pds3-holdings-root`` accept any URL understood by ``filecache.FCPath``
+(for example ``https://pds-rings.seti.org/holdings``).
 
 Configuration System
 ====================
@@ -238,11 +227,46 @@ Queue-driven processing is supported by ``nav_offset_cloud_tasks``. This variant
 
    nav_offset_cloud_tasks [--config-file PATH] [--nav-results-root PATH]
 
-Each task payload must be a JSON object with the following fields:
+Cloud-tasks JSON schema
+^^^^^^^^^^^^^^^^^^^^^^^
 
-* ``dataset_name``: one of the supported dataset names.
-* ``arguments``: an object with optional keys ``nav_models`` and ``nav_techniques`` (lists or ``null``).
-* ``files``: an array of objects, each containing required fields ``image_file_url``, ``label_file_url``, and ``results_path_stub``, and optional fields ``index_file_row`` (metadata) and ``extra_params`` (a JSON object/dictionary of arbitrary key/value pairs that will be passed through to the task implementation; optional, may be null or omitted).
+The file produced by ``--output-cloud-tasks-file`` is a JSON array of task
+objects. Each task is:
+
+.. code-block:: json
+
+    {
+        "task_id": "<dataset_name>-<label_file_name>-<index>",
+        "data": {
+            "dataset_name": "<dataset_name>",
+            "arguments": {
+                "nav_models": ["bodies", "rings", "stars"],
+                "nav_techniques": ["correlate_all"]
+            },
+            "files": [
+                {
+                    "image_file_url": "<path or URL to image file>",
+                    "label_file_url": "<path or URL to label file>",
+                    "results_path_stub": "<relative stub used to name outputs>",
+                    "index_file_row": {"<column>": "<value>", "...": "..."},
+                    "extra_params": {"<key>": "<value>"}
+                }
+            ]
+        }
+    }
+
+Fields:
+
+* ``task_id``: unique string identifier built from the dataset name, the
+  first image's label filename, and the enumeration index.
+* ``data.dataset_name``: one of the supported dataset names.
+* ``data.arguments``: an object with optional keys ``nav_models`` and
+  ``nav_techniques`` (each a list of strings, or ``null``).
+* ``data.files``: one or more file descriptors with required fields
+  ``image_file_url``, ``label_file_url``, and ``results_path_stub``, and
+  optional ``index_file_row`` (metadata from the source index file, may be
+  ``null``) and ``extra_params`` (arbitrary key/value dictionary forwarded
+  to the task implementation; optional, may be ``null`` or omitted).
 
 Inputs and Outputs
 ==================
@@ -303,10 +327,17 @@ The key information in the results is:
 Simulated Images
 ================
 
-RMS-NAV supports simulated images created using the simulated image creation GUI.
-For detailed information about the GUI, the JSON parameter file structure
-including all supported fields, and how to run navigation with simulated images,
-see :doc:`introduction_simulated_images`.
+RMS-NAV supports simulated images created with the
+``nav_create_simulated_image`` GUI. Simulated images share the same
+navigation pipeline as real images; they are selected by passing the ``sim``
+dataset name and a path to the JSON parameter file on the command line:
+
+.. code-block:: bash
+
+   nav_offset sim /path/to/simulated_image.json
+
+For a full description of the GUI, the JSON parameter file structure, and
+every supported field, see :doc:`user_guide_simulated_images`.
 
 Navigation Techniques
 =====================
@@ -335,7 +366,7 @@ The ``correlate_all`` technique performs automated navigation by correlating the
 
 **Configuration Options:**
 
-The following configuration options in ``config_01_general.yaml`` control the behavior of ``correlate_all``:
+The following configuration options in ``config_02_offset.yaml`` control the behavior of ``correlate_all``:
 
 * ``offset.correlation_fft_upsample_factor`` (default: 128): The upsampling factor used in the FFT-based correlation. Higher values provide finer sub-pixel resolution but increase computation time.
 
@@ -355,7 +386,7 @@ The following configuration options in ``config_01_general.yaml`` control the be
 
 * ``offset.log_star_refinement_detail`` (default: false): Log all fit metrics and gate thresholds per star at DEBUG level. Useful for diagnosing unexpected rejection behavior.
 
-* ``general.log_level_nav_correlate_all``: Logging level for this technique (can be set to DEBUG, INFO, WARNING, ERROR, or NONE).
+* ``general.log_level_nav_correlate_all`` (default: ``INFO``, from ``config_01_general.yaml``): Logging level for this technique. Accepts ``DEBUG``, ``INFO``, ``WARNING``, ``ERROR``, or ``CRITICAL``.
 
 **Star conflict strings from refinement:**
 
@@ -376,7 +407,7 @@ Before entering the star model or refinement loop, each star is checked against 
 
 The ring annuli are configured per planet under ``stars.ring_occlusion_radii_km``. Each planet maps to a list of ``[inner_km, outer_km]`` pairs. A star is occluded if the sampled ring-plane radius falls inside any pair for that planet. Planets not listed have no ring occlusion.
 
-Example from ``config_01_general.yaml``:
+Example from ``config_03_stars.yaml``:
 
 .. code-block:: yaml
 
@@ -464,7 +495,7 @@ Ring Navigation Model
 =====================
 
 The ring navigation model generates theoretical brightness profiles for
-planetary ring edges.  Two configuration options in ``config_05_rings.yaml``
+planetary ring edges. Two configuration options in ``config_05_rings.yaml``
 control whether ring pixels that lie in shadow are excluded from the model
 before navigation is performed.
 
@@ -472,7 +503,7 @@ Planet shadow removal
 ---------------------
 
 When a planet casts a shadow across part of its own ring system, those ring
-arcs appear dark in the image.  If the model still shows those arcs as bright,
+arcs appear dark in the image. If the model still shows those arcs as bright,
 the navigator will try to align a bright model against a dark image region,
 which introduces a systematic pointing error.
 
@@ -493,7 +524,7 @@ When active, the ring model logs the number of masked pixels at ``INFO`` level:
 
 If the shadow geometry cannot be computed for a particular observation (for
 example, because the illumination geometry is degenerate), a warning is logged
-and the full unmasked ring model is used instead.  Navigation proceeds
+and the full unmasked ring model is used instead. Navigation proceeds
 normally; no output files are suppressed.
 
 To disable shadow removal entirely -- for example, to compare navigation
@@ -509,7 +540,7 @@ Body shadow removal (future)
 -----------------------------
 
 The ``rings.remove_body_shadows`` option (default ``false``) is reserved for a
-future enhancement that will remove ring pixels shadowed by moons.  Setting it
+future enhancement that will remove ring pixels shadowed by moons. Setting it
 to ``true`` has no effect in the current release.
 
 .. code-block:: yaml

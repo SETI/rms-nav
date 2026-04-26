@@ -6,7 +6,7 @@ import oops
 from filecache import FCPath
 from oops.observation.snapshot import Snapshot
 
-from nav.config import DEFAULT_CONFIG, DEFAULT_LOGGER, Config
+from nav.config import DEFAULT_CONFIG, IMAGE_LOGGER, Config
 from nav.obs.obs_snapshot_inst import ObsSnapshotInst
 from nav.sim.render import render_combined_model
 from nav.support.types import PathLike
@@ -38,7 +38,7 @@ class ObsSim(ObsSnapshotInst):
         """
 
         config = config or DEFAULT_CONFIG
-        logger = DEFAULT_LOGGER
+        logger = IMAGE_LOGGER
 
         provided_sim_params = kwargs.get('sim_params')
         json_path = FCPath(path)

@@ -35,8 +35,6 @@ on feature type and edge availability:
   per present edge -> one ``RingRenderResult`` per edge
 """
 
-from __future__ import annotations
-
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -597,7 +595,7 @@ class RingFeature:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_config(cls, key: str, data: dict[str, Any]) -> RingFeature:
+    def from_config(cls, key: str, data: dict[str, Any]) -> 'RingFeature':
         """Construct a RingFeature from a YAML feature dictionary.
 
         Validates all fields at construction time. This follows the principle

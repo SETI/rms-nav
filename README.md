@@ -130,6 +130,72 @@ nav_create_bundle labels coiss_saturn \
   --volumes COISS_2001
 ```
 
+### Mosaicing
+
+Reproject a set of ring images and combine them into a mosaic:
+
+```bash
+nav_mosaic_rings coiss_saturn \
+  --volumes COISS_2001 \
+  --pds3-holdings-root /path/to/pds3 \
+  --nav-results-root /path/to/nav_results \
+  --planet SATURN \
+  --radius-inner 139500 \
+  --radius-outer 140220 \
+  --output-dir /path/to/mosaic_results \
+  --prefix saturn_fring_2004
+```
+
+Display the resulting mosaic (or any individual reprojection file):
+
+```bash
+nav_mosaic_display_rings /path/to/mosaic_results/saturn_fring_2004_mosaic.fits
+```
+
+Reproject body images (e.g. Mimas):
+
+```bash
+nav_mosaic_body coiss_saturn \
+  --volumes COISS_2001 \
+  --pds3-holdings-root /path/to/pds3 \
+  --nav-results-root /path/to/nav_results \
+  --body-name MIMAS \
+  --output-dir /path/to/mosaic_results \
+  --prefix mimas_2004
+```
+
+See the
+[Reprojection user guide](https://rms-nav.readthedocs.io/en/latest/user_guide_reprojection.html)
+for full option references and more examples.
+
+### Cloud Tasks variants
+
+Each of the main batch drivers above has a queue-driven counterpart suffixed
+with `_cloud_tasks`, which reads file lists from a
+[cloud_tasks](https://github.com/SETI/rms-cloud_tasks) queue instead of
+enumerating the dataset locally:
+
+- `nav_offset_cloud_tasks` — navigation offsets
+- `nav_backplanes_cloud_tasks` — backplane generation
+- `nav_create_bundle_cloud_tasks` — PDS4 bundle labels pass
+- `nav_mosaic_rings_cloud_tasks` / `nav_mosaic_body_cloud_tasks` —
+  mosaic reprojection pass (mosaic combination is run separately via
+  `nav_mosaic <mode> --skip-reproject`)
+
+These workers accept only the environment flags needed to locate configuration
+and results roots; the task payload carries the list of files plus any
+per-task parameters. Each of `nav_offset`, `nav_backplanes`, and
+`nav_mosaic_rings` / `nav_mosaic_body` can produce a ready-to-load task-queue
+JSON file for its matching worker via `--output-cloud-tasks-file PATH`. The
+per-feature user guides document the JSON schema each worker expects:
+
+- `nav_offset_cloud_tasks`:
+  [Navigation user guide](https://rms-nav.readthedocs.io/en/latest/user_guide_navigation.html)
+- `nav_backplanes_cloud_tasks`:
+  [Backplanes user guide](https://rms-nav.readthedocs.io/en/latest/user_guide_backplanes.html)
+- `nav_mosaic_rings_cloud_tasks` / `nav_mosaic_body_cloud_tasks`:
+  [Reprojection user guide](https://rms-nav.readthedocs.io/en/latest/user_guide_reprojection.html)
+
 ## Documentation
 
 Comprehensive documentation is available in the `docs` directory. To build

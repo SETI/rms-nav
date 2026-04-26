@@ -1,9 +1,43 @@
+"""YAML-backed configuration for RMS-NAV.
+
+Loads and merges settings from bundled defaults and optional user YAML files
+using :class:`ruamel.yaml.YAML` (safe typ), then exposes sections as
+:class:`nav.support.attrdict.AttrDict` for attribute-style access. The
+:class:`Config` class is the main public entry; helpers such as
+:func:`_as_str_list` validate list-shaped YAML fragments used when building
+config structures.
+"""
+
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from ruamel.yaml import YAML
 
 from nav.support.attrdict import AttrDict
+
+
+def _as_str_list(value: Any, *, location: str) -> list[str]:
+    """Coerce a YAML list value to ``list[str]``.
+
+    Parameters:
+        value: Parsed YAML fragment expected to be a list of strings.
+        location: Human-readable path (e.g. config key path) for error messages.
+
+    Returns:
+        A new ``list[str]`` containing each element of ``value`` as ``str``.
+
+    Raises:
+        TypeError: If ``value`` is not a list, or if any element is not a ``str``.
+    """
+
+    if not isinstance(value, list):
+        raise TypeError(f'{location}: expected a list of strings, got {type(value).__name__}')
+    out: list[str] = []
+    for i, item in enumerate(value):
+        if not isinstance(item, str):
+            raise TypeError(f'{location}[{i}]: expected str, got {type(item).__name__}')
+        out.append(item)
+    return out
 
 
 class Config:
@@ -27,6 +61,21 @@ class Config:
         self._config_bootstrap: dict[str, Any] = AttrDict({})
         self._config_backplanes: dict[str, Any] = AttrDict({})
         self._config_pds4: dict[str, Any] = AttrDict({})
+
+    @property
+    def is_loaded(self) -> bool:
+        """Whether merged YAML is present (after ``read_config`` / ``update_config``)."""
+
+        return bool(self._config_dict)
+
+    def ensure_loaded(self) -> None:
+        """Load bundled default YAML if not already loaded.
+
+        Safe to call repeatedly; delegates to :meth:`read_config` with no path
+        (same early-return behavior when data is already present).
+        """
+
+        self.read_config()
 
     def _update_attrdicts(self) -> None:
         """Updates all attribute dictionaries from the main configuration dictionary.
@@ -120,7 +169,7 @@ class Config:
         """Returns the list of configured planet names."""
 
         self.read_config()
-        return cast(list[str], self._config_dict.get('planets', []))
+        return _as_str_list(self._config_dict.get('planets', []), location='config.planets')
 
     def satellites(self, planet: str) -> list[str]:
         """Returns the list of satellites for the specified planet.
@@ -133,7 +182,15 @@ class Config:
         """
 
         self.read_config()
-        return cast(list[str], self._config_dict.get('satellites', {}).get(planet.upper(), []))
+        block = self._config_dict.get('satellites', {})
+        if not isinstance(block, dict):
+            raise TypeError(
+                f'config key "satellites" must be a mapping, got {type(block).__name__}'
+            )
+        return _as_str_list(
+            block.get(planet.upper(), []),
+            location=f'config.satellites[{planet.upper()!r}]',
+        )
 
     def fuzzy_satellites(self, planet: str) -> list[str]:
         """Returns the list of fuzzy satellites for the specified planet.
@@ -146,9 +203,14 @@ class Config:
         """
 
         self.read_config()
-        return cast(
-            list[str],
-            self._config_dict.get('fuzzy_satellites', {}).get(planet.upper(), []),
+        block = self._config_dict.get('fuzzy_satellites', {})
+        if not isinstance(block, dict):
+            raise TypeError(
+                f'config key "fuzzy_satellites" must be a mapping, got {type(block).__name__}'
+            )
+        return _as_str_list(
+            block.get(planet.upper(), []),
+            location=f'config.fuzzy_satellites[{planet.upper()!r}]',
         )
 
     def ring_satellites(self, planet: str) -> list[str]:
@@ -162,9 +224,14 @@ class Config:
         """
 
         self.read_config()
-        return cast(
-            list[str],
-            self._config_dict.get('ring_satellites', {}).get(planet.upper(), []),
+        block = self._config_dict.get('ring_satellites', {})
+        if not isinstance(block, dict):
+            raise TypeError(
+                f'config key "ring_satellites" must be a mapping, got {type(block).__name__}'
+            )
+        return _as_str_list(
+            block.get(planet.upper(), []),
+            location=f'config.ring_satellites[{planet.upper()!r}]',
         )
 
     @property

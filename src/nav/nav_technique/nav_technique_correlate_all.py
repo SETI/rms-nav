@@ -107,13 +107,19 @@ class NavTechniqueCorrelateAll(NavTechnique):
                 combined_model.models[0].model_mask,
                 upsample_factor=self.config.offset.correlation_fft_upsample_factor,
                 max_offset_vu=obs.extfov_margin_vu,
+                data_mask=obs.extfov_data_sensor_mask(),
             )
 
             corr_offset = (float(result['offset'][0]), float(result['offset'][1]))
 
-            if not (
-                -obs.extfov_margin_u + 1 < corr_offset[1] < obs.extfov_margin_u - 1
-                and -obs.extfov_margin_v + 1 < corr_offset[0] < obs.extfov_margin_v - 1
+            # ``extract_offset_array`` slices ``extdata[v0:v0+data_h, u0:u0+data_w]``
+            # with ``v0 = margin_v - round(dV)``, ``u0 = margin_u - round(dU)``.
+            # That slice is in bounds iff |round(dV)| <= margin_v and
+            # |round(dU)| <= margin_u -- so the offset is inside the extended
+            # FOV iff both components satisfy that rounded-integer bound.
+            if (
+                abs(int(np.round(corr_offset[0]))) > obs.extfov_margin_v
+                or abs(int(np.round(corr_offset[1]))) > obs.extfov_margin_u
             ):
                 self.logger.info('Correlation offset is outside the extended FOV')
                 return
@@ -133,13 +139,20 @@ class NavTechniqueCorrelateAll(NavTechnique):
 
             star_models = self._filter_models(['stars'])
             if len(star_models) == 1:
-                ret = self._refine_stars(cast(NavModelStars, star_models[0]), corr_offset)
-                if ret is not None:
-                    self._offset, self._uncertainty = ret
+                first_model = star_models[0]
+                if isinstance(first_model, NavModelStars):
+                    ret = self._refine_stars(first_model, corr_offset)
+                    if ret is not None:
+                        self._offset, self._uncertainty = ret
+                else:
+                    self.logger.warning(
+                        'Expected NavModelStars for stars filter, got %s; skipping star refinement',
+                        type(first_model).__name__,
+                    )
 
-        if not (
-            -obs.extfov_margin_u + 1 < self._offset[1] < obs.extfov_margin_u - 1
-            and -obs.extfov_margin_v + 1 < self._offset[0] < obs.extfov_margin_v - 1
+        if (
+            abs(int(np.round(self._offset[0]))) > obs.extfov_margin_v
+            or abs(int(np.round(self._offset[1]))) > obs.extfov_margin_u
         ):
             self.logger.info('Final offset is outside the extended FOV')
             self._offset = None

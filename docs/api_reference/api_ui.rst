@@ -5,3 +5,21 @@ nav.ui
    :members:
    :undoc-members:
    :show-inheritance:
+
+nav.ui.mosaic_viewer
+--------------------
+
+.. automodule:: nav.ui.mosaic_viewer.projections
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: nav.ui.mosaic_viewer.sphere_render
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: nav.ui.mosaic_viewer.graticule
+   :members:
+   :undoc-members:
+   :show-inheritance:

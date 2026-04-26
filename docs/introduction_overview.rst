@@ -94,7 +94,15 @@ distributed processing:
 * ``nav_create_bundle_cloud_tasks`` - Cloud tasks worker for PDS4 bundle
   creation.
 
+* ``nav_mosaic_cloud_tasks`` - Cloud tasks worker for the reprojection pass
+  of ring and body mosaic generation. A single worker process handles both
+  ring and body tasks; the mode is encoded per-task in the task payload.
+  (Mosaic combination remains a single-node step; see
+  :doc:`user_guide_reprojection`.)
+
 These cloud tasks variants read task payloads from a queue and process batches
 of files, making them suitable for large-scale processing in cloud
-environments. The ``nav_offset`` program can generate cloud tasks JSON files
-using the ``--output-cloud-tasks-file`` option.
+environments. The local batch drivers ``nav_offset``, ``nav_backplanes``, and
+``nav_mosaic_rings`` / ``nav_mosaic_body`` can emit a cloud-tasks JSON file
+for their respective workers via ``--output-cloud-tasks-file PATH``; see the
+matching user guide for each driver's JSON schema.

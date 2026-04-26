@@ -9,6 +9,7 @@ description = "Navigation system for spacecraft imagery"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+  "astropy>=6.0",
   "matplotlib",
   "numpy>=2.2.0",
   "PyQt6",
@@ -51,7 +52,6 @@ classifiers = [
 dev = [
   "coverage",
   "mypy",
-  "myst-parser",
   "pyinstrument",
   "pymarkdownlnt>=0.9.35",
   "pytest",
@@ -59,9 +59,15 @@ dev = [
   "pytest-profiling",
   "pytest-xdist",
   "ruff",
-  "sphinx",
-  "sphinxcontrib-mermaid",
-  "sphinx-rtd-theme"
+  "rms-nav[docs]",
+]
+# Sphinx stack only. ``pip install -e ".[docs]"`` (ReadTheDocs: ``path: .`` +
+# ``extra_requirements: [docs]``) installs these *plus* ``[project] dependencies``.
+docs = [
+  "myst-parser>=3.0.1",
+  "sphinx>=7.4.7",
+  "sphinxcontrib-mermaid>=0.9.2",
+  "sphinx-rtd-theme>=2.0.0",
 ]
 
 [project.urls]
@@ -74,8 +80,10 @@ Issues = "https://github.com/SETI/rms-nav/issues"
 [tool.mypy]
 strict = true
 disallow_subclassing_any = false
-exclude = ["src/experiments"]
+exclude = ["src/experiments", "^build/"]
 mypy_path = "src"
+# Third-party science stack is largely untyped or stub-incomplete; per-module
+# ``ignore_missing_imports`` below covers missing packages.
 
 [[tool.mypy.overrides]]
 module = "nav._version"
@@ -136,7 +144,10 @@ pythonpath = [
 
 [tool.ruff]
 src = ["src", "tests"]
-extend-exclude = ["src/experiments", "src/nav/support/correlate_old.py"]
+extend-exclude = [
+  "src/experiments",
+  "src/nav/support/correlate_old.py",
+]
 line-length = 100
 
 [tool.ruff.lint]
@@ -156,6 +167,8 @@ extend-ignore = ["N802", "N803", "N806", "PT011", "SIM105", "SIM108"]
 [tool.ruff.lint.per-file-ignores]
 # Entry-point scripts add package to path before importing nav
 "src/main/*.py" = ["E402"]
+# Sphinx reads ``copyright`` from conf by name (builtin shadowing is unavoidable).
+"docs/conf.py" = ["A001"]
 
 [tool.ruff.format]
 quote-style = "single"
@@ -183,3 +196,10 @@ nav_backplanes_cloud_tasks = "main.nav_backplanes_cloud_tasks:main"
 nav_backplane_viewer = "main.nav_backplane_viewer:main"
 nav_create_bundle = "main.nav_create_bundle:main"
 nav_create_bundle_cloud_tasks = "main.nav_create_bundle_cloud_tasks:main"
+nav_mosaic = "main.nav_mosaic:main"
+nav_mosaic_rings = "main.nav_mosaic:rings_main"
+nav_mosaic_body = "main.nav_mosaic:body_main"
+nav_mosaic_cloud_tasks = "main.nav_mosaic_cloud_tasks:main"
+nav_mosaic_display = "main.nav_mosaic_display:main"
+nav_mosaic_display_rings = "main.nav_mosaic_display:rings_main"
+nav_mosaic_display_body = "main.nav_mosaic_display:body_main"

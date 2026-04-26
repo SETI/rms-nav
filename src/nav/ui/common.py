@@ -1,6 +1,6 @@
 import math
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 from PyQt6.QtCore import QPoint, Qt
@@ -14,8 +14,56 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from nav.support.types import NDArrayFloatType
+
 # Pixel spacing between sliders and value labels in ``build_stretch_controls`` rows.
 STRETCH_CONTROLS_ROW_SPACING = 4
+
+
+def apply_linear_gamma_stretch(
+    data: NDArrayFloatType,
+    *,
+    black: float,
+    white: float,
+    gamma: float,
+) -> NDArrayFloatType:
+    """Apply black/white/gamma stretch and return a float array in ``[0, 1]``.
+
+    Uses the convention ``((clip(data, black, white) - black) / (white - black)) ** gamma``.
+    A ``gamma`` of 1.0 is linear; values below 1.0 brighten the mid-tones
+    (common for display) and values above 1.0 darken them.
+
+    Parameters:
+        data: Input float array (any shape).
+        black: Black-point; input values at or below this map to 0.
+        white: White-point; input values at or above this map to 1. If
+            ``white <= black`` (including accidental UI equality), ``white`` is
+            raised silently to the next representable float above ``black`` so
+            the linear scale denominator is never zero.
+        gamma: Exponent applied after linear normalisation; must be finite and
+            strictly greater than zero.
+
+    Returns:
+        Float array of the same shape as ``data`` with values in ``[0, 1]``.
+
+    Raises:
+        TypeError: If ``black``, ``white``, or ``gamma`` is not an ``int`` or
+            ``float``, or any of them is a ``bool``.
+        ValueError: If any of ``black``, ``white``, or ``gamma`` is not finite;
+            or if ``gamma <= 0``.
+    """
+    _require_finite_int_or_float('black', black)
+    _require_finite_int_or_float('white', white)
+    _require_finite_int_or_float('gamma', gamma)
+    b = float(black)
+    w = float(white)
+    g = float(gamma)
+    if w <= b:
+        w = math.nextafter(b, math.inf)
+    if g <= 0.0:
+        raise ValueError(f'gamma must be greater than 0, got {g!r}')
+    normalized = np.clip((data - b) / (w - b), 0.0, 1.0)
+    return cast(NDArrayFloatType, np.power(normalized, g))
 
 
 def _require_finite_int_or_float(name: str, value: object) -> None:

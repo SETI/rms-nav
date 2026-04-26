@@ -90,10 +90,7 @@ class ObsSnapshot(Obs, Snapshot):
         )
         self.reset_all()
 
-        try:
-            # Will already be set for simulated observations
-            _ = self._closest_planet  # type: ignore
-        except AttributeError:
+        if not hasattr(self, '_closest_planet'):
             closest_planet = None
             closest_dist = 1e38
             for planet in self._config.planets:
@@ -133,6 +130,25 @@ class ObsSnapshot(Obs, Snapshot):
             A boolean array of False values with the same shape as the extended FOV.
         """
         return np.zeros(self.extdata.shape, dtype=bool)
+
+    def extfov_data_sensor_mask(self) -> NDArrayBoolType:
+        """Boolean mask over extdata that is True where real sensor data lives.
+
+        ``extdata`` wraps ``data`` in a zero-padded margin so that correlation
+        can search offsets outside the original field of view. The returned
+        mask is True inside the original-FOV rectangle and False in the
+        zero-padded margin.
+
+        Returns:
+            Boolean array with the same shape as ``extdata``; True for the
+            inner ``extfov_margin_v : extfov_margin_v + data_shape_v`` x
+            ``extfov_margin_u : extfov_margin_u + data_shape_u`` region.
+        """
+        mask = np.zeros(self.extdata.shape, dtype=bool)
+        mv, mu = self._extfov_margin_vu
+        dv, du = self._data_shape_vu
+        mask[mv : mv + dv, mu : mu + du] = True
+        return mask
 
     def unpad_array_to_extfov(self, array: NDArrayType[NPType]) -> NDArrayType[NPType]:
         """Unpads an array to be the size of the extended FOV.
