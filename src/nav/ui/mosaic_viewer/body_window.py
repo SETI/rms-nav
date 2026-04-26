@@ -233,7 +233,7 @@ class _ZoomSync(_SyncedSlider):
         return _slider_to_zoom(pos)
 
 
-
+class BodyMosaicWindow(QMainWindow):
     """Viewer window for a list of body reprojection / mosaic files."""
 
     def __init__(

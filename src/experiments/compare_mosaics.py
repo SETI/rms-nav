@@ -83,12 +83,11 @@ def _apply_photometry(obj, kind, mode):
         mode = 'intrinsic'
 
     if kind.startswith('ring'):
-        phase_deg = ma.masked_array(
-            np.rad2deg(np.asarray(obj.mean_phase, dtype=np.float64))
-        )
-        emission_deg = ma.masked_array(
-            np.rad2deg(np.asarray(obj.mean_emission, dtype=np.float64))
-        )
+        # ma.asarray preserves the mask when the input is a MaskedArray
+        # (RingMosaicData) and produces a no-mask array for plain ndarrays
+        # (RingReprojResult).
+        phase_deg = np.rad2deg(ma.asarray(obj.mean_phase, dtype=np.float64))
+        emission_deg = np.rad2deg(ma.asarray(obj.mean_emission, dtype=np.float64))
         incidence_deg = np.rad2deg(
             float(obj.incidence if kind == 'ring_reproj' else obj.mean_incidence)
         )
@@ -101,15 +100,10 @@ def _apply_photometry(obj, kind, mode):
             mean_incidence_deg=incidence_deg,
         )
     else:
-        phase_deg = ma.masked_array(
-            np.rad2deg(np.asarray(obj.phase, dtype=np.float64))
-        )
-        emission_deg = ma.masked_array(
-            np.rad2deg(np.asarray(obj.emission, dtype=np.float64))
-        )
-        incidence_deg = ma.masked_array(
-            np.rad2deg(np.asarray(obj.incidence, dtype=np.float64))
-        )
+        # .astype() on a MaskedArray preserves the mask; np.asarray would strip it.
+        phase_deg = np.rad2deg(obj.phase.astype(np.float64))
+        emission_deg = np.rad2deg(obj.emission.astype(np.float64))
+        incidence_deg = np.rad2deg(obj.incidence.astype(np.float64))
         return compute_body_display_image(
             mode=mode,
             image_ma=obj.img,
