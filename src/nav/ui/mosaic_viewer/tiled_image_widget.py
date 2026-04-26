@@ -469,7 +469,9 @@ class TiledImageWidget(QAbstractScrollArea):
         self._ring_pixel_y_absolute = bool(ring_radial_axis_absolute) and y_flip
         self._ring_radial_mid_km = float(ring_radial_mid_km) if self._ring_pixel_y_absolute else 0.0
         self._ring_full_lon_cols = (
-            max(self._n_cols, math.ceil(360.0 / x_interval)) if ring_full_lon and x_interval > 0 else 0
+            max(self._n_cols, math.ceil(360.0 / x_interval))
+            if ring_full_lon and x_interval > 0
+            else 0
         )
         self._ring_x_col_offset = (
             round(self._x_origin_deg / x_interval)

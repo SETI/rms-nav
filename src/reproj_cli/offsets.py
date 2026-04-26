@@ -76,18 +76,14 @@ def _parse_nav_offset_pair(offset: object) -> tuple[float, float] | None:
     except (TypeError, ValueError, KeyError, IndexError):
         return None
     if isinstance(dv_raw, bool) or isinstance(du_raw, bool):
-        raise TypeError(
-            f'Offset elements must not be bool; got dv={dv_raw!r}, du={du_raw!r}'
-        )
+        raise TypeError(f'Offset elements must not be bool; got dv={dv_raw!r}, du={du_raw!r}')
     try:
         dv = float(dv_raw)
         du = float(du_raw)
     except (TypeError, ValueError):
         return None
     if not math.isfinite(dv) or not math.isfinite(du):
-        raise ValueError(
-            f'Offset elements must be finite floats; got dv={dv!r}, du={du!r}'
-        )
+        raise ValueError(f'Offset elements must be finite floats; got dv={dv!r}, du={du!r}')
     return dv, du
 
 
@@ -191,6 +187,7 @@ def load_offset_if_any(
         )
         return None
     return parsed
+
 
 def apply_offset_to_obs(obs: ObsSnapshotInst, dv: float, du: float) -> None:
     """Apply a navigation offset in-place to an observation's FOV.
