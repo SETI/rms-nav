@@ -17,7 +17,10 @@ class NavTechniqueResult:
 
     Parameters:
         technique_name: Class name of the producing technique.
-        feature_ids: List of NavFeature.feature_id values actually consumed.
+        feature_ids: Tuple of NavFeature.feature_id values actually
+            consumed.  Stored as an immutable ``tuple[str, ...]`` so the
+            hash is stable across the lifetime of the instance; passing
+            a ``list`` is accepted and converted in ``__post_init__``.
         offset_px: ``(dv, du)`` translational offset.  Convention: predicted
             position ``(v, u)`` means actual position is ``(v + dv, u + du)``.
         covariance_px2: 2x2 (or 3x3 with rotation) covariance matrix in
@@ -34,7 +37,7 @@ class NavTechniqueResult:
     """
 
     technique_name: str
-    feature_ids: list[str]
+    feature_ids: tuple[str, ...]
     offset_px: tuple[float, float]
     covariance_px2: NDArrayFloatType
     confidence: float
@@ -63,11 +66,15 @@ class NavTechniqueResult:
         cov.setflags(write=False)
         # Replace with the canonical float64 read-only copy.
         object.__setattr__(self, 'covariance_px2', cov)
+        # Coerce a list-of-str input into the canonical tuple-of-str form
+        # so the hash is stable across instance lifetimes.
+        if not isinstance(self.feature_ids, tuple):
+            object.__setattr__(self, 'feature_ids', tuple(self.feature_ids))
 
-    # Equality and hashing operate on (technique_name, feature_ids tuple)
-    # because numpy-array fields prevent the default dataclass equality.
+    # Equality and hashing operate on (technique_name, feature_ids) because
+    # numpy-array fields prevent the default dataclass equality.
     def __hash__(self) -> int:
-        return hash((self.technique_name, tuple(self.feature_ids)))
+        return hash((self.technique_name, self.feature_ids))
 
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, NavTechniqueResult):

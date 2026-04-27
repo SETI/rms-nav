@@ -79,6 +79,6 @@ def test_navtechniqueresult_eq_by_name_and_features() -> None:
 
 def test_navtechniqueresult_neq_different_features() -> None:
     """Two results with different feature_ids compare unequal."""
-    a = _make_result(feature_ids=['limb_arc:MIMAS'])
-    b = _make_result(feature_ids=['limb_arc:RHEA'])
+    a = _make_result(feature_ids=('limb_arc:MIMAS',))
+    b = _make_result(feature_ids=('limb_arc:RHEA',))
     assert a != b

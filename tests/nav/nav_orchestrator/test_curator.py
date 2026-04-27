@@ -43,7 +43,7 @@ def _ok_result_with_one_technique() -> NavResult:
     diag = BodyLimbDiagnostics(visible_arc_px=120.0, dt_fit_rms_px=0.456789)
     tech = NavTechniqueResult(
         technique_name='BodyLimbNav',
-        feature_ids=['limb_arc:MIMAS'],
+        feature_ids=('limb_arc:MIMAS',),
         offset_px=(1.234567, 2.345678),
         covariance_px2=cov,
         confidence=0.876543,
@@ -161,7 +161,7 @@ def test_assert_diagnostic_fields_present_detects_missing_curator_field() -> Non
     cov = np.eye(2, dtype=np.float64)
     tech = NavTechniqueResult(
         technique_name='BadTechnique',
-        feature_ids=[],
+        feature_ids=(),
         offset_px=(0.0, 0.0),
         covariance_px2=cov,
         confidence=0.5,

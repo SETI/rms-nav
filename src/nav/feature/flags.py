@@ -31,7 +31,7 @@ class StarFlags:
             DN; centroiding switches from peak-Gaussian-fit to annular
             brightness-weighted moment.
         smear_length_px: Expected smear length in pixels at this image's
-            spacecraft attitude rate.
+            spacecraft attitude rate.  Must be ``>= 0``.
         in_body_silhouette: True if the predicted star position falls inside
             a predicted body silhouette in extfov.
         in_saturation_or_cosmic_mask: True if the predicted star position
@@ -42,6 +42,11 @@ class StarFlags:
     smear_length_px: float = 0.0
     in_body_silhouette: bool = False
     in_saturation_or_cosmic_mask: bool = False
+
+    def __post_init__(self) -> None:
+        """Validate that ``smear_length_px`` is non-negative."""
+        if self.smear_length_px < 0.0:
+            raise ValueError(f'smear_length_px must be >= 0; got {self.smear_length_px!r}')
 
 
 @dataclass(frozen=True)
@@ -57,6 +62,13 @@ class LimbArcFlags:
     body_name: str = ''
     visible_arc_fraction: float = 0.0
 
+    def __post_init__(self) -> None:
+        """Validate ``visible_arc_fraction`` is in ``[0, 1]``."""
+        if not 0.0 <= self.visible_arc_fraction <= 1.0:
+            raise ValueError(
+                f'visible_arc_fraction must lie in [0, 1]; got {self.visible_arc_fraction!r}'
+            )
+
 
 @dataclass(frozen=True)
 class TerminatorArcFlags:
@@ -67,12 +79,23 @@ class TerminatorArcFlags:
         visible_arc_fraction: Fraction of total terminator length inside
             extfov and lit ``[0, 1]``.
         phase_angle_factor: ``sin(phase_angle)`` factor used in reliability;
-            peaks at 90-degree crescent.
+            peaks at 90-degree crescent.  Must lie in ``[0, 1]``.
     """
 
     body_name: str = ''
     visible_arc_fraction: float = 0.0
     phase_angle_factor: float = 0.0
+
+    def __post_init__(self) -> None:
+        """Validate fractions and the phase-angle factor."""
+        if not 0.0 <= self.visible_arc_fraction <= 1.0:
+            raise ValueError(
+                f'visible_arc_fraction must lie in [0, 1]; got {self.visible_arc_fraction!r}'
+            )
+        if not 0.0 <= self.phase_angle_factor <= 1.0:
+            raise ValueError(
+                f'phase_angle_factor must lie in [0, 1]; got {self.phase_angle_factor!r}'
+            )
 
 
 @dataclass(frozen=True)
@@ -110,6 +133,13 @@ class BodyDiscFlags:
     body_name: str = ''
     overflow_fov_fraction: float = 0.0
 
+    def __post_init__(self) -> None:
+        """Validate ``overflow_fov_fraction`` is in ``[0, 1]``."""
+        if not 0.0 <= self.overflow_fov_fraction <= 1.0:
+            raise ValueError(
+                f'overflow_fov_fraction must lie in [0, 1]; got {self.overflow_fov_fraction!r}'
+            )
+
 
 @dataclass(frozen=True)
 class BodyBlobFlags:
@@ -118,11 +148,18 @@ class BodyBlobFlags:
     Parameters:
         body_name: SPICE body name whose blob this feature represents.
         predicted_diameter_px: Predicted disc diameter in pixels (longer
-            axis of the predicted ellipse silhouette).
+            axis of the predicted ellipse silhouette).  Must be ``>= 0``.
     """
 
     body_name: str = ''
     predicted_diameter_px: float = 0.0
+
+    def __post_init__(self) -> None:
+        """Validate ``predicted_diameter_px`` is non-negative."""
+        if self.predicted_diameter_px < 0.0:
+            raise ValueError(
+                f'predicted_diameter_px must be >= 0; got {self.predicted_diameter_px!r}'
+            )
 
 
 @dataclass(frozen=True)
@@ -132,11 +169,25 @@ class RingAnnulusFlags:
     Parameters:
         planet_name: Planet whose ring system this annulus represents.
         constituent_edge_count: Number of catalog edges fused into this
-            annulus template.
+            annulus template.  Must be a non-negative integer.
     """
 
     planet_name: str = ''
     constituent_edge_count: int = 0
+
+    def __post_init__(self) -> None:
+        """Validate ``constituent_edge_count`` is a non-negative integer."""
+        if not isinstance(self.constituent_edge_count, int) or isinstance(
+            self.constituent_edge_count, bool
+        ):
+            raise TypeError(
+                f'constituent_edge_count must be int; got '
+                f'{type(self.constituent_edge_count).__name__}'
+            )
+        if self.constituent_edge_count < 0:
+            raise ValueError(
+                f'constituent_edge_count must be >= 0; got {self.constituent_edge_count!r}'
+            )
 
 
 @dataclass(frozen=True)

@@ -25,7 +25,7 @@ class _ConcreteTechniqueForTest(NavTechnique):
     def navigate(self, features: list[NavFeature], context: Any) -> NavTechniqueResult:
         return NavTechniqueResult(
             technique_name=self.name,
-            feature_ids=[],
+            feature_ids=(),
             offset_px=(0.0, 0.0),
             covariance_px2=np.eye(2, dtype=np.float64),
             confidence=0.0,

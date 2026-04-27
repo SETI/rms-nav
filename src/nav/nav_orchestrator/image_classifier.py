@@ -50,9 +50,9 @@ class ImageQualityThresholds:
         max_missing_frac_clean: Above this fraction of missing pixels the
             image is ``mostly_missing_data``.
         partial_dropout_min_frac: Below this missing fraction, no
-            ``partial_dropout`` flag is raised.
-        partial_dropout_max_frac: Above this fraction, the image escalates
-            to ``mostly_missing_data``.
+            ``partial_dropout`` flag is raised.  At or above this fraction
+            (and below ``max_missing_frac_clean``) the ``partial_dropout``
+            advisory flag is set on the result.
         blank_max_dn: If the image's max DN is below this, the image is
             ``blank``.
         noisy_threshold: Above this MAD-noise sigma, the ``noisy`` flag is
@@ -64,7 +64,6 @@ class ImageQualityThresholds:
     max_saturation_frac_clean: float = 0.80
     max_missing_frac_clean: float = 0.30
     partial_dropout_min_frac: float = 0.05
-    partial_dropout_max_frac: float = 0.30
     blank_max_dn: float = 5.0
     noisy_threshold: float = 10.0
 
@@ -102,10 +101,20 @@ class NavImageClassifier:
         if sensor_mask is None:
             sensor = image
         else:
+            if not isinstance(sensor_mask, np.ndarray):
+                raise TypeError(
+                    f'sensor_mask must be a numpy ndarray; got {type(sensor_mask).__name__}'
+                )
+            if sensor_mask.dtype != np.bool_:
+                raise TypeError(f'sensor_mask must have boolean dtype; got {sensor_mask.dtype}')
             if sensor_mask.shape != image.shape:
                 raise ValueError(
                     f'sensor_mask shape {sensor_mask.shape} differs from image shape {image.shape}'
                 )
+            if sensor_mask.size == 0:
+                raise ValueError('sensor_mask must not be empty')
+            if not sensor_mask.any():
+                raise ValueError('sensor_mask must select at least one sensor pixel')
             sensor = image[sensor_mask]
         # Compute statistics on the sensor pixels only.
         sat_mask = sensor >= self.thresholds.saturation_threshold_dn

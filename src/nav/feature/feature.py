@@ -151,6 +151,8 @@ class NavFeature:
             cov = np.asarray(self.position_cov_px, np.float64)
             if cov.shape != (2, 2):
                 raise ValueError(f'position_cov_px must be 2x2; got shape {cov.shape}')
+            if not np.isfinite(cov).all():
+                raise ValueError('position_cov_px must be finite (no NaN or inf entries)')
             # Symmetric (within numerical tolerance) and positive-semidefinite.
             if not np.allclose(cov, cov.T, atol=1e-9):
                 raise ValueError('position_cov_px must be symmetric')
@@ -165,12 +167,15 @@ class NavFeature:
             # object.__setattr__ is the standard escape hatch for normalising
             # inputs in a frozen dataclass's __post_init__.
             object.__setattr__(self, 'position_cov_px', cov)
+        if (self.template_img is None) != (self.template_mask is None):
+            raise ValueError(
+                'template_img and template_mask must be provided together '
+                '(both None or both non-None)'
+            )
         if self.template_img is not None:
             self.template_img.setflags(write=False)
         if self.template_mask is not None:
             self.template_mask.setflags(write=False)
-        # Sanity: a template-bearing feature should have a corresponding mask
-        # with matching shape if both are provided.
         if (
             self.template_img is not None
             and self.template_mask is not None

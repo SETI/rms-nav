@@ -63,12 +63,18 @@ from nav.feature.geometry import (
     StarGeometry,
     TerminatorPolyline,
 )
+from nav.feature.reliability import (
+    DEFAULT_RELIABILITY_THRESHOLDS,
+    FeatureReliabilityGate,
+    GatedFeatureRecord,
+)
 
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 __all__ = [
     'AGREEMENT_FACTOR_CAP',
     'COMBINED_CONFIDENCE_CAP',
+    'DEFAULT_RELIABILITY_THRESHOLDS',
     'INCIDENCE_FACTOR_ANGLE_CAP_DEG',
     'INCIDENCE_FACTOR_CLIP_DEG',
     'JSON_INF_SENTINEL',
@@ -80,6 +86,8 @@ __all__ = [
     'BodyDiscGeometry',
     'CartographicModelFlags',
     'CartographicModelGeometry',
+    'FeatureReliabilityGate',
+    'GatedFeatureRecord',
     'LimbArcFlags',
     'LimbPolyline',
     'NavFeature',

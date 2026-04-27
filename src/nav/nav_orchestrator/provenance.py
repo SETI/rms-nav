@@ -6,7 +6,9 @@ by construction; regression-baseline comparison strips that field before
 comparing.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 
 __all__ = ['Provenance']
 
@@ -19,20 +21,22 @@ class Provenance:
         rms_nav_version: ``__version__`` string (e.g. ``'0.5.2'``).
         rms_nav_git_sha: Short git SHA, ``'dirty'``, or ``None`` if neither
             can be determined.
-        spice_kernels: Sorted list of SPICE kernel filenames actually
+        spice_kernels: Sorted tuple of SPICE kernel filenames actually
             loaded (from ``spice.ktotal`` / ``spice.kdata``).
-        spice_kernel_count: Convenience field equal to
-            ``len(spice_kernels)``.
         static_data_hashes: Mapping ``filename -> sha256(raw bytes)`` for
             static-data YAMLs (``config_220_body_shape.yaml``, every
             ``config_3N0_*_rings.yaml``, every ``config_4N0_inst_*.yaml``).
             Comments and whitespace are included in the hashed bytes.
-        technique_names: Sorted list of registered technique class names.
-        extractor_names: Sorted list of registered extractor class names.
+            Stored as a read-only ``MappingProxyType`` after construction.
+        technique_names: Sorted tuple of registered technique class names.
+        extractor_names: Sorted tuple of registered extractor class names.
         image_et: Observation midtime ET (TDB seconds past J2000).
         pipeline_run_iso8601: UTC timestamp when the run began.  Excluded
             from byte-identical regression-baseline comparison because it
             varies wall-clock-to-wall-clock for identical inputs.
+
+    The non-init field ``spice_kernel_count`` is derived from
+    ``len(spice_kernels)`` in ``__post_init__``.
     """
 
     rms_nav_version: str
@@ -40,7 +44,18 @@ class Provenance:
     pipeline_run_iso8601: str
     rms_nav_git_sha: str | None = None
     spice_kernels: tuple[str, ...] = ()
-    spice_kernel_count: int = 0
-    static_data_hashes: dict[str, str] = field(default_factory=dict)
+    static_data_hashes: Mapping[str, str] = field(default_factory=dict)
     technique_names: tuple[str, ...] = ()
     extractor_names: tuple[str, ...] = ()
+    spice_kernel_count: int = field(init=False)
+
+    def __post_init__(self) -> None:
+        """Derive ``spice_kernel_count`` and freeze ``static_data_hashes``."""
+        # ``object.__setattr__`` is required for frozen dataclasses.
+        object.__setattr__(self, 'spice_kernel_count', len(self.spice_kernels))
+        if not isinstance(self.static_data_hashes, MappingProxyType):
+            object.__setattr__(
+                self,
+                'static_data_hashes',
+                MappingProxyType(dict(self.static_data_hashes)),
+            )

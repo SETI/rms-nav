@@ -3,7 +3,7 @@ Introduction
 ============
 
 This guide is intended for developers who want to understand, modify, or
-extend the RMS-NAV system.  It gives an overview of the system
+extend the RMS-NAV system. It gives an overview of the system
 architecture, the class hierarchy, and instructions for extending the
 pipeline with new components.
 

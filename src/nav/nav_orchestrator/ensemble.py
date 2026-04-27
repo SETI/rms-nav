@@ -16,6 +16,7 @@ The ensemble is tested in isolation against synthetic per-technique results;
 correctness here is what makes the rest of the pipeline trustworthy.
 """
 
+import copy
 import logging
 import math
 from dataclasses import dataclass, field
@@ -89,7 +90,7 @@ class EnsembleConfig:
     min_confidence: float = DEFAULT_MIN_CONFIDENCE
     pinvh_rcond: float = DEFAULT_PINVH_RCOND
     tier_thresholds: dict[str, dict[str, float | None]] = field(
-        default_factory=lambda: dict(DEFAULT_TIER_THRESHOLDS)
+        default_factory=lambda: copy.deepcopy(DEFAULT_TIER_THRESHOLDS)
     )
 
 

@@ -64,11 +64,32 @@ class FeatureReliabilityGate:
     Parameters:
         thresholds: Mapping ``feature_type -> minimum reliability``.  Falls
             back to 0.0 (no gate) for missing keys.
+
+    Raises:
+        TypeError: if any key in ``thresholds`` is not a ``NavFeatureType``
+            or any value is not numeric.
+        ValueError: if any threshold is non-finite or outside ``[0, 1]``.
     """
 
     thresholds: dict[NavFeatureType, float] = field(
         default_factory=lambda: dict(DEFAULT_RELIABILITY_THRESHOLDS)
     )
+
+    def __post_init__(self) -> None:
+        """Validate every threshold is a number in ``[0, 1]``."""
+        import math as _math
+
+        for key, value in self.thresholds.items():
+            if not isinstance(key, NavFeatureType):
+                raise TypeError(f'thresholds keys must be NavFeatureType; got {type(key).__name__}')
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise TypeError(
+                    f'thresholds[{key.name}] must be numeric; got {type(value).__name__}'
+                )
+            if not _math.isfinite(value):
+                raise ValueError(f'thresholds[{key.name}] must be finite; got {value!r}')
+            if not 0.0 <= value <= 1.0:
+                raise ValueError(f'thresholds[{key.name}] must lie in [0, 1]; got {value!r}')
 
     def apply(
         self, features: list[NavFeature]

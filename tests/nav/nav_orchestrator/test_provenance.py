@@ -24,8 +24,22 @@ def test_provenance_carries_kernels_and_hashes() -> None:
         image_et=1.0,
         pipeline_run_iso8601='2026-04-26T12:00:00Z',
         spice_kernels=('a.bsp', 'b.tpc'),
-        spice_kernel_count=2,
         static_data_hashes={'config_220_body_shape.yaml': 'deadbeef'},
     )
     assert prov.spice_kernels == ('a.bsp', 'b.tpc')
+    assert prov.spice_kernel_count == 2
     assert prov.static_data_hashes['config_220_body_shape.yaml'] == 'deadbeef'
+
+
+def test_provenance_static_data_hashes_is_immutable() -> None:
+    """``static_data_hashes`` is wrapped as ``MappingProxyType``."""
+    import pytest
+
+    prov = Provenance(
+        rms_nav_version='0.5.2',
+        image_et=1.0,
+        pipeline_run_iso8601='2026-04-26T12:00:00Z',
+        static_data_hashes={'a.yaml': 'aa'},
+    )
+    with pytest.raises(TypeError):
+        prov.static_data_hashes['b.yaml'] = 'bb'  # type: ignore[index]

@@ -164,7 +164,13 @@ class NavOrchestrator(NavBase):
                 provenance=provenance,
             )
         for model in self._registry.models:
-            model.create_model()
+            try:
+                model.create_model()
+            except Exception:  # plugin sandbox; mirrors _extract_features
+                self._logger.exception(
+                    'NavModel %s.create_model raised; skipping its features and annotations',
+                    model.name,
+                )
         all_features = self._extract_features(context)
         kept, gated = self._gate.apply(all_features)
         feature_inventory = self._build_inventory(kept, gated)

@@ -102,7 +102,7 @@ class _FakeStarTechnique(NavTechnique):
     def navigate(self, features: list[NavFeature], context: NavContext) -> NavTechniqueResult:
         return NavTechniqueResult(
             technique_name=self.name,
-            feature_ids=[f.feature_id for f in features],
+            feature_ids=tuple(f.feature_id for f in features),
             offset_px=(1.5, 2.5),
             covariance_px2=np.eye(2, dtype=np.float64) * 0.25,
             confidence=0.85,
@@ -250,7 +250,7 @@ class _PassTwoTechnique(NavTechnique):
         type(self).captured_prior = context.prior_offset_px
         return NavTechniqueResult(
             technique_name=self.name,
-            feature_ids=[f.feature_id for f in features],
+            feature_ids=tuple(f.feature_id for f in features),
             offset_px=(1.5, 2.5),
             covariance_px2=np.eye(2, dtype=np.float64) * 0.04,
             confidence=0.9,

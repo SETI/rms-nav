@@ -47,10 +47,16 @@ def test_apply_filter_anisotropic_gaussian_axis_aligned() -> None:
     cov = np.array([[1.0, 0.0], [0.0, 9.0]], np.float64)
     spec = NavFilterSpec(kind=NavFilterKind.ANISOTROPIC_GAUSSIAN, covariance_px2=cov)
     out = apply_filter(arr, spec)
-    # Profile along v-axis (small sigma) is narrower than along u-axis.
-    v_profile = out[:, 10]
-    u_profile = out[10, :]
-    assert v_profile[10] > u_profile[10] / 2  # peak narrower in v
+    # The covariance has sigma_v=1 and sigma_u=3, so the v-axis profile
+    # decays faster than the u-axis profile.  Sample at off-center positions
+    # so the comparison actually exercises anisotropy (the on-center samples
+    # are equal by symmetry).
+    center = 10
+    offset = 3
+    v_profile = out[:, center]
+    u_profile = out[center, :]
+    assert v_profile[center + offset] < u_profile[center + offset]
+    assert v_profile[center - offset] < u_profile[center - offset]
 
 
 def test_apply_filter_anisotropic_gaussian_requires_covariance() -> None:

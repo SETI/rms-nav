@@ -1,5 +1,7 @@
 """Tests for ``nav.nav_technique.diagnostics`` per-technique dataclasses."""
 
+import dataclasses
+
 import pytest
 
 from nav.nav_technique.diagnostics import (
@@ -54,8 +56,6 @@ def test_diagnostic_dataclasses_construct_with_defaults(cls: type) -> None:
 )
 def test_curator_fields_lists_every_attribute(cls: type) -> None:
     """CURATOR_FIELDS keys cover every dataclass field."""
-    import dataclasses
-
     field_names = {f.name for f in dataclasses.fields(cls)}
     curator_fields: dict[str, str | None] = cls.CURATOR_FIELDS  # type: ignore[attr-defined]
     declared = set(curator_fields.keys())

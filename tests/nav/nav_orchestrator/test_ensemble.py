@@ -45,7 +45,7 @@ def _make_result(
         cov = np.eye(2, dtype=np.float64) * 0.25
     return NavTechniqueResult(
         technique_name=technique_name,
-        feature_ids=[f'{technique_name}:f1'],
+        feature_ids=(f'{technique_name}:f1',),
         offset_px=offset,
         covariance_px2=cov,
         confidence=confidence,

@@ -1,6 +1,9 @@
 nav.feature
 ===========
 
+.. automodule:: nav.feature
+   :no-index:
+
 .. automodule:: nav.feature.feature
    :members:
    :undoc-members:

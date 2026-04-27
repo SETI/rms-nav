@@ -28,6 +28,9 @@ __all__ = [
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 
+_NumberType = (int, float)
+
+
 @dataclass(frozen=True)
 class ConfidenceTerm:
     """One term in the sigmoid-of-linear-combination formula.
@@ -38,8 +41,15 @@ class ConfidenceTerm:
         alpha: Linear-combination coefficient.
         offset: Subtracted from the raw value before scaling.
         divisor: Raw value is divided by this after offset (default 1).
+            Must be non-zero.
         cap_at: Optional upper bound on the post-scale value (clamped to
-            ``[0, cap_at]`` if set).
+            ``[0, cap_at]`` if set).  When set, must lie in ``[0, 1]``.
+
+    Raises:
+        TypeError: if ``alpha``, ``offset``, ``divisor``, or ``cap_at``
+            is not numeric.
+        ValueError: if ``divisor`` is zero or ``cap_at`` is outside
+            ``[0, 1]``.
     """
 
     feature: str
@@ -48,6 +58,25 @@ class ConfidenceTerm:
     divisor: float = 1.0
     cap_at: float | None = None
 
+    def __post_init__(self) -> None:
+        """Validate numeric types and divisor / cap_at ranges."""
+        for name in ('alpha', 'offset', 'divisor'):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, _NumberType):
+                raise TypeError(
+                    f'ConfidenceTerm.{name} must be numeric; got {type(value).__name__}'
+                )
+        if self.divisor == 0.0:
+            raise ValueError('ConfidenceTerm.divisor must be non-zero')
+        if self.cap_at is not None:
+            if isinstance(self.cap_at, bool) or not isinstance(self.cap_at, _NumberType):
+                raise TypeError(
+                    f'ConfidenceTerm.cap_at must be numeric or None; got '
+                    f'{type(self.cap_at).__name__}'
+                )
+            if not 0.0 <= self.cap_at <= 1.0:
+                raise ValueError(f'ConfidenceTerm.cap_at must lie in [0, 1]; got {self.cap_at!r}')
+
 
 @dataclass(frozen=True)
 class ConfidenceSpec:
@@ -55,16 +84,65 @@ class ConfidenceSpec:
 
     Parameters:
         alpha0: Constant term in the sigmoid argument.
-        terms: List of ``ConfidenceTerm`` linear contributions.
-        hard_zero_if: Mapping of diagnostic-attribute names to expected
-            boolean values; if any condition holds, confidence = 0.
+        terms: Tuple of ``ConfidenceTerm`` linear contributions.
+        hard_zero_if: Mapping of diagnostic-attribute names (str) to
+            expected boolean values; if any condition holds,
+            confidence = 0.
         hard_cap: Optional upper-bound clamp applied after the sigmoid.
+            When set, must lie in ``[0, 1]``.
+
+    Raises:
+        TypeError: if ``alpha0`` is not numeric, ``terms`` is not a
+            tuple of ``ConfidenceTerm``, or ``hard_zero_if`` is not a
+            mapping of ``str`` to ``bool``.
+        ValueError: if ``hard_cap`` is outside ``[0, 1]``.
     """
 
     alpha0: float
     terms: tuple[ConfidenceTerm, ...] = ()
     hard_zero_if: dict[str, bool] = field(default_factory=dict)
     hard_cap: float | None = None
+
+    def __post_init__(self) -> None:
+        """Validate types and ranges of every field."""
+        if isinstance(self.alpha0, bool) or not isinstance(self.alpha0, _NumberType):
+            raise TypeError(
+                f'ConfidenceSpec.alpha0 must be numeric; got {type(self.alpha0).__name__}'
+            )
+        if not isinstance(self.terms, tuple):
+            raise TypeError(
+                f'ConfidenceSpec.terms must be a tuple; got {type(self.terms).__name__}'
+            )
+        for term in self.terms:
+            if not isinstance(term, ConfidenceTerm):
+                raise TypeError(
+                    'ConfidenceSpec.terms entries must be ConfidenceTerm; '
+                    f'got {type(term).__name__}'
+                )
+        if not isinstance(self.hard_zero_if, dict):
+            raise TypeError(
+                'ConfidenceSpec.hard_zero_if must be a dict; '
+                f'got {type(self.hard_zero_if).__name__}'
+            )
+        for key, value in self.hard_zero_if.items():
+            if not isinstance(key, str):
+                raise TypeError(
+                    f'ConfidenceSpec.hard_zero_if keys must be str; got {type(key).__name__}'
+                )
+            if not isinstance(value, bool):
+                raise TypeError(
+                    f'ConfidenceSpec.hard_zero_if[{key!r}] must be bool; got {type(value).__name__}'
+                )
+        if self.hard_cap is not None:
+            if isinstance(self.hard_cap, bool) or not isinstance(self.hard_cap, _NumberType):
+                raise TypeError(
+                    f'ConfidenceSpec.hard_cap must be numeric or None; got '
+                    f'{type(self.hard_cap).__name__}'
+                )
+            if not 0.0 <= self.hard_cap <= 1.0:
+                raise ValueError(
+                    f'ConfidenceSpec.hard_cap must lie in [0, 1]; got {self.hard_cap!r}'
+                )
 
 
 def _sigmoid(x: float) -> float:

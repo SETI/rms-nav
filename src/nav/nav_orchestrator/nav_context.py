@@ -11,7 +11,10 @@ ensemble's prior offset and covariance attached via ``with_prior``.
 from __future__ import annotations
 
 import dataclasses
+import math
 from dataclasses import dataclass
+
+import numpy as np
 
 from nav.nav_orchestrator.image_classifier_result import NavImageClassifierResult
 from nav.nav_orchestrator.provenance import Provenance
@@ -84,9 +87,30 @@ class NavContext:
         Returns:
             New ``NavContext`` with ``prior_offset_px`` and
             ``prior_covariance_px2`` populated.
+
+        Raises:
+            TypeError: if ``offset_px`` is not a length-2 sequence of
+                numbers or ``covariance_px2`` cannot be coerced to a float
+                array.
+            ValueError: if ``offset_px`` contains non-finite entries or
+                ``covariance_px2`` does not have shape ``(2, 2)`` or
+                contains non-finite entries.
         """
+        if len(offset_px) != 2:
+            raise ValueError(f'offset_px must be a length-2 sequence; got length {len(offset_px)}')
+        try:
+            dv, du = float(offset_px[0]), float(offset_px[1])
+        except (TypeError, ValueError) as exc:
+            raise TypeError(f'offset_px entries must be numeric; got {offset_px!r}') from exc
+        if not (math.isfinite(dv) and math.isfinite(du)):
+            raise ValueError(f'offset_px must be finite; got {offset_px!r}')
+        cov = np.asarray(covariance_px2, np.float64)
+        if cov.shape != (2, 2):
+            raise ValueError(f'covariance_px2 must have shape (2, 2); got {cov.shape}')
+        if not np.isfinite(cov).all():
+            raise ValueError('covariance_px2 must contain only finite entries')
         return dataclasses.replace(
             self,
-            prior_offset_px=offset_px,
-            prior_covariance_px2=covariance_px2,
+            prior_offset_px=(dv, du),
+            prior_covariance_px2=cov,
         )
