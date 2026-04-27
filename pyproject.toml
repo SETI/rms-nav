@@ -141,6 +141,19 @@ ignore_missing_imports = true
 pythonpath = [
   "src"
 ]
+testpaths = ["tests"]
+addopts = ["--strict-markers", "--strict-config"]
+filterwarnings = [
+  "error",
+  # Astropy's FITS reader can leave a file handle open while the cache
+  # owns the underlying path; the resulting unraisable exception is
+  # outside our control.  Allow it through as a non-fatal warning.
+  "default::pytest.PytestUnraisableExceptionWarning",
+]
+markers = [
+  "integration: requires PDS3_HOLDINGS_DIR (real holdings on disk or via filecache)",
+  "slow: per-image library regression test",
+]
 
 [tool.ruff]
 src = ["src", "tests"]

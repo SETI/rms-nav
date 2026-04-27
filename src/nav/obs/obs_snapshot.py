@@ -19,7 +19,7 @@ from nav.support.types import (
 from .obs import Obs
 
 
-class ObsSnapshot(Obs, Snapshot):
+class ObsSnapshot(Obs, Snapshot):  # type: ignore[misc]  # oops.Snapshot has no type stubs
     """Provides cached Backplane and Meshgrid operations for snapshot observations.
 
     This class extends both Obs and Snapshot to provide navigation-specific functionality

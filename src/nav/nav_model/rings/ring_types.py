@@ -256,7 +256,7 @@ class RingEdgeData:
         """RMS residual of the orbit fit in km.
 
         Propagated to ``RingFeature.uncertainty`` (max of inner and outer edge
-        RMS values), which in turn is stored in ``NavModelResult.uncertainty``.
+        RMS values).
         """
         return self.base_orbit.rms
 

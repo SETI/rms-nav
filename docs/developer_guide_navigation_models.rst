@@ -1,20 +1,32 @@
-====================
+=================
 Navigation models
-====================
+=================
 
-:class:`~nav.nav_model.nav_model.NavModel` is the abstract base class for
-synthetic model generators. Each subclass implements ``create_model(...)`` to
-populate image arrays, masks, optional quality metadata, and annotations that
-support navigation techniques (for example correlation against the observation).
+:class:`~nav.nav_model.nav_model.NavModel` is the abstract base for
+predicted-scene generators.  Each subclass implements three methods:
 
-Concrete implementations cover stars, planetary bodies (including a simulated
-variant), Saturn's rings (real and simulated), Titan, and a combined model that
-merges contributions from multiple sources. The API surface is summarized under
+- ``create_model()`` — populate the model's internal state and
+  ``metadata`` dict.
+- ``to_features(context)`` — return a list of
+  :class:`~nav.feature.feature.NavFeature` instances for technique
+  consumption.
+- ``to_annotations(context)`` — return an
+  :class:`~nav.annotation.annotations.Annotations` collection for the
+  summary PNG.
+
+Concrete subclasses self-register via ``__init_subclass__``; abstract
+bases set ``_abstract = True`` to opt out.  The class method
+``instances_for_obs(cls, obs)`` is the per-class hook that
+:func:`~nav.nav_model.nav_model.build_models_for_obs` iterates.
+
+Today's registered concrete models cover Titan (a stub), simulated
+bodies, and simulated rings; the real-scene body and ring models are
+unimplemented.  The data-model subpackage :mod:`nav.nav_model.rings`
+provides the catalog-driven ring-feature classes shared between the
+simulated and real (forthcoming) ring renderers.
+
+The API surface is summarised under
 :doc:`api_reference/api_nav_model`.
-
-The following sections describe design and behavior for each model family. Only
-the rings chapter is filled in today; the others are placeholders for future
-expansion.
 
 .. toctree::
    :maxdepth: 1

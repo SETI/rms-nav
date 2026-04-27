@@ -1,0 +1,166 @@
+"""Sum-type flag dataclasses carried on NavFeature.flags.
+
+Each feature type has a small dataclass listing the technique-specific
+boolean / scalar flags relevant to that type.  Carrying them as a typed sum
+type instead of a free-form ``dict[str, Any]`` lets static type checkers see
+which fields exist for each type and lets curator code copy known fields by
+attribute.
+"""
+
+from dataclasses import dataclass
+
+__all__ = [
+    'BodyBlobFlags',
+    'BodyDiscFlags',
+    'CartographicModelFlags',
+    'LimbArcFlags',
+    'NavFeatureFlags',
+    'RingAnnulusFlags',
+    'RingEdgeFlags',
+    'StarFlags',
+    'TerminatorArcFlags',
+]
+
+
+@dataclass(frozen=True)
+class StarFlags:
+    """Flags carried on a STAR feature.
+
+    Parameters:
+        saturated: True if the detected star peak hit the camera's full-well
+            DN; centroiding switches from peak-Gaussian-fit to annular
+            brightness-weighted moment.
+        smear_length_px: Expected smear length in pixels at this image's
+            spacecraft attitude rate.
+        in_body_silhouette: True if the predicted star position falls inside
+            a predicted body silhouette in extfov.
+        in_saturation_or_cosmic_mask: True if the predicted star position
+            falls inside a saturation or cosmic-ray mask pixel.
+    """
+
+    saturated: bool = False
+    smear_length_px: float = 0.0
+    in_body_silhouette: bool = False
+    in_saturation_or_cosmic_mask: bool = False
+
+
+@dataclass(frozen=True)
+class LimbArcFlags:
+    """Flags carried on a LIMB_ARC feature.
+
+    Parameters:
+        body_name: SPICE body name whose limb this arc traces.
+        visible_arc_fraction: Fraction of total limb length inside extfov
+            and not occluded ``[0, 1]``.
+    """
+
+    body_name: str = ''
+    visible_arc_fraction: float = 0.0
+
+
+@dataclass(frozen=True)
+class TerminatorArcFlags:
+    """Flags carried on a TERMINATOR_ARC feature.
+
+    Parameters:
+        body_name: SPICE body name whose terminator this arc traces.
+        visible_arc_fraction: Fraction of total terminator length inside
+            extfov and lit ``[0, 1]``.
+        phase_angle_factor: ``sin(phase_angle)`` factor used in reliability;
+            peaks at 90-degree crescent.
+    """
+
+    body_name: str = ''
+    visible_arc_fraction: float = 0.0
+    phase_angle_factor: float = 0.0
+
+
+@dataclass(frozen=True)
+class RingEdgeFlags:
+    """Flags carried on a RING_EDGE feature.
+
+    Parameters:
+        is_straight_line: True when the polyline's deviation from a
+            straight-line fit is below threshold.  Triggers rank-1
+            covariance handling at the technique level.
+        polarity_predictable: True only when the per-edge static-catalog
+            entry guarantees the gradient direction across the edge in
+            this scene.  Default is False.
+        edge_name: Name of the ring edge in the static catalog.
+        planet_name: Planet whose rings this edge belongs to.
+    """
+
+    is_straight_line: bool = False
+    polarity_predictable: bool = False
+    edge_name: str = ''
+    planet_name: str = ''
+
+
+@dataclass(frozen=True)
+class BodyDiscFlags:
+    """Flags carried on a BODY_DISC feature.
+
+    Parameters:
+        body_name: SPICE body name whose disc this feature renders.
+        overflow_fov_fraction: Fraction of the disc area outside the sensor
+            ``[0, 1]``.  Same value as ``BodyDiscGeometry.overflow_fraction``;
+            duplicated here for type-specific access.
+    """
+
+    body_name: str = ''
+    overflow_fov_fraction: float = 0.0
+
+
+@dataclass(frozen=True)
+class BodyBlobFlags:
+    """Flags carried on a BODY_BLOB feature.
+
+    Parameters:
+        body_name: SPICE body name whose blob this feature represents.
+        predicted_diameter_px: Predicted disc diameter in pixels (longer
+            axis of the predicted ellipse silhouette).
+    """
+
+    body_name: str = ''
+    predicted_diameter_px: float = 0.0
+
+
+@dataclass(frozen=True)
+class RingAnnulusFlags:
+    """Flags carried on a RING_ANNULUS feature.
+
+    Parameters:
+        planet_name: Planet whose ring system this annulus represents.
+        constituent_edge_count: Number of catalog edges fused into this
+            annulus template.
+    """
+
+    planet_name: str = ''
+    constituent_edge_count: int = 0
+
+
+@dataclass(frozen=True)
+class CartographicModelFlags:
+    """Flags carried on a CARTOGRAPHIC_MODEL feature.
+
+    Parameters:
+        body_name: SPICE body name the cartographic mosaic represents.
+        mosaic_source: Identifier of the mosaic file (e.g. file basename or
+            URL).
+    """
+
+    body_name: str = ''
+    mosaic_source: str = ''
+
+
+NavFeatureFlags = (
+    StarFlags
+    | LimbArcFlags
+    | TerminatorArcFlags
+    | RingEdgeFlags
+    | BodyDiscFlags
+    | BodyBlobFlags
+    | RingAnnulusFlags
+    | CartographicModelFlags
+)
+"""Sum type spanning every NavFeatureType's flag dataclass."""
