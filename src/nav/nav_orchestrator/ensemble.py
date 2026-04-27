@@ -221,9 +221,7 @@ def _combine_precision_weighted(
     # zero info matrix (which itself is degenerate).
     rel_tol = 1.0e-8
     eps = np.finfo(np.float64).eps
-    is_rank_deficient = bool(
-        eigvals.min() / max(abs(eigvals.max()), eps) < rel_tol
-    )
+    is_rank_deficient = bool(eigvals.min() / max(abs(eigvals.max()), eps) < rel_tol)
     return (
         (float(mu_combined[0]), float(mu_combined[1])),
         cast(NDArrayFloatType, cov_combined),

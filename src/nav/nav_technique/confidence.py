@@ -83,9 +83,7 @@ class ConfidenceTerm:
                     f'{type(self.cap_at).__name__}'
                 )
             if not math.isfinite(self.cap_at):
-                raise ValueError(
-                    f'ConfidenceTerm.cap_at must be finite; got {self.cap_at!r}'
-                )
+                raise ValueError(f'ConfidenceTerm.cap_at must be finite; got {self.cap_at!r}')
             if not 0.0 <= self.cap_at <= 1.0:
                 raise ValueError(f'ConfidenceTerm.cap_at must lie in [0, 1]; got {self.cap_at!r}')
 
