@@ -952,34 +952,51 @@ this section is the operational checklist.
   `RingEdgeFlags`, `BodyDiscFlags`, `BodyBlobFlags`,
   `RingAnnulusFlags`, `CartographicModelFlags`).
 - `nav.feature.NavFeature` (frozen, eq-by-`feature_id`,
-  numpy-array-aware) and `NavReliabilityBreakdown`.
+  numpy-array-aware) and `NavReliabilityBreakdown`.  ``__post_init__``
+  validates ``feature_id``, ``reliability``, ``subject_range_km``
+  (>= 0, NaN-rejected, ``inf`` permitted), ``intensity_sigma_rel``
+  (finite, ``[0, 1]``), ``feature_type in usable_types``,
+  the ``position_cov_px`` shape / finiteness / symmetry / PSD
+  invariants, and the ``template_img`` / ``template_mask`` both-or-
+  neither + shape-match invariants.
 - `nav.feature.constants` module (cap angles, sentinels).
 - `nav.feature.compose_template_features` — Z-buffer paint of
-  template features into a single ext-FOV image+mask.
+  template features into a single ext-FOV image+mask; raises
+  ``ValueError`` (with the offending ``feature_id`` and bbox) when
+  a template is smaller than its declared bbox.
 - `nav.feature.reliability.FeatureReliabilityGate` and the default
-  per-type threshold table.
+  per-type threshold table.  ``__post_init__`` requires the
+  ``thresholds`` argument to be a ``Mapping[NavFeatureType, float]``
+  with each value finite and in ``[0, 1]``.
 - `nav.support.filters` — `NavFilterSpec`, `NavFilterKind`,
   `apply_filter` (NONE, isotropic / anisotropic Gaussian, bandpass
   DoG, distance transform, gradient-of-Gaussian, morph dilate, with
   null-filter short-circuit).
 - `nav.support.filter_combo.canonicalize`.
-- `nav.support.status_reason.NavStatusReason` (15 values).
+- `nav.support.status_reason.NavStatusReason` (15 values; ``StrEnum``
+  on Python 3.11+).
 - `nav.support.noise_estimate.estimate_image_noise_sigma`.
 - `nav.support.image_quality.saturation_mask` / `cosmic_ray_mask`.
 - `nav.support.distance_transform` — `apply_translation`,
   `sample_dt_bilinear`.
 - Updated `pyproject.toml` `[tool.pytest.ini_options]` with
-  `testpaths`, `--strict-markers`, `--strict-config`, and the
-  `integration` / `slow` markers.
+  `testpaths`, `--strict-markers`, `--strict-config`,
+  `filterwarnings = ["error"]` (with one tolerated rule for
+  astropy's FITS-reader leakage), and the `integration` / `slow`
+  markers.  Python floor is 3.11; CI matrix covers 3.11 / 3.12 /
+  3.13 / 3.14.
 
 **Technique infrastructure (Part 3)**
 
 - `nav.nav_technique.NavTechnique` ABC + `__init_subclass__`
   registry + `filter_technique_names` glob helper (with leading-`!`
   exclusion).
-- `nav.nav_technique.NavFeasibilityReport` and
-  `NavTechniqueResult` (with covariance shape + symmetry +
-  positive-semidefinite validation).
+- `nav.nav_technique.NavFeasibilityReport` (validates types and
+  the ``feasible=False`` requires non-empty ``reason`` invariant) and
+  `NavTechniqueResult` with ``feature_ids: tuple[str, ...]`` (immutable;
+  list-typed inputs are converted in ``__post_init__``); covariance
+  shape / symmetry / positive-semidefinite validation; the array is
+  frozen read-only on construction.
 - Per-technique typed diagnostics dataclasses with `CURATOR_FIELDS`
   allow-lists: `BodyDiscDiagnostics`, `BodyLimbDiagnostics`,
   `BodyTerminatorDiagnostics`, `BodyBlobDiagnostics`,
@@ -987,7 +1004,11 @@ this section is the operational checklist.
   `StarFieldDiagnostics`, `StarUniqueMatchDiagnostics`,
   `StarRefineDiagnostics`, `CartographicDiagnostics`.
 - `nav.nav_technique.confidence` — `evaluate_sigmoid_combination`
-  with `ConfidenceSpec` / `ConfidenceTerm`.
+  with `ConfidenceSpec` / `ConfidenceTerm`.  Both dataclasses
+  validate types, finite numerics, and range invariants in
+  ``__post_init__``; ``ConfidenceSpec`` takes a defensive shallow
+  copy of ``hard_zero_if`` so the frozen instance cannot be
+  mutated through the caller's dict.
 - `NavTechniqueManual` — interactive technique opted out of the
   auto-discovery registry.
 
@@ -1008,28 +1029,56 @@ this section is the operational checklist.
 
 **Orchestrator + ensemble (Part 4)**
 
-- `nav.nav_orchestrator.NavContext` (frozen, `with_prior` non-mutating).
-- `Provenance`, `NavFeatureSummary`,
+- `nav.nav_orchestrator.NavContext` (frozen, `with_prior`
+  non-mutating; the ``with_prior`` boundary validates the prior
+  offset and covariance and takes an independent copy + freezes the
+  array so the caller cannot mutate it after the fact).
+- `Provenance` (``__post_init__`` normalises ``spice_kernels``,
+  ``technique_names``, ``extractor_names`` to deterministic sorted
+  tuples; derives ``spice_kernel_count``; wraps
+  ``static_data_hashes`` with ``MappingProxyType``).
+- `NavFeatureSummary` (validates every field including the
+  ``gated``/``gate_reason`` invariant) and
   `NavImageClassifierResult` dataclasses.
-- `NavImageClassifier` + `ImageQualityThresholds`.
-- `NavResult` with `ok` / `failed` / `conflicted` constructors.
+- `NavImageClassifier` + `ImageQualityThresholds`.  ``classify``
+  validates the image is a 2-D ``np.ndarray`` and the optional
+  ``sensor_mask`` is a non-empty boolean ndarray with at least one
+  True entry and matching shape.
+- `NavResult` with `ok` / `failed` / `conflicted` constructors;
+  carries an ``annotations: Annotations`` field that the
+  orchestrator populates via ``_collect_annotations``, plus the
+  ``model_metadata: dict[str, dict[str, Any]]`` map populated by
+  ``_collect_model_metadata``.
 - `STATUS_REASON_INFO_TEMPLATE` covering every `NavStatusReason`.
 - `ensemble.ensemble` — Mahalanobis-distance grouping +
   precision-weighted information-form combine + agreement boost +
   conflict / unobservable-offset handling + tier derivation.
-- `EnsembleConfig` and `derive_confidence_rank`.
+  Rank-deficiency is flagged with a *scale-independent* relative
+  test (``eigvals.min() / max(abs(eigvals.max()), eps) < 1e-8``).
+- `EnsembleConfig` (default factory deep-copies
+  ``DEFAULT_TIER_THRESHOLDS`` so the inner per-rank dicts cannot be
+  cross-mutated between instances) and `derive_confidence_rank`.
 - `curator.build_metadata_dict` + `assert_diagnostic_fields_present`
   (float-rounding policy: 4 px / 3 conf / 6 ET; ∞ → 1e9 sentinel).
 - `NavOrchestrator` two-pass driver
   (preflight → extract → gate → pass-1 → ensemble → pass-2 → final
   ensemble) with `only_models` / `only_techniques` glob filters.
+  Per-NavModel ``create_model`` / ``to_features`` /
+  ``to_annotations`` and per-NavTechnique ``navigate`` are
+  sandboxed in plugin-isolation try/excepts so a misbehaving
+  plugin is logged and skipped, never propagated.  Saturation DN
+  comes from the named module-level ``DEFAULT_FULL_WELL_DN_12_BIT``
+  constant.
 
 **Top-level driver (Part 8)**
 
 - `nav.navigate_image_files.navigate_image_files` — uses
   `build_models_for_obs` + `NavOrchestrator` + `build_metadata_dict`,
   preserves the legacy `(success, metadata)` contract for
-  `nav_offset` and `nav_offset_cloud_tasks`.
+  `nav_offset` and `nav_offset_cloud_tasks`.  The
+  ``_write_summary_png`` step is an honest no-op that logs at INFO
+  until the annotation-rendering pipeline lands; the misleading
+  1×1 grey PNG placeholder is gone.
 
 **Manual navigation (Part 12.6)**
 
@@ -1087,12 +1136,19 @@ this section is the operational checklist.
   `BANDPASS_DOG` pre-filter — fields are present on `NavContext`
   but the orchestrator does not yet populate them.
 - Per-instrument saturation DN read from `config_4N0_inst_*.yaml`
-  (currently a hard-coded 4095).
+  (the orchestrator currently returns the named module-level
+  ``DEFAULT_FULL_WELL_DN_12_BIT = 4095.0`` constant from
+  ``_instrument_full_well_dn``; replace with a config loader).
 
 **Provenance population**
 
-- `Provenance.spice_kernels` from `spice.ktotal` / `spice.kdata`.
-- `Provenance.static_data_hashes` (sha256 of raw YAML bytes).
+- ``Provenance`` dataclass shape is final (sorted-tuple
+  normalisation, derived ``spice_kernel_count``,
+  ``MappingProxyType``-wrapped ``static_data_hashes``).
+- Pending: actually populate ``spice_kernels`` from
+  ``spice.ktotal`` / ``spice.kdata``; populate
+  ``static_data_hashes`` with sha256 of raw YAML bytes; populate
+  ``rms_nav_git_sha`` from ``git rev-parse``.
 
 **Camera rotation correction (Part 5b)**
 
@@ -1105,12 +1161,15 @@ this section is the operational checklist.
 
 **Annotations + summary PNG**
 
-- Add `annotations: Annotations` field to `NavResult`
-  (prerequisite for the next two bullets — currently absent).
-- Compose annotations from every `NavModel.to_annotations(context)`
-  in the orchestrator.
-- Replace the placeholder PNG in `_write_summary_png` with the
-  real annotation-compositing path.
+- ``NavResult.annotations: Annotations`` field is implemented; the
+  orchestrator's ``_collect_annotations`` helper merges every
+  registered NavModel's ``to_annotations(context)`` into it on
+  every navigation.
+- Pending: replace the honest INFO-level no-op in
+  ``navigate_image_files._write_summary_png`` with the real
+  annotation-compositing renderer that turns
+  ``NavResult.annotations`` plus the source image into a
+  ``_summary.png``.
 
 **Static-data files (Part 5)**
 
@@ -1188,10 +1247,24 @@ this section is the operational checklist.
 
 **Cleanup (Phase 7)**
 
-- CI grep step that fails on residual references to deleted
-  symbols.
-- Coverage gate in CI.
-- `sphinx-build -W` clean.
+- ``sphinx-build -W`` is clean as of stage 0; CI must keep it that
+  way.
+- CI grep step that fails on residual references to deleted symbols
+  (``NavTechniqueCorrelateAll``, ``NavModelCombined``,
+  ``NavModelResult``, ``NavMaster``, ``weighted_mask``,
+  ``blur_amount``, ``final_offset``, ``final_confidence``,
+  ``use_legacy_pipeline``).
+- Coverage gate in CI: cutover-tier modules (``nav.feature/``,
+  ``nav.nav_orchestrator/``, ``nav.nav_technique/``) at >= 90 %;
+  whole-tree percentage gated by per-package thresholds once
+  concrete NavModels and NavTechniques arrive (the GUI / mosaic-
+  viewer / sim packages pre-date the cutover and are below 90 %
+  by design).
+- Module size cap.  ``src/nav/ui/manual_nav_dialog.py`` is 1058
+  lines, exceeding the project's 1000-line module ceiling.  Split
+  into a ``nav.ui.manual_nav/`` subpackage in a dedicated PR with
+  GUI-test infrastructure to verify the manual workflow still
+  works.
 
 **Deferred (Part 13b)**
 
@@ -1207,169 +1280,277 @@ this section is the operational checklist.
 
 ---
 
-## Foundation cleanup status (stage 0 — 2026-04-27)
+## Foundation cleanup status (stage 0 — complete)
 
+Stage 0 ("foundational support" PR
+[#111](https://github.com/SETI/rms-nav/pull/111),
+branch ``core_rewrite_foundation`` → ``rf_core_rewrite``) is **complete**.
 The 2026-04-27 foundation critique surfaced four severity-tagged
-domains of work; all blocking and important items have been resolved
-in this branch.  The original critique reports
-(`CRITIQUE_PYTHON.md`, `CRITIQUE_TESTS.md`, `CRITIQUE_DOCS.md`,
-`CRITIQUE_PLAN.md`, `CRITIQUE_SUMMARY.md`) and the disposition log
-(`CRITIQUE_RESOLUTION.md`) live at the repo root; this section
-summarises the post-cleanup state for an AI agent picking the work up
-fresh.
+domains of work; every blocking and important item has been resolved.
+The original critique reports (`CRITIQUE_PYTHON.md`,
+`CRITIQUE_TESTS.md`, `CRITIQUE_DOCS.md`, `CRITIQUE_PLAN.md`,
+`CRITIQUE_SUMMARY.md`) and the disposition log
+(`CRITIQUE_RESOLUTION.md`) live at the repo root, untracked, as the
+historical record of stage-0 cleanup.
 
-### Resolved during stage 0
+### Final stage-0 check matrix
 
-- `mypy --strict src tests` is clean (208 source files).
-- `ruff check` and `ruff format --check` are clean across `src` and
-  `tests`.
-- `sphinx-build -W -b html docs docs/_build` is clean.
-- `pyproject.toml [tool.pytest.ini_options]` has
-  `filterwarnings = ["error"]` plus a single tolerated rule for the
-  third-party `PytestUnraisableExceptionWarning` raised by astropy's
-  FITS reader on integration tests.
-- Image-classifier `ImageClass` literal scoped to the five values
-  actually emitted (`clean`, `blank`, `fully_overexposed`,
-  `mostly_missing_data`, `corrupt`); the four content-degradation
-  classes are tracked under "Pending → Image-quality classifier
-  completeness".
-- `_instrument_full_well_dn` returns the named module-level constant
-  `DEFAULT_FULL_WELL_DN_12_BIT = 4095.0` (no in-place magic number);
-  the dead `try / except Exception` around it is gone.
-- `_write_summary_png` is now an honest no-op that logs at INFO that
-  the renderer is not yet implemented; the misleading 1×1 grey PNG
-  placeholder is removed.
-- `NavResult.annotations: Annotations` field added; the orchestrator's
-  `_collect_annotations` helper merges every NavModel's
-  ``to_annotations`` and the matching `_collect_model_metadata` helper
-  populates `model_metadata`.  Both are threaded through every
-  `NavResult.failed` / `.ok` / `.conflicted` constructor.
-- Sphinx API pages for `nav.feature`, `nav.nav_orchestrator`,
-  `nav.support` (refreshed), `nav.nav_model`, `nav.nav_technique`
-  reflect the actual modules.  `api_nav_master.rst` deleted.
-- Stale `NavMaster` / `NavModelCombined` / `NavTechniqueCorrelateAll`
-  references purged from
-  `developer_guide_class_hierarchy.rst`,
-  `developer_guide_introduction.rst`,
-  `developer_guide_extending.rst`,
-  `developer_guide_navigation_models.rst`,
-  `developer_guide_navigation_models_bodies.rst`,
-  `developer_guide_navigation_models_stars.rst`,
-  `developer_guide_navigation_models_titan.rst`,
-  `developer_guide_navigation_models_rings.rst`.
-  `developer_guide_nav_technique_correlate.rst` deleted (its toctree
-  entry removed too).
-- Module docstrings added to `nav.support.types`,
-  `nav.nav_model.nav_model_body_base`, `nav.ui.manual_nav_dialog`.
-- Defensive `getattr` calls in `orchestrator.py` (the
-  `obs.midtime` and `geometry.bbox_extfov_vu` lookups) replaced with
-  direct attribute access; the `# type: ignore[return-value]`
-  removed.
-- `NavTechnique` docstring reformatted so docutils renders the
-  attribute list as Sphinx-friendly attribute directives instead of a
-  block-quote.
-- `_ = field` discard-assignment silencer in
-  `nav.nav_technique.diagnostics` removed; the unused
-  `from dataclasses import field` import dropped.
-- `composition._bbox_clamped` defensive silent-skip branch replaced
-  with a `ValueError` so a producer bug surfaces immediately.
-- `ModelRegistry` is private (`_ModelRegistry`) and no longer in
-  `nav.nav_orchestrator.orchestrator.__all__`.
-- `_HARD_FAILURE_TO_REASON` is typed `dict[ImageClass,
-  NavStatusReason]`; the unused `HARD_FAILURE_CLASSES` frozen-string
-  alias is gone.
-- Inline `scipy.ndimage` imports in `nav.support.filters` lifted to
-  the top-of-file alphabetical group.
-- `obs_snapshot.py` carries a scoped
-  `# type: ignore[misc]  # oops.Snapshot has no type stubs` so
-  ``mypy --strict`` is clean.
-- `nav.nav_orchestrator.curator.assert_diagnostic_fields_present`
-  uses `hasattr` then direct access instead of defensive
-  `getattr(..., None)`.
-- Test smoke-assertions T-1 through T-10 from `CRITIQUE_PLAN.md`
-  rewritten to assert on exact computed values.  Duplicated
-  `_classifier()` / `_provenance()` builders promoted to
-  `tests/nav/nav_orchestrator/conftest.py` fixtures.
-- Test coverage added for: navigate_image_files (5 paths), the three
-  orchestrator broad-catch sites (capsys-based assertions), the
-  pass-2 prior contract, the `RANK_1_ONLY` ensemble path, the
-  `ALL_FEATURES_GATED` orchestrator path, the model-metadata and
-  annotations population, and the ``NavModelTitan`` stub.
-- Plan implementation-status snapshot edited to reflect the resolved
-  items (camera-rotation P-9 split into "shape implemented" + the
-  three remaining bullets; image-classifier sub-bullet added;
-  `Annotations + summary PNG` first bullet now flags the field as
-  implemented).
+```
+$ ruff check src tests           — clean
+$ ruff format --check src tests  — 210 files already formatted
+$ mypy --strict src tests        — 211 source files, no issues
+$ pytest -n auto --dist=loadfile — 719 passed (1 tolerated warning)
+$ sphinx-build -W -b html docs docs/_build  — clean
+$ pymarkdown scan docs/ .cursor/ README.md CONTRIBUTING.md  — clean
+```
 
-### Residual gaps (carried into stage 1+)
+### Stage-0 commit lineage (most recent first)
 
-These are tracked under "Implementation status (snapshot) →
-Pending" above; they are *not* foundation regressions, only work
-that the foundation explicitly defers to subsequent stages.
+- ``5bb982b`` ci: add Python 3.14 to the supported version matrix
+- ``664e092`` refactor: scale-independent rank-deficiency check + defensive ``hard_zero_if`` copy
+- ``ae26b54`` refactor: strengthen dataclass ``__post_init__`` validation
+- ``1fe6d62`` build: bump Python floor from 3.10 to 3.11
+- ``68edecb`` ci: run tests on all pull requests, not just those targeting main
+- ``57b70d4`` Stage 0 follow-up: address PR review findings
+- ``be61c79`` Stage 0: foundational support for navigation core rewrite
 
-- **Real-scene `NavModelStars`, `NavModelBody`, `NavModelRings`** and
-  the concrete `NavTechnique` subclasses (`BodyDiscCorrelateNav`,
-  `BodyLimbNav`, ...).
-- **NavContext shared derivatives** (`image_gradient_ext`,
-  `image_edge_dt_ext`, source-image bandpass).
-- **Per-instrument `full_well_dn` loader** that replaces
-  `DEFAULT_FULL_WELL_DN_12_BIT` once
-  `config_4N0_inst_*.yaml.noise.full_well_dn` ships.
-- **Provenance population** (SPICE kernel list, static-data hashes,
-  git-SHA capture).
-- **Rotation populators + rotation-aware ensemble combine.**
-- **Annotation rendering** behind `_write_summary_png` (PNG output is
-  intentionally absent until the renderer lands).
-- **Image-quality classifier completeness** — four content-degradation
-  classes (`partial_data_dropout`, `alternating_lines`,
-  `truncated_readout`, `ccd_bloom_dominant`) need detection paths;
-  add corresponding flags as needed.
-- **Static-data files** (`config_220_body_shape.yaml`,
-  `config_510_techniques.yaml`, `config_520_features.yaml`,
-  `config_530_filters.yaml`, `config_540_orchestrator.yaml`,
-  per-instrument `noise:` and `mag_offset:` blocks, renumbering of
-  existing files to 3-digit prefixes).
-- **CLI** (`nav_feature_inspect`).
-- **Test image library + integration tests + regression baselines.**
-- **Documentation** for the autonomous-nav developer / user guide
-  (every page listed under "Pending → Documentation").
-- **Coverage gate.**  Cutover-tier modules under
-  `nav.feature/`, `nav.nav_orchestrator/`, `nav.nav_technique/`
-  reach >= 90 % branch+line coverage; the simulated NavModels
-  (`nav_model_body_base`, `nav_model_rings_base`,
-  `*_simulated`) and `nav.nav_technique.nav_technique_manual` sit
-  below that bar because their non-stub paths require either a
-  PyQt6 GUI host or running the simulator end-to-end.  The full-tree
-  total is held back by the GUI / mosaic-viewer / sim packages that
-  pre-date the autonomous-nav cutover.  Stage-1 work should set
-  `--cov-fail-under` per-package once concrete NavModels and
-  techniques arrive.
-- **Module size cap.**  `src/nav/ui/manual_nav_dialog.py` is 1058
-  lines, exceeding the project's 1000-line module ceiling.  The
-  plan-level fix (split into a `nav.ui.manual_nav/` subpackage) is
-  deferred to a dedicated PR because the file is GUI-only and a
-  late-cycle refactor risks breaking the manual workflow without
-  GUI-test infrastructure to verify.  Tracked under Pending →
-  Cleanup.
+### Architectural skeleton shipped in stage 0
 
-### Conventions established during stage 0 (binding)
+Every package, class, free function, and dataclass listed in
+"Implementation status (snapshot) → Implemented" exists at its
+documented path with full docstrings, frozen-where-appropriate
+dataclasses with strict ``__post_init__`` validation, and complete
+unit-test coverage at ≥ 93 % for the cutover-tier modules.
 
+The orchestrator pipeline runs end-to-end: ``NavOrchestrator.navigate``
+builds a ``NavContext``, calls ``model.create_model()`` /
+``to_features`` / ``to_annotations`` on each registered NavModel
+inside a per-plugin sandbox, gates features by reliability, runs
+every feasible NavTechnique through its own sandbox, reconciles
+per-technique results via the precision-weighted Kalman-style
+``ensemble`` free function, and returns a ``NavResult`` carrying
+``offset_px`` ± ``sigma_px``, ``confidence_rank``,
+``per_technique`` results, the feature inventory, the image-quality
+classifier verdict, the merged annotation collection, the
+per-NavModel metadata dict, and the reproducibility envelope.
+
+The simulated body / rings NavModels emit on the new contract; the
+``NavModelTitan`` stub is registered.  ``NavTechniqueManual`` is
+abstract-opted-out of the auto-discovery registry but available for
+the GUI driver.  Real-scene NavModels and concrete NavTechniques are
+the next stage's work — see "Stage 1 entry points" below.
+
+### Hardening landed in stage 0
+
+Validation-and-immutability hardening across every dataclass and
+public function the orchestrator depends on.  An AI continuing the
+work can construct any of these and trust the inputs are checked.
+
+- ``NavFeature.__post_init__`` validates: ``feature_id`` non-empty
+  string; ``reliability`` in ``[0, 1]``; ``subject_range_km`` >= 0
+  and not NaN (``inf`` permitted as the very-far sentinel);
+  ``intensity_sigma_rel`` finite and in ``[0, 1]``;
+  ``feature_type in usable_types``; ``position_cov_px`` is 2x2
+  finite symmetric positive-semidefinite (frozen read-only);
+  ``template_img`` and ``template_mask`` are both-or-neither and
+  shape-matched (shape check runs before ``setflags(write=False)``
+  so rejected inputs leave the caller's array untouched).
+- Every per-feature ``Flags`` dataclass with bounded numeric
+  fields (``StarFlags.smear_length_px``,
+  ``LimbArcFlags.visible_arc_fraction``,
+  ``TerminatorArcFlags.{visible_arc_fraction, phase_angle_factor}``,
+  ``BodyDiscFlags.overflow_fov_fraction``,
+  ``BodyBlobFlags.predicted_diameter_px``,
+  ``RingAnnulusFlags.constituent_edge_count``) validates ranges in
+  ``__post_init__``.
+- ``FeatureReliabilityGate.__post_init__`` requires the thresholds
+  argument to be a ``Mapping[NavFeatureType, float]`` with each
+  value finite and in ``[0, 1]``.
+- ``NavContext.with_prior`` validates ``offset_px`` is a length-2
+  finite tuple and ``covariance_px2`` is a 2x2 finite array; takes
+  an independent ``copy()`` and ``setflags(write=False)`` so the
+  caller cannot mutate the prior covariance after the fact.
+- ``NavFeasibilityReport.__post_init__`` validates types of every
+  field and requires a non-empty ``reason`` when ``feasible`` is
+  False.
+- ``NavTechniqueResult`` carries ``feature_ids: tuple[str, ...]``
+  (immutable; ``__post_init__`` converts a list-typed input);
+  validates 2x2/3x3 covariance shape, symmetry, PSD; freezes the
+  array.
+- ``NavFeatureSummary.__post_init__`` validates every field
+  including the ``gated``/``gate_reason`` invariant (gated features
+  must carry a non-empty reason) and the bbox-tuple shape.
+- ``ConfidenceTerm.__post_init__`` validates ``feature`` is a
+  non-empty string; ``alpha`` / ``offset`` / ``divisor`` are finite
+  numerics; ``divisor`` is non-zero; ``cap_at`` (when set) is finite
+  and in ``[0, 1]``.
+- ``ConfidenceSpec.__post_init__`` validates types of every field
+  and takes a defensive shallow copy of ``hard_zero_if`` so the
+  frozen dataclass cannot be mutated through the caller's dict.
+- ``Provenance.__post_init__`` normalises ``spice_kernels``,
+  ``technique_names``, ``extractor_names`` to deterministic sorted
+  tuples; derives ``spice_kernel_count`` from
+  ``len(spice_kernels)``; wraps ``static_data_hashes`` with
+  ``MappingProxyType`` so the frozen dataclass cannot leak a
+  mutable mapping.
+- ``ImageQualityThresholds`` dropped the redundant
+  ``partial_dropout_max_frac`` field (which duplicated
+  ``max_missing_frac_clean``); ``NavImageClassifier.classify``
+  validates the ``image`` argument is a 2-D ``np.ndarray`` and the
+  ``sensor_mask`` (when supplied) is a non-empty boolean ndarray
+  with at least one True entry and matching shape.
+- ``EnsembleConfig`` default-factory now does a deep copy of
+  ``DEFAULT_TIER_THRESHOLDS`` so the inner per-rank dicts can no
+  longer be cross-mutated between instances.
+- ``ensemble._combine_precision_weighted`` flags rank-deficiency
+  with a *scale-independent* relative test
+  (``eigvals.min() / max(abs(eigvals.max()), eps) < 1e-8``),
+  replacing the previous absolute cutoff that mis-classified
+  high-precision combines.
+- ``feature.composition.compose_template_features`` raises
+  ``ValueError`` (with the offending ``feature_id`` and bbox) when
+  a template is smaller than its declared bbox; the silent-skip
+  branch is gone.
+
+### API surface published in stage 0
+
+- ``nav.feature``: ``NavFeature``, ``NavFeatureType`` (9 values),
+  ``NavFeatureGeometry`` and ``NavFeatureFlags`` sum types,
+  ``NavReliabilityBreakdown``, ``compose_template_features``,
+  ``FeatureReliabilityGate``, ``GatedFeatureRecord``,
+  ``DEFAULT_RELIABILITY_THRESHOLDS``, plus the named constants
+  module.
+- ``nav.nav_orchestrator``: ``NavOrchestrator``, ``NavContext``,
+  ``NavResult``, ``NavFeatureSummary``, ``NavImageClassifier``,
+  ``ImageQualityThresholds``, ``NavImageClassifierResult``,
+  ``Provenance``, ``EnsembleConfig``, ``ensemble``,
+  ``derive_confidence_rank``, ``build_metadata_dict``,
+  ``assert_diagnostic_fields_present``,
+  ``STATUS_REASON_INFO_TEMPLATE``.
+- ``nav.nav_technique``: ``NavTechnique`` ABC with
+  ``__init_subclass__`` auto-registry,
+  ``filter_technique_names``, ``NavFeasibilityReport``,
+  ``NavTechniqueResult``, every per-technique typed
+  ``*Diagnostics`` dataclass with ``CURATOR_FIELDS`` allow-lists,
+  ``ConfidenceSpec`` / ``ConfidenceTerm`` /
+  ``evaluate_sigmoid_combination``, and ``NavTechniqueManual``
+  (abstract-opted-out of the registry).
+- ``nav.nav_model``: ``NavModel`` ABC with
+  ``__init_subclass__`` auto-registry,
+  ``build_models_for_obs``, ``NavModelBodyBase``,
+  ``NavModelBodySimulated``, ``NavModelRingsBase``,
+  ``NavModelRingsSimulated``, ``NavModelTitan`` (registered stub),
+  plus the preserved ``nav.nav_model.rings`` data-model subpackage.
+- ``nav.support``: ``NavFilterSpec`` / ``NavFilterKind`` /
+  ``apply_filter`` (every kind from the plan implemented),
+  ``filter_combo.canonicalize``, ``NavStatusReason`` (15 values,
+  ``StrEnum`` on Python 3.11+), ``estimate_image_noise_sigma``,
+  ``saturation_mask`` / ``cosmic_ray_mask``,
+  ``apply_translation`` / ``sample_dt_bilinear``, plus the shared
+  ``types`` aliases.
+- ``nav.navigate_image_files.navigate_image_files`` is the top-level
+  driver that ``nav_offset`` and ``nav_offset_cloud_tasks`` invoke;
+  it preserves the legacy ``(success, metadata)`` contract and now
+  routes through ``NavOrchestrator``.
+
+### Tooling and conventions established in stage 0 (binding)
+
+- **Python floor** is 3.11.  ``NavStatusReason`` uses ``StrEnum``;
+  do not regress to the ``(str, Enum)`` mixin without bumping
+  ``requires-python`` first.
 - **Stub honesty.**  Code that is not yet implemented either logs
   the deferral and returns an inert value (the summary-PNG path) or
-  raises `NotImplementedError` with a message naming the deferred
-  work.  No silent placeholder values.
-- **Magic constants live in module-level ALL_CAPS constants with a
-  one-line docstring** stating units and intent.  See
-  `DEFAULT_FULL_WELL_DN_12_BIT` for the canonical example.
-- **Broad `except Exception:` is reserved for the orchestrator's
-  plugin-sandbox sites** (per-NavModel `to_features`,
-  `to_annotations`, and per-NavTechnique `navigate`).  Each site
-  carries a docstring explaining why the broad catch is intentional
-  and a per-line justification comment.
-- **Pdslogger output is captured with `capsys`, not `caplog`.**
+  raises ``NotImplementedError`` naming the deferred work.  No
+  silent placeholder values, ever.  See
+  ``navigate_image_files._write_summary_png`` for the canonical
+  pattern.
+- **Magic constants live in module-level ``ALL_CAPS`` constants
+  with a one-line docstring** stating units and intent.  See
+  ``DEFAULT_FULL_WELL_DN_12_BIT`` for the canonical example.
+- **Broad ``except Exception:`` is reserved for the orchestrator's
+  plugin-sandbox sites** (per-NavModel ``create_model`` /
+  ``to_features`` / ``to_annotations``, per-NavTechnique
+  ``navigate``).  Each site carries a docstring explaining why and
+  a per-line justification comment.  Other broad catches are
+  not acceptable.
+- **Pdslogger output is captured with ``capsys``, not ``caplog``.**
   Pdslogger writes through its own stream handler that does not feed
-  the standard logging propagation; tests that need to verify a
-  WARNING / ERROR / EXCEPTION emission read from `capsys.readouterr()`.
+  the standard logging propagation.  Tests that need to verify a
+  WARNING / ERROR / EXCEPTION emission read from
+  ``capsys.readouterr().out``.
+- **Frozen dataclasses validate on construction.**  Public
+  dataclasses use ``__post_init__`` to enforce documented
+  invariants; ``object.__setattr__`` is the standard escape hatch
+  for normalising inputs in a frozen dataclass.
+- **Sphinx ``automodule`` for re-exporting packages uses
+  ``:no-index:``** to avoid duplicate cross-references with the
+  submodule pages (see ``docs/api_reference/api_feature.rst``).
+- **``pyproject.toml [tool.pytest.ini_options]``** has
+  ``filterwarnings = ["error"]`` plus a single tolerated rule for
+  the third-party ``PytestUnraisableExceptionWarning`` raised by
+  astropy's FITS reader on integration tests.
+- **CI.**  ``.github/workflows/run-tests.yml`` runs on every PR
+  (not just those targeting ``main``); the matrix covers Python
+  3.11 / 3.12 / 3.13 / 3.14.  ``codecov-action@v6``.
+
+### Stage 1 entry points (the next AI session starts here)
+
+The "Pending" subsection of "Implementation status (snapshot)" is
+the canonical work list.  Stage 1 should land **real-scene
+NavModels** so concrete NavTechniques have something to consume.
+Recommended order:
+
+1. **``NavModelStars``** — the validated star-catalog reduction
+   helpers (aberration, proper motion, multi-catalog precedence,
+   incremental search, body / ring conflict marking, the
+   ``SCLASS_TO_B_MINUS_V`` lookup, smear-aware PSF rendering)
+   were preserved in git history under the deleted
+   ``src/nav/nav_model/nav_model_stars.py`` (~1004 lines).
+   Recover with
+   ``git log --diff-filter=D -- src/nav/nav_model/nav_model_stars.py``;
+   structure as helper modules under
+   ``src/nav/nav_model/stars/`` (``predicted_snr.py``,
+   ``detection.py``, ``aberration.py``, ``conflicts.py``, etc.)
+   imported by the new ``NavModelStars.to_features``.  Emit
+   ``STAR`` features on the new ``NavFeature`` contract; populate
+   ``StarGeometry``, ``StarFlags``, predicted-SNR-driven
+   ``reliability``, and a ``NavFilterKind.NONE`` filter spec.
+
+2. **``NavModelBody``** — limb-mask extraction, body-silhouette
+   computation, and the body-shape lookup logic were preserved in
+   the deleted ``src/nav/nav_model/nav_model_body.py`` (~540 lines).
+   ``NavModelBodyBase`` (still present) provides the shared
+   annotation rendering.  Per resolution / shape / lighting,
+   emit a mix of ``LIMB_ARC``, ``TERMINATOR_ARC``, ``BODY_DISC``,
+   and ``BODY_BLOB`` features.
+
+3. **``NavModelRings``** — the four-pass ``RingFeatureFilter`` is
+   already preserved under
+   ``src/nav/nav_model/rings/ring_filter.py``.  The deleted
+   ``src/nav/nav_model/nav_model_rings.py`` (~525 lines) carried the
+   per-edge polyline rendering that the new ``to_features`` needs
+   to call.  Emit ``RING_EDGE`` features per edge, plus a
+   ``RING_ANNULUS`` fallback when many edges pack into few pixels.
+
+For each NavModel:
+
+- Implement ``instances_for_obs(cls, obs)`` to construct one
+  instance per body / per planet with visible rings / one stars
+  model so the registry-based discovery in
+  ``build_models_for_obs`` works.
+- Populate ``self._metadata`` during ``create_model`` (the curator
+  pass-through is already wired into ``NavResult.model_metadata``).
+- Build a fresh ``Annotations`` collection in ``to_annotations`` —
+  the orchestrator's ``_collect_annotations`` already merges them
+  into ``NavResult.annotations``.
+
+After NavModels land, stage 2 should bring up the concrete
+NavTechniques (``BodyDiscCorrelateNav``, ``BodyLimbNav``,
+``BodyTerminatorNav``, ``BodyBlobNav``, ``RingEdgeNav``,
+``RingAnnulusNav``, ``StarFieldFromCatalogNav``,
+``StarUniqueMatchNav``, ``StarRefineNav``, ``CartographicNav``).
+The technique-class registration mechanism is already in place;
+each new subclass auto-registers via ``__init_subclass__``.
 
 End of "Foundation cleanup status (stage 0)" section.
 
