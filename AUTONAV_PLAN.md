@@ -656,7 +656,7 @@ plan-body section conflicts, this list wins.
 57. **`xfail` / `skipif` discipline (F12).** Convention in
     `developer_guide_testing.rst`: every `pytest.mark.xfail` carries
     `strict=True` and a comment containing a GH issue link. `skipif`
-    with stale conditions (e.g., Python < 3.10) is removed in PR review.
+    with stale conditions (e.g., Python < 3.11) is removed in PR review.
     No xfail / skip lands without ticket reference.
 
 58. **Per-image log assertion (F13).** `tests/nav/nav_orchestrator/
@@ -4378,9 +4378,9 @@ scratch.
   `nav_technique_manual.py`.  Change it if operator precision is ever
   characterised against the library; do not let it become a config
   knob without a real reason.
-- **`(str, Enum)` mixin for `NavStatusReason`** keeps the codebase on
-  Python 3.10.  Do not switch to `StrEnum` (which is 3.11+) without
-  bumping `requires-python`.
+- **`NavStatusReason` uses `StrEnum`.**  The minimum Python version is
+  3.11; `StrEnum` is available natively.  Do not regress to a
+  ``(str, Enum)`` mixin.
 - **Stub honesty.**  Code that is not yet implemented either logs the
   deferral and returns an inert value (e.g. ``_write_summary_png``
   which logs at INFO and returns) or raises ``NotImplementedError``

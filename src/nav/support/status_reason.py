@@ -13,16 +13,14 @@ dataset enumeration).
 """
 
 import logging
-from enum import Enum
+from enum import StrEnum
 
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 __all__ = ['NavStatusReason']
 
 
-# (str, Enum) instead of StrEnum so the module works on Python 3.10 (StrEnum
-# was added in 3.11, but pyproject.toml floors at 3.10).
-class NavStatusReason(str, Enum):
+class NavStatusReason(StrEnum):
     """Discrete outcome reasons set on every NavResult.
 
     The value tells downstream consumers exactly why the navigation has its
