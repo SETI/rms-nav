@@ -129,9 +129,9 @@ def test_ensemble_at_edge_dropped_when_interior_exists() -> None:
         provenance=_provenance(),
     )
     assert result.status == 'ok'
-    # Result driven by interior technique only.
-    assert result.offset_px is not None
-    assert abs(result.offset_px[0] - 1.05) < 0.05
+    # The at-edge result is dropped, leaving only the interior technique
+    # which contributes its exact offset.
+    assert result.offset_px == (1.05, 1.05)
 
 
 def test_ensemble_at_edge_kept_when_only_one() -> None:
@@ -250,11 +250,8 @@ def test_ensemble_unobservable_offset_when_all_share_null_direction() -> None:
         image_classifier=_classifier(),
         provenance=_provenance(),
     )
-    # The combine succeeds because v is observable; verify we get either
-    # rank_1_only (success on observable axis) or a sensible failure mode.
-    # The two inputs agree on v=0 and disagree on u, but the u-axis is
-    # essentially unconstrained so the combined covariance is dominated by
-    # the v constraint; ensemble returns ok or rank_1_only.
+    # v is observable, u is not; the ensemble reports RANK_1_ONLY with
+    # ``sigma_along_unobservable_px`` set on the result.
     from nav.support.status_reason import NavStatusReason
 
-    assert result.status_reason in (NavStatusReason.OK, NavStatusReason.RANK_1_ONLY)
+    assert result.status_reason == NavStatusReason.RANK_1_ONLY

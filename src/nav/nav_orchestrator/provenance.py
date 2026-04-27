@@ -50,8 +50,13 @@ class Provenance:
     spice_kernel_count: int = field(init=False)
 
     def __post_init__(self) -> None:
-        """Derive ``spice_kernel_count`` and freeze ``static_data_hashes``."""
-        # ``object.__setattr__`` is required for frozen dataclasses.
+        """Normalize sequences, derive count, freeze ``static_data_hashes``."""
+        # Normalize the three sequence fields to deterministic sorted
+        # tuples so callers' mutable or unsorted inputs cannot leak in.
+        # ``object.__setattr__`` is required because the dataclass is frozen.
+        object.__setattr__(self, 'spice_kernels', tuple(sorted(self.spice_kernels)))
+        object.__setattr__(self, 'technique_names', tuple(sorted(self.technique_names)))
+        object.__setattr__(self, 'extractor_names', tuple(sorted(self.extractor_names)))
         object.__setattr__(self, 'spice_kernel_count', len(self.spice_kernels))
         if not isinstance(self.static_data_hashes, MappingProxyType):
             object.__setattr__(

@@ -96,6 +96,10 @@ class NavImageClassifier:
         Raises:
             TypeError: if ``image`` is not 2-D.
         """
+        if not isinstance(image, np.ndarray):
+            raise TypeError(
+                f'NavImageClassifier requires a numpy.ndarray; got {type(image).__name__}'
+            )
         if image.ndim != 2:
             raise TypeError(f'NavImageClassifier requires a 2-D image; got ndim={image.ndim}')
         if sensor_mask is None:

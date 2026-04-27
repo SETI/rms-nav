@@ -7,6 +7,7 @@ uncertainty, a preferred filter, a reliability score, and which technique
 types are allowed to consume it.
 """
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -142,6 +143,21 @@ class NavFeature:
             raise ValueError(f'feature_id must be a non-empty string, got {self.feature_id!r}')
         if not 0.0 <= self.reliability <= 1.0:
             raise ValueError(f'reliability must lie in [0, 1]; got {self.reliability!r}')
+        # ``subject_range_km`` may legitimately be ``float('inf')`` for stars
+        # and very-far simulated bodies, so the check rejects only NaN and
+        # negative distances.
+        if math.isnan(self.subject_range_km) or self.subject_range_km < 0.0:
+            raise ValueError(
+                f'subject_range_km must be >= 0 and not NaN; got {self.subject_range_km!r}'
+            )
+        if not math.isfinite(self.intensity_sigma_rel):
+            raise ValueError(
+                f'intensity_sigma_rel must be finite; got {self.intensity_sigma_rel!r}'
+            )
+        if not 0.0 <= self.intensity_sigma_rel <= 1.0:
+            raise ValueError(
+                f'intensity_sigma_rel must lie in [0, 1]; got {self.intensity_sigma_rel!r}'
+            )
         if self.feature_type not in self.usable_types:
             raise ValueError(
                 f'usable_types must contain feature_type={self.feature_type.name}; '
@@ -172,10 +188,8 @@ class NavFeature:
                 'template_img and template_mask must be provided together '
                 '(both None or both non-None)'
             )
-        if self.template_img is not None:
-            self.template_img.setflags(write=False)
-        if self.template_mask is not None:
-            self.template_mask.setflags(write=False)
+        # Validate the shape match before mutating the caller's arrays so
+        # rejected inputs leave their write flag untouched.
         if (
             self.template_img is not None
             and self.template_mask is not None
@@ -185,6 +199,10 @@ class NavFeature:
                 f'template_img shape {self.template_img.shape} does not match '
                 f'template_mask shape {self.template_mask.shape}'
             )
+        if self.template_img is not None:
+            self.template_img.setflags(write=False)
+        if self.template_mask is not None:
+            self.template_mask.setflags(write=False)
 
     # Equality and hashing operate on feature_id only because the dataclass
     # carries unhashable numpy arrays (template_img, template_mask,

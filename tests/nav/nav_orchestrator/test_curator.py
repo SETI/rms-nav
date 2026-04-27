@@ -139,8 +139,10 @@ def test_metadata_dict_replaces_inf_with_sentinel() -> None:
         sigma_along_unobservable_px=math.inf,
     )
     md = build_metadata_dict(result)
-    assert md['sigma_along_unobservable_px'] is not None
-    assert md['sigma_along_unobservable_px'] >= 1e8
+    # ``math.inf`` is clamped to the curator's JSON_INF_SENTINEL sentinel.
+    from nav.feature.constants import JSON_INF_SENTINEL
+
+    assert md['sigma_along_unobservable_px'] == JSON_INF_SENTINEL
 
 
 def test_assert_diagnostic_fields_present_passes() -> None:

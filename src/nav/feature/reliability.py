@@ -76,9 +76,15 @@ class FeatureReliabilityGate:
     )
 
     def __post_init__(self) -> None:
-        """Validate every threshold is a number in ``[0, 1]``."""
+        """Validate the thresholds mapping and every threshold value."""
         import math as _math
+        from collections.abc import Mapping
 
+        if not isinstance(self.thresholds, Mapping):
+            raise TypeError(
+                'FeatureReliabilityGate.thresholds must be a Mapping; '
+                f'got {type(self.thresholds).__name__}'
+            )
         for key, value in self.thresholds.items():
             if not isinstance(key, NavFeatureType):
                 raise TypeError(f'thresholds keys must be NavFeatureType; got {type(key).__name__}')

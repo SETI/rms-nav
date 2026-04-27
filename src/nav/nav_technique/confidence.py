@@ -60,12 +60,20 @@ class ConfidenceTerm:
 
     def __post_init__(self) -> None:
         """Validate numeric types and divisor / cap_at ranges."""
+        if not isinstance(self.feature, str):
+            raise TypeError(
+                f'ConfidenceTerm.feature must be str; got {type(self.feature).__name__}'
+            )
+        if not self.feature.strip():
+            raise ValueError('ConfidenceTerm.feature must be a non-empty string')
         for name in ('alpha', 'offset', 'divisor'):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, _NumberType):
                 raise TypeError(
                     f'ConfidenceTerm.{name} must be numeric; got {type(value).__name__}'
                 )
+            if not math.isfinite(value):
+                raise ValueError(f'ConfidenceTerm.{name} must be finite; got {value!r}')
         if self.divisor == 0.0:
             raise ValueError('ConfidenceTerm.divisor must be non-zero')
         if self.cap_at is not None:
@@ -73,6 +81,10 @@ class ConfidenceTerm:
                 raise TypeError(
                     f'ConfidenceTerm.cap_at must be numeric or None; got '
                     f'{type(self.cap_at).__name__}'
+                )
+            if not math.isfinite(self.cap_at):
+                raise ValueError(
+                    f'ConfidenceTerm.cap_at must be finite; got {self.cap_at!r}'
                 )
             if not 0.0 <= self.cap_at <= 1.0:
                 raise ValueError(f'ConfidenceTerm.cap_at must lie in [0, 1]; got {self.cap_at!r}')
@@ -133,6 +145,9 @@ class ConfidenceSpec:
                 raise TypeError(
                     f'ConfidenceSpec.hard_zero_if[{key!r}] must be bool; got {type(value).__name__}'
                 )
+        # Defensive shallow copy so the caller cannot mutate the
+        # frozen dataclass's hard_zero_if dict after construction.
+        object.__setattr__(self, 'hard_zero_if', dict(self.hard_zero_if))
         if self.hard_cap is not None:
             if isinstance(self.hard_cap, bool) or not isinstance(self.hard_cap, _NumberType):
                 raise TypeError(

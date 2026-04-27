@@ -104,11 +104,15 @@ class NavContext:
             raise TypeError(f'offset_px entries must be numeric; got {offset_px!r}') from exc
         if not (math.isfinite(dv) and math.isfinite(du)):
             raise ValueError(f'offset_px must be finite; got {offset_px!r}')
-        cov = np.asarray(covariance_px2, np.float64)
-        if cov.shape != (2, 2):
-            raise ValueError(f'covariance_px2 must have shape (2, 2); got {cov.shape}')
-        if not np.isfinite(cov).all():
+        cov_in = np.asarray(covariance_px2, np.float64)
+        if cov_in.shape != (2, 2):
+            raise ValueError(f'covariance_px2 must have shape (2, 2); got {cov_in.shape}')
+        if not np.isfinite(cov_in).all():
             raise ValueError('covariance_px2 must contain only finite entries')
+        # Take an independent copy and mark it read-only so the caller
+        # cannot mutate the prior covariance after the NavContext is built.
+        cov = cov_in.copy()
+        cov.setflags(write=False)
         return dataclasses.replace(
             self,
             prior_offset_px=(dv, du),

@@ -41,5 +41,8 @@ def test_provenance_static_data_hashes_is_immutable() -> None:
         pipeline_run_iso8601='2026-04-26T12:00:00Z',
         static_data_hashes={'a.yaml': 'aa'},
     )
-    with pytest.raises(TypeError):
+    with pytest.raises(TypeError) as exc_info:
         prov.static_data_hashes['b.yaml'] = 'bb'  # type: ignore[index]
+    # ``MappingProxyType`` raises ``TypeError`` with "does not support
+    # item assignment" when assignment is attempted.
+    assert 'item assignment' in str(exc_info.value)

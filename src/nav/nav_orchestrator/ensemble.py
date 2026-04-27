@@ -216,7 +216,14 @@ def _combine_precision_weighted(
     # Check rank-deficiency by comparing combined info matrix's smallest
     # eigenvalue to a small tolerance.
     eigvals = np.linalg.eigvalsh(info_sum)
-    is_rank_deficient = bool(eigvals.min() < 1.0 / 1e8)
+    # Scale-independent rank-deficiency check: the smallest eigenvalue is
+    # tiny relative to the largest.  The eps guards divide-by-zero on a
+    # zero info matrix (which itself is degenerate).
+    rel_tol = 1.0e-8
+    eps = np.finfo(np.float64).eps
+    is_rank_deficient = bool(
+        eigvals.min() / max(abs(eigvals.max()), eps) < rel_tol
+    )
     return (
         (float(mu_combined[0]), float(mu_combined[1])),
         cast(NDArrayFloatType, cov_combined),
