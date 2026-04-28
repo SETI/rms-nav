@@ -11,6 +11,7 @@ from nav.nav_orchestrator.image_derivatives import (
     DEFAULT_IMAGE_GRADIENT_SIGMA_PX,
     ImageDerivativesConfig,
     build_image_edge_dt,
+    compute_all_image_derivatives,
     compute_image_gradient_vu,
 )
 
@@ -49,9 +50,9 @@ def test_image_derivatives_config_rejects_zero_threshold() -> None:
 
 
 def test_image_derivatives_config_rejects_zero_half_width() -> None:
-    """A non-positive ``dt_half_width_px`` is rejected with a named field message."""
+    """A zero ``dt_half_width_px`` is rejected with a named field message."""
     with pytest.raises(ValueError, match='dt_half_width_px'):
-        ImageDerivativesConfig(dt_half_width_px=-1.0)
+        ImageDerivativesConfig(dt_half_width_px=0.0)
 
 
 def test_build_image_edge_dt_peak_aligns_with_step_edge() -> None:
@@ -247,3 +248,63 @@ def test_build_image_edge_dt_threshold_boundary_exact() -> None:
     # through and produces at least one zero-DT pixel.
     _, edge_dt_below = build_image_edge_dt(img, image_noise_sigma=boundary_sigma * 0.99, config=cfg)
     assert float(edge_dt_below.min()) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Combined entry point — orchestrator-friendly single-pass derivative bundle
+# ---------------------------------------------------------------------------
+
+
+def test_compute_all_image_derivatives_matches_separate_calls() -> None:
+    """Combined entry point produces the same arrays as the two split calls.
+
+    The orchestrator switched from calling ``build_image_edge_dt`` and
+    ``compute_image_gradient_vu`` separately to using the combined entry
+    point.  Both paths must return byte-identical results because they
+    share the same underlying gaussian + sobel pipeline.
+    """
+    shape = (40, 40)
+    img = _step_image(shape, step_v=16)
+    cfg = ImageDerivativesConfig()
+    gradient_split, edge_dt_split = build_image_edge_dt(img, image_noise_sigma=1.0, config=cfg)
+    gradient_vu_split = compute_image_gradient_vu(img, sigma_px=cfg.image_gradient_sigma_px)
+    gradient_combo, edge_dt_combo, gradient_vu_combo = compute_all_image_derivatives(
+        img, image_noise_sigma=1.0, config=cfg
+    )
+    np.testing.assert_array_equal(gradient_combo, gradient_split)
+    np.testing.assert_array_equal(edge_dt_combo, edge_dt_split)
+    np.testing.assert_array_equal(gradient_vu_combo, gradient_vu_split)
+
+
+def test_compute_all_image_derivatives_rejects_non_2d_input() -> None:
+    """A non-2-D ``image_ext`` is rejected with a TypeError naming the field."""
+    with pytest.raises(TypeError, match='image_ext must be 2-D'):
+        compute_all_image_derivatives(np.zeros((4, 4, 4)), image_noise_sigma=1.0)
+
+
+def test_compute_all_image_derivatives_rejects_nan_image() -> None:
+    """A non-finite ``image_ext`` is rejected before any heavy work runs."""
+    img = np.zeros((8, 8), dtype=np.float64)
+    img[3, 3] = np.nan
+    with pytest.raises(ValueError, match='image_ext must contain only finite values'):
+        compute_all_image_derivatives(img, image_noise_sigma=1.0)
+
+
+def test_compute_all_image_derivatives_rejects_negative_noise_sigma() -> None:
+    """A negative ``image_noise_sigma`` is rejected with a named field message."""
+    with pytest.raises(ValueError, match='image_noise_sigma'):
+        compute_all_image_derivatives(np.zeros((4, 4)), image_noise_sigma=-1.0)
+
+
+def test_compute_all_image_derivatives_uses_default_config_when_none() -> None:
+    """``config=None`` resolves to the documented defaults."""
+    img = _step_image((40, 40), step_v=16)
+    gradient_default, edge_dt_default, gradient_vu_default = compute_all_image_derivatives(
+        img, image_noise_sigma=1.0
+    )
+    gradient_explicit, edge_dt_explicit, gradient_vu_explicit = compute_all_image_derivatives(
+        img, image_noise_sigma=1.0, config=ImageDerivativesConfig()
+    )
+    np.testing.assert_array_equal(gradient_default, gradient_explicit)
+    np.testing.assert_array_equal(edge_dt_default, edge_dt_explicit)
+    np.testing.assert_array_equal(gradient_vu_default, gradient_vu_explicit)

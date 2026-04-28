@@ -40,8 +40,7 @@ from nav.nav_orchestrator.image_classifier_result import (
 )
 from nav.nav_orchestrator.image_derivatives import (
     ImageDerivativesConfig,
-    build_image_edge_dt,
-    compute_image_gradient_vu,
+    compute_all_image_derivatives,
 )
 from nav.nav_orchestrator.nav_context import NavContext
 from nav.nav_orchestrator.nav_result import NavResult
@@ -357,14 +356,14 @@ class NavOrchestrator(NavBase):
             if classifier_result.noise_sigma > 0.0
             else estimate_image_noise_sigma(image, sensor_mask)
         )
-        gradient_ext, edge_dt_ext = build_image_edge_dt(
+        # Single-pass derivative computation: one gaussian + sobel pair
+        # produces gradient magnitude, edge DT, and the signed gradient
+        # vector image together rather than doing the heavy smoothing
+        # twice for separate calls.
+        gradient_ext, edge_dt_ext, gradient_vu_ext = compute_all_image_derivatives(
             image,
             noise_sigma,
             config=self._image_derivatives_config,
-        )
-        gradient_vu_ext = compute_image_gradient_vu(
-            image,
-            sigma_px=self._image_derivatives_config.image_gradient_sigma_px,
         )
         context = NavContext(
             obs=obs,

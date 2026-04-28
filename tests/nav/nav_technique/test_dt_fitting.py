@@ -216,16 +216,46 @@ def test_coarse_ncc_search_returns_zero_with_empty_polyline() -> None:
             (1, -1),
             'must be non-negative',
         ),
+        # Wrong-length window: caught by the length-2 guard.
+        (
+            np.zeros((4, 4), bool),
+            np.zeros((4, 4), bool),
+            (1, 2, 3),
+            'length-2 sequence of ints',
+        ),
+        (
+            np.zeros((4, 4), bool),
+            np.zeros((4, 4), bool),
+            (1,),
+            'length-2 sequence of ints',
+        ),
     ],
 )
 def test_coarse_ncc_search_rejects_invalid_inputs(
     edge_mask: np.ndarray,
     polyline_mask: np.ndarray,
-    window: tuple[int, int],
+    window: tuple[int, ...],
     message: str,
 ) -> None:
+    """Invalid mask shapes or window tuples are rejected with a named message."""
     with pytest.raises(ValueError, match=message):
-        coarse_ncc_search(edge_mask, polyline_mask, window)
+        coarse_ncc_search(edge_mask, polyline_mask, window)  # type: ignore[arg-type]
+
+
+def test_coarse_ncc_search_rejects_float_window_entry() -> None:
+    """A float window entry is rejected with TypeError instead of being truncated."""
+    edge_mask = np.zeros((4, 4), bool)
+    polyline_mask = np.zeros((4, 4), bool)
+    with pytest.raises(TypeError, match='search_window_vu\\[0\\] must be int'):
+        coarse_ncc_search(edge_mask, polyline_mask, (1.5, 1))  # type: ignore[arg-type]
+
+
+def test_coarse_ncc_search_rejects_non_sequence_window() -> None:
+    """A non-tuple/list window is rejected by the length-2 sequence guard."""
+    edge_mask = np.zeros((4, 4), bool)
+    polyline_mask = np.zeros((4, 4), bool)
+    with pytest.raises(ValueError, match='length-2 sequence of ints'):
+        coarse_ncc_search(edge_mask, polyline_mask, np.array([1, 1]))  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------

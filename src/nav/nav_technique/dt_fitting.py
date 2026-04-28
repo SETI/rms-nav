@@ -134,8 +134,10 @@ def coarse_ncc_search(
         ``(dv, du)`` integer offset pair at the peak.
 
     Raises:
+        TypeError: if either entry of ``search_window_vu`` is not an int.
         ValueError: if shapes disagree, masks are not 2-D, or
-            ``search_window_vu`` contains a negative entry.
+            ``search_window_vu`` is not a length-2 sequence of
+            non-negative ints.
     """
     if edge_mask.ndim != 2 or polyline_mask.ndim != 2:
         raise ValueError(
@@ -146,9 +148,21 @@ def coarse_ncc_search(
         raise ValueError(
             f'shape mismatch: edge_mask {edge_mask.shape} vs polyline_mask {polyline_mask.shape}'
         )
-    margin_v, margin_u = int(search_window_vu[0]), int(search_window_vu[1])
-    if margin_v < 0 or margin_u < 0:
+    # Validate explicitly rather than relying on int() coercion, which would
+    # silently truncate floats and raise an unhelpful IndexError on
+    # wrong-length sequences.
+    if not isinstance(search_window_vu, tuple | list) or len(search_window_vu) != 2:
+        raise ValueError(
+            f'search_window_vu must be a length-2 sequence of ints; got {search_window_vu!r}'
+        )
+    margin_v_raw, margin_u_raw = search_window_vu[0], search_window_vu[1]
+    if not isinstance(margin_v_raw, int) or isinstance(margin_v_raw, bool):
+        raise TypeError(f'search_window_vu[0] must be int; got {type(margin_v_raw).__name__}')
+    if not isinstance(margin_u_raw, int) or isinstance(margin_u_raw, bool):
+        raise TypeError(f'search_window_vu[1] must be int; got {type(margin_u_raw).__name__}')
+    if margin_v_raw < 0 or margin_u_raw < 0:
         raise ValueError(f'search_window_vu must be non-negative; got {search_window_vu!r}')
+    margin_v, margin_u = margin_v_raw, margin_u_raw
     height, width = edge_mask.shape
     edge_f = edge_mask.astype(np.float64, copy=False)
     # Scan the bounded window directly: brute-force over O(margin_v * margin_u)
@@ -446,9 +460,10 @@ def _compute_residuals_and_jacobian(
 
     Bilinear DT samples are differentiable almost everywhere, so a
     central-difference Jacobian with a small step gives a good local
-    linearisation.  The step is fixed at 0.5 pixels — large enough to
-    cross many DT cells, small enough to remain within the bilinear
-    interpolant's local quadratic regime.
+    linearisation.  The step is fixed at 0.25 pixels — large enough to
+    cross several DT bilinear cells (the DT grows by 1 every full
+    pixel), small enough to remain within the bilinear interpolant's
+    local quadratic regime.
     """
     base_pos = _shift_vertices(_rotate_vertices(vertices_vu, pivot_vu, dtheta), dv, du)
     residuals = sample_dt_bilinear(image_dt, base_pos)

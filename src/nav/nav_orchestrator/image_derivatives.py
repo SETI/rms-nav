@@ -49,6 +49,7 @@ __all__ = [
     'DEFAULT_IMAGE_GRADIENT_SIGMA_PX',
     'ImageDerivativesConfig',
     'build_image_edge_dt',
+    'compute_all_image_derivatives',
     'compute_image_gradient_vu',
 ]
 
@@ -123,6 +124,96 @@ class ImageDerivativesConfig:
             )
 
 
+def _smooth_and_compute_gradients(
+    image_ext: NDArrayFloatType,
+    sigma_px: float,
+) -> tuple[NDArrayFloatType, NDArrayFloatType]:
+    """Smooth ``image_ext`` and return ``(g_v, g_u)`` Sobel gradients.
+
+    Shared core of :func:`build_image_edge_dt`,
+    :func:`compute_image_gradient_vu`, and
+    :func:`compute_all_image_derivatives`.  Each public entry point
+    delegates the gaussian + sobel pass to this helper so the heavy
+    smoothing only runs once per image when the orchestrator uses the
+    combined entry point.
+
+    Parameters:
+        image_ext: Extended-FOV image array.  Must be 2-D and finite.
+        sigma_px: Gaussian sigma (pixels).  Must be strictly positive.
+
+    Returns:
+        Tuple ``(gv, gu)`` of float64 arrays shaped like ``image_ext``.
+
+    Raises:
+        TypeError: if ``image_ext`` is not 2-D.
+        ValueError: if ``image_ext`` contains NaN or +/-inf, or if
+            ``sigma_px`` is not strictly positive.
+    """
+    if image_ext.ndim != 2:
+        raise TypeError(f'image_ext must be 2-D; got ndim={image_ext.ndim}')
+    if not np.isfinite(image_ext).all():
+        raise ValueError(
+            'image_ext must contain only finite values; NaN or +/-inf would '
+            'propagate through gaussian_filter / sobel and poison every '
+            'derivative downstream'
+        )
+    if not (math.isfinite(sigma_px) and sigma_px > 0.0):
+        raise ValueError(f'sigma_px must be a finite positive number; got {sigma_px!r}')
+    smoothed = gaussian_filter(image_ext.astype(np.float64), sigma=(sigma_px, sigma_px))
+    gv = sobel(smoothed, axis=0, mode='constant', cval=0.0)
+    gu = sobel(smoothed, axis=1, mode='constant', cval=0.0)
+    return cast(NDArrayFloatType, gv.astype(np.float64, copy=False)), cast(
+        NDArrayFloatType, gu.astype(np.float64, copy=False)
+    )
+
+
+def _build_edge_dt_from_gradients(
+    gv: NDArrayFloatType,
+    gu: NDArrayFloatType,
+    *,
+    edge_threshold_k_sigma: float,
+    dt_half_width_px: float,
+    image_noise_sigma: float,
+) -> tuple[NDArrayFloatType, NDArrayFloatType]:
+    """Return ``(gradient_magnitude, edge_dt)`` from precomputed ``(gv, gu)``.
+
+    The thresholding intentionally treats *every* edge pixel as a
+    candidate; the per-technique polarity filter rejects matches that
+    disagree on the gradient direction.  Empty thresholded masks fall
+    back to a saturated DT so downstream consumers always see a
+    fully-defined array.
+
+    Parameters:
+        gv: Per-pixel ``g_v`` Sobel-of-Gaussian derivative.
+        gu: Per-pixel ``g_u`` Sobel-of-Gaussian derivative.
+        edge_threshold_k_sigma: Multiples of ``image_noise_sigma`` used as
+            the gradient-magnitude threshold.
+        dt_half_width_px: Cap on the truncated distance transform.
+        image_noise_sigma: MAD noise sigma for the threshold scaling.
+
+    Returns:
+        ``(gradient_magnitude, edge_dt)`` float64 arrays.
+    """
+    gradient = np.hypot(gv, gu).astype(np.float64)
+    threshold = edge_threshold_k_sigma * image_noise_sigma
+    # Thin the gradient ridge to a one-pixel-wide edge map via Canny-style
+    # non-maximum suppression along the local gradient direction.  A naive
+    # 3x3 NMS would discard most edge pixels along a smooth ridge; the
+    # directional check compares each candidate only against the two
+    # neighbours along its own gradient direction, leaving the full edge
+    # length intact and producing a usable input for both the
+    # cross-correlation coarse search and the distance transform.
+    edge_mask = _directional_nms(gradient, gv, gu, threshold)
+    edge_dt = apply_filter(
+        edge_mask.astype(np.float64, copy=False),
+        NavFilterSpec(
+            kind=NavFilterKind.DISTANCE_TRANSFORM,
+            dt_half_width_px=dt_half_width_px,
+        ),
+    )
+    return cast(NDArrayFloatType, gradient), edge_dt
+
+
 def build_image_edge_dt(
     image_ext: NDArrayFloatType,
     image_noise_sigma: float,
@@ -138,6 +229,10 @@ def build_image_edge_dt(
     2. The distance transform of the thresholded gradient image, where the
        threshold is ``config.edge_threshold_k_sigma * image_noise_sigma``
        and the result is truncated at ``config.dt_half_width_px``.
+
+    For callers (the orchestrator) that need *both* this product and the
+    gradient-vector product, prefer :func:`compute_all_image_derivatives`
+    so the heavy smoothing + Sobel pass runs once instead of twice.
 
     Parameters:
         image_ext: Extended-FOV image array (post any source-image filter).
@@ -156,39 +251,17 @@ def build_image_edge_dt(
         ValueError: if ``image_ext`` contains NaN or +/-inf, or if
             ``image_noise_sigma`` is negative or non-finite.
     """
-    if image_ext.ndim != 2:
-        raise TypeError(f'image_ext must be 2-D; got ndim={image_ext.ndim}')
-    if not np.isfinite(image_ext).all():
-        raise ValueError(
-            'image_ext must contain only finite values; NaN or +/-inf would '
-            'propagate through gaussian_filter / sobel and poison the '
-            'gradient and DT outputs'
-        )
     if not (math.isfinite(image_noise_sigma) and image_noise_sigma >= 0.0):
         raise ValueError(f'image_noise_sigma must be finite and >= 0; got {image_noise_sigma!r}')
     cfg = config if config is not None else ImageDerivativesConfig()
-    sigma = cfg.image_gradient_sigma_px
-    smoothed = gaussian_filter(image_ext.astype(np.float64), sigma=(sigma, sigma))
-    gv = sobel(smoothed, axis=0, mode='constant', cval=0.0)
-    gu = sobel(smoothed, axis=1, mode='constant', cval=0.0)
-    gradient = np.hypot(gv, gu).astype(np.float64)
-    threshold = cfg.edge_threshold_k_sigma * image_noise_sigma
-    # Thin the gradient ridge to a one-pixel-wide edge map via Canny-style
-    # non-maximum suppression along the local gradient direction.  A naive
-    # 3x3 NMS would discard most edge pixels along a smooth ridge; the
-    # directional check compares each candidate only against the two
-    # neighbours along its own gradient direction, leaving the full edge
-    # length intact and producing a usable input for both the
-    # cross-correlation coarse search and the distance transform.
-    edge_mask = _directional_nms(gradient, gv, gu, threshold)
-    edge_dt = apply_filter(
-        edge_mask.astype(np.float64, copy=False),
-        NavFilterSpec(
-            kind=NavFilterKind.DISTANCE_TRANSFORM,
-            dt_half_width_px=cfg.dt_half_width_px,
-        ),
+    gv, gu = _smooth_and_compute_gradients(image_ext, cfg.image_gradient_sigma_px)
+    return _build_edge_dt_from_gradients(
+        gv,
+        gu,
+        edge_threshold_k_sigma=cfg.edge_threshold_k_sigma,
+        dt_half_width_px=cfg.dt_half_width_px,
+        image_noise_sigma=image_noise_sigma,
     )
-    return cast(NDArrayFloatType, gradient), edge_dt
 
 
 def _directional_nms(
@@ -260,6 +333,10 @@ def compute_image_gradient_vu(
     polarity filter, which compares the image gradient direction to the
     model's outward normal.
 
+    For callers (the orchestrator) that need this product alongside the
+    gradient magnitude / DT, prefer :func:`compute_all_image_derivatives`
+    so the heavy smoothing + Sobel pass runs once instead of twice.
+
     Parameters:
         image_ext: Extended-FOV image array.  Must be 2-D.
         sigma_px: Gaussian sigma (pixels) used before the Sobel operator.
@@ -275,18 +352,59 @@ def compute_image_gradient_vu(
         ValueError: if ``image_ext`` contains NaN or +/-inf, or if
             ``sigma_px`` is not strictly positive.
     """
-    if image_ext.ndim != 2:
-        raise TypeError(f'image_ext must be 2-D; got ndim={image_ext.ndim}')
-    if not np.isfinite(image_ext).all():
-        raise ValueError(
-            'image_ext must contain only finite values; NaN or +/-inf would '
-            'propagate through gaussian_filter / sobel and poison the '
-            'gradient-vector output'
-        )
-    if not (math.isfinite(sigma_px) and sigma_px > 0.0):
-        raise ValueError(f'sigma_px must be a finite positive number; got {sigma_px!r}')
-    smoothed = gaussian_filter(image_ext.astype(np.float64), sigma=(sigma_px, sigma_px))
-    gv = sobel(smoothed, axis=0, mode='constant', cval=0.0)
-    gu = sobel(smoothed, axis=1, mode='constant', cval=0.0)
+    gv, gu = _smooth_and_compute_gradients(image_ext, sigma_px)
     out = np.stack([gv, gu], axis=-1).astype(np.float64)
     return cast(NDArrayFloatType, out)
+
+
+def compute_all_image_derivatives(
+    image_ext: NDArrayFloatType,
+    image_noise_sigma: float,
+    *,
+    config: ImageDerivativesConfig | None = None,
+) -> tuple[NDArrayFloatType, NDArrayFloatType, NDArrayFloatType]:
+    """Compute every image-side derivative the orchestrator needs in one pass.
+
+    Returns the same products that :func:`build_image_edge_dt` and
+    :func:`compute_image_gradient_vu` produce separately, but shares the
+    single gaussian + sobel pass between them.  The orchestrator's
+    per-image setup uses this entry point so the heavy smoothing only
+    runs once even though three derivative products end up on the
+    :class:`~nav.nav_orchestrator.nav_context.NavContext`.
+
+    Parameters:
+        image_ext: Extended-FOV image array (post any source-image
+            filter).  Must be 2-D.
+        image_noise_sigma: MAD-derived noise sigma (DN units) used to
+            scale the gradient threshold.  Must be finite and
+            non-negative.
+        config: Optional override; when ``None`` the documented defaults
+            apply.
+
+    Returns:
+        Tuple ``(gradient_ext, edge_dt_ext, gradient_vu_ext)``:
+
+        - ``gradient_ext`` — gradient magnitude shaped ``(H, W)``.
+        - ``edge_dt_ext`` — truncated distance transform of the
+          thresholded edge mask, shaped ``(H, W)``.
+        - ``gradient_vu_ext`` — signed ``(g_v, g_u)`` gradient vector
+          image, shaped ``(H, W, 2)``.
+
+    Raises:
+        TypeError: if ``image_ext`` is not 2-D.
+        ValueError: if ``image_ext`` contains NaN or +/-inf, or if
+            ``image_noise_sigma`` is negative or non-finite.
+    """
+    if not (math.isfinite(image_noise_sigma) and image_noise_sigma >= 0.0):
+        raise ValueError(f'image_noise_sigma must be finite and >= 0; got {image_noise_sigma!r}')
+    cfg = config if config is not None else ImageDerivativesConfig()
+    gv, gu = _smooth_and_compute_gradients(image_ext, cfg.image_gradient_sigma_px)
+    gradient, edge_dt = _build_edge_dt_from_gradients(
+        gv,
+        gu,
+        edge_threshold_k_sigma=cfg.edge_threshold_k_sigma,
+        dt_half_width_px=cfg.dt_half_width_px,
+        image_noise_sigma=image_noise_sigma,
+    )
+    gradient_vu = np.stack([gv, gu], axis=-1).astype(np.float64)
+    return gradient, edge_dt, cast(NDArrayFloatType, gradient_vu)

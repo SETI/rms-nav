@@ -15,8 +15,11 @@ Modules:
     ``image_classifier_result``
         ``NavImageClassifierResult`` — output of the classifier.
     ``image_derivatives``
-        ``build_image_edge_dt`` and ``ImageDerivativesConfig`` — shared
-        gradient and edge-distance-transform computation.
+        ``build_image_edge_dt``, ``compute_image_gradient_vu``,
+        ``compute_all_image_derivatives``, and ``ImageDerivativesConfig`` —
+        shared gradient / edge-DT / gradient-vector computation.  The
+        combined entry point (``compute_all_image_derivatives``) shares
+        the heavy gaussian + sobel pass between all three products.
     ``provenance``
         ``Provenance`` — reproducibility metadata.
     ``ensemble``
@@ -48,6 +51,8 @@ from nav.nav_orchestrator.image_classifier_result import NavImageClassifierResul
 from nav.nav_orchestrator.image_derivatives import (
     ImageDerivativesConfig,
     build_image_edge_dt,
+    compute_all_image_derivatives,
+    compute_image_gradient_vu,
 )
 from nav.nav_orchestrator.nav_context import NavContext
 from nav.nav_orchestrator.nav_result import NavResult
@@ -70,6 +75,8 @@ __all__ = [
     'assert_diagnostic_fields_present',
     'build_image_edge_dt',
     'build_metadata_dict',
+    'compute_all_image_derivatives',
+    'compute_image_gradient_vu',
     'derive_confidence_rank',
     'ensemble',
 ]
