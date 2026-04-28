@@ -33,6 +33,7 @@ because :func:`build_image_edge_dt` falls back to a pure-saturation array
 when no pixel exceeds the threshold.
 """
 
+import math
 from dataclasses import dataclass
 from typing import cast
 
@@ -106,16 +107,20 @@ class ImageDerivativesConfig:
 
     def __post_init__(self) -> None:
         """Validate the three positive-real parameters."""
-        if not (self.image_gradient_sigma_px > 0.0):
+        if not (math.isfinite(self.image_gradient_sigma_px) and self.image_gradient_sigma_px > 0.0):
             raise ValueError(
-                f'image_gradient_sigma_px must be > 0; got {self.image_gradient_sigma_px!r}'
+                'image_gradient_sigma_px must be a finite positive number; '
+                f'got {self.image_gradient_sigma_px!r}'
             )
-        if not (self.edge_threshold_k_sigma > 0.0):
+        if not (math.isfinite(self.edge_threshold_k_sigma) and self.edge_threshold_k_sigma > 0.0):
             raise ValueError(
-                f'edge_threshold_k_sigma must be > 0; got {self.edge_threshold_k_sigma!r}'
+                'edge_threshold_k_sigma must be a finite positive number; '
+                f'got {self.edge_threshold_k_sigma!r}'
             )
-        if not (self.dt_half_width_px > 0.0):
-            raise ValueError(f'dt_half_width_px must be > 0; got {self.dt_half_width_px!r}')
+        if not (math.isfinite(self.dt_half_width_px) and self.dt_half_width_px > 0.0):
+            raise ValueError(
+                f'dt_half_width_px must be a finite positive number; got {self.dt_half_width_px!r}'
+            )
 
 
 def build_image_edge_dt(
@@ -152,7 +157,7 @@ def build_image_edge_dt(
     """
     if image_ext.ndim != 2:
         raise TypeError(f'image_ext must be 2-D; got ndim={image_ext.ndim}')
-    if not (image_noise_sigma >= 0.0) or image_noise_sigma != image_noise_sigma:
+    if not (math.isfinite(image_noise_sigma) and image_noise_sigma >= 0.0):
         raise ValueError(f'image_noise_sigma must be finite and >= 0; got {image_noise_sigma!r}')
     cfg = config if config is not None else ImageDerivativesConfig()
     sigma = cfg.image_gradient_sigma_px
@@ -206,9 +211,14 @@ def _directional_nms(
     """
     abs_gv = np.abs(gv)
     abs_gu = np.abs(gu)
-    diag = abs_gv * 0.4142135623730951  # tan(22.5 deg) approximation
-    sector_horizontal = abs_gu >= abs_gv + diag
-    sector_vertical = abs_gv >= abs_gu + diag
+    # Standard Canny quantisation splits the half-circle of gradient
+    # directions into four 45-degree sectors with boundaries at 22.5,
+    # 67.5, 112.5, and 157.5 degrees from the u-axis.  A direction
+    # belongs to the horizontal sector when |angle| <= 22.5 deg, i.e.
+    # |gu| >= |gv| * cot(22.5 deg).  cot(22.5 deg) = 1 + sqrt(2).
+    cot_22_5 = 2.414213562373095
+    sector_horizontal = abs_gu >= abs_gv * cot_22_5
+    sector_vertical = abs_gv >= abs_gu * cot_22_5
     sector_diag_pos = (~sector_horizontal) & (~sector_vertical) & (gv * gu >= 0)
     sector_diag_neg = (~sector_horizontal) & (~sector_vertical) & (gv * gu < 0)
     pad = np.pad(gradient_magnitude, 1, mode='constant', constant_values=-np.inf)
@@ -259,8 +269,8 @@ def compute_image_gradient_vu(
     """
     if image_ext.ndim != 2:
         raise TypeError(f'image_ext must be 2-D; got ndim={image_ext.ndim}')
-    if not (sigma_px > 0.0):
-        raise ValueError(f'sigma_px must be > 0; got {sigma_px!r}')
+    if not (math.isfinite(sigma_px) and sigma_px > 0.0):
+        raise ValueError(f'sigma_px must be a finite positive number; got {sigma_px!r}')
     smoothed = gaussian_filter(image_ext.astype(np.float64), sigma=(sigma_px, sigma_px))
     gv = sobel(smoothed, axis=0, mode='constant', cval=0.0)
     gu = sobel(smoothed, axis=1, mode='constant', cval=0.0)

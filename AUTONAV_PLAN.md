@@ -1002,7 +1002,9 @@ this section is the operational checklist.
   `BodyTerminatorDiagnostics`, `BodyBlobDiagnostics`,
   `RingEdgeDiagnostics`, `RingAnnulusDiagnostics`,
   `StarFieldDiagnostics`, `StarUniqueMatchDiagnostics`,
-  `StarRefineDiagnostics`, `CartographicDiagnostics`.
+  `StarRefineDiagnostics`.  ``CartographicDiagnostics`` is **not** in
+  the cutover-tier source tree until ``CartographicNav`` itself
+  ships — see "Removed without direct replacement" below.
 - `nav.nav_technique.confidence` — `evaluate_sigmoid_combination`
   with `ConfidenceSpec` / `ConfidenceTerm`.  Both dataclasses
   validate types, finite numerics, and range invariants in

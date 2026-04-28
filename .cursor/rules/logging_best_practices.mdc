@@ -88,8 +88,10 @@ attaches a stdout stream handler and a rotating timestamped file handler to
 from nav.config import setup_logging, MAIN_LOGGER
 
 setup_logging(arguments, config, nav_results_root_str)
-MAIN_LOGGER.add_handler(pdslogger.stream_handler(level='INFO'))
-# file handler written under {nav_results_root}/logs/nav_offset/
+# `setup_logging` attaches both the stdout stream handler and the
+# timestamped file handler under {nav_results_root}/logs/nav_offset/
+# to MAIN_LOGGER; do not call `MAIN_LOGGER.add_handler` again or the
+# stdout console will see every line twice.
 ```
 
 For `IMAGE_LOGGER`, create per-image handlers with `image_log_handlers()` and pass
@@ -132,4 +134,4 @@ log_dir.mkdir(parents=True, exist_ok=True)
 | Named section + level | `with logger.open('HEADER', level='DEBUG'):` |
 | Per-image file + console | `with IMAGE_LOGGER.open(url, handler=local_handlers):` |
 | Exception in except block | `logger.exception('msg: %s', detail)` |
-| Standard library logging | Only for `NullHandler` and type annotations |
+| Standard library logging | Only for type annotations in low-level plumbing |

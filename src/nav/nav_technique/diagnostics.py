@@ -257,8 +257,7 @@ NavTechniqueDiagnostics = (
 )
 """Sum type spanning every per-technique diagnostics dataclass.
 
-A ``CartographicDiagnostics`` variant returns alongside ``CartographicNav``
-when the technique itself lands; the diagnostics class lives in git history
-(see the cutover commits) until then so production code does not carry a
-dataclass that no technique populates.
+The orchestrator's curator and the technique-result type both consume
+this union; adding a new technique means adding both its diagnostics
+dataclass above and a new entry into this union.
 """

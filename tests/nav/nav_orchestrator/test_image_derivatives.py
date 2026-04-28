@@ -149,8 +149,23 @@ def test_compute_image_gradient_vu_rejects_non_2d_input() -> None:
 
 
 def test_compute_image_gradient_vu_rejects_zero_sigma() -> None:
-    with pytest.raises(ValueError, match='sigma_px must be > 0'):
+    with pytest.raises(ValueError, match='sigma_px must be a finite positive number'):
         compute_image_gradient_vu(np.zeros((4, 4)), sigma_px=0.0)
+
+
+def test_compute_image_gradient_vu_rejects_inf_sigma() -> None:
+    with pytest.raises(ValueError, match='sigma_px must be a finite positive number'):
+        compute_image_gradient_vu(np.zeros((4, 4)), sigma_px=float('inf'))
+
+
+def test_build_image_edge_dt_rejects_inf_noise_sigma() -> None:
+    with pytest.raises(ValueError, match='image_noise_sigma must be finite'):
+        build_image_edge_dt(np.zeros((4, 4)), image_noise_sigma=float('inf'))
+
+
+def test_image_derivatives_config_rejects_inf_sigma() -> None:
+    with pytest.raises(ValueError, match='image_gradient_sigma_px'):
+        ImageDerivativesConfig(image_gradient_sigma_px=float('inf'))
 
 
 # ---------------------------------------------------------------------------

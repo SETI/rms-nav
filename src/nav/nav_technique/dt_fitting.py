@@ -151,7 +151,6 @@ def coarse_ncc_search(
         raise ValueError(f'search_window_vu must be non-negative; got {search_window_vu!r}')
     height, width = edge_mask.shape
     edge_f = edge_mask.astype(np.float64, copy=False)
-    poly_f = polyline_mask.astype(np.float64, copy=False)
     # Scan the bounded window directly: brute-force over O(margin_v * margin_u)
     # offsets is faster than FFT for the typical (50, 50) margins on a
     # 1024 x 1024 image because the cross-correlation involves only the
@@ -176,10 +175,11 @@ def coarse_ncc_search(
                 continue
             sv = shifted_v[valid]
             su = shifted_u[valid]
-            score = float(edge_f[sv, su].sum() * poly_f[poly_vs[valid], poly_us[valid]].sum())
-            # Use the squared score to keep computation in non-negative
-            # ints; ``poly_f[...]`` is constant 1 along ``valid``, so
-            # ``score`` reduces to the overlap count of edge pixels.
+            # Score is the count of polyline points (after shift) that fall
+            # on edge pixels.  ``edge_mask`` is binary, so summing the
+            # binary slice over the in-bounds polyline indices gives the
+            # number of overlapping pixels directly.
+            score = float(edge_f[sv, su].sum())
             key = (abs(dv) + abs(du), abs(dv), dv, du)
             if score > best_score or (score == best_score and key < best_key):
                 best_score = score
@@ -598,8 +598,8 @@ def lm_subpixel_refine(
     verts = np.asarray(vertices_vu, np.float64)
     norms = np.asarray(normals_vu, np.float64)
     sigmas = np.asarray(sigma_normal_per_vertex_px, np.float64)
-    if verts.ndim != 2 or verts.shape[1] != 2:
-        raise ValueError(f'vertices_vu must have shape (N, 2); got {verts.shape}')
+    if verts.ndim != 2 or verts.shape[1] != 2 or verts.shape[0] == 0:
+        raise ValueError(f'vertices_vu must have shape (N, 2) with N > 0; got {verts.shape}')
     if norms.shape != verts.shape:
         raise ValueError(f'normals_vu must match vertices_vu shape; got {norms.shape}')
     if sigmas.ndim != 1 or sigmas.shape[0] != verts.shape[0]:
