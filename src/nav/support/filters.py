@@ -19,7 +19,6 @@ Thread safety: all functions in this module are pure / stateless; safe for
 concurrent use on independent inputs.
 """
 
-import logging
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import cast
@@ -34,8 +33,6 @@ from scipy.ndimage import (
 )
 
 from nav.support.types import NDArrayFloatType
-
-logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 __all__ = [
     'NavFilterKind',

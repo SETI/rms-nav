@@ -14,7 +14,6 @@ __all__ = [
     'BodyDiscDiagnostics',
     'BodyLimbDiagnostics',
     'BodyTerminatorDiagnostics',
-    'CartographicDiagnostics',
     'NavTechniqueDiagnostics',
     'RingAnnulusDiagnostics',
     'RingEdgeDiagnostics',
@@ -245,27 +244,6 @@ class StarRefineDiagnostics:
     }
 
 
-@dataclass(frozen=True)
-class CartographicDiagnostics:
-    """Diagnostics emitted by ``CartographicNav``.
-
-    Parameters:
-        ncc_peak: Peak NCC value.
-        visible_body_area_px: Cartographic-model area in pixels that
-            overlapped the predicted body silhouette.
-        used_gradient: True if gradient mode was selected.
-    """
-
-    ncc_peak: float = 0.0
-    visible_body_area_px: float = 0.0
-    used_gradient: bool = False
-    CURATOR_FIELDS: ClassVar[dict[str, str | None]] = {
-        'ncc_peak': 'ncc_peak',
-        'visible_body_area_px': 'visible_body_area_px',
-        'used_gradient': 'used_gradient',
-    }
-
-
 NavTechniqueDiagnostics = (
     BodyDiscDiagnostics
     | BodyLimbDiagnostics
@@ -276,6 +254,10 @@ NavTechniqueDiagnostics = (
     | StarFieldDiagnostics
     | StarUniqueMatchDiagnostics
     | StarRefineDiagnostics
-    | CartographicDiagnostics
 )
-"""Sum type spanning every per-technique diagnostics dataclass."""
+"""Sum type spanning every per-technique diagnostics dataclass.
+
+The orchestrator's curator and the technique-result type both consume
+this union; adding a new technique means adding both its diagnostics
+dataclass above and a new entry into this union.
+"""

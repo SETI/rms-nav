@@ -11,7 +11,6 @@ fails CI if a new diagnostic field is added without updating the allow-list.
 """
 
 import dataclasses
-import logging
 import math
 from typing import Any
 
@@ -21,8 +20,6 @@ from nav.nav_orchestrator.image_classifier_result import NavImageClassifierResul
 from nav.nav_orchestrator.nav_result import NavResult
 from nav.nav_orchestrator.provenance import Provenance
 from nav.nav_technique.technique_result import NavTechniqueResult
-
-logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 __all__ = [
     'assert_diagnostic_fields_present',

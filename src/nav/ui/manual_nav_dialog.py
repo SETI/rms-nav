@@ -372,8 +372,9 @@ class ManualNavDialog(QDialog):
         model = np.asarray(self._model_img_ext, dtype=np.float64)
         mask = np.asarray(self._model_mask_ext, dtype=bool)
         # Use the bi-directional (data-mask aware) NCC so the surface the user
-        # sees -- and the peak the Auto button finds -- matches what the
-        # correlate_all pipeline produces; without data_mask the zero-padded
+        # sees -- and the peak the Auto button finds -- matches the
+        # composite-template stream this dialog consumes from
+        # ``compose_template_features``; without data_mask the zero-padded
         # extfov margin biases the peak toward |dV| = extfov_margin_v.
         data_mask = self._obs.extfov_data_sensor_mask()
         self._corr_surface, _ = masked_ncc(image, model, mask, data_mask=data_mask)
@@ -792,9 +793,10 @@ class ManualNavDialog(QDialog):
         dlg.exec()
 
     def _on_auto(self) -> None:
-        # Call the same KPeaks correlation used by correlate_all, including
-        # the bi-directional data_mask so that a body model extending into
-        # the extfov zero-padded margin does not bias the peak toward
+        # Auto-pick: run the same KPeaks pyramid NCC against the composite
+        # template the dialog assembled via ``compose_template_features``.
+        # The bi-directional ``data_mask`` keeps a body model that extends
+        # into the extfov zero-padded margin from biasing the peak toward
         # |dV| = extfov_margin_v.
         up_factor = (
             getattr(self._config.offset, 'correlation_fft_upsample_factor', 128)

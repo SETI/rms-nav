@@ -1,0 +1,371 @@
+"""``BodyLimbNav`` — translation fit from body limb polylines.
+
+Consumes every ``LIMB_ARC`` feature in the input set, concatenates their
+per-vertex positions, weights them by ``1 / sigma_normal_per_vertex_px**2``,
+and runs the shared distance-transform fitter to recover a single
+translation that minimises the joint cost across all bodies.  Multi-body
+inputs improve the fit by ``sqrt(N_bodies)`` when SPICE relative geometry
+is correct; the joint-translation parameterisation cannot represent
+"swap two moons" mistakes by construction.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import numpy as np
+
+from nav.config import Config
+from nav.feature.feature import NavFeature
+from nav.feature.feature_type import NavFeatureType
+from nav.feature.geometry import LimbPolyline
+from nav.nav_technique.confidence import (
+    ConfidenceSpec,
+    ConfidenceTerm,
+    evaluate_sigmoid_combination,
+)
+from nav.nav_technique.diagnostics import BodyLimbDiagnostics
+from nav.nav_technique.dt_fitting import (
+    coarse_ncc_search,
+    lm_subpixel_refine,
+)
+from nav.nav_technique.feasibility import NavFeasibilityReport
+from nav.nav_technique.nav_technique import NavTechnique
+from nav.nav_technique.technique_result import NavTechniqueResult
+from nav.support.types import NDArrayBoolType, NDArrayFloatType
+
+if TYPE_CHECKING:  # pragma: no cover - typing-only import
+    from nav.nav_orchestrator.nav_context import NavContext
+
+__all__ = ['BodyLimbNav']
+
+
+LIMB_MIN_ARC_PX: float = 30.0
+"""Minimum surviving polyline length per LIMB_ARC feature for feasibility.
+
+Shorter limbs do not constrain a 2-D translation enough to be worth
+running the LM iteration for; the technique reports infeasibility.
+"""
+
+
+SPURIOUS_DT_RMS_FACTOR: float = 5.0
+"""Final DT residual exceeding this many limb-sigmas marks the result spurious."""
+
+
+SPURIOUS_DT_FLOOR_PX: float = 3.0
+"""Minimum surviving DT residual below which spurious detection is skipped."""
+
+
+SPURIOUS_MIN_INLIERS: int = 6
+"""Below this Tukey-inlier count the final fit is flagged spurious.
+
+Six surviving vertices is the smallest count at which the M-estimator
+covariance is meaningfully informative for a 2-D translation.
+"""
+
+
+_AT_EDGE_TOLERANCE_PX: float = 1.0
+"""Pixels of slack around the search-window axis bounds for at-edge detection.
+
+A converged offset whose absolute distance from any axis bound (``+/-margin_v``,
+``+/-margin_u``) falls within this tolerance is flagged ``at_edge=True`` and
+forced to zero confidence by the technique's ``hard_zero_if`` gate.  One pixel
+matches the bilinear DT half-cell width: any closer to the boundary and the
+LM gradient information is unreliable.
+"""
+
+
+_BODY_LIMB_CONFIDENCE_SPEC = ConfidenceSpec(
+    alpha0=-1.0,
+    terms=(
+        ConfidenceTerm(feature='visible_limb_arc_fraction', alpha=3.0),
+        ConfidenceTerm(feature='dt_fit_rms_px', alpha=-1.5),
+        ConfidenceTerm(
+            feature='visible_arc_px',
+            alpha=0.4,
+            divisor=100.0,
+            cap_at=1.0,
+        ),
+    ),
+    hard_zero_if={'at_edge': True},
+)
+"""Default confidence spec for the body-limb technique.
+
+The placeholder coefficients match the design's calibration target:
+half-visible 30-vertex limbs converge to "medium" and full-visible
+60+-vertex limbs converge to "high" once the planted-offset library is
+used to retune the alphas.
+"""
+
+
+def _build_polyline_mask(
+    vertices_vu: NDArrayFloatType, shape_vu: tuple[int, int]
+) -> NDArrayBoolType:
+    """Render polyline vertices into a boolean image mask aligned to shape_vu."""
+    vs = np.rint(vertices_vu[:, 0]).astype(np.int64)
+    us = np.rint(vertices_vu[:, 1]).astype(np.int64)
+    valid = (vs >= 0) & (vs < shape_vu[0]) & (us >= 0) & (us < shape_vu[1])
+    mask = np.zeros(shape_vu, dtype=bool)
+    if valid.any():
+        mask[vs[valid], us[valid]] = True
+    return mask
+
+
+def _aggregate_limb_features(
+    features: list[NavFeature],
+) -> tuple[
+    NDArrayFloatType,
+    NDArrayFloatType,
+    NDArrayFloatType,
+    list[str],
+]:
+    """Concatenate vertices, normals, and per-vertex sigmas from LIMB_ARC features.
+
+    The model normals are negated relative to the geometric outward normal
+    so that the ``polarity_filter`` ``dot > 0`` rule corresponds to "image
+    gradient points into the body silhouette" — which is the typical
+    bright-body convention used by the body NavModel.
+
+    Returns:
+        ``(vertices, polarity_normals, sigmas, feature_ids)``.
+    """
+    vert_chunks: list[NDArrayFloatType] = []
+    normal_chunks: list[NDArrayFloatType] = []
+    sigma_chunks: list[NDArrayFloatType] = []
+    ids: list[str] = []
+    for feat in features:
+        if not isinstance(feat.geometry, LimbPolyline):
+            continue
+        if feat.geometry.vertices_vu.shape[0] == 0:
+            continue
+        vert_chunks.append(feat.geometry.vertices_vu.astype(np.float64))
+        # Negate to obtain "polarity normals": the direction the image
+        # gradient is expected to point at a bright-body limb.
+        normal_chunks.append(-feat.geometry.normals_vu.astype(np.float64))
+        sigma_chunks.append(feat.geometry.sigma_normal_per_vertex_px.astype(np.float64))
+        ids.append(feat.feature_id)
+    empty_2 = np.empty((0, 2), np.float64)
+    empty_1 = np.empty(0, np.float64)
+    vertices = np.concatenate(vert_chunks, axis=0) if vert_chunks else empty_2
+    normals = np.concatenate(normal_chunks, axis=0) if normal_chunks else empty_2
+    sigmas = np.concatenate(sigma_chunks, axis=0) if sigma_chunks else empty_1
+    return vertices, normals, sigmas, ids
+
+
+class BodyLimbNav(NavTechnique):
+    """Body-limb DT-based translation fit.
+
+    Consumes every ``LIMB_ARC`` feature whose visible arc length meets the
+    feasibility threshold and produces one combined translation offset by
+    minimising the summed weighted squared distance from the model
+    polylines to the image edge distance transform.  Per-vertex weights
+    follow the prior precision ``1 / sigma_normal_per_vertex_px**2``;
+    Tukey biweight reweighting handles the per-image outliers.
+
+    Class attributes:
+        accepts_feature_types: ``frozenset({LIMB_ARC})``.
+        requires_prior: ``False`` — the technique runs in pass 1.
+    """
+
+    name = 'BodyLimbNav'
+    accepts_feature_types = frozenset({NavFeatureType.LIMB_ARC})
+    requires_prior = False
+
+    def __init__(self, *, config: Config | None = None) -> None:
+        super().__init__(config=config)
+
+    def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
+        """Return whether the input set carries any usable limb arc.
+
+        Reads only the polyline vertex count per feature — never any
+        pixels — so the report is cheap to obtain even on large feature
+        sets.
+
+        Parameters:
+            features: Feature list filtered to this technique's accepted
+                types.
+
+        Returns:
+            ``NavFeasibilityReport`` with ``feasible=True`` iff at least
+            one LIMB_ARC has at least :data:`LIMB_MIN_ARC_PX` surviving
+            vertices.
+        """
+        eligible = [
+            f
+            for f in features
+            if isinstance(f.geometry, LimbPolyline)
+            and f.geometry.vertices_vu.shape[0] >= LIMB_MIN_ARC_PX
+        ]
+        if not eligible:
+            return NavFeasibilityReport(
+                feasible=False,
+                reason='no_limb_arc_features_with_sufficient_visible_arc',
+            )
+        return NavFeasibilityReport(
+            feasible=True,
+            reason='ok',
+            consumed_feature_count=len(eligible),
+        )
+
+    def navigate(self, features: list[NavFeature], context: NavContext) -> NavTechniqueResult:
+        """Compute the joint-translation offset from the input limb polylines.
+
+        Parameters:
+            features: Feature list filtered to the technique's accepted
+                types.  Polylines with fewer than :data:`LIMB_MIN_ARC_PX`
+                vertices are dropped before fitting.
+            context: Per-image NavContext.  Must carry
+                ``image_edge_dt_ext`` and ``image_gradient_vu_ext`` —
+                both populated by the orchestrator's ``_make_context``.
+
+        Returns:
+            A ``NavTechniqueResult`` with the recovered offset, 2x2
+            covariance, calibrated confidence, and a populated
+            :class:`BodyLimbDiagnostics`.
+        """
+        with self.logger.open(f'TECHNIQUE: {self.name}'):
+            if context.image_edge_dt_ext is None or context.image_gradient_vu_ext is None:
+                raise RuntimeError(
+                    'BodyLimbNav requires NavContext.image_edge_dt_ext and '
+                    'NavContext.image_gradient_vu_ext to be populated by the orchestrator'
+                )
+            eligible_features = [
+                f
+                for f in features
+                if isinstance(f.geometry, LimbPolyline)
+                and f.geometry.vertices_vu.shape[0] >= LIMB_MIN_ARC_PX
+            ]
+            self.logger.info(
+                'Consuming %d LIMB_ARC features (out of %d offered)',
+                len(eligible_features),
+                len(features),
+            )
+            vertices, polarity_normals, sigmas, feature_ids = _aggregate_limb_features(
+                eligible_features
+            )
+            edge_dt = context.image_edge_dt_ext
+            gradient_vu = context.image_gradient_vu_ext
+            edge_mask = edge_dt <= 0.5
+            polyline_mask = _build_polyline_mask(vertices, edge_dt.shape[:2])
+            margin_v, margin_u = _search_window_for_obs(context)
+            coarse_dv, coarse_du = coarse_ncc_search(
+                edge_mask,
+                polyline_mask,
+                (margin_v, margin_u),
+            )
+            self.logger.debug('Coarse NCC offset: (%d, %d)', coarse_dv, coarse_du)
+            result = lm_subpixel_refine(
+                vertices_vu=vertices,
+                normals_vu=polarity_normals,
+                sigma_normal_per_vertex_px=sigmas,
+                image_edge_dt=edge_dt,
+                image_gradient_vu=gradient_vu,
+                initial_offset_vu=(float(coarse_dv), float(coarse_du)),
+                use_polarity=True,
+            )
+            dv_final, du_final = result.offset_vu
+            at_edge = (
+                abs(dv_final - margin_v) <= _AT_EDGE_TOLERANCE_PX
+                or abs(dv_final + margin_v) <= _AT_EDGE_TOLERANCE_PX
+                or abs(du_final - margin_u) <= _AT_EDGE_TOLERANCE_PX
+                or abs(du_final + margin_u) <= _AT_EDGE_TOLERANCE_PX
+            )
+            sigma_min_px = float(sigmas.min()) if sigmas.size else 1.0
+            spurious = (
+                result.rms_px > max(SPURIOUS_DT_FLOOR_PX, SPURIOUS_DT_RMS_FACTOR * sigma_min_px)
+                or result.inlier_count < SPURIOUS_MIN_INLIERS
+            )
+            visible_limb_arc_fraction = _aggregate_visible_arc_fraction(eligible_features)
+            diagnostics = BodyLimbDiagnostics(
+                visible_limb_arc_fraction=visible_limb_arc_fraction,
+                visible_arc_px=float(vertices.shape[0]),
+                dt_fit_rms_px=float(result.rms_px),
+                lm_iterations=int(result.iterations),
+                tukey_inlier_count=int(result.inlier_count),
+            )
+            confidence = evaluate_sigmoid_combination(
+                _BODY_LIMB_CONFIDENCE_SPEC,
+                _LimbConfidenceContext(at_edge=at_edge, diagnostics=diagnostics),
+                technique_name=self.name,
+            )
+            self.logger.info(
+                'Converged at offset (%.4f, %.4f) px, RMS %.4f px, inliers %d / %d, '
+                'confidence %.4f',
+                dv_final,
+                du_final,
+                result.rms_px,
+                result.inlier_count,
+                int(vertices.shape[0]),
+                float(confidence),
+            )
+            covariance = result.covariance
+            if covariance.shape != (2, 2):
+                covariance = covariance[:2, :2]
+            return NavTechniqueResult(
+                technique_name=self.name,
+                feature_ids=tuple(feature_ids),
+                offset_px=(float(dv_final), float(du_final)),
+                covariance_px2=covariance,
+                confidence=float(confidence),
+                spurious=bool(spurious),
+                at_edge=bool(at_edge),
+                diagnostics=diagnostics,
+            )
+
+
+class _LimbConfidenceContext:
+    """Adapter binding ``BodyLimbDiagnostics`` plus ``at_edge`` for confidence eval.
+
+    The shared :func:`evaluate_sigmoid_combination` helper accepts any
+    object whose attributes match the spec's term names.  ``at_edge`` is
+    not part of ``BodyLimbDiagnostics`` (it lives on
+    ``NavTechniqueResult``) so this small adapter exposes both as
+    attributes of one object the spec can dot into.
+    """
+
+    def __init__(self, *, at_edge: bool, diagnostics: BodyLimbDiagnostics) -> None:
+        self.at_edge = at_edge
+        self.visible_limb_arc_fraction = diagnostics.visible_limb_arc_fraction
+        self.visible_arc_px = diagnostics.visible_arc_px
+        self.dt_fit_rms_px = diagnostics.dt_fit_rms_px
+        self.lm_iterations = diagnostics.lm_iterations
+        self.tukey_inlier_count = diagnostics.tukey_inlier_count
+
+
+def _aggregate_visible_arc_fraction(features: list[NavFeature]) -> float:
+    """Return the per-feature ``visible_arc_fraction`` weighted by vertex count.
+
+    The reliability breakdown carries each feature's visible-arc fraction
+    on the predicted polyline; the diagnostic on the navigation result
+    summarises across all consumed features by weighting each fraction by
+    the count of surviving vertices.  The result is in ``[0, 1]``.
+    """
+    total_weighted = 0.0
+    total_count = 0.0
+    for feat in features:
+        fraction = feat.reliability_reasons.visible_arc_fraction
+        if fraction is None:
+            continue
+        if not isinstance(feat.geometry, LimbPolyline):
+            continue
+        n = float(feat.geometry.vertices_vu.shape[0])
+        total_weighted += float(fraction) * n
+        total_count += n
+    if total_count == 0.0:
+        return 0.0
+    return total_weighted / total_count
+
+
+def _search_window_for_obs(context: NavContext) -> tuple[int, int]:
+    """Return the ``(margin_v, margin_u)`` search window for the coarse NCC.
+
+    The technique respects the per-instrument extfov margin attached to
+    the observation; if the obs does not expose that attribute (e.g.,
+    test fixtures), a 32 x 32 fallback is used so the technique still
+    runs end-to-end for unit-test scenes.
+    """
+    obs = context.obs
+    margin = getattr(obs, 'extfov_margin_vu', None)
+    if margin is None:
+        return (32, 32)
+    return (int(margin[0]), int(margin[1]))

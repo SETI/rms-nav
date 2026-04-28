@@ -30,8 +30,6 @@ Modules:
         Catalog-driven star ``NavModel`` and supporting helpers.
 """
 
-import logging
-
 from nav.nav_model.nav_model import NavModel, build_models_for_obs
 from nav.nav_model.nav_model_body import NavModelBody
 from nav.nav_model.nav_model_body_base import NavModelBodyBase
@@ -41,8 +39,6 @@ from nav.nav_model.nav_model_rings_base import NavModelRingsBase
 from nav.nav_model.nav_model_rings_simulated import NavModelRingsSimulated
 from nav.nav_model.nav_model_titan import NavModelTitan
 from nav.nav_model.stars import NavModelStars
-
-logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 __all__ = [
     'NavModel',

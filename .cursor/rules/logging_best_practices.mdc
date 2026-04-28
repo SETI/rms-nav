@@ -1,0 +1,135 @@
+---
+alwaysApply: true
+description: Best practices for using PdsLogger (rms-pdslogger) throughout this project.
+---
+
+# Logging Best Practices
+
+This project uses `pdslogger.PdsLogger` exclusively. **Never** use the standard Python
+`logging` module to emit log messages. The only legitimate use of `import logging` is
+for type annotations in low-level plumbing code (e.g. `logging.Handler`,
+`logging.FileHandler` in `nav.config.logger`) where `pdslogger` factory functions
+return standard handler objects. Do not add `import logging` to new files.
+
+## 1. The Two Module-Level Loggers
+
+`nav.config.logger` defines two singleton loggers imported from `nav.config`:
+
+```python
+from nav.config import MAIN_LOGGER, IMAGE_LOGGER
+```
+
+| Logger | Name | Purpose |
+|--------|------|---------|
+| `MAIN_LOGGER` | `"nav_offset"` | Top-level program events; stdout + timestamped file handler attached at startup via `setup_logging()` |
+| `IMAGE_LOGGER` | `"nav_image"` | Per-image events; handlers are attached only inside an `IMAGE_LOGGER.open()` context via `image_log_handlers()` |
+
+Navigation components (subclasses of `NavBase`) receive `IMAGE_LOGGER` via `self._logger`.
+The main driver modules use `MAIN_LOGGER` directly.
+
+## 2. Structuring Output with `logger.open()`
+
+Use `with logger.open(header)` to group related log lines under a named section header.
+This creates a visual block in both the console and log files.
+
+```python
+# ✅ GOOD - wrap a logical unit of work in a named section
+with self._logger.open(f'CREATE BODY MODEL FOR: {self._body_name}'):
+    self._render()
+
+# ✅ GOOD - optional level= to control visibility
+with self._logger.open('CREATE RINGS MODEL', level=log_level):
+    ...
+
+# ✅ GOOD - attach per-image handlers (stdout + file) for IMAGE_LOGGER contexts
+with logger.open(str(image_url), handler=local_handlers):
+    ...
+```
+
+Sections can be nested. The outermost `open()` at the image level carries
+`handler=local_handlers` so that per-image console and file handlers are
+active only for that image's processing window:
+
+```python
+local_handlers = image_log_handlers(image_log_path, log_arguments, DEFAULT_CONFIG)
+with IMAGE_LOGGER.open(str(image_url), handler=local_handlers):
+    log_run_environment(IMAGE_LOGGER, sys.argv[1:])
+    # ... process image ...
+```
+
+## 3. Logging Calls
+
+Use `%`-style format strings (never f-strings) in logging calls so the
+interpolation is deferred until the message is actually emitted:
+
+```python
+# ✅ GOOD
+self._logger.info('No rings visible in observation')
+self._logger.info('Writing metadata to %s', public_metadata_file)
+self._logger.warning('No closest planet found -- cannot create ring model')
+self._logger.debug('Navigation failed; metadata keys: %s', sorted(metadata.keys()))
+self._logger.exception('Error reading image "%s": %s', image_path, message)
+
+# ❌ BAD - f-string is always evaluated, even when the level is suppressed
+self._logger.info(f'Writing metadata to {public_metadata_file}')
+```
+
+Available levels: `debug`, `info`, `warning`, `error`, `exception`, `fatal`.
+Use `exception` (not `error`) when inside an `except` block so the traceback is
+captured automatically.
+
+Note: f-strings are OK in the logger.open() call.
+
+
+## 4. Setting Up Handlers
+
+Call `setup_logging()` once from `main()` after resolving the results root. It
+attaches a stdout stream handler and a rotating timestamped file handler to
+`MAIN_LOGGER`:
+
+```python
+from nav.config import setup_logging, MAIN_LOGGER
+
+setup_logging(arguments, config, nav_results_root_str)
+# `setup_logging` attaches both the stdout stream handler and the
+# timestamped file handler under {nav_results_root}/logs/nav_offset/
+# to MAIN_LOGGER; do not call `MAIN_LOGGER.add_handler` again or the
+# stdout console will see every line twice.
+```
+
+For `IMAGE_LOGGER`, create per-image handlers with `image_log_handlers()` and pass
+them to `logger.open()` — never attach them permanently to the logger:
+
+```python
+from nav.config import IMAGE_LOGGER, image_log_handlers
+
+local_handlers = image_log_handlers(image_log_path, arguments, config)
+with IMAGE_LOGGER.open(str(image_url), handler=local_handlers):
+    ...
+```
+
+`image_log_handlers()` returns one `stream_handler` and one `file_handler`. Their
+levels are resolved from CLI args → config → `"INFO"`.
+
+## 5. Log File Paths
+
+Log file paths are `FCPath` objects. Follow the `filecache_best_practices` rule:
+never call `mkdir` on the log directory — `PdsLogger` handles directory creation
+via `FileCache` internally.
+
+```python
+# ❌ BAD - do not mkdir the log directory
+log_dir.mkdir(parents=True, exist_ok=True)
+```
+
+## 6. Quick Reference
+
+| Task | Pattern |
+|------|---------|
+| Import loggers | `from nav.config import MAIN_LOGGER, IMAGE_LOGGER` |
+| Top-level events | `MAIN_LOGGER.info(...)` |
+| Per-image events | `self._logger.info(...)` (`self._logger` is `IMAGE_LOGGER`) |
+| Named section | `with self._logger.open('SECTION HEADER'):` |
+| Named section + level | `with self._logger.open('HEADER', level='DEBUG'):` |
+| Exception in except block | `logger.exception('msg: %s', detail)` |
+| Standard library logging | Only for type annotations in low-level plumbing |

@@ -12,10 +12,7 @@ outside the orchestrator (image-quality classifier, kernel-loading shim,
 dataset enumeration).
 """
 
-import logging
 from enum import StrEnum
-
-logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 __all__ = ['NavStatusReason']
 

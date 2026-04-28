@@ -16,7 +16,6 @@ takes them as constructor parameters so it stays pure-Python and unit-
 testable without loading config.
 """
 
-import logging
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -27,8 +26,6 @@ from nav.nav_orchestrator.image_classifier_result import (
 )
 from nav.support.noise_estimate import estimate_image_noise_sigma
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
-
-logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 __all__ = [
     'ImageQualityThresholds',

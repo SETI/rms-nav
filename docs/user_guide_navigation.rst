@@ -130,10 +130,17 @@ Navigation options
   enable. Valid entries are ``stars``, ``rings``, and body-specific entries of
   the form ``body:NAME`` (glob patterns are allowed).
 
-* ``--nav-techniques LIST``: a comma-separated list of navigation techniques to
-  apply. Valid entries include ``correlate_all`` and ``manual``. Note: You
-  should typically use only one technique at a time, as they serve different
-  purposes.
+* ``--nav-techniques LIST``: a comma-separated glob-pattern list selecting
+  which registered ``NavTechnique`` subclasses run.  Implemented techniques
+  today are ``BodyLimbNav``, ``BodyTerminatorNav``, and ``RingEdgeNav``;
+  several more (``BodyDiscCorrelateNav``, ``BodyBlobNav``, ``RingAnnulusNav``,
+  ``StarFieldFromCatalogNav``, ``StarUniqueMatchNav``, ``StarRefineNav``)
+  are planned but not yet shipped.  Defaults to ``*`` (all registered
+  techniques run); a leading ``!`` excludes a pattern (e.g.
+  ``--nav-techniques '!RingEdgeNav'`` runs every technique except the
+  ring-edge fitter).  Multiple feasible techniques run in parallel and the
+  orchestrator combines their results via the ensemble; you do **not**
+  pick "one technique at a time" the way the legacy pipeline did.
 
 Output options
 ^^^^^^^^^^^^^^
@@ -200,11 +207,13 @@ To process Voyager images within a single PDS3 volume:
 
    nav_offset vgiss --volumes VGISS_5101
 
-To process a New Horizons image list found in a CSV from PDS using the correlate_all technique:
+To process a New Horizons image list found in a CSV from PDS, restricting the
+run to the body-limb and ring-edge DT techniques:
 
 .. code-block:: bash
 
-   nav_offset nhlorri --image-filespec-csv /path/to/nhlorri.csv --nav-techniques correlate_all
+   nav_offset nhlorri --image-filespec-csv /path/to/nhlorri.csv \
+       --nav-techniques 'BodyLimbNav,RingEdgeNav'
 
 To choose ten random Cassini images between two volumes and perform a dry run:
 
@@ -241,7 +250,7 @@ objects. Each task is:
             "dataset_name": "<dataset_name>",
             "arguments": {
                 "nav_models": ["body:*", "rings", "stars"],
-                "nav_techniques": ["correlate_all"]
+                "nav_techniques": ["*"]
             },
             "files": [
                 {
@@ -342,154 +351,119 @@ every supported field, see :doc:`user_guide_simulated_images`.
 Navigation Techniques
 =====================
 
-RMS-NAV supports two navigation techniques that can be selected using the ``--nav-techniques`` command-line option. You should typically use only one technique at a time, as they serve different purposes.
+The autonomous-navigation pipeline runs every registered ``NavTechnique``
+whose feasibility check passes on the surviving feature set, then combines
+the per-technique offsets via the orchestrator's precision-weighted
+ensemble.  Use ``--nav-techniques`` to restrict which techniques run; the
+default ``*`` runs all of them.
 
-correlate_all
--------------
+The algorithmic detail (DT pipeline, Levenberg-Marquardt refinement,
+information-matrix covariance) lives in
+:doc:`developer_guide_techniques` and :doc:`developer_guide_uncertainty`;
+this page summarises what each technique does and which scenes it
+applies to.
 
-The ``correlate_all`` technique performs automated navigation by correlating the observed image with a combined theoretical model. This is the primary automated navigation method.
+Implemented techniques
+----------------------
 
-**How it works:**
+``BodyLimbNav``
+^^^^^^^^^^^^^^^
 
-1. **Model Combination**: The technique first creates a combined model from all available navigation models (stars, bodies, rings, etc.). For each pixel, it selects the model element with the smallest range (closest to the observer), ensuring proper depth ordering.
+Translation fit on a body's lit limb.  Consumes every ``LIMB_ARC`` feature
+emitted by ``NavModelBody``, concatenates their per-vertex polylines, and
+runs a coarse-NCC plus Levenberg-Marquardt refinement against the image
+edge-distance transform.  Tukey biweight reweighting rejects outlier
+vertices; the M-estimator information matrix at the converged solution
+yields the result's covariance.  Multi-body inputs sharpen the fit by
+``sqrt(N_bodies)``.
 
-2. **Correlation**: It uses a pyramid-based correlation algorithm (KPeaks) to find the best match between the observed image and the combined model. The correlation searches for the offset that maximizes the match quality.
+Best for: scenes where one or more bodies show a visible limb arc
+(typical Cassini ISS Mimas / Enceladus / Tethys / Dione / Rhea encounter
+images).  Feasibility threshold: at least one limb arc with at least
+30 surviving polyline vertices.
 
-3. **Star Refinement** (optional): If star models are available and star refinement is enabled in the configuration, the technique performs a second pass to refine the offset by precisely locating individual stars in the image. This refinement:
-   - Searches for each star's position using the instrument's point spread function (PSF)
-   - Applies photometric gates to reject non-stellar signal (scale/noise, chi-squared, SNR, position error)
-   - Computes the median offset from all successfully located stars
-   - Removes outliers using a robust statistical method
-   - Updates the final offset with the refined value
+``BodyTerminatorNav``
+^^^^^^^^^^^^^^^^^^^^^
 
-4. **Validation**: The technique validates that the computed offset is within the extended field of view margins. If the offset is outside these bounds, the technique fails.
+Same shape as ``BodyLimbNav`` on ``TERMINATOR_ARC`` features, with two
+differences: each body's per-vertex sigmas collapse to one per-body scalar
+(the body's mean sigma), and the confidence formula carries
+phase-angle-factor and albedo-penalty terms.  Best for crescent
+geometries where the terminator runs through bright, nearly-uniform
+hemispheres.
 
-**Configuration Options:**
+``RingEdgeNav``
+^^^^^^^^^^^^^^^
 
-The following configuration options in ``config_02_offset.yaml`` control the behavior of ``correlate_all``:
+DT-based fit on every ``RING_EDGE`` feature.  Polarity prediction is
+intentionally disabled today (the ring catalog does not yet flag
+polarity_predictable, deferred work).  When every input edge is
+straight-line the technique reports ``is_rank_1=True`` and returns an
+honest rank-deficient covariance; the ensemble combine fuses it with any
+orthogonal-axis result (a star, body limb, body blob) before declaring a
+final answer.
 
-* ``offset.correlation_fft_upsample_factor`` (default: 128): The upsampling factor used in the FFT-based correlation. Higher values provide finer sub-pixel resolution but increase computation time.
+Best for: scenes containing bright ring edges (typical Cassini ISS
+Saturn-rings imagery).
 
-* ``offset.star_refinement_enabled`` (default: true): Whether to enable star-based refinement after the initial correlation.
+``NavTechniqueManual``
+^^^^^^^^^^^^^^^^^^^^^^
 
-* ``offset.star_refinement_nsigma`` (default: 3): The number of standard deviations used to identify outliers during star refinement.
+Interactive PyQt6 dialog that composes every template-bearing feature
+into a single ext-FOV overlay and lets the operator pick the offset by
+hand.  Not part of the autonomous registry; invoke it directly from a
+GUI driver when human judgement is required.
 
-* ``offset.star_refinement_search_limit`` (default: [2.5, 2.5]): The search radius in pixels (v, u) when locating individual stars.
+Pending techniques (not yet shipped)
+-------------------------------------
 
-* ``offset.star_refinement_max_reduced_chi2`` (default: 10.0): Reject PSF fits with reduced chi-squared above this threshold. A high chi-squared indicates the PSF model cannot describe the data, suggesting a non-stellar source.
+The following techniques are designed and have stub diagnostics in
+place; their concrete implementations are pending.
 
-* ``offset.star_refinement_min_reduced_chi2`` (default: 0.1): Reject PSF fits with reduced chi-squared below this threshold. A value near zero indicates the background polynomial has absorbed the signal (overfitting).
+* ``BodyDiscCorrelateNav`` -- full-disc NCC for fully-in-FOV bodies.
+* ``BodyBlobNav`` -- centroid fit for under-resolved or irregular bodies.
+* ``RingAnnulusNav`` -- multi-ring composite NCC for compressed ring
+  geometries.
+* ``StarFieldFromCatalogNav`` -- triplet-hash + RANSAC pattern match for
+  star-rich frames.
+* ``StarUniqueMatchNav`` -- direct catalog-uniqueness match for sparse
+  star fields with one or two bright stars.
+* ``StarRefineNav`` -- prior-refining single-star polish (pass-2).
 
-* ``offset.star_refinement_min_peak_snr`` (default: 5.0): Reject PSF fits with peak signal-to-noise ratio below this value. Low SNR indicates the fit may have locked onto noise or a non-stellar feature.
+Until these land, scenes whose only viable feature type is ``STAR``,
+``BODY_DISC``, ``BODY_BLOB``, or ``RING_ANNULUS`` will report
+``status_reason=no_feasible_techniques``.
 
-* ``offset.star_refinement_max_pos_err`` (default: 0.5 pixels): Reject PSF fits where the 1-sigma position uncertainty in either axis exceeds this limit.
+Filtering examples
+------------------
 
-* ``offset.log_star_refinement_detail`` (default: false): Log all fit metrics and gate thresholds per star at DEBUG level. Useful for diagnosing unexpected rejection behavior.
+Run only the ring-edge technique:
 
-* ``general.log_level_nav_correlate_all`` (default: ``INFO``, from ``config_01_general.yaml``): Logging level for this technique. Accepts ``DEBUG``, ``INFO``, ``WARNING``, ``ERROR``, or ``CRITICAL``.
+.. code-block:: bash
 
-**Star conflict strings from refinement:**
+   nav_offset coiss N1234567890 --nav-techniques RingEdgeNav
 
-Stars that fail a gate receive one of the following ``conflicts`` strings and are excluded from offset statistics:
+Run every technique except ``BodyTerminatorNav``:
 
-* ``REFINEMENT EDGE``: Star is too close to the image edge for PSF fitting.
-* ``REFINEMENT FAILED``: PSF optimizer returned no result.
-* ``REFINEMENT NO STAR``: Fit scale at or below the noise floor; no real signal present.
-* ``REFINEMENT CHI2 LOW``: Reduced chi-squared below minimum; background polynomial overfit the signal.
-* ``REFINEMENT CHI2``: Reduced chi-squared above maximum; PSF model cannot describe the data.
-* ``REFINEMENT SNR``: Peak SNR below minimum.
-* ``REFINEMENT POS_ERR``: Position uncertainty exceeds the maximum.
-* ``REFINEMENT OUTLIER``: Passed all photometric gates but identified as a spatial outlier by the robust rejection step.
+.. code-block:: bash
 
-**Star ring-plane occlusion:**
+   nav_offset coiss N1234567890 --nav-techniques '!BodyTerminatorNav'
 
-Before entering the star model or refinement loop, each star is checked against the ring-plane backplane for the observation's closest planet. Stars whose predicted image position falls within a configured opaque ring annulus receive a ``RING: <PLANET>`` conflict string and are excluded from the star model and refinement. Body intercept (``BODY: <NAME>``) takes precedence: if a star is already behind a planet or moon the ring check is skipped.
+Run both DT body techniques together:
 
-The ring annuli are configured per planet under ``stars.ring_occlusion_radii_km``. Each planet maps to a list of ``[inner_km, outer_km]`` pairs. A star is occluded if the sampled ring-plane radius falls inside any pair for that planet. Planets not listed have no ring occlusion.
+.. code-block:: bash
 
-Example from ``config_03_stars.yaml``:
+   nav_offset coiss N1234567890 --nav-techniques 'BodyLimbNav,BodyTerminatorNav'
 
-.. code-block:: yaml
-
-   stars:
-     ring_occlusion_enabled: true
-     ring_occlusion_radii_km:
-       SATURN:
-         - [74490.0, 91980.0]    # C ring
-         - [91980.0, 117580.0]   # B ring
-         - [122170.0, 136780.0]  # A ring (Cassini Division excluded)
-       URANUS:
-         - [41837.0, 51149.0]
-       NEPTUNE:
-         - [40900.0, 62933.0]
-
-* ``stars.ring_occlusion_enabled`` (default: true): Master switch. Set to ``false`` to disable ring-plane occlusion for all planets.
-
-* ``stars.ring_occlusion_radii_km``: Dict mapping uppercase planet names to lists of ``[inner_km, outer_km]`` annulus pairs. Each pair defines a radial range that is treated as opaque. Multiple pairs per planet allow gaps (e.g., the Cassini Division) to remain transparent.
-
-**When to use:**
-
-* Use ``correlate_all`` for automated batch processing of images
-* Best for images with clear features (stars, planetary bodies, or rings)
-* Suitable for both starfield and body-dominated images
-* Works well when you need consistent, reproducible results
-
-**Output:**
-
-The technique produces:
-* A pixel offset (dv, du) indicating the correction needed
-* Uncertainty estimates (sigma_v, sigma_u) based on the correlation quality and star refinement
-* Confidence score (typically 1.0 for successful correlations)
-* Metadata including correlation quality metrics and star refinement statistics
-
-manual
+Output
 ------
 
-The ``manual`` technique provides an interactive graphical interface for manually adjusting the navigation offset. This is useful when automated techniques fail or when expert judgment is needed.
-
-**How it works:**
-
-1. **Model Combination**: Like ``correlate_all``, the manual technique first creates a combined model from all available navigation models.
-
-2. **Interactive Dialog**: A PyQt6-based dialog window opens showing:
-   * The observed image (science data)
-   * The combined model overlaid on the image
-   * Pan and zoom controls for detailed inspection
-   * Offset adjustment controls (dv, du spin boxes)
-   * An "Auto" button that runs the same correlation algorithm used by ``correlate_all``
-
-3. **User Interaction**: The user can:
-   * Pan and zoom to examine details
-   * Manually adjust the offset using spin boxes
-   * Click "Auto" to get an automated correlation result as a starting point
-   * Accept or cancel the navigation
-
-4. **Result**: If the user accepts, the manually specified offset is used. The confidence is set to 1.0, and uncertainty is set to None (since it's a manual determination).
-
-**Configuration Options:**
-
-The manual technique uses the same correlation settings as ``correlate_all`` when the "Auto" button is clicked:
-* ``offset.correlation_fft_upsample_factor``: Controls the precision of the auto-correlation
-
-**When to use:**
-
-* Use ``manual`` when automated techniques fail or produce questionable results
-* Useful for images with poor quality, unusual features, or edge cases
-* Helpful for expert review and validation of automated results
-* Required when running in an environment with a display (X11 or similar)
-
-**Requirements:**
-
-* Requires a graphical display (X11, Wayland, or similar)
-* Requires PyQt6 to be installed
-* Not suitable for headless batch processing environments
-
-**Output:**
-
-The technique produces:
-* A pixel offset (dv, du) as specified by the user
-* Confidence score of 1.0 (user-accepted result)
-* Uncertainty set to None (manual determination)
+Every technique that runs contributes one entry to
+``NavResult.per_technique`` carrying the per-technique offset, 2x2
+covariance, calibrated confidence, and a typed ``*Diagnostics``
+dataclass.  The orchestrator's ensemble combine reconciles those
+entries into a single ``NavResult.offset_px`` and ``confidence_rank``;
+both numbers land in the per-image ``_metadata.json``.
 
 Navigation Models
 =================

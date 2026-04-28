@@ -19,8 +19,6 @@ Modules:
         / ``ConfidenceTerm`` dataclasses.
 """
 
-import logging
-
 from nav.nav_technique.confidence import (
     ConfidenceSpec,
     ConfidenceTerm,
@@ -31,7 +29,6 @@ from nav.nav_technique.diagnostics import (
     BodyDiscDiagnostics,
     BodyLimbDiagnostics,
     BodyTerminatorDiagnostics,
-    CartographicDiagnostics,
     NavTechniqueDiagnostics,
     RingAnnulusDiagnostics,
     RingEdgeDiagnostics,
@@ -41,17 +38,19 @@ from nav.nav_technique.diagnostics import (
 )
 from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.nav_technique import NavTechnique, filter_technique_names
+from nav.nav_technique.nav_technique_body_limb import BodyLimbNav
+from nav.nav_technique.nav_technique_body_terminator import BodyTerminatorNav
 from nav.nav_technique.nav_technique_manual import NavTechniqueManual
+from nav.nav_technique.nav_technique_ring_edge import RingEdgeNav
 from nav.nav_technique.technique_result import NavTechniqueResult
-
-logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 __all__ = [
     'BodyBlobDiagnostics',
     'BodyDiscDiagnostics',
     'BodyLimbDiagnostics',
+    'BodyLimbNav',
     'BodyTerminatorDiagnostics',
-    'CartographicDiagnostics',
+    'BodyTerminatorNav',
     'ConfidenceSpec',
     'ConfidenceTerm',
     'NavFeasibilityReport',
@@ -61,6 +60,7 @@ __all__ = [
     'NavTechniqueResult',
     'RingAnnulusDiagnostics',
     'RingEdgeDiagnostics',
+    'RingEdgeNav',
     'StarFieldDiagnostics',
     'StarRefineDiagnostics',
     'StarUniqueMatchDiagnostics',

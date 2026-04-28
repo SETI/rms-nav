@@ -14,7 +14,6 @@ uniformly and a config-load validation pass can verify every spec at
 startup.
 """
 
-import logging
 import math
 from dataclasses import dataclass, field
 from typing import Any
@@ -24,9 +23,6 @@ __all__ = [
     'ConfidenceTerm',
     'evaluate_sigmoid_combination',
 ]
-
-logging.getLogger(__name__).addHandler(logging.NullHandler())
-
 
 _NumberType = (int, float)
 

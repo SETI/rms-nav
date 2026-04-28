@@ -13,14 +13,10 @@ operations are global by design — no helper here crops to a predicted
 position.
 """
 
-import logging
-
 import numpy as np
 from scipy.ndimage import median_filter
 
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
-
-logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 __all__ = [
     'cosmic_ray_mask',

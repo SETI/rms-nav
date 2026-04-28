@@ -17,7 +17,6 @@ correctness here is what makes the rest of the pipeline trustworthy.
 """
 
 import copy
-import logging
 import math
 from dataclasses import dataclass, field
 from typing import Any, cast
@@ -38,8 +37,6 @@ from nav.nav_orchestrator.provenance import Provenance
 from nav.nav_technique.technique_result import NavTechniqueResult
 from nav.support.status_reason import NavStatusReason
 from nav.support.types import NDArrayFloatType
-
-logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 __all__ = [
     'EnsembleConfig',

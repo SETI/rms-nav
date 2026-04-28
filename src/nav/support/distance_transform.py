@@ -11,14 +11,11 @@ sub-pixel precision; the orchestrator's ``NavContext`` carries the per-image
 DT array so callers reach in once and the gradient is shared.
 """
 
-import logging
 from typing import cast
 
 import numpy as np
 
 from nav.support.types import NDArrayFloatType
-
-logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 __all__ = [
     'apply_translation',

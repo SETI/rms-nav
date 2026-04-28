@@ -10,10 +10,10 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "astropy>=6.0",
+  "cspyce>=2.3.5",
   "matplotlib",
   "numpy>=2.2.0",
   "PyQt6",
-  "rms-cloud_tasks>=0.1.2",
   "rms-filecache>=3.0.0",
   "rms-imgdisp",
   "rms-julian>=3.0.1",

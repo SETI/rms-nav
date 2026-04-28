@@ -10,7 +10,6 @@ constructed at import time.
 from __future__ import annotations
 
 import fnmatch
-import logging
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -22,8 +21,6 @@ from nav.support.nav_base import NavBase
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only import
     from nav.nav_orchestrator.nav_context import NavContext
-
-logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 __all__ = [
     'NavTechnique',
