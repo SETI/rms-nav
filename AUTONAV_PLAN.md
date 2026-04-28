@@ -1131,14 +1131,11 @@ this section is the operational checklist.
 - `NavTechniqueCorrelateAll` (the legacy fused-model NCC pipeline).
 - `NavModelCombined`, `NavModelResult` (replaced by per-feature
   templates and the ensemble's per-technique combine).
-- The legacy `NavModelStars`, `NavModelBody`, `NavModelRings`
-  classes — only the `rings/` data-model subpackage and the
-  simulated variants survive on the new contract.
-- The deleted star-catalog helpers (aberration, proper motion,
-  incremental catalog search, body / ring conflict marking) need
-  to be carried forward verbatim into a helper module so the new
-  `NavModelStars` does not rewrite them; this is tracked under
-  "Pending" below.
+- The previous `NavModelStars`, `NavModelBody`, `NavModelRings`
+  classes — replaced by the new-contract implementations listed
+  under "Concrete NavModels (Part 1, Part 8)" above. The
+  `rings/` data-model subpackage and the simulated variants
+  survive unchanged.
 
 ### Pending
 
@@ -1254,11 +1251,11 @@ this section is the operational checklist.
 **NavModel coverage gap (Part 1, Part 8) — needs the image library**
 
 These code paths cannot be unit-tested without a working
-``oops.Backplane`` + SPICE pool + a real obs camera model.  They
+``oops.Backplane`` + SPICE pool + a real obs camera model. They
 account for the bulk of the remaining 10 % gap on
 ``nav.nav_model.stars.catalog`` plus the > 50 % gap on
 ``nav.nav_model.nav_model_body``, ``nav.nav_model.nav_model_rings``,
-and ``nav.nav_model.stars.conflicts``.  The integration tests under
+and ``nav.nav_model.stars.conflicts``. The integration tests under
 ``tests/integration/test_autonomous_nav.py`` will hit them when the
 image library lands.
 

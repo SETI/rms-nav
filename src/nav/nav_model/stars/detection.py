@@ -398,7 +398,6 @@ def detect_sources(
 
     sigma_psf = _psf_sigma(psf)
     box_half = max(1, math.ceil(2.0 * sigma_psf))
-    2 * box_half + 1
 
     out: list[DetectedSource] = []
     rows = candidate_mask.shape[0]

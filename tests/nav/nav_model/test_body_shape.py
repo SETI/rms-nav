@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import dataclasses
+
+import pytest
+
 from nav.nav_model.body_shape import (
     BODY_SHAPE_TABLE,
     DEFAULT_BODY_SHAPE,
@@ -36,10 +40,6 @@ def test_default_body_shape_values() -> None:
 
 def test_body_shape_dataclass_is_frozen() -> None:
     """``BodyShape`` is frozen — assignment raises ``FrozenInstanceError``."""
-    import dataclasses
-
-    import pytest
-
     shape = BodyShape(
         ellipsoid_residual_km=1.0,
         crater_scale_km=2.0,

@@ -180,11 +180,9 @@ class NavModelStars(NavModel):
             v_extfov, u_extfov = self._extfov_indices(star)
             in_body = bool(star.conflicts.startswith('BODY'))
             in_ring = bool(star.conflicts.startswith('RING'))
-            in_saturation = bool(
-                _safe_mask_lookup(sat_mask, v_extfov, u_extfov)
-                or _safe_mask_lookup(cosmic_mask, v_extfov, u_extfov)
-            )
-            saturated = in_saturation
+            in_sat = bool(_safe_mask_lookup(sat_mask, v_extfov, u_extfov))
+            in_cosmic = bool(_safe_mask_lookup(cosmic_mask, v_extfov, u_extfov))
+            in_sat_or_cosmic = in_sat or in_cosmic
             cov = _crlb_covariance(
                 snr=snr,
                 sigma_psf=sigma_psf,
@@ -216,20 +214,20 @@ class NavModelStars(NavModel):
                         snr=snr,
                         in_body=in_body,
                         in_ring=in_ring,
-                        in_saturation=in_saturation,
+                        in_saturation=in_sat_or_cosmic,
                     ),
                     reliability_reasons=NavReliabilityBreakdown(
                         predicted_snr=_snr_reason_score(snr, min_snr),
                         in_body_silhouette=in_body or in_ring,
-                        in_saturation_or_cosmic=in_saturation,
+                        in_saturation_or_cosmic=in_sat_or_cosmic,
                         smear_length_ok=True,
                     ),
                     usable_types=frozenset({NavFeatureType.STAR}),
                     flags=StarFlags(
-                        saturated=saturated,
+                        saturated=in_sat,
                         smear_length_px=smear_len,
                         in_body_silhouette=in_body or in_ring,
-                        in_saturation_or_cosmic_mask=in_saturation,
+                        in_saturation_or_cosmic_mask=in_sat_or_cosmic,
                     ),
                 )
             )

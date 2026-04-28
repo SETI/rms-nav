@@ -333,7 +333,13 @@ def plant_circular_body(
 
     Returns:
         Configured :class:`BodyBackplaneData`.
+
+    Raises:
+        ValueError: If ``radius_px`` is not positive (would divide by zero
+            in the incidence ramp and seed NaNs into the outputs).
     """
+    if not radius_px > 0.0:
+        raise ValueError(f'radius_px must be > 0; got {radius_px!r}')
     rows, cols = shape
     vv, uu = np.meshgrid(
         np.arange(rows, dtype=np.float64),

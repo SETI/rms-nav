@@ -213,9 +213,9 @@ class FakeStarCatalog:
                 continue
             if not dec_min <= star.dec <= dec_max:
                 continue
-            if not vmag_min <= star.vmag <= vmag_max:
-                continue
             if math.isnan(star.vmag):
+                continue
+            if not vmag_min <= star.vmag <= vmag_max:
                 continue
             yield copy.deepcopy(star)
 

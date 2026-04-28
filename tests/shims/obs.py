@@ -23,6 +23,7 @@ so the test failure is informative.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -150,6 +151,7 @@ class FakeObs:
     star_min_vmag: float = 0.0
     star_max_vmag: float = 17.0
     ra_dec_limits_ext_rad: tuple[float, float, float, float] = (0.0, 0.1, 0.0, 0.1)
+    radec_to_uv: Callable[[float, float, float], tuple[float, float]] | None = None
     boresight_ra_rad: float = 0.0
     boresight_dec_rad: float = 0.0
     fov: FakeFOV = field(default_factory=FakeFOV)
@@ -157,6 +159,10 @@ class FakeObs:
     def __post_init__(self) -> None:
         """Build the extfov-padded ``extdata`` from ``data`` plus the margin."""
         margin_v, margin_u = self.extfov_margin_vu
+        if margin_v < 0 or margin_u < 0:
+            raise ValueError(
+                f'extfov_margin_vu must be non-negative; got {self.extfov_margin_vu!r}'
+            )
         ext_shape = (
             self.data.shape[0] + 2 * margin_v,
             self.data.shape[1] + 2 * margin_u,
@@ -345,9 +351,12 @@ class FakeObs:
     ) -> FakeUV:
         """Project RA/DEC into pixel coordinates.
 
-        The fake places every requested point at the FOV centre, with a
-        small ``tfrac``-driven shift so the smear-bracket calculation
-        produces a deterministic non-zero displacement when desired.
+        When ``self.radec_to_uv`` is set, the callable is invoked once per
+        ``(ra, dec)`` point with ``(ra, dec, tfrac)`` and must return
+        ``(u, v)``.  Otherwise the shim places every requested point at
+        the FOV centre with a small ``tfrac``-driven shift so the
+        smear-bracket calculation produces a deterministic non-zero
+        displacement when desired.
 
         Parameters:
             ra: Scalar or polymath-Scalar RA.
@@ -356,14 +365,21 @@ class FakeObs:
             apparent: Accepted for API parity; ignored by the shim.
         """
         del apparent
-        v_centre = self.data.shape[0] / 2.0 + self.extfov_margin_vu[0]
-        u_centre = self.data.shape[1] / 2.0 + self.extfov_margin_vu[1]
-        # Decompose ra/dec to a 1-D float array so callers can pass a
-        # polymath.Scalar wrapping a list, a numpy array, or a python
-        # float.  The shim uses the raw values to size the output.
         ra_arr = np.atleast_1d(np.asarray(_extract_vals(ra), dtype=np.float64))
         dec_arr = np.atleast_1d(np.asarray(_extract_vals(dec), dtype=np.float64))
         n = max(ra_arr.size, dec_arr.size)
+        ra_b = np.broadcast_to(ra_arr, (n,))
+        dec_b = np.broadcast_to(dec_arr, (n,))
+        if self.radec_to_uv is not None:
+            uv = [
+                self.radec_to_uv(float(r), float(d), tfrac)
+                for r, d in zip(ra_b, dec_b, strict=True)
+            ]
+            u = np.asarray([p[0] for p in uv], dtype=np.float64)
+            v = np.asarray([p[1] for p in uv], dtype=np.float64)
+            return FakeUV(u_vals=u, v_vals=v)
+        v_centre = self.data.shape[0] / 2.0 + self.extfov_margin_vu[0]
+        u_centre = self.data.shape[1] / 2.0 + self.extfov_margin_vu[1]
         u = np.full(n, u_centre)
         v = np.full(n, v_centre)
         # Apply a per-point shift driven by tfrac so the bracket

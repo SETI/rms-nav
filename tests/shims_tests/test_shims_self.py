@@ -28,13 +28,22 @@ from tests.shims import (
 
 
 def test_plant_circular_body_paints_disc_of_correct_radius() -> None:
-    """A 5-px-radius circle paints a disc with that approximate area."""
+    """A 5-px-radius circle paints exactly the pixels with centre distance <= radius."""
+    shape = (40, 40)
+    centre_vu = (20.0, 20.0)
+    radius_px = 5.0
     data = plant_circular_body(
-        shape=(40, 40), centre_vu=(20.0, 20.0), radius_px=5.0, resolution_km_px=2.0
+        shape=shape, centre_vu=centre_vu, radius_px=radius_px, resolution_km_px=2.0
     )
-    area = int(np.count_nonzero(data.body_mask))
-    expected = math.pi * 5.0 * 5.0
-    assert area == pytest.approx(expected, rel=0.15)
+    vv, uu = np.meshgrid(
+        np.arange(shape[0], dtype=np.float64),
+        np.arange(shape[1], dtype=np.float64),
+        indexing='ij',
+    )
+    expected_pixels = int(
+        np.count_nonzero((vv - centre_vu[0]) ** 2 + (uu - centre_vu[1]) ** 2 <= radius_px**2)
+    )
+    assert int(np.count_nonzero(data.body_mask)) == expected_pixels
 
 
 def test_plant_circular_body_incidence_increases_with_radius() -> None:
@@ -75,11 +84,20 @@ def test_fake_backplane_body_methods_round_trip() -> None:
 
 
 def test_fake_backplane_body_lambert_default_is_cosine_of_incidence() -> None:
-    """Without an explicit ``lambert`` array the shim uses ``cos(incidence)``."""
+    """Without an explicit ``lambert`` array the shim returns ``cos(incidence)``.
+
+    On-body pixels carry ``cos(incidence)`` clipped to ``[0, inf)``; off-body
+    pixels are zero.
+    """
     body = plant_circular_body(shape=(10, 10), centre_vu=(5.0, 5.0), radius_px=3.0)
     bp = FakeBackplane(per_body={'MIMAS': body})
     lambert = bp.lambert_law('MIMAS')
-    assert (lambert.mvals.filled(0.0)[body.body_mask] >= 0.0).all()
+    incidence = bp.incidence_angle('MIMAS')
+    expected = np.where(
+        body.body_mask, np.clip(np.cos(incidence.mvals.filled(0.0)), 0.0, None), 0.0
+    )
+    np.testing.assert_array_equal(lambert.mvals.filled(0.0), expected)
+    assert (lambert.mvals.filled(0.0)[~body.body_mask] == 0.0).all()
 
 
 def test_fake_backplane_unknown_body_raises_lookup_error() -> None:

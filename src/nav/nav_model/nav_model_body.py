@@ -584,7 +584,7 @@ class NavModelBody(NavModelBodyBase):
         fwhm_method = getattr(psf, 'fwhm', None)
         if callable(fwhm_method):
             return float(fwhm_method()) / 2.3548200450309493
-        return 1.0
+        raise AttributeError(f'PSF {type(psf).__name__} exposes neither sigma nor fwhm()')
 
     def _limb_uncertainty_px(self, shape: BodyShape) -> float:
         """Return the design's ``limb_uncertainty_px`` for this body."""

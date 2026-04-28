@@ -127,8 +127,8 @@ Navigation options
 ^^^^^^^^^^^^^^^^^^
 
 * ``--nav-models LIST``: a comma-separated list of model names or patterns to
-  enable. Valid entries include ``stars``, ``rings``, ``titan``, and
-  body-specific entries of the form ``body:NAME`` (glob patterns are allowed).
+  enable. Valid entries are ``stars``, ``rings``, and body-specific entries of
+  the form ``body:NAME`` (glob patterns are allowed).
 
 * ``--nav-techniques LIST``: a comma-separated list of navigation techniques to
   apply. Valid entries include ``correlate_all`` and ``manual``. Note: You
@@ -240,7 +240,7 @@ objects. Each task is:
         "data": {
             "dataset_name": "<dataset_name>",
             "arguments": {
-                "nav_models": ["bodies", "rings", "stars"],
+                "nav_models": ["body:*", "rings", "stars"],
                 "nav_techniques": ["correlate_all"]
             },
             "files": [

@@ -134,26 +134,26 @@ def test_to_features_emits_ring_edge_with_straight_line_flag(fake_obs: FakeObs) 
 def test_to_features_emits_annulus_when_polyline_compresses_radially(
     fake_obs: FakeObs,
 ) -> None:
-    """A polyline whose radial extent is below the threshold emits RING_ANNULUS."""
-    # Build a curved-ish but radially compact polyline: a 10-pixel-wide arc
-    # whose mean normal points consistently along V so the extent stays
-    # below RING_ANNULUS_MAX_RADIAL_PX.
+    """A polyline whose radial extent is below the threshold emits RING_ANNULUS.
+
+    The mask carries a shallow parabolic arch over a narrow U range so the
+    polyline is curved (deviation > FLAT_CURVATURE_THRESHOLD_PX) yet projects
+    to a span of < RING_ANNULUS_MAX_RADIAL_PX along its mean normal.
+    """
     rows, cols = 110, 110
     mask = np.zeros((rows, cols), dtype=bool)
-    us = np.arange(40, 60)
-    vs = (rows // 2 + (us % 3 - 1)).astype(int)  # tiny vertical jitter
+    us = np.arange(40, 70)
+    vs = (rows // 2 + 2.5 * np.sin(np.pi * (us - 40) / 30)).astype(int)
     for u, v in zip(us, vs, strict=True):
         mask[v, u] = True
-    # Override the polyline normals indirectly: use a vertically narrow but
-    # u-extended footprint so radial extent is < 5 px.
     model = _build_rings(obs=fake_obs, edge_mask=mask, constituent_count=2)
     features = model.to_features(cast(Any, None))
     types = {f.feature_type for f in features}
-    if NavFeatureType.RING_ANNULUS in types:
-        annulus = next(f for f in features if f.feature_type is NavFeatureType.RING_ANNULUS)
-        assert isinstance(annulus.geometry, RingAnnulusGeometry)
-        assert isinstance(annulus.flags, RingAnnulusFlags)
-        assert annulus.flags.planet_name == 'SATURN'
+    assert NavFeatureType.RING_ANNULUS in types
+    annulus = next(f for f in features if f.feature_type is NavFeatureType.RING_ANNULUS)
+    assert isinstance(annulus.geometry, RingAnnulusGeometry)
+    assert isinstance(annulus.flags, RingAnnulusFlags)
+    assert annulus.flags.planet_name == 'SATURN'
 
 
 def test_to_features_skips_empty_edge_info_list(fake_obs: FakeObs) -> None:

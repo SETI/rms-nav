@@ -26,6 +26,7 @@ construct each catalog lazily on first call.
 from __future__ import annotations
 
 import copy
+import functools
 import itertools
 from typing import TYPE_CHECKING, cast
 
@@ -89,33 +90,22 @@ reached or the next bin's lower edge exceeds the obs's
 """
 
 
-_STAR_CATALOG_UCAC4: UCAC4StarCatalog | None = None
-_STAR_CATALOG_TYCHO2: SpiceStarCatalog | None = None
-_STAR_CATALOG_YBSC: YBSCStarCatalog | None = None
-
-
+@functools.lru_cache(maxsize=1)
 def get_ucac4_catalog() -> UCAC4StarCatalog:
     """Return the UCAC4 catalog, lazily constructing on first call."""
-    global _STAR_CATALOG_UCAC4
-    if _STAR_CATALOG_UCAC4 is None:
-        _STAR_CATALOG_UCAC4 = UCAC4StarCatalog()
-    return _STAR_CATALOG_UCAC4
+    return UCAC4StarCatalog()
 
 
+@functools.lru_cache(maxsize=1)
 def get_tycho2_catalog() -> SpiceStarCatalog:
     """Return the Tycho-2 catalog, lazily constructing on first call."""
-    global _STAR_CATALOG_TYCHO2
-    if _STAR_CATALOG_TYCHO2 is None:
-        _STAR_CATALOG_TYCHO2 = SpiceStarCatalog('tycho2')
-    return _STAR_CATALOG_TYCHO2
+    return SpiceStarCatalog('tycho2')
 
 
+@functools.lru_cache(maxsize=1)
 def get_ybsc_catalog() -> YBSCStarCatalog:
     """Return the YBSC catalog, lazily constructing on first call."""
-    global _STAR_CATALOG_YBSC
-    if _STAR_CATALOG_YBSC is None:
-        _STAR_CATALOG_YBSC = YBSCStarCatalog()
-    return _STAR_CATALOG_YBSC
+    return YBSCStarCatalog()
 
 
 def aberrate_star(obs: ObsSnapshot, star: MutableStar) -> None:
@@ -497,14 +487,14 @@ def reduce_catalogs(
                 break
             if mag_max < mag_min_cap:
                 continue
-            mag_min = max(mag_min, mag_min_cap)
-            mag_max = min(mag_max, mag_max_cap)
+            mag_min_clamped = max(mag_min, mag_min_cap)
+            mag_max_clamped = min(mag_max, mag_max_cap)
             chunk = stars_in_extfov(
                 obs,
                 config,
                 catalog_name=catalog_name.lower(),
-                mag_min=mag_min,
-                mag_max=mag_max,
+                mag_min=mag_min_clamped,
+                mag_max=mag_max_clamped,
                 radec_movement=radec_movement,
             )
             next_per_catalog.extend(chunk)
@@ -602,7 +592,12 @@ def _mark_visual_overlaps(stars: list[MutableStar], *, overlap_vmag: float) -> N
             sj = stars[j]
             v_gap = (si.psf_size[0] + sj.psf_size[0]) / 2
             u_gap = (si.psf_size[1] + sj.psf_size[1]) / 2
-            if abs(si.v - sj.v) < v_gap and abs(si.u - sj.u) < u_gap:
+            dv = sj.v - si.v
+            if dv >= v_gap:
+                # Stars are sorted by v ascending — once the v-gap is exceeded
+                # for this pair, every later sj only moves further away.
+                break
+            if abs(dv) < v_gap and abs(si.u - sj.u) < u_gap:
                 if cast(float, sj.vmag) - cast(float, si.vmag) < overlap_vmag:
                     si.conflicts = 'STAR'
                     sj.conflicts = 'STAR'
