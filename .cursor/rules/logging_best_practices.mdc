@@ -6,14 +6,10 @@ description: Best practices for using PdsLogger (rms-pdslogger) throughout this 
 # Logging Best Practices
 
 This project uses `pdslogger.PdsLogger` exclusively. **Never** use the standard Python
-`logging` module to emit log messages. The only legitimate uses of `import logging` are:
-
-- Adding a `NullHandler` in library modules so unhandled records are silenced:
-  ```python
-  import logging
-  logging.getLogger(__name__).addHandler(logging.NullHandler())
-  ```
-- Type annotations (`logging.Handler`, `logging.FileHandler`) in signatures.
+`logging` module to emit log messages. The only legitimate use of `import logging` is
+for type annotations in low-level plumbing code (e.g. `logging.Handler`,
+`logging.FileHandler` in `nav.config.logger`) where `pdslogger` factory functions
+return standard handler objects. Do not add `import logging` to new files.
 
 ## 1. The Two Module-Level Loggers
 
