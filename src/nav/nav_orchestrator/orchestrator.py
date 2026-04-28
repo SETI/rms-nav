@@ -329,8 +329,15 @@ class NavOrchestrator(NavBase):
     def _make_context(
         self, obs: ObsSnapshotInst, provenance: Provenance
     ) -> tuple[NavContext, NavImageClassifierResult]:
-        """Build a NavContext from an observation."""
-        image = obs.data.astype('float64')
+        """Build a NavContext from an observation.
+
+        The image, sensor mask, saturation mask, and cosmic-ray mask all
+        live on the *extended FOV* (zero-padded around the original sensor
+        rectangle).  ``obs.extdata`` is the canonical source for the
+        extfov-shaped image and matches the extfov sensor mask shape
+        regardless of the per-instrument ``extfov_margin_vu``.
+        """
+        image = obs.extdata.astype('float64')
         sensor_mask = obs.extfov_data_sensor_mask()
         classifier_result = self._image_classifier.classify(image, sensor_mask)
         full_well = self._instrument_full_well_dn(obs)
@@ -372,10 +379,10 @@ class NavOrchestrator(NavBase):
     def _instrument_full_well_dn(self, obs: ObsSnapshotInst) -> float:
         """Return the saturation DN used for the per-image saturation mask.
 
-        Returns the 12-bit camera default ``DEFAULT_FULL_WELL_DN_12_BIT``
-        for now; per-instrument values will replace this lookup once the
-        per-instrument noise YAML blocks ship.  ``obs`` is accepted so the
-        per-instrument path can branch on it without a signature change.
+        Returns the 12-bit camera default
+        :data:`DEFAULT_FULL_WELL_DN_12_BIT`.  ``obs`` is accepted so a
+        per-instrument path can branch on the observation without a
+        signature change.
         """
         del obs
         return DEFAULT_FULL_WELL_DN_12_BIT

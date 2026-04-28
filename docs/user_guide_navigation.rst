@@ -491,16 +491,160 @@ The technique produces:
 * Confidence score of 1.0 (user-accepted result)
 * Uncertainty set to None (manual determination)
 
-Ring Navigation Model
-=====================
+Navigation Models
+=================
 
-The ring navigation model generates theoretical brightness profiles for
-planetary ring edges. Two configuration options in ``config_05_rings.yaml``
-control whether ring pixels that lie in shadow are excluded from the model
-before navigation is performed.
+A *navigation model* is RMS-NAV's prediction of what the image *should*
+look like at the spacecraft's nominal pointing.  Three model families
+ship out of the box: stars, planetary bodies, and planetary rings.
+Each contributes one or more *features* (typed predictions with their
+own per-feature uncertainty) to the navigator.  You can restrict which
+families run by passing ``--nav-models`` on the command line; valid
+entries are ``stars``, ``rings``, and body-specific entries of the form
+``body:NAME`` (glob patterns are allowed).
+
+Star Navigation Model
+---------------------
+
+The star model builds a deduplicated catalog of stars expected to fall
+inside the field of view, applies stellar aberration and proper motion
+to bring each catalog position into the spacecraft frame at observation
+time, and emits one feature per usable star.
+
+**Catalog precedence.**  Catalogs are searched in the order configured
+in ``config_03_stars.yaml`` under ``stars.catalogs`` (default
+``[ucac4, tycho2, ybsc]``).  Stars present in more than one catalog are
+deduplicated using the RA / DEC and V-magnitude thresholds in the same
+file.
+
+**Per-star detectability.**  A predicted SNR is computed for each star
+using the per-instrument PSF (``obs.star_psf()``), the per-image noise
+sigma (a robust MAD estimate), and the catalog magnitude.  Stars whose
+predicted SNR is below ``stars.min_predicted_snr`` are dropped.
+
+**Smear.**  When the spacecraft attitude rate is non-zero during the
+exposure, stars smear into trails.  The model computes the per-image
+smear vector from the SPICE pointing brackets and uses
+``psfmodel.eval_rect(movement=...)`` to render a smear-aware kernel
+when a downstream technique needs one.  Stars whose smear length
+exceeds ``stars.max_smear`` are dropped (the centroid is unfittable).
+
+**Body and ring conflicts.**  Each star's predicted pixel is checked
+against an ``oops`` body intercept and a per-planet opaque ring
+annulus (configured under ``stars.ring_occlusion_radii_km``).  Stars
+that fall behind a body or inside an opaque ring annulus are tagged
+with a ``BODY:`` or ``RING:`` conflict string and excluded from
+matching.  Body intercepts win over ring intercepts.
+
+**Configuration.**  Most user-tunable parameters live in
+``config_03_stars.yaml``:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Key
+     - Effect
+   * - ``stars.catalogs``
+     - Catalog search order; default ``[ucac4, tycho2, ybsc]``.
+   * - ``stars.max_stars``
+     - Maximum number of stars retained per image (default 100).
+   * - ``stars.max_smear``
+     - Smear length in pixels above which a star is dropped (default
+       100).
+   * - ``stars.min_vmag`` / ``stars.max_vmag``
+     - Magnitude window applied to the per-instrument
+       ``star_min_usable_vmag`` / ``star_max_usable_vmag`` floor.
+   * - ``stars.proper_motion``
+     - Apply proper motion at ``obs.midtime`` (default true).
+   * - ``stars.stellar_aberration``
+     - Apply stellar aberration (default true).
+   * - ``stars.ring_occlusion_enabled``
+     - Toggle the ring-annulus occlusion check (default true).
+   * - ``stars.ring_occlusion_radii_km``
+     - Per-planet list of opaque ``[inner_km, outer_km]`` annuli.
+
+Body Navigation Model
+---------------------
+
+For every body whose predicted bounding box overlaps the extended
+field of view, the body model renders an oversampled Lambert-shaded
+silhouette, extracts the limb and terminator polylines, and emits a
+mix of feature types depending on resolution, lighting, and shape
+quality:
+
+- ``LIMB_ARC`` — emitted when the limb position is well-determined
+  (per-vertex normal sigma below the ``LIMB_ARC_MAX_UNCERTAINTY_PX``
+  cap).  Carries a polyline of vertex coordinates and per-vertex
+  anisotropic sigmas.
+- ``BODY_BLOB`` — emitted instead of ``LIMB_ARC`` when the limb is too
+  uncertain to fit but the predicted body diameter is above the
+  body-specific blob threshold.  Carries only a centroid and bounding
+  box.
+- ``BODY_DISC`` — emitted alongside ``LIMB_ARC`` when the body fits
+  well inside the FOV (overflow below 30 %, lit-and-visible fraction
+  at least 40 %).  Carries the rendered template for full-disc
+  correlation.
+- ``TERMINATOR_ARC`` — emitted when the terminator polyline has at
+  least 8 vertices and the phase-angle factor (``sin(phase_angle)``)
+  is above 0.05.
+
+**Per-body shape data.**  ``ellipsoid_residual_km``, ``crater_scale_km``,
+``albedo_variation``, ``spice_orbital_residual_km``, and
+``min_blob_diameter_px`` come from the static body-shape table.  These
+quantities drive the per-vertex polyline sigmas and the BODY_BLOB
+emission threshold.  For bodies absent from the table a conservative
+generic-icy-moon profile is used.
+
+**Configuration.**  ``config_04_bodies.yaml`` exposes:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Key
+     - Effect
+   * - ``bodies.min_bounding_box_area``
+     - Minimum predicted body bbox area (px squared) below which
+       silhouette rendering is skipped.
+   * - ``bodies.oversample_edge_limit``
+     - Anti-aliasing oversample limit for the silhouette render.
+   * - ``bodies.oversample_maximum``
+     - Hard cap on the per-axis oversample factor.
+   * - ``bodies.use_lambert``
+     - Use Lambert shading (default true) vs. flat-disc rendering.
+   * - ``bodies.use_albedo`` / ``bodies.geometric_albedo``
+     - Apply per-body geometric albedo when computing brightness.
+
+The bodies considered for navigation are the planet returned by
+``obs.closest_planet`` plus the satellites configured under
+``planets.satellites``.
+
+Ring Navigation Model
+---------------------
+
+The ring navigation model generates theoretical brightness profiles
+for planetary ring edges and emits one feature per surviving edge.
+Two top-level options in ``config_05_rings.yaml`` control whether
+ring pixels in shadow are excluded from the model before navigation.
+
+For each surviving ring feature the model emits one of:
+
+- ``RING_EDGE`` — a per-vertex polyline of edge coordinates with
+  per-vertex radial sigma derived from the catalog ``rms`` divided by
+  the radial km-per-pixel scale.  When the polyline is straight
+  (deviation from a best-fit line below 1 px) the ``is_straight_line``
+  flag is set so techniques can handle the rank-1 covariance.
+- ``RING_ANNULUS`` — a multi-edge composite template emitted when the
+  surviving polyline compresses radially below 5 px (the edges are
+  not separable at the image scale).
+
+Per-edge feature definitions live in ``config_2X_<planet>_rings.yaml``
+under ``rings.ring_features.<PLANET>.features``.  See "Ring YAML
+configuration" in the developer guide for the full schema.
 
 Planet shadow removal
----------------------
+^^^^^^^^^^^^^^^^^^^^^
 
 When a planet casts a shadow across part of its own ring system, those ring
 arcs appear dark in the image. If the model still shows those arcs as bright,
@@ -537,7 +681,7 @@ quality with and without the mask -- set the option to ``false`` in a
      remove_planet_shadow: false
 
 Body shadow removal (future)
------------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The ``rings.remove_body_shadows`` option (default ``false``) is reserved for a
 future enhancement that will remove ring pixels shadowed by moons. Setting it

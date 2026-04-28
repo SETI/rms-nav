@@ -1,0 +1,363 @@
+"""Fake ``oops.Backplane`` for unit-testing nav-pipeline code paths.
+
+Real backplane evaluation depends on a working SPICE kernel pool, an
+``oops.Observation`` whose camera model can be inverted at sub-pixel
+resolution, and a per-image meshgrid.  This shim lets a test plug in
+canned per-pixel arrays and per-body / per-ring scalar facts; every
+backplane method the navigation pipeline calls returns a real
+``polymath.Scalar`` wrapping the configured numpy array.
+
+The shim is table-driven.  Tests construct a :class:`FakeBackplane`
+with kwargs that fill the lookup tables; methods that have no entry
+raise ``LookupError`` naming the missing key, so missing wiring fails
+fast instead of silently returning empty data.
+
+Construction is intentionally explicit so tests can build the smallest
+backplane they need.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any
+
+import numpy as np
+import polymath
+
+__all__ = [
+    'BodyBackplaneData',
+    'FakeBackplane',
+    'RingBackplaneData',
+    'plant_circular_body',
+]
+
+
+def _scalar(
+    vals: np.ndarray | float,
+    mask: np.ndarray | bool | None = None,
+    *,
+    key: tuple[Any, ...] | None = None,
+) -> polymath.Scalar:
+    """Build a ``polymath.Scalar`` and optionally tag it with a backplane ``key``.
+
+    ``polymath.Scalar`` already covers ``.vals`` / ``.mvals`` /
+    ``min`` / ``max`` / ``median`` / ``expand_mask`` / ``mask_where`` /
+    ``any`` / ``__getitem__`` natively.  The shim only needs to set the
+    ``key`` attribute the navigation pipeline reads back from
+    ``ring_radius`` results so it can call
+    :meth:`oops.Backplane.border_atop`.
+
+    Parameters:
+        vals: Numpy array or scalar.
+        mask: Optional boolean mask of the same shape as ``vals``.
+        key: Optional opaque key surfaced as ``.key``.
+
+    Returns:
+        Configured ``polymath.Scalar``.
+    """
+    if mask is None:
+        scalar = polymath.Scalar(np.asarray(vals))
+    else:
+        scalar = polymath.Scalar(np.asarray(vals), np.asarray(mask, dtype=bool))
+    if key is not None:
+        scalar.key = key
+    return scalar
+
+
+@dataclass
+class BodyBackplaneData:
+    """Per-body backplane arrays and scalar facts.
+
+    Parameters:
+        body_mask: 2-D boolean mask, ``True`` where the body silhouette
+            is on the pixel grid.  Required.
+        incidence_rad: 2-D float array of per-pixel incidence angles in
+            radians.  Values outside ``body_mask`` are ignored.
+            Required.
+        lambert: 2-D float array of per-pixel Lambert reflectance.
+            Defaults to ``cos(incidence)`` clipped to ``[0, inf)`` and
+            zeroed outside the silhouette.
+        resolution_km_px: 2-D float array of per-pixel km/px scale.
+            Defaults to a constant fill from ``default_resolution_km_px``.
+        default_resolution_km_px: Scalar fallback when
+            ``resolution_km_px`` is not supplied.
+        sub_solar_lon_rad: scalar; default 0.
+        sub_solar_lat_rad: scalar; default 0.
+        sub_observer_lon_rad: scalar; default 0.
+        sub_observer_lat_rad: scalar; default 0.
+        center_phase_rad: scalar; default 0.
+        intercepted_mask: 2-D boolean mask returned by
+            ``where_intercepted``.  Defaults to ``body_mask``.
+    """
+
+    body_mask: np.ndarray
+    incidence_rad: np.ndarray
+    lambert: np.ndarray | None = None
+    resolution_km_px: np.ndarray | None = None
+    default_resolution_km_px: float = 1.0
+    sub_solar_lon_rad: float = 0.0
+    sub_solar_lat_rad: float = 0.0
+    sub_observer_lon_rad: float = 0.0
+    sub_observer_lat_rad: float = 0.0
+    center_phase_rad: float = 0.0
+    intercepted_mask: np.ndarray | None = None
+
+    def lambert_array(self) -> np.ndarray:
+        """Return the Lambert array, computing the default if absent."""
+        if self.lambert is not None:
+            return self.lambert
+        cos_i = np.clip(np.cos(self.incidence_rad), 0.0, None)
+        return np.where(self.body_mask, cos_i, 0.0)
+
+    def resolution_array(self) -> np.ndarray:
+        """Return the resolution array, computing the default if absent."""
+        if self.resolution_km_px is not None:
+            return self.resolution_km_px
+        return np.full(self.body_mask.shape, self.default_resolution_km_px)
+
+    def intercept_mask(self) -> np.ndarray:
+        """Return the intercepted-mask, defaulting to ``body_mask``."""
+        return self.intercepted_mask if self.intercepted_mask is not None else self.body_mask
+
+
+@dataclass
+class RingBackplaneData:
+    """Per-planet ring-system backplane arrays.
+
+    Parameters:
+        ring_radius_km: 2-D float array of per-pixel ring-plane radius
+            in km.  Required.
+        ring_mask: 2-D boolean mask, ``True`` where the ring plane is
+            sampled (False -> masked out, off the ring).  Required.
+        radial_resolution_km_px: 2-D float array of per-pixel radial
+            km/px.  Defaults to a constant fill.
+        default_radial_resolution_km_px: Scalar fallback when
+            ``radial_resolution_km_px`` is not supplied.
+        distance_km: 2-D float array of per-pixel distance to the ring
+            plane.  Defaults to a constant fill.
+        default_distance_km: Scalar fallback for ``distance_km``.
+        shadow_mask: Optional 2-D boolean mask, ``True`` where the ring
+            plane is in the planet's shadow.  Defaults to all-False.
+        border_atop: Optional callable mapping ``(key, a)`` to a 2-D
+            boolean mask.  Defaults to a thresholding helper that picks
+            pixels whose ``ring_radius_km`` is within 0.5 km of ``a``.
+    """
+
+    ring_radius_km: np.ndarray
+    ring_mask: np.ndarray
+    radial_resolution_km_px: np.ndarray | None = None
+    default_radial_resolution_km_px: float = 1.0
+    distance_km: np.ndarray | None = None
+    default_distance_km: float = 1.0e9
+    shadow_mask: np.ndarray | None = None
+    border_atop: Callable[[tuple[Any, ...], float], np.ndarray] | None = None
+
+    def radial_resolution_array(self) -> np.ndarray:
+        """Return the radial-resolution array, defaulting if absent."""
+        if self.radial_resolution_km_px is not None:
+            return self.radial_resolution_km_px
+        return np.full(self.ring_mask.shape, self.default_radial_resolution_km_px)
+
+    def distance_array(self) -> np.ndarray:
+        """Return the distance array, defaulting if absent."""
+        if self.distance_km is not None:
+            return self.distance_km
+        return np.full(self.ring_mask.shape, self.default_distance_km)
+
+    def shadow_array(self) -> np.ndarray:
+        """Return the shadow mask, defaulting to all-False."""
+        return (
+            self.shadow_mask
+            if self.shadow_mask is not None
+            else np.zeros(self.ring_mask.shape, dtype=bool)
+        )
+
+    def border_atop_mask(self, key: tuple[Any, ...], a: float) -> np.ndarray:
+        """Return the boolean ``border_atop(key, a)`` mask."""
+        if self.border_atop is not None:
+            return self.border_atop(key, a)
+        return np.abs(self.ring_radius_km - a) < 0.5
+
+
+@dataclass
+class FakeBackplane:
+    """Table-driven stand-in for ``oops.Backplane``.
+
+    Each method returns a real ``polymath.Scalar`` whose ``vals`` /
+    ``mvals`` / aggregate-reduction methods behave exactly like the
+    production code expects, so the navigation pipeline runs against
+    standard ``polymath`` objects.
+
+    Parameters:
+        per_body: Mapping of upper-case body name to
+            :class:`BodyBackplaneData`.  Methods like
+            ``incidence_angle(body_name)`` look up the matching entry
+            and return a Scalar over the configured array.
+        per_ring: Mapping of ring target string (e.g. ``'saturn:ring'``)
+            to :class:`RingBackplaneData`.
+    """
+
+    per_body: dict[str, BodyBackplaneData] = field(default_factory=dict)
+    per_ring: dict[str, RingBackplaneData] = field(default_factory=dict)
+
+    def _body(self, body_name: str) -> BodyBackplaneData:
+        key = body_name.upper()
+        if key not in self.per_body:
+            raise LookupError(f'FakeBackplane has no entry for body {body_name!r}')
+        return self.per_body[key]
+
+    def _ring(self, ring_target: str) -> RingBackplaneData:
+        if ring_target not in self.per_ring:
+            raise LookupError(f'FakeBackplane has no entry for ring target {ring_target!r}')
+        return self.per_ring[ring_target]
+
+    # ------------------------------------------------------------------
+    # Body methods
+    # ------------------------------------------------------------------
+
+    def incidence_angle(self, body_name: str) -> polymath.Scalar:
+        """Return per-pixel incidence angle in radians."""
+        data = self._body(body_name)
+        return _scalar(data.incidence_rad, ~data.body_mask)
+
+    def lambert_law(self, body_name: str) -> polymath.Scalar:
+        """Return per-pixel Lambert reflectance."""
+        data = self._body(body_name)
+        return _scalar(data.lambert_array(), ~data.body_mask)
+
+    def resolution(self, body_name: str) -> polymath.Scalar:
+        """Return per-pixel km/px scale."""
+        data = self._body(body_name)
+        return _scalar(data.resolution_array(), ~data.body_mask)
+
+    def sub_solar_longitude(self, body_name: str) -> polymath.Scalar:
+        """Return scalar sub-solar longitude (radians)."""
+        return _scalar(self._body(body_name).sub_solar_lon_rad)
+
+    def sub_solar_latitude(self, body_name: str) -> polymath.Scalar:
+        """Return scalar sub-solar latitude (radians)."""
+        return _scalar(self._body(body_name).sub_solar_lat_rad)
+
+    def sub_observer_longitude(self, body_name: str) -> polymath.Scalar:
+        """Return scalar sub-observer longitude (radians)."""
+        return _scalar(self._body(body_name).sub_observer_lon_rad)
+
+    def sub_observer_latitude(self, body_name: str) -> polymath.Scalar:
+        """Return scalar sub-observer latitude (radians)."""
+        return _scalar(self._body(body_name).sub_observer_lat_rad)
+
+    def center_phase_angle(self, body_name: str) -> polymath.Scalar:
+        """Return scalar center-pixel phase angle (radians)."""
+        return _scalar(self._body(body_name).center_phase_rad)
+
+    def where_intercepted(self, body_name: str) -> polymath.Scalar:
+        """Return a boolean Scalar marking pixels intercepting the body."""
+        return _scalar(self._body(body_name).intercept_mask().astype(bool))
+
+    # ------------------------------------------------------------------
+    # Ring methods
+    # ------------------------------------------------------------------
+
+    def ring_radius(self, ring_target: str) -> polymath.Scalar:
+        """Return per-pixel ring-plane radius in km."""
+        data = self._ring(ring_target)
+        return _scalar(
+            data.ring_radius_km,
+            ~data.ring_mask,
+            key=('ring_radius', ring_target),
+        )
+
+    def ring_radial_resolution(self, ring_target: str) -> polymath.Scalar:
+        """Return per-pixel radial km/px scale."""
+        data = self._ring(ring_target)
+        return _scalar(data.radial_resolution_array(), ~data.ring_mask)
+
+    def border_atop(self, key: tuple[Any, ...], a: float) -> polymath.Scalar:
+        """Return a boolean Scalar marking pixels at ring radius ``a``.
+
+        ``key`` is the tuple read off ``ring_radius(...).key`` by the
+        production code; the head determines which ring's radius array
+        we threshold against ``a``.
+        """
+        if not key or key[0] != 'ring_radius':
+            raise LookupError(f'FakeBackplane.border_atop expected a ring_radius key, got {key!r}')
+        ring_target = key[1]
+        data = self._ring(ring_target)
+        return _scalar(data.border_atop_mask(key, a).astype(bool))
+
+    def distance(self, ring_target: str, *, direction: str = 'dep') -> polymath.Scalar:
+        """Return per-pixel ring-plane distance in km."""
+        del direction
+        data = self._ring(ring_target)
+        return _scalar(data.distance_array(), ~data.ring_mask)
+
+    def where_inside_shadow(self, ring_target: str, planet: str) -> polymath.Scalar:
+        """Return a boolean Scalar marking ring pixels inside the planet's shadow."""
+        del planet
+        data = self._ring(ring_target)
+        return _scalar(data.shadow_array().astype(bool))
+
+
+def plant_circular_body(
+    *,
+    shape: tuple[int, int],
+    centre_vu: tuple[float, float],
+    radius_px: float,
+    sub_solar_lon_deg: float = 0.0,
+    sub_solar_lat_deg: float = 0.0,
+    sub_observer_lon_deg: float = 0.0,
+    sub_observer_lat_deg: float = 0.0,
+    phase_angle_deg: float = 30.0,
+    resolution_km_px: float = 5.0,
+) -> BodyBackplaneData:
+    """Build :class:`BodyBackplaneData` for a circular body silhouette.
+
+    Convenience factory that paints a circle of radius ``radius_px``
+    centred at ``centre_vu`` and assigns each silhouette pixel an
+    incidence angle that varies smoothly across the disc (zero at the
+    centre, increasing outward to the limb).  Suitable for end-to-end
+    body-NavModel tests where the exact incidence pattern is not the
+    focus.
+
+    Parameters:
+        shape: ``(rows, cols)`` of the output arrays.
+        centre_vu: Body centre in pixel coordinates.
+        radius_px: Body radius in pixels.
+        sub_solar_lon_deg: Scalar sub-solar longitude in degrees.
+        sub_solar_lat_deg: Scalar sub-solar latitude in degrees.
+        sub_observer_lon_deg: Scalar sub-observer longitude in degrees.
+        sub_observer_lat_deg: Scalar sub-observer latitude in degrees.
+        phase_angle_deg: Scalar phase angle in degrees.
+        resolution_km_px: Constant per-pixel km/px scale.
+
+    Returns:
+        Configured :class:`BodyBackplaneData`.
+    """
+    rows, cols = shape
+    vv, uu = np.meshgrid(
+        np.arange(rows, dtype=np.float64),
+        np.arange(cols, dtype=np.float64),
+        indexing='ij',
+    )
+    dv = vv - centre_vu[0]
+    du = uu - centre_vu[1]
+    radius = np.sqrt(dv * dv + du * du)
+    body_mask = radius <= radius_px
+    # Linear ramp from 0 at centre to pi/2 at limb; outside the limb the
+    # value is irrelevant because ``body_mask`` is False.
+    incidence = np.where(
+        body_mask,
+        (radius / radius_px) * (np.pi / 2.0),
+        np.pi / 2.0,
+    )
+    return BodyBackplaneData(
+        body_mask=body_mask,
+        incidence_rad=incidence,
+        sub_solar_lon_rad=float(np.radians(sub_solar_lon_deg)),
+        sub_solar_lat_rad=float(np.radians(sub_solar_lat_deg)),
+        sub_observer_lon_rad=float(np.radians(sub_observer_lon_deg)),
+        sub_observer_lat_rad=float(np.radians(sub_observer_lat_deg)),
+        center_phase_rad=float(np.radians(phase_angle_deg)),
+        default_resolution_km_px=resolution_km_px,
+    )

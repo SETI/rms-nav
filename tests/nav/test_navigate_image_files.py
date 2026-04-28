@@ -27,6 +27,10 @@ class _FakeSnapshot:
             self.data = np.zeros((32, 32), np.float64)
         else:
             self.data = rng.standard_normal(size=(32, 32)) + 100.0
+        # The orchestrator reads ``obs.extdata`` (extfov-shaped); this
+        # fake uses zero extfov margin so ``extdata`` is the same shape
+        # as ``data``.
+        self.extdata = self.data
         self._sensor_mask = np.ones(self.data.shape, bool)
         self.midtime = midtime
 
