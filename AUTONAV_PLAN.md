@@ -1,5 +1,63 @@
 # Autonomous Navigation Overhaul — Design Plan
 
+## Reading order for an AI picking this up cold
+
+Read in this order; later items reference earlier ones, not the
+other way round:
+
+1. **This subsection** (you are here) — orientation.
+2. **Part 0 — Audit corrections** — binding overrides; supersedes
+   any conflicting text further down in Parts 1–16.
+3. **Implementation phases — overview** — the action plan. Phase
+   table, "Per-phase definition of done" (lint / type / pytest /
+   sphinx / pymarkdown checks + six-file critique folder + executive
+   summary), and "Tooling and conventions binding for every phase".
+4. **Phase 0 / Phase 1 / Phase 2 — status sections** — historical
+   record of what has already shipped (foundation, real-scene
+   NavModels, DT-based NavTechniques). Read these to know what
+   already exists in the codebase.
+5. **Phase 3 → Phase 12+** — the per-phase work specifications you
+   will execute next. Each phase is self-contained (Goal / Why now /
+   Prerequisites / Scope (in) / Scope (out) / Design references /
+   Tests / Documentation / Definition of done). **Do exactly one
+   phase per fresh context.**
+6. **Implementation status (snapshot)** — historical flat checklist
+   (Implemented / Removed / Pending) preserved as a comprehensive
+   index. **Not the action plan**; the per-phase sections above
+   are. Where this list and a phase's Scope (in) disagree, the
+   phase wins.
+7. **Parts 1–16** — design source-of-truth. Per-phase Scope (in) lines
+   point here ("Design references: Part 1 §X / Part 5 §Y"); read
+   only the cited subsections, not the full body. Anything in
+   Parts 1–16 that conflicts with Part 0 loses.
+8. **Resumption notes + Continuation notes for the implementation
+   (binding)** — at the very bottom of the file. Read once for
+   user-style preferences, hallucination history, and the
+   "things that already work" list before starting any work.
+
+**Phase-numbering caveat.** "Phase N" appears throughout this file
+in two distinct numberings:
+
+- The **new** per-phase plan at the top of this file uses
+  Phase 0–11 (plus 12+ for Part 13b deferred items). This is what
+  you are executing.
+- Parts 1–16 (the design body) and parts of Part 0 occasionally
+  reference the **legacy** phase numbering (legacy Phase 1 ↔ new
+  Phase 0; legacy Phase 5 ↔ new Phase 10; legacy Phase 7 ↔ new
+  Phase 11). Where this matters, the legacy reference is annotated
+  inline with "(Legacy wording said …)" so you can disambiguate.
+  Part 13 carries the full legacy → new mapping.
+
+If you read a "Phase N" reference and aren't sure which numbering
+it uses, check the surrounding sentence for a "(Legacy wording …)"
+annotation; if present, the new numbering is canonical and the
+legacy reference is preserved only for traceability to old
+discussions. If you find a "Phase N" reference that is genuinely
+ambiguous and not covered by an annotation, treat that as a bug in
+this plan and fix it.
+
+---
+
 ## Part 0 — Audit corrections (2026-04-26)
 
 These supersede any conflicting text below. Where a Part 1–16 section
@@ -65,10 +123,13 @@ Same naming convention applies inside `NavResult`: `status_reason: NavStatusReas
    Update the JSON schema, `tier_thresholds` YAML, and the rank-derivation
    table accordingly.
 
-5. **Phase-5 placeholder constants get inline comments.** Each placeholder
-   value in Phase-1 YAML carries a `# PLACEHOLDER — calibrate in Phase 5`
-   comment; PR review enforces that no `PLACEHOLDER` markers ship to
-   production. No CI gate is added.
+5. **Calibration-phase placeholder constants get inline comments.** Each
+   placeholder value in YAML written before calibration carries a
+   `# PLACEHOLDER — calibrate in Phase 10` comment; PR review enforces
+   that no `PLACEHOLDER` markers ship to production. No CI gate is
+   added. (Original wording referenced "Phase 1 YAML" / "Phase 5
+   calibration" under the legacy phasing; Phase 1 ↔ new Phase 0 + 3
+   shipped placeholders, Phase 5 ↔ new Phase 10 calibrates them.)
 
 6. **`LimbRefineNav` is dropped.** Remove from Part 8 file list.
    `BodyLimbNav` does its own subpixel refinement after the coarse DT
@@ -154,7 +215,9 @@ Same naming convention applies inside `NavResult`: `status_reason: NavStatusReas
   Part 4 is true at the read interface; just reword for accuracy.
 - `pyproject.toml` `[tool.pytest.ini_options]` has no `testpaths`,
   `markers`, `--strict-markers`, or `filterwarnings = ["error"]` today.
-  Phase 1 must add all four (per `critique-test-suite` §19, §22).
+  All four were added in Phase 0 (per `critique-test-suite` §19, §22);
+  the binding is preserved in the "Tooling and conventions binding for
+  every phase" subsection. (Legacy wording said "Phase 1".)
 - "Three rules" in Part 0 (Cardinal Principles) is actually four; the
   fourth is angles in degrees / radians. Reread Cardinal Principles with
   that count.
@@ -268,12 +331,18 @@ plan-body section conflicts, this list wins.
 #### Internal-inconsistency fixes
 
 20. **Cutover gating timing (B3).** The 500-image breadth comparison vs
-    legacy is a **pre-merge** gate of the Phase 4 change-set, not a
-    Phase 7 step. While the change-set is on a feature branch, both
-    pipelines coexist; the comparison runs there. After Phase 4 merges,
-    legacy is gone and there's nothing to compare against. Phase 7
-    cutover-gating is verification (grep sweeps + coverage + docs)
-    only.
+    legacy is a **pre-merge** gate of the cutover change-set (the
+    change-set that deletes the legacy code; in the new phase plan
+    this is the Phase 11 cutover, but in the codebase this *already
+    happened* during the Phase 0/1/2 cutover branch — the breadth
+    comparison must therefore be re-run on a comparison branch that
+    re-instates legacy or against a pinned pre-cutover commit hash).
+    The comparison cannot run after the legacy delete merges because
+    legacy is gone. Phase 11 cutover-gating is verification (grep
+    sweeps + coverage + docs) plus the breadth comparison itself.
+    (Legacy wording referenced "Phase 4 change-set" / "Phase 7 step";
+    legacy Phase 4 = orchestrator + cutover, legacy Phase 7 =
+    cleanup, both rolled into new Phase 11.)
 
 21. **`'corrupt'` row in image-classifier table (B15).** Add a row:
     `corrupt | image file failed to parse / read; raises in obs construction
@@ -493,9 +562,9 @@ plan-body section conflicts, this list wins.
     `INCIDENCE_FACTOR_CLIP_DEG = 85.0`, `AGREEMENT_FACTOR_CAP = 1.5`,
     `COMBINED_CONFIDENCE_CAP = 0.99`, `JSON_INF_SENTINEL = 1e9`,
     `MIN_ANISOTROPIC_SMEAR_PX = 0.5`, etc. Each carries a one-line
-    docstring with units + intent. Phase 1 implementation populates
-    this module; pseudocode in this plan referencing the inline numbers
-    is updated to reference the constant name.
+    docstring with units + intent. Phase 0 shipped this module;
+    pseudocode in this plan referencing the inline numbers is updated
+    to reference the constant name. (Legacy wording said "Phase 1".)
 
 45. **Typing aliases (D6).** Add `src/nav/support/types.py` containing
     `NDArrayFloat = np.ndarray  # cast of NDArray[np.floating[Any]]`,
@@ -536,7 +605,9 @@ plan-body section conflicts, this list wins.
     - `nav.support.status_reason.__all__ = ['NavStatusReason']`.
 
 47. **Pre-emptive module splits (D10).** Three packages get split before
-    Phase 4 ships, avoiding > 1000-line files:
+    the orchestrator phase ships, avoiding > 1000-line files (the
+    orchestrator-tier work shipped in Phase 0; the splits below are
+    binding for any later additions to those modules):
     - `nav.nav_orchestrator` already split (`orchestrator.py`,
       `ensemble.py`, `nav_result.py`); also split `nav_result.py` into
       `nav_result.py` (the dataclass), `feature_summary.py`
@@ -577,7 +648,9 @@ plan-body section conflicts, this list wins.
 
 49. **Module index (E4).** Update `docs/index.rst` (the Sphinx
     top-level toctree) to list every new module, sorted by package and
-    name. Add to Phase 6 work list.
+    name. The toctree must be kept in sync as each phase ships its
+    docs; the final audit is part of Phase 11. (Legacy wording said
+    "Phase 6 work list".)
 
 #### Testing additions (Section F)
 
@@ -725,18 +798,20 @@ plan-body section conflicts, this list wins.
 
 65. **"Future need" sentences swept into Part 13b (H3).** Every "if a
     future need arises" / "tracked in Part 13b" / "to be designed and
-    added later" sentence in Parts 1–12 either points to one of the 5
-    existing Part 13b items or its referenced item is added. Reading
-    pass during Phase 1 catches the rest; for now, the 5 items in
-    Part 13b are the canonical deferred-work list.
+    added later" sentence in Parts 1–12 either points to one of the
+    Part 13b items or its referenced item is added. Reading pass
+    during Phase 0 caught the rest; for now, the 6 items in Part 13b
+    are the canonical deferred-work list. (Legacy wording said "5
+    items" / "Phase 1".)
 
 66. **UI per-technique-result panel layout (H13).** Out of scope for
     the cutover. Filed as a 6th Part 13b item: "UI per-technique panel
     redesign — replace the manual-nav 'Auto' button with a per-technique
     side-by-side panel; ergonomics + interaction TBD; tracker only."
-    Phase 4 keeps the existing manual-nav UI working with the new
-    `NavResult` (one technique surfaced per the orchestrator's choice);
-    the panel redesign happens later.
+    The cutover (Phases 0–11) keeps the existing manual-nav UI working
+    with the new `NavResult` (one technique surfaced per the
+    orchestrator's choice); the panel redesign happens later.
+    (Legacy wording said "Phase 4".)
 
 #### Section I: missing material
 
@@ -752,18 +827,18 @@ plan-body section conflicts, this list wins.
     - VGISS NA, `fit_camera_rotation=True`: ≤ 3× legacy.
     - Memory ceiling per worker: 800 MB resident set for any of the
       four supported missions at native resolution.
-    Phase 5 calibration validates against the library; CI smoke test
+    Phase 10 calibration validates against the library; CI smoke test
     measures one COISS NAC frame and fails if runtime > 5× a stored
     baseline (loose; for catching catastrophic regressions, not
-    fine tuning).
+    fine tuning). (Legacy wording said "Phase 5".)
 
-69. **CI grep step for deleted symbols (I3).** Phase 7 adds a
+69. **CI grep step for deleted symbols (I3).** Phase 11 adds a
     `.github/workflows/ci.yml` step:
     `grep -rE 'NavTechniqueCorrelateAll|NavModelCombined|NavModelResult|NavMaster|weighted_mask|blur_amount|final_offset|final_confidence|use_legacy_pipeline' src tests docs README.md CLAUDE.md && exit 1 || exit 0`
     fails the build if any leftover reference appears. Single sweep;
-    run on every PR.
+    run on every PR. (Legacy wording said "Phase 7".)
 
-70. **Empty tests directories (I5).** Phase 1 creates
+70. **Empty tests directories (I5).** Phase 0 created
     `tests/nav/feature/__init__.py` (empty),
     `tests/nav/nav_orchestrator/__init__.py` (empty),
     `tests/integration/__init__.py` (empty),
@@ -857,8 +932,7 @@ plan-body section conflicts, this list wins.
       <document_id> v<version>, §<section>, Table <N>` — the document
       ID matches the PDS3/PDS4 holdings.
     - **IAU report**: `IAU WGCCRE <year> report, §<section>`.
-    - **Mission-team technical memo**: `<Author or Team> (Year),
-      <Title>, <Identifier or URL>` — URL only when no DOI exists.
+    - **Mission-team technical memo**: `<Author or Team> (Year), <Title>, <Identifier or URL>` — URL only when no DOI exists.
 
     **Anti-hallucination procedure.** AI agents that draft body-shape
     entries:
@@ -867,9 +941,10 @@ plan-body section conflicts, this list wins.
        session. Citing from training-data memory is not allowed.
     2. If a value cannot be sourced from a fetched document, the value
        is left as `null` and the `_sources` entry reads
-       `'PLACEHOLDER — no source found, calibrate in Phase 5'`. The
+       `'PLACEHOLDER — no source found, calibrate in Phase 10'`. The
        loader fallback (Part 5: 10% radius default, WARNING log,
-       reliability cap 0.3) handles `null` values at runtime.
+       reliability cap 0.3) handles `null` values at runtime. (Legacy
+       wording said "Phase 5".)
     3. DOIs and paper titles must verify against a real
        `https://doi.org/<DOI>` lookup; agents do not invent identifiers.
     4. The drafting prompt explicitly forbids fabrication: any draft
@@ -931,11 +1006,181 @@ implementation-time conventions. Their absence from this section means
 
 ---
 
+## Implementation phases — overview
+
+The implementation is split into context-sized phases. Each phase is small
+enough to fit in a single Claude Opus context (no context drift),
+self-contained (assume the agent picking it up has no memory of prior
+phases beyond what is in the codebase + the design content in Parts 1–16
++ this overview), and ends with full lint, type, pytest, and
+documentation checks plus a complete code review (see "Per-phase
+definition of done" below). Order is chosen so that **minimal
+end-to-end functionality lands as early as possible** — the first time
+a real image navigates is Phase 4 — and only then do additional
+techniques broaden coverage.
+
+| Phase | Goal | Status |
+|-------|------|--------|
+| **0** | Foundational support for the navigation core rewrite | **Complete** (PR #111) |
+| **1** | Real-scene NavModels (`NavModelStars`, `NavModelBody`, `NavModelRings`) | **Complete** (PR #112) |
+| **2** | DT-based NavTechniques (`BodyLimbNav`, `BodyTerminatorNav`, `RingEdgeNav`) | **Complete** (branch `core_rewrite_dt_techniques`) |
+| **3** | Foundation completion + per-instrument config wiring | Pending |
+| **4** | First navigable image (end-to-end DT-only) | Pending |
+| **5** | Body disc + body blob techniques | Pending |
+| **6** | Ring-annulus technique | Pending |
+| **7** | Star techniques part 1 (unique-match + refine) | Pending |
+| **8** | `StarFieldFromCatalogNav` (multi-star RANSAC) | Pending |
+| **9** | Camera rotation correction (per instrument) | Pending |
+| **10** | Image library expansion + confidence-formula calibration | Pending |
+| **11** | Cleanup + documentation finalization + breadth comparison | Pending |
+| **12+** | Deferred items (Part 13b) — each its own phase when scheduled | Tracked |
+
+**Detailed Phase 0–2 status sections** ("Phase 0 — Foundation
+(complete)" / "Phase 1 — Real-scene NavModels (complete)" / "Phase 2
+— DT-based NavTechniques (partial)") follow this overview and the
+operational checklist. They preserve the check matrix, commit lineage,
+shipped components, conventions, and remaining gaps recorded during
+each phase.
+
+**Detailed Phase 3+ specifications** (Goal / Why now / Prerequisites /
+Scope (in) / Scope (out) / Design references / Tests / Documentation /
+Definition of done) follow the Phase 0–2 sections.
+
+### Per-phase definition of done
+
+Every phase must end with all of the following clean before it is
+considered done:
+
+- `ruff check src tests` — clean.
+- `ruff format --check src tests` — clean.
+- `mypy --strict src tests` — clean (`MYPYPATH=src` from `pyproject.toml`).
+- `pytest -n auto --dist=loadfile` — all passing (`--dist=loadfile`
+  matches CI; default scheduling crashes PyQt6 workers).
+- `pytest --cov` — coverage ≥ 90 % on the cutover-tier modules
+  (`nav.feature/`, `nav.nav_orchestrator/`, `nav.nav_technique/`,
+  `nav.nav_model/`); whole-tree percentage gated by per-package
+  thresholds (the GUI / mosaic-viewer / sim packages pre-date the
+  cutover and are below 90 % by design).
+- `sphinx-build -W -b html docs docs/_build` — clean.
+- `pymarkdown scan docs/ .cursor/ README.md CONTRIBUTING.md` — clean.
+- `./scripts/run-all-checks.sh` — green end-to-end.
+
+Plus a **complete code review** written to a per-phase folder
+`phase_NN_review/` at the repo root (committed alongside the phase
+work as the historical record of its quality bar — the existing
+stage-0 critique reports at the repo root are the precedent for this
+convention). The folder contains the following files:
+
+- `CRITIQUE_PYTHON.md` — review against `.cursor/rules/python_best_practices.mdc`.
+- `CRITIQUE_DOCS.md` — review against `.cursor/rules/documentation.mdc`.
+- `CRITIQUE_FILECACHE.md` — review against `.cursor/rules/filecache_best_practices.mdc`.
+- `CRITIQUE_LOGGING.md` — review against `.cursor/rules/logging_best_practices.mdc`.
+- `CRITIQUE_TESTS.md` — review using `.cursor/skills/critique-test-suite/SKILL.md`.
+- `CRITIQUE_CODEBASE.md` — review using `.cursor/skills/python-codebase-analysis/SKILL.md`.
+- `CRITIQUE_SUMMARY.md` — **executive summary** aggregating every
+  finding from the six files above with importance
+  (Critical / High / Medium / Low) and a ready-to-run AI prompt to
+  execute the fix for each finding. Every Critical and High
+  finding **must** be addressed before the phase closes.
+
+Doc files unique to the phase (e.g. `developer_guide_<topic>.rst`,
+`user_guide_<topic>.rst`) ship alongside the code in the phase. There
+is no separate documentation phase; doc finalization (index audit,
+README + CLAUDE.md + CHANGELOG, `.cursor/rules/*.mdc` files) folds
+into Phase 11.
+
+### Tooling and conventions binding for every phase
+
+Cross-phase bindings established during Phases 0–2. An AI continuing
+the work must respect every item below; regressing any of them is a
+phase-blocker.
+
+- **Python floor** is 3.11. `NavStatusReason` uses `StrEnum`; do not
+  regress to a `(str, Enum)` mixin without bumping `requires-python`
+  first. CI matrix covers 3.11 / 3.12 / 3.13 / 3.14.
+- **No backwards-compatibility shims** anywhere (Cardinal Principle #1).
+  When something is replaced, the old form is deleted; the new form
+  is the only form. No "DEPRECATED: removed in vNext" comments.
+- **Stub honesty.** Code that is not yet implemented either logs the
+  deferral and returns an inert value (the summary-PNG path before
+  Phase 4) or raises `NotImplementedError` naming the deferred work.
+  No silent placeholder values, ever.
+- **Magic constants live in module-level `ALL_CAPS` constants** with a
+  one-line docstring stating units and intent (e.g.
+  `DEFAULT_FULL_WELL_DN_12_BIT` was the canonical example before
+  Phase 3 replaced it with config-driven values). No hard-coded
+  saturation thresholds, magic factors, or sentinels in function
+  bodies.
+- **Broad `except Exception:` is reserved for the orchestrator's
+  plugin-sandbox sites** (per-NavModel `create_model` /
+  `to_features` / `to_annotations`, per-NavTechnique `navigate`).
+  Each site carries a docstring explaining why and a per-line
+  justification comment. Other broad catches are not acceptable.
+- **Pdslogger output is captured with `capsys`, not `caplog`.**
+  Pdslogger writes through its own stream handler that does not feed
+  the standard `logging` propagation. Tests that need to verify a
+  WARNING / ERROR / EXCEPTION emission read from
+  `capsys.readouterr().out`.
+- **Frozen dataclasses validate on construction.** Public dataclasses
+  use `__post_init__` to enforce documented invariants;
+  `object.__setattr__` is the standard escape hatch for normalising
+  inputs in a frozen dataclass.
+- **Sphinx `automodule` for re-exporting packages uses `:no-index:`**
+  to avoid duplicate cross-references with the submodule pages
+  (see `docs/api_reference/api_feature.rst`).
+- **`pyproject.toml [tool.pytest.ini_options]`** has
+  `filterwarnings = ["error"]` plus a single tolerated rule for the
+  third-party `PytestUnraisableExceptionWarning` raised by astropy's
+  FITS reader on integration tests.
+- **CI.** `.github/workflows/run-tests.yml` runs on every PR (not
+  just those targeting `main`); the Python matrix covers 3.11 /
+  3.12 / 3.13 / 3.14; `codecov-action@v6`.
+- **Source-tree code, comments, docstrings, and tests must not
+  mention the plan.** No "Per Part X §Y", no "Phase N", no "Cardinal
+  Principle #N", no "AUTONAV_PLAN". The implementation reads as if
+  written from scratch with the design in mind.
+- **No `import logging`** anywhere in the new core code
+  (`nav.feature`, `nav.nav_model`, `nav.nav_orchestrator`,
+  `nav.nav_technique`, `nav.support`). Pdslogger via
+  `nav.config.logger.IMAGE_LOGGER` is the only logger; `NavBase`
+  exposes it as `self.logger`.
+- **Every `NavTechnique.navigate` body opens a logger section** via
+  `with self.logger.open(f'TECHNIQUE: {self.name}'):` so the
+  per-image log clearly delimits each technique's contribution.
+- **Test shims under `tests/shims/`** are the canonical way to drive
+  nav code paths that depend on `oops.Backplane`, `oops.Observation`,
+  or production star catalogs without paying the SPICE-kernel /
+  multi-GB-binary price. Extend the shim rather than spinning up a
+  parallel fake.
+- **Inline imports remain forbidden** — every test imports at the
+  module top.
+- **`@pytest.fixture(autouse=True)`** is reserved for genuinely
+  cross-cutting setup (e.g., DB cleanup if it existed). Per-test
+  data injection should be requested explicitly.
+- **`pytest-xdist` must run with `--dist=loadfile`**; default
+  scheduling crashes PyQt6 workers when tests from one file split
+  across processes.
+
+---
+
 ## Implementation status (snapshot)
+
+> **Future-AI orientation note.** This section is the **historical
+> operational checklist** built up during Phases 0–2; it lists what
+> shipped, what was removed without direct replacement, and what is
+> still pending. **It is not the action plan.** The action plan is
+> the per-phase sections at the top of this file (Phase 0 → Phase
+> 12+). Where this checklist's "Pending" subsection and a per-phase
+> "Scope (in)" disagree, the **per-phase section wins** — it has been
+> reorganised for context-friendly delivery, while the checklist
+> below is preserved as a flat, comprehensive index of every
+> outstanding item. Read this section to *survey* what is left;
+> read the per-phase sections to *do* the next phase.
 
 This section tracks what has shipped vs. what still needs to be built.
 The remainder of the plan (Parts 1–16) describes the *target* design;
-this section is the operational checklist.
+this section is the operational checklist that the per-phase sections
+above operationalise.
 
 ### Implemented
 
@@ -1376,7 +1621,7 @@ image library lands.
 - README + CLAUDE.md + CHANGELOG.md updates.
 - The three new `.cursor/rules/*.mdc` files.
 
-**Cleanup (Phase 7)**
+**Cleanup (new Phase 11; legacy Phase 7)**
 
 - ``sphinx-build -W`` is clean as of stage 0; CI must keep it that
   way.
@@ -1411,11 +1656,14 @@ image library lands.
 
 ---
 
-## Foundation cleanup status (stage 0 — complete)
+## Phase 0 — Foundation (complete)
 
-Stage 0 ("foundational support" PR
+Phase 0 ("foundational support" PR
 [#111](https://github.com/SETI/rms-nav/pull/111),
 branch ``core_rewrite_foundation`` → ``rf_core_rewrite``) is **complete**.
+The internal label "stage 0" survives in commit messages and the body
+of this section as historical record; treat it as synonymous with
+Phase 0.
 The 2026-04-27 foundation critique surfaced four severity-tagged
 domains of work; every blocking and important item has been resolved.
 The original critique reports (`CRITIQUE_PYTHON.md`,
@@ -1469,7 +1717,7 @@ The simulated body / rings NavModels emit on the new contract; the
 ``NavModelTitan`` stub is registered.  ``NavTechniqueManual`` is
 abstract-opted-out of the auto-discovery registry but available for
 the GUI driver.  Real-scene NavModels and concrete NavTechniques are
-the next stage's work — see "Stage 1 entry points" below.
+the next phase's work — see "Phase 1 forward reference" below.
 
 ### Hardening landed in stage 0
 
@@ -1586,6 +1834,14 @@ work can construct any of these and trust the inputs are checked.
 
 ### Tooling and conventions established in stage 0 (binding)
 
+> The canonical cross-phase binding lives in the **"Tooling and
+> conventions binding for every phase"** subsection inside the
+> "Implementation phases — overview" section at the top of this
+> file. The list below is the original Phase-0-era version, kept
+> verbatim as the historical record. The two lists are
+> intentionally aligned — if they ever drift, the top-of-file
+> "binding for every phase" subsection wins.
+
 - **Python floor** is 3.11.  ``NavStatusReason`` uses ``StrEnum``;
   do not regress to the ``(str, Enum)`` mixin without bumping
   ``requires-python`` first.
@@ -1624,20 +1880,23 @@ work can construct any of these and trust the inputs are checked.
   (not just those targeting ``main``); the matrix covers Python
   3.11 / 3.12 / 3.13 / 3.14.  ``codecov-action@v6``.
 
-### Stage 1 forward reference
+### Phase 1 forward reference
 
-Stage 1 (real-scene NavModels) is described in its own top-level
-section, "Stage 1 status (NavModels — complete)", below.
+Phase 1 (real-scene NavModels) is described in its own top-level
+section, "Phase 1 — Real-scene NavModels (complete)", below.
 
-End of "Foundation cleanup status (stage 0)" section.
+End of "Phase 0 — Foundation" section.
 
 ---
 
-## Stage 1 status (NavModels — complete)
+## Phase 1 — Real-scene NavModels (complete)
 
-Stage 1 ("real-scene NavModels" PR
+Phase 1 ("real-scene NavModels" PR
 [#112](https://github.com/SETI/rms-nav/pull/112),
 branch ``core_rewrite_models`` → ``rf_core_rewrite``) is **complete**.
+The internal label "stage 1" survives in commit messages and the body
+of this section as historical record; treat it as synonymous with
+Phase 1.
 The three concrete NavModels listed in Part 1 / Part 8 — `NavModelStars`,
 `NavModelBody`, `NavModelRings` — now exist on the new `NavModel` ABC
 contract, together with the per-body shape table and the helper
@@ -1740,9 +1999,9 @@ factory the orchestrator's registry walks at construction.
 The shims under ``tests/shims/`` are the canonical way to drive
 nav code paths that depend on ``oops.Backplane``,
 ``oops.Observation``, or production star catalogs without paying
-the SPICE-kernel / multi-GB-binary price.  Stage 2 should reuse
-them; if a NavTechnique surfaces a missing surface, extend the
-shim rather than spinning up a parallel fake.
+the SPICE-kernel / multi-GB-binary price.  Phase 2 and every later
+phase should reuse them; if a NavTechnique surfaces a missing
+surface, extend the shim rather than spinning up a parallel fake.
 
 - ``tests/shims/backplane.py`` — ``FakeBackplane`` returning real
   ``polymath.Scalar`` instances over ``BodyBackplaneData`` /
@@ -1794,8 +2053,8 @@ coverage is enumerated under "NavModel coverage gap" in the
 - **Test shims under ``tests/shims/``** are the canonical way to
   drive nav code paths that depend on ``oops.Backplane``,
   ``oops.Observation``, or production star catalogs without
-  paying the SPICE-kernel / multi-GB-binary price.  Stage 2
-  reuses them.
+  paying the SPICE-kernel / multi-GB-binary price.  Phase 2 and
+  every later phase reuse them.
 - **Pytest ``monkeypatch`` is per-test scoped.**
   ``install_fake_catalogs`` swaps the lazy getter functions
   using ``monkeypatch.setattr``; the swap is bound to the
@@ -1833,17 +2092,34 @@ coverage is enumerated under "NavModel coverage gap" in the
   collection-mismatch was a downstream symptom that disappears
   when the warning is allowed through.
 
-End of "Stage 1 status" section.
+End of "Phase 1 — Real-scene NavModels" section.
 
 ---
 
-## Stage 2 status (NavTechniques — partial; DT techniques landed)
+## Phase 2 — DT-based NavTechniques (partial — DT subset complete)
 
-Stage 2 brings up the concrete ``NavTechnique`` subclasses that consume
-the features the stage-1 NavModels emit.  The first wave (the three
-DT-based techniques plus their shared infrastructure) has shipped; the
-remaining techniques (full-disc NCC, blob centroid, ring-annulus NCC,
-all star techniques) are still pending.
+Phase 2 brings up the concrete ``NavTechnique`` subclasses that consume
+the features the Phase-1 NavModels emit.  The first wave (the three
+DT-based techniques plus their shared infrastructure) has shipped under
+this phase; the remaining techniques (full-disc NCC, blob centroid,
+ring-annulus NCC, all star techniques) are scheduled into separate
+later phases — see the table below. The internal label "stage 2"
+survives in commit messages and the body of this section as historical
+record; treat it as synonymous with Phase 2 in this plan.
+
+The remaining technique work originally bundled into "stage 2" has
+been re-cut into context-friendly later phases:
+
+| Technique | Phase |
+|---|---|
+| `BodyDiscCorrelateNav` | 5 |
+| `BodyBlobNav` | 5 |
+| `RingAnnulusNav` | 6 |
+| `StarUniqueMatchNav` | 7 |
+| `StarRefineNav` | 7 |
+| `StarFieldFromCatalogNav` | 8 |
+| `CartographicNav` | 12+ (deferred per Part 13b §2) |
+| `TitanNav` (real algorithm) | 12+ (deferred per Part 13b §3) |
 
 ### DT-based techniques shipped
 
@@ -1900,7 +2176,7 @@ image logs delimit each technique's contribution.  Tests capture log
 output via ``capsys``, never ``caplog`` (pdslogger writes through its
 own stream handler).
 
-### Final stage-2-DT check matrix
+### Final Phase-2-DT check matrix
 
 ```
 $ ruff check src tests           — clean
@@ -1925,42 +2201,807 @@ Per-module coverage on the new DT-tier code is 89-100 %.  Whole-tree
 coverage stays at ~39 % because the GUI / mosaic-viewer / sim / pds4
 packages are intentionally out of scope.
 
-### What stage 2 still owes
+### What Phase 2 owes downstream
 
-Concrete NavTechniques not yet landed:
+The remaining technique implementations and the production-wiring
+gaps that surfaced during Phase 2 are scheduled into the later
+phases below. Each is **not** a Phase 2 deliverable; they are tracked
+here only as forward references so an agent reading this section
+sees where the work went.
 
-- ``BodyDiscCorrelateNav`` (BODY_DISC NCC)
-- ``BodyBlobNav`` (BODY_BLOB centroid)
-- ``RingAnnulusNav`` (RING_ANNULUS NCC)
-- ``StarFieldFromCatalogNav`` (multi-star RANSAC)
-- ``StarUniqueMatchNav`` (single-star unique match)
-- ``StarRefineNav`` (single-star refine pass)
-- ``CartographicNav`` (CARTOGRAPHIC_MODEL NCC, deferred per Part 13b)
-- ``TitanNav`` (atmospheric-body, deferred per Part 13b)
+Concrete NavTechniques scheduled into later phases (see the table at
+the top of this section):
+
+- ``BodyDiscCorrelateNav`` / ``BodyBlobNav`` — Phase 5.
+- ``RingAnnulusNav`` — Phase 6.
+- ``StarUniqueMatchNav`` / ``StarRefineNav`` — Phase 7.
+- ``StarFieldFromCatalogNav`` — Phase 8.
+- ``CartographicNav`` / ``TitanNav`` — Phase 12+ (deferred per
+  Part 13b §2 / §3).
 
 Per Part 13b §2 the ``CartographicDiagnostics`` dataclass is **deleted**
 from the cutover-tier source tree until ``CartographicNav`` itself
 lands; the diagnostics class returns alongside the technique (kept in
 git history until then).
 
-Production wiring still pending (see "Pending" subsection):
+Production wiring scheduled into later phases:
 
 - Static-data YAML files (``config_220_body_shape.yaml`` plus four
   orchestration tier files plus per-camera ``noise:`` / ``mag_offset:``
-  blocks).
+  blocks) — initial bodies + per-instrument blocks land in Phase 3;
+  full ~55-body coverage in Phase 10.
 - Per-instrument ``ImageQualityThresholds`` from ``config_4N0_inst_*.yaml``
   (today the orchestrator uses raw-DN-unit defaults, which mis-classify
-  CALIB I/F-unit images as ``blank``).
+  CALIB I/F-unit images as ``blank``) — Phase 3.
 - ``STATUS_REASON_INFO_TEMPLATE`` wiring so every hard-failure
-  short-circuit emits an operator-readable INFO line.
+  short-circuit emits an operator-readable INFO line — Phase 3.
 - Per-camera saturation DN, mag-offset table consumer, source-image
-  ``BANDPASS_DOG`` pre-filter.
-- Provenance population (SPICE kernels, static-data hashes, git SHA).
-- Annotations + summary-PNG renderer.
-- Real-image integration suite (Parts 9 / 10).
-- Confidence-formula calibration against the integration library.
+  ``BANDPASS_DOG`` pre-filter — Phase 3.
+- Provenance population (SPICE kernels, static-data hashes, git SHA)
+  — Phase 3.
+- Annotations + summary-PNG renderer — Phase 4.
+- Real-image integration suite (Parts 9 / 10) — Phase 4 (initial 1-3
+  images), expanded incrementally each subsequent phase, full ~50
+  images in Phase 10.
+- Confidence-formula calibration against the integration library —
+  Phase 10.
 
-End of "Stage 2 status" section.
+End of "Phase 2 — DT-based NavTechniques" section.
+
+---
+
+## Phase 3 — Foundation completion + per-instrument config wiring
+
+**Goal:** Close the foundational gaps that should have shipped in
+Phases 0–2 but didn't, and wire enough static data + per-instrument
+config so a real image can run through the pipeline without
+hard-coded defaults misclassifying it.
+
+**Why now:** The orchestrator currently hard-codes a 12-bit
+saturation default and uses raw-DN-unit classifier defaults that
+mis-classify Cassini CALIB I/F products as `blank` (max value < 1.0).
+Without per-instrument config wiring, no real image navigates
+correctly. INFO logging cadence is missing for hard-failure
+short-circuits, so failed images log only the section header with no
+reason. Provenance is unpopulated. The source-image pre-filter is
+unwired. These are foundational pieces that block every downstream
+phase, so they go first.
+
+**Prerequisites:** Phase 0, 1, 2 (complete).
+
+**Scope (in):**
+
+A. **Config file infrastructure.**
+   - Renumber `config_NN_*.yaml` → `config_NNN_*.yaml` (3-digit
+     prefix per the binding file numbering convention in the
+     resumption notes / active style conventions). Update the
+     loader's filename-order merge contract to match.
+   - Convert any radian-based fields in existing configs (notably
+     `config_07_bootstrap.yaml`, which becomes
+     `config_070_bootstrap.yaml`) to degrees per Cardinal Principle
+     #4. Loader converts at load time; metadata curator already
+     converts back at write time. No backwards compatibility.
+   - **Config-load validation** (per Part 0 §16): `Config`
+     initialization runs `evaluate_sigmoid_combination` on every
+     shipped technique YAML against its `NavTechniqueDiagnostics`
+     field set; unknown fields raise `ValueError` with full
+     diagnostic at startup. Add a config-load test asserting every
+     shipped YAML resolves cleanly.
+
+B. **Per-instrument `config_4N0_inst_*.yaml` — real wiring** (replaces
+   stage-0 hard-coded defaults).
+   - Each instrument config gains `data_units: 'raw_dn' |
+     'calibrated_if'` at the camera section root (required field).
+     Loader rejects any instrument config without it.
+   - For raw instruments, `noise.{saturation_dn, full_well_dn,
+     expected_noise_dn, marker_value, read_noise_dn}` and
+     `image_quality_thresholds.{blank_max_dn,
+     saturation_threshold_dn, noisy_threshold_dn,
+     max_missing_frac_clean, max_overexposed_frac_clean}` are all
+     required. **Each raw observation type carries its own max DN
+     — no global default; an 8-bit instrument's `saturation_dn`
+     is 255, 12-bit is 4095, 14-bit is 16383, etc.**
+   - For calibrated-IF instruments, the DN-keyed fields are
+     omitted/null; the I/F-keyed counterparts (`blank_max_if`,
+     `saturation_threshold_if`, `noisy_threshold_if`,
+     `marker_value: NaN`) are required instead. The orchestrator's
+     saturation-mask path keys off `data_units` and either reads
+     raw DN against `saturation_dn` or reads preserved
+     raw-saturation flags off the calibrated obs (or short-circuits
+     with a one-line WARNING when neither is available).
+   - Each camera section gains a `mag_offset:` block with
+     `fallback_combo` and per-filter-combo `mag_offset_table` keyed
+     by B-V color bin (per Part 1 "Filter-aware photometry"). Per
+     Part 0 §74, every numeric field carries a sibling `_sources`
+     entry with DOI / URL evidence. Citations for the filter
+     transformations come from the per-mission calibration reports
+     (CISS Calibration Report, GOSSI calibration documentation,
+     VGISS / NHLORRI PDS calibration archives).
+   - Each camera section gains a `source_image_filter:` block
+     (`kind`, `lo_sigma_px`, `hi_sigma_px`, `enabled`) per
+     Part 2 §"Source-image filters".
+   - Each camera section gains `fit_camera_rotation: false` (default;
+     Phase 9 flips this on per camera) and `max_rotation_deg: 5.0`.
+
+C. **Orchestrator wiring.**
+   - Replace `_instrument_full_well_dn` returning the named
+     module-level `DEFAULT_FULL_WELL_DN_12_BIT` constant with a
+     real config consumer that reads
+     `config.<camera>.noise.saturation_dn`. Returns `None` for
+     `data_units == 'calibrated_if'` instruments; downstream
+     gradient/star paths handle `None` by producing an empty
+     saturation mask.
+   - Wire `ImageQualityThresholds` from
+     `config_4N0_inst_*.yaml.image_quality_thresholds`. The
+     classifier today carries raw-DN defaults
+     (`blank_max_dn = 5.0`, `saturation_threshold_dn = 4095`,
+     `noisy_threshold = 10.0`) that mis-classify CALIB I/F-unit
+     Cassini products as `blank` and short-circuit before any model
+     or technique runs.
+   - Apply the source-image `BANDPASS_DOG` pre-filter to
+     `NavContext.image_ext` when the per-instrument config enables
+     it. The field is already on `NavContext`; only the application
+     step is missing.
+   - Wire `STATUS_REASON_INFO_TEMPLATE` through every
+     `NavResult.failed` site (orchestrator hard-failure
+     short-circuits, classifier short-circuits, plugin sandbox
+     sites). Hard-failure short-circuits
+     (`no_signal_in_image`, `image_overexposed`,
+     `mostly_missing_data`, `image_corrupt`) currently return
+     immediately from `NavOrchestrator.navigate` without emitting
+     any per-image INFO line; wire the template through every
+     `NavResult.failed` site so the failure reason appears in the
+     log alongside the per-image section header. Add per-stage
+     INFO lines for the four orchestrator-level failure status
+     reasons (`no_features_extracted`, `all_features_gated`,
+     `no_feasible_techniques`, `final_confidence_below_threshold`).
+
+D. **Provenance population.**
+   - Populate `Provenance.spice_kernels` from `spice.ktotal` /
+     `spice.kdata` at navigation time; `static_data_hashes` with
+     sha256 of raw YAML bytes for every `config_*.yaml` that
+     contributes to the run (per Part 0 §18; comments + whitespace
+     are part of the hash so comment-only edits invalidate
+     baselines); `rms_nav_git_sha` from `git rev-parse HEAD` at
+     process start.
+   - Test that two consecutive identical-input runs produce
+     byte-identical Provenance except `pipeline_run_iso8601` (per
+     Part 0 §11).
+
+E. **`NavModelStars` per-camera mag-offset wiring.**
+   - `nav.nav_model.stars.NavModelStars.to_features` reads
+     `config.<camera>.mag_offset.filter_combos[<combo>]` per star,
+     falling back to `config.<camera>.mag_offset.fallback_combo`
+     when the in-image combo has no entry. The `mag_offset`
+     parameter accepted by `predicted_snr` is no longer hard-coded
+     to `0.0`.
+
+F. **Image-quality classifier completeness.**
+   - Add detection paths and `flags` / classes for
+     `partial_data_dropout`, `alternating_lines`,
+     `truncated_readout`, `ccd_bloom_dominant`. Each detection is
+     a global statistic on the full sensor area (Cardinal
+     Principle #2). The `ImageClass` Literal grows to include
+     these.
+
+G. **Static data — `config_220_body_shape.yaml` (initial).**
+   - Populate the bodies needed for the Phase 4 first integration
+     image plus immediate neighbours (~10 bodies; full ~55-body
+     coverage lands in Phase 10). Per-body schema in Part 5;
+     AI-drafted citations per Part 0 §74; PR limit ≤ 10 bodies.
+   - Add the schema validator test (`test_body_shape_citations.py`
+     per Part 9). Per Part 0 §74: every body has a `_sources`
+     mapping; every non-`null` numeric/list field has a non-empty
+     `_sources` entry; no `TODO` / `FIXME` / `XXX`; `PLACEHOLDER`
+     allowed only as a matched pair with a `null` value.
+
+**Scope (out):**
+- Full ~55-body `config_220_body_shape.yaml` — Phase 10.
+- New techniques (BodyDisc / Blob / RingAnnulus / Stars) — Phases 5–8.
+- Camera rotation math — Phase 9.
+- Annotations + summary-PNG renderer — Phase 4.
+- Per-image integration tests — Phase 4.
+
+**Design references:** Part 1 §"Image-quality preprocessing" /
+§"Image-quality classification (quick-fail before techniques)" /
+§"Filter-aware photometry"; Part 2 §"Source-image filters";
+Part 5 §"Static-data sources" §"Extensions to existing
+`config_4N0_inst_*.yaml`"; Part 12.7 §"Observability and logging
+conventions".
+
+**Tests:**
+- Unit tests for every new config consumer (under `tests/nav/config/`).
+- Config-load test asserting every shipped YAML resolves cleanly
+  (every technique YAML's `confidence_terms` map cleanly to its
+  `NavTechniqueDiagnostics` field set).
+- Provenance round-trip test: two consecutive runs produce identical
+  Provenance ex `pipeline_run_iso8601`.
+- Tests for the new classifier branches using the FakeObs shim
+  (synthetic inputs for each new class).
+- Tests for the radian → degree conversion in the renumbered
+  `config_070_bootstrap.yaml`.
+- Tests for the data_units field rejection and the I/F-fallback
+  saturation path.
+
+**Documentation:**
+- New developer guide pages: `developer_guide_static_data.rst`
+  (initial), `developer_guide_logging.rst` (initial). Existing
+  pages updated to reference the new config blocks.
+- Update README and `CLAUDE.md` if any new env var or CLI flag
+  is added (none expected for this phase).
+
+**Definition of done:** see "Per-phase definition of done" in the
+overview at the top of the file.
+
+---
+
+## Phase 4 — First navigable image (end-to-end)
+
+**Goal:** A real Cassini ISS image (or similar) navigates
+end-to-end through the orchestrator using the existing DT
+techniques (`BodyLimbNav`, `BodyTerminatorNav`, `RingEdgeNav`),
+producing a `NavResult` with offset / confidence and a non-trivial
+summary PNG. This is the **minimal-functionality milestone** — the
+first time the new pipeline does real work on a real image.
+
+**Why now:** All foundational infra is in place after Phase 3. The
+DT techniques shipped in Phase 2. Only the test-image-library
+scaffolding + annotation rendering + a few curated images stand
+between the codebase and a working end-to-end run.
+
+**Prerequisites:** Phase 3.
+
+**Scope (in):**
+
+A. **Test image library scaffolding.**
+   - `tests/integration/image_library/<class>/<image_id>/` directory
+     layout per Part 10 §"Library structure".
+   - Per-image sidecar schema (`schema_version: 1`) per Part 10
+     §"Per-image sidecar schema": operator-supplied ground-truth
+     offset, expected confidence tier, expected status,
+     scene-class tags, provenance.
+   - `tests/integration/test_image_library.py` — structural
+     invariants: every directory has a sidecar; every sidecar
+     validates against the schema; every cited image_id resolves
+     through the holdings layout; sidecars do not duplicate
+     scene-class tags. Runs without the holdings env vars.
+
+B. **Initial library entries (DT-friendly scenes).**
+   - 1–3 operator-curated images covering scenes where the DT
+     techniques are expected to succeed: e.g. a Cassini Mimas scene
+     with a long visible limb, a Cassini Saturn ring scene with a
+     sharp ring edge, optionally a Cassini terminator-only scene
+     for `BodyTerminatorNav`. Operator hand-picks via the
+     manual-nav UI (per Part 10 §"Per-class selection criteria").
+     Ground truth via the manual-nav dialog.
+   - **Save-as-library-entry button** on the manual-nav dialog
+     (originally a Phase 5 work item in the old plan; pulled
+     forward to enable library curation now). Writes a sidecar
+     with provenance pre-filled.
+
+C. **Annotations + summary-PNG renderer.**
+   - Replace the honest INFO-level no-op in
+     `nav.navigate_image_files._write_summary_png` with the real
+     annotation-compositing renderer that turns
+     `NavResult.annotations` plus the source image into a
+     `_summary.png`. The orchestrator's `_collect_annotations`
+     already merges every NavModel's `to_annotations(context)` —
+     only the renderer is missing.
+   - The renderer composites annotation overlays + text labels
+     over the source image; the existing `Annotations` collection
+     class owns the rendering logic, so this is a thin driver.
+     **No new annotation classes; no new styling config.**
+
+D. **Per-image integration regression test.**
+   - `tests/integration/test_autonomous_nav.py` — for each library
+     entry: run `navigate_image_files` end-to-end against the real
+     holdings; assert `NavResult.status == sidecar.expected.status`,
+     `NavResult.confidence_rank == sidecar.expected.confidence_tier`,
+     `offset_px` within `offset_uncertainty_px + 0.5 px` slack of
+     the operator-supplied ground truth.
+   - Tests run under the `integration` mark (require
+     `PDS3_HOLDINGS_DIR` etc. env vars per the existing CI workflow;
+     fast suite skips them).
+
+E. **Regression baseline scaffolding.**
+   - `tests/integration/baselines/<image_id>.json` per Part 0 §17:
+     `offset_px` rounded to 4 decimals, `confidence` to 3 decimals;
+     comparison is exact-equal on rounded values. Populated for
+     the 1–3 initial images; gated by the citations test.
+
+**Scope (out):**
+- BodyDiscCorrelateNav / BodyBlobNav / RingAnnulusNav / Star
+  techniques — Phases 5–8.
+- ~50-image library + confidence calibration — Phase 10.
+- Per-technique side-by-side panel (Part 13b §6) — deferred.
+- Annotation styling for gated-out features (Part 13b §4) —
+  deferred.
+
+**Design references:** Part 1 §"Annotations: reuse existing
+infrastructure, no new classes" (annotation reuse); Part 4
+(orchestrator); Part 9 §"Methodology — TDD throughout"; Part 10
+(test image library).
+
+**Tests:**
+- Structural-invariants test (no external dependencies; runs in
+  the fast suite).
+- Per-image regression test (under the `integration` mark; runs in
+  the slow / integration CI step).
+- Annotation renderer unit tests against synthetic annotations + a
+  synthetic image.
+
+**Documentation:**
+- `developer_guide_orchestrator.rst` — describes the end-to-end
+  flow; cite the integration test as the worked example.
+- `user_guide_image_library.rst` — describes the library layout,
+  sidecar schema, and how operators add new entries.
+- Manual-nav dialog "Save as library entry" button workflow added
+  to `developer_guide_extending.rst` (or the manual-nav dev page).
+
+**Definition of done:** see "Per-phase definition of done".
+
+---
+
+## Phase 5 — Body disc + body blob techniques
+
+**Goal:** Ship `BodyDiscCorrelateNav` (full-disc NCC) and
+`BodyBlobNav` (blob centroid) — the two body-side techniques that
+don't fit the DT shape. After this phase, body-fills-FOV,
+body-mostly-off-frame-with-irregular-shape, and unresolved-body
+scenes navigate.
+
+**Why now:** Body-disc correlation is the foundation of the existing
+pipeline; porting it forward is well-understood and adds large
+coverage. Body-blob is cheap and fills the irregular-body /
+under-resolution gap. Together they extend the per-image
+integration suite with broad real-world coverage.
+
+**Prerequisites:** Phase 4 (so the integration test harness exists
+for the new techniques).
+
+**Scope (in):**
+
+A. **`BodyDiscCorrelateNav`.**
+   - NCC pyramid against the per-body `BODY_DISC` template, using
+     the existing 4-level pyramid structure as in
+     `navigate_with_pyramid_kpeaks`. `use_gradient='auto'` mode
+     picks raw vs gradient per Part 3 §"Correlation type — RAW vs
+     GRADIENT vs AUTO".
+   - Multi-body handling per Part 0 §2: Z-buffer paint by
+     `subject_range_km` ascending; closer body's nonzero pixels
+     overwrite farther body's; combined mask = OR of per-body
+     masks. This produces a single fused `BODY_DISC` template the
+     technique correlates against.
+   - Diagnostics via the existing `BodyDiscDiagnostics` dataclass
+     in `nav.nav_technique.diagnostics`.
+   - Confidence formula per `config_510_techniques.yaml` carries
+     placeholder coefficients with the
+     `# PLACEHOLDER — calibrate in Phase 10` marker (per Part 0 §5).
+
+B. **`BodyBlobNav`.**
+   - Brightness-weighted-moment centroid fit on the per-body
+     `BODY_BLOB` payload (predicted bounding box in image; centroid
+     intensity-weighted over predicted-lit pixels per Part 1
+     §"BODY_BLOB" position-covariance derivation).
+   - Confidence intrinsically capped at 0.4 per
+     `config_510_techniques.yaml`.
+   - Diagnostics via the existing `BodyBlobDiagnostics` dataclass.
+   - **Body extractor emission rule** per Part 5: emit `LIMB_ARC`
+     if `limb_uncertainty_px ≤ limb_uncertainty_px_max_for_arc`
+     (default 3 px); else emit `BODY_BLOB` if body diameter
+     ≥ `body_blob_min_px` (default 8 px); else emit nothing.
+     Wire the gate based on per-image computed
+     `limb_uncertainty_px = ellipsoid_residual_km / km_per_px_at_limb`
+     using `config_220_body_shape.yaml`.
+
+C. **Cartographic-model emission deferral.**
+   - `CartographicNav` and `CARTOGRAPHIC_MODEL` emission stay
+     deferred per Part 13b §2; restore the deleted
+     `CartographicDiagnostics` dataclass when its producer ships
+     (Phase 12+). No work in Phase 5.
+
+D. **Library expansion.**
+   - 2–4 operator-curated library images covering: body fills FOV
+     with small overflow; body 80 % off-frame with regular shape
+     (Moon-class); body at low resolution (~10 px) where blob-only
+     applies; multi-body scene where Z-buffer paint matters.
+     Sidecars + ground truth + baselines.
+
+E. **`_filter_models` glob-negation extension.**
+   - Per Part 0 §9: extend the existing `_filter_models` in
+     `src/nav/nav_technique/nav_technique.py` to parse leading `!`
+     as gitignore-style exclusion. Existing technique callers pass
+     non-negation patterns unchanged. Tests assert mixed
+     include/exclude patterns work in both `nav_models` and
+     `nav_techniques` orchestrator filters.
+
+**Scope (out):** Ring-annulus technique — Phase 6. Star techniques —
+Phases 7–8. Camera rotation — Phase 9. Confidence calibration —
+Phase 10.
+
+**Design references:** Part 1 §"BODY_BLOB" + §"BODY_DISC";
+Part 3 §"Techniques" + §"Correlation type — RAW vs GRADIENT vs
+AUTO"; Part 5 §"New: `config_220_body_shape.yaml`" extractor rules.
+
+**Tests:** Unit tests recover planted offsets on synthetic inputs
+per technique; report appropriate confidence at boundary cases
+(low signal, partial overlap); detect infeasibility cleanly; raise
+on invalid input with assert-on-message. Integration tests against
+the new library entries.
+
+**Documentation:** `developer_guide_techniques.rst` gains
+`BodyDiscCorrelateNav` and `BodyBlobNav` sections (formula source,
+diagnostics fields, infeasibility cases). Per-technique docstrings
+link to the confidence formula source-of-truth
+(`config_510_techniques.yaml.<technique_key>`).
+
+**Definition of done:** see "Per-phase definition of done".
+
+---
+
+## Phase 6 — Ring-annulus technique
+
+**Goal:** Ship `RingAnnulusNav` for low-resolution ring scenes
+where individual edges compress into a small image area. After
+this phase all ring scenes navigate (sharp edges via `RingEdgeNav`,
+low-res annulus via `RingAnnulusNav`).
+
+**Why now:** Ring-annulus is a small, focused technique that
+completes ring coverage. It has a smaller surface area than the
+star techniques and unblocks low-res Saturn / Uranus ring scenes
+that are currently un-navigable.
+
+**Prerequisites:** Phase 5.
+
+**Scope (in):**
+
+A. **`RingAnnulusNav`.**
+   - NCC against the multi-ring composite template carried on the
+     `RING_ANNULUS` feature.
+   - Per Part 0 §13, one feature per detectable ring system per
+     scene; multi-planet scenes (rare but real) emit one
+     `RING_ANNULUS` per planet; `is_feasible` handles
+     `len(features) > 1`.
+   - Confidence formula per `config_510_techniques.yaml`
+     (placeholder coefficients).
+   - Diagnostics via the existing `RingAnnulusDiagnostics` dataclass.
+
+B. **Library expansion.**
+   - 1–2 low-res-ring library images. Distant Cassini ring views;
+     possibly NHLORRI Pluto/Charon if the geometry yields a
+     useful annulus. Sidecars + ground truth + baselines.
+
+**Scope (out):** Star techniques — Phases 7–8. Calibration —
+Phase 10.
+
+**Design references:** Part 1 §"RING_ANNULUS"; Part 2 (filter for
+ring-annulus); Part 3 (technique).
+
+**Tests / Documentation / Definition of done:** standard.
+
+---
+
+## Phase 7 — Star techniques part 1 (unique-match + refine)
+
+**Goal:** Ship `StarUniqueMatchNav` and `StarRefineNav` — the two
+simpler star techniques that do not require multi-star pattern
+matching.
+
+**Why now:** Star navigation is the long pole, but
+`StarUniqueMatchNav` (1–2 stars; exploits catalog uniqueness) and
+`StarRefineNav` (refine pass given a prior) are well-defined and
+unblock star-only and star-supplemented scenes that the
+orchestrator can't currently handle. `StarFieldFromCatalogNav`
+(the big triplet-hash RANSAC pattern matcher) gets its own phase.
+
+**Prerequisites:** Phase 6.
+
+**Scope (in):**
+
+A. **`StarUniqueMatchNav`.**
+   - 1-star path: catalog reduction yields the unique brightest
+     predictable star (per `brightness_margin_to_next_catalog_star_mag`,
+     ≥ 1.5 mag default); brightest detection matched to it; offset
+     = detection − prediction. Confidence capped at 0.7.
+   - 2-star path: tries both detection-to-catalog assignments,
+     picks smaller-residual fit; confidence ~0.8 because the
+     residual cross-checks the assignment.
+   - On `fit_camera_rotation = True` instruments the 3×3
+     covariance is rank-2 in the 1-star case (translation
+     observable, rotation unobservable); ensemble combine handles
+     via `pinvh`.
+   - Diagnostics via the existing `StarUniqueMatchDiagnostics`
+     dataclass.
+
+B. **`StarRefineNav`.**
+   - Port the existing star-refinement pass forward; consumes a
+     prior offset (typically the pass-1 ensemble result) and
+     refines via local PSF fit on detected stars near each
+     predicted catalog star. Confidence per the refinement formula.
+   - Diagnostics via `StarRefineDiagnostics`.
+
+C. **Library expansion.**
+   - 2–3 star-rich library images: 1 Cassini star-cal frame, 1
+     NHLORRI scene with detectable stars, 1 multi-feature scene
+     with stars + body where the refine pass matters. Sidecars +
+     ground truth + baselines.
+
+**Scope (out):** `StarFieldFromCatalogNav` — Phase 8. Camera
+rotation — Phase 9.
+
+**Design references:** Part 1 §"Star magnitudes by filter" /
+§"Per-instrument star PSF" / §"Star-poor missions"; Part 3
+§"Techniques" star sections; Part 6 scenarios.
+
+---
+
+## Phase 8 — `StarFieldFromCatalogNav`
+
+**Goal:** Ship the multi-star RANSAC pattern matcher — the long
+pole of the star side. After this phase all star scenes navigate
+(unique-match + refine + multi-star pattern matching).
+
+**Why now:** Largest single technique; benefits from being last on
+the technique side so the rest of the pipeline is in production by
+then. Each sub-piece is TDD'd separately per the existing Part 13
+guidance.
+
+**Prerequisites:** Phase 7.
+
+**Scope (in):**
+
+A. **Sub-piece 1 — source detection.** Reuse the DAOPHOT-style
+   matched-filter detector from `nav.nav_model.stars.detection`
+   (already shipped in Phase 1). Phase 8 wires the technique-side
+   consumer.
+
+B. **Sub-piece 2 — triplet hashing.** Spatial-hash table keyed by
+   triplet relative geometry (angles + log-ratio of side lengths).
+   Built once per image from catalog stars; queried with detection
+   triplets.
+
+C. **Sub-piece 3 — RANSAC.** Deterministic seeding (seed from
+   `obs.midtime` ET as integer ns per Part 3 §"Determinism in
+   RANSAC"). Inlier count + median residual reported in
+   `StarFieldDiagnostics`.
+
+D. **Sub-piece 4 — verification.** Procrustes fit
+   (translation + rotation when `fit_camera_rotation` is true;
+   translation-only otherwise). Tukey biweight reweighting
+   (reuse `nav.nav_technique.dt_fitting.tukey_biweight_weights`).
+   Diagnostics via `StarFieldDiagnostics`.
+
+E. **Library expansion.** 2–3 dense star fields: Cassini star
+   calibration scenes, NHLORRI deep sky. Sidecars + ground truth +
+   baselines.
+
+**Scope (out):** Camera rotation full enablement — Phase 9.
+Calibration — Phase 10.
+
+**Design references:** Part 3 §"Techniques" star sections;
+Part 5 §"Backplane query reference"; Appendix A.
+
+**Tests:** Each sub-piece has its own TDD red→green→refactor
+cycle; integration test on each library star field. Determinism
+test: seeded RANSAC runs are bit-identical across two
+back-to-back invocations on the same obs.
+
+---
+
+## Phase 9 — Camera rotation correction (per instrument)
+
+**Goal:** Enable camera rotation fitting on instruments where
+attitude rotation residuals are observable per-image (VGISS,
+GOSSI). Cassini ISS and NHLORRI stay 2-DoF.
+
+**Why now:** Phases 4–8 produce a 2-DoF baseline. Once every
+technique is in place, the rotation knob can be flipped without
+churn — every technique can populate its 3×3 covariance correctly
+and the ensemble combine logic only needs one round of changes.
+
+**Prerequisites:** Phase 8.
+
+**Scope (in):**
+
+A. **Per-technique 3-DoF math.** Per Part 5b, each technique's
+   cost function gains a third parameter `dθ` (radians; bounded
+   by `±deg_to_rad(max_rotation_deg)`). Per-technique pivot rules
+   (body center, planet center, point-set centroid, etc.) per
+   Part 5b. Implementations populate the `rotation_rad` /
+   `sigma_rotation_rad` fields on `NavTechniqueResult`.
+   - DT-based techniques run rotation as a third LM parameter
+     (no outer search; LM converges from 2-D coarse-search basin
+     in <15 iters; compute overhead < 50 %).
+   - `BodyDiscCorrelateNav` runs the 3-D NCC pyramid sample
+     schedule per Part 5b §"Sub-decisions / pessimism".
+   - `BodyBlobNav` carries zero rotation information (centroid is
+     rotation-invariant); reports rank-deficient 3×3 covariance.
+   - `RingEdgeNav` on flat rings is doubly-rank-deficient;
+     ensemble's `pinvh` handles correctly without special cases.
+
+B. **Rotation-aware ensemble combine.** 3-D agreement /
+   precision-weighted combine. Mahalanobis check in 3-D.
+   Rank-deficient handling extends naturally — `pinvh` already
+   handles it. 3×3 covariance flows through to `NavResult`.
+
+C. **Per-instrument flag flip.** VGISS / GOSSI
+   `fit_camera_rotation: true`. Cassini / NHLORRI stays false.
+   Per-instrument `max_rotation_deg` tuned from observed residuals
+   (initial 5° default).
+
+D. **Metadata curator.** Convert `rotation_rad` →
+   `rotation_deg` and `sigma_rotation_rad` → `sigma_rotation_deg`
+   for the JSON; omit both fields entirely when
+   `fit_camera_rotation` is False (cleaner than serializing nulls).
+
+E. **Library expansion.** 2–3 VGISS / GOSSI images where rotation
+   fit is observably non-zero. Sidecars carry expected rotation
+   tier.
+
+**Scope (out):** Calibration — Phase 10.
+
+**Design references:** Part 5b (camera rotation correction in full).
+
+---
+
+## Phase 10 — Image library expansion + confidence calibration
+
+**Goal:** Expand the curated library to ~50 images covering every
+scene class per Part 10 §"Coverage matrix"; one-time fit of
+confidence-formula α coefficients in `config_510_techniques.yaml`
+against the library.
+
+**Why now:** Calibration is the last gate before legacy delete (the
+breadth comparison in Phase 11 depends on calibrated confidences).
+Cannot be done sooner because all techniques must be in place for
+their formulas to be tunable against ground truth.
+
+**Prerequisites:** Phase 9.
+
+**Scope (in):**
+
+A. **Library expansion to ~50 images.** Per Part 10 §"Per-class
+   selection criteria"; operator-curated. Coverage matrix asserts
+   every technique exercises on ≥ 1 image. Test library
+   intentionally over-samples star-only Cassini / NHLORRI scenes
+   and star-absent Galileo / Voyager science scenes per Part 1
+   §"Star-poor missions".
+
+B. **Full ~55-body `config_220_body_shape.yaml` population** per
+   Part 0 §74 + Part 5 source-citation rules. Bodies populated in
+   PRs of ≤ 10 each for human reviewer spot-check.
+
+C. **Confidence-formula calibration.** `confidence = sigmoid(α₀ +
+   Σ αᵢ × xᵢ)`; fit via `scipy.optimize.curve_fit` against
+   `target_tier_midpoint` per image (`0.9` for `high`, `0.65` for
+   `medium`, `0.35` for `low`, `0.1` for `failed`). One-time fit;
+   check `config_510_techniques.yaml` in afterward; never updated
+   by per-image runs. The placeholder coefficients in
+   `config_510_techniques.yaml` are arithmetically illustrative
+   only — they are not claimed to produce the example confidence
+   values stated alongside them; calibration replaces them.
+   PR review enforces no `PLACEHOLDER` markers ship to production
+   (per Part 0 §5).
+
+D. **Regression baselines for every library image.**
+   `tests/integration/baselines/<image_id>.json` populated per
+   Part 0 §17.
+
+E. **Manual-nav UI polish.** Save-as-library-entry button shipped
+   in Phase 4; finalize any remaining workflow rough edges
+   discovered during the bulk library curation.
+
+**Scope (out):** Cleanup — Phase 11. Deferred items — Phase 12+.
+
+**Design references:** Part 9 (test strategy); Part 10 (library);
+Part 11 (manual research vs AI-automated research) for
+attribution / human-vs-AI split.
+
+---
+
+## Phase 11 — Cleanup + documentation finalization + breadth comparison
+
+**Goal:** Final residual-reference grep, coverage gate enforcement,
+module-size split, doc index audit, README / `CLAUDE.md` /
+`CHANGELOG` updates, three new `.cursor/rules/*.mdc` files, and the
+500-image breadth comparison vs legacy that gates the cutover.
+
+**Why now:** Legacy code is already deleted (the cutover branch
+deleted `NavTechniqueCorrelateAll`, `NavModelCombined`, `NavMaster`,
+etc.). Phase 11 is verification + final polish. **The breadth
+comparison is the load-bearing gate**: per Part 13 (legacy
+phasing) §"Cutover gating", the new pipeline must be equal-or-
+better than the legacy pipeline on every per-class aggregate
+metric (% ok, P50 / P95 offset error, % conflicted, % failed).
+
+**Prerequisites:** Phase 10.
+
+**Scope (in):**
+
+A. **CI grep step.** Single-line CI step that fails the build on
+   any leftover reference to deleted symbols:
+   `NavTechniqueCorrelateAll`, `NavModelCombined`,
+   `NavModelResult`, `NavMaster`, `weighted_mask`, `blur_amount`,
+   `final_offset`, `final_confidence`, `use_legacy_pipeline`. Per
+   Part 0 §69.
+
+B. **Coverage gate in CI.** Cutover-tier modules
+   (`nav.feature/`, `nav.nav_orchestrator/`, `nav.nav_technique/`,
+   `nav.nav_model/`) at ≥ 90 %; whole-tree percentage gated by
+   per-package thresholds (the GUI / mosaic-viewer / sim packages
+   pre-date the cutover and are below 90 % by design).
+
+C. **Module size cap.** Split
+   `src/nav/ui/manual_nav_dialog.py` (1058 lines) into a
+   `nav.ui.manual_nav/` subpackage in a dedicated PR with GUI-test
+   infrastructure to verify the manual workflow still works.
+   1000-line ceiling per Cardinal Principle / Part 16.
+
+D. **Doc index / toctree audit.** Per Part 0 §49: verify every
+   new page is wired into `docs/index.rst` sorted by package and
+   name. All cross-references resolve. `sphinx-build -W -b html
+   docs docs/_build` clean. Verify `sphinx-build -W` has been
+   clean every phase.
+
+E. **README + `CLAUDE.md` + `CHANGELOG.md`.** Summarize the
+   autonomy cutover: new architecture overview, updated
+   install / usage instructions, PyPI / ReadTheDocs badges still
+   valid. CHANGELOG entries for each phase's release.
+
+F. **Three new `.cursor/rules/*.mdc` files.**
+   - Autonomy conventions (per the cutover discoveries — pdslogger
+     only, no `import logging`, frozen-dataclass validation,
+     plugin-sandbox try/except, etc.).
+   - Feature/extractor patterns (binding for any future technique
+     addition).
+   - Ensemble/orchestrator conventions
+     (precision-weighted combine, rank-deficient handling, INFO
+     cadence).
+
+G. **500-image breadth comparison vs legacy.** Per Part 13 (legacy)
+   §"Cutover gating": run `nav_offset` over a curated 500-image
+   selection (5 missions × 100 images covering scene diversity)
+   and measure % `ok`, per-tier offset-error distribution
+   (median, P95), % `conflicted`, % `failed`. Compare to the
+   legacy baseline (re-run on a comparison branch that re-instates
+   the legacy pipeline, or pin the comparison to a pre-cutover
+   commit hash); gate on **"new pipeline ≥ legacy on every
+   per-class metric"**. A regression on one scene class is a
+   blocker even when overall metrics improve. If a class regresses,
+   the response is **fix the new pipeline**, not retain the legacy
+   as a fallback (Cardinal Principle #1).
+
+**Scope (out):** Deferred items — Phase 12+.
+
+**Design references:** Part 0 §20 (cutover gating); Part 0 §69
+(grep CI step); Part 12 §"Cutover (no backwards compatibility)";
+Part 13 (legacy phasing) §"Cutover gating" preserved below.
+
+---
+
+## Phase 12+ — Deferred items (Part 13b)
+
+Each deferred item is its own phase when scheduled. The full
+descriptions live in Part 13b (kept verbatim below); each item
+inherits the standard "Per-phase definition of done" plus a code
+review folder `phase_NN_review/`.
+
+| Phase | Deferred item | Source |
+|-------|----------------|--------|
+| 12 | Ring-edge polarity-aware matching | Part 13b §1 |
+| 13 | Cartographic-model technique testing | Part 13b §2 |
+| 14 | Atmospheric-body navigation algorithm (real `TitanNav`) | Part 13b §3 |
+| 15 | Annotation styling for gated-out features | Part 13b §4 |
+| 16 | Mixed-instrument batch SPICE-kernel hot path | Part 13b §5 |
+| 17 | UI per-technique-result panel redesign | Part 13b §6 |
+
+For Phase 13 (cartographic), the deleted `CartographicDiagnostics`
+dataclass is restored from git history alongside the technique;
+recover with `git log --diff-filter=D -- src/nav/nav_technique/diagnostics.py`
+and pull from the appropriate commit. The `CARTOGRAPHIC_MODEL`
+feature emission from `NavModelBody` via
+`nav.reproj.cartographic_model.create_cartographic_model` lands in
+the same phase.
 
 ---
 
@@ -2237,7 +3278,7 @@ The orchestrator additionally emits its own `Annotations` for items that have no
 
 Three image-level checks happen in the orchestrator before any technique runs. All operate on the full image — Cardinal Principle #2 — and produce masks / statistics that go on `NavContext` for every downstream consumer:
 
-- **Saturation map.** Pixels at or near full-well DN (per-instrument value from the `noise:` block of the matching `config_4N0_inst_*.yaml`) are marked. The global gradient computation excludes them; the star detector treats saturated peaks specially (truncated PSF, unreliable centroid — either reject if isolated or use moments instead of fit).
+- **Saturation map.** Pixels at or near full-well DN (per-instrument value from the `noise:` block of the matching `config_4N0_inst_*.yaml`) are marked. The global gradient computation excludes them; the star detector treats saturated peaks specially (truncated PSF, unreliable centroid — either reject if isolated or use moments instead of fit). **Raw vs calibrated:** the saturation map is built from the per-instrument `noise.saturation_dn` value only when the instrument config declares `data_units: 'raw_dn'`. For instruments declaring `data_units: 'calibrated_if'` (e.g. Cassini ISS CALIB I/F products), the per-image DN is no longer a meaningful unit (typical CALIB I/F values are < 1.0); the saturation map is instead built from the calibration pipeline's preserved raw-saturation flags carried in the metadata when available, or — if the calibration product carries no preserved flags — left empty with a one-line WARNING noting that overexposure cannot be detected for calibrated inputs. Each *raw* observation type carries its own per-camera `saturation_dn` (e.g. 8-bit = 255, 12-bit = 4095, 14-bit = 16383); there is no global default.
 - **Cosmic-ray / hot-pixel rejection.** Single-pixel spikes 5+σ above their immediate neighbors (median 3×3 vs raw) are masked. This step is global and pre-detection; without it a single hot pixel produces a fake "star" detection that derails pattern matching. Existing GOSSI / Voyager / Cassini pipelines all need this; their archives have many cosmic ray hits per long-exposure image.
 - **Smear-aware PSF via the `eval_rect(movement=...)` parameter.** Long exposures with non-zero spacecraft attitude rate smear stars into trails. The existing `psfmodel.GaussianPSF` provides smear support directly: `eval_rect(rect_size, offset, *, movement=(my, mx), movement_granularity=0.1, ...)` integrates the PSF along a line segment of length `sqrt(my² + mx²)` in the `(Y, X)` direction. The internal `_eval_rect_smeared` (PSF base) does the integration; `movement_granularity` is the step size in pixels for the smear-line sampling.
 
@@ -2252,7 +3293,7 @@ Three image-level checks happen in the orchestrator before any technique runs. A
   Mission applicability:
   - **Cassini**: SPICE-bracket geometry is well-tested elsewhere and the brackets reliably represent the true relative rotation. Enabled by default.
   - **Voyager / Galileo / NHLORRI**: same approach is theoretically applicable but **untested in this project**. Implementation parameterizes uniformly (the smear math doesn't care which mission), but ships with a config flag (`stars.smear_from_spice_brackets: bool`, default `true` for Cassini, `false` for the others until validated). Galileo and Voyager are mostly star-blind anyway.
-  - The existing `stars.max_smear: 100` config in `config_110_stars.yaml` is currently dead code (no consumer in today's tree). The new pipeline becomes its first consumer: smear lengths beyond `max_smear` cause the star to be rejected from the star feature list (PSF too elongated to fit reliably even with the smear-aware template). The 100 px value is liberal: it's a "reject above this" hard gate, not a "trust below this" gate. Empirically, smear < 5 px is "minor", 5–20 px is "significant but well-fittable", 20–100 px is "extreme but worth trying once with reduced reliability". Tighten in Phase 5 if the relaxed gate generates too many low-confidence star features.
+  - The existing `stars.max_smear: 100` config in `config_110_stars.yaml` is currently dead code (no consumer in today's tree). The new pipeline becomes its first consumer: smear lengths beyond `max_smear` cause the star to be rejected from the star feature list (PSF too elongated to fit reliably even with the smear-aware template). The 100 px value is liberal: it's a "reject above this" hard gate, not a "trust below this" gate. Empirically, smear < 5 px is "minor", 5–20 px is "significant but well-fittable", 20–100 px is "extreme but worth trying once with reduced reliability". Tighten in Phase 10 calibration if the relaxed gate generates too many low-confidence star features. (Legacy wording said "Phase 5".)
 
 ### Image-quality classification (quick-fail before techniques)
 
@@ -2271,7 +3312,7 @@ Before any extractor runs, the orchestrator assigns the image to one of these cl
 | `corrupt` | image file failed to parse / read; `obs.from_file(...)` or `obs.data` access raised an exception | `status='failed', status_reason='image_corrupt'`. No technique runs. (Per Part 0 §21.) |
 | (`noisy` is **not** a class; see Part 0 §7) | high read noise = `noise_sigma > per-instrument threshold` | Pipeline runs as `image_class='clean', flags=['noisy']`; per-feature reliability gates use the elevated noise so faint stars are correctly rejected. |
 
-Per-instrument detection thresholds (saturation_dn, marker_value, expected_noise_dn) live in the `noise:` block of each `config_4N0_inst_*.yaml`. The classifier's decision goes into `NavResult.feature_inventory` as a top-level diagnostic so operators can see which images failed for which reason.
+Per-instrument detection thresholds (saturation_dn, marker_value, expected_noise_dn) live in the `noise:` block of each `config_4N0_inst_*.yaml`. The classifier's decision goes into `NavResult.feature_inventory` as a top-level diagnostic so operators can see which images failed for which reason. **The DN-based branches (`fully_overexposed`, `blank` against an absolute DN floor) are conditional on `inst.data_units == 'raw_dn'`.** For instruments declaring `data_units: 'calibrated_if'`, those branches use the per-camera `image_quality_thresholds.saturation_threshold_if` and `blank_max_if` values instead (typical CISS CALIB cap is around 10 I/F; blank floor around 1e-3 I/F). Each *raw* observation type carries its own `saturation_dn` and `full_well_dn` keyed by camera bit depth (8-bit = 255, 12-bit = 4095, 14-bit = 16383, etc.); there is no global default. Misconfiguring the data-units flag is the canonical way to mis-classify CALIB Cassini products as `blank` (max I/F < 1.0 against a `blank_max_dn = 5.0` raw-DN default).
 
 ### Filter-aware photometry
 
@@ -2336,7 +3377,7 @@ Occlusion / shadow handled at extraction by vertex cropping (no `range` field on
 
 where:
 - `L` is the smear length in pixels (scalar `sqrt(my² + mx²)`).
-- `L² / 12` is the variance of a uniform distribution of length L. **Assumption**: spacecraft attitude rate is approximately constant during the exposure (uniform smear). This holds for almost all imaging — attitude jerk events are rare and typically excluded from imaging campaigns. If the rate is non-uniform during the exposure (e.g., a thruster fired mid-exposure), the smear distribution is non-uniform and `L²/12` is wrong; the practical effect is a wider smear than predicted, which manifests as `position_cov_px` being a *lower bound* rather than the true covariance. Phase 5 calibration flags any library image showing attitude-jerk-during-exposure behavior.
+- `L² / 12` is the variance of a uniform distribution of length L. **Assumption**: spacecraft attitude rate is approximately constant during the exposure (uniform smear). This holds for almost all imaging — attitude jerk events are rare and typically excluded from imaging campaigns. If the rate is non-uniform during the exposure (e.g., a thruster fired mid-exposure), the smear distribution is non-uniform and `L²/12` is wrong; the practical effect is a wider smear than predicted, which manifests as `position_cov_px` being a *lower bound* rather than the true covariance. Phase 10 calibration flags any library image showing attitude-jerk-during-exposure behavior. (Legacy wording said "Phase 5".)
 - `σ_PSF` is the per-pixel PSF Gaussian σ.
 - `SNR_predicted` is the **integrated** SNR across the full PSF support, computed as `total_signal_DN / sqrt(total_signal_DN + read_noise_DN² × N_pixels_in_aperture)` where the aperture is the smeared-PSF box. *Not* per-pixel SNR. (The denominator under the square root is the variance from shot noise + read noise; the numerator is the total expected signal in DN.)
 
@@ -2375,7 +3416,7 @@ Reliability is a [0, 1] scalar on every emitted `NavFeature`, computed at extrac
 
 **Distinction from confidence**: reliability lives on a `NavFeature` and answers "how trustworthy is this *as input data*". Confidence lives on a `NavTechniqueResult` and answers "how trustworthy is this *as an offset*". Different objects, different stages.
 
-**Per-type formulas** (sigmoid-of-linear-combination form; α coefficients calibrated in Phase 5):
+**Per-type formulas** (sigmoid-of-linear-combination form; α coefficients calibrated in Phase 10; legacy wording said "Phase 5"):
 
 ```
 STAR:          sigmoid(α₀ + α₁·(predicted_snr − threshold_snr))
@@ -2395,7 +3436,7 @@ BODY_BLOB:     sigmoid(snr_in_bbox) × sigmoid(extent_px / 8 − 1) × 0.4   # h
 CARTOGRAPHIC:  same shape as BODY_DISC with higher ceiling
 ```
 
-**Gate threshold** in `config_520_features.yaml`, per-type, with per-instrument overrides. Default placeholders, calibrated in Phase 5 from image library.
+**Gate threshold** in `config_520_features.yaml`, per-type, with per-instrument overrides. Default placeholders, calibrated in Phase 10 from image library. (Legacy wording said "Phase 5".)
 
 **Gated-out features**:
 1. Not passed to any technique (excluded from technique input lists).
@@ -2500,7 +3541,7 @@ inst:
 
 Rule: `lo_sigma_px >= 50 × hi_sigma_px` so the bandpass is a true high-pass-with-noise-cap, not a narrow band.
 
-Per-instrument concrete values (placeholders for Phase 5 retuning):
+Per-instrument concrete values (placeholders for Phase 10 retuning; legacy wording said "Phase 5"):
 
 | Instrument | kind | `lo_sigma_px` | `hi_sigma_px` | rationale |
 |---|---|---|---|---|
@@ -2764,7 +3805,7 @@ If RANSAC fails (no transform with enough inliers), the technique reports infeas
   - *Unsaturated* (`peak_DN < saturation_threshold_dn`): 2-D Gaussian fit on a `2.5 × psf_fwhm` box; cuts `fitted_fwhm ∈ [0.7, 1.5] × instrument_psf_fwhm`, `roundness < 0.25` (skipped for smeared images), `sharpness > 0.4`. Hot-pixel sanity: reject if `peak_DN > 5 × max(8 surrounding pixels)`.
   - *Saturated* (`peak_DN ≥ saturation_threshold_dn`): annular brightness-weighted moment centroid over `r ∈ [0.5, 1.5] × psf_fwhm`, excluding `cosmic_ray_mask_ext`, `saturation_mask_ext`, bloom columns, missing-data pixels. Reject if fewer than 8 valid annulus pixels remain. σ_centroid floor 0.2 px; `saturated=True` tag downweights triplet weight.
 - **Bloom detection**: vertical (per `bloom_orientation`) saturated runs > 1.5 × psf_fwhm at a saturated peak mark a bloom column; column + 1 px each side merged into `saturation_mask_ext`. Parent star kept (centroided via annulus).
-- **Implementation choice**: DAOPHOT-style sharpness/roundness cuts are hand-rolled in numpy / scipy (already in deps). Modern alternatives (`photutils.detection.StarFinder`, `sep`, `scikit-image.feature`) cost extra dependencies; `photutils` would be the cheapest fallback if the hand-roll proves troublesome in Phase 3.
+- **Implementation choice**: DAOPHOT-style sharpness/roundness cuts are hand-rolled in numpy / scipy (already in deps). Modern alternatives (`photutils.detection.StarFinder`, `sep`, `scikit-image.feature`) cost extra dependencies; `photutils` would be the cheapest fallback if the hand-roll proves troublesome in Phase 7 / 8 (the star-technique phases). (Legacy wording said "Phase 3".)
 
 **Single-bright-star scenes** are a **primary navigation mode** via `StarUniqueMatchNav`, not a failure. When `stars_list_for_obs()` predicts 1–2 catalog stars in extended FOV and the brightest is ≥ `unique_match_brightness_margin_mag` (default 1.5 mag) brighter than the next-brightest predictable source, the catalog itself supplies uniqueness — no triplet hash needed. The brightest detection assigns to the unique catalog star; offset = detection − prediction; sanity check is that the detection lies within `extfov_margin` of predicted position (otherwise the brightest detection is an asteroid / surviving cosmic ray / rare transient, and the technique reports infeasibility). 2-star case fits a translation (or translation + rotation) via two-assignment trial. `StarFieldFromCatalogNav` and `StarUniqueMatchNav` are mutually exclusive at feasibility time: ≥3 unambiguous catalog stars → triplet matcher runs, unique matcher returns `'enough_stars_for_triplet_match'`; 1–2 → unique matcher runs, triplet returns `'fewer_than_3_detected_sources'`. The single-star STAR feature is also still consumed by `StarRefineNav` in pass 2 when a body / ring prior exists — multiple paths benefit from the lone bright star.
 
@@ -2947,7 +3988,7 @@ Every `NavTechniqueResult.confidence` is a calibrated 0..1 score derived **from 
 confidence = sigmoid(α₀ + Σᵢ αᵢ * normalized_feature_iᵢ)
 ```
 
-with `sigmoid(x) = 1 / (1 + exp(-x))`. Starting constants — to be retuned in Phase 5 against the library; what matters now is that they're *concrete* enough to implement and calibrate against. **The example confidence values listed alongside each formula below are illustrative targets, not arithmetic outputs of the listed coefficients** — coefficients are calibrated in Phase 5 to produce those targets, not the other way round. Implementations should not assert on the example values; they should evaluate the formula as written and accept whatever confidence emerges.
+with `sigmoid(x) = 1 / (1 + exp(-x))`. Starting constants — to be retuned in Phase 10 against the library; what matters now is that they're *concrete* enough to implement and calibrate against. **The example confidence values listed alongside each formula below are illustrative targets, not arithmetic outputs of the listed coefficients** — coefficients are calibrated in Phase 10 to produce those targets, not the other way round. Implementations should not assert on the example values; they should evaluate the formula as written and accept whatever confidence emerges. (Legacy wording said "Phase 5".)
 
 - **StarFieldFromCatalogNav**: `α₀ = -2`, `α(n_inliers, capped at 12) = 0.6`, `α(median_residual_px) = -2.5`. With 6 inliers and 0.4 px median residual, confidence ≈ 0.85.
 - **StarUniqueMatchNav (1-star)**: `α₀ = -1.5`, `α(predicted_snr_capped_at_50) = 0.06`, `α(brightness_margin_mag − 1.5, capped at 3) = 0.5`. With SNR=20 and 2-mag margin, confidence ≈ 0.6. Hard-capped at 0.7 (no internal cross-check is possible from one star).
@@ -3498,6 +4539,52 @@ So Prometheus at approach is a `BODY_BLOB` (maybe with confidence-cap 0.3); Prom
 
 **3. Extensions to existing `config_4N0_inst_*.yaml`** — per-camera `noise:` and `mag_offset:` blocks added under each existing camera section. The instrument noise data, mag-offset tables, and image-quality classifier thresholds all live here, alongside the existing `extfov_margin_vu` / `star_psf_sigma` fields. Schema in the proposal section below; no new file. Loaded by the existing `Config` machinery — accessed as `config.cassini_iss.nac.noise.read_noise_dn` and `config.cassini_iss.nac.mag_offset.filter_combos['CL1+CL2']`.
 
+Each instrument additionally declares **`data_units: 'raw_dn' | 'calibrated_if'`** at the camera section root (required field). This determines which DN-based vs I/F-based fields the classifier and saturation pipeline read:
+
+```yaml
+cassini_iss:
+  nac:
+    data_units: raw_dn          # COISS NAC RAW products
+    noise:
+      saturation_dn: 4095       # 12-bit; required when data_units == 'raw_dn'
+      full_well_dn: 4095
+      expected_noise_dn: 4.0
+      marker_value: 0           # per-instrument missing-data sentinel
+      read_noise_dn: 4.0
+    image_quality_thresholds:
+      blank_max_dn: 5.0
+      saturation_threshold_dn: 4095
+      noisy_threshold_dn: 10.0
+      max_missing_frac_clean: 0.05
+      max_overexposed_frac_clean: 0.80
+    # ...
+
+cassini_iss_calib:
+  nac:
+    data_units: calibrated_if   # COISS NAC CALIB I/F products
+    noise:
+      # saturation_dn / full_well_dn / expected_noise_dn omitted — DN-based
+      # checks short-circuit. Saturation mask is built from preserved raw-
+      # saturation flags carried by the calibration pipeline when available;
+      # otherwise empty + WARNING.
+      marker_value: NaN          # CALIB pipeline marks missing pixels with NaN
+    image_quality_thresholds:
+      blank_max_if: 1.0e-3       # used in place of blank_max_dn
+      saturation_threshold_if: 10.0   # used in place of saturation_threshold_dn
+      noisy_threshold_if: 0.005       # used in place of noisy_threshold_dn
+      max_missing_frac_clean: 0.05
+      max_overexposed_frac_clean: 0.80
+    # ...
+```
+
+Rules:
+
+- `data_units` is required; loader rejects an instrument config without it.
+- For `data_units == 'raw_dn'`: `noise.saturation_dn`, `noise.full_well_dn`, `noise.expected_noise_dn`, and `image_quality_thresholds.{blank_max_dn, saturation_threshold_dn, noisy_threshold_dn}` are all required. **Each raw observation type carries its own max DN — no global default; an 8-bit instrument's saturation_dn is 255, 12-bit is 4095, 14-bit is 16383, etc.**
+- For `data_units == 'calibrated_if'`: those DN-keyed fields are omitted/null; the I/F-keyed counterparts (`blank_max_if`, `saturation_threshold_if`, `noisy_threshold_if`) are required instead. The orchestrator's saturation-mask path keys off `data_units` and either reads raw DN against `saturation_dn` or reads preserved raw-saturation flags off the calibrated obs (or short-circuits with a WARNING when neither is available).
+
+The **`mag_offset:`** block schema is unchanged by `data_units` (color transforms apply equally to raw and calibrated photometry; the difference is only in absolute scale, which the catalog flux-to-DN computation already handles per-image). Same for the `source_image_filter:` and `fit_camera_rotation:` blocks.
+
 Each entry is loaded once at config init and cached. Missing body entries fall back to `shape_class_hint: unknown` with conservative defaults (residual ≈ 10% of mean radius). Missing instrument-noise blocks log a warning and force stars to `reliability ≤ 0.3`.
 
 ### How these substitute for cross-image statistics
@@ -3546,7 +4633,7 @@ inst:
   max_rotation_deg: 5.0           # applies when fit_camera_rotation = true
 ```
 
-Stored in `config_4N0_inst_*.yaml`. Default `false`; flip on for VGISS / GOSSI based on observed residuals during Phase 5 calibration.
+Stored in `config_4N0_inst_*.yaml`. Default `false`; flip on for VGISS / GOSSI in Phase 9 (camera rotation correction) based on observed residuals; final tuning during Phase 10 calibration. (Legacy wording said "Phase 5 calibration".)
 
 **Behavior when enabled:**
 
@@ -3586,7 +4673,7 @@ The metadata curator converts to `rotation_deg` and `sigma_rotation_deg` for the
 
   For DT-based techniques (BodyLimbNav, BodyTerminatorNav, RingEdgeNav), rotation is a third optimizer parameter rather than an outer-loop search — Levenberg-Marquardt converges from the 2-D coarse-search basin in < 15 iterations including rotation. Compute overhead < 50%.
 - **Rotation ambiguity on partial-overlap geometry.** A short visible limb arc + free rotation has correlated (rotation, translation) ambiguity — covariance becomes ill-conditioned. The 3×3 covariance reflects this directly; orchestrator's rank-deficient handling produces low-confidence results without needing special cases.
-- **`max_rotation_deg` is a knob.** Default 5° per the user's "<5°" guidance; per-instrument tuning in Phase 5.
+- **`max_rotation_deg` is a knob.** Default 5° per the user's "<5°" guidance; per-instrument tuning in Phase 9 / 10. (Legacy wording said "Phase 5".)
 
 ## Part 6 — Scenario handling
 
@@ -4365,7 +5452,7 @@ CI test tolerance = `offset_uncertainty_px + 0.5 px` slack. Slack absorbs algori
 
 **No `manifest.yaml`** — the directory tree IS the registry. Adding a library image = creating a sidecar in the right class directory; CI picks it up automatically. Removing a sidecar stops its test. Drift between manifest and disk is impossible because no manifest exists.
 
-**Regression baselines** (per Part 9) live in a separate `tests/integration/baselines/<image_id>.json` per image and run as a third test layer; baseline updates require explicit PR review (Phase 5 work).
+**Regression baselines** (per Part 9) live in a separate `tests/integration/baselines/<image_id>.json` per image and run as a third test layer; baseline updates require explicit PR review (initial seed during Phase 4; full set populated in Phase 10; legacy wording said "Phase 5").
 
 ### Library curation policy
 
@@ -4534,77 +5621,76 @@ If an image shows a body that's not in `config_220_body_shape.yaml`, extractor u
 
 ---
 
-## Part 13 — Phasing (implementation order)
+## Part 13 — Phasing (legacy phase plan — superseded; preserved for cutover gating)
 
-Order matters — each phase is self-contained, follows TDD throughout (Part 9), and leaves the tree green. Each phase ends with `ruff check && ruff format --check && mypy && pytest -n auto --dist=loadfile` clean before merging.
+The original phase plan that this section once contained has been
+**reorganised** into the per-phase sections at the top of this file
+("Phase 0" through "Phase 12+"). Those sections are now the source
+of truth. The legacy phase numbering (legacy Phase 1 ↔ Foundation,
+legacy Phase 2 ↔ Extractors, legacy Phase 3 ↔ Techniques,
+legacy Phase 4 ↔ Orchestrator, legacy Phase 5 ↔ Library +
+calibration, legacy Phase 6 ↔ Documentation, legacy Phase 7 ↔
+Cleanup) split unevenly across context windows; the new per-phase
+plan above is context-sized and ordered so that minimal end-to-end
+functionality lands as early as possible.
 
-**Phase 1: Foundations (~1 week).** Types and plumbing only; no behavior change.
-- *Tests first* for: `NavFeature` invariants, `NavFilterSpec` construction, `NavTechniqueResult` round-trip, `NavContext` field requirements, static-data loader for missing-body fallback and missing-instrument warning. Use parametrize for the per-type variants.
-- Implement: `NavFeature`, `NavFilterSpec`, `NavTechniqueResult`, `NavContext`, `NavResult`, `NavFeatureExtractor` ABC + registry. Static-data loader. Implement payload sum-type in `src/nav/feature/geometry.py` (`NavFeatureGeometry` per Part 0).
-- **`pyproject.toml` `[tool.pytest.ini_options]` updates (mandatory)**: add `testpaths = ["tests"]`, `--strict-markers` and `--strict-config` to `addopts`, register `markers = ["integration: requires PDS3_HOLDINGS_DIR", "slow: per-image library regression"]`, and set `filterwarnings = ["error"]` so unexpected warnings fail the build (per `critique-test-suite` §19, §22; verified absent in baseline pyproject.toml).
-- **Manual artifacts needed at the start of Phase 1**: `config_220_body_shape.yaml`, the `noise:` / `mag_offset:` block additions to each `config_4N0_inst_*.yaml`, and the `default_reliability` / `sharpness` extensions to the existing ring catalogs. Without them the loader has nothing to load. Required scope: ~55 body entries (Part 5 list); all four mission instrument-noise blocks; `mag_offset:` populated for the dominant filter combos per camera, with `fallback_combo` for the long tail. **YAML population workflow (per Part 0 §74)**: an AI agent drafts entries from PDS calibration reports + Thomas et al. shape papers + IAU physical-parameters tables, **citing only documents fetched in-session via `WebFetch` / `WebSearch`** (never from training-data memory) — every numeric value carries a sibling `_sources` entry with DOI where available. PRs are split into ≤10 bodies each so the human reviewer can spot-check ≥5 citations per PR by opening the cited document and verifying the value appears at the cited location. Fabricated citations are a revert-in-full offense. The `test_body_shape_citations.py` validation test (Part 9) blocks merge on schema gaps; citation accuracy is human-verified.
-- No old code touched in this phase.
+The legacy material content from the old Part 13 has been preserved
+in the per-phase sections at the top of this file:
 
-**Phase 2: Image preprocessing + extractors (~1 week).**
-- *Tests first* for: cosmic-ray despeckle (planted hot pixels), saturation mask, smear-aware PSF size, global noise estimate convergence. Then per-extractor tests using synthetic obs fixtures (already covered in Part 9).
-- Implement: image-quality preprocessing, `StarFeatureExtractor`, body extractors, ring extractors, cartographic extractor. Reuse existing `RingFeatureFilter`.
-- New CLI `nav_feature_inspect` for visual eyeballing — useful for confirming what the extractors produce on real images without running navigation.
-- Old pipeline still the navigation path.
+- Old Phase 1 (Foundations) → new Phase 0 (already shipped).
+- Old Phase 2 (Image preprocessing + extractors) → new Phase 0 / 1
+  (already shipped) and the per-camera image-preprocessing wiring
+  in new Phase 3.
+- Old Phase 3 (Techniques) → new Phases 2 / 5 / 6 / 7 / 8
+  (DT subset already shipped; remainder split for context size).
+- Old Phase 4 (Orchestrator + ensemble + CLI cutover + legacy
+  delete) → new Phase 0 (orchestrator) plus new Phase 11
+  (residual-symbol grep + breadth comparison; legacy delete
+  already happened on the cutover branch).
+- Old Phase 5 (Image library + calibration) → new Phase 4 (initial
+  1-3 images, end-to-end milestone) and new Phase 10 (full ~50
+  images + α calibration).
+- Old Phase 6 (Documentation) → distributed across every new
+  phase (per-phase docs ship with the code) plus new Phase 11
+  (index audit + README + CHANGELOG + `.cursor/rules/*.mdc`).
+- Old Phase 7 (Cleanup) → new Phase 11.
 
-**Phase 3: Techniques (~3–4 weeks; pattern matching is the long pole).**
-- *Tests first* per technique. For each technique, write tests that: (a) recover a planted offset on a synthetic input; (b) report appropriate confidence at boundary cases (low signal, partial overlap, etc.); (c) detect infeasibility cleanly; (d) raise on invalid input with assert-on-message.
-- Implement in this order: `BodyDiscCorrelateNav` (port existing correlation; well-tested baseline), `BodyBlobNav` (cheap), `BodyLimbNav` (DT-based; new heavy algorithm), `BodyTerminatorNav` (small variant of limb), `RingEdgeNav`, `RingAnnulusNav`, `StarRefineNav` (port existing refinement), `CartographicNav` (port existing bootstrap), `TitanNav` (stub — registered but always reports infeasible; real algorithm is a separate future work item).
-- `StarFieldFromCatalogNav` (pattern matching from scratch) is its own sub-phase: source detection → triplet hashing → RANSAC → verification. Each piece TDD'd separately.
-- After each technique, run the codebase-analysis + critique-test-suite skills; revise before moving on.
+### Cutover gating — what blocks the legacy delete (per Part 0 §20)
 
-**Phase 4: Orchestrator + ensemble (~1 week).**
-- *Tests first* for: feasibility filtering, two-pass priority, agreement grouping, conflicted handling, rank-deficient combination. Use mocked `NavTechniqueResult`s so tests don't depend on technique implementations.
-- Implement `NavOrchestrator`, `ensemble()`, two-pass driver, `NavResult` JSON serialization (extending the existing `_metadata.json` additively).
-- **CLI cutover** (every script in `src/main/` that invokes navigation):
-  - `nav_offset.py` → `NavOrchestrator(...).navigate(obs)`.
-  - `nav_offset_cloud_tasks.py` → same; per-image task body unchanged in shape.
-  - `nav_backplanes.py` and `nav_backplanes_cloud_tasks.py` → read `offset` from the new metadata (already present in additive form).
-  - `nav_create_bundle.py` and `nav_create_bundle_cloud_tasks.py` → read `confidence_rank` and refuse to bundle `low` results unless `--include-low-confidence` is set.
-  - `nav_create_simulated_image.py` → no change (writes images, doesn't read nav metadata).
-  - `nav_mosaic_*.py` and `nav_mosaic_*_cloud_tasks.py` → read `offset` and `confidence_rank` per Part 12.6.
-- **CI workflow**: `.github/workflows/run-tests.yml` already sets `PDS3_HOLDINGS_DIR`, `PDS4_HOLDINGS_DIR`, `OOPS_RESOURCES`, `UCAC4_PATH`, `YBSC_PATH`. No new env vars. Add a new job step for `pytest tests/integration/test_image_library.py` (structural invariants — runs without holdings) and `pytest tests/integration/test_autonomous_nav.py -n auto` (per-image regression — runs with holdings).
-- Legacy `NavTechniqueCorrelateAll` / `NavModelCombined` / `NavModelResult` are **deleted** in this same change-set (Cardinal Principle #1).
+This subsection is **load-bearing** and applies to new Phase 11 (or
+to the moment when the cutover branch's legacy-deleting change-set
+merges, whichever is in flight). It is preserved verbatim from the
+legacy plan because nothing in the per-phase reorganisation
+supersedes the gating contract.
 
-**Phase 5: Image library + calibration (~2 weeks).** *This is when the manually-supplied test images are required.*
-- **UI work**: add a "Save as library entry" button to the manual-nav dialog that writes a sidecar with provenance pre-filled. Without it, hand-curating 50 sidecars is a 50-paste ceremony. Small but real Phase 5 work; sits alongside the per-technique-result panel work in Part 12.6.
-- **Manual artifact needed**: ~50 PDS3 image identifiers chosen by the operator covering all scene classes (Part 10), plus operator-verified ground-truth offsets via the manual-nav UI. Library cannot be drafted by an AI; ground truth must be a human eye matching the overlay.
-- Tune every confidence formula (Part 4) against library ground-truth. The model is `confidence = sigmoid(α₀ + Σ αᵢ × xᵢ)` (logistic in the αᵢ); fitting is via `scipy.optimize.curve_fit` with the sigmoid model, optimizing the αᵢ to minimize `Σ_image (predicted_confidence − target_tier_midpoint)²` where `target_tier_midpoint` is `0.9` for images expected to land in `high`, `0.65` for `medium`, `0.35` for `low`, `0.1` for `failed`. (Equivalent to a logistic regression with continuous targets; not strictly OLS because the model is nonlinear, hence `curve_fit` not `lstsq`.) The placeholder coefficients in Part 4 are arithmetically illustrative only — they are *not* claimed to produce the example confidence values stated alongside them; calibration replaces them. This is a one-time calibration; `config_510_techniques.yaml` is checked in afterward and never updated by per-image runs.
-- Set the regression baselines in `tests/integration/baselines/`.
+The legacy code is deleted in the cutover change-set per Cardinal
+Principle #1. **Pre-merge gates run on the feature branch while
+both pipelines coexist** — the breadth comparison cannot run after
+merge because legacy is gone by then. Gates that must be green
+before merging that change-set:
 
-**Phase 6: Documentation (~1 week).**
-- All new `.rst` pages (Part 8 file list). Existing `user_guide_*` and `introduction_overview` updated.
-- AI agent drafts pages from code docstrings + this plan; human edits for clarity and accuracy.
-- Per Part 0 §49: update `docs/index.rst` Sphinx toctree to list every new module sorted by package and name.
-- Per Part 0 §48: every new module/class/function carries a Google-style docstring (Parameters / Returns / Raises) detailed enough to write a black-box test from the docstring alone (per `documentation.mdc` §4). Each technique's docstring links to its confidence-formula source-of-truth (`config_510_techniques.yaml.<technique_key>`).
-- Per Part 0 §63: thread-safety section added to each extractor and the orchestrator docstrings ("Not safe for concurrent use on the same `obs`...").
-- Per Part 0 §54: `developer_guide_testing.rst` declares mocking conventions (`mock.patch` for spies; `monkeypatch` for env / module state) and lists canonical patch targets per shared utility.
-- Per Part 0 §57: `developer_guide_testing.rst` declares the `xfail` / `skipif` discipline.
+1. Every image in the new-Phase-10 library navigates to
+   `expected.status` and `expected.confidence_tier`, with offset
+   within `offset_uncertainty_px + 0.5 px` slack.
+2. The 500-image breadth comparison (Part 15) shows the new
+   pipeline equal-or-better than the legacy on every aggregate
+   metric (% ok, P50 / P95 offset error, % conflicted, % failed).
+   "Equal-or-better" is **per-class, not just overall** — a
+   regression on one scene class is a blocker even when overall
+   metrics improve.
+3. Coverage ≥ 90 % on the new code (cursor rule §7).
+4. Every doc page listed in Part 8 written and
+   `sphinx-build -W -b html` clean.
 
-**Phase 7: Cleanup (~3 days).** All deletions happen in Phase 4 (Cardinal Principle #1); Phase 7 is verification only. Per Part 0 §20, the breadth comparison vs legacy already ran pre-merge in Phase 4 — Phase 7 is post-merge cleanup, not gating.
-- `grep` sweeps to verify nothing references deleted symbols (`NavTechniqueCorrelateAll`, `NavModelCombined`, `NavModelResult`, `NavMaster`, `weighted_mask`, `blur_amount`, `final_offset`, `final_confidence`, `use_legacy_pipeline`). Per Part 0 §69: implemented as a single-line CI step that fails the build on any match.
-- Final regression run on the full library; the 500-image breadth comparison vs legacy already ran pre-merge in Phase 4 (Part 0 §20).
-- Coverage report ≥ 90% on the new code.
-- `sphinx-build -W -b html` clean.
-- Per Part 0 §69: new CI step (single grep line in `.github/workflows/ci.yml`) fails the build on any leftover reference to deleted symbols.
-- If the grep sweeps find any leftover references, fix in Phase 7 — but Phase 4 should have left no leftovers.
+If a library image regresses, the response is **fix the new
+pipeline**, not retain the legacy as a fallback. The image library
+plus the breadth comparison is the safety net. There is no
+rollback to the legacy pipeline post-merge (per Cardinal Principle
+#1); pre-merge, the change-set sits behind these gates.
 
-**Cutover gating — what blocks the legacy delete (per Part 0 §20):**
-
-The legacy code is deleted in Phase 4's change-set per Cardinal Principle #1. **Pre-merge gates run on the feature branch while both pipelines coexist** — the breadth comparison cannot run after merge because legacy is gone by then. Gates that must be green before merging that change-set:
-
-1. Every image in the Phase 5 library navigates to `expected.status` and `expected.confidence_tier`, with offset within `offset_uncertainty_px + 0.5 px` slack.
-2. The 500-image breadth comparison (Part 15) shows the new pipeline equal-or-better than the legacy on every aggregate metric (% ok, P50 / P95 offset error, % conflicted, % failed). "Equal-or-better" is per-class, not just overall — a regression on one scene class is a blocker even when overall metrics improve.
-3. Coverage ≥ 90% on the new code (cursor rule §7).
-4. Every doc page listed in Part 8 written and `sphinx-build -W -b html` clean.
-
-If a Phase 5 image regresses, the response is **fix the new pipeline**, not retain the legacy as a fallback. The image library plus the breadth comparison is the safety net. There is no rollback to the legacy pipeline post-merge (per Cardinal Principle #1); pre-merge, the change-set sits behind these gates.
-
-Total estimated: 2–3 months of focused work, including iteration. The design is structured so that each phase ships useful progress even if the overall project pauses.
+Total estimated effort across new Phases 3–11: 2–3 months of
+focused work, including iteration. Each phase ships useful progress
+even if the overall project pauses.
 
 ---
 
@@ -4627,12 +5713,12 @@ architecture leaves room for them.
 2. **Cartographic-model technique testing.** The architecture supports
    `CARTOGRAPHIC_MODEL` features and `CartographicNav` and the technique is
    implemented + unit-tested against synthetic mosaics in the cutover, but
-   the Phase 5 image library does not include cartographic-model test images
-   (no production cartographic mosaics exist for the supported missions
-   yet). Track: when production mosaics become available, add representative
-   cartographic test images to the library, recalibrate the
+   the Phase 10 image library does not include cartographic-model test
+   images (no production cartographic mosaics exist for the supported
+   missions yet). Track: when production mosaics become available, add
+   representative cartographic test images to the library, recalibrate the
    `CartographicNav` confidence formula against ground truth, and add the
-   technique to the regression baseline.
+   technique to the regression baseline. (Legacy wording said "Phase 5".)
 
 3. **Atmospheric-body navigation algorithm.** `TitanNav` ships as a stub
    that always returns infeasibility; bodies flagged `atmospheric: true` in
@@ -4668,10 +5754,10 @@ architecture leaves room for them.
    target end-state is a per-technique side-by-side panel showing each
    technique's proposal, confidence, and overlay (operator picks one or
    accepts the orchestrator's choice). Out of scope for the cutover;
-   Phase 4 keeps the existing UI working with the new `NavResult` (the
-   orchestrator's chosen offset is what gets surfaced). Track:
+   Phases 0–11 keep the existing UI working with the new `NavResult`
+   (the orchestrator's chosen offset is what gets surfaced). Track:
    ergonomics, interaction model, layout, color coding for confidence
-   tiers.
+   tiers. (Legacy wording said "Phase 4".)
 
 ## Part 14 — Open questions — operator decisions
 
@@ -4682,7 +5768,7 @@ Resolved during review:
 3. **Confidence tier thresholds** — 0.8 / 0.5 / 0.2 starting point accepted; re-tuned on the image library during calibration.
 4. **"Conflicted" strictness** — groups form at 2σ Mahalanobis (`agreement_sigma`); `conflicted` fires when ≥2 groups exist and the summed-confidence gap between best and runner-up is below `agreement_gap` (default 0.5). Both thresholds live in `config_540_orchestrator.yaml`. See Part 4.
 5. **Cloud-tasks parallelism** — the cloud-tasks environment is already multi-process; the navigation pipeline stays single-image-per-task and parallelism is the harness's job. No pipeline changes required.
-6. **Legacy retention** — none. `NavTechniqueCorrelateAll`, `NavModelCombined`, `NavModelResult`, `NavMaster` are deleted in the Phase 4 cutover change-set. No `use_legacy_pipeline` flag. Pre-merge gates (Phase 7) protect against regression; no post-merge rollback.
+6. **Legacy retention** — none. `NavTechniqueCorrelateAll`, `NavModelCombined`, `NavModelResult`, `NavMaster` are deleted in the cutover change-set (already shipped during the Phase 0/1/2 cutover branch). No `use_legacy_pipeline` flag. Pre-merge gates (Phase 11 verification + breadth comparison) protect against regression; no post-merge rollback. (Legacy wording said "Phase 4 cutover" / "Pre-merge gates (Phase 7)".)
 
 No questions outstanding — ready to implement when scheduled.
 
@@ -4774,9 +5860,16 @@ These apply uniformly across every section above; called out here so an implemen
 
 ---
 
-# Resumption notes — read these first when picking up the discussion
+# Resumption notes — read for user-style + load-bearing decisions
 
-This plan is the product of an extended interview-style design discussion. If you're picking it up in a fresh context, read this section before proposing changes — it preserves the working state, the user's communication style, and the load-bearing decisions that have already been settled.
+> The "Reading order for an AI picking this up cold" subsection at
+> the very top of this file is the **first** thing to read; this
+> section is **step 8** in that reading order. The original
+> "read these first" framing is preserved below for the moments
+> when this file is consumed standalone (e.g., grepped for the
+> "What this is" paragraph or the hallucination history).
+
+This plan is the product of an extended interview-style design discussion. If you're picking it up in a fresh context, read this section for the user's communication style and the load-bearing decisions that have already been settled — but do so **after** you have read the top-of-file reading-order subsection and the per-phase plan, not before.
 
 ## What this is
 
@@ -4826,6 +5919,15 @@ None outstanding from the operator (Part 14 records resolved decisions). The use
 
 ## What to do when continuing
 
+> The original guidance below was for **continuing the design
+> discussion**, written when the plan was being walked branch by
+> branch. The design walk is finished. The current activity is
+> **executing the per-phase implementation plan** (Phase 3 onward).
+> For implementation work, follow the top-of-file "Reading order"
+> subsection plus the per-phase Definition of done — not the steps
+> below. The steps below remain the canonical recipe if a fresh
+> design discussion ever resumes.
+
 1. Read this whole resumption-notes section, then read Cardinal Principles in the plan body, then skim the per-Part headings.
 2. Pick the next branch from "Still to walk" (or ask the user which one).
 3. Start with a focused proposal — concrete answer with reasoning, not options.
@@ -4857,6 +5959,7 @@ None outstanding from the operator (Part 14 records resolved decisions). The use
 - `range` field on `LimbPolyline` — wrong; occlusion is handled at extraction time by vertex cropping, just like ring shadows.
 - Treating `NavResult` as a direct JSON dump — wrong; a curator function builds a curated subset.
 - "One bright star, no body, can't navigate from scratch" — wrong; `StarUniqueMatchNav` exploits catalog uniqueness (when the brightest predicted catalog star is ≥1.5 mag brighter than the next-brightest predictable source, the catalog itself supplies the assignment, no triplet hash needed). 1-star and 2-star scenes are primary navigation modes, not failures.
+- "DN-based overexposure detection works for every image" — wrong; only **raw** instrument observations carry DN values that can be compared against a per-instrument saturation DN. Calibrated images (I/F units, radiance, reflectance) cannot be checked for overexposure with a DN threshold. Each per-instrument config carries an explicit `data_units: 'raw_dn' | 'calibrated_if'` field; the saturation / overexposure classifier branches are conditional on it. Each raw observation type carries its own `saturation_dn` / `full_well_dn` (8-bit = 255, 12-bit = 4095, 14-bit = 16383, etc.); there is no global default.
 
 ## Active style conventions
 
