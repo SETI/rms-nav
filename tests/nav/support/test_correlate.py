@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from nav.support.correlate import (
+    gradient_magnitude,
     masked_ncc,
     navigate_single_scale_kpeaks,
     navigate_with_pyramid_kpeaks,
@@ -422,3 +423,72 @@ class TestMaxOffsetVu:
         dy, dx = result['offset']
         assert dy == pytest.approx(1.0, abs=0.1)
         assert dx == pytest.approx(0.0, abs=0.1)
+
+    def test_pyramid_peak_at_window_edge_is_spurious(self) -> None:
+        """Pyramid result sitting within 1 pixel of the max-offset edge is spurious.
+
+        Reason: a correlation peak at the boundary usually means the true peak
+        is clipped outside the search window, so the reported offset cannot be
+        trusted.
+        """
+        image, model, mask = _make_single_star(image_offset=(2.0, 0.0))
+        result = navigate_with_pyramid_kpeaks(
+            image,
+            model,
+            mask,
+            pyramid_levels=3,
+            max_peaks=5,
+            upsample_factor=16,
+            metric='psr',
+            quality_thresh=0.0,
+            consistency_tol=10.0,
+            max_offset_vu=(3, 10),
+        )
+        assert result['spurious']
+
+
+# =========================================================================
+# Gradient-mode tests
+# =========================================================================
+
+
+class TestGradientMode:
+    """Gradient-mode NCC (``use_gradient=True``) for body-overflows-FOV scenes."""
+
+    def test_gradient_magnitude_highlights_edges(self) -> None:
+        """Gradient magnitude is ~0 on an interior flat region and large at an interior step."""
+        # Check interior only: sobel in 'constant' mode picks up the array-border
+        # as an edge, which is intentional (real images have a hard boundary to
+        # the zero-padded extfov margin); the data_mask used by masked_ncc
+        # excludes those pixels from the correlation at use time.
+        flat = np.full((30, 30), 7.0)
+        g_flat = gradient_magnitude(flat)
+        assert float(g_flat[5:25, 5:25].max()) < 1e-9
+
+        step = np.zeros((30, 30))
+        step[:, 15:] = 1.0
+        g_step = gradient_magnitude(step)
+        # Sobel magnitude at a unit step is 4; check interior of each side stays flat.
+        assert float(g_step[5:25, 14:16].max()) > 0.5
+        assert float(g_step[5:25, 5:10].max()) < 1e-9
+        assert float(g_step[5:25, 20:25].max()) < 1e-9
+
+    def test_pyramid_gradient_converges_on_star_scene(self) -> None:
+        """use_gradient=True still converges to the planted offset on a simple star scene."""
+        image, model, mask = _make_single_star(image_offset=(1.5, -0.5))
+        result = navigate_with_pyramid_kpeaks(
+            image,
+            model,
+            mask,
+            pyramid_levels=3,
+            max_peaks=5,
+            upsample_factor=16,
+            metric='psr',
+            quality_thresh=0.0,
+            consistency_tol=10.0,
+            max_offset_vu=(10, 10),
+            use_gradient=True,
+        )
+        dy, dx = result['offset']
+        assert dy == pytest.approx(1.5, abs=0.3)
+        assert dx == pytest.approx(-0.5, abs=0.3)

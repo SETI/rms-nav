@@ -1,0 +1,230 @@
+"""NavResult — full in-memory output of a single navigation.
+
+Carries the headline (offset ± uncertainty + simple rank) plus full
+diagnostic information about every technique that ran, every feature that
+was extracted, and provenance.  Not intended to be JSON-serialized
+directly; the curator builds a curated JSON-friendly subset.
+"""
+
+from dataclasses import dataclass, field
+from typing import Any, Literal
+
+import numpy as np
+
+from nav.annotation import Annotations
+from nav.nav_orchestrator.feature_summary import NavFeatureSummary
+from nav.nav_orchestrator.image_classifier_result import NavImageClassifierResult
+from nav.nav_orchestrator.provenance import Provenance
+from nav.nav_technique.technique_result import NavTechniqueResult
+from nav.support.status_reason import NavStatusReason
+from nav.support.types import NDArrayFloatType
+
+__all__ = ['NavResult']
+
+
+Status = Literal['ok', 'failed', 'conflicted']
+"""Top-level status set on every NavResult."""
+
+ConfidenceRank = Literal['high', 'medium', 'low', 'conflicted', 'failed']
+"""Five-bucket confidence rank presented to downstream consumers."""
+
+
+@dataclass(frozen=True, eq=False)
+class NavResult:
+    """Full in-memory navigation output for one image.
+
+    Constructors ``NavResult.ok``, ``NavResult.failed``, and
+    ``NavResult.conflicted`` are the canonical entry points; direct
+    instantiation is also supported.
+
+    Parameters:
+        status: One of ``'ok'``, ``'failed'``, ``'conflicted'``.
+        offset_px: ``(dv, du)`` offset; ``None`` on failure.
+        sigma_px: Per-axis 1sigma marginal uncertainty; ``None`` on failure.
+        sigma_along_unobservable_px: Set when covariance is rank-1
+            (e.g. flat-ring-only scenes); ``None`` for full-rank results.
+        confidence_rank: Five-bucket rank derived from confidence + status.
+        confidence: Underlying calibrated confidence score in ``[0, 1]``.
+        status_reason: NavStatusReason value explaining the outcome.
+        covariance_px2: Full 2x2 covariance (or 3x3 with rotation);
+            ``None`` on failure.
+        per_technique: List of every technique's result (whether kept or
+            dropped by the ensemble).
+        feature_inventory: Per-feature summary entries — what was
+            extracted, what survived the gate, and why.
+        image_classifier: The image-quality classifier's verdict.
+        model_metadata: Per-NavModel diagnostic dicts keyed by model name.
+        annotations: Composite annotation collection assembled from every
+            registered NavModel's ``to_annotations`` plus orchestrator
+            additions.  Empty by default; intended for the summary-PNG
+            renderer.
+        provenance: Reproducibility envelope.
+        rotation_rad: Optional fitted camera rotation (radians); ``None``
+            when ``fit_camera_rotation`` is False.
+        sigma_rotation_rad: Optional 1-sigma rotation uncertainty.
+    """
+
+    status: Status
+    offset_px: tuple[float, float] | None
+    sigma_px: tuple[float, float] | None
+    sigma_along_unobservable_px: float | None
+    confidence_rank: ConfidenceRank
+    confidence: float
+    status_reason: NavStatusReason
+    covariance_px2: NDArrayFloatType | None
+    per_technique: list[NavTechniqueResult]
+    feature_inventory: list[NavFeatureSummary]
+    image_classifier: NavImageClassifierResult
+    provenance: Provenance
+    model_metadata: dict[str, dict[str, Any]] = field(default_factory=dict)
+    annotations: Annotations = field(default_factory=Annotations)
+    rotation_rad: float | None = None
+    sigma_rotation_rad: float | None = None
+
+    def __post_init__(self) -> None:
+        """Validate consistency between status, offset, and reason."""
+        if self.status == 'failed' and self.offset_px is not None:
+            raise ValueError('status=failed must have offset_px=None')
+        if self.status == 'ok' and self.offset_px is None:
+            raise ValueError('status=ok must have a non-None offset_px')
+        if self.confidence_rank == 'failed' and self.status != 'failed':
+            raise ValueError('confidence_rank=failed requires status=failed')
+        if not 0.0 <= self.confidence <= 1.0:
+            raise ValueError(f'confidence must lie in [0, 1]; got {self.confidence!r}')
+        if self.covariance_px2 is not None:
+            cov = np.asarray(self.covariance_px2, np.float64)
+            if cov.ndim != 2 or cov.shape[0] != cov.shape[1]:
+                raise ValueError(f'covariance_px2 must be square 2-D; got shape {cov.shape}')
+            cov.setflags(write=False)
+            object.__setattr__(self, 'covariance_px2', cov)
+
+    @classmethod
+    def failed(
+        cls,
+        *,
+        status_reason: NavStatusReason,
+        image_classifier: NavImageClassifierResult,
+        provenance: Provenance,
+        per_technique: list[NavTechniqueResult] | None = None,
+        feature_inventory: list[NavFeatureSummary] | None = None,
+        model_metadata: dict[str, dict[str, Any]] | None = None,
+        annotations: Annotations | None = None,
+    ) -> 'NavResult':
+        """Construct a NavResult for a failed navigation.
+
+        Parameters:
+            status_reason: Discrete reason from ``NavStatusReason``.
+            image_classifier: Image-quality classifier verdict.
+            provenance: Reproducibility envelope.
+            per_technique: Optional list of technique results (e.g. when
+                every technique returned spurious).
+            feature_inventory: Optional list of feature summaries.
+            model_metadata: Optional model metadata dict.
+            annotations: Optional pre-built annotation collection
+                (typically empty on failure).
+
+        Returns:
+            NavResult with ``status='failed'``, ``confidence=0.0``,
+            ``confidence_rank='failed'``, and no offset.
+        """
+        return cls(
+            status='failed',
+            offset_px=None,
+            sigma_px=None,
+            sigma_along_unobservable_px=None,
+            confidence_rank='failed',
+            confidence=0.0,
+            status_reason=status_reason,
+            covariance_px2=None,
+            per_technique=per_technique or [],
+            feature_inventory=feature_inventory or [],
+            image_classifier=image_classifier,
+            provenance=provenance,
+            model_metadata=model_metadata or {},
+            annotations=annotations if annotations is not None else Annotations(),
+        )
+
+    @classmethod
+    def ok(
+        cls,
+        *,
+        offset_px: tuple[float, float],
+        covariance_px2: NDArrayFloatType,
+        confidence: float,
+        confidence_rank: ConfidenceRank,
+        status_reason: NavStatusReason,
+        per_technique: list[NavTechniqueResult],
+        feature_inventory: list[NavFeatureSummary],
+        image_classifier: NavImageClassifierResult,
+        provenance: Provenance,
+        sigma_along_unobservable_px: float | None = None,
+        model_metadata: dict[str, dict[str, Any]] | None = None,
+        annotations: Annotations | None = None,
+        rotation_rad: float | None = None,
+        sigma_rotation_rad: float | None = None,
+    ) -> 'NavResult':
+        """Construct a NavResult for a successful navigation.
+
+        Parameters: see dataclass field docs above.  ``sigma_px`` is
+        derived from the diagonal of ``covariance_px2``.
+        """
+        cov = np.asarray(covariance_px2, np.float64)
+        sigma_dv = float(np.sqrt(max(cov[0, 0], 0.0)))
+        sigma_du = float(np.sqrt(max(cov[1, 1], 0.0)))
+        return cls(
+            status='ok',
+            offset_px=offset_px,
+            sigma_px=(sigma_dv, sigma_du),
+            sigma_along_unobservable_px=sigma_along_unobservable_px,
+            confidence_rank=confidence_rank,
+            confidence=confidence,
+            status_reason=status_reason,
+            covariance_px2=cov,
+            per_technique=per_technique,
+            feature_inventory=feature_inventory,
+            image_classifier=image_classifier,
+            provenance=provenance,
+            model_metadata=model_metadata or {},
+            annotations=annotations if annotations is not None else Annotations(),
+            rotation_rad=rotation_rad,
+            sigma_rotation_rad=sigma_rotation_rad,
+        )
+
+    @classmethod
+    def conflicted(
+        cls,
+        *,
+        offset_px: tuple[float, float],
+        covariance_px2: NDArrayFloatType,
+        confidence: float,
+        per_technique: list[NavTechniqueResult],
+        feature_inventory: list[NavFeatureSummary],
+        image_classifier: NavImageClassifierResult,
+        provenance: Provenance,
+        model_metadata: dict[str, dict[str, Any]] | None = None,
+        annotations: Annotations | None = None,
+    ) -> 'NavResult':
+        """Construct a NavResult for a conflicted (best-group reported) navigation.
+
+        ``confidence_rank`` is hard-set to ``'conflicted'``; downstream
+        consumers refuse to use these results without explicit opt-in.
+        """
+        cov = np.asarray(covariance_px2, np.float64)
+        sigma_dv = float(np.sqrt(max(cov[0, 0], 0.0)))
+        sigma_du = float(np.sqrt(max(cov[1, 1], 0.0)))
+        return cls(
+            status='conflicted',
+            offset_px=offset_px,
+            sigma_px=(sigma_dv, sigma_du),
+            sigma_along_unobservable_px=None,
+            confidence_rank='conflicted',
+            confidence=confidence,
+            status_reason=NavStatusReason.CONFLICTED_TECHNIQUES,
+            covariance_px2=cov,
+            per_technique=per_technique,
+            feature_inventory=feature_inventory,
+            image_classifier=image_classifier,
+            provenance=provenance,
+            model_metadata=model_metadata or {},
+            annotations=annotations if annotations is not None else Annotations(),
+        )

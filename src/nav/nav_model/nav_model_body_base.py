@@ -1,3 +1,17 @@
+"""Shared base class for body navigation models.
+
+``NavModelBodyBase`` carries the limb-mask helper and the body-label
+annotation pipeline shared between every concrete body NavModel.  It is
+abstract — registered subclasses (``NavModelBodySimulated`` today, plus
+the real-scene body model when it lands) inherit the helpers and supply
+the per-image rendering.
+
+Anti-aliasing math lives separately in
+``nav.nav_model.rings.ring_math.compute_antialiasing``; helpers here are
+strictly observation-aware (image shape, font config, label-placement
+heuristics).
+"""
+
 import numpy as np
 import scipy.ndimage as ndimage
 
@@ -23,6 +37,8 @@ class NavModelBodyBase(NavModel):
     Provides shared helpers to compute a limb mask and to create annotations
     consistent with the standard body model implementation.
     """
+
+    _abstract = True
 
     def _compute_limb_mask_from_body_mask(self, body_mask: NDArrayBoolType) -> NDArrayBoolType:
         """Compute limb mask as body pixels adjacent to at least one non-body neighbor."""

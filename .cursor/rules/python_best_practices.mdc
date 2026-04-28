@@ -5,7 +5,7 @@ description: Python coding standards for writing correct, readable, maintainable
 
 # Python Best Practices
 
-Apply these rules to ALL new and modified Python code. This project is a Python library published on PyPI and documented on ReadTheDocs. **Minimum Python version: 3.10.**
+Apply these rules to ALL new and modified Python code. This project is a Python library published on PyPI and documented on ReadTheDocs. **Minimum Python version: 3.11.**
 
 ## 1. Naming and Style
 
@@ -59,7 +59,7 @@ Apply these rules to ALL new and modified Python code. This project is a Python 
 ### Types
 
 - ALWAYS annotate all function/method parameters and return values, including `-> None` for functions (and `__init__`) that return nothing.
-- Use modern generic syntax (`list[str]`, `dict[str, int]`, `X | None`) for Python 3.10+.
+- Use modern generic syntax (`list[str]`, `dict[str, int]`, `X | None`) for Python 3.11+.
 
 ### Mypy
 
@@ -132,7 +132,7 @@ The template enables these Ruff lint categories in `pyproject.toml`. Use them as
 | **E**, **W** | pycodestyle | Style and formatting (indent, whitespace, line length). |
 | **F** | Pyflakes | Unused imports, undefined names, syntax issues. |
 | **I** | isort | Import sorting and grouping. |
-| **UP** | pyupgrade | Prefer modern Python (e.g. 3.10+ syntax). |
+| **UP** | pyupgrade | Prefer modern Python (e.g. 3.11+ syntax). |
 | **B** | flake8-bugbear | Common bugs (mutable defaults, assert, loop vars). |
 | **SIM** | flake8-simplify | Simpler alternatives (e.g. `in` instead of `not x == y`). |
 | **C4** | flake8-comprehensions | Prefer comprehensions over loops where clear. |

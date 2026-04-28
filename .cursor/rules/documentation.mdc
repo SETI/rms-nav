@@ -12,7 +12,6 @@ description: Standards for Python library documentation using Sphinx, ReadTheDoc
 
 ## 2. Documentation Standard
 
-- NEVER use unicode characters such as smart quotes, em-dashes, or arrows in source code files (such as .py) in docstrings or comments. They are acceptable in .rst and .md files. They are also acceptable in source code strings when needed to present special characters to the user such as degree signs or arrows at runtime.
 - Always use one space between the period at the end of a sentence and the next sentence.
 
 ## 3. Required Documentation

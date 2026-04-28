@@ -1,3 +1,15 @@
+"""Interactive manual-navigation dialog (PyQt6).
+
+Renders a composite of the predicted scene against the source image and
+lets an operator pick a translation offset by hand.  An ``Auto`` button
+runs the same masked-NCC pyramid that correlation-based techniques use,
+so the operator can either accept the auto-pick or override it.
+
+This module is GUI-only; no autonomous-pipeline code imports it.  It is
+constructed by ``NavTechniqueManual`` (which is opted out of the
+auto-discovery registry) on demand.
+"""
+
 from __future__ import annotations
 
 import math
@@ -29,10 +41,9 @@ from PyQt6.QtWidgets import (
 )
 
 from nav.config import Config
-from nav.nav_model import NavModelCombined
 from nav.obs import ObsSnapshot
 from nav.support.correlate import masked_ncc, navigate_with_pyramid_kpeaks
-from nav.support.types import NDArrayFloatType, NDArrayUint8Type
+from nav.support.types import NDArrayBoolType, NDArrayFloatType, NDArrayUint8Type
 from nav.ui.common import (
     ZoomPanController,
     apply_linear_gamma_stretch,
@@ -265,16 +276,28 @@ class ManualNavDialog(QDialog):
         self,
         *,
         obs: ObsSnapshot,
-        combined_model: NavModelCombined,
+        model_img_ext: NDArrayFloatType,
+        model_mask_ext: NDArrayBoolType,
         config: Config | None,
         parent: QWidget | None = None,
     ) -> None:
+        """Initialize the manual-navigation dialog.
+
+        Parameters:
+            obs: The observation snapshot under navigation.
+            model_img_ext: Composite predicted-scene image in ext-FOV
+                coordinates (the union of every NavModel template painted
+                Z-buffer-style by subject range).
+            model_mask_ext: Boolean mask matching ``model_img_ext``;
+                True wherever the composite carries signal.
+            config: Optional ``Config`` override.
+            parent: Optional Qt parent widget.
+        """
         super().__init__(parent)
         self.setWindowTitle('Manual Navigation')
         self.setMinimumSize(1200, 800)
 
         self._obs = obs
-        self._model = combined_model
         self._config = config
 
         self.setWindowTitle(f'Manual Navigation - {obs.abspath.name}')
@@ -282,14 +305,13 @@ class ManualNavDialog(QDialog):
         # Image and model arrays
         self._img_fov = obs.data  # V x U, float64
         self._img_ext = obs.extdata  # for correlation
-        if (
-            len(self._model.models) == 0
-            or self._model.models[0].model_img is None
-            or self._model.models[0].model_mask is None
-        ):
-            raise ValueError('Combined model is missing image or mask')
-        self._model_img_ext = self._model.models[0].model_img
-        self._model_mask_ext = self._model.models[0].model_mask
+        if model_img_ext.shape != model_mask_ext.shape:
+            raise ValueError(
+                f'model_img_ext shape {model_img_ext.shape} does not match '
+                f'model_mask_ext shape {model_mask_ext.shape}'
+            )
+        self._model_img_ext = model_img_ext
+        self._model_mask_ext = model_mask_ext
 
         # Stretch/gamma parameters (image)
         self._image_black = float(np.quantile(self._img_fov, 0.001))

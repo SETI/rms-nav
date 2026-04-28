@@ -7,7 +7,7 @@ name = "rms-nav"
 dynamic = ["version"]
 description = "Navigation system for spacecraft imagery"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
   "astropy>=6.0",
   "matplotlib",
@@ -39,10 +39,10 @@ classifiers = [
   "Topic :: Software Development :: Libraries :: Python Modules",
   "Topic :: Utilities",
   "License :: OSI Approved :: Apache Software License",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Operating System :: MacOS :: MacOS X",
   "Operating System :: POSIX :: Linux",
   "Operating System :: Microsoft :: Windows"
@@ -140,6 +140,19 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 pythonpath = [
   "src"
+]
+testpaths = ["tests"]
+addopts = ["--strict-markers", "--strict-config"]
+filterwarnings = [
+  "error",
+  # Astropy's FITS reader can leave a file handle open while the cache
+  # owns the underlying path; the resulting unraisable exception is
+  # outside our control.  Allow it through as a non-fatal warning.
+  "default::pytest.PytestUnraisableExceptionWarning",
+]
+markers = [
+  "integration: requires PDS3_HOLDINGS_DIR (real holdings on disk or via filecache)",
+  "slow: per-image library regression test",
 ]
 
 [tool.ruff]

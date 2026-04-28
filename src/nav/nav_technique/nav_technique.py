@@ -1,85 +1,138 @@
-import fnmatch
-from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
+"""NavTechnique base class for the autonomous-navigation pipeline.
 
-from nav.config import Config
-from nav.nav_model import NavModel, NavModelCombined
+Concrete subclasses self-register via ``__init_subclass__`` and the
+orchestrator iterates the registry.  Every concrete technique is safe to
+instantiate per-image without depending on prior runs;
+``__init_subclass__`` only records a class reference — no instances are
+constructed at import time.
+"""
+
+from __future__ import annotations
+
+import fnmatch
+import logging
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Any, ClassVar
+
+from nav.feature.feature import NavFeature
+from nav.feature.feature_type import NavFeatureType
+from nav.nav_technique.feasibility import NavFeasibilityReport
+from nav.nav_technique.technique_result import NavTechniqueResult
 from nav.support.nav_base import NavBase
 
-if TYPE_CHECKING:
-    from nav.nav_master import NavMaster
+if TYPE_CHECKING:  # pragma: no cover - typing-only import
+    from nav.nav_orchestrator.nav_context import NavContext
+
+logging.getLogger(__name__).addHandler(logging.NullHandler())
+
+__all__ = [
+    'NavTechnique',
+    'filter_technique_names',
+]
 
 
-class NavTechnique(ABC, NavBase):
-    """Base class for navigation techniques."""
+class NavTechnique(NavBase, ABC):
+    """Abstract base for autonomous-navigation techniques.
 
-    def __init__(self, nav_master: 'NavMaster', *, config: Config | None = None) -> None:
-        """Initializes a navigation technique.
+    Concrete subclasses self-register via ``__init_subclass__``.  The
+    orchestrator iterates ``NavTechnique._registry`` to discover the
+    techniques it should run.  Subclasses must override the class
+    attributes ``name``, ``accepts_feature_types``, and (when relevant)
+    ``requires_prior``.
+    """
 
-        Parameters:
-            nav_master: The navigation master instance.
-            config: Configuration object to use. If None, uses DEFAULT_CONFIG.
-        """
+    _registry: ClassVar[list[type[NavTechnique]]] = []
+    _abstract: ClassVar[bool] = True
 
-        super().__init__(config=config)
+    #: Human-readable technique name; used as the registry key.
+    name: ClassVar[str] = ''
+    #: Frozen set of feature types this technique consumes.  The
+    #: orchestrator skips invocation when no input feature has a
+    #: matching type.
+    accepts_feature_types: ClassVar[frozenset[NavFeatureType]] = frozenset()
+    #: If ``True``, this technique requires a prior offset on
+    #: ``NavContext`` and is run only on pass 2.
+    requires_prior: ClassVar[bool] = False
 
-        self._nav_master = nav_master
-        self._offset: tuple[float, float] | None = None
-        self._uncertainty: tuple[float, float] | None = None
-        self._confidence: float | None = None
-        self._metadata: dict[str, Any] = {}
-
-    @property
-    def nav_master(self) -> 'NavMaster':
-        """Returns the navigation master instance."""
-        return self._nav_master
-
-    @property
-    def offset(self) -> tuple[float, float] | None:
-        """Returns the computed offset as a tuple of (v, u) or None if not calculated.
-
-        The floating point offset is of form (dv, du). If an object is predicted by the SPICE
-        kernels to be at location (v, u) in the image, then the actual location of the
-        object is (v+dv, u+du). This means a positive offset is equivalent to shifting a model
-        up and to the right (positive v and u).
-        """
-        return self._offset
-
-    @property
-    def uncertainty(self) -> tuple[float, float] | None:
-        """Returns the computed uncertainty as a tuple of (v, u) or None if not calculated."""
-        return self._uncertainty
-
-    @property
-    def confidence(self) -> float | None:
-        """Returns the confidence in the computed offset as a float or None if not calculated."""
-        return self._confidence
-
-    @property
-    def metadata(self) -> dict[str, Any]:
-        """Returns the metadata dictionary."""
-        return self._metadata
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Auto-register concrete subclasses."""
+        super().__init_subclass__(**kwargs)
+        if not cls.__dict__.get('_abstract', False):
+            NavTechnique._registry.append(cls)
 
     @abstractmethod
-    def navigate(self) -> None:
-        """Performs the navigation process.
+    def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
+        """Return whether this technique can run on the supplied features.
 
-        This abstract method must be implemented by all navigation technique subclasses.
+        ``is_feasible`` reads feature metadata only — never pixels.  It is
+        called *before* ``navigate`` and short-circuits work that has no
+        chance of producing a useful result.
+
+        Parameters:
+            features: Full feature set after the reliability gate.  The
+                technique filters to its accepted types internally.
+
+        Returns:
+            A ``NavFeasibilityReport`` whose ``feasible`` field tells the
+            orchestrator whether to invoke ``navigate``.
         """
-        ...
 
-    def _filter_models(self, model_names: list[str]) -> list['NavModel']:
-        """Filters the available models using glob patterns."""
-        models = [
-            x
-            for x in self.nav_master.all_models
-            if any(fnmatch.fnmatch(x.name.upper(), pattern.upper()) for pattern in model_names)
-        ]
-        return models
+    @abstractmethod
+    def navigate(self, features: list[NavFeature], context: NavContext) -> NavTechniqueResult:
+        """Compute and return a single per-technique offset estimate.
 
-    def _combine_models(self, model_names: list[str]) -> 'NavModelCombined | None':
-        """Returns a combined model from the available models matching patterns."""
-        models = self._filter_models(model_names)
-        if len(models) == 0:
-            return None
-        return NavModelCombined('combined', self.nav_master.obs, models)
+        Parameters:
+            features: Features filtered to this technique's accepted types
+                (the orchestrator pre-filters; the technique need not
+                re-filter unless an internal sub-check requires it).
+            context: Per-image NavContext with image, masks, and shared
+                derivatives.
+
+        Returns:
+            A ``NavTechniqueResult`` with offset, covariance, confidence,
+            and per-technique diagnostics.
+        """
+
+
+def filter_technique_names(names: list[str], patterns: str | list[str]) -> list[str]:
+    """Return ``names`` filtered by gitignore-style glob patterns.
+
+    A leading ``!`` marks an exclusion pattern; otherwise the pattern is
+    inclusion.  An exclusion-only pattern list implies an inclusion default
+    of ``'*'``.
+
+    Parameters:
+        names: List of technique names (or any candidate strings).
+        patterns: Single pattern or list of patterns.  Patterns matching
+            shell-glob syntax (``*``, ``?``, ``[abc]``).  Leading ``!``
+            means exclusion.
+
+    Returns:
+        Names that match at least one inclusion pattern and no exclusion
+        patterns.
+
+    Raises:
+        ValueError: if an empty pattern list is supplied.
+    """
+    if isinstance(patterns, str):
+        patterns = [patterns]
+    if not patterns:
+        raise ValueError('patterns must contain at least one entry')
+    includes: list[str] = []
+    excludes: list[str] = []
+    for pat in patterns:
+        if pat.startswith('!'):
+            excludes.append(pat[1:])
+        else:
+            includes.append(pat)
+    if not includes:
+        # Pure-exclusion pattern list: implicit '*' include.
+        includes = ['*']
+    out: list[str] = []
+    for name in names:
+        if not any(fnmatch.fnmatch(name, p) for p in includes):
+            continue
+        if any(fnmatch.fnmatch(name, p) for p in excludes):
+            continue
+        out.append(name)
+    return out

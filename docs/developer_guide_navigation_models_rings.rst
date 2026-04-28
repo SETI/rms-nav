@@ -1,13 +1,16 @@
-================
+=====
 Rings
-================
+=====
 
-:class:`~nav.nav_model.nav_model_rings.NavModelRings` and
-:class:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated` build
-ring feature models from configuration (or simulation parameters). The
-``nav.nav_model.rings`` subpackage holds the domain model: validation,
-filtering, and rendering are separated so each concern can be tested in
-isolation.
+The ring NavModel renders each catalog-driven ring edge into per-edge
+polylines plus an optional ``RING_ANNULUS`` composite template, emitting
+:class:`~nav.feature.feature.NavFeature` instances for technique
+consumption.  Today's only registered concrete subclass is
+:class:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated`,
+used by the simulated-image GUI; the real-scene model is unimplemented.
+The :mod:`nav.nav_model.rings` subpackage holds the catalog-driven
+domain model — validation, filtering, and rendering are separated so
+each concern can be tested in isolation.
 
 Ring domain model
 -----------------
@@ -102,8 +105,9 @@ Top-level ring model parameters
 
 These keys sit directly under the ``rings:`` section (not under
 ``rings.ring_features.<PLANET>``). They are shared across all planets and
-control post-render processing that is applied to every feature before the
-``NavModelResult`` is constructed.
+control post-render processing that is applied to every rendered ring
+feature before its image and mask are emitted as part of a
+``RING_ANNULUS`` :class:`~nav.feature.feature.NavFeature`.
 
 .. list-table::
    :header-rows: 1
@@ -132,10 +136,11 @@ control post-render processing that is applied to every feature before the
        accepted by the configuration parser but has no effect in the current
        release.
 
-Shadow removal is applied **after** rendering and **before**
-``NavModelResult`` construction, so the ``model_img`` and ``model_mask``
-stored in each result already reflect the masking. At ``INFO`` log level the
-orchestrator reports the shadow pixel count:
+Shadow removal is applied **after** rendering and **before** the rendered
+mask is folded into the emitted ``NavFeature.template_img`` /
+``template_mask``, so the per-feature image and mask already reflect the
+masking. At ``INFO`` log level the orchestrator reports the shadow
+pixel count:
 
 .. code-block::
 
@@ -264,8 +269,9 @@ Edge mode parameters (mode 1 — base orbit)
    * - ``rate_peri``
      - Precession rate of periapsis, in degrees per day.
    * - ``rms``
-     - Edge position uncertainty, in km (1-sigma RMS). Used for
-       ``NavModelResult.uncertainty``.
+     - Edge position uncertainty, in km (1-sigma RMS). Projected to
+       pixels per image and stored on each emitted ring feature's
+       per-vertex ``sigma_radial_per_vertex_px``.
 
 Edge mode parameters (mode > 1 — perturbation modes)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -328,6 +334,6 @@ To configure rings for a new planet (e.g., Uranus):
 
 4. Add individual features under ``features:`` using the same format as Saturn.
 
-No code changes are required. The orchestrator (:class:`~nav.nav_model.nav_model_rings.NavModelRings`) reads whichever
-planet name appears in ``obs.closest_planet`` and looks it up in
+No code changes are required.  The ring NavModel reads whichever planet
+name appears in ``obs.closest_planet`` and looks it up in
 ``rings.ring_features`` at runtime.

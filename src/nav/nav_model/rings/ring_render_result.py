@@ -24,8 +24,8 @@ class RingRenderResult:
     """Result of rendering a single ring feature edge or band.
 
     Returned by ``RingFeature.render()``. Contains the rendered model image
-    and mask, the feature uncertainty (for ``NavModelResult``), and pre-computed
-    annotation edge data.
+    and mask, the feature uncertainty (km), and pre-computed annotation edge
+    data.
 
     ``edge_info_list`` contains ``(edge_mask, label_text, edge_label)`` tuples
     for annotation creation. ``render()`` computes these during rendering to

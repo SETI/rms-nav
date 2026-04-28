@@ -8,7 +8,8 @@ This section provides detailed API documentation for the RMS-NAV system.
    :maxdepth: 2
    :caption: API Reference:
 
-   api_reference/api_nav_master
+   api_reference/api_feature
+   api_reference/api_nav_orchestrator
    api_reference/api_nav_model
    api_reference/api_nav_technique
    api_reference/api_reproj
