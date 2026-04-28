@@ -153,10 +153,17 @@ def build_image_edge_dt(
 
     Raises:
         TypeError: if ``image_ext`` is not 2-D.
-        ValueError: if ``image_noise_sigma`` is negative or non-finite.
+        ValueError: if ``image_ext`` contains NaN or +/-inf, or if
+            ``image_noise_sigma`` is negative or non-finite.
     """
     if image_ext.ndim != 2:
         raise TypeError(f'image_ext must be 2-D; got ndim={image_ext.ndim}')
+    if not np.isfinite(image_ext).all():
+        raise ValueError(
+            'image_ext must contain only finite values; NaN or +/-inf would '
+            'propagate through gaussian_filter / sobel and poison the '
+            'gradient and DT outputs'
+        )
     if not (math.isfinite(image_noise_sigma) and image_noise_sigma >= 0.0):
         raise ValueError(f'image_noise_sigma must be finite and >= 0; got {image_noise_sigma!r}')
     cfg = config if config is not None else ImageDerivativesConfig()
@@ -265,10 +272,17 @@ def compute_image_gradient_vu(
 
     Raises:
         TypeError: if ``image_ext`` is not 2-D.
-        ValueError: if ``sigma_px`` is not strictly positive.
+        ValueError: if ``image_ext`` contains NaN or +/-inf, or if
+            ``sigma_px`` is not strictly positive.
     """
     if image_ext.ndim != 2:
         raise TypeError(f'image_ext must be 2-D; got ndim={image_ext.ndim}')
+    if not np.isfinite(image_ext).all():
+        raise ValueError(
+            'image_ext must contain only finite values; NaN or +/-inf would '
+            'propagate through gaussian_filter / sobel and poison the '
+            'gradient-vector output'
+        )
     if not (math.isfinite(sigma_px) and sigma_px > 0.0):
         raise ValueError(f'sigma_px must be a finite positive number; got {sigma_px!r}')
     smoothed = gaussian_filter(image_ext.astype(np.float64), sigma=(sigma_px, sigma_px))

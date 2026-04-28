@@ -59,8 +59,8 @@ with IMAGE_LOGGER.open(str(image_url), handler=local_handlers):
 
 ## 3. Logging Calls
 
-Use `%`-style format strings (never f-strings) so the interpolation is deferred
-until the message is actually emitted:
+Use `%`-style format strings (never f-strings) in logging calls so the
+interpolation is deferred until the message is actually emitted:
 
 ```python
 # ✅ GOOD
@@ -77,6 +77,9 @@ self._logger.info(f'Writing metadata to {public_metadata_file}')
 Available levels: `debug`, `info`, `warning`, `error`, `exception`, `fatal`.
 Use `exception` (not `error`) when inside an `except` block so the traceback is
 captured automatically.
+
+Note: f-strings are OK in the logger.open() call.
+
 
 ## 4. Setting Up Handlers
 
@@ -115,10 +118,6 @@ never call `mkdir` on the log directory — `PdsLogger` handles directory creati
 via `FileCache` internally.
 
 ```python
-# ✅ GOOD
-log_dir = FCPath(nav_results_root_str) / 'logs' / 'nav_offset'
-MAIN_LOGGER.add_handler(pdslogger.file_handler(log_dir / 'nav_offset.log', rotation='ymdhms'))
-
 # ❌ BAD - do not mkdir the log directory
 log_dir.mkdir(parents=True, exist_ok=True)
 ```
@@ -130,8 +129,7 @@ log_dir.mkdir(parents=True, exist_ok=True)
 | Import loggers | `from nav.config import MAIN_LOGGER, IMAGE_LOGGER` |
 | Top-level events | `MAIN_LOGGER.info(...)` |
 | Per-image events | `self._logger.info(...)` (`self._logger` is `IMAGE_LOGGER`) |
-| Named section | `with logger.open('SECTION HEADER'):` |
-| Named section + level | `with logger.open('HEADER', level='DEBUG'):` |
-| Per-image file + console | `with IMAGE_LOGGER.open(url, handler=local_handlers):` |
+| Named section | `with self._logger.open('SECTION HEADER'):` |
+| Named section + level | `with self._logger.open('HEADER', level='DEBUG'):` |
 | Exception in except block | `logger.exception('msg: %s', detail)` |
 | Standard library logging | Only for type annotations in low-level plumbing |

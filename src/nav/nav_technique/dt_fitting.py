@@ -702,27 +702,31 @@ def lm_subpixel_refine(
                 pivot_distance_px=pivot_distance_px,
             )
             state.iteration += 1
+            # Recompute residuals / weights / Jacobian at the accepted pose
+            # immediately so diagnostics (rms_px, inlier_count, covariance)
+            # reflect the committed parameters even if the loop exits via
+            # max_iterations on the next check.  Without this, an accepted
+            # step in the final iteration would leave state.raw_residuals /
+            # state.weights / state.jacobian reflecting the pre-step pose.
+            residuals_final, jacobian_final = _compute_residuals_and_jacobian(
+                vertices_vu=verts,
+                pivot_vu=pivot,
+                image_dt=image_edge_dt,
+                dv=state.dv,
+                du=state.du,
+                dtheta=state.dtheta,
+                fit_rotation=fit_rotation,
+            )
+            residuals_final = np.where(
+                state.polarity_mask, residuals_final, _INFINITY_DT_PENALTY_PX
+            )
+            final_scaled = residuals_final / sigmas
+            final_tukey = tukey_biweight_weights(final_scaled, c=tukey_c)
+            state.raw_residuals = residuals_final
+            state.weights = inv_sigma_sq * final_tukey
+            state.jacobian = jacobian_final
             if step_norm < step_tolerance_px:
                 state.converged = True
-                # Recompute residuals / weights at the accepted point so
-                # the returned diagnostics are consistent.
-                residuals_final, jacobian_final = _compute_residuals_and_jacobian(
-                    vertices_vu=verts,
-                    pivot_vu=pivot,
-                    image_dt=image_edge_dt,
-                    dv=state.dv,
-                    du=state.du,
-                    dtheta=state.dtheta,
-                    fit_rotation=fit_rotation,
-                )
-                residuals_final = np.where(
-                    state.polarity_mask, residuals_final, _INFINITY_DT_PENALTY_PX
-                )
-                final_scaled = residuals_final / sigmas
-                final_tukey = tukey_biweight_weights(final_scaled, c=tukey_c)
-                state.raw_residuals = residuals_final
-                state.weights = inv_sigma_sq * final_tukey
-                state.jacobian = jacobian_final
                 break
         else:
             lambda_ = min(lambda_ * 2.0, 1.0e6)
@@ -762,7 +766,18 @@ def lm_subpixel_refine(
     else:
         rms_px = 0.0
     covariance: NDArrayFloatType
-    if state.jacobian.size == 0 or state.jacobian.shape[1] != n_params:
+    # Guard against three "no information" cases that would otherwise let
+    # information_matrix_to_covariance produce a misleading zero-covariance
+    # answer (pinvh of the zero information matrix is zero — which would
+    # falsely advertise perfect certainty about the fit).  All three
+    # conditions mean there is no inlier evidence to constrain the
+    # parameters; the inf sentinel correctly signals "fully unconstrained".
+    if (
+        state.jacobian.size == 0
+        or state.jacobian.shape[1] != n_params
+        or inlier_count == 0
+        or final_weights.sum() == 0.0
+    ):
         covariance = cast(NDArrayFloatType, np.full((n_params, n_params), np.inf, dtype=np.float64))
     else:
         covariance = information_matrix_to_covariance(

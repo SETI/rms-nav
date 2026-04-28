@@ -29,6 +29,7 @@ def _step_image(shape: tuple[int, int], step_v: int) -> np.ndarray:
 
 
 def test_image_derivatives_config_defaults_match_design() -> None:
+    """Default ``ImageDerivativesConfig`` carries the documented constants."""
     cfg = ImageDerivativesConfig()
     assert cfg.image_gradient_sigma_px == DEFAULT_IMAGE_GRADIENT_SIGMA_PX
     assert cfg.edge_threshold_k_sigma == DEFAULT_EDGE_THRESHOLD_K_SIGMA
@@ -36,21 +37,25 @@ def test_image_derivatives_config_defaults_match_design() -> None:
 
 
 def test_image_derivatives_config_rejects_zero_sigma() -> None:
+    """A zero ``image_gradient_sigma_px`` is rejected with a named field message."""
     with pytest.raises(ValueError, match='image_gradient_sigma_px'):
         ImageDerivativesConfig(image_gradient_sigma_px=0.0)
 
 
 def test_image_derivatives_config_rejects_zero_threshold() -> None:
+    """A zero ``edge_threshold_k_sigma`` is rejected with a named field message."""
     with pytest.raises(ValueError, match='edge_threshold_k_sigma'):
         ImageDerivativesConfig(edge_threshold_k_sigma=0.0)
 
 
 def test_image_derivatives_config_rejects_zero_half_width() -> None:
+    """A non-positive ``dt_half_width_px`` is rejected with a named field message."""
     with pytest.raises(ValueError, match='dt_half_width_px'):
         ImageDerivativesConfig(dt_half_width_px=-1.0)
 
 
 def test_build_image_edge_dt_peak_aligns_with_step_edge() -> None:
+    """Gradient peak row matches the leading or trailing edge of a planted bar."""
     # A horizontal bar centred on row 16 has its leading edge near row 12
     # and trailing edge near row 19; the gradient row-sum peaks at one of
     # those rows after Gaussian smoothing.
@@ -66,6 +71,7 @@ def test_build_image_edge_dt_peak_aligns_with_step_edge() -> None:
 
 
 def test_build_image_edge_dt_zeros_edge_dt_on_thresholded_pixels() -> None:
+    """Distance transform is exactly zero on retained edge pixels and positive elsewhere."""
     img = _step_image((40, 40), step_v=16)
     _, edge_dt = build_image_edge_dt(img, image_noise_sigma=1.0)
     # Pixels along the leading edge (row 12) get DT = 0 exactly --
@@ -77,6 +83,7 @@ def test_build_image_edge_dt_zeros_edge_dt_on_thresholded_pixels() -> None:
 
 
 def test_build_image_edge_dt_falls_back_when_no_pixel_exceeds_threshold() -> None:
+    """Empty edge mask saturates the DT at the configured half-width everywhere."""
     img = np.full((16, 16), 1.0, dtype=np.float64)
     cfg = ImageDerivativesConfig(
         edge_threshold_k_sigma=1000.0,
@@ -92,6 +99,7 @@ def test_build_image_edge_dt_falls_back_when_no_pixel_exceeds_threshold() -> Non
 
 
 def test_build_image_edge_dt_threshold_sweep_matches_expected_count() -> None:
+    """Edge-pixel count is monotonically non-decreasing as the k-sigma threshold drops."""
     img = _step_image((40, 40), step_v=16)
     # Decreasing the k_sigma factor lets more pixels pass the threshold;
     # binarized edge counts must be monotonically non-decreasing.
@@ -102,25 +110,30 @@ def test_build_image_edge_dt_threshold_sweep_matches_expected_count() -> None:
         threshold = k * 1.0
         edge_count = int((gradient > threshold).sum())
         counts.append(edge_count)
-    assert counts[0] <= counts[1] <= counts[2]
+    assert counts[0] <= counts[1]
+    assert counts[1] <= counts[2]
 
 
 def test_build_image_edge_dt_rejects_non_2d_input() -> None:
+    """A non-2-D ``image_ext`` is rejected with a TypeError naming the field."""
     with pytest.raises(TypeError, match='image_ext must be 2-D'):
         build_image_edge_dt(np.zeros((4, 4, 4)), image_noise_sigma=1.0)
 
 
 def test_build_image_edge_dt_rejects_negative_noise_sigma() -> None:
+    """A negative ``image_noise_sigma`` is rejected with a named field message."""
     with pytest.raises(ValueError, match='image_noise_sigma'):
         build_image_edge_dt(np.zeros((4, 4)), image_noise_sigma=-1.0)
 
 
 def test_build_image_edge_dt_rejects_nan_noise_sigma() -> None:
+    """A NaN ``image_noise_sigma`` is rejected with a named field message."""
     with pytest.raises(ValueError, match='image_noise_sigma'):
         build_image_edge_dt(np.zeros((4, 4)), image_noise_sigma=float('nan'))
 
 
 def test_compute_image_gradient_vu_horizontal_step_points_along_v() -> None:
+    """Horizontal step edge produces a positive ``g_v`` and near-zero ``g_u``."""
     shape = (40, 40)
     img = _step_image(shape, step_v=16)
     grad = compute_image_gradient_vu(img, sigma_px=1.0)
@@ -136,6 +149,7 @@ def test_compute_image_gradient_vu_horizontal_step_points_along_v() -> None:
 
 
 def test_compute_image_gradient_vu_vertical_step_points_along_u() -> None:
+    """Vertical step edge produces a positive ``g_u`` and near-zero ``g_v``."""
     img = np.zeros((32, 32), dtype=np.float64)
     img[:, 16:] = 100.0
     grad = compute_image_gradient_vu(img, sigma_px=1.0)
@@ -144,26 +158,31 @@ def test_compute_image_gradient_vu_vertical_step_points_along_u() -> None:
 
 
 def test_compute_image_gradient_vu_rejects_non_2d_input() -> None:
+    """A non-2-D ``image_ext`` is rejected with a TypeError naming the field."""
     with pytest.raises(TypeError, match='image_ext must be 2-D'):
         compute_image_gradient_vu(np.zeros((4, 4, 2)))
 
 
 def test_compute_image_gradient_vu_rejects_zero_sigma() -> None:
+    """A zero ``sigma_px`` is rejected with a finite-positive-number message."""
     with pytest.raises(ValueError, match='sigma_px must be a finite positive number'):
         compute_image_gradient_vu(np.zeros((4, 4)), sigma_px=0.0)
 
 
 def test_compute_image_gradient_vu_rejects_inf_sigma() -> None:
+    """An infinite ``sigma_px`` is rejected with a finite-positive-number message."""
     with pytest.raises(ValueError, match='sigma_px must be a finite positive number'):
         compute_image_gradient_vu(np.zeros((4, 4)), sigma_px=float('inf'))
 
 
 def test_build_image_edge_dt_rejects_inf_noise_sigma() -> None:
+    """An infinite ``image_noise_sigma`` is rejected with a finite-required message."""
     with pytest.raises(ValueError, match='image_noise_sigma must be finite'):
         build_image_edge_dt(np.zeros((4, 4)), image_noise_sigma=float('inf'))
 
 
 def test_image_derivatives_config_rejects_inf_sigma() -> None:
+    """An infinite ``image_gradient_sigma_px`` is rejected with a named field message."""
     with pytest.raises(ValueError, match='image_gradient_sigma_px'):
         ImageDerivativesConfig(image_gradient_sigma_px=float('inf'))
 
