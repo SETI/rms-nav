@@ -1027,6 +1027,36 @@ this section is the operational checklist.
   `RingFeatureFilter`, `RingRenderResult`, `RingsRenderContext`,
   `ring_math`, `ring_types`) preserved with restored unit tests.
 
+**Concrete NavModels (Part 1, Part 8)**
+
+- `nav.nav_model.stars` package — `NavModelStars` orchestrator plus
+  six helper modules: `catalog` (multi-catalog reduction with
+  stellar aberration, proper motion, FOV projection, dedup),
+  `conflicts` (body / ring occlusion via the `oops` backplane),
+  `predicted_snr` (per-star integrated SNR with
+  `SCLASS_TO_B_MINUS_V` colour lookup), `smeared_psf` (smear-aware
+  PSF rendering and per-image smear-vector computation from SPICE
+  brackets), `detection` (DAOPHOT-style matched-filter detector with
+  CCD bloom and shape cuts), and the orchestrator itself.  Emits
+  one `STAR` feature per usable catalog star with anisotropic CRLB
+  centroid covariance.
+- `nav.nav_model.NavModelBody` — per-body silhouette navigation; one
+  instance per body with `inventory_body_in_extfov`.  Builds an
+  oversampled Lambert-shaded silhouette, extracts limb / terminator
+  polylines, and emits `LIMB_ARC` / `BODY_BLOB` / `BODY_DISC` /
+  `TERMINATOR_ARC` features per the design's emission gates.
+  Per-vertex polyline sigmas follow the quadrature-sum formula with
+  the `MAX_INCIDENCE_FACTOR_CAP` clamp.  Per-body shape parameters
+  come from `nav.nav_model.body_shape.BODY_SHAPE_TABLE` (which the
+  pending `config_220_body_shape.yaml` loader will replace).
+- `nav.nav_model.NavModelRings` — catalog-driven ring navigation;
+  one instance per planet whose ring catalog touches the FOV.
+  Reuses the four-pass `RingFeatureFilter`, samples each surviving
+  rendered edge mask into a polyline, and emits `RING_EDGE`
+  (per-vertex `RingEdgePolyline` with σ_radial / σ_along_edge) or
+  `RING_ANNULUS` (multi-edge composite template) per the radial
+  resolvability threshold.
+
 **Orchestrator + ensemble (Part 4)**
 
 - `nav.nav_orchestrator.NavContext` (frozen, `with_prior`
@@ -1101,27 +1131,28 @@ this section is the operational checklist.
 - `NavTechniqueCorrelateAll` (the legacy fused-model NCC pipeline).
 - `NavModelCombined`, `NavModelResult` (replaced by per-feature
   templates and the ensemble's per-technique combine).
-- The legacy `NavModelStars`, `NavModelBody`, `NavModelRings`
-  classes — only the `rings/` data-model subpackage and the
-  simulated variants survive on the new contract.
-- The deleted star-catalog helpers (aberration, proper motion,
-  incremental catalog search, body / ring conflict marking) need
-  to be carried forward verbatim into a helper module so the new
-  `NavModelStars` does not rewrite them; this is tracked under
-  "Pending" below.
+- The previous `NavModelStars`, `NavModelBody`, `NavModelRings`
+  classes — replaced by the new-contract implementations listed
+  under "Concrete NavModels (Part 1, Part 8)" above. The
+  `rings/` data-model subpackage and the simulated variants
+  survive unchanged.
 
 ### Pending
 
-**Concrete NavModels (Part 1, Part 8)**
+**Cartographic-model emission (Part 1)**
 
-- Real-scene `NavModelStars` on the new contract — must reuse the
-  existing aberration / proper-motion / catalog-reduction /
-  body-and-ring-conflict logic from the deleted module rather than
-  rewrite it.
-- Real-scene `NavModelBody` (per-body limb, terminator, disc, blob,
-  cartographic-model emission with the existing shape gates).
-- Real-scene `NavModelRings` (per-edge polylines + `RING_ANNULUS`
-  fallback, using the preserved `RingFeatureFilter`).
+- `CARTOGRAPHIC_MODEL` feature emission from the body NavModel via
+  ``nav.reproj.cartographic_model.create_cartographic_model``.
+  ``NavModelBody`` currently emits ``LIMB_ARC`` / ``TERMINATOR_ARC``
+  / ``BODY_DISC`` / ``BODY_BLOB`` only.
+
+**Per-camera mag-offset table consumer (Part 1)**
+
+- ``nav.nav_model.stars.predicted_snr.predicted_snr`` accepts a
+  ``mag_offset`` parameter, but ``NavModelStars.to_features`` always
+  passes ``0.0`` because no per-camera ``mag_offset_table`` config
+  block is read.  When the per-camera ``mag_offset:`` YAML blocks
+  ship, wire the lookup through.
 
 **Concrete NavTechniques (Part 3)**
 
@@ -1216,6 +1247,39 @@ this section is the operational checklist.
 - `tests/integration/test_autonomous_nav.py` (per-image regression).
 - `tests/integration/baselines/<image_id>.json` regression
   baselines.
+
+**NavModel coverage gap (Part 1, Part 8) — needs the image library**
+
+These code paths cannot be unit-tested without a working
+``oops.Backplane`` + SPICE pool + a real obs camera model. They
+account for the bulk of the remaining 10 % gap on
+``nav.nav_model.stars.catalog`` plus the > 50 % gap on
+``nav.nav_model.nav_model_body``, ``nav.nav_model.nav_model_rings``,
+and ``nav.nav_model.stars.conflicts``. The integration tests under
+``tests/integration/test_autonomous_nav.py`` will hit them when the
+image library lands.
+
+- ``NavModelBody._render`` / ``_build_backplane_model`` — the
+  oversampled ``Meshgrid.for_fov`` plus ``Backplane(obs,
+  meshgrid=...)`` plus ``filter_downsample`` chain.  Drives the
+  silhouette / Lambert / limb / terminator / km-per-pixel arrays
+  every body feature reads.
+- ``NavModelRings._render`` — the four-pass ``RingFeatureFilter``
+  applied to a real ``ext_bp.ring_radius`` / ``border_atop`` /
+  ``where_inside_shadow`` surface plus ``RingFeature.render``
+  (which calls ``ext_bp.radial_mode`` for each ring perturbation
+  mode).
+- ``nav.nav_model.stars.conflicts.mark_body_and_ring_conflicts``
+  / ``_check_one_star`` — per-star ``Meshgrid.for_fov`` plus
+  ``Backplane(obs, meshgrid).where_intercepted(body)`` and
+  ``ring_radius(ring)`` calls.
+- ``nav.nav_model.stars.catalog.aberrate_star`` — ``oops.Event``
+  constructor body (lines ~134–145).
+- ``nav.nav_model.stars.catalog`` lazy catalog getters
+  (``UCAC4StarCatalog()`` / ``SpiceStarCatalog('tycho2')`` /
+  ``YBSCStarCatalog()``) — first-call instantiation paths
+  requiring real catalog data on disk or via the per-test
+  ``UCAC4_PATH`` / ``YBSC_PATH`` env vars.
 
 **Confidence-formula calibration (Part 5)**
 
@@ -1493,56 +1557,16 @@ work can construct any of these and trust the inputs are checked.
   (not just those targeting ``main``); the matrix covers Python
   3.11 / 3.12 / 3.13 / 3.14.  ``codecov-action@v6``.
 
-### Stage 1 entry points (the next AI session starts here)
+### Stage 1 entry points (NavModels — complete)
 
+The three concrete NavModels (`NavModelStars`, `NavModelBody`,
+`NavModelRings`) are landed under
+``src/nav/nav_model/{stars,nav_model_body.py,nav_model_rings.py}``.
 The "Pending" subsection of "Implementation status (snapshot)" is
-the canonical work list.  Stage 1 should land **real-scene
-NavModels** so concrete NavTechniques have something to consume.
-Recommended order:
-
-1. **``NavModelStars``** — the validated star-catalog reduction
-   helpers (aberration, proper motion, multi-catalog precedence,
-   incremental search, body / ring conflict marking, the
-   ``SCLASS_TO_B_MINUS_V`` lookup, smear-aware PSF rendering)
-   were preserved in git history under the deleted
-   ``src/nav/nav_model/nav_model_stars.py`` (~1004 lines).
-   Recover with
-   ``git log --diff-filter=D -- src/nav/nav_model/nav_model_stars.py``;
-   structure as helper modules under
-   ``src/nav/nav_model/stars/`` (``predicted_snr.py``,
-   ``detection.py``, ``aberration.py``, ``conflicts.py``, etc.)
-   imported by the new ``NavModelStars.to_features``.  Emit
-   ``STAR`` features on the new ``NavFeature`` contract; populate
-   ``StarGeometry``, ``StarFlags``, predicted-SNR-driven
-   ``reliability``, and a ``NavFilterKind.NONE`` filter spec.
-
-2. **``NavModelBody``** — limb-mask extraction, body-silhouette
-   computation, and the body-shape lookup logic were preserved in
-   the deleted ``src/nav/nav_model/nav_model_body.py`` (~540 lines).
-   ``NavModelBodyBase`` (still present) provides the shared
-   annotation rendering.  Per resolution / shape / lighting,
-   emit a mix of ``LIMB_ARC``, ``TERMINATOR_ARC``, ``BODY_DISC``,
-   and ``BODY_BLOB`` features.
-
-3. **``NavModelRings``** — the four-pass ``RingFeatureFilter`` is
-   already preserved under
-   ``src/nav/nav_model/rings/ring_filter.py``.  The deleted
-   ``src/nav/nav_model/nav_model_rings.py`` (~525 lines) carried the
-   per-edge polyline rendering that the new ``to_features`` needs
-   to call.  Emit ``RING_EDGE`` features per edge, plus a
-   ``RING_ANNULUS`` fallback when many edges pack into few pixels.
-
-For each NavModel:
-
-- Implement ``instances_for_obs(cls, obs)`` to construct one
-  instance per body / per planet with visible rings / one stars
-  model so the registry-based discovery in
-  ``build_models_for_obs`` works.
-- Populate ``self._metadata`` during ``create_model`` (the curator
-  pass-through is already wired into ``NavResult.model_metadata``).
-- Build a fresh ``Annotations`` collection in ``to_annotations`` —
-  the orchestrator's ``_collect_annotations`` already merges them
-  into ``NavResult.annotations``.
+the canonical follow-up list.  The next stage of work is the
+concrete `NavTechniques` that consume the emitted features
+(`StarFieldFromCatalogNav`, `BodyDiscCorrelateNav`, `RingEdgeNav`,
+etc.).
 
 After NavModels land, stage 2 should bring up the concrete
 NavTechniques (``BodyDiscCorrelateNav``, ``BodyLimbNav``,

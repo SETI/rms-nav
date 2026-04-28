@@ -5,12 +5,50 @@ Rings
 The ring NavModel renders each catalog-driven ring edge into per-edge
 polylines plus an optional ``RING_ANNULUS`` composite template, emitting
 :class:`~nav.feature.feature.NavFeature` instances for technique
-consumption.  Today's only registered concrete subclass is
-:class:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated`,
-used by the simulated-image GUI; the real-scene model is unimplemented.
+consumption.
+
+Registered concrete subclasses:
+
+- :class:`~nav.nav_model.nav_model_rings.NavModelRings` — catalog-driven
+  ring navigation; one instance per planet whose ring system is
+  configured and visible in the extended FOV.
+- :class:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated`
+  — simulated-image GUI variant; emits a single ``RING_ANNULUS``
+  feature carrying the rendered template.
+
 The :mod:`nav.nav_model.rings` subpackage holds the catalog-driven
 domain model — validation, filtering, and rendering are separated so
 each concern can be tested in isolation.
+
+The catalog-driven ring model
+-----------------------------
+
+:class:`~nav.nav_model.nav_model_rings.NavModelRings` runs the
+four-pass :class:`~nav.nav_model.rings.ring_filter.RingFeatureFilter`
+selection (date, radius, resolvability, fade-conflict), renders each
+surviving feature via
+:meth:`~nav.nav_model.rings.ring_feature.RingFeature.render`, samples
+each rendered edge mask into a polyline, and emits one of:
+
+- ``RING_EDGE`` — per-vertex
+  :class:`~nav.feature.geometry.RingEdgePolyline` with
+  ``sigma_radial_per_vertex_px`` projected from the catalog ``rms``
+  through ``km_per_pixel_radial`` and a ~0.5-px
+  ``sigma_along_edge_per_vertex_px``.  The
+  :class:`~nav.feature.flags.RingEdgeFlags.is_straight_line` flag is
+  set when the polyline's max-deviation from a best-fit straight line
+  is below
+  :data:`~nav.nav_model.nav_model_rings.FLAT_CURVATURE_THRESHOLD_PX`.
+- ``RING_ANNULUS`` — multi-ring composite template carried on
+  ``NavFeature.template_img`` with a
+  :class:`~nav.feature.geometry.RingAnnulusGeometry` payload.  Emitted
+  when the surviving polyline compresses radially below
+  :data:`~nav.nav_model.nav_model_rings.RING_ANNULUS_MAX_RADIAL_PX`
+  (the edges are not separable at the image scale).
+
+Per-image diagnostics on ``self._metadata``: ``planet``, ``epoch``,
+``feature_count``, and a ``features`` list of ``{'name', 'type'}``
+dicts for each surviving ring feature.
 
 Ring domain model
 -----------------

@@ -149,6 +149,10 @@ filterwarnings = [
   # owns the underlying path; the resulting unraisable exception is
   # outside our control.  Allow it through as a non-fatal warning.
   "default::pytest.PytestUnraisableExceptionWarning",
+  # Astropy emits this on import when XDG_CONFIG_HOME is set but
+  # ~/.astropy/config already exists (CI image state).  Benign env-var
+  # precedence note; do not let it fail collection.
+  "default:XDG_CONFIG_HOME is set to:UserWarning",
 ]
 markers = [
   "integration: requires PDS3_HOLDINGS_DIR (real holdings on disk or via filecache)",

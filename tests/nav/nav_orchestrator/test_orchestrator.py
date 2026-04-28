@@ -33,13 +33,26 @@ class _FakeObs:
         image: np.ndarray | None = None,
         sensor_mask: np.ndarray | None = None,
         midtime: float = 0.0,
+        extfov_margin: tuple[int, int] = (0, 0),
     ) -> None:
         if image is None:
             rng = np.random.default_rng(seed=42)
             image = rng.standard_normal(size=(64, 64)) + 100.0
         self.data = image
+        # Build an extfov-padded image around ``data`` so the fake matches
+        # the real obs API: ``extdata`` is the canonical input the
+        # orchestrator reads.
+        margin_v, margin_u = extfov_margin
+        ext_shape = (image.shape[0] + 2 * margin_v, image.shape[1] + 2 * margin_u)
+        ext = np.zeros(ext_shape, dtype=image.dtype)
+        ext[margin_v : margin_v + image.shape[0], margin_u : margin_u + image.shape[1]] = image
+        self.extdata = ext
         if sensor_mask is None:
-            sensor_mask = np.ones(image.shape, bool)
+            sensor_mask = np.zeros(ext_shape, bool)
+            sensor_mask[
+                margin_v : margin_v + image.shape[0],
+                margin_u : margin_u + image.shape[1],
+            ] = True
         self._sensor_mask = sensor_mask
         self.midtime = midtime
 
@@ -131,6 +144,25 @@ def test_orchestrator_runs_pipeline_end_to_end(fake_obs: _FakeObs) -> None:
     assert result.offset_px == (1.5, 2.5)
     assert [t.technique_name for t in result.per_technique] == ['_FakeStarTechnique']
     assert result.confidence_rank == 'high'
+
+
+def test_orchestrator_handles_nonzero_extfov_margin() -> None:
+    """The pipeline accepts obs whose ``extdata`` is larger than ``data``.
+
+    The image-quality classifier consumes ``obs.extdata`` and
+    ``obs.extfov_data_sensor_mask()`` together, which must share the
+    extended-FOV shape regardless of the per-instrument extfov margin.
+    """
+    obs = _FakeObs(
+        image=np.full((64, 64), 100.0, dtype=np.float64),
+        extfov_margin=(8, 12),
+    )
+    assert obs.extdata.shape == (80, 88)
+    assert obs.extfov_data_sensor_mask().shape == (80, 88)
+    model = _FakeStarModel(obs, feature_count=3)
+    orch = NavOrchestrator([model], only_techniques=['_FakeStarTechnique'])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    assert result.status == 'ok'
 
 
 def test_orchestrator_blank_image_short_circuits(fake_obs: _FakeObs) -> None:

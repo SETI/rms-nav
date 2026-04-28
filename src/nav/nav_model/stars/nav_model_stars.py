@@ -1,0 +1,497 @@
+"""Real-scene star NavModel.
+
+Orchestrates the catalog-reduction, conflict-marking, predicted-SNR, and
+smear-aware PSF helpers so the NavModel ABC can emit one ``STAR``
+``NavFeature`` per detectable catalog star.  Heavy lifting lives in
+sibling modules; this file is the entry point the orchestrator's
+registry sees.
+"""
+
+from __future__ import annotations
+
+import math
+from typing import TYPE_CHECKING, Any
+
+import numpy as np
+from oops import Observation
+
+from nav.annotation import (
+    TEXTINFO_BOTTOM,
+    TEXTINFO_BOTTOM_LEFT,
+    TEXTINFO_BOTTOM_RIGHT,
+    TEXTINFO_LEFT,
+    TEXTINFO_RIGHT,
+    TEXTINFO_TOP,
+    TEXTINFO_TOP_LEFT,
+    TEXTINFO_TOP_RIGHT,
+    Annotation,
+    Annotations,
+    AnnotationTextInfo,
+    TextLocInfo,
+)
+from nav.config import Config
+from nav.feature.constants import MIN_ANISOTROPIC_SMEAR_PX
+from nav.feature.feature import NavFeature, NavReliabilityBreakdown
+from nav.feature.feature_type import NavFeatureType
+from nav.feature.flags import StarFlags
+from nav.feature.geometry import StarGeometry
+from nav.nav_model.nav_model import NavModel
+from nav.nav_model.stars.catalog import reduce_catalogs
+from nav.nav_model.stars.conflicts import mark_body_and_ring_conflicts
+from nav.nav_model.stars.predicted_snr import (
+    SCLASS_TO_B_MINUS_V,
+    predicted_snr,
+    psf_sigma_px,
+)
+from nav.nav_model.stars.smeared_psf import compute_smear_vector_px, smear_length_px
+from nav.support.flux import clean_sclass
+from nav.support.image import draw_rect
+from nav.support.time import now_dt
+
+if TYPE_CHECKING:  # pragma: no cover - typing-only import
+    from nav.nav_orchestrator.nav_context import NavContext
+    from nav.support.types import MutableStar
+
+from nav.support.filters import NavFilterKind, NavFilterSpec
+
+__all__ = [
+    'SCLASS_TO_B_MINUS_V',
+    'NavModelStars',
+]
+
+
+class NavModelStars(NavModel):
+    """Catalog-driven star NavModel.
+
+    Reduces the configured catalogs into a deduplicated star list,
+    flags body/ring conflicts, and emits one STAR ``NavFeature`` per
+    star whose predicted SNR clears the configured floor and whose
+    conflict flags allow it.
+
+    Parameters:
+        name: Model name (typically ``'stars'``).
+        obs: Observation snapshot.
+        config: Optional ``Config`` override.
+    """
+
+    _abstract = False
+
+    def __init__(
+        self,
+        name: str,
+        obs: Observation,
+        *,
+        config: Config | None = None,
+    ) -> None:
+        super().__init__(name, obs, config=config)
+        self._stars_config = self._config.stars
+        self._stars: list[MutableStar] = []
+        self._smear_vu: tuple[float, float] = (0.0, 0.0)
+
+    @classmethod
+    def instances_for_obs(cls, obs: Observation) -> list[NavModel]:
+        """Always returns one star NavModel per observation.
+
+        Parameters:
+            obs: Observation snapshot.
+
+        Returns:
+            ``[NavModelStars('stars', obs)]``.
+        """
+        return [cls('stars', obs)]
+
+    @property
+    def stars(self) -> list[MutableStar]:
+        """Reduced star list populated by ``create_model``."""
+        return self._stars
+
+    def create_model(self) -> None:
+        """Build the reduced star list and populate metadata.
+
+        Steps:
+
+        1. Compute the per-image smear vector via ``compute_smear_vector_px``.
+        2. Reduce all configured catalogs through ``reduce_catalogs`` —
+           pulls per-bin chunks, dedupes against precedence, marks
+           visual overlaps.
+        3. Mark body and ring conflicts via ``mark_body_and_ring_conflicts``.
+        4. Populate ``self._metadata`` with summary fields used by the
+           curator.
+        """
+        start_time = now_dt()
+        self._metadata.clear()
+        self._metadata['start_time'] = start_time.isoformat()
+        self._metadata['end_time'] = None
+        self._metadata['elapsed_time_sec'] = None
+        with self._logger.open('CREATE STARS MODEL'):
+            self._stars = reduce_catalogs(self.obs, self._config)
+            self._smear_vu = _compute_smear_for_obs(self.obs)
+            mark_body_and_ring_conflicts(self.obs, self._config, self._stars)
+            self._metadata['star_count'] = len(self._stars)
+            self._metadata['stars'] = [_star_summary(star) for star in self._stars]
+        end_time = now_dt()
+        self._metadata['end_time'] = end_time.isoformat()
+        self._metadata['elapsed_time_sec'] = (end_time - start_time).total_seconds()
+
+    def to_features(self, context: NavContext) -> list[NavFeature]:
+        """Emit one STAR feature per catalog star above the SNR floor.
+
+        Stars with body or ring conflicts are emitted with the matching
+        ``in_body_silhouette`` / ``in_saturation_or_cosmic_mask`` flags
+        set; the reliability gate decides whether to keep them.  Stars
+        whose predicted SNR is below ``stars.min_predicted_snr`` (when
+        configured; default ``0`` keeps them all) are skipped.
+
+        Parameters:
+            context: Per-image NavContext.
+
+        Returns:
+            List of STAR ``NavFeature`` instances.
+        """
+        if not self._stars:
+            return []
+        psf = self.obs.star_psf()
+        sigma_psf = psf_sigma_px(psf)
+        image_noise_sigma = float(context.image_noise_sigma)
+        if image_noise_sigma <= 0.0:
+            return []
+        min_snr = float(getattr(self._stars_config, 'min_predicted_snr', 0.0))
+        max_smear = float(getattr(self._stars_config, 'max_smear', math.inf))
+        sat_mask = context.saturation_mask_ext
+        cosmic_mask = context.cosmic_ray_mask_ext
+
+        features: list[NavFeature] = []
+        for star in self._stars:
+            snr = predicted_snr(
+                star,
+                psf=psf,
+                image_noise_sigma=image_noise_sigma,
+                mag_offset=0.0,
+            )
+            if snr < min_snr:
+                continue
+            smear_len = smear_length_px(star.move_v, star.move_u)
+            # Per the design's "max_smear" gate — stars with a smear longer
+            # than the per-instrument cap are unfittable even with the
+            # smear-aware kernel, so we drop them from the feature list
+            # rather than emit a structurally-broken feature.
+            if smear_len > max_smear:
+                continue
+            v_extfov, u_extfov = self._extfov_indices(star)
+            in_body = bool(star.conflicts.startswith('BODY'))
+            in_ring = bool(star.conflicts.startswith('RING'))
+            in_sat = bool(_safe_mask_lookup(sat_mask, v_extfov, u_extfov))
+            in_cosmic = bool(_safe_mask_lookup(cosmic_mask, v_extfov, u_extfov))
+            in_sat_or_cosmic = in_sat or in_cosmic
+            cov = _crlb_covariance(
+                snr=snr,
+                sigma_psf=sigma_psf,
+                move_v=star.move_v,
+                move_u=star.move_u,
+            )
+            box_half = (star.psf_size[0] // 2 + 2, star.psf_size[1] // 2 + 2)
+            bbox = (
+                round(v_extfov - box_half[0]),
+                round(u_extfov - box_half[1]),
+                round(v_extfov + box_half[0] + 1),
+                round(u_extfov + box_half[1] + 1),
+            )
+            features.append(
+                NavFeature(
+                    feature_id=_star_feature_id(star),
+                    feature_type=NavFeatureType.STAR,
+                    source_model=self.name,
+                    geometry=StarGeometry(
+                        predicted_vu=(float(v_extfov), float(u_extfov)),
+                        catalog_vu=(float(v_extfov), float(u_extfov)),
+                        bbox_extfov_vu=bbox,
+                    ),
+                    subject_range_km=float('inf'),
+                    position_cov_px=cov,
+                    intensity_sigma_rel=0.0,
+                    preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
+                    reliability=_reliability_from_snr(
+                        snr=snr,
+                        in_body=in_body,
+                        in_ring=in_ring,
+                        in_saturation=in_sat_or_cosmic,
+                    ),
+                    reliability_reasons=NavReliabilityBreakdown(
+                        predicted_snr=_snr_reason_score(snr, min_snr),
+                        in_body_silhouette=in_body or in_ring,
+                        in_saturation_or_cosmic=in_sat_or_cosmic,
+                        smear_length_ok=True,
+                    ),
+                    usable_types=frozenset({NavFeatureType.STAR}),
+                    flags=StarFlags(
+                        saturated=in_sat,
+                        smear_length_px=smear_len,
+                        in_body_silhouette=in_body or in_ring,
+                        in_saturation_or_cosmic_mask=in_sat_or_cosmic,
+                    ),
+                )
+            )
+        return features
+
+    def to_annotations(self, context: NavContext) -> Annotations:
+        """Emit star-box overlays plus name/magnitude labels."""
+        del context
+        if not self._stars:
+            return Annotations()
+        return self._build_annotations()
+
+    def _build_annotations(self) -> Annotations:
+        """Render star-box overlays + per-star labels for the summary PNG."""
+        obs = self.obs
+        text_info_list: list[AnnotationTextInfo] = []
+        star_avoid_mask = obs.make_extfov_false()
+        star_overlay = obs.make_extfov_false()
+        for star in self._stars:
+            if star.conflicts and star.conflicts != 'STAR':
+                # Skip body/ring-blocked stars; they are not labelled.
+                continue
+            v_idx, u_idx = self._extfov_indices(star)
+            v_int = int(v_idx)
+            u_int = int(u_idx)
+            v_half = (star.psf_size[0] // 2) + 2
+            u_half = (star.psf_size[1] // 2) + 2
+            u_min, v_min = obs.clip_extfov(u_int - u_half, v_int - v_half)
+            u_max, v_max = obs.clip_extfov(u_int + u_half, v_int + v_half)
+            star_avoid_mask[v_min : v_max + 1, u_min : u_max + 1] = True
+            draw_rect(
+                star_overlay,
+                True,
+                u_int,
+                v_int,
+                u_half,
+                v_half,
+                dot_spacing=1,
+            )
+            label_margin = u_half + 3
+            text_info_list.append(
+                _star_label(
+                    star=star,
+                    config=self._stars_config,
+                    v_int=v_int,
+                    u_int=u_int,
+                    label_margin=label_margin,
+                )
+            )
+        annotations = Annotations()
+        annotations.add_annotations(
+            Annotation(
+                obs,
+                star_overlay,
+                self._stars_config.label_star_color,
+                thicken_overlay=0,
+                avoid_mask=star_avoid_mask,
+                text_info=text_info_list,
+            )
+        )
+        return annotations
+
+    def _extfov_indices(self, star: MutableStar) -> tuple[float, float]:
+        """Return ``(v, u)`` of ``star`` in extfov coordinates."""
+        return (
+            float(star.v) + float(self.obs.extfov_margin_v),
+            float(star.u) + float(self.obs.extfov_margin_u),
+        )
+
+
+def _compute_smear_for_obs(obs: Observation) -> tuple[float, float]:
+    """Best-effort smear vector lookup that tolerates obs API quirks.
+
+    Pulls smear from the SPICE bracket via
+    ``compute_smear_vector_px`` when the obs supports it.  Snapshots
+    that don't have a bracket-capable boresight (simulated obs, partial
+    test fixtures) report a zero smear vector — the SNR formula still
+    applies and the star covariance falls back to the isotropic case.
+
+    Parameters:
+        obs: Observation snapshot.
+
+    Returns:
+        ``(my, mx)`` smear vector in pixels.  Returns ``(0.0, 0.0)`` for
+        obs stand-ins that don't expose a SPICE-bracketable boresight.
+    """
+    try:
+        return compute_smear_vector_px(obs)
+    except (AttributeError, NotImplementedError):
+        return (0.0, 0.0)
+
+
+def _safe_mask_lookup(
+    mask: Any,
+    v: float,
+    u: float,
+) -> bool:
+    """Return ``mask[round(v), round(u)]`` clamped to bounds, defaulting False."""
+    if mask is None:
+        return False
+    arr = np.asarray(mask)
+    if arr.ndim != 2 or arr.size == 0:
+        return False
+    rows, cols = arr.shape
+    vi = int(np.clip(round(v), 0, rows - 1))
+    ui = int(np.clip(round(u), 0, cols - 1))
+    return bool(arr[vi, ui])
+
+
+def _crlb_covariance(
+    *,
+    snr: float,
+    sigma_psf: float,
+    move_v: float,
+    move_u: float,
+) -> np.ndarray:
+    """Return the 2x2 anisotropic CRLB centroid covariance for a star.
+
+    Implements the formula from the design's STAR section:
+
+    ::
+
+        sigma_along  = sqrt(L^2 / 12 + sigma_PSF^2) / sqrt(SNR)
+        sigma_across = sigma_PSF / sqrt(SNR)
+
+    rotated so the major axis aligns with the smear vector ``(my, mx)``.
+    Below ``MIN_ANISOTROPIC_SMEAR_PX``, the covariance collapses to an
+    isotropic ``(sigma_PSF / sqrt(SNR))^2 * I``.
+
+    Parameters:
+        snr: Predicted integrated SNR.
+        sigma_psf: Per-pixel PSF Gaussian sigma in pixels.
+        move_v: Smear vector V component (pixels).
+        move_u: Smear vector U component (pixels).
+
+    Returns:
+        2x2 numpy float array with rows / columns in (v, u) order.
+    """
+    if snr <= 0.0:
+        return np.eye(2, dtype=np.float64) * 1e6
+    if sigma_psf <= 0.0:
+        raise ValueError(f'sigma_psf must be > 0; got {sigma_psf!r}')
+    smear = math.hypot(move_v, move_u)
+    s_across_sq = (sigma_psf * sigma_psf) / snr
+    if smear < MIN_ANISOTROPIC_SMEAR_PX:
+        return np.eye(2, dtype=np.float64) * s_across_sq
+    s_along_sq = (smear * smear / 12.0 + sigma_psf * sigma_psf) / snr
+    cos_t = move_v / smear
+    sin_t = move_u / smear
+    rot = np.array([[cos_t, -sin_t], [sin_t, cos_t]], dtype=np.float64)
+    diag = np.diag([s_along_sq, s_across_sq])
+    cov = rot @ diag @ rot.T
+    return 0.5 * (cov + cov.T)
+
+
+def _snr_reason_score(snr: float, min_snr: float) -> float:
+    """Map a predicted SNR onto the reliability-breakdown ``predicted_snr`` field.
+
+    The ``NavReliabilityBreakdown.predicted_snr`` is a [0, 1] contribution
+    score, not the raw SNR.  This helper folds the configured floor in:
+    when ``min_snr > 0``, the score is ``snr / min_snr`` capped at 1; when
+    no floor is configured, an SNR of 50 saturates the score (the same
+    centre the reliability sigmoid uses).
+
+    Parameters:
+        snr: Predicted SNR.
+        min_snr: Configured floor (``stars.min_predicted_snr``); 0
+            when unset.
+
+    Returns:
+        Contribution score in ``[0, 1]``.
+    """
+    if min_snr > 0.0:
+        return float(min(1.0, snr / min_snr))
+    return float(min(1.0, snr / 50.0))
+
+
+def _reliability_from_snr(
+    *,
+    snr: float,
+    in_body: bool,
+    in_ring: bool,
+    in_saturation: bool,
+) -> float:
+    """Return the [0, 1] reliability for a star.
+
+    Sigmoid-of-SNR core multiplied by hard zero terms for occlusion and
+    saturation.  Matches the design's STAR formula:
+    ``sigmoid(alpha_0 + alpha_1*(snr - threshold))`` with the
+    ``not_in_body_silhouette`` / ``not_in_saturation_or_cosmic`` factors
+    applied multiplicatively.  Excessive-smear stars are excluded from
+    the feature list before this helper runs.
+
+    Parameters:
+        snr: Predicted SNR.
+        in_body: True if the star is occluded by a body silhouette.
+        in_ring: True if the star is occluded by a ring annulus.
+        in_saturation: True if the predicted pixel is saturated or
+            tagged as a cosmic-ray hit.
+
+    Returns:
+        Reliability scalar in ``[0, 1]``.
+    """
+    if in_body or in_ring or in_saturation:
+        return 0.0
+    # Sigmoid centred near snr=10 with a span of ~5 — stars at snr=20 are
+    # saturated to ~1, stars at snr=5 are around 0.27.  Coefficients are
+    # the calibration starting point; phase-5 fitting will refine them.
+    z = 0.2 * (snr - 10.0)
+    return float(1.0 / (1.0 + math.exp(-z)))
+
+
+def _star_feature_id(star: MutableStar) -> str:
+    """Return the ``feature_id`` for ``star``: ``star:<catalog>:<id>``."""
+    cat = (star.catalog_name or 'unknown').upper()
+    uid = star.unique_number if star.unique_number is not None else star.pretty_name
+    return f'star:{cat}:{uid}'
+
+
+def _star_summary(star: MutableStar) -> dict[str, Any]:
+    """Return a compact JSON-friendly summary of a star (for metadata)."""
+    return {
+        'catalog_name': star.catalog_name,
+        'unique_number': star.unique_number,
+        'pretty_name': star.pretty_name,
+        'ra_deg': float(np.degrees(star.ra_pm)),
+        'dec_deg': float(np.degrees(star.dec_pm)),
+        'vmag': star.vmag,
+        'u': star.u,
+        'v': star.v,
+        'move_u': star.move_u,
+        'move_v': star.move_v,
+        'spectral_class': star.spectral_class,
+        'conflicts': star.conflicts,
+    }
+
+
+def _star_label(
+    *,
+    star: MutableStar,
+    config: Any,
+    v_int: int,
+    u_int: int,
+    label_margin: int,
+) -> AnnotationTextInfo:
+    """Return the label info for one star (8 candidate placements)."""
+    sclass = clean_sclass(star.spectral_class or '')
+    line1 = star.pretty_name[:10]
+    line2 = f'{star.vmag:.3f} {sclass}' if star.vmag is not None else sclass
+    text_loc: list[TextLocInfo] = [
+        TextLocInfo(TEXTINFO_BOTTOM, v_int + label_margin, u_int),
+        TextLocInfo(TEXTINFO_TOP, v_int - label_margin, u_int),
+        TextLocInfo(TEXTINFO_LEFT, v_int, u_int - label_margin),
+        TextLocInfo(TEXTINFO_RIGHT, v_int, u_int + label_margin),
+        TextLocInfo(TEXTINFO_TOP_LEFT, v_int - label_margin, u_int - label_margin),
+        TextLocInfo(TEXTINFO_TOP_RIGHT, v_int - label_margin, u_int + label_margin),
+        TextLocInfo(TEXTINFO_BOTTOM_LEFT, v_int + label_margin, u_int - label_margin),
+        TextLocInfo(TEXTINFO_BOTTOM_RIGHT, v_int + label_margin, u_int + label_margin),
+    ]
+    return AnnotationTextInfo(
+        f'{line1}\n{line2}',
+        ref_vu=(v_int, u_int),
+        text_loc=text_loc,
+        font=config.label_font,
+        font_size=config.label_font_size,
+        color=config.label_font_color,
+    )
