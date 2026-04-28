@@ -10,14 +10,10 @@ lives in the image, and is therefore not biased by a wrong SPICE pointing
 prediction.
 """
 
-import logging
-
 import numpy as np
 
 from nav.support.misc import mad_std
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
-
-logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 __all__ = [
     'estimate_image_noise_sigma',

@@ -31,6 +31,11 @@ nav.nav_orchestrator
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: nav.nav_orchestrator.image_derivatives
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: nav.nav_orchestrator.provenance
    :members:
    :undoc-members:

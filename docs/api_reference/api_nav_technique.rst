@@ -26,6 +26,26 @@ nav.nav_technique
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: nav.nav_technique.dt_fitting
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: nav.nav_technique.nav_technique_body_limb
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: nav.nav_technique.nav_technique_body_terminator
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: nav.nav_technique.nav_technique_ring_edge
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: nav.nav_technique.nav_technique_manual
    :members:
    :undoc-members:

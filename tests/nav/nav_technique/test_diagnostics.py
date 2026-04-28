@@ -9,7 +9,6 @@ from nav.nav_technique.diagnostics import (
     BodyDiscDiagnostics,
     BodyLimbDiagnostics,
     BodyTerminatorDiagnostics,
-    CartographicDiagnostics,
     RingAnnulusDiagnostics,
     RingEdgeDiagnostics,
     StarFieldDiagnostics,
@@ -30,7 +29,6 @@ from nav.nav_technique.diagnostics import (
         StarFieldDiagnostics,
         StarUniqueMatchDiagnostics,
         StarRefineDiagnostics,
-        CartographicDiagnostics,
     ],
 )
 def test_diagnostic_dataclasses_construct_with_defaults(cls: type) -> None:
@@ -51,7 +49,6 @@ def test_diagnostic_dataclasses_construct_with_defaults(cls: type) -> None:
         StarFieldDiagnostics,
         StarUniqueMatchDiagnostics,
         StarRefineDiagnostics,
-        CartographicDiagnostics,
     ],
 )
 def test_curator_fields_lists_every_attribute(cls: type) -> None:

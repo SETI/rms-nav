@@ -10,14 +10,11 @@ optional per-instrument overrides.  Default values defined here are used
 when no override is supplied by the loader.
 """
 
-import logging
 from dataclasses import dataclass, field
 from typing import Final
 
 from nav.feature.feature import NavFeature
 from nav.feature.feature_type import NavFeatureType
-
-logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 __all__ = [
     'DEFAULT_RELIABILITY_THRESHOLDS',

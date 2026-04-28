@@ -1012,6 +1012,44 @@ this section is the operational checklist.
 - `NavTechniqueManual` — interactive technique opted out of the
   auto-discovery registry.
 
+**DT-based techniques (Part 3)**
+
+- `nav.nav_technique.dt_fitting` — shared distance-transform fitting
+  machinery: `coarse_ncc_search` (binary-mask cross-correlation),
+  `polarity_filter` (per-vertex polarity test), `tukey_biweight_weights`
+  (Holland-Welsch redescender), `lm_subpixel_refine` (translation, and
+  optional rotation, Levenberg-Marquardt with IRLS Tukey weights), and
+  `information_matrix_to_covariance` (M-estimator information matrix →
+  covariance via ``scipy.linalg.pinvh`` with the same ``rtol`` the
+  ensemble uses).  All five helpers are pure functions over numpy
+  arrays, called by the three DT techniques.
+- `nav.nav_technique.BodyLimbNav` — joint-translation fit on
+  ``LIMB_ARC`` polylines.  Concatenates every body's limb vertices,
+  weights by ``1 / sigma_normal_per_vertex_px**2``, runs the shared
+  coarse-search + LM pipeline with polarity filtering enabled, and
+  emits a ``BodyLimbDiagnostics`` populated with the per-image
+  visible-arc fraction, total visible arc length, DT RMS, LM iteration
+  count, and Tukey inlier count.  Feasibility threshold is at least
+  one limb arc with ``visible_arc_px >= LIMB_MIN_ARC_PX = 30``.
+- `nav.nav_technique.BodyTerminatorNav` — same shape as
+  ``BodyLimbNav`` with the design's per-body uniform weighting (each
+  body's vertices share the body's mean ``sigma_normal_per_vertex_px``)
+  and a confidence spec carrying albedo-penalty and phase-angle-factor
+  terms.
+- `nav.nav_technique.RingEdgeNav` — ``RING_EDGE`` polyline fit.
+  Polarity is intentionally disabled (per the deferred polarity-aware
+  ring matching item) and the technique reports ``is_rank_1=True``
+  whenever every input edge is straight-line, propagating an honest
+  rank-deficient covariance into the ensemble.
+- Shared image-side derivatives on ``NavContext``:
+  ``image_gradient_ext`` (Sobel-of-Gaussian magnitude),
+  ``image_gradient_vu_ext`` (per-pixel ``(g_v, g_u)`` vector consumed
+  by the polarity filter), and ``image_edge_dt_ext`` (signed distance
+  transform of the Canny-style thinned gradient image).  Computed once
+  per navigation by ``nav.nav_orchestrator.image_derivatives.build_image_edge_dt``
+  + ``compute_image_gradient_vu``; the orchestrator's ``_make_context``
+  populates both fields.
+
 **NavModel infrastructure (Part 1, Part 8)**
 
 - `nav.nav_model.NavModel` ABC + `__init_subclass__` registry +
@@ -1136,6 +1174,12 @@ this section is the operational checklist.
   under "Concrete NavModels (Part 1, Part 8)" above. The
   `rings/` data-model subpackage and the simulated variants
   survive unchanged.
+- ``CartographicDiagnostics`` — deleted from
+  ``nav.nav_technique.diagnostics`` until ``CartographicNav``
+  itself ships (the dataclass had no producer in the cutover-tier
+  source tree).  The class returns alongside the technique when
+  ``CARTOGRAPHIC_MODEL`` emission and ``CartographicNav`` land
+  together (deferred per Part 13b §2); recover from git history.
 
 ### Pending
 
@@ -1156,20 +1200,28 @@ this section is the operational checklist.
 
 **Concrete NavTechniques (Part 3)**
 
-- `BodyDiscCorrelateNav`, `BodyLimbNav`, `BodyTerminatorNav`,
-  `BodyBlobNav`, `RingEdgeNav`, `RingAnnulusNav`,
+- `BodyDiscCorrelateNav`, `BodyBlobNav`, `RingAnnulusNav`,
   `StarFieldFromCatalogNav`, `StarUniqueMatchNav`, `StarRefineNav`,
-  `CartographicNav`, `TitanNav`.
+  `CartographicNav`, `TitanNav`.  ``BodyLimbNav``,
+  ``BodyTerminatorNav``, and ``RingEdgeNav`` are implemented (see
+  "DT-based techniques" under Implemented).
 
 **NavContext shared derivatives**
 
-- `image_gradient_ext`, `image_edge_dt_ext`, source-image
-  `BANDPASS_DOG` pre-filter — fields are present on `NavContext`
-  but the orchestrator does not yet populate them.
+- Source-image ``BANDPASS_DOG`` pre-filter — field is present on
+  `NavContext` but the orchestrator does not yet apply it.
 - Per-instrument saturation DN read from `config_4N0_inst_*.yaml`
   (the orchestrator currently returns the named module-level
   ``DEFAULT_FULL_WELL_DN_12_BIT = 4095.0`` constant from
   ``_instrument_full_well_dn``; replace with a config loader).
+- Per-instrument ``ImageQualityThresholds`` from
+  ``config_4N0_inst_*.yaml``.  The classifier today carries raw-DN
+  defaults (``blank_max_dn = 5.0``, ``saturation_threshold_dn = 4095``,
+  ``noisy_threshold = 10.0``) which mis-classify CALIB I/F-unit
+  Cassini products as ``blank`` (max value < 1.0) and short-circuit
+  before any model or technique runs.  Phase-1 manual artifact per
+  Part 13 line 4424; Phase-2 consumer per the orchestrator's
+  ``_make_context``.
 
 **Provenance population**
 
@@ -1218,9 +1270,22 @@ this section is the operational checklist.
 **INFO logging cadence (Part 12.7)**
 
 - `STATUS_REASON_INFO_TEMPLATE` exists; the orchestrator does not
-  yet emit those INFO lines for each status_reason.
+  yet emit those INFO lines for each status_reason.  In particular,
+  hard-failure short-circuits (``no_signal_in_image``,
+  ``image_overexposed``, ``mostly_missing_data``, ``image_corrupt``)
+  return immediately from ``NavOrchestrator.navigate`` without
+  emitting any per-image INFO line, so the operator log shows the
+  ``HEADER`` opening of the per-image section followed by metadata
+  write with no model/technique lines in between.  Wire the template
+  through every ``NavResult.failed`` site so the failure reason
+  appears in the log alongside the section header.
 - Per-technique 1-line summary + per-feature reliability score
-  breakdown at DEBUG level.
+  breakdown at DEBUG level (the three DT techniques already emit
+  summary INFO lines under their ``with self.logger.open(...)``
+  sections; the missing piece is the ``no_features_extracted`` /
+  ``all_features_gated`` / ``no_feasible_techniques`` /
+  ``final_confidence_below_threshold`` orchestrator-level INFO
+  cadence).
 
 **Image-quality classifier completeness**
 
@@ -1557,26 +1622,343 @@ work can construct any of these and trust the inputs are checked.
   (not just those targeting ``main``); the matrix covers Python
   3.11 / 3.12 / 3.13 / 3.14.  ``codecov-action@v6``.
 
-### Stage 1 entry points (NavModels — complete)
+### Stage 1 forward reference
 
-The three concrete NavModels (`NavModelStars`, `NavModelBody`,
-`NavModelRings`) are landed under
-``src/nav/nav_model/{stars,nav_model_body.py,nav_model_rings.py}``.
-The "Pending" subsection of "Implementation status (snapshot)" is
-the canonical follow-up list.  The next stage of work is the
-concrete `NavTechniques` that consume the emitted features
-(`StarFieldFromCatalogNav`, `BodyDiscCorrelateNav`, `RingEdgeNav`,
-etc.).
-
-After NavModels land, stage 2 should bring up the concrete
-NavTechniques (``BodyDiscCorrelateNav``, ``BodyLimbNav``,
-``BodyTerminatorNav``, ``BodyBlobNav``, ``RingEdgeNav``,
-``RingAnnulusNav``, ``StarFieldFromCatalogNav``,
-``StarUniqueMatchNav``, ``StarRefineNav``, ``CartographicNav``).
-The technique-class registration mechanism is already in place;
-each new subclass auto-registers via ``__init_subclass__``.
+Stage 1 (real-scene NavModels) is described in its own top-level
+section, "Stage 1 status (NavModels — complete)", below.
 
 End of "Foundation cleanup status (stage 0)" section.
+
+---
+
+## Stage 1 status (NavModels — complete)
+
+Stage 1 ("real-scene NavModels" PR
+[#112](https://github.com/SETI/rms-nav/pull/112),
+branch ``core_rewrite_models`` → ``rf_core_rewrite``) is **complete**.
+The three concrete NavModels listed in Part 1 / Part 8 — `NavModelStars`,
+`NavModelBody`, `NavModelRings` — now exist on the new `NavModel` ABC
+contract, together with the per-body shape table and the helper
+modules each model composes.  Inline review findings on the PR have
+been triaged and either landed or explicitly declined with a recorded
+reason (see ``a4e70ab``).
+
+### Final stage-1 check matrix
+
+```
+$ ruff check src tests           — clean
+$ ruff format --check src tests  — 239 files already formatted
+$ mypy --strict src tests        — 240 source files, no issues
+$ pytest -n auto --dist=loadfile — 930 passed (6 tolerated warnings)
+$ sphinx-build -W -b html docs docs/_build  — clean
+```
+
+### Stage-1 commit lineage (most recent first)
+
+- ``a4e70ab`` fix: address inline review findings on stage-1 NavModels
+- ``6e04b83`` test: silence astropy XDG_CONFIG_HOME warning during collection
+- ``709d109`` feat: stage 1 real-scene NavModels
+
+### Real-scene NavModels shipped in stage 1
+
+Each NavModel below conforms to the ABC: ``create_model`` builds the
+internal state, ``to_features(context)`` emits one or more
+``NavFeature`` instances, ``to_annotations(context)`` emits an
+``Annotations`` collection, and ``instances_for_obs(obs)`` is the
+factory the orchestrator's registry walks at construction.
+
+- ``nav.nav_model.stars`` package — ``NavModelStars`` orchestrator
+  plus five helper modules:
+  - ``catalog`` — multi-catalog reduction (UCAC4 → Tycho-2 → YBSC
+    by default), incremental magnitude-bin walk, stellar aberration
+    via ``oops.Event``, proper-motion update at ``obs.midtime``,
+    FOV projection with smear-aware edge culling, dedup +
+    visual-overlap tagging.  Lazy catalog construction is now
+    ``functools.lru_cache``-backed (thread-safe first call).
+  - ``conflicts`` — per-star body / ring occlusion via tiny
+    ``Meshgrid.for_fov`` + ``Backplane.where_intercepted`` /
+    ``ring_radius`` queries; produces ``BODY: <name>`` /
+    ``RING: <planet>`` strings on ``MutableStar.conflicts``.
+  - ``predicted_snr`` — per-star integrated SNR using
+    ``SCLASS_TO_B_MINUS_V`` and the per-instrument flux-to-DN
+    constants; re-exported from the package root.
+  - ``smeared_psf`` — smear-aware PSF rendering (``smeared_psf``,
+    ``smear_length_px``) and per-image smear-vector computation
+    (``compute_smear_vector_px``) from the SPICE bracket
+    ``obs.uv_from_ra_and_dec(boresight, tfrac=0/1)``.
+  - ``detection`` — DAOPHOT-style matched-filter detector
+    (``detect_sources`` + ``apply_shape_cuts`` +
+    ``centroid_gaussian_fit`` / ``centroid_saturated``) with the
+    ``_psf_sigma`` helper that raises rather than silently
+    inventing a sigma.
+
+  ``NavModelStars`` itself emits one ``STAR`` ``NavFeature`` per
+  usable catalog star with anisotropic CRLB centroid covariance
+  rotated to the per-image smear vector, isotropic short-smear
+  fallback below ``MIN_ANISOTROPIC_SMEAR_PX``, and ``StarFlags``
+  carrying ``saturated`` (saturation mask only) and
+  ``in_saturation_or_cosmic_mask`` (saturation OR cosmic-ray) as
+  separately-sourced fields.
+
+- ``nav.nav_model.NavModelBody`` — catalog-driven per-body
+  silhouette navigation; one instance per body inside the extfov
+  (filtered by ``inventory_body_in_extfov``).  Builds an
+  oversampled Lambert-shaded silhouette via
+  ``Meshgrid.for_fov(oversample=...)`` + ``Backplane(obs,
+  meshgrid=...)`` + ``filter_downsample``, extracts limb /
+  terminator polylines, and emits the four feature types per the
+  design's emission gates: ``LIMB_ARC`` / ``BODY_BLOB`` /
+  ``BODY_DISC`` / ``TERMINATOR_ARC``.  Per-vertex polyline sigmas
+  follow the quadrature-sum formula with the
+  ``MAX_INCIDENCE_FACTOR_CAP`` clamp.  Per-body shape parameters
+  are read from ``nav.nav_model.body_shape.BODY_SHAPE_TABLE``;
+  the pending ``config_220_body_shape.yaml`` loader is the
+  successor.
+
+- ``nav.nav_model.NavModelRings`` — catalog-driven ring navigation;
+  one instance per planet whose ring catalog touches the FOV.
+  Reuses the four-pass ``RingFeatureFilter`` that already shipped
+  in stage 0, samples each surviving rendered edge mask into a
+  polyline, and emits ``RING_EDGE`` (per-vertex
+  ``RingEdgePolyline`` with σ_radial / σ_along_edge) or
+  ``RING_ANNULUS`` (multi-edge composite template) depending on
+  the radial extent + straightness gates
+  (``RING_ANNULUS_MAX_RADIAL_PX`` and ``FLAT_CURVATURE_THRESHOLD_PX``).
+
+- ``nav.nav_model.body_shape`` — ``BodyShape`` frozen dataclass
+  plus ``BODY_SHAPE_TABLE`` covering Saturn moons (``MIMAS``,
+  ``ENCELADUS``, ``TETHYS``, ``DIONE``, ``RHEA``, ``IAPETUS``,
+  ``TITAN``), irregulars (``HYPERION``, ``PHOEBE``), gas / ice
+  giants (``SATURN``, ``JUPITER``, ``URANUS``, ``NEPTUNE``), and
+  the major Galilean satellites; ``shape_for_body`` is the
+  case-insensitive lookup with ``DEFAULT_BODY_SHAPE`` fallback.
+
+### Test shims established in stage 1 (binding)
+
+The shims under ``tests/shims/`` are the canonical way to drive
+nav code paths that depend on ``oops.Backplane``,
+``oops.Observation``, or production star catalogs without paying
+the SPICE-kernel / multi-GB-binary price.  Stage 2 should reuse
+them; if a NavTechnique surfaces a missing surface, extend the
+shim rather than spinning up a parallel fake.
+
+- ``tests/shims/backplane.py`` — ``FakeBackplane`` returning real
+  ``polymath.Scalar`` instances over ``BodyBackplaneData`` /
+  ``RingBackplaneData`` records; convenience factory
+  ``plant_circular_body`` validates ``radius_px > 0`` and paints a
+  disc whose pixel-count test asserts exactly.
+- ``tests/shims/catalog.py`` — ``FakeStar`` /
+  ``FakeStarCatalog`` mutable star records satisfying the
+  ``MutableStar`` protocol surface; ``install_fake_catalogs``
+  uses ``monkeypatch.setattr`` so the swap is **per-test scoped**
+  (no inter-test or inter-worker leakage under
+  ``pytest -n auto --dist=loadfile``).
+- ``tests/shims/obs.py`` — ``FakeObs`` numpy-array stand-in for
+  ``ObsSnapshotInst``: required ``data`` plus optional extfov
+  margin (validated non-negative), inventory dict, RA/DEC limits,
+  PSF stub, optional per-call ``radec_to_uv`` callable for
+  custom projection, and bracket-driven default
+  ``uv_from_ra_and_dec`` for smear-vector tests.
+
+### Test coverage achieved in stage 1
+
+```
+nav_model_stars                100%
+stars/nav_model_stars          100%
+stars/predicted_snr            100%
+stars/smeared_psf              100%
+body_shape                     100%
+stars/detection                 97%
+stars/catalog                   94%
+stars/conflicts                 49%   (rest needs real Backplane)
+nav_model_rings                 55%   (rest needs real Backplane)
+nav_model_body                  46%   (rest needs real Backplane)
+```
+
+The < 50 % coverage on the body / rings / conflicts modules is
+the ``_render`` / ``_build_backplane_model`` / ``_check_one_star``
+chain that constructs an ``oops.Backplane`` over a real obs
+camera model.  These paths run end-to-end against synthetic
+fixtures in the stage-1 integration tests but the
+``Meshgrid.for_fov`` + ``Backplane(obs, meshgrid=...)`` line
+itself can only be exercised by integration tests against the
+image library (Part 9 / Part 10), which is the next gating piece
+of work.  The list of specific functions that need image-library
+coverage is enumerated under "NavModel coverage gap" in the
+"Implementation status (snapshot) → Pending" section above.
+
+### Conventions established in stage 1 (binding)
+
+- **Test shims under ``tests/shims/``** are the canonical way to
+  drive nav code paths that depend on ``oops.Backplane``,
+  ``oops.Observation``, or production star catalogs without
+  paying the SPICE-kernel / multi-GB-binary price.  Stage 2
+  reuses them.
+- **Pytest ``monkeypatch`` is per-test scoped.**
+  ``install_fake_catalogs`` swaps the lazy getter functions
+  using ``monkeypatch.setattr``; the swap is bound to the
+  calling test's lifetime and ``pytest-xdist`` workers run in
+  separate processes, so module-level state in one worker
+  cannot leak into another.
+- **Real ``polymath.Scalar`` over fakes.**  The backplane shim
+  wraps real ``polymath.Scalar`` masked arrays rather than
+  reimplementing a parallel ``FakeScalar`` surface.  Tests
+  assert against the actual ``mvals`` / ``vals`` API.
+- **Inline imports remain forbidden.**  Every test imports at
+  the module top — including small one-off ``dataclasses`` /
+  ``pytest`` references; the per-function-import shortcut is
+  not acceptable.
+- **Star-catalog factory caching.**  The three star catalog
+  getters (``get_ucac4_catalog`` / ``get_tycho2_catalog`` /
+  ``get_ybsc_catalog``) use ``functools.lru_cache(maxsize=1)``
+  rather than module-level mutable globals; first-call
+  construction is thread-safe and the cache is bypassed when
+  ``install_fake_catalogs`` patches the getters.
+- **Saturation vs cosmic-ray separation.**  ``StarFlags.saturated``
+  reflects the saturation mask only.  ``StarFlags.in_saturation_or_cosmic_mask``
+  and the reliability gate input both carry the OR.  Mixing
+  the two on the ``saturated`` field was rejected during the
+  stage-1 review; the split is binding for any new flag in any
+  feature type.
+
+### CI / collection robustness
+
+- ``pyproject.toml [tool.pytest.ini_options].filterwarnings``
+  carries an explicit ``"default:XDG_CONFIG_HOME is set to:UserWarning"``
+  entry to keep astropy's import-time XDG / ``~/.astropy/config``
+  precedence warning from being elevated to a collection error
+  on the GitHub-hosted runner image.  The matching xdist
+  collection-mismatch was a downstream symptom that disappears
+  when the warning is allowed through.
+
+End of "Stage 1 status" section.
+
+---
+
+## Stage 2 status (NavTechniques — partial; DT techniques landed)
+
+Stage 2 brings up the concrete ``NavTechnique`` subclasses that consume
+the features the stage-1 NavModels emit.  The first wave (the three
+DT-based techniques plus their shared infrastructure) has shipped; the
+remaining techniques (full-disc NCC, blob centroid, ring-annulus NCC,
+all star techniques) are still pending.
+
+### DT-based techniques shipped
+
+- ``BodyLimbNav`` — joint translation fit on every ``LIMB_ARC`` feature
+  via the shared coarse-NCC + Levenberg-Marquardt pipeline with
+  polarity filtering and Tukey biweight reweighting.
+- ``BodyTerminatorNav`` — same shape with terminator-specific
+  per-body uniform weighting and an albedo / phase-angle confidence
+  spec.
+- ``RingEdgeNav`` — DT fit on every ``RING_EDGE`` feature; reports
+  honest rank-1 covariance when every input edge is straight-line.
+  Polarity prediction is intentionally disabled (deferred per
+  Part 13b §1).
+
+### Shared infrastructure shipped alongside the techniques
+
+- ``nav.nav_technique.dt_fitting`` — pure-numerical helpers shared by
+  every DT technique:
+  - ``coarse_ncc_search`` — binary-mask cross-correlation with
+    Manhattan-distance tie-breaking.
+  - ``polarity_filter`` — strict ``dot(model_normal, image_gradient) > 0``.
+  - ``tukey_biweight_weights`` — Holland-Welsch redescender at
+    ``c = 4.685``.
+  - ``lm_subpixel_refine`` — translation (or translation + rotation)
+    LM with IRLS Tukey reweighting; ``lambda = 1e-3`` start, max 30
+    iterations, step-norm tolerance ``1e-3 px``.
+  - ``information_matrix_to_covariance`` — Hessian to covariance via
+    ``scipy.linalg.pinvh(rtol=1e-9)`` (matches the ensemble combine).
+- ``nav.nav_orchestrator.image_derivatives`` — shared
+  Sobel-of-Gaussian gradient + Canny-style directional NMS + truncated
+  distance transform.  ``build_image_edge_dt`` returns
+  ``(image_gradient_ext, image_edge_dt_ext)`` and
+  ``compute_image_gradient_vu`` returns the per-pixel ``(g_v, g_u)``
+  vector consumed by the polarity filter.  The orchestrator's
+  ``_make_context`` populates all three fields on every NavContext
+  before any technique runs.
+- ``tests/nav/nav_technique/conftest.py`` — shared factory fixtures
+  (``disc_image``, ``horizontal_step_image``, ``circle_polyline``,
+  ``arc_polyline``, ``flat_polyline``, ``make_nav_context``,
+  ``make_limb_feature``, ``make_terminator_feature``,
+  ``make_ring_feature``, plus the ``FakeObs`` stand-in and the
+  ``DiscImageFactory`` / ``ArcPolylineFactory`` / etc. type aliases) so
+  the three technique end-to-end test files share their scaffolding
+  rather than duplicating it.
+
+### Logging convention shipped with the DT techniques
+
+The codebase does **not** use the stdlib ``logging`` module anywhere in
+the cutover-tier source tree.  Pdslogger via
+``nav.config.logger.IMAGE_LOGGER`` is the only logger; ``NavBase`` exposes
+it as ``self.logger``.  Every ``NavTechnique.navigate`` body opens a
+section via ``with self.logger.open(f'TECHNIQUE: {self.name}'):`` so per-
+image logs delimit each technique's contribution.  Tests capture log
+output via ``capsys``, never ``caplog`` (pdslogger writes through its
+own stream handler).
+
+### Final stage-2-DT check matrix
+
+```
+$ ruff check src tests           — clean
+$ ruff format --check src tests  — 250 files already formatted
+$ mypy --strict src tests        — 251 source files, no issues
+$ pytest -n auto --dist=loadfile — 1009 passed (6 tolerated warnings)
+$ sphinx-build -W -b html docs docs/_build  — clean
+$ pymarkdown scan docs/ .cursor/ README.md CONTRIBUTING.md  — clean
+```
+
+### Coverage of the new DT-stage modules
+
+```
+nav_orchestrator/image_derivatives                 100%
+nav_technique/dt_fitting                            93%
+nav_technique/nav_technique_body_limb               90%
+nav_technique/nav_technique_body_terminator         90%
+nav_technique/nav_technique_ring_edge               89%
+```
+
+Per-module coverage on the new DT-tier code is 89-100 %.  Whole-tree
+coverage stays at ~39 % because the GUI / mosaic-viewer / sim / pds4
+packages are intentionally out of scope.
+
+### What stage 2 still owes
+
+Concrete NavTechniques not yet landed:
+
+- ``BodyDiscCorrelateNav`` (BODY_DISC NCC)
+- ``BodyBlobNav`` (BODY_BLOB centroid)
+- ``RingAnnulusNav`` (RING_ANNULUS NCC)
+- ``StarFieldFromCatalogNav`` (multi-star RANSAC)
+- ``StarUniqueMatchNav`` (single-star unique match)
+- ``StarRefineNav`` (single-star refine pass)
+- ``CartographicNav`` (CARTOGRAPHIC_MODEL NCC, deferred per Part 13b)
+- ``TitanNav`` (atmospheric-body, deferred per Part 13b)
+
+Per Part 13b §2 the ``CartographicDiagnostics`` dataclass is **deleted**
+from the cutover-tier source tree until ``CartographicNav`` itself
+lands; the diagnostics class returns alongside the technique (kept in
+git history until then).
+
+Production wiring still pending (see "Pending" subsection):
+
+- Static-data YAML files (``config_220_body_shape.yaml`` plus four
+  orchestration tier files plus per-camera ``noise:`` / ``mag_offset:``
+  blocks).
+- Per-instrument ``ImageQualityThresholds`` from ``config_4N0_inst_*.yaml``
+  (today the orchestrator uses raw-DN-unit defaults, which mis-classify
+  CALIB I/F-unit images as ``blank``).
+- ``STATUS_REASON_INFO_TEMPLATE`` wiring so every hard-failure
+  short-circuit emits an operator-readable INFO line.
+- Per-camera saturation DN, mag-offset table consumer, source-image
+  ``BANDPASS_DOG`` pre-filter.
+- Provenance population (SPICE kernels, static-data hashes, git SHA).
+- Annotations + summary-PNG renderer.
+- Real-image integration suite (Parts 9 / 10).
+- Confidence-formula calibration against the integration library.
+
+End of "Stage 2 status" section.
 
 ---
 
@@ -4505,6 +4887,41 @@ codebase regresses to its previous shape.
   in vNext" comments.  When something is replaced, the old form is
   deleted; the new form is the only form.
 
+### Logging — pdslogger only, never the stdlib ``logging`` module
+
+The codebase has its own logging infrastructure built on the
+``pdslogger`` package.  Two ``pdslogger.PdsLogger`` instances live in
+``nav.config.logger``:
+
+- ``MAIN_LOGGER`` (``nav_offset``) — top-level program events.
+- ``IMAGE_LOGGER`` (``nav_image``) — per-image processing events;
+  per-image stdout and file handlers are attached as **local
+  handlers** inside each ``IMAGE_LOGGER.open(...)`` context (see
+  ``nav.config.logger.image_log_handlers`` and
+  ``navigate_image_files``).
+
+The ``NavBase`` superclass exposes ``self.logger`` returning
+``IMAGE_LOGGER`` so every NavModel / NavFeatureExtractor / NavTechnique
+subclass logs through pdslogger automatically.  Binding rules:
+
+- **No ``import logging``** anywhere in the new core code (``nav.feature``,
+  ``nav.nav_model``, ``nav.nav_orchestrator``, ``nav.nav_technique``,
+  ``nav.support``).  The historical ``logging.getLogger(__name__).addHandler(logging.NullHandler())``
+  module-bootstrap line is removed everywhere.
+- **No ``logging.getLogger`` calls** — pdslogger is the only logger
+  factory.
+- **Every ``NavTechnique.navigate`` body opens a logger section** via
+  ``with self.logger.open(f'TECHNIQUE: {self.name}'):`` so the
+  per-image log clearly delimits each technique's contribution.
+  ``NavModel`` and ``NavFeatureExtractor`` may follow the same pattern
+  when they have multi-step bodies worth structuring; otherwise they
+  log directly to ``self.logger``.
+- **Logging output is captured with ``capsys``, not ``caplog``.**
+  Pdslogger writes through its own stream handler that does not feed
+  the standard ``logging`` propagation.  Tests that need to verify a
+  WARNING / ERROR / EXCEPTION emission read from
+  ``capsys.readouterr().out``.
+
 ### Git as the source of preserved-but-deleted code
 
 Several modules were deleted during the cutover whose internal
@@ -4627,11 +5044,30 @@ scratch.
   ``mypy --strict`` is clean.  Remove the ignore once oops ships
   type stubs.
 
+### DT-based fitting machinery lives in ``nav.nav_technique.dt_fitting``
+
+The shared DT pipeline that the body-limb, body-terminator, and
+ring-edge techniques compose lives in
+``src/nav/nav_technique/dt_fitting.py``.  Future DT-using techniques
+(e.g. a polarity-aware ring matcher) should reuse the same five
+helpers — ``coarse_ncc_search``, ``polarity_filter``,
+``tukey_biweight_weights``, ``lm_subpixel_refine``,
+``information_matrix_to_covariance`` — rather than rolling their own
+LM loops.  Image-side derivatives are produced by
+``nav.nav_orchestrator.image_derivatives.build_image_edge_dt`` (Canny-
+style directional non-maximum suppression on the Sobel-of-Gaussian
+gradient, then a truncated DT) and
+``compute_image_gradient_vu`` (the per-pixel gradient vector consumed
+by the polarity filter).  The orchestrator's ``_make_context``
+populates ``image_gradient_ext``, ``image_gradient_vu_ext``, and
+``image_edge_dt_ext`` on every ``NavContext``; techniques must not
+recompute them.
+
 ### Things that already work and should not be re-litigated
 
-- The 700-test suite is green.  Adding code that breaks existing tests
-  is a regression; either fix the regression or delete the obsolete
-  test (with justification).
+- The full test suite is green.  Adding code that breaks existing
+  tests is a regression; either fix the regression or delete the
+  obsolete test (with justification).
 - `ruff check`, `ruff format --check`, and `mypy --strict` are clean
   on every committed file.  CI must stay clean.
 - The `nav.nav_model.rings/` data-model subpackage is preserved

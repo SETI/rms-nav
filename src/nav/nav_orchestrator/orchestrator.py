@@ -18,7 +18,6 @@ models or techniques run for debugging (``only_models='body:MIMAS'``,
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -39,6 +38,11 @@ from nav.nav_orchestrator.image_classifier_result import (
     ImageClass,
     NavImageClassifierResult,
 )
+from nav.nav_orchestrator.image_derivatives import (
+    ImageDerivativesConfig,
+    build_image_edge_dt,
+    compute_image_gradient_vu,
+)
 from nav.nav_orchestrator.nav_context import NavContext
 from nav.nav_orchestrator.nav_result import NavResult
 from nav.nav_orchestrator.provenance import Provenance
@@ -51,8 +55,6 @@ from nav.support.status_reason import NavStatusReason
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only import
     from nav.obs import ObsSnapshotInst
-
-logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 __all__ = [
     'NavOrchestrator',
@@ -132,6 +134,7 @@ class NavOrchestrator(NavBase):
         only_techniques: str | list[str] = '*',
         ensemble_config: EnsembleConfig | None = None,
         image_quality_thresholds: ImageQualityThresholds | None = None,
+        image_derivatives_config: ImageDerivativesConfig | None = None,
         rms_nav_version: str = '0.0.0',
     ) -> None:
         super().__init__(config=config)
@@ -143,6 +146,7 @@ class NavOrchestrator(NavBase):
         self._image_classifier = NavImageClassifier(
             thresholds=image_quality_thresholds or ImageQualityThresholds()
         )
+        self._image_derivatives_config = image_derivatives_config or ImageDerivativesConfig()
         self._gate = FeatureReliabilityGate()
         self._rms_nav_version = rms_nav_version
 
@@ -353,6 +357,15 @@ class NavOrchestrator(NavBase):
             if classifier_result.noise_sigma > 0.0
             else estimate_image_noise_sigma(image, sensor_mask)
         )
+        gradient_ext, edge_dt_ext = build_image_edge_dt(
+            image,
+            noise_sigma,
+            config=self._image_derivatives_config,
+        )
+        gradient_vu_ext = compute_image_gradient_vu(
+            image,
+            sigma_px=self._image_derivatives_config.image_gradient_sigma_px,
+        )
         context = NavContext(
             obs=obs,
             image_ext=image,
@@ -362,6 +375,9 @@ class NavOrchestrator(NavBase):
             cosmic_ray_mask_ext=cr_mask,
             image_classifier=classifier_result,
             provenance=provenance,
+            image_gradient_ext=gradient_ext,
+            image_gradient_vu_ext=gradient_vu_ext,
+            image_edge_dt_ext=edge_dt_ext,
         )
         return context, classifier_result
 

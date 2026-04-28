@@ -27,8 +27,6 @@ as each thread holds its own ``ObsSnapshotInst`` (the underlying ``oops``
 ``Backplane`` queries mutate global precision state).
 """
 
-import logging
-
 from nav.feature.composition import compose_template_features
 from nav.feature.constants import (
     AGREEMENT_FACTOR_CAP,
@@ -68,8 +66,6 @@ from nav.feature.reliability import (
     FeatureReliabilityGate,
     GatedFeatureRecord,
 )
-
-logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 __all__ = [
     'AGREEMENT_FACTOR_CAP',

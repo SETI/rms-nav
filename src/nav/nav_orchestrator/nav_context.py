@@ -47,6 +47,11 @@ class NavContext:
         image_classifier: The image-quality classifier's verdict.
         image_gradient_ext: Optional shared Sobel-of-Gaussian magnitude
             (computed once, reused by every DT-based technique).
+        image_gradient_vu_ext: Optional ``(H, W, 2)`` per-pixel
+            gradient-vector image (``[..., 0]`` is ``g_v``,
+            ``[..., 1]`` is ``g_u``).  Sampled by the polarity filter to
+            compare each model vertex's outward normal against the image's
+            edge direction.
         image_edge_dt_ext: Optional shared signed distance transform of the
             thresholded gradient image.
         prior_offset_px: Prior offset from pass 1, ``None`` on pass 1.
@@ -65,6 +70,7 @@ class NavContext:
     image_classifier: NavImageClassifierResult
     provenance: Provenance
     image_gradient_ext: NDArrayFloatType | None = None
+    image_gradient_vu_ext: NDArrayFloatType | None = None
     image_edge_dt_ext: NDArrayFloatType | None = None
     prior_offset_px: tuple[float, float] | None = None
     prior_covariance_px2: NDArrayFloatType | None = None

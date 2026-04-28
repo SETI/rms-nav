@@ -11,6 +11,8 @@ This guide is intended for developers who want to understand, modify, or extend 
    developer_guide_introduction
    developer_guide_class_hierarchy
    developer_guide_navigation_models
+   developer_guide_techniques
+   developer_guide_uncertainty
    developer_guide_reprojection
    developer_guide_extending
    developer_guide_configuration

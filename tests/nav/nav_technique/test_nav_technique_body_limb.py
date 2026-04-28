@@ -1,0 +1,239 @@
+"""End-to-end tests for ``BodyLimbNav``."""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+from tests.nav.nav_technique.conftest import (
+    ArcPolylineFactory,
+    CirclePolylineFactory,
+    DiscImageFactory,
+    NavContextFactory,
+    NavFeatureFactory,
+)
+
+from nav.feature.feature import NavFeature
+from nav.nav_orchestrator.nav_context import NavContext
+from nav.nav_technique.diagnostics import BodyLimbDiagnostics
+from nav.nav_technique.nav_technique_body_limb import (
+    LIMB_MIN_ARC_PX,
+    BodyLimbNav,
+)
+
+
+def test_body_limb_nav_recovers_planted_offset_single_body(
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_limb_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    shape = (200, 200)
+    image_center = (100.0, 100.0)
+    radius = 30.0
+    image = disc_image(shape, image_center, radius)
+    # Plant the model 1.5 px below and 2.5 px right of the actual disc:
+    # the technique should report offset_px = (1.5, 2.5) so the model
+    # gets shifted onto the image disc.
+    model_center = (image_center[0] - 1.5, image_center[1] - 2.5)
+    vertices, outward = circle_polyline(model_center, radius, 120)
+    feature = make_limb_feature('moonA', vertices=vertices, outward_normals=outward)
+    technique = BodyLimbNav()
+    context = make_nav_context(image)
+    feasibility = technique.is_feasible([feature])
+    assert feasibility.feasible is True
+    result = technique.navigate([feature], context)
+    assert result.offset_px[0] == pytest.approx(1.5, abs=0.05)
+    assert result.offset_px[1] == pytest.approx(2.5, abs=0.05)
+    assert result.spurious is False
+    assert result.at_edge is False
+    assert isinstance(result.diagnostics, BodyLimbDiagnostics)
+    assert result.diagnostics.tukey_inlier_count == 120
+    assert result.diagnostics.lm_iterations >= 1
+
+
+def test_body_limb_nav_recovers_partial_arc(
+    disc_image: DiscImageFactory,
+    arc_polyline: ArcPolylineFactory,
+    make_limb_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    shape = (200, 200)
+    image_center = (100.0, 100.0)
+    radius = 30.0
+    image = disc_image(shape, image_center, radius)
+    # 50 % visible arc starting at the right side of the body (angles
+    # [-pi/2, pi/2]).
+    model_center = (image_center[0] - 0.5, image_center[1] - 1.5)
+    vertices, outward = arc_polyline(model_center, radius, 60, -np.pi / 2, np.pi / 2)
+    feature = make_limb_feature(
+        'moonB', vertices=vertices, outward_normals=outward, visible_arc_fraction=0.5
+    )
+    technique = BodyLimbNav()
+    context = make_nav_context(image)
+    result = technique.navigate([feature], context)
+    assert result.offset_px[0] == pytest.approx(0.5, abs=0.1)
+    assert result.offset_px[1] == pytest.approx(1.5, abs=0.1)
+    assert result.confidence > 0.0
+
+
+def test_body_limb_nav_recovers_multi_body_offset(
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_limb_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    shape = (240, 240)
+    radius = 22.0
+    centres = [(80.0, 80.0), (160.0, 90.0), (130.0, 170.0)]
+    image = np.zeros(shape, dtype=np.float64)
+    for cv, cu in centres:
+        image += disc_image(shape, (cv, cu), radius)
+    image = np.clip(image, 0.0, 100.0)
+    planted_dv, planted_du = 1.0, -1.5
+    features: list[NavFeature] = []
+    for idx, (cv, cu) in enumerate(centres):
+        model_center = (cv - planted_dv, cu - planted_du)
+        vertices, outward = circle_polyline(model_center, radius, 80)
+        features.append(
+            make_limb_feature(f'moon_{idx}', vertices=vertices, outward_normals=outward)
+        )
+    technique = BodyLimbNav()
+    context = make_nav_context(image)
+    result = technique.navigate(features, context)
+    assert result.offset_px[0] == pytest.approx(planted_dv, abs=0.05)
+    assert result.offset_px[1] == pytest.approx(planted_du, abs=0.05)
+    # Single-body result on the same image, for covariance comparison.
+    single_result = technique.navigate([features[0]], context)
+    multi_diag_max = float(np.linalg.eigvalsh(result.covariance_px2).max())
+    single_diag_max = float(np.linalg.eigvalsh(single_result.covariance_px2).max())
+    assert multi_diag_max < single_diag_max
+
+
+def test_body_limb_nav_infeasible_on_empty_input() -> None:
+    technique = BodyLimbNav()
+    report = technique.is_feasible([])
+    assert report.feasible is False
+    assert 'no_limb_arc_features' in report.reason
+
+
+def test_body_limb_nav_infeasible_on_short_arc(
+    circle_polyline: CirclePolylineFactory,
+    make_limb_feature: NavFeatureFactory,
+) -> None:
+    short_n = int(LIMB_MIN_ARC_PX) - 1
+    vertices, outward = circle_polyline((50.0, 50.0), 12.0, short_n)
+    feature = make_limb_feature('tiny_moon', vertices=vertices, outward_normals=outward)
+    technique = BodyLimbNav()
+    report = technique.is_feasible([feature])
+    assert report.feasible is False
+    assert 'sufficient_visible_arc' in report.reason
+
+
+def test_body_limb_nav_at_edge_when_offset_hits_search_window(
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_limb_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    shape = (160, 160)
+    image_center = (80.0, 80.0)
+    radius = 25.0
+    image = disc_image(shape, image_center, radius)
+    margin_v, margin_u = 6, 6
+    # Plant the model at exactly the search window boundary so LM can
+    # only converge at the edge.
+    model_center = (image_center[0] - float(margin_v), image_center[1] - float(margin_u))
+    vertices, outward = circle_polyline(model_center, radius, 120)
+    feature = make_limb_feature('atedge_moon', vertices=vertices, outward_normals=outward)
+    technique = BodyLimbNav()
+    context = make_nav_context(image, extfov_margin_vu=(margin_v, margin_u))
+    result = technique.navigate([feature], context)
+    assert result.at_edge is True
+    # Hard-zero gate via ``at_edge`` forces confidence to 0 per the spec.
+    assert result.confidence == pytest.approx(0.0, abs=1e-12)
+
+
+def test_body_limb_nav_marks_spurious_when_image_lacks_limb(
+    circle_polyline: CirclePolylineFactory,
+    make_limb_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    shape = (200, 200)
+    image = np.zeros(shape, dtype=np.float64)  # No edge anywhere.
+    image[10:20, 10:20] = 100.0  # a small unrelated bright square far from the model
+    vertices, outward = circle_polyline((100.0, 100.0), 30.0, 120)
+    feature = make_limb_feature('lonely_moon', vertices=vertices, outward_normals=outward)
+    technique = BodyLimbNav()
+    context = make_nav_context(image)
+    result = technique.navigate([feature], context)
+    assert result.spurious is True
+
+
+def test_body_limb_nav_polarity_filters_wrong_polarity_vertices(
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_limb_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    shape = (200, 200)
+    image_center = (100.0, 100.0)
+    radius = 30.0
+    image = disc_image(shape, image_center, radius)
+    model_center = (image_center[0] - 1.0, image_center[1] - 2.0)
+    n_vertices = 120
+    vertices, outward_normals = circle_polyline(model_center, radius, n_vertices)
+    # Plant exactly half (60 of 120) the vertices with inverted outward
+    # normals; the polarity filter must reject every one of them.  The
+    # exact count is the load-bearing assertion: any silent change to the
+    # polarity-rejection wiring (sign convention, Tukey constant,
+    # ``_INFINITY_DT_PENALTY_PX`` substitute) shifts it.
+    bad_indices = np.arange(0, n_vertices, 2)
+    n_bad = int(bad_indices.size)
+    n_good = n_vertices - n_bad
+    outward_normals[bad_indices] *= -1.0
+    feature = make_limb_feature('mixed_moon', vertices=vertices, outward_normals=outward_normals)
+    technique = BodyLimbNav()
+    context = make_nav_context(image)
+    result = technique.navigate([feature], context)
+    assert result.offset_px[0] == pytest.approx(1.0, abs=0.1)
+    assert result.offset_px[1] == pytest.approx(2.0, abs=0.1)
+    assert isinstance(result.diagnostics, BodyLimbDiagnostics)
+    # Two complementary assertions so a failure points at which side broke:
+    # the count must equal the planted ``n_good`` (no extra rejections from
+    # convergence-tolerance drift, no extra acceptances from polarity-check
+    # weakening).
+    assert result.diagnostics.tukey_inlier_count <= n_good
+    assert result.diagnostics.tukey_inlier_count == n_good
+
+
+def test_body_limb_nav_registered_with_navtechnique_registry() -> None:
+    from nav.nav_technique.nav_technique import NavTechnique
+
+    assert BodyLimbNav in NavTechnique._registry
+
+
+def test_body_limb_nav_raises_when_navcontext_lacks_derivatives(
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_limb_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    shape = (160, 160)
+    image = disc_image(shape, (80.0, 80.0), 25.0)
+    vertices, outward = circle_polyline((80.0, 80.0), 25.0, 120)
+    feature = make_limb_feature('moon', vertices=vertices, outward_normals=outward)
+    technique = BodyLimbNav()
+    context = make_nav_context(image)
+    # Build a fresh context without the gradient / DT fields populated.
+    bare_context = NavContext(
+        obs=context.obs,
+        image_ext=context.image_ext,
+        sensor_mask_ext=context.sensor_mask_ext,
+        image_noise_sigma=context.image_noise_sigma,
+        saturation_mask_ext=context.saturation_mask_ext,
+        cosmic_ray_mask_ext=context.cosmic_ray_mask_ext,
+        image_classifier=context.image_classifier,
+        provenance=context.provenance,
+    )
+    with pytest.raises(RuntimeError, match='image_edge_dt_ext'):
+        technique.navigate([feature], bare_context)

@@ -15,8 +15,6 @@ orchestrator class:
   ``NavModel`` ABC.
 """
 
-import logging
-
 from nav.nav_model.stars.catalog import (
     CATALOG_MAGNITUDE_BINS,
     aberrate_star,
@@ -55,8 +53,6 @@ from nav.nav_model.stars.smeared_psf import (
     render_smeared_psf,
     smear_length_px,
 )
-
-logging.getLogger(__name__).addHandler(logging.NullHandler())
 
 __all__ = [
     'CATALOG_MAGNITUDE_BINS',
