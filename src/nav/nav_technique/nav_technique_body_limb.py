@@ -92,7 +92,7 @@ _BODY_LIMB_CONFIDENCE_SPEC = ConfidenceSpec(
             cap_at=1.0,
         ),
     ),
-    hard_zero_if={'at_edge': True},
+    hard_zero_if={'at_edge': True, 'spurious': True},
 )
 """Default confidence spec for the body-limb technique.
 
@@ -179,6 +179,7 @@ class BodyLimbNav(NavTechnique):
     confidence_attributes = frozenset(
         {
             'at_edge',
+            'spurious',
             'visible_limb_arc_fraction',
             'visible_arc_px',
             'dt_fit_rms_px',
@@ -316,7 +317,9 @@ class BodyLimbNav(NavTechnique):
             assert self.confidence_spec is not None  # set as class attribute
             confidence, breakdown = evaluate_sigmoid_combination(
                 self.confidence_spec,
-                _LimbConfidenceContext(at_edge=at_edge, diagnostics=diagnostics),
+                _LimbConfidenceContext(
+                    at_edge=at_edge, spurious=bool(spurious), diagnostics=diagnostics
+                ),
                 technique_name=self.name,
                 return_breakdown=True,
             )
@@ -355,17 +358,18 @@ class BodyLimbNav(NavTechnique):
 
 
 class _LimbConfidenceContext:
-    """Adapter binding ``BodyLimbDiagnostics`` plus ``at_edge`` for confidence eval.
+    """Adapter binding ``BodyLimbDiagnostics`` plus ``at_edge`` / ``spurious``.
 
     The shared :func:`evaluate_sigmoid_combination` helper accepts any
-    object whose attributes match the spec's term names.  ``at_edge`` is
-    not part of ``BodyLimbDiagnostics`` (it lives on
-    ``NavTechniqueResult``) so this small adapter exposes both as
-    attributes of one object the spec can dot into.
+    object whose attributes match the spec's term names.  ``at_edge``
+    and ``spurious`` are not part of ``BodyLimbDiagnostics`` (they live
+    on ``NavTechniqueResult``) so this small adapter exposes them
+    alongside the diagnostic fields the spec consumes.
     """
 
-    def __init__(self, *, at_edge: bool, diagnostics: BodyLimbDiagnostics) -> None:
+    def __init__(self, *, at_edge: bool, spurious: bool, diagnostics: BodyLimbDiagnostics) -> None:
         self.at_edge = at_edge
+        self.spurious = spurious
         self.visible_limb_arc_fraction = diagnostics.visible_limb_arc_fraction
         self.visible_arc_px = diagnostics.visible_arc_px
         self.dt_fit_rms_px = diagnostics.dt_fit_rms_px

@@ -110,23 +110,40 @@ the calibration sample.
 - `expected.techniques_must_run: [BodyLimbNav]`
 - `expected.techniques_must_skip: [BodyDiscCorrelateNav]`
 
-### Scenario C — Below-resolution / irregular body (`BodyBlobNav`)
+### Scenario C — Irregular body (`BodyBlobNav`)
 
-A scene where a small or irregular moon is too unresolved or
-shape-irregular for the limb fit. The body extractor emits `BODY_BLOB`
-only.
+A scene where the body's shape is too irregular for the ellipsoid
+limb fit. The body extractor emits `BODY_BLOB` only.
+
+> ⚠️ **Important — the gate is shape-uncertainty-based, not
+> size-based.** The body extractor decides between LIMB_ARC and
+> BODY_BLOB by computing
+> `limb_uncertainty_px = ellipsoid_residual_km / km_per_px_at_limb`.
+> Regular moons (Mimas, Tethys, Dione, Rhea, …) carry
+> `ellipsoid_residual_km ≈ 1` so their limb uncertainty stays well
+> below the 3 px threshold *at any reasonable resolution*, including
+> when they show up at only 10–20 px diameter in the frame.  On
+> regular moons the extractor always emits LIMB_ARC; BodyBlobNav
+> never fires.  To exercise BodyBlobNav you must pick an
+> **irregular** body whose `ellipsoid_residual_km` in the body-shape
+> table is large enough that `1 km/px · ellipsoid_residual_km > 3 px`
+> on the chosen image — i.e. Prometheus, Pandora, Atlas, Pan,
+> Hyperion, or Phoebe at close range.
 
 | Field | What to look for |
 |---|---|
 | Mission / camera | Cassini ISS, NAC |
-| Body | Prometheus, Pandora, Atlas, Pan, Hyperion at close range, **or** any regular moon at a distance where `predicted_diameter_px` is 10–30 px |
-| Body diameter in FOV | 8–30 px |
+| Body | Prometheus, Pandora, Atlas, Pan, Hyperion, Phoebe (highly_irregular shape class) |
+| Body diameter in FOV | >= 8 px (so the BODY_BLOB diameter floor is satisfied) |
+| Resolution | High enough that `limb_uncertainty_px > 3` for the chosen body — the more irregular the body, the higher km/px the gate accepts |
 | Other bright sources | None inside the predicted bbox (otherwise the centroid is biased) |
 | Background | Dark sky preferred |
 
 **Sidecar location**:
-- Irregular body: `tests/integration/image_library/images/body_irregular/<IMAGE_ID>.yaml`
-- Distant regular body: `tests/integration/image_library/images/below_resolution_body/<IMAGE_ID>.yaml`
+`tests/integration/image_library/images/body_irregular/<IMAGE_ID>.yaml`
+(use `body_irregular` — the `below_resolution_body` class is reserved
+for the case where even the BODY_BLOB diameter floor is violated and
+the extractor emits no body feature at all).
 
 **Expected behavior**:
 - `expected.status: ok` (or `failed` if calibration discovers the

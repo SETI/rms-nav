@@ -2869,11 +2869,57 @@ link to the confidence formula source-of-truth
   joint LS, infeasibility on empty / no-template / zero-diameter
   inputs, at-edge detection at the search-window boundary, blank-image
   spurious-result fallback for the blob technique, the 0.4 hard cap on
-  blob confidence, and registry presence for both techniques.
-  Existing unit tests under `tests/nav/nav_model/` updated to match
-  the new gate constants (`LIMB_ARC_MAX_UNCERTAINTY_PX = 3.0`,
-  `DEFAULT_BODY_SHAPE.min_blob_diameter_px = 8.0`,
-  worked-example km/px values for the threshold-crossing tests).
+  blob confidence, registry presence for both techniques, plus the
+  Phase-5-fix-up additions: at-edge fixture splitting the
+  disjunctive assertion into two named cases, diagnostic-field
+  assertions on `peak_to_runner_up_ratio` / `consistency_px` /
+  `residual_px`, and the new `TestPyramidTopKPeaks` class in
+  `tests/nav/support/test_correlate.py` pinning the
+  ``top_k_peaks`` field shape.  Existing unit tests under
+  `tests/nav/nav_model/` updated to match the new gate constants
+  (`LIMB_ARC_MAX_UNCERTAINTY_PX = 3.0`,
+  `DEFAULT_BODY_SHAPE.min_blob_diameter_px = 8.0`, worked-example
+  km/px values for the threshold-crossing tests).
+- **Spurious-result hard-zero gate on the limb / terminator
+  techniques.**  ``BodyLimbNav`` and ``BodyTerminatorNav`` confidence
+  specs now include ``hard_zero_if={'spurious': True}`` (matching the
+  pre-existing gate on ``BodyDiscCorrelateNav``).  Without this gate
+  a degenerate LM run that returns ``rms_px = 0`` (default value
+  on a zero-inlier result) would feed the ``-alpha * rms_px`` term
+  with the artificial-perfect 0, and the formula would report
+  high confidence on a clearly-spurious result.  The fix added
+  ``'spurious'`` to ``confidence_attributes`` on both techniques and
+  plumbed the flag through ``_LimbConfidenceContext`` /
+  ``_TerminatorConfidenceContext``.  Caught when the operator's
+  Rhea-partial-overflow integration sidecar (N1484593951) recorded
+  BodyTerminatorNav at confidence 0.903 with 0/895 inliers.
+- **Library expansion.**  Four operator-curated sidecars added,
+  covering all four design-recommended Phase 5 scenarios:
+  * `body_full_fov/N1572105349_1_CALIB.yaml` — Dione fully in FOV;
+    pinned `expected.status=failed` because the LIMB_ARC reliability
+    gate drops the limb on a fully-lit body and the
+    BodyDiscCorrelateNav consistency check trips on the auto-gradient
+    mode-switch (both calibration follow-ups, listed below).
+  * `body_partial_overflow/N1484593951_2_CALIB.yaml` — Rhea with
+    overflow 0.222; `expected.status=ok`,
+    `primary_technique=BodyLimbNav` (BodyDiscCorrelateNav fires per
+    the disc gate but self-flags spurious because the heavy crop
+    collapses the NCC peak).
+  * `multi_body/N1487595731_1_CALIB.yaml` — Dione+Rhea high-phase
+    scene; `expected.status=conflicted` because BodyTerminatorNav
+    latches onto a wrong local minimum (multi-body crescent
+    coarse-NCC ambiguity, listed below) at confidence 0.744 even
+    though Disc + Limb agree with the operator at confidences 0.246
+    + 0.239 and the ensemble's `agreement_gap` threshold (0.5)
+    refuses to commit.
+  * `below_resolution_body/N1777325846_1_CALIB.yaml` — Mimas at
+    ~20 px diameter; pinned `primary_technique=BodyLimbNav`.
+    Confirms the design's emission-gate behavior: a regular moon's
+    `limb_uncertainty_px` stays well below the 3 px threshold even
+    at low resolution, so LIMB_ARC always wins over BODY_BLOB on
+    well-shaped bodies.  `PHASE5_LIBRARY_SEED.md` Scenario C
+    rewritten with a prominent ⚠️ block clarifying that BodyBlobNav
+    requires an irregular body, not just a small one.
 
 ### Logging / API conventions established in Phase 5 (binding)
 
@@ -2908,25 +2954,95 @@ link to the confidence formula source-of-truth
 ### Phase 5 follow-ups uncovered during implementation
 
 These are real, reproducible gaps surfaced by the synthetic-image
-unit tests and the design review during Phase 5.  They do not block
-Phase 5 (the technique handles all the documented happy and boundary
-paths) but are concrete starting points for Phase 6 / Phase 10
-calibration work.
+unit tests, the design review, and the four-sidecar integration
+seeding during Phase 5.  They do not block Phase 5 (every technique
+handles its documented happy and boundary paths) but are concrete
+starting points for Phase 6 / Phase 10 calibration work.
 
-- **`peak_to_runner_up_ratio` placeholder.**
-  `BodyDiscDiagnostics.peak_to_runner_up_ratio` is populated with
-  `0.0` because `navigate_with_pyramid_kpeaks` does not surface
-  multi-peak telemetry past the auto picker.  Phase 6 follow-up: when
-  `RingAnnulusNav` lands, extend the pyramid wrapper to return the
-  top-K peak values from its final pass so both correlation
-  techniques can populate this diagnostic; until then, the field is
-  inert and the confidence formula does not consume it.
 - **`config_510_techniques.yaml` not yet shipped.** The per-technique
   confidence-formula coefficients live as Python constants
-  (`_BODY_DISC_CONFIDENCE_SPEC`, `_BODY_BLOB_CONFIDENCE_SPEC`) until
-  the corresponding YAML config file ships in a later phase.  When it
-  does, the confidence specs should be loaded from YAML at config
-  init so the operator can retune without a code change.
+  (`_BODY_DISC_CONFIDENCE_SPEC`, `_BODY_BLOB_CONFIDENCE_SPEC`,
+  `_BODY_LIMB_CONFIDENCE_SPEC`, `_BODY_TERMINATOR_CONFIDENCE_SPEC`)
+  until the corresponding YAML config file ships in a later phase.
+  When it does, the confidence specs should be loaded from YAML at
+  config init so the operator can retune without a code change.
+- **LIMB_ARC reliability formula too punitive on fully-lit limbs**
+  (Dione `body_full_fov/N1572105349`).  The `_limb_reliability`
+  formula carries a ``-0.7 * mean_incidence_factor`` term where the
+  incidence-factor cap is 4.76; on a fully-lit body whose limb
+  vertices live at 80–90° incidence the penalty saturates, dragging
+  reliability to ~0.14 — below the LIMB_ARC gate threshold (0.30).
+  The textbook full-disc body's limb is rejected before BodyLimbNav
+  can consume it.  Phase 10 calibration target: lower the
+  ``incidence_factor`` alpha, replace the penalty with a
+  per-vertex sigma_normal-weighted average that already encodes the
+  photometric softness, or move the incidence-factor consideration
+  entirely into ``sigma_normal_px`` (where it already lives) and
+  drop it from reliability.
+- **`BodyDiscCorrelateNav` `consistency_tol` too tight on
+  auto-gradient mode-switch scenes** (Dione
+  `body_full_fov/N1572105349`).  The technique converges within 0.5
+  px of the operator's truth on a fully-in-FOV body but the pyramid
+  wrapper flags `spurious=True` because `consistency=2.78 px`
+  exceeds the `consistency_tol=2.0` threshold — pyramid drift on the
+  auto-gradient pass when the picker swaps modes between coarse and
+  fine levels.  Phase 6 / Phase 10 follow-up: loosen
+  ``consistency_tol`` for ``BodyDiscCorrelateNav`` (or apply it only
+  when raw and gradient picks disagreed at any level) so a strong,
+  consistent gradient-mode peak does not get rejected for sub-3-px
+  coarse-vs-fine drift.
+- **`BodyTerminatorNav` coarse-NCC fragile in multi-body crescent
+  geometry** (multi-body `multi_body/N1487595731`).  The technique
+  concatenates per-body terminator polylines into one combined mask
+  for the coarse search; on a high-phase scene with two bodies the
+  combined mask plus image edges at the wrong location find an
+  incorrect global maximum, and LM converges on the wrong seed —
+  reporting sub-pixel RMS with 76% inliers and confidence 0.744 on
+  an offset 31 px from the operator's truth.  This is a *different*
+  failure mode from the Tethys-N1716186428 LM-divergence case
+  (where coarse-NCC was right and LM walked away); here the coarse
+  search itself goes wrong.  Phase 6 / Phase 10 follow-ups:
+  per-body coarse search fused only after each body's individual
+  peak passes a sanity test, polarity-aware terminator extraction,
+  or inter-technique sanity-check (terminator must agree with limb
+  on the same image, otherwise spurious).
+- **Ensemble `agreement_gap` threshold needs calibration**
+  (multi-body N1487595731 + high-phase-terminator N1597846115).
+  Two scenes now showcase the same conflict-detector miscalibration:
+  in N1597846115 limb + terminator agree within 1 px but their
+  summed-confidence gap (0.045) is below the 0.5 threshold; in
+  N1487595731 disc + limb agree with the operator while a
+  wrong-answer terminator runs away alone, and the gap (0.259)
+  again falls short.  Phase 10 target: replace the
+  summed-confidence gap with a per-axis offset-disagreement test
+  in pixels, or recalibrate the threshold against the broadened
+  library so disc + limb agreement weighs more strongly against
+  isolated wrong-answer high-confidence runner-ups.
+- **Resolved during Phase 5 (no longer follow-ups):**
+  * ``peak_to_runner_up_ratio`` now populated honestly via the
+    new `top_k_peaks` field on
+    ``navigate_with_pyramid_kpeaks``'s result dict (the placeholder
+    that lived here at Phase 5's first close-out is gone — see
+    ``BodyDiscCorrelateNav._peak_to_runner_up_ratio``).  The
+    confidence-spec term reading the field is wired with
+    ``alpha=0.0`` until calibration tunes it.
+  * `BodyLimbNav` / `BodyTerminatorNav` spurious-confidence gate
+    (the bug that flagged terminator at 0.903 confidence with 0
+    inliers) — fixed by adding
+    ``hard_zero_if={'spurious': True}`` to both confidence specs.
+
+### Final Phase-5 check matrix
+
+| Check | Status |
+|---|---|
+| `ruff check src tests` | clean |
+| `ruff format --check src tests` | clean |
+| `mypy --strict src tests` | clean (270 source files) |
+| `pytest -n auto --dist=loadfile` (unit) | 1097 passed |
+| `pytest -n auto --dist=loadfile tests/integration/` | 28 passed (4 new sidecars + Phase 4 carry-overs) |
+| `sphinx-build -W -b html docs docs/_build` | clean |
+| `pymarkdown scan docs/ .cursor/ README.md CONTRIBUTING.md` | clean |
+| `phase_05_review/CRITIQUE_*.md` | written; resolution log records every Medium/Low fix or deliberate deferral |
 
 ---
 

@@ -1,0 +1,63 @@
+schema_version: 1
+image_id: N1487595731_1_CALIB
+mission: CASSINI_ISS            # CASSINI_ISS | VOYAGER_ISS | GOSSI | NHLORRI
+camera: NAC              # NAC | WAC | SSI | NA | WA | LORRI
+filter_combo: 'CL1+CL2'          # canonicalized: filters sorted, '+'-joined
+image_url: 'pds3://calibrated/COISS_2xxx/COISS_2009/data/1487544030_1487616958/N1487595731_1_CALIB.IMG'
+
+scene_tags:
+  - multi_body                         # First tag is the primary class;
+                                       # must match the directory the
+                                       # sidecar lives in.
+
+ground_truth:
+  offset_dv_px: 7.0329
+  offset_du_px: -18.4178
+  offset_uncertainty_px: 1.0           # 1sigma marginal; tighten
+                                       # for bright stars / sharp limbs.
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-04-29
+  ui_version: 'rms-nav 0.1.dev25'
+  notes: |
+    Dione and Rhea both visible and overlapping. Phase angle ~90 deg.
+
+    Phase-5 status: BodyDiscCorrelateNav and BodyLimbNav both converge
+    within ~1 px of the operator's ground truth (disc: (6.76, -17.71)
+    confidence 0.246; limb: (7.00, -18.00) confidence 0.239).
+    BodyTerminatorNav, however, latches onto a wrong local minimum at
+    (11.58, +12.64) — about 31 px off in the U axis — and reports
+    sub-pixel RMS with 76 % inliers, scoring confidence 0.744 on the
+    wrong answer.  The combined-edge-mask coarse NCC for the two
+    bodies' concatenated terminator polylines finds an incorrect
+    global maximum at (11, 13) on this high-phase, multi-body
+    crescent geometry, and LM converges near the wrong seed.
+
+    The ensemble correctly refuses to commit: disc + limb sum to 0.485
+    while the lone terminator scores 0.744, gap 0.259, below the
+    agreement_gap threshold (0.5), so the orchestrator returns
+    status=conflicted.  Headline (disc + limb) answer is right; the
+    multi-body terminator coarse-NCC failure plus the
+    summed-confidence-gap conflict-detector rule produce the
+    conflicted verdict.
+
+    Phase 6 / Phase 10 follow-ups: (a) make BodyTerminatorNav's
+    coarse NCC robust to multi-body crescent geometry (e.g.
+    polarity-aware terminator extraction, or per-body coarse search
+    fused only after each body's individual peak passes a sanity
+    test); (b) lower agreement_gap (or replace it with a per-axis
+    offset-disagreement-in-pixels test) so disc + limb agreement
+    weighs more strongly against an isolated wrong-answer
+    high-confidence runner-up.
+
+expected:
+  status: conflicted
+  confidence_tier: conflicted
+  primary_technique: BodyTerminatorNav  # highest-confidence
+                                        # per-technique result, even
+                                        # though wrong — the test's
+                                        # primary_technique rule is
+                                        # max-confidence with
+                                        # tie-break by name
+  techniques_must_run: [BodyDiscCorrelateNav, BodyLimbNav, BodyTerminatorNav]
+  techniques_must_skip: []

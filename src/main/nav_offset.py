@@ -284,20 +284,24 @@ def _run_manual_pass(
     )
     local_handlers = image_log_handlers(image_log_path, arguments, DEFAULT_CONFIG)
 
-    with IMAGE_LOGGER.open(str(image_url), handler=local_handlers):
-        obs = cast(ObsSnapshotInst, obs_class.from_file(image_url, **extra_params))
-        result = run_manual_nav(obs, config=DEFAULT_CONFIG)
-        if result is None:
-            # ``run_manual_nav`` already logged the precise infeasibility
-            # reason (no_renderable_features_for_manual_nav, empty composed
-            # overlay, etc.); avoid re-logging stale template-only wording.
-            sys.exit(2)
-        if result.spurious:
-            IMAGE_LOGGER.warning('Manual navigation cancelled')
-            sys.exit(2)
+    try:
+        with IMAGE_LOGGER.open(str(image_url), handler=local_handlers):
+            obs = cast(ObsSnapshotInst, obs_class.from_file(image_url, **extra_params))
+            result = run_manual_nav(obs, config=DEFAULT_CONFIG)
+            if result is None:
+                # ``run_manual_nav`` already logged the precise infeasibility
+                # reason (no_renderable_features_for_manual_nav, empty composed
+                # overlay, etc.); avoid re-logging stale template-only wording.
+                sys.exit(2)
+            if result.spurious:
+                IMAGE_LOGGER.warning('Manual navigation cancelled')
+                sys.exit(2)
 
-        dv, du = result.offset_px
-        IMAGE_LOGGER.info('Manual nav: offset_dv_px=%.4f, offset_du_px=%.4f', dv, du)
+            dv, du = result.offset_px
+            IMAGE_LOGGER.info('Manual nav: offset_dv_px=%.4f, offset_du_px=%.4f', dv, du)
+    finally:
+        for handler in local_handlers:
+            handler.close()
     # The dv / du print statements are the CLI's machine-parsable contract;
     # they go to stdout regardless of the per-image log routing.
     print(f'offset_dv_px={dv:.4f}')

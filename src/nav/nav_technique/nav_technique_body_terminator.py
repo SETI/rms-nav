@@ -76,7 +76,7 @@ _BODY_TERMINATOR_CONFIDENCE_SPEC = ConfidenceSpec(
         ConfidenceTerm(feature='mean_phase_angle_factor', alpha=1.0),
         ConfidenceTerm(feature='mean_albedo_penalty', alpha=-1.5),
     ),
-    hard_zero_if={'at_edge': True},
+    hard_zero_if={'at_edge': True, 'spurious': True},
 )
 """Default confidence spec for the body-terminator technique.
 
@@ -174,6 +174,7 @@ class BodyTerminatorNav(NavTechnique):
     confidence_attributes = frozenset(
         {
             'at_edge',
+            'spurious',
             'visible_terminator_arc_fraction',
             'visible_arc_px',
             'dt_fit_rms_px',
@@ -313,6 +314,7 @@ class BodyTerminatorNav(NavTechnique):
             )
             confidence_context = _TerminatorConfidenceContext(
                 at_edge=at_edge,
+                spurious=bool(spurious),
                 diagnostics=diagnostics,
                 mean_phase_angle_factor=mean_phase,
                 mean_albedo_penalty=mean_albedo,
@@ -369,11 +371,13 @@ class _TerminatorConfidenceContext:
         self,
         *,
         at_edge: bool,
+        spurious: bool,
         diagnostics: BodyTerminatorDiagnostics,
         mean_phase_angle_factor: float,
         mean_albedo_penalty: float,
     ) -> None:
         self.at_edge = at_edge
+        self.spurious = spurious
         self.visible_terminator_arc_fraction = diagnostics.visible_terminator_arc_fraction
         self.visible_arc_px = diagnostics.visible_arc_px
         self.dt_fit_rms_px = diagnostics.dt_fit_rms_px
