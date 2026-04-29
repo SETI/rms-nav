@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 
+from nav.config import IMAGE_LOGGER
+
 __all__ = [
     'Provenance',
     'ProvenanceMetadata',
@@ -178,6 +180,11 @@ def _resolve_static_data_hashes() -> Mapping[str, str]:
     with one of the recognised static-data prefixes
     (``config_220_``, ``config_3``, ``config_4``).  Returns the mapping
     sorted by filename so equality testing is stable.
+
+    Provenance metadata is best-effort: a per-file I/O failure (file
+    disappearing between ``glob`` and ``read_bytes``, permission error,
+    OS-level read error) is logged at WARNING and the file is skipped
+    rather than allowed to abort the navigation run.
     """
     config_dir = Path(__file__).resolve().parent.parent / 'config_files'
     hashes: dict[str, str] = {}
@@ -185,7 +192,11 @@ def _resolve_static_data_hashes() -> Mapping[str, str]:
         name = path.name
         if not any(name.startswith(prefix) for prefix in _STATIC_DATA_PREFIXES):
             continue
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        try:
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError as exc:
+            IMAGE_LOGGER.warning('static-data hash skipped for %s: %s', name, exc)
+            continue
         hashes[name] = digest
     return MappingProxyType(hashes)
 

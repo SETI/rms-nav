@@ -1,5 +1,7 @@
 """Tests for ``nav.nav_orchestrator.provenance.Provenance``."""
 
+import pytest
+
 from nav.nav_orchestrator.provenance import (
     Provenance,
     ProvenanceMetadata,
@@ -95,3 +97,33 @@ def test_collect_provenance_metadata_is_byte_identical_across_calls() -> None:
     b = collect_provenance_metadata()
     assert dict(a.static_data_hashes) == dict(b.static_data_hashes)
     assert a.spice_kernels == b.spice_kernels
+
+
+def test_static_data_hashes_skips_unreadable_files(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A ``read_bytes`` failure is logged at WARNING and the file is skipped.
+
+    Provenance metadata is best-effort: a per-file I/O error must not
+    abort the navigation run.
+    """
+    import pathlib
+
+    from nav.nav_orchestrator import provenance as provenance_mod
+
+    real_read_bytes = pathlib.Path.read_bytes
+
+    def fake_read_bytes(self: pathlib.Path) -> bytes:
+        if self.name == 'config_400_inst_coiss.yaml':
+            raise PermissionError(f'simulated permission denied for {self.name}')
+        return real_read_bytes(self)
+
+    monkeypatch.setattr(pathlib.Path, 'read_bytes', fake_read_bytes)
+    hashes = provenance_mod._resolve_static_data_hashes()
+    assert 'config_400_inst_coiss.yaml' not in hashes
+    # Other static-data files still hash successfully.
+    assert 'config_220_body_shape.yaml' in hashes
+    out = capsys.readouterr().out
+    assert 'config_400_inst_coiss.yaml' in out
+    assert 'simulated permission denied' in out
