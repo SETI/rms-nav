@@ -629,8 +629,13 @@ def navigate_single_scale_kpeaks(
     # runner-up peaks (e.g. peak-to-runner-up ratio diagnostics) can do
     # so without re-running the correlation.  Sorted by quality desc so
     # ``all_candidates[0]`` is the winner and ``[1:]`` are runner-ups.
-    winner['all_candidates'] = sorted(candidates, key=lambda r: r['quality'], reverse=True)
-    return winner
+    # Return a shallow copy of the winner with the per-candidate list
+    # attached separately so the returned dict is not self-referential
+    # (the original winner remains an entry inside the new list).
+    sorted_candidates = sorted(candidates, key=lambda r: r['quality'], reverse=True)
+    result = dict(winner)
+    result['all_candidates'] = sorted_candidates
+    return result
 
 
 # ==============================================================

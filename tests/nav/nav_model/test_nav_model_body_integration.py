@@ -227,11 +227,19 @@ def test_to_features_skips_terminator_when_polyline_too_short(fake_obs: FakeObs)
 
 
 def test_to_features_limb_uncertainty_at_threshold(fake_obs: FakeObs) -> None:
-    """A body sitting exactly at the LIMB_ARC threshold still emits the arc.
+    """The LIMB_ARC vs BODY_BLOB switch is correctly placed around the threshold.
 
     With ``LIMB_ARC_MAX_UNCERTAINTY_PX = 3.0`` and Saturn's
     ``ellipsoid_residual_km = 50`` (gas-giant default), the threshold
-    is reached at ``km_per_pixel_at_limb = 50 / 3.0 ~= 16.67``.
+    sits at ``km_per_pixel_at_limb = 50 / 3.0 ~= 16.67``.  This test
+    probes either side of that threshold:
+
+    * ``km_per_pixel_at_limb = 17.0`` (uncertainty ~ 2.94 px, below
+      threshold) — ``saturn_model.to_features`` must emit a
+      ``LIMB_ARC``.
+    * ``km_per_pixel_at_limb = 15.0`` (uncertainty ~ 3.33 px, above
+      threshold) — the limb branch must drop and the technique falls
+      through to ``BODY_BLOB``.
     """
     # km_per_pixel_at_limb=17 yields uncertainty ~ 2.94 < 3.0 -> LIMB_ARC.
     saturn_model = _build_body(obs=fake_obs, body_name='SATURN', km_per_pixel_at_limb=17.0)

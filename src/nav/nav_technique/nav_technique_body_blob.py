@@ -304,8 +304,9 @@ def _joint_covariance(
         return float(floor) * np.eye(2, dtype=np.float64)
     residuals_v = offsets_v - dv
     residuals_u = offsets_u - du
-    var_v = max(float(np.sum(weights * residuals_v * residuals_v) / total_weight), floor)
-    var_u = max(float(np.sum(weights * residuals_u * residuals_u) / total_weight), floor)
+    total_weight_sq = max(total_weight * total_weight, 1e-24)
+    var_v = max(float(np.sum(weights * residuals_v * residuals_v) / total_weight_sq), floor)
+    var_u = max(float(np.sum(weights * residuals_u * residuals_u) / total_weight_sq), floor)
     return np.diag([var_v, var_u]).astype(np.float64)
 
 
@@ -384,10 +385,8 @@ class BodyBlobNav(NavTechnique):
                 return self._fail_no_signal(features=eligible, noise_sigma=noise_sigma)
             fit = _joint_offset_from_residuals(residuals)
             at_edge = (
-                abs(fit.dv - margin_v) <= AT_EDGE_TOLERANCE_PX
-                or abs(fit.dv + margin_v) <= AT_EDGE_TOLERANCE_PX
-                or abs(fit.du - margin_u) <= AT_EDGE_TOLERANCE_PX
-                or abs(fit.du + margin_u) <= AT_EDGE_TOLERANCE_PX
+                abs(fit.dv) >= margin_v - AT_EDGE_TOLERANCE_PX
+                or abs(fit.du) >= margin_u - AT_EDGE_TOLERANCE_PX
             )
             mean_snr = float(np.mean(residuals.snrs))
             mean_extent = float(np.mean(residuals.extents))

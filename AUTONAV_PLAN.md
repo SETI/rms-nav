@@ -1305,11 +1305,13 @@ above operationalise.
   (closer body's nonzero pixels overwrite farther body's), runs the
   shared ``navigate_with_pyramid_kpeaks`` with ``use_gradient='auto'``,
   and emits ``BodyDiscDiagnostics`` populated with the pyramid's
-  ``ncc_peak`` (PSR), ``consistency_px``, ``used_gradient``, and
-  ``body_count``.  ``hard_zero_if`` fires on ``at_edge`` or
+  ``ncc_peak``, ``consistency_px``, ``used_gradient``, ``body_count``,
+  and ``peak_to_runner_up_ratio`` (derived from the wrapper's
+  ``top_k_peaks`` return).  ``hard_zero_if`` fires on ``at_edge`` or
   ``spurious``.  The pyramid wrapper now returns
-  ``'used_gradient': bool`` so the technique can record the chosen
-  mode honestly (backwards-compatible addition to
+  ``'used_gradient': bool`` and ``'top_k_peaks': list`` so the technique
+  can record the chosen mode honestly and compute the runner-up ratio
+  without re-running the correlation (backwards-compatible additions to
   ``nav.support.correlate``).
 - ``nav.nav_technique.BodyBlobNav`` — joint-translation fit from
   brightness-weighted-moment centroids over each blob's predicted
@@ -2923,11 +2925,17 @@ link to the confidence formula source-of-truth
 
 ### Logging / API conventions established in Phase 5 (binding)
 
-- **`navigate_with_pyramid_kpeaks` returns `'used_gradient': bool`.**
-  Backwards-compatible addition; non-auto callers see `bool(use_gradient)`,
-  auto callers see whichever mode the picker chose.  Future correlation
-  techniques (e.g. `RingAnnulusNav` in Phase 6) should read this field
-  rather than re-running the pyramid in both modes.
+- **`navigate_with_pyramid_kpeaks` returns `'used_gradient': bool` and
+  `'top_k_peaks': list[tuple[quality, dv, du]]`.**  Both are
+  backwards-compatible additions.  ``used_gradient`` reports
+  ``bool(use_gradient)`` for non-auto callers and the picker's choice
+  for ``auto``; ``top_k_peaks`` carries the final-pass per-peak
+  telemetry (winner at index 0, runner-ups in descending quality)
+  from which ``BodyDiscCorrelateNav`` derives the
+  ``peak_to_runner_up_ratio`` diagnostic without re-running the
+  correlation.  Future correlation techniques (e.g. `RingAnnulusNav`
+  in Phase 6) should read these fields rather than re-running the
+  pyramid in both modes.
 - **BODY_DISC `template_img` is a postage stamp sized to
   `bbox_extfov_vu`.** Both `NavModelBody` and `NavModelBodySimulated`
   produce postage stamps; future body-emitting NavModels (cartographic,

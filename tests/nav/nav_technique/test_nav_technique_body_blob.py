@@ -137,6 +137,7 @@ def test_body_blob_returns_zero_confidence_when_image_blank(
 
 
 def test_body_blob_infeasible_on_empty_input() -> None:
+    """``is_feasible([])`` reports infeasibility with a no-features reason."""
     technique = BodyBlobNav()
     report = technique.is_feasible([])
     assert report.feasible is False
@@ -144,6 +145,11 @@ def test_body_blob_infeasible_on_empty_input() -> None:
 
 
 def test_body_blob_infeasible_on_zero_diameter() -> None:
+    """A BODY_BLOB feature with ``predicted_diameter_px == 0`` is infeasible.
+
+    Asserts the reason names the predicted-diameter requirement so a
+    regression that returns a generic infeasibility message is caught.
+    """
     feature = NavFeature(
         feature_id='body_blob:zero',
         feature_type=NavFeatureType.BODY_BLOB,
@@ -165,6 +171,7 @@ def test_body_blob_infeasible_on_zero_diameter() -> None:
     technique = BodyBlobNav()
     report = technique.is_feasible([feature])
     assert report.feasible is False
+    assert 'predicted_diameter' in report.reason
 
 
 def test_body_blob_confidence_capped_at_0_4(
@@ -190,10 +197,11 @@ def test_body_blob_confidence_capped_at_0_4(
     technique = BodyBlobNav()
     context = make_nav_context(image)
     result = technique.navigate(features, context)
-    assert result.confidence <= 0.4 + 1e-12
+    assert result.confidence == pytest.approx(0.4, abs=1e-12)
 
 
 def test_body_blob_registered_with_navtechnique_registry() -> None:
+    """``BodyBlobNav`` is auto-registered in ``NavTechnique._registry`` on import."""
     from nav.nav_technique.nav_technique import NavTechnique
 
     assert BodyBlobNav in NavTechnique._registry

@@ -229,8 +229,10 @@ Diagnostics fields:
   ``top_k_peaks`` field (sorted by quality descending).  Returns
   ``1.0`` when only one peak survives non-maximum suppression — the
   unambiguous-peak case.
-- ``consistency_px``: maximum per-axis disagreement between coarse and
-  fine pyramid levels.
+- ``consistency_px``: maximum Euclidean drift across pyramid levels —
+  ``np.max(np.linalg.norm(level_shifts - final_prior, axis=1))`` over
+  the coarse-to-fine cascade in
+  :func:`nav.support.correlate.navigate_with_pyramid_kpeaks`.
 - ``used_gradient``: ``True`` when auto-mode picked the gradient pass.
 - ``body_count``: number of fused BODY_DISC features.
 
@@ -297,14 +299,14 @@ trace of the form:
 
 .. code-block:: text
 
-   Confidence breakdown: alpha0=-1.000, sigmoid_arg=1.133 -> confidence=0.4000 (hard_cap applied)
+   Confidence breakdown: alpha0=-1.000, sigmoid_arg=0.900 -> confidence=0.4000 (hard_cap applied)
      term 'body_snr_inside_predicted_bbox': raw=8.00, normalized=1.000, alpha=+0.500 -> contribution=+0.500
      term 'body_extent_px':                  raw=16.00, normalized=1.000, alpha=+1.000 -> contribution=+1.000
      term 'blob_count':                      raw=3.00, normalized=1.000, alpha=+0.400 -> contribution=+0.400
-     term 'residual_px':                     raw=0.10, normalized=0.100, alpha=+0.000 -> contribution=+0.000
 
 The sigmoid argument before clamping is ``-1.0 + 0.5 + 1.0 + 0.4 =
-0.9``, the sigmoid evaluates to ``0.711``, and the ``hard_cap = 0.4``
+0.9`` (matching the three terms in ``_BODY_BLOB_CONFIDENCE_SPEC``),
+the sigmoid evaluates to ``0.711``, and the ``hard_cap = 0.4``
 post-sigmoid clamp drops the headline confidence to the BODY_BLOB
 ceiling.
 
@@ -364,11 +366,13 @@ See also
   information-matrix to covariance step that turns the LM Jacobian at
   convergence into the per-technique 2x2 (or 3x3) covariance reported
   on every ``NavTechniqueResult``.  ``BodyDiscCorrelateNav``'s
-  covariance comes from the pyramid wrapper's Hessian-of-NCC; both
-  ``BodyLimbNav`` and ``BodyTerminatorNav`` derive theirs from the
-  Tukey-reweighted information matrix; ``BodyBlobNav`` derives a
-  diagonal precision-weighted-mean covariance from the per-blob CRLB
-  weights.
+  covariance is the Fisher / CRLB covariance produced by
+  :func:`nav.support.correlate.fisher_covariance` inside
+  :func:`nav.support.correlate.evaluate_candidate` and forwarded
+  through ``navigate_with_pyramid_kpeaks``; both ``BodyLimbNav`` and
+  ``BodyTerminatorNav`` derive theirs from the Tukey-reweighted
+  information matrix; ``BodyBlobNav`` derives a diagonal
+  precision-weighted-mean covariance from the per-blob CRLB weights.
 - :func:`nav.feature.composition.compose_template_features` — the
   Z-buffer paint helper that ``BodyDiscCorrelateNav`` uses to fuse
   per-body templates into a single composite for the NCC.
