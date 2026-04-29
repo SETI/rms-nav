@@ -288,7 +288,12 @@ def _make_blob(
 
 
 def test_compose_dialog_overlay_renders_body_blob_circle() -> None:
-    """A BODY_BLOB feature renders a 1-pixel circle outline at its centroid."""
+    """A BODY_BLOB feature renders a 1-pixel circle outline at its centroid.
+
+    Pin the exact pixel set Bresenham produces for radius 5 centered at
+    (20, 20) so a future change to the circle algorithm or the dialog
+    overlay's painting logic fails this test loud.
+    """
     from nav.feature.composition import compose_dialog_overlay
 
     blob = _make_blob(
@@ -298,16 +303,51 @@ def test_compose_dialog_overlay_renders_body_blob_circle() -> None:
         bbox=(15, 15, 25, 25),
     )
     image, mask = compose_dialog_overlay([blob], (40, 40))
-    # The circle's interior centroid stays unpainted (outline-only).
-    assert image[20, 20] == 0.0
-    # Several pixels around the radius=5 circumference are painted.
-    painted = np.count_nonzero(image)
-    assert painted >= 12  # ~2*pi*r ~ 31; outline thickness 1 yields >= 12 in any half-plane
-    assert painted == np.count_nonzero(mask)
+    expected_pixels = {
+        (15, 18),
+        (15, 19),
+        (15, 20),
+        (15, 21),
+        (15, 22),
+        (16, 17),
+        (16, 23),
+        (17, 16),
+        (17, 24),
+        (18, 15),
+        (18, 25),
+        (19, 15),
+        (19, 25),
+        (20, 15),
+        (20, 25),
+        (21, 15),
+        (21, 25),
+        (22, 15),
+        (22, 25),
+        (23, 16),
+        (23, 24),
+        (24, 17),
+        (24, 23),
+        (25, 18),
+        (25, 19),
+        (25, 20),
+        (25, 21),
+        (25, 22),
+    }
+    actual_pixels = set(zip(*np.nonzero(image), strict=True))
+    assert actual_pixels == expected_pixels
+    assert set(zip(*np.nonzero(mask), strict=True)) == expected_pixels
+    assert np.count_nonzero(image) == len(expected_pixels)
+    assert np.count_nonzero(mask) == len(expected_pixels)
 
 
 def test_compose_dialog_overlay_blob_clips_to_extfov_bounds() -> None:
-    """A blob whose circle extends past ext-FOV is silently clipped."""
+    """A blob whose circle extends past ext-FOV is silently clipped.
+
+    With center (2, 2) and radius 10 against a 10x10 ext-FOV, the
+    Bresenham outline only intersects a single in-bounds pixel.  Pin
+    the exact pixel set so a regression in either the clipping logic
+    or the circle algorithm fails this test loud.
+    """
     from nav.feature.composition import compose_dialog_overlay
 
     blob = _make_blob(
@@ -318,6 +358,8 @@ def test_compose_dialog_overlay_blob_clips_to_extfov_bounds() -> None:
     )
     image, mask = compose_dialog_overlay([blob], (10, 10))
     assert image.shape == (10, 10)
-    # Some painted pixels exist (the lower-right quadrant of the circle).
-    assert np.count_nonzero(image) > 0
-    assert mask.any()
+    expected_pixels = {(9, 9)}
+    assert set(zip(*np.nonzero(image), strict=True)) == expected_pixels
+    assert set(zip(*np.nonzero(mask), strict=True)) == expected_pixels
+    assert np.count_nonzero(image) == 1
+    assert np.count_nonzero(mask) == 1

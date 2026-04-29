@@ -417,7 +417,8 @@ selection to resolve to exactly one image:
 
 .. code-block:: bash
 
-   nav_offset coiss --manual --image-filespec W1521598221_1_CALIB
+   echo W1521598221_1_CALIB > /tmp/img_list.txt
+   nav_offset coiss --manual --image-file-list /tmp/img_list.txt
 
 The driver loads the image, runs the orchestrator's ``prepare`` step
 (image classifier + NavModels + features + reliability gate), opens the

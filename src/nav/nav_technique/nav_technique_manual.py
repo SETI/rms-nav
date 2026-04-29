@@ -185,12 +185,20 @@ def run_manual_nav(
 
     Returns:
         The :class:`NavTechniqueResult` produced by the dialog, or
-        ``None`` when no template-bearing features are available (the
-        dialog has nothing to overlay so it is not opened).
+        ``None`` when no supported overlay features paint any pixels
+        into the ext-FOV composite.  Supported overlay types are
+        template-bearing features (``BODY_DISC`` / ``RING_ANNULUS`` /
+        ``CARTOGRAPHIC_MODEL``), polyline-bearing features (``LIMB_ARC``
+        / ``TERMINATOR_ARC`` / ``RING_EDGE``), and ``BODY_BLOB`` (which
+        renders as a 1-pixel circle outline).  The dialog is opened
+        only when the composed mask is non-empty; an off-frame blob or
+        a polyline whose vertices all clip out-of-bounds is treated as
+        if no renderable feature were present.
     """
     # Local imports keep heavyweight dependencies (NavOrchestrator, NavModel
     # registry) out of import-time graphs for callers that only need the
     # autonomous pipeline.
+    from nav.feature.composition import compose_dialog_overlay
     from nav.nav_model import build_models_for_obs
     from nav.nav_orchestrator.orchestrator import NavOrchestrator
 
@@ -205,5 +213,18 @@ def run_manual_nav(
     feasibility = technique.is_feasible(features)
     if not feasibility.feasible:
         IMAGE_LOGGER.warning('Manual navigation skipped: %s', feasibility.reason)
+        return None
+    # The metadata-only feasibility check counted features by geometry
+    # presence; verify the actual composed overlay against the same
+    # ext-FOV shape the dialog will display so off-frame blobs and
+    # all-clipped polylines fail loudly here instead of opening an
+    # empty dialog.
+    shape = context.image_ext.shape
+    _overlay_img, overlay_mask = compose_dialog_overlay(features, (int(shape[0]), int(shape[1])))
+    if not overlay_mask.any():
+        IMAGE_LOGGER.warning(
+            'Manual navigation skipped: composed overlay is empty (every renderable '
+            'feature clipped out of the ext-FOV)'
+        )
         return None
     return technique.navigate(features, context)

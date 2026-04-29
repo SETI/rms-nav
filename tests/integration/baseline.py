@@ -73,14 +73,44 @@ class Baseline:
         )
 
 
+_REQUIRED_BASELINE_KEYS: tuple[str, ...] = (
+    'image_id',
+    'offset_dv_px',
+    'offset_du_px',
+    'confidence',
+)
+
+
 def load_baseline(path: Path) -> Baseline:
-    """Parse one baseline JSON file."""
-    raw = json.loads(path.read_text())
+    """Parse one baseline JSON file with strict schema validation.
+
+    Wraps JSON-decode errors, missing keys, and wrong-type fields in
+    diagnostics that include the offending file path so a malformed
+    baseline fails loudly with the file under suspicion identified.
+    """
+    try:
+        raw = json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        raise ValueError(f'{path}: cannot parse JSON: {exc}') from exc
+    if not isinstance(raw, dict):
+        raise ValueError(f'{path}: top-level JSON must be a mapping, got {type(raw).__name__}')
+    missing = [k for k in _REQUIRED_BASELINE_KEYS if k not in raw]
+    if missing:
+        raise KeyError(f'{path}: missing required key(s): {missing}')
+    image_id = raw['image_id']
+    if not isinstance(image_id, str):
+        raise TypeError(f'{path}: image_id must be a string, got {type(image_id).__name__}')
+    floats: dict[str, float] = {}
+    for key in ('offset_dv_px', 'offset_du_px', 'confidence'):
+        value = raw[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TypeError(f'{path}: {key!r} must be a number, got {type(value).__name__}')
+        floats[key] = float(value)
     return Baseline(
-        image_id=str(raw['image_id']),
-        offset_dv_px=float(raw['offset_dv_px']),
-        offset_du_px=float(raw['offset_du_px']),
-        confidence=float(raw['confidence']),
+        image_id=image_id,
+        offset_dv_px=floats['offset_dv_px'],
+        offset_du_px=floats['offset_du_px'],
+        confidence=floats['confidence'],
     )
 
 

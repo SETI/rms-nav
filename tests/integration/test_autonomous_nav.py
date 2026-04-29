@@ -105,6 +105,12 @@ def test_one_library_image(sidecar: Sidecar, tmp_path: Path) -> None:
     assert actual_status == sidecar.expected.status, (
         f'{sidecar.image_id}: expected status={sidecar.expected.status}, got {actual_status}'
     )
+    expected_success = sidecar.expected.status == 'ok'
+    assert success == expected_success, (
+        f'{sidecar.image_id}: success={success!r} disagrees with status={actual_status!r} '
+        f'(expected success={expected_success!r} for expected.status='
+        f'{sidecar.expected.status!r})'
+    )
 
     # (b) confidence_rank (no slack, exact match)
     actual_rank = nav_meta.get('confidence_rank')
@@ -150,8 +156,6 @@ def test_one_library_image(sidecar: Sidecar, tmp_path: Path) -> None:
             f'{sidecar.image_id}: technique {name!r} unexpectedly produced '
             f'a result (per_technique={technique_names})'
         )
-
-    del success  # asserted via status block above
 
 
 # ---------------------------------------------------------------------------

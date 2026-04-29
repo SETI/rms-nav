@@ -242,26 +242,31 @@ def _run_manual_pass(
     handlers are attached during prepare + dialog.
     """
     from datetime import datetime
+    from itertools import islice
 
     from nav.config import IMAGE_LOGGER, image_log_handlers
     from nav.nav_technique import run_manual_nav
 
     assert DATASET is not None
-    selected = list(DATASET.yield_image_files_from_arguments(arguments))
-    if not selected:
+    # Bound the dataset traversal to at most six items: we only need to
+    # distinguish the {0, 1, >1} cases and to surface up to five filespecs
+    # in the multi-match diagnostic.  Larger datasets used to scan the
+    # whole tree just to print a count.
+    selected_preview = list(islice(DATASET.yield_image_files_from_arguments(arguments), 6))
+    if not selected_preview:
         MAIN_LOGGER.error('No images matched the selection arguments')
         sys.exit(1)
-    if len(selected) > 1:
-        names = ', '.join(b.image_files[0].image_file_url.as_posix() for b in selected[:5])
+    if len(selected_preview) > 1:
+        names = ', '.join(b.image_files[0].image_file_url.as_posix() for b in selected_preview[:5])
         MAIN_LOGGER.error(
-            '--manual requires exactly one image; selection matched %d (first few: %s).'
-            ' Tighten the selection flags.',
-            len(selected),
+            '--manual requires exactly one image; selection matched at least %d '
+            '(first few: %s).  Tighten the selection flags.',
+            len(selected_preview),
             names,
         )
         sys.exit(1)
 
-    image_files = selected[0]
+    image_files = selected_preview[0]
     if len(image_files.image_files) != 1:
         MAIN_LOGGER.error(
             '--manual requires a one-image batch; got %d.', len(image_files.image_files)
@@ -283,9 +288,9 @@ def _run_manual_pass(
         obs = cast(ObsSnapshotInst, obs_class.from_file(image_url, **extra_params))
         result = run_manual_nav(obs, config=DEFAULT_CONFIG)
         if result is None:
-            IMAGE_LOGGER.warning(
-                'Manual navigation skipped: no template-bearing features available'
-            )
+            # ``run_manual_nav`` already logged the precise infeasibility
+            # reason (no_renderable_features_for_manual_nav, empty composed
+            # overlay, etc.); avoid re-logging stale template-only wording.
             sys.exit(2)
         if result.spurious:
             IMAGE_LOGGER.warning('Manual navigation cancelled')

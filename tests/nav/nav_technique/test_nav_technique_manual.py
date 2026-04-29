@@ -54,9 +54,11 @@ class _StubStarModel(NavModel):
         template_img: np.ndarray | None
         template_mask: np.ndarray | None
         if self._with_template:
-            template_img = np.zeros(self._obs.extdata.shape, dtype=np.float64)
-            template_img[10:13, 10:13] = 1.0
-            template_mask = template_img > 0
+            # Template arrays are sized to the bbox (6x6 here for the
+            # (8, 8, 14, 14) bbox below) so ``compose_template_features``
+            # paints a non-empty patch into the ext-FOV composite.
+            template_img = np.ones((6, 6), dtype=np.float64)
+            template_mask = np.ones((6, 6), dtype=bool)
         else:
             template_img = None
             template_mask = None

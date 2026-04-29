@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from tests.integration.sidecar import load_sidecar
+from tests.integration.sidecar import SidecarValidationError, load_sidecar
 
 from nav.ui.library_entry import (
     LibraryEntryDraft,
@@ -139,5 +139,7 @@ def test_build_sidecar_yaml_unedited_fails_validation(tmp_path: Path) -> None:
     )
     p = tmp_path / 'X.yaml'
     p.write_text(yaml_text)
-    with pytest.raises(Exception, match=r'TODO_REPLACE_PRIMARY_CLASS|primary scene_tag'):
+    with pytest.raises(
+        SidecarValidationError, match=r'TODO_REPLACE_PRIMARY_CLASS|primary scene_tag'
+    ):
         load_sidecar(p)

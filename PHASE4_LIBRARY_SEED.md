@@ -130,17 +130,14 @@ Per the plan (Part 0 §40), every sidecar's offset must come from manually navig
 
 ## Workflow per image
 
-1. **Run the manual-nav dialog**:
+1. **Run the manual-nav dialog** (write the candidate's filespec into a one-line list file and point ``--image-file-list`` at it):
 
    ```bash
-   nav_offset coiss --manual --image-filespec <IMAGE_NAME_NO_EXT>
+   echo N1521598221_1 > /tmp/img_list.txt
+   nav_offset coiss --manual --image-file-list /tmp/img_list.txt
    ```
 
-   For a Cassini Rhea NAC frame:
-
-   ```bash
-   nav_offset coiss --manual --image-filespec N1521598221_1
-   ```
+   ``--image-file-list`` accepts any documented selector (filespec, basename) and the ``--manual`` driver will refuse a list that resolves to anything other than exactly one image.
 
    The dialog will load, show the source image plus the predicted model overlay, and let you drag the offset by hand.
 

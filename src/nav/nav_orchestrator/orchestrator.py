@@ -181,8 +181,8 @@ class NavOrchestrator(NavBase):
         provenance = self._make_provenance(obs)
         context, image_classifier = self._make_context(obs, provenance)
         self._log_classifier_verdict(image_classifier)
-        self._build_models()
-        all_features = self._extract_features(context)
+        built_models = self._build_models()
+        all_features = self._extract_features(context, built_models)
         if not apply_gate:
             self._logger.info(
                 'Reliability gate skipped (apply_gate=False); returning %d feature(s)',
@@ -210,8 +210,8 @@ class NavOrchestrator(NavBase):
                 image_classifier=image_classifier,
                 provenance=provenance,
             )
-        self._build_models()
-        all_features = self._extract_features(context)
+        built_models = self._build_models()
+        all_features = self._extract_features(context, built_models)
         kept, gated = self._extract_and_gate(all_features)
         if gated:
             gated_kinds: dict[str, int] = {}
@@ -220,8 +220,8 @@ class NavOrchestrator(NavBase):
                 gated_kinds[key] = gated_kinds.get(key, 0) + 1
             self._logger.debug('Gated breakdown: %s', gated_kinds)
         feature_inventory = self._build_inventory(kept, gated)
-        model_metadata = self._collect_model_metadata()
-        annotations = self._collect_annotations(context)
+        model_metadata = self._collect_model_metadata(built_models)
+        annotations = self._collect_annotations(context, built_models)
         if not all_features:
             return self._fail(
                 status_reason=NavStatusReason.NO_FEATURES_EXTRACTED,
@@ -345,17 +345,21 @@ class NavOrchestrator(NavBase):
                     tr.at_edge,
                 )
 
-    def _build_models(self) -> None:
+    def _build_models(self) -> list[NavModel]:
         """Call ``create_model`` on every registered NavModel.
 
         Wrapped so :meth:`prepare` and :meth:`navigate` share the same
-        log line and exception-sandbox behavior.
+        log line and exception-sandbox behavior.  Models whose
+        ``create_model`` raises are dropped from the returned list so
+        downstream feature / annotation / metadata collection skips
+        them entirely (rather than processing partially-built state).
         """
         self._logger.info(
             'Building %d NavModel(s): %s',
             len(self._registry.models),
             ', '.join(m.name for m in self._registry.models) or '(none)',
         )
+        built_models: list[NavModel] = []
         for model in self._registry.models:
             try:
                 model.create_model()
@@ -364,6 +368,9 @@ class NavOrchestrator(NavBase):
                     'NavModel %s.create_model raised; skipping its features and annotations',
                     model.name,
                 )
+                continue
+            built_models.append(model)
+        return built_models
 
     def _extract_and_gate(
         self, all_features: list[NavFeature]
@@ -409,14 +416,14 @@ class NavOrchestrator(NavBase):
         for line in STATUS_REASON_INFO_TEMPLATE.get(status_reason, ()):
             self._logger.info(line)
 
-    def _collect_model_metadata(self) -> dict[str, dict[str, Any]]:
-        """Snapshot ``model.metadata`` from every registered NavModel."""
+    def _collect_model_metadata(self, models: list[NavModel]) -> dict[str, dict[str, Any]]:
+        """Snapshot ``model.metadata`` from every successfully-built NavModel."""
         out: dict[str, dict[str, Any]] = {}
-        for model in self._registry.models:
+        for model in models:
             out[model.name] = dict(model.metadata)
         return out
 
-    def _collect_annotations(self, context: NavContext) -> Annotations:
+    def _collect_annotations(self, context: NavContext, models: list[NavModel]) -> Annotations:
         """Merge per-NavModel annotation collections into one.
 
         Each model's ``to_annotations`` is invoked; failures are logged and
@@ -424,7 +431,7 @@ class NavOrchestrator(NavBase):
         model never blocks the rest of the pipeline.
         """
         merged = Annotations()
-        for model in self._registry.models:
+        for model in models:
             try:
                 model_annotations = model.to_annotations(context)
             except Exception:  # plugin sandbox; mirrors _extract_features
@@ -436,8 +443,8 @@ class NavOrchestrator(NavBase):
             merged.add_annotations(model_annotations)
         return merged
 
-    def _extract_features(self, context: NavContext) -> list[NavFeature]:
-        """Iterate registered models and gather their features.
+    def _extract_features(self, context: NavContext, models: list[NavModel]) -> list[NavFeature]:
+        """Iterate built models and gather their features.
 
         A misbehaving NavModel is logged with a full traceback and treated
         as if it emitted zero features.  Catching every exception is
@@ -447,7 +454,7 @@ class NavOrchestrator(NavBase):
         plugin has its own failure modes.
         """
         all_features: list[NavFeature] = []
-        for model in self._registry.models:
+        for model in models:
             try:
                 emitted = model.to_features(context)
             except Exception:  # plugin sandbox; see docstring

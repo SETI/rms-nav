@@ -16,6 +16,7 @@ failure later.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -301,9 +302,21 @@ def _validate_camera_rotation(raw: Any, *, path: Path) -> CameraRotationExpected
     rotation_deg = raw.get('rotation_deg')
     uncertainty_deg = raw.get('uncertainty_deg')
     for label, value in (('rotation_deg', rotation_deg), ('uncertainty_deg', uncertainty_deg)):
-        if value is not None and not isinstance(value, (int, float)):
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            raise SidecarValidationError(
+                f'{path}: camera_rotation_expected.{label} must be a number or null, '
+                f'got bool {value!r}'
+            )
+        if not isinstance(value, (int, float)):
             raise SidecarValidationError(
                 f'{path}: camera_rotation_expected.{label} must be a number or null'
+            )
+        if not math.isfinite(float(value)):
+            raise SidecarValidationError(
+                f'{path}: camera_rotation_expected.{label} must be a finite number or null, '
+                f'got {value!r}'
             )
     return CameraRotationExpected(
         rotation_deg=None if rotation_deg is None else float(rotation_deg),
@@ -400,9 +413,14 @@ def _require_float(raw: dict[str, Any], key: str, *, path: Path) -> float:
     if key not in raw:
         raise _missing(path, key)
     value = raw[key]
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if isinstance(value, bool):
+        raise SidecarValidationError(f'{path}: {key!r} must be a number, got bool {value!r}')
+    if not isinstance(value, (int, float)):
         raise SidecarValidationError(f'{path}: {key!r} must be a number, got {value!r}')
-    return float(value)
+    coerced = float(value)
+    if not math.isfinite(coerced):
+        raise SidecarValidationError(f'{path}: {key!r} must be a finite number, got {value!r}')
+    return coerced
 
 
 def _require_enum(raw: dict[str, Any], key: str, allowed: frozenset[str], *, path: Path) -> str:

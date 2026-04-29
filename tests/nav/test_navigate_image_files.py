@@ -220,11 +220,17 @@ def test_grayscale_to_rgb_stretch_shape_and_dtype() -> None:
 
 
 def test_grayscale_to_rgb_stretch_handles_constant_image() -> None:
-    """A constant image renders as an all-zero (or saturated-equivalent) field."""
+    """A constant image renders as an all-zero RGB field.
+
+    The 0.001 / 0.999 quantiles collapse to the constant value, so the
+    stretch helper bumps ``white`` to ``nextafter(black, inf)``; the
+    subsequent ``(value - black) / (white - black)`` evaluates to 0
+    everywhere and ``(0 * 255).astype(uint8)`` is uniformly zero.
+    """
     image = np.full((4, 4), 5.0, dtype=np.float64)
     rgb = _grayscale_to_rgb_with_quantile_stretch(image)
-    assert rgb.shape == (4, 4, 3)
-    assert rgb.dtype == np.uint8
+    expected = np.zeros((4, 4, 3), dtype=np.uint8)
+    np.testing.assert_array_equal(rgb, expected)
 
 
 def test_grayscale_to_rgb_stretch_treats_non_finite_as_zero() -> None:
