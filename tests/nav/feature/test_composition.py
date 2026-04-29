@@ -165,3 +165,159 @@ def test_compose_clamps_bbox_to_extfov() -> None:
     # No paint leaks outside the (8:10, 8:10) clipped region.
     assert image[:8, :8].sum() == 0.0
     assert not mask[:8, :8].any()
+
+
+def _make_limb(
+    *, feature_id: str, vertices: list[tuple[float, float]], bbox: tuple[int, int, int, int]
+) -> NavFeature:
+    """Build a LIMB_ARC feature with the given vertices."""
+    from nav.feature.flags import LimbArcFlags
+    from nav.feature.geometry import LimbPolyline
+
+    verts = np.asarray(vertices, dtype=np.float64).reshape(-1, 2)
+    return NavFeature(
+        feature_id=feature_id,
+        feature_type=NavFeatureType.LIMB_ARC,
+        source_model='body',
+        geometry=LimbPolyline(
+            vertices_vu=verts,
+            normals_vu=np.zeros_like(verts),
+            sigma_normal_per_vertex_px=np.full(verts.shape[0], 0.5),
+            sigma_tangent_per_vertex_px=np.full(verts.shape[0], 0.5),
+            bbox_extfov_vu=bbox,
+        ),
+        subject_range_km=100.0,
+        position_cov_px=None,
+        intensity_sigma_rel=0.0,
+        preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
+        reliability=0.9,
+        reliability_reasons=NavReliabilityBreakdown(visible_arc_fraction=1.0),
+        usable_types=frozenset({NavFeatureType.LIMB_ARC}),
+        flags=LimbArcFlags(body_name='X', visible_arc_fraction=1.0),
+    )
+
+
+# ---------------------------------------------------------------------------
+# compose_dialog_overlay
+# ---------------------------------------------------------------------------
+
+
+def test_compose_dialog_overlay_paints_limb_polyline_pixels() -> None:
+    """Limb-arc vertices are rasterized into the composite mask."""
+    from nav.feature.composition import compose_dialog_overlay
+
+    limb = _make_limb(
+        feature_id='limb_arc:X',
+        vertices=[(2.0, 3.0), (4.0, 5.0), (6.0, 7.0)],
+        bbox=(2, 3, 7, 8),
+    )
+    image, mask = compose_dialog_overlay([limb], (10, 10))
+    for v, u in [(2, 3), (4, 5), (6, 7)]:
+        assert mask[v, u]
+        assert image[v, u] == 1.0
+    # Pixels not in the polyline are untouched.
+    assert image[0, 0] == 0.0
+    assert not mask[0, 0]
+
+
+def test_compose_dialog_overlay_drops_out_of_bounds_vertices() -> None:
+    """Vertices outside the ext-FOV are silently clipped."""
+    from nav.feature.composition import compose_dialog_overlay
+
+    limb = _make_limb(
+        feature_id='limb_arc:edge',
+        vertices=[(-1.0, 5.0), (5.0, 5.0), (5.0, 99.0)],
+        bbox=(0, 0, 10, 10),
+    )
+    _image, mask = compose_dialog_overlay([limb], (10, 10))
+    assert mask[5, 5]
+    assert mask.sum() == 1
+
+
+def test_compose_dialog_overlay_combines_template_and_polyline() -> None:
+    """A body-disc template + a limb-arc polyline both land in the composite."""
+    from nav.feature.composition import compose_dialog_overlay
+
+    body = _make_body(
+        feature_id='body_disc:X',
+        bbox=(0, 0, 3, 3),
+        template_value=4.0,
+        subject_range_km=100.0,
+    )
+    limb = _make_limb(
+        feature_id='limb_arc:X',
+        vertices=[(7.0, 7.0)],
+        bbox=(7, 7, 8, 8),
+    )
+    image, mask = compose_dialog_overlay([body, limb], (10, 10))
+    assert image[0, 0] == 4.0  # body template kept
+    assert mask[0, 0]
+    assert image[7, 7] == 1.0  # polyline pixel painted
+    assert mask[7, 7]
+
+
+def _make_blob(
+    *,
+    feature_id: str,
+    center: tuple[float, float],
+    diameter_px: float,
+    bbox: tuple[int, int, int, int],
+) -> NavFeature:
+    """Build a BODY_BLOB feature."""
+    from nav.feature.flags import BodyBlobFlags
+    from nav.feature.geometry import BodyBlobGeometry
+
+    return NavFeature(
+        feature_id=feature_id,
+        feature_type=NavFeatureType.BODY_BLOB,
+        source_model='body',
+        geometry=BodyBlobGeometry(
+            predicted_center_vu=center,
+            bbox_extfov_vu=bbox,
+            predicted_diameter_px=diameter_px,
+        ),
+        subject_range_km=100.0,
+        position_cov_px=None,
+        intensity_sigma_rel=0.0,
+        preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
+        reliability=0.5,
+        reliability_reasons=NavReliabilityBreakdown(blob_snr=0.5),
+        usable_types=frozenset({NavFeatureType.BODY_BLOB}),
+        flags=BodyBlobFlags(body_name='X', predicted_diameter_px=diameter_px),
+    )
+
+
+def test_compose_dialog_overlay_renders_body_blob_circle() -> None:
+    """A BODY_BLOB feature renders a 1-pixel circle outline at its centroid."""
+    from nav.feature.composition import compose_dialog_overlay
+
+    blob = _make_blob(
+        feature_id='body_blob:X',
+        center=(20.0, 20.0),
+        diameter_px=10.0,
+        bbox=(15, 15, 25, 25),
+    )
+    image, mask = compose_dialog_overlay([blob], (40, 40))
+    # The circle's interior centroid stays unpainted (outline-only).
+    assert image[20, 20] == 0.0
+    # Several pixels around the radius=5 circumference are painted.
+    painted = np.count_nonzero(image)
+    assert painted >= 12  # ~2*pi*r ~ 31; outline thickness 1 yields >= 12 in any half-plane
+    assert painted == np.count_nonzero(mask)
+
+
+def test_compose_dialog_overlay_blob_clips_to_extfov_bounds() -> None:
+    """A blob whose circle extends past ext-FOV is silently clipped."""
+    from nav.feature.composition import compose_dialog_overlay
+
+    blob = _make_blob(
+        feature_id='body_blob:edge',
+        center=(2.0, 2.0),
+        diameter_px=20.0,  # radius 10, way past (0,0)
+        bbox=(-10, -10, 12, 12),
+    )
+    image, mask = compose_dialog_overlay([blob], (10, 10))
+    assert image.shape == (10, 10)
+    # Some painted pixels exist (the lower-right quadrant of the circle).
+    assert np.count_nonzero(image) > 0
+    assert mask.any()

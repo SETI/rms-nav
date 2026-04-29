@@ -6,6 +6,11 @@ nav.ui
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: nav.ui.library_entry
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 nav.ui.mosaic_viewer
 --------------------
 

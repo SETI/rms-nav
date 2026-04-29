@@ -428,7 +428,7 @@ Display layer
        via ``set_axis_tick_options``.
      - ``y_flip=True`` for ring mosaics (array row 0 = inner radius, displayed at
        bottom); ``y_flip=False`` for body mosaics (row 0 = top of display).
-     - Uses :func:`nav.ui.common.apply_linear_gamma_stretch` for image contrast,
+     - Uses :func:`nav.support.image.apply_linear_gamma_stretch` for image contrast,
        ensuring a consistent ``data ** gamma`` convention across all viewers.
      - Does *not* use :class:`nav.ui.common.ZoomPanController` — that helper
        assumes a pre-scaled ``QLabel`` inside a ``QScrollArea``, which is
@@ -486,7 +486,7 @@ Gamma stretch convention
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
 All viewers use the ``((clip - black) / (white - black)) ** gamma`` convention
-implemented by :func:`nav.ui.common.apply_linear_gamma_stretch`. A gamma of
+implemented by :func:`nav.support.image.apply_linear_gamma_stretch`. A gamma of
 ``1.0`` is linear; values below ``1.0`` brighten mid-tones (the common display
 choice). This convention is now uniformly applied across
 ``TiledImageWidget``, ``manual_nav_dialog``, ``nav_backplane_viewer``, and

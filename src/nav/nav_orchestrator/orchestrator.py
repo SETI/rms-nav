@@ -151,6 +151,47 @@ class NavOrchestrator(NavBase):
         self._gate = FeatureReliabilityGate()
         self._rms_nav_version = rms_nav_version
 
+    def prepare(
+        self,
+        obs: ObsSnapshotInst,
+        *,
+        apply_gate: bool = True,
+    ) -> tuple[NavContext, list[NavFeature]]:
+        """Build per-image state without running any technique.
+
+        Runs the same pre-technique pipeline as :meth:`navigate`: builds
+        the provenance envelope and the :class:`NavContext`, calls every
+        registered NavModel's ``create_model``, and extracts features.
+        Hard-failure image classes are logged but **not** short-circuited
+        — the caller (manual-nav dialog, debugger) decides what to do on
+        a blank or saturated frame.
+
+        Parameters:
+            obs: The observation snapshot to prepare.
+            apply_gate: When ``True`` (the default) the reliability gate
+                runs and only the kept features are returned.  When
+                ``False`` every emitted feature is returned, gated or
+                not — useful for the manual-nav dialog, where the
+                operator overrides the autonomous reliability decision.
+
+        Returns:
+            ``(context, features)``.  ``features`` is the gated subset
+            when ``apply_gate=True``, otherwise the full set.
+        """
+        provenance = self._make_provenance(obs)
+        context, image_classifier = self._make_context(obs, provenance)
+        self._log_classifier_verdict(image_classifier)
+        self._build_models()
+        all_features = self._extract_features(context)
+        if not apply_gate:
+            self._logger.info(
+                'Reliability gate skipped (apply_gate=False); returning %d feature(s)',
+                len(all_features),
+            )
+            return context, all_features
+        kept, _gated = self._extract_and_gate(all_features)
+        return context, kept
+
     def navigate(self, obs: ObsSnapshotInst) -> NavResult:
         """Run the full pipeline on one observation.
 
@@ -169,27 +210,9 @@ class NavOrchestrator(NavBase):
                 image_classifier=image_classifier,
                 provenance=provenance,
             )
-        self._logger.info(
-            'Building %d NavModel(s): %s',
-            len(self._registry.models),
-            ', '.join(m.name for m in self._registry.models) or '(none)',
-        )
-        for model in self._registry.models:
-            try:
-                model.create_model()
-            except Exception:  # plugin sandbox; mirrors _extract_features
-                self._logger.exception(
-                    'NavModel %s.create_model raised; skipping its features and annotations',
-                    model.name,
-                )
+        self._build_models()
         all_features = self._extract_features(context)
-        kept, gated = self._gate.apply(all_features)
-        self._logger.info(
-            'Reliability gate: %d feature(s) kept, %d gated (out of %d emitted)',
-            len(kept),
-            len(gated),
-            len(all_features),
-        )
+        kept, gated = self._extract_and_gate(all_features)
         if gated:
             gated_kinds: dict[str, int] = {}
             for record in gated:
@@ -321,6 +344,39 @@ class NavOrchestrator(NavBase):
                     tr.spurious,
                     tr.at_edge,
                 )
+
+    def _build_models(self) -> None:
+        """Call ``create_model`` on every registered NavModel.
+
+        Wrapped so :meth:`prepare` and :meth:`navigate` share the same
+        log line and exception-sandbox behavior.
+        """
+        self._logger.info(
+            'Building %d NavModel(s): %s',
+            len(self._registry.models),
+            ', '.join(m.name for m in self._registry.models) or '(none)',
+        )
+        for model in self._registry.models:
+            try:
+                model.create_model()
+            except Exception:  # plugin sandbox; mirrors _extract_features
+                self._logger.exception(
+                    'NavModel %s.create_model raised; skipping its features and annotations',
+                    model.name,
+                )
+
+    def _extract_and_gate(
+        self, all_features: list[NavFeature]
+    ) -> tuple[list[NavFeature], list[GatedFeatureRecord]]:
+        """Apply the reliability gate and emit the standard summary log line."""
+        kept, gated = self._gate.apply(all_features)
+        self._logger.info(
+            'Reliability gate: %d feature(s) kept, %d gated (out of %d emitted)',
+            len(kept),
+            len(gated),
+            len(all_features),
+        )
+        return kept, gated
 
     def _fail(
         self,

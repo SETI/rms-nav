@@ -1,0 +1,29 @@
+schema_version: 1
+image_id: N1597846115_2_CALIB
+mission: CASSINI_ISS
+camera: NAC
+filter_combo: 'CL1+CL2'
+image_url: 'pds3://calibrated/COISS_2xxx/COISS_2048/data/1597823641_1597899095/N1597846115_2_CALIB.IMG'
+
+scene_tags:
+  - high_phase_terminator
+
+ground_truth:
+  offset_dv_px: 5.1857
+  offset_du_px: 1.3026
+  offset_uncertainty_px: 1.0
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-04-28
+  ui_version: 'rms-nav 0.1.dev25'
+  notes: |
+    A high-phase terminator arc with no other features in the FOV.
+
+    Phase-4 status: BodyLimbNav and BodyTerminatorNav both fire and BodyLimbNav's offset (6.09, 1.19) lands within ~1 px of the operator's ground truth. The ensemble flags the result conflicted because the summed-confidence gap between the two techniques (0.045) falls below the agreement_gap threshold (0.5), even though the techniques' offsets agree closely. The headline answer is correct; only the ok-vs-conflicted status decision is wrong. Phase 10 calibration target: lower agreement_gap (or replace it with a per-axis disagreement-in-pixels test) so near-agreeing techniques don't trip the conflict detector.
+
+expected:
+  status: conflicted
+  confidence_tier: conflicted
+  primary_technique: BodyLimbNav
+  techniques_must_run: [BodyLimbNav, BodyTerminatorNav]
+  techniques_must_skip: []

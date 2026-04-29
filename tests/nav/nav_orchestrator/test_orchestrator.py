@@ -407,3 +407,71 @@ def test_collect_annotations_skips_failing_model(
     assert result.status == 'ok'
     assert 'to_annotations raised' in captured.out
     assert 'synthetic to_annotations failure' in captured.out
+
+
+def test_prepare_returns_context_and_features(fake_obs: _FakeObs) -> None:
+    """``prepare`` builds the context and returns the gated feature list."""
+    obs = fake_obs
+    model = _FakeStarModel(obs, feature_count=3)
+    orch = NavOrchestrator([model])
+    context, features = orch.prepare(obs)  # type: ignore[arg-type]
+    assert context.obs is obs
+    assert len(features) == 3
+    assert {f.feature_type for f in features} == {NavFeatureType.STAR}
+
+
+def test_prepare_does_not_short_circuit_on_blank_image() -> None:
+    """``prepare`` keeps going on hard-failure images so manual nav can inspect them.
+
+    ``navigate`` returns a failed NavResult on a blank image, but
+    ``prepare`` is the entry point for the manual-nav dialog — the
+    operator may legitimately want to look at a blank or saturated frame.
+    """
+    obs = _FakeObs(image=np.zeros((64, 64), np.float64))
+    model = _FakeStarModel(obs, feature_count=0)
+    orch = NavOrchestrator([model])
+    context, features = orch.prepare(obs)  # type: ignore[arg-type]
+    assert context.image_classifier.image_class == 'blank'
+    assert features == []
+
+
+def test_prepare_drops_models_via_only_models_filter() -> None:
+    """The ``only_models`` glob filter is honored by ``prepare`` too."""
+    obs = _FakeObs()
+    model = _FakeStarModel(obs, feature_count=3)
+    orch = NavOrchestrator([model], only_models='!stars')
+    _context, features = orch.prepare(obs)  # type: ignore[arg-type]
+    assert features == []
+
+
+def test_prepare_apply_gate_false_returns_gated_features() -> None:
+    """``apply_gate=False`` returns every emitted feature, including gated ones."""
+
+    class _LowReliabilityModel(_FakeStarModel):
+        def to_features(self, context: NavContext) -> list[NavFeature]:
+            features = super().to_features(context)
+            return [
+                NavFeature(
+                    feature_id=f.feature_id,
+                    feature_type=f.feature_type,
+                    source_model=f.source_model,
+                    geometry=f.geometry,
+                    subject_range_km=f.subject_range_km,
+                    position_cov_px=f.position_cov_px,
+                    intensity_sigma_rel=f.intensity_sigma_rel,
+                    preferred_filter=f.preferred_filter,
+                    reliability=0.01,
+                    reliability_reasons=f.reliability_reasons,
+                    usable_types=f.usable_types,
+                    flags=f.flags,
+                )
+                for f in features
+            ]
+
+    obs = _FakeObs()
+    model = _LowReliabilityModel(obs, feature_count=2)
+    orch = NavOrchestrator([model])
+    _ctx, gated_kept = orch.prepare(obs, apply_gate=True)  # type: ignore[arg-type]
+    _ctx, full = orch.prepare(obs, apply_gate=False)  # type: ignore[arg-type]
+    assert gated_kept == []
+    assert len(full) == 2

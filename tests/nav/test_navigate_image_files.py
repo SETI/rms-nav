@@ -4,18 +4,33 @@ The driver wires the per-image batch loader together with the
 orchestrator and the metadata curator.  These tests exercise the
 happy / image-load-failure / status=failed paths against a fake
 observation class so no holdings are required.
+
+Also covers the annotation-compositing summary-PNG renderer
+(``_write_summary_png`` and ``_grayscale_to_rgb_with_quantile_stretch``)
+end-to-end against a synthetic ``Annotations`` collection.
 """
 
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 from filecache import FCPath
+from PIL import Image
 
+from nav.annotation import Annotation, Annotations
 from nav.dataset.dataset import ImageFile, ImageFiles
-from nav.navigate_image_files import navigate_image_files
+from nav.nav_orchestrator.image_classifier_result import NavImageClassifierResult
+from nav.nav_orchestrator.nav_result import NavResult
+from nav.nav_orchestrator.provenance import Provenance
+from nav.navigate_image_files import (
+    _grayscale_to_rgb_with_quantile_stretch,
+    _write_summary_png,
+    navigate_image_files,
+)
+from nav.support.status_reason import NavStatusReason
 
 
 class _FakeSnapshot:
@@ -38,17 +53,28 @@ class _FakeSnapshot:
         return self._sensor_mask
 
 
-class _FakeObsClass:
-    """``obs_class`` shim whose ``from_file`` returns a controllable snapshot."""
+def _make_fake_obs_class(
+    *,
+    blank: bool = False,
+    raise_on_load: BaseException | None = None,
+) -> type:
+    """Build a fresh per-test ``obs_class`` shim with controllable behavior.
 
-    raise_on_load: BaseException | None = None
-    blank: bool = False
+    Each call returns a brand-new class with the requested behavior baked in
+    as class-level constants (read-only).  The previous design used a single
+    shared `_FakeObsClass` whose mutable state raced under pytest-xdist.
+    """
+    captured_blank = blank
+    captured_raise = raise_on_load
 
-    @classmethod
-    def from_file(cls, path: Any, **kwargs: Any) -> _FakeSnapshot:
-        if cls.raise_on_load is not None:
-            raise cls.raise_on_load
-        return _FakeSnapshot(blank=cls.blank)
+    class _FakeObsClass:
+        @classmethod
+        def from_file(cls, path: Any, **kwargs: Any) -> _FakeSnapshot:
+            if captured_raise is not None:
+                raise captured_raise
+            return _FakeSnapshot(blank=captured_blank)
+
+    return _FakeObsClass
 
 
 def _make_image_files(tmp_path: Path) -> ImageFiles:
@@ -75,11 +101,10 @@ def test_navigate_image_files_no_features_path(tmp_path: Path) -> None:
     real-scene models are registered), so the orchestrator reports
     ``NO_FEATURES_EXTRACTED``.
     """
-    _FakeObsClass.raise_on_load = None
-    _FakeObsClass.blank = False
+    obs_class = _make_fake_obs_class()
     image_files = _make_image_files(tmp_path)
     success, metadata = navigate_image_files(
-        _FakeObsClass,  # type: ignore[arg-type]
+        obs_class,
         image_files,
         FCPath(str(tmp_path / 'results')),
         write_output_files=False,
@@ -99,13 +124,11 @@ def test_navigate_image_files_no_features_path(tmp_path: Path) -> None:
 
 def test_navigate_image_files_writes_metadata(tmp_path: Path) -> None:
     """``write_output_files=True`` writes the metadata JSON to disk."""
-    _FakeObsClass.raise_on_load = None
-    _FakeObsClass.blank = False
+    obs_class = _make_fake_obs_class()
     image_files = _make_image_files(tmp_path)
     results_root = tmp_path / 'results'
-    results_root.mkdir(exist_ok=True)
     success, _metadata = navigate_image_files(
-        _FakeObsClass,  # type: ignore[arg-type]
+        obs_class,
         image_files,
         FCPath(str(results_root)),
         write_output_files=True,
@@ -117,11 +140,10 @@ def test_navigate_image_files_writes_metadata(tmp_path: Path) -> None:
 
 def test_navigate_image_files_blank_image_yields_no_signal(tmp_path: Path) -> None:
     """A blank image yields ``status_reason == 'no_signal_in_image'``."""
-    _FakeObsClass.raise_on_load = None
-    _FakeObsClass.blank = True
+    obs_class = _make_fake_obs_class(blank=True)
     image_files = _make_image_files(tmp_path)
     success, metadata = navigate_image_files(
-        _FakeObsClass,  # type: ignore[arg-type]
+        obs_class,
         image_files,
         FCPath(str(tmp_path / 'results')),
         write_output_files=False,
@@ -132,18 +154,14 @@ def test_navigate_image_files_blank_image_yields_no_signal(tmp_path: Path) -> No
 
 def test_navigate_image_files_image_load_failure_records_status(tmp_path: Path) -> None:
     """An OSError during ``from_file`` records ``status='error'`` metadata."""
-    _FakeObsClass.raise_on_load = OSError('cannot read fixture image')
-    _FakeObsClass.blank = False
+    obs_class = _make_fake_obs_class(raise_on_load=OSError('cannot read fixture image'))
     image_files = _make_image_files(tmp_path)
-    try:
-        success, metadata = navigate_image_files(
-            _FakeObsClass,  # type: ignore[arg-type]
-            image_files,
-            FCPath(str(tmp_path / 'results')),
-            write_output_files=False,
-        )
-    finally:
-        _FakeObsClass.raise_on_load = None
+    success, metadata = navigate_image_files(
+        obs_class,
+        image_files,
+        FCPath(str(tmp_path / 'results')),
+        write_output_files=False,
+    )
     assert success is False
     assert metadata['status'] == 'error'
     assert metadata['status_error'] == 'image_read_error'
@@ -154,20 +172,182 @@ def test_navigate_image_files_spice_load_failure_records_missing_kernel(
     tmp_path: Path,
 ) -> None:
     """A SPICE-data error is classified as ``status_error='missing_spice_data'``."""
-    _FakeObsClass.raise_on_load = RuntimeError('SPICE(SPKINSUFFDATA) coverage missing')
-    _FakeObsClass.blank = False
+    obs_class = _make_fake_obs_class(
+        raise_on_load=RuntimeError('SPICE(SPKINSUFFDATA) coverage missing')
+    )
     image_files = _make_image_files(tmp_path)
-    try:
-        success, metadata = navigate_image_files(
-            _FakeObsClass,  # type: ignore[arg-type]
-            image_files,
-            FCPath(str(tmp_path / 'results')),
-            write_output_files=False,
-        )
-    finally:
-        _FakeObsClass.raise_on_load = None
+    success, metadata = navigate_image_files(
+        obs_class,
+        image_files,
+        FCPath(str(tmp_path / 'results')),
+        write_output_files=False,
+    )
     assert success is False
     assert metadata['status_error'] == 'missing_spice_data'
+
+
+def test_navigate_image_files_writes_summary_png(tmp_path: Path) -> None:
+    """``write_output_files=True`` writes a non-empty summary PNG to disk."""
+    obs_class = _make_fake_obs_class()
+    image_files = _make_image_files(tmp_path)
+    results_root = tmp_path / 'results'
+    navigate_image_files(
+        obs_class,
+        image_files,
+        FCPath(str(results_root)),
+        write_output_files=True,
+    )
+    png_path = results_root / 'fake_image_summary.png'
+    assert png_path.exists()
+    with Image.open(png_path) as img:
+        assert img.mode == 'RGB'
+        assert img.size == (32, 32)
+
+
+# ---------------------------------------------------------------------------
+# _grayscale_to_rgb_with_quantile_stretch
+# ---------------------------------------------------------------------------
+
+
+def test_grayscale_to_rgb_stretch_shape_and_dtype() -> None:
+    """Output is uint8 RGB with the input's spatial shape."""
+    image = np.linspace(0.0, 1.0, num=64, dtype=np.float64).reshape(8, 8)
+    rgb = _grayscale_to_rgb_with_quantile_stretch(image)
+    assert rgb.shape == (8, 8, 3)
+    assert rgb.dtype == np.uint8
+    np.testing.assert_array_equal(rgb[..., 0], rgb[..., 1])
+    np.testing.assert_array_equal(rgb[..., 0], rgb[..., 2])
+
+
+def test_grayscale_to_rgb_stretch_handles_constant_image() -> None:
+    """A constant image renders as an all-zero (or saturated-equivalent) field."""
+    image = np.full((4, 4), 5.0, dtype=np.float64)
+    rgb = _grayscale_to_rgb_with_quantile_stretch(image)
+    assert rgb.shape == (4, 4, 3)
+    assert rgb.dtype == np.uint8
+
+
+def test_grayscale_to_rgb_stretch_treats_non_finite_as_zero() -> None:
+    """NaN / inf samples are masked out before percentile selection."""
+    image = np.array([[0.0, np.nan], [1.0, np.inf]], dtype=np.float64)
+    rgb = _grayscale_to_rgb_with_quantile_stretch(image)
+    assert rgb.shape == (2, 2, 3)
+    # Non-finite pixels are remapped to zero before the stretch — so they
+    # appear at or near the black end (0).
+    assert int(rgb[0, 1, 0]) == 0
+
+
+# ---------------------------------------------------------------------------
+# _write_summary_png — direct fixture-driven exercise
+# ---------------------------------------------------------------------------
+
+
+class _FakeObsForRender:
+    """Minimal stand-in for ObsSnapshot that satisfies the renderer + Annotations."""
+
+    def __init__(self, *, image: np.ndarray) -> None:
+        self.data = image
+        self.extdata = image
+        self._shape = image.shape
+        self.data_shape_vu = image.shape
+        self.extdata_shape_vu = image.shape
+        self.extfov_margin_vu = (0, 0)
+        self.extfov_margin_v = 0
+        self.extfov_margin_u = 0
+
+    def extract_offset_array(
+        self, array: np.ndarray, _offset: tuple[float, float] | tuple[int, int] | None
+    ) -> np.ndarray:
+        # Zero extfov margin: the offset slice is the array itself.
+        return array
+
+
+def _make_render_result(
+    *, annotations: Annotations, offset_px: tuple[float, float] | None = None
+) -> NavResult:
+    """Build a minimal NavResult that carries an annotation collection."""
+    classifier = NavImageClassifierResult(
+        image_class='clean',
+        saturation_frac=0.0,
+        missing_frac=0.0,
+        noise_sigma=1.0,
+        max_dn=10.0,
+    )
+    provenance = Provenance(
+        rms_nav_version='0.0.0',
+        image_et=0.0,
+        pipeline_run_iso8601='2026-04-28T00:00:00Z',
+    )
+    if offset_px is not None:
+        return NavResult.ok(
+            offset_px=offset_px,
+            covariance_px2=np.eye(2),
+            confidence=0.5,
+            confidence_rank='medium',
+            status_reason=NavStatusReason.OK,
+            per_technique=[],
+            feature_inventory=[],
+            image_classifier=classifier,
+            provenance=provenance,
+            annotations=annotations,
+        )
+    return NavResult.failed(
+        status_reason=NavStatusReason.NO_FEATURES_EXTRACTED,
+        image_classifier=classifier,
+        provenance=provenance,
+        annotations=annotations,
+    )
+
+
+def test_write_summary_png_image_only_when_no_annotations(tmp_path: Path) -> None:
+    """With an empty annotation collection the PNG carries the source image only."""
+    rng = np.random.default_rng(seed=11)
+    image = rng.standard_normal((20, 24)) + 50.0
+    obs = _FakeObsForRender(image=image)
+    result = _make_render_result(annotations=Annotations())
+    png_path = FCPath(str(tmp_path / 'out.png'))
+    _write_summary_png(obs, result, png_path, _CapturingLogger())  # type: ignore[arg-type]
+    with Image.open(BytesIO(png_path.read_bytes())) as img:
+        assert img.mode == 'RGB'
+        assert img.size == (24, 20)
+
+
+def test_write_summary_png_composites_overlay(tmp_path: Path) -> None:
+    """A red overlay is visible at the overlay's True pixels in the PNG."""
+    rng = np.random.default_rng(seed=12)
+    image = rng.standard_normal((16, 16)) + 10.0
+    obs = _FakeObsForRender(image=image)
+    overlay_mask = np.zeros((16, 16), dtype=bool)
+    overlay_mask[5:8, 5:8] = True
+    annotation = Annotation(
+        obs=obs,  # type: ignore[arg-type]
+        overlay=overlay_mask,
+        overlay_color=(255, 0, 0),
+    )
+    annotations = Annotations()
+    annotations.add_annotations(annotation)
+    result = _make_render_result(annotations=annotations, offset_px=(0.0, 0.0))
+    png_path = FCPath(str(tmp_path / 'overlay.png'))
+    _write_summary_png(obs, result, png_path, _CapturingLogger())  # type: ignore[arg-type]
+    with Image.open(BytesIO(png_path.read_bytes())) as raw:
+        img = np.asarray(raw)
+    inside = img[6, 6]
+    outside = img[0, 0]
+    assert inside[0] == 255
+    assert inside[1] == 0
+    assert inside[2] == 0
+    assert outside[0] == outside[1]
+    assert outside[1] == outside[2]
+
+
+class _CapturingLogger:
+    """Minimal stand-in for pdslogger that records info messages."""
+
+    def __init__(self) -> None:
+        self.infos: list[str] = []
+
+    def info(self, fmt: str, *args: Any) -> None:
+        self.infos.append(fmt % args if args else fmt)
 
 
 def test_navigate_image_files_rejects_multi_image_batch(tmp_path: Path) -> None:
@@ -188,8 +368,9 @@ def test_navigate_image_files_rejects_multi_image_batch(tmp_path: Path) -> None:
             ),
         ]
     )
+    obs_class = _make_fake_obs_class()
     success, metadata = navigate_image_files(
-        _FakeObsClass,  # type: ignore[arg-type]
+        obs_class,
         image_files,
         FCPath(str(tmp_path / 'results')),
         write_output_files=False,
