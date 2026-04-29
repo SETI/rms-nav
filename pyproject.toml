@@ -94,6 +94,10 @@ module = "astropy.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
+module = "cloud_tasks.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 module = "cspyce.*"
 ignore_missing_imports = true
 
