@@ -1,0 +1,29 @@
+schema_version: 1
+image_id: N1716186428_1_CALIB
+mission: CASSINI_ISS
+camera: NAC
+filter_combo: 'CL1+CL2'
+image_url: 'pds3://calibrated/COISS_2xxx/COISS_2074/data/1715959973_1716194018/N1716186428_1_CALIB.IMG'
+
+scene_tags:
+  - body_mostly_offscreen
+
+ground_truth:
+  offset_dv_px: 16.4800
+  offset_du_px: -19.7800
+  offset_uncertainty_px: 1.0
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-04-28
+  ui_version: 'rms-nav 0.1.dev25'
+  notes: |
+    Tethys offset to upper left of frame. Brightly lit limb fully visible. Limb is obviously not a perfect ellipsoid. Nothing else in the FOV.
+
+    Phase-4 status: BodyLimbNav LM iteration walks away from the coarse-NCC starting point (which lands within ~1 px of the operator's dv) and converges on a wrong local minimum where ~13 limb vertices coincide with internal Tethys crater rims. The Phase-4 SPURIOUS_MIN_INLIER_FRACTION safety net catches this and flags the result spurious, so the orchestrator returns status=failed (status_reason=all_techniques_spurious) rather than reporting a wrong-offset moderate-confidence answer. Phase 5 follow-up: tighter Tukey scaling on heavily-cratered surfaces, polarity-aware DT that downweights internal-body edges, and/or LM step-size cap so the refinement cannot diverge far from the coarse seed.
+
+expected:
+  status: failed
+  confidence_tier: failed
+  primary_technique: BodyLimbNav
+  techniques_must_run: []
+  techniques_must_skip: []

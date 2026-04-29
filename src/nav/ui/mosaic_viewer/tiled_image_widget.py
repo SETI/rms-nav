@@ -37,7 +37,7 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import QAbstractScrollArea, QRubberBand, QScrollBar, QSizePolicy, QWidget
 
-from nav.ui.common import apply_linear_gamma_stretch
+from nav.support.image import apply_linear_gamma_stretch
 from nav.ui.mosaic_viewer.graticule import graticule_label_anchors, graticule_polylines
 from nav.ui.mosaic_viewer.projections import (
     ProjectionKind,

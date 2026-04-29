@@ -18,10 +18,13 @@ from __future__ import annotations
 import argparse
 import sys
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 from typing import Any, cast
 
+import numpy as np
 from filecache import FCPath
+from PIL import Image
 
 from nav.config import DEFAULT_CONFIG, IMAGE_LOGGER, MAIN_LOGGER, image_log_handlers
 from nav.dataset.dataset import ImageFiles
@@ -33,7 +36,9 @@ from nav.nav_orchestrator import (
 )
 from nav.obs import ObsSnapshotInst
 from nav.support.file import json_as_string
+from nav.support.image import apply_linear_gamma_stretch
 from nav.support.misc import log_run_environment
+from nav.support.types import NDArrayFloatType, NDArrayUint8Type
 
 __all__ = ['navigate_image_files']
 
@@ -136,7 +141,7 @@ def navigate_image_files(
         if write_output_files:
             logger.info('Writing metadata to %s', public_metadata_file)
             public_metadata_file.write_text(json_as_string(metadata))
-            _write_summary_png(nav_result, summary_png_file, logger)
+            _write_summary_png(snapshot_inst, nav_result, summary_png_file, logger)
         MAIN_LOGGER.info('Wrote log to %s', image_log_path)
         return nav_result.status == 'ok', metadata
 
@@ -182,16 +187,58 @@ def _metadata_from_result(result: NavResult, image_path: Path, image_name: str) 
     return metadata
 
 
-def _write_summary_png(result: NavResult, png_path: FCPath, logger: Any) -> None:
-    """Skip writing the summary PNG until annotation rendering is wired.
+def _write_summary_png(
+    obs: ObsSnapshotInst,
+    result: NavResult,
+    png_path: FCPath,
+    logger: Any,
+) -> None:
+    """Composite the source image with the orchestrator's annotation overlay.
 
-    The summary-PNG renderer requires a populated ``NavResult.annotations``
-    field plus an orchestrator-side annotation-compositing path; neither
-    is implemented yet.  Rather than write a misleading placeholder image,
-    this function logs at INFO that the summary PNG is unavailable for
-    this run and returns without touching the filesystem.  The metadata
-    JSON is still written by the caller, so downstream tooling can read
-    the navigation result; only the summary image is absent.
+    The renderer is intentionally a thin driver: ``Annotations.combine``
+    produces the RGB overlay (in FOV coordinates) at ``result.offset_px``;
+    this function provides the grayscale background by applying a quantile
+    contrast stretch to ``obs.data`` and replaces every pixel where the
+    overlay carries any color channel.  When ``result.annotations`` is
+    empty, the source image alone is written so the PNG is always a
+    faithful record of what the navigator saw.
+
+    Parameters:
+        obs: Observation snapshot used as the background.
+        result: Navigation result; ``offset_px`` shifts the overlay to the
+            best-fit pose, ``annotations`` carries every NavModel's overlay.
+        png_path: Destination path; supports ``FCPath`` URLs.
+        logger: ``pdslogger`` to emit one INFO line on success.
     """
-    del result, png_path  # consumed once annotation rendering is wired
-    logger.info('Summary PNG rendering is not yet implemented; skipping')
+    image_fov = np.asarray(obs.data, dtype=np.float64)
+    rgb = _grayscale_to_rgb_with_quantile_stretch(image_fov)
+    overlay_offset = result.offset_px if result.offset_px is not None else (0.0, 0.0)
+    overlay = result.annotations.combine(offset=overlay_offset)
+    if overlay is not None:
+        mask = overlay.any(axis=-1)
+        rgb[mask] = overlay[mask]
+    buf = BytesIO()
+    Image.fromarray(rgb, mode='RGB').save(buf, format='PNG')
+    png_path.write_bytes(buf.getvalue())
+    logger.info('Wrote summary PNG to %s', png_path)
+
+
+def _grayscale_to_rgb_with_quantile_stretch(image: NDArrayFloatType) -> NDArrayUint8Type:
+    """Build a uint8 RGB grayscale background from a float image.
+
+    The black/white points come from the 0.1 / 99.9 percentiles of the
+    finite samples; non-finite pixels are remapped to zero before the
+    stretch so they show as black rather than poisoning the percentiles.
+    """
+    finite = np.isfinite(image)
+    if finite.any():
+        clean = np.where(finite, image, 0.0)
+        black = float(np.quantile(image[finite], 0.001))
+        white = float(np.quantile(image[finite], 0.999))
+    else:
+        clean = np.zeros_like(image)
+        black = 0.0
+        white = 1.0
+    stretched = apply_linear_gamma_stretch(clean, black=black, white=white, gamma=1.0)
+    gray = (stretched * 255.0).astype(np.uint8)
+    return np.stack([gray, gray, gray], axis=-1)

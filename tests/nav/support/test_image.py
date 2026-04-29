@@ -1,7 +1,10 @@
+import math
+
 import numpy as np
 import pytest
 
 from nav.support.image import (
+    apply_linear_gamma_stretch,
     next_power_of_2,
     pad_array,
     pad_array_to_power_of_2,
@@ -209,3 +212,89 @@ def test_draw_rect() -> None:  # TODO: Implement
 
 def test_draw_circle() -> None:  # TODO: Implement
     ...
+
+
+# ---------------------------------------------------------------------------
+# apply_linear_gamma_stretch
+# ---------------------------------------------------------------------------
+
+
+def test_apply_linear_gamma_stretch_linear_gamma_one() -> None:
+    """gamma=1.0 is a simple linear normalisation."""
+    data = np.array([0.0, 0.5, 1.0])
+    result = apply_linear_gamma_stretch(data, black=0.0, white=1.0, gamma=1.0)
+    np.testing.assert_allclose(result, [0.0, 0.5, 1.0])
+
+
+def test_apply_linear_gamma_stretch_clips_below_black() -> None:
+    """Verify values below ``black`` clip to 0.0; zero and mid-range values stay scaled."""
+    data = np.array([-1.0, 0.0, 0.5])
+    result = apply_linear_gamma_stretch(data, black=0.0, white=1.0, gamma=1.0)
+    np.testing.assert_allclose(result, [0.0, 0.0, 0.5])
+
+
+def test_apply_linear_gamma_stretch_clips_above_white() -> None:
+    """Verify values above ``white`` clip to 1.0; values at or below ``white`` stay scaled."""
+    data = np.array([0.5, 1.0, 2.0])
+    result = apply_linear_gamma_stretch(data, black=0.0, white=1.0, gamma=1.0)
+    np.testing.assert_allclose(result, [0.5, 1.0, 1.0])
+
+
+def test_apply_linear_gamma_stretch_gamma_half_brightens_midtones() -> None:
+    """gamma=0.5 maps 0.25 -> 0.5 (brightens relative to linear)."""
+    data = np.array([0.0, 0.25, 1.0])
+    result = apply_linear_gamma_stretch(data, black=0.0, white=1.0, gamma=0.5)
+    np.testing.assert_allclose(result, [0.0, 0.5, 1.0], atol=1e-7)
+
+
+def test_apply_linear_gamma_stretch_gamma_two_darkens_midtones() -> None:
+    """gamma=2.0 maps 0.5 -> 0.25 (darkens relative to linear)."""
+    data = np.array([0.0, 0.5, 1.0])
+    result = apply_linear_gamma_stretch(data, black=0.0, white=1.0, gamma=2.0)
+    np.testing.assert_allclose(result, [0.0, 0.25, 1.0], atol=1e-7)
+
+
+def test_apply_linear_gamma_stretch_white_equal_black_uses_epsilon_denominator() -> None:
+    """``white == black`` is adjusted so the stretch never divides by zero."""
+    data = np.array([5.0, 5.0, 6.0])
+    result = apply_linear_gamma_stretch(data, black=5.0, white=5.0, gamma=1.0)
+    assert np.all((result >= 0.0) & (result <= 1.0))
+    np.testing.assert_array_less(result[:2], result[2])
+
+
+def test_apply_linear_gamma_stretch_white_less_than_black_is_silently_clipped() -> None:
+    """Inverted black/white is treated as ``white`` just above ``black``."""
+    data = np.array([0.0, 0.5, 1.0])
+    result = apply_linear_gamma_stretch(data, black=0.5, white=0.25, gamma=1.0)
+    assert np.all((result >= 0.0) & (result <= 1.0))
+    expected = apply_linear_gamma_stretch(
+        data,
+        black=0.5,
+        white=math.nextafter(0.5, math.inf),
+        gamma=1.0,
+    )
+    np.testing.assert_allclose(result, expected)
+
+
+def test_apply_linear_gamma_stretch_rejects_non_positive_gamma() -> None:
+    data = np.array([0.0, 0.5, 1.0])
+    with pytest.raises(ValueError, match='gamma must be greater than 0'):
+        apply_linear_gamma_stretch(data, black=0.0, white=1.0, gamma=0.0)
+
+
+def test_apply_linear_gamma_stretch_rejects_negative_gamma() -> None:
+    data = np.array([0.0, 0.5, 1.0])
+    with pytest.raises(ValueError, match='gamma must be greater than 0'):
+        apply_linear_gamma_stretch(data, black=0.0, white=1.0, gamma=-0.5)
+
+
+def test_apply_linear_gamma_stretch_rejects_non_finite_black() -> None:
+    data = np.array([0.0, 1.0])
+    with pytest.raises(ValueError, match='black must be a finite number'):
+        apply_linear_gamma_stretch(data, black=float('nan'), white=1.0, gamma=1.0)
+
+
+def test_apply_linear_gamma_stretch_rejects_bool_black() -> None:
+    data = np.array([0.0, 1.0])
+    with pytest.raises(TypeError, match='black must be int or float, not bool'):
+        apply_linear_gamma_stretch(data, black=True, white=1.0, gamma=1.0)

@@ -27,7 +27,7 @@ as each thread holds its own ``ObsSnapshotInst`` (the underlying ``oops``
 ``Backplane`` queries mutate global precision state).
 """
 
-from nav.feature.composition import compose_template_features
+from nav.feature.composition import compose_dialog_overlay, compose_template_features
 from nav.feature.constants import (
     AGREEMENT_FACTOR_CAP,
     COMBINED_CONFIDENCE_CAP,
@@ -99,5 +99,6 @@ __all__ = [
     'StarGeometry',
     'TerminatorArcFlags',
     'TerminatorPolyline',
+    'compose_dialog_overlay',
     'compose_template_features',
 ]

@@ -411,8 +411,31 @@ Saturn-rings imagery).
 
 Interactive PyQt6 dialog that composes every template-bearing feature
 into a single ext-FOV overlay and lets the operator pick the offset by
-hand.  Not part of the autonomous registry; invoke it directly from a
-GUI driver when human judgement is required.
+hand.  Not part of the autonomous registry; opt into it from the normal
+``nav_offset`` driver with the ``--manual`` flag, which requires the
+selection to resolve to exactly one image:
+
+.. code-block:: bash
+
+   echo W1521598221_1_CALIB > /tmp/img_list.txt
+   nav_offset coiss --manual --image-file-list /tmp/img_list.txt
+
+The driver loads the image, runs the orchestrator's ``prepare`` step
+(image classifier + NavModels + features + reliability gate), opens the
+dialog, and prints the chosen ``offset_dv_px`` / ``offset_du_px`` to
+stdout.  Exit code is ``2`` if the dialog is cancelled or no
+template-bearing features are available.  The dialog's **Save as
+Library Entry...** button is the recommended path for adding a sidecar
+to the operator-curated test image library; see
+:doc:`user_guide_image_library`.
+
+Programmatic equivalent (one obs in, ``NavTechniqueResult`` out):
+
+.. code-block:: python
+
+   from nav.nav_technique import run_manual_nav
+
+   result = run_manual_nav(obs)
 
 Pending techniques (not yet shipped)
 -------------------------------------

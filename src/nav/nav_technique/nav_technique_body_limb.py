@@ -64,6 +64,21 @@ covariance is meaningfully informative for a 2-D translation.
 """
 
 
+SPURIOUS_MIN_INLIER_FRACTION: float = 0.05
+"""Below this inlier fraction the LM fit has almost certainly fallen
+into a wrong local minimum and is flagged spurious.
+
+A healthy limb fit retains tens of percent of its candidate vertices
+as Tukey inliers (40 % is typical when the limb dominates the image
+edge map).  A converged fit that survives with <5 % inliers has
+walked away from the true limb and locked onto a small subset of
+internal-body features — crater rims, terminator pixels, surface
+boundaries — that happen to coincide with the model polyline at the
+diverged offset.  Treat the result as spurious so the ensemble drops
+it instead of reporting a wrong offset with moderate confidence.
+"""
+
+
 _AT_EDGE_TOLERANCE_PX: float = 1.0
 """Pixels of slack around the search-window axis bounds for at-edge detection.
 
@@ -291,9 +306,14 @@ class BodyLimbNav(NavTechnique):
                 or abs(du_final + margin_u) <= _AT_EDGE_TOLERANCE_PX
             )
             sigma_min_px = float(sigmas.min()) if sigmas.size else 1.0
+            n_vertices = int(vertices.shape[0])
+            inlier_fraction = (
+                float(result.inlier_count) / float(n_vertices) if n_vertices > 0 else 0.0
+            )
             spurious = (
                 result.rms_px > max(SPURIOUS_DT_FLOOR_PX, SPURIOUS_DT_RMS_FACTOR * sigma_min_px)
                 or result.inlier_count < SPURIOUS_MIN_INLIERS
+                or inlier_fraction < SPURIOUS_MIN_INLIER_FRACTION
             )
             visible_limb_arc_fraction = _aggregate_visible_arc_fraction(eligible_features)
             diagnostics = BodyLimbDiagnostics(

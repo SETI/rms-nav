@@ -17,6 +17,7 @@ from nav.nav_orchestrator.nav_context import NavContext
 from nav.nav_technique.diagnostics import BodyLimbDiagnostics
 from nav.nav_technique.nav_technique_body_limb import (
     LIMB_MIN_ARC_PX,
+    SPURIOUS_MIN_INLIER_FRACTION,
     BodyLimbNav,
 )
 
@@ -237,3 +238,103 @@ def test_body_limb_nav_raises_when_navcontext_lacks_derivatives(
     )
     with pytest.raises(RuntimeError, match='image_edge_dt_ext'):
         technique.navigate([feature], bare_context)
+
+
+def test_body_limb_nav_marks_spurious_when_inlier_fraction_collapses(
+    monkeypatch: pytest.MonkeyPatch,
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_limb_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """An LM convergence that retains < 5 % of vertices as inliers is spurious.
+
+    Models a real failure mode (Tethys N1716186428): the limb polyline
+    finds a deep local minimum at internal-body crater rims, retaining a
+    handful of inliers while rejecting the actual limb as outliers.  The
+    fraction-based check rescues the ensemble from a wrong-offset
+    moderate-confidence answer.
+
+    The test is deterministic: ``lm_subpixel_refine`` is patched to
+    return an LMResult whose inlier_count / vertex_count is below
+    ``SPURIOUS_MIN_INLIER_FRACTION`` so the safety-net assertion is
+    unconditionally exercised.
+    """
+    from nav.nav_technique import dt_fitting, nav_technique_body_limb
+
+    shape = (200, 200)
+    image = disc_image(shape, (100.0, 100.0), 30.0)
+    vertices, outward = circle_polyline((100.0, 100.0), 30.0, 1000)
+    feature = make_limb_feature('confused_moon', vertices=vertices, outward_normals=outward)
+    technique = BodyLimbNav()
+    context = make_nav_context(image)
+
+    # Force a degenerate LM result: many vertices, very few inliers.
+    forged_result = dt_fitting.LMRefineResult(
+        offset_vu=(7.0, -3.0),
+        rotation_rad=0.0,
+        covariance=np.eye(2, dtype=np.float64),
+        residuals_px=np.zeros(vertices.shape[0], dtype=np.float64),
+        weights=np.zeros(vertices.shape[0], dtype=np.float64),
+        rms_px=2.5,
+        iterations=5,
+        converged=True,
+        inlier_count=10,
+    )
+    monkeypatch.setattr(
+        nav_technique_body_limb,
+        'lm_subpixel_refine',
+        lambda **_kwargs: forged_result,
+    )
+
+    result = technique.navigate([feature], context)
+    assert isinstance(result.diagnostics, BodyLimbDiagnostics)
+    inlier_fraction = result.diagnostics.tukey_inlier_count / float(vertices.shape[0])
+    assert inlier_fraction < SPURIOUS_MIN_INLIER_FRACTION
+    assert result.spurious is True
+
+
+def test_body_limb_nav_does_not_mark_spurious_when_inlier_fraction_healthy(
+    monkeypatch: pytest.MonkeyPatch,
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_limb_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """The negative-path counterpart: a healthy inlier fraction does not trip spurious.
+
+    Covers the boundary so a future widening of ``SPURIOUS_MIN_INLIER_FRACTION``
+    (or a sign flip in the comparison) immediately fails this test.
+    """
+    from nav.nav_technique import dt_fitting, nav_technique_body_limb
+
+    shape = (200, 200)
+    image = disc_image(shape, (100.0, 100.0), 30.0)
+    vertices, outward = circle_polyline((100.0, 100.0), 30.0, 1000)
+    feature = make_limb_feature('healthy_moon', vertices=vertices, outward_normals=outward)
+    technique = BodyLimbNav()
+    context = make_nav_context(image)
+
+    # Healthy LM result: 50 % of vertices retained, sub-pixel RMS.
+    forged_result = dt_fitting.LMRefineResult(
+        offset_vu=(0.5, 0.5),
+        rotation_rad=0.0,
+        covariance=np.eye(2, dtype=np.float64) * 0.25,
+        residuals_px=np.zeros(vertices.shape[0], dtype=np.float64),
+        weights=np.ones(vertices.shape[0], dtype=np.float64),
+        rms_px=0.4,
+        iterations=8,
+        converged=True,
+        inlier_count=500,
+    )
+    monkeypatch.setattr(
+        nav_technique_body_limb,
+        'lm_subpixel_refine',
+        lambda **_kwargs: forged_result,
+    )
+
+    result = technique.navigate([feature], context)
+    assert isinstance(result.diagnostics, BodyLimbDiagnostics)
+    inlier_fraction = result.diagnostics.tukey_inlier_count / float(vertices.shape[0])
+    assert inlier_fraction >= SPURIOUS_MIN_INLIER_FRACTION
+    assert result.spurious is False

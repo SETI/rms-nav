@@ -16,6 +16,7 @@ import math
 from typing import Any, cast
 
 import numpy as np
+from filecache import FCPath
 from matplotlib.backends.backend_qt import NavigationToolbar2QT
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
@@ -27,10 +28,12 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QDialog,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QScrollBar,
@@ -40,15 +43,17 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from nav._version import __version__ as _rms_nav_version
 from nav.config import Config
 from nav.obs import ObsSnapshot
 from nav.support.correlate import masked_ncc, navigate_with_pyramid_kpeaks
+from nav.support.image import apply_linear_gamma_stretch
 from nav.support.types import NDArrayBoolType, NDArrayFloatType, NDArrayUint8Type
 from nav.ui.common import (
     ZoomPanController,
-    apply_linear_gamma_stretch,
     build_stretch_controls,
 )
+from nav.ui.library_entry import build_sidecar_yaml, infer_obs_metadata
 
 # Correlation map popup (_CorrMapDialog) layout sizing
 _CORR_MAP_MIN_WIDTH = 550
@@ -583,19 +588,22 @@ class ManualNavDialog(QDialog):
         offset_group.setLayout(offset_form)
         right.addWidget(offset_group)
 
-        # Buttons: Correlation Map, Auto, OK/Cancel
+        # Buttons: Correlation Map, Auto, Save Library Entry, OK/Cancel
         btn_row = QHBoxLayout()
         self._btn_corr_map = QPushButton('Correlation Map...')
         self._btn_auto = QPushButton('Auto')
+        self._btn_save_library = QPushButton('Save as Library Entry...')
         self._btn_ok = QPushButton('OK')
         self._btn_cancel = QPushButton('Cancel')
         self._btn_corr_map.clicked.connect(self._on_show_corr_map)
         self._btn_auto.clicked.connect(self._on_auto)
+        self._btn_save_library.clicked.connect(self._on_save_library_entry)
         self._btn_ok.clicked.connect(self.accept)
         self._btn_cancel.clicked.connect(self.reject)
         btn_row.addStretch()
         btn_row.addWidget(self._btn_corr_map)
         btn_row.addWidget(self._btn_auto)
+        btn_row.addWidget(self._btn_save_library)
         btn_row.addWidget(self._btn_ok)
         btn_row.addWidget(self._btn_cancel)
         right.addLayout(btn_row)
@@ -821,6 +829,56 @@ class ManualNavDialog(QDialog):
         self._spin_dv.blockSignals(False)
         self._spin_du.blockSignals(False)
         self._refresh_overlay()
+
+    def _on_save_library_entry(self) -> None:
+        """Write the current dv/du as a fresh library sidecar.
+
+        Pops a save-file dialog, defaults to ``<image_id>.yaml`` in
+        whatever directory the operator was last in, and writes a sidecar
+        seeded with the auto-fillable fields plus ``TODO`` placeholders
+        for the operator-curated ones.  No round-trip into the image
+        library is performed; the operator chooses the destination so an
+        existing sidecar is not silently clobbered.
+        """
+        draft = infer_obs_metadata(self._obs)
+        suggested_name = f'{draft.image_id or "TODO"}.yaml'
+        path_str, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            'Save Library Sidecar',
+            suggested_name,
+            'Sidecar YAML (*.yaml);;All files (*)',
+        )
+        if not path_str:
+            return
+        image_url = ''
+        abspath = getattr(self._obs, 'abspath', None)
+        if abspath is not None:
+            image_url = str(abspath)
+        try:
+            yaml_text = build_sidecar_yaml(
+                draft=draft,
+                image_url=image_url,
+                offset_dv_px=self._dv,
+                offset_du_px=self._du,
+                ui_version=_rms_nav_version,
+            )
+            FCPath(path_str).write_text(yaml_text)
+        except OSError as exc:
+            QMessageBox.critical(
+                self,
+                'Save failed',
+                f'Could not write sidecar to {path_str}:\n{exc}',
+            )
+            return
+        QMessageBox.information(
+            self,
+            'Sidecar saved',
+            (
+                f'Wrote sidecar to:\n{path_str}\n\n'
+                'Edit the TODO_REPLACE_* fields (scene_tags, primary_technique, '
+                'notes, etc.) before committing.'
+            ),
+        )
 
     # Mouse handling
     def _on_mouse_press(self, event: QMouseEvent) -> None:

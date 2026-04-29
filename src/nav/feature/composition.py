@@ -7,8 +7,13 @@ composite by Z-buffer painting every feature that carries a
 ``template_img`` / ``template_mask`` payload, ordered by subject range so
 nearer features paint over farther ones.
 
-Polyline-only features (limbs, terminators, ring edges) are skipped; their
-geometry is rendered separately by the annotation pipeline.
+:func:`compose_template_features` is the bitmap-only composer (limbs,
+terminators, ring edges are skipped; their geometry belongs to the
+annotation pipeline).  :func:`compose_dialog_overlay` extends it by
+rasterizing every polyline-bearing feature on top — that is the composite
+the manual-navigation dialog overlays on the source image so an operator
+sees limbs / terminators / ring edges even when the body emits no
+full-disc template.
 """
 
 from __future__ import annotations
@@ -16,9 +21,11 @@ from __future__ import annotations
 import numpy as np
 
 from nav.feature.feature import NavFeature
+from nav.feature.geometry import BodyBlobGeometry
+from nav.support.image import draw_circle
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
-__all__ = ['compose_template_features']
+__all__ = ['compose_dialog_overlay', 'compose_template_features']
 
 
 def compose_template_features(
@@ -77,6 +84,68 @@ def compose_template_features(
         target_mask_slice = mask[v_min:v_max, u_min:u_max]
         np.copyto(target_image_slice, sub_img, where=sub_mask)
         np.logical_or(target_mask_slice, sub_mask, out=target_mask_slice)
+    return image, mask
+
+
+def compose_dialog_overlay(
+    features: list[NavFeature], extfov_shape_vu: tuple[int, int]
+) -> tuple[NDArrayFloatType, NDArrayBoolType]:
+    """Compose the manual-navigation dialog's full-scene overlay.
+
+    Starts from :func:`compose_template_features` (BODY_DISC,
+    RING_ANNULUS, CARTOGRAPHIC_MODEL templates) and additionally
+    rasterizes every polyline-bearing feature's ``vertices_vu`` as
+    single-pixel marks so an operator can manually align scenes whose
+    only emitted features are limbs, terminators, or ring edges.  The
+    polyline rasterization is intentionally minimal — it is a visibility
+    aid, not a precise renderer; the autonomous DT pipeline owns the
+    quantitative fit.
+
+    Vertices that fall outside the ext-FOV bounds are silently dropped
+    (the polyline samplers can hand back partially-clipped polylines
+    near the FOV edge).
+
+    Parameters:
+        features: The feature list (templated + polyline + plain).
+        extfov_shape_vu: Shape ``(v, u)`` of the ext-FOV array to build.
+
+    Returns:
+        Tuple ``(image, mask)`` where ``image`` is float64 in ext-FOV
+        coordinates and ``mask`` is a boolean array of the same shape.
+        Every painted pixel (template *or* polyline) is True in the mask.
+    """
+    image, mask = compose_template_features(features, extfov_shape_vu)
+    h, w = extfov_shape_vu
+    for feature in features:
+        # 1) Polyline-bearing geometries (LIMB_ARC, TERMINATOR_ARC, RING_EDGE)
+        #    rasterize as single-pixel marks at every vertex.
+        vertices_vu = getattr(feature.geometry, 'vertices_vu', None)
+        if vertices_vu is not None:
+            verts = np.asarray(vertices_vu, dtype=np.float64)
+            if verts.size > 0:
+                v_idx = np.rint(verts[:, 0]).astype(np.int64)
+                u_idx = np.rint(verts[:, 1]).astype(np.int64)
+                in_bounds = (v_idx >= 0) & (v_idx < h) & (u_idx >= 0) & (u_idx < w)
+                v_idx = v_idx[in_bounds]
+                u_idx = u_idx[in_bounds]
+                if v_idx.size > 0:
+                    # Polyline pixels paint a value of 1.0 — the dialog
+                    # re-stretches the model channel for display, so any
+                    # positive value is visible against the zero background.
+                    image[v_idx, u_idx] = 1.0
+                    mask[v_idx, u_idx] = True
+        # 2) BodyBlobGeometry has no template and no polyline; render the
+        #    predicted silhouette as a 1-pixel circle outline so the
+        #    operator can still align the centroid by eye.
+        if isinstance(feature.geometry, BodyBlobGeometry):
+            v_center, u_center = feature.geometry.predicted_center_vu
+            radius_px = max(1, round(feature.geometry.predicted_diameter_px / 2.0))
+            # ``draw_circle`` uses (x=u, y=v); it clips internally to the
+            # array bounds so partial-FOV blobs render their visible arc.
+            v_int = round(v_center)
+            u_int = round(u_center)
+            draw_circle(image, 1.0, u_int, v_int, radius_px)
+            draw_circle(mask, True, u_int, v_int, radius_px)
     return image, mask
 
 

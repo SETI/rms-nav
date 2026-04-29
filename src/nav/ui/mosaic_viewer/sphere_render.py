@@ -17,7 +17,7 @@ import numpy as np
 import numpy.ma as ma
 from PyQt6.QtGui import QImage
 
-from nav.ui.common import apply_linear_gamma_stretch
+from nav.support.image import apply_linear_gamma_stretch
 
 
 def render_to_image(

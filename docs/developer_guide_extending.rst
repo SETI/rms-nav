@@ -158,3 +158,35 @@ The technique becomes visible to
 module is imported.  Glob filters on the orchestrator (``only_techniques``)
 let you exclude or single out the new technique without modifying the
 registry.
+
+Adding to the image library via the manual-nav dialog
+-----------------------------------------------------
+
+The interactive ``ManualNavDialog`` (built by
+:class:`~nav.nav_technique.nav_technique_manual.NavTechniqueManual`)
+exposes a **Save as Library Entry...** button alongside the OK / Cancel
+controls.  Clicking it captures the current dv/du and writes a sidecar
+seeded with the auto-fillable fields plus ``TODO_REPLACE_*``
+placeholders for the operator-curated ones (scene_tags,
+``primary_technique``, notes).  The YAML helper lives in
+:mod:`nav.ui.library_entry`.
+
+Operator workflow:
+
+1. Open the manual-nav dialog on the candidate image and pick the
+   offset by hand (or accept **Auto**).
+2. Click **Save as Library Entry...**.  The save-file dialog suggests
+   ``<image_id>.yaml`` as the filename.  Point it at the appropriate
+   scene-class directory under
+   ``tests/integration/image_library/images/<class>/``.
+3. Open the saved YAML and fill in every ``TODO_REPLACE_*`` value.  An
+   unedited template trips
+   :func:`tests.integration.sidecar.load_sidecar` so CI fails loudly if
+   you forget.
+4. Run the structural-invariants test
+   (``pytest tests/integration/test_image_library.py``); the per-image
+   regression test (``test_autonomous_nav.py``) follows once
+   ``PDS3_HOLDINGS_DIR`` is set.
+
+See :doc:`user_guide_image_library` for the sidecar schema and the
+deeper rationale behind the curation policy.

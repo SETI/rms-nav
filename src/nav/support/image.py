@@ -1,3 +1,4 @@
+import math
 from typing import Any, cast
 
 import numpy as np
@@ -534,6 +535,76 @@ def normalize_array(a: NDArrayFloatType, eps: float = 1e-12) -> NDArrayFloatType
     if s < eps:
         return np.zeros_like(a, dtype=np.float64)
     return cast(NDArrayFloatType, (a - m) / s)
+
+
+def require_finite_int_or_float(name: str, value: object) -> None:
+    """Validate stretch control numeric parameters at the public API boundary.
+
+    Used by stretch helpers and the UI control-builders to reject ``bool``,
+    non-numeric, and non-finite inputs with a clear error message tagged by
+    the parameter name.
+
+    Parameters:
+        name: Parameter name to include in the error message (e.g.
+            ``'black'``).
+        value: Candidate value to validate.
+
+    Raises:
+        TypeError: When ``value`` is a ``bool`` or not an ``int``/``float``.
+        ValueError: When ``value`` is not finite.
+    """
+    if isinstance(value, bool):
+        raise TypeError(f'{name} must be int or float, not bool')
+    if not isinstance(value, (int, float)):
+        raise TypeError(f'{name} must be int or float, not {type(value).__name__}')
+    if not math.isfinite(float(value)):
+        raise ValueError(f'{name} must be a finite number, got {value!r}')
+
+
+def apply_linear_gamma_stretch(
+    data: NDArrayFloatType,
+    *,
+    black: float,
+    white: float,
+    gamma: float,
+) -> NDArrayFloatType:
+    """Apply black/white/gamma stretch and return a float array in ``[0, 1]``.
+
+    Uses the convention ``((clip(data, black, white) - black) / (white - black)) ** gamma``.
+    A ``gamma`` of 1.0 is linear; values below 1.0 brighten the mid-tones
+    (common for display) and values above 1.0 darken them.
+
+    Parameters:
+        data: Input float array (any shape).
+        black: Black-point; input values at or below this map to 0.
+        white: White-point; input values at or above this map to 1. If
+            ``white <= black`` (including accidental UI equality), ``white`` is
+            raised silently to the next representable float above ``black`` so
+            the linear scale denominator is never zero.
+        gamma: Exponent applied after linear normalisation; must be finite and
+            strictly greater than zero.
+
+    Returns:
+        Float array of the same shape as ``data`` with values in ``[0, 1]``.
+
+    Raises:
+        TypeError: If ``black``, ``white``, or ``gamma`` is not an ``int`` or
+            ``float``, or any of them is a ``bool``.
+        ValueError: If any of ``black``, ``white``, or ``gamma`` is not finite;
+            or if ``gamma <= 0``.
+    """
+    require_finite_int_or_float('black', black)
+    require_finite_int_or_float('white', white)
+    require_finite_int_or_float('gamma', gamma)
+    b = float(black)
+    w = float(white)
+    g = float(gamma)
+    if w <= b:
+        w = math.nextafter(b, math.inf)
+    if g <= 0.0:
+        raise ValueError(f'gamma must be greater than 0, got {g!r}')
+    normalized = np.clip((data - b) / (w - b), 0.0, 1.0)
+    return cast(NDArrayFloatType, np.power(normalized, g))
 
 
 def gradient_magnitude(img: NDArrayFloatType) -> NDArrayFloatType:
