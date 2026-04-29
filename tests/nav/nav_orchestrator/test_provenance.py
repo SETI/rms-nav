@@ -1,6 +1,12 @@
 """Tests for ``nav.nav_orchestrator.provenance.Provenance``."""
 
-from nav.nav_orchestrator.provenance import Provenance
+import pytest
+
+from nav.nav_orchestrator.provenance import (
+    Provenance,
+    ProvenanceMetadata,
+    collect_provenance_metadata,
+)
 
 
 def test_provenance_minimal_construction() -> None:
@@ -46,3 +52,78 @@ def test_provenance_static_data_hashes_is_immutable() -> None:
     # ``MappingProxyType`` raises ``TypeError`` with "does not support
     # item assignment" when assignment is attempted.
     assert 'item assignment' in str(exc_info.value)
+
+
+def test_collect_provenance_metadata_returns_dataclass() -> None:
+    """``collect_provenance_metadata`` returns a populated dataclass."""
+    from collections.abc import Mapping
+    from types import MappingProxyType
+
+    meta = collect_provenance_metadata()
+    assert isinstance(meta, ProvenanceMetadata)
+    # The git SHA may be ``None`` if the working tree isn't a repo, but
+    # the field must exist.
+    assert isinstance(meta.git_sha, str | type(None))
+    assert isinstance(meta.spice_kernels, tuple)
+    # ``static_data_hashes`` is exposed as ``Mapping[str, str]`` and the
+    # implementation returns a ``MappingProxyType``; pin both shape and
+    # contents so a future refactor that swaps the wrapping type still
+    # has to satisfy the read-only-mapping contract.
+    assert isinstance(meta.static_data_hashes, Mapping)
+    assert isinstance(meta.static_data_hashes, MappingProxyType)
+    for key, value in meta.static_data_hashes.items():
+        assert isinstance(key, str)
+        assert isinstance(value, str)
+
+
+def test_collect_provenance_metadata_hashes_static_data_yamls() -> None:
+    """The hash dict covers config_220_body_shape.yaml and the inst configs."""
+    meta = collect_provenance_metadata()
+    names = set(meta.static_data_hashes.keys())
+    # Every shipped 4N0 instrument block plus the body-shape catalogue
+    # must appear; ring catalogues (3N0) are also static data.
+    assert 'config_220_body_shape.yaml' in names
+    assert 'config_400_inst_coiss.yaml' in names
+    assert 'config_310_saturn_rings.yaml' in names
+    # SHA-256 hex digest is 64 chars.
+    for digest in meta.static_data_hashes.values():
+        assert len(digest) == 64
+        assert all(c in '0123456789abcdef' for c in digest)
+
+
+def test_collect_provenance_metadata_is_byte_identical_across_calls() -> None:
+    """Two consecutive calls produce identical hashes (modulo wall-clock)."""
+    a = collect_provenance_metadata()
+    b = collect_provenance_metadata()
+    assert dict(a.static_data_hashes) == dict(b.static_data_hashes)
+    assert a.spice_kernels == b.spice_kernels
+
+
+def test_static_data_hashes_skips_unreadable_files(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A ``read_bytes`` failure is logged at WARNING and the file is skipped.
+
+    Provenance metadata is best-effort: a per-file I/O error must not
+    abort the navigation run.
+    """
+    import pathlib
+
+    from nav.nav_orchestrator import provenance as provenance_mod
+
+    real_read_bytes = pathlib.Path.read_bytes
+
+    def fake_read_bytes(self: pathlib.Path) -> bytes:
+        if self.name == 'config_400_inst_coiss.yaml':
+            raise PermissionError(f'simulated permission denied for {self.name}')
+        return real_read_bytes(self)
+
+    monkeypatch.setattr(pathlib.Path, 'read_bytes', fake_read_bytes)
+    hashes = provenance_mod._resolve_static_data_hashes()
+    assert 'config_400_inst_coiss.yaml' not in hashes
+    # Other static-data files still hash successfully.
+    assert 'config_220_body_shape.yaml' in hashes
+    out = capsys.readouterr().out
+    assert 'config_400_inst_coiss.yaml' in out
+    assert 'simulated permission denied' in out

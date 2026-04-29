@@ -16,6 +16,30 @@ from ruamel.yaml import YAML
 from nav.support.attrdict import AttrDict
 
 
+def _strip_underscore_keys(value: Any) -> Any:
+    """Recursively drop mapping keys whose name starts with ``_``.
+
+    Used by :meth:`Config._load_yaml` to remove documentation-only
+    ``_sources`` blocks before merging.  Lists are walked element-wise;
+    scalars pass through unchanged.
+
+    Parameters:
+        value: A YAML-parsed value (mapping, list, or scalar).
+
+    Returns:
+        ``value`` with every underscore-prefixed mapping key removed.
+    """
+    if isinstance(value, dict):
+        return {
+            k: _strip_underscore_keys(v)
+            for k, v in value.items()
+            if not (isinstance(k, str) and k.startswith('_'))
+        }
+    if isinstance(value, list):
+        return [_strip_underscore_keys(v) for v in value]
+    return value
+
+
 def _as_str_list(value: Any, *, location: str) -> list[str]:
     """Coerce a YAML list value to ``list[str]``.
 
@@ -55,6 +79,7 @@ class Config:
         self._config_general: dict[str, Any] = AttrDict({})
         self._config_offset: dict[str, Any] = AttrDict({})
         self._config_bodies: dict[str, Any] = AttrDict({})
+        self._config_body_shape: dict[str, Any] = AttrDict({})
         self._config_rings: dict[str, Any] = AttrDict({})
         self._config_stars: dict[str, Any] = AttrDict({})
         self._config_titan: dict[str, Any] = AttrDict({})
@@ -87,6 +112,7 @@ class Config:
         self._config_general = AttrDict(self._config_dict.get('general', {}))
         self._config_offset = AttrDict(self._config_dict.get('offset', {}))
         self._config_bodies = AttrDict(self._config_dict.get('bodies', {}))
+        self._config_body_shape = AttrDict(self._config_dict.get('body_shape', {}))
         self._config_rings = AttrDict(self._config_dict.get('rings', {}))
         self._config_stars = AttrDict(self._config_dict.get('stars', {}))
         self._config_titan = AttrDict(self._config_dict.get('titan', {}))
@@ -95,14 +121,25 @@ class Config:
         self._config_pds4 = AttrDict(self._config_dict.get('pds4', {}))
 
     def _load_yaml(self, config_path: str | Path) -> dict[str, Any]:
-        """Loads a YAML file and returns a dictionary mapping."""
+        """Loads a YAML file and returns a dictionary mapping.
+
+        Documentation-only ``_sources`` blocks (and any other top-level or
+        nested key that starts with an underscore) are stripped at load
+        time per Part 0 §74 — citations live alongside values for human
+        review without bloating the parsed config.
+        """
 
         yaml = YAML(typ='safe')
         with open(config_path, encoding='utf-8') as f:
             loaded = yaml.load(f) or {}
         if not isinstance(loaded, dict):
             raise ValueError(f'Config "{config_path}" did not parse to a dictionary mapping')
-        return loaded
+        stripped = _strip_underscore_keys(loaded)
+        # ``_strip_underscore_keys`` returns ``Any`` because it walks
+        # arbitrary YAML; the top-level shape is guaranteed dict because
+        # ``loaded`` was checked above.
+        assert isinstance(stripped, dict)
+        return stripped
 
     def read_config(self, config_path: str | Path | None = None, reread: bool = False) -> None:
         """Reads configuration from the specified YAML file.
@@ -111,6 +148,11 @@ class Config:
             config_path: Path to the configuration file. If None, uses the default
                 config files.
             reread: Whether to reread the configuration file if it has already been read.
+
+        Raises:
+            ValueError: If any registered NavTechnique's confidence spec
+                references an attribute the technique does not declare.
+                Validation runs once per ``read_config`` invocation.
         """
 
         if not reread and self._config_dict:
@@ -120,10 +162,24 @@ class Config:
             config_dir = Path(__file__).resolve().parent.parent / 'config_files'
             for filename in sorted(config_dir.glob('*.yaml')):
                 self.update_config(filename, read_default=False)
+            self._validate_registered_techniques()
             return
 
         self._config_dict = self._load_yaml(config_path)
         self._update_attrdicts()
+        self._validate_registered_techniques()
+
+    @staticmethod
+    def _validate_registered_techniques() -> None:
+        """Validate every registered NavTechnique's confidence spec.
+
+        Imported inside the method because ``nav.nav_technique.nav_technique``
+        imports ``nav.support.nav_base`` which imports this module —
+        promoting the import to the top would deadlock the package init.
+        """
+        from nav.nav_technique.nav_technique import validate_registered_confidence_specs
+
+        validate_registered_confidence_specs()
 
     def update_config(self, config_path: str | Path, read_default: bool = True) -> None:
         """Updates the current configuration with values from the specified YAML file.
@@ -247,6 +303,21 @@ class Config:
 
         self.read_config()
         return self._config_bodies
+
+    @property
+    def body_shape(self) -> Any:
+        """Returns the per-body shape catalogue (``config_220_body_shape.yaml``).
+
+        Each entry is keyed by SPICE body name (e.g. ``MIMAS``) and exposes
+        ``radii_km``, ``ellipsoid_rms_residual_km``, ``crater_scale_km``,
+        ``albedo_mean``, ``albedo_variation``, and ``shape_class_hint``.
+        Missing-body lookups return ``None`` from ``AttrDict.get``; downstream
+        code applies the conservative fallback (10% radius default,
+        reliability cap 0.3).
+        """
+
+        self.read_config()
+        return self._config_body_shape
 
     @property
     def rings(self) -> Any:

@@ -35,7 +35,7 @@ from nav.nav_technique.dt_fitting import (
     lm_subpixel_refine,
 )
 from nav.nav_technique.feasibility import NavFeasibilityReport
-from nav.nav_technique.nav_technique import NavTechnique
+from nav.nav_technique.nav_technique import NavTechnique, log_confidence_breakdown
 from nav.nav_technique.technique_result import NavTechniqueResult
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
@@ -180,6 +180,19 @@ class BodyTerminatorNav(NavTechnique):
     name = 'BodyTerminatorNav'
     accepts_feature_types = frozenset({NavFeatureType.TERMINATOR_ARC})
     requires_prior = False
+    confidence_spec = _BODY_TERMINATOR_CONFIDENCE_SPEC
+    confidence_attributes = frozenset(
+        {
+            'at_edge',
+            'visible_terminator_arc_fraction',
+            'visible_arc_px',
+            'dt_fit_rms_px',
+            'lm_iterations',
+            'tukey_inlier_count',
+            'mean_phase_angle_factor',
+            'mean_albedo_penalty',
+        }
+    )
 
     def __init__(self, *, config: Config | None = None) -> None:
         super().__init__(config=config)
@@ -262,6 +275,15 @@ class BodyTerminatorNav(NavTechnique):
             edge_mask = edge_dt <= 0.5
             polyline_mask = _build_polyline_mask(vertices, edge_dt.shape[:2])
             margin_v, margin_u = _search_window_for_obs(context)
+            self.logger.debug(
+                'Aggregated %d terminator vertices, sigma_normal range [%.3f, %.3f] px, '
+                'search window (v, u) = (%d, %d) px',
+                int(vertices.shape[0]),
+                float(sigmas.min()) if sigmas.size else 0.0,
+                float(sigmas.max()) if sigmas.size else 0.0,
+                margin_v,
+                margin_u,
+            )
             coarse_dv, coarse_du = coarse_ncc_search(
                 edge_mask,
                 polyline_mask,
@@ -305,11 +327,14 @@ class BodyTerminatorNav(NavTechnique):
                 mean_phase_angle_factor=mean_phase,
                 mean_albedo_penalty=mean_albedo,
             )
-            confidence = evaluate_sigmoid_combination(
-                _BODY_TERMINATOR_CONFIDENCE_SPEC,
+            assert self.confidence_spec is not None  # set as class attribute
+            confidence, breakdown = evaluate_sigmoid_combination(
+                self.confidence_spec,
                 confidence_context,
                 technique_name=self.name,
+                return_breakdown=True,
             )
+            log_confidence_breakdown(self.logger, breakdown)
             self.logger.info(
                 'Converged at offset (%.4f, %.4f) px, RMS %.4f px, inliers %d / %d, '
                 'confidence %.4f',
@@ -319,6 +344,18 @@ class BodyTerminatorNav(NavTechnique):
                 result.inlier_count,
                 int(vertices.shape[0]),
                 float(confidence),
+            )
+            if spurious or at_edge:
+                self.logger.info('Diagnostic flags: spurious=%s, at_edge=%s', spurious, at_edge)
+            self.logger.debug(
+                'LM iterations = %d, sigma_min = %.3f px, '
+                'visible_terminator_arc_fraction = %.3f, mean_phase_factor = %.3f, '
+                'mean_albedo_penalty = %.3f',
+                result.iterations,
+                sigma_min_px,
+                visible_terminator_arc_fraction,
+                mean_phase,
+                mean_albedo,
             )
             covariance = result.covariance
             if covariance.shape != (2, 2):

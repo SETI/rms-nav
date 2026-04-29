@@ -19,8 +19,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 __all__ = [
+    'ConfidenceBreakdown',
     'ConfidenceSpec',
     'ConfidenceTerm',
+    'ConfidenceTermContribution',
     'evaluate_sigmoid_combination',
 ]
 
@@ -174,9 +176,57 @@ def _normalize(value: float, term: ConfidenceTerm) -> float:
     return scaled
 
 
+@dataclass(frozen=True)
+class ConfidenceTermContribution:
+    """One term's contribution to the sigmoid argument.
+
+    Parameters:
+        feature: The diagnostic-attribute name.
+        raw: The raw value read off the diagnostics object.
+        normalized: ``raw`` after offset / divisor / cap_at.
+        alpha: Linear coefficient applied.
+        contribution: ``alpha * normalized`` — the term's signed
+            contribution to the sigmoid argument.
+    """
+
+    feature: str
+    raw: float
+    normalized: float
+    alpha: float
+    contribution: float
+
+
+@dataclass(frozen=True)
+class ConfidenceBreakdown:
+    """Per-step trace of a sigmoid-combination evaluation.
+
+    Parameters:
+        confidence: Final ``[0, 1]`` confidence after sigmoid + hard_cap.
+        sigmoid_arg: The argument fed into the sigmoid (sum of alpha0 +
+            term contributions).
+        alpha0: The constant baseline term.
+        terms: Per-term contributions.
+        hard_zero: Name of the ``hard_zero_if`` attribute that fired, or
+            ``None`` when no hard-zero gate applied.
+        hard_cap_applied: True if the final sigmoid value was clamped by
+            ``spec.hard_cap``.
+    """
+
+    confidence: float
+    sigmoid_arg: float
+    alpha0: float
+    terms: tuple[ConfidenceTermContribution, ...]
+    hard_zero: str | None
+    hard_cap_applied: bool
+
+
 def evaluate_sigmoid_combination(
-    spec: ConfidenceSpec, diagnostics: Any, *, technique_name: str = ''
-) -> float:
+    spec: ConfidenceSpec,
+    diagnostics: Any,
+    *,
+    technique_name: str = '',
+    return_breakdown: bool = False,
+) -> Any:
     """Evaluate the spec's sigmoid formula against a diagnostics object.
 
     Parameters:
@@ -184,15 +234,21 @@ def evaluate_sigmoid_combination(
         diagnostics: Diagnostics dataclass instance for the technique.
         technique_name: Optional human-readable identifier used in error
             messages.
+        return_breakdown: When True, return a tuple
+            ``(confidence, ConfidenceBreakdown)`` so callers can log a
+            per-term explanation of low / zero confidence values.
 
     Returns:
-        Calibrated confidence in ``[0, 1]``.
+        Calibrated confidence in ``[0, 1]``, or
+        ``(confidence, ConfidenceBreakdown)`` when
+        ``return_breakdown=True``.
 
     Raises:
         ValueError: if a term references an attribute that does not exist
             on the diagnostics object.  The message names the missing
             attribute and the technique.
     """
+    contributions: list[ConfidenceTermContribution] = []
     # Hard-zero gates first: short-circuit if any condition holds.
     for attr_name, required in spec.hard_zero_if.items():
         if not hasattr(diagnostics, attr_name):
@@ -203,7 +259,17 @@ def evaluate_sigmoid_combination(
             )
         actual = getattr(diagnostics, attr_name)
         if bool(actual) == bool(required):
-            return 0.0
+            if not return_breakdown:
+                return 0.0
+            breakdown = ConfidenceBreakdown(
+                confidence=0.0,
+                sigmoid_arg=float('nan'),
+                alpha0=spec.alpha0,
+                terms=tuple(contributions),
+                hard_zero=attr_name,
+                hard_cap_applied=False,
+            )
+            return 0.0, breakdown
     # Linear-combination of normalized terms.
     arg = spec.alpha0
     for term in spec.terms:
@@ -214,8 +280,31 @@ def evaluate_sigmoid_combination(
                 f'{type(diagnostics).__name__}'
             )
         raw = float(getattr(diagnostics, term.feature))
-        arg += term.alpha * _normalize(raw, term)
+        normalized = _normalize(raw, term)
+        contribution = term.alpha * normalized
+        arg += contribution
+        contributions.append(
+            ConfidenceTermContribution(
+                feature=term.feature,
+                raw=raw,
+                normalized=normalized,
+                alpha=term.alpha,
+                contribution=contribution,
+            )
+        )
     confidence = _sigmoid(arg)
+    hard_cap_applied = False
     if spec.hard_cap is not None and confidence > spec.hard_cap:
         confidence = spec.hard_cap
-    return confidence
+        hard_cap_applied = True
+    if not return_breakdown:
+        return confidence
+    breakdown = ConfidenceBreakdown(
+        confidence=confidence,
+        sigmoid_arg=arg,
+        alpha0=spec.alpha0,
+        terms=tuple(contributions),
+        hard_zero=None,
+        hard_cap_applied=hard_cap_applied,
+    )
+    return confidence, breakdown

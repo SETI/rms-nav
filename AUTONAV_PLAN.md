@@ -1024,7 +1024,7 @@ techniques broaden coverage.
 | **0** | Foundational support for the navigation core rewrite | **Complete** (PR #111) |
 | **1** | Real-scene NavModels (`NavModelStars`, `NavModelBody`, `NavModelRings`) | **Complete** (PR #112) |
 | **2** | DT-based NavTechniques (`BodyLimbNav`, `BodyTerminatorNav`, `RingEdgeNav`) | **Complete** (branch `core_rewrite_dt_techniques`) |
-| **3** | Foundation completion + per-instrument config wiring | Pending |
+| **3** | Foundation completion + per-instrument config wiring | **Complete** (branch `core_rewrite_catchup`) |
 | **4** | First navigable image (end-to-end DT-only) | Pending |
 | **5** | Body disc + body blob techniques | Pending |
 | **6** | Ring-annulus technique | Pending |
@@ -1437,7 +1437,7 @@ above operationalise.
   ``NavModelBody`` currently emits ``LIMB_ARC`` / ``TERMINATOR_ARC``
   / ``BODY_DISC`` / ``BODY_BLOB`` only.
 
-**Per-camera mag-offset table consumer (Part 1)**
+**Per-camera mag-offset table consumer (Part 1)** — *Superseded by `core_rewrite_catchup` (shipped); see "Phase 3 — Foundation completion + per-instrument config wiring (complete)".*
 
 - ``nav.nav_model.stars.predicted_snr.predicted_snr`` accepts a
   ``mag_offset`` parameter, but ``NavModelStars.to_features`` always
@@ -1453,7 +1453,7 @@ above operationalise.
   ``BodyTerminatorNav``, and ``RingEdgeNav`` are implemented (see
   "DT-based techniques" under Implemented).
 
-**NavContext shared derivatives**
+**NavContext shared derivatives** — *Superseded by `core_rewrite_catchup` (shipped); see "Phase 3 — Foundation completion + per-instrument config wiring (complete)".*
 
 - Source-image ``BANDPASS_DOG`` pre-filter — field is present on
   `NavContext` but the orchestrator does not yet apply it.
@@ -1470,7 +1470,7 @@ above operationalise.
   Part 13 line 4424; Phase-2 consumer per the orchestrator's
   ``_make_context``.
 
-**Provenance population**
+**Provenance population** — *Superseded by `core_rewrite_catchup` (shipped); see "Phase 3 — Foundation completion + per-instrument config wiring (complete)".*
 
 - ``Provenance`` dataclass shape is final (sorted-tuple
   normalisation, derived ``spice_kernel_count``,
@@ -1503,6 +1503,8 @@ above operationalise.
 
 **Static-data files (Part 5)**
 
+*Partially superseded by `core_rewrite_catchup` (shipped); see "Phase 3 — Foundation completion + per-instrument config wiring (complete)".* The renumbering, the per-camera `noise:` / `mag_offset:` blocks, and the initial `config_220_body_shape.yaml` (10 bodies, every numeric value `null` paired with a `PLACEHOLDER` citation pending Phase 10 calibration) all shipped. The other YAMLs (`config_510_techniques.yaml`, `config_520_features.yaml`, `config_530_filters.yaml`, `config_540_orchestrator.yaml`) remain pending — Phases 4–10 introduce them as the corresponding consumers ship.
+
 - `config_220_body_shape.yaml` (per-body shape, albedo, with
   `_sources` citations per Part 0 §74).
 - `config_510_techniques.yaml` (technique tunables + confidence
@@ -1514,7 +1516,7 @@ above operationalise.
   `config_4N0_inst_*.yaml`.
 - Renumbering of `config_NN_*.yaml` → `config_NNN_*.yaml`.
 
-**INFO logging cadence (Part 12.7)**
+**INFO logging cadence (Part 12.7)** — *Superseded by `core_rewrite_catchup` (shipped); see "Phase 3 — Foundation completion + per-instrument config wiring (complete)" and the binding "Logging conventions established in Phase 3" subsection.*
 
 - `STATUS_REASON_INFO_TEMPLATE` exists; the orchestrator does not
   yet emit those INFO lines for each status_reason.  In particular,
@@ -1599,6 +1601,8 @@ image library lands.
   `config_510_techniques.yaml` against the curated library.
 
 **Documentation (Part 8)**
+
+*Partially superseded by `core_rewrite_catchup` (shipped):* `developer_guide_static_data.rst` and `developer_guide_logging.rst` shipped in Phase 3. The remaining Sphinx pages (autonomous-nav, features, filters, uncertainty, orchestrator, cli, testing, metadata schema, troubleshooting, image library, migration) are still pending — Phase 11 covers the documentation-finalisation sweep.
 
 - All new Sphinx pages: `developer_guide_autonomous_nav.rst`,
   `developer_guide_features.rst`,
@@ -2250,7 +2254,9 @@ End of "Phase 2 — DT-based NavTechniques" section.
 
 ---
 
-## Phase 3 — Foundation completion + per-instrument config wiring
+## Phase 3 — Foundation completion + per-instrument config wiring (complete)
+
+**Status:** Shipped on branch `core_rewrite_catchup`. The original specification (Goal / Scope / Tests / Documentation / Definition of done) is preserved verbatim below for reference; the post-merge "What shipped" subsection at the end records the actual delivery, the calibration items still parked for Phase 10, and the binding logging conventions established during the phase.
 
 **Goal:** Close the foundational gaps that should have shipped in
 Phases 0–2 but didn't, and wire enough static data + per-instrument
@@ -2432,6 +2438,42 @@ conventions".
 
 **Definition of done:** see "Per-phase definition of done" in the
 overview at the top of the file.
+
+### What shipped in Phase 3
+
+- **Config files renumbered** to three-digit prefixes (`010`/`020`/.../`950`); ring catalogues moved to the `3N0` band, per-instrument blocks to the `4N0` band; bootstrap scalar angle fields converted to degrees (`max_phase_angle_deg`, `max_incidence_angle_deg`, `max_emission_angle_deg`, `lon_resolution_deg`, `lat_resolution_deg`, `max_subsolar_dist_deg`).
+- **Per-instrument `noise:` / `mag_offset:` / `image_quality_thresholds:` / `source_image_filter:` / `fit_camera_rotation:` / `max_rotation_deg:` blocks** added to every shipped `config_4N0_inst_*.yaml`. A second `cassini_iss_calib:` block was added because the Cassini loader picks the calibrated-IF block when the filename contains `_CALIB`; raw-DN and CALIB I/F products no longer share the same blank / saturation / noisy thresholds.
+- **`nav.nav_orchestrator.instrument_config.instrument_settings_from_obs(obs)`** translates the per-camera YAML block into a frozen `InstrumentSettings` dataclass that the orchestrator consumes. Missing `data_units`, missing `noise.saturation_dn` (raw_dn), and missing `image_quality_thresholds` blocks fail fast at navigate time.
+- **Orchestrator wiring.** The hard-coded `DEFAULT_FULL_WELL_DN_12_BIT` constant is gone; `_make_context` now reads the per-instrument saturation DN, image-quality thresholds, and source-image filter from `obs.inst_config`. Calibrated-IF instruments without preserved raw-saturation flags emit a one-line WARNING and an empty saturation mask.
+- **Provenance population.** `nav.nav_orchestrator.provenance.collect_provenance_metadata()` returns the runtime-derived git SHA (`git rev-parse --short HEAD` plus `--porcelain` dirty-detection), loaded SPICE kernel basenames (via `cspyce`), and sha256 hex digests of every shipped static-data YAML (`config_220_*`, `config_3*`, `config_4*`). The orchestrator's `_make_provenance` populates `Provenance.{rms_nav_git_sha, spice_kernels, static_data_hashes}`.
+- **STATUS_REASON_INFO_TEMPLATE wired through every failure path** via the new `_fail` helper plus `_log_status_reason`. `IMAGE_OVEREXPOSED` and `MISSING_DATA_DOMINANT` templates were rewritten in plain prose because pdslogger interprets `%` as a format placeholder.
+- **Star photometry wiring.** `NavModelStars` reads `obs.inst_config.mag_offset.{fallback_combo, mag_offset_table}` per image and feeds the resolved `mag_offset` into `predicted_snr`. The legacy hard-coded `mag_offset=0.0` is gone. The PSF-sigma helper handles the actual `psfmodel.GaussianPSF` interface (`sigma_x` / `sigma_y` per-axis attributes, averaged); the helper lives in `nav.nav_model.stars.predicted_snr.psf_sigma_px` and is called directly from every site that needs it (no wrappers).
+- **Confidence-spec validation.** Every `NavTechnique` declares `confidence_spec: ClassVar[ConfidenceSpec | None]` and `confidence_attributes: ClassVar[frozenset[str]]`. `validate_registered_confidence_specs()` runs at `Config.read_config` time and raises `ValueError` naming the technique and bad attribute when a spec references an undeclared field. Validation caught a real bug during Phase 3 — `BodyTerminatorNav`'s `mean_phase_angle_factor` and `mean_albedo_penalty` were undeclared.
+- **`evaluate_sigmoid_combination(..., return_breakdown=True)`** now returns `(confidence, ConfidenceBreakdown)` carrying the sigmoid argument and per-term raw / normalized / alpha / contribution values plus the `hard_zero` and `hard_cap_applied` flags. `nav.nav_technique.nav_technique.log_confidence_breakdown(logger, breakdown)` logs the breakdown at DEBUG always and *also* at INFO when `confidence <= 0.1`, so an operator running at the default INFO level immediately sees which term drove the sigmoid argument when a fit reports near-zero confidence.
+- **Config loader strips `_sources` blocks.** `Config._load_yaml` walks the parsed YAML tree and drops every mapping key starting with `_`, so the documentation-only citation blocks live alongside values in source for human review without bloating the runtime `Config` object. The `tests/nav/config_files/test_body_shape_citations.py` validator parses the *raw* YAML (citations preserved) and asserts the schema; the `Config` accessor sees only the value-bearing fields.
+- **Initial `config_220_body_shape.yaml`** with 10 bodies (Mimas, Enceladus, Tethys, Dione, Rhea, Titan, Iapetus, Prometheus, Pandora, Saturn). Per Part 0 §74, every numeric value is `null` paired with a `'PLACEHOLDER — no source found, calibrate in Phase 10'` `_sources` entry; the runtime fallback (10 % radius default + reliability cap 0.3) handles `null` values so the schema and consumers can be exercised without fabricating literature citations.
+- **Documentation.** New `docs/developer_guide_static_data.rst` (citation rules, anti-hallucination procedure, validator tests) and `docs/developer_guide_logging.rst` (pdslogger conventions, per-status-reason INFO templates, `caplog` vs. `capsys` for tests). `docs/introduction_configuration.rst` rewritten for the renumbered `config_NNN_*.yaml` set.
+- **Per-phase critique reports.** `phase_03_review/` carries the seven `CRITIQUE_*.md` reports per the per-phase definition of done.
+
+### Calibration items still parked for Phase 10
+
+- Every `# PLACEHOLDER` line in `config_4N0_inst_*.yaml` (read noise, expected noise, mag-offset tables) — Phase 10 fits real values from the planted-offset library.
+- Every `null` value in `config_220_body_shape.yaml` — Phase 10 populates literature-cited tri-axial radii, ellipsoid residuals, crater scales, and albedo numbers (≤ 10 bodies per PR per the human-review rule).
+- The ring-edge confidence spec `_RING_EDGE_CONFIDENCE_SPEC` consumes `per_edge_dt_rms_summed` (un-divided) which scales with edge count and outlier residuals. The breakdown logger now surfaces this clearly when it fires; Phase 10 either retunes the alpha / divisor or replaces the term with `dt_fit_rms_px` (the path body-limb / body-terminator already use).
+- I/F-domain image-quality thresholds (`blank_max_if`, `saturation_threshold_if`, `noisy_threshold_if`) ship as PLACEHOLDER guesses; Phase 10 measures the real distribution of CALIB I/F images.
+
+### Logging conventions established in Phase 3 (binding)
+
+These conventions are binding for every later NavModel / NavTechnique addition. Regressing any item is a phase-blocker for the addition.
+
+- **Section headers via `logger.open(...)` carry the per-instance context.** `NavModelBody` opens `'CREATE BODY MODEL FOR: <BODY_NAME>'` and `'EMIT BODY FEATURES: <BODY_NAME>'`; `NavModelRings` opens `'CREATE RINGS MODEL'` and `'EMIT RINGS FEATURES'`; `NavModelStars` opens `'CREATE STARS MODEL'` and `'EMIT STARS FEATURES'`; every `NavTechnique.navigate` body opens `with self.logger.open(f'TECHNIQUE: {self.name}'):`. **Inside a section the per-instance prefix (e.g. "Body MIMAS:", "Rings:") is dropped** — the section header already carries that context. Outside any section (e.g. orchestrator-level milestones) prefix as needed for disambiguation.
+- **INFO is for the operator-readable narrative** of *what the software is doing* plus *interesting metadata that has already been computed*. Examples (binding): NavModel-level lit-fraction / silhouette overflow / km-per-pixel / subject range / phase / sub-solar+sub-observer lat-lon / smear vector / star-list summary; NavTechnique-level features-consumed counts / converged offset / RMS / inliers / confidence; orchestrator-level image-classifier verdict / pass-1 prior / pass-2 result counts / final offset+sigma+confidence+rank+per-technique-fusion-count.
+- **DEBUG is for internal details** useful for diagnosing problems. Examples (binding): NavModel-level bbox / size_ok / shape-class hint / backplane oversample factors; NavTechnique-level coarse-NCC offset / vertex sigma range / search window / LM iteration count / supplementary diagnostics (visible-arc-fraction, per-edge-rms-summed, mean-phase-factor, mean-albedo-penalty); orchestrator-level gated-feature breakdown by feature type / per-technique offset / spurious / at_edge.
+- **Failure paths log the actual measured values, not just the threshold name.** Every `NavResult.failed` site that knows the offending number includes it in the INFO line: combined-confidence-below-min logs `combined %.3f < threshold %.3f`; no-tier-earned logs `combined %.3f, sigma (dv,du) = (%.3f, %.3f) px (max %.3f); tier_thresholds = {...}`; conflicted logs `gap %.3f < agreement_gap %.3f (best %.3f, runner-up %.3f); conflicted = combined %.3f x multiplier %.3f`; all-techniques-spurious logs the technique-name list; unobservable-offset logs the input count.
+- **Star list emission.** `NavModelStars.create_model` emits one INFO line per surviving star using `_star_short_info(star)` (catalog/name, U+/-move, V+/-move, VMAG, JBMAG, JVMAG, SCLASS, TEMP, CONFLICT) — mirrors the legacy log format that operators are used to grepping. Defensive `getattr(..., None) or 0.0` is used for fields that minimal test fixtures may omit.
+- **Confidence breakdown for low-confidence fits.** Every NavTechnique using `evaluate_sigmoid_combination` calls it with `return_breakdown=True` and feeds the result to `log_confidence_breakdown(self.logger, breakdown)`. The helper logs the per-term raw / normalized / alpha / contribution at DEBUG; when `confidence <= 0.1` it promotes the breakdown to INFO so calibration bugs surface in the default operator log. A `hard_zero_if` firing logs `'Confidence forced to 0 by hard_zero_if[%r]=True'` at INFO with the offending attribute name.
+- **Pdslogger over `print()` over stdlib `logging`.** `nav.feature`, `nav.nav_model`, `nav.nav_orchestrator`, `nav.nav_technique`, and `nav.support` never `import logging` and never `print(...)`. Every log site routes through `self._logger` (NavBase) or the module-level `IMAGE_LOGGER` exported from `nav.config.logger`. Tests assert log content via `capsys`, not `caplog`.
+- **`%`-as-format-placeholder hazard.** Pdslogger format-substitutes the message string. Literal `%` characters in fixed log strings (e.g. "> 80% pixels") trigger `TypeError: not enough arguments for format string`. Use plain prose ("most pixels at full-well DN") in `STATUS_REASON_INFO_TEMPLATE` and similar fixed strings.
 
 ---
 

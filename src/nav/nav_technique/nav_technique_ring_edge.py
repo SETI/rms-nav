@@ -31,7 +31,7 @@ from nav.nav_technique.dt_fitting import (
     lm_subpixel_refine,
 )
 from nav.nav_technique.feasibility import NavFeasibilityReport
-from nav.nav_technique.nav_technique import NavTechnique
+from nav.nav_technique.nav_technique import NavTechnique, log_confidence_breakdown
 from nav.nav_technique.technique_result import NavTechniqueResult
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
@@ -166,6 +166,16 @@ class RingEdgeNav(NavTechnique):
     name = 'RingEdgeNav'
     accepts_feature_types = frozenset({NavFeatureType.RING_EDGE})
     requires_prior = False
+    confidence_spec = _RING_EDGE_CONFIDENCE_SPEC
+    confidence_attributes = frozenset(
+        {
+            'at_edge',
+            'total_edge_length_px',
+            'per_edge_dt_rms_summed',
+            'edge_count',
+            'is_rank_1',
+        }
+    )
 
     def __init__(self, *, config: Config | None = None) -> None:
         super().__init__(config=config)
@@ -242,6 +252,15 @@ class RingEdgeNav(NavTechnique):
             edge_mask = edge_dt <= 0.5
             polyline_mask = _build_polyline_mask(vertices, edge_dt.shape[:2])
             margin_v, margin_u = _search_window_for_obs(context)
+            self.logger.debug(
+                'Aggregated %d ring-edge vertices, sigma_radial range [%.3f, %.3f] px, '
+                'search window (v, u) = (%d, %d) px',
+                int(vertices.shape[0]),
+                float(sigmas.min()) if sigmas.size else 0.0,
+                float(sigmas.max()) if sigmas.size else 0.0,
+                margin_v,
+                margin_u,
+            )
             coarse_dv, coarse_du = coarse_ncc_search(
                 edge_mask,
                 polyline_mask,
@@ -285,11 +304,14 @@ class RingEdgeNav(NavTechnique):
                 edge_count=len(feature_ids),
                 is_rank_1=bool(is_rank_1),
             )
-            confidence = evaluate_sigmoid_combination(
-                _RING_EDGE_CONFIDENCE_SPEC,
+            assert self.confidence_spec is not None  # set as class attribute
+            confidence, breakdown = evaluate_sigmoid_combination(
+                self.confidence_spec,
                 _RingEdgeConfidenceContext(at_edge=at_edge, diagnostics=diagnostics),
                 technique_name=self.name,
+                return_breakdown=True,
             )
+            log_confidence_breakdown(self.logger, breakdown)
             self.logger.info(
                 'Converged at offset (%.4f, %.4f) px, RMS %.4f px, inliers %d / %d, '
                 'rank_1=%s, confidence %.4f',
@@ -300,6 +322,16 @@ class RingEdgeNav(NavTechnique):
                 int(vertices.shape[0]),
                 is_rank_1,
                 float(confidence),
+            )
+            if spurious or at_edge:
+                self.logger.info('Diagnostic flags: spurious=%s, at_edge=%s', spurious, at_edge)
+            self.logger.debug(
+                'LM iterations = %d, sigma_min = %.3f px, '
+                'per_edge_rms_summed = %.3f, total_edge_length = %.1f px',
+                result.iterations,
+                sigma_min_px,
+                per_edge_rms_summed,
+                total_edge_length_px,
             )
             return NavTechniqueResult(
                 technique_name=self.name,

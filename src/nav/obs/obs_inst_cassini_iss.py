@@ -62,7 +62,24 @@ class ObsCassiniISS(ObsSnapshotInst):
         obs.image_url = str(fc_path.absolute())
 
         detector = obs.detector.lower()
-        inst_config = config.category('cassini_iss')[detector]
+        # Cassini ISS CALIB products carry pixels in I/F units; the RAW
+        # and CALIB pipelines have different blank / saturation /
+        # noisy thresholds.  ``_CALIB.IMG`` in the filename selects the
+        # ``cassini_iss_calib`` config block instead of ``cassini_iss``.
+        is_calibrated = '_CALIB' in fc_path.name.upper()
+        inst_section = 'cassini_iss_calib' if is_calibrated else 'cassini_iss'
+        category_dict = config.category(inst_section)
+        if not category_dict:
+            raise ValueError(
+                f'Cassini ISS config section {inst_section!r} is missing or empty; '
+                f'expected for detector {detector!r}'
+            )
+        if detector not in category_dict:
+            raise ValueError(
+                f'Cassini ISS config section {inst_section!r} has no entry for '
+                f'detector {detector!r}; available detectors: {sorted(category_dict)}'
+            )
+        inst_config = category_dict[detector]
 
         if extfov_margin_vu is None:
             extfov_margin_vu_entry = inst_config['extfov_margin_vu']

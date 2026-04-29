@@ -4,13 +4,41 @@ Two navigations with identical inputs produce byte-identical
 ``Provenance`` *except* for ``pipeline_run_iso8601``, which is wall-clock
 by construction; regression-baseline comparison strips that field before
 comparing.
+
+The :func:`collect_provenance_metadata` helper produces the per-image
+``rms_nav_git_sha``, loaded-SPICE-kernel list, and the static-data hash
+dictionary at navigate time so the orchestrator can populate the
+``Provenance`` envelope without each caller re-implementing the lookups.
 """
 
+from __future__ import annotations
+
+import hashlib
+import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 from types import MappingProxyType
 
-__all__ = ['Provenance']
+from nav.config import IMAGE_LOGGER
+
+__all__ = [
+    'Provenance',
+    'ProvenanceMetadata',
+    'collect_provenance_metadata',
+]
+
+
+_STATIC_DATA_PREFIXES: tuple[str, ...] = (
+    'config_220_',  # body shape catalogue (Phase 3+)
+    'config_3',  # ring catalogues (300_*_rings.yaml)
+    'config_4',  # per-instrument blocks (400_inst_coiss.yaml ...)
+)
+"""Filename prefixes counted as static-data YAML for hashing.
+
+Anything in ``src/nav/config_files`` whose name starts with one of these
+prefixes is sha256-hashed and recorded in ``Provenance.static_data_hashes``.
+"""
 
 
 @dataclass(frozen=True)
@@ -64,3 +92,124 @@ class Provenance:
                 'static_data_hashes',
                 MappingProxyType(dict(self.static_data_hashes)),
             )
+
+
+@dataclass(frozen=True)
+class ProvenanceMetadata:
+    """The per-image runtime-derived provenance fields.
+
+    Parameters:
+        git_sha: Short git SHA of the repository, ``'dirty'`` if there are
+            uncommitted changes, or ``None`` if not available.
+        spice_kernels: Sorted tuple of SPICE kernel filenames actually
+            loaded.
+        static_data_hashes: Mapping of static-data YAML filename to
+            sha256-hex digest of the file's raw bytes.
+    """
+
+    git_sha: str | None
+    spice_kernels: tuple[str, ...]
+    static_data_hashes: Mapping[str, str]
+
+
+def _resolve_git_sha() -> str | None:
+    """Return the short git SHA at the head of the working tree or ``None``.
+
+    Uses ``git rev-parse HEAD`` to read the SHA and ``git status
+    --porcelain`` to detect uncommitted changes (returning ``'dirty'`` in
+    that case).  Returns ``None`` when the tree is not inside a git
+    repository or git is unavailable.
+    """
+    repo_root = Path(__file__).resolve().parents[3]
+    try:
+        sha = subprocess.run(
+            ['git', '-C', str(repo_root), 'rev-parse', '--short', 'HEAD'],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout.strip()
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+        return None
+    if not sha:
+        return None
+    try:
+        status = subprocess.run(
+            ['git', '-C', str(repo_root), 'status', '--porcelain'],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+        return sha
+    return f'{sha}-dirty' if status.strip() else sha
+
+
+def _resolve_spice_kernels() -> tuple[str, ...]:
+    """Return the sorted tuple of currently-loaded SPICE kernel basenames.
+
+    Uses ``cspyce`` (the SPICE binding shared with ``oops``) when it is
+    available; returns an empty tuple when SPICE is not loaded.  The
+    tuple holds *basenames* only so the hash and JSON output stay
+    deterministic across machines with different kernel install roots.
+    """
+    try:
+        import cspyce
+    except ImportError:
+        return ()
+    try:
+        ktotal = int(cspyce.ktotal('ALL'))
+    except Exception:  # pragma: no cover - cspyce diagnostic edge case
+        return ()
+    kernels: list[str] = []
+    for index in range(ktotal):
+        try:
+            file_name, _, _, _ = cspyce.kdata(index, 'ALL')
+        except Exception:  # pragma: no cover - cspyce diagnostic edge case
+            continue
+        if file_name:
+            kernels.append(Path(str(file_name)).name)
+    return tuple(sorted(kernels))
+
+
+def _resolve_static_data_hashes() -> Mapping[str, str]:
+    """Return ``{filename: sha256_hex(raw bytes)}`` for shipped static data.
+
+    Walks ``src/nav/config_files`` and hashes any file whose name starts
+    with one of the recognised static-data prefixes
+    (``config_220_``, ``config_3``, ``config_4``).  Returns the mapping
+    sorted by filename so equality testing is stable.
+
+    Provenance metadata is best-effort: a per-file I/O failure (file
+    disappearing between ``glob`` and ``read_bytes``, permission error,
+    OS-level read error) is logged at WARNING and the file is skipped
+    rather than allowed to abort the navigation run.
+    """
+    config_dir = Path(__file__).resolve().parent.parent / 'config_files'
+    hashes: dict[str, str] = {}
+    for path in sorted(config_dir.glob('*.yaml')):
+        name = path.name
+        if not any(name.startswith(prefix) for prefix in _STATIC_DATA_PREFIXES):
+            continue
+        try:
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError as exc:
+            IMAGE_LOGGER.warning('static-data hash skipped for %s: %s', name, exc)
+            continue
+        hashes[name] = digest
+    return MappingProxyType(hashes)
+
+
+def collect_provenance_metadata() -> ProvenanceMetadata:
+    """Gather process-wide provenance metadata at navigate time.
+
+    Returns:
+        A :class:`ProvenanceMetadata` instance populated with the current
+        git SHA, loaded SPICE kernel list, and static-data hashes.
+    """
+    return ProvenanceMetadata(
+        git_sha=_resolve_git_sha(),
+        spice_kernels=_resolve_spice_kernels(),
+        static_data_hashes=_resolve_static_data_hashes(),
+    )

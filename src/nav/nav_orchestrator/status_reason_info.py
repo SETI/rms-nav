@@ -28,11 +28,11 @@ STATUS_REASON_INFO_TEMPLATE: dict[NavStatusReason, list[str]] = {
     ],
     NavStatusReason.IMAGE_OVEREXPOSED: [
         'Final: status=failed',
-        'Image classifier: > 80% pixels at full-well DN',
+        'Image classifier: most pixels at full-well DN',
     ],
     NavStatusReason.MISSING_DATA_DOMINANT: [
         'Final: status=failed',
-        'Image classifier: > 30% pixels at missing-data marker',
+        'Image classifier: missing-data marker dominates',
     ],
     NavStatusReason.IMAGE_CORRUPT: [
         'Final: status=failed',

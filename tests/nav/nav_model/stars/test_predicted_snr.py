@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
+from psfmodel import GaussianPSF
 from starcat import SCLASS_TO_B_MINUS_V as CANONICAL_SCLASS_TO_B_MINUS_V
 
 from nav.nav_model.stars.predicted_snr import (
@@ -25,15 +26,23 @@ class _FakeStar:
     vmag: float | None
 
 
-class _FakeGaussianPSF:
-    """Minimal PSF stand-in exposing only a ``sigma`` attribute."""
+class _FakeSigmaPSF:
+    """Minimal PSF stand-in exposing only a single ``sigma`` attribute."""
 
     def __init__(self, sigma: float) -> None:
         self.sigma = sigma
 
 
+class _FakeAxisPSF:
+    """PSF stand-in mimicking ``psfmodel.GaussianPSF``'s per-axis attrs."""
+
+    def __init__(self, sigma_x: float, sigma_y: float) -> None:
+        self.sigma_x = sigma_x
+        self.sigma_y = sigma_y
+
+
 class _FakeFwhmPSF:
-    """PSF stand-in that exposes ``fwhm()`` but not ``sigma``."""
+    """PSF stand-in that exposes ``fwhm()`` but no sigma attributes."""
 
     def __init__(self, fwhm: float) -> None:
         self._fwhm = fwhm
@@ -43,13 +52,30 @@ class _FakeFwhmPSF:
         return self._fwhm
 
 
+def test_psf_sigma_px_reads_axis_sigmas() -> None:
+    """``psf_sigma_px`` averages ``sigma_x`` and ``sigma_y`` when both are present."""
+    assert psf_sigma_px(_FakeAxisPSF(sigma_x=1.0, sigma_y=2.0)) == 1.5  # type: ignore[arg-type]
+
+
+def test_psf_sigma_px_supports_real_gaussian_psf() -> None:
+    """``psfmodel.GaussianPSF(sigma=...)`` is read via ``sigma_x`` / ``sigma_y``.
+
+    Regression: the legacy implementation looked for a ``sigma`` attribute
+    on every PSF, but the shipped ``GaussianPSF`` exposes only per-axis
+    sigmas, so every Cassini star-feature extraction raised
+    ``AttributeError`` before the helper handled both shapes.
+    """
+    assert psf_sigma_px(GaussianPSF(sigma=0.54)) == pytest.approx(0.54)
+    assert psf_sigma_px(GaussianPSF(sigma=0.77)) == pytest.approx(0.77)
+
+
 def test_psf_sigma_px_reads_sigma_attribute() -> None:
-    """``psf_sigma_px`` returns the PSF's ``sigma`` attribute when present."""
-    assert psf_sigma_px(_FakeGaussianPSF(sigma=1.25)) == 1.25  # type: ignore[arg-type]
+    """``psf_sigma_px`` falls back to a single ``sigma`` attribute."""
+    assert psf_sigma_px(_FakeSigmaPSF(sigma=1.25)) == 1.25  # type: ignore[arg-type]
 
 
 def test_psf_sigma_px_falls_back_to_fwhm() -> None:
-    """When ``sigma`` is absent, the helper converts FWHM via the Gaussian factor."""
+    """When no sigma attrs are present, the helper converts FWHM via the Gaussian factor."""
     psf = _FakeFwhmPSF(fwhm=2.3548200450309493)
     assert math.isclose(psf_sigma_px(psf), 1.0, rel_tol=1e-12)  # type: ignore[arg-type]
 
@@ -60,7 +86,7 @@ def test_psf_sigma_px_raises_when_neither_sigma_nor_fwhm_present() -> None:
     class _NoApiPSF:
         pass
 
-    with pytest.raises(AttributeError, match='exposes neither sigma nor fwhm'):
+    with pytest.raises(AttributeError, match='exposes neither sigma_x/sigma_y'):
         psf_sigma_px(_NoApiPSF())  # type: ignore[arg-type]
 
 
@@ -98,7 +124,7 @@ def test_integrated_signal_dn_returns_zero_when_vmag_missing() -> None:
 def test_predicted_snr_matches_design_formula() -> None:
     """Predicted SNR matches the design's matched-filter form for known inputs."""
     star: Any = _FakeStar(vmag=4.0)
-    psf: Any = _FakeGaussianPSF(sigma=1.0)
+    psf: Any = _FakeSigmaPSF(sigma=1.0)
     image_noise_sigma = 0.5
     sig = 1.0
     aperture = 4.0 * math.pi
@@ -110,14 +136,14 @@ def test_predicted_snr_matches_design_formula() -> None:
 def test_predicted_snr_returns_zero_for_missing_vmag() -> None:
     """A star with no vmag produces zero SNR (no signal)."""
     star: Any = _FakeStar(vmag=None)
-    psf: Any = _FakeGaussianPSF(sigma=1.0)
+    psf: Any = _FakeSigmaPSF(sigma=1.0)
     assert predicted_snr(star, psf=psf, image_noise_sigma=0.5) == 0.0
 
 
 def test_predicted_snr_raises_for_non_positive_noise_sigma() -> None:
     """A non-positive noise sigma raises ``ValueError`` naming the bad value."""
     star: Any = _FakeStar(vmag=4.0)
-    psf: Any = _FakeGaussianPSF(sigma=1.0)
+    psf: Any = _FakeSigmaPSF(sigma=1.0)
     with pytest.raises(ValueError, match='image_noise_sigma must be > 0'):
         predicted_snr(star, psf=psf, image_noise_sigma=0.0)
 

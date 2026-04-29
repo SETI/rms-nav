@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from nav.feature.feature import NavFeature
 from nav.feature.feature_type import NavFeatureType
+from nav.nav_technique.confidence import ConfidenceBreakdown, ConfidenceSpec
 from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.technique_result import NavTechniqueResult
 from nav.support.nav_base import NavBase
@@ -25,7 +26,71 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only import
 __all__ = [
     'NavTechnique',
     'filter_technique_names',
+    'log_confidence_breakdown',
+    'validate_registered_confidence_specs',
 ]
+
+
+def log_confidence_breakdown(
+    logger: Any, breakdown: ConfidenceBreakdown, *, low_threshold: float = 0.1
+) -> None:
+    """Emit a human-readable per-term explanation of a confidence value.
+
+    Always logs the breakdown at DEBUG.  When the confidence falls below
+    ``low_threshold`` the breakdown is *also* emitted at INFO so an
+    operator running at the default INFO level sees why a fit reported
+    near-zero confidence (typically: a single un-divided term has driven
+    the sigmoid argument to a large negative value).
+
+    Parameters:
+        logger: A pdslogger compatible with ``info(...)`` / ``debug(...)``.
+        breakdown: The :class:`ConfidenceBreakdown` returned by
+            ``evaluate_sigmoid_combination(..., return_breakdown=True)``.
+        low_threshold: Confidence at or below this value triggers the
+            promotion from DEBUG to INFO.
+    """
+    summary_fmt = 'Confidence breakdown: alpha0=%.3f, sigmoid_arg=%.3f -> confidence=%.4f%s'
+    summary_args = (
+        breakdown.alpha0,
+        breakdown.sigmoid_arg,
+        breakdown.confidence,
+        ' (hard_cap applied)' if breakdown.hard_cap_applied else '',
+    )
+    term_fmt = '  term %r: raw=%.4g, normalized=%.4g, alpha=%+.3f -> contribution=%+.4g'
+    if breakdown.hard_zero is not None:
+        logger.debug(summary_fmt, *summary_args)
+        for term in breakdown.terms:
+            logger.debug(
+                term_fmt,
+                term.feature,
+                term.raw,
+                term.normalized,
+                term.alpha,
+                term.contribution,
+            )
+        logger.info('Confidence forced to 0 by hard_zero_if[%r]=True', breakdown.hard_zero)
+        return
+    logger.debug(summary_fmt, *summary_args)
+    for term in breakdown.terms:
+        logger.debug(
+            term_fmt,
+            term.feature,
+            term.raw,
+            term.normalized,
+            term.alpha,
+            term.contribution,
+        )
+    if breakdown.confidence <= low_threshold:
+        logger.info(summary_fmt, *summary_args)
+        for term in breakdown.terms:
+            logger.info(
+                term_fmt,
+                term.feature,
+                term.raw,
+                term.normalized,
+                term.alpha,
+                term.contribution,
+            )
 
 
 class NavTechnique(NavBase, ABC):
@@ -50,6 +115,15 @@ class NavTechnique(NavBase, ABC):
     #: If ``True``, this technique requires a prior offset on
     #: ``NavContext`` and is run only on pass 2.
     requires_prior: ClassVar[bool] = False
+    #: Confidence-formula spec consumed by ``evaluate_sigmoid_combination``.
+    #: ``None`` for techniques that don't yet define a spec (e.g.
+    #: ``NavTechniqueManual``).
+    confidence_spec: ClassVar[ConfidenceSpec | None] = None
+    #: Names of every attribute the technique's confidence spec may read
+    #: (diagnostics fields plus side-channel flags such as ``at_edge``).
+    #: ``validate_registered_confidence_specs`` ensures every term in
+    #: ``confidence_spec`` references a member of this set.
+    confidence_attributes: ClassVar[frozenset[str]] = frozenset()
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Auto-register concrete subclasses."""
@@ -89,6 +163,41 @@ class NavTechnique(NavBase, ABC):
             A ``NavTechniqueResult`` with offset, covariance, confidence,
             and per-technique diagnostics.
         """
+
+
+def validate_registered_confidence_specs() -> None:
+    """Validate every registered ``NavTechnique``'s confidence spec.
+
+    Each technique that defines ``confidence_spec`` must also declare the
+    full set of valid attribute names in ``confidence_attributes``.
+    Every term's ``feature`` and every ``hard_zero_if`` key must appear in
+    that set; otherwise the technique would raise at navigate time.
+    Validation runs at config-load time so the failure surfaces during
+    process startup rather than mid-image.
+
+    Raises:
+        ValueError: if any term references an unknown attribute.  The
+            message names both the technique class and the bad
+            attribute.
+    """
+    for cls in NavTechnique._registry:
+        spec = cls.confidence_spec
+        if spec is None:
+            continue
+        valid = cls.confidence_attributes
+        for term in spec.terms:
+            if term.feature not in valid:
+                raise ValueError(
+                    f'NavTechnique {cls.name!r}: confidence term references unknown '
+                    f'attribute {term.feature!r}; declared attributes are '
+                    f'{sorted(valid)!r}'
+                )
+        for key in spec.hard_zero_if:
+            if key not in valid:
+                raise ValueError(
+                    f'NavTechnique {cls.name!r}: hard_zero_if references unknown '
+                    f'attribute {key!r}; declared attributes are {sorted(valid)!r}'
+                )
 
 
 def filter_technique_names(names: list[str], patterns: str | list[str]) -> list[str]:
