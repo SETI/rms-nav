@@ -479,8 +479,5 @@ class _BlobConfidenceContext:
 
 def _search_window_for_obs(context: NavContext) -> tuple[int, int]:
     """Return the ``(margin_v, margin_u)`` search window for at-edge detection."""
-    obs = context.obs
-    margin = getattr(obs, 'extfov_margin_vu', None)
-    if margin is None:
-        return (32, 32)
-    return (int(margin[0]), int(margin[1]))
+    margin_v, margin_u = context.obs.extfov_margin_vu
+    return (int(margin_v), int(margin_u))

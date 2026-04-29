@@ -1026,7 +1026,7 @@ techniques broaden coverage.
 | **2** | DT-based NavTechniques (`BodyLimbNav`, `BodyTerminatorNav`, `RingEdgeNav`) | **Complete** (branch `core_rewrite_dt_techniques`) |
 | **3** | Foundation completion + per-instrument config wiring | **Complete** (branch `core_rewrite_catchup`) |
 | **4** | First navigable image (end-to-end DT-only) | **Complete** (branch `core_rewrite_phase4`) |
-| **5** | Body disc + body blob techniques | Pending |
+| **5** | Body disc + body blob techniques | **Complete** (branch `core_rewrite_phase5`) |
 | **6** | Ring-annulus technique | Pending |
 | **7** | Star techniques part 1 (unique-match + refine) | Pending |
 | **8** | `StarFieldFromCatalogNav` (multi-star RANSAC) | Pending |
