@@ -227,16 +227,18 @@ def test_to_features_skips_terminator_when_polyline_too_short(fake_obs: FakeObs)
 
 
 def test_to_features_limb_uncertainty_at_threshold(fake_obs: FakeObs) -> None:
-    """A body sitting exactly at the LIMB_ARC threshold still emits the arc."""
-    # ellipsoid_residual_km = 50 (gas-giant default -- SATURN is mapped to it),
-    # so limb_uncertainty_px = ellipsoid_residual_km / km_per_pixel_at_limb.
-    # km_per_pixel_at_limb=25 yields uncertainty=2.0 == LIMB_ARC_MAX_UNCERTAINTY_PX.
-    saturn_model = _build_body(obs=fake_obs, body_name='SATURN', km_per_pixel_at_limb=25.0)
+    """A body sitting exactly at the LIMB_ARC threshold still emits the arc.
+
+    With ``LIMB_ARC_MAX_UNCERTAINTY_PX = 3.0`` and Saturn's
+    ``ellipsoid_residual_km = 50`` (gas-giant default), the threshold
+    is reached at ``km_per_pixel_at_limb = 50 / 3.0 ~= 16.67``.
+    """
+    # km_per_pixel_at_limb=17 yields uncertainty ~ 2.94 < 3.0 -> LIMB_ARC.
+    saturn_model = _build_body(obs=fake_obs, body_name='SATURN', km_per_pixel_at_limb=17.0)
     features = saturn_model.to_features(cast(Any, None))
     assert any(f.feature_type is NavFeatureType.LIMB_ARC for f in features)
-    # Now push it over -- 26 km/px -> uncertainty < 2 still passes; 24 km/px ->
-    # uncertainty > 2 forces the blob branch.
-    saturn_blob = _build_body(obs=fake_obs, body_name='SATURN', km_per_pixel_at_limb=24.0)
+    # km_per_pixel_at_limb=15 yields uncertainty ~ 3.33 > 3.0 -> blob branch.
+    saturn_blob = _build_body(obs=fake_obs, body_name='SATURN', km_per_pixel_at_limb=15.0)
     features_blob = saturn_blob.to_features(cast(Any, None))
     types = {f.feature_type for f in features_blob}
     assert NavFeatureType.LIMB_ARC not in types

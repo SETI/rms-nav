@@ -162,6 +162,189 @@ the M-estimator pseudoinverse, honestly rank-deficient on flat-only
 scenes; the ensemble combine fuses it with any orthogonal feature
 (star, body limb, body blob) before declaring a final answer.
 
+Body-disc and body-blob techniques
+==================================
+
+Two body-side techniques do not fit the DT-fitting shape: full-disc NCC
+correlation (``BodyDiscCorrelateNav``) and brightness-weighted-moment
+centroid fitting (``BodyBlobNav``).  Both consume a single feature type
+and produce one combined translation, so multi-body inputs constrain the
+fit jointly without per-body offset ambiguity.
+
+BodyDiscCorrelateNav
+--------------------
+
+Accepts ``BODY_DISC`` features.  Each ``BODY_DISC`` carries a
+postage-stamp Lambert-shaded disc template (``template_img``) plus a
+boolean ``template_mask`` and a ``bbox_extfov_vu`` placement.  The
+technique:
+
+1. Fuses the per-body templates into a single extfov-shaped composite
+   via :func:`nav.feature.composition.compose_template_features`.  The
+   helper sorts features by ``subject_range_km`` ascending so closer
+   bodies overwrite farther bodies on overlap (Z-buffer paint per
+   Part 0 §2 of the autonav design).  The combined mask is the OR of
+   per-body masks.
+2. Runs :func:`nav.support.correlate.navigate_with_pyramid_kpeaks`
+   against the composite with ``use_gradient='auto'``.  Auto mode tries
+   both raw-intensity and gradient-magnitude NCC and keeps the better
+   result by ``non-spurious > not-at-edge > higher-quality`` ordering.
+3. Reads the pyramid wrapper's ``offset``, ``cov``, ``quality``,
+   ``consistency``, ``spurious``, ``at_edge``, and ``used_gradient``
+   fields directly into ``BodyDiscDiagnostics``.
+
+``is_feasible`` returns True iff at least one input ``BODY_DISC``
+feature carries a template payload.  The technique reports
+``spurious=True`` when the pyramid's quality metric falls below
+``quality_thresh`` or pyramid consistency drifts past ``consistency_tol``;
+``at_edge=True`` when the converged peak lies within 2 px of the search
+window edge.
+
+Confidence spec coefficients (placeholders pending calibration
+against the operator-curated image library):
+
+- ``alpha0 = -2``
+- ``alpha(ncc_peak / 6, capped at 1) = 1.5``
+- ``alpha(consistency_px / 2) = -1``
+- ``alpha(body_count / 3, capped at 1) = 0.4``
+- ``alpha(peak_to_runner_up_ratio / 2, capped at 1) = 0.0`` — wired in
+  but disabled until calibration tunes the alpha
+- hard zero when ``at_edge`` or ``spurious``
+
+.. note::
+
+   ``config_510_techniques.yaml`` is not yet in the tree; the
+   coefficients above live as the Python module constant
+   ``_BODY_DISC_CONFIDENCE_SPEC`` in
+   ``nav.nav_technique.nav_technique_body_disc``.  When the YAML
+   config ships the loader's defaults will mirror these values and
+   the technique will read them from
+   ``config_510_techniques.yaml.body_disc_correlate``.
+
+Diagnostics fields:
+
+- ``ncc_peak``: pyramid-wrapper quality metric (PSR by default).
+- ``peak_to_runner_up_ratio``: ratio of the winning peak's quality to
+  the runner-up's, derived from the pyramid wrapper's
+  ``top_k_peaks`` field (sorted by quality descending).  Returns
+  ``1.0`` when only one peak survives non-maximum suppression — the
+  unambiguous-peak case.
+- ``consistency_px``: maximum per-axis disagreement between coarse and
+  fine pyramid levels.
+- ``used_gradient``: ``True`` when auto-mode picked the gradient pass.
+- ``body_count``: number of fused BODY_DISC features.
+
+Infeasibility cases:
+
+- No input feature carries a template.
+
+BodyBlobNav
+-----------
+
+Accepts ``BODY_BLOB`` features.  Each blob carries only a predicted
+centroid and a predicted bounding box (no template — the body is
+either irregular or under-resolved, so a Lambert template cannot be
+rendered usefully).  The technique:
+
+1. For each blob, computes a brightness-weighted-moment centroid over
+   every above-noise pixel inside the predicted bbox.  Above-noise
+   means ``image_DN > 3 * image_noise_sigma``; background DN never
+   biases the moment.
+2. Computes the per-blob residual ``observed_centroid - predicted_center``
+   and forms a precision-weighted joint translation (the simple
+   weighted mean across all surviving blobs).
+3. Per-blob weight ``w_i = N_lit_i * SNR_i^2 / radius_i^2`` from the
+   BODY_BLOB centroid CRLB derivation; the joint covariance is
+   diagonal with per-axis variance ``1 / sum(w)`` floored to the
+   inverse-precision and inflated by residual scatter when ``N >= 2``.
+
+``is_feasible`` returns True iff at least one input ``BODY_BLOB``
+carries a non-zero ``predicted_diameter_px``.  The technique flags
+``spurious=True`` when no blob has any above-noise signal in its
+predicted bbox; ``at_edge=True`` when the converged offset lies within
+1 px of the search-window axis bounds.
+
+The confidence formula intrinsically caps at ``0.4`` (the BODY_BLOB
+reliability ceiling).  A brightness-weighted centroid is weaker than
+a limb fit by design; the cap ensures the technique cannot dominate
+the ensemble even when every term saturates.  Coefficient
+placeholders pending calibration against the operator-curated image
+library:
+
+- ``alpha0 = -1``
+- ``alpha(body_snr_inside_predicted_bbox / 4, capped at 1) = 0.5``
+- ``alpha((body_extent_px - 8) / 8, capped at 1) = 1``
+- ``alpha(blob_count / 3, capped at 1) = 0.4``
+- hard zero when ``at_edge``
+- hard cap ``0.4`` after the sigmoid
+
+.. note::
+
+   ``config_510_techniques.yaml`` is not yet in the tree; the
+   coefficients above live as the Python module constant
+   ``_BODY_BLOB_CONFIDENCE_SPEC`` in
+   ``nav.nav_technique.nav_technique_body_blob``.  When the YAML
+   config ships the loader's defaults will mirror these values and
+   the technique will read them from
+   ``config_510_techniques.yaml.body_blob``.
+
+Sample confidence breakdown
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Running the BodyBlobNav unit tests with DEBUG logging on a 3-blob
+synthetic scene (mean-extent 16 px, mean-SNR 8) produces a per-term
+trace of the form:
+
+.. code-block:: text
+
+   Confidence breakdown: alpha0=-1.000, sigmoid_arg=1.133 -> confidence=0.4000 (hard_cap applied)
+     term 'body_snr_inside_predicted_bbox': raw=8.00, normalized=1.000, alpha=+0.500 -> contribution=+0.500
+     term 'body_extent_px':                  raw=16.00, normalized=1.000, alpha=+1.000 -> contribution=+1.000
+     term 'blob_count':                      raw=3.00, normalized=1.000, alpha=+0.400 -> contribution=+0.400
+     term 'residual_px':                     raw=0.10, normalized=0.100, alpha=+0.000 -> contribution=+0.000
+
+The sigmoid argument before clamping is ``-1.0 + 0.5 + 1.0 + 0.4 =
+0.9``, the sigmoid evaluates to ``0.711``, and the ``hard_cap = 0.4``
+post-sigmoid clamp drops the headline confidence to the BODY_BLOB
+ceiling.
+
+Diagnostics fields:
+
+- ``body_snr_inside_predicted_bbox``: mean SNR of above-noise pixels
+  inside each predicted bbox, averaged across consumed blobs.
+- ``body_extent_px``: mean predicted disc diameter in pixels across
+  consumed blobs.
+- ``blob_count``: number of blobs that contributed (after dropping
+  blobs with no above-noise signal).
+- ``residual_px``: RMS scatter of per-blob ``observed - predicted``
+  vectors around the joint mean.
+
+Infeasibility cases:
+
+- No input feature carries a non-zero predicted diameter.
+
+Body-extractor emission gate
+============================
+
+The body NavModel picks which feature types to emit per-image,
+per-body:
+
+1. If ``limb_uncertainty_px <= LIMB_ARC_MAX_UNCERTAINTY_PX`` (default
+   3 px) and the limb sampler has surviving vertices: emit
+   ``LIMB_ARC``.
+2. Else if ``predicted_diameter_px >= max(BODY_BLOB_MIN_DIAMETER_PX,
+   shape.min_blob_diameter_px)`` (default 8 px, with per-body
+   overrides for highly-irregular satellites and gas giants): emit
+   ``BODY_BLOB``.
+3. Else: emit no body feature for the image.
+
+``limb_uncertainty_px = ellipsoid_residual_km / km_per_px_at_limb`` —
+per-image, per-body.  The same body becomes a usable limb arc at one
+distance and a blob at another (worked example: an irregular
+ring-shepherd moon at 100 km/px has ``limb_uncertainty_px = 0.08``
+and emits ``LIMB_ARC``; the same moon at 1 km/px has
+``limb_uncertainty_px = 8`` and emits ``BODY_BLOB`` instead).
+
 Logging
 =======
 
@@ -180,4 +363,17 @@ See also
 - :doc:`developer_guide_uncertainty` — derivation of the M-estimator
   information-matrix to covariance step that turns the LM Jacobian at
   convergence into the per-technique 2x2 (or 3x3) covariance reported
-  on every ``NavTechniqueResult``.
+  on every ``NavTechniqueResult``.  ``BodyDiscCorrelateNav``'s
+  covariance comes from the pyramid wrapper's Hessian-of-NCC; both
+  ``BodyLimbNav`` and ``BodyTerminatorNav`` derive theirs from the
+  Tukey-reweighted information matrix; ``BodyBlobNav`` derives a
+  diagonal precision-weighted-mean covariance from the per-blob CRLB
+  weights.
+- :func:`nav.feature.composition.compose_template_features` — the
+  Z-buffer paint helper that ``BodyDiscCorrelateNav`` uses to fuse
+  per-body templates into a single composite for the NCC.
+- :func:`nav.support.correlate.navigate_with_pyramid_kpeaks` — the
+  shared pyramid-NCC entry point.  Returns ``offset``, ``cov``,
+  ``quality``, ``consistency``, ``spurious``, ``at_edge``,
+  ``used_gradient``, and ``top_k_peaks`` (per-peak telemetry the
+  ``BodyDiscCorrelateNav`` peak-to-runner-up diagnostic reads).

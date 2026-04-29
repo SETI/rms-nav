@@ -20,9 +20,11 @@ The feature-by-feature emission rules:
 
 - ``LIMB_ARC`` is emitted when ``limb_uncertainty_px <=
   LIMB_ARC_MAX_UNCERTAINTY_PX`` and there are surviving limb vertices.
-- ``BODY_BLOB`` is emitted when the predicted disc diameter is at least
-  the body's ``min_blob_diameter_px`` *and* the limb uncertainty is
-  too high for ``LIMB_ARC``.
+- ``BODY_BLOB`` is emitted when the predicted disc diameter is at
+  least ``max(BODY_BLOB_MIN_DIAMETER_PX, shape.min_blob_diameter_px)``
+  *and* the limb uncertainty is too high for ``LIMB_ARC``.  The
+  per-body shape floor can override the global default upward but
+  not downward.
 - ``BODY_DISC`` is emitted alongside ``LIMB_ARC`` when the body fits
   inside the FOV with at least ``BODY_DISC_MIN_VISIBLE_LIT_FRACTION``
   of its lit side visible and ``overflow_fraction`` below
@@ -82,6 +84,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only import
 from nav.support.filters import NavFilterKind, NavFilterSpec
 
 __all__ = [
+    'BODY_BLOB_MIN_DIAMETER_PX',
     'BODY_DISC_MAX_OVERFLOW_FRACTION',
     'BODY_DISC_MIN_VISIBLE_LIT_FRACTION',
     'BODY_POSITION_SLOP_FRAC',
@@ -101,13 +104,25 @@ limb pixels from being lost on the boundary.
 """
 
 
-LIMB_ARC_MAX_UNCERTAINTY_PX: float = 2.0
+LIMB_ARC_MAX_UNCERTAINTY_PX: float = 3.0
 """Cap on the limb normal-sigma at which LIMB_ARC remains useful.
 
-Above this value the feature is unreliable enough that BODY_BLOB or
-BODY_DISC is the right emission instead.  Phase-5 calibration may
-tighten this; the default is the design's "limb fits within a couple of
-pixels" guideline.
+Above this value the per-vertex normal uncertainty is too large for
+the DT-based limb fit; the extractor switches to ``BODY_BLOB`` so the
+brightness-weighted-centroid technique still has something to work
+with.  The numeric value is a config default pending calibration
+against the operator-curated image library.
+"""
+
+
+BODY_BLOB_MIN_DIAMETER_PX: float = 8.0
+"""Minimum predicted disc diameter (px) at which BODY_BLOB is emitted.
+
+Below this diameter the predicted body silhouette is too small for a
+brightness-weighted centroid to pin the body to better than ~1 px, so
+the extractor emits no body feature for the image.  The per-body
+shape table can override this floor for known irregular / gas-giant
+bodies.
 """
 
 
@@ -543,9 +558,11 @@ class NavModelBody(NavModelBodyBase):
             lit_mask = lit_arr
         body_total = int(np.count_nonzero(body_mask))
         body_visible = int(np.count_nonzero(body_mask & in_sensor))
-        # Per Part 1: ``visible_lit_fraction`` is the fraction of the
-        # *whole predicted disc* (lit and dark) whose cos(incidence) >= 0
-        # *and* which lies inside the sensor FOV.
+        # ``visible_lit_fraction`` measures the fraction of the *whole
+        # predicted disc* (lit + dark together) whose cos(incidence) >= 0
+        # AND which lies inside the sensor FOV — not the lit hemisphere
+        # alone, which would always score ~1.0 for a fully-in-frame
+        # body and lose discriminating power for the BODY_DISC gate.
         lit_visible_in_fov = int(np.count_nonzero(lit_mask & in_sensor))
         visible_lit_fraction = lit_visible_in_fov / max(body_total, 1)
         overflow_fraction = 1.0 - (body_visible / max(body_total, 1))
@@ -583,6 +600,7 @@ class NavModelBody(NavModelBodyBase):
                 getattr(shape, 'shape_class_hint', 'unknown'),
             )
             limb_arc_emitted = False
+            blob_min_px = max(BODY_BLOB_MIN_DIAMETER_PX, shape.min_blob_diameter_px)
             if (
                 self._limb_sampler is not None
                 and self._limb_sampler.vertices_vu.size > 0
@@ -600,9 +618,17 @@ class NavModelBody(NavModelBodyBase):
                     )
                 )
                 limb_arc_emitted = True
+            elif self._predicted_diameter_px >= blob_min_px:
+                features.append(self._build_blob_feature(shape))
             else:
-                if self._predicted_diameter_px >= shape.min_blob_diameter_px:
-                    features.append(self._build_blob_feature(shape))
+                self._logger.debug(
+                    'No body feature emitted: limb_uncertainty %.3f > %.3f and '
+                    'predicted_diameter %.3f < %.3f',
+                    limb_uncertainty_px,
+                    LIMB_ARC_MAX_UNCERTAINTY_PX,
+                    self._predicted_diameter_px,
+                    blob_min_px,
+                )
 
             if self._should_emit_disc(limb_arc_emitted):
                 features.append(self._build_disc_feature(shape))
@@ -647,6 +673,14 @@ class NavModelBody(NavModelBodyBase):
         """Construct the BODY_DISC feature (template + geometry + flags)."""
         assert self._model_img is not None
         assert self._body_mask is not None
+        # ``compose_template_features`` expects the template payload to be a
+        # postage-stamp sized to ``bbox_extfov_vu``.  ``self._model_img`` is
+        # an extfov-shaped buffer with non-zero values only inside the body
+        # bbox, so crop here to the body's bbox.  The .copy() detaches from
+        # the parent so the feature can freeze its own array safely.
+        v_min, u_min, v_max, u_max = self._bbox_extfov_vu
+        template_img = self._model_img[v_min:v_max, u_min:u_max].copy()
+        template_mask = self._body_mask[v_min:v_max, u_min:u_max].copy()
         return NavFeature(
             feature_id=f'body_disc:{self._body_name}',
             feature_type=NavFeatureType.BODY_DISC,
@@ -674,8 +708,8 @@ class NavModelBody(NavModelBodyBase):
                 body_name=self._body_name,
                 overflow_fov_fraction=self._overflow_fraction,
             ),
-            template_img=self._model_img,
-            template_mask=self._body_mask,
+            template_img=template_img,
+            template_mask=template_mask,
         )
 
     def _build_blob_feature(self, shape: BodyShape) -> NavFeature:

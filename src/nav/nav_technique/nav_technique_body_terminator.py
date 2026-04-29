@@ -31,6 +31,7 @@ from nav.nav_technique.confidence import (
 )
 from nav.nav_technique.diagnostics import BodyTerminatorDiagnostics
 from nav.nav_technique.dt_fitting import (
+    AT_EDGE_TOLERANCE_PX,
     coarse_ncc_search,
     lm_subpixel_refine,
 )
@@ -59,17 +60,6 @@ SPURIOUS_DT_FLOOR_PX: float = 4.0
 
 SPURIOUS_MIN_INLIERS: int = 6
 """Below this Tukey-inlier count the final fit is flagged spurious."""
-
-
-_AT_EDGE_TOLERANCE_PX: float = 1.0
-"""Pixels of slack around the search-window axis bounds for at-edge detection.
-
-A converged offset whose absolute distance from any axis bound (``+/-margin_v``,
-``+/-margin_u``) falls within this tolerance is flagged ``at_edge=True`` and
-forced to zero confidence by the technique's ``hard_zero_if`` gate.  One pixel
-matches the bilinear DT half-cell width: any closer to the boundary and the
-LM gradient information is unreliable.
-"""
 
 
 _BODY_TERMINATOR_CONFIDENCE_SPEC = ConfidenceSpec(
@@ -301,10 +291,10 @@ class BodyTerminatorNav(NavTechnique):
             )
             dv_final, du_final = result.offset_vu
             at_edge = (
-                abs(dv_final - margin_v) <= _AT_EDGE_TOLERANCE_PX
-                or abs(dv_final + margin_v) <= _AT_EDGE_TOLERANCE_PX
-                or abs(du_final - margin_u) <= _AT_EDGE_TOLERANCE_PX
-                or abs(du_final + margin_u) <= _AT_EDGE_TOLERANCE_PX
+                abs(dv_final - margin_v) <= AT_EDGE_TOLERANCE_PX
+                or abs(dv_final + margin_v) <= AT_EDGE_TOLERANCE_PX
+                or abs(du_final - margin_u) <= AT_EDGE_TOLERANCE_PX
+                or abs(du_final + margin_u) <= AT_EDGE_TOLERANCE_PX
             )
             sigma_min_px = float(sigmas.min()) if sigmas.size else 1.0
             spurious = (

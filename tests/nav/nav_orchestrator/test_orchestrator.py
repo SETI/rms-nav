@@ -210,6 +210,61 @@ def test_orchestrator_only_techniques_filter_drops_techniques(
     assert result.status_reason == NavStatusReason.NO_FEASIBLE_TECHNIQUES
 
 
+def test_orchestrator_only_models_mixed_include_exclude(fake_obs: _FakeObs) -> None:
+    """Mixed include/exclude patterns on ``only_models`` apply both gates.
+
+    ``only_models`` accepts the same glob-with-negation grammar as
+    ``only_techniques``: include patterns admit every match; the
+    leading-bang exclusion drops any name matching the exclude
+    pattern, applied after inclusion.
+    """
+    obs = fake_obs
+    model = _FakeStarModel(obs, feature_count=3)
+    # Include everything ('*') but exclude names starting with 'st' (the
+    # stars model).  No models survive, so feature extraction yields the
+    # NO_FEATURES_EXTRACTED status the single-pattern test already covers.
+    orch = NavOrchestrator([model], only_models=['*', '!st*'])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    assert result.status == 'failed'
+    assert result.status_reason == NavStatusReason.NO_FEATURES_EXTRACTED
+
+
+def test_orchestrator_only_models_mixed_keeps_matching_inclusion(
+    fake_obs: _FakeObs,
+) -> None:
+    """Mixed pattern ``['stars', '!ring*']`` keeps ``stars`` (no exclusion match)."""
+    obs = fake_obs
+    model = _FakeStarModel(obs, feature_count=3)
+    # Include only 'stars'; exclude any 'ring*' (no match — kept).
+    orch = NavOrchestrator(
+        [model],
+        only_models=['stars', '!ring*'],
+        only_techniques=['_FakeStarTechnique'],
+    )
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    assert result.status == 'ok'
+
+
+def test_orchestrator_only_techniques_mixed_include_exclude(
+    fake_obs: _FakeObs,
+) -> None:
+    """Mixed include/exclude patterns on ``only_techniques`` apply both gates."""
+    obs = fake_obs
+    model = _FakeStarModel(obs, feature_count=3)
+    # Include everything but exclude techniques whose name contains 'Pass'.
+    # ``_FakeStarTechnique`` survives; ``_PassTwoTechnique`` (registered
+    # later in this module) does not.
+    orch = NavOrchestrator(
+        [model],
+        only_techniques=['*', '!*Pass*'],
+    )
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    assert result.status == 'ok'
+    technique_names = {t.technique_name for t in result.per_technique}
+    assert '_FakeStarTechnique' in technique_names
+    assert '_PassTwoTechnique' not in technique_names
+
+
 def test_orchestrator_marks_technique_results_in_inventory(
     fake_obs: _FakeObs,
 ) -> None:

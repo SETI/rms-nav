@@ -149,6 +149,9 @@ class NavModelBodySimulated(NavModelBodyBase):
         """Emit a single BODY_DISC feature carrying the rendered template."""
         if self._model_img is None or self._body_mask is None:
             return []
+        v_min, u_min, v_max, u_max = self._bbox_extfov_vu
+        template_img = self._model_img[v_min:v_max, u_min:u_max].copy()
+        template_mask = self._body_mask[v_min:v_max, u_min:u_max].copy()
         feature = NavFeature(
             feature_id=f'body_disc:{self._body_name}',
             feature_type=NavFeatureType.BODY_DISC,
@@ -168,8 +171,8 @@ class NavModelBodySimulated(NavModelBodyBase):
             ),
             usable_types=frozenset({NavFeatureType.BODY_DISC}),
             flags=BodyDiscFlags(body_name=self._body_name, overflow_fov_fraction=0.0),
-            template_img=self._model_img,
-            template_mask=self._body_mask,
+            template_img=template_img,
+            template_mask=template_mask,
         )
         return [feature]
 

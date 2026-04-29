@@ -38,6 +38,8 @@ from nav.nav_technique.diagnostics import (
 )
 from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.nav_technique import NavTechnique, filter_technique_names
+from nav.nav_technique.nav_technique_body_blob import BodyBlobNav
+from nav.nav_technique.nav_technique_body_disc import BodyDiscCorrelateNav
 from nav.nav_technique.nav_technique_body_limb import BodyLimbNav
 from nav.nav_technique.nav_technique_body_terminator import BodyTerminatorNav
 from nav.nav_technique.nav_technique_manual import NavTechniqueManual, run_manual_nav
@@ -46,6 +48,8 @@ from nav.nav_technique.technique_result import NavTechniqueResult
 
 __all__ = [
     'BodyBlobDiagnostics',
+    'BodyBlobNav',
+    'BodyDiscCorrelateNav',
     'BodyDiscDiagnostics',
     'BodyLimbDiagnostics',
     'BodyLimbNav',
