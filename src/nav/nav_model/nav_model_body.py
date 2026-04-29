@@ -45,7 +45,7 @@ from oops import Meshgrid
 from oops.backplane import Backplane
 
 from nav.annotation import Annotations
-from nav.config import Config
+from nav.config import DEFAULT_CONFIG, Config
 from nav.feature.constants import (
     INCIDENCE_FACTOR_ANGLE_CAP_DEG,
     INCIDENCE_FACTOR_CLIP_DEG,
@@ -68,6 +68,7 @@ from nav.feature.geometry import (
 from nav.nav_model.body_shape import BODY_SHAPE_TABLE, DEFAULT_BODY_SHAPE, BodyShape
 from nav.nav_model.nav_model import NavModel
 from nav.nav_model.nav_model_body_base import NavModelBodyBase
+from nav.nav_model.stars.predicted_snr import psf_sigma_px
 from nav.support.constants import HALFPI
 from nav.support.image import filter_downsample, shift_array
 from nav.support.time import now_dt
@@ -208,8 +209,6 @@ class NavModelBody(NavModelBodyBase):
         Returns:
             One ``NavModelBody`` per body present in the extfov.
         """
-        from nav.config import DEFAULT_CONFIG
-
         config = DEFAULT_CONFIG
         planet = getattr(obs, 'closest_planet', None)
         if planet is None:
@@ -245,9 +244,42 @@ class NavModelBody(NavModelBodyBase):
         self._metadata['body_name'] = self._body_name
         with self._logger.open(f'CREATE BODY MODEL FOR: {self._body_name}'):
             self._render()
-        end_time = now_dt()
-        self._metadata['end_time'] = end_time.isoformat()
-        self._metadata['elapsed_time_sec'] = (end_time - start_time).total_seconds()
+            self._log_geometry_summary()
+            end_time = now_dt()
+            self._metadata['end_time'] = end_time.isoformat()
+            self._metadata['elapsed_time_sec'] = (end_time - start_time).total_seconds()
+            self._logger.info('Model created in %.3f s', self._metadata['elapsed_time_sec'])
+
+    def _log_geometry_summary(self) -> None:
+        """Emit INFO-level geometry summary plus DEBUG-level bbox detail."""
+        meta = self._metadata
+        self._logger.info(
+            'Subsolar (lon, lat) = (%.2f, %.2f) deg; '
+            'subobserver (lon, lat) = (%.2f, %.2f) deg; phase = %.2f deg',
+            meta.get('sub_solar_lon_deg', float('nan')),
+            meta.get('sub_solar_lat_deg', float('nan')),
+            meta.get('sub_observer_lon_deg', float('nan')),
+            meta.get('sub_observer_lat_deg', float('nan')),
+            meta.get('phase_angle_deg', float('nan')),
+        )
+        self._logger.info(
+            'Subject range = %.0f km; predicted diameter = %.2f px; km/px at limb = %.4f',
+            self._subject_range_km,
+            self._predicted_diameter_px,
+            self._km_per_pixel_at_limb,
+        )
+        self._logger.info(
+            'Visible-lit fraction = %.3f; silhouette overflow = %.3f; guaranteed-visible = %s',
+            self._visible_lit_fraction,
+            self._overflow_fraction,
+            meta.get('guaranteed_visible_in_fov', False),
+        )
+        self._logger.debug(
+            'Bbox (extfov vu) = %s; bbox area = %.1f px; size_ok = %s',
+            self._bbox_extfov_vu,
+            meta.get('bbox_area_px', 0.0),
+            meta.get('size_ok', False),
+        )
 
     def _render(self) -> None:
         """Populate masks, polyline samplers, and metadata."""
@@ -395,6 +427,14 @@ class NavModelBody(NavModelBodyBase):
         )
         oversample_u = min(oversample_u, body_config.oversample_maximum)
         oversample_v = min(oversample_v, body_config.oversample_maximum)
+        self._logger.debug(
+            'Body %s: backplane oversample (u, v) = (%d, %d); edge_limit = %s, max = %s',
+            self._body_name,
+            oversample_u,
+            oversample_v,
+            body_config.oversample_edge_limit,
+            body_config.oversample_maximum,
+        )
         restr_u_min = u_min + 1.0 / (2 * oversample_u)
         restr_u_max = u_max + 1 - 1.0 / (2 * oversample_u)
         restr_v_min = v_min + 1.0 / (2 * oversample_v)
@@ -527,40 +567,53 @@ class NavModelBody(NavModelBodyBase):
     def to_features(self, context: NavContext) -> list[NavFeature]:
         """Emit the body's NavFeatures per the design's gate rules."""
         del context
-        if self._body_mask is None:
-            return []
-        shape = BODY_SHAPE_TABLE.get(self._body_name, DEFAULT_BODY_SHAPE)
-        features: list[NavFeature] = []
-        limb_uncertainty_px = self._limb_uncertainty_px(shape)
-        limb_arc_emitted = False
-        if (
-            self._limb_sampler is not None
-            and self._limb_sampler.vertices_vu.size > 0
-            and limb_uncertainty_px <= LIMB_ARC_MAX_UNCERTAINTY_PX
-        ):
-            features.append(
-                _build_limb_arc(
-                    body_name=self._body_name,
-                    sampler=self._limb_sampler,
-                    shape=shape,
-                    bbox=self._bbox_extfov_vu,
-                    subject_range_km=self._subject_range_km,
-                    psf_sigma_px=self._star_psf_sigma(),
-                    source_model=self.name,
-                )
+        with self._logger.open(f'EMIT BODY FEATURES: {self._body_name}'):
+            if self._body_mask is None:
+                self._logger.debug('body_mask is None — emitting no features')
+                return []
+            shape = BODY_SHAPE_TABLE.get(self._body_name, DEFAULT_BODY_SHAPE)
+            features: list[NavFeature] = []
+            limb_uncertainty_px = self._limb_uncertainty_px(shape)
+            self._logger.debug(
+                'ellipsoid_residual = %.3f km; limb_uncertainty = %.3f px '
+                '(arc max %.3f); shape_class = %s',
+                shape.ellipsoid_residual_km,
+                limb_uncertainty_px,
+                LIMB_ARC_MAX_UNCERTAINTY_PX,
+                getattr(shape, 'shape_class_hint', 'unknown'),
             )
-            limb_arc_emitted = True
-        else:
-            if self._predicted_diameter_px >= shape.min_blob_diameter_px:
-                features.append(self._build_blob_feature(shape))
+            limb_arc_emitted = False
+            if (
+                self._limb_sampler is not None
+                and self._limb_sampler.vertices_vu.size > 0
+                and limb_uncertainty_px <= LIMB_ARC_MAX_UNCERTAINTY_PX
+            ):
+                features.append(
+                    _build_limb_arc(
+                        body_name=self._body_name,
+                        sampler=self._limb_sampler,
+                        shape=shape,
+                        bbox=self._bbox_extfov_vu,
+                        subject_range_km=self._subject_range_km,
+                        psf_sigma_px=psf_sigma_px(self.obs.star_psf()),
+                        source_model=self.name,
+                    )
+                )
+                limb_arc_emitted = True
+            else:
+                if self._predicted_diameter_px >= shape.min_blob_diameter_px:
+                    features.append(self._build_blob_feature(shape))
 
-        if self._should_emit_disc(limb_arc_emitted):
-            features.append(self._build_disc_feature(shape))
+            if self._should_emit_disc(limb_arc_emitted):
+                features.append(self._build_disc_feature(shape))
 
-        terminator_feature = self._maybe_build_terminator(shape)
-        if terminator_feature is not None:
-            features.append(terminator_feature)
-        return features
+            terminator_feature = self._maybe_build_terminator(shape)
+            if terminator_feature is not None:
+                features.append(terminator_feature)
+
+            kinds = ', '.join(sorted({f.feature_type.name for f in features})) or 'none'
+            self._logger.info('Emitted %d feature(s) [%s]', len(features), kinds)
+            return features
 
     def to_annotations(self, context: NavContext) -> Annotations:
         """Reuse the shared body annotation helper."""
@@ -575,16 +628,6 @@ class NavModelBody(NavModelBodyBase):
             self._limb_mask,
             self._body_mask,
         )
-
-    def _star_psf_sigma(self) -> float:
-        """Return the per-pixel PSF sigma from ``obs.star_psf()``."""
-        psf = self.obs.star_psf()
-        if hasattr(psf, 'sigma'):
-            return float(psf.sigma)
-        fwhm_method = getattr(psf, 'fwhm', None)
-        if callable(fwhm_method):
-            return float(fwhm_method()) / 2.3548200450309493
-        raise AttributeError(f'PSF {type(psf).__name__} exposes neither sigma nor fwhm()')
 
     def _limb_uncertainty_px(self, shape: BodyShape) -> float:
         """Return the design's ``limb_uncertainty_px`` for this body."""
@@ -681,7 +724,7 @@ class NavModelBody(NavModelBodyBase):
         sigma_normal_per_vertex_px = _sigma_normal_per_vertex(
             sampler=sampler,
             shape=shape,
-            psf_sigma_px=self._star_psf_sigma(),
+            psf_sigma_px=psf_sigma_px(self.obs.star_psf()),
             include_albedo=True,
         )
         sigma_tangent_per_vertex_px = np.full_like(sigma_normal_per_vertex_px, 0.5)

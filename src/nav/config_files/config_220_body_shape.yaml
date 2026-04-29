@@ -1,0 +1,170 @@
+# Per-body shape parameters consumed by the body NavModel and feature
+# extractors.  Schema:
+#
+#   <BODY_NAME>:
+#     radii_km: [a, b, c] | null      # tri-axial ellipsoid (km)
+#     ellipsoid_rms_residual_km: float | null
+#     crater_scale_km: float | null
+#     albedo_mean: float | null
+#     albedo_variation: float | null  # relative albedo std on visible hemisphere
+#     shape_class_hint: regular | irregular | highly_irregular | unknown
+#     _sources:                       # documentation-only; loader ignores `_` keys
+#       <field>: 'citation string'
+#
+# Bodies present in this initial population — Phase 4 first-image targets
+# plus their immediate neighbours.  Full ~55-body coverage lands in
+# Phase 10 with literature-cited values; until then, every numeric field
+# is `null` with a matching `'PLACEHOLDER — ...'` source so the runtime
+# fallback (10% radius default + reliability cap 0.3) handles each body
+# uniformly.
+
+body_shape:
+  MIMAS:
+    radii_km: null
+    ellipsoid_rms_residual_km: null
+    crater_scale_km: null
+    albedo_mean: null
+    albedo_variation: null
+    shape_class_hint: regular
+    _sources:
+      radii_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      ellipsoid_rms_residual_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      crater_scale_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      albedo_mean: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      albedo_variation: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      shape_class_hint: 'IAU WGCCRE — regular ellipsoidal satellites of Saturn (citation pending fetch)'
+
+  ENCELADUS:
+    radii_km: null
+    ellipsoid_rms_residual_km: null
+    crater_scale_km: null
+    albedo_mean: null
+    albedo_variation: null
+    shape_class_hint: regular
+    _sources:
+      radii_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      ellipsoid_rms_residual_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      crater_scale_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      albedo_mean: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      albedo_variation: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      shape_class_hint: 'IAU WGCCRE — regular ellipsoidal satellites of Saturn (citation pending fetch)'
+
+  TETHYS:
+    radii_km: null
+    ellipsoid_rms_residual_km: null
+    crater_scale_km: null
+    albedo_mean: null
+    albedo_variation: null
+    shape_class_hint: regular
+    _sources:
+      radii_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      ellipsoid_rms_residual_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      crater_scale_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      albedo_mean: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      albedo_variation: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      shape_class_hint: 'IAU WGCCRE — regular ellipsoidal satellites of Saturn (citation pending fetch)'
+
+  DIONE:
+    radii_km: null
+    ellipsoid_rms_residual_km: null
+    crater_scale_km: null
+    albedo_mean: null
+    albedo_variation: null
+    shape_class_hint: regular
+    _sources:
+      radii_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      ellipsoid_rms_residual_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      crater_scale_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      albedo_mean: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      albedo_variation: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      shape_class_hint: 'IAU WGCCRE — regular ellipsoidal satellites of Saturn (citation pending fetch)'
+
+  RHEA:
+    radii_km: null
+    ellipsoid_rms_residual_km: null
+    crater_scale_km: null
+    albedo_mean: null
+    albedo_variation: null
+    shape_class_hint: regular
+    _sources:
+      radii_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      ellipsoid_rms_residual_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      crater_scale_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      albedo_mean: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      albedo_variation: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      shape_class_hint: 'IAU WGCCRE — regular ellipsoidal satellites of Saturn (citation pending fetch)'
+
+  TITAN:
+    radii_km: null
+    ellipsoid_rms_residual_km: null
+    crater_scale_km: null
+    albedo_mean: null
+    albedo_variation: null
+    shape_class_hint: regular
+    _sources:
+      radii_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      ellipsoid_rms_residual_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      crater_scale_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      albedo_mean: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      albedo_variation: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      shape_class_hint: 'IAU WGCCRE — Titan, hazy regular body (citation pending fetch)'
+
+  IAPETUS:
+    radii_km: null
+    ellipsoid_rms_residual_km: null
+    crater_scale_km: null
+    albedo_mean: null
+    albedo_variation: null
+    shape_class_hint: regular
+    _sources:
+      radii_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      ellipsoid_rms_residual_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      crater_scale_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      albedo_mean: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      albedo_variation: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      shape_class_hint: 'IAU WGCCRE — Iapetus regular body (citation pending fetch)'
+
+  PROMETHEUS:
+    radii_km: null
+    ellipsoid_rms_residual_km: null
+    crater_scale_km: null
+    albedo_mean: null
+    albedo_variation: null
+    shape_class_hint: highly_irregular
+    _sources:
+      radii_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      ellipsoid_rms_residual_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      crater_scale_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      albedo_mean: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      albedo_variation: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      shape_class_hint: 'IAU WGCCRE — irregular ring-shepherd satellites (citation pending fetch)'
+
+  PANDORA:
+    radii_km: null
+    ellipsoid_rms_residual_km: null
+    crater_scale_km: null
+    albedo_mean: null
+    albedo_variation: null
+    shape_class_hint: highly_irregular
+    _sources:
+      radii_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      ellipsoid_rms_residual_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      crater_scale_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      albedo_mean: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      albedo_variation: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      shape_class_hint: 'IAU WGCCRE — irregular ring-shepherd satellites (citation pending fetch)'
+
+  SATURN:
+    radii_km: null
+    ellipsoid_rms_residual_km: null
+    crater_scale_km: null
+    albedo_mean: null
+    albedo_variation: null
+    shape_class_hint: regular
+    _sources:
+      radii_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      ellipsoid_rms_residual_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      crater_scale_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      albedo_mean: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      albedo_variation: 'PLACEHOLDER — no source found, calibrate in Phase 10'
+      shape_class_hint: 'IAU WGCCRE — Saturn oblate spheroid (citation pending fetch)'

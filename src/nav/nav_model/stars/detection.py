@@ -36,6 +36,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 from scipy.ndimage import correlate, maximum_filter
 
+from nav.nav_model.stars.predicted_snr import psf_sigma_px
+
 if TYPE_CHECKING:  # pragma: no cover - typing-only import
     from psfmodel import PSF
 
@@ -396,7 +398,7 @@ def detect_sources(
     if bloom_mask is not None:
         candidate_mask &= ~bloom_mask
 
-    sigma_psf = _psf_sigma(psf)
+    sigma_psf = psf_sigma_px(psf)
     box_half = max(1, math.ceil(2.0 * sigma_psf))
 
     out: list[DetectedSource] = []
@@ -435,13 +437,3 @@ def detect_sources(
             )
         )
     return out
-
-
-def _psf_sigma(psf: PSF) -> float:
-    """Return the per-pixel sigma of ``psf`` (Gaussian or via FWHM)."""
-    if hasattr(psf, 'sigma'):
-        return float(psf.sigma)
-    fwhm_method = getattr(psf, 'fwhm', None)
-    if callable(fwhm_method):
-        return float(fwhm_method()) / 2.3548200450309493
-    raise AttributeError(f'PSF {type(psf).__name__} exposes neither sigma nor fwhm()')

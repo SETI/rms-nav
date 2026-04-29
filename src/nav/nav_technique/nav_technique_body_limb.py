@@ -30,7 +30,7 @@ from nav.nav_technique.dt_fitting import (
     lm_subpixel_refine,
 )
 from nav.nav_technique.feasibility import NavFeasibilityReport
-from nav.nav_technique.nav_technique import NavTechnique
+from nav.nav_technique.nav_technique import NavTechnique, log_confidence_breakdown
 from nav.nav_technique.technique_result import NavTechniqueResult
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
@@ -170,6 +170,17 @@ class BodyLimbNav(NavTechnique):
     name = 'BodyLimbNav'
     accepts_feature_types = frozenset({NavFeatureType.LIMB_ARC})
     requires_prior = False
+    confidence_spec = _BODY_LIMB_CONFIDENCE_SPEC
+    confidence_attributes = frozenset(
+        {
+            'at_edge',
+            'visible_limb_arc_fraction',
+            'visible_arc_px',
+            'dt_fit_rms_px',
+            'lm_iterations',
+            'tukey_inlier_count',
+        }
+    )
 
     def __init__(self, *, config: Config | None = None) -> None:
         super().__init__(config=config)
@@ -248,6 +259,15 @@ class BodyLimbNav(NavTechnique):
             edge_mask = edge_dt <= 0.5
             polyline_mask = _build_polyline_mask(vertices, edge_dt.shape[:2])
             margin_v, margin_u = _search_window_for_obs(context)
+            self.logger.debug(
+                'Aggregated %d limb vertices, sigma_normal range [%.3f, %.3f] px, '
+                'search window (v, u) = (%d, %d) px',
+                int(vertices.shape[0]),
+                float(sigmas.min()) if sigmas.size else 0.0,
+                float(sigmas.max()) if sigmas.size else 0.0,
+                margin_v,
+                margin_u,
+            )
             coarse_dv, coarse_du = coarse_ncc_search(
                 edge_mask,
                 polyline_mask,
@@ -283,11 +303,13 @@ class BodyLimbNav(NavTechnique):
                 lm_iterations=int(result.iterations),
                 tukey_inlier_count=int(result.inlier_count),
             )
-            confidence = evaluate_sigmoid_combination(
+            confidence, breakdown = evaluate_sigmoid_combination(
                 _BODY_LIMB_CONFIDENCE_SPEC,
                 _LimbConfidenceContext(at_edge=at_edge, diagnostics=diagnostics),
                 technique_name=self.name,
+                return_breakdown=True,
             )
+            log_confidence_breakdown(self.logger, breakdown)
             self.logger.info(
                 'Converged at offset (%.4f, %.4f) px, RMS %.4f px, inliers %d / %d, '
                 'confidence %.4f',
@@ -297,6 +319,14 @@ class BodyLimbNav(NavTechnique):
                 result.inlier_count,
                 int(vertices.shape[0]),
                 float(confidence),
+            )
+            if spurious or at_edge:
+                self.logger.info('Diagnostic flags: spurious=%s, at_edge=%s', spurious, at_edge)
+            self.logger.debug(
+                'LM iterations = %d, sigma_min = %.3f px, visible_limb_arc_fraction = %.3f',
+                result.iterations,
+                sigma_min_px,
+                visible_limb_arc_fraction,
             )
             covariance = result.covariance
             if covariance.shape != (2, 2):

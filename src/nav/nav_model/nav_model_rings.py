@@ -27,7 +27,7 @@ import numpy as np
 import oops
 
 from nav.annotation import Annotations
-from nav.config import Config
+from nav.config import DEFAULT_CONFIG, Config
 from nav.feature.feature import NavFeature, NavReliabilityBreakdown
 from nav.feature.feature_type import NavFeatureType
 from nav.feature.flags import RingAnnulusFlags, RingEdgeFlags
@@ -176,8 +176,6 @@ class NavModelRings(NavModelRingsBase):
         # stand-ins that don't expose those are not applicable.
         if not hasattr(obs, 'extdata_shape_vu') or not hasattr(obs, 'ext_bp'):
             return []
-        from nav.config import DEFAULT_CONFIG
-
         rings_config = DEFAULT_CONFIG.rings
         ring_features_dict = getattr(rings_config, 'ring_features', None)
         if not ring_features_dict or planet not in ring_features_dict:
@@ -194,9 +192,36 @@ class NavModelRings(NavModelRingsBase):
         log_level = self._config.general.get('log_level_model_rings')
         with self._logger.open('CREATE RINGS MODEL', level=log_level):
             self._render()
-        end_time = now_dt()
-        self._metadata['end_time'] = end_time.isoformat()
-        self._metadata['elapsed_time_sec'] = (end_time - start_time).total_seconds()
+            self._log_render_summary()
+            end_time = now_dt()
+            self._metadata['end_time'] = end_time.isoformat()
+            self._metadata['elapsed_time_sec'] = (end_time - start_time).total_seconds()
+            self._logger.info('Model created in %.3f s', self._metadata['elapsed_time_sec'])
+
+    def _log_render_summary(self) -> None:
+        """Emit INFO summary of the surviving ring catalogue + DEBUG detail."""
+        meta = self._metadata
+        planet = meta.get('planet')
+        if not planet:
+            self._logger.info('No planet identified — model is empty')
+            return
+        feature_count = meta.get('feature_count', 0)
+        self._logger.info(
+            'Planet = %s, surviving features = %d, km/px radial = %.4f, subject range = %.0f km',
+            planet,
+            feature_count,
+            self._km_per_pixel_radial,
+            self._subject_range_km,
+        )
+        if feature_count > 0:
+            names = [entry['name'] for entry in meta.get('features', [])]
+            self._logger.debug('Surviving feature names = %s', names)
+        self._logger.debug(
+            'Extfov shape (vu) = (%d, %d); predicted_center = %s',
+            self._extfov_v_size,
+            self._extfov_u_size,
+            self._predicted_center_vu,
+        )
 
     def _render(self) -> None:
         """Filter + render every surviving ring feature for this observation."""
@@ -267,6 +292,11 @@ class NavModelRings(NavModelRingsBase):
             return
         min_radius = float(bp_radii.min().vals)
         max_radius = float(bp_radii.max().vals)
+        self._logger.info(
+            'Ring plane radial range visible in image: [%.0f, %.0f] km',
+            min_radius,
+            max_radius,
+        )
         features: list[RingFeature] = []
         for key, data in features_raw.items():
             if not isinstance(data, dict):
@@ -379,54 +409,81 @@ class NavModelRings(NavModelRingsBase):
     def to_features(self, context: NavContext) -> list[NavFeature]:
         """Emit RING_EDGE / RING_ANNULUS features per surviving render result."""
         del context
-        features: list[NavFeature] = []
-        for (
-            ring_feat,
-            model_img,
-            model_mask,
-            uncertainty_km,
-            edge_info_list,
-        ) in self._render_results:
-            if not edge_info_list:
-                continue
-            for edge_mask, label_text, edge_label in edge_info_list:
-                vertices_vu, normals_vu = _polyline_from_edge_mask(edge_mask)
-                if vertices_vu.shape[0] == 0:
+        with self._logger.open('EMIT RINGS FEATURES'):
+            features: list[NavFeature] = []
+            edge_count = 0
+            annulus_count = 0
+            straight_count = 0
+            for (
+                ring_feat,
+                model_img,
+                model_mask,
+                uncertainty_km,
+                edge_info_list,
+            ) in self._render_results:
+                if not edge_info_list:
                     continue
-                radial_extent_px = _radial_extent_px(vertices_vu, normals_vu)
-                straight = _is_straight_line(vertices_vu)
-                if radial_extent_px <= RING_ANNULUS_MAX_RADIAL_PX and not straight:
-                    features.append(
-                        _build_annulus_feature(
-                            ring_name=label_text,
-                            planet=self._planet or '',
-                            model_img=model_img,
-                            model_mask=model_mask,
-                            bbox=_mask_bbox(model_mask),
-                            predicted_center_vu=self._predicted_center_vu,
-                            subject_range_km=self._subject_range_km,
-                            constituent_count=1,
-                            source_model=self.name,
+                for edge_mask, label_text, edge_label in edge_info_list:
+                    vertices_vu, normals_vu = _polyline_from_edge_mask(edge_mask)
+                    if vertices_vu.shape[0] == 0:
+                        continue
+                    radial_extent_px = _radial_extent_px(vertices_vu, normals_vu)
+                    straight = _is_straight_line(vertices_vu)
+                    if radial_extent_px <= RING_ANNULUS_MAX_RADIAL_PX and not straight:
+                        annulus_count += 1
+                        kind = 'ANNULUS'
+                        features.append(
+                            _build_annulus_feature(
+                                ring_name=label_text,
+                                planet=self._planet or '',
+                                model_img=model_img,
+                                model_mask=model_mask,
+                                bbox=_mask_bbox(model_mask),
+                                predicted_center_vu=self._predicted_center_vu,
+                                subject_range_km=self._subject_range_km,
+                                constituent_count=1,
+                                source_model=self.name,
+                            )
                         )
-                    )
-                else:
-                    features.append(
-                        _build_edge_feature(
-                            ring_feat=ring_feat,
-                            edge_label=edge_label,
-                            label_text=label_text,
-                            planet=self._planet or '',
-                            vertices_vu=vertices_vu,
-                            normals_vu=normals_vu,
-                            uncertainty_km=uncertainty_km,
-                            km_per_pixel_radial=max(self._km_per_pixel_radial, 1.0),
-                            is_straight_line=straight,
-                            bbox=_mask_bbox(edge_mask),
-                            subject_range_km=self._subject_range_km,
-                            source_model=self.name,
+                    else:
+                        edge_count += 1
+                        if straight:
+                            straight_count += 1
+                        kind = 'EDGE'
+                        features.append(
+                            _build_edge_feature(
+                                ring_feat=ring_feat,
+                                edge_label=edge_label,
+                                label_text=label_text,
+                                planet=self._planet or '',
+                                vertices_vu=vertices_vu,
+                                normals_vu=normals_vu,
+                                uncertainty_km=uncertainty_km,
+                                km_per_pixel_radial=max(self._km_per_pixel_radial, 1.0),
+                                is_straight_line=straight,
+                                bbox=_mask_bbox(edge_mask),
+                                subject_range_km=self._subject_range_km,
+                                source_model=self.name,
+                            )
                         )
+                    self._logger.debug(
+                        '%s %r -> vertices=%d, radial_extent=%.2f px, '
+                        'straight=%s, uncertainty=%.3f km',
+                        kind,
+                        label_text,
+                        int(vertices_vu.shape[0]),
+                        radial_extent_px,
+                        straight,
+                        uncertainty_km,
                     )
-        return features
+            self._logger.info(
+                'Emitted %d feature(s) — %d edge (%d straight), %d annulus',
+                len(features),
+                edge_count,
+                straight_count,
+                annulus_count,
+            )
+            return features
 
     def to_annotations(self, context: NavContext) -> Annotations:
         """Render per-edge polyline overlays + ring labels."""

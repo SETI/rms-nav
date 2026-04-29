@@ -17,27 +17,32 @@ overriding earlier ones:
    ``src/nav/config_files/`` directory are loaded in alphabetical order. These
    files provide default settings for:
 
-   * ``config_01_general.yaml``: General settings including all logging levels
-   * ``config_02_offset.yaml``: Offset-finding and star refinement parameters
-   * ``config_03_stars.yaml``: Star-model and ring-occlusion parameters
-   * ``config_04_bodies.yaml``: Body (planet/moon) rendering parameters
-   * ``config_05_rings.yaml``: Ring model parameters
-   * ``config_06_titan.yaml``: Titan-specific navigation parameters
-   * ``config_07_bootstrap.yaml``: Bootstrap navigation parameters
-   * ``config_10_satellites.yaml``: Satellite definitions for each planet
-   * ``config_20_jupiter_rings.yaml``: Jupiter ring system parameters
-   * ``config_21_saturn_rings.yaml``: Saturn ring system parameters
-   * ``config_22_uranus_rings.yaml``: Uranus ring system parameters
-   * ``config_23_neptune_rings.yaml``: Neptune ring system parameters
-   * ``config_30_inst_coiss.yaml``: Cassini ISS instrument-specific settings
-   * ``config_31_inst_gossi.yaml``: Galileo SSI instrument-specific settings
-   * ``config_32_inst_nhlorri.yaml``: New Horizons LORRI instrument-specific settings
-   * ``config_33_inst_vgiss.yaml``: Voyager ISS instrument-specific settings
-   * ``config_40_sim.yaml``: Simulated image settings
-   * ``config_90_backplanes.yaml``: Backplane generation settings
-   * ``config_95_pds4.yaml``: PDS4 metadata and export settings for generated
+   * ``config_010_general.yaml``: General settings including all logging levels
+   * ``config_020_offset.yaml``: Offset-finding and star refinement parameters
+   * ``config_030_stars.yaml``: Star-model and ring-occlusion parameters
+   * ``config_040_bodies.yaml``: Body (planet/moon) rendering parameters
+   * ``config_050_rings.yaml``: Ring model parameters
+   * ``config_060_titan.yaml``: Titan-specific navigation parameters
+   * ``config_070_bootstrap.yaml``: Bootstrap navigation parameters (angles in degrees)
+   * ``config_100_satellites.yaml``: Satellite definitions for each planet
+   * ``config_300_jupiter_rings.yaml``: Jupiter ring system parameters
+   * ``config_310_saturn_rings.yaml``: Saturn ring system parameters
+   * ``config_320_uranus_rings.yaml``: Uranus ring system parameters
+   * ``config_330_neptune_rings.yaml``: Neptune ring system parameters
+   * ``config_400_inst_coiss.yaml``: Cassini ISS instrument-specific settings
+   * ``config_410_inst_gossi.yaml``: Galileo SSI instrument-specific settings
+   * ``config_420_inst_nhlorri.yaml``: New Horizons LORRI instrument-specific settings
+   * ``config_430_inst_vgiss.yaml``: Voyager ISS instrument-specific settings
+   * ``config_440_sim.yaml``: Simulated image settings
+   * ``config_900_backplanes.yaml``: Backplane generation settings
+   * ``config_950_pds4.yaml``: PDS4 metadata and export settings for generated
      products, overrides for PDS4 label templates and mapping of internal fields
      to PDS4 keys
+
+   The 3-digit numeric prefix is the lexicographic merge order. Files in the
+   ``0NN`` range are global / model-shared settings, ``1NN`` are catalogues,
+   ``3N0`` are per-planet ring catalogues, ``4N0`` are per-instrument camera
+   blocks, and ``9NN`` are downstream-product settings.
 
 2. **User Default Configuration**: If present, the file
    ``nav_default_config.yaml`` in the current working directory is loaded. This
@@ -76,7 +81,7 @@ define the same setting, the value from the last file loaded takes precedence.
 Logging Configuration
 ---------------------
 
-All logging levels are set in the ``general`` section of ``config_01_general.yaml``.
+All logging levels are set in the ``general`` section of ``config_010_general.yaml``.
 Each key accepts a standard log-level string: ``DEBUG``, ``INFO``, ``WARNING``,
 ``ERROR``, or ``CRITICAL``.
 

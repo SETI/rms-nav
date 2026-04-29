@@ -10,6 +10,8 @@ optional per-instrument overrides.  Default values defined here are used
 when no override is supplied by the loader.
 """
 
+import math
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Final
 
@@ -74,9 +76,6 @@ class FeatureReliabilityGate:
 
     def __post_init__(self) -> None:
         """Validate the thresholds mapping and every threshold value."""
-        import math as _math
-        from collections.abc import Mapping
-
         if not isinstance(self.thresholds, Mapping):
             raise TypeError(
                 'FeatureReliabilityGate.thresholds must be a Mapping; '
@@ -89,7 +88,7 @@ class FeatureReliabilityGate:
                 raise TypeError(
                     f'thresholds[{key.name}] must be numeric; got {type(value).__name__}'
                 )
-            if not _math.isfinite(value):
+            if not math.isfinite(value):
                 raise ValueError(f'thresholds[{key.name}] must be finite; got {value!r}')
             if not 0.0 <= value <= 1.0:
                 raise ValueError(f'thresholds[{key.name}] must lie in [0, 1]; got {value!r}')

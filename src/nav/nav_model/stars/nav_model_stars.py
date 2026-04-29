@@ -129,9 +129,29 @@ class NavModelStars(NavModel):
             mark_body_and_ring_conflicts(self.obs, self._config, self._stars)
             self._metadata['star_count'] = len(self._stars)
             self._metadata['stars'] = [_star_summary(star) for star in self._stars]
-        end_time = now_dt()
-        self._metadata['end_time'] = end_time.isoformat()
-        self._metadata['elapsed_time_sec'] = (end_time - start_time).total_seconds()
+            body_conflicts = sum(1 for s in self._stars if (s.conflicts or '').startswith('BODY'))
+            ring_conflicts = sum(1 for s in self._stars if (s.conflicts or '').startswith('RING'))
+            smear_len = math.hypot(self._smear_vu[0], self._smear_vu[1])
+            self._logger.info(
+                '%d catalog stars after dedup; smear vector (v, u) = '
+                '(%.3f, %.3f) px (|smear| = %.3f)',
+                len(self._stars),
+                self._smear_vu[0],
+                self._smear_vu[1],
+                smear_len,
+            )
+            self._logger.info(
+                'Conflicts: body-occluded = %d, ring-occluded = %d',
+                body_conflicts,
+                ring_conflicts,
+            )
+            self._logger.info('Final star list (total %d):', len(self._stars))
+            for star in self._stars:
+                self._logger.info('  %s', _star_short_info(star))
+            end_time = now_dt()
+            self._metadata['end_time'] = end_time.isoformat()
+            self._metadata['elapsed_time_sec'] = (end_time - start_time).total_seconds()
+            self._logger.info('Model created in %.3f s', self._metadata['elapsed_time_sec'])
 
     def to_features(self, context: NavContext) -> list[NavFeature]:
         """Emit one STAR feature per catalog star above the SNR floor.
@@ -148,27 +168,52 @@ class NavModelStars(NavModel):
         Returns:
             List of STAR ``NavFeature`` instances.
         """
+        with self._logger.open('EMIT STARS FEATURES'):
+            return self._emit_features(context)
+
+    def _emit_features(self, context: NavContext) -> list[NavFeature]:
         if not self._stars:
+            self._logger.info('Catalog is empty — emitting no features')
             return []
         psf = self.obs.star_psf()
         sigma_psf = psf_sigma_px(psf)
         image_noise_sigma = float(context.image_noise_sigma)
         if image_noise_sigma <= 0.0:
+            self._logger.info(
+                'Image noise sigma is non-positive (%.3f) — emitting no features',
+                image_noise_sigma,
+            )
             return []
         min_snr = float(getattr(self._stars_config, 'min_predicted_snr', 0.0))
         max_smear = float(getattr(self._stars_config, 'max_smear', math.inf))
         sat_mask = context.saturation_mask_ext
         cosmic_mask = context.cosmic_ray_mask_ext
+        mag_offset_value = _resolve_mag_offset(self.obs)
+        self._logger.debug(
+            'image_noise_sigma = %.3f, sigma_psf = %.3f px, mag_offset = %.3f, '
+            'min_predicted_snr = %.2f, max_smear = %.2f px',
+            image_noise_sigma,
+            sigma_psf,
+            mag_offset_value,
+            min_snr,
+            max_smear,
+        )
 
         features: list[NavFeature] = []
+        skipped_low_snr = 0
+        skipped_smear = 0
+        in_body_count = 0
+        in_ring_count = 0
+        in_sat_count = 0
         for star in self._stars:
             snr = predicted_snr(
                 star,
                 psf=psf,
                 image_noise_sigma=image_noise_sigma,
-                mag_offset=0.0,
+                mag_offset=mag_offset_value,
             )
             if snr < min_snr:
+                skipped_low_snr += 1
                 continue
             smear_len = smear_length_px(star.move_v, star.move_u)
             # Per the design's "max_smear" gate — stars with a smear longer
@@ -176,6 +221,7 @@ class NavModelStars(NavModel):
             # smear-aware kernel, so we drop them from the feature list
             # rather than emit a structurally-broken feature.
             if smear_len > max_smear:
+                skipped_smear += 1
                 continue
             v_extfov, u_extfov = self._extfov_indices(star)
             in_body = bool(star.conflicts.startswith('BODY'))
@@ -183,6 +229,12 @@ class NavModelStars(NavModel):
             in_sat = bool(_safe_mask_lookup(sat_mask, v_extfov, u_extfov))
             in_cosmic = bool(_safe_mask_lookup(cosmic_mask, v_extfov, u_extfov))
             in_sat_or_cosmic = in_sat or in_cosmic
+            if in_body:
+                in_body_count += 1
+            if in_ring:
+                in_ring_count += 1
+            if in_sat_or_cosmic:
+                in_sat_count += 1
             cov = _crlb_covariance(
                 snr=snr,
                 sigma_psf=sigma_psf,
@@ -230,6 +282,19 @@ class NavModelStars(NavModel):
                         in_saturation_or_cosmic_mask=in_sat_or_cosmic,
                     ),
                 )
+            )
+        self._logger.info(
+            'Emitted %d STAR feature(s) (low-SNR skipped %d, smear skipped %d)',
+            len(features),
+            skipped_low_snr,
+            skipped_smear,
+        )
+        if features:
+            self._logger.debug(
+                'Flagged in-body = %d, in-ring = %d, in-saturation/cosmic = %d',
+                in_body_count,
+                in_ring_count,
+                in_sat_count,
             )
         return features
 
@@ -296,6 +361,40 @@ class NavModelStars(NavModel):
             float(star.v) + float(self.obs.extfov_margin_v),
             float(star.u) + float(self.obs.extfov_margin_u),
         )
+
+
+def _resolve_mag_offset(obs: Observation) -> float:
+    """Return the per-camera-per-filter magnitude offset for a navigation.
+
+    Reads ``obs.inst_config.mag_offset.{fallback_combo, mag_offset_table}``
+    populated by ``ObsInst.from_file``.  When no per-instrument
+    ``mag_offset`` block is configured (test fixtures, simulated obs
+    that skip the ``from_file`` path), the offset is ``0.0`` — the
+    legacy hard-coded value.
+
+    The resolved offset is read from
+    ``mag_offset_table[fallback_combo]['default']``; the per-color-bin
+    sub-keys are reserved for phase-10 calibration.
+    """
+    inst_config = getattr(obs, 'inst_config', None)
+    if inst_config is None:
+        return 0.0
+    block = inst_config.get('mag_offset')
+    if not block:
+        return 0.0
+    fallback = block.get('fallback_combo')
+    table = block.get('mag_offset_table') or {}
+    entry = table.get(fallback) if fallback is not None else None
+    if entry is None and table:
+        entry = next(iter(table.values()), None)
+    if entry is None:
+        return 0.0
+    if isinstance(entry, (int, float)) and not isinstance(entry, bool):
+        return float(entry)
+    if isinstance(entry, dict):
+        default = entry.get('default', 0.0)
+        return float(default) if isinstance(default, (int, float)) else 0.0
+    return 0.0
 
 
 def _compute_smear_for_obs(obs: Observation) -> tuple[float, float]:
@@ -445,6 +544,28 @@ def _star_feature_id(star: MutableStar) -> str:
     cat = (star.catalog_name or 'unknown').upper()
     uid = star.unique_number if star.unique_number is not None else star.pretty_name
     return f'star:{cat}:{uid}'
+
+
+def _star_short_info(star: MutableStar) -> str:
+    """Return a one-line text summary of a star, suitable for INFO logging.
+
+    Mirrors the shape of the legacy ``NavModelStars._star_short_info`` line so
+    the per-image log keeps a familiar listing that operators can grep.
+    """
+    jb = getattr(star, 'johnson_mag_b', None) or 0.0
+    jv = getattr(star, 'johnson_mag_v', None) or 0.0
+    temp = getattr(star, 'temperature', None) or 0.0
+    return (
+        f'Star {star.catalog_name:>6s}/{star.pretty_name:>9s} '
+        f'U {star.u:9.3f}+/-{abs(star.move_u):7.3f} '
+        f'V {star.v:9.3f}+/-{abs(star.move_v):7.3f} '
+        f'VMAG {(-1.0 if star.vmag is None else star.vmag):6.3f} '
+        f'JBMAG {jb:6.3f} '
+        f'JVMAG {jv:6.3f} '
+        f'SCLASS {clean_sclass(star.spectral_class or ""):>3s} '
+        f'TEMP {temp:6.0f} '
+        f'CONFLICT {star.conflicts}'
+    )
 
 
 def _star_summary(star: MutableStar) -> dict[str, Any]:

@@ -26,6 +26,7 @@ from scipy.linalg import pinvh
 from scipy.sparse.csgraph import connected_components
 
 from nav.annotation import Annotations
+from nav.config import IMAGE_LOGGER
 from nav.feature.constants import (
     AGREEMENT_FACTOR_CAP,
     COMBINED_CONFIDENCE_CAP,
@@ -357,6 +358,11 @@ def ensemble(
         )
     viable = [r for r in results if not r.spurious]
     if not viable:
+        IMAGE_LOGGER.info(
+            'All %d technique result(s) returned spurious=True: %s',
+            len(results),
+            ', '.join(r.technique_name for r in results),
+        )
         return NavResult.failed(
             status_reason=NavStatusReason.ALL_TECHNIQUES_SPURIOUS,
             image_classifier=image_classifier,
@@ -395,6 +401,11 @@ def ensemble(
     except ValueError:
         # Total weight zero — offset unobservable in every contributing
         # input.
+        IMAGE_LOGGER.info(
+            'Combined precision-weighted offset is unobservable: every input '
+            'covariance shares one null direction (%d input(s))',
+            len(best_group),
+        )
         return NavResult.failed(
             status_reason=NavStatusReason.UNOBSERVABLE_OFFSET,
             image_classifier=image_classifier,
@@ -410,6 +421,19 @@ def ensemble(
         gap = best_summed_conf - runner_up_summed_conf
         if gap < cfg.agreement_gap:
             conflicted_confidence = combined_confidence * cfg.conflicted_confidence_multiplier
+            IMAGE_LOGGER.info(
+                'Conflicted: best-vs-runner-up summed-confidence gap %.3f is '
+                'below the agreement_gap threshold %.3f '
+                '(best %.3f, runner-up %.3f); conflicted confidence = %.3f '
+                '(combined %.3f x conflicted_multiplier %.3f)',
+                gap,
+                cfg.agreement_gap,
+                best_summed_conf,
+                runner_up_summed_conf,
+                conflicted_confidence,
+                combined_confidence,
+                cfg.conflicted_confidence_multiplier,
+            )
             return NavResult.conflicted(
                 offset_px=offset,
                 covariance_px2=cov,
@@ -422,6 +446,11 @@ def ensemble(
                 annotations=ann,
             )
     if combined_confidence < cfg.min_confidence:
+        IMAGE_LOGGER.info(
+            'Combined confidence %.3f is below the min_confidence threshold %.3f',
+            combined_confidence,
+            cfg.min_confidence,
+        )
         return NavResult.failed(
             status_reason=NavStatusReason.FINAL_CONFIDENCE_BELOW_THRESHOLD,
             image_classifier=image_classifier,
@@ -441,6 +470,15 @@ def ensemble(
     )
     if rank == 'failed':
         # Confidence + sigma combination doesn't earn any tier.
+        IMAGE_LOGGER.info(
+            'No tier earned: combined confidence %.3f, sigma (dv, du) = '
+            '(%.3f, %.3f) px (max %.3f); tier thresholds = %s',
+            combined_confidence,
+            sigma_dv,
+            sigma_du,
+            max(sigma_dv, sigma_du),
+            cfg.tier_thresholds,
+        )
         return NavResult.failed(
             status_reason=NavStatusReason.FINAL_CONFIDENCE_BELOW_THRESHOLD,
             image_classifier=image_classifier,

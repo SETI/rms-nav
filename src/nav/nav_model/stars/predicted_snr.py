@@ -55,23 +55,32 @@ def psf_sigma_px(psf: PSF) -> float:
     """Return the Gaussian-equivalent sigma of ``psf`` in pixels.
 
     Treats every PSF as a 2-D Gaussian for SNR / CRLB purposes.  The
-    pipeline ships ``GaussianPSF`` instances populated from
-    ``star_psf_sigma`` in ``config_NN_inst_*.yaml``, so the ``sigma``
-    attribute is the natural source.  When the field is absent (a
-    third-party PSF subclass), we fall back to ``fwhm() / 2.3548``.
+    pipeline ships ``psfmodel.GaussianPSF`` instances populated from
+    ``star_psf_sigma`` in ``config_4N0_inst_*.yaml``; that class exposes
+    per-axis ``sigma_x`` / ``sigma_y`` attributes (typically equal).
+    When neither per-axis sigma is available we fall back to a single
+    ``sigma`` attribute (legacy interface) or ``fwhm() / 2.3548`` (a
+    third-party PSF subclass).
 
     Parameters:
         psf: PSF instance from ``obs.star_psf()``.
 
     Returns:
-        Gaussian sigma in pixels.
+        Gaussian sigma in pixels.  When the PSF is anisotropic, the
+        per-axis values are averaged.
     """
+    sigma_x = getattr(psf, 'sigma_x', None)
+    sigma_y = getattr(psf, 'sigma_y', None)
+    if sigma_x is not None and sigma_y is not None:
+        return float((float(sigma_x) + float(sigma_y)) / 2.0)
     if hasattr(psf, 'sigma'):
         return float(cast(float, psf.sigma))
     fwhm_method = getattr(psf, 'fwhm', None)
     if callable(fwhm_method):
         return float(fwhm_method()) / 2.3548200450309493
-    raise AttributeError(f'PSF {type(psf).__name__} exposes neither sigma nor fwhm()')
+    raise AttributeError(
+        f'PSF {type(psf).__name__} exposes neither sigma_x/sigma_y, sigma, nor fwhm()'
+    )
 
 
 def psf_aperture_pixels(sigma_px_value: float) -> float:
