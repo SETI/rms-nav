@@ -40,9 +40,10 @@ overriding earlier ones:
      to PDS4 keys
 
    The 3-digit numeric prefix is the lexicographic merge order. Files in the
-   ``0NN`` range are global / model-shared settings, ``1NN`` are catalogues,
-   ``3N0`` are per-planet ring catalogues, ``4N0`` are per-instrument camera
-   blocks, and ``9NN`` are downstream-product settings.
+   ``0xx`` range (000–099) are global / model-shared settings, ``1xx``
+   (100–199) are catalogues, ``3xx`` (300–399) are per-planet ring catalogues,
+   ``4xx`` (400–499) are per-instrument camera blocks, and ``9xx`` (900–999)
+   are downstream-product settings.
 
 2. **User Default Configuration**: If present, the file
    ``nav_default_config.yaml`` in the current working directory is loaded. This

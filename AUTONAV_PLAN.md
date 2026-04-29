@@ -1437,7 +1437,7 @@ above operationalise.
   ``NavModelBody`` currently emits ``LIMB_ARC`` / ``TERMINATOR_ARC``
   / ``BODY_DISC`` / ``BODY_BLOB`` only.
 
-**Per-camera mag-offset table consumer (Part 1)**
+**Per-camera mag-offset table consumer (Part 1)** — *Superseded by `core_rewrite_catchup` (shipped); see "Phase 3 — Foundation completion + per-instrument config wiring (complete)".*
 
 - ``nav.nav_model.stars.predicted_snr.predicted_snr`` accepts a
   ``mag_offset`` parameter, but ``NavModelStars.to_features`` always
@@ -1453,7 +1453,7 @@ above operationalise.
   ``BodyTerminatorNav``, and ``RingEdgeNav`` are implemented (see
   "DT-based techniques" under Implemented).
 
-**NavContext shared derivatives**
+**NavContext shared derivatives** — *Superseded by `core_rewrite_catchup` (shipped); see "Phase 3 — Foundation completion + per-instrument config wiring (complete)".*
 
 - Source-image ``BANDPASS_DOG`` pre-filter — field is present on
   `NavContext` but the orchestrator does not yet apply it.
@@ -1470,7 +1470,7 @@ above operationalise.
   Part 13 line 4424; Phase-2 consumer per the orchestrator's
   ``_make_context``.
 
-**Provenance population**
+**Provenance population** — *Superseded by `core_rewrite_catchup` (shipped); see "Phase 3 — Foundation completion + per-instrument config wiring (complete)".*
 
 - ``Provenance`` dataclass shape is final (sorted-tuple
   normalisation, derived ``spice_kernel_count``,
@@ -1503,6 +1503,8 @@ above operationalise.
 
 **Static-data files (Part 5)**
 
+*Partially superseded by `core_rewrite_catchup` (shipped); see "Phase 3 — Foundation completion + per-instrument config wiring (complete)".* The renumbering, the per-camera `noise:` / `mag_offset:` blocks, and the initial `config_220_body_shape.yaml` (10 bodies, every numeric value `null` paired with a `PLACEHOLDER` citation pending Phase 10 calibration) all shipped. The other YAMLs (`config_510_techniques.yaml`, `config_520_features.yaml`, `config_530_filters.yaml`, `config_540_orchestrator.yaml`) remain pending — Phases 4–10 introduce them as the corresponding consumers ship.
+
 - `config_220_body_shape.yaml` (per-body shape, albedo, with
   `_sources` citations per Part 0 §74).
 - `config_510_techniques.yaml` (technique tunables + confidence
@@ -1514,7 +1516,7 @@ above operationalise.
   `config_4N0_inst_*.yaml`.
 - Renumbering of `config_NN_*.yaml` → `config_NNN_*.yaml`.
 
-**INFO logging cadence (Part 12.7)**
+**INFO logging cadence (Part 12.7)** — *Superseded by `core_rewrite_catchup` (shipped); see "Phase 3 — Foundation completion + per-instrument config wiring (complete)" and the binding "Logging conventions established in Phase 3" subsection.*
 
 - `STATUS_REASON_INFO_TEMPLATE` exists; the orchestrator does not
   yet emit those INFO lines for each status_reason.  In particular,
@@ -1599,6 +1601,8 @@ image library lands.
   `config_510_techniques.yaml` against the curated library.
 
 **Documentation (Part 8)**
+
+*Partially superseded by `core_rewrite_catchup` (shipped):* `developer_guide_static_data.rst` and `developer_guide_logging.rst` shipped in Phase 3. The remaining Sphinx pages (autonomous-nav, features, filters, uncertainty, orchestrator, cli, testing, metadata schema, troubleshooting, image library, migration) are still pending — Phase 11 covers the documentation-finalisation sweep.
 
 - All new Sphinx pages: `developer_guide_autonomous_nav.rst`,
   `developer_guide_features.rst`,

@@ -304,8 +304,9 @@ class RingEdgeNav(NavTechnique):
                 edge_count=len(feature_ids),
                 is_rank_1=bool(is_rank_1),
             )
+            assert self.confidence_spec is not None  # set as class attribute
             confidence, breakdown = evaluate_sigmoid_combination(
-                _RING_EDGE_CONFIDENCE_SPEC,
+                self.confidence_spec,
                 _RingEdgeConfidenceContext(at_edge=at_edge, diagnostics=diagnostics),
                 technique_name=self.name,
                 return_breakdown=True,

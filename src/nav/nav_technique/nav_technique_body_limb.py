@@ -303,8 +303,9 @@ class BodyLimbNav(NavTechnique):
                 lm_iterations=int(result.iterations),
                 tukey_inlier_count=int(result.inlier_count),
             )
+            assert self.confidence_spec is not None  # set as class attribute
             confidence, breakdown = evaluate_sigmoid_combination(
-                _BODY_LIMB_CONFIDENCE_SPEC,
+                self.confidence_spec,
                 _LimbConfidenceContext(at_edge=at_edge, diagnostics=diagnostics),
                 technique_name=self.name,
                 return_breakdown=True,

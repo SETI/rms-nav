@@ -327,8 +327,9 @@ class BodyTerminatorNav(NavTechnique):
                 mean_phase_angle_factor=mean_phase,
                 mean_albedo_penalty=mean_albedo,
             )
+            assert self.confidence_spec is not None  # set as class attribute
             confidence, breakdown = evaluate_sigmoid_combination(
-                _BODY_TERMINATOR_CONFIDENCE_SPEC,
+                self.confidence_spec,
                 confidence_context,
                 technique_name=self.name,
                 return_breakdown=True,

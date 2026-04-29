@@ -49,27 +49,48 @@ def log_confidence_breakdown(
         low_threshold: Confidence at or below this value triggers the
             promotion from DEBUG to INFO.
     """
-    if breakdown.hard_zero is not None:
-        logger.info('Confidence forced to 0 by hard_zero_if[%r]=True', breakdown.hard_zero)
-        return
-    promote_to_info = breakdown.confidence <= low_threshold
-    log = logger.info if promote_to_info else logger.debug
-    log(
-        'Confidence breakdown: alpha0=%.3f, sigmoid_arg=%.3f -> confidence=%.4f%s',
+    summary_fmt = 'Confidence breakdown: alpha0=%.3f, sigmoid_arg=%.3f -> confidence=%.4f%s'
+    summary_args = (
         breakdown.alpha0,
         breakdown.sigmoid_arg,
         breakdown.confidence,
         ' (hard_cap applied)' if breakdown.hard_cap_applied else '',
     )
+    term_fmt = '  term %r: raw=%.4g, normalized=%.4g, alpha=%+.3f -> contribution=%+.4g'
+    if breakdown.hard_zero is not None:
+        logger.debug(summary_fmt, *summary_args)
+        for term in breakdown.terms:
+            logger.debug(
+                term_fmt,
+                term.feature,
+                term.raw,
+                term.normalized,
+                term.alpha,
+                term.contribution,
+            )
+        logger.info('Confidence forced to 0 by hard_zero_if[%r]=True', breakdown.hard_zero)
+        return
+    logger.debug(summary_fmt, *summary_args)
     for term in breakdown.terms:
-        log(
-            '  term %r: raw=%.4g, normalized=%.4g, alpha=%+.3f -> contribution=%+.4g',
+        logger.debug(
+            term_fmt,
             term.feature,
             term.raw,
             term.normalized,
             term.alpha,
             term.contribution,
         )
+    if breakdown.confidence <= low_threshold:
+        logger.info(summary_fmt, *summary_args)
+        for term in breakdown.terms:
+            logger.info(
+                term_fmt,
+                term.feature,
+                term.raw,
+                term.normalized,
+                term.alpha,
+                term.contribution,
+            )
 
 
 class NavTechnique(NavBase, ABC):

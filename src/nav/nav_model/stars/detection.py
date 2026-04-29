@@ -375,9 +375,16 @@ def detect_sources(
 
     Parameters:
         image: 2-D float input array.
-        psf: PSF used for the matched-filter shape window.  Only the
-            ``sigma`` (or ``fwhm()``) is consulted; the smear is
-            already baked into ``smear_kernel``.
+        psf: PSF used for the matched-filter shape window.  Per-pixel
+            sigma is obtained via
+            :func:`nav.nav_model.stars.predicted_snr.psf_sigma_px`,
+            which reads ``sigma_x`` / ``sigma_y`` from
+            ``psfmodel.GaussianPSF`` (averaged for anisotropic PSFs)
+            and falls back to a single ``sigma`` attribute or
+            ``fwhm() / 2.3548`` for third-party PSF subclasses.  The
+            returned sigma is in pixels.  The smear is already baked
+            into ``smear_kernel``; this PSF parameter only sets the
+            centroid-fit box half-width.
         image_noise_sigma: Robust per-pixel noise sigma in DN.
         full_well_dn: Saturation DN.
         smear_kernel: Pre-rendered smeared PSF kernel matched to the

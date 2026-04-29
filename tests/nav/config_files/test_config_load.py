@@ -41,13 +41,25 @@ def test_per_instrument_required_fields_present() -> None:
         assert camera['noise']['saturation_dn'] == 4095
         assert camera['fit_camera_rotation'] is False
         assert camera['max_rotation_deg'] == 5.0
-        assert camera['mag_offset']['fallback_combo']
+        assert camera['mag_offset']['fallback_combo'] == 'CL1+CL2'
     voyager = config.category('voyager_iss')
     assert voyager['data_units'] == 'raw_dn'
     assert voyager['noise']['saturation_dn'] == 255
+    assert voyager['fit_camera_rotation'] is False
+    assert voyager['max_rotation_deg'] == 5.0
+    assert voyager['mag_offset']['fallback_combo'] == 'CL'
     galileo = config.category('galileo_ssi')
     assert galileo['data_units'] == 'raw_dn'
     assert galileo['noise']['saturation_dn'] == 255
+    assert galileo['fit_camera_rotation'] is False
+    assert galileo['max_rotation_deg'] == 5.0
+    assert galileo['mag_offset']['fallback_combo'] == 'CL'
+    nhlorri = config.category('newhorizons_lorri')
+    assert nhlorri['data_units'] == 'raw_dn'
+    assert nhlorri['noise']['saturation_dn'] == 4095
+    assert nhlorri['fit_camera_rotation'] is False
+    assert nhlorri['max_rotation_deg'] == 5.0
+    assert nhlorri['mag_offset']['fallback_combo'] == '1'
 
 
 def test_body_shape_section_loaded() -> None:

@@ -14,8 +14,9 @@ orchestrator can branch on ``data_units`` without re-reading raw YAML.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from nav.nav_orchestrator.image_classifier import ImageQualityThresholds
 
@@ -75,17 +76,22 @@ def _coerce_marker_value(value: Any) -> float:
 
 
 def _required_float(block: Any, key: str, *, location: str) -> float:
-    """Read a required numeric field from a YAML mapping.
+    """Read a required finite numeric field from a YAML mapping.
 
     Raises ``ValueError`` with a path-aware error message when the key
-    is missing or non-numeric.
+    is missing, non-numeric, or non-finite (NaN / +-Inf).  Non-finite
+    config values would propagate into thresholds the orchestrator
+    compares against pixel data, so they are rejected at load time.
     """
     if block is None or key not in block:
         raise ValueError(f'{location} missing required field {key!r}')
     value = block[key]
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f'{location}.{key} must be numeric; got {type(value).__name__}={value!r}')
-    return float(value)
+    coerced = float(value)
+    if not math.isfinite(coerced):
+        raise ValueError(f'{location}.{key} must be a finite numeric value; got {value!r}')
+    return coerced
 
 
 def instrument_settings_from_obs(obs: Any) -> InstrumentSettings:
@@ -121,17 +127,31 @@ def instrument_settings_from_obs(obs: Any) -> InstrumentSettings:
             fit_camera_rotation=False,
             max_rotation_deg=5.0,
         )
+    if not isinstance(inst_config, Mapping):
+        raise TypeError(
+            f'obs.inst_config must be a mapping (dict / AttrDict); got {type(inst_config).__name__}'
+        )
     data_units_raw = inst_config.get('data_units')
-    if data_units_raw not in ('raw_dn', 'calibrated_if'):
+    if not isinstance(data_units_raw, str) or data_units_raw not in (
+        'raw_dn',
+        'calibrated_if',
+    ):
         raise ValueError(
             'instrument config missing required field data_units '
             f"(must be 'raw_dn' or 'calibrated_if'); got {data_units_raw!r}"
         )
-    data_units: DataUnits = data_units_raw
+    data_units: DataUnits = cast(DataUnits, data_units_raw)
     noise = inst_config.get('noise')
     iqt_block = inst_config.get('image_quality_thresholds')
-    if iqt_block is None:
-        raise ValueError('instrument config missing required image_quality_thresholds block')
+    if not isinstance(iqt_block, Mapping):
+        raise ValueError(
+            'instrument config missing required image_quality_thresholds block '
+            f'(or block is not a mapping); got {type(iqt_block).__name__}'
+        )
+    if noise is not None and not isinstance(noise, Mapping):
+        raise TypeError(
+            f'instrument config noise block must be a mapping; got {type(noise).__name__}'
+        )
     if data_units == 'raw_dn':
         if noise is None:
             raise ValueError(

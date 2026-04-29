@@ -54,13 +54,24 @@ def test_provenance_static_data_hashes_is_immutable() -> None:
 
 def test_collect_provenance_metadata_returns_dataclass() -> None:
     """``collect_provenance_metadata`` returns a populated dataclass."""
+    from collections.abc import Mapping
+    from types import MappingProxyType
+
     meta = collect_provenance_metadata()
     assert isinstance(meta, ProvenanceMetadata)
     # The git SHA may be ``None`` if the working tree isn't a repo, but
     # the field must exist.
     assert isinstance(meta.git_sha, str | type(None))
     assert isinstance(meta.spice_kernels, tuple)
-    assert isinstance(meta.static_data_hashes, dict | type(meta.static_data_hashes))
+    # ``static_data_hashes`` is exposed as ``Mapping[str, str]`` and the
+    # implementation returns a ``MappingProxyType``; pin both shape and
+    # contents so a future refactor that swaps the wrapping type still
+    # has to satisfy the read-only-mapping contract.
+    assert isinstance(meta.static_data_hashes, Mapping)
+    assert isinstance(meta.static_data_hashes, MappingProxyType)
+    for key, value in meta.static_data_hashes.items():
+        assert isinstance(key, str)
+        assert isinstance(value, str)
 
 
 def test_collect_provenance_metadata_hashes_static_data_yamls() -> None:
