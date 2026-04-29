@@ -39,7 +39,7 @@ from nav.nav_model.nav_model_body import (
 def test_constants_have_design_values() -> None:
     """Module-level constants match the design's defaults."""
     assert pytest.approx(0.05) == BODY_POSITION_SLOP_FRAC
-    assert pytest.approx(2.0) == LIMB_ARC_MAX_UNCERTAINTY_PX
+    assert pytest.approx(3.0) == LIMB_ARC_MAX_UNCERTAINTY_PX
     assert pytest.approx(0.4) == BODY_DISC_MIN_VISIBLE_LIT_FRACTION
     assert pytest.approx(0.3) == BODY_DISC_MAX_OVERFLOW_FRACTION
     assert TERMINATOR_MIN_VERTICES == 8

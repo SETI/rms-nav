@@ -31,6 +31,7 @@ from nav.nav_technique.confidence import (
 )
 from nav.nav_technique.diagnostics import BodyTerminatorDiagnostics
 from nav.nav_technique.dt_fitting import (
+    AT_EDGE_TOLERANCE_PX,
     coarse_ncc_search,
     lm_subpixel_refine,
 )
@@ -61,17 +62,6 @@ SPURIOUS_MIN_INLIERS: int = 6
 """Below this Tukey-inlier count the final fit is flagged spurious."""
 
 
-_AT_EDGE_TOLERANCE_PX: float = 1.0
-"""Pixels of slack around the search-window axis bounds for at-edge detection.
-
-A converged offset whose absolute distance from any axis bound (``+/-margin_v``,
-``+/-margin_u``) falls within this tolerance is flagged ``at_edge=True`` and
-forced to zero confidence by the technique's ``hard_zero_if`` gate.  One pixel
-matches the bilinear DT half-cell width: any closer to the boundary and the
-LM gradient information is unreliable.
-"""
-
-
 _BODY_TERMINATOR_CONFIDENCE_SPEC = ConfidenceSpec(
     alpha0=-1.0,
     terms=(
@@ -86,7 +76,7 @@ _BODY_TERMINATOR_CONFIDENCE_SPEC = ConfidenceSpec(
         ConfidenceTerm(feature='mean_phase_angle_factor', alpha=1.0),
         ConfidenceTerm(feature='mean_albedo_penalty', alpha=-1.5),
     ),
-    hard_zero_if={'at_edge': True},
+    hard_zero_if={'at_edge': True, 'spurious': True},
 )
 """Default confidence spec for the body-terminator technique.
 
@@ -184,6 +174,7 @@ class BodyTerminatorNav(NavTechnique):
     confidence_attributes = frozenset(
         {
             'at_edge',
+            'spurious',
             'visible_terminator_arc_fraction',
             'visible_arc_px',
             'dt_fit_rms_px',
@@ -301,10 +292,10 @@ class BodyTerminatorNav(NavTechnique):
             )
             dv_final, du_final = result.offset_vu
             at_edge = (
-                abs(dv_final - margin_v) <= _AT_EDGE_TOLERANCE_PX
-                or abs(dv_final + margin_v) <= _AT_EDGE_TOLERANCE_PX
-                or abs(du_final - margin_u) <= _AT_EDGE_TOLERANCE_PX
-                or abs(du_final + margin_u) <= _AT_EDGE_TOLERANCE_PX
+                abs(dv_final - margin_v) <= AT_EDGE_TOLERANCE_PX
+                or abs(dv_final + margin_v) <= AT_EDGE_TOLERANCE_PX
+                or abs(du_final - margin_u) <= AT_EDGE_TOLERANCE_PX
+                or abs(du_final + margin_u) <= AT_EDGE_TOLERANCE_PX
             )
             sigma_min_px = float(sigmas.min()) if sigmas.size else 1.0
             spurious = (
@@ -323,6 +314,7 @@ class BodyTerminatorNav(NavTechnique):
             )
             confidence_context = _TerminatorConfidenceContext(
                 at_edge=at_edge,
+                spurious=bool(spurious),
                 diagnostics=diagnostics,
                 mean_phase_angle_factor=mean_phase,
                 mean_albedo_penalty=mean_albedo,
@@ -379,11 +371,13 @@ class _TerminatorConfidenceContext:
         self,
         *,
         at_edge: bool,
+        spurious: bool,
         diagnostics: BodyTerminatorDiagnostics,
         mean_phase_angle_factor: float,
         mean_albedo_penalty: float,
     ) -> None:
         self.at_edge = at_edge
+        self.spurious = spurious
         self.visible_terminator_arc_fraction = diagnostics.visible_terminator_arc_fraction
         self.visible_arc_px = diagnostics.visible_arc_px
         self.dt_fit_rms_px = diagnostics.dt_fit_rms_px

@@ -1,5 +1,7 @@
 """Tests for nav.support.correlate, focused on masked NCC and pyramid navigation."""
 
+from itertools import pairwise
+
 import numpy as np
 import pytest
 
@@ -492,3 +494,34 @@ class TestGradientMode:
         dy, dx = result['offset']
         assert dy == pytest.approx(1.5, abs=0.3)
         assert dx == pytest.approx(-0.5, abs=0.3)
+
+
+class TestPyramidTopKPeaks:
+    """``navigate_with_pyramid_kpeaks`` surfaces a sorted ``top_k_peaks`` list."""
+
+    def test_top_k_peaks_present_and_sorted(self) -> None:
+        """The returned dict carries the per-peak telemetry sorted by quality."""
+        image, model, mask = _make_single_star(image_offset=(1.0, 0.0))
+        result = navigate_with_pyramid_kpeaks(
+            image,
+            model,
+            mask,
+            pyramid_levels=3,
+            max_peaks=3,
+            upsample_factor=16,
+            metric='psr',
+            quality_thresh=0.0,
+            consistency_tol=10.0,
+            max_offset_vu=(10, 10),
+        )
+        peaks = result['top_k_peaks']
+        assert isinstance(peaks, list)
+        assert len(peaks) >= 1
+        # First peak quality matches the headline ``quality`` value.
+        assert peaks[0][0] == pytest.approx(result['quality'])
+        # Sorted by quality descending.
+        for prev, cur in pairwise(peaks):
+            assert prev[0] >= cur[0]
+        # Each entry has shape (quality, dv, du).
+        for entry in peaks:
+            assert len(entry) == 3

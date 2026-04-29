@@ -148,36 +148,40 @@ def _run_reproject_pass(
             continue
 
         local_handlers, image_log_path = _reproject_image_log_handlers(output_dir, image_file, args)
-        with IMAGE_LOGGER.open(
-            f'REPROJECT {image_file.image_file_url}',
-            handler=local_handlers,
-        ):
-            try:
-                image_path = image_file.image_file_path.absolute()
-                obs = obs_class.from_file(image_path, extfov_margin_vu=(0, 0))
+        try:
+            with IMAGE_LOGGER.open(
+                f'REPROJECT {image_file.image_file_url}',
+                handler=local_handlers,
+            ):
+                try:
+                    image_path = image_file.image_file_path.absolute()
+                    obs = obs_class.from_file(image_path, extfov_margin_vu=(0, 0))
 
-                offset = load_offset_if_any(nav_results_root_path, image_file)
-                if offset is not None:
-                    apply_offset_to_obs(cast(ObsSnapshotInst, obs), offset[0], offset[1])
+                    offset = load_offset_if_any(nav_results_root_path, image_file)
+                    if offset is not None:
+                        apply_offset_to_obs(cast(ObsSnapshotInst, obs), offset[0], offset[1])
 
-                img_label = (
-                    args.image_name
-                    if args.image_name is not None
-                    else image_file.image_file_path.stem
-                )
-                obs_inst = cast(ObsSnapshotInst, obs)
-                result = reproject_fn(obs_inst, img_label)
+                    img_label = (
+                        args.image_name
+                        if args.image_name is not None
+                        else image_file.image_file_path.stem
+                    )
+                    obs_inst = cast(ObsSnapshotInst, obs)
+                    result = reproject_fn(obs_inst, img_label)
 
-                if not args.no_write_output_files:
-                    out_path.parent.mkdir(parents=True, exist_ok=True)
-                    result.save(out_path)
-                    MAIN_LOGGER.info('Saved reproj: %s', out_path)
-                n_done += 1
-            except Exception:
-                _log_main_exception('Error reprojecting %s', image_file.image_file_url)
-            finally:
-                if local_handlers:
-                    MAIN_LOGGER.info('Wrote reprojection log to %s', image_log_path)
+                    if not args.no_write_output_files:
+                        out_path.parent.mkdir(parents=True, exist_ok=True)
+                        result.save(out_path)
+                        MAIN_LOGGER.info('Saved reproj: %s', out_path)
+                    n_done += 1
+                except Exception:
+                    _log_main_exception('Error reprojecting %s', image_file.image_file_url)
+                finally:
+                    if local_handlers:
+                        MAIN_LOGGER.info('Wrote reprojection log to %s', image_log_path)
+        finally:
+            for handler in local_handlers:
+                handler.close()
 
     return n_done, n_skipped
 

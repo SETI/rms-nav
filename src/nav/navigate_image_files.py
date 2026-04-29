@@ -120,30 +120,34 @@ def navigate_image_files(
     )
     local_handlers = image_log_handlers(image_log_path, log_arguments, DEFAULT_CONFIG)
 
-    with logger.open(str(image_url), handler=local_handlers):
-        log_run_environment(logger, sys.argv[1:])
-        try:
-            snapshot = obs_class.from_file(image_url, **extra_params)
-        except (OSError, RuntimeError) as exc:
-            metadata = _metadata_for_load_error(image_path, image_name, exc, logger)
+    try:
+        with logger.open(str(image_url), handler=local_handlers):
+            log_run_environment(logger, sys.argv[1:])
+            try:
+                snapshot = obs_class.from_file(image_url, **extra_params)
+            except (OSError, RuntimeError) as exc:
+                metadata = _metadata_for_load_error(image_path, image_name, exc, logger)
+                if write_output_files:
+                    public_metadata_file.write_text(json_as_string(metadata))
+                MAIN_LOGGER.info('Wrote log to %s', image_log_path)
+                return False, metadata
+            snapshot_inst = cast(ObsSnapshotInst, snapshot)
+            orchestrator = NavOrchestrator(
+                build_models_for_obs(snapshot_inst),
+                only_models=nav_models or '*',
+                only_techniques=nav_techniques or '*',
+            )
+            nav_result = orchestrator.navigate(snapshot_inst)
+            metadata = _metadata_from_result(nav_result, image_path, image_name)
             if write_output_files:
+                logger.info('Writing metadata to %s', public_metadata_file)
                 public_metadata_file.write_text(json_as_string(metadata))
+                _write_summary_png(snapshot_inst, nav_result, summary_png_file, logger)
             MAIN_LOGGER.info('Wrote log to %s', image_log_path)
-            return False, metadata
-        snapshot_inst = cast(ObsSnapshotInst, snapshot)
-        orchestrator = NavOrchestrator(
-            build_models_for_obs(snapshot_inst),
-            only_models=nav_models or '*',
-            only_techniques=nav_techniques or '*',
-        )
-        nav_result = orchestrator.navigate(snapshot_inst)
-        metadata = _metadata_from_result(nav_result, image_path, image_name)
-        if write_output_files:
-            logger.info('Writing metadata to %s', public_metadata_file)
-            public_metadata_file.write_text(json_as_string(metadata))
-            _write_summary_png(snapshot_inst, nav_result, summary_png_file, logger)
-        MAIN_LOGGER.info('Wrote log to %s', image_log_path)
-        return nav_result.status == 'ok', metadata
+            return nav_result.status == 'ok', metadata
+    finally:
+        for handler in local_handlers:
+            handler.close()
 
 
 def _metadata_for_load_error(

@@ -622,8 +622,20 @@ def navigate_single_scale_kpeaks(
             'cov': np.diag([1e6, 1e6]),
             'sigma_xy': (1e3, 1e3),
             'quality': -np.inf,
+            'all_candidates': [],
         }
-    return max(candidates, key=lambda r: r['quality'])
+    winner = max(candidates, key=lambda r: r['quality'])
+    # Carry every evaluated candidate so callers that want to inspect
+    # runner-up peaks (e.g. peak-to-runner-up ratio diagnostics) can do
+    # so without re-running the correlation.  Sorted by quality desc so
+    # ``all_candidates[0]`` is the winner and ``[1:]`` are runner-ups.
+    # Return a shallow copy of the winner with the per-candidate list
+    # attached separately so the returned dict is not self-referential
+    # (the original winner remains an entry inside the new list).
+    sorted_candidates = sorted(candidates, key=lambda r: r['quality'], reverse=True)
+    result = dict(winner)
+    result['all_candidates'] = sorted_candidates
+    return result
 
 
 # ==============================================================
@@ -799,6 +811,7 @@ def navigate_with_pyramid_kpeaks(
             result_grad['spurious'],
             result_grad['at_edge'],
         )
+        winner['used_gradient'] = chosen == 'gradient'
         return winner
 
     logger.debug('Navigating with pyramid kpeaks:')
@@ -937,6 +950,21 @@ def navigate_with_pyramid_kpeaks(
             'Correlation peak within 2 pixels of max-offset window edge; marking result spurious'
         )
 
+    # Surface the per-peak telemetry from the final-pass single-scale
+    # call so callers can derive a peak-to-runner-up ratio without
+    # re-running the correlation.  Each entry is
+    # ``(quality, offset_dv, offset_du)``; the winner is index 0 and
+    # any runner-ups follow in descending quality order.
+    all_candidates = result.get('all_candidates', [])
+    top_k_peaks: list[tuple[float, float, float]] = [
+        (
+            float(c['quality']),
+            float(c['offset'][0]),
+            float(c['offset'][1]),
+        )
+        for c in all_candidates
+    ]
+
     ret = {
         'offset': result['offset'],
         'cov': result['cov'],
@@ -946,6 +974,8 @@ def navigate_with_pyramid_kpeaks(
         'consistency': consistency,
         'spurious': bool(spurious),
         'at_edge': bool(at_edge),
+        'used_gradient': bool(use_gradient),
+        'top_k_peaks': top_k_peaks,
     }
 
     logger.debug(

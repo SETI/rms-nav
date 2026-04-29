@@ -32,6 +32,7 @@ from nav.support.distance_transform import sample_dt_bilinear
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
 __all__ = [
+    'AT_EDGE_TOLERANCE_PX',
     'DEFAULT_LM_DAMPING',
     'DEFAULT_LM_MAX_ITERATIONS',
     'DEFAULT_LM_STEP_TOLERANCE',
@@ -44,6 +45,22 @@ __all__ = [
     'polarity_filter',
     'tukey_biweight_weights',
 ]
+
+
+AT_EDGE_TOLERANCE_PX: float = 1.0
+"""Pixels of slack around the search-window axis bounds for at-edge detection.
+
+A converged offset whose absolute distance from any axis bound
+(``+/- margin_v``, ``+/- margin_u``) falls within this tolerance is
+flagged ``at_edge=True`` and forced to zero confidence by the
+technique's ``hard_zero_if`` gate.  One pixel matches the bilinear
+DT half-cell width: any closer to the boundary and the LM gradient
+information is unreliable.
+
+Shared across every translation-fit technique (DT-based limb /
+terminator / ring-edge plus the brightness-weighted-moment blob fit)
+so the at-edge convention stays uniform.
+"""
 
 
 DEFAULT_TUKEY_C: float = 4.685
