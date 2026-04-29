@@ -329,7 +329,7 @@ async def async_main() -> None:
     init_cli_args = cast(argparse.Namespace, worker._data.args)
     load_default_and_user_config(init_cli_args, DEFAULT_CONFIG)
     # ``WorkerData`` has no typed field; ``process_task`` reads via ``getattr``.
-    worker._data.nav_results_root_path = _resolve_nav_results_root_fcpath(init_cli_args)  # type: ignore[attr-defined,unused-ignore]
+    worker._data.nav_results_root_path = _resolve_nav_results_root_fcpath(init_cli_args)  # type: ignore[attr-defined]
     await worker.start()
 
 
