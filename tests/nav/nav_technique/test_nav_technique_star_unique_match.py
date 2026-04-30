@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 from tests.nav.nav_technique.conftest import (
@@ -156,3 +158,80 @@ def test_star_unique_match_marks_at_edge_when_offset_hits_margin(
     result = technique.navigate([feature], context)
     assert result.at_edge is True
     assert result.confidence == pytest.approx(0.0)
+
+
+def test_star_unique_match_two_star_3dof_recovers_planted_rotation(
+    make_nav_context: NavContextFactory,
+    make_star_feature: NavFeatureFactory,
+    draw_gaussian_star: DrawGaussianStarFactory,
+) -> None:
+    """The 2-star Procrustes path recovers a planted rotation around the catalog midpoint.
+
+    Translation is reported in the catalog frame: the test plants a 1
+    deg rotation between the catalog cohort and the detection cohort,
+    which the 2-star similarity-transform fit must recover within the
+    expected sub-degree tolerance.
+    """
+    shape = (200, 200)
+    image = np.zeros(shape, dtype=np.float64)
+    actual_a = (60.0, 60.0)
+    actual_b = (140.0, 140.0)
+    draw_gaussian_star(image, actual_a, peak_dn=200.0, sigma=1.2)
+    draw_gaussian_star(image, actual_b, peak_dn=180.0, sigma=1.2)
+    # Choose catalog predictions such that rotating them by the planted
+    # angle about their midpoint and applying a tiny translation lands
+    # on the detected positions.  Pivot is the midpoint of the catalog
+    # predictions.
+    planted_offset = (0.5, 0.5)
+    planted_theta = math.radians(1.0)
+    cat_a = (actual_a[0] - planted_offset[0], actual_a[1] - planted_offset[1])
+    cat_b = (actual_b[0] - planted_offset[0], actual_b[1] - planted_offset[1])
+    pivot = (0.5 * (cat_a[0] + cat_b[0]), 0.5 * (cat_a[1] + cat_b[1]))
+    cos_t = math.cos(-planted_theta)
+    sin_t = math.sin(-planted_theta)
+
+    def _rotate(p: tuple[float, float]) -> tuple[float, float]:
+        rv = p[0] - pivot[0]
+        ru = p[1] - pivot[1]
+        return (
+            pivot[0] + cos_t * rv - sin_t * ru,
+            pivot[1] + sin_t * rv + cos_t * ru,
+        )
+
+    pred_a = _rotate(cat_a)
+    pred_b = _rotate(cat_b)
+    feat_a = make_star_feature('star:UCAC4:A', predicted_vu=pred_a, predicted_snr=60.0)
+    feat_b = make_star_feature('star:UCAC4:B', predicted_vu=pred_b, predicted_snr=40.0)
+    technique = StarUniqueMatchNav()
+    context = make_nav_context(image, fit_camera_rotation=True, max_rotation_deg=5.0)
+    result = technique.navigate([feat_a, feat_b], context)
+    assert result.covariance_px2.shape == (3, 3)
+    assert result.rotation_rad is not None
+    assert result.rotation_rad == pytest.approx(planted_theta, abs=math.radians(0.3))
+    assert isinstance(result.diagnostics, StarUniqueMatchDiagnostics)
+    assert result.diagnostics.mode == 'two_star'
+
+
+def test_star_unique_match_one_star_3dof_rotation_unobservable(
+    make_nav_context: NavContextFactory,
+    make_star_feature: NavFeatureFactory,
+    draw_gaussian_star: DrawGaussianStarFactory,
+) -> None:
+    """A 1-star path with fit_camera_rotation reports rotation as unobservable."""
+    from nav.nav_technique.nav_technique import ROTATION_UNOBSERVABLE_VARIANCE
+
+    shape = (200, 200)
+    image = np.zeros(shape, dtype=np.float64)
+    actual = (100.0, 100.0)
+    draw_gaussian_star(image, actual, peak_dn=200.0, sigma=1.2)
+    feature = make_star_feature(
+        'star:UCAC4:bright',
+        predicted_vu=(99.0, 101.0),
+        predicted_snr=60.0,
+    )
+    technique = StarUniqueMatchNav()
+    context = make_nav_context(image, fit_camera_rotation=True, max_rotation_deg=5.0)
+    result = technique.navigate([feature], context)
+    assert result.covariance_px2.shape == (3, 3)
+    assert result.rotation_rad == 0.0
+    assert result.covariance_px2[2, 2] == pytest.approx(ROTATION_UNOBSERVABLE_VARIANCE)

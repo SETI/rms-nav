@@ -60,3 +60,59 @@ def test_navcontext_with_prior_preserves_other_fields() -> None:
     new_ctx = ctx.with_prior(offset_px=(0.0, 0.0), covariance_px2=cov)
     assert new_ctx.image_noise_sigma == ctx.image_noise_sigma
     assert new_ctx.image_classifier is ctx.image_classifier
+
+
+def test_navcontext_rotation_fields_default_off() -> None:
+    """Default NavContext disables rotation fitting at the standard 5 degree cap."""
+    ctx = _minimal_context()
+    assert ctx.fit_camera_rotation is False
+    assert ctx.max_rotation_deg == 5.0
+
+
+def test_navcontext_rotation_fields_propagate() -> None:
+    """Explicit rotation flags survive construction and ``with_prior``."""
+    image = np.zeros((4, 4), np.float64)
+    mask = np.ones((4, 4), bool)
+    classifier = NavImageClassifierResult(
+        image_class='clean',
+        saturation_frac=0.0,
+        missing_frac=0.0,
+        noise_sigma=1.0,
+        max_dn=10.0,
+    )
+    provenance = Provenance(
+        rms_nav_version='0.5.2',
+        image_et=0.0,
+        pipeline_run_iso8601='2026-04-26T12:00:00Z',
+    )
+    ctx = NavContext(
+        obs=object(),
+        image_ext=image,
+        sensor_mask_ext=mask,
+        image_noise_sigma=1.0,
+        saturation_mask_ext=np.zeros((4, 4), bool),
+        cosmic_ray_mask_ext=np.zeros((4, 4), bool),
+        image_classifier=classifier,
+        provenance=provenance,
+        fit_camera_rotation=True,
+        max_rotation_deg=3.5,
+    )
+    assert ctx.fit_camera_rotation is True
+    assert ctx.max_rotation_deg == 3.5
+    new_ctx = ctx.with_prior(
+        offset_px=(0.5, -0.5),
+        covariance_px2=np.eye(2, dtype=np.float64),
+    )
+    assert new_ctx.fit_camera_rotation is True
+    assert new_ctx.max_rotation_deg == 3.5
+
+
+def test_navcontext_with_prior_accepts_3x3_covariance() -> None:
+    """``with_prior`` accepts a 3x3 prior covariance and keeps the 2x2 block."""
+    ctx = _minimal_context()
+    cov_3x3 = np.diag([0.1, 0.2, 1.0]).astype(np.float64)
+    new_ctx = ctx.with_prior(offset_px=(0.0, 0.0), covariance_px2=cov_3x3)
+    assert new_ctx.prior_covariance_px2 is not None
+    assert new_ctx.prior_covariance_px2.shape == (2, 2)
+    assert new_ctx.prior_covariance_px2[0, 0] == 0.1
+    assert new_ctx.prior_covariance_px2[1, 1] == 0.2

@@ -37,11 +37,14 @@ from nav.nav_technique.diagnostics import RingAnnulusDiagnostics
 from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.nav_technique import (
     NavTechnique,
+    embed_rotation_unobservable,
     log_confidence_breakdown,
+    rotation_unobservable_sigma_rad,
     search_window_for_obs,
 )
 from nav.nav_technique.technique_result import NavTechniqueResult
 from nav.support.correlate import navigate_with_pyramid_kpeaks
+from nav.support.types import NDArrayFloatType
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only import
     from nav.nav_orchestrator.nav_context import NavContext
@@ -205,9 +208,13 @@ class RingAnnulusNav(NavTechnique):
             )
             dv = float(ncc_result['offset'][0])
             du = float(ncc_result['offset'][1])
-            covariance = np.asarray(ncc_result['cov'], np.float64)
-            if covariance.shape != (2, 2):
-                covariance = covariance[:2, :2]
+            covariance_2x2 = np.asarray(ncc_result['cov'], np.float64)
+            if covariance_2x2.shape != (2, 2):
+                covariance_2x2 = covariance_2x2[:2, :2]
+            fit_rotation = bool(context.fit_camera_rotation)
+            covariance: NDArrayFloatType = (
+                embed_rotation_unobservable(covariance_2x2) if fit_rotation else covariance_2x2
+            )
             spurious = bool(ncc_result['spurious'])
             at_edge = bool(ncc_result['at_edge'])
             quality = float(ncc_result['quality'])
@@ -250,6 +257,8 @@ class RingAnnulusNav(NavTechnique):
                 spurious=spurious,
                 at_edge=at_edge,
                 diagnostics=diagnostics,
+                rotation_rad=0.0 if fit_rotation else None,
+                sigma_rotation_rad=(rotation_unobservable_sigma_rad() if fit_rotation else None),
             )
 
     def _upsample_factor(self) -> int:

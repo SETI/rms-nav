@@ -10,8 +10,11 @@ constructed at import time.
 from __future__ import annotations
 
 import fnmatch
+import math
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, cast
+
+import numpy as np
 
 from nav.feature.feature import NavFeature
 from nav.feature.feature_type import NavFeatureType
@@ -19,17 +22,68 @@ from nav.nav_technique.confidence import ConfidenceBreakdown, ConfidenceSpec
 from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.technique_result import NavTechniqueResult
 from nav.support.nav_base import NavBase
+from nav.support.types import NDArrayFloatType
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only import
     from nav.nav_orchestrator.nav_context import NavContext
 
 __all__ = [
+    'ROTATION_UNOBSERVABLE_VARIANCE',
     'NavTechnique',
+    'embed_rotation_unobservable',
     'filter_technique_names',
     'log_confidence_breakdown',
+    'rotation_pivot_distance_px',
+    'rotation_unobservable_sigma_rad',
     'search_window_for_obs',
     'validate_registered_confidence_specs',
 ]
+
+
+ROTATION_UNOBSERVABLE_VARIANCE: float = 1.0e15
+"""Finite sentinel used as the rotation-axis variance when a technique
+provides no rotation evidence (centroid-based fits, single-star matches,
+template NCC without an outer rotation search).
+
+The pseudoinverse used by the ensemble combine maps this huge variance to
+a near-zero information contribution in the rotation direction, so the
+technique contributes no rotation constraint to the precision-weighted
+merge.  A literal ``+inf`` would break covariance validation
+(``np.linalg.eigvalsh`` returns NaN for non-finite matrices), so this
+finite sentinel is preferred.
+"""
+
+
+def embed_rotation_unobservable(cov_2x2: NDArrayFloatType) -> NDArrayFloatType:
+    """Promote a 2x2 translation covariance to a 3x3 with rotation unobservable.
+
+    The third diagonal carries :data:`ROTATION_UNOBSERVABLE_VARIANCE`; the
+    cross-covariance entries are zero.  The ensemble's pseudo-inverse
+    combine treats the rotation eigenvalue as null on input from this
+    technique, so the rotation direction is ignored when fusing with
+    rotation-aware techniques.
+
+    Parameters:
+        cov_2x2: 2x2 translation covariance.
+
+    Returns:
+        ``(3, 3)`` covariance matrix with the original 2x2 in the
+        top-left block and the rotation-unobservable sentinel on the
+        bottom-right diagonal.
+    """
+    out = np.zeros((3, 3), dtype=np.float64)
+    out[:2, :2] = cov_2x2
+    out[2, 2] = ROTATION_UNOBSERVABLE_VARIANCE
+    return cast(NDArrayFloatType, out)
+
+
+def rotation_unobservable_sigma_rad() -> float:
+    """Return the rotation sigma corresponding to the unobservable sentinel.
+
+    Convenience for techniques that report ``sigma_rotation_rad`` on
+    their :class:`NavTechniqueResult` when rotation is unconstrained.
+    """
+    return float(math.sqrt(ROTATION_UNOBSERVABLE_VARIANCE))
 
 
 def search_window_for_obs(context: NavContext) -> tuple[int, int]:
@@ -44,6 +98,22 @@ def search_window_for_obs(context: NavContext) -> tuple[int, int]:
     """
     margin = context.obs.extfov_margin_vu  # type: ignore[attr-defined]
     return (int(margin[0]), int(margin[1]))
+
+
+def rotation_pivot_distance_px(
+    pivot_vu: tuple[float, float], image_shape_vu: tuple[int, int]
+) -> float:
+    """Return the rotation-pivot's distance from the image centre.
+
+    Used by 3-DoF DT-fit techniques to convert the LM rotation step into a
+    pixel-equivalent value for the convergence test.  Floored at 1.0 so a
+    pivot that lands exactly on the image centre still yields a usable
+    convergence threshold.
+    """
+    centre_v = float(image_shape_vu[0]) / 2.0
+    centre_u = float(image_shape_vu[1]) / 2.0
+    dist = math.hypot(float(pivot_vu[0]) - centre_v, float(pivot_vu[1]) - centre_u)
+    return max(dist, 1.0)
 
 
 def log_confidence_breakdown(

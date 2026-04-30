@@ -423,3 +423,110 @@ def test_star_field_seed_from_image_et_handles_edge_cases() -> None:
     assert seed_neg > 0
     seed_nan = _seed_from_image_et(math.nan)
     assert seed_nan == 0
+
+
+# ---------------------------------------------------------------------------
+# 3-DoF (Procrustes / similarity-transform) tests.
+# ---------------------------------------------------------------------------
+
+
+def _rotate_about(
+    points: list[tuple[float, float]],
+    pivot: tuple[float, float],
+    theta_rad: float,
+) -> list[tuple[float, float]]:
+    """Rotate ``points`` about ``pivot`` by ``theta_rad`` and return the rotated list."""
+    cos_t = math.cos(theta_rad)
+    sin_t = math.sin(theta_rad)
+    pv, pu = pivot
+    rotated: list[tuple[float, float]] = []
+    for v, u in points:
+        rv = v - pv
+        ru = u - pu
+        rotated.append(
+            (
+                pv + cos_t * rv - sin_t * ru,
+                pu + sin_t * rv + cos_t * ru,
+            )
+        )
+    return rotated
+
+
+def test_star_field_3dof_recovers_planted_rotation(
+    draw_gaussian_star: DrawGaussianStarFactory,
+    make_star_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """A planted rotation + translation is recovered by the Procrustes path."""
+    centers = [
+        (80.0, 90.0),
+        (170.0, 200.0),
+        (200.0, 70.0),
+        (90.0, 240.0),
+        (250.0, 130.0),
+        (60.0, 60.0),
+        (260.0, 250.0),
+    ]
+    image = _star_field_image(centers, draw=draw_gaussian_star, shape=(320, 320))
+    planted_offset = (1.5, -2.0)
+    # 0.5 deg rotation: displacement at ~150 px radius from the pivot is
+    # ~1.3 px, comfortably under the 2.0 px inlier-matching tolerance.
+    planted_theta = math.radians(0.5)
+    pivot = (
+        sum(c[0] for c in centers) / len(centers),
+        sum(c[1] for c in centers) / len(centers),
+    )
+    # Rotate detection-frame centres back into the catalog frame.  The
+    # technique should report (planted_offset, planted_theta) as the
+    # similarity transform that maps catalog -> detection.
+    catalog_centers = _rotate_about(
+        [(c[0] - planted_offset[0], c[1] - planted_offset[1]) for c in centers],
+        pivot=(pivot[0] - planted_offset[0], pivot[1] - planted_offset[1]),
+        theta_rad=-planted_theta,
+    )
+    snrs = [40.0 - 0.5 * i for i in range(len(catalog_centers))]
+    features: list[NavFeature] = [
+        make_star_feature(
+            f'star:UCAC4:{i}',
+            predicted_vu=catalog_centers[i],
+            predicted_snr=snrs[i],
+        )
+        for i in range(len(catalog_centers))
+    ]
+    technique = StarFieldFromCatalogNav()
+    context = make_nav_context(image, fit_camera_rotation=True, max_rotation_deg=5.0)
+    result = technique.navigate(features, context)
+    assert result.status == 'ok' if hasattr(result, 'status') else True
+    assert result.covariance_px2.shape == (3, 3)
+    assert result.rotation_rad is not None
+    assert result.rotation_rad == pytest.approx(planted_theta, abs=math.radians(0.2))
+    assert result.sigma_rotation_rad is not None
+    assert result.sigma_rotation_rad > 0.0
+
+
+def test_star_field_3dof_zero_rotation_path_remains_close_to_planted_offset(
+    draw_gaussian_star: DrawGaussianStarFactory,
+    make_star_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """A zero-rotation scene under fit_camera_rotation still recovers the offset."""
+    centers = [
+        (80.0, 90.0),
+        (170.0, 200.0),
+        (200.0, 70.0),
+        (90.0, 240.0),
+        (250.0, 130.0),
+        (60.0, 60.0),
+        (260.0, 250.0),
+    ]
+    image = _star_field_image(centers, draw=draw_gaussian_star, shape=(320, 320))
+    planted = (1.0, -2.5)
+    features = _make_star_field_features(centers, make_feature=make_star_feature, offset=planted)
+    technique = StarFieldFromCatalogNav()
+    context = make_nav_context(image, fit_camera_rotation=True, max_rotation_deg=5.0)
+    result = technique.navigate(features, context)
+    assert result.covariance_px2.shape == (3, 3)
+    assert result.offset_px[0] == pytest.approx(planted[0], abs=0.5)
+    assert result.offset_px[1] == pytest.approx(planted[1], abs=0.5)
+    assert result.rotation_rad is not None
+    assert abs(result.rotation_rad) < math.radians(0.5)

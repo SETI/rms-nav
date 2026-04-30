@@ -287,3 +287,41 @@ def test_body_disc_diagnostics_records_consistency_and_quality(
     assert isinstance(result.diagnostics, BodyDiscDiagnostics)
     assert result.diagnostics.ncc_peak > 0.0
     assert result.diagnostics.consistency_px < 1.0
+
+
+def test_body_disc_3dof_emits_3x3_covariance(
+    disc_image: DiscImageFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """A planted offset under fit_camera_rotation produces a 3x3 covariance.
+
+    A circular disc planted at zero rotation should converge near
+    rotation = 0 deg with a finite sigma_theta — the rotation pyramid
+    runs the full 11+5+3 sample schedule but the body's circular shape
+    means the NCC peak is shallow along the rotation axis.
+    """
+    shape = (120, 120)
+    image_center = (60.0, 60.0)
+    radius = 15.0
+    image = disc_image(shape, image_center, radius)
+    feature = _make_disc_feature(
+        'moonA',
+        extfov_shape=shape,
+        image_center_vu=image_center,
+        radius=radius,
+        planted_offset_vu=(1.0, -1.0),
+    )
+    technique = BodyDiscCorrelateNav()
+    context = make_nav_context(
+        image,
+        extfov_margin_vu=(8, 8),
+        fit_camera_rotation=True,
+        max_rotation_deg=5.0,
+    )
+    result = technique.navigate([feature], context)
+    assert result.covariance_px2.shape == (3, 3)
+    assert result.rotation_rad is not None
+    assert result.sigma_rotation_rad is not None
+    assert abs(result.rotation_rad) <= np.deg2rad(5.0)
+    assert result.offset_px[0] == pytest.approx(1.0, abs=1.5)
+    assert result.offset_px[1] == pytest.approx(-1.0, abs=1.5)

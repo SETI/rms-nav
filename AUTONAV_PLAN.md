@@ -1030,7 +1030,7 @@ techniques broaden coverage.
 | **6** | Ring-annulus technique | **Complete** (branch `core_rewrite_phase6`) |
 | **7** | Star techniques part 1 (unique-match + refine) | **Complete** (branch `core_rewrite_phase7`) |
 | **8** | `StarFieldFromCatalogNav` (multi-star RANSAC) | **Complete** (branch `core_rewrite_phase7`) |
-| **9** | Camera rotation correction (per instrument) | Pending |
+| **9** | Camera rotation correction (per instrument) | **Complete** (branch `core_rewrite_phase9`) |
 | **10** | Image library expansion + confidence-formula calibration | Pending |
 | **11** | Cleanup + documentation finalization + breadth comparison | Pending |
 | **12+** | Deferred items (Part 13b) — each its own phase when scheduled | Tracked |
@@ -3470,57 +3470,72 @@ back-to-back invocations on the same obs.
 
 ---
 
-## Phase 9 — Camera rotation correction (per instrument)
+## Phase 9 — Camera rotation correction (per instrument) (complete)
 
-**Goal:** Enable camera rotation fitting on instruments where
-attitude rotation residuals are observable per-image (VGISS,
-GOSSI). Cassini ISS and NHLORRI stay 2-DoF.
+Phase 9 (branch `core_rewrite_phase9`) ships per-instrument camera-rotation correction across the entire technique set. VGISS and GOSSI are flipped to `fit_camera_rotation: true`; Cassini ISS and NHLORRI stay 2-DoF. Every technique now produces a 3×3 covariance and a populated `rotation_rad` / `sigma_rotation_rad` pair when the per-image flag is on; the ensemble's `pinvh`-based combine fuses 3-DoF results uniformly and rejects mixed-DoF inputs.
 
-**Why now:** Phases 4–8 produce a 2-DoF baseline. Once every
-technique is in place, the rotation knob can be flipped without
-churn — every technique can populate its 3×3 covariance correctly
-and the ensemble combine logic only needs one round of changes.
+**Goal:** Enable camera rotation fitting on instruments where attitude rotation residuals are observable per-image (VGISS, GOSSI). Cassini ISS and NHLORRI stay 2-DoF.
+
+**Why now:** Phases 4–8 produce a 2-DoF baseline. Once every technique is in place, the rotation knob can be flipped without churn — every technique populates its 3×3 covariance correctly and the ensemble combine logic only needs one round of changes.
 
 **Prerequisites:** Phase 8.
 
 **Scope (in):**
 
-A. **Per-technique 3-DoF math.** Per Part 5b, each technique's
-   cost function gains a third parameter `dθ` (radians; bounded
-   by `±deg_to_rad(max_rotation_deg)`). Per-technique pivot rules
-   (body center, planet center, point-set centroid, etc.) per
-   Part 5b. Implementations populate the `rotation_rad` /
-   `sigma_rotation_rad` fields on `NavTechniqueResult`.
-   - DT-based techniques run rotation as a third LM parameter
-     (no outer search; LM converges from 2-D coarse-search basin
-     in <15 iters; compute overhead < 50 %).
-   - `BodyDiscCorrelateNav` runs the 3-D NCC pyramid sample
-     schedule per Part 5b §"Sub-decisions / pessimism".
-   - `BodyBlobNav` carries zero rotation information (centroid is
-     rotation-invariant); reports rank-deficient 3×3 covariance.
-   - `RingEdgeNav` on flat rings is doubly-rank-deficient;
-     ensemble's `pinvh` handles correctly without special cases.
+A. **Per-technique 3-DoF math.** Each technique's cost function gains a third parameter `dθ` bounded by `±deg_to_rad(max_rotation_deg)` per Part 5b. Per-technique pivot rules (body centroid, planet centroid, point-set centroid) implemented as documented; every technique populates `rotation_rad` / `sigma_rotation_rad` on `NavTechniqueResult`.
+   - **DT-based techniques** (`BodyLimbNav`, `BodyTerminatorNav`, `RingEdgeNav`) thread `fit_rotation` through `lm_subpixel_refine`; the existing LM machinery already supported a third rotation parameter. Pivot is the centroid of polyline vertices; `pivot_distance_px` is the pivot-to-image-centre distance (floored at 1.0). The Tukey-weighted M-estimator information matrix at convergence yields the 3×3 covariance via `pinvh`.
+   - **`BodyDiscCorrelateNav`** runs the 11 + 5 + 3 rotation-sample pyramid per Part 5b §"Sub-decisions / pessimism": level 0 spans `±max_rotation_deg` in 1° steps, level 1 spans the level-0 winner ±1° in 0.5° steps, level 2 spans the level-1 winner ±0.5° in 0.25° steps. The composite template is pre-rotated about the centroid-of-body-centres pivot via `scipy.ndimage.rotate` for each sample; `navigate_with_pyramid_kpeaks` runs unchanged per sample. The level-2 quality curvature feeds `sigma_theta`; non-concave curvature falls back to the rotation-unobservable sentinel.
+   - **`RingAnnulusNav`** consumes the same template-NCC code path as `BodyDiscCorrelateNav`; for this phase it emits a rank-deficient 3×3 (rotation unobservable) when the flag is on. Multi-planet ring-system scenes are rare enough that the 3-D NCC pyramid was not justified; can be lit up later if observed need warrants.
+   - **`BodyBlobNav`** is rotation-invariant by construction (a centroid does not move under rotation about itself); reports a rank-deficient 3×3 with `ROTATION_UNOBSERVABLE_VARIANCE = 1.0e15` on the rotation diagonal. `pinvh` in the ensemble combine treats that eigenvalue as null and drops the technique's rotation contribution while still fusing its translation constraint.
+   - **`StarFieldFromCatalogNav`** runs Tukey-reweighted Kabsch / orthogonal Procrustes on the inlier set: weighted centroids, weighted cross-covariance SVD, `R = U diag(1, det(U V.T)) V.T` to keep the result a proper rotation. The 3×3 covariance is the per-axis residual variance for translation plus `σ²_θ = σ²_residual / Σ_i w_i |cat_i − centroid|²` for rotation. Sub-piece in `_star_helpers.similarity_transform_fit`; same helper consumed by both other star techniques.
+   - **`StarUniqueMatchNav`** 2-star path runs an exact two-point Procrustes per assignment, picks the smaller-residual fit, and reports rotation. The rotation diagonal uses the closed-form lever-arm `2 × (σ_v² + σ_u²) / L²` where `L` is the catalog separation. 1-star path stays rank-deficient (rotation unobservable from a single point).
+   - **`StarRefineNav`** runs Procrustes on the inlier set when ≥ 2 inliers survive; 1-inlier remains rank-deficient. Rotation pivot is the catalog centroid. Translation block is unchanged from the legacy CRLB-floor + scatter computation.
+   - **`RingEdgeNav`** on flat rings is doubly-rank-deficient by construction; the technique's `is_rank_1` diagnostic reads from the 2×2 translation block of the 3×3 covariance so the rank-1 flag stays comparable to the 2-DoF case.
 
-B. **Rotation-aware ensemble combine.** 3-D agreement /
-   precision-weighted combine. Mahalanobis check in 3-D.
-   Rank-deficient handling extends naturally — `pinvh` already
-   handles it. 3×3 covariance flows through to `NavResult`.
+B. **Rotation-aware ensemble combine.** `_combine_precision_weighted` returns a typed `_CombinedEstimate` dataclass carrying offset, optional rotation, covariance, and rank-deficiency flag. The Mahalanobis distance, single-link clustering, and information-form merge all extend naturally to a 3-vector parameter; `_result_param_vector` emits `(dv, du)` for 2-DoF inputs and `(dv, du, theta)` for 3-DoF inputs. Mixed-DoF inputs raise `ValueError` with both technique names — the orchestrator pins the DoF per image so this fires only on a programmer error in a technique implementation. Rotation is propagated onto `NavResult.ok` / `NavResult.conflicted` outputs; `sigma_rotation_rad` is derived from the bottom-right diagonal of the combined 3×3 covariance.
 
-C. **Per-instrument flag flip.** VGISS / GOSSI
-   `fit_camera_rotation: true`. Cassini / NHLORRI stays false.
-   Per-instrument `max_rotation_deg` tuned from observed residuals
-   (initial 5° default).
+C. **Per-instrument flag flip.** `config_410_inst_gossi.yaml` and `config_430_inst_vgiss.yaml` carry `fit_camera_rotation: true`; Cassini ISS (`config_400_inst_coiss.yaml`, all four cameras) and NHLORRI (`config_420_inst_nhlorri.yaml`) stay false. `max_rotation_deg: 5.0` everywhere — final tuning waits for Phase 10 calibration. The orchestrator reads both via `instrument_settings_from_obs` and plumbs them onto `NavContext.fit_camera_rotation` / `NavContext.max_rotation_deg`.
 
-D. **Metadata curator.** Convert `rotation_rad` →
-   `rotation_deg` and `sigma_rotation_rad` → `sigma_rotation_deg`
-   for the JSON; omit both fields entirely when
-   `fit_camera_rotation` is False (cleaner than serializing nulls).
+D. **Metadata curator.** Already shipped in Phase 0 alongside the rotation fields on `NavResult`; Phase 9's contribution is verifying it: when `rotation_rad is not None`, the curator emits `rotation_deg` (degrees, rounded to 3 decimals) and `sigma_rotation_deg`; when `None`, both fields are omitted entirely. Tier derivation (`max_sigma_px`) consults only the translation sigma so a rotation outcome can never inflate a tier.
 
-E. **Library expansion.** 2–3 VGISS / GOSSI images where rotation
-   fit is observably non-zero. Sidecars carry expected rotation
-   tier.
+E. **Library expansion (deferred).** "2–3 VGISS / GOSSI images where rotation fit is observably non-zero" is impractical without holdings access and SPICE kernels in this context; deferred to Phase 10's `~50`-image library expansion alongside confidence-formula calibration.
 
-**Scope (out):** Calibration — Phase 10.
+### Implementation notes
+
+- **Rotation pivot per technique.** Polyline DT techniques (`BodyLimbNav`, `BodyTerminatorNav`, `RingEdgeNav`) use the centroid of consumed vertices as a pragmatic substitute for "predicted body centre" / "predicted planet centre" — `LimbPolyline` / `TerminatorPolyline` / `RingEdgePolyline` do not carry the body-centre coordinate, and the LM fit is robust to small pivot mis-placement because the rotation parameter is a small-angle perturbation. `BodyDiscCorrelateNav` reads `predicted_center_vu` from each `BodyDiscGeometry` directly. The star techniques' pivot is the weighted centroid of the inlier catalog points (returned on `SimilarityFit.pivot_vu`).
+- **`ROTATION_UNOBSERVABLE_VARIANCE` sentinel.** A literal `+inf` on the rotation diagonal is rejected by `np.linalg.eigvalsh` (returns NaN), so the no-rotation-evidence path uses the finite sentinel `1.0e15`. The ensemble's `pinvh`-based combine sees the rotation eigenvalue as null relative to the translation block and drops the technique's rotation contribution. The helper trio `ROTATION_UNOBSERVABLE_VARIANCE` / `embed_rotation_unobservable` / `rotation_unobservable_sigma_rad` lives in `nav.nav_technique.nav_technique` so every technique imports from one place.
+- **`at_edge` semantics for rotation.** A rotation magnitude `≥ 0.95 × max_rotation_deg` triggers `at_edge = True`, OR-ed with the existing translation `at_edge` rule. A separate INFO log line reports the converged rotation (in degrees) plus its sigma plus an `AT_EDGE` annotation when the rotation cap is the trigger.
+- **`NavContext.with_prior` accepts 3×3 covariance.** Pass-1 ensemble outputs that carry rotation collapse to the 2×2 translation block before pass-2 — pass-2 techniques re-derive any rotation prior from their own geometry; the rotation prior carries no useful information across the pass boundary.
+- **Compute overhead.** DT techniques run < 50% slower in 3-DoF mode (LM converges in < 20 iterations including the rotation parameter). `BodyDiscCorrelateNav` runs ~ 19× the 2-DoF baseline (11 + 5 + 3 NCC pyramids) when `fit_camera_rotation` is on; this only applies to instruments where the flag is true (VGISS / GOSSI), and body-disc scenes are uncommon there.
+
+### Final Phase-9 check matrix
+
+| Check | Status |
+|---|---|
+| `ruff check src tests` | clean |
+| `ruff format --check src tests` | clean |
+| `mypy --strict src tests` | clean |
+| `pytest -n auto --dist=loadfile` (unit) | 1230 / 1230 passing |
+| `sphinx-build -W -b html docs docs/_build` | clean |
+| `pymarkdown scan docs/ .cursor/ README.md CONTRIBUTING.md` | clean |
+| `./scripts/run-all-checks.sh` | green |
+
+### Files added / changed (summary)
+
+- `src/nav/nav_orchestrator/nav_context.py` — `fit_camera_rotation`, `max_rotation_deg` on `NavContext`; `with_prior` accepts 2×2 or 3×3.
+- `src/nav/nav_orchestrator/orchestrator.py` — populates the new fields from `InstrumentSettings`.
+- `src/nav/nav_orchestrator/ensemble.py` — `_CombinedEstimate` dataclass; `_result_param_vector` 2-DoF / 3-DoF dispatcher; mixed-DoF rejection; rotation propagation onto `NavResult.ok` / `NavResult.conflicted`.
+- `src/nav/nav_technique/nav_technique.py` — `ROTATION_UNOBSERVABLE_VARIANCE`, `embed_rotation_unobservable`, `rotation_pivot_distance_px`, `rotation_unobservable_sigma_rad`.
+- `src/nav/nav_technique/_star_helpers.py` — `SimilarityFit` dataclass + `similarity_transform_fit` (Kabsch / Procrustes with proper-rotation determinant correction).
+- DT techniques (`nav_technique_body_limb.py`, `nav_technique_body_terminator.py`, `nav_technique_ring_edge.py`) — pass `fit_rotation` to LM, use vertex-centroid pivot, drive `at_edge` from the rotation cap, populate `rotation_rad` / `sigma_rotation_rad`, and emit a rotation INFO line.
+- Centroid / template-NCC techniques (`nav_technique_body_blob.py`, `nav_technique_ring_annulus.py`) — emit a rank-deficient 3×3 covariance with rotation unobservable when the flag is on.
+- `nav_technique_body_disc.py` — full 3-D NCC rotation pyramid with `_rotate_template`, `_run_3dof_pyramid`, `_evaluate_rotation_samples`, `_ncc_at_rotation`, `_rotation_sigma_from_quality`.
+- Star techniques (`nav_technique_star_field.py`, `nav_technique_star_unique_match.py`, `nav_technique_star_refine.py`) — Procrustes / two-point similarity refit when ≥ 2 inliers survive; rank-deficient when fewer.
+- `src/nav/config_files/config_410_inst_gossi.yaml`, `src/nav/config_files/config_430_inst_vgiss.yaml` — `fit_camera_rotation: true`.
+- `docs/developer_guide_rotation.rst` — new developer guide covering the per-instrument flag, parameter vector, pivot rules, per-technique strategy, rank-deficient pattern, ensemble combine, JSON output, and `at_edge` semantics.
+- Tests: `tests/nav/nav_orchestrator/test_ensemble.py`, `test_nav_context.py`, `tests/nav/nav_technique/conftest.py`, `test_nav_technique_body_limb.py`, `test_nav_technique_body_terminator.py`, `test_nav_technique_ring_edge.py`, `test_nav_technique_body_blob.py`, `test_nav_technique_body_disc.py`, `test_nav_technique_star_field.py`, `test_nav_technique_star_unique_match.py`, `test_nav_technique_star_refine.py` — 19 new tests covering 3-DoF result shape, rotation recovery, rank-deficient fallback, mixed-DoF rejection, and the `at_edge` rotation rule.
+
+**Scope (out):** Calibration — Phase 10. Image-library expansion of VGISS / GOSSI rotation-bearing scenes — Phase 10.
 
 **Design references:** Part 5b (camera rotation correction in full).
 

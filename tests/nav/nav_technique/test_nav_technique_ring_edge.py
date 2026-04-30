@@ -163,3 +163,55 @@ def test_ring_edge_nav_raises_when_navcontext_lacks_derivatives(
     )
     with pytest.raises(RuntimeError, match='image_edge_dt_ext'):
         technique.navigate([feature], bare_context)
+
+
+def test_ring_edge_nav_3dof_emits_3x3_covariance(
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """A curved ring edge with ``fit_camera_rotation=True`` produces a 3x3 covariance."""
+    shape = (200, 200)
+    cv = 100.0
+    cu = 100.0
+    radius = 32.0
+    image = disc_image(shape, (cv, cu), radius)
+    vertices, outward = circle_polyline((cv - 0.7, cu - 1.3), radius, 120)
+    feature = make_ring_feature(
+        'outer', vertices=vertices, outward_normals=outward, is_straight_line=False
+    )
+    technique = RingEdgeNav()
+    context = make_nav_context(image, fit_camera_rotation=True, max_rotation_deg=5.0)
+    result = technique.navigate([feature], context)
+    assert result.covariance_px2.shape == (3, 3)
+    assert result.rotation_rad is not None
+    assert result.sigma_rotation_rad is not None
+    assert abs(result.rotation_rad) < np.deg2rad(5.0)
+
+
+def test_ring_edge_nav_3dof_flat_edge_remains_rank_deficient(
+    horizontal_step_image: HorizontalStepImageFactory,
+    flat_polyline: FlatPolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """An all-flat scene under fit_camera_rotation reports rank-1 in the translation block.
+
+    The 3x3 covariance is rank-deficient on multiple axes (along-edge
+    plus rotation when geometry is uninformative); the technique still
+    flags ``is_rank_1`` based on the 2x2 translation block so the
+    diagnostic stays comparable to the 2-DoF case.
+    """
+    shape = (200, 200)
+    image = horizontal_step_image(shape, 100.0)
+    vertices, outward = flat_polyline(99.5, 30.0, 170.0, 200)
+    feature = make_ring_feature(
+        'flat', vertices=vertices, outward_normals=outward, is_straight_line=True
+    )
+    technique = RingEdgeNav()
+    context = make_nav_context(image, fit_camera_rotation=True, max_rotation_deg=5.0)
+    result = technique.navigate([feature], context)
+    assert result.covariance_px2.shape == (3, 3)
+    assert isinstance(result.diagnostics, RingEdgeDiagnostics)
+    assert result.diagnostics.is_rank_1 is True

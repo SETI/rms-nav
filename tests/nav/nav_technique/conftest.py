@@ -245,6 +245,8 @@ def _make_nav_context(
     *,
     extfov_margin_vu: tuple[int, int] = (32, 32),
     technique_names: tuple[str, ...] = (),
+    fit_camera_rotation: bool = False,
+    max_rotation_deg: float = 5.0,
 ) -> NavContext:
     """Build a fully-populated ``NavContext`` from ``image``.
 
@@ -253,7 +255,8 @@ def _make_nav_context(
     with deterministic values.  Image gradient / DT derivatives are computed
     via :func:`build_image_edge_dt` + :func:`compute_image_gradient_vu` so
     the techniques' ``image_edge_dt_ext`` / ``image_gradient_vu_ext`` reads
-    behave exactly as they would under the orchestrator.
+    behave exactly as they would under the orchestrator.  Pass
+    ``fit_camera_rotation=True`` to exercise techniques' 3-DoF code path.
     """
     sensor_mask = np.ones(image.shape, dtype=bool)
     saturation_mask = np.zeros(image.shape, dtype=bool)
@@ -287,6 +290,8 @@ def _make_nav_context(
         image_gradient_ext=gradient,
         image_gradient_vu_ext=gradient_vu,
         image_edge_dt_ext=edge_dt,
+        fit_camera_rotation=fit_camera_rotation,
+        max_rotation_deg=max_rotation_deg,
     )
 
 

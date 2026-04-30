@@ -32,7 +32,9 @@ from nav.nav_technique.diagnostics import BodyBlobDiagnostics
 from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.nav_technique import (
     NavTechnique,
+    embed_rotation_unobservable,
     log_confidence_breakdown,
+    rotation_unobservable_sigma_rad,
     search_window_for_obs,
 )
 from nav.nav_technique.technique_result import NavTechniqueResult
@@ -347,11 +349,19 @@ class BodyBlobNav(NavTechnique):
             noise_sigma = float(max(context.image_noise_sigma, 1e-9))
             residuals = _collect_per_blob_residuals(eligible, image_ext, noise_sigma, self.logger)
             if not residuals.consumed:
-                return self._fail_no_signal(features=eligible, noise_sigma=noise_sigma)
+                return self._fail_no_signal(
+                    features=eligible,
+                    noise_sigma=noise_sigma,
+                    fit_rotation=bool(context.fit_camera_rotation),
+                )
             fit = _joint_offset_from_residuals(residuals)
             at_edge = (
                 abs(fit.dv) >= margin_v - self._at_edge_tolerance_px
                 or abs(fit.du) >= margin_u - self._at_edge_tolerance_px
+            )
+            fit_rotation = bool(context.fit_camera_rotation)
+            covariance = (
+                embed_rotation_unobservable(fit.covariance) if fit_rotation else fit.covariance
             )
             mean_snr = float(np.mean(residuals.snrs))
             mean_extent = float(np.mean(residuals.extents))
@@ -386,15 +396,17 @@ class BodyBlobNav(NavTechnique):
                 technique_name=self.name,
                 feature_ids=tuple(f.feature_id for f in residuals.consumed),
                 offset_px=(fit.dv, fit.du),
-                covariance_px2=fit.covariance,
+                covariance_px2=covariance,
                 confidence=float(confidence),
                 spurious=False,
                 at_edge=at_edge,
                 diagnostics=diagnostics,
+                rotation_rad=0.0 if fit_rotation else None,
+                sigma_rotation_rad=(rotation_unobservable_sigma_rad() if fit_rotation else None),
             )
 
     def _fail_no_signal(
-        self, *, features: list[NavFeature], noise_sigma: float
+        self, *, features: list[NavFeature], noise_sigma: float, fit_rotation: bool
     ) -> NavTechniqueResult:
         """Return a zero-confidence spurious result when no blob carries signal."""
         diagnostics = BodyBlobDiagnostics(
@@ -409,15 +421,19 @@ class BodyBlobNav(NavTechnique):
             3.0 * noise_sigma,
             len(features),
         )
+        cov_2x2 = 1e6 * np.eye(2, dtype=np.float64)
+        cov = embed_rotation_unobservable(cov_2x2) if fit_rotation else cov_2x2
         return NavTechniqueResult(
             technique_name=self.name,
             feature_ids=tuple(f.feature_id for f in features),
             offset_px=(0.0, 0.0),
-            covariance_px2=1e6 * np.eye(2, dtype=np.float64),
+            covariance_px2=cov,
             confidence=0.0,
             spurious=True,
             at_edge=False,
             diagnostics=diagnostics,
+            rotation_rad=0.0 if fit_rotation else None,
+            sigma_rotation_rad=(rotation_unobservable_sigma_rad() if fit_rotation else None),
         )
 
 

@@ -15,6 +15,7 @@ Mirrors :class:`BodyLimbNav` with three terminator-specific differences:
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -34,6 +35,7 @@ from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.nav_technique import (
     NavTechnique,
     log_confidence_breakdown,
+    rotation_pivot_distance_px,
     search_window_for_obs,
 )
 from nav.nav_technique.technique_result import NavTechniqueResult
@@ -248,6 +250,11 @@ class BodyTerminatorNav(NavTechnique):
                 (margin_v, margin_u),
             )
             self.logger.debug('Coarse NCC offset: (%d, %d)', coarse_dv, coarse_du)
+            fit_rotation = bool(context.fit_camera_rotation)
+            pivot_vu = (float(vertices[:, 0].mean()), float(vertices[:, 1].mean()))
+            pivot_distance = (
+                rotation_pivot_distance_px(pivot_vu, edge_dt.shape[:2]) if fit_rotation else 0.0
+            )
             result = lm_subpixel_refine(
                 vertices_vu=vertices,
                 normals_vu=polarity_normals,
@@ -256,13 +263,21 @@ class BodyTerminatorNav(NavTechnique):
                 image_gradient_vu=gradient_vu,
                 initial_offset_vu=(float(coarse_dv), float(coarse_du)),
                 use_polarity=True,
+                fit_rotation=fit_rotation,
+                pivot_vu=pivot_vu if fit_rotation else None,
+                pivot_distance_px=pivot_distance,
             )
             dv_final, du_final = result.offset_vu
+            max_rotation_rad = math.radians(context.max_rotation_deg)
+            rotation_at_edge = fit_rotation and (
+                abs(result.rotation_rad) >= 0.95 * max_rotation_rad
+            )
             at_edge = (
                 abs(dv_final - margin_v) <= self._at_edge_tolerance_px
                 or abs(dv_final + margin_v) <= self._at_edge_tolerance_px
                 or abs(du_final - margin_u) <= self._at_edge_tolerance_px
                 or abs(du_final + margin_u) <= self._at_edge_tolerance_px
+                or rotation_at_edge
             )
             sigma_min_px = float(sigmas.min()) if sigmas.size else 1.0
             spurious = (
@@ -308,6 +323,14 @@ class BodyTerminatorNav(NavTechnique):
                 int(vertices.shape[0]),
                 float(confidence),
             )
+            if fit_rotation:
+                rot_sigma_rad = float(np.sqrt(max(float(result.covariance[2, 2]), 0.0)))
+                self.logger.info(
+                    'Rotation = %+.4f deg (sigma %.4f deg)%s',
+                    math.degrees(result.rotation_rad),
+                    math.degrees(rot_sigma_rad),
+                    ', AT_EDGE' if rotation_at_edge else '',
+                )
             if spurious or at_edge:
                 self.logger.info('Diagnostic flags: spurious=%s, at_edge=%s', spurious, at_edge)
             self.logger.debug(
@@ -321,8 +344,21 @@ class BodyTerminatorNav(NavTechnique):
                 mean_albedo,
             )
             covariance = result.covariance
-            if covariance.shape != (2, 2):
-                covariance = covariance[:2, :2]
+            rotation_rad: float | None
+            sigma_rotation_rad: float | None
+            if fit_rotation:
+                if covariance.shape != (3, 3):
+                    raise RuntimeError(
+                        f'BodyTerminatorNav expected 3x3 covariance with fit_rotation; '
+                        f'got {covariance.shape}'
+                    )
+                rotation_rad = float(result.rotation_rad)
+                sigma_rotation_rad = float(np.sqrt(max(float(covariance[2, 2]), 0.0)))
+            else:
+                if covariance.shape != (2, 2):
+                    covariance = covariance[:2, :2]
+                rotation_rad = None
+                sigma_rotation_rad = None
             return NavTechniqueResult(
                 technique_name=self.name,
                 feature_ids=tuple(feature_ids),
@@ -332,6 +368,8 @@ class BodyTerminatorNav(NavTechnique):
                 spurious=bool(spurious),
                 at_edge=bool(at_edge),
                 diagnostics=diagnostics,
+                rotation_rad=rotation_rad,
+                sigma_rotation_rad=sigma_rotation_rad,
             )
 
 

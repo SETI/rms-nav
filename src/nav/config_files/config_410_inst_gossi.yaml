@@ -7,7 +7,7 @@ galileo_ssi:
   star_psf_sigma: 3.
   star_psf_sizes:
     100: [7, 7]
-  fit_camera_rotation: false       # flip true in phase 9 once rotation residuals confirmed
+  fit_camera_rotation: true        # Galileo SSI carries non-negligible attitude rotation residuals
   max_rotation_deg: 5.0
   noise:
     saturation_dn: 255             # 8-bit ADC
