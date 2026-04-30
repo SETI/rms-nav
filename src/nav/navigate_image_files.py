@@ -238,7 +238,7 @@ def _grayscale_to_rgb_with_quantile_stretch(image: NDArrayFloatType) -> NDArrayU
     saturates every bright pixel to 255 even though the brightest is
     much brighter than the rest.
 
-    The fix counts the bright outliers via a robust median + 6 * MAD
+    The fix counts the bright outliers via a robust median + 15 * MAD
     threshold and clips at most half of them — so the brightest few
     are saturated but the remaining bright pixels keep their relative
     brightness ordering.  When the image carries many bright pixels
@@ -290,7 +290,7 @@ def _grayscale_to_rgb_with_quantile_stretch(image: NDArrayFloatType) -> NDArrayU
         clip_quantile = 1.0 - clip_count / n_finite
         white = float(np.quantile(finite_values, clip_quantile))
         if white <= black:
-            white = black + 1.0
+            white = float(np.nextafter(black, np.inf))
 
     stretched = apply_linear_gamma_stretch(clean, black=black, white=white, gamma=1.0)
     gray = (stretched * 255.0).astype(np.uint8)

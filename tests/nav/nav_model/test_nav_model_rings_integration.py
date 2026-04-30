@@ -221,6 +221,7 @@ def test_to_features_collapses_multi_ring_input_into_one_annulus(
     model._predicted_center_vu = (rows / 2.0, cols / 2.0)
     model._subject_range_km = 1.5e9
     features = model.to_features(cast(Any, None))
+    assert len(features) == 1
     annulus_features = [f for f in features if f.feature_type is NavFeatureType.RING_ANNULUS]
     assert len(annulus_features) == 1
     annulus = annulus_features[0]

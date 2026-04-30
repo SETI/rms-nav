@@ -204,16 +204,24 @@ class Config:
             try:
                 cls.confidence_spec = load_confidence_spec(techniques_block, cls.name)
             except ConfidenceConfigError:
-                if cls.name.startswith('_'):
-                    # Test-only technique: leave spec as inherited (None)
-                    # so the test fixture controls it.
-                    continue
-                raise
+                if not cls.name.startswith('_'):
+                    raise
+                # Test-only technique: leave spec as inherited (None)
+                # so the test fixture controls it.  Tuning still resets
+                # below so a stale fixture value cannot leak across reloads.
             cls.tuning = load_technique_tuning(techniques_block, cls.name)
         validate_registered_confidence_specs()
 
     def update_config(self, config_path: str | Path, read_default: bool = True) -> None:
         """Updates the current configuration with values from the specified YAML file.
+
+        When ``read_default`` is true the merged YAML is re-validated against
+        every registered :class:`NavTechnique` so per-technique overrides
+        (``confidence_spec`` and ``tuning``) take effect.  The internal
+        bootstrap path inside :meth:`read_config` calls with
+        ``read_default=False`` and validates once after the loop, since
+        early default files are loaded before
+        ``config_510_techniques.yaml`` has populated the techniques block.
 
         Parameters:
             config_path: Path to the configuration file containing update values.
@@ -230,6 +238,8 @@ class Config:
             else:
                 self._config_dict[key] = new_config[key]
         self._update_attrdicts()
+        if read_default:
+            self._validate_registered_techniques()
 
     def category(self, category: str) -> AttrDict:
         """Returns the configuration settings for the specified category."""

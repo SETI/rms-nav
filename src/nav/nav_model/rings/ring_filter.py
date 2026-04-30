@@ -211,16 +211,12 @@ class RingFeatureFilter:
                 if self._min_radius <= r <= self._max_radius
             ]
             if after_res_in_range:
-                outermost_radius, _, outermost_feature = max(
+                outermost_radius, outermost_label, outermost_feature = max(
                     after_res_in_range, key=lambda triple: triple[0]
                 )
                 survives_outermost = any(
-                    outermost_radius
-                    in {
-                        r
-                        for r, _ in feat.all_base_radii()
-                        if self._min_radius <= r <= self._max_radius
-                    }
+                    feat.key == outermost_feature.key
+                    and (outermost_radius, outermost_label) in feat.all_base_radii()
                     for feat in result
                 )
                 if not survives_outermost:

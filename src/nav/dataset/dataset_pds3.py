@@ -574,6 +574,8 @@ class DataSetPDS3(DataSet):
             if vol_end not in all_volume_names:
                 raise ValueError(f'Illegal volume name: {vol_end}')
             vol_end_idx = all_volume_names.index(vol_end)
+        if vol_start is not None and vol_end is not None and vol_start_idx > vol_end_idx:
+            raise ValueError(f'vol_start ({vol_start!r}) must not be after vol_end ({vol_end!r})')
         valid_volumes = [
             v
             for v in valid_volumes

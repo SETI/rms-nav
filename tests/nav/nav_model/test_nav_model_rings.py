@@ -186,13 +186,15 @@ def test_ring_annulus_reliability_increases_with_radial_extent() -> None:
 def test_composite_ring_renderings_unions_masks_and_takes_max_image() -> None:
     """The composite is the OR of input masks and the per-pixel max of input images."""
     extfov_shape = (4, 4)
+    # (2, 2) is shared between the two inputs at different intensities to
+    # force the per-pixel-max path (rather than last-writer-wins).
     img_a = np.array(
-        [[0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]],
+        [[0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 3.0, 0.0], [0.0, 0.0, 0.0, 0.0]],
         dtype=np.float64,
     )
     mask_a = img_a > 0.0
     img_b = np.array(
-        [[0.5, 0.0, 0.0, 0.0], [0.0, 2.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]],
+        [[0.5, 0.0, 0.0, 0.0], [0.0, 2.0, 0.0, 0.0], [0.0, 0.0, 1.5, 0.0], [0.0, 0.0, 0.0, 0.0]],
         dtype=np.float64,
     )
     mask_b = img_b > 0.0
@@ -204,12 +206,14 @@ def test_composite_ring_renderings_unions_masks_and_takes_max_image() -> None:
     assert bool(composite_mask[0, 1])
     assert bool(composite_mask[0, 0])
     assert bool(composite_mask[1, 1])
-    # Per-pixel max keeps the brighter contribution where they overlap
-    # would have collided (no overlap here, so each pixel's value is
-    # whichever input had it set).
+    assert bool(composite_mask[2, 2])
+    # Non-overlapping pixels keep whichever input had them set.
     assert composite_img[0, 1] == pytest.approx(1.0)
     assert composite_img[0, 0] == pytest.approx(0.5)
     assert composite_img[1, 1] == pytest.approx(2.0)
+    # Overlapping pixel takes the brighter input (3.0 from img_a, not 1.5
+    # from img_b) — this is the per-pixel-max contract, not last-writer-wins.
+    assert composite_img[2, 2] == pytest.approx(3.0)
 
 
 def test_composite_ring_renderings_empty_input_returns_zero_arrays() -> None:
