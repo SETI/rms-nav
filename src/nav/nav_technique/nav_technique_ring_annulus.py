@@ -1,18 +1,23 @@
-"""``BodyDiscCorrelateNav`` — full-disc NCC translation fit.
+"""``RingAnnulusNav`` — multi-ring composite NCC translation fit.
 
-Consumes every ``BODY_DISC`` feature in the input set, fuses the per-body
-templates into a single composite by Z-buffer paint (closer body's pixels
-overwrite farther body's), runs the existing pyramid kpeaks NCC against
-the composite, and returns one combined translation.  ``use_gradient``
-defaults to ``'auto'`` so the NCC self-selects raw vs gradient mode per
-image — raw wins on smooth Lambert-shaded discs that fill the FOV;
-gradient wins when only the limb carries unique-alignment signal.
+Consumes every ``RING_ANNULUS`` feature in the input set, fuses the per-
+planet templates into a single composite by Z-buffer paint (closer ring
+system's pixels overwrite farther ones), runs the existing pyramid
+kpeaks NCC against the composite, and returns one combined translation.
+``use_gradient`` defaults to ``'auto'`` so the NCC self-selects raw vs
+gradient mode per image — raw wins on broad-brightness-gradient ring
+geometries (low-resolution Saturn rings where the C-ring is uniformly
+dim), gradient wins when sharp ringlet edges dominate.
 
-Multi-body composites improve disambiguation: with ``N`` bodies the
-correlation peak's SNR grows roughly as ``sqrt(N)`` if backgrounds are
-independent, and the joint geometric constraint removes the
-"swap moon assignments" mode-failure that plagues per-body solo
-correlation.
+Multi-planet annulus composites improve disambiguation in the same way
+as multi-body disc composites: each annulus contributes its own
+translational constraint to the joint NCC peak, the geometric alignment
+between ring systems removes the "swap planet assignments" ambiguity,
+and the SNR of the combined peak grows roughly as ``sqrt(N)`` if
+backgrounds are independent.  Multi-planet scenes are rare but real
+(the Cassini approach phase imaged Jupiter and Saturn together; New
+Horizons imaged Jupiter from Pluto distance), so ``is_feasible`` must
+handle ``len(features) > 1``.
 """
 
 from __future__ import annotations
@@ -25,9 +30,9 @@ from nav.config import Config
 from nav.feature.composition import compose_template_features
 from nav.feature.feature import NavFeature
 from nav.feature.feature_type import NavFeatureType
-from nav.feature.geometry import BodyDiscGeometry
+from nav.feature.geometry import RingAnnulusGeometry
 from nav.nav_technique.confidence import evaluate_sigmoid_combination
-from nav.nav_technique.diagnostics import BodyDiscDiagnostics
+from nav.nav_technique.diagnostics import RingAnnulusDiagnostics
 from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.nav_technique import NavTechnique, log_confidence_breakdown
 from nav.nav_technique.technique_result import NavTechniqueResult
@@ -36,16 +41,16 @@ from nav.support.correlate import navigate_with_pyramid_kpeaks
 if TYPE_CHECKING:  # pragma: no cover - typing-only import
     from nav.nav_orchestrator.nav_context import NavContext
 
-__all__ = ['BodyDiscCorrelateNav']
+__all__ = ['RingAnnulusNav']
 
 
-def _filter_disc_features(features: list[NavFeature]) -> list[NavFeature]:
-    """Return the subset that carries a ``BODY_DISC`` template payload."""
+def _filter_annulus_features(features: list[NavFeature]) -> list[NavFeature]:
+    """Return the subset that carries a ``RING_ANNULUS`` template payload."""
     return [
         f
         for f in features
-        if f.feature_type is NavFeatureType.BODY_DISC
-        and isinstance(f.geometry, BodyDiscGeometry)
+        if f.feature_type is NavFeatureType.RING_ANNULUS
+        and isinstance(f.geometry, RingAnnulusGeometry)
         and f.template_img is not None
         and f.template_mask is not None
     ]
@@ -74,16 +79,16 @@ def _peak_to_runner_up_ratio(top_k_peaks: list[tuple[float, float, float]]) -> f
     return float(winner_q) / float(runner_q)
 
 
-class BodyDiscCorrelateNav(NavTechnique):
-    """Body-disc full-disc NCC translation fit (multi-body, Z-buffer paint).
+class RingAnnulusNav(NavTechnique):
+    """Ring-annulus full-template NCC translation fit (multi-planet, Z-buffer paint).
 
     Class attributes:
-        accepts_feature_types: ``frozenset({BODY_DISC})``.
+        accepts_feature_types: ``frozenset({RING_ANNULUS})``.
         requires_prior: ``False`` — the technique runs in pass 1.
     """
 
-    name = 'BodyDiscCorrelateNav'
-    accepts_feature_types = frozenset({NavFeatureType.BODY_DISC})
+    name = 'RingAnnulusNav'
+    accepts_feature_types = frozenset({NavFeatureType.RING_ANNULUS})
     requires_prior = False
     confidence_attributes = frozenset(
         {
@@ -91,9 +96,8 @@ class BodyDiscCorrelateNav(NavTechnique):
             'spurious',
             'ncc_peak',
             'peak_to_runner_up_ratio',
-            'consistency_px',
             'used_gradient',
-            'body_count',
+            'annulus_count',
         }
     )
 
@@ -101,10 +105,13 @@ class BodyDiscCorrelateNav(NavTechnique):
         super().__init__(config=config)
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
-        """Return whether the input set carries any usable BODY_DISC feature.
+        """Return whether the input set carries any usable RING_ANNULUS feature.
 
         Reads only feature metadata — never any pixels — so the report is
-        cheap to obtain even on large feature sets.
+        cheap to obtain even on large feature sets.  The feature list may
+        carry one ``RING_ANNULUS`` per detectable ring system in
+        multi-planet scenes; the technique handles ``len(features) > 1``
+        by Z-buffer painting all annuli into one combined template.
 
         Parameters:
             features: Feature list filtered to this technique's accepted
@@ -112,13 +119,13 @@ class BodyDiscCorrelateNav(NavTechnique):
 
         Returns:
             ``NavFeasibilityReport`` with ``feasible=True`` iff at least
-            one ``BODY_DISC`` feature carries a template payload.
+            one ``RING_ANNULUS`` feature carries a template payload.
         """
-        eligible = _filter_disc_features(features)
+        eligible = _filter_annulus_features(features)
         if not eligible:
             return NavFeasibilityReport(
                 feasible=False,
-                reason='no_body_disc_features_with_template',
+                reason='no_ring_annulus_features_with_template',
             )
         return NavFeasibilityReport(
             feasible=True,
@@ -127,7 +134,7 @@ class BodyDiscCorrelateNav(NavTechnique):
         )
 
     def navigate(self, features: list[NavFeature], context: NavContext) -> NavTechniqueResult:
-        """Compute the joint-translation offset from the input BODY_DISC templates.
+        """Compute the joint-translation offset from the input RING_ANNULUS templates.
 
         Parameters:
             features: Feature list filtered to this technique's accepted
@@ -139,12 +146,12 @@ class BodyDiscCorrelateNav(NavTechnique):
         Returns:
             A ``NavTechniqueResult`` with the recovered offset, 2x2
             covariance, calibrated confidence, and a populated
-            :class:`BodyDiscDiagnostics`.
+            :class:`RingAnnulusDiagnostics`.
         """
         with self.logger.open(f'TECHNIQUE: {self.name}'):
-            eligible = _filter_disc_features(features)
+            eligible = _filter_annulus_features(features)
             self.logger.info(
-                'Consuming %d BODY_DISC features (out of %d offered)',
+                'Consuming %d RING_ANNULUS features (out of %d offered)',
                 len(eligible),
                 len(features),
             )
@@ -153,8 +160,8 @@ class BodyDiscCorrelateNav(NavTechnique):
             margin_v, margin_u = _search_window_for_obs(context)
             up_factor = self._upsample_factor()
             self.logger.debug(
-                'Composite template: %d painted pixels; search window (v, u) = (%d, %d) px; '
-                'upsample factor = %d',
+                'Composite annulus template: %d painted pixels; '
+                'search window (v, u) = (%d, %d) px; upsample factor = %d',
                 int(template_mask.sum()),
                 margin_v,
                 margin_u,
@@ -178,31 +185,30 @@ class BodyDiscCorrelateNav(NavTechnique):
             spurious = bool(ncc_result['spurious'])
             at_edge = bool(ncc_result['at_edge'])
             quality = float(ncc_result['quality'])
-            consistency = float(ncc_result['consistency'])
             used_gradient = bool(ncc_result.get('used_gradient', False))
             top_k_peaks = ncc_result.get('top_k_peaks', [])
-            diagnostics = BodyDiscDiagnostics(
+            diagnostics = RingAnnulusDiagnostics(
                 ncc_peak=quality,
                 peak_to_runner_up_ratio=_peak_to_runner_up_ratio(top_k_peaks),
-                consistency_px=consistency,
+                annulus_count=len(eligible),
                 used_gradient=used_gradient,
-                body_count=len(eligible),
             )
             assert self.confidence_spec is not None  # set as class attribute
             confidence, breakdown = evaluate_sigmoid_combination(
                 self.confidence_spec,
-                _DiscConfidenceContext(at_edge=at_edge, spurious=spurious, diagnostics=diagnostics),
+                _AnnulusConfidenceContext(
+                    at_edge=at_edge, spurious=spurious, diagnostics=diagnostics
+                ),
                 technique_name=self.name,
                 return_breakdown=True,
             )
             log_confidence_breakdown(self.logger, breakdown)
             self.logger.info(
-                'Converged at offset (%.4f, %.4f) px, quality %.3f, consistency %.3f, '
-                'mode=%s, bodies=%d, confidence %.4f',
+                'Converged at offset (%.4f, %.4f) px, quality %.3f, '
+                'mode=%s, annuli=%d, confidence %.4f',
                 dv,
                 du,
                 quality,
-                consistency,
                 'gradient' if used_gradient else 'raw',
                 len(eligible),
                 float(confidence),
@@ -228,33 +234,35 @@ class BodyDiscCorrelateNav(NavTechnique):
         return int(getattr(offset_block, 'correlation_fft_upsample_factor', 128))
 
 
-class _DiscConfidenceContext:
-    """Adapter binding ``BodyDiscDiagnostics`` plus ``at_edge`` / ``spurious``.
+class _AnnulusConfidenceContext:
+    """Adapter binding ``RingAnnulusDiagnostics`` plus ``at_edge`` / ``spurious``.
 
     The shared :func:`evaluate_sigmoid_combination` helper accepts any
     object whose attributes match the spec's term names.  ``at_edge`` and
-    ``spurious`` are not part of ``BodyDiscDiagnostics`` (they live on
-    ``NavTechniqueResult``) so this small adapter exposes both alongside
-    the diagnostic fields the spec consumes.
+    ``spurious`` are not part of ``RingAnnulusDiagnostics`` (they live
+    on ``NavTechniqueResult``) so this small adapter exposes both
+    alongside the diagnostic fields the spec consumes.
     """
 
-    def __init__(self, *, at_edge: bool, spurious: bool, diagnostics: BodyDiscDiagnostics) -> None:
+    def __init__(
+        self, *, at_edge: bool, spurious: bool, diagnostics: RingAnnulusDiagnostics
+    ) -> None:
         self.at_edge = at_edge
         self.spurious = spurious
         self.ncc_peak = diagnostics.ncc_peak
         self.peak_to_runner_up_ratio = diagnostics.peak_to_runner_up_ratio
-        self.consistency_px = diagnostics.consistency_px
         self.used_gradient = diagnostics.used_gradient
-        self.body_count = float(diagnostics.body_count)
+        self.annulus_count = float(diagnostics.annulus_count)
 
 
 def _search_window_for_obs(context: NavContext) -> tuple[int, int]:
     """Return the ``(margin_v, margin_u)`` search window for the NCC.
 
-    Mirrors the helper used by the DT techniques: the technique respects
-    the per-instrument extfov margin attached to the observation; if the
-    obs does not expose that attribute (test fixtures) a 32 x 32 fallback
-    is used so the technique still runs end-to-end.
+    Mirrors the helper used by the DT and disc techniques: the
+    technique respects the per-instrument extfov margin attached to the
+    observation; if the obs does not expose that attribute (test
+    fixtures) a 32 x 32 fallback is used so the technique still runs
+    end-to-end.
     """
     obs = context.obs
     margin = getattr(obs, 'extfov_margin_vu', None)

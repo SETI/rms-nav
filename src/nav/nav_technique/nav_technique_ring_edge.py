@@ -20,11 +20,7 @@ from nav.config import Config
 from nav.feature.feature import NavFeature
 from nav.feature.feature_type import NavFeatureType
 from nav.feature.geometry import RingEdgePolyline
-from nav.nav_technique.confidence import (
-    ConfidenceSpec,
-    ConfidenceTerm,
-    evaluate_sigmoid_combination,
-)
+from nav.nav_technique.confidence import evaluate_sigmoid_combination
 from nav.nav_technique.diagnostics import RingEdgeDiagnostics
 from nav.nav_technique.dt_fitting import (
     coarse_ncc_search,
@@ -40,28 +36,11 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only import
 
 __all__ = ['RingEdgeNav']
 
-
-_AT_EDGE_TOLERANCE_PX: float = 1.0
-"""Pixels of slack around the search-window axis bounds for at-edge detection.
-
-A converged offset whose absolute distance from any axis bound (``+/-margin_v``,
-``+/-margin_u``) falls within this tolerance is flagged ``at_edge=True`` and
-forced to zero confidence by the technique's ``hard_zero_if`` gate.  One pixel
-matches the bilinear DT half-cell width: any closer to the boundary and the
-LM gradient information is unreliable.
-"""
-
-
-SPURIOUS_DT_RMS_FACTOR: float = 5.0
-"""Final DT residual exceeding this many radial-sigmas marks the result spurious."""
-
-
-SPURIOUS_DT_FLOOR_PX: float = 3.0
-"""Floor for the spurious-detection threshold."""
-
-
-SPURIOUS_MIN_INLIERS: int = 6
-"""Below this Tukey-inlier count the final fit is flagged spurious."""
+# All numeric tunables for this technique live in
+# ``config_files/config_510_techniques.yaml`` under
+# ``techniques.RingEdgeNav.tuning``.  No Python-level fallback;
+# missing-key access in ``__init__`` is a KeyError so a config typo
+# fails fast at process startup.
 
 
 _RANK1_NULL_RELATIVE_THRESHOLD: float = 1.0e-8
@@ -69,29 +48,6 @@ _RANK1_NULL_RELATIVE_THRESHOLD: float = 1.0e-8
 
 Matches the ensemble's scale-independent rank-deficiency test so the
 two paths agree on whether a result is rank-deficient.
-"""
-
-
-_RING_EDGE_CONFIDENCE_SPEC = ConfidenceSpec(
-    alpha0=-1.0,
-    terms=(
-        ConfidenceTerm(
-            feature='total_edge_length_px',
-            alpha=1.0,
-            divisor=200.0,
-            cap_at=1.0,
-        ),
-        ConfidenceTerm(feature='per_edge_dt_rms_summed', alpha=-2.0),
-    ),
-    hard_zero_if={'at_edge': True},
-)
-"""Default confidence spec for the ring-edge technique.
-
-Long, low-residual fits get high confidence; very short or noisy fits
-collapse below the 0.2 floor.  When the result is rank-1 (every input
-edge is a straight line), the ensemble multiplies the unobservable axis
-by 0.0, so the per-axis confidence is meaningful even at full numeric
-value.
 """
 
 
@@ -166,7 +122,6 @@ class RingEdgeNav(NavTechnique):
     name = 'RingEdgeNav'
     accepts_feature_types = frozenset({NavFeatureType.RING_EDGE})
     requires_prior = False
-    confidence_spec = _RING_EDGE_CONFIDENCE_SPEC
     confidence_attributes = frozenset(
         {
             'at_edge',
@@ -179,6 +134,11 @@ class RingEdgeNav(NavTechnique):
 
     def __init__(self, *, config: Config | None = None) -> None:
         super().__init__(config=config)
+        self.config.read_config()  # ensure cls.tuning is populated
+        self._at_edge_tolerance_px = float(self.tuning['at_edge_tolerance_px'])
+        self._spurious_dt_rms_factor = float(self.tuning['spurious_dt_rms_factor'])
+        self._spurious_dt_floor_px = float(self.tuning['spurious_dt_floor_px'])
+        self._spurious_min_inliers = int(self.tuning['spurious_min_inliers'])
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Return whether the input set carries any usable ring edge.
@@ -281,15 +241,19 @@ class RingEdgeNav(NavTechnique):
             )
             dv_final, du_final = result.offset_vu
             at_edge = (
-                abs(dv_final - margin_v) <= _AT_EDGE_TOLERANCE_PX
-                or abs(dv_final + margin_v) <= _AT_EDGE_TOLERANCE_PX
-                or abs(du_final - margin_u) <= _AT_EDGE_TOLERANCE_PX
-                or abs(du_final + margin_u) <= _AT_EDGE_TOLERANCE_PX
+                abs(dv_final - margin_v) <= self._at_edge_tolerance_px
+                or abs(dv_final + margin_v) <= self._at_edge_tolerance_px
+                or abs(du_final - margin_u) <= self._at_edge_tolerance_px
+                or abs(du_final + margin_u) <= self._at_edge_tolerance_px
             )
             sigma_min_px = float(sigmas.min()) if sigmas.size else 1.0
             spurious = (
-                result.rms_px > max(SPURIOUS_DT_FLOOR_PX, SPURIOUS_DT_RMS_FACTOR * sigma_min_px)
-                or result.inlier_count < SPURIOUS_MIN_INLIERS
+                result.rms_px
+                > max(
+                    self._spurious_dt_floor_px,
+                    self._spurious_dt_rms_factor * sigma_min_px,
+                )
+                or result.inlier_count < self._spurious_min_inliers
             )
             covariance = result.covariance
             if covariance.shape != (2, 2):

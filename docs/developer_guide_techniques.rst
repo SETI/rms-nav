@@ -211,15 +211,12 @@ against the operator-curated image library):
   but disabled until calibration tunes the alpha
 - hard zero when ``at_edge`` or ``spurious``
 
-.. note::
-
-   ``config_510_techniques.yaml`` is not yet in the tree; the
-   coefficients above live as the Python module constant
-   ``_BODY_DISC_CONFIDENCE_SPEC`` in
-   ``nav.nav_technique.nav_technique_body_disc``.  When the YAML
-   config ships the loader's defaults will mirror these values and
-   the technique will read them from
-   ``config_510_techniques.yaml.body_disc_correlate``.
+The coefficients live in
+``src/nav/config_files/config_510_techniques.yaml`` under
+``techniques.BodyDiscCorrelateNav`` and are loaded into
+``ConfidenceSpec`` at config-load time by
+:func:`nav.nav_technique.confidence_config.load_confidence_spec`.
+Re-tune by editing the YAML; no code change required.
 
 Diagnostics fields:
 
@@ -280,15 +277,11 @@ library:
 - hard zero when ``at_edge``
 - hard cap ``0.4`` after the sigmoid
 
-.. note::
-
-   ``config_510_techniques.yaml`` is not yet in the tree; the
-   coefficients above live as the Python module constant
-   ``_BODY_BLOB_CONFIDENCE_SPEC`` in
-   ``nav.nav_technique.nav_technique_body_blob``.  When the YAML
-   config ships the loader's defaults will mirror these values and
-   the technique will read them from
-   ``config_510_techniques.yaml.body_blob``.
+The coefficients live in
+``src/nav/config_files/config_510_techniques.yaml`` under
+``techniques.BodyBlobNav`` and are loaded into ``ConfidenceSpec`` at
+config-load time by
+:func:`nav.nav_technique.confidence_config.load_confidence_spec`.
 
 Sample confidence breakdown
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -324,6 +317,78 @@ Diagnostics fields:
 Infeasibility cases:
 
 - No input feature carries a non-zero predicted diameter.
+
+Ring-annulus technique
+======================
+
+When the rings model emits a ``RING_ANNULUS`` feature instead of
+per-edge ``RING_EDGE`` polylines (because adjacent ring edges compress
+within ``RING_ANNULUS_MAX_RADIAL_PX`` of each other in the image
+plane), the per-planet multi-ring composite template lives on
+``NavFeature.template_img``.  The ring-annulus technique mirrors
+``BodyDiscCorrelateNav`` for that template payload.
+
+RingAnnulusNav
+--------------
+
+Accepts ``RING_ANNULUS`` features.  Each ``RING_ANNULUS`` carries a
+multi-ring composite template (``template_img``) plus a boolean
+``template_mask`` and a ``bbox_extfov_vu`` placement.  The technique:
+
+1. Fuses the per-planet annulus templates into a single extfov-shaped
+   composite via :func:`nav.feature.composition.compose_template_features`.
+   The helper sorts features by ``subject_range_km`` ascending so closer
+   ring systems overwrite farther ones on overlap (Z-buffer paint).  The
+   combined mask is the OR of per-planet masks.
+2. Runs :func:`nav.support.correlate.navigate_with_pyramid_kpeaks`
+   against the composite with ``use_gradient='auto'``.  Auto mode tries
+   both raw-intensity and gradient-magnitude NCC and keeps the better
+   result by ``non-spurious > not-at-edge > higher-quality`` ordering;
+   raw wins on broad-brightness-gradient ring geometries (low-resolution
+   Saturn rings where the C-ring is uniformly dim) and gradient wins
+   when sharp ringlet edges dominate.
+3. Reads the pyramid wrapper's ``offset``, ``cov``, ``quality``,
+   ``spurious``, ``at_edge``, and ``used_gradient`` fields directly into
+   ``RingAnnulusDiagnostics``.
+
+``is_feasible`` returns True iff at least one input ``RING_ANNULUS``
+feature carries a template payload.  The technique handles
+``len(features) > 1`` for the rare multi-planet case (one
+``RING_ANNULUS`` per detectable ring system).  It reports
+``spurious=True`` when the pyramid's quality metric falls below
+``quality_thresh`` and ``at_edge=True`` when the converged peak lies
+within 2 px of the search window edge.
+
+Confidence spec coefficients (placeholders pending calibration against
+the operator-curated image library):
+
+- ``alpha0 = -2``
+- ``alpha(ncc_peak / 6, capped at 1) = 1.5``
+- ``alpha(annulus_count / 2, capped at 1) = 0.4``
+- ``alpha(peak_to_runner_up_ratio / 2, capped at 1) = 0.0`` — wired in
+  but disabled until calibration tunes the alpha
+- hard zero when ``at_edge`` or ``spurious``
+
+The coefficients live in
+``src/nav/config_files/config_510_techniques.yaml`` under
+``techniques.RingAnnulusNav`` and are loaded into ``ConfidenceSpec`` at
+config-load time by
+:func:`nav.nav_technique.confidence_config.load_confidence_spec`.
+
+Diagnostics fields:
+
+- ``ncc_peak``: pyramid-wrapper quality metric (PSR by default).
+- ``peak_to_runner_up_ratio``: ratio of the winning peak's quality to
+  the runner-up's, derived from the pyramid wrapper's ``top_k_peaks``
+  field (sorted by quality descending).  Returns ``1.0`` when only one
+  peak survives non-maximum suppression — the unambiguous-peak case.
+- ``annulus_count``: number of fused ``RING_ANNULUS`` features (one
+  per detectable ring system).
+- ``used_gradient``: ``True`` when auto-mode picked the gradient pass.
+
+Infeasibility cases:
+
+- No input feature carries a template.
 
 Body-extractor emission gate
 ============================

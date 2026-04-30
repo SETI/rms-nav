@@ -43,6 +43,7 @@ from nav.nav_technique.nav_technique_body_disc import BodyDiscCorrelateNav
 from nav.nav_technique.nav_technique_body_limb import BodyLimbNav
 from nav.nav_technique.nav_technique_body_terminator import BodyTerminatorNav
 from nav.nav_technique.nav_technique_manual import NavTechniqueManual, run_manual_nav
+from nav.nav_technique.nav_technique_ring_annulus import RingAnnulusNav
 from nav.nav_technique.nav_technique_ring_edge import RingEdgeNav
 from nav.nav_technique.technique_result import NavTechniqueResult
 
@@ -63,6 +64,7 @@ __all__ = [
     'NavTechniqueManual',
     'NavTechniqueResult',
     'RingAnnulusDiagnostics',
+    'RingAnnulusNav',
     'RingEdgeDiagnostics',
     'RingEdgeNav',
     'StarFieldDiagnostics',

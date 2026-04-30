@@ -191,6 +191,47 @@ class RingFeatureFilter:
             if trimmed is not None:
                 result.append(trimmed)
 
+        # Pass 4 outermost-preservation: at very low resolution every
+        # neighboring fade overlaps every other and the per-edge check
+        # can drop *every* outer-side edge, leaving only an
+        # innermost-region feature (e.g. a C-ring gap) that is far less
+        # useful for navigation than the outer A-ring edge would have
+        # been.  If the outermost in-range edge that survived pass 3
+        # was excluded by pass 4, restore the feature carrying it: the
+        # outer edge of the ring system is the most useful single
+        # navigation reference, and even a narrow-fade rendering of
+        # it is better than nothing.  Out-of-range edges are excluded
+        # from the comparison so the partial-visibility trim's
+        # trimmed-but-still-valid feature is not falsely restored.
+        if after_res:
+            after_res_in_range = [
+                (r, label, feat)
+                for feat in after_res
+                for r, label in feat.all_base_radii()
+                if self._min_radius <= r <= self._max_radius
+            ]
+            if after_res_in_range:
+                outermost_radius, _, outermost_feature = max(
+                    after_res_in_range, key=lambda triple: triple[0]
+                )
+                survives_outermost = any(
+                    outermost_radius
+                    in {
+                        r
+                        for r, _ in feat.all_base_radii()
+                        if self._min_radius <= r <= self._max_radius
+                    }
+                    for feat in result
+                )
+                if not survives_outermost:
+                    self._logger.debug(
+                        'RingFeatureFilter: pass 4 dropped the outermost feature %r '
+                        '(largest in-range edge radius %.1f km); restoring it for navigation',
+                        outermost_feature.key,
+                        outermost_radius,
+                    )
+                    result.append(outermost_feature)
+
         self._logger.debug(
             'RingFeatureFilter: after fade pass, %d / %d feature(s)',
             len(result),

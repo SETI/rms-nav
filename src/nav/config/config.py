@@ -125,8 +125,8 @@ class Config:
 
         Documentation-only ``_sources`` blocks (and any other top-level or
         nested key that starts with an underscore) are stripped at load
-        time per Part 0 §74 — citations live alongside values for human
-        review without bloating the parsed config.
+        time so citations can live alongside values for human review
+        without bloating the parsed config.
         """
 
         yaml = YAML(typ='safe')
@@ -169,16 +169,43 @@ class Config:
         self._update_attrdicts()
         self._validate_registered_techniques()
 
-    @staticmethod
-    def _validate_registered_techniques() -> None:
-        """Validate every registered NavTechnique's confidence spec.
+    def _validate_registered_techniques(self) -> None:
+        """Load + validate every registered NavTechnique's confidence spec.
+
+        Builds each technique's :class:`ConfidenceSpec` from the
+        ``techniques.<technique_name>`` block in
+        ``config_510_techniques.yaml`` and assigns it to the class
+        attribute, then asserts every term references an attribute the
+        technique has declared in ``confidence_attributes``.  Test-only
+        registry entries whose ``name`` starts with ``_`` are exempt
+        from the YAML requirement (the test fixture supplies its own
+        spec or uses ``None`` to opt out of confidence evaluation).
 
         Imported inside the method because ``nav.nav_technique.nav_technique``
         imports ``nav.support.nav_base`` which imports this module —
         promoting the import to the top would deadlock the package init.
         """
-        from nav.nav_technique.nav_technique import validate_registered_confidence_specs
+        from nav.nav_technique.confidence_config import (
+            ConfidenceConfigError,
+            load_confidence_spec,
+            load_technique_tuning,
+        )
+        from nav.nav_technique.nav_technique import (
+            NavTechnique,
+            validate_registered_confidence_specs,
+        )
 
+        techniques_block = dict(self._config_dict.get('techniques', {}))
+        for cls in NavTechnique._registry:
+            try:
+                cls.confidence_spec = load_confidence_spec(techniques_block, cls.name)
+            except ConfidenceConfigError:
+                if cls.name.startswith('_'):
+                    # Test-only technique: leave spec as inherited (None)
+                    # so the test fixture controls it.
+                    continue
+                raise
+            cls.tuning = load_technique_tuning(techniques_block, cls.name)
         validate_registered_confidence_specs()
 
     def update_config(self, config_path: str | Path, read_default: bool = True) -> None:

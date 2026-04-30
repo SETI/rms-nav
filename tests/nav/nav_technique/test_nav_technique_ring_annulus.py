@@ -1,0 +1,320 @@
+"""End-to-end tests for ``RingAnnulusNav``."""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+from tests.nav.nav_technique.conftest import NavContextFactory
+
+from nav.feature.feature import NavFeature, NavReliabilityBreakdown
+from nav.feature.feature_type import NavFeatureType
+from nav.feature.flags import RingAnnulusFlags
+from nav.feature.geometry import RingAnnulusGeometry
+from nav.nav_technique.diagnostics import RingAnnulusDiagnostics
+from nav.nav_technique.nav_technique_ring_annulus import RingAnnulusNav
+from nav.nav_technique.technique_result import NavTechniqueResult
+from nav.support.filters import NavFilterKind, NavFilterSpec
+from nav.support.types import NDArrayBoolType, NDArrayFloatType
+
+
+def _annulus_template(
+    *,
+    bbox_extfov_vu: tuple[int, int, int, int],
+    center_in_template_vu: tuple[float, float],
+    inner_radius: float,
+    outer_radius: float,
+) -> tuple[NDArrayFloatType, NDArrayBoolType]:
+    """Build a postage-stamp RING_ANNULUS template (anti-aliased annulus).
+
+    The annulus carries bright pixels in the radial band
+    ``[inner_radius, outer_radius]`` and zero elsewhere.  The 1-pixel
+    anti-aliased ramp at each edge gives the NCC a clean sub-pixel
+    convergence target without integer-grid bias.
+    """
+    h = bbox_extfov_vu[2] - bbox_extfov_vu[0]
+    w = bbox_extfov_vu[3] - bbox_extfov_vu[1]
+    vs, us = np.meshgrid(np.arange(h), np.arange(w), indexing='ij')
+    rr = np.hypot(vs - center_in_template_vu[0], us - center_in_template_vu[1])
+    inside = (rr >= inner_radius - 0.5) & (rr <= outer_radius + 0.5)
+    in_band = (rr >= inner_radius + 0.5) & (rr <= outer_radius - 0.5)
+    inner_ramp = np.clip(rr - (inner_radius - 0.5), 0.0, 1.0)
+    outer_ramp = np.clip((outer_radius + 0.5) - rr, 0.0, 1.0)
+    template_img = np.where(in_band, 100.0, 0.0).astype(np.float64)
+    edge_ramp = 100.0 * np.minimum(inner_ramp, outer_ramp)
+    template_img = np.where(inside & ~in_band, edge_ramp, template_img)
+    template_mask: NDArrayBoolType = template_img > 1e-6
+    return template_img, template_mask
+
+
+def _render_annulus_image(
+    shape: tuple[int, int],
+    center_vu: tuple[float, float],
+    inner_radius: float,
+    outer_radius: float,
+) -> NDArrayFloatType:
+    """Render an anti-aliased bright annulus image at full extfov shape."""
+    vs, us = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]), indexing='ij')
+    rr = np.hypot(vs - center_vu[0], us - center_vu[1])
+    in_band = (rr >= inner_radius + 0.5) & (rr <= outer_radius - 0.5)
+    inside = (rr >= inner_radius - 0.5) & (rr <= outer_radius + 0.5)
+    inner_ramp = np.clip(rr - (inner_radius - 0.5), 0.0, 1.0)
+    outer_ramp = np.clip((outer_radius + 0.5) - rr, 0.0, 1.0)
+    image = np.where(in_band, 100.0, 0.0).astype(np.float64)
+    image = np.where(inside & ~in_band, 100.0 * np.minimum(inner_ramp, outer_ramp), image)
+    return image
+
+
+def _make_annulus_feature(
+    planet_name: str,
+    *,
+    extfov_shape: tuple[int, int],
+    image_center_vu: tuple[float, float],
+    inner_radius: float,
+    outer_radius: float,
+    planted_offset_vu: tuple[float, float] = (0.0, 0.0),
+    subject_range_km: float = 1.5e9,
+    constituent_count: int = 4,
+) -> NavFeature:
+    """Build a RING_ANNULUS feature whose template is shifted by a planted offset.
+
+    The template is a bright anti-aliased annulus placed inside a
+    postage-stamp bbox.  ``planted_offset_vu`` shifts the predicted
+    center relative to the actual image center, so the technique should
+    report ``offset_px = planted_offset_vu`` (predicted + offset =
+    actual).
+    """
+    pred_v = image_center_vu[0] - planted_offset_vu[0]
+    pred_u = image_center_vu[1] - planted_offset_vu[1]
+    half_extent = round(outer_radius) + 8
+    v_min = max(0, round(pred_v - half_extent))
+    u_min = max(0, round(pred_u - half_extent))
+    v_max = min(extfov_shape[0], round(pred_v + half_extent))
+    u_max = min(extfov_shape[1], round(pred_u + half_extent))
+    bbox = (v_min, u_min, v_max, u_max)
+    center_in_template = (pred_v - v_min, pred_u - u_min)
+    template_img, template_mask = _annulus_template(
+        bbox_extfov_vu=bbox,
+        center_in_template_vu=center_in_template,
+        inner_radius=inner_radius,
+        outer_radius=outer_radius,
+    )
+    return NavFeature(
+        feature_id=f'ring_annulus:{planet_name}',
+        feature_type=NavFeatureType.RING_ANNULUS,
+        source_model='rings',
+        geometry=RingAnnulusGeometry(
+            bbox_extfov_vu=bbox,
+            predicted_center_vu=(pred_v, pred_u),
+        ),
+        subject_range_km=subject_range_km,
+        position_cov_px=None,
+        intensity_sigma_rel=0.05,
+        preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
+        reliability=0.55,
+        reliability_reasons=NavReliabilityBreakdown(visible_arc_fraction=1.0),
+        usable_types=frozenset({NavFeatureType.RING_ANNULUS}),
+        flags=RingAnnulusFlags(
+            planet_name=planet_name,
+            constituent_edge_count=constituent_count,
+        ),
+        template_img=template_img,
+        template_mask=template_mask,
+    )
+
+
+def test_ring_annulus_recovers_planted_offset_single_annulus(
+    make_nav_context: NavContextFactory,
+) -> None:
+    """One RING_ANNULUS against an anti-aliased annulus image converges below 1 px."""
+    shape = (180, 180)
+    image_center = (90.0, 90.0)
+    inner_radius = 14.0
+    outer_radius = 28.0
+    image = _render_annulus_image(shape, image_center, inner_radius, outer_radius)
+    feature = _make_annulus_feature(
+        'SATURN',
+        extfov_shape=shape,
+        image_center_vu=image_center,
+        inner_radius=inner_radius,
+        outer_radius=outer_radius,
+        planted_offset_vu=(2.0, -3.0),
+    )
+    technique = RingAnnulusNav()
+    context = make_nav_context(image, extfov_margin_vu=(16, 16))
+    feasibility = technique.is_feasible([feature])
+    assert feasibility.feasible is True
+    assert feasibility.consumed_feature_count == 1
+    result = technique.navigate([feature], context)
+    assert result.offset_px[0] == pytest.approx(2.0, abs=1.0)
+    assert result.offset_px[1] == pytest.approx(-3.0, abs=1.0)
+    assert isinstance(result.diagnostics, RingAnnulusDiagnostics)
+    assert result.diagnostics.annulus_count == 1
+
+
+def test_ring_annulus_multi_planet_z_buffer_paint(
+    make_nav_context: NavContextFactory,
+) -> None:
+    """Two RING_ANNULUS features fuse via Z-buffer paint and recover one offset.
+
+    Multi-planet scenes (rare) emit one RING_ANNULUS per detectable
+    ring system and the technique handles ``len(features) > 1``.
+    """
+    shape = (240, 240)
+    inner_radius = 12.0
+    outer_radius = 24.0
+    centers = [(60.0, 70.0), (170.0, 160.0)]
+    image = np.zeros(shape, dtype=np.float64)
+    for c in centers:
+        image += _render_annulus_image(shape, c, inner_radius, outer_radius)
+    image = np.clip(image, 0.0, 100.0)
+    planted = (1.0, 1.5)
+    features = [
+        _make_annulus_feature(
+            f'PLANET_{i}',
+            extfov_shape=shape,
+            image_center_vu=c,
+            inner_radius=inner_radius,
+            outer_radius=outer_radius,
+            planted_offset_vu=planted,
+            # Vary subject_range so the depth ordering is well-defined.
+            subject_range_km=1.5e9 * (i + 1),
+        )
+        for i, c in enumerate(centers)
+    ]
+    technique = RingAnnulusNav()
+    context = make_nav_context(image, extfov_margin_vu=(16, 16))
+    result = technique.navigate(features, context)
+    assert result.offset_px[0] == pytest.approx(planted[0], abs=1.0)
+    assert result.offset_px[1] == pytest.approx(planted[1], abs=1.0)
+    assert isinstance(result.diagnostics, RingAnnulusDiagnostics)
+    assert result.diagnostics.annulus_count == 2
+
+
+def test_ring_annulus_infeasible_on_empty_input() -> None:
+    technique = RingAnnulusNav()
+    report = technique.is_feasible([])
+    assert report.feasible is False
+    assert 'no_ring_annulus_features' in report.reason
+
+
+def test_ring_annulus_infeasible_when_no_template() -> None:
+    """A RING_ANNULUS feature without a template payload is rejected."""
+    feature = NavFeature(
+        feature_id='ring_annulus:no_template',
+        feature_type=NavFeatureType.RING_ANNULUS,
+        source_model='rings',
+        geometry=RingAnnulusGeometry(
+            bbox_extfov_vu=(0, 0, 10, 10),
+            predicted_center_vu=(5.0, 5.0),
+        ),
+        subject_range_km=1.0e9,
+        position_cov_px=None,
+        intensity_sigma_rel=0.0,
+        preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
+        reliability=0.4,
+        reliability_reasons=NavReliabilityBreakdown(visible_arc_fraction=1.0),
+        usable_types=frozenset({NavFeatureType.RING_ANNULUS}),
+        flags=RingAnnulusFlags(planet_name='no_template', constituent_edge_count=0),
+    )
+    technique = RingAnnulusNav()
+    report = technique.is_feasible([feature])
+    assert report.feasible is False
+
+
+@pytest.fixture
+def at_edge_annulus_result(
+    make_nav_context: NavContextFactory,
+) -> NavTechniqueResult:
+    """Build a RingAnnulusNav result whose offset hits the search-window edge.
+
+    Plants an annulus at exactly the search-window axis bound, runs
+    ``RingAnnulusNav``, and returns the resulting
+    :class:`NavTechniqueResult` for the at-edge / hard-zero assertions
+    to consume.
+    """
+    shape = (160, 160)
+    image_center = (80.0, 80.0)
+    inner_radius = 10.0
+    outer_radius = 20.0
+    image = _render_annulus_image(shape, image_center, inner_radius, outer_radius)
+    margin = 5
+    feature = _make_annulus_feature(
+        'edge_planet',
+        extfov_shape=shape,
+        image_center_vu=image_center,
+        inner_radius=inner_radius,
+        outer_radius=outer_radius,
+        planted_offset_vu=(float(margin), 0.0),
+    )
+    technique = RingAnnulusNav()
+    context = make_nav_context(image, extfov_margin_vu=(margin, margin))
+    return technique.navigate([feature], context)
+
+
+def test_ring_annulus_marks_at_edge_when_offset_hits_window(
+    at_edge_annulus_result: NavTechniqueResult,
+) -> None:
+    """The pyramid wrapper flags the boundary peak as ``at_edge``."""
+    assert at_edge_annulus_result.at_edge is True
+
+
+def test_ring_annulus_at_edge_forces_zero_confidence(
+    at_edge_annulus_result: NavTechniqueResult,
+) -> None:
+    """The ``hard_zero_if={'at_edge': True}`` gate drives confidence to 0."""
+    assert at_edge_annulus_result.confidence == pytest.approx(0.0)
+
+
+def test_ring_annulus_registered_with_navtechnique_registry() -> None:
+    from nav.nav_technique.nav_technique import NavTechnique
+
+    assert RingAnnulusNav in NavTechnique._registry
+
+
+def test_ring_annulus_diagnostics_records_quality_and_count(
+    make_nav_context: NavContextFactory,
+) -> None:
+    """A clean planted-offset case reports positive ncc_peak and the right annulus_count."""
+    shape = (180, 180)
+    image_center = (90.0, 90.0)
+    inner_radius = 14.0
+    outer_radius = 28.0
+    image = _render_annulus_image(shape, image_center, inner_radius, outer_radius)
+    feature = _make_annulus_feature(
+        'SATURN',
+        extfov_shape=shape,
+        image_center_vu=image_center,
+        inner_radius=inner_radius,
+        outer_radius=outer_radius,
+        planted_offset_vu=(1.0, 1.0),
+    )
+    technique = RingAnnulusNav()
+    context = make_nav_context(image, extfov_margin_vu=(16, 16))
+    result = technique.navigate([feature], context)
+    assert isinstance(result.diagnostics, RingAnnulusDiagnostics)
+    assert result.diagnostics.ncc_peak > 0.0
+    assert result.diagnostics.annulus_count == 1
+
+
+def test_ring_annulus_diagnostics_records_peak_to_runner_up_ratio(
+    make_nav_context: NavContextFactory,
+) -> None:
+    """A clean single-annulus scene reports peak-to-runner-up ratio > 1.0."""
+    shape = (180, 180)
+    image_center = (90.0, 90.0)
+    inner_radius = 14.0
+    outer_radius = 28.0
+    image = _render_annulus_image(shape, image_center, inner_radius, outer_radius)
+    feature = _make_annulus_feature(
+        'SATURN',
+        extfov_shape=shape,
+        image_center_vu=image_center,
+        inner_radius=inner_radius,
+        outer_radius=outer_radius,
+        planted_offset_vu=(1.0, 1.0),
+    )
+    technique = RingAnnulusNav()
+    context = make_nav_context(image, extfov_margin_vu=(16, 16))
+    result = technique.navigate([feature], context)
+    assert isinstance(result.diagnostics, RingAnnulusDiagnostics)
+    assert result.diagnostics.peak_to_runner_up_ratio > 1.0

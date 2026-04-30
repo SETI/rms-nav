@@ -12,9 +12,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from nav.config.config import Config
 from nav.nav_model.nav_model_rings import (
     FLAT_CURVATURE_THRESHOLD_PX,
-    RING_ANNULUS_MAX_RADIAL_PX,
     RING_EDGE_DEFAULT_RELIABILITY,
     RING_EDGE_SIGMA_ALONG_PX,
     _is_straight_line,
@@ -22,6 +22,7 @@ from nav.nav_model.nav_model_rings import (
     _polyline_from_edge_mask,
     _radial_extent_px,
     _require_positive_finite_planet_scalar,
+    _ring_annulus_emission_params,
     _ring_annulus_reliability,
     _ring_edge_reliability,
 )
@@ -32,7 +33,6 @@ def test_constants_have_design_values() -> None:
     assert pytest.approx(0.7) == RING_EDGE_DEFAULT_RELIABILITY
     assert pytest.approx(0.5) == RING_EDGE_SIGMA_ALONG_PX
     assert pytest.approx(1.0) == FLAT_CURVATURE_THRESHOLD_PX
-    assert pytest.approx(5.0) == RING_ANNULUS_MAX_RADIAL_PX
 
 
 def test_polyline_from_edge_mask_returns_one_vertex_per_true_pixel() -> None:
@@ -180,6 +180,31 @@ def test_ring_annulus_reliability_increases_with_radial_extent() -> None:
     narrow = _ring_annulus_reliability(constituent_count=3, radial_extent_px=10.0)
     wide = _ring_annulus_reliability(constituent_count=3, radial_extent_px=200.0)
     assert wide > narrow
+
+
+def test_ring_annulus_emission_params_loads_saturn_block() -> None:
+    """Saturn's planet-specific block in the bundled YAML is loaded."""
+    config = Config()
+    max_radial_px, kmpp_threshold = _ring_annulus_emission_params(config, 'SATURN')
+    assert max_radial_px == pytest.approx(5.0)
+    assert kmpp_threshold == pytest.approx(1000.0)
+
+
+def test_ring_annulus_emission_params_loads_jupiter_block() -> None:
+    """Jupiter's planet-specific block uses a tighter km/px threshold."""
+    config = Config()
+    max_radial_px, kmpp_threshold = _ring_annulus_emission_params(config, 'JUPITER')
+    assert max_radial_px == pytest.approx(5.0)
+    # Jupiter's main ring is ~10x narrower than Saturn's; threshold lower.
+    assert kmpp_threshold == pytest.approx(200.0)
+
+
+def test_ring_annulus_emission_params_falls_back_to_default_block() -> None:
+    """An unknown planet falls back to the ``default`` block."""
+    config = Config()
+    max_radial_px, kmpp_threshold = _ring_annulus_emission_params(config, 'UNKNOWN')
+    assert max_radial_px == pytest.approx(5.0)
+    assert kmpp_threshold == pytest.approx(1000.0)
 
 
 def test_require_positive_finite_planet_scalar_returns_value() -> None:

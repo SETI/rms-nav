@@ -15,11 +15,15 @@ from tests.nav.nav_technique.conftest import (
 from nav.feature.feature import NavFeature
 from nav.nav_orchestrator.nav_context import NavContext
 from nav.nav_technique.diagnostics import BodyLimbDiagnostics
-from nav.nav_technique.nav_technique_body_limb import (
-    LIMB_MIN_ARC_PX,
-    SPURIOUS_MIN_INLIER_FRACTION,
-    BodyLimbNav,
-)
+from nav.nav_technique.nav_technique_body_limb import BodyLimbNav
+
+# Tests pull these values from the technique's loaded YAML tuning so a
+# config edit retunes the assertions automatically.  The values must be
+# read AFTER ``Config.read_config()`` runs (BodyLimbNav.__init__ calls
+# it) so the class-level ``BodyLimbNav.tuning`` dict is populated.
+BodyLimbNav()  # populates BodyLimbNav.tuning via Config.read_config
+LIMB_MIN_ARC_PX = BodyLimbNav.tuning['min_arc_px']
+SPURIOUS_MIN_INLIER_FRACTION = BodyLimbNav.tuning['spurious_min_inlier_fraction']
 
 
 def test_body_limb_nav_recovers_planted_offset_single_body(

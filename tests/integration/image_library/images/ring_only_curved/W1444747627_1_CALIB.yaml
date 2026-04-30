@@ -1,0 +1,39 @@
+schema_version: 1
+image_id: W1444747627_1_CALIB
+mission: CASSINI_ISS            # CASSINI_ISS | VOYAGER_ISS | GOSSI | NHLORRI
+camera: WAC              # NAC | WAC | SSI | NA | WA | LORRI
+filter_combo: 'CL1+VIO'          # canonicalized: filters sorted, '+'-joined
+image_url: 'pds3://calibrated/COISS_1xxx/COISS_1008/data/1444744636_1444749812/W1444747627_1_CALIB.IMG'
+
+scene_tags:
+  - ring_only_curved                   # First tag is the primary class;
+                                       # must match the directory the
+                                       # sidecar lives in.
+
+ground_truth:
+  offset_dv_px: 3.1925
+  offset_du_px: -2.9609
+  offset_uncertainty_px: 1.0           # 1sigma marginal; tighten
+                                       # for bright stars / sharp limbs.
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-04-29
+  ui_version: 'rms-nav 0.1.dev25'
+  notes: |
+    Distant Saturn ring view. The catalog A/B/C edges all collapse
+    radially below RING_ANNULUS_MAX_RADIAL_PX so the rings model
+    emits one RING_ANNULUS feature for the Saturn ring system; the
+    technique runs one joint NCC against the composite annulus
+    template.
+
+    Phase-6 status: RingAnnulusNav converges to (TODO, TODO),
+    within TODO px of the operator's ground truth. Confidence
+    coefficients are placeholders pending Phase 10 calibration; the
+    expected.confidence_tier below pins today's behavior.
+
+expected:
+  status: ok                           # ok | failed | conflicted
+  confidence_tier: high                # high | medium | low | failed
+  primary_technique: RingAnnulusNav  # e.g. BodyLimbNav
+  techniques_must_run: [RingAnnulusNav]
+  techniques_must_skip: []

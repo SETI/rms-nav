@@ -156,6 +156,45 @@ def test_to_features_emits_annulus_when_polyline_compresses_radially(
     assert annulus.flags.planet_name == 'SATURN'
 
 
+def test_to_features_emits_annulus_when_kmpp_above_planet_threshold(
+    fake_obs: FakeObs,
+) -> None:
+    """A high km/px scene triggers the system-level annulus gate.
+
+    Even when the per-edge polyline's radial extent would otherwise
+    classify as a RING_EDGE, the planet-specific kmpp threshold
+    (``feature_emission.ring_annulus.planets.SATURN.kmpp_threshold = 1000``)
+    forces annulus emission for the entire ring system.
+    """
+    model = _build_rings(
+        obs=fake_obs,
+        edge_mask=_curved_edge_mask((110, 110)),
+        km_per_pixel_radial=20000.0,
+    )
+    features = model.to_features(cast(Any, None))
+    types = {f.feature_type for f in features}
+    assert NavFeatureType.RING_ANNULUS in types
+    assert NavFeatureType.RING_EDGE not in types
+
+
+def test_to_features_emits_edge_when_kmpp_below_planet_threshold(
+    fake_obs: FakeObs,
+) -> None:
+    """Below the planet's km/px threshold the per-polyline gate decides.
+
+    Mirrors :func:`test_to_features_emits_ring_edge_for_curved_polyline`
+    but pins the km/px below the Saturn-specific threshold so the
+    system-level gate explicitly does not fire.
+    """
+    model = _build_rings(
+        obs=fake_obs,
+        edge_mask=_curved_edge_mask((110, 110)),
+        km_per_pixel_radial=50.0,
+    )
+    features = model.to_features(cast(Any, None))
+    assert features[0].feature_type is NavFeatureType.RING_EDGE
+
+
 def test_to_features_skips_empty_edge_info_list(fake_obs: FakeObs) -> None:
     """A render result with no edges emits no features."""
     model = _build_rings(obs=fake_obs, edge_mask=_curved_edge_mask((110, 110)))

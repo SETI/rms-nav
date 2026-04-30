@@ -522,13 +522,18 @@ class NavModelBody(NavModelBodyBase):
         terminator_mask[v_slice, u_slice] = terminator_local
         body_mask[v_slice, u_slice] = body_mask_valid
 
-        km_per_pixel_arr: NDArrayFloatType = (
-            restr_bp.resolution(body_name).mvals.filled(0.0)
-            if body_mask_valid.any()
-            else np.zeros_like(body_mask_valid, dtype=np.float64)
-        )
-        # Downsample km/pixel to the same grid as the masks.
-        km_per_pixel_local = filter_downsample(km_per_pixel_arr, oversample_v, oversample_u)
+        # km/pixel is queried at the oversampled grid and downsampled to
+        # match the masks.  When the predicted silhouette is empty the
+        # backplane query is skipped (it would return masked values
+        # anyway) and the downsampled-shape zeros array is used
+        # directly — feeding it back through ``filter_downsample`` would
+        # try to downsample an already-downsampled array, asserting on
+        # the (downsampled-)shape vs oversample divisibility.
+        if body_mask_valid.any():
+            km_per_pixel_arr = restr_bp.resolution(body_name).mvals.filled(0.0)
+            km_per_pixel_local = filter_downsample(km_per_pixel_arr, oversample_v, oversample_u)
+        else:
+            km_per_pixel_local = np.zeros_like(body_mask_valid, dtype=np.float64)
 
         limb_sampler = _build_polyline_sampler(
             local_mask=limb_mask_local,

@@ -19,11 +19,7 @@ from nav.config import Config
 from nav.feature.feature import NavFeature
 from nav.feature.feature_type import NavFeatureType
 from nav.feature.geometry import LimbPolyline
-from nav.nav_technique.confidence import (
-    ConfidenceSpec,
-    ConfidenceTerm,
-    evaluate_sigmoid_combination,
-)
+from nav.nav_technique.confidence import evaluate_sigmoid_combination
 from nav.nav_technique.diagnostics import BodyLimbDiagnostics
 from nav.nav_technique.dt_fitting import (
     AT_EDGE_TOLERANCE_PX,
@@ -40,67 +36,11 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only import
 
 __all__ = ['BodyLimbNav']
 
-
-LIMB_MIN_ARC_PX: float = 30.0
-"""Minimum surviving polyline length per LIMB_ARC feature for feasibility.
-
-Shorter limbs do not constrain a 2-D translation enough to be worth
-running the LM iteration for; the technique reports infeasibility.
-"""
-
-
-SPURIOUS_DT_RMS_FACTOR: float = 5.0
-"""Final DT residual exceeding this many limb-sigmas marks the result spurious."""
-
-
-SPURIOUS_DT_FLOOR_PX: float = 3.0
-"""Minimum surviving DT residual below which spurious detection is skipped."""
-
-
-SPURIOUS_MIN_INLIERS: int = 6
-"""Below this Tukey-inlier count the final fit is flagged spurious.
-
-Six surviving vertices is the smallest count at which the M-estimator
-covariance is meaningfully informative for a 2-D translation.
-"""
-
-
-SPURIOUS_MIN_INLIER_FRACTION: float = 0.05
-"""Below this inlier fraction the LM fit has almost certainly fallen
-into a wrong local minimum and is flagged spurious.
-
-A healthy limb fit retains tens of percent of its candidate vertices
-as Tukey inliers (40 % is typical when the limb dominates the image
-edge map).  A converged fit that survives with <5 % inliers has
-walked away from the true limb and locked onto a small subset of
-internal-body features — crater rims, terminator pixels, surface
-boundaries — that happen to coincide with the model polyline at the
-diverged offset.  Treat the result as spurious so the ensemble drops
-it instead of reporting a wrong offset with moderate confidence.
-"""
-
-
-_BODY_LIMB_CONFIDENCE_SPEC = ConfidenceSpec(
-    alpha0=-1.0,
-    terms=(
-        ConfidenceTerm(feature='visible_limb_arc_fraction', alpha=3.0),
-        ConfidenceTerm(feature='dt_fit_rms_px', alpha=-1.5),
-        ConfidenceTerm(
-            feature='visible_arc_px',
-            alpha=0.4,
-            divisor=100.0,
-            cap_at=1.0,
-        ),
-    ),
-    hard_zero_if={'at_edge': True, 'spurious': True},
-)
-"""Default confidence spec for the body-limb technique.
-
-The placeholder coefficients match the design's calibration target:
-half-visible 30-vertex limbs converge to "medium" and full-visible
-60+-vertex limbs converge to "high" once the planted-offset library is
-used to retune the alphas.
-"""
+# All numeric tunables for this technique live in
+# ``config_files/config_510_techniques.yaml`` under
+# ``techniques.BodyLimbNav.tuning``.  No Python-level fallback;
+# missing-key access in ``__init__`` is a KeyError so a config typo
+# fails fast at process startup.
 
 
 def _build_polyline_mask(
@@ -175,7 +115,6 @@ class BodyLimbNav(NavTechnique):
     name = 'BodyLimbNav'
     accepts_feature_types = frozenset({NavFeatureType.LIMB_ARC})
     requires_prior = False
-    confidence_spec = _BODY_LIMB_CONFIDENCE_SPEC
     confidence_attributes = frozenset(
         {
             'at_edge',
@@ -190,6 +129,12 @@ class BodyLimbNav(NavTechnique):
 
     def __init__(self, *, config: Config | None = None) -> None:
         super().__init__(config=config)
+        self.config.read_config()  # ensure cls.tuning is populated
+        self._min_arc_px = float(self.tuning['min_arc_px'])
+        self._spurious_dt_rms_factor = float(self.tuning['spurious_dt_rms_factor'])
+        self._spurious_dt_floor_px = float(self.tuning['spurious_dt_floor_px'])
+        self._spurious_min_inliers = int(self.tuning['spurious_min_inliers'])
+        self._spurious_min_inlier_fraction = float(self.tuning['spurious_min_inlier_fraction'])
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Return whether the input set carries any usable limb arc.
@@ -204,14 +149,14 @@ class BodyLimbNav(NavTechnique):
 
         Returns:
             ``NavFeasibilityReport`` with ``feasible=True`` iff at least
-            one LIMB_ARC has at least :data:`LIMB_MIN_ARC_PX` surviving
-            vertices.
+            one LIMB_ARC has at least the configured ``min_arc_px``
+            surviving vertices.
         """
         eligible = [
             f
             for f in features
             if isinstance(f.geometry, LimbPolyline)
-            and f.geometry.vertices_vu.shape[0] >= LIMB_MIN_ARC_PX
+            and f.geometry.vertices_vu.shape[0] >= self._min_arc_px
         ]
         if not eligible:
             return NavFeasibilityReport(
@@ -229,8 +174,8 @@ class BodyLimbNav(NavTechnique):
 
         Parameters:
             features: Feature list filtered to the technique's accepted
-                types.  Polylines with fewer than :data:`LIMB_MIN_ARC_PX`
-                vertices are dropped before fitting.
+                types.  Polylines with fewer than the configured
+                ``min_arc_px`` vertices are dropped before fitting.
             context: Per-image NavContext.  Must carry
                 ``image_edge_dt_ext`` and ``image_gradient_vu_ext`` —
                 both populated by the orchestrator's ``_make_context``.
@@ -250,7 +195,7 @@ class BodyLimbNav(NavTechnique):
                 f
                 for f in features
                 if isinstance(f.geometry, LimbPolyline)
-                and f.geometry.vertices_vu.shape[0] >= LIMB_MIN_ARC_PX
+                and f.geometry.vertices_vu.shape[0] >= self._min_arc_px
             ]
             self.logger.info(
                 'Consuming %d LIMB_ARC features (out of %d offered)',
@@ -302,9 +247,13 @@ class BodyLimbNav(NavTechnique):
                 float(result.inlier_count) / float(n_vertices) if n_vertices > 0 else 0.0
             )
             spurious = (
-                result.rms_px > max(SPURIOUS_DT_FLOOR_PX, SPURIOUS_DT_RMS_FACTOR * sigma_min_px)
-                or result.inlier_count < SPURIOUS_MIN_INLIERS
-                or inlier_fraction < SPURIOUS_MIN_INLIER_FRACTION
+                result.rms_px
+                > max(
+                    self._spurious_dt_floor_px,
+                    self._spurious_dt_rms_factor * sigma_min_px,
+                )
+                or result.inlier_count < self._spurious_min_inliers
+                or inlier_fraction < self._spurious_min_inlier_fraction
             )
             visible_limb_arc_fraction = _aggregate_visible_arc_fraction(eligible_features)
             diagnostics = BodyLimbDiagnostics(

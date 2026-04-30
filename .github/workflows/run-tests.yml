@@ -87,7 +87,11 @@ jobs:
           # loadfile keeps each test file on one xdist worker; PyQt6 + default load
           # scheduling has caused worker crashes when tests from the same file ran
           # in different processes.
-          python -m pytest --cov -n auto --dist=loadfile
+          # ``-m "not integration"`` skips the operator-curated image-library
+          # regression tests; those rely on real PDS3 holdings + SPICE kernels
+          # and are slow / flaky in CI.  Run the integration suite locally
+          # against a populated $PDS3_HOLDINGS_DIR before merging.
+          python -m pytest --cov -n auto --dist=loadfile -m "not integration"
 
       - name: Print coverage report
         run: |

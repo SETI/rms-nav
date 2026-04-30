@@ -474,6 +474,38 @@ class TestPass4FadeConflict:
         # Inner edge should remain
         assert gap_results[0].inner_edge is not None
 
+    def test_pass4_preserves_outermost_when_all_outer_edges_dropped(self) -> None:
+        """At very low resolution the outermost feature is restored after pass 4.
+
+        Several features cluster within a single pixel of fade width;
+        the per-edge check drops every outer-side edge.  The
+        preserve-outermost pass restores the feature carrying the
+        largest in-range edge so navigation has at least one outer
+        reference, which is far more useful than an inner-region
+        gap edge.
+        """
+        # Three single-edge ringlets within 50 km of each other; very
+        # low resolution (km/px = 100) makes the fade width 10000 km.
+        # Every per-edge fade conflict shrinks below the min_allowed
+        # threshold -> all 3 would otherwise be dropped.
+        inner = _make_single_edge_ringlet(key='inner', inner_a=100_000.0)
+        middle = _make_single_edge_ringlet(key='middle', inner_a=100_025.0)
+        outer = _make_single_edge_ringlet(key='outer', inner_a=100_050.0)
+        res = {100_000.0: 100.0, 100_025.0: 100.0, 100_050.0: 100.0}
+        flt = _make_filter(
+            min_radius=99_000.0,
+            max_radius=110_000.0,
+            min_res_at_radius=res,
+            fade_width_pix=100.0,
+            min_allowed_fade_width_pix=10.0,
+        )
+        result = flt.filter([inner, middle, outer])
+        keys = [f.key for f in result]
+        # Without preservation all three would be dropped (zero results).
+        # The outermost-preservation pass restores 'outer' (the one
+        # with the largest in-range edge radius).
+        assert 'outer' in keys
+
     def test_pass4_exclusion_logged_at_debug(self, caplog: pytest.LogCaptureFixture) -> None:
         """Pass 4 exclusion is logged at DEBUG level."""
         feature = _make_single_edge_ringlet(key='tight', inner_a=100_000.0)

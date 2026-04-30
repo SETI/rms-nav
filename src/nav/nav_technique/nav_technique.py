@@ -116,9 +116,17 @@ class NavTechnique(NavBase, ABC):
     #: ``NavContext`` and is run only on pass 2.
     requires_prior: ClassVar[bool] = False
     #: Confidence-formula spec consumed by ``evaluate_sigmoid_combination``.
-    #: ``None`` for techniques that don't yet define a spec (e.g.
-    #: ``NavTechniqueManual``).
+    #: Loaded from ``config_510_techniques.yaml`` and assigned at
+    #: ``Config.read_config`` time.  ``None`` for techniques that opt out
+    #: of the autonomous registry (e.g. ``NavTechniqueManual``).
     confidence_spec: ClassVar[ConfidenceSpec | None] = None
+    #: Per-technique runtime tuning loaded from
+    #: ``config_510_techniques.yaml.techniques.<name>.tuning``.  Each
+    #: technique pulls the values it needs by name from this dict and
+    #: falls back to the module-level default constant when a key is
+    #: missing.  Empty for techniques that opt out of the autonomous
+    #: registry or that have no tunable parameters.
+    tuning: ClassVar[dict[str, float | int]] = {}
     #: Names of every attribute the technique's confidence spec may read
     #: (diagnostics fields plus side-channel flags such as ``at_edge``).
     #: ``validate_registered_confidence_specs`` ensures every term in
@@ -168,12 +176,16 @@ class NavTechnique(NavBase, ABC):
 def validate_registered_confidence_specs() -> None:
     """Validate every registered ``NavTechnique``'s confidence spec.
 
-    Each technique that defines ``confidence_spec`` must also declare the
-    full set of valid attribute names in ``confidence_attributes``.
-    Every term's ``feature`` and every ``hard_zero_if`` key must appear in
-    that set; otherwise the technique would raise at navigate time.
-    Validation runs at config-load time so the failure surfaces during
-    process startup rather than mid-image.
+    Each technique whose spec was loaded from
+    ``config_510_techniques.yaml`` (assigned by
+    :meth:`nav.config.config.Config._validate_registered_techniques`)
+    must declare the full set of valid attribute names in
+    ``confidence_attributes``.  Every term's ``feature`` and every
+    ``hard_zero_if`` key must appear in that set; otherwise the
+    technique would raise at navigate time.  Validation runs at
+    config-load time so the failure surfaces during process startup
+    rather than mid-image.  Techniques whose spec is ``None`` (test-
+    only registry entries opted out of YAML lookup) are skipped.
 
     Raises:
         ValueError: if any term references an unknown attribute.  The
