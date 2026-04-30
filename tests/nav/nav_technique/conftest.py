@@ -19,8 +19,13 @@ import pytest
 
 from nav.feature.feature import NavFeature, NavReliabilityBreakdown
 from nav.feature.feature_type import NavFeatureType
-from nav.feature.flags import LimbArcFlags, RingEdgeFlags, TerminatorArcFlags
-from nav.feature.geometry import LimbPolyline, RingEdgePolyline, TerminatorPolyline
+from nav.feature.flags import LimbArcFlags, RingEdgeFlags, StarFlags, TerminatorArcFlags
+from nav.feature.geometry import (
+    LimbPolyline,
+    RingEdgePolyline,
+    StarGeometry,
+    TerminatorPolyline,
+)
 from nav.nav_orchestrator.image_classifier_result import NavImageClassifierResult
 from nav.nav_orchestrator.image_derivatives import (
     DEFAULT_IMAGE_GRADIENT_SIGMA_PX,
@@ -58,14 +63,18 @@ NavContextFactory = Callable[..., NavContext]
 NavFeatureFactory = Callable[..., NavFeature]
 """Signature of the ``make_*_feature`` factory fixtures (kwargs-flexible)."""
 
+DrawGaussianStarFactory = Callable[..., None]
+"""Signature of the ``draw_gaussian_star`` factory fixture (kwargs-flexible)."""
+
 
 class FakeObs:
     """Minimal observation stand-in matching the obs.* attribute access used by
     the DT techniques.
 
     The technique implementations only read ``obs.extfov_margin_vu`` (via the
-    private ``_search_window_for_obs`` helper); the rest of the obs surface is
-    irrelevant once a fully-populated ``NavContext`` is supplied directly.
+    shared :func:`nav.nav_technique.nav_technique.search_window_for_obs`
+    helper); the rest of the obs surface is irrelevant once a
+    fully-populated ``NavContext`` is supplied directly.
 
     Parameters:
         extfov_margin_vu: ``(margin_v, margin_u)`` extfov margin tuple
@@ -110,6 +119,25 @@ def _render_horizontal_step_image(shape: tuple[int, int], step_v: float) -> np.n
     return image.astype(np.float64)
 
 
+def _draw_gaussian_star(
+    image: np.ndarray, center_vu: tuple[float, float], peak_dn: float, sigma: float = 1.0
+) -> None:
+    """Add a 2-D Gaussian point source to ``image`` in place."""
+    h, w = image.shape
+    half = max(1, int(np.ceil(3.0 * sigma)))
+    cv, cu = center_vu
+    v_lo = max(0, int(np.floor(cv - half)))
+    v_hi = min(h, int(np.ceil(cv + half)) + 1)
+    u_lo = max(0, int(np.floor(cu - half)))
+    u_hi = min(w, int(np.ceil(cu + half)) + 1)
+    vs = np.arange(v_lo, v_hi, dtype=np.float64)
+    us = np.arange(u_lo, u_hi, dtype=np.float64)
+    vv, uu = np.meshgrid(vs, us, indexing='ij')
+    image[v_lo:v_hi, u_lo:u_hi] += peak_dn * np.exp(
+        -((vv - cv) ** 2 + (uu - cu) ** 2) / (2.0 * sigma * sigma)
+    )
+
+
 @pytest.fixture
 def disc_image() -> DiscImageFactory:
     """Factory fixture producing anti-aliased bright-disc images."""
@@ -120,6 +148,16 @@ def disc_image() -> DiscImageFactory:
 def horizontal_step_image() -> HorizontalStepImageFactory:
     """Factory fixture producing horizontal-step images for flat-edge tests."""
     return _render_horizontal_step_image
+
+
+@pytest.fixture
+def draw_gaussian_star() -> DrawGaussianStarFactory:
+    """Factory fixture for stamping a 2-D Gaussian PSF onto an image in place.
+
+    Signature: ``draw_gaussian_star(image, center_vu, peak_dn, sigma=1.0)``.
+    Mutates ``image`` and returns ``None``.
+    """
+    return _draw_gaussian_star
 
 
 # ---------------------------------------------------------------------------
@@ -387,6 +425,58 @@ def _make_ring_feature(
     )
 
 
+def _make_star_feature(
+    feature_id: str,
+    *,
+    predicted_vu: tuple[float, float],
+    predicted_snr: float,
+    bbox_pad: int = 6,
+    in_body_silhouette: bool = False,
+    in_saturation_or_cosmic_mask: bool = False,
+    vmag: float | None = 5.0,
+) -> NavFeature:
+    """Build a STAR ``NavFeature`` with the supplied prediction + brightness."""
+    pv, pu = predicted_vu
+    bbox = (
+        int(np.floor(pv - bbox_pad)),
+        int(np.floor(pu - bbox_pad)),
+        int(np.ceil(pv + bbox_pad)),
+        int(np.ceil(pu + bbox_pad)),
+    )
+    sigma = 0.5
+    cov = (sigma * sigma) * np.eye(2, dtype=np.float64)
+    return NavFeature(
+        feature_id=feature_id,
+        feature_type=NavFeatureType.STAR,
+        source_model='stars',
+        geometry=StarGeometry(
+            predicted_vu=predicted_vu,
+            catalog_vu=predicted_vu,
+            bbox_extfov_vu=bbox,
+        ),
+        subject_range_km=float('inf'),
+        position_cov_px=cov,
+        intensity_sigma_rel=0.0,
+        preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
+        reliability=0.95,
+        reliability_reasons=NavReliabilityBreakdown(
+            predicted_snr=1.0,
+            in_body_silhouette=in_body_silhouette,
+            in_saturation_or_cosmic=in_saturation_or_cosmic_mask,
+            smear_length_ok=True,
+        ),
+        usable_types=frozenset({NavFeatureType.STAR}),
+        flags=StarFlags(
+            saturated=False,
+            smear_length_px=0.0,
+            in_body_silhouette=in_body_silhouette,
+            in_saturation_or_cosmic_mask=in_saturation_or_cosmic_mask,
+            predicted_snr=predicted_snr,
+            vmag=vmag,
+        ),
+    )
+
+
 @pytest.fixture
 def make_limb_feature() -> NavFeatureFactory:
     """Factory fixture producing ``LIMB_ARC`` ``NavFeature`` instances."""
@@ -403,3 +493,9 @@ def make_terminator_feature() -> NavFeatureFactory:
 def make_ring_feature() -> NavFeatureFactory:
     """Factory fixture producing ``RING_EDGE`` ``NavFeature`` instances."""
     return _make_ring_feature
+
+
+@pytest.fixture
+def make_star_feature() -> NavFeatureFactory:
+    """Factory fixture producing ``STAR`` ``NavFeature`` instances."""
+    return _make_star_feature

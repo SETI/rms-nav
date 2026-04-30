@@ -47,10 +47,16 @@ _MANUAL_OFFSET_SIGMA_PX = 1.0
 class NavTechniqueManual(NavTechnique):
     """Interactive manual navigation.
 
-    Composes every template-bearing feature into a single ext-FOV image
-    plus mask, hands the result plus the observation to the
-    ``ManualNavDialog``, and packages the operator's choice into a
-    ``NavTechniqueResult``.
+    Composes every renderable feature into a single ext-FOV image plus
+    mask via :func:`~nav.feature.composition.compose_dialog_overlay`,
+    hands the result plus the observation to the ``ManualNavDialog``,
+    and packages the operator's choice into a ``NavTechniqueResult``.
+    Renderable feature kinds are template-bearing (``BODY_DISC``,
+    ``RING_ANNULUS``, ``CARTOGRAPHIC_MODEL``), polyline-bearing
+    (``LIMB_ARC``, ``TERMINATOR_ARC``, ``RING_EDGE``), ``BODY_BLOB``
+    (predicted-diameter circle outline), and ``STAR`` (rectangle
+    outline at the predicted-vu position sized by the per-feature PSF
+    bbox).
 
     Class attributes:
         _abstract: ``True`` — kept out of the auto-discovery registry so
@@ -72,7 +78,7 @@ class NavTechniqueManual(NavTechnique):
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Manual navigation runs whenever there is anything to render.
 
-        Three feature kinds paint into the dialog's composite overlay
+        Four feature kinds paint into the dialog's composite overlay
         (see :func:`~nav.feature.composition.compose_dialog_overlay`):
 
         - template-bearing (``BODY_DISC``, ``RING_ANNULUS``,
@@ -80,11 +86,14 @@ class NavTechniqueManual(NavTechnique):
         - polyline-bearing (``LIMB_ARC``, ``TERMINATOR_ARC``,
           ``RING_EDGE``) — single-pixel marks at every vertex;
         - ``BODY_BLOB`` — 1-pixel circle outline at the predicted
-          centroid with the predicted-diameter radius.
+          centroid with the predicted-diameter radius;
+        - ``STAR`` — rectangle outline at the predicted-vu position
+          sized by the per-feature PSF bbox so the operator can see
+          where the catalog says the star sits.
 
         Without any of them the dialog has nothing to display.
         """
-        from nav.feature.geometry import BodyBlobGeometry
+        from nav.feature.geometry import BodyBlobGeometry, StarGeometry
 
         renderable = 0
         for f in features:
@@ -96,6 +105,9 @@ class NavTechniqueManual(NavTechnique):
                 renderable += 1
                 continue
             if isinstance(f.geometry, BodyBlobGeometry):
+                renderable += 1
+                continue
+            if isinstance(f.geometry, StarGeometry):
                 renderable += 1
         if renderable == 0:
             return NavFeasibilityReport(
@@ -186,14 +198,17 @@ def run_manual_nav(
     Returns:
         The :class:`NavTechniqueResult` produced by the dialog, or
         ``None`` when no supported overlay features paint any pixels
-        into the ext-FOV composite.  Supported overlay types are
-        template-bearing features (``BODY_DISC`` / ``RING_ANNULUS`` /
+        into the ext-FOV composite.  Supported overlay types match
+        :meth:`NavTechniqueManual.is_feasible`: template-bearing
+        features (``BODY_DISC`` / ``RING_ANNULUS`` /
         ``CARTOGRAPHIC_MODEL``), polyline-bearing features (``LIMB_ARC``
-        / ``TERMINATOR_ARC`` / ``RING_EDGE``), and ``BODY_BLOB`` (which
-        renders as a 1-pixel circle outline).  The dialog is opened
-        only when the composed mask is non-empty; an off-frame blob or
-        a polyline whose vertices all clip out-of-bounds is treated as
-        if no renderable feature were present.
+        / ``TERMINATOR_ARC`` / ``RING_EDGE``), ``BODY_BLOB`` (1-pixel
+        circle outline at the predicted centroid), and ``STAR``
+        (rectangle outline at the predicted-vu position sized by the
+        per-feature PSF bbox).  The dialog is opened only when the
+        composed mask is non-empty; an off-frame blob, an off-image
+        star, or a polyline whose vertices all clip out-of-bounds is
+        treated as if no renderable feature were present.
     """
     # Local imports keep heavyweight dependencies (NavOrchestrator, NavModel
     # registry) out of import-time graphs for callers that only need the

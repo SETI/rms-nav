@@ -22,12 +22,15 @@ from nav.feature.geometry import LimbPolyline
 from nav.nav_technique.confidence import evaluate_sigmoid_combination
 from nav.nav_technique.diagnostics import BodyLimbDiagnostics
 from nav.nav_technique.dt_fitting import (
-    AT_EDGE_TOLERANCE_PX,
     coarse_ncc_search,
     lm_subpixel_refine,
 )
 from nav.nav_technique.feasibility import NavFeasibilityReport
-from nav.nav_technique.nav_technique import NavTechnique, log_confidence_breakdown
+from nav.nav_technique.nav_technique import (
+    NavTechnique,
+    log_confidence_breakdown,
+    search_window_for_obs,
+)
 from nav.nav_technique.technique_result import NavTechniqueResult
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
@@ -135,6 +138,7 @@ class BodyLimbNav(NavTechnique):
         self._spurious_dt_floor_px = float(self.tuning['spurious_dt_floor_px'])
         self._spurious_min_inliers = int(self.tuning['spurious_min_inliers'])
         self._spurious_min_inlier_fraction = float(self.tuning['spurious_min_inlier_fraction'])
+        self._at_edge_tolerance_px = float(self.tuning['at_edge_tolerance_px'])
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Return whether the input set carries any usable limb arc.
@@ -209,7 +213,7 @@ class BodyLimbNav(NavTechnique):
             gradient_vu = context.image_gradient_vu_ext
             edge_mask = edge_dt <= 0.5
             polyline_mask = _build_polyline_mask(vertices, edge_dt.shape[:2])
-            margin_v, margin_u = _search_window_for_obs(context)
+            margin_v, margin_u = search_window_for_obs(context)
             self.logger.debug(
                 'Aggregated %d limb vertices, sigma_normal range [%.3f, %.3f] px, '
                 'search window (v, u) = (%d, %d) px',
@@ -236,10 +240,10 @@ class BodyLimbNav(NavTechnique):
             )
             dv_final, du_final = result.offset_vu
             at_edge = (
-                abs(dv_final - margin_v) <= AT_EDGE_TOLERANCE_PX
-                or abs(dv_final + margin_v) <= AT_EDGE_TOLERANCE_PX
-                or abs(du_final - margin_u) <= AT_EDGE_TOLERANCE_PX
-                or abs(du_final + margin_u) <= AT_EDGE_TOLERANCE_PX
+                abs(dv_final - margin_v) <= self._at_edge_tolerance_px
+                or abs(dv_final + margin_v) <= self._at_edge_tolerance_px
+                or abs(du_final - margin_u) <= self._at_edge_tolerance_px
+                or abs(du_final + margin_u) <= self._at_edge_tolerance_px
             )
             sigma_min_px = float(sigmas.min()) if sigmas.size else 1.0
             n_vertices = int(vertices.shape[0])
@@ -348,18 +352,3 @@ def _aggregate_visible_arc_fraction(features: list[NavFeature]) -> float:
     if total_count == 0.0:
         return 0.0
     return total_weighted / total_count
-
-
-def _search_window_for_obs(context: NavContext) -> tuple[int, int]:
-    """Return the ``(margin_v, margin_u)`` search window for the coarse NCC.
-
-    ``extfov_margin_vu`` is a mandatory attribute on every
-    ``ObsSnapshotInst``; test fixtures must set it as well.  An obs
-    missing the attribute is a programming error and surfaces as
-    ``AttributeError`` rather than a silent fallback.
-    """
-    # ``NavContext.obs`` is typed as ``object`` to avoid an import cycle
-    # with ``ObsSnapshotInst``; the attribute lookup is mandatory at
-    # runtime even though mypy cannot see it.
-    margin = context.obs.extfov_margin_vu  # type: ignore[attr-defined]
-    return (int(margin[0]), int(margin[1]))

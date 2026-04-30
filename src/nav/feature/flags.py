@@ -36,17 +36,29 @@ class StarFlags:
             a predicted body silhouette in extfov.
         in_saturation_or_cosmic_mask: True if the predicted star position
             falls inside a saturation or cosmic-ray mask pixel.
+        predicted_snr: Predicted integrated SNR for the catalog star (raw,
+            uncapped).  Consumed by ``StarUniqueMatchNav`` to rank stars
+            by predicted brightness when picking the unique-bright pair.
+            ``0.0`` for fixtures or features whose model did not populate
+            it.  Must be ``>= 0``.
+        vmag: Catalog V-band magnitude of the star, or ``None`` when the
+            catalog entry has no magnitude.  Used by ``StarUniqueMatchNav``
+            to compute the magnitude margin to the next-brightest star.
     """
 
     saturated: bool = False
     smear_length_px: float = 0.0
     in_body_silhouette: bool = False
     in_saturation_or_cosmic_mask: bool = False
+    predicted_snr: float = 0.0
+    vmag: float | None = None
 
     def __post_init__(self) -> None:
-        """Validate that ``smear_length_px`` is non-negative."""
+        """Validate ``smear_length_px`` and ``predicted_snr`` are non-negative."""
         if self.smear_length_px < 0.0:
             raise ValueError(f'smear_length_px must be >= 0; got {self.smear_length_px!r}')
+        if self.predicted_snr < 0.0:
+            raise ValueError(f'predicted_snr must be >= 0; got {self.predicted_snr!r}')
 
 
 @dataclass(frozen=True)

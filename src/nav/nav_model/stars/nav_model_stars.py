@@ -280,6 +280,8 @@ class NavModelStars(NavModel):
                         smear_length_px=smear_len,
                         in_body_silhouette=in_body or in_ring,
                         in_saturation_or_cosmic_mask=in_sat_or_cosmic,
+                        predicted_snr=float(snr),
+                        vmag=(None if star.vmag is None else float(star.vmag)),
                     ),
                 )
             )

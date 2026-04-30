@@ -207,8 +207,10 @@ class StarUniqueMatchDiagnostics:
     Parameters:
         mode: ``'one_star'`` or ``'two_star'``.
         predicted_snr: Predicted SNR of the brightest catalog star.
-        brightness_margin_mag: Mag difference to the next-brightest catalog
-            source predictable in extfov.
+        brightness_margin_mag: Mag difference to the next-brightest *unmatched*
+            catalog source predictable in extfov; ``+inf`` when no unmatched
+            star exists (a 1-star scene with no other predictable star, or a
+            2-star scene with no third predictable star to compare against).
         residual_px: Detection-vs-prediction residual.
     """
 

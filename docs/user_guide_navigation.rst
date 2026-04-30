@@ -133,10 +133,9 @@ Navigation options
 * ``--nav-techniques LIST``: a comma-separated glob-pattern list selecting
   which registered ``NavTechnique`` subclasses run.  Implemented techniques
   today are ``BodyDiscCorrelateNav``, ``BodyBlobNav``, ``BodyLimbNav``,
-  ``BodyTerminatorNav``, ``RingAnnulusNav``, and ``RingEdgeNav``; the
-  star techniques (``StarFieldFromCatalogNav``, ``StarUniqueMatchNav``,
-  ``StarRefineNav``) are planned but not yet shipped.  Defaults to ``*``
-  (all registered
+  ``BodyTerminatorNav``, ``RingAnnulusNav``, ``RingEdgeNav``,
+  ``StarUniqueMatchNav``, ``StarRefineNav``, and
+  ``StarFieldFromCatalogNav``.  Defaults to ``*`` (all registered
   techniques run); a leading ``!`` excludes a pattern (e.g.
   ``--nav-techniques '!RingEdgeNav'`` runs every technique except the
   ring-edge fitter).  Multiple feasible techniques run in parallel and the
@@ -457,21 +456,6 @@ Programmatic equivalent (one obs in, ``NavTechniqueResult`` out):
    from nav.nav_technique import run_manual_nav
 
    result = run_manual_nav(obs)
-
-Pending techniques (not yet shipped)
--------------------------------------
-
-The following techniques are designed and have stub diagnostics in
-place; their concrete implementations are pending.
-
-* ``StarFieldFromCatalogNav`` -- triplet-hash + RANSAC pattern match for
-  star-rich frames.
-* ``StarUniqueMatchNav`` -- direct catalog-uniqueness match for sparse
-  star fields with one or two bright stars.
-* ``StarRefineNav`` -- prior-refining single-star polish (pass-2).
-
-Until these land, scenes whose only viable feature type is ``STAR`` will
-report ``status_reason=no_feasible_techniques``.
 
 Filtering examples
 ------------------

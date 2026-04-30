@@ -363,3 +363,122 @@ def test_compose_dialog_overlay_blob_clips_to_extfov_bounds() -> None:
     assert set(zip(*np.nonzero(mask), strict=True)) == expected_pixels
     assert np.count_nonzero(image) == 1
     assert np.count_nonzero(mask) == 1
+
+
+def _make_star(
+    *,
+    feature_id: str,
+    predicted_vu: tuple[float, float],
+    bbox_pad: int = 6,
+) -> NavFeature:
+    """Build a STAR feature with a PSF-sized bbox around the prediction."""
+    from nav.feature.flags import StarFlags
+    from nav.feature.geometry import StarGeometry
+
+    pv, pu = predicted_vu
+    bbox = (
+        int(np.floor(pv - bbox_pad)),
+        int(np.floor(pu - bbox_pad)),
+        int(np.ceil(pv + bbox_pad)) + 1,
+        int(np.ceil(pu + bbox_pad)) + 1,
+    )
+    return NavFeature(
+        feature_id=feature_id,
+        feature_type=NavFeatureType.STAR,
+        source_model='stars',
+        geometry=StarGeometry(
+            predicted_vu=predicted_vu,
+            catalog_vu=predicted_vu,
+            bbox_extfov_vu=bbox,
+        ),
+        subject_range_km=float('inf'),
+        position_cov_px=None,
+        intensity_sigma_rel=0.0,
+        preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
+        reliability=0.95,
+        reliability_reasons=NavReliabilityBreakdown(predicted_snr=1.0),
+        usable_types=frozenset({NavFeatureType.STAR}),
+        flags=StarFlags(predicted_snr=10.0),
+    )
+
+
+def test_compose_dialog_overlay_renders_star_marker_rectangle() -> None:
+    """A STAR feature renders an exact rectangle-outline pixel set.
+
+    Pin the full perimeter — top + bottom + left + right at half-width
+    5 around (20, 25) — so a regression in the marker geometry, the
+    bbox-to-half-extent conversion, or the choice of outline-vs-filled
+    rasteriser fails this test loud.
+    """
+    from nav.feature.composition import compose_dialog_overlay
+
+    star = _make_star(
+        feature_id='star:UCAC4:1',
+        predicted_vu=(20.0, 25.0),
+        bbox_pad=6,  # bbox spans (14, 19, 27, 32) -> half-width 5
+    )
+    image, mask = compose_dialog_overlay([star], (40, 40))
+    expected_pixels = set()
+    half = 5
+    v_min, v_max = 20 - half, 20 + half
+    u_min, u_max = 25 - half, 25 + half
+    for u in range(u_min, u_max + 1):
+        expected_pixels.add((v_min, u))  # top
+        expected_pixels.add((v_max, u))  # bottom
+    for v in range(v_min, v_max + 1):
+        expected_pixels.add((v, u_min))  # left
+        expected_pixels.add((v, u_max))  # right
+    actual_pixels = set(zip(*np.nonzero(image), strict=True))
+    assert actual_pixels == expected_pixels
+    assert set(zip(*np.nonzero(mask), strict=True)) == expected_pixels
+    assert np.count_nonzero(image) == len(expected_pixels)
+    assert np.count_nonzero(mask) == len(expected_pixels)
+
+
+def test_compose_dialog_overlay_star_marker_off_image_no_op() -> None:
+    """A STAR whose predicted (v, u) is off-image paints no pixels."""
+    from nav.feature.composition import compose_dialog_overlay
+
+    star = _make_star(
+        feature_id='star:UCAC4:offscreen',
+        predicted_vu=(-50.0, -50.0),
+    )
+    image, mask = compose_dialog_overlay([star], (20, 20))
+    assert np.count_nonzero(image) == 0
+    assert np.count_nonzero(mask) == 0
+
+
+def test_compose_dialog_overlay_star_marker_clamps_at_edge() -> None:
+    """A STAR centre near the FOV edge produces an exact 3x3-perimeter pixel set.
+
+    With predicted (1, 1) on a 20x20 FOV, the marker can extend at most
+    1 pixel before hitting the edge — the floor (3) does not apply here
+    because the explicit edge clamp is tighter.  The full 8-pixel
+    perimeter (3x3 outline minus the centre) is asserted as an exact
+    set so a regression in the half-width clamp logic fails loud.
+    """
+    from nav.feature.composition import compose_dialog_overlay
+
+    star = _make_star(
+        feature_id='star:UCAC4:edge',
+        predicted_vu=(1.0, 1.0),
+        bbox_pad=6,
+    )
+    image, mask = compose_dialog_overlay([star], (20, 20))
+    # Half-width clamped to 1 -> 3x3 outline around (1, 1).
+    expected_pixels = {
+        (0, 0),
+        (0, 1),
+        (0, 2),
+        (1, 0),
+        (1, 2),
+        (2, 0),
+        (2, 1),
+        (2, 2),
+    }
+    actual_pixels = set(zip(*np.nonzero(image), strict=True))
+    assert actual_pixels == expected_pixels
+    assert set(zip(*np.nonzero(mask), strict=True)) == expected_pixels
+    assert np.count_nonzero(image) == len(expected_pixels)
+    assert np.count_nonzero(mask) == len(expected_pixels)
+    assert image[1, 1] == 0.0  # centre not painted

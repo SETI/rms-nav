@@ -9,10 +9,11 @@ fall in the extended FOV.  Each feature carries a
 Cramer-Rao centroid covariance, a predicted-SNR-driven reliability
 score, and a :class:`~nav.feature.flags.StarFlags` block with
 ``saturated``, ``smear_length_px``, ``in_body_silhouette``, and
-``in_saturation_or_cosmic_mask`` fields.  Two techniques consume STAR
+``in_saturation_or_cosmic_mask`` fields.  Three techniques consume STAR
 features: ``StarFieldFromCatalogNav`` (similarity-invariant triplet
-pattern match) and ``StarUniqueMatchNav`` (catalog-uniqueness 1- or
-2-star match).
+pattern match for ≥ 3 stars), ``StarUniqueMatchNav`` (catalog-uniqueness
+1- or 2-star match), and ``StarRefineNav`` (pass-2 refinement on a
+prior offset).
 
 The :mod:`nav.nav_model.stars` package is split by responsibility:
 

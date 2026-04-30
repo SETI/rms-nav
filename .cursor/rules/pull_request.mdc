@@ -7,7 +7,7 @@ alwaysApply: false
 
 ## Scope of review
 
-Treat the PR as a **single unit of change**. The diff to review is the set of all commits on the current branch back to its **immediate root** (the merge-base with the target branch). Consider the net result of those commits together; do **not** comment on differences that exist only between commits within the PR (e.g. "you fixed X in a later commit" or "commit 2 undid part of commit 1"). Review the final state of the branch against the base.
+Treat the PR as a **single unit of change**. The diff to review is the set of all commits on the current branch back to its **immediate root** (the merge-base with the target branch). Consider the net result of those commits together; do **not** comment on differences that exist only between commits within the PR (e.g. "you fixed X in a later commit" or "commit 2 undid part of commit 1"). Review the final state of the branch against the base. Do not explicitly word wrap lines.
 
 ## Principles
 

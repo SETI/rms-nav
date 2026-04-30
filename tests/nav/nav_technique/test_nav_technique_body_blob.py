@@ -211,7 +211,7 @@ def test_body_blob_marks_at_edge_when_centroid_hits_window(
     disc_image: DiscImageFactory,
     make_nav_context: NavContextFactory,
 ) -> None:
-    """A converged offset within ``AT_EDGE_TOLERANCE_PX`` of the search-window
+    """A converged offset within ``at_edge_tolerance_px`` of the search-window
     edge is flagged ``at_edge=True`` and forced to zero confidence by the
     ``hard_zero_if`` gate.
     """

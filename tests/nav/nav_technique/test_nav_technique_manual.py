@@ -163,12 +163,61 @@ def test_run_manual_nav_returns_spurious_on_cancel() -> None:
     assert result.confidence == 0.0
 
 
-def test_run_manual_nav_returns_none_when_no_template_features(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """No template-bearing feature → dialog is not opened, ``None`` is returned."""
+def test_run_manual_nav_runs_on_template_less_star_feature() -> None:
+    """A STAR feature without a template still renders as a marker rectangle.
+
+    The dialog opens because ``StarGeometry`` is recognised by both
+    ``compose_dialog_overlay`` and ``NavTechniqueManual.is_feasible`` —
+    the absence of ``template_img`` / ``template_mask`` no longer
+    short-circuits feasibility for star-only scenes.
+    """
     obs = _FakeObsForRunManual()
     obs.with_template = False  # type: ignore[attr-defined]
+    fake_dialog, instances = _make_fake_dialog((True, (1.5, -0.5), 0.7))
+    with patch('nav.ui.manual_nav_dialog.ManualNavDialog', fake_dialog):
+        result = run_manual_nav(obs)  # type: ignore[arg-type]
+    assert result is not None
+    assert result.spurious is False
+    assert result.offset_px == (1.5, -0.5)
+    assert len(instances) == 1
+
+
+class _StubEmptyModel(NavModel):
+    """NavModel that emits zero features.  Drives the no-feasible path."""
+
+    def __init__(self, obs: Any) -> None:
+        super().__init__('stars', obs)
+
+    def create_model(self) -> None:
+        return None
+
+    def to_features(self, context: Any) -> list[NavFeature]:
+        return []
+
+    def to_annotations(self, context: Any) -> Annotations:
+        return Annotations()
+
+
+def test_run_manual_nav_returns_none_when_no_features(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A scene that emits zero features → dialog is not opened, ``None`` is returned."""
+    obs = _FakeObsForRunManual()
+
+    from nav.nav_technique import nav_technique_manual
+
+    def _empty_builder(obs: Any) -> list[NavModel]:
+        return [_StubEmptyModel(obs)]
+
+    monkeypatch.setattr(
+        nav_technique_manual,
+        'build_models_for_obs',
+        _empty_builder,
+        raising=False,
+    )
+    import nav.nav_model as nav_model_pkg
+
+    monkeypatch.setattr(nav_model_pkg, 'build_models_for_obs', _empty_builder, raising=False)
     result = run_manual_nav(obs)  # type: ignore[arg-type]
     assert result is None
     captured = capsys.readouterr()
