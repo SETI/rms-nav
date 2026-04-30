@@ -143,7 +143,7 @@ pythonpath = [
   "src"
 ]
 testpaths = ["tests"]
-addopts = ["--strict-markers", "--strict-config"]
+addopts = ["--strict-markers", "--strict-config", "-m", "not integration"]
 filterwarnings = [
   "error",
   # Astropy's FITS reader can leave a file handle open while the cache

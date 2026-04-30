@@ -17,6 +17,7 @@ from nav.nav_model.nav_model_rings import (
     FLAT_CURVATURE_THRESHOLD_PX,
     RING_EDGE_DEFAULT_RELIABILITY,
     RING_EDGE_SIGMA_ALONG_PX,
+    _composite_ring_renderings,
     _is_straight_line,
     _mask_bbox,
     _polyline_from_edge_mask,
@@ -180,6 +181,43 @@ def test_ring_annulus_reliability_increases_with_radial_extent() -> None:
     narrow = _ring_annulus_reliability(constituent_count=3, radial_extent_px=10.0)
     wide = _ring_annulus_reliability(constituent_count=3, radial_extent_px=200.0)
     assert wide > narrow
+
+
+def test_composite_ring_renderings_unions_masks_and_takes_max_image() -> None:
+    """The composite is the OR of input masks and the per-pixel max of input images."""
+    extfov_shape = (4, 4)
+    img_a = np.array(
+        [[0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]],
+        dtype=np.float64,
+    )
+    mask_a = img_a > 0.0
+    img_b = np.array(
+        [[0.5, 0.0, 0.0, 0.0], [0.0, 2.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]],
+        dtype=np.float64,
+    )
+    mask_b = img_b > 0.0
+    composite_img, composite_mask = _composite_ring_renderings(
+        [(img_a, mask_a, 'a', 1.0), (img_b, mask_b, 'b', 1.0)],
+        extfov_shape=extfov_shape,
+    )
+    # Both rings' pixels appear in the union mask.
+    assert bool(composite_mask[0, 1])
+    assert bool(composite_mask[0, 0])
+    assert bool(composite_mask[1, 1])
+    # Per-pixel max keeps the brighter contribution where they overlap
+    # would have collided (no overlap here, so each pixel's value is
+    # whichever input had it set).
+    assert composite_img[0, 1] == pytest.approx(1.0)
+    assert composite_img[0, 0] == pytest.approx(0.5)
+    assert composite_img[1, 1] == pytest.approx(2.0)
+
+
+def test_composite_ring_renderings_empty_input_returns_zero_arrays() -> None:
+    """An empty list returns zero-shaped composite of the requested extfov shape."""
+    composite_img, composite_mask = _composite_ring_renderings([], extfov_shape=(8, 8))
+    assert composite_img.shape == (8, 8)
+    assert composite_mask.shape == (8, 8)
+    assert not composite_mask.any()
 
 
 def test_ring_annulus_emission_params_loads_saturn_block() -> None:

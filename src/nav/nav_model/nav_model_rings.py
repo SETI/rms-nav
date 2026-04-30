@@ -450,7 +450,6 @@ class NavModelRings(NavModelRingsBase):
         with self._logger.open('EMIT RINGS FEATURES'):
             features: list[NavFeature] = []
             edge_count = 0
-            annulus_count = 0
             straight_count = 0
             max_radial_px, kmpp_threshold = _ring_annulus_emission_params(
                 self._config, self._planet or ''
@@ -469,6 +468,14 @@ class NavModelRings(NavModelRingsBase):
                     self._km_per_pixel_radial,
                     kmpp_threshold,
                 )
+            # Annulus-eligible per-ring renderings accumulate here and
+            # collapse into a single composite RING_ANNULUS at the end
+            # of the loop.  The design specifies one RING_ANNULUS per
+            # planet per scene; emitting one feature per surviving ring
+            # would set ``constituent_count=1`` on each and the
+            # reliability formula would gate them all out
+            # (min(1, 1/5) * 0.7 = 0.14 < 0.30 threshold).
+            annulus_renderings: list[tuple[NDArrayFloatType, NDArrayBoolType, str, float]] = []
             for (
                 ring_feat,
                 model_img,
@@ -488,26 +495,22 @@ class NavModelRings(NavModelRingsBase):
                         radial_extent_px <= max_radial_px and not straight
                     )
                     if use_annulus:
-                        annulus_count += 1
-                        kind = 'ANNULUS'
-                        features.append(
-                            _build_annulus_feature(
-                                ring_name=label_text,
-                                planet=self._planet or '',
-                                model_img=model_img,
-                                model_mask=model_mask,
-                                bbox=_mask_bbox(model_mask),
-                                predicted_center_vu=self._predicted_center_vu,
-                                subject_range_km=self._subject_range_km,
-                                constituent_count=1,
-                                source_model=self.name,
-                            )
+                        annulus_renderings.append(
+                            (model_img, model_mask, label_text, radial_extent_px)
+                        )
+                        self._logger.debug(
+                            'ANNULUS %r -> vertices=%d, radial_extent=%.2f px, '
+                            'straight=%s, uncertainty=%.3f km',
+                            label_text,
+                            int(vertices_vu.shape[0]),
+                            radial_extent_px,
+                            straight,
+                            uncertainty_km,
                         )
                     else:
                         edge_count += 1
                         if straight:
                             straight_count += 1
-                        kind = 'EDGE'
                         features.append(
                             _build_edge_feature(
                                 ring_feat=ring_feat,
@@ -524,16 +527,45 @@ class NavModelRings(NavModelRingsBase):
                                 source_model=self.name,
                             )
                         )
-                    self._logger.debug(
-                        '%s %r -> vertices=%d, radial_extent=%.2f px, '
-                        'straight=%s, uncertainty=%.3f km',
-                        kind,
-                        label_text,
-                        int(vertices_vu.shape[0]),
-                        radial_extent_px,
-                        straight,
-                        uncertainty_km,
+                        self._logger.debug(
+                            'EDGE %r -> vertices=%d, radial_extent=%.2f px, '
+                            'straight=%s, uncertainty=%.3f km',
+                            label_text,
+                            int(vertices_vu.shape[0]),
+                            radial_extent_px,
+                            straight,
+                            uncertainty_km,
+                        )
+            annulus_count = 1 if annulus_renderings else 0
+            if annulus_renderings:
+                composite_img, composite_mask = _composite_ring_renderings(
+                    annulus_renderings,
+                    extfov_shape=(self._extfov_v_size, self._extfov_u_size),
+                )
+                composite_bbox = _mask_bbox(composite_mask)
+                composite_radial_extent_px = float(composite_bbox[2] - composite_bbox[0])
+                joint_label = ', '.join(sorted({label for _, _, label, _ in annulus_renderings}))
+                features.append(
+                    _build_annulus_feature(
+                        ring_name=joint_label,
+                        planet=self._planet or '',
+                        model_img=composite_img,
+                        model_mask=composite_mask,
+                        bbox=composite_bbox,
+                        predicted_center_vu=self._predicted_center_vu,
+                        subject_range_km=self._subject_range_km,
+                        constituent_count=len(annulus_renderings),
+                        source_model=self.name,
                     )
+                )
+                self._logger.debug(
+                    'ANNULUS composite for planet %s: %d constituent ring(s), '
+                    'composite bbox %r, composite radial_extent=%.2f px',
+                    self._planet,
+                    len(annulus_renderings),
+                    composite_bbox,
+                    composite_radial_extent_px,
+                )
             self._logger.info(
                 'Emitted %d feature(s) — %d edge (%d straight), %d annulus',
                 len(features),
@@ -639,6 +671,37 @@ def _mask_bbox(mask: NDArrayBoolType) -> tuple[int, int, int, int]:
         int(vs.max()) + 1,
         int(us.max()) + 1,
     )
+
+
+def _composite_ring_renderings(
+    renderings: list[tuple[NDArrayFloatType, NDArrayBoolType, str, float]],
+    *,
+    extfov_shape: tuple[int, int],
+) -> tuple[NDArrayFloatType, NDArrayBoolType]:
+    """Union per-ring rendered images + masks into one composite annulus.
+
+    Each per-ring rendering carries an ext-FOV-shaped ``model_img`` /
+    ``model_mask`` pair from :class:`RingFeature.render`.  The composite
+    is the OR of the masks and the per-pixel maximum of the images so
+    overlapping rings keep their brightest contribution.
+
+    Parameters:
+        renderings: List of ``(model_img, model_mask, label, radial_extent)``
+            tuples (radial_extent is unused by this helper but kept on
+            the input row so the caller can read it without a second
+            iteration).
+        extfov_shape: ``(v, u)`` shape of the ext-FOV array — every
+            input rendering shares this shape.
+
+    Returns:
+        ``(composite_img, composite_mask)`` both shaped ``extfov_shape``.
+    """
+    composite_img: NDArrayFloatType = np.zeros(extfov_shape, dtype=np.float64)
+    composite_mask: NDArrayBoolType = np.zeros(extfov_shape, dtype=bool)
+    for img, mask, _label, _extent in renderings:
+        composite_img = np.maximum(composite_img, img)
+        composite_mask = composite_mask | mask
+    return composite_img, composite_mask
 
 
 def _build_edge_feature(

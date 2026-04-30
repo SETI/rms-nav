@@ -91,7 +91,7 @@ jobs:
           # regression tests; those rely on real PDS3 holdings + SPICE kernels
           # and are slow / flaky in CI.  Run the integration suite locally
           # against a populated $PDS3_HOLDINGS_DIR before merging.
-          python -m pytest --cov -n auto --dist=loadfile -m "not integration"
+          python -m pytest --cov --cov-report=xml -n auto --dist=loadfile -m "not integration"
 
       - name: Print coverage report
         run: |
@@ -99,7 +99,7 @@ jobs:
 
       - name: Upload coverage report to codecov
         uses: codecov/codecov-action@v6
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13' &&!github.event.pull_request.head.repo.fork
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true

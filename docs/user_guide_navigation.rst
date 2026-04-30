@@ -411,14 +411,17 @@ Saturn-rings imagery).
 ^^^^^^^^^^^^^^^^^^
 
 Pyramid-NCC fit on every ``RING_ANNULUS`` feature.  ``RING_ANNULUS``
-features are emitted by the rings model when individual ring edges
-compress radially (low-resolution ring-system encounters where adjacent
-edges fall within ``RING_ANNULUS_MAX_RADIAL_PX`` of each other); each
-feature carries a multi-ring composite template instead of a per-edge
-polyline.  Multi-planet scenes (rare) emit one ``RING_ANNULUS`` per
-ring system; the technique fuses them via Z-buffer paint and runs one
-joint NCC.  ``use_gradient='auto'`` self-selects raw vs gradient mode
-per image.
+features are emitted by the rings model in two regimes: when adjacent
+ring edges compress radially below the per-planet
+``feature_emission.ring_annulus.max_radial_px`` threshold in
+``config_510_techniques.yaml`` (individual edges no longer separable),
+and when the per-planet km/px threshold fires on a low-resolution
+ring scene where the entire ring system spans only a handful of
+pixels.  In either case the rings model collapses every surviving
+ring into a single composite annulus per planet.  Multi-planet scenes
+(rare) emit one ``RING_ANNULUS`` per ring system; the technique fuses
+them via Z-buffer paint and runs one joint NCC.
+``use_gradient='auto'`` self-selects raw vs gradient mode per image.
 
 Best for: low-resolution ring scenes where ``RingEdgeNav`` cannot
 separate individual edges (distant Cassini ring views; potential

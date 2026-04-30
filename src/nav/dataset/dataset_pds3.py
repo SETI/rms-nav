@@ -391,7 +391,6 @@ class DataSetPDS3(DataSet):
         volumes = None
         if arguments.volumes:
             volumes = [x for y in arguments.volumes for x in y.split(',')]
-            volumes.sort()
 
         # if use_index_files:
         #     yield_function = yield_image_filenames_index
@@ -568,8 +567,12 @@ class DataSetPDS3(DataSet):
         # Restrict volumes to given "vol_start" and "vol_end" arguments
         # keeping original order
         if vol_start is not None:
+            if vol_start not in all_volume_names:
+                raise ValueError(f'Illegal volume name: {vol_start}')
             vol_start_idx = all_volume_names.index(vol_start)
         if vol_end is not None:
+            if vol_end not in all_volume_names:
+                raise ValueError(f'Illegal volume name: {vol_end}')
             vol_end_idx = all_volume_names.index(vol_end)
         valid_volumes = [
             v

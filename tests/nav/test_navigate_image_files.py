@@ -243,6 +243,62 @@ def test_grayscale_to_rgb_stretch_treats_non_finite_as_zero() -> None:
     assert int(rgb[0, 1, 0]) == 0
 
 
+def test_grayscale_to_rgb_stretch_preserves_few_bright_pixels() -> None:
+    """A handful of bright pixels keep their relative brightness ordering.
+
+    A 1024 x 1024 dark-sky image with 8 bright stars at distinct
+    intensities would clip every star to 255 under a fixed 0.001 / 0.999
+    quantile stretch (0.1 % of 1 M = 1 048 pixels excluded as "white,"
+    far more than the 8 brights).  The adaptive helper limits the clip
+    count to half the bright-outlier count, so the brightest few
+    saturate but the dimmer half keeps distinct gray values that
+    preserve their brightness ordering.
+    """
+    rng = np.random.default_rng(seed=42)
+    image = rng.normal(loc=0.0, scale=0.001, size=(1024, 1024)).astype(np.float64)
+    bright_intensities = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5]
+    bright_positions = [
+        (100, 100),
+        (200, 200),
+        (300, 300),
+        (400, 400),
+        (500, 500),
+        (600, 600),
+        (700, 700),
+        (800, 800),
+    ]
+    for (v, u), intensity in zip(bright_positions, bright_intensities, strict=True):
+        image[v, u] = intensity
+    rgb = _grayscale_to_rgb_with_quantile_stretch(image)
+    bright_grays = [int(rgb[v, u, 0]) for v, u in bright_positions]
+    # The two dimmest stars keep distinct, sub-saturation gray values
+    # (under the old fixed-0.999 stretch they would both clip to 255).
+    assert bright_grays[0] < bright_grays[1] < 255
+    # Brightness ordering monotonically rises through every bright pixel.
+    assert bright_grays == sorted(bright_grays)
+
+
+def test_grayscale_to_rgb_stretch_keeps_default_clip_when_many_brights() -> None:
+    """With many bright pixels the original 0.1 % clip is unchanged.
+
+    A bright disc filling a quarter of the FOV has tens of thousands of
+    bright pixels — far more than the 0.1 % default clip count.  The
+    adaptive helper falls back to the default behavior in that regime so
+    a body-fills-FOV scene's visualization is unchanged from before this
+    fix.
+    """
+    image = np.zeros((512, 512), dtype=np.float64)
+    # Bright disc: 256 x 256 = 65536 bright pixels (~25 % of the image,
+    # vastly more than the 0.1 % default clip count of 262).
+    image[128:384, 128:384] = 100.0
+    rgb = _grayscale_to_rgb_with_quantile_stretch(image)
+    # Every disc pixel saturates to 255 because they are all the same
+    # value and far above the 99.9 percentile of the full image.
+    assert int(rgb[256, 256, 0]) == 255
+    # Background is at the dark end.
+    assert int(rgb[0, 0, 0]) == 0
+
+
 # ---------------------------------------------------------------------------
 # _write_summary_png — direct fixture-driven exercise
 # ---------------------------------------------------------------------------

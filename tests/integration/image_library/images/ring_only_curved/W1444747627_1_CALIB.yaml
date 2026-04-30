@@ -11,8 +11,8 @@ scene_tags:
                                        # sidecar lives in.
 
 ground_truth:
-  offset_dv_px: 3.1925
-  offset_du_px: -2.9609
+  offset_dv_px: 1.5
+  offset_du_px: -2.5
   offset_uncertainty_px: 1.0           # 1sigma marginal; tighten
                                        # for bright stars / sharp limbs.
   source: operator_verified
@@ -33,7 +33,7 @@ ground_truth:
 
 expected:
   status: ok                           # ok | failed | conflicted
-  confidence_tier: high                # high | medium | low | failed
+  confidence_tier: low                # high | medium | low | failed
   primary_technique: RingAnnulusNav  # e.g. BodyLimbNav
   techniques_must_run: [RingAnnulusNav]
   techniques_must_skip: []

@@ -323,10 +323,13 @@ Ring-annulus technique
 
 When the rings model emits a ``RING_ANNULUS`` feature instead of
 per-edge ``RING_EDGE`` polylines (because adjacent ring edges compress
-within ``RING_ANNULUS_MAX_RADIAL_PX`` of each other in the image
-plane), the per-planet multi-ring composite template lives on
-``NavFeature.template_img``.  The ring-annulus technique mirrors
-``BodyDiscCorrelateNav`` for that template payload.
+within the per-planet
+``feature_emission.ring_annulus.max_radial_px`` threshold in
+``config_510_techniques.yaml``, or because the system-level km/px
+threshold fires on a low-resolution ring scene), the per-planet
+multi-ring composite template lives on ``NavFeature.template_img``.
+The ring-annulus technique mirrors ``BodyDiscCorrelateNav`` for that
+template payload.
 
 RingAnnulusNav
 --------------

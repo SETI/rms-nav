@@ -230,7 +230,26 @@ class RingFeatureFilter:
                         outermost_feature.key,
                         outermost_radius,
                     )
-                    result.append(outermost_feature)
+                    # If the trimmed-but-incomplete version of this feature
+                    # is already in ``result`` (same key, but lacking the
+                    # outermost edge), replace it in place rather than
+                    # appending a second entry with the same key.  This can
+                    # arise when ``_apply_fade_filter`` returns a trimmed
+                    # version that drops the outer edge — preserving the
+                    # original (untrimmed) feature is what restores the
+                    # navigation-useful outer reference.
+                    existing_index = next(
+                        (
+                            idx
+                            for idx, feat in enumerate(result)
+                            if feat.key == outermost_feature.key
+                        ),
+                        None,
+                    )
+                    if existing_index is None:
+                        result.append(outermost_feature)
+                    else:
+                        result[existing_index] = outermost_feature
 
         self._logger.debug(
             'RingFeatureFilter: after fade pass, %d / %d feature(s)',

@@ -440,12 +440,15 @@ class _BlobConfidenceContext:
 def _search_window_for_obs(context: NavContext) -> tuple[int, int]:
     """Return the ``(margin_v, margin_u)`` search window for at-edge detection.
 
-    Falls back to a 32 x 32 window when the obs does not expose
-    ``extfov_margin_vu`` (test fixtures), mirroring the helper used by
-    every other technique that respects the per-instrument extfov
-    margin.
+    The technique reads the per-instrument extfov margin from the
+    observation.  ``extfov_margin_vu`` is a mandatory attribute on
+    every ``ObsSnapshotInst``; test fixtures must set it as well
+    (the shared ``FakeObs`` defaults to ``(32, 32)``).  An obs
+    missing the attribute is a programming error and surfaces as
+    ``AttributeError`` rather than a silent fallback.
     """
-    margin = getattr(context.obs, 'extfov_margin_vu', None)
-    if margin is None:
-        return (32, 32)
+    # ``NavContext.obs`` is typed as ``object`` to avoid an import cycle
+    # with ``ObsSnapshotInst``; the attribute lookup is mandatory at
+    # runtime even though mypy cannot see it.
+    margin = context.obs.extfov_margin_vu  # type: ignore[attr-defined]
     return (int(margin[0]), int(margin[1]))

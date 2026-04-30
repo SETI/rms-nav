@@ -113,6 +113,18 @@ We use pytest for testing. To run the tests:
 pytest
 ```
 
+The default `addopts = ["-m", "not integration"]` skips integration
+tests (they need real PDS3 holdings + SPICE kernels and are slow).
+To include them, override the marker filter:
+
+```bash
+pytest -m ""              # full suite, including integration
+pytest -m integration     # only integration
+```
+
+`scripts/run-all-checks.sh -i` (or `--integration`) does the same for
+the all-checks runner.
+
 For more verbose output:
 
 ```bash

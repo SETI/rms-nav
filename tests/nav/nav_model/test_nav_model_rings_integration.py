@@ -148,12 +148,15 @@ def test_to_features_emits_annulus_when_polyline_compresses_radially(
         mask[v, u] = True
     model = _build_rings(obs=fake_obs, edge_mask=mask, constituent_count=2)
     features = model.to_features(cast(Any, None))
-    types = {f.feature_type for f in features}
-    assert NavFeatureType.RING_ANNULUS in types
-    annulus = next(f for f in features if f.feature_type is NavFeatureType.RING_ANNULUS)
+    annulus_features = [f for f in features if f.feature_type is NavFeatureType.RING_ANNULUS]
+    # Two annulus-eligible polylines collapse into ONE composite per planet.
+    assert len(annulus_features) == 1
+    annulus = annulus_features[0]
     assert isinstance(annulus.geometry, RingAnnulusGeometry)
     assert isinstance(annulus.flags, RingAnnulusFlags)
     assert annulus.flags.planet_name == 'SATURN'
+    # The composite reports the total number of fused constituent edges.
+    assert annulus.flags.constituent_edge_count == 2
 
 
 def test_to_features_emits_annulus_when_kmpp_above_planet_threshold(
@@ -175,6 +178,58 @@ def test_to_features_emits_annulus_when_kmpp_above_planet_threshold(
     types = {f.feature_type for f in features}
     assert NavFeatureType.RING_ANNULUS in types
     assert NavFeatureType.RING_EDGE not in types
+
+
+def test_to_features_collapses_multi_ring_input_into_one_annulus(
+    fake_obs: FakeObs,
+) -> None:
+    """Multiple surviving rings under force_annulus produce ONE composite feature.
+
+    Without the composite step each per-ring annulus would carry
+    ``constituent_count=1`` and the reliability formula
+    (``min(1, k/5) * 0.7 * sigmoid(extent/50 - 1)``) would gate every
+    one of them out (0.14 < 0.30 default threshold).  The composite
+    feature carries ``constituent_count = N`` so the formula scales
+    with the number of rings and clears the gate on a real ring scene.
+    """
+    rows, cols = 110, 110
+    model = NavModelRings('rings:SATURN', cast(Any, fake_obs))
+    feat = _ring_feature()
+    # Three distinct edge masks at different image rows — each a thin
+    # 1-pixel ridge so each polyline qualifies for the per-polyline
+    # radial-extent gate as well as the system-level km/px gate.
+    masks = []
+    for v_row in (40, 50, 60):
+        m = np.zeros((rows, cols), dtype=bool)
+        m[v_row, 30:80] = True
+        masks.append(m)
+    render_results = [
+        (
+            feat,
+            m.astype(np.float64),
+            m.copy(),
+            1.0,
+            [(m, f'ring_{i}', 'outer')],
+        )
+        for i, m in enumerate(masks)
+    ]
+    model._render_results = cast(Any, render_results)
+    model._planet = 'SATURN'
+    model._km_per_pixel_radial = 20000.0  # force_annulus
+    model._extfov_v_size = rows
+    model._extfov_u_size = cols
+    model._predicted_center_vu = (rows / 2.0, cols / 2.0)
+    model._subject_range_km = 1.5e9
+    features = model.to_features(cast(Any, None))
+    annulus_features = [f for f in features if f.feature_type is NavFeatureType.RING_ANNULUS]
+    assert len(annulus_features) == 1
+    annulus = annulus_features[0]
+    assert isinstance(annulus.flags, RingAnnulusFlags)
+    assert annulus.flags.constituent_edge_count == 3
+    # The composite mask carries every constituent ring's pixels.
+    assert annulus.template_mask is not None
+    for m in masks:
+        assert annulus.template_mask[m].all()
 
 
 def test_to_features_emits_edge_when_kmpp_below_planet_threshold(

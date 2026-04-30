@@ -318,3 +318,128 @@ def test_ring_annulus_diagnostics_records_peak_to_runner_up_ratio(
     result = technique.navigate([feature], context)
     assert isinstance(result.diagnostics, RingAnnulusDiagnostics)
     assert result.diagnostics.peak_to_runner_up_ratio > 1.0
+
+
+def test_ring_annulus_navigate_raises_when_no_eligible_features(
+    make_nav_context: NavContextFactory,
+) -> None:
+    """``navigate`` raises ``ValueError`` if every input feature lacks a template.
+
+    The orchestrator gates with ``is_feasible`` before invoking
+    ``navigate``, but a direct caller (a debugger, a manual harness)
+    can skip that step.  The boundary check makes the failure mode
+    explicit instead of letting downstream code fail with an opaque
+    array-shape error.
+    """
+    feature = NavFeature(
+        feature_id='ring_annulus:no_template',
+        feature_type=NavFeatureType.RING_ANNULUS,
+        source_model='rings',
+        geometry=RingAnnulusGeometry(
+            bbox_extfov_vu=(0, 0, 10, 10),
+            predicted_center_vu=(5.0, 5.0),
+        ),
+        subject_range_km=1.0e9,
+        position_cov_px=None,
+        intensity_sigma_rel=0.0,
+        preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
+        reliability=0.4,
+        reliability_reasons=NavReliabilityBreakdown(visible_arc_fraction=1.0),
+        usable_types=frozenset({NavFeatureType.RING_ANNULUS}),
+        flags=RingAnnulusFlags(planet_name='no_template', constituent_edge_count=0),
+    )
+    technique = RingAnnulusNav()
+    context = make_nav_context(np.zeros((100, 100), dtype=np.float64), extfov_margin_vu=(16, 16))
+    with pytest.raises(ValueError, match=r'No usable RING_ANNULUS templates available'):
+        technique.navigate([feature], context)
+
+
+def test_upsample_factor_returns_default_when_offset_block_missing() -> None:
+    """``_upsample_factor`` falls back to the module default when ``config.offset`` is None."""
+    from nav.nav_technique.nav_technique_ring_annulus import _DEFAULT_UPSAMPLE_FACTOR
+
+    technique = RingAnnulusNav()
+
+    class _StubConfig:
+        offset = None
+
+    technique._config = _StubConfig()  # type: ignore[assignment]
+    assert technique._upsample_factor() == _DEFAULT_UPSAMPLE_FACTOR
+
+
+def test_upsample_factor_returns_default_when_value_missing() -> None:
+    """``_upsample_factor`` falls back when the offset block has no upsample key."""
+    from nav.nav_technique.nav_technique_ring_annulus import _DEFAULT_UPSAMPLE_FACTOR
+
+    technique = RingAnnulusNav()
+
+    class _StubOffset:
+        pass
+
+    class _StubConfig:
+        offset = _StubOffset()
+
+    technique._config = _StubConfig()  # type: ignore[assignment]
+    assert technique._upsample_factor() == _DEFAULT_UPSAMPLE_FACTOR
+
+
+def test_upsample_factor_rejects_bool_value() -> None:
+    """Boolean values are rejected even though Python treats ``bool`` as ``int``."""
+    technique = RingAnnulusNav()
+
+    class _StubOffset:
+        correlation_fft_upsample_factor = True
+
+    class _StubConfig:
+        offset = _StubOffset()
+
+    technique._config = _StubConfig()  # type: ignore[assignment]
+    with pytest.raises(ValueError, match=r'must be a real \(non-bool\) number'):
+        technique._upsample_factor()
+
+
+def test_upsample_factor_rejects_string_value() -> None:
+    """Non-numeric values raise ``ValueError`` naming the config key."""
+    technique = RingAnnulusNav()
+
+    class _StubOffset:
+        correlation_fft_upsample_factor = 'abc'
+
+    class _StubConfig:
+        offset = _StubOffset()
+
+    technique._config = _StubConfig()  # type: ignore[assignment]
+    with pytest.raises(ValueError, match=r'correlation_fft_upsample_factor must be a real'):
+        technique._upsample_factor()
+
+
+def test_upsample_factor_rejects_zero() -> None:
+    """Values below 1 are out of range and raise ``ValueError``."""
+    technique = RingAnnulusNav()
+
+    class _StubOffset:
+        correlation_fft_upsample_factor = 0
+
+    class _StubConfig:
+        offset = _StubOffset()
+
+    technique._config = _StubConfig()  # type: ignore[assignment]
+    with pytest.raises(ValueError, match=r'must lie in \[1,'):
+        technique._upsample_factor()
+
+
+def test_upsample_factor_rejects_overlarge_value() -> None:
+    """Values above the upper bound raise ``ValueError`` to prevent FFT overflow."""
+    from nav.nav_technique.nav_technique_ring_annulus import _MAX_UPSAMPLE_FACTOR
+
+    technique = RingAnnulusNav()
+
+    class _StubOffset:
+        correlation_fft_upsample_factor = _MAX_UPSAMPLE_FACTOR + 1
+
+    class _StubConfig:
+        offset = _StubOffset()
+
+    technique._config = _StubConfig()  # type: ignore[assignment]
+    with pytest.raises(ValueError, match=r'must lie in \[1,'):
+        technique._upsample_factor()

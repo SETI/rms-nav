@@ -22,6 +22,7 @@ handle ``len(features) > 1``.
 
 from __future__ import annotations
 
+import numbers
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -42,6 +43,21 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only import
     from nav.nav_orchestrator.nav_context import NavContext
 
 __all__ = ['RingAnnulusNav']
+
+
+_DEFAULT_UPSAMPLE_FACTOR: int = 128
+"""Default FFT upsample factor when ``config.offset`` is missing."""
+
+
+_MAX_UPSAMPLE_FACTOR: int = 1_000_000
+"""Upper bound on the FFT upsample factor.
+
+A misconfigured value above this would push the upsampled correlation
+peak grid into multi-gigabyte allocations and effectively hang the
+process; raise ``ValueError`` instead.  The bound is generous — the
+shipped default is 128 — so legitimate per-instrument tuning is never
+clipped.
+"""
 
 
 def _filter_annulus_features(features: list[NavFeature]) -> list[NavFeature]:
@@ -155,6 +171,12 @@ class RingAnnulusNav(NavTechnique):
                 len(eligible),
                 len(features),
             )
+            if not eligible:
+                raise ValueError(
+                    'No usable RING_ANNULUS templates available for navigation '
+                    '(every input feature was missing a template payload).  '
+                    'Call is_feasible() before navigate() to gate this case.'
+                )
             extfov_shape = context.image_ext.shape
             template_img, template_mask = compose_template_features(eligible, extfov_shape)
             margin_v, margin_u = _search_window_for_obs(context)
@@ -227,11 +249,31 @@ class RingAnnulusNav(NavTechnique):
             )
 
     def _upsample_factor(self) -> int:
-        """Return the FFT upsample factor configured under ``config.offset``."""
+        """Return the FFT upsample factor configured under ``config.offset``.
+
+        Validates the raw value: must be a real (non-bool) number, must
+        coerce to ``int >= 1``, and must lie below
+        :data:`_MAX_UPSAMPLE_FACTOR` so a malformed config cannot push
+        the FFT into a multi-gigabyte allocation.
+        """
         offset_block = getattr(self.config, 'offset', None)
         if offset_block is None:
-            return 128
-        return int(getattr(offset_block, 'correlation_fft_upsample_factor', 128))
+            return _DEFAULT_UPSAMPLE_FACTOR
+        raw = getattr(offset_block, 'correlation_fft_upsample_factor', None)
+        if raw is None:
+            return _DEFAULT_UPSAMPLE_FACTOR
+        if isinstance(raw, bool) or not isinstance(raw, numbers.Real):
+            raise ValueError(
+                f'config.offset.correlation_fft_upsample_factor must be a '
+                f'real (non-bool) number; got {type(raw).__name__} {raw!r}'
+            )
+        coerced = int(raw)
+        if coerced < 1 or coerced > _MAX_UPSAMPLE_FACTOR:
+            raise ValueError(
+                f'config.offset.correlation_fft_upsample_factor must lie in '
+                f'[1, {_MAX_UPSAMPLE_FACTOR}]; got {raw!r}'
+            )
+        return coerced
 
 
 class _AnnulusConfidenceContext:
@@ -258,14 +300,15 @@ class _AnnulusConfidenceContext:
 def _search_window_for_obs(context: NavContext) -> tuple[int, int]:
     """Return the ``(margin_v, margin_u)`` search window for the NCC.
 
-    Mirrors the helper used by the DT and disc techniques: the
-    technique respects the per-instrument extfov margin attached to the
-    observation; if the obs does not expose that attribute (test
-    fixtures) a 32 x 32 fallback is used so the technique still runs
-    end-to-end.
+    The technique reads the per-instrument extfov margin from the
+    observation.  ``extfov_margin_vu`` is a mandatory attribute on
+    every ``ObsSnapshotInst``; test fixtures must set it as well
+    (the shared ``FakeObs`` defaults to ``(32, 32)``).  An obs
+    missing the attribute is a programming error and surfaces as
+    ``AttributeError`` rather than a silent fallback.
     """
-    obs = context.obs
-    margin = getattr(obs, 'extfov_margin_vu', None)
-    if margin is None:
-        return (32, 32)
+    # ``NavContext.obs`` is typed as ``object`` to avoid an import cycle
+    # with ``ObsSnapshotInst``; the attribute lookup is mandatory at
+    # runtime even though mypy cannot see it.
+    margin = context.obs.extfov_margin_vu  # type: ignore[attr-defined]
     return (int(margin[0]), int(margin[1]))

@@ -182,8 +182,12 @@ class Config:
         spec or uses ``None`` to opt out of confidence evaluation).
 
         Imported inside the method because ``nav.nav_technique.nav_technique``
-        imports ``nav.support.nav_base`` which imports this module —
-        promoting the import to the top would deadlock the package init.
+        imports ``nav.support.nav_base`` which imports ``nav.config``;
+        promoting these imports to the module top would fail with
+        ``ImportError: cannot import name 'DEFAULT_CONFIG' from
+        partially initialized module 'nav.config'``.  This lazy-import
+        site is the minimum cycle break — the other modules can keep
+        their top-of-file imports.
         """
         from nav.nav_technique.confidence_config import (
             ConfidenceConfigError,
