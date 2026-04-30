@@ -42,9 +42,16 @@ each rendered edge mask into a polyline, and emits one of:
 - ``RING_ANNULUS`` — multi-ring composite template carried on
   ``NavFeature.template_img`` with a
   :class:`~nav.feature.geometry.RingAnnulusGeometry` payload.  Emitted
-  when the surviving polyline compresses radially below
-  :data:`~nav.nav_model.nav_model_rings.RING_ANNULUS_MAX_RADIAL_PX`
-  (the edges are not separable at the image scale).
+  when the surviving polyline compresses radially below the
+  per-planet ``feature_emission.ring_annulus.max_radial_px`` threshold
+  in ``config_510_techniques.yaml`` (individual edges are not
+  separable at the image scale), or when the system-level km/px
+  threshold ``feature_emission.ring_annulus.kmpp_threshold`` fires
+  (the entire ring system spans only a handful of pixels).  Multiple
+  surviving rings collapse into a single composite annulus per planet
+  with ``constituent_edge_count = N``; the reliability formula
+  ``min(1, k/5) * 0.7 * sigmoid(extent/50 - 1)`` then scales with
+  the number of constituent rings.
 
 Per-image diagnostics on ``self._metadata``: ``planet``, ``epoch``,
 ``feature_count``, and a ``features`` list of ``{'name', 'type'}``

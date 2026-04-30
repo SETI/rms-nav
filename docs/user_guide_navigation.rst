@@ -132,10 +132,11 @@ Navigation options
 
 * ``--nav-techniques LIST``: a comma-separated glob-pattern list selecting
   which registered ``NavTechnique`` subclasses run.  Implemented techniques
-  today are ``BodyLimbNav``, ``BodyTerminatorNav``, and ``RingEdgeNav``;
-  several more (``BodyDiscCorrelateNav``, ``BodyBlobNav``, ``RingAnnulusNav``,
-  ``StarFieldFromCatalogNav``, ``StarUniqueMatchNav``, ``StarRefineNav``)
-  are planned but not yet shipped.  Defaults to ``*`` (all registered
+  today are ``BodyDiscCorrelateNav``, ``BodyBlobNav``, ``BodyLimbNav``,
+  ``BodyTerminatorNav``, ``RingAnnulusNav``, and ``RingEdgeNav``; the
+  star techniques (``StarFieldFromCatalogNav``, ``StarUniqueMatchNav``,
+  ``StarRefineNav``) are planned but not yet shipped.  Defaults to ``*``
+  (all registered
   techniques run); a leading ``!`` excludes a pattern (e.g.
   ``--nav-techniques '!RingEdgeNav'`` runs every technique except the
   ring-edge fitter).  Multiple feasible techniques run in parallel and the
@@ -406,6 +407,26 @@ final answer.
 Best for: scenes containing bright ring edges (typical Cassini ISS
 Saturn-rings imagery).
 
+``RingAnnulusNav``
+^^^^^^^^^^^^^^^^^^
+
+Pyramid-NCC fit on every ``RING_ANNULUS`` feature.  ``RING_ANNULUS``
+features are emitted by the rings model in two regimes: when adjacent
+ring edges compress radially below the per-planet
+``feature_emission.ring_annulus.max_radial_px`` threshold in
+``config_510_techniques.yaml`` (individual edges no longer separable),
+and when the per-planet km/px threshold fires on a low-resolution
+ring scene where the entire ring system spans only a handful of
+pixels.  In either case the rings model collapses every surviving
+ring into a single composite annulus per planet.  Multi-planet scenes
+(rare) emit one ``RING_ANNULUS`` per ring system; the technique fuses
+them via Z-buffer paint and runs one joint NCC.
+``use_gradient='auto'`` self-selects raw vs gradient mode per image.
+
+Best for: low-resolution ring scenes where ``RingEdgeNav`` cannot
+separate individual edges (distant Cassini ring views; potential
+NHLORRI Pluto/Charon ring geometries).
+
 ``NavTechniqueManual``
 ^^^^^^^^^^^^^^^^^^^^^^
 
@@ -443,19 +464,14 @@ Pending techniques (not yet shipped)
 The following techniques are designed and have stub diagnostics in
 place; their concrete implementations are pending.
 
-* ``BodyDiscCorrelateNav`` -- full-disc NCC for fully-in-FOV bodies.
-* ``BodyBlobNav`` -- centroid fit for under-resolved or irregular bodies.
-* ``RingAnnulusNav`` -- multi-ring composite NCC for compressed ring
-  geometries.
 * ``StarFieldFromCatalogNav`` -- triplet-hash + RANSAC pattern match for
   star-rich frames.
 * ``StarUniqueMatchNav`` -- direct catalog-uniqueness match for sparse
   star fields with one or two bright stars.
 * ``StarRefineNav`` -- prior-refining single-star polish (pass-2).
 
-Until these land, scenes whose only viable feature type is ``STAR``,
-``BODY_DISC``, ``BODY_BLOB``, or ``RING_ANNULUS`` will report
-``status_reason=no_feasible_techniques``.
+Until these land, scenes whose only viable feature type is ``STAR`` will
+report ``status_reason=no_feasible_techniques``.
 
 Filtering examples
 ------------------

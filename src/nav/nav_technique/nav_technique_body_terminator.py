@@ -24,11 +24,7 @@ from nav.feature.feature import NavFeature
 from nav.feature.feature_type import NavFeatureType
 from nav.feature.flags import TerminatorArcFlags
 from nav.feature.geometry import TerminatorPolyline
-from nav.nav_technique.confidence import (
-    ConfidenceSpec,
-    ConfidenceTerm,
-    evaluate_sigmoid_combination,
-)
+from nav.nav_technique.confidence import evaluate_sigmoid_combination
 from nav.nav_technique.diagnostics import BodyTerminatorDiagnostics
 from nav.nav_technique.dt_fitting import (
     AT_EDGE_TOLERANCE_PX,
@@ -45,47 +41,11 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only import
 
 __all__ = ['BodyTerminatorNav']
 
-
-TERMINATOR_MIN_ARC_PX: float = 30.0
-"""Minimum surviving polyline length per TERMINATOR_ARC feature for feasibility."""
-
-
-SPURIOUS_DT_RMS_FACTOR: float = 5.0
-"""Final DT residual exceeding this many limb-sigmas marks the result spurious."""
-
-
-SPURIOUS_DT_FLOOR_PX: float = 4.0
-"""Floor for the spurious-detection threshold (terminators are softer than limbs)."""
-
-
-SPURIOUS_MIN_INLIERS: int = 6
-"""Below this Tukey-inlier count the final fit is flagged spurious."""
-
-
-_BODY_TERMINATOR_CONFIDENCE_SPEC = ConfidenceSpec(
-    alpha0=-1.0,
-    terms=(
-        ConfidenceTerm(feature='visible_terminator_arc_fraction', alpha=2.0),
-        ConfidenceTerm(feature='dt_fit_rms_px', alpha=-1.0),
-        ConfidenceTerm(
-            feature='visible_arc_px',
-            alpha=0.4,
-            divisor=100.0,
-            cap_at=1.0,
-        ),
-        ConfidenceTerm(feature='mean_phase_angle_factor', alpha=1.0),
-        ConfidenceTerm(feature='mean_albedo_penalty', alpha=-1.5),
-    ),
-    hard_zero_if={'at_edge': True, 'spurious': True},
-)
-"""Default confidence spec for the body-terminator technique.
-
-Terminator ceiling sits below the limb's ceiling because albedo variation
-softens the photometric edge; the phase-angle-factor term boosts
-crescent-illumination geometries (where the terminator is geometrically
-sharp) and the albedo-penalty term suppresses scenes where surface
-mottling would otherwise dominate.
-"""
+# All numeric tunables for this technique live in
+# ``config_files/config_510_techniques.yaml`` under
+# ``techniques.BodyTerminatorNav.tuning``.  No Python-level fallback;
+# missing-key access in ``__init__`` is a KeyError so a config typo
+# fails fast at process startup.
 
 
 def _build_polyline_mask(
@@ -170,7 +130,6 @@ class BodyTerminatorNav(NavTechnique):
     name = 'BodyTerminatorNav'
     accepts_feature_types = frozenset({NavFeatureType.TERMINATOR_ARC})
     requires_prior = False
-    confidence_spec = _BODY_TERMINATOR_CONFIDENCE_SPEC
     confidence_attributes = frozenset(
         {
             'at_edge',
@@ -187,6 +146,11 @@ class BodyTerminatorNav(NavTechnique):
 
     def __init__(self, *, config: Config | None = None) -> None:
         super().__init__(config=config)
+        self.config.read_config()  # ensure cls.tuning is populated
+        self._min_arc_px = float(self.tuning['min_arc_px'])
+        self._spurious_dt_rms_factor = float(self.tuning['spurious_dt_rms_factor'])
+        self._spurious_dt_floor_px = float(self.tuning['spurious_dt_floor_px'])
+        self._spurious_min_inliers = int(self.tuning['spurious_min_inliers'])
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Return whether the input set carries a usable terminator arc.
@@ -199,14 +163,14 @@ class BodyTerminatorNav(NavTechnique):
 
         Returns:
             ``NavFeasibilityReport`` with ``feasible=True`` iff at least
-            one TERMINATOR_ARC has at least :data:`TERMINATOR_MIN_ARC_PX`
+            one TERMINATOR_ARC has at least the configured ``min_arc_px``
             surviving vertices.
         """
         eligible = [
             f
             for f in features
             if isinstance(f.geometry, TerminatorPolyline)
-            and f.geometry.vertices_vu.shape[0] >= TERMINATOR_MIN_ARC_PX
+            and f.geometry.vertices_vu.shape[0] >= self._min_arc_px
         ]
         if not eligible:
             return NavFeasibilityReport(
@@ -224,9 +188,8 @@ class BodyTerminatorNav(NavTechnique):
 
         Parameters:
             features: Feature list filtered to the technique's accepted
-                types.  Polylines with fewer than
-                :data:`TERMINATOR_MIN_ARC_PX` vertices are dropped before
-                fitting.
+                types.  Polylines with fewer than the configured
+                ``min_arc_px`` vertices are dropped before fitting.
             context: Per-image NavContext.  Must carry
                 ``image_edge_dt_ext`` and ``image_gradient_vu_ext`` —
                 both populated by the orchestrator's ``_make_context``.
@@ -246,7 +209,7 @@ class BodyTerminatorNav(NavTechnique):
                 f
                 for f in features
                 if isinstance(f.geometry, TerminatorPolyline)
-                and f.geometry.vertices_vu.shape[0] >= TERMINATOR_MIN_ARC_PX
+                and f.geometry.vertices_vu.shape[0] >= self._min_arc_px
             ]
             self.logger.info(
                 'Consuming %d TERMINATOR_ARC features (out of %d offered)',
@@ -299,8 +262,12 @@ class BodyTerminatorNav(NavTechnique):
             )
             sigma_min_px = float(sigmas.min()) if sigmas.size else 1.0
             spurious = (
-                result.rms_px > max(SPURIOUS_DT_FLOOR_PX, SPURIOUS_DT_RMS_FACTOR * sigma_min_px)
-                or result.inlier_count < SPURIOUS_MIN_INLIERS
+                result.rms_px
+                > max(
+                    self._spurious_dt_floor_px,
+                    self._spurious_dt_rms_factor * sigma_min_px,
+                )
+                or result.inlier_count < self._spurious_min_inliers
             )
             visible_terminator_arc_fraction = _aggregate_visible_arc_fraction(eligible_features)
             mean_phase = float(np.mean(phase_factors)) if phase_factors else 0.0
@@ -406,9 +373,15 @@ def _aggregate_visible_arc_fraction(features: list[NavFeature]) -> float:
 
 
 def _search_window_for_obs(context: NavContext) -> tuple[int, int]:
-    """Return ``(margin_v, margin_u)`` for the coarse search."""
-    obs = context.obs
-    margin = getattr(obs, 'extfov_margin_vu', None)
-    if margin is None:
-        return (32, 32)
+    """Return ``(margin_v, margin_u)`` for the coarse search.
+
+    ``extfov_margin_vu`` is a mandatory attribute on every
+    ``ObsSnapshotInst``; test fixtures must set it as well.  An obs
+    missing the attribute is a programming error and surfaces as
+    ``AttributeError`` rather than a silent fallback.
+    """
+    # ``NavContext.obs`` is typed as ``object`` to avoid an import cycle
+    # with ``ObsSnapshotInst``; the attribute lookup is mandatory at
+    # runtime even though mypy cannot see it.
+    margin = context.obs.extfov_margin_vu  # type: ignore[attr-defined]
     return (int(margin[0]), int(margin[1]))

@@ -14,6 +14,8 @@
 #   -c, --code       Run only code checks (ruff, mypy, pytest)
 #   -d, --docs       Run only documentation build (Sphinx + PyMarkdown lint)
 #   -m, --markdown   Run only Markdown lint (PyMarkdown)
+#   -i, --integration Include integration tests (slow; require PDS3_HOLDINGS_DIR
+#                    + SPICE kernels).  Default: skipped.
 #   -h, --help       Show this help message
 #
 # Environment:
@@ -50,6 +52,7 @@ RUN_CODE=false
 RUN_DOCS=false
 RUN_MARKDOWN=false
 SCOPE_SPECIFIED=false
+RUN_INTEGRATION=false
 
 # Get script directory and project root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -160,6 +163,10 @@ while [[ $# -gt 0 ]]; do
             SCOPE_SPECIFIED=true
             shift
             ;;
+        -i|--integration)
+            RUN_INTEGRATION=true
+            shift
+            ;;
         -h|--help)
             show_usage
             exit 0
@@ -187,6 +194,12 @@ if [ "$PARALLEL" = true ]; then
     print_info "Running checks in PARALLEL mode"
 else
     print_info "Running checks in SEQUENTIAL mode"
+fi
+
+if [ "$RUN_INTEGRATION" = true ]; then
+    print_info "Integration tests: ENABLED (will run; require PDS3_HOLDINGS_DIR + SPICE)"
+else
+    print_info "Integration tests: SKIPPED (default; pass -i / --integration to include)"
 fi
 
 # Function to run code checks (ruff, mypy, pytest)
@@ -244,9 +257,18 @@ run_code_checks() {
         failed_checks="${failed_checks}Code - Mypy"$'\n'
     fi
 
-    # Pytest
-    print_info "Running pytest..."
-    if python -m pytest tests -q --cov -n auto; then
+    # Pytest.  ``addopts = ["-m", "not integration"]`` in pyproject.toml
+    # excludes integration tests by default; with --integration / -i,
+    # override by passing ``-m ""`` so the marker filter accepts every
+    # test (including ones marked ``integration``).
+    if [ "$RUN_INTEGRATION" = true ]; then
+        print_info "Running pytest (with integration tests)..."
+        pytest_marker_args=("-m" "")
+    else
+        print_info "Running pytest (integration tests skipped — pass -i to include)..."
+        pytest_marker_args=()
+    fi
+    if python -m pytest tests -q --cov -n auto "${pytest_marker_args[@]}"; then
         print_success "Pytest passed"
     else
         print_error "Pytest failed"

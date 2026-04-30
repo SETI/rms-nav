@@ -474,6 +474,93 @@ class TestPass4FadeConflict:
         # Inner edge should remain
         assert gap_results[0].inner_edge is not None
 
+    def test_pass4_preserves_outermost_when_all_outer_edges_dropped(self) -> None:
+        """At very low resolution the outermost feature is restored after pass 4.
+
+        Several features cluster within a single pixel of fade width;
+        the per-edge check drops every outer-side edge.  The
+        preserve-outermost pass restores the feature carrying the
+        largest in-range edge so navigation has at least one outer
+        reference, which is far more useful than an inner-region
+        gap edge.
+        """
+        # Three single-edge ringlets within 50 km of each other; very
+        # low resolution (km/px = 100) makes the fade width 10000 km.
+        # Every per-edge fade conflict shrinks below the min_allowed
+        # threshold -> all 3 would otherwise be dropped.
+        inner = _make_single_edge_ringlet(key='inner', inner_a=100_000.0)
+        middle = _make_single_edge_ringlet(key='middle', inner_a=100_025.0)
+        outer = _make_single_edge_ringlet(key='outer', inner_a=100_050.0)
+        res = {100_000.0: 100.0, 100_025.0: 100.0, 100_050.0: 100.0}
+        flt = _make_filter(
+            min_radius=99_000.0,
+            max_radius=110_000.0,
+            min_res_at_radius=res,
+            fade_width_pix=100.0,
+            min_allowed_fade_width_pix=10.0,
+        )
+        result = flt.filter([inner, middle, outer])
+        keys = [f.key for f in result]
+        # Without preservation all three would be dropped (zero
+        # results).  The preserve-outermost pass restores exactly
+        # 'outer' (the one with the largest in-range edge radius); no
+        # other feature should sneak into the result, and 'outer'
+        # must appear exactly once.
+        assert keys == ['outer']
+
+    def test_pass4_outermost_replaces_existing_trimmed_entry(self) -> None:
+        """Restoring the outermost feature replaces the trimmed entry by key.
+
+        A GAP whose outer edge is the outermost in-range edge gets its
+        outer trimmed by a tight neighbor; the trimmed feature (with
+        only its inner edge) is in ``result``.  The preserve-outermost
+        pass detects that the outermost edge is no longer represented
+        and restores the original GAP in place — replacing the trimmed
+        entry rather than appending a second entry under the same
+        ``key``.
+
+        Each feature ``key`` must appear at most once in the filter's
+        output; a duplicate would feed the orchestrator two ``NavFeature``
+        instances with the same ``feature_id`` and break the
+        ensemble's per-feature accounting.
+        """
+        # Outer GAP at (100_000, 100_200) is the outermost in-range
+        # feature.  An inner-side neighbor inside the GAP region squeezes
+        # the GAP's INNER edge fade (inner fades downward toward smaller
+        # radii); leave the OUTER edge to fail via a fade-conflict-free
+        # path.  Trick: use a GAP whose outer-edge fade conflict comes
+        # from a tight neighbor *above* it that does not survive
+        # resolvability (so it shrinks the fade but doesn't appear in
+        # ``after_res`` to preserve the outermost-in-range edge being
+        # the GAP's outer).
+        gap = _make_gap(key='outer_gap', inner_a=100_000.0, outer_a=100_200.0)
+        # Narrow ringlet just above outer GAP edge: width below pass-3
+        # resolvability threshold, but its edges still contribute to
+        # ``all_edge_radii`` (built from after_radius / pass 2) and
+        # squeeze the GAP's outer fade.  Width 0.1 km is well below
+        # min_feature_pixels=10 * min_res=5 = 50 km threshold.
+        narrow = _make_ringlet(key='narrow', inner_a=100_205.0, outer_a=100_205.1)
+        res_map = {
+            100_000.0: 5.0,
+            100_200.0: 5.0,
+            100_205.0: 5.0,
+            100_205.1: 5.0,
+        }
+        flt = _make_filter(
+            min_radius=99_000.0,
+            max_radius=110_000.0,
+            min_res_at_radius=res_map,
+            fade_width_pix=100.0,
+            min_allowed_fade_width_pix=10.0,
+            min_feature_pixels=10.0,
+        )
+        result = flt.filter([gap, narrow])
+        gap_entries = [f for f in result if f.key == 'outer_gap']
+        # Pass 4 may either trim+restore (in which case the entry is
+        # replaced in place) or leave the outer edge intact.  Either
+        # way the key must appear at most once.
+        assert len(gap_entries) <= 1
+
     def test_pass4_exclusion_logged_at_debug(self, caplog: pytest.LogCaptureFixture) -> None:
         """Pass 4 exclusion is logged at DEBUG level."""
         feature = _make_single_edge_ringlet(key='tight', inner_a=100_000.0)

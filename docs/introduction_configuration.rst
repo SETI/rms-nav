@@ -25,6 +25,9 @@ overriding earlier ones:
    * ``config_060_titan.yaml``: Titan-specific navigation parameters
    * ``config_070_bootstrap.yaml``: Bootstrap navigation parameters (angles in degrees)
    * ``config_100_satellites.yaml``: Satellite definitions for each planet
+   * ``config_220_body_shape.yaml``: Per-body shape table (radii, ellipsoid
+     residual, crater scale, albedo) consumed by the body NavModel and feature
+     extractors
    * ``config_300_jupiter_rings.yaml``: Jupiter ring system parameters
    * ``config_310_saturn_rings.yaml``: Saturn ring system parameters
    * ``config_320_uranus_rings.yaml``: Uranus ring system parameters
@@ -34,16 +37,23 @@ overriding earlier ones:
    * ``config_420_inst_nhlorri.yaml``: New Horizons LORRI instrument-specific settings
    * ``config_430_inst_vgiss.yaml``: Voyager ISS instrument-specific settings
    * ``config_440_sim.yaml``: Simulated image settings
+   * ``config_510_techniques.yaml``: Per-NavTechnique confidence-formula
+     coefficients and runtime tunables (spurious-detection thresholds,
+     at-edge tolerances, minimum arc lengths) plus the planet-specific
+     ``feature_emission.ring_annulus`` block that decides RING_EDGE vs
+     RING_ANNULUS feature emission
    * ``config_900_backplanes.yaml``: Backplane generation settings
    * ``config_950_pds4.yaml``: PDS4 metadata and export settings for generated
      products, overrides for PDS4 label templates and mapping of internal fields
      to PDS4 keys
 
-   The 3-digit numeric prefix is the lexicographic merge order. Files in the
+   The 3-digit numeric prefix is the lexicographic merge order.  Files in the
    ``0xx`` range (000–099) are global / model-shared settings, ``1xx``
-   (100–199) are catalogues, ``3xx`` (300–399) are per-planet ring catalogues,
-   ``4xx`` (400–499) are per-instrument camera blocks, and ``9xx`` (900–999)
-   are downstream-product settings.
+   (100–199) are catalogues, ``2xx`` (200–299) are per-target tables (body
+   shape), ``3xx`` (300–399) are per-planet ring catalogues, ``4xx``
+   (400–499) are per-instrument camera blocks, ``5xx`` (500–599) are
+   per-technique tunables, and ``9xx`` (900–999) are downstream-product
+   settings.
 
 2. **User Default Configuration**: If present, the file
    ``nav_default_config.yaml`` in the current working directory is loaded. This
@@ -112,8 +122,15 @@ an image is being processed):
 
 **Navigation technique loggers**:
 
-* ``general.log_level_nav_correlate_all`` (default: ``INFO``): Logging level for
-  the ``correlate_all`` technique, including star refinement.
+The autonomous-navigation pipeline routes every per-image technique line
+through ``IMAGE_LOGGER``; there is no per-technique log-level knob.  Each
+technique opens a ``with self.logger.open(f'TECHNIQUE: {self.name}')``
+section so the per-image log file delimits each technique's contribution.
+The legacy ``general.log_level_nav_correlate_all`` knob is retained for
+backwards compatibility with any user config files that still set it but
+the autonomous techniques (``BodyDiscCorrelateNav``, ``BodyBlobNav``,
+``BodyLimbNav``, ``BodyTerminatorNav``, ``RingEdgeNav``,
+``RingAnnulusNav``) do not consult it.
 
 **Annotation**:
 

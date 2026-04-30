@@ -188,6 +188,44 @@ def test_orchestrator_no_features_emitted_yields_no_features_extracted(
     assert result.status_reason == NavStatusReason.NO_FEATURES_EXTRACTED
 
 
+def test_normalize_model_patterns_expands_bare_prefix() -> None:
+    """A bare prefix without colon expands to ``prefix:*`` so ``rings`` matches ``rings:SATURN``."""
+    from nav.nav_orchestrator.orchestrator import _normalize_model_patterns
+
+    names = ['stars', 'rings:SATURN', 'body:DIONE', 'body:SATURN']
+    out = _normalize_model_patterns('rings', names)
+    assert 'rings:*' in out
+
+
+def test_normalize_model_patterns_uppercases_value_after_colon() -> None:
+    """``body:saturn`` is normalized to ``body:SATURN``."""
+    from nav.nav_orchestrator.orchestrator import _normalize_model_patterns
+
+    names = ['body:SATURN', 'body:DIONE']
+    assert _normalize_model_patterns('body:saturn', names) == ['body:SATURN']
+
+
+def test_normalize_model_patterns_preserves_bang_exclusion() -> None:
+    """A leading ``!`` is preserved through the normalization."""
+    from nav.nav_orchestrator.orchestrator import _normalize_model_patterns
+
+    names = ['stars', 'rings:SATURN', 'body:DIONE']
+    out = _normalize_model_patterns('!rings', names)
+    assert '!rings:*' in out
+
+
+def test_normalize_model_patterns_preserves_star_token_for_unnamespaced_models() -> None:
+    """``stars`` (with no namespace) still matches ``stars`` after normalization."""
+    from nav.nav_orchestrator.orchestrator import _normalize_model_patterns
+
+    names = ['stars', 'rings:SATURN']
+    # With both styles in the registry the bare token should match both
+    # the literal name and any namespaced variant.
+    out = _normalize_model_patterns('stars', names)
+    assert 'stars' in out  # matches 'stars'
+    assert 'stars:*' in out  # matches potential 'stars:FOO'
+
+
 def test_orchestrator_only_models_filter_drops_models(fake_obs: _FakeObs) -> None:
     """only_models='!stars' drops the stars model entirely."""
     obs = fake_obs

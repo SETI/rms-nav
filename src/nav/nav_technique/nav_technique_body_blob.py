@@ -27,11 +27,7 @@ from nav.config import Config
 from nav.feature.feature import NavFeature
 from nav.feature.feature_type import NavFeatureType
 from nav.feature.geometry import BodyBlobGeometry
-from nav.nav_technique.confidence import (
-    ConfidenceSpec,
-    ConfidenceTerm,
-    evaluate_sigmoid_combination,
-)
+from nav.nav_technique.confidence import evaluate_sigmoid_combination
 from nav.nav_technique.diagnostics import BodyBlobDiagnostics
 from nav.nav_technique.dt_fitting import AT_EDGE_TOLERANCE_PX
 from nav.nav_technique.feasibility import NavFeasibilityReport
@@ -43,41 +39,6 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only import
     from nav.nav_orchestrator.nav_context import NavContext
 
 __all__ = ['BodyBlobNav']
-
-
-_BODY_BLOB_CONFIDENCE_SPEC = ConfidenceSpec(
-    alpha0=-1.0,
-    terms=(
-        # Brightness-weighted centroid uncertainty shrinks with SNR.
-        ConfidenceTerm(
-            feature='body_snr_inside_predicted_bbox',
-            alpha=0.5,
-            divisor=4.0,
-            cap_at=1.0,
-        ),
-        # Larger blobs carry more centroid signal per the design's
-        # ``sigmoid(extent_px / 8 - 1)`` factor.
-        ConfidenceTerm(
-            feature='body_extent_px',
-            alpha=1.0,
-            offset=8.0,
-            divisor=8.0,
-            cap_at=1.0,
-        ),
-        # Multi-body geometry over-determines the joint translation.
-        ConfidenceTerm(feature='blob_count', alpha=0.4, divisor=3.0, cap_at=1.0),
-    ),
-    hard_zero_if={'at_edge': True},
-    hard_cap=0.4,
-)
-"""Confidence spec for the body-blob technique.
-
-The hard cap of 0.4 mirrors the BODY_BLOB reliability formula: a
-brightness-weighted centroid is a weaker observation than a limb fit,
-so the technique cannot drive the ensemble past 0.4 confidence even
-when every term saturates.  Coefficients are placeholders pending
-calibration against the operator-curated image library.
-"""
 
 
 @dataclass(frozen=True)
@@ -321,7 +282,6 @@ class BodyBlobNav(NavTechnique):
     name = 'BodyBlobNav'
     accepts_feature_types = frozenset({NavFeatureType.BODY_BLOB})
     requires_prior = False
-    confidence_spec = _BODY_BLOB_CONFIDENCE_SPEC
     confidence_attributes = frozenset(
         {
             'at_edge',
@@ -478,6 +438,17 @@ class _BlobConfidenceContext:
 
 
 def _search_window_for_obs(context: NavContext) -> tuple[int, int]:
-    """Return the ``(margin_v, margin_u)`` search window for at-edge detection."""
-    margin_v, margin_u = context.obs.extfov_margin_vu
-    return (int(margin_v), int(margin_u))
+    """Return the ``(margin_v, margin_u)`` search window for at-edge detection.
+
+    The technique reads the per-instrument extfov margin from the
+    observation.  ``extfov_margin_vu`` is a mandatory attribute on
+    every ``ObsSnapshotInst``; test fixtures must set it as well
+    (the shared ``FakeObs`` defaults to ``(32, 32)``).  An obs
+    missing the attribute is a programming error and surfaces as
+    ``AttributeError`` rather than a silent fallback.
+    """
+    # ``NavContext.obs`` is typed as ``object`` to avoid an import cycle
+    # with ``ObsSnapshotInst``; the attribute lookup is mandatory at
+    # runtime even though mypy cannot see it.
+    margin = context.obs.extfov_margin_vu  # type: ignore[attr-defined]
+    return (int(margin[0]), int(margin[1]))

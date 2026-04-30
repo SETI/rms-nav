@@ -125,8 +125,8 @@ class Config:
 
         Documentation-only ``_sources`` blocks (and any other top-level or
         nested key that starts with an underscore) are stripped at load
-        time per Part 0 §74 — citations live alongside values for human
-        review without bloating the parsed config.
+        time so citations can live alongside values for human review
+        without bloating the parsed config.
         """
 
         yaml = YAML(typ='safe')
@@ -169,20 +169,59 @@ class Config:
         self._update_attrdicts()
         self._validate_registered_techniques()
 
-    @staticmethod
-    def _validate_registered_techniques() -> None:
-        """Validate every registered NavTechnique's confidence spec.
+    def _validate_registered_techniques(self) -> None:
+        """Load + validate every registered NavTechnique's confidence spec.
+
+        Builds each technique's :class:`ConfidenceSpec` from the
+        ``techniques.<technique_name>`` block in
+        ``config_510_techniques.yaml`` and assigns it to the class
+        attribute, then asserts every term references an attribute the
+        technique has declared in ``confidence_attributes``.  Test-only
+        registry entries whose ``name`` starts with ``_`` are exempt
+        from the YAML requirement (the test fixture supplies its own
+        spec or uses ``None`` to opt out of confidence evaluation).
 
         Imported inside the method because ``nav.nav_technique.nav_technique``
-        imports ``nav.support.nav_base`` which imports this module —
-        promoting the import to the top would deadlock the package init.
+        imports ``nav.support.nav_base`` which imports ``nav.config``;
+        promoting these imports to the module top would fail with
+        ``ImportError: cannot import name 'DEFAULT_CONFIG' from
+        partially initialized module 'nav.config'``.  This lazy-import
+        site is the minimum cycle break — the other modules can keep
+        their top-of-file imports.
         """
-        from nav.nav_technique.nav_technique import validate_registered_confidence_specs
+        from nav.nav_technique.confidence_config import (
+            ConfidenceConfigError,
+            load_confidence_spec,
+            load_technique_tuning,
+        )
+        from nav.nav_technique.nav_technique import (
+            NavTechnique,
+            validate_registered_confidence_specs,
+        )
 
+        techniques_block = dict(self._config_dict.get('techniques', {}))
+        for cls in NavTechnique._registry:
+            try:
+                cls.confidence_spec = load_confidence_spec(techniques_block, cls.name)
+            except ConfidenceConfigError:
+                if not cls.name.startswith('_'):
+                    raise
+                # Test-only technique: leave spec as inherited (None)
+                # so the test fixture controls it.  Tuning still resets
+                # below so a stale fixture value cannot leak across reloads.
+            cls.tuning = load_technique_tuning(techniques_block, cls.name)
         validate_registered_confidence_specs()
 
     def update_config(self, config_path: str | Path, read_default: bool = True) -> None:
         """Updates the current configuration with values from the specified YAML file.
+
+        When ``read_default`` is true the merged YAML is re-validated against
+        every registered :class:`NavTechnique` so per-technique overrides
+        (``confidence_spec`` and ``tuning``) take effect.  The internal
+        bootstrap path inside :meth:`read_config` calls with
+        ``read_default=False`` and validates once after the loop, since
+        early default files are loaded before
+        ``config_510_techniques.yaml`` has populated the techniques block.
 
         Parameters:
             config_path: Path to the configuration file containing update values.
@@ -199,6 +238,8 @@ class Config:
             else:
                 self._config_dict[key] = new_config[key]
         self._update_attrdicts()
+        if read_default:
+            self._validate_registered_techniques()
 
     def category(self, category: str) -> AttrDict:
         """Returns the configuration settings for the specified category."""

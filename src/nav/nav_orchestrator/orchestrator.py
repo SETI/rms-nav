@@ -100,10 +100,67 @@ class _ModelRegistry:
     models: list[NavModel] = field(default_factory=list)
 
     def filter_by_glob(self, patterns: str | list[str]) -> list[NavModel]:
-        """Return models whose ``name`` matches the glob pattern list."""
+        """Return models whose ``name`` matches the glob pattern list.
+
+        Model names follow the ``prefix:VALUE`` convention
+        (``rings:SATURN``, ``body:DIONE``, plain ``stars`` for the
+        catalog-driven star model).  This helper normalizes user
+        patterns to that convention so the common shorthand forms
+        match without requiring explicit globs:
+
+        - ``"rings"`` is expanded to ``"rings:*"`` so a pattern
+          missing a colon matches every namespaced model under that
+          prefix.  ``"stars"`` (which has no colon in its model name)
+          continues to match itself directly.
+        - The value part of ``"prefix:VALUE"`` is normalized to
+          uppercase so ``"body:saturn"`` matches ``"body:SATURN"``.
+
+        The leading-``!`` exclusion convention is preserved.
+        """
         names = [m.name for m in self.models]
-        kept = set(filter_technique_names(names, patterns))
+        normalized = _normalize_model_patterns(patterns, names)
+        kept = set(filter_technique_names(names, normalized))
         return [m for m in self.models if m.name in kept]
+
+
+def _normalize_model_patterns(patterns: str | list[str], names: list[str]) -> list[str]:
+    """Normalize model glob patterns to the ``prefix:VALUE`` convention.
+
+    See :meth:`_ModelRegistry.filter_by_glob` for the rules.
+
+    Parameters:
+        patterns: Single pattern or list of patterns from the user.
+        names: Available model names; used to detect whether the
+            ``prefix:*`` expansion makes sense (any name contains
+            ``:``).
+
+    Returns:
+        A list of normalized patterns suitable for
+        :func:`filter_technique_names`.
+    """
+    if isinstance(patterns, str):
+        patterns = [patterns]
+    has_namespaced_models = any(':' in n for n in names)
+    out: list[str] = []
+    for raw in patterns:
+        if raw.startswith('!'):
+            prefix, body = '!', raw[1:]
+        else:
+            prefix, body = '', raw
+        if ':' in body:
+            head, _, tail = body.partition(':')
+            normalized = f'{head}:{tail.upper()}'
+        elif has_namespaced_models and body and not any(c in body for c in '*?['):
+            # Plain prefix-only token (e.g. "rings"): expand to "rings:*"
+            # so it matches every namespaced model under that prefix.
+            # Names that have no namespace (like "stars") still match
+            # via the unmodified pattern below.
+            normalized = f'{body}:*'
+            out.append(prefix + body)  # also keep the literal for "stars"
+        else:
+            normalized = body
+        out.append(prefix + normalized)
+    return out
 
 
 class NavOrchestrator(NavBase):

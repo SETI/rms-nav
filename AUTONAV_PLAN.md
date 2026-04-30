@@ -3054,7 +3054,9 @@ starting points for Phase 6 / Phase 10 calibration work.
 
 ---
 
-## Phase 6 — Ring-annulus technique
+## Phase 6 — Ring-annulus technique (complete)
+
+**Status:** Shipped on branch `core_rewrite_phase6`.  The original specification (Goal / Scope / Tests / Documentation / Definition of done) is preserved verbatim below for reference; the post-merge "What shipped" subsection at the end records the actual delivery, the operator-curated library follow-ups, and the binding conventions established during the phase.
 
 **Goal:** Ship `RingAnnulusNav` for low-resolution ring scenes
 where individual edges compress into a small image area. After
@@ -3093,6 +3095,151 @@ Phase 10.
 ring-annulus); Part 3 (technique).
 
 **Tests / Documentation / Definition of done:** standard.
+
+### What shipped in Phase 6
+
+- **`nav.nav_technique.RingAnnulusNav`** (new module
+  `src/nav/nav_technique/nav_technique_ring_annulus.py`).  Filters
+  input to `RING_ANNULUS` features carrying a template payload, fuses
+  them via `nav.feature.composition.compose_template_features`
+  (Z-buffer paint by `subject_range_km` ascending so closer ring
+  systems overwrite farther ones), and runs
+  `nav.support.correlate.navigate_with_pyramid_kpeaks` with
+  `use_gradient='auto'`.  Mirrors `BodyDiscCorrelateNav`'s shape
+  exactly because the underlying problem is the same — composite
+  template plus extfov-margin-bounded NCC.  Confidence spec carries
+  the placeholder coefficients documented in
+  `developer_guide_techniques.rst` plus
+  `hard_zero_if={'at_edge': True, 'spurious': True}`.  Registered in
+  `nav.nav_technique.__init__.py`.
+- **Multi-planet scope honored.**  `is_feasible` and `navigate` both
+  handle `len(features) > 1`: the multi-planet case paints each
+  planet's annulus into the composite (Z-buffer ordering matches
+  BodyDiscCorrelateNav), and the diagnostics field `annulus_count`
+  records the number of fused features so the confidence formula can
+  reward joint geometric constraint.  The unit test
+  `test_ring_annulus_multi_planet_z_buffer_paint` plants two annuli
+  at different image centers with a shared offset and asserts
+  recovery within 1 px.
+- **`config_510_techniques.yaml` ships.**  Every existing technique's
+  confidence-formula coefficients (BodyDiscCorrelateNav, BodyBlobNav,
+  BodyLimbNav, BodyTerminatorNav, RingEdgeNav, RingAnnulusNav) move
+  out of per-technique Python module constants and into the new YAML
+  under `techniques.<technique_name>`.  `Config._validate_registered_techniques`
+  loads each spec via the new
+  `nav.nav_technique.confidence_config.load_confidence_spec` helper at
+  config-load time and assigns it to the technique's class attribute.
+  Test-only registry entries whose `name` starts with `_` are exempt
+  from the YAML requirement so existing fake-technique fixtures
+  continue to work.  Phase 10 calibration is now a YAML edit, not a
+  code change.
+- **`nav.nav_technique.confidence_config.load_confidence_spec` (new
+  module).**  Pure-parser helper that turns a `techniques[<name>]`
+  mapping into a frozen :class:`ConfidenceSpec`.  Validates every
+  field at load time and rejects malformed shapes with typed
+  `ConfidenceConfigError` errors (missing block, missing `alpha0`,
+  unknown block / term keys, non-finite values, bool-as-numeric,
+  zero divisor, non-mapping block, non-bool hard-zero gate value).
+- **Pre-existing mypy error fixed.**  `nav_technique_body_blob.py:482`
+  was unwrapping `context.obs.extfov_margin_vu` directly on
+  `obs: object`; harmonized to the same `getattr(obs,
+  'extfov_margin_vu', None)` fallback pattern the other three NCC
+  techniques use.  Reproduces on the pre-Phase-6 commit; cleared as
+  part of the Phase 6 "fix all check errors" sweep.
+- **Documentation.** `docs/developer_guide_techniques.rst` gains a
+  "Ring-annulus technique" section documenting algorithm, confidence
+  spec, diagnostics fields, and infeasibility cases; the three
+  "config_510_techniques.yaml is not yet in the tree" notes (one
+  each on BodyDiscCorrelateNav / BodyBlobNav / RingAnnulusNav) are
+  retired now that the YAML ships, and each section now points at
+  `config_510_techniques.yaml.techniques.<name>` and the loader as
+  the source-of-truth.  The user-guide navigation listing moves
+  `RingAnnulusNav` from the "pending techniques" list into the body
+  of techniques and adds a best-for / when-to-use paragraph
+  alongside the existing `RingEdgeNav` entry.
+- **Test coverage.** Two new end-to-end test files (22 tests total,
+  all pass):
+  * `tests/nav/nav_technique/test_nav_technique_ring_annulus.py` (9
+    tests) covers single-planet planted-offset recovery, multi-planet
+    Z-buffer paint, infeasibility on empty inputs and on
+    RING_ANNULUS features that lack a template, at-edge detection at
+    the search-window boundary, hard-zero confidence on at-edge,
+    registry presence, and diagnostic-field assertions on `ncc_peak`,
+    `annulus_count`, and `peak_to_runner_up_ratio`.
+  * `tests/nav/nav_technique/test_confidence_config.py` (13 tests)
+    covers bundled-YAML round-trip for every shipped technique,
+    missing block, missing `alpha0`, unknown block / term keys,
+    non-finite values, bool-as-numeric rejection, zero divisor,
+    non-mapping block, non-bool hard-zero gate value, and the
+    hard-cap / hard-zero / default-term-offset paths.
+- **Phase 6 review folder.**  `phase_06_review/` carries the seven
+  CRITIQUE_*.md files per the per-phase definition of done
+  (`CRITIQUE_PYTHON.md`, `CRITIQUE_DOCS.md`,
+  `CRITIQUE_FILECACHE.md`, `CRITIQUE_LOGGING.md`,
+  `CRITIQUE_TESTS.md`, `CRITIQUE_CODEBASE.md`,
+  `CRITIQUE_SUMMARY.md`).  No Critical or High findings; eleven Low
+  follow-ups documented in the summary.
+- **`PHASE6_LIBRARY_SEED.md`** — operator instructions for the
+  deferred sidecar work, including scenario picks (distant Saturn
+  ring view; rare multi-planet composite), sidecar YAML template
+  with required fields and expected status / tier values, and the
+  per-image workflow.
+
+### Phase 6 follow-ups uncovered during implementation
+
+These are the gaps surfaced by the design review and the synthetic-
+image unit tests during Phase 6 implementation.  None block Phase 6
+(the technique handles its documented happy and boundary paths) but
+all are concrete starting points for Phase 10 calibration work.
+
+- **Library expansion deferred to operator session.**  Phase 6 §B
+  calls for 1–2 low-res-ring library images with operator-verified
+  ground truth.  The sidecar schema enforces
+  `ground_truth.source: operator_verified`; fabricating a sidecar
+  without an operator session would either fail integration testing
+  on first run or — worse — encode wrong-truth values that would
+  mask a real regression.  The technique itself is fully implemented
+  and unit-tested; library expansion needs a follow-up operator
+  session running `nav_offset --manual` against candidate images
+  (distant Cassini ring views; rare multi-planet composites) plus
+  the dialog's **Save as Library Entry...** button.  Operator
+  instructions live in `PHASE6_LIBRARY_SEED.md` (scenario picks,
+  sidecar template, per-field guidance).  The autonomous-nav
+  integration test (`tests/integration/`) is parameterized by
+  sidecar discovery so the operator-added entries exercise the
+  technique end-to-end as soon as they land.
+- **`peak_to_runner_up_ratio` term wired with `alpha=0.0`.**  Same
+  posture as `BodyDiscCorrelateNav`: the diagnostic is populated
+  honestly via the `top_k_peaks` field on
+  `navigate_with_pyramid_kpeaks`'s result dict (the binding
+  established in Phase 5), but the confidence-formula contribution
+  is zero pending Phase 10 calibration.  Re-tunable without code
+  change by editing `config_510_techniques.yaml` once the
+  operator-curated library spans enough multi-peak vs
+  unambiguous-peak scenes to fit the alpha.
+- **`annulus_count` saturation cap chosen at 2, not 3.**  The
+  confidence-formula divisor for `annulus_count` is 2.0 (vs the
+  body-disc `body_count` divisor of 3.0).  Justification: the
+  current spacecraft fleet has at most a handful of multi-planet
+  ring scenes (Cassini approach phase imaged Jupiter and Saturn
+  together; New Horizons imaged Jupiter from Pluto distance), and
+  three-planet ring composites are not a realistic geometry from
+  any single observation.  If a future mission produces a 3+ planet
+  scene the calibration sweep will tune both the divisor and the
+  alpha by editing `config_510_techniques.yaml`; the wiring is in
+  place.
+
+### Final Phase-6 check matrix
+
+| Check | Status |
+|---|---|
+| `ruff check src tests` | clean |
+| `ruff format --check src tests` | clean (273 files) |
+| `mypy --strict src tests` | clean (274 source files) — pre-existing body_blob error fixed |
+| `pytest -n auto --dist=loadfile` (unit) | 1134 passed |
+| `phase_06_review/CRITIQUE_*.md` | written; no Critical / High findings; eleven Low follow-ups documented for opportunistic later work |
+| `sphinx-build -W -b html docs docs/_build` | clean |
+| `pymarkdown scan docs/ .cursor/ README.md CONTRIBUTING.md` | clean |
 
 ---
 

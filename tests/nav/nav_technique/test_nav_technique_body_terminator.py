@@ -18,11 +18,17 @@ from nav.feature.geometry import TerminatorPolyline
 from nav.nav_orchestrator.nav_context import NavContext
 from nav.nav_technique.diagnostics import BodyTerminatorDiagnostics
 from nav.nav_technique.nav_technique_body_terminator import (
-    TERMINATOR_MIN_ARC_PX,
     BodyTerminatorNav,
     _aggregate_terminator_features,
 )
 from nav.support.filters import NavFilterKind, NavFilterSpec
+
+# Tests pull this value from the technique's loaded YAML tuning so a
+# config edit retunes the assertions automatically.  ``BodyTerminatorNav``
+# instantiation populates ``cls.tuning`` via ``Config.read_config`` —
+# see ``test_nav_technique_body_limb.py`` for the same pattern.
+BodyTerminatorNav()
+TERMINATOR_MIN_ARC_PX = BodyTerminatorNav.tuning['min_arc_px']
 
 # Terminator tests always use a right-side crescent: a half-arc spanning
 # [-pi/2, pi/2] around the body centre.  Other techniques use different

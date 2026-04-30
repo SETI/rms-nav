@@ -1,0 +1,253 @@
+# Per-technique confidence-formula coefficients and runtime tunables.
+# Loaded at config-load time so any unknown reference fails fast at
+# startup rather than mid-image.  Each technique block looks like:
+#
+#   <technique_name>:
+#     alpha0: float                 # constant in the sigmoid argument
+#     terms:                        # confidence-formula linear terms
+#       - feature: str              # diagnostic-attribute name
+#         alpha: float              # linear coefficient
+#         offset: float | null      # subtracted before scaling (default 0)
+#         divisor: float | null     # divides after offset (default 1, non-zero)
+#         cap_at: float | null      # post-scale upper bound, in [0, 1] (optional)
+#     hard_zero_if:                 # mapping str -> bool; firing forces conf=0
+#       <attribute>: bool
+#     hard_cap: float | null        # optional post-sigmoid clamp, in [0, 1]
+#     tuning:                       # technique-specific runtime tunables
+#       <key>: float | int          # see ``load_technique_tuning`` for schema
+#
+# Coefficients are placeholders pending a calibration sweep against the
+# operator-curated image library; the sigmoid shape and the alpha=0
+# wiring for terms that are populated but not yet weighted (e.g.
+# peak_to_runner_up_ratio) are intentional so the calibration sweep
+# tunes alphas against real data without code changes.
+
+techniques:
+  BodyDiscCorrelateNav:
+    alpha0: -2.0
+    terms:
+      # PSR-style quality measure of the chosen NCC peak.  Healthy
+      # body-disc fits report quality 6-15; the divisor maps that range
+      # onto the sigmoid's responsive interval.
+      - feature: ncc_peak
+        alpha: 1.5
+        divisor: 6.0
+        cap_at: 1.0
+      # Pyramid-level consistency: low values (<= 0.5 px disagreement
+      # across pyramid levels) indicate a globally unambiguous peak.
+      - feature: consistency_px
+        alpha: -1.0
+        divisor: 2.0
+      # Reward additional bodies in the composite (joint geometric
+      # constraint sharpens the peak); cap so a 3-body scene saturates.
+      - feature: body_count
+        alpha: 0.4
+        divisor: 3.0
+        cap_at: 1.0
+      # Peak-to-runner-up ratio: a sharp, unambiguous correlation peak
+      # has ratio >> 1 vs the next-best peak.  alpha=0.0 for now so the
+      # term carries no weight pending calibration; the wiring is in
+      # place so once a calibration sweep tunes the alpha the formula
+      # picks it up without code changes.
+      - feature: peak_to_runner_up_ratio
+        alpha: 0.0
+        divisor: 2.0
+        cap_at: 1.0
+    hard_zero_if:
+      at_edge: true
+      spurious: true
+
+  BodyBlobNav:
+    alpha0: -1.0
+    terms:
+      # Brightness-weighted centroid uncertainty shrinks with SNR.
+      - feature: body_snr_inside_predicted_bbox
+        alpha: 0.5
+        divisor: 4.0
+        cap_at: 1.0
+      # Larger blobs carry more centroid signal per the design's
+      # sigmoid(extent_px / 8 - 1) factor.
+      - feature: body_extent_px
+        alpha: 1.0
+        offset: 8.0
+        divisor: 8.0
+        cap_at: 1.0
+      # Multi-body geometry over-determines the joint translation.
+      - feature: blob_count
+        alpha: 0.4
+        divisor: 3.0
+        cap_at: 1.0
+    hard_zero_if:
+      at_edge: true
+    # The hard cap mirrors the BODY_BLOB reliability formula: a
+    # brightness-weighted centroid is a weaker observation than a limb
+    # fit, so the technique cannot drive the ensemble past 0.4
+    # confidence even when every term saturates.
+    hard_cap: 0.4
+
+  BodyLimbNav:
+    alpha0: -1.0
+    terms:
+      - feature: visible_limb_arc_fraction
+        alpha: 3.0
+      - feature: dt_fit_rms_px
+        alpha: -1.5
+      - feature: visible_arc_px
+        alpha: 0.4
+        divisor: 100.0
+        cap_at: 1.0
+    hard_zero_if:
+      at_edge: true
+      spurious: true
+    tuning:
+      # Minimum surviving polyline length per LIMB_ARC for feasibility.
+      # Shorter limbs do not constrain a 2-D translation enough to be
+      # worth the LM iteration.
+      min_arc_px: 30.0
+      # Final DT residual exceeding this many limb-sigmas marks the
+      # result spurious.
+      spurious_dt_rms_factor: 5.0
+      # Floor for the spurious-detection threshold.
+      spurious_dt_floor_px: 3.0
+      # Below this Tukey-inlier count the M-estimator covariance is no
+      # longer informative — flag spurious.
+      spurious_min_inliers: 6
+      # Below this inlier fraction the LM has almost certainly walked
+      # off the true limb onto internal-body features (crater rims,
+      # terminator, surface boundaries) — flag spurious.
+      spurious_min_inlier_fraction: 0.05
+
+  BodyTerminatorNav:
+    alpha0: -1.0
+    terms:
+      - feature: visible_terminator_arc_fraction
+        alpha: 2.0
+      - feature: dt_fit_rms_px
+        alpha: -1.0
+      - feature: visible_arc_px
+        alpha: 0.4
+        divisor: 100.0
+        cap_at: 1.0
+      - feature: mean_phase_angle_factor
+        alpha: 1.0
+      - feature: mean_albedo_penalty
+        alpha: -1.5
+    hard_zero_if:
+      at_edge: true
+      spurious: true
+    tuning:
+      # Minimum surviving polyline length per TERMINATOR_ARC for
+      # feasibility (same shape as BodyLimbNav.min_arc_px).
+      min_arc_px: 30.0
+      # Final DT residual exceeding this many terminator-sigmas marks
+      # the result spurious.
+      spurious_dt_rms_factor: 5.0
+      # Floor for the spurious-detection threshold (terminators are
+      # softer than limbs; the floor is one pixel wider).
+      spurious_dt_floor_px: 4.0
+      # Below this Tukey-inlier count the M-estimator covariance is
+      # no longer informative.
+      spurious_min_inliers: 6
+
+  RingEdgeNav:
+    alpha0: -1.0
+    terms:
+      - feature: total_edge_length_px
+        alpha: 1.0
+        divisor: 200.0
+        cap_at: 1.0
+      - feature: per_edge_dt_rms_summed
+        alpha: -2.0
+    hard_zero_if:
+      at_edge: true
+    tuning:
+      # Pixels of slack around the search-window axis bounds for the
+      # at-edge check.  A converged offset whose absolute distance from
+      # any axis bound (+/-margin_v, +/-margin_u) falls within this
+      # tolerance is flagged ``at_edge=True``.  One pixel matches the
+      # bilinear DT half-cell width: any closer and the LM gradient
+      # information is unreliable.
+      at_edge_tolerance_px: 1.0
+      # Final DT residual exceeding this many radial-sigmas marks the
+      # result spurious.
+      spurious_dt_rms_factor: 5.0
+      # Floor for the spurious-detection threshold.
+      spurious_dt_floor_px: 3.0
+      # Below this Tukey-inlier count the M-estimator covariance is no
+      # longer informative.
+      spurious_min_inliers: 6
+
+  RingAnnulusNav:
+    alpha0: -2.0
+    terms:
+      # PSR-style quality measure of the chosen NCC peak.  Healthy
+      # annulus fits report quality 6-15; the divisor maps that range
+      # onto the sigmoid's responsive interval.
+      - feature: ncc_peak
+        alpha: 1.5
+        divisor: 6.0
+        cap_at: 1.0
+      # Peak-to-runner-up ratio: alpha=0.0 pending calibration (same
+      # posture as BodyDiscCorrelateNav).
+      - feature: peak_to_runner_up_ratio
+        alpha: 0.0
+        divisor: 2.0
+        cap_at: 1.0
+      # Reward additional ring systems in the composite.  The current
+      # spacecraft fleet has at most a handful of multi-planet ring
+      # scenes, so the saturation cap is at 2 (vs body_count's 3).
+      - feature: annulus_count
+        alpha: 0.4
+        divisor: 2.0
+        cap_at: 1.0
+    hard_zero_if:
+      at_edge: true
+      spurious: true
+
+
+# Feature-emission tunables that decide which technique a given
+# scene's features feed.  Per-planet overrides because Saturn's ring
+# system spans tens of thousands of km radially while the Jupiter /
+# Uranus / Neptune systems are an order of magnitude narrower; the
+# "individual edges can't be separated" criterion lives at very
+# different image-scale thresholds.
+feature_emission:
+  ring_annulus:
+    # Default applies to any planet that does not have an explicit
+    # entry below.  Both Saturn and the giant-planet fleet have entries
+    # so this default is mostly defensive against typos / new planets.
+    default:
+      # Maximum per-edge polyline radial extent (px) below which the
+      # rings model emits a RING_ANNULUS template instead of per-edge
+      # polylines.  Per-polyline gate; fires when a single ring edge
+      # has compressed below this width.
+      max_radial_px: 5.0
+      # Ring-radial km/px threshold above which the ENTIRE ring system
+      # is annulus-class regardless of any per-polyline metric.  At
+      # this resolution even a "well-traceable" per-edge polyline only
+      # spans a handful of pixels along the radial direction; the
+      # right technique is the multi-ring composite NCC, not the
+      # per-edge DT fit.
+      kmpp_threshold: 1000.0
+    planets:
+      SATURN:
+        # Saturn's main rings span ~75000-140000 km (~65000 km wide).
+        # At km/px > 1000 the entire system is < 65 px wide and
+        # individual edges within rings (gaps, ringlets) are sub-pixel
+        # apart — annulus path wins.
+        max_radial_px: 5.0
+        kmpp_threshold: 1000.0
+      JUPITER:
+        # Jupiter's main ring spans ~122500-129000 km (~6500 km wide,
+        # ~10x narrower than Saturn).  Lower kmpp threshold so
+        # annulus fires before the ring becomes a single bright pixel.
+        max_radial_px: 5.0
+        kmpp_threshold: 200.0
+      URANUS:
+        # Uranus's main rings span ~41800-51200 km (~9400 km wide).
+        max_radial_px: 5.0
+        kmpp_threshold: 300.0
+      NEPTUNE:
+        # Neptune's main rings span ~41900-62900 km (~21000 km wide).
+        max_radial_px: 5.0
+        kmpp_threshold: 500.0
