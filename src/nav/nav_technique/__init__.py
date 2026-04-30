@@ -45,6 +45,9 @@ from nav.nav_technique.nav_technique_body_terminator import BodyTerminatorNav
 from nav.nav_technique.nav_technique_manual import NavTechniqueManual, run_manual_nav
 from nav.nav_technique.nav_technique_ring_annulus import RingAnnulusNav
 from nav.nav_technique.nav_technique_ring_edge import RingEdgeNav
+from nav.nav_technique.nav_technique_star_field import StarFieldFromCatalogNav
+from nav.nav_technique.nav_technique_star_refine import StarRefineNav
+from nav.nav_technique.nav_technique_star_unique_match import StarUniqueMatchNav
 from nav.nav_technique.technique_result import NavTechniqueResult
 
 __all__ = [
@@ -68,8 +71,11 @@ __all__ = [
     'RingEdgeDiagnostics',
     'RingEdgeNav',
     'StarFieldDiagnostics',
+    'StarFieldFromCatalogNav',
     'StarRefineDiagnostics',
+    'StarRefineNav',
     'StarUniqueMatchDiagnostics',
+    'StarUniqueMatchNav',
     'evaluate_sigmoid_combination',
     'filter_technique_names',
     'run_manual_nav',

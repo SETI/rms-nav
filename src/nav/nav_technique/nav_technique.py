@@ -27,8 +27,23 @@ __all__ = [
     'NavTechnique',
     'filter_technique_names',
     'log_confidence_breakdown',
+    'search_window_for_obs',
     'validate_registered_confidence_specs',
 ]
+
+
+def search_window_for_obs(context: NavContext) -> tuple[int, int]:
+    """Return the ``(margin_v, margin_u)`` extfov margin from the obs.
+
+    Every translation-fit technique reads the per-instrument extfov
+    margin from ``context.obs.extfov_margin_vu`` to bound its at-edge
+    detection.  Centralising the read in one helper keeps the convention
+    uniform: a test obs stand-in that omits the attribute surfaces an
+    ``AttributeError`` rather than silently falling through to a
+    fabricated default.
+    """
+    margin = context.obs.extfov_margin_vu  # type: ignore[attr-defined]
+    return (int(margin[0]), int(margin[1]))
 
 
 def log_confidence_breakdown(

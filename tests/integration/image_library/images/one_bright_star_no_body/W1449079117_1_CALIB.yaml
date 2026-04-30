@@ -1,0 +1,31 @@
+schema_version: 1
+image_id: W1449079117_1_CALIB
+mission: CASSINI_ISS            # CASSINI_ISS | VOYAGER_ISS | GOSSI | NHLORRI
+camera: WAC              # NAC | WAC | SSI | NA | WA | LORRI
+filter_combo: 'CL1+RED'          # canonicalized: filters sorted, '+'-joined
+image_url: 'pds3://calibrated/COISS_1xxx/COISS_1009/data/1449071343_1449079877/W1449079117_1_CALIB.IMG'
+
+scene_tags:
+  - one_bright_star_no_body            # First tag is the primary class;
+                                       # must match the directory the
+                                       # sidecar lives in.
+
+ground_truth:
+  offset_dv_px: 3.0579
+  offset_du_px: -0.0188
+  offset_uncertainty_px: 1.0           # 1sigma marginal; tighten
+                                       # for bright stars / sharp limbs.
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-04-30
+  ui_version: 'rms-nav 0.1.dev25'
+  notes: |
+    Single star (Vega) in FOV.
+    RED filter.
+
+expected:
+  status: ok                           # ok | failed | conflicted
+  confidence_tier: low                # high | medium | low | failed
+  primary_technique: StarRefineNav  # e.g. BodyLimbNav
+  techniques_must_run: [StarUniqueMatchNav]
+  techniques_must_skip: []

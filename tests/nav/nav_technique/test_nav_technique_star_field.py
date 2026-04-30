@@ -1,0 +1,425 @@
+"""End-to-end and helper-level tests for ``StarFieldFromCatalogNav``."""
+
+from __future__ import annotations
+
+import math
+
+import numpy as np
+import pytest
+from tests.nav.nav_technique.conftest import (
+    DrawGaussianStarFactory,
+    NavContextFactory,
+    NavFeatureFactory,
+)
+
+from nav.feature.feature import NavFeature
+from nav.nav_technique.diagnostics import StarFieldDiagnostics
+from nav.nav_technique.nav_technique import NavTechnique
+from nav.nav_technique.nav_technique_star_field import (
+    StarFieldFromCatalogNav,
+    _detect_image_sources,
+    _enumerate_triplets,
+    _greedy_inlier_count,
+    _hash_distance_sq,
+    _seed_from_image_et,
+    _solve_translation,
+    _triplet_hash,
+)
+
+
+def _star_field_image(
+    star_centers: list[tuple[float, float]],
+    *,
+    draw: DrawGaussianStarFactory,
+    shape: tuple[int, int] = (300, 300),
+    peak_dn: float = 200.0,
+    sigma: float = 1.2,
+) -> np.ndarray:
+    """Return an image with planted Gaussian stars at the supplied centers."""
+    image = np.zeros(shape, dtype=np.float64)
+    for cv, cu in star_centers:
+        draw(image, (cv, cu), peak_dn=peak_dn, sigma=sigma)
+    return image
+
+
+def _make_star_field_features(
+    centers: list[tuple[float, float]],
+    *,
+    make_feature: NavFeatureFactory,
+    offset: tuple[float, float],
+    snrs: list[float] | None = None,
+) -> list[NavFeature]:
+    """Build a STAR feature per planted center, predicted at ``center - offset``.
+
+    ``offset`` is the planted ``(dv, du)`` translation: predicted at
+    position ``center - offset`` so that the technique recovers
+    ``offset``.
+    """
+    if snrs is None:
+        snrs = [40.0 - 0.5 * i for i in range(len(centers))]
+    features: list[NavFeature] = []
+    for i, (cv, cu) in enumerate(centers):
+        pred = (cv - offset[0], cu - offset[1])
+        features.append(
+            make_feature(
+                f'star:UCAC4:{i}',
+                predicted_vu=pred,
+                predicted_snr=snrs[i],
+            )
+        )
+    return features
+
+
+# ---------------------------------------------------------------------------
+# Sub-piece 1 — source detection.
+# ---------------------------------------------------------------------------
+
+
+def test_detect_image_sources_finds_planted_stars(
+    draw_gaussian_star: DrawGaussianStarFactory,
+) -> None:
+    """The matched-filter detector recovers planted Gaussian peaks."""
+    centers = [(50.0, 60.0), (120.0, 80.0), (200.0, 220.0)]
+    image = _star_field_image(centers, draw=draw_gaussian_star)
+    detected = _detect_image_sources(
+        image,
+        image_noise_sigma=1.0,
+        sigma_px=1.2,
+        detection_sigma=4.0,
+        centroid_box_half_px=3,
+        max_sources=30,
+    )
+    assert len(detected) == 3
+    detected_centers = sorted((s.v, s.u) for s in detected)
+    expected = sorted(centers)
+    for got, want in zip(detected_centers, expected, strict=True):
+        assert got[0] == pytest.approx(want[0], abs=0.5)
+        assert got[1] == pytest.approx(want[1], abs=0.5)
+
+
+def test_detect_image_sources_caps_at_max_sources(
+    draw_gaussian_star: DrawGaussianStarFactory,
+) -> None:
+    """``max_sources`` keeps the brightest peaks first."""
+    image = _star_field_image(
+        [(50.0, 50.0), (100.0, 100.0), (150.0, 150.0), (200.0, 200.0)],
+        draw=draw_gaussian_star,
+        peak_dn=200.0,
+    )
+    # Plant a fainter fifth peak — it must rank below the four brighter
+    # ones and get dropped when max_sources=4.
+    draw_gaussian_star(image, (250.0, 250.0), peak_dn=80.0, sigma=1.2)
+    detected = _detect_image_sources(
+        image,
+        image_noise_sigma=1.0,
+        sigma_px=1.2,
+        detection_sigma=4.0,
+        centroid_box_half_px=3,
+        max_sources=4,
+    )
+    assert len(detected) == 4
+    assert all(s.peak_dn >= detected[-1].peak_dn for s in detected)
+
+
+def test_detect_image_sources_returns_empty_when_blank() -> None:
+    """A blank image yields no detections."""
+    image = np.zeros((100, 100), dtype=np.float64)
+    detected = _detect_image_sources(
+        image,
+        image_noise_sigma=1.0,
+        sigma_px=1.2,
+        detection_sigma=4.0,
+        centroid_box_half_px=3,
+        max_sources=30,
+    )
+    assert detected == []
+
+
+# ---------------------------------------------------------------------------
+# Sub-piece 2 — triplet hashing.
+# ---------------------------------------------------------------------------
+
+
+def test_triplet_hash_is_translation_invariant() -> None:
+    """The hash does not change when every vertex is translated by the same offset."""
+    a = (10.0, 20.0)
+    b = (12.0, 35.0)
+    c = (40.0, 22.0)
+    h1 = _triplet_hash(a, b, c)
+    h2 = _triplet_hash(
+        (a[0] + 7.0, a[1] - 3.0),
+        (b[0] + 7.0, b[1] - 3.0),
+        (c[0] + 7.0, c[1] - 3.0),
+    )
+    assert h1 is not None
+    assert h2 is not None
+    for v1, v2 in zip(h1, h2, strict=True):
+        assert v1 == pytest.approx(v2)
+
+
+def test_triplet_hash_is_uniform_scale_invariant() -> None:
+    """Multiplying every vertex by a constant scale leaves the hash unchanged."""
+    a = (10.0, 20.0)
+    b = (12.0, 35.0)
+    c = (40.0, 22.0)
+    s = 3.7
+    h1 = _triplet_hash(a, b, c)
+    h2 = _triplet_hash(
+        (a[0] * s, a[1] * s),
+        (b[0] * s, b[1] * s),
+        (c[0] * s, c[1] * s),
+    )
+    assert h1 is not None
+    assert h2 is not None
+    for v1, v2 in zip(h1, h2, strict=True):
+        assert v1 == pytest.approx(v2)
+
+
+def test_triplet_hash_drops_collinear() -> None:
+    """A triplet with two coincident points is rejected (None)."""
+    h = _triplet_hash((10.0, 10.0), (10.0, 10.0), (20.0, 20.0))
+    assert h is None
+
+
+def test_enumerate_triplets_yields_one_per_unordered_set() -> None:
+    """Each unordered triplet appears exactly once with A=brightest."""
+    points = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (5.0, 5.0)]
+    # Brightness rank 0 = brightest; rank by index here.
+    brightness_rank = [0, 1, 2, 3]
+    triplets = _enumerate_triplets(points, brightness_rank)
+    # C(4,3) = 4 triplets.
+    assert len(triplets) == 4
+    # The brightest of each unordered set is correctly identified as A.
+    seen_keys: set[tuple[int, int, int]] = set()
+    for t in triplets:
+        # b and c indices are sorted ascending.
+        assert t.idx_b < t.idx_c
+        # A index has the lowest brightness rank.
+        ranks = (
+            brightness_rank[t.idx_a],
+            brightness_rank[t.idx_b],
+            brightness_rank[t.idx_c],
+        )
+        assert ranks[0] == min(ranks)
+        # Unordered triplet seen once.
+        sorted_indices = sorted([t.idx_a, t.idx_b, t.idx_c])
+        key = (sorted_indices[0], sorted_indices[1], sorted_indices[2])
+        assert key not in seen_keys
+        seen_keys.add(key)
+
+
+def test_hash_distance_sq_zero_for_identical_hashes() -> None:
+    """``_hash_distance_sq(h, h, ...)`` is exactly zero."""
+    h = (1.5, 2.5, 0.7)
+    d_sq = _hash_distance_sq(h, h, ratio_weight=1.0, angle_weight=1.0)
+    assert d_sq == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Helper-level translation solve and inlier counting.
+# ---------------------------------------------------------------------------
+
+
+def test_solve_translation_recovers_constant_offset() -> None:
+    """Constant per-correspondence offset is recovered as the weighted mean."""
+    catalog = np.asarray([[10.0, 20.0], [30.0, 50.0], [70.0, 110.0]], dtype=np.float64)
+    planted = (4.0, -2.5)
+    detection = catalog + np.asarray(planted)
+    weights = np.ones(3, dtype=np.float64)
+    dv, du = _solve_translation(detection, catalog, weights)
+    assert dv == pytest.approx(planted[0])
+    assert du == pytest.approx(planted[1])
+
+
+def test_greedy_inlier_count_under_perfect_offset() -> None:
+    """Every detection is an inlier when the offset perfectly aligns the catalog."""
+    catalog = np.asarray([[10.0, 20.0], [30.0, 50.0], [70.0, 110.0]], dtype=np.float64)
+    offset = (4.0, -2.5)
+    detections = catalog + np.asarray(offset)
+    n_inliers, pairs = _greedy_inlier_count(detections, catalog, offset_vu=offset, tolerance_px=0.5)
+    assert n_inliers == 3
+    assert sorted(pairs) == [(0, 0), (1, 1), (2, 2)]
+
+
+def test_greedy_inlier_count_does_not_double_match() -> None:
+    """Each catalog star matches at most one detection."""
+    catalog = np.asarray([[10.0, 20.0]], dtype=np.float64)
+    detections = np.asarray([[10.0, 20.0], [10.5, 19.9]], dtype=np.float64)
+    n_inliers, pairs = _greedy_inlier_count(
+        detections, catalog, offset_vu=(0.0, 0.0), tolerance_px=2.0
+    )
+    assert n_inliers == 1
+    assert pairs == [(0, 0)]
+
+
+# ---------------------------------------------------------------------------
+# Sub-piece 3 / 4 — RANSAC + verification (technique-level).
+# ---------------------------------------------------------------------------
+
+
+def test_star_field_recovers_planted_offset(
+    make_nav_context: NavContextFactory,
+    make_star_feature: NavFeatureFactory,
+    draw_gaussian_star: DrawGaussianStarFactory,
+) -> None:
+    """RANSAC + Tukey refit recovers a planted translation on a clean field."""
+    centers = [
+        (60.0, 80.0),
+        (110.0, 130.0),
+        (180.0, 90.0),
+        (220.0, 200.0),
+        (90.0, 240.0),
+        (250.0, 70.0),
+    ]
+    image = _star_field_image(centers, draw=draw_gaussian_star, shape=(320, 320))
+    planted = (3.0, -2.5)
+    features = _make_star_field_features(centers, make_feature=make_star_feature, offset=planted)
+    technique = StarFieldFromCatalogNav()
+    context = make_nav_context(image, extfov_margin_vu=(32, 32))
+    feasibility = technique.is_feasible(features)
+    assert feasibility.feasible is True
+    result = technique.navigate(features, context)
+    assert result.spurious is False
+    assert result.offset_px[0] == pytest.approx(planted[0], abs=0.5)
+    assert result.offset_px[1] == pytest.approx(planted[1], abs=0.5)
+    assert isinstance(result.diagnostics, StarFieldDiagnostics)
+    assert result.diagnostics.n_inliers >= 6
+
+
+def test_star_field_is_deterministic_across_two_invocations(
+    make_nav_context: NavContextFactory,
+    make_star_feature: NavFeatureFactory,
+    draw_gaussian_star: DrawGaussianStarFactory,
+) -> None:
+    """Two back-to-back invocations on the same obs return bit-identical fits."""
+    centers = [
+        (60.0, 80.0),
+        (110.0, 130.0),
+        (180.0, 90.0),
+        (220.0, 200.0),
+        (90.0, 240.0),
+        (250.0, 70.0),
+    ]
+    image = _star_field_image(centers, draw=draw_gaussian_star, shape=(320, 320))
+    planted = (1.5, 2.0)
+    features = _make_star_field_features(centers, make_feature=make_star_feature, offset=planted)
+    technique = StarFieldFromCatalogNav()
+    context = make_nav_context(image)
+    result_a = technique.navigate(features, context)
+    result_b = technique.navigate(features, context)
+    assert result_a.offset_px == result_b.offset_px
+    assert np.array_equal(result_a.covariance_px2, result_b.covariance_px2)
+    assert result_a.confidence == result_b.confidence
+    assert result_a.diagnostics == result_b.diagnostics
+
+
+def test_star_field_infeasible_with_fewer_than_three_features(
+    make_star_feature: NavFeatureFactory,
+) -> None:
+    """``is_feasible`` requires >= 3 usable STAR features."""
+    feat_a = make_star_feature('star:UCAC4:A', predicted_vu=(50.0, 50.0), predicted_snr=40.0)
+    feat_b = make_star_feature('star:UCAC4:B', predicted_vu=(80.0, 80.0), predicted_snr=35.0)
+    technique = StarFieldFromCatalogNav()
+    report = technique.is_feasible([feat_a, feat_b])
+    assert report.feasible is False
+    assert 'fewer_than_3_predicted_stars' in report.reason
+
+
+def test_star_field_infeasible_when_all_stars_occluded(
+    make_star_feature: NavFeatureFactory,
+) -> None:
+    """Stars marked in_body_silhouette are filtered out before feasibility."""
+    features = [
+        make_star_feature(
+            f'star:UCAC4:{i}',
+            predicted_vu=(50.0 + 30.0 * i, 60.0 + 25.0 * i),
+            predicted_snr=30.0,
+            in_body_silhouette=True,
+        )
+        for i in range(5)
+    ]
+    technique = StarFieldFromCatalogNav()
+    report = technique.is_feasible(features)
+    assert report.feasible is False
+    assert 'fewer_than_3_predicted_stars' in report.reason
+
+
+def test_star_field_returns_spurious_when_too_few_detections(
+    make_nav_context: NavContextFactory,
+    make_star_feature: NavFeatureFactory,
+    draw_gaussian_star: DrawGaussianStarFactory,
+) -> None:
+    """Image with only 2 bright peaks fails the >= 3 detected-sources check."""
+    image = _star_field_image(
+        [(50.0, 50.0), (120.0, 130.0)], draw=draw_gaussian_star, shape=(200, 200)
+    )
+    centers = [(50.0, 50.0), (120.0, 130.0), (160.0, 80.0)]
+    features = _make_star_field_features(centers, make_feature=make_star_feature, offset=(0.0, 0.0))
+    technique = StarFieldFromCatalogNav()
+    context = make_nav_context(image)
+    result = technique.navigate(features, context)
+    assert result.spurious is True
+    assert isinstance(result.diagnostics, StarFieldDiagnostics)
+    assert result.diagnostics.n_detected_sources == 2
+
+
+def test_star_field_marks_at_edge_when_offset_hits_margin(
+    make_nav_context: NavContextFactory,
+    make_star_feature: NavFeatureFactory,
+    draw_gaussian_star: DrawGaussianStarFactory,
+) -> None:
+    """An offset that hits the search-window edge is flagged + zero confidence."""
+    centers = [
+        (80.0, 80.0),
+        (110.0, 130.0),
+        (140.0, 90.0),
+        (170.0, 200.0),
+        (200.0, 70.0),
+        (90.0, 240.0),
+        (250.0, 130.0),
+    ]
+    image = _star_field_image(centers, draw=draw_gaussian_star, shape=(320, 320))
+    margin = (8, 8)
+    # Plant the offset on the V-axis margin.
+    planted = (float(margin[0]), 0.0)
+    features = _make_star_field_features(centers, make_feature=make_star_feature, offset=planted)
+    technique = StarFieldFromCatalogNav()
+    context = make_nav_context(image, extfov_margin_vu=margin)
+    result = technique.navigate(features, context)
+    # Translation hit the v-axis margin: at_edge fires and the
+    # confidence formula's hard_zero_if pushes confidence to zero.
+    assert result.at_edge is True
+    assert result.confidence == pytest.approx(0.0)
+
+
+def test_star_field_registered_with_navtechnique_registry() -> None:
+    """``StarFieldFromCatalogNav`` self-registers on import."""
+    assert StarFieldFromCatalogNav in NavTechnique._registry
+
+
+def test_star_field_min_inliers_less_than_three_raises() -> None:
+    """Construction rejects a ``pattern_match_min_inliers`` below 3."""
+    technique_class = StarFieldFromCatalogNav
+    bad_tuning = dict(technique_class.tuning)
+    bad_tuning['pattern_match_min_inliers'] = 2
+    original_tuning = technique_class.tuning
+    try:
+        technique_class.tuning = bad_tuning
+        with pytest.raises(ValueError, match='pattern_match_min_inliers'):
+            technique_class()
+    finally:
+        technique_class.tuning = original_tuning
+
+
+def test_star_field_seed_from_image_et_handles_edge_cases() -> None:
+    """``_seed_from_image_et`` produces a stable 64-bit unsigned integer."""
+    seed_zero = _seed_from_image_et(0.0)
+    assert seed_zero == 0
+    seed_pos = _seed_from_image_et(123.456)
+    assert seed_pos > 0
+    seed_neg = _seed_from_image_et(-1.0)
+    # Negative ETs (pre-J2000 obs, e.g. Voyager) wrap into the unsigned
+    # 64-bit range rather than overflowing the RNG seed.
+    assert seed_neg > 0
+    seed_nan = _seed_from_image_et(math.nan)
+    assert seed_nan == 0

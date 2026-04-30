@@ -130,7 +130,8 @@ The legacy ``general.log_level_nav_correlate_all`` knob is retained for
 backwards compatibility with any user config files that still set it but
 the autonomous techniques (``BodyDiscCorrelateNav``, ``BodyBlobNav``,
 ``BodyLimbNav``, ``BodyTerminatorNav``, ``RingEdgeNav``,
-``RingAnnulusNav``) do not consult it.
+``RingAnnulusNav``, ``StarUniqueMatchNav``, ``StarRefineNav``,
+``StarFieldFromCatalogNav``) do not consult it.
 
 **Annotation**:
 

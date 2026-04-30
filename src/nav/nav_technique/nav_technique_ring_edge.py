@@ -27,7 +27,11 @@ from nav.nav_technique.dt_fitting import (
     lm_subpixel_refine,
 )
 from nav.nav_technique.feasibility import NavFeasibilityReport
-from nav.nav_technique.nav_technique import NavTechnique, log_confidence_breakdown
+from nav.nav_technique.nav_technique import (
+    NavTechnique,
+    log_confidence_breakdown,
+    search_window_for_obs,
+)
 from nav.nav_technique.technique_result import NavTechniqueResult
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
@@ -211,7 +215,7 @@ class RingEdgeNav(NavTechnique):
             gradient_vu = context.image_gradient_vu_ext
             edge_mask = edge_dt <= 0.5
             polyline_mask = _build_polyline_mask(vertices, edge_dt.shape[:2])
-            margin_v, margin_u = _search_window_for_obs(context)
+            margin_v, margin_u = search_window_for_obs(context)
             self.logger.debug(
                 'Aggregated %d ring-edge vertices, sigma_radial range [%.3f, %.3f] px, '
                 'search window (v, u) = (%d, %d) px',
@@ -354,18 +358,3 @@ class _RingEdgeConfidenceContext:
         self.per_edge_dt_rms_summed = diagnostics.per_edge_dt_rms_summed
         self.edge_count = diagnostics.edge_count
         self.is_rank_1 = diagnostics.is_rank_1
-
-
-def _search_window_for_obs(context: NavContext) -> tuple[int, int]:
-    """Return ``(margin_v, margin_u)`` for the coarse search.
-
-    ``extfov_margin_vu`` is a mandatory attribute on every
-    ``ObsSnapshotInst``; test fixtures must set it as well.  An obs
-    missing the attribute is a programming error and surfaces as
-    ``AttributeError`` rather than a silent fallback.
-    """
-    # ``NavContext.obs`` is typed as ``object`` to avoid an import cycle
-    # with ``ObsSnapshotInst``; the attribute lookup is mandatory at
-    # runtime even though mypy cannot see it.
-    margin = context.obs.extfov_margin_vu  # type: ignore[attr-defined]
-    return (int(margin[0]), int(margin[1]))

@@ -133,10 +133,9 @@ Navigation options
 * ``--nav-techniques LIST``: a comma-separated glob-pattern list selecting
   which registered ``NavTechnique`` subclasses run.  Implemented techniques
   today are ``BodyDiscCorrelateNav``, ``BodyBlobNav``, ``BodyLimbNav``,
-  ``BodyTerminatorNav``, ``RingAnnulusNav``, and ``RingEdgeNav``; the
-  star techniques (``StarFieldFromCatalogNav``, ``StarUniqueMatchNav``,
-  ``StarRefineNav``) are planned but not yet shipped.  Defaults to ``*``
-  (all registered
+  ``BodyTerminatorNav``, ``RingAnnulusNav``, ``RingEdgeNav``,
+  ``StarUniqueMatchNav``, ``StarRefineNav``, and
+  ``StarFieldFromCatalogNav``.  Defaults to ``*`` (all registered
   techniques run); a leading ``!`` excludes a pattern (e.g.
   ``--nav-techniques '!RingEdgeNav'`` runs every technique except the
   ring-edge fitter).  Multiple feasible techniques run in parallel and the

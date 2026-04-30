@@ -21,11 +21,23 @@ from __future__ import annotations
 import numpy as np
 
 from nav.feature.feature import NavFeature
-from nav.feature.geometry import BodyBlobGeometry
-from nav.support.image import draw_circle
+from nav.feature.geometry import BodyBlobGeometry, StarGeometry
+from nav.support.image import draw_circle, draw_rect
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
 __all__ = ['compose_dialog_overlay', 'compose_template_features']
+
+
+_STAR_MARKER_HALFWIDTH_PX_FLOOR: int = 3
+"""Minimum half-width of the rectangle marker drawn around a STAR feature.
+
+The dialog overlay paints a rectangle outline at each STAR's predicted
+position so the operator can see where the catalog says the star sits
+before they click on the actual bright pixel.  The rectangle's
+half-width is the larger of the feature's per-axis bbox half-extent
+and this floor, so a tightly-bbox'd star (e.g. PSF sigma < 1 px) still
+gets a visible 7x7 outline rather than collapsing to a single pixel.
+"""
 
 
 def compose_template_features(
@@ -94,16 +106,24 @@ def compose_dialog_overlay(
 
     Starts from :func:`compose_template_features` (BODY_DISC,
     RING_ANNULUS, CARTOGRAPHIC_MODEL templates) and additionally
-    rasterizes every polyline-bearing feature's ``vertices_vu`` as
-    single-pixel marks so an operator can manually align scenes whose
-    only emitted features are limbs, terminators, or ring edges.  The
-    polyline rasterization is intentionally minimal — it is a visibility
-    aid, not a precise renderer; the autonomous DT pipeline owns the
-    quantitative fit.
+    rasterizes:
 
-    Vertices that fall outside the ext-FOV bounds are silently dropped
-    (the polyline samplers can hand back partially-clipped polylines
-    near the FOV edge).
+    - every polyline-bearing feature's ``vertices_vu`` as single-pixel
+      marks (LIMB_ARC, TERMINATOR_ARC, RING_EDGE);
+    - every BODY_BLOB's predicted-diameter circle outline at the
+      predicted centroid;
+    - every STAR feature's bbox as a rectangle outline at the
+      predicted-vu position so the operator can manually align
+      catalog stars with the observed bright pixels.
+
+    All rasterization is intentionally minimal — it is a visibility
+    aid, not a precise renderer; the autonomous DT / RANSAC pipeline
+    owns the quantitative fit.
+
+    Vertices and markers that fall outside the ext-FOV bounds are
+    silently dropped (the polyline samplers can hand back
+    partially-clipped polylines near the FOV edge; star markers near
+    the FOV edge are clipped to the visible portion).
 
     Parameters:
         features: The feature list (templated + polyline + plain).
@@ -112,7 +132,8 @@ def compose_dialog_overlay(
     Returns:
         Tuple ``(image, mask)`` where ``image`` is float64 in ext-FOV
         coordinates and ``mask`` is a boolean array of the same shape.
-        Every painted pixel (template *or* polyline) is True in the mask.
+        Every painted pixel (template *or* polyline *or* marker) is
+        True in the mask.
     """
     image, mask = compose_template_features(features, extfov_shape_vu)
     h, w = extfov_shape_vu
@@ -146,7 +167,53 @@ def compose_dialog_overlay(
             u_int = round(u_center)
             draw_circle(image, 1.0, u_int, v_int, radius_px)
             draw_circle(mask, True, u_int, v_int, radius_px)
+        # 3) StarGeometry carries only a predicted (v, u) point and a
+        #    PSF-sized bbox.  Render a rectangle outline around the
+        #    bbox so the operator can see where the catalog says the
+        #    star sits before clicking on the actual peak.
+        if isinstance(feature.geometry, StarGeometry):
+            _paint_star_marker(image, mask, feature.geometry, extfov_shape_vu)
     return image, mask
+
+
+def _paint_star_marker(
+    image: NDArrayFloatType,
+    mask: NDArrayBoolType,
+    geometry: StarGeometry,
+    extfov_shape_vu: tuple[int, int],
+) -> None:
+    """Paint a rectangle outline around a STAR feature's predicted bbox.
+
+    ``draw_rect`` does not clip on the array bounds — partial-FOV
+    rectangles get truncated by the slice operations, but a center
+    that is far enough off-image that the rectangle is entirely
+    out-of-bounds is silently a no-op.  A center close enough to an
+    edge that part of the rectangle would index negatively is the
+    risky case; the explicit half-width clamp below keeps every drawn
+    pixel inside the array.
+    """
+    h, w = extfov_shape_vu
+    v_center, u_center = geometry.predicted_vu
+    v_int = round(v_center)
+    u_int = round(u_center)
+    if v_int < 0 or v_int >= h or u_int < 0 or u_int >= w:
+        return  # marker centre off-image; no painting
+    v_min, u_min, v_max, u_max = geometry.bbox_extfov_vu
+    # The bbox is half-open, so its half-extent is one less than the
+    # diff.  Clamp to a visible-marker floor and also to the largest
+    # half-width that keeps every rectangle pixel inside the FOV.
+    v_half = max(_STAR_MARKER_HALFWIDTH_PX_FLOOR, ((v_max - v_min) // 2) - 1)
+    u_half = max(_STAR_MARKER_HALFWIDTH_PX_FLOOR, ((u_max - u_min) // 2) - 1)
+    v_half = min(v_half, v_int, h - 1 - v_int)
+    u_half = min(u_half, u_int, w - 1 - u_int)
+    if v_half <= 0 or u_half <= 0:
+        # Edge-tight: fall back to a single pixel at the predicted
+        # position rather than emit no marker at all.
+        image[v_int, u_int] = 1.0
+        mask[v_int, u_int] = True
+        return
+    draw_rect(image, 1.0, u_int, v_int, u_half, v_half)
+    draw_rect(mask, True, u_int, v_int, u_half, v_half)
 
 
 def _bbox_clamped(

@@ -29,7 +29,11 @@ from nav.feature.geometry import BodyDiscGeometry
 from nav.nav_technique.confidence import evaluate_sigmoid_combination
 from nav.nav_technique.diagnostics import BodyDiscDiagnostics
 from nav.nav_technique.feasibility import NavFeasibilityReport
-from nav.nav_technique.nav_technique import NavTechnique, log_confidence_breakdown
+from nav.nav_technique.nav_technique import (
+    NavTechnique,
+    log_confidence_breakdown,
+    search_window_for_obs,
+)
 from nav.nav_technique.technique_result import NavTechniqueResult
 from nav.support.correlate import navigate_with_pyramid_kpeaks
 
@@ -150,7 +154,7 @@ class BodyDiscCorrelateNav(NavTechnique):
             )
             extfov_shape = context.image_ext.shape
             template_img, template_mask = compose_template_features(eligible, extfov_shape)
-            margin_v, margin_u = _search_window_for_obs(context)
+            margin_v, margin_u = search_window_for_obs(context)
             up_factor = self._upsample_factor()
             self.logger.debug(
                 'Composite template: %d painted pixels; search window (v, u) = (%d, %d) px; '
@@ -246,20 +250,3 @@ class _DiscConfidenceContext:
         self.consistency_px = diagnostics.consistency_px
         self.used_gradient = diagnostics.used_gradient
         self.body_count = float(diagnostics.body_count)
-
-
-def _search_window_for_obs(context: NavContext) -> tuple[int, int]:
-    """Return the ``(margin_v, margin_u)`` search window for the NCC.
-
-    The technique reads the per-instrument extfov margin from the
-    observation.  ``extfov_margin_vu`` is a mandatory attribute on
-    every ``ObsSnapshotInst``; test fixtures must set it as well
-    (the shared ``FakeObs`` defaults to ``(32, 32)``).  An obs
-    missing the attribute is a programming error and surfaces as
-    ``AttributeError`` rather than a silent fallback.
-    """
-    # ``NavContext.obs`` is typed as ``object`` to avoid an import cycle
-    # with ``ObsSnapshotInst``; the attribute lookup is mandatory at
-    # runtime even though mypy cannot see it.
-    margin = context.obs.extfov_margin_vu  # type: ignore[attr-defined]
-    return (int(margin[0]), int(margin[1]))

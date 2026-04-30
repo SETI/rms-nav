@@ -1,0 +1,186 @@
+"""Internal helpers shared across the three star NavTechniques.
+
+The three star techniques (`StarUniqueMatchNav`, `StarRefineNav`,
+`StarFieldFromCatalogNav`) all need the same handful of small
+operations on STAR features and image patches: filtering by feature
+type / flags, reading the predicted-SNR off the flags dataclass,
+converting an SNR ratio to a magnitude difference, and pulling a
+sub-pixel centroid from a small image window.  Defining these helpers
+in one place avoids the cross-module private-helper imports that
+otherwise tie three technique modules together through their
+underscore-prefixed surface.
+
+The submodule itself is private (leading underscore on the file
+name); the helpers carry no underscore prefix because they are
+public-but-internal — every star technique imports them, but they
+are not part of the package's public API.
+"""
+
+from __future__ import annotations
+
+import math
+
+import numpy as np
+
+from nav.feature.feature import NavFeature
+from nav.feature.feature_type import NavFeatureType
+from nav.feature.flags import StarFlags
+from nav.feature.geometry import StarGeometry
+from nav.support.types import NDArrayFloatType
+
+__all__ = [
+    'brightness_margin_mag',
+    'local_centroid',
+    'predicted_snr',
+    'predicted_vu',
+    'star_features',
+    'usable_stars',
+]
+
+
+def star_features(features: list[NavFeature]) -> list[NavFeature]:
+    """Return the input subset that carries STAR geometry + StarFlags."""
+    return [
+        f
+        for f in features
+        if f.feature_type is NavFeatureType.STAR
+        and isinstance(f.geometry, StarGeometry)
+        and isinstance(f.flags, StarFlags)
+    ]
+
+
+def usable_stars(features: list[NavFeature]) -> list[NavFeature]:
+    """Return STAR features that are not occluded or saturation-flagged.
+
+    Mirrors the autonomous reliability gate's STAR posture: a star inside a
+    body silhouette, ring annulus, or saturation/cosmic-ray mask is not a
+    candidate for any star technique because the corresponding image pixel
+    is dominated by other signal.
+    """
+    out: list[NavFeature] = []
+    for f in star_features(features):
+        flags = f.flags
+        assert isinstance(flags, StarFlags)
+        if flags.in_body_silhouette:
+            continue
+        if flags.in_saturation_or_cosmic_mask:
+            continue
+        out.append(f)
+    return out
+
+
+def predicted_snr(feature: NavFeature) -> float:
+    """Return the predicted SNR carried on a STAR feature's flags."""
+    flags = feature.flags
+    assert isinstance(flags, StarFlags)
+    return float(flags.predicted_snr)
+
+
+def predicted_vu(feature: NavFeature) -> tuple[float, float]:
+    """Return the predicted (v, u) carried on a STAR feature's geometry."""
+    geometry = feature.geometry
+    assert isinstance(geometry, StarGeometry)
+    return geometry.predicted_vu
+
+
+def brightness_margin_mag(brightest_snr: float, runner_up_snr: float) -> float:
+    """Return the magnitude difference implied by an SNR ratio.
+
+    For background-limited detection the measured SNR scales linearly with
+    flux, so the magnitude difference between two stars whose predicted
+    SNRs are ``s1`` (brighter) and ``s2`` (dimmer) is
+
+    ::
+
+        delta_mag = 2.5 * log10(s1 / s2)
+
+    A ratio of 4 corresponds to ~1.5 mag, the default uniqueness floor.
+    Returns ``+inf`` when ``runner_up_snr`` is non-positive (no other
+    predictable star competes with the brightest).
+    """
+    if runner_up_snr <= 0.0:
+        return float('inf')
+    if brightest_snr <= 0.0:
+        return 0.0
+    return 2.5 * math.log10(brightest_snr / runner_up_snr)
+
+
+def local_centroid(
+    image_ext: NDArrayFloatType,
+    predicted_vu_pos: tuple[float, float],
+    *,
+    search_window_px: float,
+    centroid_box_half_px: int,
+    image_noise_sigma: float,
+    detection_sigma: float,
+) -> tuple[tuple[float, float] | None, float]:
+    """Return the brightest local detection centroid + matched-filter peak.
+
+    Implements a small DAOPHOT-style detection inside a search window
+    centered on the prediction:
+
+    1. Slice the image to a ``(2 * search_window_px + 1)`` half-window
+       around the prediction (clamped to image bounds).
+    2. Take the brightest pixel inside the window — this is the
+       candidate peak.
+    3. Reject the candidate when its DN is below
+       ``detection_sigma * image_noise_sigma``.
+    4. Fit a brightness-weighted moment (Gaussian-equivalent for noise-
+       free fixtures) over a ``(2 * centroid_box_half_px + 1)`` box
+       around the candidate to pull a sub-pixel centroid.
+
+    The star techniques use this purely-local fit rather than a global
+    ``detect_sources`` call so they stay feasible on images where the
+    global DAOPHOT pipeline would fail (mostly-empty FOV, dim secondary
+    stars).
+
+    Parameters:
+        image_ext: 2-D extfov image array.
+        predicted_vu_pos: ``(v, u)`` prediction at the centre of the
+            search window.
+        search_window_px: Half-width of the search window in pixels.
+        centroid_box_half_px: Half-width of the centroid-fit box in
+            pixels.
+        image_noise_sigma: Robust per-pixel noise sigma in DN units.
+        detection_sigma: Threshold multiplier on
+            ``image_noise_sigma``; the brightest peak must clear
+            ``detection_sigma * image_noise_sigma`` to be accepted.
+
+    Returns:
+        ``(centroid, peak_dn)`` where ``centroid`` is the
+        ``(v, u)`` sub-pixel centre or ``None`` if no peak cleared
+        the threshold.  ``peak_dn`` is the brightest DN in the search
+        window regardless of whether the peak was accepted (handy for
+        diagnostics).
+    """
+    v0, u0 = predicted_vu_pos
+    h, w = image_ext.shape
+    v_lo = max(0, math.floor(v0 - search_window_px))
+    u_lo = max(0, math.floor(u0 - search_window_px))
+    v_hi = min(h, math.ceil(v0 + search_window_px) + 1)
+    u_hi = min(w, math.ceil(u0 + search_window_px) + 1)
+    if v_hi <= v_lo or u_hi <= u_lo:
+        return None, 0.0
+    window = image_ext[v_lo:v_hi, u_lo:u_hi]
+    flat_idx = int(np.argmax(window))
+    pv, pu = np.unravel_index(flat_idx, window.shape)
+    peak_dn = float(window[pv, pu])
+    if peak_dn < detection_sigma * image_noise_sigma:
+        return None, peak_dn
+    peak_v = v_lo + int(pv)
+    peak_u = u_lo + int(pu)
+    box_v_lo = max(0, peak_v - centroid_box_half_px)
+    box_u_lo = max(0, peak_u - centroid_box_half_px)
+    box_v_hi = min(h, peak_v + centroid_box_half_px + 1)
+    box_u_hi = min(w, peak_u + centroid_box_half_px + 1)
+    box = image_ext[box_v_lo:box_v_hi, box_u_lo:box_u_hi]
+    bg = float(np.median(box))
+    weights = np.clip(box.astype(np.float64) - bg, 0.0, None)
+    total = float(weights.sum())
+    if total <= 0.0:
+        return None, peak_dn
+    vs = np.arange(box_v_lo, box_v_hi, dtype=np.float64)
+    us = np.arange(box_u_lo, box_u_hi, dtype=np.float64)
+    centroid_v = float(np.sum(vs[:, None] * weights) / total)
+    centroid_u = float(np.sum(us[None, :] * weights) / total)
+    return (centroid_v, centroid_u), peak_dn

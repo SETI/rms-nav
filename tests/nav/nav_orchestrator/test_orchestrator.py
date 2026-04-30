@@ -239,10 +239,23 @@ def test_orchestrator_only_models_filter_drops_models(fake_obs: _FakeObs) -> Non
 def test_orchestrator_only_techniques_filter_drops_techniques(
     fake_obs: _FakeObs,
 ) -> None:
-    """only_techniques='!_FakeStarTechnique' yields no_feasible_techniques."""
+    """An exclusion glob that rejects every STAR technique yields ``no_feasible_techniques``.
+
+    The exclude list covers ``_FakeStarTechnique`` plus every shipped
+    STAR-accepting NavTechnique so the only feasible matches against
+    the fake STAR features are filtered out, leaving an empty pass-1
+    result list and the corresponding status reason.
+    """
     obs = fake_obs
     model = _FakeStarModel(obs, feature_count=3)
-    orch = NavOrchestrator([model], only_techniques='!_FakeStarTechnique')
+    orch = NavOrchestrator(
+        [model],
+        only_techniques=[
+            '!_FakeStarTechnique',
+            '!_RaisingTechnique',
+            '!Star*',
+        ],
+    )
     result = orch.navigate(obs)  # type: ignore[arg-type]
     assert result.status == 'failed'
     assert result.status_reason == NavStatusReason.NO_FEASIBLE_TECHNIQUES

@@ -29,9 +29,12 @@ from nav.feature.feature_type import NavFeatureType
 from nav.feature.geometry import BodyBlobGeometry
 from nav.nav_technique.confidence import evaluate_sigmoid_combination
 from nav.nav_technique.diagnostics import BodyBlobDiagnostics
-from nav.nav_technique.dt_fitting import AT_EDGE_TOLERANCE_PX
 from nav.nav_technique.feasibility import NavFeasibilityReport
-from nav.nav_technique.nav_technique import NavTechnique, log_confidence_breakdown
+from nav.nav_technique.nav_technique import (
+    NavTechnique,
+    log_confidence_breakdown,
+    search_window_for_obs,
+)
 from nav.nav_technique.technique_result import NavTechniqueResult
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
@@ -294,6 +297,8 @@ class BodyBlobNav(NavTechnique):
 
     def __init__(self, *, config: Config | None = None) -> None:
         super().__init__(config=config)
+        self.config.read_config()  # ensure cls.tuning is populated
+        self._at_edge_tolerance_px = float(self.tuning['at_edge_tolerance_px'])
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Return whether the input set carries any usable BODY_BLOB feature.
@@ -336,7 +341,7 @@ class BodyBlobNav(NavTechnique):
                 len(eligible),
                 len(features),
             )
-            margin_v, margin_u = _search_window_for_obs(context)
+            margin_v, margin_u = search_window_for_obs(context)
             self.logger.debug('Search window (v, u) = (%d, %d) px', margin_v, margin_u)
             image_ext = np.asarray(context.image_ext, np.float64)
             noise_sigma = float(max(context.image_noise_sigma, 1e-9))
@@ -345,8 +350,8 @@ class BodyBlobNav(NavTechnique):
                 return self._fail_no_signal(features=eligible, noise_sigma=noise_sigma)
             fit = _joint_offset_from_residuals(residuals)
             at_edge = (
-                abs(fit.dv) >= margin_v - AT_EDGE_TOLERANCE_PX
-                or abs(fit.du) >= margin_u - AT_EDGE_TOLERANCE_PX
+                abs(fit.dv) >= margin_v - self._at_edge_tolerance_px
+                or abs(fit.du) >= margin_u - self._at_edge_tolerance_px
             )
             mean_snr = float(np.mean(residuals.snrs))
             mean_extent = float(np.mean(residuals.extents))
@@ -435,20 +440,3 @@ class _BlobConfidenceContext:
         self.body_extent_px = diagnostics.body_extent_px
         self.blob_count = float(diagnostics.blob_count)
         self.residual_px = diagnostics.residual_px
-
-
-def _search_window_for_obs(context: NavContext) -> tuple[int, int]:
-    """Return the ``(margin_v, margin_u)`` search window for at-edge detection.
-
-    The technique reads the per-instrument extfov margin from the
-    observation.  ``extfov_margin_vu`` is a mandatory attribute on
-    every ``ObsSnapshotInst``; test fixtures must set it as well
-    (the shared ``FakeObs`` defaults to ``(32, 32)``).  An obs
-    missing the attribute is a programming error and surfaces as
-    ``AttributeError`` rather than a silent fallback.
-    """
-    # ``NavContext.obs`` is typed as ``object`` to avoid an import cycle
-    # with ``ObsSnapshotInst``; the attribute lookup is mandatory at
-    # runtime even though mypy cannot see it.
-    margin = context.obs.extfov_margin_vu  # type: ignore[attr-defined]
-    return (int(margin[0]), int(margin[1]))

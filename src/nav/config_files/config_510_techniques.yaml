@@ -84,6 +84,10 @@ techniques:
     # fit, so the technique cannot drive the ensemble past 0.4
     # confidence even when every term saturates.
     hard_cap: 0.4
+    tuning:
+      # Pixels of slack around the search-window axis bounds for the
+      # at-edge check.  See ``RingEdgeNav.at_edge_tolerance_px``.
+      at_edge_tolerance_px: 1.0
 
   BodyLimbNav:
     alpha0: -1.0
@@ -116,6 +120,9 @@ techniques:
       # off the true limb onto internal-body features (crater rims,
       # terminator, surface boundaries) — flag spurious.
       spurious_min_inlier_fraction: 0.05
+      # Pixels of slack around the search-window axis bounds for the
+      # at-edge check.  See ``RingEdgeNav.at_edge_tolerance_px``.
+      at_edge_tolerance_px: 1.0
 
   BodyTerminatorNav:
     alpha0: -1.0
@@ -148,6 +155,9 @@ techniques:
       # Below this Tukey-inlier count the M-estimator covariance is
       # no longer informative.
       spurious_min_inliers: 6
+      # Pixels of slack around the search-window axis bounds for the
+      # at-edge check.  See ``RingEdgeNav.at_edge_tolerance_px``.
+      at_edge_tolerance_px: 1.0
 
   RingEdgeNav:
     alpha0: -1.0
@@ -176,6 +186,178 @@ techniques:
       # Below this Tukey-inlier count the M-estimator covariance is no
       # longer informative.
       spurious_min_inliers: 6
+
+  StarUniqueMatchNav:
+    # The 1-star path is capped at 0.7 inside the technique (single match
+    # cannot self-check); the 2-star path is capped at 0.8 (residual
+    # cross-checks the assignment).  YAML alpha shape is identical for
+    # both paths; the cap is applied post-sigmoid in
+    # ``StarUniqueMatchNav.navigate``.
+    alpha0: -1.0
+    terms:
+      # Higher predicted SNR shrinks the centroid CRLB and tightens the
+      # match.  Saturate near snr=20 (typical bright catalog star).
+      - feature: predicted_snr
+        alpha: 1.0
+        divisor: 20.0
+        cap_at: 1.0
+      # Magnitude margin to the next-brightest predictable star in the
+      # extfov.  Below the 1.5 mag floor the technique short-circuits
+      # before reaching the formula; above the floor, additional margin
+      # earns confidence up to a 1.5 mag span.
+      - feature: brightness_margin_mag
+        alpha: 1.0
+        offset: 1.5
+        divisor: 1.5
+        cap_at: 1.0
+      # Larger residuals between the matched detection and the prediction
+      # pull confidence down.
+      - feature: residual_px
+        alpha: -1.0
+        divisor: 2.0
+    hard_zero_if:
+      at_edge: true
+      spurious: true
+    tuning:
+      # Minimum magnitude difference to the next-brightest predictable
+      # star for the 1-star path to fire.
+      brightness_margin_to_next_catalog_star_mag: 1.5
+      # Half-width of the search window around each prediction (px).
+      # Should bracket the per-instrument SPICE pointing-error envelope
+      # so the brightest peak in the window is the matched detection.
+      search_window_px: 30.0
+      # Centroid box half-width around the brightness peak (px).
+      centroid_box_half_px: 3
+      # Maximum allowed best-assignment residual in the 2-star path
+      # before falling back to the 1-star path.
+      max_residual_px: 4.0
+      # Detection-threshold multiplier on image_noise_sigma; below this
+      # the brightest pixel inside the search window is considered noise.
+      detection_sigma: 4.0
+      # Per-mode caps applied post-sigmoid; the 1-star path cannot
+      # self-check, so its cap is lower than the 2-star path's.
+      one_star_confidence_cap: 0.7
+      two_star_confidence_cap: 0.8
+      # Pixels of slack around the search-window axis bounds for the
+      # at-edge check.  A converged offset whose absolute distance from
+      # any axis bound (+/-margin_v, +/-margin_u) falls within this
+      # tolerance is flagged ``at_edge=True`` and forced to zero
+      # confidence by the technique's ``hard_zero_if`` gate.  Matches
+      # the bilinear-DT half-cell width used elsewhere in the pipeline.
+      at_edge_tolerance_px: 1.0
+
+  StarRefineNav:
+    # Pass-2 refinement on the pass-1 ensemble's prior offset.  Tighter
+    # alphas than the unique-match path because every surviving inlier
+    # contributes independent evidence.
+    alpha0: -1.0
+    terms:
+      # More inliers => more independent constraints; saturate at 5.
+      - feature: n_stars_used
+        alpha: 1.0
+        divisor: 5.0
+        cap_at: 1.0
+      # Lower median per-star error => tighter refinement.
+      - feature: median_pos_err_px
+        alpha: -1.0
+        divisor: 1.0
+      # Lower per-axis scatter => internally consistent fit.
+      - feature: residual_scatter_px
+        alpha: -1.0
+        divisor: 1.0
+    hard_zero_if:
+      at_edge: true
+      spurious: true
+    tuning:
+      # Half-width of the per-star refine window (px).  Tighter than the
+      # unique-match search window because the pass-1 prior already put
+      # us within a few pixels of the right answer.
+      refine_window_px: 6.0
+      # Centroid box half-width around the brightness peak (px).
+      centroid_box_half_px: 3
+      # Drop a star whose detection sits more than this many pixels from
+      # the prior-shifted prediction; almost certainly a wrong peak.
+      max_per_star_residual_px: 4.0
+      # Detection-threshold multiplier on image_noise_sigma.
+      detection_sigma: 4.0
+      # Below this many surviving inliers the technique reports spurious.
+      min_inliers: 1
+      # Pixels of slack around the search-window axis bounds for the
+      # at-edge check (see StarUniqueMatchNav.at_edge_tolerance_px).
+      at_edge_tolerance_px: 1.0
+      # Post-sigmoid confidence cap when the refine fit had only one
+      # inlier.  A 1-star refine adds no independent cross-check
+      # information beyond the prior it was handed (the same single
+      # observation that drove the pass-1 fit), so its confidence
+      # ceiling is set lower than ``StarUniqueMatchNav``'s 0.7 1-star
+      # cap.  The ensemble's primary-technique selection therefore
+      # cannot promote a 1-star refine over a 1-star unique-match on
+      # the same observation.  Phase 10 calibration may retune the
+      # numeric value; the structural cap stays.
+      single_inlier_confidence_cap: 0.5
+
+  StarFieldFromCatalogNav:
+    # Multi-star RANSAC pattern matcher.  Confidence is dominated by
+    # ``n_inliers`` (more matched stars => stronger constraint) and is
+    # pulled down by residual scatter.  The ``n_detected_sources`` and
+    # ``n_catalog_predicted`` terms ride alpha=0.0 pending Phase 10
+    # calibration; the wiring is in place so a sweep can tune them
+    # without code changes.
+    alpha0: -2.0
+    terms:
+      - feature: n_inliers
+        alpha: 1.0
+        offset: 6.0
+        divisor: 6.0
+        cap_at: 1.0
+      - feature: median_residual_px
+        alpha: -1.0
+        divisor: 1.0
+      - feature: n_detected_sources
+        alpha: 0.0
+        divisor: 30.0
+        cap_at: 1.0
+      - feature: n_catalog_predicted
+        alpha: 0.0
+        divisor: 30.0
+        cap_at: 1.0
+    hard_zero_if:
+      at_edge: true
+      spurious: true
+    tuning:
+      # Maximum number of brightest detected sources / brightest
+      # catalog stars to feed the matcher.  Triplet count is M^3, so
+      # 30 keeps the candidate list bounded (~27K triplets per side).
+      max_sources: 30
+      # Detection-threshold multiplier on image_noise_sigma.
+      detection_sigma: 4.0
+      # Gaussian PSF sigma (px) used for the matched-filter kernel.
+      # Matches the typical ungroomed star PSF; per-instrument
+      # overrides arrive in Phase 9 / 10 once the integration library
+      # exercises the full instrument set.
+      psf_sigma_px: 1.0
+      # Centroid box half-width around each detection peak (px).
+      centroid_box_half_px: 3
+      # KD-tree match radius in the (ratio, ratio, angle_rad) hash
+      # space; weighted Euclidean.  0.05 is the empirical default for
+      # centroid sigma ~0.1 px against typical triplet scales (Part 3
+      # §"Algorithm specifics").
+      hash_match_tolerance: 0.05
+      # Per-axis weights in the hash distance metric.  Radians and
+      # dimensionless ratios are roughly comparable in magnitude over
+      # the typical triplet shapes; both default to 1.0.
+      hash_ratio_weight: 1.0
+      hash_angle_weight: 1.0
+      # Maximum residual (px) for a detection-to-catalog
+      # correspondence to count as an inlier under a candidate
+      # transform.
+      inlier_tolerance_px: 2.0
+      # Minimum inlier count for the matcher to accept a transform;
+      # below this the technique returns spurious.
+      pattern_match_min_inliers: 6
+      # Pixels of slack around the search-window axis bounds for the
+      # at-edge check (see StarUniqueMatchNav.at_edge_tolerance_px).
+      at_edge_tolerance_px: 1.0
 
   RingAnnulusNav:
     alpha0: -2.0

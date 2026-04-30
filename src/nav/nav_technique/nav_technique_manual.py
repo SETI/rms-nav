@@ -72,7 +72,7 @@ class NavTechniqueManual(NavTechnique):
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Manual navigation runs whenever there is anything to render.
 
-        Three feature kinds paint into the dialog's composite overlay
+        Four feature kinds paint into the dialog's composite overlay
         (see :func:`~nav.feature.composition.compose_dialog_overlay`):
 
         - template-bearing (``BODY_DISC``, ``RING_ANNULUS``,
@@ -80,11 +80,14 @@ class NavTechniqueManual(NavTechnique):
         - polyline-bearing (``LIMB_ARC``, ``TERMINATOR_ARC``,
           ``RING_EDGE``) — single-pixel marks at every vertex;
         - ``BODY_BLOB`` — 1-pixel circle outline at the predicted
-          centroid with the predicted-diameter radius.
+          centroid with the predicted-diameter radius;
+        - ``STAR`` — rectangle outline at the predicted-vu position
+          sized by the per-feature PSF bbox so the operator can see
+          where the catalog says the star sits.
 
         Without any of them the dialog has nothing to display.
         """
-        from nav.feature.geometry import BodyBlobGeometry
+        from nav.feature.geometry import BodyBlobGeometry, StarGeometry
 
         renderable = 0
         for f in features:
@@ -96,6 +99,9 @@ class NavTechniqueManual(NavTechnique):
                 renderable += 1
                 continue
             if isinstance(f.geometry, BodyBlobGeometry):
+                renderable += 1
+                continue
+            if isinstance(f.geometry, StarGeometry):
                 renderable += 1
         if renderable == 0:
             return NavFeasibilityReport(

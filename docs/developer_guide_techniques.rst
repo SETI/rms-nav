@@ -393,6 +393,139 @@ Infeasibility cases:
 
 - No input feature carries a template.
 
+Star techniques
+===============
+
+Three techniques consume STAR features.  Each runs against a different
+star-count regime, and the orchestrator picks per scene by feasibility
+gates.
+
+StarUniqueMatchNav
+------------------
+
+Accepts ``STAR`` features.  Runs in pass 1 (no prior required).  Two
+paths share one technique:
+
+- **One-star path.** When the catalog reduction yields one star whose
+  predicted SNR is at least
+  ``brightness_margin_to_next_catalog_star_mag`` (default 1.5 mag)
+  brighter than the next-brightest predictable star, the brightest
+  detection inside its search window is unambiguously its match.  The
+  offset is the centroid minus the prediction; confidence is capped
+  at ``one_star_confidence_cap`` (default 0.7).
+- **Two-star path.**  With two predictable stars, the technique tries
+  both detection-to-prediction assignments and picks the one whose
+  joint residual is smaller.  Confidence is capped at
+  ``two_star_confidence_cap`` (default 0.8).
+
+``is_feasible`` returns True when at least one usable STAR feature is
+present (occluded / cosmic-ray-masked stars are filtered out
+upstream).  The technique uses a localised brightness-peak +
+brightness-weighted-moment centroid inside a per-prediction window; no
+global ``detect_sources`` call is needed.
+
+StarRefineNav
+-------------
+
+Accepts ``STAR`` features.  Runs in pass 2 (``requires_prior=True``).
+For each predicted catalog star, the technique:
+
+1. Shifts the prediction by the prior offset.
+2. Looks for a brightness peak in a small refine window around the
+   shifted prediction.
+3. Fits a brightness-weighted moment for the sub-pixel centroid.
+4. Computes per-star residuals and averages them in inverse-variance
+   fashion.
+
+Stars whose detection sits more than ``max_per_star_residual_px`` from
+the shifted prediction are dropped before the joint average.  The
+refined offset is reported as ``delta + prior_offset`` (the ensemble
+combine sees the absolute offset).  The covariance reflects the
+residual scatter across surviving stars; with two or more inliers the
+technique reports the actual scatter, with one inlier the per-feature
+CRLB floor.
+
+StarFieldFromCatalogNav
+-----------------------
+
+Accepts ``STAR`` features.  Runs in pass 1 (no prior required).
+Requires at least three usable STAR features.  Algorithm:
+
+1. **Source detection.** Matched-filter the image against a Gaussian
+   PSF kernel sized by ``psf_sigma_px`` /
+   ``centroid_box_half_px``; pixels that are local maxima above
+   ``detection_sigma * image_noise_sigma`` clear the gate.  Each
+   surviving peak contributes a brightness-weighted moment centroid.
+   The brightest ``max_sources`` (default 30) survivors feed the
+   matcher; the cap keeps the M^3 triplet enumeration bounded.
+2. **Triplet hashing.**  For each unordered triplet of detected
+   sources ``{A, B, C}`` with ``A`` brightest, the hash
+   ``(d_AB / d_AC, d_BC / d_AC, ∠BAC)`` is computed.  The same
+   canonicalisation runs on catalog triplets, ranked by predicted
+   SNR.  All three hash components are similarity-invariant
+   (translation, rotation, uniform scale), so the matcher recovers
+   correspondences without already knowing the transform.
+3. **RANSAC.**  Each (det_triplet, cat_triplet) candidate within
+   ``hash_match_tolerance`` (weighted Euclidean in the hash space)
+   proposes the translation
+   ``mean(detection_vertices) - mean(catalog_vertices)``.  Candidates
+   are evaluated in deterministic sorted order — ``(hash_distance
+   ascending, sorted detection-source indices ascending,
+   catalog-triplet index ascending)`` — so the matcher's choice of
+   winner is bit-identical across two back-to-back invocations on
+   the same obs (Cardinal Principle 3, Part 3 §"Determinism in
+   RANSAC").  Inlier count is the score; the winner needs at least
+   ``pattern_match_min_inliers`` (default 6).
+4. **Verification.**  With the winning inlier correspondences, a
+   Tukey-biweight-reweighted weighted least-squares mean refits the
+   translation; the per-axis variance of the surviving residuals is
+   the reported covariance.
+
+``is_feasible`` returns True when ≥ 3 usable STAR features are
+present (below that the matcher cannot form a triplet).
+``StarUniqueMatchNav`` and ``StarFieldFromCatalogNav`` are mutually
+exclusive at feasibility time: 1–2 predictable stars favour the
+unique-match path, ≥ 3 favour the triplet matcher.
+
+Phase 8 ships translation-only fitting; the rotation-enabled
+3-DoF Procrustes path lights up in Phase 9 when
+``fit_camera_rotation`` is enabled per instrument.
+
+Confidence spec coefficients (placeholders pending Phase 10
+calibration against the operator-curated image library):
+
+- ``alpha0 = -2``
+- ``alpha((n_inliers - 6) / 6, capped at 1) = 1``
+- ``alpha(median_residual_px) = -1``
+- ``alpha(n_detected_sources / 30, capped at 1) = 0`` — wired in but
+  disabled until calibration tunes the alpha
+- ``alpha(n_catalog_predicted / 30, capped at 1) = 0`` — wired in but
+  disabled until calibration tunes the alpha
+- hard zero when ``at_edge`` or ``spurious``
+
+The coefficients live in
+``src/nav/config_files/config_510_techniques.yaml`` under
+``techniques.StarFieldFromCatalogNav`` and are loaded into
+``ConfidenceSpec`` at config-load time by
+:func:`nav.nav_technique.confidence_config.load_confidence_spec`.
+
+Diagnostics fields:
+
+- ``n_inliers``: surviving detection-to-catalog correspondences after
+  the Tukey refit.
+- ``median_residual_px``: median Euclidean residual on the inliers.
+- ``n_detected_sources``: bright peaks the detector kept (capped at
+  ``max_sources``).
+- ``n_catalog_predicted``: catalog stars the matcher considered (also
+  capped at ``max_sources``).
+- ``n_triplets_evaluated``: candidate (det_triplet, cat_triplet)
+  pairs whose hash distance fell within the match tolerance.
+
+Infeasibility cases:
+
+- Fewer than three usable STAR features (the matcher cannot form a
+  triplet).
+
 Body-extractor emission gate
 ============================
 

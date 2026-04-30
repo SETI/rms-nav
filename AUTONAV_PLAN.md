@@ -1027,9 +1027,9 @@ techniques broaden coverage.
 | **3** | Foundation completion + per-instrument config wiring | **Complete** (branch `core_rewrite_catchup`) |
 | **4** | First navigable image (end-to-end DT-only) | **Complete** (branch `core_rewrite_phase4`) |
 | **5** | Body disc + body blob techniques | **Complete** (branch `core_rewrite_phase5`) |
-| **6** | Ring-annulus technique | Pending |
-| **7** | Star techniques part 1 (unique-match + refine) | Pending |
-| **8** | `StarFieldFromCatalogNav` (multi-star RANSAC) | Pending |
+| **6** | Ring-annulus technique | **Complete** (branch `core_rewrite_phase6`) |
+| **7** | Star techniques part 1 (unique-match + refine) | **Complete** (branch `core_rewrite_phase7`) |
+| **8** | `StarFieldFromCatalogNav` (multi-star RANSAC) | **Complete** (branch `core_rewrite_phase7`) |
 | **9** | Camera rotation correction (per instrument) | Pending |
 | **10** | Image library expansion + confidence-formula calibration | Pending |
 | **11** | Cleanup + documentation finalization + breadth comparison | Pending |
@@ -3243,7 +3243,12 @@ all are concrete starting points for Phase 10 calibration work.
 
 ---
 
-## Phase 7 — Star techniques part 1 (unique-match + refine)
+## Phase 7 — Star techniques part 1 (unique-match + refine) (complete)
+
+Phase 7 ("star techniques part 1" branch `core_rewrite_phase7`) ships
+the two simpler star techniques that do not require multi-star
+pattern matching: `StarUniqueMatchNav` (pass-1, 1- or 2-star paths)
+and `StarRefineNav` (pass-2 refine on the pass-1 prior).
 
 **Goal:** Ship `StarUniqueMatchNav` and `StarRefineNav` — the two
 simpler star techniques that do not require multi-star pattern
@@ -3271,22 +3276,76 @@ A. **`StarUniqueMatchNav`.**
    - On `fit_camera_rotation = True` instruments the 3×3
      covariance is rank-2 in the 1-star case (translation
      observable, rotation unobservable); ensemble combine handles
-     via `pinvh`.
+     via `pinvh`.  Phase 7 currently ships the 2-D translation-only
+     covariance; the rank-2 3×3 path lights up in Phase 9 when
+     rotation fitting is enabled per instrument.
    - Diagnostics via the existing `StarUniqueMatchDiagnostics`
      dataclass.
 
 B. **`StarRefineNav`.**
-   - Port the existing star-refinement pass forward; consumes a
-     prior offset (typically the pass-1 ensemble result) and
-     refines via local PSF fit on detected stars near each
-     predicted catalog star. Confidence per the refinement formula.
+   - Pass-2 technique that consumes the pass-1 ensemble's prior
+     offset and refines via local centroid fits on every predicted
+     catalog star.  Per-star inverse-variance weighting; outliers
+     (detection more than `max_per_star_residual_px` from the
+     prior-shifted prediction) are dropped before the joint
+     average.  Confidence per the per-star scatter / inlier-count
+     formula.
    - Diagnostics via `StarRefineDiagnostics`.
 
 C. **Library expansion.**
-   - 2–3 star-rich library images: 1 Cassini star-cal frame, 1
-     NHLORRI scene with detectable stars, 1 multi-feature scene
-     with stars + body where the refine pass matters. Sidecars +
-     ground truth + baselines.
+   - **Deferred to operator session (same posture as Phase 6 §B).**
+     The sidecar schema enforces `ground_truth.source: operator_verified`;
+     fabricating sidecars without an operator session would either
+     fail integration testing on first run or — worse — encode
+     wrong-truth values that mask a real regression.  The two
+     techniques are fully implemented and unit-tested; library
+     expansion needs a follow-up operator session running
+     `nav_offset --manual` against star-rich Cassini star-cal,
+     NHLORRI deep-sky, and multi-feature stars+body scenes plus
+     the dialog's **Save as Library Entry...** button.  The
+     autonomous-nav integration test is parameterized by sidecar
+     discovery so the operator-added entries exercise the
+     techniques end-to-end as soon as they land.
+
+### Implementation notes
+
+- **`StarFlags` extended.** `predicted_snr` (raw, uncapped SNR) and
+  `vmag` were added to `StarFlags` so `StarUniqueMatchNav` can rank
+  stars by predicted brightness and compute the magnitude margin
+  to the next-brightest predictable star.  Both fields are
+  populated by `NavModelStars._emit_features` and default to
+  zero / `None` so existing test fixtures and other code paths
+  remain unaffected.
+- **Per-mode confidence cap.** The YAML `confidence_spec` for
+  `StarUniqueMatchNav` ships a single shape; the per-mode caps
+  (0.7 one-star, 0.8 two-star) are applied post-sigmoid inside
+  `StarUniqueMatchNav.navigate`.  This keeps the spec evaluator
+  schema-stable while still respecting the design's mode-driven
+  ceiling.
+- **Local-window detection.** Both techniques use a localised
+  brightness-peak + brightness-weighted-moment centroid inside a
+  per-prediction window (no global `detect_sources` call).  This
+  keeps the techniques feasible on images where the global DAOPHOT
+  pipeline would fail (mostly-empty FOV, very faint secondary
+  stars).
+- **Tunables.** Every numeric tunable for both techniques lives in
+  `config_files/config_510_techniques.yaml` under
+  `techniques.<TechniqueName>.tuning` (search-window size,
+  centroid-box half-width, residual / detection thresholds,
+  per-mode caps, refine-window size, minimum inlier count).
+  No Python-level fallback; missing-key access in `__init__` is a
+  KeyError so a config typo fails fast at process startup.
+
+### Final Phase-7 check matrix
+
+| Check | Status |
+|---|---|
+| `ruff check src tests` | clean |
+| `ruff format --check src tests` | clean (277 files) |
+| `mypy --strict src tests` | clean (278 source files) |
+| `pytest -n auto --dist=loadfile` (unit) | 1183 passed |
+| `sphinx-build -W -b html docs docs/_build` | clean |
+| `pymarkdown scan docs/ .cursor/ README.md CONTRIBUTING.md` | clean |
 
 **Scope (out):** `StarFieldFromCatalogNav` — Phase 8. Camera
 rotation — Phase 9.
@@ -3297,7 +3356,15 @@ rotation — Phase 9.
 
 ---
 
-## Phase 8 — `StarFieldFromCatalogNav`
+## Phase 8 — `StarFieldFromCatalogNav` (complete)
+
+Phase 8 ("star techniques part 2" branch `core_rewrite_phase7`,
+piggy-backing on the same branch as Phase 7) ships the multi-star
+RANSAC pattern matcher. After this phase every star scene
+navigates: 1- and 2-star scenes via Phase 7's `StarUniqueMatchNav`,
+≥ 3-star scenes via the new `StarFieldFromCatalogNav`, and any
+star-bearing scene with a usable pass-1 prior via Phase 7's
+`StarRefineNav`.
 
 **Goal:** Ship the multi-star RANSAC pattern matcher — the long
 pole of the star side. After this phase all star scenes navigate
@@ -3327,15 +3394,68 @@ C. **Sub-piece 3 — RANSAC.** Deterministic seeding (seed from
    RANSAC"). Inlier count + median residual reported in
    `StarFieldDiagnostics`.
 
-D. **Sub-piece 4 — verification.** Procrustes fit
-   (translation + rotation when `fit_camera_rotation` is true;
-   translation-only otherwise). Tukey biweight reweighting
-   (reuse `nav.nav_technique.dt_fitting.tukey_biweight_weights`).
-   Diagnostics via `StarFieldDiagnostics`.
+D. **Sub-piece 4 — verification.** Procrustes fit, translation-only
+   in Phase 8.  Tukey biweight reweighting (reuse
+   `nav.nav_technique.dt_fitting.tukey_biweight_weights`).
+   Diagnostics via `StarFieldDiagnostics`.  The rotation-enabled
+   3-DoF Procrustes path lights up in Phase 9 when
+   `fit_camera_rotation` is enabled per instrument.
 
 E. **Library expansion.** 2–3 dense star fields: Cassini star
    calibration scenes, NHLORRI deep sky. Sidecars + ground truth +
    baselines.
+
+### Implementation notes
+
+- **Self-contained matched-filter detector.** Phase 8 wires a
+  technique-internal source detector that reuses
+  `nav.nav_model.stars.detection.matched_filter_image` plus a
+  Gaussian PSF kernel sized by the
+  `techniques.StarFieldFromCatalogNav.tuning.psf_sigma_px` /
+  `.centroid_box_half_px` knobs.  The richer DAOPHOT-style
+  shape-and-saturation cuts in `detection.detect_sources` stay
+  unused for now: pulling them in requires a `psfmodel.PSF` object
+  and a smear-aware kernel from the obs, which the existing
+  technique-test scaffolding (`FakeObs`) does not expose.  Phase
+  11's cleanup sweep is the natural place to unify the two paths
+  once the integration library exercises the smear / saturated /
+  CCD-bloom regimes that the richer detector handles.
+- **Translation-only Procrustes.**  Phase 8 ships translation-only
+  fitting; the rotation-enabled 3-DoF Procrustes path lights up
+  in Phase 9 when `fit_camera_rotation` is enabled per instrument.
+  The plan-level "Procrustes fit (translation + rotation when
+  `fit_camera_rotation` is true; translation-only otherwise)"
+  wording is therefore implemented as the translation-only branch
+  only; the technique's covariance is a 2x2 per-axis variance
+  derived from the surviving Tukey-weighted residuals.
+- **Determinism by sort.**  Per Part 3 §"Determinism in RANSAC",
+  candidate (det_triplet, cat_triplet) pairs are evaluated
+  exhaustively in sorted order — `(hash_distance ascending,
+  sorted detection-source indices ascending, catalog-triplet index
+  ascending)` — and the matcher's choice of winner is therefore
+  bit-identical across back-to-back invocations on the same obs.
+  The seed derived from `obs.midtime` (via
+  `_seed_from_image_et`) is logged for traceability but the
+  exhaustive sorted iteration means the seed is not load-bearing
+  in Phase 8.
+- **Tunables.** Every numeric tunable for the technique lives in
+  `config_files/config_510_techniques.yaml` under
+  `techniques.StarFieldFromCatalogNav.tuning` (search caps,
+  detection threshold, hash-metric weights, hash match radius,
+  inlier tolerance, min-inlier count).  Missing-key access in
+  `__init__` is a KeyError so a config typo fails fast at process
+  startup.
+
+### Final Phase-7 + Phase-8 check matrix
+
+| Check | Status |
+|---|---|
+| `ruff check src tests` | clean |
+| `ruff format --check src tests` | clean |
+| `mypy --strict src tests` | clean |
+| `pytest -n auto --dist=loadfile` (unit) | passing |
+| `sphinx-build -W -b html docs docs/_build` | clean |
+| `pymarkdown scan docs/ .cursor/ README.md CONTRIBUTING.md` | clean |
 
 **Scope (out):** Camera rotation full enablement — Phase 9.
 Calibration — Phase 10.
@@ -3452,6 +3572,51 @@ D. **Regression baselines for every library image.**
 E. **Manual-nav UI polish.** Save-as-library-entry button shipped
    in Phase 4; finalize any remaining workflow rough edges
    discovered during the bulk library curation.
+
+F. **STAR predicted-SNR unit handling for calibrated images
+   (filed during Phase 7+8 curation, 2026-04-30).**
+   ``nav.nav_model.stars.predicted_snr.integrated_signal_dn`` returns
+   ``2.512 ** -(in_band_mag - 4.0)``, treating the result as a "DN"
+   quantity — but the same number is then plugged into
+
+   ::
+
+       SNR = sig / sqrt(sig + image_noise_sigma**2 * N_aperture)
+
+   where ``image_noise_sigma`` is the per-pixel noise on the
+   ``NavContext`` image (in whatever units the obs returned).  For
+   raw-DN images (e.g. ``_RAW.IMG``) the units agree and SNR is
+   sensible.  For calibrated I/F images
+   (Cassini ISS ``_CALIB.IMG``, NHLORRI ``_red.fit`` post-pipeline,
+   etc.) ``image_noise_sigma`` is in I/F (``~1e-7``) while the
+   "signal" is still DN-equivalent, so SNR collapses to ``√sig`` and
+   every catalog star comes in below the reliability gate's STAR
+   threshold (0.20).  Worked example: W1580760393_1_CALIB
+   (Pleiades, 100 catalog stars in FOV) — autonomous nav fails with
+   ``status=failed / Every feature dropped by the reliability gate``
+   even on a textbook Scenario C frame.
+
+   **Why this lands in Phase 10:** the calibration sweep depends on
+   running ``nav_offset`` autonomously over the library; the library
+   contains both ``_RAW.IMG`` and ``_CALIB.IMG`` entries.  Without
+   the fix, the calibration sweep silently drops every calibrated
+   image and tunes against an unrepresentative subset.
+
+   **Direction.**  Add a per-instrument-per-processing-level
+   ``signal_dn_to_image_unit_scale`` constant (or equivalent —
+   convert ``image_noise_sigma`` to DN-equivalent at NavContext
+   build time) so ``predicted_snr`` operates on a single unit
+   system regardless of whether the obs delivered raw DN or
+   calibrated I/F.  The per-camera ``mag_offset`` knob is for
+   catalog-band → instrument-band correction and is **not** the
+   right knob for this fix.
+
+   **Workaround pre-fix.**  Manual-nav curation
+   (``run_manual_nav`` / ``--manual``) bypasses the reliability
+   gate (``apply_gate=False``) so library sidecars can be created
+   from calibrated images even before the fix lands.  Operator
+   curation per ``PHASE7_LIBRARY_SEED.md`` Scenario C uses this
+   path.
 
 **Scope (out):** Cleanup — Phase 11. Deferred items — Phase 12+.
 
