@@ -47,10 +47,16 @@ _MANUAL_OFFSET_SIGMA_PX = 1.0
 class NavTechniqueManual(NavTechnique):
     """Interactive manual navigation.
 
-    Composes every template-bearing feature into a single ext-FOV image
-    plus mask, hands the result plus the observation to the
-    ``ManualNavDialog``, and packages the operator's choice into a
-    ``NavTechniqueResult``.
+    Composes every renderable feature into a single ext-FOV image plus
+    mask via :func:`~nav.feature.composition.compose_dialog_overlay`,
+    hands the result plus the observation to the ``ManualNavDialog``,
+    and packages the operator's choice into a ``NavTechniqueResult``.
+    Renderable feature kinds are template-bearing (``BODY_DISC``,
+    ``RING_ANNULUS``, ``CARTOGRAPHIC_MODEL``), polyline-bearing
+    (``LIMB_ARC``, ``TERMINATOR_ARC``, ``RING_EDGE``), ``BODY_BLOB``
+    (predicted-diameter circle outline), and ``STAR`` (rectangle
+    outline at the predicted-vu position sized by the per-feature PSF
+    bbox).
 
     Class attributes:
         _abstract: ``True`` — kept out of the auto-discovery registry so
@@ -192,14 +198,17 @@ def run_manual_nav(
     Returns:
         The :class:`NavTechniqueResult` produced by the dialog, or
         ``None`` when no supported overlay features paint any pixels
-        into the ext-FOV composite.  Supported overlay types are
-        template-bearing features (``BODY_DISC`` / ``RING_ANNULUS`` /
+        into the ext-FOV composite.  Supported overlay types match
+        :meth:`NavTechniqueManual.is_feasible`: template-bearing
+        features (``BODY_DISC`` / ``RING_ANNULUS`` /
         ``CARTOGRAPHIC_MODEL``), polyline-bearing features (``LIMB_ARC``
-        / ``TERMINATOR_ARC`` / ``RING_EDGE``), and ``BODY_BLOB`` (which
-        renders as a 1-pixel circle outline).  The dialog is opened
-        only when the composed mask is non-empty; an off-frame blob or
-        a polyline whose vertices all clip out-of-bounds is treated as
-        if no renderable feature were present.
+        / ``TERMINATOR_ARC`` / ``RING_EDGE``), ``BODY_BLOB`` (1-pixel
+        circle outline at the predicted centroid), and ``STAR``
+        (rectangle outline at the predicted-vu position sized by the
+        per-feature PSF bbox).  The dialog is opened only when the
+        composed mask is non-empty; an off-frame blob, an off-image
+        star, or a polyline whose vertices all clip out-of-bounds is
+        treated as if no renderable feature were present.
     """
     # Local imports keep heavyweight dependencies (NavOrchestrator, NavModel
     # registry) out of import-time graphs for callers that only need the

@@ -67,6 +67,20 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only import
 __all__ = ['StarFieldFromCatalogNav']
 
 
+_COLLINEAR_REL_EPS: float = 1.0e-6
+"""Relative tolerance for the collinear-triplet rejection in ``_triplet_hash``.
+
+A triplet is treated as collinear (and rejected) when the magnitude of
+its 2-D cross product falls below ``_COLLINEAR_REL_EPS * d_ab * d_ac``.
+The dimensionless ratio survives uniform scaling of the input, so the
+floor expresses "the smaller-angle deviation from a perfect line" in
+the same way a relative-error tolerance does for floating-point
+comparisons.  ``1e-6`` admits numerical jitter on near-degenerate
+real-detection triplets while still catching the geometric
+degeneracy.
+"""
+
+
 # All numeric tunables for this technique live in
 # ``config_files/config_510_techniques.yaml`` under
 # ``techniques.StarFieldFromCatalogNav.tuning``.  Missing-key access in
@@ -220,6 +234,15 @@ def _triplet_hash(
     d_ac = math.hypot(ac_v, ac_u)
     d_bc = math.hypot(bc_v, bc_u)
     if d_ab <= 0.0 or d_ac <= 0.0:
+        return None
+    # Collinear-but-distinct triplets produce ``theta = 0`` or ``pi`` —
+    # a hash that can match any other 0-or-pi hash regardless of scale,
+    # which is a false-match trap for the RANSAC matcher.  Reject when
+    # the 2-D cross product magnitude (``d_ab * d_ac * |sin(theta)|``)
+    # falls below a small fraction of the side-length product, which
+    # is dimensionless and survives uniform scaling of the input.
+    cross = ab_v * ac_u - ab_u * ac_v
+    if abs(cross) <= _COLLINEAR_REL_EPS * d_ab * d_ac:
         return None
     cos_theta = (ab_v * ac_v + ab_u * ac_u) / (d_ab * d_ac)
     cos_theta = max(-1.0, min(1.0, cos_theta))

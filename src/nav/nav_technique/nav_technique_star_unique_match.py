@@ -243,6 +243,25 @@ class StarUniqueMatchNav(NavTechnique):
                 peak_b,
             )
             return None
+        # Overlapping search windows can return the SAME detection for
+        # both predictions (one bright peak shared between the
+        # ``[predicted - W, predicted + W]`` slabs of two close
+        # predictions).  Without this guard the 2-star math would fit
+        # both catalog stars to the same observation, fabricate a
+        # zero-residual cross-check, and report high confidence on a
+        # wrong offset.  Two centroids less than 1 pixel apart almost
+        # certainly came from the same matched-filter peak — fall
+        # back to the one-star path so the brightness-margin gate
+        # gets a chance to reject the ambiguous match.
+        det_separation_px = math.hypot(det_a[0] - det_b[0], det_a[1] - det_b[1])
+        if det_separation_px < 1.0:
+            self.logger.debug(
+                'Two-star path: both predictions resolved to the same '
+                'detection (separation %.4f px < 1.0); falling back to '
+                'one-star path',
+                det_separation_px,
+            )
+            return None
         pred_a = chosen[0].geometry.predicted_vu  # type: ignore[union-attr]
         pred_b = chosen[1].geometry.predicted_vu  # type: ignore[union-attr]
         # Assignment 1: det_a -> pred_a, det_b -> pred_b.

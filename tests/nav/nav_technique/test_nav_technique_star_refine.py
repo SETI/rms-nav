@@ -117,7 +117,7 @@ def test_star_refine_requires_prior(
     # Don't attach a prior.
     result = technique.navigate([feature], context)
     assert result.spurious is True
-    assert 'prior' in str(result.feature_ids) or result.confidence == 0.0
+    assert result.confidence == 0.0
 
 
 def test_star_refine_caps_single_inlier_confidence(

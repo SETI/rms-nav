@@ -403,10 +403,12 @@ def _make_star(
 
 
 def test_compose_dialog_overlay_renders_star_marker_rectangle() -> None:
-    """A STAR feature renders a rectangle outline around its predicted (v, u).
+    """A STAR feature renders an exact rectangle-outline pixel set.
 
-    Pin the exact corner pixels so a regression in the marker geometry
-    or in the bbox-to-half-extent conversion fails this test loud.
+    Pin the full perimeter — top + bottom + left + right at half-width
+    5 around (20, 25) — so a regression in the marker geometry, the
+    bbox-to-half-extent conversion, or the choice of outline-vs-filled
+    rasteriser fails this test loud.
     """
     from nav.feature.composition import compose_dialog_overlay
 
@@ -416,14 +418,21 @@ def test_compose_dialog_overlay_renders_star_marker_rectangle() -> None:
         bbox_pad=6,  # bbox spans (14, 19, 27, 32) -> half-width 5
     )
     image, mask = compose_dialog_overlay([star], (40, 40))
-    # Rectangle corners at (v ± 5, u ± 5).
-    for v_corner in (15, 25):
-        for u_corner in (20, 30):
-            assert mask[v_corner, u_corner], f'corner {(v_corner, u_corner)} missing'
-            assert image[v_corner, u_corner] == 1.0
-    # Centre of the rectangle is NOT painted (outline only).
-    assert image[20, 25] == 0.0
-    assert not mask[20, 25]
+    expected_pixels = set()
+    half = 5
+    v_min, v_max = 20 - half, 20 + half
+    u_min, u_max = 25 - half, 25 + half
+    for u in range(u_min, u_max + 1):
+        expected_pixels.add((v_min, u))  # top
+        expected_pixels.add((v_max, u))  # bottom
+    for v in range(v_min, v_max + 1):
+        expected_pixels.add((v, u_min))  # left
+        expected_pixels.add((v, u_max))  # right
+    actual_pixels = set(zip(*np.nonzero(image), strict=True))
+    assert actual_pixels == expected_pixels
+    assert set(zip(*np.nonzero(mask), strict=True)) == expected_pixels
+    assert np.count_nonzero(image) == len(expected_pixels)
+    assert np.count_nonzero(mask) == len(expected_pixels)
 
 
 def test_compose_dialog_overlay_star_marker_off_image_no_op() -> None:
@@ -440,11 +449,13 @@ def test_compose_dialog_overlay_star_marker_off_image_no_op() -> None:
 
 
 def test_compose_dialog_overlay_star_marker_clamps_at_edge() -> None:
-    """A STAR centre near the FOV edge clamps the marker half-width down.
+    """A STAR centre near the FOV edge produces an exact 3x3-perimeter pixel set.
 
     With predicted (1, 1) on a 20x20 FOV, the marker can extend at most
     1 pixel before hitting the edge — the floor (3) does not apply here
-    because the explicit edge clamp is tighter.
+    because the explicit edge clamp is tighter.  The full 8-pixel
+    perimeter (3x3 outline minus the centre) is asserted as an exact
+    set so a regression in the half-width clamp logic fails loud.
     """
     from nav.feature.composition import compose_dialog_overlay
 
@@ -454,9 +465,20 @@ def test_compose_dialog_overlay_star_marker_clamps_at_edge() -> None:
         bbox_pad=6,
     )
     image, mask = compose_dialog_overlay([star], (20, 20))
-    # Half-width clamped to 1 -> rectangle corners at (0, 0), (0, 2),
-    # (2, 0), (2, 2).
-    for v_corner in (0, 2):
-        for u_corner in (0, 2):
-            assert mask[v_corner, u_corner], f'corner {(v_corner, u_corner)} missing'
+    # Half-width clamped to 1 -> 3x3 outline around (1, 1).
+    expected_pixels = {
+        (0, 0),
+        (0, 1),
+        (0, 2),
+        (1, 0),
+        (1, 2),
+        (2, 0),
+        (2, 1),
+        (2, 2),
+    }
+    actual_pixels = set(zip(*np.nonzero(image), strict=True))
+    assert actual_pixels == expected_pixels
+    assert set(zip(*np.nonzero(mask), strict=True)) == expected_pixels
+    assert np.count_nonzero(image) == len(expected_pixels)
+    assert np.count_nonzero(mask) == len(expected_pixels)
     assert image[1, 1] == 0.0  # centre not painted

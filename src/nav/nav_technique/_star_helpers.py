@@ -95,13 +95,18 @@ def brightness_margin_mag(brightest_snr: float, runner_up_snr: float) -> float:
         delta_mag = 2.5 * log10(s1 / s2)
 
     A ratio of 4 corresponds to ~1.5 mag, the default uniqueness floor.
-    Returns ``+inf`` when ``runner_up_snr`` is non-positive (no other
-    predictable star competes with the brightest).
+
+    A non-positive ``brightest_snr`` is unpopulated / garbage input and
+    is checked **first** so a zero-SNR cohort cannot accidentally be
+    treated as "uniquely bright" — it returns ``0.0``.  Only after the
+    brightest is known to carry signal does a non-positive
+    ``runner_up_snr`` mean "no other predictable star competes with the
+    brightest", which is reported as ``+inf``.
     """
-    if runner_up_snr <= 0.0:
-        return float('inf')
     if brightest_snr <= 0.0:
         return 0.0
+    if runner_up_snr <= 0.0:
+        return float('inf')
     return 2.5 * math.log10(brightest_snr / runner_up_snr)
 
 

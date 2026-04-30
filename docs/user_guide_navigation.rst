@@ -457,21 +457,6 @@ Programmatic equivalent (one obs in, ``NavTechniqueResult`` out):
 
    result = run_manual_nav(obs)
 
-Pending techniques (not yet shipped)
--------------------------------------
-
-The following techniques are designed and have stub diagnostics in
-place; their concrete implementations are pending.
-
-* ``StarFieldFromCatalogNav`` -- triplet-hash + RANSAC pattern match for
-  star-rich frames.
-* ``StarUniqueMatchNav`` -- direct catalog-uniqueness match for sparse
-  star fields with one or two bright stars.
-* ``StarRefineNav`` -- prior-refining single-star polish (pass-2).
-
-Until these land, scenes whose only viable feature type is ``STAR`` will
-report ``status_reason=no_feasible_techniques``.
-
 Filtering examples
 ------------------
 
