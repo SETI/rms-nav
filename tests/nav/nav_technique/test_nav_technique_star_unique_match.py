@@ -13,7 +13,10 @@ from tests.nav.nav_technique.conftest import (
 )
 
 from nav.nav_technique.diagnostics import StarUniqueMatchDiagnostics
-from nav.nav_technique.nav_technique import NavTechnique
+from nav.nav_technique.nav_technique import (
+    ROTATION_UNOBSERVABLE_VARIANCE,
+    NavTechnique,
+)
 from nav.nav_technique.nav_technique_star_unique_match import StarUniqueMatchNav
 
 
@@ -205,9 +208,24 @@ def test_star_unique_match_two_star_3dof_recovers_planted_rotation(
     technique = StarUniqueMatchNav()
     context = make_nav_context(image, fit_camera_rotation=True, max_rotation_deg=5.0)
     result = technique.navigate([feat_a, feat_b], context)
+    assert result.spurious is False
     assert result.covariance_px2.shape == (3, 3)
     assert result.rotation_rad is not None
     assert result.rotation_rad == pytest.approx(planted_theta, abs=math.radians(0.3))
+    # The Procrustes translation is ``t = det_centroid - R @ cat_centroid``,
+    # which equals ``planted_offset + (pivot - R @ pivot)`` for the test
+    # setup.  When the pivot sits far from the image origin (here at
+    # ~ (100, 100)) that pivot-rotation correction dominates the raw
+    # ``planted_offset`` term, so the assertion compares against the
+    # full expected Procrustes output rather than the planted shift.
+    cos_t = math.cos(planted_theta)
+    sin_t = math.sin(planted_theta)
+    rotated_pivot_v = cos_t * pivot[0] - sin_t * pivot[1]
+    rotated_pivot_u = sin_t * pivot[0] + cos_t * pivot[1]
+    expected_offset_v = planted_offset[0] + (pivot[0] - rotated_pivot_v)
+    expected_offset_u = planted_offset[1] + (pivot[1] - rotated_pivot_u)
+    assert result.offset_px[0] == pytest.approx(expected_offset_v, abs=0.4)
+    assert result.offset_px[1] == pytest.approx(expected_offset_u, abs=0.4)
     assert isinstance(result.diagnostics, StarUniqueMatchDiagnostics)
     assert result.diagnostics.mode == 'two_star'
 
@@ -218,8 +236,6 @@ def test_star_unique_match_one_star_3dof_rotation_unobservable(
     draw_gaussian_star: DrawGaussianStarFactory,
 ) -> None:
     """A 1-star path with fit_camera_rotation reports rotation as unobservable."""
-    from nav.nav_technique.nav_technique import ROTATION_UNOBSERVABLE_VARIANCE
-
     shape = (200, 200)
     image = np.zeros(shape, dtype=np.float64)
     actual = (100.0, 100.0)
@@ -232,6 +248,7 @@ def test_star_unique_match_one_star_3dof_rotation_unobservable(
     technique = StarUniqueMatchNav()
     context = make_nav_context(image, fit_camera_rotation=True, max_rotation_deg=5.0)
     result = technique.navigate([feature], context)
+    assert result.spurious is False
     assert result.covariance_px2.shape == (3, 3)
     assert result.rotation_rad == 0.0
     assert result.covariance_px2[2, 2] == pytest.approx(ROTATION_UNOBSERVABLE_VARIANCE)

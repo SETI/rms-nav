@@ -28,6 +28,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only import
     from nav.nav_orchestrator.nav_context import NavContext
 
 __all__ = [
+    'ROTATION_AT_EDGE_FRACTION',
     'ROTATION_UNOBSERVABLE_VARIANCE',
     'NavTechnique',
     'embed_rotation_unobservable',
@@ -54,6 +55,20 @@ finite sentinel is preferred.
 """
 
 
+ROTATION_AT_EDGE_FRACTION: float = 0.95
+"""Fraction of ``max_rotation_deg`` at which the rotation parameter trips
+the technique's ``at_edge`` flag.
+
+When the converged ``|theta|`` exceeds
+``ROTATION_AT_EDGE_FRACTION * max_rotation_deg`` the LM (or Procrustes /
+NCC pyramid) is reporting a rotation that lies right against the
+configured cap, which usually signals that the cap is too tight or the
+geometry is unobservable in the rotation direction.  Centralising the
+threshold lets every 3-DoF technique apply the same rule without
+re-introducing the same magic constant per file.
+"""
+
+
 def embed_rotation_unobservable(cov_2x2: NDArrayFloatType) -> NDArrayFloatType:
     """Promote a 2x2 translation covariance to a 3x3 with rotation unobservable.
 
@@ -70,9 +85,15 @@ def embed_rotation_unobservable(cov_2x2: NDArrayFloatType) -> NDArrayFloatType:
         ``(3, 3)`` covariance matrix with the original 2x2 in the
         top-left block and the rotation-unobservable sentinel on the
         bottom-right diagonal.
+
+    Raises:
+        ValueError: if ``cov_2x2`` is not a 2x2 ndarray.
     """
+    arr = np.asarray(cov_2x2, dtype=np.float64)
+    if arr.ndim != 2 or arr.shape != (2, 2):
+        raise ValueError(f'cov_2x2 must be a (2, 2) array; got shape {arr.shape}')
     out = np.zeros((3, 3), dtype=np.float64)
-    out[:2, :2] = cov_2x2
+    out[:2, :2] = arr
     out[2, 2] = ROTATION_UNOBSERVABLE_VARIANCE
     return cast(NDArrayFloatType, out)
 
@@ -82,6 +103,9 @@ def rotation_unobservable_sigma_rad() -> float:
 
     Convenience for techniques that report ``sigma_rotation_rad`` on
     their :class:`NavTechniqueResult` when rotation is unconstrained.
+
+    Returns:
+        ``sqrt(ROTATION_UNOBSERVABLE_VARIANCE)`` (radians, as a float).
     """
     return float(math.sqrt(ROTATION_UNOBSERVABLE_VARIANCE))
 
@@ -106,9 +130,16 @@ def rotation_pivot_distance_px(
     """Return the rotation-pivot's distance from the image centre.
 
     Used by 3-DoF DT-fit techniques to convert the LM rotation step into a
-    pixel-equivalent value for the convergence test.  Floored at 1.0 so a
-    pivot that lands exactly on the image centre still yields a usable
-    convergence threshold.
+    pixel-equivalent value for the convergence test.
+
+    Parameters:
+        pivot_vu: Pivot coordinates ``(v, u)`` in image pixels.
+        image_shape_vu: Image shape ``(height, width)`` in V/U pixels.
+
+    Returns:
+        Euclidean distance from ``pivot_vu`` to the image centre, floored
+        at ``1.0`` so a pivot landing exactly on the image centre still
+        yields a non-zero convergence threshold.
     """
     centre_v = float(image_shape_vu[0]) / 2.0
     centre_u = float(image_shape_vu[1]) / 2.0

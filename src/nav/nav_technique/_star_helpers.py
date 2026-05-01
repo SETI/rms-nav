@@ -197,6 +197,8 @@ def similarity_transform_fit(
         )
     if w.ndim != 1 or w.shape[0] != det.shape[0]:
         raise ValueError(f'weights must be 1-D of length {det.shape[0]}; got shape {w.shape}')
+    if (w < 0.0).any():
+        raise ValueError('weights must be non-negative')
     total = float(w.sum())
     if total <= 0.0:
         # No usable weight: report an identity transform with empty

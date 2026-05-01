@@ -1515,14 +1515,10 @@ above operationalise.
   ``static_data_hashes`` with sha256 of raw YAML bytes; populate
   ``rms_nav_git_sha`` from ``git rev-parse``.
 
-**Camera rotation correction (Part 5b)**
+**Camera rotation correction (Part 5b)** — *Shipped in Phase 9; see "Phase 9 — Camera rotation correction (per instrument) (complete)".*
 
-- Dataclass shape implemented: `NavTechniqueResult.covariance_px2`
-  accepts 3×3, and both `NavTechniqueResult` and `NavResult` carry
-  `rotation_rad` / `sigma_rotation_rad` fields.
-- Pending: per-instrument `fit_camera_rotation` flag wiring; per-
-  technique populators that emit the rotation entries; rotation-aware
-  ensemble combine math.
+- Dataclass shape implemented: `NavTechniqueResult.covariance_px2` accepts 3×3, and both `NavTechniqueResult` and `NavResult` carry `rotation_rad` / `sigma_rotation_rad` fields.
+- Per-instrument `fit_camera_rotation` flag wiring (VGISS / GOSSI on; Cassini / NHLORRI off), per-technique populators (DT 3-DoF LM, Procrustes for star techniques, 3-D NCC pyramid for `BodyDiscCorrelateNav`, rank-deficient 3×3 for centroid / 1-star paths), and the rotation-aware ensemble combine all shipped in Phase 9.
 
 **Annotations + summary PNG**
 
@@ -3496,7 +3492,7 @@ B. **Rotation-aware ensemble combine.** `_combine_precision_weighted` returns a 
 
 C. **Per-instrument flag flip.** `config_410_inst_gossi.yaml` and `config_430_inst_vgiss.yaml` carry `fit_camera_rotation: true`; Cassini ISS (`config_400_inst_coiss.yaml`, all four cameras) and NHLORRI (`config_420_inst_nhlorri.yaml`) stay false. `max_rotation_deg: 5.0` everywhere — final tuning waits for Phase 10 calibration. The orchestrator reads both via `instrument_settings_from_obs` and plumbs them onto `NavContext.fit_camera_rotation` / `NavContext.max_rotation_deg`.
 
-D. **Metadata curator.** Already shipped in Phase 0 alongside the rotation fields on `NavResult`; Phase 9's contribution is verifying it: when `rotation_rad is not None`, the curator emits `rotation_deg` (degrees, rounded to 3 decimals) and `sigma_rotation_deg`; when `None`, both fields are omitted entirely. Tier derivation (`max_sigma_px`) consults only the translation sigma so a rotation outcome can never inflate a tier.
+D. **Metadata curator.** Already shipped in Phase 0 alongside the rotation fields on `NavResult`; Phase 9's contribution is verifying it: when `rotation_rad is not None`, the curator emits `rotation_deg` and `sigma_rotation_deg`, both rounded to the canonical curator confidence-precision (`CONFIDENCE_DECIMALS` per `nav.nav_orchestrator.curator`); when `None`, both fields are omitted entirely so 2-DoF runs do not litter the JSON with null entries. Tier derivation (`max_sigma_px`) consults only the translation sigma so a rotation outcome can never inflate a tier.
 
 E. **Library expansion (deferred).** "2–3 VGISS / GOSSI images where rotation fit is observably non-zero" is impractical without holdings access and SPICE kernels in this context; deferred to Phase 10's `~50`-image library expansion alongside confidence-formula calibration.
 

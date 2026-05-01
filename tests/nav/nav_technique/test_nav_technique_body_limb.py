@@ -318,9 +318,9 @@ def test_body_limb_nav_3dof_emits_3x3_covariance(
     assert result.covariance_px2.shape == (3, 3)
     assert result.rotation_rad is not None
     assert result.sigma_rotation_rad is not None
-    # Image had no rotation planted; the LM should converge near zero
-    # rotation (well within the 5 degree cap).
-    assert abs(result.rotation_rad) < np.deg2rad(5.0)
+    # No rotation planted; LM converges to within a small fraction of a
+    # degree of zero on a clean disc (well below the 5 deg cap).
+    assert abs(result.rotation_rad) < np.deg2rad(0.5)
 
 
 def test_body_limb_nav_3dof_at_edge_when_rotation_saturates(

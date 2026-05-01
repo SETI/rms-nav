@@ -1,5 +1,7 @@
 """Tests for ``nav.nav_orchestrator.nav_context.NavContext``."""
 
+from typing import Any
+
 import numpy as np
 
 from nav.nav_orchestrator.image_classifier_result import NavImageClassifierResult
@@ -7,8 +9,14 @@ from nav.nav_orchestrator.nav_context import NavContext
 from nav.nav_orchestrator.provenance import Provenance
 
 
-def _minimal_context() -> NavContext:
-    """Build a context with the smallest valid set of fields."""
+def _minimal_context(**overrides: Any) -> NavContext:
+    """Build a context with the smallest valid set of fields.
+
+    Keyword arguments override the corresponding ``NavContext`` field so
+    callers can flip a single property (``fit_camera_rotation=True``,
+    custom ``max_rotation_deg``, etc.) without rebuilding the entire
+    fixture.
+    """
     image = np.zeros((4, 4), np.float64)
     mask = np.ones((4, 4), bool)
     classifier = NavImageClassifierResult(
@@ -23,16 +31,18 @@ def _minimal_context() -> NavContext:
         image_et=0.0,
         pipeline_run_iso8601='2026-04-26T12:00:00Z',
     )
-    return NavContext(
-        obs=object(),
-        image_ext=image,
-        sensor_mask_ext=mask,
-        image_noise_sigma=1.0,
-        saturation_mask_ext=np.zeros((4, 4), bool),
-        cosmic_ray_mask_ext=np.zeros((4, 4), bool),
-        image_classifier=classifier,
-        provenance=provenance,
-    )
+    defaults: dict[str, Any] = {
+        'obs': object(),
+        'image_ext': image,
+        'sensor_mask_ext': mask,
+        'image_noise_sigma': 1.0,
+        'saturation_mask_ext': np.zeros((4, 4), bool),
+        'cosmic_ray_mask_ext': np.zeros((4, 4), bool),
+        'image_classifier': classifier,
+        'provenance': provenance,
+    }
+    defaults.update(overrides)
+    return NavContext(**defaults)
 
 
 def test_navcontext_constructs_with_minimal_fields() -> None:
@@ -71,32 +81,7 @@ def test_navcontext_rotation_fields_default_off() -> None:
 
 def test_navcontext_rotation_fields_propagate() -> None:
     """Explicit rotation flags survive construction and ``with_prior``."""
-    image = np.zeros((4, 4), np.float64)
-    mask = np.ones((4, 4), bool)
-    classifier = NavImageClassifierResult(
-        image_class='clean',
-        saturation_frac=0.0,
-        missing_frac=0.0,
-        noise_sigma=1.0,
-        max_dn=10.0,
-    )
-    provenance = Provenance(
-        rms_nav_version='0.5.2',
-        image_et=0.0,
-        pipeline_run_iso8601='2026-04-26T12:00:00Z',
-    )
-    ctx = NavContext(
-        obs=object(),
-        image_ext=image,
-        sensor_mask_ext=mask,
-        image_noise_sigma=1.0,
-        saturation_mask_ext=np.zeros((4, 4), bool),
-        cosmic_ray_mask_ext=np.zeros((4, 4), bool),
-        image_classifier=classifier,
-        provenance=provenance,
-        fit_camera_rotation=True,
-        max_rotation_deg=3.5,
-    )
+    ctx = _minimal_context(fit_camera_rotation=True, max_rotation_deg=3.5)
     assert ctx.fit_camera_rotation is True
     assert ctx.max_rotation_deg == 3.5
     new_ctx = ctx.with_prior(

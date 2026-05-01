@@ -1,6 +1,7 @@
 """Tests for ``nav.nav_orchestrator.ensemble.ensemble`` and helpers."""
 
 import numpy as np
+import pytest
 
 from nav.nav_orchestrator.ensemble import (
     EnsembleConfig,
@@ -10,6 +11,10 @@ from nav.nav_orchestrator.ensemble import (
 from nav.nav_orchestrator.image_classifier_result import NavImageClassifierResult
 from nav.nav_orchestrator.provenance import Provenance
 from nav.nav_technique.diagnostics import BodyLimbDiagnostics
+from nav.nav_technique.nav_technique import (
+    ROTATION_UNOBSERVABLE_VARIANCE,
+    embed_rotation_unobservable,
+)
 from nav.nav_technique.technique_result import NavTechniqueResult
 
 
@@ -295,18 +300,16 @@ def test_ensemble_3dof_combines_translation_and_rotation() -> None:
     assert result.rotation_rad is not None
     assert abs(result.rotation_rad - 0.011) < 1e-3
     assert result.sigma_rotation_rad is not None
-    assert result.sigma_rotation_rad > 0.0
+    # Two equal-confidence inputs with sigma_theta = 0.01 rad each combine
+    # via inverse-variance averaging to sigma = 1 / sqrt(1/0.01**2 + 1/0.01**2)
+    # = 0.01 / sqrt(2) ~ 0.0070710678 rad.
+    assert result.sigma_rotation_rad == pytest.approx(0.01 / np.sqrt(2.0), rel=1e-6)
     assert result.covariance_px2 is not None
     assert result.covariance_px2.shape == (3, 3)
 
 
 def test_ensemble_3dof_with_rotation_unobservable_input() -> None:
     """Rotation-unobservable input contributes near-zero info to 3-DoF combine."""
-    from nav.nav_technique.nav_technique import (
-        ROTATION_UNOBSERVABLE_VARIANCE,
-        embed_rotation_unobservable,
-    )
-
     cov_observable = np.diag([0.04, 0.04, 1e-4]).astype(np.float64)
     cov_unobservable = embed_rotation_unobservable(np.diag([0.04, 0.04]).astype(np.float64))
     a = NavTechniqueResult(
@@ -348,8 +351,6 @@ def test_ensemble_3dof_with_rotation_unobservable_input() -> None:
 
 def test_ensemble_rejects_mixed_dof_inputs() -> None:
     """Mixing 2-DoF and 3-DoF results raises a ValueError."""
-    import pytest
-
     cov_2d = np.diag([0.04, 0.04]).astype(np.float64)
     cov_3d = np.diag([0.04, 0.04, 1e-4]).astype(np.float64)
     two = _make_result(technique_name='Two', cov=cov_2d)

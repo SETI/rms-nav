@@ -46,6 +46,8 @@ from nav.nav_technique.confidence import evaluate_sigmoid_combination
 from nav.nav_technique.diagnostics import StarRefineDiagnostics
 from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.nav_technique import (
+    ROTATION_AT_EDGE_FRACTION,
+    ROTATION_UNOBSERVABLE_VARIANCE,
     NavTechnique,
     embed_rotation_unobservable,
     log_confidence_breakdown,
@@ -281,7 +283,7 @@ class StarRefineNav(NavTechnique):
                         cov_2x2=cov_2x2,
                     )
                 )
-                rotation_at_edge = abs(rotation_rad) >= 0.95 * math.radians(
+                rotation_at_edge = abs(rotation_rad) >= ROTATION_AT_EDGE_FRACTION * math.radians(
                     context.max_rotation_deg
                 )
                 if rotation_at_edge:
@@ -414,10 +416,6 @@ class StarRefineNav(NavTechnique):
             ``(rotation_rad, sigma_rotation_rad, covariance_3x3,
             offset_v_total, offset_u_total)``.
         """
-        from nav.nav_technique.nav_technique import (
-            ROTATION_UNOBSERVABLE_VARIANCE,
-        )
-
         cat_pts = np.asarray(
             [list(star.geometry.predicted_vu) for star in inliers],  # type: ignore[union-attr]
             dtype=np.float64,

@@ -33,6 +33,7 @@ from nav.nav_technique.confidence import evaluate_sigmoid_combination
 from nav.nav_technique.diagnostics import BodyDiscDiagnostics
 from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.nav_technique import (
+    ROTATION_AT_EDGE_FRACTION,
     ROTATION_UNOBSERVABLE_VARIANCE,
     NavTechnique,
     log_confidence_breakdown,
@@ -143,7 +144,16 @@ def _composite_pivot_vu(features: list[NavFeature]) -> tuple[float, float]:
     painted into ext-FOV coordinates; the natural rotation pivot is the
     centroid of the bodies' predicted centres in that same frame.  A
     single-body composite reduces to that body's predicted centre.
+
+    Raises:
+        ValueError: if ``features`` is empty (the upstream feasibility
+            gate should never let this happen, but the check guards
+            against a degenerate divide-by-zero).
     """
+    if not features:
+        raise ValueError(
+            '_composite_pivot_vu requires at least one BODY_DISC feature; got an empty list'
+        )
     centres = [
         feat.geometry.predicted_center_vu  # type: ignore[union-attr]
         for feat in features
@@ -301,7 +311,11 @@ class BodyDiscCorrelateNav(NavTechnique):
             du = float(ncc_result['offset'][1])
             covariance_2x2 = np.asarray(ncc_result['cov'], np.float64)
             if covariance_2x2.shape != (2, 2):
-                covariance_2x2 = covariance_2x2[:2, :2]
+                raise RuntimeError(
+                    f'BodyDiscCorrelateNav: navigate_with_pyramid_kpeaks returned '
+                    f'covariance with shape {covariance_2x2.shape}; expected (2, 2). '
+                    'Investigate the pyramid output rather than silently slicing.'
+                )
             spurious = bool(ncc_result['spurious'])
             at_edge_translation = bool(ncc_result['at_edge'])
             quality = float(ncc_result['quality'])
@@ -321,7 +335,9 @@ class BodyDiscCorrelateNav(NavTechnique):
             rotation_at_edge = False
             if fit_rotation:
                 max_rotation_rad = math.radians(context.max_rotation_deg)
-                rotation_at_edge = abs(best_theta_rad) >= 0.95 * max_rotation_rad
+                rotation_at_edge = (
+                    abs(best_theta_rad) >= ROTATION_AT_EDGE_FRACTION * max_rotation_rad
+                )
                 cov = np.zeros((3, 3), dtype=np.float64)
                 cov[:2, :2] = covariance_2x2
                 cov[2, 2] = float(
@@ -394,8 +410,10 @@ class BodyDiscCorrelateNav(NavTechnique):
 
         Three coarse-to-fine passes:
 
-        * Level 0 — 11 samples spanning ``±max_rotation_deg`` in 1 deg
-          steps.  Pick the rotation with the highest NCC peak quality.
+        * Level 0 — 11 samples spanning ``±max_rotation_deg`` (step =
+          ``2 * max_rotation_deg / 10`` deg, which is exactly 1 deg at
+          the default ``max_rotation_deg = 5``).  Pick the rotation with
+          the highest NCC peak quality.
         * Level 1 — 5 samples in 0.5 deg steps centred on the level-0
           winner.  Pick the new winner.
         * Level 2 — 3 samples in 0.25 deg steps centred on the level-1
@@ -411,9 +429,10 @@ class BodyDiscCorrelateNav(NavTechnique):
         max_rotation_rad = math.radians(max_rotation_deg)
         l0_thetas = np.linspace(-max_rotation_rad, max_rotation_rad, 11)
         self.logger.debug(
-            '3-DoF pyramid level 0: %d samples across +-%.2f deg in 1 deg steps',
+            '3-DoF pyramid level 0: %d samples across +-%.2f deg (step %.3f deg)',
             l0_thetas.size,
             max_rotation_deg,
+            2.0 * max_rotation_deg / 10.0,
         )
         l0_winner = self._evaluate_rotation_samples(
             thetas_rad=l0_thetas.tolist(),
@@ -468,7 +487,6 @@ class BodyDiscCorrelateNav(NavTechnique):
         l2_winner = max(l2_candidates, key=lambda c: float(c.ncc_result['quality']))
         sigma_theta_rad = self._rotation_sigma_from_quality(
             candidates=l2_candidates,
-            winner=l2_winner,
             step_rad=step_l2,
         )
         sigma_str = f'{math.degrees(sigma_theta_rad):.4f}' if sigma_theta_rad is not None else 'inf'
@@ -492,7 +510,24 @@ class BodyDiscCorrelateNav(NavTechnique):
         data_mask: NDArrayBoolType | None,
         upsample_factor: int,
     ) -> _RotationCandidate:
-        """Run an NCC pyramid for each rotation sample; return the highest-quality candidate."""
+        """Run an NCC pyramid for each rotation sample; return the highest-quality candidate.
+
+        Parameters:
+            thetas_rad: Rotation samples (radians) to evaluate.
+            image: Source image (ext-FOV) shared across rotation samples.
+            template_img: Composite body-disc template (pre-rotation).
+            template_mask: Mask of the composite template.
+            pivot_vu: Centroid-of-body-centres pivot ``(v, u)``; the
+                template is rotated about this pixel before each NCC.
+            max_offset_vu: Translation-search window in pixels.
+            data_mask: Optional sensor mask passed through to the
+                pyramid for the bi-directional NCC path.
+            upsample_factor: FFT upsample factor.
+
+        Returns:
+            The :class:`_RotationCandidate` whose NCC pyramid reported
+            the highest quality across the supplied rotation samples.
+        """
         best: _RotationCandidate | None = None
         for theta in thetas_rad:
             ncc_result = self._ncc_at_rotation(
@@ -523,7 +558,25 @@ class BodyDiscCorrelateNav(NavTechnique):
         data_mask: NDArrayBoolType | None,
         upsample_factor: int,
     ) -> dict[str, Any]:
-        """Rotate the template about ``pivot_vu`` and run a single NCC pyramid."""
+        """Rotate the template about ``pivot_vu`` and run a single NCC pyramid.
+
+        Parameters:
+            image: Source ext-FOV image.
+            template_img: Composite body-disc template (pre-rotation).
+            template_mask: Mask of the composite template.
+            pivot_vu: Pivot ``(v, u)`` about which the template is
+                rotated before correlation.
+            theta_rad: Rotation angle (radians) to apply.
+            max_offset_vu: Translation-search window in pixels.
+            data_mask: Optional sensor mask threaded into the pyramid.
+            upsample_factor: FFT upsample factor.
+
+        Returns:
+            The raw dict returned by
+            :func:`nav.support.correlate.navigate_with_pyramid_kpeaks`
+            (offset, covariance, quality, consistency, top-K peaks,
+            spurious / at-edge flags, gradient-mode tag).
+        """
         rotated_img, rotated_mask = _rotate_template(
             template_img,
             template_mask,
@@ -545,7 +598,6 @@ class BodyDiscCorrelateNav(NavTechnique):
     def _rotation_sigma_from_quality(
         *,
         candidates: list[_RotationCandidate],
-        winner: _RotationCandidate,
         step_rad: float,
     ) -> float | None:
         """Estimate sigma_theta from the level-2 NCC quality curvature.
@@ -555,9 +607,21 @@ class BodyDiscCorrelateNav(NavTechnique):
         derivative) is concave (``H < 0``) the precision is
         ``-1 / H``; the matching sigma is ``sqrt(1 / (-H * q0))``
         normalising by the peak quality so a high-confidence sharp
-        peak yields a tight rotation estimate.  When the surface is
-        not concave at the winner the function returns ``None`` so the
-        caller can fall back to the rotation-unobservable sentinel.
+        peak yields a tight rotation estimate.
+
+        Parameters:
+            candidates: The three level-2 :class:`_RotationCandidate`
+                samples (any ordering).  The function sorts internally
+                by ``theta_rad`` so the centre sample is identified
+                without consulting an outside winner.
+            step_rad: Angular sampling step in radians (level-2 step;
+                evenly spaced).
+
+        Returns:
+            Estimated sigma_theta in radians when the local curvature is
+            concave at the centre sample; ``None`` when the surface is
+            not concave (the caller falls back to the
+            rotation-unobservable sentinel).
         """
         if len(candidates) != 3:
             return None

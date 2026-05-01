@@ -60,6 +60,8 @@ from nav.nav_technique.diagnostics import StarFieldDiagnostics
 from nav.nav_technique.dt_fitting import DEFAULT_TUKEY_C, tukey_biweight_weights
 from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.nav_technique import (
+    ROTATION_AT_EDGE_FRACTION,
+    ROTATION_UNOBSERVABLE_VARIANCE,
     NavTechnique,
     embed_rotation_unobservable,
     log_confidence_breakdown,
@@ -686,7 +688,8 @@ class StarFieldFromCatalogNav(NavTechnique):
         margin_v, margin_u = search_window_for_obs(context)
         max_rotation_rad = math.radians(context.max_rotation_deg)
         rotation_at_edge = fit_rotation and (
-            rotation_rad is not None and abs(rotation_rad) >= 0.95 * max_rotation_rad
+            rotation_rad is not None
+            and abs(rotation_rad) >= ROTATION_AT_EDGE_FRACTION * max_rotation_rad
         )
         at_edge = (
             abs(offset_vu[0]) >= margin_v - self._at_edge_tolerance_px
@@ -926,11 +929,6 @@ class StarFieldFromCatalogNav(NavTechnique):
         cov_2x2 = self._build_covariance(weights=weights, residuals=residuals)
         total = float(weights.sum())
         if total <= 0.0:
-            from nav.nav_technique.nav_technique import (
-                ROTATION_UNOBSERVABLE_VARIANCE,
-                embed_rotation_unobservable,
-            )
-
             return embed_rotation_unobservable(cov_2x2)
         cat_c_v = float(np.sum(weights * cat_inliers[:, 0]) / total)
         cat_c_u = float(np.sum(weights * cat_inliers[:, 1]) / total)
@@ -940,8 +938,6 @@ class StarFieldFromCatalogNav(NavTechnique):
         var_v = float(np.sum(weights * residuals[:, 0] ** 2)) / total
         var_u = float(np.sum(weights * residuals[:, 1] ** 2)) / total
         var_residual = 0.5 * (var_v + var_u)
-        from nav.nav_technique.nav_technique import ROTATION_UNOBSERVABLE_VARIANCE
-
         if spread <= 0.0:
             sigma_theta_sq = ROTATION_UNOBSERVABLE_VARIANCE
         else:

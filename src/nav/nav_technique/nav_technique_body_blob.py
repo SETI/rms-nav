@@ -408,7 +408,23 @@ class BodyBlobNav(NavTechnique):
     def _fail_no_signal(
         self, *, features: list[NavFeature], noise_sigma: float, fit_rotation: bool
     ) -> NavTechniqueResult:
-        """Return a zero-confidence spurious result when no blob carries signal."""
+        """Return a zero-confidence spurious result when no blob carries signal.
+
+        Parameters:
+            features: Candidate BODY_BLOB features that all failed the
+                above-noise signal check (kept on the result so the
+                inventory can attribute the rejection per-feature).
+            noise_sigma: Image noise sigma (DN) used to compute the
+                ``3 * sigma`` rejection threshold; logged in the
+                spurious-result message.
+            fit_rotation: When True the result carries a 3x3 covariance
+                with the rotation diagonal set to the unobservable
+                sentinel; when False the result reports a 2x2 covariance.
+
+        Returns:
+            A :class:`NavTechniqueResult` with ``spurious=True``,
+            zero confidence, and a populated :class:`BodyBlobDiagnostics`.
+        """
         diagnostics = BodyBlobDiagnostics(
             body_snr_inside_predicted_bbox=0.0,
             body_extent_px=0.0,

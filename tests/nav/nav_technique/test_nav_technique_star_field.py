@@ -435,7 +435,23 @@ def _rotate_about(
     pivot: tuple[float, float],
     theta_rad: float,
 ) -> list[tuple[float, float]]:
-    """Rotate ``points`` about ``pivot`` by ``theta_rad`` and return the rotated list."""
+    """Rotate ``points`` about ``pivot`` by ``theta_rad``.
+
+    Parameters:
+        points: Sequence of ``(v, u)`` pixel coordinates to rotate.
+        pivot: ``(v, u)`` pivot in the same coordinate frame as
+            ``points``.  The rotation is applied about this point with
+            no translation.
+        theta_rad: Rotation angle in radians, counter-clockwise in the
+            image-frame ``(v, u)`` axes (``v`` increasing downward,
+            ``u`` increasing rightward) — i.e. the standard rotation
+            matrix ``[[cos, -sin], [sin, cos]]`` applied to the
+            ``(v, u)`` offset from the pivot.
+
+    Returns:
+        New list of ``(v, u)`` tuples, one per input point, in the
+        same order as ``points``.
+    """
     cos_t = math.cos(theta_rad)
     sin_t = math.sin(theta_rad)
     pv, pu = pivot
@@ -496,7 +512,7 @@ def test_star_field_3dof_recovers_planted_rotation(
     technique = StarFieldFromCatalogNav()
     context = make_nav_context(image, fit_camera_rotation=True, max_rotation_deg=5.0)
     result = technique.navigate(features, context)
-    assert result.status == 'ok' if hasattr(result, 'status') else True
+    assert result.spurious is False
     assert result.covariance_px2.shape == (3, 3)
     assert result.rotation_rad is not None
     assert result.rotation_rad == pytest.approx(planted_theta, abs=math.radians(0.2))
@@ -528,5 +544,4 @@ def test_star_field_3dof_zero_rotation_path_remains_close_to_planted_offset(
     assert result.covariance_px2.shape == (3, 3)
     assert result.offset_px[0] == pytest.approx(planted[0], abs=0.5)
     assert result.offset_px[1] == pytest.approx(planted[1], abs=0.5)
-    assert result.rotation_rad is not None
-    assert abs(result.rotation_rad) < math.radians(0.5)
+    assert result.rotation_rad == pytest.approx(0.0, abs=math.radians(0.5))

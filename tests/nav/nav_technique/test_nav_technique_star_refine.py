@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 from tests.nav.nav_technique.conftest import (
@@ -12,7 +14,10 @@ from tests.nav.nav_technique.conftest import (
 
 from nav.nav_orchestrator.nav_context import NavContext
 from nav.nav_technique.diagnostics import StarRefineDiagnostics
-from nav.nav_technique.nav_technique import NavTechnique
+from nav.nav_technique.nav_technique import (
+    ROTATION_UNOBSERVABLE_VARIANCE,
+    NavTechnique,
+)
 from nav.nav_technique.nav_technique_star_refine import StarRefineNav
 
 
@@ -222,8 +227,6 @@ def test_star_refine_3dof_recovers_planted_rotation_with_two_inliers(
     draw_gaussian_star: DrawGaussianStarFactory,
 ) -> None:
     """Two refined inliers under fit_camera_rotation recover a small rotation."""
-    import math
-
     shape = (200, 200)
     image = np.zeros(shape, dtype=np.float64)
     actual_a = (60.0, 60.0)
@@ -269,8 +272,6 @@ def test_star_refine_3dof_single_inlier_unobservable(
     draw_gaussian_star: DrawGaussianStarFactory,
 ) -> None:
     """A single-inlier refine under fit_camera_rotation reports rotation as unobservable."""
-    from nav.nav_technique.nav_technique import ROTATION_UNOBSERVABLE_VARIANCE
-
     shape = (200, 200)
     image = np.zeros(shape, dtype=np.float64)
     actual = (100.0, 100.0)

@@ -322,6 +322,14 @@ def test_body_disc_3dof_emits_3x3_covariance(
     assert result.covariance_px2.shape == (3, 3)
     assert result.rotation_rad is not None
     assert result.sigma_rotation_rad is not None
-    assert abs(result.rotation_rad) <= np.deg2rad(5.0)
+    # No rotation planted; the level-2 winner is centred on zero with the
+    # 0.25 deg sample step, so |rotation| stays well inside one step.
+    assert abs(result.rotation_rad) <= np.deg2rad(0.5)
+    assert 0.0 < result.sigma_rotation_rad < np.deg2rad(5.0)
+    # Wider abs tolerance than the 2-DoF case: the 11+5+3 rotation
+    # search runs the NCC against rotated templates, and the 0.25 deg
+    # level-2 sampling step plus integer-rounded pivot shift admits up
+    # to ~ 1 px of translation jitter even on a circular disc planted
+    # at zero rotation.
     assert result.offset_px[0] == pytest.approx(1.0, abs=1.5)
     assert result.offset_px[1] == pytest.approx(-1.0, abs=1.5)

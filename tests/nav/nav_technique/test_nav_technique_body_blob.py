@@ -14,6 +14,7 @@ from nav.feature.feature_type import NavFeatureType
 from nav.feature.flags import BodyBlobFlags
 from nav.feature.geometry import BodyBlobGeometry
 from nav.nav_technique.diagnostics import BodyBlobDiagnostics
+from nav.nav_technique.nav_technique import ROTATION_UNOBSERVABLE_VARIANCE
 from nav.nav_technique.nav_technique_body_blob import BodyBlobNav
 from nav.support.filters import NavFilterKind, NavFilterSpec
 
@@ -282,8 +283,6 @@ def test_body_blob_3dof_rotation_unobservable(
     ensemble combine treats this as no-information in the rotation
     direction.
     """
-    from nav.nav_technique.nav_technique import ROTATION_UNOBSERVABLE_VARIANCE
-
     shape = (200, 200)
     actual_center = (100.0, 100.0)
     radius = 8.0
@@ -297,6 +296,6 @@ def test_body_blob_3dof_rotation_unobservable(
     context = make_nav_context(image, fit_camera_rotation=True)
     result = technique.navigate([feature], context)
     assert result.covariance_px2.shape == (3, 3)
-    assert result.rotation_rad == 0.0
-    assert result.sigma_rotation_rad is not None
+    assert result.rotation_rad == pytest.approx(0.0)
+    assert result.sigma_rotation_rad == pytest.approx(np.sqrt(ROTATION_UNOBSERVABLE_VARIANCE))
     assert result.covariance_px2[2, 2] == pytest.approx(ROTATION_UNOBSERVABLE_VARIANCE)

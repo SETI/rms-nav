@@ -45,6 +45,8 @@ from nav.nav_technique.confidence import evaluate_sigmoid_combination
 from nav.nav_technique.diagnostics import StarUniqueMatchDiagnostics
 from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.nav_technique import (
+    ROTATION_AT_EDGE_FRACTION,
+    ROTATION_UNOBSERVABLE_VARIANCE,
     NavTechnique,
     embed_rotation_unobservable,
     log_confidence_breakdown,
@@ -340,7 +342,8 @@ class StarUniqueMatchNav(NavTechnique):
         margin_v, margin_u = search_window_for_obs(context)
         max_rotation_rad = math.radians(context.max_rotation_deg)
         rotation_at_edge = fit_rotation and (
-            rotation_rad is not None and abs(rotation_rad) >= 0.95 * max_rotation_rad
+            rotation_rad is not None
+            and abs(rotation_rad) >= ROTATION_AT_EDGE_FRACTION * max_rotation_rad
         )
         at_edge = (
             abs(offset_v) >= margin_v - self._at_edge_tolerance_px
@@ -409,13 +412,24 @@ class StarUniqueMatchNav(NavTechnique):
     ) -> tuple[SimilarityFit, float]:
         """Run a single-assignment Procrustes fit and report its residual.
 
-        ``det_arr`` is the ordered pair ``[det_a, det_b]``.  When
-        ``swap`` is False the catalog cohort is ``[pred_a, pred_b]``;
-        when True it is ``[pred_b, pred_a]`` (the swapped assignment).
-        Returns the :class:`SimilarityFit` and the per-axis residual
-        magnitude — for two-point inputs the rigid fit is exact, so the
-        magnitude reduces to the centroid-relative residual the legacy
-        translation-only path used.
+        Parameters:
+            det_arr: Ordered detection pair ``[det_a, det_b]`` shaped
+                ``(2, 2)``.
+            pred_a: Catalog prediction for the first chosen star.
+            pred_b: Catalog prediction for the second chosen star.
+            swap: When False the catalog cohort is ``[pred_a, pred_b]``;
+                when True the cohort is ``[pred_b, pred_a]`` (the
+                swapped detection-to-prediction assignment).
+
+        Returns:
+            ``(SimilarityFit, residual_px)`` where the residual is the
+            centroid-relative scalar used to compare assignments.
+            For a two-point rigid fit the Procrustes residuals are zero
+            by construction; the comparable scalar — the same one the
+            legacy translation-only path used — is computed directly
+            from the centroid-relative offset so the assignment-
+            selection criterion stays stable across legacy and 3-DoF
+            runs.
         """
         if swap:
             cat_arr = np.asarray([pred_b, pred_a], dtype=np.float64)
@@ -454,14 +468,20 @@ class StarUniqueMatchNav(NavTechnique):
         by approximately ``sigma_pos / L`` per star, and the two stars
         contribute independently.
 
-        Whenever the two predictions coincide (degenerate input that
-        the upstream guard already rejects), the rotation diagonal
-        falls back to the rotation-unobservable sentinel.
-        """
-        from nav.nav_technique.nav_technique import (
-            ROTATION_UNOBSERVABLE_VARIANCE,
-        )
+        Parameters:
+            cov_2x2: Per-feature CRLB-derived 2x2 translation covariance
+                (already symmetrised).
+            pred_a: Catalog prediction for the first chosen star.
+            pred_b: Catalog prediction for the second chosen star.
 
+        Returns:
+            3x3 covariance with the input ``cov_2x2`` in the
+            translation block and either the analytic
+            ``2 * (sigma_v**2 + sigma_u**2) / L**2`` rotation variance
+            on the diagonal, or :data:`ROTATION_UNOBSERVABLE_VARIANCE`
+            when the two predictions coincide (a degenerate input the
+            upstream guard already rejects).
+        """
         separation_sq = (pred_a[0] - pred_b[0]) ** 2 + (pred_a[1] - pred_b[1]) ** 2
         if separation_sq <= 0.0:
             sigma_theta_sq = ROTATION_UNOBSERVABLE_VARIANCE

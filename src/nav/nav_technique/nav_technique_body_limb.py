@@ -28,6 +28,7 @@ from nav.nav_technique.dt_fitting import (
 )
 from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.nav_technique import (
+    ROTATION_AT_EDGE_FRACTION,
     NavTechnique,
     log_confidence_breakdown,
     rotation_pivot_distance_px,
@@ -211,6 +212,11 @@ class BodyLimbNav(NavTechnique):
             vertices, polarity_normals, sigmas, feature_ids = _aggregate_limb_features(
                 eligible_features
             )
+            if vertices.shape[0] == 0:
+                raise RuntimeError(
+                    'BodyLimbNav.navigate received zero usable LIMB_ARC vertices despite '
+                    'is_feasible reporting feasibility; aborting fit'
+                )
             edge_dt = context.image_edge_dt_ext
             gradient_vu = context.image_gradient_vu_ext
             edge_mask = edge_dt <= 0.5
@@ -251,8 +257,29 @@ class BodyLimbNav(NavTechnique):
             dv_final, du_final = result.offset_vu
             max_rotation_rad = math.radians(context.max_rotation_deg)
             rotation_at_edge = fit_rotation and (
-                abs(result.rotation_rad) >= 0.95 * max_rotation_rad
+                abs(result.rotation_rad) >= ROTATION_AT_EDGE_FRACTION * max_rotation_rad
             )
+            covariance = result.covariance
+            rotation_rad: float | None
+            sigma_rotation_rad: float | None
+            if fit_rotation:
+                if covariance.shape != (3, 3):
+                    raise RuntimeError(
+                        f'BodyLimbNav expected 3x3 covariance with fit_rotation; '
+                        f'got {covariance.shape}'
+                    )
+                rotation_rad = float(result.rotation_rad)
+                sigma_rotation_rad = float(np.sqrt(max(float(covariance[2, 2]), 0.0)))
+            else:
+                if covariance.shape != (2, 2):
+                    self.logger.warning(
+                        'BodyLimbNav: lm_subpixel_refine returned %s covariance with '
+                        'fit_rotation=False; truncating to (2, 2)',
+                        covariance.shape,
+                    )
+                    covariance = covariance[:2, :2]
+                rotation_rad = None
+                sigma_rotation_rad = None
             at_edge = (
                 abs(dv_final - margin_v) <= self._at_edge_tolerance_px
                 or abs(dv_final + margin_v) <= self._at_edge_tolerance_px
@@ -302,12 +329,11 @@ class BodyLimbNav(NavTechnique):
                 int(vertices.shape[0]),
                 float(confidence),
             )
-            if fit_rotation:
-                rot_sigma_rad = float(np.sqrt(max(float(result.covariance[2, 2]), 0.0)))
+            if fit_rotation and sigma_rotation_rad is not None and rotation_rad is not None:
                 self.logger.info(
                     'Rotation = %+.4f deg (sigma %.4f deg)%s',
-                    math.degrees(result.rotation_rad),
-                    math.degrees(rot_sigma_rad),
+                    math.degrees(rotation_rad),
+                    math.degrees(sigma_rotation_rad),
                     ', AT_EDGE' if rotation_at_edge else '',
                 )
             if spurious or at_edge:
@@ -318,22 +344,6 @@ class BodyLimbNav(NavTechnique):
                 sigma_min_px,
                 visible_limb_arc_fraction,
             )
-            covariance = result.covariance
-            rotation_rad: float | None
-            sigma_rotation_rad: float | None
-            if fit_rotation:
-                if covariance.shape != (3, 3):
-                    raise RuntimeError(
-                        f'BodyLimbNav expected 3x3 covariance with fit_rotation; '
-                        f'got {covariance.shape}'
-                    )
-                rotation_rad = float(result.rotation_rad)
-                sigma_rotation_rad = float(np.sqrt(max(float(covariance[2, 2]), 0.0)))
-            else:
-                if covariance.shape != (2, 2):
-                    covariance = covariance[:2, :2]
-                rotation_rad = None
-                sigma_rotation_rad = None
             return NavTechniqueResult(
                 technique_name=self.name,
                 feature_ids=tuple(feature_ids),

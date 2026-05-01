@@ -187,7 +187,10 @@ def test_ring_edge_nav_3dof_emits_3x3_covariance(
     assert result.covariance_px2.shape == (3, 3)
     assert result.rotation_rad is not None
     assert result.sigma_rotation_rad is not None
-    assert abs(result.rotation_rad) < np.deg2rad(5.0)
+    # No rotation planted; the LM should converge to near zero.  Allow
+    # up to 3 sigma of the reported rotation uncertainty as the
+    # tolerance so tighter sigma estimates also tighten the test.
+    assert np.isclose(result.rotation_rad, 0.0, atol=3.0 * result.sigma_rotation_rad)
 
 
 def test_ring_edge_nav_3dof_flat_edge_remains_rank_deficient(

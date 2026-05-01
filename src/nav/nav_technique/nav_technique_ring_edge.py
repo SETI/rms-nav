@@ -29,6 +29,7 @@ from nav.nav_technique.dt_fitting import (
 )
 from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.nav_technique import (
+    ROTATION_AT_EDGE_FRACTION,
     NavTechnique,
     log_confidence_breakdown,
     rotation_pivot_distance_px,
@@ -256,7 +257,7 @@ class RingEdgeNav(NavTechnique):
             dv_final, du_final = result.offset_vu
             max_rotation_rad = math.radians(context.max_rotation_deg)
             rotation_at_edge = fit_rotation and (
-                abs(result.rotation_rad) >= 0.95 * max_rotation_rad
+                abs(result.rotation_rad) >= ROTATION_AT_EDGE_FRACTION * max_rotation_rad
             )
             at_edge = (
                 abs(dv_final - margin_v) <= self._at_edge_tolerance_px
@@ -319,12 +320,11 @@ class RingEdgeNav(NavTechnique):
                 is_rank_1,
                 float(confidence),
             )
-            if fit_rotation:
-                rot_sigma_rad = float(np.sqrt(max(float(result.covariance[2, 2]), 0.0)))
+            if fit_rotation and sigma_rotation_rad is not None and rotation_rad is not None:
                 self.logger.info(
                     'Rotation = %+.4f deg (sigma %.4f deg)%s',
-                    math.degrees(result.rotation_rad),
-                    math.degrees(rot_sigma_rad),
+                    math.degrees(rotation_rad),
+                    math.degrees(sigma_rotation_rad),
                     ', AT_EDGE' if rotation_at_edge else '',
                 )
             if spurious or at_edge:
