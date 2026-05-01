@@ -32,7 +32,9 @@ from nav.nav_technique.diagnostics import BodyBlobDiagnostics
 from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.nav_technique import (
     NavTechnique,
+    embed_rotation_unobservable,
     log_confidence_breakdown,
+    rotation_unobservable_sigma_rad,
     search_window_for_obs,
 )
 from nav.nav_technique.technique_result import NavTechniqueResult
@@ -327,12 +329,25 @@ class BodyBlobNav(NavTechnique):
                 types.  Blobs that fall outside the extfov or have no
                 above-noise signal in their predicted bbox are dropped.
             context: Per-image NavContext.  Reads ``image_ext``,
-                ``image_noise_sigma``, and ``obs.extfov_margin_vu``.
+                ``image_noise_sigma``, ``obs.extfov_margin_vu``, and
+                ``fit_camera_rotation``.
 
         Returns:
-            A ``NavTechniqueResult`` with the recovered offset, 2x2
-            covariance, calibrated confidence, and a populated
-            :class:`BodyBlobDiagnostics`.
+            A :class:`NavTechniqueResult` with the recovered offset,
+            calibrated confidence, and a populated
+            :class:`BodyBlobDiagnostics`.  The covariance shape and the
+            rotation fields depend on ``context.fit_camera_rotation``:
+
+            - ``False`` (the default Cassini / NHLORRI posture):
+              ``covariance_px2`` is ``(2, 2)`` and ``rotation_rad`` /
+              ``sigma_rotation_rad`` are ``None``.
+            - ``True`` (VGISS / GOSSI): ``covariance_px2`` is the
+              rank-deficient ``(3, 3)`` form returned by
+              :func:`~nav.nav_technique.nav_technique.embed_rotation_unobservable`
+              (a brightness-weighted centroid is rotation-invariant
+              about itself, so the technique carries no rotation
+              evidence); ``rotation_rad`` is ``0.0`` and
+              ``sigma_rotation_rad`` is the unobservable sentinel.
         """
         with self.logger.open(f'TECHNIQUE: {self.name}'):
             eligible = _eligible_blobs(features)
@@ -347,11 +362,19 @@ class BodyBlobNav(NavTechnique):
             noise_sigma = float(max(context.image_noise_sigma, 1e-9))
             residuals = _collect_per_blob_residuals(eligible, image_ext, noise_sigma, self.logger)
             if not residuals.consumed:
-                return self._fail_no_signal(features=eligible, noise_sigma=noise_sigma)
+                return self._fail_no_signal(
+                    features=eligible,
+                    noise_sigma=noise_sigma,
+                    fit_rotation=bool(context.fit_camera_rotation),
+                )
             fit = _joint_offset_from_residuals(residuals)
             at_edge = (
                 abs(fit.dv) >= margin_v - self._at_edge_tolerance_px
                 or abs(fit.du) >= margin_u - self._at_edge_tolerance_px
+            )
+            fit_rotation = bool(context.fit_camera_rotation)
+            covariance = (
+                embed_rotation_unobservable(fit.covariance) if fit_rotation else fit.covariance
             )
             mean_snr = float(np.mean(residuals.snrs))
             mean_extent = float(np.mean(residuals.extents))
@@ -386,17 +409,39 @@ class BodyBlobNav(NavTechnique):
                 technique_name=self.name,
                 feature_ids=tuple(f.feature_id for f in residuals.consumed),
                 offset_px=(fit.dv, fit.du),
-                covariance_px2=fit.covariance,
+                covariance_px2=covariance,
                 confidence=float(confidence),
                 spurious=False,
                 at_edge=at_edge,
                 diagnostics=diagnostics,
+                rotation_rad=0.0 if fit_rotation else None,
+                sigma_rotation_rad=(rotation_unobservable_sigma_rad() if fit_rotation else None),
             )
 
     def _fail_no_signal(
-        self, *, features: list[NavFeature], noise_sigma: float
+        self, *, features: list[NavFeature], noise_sigma: float, fit_rotation: bool
     ) -> NavTechniqueResult:
-        """Return a zero-confidence spurious result when no blob carries signal."""
+        """Return a zero-confidence spurious result when no blob carries signal.
+
+        Parameters:
+            features: Candidate BODY_BLOB features that all failed the
+                above-noise signal check (kept on the result so the
+                inventory can attribute the rejection per-feature).
+            noise_sigma: Image noise sigma (DN) used to compute the
+                ``3 * sigma`` rejection threshold; logged in the
+                spurious-result message.
+            fit_rotation: When True the result carries a ``(3, 3)``
+                covariance with the rotation diagonal set to
+                :data:`~nav.nav_technique.nav_technique.ROTATION_UNOBSERVABLE_VARIANCE`
+                and ``rotation_rad`` / ``sigma_rotation_rad`` populated
+                with the rotation-unobservable sentinel; when False the
+                result reports a ``(2, 2)`` covariance and both rotation
+                fields are ``None``.
+
+        Returns:
+            A :class:`NavTechniqueResult` with ``spurious=True``,
+            zero confidence, and a populated :class:`BodyBlobDiagnostics`.
+        """
         diagnostics = BodyBlobDiagnostics(
             body_snr_inside_predicted_bbox=0.0,
             body_extent_px=0.0,
@@ -409,15 +454,19 @@ class BodyBlobNav(NavTechnique):
             3.0 * noise_sigma,
             len(features),
         )
+        cov_2x2 = 1e6 * np.eye(2, dtype=np.float64)
+        cov = embed_rotation_unobservable(cov_2x2) if fit_rotation else cov_2x2
         return NavTechniqueResult(
             technique_name=self.name,
             feature_ids=tuple(f.feature_id for f in features),
             offset_px=(0.0, 0.0),
-            covariance_px2=1e6 * np.eye(2, dtype=np.float64),
+            covariance_px2=cov,
             confidence=0.0,
             spurious=True,
             at_edge=False,
             diagnostics=diagnostics,
+            rotation_rad=0.0 if fit_rotation else None,
+            sigma_rotation_rad=(rotation_unobservable_sigma_rad() if fit_rotation else None),
         )
 
 

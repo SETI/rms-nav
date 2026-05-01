@@ -48,14 +48,23 @@ from nav.config import Config
 from nav.feature.feature import NavFeature
 from nav.feature.feature_type import NavFeatureType
 from nav.nav_model.stars.detection import matched_filter_image
-from nav.nav_technique._star_helpers import predicted_snr, predicted_vu, usable_stars
+from nav.nav_technique._star_helpers import (
+    SimilarityFit,
+    predicted_snr,
+    predicted_vu,
+    similarity_transform_fit,
+    usable_stars,
+)
 from nav.nav_technique.confidence import evaluate_sigmoid_combination
 from nav.nav_technique.diagnostics import StarFieldDiagnostics
 from nav.nav_technique.dt_fitting import DEFAULT_TUKEY_C, tukey_biweight_weights
 from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.nav_technique import (
+    ROTATION_UNOBSERVABLE_VARIANCE,
     NavTechnique,
+    embed_rotation_unobservable,
     log_confidence_breakdown,
+    rotation_unobservable_sigma_rad,
     search_window_for_obs,
 )
 from nav.nav_technique.technique_result import NavTechniqueResult
@@ -487,6 +496,7 @@ class StarFieldFromCatalogNav(NavTechnique):
         self._inlier_tolerance_px = float(self.tuning['inlier_tolerance_px'])
         self._min_inliers = int(self.tuning['pattern_match_min_inliers'])
         self._at_edge_tolerance_px = float(self.tuning['at_edge_tolerance_px'])
+        self._rotation_at_edge_fraction = float(self.tuning['rotation_at_edge_fraction'])
         if self._min_inliers < 3:
             raise ValueError(
                 f'pattern_match_min_inliers must be >= 3 (the matcher needs at '
@@ -546,6 +556,7 @@ class StarFieldFromCatalogNav(NavTechnique):
                         n_catalog_predicted=n_catalog_predicted,
                         n_triplets_evaluated=0,
                     ),
+                    fit_rotation=bool(context.fit_camera_rotation),
                 )
             image_ext = np.asarray(context.image_ext, np.float64)
             noise_sigma = float(max(context.image_noise_sigma, 1e-9))
@@ -574,6 +585,7 @@ class StarFieldFromCatalogNav(NavTechnique):
                         n_catalog_predicted=n_catalog_predicted,
                         n_triplets_evaluated=0,
                     ),
+                    fit_rotation=bool(context.fit_camera_rotation),
                 )
             return self._match_and_fit(
                 features=features,
@@ -614,6 +626,7 @@ class StarFieldFromCatalogNav(NavTechnique):
                     n_catalog_predicted=n_catalog_predicted,
                     n_triplets_evaluated=0,
                 ),
+                fit_rotation=bool(context.fit_camera_rotation),
             )
         candidates = self._enumerate_candidates(det_triplets, cat_triplets)
         n_triplets_evaluated = len(candidates)
@@ -641,14 +654,30 @@ class StarFieldFromCatalogNav(NavTechnique):
                     n_catalog_predicted=n_catalog_predicted,
                     n_triplets_evaluated=n_triplets_evaluated,
                 ),
+                fit_rotation=bool(context.fit_camera_rotation),
             )
         n_inliers, correspondences, _coarse_offset = best
         det_inliers = det_points_arr[[d for d, _ in correspondences]]
         cat_inliers = cat_points_arr[[c for _, c in correspondences]]
-        offset_vu, weights, residuals = self._tukey_refit(det_inliers, cat_inliers)
+        fit_rotation = bool(context.fit_camera_rotation)
+        if fit_rotation:
+            sim_fit, weights = self._similarity_refit(det_inliers, cat_inliers)
+            offset_vu = sim_fit.translation_vu
+            residuals = sim_fit.residuals_vu
+            rotation_rad: float | None = float(sim_fit.rotation_rad)
+        else:
+            offset_vu, weights, residuals = self._tukey_refit(det_inliers, cat_inliers)
+            rotation_rad = None
         residual_distances = np.hypot(residuals[:, 0], residuals[:, 1])
         median_residual_px = float(np.median(residual_distances))
-        cov = self._build_covariance(weights=weights, residuals=residuals)
+        if fit_rotation:
+            cov = self._build_covariance_3dof(
+                weights=weights,
+                residuals=residuals,
+                cat_inliers=cat_inliers,
+            )
+        else:
+            cov = self._build_covariance(weights=weights, residuals=residuals)
         diagnostics = StarFieldDiagnostics(
             n_inliers=n_inliers,
             median_residual_px=median_residual_px,
@@ -657,9 +686,15 @@ class StarFieldFromCatalogNav(NavTechnique):
             n_triplets_evaluated=n_triplets_evaluated,
         )
         margin_v, margin_u = search_window_for_obs(context)
+        max_rotation_rad = math.radians(context.max_rotation_deg)
+        rotation_at_edge = fit_rotation and (
+            rotation_rad is not None
+            and abs(rotation_rad) >= self._rotation_at_edge_fraction * max_rotation_rad
+        )
         at_edge = (
             abs(offset_vu[0]) >= margin_v - self._at_edge_tolerance_px
             or abs(offset_vu[1]) >= margin_u - self._at_edge_tolerance_px
+            or rotation_at_edge
         )
         confidence = self._evaluate_confidence(
             diagnostics=diagnostics, at_edge=at_edge, spurious=False
@@ -674,6 +709,17 @@ class StarFieldFromCatalogNav(NavTechnique):
             median_residual_px,
             confidence,
         )
+        sigma_rotation_rad: float | None
+        if fit_rotation:
+            sigma_rotation_rad = float(np.sqrt(max(float(cov[2, 2]), 0.0)))
+            self.logger.info(
+                'Rotation = %+.4f deg (sigma %.4f deg)%s',
+                math.degrees(rotation_rad if rotation_rad is not None else 0.0),
+                math.degrees(sigma_rotation_rad),
+                ', AT_EDGE' if (rotation_at_edge or at_edge) else '',
+            )
+        else:
+            sigma_rotation_rad = None
         return NavTechniqueResult(
             technique_name=self.name,
             feature_ids=consumed_ids,
@@ -683,6 +729,8 @@ class StarFieldFromCatalogNav(NavTechnique):
             spurious=False,
             at_edge=at_edge,
             diagnostics=diagnostics,
+            rotation_rad=rotation_rad,
+            sigma_rotation_rad=sigma_rotation_rad,
         )
 
     def _enumerate_candidates(
@@ -798,6 +846,38 @@ class StarFieldFromCatalogNav(NavTechnique):
         residuals = det_inliers - cat_inliers - np.asarray(offset, np.float64)[None, :]
         return offset, weights, residuals
 
+    def _similarity_refit(
+        self,
+        det_inliers: NDArrayFloatType,
+        cat_inliers: NDArrayFloatType,
+    ) -> tuple[SimilarityFit, NDArrayFloatType]:
+        """Run a Tukey-biweight-reweighted Procrustes / similarity fit.
+
+        Two-pass: an unweighted Kabsch fit seeds the residual scale; a
+        biweight-reweighted Kabsch fit at the conventional 4.685
+        breakdown constant produces the final ``(rotation, translation)``
+        pair.  Falls back to the unweighted fit when every residual
+        survives at full weight (a perfect fit) or when the biweight
+        weights total zero.
+
+        Returns:
+            ``(SimilarityFit, weights)`` — the converged fit plus the
+            per-correspondence weights used in the final iteration.
+        """
+        n = det_inliers.shape[0]
+        weights0 = np.ones(n, dtype=np.float64)
+        seed = similarity_transform_fit(det_inliers, cat_inliers, weights0)
+        distances0 = np.hypot(seed.residuals_vu[:, 0], seed.residuals_vu[:, 1])
+        scale = float(np.median(distances0)) if distances0.size > 0 else 0.0
+        if scale <= 0.0:
+            return seed, weights0
+        scaled = distances0 / scale
+        weights = tukey_biweight_weights(scaled, c=DEFAULT_TUKEY_C)
+        if float(weights.sum()) <= 0.0:
+            return seed, weights0
+        refined = similarity_transform_fit(det_inliers, cat_inliers, weights)
+        return refined, weights
+
     def _build_covariance(
         self, *, weights: NDArrayFloatType, residuals: NDArrayFloatType
     ) -> NDArrayFloatType:
@@ -819,6 +899,53 @@ class StarFieldFromCatalogNav(NavTechnique):
         cov_v = max(var_v / total, floor)
         cov_u = max(var_u / total, floor)
         return np.diag([cov_v, cov_u]).astype(np.float64)
+
+    def _build_covariance_3dof(
+        self,
+        *,
+        weights: NDArrayFloatType,
+        residuals: NDArrayFloatType,
+        cat_inliers: NDArrayFloatType,
+    ) -> NDArrayFloatType:
+        """Return the 3x3 covariance for the similarity-transform fit.
+
+        Translation block follows :meth:`_build_covariance`; the
+        rotation diagonal uses the textbook formula
+
+        ::
+
+            sigma_theta**2 = sigma_residual**2 / sum_i w_i * |cat_i - cc|**2
+
+        where ``sigma_residual**2`` is the per-axis weighted residual
+        variance and ``cc`` is the catalog centroid.  Cross-terms are
+        zero — under independent-isotropic-residual assumptions the
+        translation and rotation parameters of a Procrustes fit are
+        uncorrelated.  Whenever the catalog spread is too small to
+        constrain rotation (numerically zero or negative spread, e.g.
+        coincident inliers) the rotation diagonal collapses to the
+        rotation-unobservable sentinel so ``pinvh`` cleanly drops the
+        rotation contribution.
+        """
+        cov_2x2 = self._build_covariance(weights=weights, residuals=residuals)
+        total = float(weights.sum())
+        if total <= 0.0:
+            return embed_rotation_unobservable(cov_2x2)
+        cat_c_v = float(np.sum(weights * cat_inliers[:, 0]) / total)
+        cat_c_u = float(np.sum(weights * cat_inliers[:, 1]) / total)
+        dv = cat_inliers[:, 0] - cat_c_v
+        du = cat_inliers[:, 1] - cat_c_u
+        spread = float(np.sum(weights * (dv * dv + du * du)))
+        var_v = float(np.sum(weights * residuals[:, 0] ** 2)) / total
+        var_u = float(np.sum(weights * residuals[:, 1] ** 2)) / total
+        var_residual = 0.5 * (var_v + var_u)
+        if spread <= 0.0:
+            sigma_theta_sq = ROTATION_UNOBSERVABLE_VARIANCE
+        else:
+            sigma_theta_sq = max(var_residual / spread, 1.0 / spread)
+        cov = np.zeros((3, 3), dtype=np.float64)
+        cov[:2, :2] = cov_2x2
+        cov[2, 2] = sigma_theta_sq
+        return cov
 
     def _evaluate_confidence(
         self,
@@ -846,16 +973,21 @@ class StarFieldFromCatalogNav(NavTechnique):
         features: list[NavFeature],
         reason: str,
         diagnostics: StarFieldDiagnostics,
+        fit_rotation: bool = False,
     ) -> NavTechniqueResult:
         """Return a zero-confidence spurious result with the supplied reason."""
         self.logger.info('Reporting spurious result: %s', reason)
+        cov_2x2 = 1e6 * np.eye(2, dtype=np.float64)
+        cov = embed_rotation_unobservable(cov_2x2) if fit_rotation else cov_2x2
         return NavTechniqueResult(
             technique_name=self.name,
             feature_ids=tuple(f.feature_id for f in features),
             offset_px=(0.0, 0.0),
-            covariance_px2=1e6 * np.eye(2, dtype=np.float64),
+            covariance_px2=cov,
             confidence=0.0,
             spurious=True,
             at_edge=False,
             diagnostics=diagnostics,
+            rotation_rad=0.0 if fit_rotation else None,
+            sigma_rotation_rad=(rotation_unobservable_sigma_rad() if fit_rotation else None),
         )

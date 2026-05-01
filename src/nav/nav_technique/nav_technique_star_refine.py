@@ -37,13 +37,20 @@ from nav.feature.feature import NavFeature
 from nav.feature.feature_type import NavFeatureType
 from nav.feature.flags import StarFlags
 from nav.feature.geometry import StarGeometry
-from nav.nav_technique._star_helpers import local_centroid, usable_stars
+from nav.nav_technique._star_helpers import (
+    local_centroid,
+    similarity_transform_fit,
+    usable_stars,
+)
 from nav.nav_technique.confidence import evaluate_sigmoid_combination
 from nav.nav_technique.diagnostics import StarRefineDiagnostics
 from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.nav_technique import (
+    ROTATION_UNOBSERVABLE_VARIANCE,
     NavTechnique,
+    embed_rotation_unobservable,
     log_confidence_breakdown,
+    rotation_unobservable_sigma_rad,
     search_window_for_obs,
 )
 from nav.nav_technique.technique_result import NavTechniqueResult
@@ -137,6 +144,7 @@ class StarRefineNav(NavTechnique):
         self._min_inliers = int(self.tuning['min_inliers'])
         self._at_edge_tolerance_px = float(self.tuning['at_edge_tolerance_px'])
         self._single_inlier_confidence_cap = float(self.tuning['single_inlier_confidence_cap'])
+        self._rotation_at_edge_fraction = float(self.tuning['rotation_at_edge_fraction'])
         if self._min_inliers < 1:
             raise ValueError(f'min_inliers must be >= 1; got {self._min_inliers}')
         if not 0.0 <= self._single_inlier_confidence_cap <= 1.0:
@@ -182,6 +190,7 @@ class StarRefineNav(NavTechnique):
                         median_pos_err_px=0.0,
                         residual_scatter_px=0.0,
                     ),
+                    fit_rotation=bool(context.fit_camera_rotation),
                 )
             prior_v, prior_u = context.prior_offset_px
             image_ext = np.asarray(context.image_ext, np.float64)
@@ -198,6 +207,7 @@ class StarRefineNav(NavTechnique):
                         median_pos_err_px=0.0,
                         residual_scatter_px=0.0,
                     ),
+                    fit_rotation=bool(context.fit_camera_rotation),
                 )
             total_weight = float(weights.sum())
             delta_v = float(np.sum(weights * per_star_residuals_v) / total_weight)
@@ -247,7 +257,7 @@ class StarRefineNav(NavTechnique):
                     self._single_inlier_confidence_cap,
                 )
                 confidence = self._single_inlier_confidence_cap
-            cov = self._build_covariance(
+            cov_2x2 = self._build_covariance(
                 inliers=inliers,
                 weights=weights,
                 residuals_v=per_star_residuals_v,
@@ -255,6 +265,54 @@ class StarRefineNav(NavTechnique):
                 delta_v=delta_v,
                 delta_u=delta_u,
             )
+            fit_rotation = bool(context.fit_camera_rotation)
+            rotation_rad: float | None = None
+            sigma_rotation_rad: float | None = None
+            cov: NDArrayFloatType
+            offset_v_total = delta_v + prior_v
+            offset_u_total = delta_u + prior_u
+            if fit_rotation and len(inliers) >= 2:
+                rotation_rad, sigma_rotation_rad, cov, offset_v_total, offset_u_total = (
+                    self._fit_rotation_3dof(
+                        inliers=inliers,
+                        residuals_v=per_star_residuals_v,
+                        residuals_u=per_star_residuals_u,
+                        weights=weights,
+                        prior_v=prior_v,
+                        prior_u=prior_u,
+                        cov_2x2=cov_2x2,
+                    )
+                )
+                # The Procrustes refit can pull the absolute offset
+                # outside the search window even when the
+                # delta-based ``at_edge`` was False; recompute against
+                # the updated absolute offset so the flag reflects
+                # what the technique actually reports.
+                at_edge = (
+                    abs(offset_v_total) >= margin_v - self._at_edge_tolerance_px
+                    or abs(offset_u_total) >= margin_u - self._at_edge_tolerance_px
+                )
+                rotation_at_edge = abs(
+                    rotation_rad
+                ) >= self._rotation_at_edge_fraction * math.radians(context.max_rotation_deg)
+                if rotation_at_edge:
+                    at_edge = True
+                self.logger.info(
+                    'Rotation = %+.4f deg (sigma %.4f deg)%s',
+                    math.degrees(rotation_rad),
+                    math.degrees(sigma_rotation_rad if sigma_rotation_rad is not None else 0.0),
+                    ', AT_EDGE' if rotation_at_edge else '',
+                )
+            elif fit_rotation:
+                # Single inlier carries no rotation evidence; promote to a
+                # rank-deficient 3x3 with the rotation-unobservable
+                # sentinel.  Translation block stays as derived from the
+                # CRLB floor.
+                cov = embed_rotation_unobservable(cov_2x2)
+                rotation_rad = 0.0
+                sigma_rotation_rad = rotation_unobservable_sigma_rad()
+            else:
+                cov = cov_2x2
             self.logger.info(
                 'Refined %d star(s); delta (%.4f, %.4f) px from prior '
                 '(%.4f, %.4f); median pos err %.4f px; scatter %.4f px; '
@@ -271,12 +329,14 @@ class StarRefineNav(NavTechnique):
             return NavTechniqueResult(
                 technique_name=self.name,
                 feature_ids=tuple(f.feature_id for f in inliers),
-                offset_px=(delta_v + prior_v, delta_u + prior_u),
+                offset_px=(offset_v_total, offset_u_total),
                 covariance_px2=cov,
                 confidence=confidence,
                 spurious=False,
                 at_edge=at_edge,
                 diagnostics=diagnostics,
+                rotation_rad=rotation_rad,
+                sigma_rotation_rad=sigma_rotation_rad,
             )
 
     def _collect_residuals(
@@ -340,6 +400,73 @@ class StarRefineNav(NavTechnique):
             np.asarray(weights, dtype=np.float64),
         )
 
+    def _fit_rotation_3dof(
+        self,
+        *,
+        inliers: list[NavFeature],
+        residuals_v: NDArrayFloatType,
+        residuals_u: NDArrayFloatType,
+        weights: NDArrayFloatType,
+        prior_v: float,
+        prior_u: float,
+        cov_2x2: NDArrayFloatType,
+    ) -> tuple[float, float, NDArrayFloatType, float, float]:
+        """Run a Procrustes / similarity refit on the inlier set.
+
+        Reconstructs the per-star detection and shifted-prediction
+        positions from the residuals + the original catalog predictions,
+        then runs :func:`similarity_transform_fit` to extract the rotation
+        and translation.  The returned ``offset_v_total`` /
+        ``offset_u_total`` is the absolute (not delta) offset that the
+        caller should report on the result, consistent with the legacy
+        contract.
+
+        Returns:
+            ``(rotation_rad, sigma_rotation_rad, covariance_3x3,
+            offset_v_total, offset_u_total)``.
+        """
+        cat_pts = np.asarray(
+            [list(star.geometry.predicted_vu) for star in inliers],  # type: ignore[union-attr]
+            dtype=np.float64,
+        )
+        shifted_pred = cat_pts + np.asarray([prior_v, prior_u], dtype=np.float64)[None, :]
+        det_pts = shifted_pred + np.column_stack([residuals_v, residuals_u])
+        # Run Procrustes with the inverse-trace weights derived from the
+        # per-star CRLB (matching the translation-only path's weighting).
+        sim_fit = similarity_transform_fit(det_pts, cat_pts, weights)
+        offset_v_total = float(sim_fit.translation_vu[0])
+        offset_u_total = float(sim_fit.translation_vu[1])
+        # Rotation sigma from the inlier residual scatter against the
+        # weighted catalog spread.  Identical math to
+        # ``StarFieldFromCatalogNav._build_covariance_3dof``.
+        total = float(weights.sum())
+        if total <= 0.0:
+            sigma_theta_sq = ROTATION_UNOBSERVABLE_VARIANCE
+        else:
+            cat_c_v = float(np.sum(weights * cat_pts[:, 0]) / total)
+            cat_c_u = float(np.sum(weights * cat_pts[:, 1]) / total)
+            dv = cat_pts[:, 0] - cat_c_v
+            du = cat_pts[:, 1] - cat_c_u
+            spread = float(np.sum(weights * (dv * dv + du * du)))
+            var_v = float(np.sum(weights * sim_fit.residuals_vu[:, 0] ** 2)) / total
+            var_u = float(np.sum(weights * sim_fit.residuals_vu[:, 1] ** 2)) / total
+            var_residual = 0.5 * (var_v + var_u)
+            if spread <= 0.0:
+                sigma_theta_sq = ROTATION_UNOBSERVABLE_VARIANCE
+            else:
+                sigma_theta_sq = max(var_residual / spread, 1.0 / spread)
+        cov = np.zeros((3, 3), dtype=np.float64)
+        cov[:2, :2] = cov_2x2
+        cov[2, 2] = sigma_theta_sq
+        sigma_rotation_rad = float(np.sqrt(max(sigma_theta_sq, 0.0)))
+        return (
+            float(sim_fit.rotation_rad),
+            sigma_rotation_rad,
+            cov,
+            offset_v_total,
+            offset_u_total,
+        )
+
     def _build_covariance(
         self,
         *,
@@ -373,16 +500,21 @@ class StarRefineNav(NavTechnique):
         features: list[NavFeature],
         reason: str,
         diagnostics: StarRefineDiagnostics,
+        fit_rotation: bool = False,
     ) -> NavTechniqueResult:
         """Return a zero-confidence spurious result with the supplied reason."""
         self.logger.info('Reporting spurious result: %s', reason)
+        cov_2x2 = 1e6 * np.eye(2, dtype=np.float64)
+        cov = embed_rotation_unobservable(cov_2x2) if fit_rotation else cov_2x2
         return NavTechniqueResult(
             technique_name=self.name,
             feature_ids=tuple(f.feature_id for f in features),
             offset_px=(0.0, 0.0),
-            covariance_px2=1e6 * np.eye(2, dtype=np.float64),
+            covariance_px2=cov,
             confidence=0.0,
             spurious=True,
             at_edge=False,
             diagnostics=diagnostics,
+            rotation_rad=0.0 if fit_rotation else None,
+            sigma_rotation_rad=(rotation_unobservable_sigma_rad() if fit_rotation else None),
         )

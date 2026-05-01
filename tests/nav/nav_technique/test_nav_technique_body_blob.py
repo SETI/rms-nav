@@ -14,6 +14,7 @@ from nav.feature.feature_type import NavFeatureType
 from nav.feature.flags import BodyBlobFlags
 from nav.feature.geometry import BodyBlobGeometry
 from nav.nav_technique.diagnostics import BodyBlobDiagnostics
+from nav.nav_technique.nav_technique import ROTATION_UNOBSERVABLE_VARIANCE
 from nav.nav_technique.nav_technique_body_blob import BodyBlobNav
 from nav.support.filters import NavFilterKind, NavFilterSpec
 
@@ -269,3 +270,32 @@ def test_body_blob_diagnostics_records_residual_and_snr(
     assert isinstance(result.diagnostics, BodyBlobDiagnostics)
     assert result.diagnostics.residual_px < 0.5
     assert result.diagnostics.body_snr_inside_predicted_bbox > 5.0
+
+
+def test_body_blob_3dof_rotation_unobservable(
+    disc_image: DiscImageFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """When ``fit_camera_rotation=True`` the blob technique reports a 3x3 covariance.
+
+    The rotation slot carries the ``ROTATION_UNOBSERVABLE_VARIANCE``
+    sentinel because a centroid is rotation-invariant about itself; the
+    ensemble combine treats this as no-information in the rotation
+    direction.
+    """
+    shape = (200, 200)
+    actual_center = (100.0, 100.0)
+    radius = 8.0
+    image = disc_image(shape, actual_center, radius)
+    feature = _make_blob_feature(
+        'moonA',
+        predicted_center_vu=(98.0, 102.0),
+        predicted_diameter_px=2.0 * radius,
+    )
+    technique = BodyBlobNav()
+    context = make_nav_context(image, fit_camera_rotation=True)
+    result = technique.navigate([feature], context)
+    assert result.covariance_px2.shape == (3, 3)
+    assert result.rotation_rad == pytest.approx(0.0)
+    assert result.sigma_rotation_rad == pytest.approx(np.sqrt(ROTATION_UNOBSERVABLE_VARIANCE))
+    assert result.covariance_px2[2, 2] == pytest.approx(ROTATION_UNOBSERVABLE_VARIANCE)

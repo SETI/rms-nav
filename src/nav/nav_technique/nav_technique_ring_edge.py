@@ -12,6 +12,7 @@ body blob) before declaring a final answer.
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -30,6 +31,7 @@ from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.nav_technique import (
     NavTechnique,
     log_confidence_breakdown,
+    rotation_pivot_distance_px,
     search_window_for_obs,
 )
 from nav.nav_technique.technique_result import NavTechniqueResult
@@ -143,6 +145,7 @@ class RingEdgeNav(NavTechnique):
         self._spurious_dt_rms_factor = float(self.tuning['spurious_dt_rms_factor'])
         self._spurious_dt_floor_px = float(self.tuning['spurious_dt_floor_px'])
         self._spurious_min_inliers = int(self.tuning['spurious_min_inliers'])
+        self._rotation_at_edge_fraction = float(self.tuning['rotation_at_edge_fraction'])
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Return whether the input set carries any usable ring edge.
@@ -234,6 +237,11 @@ class RingEdgeNav(NavTechnique):
             # Ring-edge polarity prediction depends on lighting / gap-vs-ringlet
             # context the catalog does not encode today; skip polarity until
             # the polarity-predictable flag is wired (deferred work).
+            fit_rotation = bool(context.fit_camera_rotation)
+            pivot_vu = (float(vertices[:, 0].mean()), float(vertices[:, 1].mean()))
+            pivot_distance = (
+                rotation_pivot_distance_px(pivot_vu, edge_dt.shape[:2]) if fit_rotation else 0.0
+            )
             result = lm_subpixel_refine(
                 vertices_vu=vertices,
                 normals_vu=polarity_normals,
@@ -242,13 +250,21 @@ class RingEdgeNav(NavTechnique):
                 image_gradient_vu=gradient_vu,
                 initial_offset_vu=(float(coarse_dv), float(coarse_du)),
                 use_polarity=False,
+                fit_rotation=fit_rotation,
+                pivot_vu=pivot_vu if fit_rotation else None,
+                pivot_distance_px=pivot_distance,
             )
             dv_final, du_final = result.offset_vu
+            max_rotation_rad = math.radians(context.max_rotation_deg)
+            rotation_at_edge = fit_rotation and (
+                abs(result.rotation_rad) >= self._rotation_at_edge_fraction * max_rotation_rad
+            )
             at_edge = (
                 abs(dv_final - margin_v) <= self._at_edge_tolerance_px
                 or abs(dv_final + margin_v) <= self._at_edge_tolerance_px
                 or abs(du_final - margin_u) <= self._at_edge_tolerance_px
                 or abs(du_final + margin_u) <= self._at_edge_tolerance_px
+                or rotation_at_edge
             )
             sigma_min_px = float(sigmas.min()) if sigmas.size else 1.0
             spurious = (
@@ -260,8 +276,21 @@ class RingEdgeNav(NavTechnique):
                 or result.inlier_count < self._spurious_min_inliers
             )
             covariance = result.covariance
-            if covariance.shape != (2, 2):
-                covariance = covariance[:2, :2]
+            rotation_rad: float | None
+            sigma_rotation_rad: float | None
+            if fit_rotation:
+                if covariance.shape != (3, 3):
+                    raise RuntimeError(
+                        f'RingEdgeNav expected 3x3 covariance with fit_rotation; '
+                        f'got {covariance.shape}'
+                    )
+                rotation_rad = float(result.rotation_rad)
+                sigma_rotation_rad = float(np.sqrt(max(float(covariance[2, 2]), 0.0)))
+            else:
+                if covariance.shape != (2, 2):
+                    covariance = covariance[:2, :2]
+                rotation_rad = None
+                sigma_rotation_rad = None
             covariance = np.asarray(covariance, np.float64)
             is_rank_1 = _is_rank_1(covariance) or every_straight
             total_edge_length_px = float(vertices.shape[0])
@@ -291,6 +320,13 @@ class RingEdgeNav(NavTechnique):
                 is_rank_1,
                 float(confidence),
             )
+            if fit_rotation and sigma_rotation_rad is not None and rotation_rad is not None:
+                self.logger.info(
+                    'Rotation = %+.4f deg (sigma %.4f deg)%s',
+                    math.degrees(rotation_rad),
+                    math.degrees(sigma_rotation_rad),
+                    ', AT_EDGE' if rotation_at_edge else '',
+                )
             if spurious or at_edge:
                 self.logger.info('Diagnostic flags: spurious=%s, at_edge=%s', spurious, at_edge)
             self.logger.debug(
@@ -310,19 +346,25 @@ class RingEdgeNav(NavTechnique):
                 spurious=bool(spurious),
                 at_edge=bool(at_edge),
                 diagnostics=diagnostics,
+                rotation_rad=rotation_rad,
+                sigma_rotation_rad=sigma_rotation_rad,
             )
 
 
 def _is_rank_1(covariance: NDArrayFloatType) -> bool:
-    """Return True when the 2x2 covariance is rank-deficient.
+    """Return True when the covariance is rank-deficient in its translation block.
 
-    Uses the same scale-independent test as the ensemble combine: the
-    ratio of the smallest absolute eigenvalue to the largest must fall
-    below :data:`_RANK1_NULL_RELATIVE_THRESHOLD`.
+    For both 2x2 (translation-only) and 3x3 (translation + rotation) inputs
+    the test runs on the top-left 2x2 block — flat-ring rank-deficiency is
+    a property of the translation parameterisation, regardless of whether
+    rotation is fit.  Uses the same scale-independent test as the ensemble
+    combine: the ratio of the smallest absolute eigenvalue to the largest
+    must fall below :data:`_RANK1_NULL_RELATIVE_THRESHOLD`.
     """
-    if covariance.shape != (2, 2):
+    if covariance.shape not in ((2, 2), (3, 3)):
         return False
-    eigvals = np.linalg.eigvalsh(covariance)
+    block = covariance[:2, :2]
+    eigvals = np.linalg.eigvalsh(block)
     largest = float(np.abs(eigvals).max())
     smallest = float(np.abs(eigvals).min())
     if largest == 0.0:

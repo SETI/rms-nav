@@ -123,6 +123,27 @@ def _mahalanobis_distance(
     return float(math.sqrt(d_sq))
 
 
+def _result_param_vector(res: NavTechniqueResult) -> NDArrayFloatType:
+    """Return the parameter vector for a per-technique result.
+
+    Two-DoF results emit ``(dv, du)``; 3-DoF results emit
+    ``(dv, du, rotation_rad)``.  The vector length always matches the
+    covariance shape — a 3x3 covariance with ``rotation_rad=None`` would be
+    inconsistent and raises here.
+    """
+    cov = np.asarray(res.covariance_px2, np.float64)
+    if cov.shape == (3, 3):
+        if res.rotation_rad is None:
+            raise ValueError(
+                f'{res.technique_name}: 3x3 covariance requires rotation_rad to be set'
+            )
+        return cast(
+            NDArrayFloatType,
+            np.array([res.offset_px[0], res.offset_px[1], res.rotation_rad], np.float64),
+        )
+    return cast(NDArrayFloatType, np.array([res.offset_px[0], res.offset_px[1]], np.float64))
+
+
 def _agreement_groups(
     results: list[NavTechniqueResult], *, agreement_sigma: float, rcond: float
 ) -> list[list[NavTechniqueResult]]:
@@ -152,11 +173,20 @@ def _agreement_groups(
         rows.append(i)
         cols.append(i)
     for i in range(n):
-        mu_i = np.asarray(results[i].offset_px, np.float64)
+        mu_i = _result_param_vector(results[i])
         cov_i = np.asarray(results[i].covariance_px2, np.float64)
         for j in range(i + 1, n):
-            mu_j = np.asarray(results[j].offset_px, np.float64)
+            mu_j = _result_param_vector(results[j])
             cov_j = np.asarray(results[j].covariance_px2, np.float64)
+            if mu_i.shape != mu_j.shape:
+                # 2-DoF and 3-DoF results never coexist within one image.
+                # If the orchestrator routed mismatched shapes through the
+                # ensemble, fail loudly rather than coerce.
+                raise ValueError(
+                    'Mixed-DoF technique results in one ensemble: '
+                    f'{results[i].technique_name} produced {mu_i.shape} parameters; '
+                    f'{results[j].technique_name} produced {mu_j.shape}.'
+                )
             dist = _mahalanobis_distance(mu_i, cov_i, mu_j, cov_j, rcond=rcond)
             if dist <= agreement_sigma:
                 rows.extend([i, j])
@@ -171,9 +201,29 @@ def _agreement_groups(
     return groups
 
 
+@dataclass(frozen=True)
+class _CombinedEstimate:
+    """Output of :func:`_combine_precision_weighted`.
+
+    Parameters:
+        offset_px: Combined ``(dv, du)`` translation.
+        rotation_rad: Combined rotation in radians; ``None`` when every
+            input was 2-DoF.
+        covariance_px2: Combined covariance, ``(2, 2)`` or ``(3, 3)``
+            matching the input parameter dimensionality.
+        is_rank_deficient: True when the summed information matrix has a
+            near-zero eigenvalue relative to its largest.
+    """
+
+    offset_px: tuple[float, float]
+    rotation_rad: float | None
+    covariance_px2: NDArrayFloatType
+    is_rank_deficient: bool
+
+
 def _combine_precision_weighted(
     group: list[NavTechniqueResult], *, rcond: float
-) -> tuple[tuple[float, float], NDArrayFloatType, bool]:
+) -> _CombinedEstimate:
     """Information-form combine of a group of agreeing results.
 
     Implements the Kalman-style information-form merge:
@@ -181,25 +231,40 @@ def _combine_precision_weighted(
         Sigma_combined = pinvh( sum_i pinvh(Sigma_i) )
         mu_combined    = Sigma_combined @ sum_i ( pinvh(Sigma_i) @ mu_i )
 
+    Parameter vectors carry rotation as a third component when every input
+    is 3-DoF; the resulting combined estimate then carries a non-``None``
+    ``rotation_rad`` field.
+
     Parameters:
-        group: Non-empty list of agreeing results.
+        group: Non-empty list of agreeing results.  Every member must
+            share the same parameter dimensionality (all 2-DoF or all
+            3-DoF — :func:`_agreement_groups` already enforces this).
         rcond: rcond for ``pinvh``.
 
     Returns:
-        Tuple ``(offset_px, covariance_px2, is_rank_deficient)``.
+        :class:`_CombinedEstimate`.
 
     Raises:
         ValueError: if ``group`` is empty (defensive; the orchestrator must
-            ensure non-emptiness before calling).
+            ensure non-emptiness before calling), if total weight is zero,
+            or if the group contains a mix of 2-DoF and 3-DoF results.
     """
     if not group:
         raise ValueError('empty group passed to _combine_precision_weighted')
     info_sum: NDArrayFloatType | None = None
     info_mu_sum: NDArrayFloatType | None = None
+    n_params: int | None = None
     for res in group:
         cov = np.asarray(res.covariance_px2, np.float64)
+        if n_params is None:
+            n_params = cov.shape[0]
+        elif cov.shape[0] != n_params:
+            raise ValueError(
+                f'mixed-DoF group passed to _combine_precision_weighted: '
+                f'expected {n_params}-DoF, got {cov.shape[0]} from {res.technique_name}'
+            )
         info = pinvh(cov, rtol=rcond)
-        mu = np.asarray(res.offset_px, np.float64)
+        mu = _result_param_vector(res)
         if info_sum is None:
             info_sum = info.copy()
             info_mu_sum = info @ mu
@@ -220,10 +285,14 @@ def _combine_precision_weighted(
     rel_tol = 1.0e-8
     eps = np.finfo(np.float64).eps
     is_rank_deficient = bool(eigvals.min() / max(abs(eigvals.max()), eps) < rel_tol)
-    return (
-        (float(mu_combined[0]), float(mu_combined[1])),
-        cast(NDArrayFloatType, cov_combined),
-        is_rank_deficient,
+    rotation: float | None = None
+    if n_params == 3:
+        rotation = float(mu_combined[2])
+    return _CombinedEstimate(
+        offset_px=(float(mu_combined[0]), float(mu_combined[1])),
+        rotation_rad=rotation,
+        covariance_px2=cast(NDArrayFloatType, cov_combined),
+        is_rank_deficient=is_rank_deficient,
     )
 
 
@@ -389,9 +458,7 @@ def ensemble(
     best_summed_conf = sum(r.confidence for r in best_group)
     apply_disagreement_penalty = len(groups) > 1
     try:
-        offset, cov, is_rank_deficient = _combine_precision_weighted(
-            best_group, rcond=cfg.pinvh_rcond
-        )
+        combined = _combine_precision_weighted(best_group, rcond=cfg.pinvh_rcond)
         combined_confidence = _combine_confidence(
             best_group,
             rcond=cfg.pinvh_rcond,
@@ -435,8 +502,8 @@ def ensemble(
                 cfg.conflicted_confidence_multiplier,
             )
             return NavResult.conflicted(
-                offset_px=offset,
-                covariance_px2=cov,
+                offset_px=combined.offset_px,
+                covariance_px2=combined.covariance_px2,
                 confidence=conflicted_confidence,
                 per_technique=results,
                 feature_inventory=feature_inventory,
@@ -460,9 +527,10 @@ def ensemble(
             model_metadata=md,
             annotations=ann,
         )
+    cov = combined.covariance_px2
     sigma_dv = float(math.sqrt(max(cov[0, 0], 0.0)))
     sigma_du = float(math.sqrt(max(cov[1, 1], 0.0)))
-    sigma_along_unobservable_px = float('inf') if is_rank_deficient else None
+    sigma_along_unobservable_px = float('inf') if combined.is_rank_deficient else None
     rank = derive_confidence_rank(
         confidence=combined_confidence,
         sigma_px=(sigma_dv, sigma_du),
@@ -488,10 +556,15 @@ def ensemble(
             model_metadata=md,
             annotations=ann,
         )
-    status_reason = NavStatusReason.RANK_1_ONLY if is_rank_deficient else NavStatusReason.OK
+    status_reason = (
+        NavStatusReason.RANK_1_ONLY if combined.is_rank_deficient else NavStatusReason.OK
+    )
+    sigma_rotation_rad: float | None = None
+    if combined.rotation_rad is not None and cov.shape == (3, 3):
+        sigma_rotation_rad = float(math.sqrt(max(cov[2, 2], 0.0)))
     return NavResult.ok(
-        offset_px=offset,
-        covariance_px2=cov,
+        offset_px=combined.offset_px,
+        covariance_px2=combined.covariance_px2,
         confidence=combined_confidence,
         confidence_rank=rank,
         status_reason=status_reason,
@@ -502,4 +575,6 @@ def ensemble(
         sigma_along_unobservable_px=sigma_along_unobservable_px,
         model_metadata=md,
         annotations=ann,
+        rotation_rad=combined.rotation_rad,
+        sigma_rotation_rad=sigma_rotation_rad,
     )

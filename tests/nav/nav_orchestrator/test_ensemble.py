@@ -1,6 +1,7 @@
 """Tests for ``nav.nav_orchestrator.ensemble.ensemble`` and helpers."""
 
 import numpy as np
+import pytest
 
 from nav.nav_orchestrator.ensemble import (
     EnsembleConfig,
@@ -10,6 +11,10 @@ from nav.nav_orchestrator.ensemble import (
 from nav.nav_orchestrator.image_classifier_result import NavImageClassifierResult
 from nav.nav_orchestrator.provenance import Provenance
 from nav.nav_technique.diagnostics import BodyLimbDiagnostics
+from nav.nav_technique.nav_technique import (
+    ROTATION_UNOBSERVABLE_VARIANCE,
+    embed_rotation_unobservable,
+)
 from nav.nav_technique.technique_result import NavTechniqueResult
 
 
@@ -255,3 +260,116 @@ def test_ensemble_unobservable_offset_when_all_share_null_direction() -> None:
     from nav.support.status_reason import NavStatusReason
 
     assert result.status_reason == NavStatusReason.RANK_1_ONLY
+
+
+def test_ensemble_3dof_combines_translation_and_rotation() -> None:
+    """Two 3-DoF results agreeing in (dv, du, theta) merge into a 3-DoF NavResult."""
+    cov_a = np.diag([0.04, 0.04, 1e-4]).astype(np.float64)
+    cov_b = np.diag([0.04, 0.04, 1e-4]).astype(np.float64)
+    a = NavTechniqueResult(
+        technique_name='A',
+        feature_ids=('A:f',),
+        offset_px=(1.0, 2.0),
+        covariance_px2=cov_a,
+        confidence=0.8,
+        spurious=False,
+        at_edge=False,
+        diagnostics=BodyLimbDiagnostics(),
+        rotation_rad=0.01,
+        sigma_rotation_rad=0.01,
+    )
+    b = NavTechniqueResult(
+        technique_name='B',
+        feature_ids=('B:f',),
+        offset_px=(1.05, 1.95),
+        covariance_px2=cov_b,
+        confidence=0.8,
+        spurious=False,
+        at_edge=False,
+        diagnostics=BodyLimbDiagnostics(),
+        rotation_rad=0.012,
+        sigma_rotation_rad=0.01,
+    )
+    result = ensemble(
+        [a, b],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'ok'
+    assert result.rotation_rad is not None
+    assert abs(result.rotation_rad - 0.011) < 1e-3
+    assert result.sigma_rotation_rad is not None
+    # Two equal-confidence inputs with sigma_theta = 0.01 rad each combine
+    # via inverse-variance averaging to sigma = 1 / sqrt(1/0.01**2 + 1/0.01**2)
+    # = 0.01 / sqrt(2) ~ 0.0070710678 rad.
+    assert result.sigma_rotation_rad == pytest.approx(0.01 / np.sqrt(2.0), rel=1e-6)
+    assert result.covariance_px2 is not None
+    assert result.covariance_px2.shape == (3, 3)
+
+
+def test_ensemble_3dof_with_rotation_unobservable_input() -> None:
+    """Rotation-unobservable input contributes near-zero info to 3-DoF combine."""
+    cov_observable = np.diag([0.04, 0.04, 1e-4]).astype(np.float64)
+    cov_unobservable = embed_rotation_unobservable(np.diag([0.04, 0.04]).astype(np.float64))
+    a = NavTechniqueResult(
+        technique_name='A',
+        feature_ids=('A:f',),
+        offset_px=(1.0, 2.0),
+        covariance_px2=cov_observable,
+        confidence=0.8,
+        spurious=False,
+        at_edge=False,
+        diagnostics=BodyLimbDiagnostics(),
+        rotation_rad=0.01,
+        sigma_rotation_rad=0.01,
+    )
+    b = NavTechniqueResult(
+        technique_name='B',
+        feature_ids=('B:f',),
+        offset_px=(1.0, 2.0),
+        covariance_px2=cov_unobservable,
+        confidence=0.8,
+        spurious=False,
+        at_edge=False,
+        diagnostics=BodyLimbDiagnostics(),
+        rotation_rad=0.0,
+        sigma_rotation_rad=float(np.sqrt(ROTATION_UNOBSERVABLE_VARIANCE)),
+    )
+    result = ensemble(
+        [a, b],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'ok'
+    assert result.rotation_rad is not None
+    # The unobservable input pulls rotation only marginally toward zero;
+    # the observable input dominates.
+    assert abs(result.rotation_rad - 0.01) < 1e-3
+
+
+def test_ensemble_rejects_mixed_dof_inputs() -> None:
+    """Mixing 2-DoF and 3-DoF results raises a ValueError."""
+    cov_2d = np.diag([0.04, 0.04]).astype(np.float64)
+    cov_3d = np.diag([0.04, 0.04, 1e-4]).astype(np.float64)
+    two = _make_result(technique_name='Two', cov=cov_2d)
+    three = NavTechniqueResult(
+        technique_name='Three',
+        feature_ids=('three:f',),
+        offset_px=(0.0, 0.0),
+        covariance_px2=cov_3d,
+        confidence=0.8,
+        spurious=False,
+        at_edge=False,
+        diagnostics=BodyLimbDiagnostics(),
+        rotation_rad=0.0,
+        sigma_rotation_rad=0.01,
+    )
+    with pytest.raises(ValueError, match='Mixed-DoF technique results'):
+        ensemble(
+            [two, three],
+            feature_inventory=[],
+            image_classifier=_classifier(),
+            provenance=_provenance(),
+        )

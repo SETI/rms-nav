@@ -298,6 +298,75 @@ def test_body_limb_nav_marks_spurious_when_inlier_fraction_collapses(
     assert result.spurious is True
 
 
+def test_body_limb_nav_3dof_emits_3x3_covariance(
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_limb_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """With ``fit_camera_rotation=True`` the result carries a 3x3 covariance + rotation."""
+    shape = (200, 200)
+    image_center = (100.0, 100.0)
+    radius = 30.0
+    image = disc_image(shape, image_center, radius)
+    model_center = (image_center[0] - 1.0, image_center[1] - 1.0)
+    vertices, outward = circle_polyline(model_center, radius, 120)
+    feature = make_limb_feature('moon', vertices=vertices, outward_normals=outward)
+    technique = BodyLimbNav()
+    context = make_nav_context(image, fit_camera_rotation=True, max_rotation_deg=5.0)
+    result = technique.navigate([feature], context)
+    assert result.covariance_px2.shape == (3, 3)
+    assert result.rotation_rad is not None
+    assert result.sigma_rotation_rad is not None
+    # No rotation planted; LM converges to within a small fraction of a
+    # degree of zero on a clean disc (well below the 5 deg cap).
+    assert abs(result.rotation_rad) < np.deg2rad(0.5)
+
+
+def test_body_limb_nav_3dof_at_edge_when_rotation_saturates(
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_limb_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A rotation magnitude near the configured cap raises ``at_edge``."""
+    from nav.nav_technique import dt_fitting, nav_technique_body_limb
+
+    shape = (200, 200)
+    image = disc_image(shape, (100.0, 100.0), 30.0)
+    vertices, outward = circle_polyline((100.0, 100.0), 30.0, 120)
+    feature = make_limb_feature('moon', vertices=vertices, outward_normals=outward)
+    technique = BodyLimbNav()
+    max_rotation_deg = 5.0
+    context = make_nav_context(image, fit_camera_rotation=True, max_rotation_deg=max_rotation_deg)
+
+    # Force a converged LM rotation right at the configured at-edge
+    # fraction of the cap so the test stays valid if calibration retunes
+    # ``rotation_at_edge_fraction`` per technique.
+    rotation_fraction = float(BodyLimbNav.tuning['rotation_at_edge_fraction'])
+    forged_rotation_rad = float(np.deg2rad(rotation_fraction * max_rotation_deg))
+    forged_result = dt_fitting.LMRefineResult(
+        offset_vu=(0.0, 0.0),
+        rotation_rad=forged_rotation_rad,
+        covariance=np.diag([0.04, 0.04, 1.0e-4]).astype(np.float64),
+        residuals_px=np.zeros(vertices.shape[0], dtype=np.float64),
+        weights=np.ones(vertices.shape[0], dtype=np.float64),
+        rms_px=0.1,
+        iterations=5,
+        converged=True,
+        inlier_count=int(vertices.shape[0]),
+    )
+    monkeypatch.setattr(
+        nav_technique_body_limb,
+        'lm_subpixel_refine',
+        lambda **_kwargs: forged_result,
+    )
+    result = technique.navigate([feature], context)
+    assert result.at_edge is True
+    assert result.rotation_rad == pytest.approx(forged_rotation_rad)
+
+
 def test_body_limb_nav_does_not_mark_spurious_when_inlier_fraction_healthy(
     monkeypatch: pytest.MonkeyPatch,
     disc_image: DiscImageFactory,

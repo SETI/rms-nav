@@ -15,6 +15,7 @@ Mirrors :class:`BodyLimbNav` with three terminator-specific differences:
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -34,6 +35,7 @@ from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.nav_technique import (
     NavTechnique,
     log_confidence_breakdown,
+    rotation_pivot_distance_px,
     search_window_for_obs,
 )
 from nav.nav_technique.technique_result import NavTechniqueResult
@@ -155,6 +157,7 @@ class BodyTerminatorNav(NavTechnique):
         self._spurious_dt_floor_px = float(self.tuning['spurious_dt_floor_px'])
         self._spurious_min_inliers = int(self.tuning['spurious_min_inliers'])
         self._at_edge_tolerance_px = float(self.tuning['at_edge_tolerance_px'])
+        self._rotation_at_edge_fraction = float(self.tuning['rotation_at_edge_fraction'])
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Return whether the input set carries a usable terminator arc.
@@ -196,12 +199,25 @@ class BodyTerminatorNav(NavTechnique):
                 ``min_arc_px`` vertices are dropped before fitting.
             context: Per-image NavContext.  Must carry
                 ``image_edge_dt_ext`` and ``image_gradient_vu_ext`` —
-                both populated by the orchestrator's ``_make_context``.
+                both populated by the orchestrator's ``_make_context``
+                — plus ``fit_camera_rotation`` and ``max_rotation_deg``.
 
         Returns:
-            A ``NavTechniqueResult`` with the recovered offset, 2x2
-            covariance, calibrated confidence, and a populated
-            :class:`BodyTerminatorDiagnostics`.
+            A :class:`NavTechniqueResult` with the recovered offset,
+            calibrated confidence, and a populated
+            :class:`BodyTerminatorDiagnostics`.  Per
+            :class:`BodyLimbNav.navigate`:
+
+            - When ``context.fit_camera_rotation`` is False the result
+              carries a ``(2, 2)`` covariance and ``rotation_rad`` /
+              ``sigma_rotation_rad`` are ``None`` (an unexpected
+              non-(2, 2) covariance from LM is logged at WARNING and
+              truncated).
+            - When ``context.fit_camera_rotation`` is True the result
+              carries a ``(3, 3)`` covariance with the LM-fit rotation
+              diagonal and populated ``rotation_rad`` /
+              ``sigma_rotation_rad``.  An unexpected covariance shape
+              from LM raises ``RuntimeError``.
         """
         with self.logger.open(f'TECHNIQUE: {self.name}'):
             if context.image_edge_dt_ext is None or context.image_gradient_vu_ext is None:
@@ -228,6 +244,11 @@ class BodyTerminatorNav(NavTechnique):
                 phase_factors,
                 albedo_penalties,
             ) = _aggregate_terminator_features(eligible_features)
+            if vertices.shape[0] == 0:
+                raise RuntimeError(
+                    'BodyTerminatorNav.navigate received zero usable TERMINATOR_ARC vertices '
+                    'despite is_feasible reporting feasibility; aborting fit'
+                )
             edge_dt = context.image_edge_dt_ext
             gradient_vu = context.image_gradient_vu_ext
             edge_mask = edge_dt <= 0.5
@@ -248,6 +269,11 @@ class BodyTerminatorNav(NavTechnique):
                 (margin_v, margin_u),
             )
             self.logger.debug('Coarse NCC offset: (%d, %d)', coarse_dv, coarse_du)
+            fit_rotation = bool(context.fit_camera_rotation)
+            pivot_vu = (float(vertices[:, 0].mean()), float(vertices[:, 1].mean()))
+            pivot_distance = (
+                rotation_pivot_distance_px(pivot_vu, edge_dt.shape[:2]) if fit_rotation else 0.0
+            )
             result = lm_subpixel_refine(
                 vertices_vu=vertices,
                 normals_vu=polarity_normals,
@@ -256,13 +282,42 @@ class BodyTerminatorNav(NavTechnique):
                 image_gradient_vu=gradient_vu,
                 initial_offset_vu=(float(coarse_dv), float(coarse_du)),
                 use_polarity=True,
+                fit_rotation=fit_rotation,
+                pivot_vu=pivot_vu if fit_rotation else None,
+                pivot_distance_px=pivot_distance,
             )
             dv_final, du_final = result.offset_vu
+            max_rotation_rad = math.radians(context.max_rotation_deg)
+            rotation_at_edge = fit_rotation and (
+                abs(result.rotation_rad) >= self._rotation_at_edge_fraction * max_rotation_rad
+            )
+            covariance = result.covariance
+            rotation_rad: float | None
+            sigma_rotation_rad: float | None
+            if fit_rotation:
+                if covariance.shape != (3, 3):
+                    raise RuntimeError(
+                        f'BodyTerminatorNav expected 3x3 covariance with fit_rotation; '
+                        f'got {covariance.shape}'
+                    )
+                rotation_rad = float(result.rotation_rad)
+                sigma_rotation_rad = float(np.sqrt(max(float(covariance[2, 2]), 0.0)))
+            else:
+                if covariance.shape != (2, 2):
+                    self.logger.warning(
+                        'BodyTerminatorNav: lm_subpixel_refine returned %s covariance with '
+                        'fit_rotation=False; truncating to (2, 2)',
+                        covariance.shape,
+                    )
+                    covariance = covariance[:2, :2]
+                rotation_rad = None
+                sigma_rotation_rad = None
             at_edge = (
                 abs(dv_final - margin_v) <= self._at_edge_tolerance_px
                 or abs(dv_final + margin_v) <= self._at_edge_tolerance_px
                 or abs(du_final - margin_u) <= self._at_edge_tolerance_px
                 or abs(du_final + margin_u) <= self._at_edge_tolerance_px
+                or rotation_at_edge
             )
             sigma_min_px = float(sigmas.min()) if sigmas.size else 1.0
             spurious = (
@@ -308,6 +363,13 @@ class BodyTerminatorNav(NavTechnique):
                 int(vertices.shape[0]),
                 float(confidence),
             )
+            if fit_rotation and sigma_rotation_rad is not None and rotation_rad is not None:
+                self.logger.info(
+                    'Rotation = %+.4f deg (sigma %.4f deg)%s',
+                    math.degrees(rotation_rad),
+                    math.degrees(sigma_rotation_rad),
+                    ', AT_EDGE' if rotation_at_edge else '',
+                )
             if spurious or at_edge:
                 self.logger.info('Diagnostic flags: spurious=%s, at_edge=%s', spurious, at_edge)
             self.logger.debug(
@@ -320,9 +382,6 @@ class BodyTerminatorNav(NavTechnique):
                 mean_phase,
                 mean_albedo,
             )
-            covariance = result.covariance
-            if covariance.shape != (2, 2):
-                covariance = covariance[:2, :2]
             return NavTechniqueResult(
                 technique_name=self.name,
                 feature_ids=tuple(feature_ids),
@@ -332,6 +391,8 @@ class BodyTerminatorNav(NavTechnique):
                 spurious=bool(spurious),
                 at_edge=bool(at_edge),
                 diagnostics=diagnostics,
+                rotation_rad=rotation_rad,
+                sigma_rotation_rad=sigma_rotation_rad,
             )
 
 

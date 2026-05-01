@@ -622,6 +622,8 @@ class NavOrchestrator(NavBase):
             image_gradient_vu_ext=gradient_vu_ext,
             image_edge_dt_ext=edge_dt_ext,
             pre_filter_applied=pre_filter,
+            fit_camera_rotation=settings.fit_camera_rotation,
+            max_rotation_deg=settings.max_rotation_deg,
         )
         return context, classifier_result
 

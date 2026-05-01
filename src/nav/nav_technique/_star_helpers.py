@@ -19,6 +19,8 @@ are not part of the package's public API.
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
+from typing import cast
 
 import numpy as np
 
@@ -29,10 +31,12 @@ from nav.feature.geometry import StarGeometry
 from nav.support.types import NDArrayFloatType
 
 __all__ = [
+    'SimilarityFit',
     'brightness_margin_mag',
     'local_centroid',
     'predicted_snr',
     'predicted_vu',
+    'similarity_transform_fit',
     'star_features',
     'usable_stars',
 ]
@@ -108,6 +112,134 @@ def brightness_margin_mag(brightest_snr: float, runner_up_snr: float) -> float:
     if runner_up_snr <= 0.0:
         return float('inf')
     return 2.5 * math.log10(brightest_snr / runner_up_snr)
+
+
+@dataclass(frozen=True)
+class SimilarityFit:
+    """Result of a 2-D similarity-transform fit aligning catalog -> detection.
+
+    Maps a catalog point ``c`` to ``R(theta) @ c + translation`` in the
+    image (``v, u``) frame — i.e. ``translation_vu`` is the global-frame
+    translation, *not* a pivot-relative offset.  ``pivot_vu`` reports
+    the weighted catalog centroid the SVD was centred on so callers can
+    recover the equivalent pivot-relative form
+    ``t_pivot = translation_vu + (R - I) @ pivot_vu`` when they need
+    the rotation expressed about that pivot.
+
+    Parameters:
+        translation_vu: ``(dv, du)`` global-frame translation; equal
+            to ``det_centroid - R @ cat_centroid``.
+        rotation_rad: Rotation angle ``theta`` (radians).
+        pivot_vu: Catalog-side weighted centroid used as the SVD
+            centring point.  Reported so a downstream caller can emit
+            a pivot-aware :class:`NavTechniqueResult` matching the
+            project's rotation-pivot convention.
+        residuals_vu: ``(N, 2)`` residual vector ``det - (R @ cat + t)``
+            for each correspondence (raw, unweighted).
+        weights: ``(N,)`` per-correspondence weight applied during the
+            fit (Tukey biweight for the M-estimator path; uniform for
+            two-point exact fits).
+    """
+
+    translation_vu: tuple[float, float]
+    rotation_rad: float
+    pivot_vu: tuple[float, float]
+    residuals_vu: NDArrayFloatType
+    weights: NDArrayFloatType
+
+
+def similarity_transform_fit(
+    detection_pts: NDArrayFloatType,
+    catalog_pts: NDArrayFloatType,
+    weights: NDArrayFloatType,
+) -> SimilarityFit:
+    """Solve the weighted Kabsch / orthogonal-Procrustes problem.
+
+    Returns the ``(rotation, translation)`` that maps the catalog point
+    cloud onto the detection point cloud minimising the weighted squared
+    residual sum.  The fit is rigid (no scale): the SVD's middle
+    diagonal is replaced with ``diag(1, det(U @ Vt))`` so the result is
+    a proper rotation even when one cohort happens to be a mirror image
+    of the other (a numerical artifact for two-point inputs that the
+    determinant correction rejects).
+
+    The algorithm follows the textbook weighted-Procrustes derivation:
+
+    1. Compute weighted centroids of both clouds.
+    2. Form the weighted cross-covariance ``H = sum_i w_i (det_i - dc) (cat_i - cc).T``.
+    3. SVD ``H = U S V.T``.
+    4. ``R = U diag(1, det(U V.T)) V.T``.
+    5. ``t = dc - R @ cc``.
+
+    The pivot returned on the result is the catalog-side centroid
+    ``cc``; that lets a caller emit a pivot-aware
+    :class:`NavTechniqueResult` consistent with the project's
+    rotation-pivot convention (a centroid-of-points pivot for star
+    fits).
+
+    Parameters:
+        detection_pts: ``(N, 2)`` detected positions in ``(v, u)``.
+        catalog_pts: ``(N, 2)`` predicted catalog positions in
+            ``(v, u)``, in the same order as ``detection_pts``.
+        weights: ``(N,)`` non-negative weights.  A near-zero total
+            weight returns the identity transform with an empty
+            residual vector.
+
+    Returns:
+        :class:`SimilarityFit`.
+
+    Raises:
+        ValueError: if the input shapes disagree or are not 2-D.
+    """
+    det = np.asarray(detection_pts, np.float64)
+    cat = np.asarray(catalog_pts, np.float64)
+    w = np.asarray(weights, np.float64)
+    if det.ndim != 2 or det.shape[1] != 2:
+        raise ValueError(f'detection_pts must have shape (N, 2); got {det.shape}')
+    if cat.shape != det.shape:
+        raise ValueError(
+            f'catalog_pts must match detection_pts shape; got {cat.shape} vs {det.shape}'
+        )
+    if w.ndim != 1 or w.shape[0] != det.shape[0]:
+        raise ValueError(f'weights must be 1-D of length {det.shape[0]}; got shape {w.shape}')
+    if (w < 0.0).any():
+        raise ValueError('weights must be non-negative')
+    total = float(w.sum())
+    if total <= 0.0:
+        # No usable weight: report an identity transform with empty
+        # residuals so callers can fall back to a translation-only path.
+        return SimilarityFit(
+            translation_vu=(0.0, 0.0),
+            rotation_rad=0.0,
+            pivot_vu=(float(cat[:, 0].mean()), float(cat[:, 1].mean())) if cat.size else (0.0, 0.0),
+            residuals_vu=np.zeros_like(det),
+            weights=w,
+        )
+    det_c_v = float(np.sum(w * det[:, 0]) / total)
+    det_c_u = float(np.sum(w * det[:, 1]) / total)
+    cat_c_v = float(np.sum(w * cat[:, 0]) / total)
+    cat_c_u = float(np.sum(w * cat[:, 1]) / total)
+    det_centred = det - np.asarray([det_c_v, det_c_u], np.float64)[None, :]
+    cat_centred = cat - np.asarray([cat_c_v, cat_c_u], np.float64)[None, :]
+    cross = (w[:, None] * det_centred).T @ cat_centred
+    u_mat, _s, vt = np.linalg.svd(cross)
+    det_correction = float(np.linalg.det(u_mat @ vt))
+    sign_diag = np.eye(2, dtype=np.float64)
+    sign_diag[1, 1] = math.copysign(1.0, det_correction)
+    rotation = u_mat @ sign_diag @ vt
+    theta = float(math.atan2(rotation[1, 0], rotation[0, 0]))
+    pivot = (cat_c_v, cat_c_u)
+    rotated_centroid = rotation @ np.asarray([cat_c_v, cat_c_u], np.float64)
+    translation = (det_c_v - float(rotated_centroid[0]), det_c_u - float(rotated_centroid[1]))
+    rotated_cat = cat @ rotation.T
+    residuals = det - (rotated_cat + np.asarray(translation, np.float64)[None, :])
+    return SimilarityFit(
+        translation_vu=translation,
+        rotation_rad=theta,
+        pivot_vu=pivot,
+        residuals_vu=cast(NDArrayFloatType, residuals),
+        weights=w,
+    )
 
 
 def local_centroid(

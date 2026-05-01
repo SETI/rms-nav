@@ -17,9 +17,12 @@ correlation.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import math
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
+from scipy.ndimage import rotate as ndimage_rotate
 
 from nav.config import Config
 from nav.feature.composition import compose_template_features
@@ -30,12 +33,14 @@ from nav.nav_technique.confidence import evaluate_sigmoid_combination
 from nav.nav_technique.diagnostics import BodyDiscDiagnostics
 from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.nav_technique import (
+    ROTATION_UNOBSERVABLE_VARIANCE,
     NavTechnique,
     log_confidence_breakdown,
     search_window_for_obs,
 )
 from nav.nav_technique.technique_result import NavTechniqueResult
 from nav.support.correlate import navigate_with_pyramid_kpeaks
+from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only import
     from nav.nav_orchestrator.nav_context import NavContext
@@ -53,6 +58,147 @@ def _filter_disc_features(features: list[NavFeature]) -> list[NavFeature]:
         and f.template_img is not None
         and f.template_mask is not None
     ]
+
+
+@dataclass(frozen=True)
+class _RotationCandidate:
+    """One rotation sample's NCC pyramid result.
+
+    Stored across the multi-level rotation schedule so the final
+    refinement can pick the global winner and reuse the per-rotation
+    outcome for the rotation-axis curvature estimate.
+
+    Parameters:
+        theta_rad: Rotation angle (radians) at which the template was
+            rotated about the body-centroid pivot.
+        ncc_result: Raw dictionary returned by
+            :func:`nav.support.correlate.navigate_with_pyramid_kpeaks`
+            for this rotation sample.
+    """
+
+    theta_rad: float
+    ncc_result: dict[str, Any]
+
+
+def _zero_padded_shift(
+    arr: NDArrayFloatType,
+    shift_v: int,
+    shift_u: int,
+    *,
+    fill_value: float = 0.0,
+) -> NDArrayFloatType:
+    """Translate ``arr`` by ``(shift_v, shift_u)`` with zero (or ``fill_value``)
+    padding on the boundary.
+
+    Equivalent to ``np.roll`` but drops out-of-bounds pixels rather than
+    wrapping them to the opposite edge — the wrapping behaviour is wrong
+    for body / ring templates whose support sits anywhere off the array
+    centre, because rotation about a pivot followed by a shift back
+    would otherwise smear template content into the diametrically
+    opposite corner of the image.
+
+    Works on 2-D arrays of any dtype; the destination is allocated with
+    ``arr.dtype`` so boolean masks stay boolean.
+    """
+    h, w = arr.shape[:2]
+    out = np.full(arr.shape, fill_value, dtype=arr.dtype)
+    src_v_lo = max(0, -shift_v)
+    src_v_hi = min(h, h - shift_v)
+    src_u_lo = max(0, -shift_u)
+    src_u_hi = min(w, w - shift_u)
+    if src_v_hi <= src_v_lo or src_u_hi <= src_u_lo:
+        return out
+    dst_v_lo = src_v_lo + shift_v
+    dst_u_lo = src_u_lo + shift_u
+    dst_v_hi = dst_v_lo + (src_v_hi - src_v_lo)
+    dst_u_hi = dst_u_lo + (src_u_hi - src_u_lo)
+    out[dst_v_lo:dst_v_hi, dst_u_lo:dst_u_hi] = arr[src_v_lo:src_v_hi, src_u_lo:src_u_hi]
+    return cast(NDArrayFloatType, out)
+
+
+def _rotate_template(
+    template_img: NDArrayFloatType,
+    template_mask: NDArrayBoolType,
+    pivot_vu: tuple[float, float],
+    theta_rad: float,
+) -> tuple[NDArrayFloatType, NDArrayBoolType]:
+    """Rotate the composite template + mask about ``pivot_vu`` by ``theta_rad``.
+
+    Uses :func:`scipy.ndimage.rotate` followed by a zero-padded translate
+    that re-centres the rotation pivot — ``ndimage.rotate`` rotates about
+    the array centre, so we shift the array so the pivot is at the centre,
+    rotate, then shift back.  Both shifts use :func:`_zero_padded_shift`
+    rather than ``np.roll`` so out-of-bounds pixels are dropped instead of
+    wrapping to the opposite edge (a wrap would smear template content
+    across the image after the second shift).  The shift is integer-
+    rounded which sacrifices < 1 px of pivot accuracy for a much simpler
+    implementation; the rotation samples are coarse (≥ 0.25 deg) so the
+    rounding error is well below the per-pixel template grid.
+
+    Returns the rotated template (float64, same shape as input) and the
+    rotated mask (bool, same shape).  The mask uses nearest-neighbour
+    interpolation so it stays binary.
+    """
+    if abs(theta_rad) < 1e-12:
+        return template_img.astype(np.float64, copy=True), template_mask.astype(bool, copy=True)
+    pivot_v, pivot_u = pivot_vu
+    h, w = template_img.shape[:2]
+    centre_v = (h - 1) / 2.0
+    centre_u = (w - 1) / 2.0
+    shift_v = round(centre_v - pivot_v)
+    shift_u = round(centre_u - pivot_u)
+    shifted = _zero_padded_shift(template_img.astype(np.float64, copy=False), shift_v, shift_u)
+    shifted_mask = _zero_padded_shift(
+        template_mask.astype(np.uint8, copy=False), shift_v, shift_u, fill_value=0
+    )
+    rotated = ndimage_rotate(
+        shifted,
+        angle=math.degrees(theta_rad),
+        reshape=False,
+        order=1,
+        mode='constant',
+        cval=0.0,
+    )
+    rotated_mask = ndimage_rotate(
+        shifted_mask,
+        angle=math.degrees(theta_rad),
+        reshape=False,
+        order=0,
+        mode='constant',
+        cval=0,
+    )
+    rotated = _zero_padded_shift(rotated, -shift_v, -shift_u)
+    rotated_mask = _zero_padded_shift(rotated_mask, -shift_v, -shift_u, fill_value=0)
+    return (
+        rotated.astype(np.float64, copy=False),
+        rotated_mask.astype(bool, copy=False),
+    )
+
+
+def _composite_pivot_vu(features: list[NavFeature]) -> tuple[float, float]:
+    """Return the centroid-of-body-centres pivot for a multi-body composite.
+
+    The composite template is the union of every body's per-body template
+    painted into ext-FOV coordinates; the natural rotation pivot is the
+    centroid of the bodies' predicted centres in that same frame.  A
+    single-body composite reduces to that body's predicted centre.
+
+    Raises:
+        ValueError: if ``features`` is empty (the upstream feasibility
+            gate should never let this happen, but the check guards
+            against a degenerate divide-by-zero).
+    """
+    if not features:
+        raise ValueError(
+            '_composite_pivot_vu requires at least one BODY_DISC feature; got an empty list'
+        )
+    centres = [
+        feat.geometry.predicted_center_vu  # type: ignore[union-attr]
+        for feat in features
+    ]
+    cv = sum(c[0] for c in centres) / len(centres)
+    cu = sum(c[1] for c in centres) / len(centres)
+    return float(cv), float(cu)
 
 
 def _peak_to_runner_up_ratio(top_k_peaks: list[tuple[float, float, float]]) -> float:
@@ -103,6 +249,8 @@ class BodyDiscCorrelateNav(NavTechnique):
 
     def __init__(self, *, config: Config | None = None) -> None:
         super().__init__(config=config)
+        self.config.read_config()  # ensure cls.tuning is populated
+        self._rotation_at_edge_fraction = float(self.tuning['rotation_at_edge_fraction'])
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Return whether the input set carries any usable BODY_DISC feature.
@@ -133,16 +281,25 @@ class BodyDiscCorrelateNav(NavTechnique):
     def navigate(self, features: list[NavFeature], context: NavContext) -> NavTechniqueResult:
         """Compute the joint-translation offset from the input BODY_DISC templates.
 
+        When ``context.fit_camera_rotation`` is False the technique runs a
+        single 2-D NCC pyramid against the unrotated composite template.
+        When the flag is True it runs the rotation-aware schedule
+        described in :meth:`_run_3dof_pyramid` — 11 + 5 + 3 NCC pyramid
+        evaluations across rotation samples spanning
+        ``±max_rotation_deg``, picking the (dv, du, theta) with the best
+        NCC quality.
+
         Parameters:
             features: Feature list filtered to this technique's accepted
                 types.  Features without a template payload are dropped
                 before fitting.
             context: Per-image NavContext.  Reads ``image_ext``,
-                ``sensor_mask_ext``, and ``obs.extfov_margin_vu``.
+                ``sensor_mask_ext``, ``obs.extfov_margin_vu``, plus
+                ``fit_camera_rotation`` / ``max_rotation_deg``.
 
         Returns:
-            A ``NavTechniqueResult`` with the recovered offset, 2x2
-            covariance, calibrated confidence, and a populated
+            A ``NavTechniqueResult`` with the recovered offset, 2x2 or
+            3x3 covariance, calibrated confidence, and a populated
             :class:`BodyDiscDiagnostics`.
         """
         with self.logger.open(f'TECHNIQUE: {self.name}'):
@@ -164,23 +321,43 @@ class BodyDiscCorrelateNav(NavTechnique):
                 margin_u,
                 up_factor,
             )
-            ncc_result = navigate_with_pyramid_kpeaks(
-                image=context.image_ext,
-                model=template_img,
-                mask=template_mask,
-                upsample_factor=up_factor,
-                max_offset_vu=(margin_v, margin_u),
-                data_mask=context.sensor_mask_ext,
-                use_gradient='auto',
-                logger=self.logger,
-            )
+            fit_rotation = bool(context.fit_camera_rotation)
+            if fit_rotation:
+                pivot = _composite_pivot_vu(eligible)
+                best_theta_rad, ncc_result, sigma_theta_rad = self._run_3dof_pyramid(
+                    image=context.image_ext,
+                    template_img=template_img,
+                    template_mask=template_mask,
+                    pivot_vu=pivot,
+                    max_offset_vu=(margin_v, margin_u),
+                    data_mask=context.sensor_mask_ext,
+                    upsample_factor=up_factor,
+                    max_rotation_deg=float(context.max_rotation_deg),
+                )
+            else:
+                best_theta_rad = 0.0
+                sigma_theta_rad = None
+                ncc_result = navigate_with_pyramid_kpeaks(
+                    image=context.image_ext,
+                    model=template_img,
+                    mask=template_mask,
+                    upsample_factor=up_factor,
+                    max_offset_vu=(margin_v, margin_u),
+                    data_mask=context.sensor_mask_ext,
+                    use_gradient='auto',
+                    logger=self.logger,
+                )
             dv = float(ncc_result['offset'][0])
             du = float(ncc_result['offset'][1])
-            covariance = np.asarray(ncc_result['cov'], np.float64)
-            if covariance.shape != (2, 2):
-                covariance = covariance[:2, :2]
+            covariance_2x2 = np.asarray(ncc_result['cov'], np.float64)
+            if covariance_2x2.shape != (2, 2):
+                raise RuntimeError(
+                    f'BodyDiscCorrelateNav: navigate_with_pyramid_kpeaks returned '
+                    f'covariance with shape {covariance_2x2.shape}; expected (2, 2). '
+                    'Investigate the pyramid output rather than silently slicing.'
+                )
             spurious = bool(ncc_result['spurious'])
-            at_edge = bool(ncc_result['at_edge'])
+            at_edge_translation = bool(ncc_result['at_edge'])
             quality = float(ncc_result['quality'])
             consistency = float(ncc_result['consistency'])
             used_gradient = bool(ncc_result.get('used_gradient', False))
@@ -192,6 +369,30 @@ class BodyDiscCorrelateNav(NavTechnique):
                 used_gradient=used_gradient,
                 body_count=len(eligible),
             )
+            covariance: NDArrayFloatType
+            rotation_rad: float | None
+            sigma_rotation_rad: float | None
+            rotation_at_edge = False
+            if fit_rotation:
+                max_rotation_rad = math.radians(context.max_rotation_deg)
+                rotation_at_edge = (
+                    abs(best_theta_rad) >= self._rotation_at_edge_fraction * max_rotation_rad
+                )
+                cov = np.zeros((3, 3), dtype=np.float64)
+                cov[:2, :2] = covariance_2x2
+                cov[2, 2] = float(
+                    sigma_theta_rad * sigma_theta_rad
+                    if sigma_theta_rad is not None
+                    else ROTATION_UNOBSERVABLE_VARIANCE
+                )
+                covariance = cov
+                rotation_rad = float(best_theta_rad)
+                sigma_rotation_rad = float(np.sqrt(max(float(cov[2, 2]), 0.0)))
+            else:
+                covariance = covariance_2x2
+                rotation_rad = None
+                sigma_rotation_rad = None
+            at_edge = at_edge_translation or rotation_at_edge
             assert self.confidence_spec is not None  # set as class attribute
             confidence, breakdown = evaluate_sigmoid_combination(
                 self.confidence_spec,
@@ -211,6 +412,13 @@ class BodyDiscCorrelateNav(NavTechnique):
                 len(eligible),
                 float(confidence),
             )
+            if fit_rotation:
+                self.logger.info(
+                    'Rotation = %+.4f deg (sigma %.4f deg)%s',
+                    math.degrees(rotation_rad if rotation_rad is not None else 0.0),
+                    math.degrees(sigma_rotation_rad if sigma_rotation_rad is not None else 0.0),
+                    ', AT_EDGE' if rotation_at_edge else '',
+                )
             if spurious or at_edge:
                 self.logger.info('Diagnostic flags: spurious=%s, at_edge=%s', spurious, at_edge)
             return NavTechniqueResult(
@@ -222,7 +430,281 @@ class BodyDiscCorrelateNav(NavTechnique):
                 spurious=spurious,
                 at_edge=at_edge,
                 diagnostics=diagnostics,
+                rotation_rad=rotation_rad,
+                sigma_rotation_rad=sigma_rotation_rad,
             )
+
+    def _run_3dof_pyramid(
+        self,
+        *,
+        image: NDArrayFloatType,
+        template_img: NDArrayFloatType,
+        template_mask: NDArrayBoolType,
+        pivot_vu: tuple[float, float],
+        max_offset_vu: tuple[int, int],
+        data_mask: NDArrayBoolType | None,
+        upsample_factor: int,
+        max_rotation_deg: float,
+    ) -> tuple[float, dict[str, Any], float | None]:
+        """Run the multi-level rotation-sample schedule.
+
+        Three coarse-to-fine passes:
+
+        * Level 0 — 11 samples spanning ``±max_rotation_deg`` (step =
+          ``2 * max_rotation_deg / 10`` deg, which is exactly 1 deg at
+          the default ``max_rotation_deg = 5``).  Pick the rotation with
+          the highest NCC peak quality.
+        * Level 1 — 5 samples in 0.5 deg steps centred on the level-0
+          winner.  Pick the new winner.
+        * Level 2 — 3 samples in 0.25 deg steps centred on the level-1
+          winner.  The peak's local quality curvature feeds the rotation
+          uncertainty estimate.
+
+        Returns ``(best_theta_rad, best_ncc_result, sigma_theta_rad)``.
+        ``sigma_theta_rad`` is ``None`` when the level-2 quality is not
+        concave around the winner — in that case the rotation slot of
+        the 3x3 covariance carries the unobservable sentinel.
+        """
+        # Level 0: coarse 11-sample search across the configured cap.
+        max_rotation_rad = math.radians(max_rotation_deg)
+        l0_thetas = np.linspace(-max_rotation_rad, max_rotation_rad, 11)
+        self.logger.debug(
+            '3-DoF pyramid level 0: %d samples across +-%.2f deg (step %.3f deg)',
+            l0_thetas.size,
+            max_rotation_deg,
+            2.0 * max_rotation_deg / 10.0,
+        )
+        l0_winner = self._evaluate_rotation_samples(
+            thetas_rad=l0_thetas.tolist(),
+            image=image,
+            template_img=template_img,
+            template_mask=template_mask,
+            pivot_vu=pivot_vu,
+            max_offset_vu=max_offset_vu,
+            data_mask=data_mask,
+            upsample_factor=upsample_factor,
+        )
+        # Level 1: 5 samples in 0.5 deg steps centred on the level-0 winner,
+        # clamped to the configured ``+-max_rotation_deg`` cap so the
+        # outer-loop search never proposes a rotation outside the
+        # operator-supplied envelope.
+        step_l1 = math.radians(0.5)
+        l1_thetas = [
+            max(-max_rotation_rad, min(max_rotation_rad, l0_winner.theta_rad + i * step_l1))
+            for i in (-2, -1, 0, 1, 2)
+        ]
+        self.logger.debug(
+            '3-DoF pyramid level 1: 5 samples around %+.4f deg in 0.5 deg steps (clamped)',
+            math.degrees(l0_winner.theta_rad),
+        )
+        l1_winner = self._evaluate_rotation_samples(
+            thetas_rad=l1_thetas,
+            image=image,
+            template_img=template_img,
+            template_mask=template_mask,
+            pivot_vu=pivot_vu,
+            max_offset_vu=max_offset_vu,
+            data_mask=data_mask,
+            upsample_factor=upsample_factor,
+        )
+        # Level 2: 3 samples in 0.25 deg steps centred on the level-1
+        # winner, again clamped to the cap.
+        step_l2 = math.radians(0.25)
+        l2_thetas = [
+            max(-max_rotation_rad, min(max_rotation_rad, l1_winner.theta_rad + i * step_l2))
+            for i in (-1, 0, 1)
+        ]
+        self.logger.debug(
+            '3-DoF pyramid level 2: 3 samples around %+.4f deg in 0.25 deg steps (clamped)',
+            math.degrees(l1_winner.theta_rad),
+        )
+        l2_candidates = [
+            _RotationCandidate(
+                theta_rad=theta,
+                ncc_result=self._ncc_at_rotation(
+                    image=image,
+                    template_img=template_img,
+                    template_mask=template_mask,
+                    pivot_vu=pivot_vu,
+                    theta_rad=theta,
+                    max_offset_vu=max_offset_vu,
+                    data_mask=data_mask,
+                    upsample_factor=upsample_factor,
+                ),
+            )
+            for theta in l2_thetas
+        ]
+        l2_winner = max(l2_candidates, key=lambda c: float(c.ncc_result['quality']))
+        sigma_theta_rad = self._rotation_sigma_from_quality(
+            candidates=l2_candidates,
+            winner=l2_winner,
+            step_rad=step_l2,
+        )
+        sigma_str = f'{math.degrees(sigma_theta_rad):.4f}' if sigma_theta_rad is not None else 'inf'
+        self.logger.info(
+            'Rotation pyramid winner: %+.4f deg, quality %.3f, sigma_theta %s deg',
+            math.degrees(l2_winner.theta_rad),
+            float(l2_winner.ncc_result['quality']),
+            sigma_str,
+        )
+        return l2_winner.theta_rad, l2_winner.ncc_result, sigma_theta_rad
+
+    def _evaluate_rotation_samples(
+        self,
+        *,
+        thetas_rad: list[float],
+        image: NDArrayFloatType,
+        template_img: NDArrayFloatType,
+        template_mask: NDArrayBoolType,
+        pivot_vu: tuple[float, float],
+        max_offset_vu: tuple[int, int],
+        data_mask: NDArrayBoolType | None,
+        upsample_factor: int,
+    ) -> _RotationCandidate:
+        """Run an NCC pyramid for each rotation sample; return the highest-quality candidate.
+
+        Parameters:
+            thetas_rad: Rotation samples (radians) to evaluate.
+            image: Source image (ext-FOV) shared across rotation samples.
+            template_img: Composite body-disc template (pre-rotation).
+            template_mask: Mask of the composite template.
+            pivot_vu: Centroid-of-body-centres pivot ``(v, u)``; the
+                template is rotated about this pixel before each NCC.
+            max_offset_vu: Translation-search window in pixels.
+            data_mask: Optional sensor mask passed through to the
+                pyramid for the bi-directional NCC path.
+            upsample_factor: FFT upsample factor.
+
+        Returns:
+            The :class:`_RotationCandidate` whose NCC pyramid reported
+            the highest quality across the supplied rotation samples.
+        """
+        best: _RotationCandidate | None = None
+        for theta in thetas_rad:
+            ncc_result = self._ncc_at_rotation(
+                image=image,
+                template_img=template_img,
+                template_mask=template_mask,
+                pivot_vu=pivot_vu,
+                theta_rad=theta,
+                max_offset_vu=max_offset_vu,
+                data_mask=data_mask,
+                upsample_factor=upsample_factor,
+            )
+            candidate = _RotationCandidate(theta_rad=theta, ncc_result=ncc_result)
+            if best is None or float(ncc_result['quality']) > float(best.ncc_result['quality']):
+                best = candidate
+        assert best is not None  # thetas_rad guaranteed non-empty by callers
+        return best
+
+    def _ncc_at_rotation(
+        self,
+        *,
+        image: NDArrayFloatType,
+        template_img: NDArrayFloatType,
+        template_mask: NDArrayBoolType,
+        pivot_vu: tuple[float, float],
+        theta_rad: float,
+        max_offset_vu: tuple[int, int],
+        data_mask: NDArrayBoolType | None,
+        upsample_factor: int,
+    ) -> dict[str, Any]:
+        """Rotate the template about ``pivot_vu`` and run a single NCC pyramid.
+
+        Parameters:
+            image: Source ext-FOV image.
+            template_img: Composite body-disc template (pre-rotation).
+            template_mask: Mask of the composite template.
+            pivot_vu: Pivot ``(v, u)`` about which the template is
+                rotated before correlation.
+            theta_rad: Rotation angle (radians) to apply.
+            max_offset_vu: Translation-search window in pixels.
+            data_mask: Optional sensor mask threaded into the pyramid.
+            upsample_factor: FFT upsample factor.
+
+        Returns:
+            The raw dict returned by
+            :func:`nav.support.correlate.navigate_with_pyramid_kpeaks`
+            (offset, covariance, quality, consistency, top-K peaks,
+            spurious / at-edge flags, gradient-mode tag).
+        """
+        rotated_img, rotated_mask = _rotate_template(
+            template_img,
+            template_mask,
+            pivot_vu=pivot_vu,
+            theta_rad=theta_rad,
+        )
+        return navigate_with_pyramid_kpeaks(
+            image=image,
+            model=rotated_img,
+            mask=rotated_mask,
+            upsample_factor=upsample_factor,
+            max_offset_vu=max_offset_vu,
+            data_mask=data_mask,
+            use_gradient='auto',
+            logger=self.logger,
+        )
+
+    @staticmethod
+    def _rotation_sigma_from_quality(
+        *,
+        candidates: list[_RotationCandidate],
+        winner: _RotationCandidate,
+        step_rad: float,
+    ) -> float | None:
+        """Estimate sigma_theta from the level-2 NCC quality curvature.
+
+        Fits a local quadratic ``q(theta) ≈ q0 + 0.5 * H * (theta - theta_0)**2``
+        through the three level-2 quality samples.  When ``H`` (second
+        derivative) is concave (``H < 0``) the precision is
+        ``-1 / H``; the matching sigma is ``sqrt(1 / (-H * q0))``
+        normalising by the peak quality so a high-confidence sharp
+        peak yields a tight rotation estimate.
+
+        The 3-sample finite-difference parabola is well-defined only
+        when the winner sits at the centre sample (so the centre is the
+        peak of the fit).  When the winner is at one of the side
+        samples — most commonly because the level-2 search is bumping
+        against ``+-max_rotation_deg`` after clamping — the function
+        returns ``None`` so the caller can fall back to the rotation-
+        unobservable sentinel rather than report a curvature taken at
+        the wrong centre.
+
+        Parameters:
+            candidates: The three level-2 :class:`_RotationCandidate`
+                samples (any ordering).
+            winner: The candidate selected as the rotation pyramid's
+                final answer (highest NCC quality).  Used to verify
+                that the centre of the 3-sample fit coincides with the
+                returned ``theta``.
+            step_rad: Angular sampling step in radians (level-2 step;
+                evenly spaced).
+
+        Returns:
+            Estimated sigma_theta in radians when the local curvature is
+            concave at the centre sample and the centre coincides with
+            the winner; ``None`` otherwise.
+        """
+        if len(candidates) != 3:
+            return None
+        sorted_candidates = sorted(candidates, key=lambda c: c.theta_rad)
+        if sorted_candidates[1].theta_rad != winner.theta_rad:
+            return None
+        q_minus = float(sorted_candidates[0].ncc_result['quality'])
+        q_centre = float(sorted_candidates[1].ncc_result['quality'])
+        q_plus = float(sorted_candidates[2].ncc_result['quality'])
+        # Approximate second derivative; level 2 evenly samples theta so the
+        # finite difference is exact for a quadratic.
+        second_deriv = (q_plus - 2.0 * q_centre + q_minus) / (step_rad * step_rad)
+        if second_deriv >= 0.0 or q_centre <= 0.0:
+            return None
+        # Quality is in the same scale as PSR / PMR; the precision the peak
+        # carries scales with q_centre, so dividing keeps sigma_theta in
+        # natural units.
+        sigma_sq = 1.0 / (-second_deriv * q_centre)
+        if not math.isfinite(sigma_sq) or sigma_sq <= 0.0:
+            return None
+        return float(math.sqrt(sigma_sq))
 
     def _upsample_factor(self) -> int:
         """Return the FFT upsample factor configured under ``config.offset``."""

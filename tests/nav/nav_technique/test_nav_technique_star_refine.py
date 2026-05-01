@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 from tests.nav.nav_technique.conftest import (
@@ -12,7 +14,10 @@ from tests.nav.nav_technique.conftest import (
 
 from nav.nav_orchestrator.nav_context import NavContext
 from nav.nav_technique.diagnostics import StarRefineDiagnostics
-from nav.nav_technique.nav_technique import NavTechnique
+from nav.nav_technique.nav_technique import (
+    ROTATION_UNOBSERVABLE_VARIANCE,
+    NavTechnique,
+)
 from nav.nav_technique.nav_technique_star_refine import StarRefineNav
 
 
@@ -214,3 +219,70 @@ def test_star_refine_infeasible_on_empty_input() -> None:
 def test_star_refine_registered_with_navtechnique_registry() -> None:
     """``StarRefineNav`` self-registers on import."""
     assert StarRefineNav in NavTechnique._registry
+
+
+def test_star_refine_3dof_recovers_planted_rotation_with_two_inliers(
+    make_nav_context: NavContextFactory,
+    make_star_feature: NavFeatureFactory,
+    draw_gaussian_star: DrawGaussianStarFactory,
+) -> None:
+    """Two refined inliers under fit_camera_rotation recover a small rotation."""
+    shape = (200, 200)
+    image = np.zeros(shape, dtype=np.float64)
+    actual_a = (60.0, 60.0)
+    actual_b = (140.0, 140.0)
+    draw_gaussian_star(image, actual_a, peak_dn=200.0, sigma=1.2)
+    draw_gaussian_star(image, actual_b, peak_dn=180.0, sigma=1.2)
+    prior = (0.5, -0.5)
+    planted_theta = math.radians(0.6)
+    pivot = (
+        0.5 * (actual_a[0] + actual_b[0]) - prior[0],
+        0.5 * (actual_a[1] + actual_b[1]) - prior[1],
+    )
+    cos_t = math.cos(-planted_theta)
+    sin_t = math.sin(-planted_theta)
+
+    def _rotate_back(p: tuple[float, float]) -> tuple[float, float]:
+        rv = p[0] - pivot[0]
+        ru = p[1] - pivot[1]
+        return (
+            pivot[0] + cos_t * rv - sin_t * ru,
+            pivot[1] + sin_t * rv + cos_t * ru,
+        )
+
+    pred_a = _rotate_back((actual_a[0] - prior[0], actual_a[1] - prior[1]))
+    pred_b = _rotate_back((actual_b[0] - prior[0], actual_b[1] - prior[1]))
+    features = [
+        make_star_feature('star:UCAC4:A', predicted_vu=pred_a, predicted_snr=40.0),
+        make_star_feature('star:UCAC4:B', predicted_vu=pred_b, predicted_snr=40.0),
+    ]
+    technique = StarRefineNav()
+    context = make_nav_context(image, fit_camera_rotation=True, max_rotation_deg=5.0)
+    context = _attach_prior(context, prior_offset_px=prior)
+    result = technique.navigate(features, context)
+    assert result.covariance_px2.shape == (3, 3)
+    assert result.rotation_rad is not None
+    assert result.rotation_rad == pytest.approx(planted_theta, abs=math.radians(0.3))
+    assert result.sigma_rotation_rad is not None
+
+
+def test_star_refine_3dof_single_inlier_unobservable(
+    make_nav_context: NavContextFactory,
+    make_star_feature: NavFeatureFactory,
+    draw_gaussian_star: DrawGaussianStarFactory,
+) -> None:
+    """A single-inlier refine under fit_camera_rotation reports rotation as unobservable."""
+    shape = (200, 200)
+    image = np.zeros(shape, dtype=np.float64)
+    actual = (100.0, 100.0)
+    draw_gaussian_star(image, actual, peak_dn=200.0, sigma=1.2)
+    prior = (0.4, -0.3)
+    pred = (actual[0] - prior[0], actual[1] - prior[1])
+    feature = make_star_feature('star:UCAC4:A', predicted_vu=pred, predicted_snr=40.0)
+    technique = StarRefineNav()
+    context = make_nav_context(image, fit_camera_rotation=True, max_rotation_deg=5.0)
+    context = _attach_prior(context, prior_offset_px=prior)
+    result = technique.navigate([feature], context)
+    assert result.covariance_px2.shape == (3, 3)
+    assert result.rotation_rad == 0.0
+    assert result.covariance_px2[2, 2] == pytest.approx(ROTATION_UNOBSERVABLE_VARIANCE)

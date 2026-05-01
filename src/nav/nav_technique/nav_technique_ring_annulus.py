@@ -37,11 +37,14 @@ from nav.nav_technique.diagnostics import RingAnnulusDiagnostics
 from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.nav_technique import (
     NavTechnique,
+    embed_rotation_unobservable,
     log_confidence_breakdown,
+    rotation_unobservable_sigma_rad,
     search_window_for_obs,
 )
 from nav.nav_technique.technique_result import NavTechniqueResult
 from nav.support.correlate import navigate_with_pyramid_kpeaks
+from nav.support.types import NDArrayFloatType
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only import
     from nav.nav_orchestrator.nav_context import NavContext
@@ -161,12 +164,28 @@ class RingAnnulusNav(NavTechnique):
                 types.  Features without a template payload are dropped
                 before fitting.
             context: Per-image NavContext.  Reads ``image_ext``,
-                ``sensor_mask_ext``, and ``obs.extfov_margin_vu``.
+                ``sensor_mask_ext``, ``obs.extfov_margin_vu``, and
+                ``fit_camera_rotation``.
 
         Returns:
-            A ``NavTechniqueResult`` with the recovered offset, 2x2
-            covariance, calibrated confidence, and a populated
-            :class:`RingAnnulusDiagnostics`.
+            A :class:`NavTechniqueResult` with the recovered offset,
+            calibrated confidence, and a populated
+            :class:`RingAnnulusDiagnostics`.  The covariance shape and
+            the rotation fields depend on ``context.fit_camera_rotation``:
+
+            - ``False`` (the default Cassini / NHLORRI posture):
+              ``covariance_px2`` is ``(2, 2)`` and ``rotation_rad`` /
+              ``sigma_rotation_rad`` are ``None``.
+            - ``True``: the translation NCC pyramid carries no rotation
+              evidence, so the result reports the rank-deficient
+              ``(3, 3)`` form returned by
+              :func:`~nav.nav_technique.nav_technique.embed_rotation_unobservable`
+              with ``rotation_rad = 0.0`` and ``sigma_rotation_rad``
+              equal to the rotation-unobservable sentinel.  Multi-
+              planet ring scenes that warrant a 3-D NCC pyramid are
+              tracked for Phase 12+; the rank-deficient encoding
+              flows through the ensemble combine without contaminating
+              other techniques' rotation slots.
         """
         with self.logger.open(f'TECHNIQUE: {self.name}'):
             eligible = _filter_annulus_features(features)
@@ -205,9 +224,13 @@ class RingAnnulusNav(NavTechnique):
             )
             dv = float(ncc_result['offset'][0])
             du = float(ncc_result['offset'][1])
-            covariance = np.asarray(ncc_result['cov'], np.float64)
-            if covariance.shape != (2, 2):
-                covariance = covariance[:2, :2]
+            covariance_2x2 = np.asarray(ncc_result['cov'], np.float64)
+            if covariance_2x2.shape != (2, 2):
+                covariance_2x2 = covariance_2x2[:2, :2]
+            fit_rotation = bool(context.fit_camera_rotation)
+            covariance: NDArrayFloatType = (
+                embed_rotation_unobservable(covariance_2x2) if fit_rotation else covariance_2x2
+            )
             spurious = bool(ncc_result['spurious'])
             at_edge = bool(ncc_result['at_edge'])
             quality = float(ncc_result['quality'])
@@ -250,6 +273,8 @@ class RingAnnulusNav(NavTechnique):
                 spurious=spurious,
                 at_edge=at_edge,
                 diagnostics=diagnostics,
+                rotation_rad=0.0 if fit_rotation else None,
+                sigma_rotation_rad=(rotation_unobservable_sigma_rad() if fit_rotation else None),
             )
 
     def _upsample_factor(self) -> int:

@@ -59,6 +59,14 @@ class NavContext:
         pre_filter_applied: NavFilterSpec applied to the source image (for
             diagnostic provenance), ``None`` if none.
         provenance: Provenance metadata; populated at context creation.
+        fit_camera_rotation: Per-instrument flag enabling 3-DoF technique
+            fits.  When True every technique adds in-plane camera rotation
+            as a third parameter and reports a 3x3 covariance; when False
+            (the default) techniques produce 2-DoF results.
+        max_rotation_deg: Maximum allowed rotation magnitude (degrees)
+            when ``fit_camera_rotation`` is True; rotation outside the
+            bound triggers ``at_edge=True``.  Ignored when
+            ``fit_camera_rotation`` is False.
     """
 
     obs: object
@@ -75,6 +83,8 @@ class NavContext:
     prior_offset_px: tuple[float, float] | None = None
     prior_covariance_px2: NDArrayFloatType | None = None
     pre_filter_applied: NavFilterSpec | None = None
+    fit_camera_rotation: bool = False
+    max_rotation_deg: float = 5.0
 
     def with_prior(
         self,
@@ -88,19 +98,23 @@ class NavContext:
 
         Parameters:
             offset_px: ``(dv, du)`` offset to install as the pass-2 prior.
-            covariance_px2: 2x2 covariance of that offset.
+            covariance_px2: 2x2 covariance of that offset, or 3x3 when the
+                pass-1 ensemble produced a rotation-aware result; the
+                top-left 2x2 block is consumed.
 
         Returns:
             New ``NavContext`` with ``prior_offset_px`` and
-            ``prior_covariance_px2`` populated.
+            ``prior_covariance_px2`` populated.  Only the 2x2 translation
+            block is kept; pass-2 techniques re-derive any rotation prior
+            from the per-instrument flag.
 
         Raises:
             TypeError: if ``offset_px`` is not a length-2 sequence of
                 numbers or ``covariance_px2`` cannot be coerced to a float
                 array.
             ValueError: if ``offset_px`` contains non-finite entries or
-                ``covariance_px2`` does not have shape ``(2, 2)`` or
-                contains non-finite entries.
+                ``covariance_px2`` is not square 2x2 / 3x3 or contains
+                non-finite entries.
         """
         if len(offset_px) != 2:
             raise ValueError(f'offset_px must be a length-2 sequence; got length {len(offset_px)}')
@@ -111,10 +125,14 @@ class NavContext:
         if not (math.isfinite(dv) and math.isfinite(du)):
             raise ValueError(f'offset_px must be finite; got {offset_px!r}')
         cov_in = np.asarray(covariance_px2, np.float64)
-        if cov_in.shape != (2, 2):
-            raise ValueError(f'covariance_px2 must have shape (2, 2); got {cov_in.shape}')
+        if cov_in.shape not in ((2, 2), (3, 3)):
+            raise ValueError(f'covariance_px2 must have shape (2, 2) or (3, 3); got {cov_in.shape}')
         if not np.isfinite(cov_in).all():
             raise ValueError('covariance_px2 must contain only finite entries')
+        # Pass-2 techniques consume the 2x2 translation block only; the
+        # rotation prior carries no information across the pass boundary
+        # (each technique re-derives it from its own geometry).
+        cov_in = cov_in[:2, :2]
         # Take an independent copy and mark it read-only so the caller
         # cannot mutate the prior covariance after the NavContext is built.
         cov = cov_in.copy()

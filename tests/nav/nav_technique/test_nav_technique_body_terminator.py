@@ -231,3 +231,29 @@ def test_body_terminator_nav_raises_when_navcontext_lacks_derivatives(
     )
     with pytest.raises(RuntimeError, match='image_edge_dt_ext'):
         technique.navigate([feature], bare_context)
+
+
+def test_body_terminator_nav_3dof_emits_3x3_covariance(
+    disc_image: DiscImageFactory,
+    arc_polyline: ArcPolylineFactory,
+    make_terminator_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """With ``fit_camera_rotation=True`` the result carries a 3x3 covariance + rotation."""
+    shape = (200, 200)
+    image_center = (100.0, 100.0)
+    radius = 30.0
+    image = disc_image(shape, image_center, radius)
+    model_center = (image_center[0] - 0.7, image_center[1] - 1.3)
+    vertices, outward = arc_polyline(
+        model_center, radius, 80, _TERMINATOR_ANGLE_START, _TERMINATOR_ANGLE_END
+    )
+    feature = make_terminator_feature('moonA', vertices=vertices, outward_normals=outward)
+    technique = BodyTerminatorNav()
+    context = make_nav_context(image, fit_camera_rotation=True, max_rotation_deg=5.0)
+    result = technique.navigate([feature], context)
+    assert result.covariance_px2.shape == (3, 3)
+    assert result.rotation_rad is not None
+    assert result.sigma_rotation_rad is not None
+    # No rotation planted; convergence stays well inside the 5 degree cap.
+    assert abs(result.rotation_rad) < np.deg2rad(5.0)
