@@ -183,10 +183,32 @@ class StarUniqueMatchNav(NavTechnique):
             context: Per-image NavContext.
 
         Returns:
-            ``NavTechniqueResult`` with offset, 2x2 covariance (or 3x3 with
-            rotation reported as unobservable when
-            ``context.fit_camera_rotation`` is True), calibrated
-            confidence, and a populated :class:`StarUniqueMatchDiagnostics`.
+            A :class:`NavTechniqueResult` with the recovered offset,
+            calibrated confidence (capped per-mode by
+            ``one_star_confidence_cap`` / ``two_star_confidence_cap``),
+            and a populated :class:`StarUniqueMatchDiagnostics`.  The
+            covariance shape and rotation fields depend on the chosen
+            path and on ``context.fit_camera_rotation``:
+
+            - **1-star path, fit_camera_rotation=False**: ``(2, 2)``
+              covariance; ``rotation_rad`` and ``sigma_rotation_rad``
+              are ``None``.
+            - **1-star path, fit_camera_rotation=True**: rank-deficient
+              ``(3, 3)`` covariance via
+              :func:`~nav.nav_technique.nav_technique.embed_rotation_unobservable`
+              (a single match cannot constrain rotation);
+              ``rotation_rad = 0.0`` and ``sigma_rotation_rad`` is the
+              rotation-unobservable sentinel.
+            - **2-star path, fit_camera_rotation=False**: ``(2, 2)``
+              covariance from the per-feature CRLB floor; rotation
+              fields ``None``.
+            - **2-star path, fit_camera_rotation=True**: full ``(3, 3)``
+              covariance with the analytic
+              ``2 * (sigma_v**2 + sigma_u**2) / L**2`` rotation
+              diagonal (``L`` is the catalog-pair separation);
+              ``rotation_rad`` is the Procrustes-fit angle and
+              ``sigma_rotation_rad`` is the square root of the rotation
+              diagonal.
         """
         with self.logger.open(f'TECHNIQUE: {self.name}'):
             usable = usable_stars(features)

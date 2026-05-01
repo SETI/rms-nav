@@ -185,12 +185,29 @@ class BodyLimbNav(NavTechnique):
                 ``min_arc_px`` vertices are dropped before fitting.
             context: Per-image NavContext.  Must carry
                 ``image_edge_dt_ext`` and ``image_gradient_vu_ext`` —
-                both populated by the orchestrator's ``_make_context``.
+                both populated by the orchestrator's ``_make_context``
+                — plus ``fit_camera_rotation`` and ``max_rotation_deg``.
 
         Returns:
-            A ``NavTechniqueResult`` with the recovered offset, 2x2
-            covariance, calibrated confidence, and a populated
-            :class:`BodyLimbDiagnostics`.
+            A :class:`NavTechniqueResult` with the recovered offset,
+            calibrated confidence, and a populated
+            :class:`BodyLimbDiagnostics`.  The covariance shape and the
+            ``rotation_rad`` / ``sigma_rotation_rad`` fields depend on
+            ``context.fit_camera_rotation``:
+
+            - ``False`` (Cassini / NHLORRI default): ``covariance_px2``
+              is ``(2, 2)``; ``rotation_rad`` and ``sigma_rotation_rad``
+              are ``None``.  Any non-``(2, 2)`` covariance returned by
+              :func:`~nav.nav_technique.dt_fitting.lm_subpixel_refine`
+              is logged at WARNING and truncated to the 2x2 translation
+              block.
+            - ``True`` (VGISS / GOSSI): ``covariance_px2`` is the LM
+              M-estimator's ``(3, 3)`` translation + rotation
+              information matrix; ``rotation_rad`` is the converged
+              ``theta`` (radians) and ``sigma_rotation_rad`` is the
+              square root of the rotation diagonal.  An unexpected
+              covariance shape is treated as a programmer error and
+              raises ``RuntimeError``.
         """
         with self.logger.open(f'TECHNIQUE: {self.name}'):
             if context.image_edge_dt_ext is None or context.image_gradient_vu_ext is None:

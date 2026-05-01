@@ -199,12 +199,25 @@ class BodyTerminatorNav(NavTechnique):
                 ``min_arc_px`` vertices are dropped before fitting.
             context: Per-image NavContext.  Must carry
                 ``image_edge_dt_ext`` and ``image_gradient_vu_ext`` —
-                both populated by the orchestrator's ``_make_context``.
+                both populated by the orchestrator's ``_make_context``
+                — plus ``fit_camera_rotation`` and ``max_rotation_deg``.
 
         Returns:
-            A ``NavTechniqueResult`` with the recovered offset, 2x2
-            covariance, calibrated confidence, and a populated
-            :class:`BodyTerminatorDiagnostics`.
+            A :class:`NavTechniqueResult` with the recovered offset,
+            calibrated confidence, and a populated
+            :class:`BodyTerminatorDiagnostics`.  Per
+            :class:`BodyLimbNav.navigate`:
+
+            - When ``context.fit_camera_rotation`` is False the result
+              carries a ``(2, 2)`` covariance and ``rotation_rad`` /
+              ``sigma_rotation_rad`` are ``None`` (an unexpected
+              non-(2, 2) covariance from LM is logged at WARNING and
+              truncated).
+            - When ``context.fit_camera_rotation`` is True the result
+              carries a ``(3, 3)`` covariance with the LM-fit rotation
+              diagonal and populated ``rotation_rad`` /
+              ``sigma_rotation_rad``.  An unexpected covariance shape
+              from LM raises ``RuntimeError``.
         """
         with self.logger.open(f'TECHNIQUE: {self.name}'):
             if context.image_edge_dt_ext is None or context.image_gradient_vu_ext is None:

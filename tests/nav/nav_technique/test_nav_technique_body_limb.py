@@ -338,12 +338,17 @@ def test_body_limb_nav_3dof_at_edge_when_rotation_saturates(
     vertices, outward = circle_polyline((100.0, 100.0), 30.0, 120)
     feature = make_limb_feature('moon', vertices=vertices, outward_normals=outward)
     technique = BodyLimbNav()
-    context = make_nav_context(image, fit_camera_rotation=True, max_rotation_deg=5.0)
+    max_rotation_deg = 5.0
+    context = make_nav_context(image, fit_camera_rotation=True, max_rotation_deg=max_rotation_deg)
 
-    # Force a converged LM at +4.9 degrees (above the 0.95 * 5 = 4.75 cap).
+    # Force a converged LM rotation right at the configured at-edge
+    # fraction of the cap so the test stays valid if calibration retunes
+    # ``rotation_at_edge_fraction`` per technique.
+    rotation_fraction = float(BodyLimbNav.tuning['rotation_at_edge_fraction'])
+    forged_rotation_rad = float(np.deg2rad(rotation_fraction * max_rotation_deg))
     forged_result = dt_fitting.LMRefineResult(
         offset_vu=(0.0, 0.0),
-        rotation_rad=float(np.deg2rad(4.9)),
+        rotation_rad=forged_rotation_rad,
         covariance=np.diag([0.04, 0.04, 1.0e-4]).astype(np.float64),
         residuals_px=np.zeros(vertices.shape[0], dtype=np.float64),
         weights=np.ones(vertices.shape[0], dtype=np.float64),
@@ -359,7 +364,7 @@ def test_body_limb_nav_3dof_at_edge_when_rotation_saturates(
     )
     result = technique.navigate([feature], context)
     assert result.at_edge is True
-    assert result.rotation_rad == pytest.approx(np.deg2rad(4.9))
+    assert result.rotation_rad == pytest.approx(forged_rotation_rad)
 
 
 def test_body_limb_nav_does_not_mark_spurious_when_inlier_fraction_healthy(

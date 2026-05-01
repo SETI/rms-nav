@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 from scipy.ndimage import rotate as ndimage_rotate
@@ -80,6 +80,42 @@ class _RotationCandidate:
     ncc_result: dict[str, Any]
 
 
+def _zero_padded_shift(
+    arr: NDArrayFloatType,
+    shift_v: int,
+    shift_u: int,
+    *,
+    fill_value: float = 0.0,
+) -> NDArrayFloatType:
+    """Translate ``arr`` by ``(shift_v, shift_u)`` with zero (or ``fill_value``)
+    padding on the boundary.
+
+    Equivalent to ``np.roll`` but drops out-of-bounds pixels rather than
+    wrapping them to the opposite edge — the wrapping behaviour is wrong
+    for body / ring templates whose support sits anywhere off the array
+    centre, because rotation about a pivot followed by a shift back
+    would otherwise smear template content into the diametrically
+    opposite corner of the image.
+
+    Works on 2-D arrays of any dtype; the destination is allocated with
+    ``arr.dtype`` so boolean masks stay boolean.
+    """
+    h, w = arr.shape[:2]
+    out = np.full(arr.shape, fill_value, dtype=arr.dtype)
+    src_v_lo = max(0, -shift_v)
+    src_v_hi = min(h, h - shift_v)
+    src_u_lo = max(0, -shift_u)
+    src_u_hi = min(w, w - shift_u)
+    if src_v_hi <= src_v_lo or src_u_hi <= src_u_lo:
+        return out
+    dst_v_lo = src_v_lo + shift_v
+    dst_u_lo = src_u_lo + shift_u
+    dst_v_hi = dst_v_lo + (src_v_hi - src_v_lo)
+    dst_u_hi = dst_u_lo + (src_u_hi - src_u_lo)
+    out[dst_v_lo:dst_v_hi, dst_u_lo:dst_u_hi] = arr[src_v_lo:src_v_hi, src_u_lo:src_u_hi]
+    return cast(NDArrayFloatType, out)
+
+
 def _rotate_template(
     template_img: NDArrayFloatType,
     template_mask: NDArrayBoolType,
@@ -88,13 +124,16 @@ def _rotate_template(
 ) -> tuple[NDArrayFloatType, NDArrayBoolType]:
     """Rotate the composite template + mask about ``pivot_vu`` by ``theta_rad``.
 
-    Uses :func:`scipy.ndimage.rotate` followed by a translate that
-    re-centres the rotation pivot — ``ndimage.rotate`` rotates about the
-    array centre, so we shift the array so the pivot is at the centre,
-    rotate, then shift back.  The shift is integer-rounded which
-    sacrifices < 1 px of pivot accuracy for a much simpler implementation;
-    the rotation samples are coarse (≥ 0.25 deg) so the rounding error is
-    well below the per-pixel template grid.
+    Uses :func:`scipy.ndimage.rotate` followed by a zero-padded translate
+    that re-centres the rotation pivot — ``ndimage.rotate`` rotates about
+    the array centre, so we shift the array so the pivot is at the centre,
+    rotate, then shift back.  Both shifts use :func:`_zero_padded_shift`
+    rather than ``np.roll`` so out-of-bounds pixels are dropped instead of
+    wrapping to the opposite edge (a wrap would smear template content
+    across the image after the second shift).  The shift is integer-
+    rounded which sacrifices < 1 px of pivot accuracy for a much simpler
+    implementation; the rotation samples are coarse (≥ 0.25 deg) so the
+    rounding error is well below the per-pixel template grid.
 
     Returns the rotated template (float64, same shape as input) and the
     rotated mask (bool, same shape).  The mask uses nearest-neighbour
@@ -102,15 +141,15 @@ def _rotate_template(
     """
     if abs(theta_rad) < 1e-12:
         return template_img.astype(np.float64, copy=True), template_mask.astype(bool, copy=True)
+    pivot_v, pivot_u = pivot_vu
     h, w = template_img.shape[:2]
     centre_v = (h - 1) / 2.0
     centre_u = (w - 1) / 2.0
-    pivot_v, pivot_u = pivot_vu
     shift_v = round(centre_v - pivot_v)
     shift_u = round(centre_u - pivot_u)
-    shifted = np.roll(np.roll(template_img, shift_v, axis=0), shift_u, axis=1)
-    shifted_mask = np.roll(
-        np.roll(template_mask.astype(np.uint8), shift_v, axis=0), shift_u, axis=1
+    shifted = _zero_padded_shift(template_img.astype(np.float64, copy=False), shift_v, shift_u)
+    shifted_mask = _zero_padded_shift(
+        template_mask.astype(np.uint8, copy=False), shift_v, shift_u, fill_value=0
     )
     rotated = ndimage_rotate(
         shifted,
@@ -128,8 +167,8 @@ def _rotate_template(
         mode='constant',
         cval=0,
     )
-    rotated = np.roll(np.roll(rotated, -shift_v, axis=0), -shift_u, axis=1)
-    rotated_mask = np.roll(np.roll(rotated_mask, -shift_v, axis=0), -shift_u, axis=1)
+    rotated = _zero_padded_shift(rotated, -shift_v, -shift_u)
+    rotated_mask = _zero_padded_shift(rotated_mask, -shift_v, -shift_u, fill_value=0)
     return (
         rotated.astype(np.float64, copy=False),
         rotated_mask.astype(bool, copy=False),
@@ -445,11 +484,17 @@ class BodyDiscCorrelateNav(NavTechnique):
             data_mask=data_mask,
             upsample_factor=upsample_factor,
         )
-        # Level 1: 5 samples in 0.5 deg steps centred on the level-0 winner.
+        # Level 1: 5 samples in 0.5 deg steps centred on the level-0 winner,
+        # clamped to the configured ``+-max_rotation_deg`` cap so the
+        # outer-loop search never proposes a rotation outside the
+        # operator-supplied envelope.
         step_l1 = math.radians(0.5)
-        l1_thetas = [l0_winner.theta_rad + i * step_l1 for i in (-2, -1, 0, 1, 2)]
+        l1_thetas = [
+            max(-max_rotation_rad, min(max_rotation_rad, l0_winner.theta_rad + i * step_l1))
+            for i in (-2, -1, 0, 1, 2)
+        ]
         self.logger.debug(
-            '3-DoF pyramid level 1: 5 samples around %+.4f deg in 0.5 deg steps',
+            '3-DoF pyramid level 1: 5 samples around %+.4f deg in 0.5 deg steps (clamped)',
             math.degrees(l0_winner.theta_rad),
         )
         l1_winner = self._evaluate_rotation_samples(
@@ -462,11 +507,15 @@ class BodyDiscCorrelateNav(NavTechnique):
             data_mask=data_mask,
             upsample_factor=upsample_factor,
         )
-        # Level 2: 3 samples in 0.25 deg steps centred on the level-1 winner.
+        # Level 2: 3 samples in 0.25 deg steps centred on the level-1
+        # winner, again clamped to the cap.
         step_l2 = math.radians(0.25)
-        l2_thetas = [l1_winner.theta_rad + i * step_l2 for i in (-1, 0, 1)]
+        l2_thetas = [
+            max(-max_rotation_rad, min(max_rotation_rad, l1_winner.theta_rad + i * step_l2))
+            for i in (-1, 0, 1)
+        ]
         self.logger.debug(
-            '3-DoF pyramid level 2: 3 samples around %+.4f deg in 0.25 deg steps',
+            '3-DoF pyramid level 2: 3 samples around %+.4f deg in 0.25 deg steps (clamped)',
             math.degrees(l1_winner.theta_rad),
         )
         l2_candidates = [
@@ -488,6 +537,7 @@ class BodyDiscCorrelateNav(NavTechnique):
         l2_winner = max(l2_candidates, key=lambda c: float(c.ncc_result['quality']))
         sigma_theta_rad = self._rotation_sigma_from_quality(
             candidates=l2_candidates,
+            winner=l2_winner,
             step_rad=step_l2,
         )
         sigma_str = f'{math.degrees(sigma_theta_rad):.4f}' if sigma_theta_rad is not None else 'inf'
@@ -599,6 +649,7 @@ class BodyDiscCorrelateNav(NavTechnique):
     def _rotation_sigma_from_quality(
         *,
         candidates: list[_RotationCandidate],
+        winner: _RotationCandidate,
         step_rad: float,
     ) -> float | None:
         """Estimate sigma_theta from the level-2 NCC quality curvature.
@@ -610,23 +661,35 @@ class BodyDiscCorrelateNav(NavTechnique):
         normalising by the peak quality so a high-confidence sharp
         peak yields a tight rotation estimate.
 
+        The 3-sample finite-difference parabola is well-defined only
+        when the winner sits at the centre sample (so the centre is the
+        peak of the fit).  When the winner is at one of the side
+        samples — most commonly because the level-2 search is bumping
+        against ``+-max_rotation_deg`` after clamping — the function
+        returns ``None`` so the caller can fall back to the rotation-
+        unobservable sentinel rather than report a curvature taken at
+        the wrong centre.
+
         Parameters:
             candidates: The three level-2 :class:`_RotationCandidate`
-                samples (any ordering).  The function sorts internally
-                by ``theta_rad`` so the centre sample is identified
-                without consulting an outside winner.
+                samples (any ordering).
+            winner: The candidate selected as the rotation pyramid's
+                final answer (highest NCC quality).  Used to verify
+                that the centre of the 3-sample fit coincides with the
+                returned ``theta``.
             step_rad: Angular sampling step in radians (level-2 step;
                 evenly spaced).
 
         Returns:
             Estimated sigma_theta in radians when the local curvature is
-            concave at the centre sample; ``None`` when the surface is
-            not concave (the caller falls back to the
-            rotation-unobservable sentinel).
+            concave at the centre sample and the centre coincides with
+            the winner; ``None`` otherwise.
         """
         if len(candidates) != 3:
             return None
         sorted_candidates = sorted(candidates, key=lambda c: c.theta_rad)
+        if sorted_candidates[1].theta_rad != winner.theta_rad:
+            return None
         q_minus = float(sorted_candidates[0].ncc_result['quality'])
         q_centre = float(sorted_candidates[1].ncc_result['quality'])
         q_plus = float(sorted_candidates[2].ncc_result['quality'])

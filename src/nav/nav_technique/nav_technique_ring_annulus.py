@@ -164,12 +164,28 @@ class RingAnnulusNav(NavTechnique):
                 types.  Features without a template payload are dropped
                 before fitting.
             context: Per-image NavContext.  Reads ``image_ext``,
-                ``sensor_mask_ext``, and ``obs.extfov_margin_vu``.
+                ``sensor_mask_ext``, ``obs.extfov_margin_vu``, and
+                ``fit_camera_rotation``.
 
         Returns:
-            A ``NavTechniqueResult`` with the recovered offset, 2x2
-            covariance, calibrated confidence, and a populated
-            :class:`RingAnnulusDiagnostics`.
+            A :class:`NavTechniqueResult` with the recovered offset,
+            calibrated confidence, and a populated
+            :class:`RingAnnulusDiagnostics`.  The covariance shape and
+            the rotation fields depend on ``context.fit_camera_rotation``:
+
+            - ``False`` (the default Cassini / NHLORRI posture):
+              ``covariance_px2`` is ``(2, 2)`` and ``rotation_rad`` /
+              ``sigma_rotation_rad`` are ``None``.
+            - ``True``: the translation NCC pyramid carries no rotation
+              evidence, so the result reports the rank-deficient
+              ``(3, 3)`` form returned by
+              :func:`~nav.nav_technique.nav_technique.embed_rotation_unobservable`
+              with ``rotation_rad = 0.0`` and ``sigma_rotation_rad``
+              equal to the rotation-unobservable sentinel.  Multi-
+              planet ring scenes that warrant a 3-D NCC pyramid are
+              tracked for Phase 12+; the rank-deficient encoding
+              flows through the ensemble combine without contaminating
+              other techniques' rotation slots.
         """
         with self.logger.open(f'TECHNIQUE: {self.name}'):
             eligible = _filter_annulus_features(features)

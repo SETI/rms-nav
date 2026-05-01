@@ -165,9 +165,13 @@ at_edge for rotation
 ====================
 
 The ``at_edge`` flag fires when the converged rotation magnitude
-crosses ``0.95 * max_rotation_deg``.  This is a separate condition
-from translation ``at_edge`` (which checks proximity to the search-
-window margin); both are OR-ed together onto the
+crosses ``rotation_at_edge_fraction * max_rotation_deg``, where
+``rotation_at_edge_fraction`` is read from each technique's tuning
+block in ``config_510_techniques.yaml`` (default ``0.95``;
+:data:`~nav.nav_technique.nav_technique.ROTATION_AT_EDGE_FRACTION`
+is the canonical value that ships in the YAML).  This is a separate
+condition from translation ``at_edge`` (which checks proximity to
+the search-window margin); both are OR-ed together onto the
 :class:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge`
 field.  A separate INFO log line surfaces the rotation magnitude and
 its sigma whenever ``fit_camera_rotation`` is on, with an explicit

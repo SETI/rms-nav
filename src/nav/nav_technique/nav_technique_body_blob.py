@@ -329,12 +329,25 @@ class BodyBlobNav(NavTechnique):
                 types.  Blobs that fall outside the extfov or have no
                 above-noise signal in their predicted bbox are dropped.
             context: Per-image NavContext.  Reads ``image_ext``,
-                ``image_noise_sigma``, and ``obs.extfov_margin_vu``.
+                ``image_noise_sigma``, ``obs.extfov_margin_vu``, and
+                ``fit_camera_rotation``.
 
         Returns:
-            A ``NavTechniqueResult`` with the recovered offset, 2x2
-            covariance, calibrated confidence, and a populated
-            :class:`BodyBlobDiagnostics`.
+            A :class:`NavTechniqueResult` with the recovered offset,
+            calibrated confidence, and a populated
+            :class:`BodyBlobDiagnostics`.  The covariance shape and the
+            rotation fields depend on ``context.fit_camera_rotation``:
+
+            - ``False`` (the default Cassini / NHLORRI posture):
+              ``covariance_px2`` is ``(2, 2)`` and ``rotation_rad`` /
+              ``sigma_rotation_rad`` are ``None``.
+            - ``True`` (VGISS / GOSSI): ``covariance_px2`` is the
+              rank-deficient ``(3, 3)`` form returned by
+              :func:`~nav.nav_technique.nav_technique.embed_rotation_unobservable`
+              (a brightness-weighted centroid is rotation-invariant
+              about itself, so the technique carries no rotation
+              evidence); ``rotation_rad`` is ``0.0`` and
+              ``sigma_rotation_rad`` is the unobservable sentinel.
         """
         with self.logger.open(f'TECHNIQUE: {self.name}'):
             eligible = _eligible_blobs(features)
@@ -417,9 +430,13 @@ class BodyBlobNav(NavTechnique):
             noise_sigma: Image noise sigma (DN) used to compute the
                 ``3 * sigma`` rejection threshold; logged in the
                 spurious-result message.
-            fit_rotation: When True the result carries a 3x3 covariance
-                with the rotation diagonal set to the unobservable
-                sentinel; when False the result reports a 2x2 covariance.
+            fit_rotation: When True the result carries a ``(3, 3)``
+                covariance with the rotation diagonal set to
+                :data:`~nav.nav_technique.nav_technique.ROTATION_UNOBSERVABLE_VARIANCE`
+                and ``rotation_rad`` / ``sigma_rotation_rad`` populated
+                with the rotation-unobservable sentinel; when False the
+                result reports a ``(2, 2)`` covariance and both rotation
+                fields are ``None``.
 
         Returns:
             A :class:`NavTechniqueResult` with ``spurious=True``,

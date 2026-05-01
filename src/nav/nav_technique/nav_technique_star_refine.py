@@ -283,6 +283,15 @@ class StarRefineNav(NavTechnique):
                         cov_2x2=cov_2x2,
                     )
                 )
+                # The Procrustes refit can pull the absolute offset
+                # outside the search window even when the
+                # delta-based ``at_edge`` was False; recompute against
+                # the updated absolute offset so the flag reflects
+                # what the technique actually reports.
+                at_edge = (
+                    abs(offset_v_total) >= margin_v - self._at_edge_tolerance_px
+                    or abs(offset_u_total) >= margin_u - self._at_edge_tolerance_px
+                )
                 rotation_at_edge = abs(
                     rotation_rad
                 ) >= self._rotation_at_edge_fraction * math.radians(context.max_rotation_deg)

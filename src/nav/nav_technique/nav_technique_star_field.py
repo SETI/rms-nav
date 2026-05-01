@@ -716,7 +716,7 @@ class StarFieldFromCatalogNav(NavTechnique):
                 'Rotation = %+.4f deg (sigma %.4f deg)%s',
                 math.degrees(rotation_rad if rotation_rad is not None else 0.0),
                 math.degrees(sigma_rotation_rad),
-                ', AT_EDGE' if rotation_at_edge else '',
+                ', AT_EDGE' if (rotation_at_edge or at_edge) else '',
             )
         else:
             sigma_rotation_rad = None

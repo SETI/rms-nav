@@ -118,17 +118,22 @@ def brightness_margin_mag(brightest_snr: float, runner_up_snr: float) -> float:
 class SimilarityFit:
     """Result of a 2-D similarity-transform fit aligning catalog -> detection.
 
-    Maps a catalog point ``c`` to ``R(theta) @ (c - pivot) + pivot +
-    translation``.  The pivot is the weighted centroid of the catalog
-    points; storing it on the fit lets callers recover the equivalent
-    pivot-free translation as ``pivot - R(theta) @ pivot + translation``.
+    Maps a catalog point ``c`` to ``R(theta) @ c + translation`` in the
+    image (``v, u``) frame — i.e. ``translation_vu`` is the global-frame
+    translation, *not* a pivot-relative offset.  ``pivot_vu`` reports
+    the weighted catalog centroid the SVD was centred on so callers can
+    recover the equivalent pivot-relative form
+    ``t_pivot = translation_vu + (R - I) @ pivot_vu`` when they need
+    the rotation expressed about that pivot.
 
     Parameters:
-        translation_vu: ``(dv, du)`` translation aligning rotated catalog
-            with detection centroids.
+        translation_vu: ``(dv, du)`` global-frame translation; equal
+            to ``det_centroid - R @ cat_centroid``.
         rotation_rad: Rotation angle ``theta`` (radians).
-        pivot_vu: Catalog-side weighted centroid used as the rotation
-            pivot.
+        pivot_vu: Catalog-side weighted centroid used as the SVD
+            centring point.  Reported so a downstream caller can emit
+            a pivot-aware :class:`NavTechniqueResult` matching the
+            project's rotation-pivot convention.
         residuals_vu: ``(N, 2)`` residual vector ``det - (R @ cat + t)``
             for each correspondence (raw, unweighted).
         weights: ``(N,)`` per-correspondence weight applied during the
