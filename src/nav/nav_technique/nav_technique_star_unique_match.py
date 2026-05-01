@@ -45,7 +45,6 @@ from nav.nav_technique.confidence import evaluate_sigmoid_combination
 from nav.nav_technique.diagnostics import StarUniqueMatchDiagnostics
 from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.nav_technique import (
-    ROTATION_AT_EDGE_FRACTION,
     ROTATION_UNOBSERVABLE_VARIANCE,
     NavTechnique,
     embed_rotation_unobservable,
@@ -153,6 +152,7 @@ class StarUniqueMatchNav(NavTechnique):
         self._one_star_confidence_cap = float(self.tuning['one_star_confidence_cap'])
         self._two_star_confidence_cap = float(self.tuning['two_star_confidence_cap'])
         self._at_edge_tolerance_px = float(self.tuning['at_edge_tolerance_px'])
+        self._rotation_at_edge_fraction = float(self.tuning['rotation_at_edge_fraction'])
         if not 0.0 <= self._one_star_confidence_cap <= 1.0:
             raise ValueError(
                 f'one_star_confidence_cap must lie in [0, 1]; got {self._one_star_confidence_cap!r}'
@@ -343,7 +343,7 @@ class StarUniqueMatchNav(NavTechnique):
         max_rotation_rad = math.radians(context.max_rotation_deg)
         rotation_at_edge = fit_rotation and (
             rotation_rad is not None
-            and abs(rotation_rad) >= ROTATION_AT_EDGE_FRACTION * max_rotation_rad
+            and abs(rotation_rad) >= self._rotation_at_edge_fraction * max_rotation_rad
         )
         at_edge = (
             abs(offset_v) >= margin_v - self._at_edge_tolerance_px

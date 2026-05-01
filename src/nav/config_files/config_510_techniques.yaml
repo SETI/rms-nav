@@ -25,6 +25,13 @@
 techniques:
   BodyDiscCorrelateNav:
     alpha0: -2.0
+    tuning:
+      # When ``fit_camera_rotation`` is True the converged rotation
+      # magnitude trips ``at_edge`` once it crosses
+      # ``rotation_at_edge_fraction * max_rotation_deg``.  The default
+      # 0.95 matches every other 3-DoF technique; lower values
+      # surface "rotation is pegged against the cap" earlier.
+      rotation_at_edge_fraction: 0.95
     terms:
       # PSR-style quality measure of the chosen NCC peak.  Healthy
       # body-disc fits report quality 6-15; the divisor maps that range
@@ -123,6 +130,9 @@ techniques:
       # Pixels of slack around the search-window axis bounds for the
       # at-edge check.  See ``RingEdgeNav.at_edge_tolerance_px``.
       at_edge_tolerance_px: 1.0
+      # Rotation-axis ``at_edge`` fraction; see
+      # ``BodyDiscCorrelateNav.rotation_at_edge_fraction``.
+      rotation_at_edge_fraction: 0.95
 
   BodyTerminatorNav:
     alpha0: -1.0
@@ -158,6 +168,9 @@ techniques:
       # Pixels of slack around the search-window axis bounds for the
       # at-edge check.  See ``RingEdgeNav.at_edge_tolerance_px``.
       at_edge_tolerance_px: 1.0
+      # Rotation-axis ``at_edge`` fraction; see
+      # ``BodyDiscCorrelateNav.rotation_at_edge_fraction``.
+      rotation_at_edge_fraction: 0.95
 
   RingEdgeNav:
     alpha0: -1.0
@@ -186,6 +199,9 @@ techniques:
       # Below this Tukey-inlier count the M-estimator covariance is no
       # longer informative.
       spurious_min_inliers: 6
+      # Rotation-axis ``at_edge`` fraction; see
+      # ``BodyDiscCorrelateNav.rotation_at_edge_fraction``.
+      rotation_at_edge_fraction: 0.95
 
   StarUniqueMatchNav:
     # The 1-star path is capped at 0.7 inside the technique (single match
@@ -245,6 +261,11 @@ techniques:
       # confidence by the technique's ``hard_zero_if`` gate.  Matches
       # the bilinear-DT half-cell width used elsewhere in the pipeline.
       at_edge_tolerance_px: 1.0
+      # Rotation-axis ``at_edge`` fraction; see
+      # ``BodyDiscCorrelateNav.rotation_at_edge_fraction``.  Only used
+      # by the 2-star Procrustes path; the 1-star path always reports
+      # rotation as unobservable so the threshold has no effect there.
+      rotation_at_edge_fraction: 0.95
 
   StarRefineNav:
     # Pass-2 refinement on the pass-1 ensemble's prior offset.  Tighter
@@ -295,6 +316,11 @@ techniques:
       # the same observation.  Phase 10 calibration may retune the
       # numeric value; the structural cap stays.
       single_inlier_confidence_cap: 0.5
+      # Rotation-axis ``at_edge`` fraction; see
+      # ``BodyDiscCorrelateNav.rotation_at_edge_fraction``.  Only the
+      # multi-inlier Procrustes path uses it; a 1-inlier refine always
+      # reports rotation as unobservable.
+      rotation_at_edge_fraction: 0.95
 
   StarFieldFromCatalogNav:
     # Multi-star RANSAC pattern matcher.  Confidence is dominated by
@@ -358,6 +384,9 @@ techniques:
       # Pixels of slack around the search-window axis bounds for the
       # at-edge check (see StarUniqueMatchNav.at_edge_tolerance_px).
       at_edge_tolerance_px: 1.0
+      # Rotation-axis ``at_edge`` fraction; see
+      # ``BodyDiscCorrelateNav.rotation_at_edge_fraction``.
+      rotation_at_edge_fraction: 0.95
 
   RingAnnulusNav:
     alpha0: -2.0

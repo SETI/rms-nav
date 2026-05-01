@@ -46,7 +46,6 @@ from nav.nav_technique.confidence import evaluate_sigmoid_combination
 from nav.nav_technique.diagnostics import StarRefineDiagnostics
 from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.nav_technique import (
-    ROTATION_AT_EDGE_FRACTION,
     ROTATION_UNOBSERVABLE_VARIANCE,
     NavTechnique,
     embed_rotation_unobservable,
@@ -145,6 +144,7 @@ class StarRefineNav(NavTechnique):
         self._min_inliers = int(self.tuning['min_inliers'])
         self._at_edge_tolerance_px = float(self.tuning['at_edge_tolerance_px'])
         self._single_inlier_confidence_cap = float(self.tuning['single_inlier_confidence_cap'])
+        self._rotation_at_edge_fraction = float(self.tuning['rotation_at_edge_fraction'])
         if self._min_inliers < 1:
             raise ValueError(f'min_inliers must be >= 1; got {self._min_inliers}')
         if not 0.0 <= self._single_inlier_confidence_cap <= 1.0:
@@ -283,9 +283,9 @@ class StarRefineNav(NavTechnique):
                         cov_2x2=cov_2x2,
                     )
                 )
-                rotation_at_edge = abs(rotation_rad) >= ROTATION_AT_EDGE_FRACTION * math.radians(
-                    context.max_rotation_deg
-                )
+                rotation_at_edge = abs(
+                    rotation_rad
+                ) >= self._rotation_at_edge_fraction * math.radians(context.max_rotation_deg)
                 if rotation_at_edge:
                     at_edge = True
                 self.logger.info(

@@ -33,7 +33,6 @@ from nav.nav_technique.dt_fitting import (
 )
 from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.nav_technique import (
-    ROTATION_AT_EDGE_FRACTION,
     NavTechnique,
     log_confidence_breakdown,
     rotation_pivot_distance_px,
@@ -158,6 +157,7 @@ class BodyTerminatorNav(NavTechnique):
         self._spurious_dt_floor_px = float(self.tuning['spurious_dt_floor_px'])
         self._spurious_min_inliers = int(self.tuning['spurious_min_inliers'])
         self._at_edge_tolerance_px = float(self.tuning['at_edge_tolerance_px'])
+        self._rotation_at_edge_fraction = float(self.tuning['rotation_at_edge_fraction'])
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Return whether the input set carries a usable terminator arc.
@@ -276,7 +276,7 @@ class BodyTerminatorNav(NavTechnique):
             dv_final, du_final = result.offset_vu
             max_rotation_rad = math.radians(context.max_rotation_deg)
             rotation_at_edge = fit_rotation and (
-                abs(result.rotation_rad) >= ROTATION_AT_EDGE_FRACTION * max_rotation_rad
+                abs(result.rotation_rad) >= self._rotation_at_edge_fraction * max_rotation_rad
             )
             covariance = result.covariance
             rotation_rad: float | None

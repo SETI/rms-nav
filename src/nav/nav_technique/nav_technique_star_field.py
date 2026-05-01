@@ -60,7 +60,6 @@ from nav.nav_technique.diagnostics import StarFieldDiagnostics
 from nav.nav_technique.dt_fitting import DEFAULT_TUKEY_C, tukey_biweight_weights
 from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.nav_technique import (
-    ROTATION_AT_EDGE_FRACTION,
     ROTATION_UNOBSERVABLE_VARIANCE,
     NavTechnique,
     embed_rotation_unobservable,
@@ -497,6 +496,7 @@ class StarFieldFromCatalogNav(NavTechnique):
         self._inlier_tolerance_px = float(self.tuning['inlier_tolerance_px'])
         self._min_inliers = int(self.tuning['pattern_match_min_inliers'])
         self._at_edge_tolerance_px = float(self.tuning['at_edge_tolerance_px'])
+        self._rotation_at_edge_fraction = float(self.tuning['rotation_at_edge_fraction'])
         if self._min_inliers < 3:
             raise ValueError(
                 f'pattern_match_min_inliers must be >= 3 (the matcher needs at '
@@ -689,7 +689,7 @@ class StarFieldFromCatalogNav(NavTechnique):
         max_rotation_rad = math.radians(context.max_rotation_deg)
         rotation_at_edge = fit_rotation and (
             rotation_rad is not None
-            and abs(rotation_rad) >= ROTATION_AT_EDGE_FRACTION * max_rotation_rad
+            and abs(rotation_rad) >= self._rotation_at_edge_fraction * max_rotation_rad
         )
         at_edge = (
             abs(offset_vu[0]) >= margin_v - self._at_edge_tolerance_px

@@ -33,7 +33,6 @@ from nav.nav_technique.confidence import evaluate_sigmoid_combination
 from nav.nav_technique.diagnostics import BodyDiscDiagnostics
 from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.nav_technique import (
-    ROTATION_AT_EDGE_FRACTION,
     ROTATION_UNOBSERVABLE_VARIANCE,
     NavTechnique,
     log_confidence_breakdown,
@@ -211,6 +210,8 @@ class BodyDiscCorrelateNav(NavTechnique):
 
     def __init__(self, *, config: Config | None = None) -> None:
         super().__init__(config=config)
+        self.config.read_config()  # ensure cls.tuning is populated
+        self._rotation_at_edge_fraction = float(self.tuning['rotation_at_edge_fraction'])
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Return whether the input set carries any usable BODY_DISC feature.
@@ -336,7 +337,7 @@ class BodyDiscCorrelateNav(NavTechnique):
             if fit_rotation:
                 max_rotation_rad = math.radians(context.max_rotation_deg)
                 rotation_at_edge = (
-                    abs(best_theta_rad) >= ROTATION_AT_EDGE_FRACTION * max_rotation_rad
+                    abs(best_theta_rad) >= self._rotation_at_edge_fraction * max_rotation_rad
                 )
                 cov = np.zeros((3, 3), dtype=np.float64)
                 cov[:2, :2] = covariance_2x2

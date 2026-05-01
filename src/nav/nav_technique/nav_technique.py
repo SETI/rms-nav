@@ -56,16 +56,21 @@ finite sentinel is preferred.
 
 
 ROTATION_AT_EDGE_FRACTION: float = 0.95
-"""Fraction of ``max_rotation_deg`` at which the rotation parameter trips
-the technique's ``at_edge`` flag.
+"""Default fraction of ``max_rotation_deg`` at which the rotation
+parameter trips the technique's ``at_edge`` flag.
 
 When the converged ``|theta|`` exceeds
-``ROTATION_AT_EDGE_FRACTION * max_rotation_deg`` the LM (or Procrustes /
-NCC pyramid) is reporting a rotation that lies right against the
-configured cap, which usually signals that the cap is too tight or the
-geometry is unobservable in the rotation direction.  Centralising the
-threshold lets every 3-DoF technique apply the same rule without
-re-introducing the same magic constant per file.
+``rotation_at_edge_fraction * max_rotation_deg`` the LM (or Procrustes /
+NCC pyramid) is reporting a rotation right against the configured cap,
+which usually signals that the cap is too tight or the geometry is
+unobservable in the rotation direction.
+
+Each 3-DoF technique reads its threshold from
+``config_510_techniques.yaml`` under
+``techniques.<name>.tuning.rotation_at_edge_fraction``; this constant
+is the documented default that ships in the YAML.  Re-exported so
+tests and downstream tools can reference the canonical default
+without re-reading the YAML.
 """
 
 
