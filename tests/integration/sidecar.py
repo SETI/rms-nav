@@ -55,12 +55,19 @@ DECLARED_SCENE_CLASSES: frozenset[str] = frozenset(
 
 ALLOWED_MISSIONS: frozenset[str] = frozenset(
     {
-        'CASSINI_ISS',
-        'VOYAGER_ISS',
+        'COISS',
+        'VGISS',
         'GOSSI',
         'NHLORRI',
     }
 )
+"""Mission codes accepted by ``Sidecar.mission``.
+
+Match the dataset names registered in :mod:`nav.dataset` upper-cased
+(``coiss`` / ``vgiss`` / ``gossi`` / ``nhlorri``) so the sidecar's
+``mission`` is unambiguous against a CLI invocation like
+``nav_offset --dataset coiss``.
+"""
 
 ALLOWED_CAMERAS: frozenset[str] = frozenset(
     {
@@ -140,6 +147,7 @@ class Sidecar:
     scene_tags: tuple[str, ...]
     ground_truth: GroundTruth
     expected: Expected
+    exposure_time_sec: float | None = None
     camera_rotation_expected: CameraRotationExpected | None = None
 
     @property
@@ -209,6 +217,7 @@ def _validate_sidecar(raw: dict[str, Any], *, path: Path) -> Sidecar:
     camera_rotation_expected = _validate_camera_rotation(
         raw.get('camera_rotation_expected'), path=path
     )
+    exposure_time_sec = _validate_optional_exposure(raw.get('exposure_time_sec'), path=path)
 
     return Sidecar(
         path=path,
@@ -221,8 +230,34 @@ def _validate_sidecar(raw: dict[str, Any], *, path: Path) -> Sidecar:
         scene_tags=tuple(scene_tags),
         ground_truth=ground_truth,
         expected=expected,
+        exposure_time_sec=exposure_time_sec,
         camera_rotation_expected=camera_rotation_expected,
     )
+
+
+def _validate_optional_exposure(raw: Any, *, path: Path) -> float | None:
+    """Validate the optional ``exposure_time_sec`` field.
+
+    Permitted values: missing / None (legacy sidecars predating Phase 10
+    metadata expansion), or a finite positive float.  Anything else is
+    a hard error so a typo or unit mistake fails loudly at load time.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        raise SidecarValidationError(
+            f'{path}: exposure_time_sec must be a positive number, got bool {raw!r}'
+        )
+    if not isinstance(raw, (int, float)):
+        raise SidecarValidationError(
+            f'{path}: exposure_time_sec must be a number, got {type(raw).__name__}'
+        )
+    coerced = float(raw)
+    if not math.isfinite(coerced) or coerced <= 0.0:
+        raise SidecarValidationError(
+            f'{path}: exposure_time_sec must be a finite positive number, got {raw!r}'
+        )
+    return coerced
 
 
 def _validate_ground_truth(raw: dict[str, Any], *, path: Path) -> GroundTruth:

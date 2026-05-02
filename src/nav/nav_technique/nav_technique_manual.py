@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from nav.annotation import Annotations
 from nav.config import IMAGE_LOGGER, Config
 from nav.feature.composition import compose_dialog_overlay
 from nav.feature.feature import NavFeature
@@ -72,8 +73,19 @@ class NavTechniqueManual(NavTechnique):
     accepts_feature_types = frozenset(NavFeatureType)
     requires_prior = False
 
-    def __init__(self, *, config: Config | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        config: Config | None = None,
+        annotations: Annotations | None = None,
+    ) -> None:
         super().__init__(config=config)
+        # ``annotations`` is the merged-per-NavModel ``Annotations`` the
+        # dialog uses when it writes a labelled summary PNG next to a
+        # saved sidecar.  Optional for backwards compatibility / tests
+        # that only need the offset-pick path; ``run_manual_nav``
+        # always populates it.
+        self._annotations: Annotations | None = annotations
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Manual navigation runs whenever there is anything to render.
@@ -149,6 +161,7 @@ class NavTechniqueManual(NavTechnique):
                 obs=obs,  # type: ignore[arg-type]
                 model_img_ext=model_img,
                 model_mask_ext=model_mask,
+                annotations=self._annotations,
                 config=self.config,
                 parent=None,
             )
@@ -224,7 +237,22 @@ def run_manual_nav(
     # gate would drop (low SNR, large limb uncertainty, etc.) belong on
     # the dialog overlay.
     context, features = orchestrator.prepare(obs, apply_gate=False)
-    technique = NavTechniqueManual(config=config)
+    # ``prepare`` already ran ``create_model`` on every model, so each
+    # carries the per-image state ``to_annotations`` needs.  Merge the
+    # collections here (mirrors ``NavOrchestrator._collect_annotations``
+    # so the dialog's saved summary PNG carries the same labelled
+    # overlay the autonomous summary PNG would).  Per-model failures
+    # are sandboxed so one broken model does not block the rest.
+    annotations = Annotations()
+    for model in models:
+        try:
+            annotations.add_annotations(model.to_annotations(context))
+        except Exception:
+            IMAGE_LOGGER.exception(
+                'NavModel %s.to_annotations raised; skipping its annotations',
+                model.name,
+            )
+    technique = NavTechniqueManual(config=config, annotations=annotations)
     feasibility = technique.is_feasible(features)
     if not feasibility.feasible:
         IMAGE_LOGGER.warning('Manual navigation skipped: %s', feasibility.reason)

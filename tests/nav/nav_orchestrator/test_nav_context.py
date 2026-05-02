@@ -79,6 +79,23 @@ def test_navcontext_rotation_fields_default_off() -> None:
     assert ctx.max_rotation_deg == 5.0
 
 
+def test_navcontext_signal_scale_defaults_to_unity() -> None:
+    """The DN-to-image-unit scale defaults to 1.0 (raw_dn behaviour)."""
+    ctx = _minimal_context()
+    assert ctx.signal_dn_to_image_unit_scale == 1.0
+
+
+def test_navcontext_signal_scale_propagates_through_with_prior() -> None:
+    """A non-unity scale survives ``with_prior``."""
+    ctx = _minimal_context(signal_dn_to_image_unit_scale=5.0e-7)
+    assert ctx.signal_dn_to_image_unit_scale == 5.0e-7
+    new_ctx = ctx.with_prior(
+        offset_px=(0.0, 0.0),
+        covariance_px2=np.eye(2, dtype=np.float64),
+    )
+    assert new_ctx.signal_dn_to_image_unit_scale == 5.0e-7
+
+
 def test_navcontext_rotation_fields_propagate() -> None:
     """Explicit rotation flags survive construction and ``with_prior``."""
     ctx = _minimal_context(fit_camera_rotation=True, max_rotation_deg=3.5)

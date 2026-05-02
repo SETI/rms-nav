@@ -110,7 +110,7 @@ def test_sidecar_filename_matches_image_id(library: LibraryRoot) -> None:
 _VALID_SIDECAR_TEXT = """\
 schema_version: 1
 image_id: TEST_IMG_0001
-mission: CASSINI_ISS
+mission: COISS
 camera: NAC
 filter_combo: 'CL+CL'
 image_url: 'pds3://volumes/COISS_2xxx/COISS_2021/data/.../TEST.IMG'
@@ -140,7 +140,7 @@ def test_load_sidecar_accepts_valid_yaml(tmp_path: Path) -> None:
     sidecar = load_sidecar(p)
     assert isinstance(sidecar, Sidecar)
     assert sidecar.image_id == 'TEST_IMG_0001'
-    assert sidecar.mission == 'CASSINI_ISS'
+    assert sidecar.mission == 'COISS'
     assert sidecar.scene_tags == ('body_mostly_offscreen', 'mimas')
     assert sidecar.ground_truth.offset_dv_px == 12.5
     assert sidecar.expected.primary_technique == 'BodyLimbNav'
@@ -149,7 +149,7 @@ def test_load_sidecar_accepts_valid_yaml(tmp_path: Path) -> None:
 def test_load_sidecar_rejects_unknown_mission(tmp_path: Path) -> None:
     """``mission`` must be one of the declared mission codes."""
     p = tmp_path / 'BAD.yaml'
-    p.write_text(_VALID_SIDECAR_TEXT.replace('mission: CASSINI_ISS', 'mission: APOLLO'))
+    p.write_text(_VALID_SIDECAR_TEXT.replace('mission: COISS', 'mission: APOLLO'))
     with pytest.raises(SidecarValidationError, match=r'mission'):
         load_sidecar(p)
 

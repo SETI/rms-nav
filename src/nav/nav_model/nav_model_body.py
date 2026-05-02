@@ -10,8 +10,10 @@ The pipeline:
    box so the limb silhouette is anti-aliased.
 2. Extracts the limb and terminator polylines from the discrete
    silhouette masks.
-3. Looks up the per-body shape parameters in
-   ``nav.nav_model.body_shape.BODY_SHAPE_TABLE``.
+3. Looks up the per-body shape parameters via
+   :func:`nav.nav_model.body_shape.shape_for_body`, which merges the
+   operator-curated ``config_220_body_shape.yaml`` over the hard-coded
+   ``BODY_SHAPE_TABLE`` profiles.
 4. Decides which features to emit by computing
    ``limb_uncertainty_px`` and the ``visible_lit_fraction`` /
    ``overflow_fraction`` quantities the design specifies.
@@ -67,7 +69,7 @@ from nav.feature.geometry import (
     LimbPolyline,
     TerminatorPolyline,
 )
-from nav.nav_model.body_shape import BODY_SHAPE_TABLE, DEFAULT_BODY_SHAPE, BodyShape
+from nav.nav_model.body_shape import BodyShape, shape_for_body
 from nav.nav_model.nav_model import NavModel
 from nav.nav_model.nav_model_body_base import NavModelBodyBase
 from nav.nav_model.stars.predicted_snr import psf_sigma_px
@@ -593,16 +595,16 @@ class NavModelBody(NavModelBodyBase):
             if self._body_mask is None:
                 self._logger.debug('body_mask is None — emitting no features')
                 return []
-            shape = BODY_SHAPE_TABLE.get(self._body_name, DEFAULT_BODY_SHAPE)
+            shape = shape_for_body(self._body_name, config=self._config)
             features: list[NavFeature] = []
             limb_uncertainty_px = self._limb_uncertainty_px(shape)
             self._logger.debug(
-                'ellipsoid_residual = %.3f km; limb_uncertainty = %.3f px '
+                'ellipsoid_rms_residual = %.3f km; limb_uncertainty = %.3f px '
                 '(arc max %.3f); shape_class = %s',
-                shape.ellipsoid_residual_km,
+                shape.ellipsoid_rms_residual_km,
                 limb_uncertainty_px,
                 LIMB_ARC_MAX_UNCERTAINTY_PX,
-                getattr(shape, 'shape_class_hint', 'unknown'),
+                shape.shape_class_hint,
             )
             limb_arc_emitted = False
             blob_min_px = max(BODY_BLOB_MIN_DIAMETER_PX, shape.min_blob_diameter_px)
@@ -664,7 +666,7 @@ class NavModelBody(NavModelBodyBase):
         """Return the design's ``limb_uncertainty_px`` for this body."""
         if self._km_per_pixel_at_limb <= 0.0:
             return float('inf')
-        return shape.ellipsoid_residual_km / self._km_per_pixel_at_limb
+        return shape.ellipsoid_rms_residual_km / self._km_per_pixel_at_limb
 
     def _should_emit_disc(self, limb_arc_emitted: bool) -> bool:
         """Return True when BODY_DISC should be emitted alongside other features."""
@@ -718,8 +720,42 @@ class NavModelBody(NavModelBodyBase):
         )
 
     def _build_blob_feature(self, shape: BodyShape) -> NavFeature:
-        """Construct the BODY_BLOB feature."""
-        del shape
+        """Construct the BODY_BLOB feature.
+
+        Three phase-aware decisions live here:
+
+        * **Lit-weighted predicted centroid.** At high phase the
+          measured brightness centroid sits at the centroid of the lit
+          hemisphere, not at the geometric body center.  Predicting the
+          lit-weighted centroid up front means the navigation offset
+          the technique recovers is just the spacecraft pointing error,
+          not pointing error plus the systematic phase bias.  The
+          weighted centroid is computed over ``_model_img *
+          _body_mask`` (the rendered model already encodes the local
+          incidence-driven brightness from an *ellipsoidal* body) and
+          collapses to the geometric center at phase 0 where the model
+          is uniform.
+        * **Inflated centroid covariance.** The lit-weighted centroid
+          assumes an ellipsoidal body of *known* rotational
+          orientation; the same scene on an irregular body whose pose
+          we do not know carries a residual centroid bias the
+          ellipsoidal model cannot remove.  The bias scales with the
+          shape's RMS departure from an ellipsoid (in km) and with how
+          much of the body the lit hemisphere fails to sample
+          (``1 + 2 * sin^2(phase / 2)`` runs from 1 at full-phase to
+          3 at full crescent — even at phase 0 the orientation is
+          unknown, so a residual-scale bias is always present).  This
+          irregularity sigma is added to the photon-noise-limited
+          centroid sigma in quadrature so the joint-fit covariance
+          reflects both terms.
+        * **``phase_irregularity_factor`` on the flags.** Surfaces the
+          dimensionless ``sin(phase/2) * residual / radius`` so the
+          BLOB confidence formula can down-weight irregular high-phase
+          blobs without the technique having to recompute it.  Raw
+          ``phase_angle_deg`` is also recorded for diagnostic
+          inspection but the confidence formula consumes the combined
+          factor.
+        """
         # Estimate per-pixel SNR from the brightest pixel in the model.
         assert self._model_img is not None
         assert self._body_mask is not None
@@ -727,13 +763,23 @@ class NavModelBody(NavModelBodyBase):
         sigma_centroid = self._predicted_diameter_px / (
             2.0 * math.sqrt(max(int(self._body_mask.sum()), 1)) * max(snr, 1e-6)
         )
-        cov = (sigma_centroid * sigma_centroid) * np.eye(2, dtype=np.float64)
+        phase_angle_deg = float(self._metadata.get('phase_angle_deg', 0.0))
+        if not math.isfinite(phase_angle_deg):
+            phase_angle_deg = 0.0
+        # Clamp to the BodyBlobFlags valid range; phase outside [0, 180]
+        # is a SPICE-corner-case artefact, never a physical value.
+        phase_angle_deg = max(0.0, min(180.0, phase_angle_deg))
+        phase_irregularity_factor = self._phase_irregularity_factor(shape, phase_angle_deg)
+        sigma_irregular_px = phase_irregularity_factor * (self._predicted_diameter_px / 2.0)
+        sigma_total_px = math.sqrt(sigma_centroid * sigma_centroid + sigma_irregular_px**2)
+        cov = (sigma_total_px * sigma_total_px) * np.eye(2, dtype=np.float64)
+        predicted_center_vu = self._lit_weighted_centroid_vu()
         return NavFeature(
             feature_id=f'body_blob:{self._body_name}',
             feature_type=NavFeatureType.BODY_BLOB,
             source_model=self.name,
             geometry=BodyBlobGeometry(
-                predicted_center_vu=self._predicted_center_vu,
+                predicted_center_vu=predicted_center_vu,
                 bbox_extfov_vu=self._bbox_extfov_vu,
                 predicted_diameter_px=self._predicted_diameter_px,
             ),
@@ -750,8 +796,67 @@ class NavModelBody(NavModelBodyBase):
             flags=BodyBlobFlags(
                 body_name=self._body_name,
                 predicted_diameter_px=self._predicted_diameter_px,
+                phase_angle_deg=phase_angle_deg,
+                phase_irregularity_factor=phase_irregularity_factor,
             ),
         )
+
+    def _phase_irregularity_factor(self, shape: BodyShape, phase_angle_deg: float) -> float:
+        """Return the dimensionless phase-and-irregularity coupling.
+
+        Computed as ``(ellipsoid_rms_residual_km / body_radius_km) *
+        (1 + 2 * sin^2(phase / 2))``.  Two physical effects compose:
+
+        * The ``residual / radius`` ratio is the *fractional* shape
+          uncertainty of the body relative to its ellipsoidal model.
+          For a regular Mimas (residual ~ 1 km, radius ~ 200 km)
+          this is ~ 0.005; for irregular Hyperion / Phoebe (residual
+          ~ 10 km, radius ~ 100-135 km) it is ~ 0.07-0.10.
+        * The ``1 + 2 * sin^2(phase / 2)`` factor captures the
+          orientation-uncertainty bound.  At phase 0 the entire
+          hemisphere is lit and the factor is ``1`` — we still do
+          not know the body's rotational orientation so a full
+          ``residual_km``-scale centroid bias is in play even at
+          full phase.  At phase 90 the factor is ``2`` because only
+          half the body is lit and the dark side could be hiding an
+          equal amount of shape irregularity.  At phase 180 the
+          factor is ``3`` since only the crescent is lit, leaving
+          most of the body's irregularity hidden.
+
+        ``body_radius_km`` is derived from the predicted disc geometry
+        rather than from a separate static-data lookup so a body
+        absent from the YAML or hard-coded shape table still gets a
+        meaningful factor (the residual itself falls back to
+        ``DEFAULT_BODY_SHAPE`` upstream).
+        """
+        if self._predicted_diameter_px <= 0.0 or self._km_per_pixel_at_limb <= 0.0:
+            return 0.0
+        body_radius_km = self._km_per_pixel_at_limb * (self._predicted_diameter_px / 2.0)
+        if body_radius_km <= 0.0:
+            return 0.0
+        sin_half_phase = math.sin(math.radians(phase_angle_deg) / 2.0)
+        phase_factor = 1.0 + 2.0 * sin_half_phase * sin_half_phase
+        residual_fraction = shape.ellipsoid_rms_residual_km / body_radius_km
+        return float(max(0.0, residual_fraction * phase_factor))
+
+    def _lit_weighted_centroid_vu(self) -> tuple[float, float]:
+        """Return the brightness-weighted centroid of the rendered body.
+
+        Falls back to the geometric center when the model is empty or
+        the body mask is all-False (degenerate render).  The centroid
+        is in the same extfov coordinate frame ``_predicted_center_vu``
+        uses, so the BLOB feature's geometry stays self-consistent.
+        """
+        assert self._model_img is not None
+        assert self._body_mask is not None
+        weights = np.where(self._body_mask, self._model_img, 0.0)
+        total = float(weights.sum())
+        if total <= 0.0:
+            return self._predicted_center_vu
+        v_indices, u_indices = np.indices(weights.shape, dtype=np.float64)
+        lit_v = float((weights * v_indices).sum() / total)
+        lit_u = float((weights * u_indices).sum() / total)
+        return (lit_v, lit_u)
 
     def _maybe_build_terminator(self, shape: BodyShape) -> NavFeature | None:
         """Build TERMINATOR_ARC when the design's terminator gates pass."""
@@ -933,7 +1038,7 @@ def _sigma_normal_per_vertex(
     km_per_pixel = np.where(sampler.km_per_pixel > 0.0, sampler.km_per_pixel, np.nan)
     limb_softness_km = psf_sigma_px * km_per_pixel
     base = (
-        shape.ellipsoid_residual_km**2
+        shape.ellipsoid_rms_residual_km**2
         + shape.crater_scale_km**2
         + (incidence_factor * limb_softness_km) ** 2
         + shape.spice_orbital_residual_km**2

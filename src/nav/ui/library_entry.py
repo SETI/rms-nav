@@ -24,16 +24,21 @@ from typing import Any
 __all__ = [
     'LibraryEntryDraft',
     'build_sidecar_yaml',
+    'compute_image_url',
     'infer_obs_metadata',
 ]
 
 
 # Mission-string mapping — keys are class names of the supported obs subclasses.
-# Add a new entry here when adding a new instrument; the new entry must use
-# the mission codes from :data:`tests.integration.sidecar.ALLOWED_MISSIONS`.
+# Mission codes match the dataset names in
+# :mod:`nav.dataset` (``coiss`` / ``vgiss`` / ``gossi`` / ``nhlorri``)
+# upper-cased, so a sidecar's ``mission`` is unambiguous against a CLI
+# invocation like ``nav_offset --dataset coiss``.  Add a new entry here
+# when adding a new instrument; keep the value in
+# :data:`tests.integration.sidecar.ALLOWED_MISSIONS` in sync.
 _OBS_CLASS_TO_MISSION: dict[str, str] = {
-    'ObsCassiniISS': 'CASSINI_ISS',
-    'ObsVoyagerISS': 'VOYAGER_ISS',
+    'ObsCassiniISS': 'COISS',
+    'ObsVoyagerISS': 'VGISS',
     'ObsGalileoSSI': 'GOSSI',
     'ObsNewHorizonsLORRI': 'NHLORRI',
 }
@@ -47,15 +52,17 @@ class LibraryEntryDraft:
     mission: str
     camera: str
     filter_combo: str
+    exposure_time_sec: float | None
 
 
 def infer_obs_metadata(obs: Any) -> LibraryEntryDraft:
     """Pull the sidecar's auto-fillable fields off an observation snapshot.
 
-    Missing or unknown fields are returned as empty strings so the
-    operator sees them in the YAML and can decide what to write; an
-    empty mission/camera trips :func:`tests.integration.sidecar.load_sidecar`
-    on validation, which is the right error.
+    Missing or unknown fields are returned as empty strings (or ``None``
+    for ``exposure_time_sec``) so the operator sees them in the YAML
+    and can decide what to write; an empty mission/camera trips
+    :func:`tests.integration.sidecar.load_sidecar` on validation, which
+    is the right error.
     """
     image_id = ''
     abspath = getattr(obs, 'abspath', None)
@@ -74,12 +81,96 @@ def infer_obs_metadata(obs: Any) -> LibraryEntryDraft:
     filters = [str(f) for f in (f1, f2) if f]
     filter_combo = '+'.join(sorted(filters)) if filters else ''
 
+    exposure_time_sec: float | None = None
+    raw_texp = getattr(obs, 'texp', None)
+    if raw_texp is not None:
+        try:
+            value = float(raw_texp)
+        except (TypeError, ValueError):
+            value = float('nan')
+        if value > 0.0 and value == value:  # finite & positive
+            exposure_time_sec = value
+
     return LibraryEntryDraft(
         image_id=image_id,
         mission=mission,
         camera=camera,
         filter_combo=filter_combo,
+        exposure_time_sec=exposure_time_sec,
     )
+
+
+def compute_image_url(obs: Any, config: Any = None) -> str:
+    """Return the best ``image_url`` for the sidecar.
+
+    When the obs's absolute path lives under a known PDS3 holdings root
+    (resolved from ``PDS3_HOLDINGS_DIR`` first, then
+    ``config.environment.pds3_holdings_root``), the URL is rewritten to
+    the opaque ``pds3://<relative-path>`` form the regression test
+    re-resolves at load time.  Otherwise the raw absolute path is
+    returned so the operator at least sees what was navigated.
+
+    Parameters:
+        obs: Observation snapshot; ``obs.abspath`` is the file path.
+        config: Optional ``Config`` override for the
+            ``environment.pds3_holdings_root`` fallback.
+
+    Returns:
+        Either ``'pds3://<relative-path>'`` or the raw absolute path
+        as a string.  Empty string when ``obs`` carries no ``abspath``.
+    """
+    abspath = getattr(obs, 'abspath', None)
+    if abspath is None:
+        return ''
+    abspath_str = str(abspath)
+    holdings_root = _resolve_pds3_holdings_root(config)
+    if holdings_root:
+        rel = _relative_to_holdings(abspath_str, holdings_root)
+        if rel is not None:
+            return f'pds3://{rel}'
+    return abspath_str
+
+
+def _resolve_pds3_holdings_root(config: Any) -> str:
+    """Return the configured PDS3 holdings root or ``''`` if unknown.
+
+    Order matches :class:`nav.dataset.dataset_pds3.DataSetPDS3`:
+    ``PDS3_HOLDINGS_DIR`` env var, then
+    ``config.environment.pds3_holdings_root``.  Missing or empty
+    configurations yield ``''``.
+    """
+    env_root = os.environ.get('PDS3_HOLDINGS_DIR')
+    if env_root:
+        return env_root.rstrip('/')
+    if config is None:
+        try:
+            from nav.config import DEFAULT_CONFIG
+
+            config = DEFAULT_CONFIG
+        except Exception:  # pragma: no cover - bootstrap sandbox
+            return ''
+    try:
+        environment = config.environment
+    except Exception:  # pragma: no cover - partial-config sandbox
+        return ''
+    cfg_root = getattr(environment, 'pds3_holdings_root', None)
+    if not cfg_root:
+        return ''
+    return str(cfg_root).rstrip('/')
+
+
+def _relative_to_holdings(abspath_str: str, holdings_root: str) -> str | None:
+    """Return the holdings-relative path or ``None`` if abspath is outside.
+
+    Tolerates trailing slashes and case-sensitive comparisons; does not
+    walk the filesystem.  ``holdings_root`` is expected to already be
+    normalised by :func:`_resolve_pds3_holdings_root` (no trailing
+    slash).
+    """
+    if not abspath_str.startswith(holdings_root):
+        return None
+    remainder = abspath_str[len(holdings_root) :]
+    return remainder.lstrip('/')
 
 
 def build_sidecar_yaml(
@@ -98,20 +189,25 @@ def build_sidecar_yaml(
     a clear ``TODO_REPLACE_*`` string so the operator knows exactly what
     to edit before committing.  Fields the dialog can infer
     (``offset_*_px``, ``mission``, ``camera``, ``filter_combo``,
-    ``image_id``) are filled in directly.
+    ``exposure_time_sec``, ``image_id``) are filled in directly.
     """
     op_name = operator or os.environ.get('USER') or 'unknown'
     on_date = (today or date.today()).isoformat()
+    if draft.exposure_time_sec is None:
+        exposure_line = 'exposure_time_sec: TODO_REPLACE_EXPOSURE  # seconds; from obs.texp\n'
+    else:
+        exposure_line = f'exposure_time_sec: {draft.exposure_time_sec:.4f}\n'
     return (
         'schema_version: 1\n'
         f'image_id: {draft.image_id or "TODO_REPLACE_IMAGE_ID"}\n'
         f'mission: {draft.mission or "TODO_REPLACE_MISSION"}'
-        '            # CASSINI_ISS | VOYAGER_ISS | GOSSI | NHLORRI\n'
+        '                  # COISS | VGISS | GOSSI | NHLORRI\n'
         f'camera: {draft.camera or "TODO_REPLACE_CAMERA"}'
-        '              # NAC | WAC | SSI | NA | WA | LORRI\n'
+        '                    # NAC | WAC | SSI | NA | WA | LORRI\n'
         f"filter_combo: '{draft.filter_combo}'"
-        "          # canonicalized: filters sorted, '+'-joined\n"
-        f"image_url: '{image_url}'\n"
+        "                # canonicalized: filters sorted, '+'-joined\n"
+        + exposure_line
+        + f"image_url: '{image_url}'\n"
         '\n'
         'scene_tags:\n'
         '  - TODO_REPLACE_PRIMARY_CLASS         # First tag is the primary class;\n'

@@ -184,15 +184,24 @@ class NavModelStars(NavModel):
                 image_noise_sigma,
             )
             return []
+        signal_scale = float(getattr(context, 'signal_dn_to_image_unit_scale', 1.0))
+        if signal_scale <= 0.0:
+            self._logger.info(
+                'signal_dn_to_image_unit_scale is non-positive (%.3g) — emitting no features',
+                signal_scale,
+            )
+            return []
         min_snr = float(getattr(self._stars_config, 'min_predicted_snr', 0.0))
         max_smear = float(getattr(self._stars_config, 'max_smear', math.inf))
         sat_mask = context.saturation_mask_ext
         cosmic_mask = context.cosmic_ray_mask_ext
         mag_offset_value = _resolve_mag_offset(self.obs)
         self._logger.debug(
-            'image_noise_sigma = %.3f, sigma_psf = %.3f px, mag_offset = %.3f, '
+            'image_noise_sigma = %.3g, signal_dn_to_image_unit_scale = %.3g, '
+            'sigma_psf = %.3f px, mag_offset = %.3f, '
             'min_predicted_snr = %.2f, max_smear = %.2f px',
             image_noise_sigma,
+            signal_scale,
             sigma_psf,
             mag_offset_value,
             min_snr,
@@ -211,6 +220,7 @@ class NavModelStars(NavModel):
                 psf=psf,
                 image_noise_sigma=image_noise_sigma,
                 mag_offset=mag_offset_value,
+                signal_dn_to_image_unit_scale=signal_scale,
             )
             if snr < min_snr:
                 skipped_low_snr += 1

@@ -268,6 +268,36 @@ class TestSingleScale:
         )
         assert result['quality'] > 6.0
 
+    def test_no_candidates_result_carries_full_key_set(self) -> None:
+        """When no peaks survive ``max_offset_vu`` the result still has every key.
+
+        Regression: the empty-candidates early-return previously omitted
+        ``peak_val`` and ``rc``, so callers that logged or read those
+        keys (notably ``navigate_with_pyramid_kpeaks``) crashed with a
+        ``KeyError`` whenever the search collapsed.  The contract now
+        matches the populated path exactly.
+        """
+        # Empty image + empty model => no real peak; force the
+        # max_offset_vu window down to (0, 0) so no candidate clears the
+        # window and the early-return branch fires deterministically.
+        image = np.zeros((16, 16), dtype=np.float64)
+        model = np.zeros((16, 16), dtype=np.float64)
+        mask = np.ones((16, 16), dtype=bool)
+        result = navigate_single_scale_kpeaks(
+            image=image,
+            model=model,
+            mask=mask,
+            max_peaks=3,
+            upsample_factor=8,
+            metric='psr',
+            max_offset_vu=(0, 0),
+            logger=None,
+        )
+        for key in ('offset', 'cov', 'sigma_xy', 'quality', 'peak_val', 'rc', 'all_candidates'):
+            assert key in result, f'no-candidates result missing key {key!r}'
+        assert result['all_candidates'] == []
+        assert result['quality'] == -np.inf
+
 
 # =========================================================================
 # Pyramid correlation tests

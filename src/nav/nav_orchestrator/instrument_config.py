@@ -54,6 +54,14 @@ class InstrumentSettings:
             fits.
         max_rotation_deg: Maximum allowed rotation magnitude when
             ``fit_camera_rotation`` is True.
+        signal_dn_to_image_unit_scale: Scale factor that converts an
+            integrated signal in DN to the same units the image (and
+            therefore ``image_noise_sigma``) carries.  Always ``1.0``
+            for ``raw_dn`` instruments.  For ``calibrated_if`` the
+            CALIB pipeline scales DN to I/F by this factor (typically
+            of order ``1e-7`` for Cassini ISS CALIB), so ``predicted_snr``
+            can convert DN-keyed signals into the image's own units
+            before forming the SNR.
     """
 
     data_units: DataUnits
@@ -62,6 +70,7 @@ class InstrumentSettings:
     thresholds: ImageQualityThresholds
     fit_camera_rotation: bool
     max_rotation_deg: float
+    signal_dn_to_image_unit_scale: float = 1.0
 
 
 def _coerce_marker_value(value: Any) -> float:
@@ -159,6 +168,10 @@ def instrument_settings_from_obs(obs: Any) -> InstrumentSettings:
             )
         saturation_dn: float | None = _required_float(noise, 'saturation_dn', location='noise')
         marker_value = _coerce_marker_value(noise.get('marker_value', 0))
+        # raw_dn instruments expose pixels already in DN, so the predicted
+        # signal does not need rescaling.  The YAML may set the field
+        # explicitly for symmetry but it must equal 1.0.
+        signal_scale = _read_signal_scale(noise, data_units='raw_dn')
         thresholds = ImageQualityThresholds(
             saturation_threshold_dn=_required_float(
                 iqt_block,
@@ -177,20 +190,31 @@ def instrument_settings_from_obs(obs: Any) -> InstrumentSettings:
             ),
         )
     else:
-        # calibrated_if: DN-keyed fields are unavailable; the I/F-keyed
-        # thresholds are loaded into the same ImageQualityThresholds
-        # fields because the classifier compares pixel values uniformly
-        # — the unit interpretation is established by data_units.
+        # calibrated_if: DN-keyed fields are unavailable, and the
+        # saturation gate is intentionally disabled.  An I/F-keyed
+        # saturation threshold is meaningless — the same physical
+        # full-well DN maps to a different I/F value for every
+        # combination of exposure time, filter, and gain — so we never
+        # compute one.  The orchestrator emits an empty saturation mask
+        # (see ``_build_saturation_mask``) and the classifier is
+        # handed an ``inf`` threshold so ``saturation_frac`` is always
+        # 0.0 and the ``fully_overexposed`` early-out cannot fire.
+        # Reject any explicit ``saturation_threshold_if`` so stale
+        # configs surface immediately rather than silently no-op.
         marker_value = _coerce_marker_value(
             noise.get('marker_value', float('nan')) if noise is not None else float('nan')
         )
         saturation_dn = None
+        signal_scale = _read_signal_scale(noise, data_units='calibrated_if')
+        if 'saturation_threshold_if' in iqt_block:
+            raise ValueError(
+                'calibrated_if instrument must not declare '
+                'image_quality_thresholds.saturation_threshold_if; the '
+                'saturation gate is off for calibrated images because I/F '
+                'depends on exposure / filter / gain (see Phase 10 §F)'
+            )
         thresholds = ImageQualityThresholds(
-            saturation_threshold_dn=_required_float(
-                iqt_block,
-                'saturation_threshold_if',
-                location='image_quality_thresholds',
-            ),
+            saturation_threshold_dn=math.inf,
             missing_data_marker_dn=marker_value,
             max_saturation_frac_clean=float(iqt_block.get('max_overexposed_frac_clean', 0.80)),
             max_missing_frac_clean=float(iqt_block.get('max_missing_frac_clean', 0.30)),
@@ -213,4 +237,50 @@ def instrument_settings_from_obs(obs: Any) -> InstrumentSettings:
         thresholds=thresholds,
         fit_camera_rotation=fit_rotation,
         max_rotation_deg=max_rotation,
+        signal_dn_to_image_unit_scale=signal_scale,
     )
+
+
+def _read_signal_scale(noise: Mapping[str, Any] | None, *, data_units: DataUnits) -> float:
+    """Read ``noise.signal_dn_to_image_unit_scale`` and validate it.
+
+    Required for ``calibrated_if`` instruments because the SNR formula
+    in :func:`nav.nav_model.stars.predicted_snr.predicted_snr` cannot
+    combine a DN-keyed signal with an I/F-keyed background sigma without
+    it.  Optional for ``raw_dn`` instruments; if present it must equal
+    1.0 because raw-DN images are already in the same units as the
+    predicted signal.
+
+    Parameters:
+        noise: The ``noise`` sub-block from the per-instrument config,
+            or ``None`` when no block was supplied.
+        data_units: The instrument's resolved data units; controls
+            whether the field is required and the validation rule on
+            its value.
+
+    Returns:
+        The scale factor (DN-to-image-unit).  ``1.0`` for raw_dn
+        instruments without an explicit override.
+
+    Raises:
+        ValueError: If ``calibrated_if`` is missing the field, or the
+            value is non-positive / non-finite, or a ``raw_dn``
+            instrument supplies a value other than 1.0.
+    """
+    if noise is None or 'signal_dn_to_image_unit_scale' not in noise:
+        if data_units == 'calibrated_if':
+            raise ValueError(
+                "instrument config with data_units='calibrated_if' missing "
+                'required noise.signal_dn_to_image_unit_scale (DN-to-image-unit '
+                'scale used by predicted_snr)'
+            )
+        return 1.0
+    value = _required_float(noise, 'signal_dn_to_image_unit_scale', location='noise')
+    if value <= 0.0:
+        raise ValueError(f'noise.signal_dn_to_image_unit_scale must be > 0; got {value!r}')
+    if data_units == 'raw_dn' and value != 1.0:
+        raise ValueError(
+            'noise.signal_dn_to_image_unit_scale must equal 1.0 for '
+            f"data_units='raw_dn'; got {value!r}"
+        )
+    return value

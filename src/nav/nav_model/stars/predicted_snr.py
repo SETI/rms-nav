@@ -5,7 +5,7 @@ its predicted pixel position.  The estimate uses three inputs:
 
 - ``obs.star_psf()`` — the per-camera-per-filter PSF.
 - ``NavContext.image_noise_sigma`` — robust MAD-based noise estimate over
-  the sensor area.
+  the sensor area in the image's native units.
 - ``star.dn`` — the integrated DN expected for the star in the
   instrument's bandpass, computed from its catalog V magnitude via the
   ``2.512 ** -(vmag - 4)`` flux-to-DN scaling.  ``star.dn`` is the
@@ -24,6 +24,16 @@ in for the variance contribution from background and read noise.
 ``image_noise_sigma`` is treated as a Gaussian read-noise proxy because
 the MAD estimator is dominated by background pixels and combines shot,
 read, and dark contributions into a single per-pixel sigma.
+
+For raw-DN instruments the catalog signal and ``image_noise_sigma`` are
+already in the same units (DN) and the formula applies directly.  For
+calibrated-IF instruments (Cassini ISS ``_CALIB.IMG`` and similar) the
+image's noise sigma is in I/F while the catalog signal is still in DN;
+``signal_dn_to_image_unit_scale`` (the per-camera DN-to-image-unit
+factor) converts ``image_noise_sigma`` back to a DN-equivalent before
+the SNR is formed.  Without this conversion the SNR for every catalog
+star collapses to ``sqrt(signal_dn)`` on calibrated images and the
+reliability gate drops them all.
 
 ``SCLASS_TO_B_MINUS_V`` is re-exported here so callers that need the
 spectral-class colour mapping can pull it from the same module that
@@ -131,6 +141,7 @@ def predicted_snr(
     psf: PSF,
     image_noise_sigma: float,
     mag_offset: float = 0.0,
+    signal_dn_to_image_unit_scale: float = 1.0,
 ) -> float:
     """Predicted integrated SNR for a star at its predicted pixel.
 
@@ -141,25 +152,45 @@ def predicted_snr(
 
     ::
 
-        SNR = total_signal / sqrt(total_signal + sigma**2 * N_aperture)
+        SNR = total_signal / sqrt(total_signal + sigma_dn**2 * N_aperture)
 
-    with ``N_aperture = 4 * pi * sigma_PSF**2``.
+    with ``N_aperture = 4 * pi * sigma_PSF**2``.  ``sigma_dn`` is the
+    DN-equivalent of ``image_noise_sigma`` obtained by dividing through
+    ``signal_dn_to_image_unit_scale``; for raw-DN instruments the scale
+    is 1.0 and ``sigma_dn == image_noise_sigma`` so the formula reduces
+    to the classic form.  For calibrated-IF instruments the scale is
+    typically of order ``1e-7`` (DN-to-I/F).
 
     Parameters:
         star: Star record.
         psf: PSF (typically from ``obs.star_psf()``).
-        image_noise_sigma: Robust per-pixel noise sigma in DN.
+        image_noise_sigma: Robust per-pixel noise sigma in the image's
+            native units (DN for raw, I/F for calibrated).
         mag_offset: Catalog-to-instrument magnitude offset (default 0).
+        signal_dn_to_image_unit_scale: Scale that converts a DN signal
+            into the same units as ``image_noise_sigma``.  ``1.0`` for
+            raw-DN instruments; per-camera value loaded from
+            ``noise.signal_dn_to_image_unit_scale`` for calibrated-IF
+            instruments.
 
     Returns:
         Predicted SNR (dimensionless, >= 0).
+
+    Raises:
+        ValueError: If ``image_noise_sigma`` or
+            ``signal_dn_to_image_unit_scale`` is non-positive.
     """
     if image_noise_sigma <= 0.0:
         raise ValueError(f'image_noise_sigma must be > 0; got {image_noise_sigma!r}')
+    if signal_dn_to_image_unit_scale <= 0.0:
+        raise ValueError(
+            f'signal_dn_to_image_unit_scale must be > 0; got {signal_dn_to_image_unit_scale!r}'
+        )
     sig = integrated_signal_dn(star, mag_offset)
     if sig <= 0.0:
         return 0.0
     sigma_px_value = psf_sigma_px(psf)
     aperture = psf_aperture_pixels(sigma_px_value)
-    variance = sig + image_noise_sigma * image_noise_sigma * aperture
+    image_noise_sigma_dn = image_noise_sigma / signal_dn_to_image_unit_scale
+    variance = sig + image_noise_sigma_dn * image_noise_sigma_dn * aperture
     return sig / math.sqrt(variance)

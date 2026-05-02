@@ -36,6 +36,28 @@ def test_classifier_fully_overexposed() -> None:
     assert result.saturation_frac == 1.0
 
 
+def test_classifier_inf_saturation_threshold_disables_gate() -> None:
+    """An ``inf`` saturation threshold disables the saturation gate.
+
+    This is the calibrated_if path (Phase 10 §F): a single I/F
+    saturation threshold is meaningless because calibrated values
+    depend on exposure / filter / gain, so the loader installs an
+    ``inf`` threshold and the classifier must report
+    ``saturation_frac=0.0`` no matter what pixel values it sees.
+    """
+    image = np.full((64, 64), 4095.0, np.float64)
+    classifier = NavImageClassifier(
+        thresholds=ImageQualityThresholds(
+            saturation_threshold_dn=float('inf'),
+            blank_max_dn=1.0e-4,
+            noisy_threshold=10.0,
+        )
+    )
+    result = classifier.classify(image)
+    assert result.saturation_frac == 0.0
+    assert result.image_class != 'fully_overexposed'
+
+
 def test_classifier_mostly_missing_data() -> None:
     """An image dominated by the missing-data marker yields mostly_missing_data."""
     image = np.full((64, 64), 0.0, np.float64)

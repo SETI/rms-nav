@@ -6,7 +6,8 @@ happy / image-load-failure / status=failed paths against a fake
 observation class so no holdings are required.
 
 Also covers the annotation-compositing summary-PNG renderer
-(``_write_summary_png`` and ``_grayscale_to_rgb_with_quantile_stretch``)
+(``_write_summary_png`` and the rendering helper now exposed via
+``nav.support.summary_png.grayscale_to_rgb_with_quantile_stretch``)
 end-to-end against a synthetic ``Annotations`` collection.
 """
 
@@ -26,11 +27,13 @@ from nav.nav_orchestrator.image_classifier_result import NavImageClassifierResul
 from nav.nav_orchestrator.nav_result import NavResult
 from nav.nav_orchestrator.provenance import Provenance
 from nav.navigate_image_files import (
-    _grayscale_to_rgb_with_quantile_stretch,
     _write_summary_png,
     navigate_image_files,
 )
 from nav.support.status_reason import NavStatusReason
+from nav.support.summary_png import (
+    grayscale_to_rgb_with_quantile_stretch as _grayscale_to_rgb_with_quantile_stretch,
+)
 
 
 class _FakeSnapshot:

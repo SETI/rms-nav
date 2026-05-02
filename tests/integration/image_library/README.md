@@ -7,5 +7,5 @@ enrolls the image in the structural-invariants test
 test (`tests/integration/test_autonomous_nav.py`).
 
 The schema, scene-class list, and library layout are documented in
-`docs/user_guide_image_library.rst`; the validator lives in
+`docs/developer_guide_image_library.rst`; the validator lives in
 `tests/integration/sidecar.py`.

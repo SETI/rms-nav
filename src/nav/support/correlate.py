@@ -617,11 +617,16 @@ def navigate_single_scale_kpeaks(
         # TODO When no candidates are found, the function returns cov: np.diag([1e6, 1e6])
         # and quality: -np.inf. Downstream code might not check for -np.inf quality and could
         # treat this as a valid result. Consider returning None or raising an exception instead.
+        # The result-shape contract matches the populated path so callers
+        # (e.g. ``navigate_with_pyramid_kpeaks`` debug log) can read every
+        # key without a KeyError when the search collapses.
         return {
             'offset': (0.0, 0.0),
             'cov': np.diag([1e6, 1e6]),
             'sigma_xy': (1e3, 1e3),
             'quality': -np.inf,
+            'peak_val': 0.0,
+            'rc': (0, 0),
             'all_candidates': [],
         }
     winner = max(candidates, key=lambda r: r['quality'])

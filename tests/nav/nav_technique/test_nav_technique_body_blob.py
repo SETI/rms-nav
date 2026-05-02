@@ -25,6 +25,8 @@ def _make_blob_feature(
     predicted_center_vu: tuple[float, float],
     predicted_diameter_px: float,
     bbox_pad: int = 4,
+    phase_angle_deg: float = 0.0,
+    phase_irregularity_factor: float = 0.0,
 ) -> NavFeature:
     """Build a BODY_BLOB feature whose bbox tightly bounds the predicted disc."""
     radius = predicted_diameter_px / 2.0
@@ -53,7 +55,12 @@ def _make_blob_feature(
             blob_extent_px=predicted_diameter_px / 30.0,
         ),
         usable_types=frozenset({NavFeatureType.BODY_BLOB}),
-        flags=BodyBlobFlags(body_name=body_name, predicted_diameter_px=predicted_diameter_px),
+        flags=BodyBlobFlags(
+            body_name=body_name,
+            predicted_diameter_px=predicted_diameter_px,
+            phase_angle_deg=phase_angle_deg,
+            phase_irregularity_factor=phase_irregularity_factor,
+        ),
     )
 
 
@@ -299,3 +306,59 @@ def test_body_blob_3dof_rotation_unobservable(
     assert result.rotation_rad == pytest.approx(0.0)
     assert result.sigma_rotation_rad == pytest.approx(np.sqrt(ROTATION_UNOBSERVABLE_VARIANCE))
     assert result.covariance_px2[2, 2] == pytest.approx(ROTATION_UNOBSERVABLE_VARIANCE)
+
+
+def test_body_blob_diagnostics_records_max_phase_irregularity(
+    disc_image: DiscImageFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """The technique surfaces the worst per-blob irregularity factor.
+
+    Two blobs in the same scene with different irregularity factors:
+    the diagnostics record the maximum so the confidence-formula
+    penalty is driven by the worst blob (regular bodies have factor ~
+    0.005, irregular ~ 0.05+).
+    """
+    shape = (200, 200)
+    image = np.maximum(
+        disc_image(shape, (60.0, 60.0), 8.0),
+        disc_image(shape, (140.0, 140.0), 8.0),
+    )
+    low_phase_blob = _make_blob_feature(
+        'regular_moon',
+        predicted_center_vu=(60.0, 60.0),
+        predicted_diameter_px=16.0,
+        phase_angle_deg=15.0,
+        phase_irregularity_factor=0.003,
+    )
+    high_phase_blob = _make_blob_feature(
+        'irregular_moon',
+        predicted_center_vu=(140.0, 140.0),
+        predicted_diameter_px=16.0,
+        phase_angle_deg=130.0,
+        phase_irregularity_factor=0.075,
+    )
+    technique = BodyBlobNav()
+    context = make_nav_context(image)
+    result = technique.navigate([low_phase_blob, high_phase_blob], context)
+    assert isinstance(result.diagnostics, BodyBlobDiagnostics)
+    assert result.diagnostics.max_phase_angle_deg == pytest.approx(130.0)
+    assert result.diagnostics.max_phase_irregularity_factor == pytest.approx(0.075)
+
+
+def test_body_blob_flags_reject_phase_outside_valid_range() -> None:
+    """``BodyBlobFlags`` validates ``phase_angle_deg`` is in [0, 180]."""
+    with pytest.raises(ValueError, match='phase_angle_deg'):
+        BodyBlobFlags(body_name='X', predicted_diameter_px=10.0, phase_angle_deg=-1.0)
+    with pytest.raises(ValueError, match='phase_angle_deg'):
+        BodyBlobFlags(body_name='X', predicted_diameter_px=10.0, phase_angle_deg=181.0)
+
+
+def test_body_blob_flags_reject_negative_phase_irregularity() -> None:
+    """``BodyBlobFlags`` validates ``phase_irregularity_factor`` is non-negative."""
+    with pytest.raises(ValueError, match='phase_irregularity_factor'):
+        BodyBlobFlags(
+            body_name='X',
+            predicted_diameter_px=10.0,
+            phase_irregularity_factor=-0.01,
+        )

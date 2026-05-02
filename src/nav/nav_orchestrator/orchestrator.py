@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from nav.annotation import Annotations
-from nav.config import IMAGE_LOGGER, Config
+from nav.config import Config
 from nav.feature.feature import NavFeature
 from nav.feature.feature_type import NavFeatureType
 from nav.feature.reliability import FeatureReliabilityGate, GatedFeatureRecord
@@ -624,6 +624,7 @@ class NavOrchestrator(NavBase):
             pre_filter_applied=pre_filter,
             fit_camera_rotation=settings.fit_camera_rotation,
             max_rotation_deg=settings.max_rotation_deg,
+            signal_dn_to_image_unit_scale=settings.signal_dn_to_image_unit_scale,
         )
         return context, classifier_result
 
@@ -636,16 +637,16 @@ class NavOrchestrator(NavBase):
         """Construct the per-image saturation mask.
 
         For raw-DN instruments the mask is ``image >= saturation_dn``.
-        For calibrated-IF instruments the saturation_dn is unavailable
-        and the orchestrator emits an empty mask plus a one-line WARNING.
+        For calibrated-IF instruments the saturation gate is intentionally
+        off — the calibrated I/F values that survive the CALIB pipeline
+        depend on exposure, filter, and gain, so a single threshold
+        cannot identify which raw pixels were saturated before
+        calibration.  The orchestrator therefore returns an empty mask
+        without any logging; operators who need saturation flags on a
+        Cassini scene must navigate the corresponding raw frame.
         """
         if settings.saturation_dn is not None:
             return saturation_mask(image, full_well_dn=settings.saturation_dn)
-        if settings.data_units == 'calibrated_if':
-            IMAGE_LOGGER.warning(
-                'no saturation_dn configured for calibrated_if instrument; '
-                'overexposure cannot be detected — saturation mask left empty'
-            )
         return np.zeros(image.shape, dtype=bool)
 
     def _apply_source_image_filter(

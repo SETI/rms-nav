@@ -97,7 +97,7 @@ def test_sigma_normal_uses_quadrature_sum() -> None:
         sampler=sampler, shape=shape, psf_sigma_px=1.0, include_albedo=False
     )
     expected_km = math.sqrt(
-        shape.ellipsoid_residual_km**2
+        shape.ellipsoid_rms_residual_km**2
         + shape.crater_scale_km**2
         + 0.0  # incidence_factor=0 at i=0
         + shape.spice_orbital_residual_km**2

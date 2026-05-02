@@ -148,6 +148,75 @@ def test_predicted_snr_raises_for_non_positive_noise_sigma() -> None:
         predicted_snr(star, psf=psf, image_noise_sigma=0.0)
 
 
+def test_predicted_snr_unity_signal_scale_is_no_op() -> None:
+    """signal_dn_to_image_unit_scale=1.0 reproduces the default behaviour."""
+    star: Any = _FakeStar(vmag=4.0)
+    psf: Any = _FakeSigmaPSF(sigma=1.0)
+    base = predicted_snr(star, psf=psf, image_noise_sigma=0.5)
+    explicit = predicted_snr(
+        star, psf=psf, image_noise_sigma=0.5, signal_dn_to_image_unit_scale=1.0
+    )
+    assert math.isclose(base, explicit, rel_tol=1e-12)
+
+
+def test_predicted_snr_calibrated_if_scale_recovers_dn_equivalent_snr() -> None:
+    """Scaling both the noise sigma and scale by k leaves the SNR unchanged.
+
+    This is the sanity check from the unit-handling fix: an IF-units
+    image has a tiny ``image_noise_sigma`` and an equally tiny
+    ``signal_dn_to_image_unit_scale``; their ratio is the DN-equivalent
+    background sigma, so the SNR matches the raw-DN result on the same
+    underlying observation.
+    """
+    star: Any = _FakeStar(vmag=4.0)
+    psf: Any = _FakeSigmaPSF(sigma=1.0)
+    raw_dn_snr = predicted_snr(star, psf=psf, image_noise_sigma=0.5)
+    scale = 5.0e-7
+    if_snr = predicted_snr(
+        star,
+        psf=psf,
+        image_noise_sigma=0.5 * scale,
+        signal_dn_to_image_unit_scale=scale,
+    )
+    assert math.isclose(raw_dn_snr, if_snr, rel_tol=1e-12)
+
+
+def test_predicted_snr_pleiades_recovers_above_gate_on_calibrated_if() -> None:
+    """A bright star on a calibrated_if image clears the STAR reliability gate.
+
+    Worked example from Phase 10 / Part F: a Pleiades-class star
+    (``vmag~3``, ``mag_offset=-10`` after Phase 10 calibration) on a
+    Cassini ISS NAC CALIB image (``image_noise_sigma~1e-7`` I/F,
+    ``signal_dn_to_image_unit_scale~5e-7``) must produce an SNR well
+    above the implicit ``snr=5`` floor or the reliability gate drops
+    every catalog star.  Without the unit conversion the SNR would
+    collapse to ``sqrt(signal_dn)`` and most stars would be gated out.
+    """
+    star: Any = _FakeStar(vmag=3.0)
+    psf: Any = _FakeSigmaPSF(sigma=0.54)
+    snr = predicted_snr(
+        star,
+        psf=psf,
+        image_noise_sigma=1.0e-7,
+        mag_offset=-10.0,
+        signal_dn_to_image_unit_scale=5.0e-7,
+    )
+    assert snr > 5.0
+
+
+def test_predicted_snr_raises_for_non_positive_signal_scale() -> None:
+    """A non-positive signal scale raises ``ValueError``."""
+    star: Any = _FakeStar(vmag=4.0)
+    psf: Any = _FakeSigmaPSF(sigma=1.0)
+    with pytest.raises(ValueError, match='signal_dn_to_image_unit_scale'):
+        predicted_snr(
+            star,
+            psf=psf,
+            image_noise_sigma=0.5,
+            signal_dn_to_image_unit_scale=0.0,
+        )
+
+
 def test_sclass_to_b_minus_v_re_export_matches_starcat() -> None:
     """The re-exported lookup table is the same dict as ``starcat``'s."""
     assert SCLASS_TO_B_MINUS_V is CANONICAL_SCLASS_TO_B_MINUS_V

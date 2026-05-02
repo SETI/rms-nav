@@ -84,6 +84,25 @@ techniques:
         alpha: 0.4
         divisor: 3.0
         cap_at: 1.0
+      # Phase-and-irregularity penalty.  Combines shape irregularity
+      # with how much of the body is in shadow into a dimensionless
+      # factor ``(ellipsoid_rms_residual_km / body_radius_km) *
+      # (1 + 2 * sin^2(phase / 2))`` that the body NavModel emits
+      # per-blob.  Raw phase angle alone is too coarse: a regular
+      # Mimas at phase 90 has predictable shadowing and the lit-
+      # weighted predicted centroid handles it (factor ~ 0.01); an
+      # irregular Hyperion at the same phase has unpredictable
+      # shadowing on an unknown rotational orientation that the
+      # ellipsoidal model cannot fully correct (factor ~ 0.15).
+      # Typical factors are 0.005-0.20; ``divisor: 0.15`` puts a
+      # textbook irregular-and-side-lit scene near the saturation
+      # point.  alpha=0.0 wires the term into the formula without
+      # weighting it; Phase 10 calibration tunes alpha to a negative
+      # value against the curated library.
+      - feature: max_phase_irregularity_factor
+        alpha: 0.0
+        divisor: 0.15
+        cap_at: 1.0
     hard_zero_if:
       at_edge: true
     # The hard cap mirrors the BODY_BLOB reliability formula: a

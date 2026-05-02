@@ -111,17 +111,34 @@ class BodyBlobDiagnostics:
         body_extent_px: Predicted body's longer-axis extent in pixels.
         blob_count: Number of BODY_BLOB features fused.
         residual_px: Centroid-fit RMS residual.
+        max_phase_angle_deg: Maximum raw phase angle across the
+            consumed blobs.  Recorded for diagnostic inspection only;
+            the confidence formula consumes
+            ``max_phase_irregularity_factor`` instead because raw phase
+            understates the centroid uncertainty for an irregular
+            body.
+        max_phase_irregularity_factor: Maximum
+            ``sin(phase/2) * (ellipsoid_rms_residual_km /
+            body_radius_km)`` across the consumed blobs.  The
+            confidence formula uses this term to down-weight irregular
+            high-phase scenes where the lit-weighted predicted centroid
+            cannot fully correct for the unknown-orientation shadowing
+            on a non-ellipsoidal body.
     """
 
     body_snr_inside_predicted_bbox: float = 0.0
     body_extent_px: float = 0.0
     blob_count: int = 0
     residual_px: float = 0.0
+    max_phase_angle_deg: float = 0.0
+    max_phase_irregularity_factor: float = 0.0
     CURATOR_FIELDS: ClassVar[dict[str, str | None]] = {
         'body_snr_inside_predicted_bbox': 'body_snr_inside_predicted_bbox',
         'body_extent_px': 'body_extent_px',
         'blob_count': 'blob_count',
         'residual_px': 'residual_px',
+        'max_phase_angle_deg': 'max_phase_angle_deg',
+        'max_phase_irregularity_factor': 'max_phase_irregularity_factor',
     }
 
 

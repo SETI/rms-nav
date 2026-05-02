@@ -51,10 +51,11 @@ from tests.integration.sidecar import (  # noqa: E402
     load_sidecar,
 )
 
-# Mission-string -> Obs class.  Keys match the sidecar schema's ``mission`` enum.
+# Mission-string -> Obs class.  Keys match the sidecar schema's ``mission`` enum
+# (upper-cased dataset names from :mod:`nav.dataset`).
 _MISSION_TO_OBS_CLASS: dict[str, type[ObsSnapshotInst]] = {
-    'CASSINI_ISS': ObsCassiniISS,
-    'VOYAGER_ISS': ObsVoyagerISS,
+    'COISS': ObsCassiniISS,
+    'VGISS': ObsVoyagerISS,
     'GOSSI': ObsGalileoSSI,
     'NHLORRI': ObsNewHorizonsLORRI,
 }

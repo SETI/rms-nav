@@ -16,6 +16,7 @@ voyager_iss:
     expected_noise_dn: 1.0         # PLACEHOLDER — calibrate in Phase 10
     marker_value: 0
     read_noise_dn: 1.0             # PLACEHOLDER — calibrate in Phase 10
+    signal_dn_to_image_unit_scale: 1.0  # raw_dn — image is already in DN
   image_quality_thresholds:
     blank_max_dn: 2.0
     saturation_threshold_dn: 255
