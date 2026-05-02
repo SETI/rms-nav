@@ -563,7 +563,7 @@ library ``logging`` module is not imported.
 See also
 ========
 
-- :doc:`developer_guide_uncertainty` — derivation of the M-estimator
+- :doc:`dev_guide_uncertainty` — derivation of the M-estimator
   information-matrix to covariance step that turns the LM Jacobian at
   convergence into the per-technique 2x2 (or 3x3) covariance reported
   on every ``NavTechniqueResult``.  ``BodyDiscCorrelateNav``'s

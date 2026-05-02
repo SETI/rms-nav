@@ -8,19 +8,19 @@ This guide is intended for developers who want to understand, modify, or extend 
    :maxdepth: 2
    :caption: Developer Guide Contents:
 
-   developer_guide_introduction
-   developer_guide_class_hierarchy
-   developer_guide_navigation_models
-   developer_guide_techniques
-   developer_guide_orchestrator
-   developer_guide_uncertainty
-   developer_guide_rotation
-   developer_guide_reprojection
-   developer_guide_extending
-   developer_guide_configuration
-   developer_guide_static_data
-   developer_guide_logging
-   developer_guide_best_practices
-   developer_guide_building_docs
-   developer_guide_backplanes
-   developer_guide_image_library
+   dev_guide_introduction
+   dev_guide_class_hierarchy
+   dev_guide_navigation_models
+   dev_guide_techniques
+   dev_guide_orchestrator
+   dev_guide_uncertainty
+   dev_guide_rotation
+   dev_guide_reprojection
+   dev_guide_extending
+   dev_guide_configuration
+   dev_guide_static_data
+   dev_guide_logging
+   dev_guide_best_practices
+   dev_guide_building_docs
+   dev_guide_backplanes
+   dev_guide_image_library

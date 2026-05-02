@@ -4,7 +4,7 @@ Configuration System
 
 RMS-NAV uses a YAML-based configuration system. The default configuration
 files ship under ``src/nav/config_files/`` and are loaded in alphabetical
-order; see :doc:`introduction_configuration` for the list of files and for
+order; see :doc:`/introduction_configuration` for the list of files and for
 the full precedence between default files, ``nav_default_config.yaml``,
 ``--config-file`` overrides, and command-line flags.
 
@@ -42,7 +42,7 @@ accessible as an :class:`~nav.support.attrdict.AttrDict` property on the
 - ``bodies`` -- body rendering parameters.
 - ``rings`` -- ring-model parameters (planet shadow removal, fade widths,
   per-planet ``ring_features`` -- see
-  :doc:`developer_guide_navigation_models_rings`).
+  :doc:`dev_guide_navigation_models_rings`).
 - ``titan`` -- Titan-specific parameters.
 - ``bootstrap`` -- bootstrap navigation parameters.
 - ``backplanes`` -- the list of body and ring backplanes to generate.
@@ -50,4 +50,4 @@ accessible as an :class:`~nav.support.attrdict.AttrDict` property on the
 
 Planetary ring YAML (planet sections, features, fade parameters, and
 validation rules) is specified in
-:doc:`developer_guide_navigation_models_rings`.
+:doc:`dev_guide_navigation_models_rings`.

@@ -78,7 +78,7 @@ the 3x3 covariance.
 
 Template-NCC techniques run a 3-D NCC pyramid that augments the
 existing translation pyramid with a rotation-sample schedule per
-:doc:`developer_guide_techniques`:
+:doc:`dev_guide_techniques`:
 
 * Level 0 (coarsest): 11 rotation samples spanning
   ``±max_rotation_deg`` in 1° steps.
@@ -147,7 +147,7 @@ production but catches programmer errors in technique implementations.
 Single-link clustering by Mahalanobis distance, the precision-weighted
 information-form merge, and the rank-deficiency check all extend
 naturally to 3-D — see
-:doc:`developer_guide_orchestrator` for the underlying math.
+:doc:`dev_guide_orchestrator` for the underlying math.
 
 JSON output
 ===========

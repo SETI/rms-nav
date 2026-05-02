@@ -359,7 +359,7 @@ default ``*`` runs all of them.
 
 The algorithmic detail (DT pipeline, Levenberg-Marquardt refinement,
 information-matrix covariance) lives in
-:doc:`developer_guide_techniques` and :doc:`developer_guide_uncertainty`;
+:doc:`dev_guide/dev_guide_techniques` and :doc:`dev_guide/dev_guide_uncertainty`;
 this page summarises what each technique does and which scenes it
 applies to.
 
@@ -447,7 +447,7 @@ stdout.  Exit code is ``2`` if the dialog is cancelled or no
 template-bearing features are available.  The dialog's **Save as
 Library Entry...** button is the recommended path for adding a sidecar
 to the operator-curated test image library; see
-:doc:`developer_guide_image_library`.
+:doc:`dev_guide/dev_guide_image_library`.
 
 Programmatic equivalent (one obs in, ``NavTechniqueResult`` out):
 
