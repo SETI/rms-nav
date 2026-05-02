@@ -101,5 +101,5 @@ The companion ``tests/integration/test_baselines.py`` records exact
 rounded ``(offset_dv_px, offset_du_px, confidence)`` per image; baseline
 mismatches require explicit operator review on the PR.
 
-See :doc:`user_guide_image_library` for sidecar curation and the
+See :doc:`developer_guide_image_library` for sidecar curation and the
 "Save as Library Entry" workflow.

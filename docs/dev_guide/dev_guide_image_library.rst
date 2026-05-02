@@ -44,7 +44,7 @@ Sidecar schema (schema_version 1)
 
    schema_version: 1
    image_id: W1521598221_1_CALIB
-   mission: CASSINI_ISS               # CASSINI_ISS | VOYAGER_ISS | GOSSI | NHLORRI
+   mission: COISS                     # COISS | VGISS | GOSSI | NHLORRI
    camera: WAC                        # NAC | WAC | SSI | NA | WA | LORRI
    filter_combo: 'CL+VIO'             # canonicalized: filters sorted, '+'-joined
    image_url: 'pds3://volumes/COISS_2xxx/COISS_2021/.../W1521598221_1_CALIB.IMG'
@@ -81,13 +81,20 @@ Adding a new entry
 The recommended path is the manual-navigation dialog's
 **Save as Library Entry...** button:
 
-1. Run the manual-nav dialog on the candidate image (e.g. via the
-   ``NavTechniqueManual`` interactive driver).
+1. Run the manual-nav dialog on the candidate image with the
+   ``nav_offset [args] --manual`` CLI flag, where ``[args]`` are the
+   selection / dataset / config flags that pin the run down to a
+   single image (e.g. dataset id, an image-list file, ``--config`` for
+   a non-default bundle).
 2. Pick the offset by hand (or accept the **Auto** result).
 3. Click **Save as Library Entry...**.  A file-save dialog suggests
    ``<image_id>.yaml`` as the filename — point it at the right
    scene-class directory under
-   ``tests/integration/image_library/images/<class>/``.
+   ``tests/integration/image_library/images/<class>/``.  The dialog
+   also drops a companion ``<image_id>.png`` next to the YAML showing
+   the red-image / green-model overlay at the chosen ``(dv, du)``;
+   it's an orientation aid for future reviewers and is not consumed
+   by any test.
 4. Open the saved YAML and replace every ``TODO_REPLACE_*`` placeholder
    (scene_tags, primary_technique, notes, etc.).
 5. Re-run ``pytest tests/integration/test_image_library.py`` to check
@@ -117,11 +124,6 @@ The CI test tolerance is ``offset_uncertainty_px + 0.5 px`` slack on
 each axis.  ``confidence_tier`` mismatches always fail (no slack — tier
 is part of the calibration target).
 
-Cross-image inference is forbidden: every sidecar's ground-truth offset
-must come from manually navigating *that* image.  Spacecraft attitude
-drift is non-linear at sub-second time scales, so any "between two
-anchors" interpolation is unsafe at pixel precision.
-
 Regression baselines
 ====================
 
@@ -132,5 +134,67 @@ confidence)`` triple in
 exact-equal on rounded values (``offset`` to 4 decimals, ``confidence``
 to 3); the baseline schema deliberately omits
 ``pipeline_run_iso8601`` because that is the only provenance field that
-is *not* byte-identical between identical runs.  Baseline updates
-require explicit operator review on the PR.
+is *not* byte-identical between identical runs.
+
+What checks the baselines
+-------------------------
+
+Two tests under ``tests/integration/test_baselines.py``:
+
+- ``test_every_baseline_cites_a_sidecar`` — runs in the fast suite (no
+  holdings needed).  Asserts that every ``baselines/<image_id>.json``
+  has a matching sidecar at
+  ``image_library/images/*/<image_id>.yaml``, and that the file's stem
+  matches the baseline's ``image_id`` field.  Catches the common drift
+  where a sidecar is renamed or deleted but its baseline lingers.
+- ``test_regression_baseline_exact_match`` — gated by the
+  ``integration`` pytest marker and skipped when ``PDS3_HOLDINGS_DIR``
+  is unset.  Parametrized one case per ``(baseline, sidecar)`` pair;
+  runs the orchestrator against the real holdings, calls
+  :meth:`tests.integration.baseline.Baseline.from_run` to round the
+  fresh outputs, and asserts ``actual == expected`` (exact equality on
+  all four keys).  The failure message tells the operator to update
+  the JSON in the same PR if the diff is intended.
+
+Plus a handful of round-trip / serialisation unit tests on
+``Baseline.from_run`` and ``Baseline.to_json`` that pin the rounding
+rule and confirm byte-stable JSON (sorted keys, trailing newline).
+
+How a baseline is created or updated
+------------------------------------
+
+Use the ``nav_update_baselines`` CLI (registered in
+``[project.scripts]``; runs from a project checkout).  It refuses to
+run without ``PDS3_HOLDINGS_DIR`` set.
+
+.. code-block:: bash
+
+   nav_update_baselines --image-id <image_id>      # one image
+   nav_update_baselines --image-id A --image-id B  # hand-picked batch
+   nav_update_baselines --all                      # every sidecar
+   nav_update_baselines --all --dry-run            # preview only
+
+For each image the tool runs ``navigate_image_files`` against the live
+holdings, rounds the result via
+:meth:`tests.integration.baseline.Baseline.from_run`, compares against
+any existing baseline, and reports one of:
+
+* ``CREATE`` — no on-disk baseline; new file written.
+* ``UPDATE`` — baseline drifted; old → new diff printed and the file
+  overwritten.
+* ``UNCHANGED`` — bytes match; file untouched (mtime preserved).
+* ``FAILED`` — orchestrator returned no offset, or the requested
+  ``--image-id`` matched no sidecar.
+
+The exit code is ``0`` when every selected image succeeded (regardless
+of write/update/unchanged), ``1`` when at least one ``FAILED`` line
+was emitted, ``2`` on argument-parsing errors or when
+``PDS3_HOLDINGS_DIR`` is unset.
+
+Sidecars must land first — the
+``test_every_baseline_cites_a_sidecar`` invariant refuses orphan
+baselines.  Baseline updates always require explicit operator review
+on the PR; the CLI is the mechanical step, but the human review of
+the resulting diff (does the new offset still overlay the limb?  does
+the new confidence still match ``expected.confidence_tier``?) is what
+keeps the regression layer trustworthy.

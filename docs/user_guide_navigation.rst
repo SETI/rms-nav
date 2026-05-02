@@ -447,7 +447,7 @@ stdout.  Exit code is ``2`` if the dialog is cancelled or no
 template-bearing features are available.  The dialog's **Save as
 Library Entry...** button is the recommended path for adding a sidecar
 to the operator-curated test image library; see
-:doc:`user_guide_image_library`.
+:doc:`developer_guide_image_library`.
 
 Programmatic equivalent (one obs in, ``NavTechniqueResult`` out):
 

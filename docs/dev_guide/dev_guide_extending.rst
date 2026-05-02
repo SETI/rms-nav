@@ -178,7 +178,11 @@ Operator workflow:
 2. Click **Save as Library Entry...**.  The save-file dialog suggests
    ``<image_id>.yaml`` as the filename.  Point it at the appropriate
    scene-class directory under
-   ``tests/integration/image_library/images/<class>/``.
+   ``tests/integration/image_library/images/<class>/``.  A companion
+   ``<image_id>.png`` capturing the red-image / green-model overlay
+   at the chosen ``(dv, du)`` is dropped next to the YAML so future
+   reviewers can see the scene at a glance; it is not consumed by any
+   test.
 3. Open the saved YAML and fill in every ``TODO_REPLACE_*`` value.  An
    unedited template trips
    :func:`tests.integration.sidecar.load_sidecar` so CI fails loudly if
@@ -188,5 +192,5 @@ Operator workflow:
    regression test (``test_autonomous_nav.py``) follows once
    ``PDS3_HOLDINGS_DIR`` is set.
 
-See :doc:`user_guide_image_library` for the sidecar schema and the
-deeper rationale behind the curation policy.
+See :doc:`developer_guide_image_library` for the sidecar schema and
+the deeper rationale behind the curation policy.

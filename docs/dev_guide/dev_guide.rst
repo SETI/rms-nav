@@ -23,3 +23,4 @@ This guide is intended for developers who want to understand, modify, or extend 
    developer_guide_best_practices
    developer_guide_building_docs
    developer_guide_backplanes
+   developer_guide_image_library
