@@ -13,6 +13,7 @@ description: Standards for Python library documentation using Sphinx, ReadTheDoc
 ## 2. Documentation Standard
 
 - Always use one space between the period at the end of a sentence and the next sentence.
+- Always use American spelling instead of British spelling (e.g. color instead of colour).
 
 ## 3. Required Documentation
 

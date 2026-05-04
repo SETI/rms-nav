@@ -19,7 +19,8 @@ Two test layers consume the library:
 A separate baseline layer at images/../baselines/<image_id>.json
 records the exact rounded (offset_dv_px, offset_du_px, confidence)
 the orchestrator produces; baselines are mechanical and refreshed
-via the nav_update_baselines CLI.
+via the developer tool at tests/integration/update_baselines.py
+(invoke as `python -m tests.integration.update_baselines`).
 
 ----------------------------------------------------------------
 Workflow
@@ -75,18 +76,20 @@ Workflow
 
   8. (Optional, requires holdings) Seed or refresh the baseline:
 
-         nav_update_baselines --image-id <image_id>
+         python -m tests.integration.update_baselines --image-id <image_id>
 
 ----------------------------------------------------------------
 YAML schema
 ----------------------------------------------------------------
 
   schema_version: 1
-  image_id: <opaque string, must match filename stem>
   mission: <one of the ALLOWED_MISSIONS values below>
   camera:  <one of the ALLOWED_CAMERAS values below>
-  filter_combo: <sorted, '+'-joined filter list, e.g. 'CL1+CL2'>
+  image_id: <opaque string, must match filename stem>
+  image_datetime_utc: <UTC ISO 8601 string | omitted>
+                                   # from et_to_utc(obs.midtime)
   exposure_time_sec: <float | omitted>   # seconds; from obs.texp
+  filter_combo: <sorted, '+'-joined filter list, e.g. 'CL1+CL2'>
   image_url: <opaque URL, e.g. pds3://... or https://...>
 
   scene_tags:                        # ordered list, length >= 1
@@ -142,6 +145,12 @@ filter_combo
   Filters applied for the exposure, sorted alphabetically and
   joined with '+'. Examples: 'CL1+CL2', 'CL+CL', 'BL1+CL2'. Use
   the same canonicalization that mag_offset_table keys use.
+
+image_datetime_utc
+  Optional. UTC ISO 8601 timestamp of the observation midtime,
+  derived from obs.midtime via et_to_utc. When present, must be
+  a non-empty string. Legacy sidecars written before the field
+  was introduced may omit it.
 
 exposure_time_sec
   Optional. Exposure duration in seconds, taken from obs.texp.

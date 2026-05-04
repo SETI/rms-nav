@@ -520,10 +520,10 @@ def test_prepare_returns_context_and_features(fake_obs: _FakeObs) -> None:
     obs = fake_obs
     model = _FakeStarModel(obs, feature_count=3)
     orch = NavOrchestrator([model])
-    context, features = orch.prepare(obs)  # type: ignore[arg-type]
-    assert context.obs is obs
-    assert len(features) == 3
-    assert {f.feature_type for f in features} == {NavFeatureType.STAR}
+    prep = orch.prepare(obs)  # type: ignore[arg-type]
+    assert prep.context.obs is obs
+    assert len(prep.features) == 3
+    assert {f.feature_type for f in prep.features} == {NavFeatureType.STAR}
 
 
 def test_prepare_does_not_short_circuit_on_blank_image() -> None:
@@ -536,9 +536,9 @@ def test_prepare_does_not_short_circuit_on_blank_image() -> None:
     obs = _FakeObs(image=np.zeros((64, 64), np.float64))
     model = _FakeStarModel(obs, feature_count=0)
     orch = NavOrchestrator([model])
-    context, features = orch.prepare(obs)  # type: ignore[arg-type]
-    assert context.image_classifier.image_class == 'blank'
-    assert features == []
+    prep = orch.prepare(obs)  # type: ignore[arg-type]
+    assert prep.context.image_classifier.image_class == 'blank'
+    assert prep.features == []
 
 
 def test_prepare_drops_models_via_only_models_filter() -> None:
@@ -546,8 +546,8 @@ def test_prepare_drops_models_via_only_models_filter() -> None:
     obs = _FakeObs()
     model = _FakeStarModel(obs, feature_count=3)
     orch = NavOrchestrator([model], only_models='!stars')
-    _context, features = orch.prepare(obs)  # type: ignore[arg-type]
-    assert features == []
+    prep = orch.prepare(obs)  # type: ignore[arg-type]
+    assert prep.features == []
 
 
 def test_prepare_apply_gate_false_returns_gated_features() -> None:
@@ -577,7 +577,7 @@ def test_prepare_apply_gate_false_returns_gated_features() -> None:
     obs = _FakeObs()
     model = _LowReliabilityModel(obs, feature_count=2)
     orch = NavOrchestrator([model])
-    _ctx, gated_kept = orch.prepare(obs, apply_gate=True)  # type: ignore[arg-type]
-    _ctx, full = orch.prepare(obs, apply_gate=False)  # type: ignore[arg-type]
-    assert gated_kept == []
-    assert len(full) == 2
+    gated_prep = orch.prepare(obs, apply_gate=True)  # type: ignore[arg-type]
+    full_prep = orch.prepare(obs, apply_gate=False)  # type: ignore[arg-type]
+    assert gated_prep.features == []
+    assert len(full_prep.features) == 2

@@ -1,22 +1,21 @@
-#!/usr/bin/env python3
 """Refresh per-image regression baselines from live navigation results.
 
-Operator workflow tool: runs the autonomous orchestrator against one or
-more library sidecars and writes the resulting rounded
+Developer tool — not a user-facing CLI.  Runs the autonomous orchestrator
+against one or more library sidecars and writes the resulting rounded
 ``(offset_dv_px, offset_du_px, confidence)`` triples to
 ``tests/integration/baselines/<image_id>.json``.
 
-Usage:
+Usage (run from the project checkout):
 
-    nav_update_baselines --all                  # every sidecar
-    nav_update_baselines --image-id ID [...]    # one or more named images
-    nav_update_baselines --all --dry-run        # show would-write/update only
+    python -m tests.integration.update_baselines --all
+    python -m tests.integration.update_baselines --image-id ID [...]
+    python -m tests.integration.update_baselines --all --dry-run
 
 Requirements:
 
 * ``PDS3_HOLDINGS_DIR`` must be set (the orchestrator needs holdings
   access to navigate each image).
-* Must be invoked from a project checkout — the CLI imports
+* Must be invoked from a project checkout — the module imports
   :mod:`tests.integration.sidecar` and :mod:`tests.integration.baseline`
   for schema and discovery.
 
@@ -38,13 +37,6 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
-
-# Make CLI runnable from a source-tree checkout (matches the pattern used
-# by every other ``src/main/*.py`` driver).
-package_source_path = os.path.dirname(os.path.dirname(__file__))
-sys.path.insert(0, package_source_path)
-project_root_path = os.path.dirname(package_source_path)
-sys.path.insert(0, project_root_path)
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only imports
     from tests.integration.baseline import Baseline
@@ -78,7 +70,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         omitted, or when both are supplied (mutually exclusive).
     """
     parser = argparse.ArgumentParser(
-        prog='nav_update_baselines',
+        prog='python -m tests.integration.update_baselines',
         description=(
             'Run the autonomous orchestrator against library sidecars and '
             'write rounded baseline JSON files under '
@@ -173,6 +165,9 @@ def update_one(sidecar: Sidecar, *, baselines_dir: Path, dry_run: bool) -> _Imag
     """
     # Local imports keep the module importable without holdings / oops.
     from filecache import FCPath
+
+    from nav.dataset.dataset import ImageFile, ImageFiles
+    from nav.navigate_image_files import navigate_image_files
     from tests.integration.baseline import (
         Baseline,
         baseline_path,
@@ -182,9 +177,6 @@ def update_one(sidecar: Sidecar, *, baselines_dir: Path, dry_run: bool) -> _Imag
         _MISSION_TO_OBS_CLASS,
         _resolve_pds3_url,
     )
-
-    from nav.dataset.dataset import ImageFile, ImageFiles
-    from nav.navigate_image_files import navigate_image_files
 
     obs_class = _MISSION_TO_OBS_CLASS[sidecar.mission]
     image_url = _resolve_pds3_url(sidecar.image_url)
@@ -251,7 +243,7 @@ def _format_baseline_diff(old: Baseline, new: Baseline) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Entry point for ``nav_update_baselines``.
+    """Entry point for ``python -m tests.integration.update_baselines``.
 
     Parameters:
         argv: Optional argument list (defaults to ``sys.argv[1:]``);
@@ -264,7 +256,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     if not os.environ.get('PDS3_HOLDINGS_DIR'):
         print(
-            'nav_update_baselines: PDS3_HOLDINGS_DIR is not set; cannot '
+            'update_baselines: PDS3_HOLDINGS_DIR is not set; cannot '
             'navigate images without the holdings cache',
             file=sys.stderr,
         )
@@ -285,7 +277,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f'FAILED    {image_id}  no matching sidecar in library', file=sys.stderr)
     if not sidecars:
         print(
-            'nav_update_baselines: no sidecars selected (library empty?)',
+            'update_baselines: no sidecars selected (library empty?)',
             file=sys.stderr,
         )
         return 1 if missing else 0

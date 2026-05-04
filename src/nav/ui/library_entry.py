@@ -53,16 +53,17 @@ class LibraryEntryDraft:
     camera: str
     filter_combo: str
     exposure_time_sec: float | None
+    image_datetime_utc: str | None
 
 
 def infer_obs_metadata(obs: Any) -> LibraryEntryDraft:
     """Pull the sidecar's auto-fillable fields off an observation snapshot.
 
     Missing or unknown fields are returned as empty strings (or ``None``
-    for ``exposure_time_sec``) so the operator sees them in the YAML
-    and can decide what to write; an empty mission/camera trips
-    :func:`tests.integration.sidecar.load_sidecar` on validation, which
-    is the right error.
+    for ``exposure_time_sec`` / ``image_datetime_utc``) so the operator
+    sees them in the YAML and can decide what to write; an empty
+    mission/camera trips :func:`tests.integration.sidecar.load_sidecar`
+    on validation, which is the right error.
     """
     image_id = ''
     abspath = getattr(obs, 'abspath', None)
@@ -91,12 +92,23 @@ def infer_obs_metadata(obs: Any) -> LibraryEntryDraft:
         if value > 0.0 and value == value:  # finite & positive
             exposure_time_sec = value
 
+    image_datetime_utc: str | None = None
+    raw_midtime = getattr(obs, 'midtime', None)
+    if raw_midtime is not None:
+        try:
+            from nav.support.time import et_to_utc
+
+            image_datetime_utc = et_to_utc(float(raw_midtime), digits=3)
+        except Exception:
+            image_datetime_utc = None
+
     return LibraryEntryDraft(
         image_id=image_id,
         mission=mission,
         camera=camera,
         filter_combo=filter_combo,
         exposure_time_sec=exposure_time_sec,
+        image_datetime_utc=image_datetime_utc,
     )
 
 
@@ -194,31 +206,39 @@ def build_sidecar_yaml(
     op_name = operator or os.environ.get('USER') or 'unknown'
     on_date = (today or date.today()).isoformat()
     if draft.exposure_time_sec is None:
-        exposure_line = 'exposure_time_sec: TODO_REPLACE_EXPOSURE  # seconds; from obs.texp\n'
+        exposure_block = '# seconds; from obs.texp\nexposure_time_sec: TODO_REPLACE_EXPOSURE\n'
     else:
-        exposure_line = f'exposure_time_sec: {draft.exposure_time_sec:.4f}\n'
+        exposure_block = f'exposure_time_sec: {draft.exposure_time_sec:.4f}\n'
+    if draft.image_datetime_utc is None:
+        datetime_block = (
+            '# UTC ISO 8601; from et_to_utc(obs.midtime)\n'
+            "image_datetime_utc: 'TODO_REPLACE_DATETIME'\n"
+        )
+    else:
+        datetime_block = f"image_datetime_utc: '{draft.image_datetime_utc}'\n"
     return (
         'schema_version: 1\n'
+        '# COISS | VGISS | GOSSI | NHLORRI\n'
+        f'mission: {draft.mission or "TODO_REPLACE_MISSION"}\n'
+        '# NAC | WAC | SSI | NA | WA | LORRI\n'
+        f'camera: {draft.camera or "TODO_REPLACE_CAMERA"}\n'
         f'image_id: {draft.image_id or "TODO_REPLACE_IMAGE_ID"}\n'
-        f'mission: {draft.mission or "TODO_REPLACE_MISSION"}'
-        '                  # COISS | VGISS | GOSSI | NHLORRI\n'
-        f'camera: {draft.camera or "TODO_REPLACE_CAMERA"}'
-        '                    # NAC | WAC | SSI | NA | WA | LORRI\n'
-        f"filter_combo: '{draft.filter_combo}'"
-        "                # canonicalized: filters sorted, '+'-joined\n"
-        + exposure_line
+        + datetime_block
+        + exposure_block
+        + "# canonicalized: filters sorted, '+'-joined\n"
+        + f"filter_combo: '{draft.filter_combo}'\n"
         + f"image_url: '{image_url}'\n"
         '\n'
+        '# First tag is the primary class; must match the directory the\n'
+        '# sidecar lives in.\n'
         'scene_tags:\n'
-        '  - TODO_REPLACE_PRIMARY_CLASS         # First tag is the primary class;\n'
-        '                                       # must match the directory the\n'
-        '                                       # sidecar lives in.\n'
+        '  - TODO_REPLACE_PRIMARY_CLASS\n'
         '\n'
         'ground_truth:\n'
         f'  offset_dv_px: {offset_dv_px:.4f}\n'
         f'  offset_du_px: {offset_du_px:.4f}\n'
-        '  offset_uncertainty_px: 1.0           # 1sigma marginal; tighten\n'
-        '                                       # for bright stars / sharp limbs.\n'
+        '  # 1sigma marginal; tighten for bright stars / sharp limbs.\n'
+        '  offset_uncertainty_px: 1.0\n'
         '  source: operator_verified\n'
         f'  operator: {op_name}\n'
         f'  verified_date: {on_date}\n'
@@ -227,9 +247,12 @@ def build_sidecar_yaml(
         '    TODO: describe the scene and any caveats.\n'
         '\n'
         'expected:\n'
-        '  status: ok                           # ok | failed | conflicted\n'
-        '  confidence_tier: high                # high | medium | low | failed\n'
-        '  primary_technique: TODO_REPLACE_TECHNIQUE  # e.g. BodyLimbNav\n'
+        '  # ok | failed | conflicted\n'
+        '  status: ok\n'
+        '  # high | medium | low | failed\n'
+        '  confidence_tier: high\n'
+        '  # e.g. BodyLimbNav\n'
+        '  primary_technique: TODO_REPLACE_TECHNIQUE\n'
         '  techniques_must_run: []\n'
         '  techniques_must_skip: []\n'
     )

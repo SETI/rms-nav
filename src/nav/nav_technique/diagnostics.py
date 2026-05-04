@@ -14,6 +14,7 @@ __all__ = [
     'BodyDiscDiagnostics',
     'BodyLimbDiagnostics',
     'BodyTerminatorDiagnostics',
+    'ManualNavDiagnostics',
     'NavTechniqueDiagnostics',
     'RingAnnulusDiagnostics',
     'RingEdgeDiagnostics',
@@ -263,11 +264,31 @@ class StarRefineDiagnostics:
     }
 
 
+@dataclass(frozen=True)
+class ManualNavDiagnostics:
+    """Diagnostics emitted by ``NavTechniqueManual``.
+
+    Parameters:
+        operator_accepted: ``True`` when the operator confirmed the
+            dialog's chosen offset.  Always ``True`` on results that
+            reach the curator (cancelled picks short-circuit before the
+            ``NavResult`` is built), but kept explicit so the JSON
+            metadata records the fact that a human, not an autonomous
+            technique, set the offset.
+    """
+
+    operator_accepted: bool = True
+    CURATOR_FIELDS: ClassVar[dict[str, str | None]] = {
+        'operator_accepted': 'operator_accepted',
+    }
+
+
 NavTechniqueDiagnostics = (
     BodyDiscDiagnostics
     | BodyLimbDiagnostics
     | BodyTerminatorDiagnostics
     | BodyBlobDiagnostics
+    | ManualNavDiagnostics
     | RingEdgeDiagnostics
     | RingAnnulusDiagnostics
     | StarFieldDiagnostics

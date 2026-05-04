@@ -1,4 +1,4 @@
-"""Unit tests for the ``nav_update_baselines`` CLI helpers.
+"""Unit tests for the ``tests.integration.update_baselines`` developer tool.
 
 The end-to-end path that runs the orchestrator against real holdings is
 exercised by ``test_baselines.test_regression_baseline_exact_match``;
@@ -11,23 +11,15 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from datetime import date
 from pathlib import Path
 from unittest import mock
 
 import pytest
 
-# Make the CLI module importable from a source-tree checkout (mirrors the
-# sys.path manipulation the script itself performs at top-level).
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-SRC_PATH = PROJECT_ROOT / 'src'
-if str(SRC_PATH) not in sys.path:
-    sys.path.insert(0, str(SRC_PATH))
-
-from main import nav_update_baselines  # noqa: E402  (path-dependent import)
-from tests.integration.baseline import Baseline, baseline_path  # noqa: E402
-from tests.integration.sidecar import (  # noqa: E402
+from tests.integration import update_baselines
+from tests.integration.baseline import Baseline, baseline_path
+from tests.integration.sidecar import (
     Expected,
     GroundTruth,
     LibraryRoot,
@@ -77,20 +69,20 @@ def _make_sidecar(
 def test_parse_args_requires_selection() -> None:
     """Neither ``--all`` nor ``--image-id`` is a usage error."""
     with pytest.raises(SystemExit) as exc:
-        nav_update_baselines.parse_args([])
+        update_baselines.parse_args([])
     assert exc.value.code == 2
 
 
 def test_parse_args_all_and_image_id_are_mutually_exclusive() -> None:
     """``--all`` and ``--image-id`` cannot be combined."""
     with pytest.raises(SystemExit) as exc:
-        nav_update_baselines.parse_args(['--all', '--image-id', 'X'])
+        update_baselines.parse_args(['--all', '--image-id', 'X'])
     assert exc.value.code == 2
 
 
 def test_parse_args_all_alone_is_accepted() -> None:
     """``--all`` alone parses to ``Namespace(all=True, image_id=[])``."""
-    args = nav_update_baselines.parse_args(['--all'])
+    args = update_baselines.parse_args(['--all'])
     assert args.all is True
     assert args.image_id == []
     assert args.dry_run is False
@@ -98,14 +90,14 @@ def test_parse_args_all_alone_is_accepted() -> None:
 
 def test_parse_args_repeatable_image_id() -> None:
     """``--image-id`` is repeatable; values accumulate in order."""
-    args = nav_update_baselines.parse_args(['--image-id', 'A', '--image-id', 'B'])
+    args = update_baselines.parse_args(['--image-id', 'A', '--image-id', 'B'])
     assert args.all is False
     assert args.image_id == ['A', 'B']
 
 
 def test_parse_args_dry_run_flag() -> None:
     """``--dry-run`` flips the corresponding boolean."""
-    args = nav_update_baselines.parse_args(['--all', '--dry-run'])
+    args = update_baselines.parse_args(['--all', '--dry-run'])
     assert args.dry_run is True
 
 
@@ -122,7 +114,7 @@ def test_select_sidecars_all_returns_every_discovered_sidecar() -> None:
         mock.patch.object(LibraryRoot, 'discover_sidecar_paths', return_value=['/p/A', '/p/B']),
         mock.patch('tests.integration.sidecar.load_sidecar', side_effect=[fake_a, fake_b]),
     ):
-        selected, missing = nav_update_baselines.select_sidecars(
+        selected, missing = update_baselines.select_sidecars(
             LibraryRoot(), use_all=True, image_ids=[]
         )
     assert [s.image_id for s in selected] == ['A', 'B']
@@ -143,7 +135,7 @@ def test_select_sidecars_filters_by_image_id() -> None:
             side_effect=[fake_a, fake_b, fake_c],
         ),
     ):
-        selected, missing = nav_update_baselines.select_sidecars(
+        selected, missing = update_baselines.select_sidecars(
             LibraryRoot(), use_all=False, image_ids=['B', 'C']
         )
     assert [s.image_id for s in selected] == ['B', 'C']
@@ -157,7 +149,7 @@ def test_select_sidecars_reports_missing_image_ids() -> None:
         mock.patch.object(LibraryRoot, 'discover_sidecar_paths', return_value=['/p/A']),
         mock.patch('tests.integration.sidecar.load_sidecar', side_effect=[fake_a]),
     ):
-        selected, missing = nav_update_baselines.select_sidecars(
+        selected, missing = update_baselines.select_sidecars(
             LibraryRoot(), use_all=False, image_ids=['A', 'NOT_THERE']
         )
     assert [s.image_id for s in selected] == ['A']
@@ -176,7 +168,7 @@ def test_update_one_creates_new_baseline_when_missing(tmp_path: Path) -> None:
         'nav.navigate_image_files.navigate_image_files',
         return_value=(True, {'offset': [12.34567, -7.89012], 'confidence': 0.876}),
     ):
-        outcome = nav_update_baselines.update_one(sidecar, baselines_dir=tmp_path, dry_run=False)
+        outcome = update_baselines.update_one(sidecar, baselines_dir=tmp_path, dry_run=False)
     assert outcome.kind == 'CREATE'
     target = baseline_path(tmp_path, 'NEW_001')
     assert target.is_file()
@@ -201,7 +193,7 @@ def test_update_one_unchanged_when_baseline_already_matches(tmp_path: Path) -> N
         'nav.navigate_image_files.navigate_image_files',
         return_value=(True, {'offset': [1.0, 2.0], 'confidence': 0.5}),
     ):
-        outcome = nav_update_baselines.update_one(sidecar, baselines_dir=tmp_path, dry_run=False)
+        outcome = update_baselines.update_one(sidecar, baselines_dir=tmp_path, dry_run=False)
     assert outcome.kind == 'UNCHANGED'
     # The matching write would still have produced the same bytes, but a
     # caller relying on mtime to detect baseline churn deserves a no-op.
@@ -223,7 +215,7 @@ def test_update_one_update_includes_field_diff(tmp_path: Path) -> None:
         'nav.navigate_image_files.navigate_image_files',
         return_value=(True, {'offset': [1.5, 2.0], 'confidence': 0.555}),
     ):
-        outcome = nav_update_baselines.update_one(sidecar, baselines_dir=tmp_path, dry_run=False)
+        outcome = update_baselines.update_one(sidecar, baselines_dir=tmp_path, dry_run=False)
     assert outcome.kind == 'UPDATE'
     assert 'dv +1.0000 -> +1.5000' in outcome.detail
     assert 'conf 0.500 -> 0.555' in outcome.detail
@@ -245,7 +237,7 @@ def test_update_one_dry_run_does_not_write(tmp_path: Path) -> None:
         'nav.navigate_image_files.navigate_image_files',
         return_value=(True, {'offset': [1.5, 2.0], 'confidence': 0.555}),
     ):
-        outcome = nav_update_baselines.update_one(sidecar, baselines_dir=tmp_path, dry_run=True)
+        outcome = update_baselines.update_one(sidecar, baselines_dir=tmp_path, dry_run=True)
     assert outcome.kind == 'CREATE'
     assert not target.exists()
 
@@ -257,7 +249,7 @@ def test_update_one_failed_when_orchestrator_returns_no_offset(tmp_path: Path) -
         'nav.navigate_image_files.navigate_image_files',
         return_value=(False, {'status': 'failed'}),
     ):
-        outcome = nav_update_baselines.update_one(sidecar, baselines_dir=tmp_path, dry_run=False)
+        outcome = update_baselines.update_one(sidecar, baselines_dir=tmp_path, dry_run=False)
     assert outcome.kind == 'FAILED'
     assert 'no offset' in outcome.detail
     assert not baseline_path(tmp_path, 'FAIL_001').exists()
@@ -271,5 +263,5 @@ def test_update_one_failed_when_orchestrator_returns_no_offset(tmp_path: Path) -
 def test_main_refuses_to_run_without_holdings() -> None:
     """``main`` exits with code 2 when ``PDS3_HOLDINGS_DIR`` is unset."""
     with mock.patch.dict(os.environ, {}, clear=True):
-        rc = nav_update_baselines.main(['--all'])
+        rc = update_baselines.main(['--all'])
     assert rc == 2

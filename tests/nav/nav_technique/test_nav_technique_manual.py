@@ -138,29 +138,29 @@ def _make_fake_dialog(
 
 
 def test_run_manual_nav_returns_result_on_accept() -> None:
-    """When the dialog returns ``accepted=True`` the technique result is non-spurious."""
+    """When the dialog returns ``accepted=True`` the NavResult is ``ok``."""
     obs = _FakeObsForRunManual()
     obs.with_template = True  # type: ignore[attr-defined]
     fake_dialog, instances = _make_fake_dialog((True, (3.0, -2.0), 0.92))
     with patch('nav.ui.manual_nav_dialog.ManualNavDialog', fake_dialog):
         result = run_manual_nav(obs)  # type: ignore[arg-type]
     assert result is not None
-    assert result.spurious is False
+    assert result.status == 'ok'
     assert result.offset_px == (3.0, -2.0)
-    assert result.technique_name == NavTechniqueManual.name
+    assert result.confidence_rank == 'high'
+    assert len(result.per_technique) == 1
+    assert result.per_technique[0].technique_name == NavTechniqueManual.name
     assert len(instances) == 1
 
 
-def test_run_manual_nav_returns_spurious_on_cancel() -> None:
-    """When the dialog is cancelled the technique result is spurious / zero."""
+def test_run_manual_nav_returns_none_on_cancel() -> None:
+    """When the dialog is cancelled ``run_manual_nav`` returns ``None``."""
     obs = _FakeObsForRunManual()
     obs.with_template = True  # type: ignore[attr-defined]
     fake_dialog, _instances = _make_fake_dialog((False, None, None))
     with patch('nav.ui.manual_nav_dialog.ManualNavDialog', fake_dialog):
         result = run_manual_nav(obs)  # type: ignore[arg-type]
-    assert result is not None
-    assert result.spurious is True
-    assert result.confidence == 0.0
+    assert result is None
 
 
 def test_run_manual_nav_runs_on_template_less_star_feature() -> None:
@@ -177,7 +177,7 @@ def test_run_manual_nav_runs_on_template_less_star_feature() -> None:
     with patch('nav.ui.manual_nav_dialog.ManualNavDialog', fake_dialog):
         result = run_manual_nav(obs)  # type: ignore[arg-type]
     assert result is not None
-    assert result.spurious is False
+    assert result.status == 'ok'
     assert result.offset_px == (1.5, -0.5)
     assert len(instances) == 1
 
@@ -285,6 +285,6 @@ def test_run_manual_nav_runs_for_polyline_only_scene(monkeypatch: pytest.MonkeyP
     with patch('nav.ui.manual_nav_dialog.ManualNavDialog', fake_dialog):
         result = run_manual_nav(obs)  # type: ignore[arg-type]
     assert result is not None
-    assert result.spurious is False
+    assert result.status == 'ok'
     assert result.offset_px == (1.0, 2.0)
     assert len(instances) == 1

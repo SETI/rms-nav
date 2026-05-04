@@ -148,6 +148,7 @@ class Sidecar:
     ground_truth: GroundTruth
     expected: Expected
     exposure_time_sec: float | None = None
+    image_datetime_utc: str | None = None
     camera_rotation_expected: CameraRotationExpected | None = None
 
     @property
@@ -218,6 +219,7 @@ def _validate_sidecar(raw: dict[str, Any], *, path: Path) -> Sidecar:
         raw.get('camera_rotation_expected'), path=path
     )
     exposure_time_sec = _validate_optional_exposure(raw.get('exposure_time_sec'), path=path)
+    image_datetime_utc = _validate_optional_datetime(raw.get('image_datetime_utc'), path=path)
 
     return Sidecar(
         path=path,
@@ -231,8 +233,30 @@ def _validate_sidecar(raw: dict[str, Any], *, path: Path) -> Sidecar:
         ground_truth=ground_truth,
         expected=expected,
         exposure_time_sec=exposure_time_sec,
+        image_datetime_utc=image_datetime_utc,
         camera_rotation_expected=camera_rotation_expected,
     )
+
+
+def _validate_optional_datetime(raw: Any, *, path: Path) -> str | None:
+    """Validate the optional ``image_datetime_utc`` field.
+
+    Permitted values: missing / None (legacy sidecars predating the
+    field), or a non-empty string.  No format check beyond non-empty:
+    the field is informational metadata for future cross-referencing
+    against PDS labels, not a navigation input.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        raise SidecarValidationError(
+            f'{path}: image_datetime_utc must be a string, got {type(raw).__name__}'
+        )
+    if not raw.strip():
+        raise SidecarValidationError(
+            f'{path}: image_datetime_utc must be a non-empty string when present'
+        )
+    return raw
 
 
 def _validate_optional_exposure(raw: Any, *, path: Path) -> float | None:

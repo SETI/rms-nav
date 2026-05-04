@@ -38,7 +38,7 @@ from nav.support.file import json_as_string
 from nav.support.misc import log_run_environment
 from nav.support.summary_png import render_annotated_summary_rgb
 
-__all__ = ['navigate_image_files']
+__all__ = ['build_metadata_from_result', 'navigate_image_files', 'write_summary_png']
 
 
 _SPICE_DATA_HINTS = (
@@ -136,11 +136,11 @@ def navigate_image_files(
                 only_techniques=nav_techniques or '*',
             )
             nav_result = orchestrator.navigate(snapshot_inst)
-            metadata = _metadata_from_result(nav_result, image_path, image_name)
+            metadata = build_metadata_from_result(nav_result, image_path, image_name)
             if write_output_files:
                 logger.info('Writing metadata to %s', public_metadata_file)
                 public_metadata_file.write_text(json_as_string(metadata))
-                _write_summary_png(snapshot_inst, nav_result, summary_png_file, logger)
+                write_summary_png(snapshot_inst, nav_result, summary_png_file, logger)
             MAIN_LOGGER.info('Wrote log to %s', image_log_path)
             return nav_result.status == 'ok', metadata
     finally:
@@ -173,8 +173,21 @@ def _metadata_for_load_error(
     }
 
 
-def _metadata_from_result(result: NavResult, image_path: Path, image_name: str) -> dict[str, Any]:
-    """Build the JSON metadata dict from a successful or failed NavResult."""
+def build_metadata_from_result(
+    result: NavResult, image_path: Path, image_name: str
+) -> dict[str, Any]:
+    """Build the JSON metadata dict from a NavResult.
+
+    Used by both the autonomous pipeline and the manual-nav driver so a
+    manually-picked offset writes the same ``_metadata.json`` schema.
+
+    Parameters:
+        result: NavResult to curate.
+        image_path: Absolute path to the source image; written to the
+            ``observation.image_path`` field.
+        image_name: Basename of the source image; written to the
+            ``observation.image_name`` field.
+    """
     metadata: dict[str, Any] = {
         'status': result.status,
         'observation': {
@@ -189,7 +202,7 @@ def _metadata_from_result(result: NavResult, image_path: Path, image_name: str) 
     return metadata
 
 
-def _write_summary_png(
+def write_summary_png(
     obs: ObsSnapshotInst,
     result: NavResult,
     png_path: FCPath,

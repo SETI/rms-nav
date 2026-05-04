@@ -68,7 +68,50 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only import
 
 __all__ = [
     'NavOrchestrator',
+    'OrchestratorPrep',
 ]
+
+
+@dataclass(frozen=True)
+class OrchestratorPrep:
+    """Per-image artifacts produced by :meth:`NavOrchestrator.prepare`.
+
+    Bundles every prep-phase output a downstream caller might want.  The
+    autonomous :meth:`NavOrchestrator.navigate` does not use this struct
+    (it inlines the prep so it can short-circuit on hard-failure
+    images), but the manual-navigation driver does: it wraps the
+    operator's chosen offset in a full :class:`NavResult` populated
+    from ``provenance`` / ``image_classifier`` / ``feature_inventory``
+    / ``model_metadata`` / ``annotations`` so the manual pipeline
+    writes the same ``_metadata.json`` and ``_summary.png`` files the
+    autonomous pipeline does.
+
+    Parameters:
+        context: NavContext built from the observation.
+        provenance: Reproducibility envelope shared with the autonomous
+            pipeline.
+        image_classifier: Image-quality classifier verdict.
+        features: Either the gated-kept feature list (when
+            ``prepare(..., apply_gate=True)``) or every emitted feature
+            (when ``apply_gate=False``).  The manual driver always
+            requests the un-gated list because the operator visually
+            overrides gate decisions.
+        feature_inventory: Per-feature summary entries.  When the gate
+            ran, both kept and gated features are included with their
+            ``gated`` flag set accordingly; when the gate was skipped,
+            every entry has ``gated=False``.
+        model_metadata: Per-NavModel diagnostic dicts keyed by model name.
+        annotations: Merged annotation collection assembled from every
+            built NavModel's ``to_annotations``.
+    """
+
+    context: NavContext
+    provenance: Provenance
+    image_classifier: NavImageClassifierResult
+    features: list[NavFeature]
+    feature_inventory: list[NavFeatureSummary]
+    model_metadata: dict[str, dict[str, Any]]
+    annotations: Annotations
 
 
 _HARD_FAILURE_TO_REASON: dict[ImageClass, NavStatusReason] = {
@@ -213,41 +256,53 @@ class NavOrchestrator(NavBase):
         obs: ObsSnapshotInst,
         *,
         apply_gate: bool = True,
-    ) -> tuple[NavContext, list[NavFeature]]:
-        """Build per-image state without running any technique.
+    ) -> OrchestratorPrep:
+        """Build every per-image artifact a downstream caller might use.
 
         Runs the same pre-technique pipeline as :meth:`navigate`: builds
         the provenance envelope and the :class:`NavContext`, calls every
-        registered NavModel's ``create_model``, and extracts features.
-        Hard-failure image classes are logged but **not** short-circuited
-        — the caller (manual-nav dialog, debugger) decides what to do on
-        a blank or saturated frame.
+        registered NavModel's ``create_model``, extracts features,
+        builds the feature inventory, snapshots per-model metadata, and
+        merges annotations.  Hard-failure image classes are logged but
+        **not** short-circuited — the caller (manual-nav dialog,
+        debugger) decides what to do on a blank or saturated frame.
 
         Parameters:
             obs: The observation snapshot to prepare.
             apply_gate: When ``True`` (the default) the reliability gate
-                runs and only the kept features are returned.  When
-                ``False`` every emitted feature is returned, gated or
-                not — useful for the manual-nav dialog, where the
-                operator overrides the autonomous reliability decision.
-
-        Returns:
-            ``(context, features)``.  ``features`` is the gated subset
-            when ``apply_gate=True``, otherwise the full set.
+                runs; ``OrchestratorPrep.features`` carries only the
+                kept features and ``feature_inventory`` records the
+                gate verdict for both kept and gated entries.  When
+                ``False`` every emitted feature is returned (with
+                ``feature_inventory`` marking each as un-gated) — used
+                by the manual-nav dialog, where the operator overrides
+                the autonomous reliability decision.
         """
         provenance = self._make_provenance(obs)
         context, image_classifier = self._make_context(obs, provenance)
         self._log_classifier_verdict(image_classifier)
         built_models = self._build_models()
         all_features = self._extract_features(context, built_models)
-        if not apply_gate:
+        if apply_gate:
+            kept, gated = self._extract_and_gate(all_features)
+            features = kept
+            feature_inventory = self._build_inventory(kept, gated)
+        else:
             self._logger.info(
                 'Reliability gate skipped (apply_gate=False); returning %d feature(s)',
                 len(all_features),
             )
-            return context, all_features
-        kept, _gated = self._extract_and_gate(all_features)
-        return context, kept
+            features = all_features
+            feature_inventory = self._build_inventory(all_features, [])
+        return OrchestratorPrep(
+            context=context,
+            provenance=provenance,
+            image_classifier=image_classifier,
+            features=features,
+            feature_inventory=feature_inventory,
+            model_metadata=self._collect_model_metadata(built_models),
+            annotations=self._collect_annotations(context, built_models),
+        )
 
     def navigate(self, obs: ObsSnapshotInst) -> NavResult:
         """Run the full pipeline on one observation.

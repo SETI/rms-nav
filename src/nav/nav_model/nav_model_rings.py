@@ -244,6 +244,11 @@ class NavModelRings(NavModelRingsBase):
             self._logger.info('No planet identified — model is empty')
             return
         feature_count = meta.get('feature_count', 0)
+        if feature_count == 0:
+            self._logger.info(
+                'Planet = %s, surviving features = 0 — model is empty', planet
+            )
+            return
         self._logger.info(
             'Planet = %s, surviving features = %d, km/px radial = %.4f, subject range = %.0f km',
             planet,
@@ -251,9 +256,8 @@ class NavModelRings(NavModelRingsBase):
             self._km_per_pixel_radial,
             self._subject_range_km,
         )
-        if feature_count > 0:
-            names = [entry['name'] for entry in meta.get('features', [])]
-            self._logger.debug('Surviving feature names = %s', names)
+        names = [entry['name'] for entry in meta.get('features', [])]
+        self._logger.debug('Surviving feature names = %s', names)
         self._logger.debug(
             'Extfov shape (vu) = (%d, %d); predicted_center = %s',
             self._extfov_v_size,
@@ -269,6 +273,7 @@ class NavModelRings(NavModelRingsBase):
             self._logger.warning('No closest planet found -- cannot create ring model')
             return
         self._planet = planet
+        self._metadata['planet'] = planet
         self._extfov_v_size = obs.extdata_shape_vu[0]
         self._extfov_u_size = obs.extdata_shape_vu[1]
         self._predicted_center_vu = (
@@ -322,6 +327,7 @@ class NavModelRings(NavModelRingsBase):
                 f'(got {type(features_raw).__name__!r})'
             )
         if not features_raw:
+            self._logger.info('Empty ring features dict for planet %s', planet)
             return
         ring_target = f'{planet.lower()}:ring'
         bp_radii = obs.ext_bp.ring_radius(ring_target)
@@ -346,6 +352,14 @@ class NavModelRings(NavModelRingsBase):
         validate_no_date_overlaps(features)
         max_feature_extent = max(f.max_extent_radius for f in features)
         if min_radius > max_feature_extent:
+            self._logger.info(
+                'Visible ring radial range [%.0f, %.0f] km lies outside catalog '
+                'max extent of %.0f km for planet %s',
+                min_radius,
+                max_radius,
+                max_feature_extent,
+                planet,
+            )
             return
         resolutions: NDArrayFloatType = obs.ext_bp.ring_radial_resolution(ring_target).vals
         self._km_per_pixel_radial = float(np.mean(resolutions[np.isfinite(resolutions)]))
@@ -377,6 +391,9 @@ class NavModelRings(NavModelRingsBase):
         )
         surviving = feature_filter.filter(features)
         if not surviving:
+            self._logger.info(
+                'All %d ring features filtered out for planet %s', len(features), planet
+            )
             return
         all_edge_radii: list[tuple[float, str]] = []
         for feat in surviving:

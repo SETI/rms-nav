@@ -30,6 +30,7 @@ def _fake_obs(
     filter1: str | None = 'CL1',
     filter2: str | None = 'CL2',
     texp: float | None = 0.46,
+    midtime: float | None = None,
 ) -> Any:
     """Build a tiny class with the named class name and the given attributes."""
     cls = type(
@@ -41,6 +42,7 @@ def _fake_obs(
             'filter1': filter1,
             'filter2': filter2,
             'texp': texp,
+            'midtime': midtime,
         },
     )
     return cls()
@@ -75,6 +77,29 @@ def test_infer_obs_metadata_missing_texp_attribute(tmp_path: Path) -> None:
     delattr(type(obs), 'texp')
     draft = infer_obs_metadata(obs)
     assert draft.exposure_time_sec is None
+
+
+def test_infer_obs_metadata_extracts_image_datetime_utc(tmp_path: Path) -> None:
+    """``obs.midtime`` (ET seconds) is converted to a UTC ISO 8601 string.
+
+    The exact formatted string is timekernel-dependent, so only the
+    coarse ISO 8601 shape is asserted (year-month-dayT hour:min:sec).
+    """
+    img_path = tmp_path / 'X.IMG'
+    img_path.write_bytes(b'')
+    # ET=0 maps to 2000-01-01 (J2000) plus a few minutes of offset.
+    draft = infer_obs_metadata(_fake_obs(abspath=img_path, midtime=0.0))
+    assert draft.image_datetime_utc is not None
+    assert draft.image_datetime_utc.startswith('2000-01-01T')
+
+
+def test_infer_obs_metadata_missing_midtime_attribute(tmp_path: Path) -> None:
+    """``obs`` without a ``midtime`` attribute drops cleanly to ``None``."""
+    img_path = tmp_path / 'X.IMG'
+    img_path.write_bytes(b'')
+    obs = _fake_obs(abspath=img_path, midtime=None)
+    draft = infer_obs_metadata(obs)
+    assert draft.image_datetime_utc is None
 
 
 def test_infer_obs_metadata_returns_blanks_for_unknown_obs() -> None:
@@ -169,6 +194,7 @@ def test_build_sidecar_yaml_round_trips_through_validator(tmp_path: Path) -> Non
         camera='NAC',
         filter_combo='CL1+CL2',
         exposure_time_sec=0.46,
+        image_datetime_utc='2006-04-28T12:34:56.789Z',
     )
     yaml_text = build_sidecar_yaml(
         draft=draft,
@@ -203,6 +229,8 @@ def test_build_sidecar_yaml_round_trips_through_validator(tmp_path: Path) -> Non
     assert sidecar.ground_truth.operator == 'rfrench'
     assert sidecar.ground_truth.verified_date == date(2026, 4, 28)
     assert sidecar.expected.primary_technique == 'BodyLimbNav'
+    assert sidecar.exposure_time_sec == pytest.approx(0.46)
+    assert sidecar.image_datetime_utc == '2006-04-28T12:34:56.789Z'
 
 
 def test_build_sidecar_yaml_unedited_fails_validation(tmp_path: Path) -> None:
@@ -217,6 +245,7 @@ def test_build_sidecar_yaml_unedited_fails_validation(tmp_path: Path) -> None:
         camera='NAC',
         filter_combo='CL+CL',
         exposure_time_sec=None,
+        image_datetime_utc=None,
     )
     yaml_text = build_sidecar_yaml(
         draft=draft,
