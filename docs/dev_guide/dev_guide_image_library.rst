@@ -3,8 +3,23 @@ Image Library
 ==================
 
 The image library is the operator-curated regression suite at
-``tests/integration/image_library/``.  Each entry is a YAML *sidecar*
-that records:
+``tests/integration/image_library/``.  It serves three roles at once:
+
+- **Regression cohort** — every shipping commit re-navigates every library
+  image and asserts the orchestrator's reported offset stays within the
+  per-image tolerance budget.  Drift is caught the moment it lands.
+- **Calibration cohort** — the per-technique confidence formulas in
+  ``config_510_techniques.yaml`` are tuned against the library so that the
+  orchestrator's reported confidence_tier matches the operator-assigned
+  tier on every image.  Without the library there is no objective signal to
+  tune the confidence formulas against.
+- **Coverage map** — the scene-class taxonomy (``body_full_fov``,
+  ``ring_only_curved``, ``star_dominated``, ``below_resolution_body``,
+  ``high_phase_terminator``, etc.) makes coverage gaps visible at a glance:
+  a regime with zero entries is a regime nobody has hand-calibrated, and
+  the orchestrator's behaviour there is unverified.
+
+Each entry is a YAML *sidecar* that records:
 
 * the image's mission / camera / filter combo,
 * an opaque ``pds3://`` URL resolved through ``PDS3_HOLDINGS_DIR``,
@@ -43,9 +58,12 @@ Sidecar schema (schema_version 1)
 .. code-block:: yaml
 
    schema_version: 1
-   image_id: W1521598221_1_CALIB
    mission: COISS                     # COISS | VGISS | GOSSI | NHLORRI
    camera: WAC                        # NAC | WAC | SSI | NA | WA | LORRI
+   image_id: W1521598221_1_CALIB
+   image_datetime_utc: '2006-04-26T08:32:14.123Z'
+                                      # UTC ISO 8601; from et_to_utc(obs.midtime)
+   exposure_time_sec: 0.46            # seconds; from obs.texp
    filter_combo: 'CL+VIO'             # canonicalized: filters sorted, '+'-joined
    image_url: 'pds3://volumes/COISS_2xxx/COISS_2021/.../W1521598221_1_CALIB.IMG'
 
@@ -74,6 +92,158 @@ Sidecar schema (schema_version 1)
 The full validator lives in :mod:`tests.integration.sidecar`; malformed
 fields raise :class:`~tests.integration.sidecar.SidecarValidationError`
 at collection time.
+
+The calibration process
+=======================
+
+The library is the project's calibration substrate.  This section describes
+the end-to-end calibration loop that the library participates in.
+
+Why the library is the right substrate
+--------------------------------------
+
+The autonomous navigation pipeline produces three pieces of output per
+image: an offset, a covariance, and a calibrated confidence rank
+(``high`` / ``medium`` / ``low`` / ``failed``).  The first two are
+testable against ground truth; the third is **defined** by ground truth
+— a "high"-confidence verdict means "in the regime where the operator
+hand-verified the offset to ~1 px and the technique reported
+self-consistent diagnostics, the answer is right ≥ 95 % of the time."
+That definition has no meaning without a cohort of images on which the
+operator actually hand-verified the offset.  The library is that cohort.
+
+The same cohort drives:
+
+- **Per-technique confidence-formula coefficients.**  Each NavTechnique
+  carries a small set of calibrated coefficients in
+  ``techniques.<TechniqueName>.confidence`` in
+  ``config_510_techniques.yaml``.  The coefficients map per-technique
+  diagnostics (correlation peak height, NCC margin, fit residuals, ...)
+  into a [0, 1] confidence score.  The coefficients are tuned offline so
+  that, across the library, the score correlates monotonically with
+  per-image correctness.
+- **Per-instrument photometric thresholds.**  Per-instrument
+  ``mag_offset``, ``noise.sigma_floor``, ``image_quality_thresholds``,
+  and ``source_image_filter`` defaults are sanity-checked against
+  library images for each instrument; values that fail to reproduce the
+  hand-verified offset on a representative cohort are revisited.  See
+  :doc:`dev_guide_config_and_static_data` for the citation discipline.
+- **Per-technique runtime tunables.**  Spurious-detection thresholds,
+  at-edge tolerances, minimum arc lengths, ring-edge detectability
+  cutoffs — every numeric knob in ``config_510_techniques.yaml`` was
+  picked because it was the value that made the library pass while
+  staying conservative on regimes outside the library's coverage.
+
+The calibration loop
+--------------------
+
+A change to the navigation pipeline that affects per-image output goes
+through this loop:
+
+1. **Land the change behind the regression suite.**  The change is
+   developed on a branch.  The author runs ``pytest -m integration -k
+   <relevant_image_ids>`` against ``$PDS3_HOLDINGS_DIR`` to see which
+   library entries it shifts.  A pure refactor should shift nothing; a
+   tuning change shifts a known cohort.
+2. **Inspect the diff per image.**  For each shifted image, the author
+   re-runs ``nav_offset --manual <image>`` and visually verifies that
+   the new offset still overlays the limb / star field / ring edge.
+   When the new offset is *better* than the operator-stored ground
+   truth — for example a fixed bug now produces a sub-pixel offset
+   where the old code reported 1.5 px — the operator-stored ground
+   truth is updated in the same PR (a fresh
+   ``Save as Library Entry...`` from the manual nav dialog rewrites the
+   sidecar's ``ground_truth`` block; ``operator``, ``verified_date``,
+   and ``ui_version`` get refreshed automatically).
+3. **Update the regression baselines.**  Once the per-image
+   ground-truth review is complete, the author runs
+   ``python -m tests.integration.update_baselines --image-id <ids>`` to
+   refresh the byte-stable baseline JSONs for the images that shifted.
+   The diff that update emits goes into the same PR as the code change.
+4. **Re-tune calibrated confidence if needed.**  If the change shifts
+   the per-image confidence score (not just the offset), the author
+   re-runs the offline confidence-tuning script (TBD: tooling lives at
+   ``tests/integration/calibrate_confidence.py`` once the cohort is
+   wide enough; current state is one-off ad-hoc tuning).  The
+   per-technique ``confidence`` coefficient block in
+   ``config_510_techniques.yaml`` updates accordingly.
+5. **Reviewer sign-off.**  PRs that touch any of (a) library sidecars,
+   (b) baseline JSONs, or (c) per-technique coefficients require a
+   reviewer to manually open at least one shifted image's summary PNG
+   and verify the overlay still tracks the data.  This is the
+   "operator-in-the-loop" gate the calibration substrate cannot replace.
+
+Coverage taxonomy
+-----------------
+
+The directory names under ``tests/integration/image_library/images/``
+constitute the scene-class taxonomy.  Each name encodes one
+information-bearing regime the orchestrator must handle.  The shipping
+classes (mirrored in
+:data:`tests.integration.sidecar.DECLARED_SCENE_CLASSES`) include:
+
+- **Body geometry** — ``body_full_fov``, ``body_partial_overflow``,
+  ``body_mostly_offscreen``, ``body_overlapping``,
+  ``below_resolution_body``, ``multi_body``,
+  ``high_phase_terminator``.
+- **Ring geometry** — ``ring_only_curved``, ``ring_only_straight``,
+  ``ring_with_body``, ``ring_below_resolution`` (annulus regime).
+- **Star regimes** — ``one_bright_star_no_body``, ``star_dominated``,
+  ``star_field_with_body``, ``star_field_with_ring``.
+- **Failure regimes** — ``empty_fov``, ``saturated``,
+  ``mostly_dropouts``, ``cosmic_ray_dense``.
+
+A regime with **zero** library entries is a regime where the
+orchestrator's behaviour is unverified.  When a new code path lands —
+say, a new technique — the contributor adds at least one library image
+per regime that exercises the path.  The
+:doc:`dev_guide_extending` chapter's checklist enumerates which regimes
+each subsystem needs.
+
+Confidence-tier semantics
+-------------------------
+
+The four tiers are calibrated to operator expectations:
+
+- ``high`` — operator-verified offset to ≤ 1 px on a sharp-feature
+  image; orchestrator reports a sharp NCC peak and tight covariance;
+  multiple techniques agree.  Bound: the per-image error is below the
+  operator-supplied ``offset_uncertainty_px`` essentially every time.
+- ``medium`` — operator-verified offset to ≤ 2 px on a
+  soft-feature / star-poor image, or an image where one technique
+  dominates without cross-technique corroboration.
+- ``low`` — operator-verified offset to ≤ 4 px on a degenerate-geometry
+  scene (rank-1 ring fits, partial limb arcs without curvature).
+  The pipeline reports the offset and the operator decides whether
+  to trust it; the bundle annotates the data label accordingly.
+- ``failed`` — no usable techniques fired, or every technique reported
+  spurious / at-edge.  No offset is reported.
+
+The library's ``expected.confidence_tier`` field is the calibration
+target; a tier mismatch on regression always fails (no slack — tier
+*is* the calibration target).  The per-axis offset budget is
+``offset_uncertainty_px + 0.5 px`` slack.
+
+Per-instrument calibration anchors
+----------------------------------
+
+Each per-instrument config (``config_4N0_inst_*.yaml``) includes a
+small set of calibration-anchor library images that exercise the
+instrument's per-image quirks.  Examples:
+
+- COISS NAC: at least one calibrated-IF image, one CALIB-stage image,
+  one heavily-saturated image (to exercise the saturation mask), one
+  cosmic-ray-dense image.
+- VGISS NA / WA: at least one image with the known per-camera
+  geometric distortion residual (the per-instrument
+  ``geometric_distortion`` correction in the per-instrument config
+  was tuned against this image).
+- GOSSI / NHLORRI: at least one calibrated image and one raw image to
+  cross-check the ``calibration=False`` default in the LORRI loader.
+
+These anchors are the minimum coverage; the broader per-regime cohort
+above is what catches drift.  When a per-instrument calibration value
+changes, every per-instrument anchor must still pass.
 
 Adding a new entry
 ==================
@@ -163,16 +333,18 @@ rule and confirm byte-stable JSON (sorted keys, trailing newline).
 How a baseline is created or updated
 ------------------------------------
 
-Use the ``nav_update_baselines`` CLI (registered in
-``[project.scripts]``; runs from a project checkout).  It refuses to
-run without ``PDS3_HOLDINGS_DIR`` set.
+Use the developer tool at
+:file:`tests/integration/update_baselines.py`.  It is intentionally
+not packaged as a user-facing CLI — invoke it from a project checkout
+as a Python module so the test stack imports resolve naturally.  It
+refuses to run without ``PDS3_HOLDINGS_DIR`` set.
 
 .. code-block:: bash
 
-   nav_update_baselines --image-id <image_id>      # one image
-   nav_update_baselines --image-id A --image-id B  # hand-picked batch
-   nav_update_baselines --all                      # every sidecar
-   nav_update_baselines --all --dry-run            # preview only
+   python -m tests.integration.update_baselines --image-id <image_id>      # one image
+   python -m tests.integration.update_baselines --image-id A --image-id B  # hand-picked batch
+   python -m tests.integration.update_baselines --all                      # every sidecar
+   python -m tests.integration.update_baselines --all --dry-run            # preview only
 
 For each image the tool runs ``navigate_image_files`` against the live
 holdings, rounds the result via
