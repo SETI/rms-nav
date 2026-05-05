@@ -6,7 +6,7 @@ Overview
 ========
 
 Per-technique diagnostics are the typed dataclasses every navigation technique returns on its
-:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.diagnostics` field.  Each
+:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.diagnostics` field. Each
 technique declares its own diagnostics dataclass — a frozen, narrow record of the per-fit
 quantities that the confidence formula consumes and the curator surfaces in the JSON sidecar.
 Centralising every diagnostics dataclass in one module lets the curator's allow-list
@@ -20,15 +20,15 @@ Theory
 ======
 
 A diagnostics dataclass is a frozen record whose fields are exactly the per-fit quantities
-that downstream systems read.  Two consumers exist:
+that downstream systems read. Two consumers exist:
 
 The confidence formula
 ----------------------
 
 Each :class:`~nav.nav_technique.confidence.ConfidenceTerm` references a diagnostic-attribute
 name; the shared evaluator reads that attribute off the diagnostics object and feeds it
-through the offset / divisor / cap normalisation before applying the linear coefficient.  See
-:doc:`dev_guide_techniques_confidence` for the sigmoid math.  The technique's
+through the offset / divisor / cap normalisation before applying the linear coefficient. See
+:doc:`dev_guide_techniques_confidence` for the sigmoid math. The technique's
 :attr:`~nav.nav_technique.nav_technique.NavTechnique.confidence_attributes` allow-list spans
 both the diagnostic-attribute names *and* any side-channel flags the spec is allowed to read
 (``at_edge``, ``spurious``, etc., which live on the result rather than the diagnostics
@@ -41,7 +41,7 @@ The curator
 The orchestrator's curator
 (:func:`~nav.nav_orchestrator.curator.build_metadata_dict`) walks every diagnostics dataclass's
 ``CURATOR_FIELDS`` class attribute — a mapping of dataclass-field name to JSON-key name (or
-``None`` to skip) — and emits exactly those fields into the per-image JSON sidecar.  The
+``None`` to skip) — and emits exactly those fields into the per-image JSON sidecar. The
 mapping format lets the JSON schema use a different name than the Python field (e.g. an
 internal ``mode`` could surface as ``"path"`` in the JSON), but the conventional usage is
 identity (the dataclass field name and the JSON key match).
@@ -55,9 +55,9 @@ Restrictions and assumptions
 - Every diagnostics dataclass is frozen (``@dataclass(frozen=True)``); the technique builds
   one instance per fit and the orchestrator passes it on to the curator without mutation.
 - Every dataclass declares a ``CURATOR_FIELDS`` :class:`typing.ClassVar` mapping covering
-  every public field.  Fields the curator deliberately omits are mapped to ``None``;
-  every other field maps to its JSON key name.  CI fails if any field is unmapped.
-- All numeric fields are plain Python floats / ints.  Numpy scalars are coerced before
+  every public field. Fields the curator deliberately omits are mapped to ``None``;
+  every other field maps to its JSON key name. CI fails if any field is unmapped.
+- All numeric fields are plain Python floats / ints. Numpy scalars are coerced before
   storage so the JSON serialiser does not encounter non-native types.
 - Every per-technique confidence formula references only attributes that exist on the
   technique's diagnostics dataclass plus the four side-channel flags carried on the
@@ -70,13 +70,13 @@ Sources of uncertainty
 ----------------------
 
 Diagnostics are the *outputs* of the per-fit numerics — they record what the technique
-measured rather than uncertainty about the measurement.  Any uncertainty quoted on the
+measured rather than uncertainty about the measurement. Any uncertainty quoted on the
 diagnostic value (e.g. an LM RMS residual) is the technique's own number.
 
 Configuration
 =============
 
-Diagnostics carry no YAML configuration of their own.  Each technique's confidence formula —
+Diagnostics carry no YAML configuration of their own. Each technique's confidence formula —
 which references diagnostic-attribute names by string — lives under
 ``techniques.<TechniqueName>`` in
 ``src/nav/config_files/config_510_techniques.yaml``; see :doc:`dev_guide_techniques_confidence`
@@ -90,7 +90,7 @@ Source file: ``src/nav/nav_technique/diagnostics.py``.
 Public surface (autodocumented at :doc:`/api_reference/api_nav_technique`):
 
 - :class:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics` — emitted by
-  :class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav`.  Fields:
+  :class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav`. Fields:
   :attr:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics.ncc_peak`,
   :attr:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics.peak_to_runner_up_ratio`,
   :attr:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics.consistency_px`,
@@ -98,7 +98,7 @@ Public surface (autodocumented at :doc:`/api_reference/api_nav_technique`):
   :attr:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics.body_count`.
 
 - :class:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics` — emitted by
-  :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav`.  Fields:
+  :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav`. Fields:
   :attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.visible_limb_arc_fraction`,
   :attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.visible_arc_px`,
   :attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.dt_fit_rms_px`,
@@ -106,13 +106,13 @@ Public surface (autodocumented at :doc:`/api_reference/api_nav_technique`):
   :attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.tukey_inlier_count`.
 
 - :class:`~nav.nav_technique.diagnostics.BodyTerminatorDiagnostics` — emitted by
-  :class:`~nav.nav_technique.nav_technique_body_terminator.BodyTerminatorNav`.  Same shape as
+  :class:`~nav.nav_technique.nav_technique_body_terminator.BodyTerminatorNav`. Same shape as
   :class:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics` with
   ``visible_terminator_arc_fraction`` substituted for
   ``visible_limb_arc_fraction``.
 
 - :class:`~nav.nav_technique.diagnostics.BodyBlobDiagnostics` — emitted by
-  :class:`~nav.nav_technique.nav_technique_body_blob.BodyBlobNav`.  Fields:
+  :class:`~nav.nav_technique.nav_technique_body_blob.BodyBlobNav`. Fields:
   :attr:`~nav.nav_technique.diagnostics.BodyBlobDiagnostics.body_snr_inside_predicted_bbox`,
   :attr:`~nav.nav_technique.diagnostics.BodyBlobDiagnostics.body_extent_px`,
   :attr:`~nav.nav_technique.diagnostics.BodyBlobDiagnostics.blob_count`,
@@ -121,21 +121,21 @@ Public surface (autodocumented at :doc:`/api_reference/api_nav_technique`):
   :attr:`~nav.nav_technique.diagnostics.BodyBlobDiagnostics.max_phase_irregularity_factor`.
 
 - :class:`~nav.nav_technique.diagnostics.RingEdgeDiagnostics` — emitted by
-  :class:`~nav.nav_technique.nav_technique_ring_edge.RingEdgeNav`.  Fields:
+  :class:`~nav.nav_technique.nav_technique_ring_edge.RingEdgeNav`. Fields:
   :attr:`~nav.nav_technique.diagnostics.RingEdgeDiagnostics.total_edge_length_px`,
   :attr:`~nav.nav_technique.diagnostics.RingEdgeDiagnostics.per_edge_dt_rms_summed`,
   :attr:`~nav.nav_technique.diagnostics.RingEdgeDiagnostics.edge_count`,
   :attr:`~nav.nav_technique.diagnostics.RingEdgeDiagnostics.is_rank_1`.
 
 - :class:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics` — emitted by
-  :class:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav`.  Fields:
+  :class:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav`. Fields:
   :attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.ncc_peak`,
   :attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.peak_to_runner_up_ratio`,
   :attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.annulus_count`,
   :attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.used_gradient`.
 
 - :class:`~nav.nav_technique.diagnostics.StarFieldDiagnostics` — emitted by
-  :class:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav`.  Fields:
+  :class:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav`. Fields:
   :attr:`~nav.nav_technique.diagnostics.StarFieldDiagnostics.n_inliers`,
   :attr:`~nav.nav_technique.diagnostics.StarFieldDiagnostics.median_residual_px`,
   :attr:`~nav.nav_technique.diagnostics.StarFieldDiagnostics.n_detected_sources`,
@@ -143,14 +143,14 @@ Public surface (autodocumented at :doc:`/api_reference/api_nav_technique`):
   :attr:`~nav.nav_technique.diagnostics.StarFieldDiagnostics.n_triplets_evaluated`.
 
 - :class:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics` — emitted by
-  :class:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav`.  Fields:
+  :class:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav`. Fields:
   :attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.mode`,
   :attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.predicted_snr`,
   :attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.brightness_margin_mag`,
   :attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.residual_px`.
 
 - :class:`~nav.nav_technique.diagnostics.StarRefineDiagnostics` — emitted by
-  :class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav`.  Fields:
+  :class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav`. Fields:
   :attr:`~nav.nav_technique.diagnostics.StarRefineDiagnostics.n_stars_used`,
   :attr:`~nav.nav_technique.diagnostics.StarRefineDiagnostics.median_pos_err_px`,
   :attr:`~nav.nav_technique.diagnostics.StarRefineDiagnostics.residual_scatter_px`.
@@ -166,7 +166,7 @@ Examples
 ========
 
 **Curator allow-list discipline.**  Each diagnostics dataclass declares a class-level
-``CURATOR_FIELDS`` mapping that the curator walks at JSON-emit time.  For
+``CURATOR_FIELDS`` mapping that the curator walks at JSON-emit time. For
 :class:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics` the mapping is::
 
     CURATOR_FIELDS = {
@@ -192,7 +192,7 @@ raises :exc:`AssertionError` and fails the build before any image is processed.
             alpha: -1.5
 
 Each ``feature`` value names an attribute on
-:class:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics`.  At config-load time
+:class:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics`. At config-load time
 :func:`~nav.nav_technique.nav_technique.validate_registered_confidence_specs` walks the spec
 and confirms every name appears in
 :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav`'s

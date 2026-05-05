@@ -6,27 +6,27 @@ Overview
 ========
 
 :class:`~nav.nav_orchestrator.nav_context.NavContext` is the frozen dataclass that carries
-per-image global state shared across feature extraction and technique navigation.  The
+per-image global state shared across feature extraction and technique navigation. The
 orchestrator's
 :meth:`~nav.nav_orchestrator.orchestrator.NavOrchestrator.navigate` builds one instance per
 image; pass-2 techniques receive a copy with the pass-1 ensemble's prior offset and
 covariance attached via
-:meth:`~nav.nav_orchestrator.nav_context.NavContext.with_prior`.  Every member is
+:meth:`~nav.nav_orchestrator.nav_context.NavContext.with_prior`. Every member is
 computed without knowing where any feature lives in the image: global statistics,
 sensor-vs-extfov masks, shared image-side derivatives, and provenance.
 
 Theory
 ======
 
-The context is the single source of truth for per-image state.  Three invariants apply:
+The context is the single source of truth for per-image state. Three invariants apply:
 
-- The context is **frozen**.  ``with_prior`` returns a new instance via
+- The context is **frozen**. ``with_prior`` returns a new instance via
   :func:`dataclasses.replace`; mutation is not supported.
 - Every image-shaped field is **extfov-shaped** — zero-padded around the original sensor
-  rectangle.  ``image_ext`` is the canonical post-source-filter extfov image; the matching
+  rectangle. ``image_ext`` is the canonical post-source-filter extfov image; the matching
   sensor / saturation / cosmic-ray masks share its shape.
 - The pass-1 → pass-2 hand-off carries only the **2x2 translation block** of the prior
-  covariance.  Any rotation prior is re-derived per technique from the per-instrument
+  covariance. Any rotation prior is re-derived per technique from the per-instrument
   flag, not propagated through the context.
 
 The default values on the dataclass cover the autonomous-pipeline path; the manual-nav
@@ -36,7 +36,7 @@ classifier).
 Restrictions and assumptions
 ----------------------------
 
-- Construction is via direct dataclass instantiation.  Validation happens in
+- Construction is via direct dataclass instantiation. Validation happens in
   :meth:`~nav.nav_orchestrator.nav_context.NavContext.with_prior` (the only mutator
   surface): the prior offset must be finite, the prior covariance must be 2x2 or 3x3 and
   finite.
@@ -51,14 +51,14 @@ Restrictions and assumptions
 Sources of uncertainty
 ----------------------
 
-The context dataclass itself reports no uncertainty.  Per-image quantities surfaced in
+The context dataclass itself reports no uncertainty. Per-image quantities surfaced in
 the context (the noise sigma, the classifier's confidence) are reported by the
 sub-systems that produced them.
 
 Configuration
 =============
 
-The dataclass carries no YAML configuration of its own.  Field defaults are Python
+The dataclass carries no YAML configuration of its own. Field defaults are Python
 constants with the documented per-instrument-aware values populated by the orchestrator's
 ``_make_context``.
 
@@ -73,7 +73,7 @@ Public class :class:`~nav.nav_orchestrator.nav_context.NavContext`, frozen datac
 Public fields (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
 
 - :attr:`~nav.nav_orchestrator.nav_context.NavContext.obs` — the observation snapshot
-  under navigation.  Typed loosely as :class:`object` to avoid an import cycle.
+  under navigation. Typed loosely as :class:`object` to avoid an import cycle.
 - :attr:`~nav.nav_orchestrator.nav_context.NavContext.image_ext` — extended-FOV image array
   post any source-image filter.
 - :attr:`~nav.nav_orchestrator.nav_context.NavContext.sensor_mask_ext` — boolean mask;
@@ -103,9 +103,9 @@ Public fields (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
   :class:`~nav.support.filters.NavFilterSpec` applied to the source image, ``None`` if
   none.
 - :attr:`~nav.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` — bool; turns
-  on 3-DoF technique fits.  Default ``False``.
+  on 3-DoF technique fits. Default ``False``.
 - :attr:`~nav.nav_orchestrator.nav_context.NavContext.max_rotation_deg` — float; rotation
-  cap when ``fit_camera_rotation`` is ``True``.  Default ``5.0`` deg.
+  cap when ``fit_camera_rotation`` is ``True``. Default ``5.0`` deg.
 - :attr:`~nav.nav_orchestrator.nav_context.NavContext.signal_dn_to_image_unit_scale` —
   per-instrument scale converting an integrated DN signal into the image's native units.
   ``1.0`` for ``raw_dn`` instruments; per-camera value for ``calibrated_if``.
@@ -113,7 +113,7 @@ Public fields (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
 Public methods:
 
 - :meth:`~nav.nav_orchestrator.nav_context.NavContext.with_prior` — return a new
-  ``NavContext`` with the pass-1 prior attached.  Validates the offset (finite, length-2)
+  ``NavContext`` with the pass-1 prior attached. Validates the offset (finite, length-2)
   and the covariance (2x2 or 3x3, finite); the rotation block is dropped.
 
 The dataclass declares ``eq=False`` on ``@dataclass(frozen=True, eq=False)``;
@@ -148,7 +148,7 @@ populated and the prior fields ``None``::
 **Pass 2 hand-off.**  After the pass-1 ensemble produces an offset, the orchestrator
 calls
 :meth:`~nav.nav_orchestrator.nav_context.NavContext.with_prior` with the pass-1 offset
-and covariance.  The returned context carries the prior on
+and covariance. The returned context carries the prior on
 :attr:`~nav.nav_orchestrator.nav_context.NavContext.prior_offset_px` and
 :attr:`~nav.nav_orchestrator.nav_context.NavContext.prior_covariance_px2`; pass-2
 techniques like

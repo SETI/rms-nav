@@ -6,11 +6,11 @@ Overview
 ========
 
 DT fitting is the shared algorithmic core that aligns a polyline of model vertices against an
-image's edge-distance-transform.  It is reused by every distance-transform-based technique in
+image's edge-distance-transform. It is reused by every distance-transform-based technique in
 the pipeline:
 :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav`,
 :class:`~nav.nav_technique.nav_technique_body_terminator.BodyTerminatorNav`, and
-:class:`~nav.nav_technique.nav_technique_ring_edge.RingEdgeNav`.  The module exposes pure
+:class:`~nav.nav_technique.nav_technique_ring_edge.RingEdgeNav`. The module exposes pure
 numerical helpers — coarse integer cross-correlation, polarity filtering, Tukey biweight
 weights, Levenberg-Marquardt sub-pixel refinement, and an information-matrix-to-covariance
 helper — and lets each technique assemble its own vertex / normal / sigma arrays before calling
@@ -18,7 +18,7 @@ in.
 
 Because this page documents algorithmic infrastructure rather than a directly-configurable
 component, the Configuration section is short: the only knobs are module-level default
-constants exposed in the module's public surface.  Every consuming technique reads
+constants exposed in the module's public surface. Every consuming technique reads
 technique-specific tunables from its own YAML stanza and may override these defaults at call
 time.
 
@@ -27,7 +27,7 @@ Theory
 
 The shared fitter solves a single problem: given a collection of model vertices, each with an
 outward normal and a prior position sigma along that normal, find the rigid transformation that
-maps the vertices closest to the image's edge pixels.  "Closest" is measured against a
+maps the vertices closest to the image's edge pixels. "Closest" is measured against a
 truncated, signed-magnitude distance transform of the thresholded image gradient, so the
 problem reduces to a weighted nonlinear least-squares fit whose residuals are bilinearly
 sampled DT values at the transformed vertex positions.
@@ -44,15 +44,15 @@ the truncated DT into an edge mask, and evaluates the integer-shift cross-correl
         \mathrm{polyline}[v, u] \, \mathrm{edge}[v + \Delta v, u + \Delta u]
 
 over every integer offset in :math:`[-m_{v}, m_{v}] \times [-m_{u}, m_{u}]`, where
-:math:`(m_{v}, m_{u})` is the per-instrument SPICE pointing-error margin.  Both inputs are
+:math:`(m_{v}, m_{u})` is the per-instrument SPICE pointing-error margin. Both inputs are
 binary; the cross-correlation peak coincides with the NCC peak because the per-shift
 normaliser varies only mildly over the small search window.
 
 Ties are broken by Manhattan distance from the origin (and lexicographic order among offsets at
 equal distance) so that on perfectly-flat inputs the nearest-to-origin shift wins
-deterministically.  An empty polyline mask short-circuits to the zero offset.
+deterministically. An empty polyline mask short-circuits to the zero offset.
 
-The brute-force scan is intentionally not FFT-based.  The polyline support is sparse on the
+The brute-force scan is intentionally not FFT-based. The polyline support is sparse on the
 image grid (a typical limb is ~200 pixels on a 1024² image), so iterating over the polyline
 indices for each shift is faster than the full-image FFT for the search-window sizes the
 pipeline actually uses.
@@ -71,12 +71,12 @@ where :math:`x_{i}` are the input vertices, :math:`x_{p}` is the rotation pivot 
 of the input vertices, or a caller-supplied pivot), :math:`R(\theta)` is the in-plane
 rotation, and :math:`\mathrm{DT}` is the bilinearly sampled image-edge distance transform.
 The per-vertex weight is the product of the prior precision :math:`1 / \sigma_{i}^{2}` and a
-Tukey biweight evaluated at the scaled residual :math:`\mathrm{DT}_{i} / \sigma_{i}`.  When
+Tukey biweight evaluated at the scaled residual :math:`\mathrm{DT}_{i} / \sigma_{i}`. When
 the caller disables rotation, the parameter vector collapses to :math:`(\Delta v, \Delta u)`.
 
 Each LM iteration:
 
-1. Samples the DT and finite-difference Jacobian at the current pose.  Translation derivatives
+1. Samples the DT and finite-difference Jacobian at the current pose. Translation derivatives
    use a 0.25-pixel central-difference step; the rotation derivative uses a small
    :math:`10^{-3}`-radian step.
 2. Computes the Tukey biweight weights from the sigma-scaled residuals.
@@ -87,7 +87,7 @@ Each LM iteration:
    factor of two), or rejects it (and grows the damping by a factor of two).
 5. After an accepted step, recomputes residuals / weights / Jacobian *at* the accepted pose
    so the cached state used by the final-iteration covariance reflects the committed
-   parameters.  The convergence test uses the step-norm in pixel-equivalent units —
+   parameters. The convergence test uses the step-norm in pixel-equivalent units —
    translation magnitudes contribute directly; the rotation step is multiplied by the
    pivot-to-image-centre distance so the same threshold applies to translation-only and
    translation-plus-rotation fits.
@@ -102,9 +102,9 @@ Polarity filtering
 Concurrently with the cost evaluation, the refiner samples the per-pixel image gradient vector
 at each shifted vertex's position, dot-products it with the model's outward normal, and
 classifies the vertex as a *polarity match* when the dot product is strictly positive (and a
-*polarity mismatch* otherwise).  Mismatched vertices are assigned a near-infinite synthetic
+*polarity mismatch* otherwise). Mismatched vertices are assigned a near-infinite synthetic
 DT residual on every iteration; the Tukey biweight zeroes their weight on the first
-reweighting.  This keeps a body-limb fit from latching onto the body's interior crater rims
+reweighting. This keeps a body-limb fit from latching onto the body's interior crater rims
 (whose gradient direction is opposite the limb's), and a ring-edge fit from latching onto a
 neighbouring ring's edge (whose gradient sign reverses).
 
@@ -121,44 +121,110 @@ The Holland-Welsch biweight is the redescender used by the IRLS step:
     \end{cases}
 
 with :math:`c = 4.685` (the default), corresponding to ~95 % asymptotic efficiency on Gaussian
-residuals when the residuals are pre-scaled by the desired robust scale.  The per-technique
+residuals when the residuals are pre-scaled by the desired robust scale. The per-technique
 caller divides each raw DT residual by the per-vertex prior sigma before the biweight is
-applied, so the cutoff is interpreted in sigma units rather than raw pixels.  Vertices whose
-scaled residuals exceed the cutoff are dropped completely.
+applied, so the cutoff is interpreted in sigma units rather than raw pixels. Vertices whose
+scaled residuals exceed the cutoff are dropped completely. Recomputing the weights after each
+accepted LM step (iteratively-reweighted least squares) makes the Tukey-rejected vertices
+truly drop out of the information matrix and keeps the converged covariance an honest
+expression of the surviving inliers' precision.
 
-Information matrix to covariance
---------------------------------
+.. _dt-uncertainty:
 
-After convergence, the M-estimator information matrix :math:`I = J^{\top} \mathrm{diag}(w) J`
-is mapped to a parameter covariance via :func:`scipy.linalg.pinvh` (the Hermitian
-Moore-Penrose pseudoinverse).  The pseudoinverse handles rank-deficient inputs gracefully — a
-flat polyline produces a rank-1 information matrix and the returned covariance has unbounded
-variance along the unobservable null direction — and a single project-wide cutoff
-(:data:`~nav.nav_technique.dt_fitting.DEFAULT_PINVH_RCOND`) keeps the cutoff consistent across
-every technique that consumes this helper.  Three "no information" cases are guarded so the
-returned covariance does not falsely advertise perfect certainty: an empty Jacobian, a
-zero-inlier population, and a zero-total-weight pose.  Each yields an all-infinity covariance
-that the orchestrator's ensemble combine treats as fully unconstrained.
+From cost surface to information matrix
+---------------------------------------
+
+The reported parameter covariance is the local quadratic approximation of the cost surface at
+convergence. Writing the residual at iteration's end as :math:`r_{i}(\hat p) = \mathrm{DT}_{i}`
+and the per-vertex weight as :math:`w_{i} = (1 / \sigma_{i}^{2}) \cdot w_{i}^{\mathrm{Tukey}}`,
+the cost is
+
+.. math::
+
+    C(p) = \sum_{i} w_{i} \, r_{i}(p)^{2}.
+
+At the converged estimate :math:`\hat p` the gradient
+
+.. math::
+
+    \nabla C(\hat p) = 2 \sum_{i} w_{i} \, r_{i}(\hat p) \, \nabla r_{i}(\hat p)
+
+vanishes by construction, and the local Hessian reduces under the Gauss-Newton approximation
+— dropping the second-order :math:`r_{i} \, \nabla^{2} r_{i}` term, which integrates to zero
+against zero-mean residuals at convergence — to
+
+.. math::
+
+    H \approx 2 \sum_{i} w_{i} \, \nabla r_{i}(\hat p) \, \nabla r_{i}(\hat p)^{\top}
+        = 2 \, J^{\top} W J,
+
+with :math:`J` the residual Jacobian (rows are :math:`\nabla r_{i}(\hat p)^{\top}`) and
+:math:`W = \mathrm{diag}(w_{i})`. Under the M-estimator interpretation the parameter
+covariance is the inverse of the information matrix :math:`I = J^{\top} W J`; the factor of
+two cancels in the standard derivation against the residual variance the Tukey weights have
+already absorbed. The dropped :math:`r \, \nabla^{2} r` term is exactly the variance
+contribution that becomes negligible at convergence under low-residual conditions.
+
+Pseudoinverse to covariance
+---------------------------
+
+After convergence, the M-estimator information matrix :math:`I = J^{\top} W J` is mapped to a
+parameter covariance via :func:`scipy.linalg.pinvh` (the Hermitian Moore-Penrose pseudoinverse).
+The pseudoinverse handles rank-deficient inputs gracefully: when the model polyline is
+geometrically rank-deficient (every edge in a flat-ring scene is parallel and the along-ring
+axis is unobservable) :math:`I` is singular, and replacing the inverse with :math:`I^{+}` lets
+the unobservable direction remain unobservable in the returned covariance: the corresponding
+eigenvalue is zero, the marginal variance along that axis is also zero in :math:`I^{+}`, and
+the per-axis sigma reported by the ensemble correctly flags the rank deficiency rather than
+silently inverting floating-point noise.
+
+A single project-wide cutoff
+(:data:`~nav.nav_technique.dt_fitting.DEFAULT_PINVH_RCOND`, ``1e-9``) keeps the threshold
+consistent across every technique that consumes this helper and across the orchestrator's
+ensemble combine. The value is calibrated so that a tighter cutoff would silently treat
+near-rank-deficient matrices as full-rank, producing garbage inverse entries; a looser cutoff
+would prematurely zero observable directions. ``1e-9`` is liberal enough to fold near-singular
+directions into the null space and conservative enough to preserve genuine 2-D / 3-D
+constraints typical of body-limb / ring-edge fits.
+
+Three "no information" cases are guarded so the returned covariance does not falsely advertise
+perfect certainty: an empty Jacobian, a zero-inlier population, and a zero-total-weight pose.
+Each yields an all-infinity covariance that the orchestrator's ensemble combine treats as
+fully unconstrained.
+
+Combining with a prior in the ensemble
+--------------------------------------
+
+The per-technique covariance returned to the orchestrator is the M-estimator pseudoinverse
+:math:`I^{+}`. The orchestrator's ensemble combines per-technique results in *information
+form*: invert each covariance, sum, invert again. :func:`scipy.linalg.pinvh` is used at every
+inversion and the same ``rtol`` propagates throughout, so a single rank-1 ring constraint plus
+any other rank-2 result yields a fully-resolved 2-D answer; a single rank-1 ring constraint
+alone yields a rank-1 final covariance with the unobservable axis honestly flagged. This is
+why the per-technique result must report :math:`I^{+}` rather than a regularised dense
+inverse: the ensemble's rank-deficiency-aware fusion depends on the unobservable directions
+being explicit zeros in the per-technique information matrix, not finite values driven by an
+arbitrary regulariser.
 
 Restrictions and assumptions
 ----------------------------
 
 - The refiner is purely local; it converges to the basin of attraction selected by the coarse
-  integer seed.  When the seed is wrong (a multi-body scene where the coarse NCC peak picks
+  integer seed. When the seed is wrong (a multi-body scene where the coarse NCC peak picks
   the dominant body's limb but the technique's polyline includes an off-frame body's limb),
-  LM converges to a wrong minimum.  The per-technique spurious gates are responsible for
+  LM converges to a wrong minimum. The per-technique spurious gates are responsible for
   catching that.
-- Bilinear DT sampling assumes the DT is differentiable almost everywhere.  Pixel-grid
+- Bilinear DT sampling assumes the DT is differentiable almost everywhere. Pixel-grid
   pathologies (a perfectly flat plateau across the entire search window) collapse the
   Jacobian and the LM step has no preferred direction; the refiner returns the seed unchanged
   with the Tukey-zero-weight covariance sentinel.
 - The polarity filter assumes the gradient vector image is the signed
   :math:`(g_{v}, g_{u})` Sobel-of-Gaussian readout produced by the orchestrator's
-  :func:`~nav.nav_orchestrator.image_derivatives.compute_image_gradient_vu`.  Magnitude-only
+  :func:`~nav.nav_orchestrator.image_derivatives.compute_image_gradient_vu`. Magnitude-only
   gradient images cannot drive the polarity test and the caller must opt out via
   ``use_polarity=False``.
 - The convergence test uses a single step-norm tolerance for both translation-only and
-  translation-plus-rotation fits.  Callers that fit rotation must provide a positive
+  translation-plus-rotation fits. Callers that fit rotation must provide a positive
   pivot-to-image-centre distance so the rotation step can be converted to pixel-equivalent
   units; missing or zero distance raises :exc:`ValueError`.
 
@@ -166,36 +232,36 @@ Sources of uncertainty
 ----------------------
 
 The covariance returned on the result reflects the cost-surface curvature at convergence under
-the surviving Tukey weights.  It does not capture systematic biases (a per-vertex sigma scaled
+the surviving Tukey weights. It does not capture systematic biases (a per-vertex sigma scaled
 incorrectly by the model upstream propagates straight into the covariance), and it does not
-capture the bias introduced by polarity-rejected vertices.  When the caller disables
+capture the bias introduced by polarity-rejected vertices. When the caller disables
 polarity filtering the covariance reverts to a pure prior-precision M-estimator on the full
 polyline.
 
 Configuration
 =============
 
-DT fitting carries no YAML configuration of its own.  Every numeric default exposed in the
+DT fitting carries no YAML configuration of its own. Every numeric default exposed in the
 module's public API is a module-level constant; consuming techniques pass technique-specific
-overrides at call time.  The defaults below are exposed in the module's ``__all__`` so
+overrides at call time. The defaults below are exposed in the module's ``__all__`` so
 tests, downstream tools, and consuming techniques can reference the canonical values without
 re-reading the source.
 
 - :data:`~nav.nav_technique.dt_fitting.DEFAULT_TUKEY_C` — float, default ``4.685`` sigma.
-  Holland-Welsch biweight cutoff.  Sigma-scaled residuals beyond this magnitude are dropped
+  Holland-Welsch biweight cutoff. Sigma-scaled residuals beyond this magnitude are dropped
   completely; 4.685 corresponds to ~95 % asymptotic Gaussian efficiency.
 - :data:`~nav.nav_technique.dt_fitting.DEFAULT_LM_DAMPING` — float, default ``1.0e-3``
-  (dimensionless).  Initial Levenberg-Marquardt damping :math:`\lambda`.  Multiplied by 0.5
+  (dimensionless). Initial Levenberg-Marquardt damping :math:`\lambda`. Multiplied by 0.5
   on accepted steps and by 2 on rejected steps; bracketed in :math:`[10^{-12}, 10^{6}]`.
 - :data:`~nav.nav_technique.dt_fitting.DEFAULT_LM_MAX_ITERATIONS` — int, default ``30``
-  (count).  Maximum LM iterations before the refiner terminates without convergence.
+  (count). Maximum LM iterations before the refiner terminates without convergence.
 - :data:`~nav.nav_technique.dt_fitting.DEFAULT_LM_STEP_TOLERANCE` — float, default
-  ``1.0e-3`` px.  Step-norm threshold below which the iteration terminates with
-  ``converged=True``.  Combines translation magnitude and rotation step times pivot distance
+  ``1.0e-3`` px. Step-norm threshold below which the iteration terminates with
+  ``converged=True``. Combines translation magnitude and rotation step times pivot distance
   into a single pixel-equivalent number.
 - :data:`~nav.nav_technique.dt_fitting.DEFAULT_PINVH_RCOND` — float, default ``1.0e-9``
-  (dimensionless).  Cutoff passed to :func:`scipy.linalg.pinvh` for the
-  information-to-covariance map.  Eigenvalues smaller than this fraction of the largest are
+  (dimensionless). Cutoff passed to :func:`scipy.linalg.pinvh` for the
+  information-to-covariance map. Eigenvalues smaller than this fraction of the largest are
   treated as null.
 
 Implementation
@@ -263,34 +329,34 @@ The shared helpers operate on numpy arrays rather than on observations, so the w
 below are numerical illustrations rather than image-library scenes.
 
 **Coarse NCC scan size.**  A typical body limb produces 200 vertices on a 1024 × 1024
-extended-FOV image; the per-instrument search window is around 30 pixels in each axis.  The
+extended-FOV image; the per-instrument search window is around 30 pixels in each axis. The
 coarse scan evaluates the binary cross-correlation at
 :math:`(2 \cdot 30 + 1)^{2} = 3721` integer offsets, summing approximately 200 polyline
 indices per offset for a total of order :math:`7.4 \times 10^{5}` boolean accumulations on
-edge-mask values.  Memory traffic is dominated by the polyline-index gather; the FFT
+edge-mask values. Memory traffic is dominated by the polyline-index gather; the FFT
 alternative would touch :math:`1024^{2}` pixels regardless of polyline support and is slower
 for windows this size.
 
 **LM iteration count.**  An on-axis body limb with sub-pixel SPICE pointing usually converges
 in 4-8 iterations; the default :data:`~nav.nav_technique.dt_fitting.DEFAULT_LM_MAX_ITERATIONS`
-of 30 is a safety net for pathological inputs.  When the polyline lands inside a flat DT
+of 30 is a safety net for pathological inputs. When the polyline lands inside a flat DT
 plateau the refiner exits via the
 :math:`\lambda \ge 10^{6}` damping bound rather than reaching the iteration cap.
 
 **Tukey weight on a clean limb.**  With per-vertex prior sigma 1.0 px and a converged DT RMS
 of 0.5 px, the scaled residuals lie well inside the cutoff
 (:math:`0.5 / 1.0 \approx 0.5 \ll 4.685`); every vertex retains a near-unit weight and the
-fit reduces to a weighted-least-squares problem with the prior precision dominating.  When
+fit reduces to a weighted-least-squares problem with the prior precision dominating. When
 the same fit lands a vertex 6 sigma away from any image edge, the biweight zeroes that
 vertex's weight on the first reweighting and the LM step ignores it for every subsequent
 iteration.
 
 **Rank-deficient covariance.**  A perfectly straight ring-edge polyline produces an
 information matrix of rank one — only the radial direction is constrained; the along-edge
-direction is unobservable.  The pseudoinverse via
+direction is unobservable. The pseudoinverse via
 :data:`~nav.nav_technique.dt_fitting.DEFAULT_PINVH_RCOND` returns a covariance whose null
 eigenvalue is mapped to :math:`+\infty` (an unbounded variance along the along-edge
-direction).  The orchestrator's ensemble combine, which uses the Moore-Penrose pseudoinverse
+direction). The orchestrator's ensemble combine, which uses the Moore-Penrose pseudoinverse
 to fuse covariances, treats the unbounded eigenvalue as a zero-information contribution along
 that direction and the technique's result is effectively a one-dimensional radial constraint
 in the joint solve.

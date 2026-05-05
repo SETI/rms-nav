@@ -8,7 +8,7 @@ Overview
 The catalog-driven body navigation model renders one solar-system body's predicted appearance
 from SPICE prediction and emits up to four navigation features per body: a polyline along the
 lit limb, a polyline along the terminator, a pixel template of the lit disc, and a centroid /
-bounding-box description for under-resolved or irregular bodies.  The orchestrator builds one
+bounding-box description for under-resolved or irregular bodies. The orchestrator builds one
 instance per body whose extended-FOV bounding box overlaps the observation; a Saturn fly-by image
 that catches Mimas, Tethys, and Dione in the same frame produces three instances, each free to
 emit any subset of the four feature types its silhouette geometry justifies.
@@ -16,7 +16,7 @@ emit any subset of the four feature types its silhouette geometry justifies.
 A simulated-image sibling (:class:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated`)
 renders a body from operator-supplied ellipsoid parameters instead of SPICE prediction; both
 classes share the silhouette / annotation helpers on
-:class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase`.  Per-body shape, albedo, and SPICE
+:class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase`. Per-body shape, albedo, and SPICE
 ephemeris-residual quantities feed in from
 :func:`~nav.nav_model.body_shape.shape_for_body`, which overlays an operator-curated YAML on top
 of a hard-coded :data:`~nav.nav_model.body_shape.BODY_SHAPE_TABLE` and a
@@ -27,7 +27,7 @@ Theory
 
 The body model is a per-body silhouette renderer whose output is a small number of
 *navigation features* — geometric primitives that downstream techniques know how to align
-against the image.  A body in the field of view contributes between zero and four such features
+against the image. A body in the field of view contributes between zero and four such features
 depending on its predicted geometry.
 
 Bounding-box construction
@@ -36,23 +36,23 @@ Bounding-box construction
 The model starts from the predicted bounding box reported by the per-image inventory query
 (``u_min_unclipped``, ``u_max_unclipped``, ``v_min_unclipped``, ``v_max_unclipped``) — the
 half-open extent of pixels intersected by the predicted body silhouette before it is clipped
-into the sensor.  Inventory bounding boxes are sometimes a half-pixel too small; the model
+into the sensor. Inventory bounding boxes are sometimes a half-pixel too small; the model
 inflates each axis by a fixed fraction of its current extent before clipping into the
-extended-FOV grid.  The 5 % default fraction keeps anti-aliased limb pixels from being lost
+extended-FOV grid. The 5 % default fraction keeps anti-aliased limb pixels from being lost
 on the boundary while remaining small enough that the rendered postage-stamp does not balloon
 on an in-FOV body.
 
 After inflation the bounding box is clipped against the per-instrument extended-FOV margins.
 A bounding box that collapses to a single point along either axis is bumped by one pixel so
-the downstream meshgrid is non-degenerate.  The model also computes a boolean
+the downstream meshgrid is non-degenerate. The model also computes a boolean
 ``guaranteed_visible_in_fov`` quantity: True when the inflated, clipped bounding box lies
-fully inside the sensor area minus the per-instrument margin.  The flag is recorded on
+fully inside the sensor area minus the per-instrument margin. The flag is recorded on
 ``self._metadata`` for the curator and is consumed by the disc-emission gates downstream.
 
 Anti-aliased silhouette extraction
 ----------------------------------
 
-The model lays an oversampled grid of pixel centres inside the clipped bounding box.  The
+The model lays an oversampled grid of pixel centres inside the clipped bounding box. The
 per-axis oversample factor is
 
 .. math::
@@ -65,15 +65,15 @@ per-axis oversample factor is
       \right\rfloor\right)\right)
 
 and analogously for the v axis, using the inventory's ``u_pixel_size`` and ``v_pixel_size`` —
-the body's predicted angular extent in pixels.  A 100-pixel body at the default settings
-(``oversample_edge_limit = 512``, ``oversample_maximum = 2``) yields ``oversample_u = 2``.  A
+the body's predicted angular extent in pixels. A 100-pixel body at the default settings
+(``oversample_edge_limit = 512``, ``oversample_maximum = 2``) yields ``oversample_u = 2``. A
 sub-pixel body (predicted extent 1 px) would saturate the formula at ``oversample_u = 2`` per
-the maximum.  The cap exists to bound memory on field-filling targets where a higher
+the maximum. The cap exists to bound memory on field-filling targets where a higher
 oversample would balloon the backplane query.
 
 At each oversampled grid point an incidence-angle backplane is queried from the SPICE
-prediction.  The discrete silhouette mask comes from the pixels where the incidence query
-returns a finite value (i.e. the line of sight intersects the body).  The oversampled mask is
+prediction. The discrete silhouette mask comes from the pixels where the incidence query
+returns a finite value (i.e. the line of sight intersects the body). The oversampled mask is
 filter-downsampled to the extended-FOV grid so that anti-aliased limb pixels at the silhouette
 boundary remain represented as fractional values rather than being lost to round-off.
 
@@ -92,7 +92,7 @@ terminator masks are walked to produce per-vertex polylines.
 Polyline sampling
 -----------------
 
-Each polyline vertex is a pixel that survived the discrete-mask construction.  At every vertex
+Each polyline vertex is a pixel that survived the discrete-mask construction. At every vertex
 the model records:
 
 - The vertex position in the extended-FOV pixel frame.
@@ -103,7 +103,7 @@ the model records:
 - The local kilometres-per-pixel scale at the vertex, queried from the SPICE backplane.
 
 The km/px scale at the limb sets the sensitivity that converts physical km uncertainties into
-pixel sigmas.  An empty mask collapses the sampler to zero-length arrays so the downstream
+pixel sigmas. An empty mask collapses the sampler to zero-length arrays so the downstream
 emission gates skip the corresponding feature without special-case handling.
 
 Per-vertex position covariance
@@ -121,11 +121,11 @@ uncertainties for the lit limb:
                                     + \sigma_{\mathrm{spk}}^{2}
 
 The first two terms are intrinsic to the body shape (RMS deviation from the best-fit ellipsoid;
-characteristic crater scale).  The third term is the photometric softness of the limb at this
+characteristic crater scale). The third term is the photometric softness of the limb at this
 vertex; :math:`\sigma_{\mathrm{soft}}(i)` is the optical PSF sigma converted to kilometres at the
 vertex (PSF-sigma-px times km-per-pixel-at-vertex), and :math:`f_{\mathrm{inc}}(i)` is a
 dimensionless incidence-angle penalty that grows as the local incidence approaches 90 degrees
-and the limb fades photometrically.  The penalty is
+and the limb fades photometrically. The penalty is
 
 .. math::
 
@@ -133,8 +133,8 @@ and the limb fades photometrically.  The penalty is
         \frac{1}{\cos\!\left(\min(i_{\mathrm{clip}}, i_{\mathrm{cap}})\right)} - 1 \right)
 
 with the clip / cap angles and the maximum :math:`f_{\mathrm{cap}}` set as project-wide
-constants in :mod:`nav.feature.constants`.  The last quadrature term is the SPK ephemeris
-uncertainty projected to the limb plane.  Dividing through by km/px gives the per-vertex pixel
+constants in :mod:`nav.feature.constants`. The last quadrature term is the SPK ephemeris
+uncertainty projected to the limb plane. Dividing through by km/px gives the per-vertex pixel
 sigma the polyline carries on its geometry payload.
 
 The terminator polyline carries the same form plus an additional albedo-variation term and a
@@ -162,7 +162,7 @@ Two scalars derived from the discrete masks gate the disc-template emission:
 The visible-lit fraction measures the portion of the *whole predicted disc* (lit + dark
 together) that is both lit and inside the sensor FOV — *not* the lit hemisphere alone, which
 would always score near unity for a fully-in-frame body and lose discriminating power for the
-disc gate.  The overflow fraction measures the portion of the predicted disc that is outside
+disc gate. The overflow fraction measures the portion of the predicted disc that is outside
 the sensor FOV.
 
 Lit-weighted predicted centroid
@@ -179,7 +179,7 @@ inside the body silhouette:
 
 Predicting the lit-weighted centroid up front means the navigation offset the technique
 recovers is just the spacecraft pointing error, not pointing error plus the systematic phase
-bias.  At zero phase the rendered model is uniform and the formula collapses to the geometric
+bias. At zero phase the rendered model is uniform and the formula collapses to the geometric
 centre.
 
 Phase-and-irregularity coupling
@@ -194,10 +194,10 @@ uncertainty with a phase factor:
              \left( 1 + 2 \sin^{2}\!\left(\frac{\phi}{2}\right) \right)
 
 where :math:`R_{\mathrm{body}}` is the predicted body radius (half the predicted disc diameter,
-in km, derived from the local km/px scale) and :math:`\phi` is the phase angle.  The phase
+in km, derived from the local km/px scale) and :math:`\phi` is the phase angle. The phase
 factor evaluates to 1 at full phase, 2 at 90 degrees, and 3 at full crescent — even at
 zero phase the body's rotational orientation is unknown, so a residual-scale centroid bias is
-always present.  The blob feature's confidence formula consumes :math:`\kappa` directly so a
+always present. The blob feature's confidence formula consumes :math:`\kappa` directly so a
 high-phase, irregular scene can be down-weighted without re-deriving the formula at the
 technique layer.
 
@@ -209,11 +209,13 @@ the silhouette extraction:
 
 - The **limb uncertainty** :math:`\sigma_{\mathrm{ellipsoid}} / (\mathrm{km\ per\ px})`, which
   measures how far the limb fit can be expected to wander given the body's intrinsic
-  ellipsoid-fit residual.  When this scalar exceeds the documented cap the limb fit is
-  information-limited; the gate rejects the LIMB_ARC and falls back to the
+  ellipsoid-fit residual. When this scalar exceeds the documented cap the limb fit is
+  information-limited; the gate rejects the
+  :attr:`~nav.feature.feature_type.NavFeatureType.LIMB_ARC` and falls back to the
   brightness-weighted-centroid path.
-- The **visible-lit fraction** and **overflow fraction** above.  The disc gate fires only
-  when LIMB_ARC was emitted, the visible-lit fraction is at or above its minimum, and the
+- The **visible-lit fraction** and **overflow fraction** above. The disc gate fires only
+  when :attr:`~nav.feature.feature_type.NavFeatureType.LIMB_ARC` was emitted, the
+  visible-lit fraction is at or above its minimum, and the
   overflow fraction is at or below its maximum.
 
 The terminator polyline gates fire when the surviving vertex count is at or above the
@@ -236,7 +238,7 @@ The model assumes:
   clamped before being recorded on the blob feature flags.
 
 Bodies whose predicted bounding box has zero overlap with the extended FOV produce no instance
-and contribute no features.  Bodies whose silhouette is entirely in shadow, or whose lit
+and contribute no features. Bodies whose silhouette is entirely in shadow, or whose lit
 fraction falls below the photometric thresholds, emit only the geometric features (limb arc
 when its uncertainty allows; otherwise nothing).
 
@@ -244,11 +246,11 @@ Sources of uncertainty
 ----------------------
 
 The per-vertex sigma values consumed by downstream techniques reflect the four physical
-quantities enumerated above plus the photometric softness budget.  They do not capture pose
+quantities enumerated above plus the photometric softness budget. They do not capture pose
 errors that bias the entire silhouette uniformly (those manifest as a global translation that
 the DT fit recovers); they do not account for unmodelled atmospheric haze or lens flare; and
 they do not propagate the SPICE pointing uncertainty itself (that is handled separately by
-the search-window margin).  The predicted lit-weighted centroid attached to the blob feature
+the search-window margin). The predicted lit-weighted centroid attached to the blob feature
 collapses to the geometric centre at zero phase but carries a phase-and-irregularity factor
 on its flags that grows for high-phase, non-ellipsoidal bodies; the enclosing
 :class:`~nav.feature.feature.NavFeature` adds a corresponding photon-noise-limited centroid
@@ -263,112 +265,111 @@ parameters live under ``bodies`` in ``src/nav/config_files/config_040_bodies.yam
 by the model itself plus its annotation helpers and the reprojection pipeline); per-body
 shape, albedo, and SPK-residual values live under ``body_shape`` in
 ``src/nav/config_files/config_220_body_shape.yaml`` (consumed via the
-:func:`~nav.nav_model.body_shape.shape_for_body` lookup chain).  Module-level Python
+:func:`~nav.nav_model.body_shape.shape_for_body` lookup chain). Module-level Python
 constants in :mod:`nav.nav_model.nav_model_body` set the emission-gate thresholds that are
-not currently exposed to YAML.
+not exposed to YAML.
 
 bodies block
 ------------
 
-Every key under ``bodies`` is listed below.  Several keys are not consumed by
+Every key under ``bodies`` is listed below. Several keys are not consumed by
 :class:`~nav.nav_model.nav_model_body.NavModelBody` itself; the second column names the
-module that does consume each key.  The grep
+module that does consume each key. The grep
 ``grep -c '^  [a-z_]\+:' src/nav/config_files/config_040_bodies.yaml`` returns 30 keys, which
 matches the 30 bullets here.
 
-- ``min_bounding_box_area`` — int, default ``9`` px².  Recorded on the model's metadata as
-  ``size_ok``; sub-threshold bounding boxes are flagged for reviewer awareness.  Does not by
-  itself suppress feature emission.  Consumed by
+- ``min_bounding_box_area`` — int, default ``9`` px². Recorded on the model's metadata as
+  ``size_ok``; sub-threshold bounding boxes are flagged for reviewer awareness. Does not by
+  itself suppress feature emission. Consumed by
   :class:`~nav.nav_model.nav_model_body.NavModelBody`.
-- ``min_emission_ring_body`` — int, default ``20`` px.  Reserved for the per-body ring-emission
-  gate that decides whether to emit RING_EDGE features near a body.  Consumed by the rings
-  feature-extraction pipeline (not yet wired); reserved here so the per-instrument override
-  story is uniform when the consumer lands.
-- ``oversample_edge_limit`` — int, default ``512`` px.  Cap on the per-axis oversample factor:
-  the floor of ``oversample_edge_limit / max(1, ceil(bbox_extent_px))``.  Larger values
-  produce a smoother anti-aliased limb at the cost of a larger backplane query.  Consumed by
+- ``min_emission_ring_body`` — int, default ``20`` px. Reserved for the per-body ring-emission
+  gate that decides whether to emit RING_EDGE features near a body. Reserved as an unused
+  key so the per-instrument override story is uniform once a consumer is wired in.
+- ``oversample_edge_limit`` — int, default ``512`` px. Cap on the per-axis oversample factor:
+  the floor of ``oversample_edge_limit / max(1, ceil(bbox_extent_px))``. Larger values
+  produce a smoother anti-aliased limb at the cost of a larger backplane query. Consumed by
   :class:`~nav.nav_model.nav_model_body.NavModelBody`.
-- ``oversample_maximum`` — int, default ``2`` (dimensionless).  Hard cap on the per-axis
-  oversample factor independent of bounding-box size.  Saturates small-body renders so large
-  field-fillers do not exhaust memory.  Consumed by
+- ``oversample_maximum`` — int, default ``2`` (dimensionless). Hard cap on the per-axis
+  oversample factor independent of bounding-box size. Saturates small-body renders so large
+  field-fillers do not exhaust memory. Consumed by
   :class:`~nav.nav_model.nav_model_body.NavModelBody`.
-- ``curvature_threshold_frac`` — float, default ``0.02`` (dimensionless).  Reserved for the
+- ``curvature_threshold_frac`` — float, default ``0.02`` (dimensionless). Reserved for the
   curvature-classification heuristic that distinguishes "limb fits a circle" from "limb is
   effectively a straight line"; not consumed by the current
   :class:`~nav.nav_model.nav_model_body.NavModelBody`.
-- ``curvature_threshold_pixels`` — int, default ``20`` px.  Reserved alongside
+- ``curvature_threshold_pixels`` — int, default ``20`` px. Reserved alongside
   ``curvature_threshold_frac`` for the same heuristic.
-- ``limb_incidence_threshold`` — float, default ``1.53589...`` rad (= 88 degrees).  Reserved
+- ``limb_incidence_threshold`` — float, default ``1.53589...`` rad (= 88 degrees). Reserved
   for a limb-vertex shadow filter that drops vertices whose local incidence angle is past
-  the threshold.  Not consumed by the current model.
-- ``limb_incidence_frac`` — float, default ``0.4`` (dimensionless).  Reserved for the same
+  the threshold. Not consumed by the current model.
+- ``limb_incidence_frac`` — float, default ``0.4`` (dimensionless). Reserved for the same
   shadow filter.
-- ``surface_bumpiness`` — dict[str, float], per-body table (km).  Reserved for a per-body
-  surface-roughness estimate that would feed into the per-vertex sigma formula; not currently
+- ``surface_bumpiness`` — dict[str, float], per-body table (km). Reserved for a per-body
+  surface-roughness estimate that would feed into the per-vertex sigma formula; not
   consumed (the equivalent quantity comes from
-  :attr:`~nav.nav_model.body_shape.BodyShape.crater_scale_km` instead).
-- ``geometric_albedo`` — dict[str, float], per-body table (dimensionless).  Per-body
+  :attr:`~nav.nav_model.body_shape.BodyShape.crater_scale_km`).
+- ``geometric_albedo`` — dict[str, float], per-body table (dimensionless). Per-body
   geometric albedo applied to the rendered brightness image when ``use_albedo`` is enabled.
   Entries default to bright icy moons (0.6-1.0); Phoebe (0.08), Iapetus (0.275), and Saturn
-  (0.342) are the notable dark exceptions.  Consumed by
+  (0.342) are the notable dark exceptions. Consumed by
   :class:`~nav.nav_model.nav_model_body.NavModelBody`.
-- ``use_lambert`` — bool, default ``true`` (dimensionless).  When true the predicted
+- ``use_lambert`` — bool, default ``true`` (dimensionless). When true the predicted
   brightness image is the per-pixel Lambert cosine of the incidence angle plus a small floor
   (so dark-but-visible silhouette pixels stay distinguishable from background); when false,
-  the silhouette is rendered as a flat binary mask.  Consumed by
+  the silhouette is rendered as a flat binary mask. Consumed by
   :class:`~nav.nav_model.nav_model_body.NavModelBody`.
-- ``use_albedo`` — bool, default ``false`` (dimensionless).  When true and the body has an
+- ``use_albedo`` — bool, default ``false`` (dimensionless). When true and the body has an
   entry in ``geometric_albedo``, the rendered brightness is multiplied by that albedo.
-  Distinguishes bright icy moons from dark bodies in multi-body composites.  Consumed by
+  Distinguishes bright icy moons from dark bodies in multi-body composites. Consumed by
   :class:`~nav.nav_model.nav_model_body.NavModelBody`.
-- ``min_reproj_seed_area`` — int, default ``40000`` px².  Threshold on per-image body extent
-  below which a body is not seeded into a body mosaic.  Consumed by
+- ``min_reproj_seed_area`` — int, default ``40000`` px². Threshold on per-image body extent
+  below which a body is not seeded into a body mosaic. Consumed by
   :class:`~nav.reproj.bodies.BodyMosaic`.
-- ``min_reproj_candidate_area`` — int, default ``2500`` px².  Threshold on per-image body
+- ``min_reproj_candidate_area`` — int, default ``2500`` px². Threshold on per-image body
   extent below which a body is not added as a candidate to an existing body mosaic.
   Consumed by :class:`~nav.reproj.bodies.BodyMosaic`.
-- ``reproj_lon_resolution`` — float, default ``0.01745...`` rad (= 1 degree).  Longitude
-  step for the body-mosaic reprojection grid.  Consumed by
+- ``reproj_lon_resolution`` — float, default ``0.01745...`` rad (= 1 degree). Longitude
+  step for the body-mosaic reprojection grid. Consumed by
   :class:`~nav.reproj.bodies.BodyMosaic`.
-- ``reproj_lat_resolution`` — float, default ``0.01745...`` rad (= 1 degree).  Latitude
-  step for the body-mosaic reprojection grid.  Consumed by
+- ``reproj_lat_resolution`` — float, default ``0.01745...`` rad (= 1 degree). Latitude
+  step for the body-mosaic reprojection grid. Consumed by
   :class:`~nav.reproj.bodies.BodyMosaic`.
 - ``reproj_latlon_type`` — str, default ``centric`` (one of ``centric`` / ``graphic``).
-  Latitude / longitude convention used by the body-mosaic reprojection.  Consumed by
+  Latitude / longitude convention used by the body-mosaic reprojection. Consumed by
   :class:`~nav.reproj.bodies.BodyMosaic`.
-- ``reproj_lon_direction`` — str, default ``east`` (one of ``east`` / ``west``).  Longitude
-  positive direction for the body-mosaic reprojection.  Consumed by
+- ``reproj_lon_direction`` — str, default ``east`` (one of ``east`` / ``west``). Longitude
+  positive direction for the body-mosaic reprojection. Consumed by
   :class:`~nav.reproj.bodies.BodyMosaic`.
-- ``min_text_area`` — float, default ``0.003`` (dimensionless fraction of frame area).  Below
+- ``min_text_area`` — float, default ``0.003`` (dimensionless fraction of frame area). Below
   this fraction the body is too small to label and the annotation pipeline skips its label.
   Consumed by :class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase`.
-- ``label_mask_enlarge`` — int, default ``10`` px.  Pixels around a body to avoid for label
-  placement.  Consumed by :class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase`.
-- ``label_limb_color`` — list[int], default ``[255, 0, 0]`` (RGB).  Color of the limb outline
-  drawn on the summary PNG.  Consumed by
+- ``label_mask_enlarge`` — int, default ``10`` px. Pixels around a body to avoid for label
+  placement. Consumed by :class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase`.
+- ``label_limb_color`` — list[int], default ``[255, 0, 0]`` (RGB). Color of the limb outline
+  drawn on the summary PNG. Consumed by
   :class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase`.
-- ``label_font`` — str, default ``liberation2/LiberationMono-Bold.ttf``.  Font used for body
-  labels.  Consumed by :class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase`.
-- ``label_font_size`` — int, default ``18`` px.  Body label font size.  Consumed by
+- ``label_font`` — str, default ``liberation2/LiberationMono-Bold.ttf``. Font used for body
+  labels. Consumed by :class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase`.
+- ``label_font_size`` — int, default ``18`` px. Body label font size. Consumed by
   :class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase`.
-- ``label_font_color`` — list[int], default ``[255, 0, 0]`` (RGB).  Body label font color.
+- ``label_font_color`` — list[int], default ``[255, 0, 0]`` (RGB). Body label font color.
   Consumed by :class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase`.
-- ``label_horiz_gap`` — int, default ``7`` px.  Horizontal gap between the limb and the head
-  of the label arrow.  Consumed by
+- ``label_horiz_gap`` — int, default ``7`` px. Horizontal gap between the limb and the head
+  of the label arrow. Consumed by
   :class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase`.
-- ``label_vert_gap`` — int, default ``5`` px.  Vertical gap between the limb and the head of
-  the label arrow.  Consumed by
+- ``label_vert_gap`` — int, default ``5`` px. Vertical gap between the limb and the head of
+  the label arrow. Consumed by
   :class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase`.
-- ``label_scan_v`` — int, default ``1`` px.  Granularity in V when scanning a limb to find
-  places to put labels.  Consumed by
+- ``label_scan_v`` — int, default ``1`` px. Granularity in V when scanning a limb to find
+  places to put labels. Consumed by
   :class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase`.
-- ``label_grid_v`` — int, default ``10`` px.  Coarse V grid for label placement when no
-  per-limb candidate is suitable.  Consumed by
+- ``label_grid_v`` — int, default ``10`` px. Coarse V grid for label placement when no
+  per-limb candidate is suitable. Consumed by
   :class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase`.
-- ``label_grid_u`` — int, default ``10`` px.  Coarse U grid for label placement.  Consumed by
+- ``label_grid_u`` — int, default ``10`` px. Coarse U grid for label placement. Consumed by
   :class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase`.
-- ``outline_thicken`` — int, default ``0`` px.  Number of dilation passes applied to the limb
-  outline before drawing.  Consumed by
+- ``outline_thicken`` — int, default ``0`` px. Number of dilation passes applied to the limb
+  outline before drawing. Consumed by
   :class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase`.
 
 Body-shape catalogue
@@ -376,7 +377,7 @@ Body-shape catalogue
 
 ``src/nav/config_files/config_220_body_shape.yaml`` carries the per-body
 :class:`~nav.nav_model.body_shape.BodyShape` overrides under a ``body_shape`` mapping keyed by
-upper-case SPICE body name.  Each entry may set any subset of the
+upper-case SPICE body name. Each entry may set any subset of the
 :class:`~nav.nav_model.body_shape.BodyShape` fields; null or missing fields fall through to
 the hard-coded :data:`~nav.nav_model.body_shape.BODY_SHAPE_TABLE` baseline (Saturn-moon,
 irregular-moon, gas-giant, or default profile depending on the body) per
@@ -386,30 +387,37 @@ Module-level emission constants
 -------------------------------
 
 The emission-gate thresholds are Python module-level constants in
-:mod:`nav.nav_model.nav_model_body` and are not exposed as YAML knobs.  Tests and downstream
+:mod:`nav.nav_model.nav_model_body` and are not exposed as YAML knobs. Tests and downstream
 tools read the canonical values via these symbols.
 
 - :data:`~nav.nav_model.nav_model_body.BODY_POSITION_SLOP_FRAC` — float, ``0.05``
-  (dimensionless).  Inflation factor applied to the inventory bounding box before clipping
+  (dimensionless). Inflation factor applied to the inventory bounding box before clipping
   into the extended FOV.
-- :data:`~nav.nav_model.nav_model_body.LIMB_ARC_MAX_UNCERTAINTY_PX` — float, ``3.0`` px.  Cap
-  on the limb normal-sigma at which LIMB_ARC remains useful.  Above this value the per-vertex
-  normal uncertainty is too large for the DT-based limb fit; the extractor switches to
-  BODY_BLOB.
+- :data:`~nav.nav_model.nav_model_body.LIMB_ARC_MAX_UNCERTAINTY_PX` — float, ``3.0`` px. Cap
+  on the limb normal-sigma at which
+  :attr:`~nav.feature.feature_type.NavFeatureType.LIMB_ARC` remains useful. Above this
+  value the per-vertex normal uncertainty is too large for the DT-based limb fit; the
+  extractor switches to :attr:`~nav.feature.feature_type.NavFeatureType.BODY_BLOB`.
 - :data:`~nav.nav_model.nav_model_body.BODY_BLOB_MIN_DIAMETER_PX` — float, ``8.0`` px.
-  Minimum predicted disc diameter at which BODY_BLOB is emitted.  Below this diameter the
-  brightness-weighted centroid cannot pin the body to better than ~1 px; the per-body
-  shape table can override this floor upward but not downward.
+  Minimum predicted disc diameter at which
+  :attr:`~nav.feature.feature_type.NavFeatureType.BODY_BLOB` is emitted. Below this
+  diameter the brightness-weighted centroid cannot pin the body to better than ~1 px; the
+  per-body shape table can override this floor upward but not downward.
 - :data:`~nav.nav_model.nav_model_body.BODY_DISC_MIN_VISIBLE_LIT_FRACTION` — float, ``0.4``
-  (dimensionless).  Minimum lit-and-in-FOV fraction for BODY_DISC emission.  Below 40 % the
+  (dimensionless). Minimum lit-and-in-FOV fraction for
+  :attr:`~nav.feature.feature_type.NavFeatureType.BODY_DISC` emission. Below 40 % the
   disc match is too asymmetric to be useful.
 - :data:`~nav.nav_model.nav_model_body.BODY_DISC_MAX_OVERFLOW_FRACTION` — float, ``0.3``
-  (dimensionless).  Maximum overflow fraction for BODY_DISC emission.  A body whose disc is
-  more than 30 % off-frame loses too much template support for a sharp correlation peak.
-- :data:`~nav.nav_model.nav_model_body.TERMINATOR_MIN_VERTICES` — int, ``8`` (count).  Minimum
-  surviving terminator vertex count for TERMINATOR_ARC emission.
+  (dimensionless). Maximum overflow fraction for
+  :attr:`~nav.feature.feature_type.NavFeatureType.BODY_DISC` emission. A body whose disc
+  is more than 30 % off-frame loses too much template support for a sharp correlation
+  peak.
+- :data:`~nav.nav_model.nav_model_body.TERMINATOR_MIN_VERTICES` — int, ``8`` (count).
+  Minimum surviving terminator vertex count for
+  :attr:`~nav.feature.feature_type.NavFeatureType.TERMINATOR_ARC` emission.
 - :data:`~nav.nav_model.nav_model_body.TERMINATOR_MIN_PHASE_FACTOR` — float, ``0.05``
-  (dimensionless).  Minimum :math:`\sin\phi` for TERMINATOR_ARC emission.  Below
+  (dimensionless). Minimum :math:`\sin\phi` for
+  :attr:`~nav.feature.feature_type.NavFeatureType.TERMINATOR_ARC` emission. Below
   :math:`\sin\phi \approx 0.05` (phase below ~3 degrees) the terminator is too close to the
   limb to be photometrically distinguishable.
 
@@ -417,7 +425,7 @@ Per-instrument overrides
 ------------------------
 
 The ``bodies`` block is global: per-instrument YAML (``config_4N0_inst_*.yaml``) does not
-currently override any of the keys above.  Instrument-specific behaviour enters through the
+override any of the keys above. Instrument-specific behaviour enters through the
 observation snapshot — the optical PSF sigma read from
 :meth:`~nav.obs.obs_inst.ObsInst.star_psf` and the extended-FOV margin set by
 :class:`~nav.nav_orchestrator.instrument_config.InstrumentSettings` — rather than through
@@ -442,14 +450,14 @@ Source files:
   :func:`~nav.nav_model.body_shape.shape_for_body`.
 
 Public class :class:`~nav.nav_model.nav_model_body.NavModelBody`, base
-:class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase`.  The class registers itself in
+:class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase`. The class registers itself in
 ``NavModel._registry`` via ``__init_subclass__`` so that
-:func:`~nav.nav_model.nav_model.build_models_for_obs` discovers it.  Public surface
+:func:`~nav.nav_model.nav_model.build_models_for_obs` discovers it. Public surface
 (autodocumented at :doc:`/api_reference/api_nav_model`):
 
 - :meth:`~nav.nav_model.nav_model_body.NavModelBody.instances_for_obs` — class method that
   returns one instance per body whose
-  :meth:`~nav.obs.obs_snapshot.ObsSnapshot.inventory_body_in_extfov` predicate fires.  The
+  :meth:`~nav.obs.obs_snapshot.ObsSnapshot.inventory_body_in_extfov` predicate fires. The
   inventory is queried once per observation against the planet plus its configured
   satellites; bodies with no inventory entry, or whose entry fails the in-extfov predicate,
   contribute nothing.
@@ -473,23 +481,25 @@ BodyShape dataclass
 covariance and emission gates:
 
 - :attr:`~nav.nav_model.body_shape.BodyShape.ellipsoid_rms_residual_km` — RMS deviation of
-  the body silhouette from the best-fit ellipsoid (km).  Primary contribution to
+  the body silhouette from the best-fit ellipsoid (km). Primary contribution to
   :math:`\sigma_{\mathrm{ellipsoid}}` in the per-vertex sigma quadrature sum.
 - :attr:`~nav.nav_model.body_shape.BodyShape.crater_scale_km` — characteristic crater /
   topographic scale (km).
 - :attr:`~nav.nav_model.body_shape.BodyShape.albedo_variation` — fractional disc-brightness
-  variation in :math:`[0, 1]`.  Drives the terminator-arc reliability formula.
+  variation in :math:`[0, 1]`. Drives the terminator-arc reliability formula.
 - :attr:`~nav.nav_model.body_shape.BodyShape.spice_orbital_residual_km` — SPK ephemeris
   uncertainty in km.
-- :attr:`~nav.nav_model.body_shape.BodyShape.min_blob_diameter_px` — predicted disc diameter
-  (px) at which the extractor stops emitting LIMB_ARC and switches to BODY_BLOB.
+- :attr:`~nav.nav_model.body_shape.BodyShape.min_blob_diameter_px` — predicted disc
+  diameter (px) at which the extractor stops emitting
+  :attr:`~nav.feature.feature_type.NavFeatureType.LIMB_ARC` and switches to
+  :attr:`~nav.feature.feature_type.NavFeatureType.BODY_BLOB`.
 - :attr:`~nav.nav_model.body_shape.BodyShape.shape_class_hint` — coarse classification
   (``regular`` / ``irregular`` / ``highly_irregular`` / ``unknown``); used in human-readable
   logs and reviewer-facing diagnostics.
 
 The lookup chain is :func:`~nav.nav_model.body_shape.shape_for_body`, which calls
 :func:`~nav.nav_model.body_shape.load_body_shape` and returns the merged
-:class:`~nav.nav_model.body_shape.BodyShape`.  Priority order:
+:class:`~nav.nav_model.body_shape.BodyShape`. Priority order:
 
 1. Operator-curated YAML (``config_220_body_shape.yaml``) — each non-null field overrides
    the baseline.
@@ -504,9 +514,9 @@ Annotation helpers
 Two helpers live there:
 
 - ``_compute_limb_mask_from_body_mask`` — computes the limb mask from the body mask via
-  discrete neighbour shifts.  Used by the simulated body model.
+  discrete neighbour shifts. Used by the simulated body model.
 - ``_create_annotations`` — builds the body-label
-  :class:`~nav.annotation.annotations.Annotations` collection for the summary PNG.  Consumes
+  :class:`~nav.annotation.annotations.Annotations` collection for the summary PNG. Consumes
   the ``label_*``, ``min_text_area``, and ``outline_thicken`` keys documented above.
 
 Per-image metadata
@@ -542,31 +552,32 @@ Call path traced through
    clears ``self._metadata``, records ``start_time``, and invokes the private render helper.
 2. The render helper looks up the inventory entry, queries five sub-solar / sub-observer /
    phase-angle backplanes for the geometry summary, and clips an inflated bounding box into
-   the extended FOV.  The inflation factor is
+   the extended FOV. The inflation factor is
    :data:`~nav.nav_model.nav_model_body.BODY_POSITION_SLOP_FRAC` of the inventory extent.
 3. The render helper builds an oversampled meshgrid + backplane around the clipped bounding
    box, queries the incidence-angle backplane, downsamples the mask to extfov resolution,
    and derives the limb / terminator / body / lit masks via discrete neighbour shifts.
 4. A predicted brightness image is built from the Lambert cosine when ``use_lambert`` is true
    and the body is at least partly lit; otherwise the silhouette is rendered as a binary
-   mask with a small offset so empty body pixels remain non-zero.  When ``use_albedo`` is
+   mask with a small offset so empty body pixels remain non-zero. When ``use_albedo`` is
    true and the body has a ``geometric_albedo`` entry, the brightness image is multiplied by
    the albedo.
 5. Discrete masks are walked by the private polyline-sampler helper to produce per-vertex
-   polylines (vertex position, outward normal, incidence, km-per-pixel).  The lit-and-in-FOV
+   polylines (vertex position, outward normal, incidence, km-per-pixel). The lit-and-in-FOV
    pixels are counted to compute ``visible_lit_fraction`` and ``overflow_fraction``.
 6. :meth:`~nav.nav_model.nav_model_body.NavModelBody.to_features` resolves the per-body
    :class:`~nav.nav_model.body_shape.BodyShape` via
    :func:`~nav.nav_model.body_shape.shape_for_body` and computes the limb-uncertainty
-   scalar.  Three branches follow, in order:
+   scalar. Three branches follow, in order:
 
    - When the limb polyline survived and its uncertainty is at or below
      :data:`~nav.nav_model.nav_model_body.LIMB_ARC_MAX_UNCERTAINTY_PX`, a
-     :data:`~nav.feature.feature_type.NavFeatureType.LIMB_ARC` feature is emitted.  The
+     :data:`~nav.feature.feature_type.NavFeatureType.LIMB_ARC` feature is emitted. The
      downstream disc gate then has a chance to fire alongside the limb arc when
      ``visible_lit_fraction`` and ``overflow_fraction`` allow.
    - When the limb arc was rejected and the predicted disc diameter is at least
-     ``max(BODY_BLOB_MIN_DIAMETER_PX, BodyShape.min_blob_diameter_px)``, a
+     ``max(`` :data:`~nav.nav_model.nav_model_body.BODY_BLOB_MIN_DIAMETER_PX` ``,``
+     :attr:`~nav.nav_model.body_shape.BodyShape.min_blob_diameter_px` ``)``, a
      :data:`~nav.feature.feature_type.NavFeatureType.BODY_BLOB` feature is emitted instead.
      The blob feature carries the lit-weighted predicted centroid and the
      phase-and-irregularity factor :math:`\kappa` on its
@@ -588,21 +599,22 @@ Examples
 ========
 
 The named scenes in ``tests/integration/image_library/images/`` exercise the four feature
-types.  Numbers below are taken from the operator-curated YAML sidecars and the integration
+types. Numbers below are taken from the operator-curated YAML sidecars and the integration
 tests.
 
 ``body_full_fov`` (Cassini ISS NAC, image ``N1572105349_1``)
     Dione fills the FOV — predicted disc diameter approximately 155 px, mostly lit with a
     sliver of terminator, ``overflow_fraction = 0.0``, ``visible_lit_fraction`` approximately
-    ``0.97``.  The model emits a single
+    ``0.97``. The model emits a single
     :data:`~nav.feature.feature_type.NavFeatureType.BODY_DISC` feature carrying the rendered
-    template; the LIMB_ARC is rejected by the downstream reliability gate that consumes it
+    template; the :data:`~nav.feature.feature_type.NavFeatureType.LIMB_ARC` is rejected by
+    the downstream reliability gate that consumes it
     (the textbook full-disc, fully-lit limb saturates the model-side reliability formula's
-    incidence-factor penalty).  Operator-verified offset is
+    incidence-factor penalty). Operator-verified offset is
     :math:`(\Delta v, \Delta u) = (8.68, -17.37)` px.
 
 ``body_partial_overflow`` (Cassini ISS NAC, image ``N1484593951_2``)
-    Rhea visible in the upper right with ``overflow_fraction \approx 0.22``.  The model emits
+    Rhea visible in the upper right with ``overflow_fraction \approx 0.22``. The model emits
     a :data:`~nav.feature.feature_type.NavFeatureType.LIMB_ARC` feature plus a
     :data:`~nav.feature.feature_type.NavFeatureType.BODY_DISC` feature (the overflow fraction
     sits below
@@ -619,20 +631,20 @@ tests.
     :data:`~nav.feature.feature_type.NavFeatureType.BODY_BLOB` feature instead of a LIMB_ARC.
     The blob feature carries the lit-weighted centroid and a phase-irregularity factor
     populated from the per-body
-    :class:`~nav.nav_model.body_shape.BodyShape`.  Operator-verified offset is
+    :class:`~nav.nav_model.body_shape.BodyShape`. Operator-verified offset is
     :math:`(\Delta v, \Delta u) = (6.08, -1.53)` px.
 
 ``high_phase_terminator`` (Cassini ISS NAC, image ``N1597846115_2``)
-    A high-phase terminator arc with no other features in the FOV.  The model emits a
+    A high-phase terminator arc with no other features in the FOV. The model emits a
     :data:`~nav.feature.feature_type.NavFeatureType.LIMB_ARC` feature (the lit limb survives)
     and a :data:`~nav.feature.feature_type.NavFeatureType.TERMINATOR_ARC` feature (the
     terminator polyline meets the minimum vertex count and the phase factor sits above the
-    minimum).  Operator-verified offset is :math:`(\Delta v, \Delta u) = (5.19, 1.30)` px.
+    minimum). Operator-verified offset is :math:`(\Delta v, \Delta u) = (5.19, 1.30)` px.
 
 ``multi_body`` (Cassini ISS NAC, image ``N1487595731_1``)
     Dione and Rhea both visible and overlapping at phase angle approximately 90 degrees.
     The orchestrator instantiates two
     :class:`~nav.nav_model.nav_model_body.NavModelBody` instances, one per body, each
     emitting its own combination of features per the gates above; the downstream techniques
-    receive the union and fuse a single offset.  Operator-verified offset is
+    receive the union and fuse a single offset. Operator-verified offset is
     :math:`(\Delta v, \Delta u) = (7.03, -18.42)` px.

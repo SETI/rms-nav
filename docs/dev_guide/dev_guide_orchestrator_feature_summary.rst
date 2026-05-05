@@ -8,10 +8,10 @@ Overview
 :class:`~nav.nav_orchestrator.feature_summary.NavFeatureSummary` is the small frozen
 dataclass that records one entry per emitted
 :class:`~nav.feature.feature.NavFeature` in the per-image
-:attr:`~nav.nav_orchestrator.nav_result.NavResult.feature_inventory` list.  The summary
+:attr:`~nav.nav_orchestrator.nav_result.NavResult.feature_inventory` list. The summary
 carries enough information about each feature for the curator to write a post-mortem entry
 into the per-image JSON sidecar — the per-feature identifier, its type, its source model,
-the gate decision (kept vs. dropped, with a stable reason), and its bounding box.  It does
+the gate decision (kept vs. dropped, with a stable reason), and its bounding box. It does
 not carry the heavy bits of a full
 :class:`~nav.feature.feature.NavFeature` (templates, polylines, covariance) because those
 would bloat the metadata.
@@ -19,23 +19,23 @@ would bloat the metadata.
 Theory
 ======
 
-The summary is a deliberately narrow record.  Heavy-bit features (BODY_DISC templates,
+The summary is a deliberately narrow record. Heavy-bit features (BODY_DISC templates,
 LIMB_ARC polylines) routinely run to tens of kilobytes per feature; surfacing every byte
 of every feature in the per-image JSON would balloon the sidecar to multi-megabyte sizes
-without operationally useful content.  The summary keeps the post-mortem structure (one
+without operationally useful content. The summary keeps the post-mortem structure (one
 entry per emitted feature) without the bulk.
 
 The :attr:`~nav.nav_orchestrator.feature_summary.NavFeatureSummary.gated` flag and the
 :attr:`~nav.nav_orchestrator.feature_summary.NavFeatureSummary.gate_reason` together
 describe the per-feature reliability-gate decision: ``gated=False`` means the feature
 reached the technique-feasibility loop; ``gated=True`` means the gate dropped it before
-any technique saw it.  The reason string is stable across images so reviewer tooling can
+any technique saw it. The reason string is stable across images so reviewer tooling can
 correlate gate refusals across an entire imaging campaign.
 
 Restrictions and assumptions
 ----------------------------
 
-- Every field is required at construction time.  The dataclass enforces invariants in
+- Every field is required at construction time. The dataclass enforces invariants in
   ``__post_init__``: feature id and source model must be non-empty strings; reliability
   must lie in :math:`[0, 1]`; the bounding box must be a length-4 tuple of ints.
 - The gate-reason field is required non-empty when ``gated`` is ``True``.
@@ -44,14 +44,14 @@ Restrictions and assumptions
 Sources of uncertainty
 ----------------------
 
-The summary reports no uncertainty.  The reliability score is the per-feature value the
-producing NavModel reported; the gate decision is deterministic given the per-image
-context.
+The summary reports no uncertainty. The reliability score is the per-feature value the
+producing :class:`~nav.nav_model.nav_model.NavModel` reported; the gate decision is
+deterministic given the per-image context.
 
 Configuration
 =============
 
-The dataclass carries no YAML configuration of its own.  The per-feature reliability
+The dataclass carries no YAML configuration of its own. The per-feature reliability
 floor that drives the gate decision lives on the
 :class:`~nav.feature.reliability.FeatureReliabilityGate` (per-type floor) rather than on
 this summary dataclass.
@@ -63,23 +63,23 @@ Source file: ``src/nav/nav_orchestrator/feature_summary.py`` —
 :class:`~nav.nav_orchestrator.feature_summary.NavFeatureSummary`.
 
 Public class :class:`~nav.nav_orchestrator.feature_summary.NavFeatureSummary`, frozen
-dataclass.  Public fields (autodocumented at
+dataclass. Public fields (autodocumented at
 :doc:`/api_reference/api_nav_orchestrator`):
 
 - :attr:`~nav.nav_orchestrator.feature_summary.NavFeatureSummary.feature_id` —
   unique identifier matching the producing
-  :attr:`~nav.feature.feature.NavFeature.feature_id`.  Non-empty string.
+  :attr:`~nav.feature.feature.NavFeature.feature_id`. Non-empty string.
 - :attr:`~nav.nav_orchestrator.feature_summary.NavFeatureSummary.feature_type` — one of
   the :class:`~nav.feature.feature_type.NavFeatureType` enum values.
 - :attr:`~nav.nav_orchestrator.feature_summary.NavFeatureSummary.source_model` — name of
-  the producing NavModel (``'stars'``, ``'body:DIONE'``, ``'rings:SATURN'``).  Non-empty
-  string.
+  the producing :class:`~nav.nav_model.nav_model.NavModel` (``'stars'``,
+  ``'body:DIONE'``, ``'rings:SATURN'``). Non-empty string.
 - :attr:`~nav.nav_orchestrator.feature_summary.NavFeatureSummary.reliability` — per-feature
   reliability score in :math:`[0, 1]`.
-- :attr:`~nav.nav_orchestrator.feature_summary.NavFeatureSummary.gated` — bool.  ``True``
+- :attr:`~nav.nav_orchestrator.feature_summary.NavFeatureSummary.gated` — bool. ``True``
   when the reliability gate dropped this feature before any technique saw it.
 - :attr:`~nav.nav_orchestrator.feature_summary.NavFeatureSummary.gate_reason` — str or
-  ``None``.  Stable English reason when ``gated`` is ``True``; ``None`` otherwise.
+  ``None``. Stable English reason when ``gated`` is ``True``; ``None`` otherwise.
 - :attr:`~nav.nav_orchestrator.feature_summary.NavFeatureSummary.bbox_extfov_vu` —
   half-open ``(v_min, u_min, v_max, u_max)`` bounding box in extfov coordinates;
   4-tuple of ints.
@@ -100,7 +100,7 @@ Examples
 ========
 
 **Kept feature on body_partial_overflow.**  The body model emits a LIMB_ARC for Rhea with
-reliability 0.82 and bounding box ``(180, 700, 540, 1024)``.  The orchestrator's gate
+reliability 0.82 and bounding box ``(180, 700, 540, 1024)``. The orchestrator's gate
 keeps it, so the inventory entry is::
 
     NavFeatureSummary(
@@ -135,7 +135,7 @@ penalty saturates on full-disc bodies.
 **Per-image inventory size.**  A multi-body Cassini fly-by image with 3 bodies plus 50
 predictable stars produces an inventory of 50 STAR plus up to 12 body-derived features
 (LIMB_ARC + BODY_DISC + TERMINATOR_ARC per body) — about 62 entries totalling ~6 KB of
-JSON.  The same scene's heavy-bit
+JSON. The same scene's heavy-bit
 :class:`~nav.feature.feature.NavFeature` objects total tens of megabytes; the summary's
 narrow shape is what makes the per-image sidecar tractable to read in a reviewer's text
 editor.

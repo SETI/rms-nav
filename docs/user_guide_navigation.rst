@@ -510,9 +510,9 @@ default ``*`` runs all of them.
 
 The algorithmic detail (DT pipeline, Levenberg-Marquardt refinement,
 information-matrix covariance) lives in
-:doc:`dev_guide/dev_guide_techniques` and :doc:`dev_guide/dev_guide_uncertainty`;
-this page summarises what each technique does and which scenes it
-applies to.
+:doc:`dev_guide/dev_guide_techniques` and
+:doc:`dev_guide/dev_guide_techniques_dt_fitting`; this page summarises
+what each technique does and which scenes it applies to.
 
 Implemented techniques
 ----------------------

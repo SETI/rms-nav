@@ -6,16 +6,16 @@ Overview
 ========
 
 Feasibility reporting is the small dataclass every navigation technique returns from its
-``is_feasible`` method.  The orchestrator consults the report before invoking ``navigate``;
+``is_feasible`` method. The orchestrator consults the report before invoking ``navigate``;
 infeasible techniques are skipped silently and the human-readable reason is recorded so the
-per-image log surfaces "skipped — no LIMB_ARC features with sufficient visible arc" without
-the technique's per-image work running.  Feasibility checks read feature *metadata* only —
+per-image log surfaces "skipped — no ``LIMB_ARC`` features with sufficient visible arc" without
+the technique's per-image work running. Feasibility checks read feature *metadata* only —
 never image pixels — so they are cheap to obtain on every image.
 
 Theory
 ======
 
-Feasibility is a binary outcome with a stable human-readable reason.  Every feasibility check
+Feasibility is a binary outcome with a stable human-readable reason. Every feasibility check
 reads the offered feature set's metadata (feature types, surviving polyline vertex counts,
 predictable-star cohort sizes, etc.) and returns either feasible-with-consumed-count or
 infeasible-with-reason.
@@ -25,7 +25,7 @@ Stable reasons
 
 The reason string carries an English description that is *stable across images* — the
 orchestrator's diagnostics use it as a key to correlate similar refusals across an entire
-imaging campaign.  A change to the wording is therefore a visible change to downstream
+imaging campaign. A change to the wording is therefore a visible change to downstream
 consumers; reasons are written in a fixed lower-case-with-underscore style ("ok",
 "no_limb_arc_features_with_sufficient_visible_arc", "no_prior_offset_on_context",
 "too_few_inliers (N < min M)").
@@ -34,21 +34,21 @@ Consumed-feature count
 ----------------------
 
 When a feasibility report is positive it carries the count of features the technique would
-consume if invoked.  This number is the size of the post-filter inlier set and is recorded on
-the per-image diagnostics.  A technique whose feasibility check counts fewer features than the
-orchestrator offered is usually applying a within-type filter (e.g. drop LIMB_ARC polylines
+consume if invoked. This number is the size of the post-filter inlier set and is recorded on
+the per-image diagnostics. A technique whose feasibility check counts fewer features than the
+orchestrator offered is usually applying a within-type filter (e.g. drop ``LIMB_ARC`` polylines
 whose surviving vertex count is below a threshold) before the actual fit runs.
 
 Restrictions and assumptions
 ----------------------------
 
-- ``is_feasible`` reads metadata only.  Anything that requires a pixel read or a backplane
+- ``is_feasible`` reads metadata only. Anything that requires a pixel read or a backplane
   query belongs in ``navigate``, not in feasibility — the orchestrator runs feasibility on
   every offered technique on every image, so a per-pixel read in feasibility would multiply
   the runtime.
-- The reason field must be non-empty when the report is infeasible.  The dataclass constructor
+- The reason field must be non-empty when the report is infeasible. The dataclass constructor
   rejects an empty reason string in that case.
-- The consumed-feature count must be non-negative.  Feasibility reports for infeasible
+- The consumed-feature count must be non-negative. Feasibility reports for infeasible
   techniques typically set the count to zero.
 
 Sources of uncertainty
@@ -59,7 +59,7 @@ There is none — feasibility is a deterministic predicate over feature metadata
 Configuration
 =============
 
-Feasibility reporting carries no YAML configuration of its own.  The per-technique thresholds
+Feasibility reporting carries no YAML configuration of its own. The per-technique thresholds
 that drive feasibility decisions (minimum surviving polyline length, minimum predictable-star
 count, etc.) live on each technique's ``tuning`` block; the feasibility check just reads them.
 
@@ -71,16 +71,16 @@ Source file: ``src/nav/nav_technique/feasibility.py`` —
 
 Public surface (autodocumented at :doc:`/api_reference/api_nav_technique`):
 
-- :class:`~nav.nav_technique.feasibility.NavFeasibilityReport` — the dataclass.  Frozen,
-  three-field.  Fields:
+- :class:`~nav.nav_technique.feasibility.NavFeasibilityReport` — the dataclass. Frozen,
+  three-field. Fields:
 
-  - :attr:`~nav.nav_technique.feasibility.NavFeasibilityReport.feasible` — bool.  True when
+  - :attr:`~nav.nav_technique.feasibility.NavFeasibilityReport.feasible` — bool. True when
     the technique can run on the supplied feature set; False when not.
-  - :attr:`~nav.nav_technique.feasibility.NavFeasibilityReport.reason` — str.  Human-readable
+  - :attr:`~nav.nav_technique.feasibility.NavFeasibilityReport.reason` — str. Human-readable
     reason; required non-empty when ``feasible`` is False; ignored (but commonly set to
     ``"ok"``) when True.
   - :attr:`~nav.nav_technique.feasibility.NavFeasibilityReport.consumed_feature_count` — int.
-    Number of features the technique *would* consume after its own type filter.  Defaults to
+    Number of features the technique *would* consume after its own type filter. Defaults to
     zero; safe to leave at zero when ``feasible`` is False.
 
 The dataclass enforces its own invariants in ``__post_init__``:
@@ -96,14 +96,14 @@ The dataclass enforces its own invariants in ``__post_init__``:
 The dataclass is consumed by every concrete
 :class:`~nav.nav_technique.nav_technique.NavTechnique` subclass's
 :meth:`~nav.nav_technique.nav_technique.NavTechnique.is_feasible` method and the
-orchestrator's two-pass driver.  See :doc:`dev_guide_techniques` for the family-level
+orchestrator's two-pass driver. See :doc:`dev_guide_techniques` for the family-level
 overview of how feasibility plugs into the pipeline.
 
 Examples
 ========
 
 **Feasible report, body limb fit.**  When :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav`
-sees three offered LIMB_ARC features, two of which carry surviving vertex counts at or above
+sees three offered ``LIMB_ARC`` features, two of which carry surviving vertex counts at or above
 ``min_arc_px``, the report is::
 
     NavFeasibilityReport(
@@ -116,7 +116,7 @@ The orchestrator invokes
 :meth:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav.navigate` with the full feature
 set; the technique itself drops the third polyline before fitting.
 
-**Infeasible report, body limb fit.**  When every offered LIMB_ARC has fewer surviving
+**Infeasible report, body limb fit.**  When every offered ``LIMB_ARC`` has fewer surviving
 vertices than ``min_arc_px``, the report is::
 
     NavFeasibilityReport(

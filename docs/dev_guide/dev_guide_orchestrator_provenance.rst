@@ -7,7 +7,7 @@ Overview
 
 :class:`~nav.nav_orchestrator.provenance.Provenance` is the frozen dataclass attached to
 every :class:`~nav.nav_orchestrator.nav_result.NavResult` to record the exact runtime
-state under which a navigation produced its outputs.  Two navigations with identical
+state under which a navigation produced its outputs. Two navigations with identical
 inputs produce byte-identical
 :class:`~nav.nav_orchestrator.provenance.Provenance` *except* for
 :attr:`~nav.nav_orchestrator.provenance.Provenance.pipeline_run_iso8601`, which is
@@ -27,7 +27,9 @@ The provenance envelope captures three independent kinds of state:
   ``_STATIC_DATA_PREFIXES`` (``config_220_`` for the body shape catalogue, ``config_3``
   for ring catalogues, ``config_4`` for per-instrument blocks).
 - **Pipeline state.**  ``technique_names`` and ``extractor_names`` enumerate every
-  registered technique and NavModel under the current process — so a regression run
+  registered :class:`~nav.nav_technique.nav_technique.NavTechnique` and
+  :class:`~nav.nav_model.nav_model.NavModel` under the current process — so a regression
+  run
   pinned to an old code revision but with a new technique registered records the
   difference in its provenance even when the outputs are otherwise byte-identical.
 
@@ -35,7 +37,7 @@ Restrictions and assumptions
 ----------------------------
 
 - The static-data hash list is built once per ``navigate`` call by
-  :func:`~nav.nav_orchestrator.provenance.collect_provenance_metadata`.  Comments and
+  :func:`~nav.nav_orchestrator.provenance.collect_provenance_metadata`. Comments and
   whitespace are included in the hashed bytes, so a YAML edit that only adds a comment
   changes the hash.
 - The SPICE-kernel list is read live from ``spiceypy.ktotal`` /
@@ -51,13 +53,13 @@ Restrictions and assumptions
 Sources of uncertainty
 ----------------------
 
-The envelope reports no uncertainty.  Every field is a deterministic readout of runtime
+The envelope reports no uncertainty. Every field is a deterministic readout of runtime
 state at navigate time.
 
 Configuration
 =============
 
-The envelope carries no YAML configuration of its own.  The list of filename prefixes
+The envelope carries no YAML configuration of its own. The list of filename prefixes
 counted as static data lives in module-level
 ``_STATIC_DATA_PREFIXES``; downstream callers that want a different set of YAML files
 hashed must extend the list at module level.
@@ -72,7 +74,7 @@ Source file: ``src/nav/nav_orchestrator/provenance.py`` —
 
 Public surface (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
 
-- :class:`~nav.nav_orchestrator.provenance.Provenance` — frozen dataclass.  Public fields:
+- :class:`~nav.nav_orchestrator.provenance.Provenance` — frozen dataclass. Public fields:
 
   - :attr:`~nav.nav_orchestrator.provenance.Provenance.rms_nav_version` — version string
     (e.g. ``'0.5.2'``).
@@ -99,7 +101,7 @@ Public surface (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
   freshly-read git SHA, kernel list, and static-data hash dict.
 
 - :func:`~nav.nav_orchestrator.provenance.collect_provenance_metadata` — runs the live
-  readouts.  Called once per
+  readouts. Called once per
   :meth:`~nav.nav_orchestrator.orchestrator.NavOrchestrator.navigate`.
 
 The dataclass enforces invariants in ``__post_init__``: every collection input is coerced
@@ -111,21 +113,21 @@ Examples
 ========
 
 **Two navigations of the same image with the same SPICE kernels.**  An operator runs a
-batch over a Cassini ISS image at two different wall-clock times.  Both runs produce
+batch over a Cassini ISS image at two different wall-clock times. Both runs produce
 :class:`~nav.nav_orchestrator.provenance.Provenance` instances that differ only in
 :attr:`~nav.nav_orchestrator.provenance.Provenance.pipeline_run_iso8601`; every other
-field is byte-identical.  A regression-baseline comparator strips that field and confirms
+field is byte-identical. A regression-baseline comparator strips that field and confirms
 the two outputs match.
 
 **Code change that surfaces in provenance.**  An operator pulls a new commit that touches
-:mod:`nav.nav_technique.dt_fitting` and reruns navigation.  The new
+:mod:`nav.nav_technique.dt_fitting` and reruns navigation. The new
 :class:`~nav.nav_orchestrator.provenance.Provenance` carries a different
 :attr:`~nav.nav_orchestrator.provenance.Provenance.rms_nav_git_sha`; the rest of the
-envelope is unchanged unless the per-technique result changed.  The reviewer can correlate
+envelope is unchanged unless the per-technique result changed. The reviewer can correlate
 output diffs with the SHA delta directly.
 
 **Static-data change.**  An operator edits ``config_220_body_shape.yaml`` to refine
-Mimas's ellipsoid residual.  The next
+Mimas's ellipsoid residual. The next
 :class:`~nav.nav_orchestrator.provenance.Provenance` carries a different
 :attr:`~nav.nav_orchestrator.provenance.Provenance.static_data_hashes` entry for that
 file; downstream regression baselines pinned to the old hash flag the difference and

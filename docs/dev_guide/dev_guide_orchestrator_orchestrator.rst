@@ -7,7 +7,7 @@ Overview
 
 :class:`~nav.nav_orchestrator.orchestrator.NavOrchestrator` is the top-level driver that
 turns one observation into one
-:class:`~nav.nav_orchestrator.nav_result.NavResult`.  The driver builds the per-image
+:class:`~nav.nav_orchestrator.nav_result.NavResult`. The driver builds the per-image
 :class:`~nav.nav_orchestrator.nav_context.NavContext`, runs every registered
 :class:`~nav.nav_model.nav_model.NavModel`'s
 :meth:`~nav.nav_model.nav_model.NavModel.create_model` and
@@ -21,13 +21,13 @@ and pass-2 results into the final
 
 Two passes, four short-circuit gates, and an exception-sandbox discipline keep the driver
 from raising through to its caller — every failure mode surfaces on the returned
-:class:`~nav.nav_orchestrator.nav_result.NavResult` instead.  The four short-circuit gates
+:class:`~nav.nav_orchestrator.nav_result.NavResult` instead. The four short-circuit gates
 are:
 
 - ``_HARD_FAILURE_TO_REASON`` — the
   :class:`~nav.nav_orchestrator.image_classifier.NavImageClassifier` reports ``blank``,
   ``fully_overexposed``, ``mostly_missing_data``, or ``corrupt``.
-- ``NO_FEATURES_EXTRACTED`` — every NavModel emitted zero features.
+- ``NO_FEATURES_EXTRACTED`` — every :class:`~nav.nav_model.nav_model.NavModel` emitted zero features.
 - ``ALL_FEATURES_GATED`` — the reliability gate dropped every emitted feature.
 - ``NO_FEASIBLE_TECHNIQUES`` — pass 1 produced zero technique results (no technique was
   feasible on the gated cohort).
@@ -35,15 +35,16 @@ are:
 Theory
 ======
 
-The orchestrator is a deterministic pipeline.  Each per-image run is a sequence of stages:
+The orchestrator is a deterministic pipeline. Each per-image run is a sequence of stages:
 build context, build models, extract features, gate features, run pass 1, fuse pass 1 into a
-prior, run pass 2, fuse the union, return a NavResult.
+prior, run pass 2, fuse the union, return a
+:class:`~nav.nav_orchestrator.nav_result.NavResult`.
 
 Pipeline stages
 ---------------
 
 1. **Provenance and context.**  Build a reproducibility envelope (git SHA, loaded SPICE
-   kernels, static-data hashes) and a per-image global-state container.  The context
+   kernels, static-data hashes) and a per-image global-state container. The context
    carries the extfov image, the per-image masks (sensor / saturation / cosmic-ray), the
    per-image noise sigma, the image-quality classifier verdict, the shared image-side
    derivatives (gradient magnitude, gradient vector, edge distance transform), and the
@@ -52,7 +53,7 @@ Pipeline stages
 2. **Model construction.**  Iterate the registered
    :class:`~nav.nav_model.nav_model.NavModel` set, calling each model's
    :meth:`~nav.nav_model.nav_model.NavModel.create_model` per the operator's
-   ``only_models`` glob filter.  An exception in any model is logged and the model is
+   ``only_models`` glob filter. An exception in any model is logged and the model is
    dropped from the per-image set.
 3. **Feature extraction.**  Each surviving model's
    :meth:`~nav.nav_model.nav_model.NavModel.to_features` is invoked; an exception is
@@ -65,22 +66,25 @@ Pipeline stages
    :attr:`~nav.nav_technique.nav_technique.NavTechnique.accepts_feature_types` overlaps the
    surviving feature set and whose ``is_feasible`` reports feasible.
 6. **Pass-1 ensemble.**  Reconcile the pass-1 results via
-   :func:`~nav.nav_orchestrator.ensemble.ensemble`.  When the ensemble produces an offset,
+   :func:`~nav.nav_orchestrator.ensemble.ensemble`. When the ensemble produces an offset,
    that offset and its covariance become the pass-2 prior; when the ensemble fails the
-   technique pipeline returns a failed NavResult immediately.
+   technique pipeline returns a failed
+   :class:`~nav.nav_orchestrator.nav_result.NavResult` immediately.
 7. **Pass 2.**  Run every prior-required technique with the pass-2 context (a copy of the
    pass-1 context with the prior offset attached via
    :meth:`~nav.nav_orchestrator.nav_context.NavContext.with_prior`).
 8. **Final ensemble.**  Reconcile the union of pass-1 and pass-2 results into the final
-   NavResult.
+   :class:`~nav.nav_orchestrator.nav_result.NavResult`.
 
 Exception-sandbox discipline
 ----------------------------
 
-Every NavModel callback (``create_model``, ``to_features``, ``to_annotations``) and every
-NavTechnique callback (``navigate``) runs inside a broad ``except Exception`` block.  An
+Every :class:`~nav.nav_model.nav_model.NavModel` callback (``create_model``,
+``to_features``, ``to_annotations``) and every
+:class:`~nav.nav_technique.nav_technique.NavTechnique` callback (``navigate``)
+runs inside a broad ``except Exception`` block. An
 exception is logged with full traceback and the offending model or technique is treated as
-if it produced no output.  This is intentional — the orchestrator must never raise through
+if it produced no output. This is intentional — the orchestrator must never raise through
 to its caller; failures land on the
 :class:`~nav.nav_orchestrator.nav_result.NavResult.status` field instead so the per-image
 JSON sidecar always exists.
@@ -89,8 +93,8 @@ Glob-pattern model and technique filters
 ----------------------------------------
 
 The constructor accepts ``only_models`` and ``only_techniques`` glob patterns (or pattern
-lists) so an operator can restrict which models or techniques run for debugging.  The
-syntax matches gitignore-style globs with leading ``!`` for exclusion.  The model-name
+lists) so an operator can restrict which models or techniques run for debugging. The
+syntax matches gitignore-style globs with leading ``!`` for exclusion. The model-name
 convention is ``prefix:VALUE`` (``rings:SATURN``, ``body:DIONE``, plain ``stars`` for the
 catalog star model); a pattern missing a colon expands to ``prefix:*`` so the common
 shorthand (``rings``) matches every namespaced ring model under that prefix.
@@ -104,14 +108,15 @@ Restrictions and assumptions
   non-malicious — the exception sandbox catches programmer bugs but cannot recover from
   state-corrupting plugins.
 - The pass-1 → pass-2 hand-off only fires when the pass-1 ensemble produces a non-failed
-  offset.  When pass 1 fails, pass 2 does not run.
+  offset. When pass 1 fails, pass 2 does not run.
 - The image-quality classifier's hard-failure short-circuit fires before any model is
-  constructed; a ``blank`` or ``fully_overexposed`` image never invokes a NavModel.
+  constructed; a ``blank`` or ``fully_overexposed`` image never invokes a
+  :class:`~nav.nav_model.nav_model.NavModel`.
 
 Sources of uncertainty
 ----------------------
 
-The orchestrator itself reports no uncertainty.  Per-technique uncertainty is captured in
+The orchestrator itself reports no uncertainty. Per-technique uncertainty is captured in
 each technique's
 :class:`~nav.nav_technique.technique_result.NavTechniqueResult.covariance_px2`; the final
 :class:`~nav.nav_orchestrator.nav_result.NavResult.covariance_px2` is the
@@ -130,7 +135,7 @@ overrides on the constructor, and the per-image
 Per-instrument YAML keys (read via
 :func:`~nav.nav_orchestrator.instrument_config.instrument_settings_from_obs`):
 
-- ``data_units`` — ``raw_dn`` or ``calibrated_if``.  Drives the saturation-mask and
+- ``data_units`` — ``raw_dn`` or ``calibrated_if``. Drives the saturation-mask and
   noise-sigma branches.
 - ``noise.saturation_dn`` — saturation DN threshold (``raw_dn`` only).
 - ``noise.marker_value`` — missing-data marker DN.
@@ -144,10 +149,10 @@ Per-instrument YAML keys (read via
 Constructor-level overrides:
 
 - ``models`` — list of constructed
-  :class:`~nav.nav_model.nav_model.NavModel` instances.  The caller builds these per-image.
+  :class:`~nav.nav_model.nav_model.NavModel` instances. The caller builds these per-image.
 - ``config`` — optional :class:`~nav.config.config.Config` override.
-- ``only_models`` — glob pattern or list selecting which models run.  Default ``'*'``.
-- ``only_techniques`` — glob pattern or list selecting which techniques run.  Default
+- ``only_models`` — glob pattern or list selecting which models run. Default ``'*'``.
+- ``only_techniques`` — glob pattern or list selecting which techniques run. Default
   ``'*'``.
 - ``ensemble_config`` — optional
   :class:`~nav.nav_orchestrator.ensemble.EnsembleConfig` override.
@@ -199,10 +204,10 @@ Public class :class:`~nav.nav_orchestrator.orchestrator.NavOrchestrator`, base
 Public methods (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
 
 - :meth:`~nav.nav_orchestrator.orchestrator.NavOrchestrator.prepare` — build per-image
-  state without running any technique.  Returns ``(context, features)``.  Used by the
+  state without running any technique. Returns ``(context, features)``. Used by the
   manual-nav dialog.
 - :meth:`~nav.nav_orchestrator.orchestrator.NavOrchestrator.navigate` — run the full
-  pipeline on one observation.  Returns one
+  pipeline on one observation. Returns one
   :class:`~nav.nav_orchestrator.nav_result.NavResult`.
 
 Call path
@@ -213,13 +218,13 @@ Call path traced through
 
 1. Build the :class:`~nav.nav_orchestrator.provenance.Provenance` envelope.
 2. Build the per-image :class:`~nav.nav_orchestrator.nav_context.NavContext` and the
-   image classifier verdict.  Log the verdict at INFO.
+   image classifier verdict. Log the verdict at INFO.
 3. **Hard-failure short-circuit.**  When the classifier's ``image_class`` is in
    ``_HARD_FAILURE_TO_REASON`` (``blank`` /
    ``fully_overexposed`` / ``mostly_missing_data`` / ``corrupt``), return a failed
    :class:`~nav.nav_orchestrator.nav_result.NavResult` with the matching
    :class:`~nav.support.status_reason.NavStatusReason`.
-4. Build every NavModel by invoking
+4. Build every :class:`~nav.nav_model.nav_model.NavModel` by invoking
    :meth:`~nav.nav_model.nav_model.NavModel.create_model` (exception-sandboxed).
 5. Extract features from each surviving model
    (:meth:`~nav.nav_model.nav_model.NavModel.to_features`, exception-sandboxed) and apply
@@ -230,14 +235,16 @@ Call path traced through
    - ``NO_FEATURES_EXTRACTED`` when every model emitted zero features.
    - ``ALL_FEATURES_GATED`` when the gate dropped every feature.
 
-   Each returns a failed NavResult via the ``_fail`` helper.
+   Each returns a failed
+   :class:`~nav.nav_orchestrator.nav_result.NavResult` via the ``_fail`` helper.
 8. **Pass 1.**  Run every prior-free technique whose feature types overlap the gated
-   cohort and whose ``is_feasible`` returns feasible.  An exception in any technique is
+   cohort and whose ``is_feasible`` returns feasible. An exception in any technique is
    logged and the technique contributes no result.
 9. **NO_FEASIBLE_TECHNIQUES** when pass 1 produced zero results — return a failed
-   NavResult.
-10. Reconcile pass-1 results via :func:`~nav.nav_orchestrator.ensemble.ensemble`.  When
-    the ensemble's ``status`` is ``'failed'`` return the failed NavResult.
+   :class:`~nav.nav_orchestrator.nav_result.NavResult`.
+10. Reconcile pass-1 results via :func:`~nav.nav_orchestrator.ensemble.ensemble`. When
+    the ensemble's ``status`` is ``'failed'`` return the failed
+    :class:`~nav.nav_orchestrator.nav_result.NavResult`.
 11. Build the pass-2 context via
     :meth:`~nav.nav_orchestrator.nav_context.NavContext.with_prior` carrying the pass-1
     ensemble's offset and covariance.
@@ -250,51 +257,52 @@ Call path traced through
 
 The ``_fail`` helper wraps
 :meth:`~nav.nav_orchestrator.nav_result.NavResult.failed` and emits the per-status-reason
-INFO log lines defined in ``STATUS_REASON_INFO_TEMPLATE``.  Every short-circuit gate
+INFO log lines defined in ``STATUS_REASON_INFO_TEMPLATE``. Every short-circuit gate
 listed above invokes ``_fail`` to keep the operator log consistent.
 
 Examples
 ========
 
 ``body_partial_overflow`` (Cassini ISS NAC, image ``N1484593951_2``)
-    Rhea visible in the upper right with about 22 % of the disc off-frame.  The
+    Rhea visible in the upper right with about 22 % of the disc off-frame. The
     orchestrator builds the body model, extracts LIMB_ARC + BODY_DISC + TERMINATOR_ARC
     features, runs pass 1 with
     :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav`,
     :class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav`, and
     :class:`~nav.nav_technique.nav_technique_body_terminator.BodyTerminatorNav` (the latter
-    two flag spurious; only BodyLimb produces a usable result).  The pass-1 ensemble
+    two flag spurious; only BodyLimb produces a usable result). The pass-1 ensemble
     selects BodyLimb's offset of ``(12.06, 30.53)`` px, the pass-2 prior is set, and pass 2
-    runs no prior-required techniques (no STAR features in this scene).  The final
+    runs no prior-required techniques (no STAR features in this scene). The final
     :class:`~nav.nav_orchestrator.nav_result.NavResult` reports
     :attr:`~nav.nav_orchestrator.nav_result.NavResult.status` ``'ok'`` against the
     operator-verified offset :math:`(\Delta v, \Delta u) = (11.0, 29.5)` px.
 
 ``one_bright_star_no_body`` (Cassini ISS WAC, image ``W1449079117_1``)
-    Single bright star (Vega) in an otherwise empty FOV.  The orchestrator's pass-1
+    Single bright star (Vega) in an otherwise empty FOV. The orchestrator's pass-1
     :class:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav`
     produces a 1-star prior; pass 2 runs
     :class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav` against that
     prior, polishes the offset, and returns it with
     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.confidence` capped at
-    0.5 by the single-inlier post-sigmoid cap.  The final ensemble fuses both technique
+    0.5 by the single-inlier post-sigmoid cap. The final ensemble fuses both technique
     results and reports
     :attr:`~nav.nav_orchestrator.nav_result.NavResult.status` ``'ok'`` against the
     operator-verified offset :math:`(\Delta v, \Delta u) = (3.06, -0.02)` px.
 
 ``star_dominated`` (Cassini ISS WAC, image ``W1580760393_1``)
-    Dense star field with no body in FOV.  Pass 1 runs
+    Dense star field with no body in FOV. Pass 1 runs
     :class:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav`, which
     produces a multi-star prior via the triplet hash; pass 2 runs
     :class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav`, which polishes
-    the offset using the full predictable cohort.  The final ensemble fuses both and
+    the offset using the full predictable cohort. The final ensemble fuses both and
     reports the operator-verified offset
     :math:`(\Delta v, \Delta u) = (-2.68, -3.68)` px.
 
 **Hard-failure short-circuit example.**  An over-exposed Cassini calibration target
-returns the classifier's ``fully_overexposed`` class.  The orchestrator returns the failed
+returns the classifier's ``fully_overexposed`` class. The orchestrator returns the failed
 :class:`~nav.nav_orchestrator.nav_result.NavResult` with
 :attr:`~nav.nav_orchestrator.nav_result.NavResult.status_reason`
-``IMAGE_OVEREXPOSED`` before any NavModel constructs.  The per-image JSON sidecar still
+``IMAGE_OVEREXPOSED`` before any :class:`~nav.nav_model.nav_model.NavModel`
+constructs. The per-image JSON sidecar still
 emits with the classifier verdict and the provenance envelope so reviewer tooling can
 correlate the failure across an entire campaign.

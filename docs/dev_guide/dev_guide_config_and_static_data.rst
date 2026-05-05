@@ -3,11 +3,11 @@ Config and Static Data
 ==========================
 
 Every RMS-NAV subsystem reads its tunables from a single
-:class:`~nav.config.config.Config` object loaded from a stack of YAML files.  The
+:class:`~nav.config.config.Config` object loaded from a stack of YAML files. The
 files split cleanly into two kinds: **runtime configuration** (knobs an operator
 might want to tune per run — search ranges, emission thresholds, label fonts) and
 **static data** (per-body shape tables, per-ring catalogues, per-instrument
-calibration constants curated from external publications).  Both kinds load through
+calibration constants curated from external publications). Both kinds load through
 the same loader; they differ in how they are reviewed and updated.
 
 This chapter documents the loader, the section structure, the file layout, and the
@@ -17,9 +17,9 @@ The Config object
 =================
 
 :class:`~nav.config.config.Config` lazily loads its YAML stack on first attribute
-access.  The stack is, in order (later files override earlier ones for the same key):
+access. The stack is, in order (later files override earlier ones for the same key):
 
-1. The bundled ``src/nav/config_files/*.yaml`` files, sorted by filename.  The
+1. The bundled ``src/nav/config_files/*.yaml`` files, sorted by filename. The
    3-digit numeric prefix is the merge order; the file groups are documented
    under :ref:`config-file-layout` below.
 2. ``nav_default_config.yaml`` in the current working directory (if present),
@@ -41,8 +41,9 @@ Direct programmatic use:
    print(cfg.offset.correlation_fft_upsample_factor)
    print(cfg.environment.pds3_holdings_root)
 
-The module-level ``DEFAULT_CONFIG`` singleton is what most subsystems read when
-no explicit ``config=`` keyword is supplied.  Per-class ``config`` properties on
+The module-level :data:`~nav.config.config.DEFAULT_CONFIG` singleton is what
+most subsystems read when no explicit ``config=`` keyword is supplied.
+Per-class ``config`` properties on
 :class:`~nav.support.nav_base.NavBase` subclasses surface the same singleton
 through dependency injection.
 
@@ -51,7 +52,7 @@ Sections
 
 Top-level YAML keys are exposed as
 :class:`~nav.support.attrdict.AttrDict` properties so code can write
-``cfg.bodies.use_lambert`` instead of ``cfg['bodies']['use_lambert']``.  The
+``cfg.bodies.use_lambert`` instead of ``cfg['bodies']['use_lambert']``. The
 shipping sections:
 
 - ``general`` — logging levels and other global settings.
@@ -76,11 +77,14 @@ shipping sections:
 - ``coiss`` / ``vgiss`` / ``gossi`` / ``nhlorri`` — per-camera blocks
   (``noise``, ``mag_offset``, ``image_quality_thresholds``,
   ``source_image_filter``, etc.).
-- ``techniques`` — per-NavTechnique tunables and confidence-formula
+- ``techniques`` — per-:class:`~nav.nav_technique.nav_technique.NavTechnique`
+  tunables and confidence-formula
   coefficients; see :doc:`dev_guide_techniques`.
-- ``satellites`` — per-planet satellite lists used by the body NavModel's
-  inventory query.
-- ``feature_emission`` — per-planet RING_EDGE vs RING_ANNULUS gates; see
+- ``satellites`` — per-planet satellite lists used by the body
+  :class:`~nav.nav_model.nav_model.NavModel`'s inventory query.
+- ``feature_emission`` — per-planet
+  :attr:`~nav.feature.feature_type.NavFeatureType.RING_EDGE` vs
+  :attr:`~nav.feature.feature_type.NavFeatureType.RING_ANNULUS` gates; see
   :doc:`dev_guide_techniques_ring_annulus`.
 
 The user-facing tour at :doc:`/introduction_configuration` lists every shipping
@@ -91,7 +95,7 @@ file with one-sentence descriptions.
 File layout
 ===========
 
-The numeric prefix encodes the load order and hints at the section's role.  The
+The numeric prefix encodes the load order and hints at the section's role. The
 ranges are conventional, not enforced by the loader:
 
 .. list-table::
@@ -100,7 +104,7 @@ ranges are conventional, not enforced by the loader:
 
    * - Prefix
      - Group
-     - Files (today)
+     - Files
    * - ``0xx``
      - Global / model-shared
      - ``config_010_general``, ``config_020_offset``, ``config_030_stars``,
@@ -131,14 +135,15 @@ ranges are conventional, not enforced by the loader:
 Loader rules
 ------------
 
-- YAML mappings are deep-merged, not replaced.  A user override that sets
+- YAML mappings are deep-merged, not overwritten. A user override that sets
   ``bodies.use_lambert: false`` does not unset every other key under
   ``bodies``.
-- Lists are replaced wholesale.  A user override of ``stars.catalogs``
-  replaces the bundled list rather than appending to it.
-- Mapping keys whose name starts with ``_`` are stripped at load time.  This
+- Lists are overwritten wholesale. A user override of ``stars.catalogs``
+  overwrites the bundled list rather than appending to it.
+- Mapping keys whose name starts with ``_`` are stripped at load time. This
   is the strip-rule that lets static-data files carry ``_sources`` blocks
-  alongside their numeric values without bloating the parsed Config object;
+  alongside their numeric values without bloating the parsed
+  :class:`~nav.config.config.Config` object;
   see :ref:`static-data-citations`.
 
 Numeric values are typed by YAML; downstream consumers convert with explicit
@@ -163,7 +168,7 @@ The ``environment`` block carries the four downstream output roots:
   ``nav_create_bundle``.
 
 Each value may be a local path or a URL; ``filecache``-aware consumers handle
-both.  Environment-variable overrides
+both. Environment-variable overrides
 (``PDS3_HOLDINGS_DIR``, ``NAV_RESULTS_ROOT``, ``BACKPLANE_RESULTS_ROOT``,
 ``BUNDLE_RESULTS_ROOT``) take precedence over the YAML defaults; CLI flags
 take precedence over the env vars.
@@ -175,7 +180,7 @@ Static data: catalogues and citation discipline
 
 The pipeline treats a small set of YAML files as **static data**: per-body
 shape parameters, per-ring radial uncertainties, and per-instrument
-photometric / noise constants.  These tables substitute for cross-image
+photometric / noise constants. These tables substitute for cross-image
 statistical learning — no run depends on the result of any other run, but
 every run benefits from values that astronomers and instrument teams have
 already calibrated.
@@ -186,11 +191,12 @@ Static-data files
 - ``config_220_body_shape.yaml`` populates ``config.body_shape`` — per-body
   radii, ellipsoid residuals, albedo, crater scale; consumed by
   :func:`~nav.nav_model.body_shape.shape_for_body` and from there by every
-  body NavTechnique's covariance and reliability formula.  See
+  body :class:`~nav.nav_technique.nav_technique.NavTechnique`'s covariance
+  and reliability formula. See
   :doc:`dev_guide_navigation_models_body`.
 - ``config_3N0_*_rings.yaml`` populate ``config.rings.<planet>.ring_features``
   — per-ring-edge radii, eccentricities, RMS radial precision; consumed by
-  the ring-edge extractor to derive per-edge ``sigma_radial``.  See
+  the ring-edge extractor to derive per-edge ``sigma_radial``. See
   :doc:`dev_guide_navigation_models_ring`.
 - ``config_4N0_inst_*.yaml`` populate ``config.<camera>`` — per-camera
   ``noise``, ``mag_offset``, ``image_quality_thresholds``, and
@@ -202,9 +208,9 @@ Citation requirement
 
 Every numeric value in ``config_220_body_shape.yaml`` and any new value added
 to a ``config_4N0_inst_*.yaml`` ``noise:`` / ``mag_offset:`` block **requires
-an accurate, non-fabricated citation**.  The reasoning:
+an accurate, non-fabricated citation**. The reasoning:
 
-- Navigation trust is downstream-safety-critical.  An invented
+- Navigation trust is downstream-safety-critical. An invented
   ``ellipsoid_rms_residual_km`` propagates silently into every per-feature
   uncertainty estimate for that body for every image forever.
 - The runtime has no cross-image cross-check that would catch a wrong value;
@@ -216,7 +222,7 @@ Schema
 
 Each body block in ``config_220_body_shape.yaml`` is wrapped in a top-level
 ``body_shape:`` mapping; each entry is keyed by upper-case SPICE body name and
-carries an optional sibling ``_sources`` mapping.  Keys beginning with ``_``
+carries an optional sibling ``_sources`` mapping. Keys beginning with ``_``
 are stripped at config-load time so the documentation does not bloat the
 parsed ``Config`` — the citation lives in the file for human review only.
 
@@ -243,12 +249,12 @@ AI agents drafting body-shape entries:
 
 1. **Cite only documents fetched in-session.**  Every citation must be
    traceable to a ``WebFetch`` / ``WebSearch`` lookup performed in the same
-   session, or to an ``oops``-package data file read directly.  No citing
+   session, or to an ``oops``-package data file read directly. No citing
    from training-data memory.
 2. If a value cannot be sourced from a fetched document, leave it as ``null``
    and write
-   ``'PLACEHOLDER — no source found, calibrate in Phase 10'`` as the
-   ``_sources`` entry.  The runtime fallback (10 % radius default plus a
+   ``'PLACEHOLDER — no source found, calibration pending'`` as the
+   ``_sources`` entry. The runtime fallback (10 % radius default plus a
    reliability cap of 0.3) handles ``null`` values.
 3. DOIs and paper titles must verify against a real
    ``https://doi.org/<DOI>`` lookup; agents do not invent identifiers.
@@ -260,9 +266,9 @@ Human review
 
 Every PR touching ``config_220_body_shape.yaml`` requires a reviewer to
 spot-check **at least 5 randomly-selected citations** by opening the cited
-document and verifying the value appears at the cited location.  PRs are
+document and verifying the value appears at the cited location. PRs are
 merged only after the reviewer marks the PR with the
-``cited-values-spot-checked`` label.  To keep review tractable, an
+``cited-values-spot-checked`` label. To keep review tractable, an
 initial-population PR is broken into ≤ 10 bodies per PR.
 
 Validation tests
@@ -279,7 +285,7 @@ Validation tests
 
 The same validation pattern extends to per-camera ``noise`` /
 ``mag_offset`` blocks in ``config_4N0_inst_*.yaml`` and to any new entries
-added to ``config_3N0_*_rings.yaml``.  Existing ring-catalogue values are
+added to ``config_3N0_*_rings.yaml``. Existing ring-catalogue values are
 grandfathered (they were curated by orbit-fitting astronomers and the
 catalogues document their pedigree in the file header) — only *new*
 additions need explicit ``_sources`` entries.
@@ -287,12 +293,12 @@ additions need explicit ``_sources`` entries.
 Strip-rule guarantee
 --------------------
 
-``Config._load_yaml`` strips every mapping key whose name starts with ``_``
-before merging, so ``_sources`` blocks never appear in the parsed ``Config``
-object.  The runtime accessors (``config.body_shape``,
-``config.<camera>.mag_offset``, etc.) see only the value-bearing fields.
-Tests assert this behaviour explicitly so the strip rule cannot regress
-silently.
+:meth:`~nav.config.config.Config._load_yaml` strips every mapping key whose
+name starts with ``_`` before merging, so ``_sources`` blocks never appear in
+the parsed :class:`~nav.config.config.Config` object. The runtime accessors
+(``config.body_shape``, ``config.<camera>.mag_offset``, etc.) see only the
+value-bearing fields. Tests assert this behaviour explicitly so the strip
+rule cannot regress silently.
 
 Adding a new tunable
 ====================
@@ -300,13 +306,13 @@ Adding a new tunable
 When a new YAML knob is added:
 
 1. Pick the file whose section it belongs to (e.g. a new ``bodies`` key goes
-   in ``config_040_bodies.yaml``).  If no existing file fits, allocate a new
+   in ``config_040_bodies.yaml``). If no existing file fits, allocate a new
    numeric prefix per the layout table above.
 2. Add the key with a sensible default and a one-line YAML comment naming
    the consumer.
 3. Document the key on the consumer's dev-guide page (for example,
    :doc:`dev_guide_navigation_models_body` lists every key under
-   ``bodies``).  The page lists name, type, default, units, and consumer.
+   ``bodies``). The page lists name, type, default, units, and consumer.
 4. If the key represents static data (a measured constant rather than a
    knob), add the ``_sources`` entry per the citation discipline above.
 5. Add or extend a unit test under ``tests/nav/config_files/`` that asserts

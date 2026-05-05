@@ -3,11 +3,11 @@ PDS4 Bundle Generation
 =======================
 
 The :mod:`pds4` package builds PDS4-compliant bundles from RMS-NAV's per-image
-navigation metadata and per-pixel backplanes.  A bundle is the deliverable the
+navigation metadata and per-pixel backplanes. A bundle is the deliverable the
 Ring-Moon Systems node ships to PDS for archive: one collection of data labels
 (one per image), one collection of browse PNGs, plus the auxiliary collections
 (context, document, xml_schema) and the bundle-level label that wires them
-together.  This chapter covers the bundle-generation driver, the per-dataset
+together. This chapter covers the bundle-generation driver, the per-dataset
 extension points, the templated label workflow, and the output layout.
 
 The user-facing CLI walkthrough lives at :doc:`/user_guide_pds4_bundle`; this
@@ -24,7 +24,7 @@ Bundle generation is a two-phase process driven by ``nav_create_bundle``:
    ``_backplane_metadata.json`` produced by ``nav_backplanes``, populates a
    ``pdstemplate`` rendering context with per-image template variables, and
    writes the matching ``<image>_backplanes.lblx`` file (plus a copy of the
-   browse PNG into the bundle's ``browse/`` tree).  The backplane FITS file
+   browse PNG into the bundle's ``browse/`` tree). The backplane FITS file
    itself is copied (or symlinked, depending on the dataset's preference) from
    the backplane root into the bundle's ``data/`` tree.
 
@@ -47,7 +47,7 @@ Driver: ``nav_create_bundle``
 =============================
 
 ``nav_create_bundle`` (``src/main/nav_create_bundle.py``) is the per-image
-phase-1 entry point.  Like the other CLIs it takes a ``DATASET_NAME``, the
+phase-1 entry point. Like the other CLIs it takes a ``DATASET_NAME``, the
 selection flags from the matching :class:`~nav.dataset.dataset.DataSet`
 subclass, the standard environment options (``--config-file``,
 ``--pds3-holdings-root``, ``--bundle-results-root``,
@@ -55,7 +55,7 @@ subclass, the standard environment options (``--config-file``,
 selected image.
 
 A separate ``--collections`` flag triggers phase 2 (collection + bundle
-labels) without re-rendering per-image data labels.  Operators typically run
+labels) without re-rendering per-image data labels. Operators typically run
 ``nav_create_bundle DATASET --image-list FOO --no-collections`` in parallel
 across many shards, then once with ``--collections`` to assemble the bundle.
 
@@ -67,7 +67,7 @@ Per-dataset extension points
 ============================
 
 PDS4 bundle generation is parameterized by the
-:class:`~nav.dataset.dataset.DataSet` subclass.  The base class declares the
+:class:`~nav.dataset.dataset.DataSet` subclass. The base class declares the
 extension points as non-abstract methods that raise ``NotImplementedError`` —
 a dataset that does not need PDS4 support can simply not override them, and
 the bundle drivers refuse to run.
@@ -77,12 +77,12 @@ The full extension-point set:
 - :meth:`~nav.dataset.dataset.DataSet.pds4_bundle_template_dir` — absolute
   path to the directory of ``pdstemplate`` ``.lblx`` files this dataset uses.
   Lookups consult ``config.pds4.<dataset_name>.template_dir`` first; relative
-  paths resolve under ``src/pds4/templates/``.  The reference Cassini ISS
+  paths resolve under ``src/pds4/templates/``. The reference Cassini ISS
   Saturn dataset uses ``cassini_iss_saturn_1.0/``.
 - :meth:`~nav.dataset.dataset.DataSet.pds4_bundle_name` — the bundle's
   external name (for example
-  ``cassini_iss_saturn_backplanes_rsfrench2027``).  The bundle root is
-  ``<bundle_results_root>/<bundle_name>/``.  Lookups consult
+  ``cassini_iss_saturn_backplanes_rsfrench2027``). The bundle root is
+  ``<bundle_results_root>/<bundle_name>/``. Lookups consult
   ``config.pds4.<dataset_name>.bundle_name``.
 - :meth:`~nav.dataset.dataset.DataSet.pds4_bundle_path_for_image` — maps an
   image name to its position in the bundle's ``data/`` directory tree
@@ -91,22 +91,22 @@ The full extension-point set:
   directories).
 - :meth:`~nav.dataset.dataset.DataSet.pds4_path_stub` — full per-image stub
   including the image name (e.g.
-  ``1234xxxxxx/123456xxxx/1234567890w``).  Builds the per-file paths under
+  ``1234xxxxxx/123456xxxx/1234567890w``). Builds the per-file paths under
   ``data/`` and ``browse/``.
 - :meth:`~nav.dataset.dataset.DataSet.pds4_image_name_to_browse_lid` /
   :meth:`~nav.dataset.dataset.DataSet.pds4_image_name_to_browse_lidvid`
   — emit the browse-product Logical Identifier (LID) and LID + version
-  (LIDVID) for the given image name.  LIDs follow the PDS4 namespace
+  (LIDVID) for the given image name. LIDs follow the PDS4 namespace
   convention ``urn:nasa:pds:<bundle>:browse:<image>``.
 - :meth:`~nav.dataset.dataset.DataSet.pds4_image_name_to_data_lid` /
   :meth:`~nav.dataset.dataset.DataSet.pds4_image_name_to_data_lidvid` —
   same, for the data product (the backplane ``.lblx`` + ``.fits`` pair).
 - :meth:`~nav.dataset.dataset.DataSet.pds4_template_variables` — returns a
   dict of template variables consumed by the per-image
-  ``data.lblx`` / ``browse.lblx`` templates.  Inputs are the
+  ``data.lblx`` / ``browse.lblx`` templates. Inputs are the
   :class:`~nav.dataset.dataset.ImageFile`, the navigation metadata dict
   parsed from ``<image>_metadata.json``, and the backplane metadata dict
-  parsed from ``<image>_backplane_metadata.json``.  The dataset is free to
+  parsed from ``<image>_backplane_metadata.json``. The dataset is free to
   derive any per-image quantity the templates reference (target body,
   observer, mid-time, exposure, filters, navigation offset and confidence,
   per-backplane min/max/units, and so on).
@@ -124,7 +124,7 @@ The ``pds4`` config block
 ``src/nav/config_files/config_950_pds4.yaml`` populates ``config.pds4`` with
 per-dataset bundle metadata: the bundle name, the template directory name,
 the LID namespace prefix, and any per-bundle template defaults the
-``pds4_template_variables`` hook draws from.  See
+``pds4_template_variables`` hook draws from. See
 :doc:`dev_guide_config_and_static_data` for the loader contract; the file
 is loaded by the standard numeric-prefix order at the ``9xx`` "downstream
 products" tier.
@@ -133,7 +133,7 @@ Templated label workflow
 ========================
 
 Labels are rendered via the ``pdstemplate`` library — a Python expression
-language embedded in PDS4 ``.lblx`` files (XML).  Each template carries
+language embedded in PDS4 ``.lblx`` files (XML). Each template carries
 expressions that resolve against a dictionary of variables; the
 ``pds4_template_variables`` hook is the contract that connects per-image
 metadata to the templates.
@@ -162,7 +162,7 @@ Template tree
 -------------
 
 Each dataset's template directory under ``src/pds4/templates/`` contains the
-shipping ``.lblx`` files.  The Cassini-ISS-Saturn-1.0 set is the reference
+shipping ``.lblx`` files. The Cassini-ISS-Saturn-1.0 set is the reference
 layout:
 
 ::
@@ -234,9 +234,9 @@ Adding PDS4 support to a new dataset
 The end-to-end checklist:
 
 1. Override every ``pds4_*`` method on the new
-   :class:`~nav.dataset.dataset.DataSet` subclass.  Use
+   :class:`~nav.dataset.dataset.DataSet` subclass. Use
    :class:`~nav.dataset.dataset_pds3_cassini_iss.DataSetPDS3CassiniISS` as
-   the reference implementation.  The methods that absolutely must work
+   the reference implementation. The methods that absolutely must work
    are :meth:`~nav.dataset.dataset.DataSet.pds4_bundle_template_dir`,
    :meth:`~nav.dataset.dataset.DataSet.pds4_bundle_name`,
    :meth:`~nav.dataset.dataset.DataSet.pds4_path_stub`, the four
@@ -244,7 +244,7 @@ The end-to-end checklist:
    :meth:`~nav.dataset.dataset.DataSet.pds4_template_variables`.
 2. Drop a per-dataset template directory under
    ``src/pds4/templates/<dataset>_<version>/`` containing the ``.lblx``
-   files and the static inventory CSVs.  Copy from
+   files and the static inventory CSVs. Copy from
    ``cassini_iss_saturn_1.0/`` and adapt the field set.
 3. Add an entry under ``pds4.<dataset_name>:`` in
    ``config_950_pds4.yaml`` that points at the new template directory and
@@ -252,13 +252,13 @@ The end-to-end checklist:
    ``pds4_template_variables`` hook draws from.
 4. Add an integration smoke test that renders one image through
    ``nav_create_bundle`` and asserts the resulting ``data.lblx`` validates
-   against the PDS4 schema.  The Cassini ISS test under
+   against the PDS4 schema. The Cassini ISS test under
    ``tests/integration/`` is the pattern to follow.
 
 API reference
 =============
 
-The :mod:`pds4` package is not yet autodocumented under
+The :mod:`pds4` package has no autogenerated entry under
 :doc:`/api_reference`; the module's public surface is the three
 phase-1 / phase-2 entry points listed below, plus the
 :class:`~nav.dataset.dataset.DataSet` ``pds4_*`` extension hooks

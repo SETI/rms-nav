@@ -7,13 +7,13 @@ A :class:`~nav.nav_technique.nav_technique.NavTechnique` consumes a subset of th
 :class:`~nav.nav_orchestrator.nav_context.NavContext` and produces one
 :class:`~nav.nav_technique.technique_result.NavTechniqueResult` carrying a calibrated
 translation offset, a 2x2 (or 3x3 with rotation) covariance, a calibrated [0, 1] confidence,
-and a typed diagnostics dataclass.  The orchestrator's ensemble combine reconciles every
+and a typed diagnostics dataclass. The orchestrator's ensemble combine reconciles every
 technique's result into a single :class:`~nav.nav_orchestrator.nav_context.NavContext` outcome.
 
 Concrete subclasses self-register via ``__init_subclass__`` and are discovered by the
-orchestrator through ``NavTechnique._registry``.  Each
+orchestrator through ``NavTechnique._registry``. Each
 technique declares its accepted feature types, whether it requires a pass-1 prior, and the
-attribute set its confidence formula may read.  Per-technique tunables and confidence-formula
+attribute set its confidence formula may read. Per-technique tunables and confidence-formula
 coefficients live in ``techniques.<TechniqueName>`` in
 ``src/nav/config_files/config_510_techniques.yaml``.
 
@@ -74,11 +74,11 @@ Ring techniques
 Titan techniques
 ----------------
 
-No Titan-specific autonomous techniques exist today.
+No Titan-specific autonomous techniques are registered.
 :class:`~nav.nav_model.nav_model_titan.NavModelTitan` is a registered
 placeholder that emits no features, so the technique pipeline runs
-without any Titan-derived contribution; the slot is reserved for the
-future haze-aware extractor (see :doc:`dev_guide_navigation_models_titans`).
+without any Titan-derived contribution; the slot is reserved for a
+haze-aware extractor (see :doc:`dev_guide_navigation_models_titans`).
 
 Manual
 ------

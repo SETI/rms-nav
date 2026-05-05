@@ -24,12 +24,14 @@ Module layout
 Thread safety
 -------------
 
-``RingMosaic.reproject()`` temporarily modifies oops global precision settings
-via ``_reduced_oops_precision``. Concurrent calls from different threads on the
-same observation will interfere. ``BodyMosaic.reproject()`` and
-``create_cartographic_model()`` create ``Backplane`` objects from the provided
-observation and are likewise not safe for concurrent use with the same
-observation.
+:meth:`~nav.reproj.rings.RingMosaic.reproject` temporarily modifies oops
+global precision settings via
+:func:`~nav.reproj._context_managers._reduced_oops_precision`. Concurrent
+calls from different threads on the same observation will interfere.
+:meth:`~nav.reproj.bodies.BodyMosaic.reproject` and
+:func:`~nav.reproj.cartographic_model.create_cartographic_model` create
+``Backplane`` objects from the provided observation and are likewise not
+safe for concurrent use with the same observation.
 
 If you need to call ``reproject()`` from multiple threads, give each thread
 its own ``obs`` instance.
@@ -37,8 +39,8 @@ its own ``obs`` instance.
 Body mosaic storage
 -------------------
 
-``BodyMosaic`` uses a *shifted circular buffer* to handle longitude
-wraparound without allocating the full 0 to 2\ |pi| range.
+:class:`~nav.reproj.bodies.BodyMosaic` uses a *shifted circular buffer* to
+handle longitude wraparound without allocating the full 0 to 2\ |pi| range.
 
 The internal arrays (``_img``, ``_has_data``, etc.) have shape
 ``(n_lat, n_lon)``. A pair of integer offsets (``_lat_min_bin``,
@@ -59,15 +61,16 @@ the column index list by concatenating the two disjoint ranges.
 Ring sparse storage
 -------------------
 
-``RingMosaic`` stores only longitude columns that contain at least one valid
-pixel. The ``_sparse_lon_mask`` boolean array (length ``n_full_lon``) marks
-which full-grid longitude bins are present. The data arrays have shape
-``(n_rad, n_sparse_lon)`` where ``n_sparse_lon`` equals the number of
-``True`` entries in ``_sparse_lon_mask``.
+:class:`~nav.reproj.rings.RingMosaic` stores only longitude columns that
+contain at least one valid pixel. The ``_sparse_lon_mask`` boolean array
+(length ``n_full_lon``) marks which full-grid longitude bins are present.
+The data arrays have shape ``(n_rad, n_sparse_lon)`` where ``n_sparse_lon``
+equals the number of ``True`` entries in ``_sparse_lon_mask``.
 
-When ``add()`` receives a :class:`~nav.reproj.rings.RingReprojResult`, it:
+When :meth:`~nav.reproj.rings.RingMosaic.add` receives a
+:class:`~nav.reproj.rings.RingReprojResult`, it:
 
-1. Identifies new longitude columns not yet in the sparse store.
+1. Identifies incoming longitude columns absent from the sparse store.
 2. Inserts those columns into all data arrays using a single
    ``np.insert(..., axis=1)`` call per array to avoid repeated reallocations.
 3. Updates ``_sparse_lon_mask``.
@@ -77,26 +80,29 @@ When ``add()`` receives a :class:`~nav.reproj.rings.RingReprojResult`, it:
    ``_image_count`` (so ``contributing_image_names[k]`` matches pixels tagged
    with ``image_number == k``).
 
-The always-sparse design means that ``reproject()`` always returns a
+The always-sparse design means that
+:meth:`~nav.reproj.rings.RingMosaic.reproject` always returns a
 :class:`~nav.reproj.rings.RingReprojResult` with only the valid longitude
-columns populated. There is no ``compress_longitude`` flag; sparsity is the
-invariant.
+columns populated; sparsity is the invariant.
 
 Ring radius and longitude semantics
 -----------------------------------
 
-The interpretation of ``RingMosaic.radius_inner`` / ``radius_outer`` (and the
-matching fields on :class:`~nav.reproj.rings.RingReprojResult` and
-:class:`~nav.reproj.rings.RingMosaicData`) depends on whether the mosaic was
-constructed with an ``orbit_model``:
+The interpretation of
+:attr:`~nav.reproj.rings.RingMosaic.radius_inner` /
+:attr:`~nav.reproj.rings.RingMosaic.radius_outer` (and the matching fields
+on :class:`~nav.reproj.rings.RingReprojResult` and
+:class:`~nav.reproj.rings.RingMosaicData`) depends on whether the mosaic
+was constructed with an ``orbit_model``:
 
 - ``orbit_model is None``: longitudes are inertial J2000; radii are
   **absolute km**.
 - ``orbit_model`` is set: longitudes are co-rotating in that model's frame;
   radii are **signed offsets in km from the orbital radius at each
   (longitude, time)** — i.e. from
-  ``orbit_model.radius_at_longitude(inertial_lon, et)``. This makes an
-  eccentric ring appear as a straight line in the reprojection.
+  ``orbit_model.radius_at_longitude(inertial_lon, et)``. With this
+  parameterisation an eccentric ring appears as a straight line in the
+  reprojection.
 
 Implementation notes:
 
@@ -107,19 +113,21 @@ Implementation notes:
 - The radius filter on ``bp_radius`` first computes per-pixel offsets
   ``bp_radius_filter = bp_radius - model_r(inertial_lon, midtime)`` so the
   ``[radius_inner, radius_outer]`` test compares offsets to offsets.
-- ``RingMosaic.reproject()`` rejects a per-call ``orbit_model`` that
-  differs from the constructor's, because radius semantics are tied to
-  that choice.
-- ``RingMosaic.add()`` validates that the reprojection's ``orbit_model``
-  is value-equal to the mosaic's (``RingOrbitModel`` is a frozen dataclass
-  with auto-generated ``__eq__``, so a model rebuilt from disk compares
-  equal to the in-memory instance) and that ``photometric_model_name``
-  matches; mismatches raise ``ValueError``.
+- :meth:`~nav.reproj.rings.RingMosaic.reproject` rejects a per-call
+  ``orbit_model`` that differs from the constructor's, because radius
+  semantics are tied to that choice.
+- :meth:`~nav.reproj.rings.RingMosaic.add` validates that the
+  reprojection's ``orbit_model`` is value-equal to the mosaic's
+  (:class:`~nav.reproj.ring_orbit_model.RingOrbitModel` is a frozen
+  dataclass with auto-generated ``__eq__``, so a model rebuilt from disk
+  compares equal to the in-memory instance) and that
+  ``photometric_model_name`` matches; mismatches raise ``ValueError``.
 
 dtype propagation
 -----------------
 
-Each ``BodyMosaic`` and ``RingMosaic`` instance holds two authoritative dtype
+Each :class:`~nav.reproj.bodies.BodyMosaic` and
+:class:`~nav.reproj.rings.RingMosaic` instance holds two authoritative dtype
 attributes set at construction:
 
 - ``_image_dtype`` (default ``np.float64``) — dtype for reprojected brightness
@@ -138,24 +146,26 @@ These propagate through the pipeline as follows:
    ``float64``, not ``_metadata_dtype``).
 2. ``reproject()`` builds per-pixel ``img`` at ``_image_dtype`` and the
    geometry fields above at ``_metadata_dtype``. Scalar ``time`` on
-   ``BodyReprojResult`` is a Python ``float`` (IEEE double); ring/body mosaic
-   ``time`` grids are ``numpy.float64`` arrays regardless of ``metadata_dtype``.
-3. Every ``BodyReprojResult`` and ``BodyMosaicData`` (and ring equivalents)
+   :class:`~nav.reproj.bodies.BodyReprojResult` is a Python ``float`` (IEEE
+   double); ring/body mosaic ``time`` grids are ``numpy.float64`` arrays
+   regardless of ``metadata_dtype``.
+3. Every :class:`~nav.reproj.bodies.BodyReprojResult` and
+   :class:`~nav.reproj.bodies.BodyMosaicData` (and ring equivalents)
    carries explicit ``image_dtype`` and ``metadata_dtype`` fields describing
    the stored image and geometry dtypes; ``time`` is never governed by
    ``metadata_dtype``. That contract is self-describing and survives a
    save/load round-trip.
 
-``image_number`` is always ``uint16`` regardless of the dtype kwargs, capping a single mosaic at
-65,535 contributing images. ``add()`` raises ``OverflowError`` when that
-limit is exceeded.
+``image_number`` is always ``uint16`` regardless of the dtype kwargs, capping
+a single mosaic at 65,535 contributing images. ``add()`` raises
+``OverflowError`` when that limit is exceeded.
 
 Serialization
 -------------
 
-The ``_serialization`` module provides the format helpers used by all four
-dataclass ``save()`` / ``load()`` methods. It is a private module (not
-exported from ``__init__.py``).
+The :mod:`nav.reproj._serialization` module provides the format helpers used
+by all four dataclass ``save()`` / ``load()`` methods. It is a private
+module (not exported from ``__init__.py``).
 
 Path arguments may be ``str``, :class:`pathlib.Path`, or
 :class:`filecache.FCPath`. Each is normalized to ``FCPath`` on entry. Writes
@@ -183,7 +193,7 @@ fits
     ``EXTNAME = <FIELDNAME>_MASK`` (uint8, 0 = valid). Tuple-of-string
     fields (``contributing_image_names``) are stored as a 1-D ``uint8`` ImageHDU
     of UTF-8 bytes with ``NUL`` (``\\0``) separators between entries (empty
-    tuple → length-0 array).
+    tuple yields a length-0 array).
 
 Format inference
 ^^^^^^^^^^^^^^^^
@@ -191,8 +201,8 @@ Format inference
 When ``format_=None`` (the default), the format is inferred from the file
 extension:
 
-- ``.npz`` → ``'npz'``
-- ``.fits``, ``.fit``, ``.fits.gz``, ``.fz`` → ``'fits'``
+- ``.npz`` maps to ``'npz'``.
+- ``.fits``, ``.fit``, ``.fits.gz``, and ``.fz`` map to ``'fits'``.
 
 An explicit ``format_='npz'`` or ``format_='fits'`` keyword overrides inference.
 
@@ -204,8 +214,8 @@ Every file includes two sentinel values:
 - ``__kind__`` — a string identifying the dataclass (e.g.
   ``'BodyMosaicData'``). ``load()`` raises ``ValueError`` when this does not
   match the expected kind.
-- ``__version__`` — an integer (currently ``1``). Reserved for future schema
-  migrations.
+- ``__version__`` — an integer (``1`` for the schema below). Reserved for
+  schema migrations.
 
 To add a field in a future version: bump ``__version__`` to ``2``, write the
 new field in ``save()``, and handle ``version == 1`` (missing field) in
@@ -231,8 +241,9 @@ external tools that may have coerced dtypes on write.
 RingOrbitModel serialization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-``RingOrbitModel`` is not a plain array; it is serialized flat via
-``orbit_model_to_dict`` / ``orbit_model_from_dict``:
+:class:`~nav.reproj.ring_orbit_model.RingOrbitModel` is not a plain array;
+it is serialized flat via ``orbit_model_to_dict`` /
+``orbit_model_from_dict``:
 
 - In **npz**: fields are stored as ``orbit_model__<field>`` entries.
 - In **FITS**: stored as ``ORBIT_MODEL__<FIELD>`` header cards.
@@ -271,11 +282,12 @@ Implementations provided:
 Context managers
 ----------------
 
-One context manager in ``_context_managers.py`` ensures global state is
-restored even if an exception occurs:
+One context manager in :mod:`nav.reproj._context_managers` ensures global
+state is restored even if an exception occurs:
 
-- ``_reduced_oops_precision(dlt=1)``: sets ``oops.config.PATH_PHOTONS`` and
-  ``SURFACE_PHOTONS`` delta-time precision to ``dlt``. Restores both on exit.
+- :func:`~nav.reproj._context_managers._reduced_oops_precision`: sets
+  ``oops.config.PATH_PHOTONS`` and ``SURFACE_PHOTONS`` delta-time precision
+  to ``dlt``. Restores both on exit.
 
 Adding a new photometric model
 ------------------------------
@@ -301,8 +313,9 @@ protocol::
             # custom correction logic
             return data / np.cos(incidence)
 
-Pass the instance to ``BodyMosaic`` or ``RingMosaic`` via the
-``photometric_model`` parameter.
+Pass the instance to :class:`~nav.reproj.bodies.BodyMosaic` or
+:class:`~nav.reproj.rings.RingMosaic` via the ``photometric_model``
+parameter.
 
 Cartographic model projection
 -------------------------------
@@ -376,13 +389,13 @@ The command-line tools are composed of three layers:
      per-image ``image_name`` string (from the CLI or from ``args.image_name``).
 
 **Dataset enumeration**
-   Both ``nav_mosaic.py`` and the existing ``nav_offset.py`` / ``nav_backplanes.py``
+   Both ``nav_mosaic.py`` and the ``nav_offset.py`` / ``nav_backplanes.py``
    scripts enumerate images via
-   :meth:`DataSet.yield_image_files_from_arguments`. The dataset class is
-   instantiated from ``DATASET_NAME = sys.argv[1]`` via
-   :func:`~nav.dataset.dataset_name_to_class`, which also provides
-   :meth:`~nav.dataset.DataSet.add_selection_arguments` to add dataset-specific
-   filtering flags to the parser.
+   :meth:`~nav.dataset.dataset.DataSet.yield_image_files_from_arguments`.
+   The dataset class is instantiated from ``DATASET_NAME = sys.argv[1]``
+   via :func:`~nav.dataset.dataset_name_to_class`, which also provides
+   :meth:`~nav.dataset.dataset.DataSet.add_selection_arguments` to add
+   dataset-specific filtering flags to the parser.
 
 Two-pass workflow
 ^^^^^^^^^^^^^^^^^
@@ -486,8 +499,9 @@ Gamma stretch convention
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
 All viewers use the ``((clip - black) / (white - black)) ** gamma`` convention
-implemented by :func:`nav.support.image.apply_linear_gamma_stretch`. A gamma of
-``1.0`` is linear; values below ``1.0`` brighten mid-tones (the common display
-choice). This convention is now uniformly applied across
-``TiledImageWidget``, ``manual_nav_dialog``, ``nav_backplane_viewer``, and
+implemented by :func:`~nav.support.image.apply_linear_gamma_stretch`. A
+gamma of ``1.0`` is linear; values below ``1.0`` brighten mid-tones (the
+common display choice). The convention is uniform across
+:class:`~nav.ui.mosaic_viewer.tiled_image_widget.TiledImageWidget`,
+:mod:`nav.ui.manual_nav_dialog`, ``nav_backplane_viewer``, and
 ``nav_create_simulated_image``.

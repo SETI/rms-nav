@@ -6,14 +6,14 @@ Overview
 ========
 
 :class:`~nav.nav_technique.nav_technique_body_blob.BodyBlobNav` recovers a single translation
-from one or more body brightness centroids.  For each offered BODY_BLOB feature the technique
+from one or more body brightness centroids. For each offered ``BODY_BLOB`` feature the technique
 computes a brightness-weighted moment inside the predicted bounding box, compares the
 observed centroid to the predicted lit-weighted centroid carried on the feature, and runs an
 inverse-variance-weighted joint fit across every consumed body to recover the per-image
-translation.  With ``N >= 2`` blobs the fit is over-determined and the joint solution is
+translation. With ``N >= 2`` blobs the fit is over-determined and the joint solution is
 robust to centroid errors on any single body.
 
-Feasibility passes when at least one offered BODY_BLOB carries a non-zero predicted
+Feasibility passes when at least one offered ``BODY_BLOB`` carries a non-zero predicted
 diameter; feasibility fails when every blob has degenerate geometry (a sub-pixel body that
 collapses the brightness-weighted moment).
 
@@ -60,11 +60,11 @@ disc:
 
 where :math:`D_{\mathrm{px}}` is the predicted disc diameter in pixels,
 :math:`N_{\mathrm{lit}}` is the number of lit pixels inside the predicted bounding box, and
-SNR is the per-pixel signal-to-noise ratio.  Two additional contributions are added in
+SNR is the per-pixel signal-to-noise ratio. Two additional contributions are added in
 quadrature: a shape-irregularity sigma scaling with the body's
 phase-and-irregularity coupling :math:`\kappa`
 (see :doc:`dev_guide_navigation_models_body`) times half the predicted disc diameter, and the
-photon-noise floor.  The total per-blob sigma populates a 2x2 isotropic covariance.
+photon-noise floor. The total per-blob sigma populates a 2x2 isotropic covariance.
 
 Joint translation fit
 ---------------------
@@ -88,16 +88,16 @@ The reported translation covariance is :math:`\sigma^{2} I` with :math:`\sigma^{
 Restrictions and assumptions
 ----------------------------
 
-- Per-blob centroids assume the bounding box truly contains the body's flux.  When a
+- Per-blob centroids assume the bounding box truly contains the body's flux. When a
   cosmic-ray hit, an in-band stellar source, or a neighbouring body's halo lands inside the
-  predicted bounding box, the moment skews and the technique reports a wrong centroid.  The
-  upstream BODY_BLOB emission gates upstream filter pathological cases (see
+  predicted bounding box, the moment skews and the technique reports a wrong centroid. The
+  upstream ``BODY_BLOB`` emission gates filter pathological cases (see
   :doc:`dev_guide_navigation_models_body`).
 - A vanishing total flux (an entirely-in-shadow body whose predicted bounding box happens to
   cover the right part of the FOV) collapses the moment; the technique drops such blobs
   before the joint fit and reports a no-signal failure when every blob is dropped.
 - The technique carries no rotation evidence — a brightness-weighted centroid is rotation-
-  invariant about itself.  When the per-instrument
+  invariant about itself. When the per-instrument
   :attr:`~nav.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` is true, the
   technique returns the rank-deficient 3x3 covariance from
   :func:`~nav.nav_technique.nav_technique.embed_rotation_unobservable` and reports
@@ -107,12 +107,12 @@ Restrictions and assumptions
 Sources of uncertainty
 ----------------------
 
-The reported covariance is the precision-weighted-mean variance described above.  It does
+The reported covariance is the precision-weighted-mean variance described above. It does
 not capture systematic biases from a body whose true rotational orientation differs from the
 rendered ellipsoid (the
 :attr:`~nav.feature.flags.BodyBlobFlags.phase_irregularity_factor` term tracks this so the
 confidence formula can down-weight the technique on irregular high-phase scenes, but the
-centroid itself remains biased).  When the converged offset sits within
+centroid itself remains biased). When the converged offset sits within
 :math:`\mathtt{at\_edge\_tolerance\_px}` of any axis bound, the result is flagged
 :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and the hard-zero
 gate forces confidence to zero.
@@ -123,7 +123,7 @@ Configuration
 All numeric tunables for this technique live in ``techniques.BodyBlobNav.tuning`` in
 ``src/nav/config_files/config_510_techniques.yaml``.
 
-- ``at_edge_tolerance_px`` — float, default ``1.0`` px.  A converged offset whose absolute
+- ``at_edge_tolerance_px`` — float, default ``1.0`` px. A converged offset whose absolute
   distance from any search-window axis bound falls within this tolerance is flagged
   :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge`.
 
@@ -136,7 +136,7 @@ Per-instrument overrides
 ------------------------
 
 The ``at_edge_tolerance_px`` knob is global; per-instrument YAML files in
-``src/nav/config_files/config_4N0_inst_*.yaml`` do not currently override it.  The
+``src/nav/config_files/config_4N0_inst_*.yaml`` do not override it. The
 search-window margin used by the at-edge test comes from the per-instrument
 :class:`~nav.nav_orchestrator.instrument_config.InstrumentSettings`.
 
@@ -150,23 +150,23 @@ off :class:`~nav.nav_technique.diagnostics.BodyBlobDiagnostics` plus
 :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge`.
 
 - :attr:`~nav.nav_technique.diagnostics.BodyBlobDiagnostics.body_snr_inside_predicted_bbox`
-  — alpha = 0.5, offset = 0.0, divisor = 4.0, cap at 1.0.  Per-image SNR inside the
-  predicted bounding box.  Brightness-weighted centroid uncertainty shrinks with SNR.
+  — alpha = 0.5, offset = 0.0, divisor = 4.0, cap at 1.0. Per-image SNR inside the
+  predicted bounding box. Brightness-weighted centroid uncertainty shrinks with SNR.
 - :attr:`~nav.nav_technique.diagnostics.BodyBlobDiagnostics.body_extent_px` — alpha = 1.0,
-  offset = 8.0, divisor = 8.0, cap at 1.0.  Predicted body's longer-axis extent in pixels.
+  offset = 8.0, divisor = 8.0, cap at 1.0. Predicted body's longer-axis extent in pixels.
   Larger blobs carry more centroid signal up to a 16-pixel saturation point.
 - :attr:`~nav.nav_technique.diagnostics.BodyBlobDiagnostics.blob_count` — alpha = 0.4,
-  offset = 0.0, divisor = 3.0, cap at 1.0.  Number of BODY_BLOB features fused.
+  offset = 0.0, divisor = 3.0, cap at 1.0. Number of ``BODY_BLOB`` features fused.
   Multi-body geometry over-determines the joint translation up to a 3-blob saturation.
 - :attr:`~nav.nav_technique.diagnostics.BodyBlobDiagnostics.max_phase_irregularity_factor`
-  — alpha = 0.0, offset = 0.0, divisor = 0.15, cap at 1.0.  Maximum phase-and-irregularity
+  — alpha = 0.0, offset = 0.0, divisor = 0.15, cap at 1.0. Maximum phase-and-irregularity
   factor across the consumed blobs (see :doc:`dev_guide_navigation_models_body` for the
-  formula).  The term carries no weight currently; the wiring is in place so a downstream
+  formula). The term carries no weight in the current confidence formula; the wiring is in place so a downstream
   recalibration can tune the alpha without code changes.
 
 Hard-zero gate: :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge`
-firing forces confidence to zero before the sigmoid evaluates.  The constant baseline is
-:math:`\alpha_{0} = -1.0`.  A post-sigmoid ``hard_cap`` of ``0.4`` clamps the result: a
+firing forces confidence to zero before the sigmoid evaluates. The constant baseline is
+:math:`\alpha_{0} = -1.0`. A post-sigmoid ``hard_cap`` of ``0.4`` clamps the result: a
 brightness-weighted centroid cannot drive the ensemble past 0.4 confidence even when every
 term saturates.
 
@@ -185,7 +185,7 @@ Source files:
   :doc:`dev_guide_techniques_diagnostics`.
 
 Public class :class:`~nav.nav_technique.nav_technique_body_blob.BodyBlobNav`, base
-:class:`~nav.nav_technique.nav_technique.NavTechnique`.  Self-registers via
+:class:`~nav.nav_technique.nav_technique.NavTechnique`. Self-registers via
 ``__init_subclass__`` so ``NavTechnique._registry`` discovers it.
 
 Class attributes:
@@ -209,20 +209,20 @@ Diagnostics
 :class:`~nav.nav_technique.diagnostics.BodyBlobDiagnostics`:
 
 - :attr:`~nav.nav_technique.diagnostics.BodyBlobDiagnostics.body_snr_inside_predicted_bbox`
-  — per-image SNR inside the predicted bounding box.  Consumed by the confidence formula.
+  — per-image SNR inside the predicted bounding box. Consumed by the confidence formula.
 - :attr:`~nav.nav_technique.diagnostics.BodyBlobDiagnostics.body_extent_px` — predicted
-  body's longer-axis extent in pixels.  Consumed by the confidence formula.
+  body's longer-axis extent in pixels. Consumed by the confidence formula.
 - :attr:`~nav.nav_technique.diagnostics.BodyBlobDiagnostics.blob_count` — number of
-  BODY_BLOB features fused.  Consumed by the confidence formula.
+  ``BODY_BLOB`` features fused. Consumed by the confidence formula.
 - :attr:`~nav.nav_technique.diagnostics.BodyBlobDiagnostics.residual_px` — joint-fit RMS
-  residual after solving the precision-weighted mean.  Diagnostic only; not in the formula.
+  residual after solving the precision-weighted mean. Diagnostic only; not in the formula.
 - :attr:`~nav.nav_technique.diagnostics.BodyBlobDiagnostics.max_phase_angle_deg` — maximum
-  raw phase angle across consumed blobs.  Diagnostic only; the formula consumes
+  raw phase angle across consumed blobs. Diagnostic only; the formula consumes
   ``max_phase_irregularity_factor`` instead because raw phase understates the centroid
   uncertainty for an irregular body.
 - :attr:`~nav.nav_technique.diagnostics.BodyBlobDiagnostics.max_phase_irregularity_factor` —
   maximum :math:`\sin(\phi/2) \cdot \sigma_{\mathrm{ellipsoid}} / R_{\mathrm{body}}` across
-  consumed blobs.  Consumed by the confidence formula (alpha=0.0 currently — the wiring is
+  consumed blobs. Consumed by the confidence formula (alpha=0.0 — the wiring is
   in place so the formula picks up a recalibrated alpha without code changes).
 
 Call path
@@ -231,7 +231,7 @@ Call path
 Call path traced through
 :meth:`~nav.nav_technique.nav_technique_body_blob.BodyBlobNav.navigate`:
 
-1. Open a logged section.  Filter the offered features down to BODY_BLOB entries with a
+1. Open a logged section. Filter the offered features down to ``BODY_BLOB`` entries with a
    non-zero predicted diameter via the private eligibility helper.
 2. Read the search-window margin off the observation via
    :func:`~nav.nav_technique.nav_technique.search_window_for_obs`, the extfov image off
@@ -287,22 +287,22 @@ Examples
 ========
 
 ``below_resolution_body`` (Cassini ISS NAC, image ``N1777325846_1``)
-    Mimas approximately 20 px in diameter in the lower left, at phase angle 72 degrees.  The
-    body model emits a single BODY_BLOB feature (the per-pixel ellipsoid uncertainty exceeds
-    :data:`~nav.nav_model.nav_model_body.LIMB_ARC_MAX_UNCERTAINTY_PX` so LIMB_ARC is
+    Mimas approximately 20 px in diameter in the lower left, at phase angle 72 degrees. The
+    body model emits a single ``BODY_BLOB`` feature (the per-pixel ellipsoid uncertainty exceeds
+    :data:`~nav.nav_model.nav_model_body.LIMB_ARC_MAX_UNCERTAINTY_PX` so ``LIMB_ARC`` is
     suppressed in favour of the centroid path).
     :class:`~nav.nav_technique.nav_technique_body_blob.BodyBlobNav` consumes the blob and
     converges within ~1 px of the operator-verified offset
-    :math:`(\Delta v, \Delta u) = (6.08, -1.53)` px.  The post-sigmoid hard cap of 0.4
+    :math:`(\Delta v, \Delta u) = (6.08, -1.53)` px. The post-sigmoid hard cap of 0.4
     keeps the technique from outranking a hypothetical limb fit on a similar but
     well-resolved scene.
 
 ``multi_body`` (Cassini ISS NAC, image ``N1487595731_1``)
-    Dione and Rhea both visible at phase angle approximately 90 degrees.  When the body
-    model emits BODY_BLOB features for both bodies (or one body's limb fails the uncertainty
+    Dione and Rhea both visible at phase angle approximately 90 degrees. When the body
+    model emits ``BODY_BLOB`` features for both bodies (or one body's limb fails the uncertainty
     gate), :class:`~nav.nav_technique.nav_technique_body_blob.BodyBlobNav` fuses the two
-    centroids into a joint translation.  The 3-blob saturation in the confidence formula is
+    centroids into a joint translation. The 3-blob saturation in the confidence formula is
     not reached, but the multi-body
     :attr:`~nav.nav_technique.diagnostics.BodyBlobDiagnostics.blob_count` term still
-    contributes a positive offset.  Operator-verified offset is
+    contributes a positive offset. Operator-verified offset is
     :math:`(\Delta v, \Delta u) = (7.03, -18.42)` px.

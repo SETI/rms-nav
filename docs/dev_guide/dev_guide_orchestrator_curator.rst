@@ -6,7 +6,7 @@ Overview
 ========
 
 The curator turns a :class:`~nav.nav_orchestrator.nav_result.NavResult` into a JSON-friendly
-metadata dict consumed by downstream readers.  Two functions form the public surface:
+metadata dict consumed by downstream readers. Two functions form the public surface:
 :func:`~nav.nav_orchestrator.curator.build_metadata_dict` does the conversion, and
 :func:`~nav.nav_orchestrator.curator.assert_diagnostic_fields_present` runs at startup to
 enforce the per-technique ``CURATOR_FIELDS`` allow-list discipline so a new diagnostic
@@ -15,8 +15,9 @@ field cannot silently disappear from the JSON output.
 Theory
 ======
 
-The curator picks JSON-friendly fields from a NavResult, rounds floats to documented
-precision, replaces non-finite floats with the ``JSON_INF_SENTINEL`` finite sentinel (or
+The curator picks JSON-friendly fields from a
+:class:`~nav.nav_orchestrator.nav_result.NavResult`, rounds floats to documented
+precision, substitutes the ``JSON_INF_SENTINEL`` finite sentinel for non-finite floats (or
 zero for NaN), and emits the ``navigation_result`` block consumed by downstream readers.
 
 Float rounding policy
@@ -38,7 +39,7 @@ Allow-list discipline
 
 Every per-technique diagnostic field that ships in the JSON appears in the technique's
 ``CURATOR_FIELDS`` class attribute (a mapping of dataclass-field name to JSON-key name, or
-``None`` to skip).  The curator walks ``CURATOR_FIELDS`` rather than the dataclass's
+``None`` to skip). The curator walks ``CURATOR_FIELDS`` rather than the dataclass's
 ``fields()`` directly, so a new field added to a diagnostics dataclass without an entry
 in the mapping does not silently leak into the JSON.
 :func:`~nav.nav_orchestrator.curator.assert_diagnostic_fields_present` runs at startup
@@ -48,7 +49,7 @@ missing from its ``CURATOR_FIELDS``.
 Restrictions and assumptions
 ----------------------------
 
-- The curator does not handle nested dataclasses generically.  Per-technique diagnostic
+- The curator does not handle nested dataclasses generically. Per-technique diagnostic
   classes are flat (every public field is a Python primitive or numpy scalar); when a
   future diagnostic dataclass needs nested structure the curator will need a recursive
   variant.
@@ -56,19 +57,19 @@ Restrictions and assumptions
   ``JSON_INF_SENTINEL``, ``-inf`` becomes ``-JSON_INF_SENTINEL``, ``nan`` becomes ``0.0``.
   The sentinel is a documented finite value the JSON schema reserves for "unbounded".
 - The curator does not include the per-image image array in the JSON (it would balloon
-  the sidecar to multi-megabyte sizes).  An external image-export step writes the image
+  the sidecar to multi-megabyte sizes). An external image-export step writes the image
   alongside the JSON when needed.
 
 Sources of uncertainty
 ----------------------
 
-The curator reports no uncertainty.  Every output is a deterministic projection of the
+The curator reports no uncertainty. Every output is a deterministic projection of the
 input :class:`~nav.nav_orchestrator.nav_result.NavResult`.
 
 Configuration
 =============
 
-The curator carries no YAML configuration of its own.  The three rounding constants
+The curator carries no YAML configuration of its own. The three rounding constants
 (``PIXEL_DECIMALS``, ``CONFIDENCE_DECIMALS``, ``ET_DECIMALS``) and the
 ``JSON_INF_SENTINEL`` live as module-level constants; ``JSON_INF_SENTINEL`` lives in
 :mod:`nav.feature.constants` and is shared with other JSON producers.
@@ -87,7 +88,7 @@ Public surface (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
   :class:`~nav.nav_orchestrator.nav_result.NavResult` into a JSON-friendly nested dict.
   Public entry point for the per-image-sidecar writer.
 - :func:`~nav.nav_orchestrator.curator.assert_diagnostic_fields_present` — verifies every
-  per-technique diagnostic field has a ``CURATOR_FIELDS`` entry.  Run at config-load
+  per-technique diagnostic field has a ``CURATOR_FIELDS`` entry. Run at config-load
   time; raises :exc:`AssertionError` on the first unmapped field.
 
 Per-technique diagnostics dataclasses (documented at
@@ -140,7 +141,7 @@ entry in the diagnostics dataclass's ``CURATOR_FIELDS``.
 **Allow-list catches a missed field.**  An operator adds a new field
 ``mean_polarity_score`` to
 :class:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics` without updating
-``CURATOR_FIELDS``.  At startup
+``CURATOR_FIELDS``. At startup
 :func:`~nav.nav_orchestrator.curator.assert_diagnostic_fields_present` runs over the
 :class:`~nav.nav_orchestrator.nav_result.NavResult` returned by the smoke test, walks the
 diagnostic's :func:`dataclasses.fields`, and raises::

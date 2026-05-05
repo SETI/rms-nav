@@ -7,10 +7,10 @@ Overview
 
 :class:`~nav.nav_orchestrator.nav_result.NavResult` is the frozen dataclass the
 orchestrator returns from
-:meth:`~nav.nav_orchestrator.orchestrator.NavOrchestrator.navigate`.  It carries the
+:meth:`~nav.nav_orchestrator.orchestrator.NavOrchestrator.navigate`. It carries the
 headline answer (offset plus per-axis sigma plus a five-bucket confidence rank) alongside
 full diagnostic information about every technique that ran, every feature that was
-extracted, and the per-image provenance.  The dataclass is the in-memory object the
+extracted, and the per-image provenance. The dataclass is the in-memory object the
 orchestrator hands back; the curator
 (:doc:`dev_guide_orchestrator_curator`) builds a JSON-friendly subset for the per-image
 sidecar.
@@ -24,7 +24,7 @@ outcomes:
 - ``'ok'`` — the ensemble combine produced an offset above the per-image confidence
   threshold.
 - ``'failed'`` — a short-circuit gate fired, every technique was spurious, or the ensemble
-  combine fell below the confidence threshold.  The result carries no offset.
+  combine fell below the confidence threshold. The result carries no offset.
 - ``'conflicted'`` — multiple non-overlapping technique groups had similar summed
   confidences and the ensemble could not pick a winner.
 
@@ -39,7 +39,7 @@ The dataclass enforces consistency invariants in ``__post_init__``:
 Three classmethod constructors centralise common shapes:
 :meth:`~nav.nav_orchestrator.nav_result.NavResult.ok`,
 :meth:`~nav.nav_orchestrator.nav_result.NavResult.failed`, and
-:meth:`~nav.nav_orchestrator.nav_result.NavResult.conflicted`.  Direct instantiation is
+:meth:`~nav.nav_orchestrator.nav_result.NavResult.conflicted`. Direct instantiation is
 also supported when the caller already knows every field.
 
 Restrictions and assumptions
@@ -57,14 +57,14 @@ Sources of uncertainty
 ----------------------
 
 The ``sigma_px`` per-axis 1-sigma marginal is derived from the diagonal of the
-``covariance_px2``.  When the covariance is rank-1 (a flat-ring-only scene), the
+``covariance_px2``. When the covariance is rank-1 (a flat-ring-only scene), the
 ``sigma_along_unobservable_px`` field carries the unconstrained-axis sigma so reviewer
 tooling can distinguish a rank-1 from a full-rank result.
 
 Configuration
 =============
 
-The dataclass carries no YAML configuration of its own.  The five-bucket confidence rank
+The dataclass carries no YAML configuration of its own. The five-bucket confidence rank
 and the per-tier sigma thresholds are configured on the
 :class:`~nav.nav_orchestrator.ensemble.EnsembleConfig` (documented at
 :doc:`dev_guide_orchestrator_ensemble`); the rank assignment runs inside
@@ -107,11 +107,12 @@ Public fields (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
   :class:`~nav.nav_orchestrator.image_classifier_result.NavImageClassifierResult` verdict.
 - :attr:`~nav.nav_orchestrator.nav_result.NavResult.provenance` — the
   :class:`~nav.nav_orchestrator.provenance.Provenance` envelope.
-- :attr:`~nav.nav_orchestrator.nav_result.NavResult.model_metadata` — per-NavModel
+- :attr:`~nav.nav_orchestrator.nav_result.NavResult.model_metadata` —
+  per-:class:`~nav.nav_model.nav_model.NavModel`
   diagnostic dicts keyed by model name.
 - :attr:`~nav.nav_orchestrator.nav_result.NavResult.annotations` — composite
   :class:`~nav.annotation.annotations.Annotations` collection assembled from every
-  registered NavModel.
+  registered :class:`~nav.nav_model.nav_model.NavModel`.
 - :attr:`~nav.nav_orchestrator.nav_result.NavResult.rotation_rad` — Optional fitted camera
   rotation in radians.
 - :attr:`~nav.nav_orchestrator.nav_result.NavResult.sigma_rotation_rad` — Optional

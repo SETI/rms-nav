@@ -6,11 +6,11 @@ Overview
 ========
 
 :class:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated` is the
-simulated-image variant of the ring navigation model.  It renders a ring system from
+simulated-image variant of the ring navigation model. It renders a ring system from
 operator-supplied edge radii and shading parameters instead of from a SPICE-driven
 catalog, then emits a single
 :data:`~nav.feature.feature_type.NavFeatureType.RING_ANNULUS` feature carrying the rendered
-template.  The simulated GUI driver constructs an instance directly with the operator's
+template. The simulated GUI driver constructs an instance directly with the operator's
 sim parameters; the orchestrator's autonomous registry does not build an instance because
 the class does not override
 :meth:`~nav.nav_model.nav_model.NavModel.instances_for_obs`.
@@ -19,14 +19,16 @@ Theory
 ======
 
 Simulated ring rendering paints a stack of catalog-shaped ring edges onto an extended-FOV
-image plus mask using image-plane coordinates and operator-supplied shading.  The same
+image plus mask using image-plane coordinates and operator-supplied shading. The same
 :class:`~nav.nav_model.rings.ring_feature.RingFeature` data model the catalog-driven path
 uses carries the per-edge metadata; only the rendering pipeline differs (pixel-space here
 vs. backplane-based for the real model).
 
-The rendered template is the RING_ANNULUS feature payload that downstream techniques
+The rendered template is the
+:attr:`~nav.feature.feature_type.NavFeatureType.RING_ANNULUS` feature payload that
+downstream techniques
 (:class:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav` is the primary
-consumer) navigate against.  The simulated ring's geometry is operator-known by
+consumer) navigate against. The simulated ring's geometry is operator-known by
 construction, so the simulated path is the calibration regime — a developer can probe the
 ring-annulus pipeline with rings whose true offset is known to the pixel.
 
@@ -37,13 +39,13 @@ Restrictions and assumptions
 - The simulated rings carry no per-image noise or PSF smearing; the operator's downstream
   noise-injection pipeline supplies those.
 - The ring system is rendered in image-plane coordinates: edges are concentric ellipses
-  about the operator-supplied centre.  More elaborate orbit geometry (precession, nodal
+  about the operator-supplied centre. More elaborate orbit geometry (precession, nodal
   regression) requires the catalog-driven path.
 
 Sources of uncertainty
 ----------------------
 
-The simulated annulus has no measurement uncertainty by construction.  The downstream
+The simulated annulus has no measurement uncertainty by construction. The downstream
 technique's reported covariance reflects only the correlation-curvature CRLB at the chosen
 NCC peak.
 
@@ -51,7 +53,7 @@ Configuration
 =============
 
 The simulated ring model consumes no YAML configuration of its own; every parameter comes
-in via the per-instance ``sim_params`` dict.  Expected keys:
+in via the per-instance ``sim_params`` dict. Expected keys:
 
 - ``name`` — ring-system label used in metadata.
 - ``feature_type`` — selects the annulus rendering path (``RING_ANNULUS``).
@@ -68,7 +70,7 @@ Source file: ``src/nav/nav_model/nav_model_rings_simulated.py`` —
 :class:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated`.
 
 Public class :class:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated`,
-base :class:`~nav.nav_model.nav_model_rings_base.NavModelRingsBase`.  The class does *not*
+base :class:`~nav.nav_model.nav_model_rings_base.NavModelRingsBase`. The class does *not*
 override :meth:`~nav.nav_model.nav_model.NavModel.instances_for_obs`, so the orchestrator's
 :func:`~nav.nav_model.nav_model.build_models_for_obs` driver never constructs an instance
 during autonomous runs.
@@ -97,14 +99,14 @@ Call path
 Call path traced through
 :meth:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated.create_model`:
 
-1. Open a logged section.  Read the operator-supplied sim parameters off the per-instance
+1. Open a logged section. Read the operator-supplied sim parameters off the per-instance
    dict and the ring-system name.
 2. Build :class:`~nav.nav_model.rings.ring_feature.RingFeature` instances from the
-   per-edge sim parameter lists.  The :class:`~nav.nav_model.rings.ring_feature.RingFeature`
+   per-edge sim parameter lists. The :class:`~nav.nav_model.rings.ring_feature.RingFeature`
    data model is shared with the catalog-driven path so the downstream emission path is
    identical.
 3. Call :func:`~nav.sim.sim_ring.render_ring` with the per-edge data, the operator-supplied
-   centre, and the shading parameters.  The helper returns the rendered ring-system image
+   centre, and the shading parameters. The helper returns the rendered ring-system image
    plus mask.
 4. Compute the per-edge brightness contrast and the per-pixel ``border_atop`` masking via
    :func:`~nav.sim.sim_ring.compute_border_atop_simulated`.
@@ -127,12 +129,12 @@ Examples
 ========
 
 The simulated ring model is consumed by the simulated-image GUI driver
-(``nav_create_simulated_image``).  An operator specifies a Saturn-like ring stack —
+(``nav_create_simulated_image``). An operator specifies a Saturn-like ring stack —
 inner edge radii ``[74,490, 91,980, 122,170]`` km, outer edge radii
 ``[91,980, 117,580, 136,780]`` km, shading distance set per the per-image illumination
 geometry — and the simulator renders the corresponding extended-FOV image plus annulus
-mask.  The downstream
+mask. The downstream
 :class:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav` correlates the
 template against an injected synthetic-noise image and recovers the operator-known
-``(0, 0)`` offset within sub-pixel.  The operator uses the residual to validate
+``(0, 0)`` offset within sub-pixel. The operator uses the residual to validate
 per-instrument ring-rendering assumptions without a real ring image.

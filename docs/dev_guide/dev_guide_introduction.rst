@@ -3,7 +3,7 @@ Introduction
 ============
 
 This is the developer manual for **RMS-NAV**, the spacecraft image-navigation system
-distributed as the ``rms-nav`` PyPI package.  The user manual lives under
+distributed as the ``rms-nav`` PyPI package. The user manual lives under
 :doc:`/user_guide` (one chapter per CLI driver); this manual is for contributors and
 maintainers — people who modify, extend, build, test, or release the package.
 
@@ -13,13 +13,13 @@ Package overview
 RMS-NAV ingests images from Cassini ISS, Voyager 1/2 ISS, Galileo SSI, and New
 Horizons LORRI; predicts the per-pixel scene geometry from SPICE kernels; and reports
 the offset between the predicted and observed scene that brings the two into
-alignment.  Downstream the same package generates per-pixel backplanes, PDS4 bundles,
+alignment. Downstream the same package generates per-pixel backplanes, PDS4 bundles,
 body / ring mosaics, and reprojections.
 
 The runtime is pure Python (3.11+), with NumPy / SciPy for numerics, ``oops`` for
 geometry and SPICE access, ``starcat`` / ``psfmodel`` for star navigation, ``filecache``
 for transparent local-or-remote file access, and PyQt6 for the optional manual-nav and
-mosaic-viewer GUIs.  No GPU is required.
+mosaic-viewer GUIs. No GPU is required.
 
 Repository layout
 =================
@@ -83,7 +83,7 @@ Editable install of runtime + dev tools (ruff, mypy, pytest, coverage):
    pip install -e ".[dev]"
 
 The ``[dev]`` group transitively includes the docs group (Sphinx, ``myst-parser``,
-``sphinx-rtd-theme``, ``sphinxcontrib-mermaid``).  The runtime-only install
+``sphinx-rtd-theme``, ``sphinxcontrib-mermaid``). The runtime-only install
 (``pip install rms-nav``) is what end users get from PyPI.
 
 Editable installs + mypy: export
@@ -94,7 +94,7 @@ Environment variables
 ---------------------
 
 Most runs need at least one of these (CLI flags override env vars override config
-defaults).  Each accepts a local path or a URL handled transparently by ``filecache``:
+defaults). Each accepts a local path or a URL handled transparently by ``filecache``:
 
 - ``SPICE_PATH`` — required by every real navigation run; points at the SPICE
   kernels directory.
@@ -111,7 +111,7 @@ Running the CLI tools
 =====================
 
 Every CLI listed in ``[project.scripts]`` is installed onto ``$PATH`` by
-``pip install``.  The full set:
+``pip install``. The full set:
 
 .. list-table::
    :header-rows: 1
@@ -121,19 +121,19 @@ Every CLI listed in ``[project.scripts]`` is installed onto ``$PATH`` by
      - Purpose
    * - ``nav_offset``
      - Run autonomous navigation on one image (or a batch); writes JSON
-       metadata + summary PNG.  Documented at :doc:`/user_guide_navigation`.
+       metadata + summary PNG. Documented at :doc:`/user_guide_navigation`.
    * - ``nav_offset_cloud_tasks``
      - Queue-driven navigation variant; reads task JSON, processes one batch.
    * - ``nav_backplanes`` / ``nav_backplanes_cloud_tasks``
-     - Generate per-pixel backplanes from a navigated image.  See
+     - Generate per-pixel backplanes from a navigated image. See
        :doc:`/user_guide_backplanes` and :doc:`dev_guide_backplanes`.
    * - ``nav_backplane_viewer``
      - PyQt6 viewer for a backplane file.
    * - ``nav_create_bundle`` / ``nav_create_bundle_cloud_tasks``
-     - Build a PDS4 bundle from navigated images + backplanes.  See
+     - Build a PDS4 bundle from navigated images + backplanes. See
        :doc:`/user_guide_pds4_bundle` and :doc:`dev_guide_pds4`.
    * - ``nav_mosaic`` / ``nav_mosaic_rings`` / ``nav_mosaic_body``
-     - Reprojection drivers (rings, body, dispatcher).  See
+     - Reprojection drivers (rings, body, dispatcher). See
        :doc:`/user_guide_reprojection` and :doc:`dev_guide_reprojection`.
    * - ``nav_mosaic_display`` / ``nav_mosaic_display_rings`` / ``nav_mosaic_display_body``
      - PyQt6 mosaic viewer.
@@ -153,7 +153,7 @@ Running the test suite
 ======================
 
 Pytest defaults exclude integration tests; pass ``-m ""`` (empty marker filter) to
-include them.  ``pyproject.toml`` sets ``addopts = ["-m", "not integration"]``.
+include them. ``pyproject.toml`` sets ``addopts = ["-m", "not integration"]``.
 
 .. code-block:: bash
 
@@ -181,11 +181,11 @@ Test markers and layout
 - Unit tests live under ``tests/nav/`` and mirror ``src/nav/`` directory by
   directory (``tests/nav/reproj/test_bodies.py`` ↔ ``src/nav/reproj/bodies.py``).
 - Integration tests live under ``tests/integration/`` and carry the
-  ``integration`` marker.  Two sub-layers: the structural-invariants test
+  ``integration`` marker. Two sub-layers: the structural-invariants test
   (fast, no holdings needed) and the per-image regression test (slow, needs
   holdings).
 - The image library (operator-curated regression cohort) lives at
-  ``tests/integration/image_library/``.  See :doc:`dev_guide_image_library`
+  ``tests/integration/image_library/``. See :doc:`dev_guide_image_library`
   for the calibration workflow, sidecar schema, and baseline tooling.
 
 Lint, types, formatter
@@ -202,7 +202,7 @@ Project conventions: line length 100, single-quoted strings, three-group import
 order (stdlib / third-party / local), Google-style docstrings with
 ``Parameters:`` (not ``Args:``) wrapped at 90 chars, at most three positional
 parameters per function (rest keyword-only after ``*``), modules under 1000 lines,
-no module-level ``# type: ignore`` without a specific error code.  See
+no module-level ``# type: ignore`` without a specific error code. See
 :doc:`dev_guide_best_practices` for the full list and the rationale.
 
 The all-in-one wrapper:
@@ -216,19 +216,19 @@ Building the documentation
 ==========================
 
 Documentation source is reStructuredText under ``docs/`` plus Markdown via
-``myst-parser``.  Sphinx config lives at ``docs/conf.py``.  Build with:
+``myst-parser``. Sphinx config lives at ``docs/conf.py``. Build with:
 
 .. code-block:: bash
 
    pip install -e ".[docs]"           # or [dev]
    sphinx-build -W -b html docs docs/_build
 
-The ``-W`` flag promotes warnings to errors; CI runs the same.  The built HTML
-opens at ``docs/_build/index.html``.  Per-format alternates are available from
+The ``-W`` flag promotes warnings to errors; CI runs the same. The built HTML
+opens at ``docs/_build/index.html``. Per-format alternates are available from
 the ``docs/`` directory's ``Makefile`` (``make latexpdf``, ``make singlehtml``,
 ``make epub``).
 
-Mermaid diagrams render via ``sphinxcontrib-mermaid``.  Validate complex
+Mermaid diagrams render via ``sphinxcontrib-mermaid``. Validate complex
 diagrams in the Mermaid Live Editor (https://mermaid.live/) before committing.
 
 The autodoc API pages under ``docs/api_reference/`` are populated from
@@ -241,16 +241,16 @@ CI / CD pipeline
 GitHub Actions defines three workflows under ``.github/workflows/``:
 
 - ``run-tests.yml`` — runs on every PR and on pushes to ``main``, plus a weekly
-  cron.  Three jobs:
+  cron. Three jobs:
 
-  - **Lint** — Python 3.13.  ``ruff check``, ``ruff format --check``, ``mypy``.
-  - **Test** — matrix across Python 3.11 / 3.12 / 3.13 / 3.14 on Ubuntu.  Runs
+  - **Lint** — Python 3.13. ``ruff check``, ``ruff format --check``, ``mypy``.
+  - **Test** — matrix across Python 3.11 / 3.12 / 3.13 / 3.14 on Ubuntu. Runs
     ``pytest -m "not integration" -n auto --dist=loadfile`` with the holdings /
-    catalog env vars exported.  Uploads coverage to Codecov from the 3.13 job
+    catalog env vars exported. Uploads coverage to Codecov from the 3.13 job
     on pushes (PRs from forks are excluded for secrets reasons).
   - **Docs** — ``sphinx-build -W`` against the ``[docs]`` extra.
 
-  Integration tests are skipped in CI (slow, holdings-dependent).  Maintainers
+  Integration tests are skipped in CI (slow, holdings-dependent). Maintainers
   run them locally before merging anything that could plausibly regress
   navigation accuracy.
 
@@ -272,7 +272,7 @@ Cutting a release:
 
 1. Land all release content on ``main`` (squash-merged).
 2. From a clean checkout of ``main``, draft a GitHub Release and tag it
-   ``vX.Y.Z`` (semver).  Publishing the release triggers
+   ``vX.Y.Z`` (semver). Publishing the release triggers
    ``publish_to_pypi.yml``.
 3. Verify the new version appears on https://pypi.org/project/rms-nav/ and
    that ``pip install rms-nav==X.Y.Z`` works in a clean venv.
@@ -287,11 +287,11 @@ from there with
 Contribution workflow
 =====================
 
-The contributor checklist is at :doc:`/contributing`.  Highlights:
+The contributor checklist is at :doc:`/contributing`. Highlights:
 
 - Conventional Commits subjects (``feat:``, ``fix:``, ``docs:``, ``refactor:``,
-  ``test:``, ``perf:``, ``ci:``, ``chore:``, ``style:``).  Subject imperative,
-  ≤ 50 chars, no trailing period.  One logical change per commit.
+  ``test:``, ``perf:``, ``ci:``, ``chore:``, ``style:``). Subject imperative,
+  ≤ 50 chars, no trailing period. One logical change per commit.
 - PRs squash-merge to ``main``; the squash message becomes the release notes
   entry.
 - Every PR must pass ``./scripts/run-all-checks.sh`` locally and the same

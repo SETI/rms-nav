@@ -1,80 +1,67 @@
 ==========================================================
-Simulated Titan Navigation Model (Planned)
+Simulated Titan Navigation Model
 ==========================================================
 
 Overview
 ========
 
-``NavModelTitanSimulated`` is the planned simulated-image variant of the Titan
-navigation model.  It will render a Titan-class disc from operator-supplied parameters
-(haze-top radius, per-filter haze profile, phase / lighting geometry) instead of from
-SPICE prediction plus a haze model, then emit a single feature carrying the rendered
-template.  The class is **not yet implemented**; this page reserves the documentation
-slot so the toctree under :doc:`dev_guide_navigation_models_titans` mirrors
+``NavModelTitanSimulated`` is the simulated-image counterpart of
+:class:`~nav.nav_model.nav_model_titan.NavModelTitan`. It is reserved without an
+implementation; the documentation slot exists so the toctree under
+:doc:`dev_guide_navigation_models_titans` is parallel with
 :doc:`dev_guide_navigation_models_bodies`,
 :doc:`dev_guide_navigation_models_rings`, and
 :doc:`dev_guide_navigation_models_stars`.
 
-The planned class is a logical complement to :class:`~nav.nav_model.nav_model_titan.NavModelTitan`:
-the catalog-driven path will need a haze-aware extractor, and the simulated path will
-need a controlled-input renderer that lets a developer probe the haze-fit pipeline with
-geometry whose true offset is known to the pixel.
+A direct simulated-image counterpart is the logical complement of
+:class:`~nav.nav_model.nav_model_titan.NavModelTitan`: the catalog-driven path needs a
+haze-aware extractor, and the simulated path needs a controlled-input renderer so a
+developer can probe the haze-fit pipeline with geometry whose true offset is known by
+construction.
 
 Theory
 ======
 
-The planned simulated Titan model will follow the same pattern as the body and ring
-simulated models: a controlled-input renderer that paints an operator-supplied
-haze-bounded disc onto an extended-FOV image plus mask, with operator-known per-pixel
-geometry.  The simulated path is the calibration regime — it will let a developer
-probe the haze-aware navigation pipeline with bodies whose true offset, haze altitude,
-and phase are known by construction.
+The simulated path is the calibration regime: a controlled-input renderer paints an
+operator-supplied haze-bounded disc onto an extended-FOV image plus mask, with
+operator-known per-pixel geometry. The renderer would let a developer probe the
+haze-aware navigation pipeline with bodies whose true offset, haze altitude, and phase
+are known by construction.
 
 Restrictions and assumptions
 ----------------------------
 
-To be specified when the class lands.  Anticipated constraints:
-
-- The operator must supply a finite haze-top radius and a finite per-filter haze
-  profile (or a sentinel that selects a baseline profile).
-- The simulated body carries no per-image noise or PSF smearing by default; the
-  operator's downstream noise-injection pipeline supplies those.
-- Phase-angle handling will mirror the planned haze-aware
-  :class:`~nav.nav_model.nav_model_titan.NavModelTitan` extractor's forward-vs-back
-  scattering treatment so the simulated and real paths share their photometric model.
+The slot has no implementation, so no algorithmic assumptions apply. A future
+implementation would inherit the constraints already documented for
+:class:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated` plus the
+haze-profile parameter constraints described in
+:doc:`dev_guide_navigation_models_titan`.
 
 Sources of uncertainty
 ----------------------
 
-The simulated Titan disc will have no measurement uncertainty by construction.
-Downstream techniques' reported covariance will reflect only the correlation-curvature
-CRLB at the chosen match position.
+The slot reports no uncertainty.
 
 Configuration
 =============
 
-To be specified when the class lands.  Anticipated sim-params keys:
-
-- ``name`` — body label used in metadata and the summary PNG.
-- ``center_v``, ``center_u`` — pixel coordinates of the body centre.
-- ``range`` — subject distance in km.
-- ``haze_radius`` — the haze-top radius in km.
-- ``haze_profile`` — per-filter haze altitude profile (or a sentinel selecting a
-  baseline profile).
-- ``illumination_angle``, ``phase_angle`` — degrees.
+The slot consumes no YAML configuration. The anticipated sim-params parallel to
+:class:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated` would carry
+``name``, ``center_v``, ``center_u``, ``range``, ``haze_radius``, ``haze_profile``,
+``illumination_angle``, and ``phase_angle``.
 
 Implementation
 ==============
 
-To be added when ``NavModelTitanSimulated`` is implemented.  The class will live at
+The slot has no source file. A direct simulated-image counterpart would live at
 ``src/nav/nav_model/nav_model_titan_simulated.py`` and self-register via
 ``__init_subclass__``; like
 :class:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated` and
-:class:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated` it will *not*
+:class:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated` it would not
 override :meth:`~nav.nav_model.nav_model.NavModel.instances_for_obs`, so the orchestrator's
-autonomous registry never builds an instance during real-image runs.
+autonomous registry would not build an instance during real-image runs.
 
 Examples
 ========
 
-To be added when the class lands.
+The slot has no examples.

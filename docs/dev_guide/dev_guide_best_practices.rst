@@ -19,8 +19,8 @@ Code style
   ``-> None``. Use modern ``list[str]``, ``dict[str, int]``, ``X | None``
   syntax.
 * Keep modules under 1000 lines. Split larger modules into a package.
-* Do not introduce backwards-compatibility shims unless explicitly requested;
-  change the code instead.
+* Do not introduce compatibility shims for prior versions unless explicitly
+  requested; change the code instead.
 
 Linting and typing
 ------------------

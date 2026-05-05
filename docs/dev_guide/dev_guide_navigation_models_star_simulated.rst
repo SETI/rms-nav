@@ -1,79 +1,71 @@
 ==========================================================
-Simulated Star Navigation Model (Planned)
+Simulated Star Navigation Model
 ==========================================================
 
 Overview
 ========
 
-``NavModelStarsSimulated`` is the planned simulated-image variant of the star navigation
-model.  It will render stars from operator-supplied parameters (per-star pixel position,
-magnitude, spectral class, optional smear vector) instead of from a catalog plus SPICE
-prediction, then emit one
-:data:`~nav.feature.feature_type.NavFeatureType.STAR` :class:`~nav.feature.feature.NavFeature`
-per operator-supplied star.  The class is **not yet implemented**; this page reserves the
-documentation slot so the toctree under :doc:`dev_guide_navigation_models_stars` mirrors
-:doc:`dev_guide_navigation_models_bodies` and :doc:`dev_guide_navigation_models_rings`.
+``NavModelStarsSimulated`` is the simulated-image counterpart of
+:class:`~nav.nav_model.stars.nav_model_stars.NavModelStars`. It is reserved without an
+implementation; the documentation slot exists so the toctree under
+:doc:`dev_guide_navigation_models_stars` is parallel with
+:doc:`dev_guide_navigation_models_bodies` and
+:doc:`dev_guide_navigation_models_rings`.
 
-Today the simulated-image driver (``nav_create_simulated_image``) renders operator-supplied
-stars directly into the simulated image via :mod:`nav.sim.render`; the per-image
+Star generation in the simulated-image driver (``nav_create_simulated_image``) is handled
+by :mod:`nav.sim.render`, which paints operator-supplied stars directly into the
+simulated image. The per-image
 :class:`~nav.obs.obs_inst_sim.ObsInstSim` snapshot carries the operator's star list on
-``sim_star_list``.  Downstream, the catalog-driven
-:class:`~nav.nav_model.stars.nav_model_stars.NavModelStars` then runs against the simulated
-observation the same way it runs against a real one.  The planned
-``NavModelStarsSimulated`` will replace that indirection with a direct simulated-image
-:class:`~nav.nav_model.nav_model.NavModel` subclass that consumes the operator parameters
-without round-tripping through the catalog reduction.
+``sim_star_list`` and the catalog-driven
+:class:`~nav.nav_model.stars.nav_model_stars.NavModelStars` runs against the simulated
+observation the same way it runs against a real one. A direct simulated-image
+``NavModelStarsSimulated`` would consume the operator parameters without round-tripping
+through the catalog reduction.
 
 Theory
 ======
 
-The planned simulated star model will follow the same pattern as the body and ring
-simulated models: a controlled-input renderer that paints operator-supplied stars onto an
-extended-FOV image plus mask, with operator-known per-star geometry.  The simulated path
-is the calibration regime — a developer can probe the star-matching pipeline with a star
-field whose true offset, photometry, and smear are known to the pixel.
+The simulated path is the calibration regime: a developer can probe the star-matching
+pipeline with a star field whose true offset, photometry, and smear are known by
+construction. The simulated-image counterpart would follow the same pattern as
+:class:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated` and
+:class:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated`: a
+controlled-input renderer that paints operator-supplied stars onto an extended-FOV image
+plus mask, with operator-known per-star geometry.
 
 Restrictions and assumptions
 ----------------------------
 
-To be specified when the class lands.  Anticipated constraints:
-
-- Operator-supplied stars must carry finite pixel positions inside the extended FOV.
-- The simulated stars carry no per-image noise or PSF smearing by default; the operator's
-  downstream noise-injection pipeline supplies those.
-- Per-star photometric calibration follows the same per-instrument bandpass model used by
-  :class:`~nav.nav_model.stars.nav_model_stars.NavModelStars`.
+The slot has no implementation, so no algorithmic assumptions apply. A future
+implementation would inherit the constraints already documented for
+:class:`~nav.nav_model.stars.nav_model_stars.NavModelStars` plus the
+operator-supplied-parameter constraints documented for
+:doc:`dev_guide_navigation_models_body_simulated`.
 
 Sources of uncertainty
 ----------------------
 
-The simulated stars will have no measurement uncertainty by construction.  Downstream
-techniques' reported covariance will reflect only the per-star CRLB at the chosen match
-position.
+The slot reports no uncertainty.
 
 Configuration
 =============
 
-To be specified when the class lands.  Anticipated sim-params keys:
-
-- ``stars`` — list of dicts each carrying ``center_v``, ``center_u``, ``vmag``,
-  ``spectral_class``, optional ``smear_v`` / ``smear_u``.
-- Background-star generation knobs already consumed by :mod:`nav.sim.render`
-  (``background_stars_num``, ``background_stars_psf_sigma``,
-  ``background_stars_distribution_exponent``).
+The slot consumes no YAML configuration. Background-star generation knobs already used by
+:mod:`nav.sim.render` (``background_stars_num``, ``background_stars_psf_sigma``,
+``background_stars_distribution_exponent``) live under the ``sim`` configuration block.
 
 Implementation
 ==============
 
-To be added when ``NavModelStarsSimulated`` is implemented.  The class will live at
+The slot has no source file. A direct simulated-image counterpart would live at
 ``src/nav/nav_model/stars/nav_model_stars_simulated.py`` and self-register via
 ``__init_subclass__``; like
 :class:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated` and
-:class:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated` it will *not*
+:class:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated` it would not
 override :meth:`~nav.nav_model.nav_model.NavModel.instances_for_obs`, so the orchestrator's
-autonomous registry never builds an instance during real-image runs.
+autonomous registry would not build an instance during real-image runs.
 
 Examples
 ========
 
-To be added when the class lands.
+The slot has no examples.

@@ -30,8 +30,8 @@ RMS-NAV is organised around six cooperating subsystems:
    per-technique results via
    :func:`~nav.nav_orchestrator.ensemble.ensemble`, returning a single
    :class:`~nav.nav_orchestrator.nav_result.NavResult`.
-6. :mod:`nav.annotation` — composes per-NavModel annotations into the
-   summary-PNG overlay.
+6. :mod:`nav.annotation` — composes per-:class:`~nav.nav_model.nav_model.NavModel`
+   annotations into the summary-PNG overlay.
 
 Data flow
 =========
@@ -39,27 +39,29 @@ Data flow
 1. ``nav_offset`` (or another CLI driver) constructs a
    :class:`~nav.dataset.dataset.DataSet` and yields one
    :class:`~nav.dataset.dataset.ImageFile` at a time.
-2. The matching ``ObsSnapshotInst`` subclass reads the file via
-   ``from_file(...)``.
+2. The matching :class:`~nav.obs.obs_snapshot_inst.ObsSnapshotInst` subclass
+   reads the file via
+   :meth:`~nav.obs.obs_snapshot_inst.ObsSnapshotInst.from_file`.
 3. :func:`~nav.nav_model.nav_model.build_models_for_obs` walks the
    :class:`~nav.nav_model.nav_model.NavModel` registry and constructs
    per-image instances applicable to the observation.
 4. The :class:`~nav.nav_orchestrator.orchestrator.NavOrchestrator`
    builds a :class:`~nav.nav_orchestrator.nav_context.NavContext`,
-   gathers features and per-NavModel annotations, gates features by
-   reliability, runs every feasible prior-free technique (pass 1),
-   ensembles the pass-1 results to derive a prior, runs prior-required
-   techniques against that prior (pass 2), and ensembles the union.
+   gathers features and per-:class:`~nav.nav_model.nav_model.NavModel`
+   annotations, gates features by reliability, runs every feasible
+   prior-free technique (pass 1), ensembles the pass-1 results to derive a
+   prior, runs prior-required techniques against that prior (pass 2), and
+   ensembles the union.
 5. :func:`~nav.nav_orchestrator.curator.build_metadata_dict` projects
    the resulting :class:`~nav.nav_orchestrator.nav_result.NavResult`
    into a JSON-friendly metadata block.
 6. :func:`~nav.navigate_image_files.navigate_image_files` writes the
-   metadata JSON and the summary PNG.  The PNG's annotation overlay is
+   metadata JSON and the summary PNG. The PNG's annotation overlay is
    composed upstream by
    :meth:`~nav.annotation.annotations.Annotations.combine` over the
-   per-NavModel annotations the orchestrator collected; the driver
-   composites that overlay onto the contrast-stretched source image and
-   writes the bytes.
+   per-:class:`~nav.nav_model.nav_model.NavModel` annotations the
+   orchestrator collected; the driver composites that overlay onto the
+   contrast-stretched source image and writes the bytes.
 
 The detailed class hierarchy and inheritance graph is at
 :doc:`dev_guide_class_hierarchy`.

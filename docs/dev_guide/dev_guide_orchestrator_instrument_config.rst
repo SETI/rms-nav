@@ -7,11 +7,11 @@ Overview
 
 :class:`~nav.nav_orchestrator.instrument_config.InstrumentSettings` is the frozen
 dataclass that carries per-instrument runtime parameters the orchestrator needs to navigate
-an observation.  The companion function
+an observation. The companion function
 :func:`~nav.nav_orchestrator.instrument_config.instrument_settings_from_obs` reads the
 per-camera ``inst_config`` mapping that an
 :class:`~nav.obs.obs_inst.ObsInst` populates from
-``config_4N0_inst_*.yaml`` and returns a populated dataclass.  Every per-instrument
+``config_4N0_inst_*.yaml`` and returns a populated dataclass. Every per-instrument
 behavioural branch in :class:`~nav.nav_orchestrator.orchestrator.NavOrchestrator` ultimately
 reads off this dataclass.
 
@@ -27,12 +27,12 @@ Per-instrument configuration is split into two layers:
   DN-to-image-unit scale.
 - The per-image observation snapshot
   (:class:`~nav.obs.obs_snapshot_inst.ObsSnapshotInst`) carries the fast-moving
-  parameters: PSF sigma, midtime, extfov margin.  These come from the per-image instrument
+  parameters: PSF sigma, midtime, extfov margin. These come from the per-image instrument
   spec rather than the YAML.
 
 :func:`~nav.nav_orchestrator.instrument_config.instrument_settings_from_obs` reads the
 slow-moving keys off the per-camera YAML block and returns a populated
-:class:`~nav.nav_orchestrator.instrument_config.InstrumentSettings`.  The orchestrator
+:class:`~nav.nav_orchestrator.instrument_config.InstrumentSettings`. The orchestrator
 calls it once per observation in ``_make_context`` and the result is consumed by:
 
 - :class:`~nav.nav_orchestrator.image_classifier.NavImageClassifier` (via the
@@ -68,24 +68,24 @@ Configuration
 The per-instrument YAML schema consumed by
 :func:`~nav.nav_orchestrator.instrument_config.instrument_settings_from_obs`:
 
-- ``data_units`` — str, one of ``'raw_dn'`` or ``'calibrated_if'``.  ``raw_dn`` exposes
+- ``data_units`` — str, one of ``'raw_dn'`` or ``'calibrated_if'``. ``raw_dn`` exposes
   pixels in raw counts; ``calibrated_if`` exposes pixels in calibrated I/F reflectance.
-- ``noise.saturation_dn`` — float, optional.  Per-instrument full-well DN.  Required for
+- ``noise.saturation_dn`` — float, optional. Per-instrument full-well DN. Required for
   ``raw_dn`` instruments; ``None`` for ``calibrated_if`` (where saturation cannot be
   identified post-CALIB).
-- ``noise.marker_value`` — int / float / str.  Missing-data sentinel value.  For raw
+- ``noise.marker_value`` — int / float / str. Missing-data sentinel value. For raw
   instruments typically 0; for calibrated-IF the literal ``"NaN"`` (or ``null``) becomes
   :class:`float` ``NaN``.
 - ``image_quality_thresholds`` — block consumed by
-  :class:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds`.  See
+  :class:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds`. See
   :doc:`dev_guide_orchestrator_image_classifier` for the field-by-field schema.
-- ``camera_rotation.fit_camera_rotation`` — bool, default ``False``.  When ``True`` every
-  technique adds in-plane camera rotation as a third parameter.  Cassini ISS / NHLORRI
+- ``camera_rotation.fit_camera_rotation`` — bool, default ``False``. When ``True`` every
+  technique adds in-plane camera rotation as a third parameter. Cassini ISS / NHLORRI
   default to ``False``; VGISS / GOSSI default to ``True``.
-- ``camera_rotation.max_rotation_deg`` — float, default ``5.0`` deg.  Maximum allowed
+- ``camera_rotation.max_rotation_deg`` — float, default ``5.0`` deg. Maximum allowed
   rotation magnitude when ``fit_camera_rotation`` is ``True``.
-- ``signal_dn_to_image_unit_scale`` — float, default ``1.0``.  Per-camera scale factor
-  converting an integrated DN signal into the image's native units.  ``1.0`` for
+- ``signal_dn_to_image_unit_scale`` — float, default ``1.0``. Per-camera scale factor
+  converting an integrated DN signal into the image's native units. ``1.0`` for
   ``raw_dn`` instruments; the per-camera CALIB-pipeline scale factor for
   ``calibrated_if`` instruments (typically of order :math:`10^{-7}` for Cassini ISS
   CALIB).
@@ -106,9 +106,9 @@ Public surface (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
   - :attr:`~nav.nav_orchestrator.instrument_config.InstrumentSettings.data_units` —
     ``'raw_dn'`` or ``'calibrated_if'``.
   - :attr:`~nav.nav_orchestrator.instrument_config.InstrumentSettings.saturation_dn` —
-    float or ``None``.  Saturation DN; ``None`` for calibrated-IF.
+    float or ``None``. Saturation DN; ``None`` for calibrated-IF.
   - :attr:`~nav.nav_orchestrator.instrument_config.InstrumentSettings.marker_value` —
-    float.  Missing-data sentinel.
+    float. Missing-data sentinel.
   - :attr:`~nav.nav_orchestrator.instrument_config.InstrumentSettings.thresholds` —
     :class:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds` for the
     classifier.
@@ -117,7 +117,7 @@ Public surface (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
   - :attr:`~nav.nav_orchestrator.instrument_config.InstrumentSettings.max_rotation_deg` —
     float.
   - :attr:`~nav.nav_orchestrator.instrument_config.InstrumentSettings.signal_dn_to_image_unit_scale`
-    — float.  Default ``1.0``.
+    — float. Default ``1.0``.
 
 - :func:`~nav.nav_orchestrator.instrument_config.instrument_settings_from_obs` — reads the
   per-camera YAML mapping off ``obs.inst_config`` and returns a populated
@@ -148,7 +148,8 @@ Examples
 
 **Voyager ISS.**  ``config_430_inst_vgiss.yaml`` declares
 ``camera_rotation.fit_camera_rotation: true`` and
-``camera_rotation.max_rotation_deg: 10.0``.  The orchestrator's per-image NavContext
+``camera_rotation.max_rotation_deg: 10.0``. The orchestrator's per-image
+:class:`~nav.nav_orchestrator.nav_context.NavContext`
 inherits ``fit_camera_rotation=True`` and every technique runs the 3-DoF path, so
 :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav` reports a 3x3 covariance
 on Voyager imagery.
