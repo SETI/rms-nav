@@ -42,15 +42,21 @@ Goal: understand the shared infrastructure every subsystem depends on
   citation policy.
 - :doc:`dev_guide_logging` — ``pdslogger`` usage, section conventions, and
   the rule against bare ``print``.
-- :mod:`nav.config` — config loader and module-level logger
-  (:mod:`nav.config.config`, :mod:`nav.config.logger`).
+- :mod:`nav.config` — config loader and module-level logger:
+
+  - :mod:`nav.config.config`
+  - :mod:`nav.config.logger`
+
 - ``src/nav/config_files/`` — the bundled YAML defaults (numeric-prefix load
   order); not autodoc'd since it is data, not code.
-- :mod:`nav.support` — cross-cutting helpers; start with
-  :mod:`nav.support.nav_base` (:class:`~nav.support.nav_base.NavBase`:
-  shared :attr:`~nav.support.nav_base.NavBase.config` +
-  :attr:`~nav.support.nav_base.NavBase.logger`) and
-  :mod:`nav.support.types`; the rest can be browsed on demand.
+- :mod:`nav.support` — cross-cutting helpers. Start with these two; the
+  rest can be browsed on demand:
+
+  - :mod:`nav.support.nav_base` —
+    :class:`~nav.support.nav_base.NavBase`, the shared base providing
+    :attr:`~nav.support.nav_base.NavBase.config` and
+    :attr:`~nav.support.nav_base.NavBase.logger`.
+  - :mod:`nav.support.types`
 
 Stage 3 — Inputs: datasets, observations, features
 ==================================================
@@ -64,24 +70,34 @@ that the rest of the pipeline consumes.
   per-instrument hierarchy, and the
   :class:`~nav.feature.feature.NavFeature` dataclass / feature-type
   taxonomy.
-- :mod:`nav.dataset` — file enumeration; the per-mission subclasses
-  (:mod:`nav.dataset.dataset_pds3_cassini_iss`,
-  :mod:`nav.dataset.dataset_pds3_voyager_iss`,
-  :mod:`nav.dataset.dataset_pds3_galileo_ssi`,
-  :mod:`nav.dataset.dataset_pds3_newhorizons_lorri`,
-  :mod:`nav.dataset.dataset_pds4`) share the
-  :class:`~nav.dataset.dataset.DataSet` /
-  :class:`~nav.dataset.dataset_pds3.DataSetPDS3` bases.
-- :mod:`nav.obs` — observation wrappers; the per-instrument
-  :class:`~nav.obs.obs_inst.ObsInst` subclasses
-  (:mod:`nav.obs.obs_inst_cassini_iss`, :mod:`nav.obs.obs_inst_voyager_iss`,
-  :mod:`nav.obs.obs_inst_galileo_ssi`,
-  :mod:`nav.obs.obs_inst_newhorizons_lorri`) share the
-  :class:`~nav.obs.obs_snapshot_inst.ObsSnapshotInst` base.
-- :mod:`nav.feature` — :mod:`nav.feature.feature` plus its
-  :mod:`~nav.feature.geometry`, :mod:`~nav.feature.flags`,
-  :mod:`~nav.feature.composition`, and :mod:`~nav.feature.reliability`
-  helpers and the :mod:`~nav.feature.feature_type` taxonomy.
+- :mod:`nav.dataset` — file enumeration. The per-mission subclasses
+  share the :class:`~nav.dataset.dataset.DataSet` /
+  :class:`~nav.dataset.dataset_pds3.DataSetPDS3` bases:
+
+  - :mod:`nav.dataset.dataset_pds3_cassini_iss`
+  - :mod:`nav.dataset.dataset_pds3_voyager_iss`
+  - :mod:`nav.dataset.dataset_pds3_galileo_ssi`
+  - :mod:`nav.dataset.dataset_pds3_newhorizons_lorri`
+  - :mod:`nav.dataset.dataset_pds4`
+
+- :mod:`nav.obs` — observation wrappers. The per-instrument
+  :class:`~nav.obs.obs_inst.ObsInst` subclasses share the
+  :class:`~nav.obs.obs_snapshot_inst.ObsSnapshotInst` base:
+
+  - :mod:`nav.obs.obs_inst_cassini_iss`
+  - :mod:`nav.obs.obs_inst_voyager_iss`
+  - :mod:`nav.obs.obs_inst_galileo_ssi`
+  - :mod:`nav.obs.obs_inst_newhorizons_lorri`
+
+- :mod:`nav.feature`:
+
+  - :mod:`nav.feature.feature` — the :class:`~nav.feature.feature.NavFeature`
+    dataclass itself.
+  - :mod:`nav.feature.feature_type` — the feature-type taxonomy.
+  - :mod:`nav.feature.geometry`
+  - :mod:`nav.feature.flags`
+  - :mod:`nav.feature.composition`
+  - :mod:`nav.feature.reliability`
 
 Stage 4 — First end-to-end pipeline: ``NavModelBody`` + ``BodyLimbNav``
 =======================================================================
@@ -100,10 +116,12 @@ Model
 
 - :doc:`dev_guide_navigation_models` — what a
   :class:`~nav.nav_model.nav_model.NavModel` is and the three methods
-  every subclass implements
-  (:meth:`~nav.nav_model.nav_model.NavModel.create_model`,
-  :meth:`~nav.nav_model.nav_model.NavModel.to_features`,
-  :meth:`~nav.nav_model.nav_model.NavModel.to_annotations`).
+  every subclass implements:
+
+  - :meth:`~nav.nav_model.nav_model.NavModel.create_model`
+  - :meth:`~nav.nav_model.nav_model.NavModel.to_features`
+  - :meth:`~nav.nav_model.nav_model.NavModel.to_annotations`
+
 - :doc:`dev_guide_navigation_models_bodies` — the body-model family.
 - :doc:`dev_guide_navigation_models_body` —
   :class:`~nav.nav_model.nav_model_body.NavModelBody` in detail.
@@ -133,7 +151,8 @@ Technique
   (:class:`~nav.nav_technique.nav_technique.NavTechnique`).
 - :mod:`nav.nav_technique.dt_fitting` — shared DT-fitting helpers.
 - :mod:`nav.nav_technique.nav_technique_body_limb` — the technique
-  implementation (:class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav`).
+  implementation
+  (:class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav`).
 
 Orchestrator (minimum slice)
 ----------------------------
@@ -148,11 +167,12 @@ Orchestrator (minimum slice)
   covered in Stage 5.)
 - :doc:`dev_guide_orchestrator_nav_result` — the final per-image result
   envelope (:class:`~nav.nav_orchestrator.nav_result.NavResult`).
-- :mod:`nav.nav_orchestrator` — read
-  :mod:`~nav.nav_orchestrator.nav_context`,
-  :mod:`~nav.nav_orchestrator.orchestrator`, and
-  :mod:`~nav.nav_orchestrator.nav_result` first; the rest are picked up
-  in Stage 5.
+- :mod:`nav.nav_orchestrator` — read these three first; the rest are
+  picked up in Stage 5:
+
+  - :mod:`nav.nav_orchestrator.nav_context`
+  - :mod:`nav.nav_orchestrator.orchestrator`
+  - :mod:`nav.nav_orchestrator.nav_result`
 
 Output: annotations, metadata, summary PNG, top-level driver
 ------------------------------------------------------------
@@ -161,11 +181,13 @@ Output: annotations, metadata, summary PNG, top-level driver
 - :doc:`dev_guide_orchestrator_curator` — projecting
   :class:`~nav.nav_orchestrator.nav_result.NavResult` into the JSON
   metadata block.
-- :mod:`nav.annotation` — annotation primitives
-  (:mod:`~nav.annotation.annotation`,
-  :mod:`~nav.annotation.annotations`,
-  :mod:`~nav.annotation.annotation_text_info`) and combine logic
-  (:meth:`~nav.annotation.annotations.Annotations.combine`).
+- :mod:`nav.annotation` — annotation primitives, plus combine logic
+  (:meth:`~nav.annotation.annotations.Annotations.combine`):
+
+  - :mod:`nav.annotation.annotation`
+  - :mod:`nav.annotation.annotations`
+  - :mod:`nav.annotation.annotation_text_info`
+
 - :mod:`nav.nav_orchestrator.curator` — the metadata-dict builder
   (:func:`~nav.nav_orchestrator.curator.build_metadata_dict`).
 - :mod:`nav.navigate_image_files` — the top-level per-image driver
@@ -198,18 +220,24 @@ orchestrator returns.
   carried through the pipeline.
 - :doc:`dev_guide_orchestrator_feature_summary` — the per-image
   feature-summary dataclass.
-- Technique-side helpers: :mod:`nav.nav_technique.feasibility`,
-  :mod:`nav.nav_technique.confidence`,
-  :mod:`nav.nav_technique.confidence_config`,
-  :mod:`nav.nav_technique.diagnostics`,
-  :mod:`nav.nav_technique.technique_result`.
-- Orchestrator-side helpers: :mod:`nav.nav_orchestrator.ensemble`,
-  :mod:`nav.nav_orchestrator.image_classifier`,
-  :mod:`nav.nav_orchestrator.image_classifier_result`,
-  :mod:`nav.nav_orchestrator.instrument_config`,
-  :mod:`nav.nav_orchestrator.provenance`,
-  :mod:`nav.nav_orchestrator.feature_summary`,
-  :mod:`nav.nav_orchestrator.status_reason_info`.
+- Technique-side helpers:
+
+  - :mod:`nav.nav_technique.feasibility`
+  - :mod:`nav.nav_technique.confidence`
+  - :mod:`nav.nav_technique.confidence_config`
+  - :mod:`nav.nav_technique.diagnostics`
+  - :mod:`nav.nav_technique.technique_result`
+
+- Orchestrator-side helpers:
+
+  - :mod:`nav.nav_orchestrator.ensemble`
+  - :mod:`nav.nav_orchestrator.image_classifier`
+  - :mod:`nav.nav_orchestrator.image_classifier_result`
+  - :mod:`nav.nav_orchestrator.instrument_config`
+  - :mod:`nav.nav_orchestrator.provenance`
+  - :mod:`nav.nav_orchestrator.feature_summary`
+  - :mod:`nav.nav_orchestrator.status_reason_info`
+
 - :mod:`nav.support.status_reason` — the shared status-reason enum.
 
 Stage 6 — Remaining models and their techniques
@@ -228,16 +256,19 @@ Rings (model + ring techniques)
   :class:`~nav.nav_model.nav_model_rings.NavModelRings` in detail.
 - :doc:`dev_guide_techniques_ring_edge` — the ring-edge DT technique.
 - :doc:`dev_guide_techniques_ring_annulus` — the ring-annulus technique.
-- :mod:`nav.nav_model.nav_model_rings_base`,
-  :mod:`nav.nav_model.nav_model_rings`, and the :mod:`nav.nav_model.rings`
-  subpackage (:mod:`~nav.nav_model.rings.ring_math`,
-  :mod:`~nav.nav_model.rings.ring_filter`,
-  :mod:`~nav.nav_model.rings.ring_render_context`,
-  :mod:`~nav.nav_model.rings.ring_render_result`,
-  :mod:`~nav.nav_model.rings.ring_types`,
-  :mod:`~nav.nav_model.rings.ring_feature`).
-- :mod:`nav.nav_technique.nav_technique_ring_edge`,
-  :mod:`nav.nav_technique.nav_technique_ring_annulus`.
+- :mod:`nav.nav_model.nav_model_rings_base`
+- :mod:`nav.nav_model.nav_model_rings`
+- :mod:`nav.nav_model.rings` subpackage:
+
+  - :mod:`nav.nav_model.rings.ring_math`
+  - :mod:`nav.nav_model.rings.ring_filter`
+  - :mod:`nav.nav_model.rings.ring_render_context`
+  - :mod:`nav.nav_model.rings.ring_render_result`
+  - :mod:`nav.nav_model.rings.ring_types`
+  - :mod:`nav.nav_model.rings.ring_feature`
+
+- :mod:`nav.nav_technique.nav_technique_ring_edge`
+- :mod:`nav.nav_technique.nav_technique_ring_annulus`
 
 Body (additional techniques)
 ----------------------------
@@ -247,9 +278,9 @@ Body (additional techniques)
 - :doc:`dev_guide_techniques_body_blob` — small / unresolved body
   navigation.
 - :doc:`dev_guide_techniques_body_disc` — full-disc correlation.
-- :mod:`nav.nav_technique.nav_technique_body_terminator`,
-  :mod:`nav.nav_technique.nav_technique_body_blob`,
-  :mod:`nav.nav_technique.nav_technique_body_disc`.
+- :mod:`nav.nav_technique.nav_technique_body_terminator`
+- :mod:`nav.nav_technique.nav_technique_body_blob`
+- :mod:`nav.nav_technique.nav_technique_body_disc`
 
 Titan (model only)
 ------------------
@@ -258,7 +289,7 @@ Titan (model only)
 - :doc:`dev_guide_navigation_models_titan` —
   :class:`~nav.nav_model.nav_model_titan.NavModelTitan` (registered
   placeholder; emits no features pending a haze-aware extractor).
-- :mod:`nav.nav_model.nav_model_titan`.
+- :mod:`nav.nav_model.nav_model_titan`
 
 Stars (model + star techniques)
 -------------------------------
@@ -272,24 +303,28 @@ Stars (model + star techniques)
   existing prior.
 - :doc:`dev_guide_techniques_star_field` — full star-field correlation.
 - :mod:`nav.nav_model.stars` subpackage:
-  :mod:`~nav.nav_model.stars.catalog`,
-  :mod:`~nav.nav_model.stars.detection`,
-  :mod:`~nav.nav_model.stars.predicted_snr`,
-  :mod:`~nav.nav_model.stars.smeared_psf`,
-  :mod:`~nav.nav_model.stars.conflicts`,
-  :mod:`~nav.nav_model.stars.nav_model_stars`.
-- :mod:`nav.nav_technique.nav_technique_star_unique_match`,
-  :mod:`nav.nav_technique.nav_technique_star_refine`,
-  :mod:`nav.nav_technique.nav_technique_star_field`. The shared
-  ``_star_helpers`` module is internal and not part of the autodoc API.
+
+  - :mod:`nav.nav_model.stars.catalog`
+  - :mod:`nav.nav_model.stars.detection`
+  - :mod:`nav.nav_model.stars.predicted_snr`
+  - :mod:`nav.nav_model.stars.smeared_psf`
+  - :mod:`nav.nav_model.stars.conflicts`
+  - :mod:`nav.nav_model.stars.nav_model_stars`
+
+- :mod:`nav.nav_technique.nav_technique_star_unique_match`
+- :mod:`nav.nav_technique.nav_technique_star_refine`
+- :mod:`nav.nav_technique.nav_technique_star_field`
+- The shared ``_star_helpers`` module is internal and not part of the
+  autodoc API.
 
 Manual
 ------
 
 - :doc:`dev_guide_techniques_manual` — the interactive PyQt6 driver.
-- :mod:`nav.nav_technique.nav_technique_manual`.
-- :mod:`nav.ui.manual_nav_dialog` plus :mod:`nav.ui.library_entry` (the
-  ``nav.ui.common`` module is internal and not autodoc'd).
+- :mod:`nav.nav_technique.nav_technique_manual`
+- :mod:`nav.ui.manual_nav_dialog`
+- :mod:`nav.ui.library_entry`
+- The ``nav.ui.common`` module is internal and not autodoc'd.
 
 Stage 7 — Simulated images
 ==========================
@@ -302,10 +337,14 @@ sibling of each model family. These are used both by
 - :doc:`dev_guide_navigation_models_ring_simulated`
 - :doc:`dev_guide_navigation_models_titan_simulated`
 - :doc:`dev_guide_navigation_models_star_simulated`
-- :mod:`nav.nav_model.nav_model_body_simulated`,
-  :mod:`nav.nav_model.nav_model_rings_simulated`.
-- :mod:`nav.sim` — the synthetic-image renderer (:mod:`~nav.sim.render`,
-  :mod:`~nav.sim.sim_body`, :mod:`~nav.sim.sim_ring`).
+- :mod:`nav.nav_model.nav_model_body_simulated`
+- :mod:`nav.nav_model.nav_model_rings_simulated`
+- :mod:`nav.sim` — the synthetic-image renderer:
+
+  - :mod:`nav.sim.render`
+  - :mod:`nav.sim.sim_body`
+  - :mod:`nav.sim.sim_ring`
+
 - ``src/nav/dataset/dataset_sim.py`` and ``src/nav/obs/obs_inst_sim.py``
   — the simulated-image dataset and observation wrappers (not autodoc'd).
 
@@ -329,15 +368,17 @@ Stage 9 — Downstream products
 Goal: understand the products built on top of a navigated image —
 mosaics / reprojections, per-pixel backplanes, and PDS4 bundles.
 
-- :doc:`dev_guide_reprojection` — body and ring mosaicing,
-  :mod:`~nav.reproj.bodies` (``BodyMosaic``),
-  :mod:`~nav.reproj.rings` (``RingMosaic``),
-  :mod:`~nav.reproj.cartographic_model`
-  (:func:`~nav.reproj.cartographic_model.create_cartographic_model`),
-  and the thread-safety constraints.
-- :mod:`nav.reproj` — reprojection core (also
-  :mod:`~nav.reproj.photometric_model`,
-  :mod:`~nav.reproj.ring_orbit_model`).
+- :doc:`dev_guide_reprojection` — body and ring mosaicing plus the
+  thread-safety constraints.
+- :mod:`nav.reproj` — reprojection core:
+
+  - :mod:`nav.reproj.bodies` — ``BodyMosaic``.
+  - :mod:`nav.reproj.rings` — ``RingMosaic``.
+  - :mod:`nav.reproj.cartographic_model` —
+    :func:`~nav.reproj.cartographic_model.create_cartographic_model`.
+  - :mod:`nav.reproj.photometric_model`
+  - :mod:`nav.reproj.ring_orbit_model`
+
 - ``src/reproj_cli/`` — CLI-only helpers shared by the mosaic drivers
   (not part of the importable ``nav`` API and not autodoc'd).
 - :doc:`dev_guide_backplanes` — per-pixel geometry product generation.
@@ -360,8 +401,11 @@ conventions land on top of a working mental model of the code.
   mypy expectations, commit conventions.
 - ``src/main/`` — CLI dispatch modules for every entry point listed in
   ``[project.scripts]`` (not autodoc'd).
-- :mod:`nav.ui.mosaic_viewer.projections`,
-  :mod:`nav.ui.mosaic_viewer.sphere_render`,
-  :mod:`nav.ui.mosaic_viewer.graticule` — the PyQt6 mosaic viewer; read
-  after :mod:`nav.ui.manual_nav_dialog` from Stage 6.
+- The PyQt6 mosaic viewer; read after :mod:`nav.ui.manual_nav_dialog`
+  from Stage 6:
+
+  - :mod:`nav.ui.mosaic_viewer.projections`
+  - :mod:`nav.ui.mosaic_viewer.sphere_render`
+  - :mod:`nav.ui.mosaic_viewer.graticule`
+
 - :doc:`/contributing` — the contributor checklist that gates every PR.
