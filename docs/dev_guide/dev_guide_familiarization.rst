@@ -22,8 +22,6 @@ top-level architecture. Skim only — do not try to absorb every detail.
 
 - ``README.md`` — PyPI-facing summary of what ``rms-nav`` is and the
   installation / quick-start commands.
-- ``CLAUDE.md`` — repository-wide engineering brief (pipeline stages, project
-  conventions, gotchas).
 - :doc:`dev_guide_introduction` — environment variables, CLI entry points,
   test / lint / docs commands, CI / release process.
 - :doc:`dev_guide_navigation_overview` — the six-subsystem architectural
