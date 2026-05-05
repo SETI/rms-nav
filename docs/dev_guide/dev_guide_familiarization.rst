@@ -246,49 +246,6 @@ and every other technique. Each subsection pairs a model with the
 techniques that consume its features, in roughly increasing order of
 complexity.
 
-Rings (model + ring techniques)
--------------------------------
-
-- :doc:`dev_guide_navigation_models_rings` — the ring-model family.
-- :doc:`dev_guide_navigation_models_ring` —
-  :class:`~nav.nav_model.nav_model_rings.NavModelRings` in detail.
-- :doc:`dev_guide_techniques_ring_edge` — the ring-edge DT technique.
-- :doc:`dev_guide_techniques_ring_annulus` — the ring-annulus technique.
-- :mod:`nav.nav_model.nav_model_rings_base`
-- :mod:`nav.nav_model.nav_model_rings`
-- :mod:`nav.nav_model.rings` subpackage:
-
-  - :mod:`nav.nav_model.rings.ring_math`
-  - :mod:`nav.nav_model.rings.ring_filter`
-  - :mod:`nav.nav_model.rings.ring_render_context`
-  - :mod:`nav.nav_model.rings.ring_render_result`
-  - :mod:`nav.nav_model.rings.ring_types`
-  - :mod:`nav.nav_model.rings.ring_feature`
-
-- :mod:`nav.nav_technique.nav_technique_ring_edge`
-- :mod:`nav.nav_technique.nav_technique_ring_annulus`
-
-Body (additional techniques)
-----------------------------
-
-- :doc:`dev_guide_techniques_body_terminator` — illuminated-body
-  terminator fitting (DT pipeline).
-- :doc:`dev_guide_techniques_body_blob` — small / unresolved body
-  navigation.
-- :doc:`dev_guide_techniques_body_disc` — full-disc correlation.
-- :mod:`nav.nav_technique.nav_technique_body_terminator`
-- :mod:`nav.nav_technique.nav_technique_body_blob`
-- :mod:`nav.nav_technique.nav_technique_body_disc`
-
-Titan (model only)
-------------------
-
-- :doc:`dev_guide_navigation_models_titans` — the Titan family.
-- :doc:`dev_guide_navigation_models_titan` —
-  :class:`~nav.nav_model.nav_model_titan.NavModelTitan` (registered
-  placeholder; emits no features pending a haze-aware extractor).
-- :mod:`nav.nav_model.nav_model_titan`
-
 Stars (model + star techniques)
 -------------------------------
 
@@ -315,6 +272,49 @@ Stars (model + star techniques)
 - The shared ``_star_helpers`` module is internal and not part of the
   autodoc API.
 
+Body (additional techniques)
+----------------------------
+
+- :doc:`dev_guide_techniques_body_terminator` — illuminated-body
+  terminator fitting (DT pipeline).
+- :doc:`dev_guide_techniques_body_blob` — small / unresolved body
+  navigation.
+- :doc:`dev_guide_techniques_body_disc` — full-disc correlation.
+- :mod:`nav.nav_technique.nav_technique_body_terminator`
+- :mod:`nav.nav_technique.nav_technique_body_blob`
+- :mod:`nav.nav_technique.nav_technique_body_disc`
+
+Rings (model + ring techniques)
+-------------------------------
+
+- :doc:`dev_guide_navigation_models_rings` — the ring-model family.
+- :doc:`dev_guide_navigation_models_ring` —
+  :class:`~nav.nav_model.nav_model_rings.NavModelRings` in detail.
+- :doc:`dev_guide_techniques_ring_edge` — the ring-edge DT technique.
+- :doc:`dev_guide_techniques_ring_annulus` — the ring-annulus technique.
+- :mod:`nav.nav_model.nav_model_rings_base`
+- :mod:`nav.nav_model.nav_model_rings`
+- :mod:`nav.nav_model.rings` subpackage:
+
+  - :mod:`nav.nav_model.rings.ring_math`
+  - :mod:`nav.nav_model.rings.ring_filter`
+  - :mod:`nav.nav_model.rings.ring_render_context`
+  - :mod:`nav.nav_model.rings.ring_render_result`
+  - :mod:`nav.nav_model.rings.ring_types`
+  - :mod:`nav.nav_model.rings.ring_feature`
+
+- :mod:`nav.nav_technique.nav_technique_ring_edge`
+- :mod:`nav.nav_technique.nav_technique_ring_annulus`
+
+Titan (model only)
+------------------
+
+- :doc:`dev_guide_navigation_models_titans` — the Titan family.
+- :doc:`dev_guide_navigation_models_titan` —
+  :class:`~nav.nav_model.nav_model_titan.NavModelTitan` (registered
+  placeholder; emits no features pending a haze-aware extractor).
+- :mod:`nav.nav_model.nav_model_titan`
+
 Manual
 ------
 
@@ -331,10 +331,10 @@ Goal: understand the synthetic-image renderer and the simulated-image
 sibling of each model family. These are used both by
 ``nav_create_simulated_image`` and by tests.
 
+- :doc:`dev_guide_navigation_models_star_simulated`
 - :doc:`dev_guide_navigation_models_body_simulated`
 - :doc:`dev_guide_navigation_models_ring_simulated`
 - :doc:`dev_guide_navigation_models_titan_simulated`
-- :doc:`dev_guide_navigation_models_star_simulated`
 - :mod:`nav.nav_model.nav_model_body_simulated`
 - :mod:`nav.nav_model.nav_model_rings_simulated`
 - :mod:`nav.sim` — the synthetic-image renderer:
