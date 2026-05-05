@@ -115,7 +115,14 @@ def _apply_photometry(obj, kind, mode):
 
 
 def _compatibility_errors(obj1, kind1, path1, obj2, kind2, path2):
-    """Return a list of compatibility problem strings (empty = fully compatible)."""
+    """Return a list of compatibility problem strings (empty = fully compatible).
+
+    For body mosaics, a shape mismatch is NOT flagged here because both files
+    share a global lat/lon grid anchored at -pi/2 / 0; the caller is expected
+    to crop both to their physical overlap via :func:`_align_body_mosaics`.
+    A shape mismatch on a ring mosaic is still a hard incompatibility because
+    the ring-radius sampling and the longitude_antimask are file-specific.
+    """
     cat1 = 'ring' if kind1.startswith('ring') else 'body'
     cat2 = 'ring' if kind2.startswith('ring') else 'body'
     if cat1 != cat2:
@@ -142,6 +149,8 @@ def _compatibility_errors(obj1, kind1, path1, obj2, kind2, path2):
             errors.append(f'radius_inner: {obj1.radius_inner} vs {obj2.radius_inner}')
         if not math.isclose(obj1.radius_outer, obj2.radius_outer, rel_tol=1e-6):
             errors.append(f'radius_outer: {obj1.radius_outer} vs {obj2.radius_outer}')
+        if obj1.img.shape != obj2.img.shape:
+            errors.append(f'image shape: {obj1.img.shape} vs {obj2.img.shape}')
     else:
         if not math.isclose(obj1.lat_resolution, obj2.lat_resolution, rel_tol=1e-6):
             errors.append(f'lat_resolution: {obj1.lat_resolution} vs {obj2.lat_resolution}')
@@ -152,10 +161,108 @@ def _compatibility_errors(obj1, kind1, path1, obj2, kind2, path2):
         if obj1.lon_direction != obj2.lon_direction:
             errors.append(f'lon_direction: {obj1.lon_direction!r} vs {obj2.lon_direction!r}')
 
-    if obj1.img.shape != obj2.img.shape:
-        errors.append(f'image shape: {obj1.img.shape} vs {obj2.img.shape}')
-
     return errors
+
+
+def _body_overlap_range(obj1, obj2):
+    """Return the lat/lon intersection of two body mosaics, or None if disjoint.
+
+    Both mosaics are anchored to the same global grid (-pi/2 step
+    ``lat_resolution`` for latitude, 0 step ``lon_resolution`` for longitude),
+    so the lat_range / lon_range bounds are integer multiples of the
+    resolution and a simple per-axis ``max(min, ...)`` / ``min(max, ...)``
+    intersection is well-defined.
+    """
+    lat_min = max(obj1.lat_range[0], obj2.lat_range[0])
+    lat_max = min(obj1.lat_range[1], obj2.lat_range[1])
+    lon_min = max(obj1.lon_range[0], obj2.lon_range[0])
+    lon_max = min(obj1.lon_range[1], obj2.lon_range[1])
+
+    # Each cell covers one resolution-step; allow a half-cell tolerance before
+    # declaring "no overlap" to keep round-off-induced gaps from looking empty.
+    lat_tol = 0.5 * obj1.lat_resolution
+    lon_tol = 0.5 * obj1.lon_resolution
+    if lat_max < lat_min - lat_tol or lon_max < lon_min - lon_tol:
+        return None
+    return (lat_min, lat_max), (lon_min, lon_max)
+
+
+def _crop_body_mosaic(obj, lat_range, lon_range):
+    """Return a new ``BodyMosaicData`` cropped to the given lat/lon range.
+
+    The 2D fields (``img``, ``resolution``, ``eff_resolution``, ``phase``,
+    ``emission``, ``incidence``, ``time``, ``image_number``) are sliced in
+    place; the ``lat_range`` / ``lon_range`` metadata is updated to reflect
+    the actual extent of the surviving rows/columns. All other fields
+    (per-image arrays, ``contributing_image_names``, dtypes, etc.) are
+    carried through unchanged.
+    """
+    lat_res = obj.lat_resolution
+    lon_res = obj.lon_resolution
+
+    r0 = int(round((lat_range[0] - obj.lat_range[0]) / lat_res))
+    r1 = int(round((lat_range[1] - obj.lat_range[0]) / lat_res)) + 1
+    c0 = int(round((lon_range[0] - obj.lon_range[0]) / lon_res))
+    c1 = int(round((lon_range[1] - obj.lon_range[0]) / lon_res)) + 1
+
+    n_rows, n_cols = obj.img.shape
+    r0 = max(0, min(r0, n_rows))
+    r1 = max(r0, min(r1, n_rows))
+    c0 = max(0, min(c0, n_cols))
+    c1 = max(c0, min(c1, n_cols))
+
+    sl = (slice(r0, r1), slice(c0, c1))
+    new_lat_range = (
+        obj.lat_range[0] + r0 * lat_res,
+        obj.lat_range[0] + (r1 - 1) * lat_res,
+    )
+    new_lon_range = (
+        obj.lon_range[0] + c0 * lon_res,
+        obj.lon_range[0] + (c1 - 1) * lon_res,
+    )
+    return dataclasses.replace(
+        obj,
+        img=obj.img[sl],
+        resolution=obj.resolution[sl],
+        eff_resolution=obj.eff_resolution[sl],
+        phase=obj.phase[sl],
+        emission=obj.emission[sl],
+        incidence=obj.incidence[sl],
+        time=obj.time[sl],
+        image_number=obj.image_number[sl],
+        lat_range=new_lat_range,
+        lon_range=new_lon_range,
+    )
+
+
+def _align_body_mosaics(obj1, obj2):
+    """Crop two body mosaics to their physical lat/lon overlap.
+
+    No-op when the inputs already share a shape and lat/lon range. Returns a
+    pair of ``BodyMosaicData`` instances (possibly the originals) whose 2D
+    arrays line up index-for-index in lat/lon space.
+
+    Raises:
+        ValueError: If the two mosaics do not overlap in lat/lon.
+    """
+    if (
+        obj1.img.shape == obj2.img.shape
+        and obj1.lat_range == obj2.lat_range
+        and obj1.lon_range == obj2.lon_range
+    ):
+        return obj1, obj2
+
+    overlap = _body_overlap_range(obj1, obj2)
+    if overlap is None:
+        raise ValueError(
+            f'Body mosaics do not overlap: '
+            f'lat {obj1.lat_range} vs {obj2.lat_range}, '
+            f'lon {obj1.lon_range} vs {obj2.lon_range}'
+        )
+    lat_range, lon_range = overlap
+    return _crop_body_mosaic(obj1, lat_range, lon_range), _crop_body_mosaic(
+        obj2, lat_range, lon_range
+    )
 
 
 def _compute_stats(arr, extra_mask=None):
@@ -288,6 +395,26 @@ def main():
                 raise ValueError(msg)
         else:
             print('Compatibility: OK')
+
+        # Body mosaics are routinely cropped to their per-file data extent on
+        # save (BodyMosaic.to_bounded), so two mosaics of the same body at the
+        # same resolution can have different shapes. They share a global grid,
+        # so align them on the physical lat/lon overlap before comparing.
+        if (
+            kind1 == 'body_mosaic'
+            and kind2 == 'body_mosaic'
+            and (obj1.img.shape != obj2.img.shape or obj1.lat_range != obj2.lat_range
+                 or obj1.lon_range != obj2.lon_range)
+        ):
+            obj1, obj2 = _align_body_mosaics(obj1, obj2)
+            print(
+                f'Aligned to lat/lon overlap: '
+                f'lat=[{math.degrees(obj1.lat_range[0]):.3f},'
+                f'{math.degrees(obj1.lat_range[1]):.3f}] deg, '
+                f'lon=[{math.degrees(obj1.lon_range[0]):.3f},'
+                f'{math.degrees(obj1.lon_range[1]):.3f}] deg, '
+                f'shape: {obj1.img.shape}'
+            )
 
         print(f"Applying photometric mode: '{args.photometry}' ...")
         img1 = _apply_photometry(obj1, kind1, args.photometry)

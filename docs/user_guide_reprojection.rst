@@ -492,9 +492,9 @@ Offset application
 
 When ``--nav-results-root`` is provided, ``nav_mosaic`` looks up a
 ``_metadata.json`` file for each image (written by ``nav_offset``). If the
-file exists and has ``status == 'success'``, the stored ``(dv, du)`` offset is
+file exists and has ``status == 'ok'``, the stored ``(dv, du)`` offset is
 applied to the observation's FOV via ``oops.fov.OffsetFOV`` before reprojection.
-If the file is absent, invalid JSON, or has a non-success status, a warning is
+If the file is absent, invalid JSON, or has any other status, a warning is
 logged and uncorrected pointing is used.
 
 Output format

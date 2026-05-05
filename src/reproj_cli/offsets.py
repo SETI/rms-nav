@@ -100,7 +100,7 @@ def load_offset_if_any(
 
     Returns:
         ``(dv, du)`` as floats when the metadata file exists, is valid JSON,
-        and has ``status == 'success'`` with a non-null ``offset`` field.
+        and has ``status == 'ok'`` with a non-null ``offset`` field.
         Returns ``None`` (with a warning) in all other cases, including when
         ``results_path_stub`` would resolve outside ``nav_results_root``.
     """
@@ -148,7 +148,7 @@ def load_offset_if_any(
         return None
 
     status = nav_metadata.get('status')
-    if status != 'success':
+    if status != 'ok':
         MAIN_LOGGER.warning(
             'Nav metadata for %s has status=%r; using uncorrected pointing.',
             image_file.image_file_url,

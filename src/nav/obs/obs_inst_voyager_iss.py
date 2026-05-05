@@ -10,6 +10,13 @@ from nav.support.types import PathLike
 
 from .obs_snapshot_inst import ObsSnapshotInst
 
+# The Voyager 1 SEDR/PDS3 calibration pipeline always computed I/F as if the
+# image had been taken at Jupiter's heliocentric distance, so V1 @ Saturn
+# images come out too dim by (~9.54 / 5.20)**2.  Multiply by this factor to
+# recover Saturn-correct I/F.  V1 only visited Jupiter and Saturn, and V2 was
+# calibrated correctly at each of its encounters, so this is the only case.
+_V1_SATURN_IF_CORRECTION = 3.345
+
 
 class ObsVoyagerISS(ObsSnapshotInst):
     """Implements an observation of a Voyager ISS image.
@@ -55,9 +62,11 @@ class ObsVoyagerISS(ObsSnapshotInst):
         label3 = obs.dict['LABEL3'].replace('FOR (I/F)*10000., MULTIPLY DN VALUE BY', '')
         factor = float(label3)
         obs.data = obs.data * factor / 10000
-        # TODO Beware - Voyager 1 @ Saturn requires data to be multiplied by 3.345
-        # because the Voyager 1 calibration pipeline always assumes the image
-        # was taken at Jupiter.
+
+        if obs.dict['LAB02'][4] == '1' and obs.planet.upper() == 'SATURN':
+            obs.data = obs.data * _V1_SATURN_IF_CORRECTION
+            logger.debug('  Applied Voyager 1 @ Saturn I/F correction: %.4fx',
+                         _V1_SATURN_IF_CORRECTION)
         # TODO Calibrate once oops.hosts is fixed.
 
         if extfov_margin_vu is None:
