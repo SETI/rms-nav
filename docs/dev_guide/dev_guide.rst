@@ -9,6 +9,7 @@ This guide is intended for developers who want to understand, modify, or extend 
    :caption: Developer Guide Contents:
 
    dev_guide_introduction
+   dev_guide_familiarization
    dev_guide_navigation
    dev_guide_reprojection
    dev_guide_backplanes
