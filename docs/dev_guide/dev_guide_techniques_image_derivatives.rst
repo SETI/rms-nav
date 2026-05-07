@@ -166,7 +166,7 @@ Source files:
   three ``DEFAULT_*`` module constants.
 - ``src/nav/support/filters.py`` — the
   :class:`~nav.support.filters.NavFilterSpec` /
-  :data:`~nav.support.filters.NavFilterKind` machinery the DT step delegates into for the
+  :class:`~nav.support.filters.NavFilterKind` machinery the DT step delegates into for the
   truncated distance transform.
 
 Public surface (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):

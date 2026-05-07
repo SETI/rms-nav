@@ -93,7 +93,7 @@ audience and the consequence of the line, not the call site's depth:
   orchestrator's broad ``except Exception`` blocks around every model and technique
   callback. Carries a full Python traceback; the offending model or technique is
   treated as if it produced no output, the rest of the pipeline continues, and the
-  surfaced :class:`~nav.nav_orchestrator.nav_result.NavResult.status_reason` records
+  surfaced :attr:`~nav.nav_orchestrator.nav_result.NavResult.status_reason` records
   what fell over. Never raise EXCEPTION from non-orchestrator code; let the
   orchestrator's sandbox catch it.
 * **FATAL** — process-level failures (a corrupt config file, a missing kernel, an

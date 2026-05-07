@@ -370,8 +370,8 @@ mosaics / reprojections, per-pixel backplanes, and PDS4 bundles.
   thread-safety constraints.
 - :mod:`nav.reproj` — reprojection core:
 
-  - :mod:`nav.reproj.bodies` — ``BodyMosaic``.
-  - :mod:`nav.reproj.rings` — ``RingMosaic``.
+  - :mod:`nav.reproj.bodies` — :class:`~nav.reproj.bodies.BodyMosaic`.
+  - :mod:`nav.reproj.rings` — :class:`~nav.reproj.rings.RingMosaic`.
   - :mod:`nav.reproj.cartographic_model` —
     :func:`~nav.reproj.cartographic_model.create_cartographic_model`.
   - :mod:`nav.reproj.photometric_model`

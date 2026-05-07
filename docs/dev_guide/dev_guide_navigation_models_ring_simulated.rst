@@ -19,13 +19,13 @@ Theory
 ======
 
 Simulated ring rendering paints a stack of catalog-shaped ring edges onto an extended-FOV
-image plus mask using image-plane coordinates and operator-supplied shading. The same
-:class:`~nav.nav_model.rings.ring_feature.RingFeature` data model the catalog-driven path
-uses carries the per-edge metadata; only the rendering pipeline differs (pixel-space here
-vs. backplane-based for the real model).
+image plus mask using image-plane coordinates and operator-supplied shading. The
+:class:`~nav.nav_model.rings.ring_feature.RingFeature` data model carries the per-edge
+metadata exactly as in the catalog-driven path; only the rendering pipeline differs
+(pixel-space here vs. backplane-based for the real model).
 
 The rendered template is the
-:attr:`~nav.feature.feature_type.NavFeatureType.RING_ANNULUS` feature payload that
+:data:`~nav.feature.feature_type.NavFeatureType.RING_ANNULUS` feature payload that
 downstream techniques
 (:class:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav` is the primary
 consumer) navigate against. The simulated ring's geometry is operator-known by

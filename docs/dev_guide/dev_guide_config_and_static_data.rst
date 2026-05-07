@@ -293,7 +293,7 @@ additions need explicit ``_sources`` entries.
 Strip-rule guarantee
 --------------------
 
-:meth:`~nav.config.config.Config._load_yaml` strips every mapping key whose
+``Config._load_yaml`` strips every mapping key whose
 name starts with ``_`` before merging, so ``_sources`` blocks never appear in
 the parsed :class:`~nav.config.config.Config` object. The runtime accessors
 (``config.body_shape``, ``config.<camera>.mag_offset``, etc.) see only the
