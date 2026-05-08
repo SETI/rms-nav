@@ -1,6 +1,8 @@
 nav.obs
 =======
 
+.. automodule:: nav.obs
+
 .. automodule:: nav.obs.obs
    :members:
    :undoc-members:

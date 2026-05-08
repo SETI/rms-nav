@@ -1,6 +1,8 @@
 nav.reproj
 ==========
 
+.. automodule:: nav.reproj
+
 .. automodule:: nav.reproj.bodies
    :members:
    :undoc-members:

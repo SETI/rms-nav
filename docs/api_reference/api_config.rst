@@ -1,6 +1,8 @@
 nav.config
 ==========
 
+.. automodule:: nav.config
+
 .. automodule:: nav.config.config
    :members:
    :undoc-members:

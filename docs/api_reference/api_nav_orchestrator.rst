@@ -1,6 +1,8 @@
 nav.nav_orchestrator
 ====================
 
+.. automodule:: nav.nav_orchestrator
+
 .. automodule:: nav.nav_orchestrator.orchestrator
    :members:
    :undoc-members:

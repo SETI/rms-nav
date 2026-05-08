@@ -1,6 +1,8 @@
 nav.sim
 =======
 
+.. automodule:: nav.sim
+
 .. automodule:: nav.sim.render
    :members:
    :undoc-members:

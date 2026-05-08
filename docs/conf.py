@@ -96,7 +96,26 @@ intersphinx_mapping = {
     'numpy': ('https://numpy.org/doc/stable/', None),
     'matplotlib': ('https://matplotlib.org/stable/', None),
     'scipy': ('https://docs.scipy.org/doc/scipy/', None),
+    'filecache': ('https://rms-filecache.readthedocs.io/en/latest/', None),
+    'pdslogger': ('https://rms-pdslogger.readthedocs.io/en/latest/', None),
 }
+
+# Suppress nitpicky warnings for symbols that have no inventory we can link to:
+# third-party packages without Sphinx docs (oops), test modules excluded from
+# autodoc, sibling packages outside the importable nav API surface, typing
+# internals leaked by autodoc, and TypeVars / unqualified type aliases that
+# Sphinx does not register as cross-reference targets.
+nitpick_ignore_regex = [
+    (r'py:.*', r'oops\..*'),
+    (r'py:.*', r'tests\..*'),
+    (r'py:.*', r'backplanes\..*'),
+    (r'py:.*', r'pds4\..*'),
+    (r'py:.*', r'reproj_cli\..*'),
+    (r'py:.*', r'numpy\._typing\..*'),
+    (r'py:.*', r'argparse\._.*'),
+    (r'py:.*', r'nav\.support\.types\.NPType'),
+    (r'py:.*', r'nav\.ui\.mosaic_viewer\..*'),
+]
 
 # MyST-Parser settings
 myst_enable_extensions = [

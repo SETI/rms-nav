@@ -1,6 +1,8 @@
 nav.nav_model
 =============
 
+.. automodule:: nav.nav_model
+
 .. automodule:: nav.nav_model.nav_model
    :members:
    :undoc-members:
@@ -49,8 +51,7 @@ nav.nav_model
 nav.nav_model.rings
 -------------------
 
-The ``nav.nav_model.rings`` subpackage provides types, features, filters, and
-rendering support for planetary ring models.
+.. automodule:: nav.nav_model.rings
 
 .. automodule:: nav.nav_model.rings.ring_types
    :members:
@@ -85,9 +86,7 @@ rendering support for planetary ring models.
 nav.nav_model.stars
 -------------------
 
-The ``nav.nav_model.stars`` subpackage provides catalog reduction, conflict
-marking, predicted-SNR computation, smear-aware PSF rendering, and DAOPHOT-style
-detection support for the star navigation model.
+.. automodule:: nav.nav_model.stars
 
 .. automodule:: nav.nav_model.stars.nav_model_stars
    :members:
