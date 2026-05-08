@@ -24,6 +24,7 @@ from nav.nav_technique.nav_technique_body_limb import BodyLimbNav
 BodyLimbNav()  # populates BodyLimbNav.tuning via Config.read_config
 LIMB_MIN_ARC_PX = BodyLimbNav.tuning['min_arc_px']
 SPURIOUS_MIN_INLIER_FRACTION = BodyLimbNav.tuning['spurious_min_inlier_fraction']
+SPURIOUS_MAX_LM_DISPLACEMENT_PX = BodyLimbNav.tuning['spurious_max_lm_displacement_px']
 
 
 def test_body_limb_nav_recovers_planted_offset_single_body(
@@ -155,6 +156,47 @@ def test_body_limb_nav_at_edge_when_offset_hits_search_window(
     result = technique.navigate([feature], context)
     assert result.at_edge is True
     # Hard-zero gate via ``at_edge`` forces confidence to 0 per the spec.
+    assert result.confidence == pytest.approx(0.0, abs=1e-12)
+
+
+def test_body_limb_nav_at_edge_when_offset_walks_outside_search_window(
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_limb_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """LM converging at or beyond the extfov margin must register as at_edge.
+
+    ``ObsSnapshot.extract_offset_array`` cannot honour an offset whose
+    magnitude meets or exceeds the extfov margin without zero-filling
+    part of the overlay slice.  The technique must flag at_edge=True so
+    the ensemble can drop the result whenever an interior alternative
+    exists, and so downstream consumers know the offset is at the edge
+    of physically meaningful translations.
+
+    The LM is unconstrained and may either stop at the boundary or
+    walk past it; the regression we are guarding against is the
+    earlier check that only fired when the offset was *near* the
+    boundary within tolerance and missed offsets that overshot.
+    """
+    shape = (160, 160)
+    image_center = (80.0, 80.0)
+    radius = 25.0
+    image = disc_image(shape, image_center, radius)
+    margin_v, margin_u = 5, 10
+    # Plant the model far enough from the image centre that the
+    # converged offset reaches the V-axis margin in either direction.
+    model_center = (image_center[0] - 11.0, image_center[1] - 9.0)
+    vertices, outward = circle_polyline(model_center, radius, 120)
+    feature = make_limb_feature('past_edge_moon', vertices=vertices, outward_normals=outward)
+    technique = BodyLimbNav()
+    context = make_nav_context(image, extfov_margin_vu=(margin_v, margin_u))
+    result = technique.navigate([feature], context)
+    dv, _du = result.offset_px
+    at_edge_tolerance_px = float(technique._at_edge_tolerance_px)
+    # The fit converged at or past the V-axis margin (the regression case).
+    assert abs(dv) >= float(margin_v) - at_edge_tolerance_px
+    assert result.at_edge is True
     assert result.confidence == pytest.approx(0.0, abs=1e-12)
 
 
@@ -365,6 +407,63 @@ def test_body_limb_nav_3dof_at_edge_when_rotation_saturates(
     result = technique.navigate([feature], context)
     assert result.at_edge is True
     assert result.rotation_rad == pytest.approx(forged_rotation_rad)
+
+
+def test_body_limb_nav_marks_spurious_when_lm_walks_far_from_coarse_seed(
+    monkeypatch: pytest.MonkeyPatch,
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_limb_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """LM that walks multi-pixel from the integer coarse seed is spurious.
+
+    Models the production failure mode (Cassini Tethys N1574928113):
+    the coarse NCC search found the integer-precision basin (-1, 2)
+    correctly, but the LM followed a DT gradient out of that basin
+    onto a crater rim and converged at (6.66, 6.48) — a 9 px walk.
+    The result retained > 50 % of vertices as inliers, so the
+    inlier-fraction guard could not catch it.  The displacement
+    guard caps trustworthy LM motion to a few pixels around the
+    coarse seed.
+    """
+    from nav.nav_technique import dt_fitting, nav_technique_body_limb
+
+    shape = (200, 200)
+    # Plant the model centered on the image — coarse NCC will report
+    # offset (0, 0) for the test setup.
+    image = disc_image(shape, (100.0, 100.0), 30.0)
+    vertices, outward = circle_polyline((100.0, 100.0), 30.0, 200)
+    feature = make_limb_feature('walked_off', vertices=vertices, outward_normals=outward)
+    technique = BodyLimbNav()
+    context = make_nav_context(image)
+
+    # Healthy inlier fraction and low RMS, but LM moved far from the
+    # coarse seed; only the displacement guard should fire.
+    forged_displacement = float(SPURIOUS_MAX_LM_DISPLACEMENT_PX) + 5.0
+    forged_result = dt_fitting.LMRefineResult(
+        offset_vu=(forged_displacement, 0.0),
+        rotation_rad=0.0,
+        covariance=np.eye(2, dtype=np.float64) * 0.25,
+        residuals_px=np.zeros(vertices.shape[0], dtype=np.float64),
+        weights=np.ones(vertices.shape[0], dtype=np.float64),
+        rms_px=0.4,
+        iterations=8,
+        converged=True,
+        inlier_count=int(vertices.shape[0] * 0.6),
+    )
+    monkeypatch.setattr(
+        nav_technique_body_limb,
+        'lm_subpixel_refine',
+        lambda **_kwargs: forged_result,
+    )
+
+    result = technique.navigate([feature], context)
+    inlier_fraction = result.diagnostics.tukey_inlier_count / float(vertices.shape[0])
+    # Sanity-check the test setup: inlier-fraction guard would NOT fire.
+    assert inlier_fraction >= SPURIOUS_MIN_INLIER_FRACTION
+    # The LM displacement was forced beyond the configured threshold.
+    assert result.spurious is True
 
 
 def test_body_limb_nav_does_not_mark_spurious_when_inlier_fraction_healthy(

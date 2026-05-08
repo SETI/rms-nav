@@ -118,6 +118,69 @@ def test_ensemble_disagreement_yields_conflicted() -> None:
     assert result.confidence_rank == 'conflicted'
 
 
+def test_ensemble_pixel_floor_groups_crlb_tight_results_within_floor() -> None:
+    """CRLB-tight covariances disagreeing within the pixel floor still group.
+
+    Without the pixel-floor, two BodyDisc/Limb-class results reporting
+    sigmas ~0.001 px register as thousands of sigmas apart even when
+    their offsets agree to a few pixels — the production failure mode
+    that turned ``status=ok`` into ``status=conflicted`` for many real
+    images.  The default ``agreement_pixel_floor`` (5.0 px) recovers
+    the consensus in that regime.
+    """
+    cov_tight = np.eye(2, dtype=np.float64) * (1.0e-3) ** 2
+    cov_loose = np.eye(2, dtype=np.float64) * 0.15**2
+    disc = _make_result(
+        technique_name='BodyDiscCorrelateNav',
+        offset=(5.09, -6.95),
+        cov=cov_tight,
+        confidence=0.36,
+    )
+    limb = _make_result(
+        technique_name='BodyLimbNav',
+        offset=(8.65, -6.46),
+        cov=cov_loose,
+        confidence=0.46,
+    )
+    result = ensemble(
+        [disc, limb],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'ok'
+
+
+def test_ensemble_pixel_floor_disabled_falls_back_to_mahalanobis() -> None:
+    """Setting ``agreement_pixel_floor=0.0`` restores Mahalanobis-only grouping."""
+    cov_tight = np.eye(2, dtype=np.float64) * (1.0e-3) ** 2
+    a = _make_result(technique_name='TechniqueA', offset=(0.0, 0.0), cov=cov_tight, confidence=0.5)
+    b = _make_result(technique_name='TechniqueB', offset=(3.0, 0.0), cov=cov_tight, confidence=0.5)
+    result = ensemble(
+        [a, b],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+        config=EnsembleConfig(agreement_pixel_floor=0.0),
+    )
+    assert result.status == 'conflicted'
+
+
+def test_ensemble_pixel_floor_does_not_group_results_beyond_floor() -> None:
+    """Two CRLB-tight results disagreeing well beyond the floor still conflict."""
+    cov_tight = np.eye(2, dtype=np.float64) * (1.0e-3) ** 2
+    a = _make_result(technique_name='TechniqueA', offset=(0.0, 0.0), cov=cov_tight, confidence=0.5)
+    # 20 px apart — far beyond the default 5.0 px floor.
+    b = _make_result(technique_name='TechniqueB', offset=(20.0, 0.0), cov=cov_tight, confidence=0.5)
+    result = ensemble(
+        [a, b],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'conflicted'
+
+
 def test_ensemble_at_edge_dropped_when_interior_exists() -> None:
     """An at-edge result is dropped when an interior result exists."""
     a = _make_result(
@@ -347,6 +410,147 @@ def test_ensemble_3dof_with_rotation_unobservable_input() -> None:
     # The unobservable input pulls rotation only marginally toward zero;
     # the observable input dominates.
     assert abs(result.rotation_rad - 0.01) < 1e-3
+
+
+def _body_feature_result(
+    *,
+    technique_name: str,
+    feature_id: str,
+    offset: tuple[float, float] = (0.0, 0.0),
+    cov: np.ndarray | None = None,
+    confidence: float = 0.6,
+    spurious: bool = False,
+) -> NavTechniqueResult:
+    """Build a NavTechniqueResult with a body-feature-shaped feature_id.
+
+    Used by the fallback-tier filter tests so the body-name extraction
+    matches what the live emitters produce
+    (``<feature_kind>:<body_name>``).
+    """
+    if cov is None:
+        cov = np.eye(2, dtype=np.float64) * 0.25
+    return NavTechniqueResult(
+        technique_name=technique_name,
+        feature_ids=(feature_id,),
+        offset_px=offset,
+        covariance_px2=cov,
+        confidence=confidence,
+        spurious=spurious,
+        at_edge=False,
+        diagnostics=BodyLimbDiagnostics(),
+    )
+
+
+def test_ensemble_drops_terminator_when_limb_succeeds_for_same_body() -> None:
+    """Non-spurious BodyLimbNav supersedes BodyTerminatorNav on the same body.
+
+    On the bug image this prevented a mis-converged 25-px-off
+    terminator from out-voting a clean limb fit.
+    """
+    limb = _body_feature_result(
+        technique_name='BodyLimbNav',
+        feature_id='limb_arc:DIONE',
+        offset=(-5.0, -16.0),
+        confidence=0.5,
+    )
+    terminator = _body_feature_result(
+        technique_name='BodyTerminatorNav',
+        feature_id='terminator_arc:DIONE',
+        offset=(-5.0, -40.0),
+        confidence=0.7,
+    )
+    result = ensemble(
+        [limb, terminator],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'ok'
+    assert result.offset_px is not None
+    # The reported offset must come from limb, not the higher-confidence
+    # but mis-converged terminator.
+    assert abs(result.offset_px[1] - (-16.0)) < 1.0
+
+
+def test_ensemble_keeps_terminator_when_limb_is_spurious() -> None:
+    """A spurious primary does not supersede the fallback — terminator runs solo."""
+    limb = _body_feature_result(
+        technique_name='BodyLimbNav',
+        feature_id='limb_arc:DIONE',
+        offset=(-5.0, -16.0),
+        confidence=0.5,
+        spurious=True,
+    )
+    terminator = _body_feature_result(
+        technique_name='BodyTerminatorNav',
+        feature_id='terminator_arc:DIONE',
+        offset=(-5.0, -40.0),
+        confidence=0.7,
+    )
+    result = ensemble(
+        [limb, terminator],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'ok'
+    assert result.offset_px is not None
+    # Terminator is the only viable input; its offset is reported.
+    assert abs(result.offset_px[1] - (-40.0)) < 1.0
+
+
+def test_ensemble_keeps_terminator_for_different_body() -> None:
+    """Limb success on body A does not drop terminator on body B."""
+    limb = _body_feature_result(
+        technique_name='BodyLimbNav',
+        feature_id='limb_arc:DIONE',
+        offset=(-5.0, -16.0),
+        confidence=0.5,
+    )
+    terminator_other = _body_feature_result(
+        technique_name='BodyTerminatorNav',
+        feature_id='terminator_arc:RHEA',
+        offset=(20.0, 30.0),
+        confidence=0.7,
+    )
+    result = ensemble(
+        [limb, terminator_other],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    # Both results survive the fallback filter, end up in different
+    # agreement groups, and so the ensemble flags conflicted.
+    assert result.status in ('conflicted', 'ok')
+    # Cross-check by counting per-technique entries: both should be
+    # preserved on the NavResult for diagnostics.
+    names = {r.technique_name for r in result.per_technique}
+    assert names == {'BodyLimbNav', 'BodyTerminatorNav'}
+
+
+def test_ensemble_drops_blob_when_disc_succeeds_for_same_body() -> None:
+    """BodyBlobNav is also fallback — a non-spurious BodyDiscCorrelateNav supersedes it."""
+    disc = _body_feature_result(
+        technique_name='BodyDiscCorrelateNav',
+        feature_id='body_disc:MIMAS',
+        offset=(2.0, 3.0),
+        confidence=0.6,
+    )
+    blob = _body_feature_result(
+        technique_name='BodyBlobNav',
+        feature_id='body_blob:MIMAS',
+        offset=(20.0, 30.0),
+        confidence=0.4,
+    )
+    result = ensemble(
+        [disc, blob],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'ok'
+    assert result.offset_px is not None
+    assert abs(result.offset_px[0] - 2.0) < 1.0
 
 
 def test_ensemble_rejects_mixed_dof_inputs() -> None:

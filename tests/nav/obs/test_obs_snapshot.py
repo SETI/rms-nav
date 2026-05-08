@@ -1,5 +1,6 @@
 from typing import Any
 
+import numpy as np
 import oops
 import pytest
 from tests.config import (
@@ -170,3 +171,66 @@ def test_obs_snapshot_distance(obs_vgiss_io_01: obstvgiss.ObsVoyagerISS) -> None
     s = obs_snapshot.ObsSnapshot(obs_vgiss_io_01)
     assert s.sun_body_distance('JUPITER') == pytest.approx(797366152.953817)
     assert s.body_distance('IO') == pytest.approx(1338438.5304067382)
+
+
+def test_extract_offset_array_within_margin_returns_translated_slice(
+    obs_coiss_stars_01: obstcoiss.ObsCassiniISS,
+) -> None:
+    """In-bounds offset returns the appropriately translated slice."""
+    s = obs_snapshot.ObsSnapshot(obs_coiss_stars_01, extfov_margin_vu=(5, 10))
+    array = np.arange(s.extdata_shape_vu[0] * s.extdata_shape_vu[1], dtype=np.float64).reshape(
+        s.extdata_shape_vu
+    )
+    out = s.extract_offset_array(array, (2.0, -3.0))
+    expected = array[5 - 2 : 5 - 2 + 1024, 10 + 3 : 10 + 3 + 1024]
+    assert out.shape == (1024, 1024)
+    assert np.array_equal(out, expected)
+
+
+def test_extract_offset_array_offset_beyond_margin_zero_fills_clipped_region(
+    obs_coiss_stars_01: obstcoiss.ObsCassiniISS,
+) -> None:
+    """Offset > margin zero-fills the out-of-extfov rows instead of raising.
+
+    With ``offset = (10.72, -15.0)`` and ``extfov_margin_vu = (5, 10)`` the
+    requested slice runs from ``v0 = -6`` to ``v1 = 1018`` (six rows above
+    the extfov in V) and from ``u0 = 25`` to ``u1 = 1049`` (five columns
+    past the right edge of the extfov in U).  The in-bounds region must
+    match ``array``, the out-of-bounds rows / cols must be zero, and the
+    call must not raise.
+    """
+    s = obs_snapshot.ObsSnapshot(obs_coiss_stars_01, extfov_margin_vu=(5, 10))
+    array = np.ones(s.extdata_shape_vu, dtype=np.float64)
+    out = s.extract_offset_array(array, (10.72, -15.0))
+    assert out.shape == (1024, 1024)
+    # First 6 rows of the output are zero-filled (slice begins at v0=-6).
+    assert np.all(out[:6, :] == 0.0)
+    # Last 5 columns of the output are zero-filled (slice ends past u1=1044).
+    assert np.all(out[:, -5:] == 0.0)
+    # The interior is populated from ``array``.
+    assert np.all(out[6:, :-5] == 1.0)
+
+
+def test_extract_offset_array_offset_far_outside_extfov_returns_all_zeros(
+    obs_coiss_stars_01: obstcoiss.ObsCassiniISS,
+) -> None:
+    """A pathological offset entirely outside the extfov yields a zero array."""
+    s = obs_snapshot.ObsSnapshot(obs_coiss_stars_01, extfov_margin_vu=(5, 10))
+    array = np.ones(s.extdata_shape_vu, dtype=np.float64)
+    out = s.extract_offset_array(array, (5000.0, 0.0))
+    assert out.shape == (1024, 1024)
+    assert np.all(out == 0.0)
+
+
+def test_extract_offset_array_preserves_dtype(
+    obs_coiss_stars_01: obstcoiss.ObsCassiniISS,
+) -> None:
+    """Boolean overlays stay boolean; integer overlays stay integer."""
+    s = obs_snapshot.ObsSnapshot(obs_coiss_stars_01, extfov_margin_vu=(2, 2))
+    bool_array = np.ones(s.extdata_shape_vu, dtype=bool)
+    out_bool = s.extract_offset_array(bool_array, (10.0, 0.0))
+    assert out_bool.dtype == bool
+    assert not out_bool[0, 0]  # zero-filled (False) past the margin
+    int_array = np.full(s.extdata_shape_vu, 7, dtype=np.int32)
+    out_int = s.extract_offset_array(int_array, (0.0, 0.0))
+    assert out_int.dtype == np.int32

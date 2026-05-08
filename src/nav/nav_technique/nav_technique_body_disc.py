@@ -242,6 +242,7 @@ class BodyDiscCorrelateNav(NavTechnique):
             'ncc_peak',
             'peak_to_runner_up_ratio',
             'consistency_px',
+            'consistency_ratio',
             'used_gradient',
             'body_count',
         }
@@ -251,6 +252,10 @@ class BodyDiscCorrelateNav(NavTechnique):
         super().__init__(config=config)
         self.config.read_config()  # ensure cls.tuning is populated
         self._rotation_at_edge_fraction = float(self.tuning['rotation_at_edge_fraction'])
+        self._consistency_max_fraction_of_diameter = float(
+            self.tuning['consistency_max_fraction_of_diameter']
+        )
+        self._consistency_max_px = float(self.tuning['consistency_max_px'])
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Return whether the input set carries any usable BODY_DISC feature.
@@ -313,13 +318,15 @@ class BodyDiscCorrelateNav(NavTechnique):
             template_img, template_mask = compose_template_features(eligible, extfov_shape)
             margin_v, margin_u = search_window_for_obs(context)
             up_factor = self._upsample_factor()
+            consistency_tol = self._consistency_tol_for(eligible)
             self.logger.debug(
                 'Composite template: %d painted pixels; search window (v, u) = (%d, %d) px; '
-                'upsample factor = %d',
+                'upsample factor = %d; consistency tolerance = %.2f px',
                 int(template_mask.sum()),
                 margin_v,
                 margin_u,
                 up_factor,
+                consistency_tol,
             )
             fit_rotation = bool(context.fit_camera_rotation)
             if fit_rotation:
@@ -333,6 +340,7 @@ class BodyDiscCorrelateNav(NavTechnique):
                     data_mask=context.sensor_mask_ext,
                     upsample_factor=up_factor,
                     max_rotation_deg=float(context.max_rotation_deg),
+                    consistency_tol=consistency_tol,
                 )
             else:
                 best_theta_rad = 0.0
@@ -342,6 +350,7 @@ class BodyDiscCorrelateNav(NavTechnique):
                     model=template_img,
                     mask=template_mask,
                     upsample_factor=up_factor,
+                    consistency_tol=consistency_tol,
                     max_offset_vu=(margin_v, margin_u),
                     data_mask=context.sensor_mask_ext,
                     use_gradient='auto',
@@ -366,6 +375,13 @@ class BodyDiscCorrelateNav(NavTechnique):
                 ncc_peak=quality,
                 peak_to_runner_up_ratio=_peak_to_runner_up_ratio(top_k_peaks),
                 consistency_px=consistency,
+                # ``consistency_tol`` is the same diameter-scaled cap
+                # used by the spurious test, so a result that just
+                # barely cleared the spurious test reads as ratio
+                # slightly under 1.0 and a clean fit on a large body
+                # reads as the small ratio it deserves regardless of
+                # body size.
+                consistency_ratio=consistency / consistency_tol,
                 used_gradient=used_gradient,
                 body_count=len(eligible),
             )
@@ -434,6 +450,26 @@ class BodyDiscCorrelateNav(NavTechnique):
                 sigma_rotation_rad=sigma_rotation_rad,
             )
 
+    def _consistency_tol_for(self, features: list[NavFeature]) -> float:
+        """Return the diameter-scaled inter-pyramid consistency cap.
+
+        A small body's NCC peak is naturally sharper in absolute pixels
+        than a large body's, so a flat cap penalizes large bodies twice
+        (real peak walks across pyramid levels scale with the
+        silhouette extent).  The applied cap is
+        ``max(consistency_max_px, consistency_max_fraction_of_diameter
+        * max_diameter_px)`` where ``max_diameter_px`` is the largest
+        ext-FOV bbox extent across the consumed BODY_DISC features.
+        """
+        if not features:
+            return self._consistency_max_px
+        max_extent_px = 0
+        for feature in features:
+            v_min, u_min, v_max, u_max = feature.geometry.bbox_extfov_vu
+            max_extent_px = max(max_extent_px, v_max - v_min, u_max - u_min)
+        scaled_px = self._consistency_max_fraction_of_diameter * float(max_extent_px)
+        return max(self._consistency_max_px, scaled_px)
+
     def _run_3dof_pyramid(
         self,
         *,
@@ -445,6 +481,7 @@ class BodyDiscCorrelateNav(NavTechnique):
         data_mask: NDArrayBoolType | None,
         upsample_factor: int,
         max_rotation_deg: float,
+        consistency_tol: float,
     ) -> tuple[float, dict[str, Any], float | None]:
         """Run the multi-level rotation-sample schedule.
 
@@ -483,6 +520,7 @@ class BodyDiscCorrelateNav(NavTechnique):
             max_offset_vu=max_offset_vu,
             data_mask=data_mask,
             upsample_factor=upsample_factor,
+            consistency_tol=consistency_tol,
         )
         # Level 1: 5 samples in 0.5 deg steps centred on the level-0 winner,
         # clamped to the configured ``+-max_rotation_deg`` cap so the
@@ -506,6 +544,7 @@ class BodyDiscCorrelateNav(NavTechnique):
             max_offset_vu=max_offset_vu,
             data_mask=data_mask,
             upsample_factor=upsample_factor,
+            consistency_tol=consistency_tol,
         )
         # Level 2: 3 samples in 0.25 deg steps centred on the level-1
         # winner, again clamped to the cap.
@@ -530,6 +569,7 @@ class BodyDiscCorrelateNav(NavTechnique):
                     max_offset_vu=max_offset_vu,
                     data_mask=data_mask,
                     upsample_factor=upsample_factor,
+                    consistency_tol=consistency_tol,
                 ),
             )
             for theta in l2_thetas
@@ -560,6 +600,7 @@ class BodyDiscCorrelateNav(NavTechnique):
         max_offset_vu: tuple[int, int],
         data_mask: NDArrayBoolType | None,
         upsample_factor: int,
+        consistency_tol: float,
     ) -> _RotationCandidate:
         """Run an NCC pyramid for each rotation sample; return the highest-quality candidate.
 
@@ -590,6 +631,7 @@ class BodyDiscCorrelateNav(NavTechnique):
                 max_offset_vu=max_offset_vu,
                 data_mask=data_mask,
                 upsample_factor=upsample_factor,
+                consistency_tol=consistency_tol,
             )
             candidate = _RotationCandidate(theta_rad=theta, ncc_result=ncc_result)
             if best is None or float(ncc_result['quality']) > float(best.ncc_result['quality']):
@@ -608,6 +650,7 @@ class BodyDiscCorrelateNav(NavTechnique):
         max_offset_vu: tuple[int, int],
         data_mask: NDArrayBoolType | None,
         upsample_factor: int,
+        consistency_tol: float,
     ) -> dict[str, Any]:
         """Rotate the template about ``pivot_vu`` and run a single NCC pyramid.
 
@@ -639,6 +682,7 @@ class BodyDiscCorrelateNav(NavTechnique):
             model=rotated_img,
             mask=rotated_mask,
             upsample_factor=upsample_factor,
+            consistency_tol=consistency_tol,
             max_offset_vu=max_offset_vu,
             data_mask=data_mask,
             use_gradient='auto',
@@ -730,5 +774,6 @@ class _DiscConfidenceContext:
         self.ncc_peak = diagnostics.ncc_peak
         self.peak_to_runner_up_ratio = diagnostics.peak_to_runner_up_ratio
         self.consistency_px = diagnostics.consistency_px
+        self.consistency_ratio = diagnostics.consistency_ratio
         self.used_gradient = diagnostics.used_gradient
         self.body_count = float(diagnostics.body_count)

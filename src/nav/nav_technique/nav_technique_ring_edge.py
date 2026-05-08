@@ -145,6 +145,12 @@ class RingEdgeNav(NavTechnique):
         self._spurious_dt_rms_factor = float(self.tuning['spurious_dt_rms_factor'])
         self._spurious_dt_floor_px = float(self.tuning['spurious_dt_floor_px'])
         self._spurious_min_inliers = int(self.tuning['spurious_min_inliers'])
+        self._spurious_per_edge_rms_factor = float(self.tuning['spurious_per_edge_rms_factor'])
+        self._spurious_max_lm_displacement_px = float(
+            self.tuning['spurious_max_lm_displacement_px']
+        )
+        self._lm_trust_region_px = float(self.tuning['lm_trust_region_px'])
+        self._lm_tikhonov_alpha = float(self.tuning['lm_tikhonov_alpha'])
         self._rotation_at_edge_fraction = float(self.tuning['rotation_at_edge_fraction'])
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
@@ -253,20 +259,48 @@ class RingEdgeNav(NavTechnique):
                 fit_rotation=fit_rotation,
                 pivot_vu=pivot_vu if fit_rotation else None,
                 pivot_distance_px=pivot_distance,
+                trust_region_px=self._lm_trust_region_px,
+                tikhonov_alpha=self._lm_tikhonov_alpha,
             )
             dv_final, du_final = result.offset_vu
             max_rotation_rad = math.radians(context.max_rotation_deg)
             rotation_at_edge = fit_rotation and (
                 abs(result.rotation_rad) >= self._rotation_at_edge_fraction * max_rotation_rad
             )
+            # See BodyLimbNav: ``>=`` covers both at-edge and over-edge cases
+            # so an LM that walked past the coarse-NCC search window does
+            # not silently report an offset outside the extfov margin.
             at_edge = (
-                abs(dv_final - margin_v) <= self._at_edge_tolerance_px
-                or abs(dv_final + margin_v) <= self._at_edge_tolerance_px
-                or abs(du_final - margin_u) <= self._at_edge_tolerance_px
-                or abs(du_final + margin_u) <= self._at_edge_tolerance_px
+                abs(dv_final) >= margin_v - self._at_edge_tolerance_px
+                or abs(du_final) >= margin_u - self._at_edge_tolerance_px
                 or rotation_at_edge
             )
             sigma_min_px = float(sigmas.min()) if sigmas.size else 1.0
+            covariance = result.covariance
+            total_edge_length_px = float(vertices.shape[0])
+            per_edge_rms_summed = _per_edge_rms_summed(features, result.residuals_px)
+            edge_count = len(feature_ids)
+            # ``result.rms_px`` is the *Tukey-weighted* residual RMS; when
+            # the LM converges to a local minimum where one edge fits
+            # cleanly and the rest are wholly mis-aligned, Tukey rejects
+            # the bad-edge vertices and ``rms_px`` collapses to near
+            # zero — a textbook mis-convergence that the existing
+            # ``rms_px > floor`` threshold cannot detect.  The raw
+            # ``per_edge_dt_rms_summed`` does not have outlier
+            # rejection, so it surfaces the bad edges; flag spurious
+            # when the per-edge average exceeds the same DT residual
+            # threshold the Tukey-weighted check uses.  The check
+            # protects the downstream ensemble combine from a
+            # confidence-zero result whose offset is far from the
+            # true fit (Cassini Tethys N1572471790 is the calibration
+            # case; the LM converged on the wrong ring of three).
+            per_edge_rms_threshold = max(
+                self._spurious_dt_floor_px,
+                self._spurious_per_edge_rms_factor * sigma_min_px,
+            )
+            lm_displacement_px = float(
+                math.hypot(dv_final - float(coarse_dv), du_final - float(coarse_du))
+            )
             spurious = (
                 result.rms_px
                 > max(
@@ -274,8 +308,12 @@ class RingEdgeNav(NavTechnique):
                     self._spurious_dt_rms_factor * sigma_min_px,
                 )
                 or result.inlier_count < self._spurious_min_inliers
+                or (
+                    edge_count > 0
+                    and per_edge_rms_summed / float(edge_count) > per_edge_rms_threshold
+                )
+                or lm_displacement_px > self._spurious_max_lm_displacement_px
             )
-            covariance = result.covariance
             rotation_rad: float | None
             sigma_rotation_rad: float | None
             if fit_rotation:
@@ -293,12 +331,10 @@ class RingEdgeNav(NavTechnique):
                 sigma_rotation_rad = None
             covariance = np.asarray(covariance, np.float64)
             is_rank_1 = _is_rank_1(covariance) or every_straight
-            total_edge_length_px = float(vertices.shape[0])
-            per_edge_rms_summed = _per_edge_rms_summed(features, result.residuals_px)
             diagnostics = RingEdgeDiagnostics(
                 total_edge_length_px=total_edge_length_px,
                 per_edge_dt_rms_summed=per_edge_rms_summed,
-                edge_count=len(feature_ids),
+                edge_count=edge_count,
                 is_rank_1=bool(is_rank_1),
             )
             assert self.confidence_spec is not None  # set as class attribute

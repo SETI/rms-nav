@@ -479,12 +479,22 @@ class NavModelBody(NavModelBodyBase):
             | shift_array(body_mask_invalid, (0, -1))
             | shift_array(body_mask_invalid, (0, 1))
         )
-        limb_mask_local: NDArrayBoolType = body_mask_valid & limb_mask_neighbor
-
         # Terminator mask: pixels whose incidence crosses 90 deg
         incidence_vals = incidence_scalar.vals
         is_lit = (incidence_vals < HALFPI) & body_mask_valid
         is_dark = (incidence_vals >= HALFPI) & body_mask_valid
+        # The geometric limb is the silhouette boundary (lit + unlit).
+        # The DT-fit LIMB_ARC technique can only see the *lit* limb in
+        # the image — the unlit limb merges into dark space and has no
+        # gradient.  Including unlit-side vertices in the polyline gives
+        # the LM no useful signal there, but the high sigma assigned to
+        # those vertices widens their Tukey inlier band so they happily
+        # lock onto the terminator (a strong DT minimum) when the LM
+        # shifts.  Filtering to lit-side vertices removes that hazard
+        # at the source.  See Cassini Tethys N1574928113 for the
+        # calibration case.
+        geometric_limb_mask: NDArrayBoolType = body_mask_valid & limb_mask_neighbor
+        limb_mask_local: NDArrayBoolType = geometric_limb_mask & is_lit
         # A pixel is on the terminator if it is lit and any neighbour is dark.
         terminator_local: NDArrayBoolType = is_lit & (
             shift_array(is_dark, (-1, 0))
@@ -921,7 +931,6 @@ def _build_limb_arc(
     )
     sigma_tangent_per_vertex_px = np.full_like(sigma_normal_per_vertex_px, 0.5)
     visible_arc_fraction = _visible_arc_fraction(sampler)
-    incidence_factor_mean = float(np.mean(_incidence_factor_array(sampler.incidence_rad)))
     return NavFeature(
         feature_id=f'limb_arc:{body_name}',
         feature_type=NavFeatureType.LIMB_ARC,
@@ -940,11 +949,9 @@ def _build_limb_arc(
         reliability=_limb_reliability(
             visible_arc_fraction=visible_arc_fraction,
             visible_arc_px=float(sampler.vertices_vu.shape[0]),
-            mean_incidence_factor=incidence_factor_mean,
         ),
         reliability_reasons=NavReliabilityBreakdown(
             visible_arc_fraction=visible_arc_fraction,
-            incidence_factor=min(1.0, incidence_factor_mean / MAX_INCIDENCE_FACTOR_CAP),
         ),
         usable_types=frozenset({NavFeatureType.LIMB_ARC}),
         flags=LimbArcFlags(
@@ -1064,16 +1071,20 @@ def _visible_arc_fraction(sampler: _PolylineSampler) -> float:
     return 1.0 if sampler.vertices_vu.shape[0] > 0 else 0.0
 
 
-def _limb_reliability(
-    *, visible_arc_fraction: float, visible_arc_px: float, mean_incidence_factor: float
-) -> float:
-    """Sigmoid-of-sum reliability for LIMB_ARC features."""
-    z = (
-        -1.0
-        + 1.5 * visible_arc_fraction
-        + 1.0 * _sigmoid(visible_arc_px / 50.0)
-        - 0.7 * mean_incidence_factor
-    )
+def _limb_reliability(*, visible_arc_fraction: float, visible_arc_px: float) -> float:
+    """Sigmoid-of-sum reliability for LIMB_ARC features.
+
+    The score answers a feature-existence question: is this limb arc a
+    target a downstream technique should bother running on?  Per-vertex
+    geometric softness (high incidence at the terminator-adjacent end
+    of the limb) lives in :func:`_sigma_normal_per_vertex`, where the
+    LM fit weights individual vertices by their normal sigma; folding
+    it into the reliability scalar as well would double-count the same
+    physics and, because ``incidence_factor`` saturates near the cap
+    on every fully-lit body, would penalize the cleanest possible
+    geometries the hardest.
+    """
+    z = -1.0 + 1.5 * visible_arc_fraction + 1.0 * _sigmoid(visible_arc_px / 50.0)
     return float(_sigmoid(z))
 
 

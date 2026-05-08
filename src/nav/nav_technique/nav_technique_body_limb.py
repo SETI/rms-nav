@@ -140,6 +140,11 @@ class BodyLimbNav(NavTechnique):
         self._spurious_dt_floor_px = float(self.tuning['spurious_dt_floor_px'])
         self._spurious_min_inliers = int(self.tuning['spurious_min_inliers'])
         self._spurious_min_inlier_fraction = float(self.tuning['spurious_min_inlier_fraction'])
+        self._spurious_max_lm_displacement_px = float(
+            self.tuning['spurious_max_lm_displacement_px']
+        )
+        self._lm_trust_region_px = float(self.tuning['lm_trust_region_px'])
+        self._lm_tikhonov_alpha = float(self.tuning['lm_tikhonov_alpha'])
         self._at_edge_tolerance_px = float(self.tuning['at_edge_tolerance_px'])
         self._rotation_at_edge_fraction = float(self.tuning['rotation_at_edge_fraction'])
 
@@ -270,6 +275,8 @@ class BodyLimbNav(NavTechnique):
                 fit_rotation=fit_rotation,
                 pivot_vu=pivot_vu if fit_rotation else None,
                 pivot_distance_px=pivot_distance,
+                trust_region_px=self._lm_trust_region_px,
+                tikhonov_alpha=self._lm_tikhonov_alpha,
             )
             dv_final, du_final = result.offset_vu
             max_rotation_rad = math.radians(context.max_rotation_deg)
@@ -297,17 +304,33 @@ class BodyLimbNav(NavTechnique):
                     covariance = covariance[:2, :2]
                 rotation_rad = None
                 sigma_rotation_rad = None
+            # ``at_edge`` fires when the converged offset reaches or passes
+            # the search-window boundary along either axis.  ``>=`` covers
+            # both the "just inside the boundary within tolerance" case and
+            # the "LM walked past the boundary" case — the latter happens
+            # when the LM follows a DT gradient outside the coarse-NCC
+            # window and produces an offset that ``ObsSnapshot.extract_offset_array``
+            # cannot honour without zero-fill.
             at_edge = (
-                abs(dv_final - margin_v) <= self._at_edge_tolerance_px
-                or abs(dv_final + margin_v) <= self._at_edge_tolerance_px
-                or abs(du_final - margin_u) <= self._at_edge_tolerance_px
-                or abs(du_final + margin_u) <= self._at_edge_tolerance_px
+                abs(dv_final) >= margin_v - self._at_edge_tolerance_px
+                or abs(du_final) >= margin_u - self._at_edge_tolerance_px
                 or rotation_at_edge
             )
             sigma_min_px = float(sigmas.min()) if sigmas.size else 1.0
             n_vertices = int(vertices.shape[0])
             inlier_fraction = (
                 float(result.inlier_count) / float(n_vertices) if n_vertices > 0 else 0.0
+            )
+            # Distance the LM walked from the integer-precision coarse-NCC
+            # seed.  The coarse search returns the integer-pixel mask-overlap
+            # maximum, so a clean sub-pixel refinement should land within
+            # ~1 px of it; a multi-pixel walk means the LM followed a DT
+            # gradient out of the coarse basin into a different local
+            # minimum (typically a crater rim or terminator edge that
+            # happens to align with the rotated polyline).  The threshold
+            # is configured under ``tuning.spurious_max_lm_displacement_px``.
+            lm_displacement_px = float(
+                math.hypot(dv_final - float(coarse_dv), du_final - float(coarse_du))
             )
             spurious = (
                 result.rms_px
@@ -317,6 +340,7 @@ class BodyLimbNav(NavTechnique):
                 )
                 or result.inlier_count < self._spurious_min_inliers
                 or inlier_fraction < self._spurious_min_inlier_fraction
+                or lm_displacement_px > self._spurious_max_lm_displacement_px
             )
             visible_limb_arc_fraction = _aggregate_visible_arc_fraction(eligible_features)
             diagnostics = BodyLimbDiagnostics(

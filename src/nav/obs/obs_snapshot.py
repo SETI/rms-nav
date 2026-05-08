@@ -445,7 +445,12 @@ class ObsSnapshot(Obs, Snapshot):  # type: ignore[misc, unused-ignore]  # oops.S
                 extract in the negative direction of v and u.
 
         Returns:
-            The extracted subimage. This will be the same shape as the original FOV.
+            The extracted subimage, shaped like the original (unpadded) FOV. When the
+            offset exceeds the extfov margin in either axis, the requested slice is
+            partly outside the extfov; the in-bounds portion is copied from ``array``
+            and the out-of-bounds portion is zero-filled (or ``False`` for boolean
+            input). This is the right semantic for overlay / model arrays — pixels
+            outside the extfov simply have no predicted content there.
         """
 
         if array.shape != self.extdata_shape_vu:
@@ -459,9 +464,19 @@ class ObsSnapshot(Obs, Snapshot):  # type: ignore[misc, unused-ignore]  # oops.S
         u0 = self.extfov_margin_u - int(np.round(offset[1]))
         v1 = v0 + self.data_shape_v
         u1 = u0 + self.data_shape_u
-        if v0 < 0 or u0 < 0 or v0 + self.data_shape_v > v_size or u0 + self.data_shape_u > u_size:
-            raise ValueError('offset produces out-of-bounds subimage slice')
-        return array[v0:v1, u0:u1]
+        out = np.zeros((self.data_shape_v, self.data_shape_u, *array.shape[2:]), dtype=array.dtype)
+        src_v_lo = max(0, v0)
+        src_u_lo = max(0, u0)
+        src_v_hi = min(v_size, v1)
+        src_u_hi = min(u_size, u1)
+        if src_v_hi <= src_v_lo or src_u_hi <= src_u_lo:
+            return out
+        dst_v_lo = src_v_lo - v0
+        dst_u_lo = src_u_lo - u0
+        dst_v_hi = dst_v_lo + (src_v_hi - src_v_lo)
+        dst_u_hi = dst_u_lo + (src_u_hi - src_u_lo)
+        out[dst_v_lo:dst_v_hi, dst_u_lo:dst_u_hi] = array[src_v_lo:src_v_hi, src_u_lo:src_u_hi]
+        return out
 
     def _ra_dec_limits(
         self, bp: Backplane, apparent: bool = True

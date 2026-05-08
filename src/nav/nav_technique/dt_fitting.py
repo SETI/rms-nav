@@ -554,6 +554,8 @@ def lm_subpixel_refine(
     step_tolerance_px: float = DEFAULT_LM_STEP_TOLERANCE,
     tukey_c: float = DEFAULT_TUKEY_C,
     pinvh_rcond: float = DEFAULT_PINVH_RCOND,
+    trust_region_px: float | None = None,
+    tikhonov_alpha: float = 0.0,
 ) -> LMRefineResult:
     """Refine a polyline-vs-image alignment by Levenberg-Marquardt.
 
@@ -601,7 +603,30 @@ def lm_subpixel_refine(
             terminates with ``converged=True``.
         tukey_c: Holland-Welsch Tukey biweight constant.
         pinvh_rcond: Pseudoinverse cutoff for the final covariance.
-
+        trust_region_px: Optional radius (pixels) around
+            ``initial_offset_vu`` outside which a trial step is rejected
+            without committing.  ``None`` (default) leaves the LM
+            unconstrained — the legacy behaviour.  When set, every
+            trial offset is checked against
+            ``hypot(trial_dv - dv0, trial_du - du0) <= trust_region_px``;
+            a violation marks the step as rejected (lambda doubled,
+            iteration counter advanced) without updating ``dv`` / ``du``.
+            This contains the joint LM + IRLS instability whereby
+            Tukey reweighting can drag the polyline off the integer
+            coarse-NCC seed onto an unrelated DT minimum (a crater
+            rim, terminator edge, or surface boundary).
+        tikhonov_alpha: Strength of a soft Tikhonov anchor pulling the
+            translation back toward ``initial_offset_vu``.  ``0`` (default)
+            disables the term — the legacy behaviour.  When positive,
+            the cost adds a per-iteration penalty
+            ``alpha * sum(weights) * ||(dv, du) - (dv0, du0)||^2`` which
+            scales with the data so the LM trades off raw DT
+            improvement against displacement.  The penalty is applied
+            only to the translation degrees of freedom; rotation is
+            never penalized.  The trust region is the hard outer
+            bound; Tikhonov pulls the LM toward the seed *inside*
+            that bound when the DT cost surface has a deeper but
+            wrong minimum on the way (crater rims, terminator edges).
     Returns:
         :class:`LMRefineResult`.
 
@@ -680,6 +705,25 @@ def lm_subpixel_refine(
         if not np.any(weights > 0):
             break
         hessian, rhs = _weighted_normal_equations(jacobian, residuals, weights)
+        # Tikhonov anchor toward the initial seed on translation only.
+        # Scaled by ``sum(weights)`` so the penalty tracks the data
+        # size: ``alpha`` is a dimensionless ratio (penalty per
+        # weighted-residual-equivalent at displacement = 1 px).
+        # ``rotation`` is never penalised — only the translation
+        # block of the (2 or 3)-DoF Hessian / RHS receives the term.
+        if tikhonov_alpha > 0.0:
+            tikhonov_lambda = float(tikhonov_alpha) * float(weights.sum())
+            displacement_v = state.dv - float(initial_offset_vu[0])
+            displacement_u = state.du - float(initial_offset_vu[1])
+            hessian = hessian.copy()
+            rhs = rhs.copy()
+            hessian[0, 0] += tikhonov_lambda
+            hessian[1, 1] += tikhonov_lambda
+            rhs[0] += tikhonov_lambda * displacement_v
+            rhs[1] += tikhonov_lambda * displacement_u
+            cost_before = cost_before + tikhonov_lambda * (
+                displacement_v * displacement_v + displacement_u * displacement_u
+            )
         # LM dampening: H_lm = H + lambda * diag(H).
         diag = np.diag(np.diag(hessian))
         hessian_lm = hessian + lambda_ * diag
@@ -690,6 +734,22 @@ def lm_subpixel_refine(
         trial_dv = state.dv + float(step[0])
         trial_du = state.du + float(step[1])
         trial_dtheta = state.dtheta + float(step[2]) if fit_rotation else state.dtheta
+        # Trust-region rejection: refuse trial offsets that have walked
+        # too far from the integer-precision coarse seed.  The IRLS-LM
+        # combo can otherwise drift the polyline onto unrelated DT
+        # minima (crater rims, terminator edges) when Tukey reweighting
+        # at the trial offset finds a different inlier set.
+        if trust_region_px is not None:
+            disp = math.hypot(
+                trial_dv - float(initial_offset_vu[0]),
+                trial_du - float(initial_offset_vu[1]),
+            )
+            if disp > trust_region_px:
+                lambda_ = min(lambda_ * 2.0, 1.0e6)
+                state.iteration += 1
+                if lambda_ >= 1.0e6:
+                    break
+                continue
         # Evaluate cost at the trial point.
         trial_residuals, _ = _compute_residuals_and_jacobian(
             vertices_vu=verts,
@@ -701,10 +761,27 @@ def lm_subpixel_refine(
             fit_rotation=fit_rotation,
         )
         trial_residuals = np.where(state.polarity_mask, trial_residuals, _INFINITY_DT_PENALTY_PX)
-        trial_scaled = trial_residuals / sigmas
-        trial_tukey = tukey_biweight_weights(trial_scaled, c=tukey_c)
-        trial_weights = inv_sigma_sq * trial_tukey
-        trial_cost = _weighted_cost(trial_weights, trial_residuals)
+        # Compare ``trial_cost`` against ``cost_before`` using the SAME
+        # weights computed at the start of this iteration.  Recomputing
+        # Tukey biweights at the trial offset (the legacy behaviour)
+        # parameterises the cost function by the offset itself, so an
+        # "improvement" can mean "the trial offset's reweighting found
+        # a different inlier set whose sum-of-squares is lower" rather
+        # than "the trial offset has smaller residuals at the current
+        # inlier set".  Freezing the weights for the inner LM step is
+        # the standard IRLS / LM separation that keeps the cost
+        # function fixed during a single Gauss-Newton step; IRLS
+        # reweighting still happens between iterations of the outer
+        # loop.  Without this, the LM can drift onto unrelated DT
+        # minima (crater rims, terminator edges) on textured bodies
+        # where multiple basins are reachable from the seed.
+        trial_cost = _weighted_cost(weights, trial_residuals)
+        if tikhonov_alpha > 0.0:
+            trial_disp_v = trial_dv - float(initial_offset_vu[0])
+            trial_disp_u = trial_du - float(initial_offset_vu[1])
+            trial_cost = trial_cost + tikhonov_lambda * (
+                trial_disp_v * trial_disp_v + trial_disp_u * trial_disp_u
+            )
         if trial_cost < cost_before:
             state.dv = trial_dv
             state.du = trial_du

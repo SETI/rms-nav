@@ -18,9 +18,10 @@ models or techniques run for debugging (``only_models='body:MIMAS'``,
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
@@ -206,6 +207,61 @@ def _normalize_model_patterns(patterns: str | list[str], names: list[str]) -> li
     return out
 
 
+_BODY_FEATURE_PREFIXES: tuple[str, ...] = (
+    'body_disc:',
+    'body_blob:',
+    'limb_arc:',
+    'terminator_arc:',
+)
+"""Feature-id prefixes carrying the ``<feature_kind>:<body_name>`` convention.
+
+Mirrors :data:`nav.nav_orchestrator.ensemble._BODY_FEATURE_PREFIXES`; the
+ensemble's downstream :func:`_drop_superseded_fallbacks` is the redundant
+filter that catches any fallback result that still slipped through.
+Ring and star feature-ids do not embed a body and are not relevant to
+the fallback-skip logic.
+"""
+
+
+def _feature_source_bodies(feature: NavFeature) -> frozenset[str]:
+    """Return the set of body names a feature was emitted for.
+
+    Returns an empty set for features whose ``feature_id`` does not
+    match the body-feature prefix convention (rings, stars).
+    """
+    for prefix in _BODY_FEATURE_PREFIXES:
+        if feature.feature_id.startswith(prefix):
+            body, _, _ = feature.feature_id[len(prefix) :].partition(':')
+            if body:
+                return frozenset({body})
+    return frozenset()
+
+
+def _bodies_with_non_spurious_primary(
+    results: list[NavTechniqueResult],
+) -> frozenset[str]:
+    """Return the set of body names that have a non-spurious primary result."""
+    covered: set[str] = set()
+    for r in results:
+        if r.spurious:
+            continue
+        tier = 'primary'
+        for cls in NavTechnique._registry:
+            if cls.name == r.technique_name:
+                tier = cls.tier
+                break
+        if tier != 'primary':
+            continue
+        for fid in r.feature_ids:
+            for prefix in _BODY_FEATURE_PREFIXES:
+                if fid.startswith(prefix):
+                    body, _, _ = fid[len(prefix) :].partition(':')
+                    if body:
+                        covered.add(body)
+                    break
+    return frozenset(covered)
+
+
 class NavOrchestrator(NavBase):
     """Top-level driver for autonomous navigation.
 
@@ -352,9 +408,26 @@ class NavOrchestrator(NavBase):
                 model_metadata=model_metadata,
                 annotations=annotations,
             )
-        # Pass 1 — prior-free techniques.
-        self._logger.info('Pass 1: running prior-free techniques')
-        pass1_results = self._run_pass(kept, context, requires_prior=False)
+        # Pass 1 — prior-free techniques.  Primaries run first so the
+        # fallback pass can skip techniques whose source body already
+        # has a non-spurious primary result; that matches the
+        # "fallback runs only when the primary fails" semantic
+        # operators expect, instead of running every technique and
+        # filtering downstream.
+        self._logger.info('Pass 1: running prior-free primary techniques')
+        pass1_primary = self._run_pass(kept, context, requires_prior=False, tier_filter='primary')
+        covered_bodies = _bodies_with_non_spurious_primary(pass1_primary)
+        if covered_bodies:
+            self._logger.debug('Pass 1 primary covered bodies: %s', sorted(covered_bodies))
+        self._logger.info('Pass 1: running prior-free fallback techniques')
+        pass1_fallback = self._run_pass(
+            kept,
+            context,
+            requires_prior=False,
+            tier_filter='fallback',
+            excluded_bodies=covered_bodies,
+        )
+        pass1_results = pass1_primary + pass1_fallback
         self._logger.info('Pass 1: %d technique result(s) produced', len(pass1_results))
         if not pass1_results:
             return self._fail(
@@ -495,6 +568,24 @@ class NavOrchestrator(NavBase):
             len(gated),
             len(all_features),
         )
+        # Per-feature DEBUG log so an operator can see exactly which
+        # reliability components dragged a gated feature below the
+        # threshold (visible_arc_fraction, incidence_factor,
+        # albedo_penalty, ...) without having to crack the metadata
+        # JSON.  Threshold lookup mirrors ``FeatureReliabilityGate.apply``.
+        gated_ids = {record.feature.feature_id for record in gated}
+        for feature in all_features:
+            verdict = 'gated' if feature.feature_id in gated_ids else 'kept'
+            threshold = self._gate.thresholds.get(feature.feature_type, 0.0)
+            self._logger.debug(
+                '%s: %s %s reliability=%.3f threshold=%.3f reasons={%s}',
+                verdict,
+                feature.feature_id,
+                feature.feature_type.name,
+                feature.reliability,
+                threshold,
+                _format_reliability_breakdown(feature.reliability_reasons),
+            )
         return kept, gated
 
     def _fail(
@@ -584,8 +675,29 @@ class NavOrchestrator(NavBase):
         context: NavContext,
         *,
         requires_prior: bool,
+        tier_filter: Literal['primary', 'fallback'] | None = None,
+        excluded_bodies: frozenset[str] = frozenset(),
     ) -> list[NavTechniqueResult]:
         """Run every feasible technique whose ``requires_prior`` matches.
+
+        Parameters:
+            features: Gated-kept features available to every technique.
+            context: Per-image NavContext.
+            requires_prior: Restricts the run to pass-1 (``False``) or
+                pass-2 (``True``) techniques.
+            tier_filter: If set, restrict to techniques in the given
+                tier (``'primary'`` or ``'fallback'``).  ``None`` runs
+                every tier.
+            excluded_bodies: Set of body names whose features should be
+                filtered out before each technique sees them.  The
+                orchestrator passes the set of body names that have a
+                non-spurious primary result so the fallback pass skips
+                techniques whose only candidate features belong to
+                already-covered bodies (the "fallback runs only when
+                the primary fails" semantic; the ensemble's
+                ``_drop_superseded_fallbacks`` is the redundant
+                downstream gate that catches anything that slips
+                through).
 
         A misbehaving NavTechnique is logged with a full traceback and
         treated as if it produced no result.  Catching every exception is
@@ -594,10 +706,17 @@ class NavOrchestrator(NavBase):
         the returned ``NavResult``.
         """
         results: list[NavTechniqueResult] = []
-        names = [cls.name for cls in NavTechnique._registry if cls.requires_prior == requires_prior]
+        names = [
+            cls.name
+            for cls in NavTechnique._registry
+            if cls.requires_prior == requires_prior
+            and (tier_filter is None or cls.tier == tier_filter)
+        ]
         kept_names = set(filter_technique_names(names, self._only_techniques))
         for cls in NavTechnique._registry:
             if cls.requires_prior != requires_prior:
+                continue
+            if tier_filter is not None and cls.tier != tier_filter:
                 continue
             if cls.name not in kept_names:
                 continue
@@ -605,10 +724,32 @@ class NavOrchestrator(NavBase):
             if not (cls.accepts_feature_types & available_types):
                 continue
             technique = cls(config=self.config)
-            feasibility = technique.is_feasible(features)
+            available_features = features
+            if excluded_bodies and cls.tier == 'fallback':
+                pre_filter_count = sum(
+                    1 for f in features if f.feature_type in cls.accepts_feature_types
+                )
+                available_features = [
+                    f for f in features if not (_feature_source_bodies(f) & excluded_bodies)
+                ]
+                post_filter_count = sum(
+                    1 for f in available_features if f.feature_type in cls.accepts_feature_types
+                )
+                dropped = pre_filter_count - post_filter_count
+                if dropped > 0:
+                    self._logger.info(
+                        'Skipping %d %s feature(s) for fallback %s: source body already '
+                        'covered by a non-spurious primary',
+                        dropped,
+                        ', '.join(sorted(t.value for t in cls.accepts_feature_types)),
+                        cls.name,
+                    )
+                if post_filter_count == 0:
+                    continue
+            feasibility = technique.is_feasible(available_features)
             if not feasibility.feasible:
                 continue
-            subset = [f for f in features if f.feature_type in cls.accepts_feature_types]
+            subset = [f for f in available_features if f.feature_type in cls.accepts_feature_types]
             try:
                 results.append(technique.navigate(subset, context))
             except Exception:  # plugin sandbox; see docstring
@@ -799,3 +940,22 @@ def _bbox_from_geometry(feature: NavFeature) -> tuple[int, int, int, int]:
     """
     bbox = feature.geometry.bbox_extfov_vu
     return (int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3]))
+
+
+def _format_reliability_breakdown(breakdown: Any) -> str:
+    """Format a ``NavReliabilityBreakdown`` as ``key=value`` for the per-feature DEBUG log.
+
+    Only fields with non-``None`` values are rendered so the line stays
+    readable; floats round to three decimals, bools render as
+    ``True``/``False`` directly.
+    """
+    parts: list[str] = []
+    for f in dataclasses.fields(breakdown):
+        value = getattr(breakdown, f.name)
+        if value is None:
+            continue
+        if isinstance(value, float):
+            parts.append(f'{f.name}={value:.3f}')
+        else:
+            parts.append(f'{f.name}={value}')
+    return ', '.join(parts)

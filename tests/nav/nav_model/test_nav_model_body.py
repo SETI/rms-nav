@@ -149,25 +149,29 @@ def test_sigmoid_at_zero() -> None:
 
 
 def test_limb_reliability_increases_with_visible_arc_fraction() -> None:
-    """Reliability is monotone in ``visible_arc_fraction`` for fixed other terms."""
-    low = _limb_reliability(
-        visible_arc_fraction=0.2, visible_arc_px=20.0, mean_incidence_factor=0.5
-    )
-    high = _limb_reliability(
-        visible_arc_fraction=0.9, visible_arc_px=20.0, mean_incidence_factor=0.5
-    )
+    """Reliability is monotone in ``visible_arc_fraction`` for fixed arc length."""
+    low = _limb_reliability(visible_arc_fraction=0.2, visible_arc_px=20.0)
+    high = _limb_reliability(visible_arc_fraction=0.9, visible_arc_px=20.0)
     assert high > low
 
 
-def test_limb_reliability_decreases_with_incidence() -> None:
-    """High incidence-factor scenes drive limb reliability down."""
-    low_inc = _limb_reliability(
-        visible_arc_fraction=0.9, visible_arc_px=20.0, mean_incidence_factor=0.0
-    )
-    high_inc = _limb_reliability(
-        visible_arc_fraction=0.9, visible_arc_px=20.0, mean_incidence_factor=4.0
-    )
-    assert high_inc < low_inc
+def test_limb_reliability_increases_with_arc_length() -> None:
+    """Longer arcs score higher (the ``visible_arc_px`` sigmoid)."""
+    short = _limb_reliability(visible_arc_fraction=0.9, visible_arc_px=5.0)
+    long = _limb_reliability(visible_arc_fraction=0.9, visible_arc_px=200.0)
+    assert long > short
+
+
+def test_limb_reliability_passes_gate_for_fully_lit_geometry() -> None:
+    """A fully visible, well-sampled limb scores well above the 0.30 gate.
+
+    Per-vertex softness already lives in ``_sigma_normal_per_vertex``;
+    the reliability score is a feature-existence gate, not a precision
+    estimate, so a textbook-good limb (Dione at low phase) must clear
+    it.
+    """
+    score = _limb_reliability(visible_arc_fraction=1.0, visible_arc_px=300.0)
+    assert score > 0.5
 
 
 def test_terminator_reliability_zero_at_zero_phase() -> None:

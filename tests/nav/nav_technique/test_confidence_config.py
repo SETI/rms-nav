@@ -173,7 +173,7 @@ def test_load_technique_tuning_returns_shipped_block() -> None:
     assert tuning['spurious_dt_rms_factor'] == pytest.approx(5.0)
     assert tuning['spurious_dt_floor_px'] == pytest.approx(3.0)
     assert tuning['spurious_min_inliers'] == 6
-    assert tuning['spurious_min_inlier_fraction'] == pytest.approx(0.05)
+    assert tuning['spurious_min_inlier_fraction'] == pytest.approx(0.20)
 
 
 def test_load_technique_tuning_returns_empty_when_no_tuning_block() -> None:

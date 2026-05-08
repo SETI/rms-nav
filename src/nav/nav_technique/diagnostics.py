@@ -32,8 +32,14 @@ class BodyDiscDiagnostics:
         ncc_peak: Peak normalized cross-correlation value.
         peak_to_runner_up_ratio: Ratio of NCC peak to second-highest peak
             outside the exclusion radius around the peak.
-        consistency_px: Mean per-axis disagreement between coarse-pyramid
-            and full-resolution sub-pixel locations.
+        consistency_px: Inter-pyramid peak migration in pixels (raw).
+        consistency_ratio: ``consistency_px`` divided by the per-image
+            spurious threshold (which scales with body diameter).  A
+            value <= 1.0 means the result is within the diameter-scaled
+            consistency budget; the confidence formula consumes this
+            normalized form so a healthy fit on a large body is not
+            penalized by the same divisor that's appropriate for a
+            small body.
         used_gradient: True if gradient mode was selected by ``auto``.
         body_count: Number of BODY_DISC features fused into the combined
             template.
@@ -42,12 +48,14 @@ class BodyDiscDiagnostics:
     ncc_peak: float = 0.0
     peak_to_runner_up_ratio: float = 0.0
     consistency_px: float = 0.0
+    consistency_ratio: float = 0.0
     used_gradient: bool = False
     body_count: int = 0
     CURATOR_FIELDS: ClassVar[dict[str, str | None]] = {
         'ncc_peak': 'ncc_peak',
         'peak_to_runner_up_ratio': 'peak_to_runner_up_ratio',
         'consistency_px': 'consistency_px',
+        'consistency_ratio': 'consistency_ratio',
         'used_gradient': 'used_gradient',
         'body_count': 'body_count',
     }

@@ -29,6 +29,7 @@ from nav.support.filters import NavFilterKind, NavFilterSpec
 # see ``test_nav_technique_body_limb.py`` for the same pattern.
 BodyTerminatorNav()
 TERMINATOR_MIN_ARC_PX = BodyTerminatorNav.tuning['min_arc_px']
+TERMINATOR_SPURIOUS_MIN_INLIER_FRACTION = BodyTerminatorNav.tuning['spurious_min_inlier_fraction']
 
 # Terminator tests always use a right-side crescent: a half-arc spanning
 # [-pi/2, pi/2] around the body centre.  Other techniques use different
@@ -174,6 +175,99 @@ def test_body_terminator_nav_marks_spurious_when_image_lacks_terminator(
     context = make_nav_context(image)
     result = technique.navigate([feature], context)
     assert result.spurious is True
+
+
+def test_body_terminator_nav_marks_spurious_when_inlier_fraction_collapses(
+    monkeypatch: pytest.MonkeyPatch,
+    disc_image: DiscImageFactory,
+    arc_polyline: ArcPolylineFactory,
+    make_terminator_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """An LM convergence retaining a small minority of vertices is spurious.
+
+    Models the production failure mode (Voyager Enceladus C4400436): the
+    terminator polyline can lock onto crater shadows or surface boundary
+    features and report a low RMS while rejecting most vertices as
+    outliers — a high-confidence wrong answer if the spurious flag does
+    not fire.  This mirrors ``BodyLimbNav``'s inlier-fraction guard.
+    """
+    from nav.nav_technique import dt_fitting, nav_technique_body_terminator
+
+    shape = (200, 200)
+    image = disc_image(shape, (100.0, 100.0), 30.0)
+    vertices, outward = arc_polyline(
+        (100.0, 100.0), 30.0, 1000, _TERMINATOR_ANGLE_START, _TERMINATOR_ANGLE_END
+    )
+    feature = make_terminator_feature('confused', vertices=vertices, outward_normals=outward)
+    technique = BodyTerminatorNav()
+    context = make_nav_context(image)
+
+    forged_result = dt_fitting.LMRefineResult(
+        offset_vu=(7.0, -3.0),
+        rotation_rad=0.0,
+        covariance=np.eye(2, dtype=np.float64),
+        residuals_px=np.zeros(vertices.shape[0], dtype=np.float64),
+        weights=np.zeros(vertices.shape[0], dtype=np.float64),
+        rms_px=2.5,
+        iterations=5,
+        converged=True,
+        inlier_count=10,
+    )
+    monkeypatch.setattr(
+        nav_technique_body_terminator,
+        'lm_subpixel_refine',
+        lambda **_kwargs: forged_result,
+    )
+
+    result = technique.navigate([feature], context)
+    assert isinstance(result.diagnostics, BodyTerminatorDiagnostics)
+    inlier_fraction = result.diagnostics.tukey_inlier_count / float(vertices.shape[0])
+    assert inlier_fraction < TERMINATOR_SPURIOUS_MIN_INLIER_FRACTION
+    assert result.spurious is True
+
+
+def test_body_terminator_nav_does_not_mark_spurious_when_inlier_fraction_healthy(
+    monkeypatch: pytest.MonkeyPatch,
+    disc_image: DiscImageFactory,
+    arc_polyline: ArcPolylineFactory,
+    make_terminator_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """A healthy inlier fraction does not trip the spurious flag."""
+    from nav.nav_technique import dt_fitting, nav_technique_body_terminator
+
+    shape = (200, 200)
+    image = disc_image(shape, (100.0, 100.0), 30.0)
+    vertices, outward = arc_polyline(
+        (100.0, 100.0), 30.0, 1000, _TERMINATOR_ANGLE_START, _TERMINATOR_ANGLE_END
+    )
+    feature = make_terminator_feature('healthy', vertices=vertices, outward_normals=outward)
+    technique = BodyTerminatorNav()
+    context = make_nav_context(image)
+
+    forged_result = dt_fitting.LMRefineResult(
+        offset_vu=(0.5, 0.5),
+        rotation_rad=0.0,
+        covariance=np.eye(2, dtype=np.float64) * 0.25,
+        residuals_px=np.zeros(vertices.shape[0], dtype=np.float64),
+        weights=np.ones(vertices.shape[0], dtype=np.float64),
+        rms_px=0.4,
+        iterations=8,
+        converged=True,
+        inlier_count=500,
+    )
+    monkeypatch.setattr(
+        nav_technique_body_terminator,
+        'lm_subpixel_refine',
+        lambda **_kwargs: forged_result,
+    )
+
+    result = technique.navigate([feature], context)
+    assert isinstance(result.diagnostics, BodyTerminatorDiagnostics)
+    inlier_fraction = result.diagnostics.tukey_inlier_count / float(vertices.shape[0])
+    assert inlier_fraction >= TERMINATOR_SPURIOUS_MIN_INLIER_FRACTION
+    assert result.spurious is False
 
 
 def test_body_terminator_nav_at_edge_when_offset_hits_search_window(

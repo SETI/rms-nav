@@ -12,7 +12,7 @@ from __future__ import annotations
 import fnmatch
 import math
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 import numpy as np
 
@@ -236,6 +236,18 @@ class NavTechnique(NavBase, ABC):
     #: If ``True``, this technique requires a prior offset on
     #: ``NavContext`` and is run only on pass 2.
     requires_prior: ClassVar[bool] = False
+    #: Technique tier consumed by the ensemble.  ``'primary'``
+    #: techniques always vote; ``'fallback'`` techniques are dropped
+    #: when any non-spurious primary result exists for the same source
+    #: body (matched by body name extracted from ``feature_id``).  The
+    #: classic example is ``BodyTerminatorNav`` (fallback) being
+    #: superseded by a non-spurious ``BodyLimbNav`` or
+    #: ``BodyDiscCorrelateNav`` result on the same body — limb / disc
+    #: are geometric features whose failure modes are visibility-
+    #: driven, while the terminator is a photometric feature that can
+    #: mis-converge on textured surfaces with no per-technique signal
+    #: to detect the failure.
+    tier: ClassVar[Literal['primary', 'fallback']] = 'primary'
     #: Confidence-formula spec consumed by ``evaluate_sigmoid_combination``.
     #: Loaded from ``config_510_techniques.yaml`` and assigned at
     #: ``Config.read_config`` time.  ``None`` for techniques that opt out

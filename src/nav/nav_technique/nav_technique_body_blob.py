@@ -296,11 +296,19 @@ class BodyBlobNav(NavTechnique):
     Class attributes:
         accepts_feature_types: ``frozenset({BODY_BLOB})``.
         requires_prior: ``False`` — the technique runs in pass 1.
+        tier: ``'fallback'`` — the brightness-weighted centroid is a
+            weaker observation than a limb fit (already reflected in
+            the technique's ``hard_cap: 0.4``).  When a non-spurious
+            primary fit (limb or disc) is available for the same body
+            the ensemble drops the blob result rather than dilute the
+            geometric techniques' answer with the centroid's lit-
+            hemisphere bias.
     """
 
     name = 'BodyBlobNav'
     accepts_feature_types = frozenset({NavFeatureType.BODY_BLOB})
     requires_prior = False
+    tier = 'fallback'
     confidence_attributes = frozenset(
         {
             'at_edge',

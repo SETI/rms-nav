@@ -35,6 +35,7 @@ from nav.nav_orchestrator.feature_summary import NavFeatureSummary
 from nav.nav_orchestrator.image_classifier_result import NavImageClassifierResult
 from nav.nav_orchestrator.nav_result import ConfidenceRank, NavResult
 from nav.nav_orchestrator.provenance import Provenance
+from nav.nav_technique.nav_technique import NavTechnique
 from nav.nav_technique.technique_result import NavTechniqueResult
 from nav.support.status_reason import NavStatusReason
 from nav.support.types import NDArrayFloatType
@@ -48,6 +49,7 @@ __all__ = [
 
 # Default constants used by the ensemble.  Configurable via ``EnsembleConfig``.
 DEFAULT_AGREEMENT_SIGMA = 2.0
+DEFAULT_AGREEMENT_PIXEL_FLOOR = 5.0
 DEFAULT_AGREEMENT_GAP = 0.5
 DEFAULT_DISAGREEMENT_PENALTY = 0.7
 DEFAULT_CONFLICTED_CONFIDENCE_MULTIPLIER = 0.3
@@ -68,6 +70,18 @@ class EnsembleConfig:
 
     Parameters:
         agreement_sigma: Mahalanobis-distance threshold for grouping.
+        agreement_pixel_floor: Translation-distance fallback grouping
+            threshold in pixels.  Two results are grouped when *either*
+            their Mahalanobis distance is at most ``agreement_sigma``
+            *or* their Euclidean translation distance is at most this
+            many pixels.  The pixel floor exists because per-technique
+            covariances are CRLB-tight (FFT subpixel localization for
+            ``BodyDiscCorrelateNav``, M-estimator information for the
+            DT-fit techniques), well below the actual position
+            uncertainty driven by model error and pointing residuals;
+            without the floor, results agreeing visually to a few px
+            register as hundreds of sigmas apart and never group.
+            Set to ``0.0`` to disable the floor.
         agreement_gap: Minimum summed-confidence gap between best and
             runner-up groups before declaring a conflict.
         disagreement_penalty: Multiplier on combined confidence when more
@@ -82,6 +96,7 @@ class EnsembleConfig:
     """
 
     agreement_sigma: float = DEFAULT_AGREEMENT_SIGMA
+    agreement_pixel_floor: float = DEFAULT_AGREEMENT_PIXEL_FLOOR
     agreement_gap: float = DEFAULT_AGREEMENT_GAP
     disagreement_penalty: float = DEFAULT_DISAGREEMENT_PENALTY
     conflicted_confidence_multiplier: float = DEFAULT_CONFLICTED_CONFIDENCE_MULTIPLIER
@@ -144,18 +159,117 @@ def _result_param_vector(res: NavTechniqueResult) -> NDArrayFloatType:
     return cast(NDArrayFloatType, np.array([res.offset_px[0], res.offset_px[1]], np.float64))
 
 
-def _agreement_groups(
-    results: list[NavTechniqueResult], *, agreement_sigma: float, rcond: float
-) -> list[list[NavTechniqueResult]]:
-    """Single-link clustering by Mahalanobis distance.
+# Body-feature-id prefixes used to extract a body name for the
+# fallback-tier filter.  Ring and star feature_ids do not embed a body
+# name, so they are intentionally excluded — fallback dropping only
+# applies between body-feature techniques.
+_BODY_FEATURE_PREFIXES: tuple[str, ...] = (
+    'body_disc:',
+    'body_blob:',
+    'limb_arc:',
+    'terminator_arc:',
+)
 
-    Two results are placed in the same group iff their pairwise distance is
-    below ``agreement_sigma``; transitive closure builds final groups via
-    connected components.
+
+def _source_bodies(result: NavTechniqueResult) -> frozenset[str]:
+    """Return the set of body names a result was computed against.
+
+    Parses ``feature_ids`` for the ``<feature_kind>:<body_name>``
+    convention used by every body-feature emitter (BODY_DISC,
+    BODY_BLOB, LIMB_ARC, TERMINATOR_ARC).  Non-body feature_ids
+    (rings, stars) yield an empty set.
+    """
+    bodies: set[str] = set()
+    for fid in result.feature_ids:
+        for prefix in _BODY_FEATURE_PREFIXES:
+            if fid.startswith(prefix):
+                body, _, _ = fid[len(prefix) :].partition(':')
+                if body:
+                    bodies.add(body)
+                break
+    return frozenset(bodies)
+
+
+def _technique_tier(technique_name: str) -> str:
+    """Look up a technique's ``tier`` from the registry.
+
+    Defaults to ``'primary'`` for unregistered names so the ensemble
+    treats unknown techniques (test stubs, future plug-ins) as
+    primary by construction; an explicit ``tier='fallback'``
+    declaration is required to opt into the fallback-drop behavior.
+    """
+    for cls in NavTechnique._registry:
+        if cls.name == technique_name:
+            return cls.tier
+    return 'primary'
+
+
+def _drop_superseded_fallbacks(
+    results: list[NavTechniqueResult],
+) -> list[NavTechniqueResult]:
+    """Drop fallback-tier results superseded by a non-spurious primary.
+
+    A fallback result is superseded when at least one of its source
+    bodies appears in the source-body set of any non-spurious primary
+    result.  Fallback results whose source body has no primary
+    coverage stay in the set so a scene with only a fallback (e.g.,
+    a body too small for limb fitting, where only BodyBlob ran) still
+    produces an offset.
+
+    Returns a new list preserving input ordering; the input list is
+    not mutated.
+    """
+    primary_success_bodies: set[str] = set()
+    for r in results:
+        if r.spurious:
+            continue
+        if _technique_tier(r.technique_name) != 'primary':
+            continue
+        primary_success_bodies.update(_source_bodies(r))
+    if not primary_success_bodies:
+        return list(results)
+    kept: list[NavTechniqueResult] = []
+    for r in results:
+        if _technique_tier(r.technique_name) == 'fallback':
+            superseded = bool(_source_bodies(r) & primary_success_bodies)
+            if superseded:
+                IMAGE_LOGGER.info(
+                    'Dropping fallback %s for body %s: superseded by a '
+                    'non-spurious primary result on the same body',
+                    r.technique_name,
+                    ', '.join(sorted(_source_bodies(r))) or '(unknown)',
+                )
+                continue
+        kept.append(r)
+    return kept
+
+
+def _agreement_groups(
+    results: list[NavTechniqueResult],
+    *,
+    agreement_sigma: float,
+    agreement_pixel_floor: float,
+    rcond: float,
+) -> list[list[NavTechniqueResult]]:
+    """Single-link clustering by Mahalanobis distance with a pixel-floor fallback.
+
+    Two results are placed in the same group iff *either* their pairwise
+    Mahalanobis distance is below ``agreement_sigma`` *or* their
+    Euclidean translation distance (in pixels, ignoring the rotation
+    component for 3-DoF results) is at most ``agreement_pixel_floor``.
+    Transitive closure builds final groups via connected components.
+
+    The pixel floor compensates for per-technique covariances that
+    report only a CRLB-style precision (FFT subpixel localization or
+    M-estimator information) and so under-estimate the actual position
+    uncertainty by orders of magnitude.  See ``EnsembleConfig`` for the
+    motivation.
 
     Parameters:
         results: Non-empty list of per-technique results.
         agreement_sigma: Maximum pairwise Mahalanobis distance for grouping.
+        agreement_pixel_floor: Maximum pairwise Euclidean translation
+            distance (in pixels) for grouping; ``0.0`` disables.
         rcond: rcond passed to ``pinvh``.
 
     Returns:
@@ -188,7 +302,11 @@ def _agreement_groups(
                     f'{results[j].technique_name} produced {mu_j.shape}.'
                 )
             dist = _mahalanobis_distance(mu_i, cov_i, mu_j, cov_j, rcond=rcond)
-            if dist <= agreement_sigma:
+            mahal_match = dist <= agreement_sigma
+            translation_delta = mu_i[:2] - mu_j[:2]
+            pixel_dist = float(math.hypot(translation_delta[0], translation_delta[1]))
+            pixel_match = agreement_pixel_floor > 0.0 and pixel_dist <= agreement_pixel_floor
+            if mahal_match or pixel_match:
                 rows.extend([i, j])
                 cols.extend([j, i])
     # Build dense adjacency.  N is small (typically < 10), so this is fine.
@@ -441,12 +559,19 @@ def ensemble(
             model_metadata=md,
             annotations=ann,
         )
+    # Drop fallback-tier results superseded by a non-spurious primary
+    # for the same body (e.g., BodyTerminatorNav / BodyBlobNav when
+    # BodyLimbNav or BodyDiscCorrelateNav succeeded on the same body).
+    # The full ``results`` list is preserved on the NavResult for
+    # diagnostics; only the ensemble math sees the filtered set.
+    viable = _drop_superseded_fallbacks(viable)
     interior = [r for r in viable if not r.at_edge]
     if interior:
         viable = interior
     groups = _agreement_groups(
         viable,
         agreement_sigma=cfg.agreement_sigma,
+        agreement_pixel_floor=cfg.agreement_pixel_floor,
         rcond=cfg.pinvh_rcond,
     )
     ranked = sorted(
