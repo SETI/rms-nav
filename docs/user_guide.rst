@@ -15,7 +15,6 @@ appendices.
    user_guide_backplanes
    user_guide_simulated_images
    user_guide_pds4_bundle
-   user_guide_image_library
    user_guide_appendix_coiss
    user_guide_appendix_gossi
    user_guide_appendix_nhlorri

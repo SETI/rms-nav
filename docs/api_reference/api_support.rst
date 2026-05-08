@@ -1,6 +1,8 @@
 nav.support
 ===========
 
+.. automodule:: nav.support
+
 .. automodule:: nav.support.attrdict
    :members:
    :undoc-members:

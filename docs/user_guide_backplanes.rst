@@ -18,13 +18,17 @@ Key properties:
   primary HDU).
 - Backplanes that are entirely zero are omitted from the FITS file.
 - The list of backplanes to generate is configured under ``backplanes`` in
-  ``src/nav/config_files/config_90_backplanes.yaml``.
+  ``src/nav/config_files/config_900_backplanes.yaml``.
 - For simulated observations, synthetic backplanes are produced whose masks
   follow the simulated body shapes.
 
 Backplane generation only writes the FITS file and the associated metadata
 JSON. PDS4 labels for the backplane products are produced in a later step
 by ``nav_create_bundle labels`` (see :doc:`user_guide_pds4_bundle`).
+
+For the pipeline's internal architecture (per-source generation,
+distance-aware merge, FITS writer details, "Adding a backplane" checklist),
+see :doc:`dev_guide/dev_guide_backplanes`.
 
 Command-Line Interfaces
 ========================
@@ -112,7 +116,7 @@ Configuration
 -------------
 
 Backplanes are configured under ``backplanes`` in
-``src/nav/config_files/config_90_backplanes.yaml``:
+``src/nav/config_files/config_900_backplanes.yaml``:
 
 - ``backplanes.bodies``: list of body backplane entries. Each entry has
   ``name`` (the FITS HDU name), ``method`` (the ``oops.Backplane`` method to

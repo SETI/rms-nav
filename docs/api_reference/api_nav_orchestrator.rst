@@ -1,6 +1,8 @@
 nav.nav_orchestrator
 ====================
 
+.. automodule:: nav.nav_orchestrator
+
 .. automodule:: nav.nav_orchestrator.orchestrator
    :members:
    :undoc-members:
@@ -52,6 +54,11 @@ nav.nav_orchestrator
    :show-inheritance:
 
 .. automodule:: nav.nav_orchestrator.status_reason_info
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: nav.nav_orchestrator.instrument_config
    :members:
    :undoc-members:
    :show-inheritance:
