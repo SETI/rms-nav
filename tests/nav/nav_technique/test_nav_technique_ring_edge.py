@@ -131,6 +131,83 @@ def test_ring_edge_nav_infeasible_on_empty_input() -> None:
     assert 'no_ring_edge_features' in report.reason
 
 
+def test_ring_edge_nav_marks_spurious_when_per_edge_rms_collapses_to_one(
+    monkeypatch: pytest.MonkeyPatch,
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """Per-edge RMS exposes a single-edge mis-convergence Tukey would mask.
+
+    Models the production failure mode (Cassini Tethys N1572471790):
+    three RING_EDGE features at distinct radii feed the LM, and the
+    fit walks onto one of them while the other two contribute pure
+    outliers.  Tukey rejects the outliers so ``rms_px`` is near zero
+    even though the offset is far from the true joint solution; the
+    per-edge sum is the only signal that recovers the correct
+    spurious flag.
+
+    The test forges an LM result whose post-Tukey ``rms_px`` is
+    zero but whose per-vertex residuals are bimodal so that the
+    per-edge RMS averages to a value far above the spurious
+    threshold.  ``RingEdgeNav.navigate`` must then mark the result
+    spurious so the ensemble can drop it.
+    """
+    from nav.nav_technique import dt_fitting, nav_technique_ring_edge
+
+    shape = (200, 200)
+    image = disc_image(shape, (100.0, 100.0), 30.0)
+    vertices_a, normals_a = circle_polyline((100.0, 100.0), 30.0, 60)
+    vertices_b, normals_b = circle_polyline((100.0, 100.0), 40.0, 60)
+    vertices_c, normals_c = circle_polyline((100.0, 100.0), 50.0, 60)
+    feat_a = make_ring_feature(
+        'inner', vertices=vertices_a, outward_normals=normals_a, is_straight_line=False
+    )
+    feat_b = make_ring_feature(
+        'middle', vertices=vertices_b, outward_normals=normals_b, is_straight_line=False
+    )
+    feat_c = make_ring_feature(
+        'outer', vertices=vertices_c, outward_normals=normals_c, is_straight_line=False
+    )
+    technique = RingEdgeNav()
+    context = make_nav_context(image)
+
+    # Bimodal residuals: edge A fits cleanly (~0 px), edges B and C are
+    # off by ~50 px so their per-edge RMS is large.  Tukey reweights
+    # the bad edges to zero — ``rms_px`` collapses to ~0 but the raw
+    # per-edge sum makes the mis-convergence visible.
+    n_total = vertices_a.shape[0] + vertices_b.shape[0] + vertices_c.shape[0]
+    residuals = np.zeros(n_total, dtype=np.float64)
+    residuals[vertices_a.shape[0] :] = 50.0
+    weights = np.zeros(n_total, dtype=np.float64)
+    weights[: vertices_a.shape[0]] = 1.0
+    forged_result = dt_fitting.LMRefineResult(
+        offset_vu=(-27.0, -18.0),
+        rotation_rad=0.0,
+        covariance=np.eye(2, dtype=np.float64) * 0.25,
+        residuals_px=residuals,
+        weights=weights,
+        rms_px=0.0,
+        iterations=10,
+        converged=True,
+        inlier_count=vertices_a.shape[0],
+    )
+    monkeypatch.setattr(
+        nav_technique_ring_edge,
+        'lm_subpixel_refine',
+        lambda **_kwargs: forged_result,
+    )
+
+    result = technique.navigate([feat_a, feat_b, feat_c], context)
+    assert isinstance(result.diagnostics, RingEdgeDiagnostics)
+    assert result.diagnostics.edge_count == 3
+    # Average per-edge RMS = (0 + 50 + 50) / 3 ≈ 33.3, far above any
+    # plausible spurious threshold derived from sub-pixel sigmas.
+    assert result.diagnostics.per_edge_dt_rms_summed > 50.0
+    assert result.spurious is True
+
+
 def test_ring_edge_nav_registered_with_navtechnique_registry() -> None:
     from nav.nav_technique.nav_technique import NavTechnique
 

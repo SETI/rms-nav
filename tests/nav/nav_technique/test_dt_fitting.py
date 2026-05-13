@@ -350,6 +350,47 @@ def test_lm_subpixel_refine_recovers_subpixel_translation() -> None:
     assert result.inlier_count == 64
 
 
+def test_lm_subpixel_refine_trust_region_caps_offset_displacement() -> None:
+    """The trust-region kwarg physically prevents the LM from leaving the seed.
+
+    Plant a circle at (-1.5, -2.5) but seed the LM at (5, 5) — well
+    outside the planted basin.  Without a trust region, the LM either
+    walks back toward the truth or, on noisy data, walks to an
+    unrelated DT minimum.  With a 1.0-px trust region the converged
+    offset is constrained to ``hypot(dv-5, du-5) <= 1.0``: the LM can
+    refine inside the trust radius but cannot escape it.
+    """
+    shape = (96, 96)
+    radius = 18.0
+    dt = _build_dt_for_circle(shape, radius)
+    cv = shape[0] / 2.0 + 1.5
+    cu = shape[1] / 2.0 + 2.5
+    vertices, outward_normals = _build_circle_polyline((cv, cu), radius, 64)
+    inward_normals = -outward_normals
+    sigmas = np.full(vertices.shape[0], 0.5, dtype=np.float64)
+    image = _render_image_with_circle(shape, (shape[0] / 2.0, shape[1] / 2.0), radius)
+    grad = compute_image_gradient_vu(image, sigma_px=DEFAULT_IMAGE_GRADIENT_SIGMA_PX)
+    initial = (5.0, 5.0)
+    trust_region = 1.0
+    result = lm_subpixel_refine(
+        vertices_vu=vertices,
+        normals_vu=inward_normals,
+        sigma_normal_per_vertex_px=sigmas,
+        image_edge_dt=dt,
+        image_gradient_vu=grad,
+        initial_offset_vu=initial,
+        use_polarity=True,
+        trust_region_px=trust_region,
+    )
+    displacement = float(
+        np.hypot(result.offset_vu[0] - initial[0], result.offset_vu[1] - initial[1])
+    )
+    # The displacement is bounded by the trust radius (with a small
+    # tolerance for the final commit; the LM may accept a step
+    # exactly at the boundary).
+    assert displacement <= trust_region + 1.0e-6
+
+
 def test_lm_subpixel_refine_rejects_outliers_via_tukey() -> None:
     shape = (96, 96)
     radius = 18.0

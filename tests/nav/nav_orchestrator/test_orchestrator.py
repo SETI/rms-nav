@@ -10,8 +10,12 @@ import pytest
 from nav.annotation import Annotations
 from nav.feature.feature import NavFeature, NavReliabilityBreakdown
 from nav.feature.feature_type import NavFeatureType
-from nav.feature.flags import StarFlags
-from nav.feature.geometry import StarGeometry
+from nav.feature.flags import BodyBlobFlags, BodyDiscFlags, StarFlags
+from nav.feature.geometry import (
+    BodyBlobGeometry,
+    BodyDiscGeometry,
+    StarGeometry,
+)
 from nav.nav_model import NavModel
 from nav.nav_orchestrator.image_classifier import ImageQualityThresholds
 from nav.nav_orchestrator.nav_context import NavContext
@@ -581,3 +585,160 @@ def test_prepare_apply_gate_false_returns_gated_features() -> None:
     full_prep = orch.prepare(obs, apply_gate=False)  # type: ignore[arg-type]
     assert gated_prep.features == []
     assert len(full_prep.features) == 2
+
+
+# --- Pass-1 fallback-skip regression tests ---
+
+
+class _FakeBodyModel(NavModel):
+    """Fake NavModel that emits one BODY_DISC + one BODY_BLOB for one body."""
+
+    def __init__(self, obs: Any, *, body_name: str = 'TestMoon') -> None:
+        super().__init__('body:test', obs)
+        self._body_name = body_name
+
+    def create_model(self) -> None:
+        self._metadata['feature_count'] = 2
+
+    def to_features(self, context: NavContext) -> list[NavFeature]:
+        common = {
+            'subject_range_km': 1.0e8,
+            'position_cov_px': np.eye(2, dtype=np.float64) * 0.25,
+            'intensity_sigma_rel': 0.05,
+            'preferred_filter': NavFilterSpec(kind=NavFilterKind.NONE),
+            'reliability': 0.8,
+            'reliability_reasons': NavReliabilityBreakdown(visible_lit_fraction=1.0),
+        }
+        disc = NavFeature(
+            feature_id=f'body_disc:{self._body_name}',
+            feature_type=NavFeatureType.BODY_DISC,
+            source_model='body:test',
+            geometry=BodyDiscGeometry(
+                bbox_extfov_vu=(0, 0, 16, 16),
+                predicted_center_vu=(8.0, 8.0),
+                overflow_fraction=0.0,
+            ),
+            usable_types=frozenset({NavFeatureType.BODY_DISC}),
+            flags=BodyDiscFlags(body_name=self._body_name),
+            **common,
+        )
+        blob = NavFeature(
+            feature_id=f'body_blob:{self._body_name}',
+            feature_type=NavFeatureType.BODY_BLOB,
+            source_model='body:test',
+            geometry=BodyBlobGeometry(
+                bbox_extfov_vu=(0, 0, 16, 16),
+                predicted_center_vu=(8.0, 8.0),
+                predicted_diameter_px=8.0,
+            ),
+            usable_types=frozenset({NavFeatureType.BODY_BLOB}),
+            flags=BodyBlobFlags(body_name=self._body_name, predicted_diameter_px=8.0),
+            **common,
+        )
+        return [disc, blob]
+
+    def to_annotations(self, context: NavContext) -> Annotations:
+        return Annotations()
+
+
+class _FakeBodyPrimary(NavTechnique):
+    """Primary technique consuming BODY_DISC; tracks how many times it ran."""
+
+    name = '_FakeBodyPrimary'
+    accepts_feature_types = frozenset({NavFeatureType.BODY_DISC})
+    tier = 'primary'
+    run_count: int = 0
+    spurious_override: bool = False
+
+    def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
+        eligible = [f for f in features if f.feature_type is NavFeatureType.BODY_DISC]
+        if not eligible:
+            return NavFeasibilityReport(feasible=False, reason='no_body_disc')
+        return NavFeasibilityReport(
+            feasible=True, reason='ok', consumed_feature_count=len(eligible)
+        )
+
+    def navigate(self, features: list[NavFeature], context: NavContext) -> NavTechniqueResult:
+        type(self).run_count += 1
+        return NavTechniqueResult(
+            technique_name=self.name,
+            feature_ids=tuple(f.feature_id for f in features),
+            offset_px=(1.0, 2.0),
+            covariance_px2=np.eye(2, dtype=np.float64) * 0.25,
+            confidence=0.85,
+            spurious=type(self).spurious_override,
+            at_edge=False,
+            diagnostics=StarFieldDiagnostics(n_inliers=len(features)),
+        )
+
+
+class _FakeBodyFallback(NavTechnique):
+    """Fallback technique consuming BODY_BLOB; tracks how many times it ran."""
+
+    name = '_FakeBodyFallback'
+    accepts_feature_types = frozenset({NavFeatureType.BODY_BLOB})
+    tier = 'fallback'
+    run_count: int = 0
+
+    def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
+        eligible = [f for f in features if f.feature_type is NavFeatureType.BODY_BLOB]
+        if not eligible:
+            return NavFeasibilityReport(feasible=False, reason='no_body_blob')
+        return NavFeasibilityReport(
+            feasible=True, reason='ok', consumed_feature_count=len(eligible)
+        )
+
+    def navigate(self, features: list[NavFeature], context: NavContext) -> NavTechniqueResult:
+        type(self).run_count += 1
+        return NavTechniqueResult(
+            technique_name=self.name,
+            feature_ids=tuple(f.feature_id for f in features),
+            offset_px=(0.5, 0.5),
+            covariance_px2=np.eye(2, dtype=np.float64) * 0.25,
+            confidence=0.6,
+            spurious=False,
+            at_edge=False,
+            diagnostics=StarFieldDiagnostics(n_inliers=len(features)),
+        )
+
+
+def test_orchestrator_skips_fallback_when_primary_covers_body() -> None:
+    """A non-spurious primary suppresses the fallback technique on the same body.
+
+    Operators expect the fallback to run only when the primary fails;
+    the prior behaviour ran every feasible technique and dropped the
+    fallback in the ensemble post-hoc, wasting its compute.  This
+    regression test verifies the primary-then-fallback scheduling
+    actually skips the fallback's ``navigate`` call.
+    """
+    _FakeBodyPrimary.run_count = 0
+    _FakeBodyPrimary.spurious_override = False
+    _FakeBodyFallback.run_count = 0
+    obs = _FakeObs()
+    model = _FakeBodyModel(obs, body_name='TestMoon')
+    orch = NavOrchestrator([model], only_techniques=['_FakeBodyPrimary', '_FakeBodyFallback'])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    assert result.status == 'ok'
+    assert _FakeBodyPrimary.run_count == 1
+    # Fallback is NOT called because the primary covered TestMoon.
+    assert _FakeBodyFallback.run_count == 0
+    technique_names = {t.technique_name for t in result.per_technique}
+    assert '_FakeBodyPrimary' in technique_names
+    assert '_FakeBodyFallback' not in technique_names
+
+
+def test_orchestrator_runs_fallback_when_primary_is_spurious() -> None:
+    """A spurious primary does not cover the body — the fallback runs."""
+    _FakeBodyPrimary.run_count = 0
+    _FakeBodyPrimary.spurious_override = True
+    _FakeBodyFallback.run_count = 0
+    obs = _FakeObs()
+    model = _FakeBodyModel(obs, body_name='TestMoon')
+    orch = NavOrchestrator([model], only_techniques=['_FakeBodyPrimary', '_FakeBodyFallback'])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    # The orchestrator returns whatever status the ensemble derives —
+    # the contract under test is that the fallback DID run.
+    del result
+    assert _FakeBodyPrimary.run_count == 1
+    assert _FakeBodyFallback.run_count == 1
+    _FakeBodyPrimary.spurious_override = False  # reset for any later test
