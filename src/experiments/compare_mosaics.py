@@ -530,6 +530,23 @@ def _expand_per_image_to_pixels(per_image, image_number):
     return ma.masked_array(values, mask=mask | out_of_range)
 
 
+def _per_pixel_incidence_rad(obj, kind, target_shape):
+    """Return per-pixel incidence in radians shaped to ``target_shape``, or None.
+
+    For body files (``body_reproj``, ``body_mosaic``) the dataclass already
+    holds a 2-D incidence array in radians on the same grid as ``img``; we
+    return it as-is. For ring files (``ring_reproj``, ``ring_mosaic``) the
+    stored incidence is a scalar and cannot be used for per-pixel masking,
+    so we return ``None`` and let the caller decide.
+    """
+    if kind not in ('body_reproj', 'body_mosaic'):
+        return None
+    inc = np.asarray(obj.incidence, dtype=np.float64)
+    if inc.shape != target_shape:
+        return None
+    return inc
+
+
 def _angle_arrays_radians(obj, kind):
     """Return ``{name: scalar_or_array_in_radians}`` for the metadata angles.
 
@@ -827,6 +844,7 @@ def _save_statistics(payload, output_path):
 
 def _build_statistics_payload(*, args, kind1, kind2, obj1, obj2, same_shape,
                               n_overlap, n_only1, n_only2,
+                              n_overlap_before_inc_mask, n_dropped_by_inc,
                               stats_label, stats1, stats2,
                               ratio_of_stats_dict, ratio_of_pixels,
                               angle_records):
@@ -853,6 +871,9 @@ def _build_statistics_payload(*, args, kind1, kind2, obj1, obj2, same_shape,
         'shape_file2': list(obj2.img.shape),
         'analyze_all_pixels': bool(args.analyze_all_pixels),
         'stats_region': stats_label,
+        'max_pixel_incidence_deg': (float(args.max_pixel_incidence)
+                                    if args.max_pixel_incidence is not None
+                                    else None),
     }
     payload = {
         'metadata': metadata,
@@ -861,6 +882,12 @@ def _build_statistics_payload(*, args, kind1, kind2, obj1, obj2, same_shape,
             'n_overlap': int(n_overlap) if n_overlap is not None else None,
             'n_only_file1': int(n_only1) if n_only1 is not None else None,
             'n_only_file2': int(n_only2) if n_only2 is not None else None,
+            'n_overlap_before_inc_mask': (int(n_overlap_before_inc_mask)
+                                          if n_overlap_before_inc_mask is not None
+                                          else None),
+            'n_dropped_by_inc_mask': (int(n_dropped_by_inc)
+                                      if n_dropped_by_inc is not None
+                                      else None),
         },
         'image_file1': stats1,
         'image_file2': stats2,
@@ -915,6 +942,20 @@ def main():
             'Compute per-file statistics over all valid pixels in each image '
             'independently, rather than restricting to pixels valid in both. '
             'The ratio is still computed only where both images have valid data.'
+        ),
+    )
+    parser.add_argument(
+        '--max-pixel-incidence',
+        type=float,
+        default=None,
+        metavar='DEG',
+        help=(
+            'Drop pixels whose absolute incidence angle exceeds DEG in either '
+            'image before computing the overlap statistics, ratio, and angle '
+            'delta percentiles. Useful to suppress Lommel-Seeliger / Minnaert '
+            'blow-up near the terminator. Only applies to body files where '
+            'incidence is per-pixel; for ring files (scalar incidence) the '
+            'whole pair is kept or dropped uniformly.'
         ),
     )
     args = parser.parse_args()
@@ -978,12 +1019,32 @@ def main():
         ratio_of_pixels = None
         overlap_mask = None
         n_only1 = n_only2 = n_overlap = None
+        n_overlap_before_inc_mask = None
+        n_dropped_by_inc = None
         if same_shape:
             img1_f = np.asarray(ma.filled(img1, np.nan), dtype=np.float64)
             img2_f = np.asarray(ma.filled(img2, np.nan), dtype=np.float64)
             mask1 = ma.getmaskarray(img1)
             mask2 = ma.getmaskarray(img2)
             overlap_mask = mask1 | mask2
+
+            if args.max_pixel_incidence is not None:
+                inc_thr_rad = math.radians(args.max_pixel_incidence)
+                inc1 = _per_pixel_incidence_rad(obj1, kind1, img1.shape)
+                inc2 = _per_pixel_incidence_rad(obj2, kind2, img2.shape)
+                if inc1 is None or inc2 is None:
+                    print(
+                        f'WARNING: --max-pixel-incidence ignored for kind '
+                        f'{kind1!r}/{kind2!r}; incidence is not per-pixel.',
+                        file=sys.stderr,
+                    )
+                else:
+                    n_overlap_before_inc_mask = int(np.sum(~overlap_mask))
+                    inc_too_high = (inc1 > inc_thr_rad) | (inc2 > inc_thr_rad)
+                    newly_masked = inc_too_high & ~overlap_mask
+                    n_dropped_by_inc = int(np.sum(newly_masked))
+                    overlap_mask = overlap_mask | inc_too_high
+
             zero2 = img2_f == 0.0
             ratio_mask = overlap_mask | zero2
             ratio_data = np.where(
@@ -997,8 +1058,16 @@ def main():
             n_only1 = int(np.sum(~mask1 & mask2))
             n_only2 = int(np.sum(mask1 & ~mask2))
             n_overlap = int(np.sum(~overlap_mask))
-            print(f'Overlap: {n_overlap} valid pixels in both images '
-                  f'({n_only1} only in file1, {n_only2} only in file2)')
+            msg = (f'Overlap: {n_overlap} valid pixels in both images '
+                   f'({n_only1} only in file1, {n_only2} only in file2)')
+            if n_dropped_by_inc is not None:
+                kept_frac = (n_overlap / n_overlap_before_inc_mask
+                             if n_overlap_before_inc_mask else 0.0)
+                msg += (f'; pixel incidence cap {args.max_pixel_incidence}° '
+                        f'dropped {n_dropped_by_inc} pixels '
+                        f'({n_overlap}/{n_overlap_before_inc_mask} kept = '
+                        f'{kept_frac:.2%})')
+            print(msg)
         else:
             print('Overlap: N/A (alignment skipped, different shapes)')
 
@@ -1056,6 +1125,8 @@ def main():
                 n_overlap=n_overlap,
                 n_only1=n_only1,
                 n_only2=n_only2,
+                n_overlap_before_inc_mask=n_overlap_before_inc_mask,
+                n_dropped_by_inc=n_dropped_by_inc,
                 stats_label=stats_region,
                 stats1=stats1,
                 stats2=stats2,

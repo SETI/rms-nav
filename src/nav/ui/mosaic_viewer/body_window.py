@@ -38,6 +38,7 @@ from PyQt6.QtWidgets import (
 from nav.support.time import et_to_utc
 from nav.ui.common import build_stretch_controls
 from nav.ui.mosaic_viewer.common import BodyDisplayData, load_body_file
+from nav.ui.mosaic_viewer.histogram_stretch import HistogramStretchWidget
 from nav.ui.mosaic_viewer.photometric_display import compute_body_display_image
 from nav.ui.mosaic_viewer.projections import ProjectionKind
 from nav.ui.mosaic_viewer.tiled_image_widget import (
@@ -284,6 +285,9 @@ class BodyMosaicWindow(QMainWindow):
         self._show_lat_ticks = show_lat_ticks
         self._show_lon_ticks = show_lon_ticks
         self._stretch_controls: dict[str, Any] = {}
+        self._stretch_form: QFormLayout = QFormLayout()
+        self._histogram_widget: HistogramStretchWidget | None = None
+        self._chk_histogram_mode: QCheckBox | None = None
         self._pending_fit = False
         self._body_view_ma: ma.MaskedArray | None = None
         self._proj_kind: ProjectionKind = initial_projection
@@ -476,6 +480,7 @@ class BodyMosaicWindow(QMainWindow):
         stretch_box = QGroupBox('Stretch')
         stretch_form = QFormLayout()
         stretch_form.setHorizontalSpacing(4)
+        self._stretch_form = stretch_form
         self._stretch_controls = build_stretch_controls(
             stretch_form,
             img_min=0.0,
@@ -488,6 +493,16 @@ class BodyMosaicWindow(QMainWindow):
             on_gamma_changed=lambda _v: self._apply_stretch(),
             slider_horizontal_stretch=1,
         )
+        self._histogram_widget = HistogramStretchWidget(
+            on_black_changed=self._on_histogram_black_changed,
+            on_white_changed=self._on_histogram_white_changed,
+        )
+        self._histogram_widget.setVisible(False)
+        stretch_left = QVBoxLayout()
+        stretch_left.setContentsMargins(0, 0, 0, 0)
+        stretch_left.setSpacing(2)
+        stretch_left.addWidget(self._histogram_widget)
+        stretch_left.addLayout(stretch_form)
         stretch_btn_col = QVBoxLayout()
         stretch_btn_col.setSpacing(4)
         btn_stretch_reset = QPushButton('Reset')
@@ -499,11 +514,14 @@ class BodyMosaicWindow(QMainWindow):
         for b in (btn_stretch_reset, btn_stretch_full, btn_stretch_bright):
             b.setMaximumWidth(72)
             stretch_btn_col.addWidget(b)
+        self._chk_histogram_mode = QCheckBox('Histogram')
+        self._chk_histogram_mode.toggled.connect(self._on_histogram_mode_toggled)
+        stretch_btn_col.addWidget(self._chk_histogram_mode)
         stretch_btn_col.addStretch()
         stretch_outer = QHBoxLayout()
         stretch_outer.setContentsMargins(4, 4, 4, 4)
         stretch_outer.setSpacing(8)
-        stretch_outer.addLayout(stretch_form, stretch=1)
+        stretch_outer.addLayout(stretch_left, stretch=1)
         stretch_outer.addLayout(stretch_btn_col)
         stretch_box.setLayout(stretch_outer)
         upper_h.addWidget(stretch_box, stretch=2)
@@ -751,7 +769,8 @@ class BodyMosaicWindow(QMainWindow):
         black, white = _percentile_stretch(img, 0.0, 98.0)
         g = max(0.1, self._stretch_controls['slider_gamma'].value() / 100.0)
         self._stretch_controls['set_range'](dd.vmin, dd.vmax)
-        self._stretch_controls['set_values'](black, white, g)
+        self._set_stretch_levels(black, white, g)
+        self._refresh_histogram_data()
         self._image_widget.set_stretch(black, white, g)
         self._on_colorby_changed(self._colorby_group.checkedButton())
 
@@ -802,7 +821,8 @@ class BodyMosaicWindow(QMainWindow):
         if self._initial_white is not None:
             white = self._initial_white
         self._stretch_controls['set_range'](dd.vmin, dd.vmax)
-        self._stretch_controls['set_values'](black, white, self._initial_gamma)
+        self._set_stretch_levels(black, white, self._initial_gamma)
+        self._refresh_histogram_data()
         self._image_widget.set_stretch(black, white, self._initial_gamma)
 
         self._clear_info()
@@ -828,6 +848,58 @@ class BodyMosaicWindow(QMainWindow):
         g = max(0.1, self._stretch_controls['slider_gamma'].value() / 100.0)
         self._image_widget.set_stretch(b, w, g)
 
+    def _set_stretch_levels(self, black: float, white: float, gamma: float) -> None:
+        """Sync black/white/gamma into the slider controls and the histogram widget."""
+        self._stretch_controls['set_values'](black, white, gamma)
+        if self._histogram_widget is not None:
+            self._histogram_widget.set_values(black, white)
+
+    def _on_histogram_black_changed(self, black: float) -> None:
+        """Histogram drag handler for the black indicator."""
+        white = self._stretch_controls['from_slider'](
+            self._stretch_controls['slider_white'].value()
+        )
+        gamma = max(0.1, self._stretch_controls['slider_gamma'].value() / 100.0)
+        self._stretch_controls['set_values'](black, white, gamma)
+        self._apply_stretch()
+
+    def _on_histogram_white_changed(self, white: float) -> None:
+        """Histogram drag handler for the white indicator."""
+        black = self._stretch_controls['from_slider'](
+            self._stretch_controls['slider_black'].value()
+        )
+        gamma = max(0.1, self._stretch_controls['slider_gamma'].value() / 100.0)
+        self._stretch_controls['set_values'](black, white, gamma)
+        self._apply_stretch()
+
+    def _on_histogram_mode_toggled(self, checked: bool) -> None:
+        """Swap between slider stretch UI and histogram-with-indicators UI."""
+        if self._histogram_widget is None or self._chk_histogram_mode is None:
+            return
+        # Slider rows are at indices 0 (Black) and 1 (White); Gamma at 2.
+        self._stretch_form.setRowVisible(0, not checked)
+        self._stretch_form.setRowVisible(1, not checked)
+        self._histogram_widget.setVisible(checked)
+        if checked:
+            black = self._stretch_controls['from_slider'](
+                self._stretch_controls['slider_black'].value()
+            )
+            white = self._stretch_controls['from_slider'](
+                self._stretch_controls['slider_white'].value()
+            )
+            self._histogram_widget.set_values(black, white)
+            self._refresh_histogram_data()
+
+    def _refresh_histogram_data(self) -> None:
+        """Push the active display image into the histogram widget."""
+        if self._histogram_widget is None:
+            return
+        dd = self._display_data
+        if dd is None:
+            return
+        view = self._body_view_ma if self._body_view_ma is not None else dd.image_ma
+        self._histogram_widget.set_data(view)
+
     def _on_stretch_preset_reset(self) -> None:
         """Reset stretch to a 0-98 percentile of the current display image."""
         dd = self._display_data
@@ -836,7 +908,7 @@ class BodyMosaicWindow(QMainWindow):
         black, white = _percentile_stretch(
             self._body_view_ma if self._body_view_ma is not None else dd.image_ma, 0.0, 98.0
         )
-        self._stretch_controls['set_values'](black, white, self._default_gamma)
+        self._set_stretch_levels(black, white, self._default_gamma)
         self._apply_stretch()
 
     def _on_stretch_preset_full(self) -> None:
@@ -844,7 +916,7 @@ class BodyMosaicWindow(QMainWindow):
         dd = self._display_data
         if dd is None:
             return
-        self._stretch_controls['set_values'](dd.vmin, dd.vmax, self._default_gamma)
+        self._set_stretch_levels(dd.vmin, dd.vmax, self._default_gamma)
         self._image_widget.set_stretch(dd.vmin, dd.vmax, self._default_gamma)
 
     def _on_stretch_preset_bright(self) -> None:
@@ -855,7 +927,7 @@ class BodyMosaicWindow(QMainWindow):
         black, white = _percentile_stretch(
             self._body_view_ma if self._body_view_ma is not None else dd.image_ma, 2.0, 98.0
         )
-        self._stretch_controls['set_values'](black, white, self._default_gamma)
+        self._set_stretch_levels(black, white, self._default_gamma)
         self._apply_stretch()
 
     def _fit_zoom_to_window(self) -> None:
