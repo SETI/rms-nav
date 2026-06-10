@@ -15,7 +15,7 @@ from nav.feature.flags import BodyBlobFlags
 from nav.feature.geometry import BodyBlobGeometry
 from nav.nav_technique.diagnostics import BodyBlobDiagnostics
 from nav.nav_technique.nav_technique import ROTATION_UNOBSERVABLE_VARIANCE
-from nav.nav_technique.nav_technique_body_blob import BodyBlobNav
+from nav.nav_technique.nav_technique_body_blob import BodyBlobNav, _joint_covariance
 from nav.support.filters import NavFilterKind, NavFilterSpec
 
 
@@ -362,3 +362,105 @@ def test_body_blob_flags_reject_negative_phase_irregularity() -> None:
             predicted_diameter_px=10.0,
             phase_irregularity_factor=-0.01,
         )
+
+
+def test_joint_covariance_two_point_reduced_chi_square() -> None:
+    """Two-blob covariance matches the analytic reduced-chi-square weighted mean.
+
+    Derivation (per-axis: var = chi2_nu / sum(w), with
+    chi2_nu = sum(w * r^2) / max(N - p, 1), p = 2):
+
+    w = [1, 3], sum(w) = 4, N = 2, dof = max(2 - 2, 1) = 1.
+
+    V axis: offsets = [2, 4], mean = (1*2 + 3*4)/4 = 3.5,
+            r = [-1.5, 0.5], sum(w r^2) = 1*2.25 + 3*0.25 = 3.0,
+            chi2_nu = 3.0/1 = 3.0, var = 3.0/4 = 0.75 (> floor 1/4 = 0.25).
+    U axis: offsets = [-1, 1], mean = (1*-1 + 3*1)/4 = 0.5,
+            r = [-1.5, 0.5], sum(w r^2) = 3.0, var = 0.75 (identical).
+    """
+    weights = np.array([1.0, 3.0], dtype=np.float64)
+    offsets_v = np.array([2.0, 4.0], dtype=np.float64)
+    offsets_u = np.array([-1.0, 1.0], dtype=np.float64)
+    dv = float(np.sum(weights * offsets_v) / weights.sum())  # 3.5
+    du = float(np.sum(weights * offsets_u) / weights.sum())  # 0.5
+    cov = _joint_covariance(offsets_v=offsets_v, offsets_u=offsets_u, weights=weights, dv=dv, du=du)
+    assert cov[0, 0] == pytest.approx(0.75, abs=1e-9)
+    assert cov[1, 1] == pytest.approx(0.75, abs=1e-9)
+    assert cov[0, 1] == pytest.approx(0.0, abs=1e-9)
+    assert cov[1, 0] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_joint_covariance_n_point_reduced_chi_square() -> None:
+    """Four-blob covariance matches the analytic reduced-chi-square weighted mean.
+
+    w = [1, 1, 1, 1], sum(w) = 4, N = 4, dof = max(4 - 2, 1) = 2.
+
+    V axis: offsets = [0, 2, 4, 6], mean = 12/4 = 3.0,
+            r = [-3, -1, 1, 3], sum(w r^2) = 9 + 1 + 1 + 9 = 20,
+            chi2_nu = 20/2 = 10, var = 10/4 = 2.5 (> floor 0.25).
+    U axis: offsets = [1, 1, 1, 1], mean = 1.0, r = 0 everywhere,
+            sum(w r^2) = 0, chi2_nu = 0, candidate var = 0 -> floored at
+            1/sum(w) = 1/4 = 0.25.
+    """
+    weights = np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float64)
+    offsets_v = np.array([0.0, 2.0, 4.0, 6.0], dtype=np.float64)
+    offsets_u = np.array([1.0, 1.0, 1.0, 1.0], dtype=np.float64)
+    dv = float(np.sum(weights * offsets_v) / weights.sum())  # 3.0
+    du = float(np.sum(weights * offsets_u) / weights.sum())  # 1.0
+    cov = _joint_covariance(offsets_v=offsets_v, offsets_u=offsets_u, weights=weights, dv=dv, du=du)
+    assert cov[0, 0] == pytest.approx(2.5, abs=1e-9)
+    assert cov[1, 1] == pytest.approx(0.25, abs=1e-9)
+
+
+def test_joint_covariance_single_blob_is_large_not_overconfident() -> None:
+    """NAV-005: a single blob yields the (large) inverse-precision floor.
+
+    One point cannot constrain two translation parameters, so the
+    covariance must be large rather than a tiny over-confident value.
+    With a single small-weight blob (w = 0.01) the per-axis variance is
+    the pure inverse precision 1/sum(w) = 1/0.01 = 100.0 -- there is no
+    residual scatter (the lone residual is zero by construction).  The
+    old ``sum(w r^2)/(sum w)^2`` form would have reported 0 here (no
+    floor at the correct power), which the over-confidence fix corrects.
+    """
+    weights = np.array([0.01], dtype=np.float64)
+    offsets_v = np.array([3.0], dtype=np.float64)
+    offsets_u = np.array([-4.0], dtype=np.float64)
+    cov = _joint_covariance(
+        offsets_v=offsets_v, offsets_u=offsets_u, weights=weights, dv=3.0, du=-4.0
+    )
+    # 1 / sum(w) = 1 / 0.01 = 100.0 on each axis.
+    assert cov[0, 0] == pytest.approx(100.0, abs=1e-9)
+    assert cov[1, 1] == pytest.approx(100.0, abs=1e-9)
+    # Far larger than a well-determined multi-blob fit (~O(1)).
+    assert cov[0, 0] > 1.0
+
+
+def test_joint_covariance_model_error_floor_inflates_diagonal_by_square() -> None:
+    """ORCH-001: model_error_floor_px>0 adds exactly its square to the diagonal.
+
+    Reuses the two-point fixture (var = 0.75 per axis with no floor).
+    With model_error_floor_px = 2.0 each diagonal grows by exactly
+    2.0**2 = 4.0 -> 0.75 + 4.0 = 4.75; the off-diagonal stays zero.
+    """
+    weights = np.array([1.0, 3.0], dtype=np.float64)
+    offsets_v = np.array([2.0, 4.0], dtype=np.float64)
+    offsets_u = np.array([-1.0, 1.0], dtype=np.float64)
+    dv = 3.5
+    du = 0.5
+    base = _joint_covariance(
+        offsets_v=offsets_v, offsets_u=offsets_u, weights=weights, dv=dv, du=du
+    )
+    floored = _joint_covariance(
+        offsets_v=offsets_v,
+        offsets_u=offsets_u,
+        weights=weights,
+        dv=dv,
+        du=du,
+        model_error_floor_px=2.0,
+    )
+    assert floored[0, 0] == pytest.approx(4.75, abs=1e-9)
+    assert floored[1, 1] == pytest.approx(4.75, abs=1e-9)
+    assert floored[0, 0] - base[0, 0] == pytest.approx(4.0, abs=1e-9)
+    assert floored[1, 1] - base[1, 1] == pytest.approx(4.0, abs=1e-9)
+    assert floored[0, 1] == pytest.approx(0.0, abs=1e-9)

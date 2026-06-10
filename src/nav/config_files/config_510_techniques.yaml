@@ -133,6 +133,13 @@ techniques:
       # Pixels of slack around the search-window axis bounds for the
       # at-edge check.  See ``RingEdgeNav.at_edge_tolerance_px``.
       at_edge_tolerance_px: 1.0
+      # Uncalibrated model-error floor (px), added in quadrature to the
+      # reported covariance diagonal: reported_cov = CRLB-form (+)
+      # model_error_floor_px**2.  Captures the SPICE pointing residual
+      # and body-shape (ellipsoid vs. true silhouette) error that the
+      # per-blob centroid CRLB does not.  Default 0.0 is a no-op pending
+      # an integration-library calibration sweep.
+      model_error_floor_px: 0.0
 
   BodyLimbNav:
     alpha0: -1.0
@@ -489,6 +496,13 @@ techniques:
       # Rotation-axis ``at_edge`` fraction; see
       # ``BodyDiscCorrelateNav.rotation_at_edge_fraction``.
       rotation_at_edge_fraction: 0.95
+      # Uncalibrated model-error floor (px), added in quadrature to the
+      # reported covariance diagonal: reported_cov = CRLB-form (+)
+      # model_error_floor_px**2.  Captures the SPICE pointing residual
+      # and body-shape error that the pattern-match residual scatter
+      # does not.  Default 0.0 is a no-op pending an integration-library
+      # calibration sweep.
+      model_error_floor_px: 0.0
 
   RingAnnulusNav:
     alpha0: -2.0

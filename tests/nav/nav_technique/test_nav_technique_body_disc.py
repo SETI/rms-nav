@@ -14,7 +14,8 @@ from nav.feature.feature_type import NavFeatureType
 from nav.feature.flags import BodyDiscFlags
 from nav.feature.geometry import BodyDiscGeometry
 from nav.nav_technique.diagnostics import BodyDiscDiagnostics
-from nav.nav_technique.nav_technique_body_disc import BodyDiscCorrelateNav
+from nav.nav_technique.nav_technique import ROTATION_UNOBSERVABLE_VARIANCE
+from nav.nav_technique.nav_technique_body_disc import BodyDiscCorrelateNav, _RotationCandidate
 from nav.nav_technique.technique_result import NavTechniqueResult
 from nav.support.filters import NavFilterKind, NavFilterSpec
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
@@ -295,10 +296,13 @@ def test_body_disc_3dof_emits_3x3_covariance(
 ) -> None:
     """A planted offset under fit_camera_rotation produces a 3x3 covariance.
 
-    A circular disc planted at zero rotation should converge near
-    rotation = 0 deg with a finite sigma_theta — the rotation pyramid
-    runs the full 11+5+3 sample schedule but the body's circular shape
-    means the NCC peak is shallow along the rotation axis.
+    NAV-010: the disc technique reports rotation as *unobservable* -- the
+    NCC peak quality is a PSR/PMR separation ratio, not a log-likelihood,
+    so its curvature carries no calibrated angular variance.  The
+    rotation slot of the 3x3 covariance therefore carries the
+    unobservable sentinel and ``sigma_rotation_rad`` is its square root.
+    The translation block and rotation *estimate* are still produced by
+    the 11+5+3 pyramid schedule.
     """
     shape = (120, 120)
     image_center = (60.0, 60.0)
@@ -321,11 +325,14 @@ def test_body_disc_3dof_emits_3x3_covariance(
     result = technique.navigate([feature], context)
     assert result.covariance_px2.shape == (3, 3)
     assert result.rotation_rad is not None
-    assert result.sigma_rotation_rad is not None
     # No rotation planted; the level-2 winner is centred on zero with the
     # 0.25 deg sample step, so |rotation| stays well inside one step.
     assert abs(result.rotation_rad) <= np.deg2rad(0.5)
-    assert 0.0 < result.sigma_rotation_rad < np.deg2rad(5.0)
+    # Rotation is reported unobservable: the rotation-variance slot carries
+    # the finite unobservable sentinel.
+    assert result.covariance_px2[2, 2] == pytest.approx(ROTATION_UNOBSERVABLE_VARIANCE)
+    assert result.sigma_rotation_rad is not None
+    assert result.sigma_rotation_rad == pytest.approx(np.sqrt(ROTATION_UNOBSERVABLE_VARIANCE))
     # Wider abs tolerance than the 2-DoF case: the 11+5+3 rotation
     # search runs the NCC against rotated templates, and the 0.25 deg
     # level-2 sampling step plus integer-rounded pivot shift admits up
@@ -333,3 +340,24 @@ def test_body_disc_3dof_emits_3x3_covariance(
     # at zero rotation.
     assert result.offset_px[0] == pytest.approx(1.0, abs=1.5)
     assert result.offset_px[1] == pytest.approx(-1.0, abs=1.5)
+
+
+def test_rotation_sigma_from_quality_reports_unobservable() -> None:
+    """NAV-010: ``_rotation_sigma_from_quality`` always returns None.
+
+    Even a sharply concave, well-centred quality parabola (the case the
+    former curvature->variance map turned into a finite sigma) now
+    returns None, routing the caller to the rotation-unobservable
+    sentinel.  The PSR/PMR quality is not a log-likelihood, so no
+    calibrated angular variance can be derived from its curvature.
+    """
+    candidates = [
+        _RotationCandidate(theta_rad=-0.1, ncc_result={'quality': 8.0}),
+        _RotationCandidate(theta_rad=0.0, ncc_result={'quality': 12.0}),
+        _RotationCandidate(theta_rad=0.1, ncc_result={'quality': 8.0}),
+    ]
+    winner = candidates[1]
+    sigma = BodyDiscCorrelateNav._rotation_sigma_from_quality(
+        candidates=candidates, winner=winner, step_rad=0.1
+    )
+    assert sigma is None

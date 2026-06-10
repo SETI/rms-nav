@@ -696,59 +696,40 @@ class BodyDiscCorrelateNav(NavTechnique):
         winner: _RotationCandidate,
         step_rad: float,
     ) -> float | None:
-        """Estimate sigma_theta from the level-2 NCC quality curvature.
+        """Report disc rotation uncertainty as unobservable (always ``None``).
 
-        Fits a local quadratic ``q(theta) ≈ q0 + 0.5 * H * (theta - theta_0)**2``
-        through the three level-2 quality samples.  When ``H`` (second
-        derivative) is concave (``H < 0``) the precision is
-        ``-1 / H``; the matching sigma is ``sqrt(1 / (-H * q0))``
-        normalising by the peak quality so a high-confidence sharp
-        peak yields a tight rotation estimate.
+        NAV-010.  The NCC peak quality returned by
+        :func:`nav.support.correlate.navigate_with_pyramid_kpeaks` is a
+        PSR / PMR-style separation ratio, not a log-likelihood.  The
+        former curvature-to-variance map ``sigma_theta**2 = 1 / (-H *
+        q_centre)`` (with ``H`` the level-2 quality second derivative)
+        is dimensionally ``rad**2 / quality**2`` and has no calibrated
+        relationship to angular variance: PSR/PMR do not live on a
+        log-likelihood scale, so the curvature carries no Fisher
+        information about rotation.  A calibrated mapping from the
+        NCC-peak rotation curvature to an angular variance is not yet
+        available, so disc rotation uncertainty is reported as
+        unobservable.
 
-        The 3-sample finite-difference parabola is well-defined only
-        when the winner sits at the centre sample (so the centre is the
-        peak of the fit).  When the winner is at one of the side
-        samples — most commonly because the level-2 search is bumping
-        against ``+-max_rotation_deg`` after clamping — the function
-        returns ``None`` so the caller can fall back to the rotation-
-        unobservable sentinel rather than report a curvature taken at
-        the wrong centre.
+        Returning ``None`` routes the caller to the
+        :data:`~nav.nav_technique.nav_technique.ROTATION_UNOBSERVABLE_VARIANCE`
+        sentinel in the 3x3 covariance's rotation slot (the ensemble's
+        ``pinvh`` combine already maps that huge variance to a near-zero
+        rotation information contribution), so the disc technique
+        contributes a translation estimate while abstaining on rotation.
 
         Parameters:
             candidates: The three level-2 :class:`_RotationCandidate`
-                samples (any ordering).
-            winner: The candidate selected as the rotation pyramid's
-                final answer (highest NCC quality).  Used to verify
-                that the centre of the 3-sample fit coincides with the
-                returned ``theta``.
-            step_rad: Angular sampling step in radians (level-2 step;
-                evenly spaced).
+                samples (unused; retained for the call-site signature
+                and a future calibrated implementation).
+            winner: The rotation-pyramid winner (unused; see above).
+            step_rad: Angular sampling step in radians (unused).
 
         Returns:
-            Estimated sigma_theta in radians when the local curvature is
-            concave at the centre sample and the centre coincides with
-            the winner; ``None`` otherwise.
+            Always ``None`` -- disc rotation variance is reported as
+            unobservable pending a calibrated curvature -> variance map.
         """
-        if len(candidates) != 3:
-            return None
-        sorted_candidates = sorted(candidates, key=lambda c: c.theta_rad)
-        if sorted_candidates[1].theta_rad != winner.theta_rad:
-            return None
-        q_minus = float(sorted_candidates[0].ncc_result['quality'])
-        q_centre = float(sorted_candidates[1].ncc_result['quality'])
-        q_plus = float(sorted_candidates[2].ncc_result['quality'])
-        # Approximate second derivative; level 2 evenly samples theta so the
-        # finite difference is exact for a quadratic.
-        second_deriv = (q_plus - 2.0 * q_centre + q_minus) / (step_rad * step_rad)
-        if second_deriv >= 0.0 or q_centre <= 0.0:
-            return None
-        # Quality is in the same scale as PSR / PMR; the precision the peak
-        # carries scales with q_centre, so dividing keeps sigma_theta in
-        # natural units.
-        sigma_sq = 1.0 / (-second_deriv * q_centre)
-        if not math.isfinite(sigma_sq) or sigma_sq <= 0.0:
-            return None
-        return float(math.sqrt(sigma_sq))
+        return None
 
     def _upsample_factor(self) -> int:
         """Return the FFT upsample factor configured under ``config.offset``."""
