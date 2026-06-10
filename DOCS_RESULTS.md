@@ -39,10 +39,11 @@ live file set.
   least as cleanly as the pre-rename layout (identical single warning before
   and after). Without `-W`, the HTML build succeeds (exit 0) with this one
   warning, and `sphinx-build -b linkcheck` reports zero broken internal links.
-- **Follow-up needed**: An operator should fix the `BodyTerminatorNav`
-  docstring so the enumerated list renders without the autodoc indentation
-  error, which will let `sphinx-build -W` exit clean. This is a source-code
-  docstring fix outside the migration's scope.
+- **Resolution**: Fixed. The `BodyTerminatorNav` class docstring now keeps only
+  short single-line entries under `Class attributes:` and moves the multi-line
+  rationale into a following prose paragraph (matching `BodyLimbNav`), so
+  `sphinx-build -W` exits clean.
+- **Follow-up needed**: None.
 
 ## Linkcheck reports one broken external link
 
@@ -51,7 +52,7 @@ live file set.
   `https://github.com/SETI/rms-cloud_tasks` as a 404. This is an external URL,
   not an internal cross-reference, and is unrelated to the developer-guide
   relocation.
-- **Action taken**: Left as-is. The migration does not touch external link
-  targets, and no internal link is broken.
-- **Follow-up needed**: An operator should confirm the correct public URL for
-  the cloud-tasks project and update the link.
+- **Action taken**: Resolved. The URL had an underscore in the slug; corrected
+  to `https://github.com/SETI/rms-cloud-tasks` in `README.md` (the source that
+  MyST includes into `index.rst`).
+- **Follow-up needed**: None.
