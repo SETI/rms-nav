@@ -407,7 +407,7 @@ Accepts ``STAR`` features.  Runs in pass 1 (no prior required).  Two
 paths share one technique:
 
 - **One-star path.** When the catalog reduction yields one star whose
-  predicted SNR is at least
+  catalog magnitude is at least
   ``brightness_margin_to_next_catalog_star_mag`` (default 1.5 mag)
   brighter than the next-brightest predictable star, the brightest
   detection inside its search window is unambiguously its match.  The

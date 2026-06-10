@@ -514,10 +514,13 @@ in ``config_03_stars.yaml`` under ``stars.catalogs`` (default
 deduplicated using the RA / DEC and V-magnitude thresholds in the same
 file.
 
-**Per-star detectability.**  A predicted SNR is computed for each star
-using the per-instrument PSF (``obs.star_psf()``), the per-image noise
-sigma (a robust MAD estimate), and the catalog magnitude.  Stars whose
-predicted SNR is below ``stars.min_predicted_snr`` are dropped.
+**Per-star detectability.**  Each star is gated by catalog magnitude
+against the per-observation limiting magnitude
+``obs.star_max_usable_vmag()``, the faintest usable star for the
+observation (derived from the camera and exposure time).  Stars fainter
+than the limiting magnitude are dropped.  A magnitude-margin effective
+SNR (how far the star sits above the limit) sets the per-star positional
+covariance and reliability.
 
 **Smear.**  When the spacecraft attitude rate is non-zero during the
 exposure, stars smear into trails.  The model computes the per-image

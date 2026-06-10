@@ -85,13 +85,12 @@ covariance collapses to an isotropic ``(sigma_PSF / sqrt(SNR))^2 * I``.
 Reliability and gating
 ----------------------
 
-The reliability is a sigmoid of the predicted SNR multiplied by hard
-zero terms for body or ring occlusion, saturation, and cosmic-ray hits.
-Stars whose smear length exceeds ``stars.max_smear`` are skipped from
-the feature list entirely (the smear-aware PSF cannot fit a usable
-centroid).  Stars whose predicted SNR is below
-``stars.min_predicted_snr`` (default ``0`` keeps all) are likewise
-skipped.
+The reliability is a sigmoid of the magnitude-margin effective SNR
+multiplied by hard zero terms for body or ring occlusion, saturation,
+and cosmic-ray hits.  Stars fainter than the per-observation limiting
+magnitude ``obs.star_max_usable_vmag()`` are skipped from the feature
+list, as are stars whose smear length exceeds ``stars.max_smear`` (the
+smear-aware PSF cannot fit a usable centroid).
 
 The
 :class:`~nav.feature.feature.NavReliabilityBreakdown` block on each
