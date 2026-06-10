@@ -1,8 +1,32 @@
+import math
+
 import pytest
 from tests.config import URL_VOYAGER_ISS_IO_01
 
 import nav.obs.obs_inst_voyager_iss as obstvgiss
-from nav.obs.obs_inst_voyager_iss import _voyager_if_factor, _voyager_spacecraft_digit
+from nav.obs.obs_inst_voyager_iss import (
+    ObsVoyagerISS,
+    _voyager_if_factor,
+    _voyager_spacecraft_digit,
+)
+
+# Documented anchor limiting magnitudes (limiting mag at texp = 1 s).
+_VOYAGER_NAC_ANCHOR = 8.3
+_VOYAGER_WAC_ANCHOR = 5.9
+
+
+def _make_obs(detector: str, texp: float) -> ObsVoyagerISS:
+    """Build a bare ObsVoyagerISS carrying only detector and texp.
+
+    The star-magnitude gate is a pure function of ``self.detector`` and
+    ``self.texp``, so a fully constructed observation (and an external image
+    fetch) is unnecessary for testing it.
+    """
+    obs = object.__new__(ObsVoyagerISS)
+    obs.detector = detector
+    obs.texp = texp
+    return obs
+
 
 # Real Voyager VICAR LAB02 records (fixed-format strings; index 4 is the
 # spacecraft digit).  Captured from a holdings GEOMED image.
@@ -75,3 +99,40 @@ def test_if_factor_non_string_raises() -> None:
     """A non-string LABEL3 value raises a clear ValueError."""
     with pytest.raises(ValueError, match='Unexpected Voyager LABEL3 format'):
         _voyager_if_factor(None)
+
+
+def test_star_max_usable_vmag_nac_anchor_at_unit_exposure() -> None:
+    """The NAC limiting magnitude equals its anchor at texp = 1 s."""
+    obs = _make_obs('NAC', 1.0)
+    assert obs.star_max_usable_vmag() == pytest.approx(_VOYAGER_NAC_ANCHOR, abs=1e-6)
+
+
+def test_star_max_usable_vmag_wac_anchor_at_unit_exposure() -> None:
+    """The WAC limiting magnitude equals its anchor at texp = 1 s."""
+    obs = _make_obs('WAC', 1.0)
+    assert obs.star_max_usable_vmag() == pytest.approx(_VOYAGER_WAC_ANCHOR, abs=1e-6)
+
+
+def test_star_max_usable_vmag_gains_one_mag_per_pogson_ratio() -> None:
+    """A 2.512x longer exposure deepens the limit by ~1 mag."""
+    base = _make_obs('NAC', 1.0).star_max_usable_vmag()
+    deeper = _make_obs('NAC', 2.512).star_max_usable_vmag()
+    assert deeper - base == pytest.approx(1.0, abs=1e-3)
+
+
+def test_star_max_usable_vmag_in_sane_range() -> None:
+    """The NAC limiting magnitude stays within a sane 3..15 range."""
+    vmag = _make_obs('NAC', 15.0).star_max_usable_vmag()
+    assert 3.0 <= vmag <= 15.0
+
+
+def test_star_max_usable_vmag_is_finite() -> None:
+    """The NAC limiting magnitude is finite."""
+    vmag = _make_obs('NAC', 15.0).star_max_usable_vmag()
+    assert math.isfinite(vmag)
+
+
+def test_star_max_usable_vmag_non_positive_exposure_returns_anchor() -> None:
+    """A non-positive exposure falls back to the anchor magnitude."""
+    obs = _make_obs('NAC', 0.0)
+    assert obs.star_max_usable_vmag() == pytest.approx(_VOYAGER_NAC_ANCHOR, abs=1e-6)

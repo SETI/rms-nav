@@ -141,6 +141,9 @@ class ObsVoyagerISS(ObsSnapshotInst):
     def star_min_usable_vmag(self) -> float:
         """Returns the minimum usable magnitude for stars in this observation.
 
+        Mirrors the Cassini ISS reference implementation, which imposes no
+        bright-end cutoff (saturation of bright stars is handled elsewhere).
+
         Returns:
             The minimum usable magnitude for stars in this observation.
         """
@@ -149,10 +152,35 @@ class ObsVoyagerISS(ObsSnapshotInst):
     def star_max_usable_vmag(self) -> float:
         """Returns the maximum usable magnitude for stars in this observation.
 
+        The limiting magnitude follows the Cassini Pogson-ratio form,
+
+            star_max_usable_vmag(texp) = anchor + log(texp) / log(2.512)
+
+        where ``anchor`` is the limiting magnitude at a 1 s exposure (each
+        2.512x increase in exposure buys +1 mag of depth).
+
+        The anchor is scaled from the Cassini NAC anchor (10.5 mag at 1 s,
+        aperture D = 0.19 m) by collecting-area, with a detector-sensitivity
+        term for the Voyager vidicon (roughly 2 mag less sensitive than a
+        CCD).  These are nominal optics values; the terms are approximate and
+        pending calibration against real Voyager star fields.
+
+            anchor = 10.5 + 5*log10(D / 0.19) + detector_term
+
+        Per camera (apertures from the Voyager ISS optics; vidicon detector):
+
+            NAC: 10.5 + 5*log10(0.176/0.19) - 2.0 (vidicon) ~= 8.3
+            WAC: 10.5 + 5*log10(0.057/0.19) - 2.0 (vidicon) ~= 5.9
+
         Returns:
             The maximum usable magnitude for stars in this observation.
         """
-        return 10  # TODO
+
+        # Anchor (limiting mag at texp = 1 s) derived above; rounded to 0.1.
+        anchor = 5.9 if self.detector == 'WAC' else 8.3
+        if self.texp <= 0:
+            return anchor
+        return cast(float, anchor + np.log(self.texp) / np.log(2.512))
 
     def get_public_metadata(self) -> dict[str, Any]:
         """Returns the public metadata for Voyager ISS.
