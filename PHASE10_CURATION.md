@@ -15,7 +15,7 @@ autonomous-navigation rewrite (`AUTONAV_PLAN.md`):
    in `config_510_techniques.yaml`).
 
 The reference for the schema / scene classes / coverage matrix is
-`docs/developer_guide_image_library.rst` plus `AUTONAV_PLAN.md`
+`docs/dev_guide/dev_guide_image_library.rst` plus `AUTONAV_PLAN.md`
 Part 10.
 This file is the *workflow* — what to do in what order, where the
 data lives, how the manual-nav UI threads into it, and how a
@@ -537,7 +537,7 @@ The current state of the library (as of 2026-04-30):
   authoritative spec; this document is the operator-facing distillation).
 - `AUTONAV_PLAN.md` Part 11 — what stays manual vs. what an agent can
   draft.
-- `docs/developer_guide_image_library.rst` — sidecar schema reference.
+- `docs/dev_guide/dev_guide_image_library.rst` — sidecar schema reference.
 - `tests/integration/sidecar.py` — schema validator.
 - `tests/integration/baseline.py` — baseline schema + writer helper.
 - `tests/integration/test_image_library.py` — structural-invariants test.

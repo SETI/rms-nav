@@ -188,5 +188,5 @@ Operator workflow:
    regression test (``test_autonomous_nav.py``) follows once
    ``PDS3_HOLDINGS_DIR`` is set.
 
-See :doc:`user_guide_image_library` for the sidecar schema and the
+See :doc:`/user_guide_image_library` for the sidecar schema and the
 deeper rationale behind the curation policy.

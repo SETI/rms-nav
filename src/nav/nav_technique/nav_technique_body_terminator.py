@@ -129,15 +129,16 @@ class BodyTerminatorNav(NavTechnique):
 
     Class attributes:
         accepts_feature_types: ``frozenset({TERMINATOR_ARC})``.
-        requires_prior: ``False`` — the technique runs in pass 1.
-        tier: ``'fallback'`` — the terminator is a photometric feature
-            modulated by phase, albedo, and local topography; its
-            failure modes (DT-fit locking onto crater shadows or other
-            local minima) have no per-technique signal that admits
-            them.  When a non-spurious primary fit (limb or disc) is
-            available for the same body the ensemble drops the
-            terminator result rather than risk letting a clean-looking
-            but mis-converged fit override the geometric techniques.
+        requires_prior: ``False`` (the technique runs in pass 1).
+        tier: ``'fallback'``.
+
+    The ``'fallback'`` tier reflects that the terminator is a photometric
+    feature modulated by phase, albedo, and local topography; its failure
+    modes (DT-fit locking onto crater shadows or other local minima) have no
+    per-technique signal that admits them.  When a non-spurious primary fit
+    (limb or disc) is available for the same body the ensemble drops the
+    terminator result rather than risk letting a clean-looking but
+    mis-converged fit override the geometric techniques.
     """
 
     name = 'BodyTerminatorNav'

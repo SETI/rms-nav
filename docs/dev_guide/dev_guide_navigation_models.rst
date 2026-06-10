@@ -45,12 +45,12 @@ holds the catalog-driven ring data model — validation, filtering, and
 rendering are separated so each concern can be tested in isolation.
 
 The API surface is summarised under
-:doc:`api_reference/api_nav_model`.
+:doc:`/api_reference/api_nav_model`.
 
 .. toctree::
    :maxdepth: 1
 
-   developer_guide_navigation_models_stars
-   developer_guide_navigation_models_bodies
-   developer_guide_navigation_models_rings
-   developer_guide_navigation_models_titan
+   dev_guide_navigation_models_stars
+   dev_guide_navigation_models_bodies
+   dev_guide_navigation_models_rings
+   dev_guide_navigation_models_titan

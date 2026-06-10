@@ -232,7 +232,7 @@ The :mod:`nav.nav_model.rings` subpackage carries the catalog-driven
 ring-feature data model (``RingFeature``, ``RingFeatureFilter``,
 ``RingRenderResult``, ``RingsRenderContext``, ``ring_math``,
 ``ring_types``); see
-:doc:`developer_guide_navigation_models_rings` for details.
+:doc:`dev_guide_navigation_models_rings` for details.
 
 NavTechnique
 ============

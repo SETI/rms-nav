@@ -57,4 +57,4 @@ Data flow
    metadata JSON and (when implemented) the summary PNG.
 
 The orchestrator's API is described in detail in
-:doc:`developer_guide_class_hierarchy`.
+:doc:`dev_guide_class_hierarchy`.
