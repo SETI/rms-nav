@@ -326,6 +326,7 @@ def test_body_limb_nav_marks_spurious_when_inlier_fraction_collapses(
         iterations=5,
         converged=True,
         inlier_count=10,
+        degenerate=False,
     )
     monkeypatch.setattr(
         nav_technique_body_limb,
@@ -398,6 +399,7 @@ def test_body_limb_nav_3dof_at_edge_when_rotation_saturates(
         iterations=5,
         converged=True,
         inlier_count=int(vertices.shape[0]),
+        degenerate=False,
     )
     monkeypatch.setattr(
         nav_technique_body_limb,
@@ -451,6 +453,7 @@ def test_body_limb_nav_marks_spurious_when_lm_walks_far_from_coarse_seed(
         iterations=8,
         converged=True,
         inlier_count=int(vertices.shape[0] * 0.6),
+        degenerate=False,
     )
     monkeypatch.setattr(
         nav_technique_body_limb,
@@ -498,6 +501,7 @@ def test_body_limb_nav_does_not_mark_spurious_when_inlier_fraction_healthy(
         iterations=8,
         converged=True,
         inlier_count=500,
+        degenerate=False,
     )
     monkeypatch.setattr(
         nav_technique_body_limb,

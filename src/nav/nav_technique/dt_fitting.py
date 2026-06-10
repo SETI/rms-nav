@@ -374,12 +374,19 @@ class LMRefineResult:
             (prior precision times Tukey biweight).
         rms_px: Weighted root-mean-square of the residuals, computed as
             ``sqrt(sum(w * r**2) / sum(w))`` over surviving vertices;
-            ``0.0`` when every vertex was rejected.
+            ``float('inf')`` when every vertex was rejected (the
+            degenerate case), so the downstream spurious gates' ``rms_px
+            > floor`` test fires instead of reading a zero RMS as a good
+            fit.
         iterations: Number of LM iterations actually performed.
         converged: True if the step-norm tolerance was met before the
             iteration cap.
         inlier_count: Number of vertices that retained a strictly
             positive Tukey weight at the final estimate.
+        degenerate: True when no vertex survived reweighting
+            (``inlier_count == 0`` or the surviving weights sum to zero).
+            In this case ``rms_px`` is ``+inf`` and ``covariance`` is
+            all-``inf``; consumers treat it as a spurious fit.
     """
 
     offset_vu: tuple[float, float]
@@ -391,6 +398,7 @@ class LMRefineResult:
     iterations: int
     converged: bool
     inlier_count: int
+    degenerate: bool
 
     def __post_init__(self) -> None:
         """Freeze the numpy arrays and validate shapes."""
@@ -853,23 +861,32 @@ def lm_subpixel_refine(
     final_weights = state.weights
     final_residuals = state.raw_residuals
     inlier_count = int(np.sum(final_weights > 0))
-    if inlier_count > 0 and final_weights.sum() > 0.0:
+    degenerate = inlier_count == 0 or final_weights.sum() == 0.0
+    if not degenerate:
         rms_px = float(math.sqrt(np.sum(final_weights * final_residuals**2) / final_weights.sum()))
     else:
-        rms_px = 0.0
+        # Every vertex was rejected: there is no surviving evidence to
+        # constrain the fit.  Report +inf (not 0.0) so the DT techniques'
+        # ``result.rms_px > floor`` spurious test fires; a zero RMS would
+        # otherwise be read downstream as a perfect fit.
+        rms_px = float('inf')
     covariance: NDArrayFloatType
-    # Guard against three "no information" cases that would otherwise let
+    # The reported covariance is DATA-ONLY: it is the pseudoinverse of the
+    # M-estimator information matrix ``J^T diag(w) J`` evaluated at the
+    # converged pose and deliberately EXCLUDES the Tikhonov anchor
+    # contribution (``tikhonov_alpha`` adds ``alpha * sum(w)`` to the
+    # translation diagonal of the *iteration* Hessian to bias the step,
+    # but that prior is a fitting aid, not measured information, so it
+    # must not shrink the reported uncertainty).
+    #
+    # Guard against the "no information" cases that would otherwise let
     # information_matrix_to_covariance produce a misleading zero-covariance
     # answer (pinvh of the zero information matrix is zero — which would
-    # falsely advertise perfect certainty about the fit).  All three
-    # conditions mean there is no inlier evidence to constrain the
-    # parameters; the inf sentinel correctly signals "fully unconstrained".
-    if (
-        state.jacobian.size == 0
-        or state.jacobian.shape[1] != n_params
-        or inlier_count == 0
-        or final_weights.sum() == 0.0
-    ):
+    # falsely advertise perfect certainty about the fit).  These conditions
+    # mean there is no inlier evidence to constrain the parameters; the inf
+    # sentinel correctly signals "fully unconstrained" and stays consistent
+    # with the ``rms_px = +inf`` degenerate result above.
+    if state.jacobian.size == 0 or state.jacobian.shape[1] != n_params or degenerate:
         covariance = cast(NDArrayFloatType, np.full((n_params, n_params), np.inf, dtype=np.float64))
     else:
         covariance = information_matrix_to_covariance(
@@ -885,4 +902,5 @@ def lm_subpixel_refine(
         iterations=state.iteration,
         converged=state.converged,
         inlier_count=inlier_count,
+        degenerate=degenerate,
     )

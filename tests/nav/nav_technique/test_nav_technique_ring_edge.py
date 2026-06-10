@@ -192,6 +192,7 @@ def test_ring_edge_nav_marks_spurious_when_per_edge_rms_collapses_to_one(
         iterations=10,
         converged=True,
         inlier_count=vertices_a.shape[0],
+        degenerate=False,
     )
     monkeypatch.setattr(
         nav_technique_ring_edge,

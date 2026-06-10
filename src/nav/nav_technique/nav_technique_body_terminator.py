@@ -355,7 +355,8 @@ class BodyTerminatorNav(NavTechnique):
             # See ``BodyLimbNav.spurious`` for the reference
             # implementation.
             spurious = (
-                result.rms_px
+                result.degenerate
+                or result.rms_px
                 > max(
                     self._spurious_dt_floor_px,
                     self._spurious_dt_rms_factor * sigma_min_px,

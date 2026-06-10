@@ -423,6 +423,40 @@ def test_lm_subpixel_refine_rejects_outliers_via_tukey() -> None:
     assert float(result.weights[inlier_idx].min()) > 1.0
 
 
+def test_lm_subpixel_refine_degenerate_when_all_vertices_rejected() -> None:
+    """A fit with no surviving inliers reports +inf RMS and inf covariance.
+
+    With a zero gradient image every polarity dot product is zero (not
+    strictly positive), so the polarity filter rejects every vertex.
+    Each rejected vertex gets the infinity penalty, the Tukey biweight
+    zeroes its weight, and no evidence remains to constrain the fit.  The
+    result must advertise this honestly: ``rms_px`` is ``+inf`` (not the
+    misleading ``0.0`` that downstream spurious gates would read as a
+    perfect fit), ``degenerate`` is True, and the covariance is all-inf.
+    """
+    shape = (96, 96)
+    radius = 18.0
+    dt = _build_dt_for_circle(shape, radius)
+    cv = shape[0] / 2.0
+    cu = shape[1] / 2.0
+    vertices, outward_normals = _build_circle_polyline((cv, cu), radius, 64)
+    sigmas = np.full(vertices.shape[0], 0.5, dtype=np.float64)
+    zero_grad = np.zeros((*shape, 2), dtype=np.float64)
+    result = lm_subpixel_refine(
+        vertices_vu=vertices,
+        normals_vu=outward_normals,
+        sigma_normal_per_vertex_px=sigmas,
+        image_edge_dt=dt,
+        image_gradient_vu=zero_grad,
+        initial_offset_vu=(0.0, 0.0),
+        use_polarity=True,
+    )
+    assert result.inlier_count == 0
+    assert result.degenerate is True
+    assert result.rms_px == float('inf')
+    assert np.isinf(result.covariance).all()
+
+
 # ---------------------------------------------------------------------------
 # lm_subpixel_refine — translation + rotation
 # ---------------------------------------------------------------------------

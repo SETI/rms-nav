@@ -25,6 +25,7 @@ from nav.nav_model.nav_model_body import (
     TERMINATOR_MIN_PHASE_FACTOR,
     TERMINATOR_MIN_VERTICES,
     _blob_reliability,
+    _build_polyline_sampler,
     _disc_reliability,
     _incidence_factor_array,
     _limb_reliability,
@@ -197,3 +198,70 @@ def test_blob_reliability_capped_at_0_4() -> None:
     """Blob reliability cannot exceed the 0.4 design cap."""
     out = _blob_reliability(snr=1e6, diameter_px=1e6)
     assert out <= 0.4 + 1e-12
+
+
+def _synthetic_disc_masks(
+    *, size: int, center: tuple[float, float], radius: float
+) -> tuple[np.ndarray, np.ndarray, tuple[float, float]]:
+    """Build a filled-disc silhouette mask plus its 1-px limb ridge.
+
+    Returns ``(silhouette_mask, limb_ridge_mask, center_vu)`` where the
+    silhouette is True inside the disc and the ridge is the inner ring of
+    silhouette pixels adjacent to space.
+    """
+    vv, uu = np.indices((size, size), dtype=np.float64)
+    dist = np.hypot(vv - center[0], uu - center[1])
+    silhouette = dist <= radius
+    # 1-px ridge: silhouette pixels with at least one space (False) neighbour.
+    space = ~silhouette
+    ridge = silhouette & (
+        np.roll(space, 1, axis=0)
+        | np.roll(space, -1, axis=0)
+        | np.roll(space, 1, axis=1)
+        | np.roll(space, -1, axis=1)
+    )
+    return silhouette, ridge, center
+
+
+def test_polyline_normal_points_outward_for_lit_disc() -> None:
+    """The limb normal points away from the disc center at >=95% of vertices.
+
+    Constructs a synthetic filled disc, extracts its limb ridge, and
+    checks ``dot(normal_i, vertex_i - center) > 0`` for the vast majority
+    of vertices.  This guards against the ridge-orientation sign bug
+    where the per-vertex normal was derived from the 1-px ridge rather
+    than from the body silhouette.
+    """
+    size = 41
+    center = (20.0, 20.0)
+    radius = 14.0
+    silhouette, ridge, center_vu = _synthetic_disc_masks(size=size, center=center, radius=radius)
+    sampler = _build_polyline_sampler(
+        local_mask=ridge,
+        region_mask=silhouette,
+        incidence_local=np.zeros((size, size), dtype=np.float64),
+        km_per_pixel_local=np.ones((size, size), dtype=np.float64),
+        ext_v0=0,
+        ext_u0=0,
+    )
+    assert sampler.vertices_vu.shape[0] > 0
+    radial = sampler.vertices_vu - np.array(center_vu, dtype=np.float64)
+    dots = np.sum(sampler.normals_vu * radial, axis=1)
+    outward_fraction = float(np.count_nonzero(dots > 0)) / dots.shape[0]
+    assert outward_fraction >= 0.95
+
+
+def test_polyline_normal_is_unit_length() -> None:
+    """Each computed normal is unit length (or zero for isolated vertices)."""
+    size = 31
+    silhouette, ridge, _ = _synthetic_disc_masks(size=size, center=(15.0, 15.0), radius=10.0)
+    sampler = _build_polyline_sampler(
+        local_mask=ridge,
+        region_mask=silhouette,
+        incidence_local=np.zeros((size, size), dtype=np.float64),
+        km_per_pixel_local=np.ones((size, size), dtype=np.float64),
+        ext_v0=0,
+        ext_u0=0,
+    )
+    lengths = np.hypot(sampler.normals_vu[:, 0], sampler.normals_vu[:, 1])
+    assert np.all(lengths == pytest.approx(1.0, abs=1e-12))

@@ -333,7 +333,8 @@ class BodyLimbNav(NavTechnique):
                 math.hypot(dv_final - float(coarse_dv), du_final - float(coarse_du))
             )
             spurious = (
-                result.rms_px
+                result.degenerate
+                or result.rms_px
                 > max(
                     self._spurious_dt_floor_px,
                     self._spurious_dt_rms_factor * sigma_min_px,

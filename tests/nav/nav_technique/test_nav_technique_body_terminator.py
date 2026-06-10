@@ -213,6 +213,7 @@ def test_body_terminator_nav_marks_spurious_when_inlier_fraction_collapses(
         iterations=5,
         converged=True,
         inlier_count=10,
+        degenerate=False,
     )
     monkeypatch.setattr(
         nav_technique_body_terminator,
@@ -256,6 +257,7 @@ def test_body_terminator_nav_does_not_mark_spurious_when_inlier_fraction_healthy
         iterations=8,
         converged=True,
         inlier_count=500,
+        degenerate=False,
     )
     monkeypatch.setattr(
         nav_technique_body_terminator,

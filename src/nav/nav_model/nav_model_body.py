@@ -549,6 +549,7 @@ class NavModelBody(NavModelBodyBase):
 
         limb_sampler = _build_polyline_sampler(
             local_mask=limb_mask_local,
+            region_mask=body_mask_valid,
             incidence_local=incidence_vals,
             km_per_pixel_local=km_per_pixel_local,
             ext_v0=ext_v0,
@@ -556,6 +557,7 @@ class NavModelBody(NavModelBodyBase):
         )
         terminator_sampler = _build_polyline_sampler(
             local_mask=terminator_local,
+            region_mask=is_lit,
             incidence_local=incidence_vals,
             km_per_pixel_local=km_per_pixel_local,
             ext_v0=ext_v0,
@@ -964,6 +966,7 @@ def _build_limb_arc(
 def _build_polyline_sampler(
     *,
     local_mask: NDArrayBoolType,
+    region_mask: NDArrayBoolType,
     incidence_local: NDArrayFloatType,
     km_per_pixel_local: NDArrayFloatType,
     ext_v0: int,
@@ -971,11 +974,29 @@ def _build_polyline_sampler(
 ) -> _PolylineSampler:
     """Sample a polyline along the True pixels of ``local_mask``.
 
-    The local mask is a 1-pixel-wide ridge inside the body silhouette; we
+    The local mask is a 1-pixel-wide ridge along a feature boundary; we
     return a parallel array of vertex coordinates in extfov space, the
-    outward-pointing normal at each vertex (from the discrete-mask
-    gradient), the per-vertex incidence angle, and the per-vertex km/px
-    scale.
+    outward-pointing normal at each vertex, the per-vertex incidence
+    angle, and the per-vertex km/px scale.
+
+    The outward normal is the discrete gradient of ``region_mask`` (the
+    body silhouette for the limb, or the lit mask for the terminator),
+    not of the ridge itself: a one-pixel ridge has no consistent
+    interior/exterior orientation, so its gradient sign depends on the
+    diagonal orientation of the ridge rather than on which side is the
+    body interior.  With the body-side True / space-side False
+    convention, ``n_v = region[v-1, u] - region[v+1, u]`` and
+    ``n_u = region[v, u-1] - region[v, u+1]`` point from inside to
+    outside.  Out-of-image neighbours are treated as space (False).
+
+    Parameters:
+        local_mask: 1-pixel-wide ridge whose True pixels become vertices.
+        region_mask: Body-side / lit-side mask whose discrete gradient
+            defines the outward normal.  Same shape as ``local_mask``.
+        incidence_local: Per-pixel incidence angle (radians).
+        km_per_pixel_local: Per-pixel km/px scale.
+        ext_v0: Extfov v-offset of the local grid origin.
+        ext_u0: Extfov u-offset of the local grid origin.
     """
     vs, us = np.where(local_mask)
     if vs.size == 0:
@@ -989,21 +1010,19 @@ def _build_polyline_sampler(
     vertices_vu: NDArrayFloatType = np.stack(
         [vs.astype(np.float64) + ext_v0, us.astype(np.float64) + ext_u0], axis=1
     )
-    rows, cols = local_mask.shape
+    rows, cols = region_mask.shape
+    region = region_mask.astype(np.float64)
     normals_vu = np.zeros_like(vertices_vu)
     for i, (v, u) in enumerate(zip(vs, us, strict=True)):
-        # Outward normal: gradient of body-mask values around the vertex.
-        # The body-side neighbour is True; the off-body neighbour is False.
-        v_dir = 0.0
-        u_dir = 0.0
-        if v > 0 and not local_mask[v - 1, u]:
-            v_dir = -1.0
-        elif v < rows - 1 and not local_mask[v + 1, u]:
-            v_dir = 1.0
-        if u > 0 and not local_mask[v, u - 1]:
-            u_dir = -1.0
-        elif u < cols - 1 and not local_mask[v, u + 1]:
-            u_dir = 1.0
+        # Outward normal: discrete gradient of the body-side / lit-side
+        # mask, pointing from inside (True) to outside (False).  Out-of-
+        # image neighbours count as space (0.0).
+        up = region[v - 1, u] if v > 0 else 0.0
+        down = region[v + 1, u] if v < rows - 1 else 0.0
+        left = region[v, u - 1] if u > 0 else 0.0
+        right = region[v, u + 1] if u < cols - 1 else 0.0
+        v_dir = up - down
+        u_dir = left - right
         norm = math.hypot(v_dir, u_dir) or 1.0
         normals_vu[i, 0] = v_dir / norm
         normals_vu[i, 1] = u_dir / norm
