@@ -2412,11 +2412,16 @@ class CreateSimulatedImageModel(QMainWindow):
                     ),
                     'time': float(params.get('time', 0.0)),
                     'ring_epoch': float(params.get('ring_epoch', 0.0)),
-                    'closest_planet': params.get('closest_planet'),
+                    'closest_planet': params.get('closest_planet') or 'SATURN',
+                    'shade_solid_rings': bool(params.get('shade_solid_rings', False)),
                     'bodies': list(params.get('bodies', [])),
                     'stars': list(params.get('stars', [])),
                     'rings': list(params.get('rings', [])),
                 }
+                # Sync the shade-solid-rings checkbox
+                self._shade_solid_rings_check.blockSignals(True)
+                self._shade_solid_rings_check.setChecked(bool(self.sim_params['shade_solid_rings']))
+                self._shade_solid_rings_check.blockSignals(False)
                 # Update general UI
                 self._size_v_spin.setValue(self.sim_params['size_v'])
                 self._size_u_spin.setValue(self.sim_params['size_u'])
@@ -2427,7 +2432,7 @@ class CreateSimulatedImageModel(QMainWindow):
                 self._time_spin.setValue(self.sim_params.get('time', 0.0))
                 self._epoch_spin.setValue(self.sim_params.get('ring_epoch', 0.0))
                 # Update closest planet
-                closest_planet = self.sim_params.get('closest_planet', 'SATURN')
+                closest_planet = self.sim_params.get('closest_planet') or 'SATURN'
                 index = self._closest_planet_combo.findText(closest_planet)
                 if index >= 0:
                     self._closest_planet_combo.setCurrentIndex(index)
