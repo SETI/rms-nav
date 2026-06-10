@@ -209,7 +209,6 @@ def test_shipped_inst_configs_load_cleanly() -> None:
         config.category('cassini_iss').get('nac'),
         config.category('cassini_iss').get('wac'),
         config.category('newhorizons_lorri'),
-        config.category('voyager_iss'),
         config.category('galileo_ssi'),
     ]
     for block in blocks:
@@ -228,6 +227,7 @@ def test_shipped_calibrated_if_configs_load_cleanly() -> None:
     blocks = [
         config.category('cassini_iss_calib').get('nac'),
         config.category('cassini_iss_calib').get('wac'),
+        config.category('voyager_iss'),
     ]
     for block in blocks:
         settings = instrument_settings_from_obs(_FakeObs(block))

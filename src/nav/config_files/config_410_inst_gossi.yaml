@@ -2,7 +2,7 @@
 # and image-quality threshold values are starting points carrying
 # `# PLACEHOLDER` markers until phase-10 calibration finalizes them.
 galileo_ssi:
-  data_units: calibrated_if
+  data_units: raw_dn
   extfov_margin_vu: [350, 350]
   star_psf_sigma: 3.
   star_psf_sizes:
@@ -16,8 +16,9 @@ galileo_ssi:
     marker_value: 0
     read_noise_dn: 1.0             # PLACEHOLDER — calibrate in Phase 10
   image_quality_thresholds:
-    blank_max_if: 1.0e-4            # PLACEHOLDER — calibrate in Phase 10
-    noisy_threshold_if: 0.005       # PLACEHOLDER — calibrate in Phase 10
+    blank_max_dn: 5.0              # PLACEHOLDER — calibrate in Phase 10
+    saturation_threshold_dn: 255   # 8-bit ADC
+    noisy_threshold_dn: 10.0       # PLACEHOLDER — calibrate in Phase 10
     max_missing_frac_clean: 0.30
     max_overexposed_frac_clean: 0.80
   source_image_filter:

@@ -2,7 +2,7 @@
 # noise and image-quality threshold values carry `# PLACEHOLDER`
 # markers until phase-10 calibration finalizes them.
 newhorizons_lorri:
-  data_units: calibrated_if
+  data_units: raw_dn
   extfov_margin_vu:
     256: [15, 15]
     512: [30, 30]
@@ -19,8 +19,9 @@ newhorizons_lorri:
     marker_value: 0
     read_noise_dn: 4.0             # PLACEHOLDER — calibrate in Phase 10
   image_quality_thresholds:
-    blank_max_if: 1.0e-4            # PLACEHOLDER — calibrate in Phase 10
-    noisy_threshold_if: 0.005       # PLACEHOLDER — calibrate in Phase 10
+    blank_max_dn: 5.0              # PLACEHOLDER — calibrate in Phase 10
+    saturation_threshold_dn: 4095  # 12-bit ADC
+    noisy_threshold_dn: 10.0       # PLACEHOLDER — calibrate in Phase 10
     max_missing_frac_clean: 0.30
     max_overexposed_frac_clean: 0.80
   source_image_filter:
