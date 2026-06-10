@@ -189,6 +189,7 @@ def test_ring_edge_nav_marks_spurious_when_per_edge_rms_collapses_to_one(
         residuals_px=residuals,
         weights=weights,
         rms_px=0.0,
+        raw_rms_px=float(np.sqrt(np.mean(residuals**2))),
         iterations=10,
         converged=True,
         inlier_count=vertices_a.shape[0],

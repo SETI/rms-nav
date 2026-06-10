@@ -378,6 +378,16 @@ class LMRefineResult:
             degenerate case), so the downstream spurious gates' ``rms_px
             > floor`` test fires instead of reading a zero RMS as a good
             fit.
+        raw_rms_px: Unweighted root-mean-square of the residuals,
+            computed as ``sqrt(mean(r**2))`` over ALL vertices with no
+            weighting.  This is well-defined even in the degenerate
+            (all-weights-zero) case, where the residuals still exist; a
+            fully-rejected fit therefore yields a large ``raw_rms_px``.
+            Because the Tukey reweighting can down-weight a wholly
+            mis-aligned arc to ~0, the weighted ``rms_px`` collapses to
+            near zero on exactly such a mis-convergence and slips past a
+            ``rms_px > floor`` gate; the raw RMS retains those outliers
+            and surfaces the bad fit.
         iterations: Number of LM iterations actually performed.
         converged: True if the step-norm tolerance was met before the
             iteration cap.
@@ -395,6 +405,7 @@ class LMRefineResult:
     residuals_px: NDArrayFloatType
     weights: NDArrayFloatType
     rms_px: float
+    raw_rms_px: float
     iterations: int
     converged: bool
     inlier_count: int
@@ -870,6 +881,15 @@ def lm_subpixel_refine(
         # ``result.rms_px > floor`` spurious test fires; a zero RMS would
         # otherwise be read downstream as a perfect fit.
         rms_px = float('inf')
+    # Unweighted RMS over ALL vertices.  Unlike the Tukey-weighted
+    # ``rms_px``, this does not down-weight outliers, so a mis-converged
+    # fit whose bad arc was rejected to ~0 weight still reports a large
+    # raw RMS.  Well-defined even in the degenerate (all-weights-zero)
+    # case because the residuals exist regardless of the weights.
+    if final_residuals.size:
+        raw_rms_px = float(math.sqrt(float(np.mean(final_residuals**2))))
+    else:
+        raw_rms_px = float('inf')
     covariance: NDArrayFloatType
     # The reported covariance is DATA-ONLY: it is the pseudoinverse of the
     # M-estimator information matrix ``J^T diag(w) J`` evaluated at the
@@ -899,6 +919,7 @@ def lm_subpixel_refine(
         residuals_px=final_residuals,
         weights=final_weights,
         rms_px=rms_px,
+        raw_rms_px=raw_rms_px,
         iterations=state.iteration,
         converged=state.converged,
         inlier_count=inlier_count,

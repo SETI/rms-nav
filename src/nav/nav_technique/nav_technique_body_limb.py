@@ -332,13 +332,23 @@ class BodyLimbNav(NavTechnique):
             lm_displacement_px = float(
                 math.hypot(dv_final - float(coarse_dv), du_final - float(coarse_du))
             )
+            # ``result.rms_px`` is the *Tukey-weighted* residual RMS; when
+            # the LM converges to a local minimum where one arc fits
+            # cleanly and another is wholly mis-aligned, Tukey rejects the
+            # bad-arc vertices and ``rms_px`` collapses to near zero, so
+            # the weighted ``rms_px > floor`` test cannot detect the
+            # mis-convergence.  ``result.raw_rms_px`` is the *unweighted*
+            # RMS over all vertices, so it retains those outliers; gate on
+            # it with the same DT residual threshold the weighted check
+            # uses (mirrors ``RingEdgeNav``).
+            dt_rms_threshold = max(
+                self._spurious_dt_floor_px,
+                self._spurious_dt_rms_factor * sigma_min_px,
+            )
             spurious = (
                 result.degenerate
-                or result.rms_px
-                > max(
-                    self._spurious_dt_floor_px,
-                    self._spurious_dt_rms_factor * sigma_min_px,
-                )
+                or result.rms_px > dt_rms_threshold
+                or result.raw_rms_px > dt_rms_threshold
                 or result.inlier_count < self._spurious_min_inliers
                 or inlier_fraction < self._spurious_min_inlier_fraction
                 or lm_displacement_px > self._spurious_max_lm_displacement_px

@@ -30,6 +30,7 @@ from nav.support.filters import NavFilterKind, NavFilterSpec
 BodyTerminatorNav()
 TERMINATOR_MIN_ARC_PX = BodyTerminatorNav.tuning['min_arc_px']
 TERMINATOR_SPURIOUS_MIN_INLIER_FRACTION = BodyTerminatorNav.tuning['spurious_min_inlier_fraction']
+TERMINATOR_SPURIOUS_DT_FLOOR_PX = BodyTerminatorNav.tuning['spurious_dt_floor_px']
 
 # Terminator tests always use a right-side crescent: a half-arc spanning
 # [-pi/2, pi/2] around the body centre.  Other techniques use different
@@ -210,6 +211,7 @@ def test_body_terminator_nav_marks_spurious_when_inlier_fraction_collapses(
         residuals_px=np.zeros(vertices.shape[0], dtype=np.float64),
         weights=np.zeros(vertices.shape[0], dtype=np.float64),
         rms_px=2.5,
+        raw_rms_px=2.5,
         iterations=5,
         converged=True,
         inlier_count=10,
@@ -254,6 +256,7 @@ def test_body_terminator_nav_does_not_mark_spurious_when_inlier_fraction_healthy
         residuals_px=np.zeros(vertices.shape[0], dtype=np.float64),
         weights=np.ones(vertices.shape[0], dtype=np.float64),
         rms_px=0.4,
+        raw_rms_px=0.4,
         iterations=8,
         converged=True,
         inlier_count=500,
@@ -269,6 +272,113 @@ def test_body_terminator_nav_does_not_mark_spurious_when_inlier_fraction_healthy
     assert isinstance(result.diagnostics, BodyTerminatorDiagnostics)
     inlier_fraction = result.diagnostics.tukey_inlier_count / float(vertices.shape[0])
     assert inlier_fraction >= TERMINATOR_SPURIOUS_MIN_INLIER_FRACTION
+    assert result.spurious is False
+
+
+def test_body_terminator_nav_raw_rms_gate_catches_tukey_masked_bad_arc(
+    monkeypatch: pytest.MonkeyPatch,
+    disc_image: DiscImageFactory,
+    arc_polyline: ArcPolylineFactory,
+    make_terminator_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """A bad arc that Tukey down-weights to zero is still flagged spurious.
+
+    One arc half fits cleanly (~0 px); the other half is offset by ~10 px
+    and reweighted to zero by Tukey.  The weighted ``rms_px`` collapses to
+    ~0 (below the floor, so the weighted gate would pass), but the
+    unweighted ``raw_rms_px`` retains the offset half and exceeds the
+    threshold, so the raw-RMS gate marks the fit spurious.
+    """
+    from nav.nav_technique import dt_fitting, nav_technique_body_terminator
+
+    shape = (200, 200)
+    image = disc_image(shape, (100.0, 100.0), 30.0)
+    vertices, outward = arc_polyline(
+        (100.0, 100.0), 30.0, 1000, _TERMINATOR_ANGLE_START, _TERMINATOR_ANGLE_END
+    )
+    feature = make_terminator_feature('masked_bad_arc', vertices=vertices, outward_normals=outward)
+    technique = BodyTerminatorNav()
+    context = make_nav_context(image)
+
+    n_total = vertices.shape[0]
+    n_half = n_total // 2
+    residuals = np.zeros(n_total, dtype=np.float64)
+    residuals[n_half:] = 10.0
+    weights = np.zeros(n_total, dtype=np.float64)
+    weights[:n_half] = 1.0
+    raw_rms = float(np.sqrt(np.mean(residuals**2)))
+    forged_result = dt_fitting.LMRefineResult(
+        offset_vu=(0.5, 0.5),
+        rotation_rad=0.0,
+        covariance=np.eye(2, dtype=np.float64) * 0.25,
+        residuals_px=residuals,
+        weights=weights,
+        rms_px=0.0,
+        raw_rms_px=raw_rms,
+        iterations=10,
+        converged=True,
+        inlier_count=n_half,
+        degenerate=False,
+    )
+    monkeypatch.setattr(
+        nav_technique_body_terminator,
+        'lm_subpixel_refine',
+        lambda **_kwargs: forged_result,
+    )
+
+    result = technique.navigate([feature], context)
+    assert isinstance(result.diagnostics, BodyTerminatorDiagnostics)
+    assert forged_result.rms_px <= TERMINATOR_SPURIOUS_DT_FLOOR_PX
+    assert raw_rms > TERMINATOR_SPURIOUS_DT_FLOOR_PX
+    assert result.spurious is True
+
+
+def test_body_terminator_nav_clean_fit_has_small_raw_rms_not_spurious(
+    monkeypatch: pytest.MonkeyPatch,
+    disc_image: DiscImageFactory,
+    arc_polyline: ArcPolylineFactory,
+    make_terminator_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """A clean fit has a small ``raw_rms_px`` and is not flagged spurious."""
+    from nav.nav_technique import dt_fitting, nav_technique_body_terminator
+
+    shape = (200, 200)
+    image = disc_image(shape, (100.0, 100.0), 30.0)
+    vertices, outward = arc_polyline(
+        (100.0, 100.0), 30.0, 1000, _TERMINATOR_ANGLE_START, _TERMINATOR_ANGLE_END
+    )
+    feature = make_terminator_feature('clean_arc', vertices=vertices, outward_normals=outward)
+    technique = BodyTerminatorNav()
+    context = make_nav_context(image)
+
+    n_total = vertices.shape[0]
+    residuals = np.full(n_total, 0.3, dtype=np.float64)
+    weights = np.ones(n_total, dtype=np.float64)
+    raw_rms = float(np.sqrt(np.mean(residuals**2)))
+    forged_result = dt_fitting.LMRefineResult(
+        offset_vu=(0.5, 0.5),
+        rotation_rad=0.0,
+        covariance=np.eye(2, dtype=np.float64) * 0.25,
+        residuals_px=residuals,
+        weights=weights,
+        rms_px=raw_rms,
+        raw_rms_px=raw_rms,
+        iterations=8,
+        converged=True,
+        inlier_count=n_total,
+        degenerate=False,
+    )
+    monkeypatch.setattr(
+        nav_technique_body_terminator,
+        'lm_subpixel_refine',
+        lambda **_kwargs: forged_result,
+    )
+
+    result = technique.navigate([feature], context)
+    assert isinstance(result.diagnostics, BodyTerminatorDiagnostics)
+    assert raw_rms < TERMINATOR_SPURIOUS_DT_FLOOR_PX
     assert result.spurious is False
 
 
