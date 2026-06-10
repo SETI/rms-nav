@@ -17,6 +17,61 @@ from .obs_snapshot_inst import ObsSnapshotInst
 # calibrated correctly at each of its encounters, so this is the only case.
 _V1_SATURN_IF_CORRECTION = 3.345
 
+# The I/F scaling factor lives in the GEOMED VICAR LABEL3 string as a
+# trailing numeric value after this fixed phrase.
+_IF_LABEL3_PHRASE = 'FOR (I/F)*10000., MULTIPLY DN VALUE BY'
+
+
+def _voyager_spacecraft_digit(lab02: Any) -> str:
+    """Extract and validate the Voyager spacecraft digit from a LAB02 record.
+
+    The Voyager VICAR ``LAB02`` record is a fixed-format string whose 5th
+    character (index 4) is the spacecraft digit, ``'1'`` for Voyager 1 or
+    ``'2'`` for Voyager 2.
+
+    Parameters:
+        lab02: The raw ``LAB02`` value from the image label.
+
+    Returns:
+        The spacecraft digit, either ``'1'`` or ``'2'``.
+
+    Raises:
+        ValueError: If ``lab02`` is not a string of length at least 5, or
+            its 5th character is not ``'1'`` or ``'2'``.
+    """
+
+    if not isinstance(lab02, str) or len(lab02) < 5:
+        raise ValueError(f'Unexpected Voyager LAB02 format: {lab02!r}')
+    digit = lab02[4]
+    if digit not in ('1', '2'):
+        raise ValueError(
+            f'Unexpected Voyager spacecraft id in LAB02[4]: {digit!r} (expected 1 or 2)'
+        )
+    return digit
+
+
+def _voyager_if_factor(label3: Any) -> float:
+    """Parse the I/F scaling factor from a Voyager GEOMED LABEL3 string.
+
+    Parameters:
+        label3: The raw ``LABEL3`` value from the image label.
+
+    Returns:
+        The numeric I/F scaling factor.
+
+    Raises:
+        ValueError: If ``label3`` is not a string, does not contain the
+            expected fixed phrase, or its numeric remainder cannot be parsed.
+    """
+
+    if not isinstance(label3, str) or _IF_LABEL3_PHRASE not in label3:
+        raise ValueError(f'Unexpected Voyager LABEL3 format: {label3!r}')
+    remainder = label3.replace(_IF_LABEL3_PHRASE, '').strip()
+    try:
+        return float(remainder)
+    except ValueError:
+        raise ValueError(f'Unexpected Voyager LABEL3 format: {label3!r}') from None
+
 
 class ObsVoyagerISS(ObsSnapshotInst):
     """Implements an observation of a Voyager ISS image.
@@ -59,14 +114,15 @@ class ObsVoyagerISS(ObsSnapshotInst):
 
         inst_config = config.category('voyager_iss')
 
-        label3 = obs.dict['LABEL3'].replace('FOR (I/F)*10000., MULTIPLY DN VALUE BY', '')
-        factor = float(label3)
+        factor = _voyager_if_factor(obs.dict.get('LABEL3', None))
         obs.data = obs.data * factor / 10000
 
-        if obs.dict['LAB02'][4] == '1' and obs.planet.upper() == 'SATURN':
+        spacecraft = _voyager_spacecraft_digit(obs.dict.get('LAB02', None))
+        if spacecraft == '1' and obs.planet.upper() == 'SATURN':
             obs.data = obs.data * _V1_SATURN_IF_CORRECTION
-            logger.debug('  Applied Voyager 1 @ Saturn I/F correction: %.4fx',
-                         _V1_SATURN_IF_CORRECTION)
+            logger.debug(
+                '  Applied Voyager 1 @ Saturn I/F correction: %.4fx', _V1_SATURN_IF_CORRECTION
+            )
         # TODO Calibrate once oops.hosts is fixed.
 
         if extfov_margin_vu is None:
@@ -108,7 +164,7 @@ class ObsVoyagerISS(ObsSnapshotInst):
         # scet_start = float(obs.dict["SPACECRAFT_CLOCK_START_COUNT"])
         # scet_end = float(obs.dict["SPACECRAFT_CLOCK_STOP_COUNT"])
 
-        spacecraft = self.dict['LAB02'][4]
+        spacecraft = _voyager_spacecraft_digit(self.dict.get('LAB02', None))
 
         return {
             'image_path': self.image_url,
