@@ -108,16 +108,20 @@ def coarse_ncc_search(
     polyline_mask: NDArrayBoolType,
     search_window_vu: tuple[int, int],
 ) -> tuple[int, int]:
-    """Return the integer offset that maximises overlap of two binary masks.
+    """Return the integer offset that maximises the normalised overlap of two masks.
 
-    The cost function is the cross-correlation
-    ``f(dv, du) = sum_{v, u} polyline_mask[v, u] * edge_mask[v + dv, u + du]``,
-    evaluated for every integer ``(dv, du)`` in
-    ``[-margin_v, +margin_v] x [-margin_u, +margin_u]``.  Because both
-    inputs are binary, the cross-correlation peak coincides with the
-    NCC peak — the per-shift normaliser ``sqrt(|polyline_mask| * |edge_mask|)``
-    is constant in ``polyline_mask`` and varies only mildly with
-    ``edge_mask`` over the small search window, so the argmax is unchanged.
+    For each integer shift ``(dv, du)`` in
+    ``[-margin_v, +margin_v] x [-margin_u, +margin_u]`` the score is the
+    fraction of in-bounds polyline vertices that land on an edge pixel,
+    ``f(dv, du) = (sum_{v, u} polyline_mask[v, u] * edge_mask[v + dv, u + du])
+    / N_in_bounds(dv, du)``, where ``N_in_bounds`` is the number of polyline
+    vertices that remain inside the image after the shift.  Dividing the raw
+    overlap count by the in-bounds vertex count gives the per-vertex match
+    fraction, whose argmax coincides with the binary normalised
+    cross-correlation peak (the NCC equals the square root of this fraction).
+    It removes the bias of a raw overlap count toward shifts that simply keep
+    more vertices in bounds or place the polyline over a denser local edge
+    region.
 
     Ties are broken by the smaller ``(|dv| + |du|, |dv|, dv, du)`` tuple,
     so the nearest-to-origin shift (by Manhattan distance) wins on
@@ -189,11 +193,14 @@ def coarse_ncc_search(
                 continue
             sv = shifted_v[valid]
             su = shifted_u[valid]
-            # Score is the count of polyline points (after shift) that fall
-            # on edge pixels.  ``edge_mask`` is binary, so summing the
-            # binary slice over the in-bounds polyline indices gives the
-            # number of overlapping pixels directly.
-            score = float(edge_f[sv, su].sum())
+            # Score is the fraction of in-bounds polyline points (after the
+            # shift) that fall on edge pixels: the raw overlap count divided
+            # by the in-bounds vertex count.  Normalising by ``sv.size``
+            # (== valid.sum(), guaranteed >= 1 by the ``valid.any()`` check
+            # above) makes the argmax the binary NCC argmax, so a shift does
+            # not win merely by keeping more vertices in bounds or covering a
+            # denser edge region.
+            score = float(edge_f[sv, su].sum()) / float(sv.size)
             key = (abs(dv) + abs(du), abs(dv), dv, du)
             if score > best_score or (score == best_score and key < best_key):
                 best_score = score

@@ -191,6 +191,49 @@ def test_coarse_ncc_search_returns_zero_with_empty_polyline() -> None:
     assert (dv, du) == (0, 0)
 
 
+def test_coarse_ncc_search_uses_ncc_not_raw_count_under_clipping() -> None:
+    """The seed is the per-vertex (NCC) argmax, not the raw-overlap argmax.
+
+    When shifts clip a different number of polyline vertices off the image,
+    the in-bounds vertex count varies, so the raw-overlap-count argmax and the
+    per-vertex (NCC) argmax differ.  ``coarse_ncc_search`` must return the
+    latter (CODE-NAV-007).
+    """
+    h, w = 20, 20
+    poly_rows = np.arange(1, 11)  # 10-vertex vertical segment near the top edge
+    polyline_mask = np.zeros((h, w), dtype=bool)
+    polyline_mask[poly_rows, 10] = True
+    edge_mask = np.zeros((h, w), dtype=bool)
+    edge_mask[0:9, 10] = True  # edges only on rows 0..8 of that column
+    window = (10, 0)
+
+    def brute(*, normalize: bool) -> tuple[int, int]:
+        best = (0, 0)
+        best_score = -1.0
+        best_key = (math.inf, math.inf, math.inf, math.inf)
+        for dv in range(-window[0], window[0] + 1):
+            sv = poly_rows + dv
+            valid = (sv >= 0) & (sv < h)
+            if not valid.any():
+                continue
+            n_in = int(valid.sum())
+            overlap = int(edge_mask[sv[valid], 10].sum())
+            score = overlap / n_in if normalize else float(overlap)
+            key = (abs(dv), abs(dv), float(dv), 0.0)
+            if score > best_score or (score == best_score and key < best_key):
+                best_score, best_key, best = score, key, (dv, 0)
+        return best
+
+    raw_argmax = brute(normalize=False)
+    ncc_argmax = brute(normalize=True)
+    # The fixture genuinely distinguishes the two definitions.
+    assert raw_argmax == (-1, 0)
+    assert ncc_argmax == (-2, 0)
+    # The function returns the NCC argmax (it would return raw_argmax if it
+    # still summed the raw overlap count).
+    assert coarse_ncc_search(edge_mask, polyline_mask, window) == ncc_argmax
+
+
 @pytest.mark.parametrize(
     ('edge_mask', 'polyline_mask', 'window', 'message'),
     [
