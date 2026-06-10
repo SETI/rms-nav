@@ -55,3 +55,8 @@ nav.nav_orchestrator
    :members:
    :undoc-members:
    :show-inheritance:
+
+.. automodule:: nav.nav_orchestrator.instrument_config
+   :members:
+   :undoc-members:
+   :show-inheritance:

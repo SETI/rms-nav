@@ -1,384 +1,204 @@
-=====
-Rings
-=====
+======================
+Ring Navigation Model
+======================
 
-The ring NavModel renders each catalog-driven ring edge into per-edge
-polylines plus an optional ``RING_ANNULUS`` composite template, emitting
-:class:`~nav.feature.feature.NavFeature` instances for technique
-consumption.
+Overview
+========
 
-Registered concrete subclasses:
+The ring navigation model predicts the appearance of a planet's ring system and emits the ring
+edges, or a composite ring-system template, that ring techniques consume.  For each ring feature
+in the per-planet catalog that survives a four-pass selection filter, it renders the feature into
+the image plane from the planet's ring backplane and emits either a per-edge polyline carrying
+``RING_EDGE`` or, when the edges compress to too few pixels to trace individually, a single
+composite ``RING_ANNULUS`` template for the whole system.
 
-- :class:`~nav.nav_model.nav_model_rings.NavModelRings` — catalog-driven
-  ring navigation; one instance per planet whose ring system is
-  configured and visible in the extended FOV.
-- :class:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated`
-  — simulated-image GUI variant; emits a single ``RING_ANNULUS``
-  feature carrying the rendered template.
+The orchestrator builds one
+:py:class:`~nav.nav_model.nav_model_rings.NavModelRings` per planet whose ring system has any
+radius inside the extended field of view and whose ring catalog is configured;
+:py:meth:`~nav.nav_model.nav_model_rings.NavModelRings.instances_for_obs` returns a single
+instance for the closest planet when those conditions hold, and an empty list otherwise.  That one
+model emits one ``RING_EDGE`` feature per traceable surviving ring edge, plus at most one
+``RING_ANNULUS`` feature collapsing every annulus-eligible edge into one composite.
 
-The :mod:`nav.nav_model.rings` subpackage holds the catalog-driven
-domain model — validation, filtering, and rendering are separated so
-each concern can be tested in isolation.
+Theory
+======
 
-The catalog-driven ring model
------------------------------
+A planet's rings lie in a flat plane.  Seen obliquely they project to nested ellipses; seen
+edge-on they collapse to a line.  Each named ring edge is the locus of a fixed ring-plane radius,
+possibly perturbed by orbital modes.  The image-plane curve of an edge is found by evaluating the
+ring-radius field over the field of view and tracing the iso-radius contour at the edge's radius.
+Where the rings are well resolved, the curve is a smooth arc whose curvature alone constrains the
+pointing offset perpendicular to the local tangent; where the rings are compressed to a few pixels
+of radial extent, individual edges blur together and only the brightness profile of the whole
+system carries usable information.
 
-:class:`~nav.nav_model.nav_model_rings.NavModelRings` runs the
-four-pass :class:`~nav.nav_model.rings.ring_filter.RingFeatureFilter`
-selection (date, radius, resolvability, fade-conflict), renders each
-surviving feature via
-:meth:`~nav.nav_model.rings.ring_feature.RingFeature.render`, samples
-each rendered edge mask into a polyline, and emits one of:
+The selection filter applies four passes to the catalog features.  A date pass drops any feature
+whose active date window excludes the observation time.  A radius pass drops any feature whose
+edges all fall outside the visible radial range.  A resolvability pass drops any two-edge feature
+whose width is smaller than a configured number of pixels at the local resolution, since an
+unresolvable gap shaded onto the model would mislead the navigator.  A fade-conflict pass trims an
+edge whose soft-edged fade would be squeezed below a minimum width by a neighbouring edge, and
+drops a feature left with no edges.
 
-- ``RING_EDGE`` — per-vertex
-  :class:`~nav.feature.geometry.RingEdgePolyline` with
-  ``sigma_radial_per_vertex_px`` projected from the catalog ``rms``
-  through ``km_per_pixel_radial`` and a ~0.5-px
-  ``sigma_along_edge_per_vertex_px``.  The
-  :class:`~nav.feature.flags.RingEdgeFlags.is_straight_line` flag is
-  set when the polyline's max-deviation from a best-fit straight line
-  is below
-  :data:`~nav.nav_model.nav_model_rings.FLAT_CURVATURE_THRESHOLD_PX`.
-- ``RING_ANNULUS`` — multi-ring composite template carried on
-  ``NavFeature.template_img`` with a
-  :class:`~nav.feature.geometry.RingAnnulusGeometry` payload.  Emitted
-  when the surviving polyline compresses radially below the
-  per-planet ``feature_emission.ring_annulus.max_radial_px`` threshold
-  in ``config_510_techniques.yaml`` (individual edges are not
-  separable at the image scale), or when the system-level km/px
-  threshold ``feature_emission.ring_annulus.kmpp_threshold`` fires
-  (the entire ring system spans only a handful of pixels).  Multiple
-  surviving rings collapse into a single composite annulus per planet
-  with ``constituent_edge_count = N``; the reliability formula
-  ``min(1, k/5) * 0.7 * sigmoid(extent/50 - 1)`` then scales with
-  the number of constituent rings.
+Each surviving feature is rendered to a brightness image and an edge mask.  The edge mask is one
+pixel wide; sampling its set pixels yields an ordered polyline, and the discrete gradient across
+the mask gives the radial normal at each vertex.  The polyline's radial extent is the spread of
+its vertices projected onto the mean normal, and its straightness is the maximum perpendicular
+deviation from the best-fit line, found by a singular-value decomposition of the centred vertex
+cloud.
 
-Per-image diagnostics on ``self._metadata``: ``planet``, ``epoch``,
-``feature_count``, and a ``features`` list of ``{'name', 'type'}``
-dicts for each surviving ring feature.
+Two regimes decide how a rendered edge is emitted.  A per-edge regime keeps the polyline as a
+``RING_EDGE`` when its radial extent exceeds a threshold and it is not straight.  An annulus regime
+applies otherwise, and also unconditionally when the system-wide kilometres-per-pixel resolution
+exceeds a per-planet threshold so that even a nominally traceable edge spans only a handful of
+pixels.  Annulus-eligible renderings are unioned into one composite brightness template and mask
+for the whole planet, emitted as a single ``RING_ANNULUS``.
 
-Ring domain model
------------------
+Per-edge uncertainty is the catalog edge's radial root-mean-square residual projected to pixels
+through the local radial resolution, carried as the across-edge sigma at every vertex; the
+along-edge sigma is a fixed sub-pixel value reflecting sampling resolution.  A straight edge is
+flagged so the technique-side fit knows it provides a rank-one constraint only.  The reliability of
+a ring edge scales a catalog-default value by the visible-arc fraction and one minus the
+shadow-occluded fraction, with a multiplier for straight edges; the reliability of an annulus
+scales with the number of constituent edges and a sigmoid of its radial extent.  The reported
+uncertainty captures the catalog radial residual and the sampling resolution; it does not model
+correlated errors along an edge or the unmodelled-mode contribution beyond what the catalog
+residual encodes.
 
-:class:`~nav.nav_model.rings.ring_types.RingFeatureType` is a two-value enum
-(``RINGLET``, ``GAP``) that controls how the shaded region is oriented relative
-to the known edge when only one edge is present.
+To avoid paying for a dense ring backplane on images where the rings are not usefully visible, a
+cheap coarse-grid radius evaluation runs first and short-circuits the render when no ray
+intersects the ring plane or when every sampled radius lies beyond the catalog's outermost
+feature.
 
-:class:`~nav.nav_model.rings.ring_types.RingBaseOrbitMode` and
-:class:`~nav.nav_model.rings.ring_types.RingPerturbationMode` are frozen
-dataclasses that hold the orbital parameters for an edge.
-:class:`~nav.nav_model.rings.ring_types.RingPerturbationMode` exposes an
-``is_inclination_mode`` property (mode number > 90) that the rendering path uses
-to skip inclination modes that require a different backplane not yet
-supported.
+Configuration
+=============
 
-:class:`~nav.nav_model.rings.ring_types.RingEdgeData` bundles the base orbit
-and zero or more perturbation modes for a single ring edge. Its ``base_radius``
-and ``rms`` properties extract the canonical radius and uncertainty from the
-base orbit. ``parsed_modes_for_backplane()`` returns the list of ``(mode,
-amplitude, phase, pattern_speed)`` tuples that the ``oops`` backplane API
-consumes, omitting inclination modes.
+The ring model reads shared parameters from the ``rings`` section of
+``src/nav/config_files/config_050_rings.yaml``, the per-planet ring catalogs from the
+``rings.ring_features`` blocks in ``config_300_jupiter_rings.yaml`` through
+``config_330_neptune_rings.yaml``, and the emission thresholds from the
+``feature_emission.ring_annulus`` block in ``config_510_techniques.yaml``.
 
-:class:`~nav.nav_model.rings.ring_feature.RingFeature` is the core domain
-object—a frozen dataclass that owns a single ring feature (ringlet or gap) with
-optional inner and outer edges. It is constructed via ``from_config(key, data)``
-which validates the YAML dictionary immediately and raises ``ValueError`` on
-any malformed input. Derived cached fields (``_start_et``, ``_end_et``) are
-computed in ``__post_init__`` using ``object.__setattr__()`` because the
-dataclass is frozen. Query methods (``is_visible_at``, ``is_in_radius_range``,
-``uncertainty``, ``all_base_radii``, ``uses_fade_for_edge``) allow the filter
-to make decisions without coupling to the rendering path. The ``render(context)``
-method dispatches to either ``_render_full_ringlet()`` (for two-edge features)
-or ``_render_single_edge()`` (for one-edge features) and returns one or two
-:class:`~nav.nav_model.rings.ring_render_result.RingRenderResult` instances.
+The ``rings`` section keys are:
 
-``validate_no_date_overlaps(features)`` is a module-level function that
-enforces authoring invariants: if two features with explicit date ranges share
-overlapping radii, their date ranges must not overlap. This is checked as a hard
-error at YAML load time to catch mistakes before any rendering occurs.
+- ``model_source`` — string, default ``ephemeris`` (dimensionless).  Selects the SPICE-ephemeris
+  ring model.
+- ``fiducial_feature_threshold`` — int, default ``3`` (count).  Minimum fiducial feature count used
+  by downstream ring fitting.
+- ``fiducial_rms_gain`` — float, default ``2`` dimensionless.  Gain applied to the catalog radial
+  residual when weighting fiducial edges.
+- ``fiducial_min_feature_width`` — float, default ``2`` px.  Minimum fiducial feature width used
+  downstream.
+- ``one_sided_feature_width`` — float, default ``30.0`` px.  Shading width applied to a single-edge
+  feature.
+- ``fiducial_ephemeris_width`` — float, default ``100`` px.  Ephemeris fiducial width used
+  downstream.
+- ``min_curvature_low_confidence`` — list, default ``[0.0, 0.5]``.  Curvature and confidence pair for
+  the low-confidence ring tier.
+- ``min_curvature_high_confidence`` — list, default ``[0.17, 1.0]``.  Curvature and confidence pair
+  for the high-confidence ring tier.
+- ``curvature_to_reduce_features`` — float, default ``1.5707963267948966`` rad.  Curvature above
+  which the feature set is reduced.
+- ``curvature_reduced_features`` — int, default ``1`` (count).  Feature count retained when curvature
+  forces reduction.
+- ``emission_fiducial_threshold`` — float, default ``0.75`` dimensionless.  Emission-angle fiducial
+  threshold used downstream.
+- ``emission_use_threshold`` — float, default ``0.2`` dimensionless.  Emission-angle usability
+  threshold used downstream.
+- ``remove_planet_shadow`` — bool, default ``true`` (dimensionless).  When true, ring pixels inside
+  the planet's shadow are zeroed from the rendered model and mask so the navigator does not match
+  bright model arcs against the dark shadow.
+- ``remove_body_shadows`` — bool, default ``false`` (dimensionless).  Accepted by the parser; ring
+  pixels in moon shadows are not removed.
+- ``label_font`` — string, default ``liberation2/LiberationMono-Bold.ttf``.  Font file for ring
+  labels.
+- ``label_font_size`` — int, default ``18`` pt.  Ring label font size.
+- ``label_font_color`` — RGB triple, default ``[255, 0, 0]``.  Ring label text colour.
+- ``label_mask_enlarge`` — int, default ``10`` px.  Dilation radius of the ring mask used as a
+  label-avoidance region.
+- ``label_horiz_gap`` — int, default ``7`` px.  Horizontal gap between an edge and a left/right label
+  arrow head.
+- ``label_vert_gap`` — int, default ``5`` px.  Vertical gap between an edge and a top/bottom label
+  arrow head.
+- ``label_limb_color`` — RGB triple, default ``[255, 0, 0]``.  Colour of the drawn ring-edge overlay.
 
-Ring filtering pipeline
------------------------
+Ring-annulus emission
+---------------------
 
-:class:`~nav.nav_model.rings.ring_filter.RingFeatureFilter` applies a
-four-pass decision pipeline to a list of ``RingFeature`` objects and returns
-only the features that should be rendered:
+The emission thresholds live under ``feature_emission.ring_annulus`` in
+``config_510_techniques.yaml`` with a ``default`` block and per-planet overrides; each block sets:
 
-.. list-table:: Filter passes
-   :header-rows: 1
-   :widths: 10 25 65
+- ``max_radial_px`` — float, default ``5.0`` px.  Per-edge radial extent at or below which the model
+  emits an annulus template instead of a per-edge polyline.  Larger values push more edges into the
+  annulus regime.
+- ``kmpp_threshold`` — float, default ``1000.0`` km/px (Saturn; ``200.0`` Jupiter, ``300.0`` Uranus,
+  ``500.0`` Neptune).  System-wide radial resolution at or above which every surviving feature is
+  forced into the annulus regime.  Lower values trigger the annulus path at higher resolution.
 
-   * - Pass
-     - Name
-     - Decision
-   * - 1
-     - Date
-     - Exclude the feature if the observation time is outside its ``[start_date,
-       end_date)`` window. Features without explicit dates are always kept.
-   * - 2
-     - Radius
-     - Exclude the feature if neither edge falls within ``[min_radius,
-       max_radius]``. Partially visible features (one edge in range) are kept so
-       the renderer can handle the partial case.
-   * - 3
-     - Resolvability
-     - For two-edge features (RINGLETs and GAPs where both edges are in the
-       FOV), exclude the feature if the gap width ``outer.base_radius -
-       inner.base_radius`` is smaller than ``min_feature_pixels *
-       min_resolution`` along the feature. The motivation is that an
-       unresolvable gap provides no useful navigational information—shading its
-       surroundings without a visible gap would be misleading.
-   * - 4
-     - Fade conflict
-     - For each edge that uses a fade, check whether a neighboring edge's
-       ``all_edge_radii`` would push the conflict-adjusted fade width below
-       ``min_allowed_fade_width_pix * min_resolution`` at best resolution. If
-       so, exclude that edge. A feature whose only remaining edge is excluded is
-       dropped entirely. A feature retaining at least one edge is passed
-       through with the excluded edge set to ``None`` (a trimmed feature).
+Per-planet ring catalogs
+------------------------
 
-The filter logs every exclusion decision at ``DEBUG`` level with the feature
-key, pass number, and reason, allowing detailed inspection without polluting
-``INFO`` output. Exclusion and trimming are kept in the filter rather than in
-the renderer so that each concern can be tested independently.
+Each ``rings.ring_features.<PLANET>`` block sets the reference ``epoch``, the edge-fade widths
+(``fade_width_pix``, ``min_allowed_fade_width_pix``), the resolvability floor
+(``min_feature_pixels``), and a ``features`` mapping of named ring features.  Each feature names a
+``feature_type`` (``GAP`` or ``RINGLET``), one or both edge orbits (``inner_data`` / ``outer_data``
+as lists of orbital modes), and optional ``start_date`` / ``end_date`` activity windows.  See
+:py:class:`~nav.nav_model.rings.ring_feature.RingFeature` and the ring domain types in
+``ring_types`` for the full schema.
 
-Ring YAML configuration
------------------------
+Implementation
+==============
 
-Top-level ring model parameters
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Source files: ``src/nav/nav_model/nav_model_rings.py`` (the concrete model and its feature
+builders), ``src/nav/nav_model/nav_model_rings_base.py`` (the shared edge-annotation helper), and
+the ``rings`` subpackage — ``ring_types.py``, ``ring_feature.py``, ``ring_filter.py``,
+``ring_math.py``, ``ring_render_context.py``, and ``ring_render_result.py``.
 
-These keys sit directly under the ``rings:`` section (not under
-``rings.ring_features.<PLANET>``). They are shared across all planets and
-control post-render processing that is applied to every rendered ring
-feature before its image and mask are emitted as part of a
-``RING_ANNULUS`` :class:`~nav.feature.feature.NavFeature`.
+The public class is :py:class:`~nav.nav_model.nav_model_rings.NavModelRings`, a subclass of
+:py:class:`~nav.nav_model.nav_model_rings_base.NavModelRingsBase` (itself a
+:py:class:`~nav.nav_model.nav_model.NavModel`).
 
-.. list-table::
-   :header-rows: 1
-   :widths: 35 10 55
+:py:meth:`~nav.nav_model.nav_model_rings.NavModelRings.create_model` records timing metadata, runs
+the render, and logs a summary.  The render identifies the closest planet, parses and validates
+the per-planet catalog into :py:class:`~nav.nav_model.rings.ring_feature.RingFeature` objects,
+checks cross-feature date overlaps, runs the cheap coarse-grid visibility pre-check, evaluates the
+dense ring-radius backplane to find the visible radial range, builds a
+:py:class:`~nav.nav_model.rings.ring_filter.RingFeatureFilter` and applies the four passes,
+computes the subject range and the optional planet-shadow mask, and renders each surviving feature
+through :py:meth:`~nav.nav_model.rings.ring_feature.RingFeature.render` into a
+:py:class:`~nav.nav_model.rings.ring_render_result.RingRenderResult`.  The rendered images, masks,
+uncertainties, and per-edge info are stored for emission.
 
-   * - Parameter
-     - Default
-     - Description
-   * - ``remove_planet_shadow``
-     - ``true``
-     - When ``true``, pixels of each rendered ring feature that fall inside the
-       shadow of the nearest planet are zeroed out of the model image and
-       removed from the model mask. The shadow boundary is computed once per
-       observation via
-       ``obs.ext_bp.where_inside_shadow(ring_target, planet.lower())``, where
-       *ring_target* is ``<planet>:ring`` (e.g. ``saturn:ring``) and *planet*
-       is ``obs.closest_planet``. If the backplane call raises an exception
-       (e.g. degenerate illumination geometry), a warning is logged and shadow
-       removal is skipped for that observation. Removing shadowed pixels
-       prevents the navigator from matching bright model arcs against the dark
-       shadow region, which would introduce a systematic offset bias.
-   * - ``remove_body_shadows``
-     - ``false``
-     - Reserved for future implementation. When set, it will zero out ring
-       model pixels that lie in the shadows cast by moons. The flag is
-       accepted by the configuration parser but has no effect in the current
-       release.
+:py:meth:`~nav.nav_model.nav_model_rings.NavModelRings.to_features` resolves the per-planet
+emission thresholds, decides the system-wide annulus gate, and walks the rendered edges.  For each
+edge it samples the polyline and normals, measures the radial extent and straightness, and either
+emits a :py:class:`~nav.feature.geometry.RingEdgePolyline` carrying
+:py:attr:`~nav.feature.feature_type.NavFeatureType.RING_EDGE` with
+:py:class:`~nav.feature.flags.RingEdgeFlags`, or accumulates the rendering for the annulus.  At the
+end, accumulated annulus renderings are unioned into one composite
+:py:class:`~nav.feature.geometry.RingAnnulusGeometry` carrying
+:py:attr:`~nav.feature.feature_type.NavFeatureType.RING_ANNULUS` with
+:py:class:`~nav.feature.flags.RingAnnulusFlags`.  The two emitted
+:py:class:`~nav.feature.feature_type.NavFeatureType` values are therefore ``RING_EDGE`` and
+``RING_ANNULUS``; the design emits at most one ``RING_ANNULUS`` per planet per scene.
 
-Shadow removal is applied **after** rendering and **before** the rendered
-mask is folded into the emitted ``NavFeature.template_img`` /
-``template_mask``, so the per-feature image and mask already reflect the
-masking. At ``INFO`` log level the orchestrator reports the shadow
-pixel count:
+:py:meth:`~nav.nav_model.nav_model_rings.NavModelRings.to_annotations` draws the per-edge polyline
+overlays and ring labels via the base ``_create_edge_annotations`` helper.
 
-.. code-block::
+The reliability of a ``RING_EDGE`` is the catalog default scaled by the visible-arc fraction and
+one minus the shadow-occluded fraction, with a straight-line multiplier; the reliability of a
+``RING_ANNULUS`` scales the catalog default by the constituent-edge count and a sigmoid of the
+radial extent.  Each emitted feature carries a
+:py:class:`~nav.feature.feature.NavReliabilityBreakdown`.
 
-   Planet shadow removal: 1284 pixel(s) inside SATURN shadow will be masked
+Examples
+========
 
-Set ``general.log_level_model_rings`` to ``DEBUG`` for the full backplane call
-trace.
-
-Planetary ring features are defined in separate YAML files under
-``src/nav/config_files/``. The default Saturn configuration is in
-``config_21_saturn_rings.yaml``.
-
-YAML structure
-^^^^^^^^^^^^^^
-
-.. code-block:: yaml
-
-   rings:
-     ring_features:
-       SATURN:                             # Planet name (must match obs.closest_planet)
-         epoch: '2004-01-01 12:00:00'     # Reference epoch for precessing modes
-         fade_width_pix: 100.0            # Nominal fade width in pixels for each edge
-         min_allowed_fade_width_pix: 2.0  # Minimum fade width before edge is excluded
-         min_feature_pixels: 2.0          # Minimum resolvable gap width (pass-3 filter)
-         features:                        # Dict of named ring features
-           colombo_gap:
-             feature_type: GAP
-             outer_data:                  # Edge data list (mode 1 = base orbit)
-               - mode: 1
-                 a: 77870.0              # Semi-major axis in km
-                 ae: 100.0              # Amplitude of eccentricity (km)
-                 long_peri: 195.0        # Longitude of periapsis (degrees)
-                 rate_peri: 0.0          # Precession rate (degrees/day)
-                 rms: 2.0               # Edge uncertainty (km, 1-sigma RMS)
-           titan_ringlet:
-             feature_type: RINGLET
-             start_date: '2004-01-01'   # Optional: feature active from this UTC date
-             end_date: '2017-09-15'     # Optional: feature active until this UTC date (exclusive)
-             inner_data:
-               - mode: 1
-                 a: 77517.0
-                 ae: 3.0
-                 long_peri: 0.0
-                 rate_peri: 0.0
-                 rms: 1.0
-             outer_data:
-               - mode: 1
-                 a: 77871.0
-                 ae: 5.0
-                 long_peri: 0.0
-                 rate_peri: 0.0
-                 rms: 2.0
-               - mode: 2                # Optional perturbation mode
-                 amplitude: 1.5
-                 phase: 30.0
-                 pattern_speed: 0.5
-
-Planet-level parameters
-^^^^^^^^^^^^^^^^^^^^^^^
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
-
-   * - Parameter
-     - Description
-   * - ``epoch``
-     - Reference UTC date-time string for evaluating precessing orbital modes.
-       All ``long_peri`` angles and ``rate_peri`` precession rates are evaluated
-       relative to this epoch. Required.
-   * - ``fade_width_pix``
-     - Desired fade width in pixels for each rendered edge. The fade spans this
-       many pixels everywhere in the image: at the ansae (high resolution) the
-       fade covers fewer kilometres; near the ansa edges (low resolution) it
-       covers more. Required; must be positive.
-   * - ``min_allowed_fade_width_pix``
-     - Minimum fade width in pixels. If a neighboring edge would force the
-       conflict-adjusted fade below this threshold (at the best resolution along
-       the edge), the edge is excluded by the filter. Required; must be positive.
-   * - ``min_feature_pixels``
-     - Minimum resolvable width in pixels for two-edge features (RINGLETs and
-       GAPs where both edges fall within the FOV). Features narrower than
-       ``min_feature_pixels * min_resolution`` are excluded by the filter because
-       the gap cannot be detected. Required; must be positive.
-
-Feature-level parameters
-^^^^^^^^^^^^^^^^^^^^^^^^
-
-.. list-table::
-   :header-rows: 1
-   :widths: 30 70
-
-   * - Parameter
-     - Description
-   * - ``feature_type``
-     - ``GAP`` or ``RINGLET``. Determines how single-edge features are shaded
-       and how the region between a pair of edges is filled.
-   * - ``inner_data`` / ``outer_data``
-     - List of mode dicts describing the edge orbit. At least one of these must
-       be present. Mode 1 is the base orbit (required in the list); higher modes
-       are perturbations. See edge mode parameters below.
-   * - ``start_date``
-     - Optional UTC date string. The feature is active only for observations at
-       or after this date.
-   * - ``end_date``
-     - Optional UTC date string. The feature is active only for observations
-       strictly before this date.
-
-Edge mode parameters (mode 1 — base orbit)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-.. list-table::
-   :header-rows: 1
-   :widths: 20 80
-
-   * - Field
-     - Description
-   * - ``mode``
-     - Must be ``1`` for the base orbit entry.
-   * - ``a``
-     - Semi-major axis in km. Must be positive.
-   * - ``ae``
-     - Eccentricity amplitude in km (half of peak-to-peak radial variation).
-   * - ``long_peri``
-     - Longitude of periapsis at the reference epoch, in degrees.
-   * - ``rate_peri``
-     - Precession rate of periapsis, in degrees per day.
-   * - ``rms``
-     - Edge position uncertainty, in km (1-sigma RMS). Projected to
-       pixels per image and stored on each emitted ring feature's
-       per-vertex ``sigma_radial_per_vertex_px``.
-
-Edge mode parameters (mode > 1 — perturbation modes)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-.. list-table::
-   :header-rows: 1
-   :widths: 20 80
-
-   * - Field
-     - Description
-   * - ``mode``
-     - Mode number. Values 2-90 are radial perturbations (supported).
-       Values > 90 are inclination modes (stored but silently skipped during
-       rendering because the current backplane API does not support them).
-   * - ``amplitude``
-     - Perturbation amplitude in km.
-   * - ``phase``
-     - Phase angle at the reference epoch, in degrees.
-   * - ``pattern_speed``
-     - Pattern speed in degrees per day.
-
-Validation and loading
-^^^^^^^^^^^^^^^^^^^^^^
-
-``RingFeature.from_config()`` validates every feature dictionary immediately when it
-is read. Errors raise ``ValueError`` with the feature key in the message. Checks
-include:
-
-* ``feature_type`` must be ``"GAP"`` or ``"RINGLET"``.
-* At least one of ``inner_data`` / ``outer_data`` must be present.
-* Each mode list must contain exactly one mode-1 entry.
-* ``a`` must be positive; ``rms`` must be non-negative.
-* Date strings must be parseable by ``utc_to_et``.
-
-After all features are loaded, ``validate_no_date_overlaps()`` performs a
-cross-feature pass. If two features share overlapping radial extents *and* both have
-explicit ``[start_date, end_date)`` windows that overlap in time, a ``ValueError`` is
-raised. This catches authoring mistakes where a curator accidentally activates two
-conflicting features simultaneously.
-
-Adding a new planet
-^^^^^^^^^^^^^^^^^^^
-
-To configure rings for a new planet (e.g., Uranus):
-
-1. Create ``src/nav/config_files/config_XX_uranus_rings.yaml`` with the structure
-   shown above, replacing ``SATURN`` with ``URANUS``.
-
-2. Add a ``!include`` directive (or equivalent) in the main config so that the new
-   file is loaded alongside the Saturn file:
-
-   .. code-block:: yaml
-
-      rings:
-        ring_features:
-          !include config_XX_uranus_rings.yaml
-
-3. Populate ``fade_width_pix``, ``min_allowed_fade_width_pix``,
-   ``min_feature_pixels``, and ``epoch`` for the new planet.
-
-4. Add individual features under ``features:`` using the same format as Saturn.
-
-No code changes are required.  The ring NavModel reads whichever planet
-name appears in ``obs.closest_planet`` and looks it up in
-``rings.ring_features`` at runtime.
+**ring_only_curved** (``N1447064164_1_CALIB``, ``W1444747627_1_CALIB``).  Distant Saturn ring views
+in which the catalog A, B, and C ring edges all compress radially below the annulus radial
+threshold, so the model collapses every surviving edge into one composite ``RING_ANNULUS`` feature
+for the Saturn ring system rather than emitting per-edge polylines.  The sidecars' expected primary
+technique is the ring-annulus navigator running one joint correlation against the composite
+template.  A nearer, well-resolved Saturn ring view in which the principal edges each span more
+than the radial threshold and curve across the field would instead emit one ``RING_EDGE`` per
+traceable edge.

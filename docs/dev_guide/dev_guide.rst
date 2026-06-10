@@ -5,7 +5,7 @@ Developer Guide
 This guide is intended for developers who want to understand, modify, or extend the RMS-NAV system.
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 4
    :caption: Developer Guide Contents:
 
    dev_guide_introduction
