@@ -55,6 +55,7 @@ DEFAULT_DISAGREEMENT_PENALTY = 0.7
 DEFAULT_CONFLICTED_CONFIDENCE_MULTIPLIER = 0.3
 DEFAULT_MIN_CONFIDENCE = 0.2
 DEFAULT_PINVH_RCOND = 1.0e-9
+DEFAULT_MAX_ALLOWED_ROTATION_DEG = 5.0
 DEFAULT_TIER_THRESHOLDS: dict[str, dict[str, float | None]] = {
     'high': {'min_confidence': 0.8, 'max_sigma_px': 0.5},
     'medium': {'min_confidence': 0.5, 'max_sigma_px': 2.0},
@@ -91,6 +92,15 @@ class EnsembleConfig:
         min_confidence: Final-result threshold below which the ensemble
             returns NavResult.failed instead of NavResult.ok.
         pinvh_rcond: rcond for ``scipy.linalg.pinvh``.
+        max_allowed_rotation_deg: Maximum magnitude (in degrees) a 3-DoF
+            result's rotation may take before the ensemble rejects it.
+            The rotation parameter is combined as a small angle (circular
+            mean of ``(dv, du, theta)`` triples); this bound enforces the
+            small-angle assumption that every contributing technique fits
+            against (every DT/star technique clamps its rotation to
+            ``+-max_rotation_deg``, default 5 deg).  A 3-DoF result
+            arriving with ``abs(rotation_rad)`` at or above this bound is a
+            programming error upstream and trips an assertion.
         tier_thresholds: Mapping ``rank -> {min_confidence, max_sigma_px}``;
             see ``derive_confidence_rank``.
     """
@@ -102,6 +112,7 @@ class EnsembleConfig:
     conflicted_confidence_multiplier: float = DEFAULT_CONFLICTED_CONFIDENCE_MULTIPLIER
     min_confidence: float = DEFAULT_MIN_CONFIDENCE
     pinvh_rcond: float = DEFAULT_PINVH_RCOND
+    max_allowed_rotation_deg: float = DEFAULT_MAX_ALLOWED_ROTATION_DEG
     tier_thresholds: dict[str, dict[str, float | None]] = field(
         default_factory=lambda: copy.deepcopy(DEFAULT_TIER_THRESHOLDS)
     )
@@ -128,7 +139,13 @@ def _mahalanobis_distance(
     # Project delta back through pinv * cov_sum; residual lies in the null
     # space.
     null_proj = delta - cov_sum @ pinv @ delta
-    if np.linalg.norm(null_proj) > 1e-6:
+    # Scale-invariant null-space disagreement test: the residual that lies in
+    # the null space of the summed covariance must be negligible relative to
+    # the size of ``delta`` itself, not against a fixed absolute pixel
+    # tolerance (which silently flips behavior as image/offset scales change).
+    rel_tol = 1.0e-6
+    eps = np.finfo(float).eps
+    if np.linalg.norm(null_proj) > rel_tol * max(float(np.linalg.norm(delta)), eps):
         return float('inf')
     d_sq = float(delta.T @ pinv @ delta)
     if d_sq < 0:
@@ -250,6 +267,7 @@ def _agreement_groups(
     agreement_sigma: float,
     agreement_pixel_floor: float,
     rcond: float,
+    max_allowed_rotation_deg: float,
 ) -> list[list[NavTechniqueResult]]:
     """Single-link clustering by Mahalanobis distance with a pixel-floor fallback.
 
@@ -258,6 +276,11 @@ def _agreement_groups(
     Euclidean translation distance (in pixels, ignoring the rotation
     component for 3-DoF results) is at most ``agreement_pixel_floor``.
     Transitive closure builds final groups via connected components.
+
+    The Mahalanobis distance differences the rotation component of two
+    3-DoF results linearly; that is correct here because every input
+    rotation is bounded to the small-angle window enforced below, so the
+    pairwise angle difference never approaches the ``+-pi`` wrap.
 
     The pixel floor compensates for per-technique covariances that
     report only a CRLB-style precision (FFT subpixel localization or
@@ -271,6 +294,9 @@ def _agreement_groups(
         agreement_pixel_floor: Maximum pairwise Euclidean translation
             distance (in pixels) for grouping; ``0.0`` disables.
         rcond: rcond passed to ``pinvh``.
+        max_allowed_rotation_deg: Small-angle bound; each 3-DoF input's
+            ``rotation_rad`` magnitude must stay strictly below this many
+            degrees for the linear rotation differencing to be valid.
 
     Returns:
         List of groups (each group a list of NavTechniqueResult).
@@ -278,6 +304,17 @@ def _agreement_groups(
     n = len(results)
     if n == 0:
         return []
+    max_rotation_rad = math.radians(max_allowed_rotation_deg)
+    for res in results:
+        cov = np.asarray(res.covariance_px2, np.float64)
+        if cov.shape == (3, 3) and res.rotation_rad is not None:
+            # Small-angle assumption: a 3-DoF rotation outside +-max_rotation_deg
+            # is an upstream error (every technique clamps its rotation fit to
+            # this bound), and would break the linear rotation differencing.
+            assert abs(res.rotation_rad) < max_rotation_rad, (
+                f'{res.technique_name}: rotation {math.degrees(res.rotation_rad):.3f} deg '
+                f'violates small-angle bound +-{max_allowed_rotation_deg:.3f} deg'
+            )
     if n == 1:
         return [list(results)]
     # Build a sparse adjacency matrix marking pairs within threshold.
@@ -340,24 +377,34 @@ class _CombinedEstimate:
 
 
 def _combine_precision_weighted(
-    group: list[NavTechniqueResult], *, rcond: float
+    group: list[NavTechniqueResult], *, rcond: float, max_allowed_rotation_deg: float
 ) -> _CombinedEstimate:
     """Information-form combine of a group of agreeing results.
 
-    Implements the Kalman-style information-form merge:
+    Implements the Kalman-style information-form merge for the translation
+    components:
 
         Sigma_combined = pinvh( sum_i pinvh(Sigma_i) )
         mu_combined    = Sigma_combined @ sum_i ( pinvh(Sigma_i) @ mu_i )
 
     Parameter vectors carry rotation as a third component when every input
     is 3-DoF; the resulting combined estimate then carries a non-``None``
-    ``rotation_rad`` field.
+    ``rotation_rad`` field.  The rotation parameter is *not* averaged as a
+    plain Euclidean coordinate (which would wrap incorrectly near
+    ``+-pi``); instead it is combined on the circle as the precision-weighted
+    circular mean ``atan2(sum_i w_i sin theta_i, sum_i w_i cos theta_i)``,
+    with ``w_i`` the rotation-component information ``pinvh(Sigma_i)[2, 2]``.
+    The translation components and the full combined covariance are produced
+    exactly as before by the information-form merge.
 
     Parameters:
         group: Non-empty list of agreeing results.  Every member must
             share the same parameter dimensionality (all 2-DoF or all
             3-DoF — :func:`_agreement_groups` already enforces this).
         rcond: rcond for ``pinvh``.
+        max_allowed_rotation_deg: Small-angle bound; each 3-DoF input's
+            ``rotation_rad`` magnitude must stay strictly below this many
+            degrees (in radians) for the circular-mean combine to be valid.
 
     Returns:
         :class:`_CombinedEstimate`.
@@ -372,6 +419,9 @@ def _combine_precision_weighted(
     info_sum: NDArrayFloatType | None = None
     info_mu_sum: NDArrayFloatType | None = None
     n_params: int | None = None
+    max_rotation_rad = math.radians(max_allowed_rotation_deg)
+    rot_w_sin = 0.0
+    rot_w_cos = 0.0
     for res in group:
         cov = np.asarray(res.covariance_px2, np.float64)
         if n_params is None:
@@ -383,6 +433,19 @@ def _combine_precision_weighted(
             )
         info = pinvh(cov, rtol=rcond)
         mu = _result_param_vector(res)
+        if cov.shape[0] == 3:
+            theta = float(mu[2])
+            # Small-angle assumption: every contributing technique clamps its
+            # rotation fit to +-max_rotation_deg, so a result arriving outside
+            # that bound is an upstream programming error, not data the
+            # circular-mean combine should silently absorb.
+            assert abs(theta) < max_rotation_rad, (
+                f'{res.technique_name}: rotation {math.degrees(theta):.3f} deg '
+                f'violates small-angle bound +-{max_allowed_rotation_deg:.3f} deg'
+            )
+            w_theta = float(info[2, 2])
+            rot_w_sin += w_theta * math.sin(theta)
+            rot_w_cos += w_theta * math.cos(theta)
         if info_sum is None:
             info_sum = info.copy()
             info_mu_sum = info @ mu
@@ -405,7 +468,13 @@ def _combine_precision_weighted(
     is_rank_deficient = bool(eigvals.min() / max(abs(eigvals.max()), eps) < rel_tol)
     rotation: float | None = None
     if n_params == 3:
-        rotation = float(mu_combined[2])
+        # Combine the rotation on the circle so angles near +-pi do not cancel
+        # to a spurious ~0; fall back to the information-form estimate when the
+        # rotation weight is degenerate (every input rotation-unobservable).
+        if rot_w_sin == 0.0 and rot_w_cos == 0.0:
+            rotation = float(mu_combined[2])
+        else:
+            rotation = float(math.atan2(rot_w_sin, rot_w_cos))
     return _CombinedEstimate(
         offset_px=(float(mu_combined[0]), float(mu_combined[1])),
         rotation_rad=rotation,
@@ -573,6 +642,7 @@ def ensemble(
         agreement_sigma=cfg.agreement_sigma,
         agreement_pixel_floor=cfg.agreement_pixel_floor,
         rcond=cfg.pinvh_rcond,
+        max_allowed_rotation_deg=cfg.max_allowed_rotation_deg,
     )
     ranked = sorted(
         groups,
@@ -583,7 +653,11 @@ def ensemble(
     best_summed_conf = sum(r.confidence for r in best_group)
     apply_disagreement_penalty = len(groups) > 1
     try:
-        combined = _combine_precision_weighted(best_group, rcond=cfg.pinvh_rcond)
+        combined = _combine_precision_weighted(
+            best_group,
+            rcond=cfg.pinvh_rcond,
+            max_allowed_rotation_deg=cfg.max_allowed_rotation_deg,
+        )
         combined_confidence = _combine_confidence(
             best_group,
             rcond=cfg.pinvh_rcond,
@@ -687,7 +761,7 @@ def ensemble(
     sigma_rotation_rad: float | None = None
     if combined.rotation_rad is not None and cov.shape == (3, 3):
         sigma_rotation_rad = float(math.sqrt(max(cov[2, 2], 0.0)))
-    return NavResult.ok(
+    return NavResult.success(
         offset_px=combined.offset_px,
         covariance_px2=combined.covariance_px2,
         confidence=combined_confidence,
