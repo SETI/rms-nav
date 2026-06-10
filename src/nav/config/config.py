@@ -40,6 +40,34 @@ def _strip_underscore_keys(value: Any) -> Any:
     return value
 
 
+def _deep_merge(base: dict[Any, Any], overlay: dict[Any, Any]) -> dict[Any, Any]:
+    """Recursively merge ``overlay`` into ``base``, returning a new mapping.
+
+    When a key is present in both mappings and both values are dictionaries,
+    the values are merged key-by-key so sibling keys in ``base`` are
+    preserved.  For any other case (one side is not a mapping, or the key is
+    new) the ``overlay`` value replaces the ``base`` value; lists and scalars
+    are never merged element-wise.
+
+    Parameters:
+        base: The starting mapping (e.g. bundled defaults).
+        overlay: The mapping whose values take precedence at each leaf.
+
+    Returns:
+        A new ``dict`` containing the deep-merged result.  ``base`` and
+        ``overlay`` are not mutated.
+    """
+
+    merged: dict[Any, Any] = dict(base)
+    for key, overlay_value in overlay.items():
+        base_value = merged.get(key)
+        if isinstance(base_value, dict) and isinstance(overlay_value, dict):
+            merged[key] = _deep_merge(base_value, overlay_value)
+        else:
+            merged[key] = overlay_value
+    return merged
+
+
 def _as_str_list(value: Any, *, location: str) -> list[str]:
     """Coerce a YAML list value to ``list[str]``.
 
@@ -233,8 +261,8 @@ class Config:
             self.read_config()
         new_config = self._load_yaml(config_path)
         for key in new_config:
-            if key in self._config_dict:
-                self._config_dict[key].update(new_config[key])
+            if key in self._config_dict and isinstance(self._config_dict[key], dict):
+                self._config_dict[key] = _deep_merge(self._config_dict[key], new_config[key])
             else:
                 self._config_dict[key] = new_config[key]
         self._update_attrdicts()
