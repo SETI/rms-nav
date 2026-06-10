@@ -148,6 +148,33 @@ The remaining 162 findings are Medium and Low severity, detailed in their parts.
 
 ---
 
+## Remediation status
+
+Tracks fixes applied against this critique. "FIXED (uncommitted)" means the
+change is on the working tree, verified by the noted tests, not yet committed.
+
+| Finding | Title | Status (2026-06-10) | Notes |
+|---|---|---|---|
+| CODE-NAV-001 | `lm_subpixel_refine` reports a clean fit on total non-convergence | FIXED (uncommitted) | `LMRefineResult.degenerate` added; `rms_px=inf` + all-inf covariance when every weight is rejected; limb / terminator / ring-edge spurious gates treat `degenerate` as spurious. 238 technique tests pass. Covariance documented as data-only (excludes the Tikhonov anchor). |
+| CODE-NAV-002 | Limb/terminator normals from the ridge mask, arbitrary sign | FIXED (uncommitted) | Normals now computed from the silhouette mask (limb) / lit mask (terminator); outward-normal regression test added. |
+| CODE-MAIN-001 (Part 7, async entry point) | `nav_backplanes_cloud_tasks` / `nav_create_bundle_cloud_tasks` register `async def main` | FIXED (uncommitted) | Both now expose a sync `main()` that runs `asyncio.run(async_main())`; verified `main` is no longer a coroutine. |
+| CODE-BACKPLANE-001 + CODE-PDS4-001 | Backplane / PDS4 stages skip every navigated image (status literal) | FIXED (uncommitted) | `NavResult.status` standardized on `'success'` (the value the two stages already check). Producer, consumers, sidecar validator, 8 sidecars, and 8 test files updated; unrelated `reason='ok'` / `StatusReason.OK` / cloud-tasks worker protocol left intact. |
+| CODE-NAV-003 | Star predicted-SNR depends on a placeholder DN-to-I/F scale | FIXED (uncommitted) | Replaced the DN-based SNR gate with a magnitude gate on the existing `obs.star_max_usable_vmag()`; covariance/reliability now use a magnitude-margin pseudo-SNR (`SNR_REF=8.0`, `SNR_FLOOR=0.1`); `signal_dn_to_image_unit_scale` removed from `InstrumentSettings`/`NavContext`/configs (placeholders gone); `predicted_snr.py` retained only as a raw-DN diagnostic. 503 nav tests pass. Follow-up: full CISSCAL photometry + non-Cassini limiting magnitudes. The general placeholder-scanning guard (CODE-CFG-001) remains tracked by issue #118. |
+| CODE-CFG-1 | `update_config` shallow merge clobbers nested sibling overrides | FIXED (uncommitted) | Added `_deep_merge`; nested user overrides combine key-by-key while preserving sibling defaults. 4 new tests pass. |
+| CODE-MAIN-002 | Sim-GUI drops `shade_solid_rings`, crashes on null `closest_planet` | FIXED (uncommitted) | `_load_parameters` now preserves `shade_solid_rings` and re-syncs the checkbox; `closest_planet` falls back to `'SATURN'` before the combo update. 6 GUI tests pass headless. |
+| CODE-OBS-001 | `star_psf_size` loop-variable leak / mistyped fallthrough | FIXED (uncommitted) | Rewritten to sort thresholds, use an explicit `default_mag`, raise `ValueError` on empty, and validate/coerce a 2-tuple. 5 new tests. |
+| CODE-OBS-011 | Voyager I/F correction keyed off one unvalidated label char | FIXED (uncommitted) | `_voyager_spacecraft_digit` validates `LAB02` (str, len>=5, char='1'/'2'); `_voyager_if_factor` guards the `LABEL3` parse. Formats confirmed against real holdings and `oops`; 10 new tests. (CODE-OBS-012 fixed in the same change.) |
+| CODE-DS-001 / 002 / 010 | Unbound idx; biased random sampling; BOTSIM mis-pair / frame loss | FIXED (uncommitted) | DS-001: indices pre-initialized for mypy. DS-002: random path samples a filtered pool per volume, bounded by the volume set (no livelock/bias). DS-010: never drops a frame; pairs only on opposite camera + same `OBSERVATION_ID` + `IMAGE_TIME` within 2.0 s (not the image-number-as-seconds heuristic). 4 new tests. |
+| CODE-NAV-008 / 009 | Ensemble angle-wrap; absolute null-space tolerance | FIXED (uncommitted) | NAV-008: rotation combined as a circular mean with a `max_allowed_rotation_deg=5.0` config field + small-angle assertion (translation merge unchanged). NAV-009: null-space test now relative (`rel_tol * max(‖delta‖, eps)`). 29 ensemble tests pass. |
+| CODE-ORCH-003 | NaN markers crash `navigate()` for calibrated images | FIXED (uncommitted) | `_make_context` sanitizes NaN/marker pixels to a finite fill before the derivative kernels and threads the true `missing_frac` into the classifier (`np.isnan`/`np.nanmax`); calibrated frames now fail gracefully and missing-data detection works. 5 new tests. |
+
+ID-collision caveat: the labels `CODE-MAIN-001` and `CODE-PDS4-001` also tag
+*different* findings in Part 1's preliminary peripheral scan (an oversized module
+and a bare-except cluster, respectively); those remain open. The rows above refer
+to the detailed-pass findings in Parts 3 and 7.
+
+---
+
 # Findings
 
 
@@ -277,6 +304,7 @@ placeholder; add a config-validation test that *fails* if any
 ### High
 
 #### CODE-NAV-004 — `StarFieldFromCatalogNav._build_covariance`: wrong power of `Σw` in the translation-mean covariance
+> **Tracked by:** #123 — Mahalanobis agreement grouping breaks because per-technique covariances are CRLB-tight
 **File:** `src/nav/nav_technique/nav_technique_star_field.py` · `_build_covariance` (lines 881-901)
 **Severity:** High
 
@@ -306,6 +334,7 @@ the final confidence tier. **Confirm by** a unit test with two stars at known
 weighted-mean sigma.
 
 #### CODE-NAV-005 — `BodyBlobNav._joint_covariance`: same `(Σw)²` mis-normalization plus a hidden single-blob over-confidence
+> **Tracked by:** #123 — Mahalanobis agreement grouping breaks because per-technique covariances are CRLB-tight
 **File:** `src/nav/nav_technique/nav_technique_body_blob.py` · `_joint_covariance` (lines 257-290)
 **Severity:** High
 
@@ -330,6 +359,7 @@ scene where a blob and a star field both fire; the blob's tiny covariance will
 dominate `mu_combined`.
 
 #### CODE-NAV-006 — DT-fit "spurious" gates can be defeated by Tukey weight collapse; `rms_px` is Tukey-weighted, not raw
+> **Tracked by:** #125 — BodyTerminatorNav mis-convergence has no per-technique signal, #128 — Architectural redesign: robust limb navigation across all body types and illuminations
 **Files:** `nav_technique_body_limb.py` (lines 335-344), `nav_technique_ring_edge.py` (lines 304-316), `nav_technique_body_terminator.py`
 **Severity:** High
 
@@ -351,6 +381,7 @@ limb/terminator techniques, or report a raw (unweighted) RMS alongside the
 robust one and gate on the raw value.
 
 #### CODE-NAV-007 — `coarse_ncc_search` is documented as NCC but is a raw count; the "argmax unchanged" claim is false in general
+> **Tracked by:** #128 — Architectural redesign: robust limb navigation across all body types and illuminations
 **File:** `src/nav/nav_technique/dt_fitting.py` · `coarse_ncc_search` (lines 106-203)
 **Severity:** High (correctness of the seed that the whole LM trusts)
 
@@ -418,6 +449,7 @@ offset. **Impact:** intermittent failure to group agreeing results → spurious
 eps)`.
 
 #### CODE-NAV-010 — `_rotation_sigma_from_quality` covariance has wrong dimensions
+> **Tracked by:** #123 — Mahalanobis agreement grouping breaks because per-technique covariances are CRLB-tight
 **File:** `src/nav/nav_technique/nav_technique_body_disc.py` · `_rotation_sigma_from_quality` (lines 692-751)
 **Severity:** High
 
@@ -511,6 +543,7 @@ RANSAC re-scores many candidates, partially masking the issue.
 - **CODE-NAV-020** — `nav_technique_star_field.py` is 993 lines, approaching the
   1000-line module cap; splitting the triplet-hash matcher into a helper module
   would respect the convention and improve testability.
+  *Tracked by:* #97 — split oversized modules exceeding 1000-line rulebook limit.
 - **CODE-NAV-021** — Several techniques use `1e6 * np.eye(2)` as a "no info"
   covariance for spurious results instead of `inf`; the ensemble drops spurious
   results anyway, but a finite huge covariance would *not* be dropped if the
@@ -537,6 +570,7 @@ with zero km/px (off-body) silently gets a 3-px sigma rather than being dropped.
 Hoist the coefficients to config and drop zero-resolution vertices.
 
 #### CODE-NAV-MODEL-002 — Body emission thresholds are module-level constants documented as "config default pending calibration"
+> **Tracked by:** #118 — Design and implement a comprehensive config validation system
 **File:** `nav_model_body.py` (lines 100-156): `LIMB_ARC_MAX_UNCERTAINTY_PX`,
 `BODY_BLOB_MIN_DIAMETER_PX`, `BODY_DISC_MIN_VISIBLE_LIT_FRACTION`,
 `BODY_DISC_MAX_OVERFLOW_FRACTION`, `TERMINATOR_MIN_PHASE_FACTOR`, etc.
@@ -559,6 +593,7 @@ intentional (to keep discriminating power), but the *name* is misleading and the
 `visible_disc_lit_fraction` and document the phase coupling, or split phase out.
 
 #### CODE-NAV-MODEL-004 — Rings model swallows shadow-computation failures with bare `except Exception`
+> **Tracked by:** #104 — replace broad except Exception control-flow in obs, nav_master, misc, and nav_mosaic
 **File:** `nav_model_rings.py` (lines 430-438)
 A broad `except Exception` around `where_inside_shadow` logs a warning and
 proceeds with no shadow removal. This can silently produce a ring model with the
@@ -572,6 +607,7 @@ rather than navigating on a contaminated template.
   `nav_model_rings.py` (949 lines) are at/over the module-size guideline; the
   body file mixes rendering, feature emission, reliability sigmoids, and sigma
   math that could be split.
+  *Tracked by:* #97 — split oversized modules exceeding 1000-line rulebook limit.
 - **CODE-NAV-MODEL-006** — `_visible_arc_fraction` always returns 1.0 when any
   vertex survives (lines 1062-1071) — a placeholder. It feeds reliability and
   confidence, so it is a constant-1 input to several formulas. Document as a
@@ -584,6 +620,7 @@ rather than navigating on a contaminated template.
 ### High (already listed: CODE-NAV-008, CODE-NAV-009)
 
 #### CODE-ORCH-001 — The ensemble's grouping depends on a 5-pixel floor *because* the covariances it is supposed to use are wrong
+> **Tracked by:** #123 — Mahalanobis agreement grouping breaks because per-technique covariances are CRLB-tight
 **File:** `src/nav/nav_orchestrator/ensemble.py` · `EnsembleConfig.agreement_pixel_floor`, `_agreement_groups`
 **Severity:** High
 
@@ -604,6 +641,7 @@ ensemble pixel floor; at minimum, apply the pixel floor only on the *observable*
 subspace, not raw Euclidean distance.
 
 #### CODE-ORCH-002 — Orchestrator wraps plugin technique calls in bare `except Exception` four times, hiding programming errors
+> **Tracked by:** #104 — replace broad except Exception control-flow in obs, nav_master, misc, and nav_mosaic
 **File:** `src/nav/nav_orchestrator/orchestrator.py` (lines 551, 640, 663, 755)
 **Severity:** High
 
@@ -661,11 +699,13 @@ nav package which uses `pdslogger`. Flagging as a consistency item, not a
 breach.
 
 #### CODE-REPROJ-003 — `bodies.py` (1980 lines) and `rings.py` (1921 lines) far exceed the 1000-line module cap
+> **Tracked by:** #97 — split oversized modules exceeding 1000-line rulebook limit
 These are the two largest non-experiment, non-UI source files. The 1000-line
 guideline is explicit; both warrant splitting (e.g. reproject vs. accumulate vs.
 serialization).
 
 #### CODE-PDS4-001 — `pds4/collections.py` uses bare `except Exception` in five places
+> **Tracked by:** #104 — replace broad except Exception control-flow in obs, nav_master, misc, and nav_mosaic
 **File:** `src/pds4/collections.py` (lines 84, 118, 180, 301, 316)
 Bundle assembly swallows broad exceptions; a malformed label or missing product
 becomes a silent skip. Narrow to the specific I/O / template exceptions so
@@ -678,6 +718,7 @@ bundle-generation failures are visible.
 ### High
 
 #### CODE-SUP-001 — `mad_std` / robust-noise helpers wrapped in bare `except Exception`
+> **Tracked by:** #104 — replace broad except Exception control-flow in obs, nav_master, misc, and nav_mosaic
 **File:** `src/nav/support/misc.py` (lines 142, 173)
 The robust noise estimate underpins every detection threshold
 (`detection_sigma · image_noise_sigma`), the star SNR (CODE-NAV-003), and the
@@ -688,6 +729,7 @@ threshold. Narrow the handler and surface failures.
 ### High (already listed: CODE-CFG-001 = CODE-NAV-003 config side)
 
 #### CODE-CFG-001 — Placeholder/uncalibrated coefficients shipped in instrument configs
+> **Tracked by:** #118 — Design and implement a comprehensive config validation system
 **File:** `src/nav/config_files/config_400_inst_coiss.yaml` (lines 116, 151)
 See CODE-NAV-003. Add a startup validation pass that scans loaded config for the
 literal `PLACEHOLDER` marker (or a dedicated `calibrated: false` flag) and either
@@ -706,11 +748,13 @@ small-field assumption. Also: the function silently assumes `obs.time` brackets
 the exposure — no validation that `time[1] > time[0]`.
 
 #### CODE-SUP-002 — `flux.py` (1174 lines) and `image.py` (971 lines) are large; `flux.py` opens with a commented-out `# import logging`
+> **Tracked by:** #96 — prune dead code (flux.py, correlate_old.py, commented-out blocks), #97 — split oversized modules exceeding 1000-line rulebook limit
 **File:** `src/nav/support/flux.py:1`
 Dead commented import; large module. Low-risk but worth cleanup. `image.py` mixes
 many unrelated array utilities.
 
 #### CODE-CFG-002 — `BodyDiscCorrelateNav._upsample_factor` falls back to a hard-coded `128` when `config.offset` is absent
+> **Tracked by:** #118 — Design and implement a comprehensive config validation system
 **File:** `nav_technique_body_disc.py` (lines 753-758)
 The technique reads `correlation_fft_upsample_factor` defensively with a magic
 `128` default in two places. If the config block is genuinely missing that is a
@@ -723,6 +767,7 @@ silently default.
 - **CODE-DATASET-001** — `dataset_pds3.py` (895 lines) is large; the per-mission
   subclasses duplicate `yield_image_files_*` scaffolding that could be lifted to
   the base.
+  *Tracked by:* #97 — split oversized modules exceeding 1000-line rulebook limit.
 - **CODE-STYLE-001** — Many techniques repeat the identical `_fail(...)` /
   spurious-result construction (`1e6*eye`, embed-rotation, zero offset). A shared
   `NavTechnique._spurious_result(...)` helper would remove ~5 copies.
@@ -734,6 +779,7 @@ silently default.
 ### Medium
 
 #### CODE-MAIN-001 — `nav_create_simulated_image.py` is 2509 lines — the single largest source file
+> **Tracked by:** #97 — split oversized modules exceeding 1000-line rulebook limit
 **File:** `src/main/nav_create_simulated_image.py`
 2.5× the module-size guideline. CLI dispatch, rendering orchestration, and arg
 parsing are intermixed; the simulation logic that is reused (`nav.sim`) should
@@ -750,6 +796,7 @@ inconsistent with the pdslogger-everywhere posture.
   `ring_window.py` 1752, `body_window.py` 1324) far exceed 1000 lines. These are
   the scoped-mypy-override PyQt6 files, so lower priority, but they concentrate a
   lot of untested logic.
+  *Tracked by:* #97 — split oversized modules exceeding 1000-line rulebook limit.
 - **CODE-EXP-001** — `src/experiments/` (2901 lines) and
   `src/nav/support/correlate_old.py` are excluded from lint/type per CLAUDE.md.
   `experiments/compare_mosaics.py` (1151 lines) duplicates substantial chunks of
@@ -860,6 +907,7 @@ tuple of arbitrary length from the YAML list (no length check), so a malformed c
 yields a 3-tuple. Impact: wrong PSF stamp size or a confusing crash on bad config.
 
 ### CODE-OBS-002 — Low — `inst_config` typed `dict[str, Any] | None` but populated with `AttrDict`; `star_psf`/`star_psf_size` index with `['...']`
+> **Tracked by:** #105 — replace pervasive Any / dict[str, Any] with TypedDicts and Protocols at interop boundaries
 `_inst_config: dict[str, Any] | None` (line 24). Subclasses assign `new_obs._inst_config = inst_config`
 where `inst_config` is an `AttrDict` (Cassini) or a nested plain `dict`. Functionally fine (AttrDict
 is a `dict` subclass), but the `inst_config` property advertises `dict[str, Any] | None` while callers
@@ -870,6 +918,7 @@ also rely on attribute access elsewhere. Minor type-clarity issue; confirm by ru
 ## src/nav/obs/obs_snapshot.py
 
 ### CODE-OBS-003 — High — `closest_planet` computation in `__init__` is silently swallowed by `hasattr` guard and `body_distance` failures
+> **Tracked by:** #104 — replace broad except Exception control-flow in obs, nav_master, misc, and nav_mosaic
 `ObsSnapshot.__init__` lines 93-102. The closest-planet search runs only
 `if not hasattr(self, '_closest_planet')`. Because `self.__dict__ = snapshot.__dict__`
 (line 58) copies all snapshot attributes, any snapshot that happens to carry a
@@ -916,6 +965,7 @@ implies an intended-but-unwritten WAC-specific value. WHY: either a TODO or left
 readers into thinking WAC/NAC differ. Impact: confusion; flag the intended value or delete the branch.
 
 ### CODE-OBS-008 — Medium — `get_public_metadata` reads `SPACECRAFT_CLOCK_START_COUNT` as `float()` and assumes label keys exist
+> **Tracked by:** #13 — Clean up handing of SCET strings
 `get_public_metadata` lines 136-137. `float(self.dict['SPACECRAFT_CLOCK_START_COUNT'])` will
 `KeyError` if the label lacks the key and `ValueError` if the SCLK is a partitioned string like
 `"1/1234567890.123"` (Cassini SCLK counts are commonly `partition/count`). WHY risky: Cassini
@@ -1093,6 +1143,7 @@ three distinct *tables* are cached per instance, not three globally — the maxs
 dataset spanning many volumes. Note only.
 
 ### CODE-DS-009 — Low — Large commented-out blocks throughout (`force_has_offset_file`, BOTSIM combine in base, planet validation)
+> **Tracked by:** #96 — prune dead code (flux.py, correlate_old.py, commented-out blocks)
 Lines ~221-316, ~395-449, ~636-832. Substantial dead/commented code documents future intent but
 violates the "no dead code" convention and makes the 895-line module harder to read. Recommend moving
 the plan to an issue/doc and deleting.
@@ -1146,6 +1197,7 @@ to any volume-name format change; no validation. Note (same pattern in VGISS `vo
 ## src/nav/dataset/dataset_pds3_galileo_ssi.py
 
 ### CODE-DS-015 — Medium — Hard-coded orbit/target directory whitelist will silently reject any new/renamed directory
+> **Tracked by:** #17 — GOSSI does not handle REDO properly
 `_get_img_name_from_label_filespec` lines 79-125. Two big hard-coded tuples enumerate every Galileo
 encounter directory (`RAW_CAL`, `VENUS`, ..., and `C3`..`J0`). Any directory not in these lists raises
 `ValueError('bad target directory')`, which in the index loop is logged-and-skipped
@@ -1216,6 +1268,7 @@ fails only at runtime when that path is hit. Acceptable tradeoff; noting the des
 ## src/nav/dataset/__init__.py
 
 ### CODE-DS-024 — Low — Module-level `assert` enforces registry consistency; stripped under `python -O`
+> **Tracked by:** #98 — consolidate parallel instrument registries into a single registry
 Lines 46-48: `assert sorted(...) == sorted(...), 'Dataset names are inconsistent'`. Running under
 `-O` removes the assert, so a future edit that desyncs the two mappings would ship silently. Replace
 with a real check raising at import, or a unit test. Note.
@@ -1327,6 +1380,7 @@ I read every file in scope in full. A separate review covers nav_model/nav_techn
 - Impact: Inconsistent logging; per-image reprojection diagnostics do not flow through `IMAGE_LOGGER` sections. Confirm with the maintainer whether `nav.reproj` is intended to be exempt; if not, switch to pdslogger.
 
 ### CODE-BACKPLANE-004 — Broad `except Exception` in simulated body-mask resolution
+> **Tracked by:** #104 — replace broad except Exception control-flow in obs, nav_master, misc, and nav_mosaic
 - Severity: **Medium**
 - File/symbol: `src/backplanes/backplanes_bodies.py`, `_create_simulated_body_backplane`, lines 50-58.
 - Description: A bare `except Exception:` wraps name lookup + index-map slicing and, on any failure, falls back to filling the entire rectangle as the body mask.
@@ -1334,6 +1388,7 @@ I read every file in scope in full. A separate review covers nav_model/nav_techn
 - Impact: Simulated backplane masks can be silently corrupted (whole-rectangle fill) masking real bugs in the sim path. Narrow to the expected exceptions (`ValueError`, `KeyError`, `IndexError`) or remove the fallback.
 
 ### CODE-BACKPLANE-005 — Broad `except Exception` around NAIF ID lookup; non-deterministic fake IDs
+> **Tracked by:** #104 — replace broad except Exception control-flow in obs, nav_master, misc, and nav_mosaic
 - Severity: **Low**
 - File/symbol: `src/backplanes/merge.py`, lines 47-54 and line 52.
 - Description: `int(cspyce.bodn2c(body_name))` is wrapped in `except Exception`. For simulated data the fallback is `10000 + (abs(hash(body_name)) % 20000)`. `hash()` of a `str` is process-randomized (PYTHONHASHSEED), so the fake NAIF ID for a given body differs run-to-run and can collide across bodies.
@@ -1376,6 +1431,7 @@ I read every file in scope in full. A separate review covers nav_model/nav_techn
 - Impact: None today; cosmetic/robustness. Either remove the redundant `mkdir` or add it symmetrically and rely on it.
 
 ### CODE-REPROJ-006 — `cartographic_model.py` uses `Any` for `obs` and rebuilds Backplane unconditionally
+> **Tracked by:** #105 — replace pervasive Any / dict[str, Any] with TypedDicts and Protocols at interop boundaries
 - Severity: **Low**
 - File/symbol: `src/nav/reproj/cartographic_model.py`, `create_cartographic_model` (param `obs: Any` line 45; `bp = oops.backplane.Backplane(obs)` line 95).
 - Description: `obs` is typed `Any`, and the function always constructs a fresh `Backplane(obs)` (consistent with the documented thread-safety hazard). Other reproj entry points accept an `override_backplane` to avoid redundant Backplane construction; this one does not, so callers that already hold a Backplane for `obs` pay to rebuild it (latitude/longitude/center_resolution all recomputed).
@@ -1548,6 +1604,7 @@ noise/PSF/crater model and per-scene seed sharing, not seed nondeterminism.
   differ.
 
 ### CODE-SIM-4 — GAP/RINGLET composition overwrites background with shaded value instead of compositing
+> **Tracked by:** #84 — Fix simulated ring edges and gaps
 - Severity: Medium
 - File: `src/nav/sim/render.py`, `_render_combined_model_cached` GAP branch
   (lines 741-758) and RINGLET branch (lines 724-740)
@@ -1701,6 +1758,7 @@ noise/PSF/crater model and per-scene seed sharing, not seed nondeterminism.
 - Impact: None functional; cleanup.
 
 ### CODE-UTIL-1 — `report_profile.py` hardcodes `./prof/combined.prof`, no docstrings, no arg
+> **Tracked by:** #99 — wire up or delete orphan src/util/report_profile.py
 - Severity: Low
 - File: `src/util/report_profile.py` (whole file)
 - Description: A 12-line throwaway: hardcoded relative path, no module/function
@@ -1714,6 +1772,7 @@ noise/PSF/crater model and per-scene seed sharing, not seed nondeterminism.
   `experiments/`.
 
 ### CODE-EXP-1 — Broad `except Exception` in experiment scripts
+> **Tracked by:** #104 — replace broad except Exception control-flow in obs, nav_master, misc, and nav_mosaic
 - Severity: Low (experiments excluded from lint/mypy per CLAUDE.md)
 - File: `src/experiments/fov_twist/find_fov_twist.py` (line 411),
   `src/experiments/offset_sensitivity/analyze_offset_results.py` (lines 78, 132),
@@ -1759,6 +1818,7 @@ NEW issues in error handling, types, conventions, and dead/structural problems.
 ## Findings
 
 ### CODE-SUPPORT-001 — `flux.py` is 1174 lines, ~99.9% dead commented code, over the module-size limit
+> **Tracked by:** #96 — prune dead code (flux.py, correlate_old.py, commented-out blocks), #97 — split oversized modules exceeding 1000-line rulebook limit
 Severity: **Medium**
 File: `src/nav/support/flux.py` (entire file; only live symbol is `clean_sclass`, lines 561-568).
 
@@ -1906,6 +1966,7 @@ input or document the NaN return. Confirm: `mad_std([])` returns `nan` with a wa
 ---
 
 ### CODE-SUPPORT-008 — `array_zoom` annotates `result: np.ndarray` (bare generic) under mypy strict
+> **Tracked by:** #105 — replace pervasive Any / dict[str, Any] with TypedDicts and Protocols at interop boundaries
 Severity: **Low**
 File: `src/nav/support/image.py`, `array_zoom` (line 268).
 
@@ -1923,6 +1984,7 @@ but it defeats the generic propagation the signature promises).
 ---
 
 ### CODE-SUPPORT-009 — `current_git_version` / `get_local_host_name` swallow all exceptions with bare `except Exception`
+> **Tracked by:** #104 — replace broad except Exception control-flow in obs, nav_master, misc, and nav_mosaic
 Severity: **Low**
 File: `src/nav/support/misc.py`, `current_git_version` (lines 137-143), `get_local_host_name` (lines 170-174).
 
@@ -2097,6 +2159,7 @@ rather than inline TODOs.
 ---
 
 ### CODE-SUPPORT-018 — `__init__.py` module docstring mischaracterizes `flux` and uses time-anchored "Legacy" phrasing
+> **Tracked by:** #96 — prune dead code (flux.py, correlate_old.py, commented-out blocks)
 Severity: **Low**
 File: `src/nav/support/__init__.py` (lines 34-36).
 
@@ -2220,6 +2283,7 @@ saturated test frame yields `saturation_frac ≈ 0`.
 ---
 
 ### CODE-ORCH-005 — `signal_dn_to_image_unit_scale` is an uncalibrated placeholder used in live SNR math
+> **Tracked by:** #118 — Design and implement a comprehensive config validation system
 **Severity: Medium**
 **File/symbol:** `instrument_config.py::instrument_settings_from_obs` / `_read_signal_scale`
 (lines 244-286); config `config_400_inst_coiss.yaml` line 116
@@ -2499,6 +2563,7 @@ Every file was read in full (large files in pages).
 ## Findings
 
 ### CODE-MAIN-001 — `nav_backplanes_cloud_tasks` / `nav_create_bundle_cloud_tasks` register an `async def main` as a console-script entry point (never runs)
+> **Tracked by:** #108 — Check all CLI programs for proper logging, cloud operation, and that `cloud_tasks` works
 Severity: **Critical**
 Files/symbols:
 - `src/main/nav_backplanes_cloud_tasks.py:101` `async def main()`
@@ -2529,6 +2594,7 @@ Impact: Save→load round-trip is lossy for ring shading, and any params file la
 ---
 
 ### CODE-MAIN-003 — Broad `except Exception` swallows rendering and I/O errors in the simulated-image GUI
+> **Tracked by:** #104 — replace broad except Exception control-flow in obs, nav_master, misc, and nav_mosaic
 Severity: **Medium**
 File/symbol: `src/main/nav_create_simulated_image.py:2145, 2369, 2383, 2476` (and `nav_backplane_viewer.py:817`)
 
@@ -2541,6 +2607,7 @@ Impact: Failures are reduced to a generic dialog with no logged traceback, makin
 ---
 
 ### CODE-MAIN-004 — `nav_mosaic.py` flips the stdlib root logger level, contradicting the pdslogger convention
+> **Tracked by:** #108 — Check all CLI programs for proper logging, cloud operation, and that `cloud_tasks` works
 Severity: **Medium**
 File/symbol: `src/main/nav_mosaic.py:28, 553-558`
 
@@ -2742,6 +2809,7 @@ collisions. Math already covered by the prior review is not re-derived.
 ## Findings
 
 ### CODE-MODEL-001 — `NavModelTitan` is registered but permanently inert (dead registration)
+> **Tracked by:** #60 — Implement Titan navigation
 Severity: Medium
 File: `src/nav/nav_model/nav_model_titan.py` (whole class);
 interacts with `src/nav/nav_model/nav_model.py::build_models_for_obs`.
@@ -2966,6 +3034,7 @@ pixel rather than the window median.
 ---
 
 ### CODE-MODEL-008 — Ring-edge / ring-annulus reliability use uncalibrated PLACEHOLDER coefficients with no config hook
+> **Tracked by:** #118 — Design and implement a comprehensive config validation system
 Severity: Medium
 File: `src/nav/nav_model/nav_model_rings.py`, `_ring_edge_reliability`
 lines 907-925 and `_ring_annulus_reliability` lines 928-949;
@@ -3027,6 +3096,7 @@ default-config-driven.
 ---
 
 ### CODE-MODEL-010 — `nav_model_body.py` exceeds the 1000-line module convention (1118 lines)
+> **Tracked by:** #97 — split oversized modules exceeding 1000-line rulebook limit
 Severity: Low
 File: `src/nav/nav_model/nav_model_body.py` (1118 lines).
 
@@ -3047,6 +3117,7 @@ builders `_build_*_feature`) into a sibling module.
 ---
 
 ### CODE-TECH-001 — `BodyDiscCorrelateNav._upsample_factor` has no validation, unlike the near-identical `RingAnnulusNav._upsample_factor`
+> **Tracked by:** #118 — Design and implement a comprehensive config validation system
 Severity: Medium
 File: `src/nav/nav_technique/nav_technique_body_disc.py`
 `_upsample_factor` lines 753-758; compare
@@ -3138,6 +3209,7 @@ without the "backwards compatibility" framing.
 ---
 
 ### CODE-TECH-004 — `search_window_for_obs` reads `obs.extfov_margin_vu` via a module-level `# type: ignore[attr-defined]`
+> **Tracked by:** #105 — replace pervasive Any / dict[str, Any] with TypedDicts and Protocols at interop boundaries
 Severity: Low
 File: `src/nav/nav_technique/nav_technique.py`, `search_window_for_obs`
 line 128.
@@ -3321,6 +3393,7 @@ Confirm by checking the confidence-spec divisor/cap_at for
 ---
 
 ### CODE-TECH-010 — `log_confidence_breakdown` types its `logger` parameter as `Any`
+> **Tracked by:** #105 — replace pervasive Any / dict[str, Any] with TypedDicts and Protocols at interop boundaries
 Severity: Low
 File: `src/nav/nav_technique/nav_technique.py`, `log_confidence_breakdown`
 lines 155-157 (`logger: Any`).
@@ -3388,6 +3461,8 @@ Every fix prompt below is self-contained and references its finding ID.
 Each prompt is self-contained and actionable by an AI with no prior context.
 
 ### FIX CODE-NAV-001 — Make `lm_subpixel_refine` report a non-zero RMS and honest covariance on non-convergence
+
+> **STATUS: FIXED (uncommitted, 2026-06-10).** Implemented as specified: `degenerate` field on `LMRefineResult`, `rms_px=inf` and all-inf covariance on full rejection, spurious gates updated in limb/terminator/ring-edge. Covariance documented as data-only.
 In `src/nav/nav_technique/dt_fitting.py`, function `lm_subpixel_refine`: after the
 main loop, the final RMS is `sqrt(Σ(w·r²)/Σw)` computed from `final_weights`. When
 every Tukey weight is zero (all vertices rejected) the loop breaks at the
@@ -3408,6 +3483,8 @@ non-zero normal) and assert `result.rms_px == inf`, `result.degenerate is True`,
 and `np.isinf(result.covariance).all()`.
 
 ### FIX CODE-NAV-002 — Compute limb/terminator vertex normals from the silhouette backplane, not the ridge mask
+
+> **STATUS: FIXED (uncommitted, 2026-06-10).** `_build_polyline_sampler` now takes a `region_mask` and computes the outward normal from the silhouette (limb) / lit (terminator) mask; outward-normal regression test added; existing negation in the techniques preserved.
 In `src/nav/nav_model/nav_model_body.py`, function `_build_polyline_sampler`: the
 per-vertex normal is currently derived from `local_mask` (the 1-px ridge), making
 its sign depend on the diagonal orientation of the ridge rather than on which side
@@ -4272,7 +4349,10 @@ tests; the per-image feature-type set is computed once.
 ## Fix Prompts — Part 7 — CLI Drivers & PyQt6 UI
 
 
-### Fix CODE-MAIN-001
+### Fix CODE-MAIN-001 (async entry point)
+
+> **STATUS: FIXED (uncommitted, 2026-06-10).** Both `_cloud_tasks` drivers now expose a synchronous `main()` that calls `asyncio.run(async_main())`; the async body was renamed to `async_main`. Verified `main` is no longer a coroutine function.
+
 In `src/main/nav_backplanes_cloud_tasks.py`, rename the existing `async def main()` (line 101) to `async def async_main()`, and add a synchronous wrapper:
 ```python
 def main() -> None:  # Required for setuptools entry points
