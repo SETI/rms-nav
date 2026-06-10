@@ -8,7 +8,9 @@ voyager_iss:
   star_psf_sigma: 3.
   star_psf_sizes:
     100: [7, 7]
-  fit_camera_rotation: false        # TODO-Voyager ISS carries non-negligible attitude rotation residuals
+  fit_camera_rotation: false        # Kept off for now: rotation fitting is too slow. Voyager ISS does
+                                    # carry non-negligible attitude rotation residuals, so revisit once
+                                    # the rotation search is fast enough.
   max_rotation_deg: 5.0
   noise:
     saturation_dn: 255             # 8-bit ADC
