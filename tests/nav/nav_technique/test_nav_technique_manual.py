@@ -145,7 +145,7 @@ def test_run_manual_nav_returns_result_on_accept() -> None:
     with patch('nav.ui.manual_nav_dialog.ManualNavDialog', fake_dialog):
         result = run_manual_nav(obs)  # type: ignore[arg-type]
     assert result is not None
-    assert result.status == 'ok'
+    assert result.status == 'success'
     assert result.offset_px == (3.0, -2.0)
     assert result.confidence_rank == 'high'
     assert len(result.per_technique) == 1
@@ -177,7 +177,7 @@ def test_run_manual_nav_runs_on_template_less_star_feature() -> None:
     with patch('nav.ui.manual_nav_dialog.ManualNavDialog', fake_dialog):
         result = run_manual_nav(obs)  # type: ignore[arg-type]
     assert result is not None
-    assert result.status == 'ok'
+    assert result.status == 'success'
     assert result.offset_px == (1.5, -0.5)
     assert len(instances) == 1
 
@@ -285,6 +285,6 @@ def test_run_manual_nav_runs_for_polyline_only_scene(monkeypatch: pytest.MonkeyP
     with patch('nav.ui.manual_nav_dialog.ManualNavDialog', fake_dialog):
         result = run_manual_nav(obs)  # type: ignore[arg-type]
     assert result is not None
-    assert result.status == 'ok'
+    assert result.status == 'success'
     assert result.offset_px == (1.0, 2.0)
     assert len(instances) == 1
