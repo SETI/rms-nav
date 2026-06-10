@@ -603,14 +603,6 @@ class _FakeBodyModel(NavModel):
         self._metadata['feature_count'] = 2
 
     def to_features(self, context: NavContext) -> list[NavFeature]:
-        common = {
-            'subject_range_km': 1.0e8,
-            'position_cov_px': np.eye(2, dtype=np.float64) * 0.25,
-            'intensity_sigma_rel': 0.05,
-            'preferred_filter': NavFilterSpec(kind=NavFilterKind.NONE),
-            'reliability': 0.8,
-            'reliability_reasons': NavReliabilityBreakdown(visible_lit_fraction=1.0),
-        }
         disc = NavFeature(
             feature_id=f'body_disc:{self._body_name}',
             feature_type=NavFeatureType.BODY_DISC,
@@ -622,7 +614,12 @@ class _FakeBodyModel(NavModel):
             ),
             usable_types=frozenset({NavFeatureType.BODY_DISC}),
             flags=BodyDiscFlags(body_name=self._body_name),
-            **common,
+            subject_range_km=1.0e8,
+            position_cov_px=np.eye(2, dtype=np.float64) * 0.25,
+            intensity_sigma_rel=0.05,
+            preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
+            reliability=0.8,
+            reliability_reasons=NavReliabilityBreakdown(visible_lit_fraction=1.0),
         )
         blob = NavFeature(
             feature_id=f'body_blob:{self._body_name}',
@@ -635,7 +632,12 @@ class _FakeBodyModel(NavModel):
             ),
             usable_types=frozenset({NavFeatureType.BODY_BLOB}),
             flags=BodyBlobFlags(body_name=self._body_name, predicted_diameter_px=8.0),
-            **common,
+            subject_range_km=1.0e8,
+            position_cov_px=np.eye(2, dtype=np.float64) * 0.25,
+            intensity_sigma_rel=0.05,
+            preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
+            reliability=0.8,
+            reliability_reasons=NavReliabilityBreakdown(visible_lit_fraction=1.0),
         )
         return [disc, blob]
 

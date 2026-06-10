@@ -462,6 +462,7 @@ def test_body_limb_nav_marks_spurious_when_lm_walks_far_from_coarse_seed(
     )
 
     result = technique.navigate([feature], context)
+    assert isinstance(result.diagnostics, BodyLimbDiagnostics)
     inlier_fraction = result.diagnostics.tukey_inlier_count / float(vertices.shape[0])
     # Sanity-check the test setup: inlier-fraction guard would NOT fire.
     assert inlier_fraction >= SPURIOUS_MIN_INLIER_FRACTION
