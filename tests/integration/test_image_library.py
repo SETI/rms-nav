@@ -125,7 +125,7 @@ ground_truth:
   ui_version: 'rms-nav 0.0.0'
   notes: 'Hand-picked for the schema test.'
 expected:
-  status: ok
+  status: success
   confidence_tier: high
   primary_technique: BodyLimbNav
   techniques_must_run: [BodyLimbNav]
@@ -177,7 +177,7 @@ def test_load_sidecar_rejects_zero_uncertainty(tmp_path: Path) -> None:
 
 def test_load_sidecar_rejects_inconsistent_failed_status(tmp_path: Path) -> None:
     """``status=failed`` requires ``confidence_tier=failed`` and vice versa."""
-    bad = _VALID_SIDECAR_TEXT.replace('status: ok', 'status: failed')
+    bad = _VALID_SIDECAR_TEXT.replace('status: success', 'status: failed')
     p = tmp_path / 'BAD.yaml'
     p.write_text(bad)
     with pytest.raises(SidecarValidationError, match=r'expected\.status'):
@@ -186,7 +186,7 @@ def test_load_sidecar_rejects_inconsistent_failed_status(tmp_path: Path) -> None
 
 def test_load_sidecar_rejects_inconsistent_conflicted_status(tmp_path: Path) -> None:
     """``status=conflicted`` requires ``confidence_tier=conflicted`` and vice versa."""
-    bad = _VALID_SIDECAR_TEXT.replace('status: ok', 'status: conflicted')
+    bad = _VALID_SIDECAR_TEXT.replace('status: success', 'status: conflicted')
     p = tmp_path / 'BAD.yaml'
     p.write_text(bad)
     with pytest.raises(SidecarValidationError, match=r'expected\.status=conflicted requires'):
@@ -195,7 +195,7 @@ def test_load_sidecar_rejects_inconsistent_conflicted_status(tmp_path: Path) -> 
 
 def test_load_sidecar_accepts_consistent_conflicted_pair(tmp_path: Path) -> None:
     """A sidecar with both ``status=conflicted`` and ``confidence_tier=conflicted`` validates."""
-    good = _VALID_SIDECAR_TEXT.replace('status: ok', 'status: conflicted').replace(
+    good = _VALID_SIDECAR_TEXT.replace('status: success', 'status: conflicted').replace(
         'confidence_tier: high', 'confidence_tier: conflicted'
     )
     p = tmp_path / 'GOOD.yaml'

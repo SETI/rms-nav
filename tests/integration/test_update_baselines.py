@@ -54,7 +54,7 @@ def _make_sidecar(
             notes=None,
         ),
         expected=Expected(
-            status='ok',
+            status='success',
             confidence_tier='high',
             primary_technique='BodyLimbNav',
         ),

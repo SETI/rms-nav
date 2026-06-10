@@ -1,6 +1,6 @@
 schema_version: 1
 image_id: N1487595731_1_CALIB
-mission: CASSINI_ISS            # CASSINI_ISS | VOYAGER_ISS | GOSSI | NHLORRI
+mission: COISS            # COISS | VGISS | GOSSI | NHLORRI
 camera: NAC              # NAC | WAC | SSI | NA | WA | LORRI
 filter_combo: 'CL1+CL2'          # canonicalized: filters sorted, '+'-joined
 image_url: 'pds3://calibrated/COISS_2xxx/COISS_2009/data/1487544030_1487616958/N1487595731_1_CALIB.IMG'

@@ -1,49 +1,31 @@
 schema_version: 1
 image_id: N1777325846_1_CALIB
-mission: CASSINI_ISS            # CASSINI_ISS | VOYAGER_ISS | GOSSI | NHLORRI
+mission: COISS            # COISS | VGISS | GOSSI | NHLORRI
 camera: NAC              # NAC | WAC | SSI | NA | WA | LORRI
 filter_combo: 'CL1+CL2'          # canonicalized: filters sorted, '+'-joined
 image_url: 'pds3://calibrated/COISS_2xxx/COISS_2090/data/1776647595_1777844466/N1777325846_1_CALIB.IMG'
 
 scene_tags:
   - below_resolution_body              # First tag is the primary class;
-                                       # must match the directory the
-                                       # sidecar lives in.
+  - mimas                              # must match the directory the
+  - medium_phase                       # sidecar lives in.
 
 ground_truth:
-  offset_dv_px: 6.3849
-  offset_du_px: -2.4536
+  offset_dv_px: 6.0841
+  offset_du_px: -1.5310
   offset_uncertainty_px: 1.0           # 1sigma marginal; tighten
                                        # for bright stars / sharp limbs.
   source: operator_verified
   operator: rfrench
-  verified_date: 2026-04-29
+  verified_date: 2026-05-01
   ui_version: 'rms-nav 0.1.dev25'
   notes: |
     Small Mimas ~20 px diameter in lower left corner.
     Slightly overexposed, 72 degree phase angle.
 
-    BodyBlobNav does NOT fire on this image: the body extractor's
-    emission gate uses ``limb_uncertainty_px =
-    ellipsoid_residual_km / km_per_px_at_limb`` (not predicted
-    diameter) to decide between LIMB_ARC and BODY_BLOB.  Mimas is a
-    regular moon with ellipsoid_residual = 1 km, and at the image's
-    km/px the limb uncertainty works out to 0.05 px — well below
-    the 3 px threshold — so the extractor emits LIMB_ARC, and
-    BodyLimbNav becomes the only body-side technique.  BodyBlobNav
-    is reserved for irregular bodies (high ellipsoid_residual_km)
-    where the ellipsoid limb is unreliable, not for small-in-pixels
-    regular moons.
-
-    BodyLimbNav converges to (5.91, -1.92), within the 1.0 px
-    ground-truth uncertainty of the operator's (6.38, -2.45).  The
-    BODY_DISC feature is also emitted (overflow_fraction below
-    threshold) but BodyDiscCorrelateNav flags spurious on the small
-    disc and contributes nothing to the ensemble.
-
 expected:
-  status: ok                           # ok | failed | conflicted
-  confidence_tier: low                 # high | medium | low | failed
-  primary_technique: BodyLimbNav  # e.g. BodyLimbNav
-  techniques_must_run: [BodyLimbNav]
+  status: success                           # success | failed | conflicted
+  confidence_tier: medium                # high | medium | low | failed
+  primary_technique: BodyBlobNav  # e.g. BodyLimbNav
+  techniques_must_run: [BodyBlobNav]
   techniques_must_skip: []

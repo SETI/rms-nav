@@ -142,7 +142,7 @@ def navigate_image_files(
                 public_metadata_file.write_text(json_as_string(metadata))
                 write_summary_png(snapshot_inst, nav_result, summary_png_file, logger)
             MAIN_LOGGER.info('Wrote log to %s', image_log_path)
-            return nav_result.status == 'ok', metadata
+            return nav_result.status == 'success', metadata
     finally:
         for handler in local_handlers:
             handler.close()

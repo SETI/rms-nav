@@ -307,7 +307,7 @@ def _run_manual_pass(
                 # operator cancelled).  No metadata or PNG is written.
                 sys.exit(2)
 
-            assert result.offset_px is not None  # status='ok' guarantees offset
+            assert result.offset_px is not None  # status='success' guarantees offset
             dv, du = result.offset_px
             IMAGE_LOGGER.info('Manual nav: offset_dv_px=%.4f, offset_du_px=%.4f', dv, du)
             if write_output_files:

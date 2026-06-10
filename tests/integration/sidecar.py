@@ -80,7 +80,7 @@ ALLOWED_CAMERAS: frozenset[str] = frozenset(
     }
 )
 
-ALLOWED_STATUSES: frozenset[str] = frozenset({'ok', 'failed', 'conflicted'})
+ALLOWED_STATUSES: frozenset[str] = frozenset({'success', 'failed', 'conflicted'})
 # 'conflicted' mirrors :data:`nav.nav_orchestrator.nav_result.ConfidenceRank` —
 # the orchestrator hard-sets the rank to 'conflicted' whenever it returns a
 # conflicted NavResult, so the sidecar schema has to accept it as an

@@ -1,6 +1,6 @@
 schema_version: 1
 image_id: N1492091163_1_CALIB
-mission: CASSINI_ISS
+mission: COISS
 camera: NAC
 filter_combo: 'CL1+CL2'
 image_url: 'pds3://calibrated/COISS_2xxx/COISS_2011/data/1492087685_1492092532/N1492091163_1_CALIB.IMG'

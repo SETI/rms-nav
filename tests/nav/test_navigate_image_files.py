@@ -344,7 +344,7 @@ def _make_render_result(
         pipeline_run_iso8601='2026-04-28T00:00:00Z',
     )
     if offset_px is not None:
-        return NavResult.ok(
+        return NavResult.success(
             offset_px=offset_px,
             covariance_px2=np.eye(2),
             confidence=0.5,

@@ -216,7 +216,7 @@ def run_manual_nav(
             to :data:`~nav.config.DEFAULT_CONFIG`.
 
     Returns:
-        A :class:`NavResult` with ``status='ok'`` on accept, or
+        A :class:`NavResult` with ``status='success'`` on accept, or
         ``None`` when the operator cancels or no supported overlay
         feature paints any pixels into the ext-FOV composite.
         Supported overlay types match
@@ -275,7 +275,7 @@ def run_manual_nav(
         # PNG write step.  The cancel reason has already been logged by
         # ``NavTechniqueManual.navigate``.
         return None
-    return NavResult.ok(
+    return NavResult.success(
         offset_px=technique_result.offset_px,
         covariance_px2=technique_result.covariance_px2,
         confidence=technique_result.confidence,
