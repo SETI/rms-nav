@@ -79,6 +79,8 @@ class NavImageClassifier:
         self,
         image: NDArrayFloatType,
         sensor_mask: NDArrayBoolType | None = None,
+        *,
+        missing_frac: float | None = None,
     ) -> NavImageClassifierResult:
         """Run the classifier and return its verdict.
 
@@ -86,6 +88,13 @@ class NavImageClassifier:
             image: 2-D float image array (sensor + extfov padding).
             sensor_mask: Optional boolean mask selecting sensor pixels;
                 if ``None``, every pixel is treated as sensor data.
+            missing_frac: Optional pre-computed missing-data fraction over
+                the sensor pixels.  The orchestrator supplies this from the
+                true missing mask (which handles the calibrated-IF
+                ``NaN`` sentinel before the array is sanitised for the
+                finite-only derivative path); when ``None`` the classifier
+                derives the fraction itself from ``missing_data_marker_dn``
+                (using ``np.isnan`` when the marker is itself ``NaN``).
 
         Returns:
             NavImageClassifierResult.
@@ -119,12 +128,29 @@ class NavImageClassifier:
             sensor = image[sensor_mask]
         # Compute statistics on the sensor pixels only.
         sat_mask = sensor >= self.thresholds.saturation_threshold_dn
-        miss_mask = sensor == self.thresholds.missing_data_marker_dn
         n_total = max(sensor.size, 1)
         saturation_frac = float(sat_mask.sum()) / float(n_total)
-        missing_frac = float(miss_mask.sum()) / float(n_total)
+        # The missing-data marker is NaN for calibrated-IF instruments, so
+        # ``sensor == marker`` can never match (NaN != NaN).  Detect the NaN
+        # marker explicitly via ``np.isnan`` so missing/dropout detection is
+        # not silently dead for calibrated images.  When the orchestrator
+        # supplies a pre-computed ``missing_frac`` (from the true missing
+        # mask before NaN sanitisation), trust it.
+        if missing_frac is None:
+            marker = self.thresholds.missing_data_marker_dn
+            if np.isnan(marker):
+                miss_mask = np.isnan(sensor)
+            else:
+                miss_mask = sensor == marker
+            missing_frac = float(miss_mask.sum()) / float(n_total)
         noise_sigma = estimate_image_noise_sigma(image, sensor_mask)
-        max_dn = float(np.max(sensor)) if sensor.size > 0 else 0.0
+        # ``np.nanmax`` ignores any NaN missing-data markers that survive in
+        # the sensor pixels; an all-NaN (or empty) sensor falls back to 0.0
+        # so the blank short-circuit and noise estimate are not poisoned.
+        if sensor.size > 0 and np.isfinite(sensor).any():
+            max_dn = float(np.nanmax(sensor))
+        else:
+            max_dn = 0.0
         flags: list[ImageFlag] = []
         # Outcome decision: blank check runs first so a near-zero image with
         # missing-data marker == 0 isn't mis-classified as "mostly_missing".

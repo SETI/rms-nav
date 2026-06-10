@@ -33,7 +33,9 @@ class NavReliabilityBreakdown:
     missing field means "not applicable for this feature type", not zero.
 
     Parameters:
-        predicted_snr: STAR — predicted detection SNR contribution.
+        predicted_snr: STAR — detection contribution derived from the
+            star's magnitude margin to the limiting magnitude (effective
+            SNR), not a DN-based photometric SNR.
         visible_arc_fraction: LIMB_ARC, TERMINATOR_ARC, RING_EDGE — fraction
             of total predicted arc length in extfov and not occluded.
         incidence_factor: LIMB_ARC — limb-incidence-angle softening

@@ -38,7 +38,9 @@ class _FakeObs:
         sensor_mask: np.ndarray | None = None,
         midtime: float = 0.0,
         extfov_margin: tuple[int, int] = (0, 0),
+        inst_config: dict[str, Any] | None = None,
     ) -> None:
+        self.inst_config = inst_config
         if image is None:
             rng = np.random.default_rng(seed=42)
             image = rng.standard_normal(size=(64, 64)) + 100.0
@@ -136,7 +138,7 @@ def fake_obs() -> _FakeObs:
 
 
 def test_orchestrator_runs_pipeline_end_to_end(fake_obs: _FakeObs) -> None:
-    """A clean image + 1 star model + 1 technique -> status='ok'."""
+    """A clean image + 1 star model + 1 technique -> status='success'."""
     obs = fake_obs
     model = _FakeStarModel(obs, feature_count=3)
     orch = NavOrchestrator(
@@ -144,7 +146,7 @@ def test_orchestrator_runs_pipeline_end_to_end(fake_obs: _FakeObs) -> None:
         only_techniques=['_FakeStarTechnique'],
     )
     result = orch.navigate(obs)  # type: ignore[arg-type]
-    assert result.status == 'ok'
+    assert result.status == 'success'
     assert result.offset_px == (1.5, 2.5)
     assert [t.technique_name for t in result.per_technique] == ['_FakeStarTechnique']
     assert result.confidence_rank == 'high'
@@ -166,7 +168,7 @@ def test_orchestrator_handles_nonzero_extfov_margin() -> None:
     model = _FakeStarModel(obs, feature_count=3)
     orch = NavOrchestrator([model], only_techniques=['_FakeStarTechnique'])
     result = orch.navigate(obs)  # type: ignore[arg-type]
-    assert result.status == 'ok'
+    assert result.status == 'success'
 
 
 def test_orchestrator_blank_image_short_circuits(fake_obs: _FakeObs) -> None:
@@ -297,7 +299,7 @@ def test_orchestrator_only_models_mixed_keeps_matching_inclusion(
         only_techniques=['_FakeStarTechnique'],
     )
     result = orch.navigate(obs)  # type: ignore[arg-type]
-    assert result.status == 'ok'
+    assert result.status == 'success'
 
 
 def test_orchestrator_only_techniques_mixed_include_exclude(
@@ -314,7 +316,7 @@ def test_orchestrator_only_techniques_mixed_include_exclude(
         only_techniques=['*', '!*Pass*'],
     )
     result = orch.navigate(obs)  # type: ignore[arg-type]
-    assert result.status == 'ok'
+    assert result.status == 'success'
     technique_names = {t.technique_name for t in result.per_technique}
     assert '_FakeStarTechnique' in technique_names
     assert '_PassTwoTechnique' not in technique_names
@@ -440,7 +442,7 @@ def test_orchestrator_pass2_receives_pass1_prior(fake_obs: _FakeObs) -> None:
         only_techniques=['_FakeStarTechnique', '_PassTwoTechnique'],
     )
     result = orch.navigate(obs)  # type: ignore[arg-type]
-    assert result.status == 'ok'
+    assert result.status == 'success'
     # The pass-2 technique captured the pass-1 ensemble's offset (which equals
     # the single _FakeStarTechnique offset of (1.5, 2.5)).
     assert _PassTwoTechnique.captured_prior == (1.5, 2.5)
@@ -514,7 +516,7 @@ def test_collect_annotations_skips_failing_model(
     orch = NavOrchestrator([bad, good], only_techniques=['_FakeStarTechnique'])
     result = orch.navigate(obs)  # type: ignore[arg-type]
     captured = capsys.readouterr()
-    assert result.status == 'ok'
+    assert result.status == 'success'
     assert 'to_annotations raised' in captured.out
     assert 'synthetic to_annotations failure' in captured.out
 
@@ -718,7 +720,7 @@ def test_orchestrator_skips_fallback_when_primary_covers_body() -> None:
     model = _FakeBodyModel(obs, body_name='TestMoon')
     orch = NavOrchestrator([model], only_techniques=['_FakeBodyPrimary', '_FakeBodyFallback'])
     result = orch.navigate(obs)  # type: ignore[arg-type]
-    assert result.status == 'ok'
+    assert result.status == 'success'
     assert _FakeBodyPrimary.run_count == 1
     # Fallback is NOT called because the primary covered TestMoon.
     assert _FakeBodyFallback.run_count == 0
@@ -742,3 +744,83 @@ def test_orchestrator_runs_fallback_when_primary_is_spurious() -> None:
     assert _FakeBodyPrimary.run_count == 1
     assert _FakeBodyFallback.run_count == 1
     _FakeBodyPrimary.spurious_override = False  # reset for any later test
+
+
+# --- Calibrated-IF NaN missing-data sentinel regression tests (CODE-ORCH-003) ---
+
+
+def _ciss_calib_inst_config() -> dict[str, Any]:
+    """Return a CISS-CALIB-style inst_config: calibrated_if + NaN marker.
+
+    Mirrors the shape ``instrument_settings_from_obs`` expects for a
+    calibrated-IF camera: ``data_units='calibrated_if'``,
+    ``noise.marker_value: NaN``, and the I/F-keyed
+    ``image_quality_thresholds`` block (no DN-keyed fields, no
+    ``saturation_threshold_if``).
+    """
+    return {
+        'data_units': 'calibrated_if',
+        'noise': {'marker_value': 'NaN'},
+        'image_quality_thresholds': {
+            'max_overexposed_frac_clean': 0.80,
+            'max_missing_frac_clean': 0.30,
+            'partial_dropout_min_frac': 0.05,
+            'blank_max_if': 1.0e-4,
+            'noisy_threshold_if': 0.01,
+        },
+    }
+
+
+def test_orchestrator_calibrated_if_nan_pixels_do_not_raise() -> None:
+    """A calibrated-IF image with NaN missing-data markers navigates without raising.
+
+    For ``calibrated_if`` instruments the missing-data sentinel is NaN.
+    The orchestrator must sanitise those NaN before the finite-only
+    derivative path runs; otherwise ``_smooth_and_compute_gradients``
+    raises a ValueError that would propagate out of ``navigate`` and
+    violate the never-raise contract.
+    """
+    image = np.full((64, 64), 0.5, np.float64)
+    image[:6, :] = np.nan  # ~9.4% NaN (missing) — below mostly_missing threshold
+    obs = _FakeObs(image=image, inst_config=_ciss_calib_inst_config())
+    model = _FakeStarModel(obs, feature_count=3)
+    orch = NavOrchestrator([model], only_techniques=['_FakeStarTechnique'])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    # The pipeline ran end-to-end and produced a successful offset.
+    assert result.status == 'success'
+    assert result.offset_px == (1.5, 2.5)
+
+
+def test_orchestrator_calibrated_if_missing_frac_reflects_nan() -> None:
+    """The classifier verdict's missing_frac reflects the NaN fraction.
+
+    The orchestrator threads the true missing fraction (computed from the
+    NaN mask before sanitisation) into the classifier rather than relying
+    on ``sensor == marker`` (which can never match NaN).
+    """
+    image = np.full((64, 64), 0.5, np.float64)
+    image[:6, :] = np.nan  # ~9.4% NaN
+    obs = _FakeObs(image=image, inst_config=_ciss_calib_inst_config())
+    model = _FakeStarModel(obs, feature_count=3)
+    orch = NavOrchestrator([model], only_techniques=['_FakeStarTechnique'])
+    prep = orch.prepare(obs)  # type: ignore[arg-type]
+    assert prep.image_classifier.missing_frac == pytest.approx(6.0 / 64.0)
+
+
+def test_orchestrator_calibrated_if_mostly_nan_short_circuits() -> None:
+    """A calibrated-IF image dominated by NaN markers short-circuits as missing.
+
+    With the NaN fraction above ``max_missing_frac_clean`` the classifier
+    returns ``mostly_missing_data`` and the orchestrator fails before any
+    technique runs — proving the NaN-aware missing detection actually
+    drives the hard-failure short-circuit for calibrated images.
+    """
+    image = np.full((64, 64), 0.5, np.float64)
+    image[:48, :] = np.nan  # 75% NaN, above the 0.30 clean threshold
+    obs = _FakeObs(image=image, inst_config=_ciss_calib_inst_config())
+    model = _FakeStarModel(obs, feature_count=3)
+    orch = NavOrchestrator([model], only_techniques=['_FakeStarTechnique'])
+    result = orch.navigate(obs)  # type: ignore[arg-type]
+    assert result.status == 'failed'
+    assert result.status_reason == NavStatusReason.MISSING_DATA_DOMINANT
+    assert result.per_technique == []

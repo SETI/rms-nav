@@ -25,7 +25,6 @@ cassini_iss:
       expected_noise_dn: 4.0       # PLACEHOLDER — calibrate in Phase 10
       marker_value: 0              # CISS RAW missing-pixel marker
       read_noise_dn: 4.0           # PLACEHOLDER — calibrate in Phase 10
-      signal_dn_to_image_unit_scale: 1.0  # raw_dn — image is already in DN
     image_quality_thresholds:
       blank_max_dn: 5.0
       saturation_threshold_dn: 4095
@@ -113,11 +112,6 @@ cassini_iss_calib:
     max_rotation_deg: 5.0
     noise:
       marker_value: NaN              # CISS CALIB missing-pixel sentinel
-      signal_dn_to_image_unit_scale: 5.0e-7  # PLACEHOLDER — calibrate in Phase 10
-                                             # CISS CALIB pipeline scales DN to I/F by an
-                                             # exposure / filter-dependent factor; this
-                                             # constant is the typical NAC clear-filter
-                                             # value and is tuned per Phase 10.
     image_quality_thresholds:
       blank_max_if: 1.0e-4            # PLACEHOLDER — calibrate in Phase 10
       noisy_threshold_if: 0.005       # PLACEHOLDER — calibrate in Phase 10
@@ -148,8 +142,6 @@ cassini_iss_calib:
     max_rotation_deg: 5.0
     noise:
       marker_value: NaN
-      signal_dn_to_image_unit_scale: 5.0e-7  # PLACEHOLDER — calibrate in Phase 10
-                                             # (typical WAC clear-filter DN-to-I/F scale).
     image_quality_thresholds:
       blank_max_if: 1.0e-4
       noisy_threshold_if: 0.005

@@ -18,7 +18,6 @@ newhorizons_lorri:
     expected_noise_dn: 4.0         # PLACEHOLDER — calibrate in Phase 10
     marker_value: 0
     read_noise_dn: 4.0             # PLACEHOLDER — calibrate in Phase 10
-    signal_dn_to_image_unit_scale: 1.0  # raw_dn — image is already in DN
   image_quality_thresholds:
     blank_max_if: 1.0e-4            # PLACEHOLDER — calibrate in Phase 10
     noisy_threshold_if: 0.005       # PLACEHOLDER — calibrate in Phase 10
@@ -45,7 +44,6 @@ newhorizons_lorri:
       expected_noise_dn: 'PLACEHOLDER — calibrate in Phase 10 against the planted-offset library.'
       marker_value: 'NHLORRI raw missing-pixel sentinel; 0 per the LORRI EDR pipeline.'
       read_noise_dn: 'PLACEHOLDER — calibrate in Phase 10 (LORRI 1x1 read-noise expected ~ 1 e-, but tuned to per-image MAD floor in Phase 10).'
-      signal_dn_to_image_unit_scale: 'raw_dn instrument: LORRI EDR pixels are in DN, so the DN-to-image-unit scale is identically 1.0.  A future calibrated-IF variant (e.g. _red.fit post-pipeline) will need its own value here.'
     image_quality_thresholds:
       blank_max_dn: 'PLACEHOLDER — calibrate in Phase 10; bias-subtracted dark frames typically peak below 5 DN.'
       saturation_threshold_dn: 'Mirrors noise.saturation_dn (12-bit ADC).'

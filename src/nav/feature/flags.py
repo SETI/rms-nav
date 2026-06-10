@@ -36,11 +36,12 @@ class StarFlags:
             a predicted body silhouette in extfov.
         in_saturation_or_cosmic_mask: True if the predicted star position
             falls inside a saturation or cosmic-ray mask pixel.
-        predicted_snr: Predicted integrated SNR for the catalog star (raw,
-            uncapped).  Consumed by ``StarUniqueMatchNav`` to rank stars
-            by predicted brightness when picking the unique-bright pair.
-            ``0.0`` for fixtures or features whose model did not populate
-            it.  Must be ``>= 0``.
+        predicted_snr: Magnitude-margin-derived effective SNR for the
+            catalog star (``SNR_REF * 2.512 ** (mag_limit - vmag)``), not a
+            DN-based photometric SNR.  Monotone in catalog brightness, so
+            ``StarUniqueMatchNav`` can still rank stars by it when picking
+            the unique-bright pair.  ``0.0`` for fixtures or features whose
+            model did not populate it.  Must be ``>= 0``.
         vmag: Catalog V-band magnitude of the star, or ``None`` when the
             catalog entry has no magnitude.  Used by ``StarUniqueMatchNav``
             to compute the magnitude margin to the next-brightest star.

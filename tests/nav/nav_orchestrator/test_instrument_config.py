@@ -64,24 +64,20 @@ def test_raw_dn_block_loads_thresholds() -> None:
     assert settings.thresholds.noisy_threshold == 10.0
     assert settings.thresholds.max_saturation_frac_clean == 0.80
     assert settings.thresholds.max_missing_frac_clean == 0.30
-    # raw_dn instruments default to a unity DN-to-image-unit scale.
-    assert settings.signal_dn_to_image_unit_scale == 1.0
 
 
-def test_raw_dn_explicit_unity_signal_scale_accepted() -> None:
-    """raw_dn instruments may set signal_dn_to_image_unit_scale=1.0 explicitly."""
-    block = _raw_dn_block()
-    block['noise']['signal_dn_to_image_unit_scale'] = 1.0
-    settings = instrument_settings_from_obs(_FakeObs(block))
-    assert settings.signal_dn_to_image_unit_scale == 1.0
+def test_raw_dn_ignores_stray_signal_scale_key() -> None:
+    """A stray ``signal_dn_to_image_unit_scale`` key is silently ignored.
 
-
-def test_raw_dn_non_unity_signal_scale_rejected() -> None:
-    """raw_dn instruments must keep the scale at 1.0; any other value fails fast."""
+    The field was removed from ``InstrumentSettings`` when the star gate
+    moved to a magnitude-based limit, so the loader no longer reads or
+    validates it; a leftover key must not break loading.
+    """
     block = _raw_dn_block()
     block['noise']['signal_dn_to_image_unit_scale'] = 0.5
-    with pytest.raises(ValueError, match='signal_dn_to_image_unit_scale'):
-        instrument_settings_from_obs(_FakeObs(block))
+    settings = instrument_settings_from_obs(_FakeObs(block))
+    assert settings.data_units == 'raw_dn'
+    assert not hasattr(settings, 'signal_dn_to_image_unit_scale')
 
 
 def test_calibrated_if_block_uses_if_thresholds() -> None:
@@ -90,7 +86,6 @@ def test_calibrated_if_block_uses_if_thresholds() -> None:
         'data_units': 'calibrated_if',
         'noise': {
             'marker_value': 'NaN',
-            'signal_dn_to_image_unit_scale': 5.0e-7,
         },
         'image_quality_thresholds': {
             'blank_max_if': 1.0e-3,
@@ -110,29 +105,14 @@ def test_calibrated_if_block_uses_if_thresholds() -> None:
     # ``saturation_frac`` stays 0.0 regardless of pixel values.
     assert math.isinf(settings.thresholds.saturation_threshold_dn)
     assert settings.thresholds.noisy_threshold == 0.005
-    assert settings.signal_dn_to_image_unit_scale == pytest.approx(5.0e-7)
 
 
-def test_calibrated_if_rejects_explicit_saturation_threshold() -> None:
-    """A stale ``saturation_threshold_if`` field fails fast at load time."""
-    block = {
-        'data_units': 'calibrated_if',
-        'noise': {
-            'marker_value': 'NaN',
-            'signal_dn_to_image_unit_scale': 5.0e-7,
-        },
-        'image_quality_thresholds': {
-            'blank_max_if': 1.0e-3,
-            'saturation_threshold_if': 10.0,
-            'noisy_threshold_if': 0.005,
-        },
-    }
-    with pytest.raises(ValueError, match='saturation_threshold_if'):
-        instrument_settings_from_obs(_FakeObs(block))
+def test_calibrated_if_does_not_require_signal_scale() -> None:
+    """calibrated_if loads cleanly without a DN-to-image-unit scale.
 
-
-def test_calibrated_if_missing_signal_scale_raises() -> None:
-    """calibrated_if without signal_dn_to_image_unit_scale fails fast."""
+    The star gate is magnitude based now, so ``calibrated_if`` no longer
+    needs (or carries) ``signal_dn_to_image_unit_scale``.
+    """
     block = {
         'data_units': 'calibrated_if',
         'noise': {'marker_value': 'NaN'},
@@ -141,24 +121,25 @@ def test_calibrated_if_missing_signal_scale_raises() -> None:
             'noisy_threshold_if': 0.005,
         },
     }
-    with pytest.raises(ValueError, match='signal_dn_to_image_unit_scale'):
-        instrument_settings_from_obs(_FakeObs(block))
+    settings = instrument_settings_from_obs(_FakeObs(block))
+    assert settings.data_units == 'calibrated_if'
+    assert not hasattr(settings, 'signal_dn_to_image_unit_scale')
 
 
-def test_calibrated_if_non_positive_signal_scale_raises() -> None:
-    """A zero or negative DN-to-image-unit scale fails fast."""
+def test_calibrated_if_rejects_explicit_saturation_threshold() -> None:
+    """A stale ``saturation_threshold_if`` field fails fast at load time."""
     block = {
         'data_units': 'calibrated_if',
         'noise': {
             'marker_value': 'NaN',
-            'signal_dn_to_image_unit_scale': 0.0,
         },
         'image_quality_thresholds': {
             'blank_max_if': 1.0e-3,
+            'saturation_threshold_if': 10.0,
             'noisy_threshold_if': 0.005,
         },
     }
-    with pytest.raises(ValueError, match='signal_dn_to_image_unit_scale'):
+    with pytest.raises(ValueError, match='saturation_threshold_if'):
         instrument_settings_from_obs(_FakeObs(block))
 
 
@@ -210,10 +191,8 @@ def test_calibrated_if_default_marker_is_nan() -> None:
             'blank_max_if': 1.0e-3,
             'noisy_threshold_if': 0.005,
         },
-        # The signal scale is required for calibrated_if; the marker
-        # default check still applies once the rest of the noise block
-        # is well-formed.
-        'noise': {'signal_dn_to_image_unit_scale': 5.0e-7},
+        # An empty noise block still defaults the marker to NaN.
+        'noise': {},
     }
     settings = instrument_settings_from_obs(_FakeObs(block))
 
@@ -238,11 +217,10 @@ def test_shipped_inst_configs_load_cleanly() -> None:
         assert settings.data_units == 'raw_dn'
         assert settings.saturation_dn is not None
         assert settings.saturation_dn > 0.0
-        assert settings.signal_dn_to_image_unit_scale == 1.0
 
 
 def test_shipped_calibrated_if_configs_load_cleanly() -> None:
-    """Every shipped calibrated-IF block loads with a populated signal scale."""
+    """Every shipped calibrated-IF block loads and disables the saturation gate."""
     from nav.config import Config
 
     config = Config()
@@ -255,7 +233,5 @@ def test_shipped_calibrated_if_configs_load_cleanly() -> None:
         settings = instrument_settings_from_obs(_FakeObs(block))
         assert settings.data_units == 'calibrated_if'
         assert settings.saturation_dn is None
-        assert settings.signal_dn_to_image_unit_scale > 0.0
-        assert settings.signal_dn_to_image_unit_scale != 1.0
         # Saturation gate disabled for calibrated_if (Phase 10 §F).
         assert math.isinf(settings.thresholds.saturation_threshold_dn)

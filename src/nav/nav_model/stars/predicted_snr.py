@@ -1,7 +1,17 @@
-"""Per-star predicted-SNR computation for the star NavModel.
+"""Raw-DN photometry helpers for stars (predicted-SNR diagnostic).
 
-Reliability of a STAR feature comes from how detectable the star is at
-its predicted pixel position.  The estimate uses three inputs:
+The star NavModel no longer gates on this DN-based SNR: STAR features are
+selected purely by magnitude against ``obs.star_max_usable_vmag()`` (see
+``nav.nav_model.stars.nav_model_stars``), which carries no dependence on
+any DN-to-image-unit scale.  This module is retained for its reusable
+photometry helpers — ``psf_sigma_px`` (imported by ``detection`` and
+``nav_model_body``), ``psf_aperture_pixels``, ``integrated_signal_dn``,
+and the ``SCLASS_TO_B_MINUS_V`` re-export — and the ``predicted_snr``
+formula is kept as a raw-DN diagnostic, not used by the navigator's star
+gate.
+
+The (diagnostic) ``predicted_snr`` estimate of how detectable a star is
+at its predicted pixel position uses three inputs:
 
 - ``obs.star_psf()`` — the per-camera-per-filter PSF.
 - ``NavContext.image_noise_sigma`` — robust MAD-based noise estimate over

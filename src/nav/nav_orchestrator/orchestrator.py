@@ -773,17 +773,42 @@ class NavOrchestrator(NavBase):
         settings = instrument_settings_from_obs(obs)
         raw_image = obs.extdata.astype('float64')
         sensor_mask = obs.extfov_data_sensor_mask()
+        # Sanitise the missing-data sentinel before any finite-only
+        # computation.  For calibrated-IF instruments the sentinel is
+        # literally NaN (CISS CALIB ``marker_value: NaN``); leaving those
+        # NaN in place would make ``_smooth_and_compute_gradients`` raise
+        # (its finite-only guard), and that ValueError would propagate out
+        # of ``navigate``, violating the orchestrator's never-raise
+        # contract.  ``missing_mask`` is computed for both the ``==
+        # marker`` case and the ``isnan(marker)`` case, then the matching
+        # pixels are replaced with a finite fill (0.0) so the gradient /
+        # noise path always sees finite data.  The *true* missing fraction
+        # is threaded into the classifier so missing/dropout detection
+        # still fires for calibrated images.
+        marker = settings.marker_value
+        if np.isnan(marker):
+            missing_mask = np.isnan(raw_image)
+        else:
+            missing_mask = raw_image == marker
+        if missing_mask.any():
+            raw_image = np.where(missing_mask, 0.0, raw_image)
+        sensor_missing = missing_mask & sensor_mask
+        n_sensor = int(sensor_mask.sum())
+        missing_frac = float(sensor_missing.sum()) / float(max(n_sensor, 1))
         image, pre_filter = self._apply_source_image_filter(raw_image, obs)
         # The classifier reads the image *after* the source-image filter
         # so blank/saturation/missing fractions match what downstream
-        # extractors will see.
+        # extractors will see.  ``image`` is already NaN-free (markers were
+        # filled above), and the true missing fraction is supplied
+        # explicitly so the NaN sentinel still drives
+        # ``mostly_missing_data`` / ``partial_dropout``.
         classifier_thresholds = (
             self._explicit_thresholds
             if self._explicit_thresholds is not None
             else settings.thresholds
         )
         classifier = NavImageClassifier(thresholds=classifier_thresholds)
-        classifier_result = classifier.classify(image, sensor_mask)
+        classifier_result = classifier.classify(image, sensor_mask, missing_frac=missing_frac)
         sat_mask = self._build_saturation_mask(image, sensor_mask, settings)
         # Cosmic-ray detection requires a strictly positive noise sigma;
         # the classifier supplies one already, but a near-zero estimate is
@@ -820,7 +845,6 @@ class NavOrchestrator(NavBase):
             pre_filter_applied=pre_filter,
             fit_camera_rotation=settings.fit_camera_rotation,
             max_rotation_deg=settings.max_rotation_deg,
-            signal_dn_to_image_unit_scale=settings.signal_dn_to_image_unit_scale,
         )
         return context, classifier_result
 

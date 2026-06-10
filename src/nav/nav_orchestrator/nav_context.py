@@ -43,10 +43,7 @@ class NavContext:
             ``calibrated_if``), computed over the entire sensor area.
             Pixel-threshold consumers (cosmic-ray mask, body-blob noise
             floor, star detection) use this value directly because they
-            compare against pixel intensities in the same units.  The
-            STAR ``predicted_snr`` formula instead combines this sigma
-            with a DN-keyed signal and converts via
-            ``signal_dn_to_image_unit_scale``.
+            compare against pixel intensities in the same units.
         saturation_mask_ext: ``True`` where pixels at or above the
             instrument's full-well DN.
         cosmic_ray_mask_ext: ``True`` where single-pixel cosmic-ray spikes
@@ -74,15 +71,6 @@ class NavContext:
             when ``fit_camera_rotation`` is True; rotation outside the
             bound triggers ``at_edge=True``.  Ignored when
             ``fit_camera_rotation`` is False.
-        signal_dn_to_image_unit_scale: Per-instrument scale that converts
-            an integrated signal in DN into the image's native units.
-            ``1.0`` for ``raw_dn`` instruments (the default); for
-            ``calibrated_if`` the orchestrator populates the per-camera
-            value from
-            ``InstrumentSettings.signal_dn_to_image_unit_scale``.
-            Consumed by the STAR ``predicted_snr`` formula so the
-            DN-keyed catalog signal and the I/F-keyed
-            ``image_noise_sigma`` can be combined without a unit mismatch.
     """
 
     obs: object
@@ -101,7 +89,6 @@ class NavContext:
     pre_filter_applied: NavFilterSpec | None = None
     fit_camera_rotation: bool = False
     max_rotation_deg: float = 5.0
-    signal_dn_to_image_unit_scale: float = 1.0
 
     def with_prior(
         self,
