@@ -106,7 +106,7 @@ def process_task(
     return False, {'status': 'success'}  # No retry under any circumstances
 
 
-async def main() -> None:
+async def async_main() -> None:
     argparser = argparse.ArgumentParser(
         description='PDS4 Bundle Generation Main Interface (Cloud Tasks version)'
     )
@@ -143,5 +143,10 @@ async def main() -> None:
     await worker.start()
 
 
+def main() -> None:  # Required for setuptools entry points
+    """Synchronous entry point; runs ``asyncio.run(async_main())``."""
+    asyncio.run(async_main())
+
+
 if __name__ == '__main__':
-    asyncio.run(main())
+    main()
