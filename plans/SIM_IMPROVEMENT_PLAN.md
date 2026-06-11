@@ -1024,7 +1024,7 @@ later ones:
 ```
 B0 (determinism) [done]
  │
- ├──→ B1 (noise model)
+ ├──→ B1 (noise model) [done]
  │     │
  │     └──→ B4 (saturation), B5 (PSF), B6 (stray light), B7 (irregular)
  │

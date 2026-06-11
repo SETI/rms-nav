@@ -48,6 +48,25 @@ from nav.sim.render import render_combined_model
 from nav.ui.common import ZoomPanController
 
 
+def _dn_to_display_uint8(image: Any) -> Any:
+    """Stretch a DN image to 8-bit grayscale for display, scaling by its peak.
+
+    The renderer emits detector counts (DN), whose range depends on the signal
+    full-scale and any cosmic-ray spikes, so a peak-relative stretch keeps the
+    preview legible regardless of absolute DN.
+
+    Parameters:
+        image: The DN image array to stretch.
+
+    Returns:
+        A uint8 array in [0, 255].
+    """
+    arr = np.asarray(image, dtype=np.float64)
+    peak = float(arr.max()) if arr.size else 0.0
+    scale = 255.0 / peak if peak > 0 else 0.0
+    return np.clip(arr * scale, 0.0, 255.0).astype(np.uint8)
+
+
 class ImageLabel(QLabel):
     def __init__(
         self,
@@ -2125,7 +2144,7 @@ class CreateSimulatedImageModel(QMainWindow):
     def _display_image(self) -> None:
         if self._current_image is None:
             return
-        img_uint8 = (np.clip(self._current_image, 0.0, 1.0) * 255).astype(np.uint8)
+        img_uint8 = _dn_to_display_uint8(self._current_image)
         height, width = img_uint8.shape
         img_uint8 = np.ascontiguousarray(img_uint8.copy())
         qimage = QImage(
@@ -2341,7 +2360,7 @@ class CreateSimulatedImageModel(QMainWindow):
             try:
                 from PIL import Image
 
-                img_uint8 = (np.clip(self._current_image, 0.0, 1.0) * 255).astype(np.uint8)
+                img_uint8 = _dn_to_display_uint8(self._current_image)
                 Image.fromarray(img_uint8, mode='L').save(filename)
             except Exception as e:
                 QMessageBox.critical(self, 'Error', f'Failed to save image:\n{e!s}')

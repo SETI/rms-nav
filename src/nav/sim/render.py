@@ -8,6 +8,7 @@ from psfmodel import GaussianPSF
 from scipy import ndimage
 from starcat import Star
 
+from nav.config import DEFAULT_CONFIG
 from nav.sim.seeds import derive_effect_seed
 from nav.sim.sim_body import create_simulated_body
 from nav.sim.sim_ring import render_ring
@@ -492,32 +493,80 @@ def render_bodies(
     }
 
 
-@lru_cache(maxsize=1)
-def _render_background_noise_cached(
-    size_v: int,
-    size_u: int,
-    noise_level: float,
-    seed: int,
-) -> NDArrayFloatType:
-    """Internal cached function to compute background noise."""
-    rng = np.random.RandomState(seed)
-    noise = rng.normal(0.0, noise_level, size=(size_v, size_u))
-    return noise
+def apply_detector_noise(
+    img: NDArrayFloatType,
+    *,
+    signal_full_scale_dn: float,
+    read_noise_dn: float,
+    saturation_dn: float,
+    poisson: bool = True,
+    cosmic_ray_rate_per_sec: float = 0.0,
+    exposure_sec: float = 1.0,
+    pixel_area_cm2: float = 1.0,
+    missing_data_marker_dn: float = 0.0,
+    missing_data_rate: float = 0.0,
+    noise_seed: int,
+    cosmic_ray_seed: int,
+    missing_data_seed: int,
+) -> None:
+    """Convert a normalized signal image to DN and add detector noise in place.
 
-
-def render_background_noise(img: NDArrayFloatType, noise_level: float, seed: int) -> None:
-    """Add Gaussian background noise to the image.
+    The composed bodies/rings/stars/sky signal arrives normalized to [0, 1].
+    This stage maps it to detector counts (DN) at ``signal_full_scale_dn`` per
+    unit signal, then applies the real camera-noise structure: signal-dependent
+    Poisson shot noise, a Gaussian read-noise floor, sparse cosmic-ray spikes,
+    and missing-data markers.  Saturation clipping at the full well is left to a
+    later stage so cosmic-ray spikes can exceed it; only a zero floor (raw
+    frames carry no negative DN) is enforced here.
 
     Parameters:
-        img: Image array to modify in-place.
-        noise_level: Standard deviation of Gaussian noise (0-1).
-        seed: Random seed for reproducibility.
+        img: Normalized [0, 1] signal image, overwritten in place with DN.
+        signal_full_scale_dn: DN that a normalized signal of 1.0 maps to.
+        read_noise_dn: Standard deviation of the Gaussian read-noise floor, DN.
+        saturation_dn: Full-well DN; cosmic-ray spikes are scaled to exceed it.
+        poisson: Whether to apply Poisson shot noise (usually on).
+        cosmic_ray_rate_per_sec: Cosmic-ray fluence in events / cm^2 / sec.
+        exposure_sec: Exposure time in seconds (scales cosmic-ray count).
+        pixel_area_cm2: Detector pixel area in cm^2 (scales cosmic-ray count).
+        missing_data_marker_dn: DN value written to dropped pixels.
+        missing_data_rate: Fraction of pixels (0-1) marked as missing.
+        noise_seed: Seed for the shot + read-noise stream.
+        cosmic_ray_seed: Seed for cosmic-ray placement and intensity.
+        missing_data_seed: Seed for missing-data placement.
     """
-    if noise_level <= 0:
-        return
     size_v, size_u = img.shape
-    noise = _render_background_noise_cached(size_v, size_u, noise_level, seed)
-    img[:] = np.clip(img + noise, 0.0, 1.0)
+
+    signal_dn = np.clip(img, 0.0, 1.0) * signal_full_scale_dn
+
+    noise_rng = np.random.RandomState(noise_seed)
+    if poisson:
+        # Poisson mean equals the noise-free signal, so noise grows with
+        # brightness the way a real detector's shot noise does.
+        out_dn = noise_rng.poisson(np.maximum(signal_dn, 0.0)).astype(np.float64)
+    else:
+        out_dn = signal_dn.copy()
+    if read_noise_dn > 0:
+        out_dn += noise_rng.normal(0.0, read_noise_dn, size=(size_v, size_u))
+
+    expected_hits = cosmic_ray_rate_per_sec * exposure_sec * pixel_area_cm2 * size_v * size_u
+    if expected_hits > 0:
+        cosmic_rng = np.random.RandomState(cosmic_ray_seed)
+        n_hits = int(cosmic_rng.poisson(expected_hits))
+        if n_hits > 0:
+            hit_v = cosmic_rng.randint(0, size_v, size=n_hits)
+            hit_u = cosmic_rng.randint(0, size_u, size=n_hits)
+            # Long-tailed spike intensities that exceed the full well by design,
+            # so the cosmic-ray mask in the orchestrator has something to catch.
+            spikes = saturation_dn * (1.0 + cosmic_rng.lognormal(0.0, 1.0, size=n_hits))
+            np.add.at(out_dn, (hit_v, hit_u), spikes)
+
+    if missing_data_rate > 0:
+        missing_rng = np.random.RandomState(missing_data_seed)
+        missing_mask = missing_rng.random_sample(size=(size_v, size_u)) < missing_data_rate
+        out_dn[missing_mask] = missing_data_marker_dn
+
+    # Raw frames carry no negative DN; the upper (saturation) clip is deferred.
+    img[:] = np.maximum(out_dn, 0.0)
 
 
 @lru_cache(maxsize=1)
@@ -641,12 +690,13 @@ def _render_combined_model_cached(
     noise_seed = derive_effect_seed(random_seed, 'noise')
     background_stars_seed = derive_effect_seed(random_seed, 'background_stars')
     crater_seed = derive_effect_seed(random_seed, 'craters')
+    cosmic_ray_seed = derive_effect_seed(random_seed, 'cosmic_rays')
+    missing_data_seed = derive_effect_seed(random_seed, 'missing_data')
 
-    # Apply background noise first
-    background_noise_intensity = float(sim_params.get('background_noise_intensity', 0.0))
-    render_background_noise(img, background_noise_intensity, noise_seed)
+    # Detector noise is applied last, after the full signal is composed, so the
+    # Poisson shot term sees the noise-free signal it should grow with.
 
-    # Then background stars
+    # Background stars are part of the sky signal, composed before noise.
     background_stars_num = int(sim_params.get('background_stars_num', 0))
     background_stars_psf_sigma = float(sim_params.get('background_stars_psf_sigma', 0.9))
     background_stars_distribution_exponent = float(
@@ -781,6 +831,28 @@ def _render_combined_model_cached(
             # Index into near-to-far order is 1-based
             near_index = order_near_to_far.index(body_info['name']) + 1
             body_index_map[body_mask] = near_index
+
+    # All signal is composed; convert to DN and apply detector noise.  Feature
+    # masks above are derived from the noise-free signal, so they are unaffected.
+    noise_cfg = DEFAULT_CONFIG.category('sim')['noise']
+    scene_noise = sim_params.get('noise') or {}
+    apply_detector_noise(
+        img,
+        signal_full_scale_dn=float(
+            scene_noise.get('signal_full_scale_dn', noise_cfg['signal_full_scale_dn'])
+        ),
+        read_noise_dn=float(scene_noise.get('read_noise_dn', noise_cfg['read_noise_dn'])),
+        saturation_dn=float(noise_cfg['saturation_dn']),
+        poisson=bool(scene_noise.get('poisson', True)),
+        cosmic_ray_rate_per_sec=float(scene_noise.get('cosmic_ray_rate_per_sec', 0.0)),
+        exposure_sec=float(sim_params.get('exposure_sec', 1.0)),
+        pixel_area_cm2=float(scene_noise.get('pixel_area_cm2', 1.0)),
+        missing_data_marker_dn=float(noise_cfg['marker_value']),
+        missing_data_rate=float(scene_noise.get('missing_data_rate', 0.0)),
+        noise_seed=noise_seed,
+        cosmic_ray_seed=cosmic_ray_seed,
+        missing_data_seed=missing_data_seed,
+    )
 
     # Build body_masks_list in original order (matching bodies_params)
     body_masks_list: list[NDArrayBoolType] = []
