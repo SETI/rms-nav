@@ -1,123 +1,181 @@
-================
-Image Classifier
-================
+==========================================================
+Image Classifier (NavImageClassifier)
+==========================================================
 
 Overview
 ========
 
-The image classifier is the orchestrator's quick-fail front gate.  It looks at the whole sensor
-area of an incoming image -- never at any predicted feature position -- and assigns it to one of a
-small closed set of classes.  Most of the "bad" classes terminate navigation in milliseconds with a
-clear reason, before any model renders or any technique runs.  The classifier reads three cheap
-statistics (saturated-pixel fraction, missing-data fraction, and a robust noise estimate), applies
-per-instrument thresholds, and returns a verdict that rides on every
-:py:class:`~nav.nav_orchestrator.nav_result.NavResult` so a downstream reader always sees which
-class the input fell into.
+:class:`~nav.nav_orchestrator.image_classifier.NavImageClassifier` is the quick-fail image
+quality classifier the orchestrator runs once per image before any
+:class:`~nav.nav_model.nav_model.NavModel` is constructed.
+It assigns the image to one of a small set of classes (``clean`` /
+``blank`` / ``fully_overexposed`` / ``mostly_missing_data``) plus optional advisory flags
+(``noisy`` / ``partial_dropout``). The hard-failure classes short-circuit the pipeline
+inside :class:`~nav.nav_orchestrator.orchestrator.NavOrchestrator` — corrupted or blank
+images fail in milliseconds with a clear status reason.
 
 Theory
 ======
 
-The classifier is global: it computes summary statistics over the sensor pixels and decides on
-those alone.  Three quantities drive the decision.  The saturated fraction is the share of sensor
-pixels at or above the saturation threshold.  The missing fraction is the share of sensor pixels
-equal to the instrument's missing-data sentinel (detected as an exact equality, or as a
-not-a-number test when the sentinel is itself not-a-number, as it is for calibrated reflectance
-imagery).  The noise level is a robust estimate based on the median absolute deviation of the
-sensor pixels, which resists outliers from a handful of bright sources.
+The classifier evaluates three cheap statistics over the sensor pixels:
 
-The outcome is decided by an ordered cascade.  A blank check runs first: if the maximum sensor
-value is below a floor, the image is blank and nothing further is evaluated -- this order matters,
-because a near-zero frame whose missing-data marker is also zero would otherwise be mislabelled as
-missing-data-dominated.  Next, if the saturated fraction exceeds its cap, the image is fully
-overexposed.  Next, if the missing fraction exceeds its cap, the image is missing-data-dominated.
-If none of those fire, the image is clean.  A clean image may still carry advisory flags that do not
-change its class: a partial-dropout flag when the missing fraction sits above an advisory floor but
-below the dominated cap, and a noisy flag when the robust noise estimate exceeds its threshold.  One
-further class, corrupt, is not produced by the statistics at all; the caller sets it when reading
-the image file itself raised.
+- ``saturation_frac`` — fraction of pixels at or above the per-instrument
+  saturation DN.
+- ``missing_frac`` — fraction of pixels exactly equal to the per-instrument
+  missing-data marker.
+- ``noise_sigma`` — robust MAD-based noise sigma over the sensor area.
 
-The classifier makes no geometric assumptions and reads no SPICE state, so it is fast and pure.  Its
-limitation is exactly that globality: it cannot distinguish a usable bright target from saturation
-spread across the frame beyond what the fraction caps encode, and it deliberately leaves
-finer-grained dropout patterns to the downstream extractors.
+The decision tree is order-sensitive:
+
+1. **Blank check first.**  When the maximum sensor DN is below ``blank_max_dn``, the image
+   is ``blank``. The blank check fires before the missing-fraction test so a near-zero
+   image whose missing-data marker is also zero is not mis-classified as
+   ``mostly_missing_data``.
+2. **Fully overexposed.**  When the saturation fraction exceeds
+   ``max_saturation_frac_clean`` (default 0.80), the image is ``fully_overexposed``.
+3. **Mostly missing data.**  When the missing fraction exceeds ``max_missing_frac_clean``
+   (default 0.30), the image is ``mostly_missing_data``.
+4. **Clean.**  Otherwise the image is ``clean``. Two advisory flags may attach:
+   ``partial_dropout`` when the missing fraction sits between
+   ``partial_dropout_min_frac`` and ``max_missing_frac_clean``; ``noisy`` when the noise
+   sigma exceeds ``noisy_threshold``.
+
+The orchestrator's ``_HARD_FAILURE_TO_REASON`` dispatch table maps the three hard-failure
+classes to
+:class:`~nav.support.status_reason.NavStatusReason` values; the ``clean`` case proceeds
+through the pipeline regardless of the advisory flags.
+
+Restrictions and assumptions
+----------------------------
+
+- The classifier assumes the per-instrument thresholds are calibrated correctly. An
+  ``ImageQualityThresholds`` configured for a different instrument will mis-classify
+  exposures.
+- The classifier reads pixel statistics over the *sensor* mask only; extfov padding is
+  excluded. When the caller passes ``sensor_mask=None`` every pixel is treated as sensor
+  data.
+- The matched-filter detection in star navigation consumes a separate noise-sigma
+  estimate from
+  :func:`~nav.support.noise_estimate.estimate_image_noise_sigma`; the classifier's
+  ``noise_sigma`` is the same MAD estimator but on the per-image sensor cohort.
+- The classifier does not look at predicted feature positions — it is a global readout
+  over the whole sensor, not a per-target check.
+
+Sources of uncertainty
+----------------------
+
+The classifier reports no uncertainty. Its outputs (the verdict and the three statistics)
+are deterministic functions of the input image and the configured thresholds.
 
 Configuration
 =============
 
-The classifier's thresholds are carried on
-:py:class:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds`, a frozen dataclass.  The
-orchestrator builds an instance per image from the per-instrument
-``image_quality_thresholds`` block in ``config_4N0_inst_*.yaml`` (for example
-``src/nav/config_files/config_400_inst_coiss.yaml``), normalising DN-keyed and I/F-keyed values to
-the right units, unless an explicit override was passed to the orchestrator constructor.  The fields
-and their dataclass defaults:
+Per-instrument thresholds live in
+:class:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds`, populated by
+:func:`~nav.nav_orchestrator.instrument_config.instrument_settings_from_obs` from the
+``image_quality_thresholds`` block in ``config_4N0_inst_*.yaml``. Documented at
+:doc:`dev_guide_orchestrator_instrument_config`.
 
-- ``saturation_threshold_dn`` -- float, default ``4095.0`` DN.  Pixels at or above this count as
-  saturated; for calibrated-I/F cameras it is set to infinity so the saturation gate never fires.
-- ``missing_data_marker_dn`` -- float, default ``0.0`` DN.  Pixels exactly equal to this are
-  missing data; for calibrated-I/F cameras it is the not-a-number sentinel.
-- ``max_saturation_frac_clean`` -- float, default ``0.80`` (dimensionless).  Above this saturated
-  fraction the image is fully overexposed; lower values refuse overexposed frames sooner.
-- ``max_missing_frac_clean`` -- float, default ``0.30`` (dimensionless).  Above this missing
-  fraction the image is missing-data-dominated; lower values refuse dropout-heavy frames sooner.
-- ``partial_dropout_min_frac`` -- float, default ``0.05`` (dimensionless).  At or above this
-  missing fraction (but below the dominated cap) the partial-dropout advisory flag is raised.
-- ``blank_max_dn`` -- float, default ``5.0`` DN.  If the maximum sensor value is below this, the
-  image is blank; higher values reject dim frames more aggressively.
-- ``noisy_threshold`` -- float, default ``10.0`` DN.  Above this robust noise level the noisy
-  advisory flag is raised; the image stays clean.
+The thresholds dataclass:
 
-For per-instrument overrides, the orchestrator reads ``image_quality_thresholds`` from the matching
-``config_4N0_inst_*.yaml`` camera block.  The raw-DN cameras supply ``blank_max_dn``,
-``saturation_threshold_dn``, ``noisy_threshold_dn``, and the two fraction caps; the calibrated-I/F
-cameras supply I/F-keyed ``blank_max_if`` and ``noisy_threshold_if`` and omit any saturation
-threshold (the saturation gate is off for calibrated reflectance imagery).  See
-:doc:`dev_guide_orchestrator_instrument_config` for how those keys are read and normalised.
+- :attr:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds.saturation_threshold_dn`
+  — float, default ``4095.0`` DN. Pixels at or above this DN are flagged saturated.
+- :attr:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds.missing_data_marker_dn`
+  — float, default ``0.0`` DN. Pixels exactly equal to this value are missing data.
+- :attr:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds.max_saturation_frac_clean`
+  — float, default ``0.80`` (dimensionless). Above this fraction of saturated pixels the
+  image is ``fully_overexposed``.
+- :attr:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds.max_missing_frac_clean`
+  — float, default ``0.30`` (dimensionless). Above this fraction of missing pixels the
+  image is ``mostly_missing_data``.
+- :attr:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds.partial_dropout_min_frac`
+  — float, default ``0.05`` (dimensionless). At or above this fraction (and below
+  ``max_missing_frac_clean``) the ``partial_dropout`` advisory flag is set.
+- :attr:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds.blank_max_dn` —
+  float, default ``5.0`` DN. Below this maximum sensor DN the image is ``blank``.
+- :attr:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds.noisy_threshold` —
+  float, default ``10.0`` DN. Above this MAD-noise sigma the ``noisy`` advisory flag is
+  set.
 
 Implementation
 ==============
 
-Source files: ``src/nav/nav_orchestrator/image_classifier.py`` and
-``src/nav/nav_orchestrator/image_classifier_result.py``.
+Source files:
 
-The public class is :py:class:`~nav.nav_orchestrator.image_classifier.NavImageClassifier`, a
-dataclass holding its :py:class:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds`.
-Its single public method,
-:py:meth:`~nav.nav_orchestrator.image_classifier.NavImageClassifier.classify`, takes the image, an
-optional sensor mask, and an optional pre-computed missing fraction.  It validates the inputs
-(raising :py:exc:`TypeError` for a non-array or non-2-D image and :py:exc:`ValueError` for a
-mismatched, empty, or all-false sensor mask), restricts the statistics to the sensor pixels,
-computes the saturated and missing fractions and the robust noise sigma via
-:py:func:`~nav.support.noise_estimate.estimate_image_noise_sigma`, and walks the blank /
-overexposed / dominated / clean cascade, appending advisory flags on the clean branch.  When the
-orchestrator supplies a pre-computed missing fraction (from the true missing mask, before the
-not-a-number sentinel is sanitised for the finite-only derivative path), the classifier trusts it
-rather than re-deriving it.
+- ``src/nav/nav_orchestrator/image_classifier.py`` —
+  :class:`~nav.nav_orchestrator.image_classifier.NavImageClassifier` and
+  :class:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds`.
+- ``src/nav/nav_orchestrator/image_classifier_result.py`` —
+  :class:`~nav.nav_orchestrator.image_classifier_result.NavImageClassifierResult` plus the
+  ``ImageClass`` and ``ImageFlag`` Literal aliases.
+- ``src/nav/support/noise_estimate.py`` —
+  :func:`~nav.support.noise_estimate.estimate_image_noise_sigma`, the MAD-based noise
+  estimator the classifier delegates to.
 
-The verdict is a :py:class:`~nav.nav_orchestrator.image_classifier_result.NavImageClassifierResult`,
-a frozen dataclass with fields
-:py:attr:`~nav.nav_orchestrator.image_classifier_result.NavImageClassifierResult.image_class`,
-:py:attr:`~nav.nav_orchestrator.image_classifier_result.NavImageClassifierResult.saturation_frac`,
-:py:attr:`~nav.nav_orchestrator.image_classifier_result.NavImageClassifierResult.missing_frac`,
-:py:attr:`~nav.nav_orchestrator.image_classifier_result.NavImageClassifierResult.noise_sigma`,
-:py:attr:`~nav.nav_orchestrator.image_classifier_result.NavImageClassifierResult.max_dn`, and
-:py:attr:`~nav.nav_orchestrator.image_classifier_result.NavImageClassifierResult.flags`.  The class
-literal (``clean``, ``blank``, ``fully_overexposed``, ``mostly_missing_data``, ``corrupt``) and the
-flag literal (``partial_dropout``, ``noisy``) are package-private type aliases in the result module.
-The orchestrator maps the four hard-failure classes to the matching
-:py:class:`~nav.support.status_reason.NavStatusReason` through its ``_HARD_FAILURE_TO_REASON`` table;
-see :doc:`dev_guide_orchestrator_orchestrator`.
+Public classes (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
+
+- :class:`~nav.nav_orchestrator.image_classifier.NavImageClassifier` — the classifier.
+  Public method:
+  :meth:`~nav.nav_orchestrator.image_classifier.NavImageClassifier.classify` runs the
+  three-statistic readout plus the decision tree and returns a
+  :class:`~nav.nav_orchestrator.image_classifier_result.NavImageClassifierResult`.
+
+- :class:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds` — frozen
+  dataclass carrying the seven thresholds documented above.
+
+- :class:`~nav.nav_orchestrator.image_classifier_result.NavImageClassifierResult` — frozen
+  dataclass returned by ``classify``. Public fields:
+  :attr:`~nav.nav_orchestrator.image_classifier_result.NavImageClassifierResult.image_class`,
+  :attr:`~nav.nav_orchestrator.image_classifier_result.NavImageClassifierResult.saturation_frac`,
+  :attr:`~nav.nav_orchestrator.image_classifier_result.NavImageClassifierResult.missing_frac`,
+  :attr:`~nav.nav_orchestrator.image_classifier_result.NavImageClassifierResult.noise_sigma`,
+  :attr:`~nav.nav_orchestrator.image_classifier_result.NavImageClassifierResult.max_dn`,
+  :attr:`~nav.nav_orchestrator.image_classifier_result.NavImageClassifierResult.flags`.
 
 Examples
 ========
 
-The ``body_partial_overflow`` scene (Cassini NAC ``N1484593951_2_CALIB``) is a clean calibrated
-frame: large Rhea is partially off-frame with a good limb, the saturated fraction is zero (the
-saturation gate is off for calibrated-I/F input), the missing fraction is below the partial-dropout
-advisory floor, and the noise level is low.  The verdict is
-:py:attr:`~nav.nav_orchestrator.image_classifier_result.NavImageClassifierResult.image_class` equal
-to ``clean`` with no advisory flags, so the orchestrator proceeds to feature extraction rather than
-short-circuiting.  A frame whose maximum value fell below the per-instrument blank floor would
-instead return ``blank`` and trip the
-:py:attr:`~nav.support.status_reason.NavStatusReason.NO_SIGNAL_IN_IMAGE` hard-failure gate before
-any model ran.
+**Clean Cassini calibration target.**  Saturation fraction 0.0, missing fraction 0.0, max
+DN 4000, MAD sigma 4.7. Verdict::
+
+    NavImageClassifierResult(
+        image_class='clean',
+        saturation_frac=0.0,
+        missing_frac=0.0,
+        noise_sigma=4.7,
+        max_dn=4000.0,
+        flags=[],
+    )
+
+**Blank image after a failed integration.**  Maximum DN 2.1. The blank check fires
+first::
+
+    NavImageClassifierResult(
+        image_class='blank',
+        saturation_frac=0.0,
+        missing_frac=0.62,    # the missing-data marker was 0
+        noise_sigma=0.4,
+        max_dn=2.1,
+        flags=[],
+    )
+
+The orchestrator's hard-failure short-circuit maps ``image_class='blank'`` to
+:attr:`~nav.support.status_reason.NavStatusReason.NO_SIGNAL_IN_IMAGE` and returns a failed
+:class:`~nav.nav_orchestrator.nav_result.NavResult` before any
+:class:`~nav.nav_model.nav_model.NavModel` constructs.
+
+**Clean with advisory flags.**  Saturation fraction 0.0, missing fraction 0.12, MAD sigma
+12.4. The classifier reports::
+
+    NavImageClassifierResult(
+        image_class='clean',
+        saturation_frac=0.0,
+        missing_frac=0.12,
+        noise_sigma=12.4,
+        max_dn=3800.0,
+        flags=['partial_dropout', 'noisy'],
+    )
+
+The orchestrator proceeds through the pipeline; the advisory flags surface in the
+per-image JSON sidecar so reviewer tooling can correlate noisy / partially-dropped scenes
+across a campaign.

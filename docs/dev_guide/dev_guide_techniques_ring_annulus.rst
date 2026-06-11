@@ -1,174 +1,285 @@
-=======================
-Ring Annulus Navigation
-=======================
+==========================================================
+Ring Annulus Correlate (RingAnnulusNav)
+==========================================================
 
 Overview
 ========
 
-This technique exploits the entire bright annular band of a ring system when the
-image is too low-resolution to resolve individual ring edges as separate
-polylines.  Instead of fitting edges, it correlates a full synthetic template of
-the predicted ring brightness against the image and recovers the translation at
-the correlation peak.  Each detectable ring system contributes one template;
-multi-planet scenes paint all templates into a single composite by a depth
-ordering so the closer ring system's pixels overwrite the farther one's.
-Feasibility passes when at least one ring-annulus feature carries a rendered
-template payload; it fails when no such feature is present.
+:class:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav` recovers a single
+translation by full-template normalised cross-correlation against a composite annulus
+fused from every offered ``RING_ANNULUS`` feature. Per-planet annulus templates are Z-buffer
+painted into a single postage stamp (the closer ring system's pixels overwrite the farther
+one's), the result is run through the shared pyramid-NCC machinery in
+:mod:`nav.support.correlate`, and the chosen peak is returned with a Cramer-Rao-lower-bound
+covariance derived from the local correlation curvature.
+
+Multi-planet annulus composites improve disambiguation in the same way as multi-body disc
+composites: each annulus contributes its own translational constraint, the geometric
+alignment between ring systems removes the "swap planet assignments" ambiguity, and the SNR
+of the combined peak grows roughly as :math:`\sqrt{N}` if backgrounds are independent.
+Multi-planet scenes are rare but real (the Cassini approach phase imaged Jupiter and Saturn
+together; New Horizons imaged Jupiter from Pluto distance).
+
+Feasibility passes when at least one offered ``RING_ANNULUS`` carries a template payload;
+feasibility fails when no offered feature has a template (a ring system whose per-edge
+polylines were emitted as ``RING_EDGE`` features instead).
 
 Theory
 ======
 
-When a ring system spans only a few pixels radially, the per-edge gradients
-merge into one broad bright band whose internal structure is unresolved.  The
-right observable is no longer the position of any one edge but the registration
-of the whole brightness pattern.  The technique predicts that pattern as a
-template image with an accompanying validity mask and seeks the translation that
-maximises the masked normalised cross-correlation between template and image:
+The technique fits a per-image translation by maximising the normalised cross-correlation
+between the composite annulus template and the observed image.
+
+Composite template construction
+-------------------------------
+
+When more than one planet emits a ``RING_ANNULUS`` feature (rare but supported), the per-planet
+templates are fused via Z-buffer paint: at each pixel covered by more than one ring system,
+the closer planet's template value (and its mask True) overwrite the farther one's so an
+in-front ring system occludes an in-behind ring system in the composite. The fused
+template carries one combined bounding box, one fused brightness image, and one fused mask;
+the orchestrator's
+:func:`~nav.feature.composition.compose_template_features` helper does the work.
+
+Cost function
+-------------
+
+The technique maximises the masked normalised cross-correlation between the composite
+template and the observed image (or a mode-selected gradient of it):
 
 .. math::
 
-   (\Delta v, \Delta u) = \arg\max_{(\delta v, \delta u)}
-       \operatorname{NCC}\big(I,\; T(\delta v, \delta u)\big),
+    \mathrm{NCC}(\Delta v, \Delta u) =
+        \frac{\langle T, I_{\Delta v, \Delta u} \rangle_{M}}
+             {\sqrt{\langle T, T \rangle_{M} \cdot \langle I_{\Delta v, \Delta u},
+                                          I_{\Delta v, \Delta u} \rangle_{M}}}
 
-where :math:`I` is the image, :math:`T` is the masked ring template, and the
-correlation is evaluated over the search window set by the pointing-error
-envelope.  A coarse-to-fine image pyramid localises the peak, and a
-Fourier-domain upsampling step refines it to sub-pixel accuracy.  The correlator
-self-selects between raw-intensity and gradient-domain correlation per image:
-raw correlation wins on broad smooth brightness gradients (a uniformly dim ring
-at low resolution), gradient correlation wins when sharp ringlet edges dominate
-the band.
+over the integer offsets in the per-instrument search window, with the masked inner product
+restricted to pixels where the annulus mask is True. Sub-pixel refinement comes from a
+quadratic fit to the correlation surface around the integer peak; the fitted curvature
+provides the CRLB covariance.
 
-Multi-planet composites tighten the fit the same way multi-body composites do:
-each annulus contributes its own translational constraint to the joint peak, the
-fixed geometric offset between the two ring systems removes the ambiguity of
-swapping their identities, and if the backgrounds are independent the
-signal-to-noise of the combined peak grows roughly as :math:`\sqrt{N}` for
-:math:`N` annuli.
+Mode selection (auto / raw / gradient)
+--------------------------------------
 
-The reported covariance is derived from the curvature of the correlation surface
-about the peak and captures the translational localisation uncertainty only.
-The translation correlation surface carries no rotation information, so when a
-camera rotation is requested the result is reported as rotation-unobservable:
-the rotation parameter is fixed at zero with a sentinel variance large enough
-that a downstream pseudo-inverse cleanly drops the rotation contribution.  A
-single planar ring band is also weakly constrained along its own bright extent
-when that extent is nearly featureless, in which case the correlation peak is
-broad and the reported covariance widens accordingly.
+The shared pyramid evaluates the correlation in two modes — raw vs. raw and gradient vs.
+gradient — and ``auto`` picks whichever peak scores higher quality. Raw wins on
+broad-brightness-gradient ring geometries (a low-resolution Saturn ring system where the
+C-ring is uniformly dim and the A/B rings dominate the per-pixel intensity); gradient wins
+when sharp ringlet edges dominate the per-pixel signal.
+
+Search strategy
+---------------
+
+The shared pyramid-NCC entry point
+(:func:`~nav.support.correlate.navigate_with_pyramid_kpeaks`) runs coarse-to-fine, keeps the
+top ``k`` peaks at each level, and reports the per-level consistency. See
+:doc:`dev_guide_techniques_dt_fitting` for the per-iteration mechanics that the body-disc
+technique shares. Rotation fitting is disabled for ring annuli (the rotation pivot
+of a ring system is its planet-centre, which is well outside the rendered template's
+support; an outer rotation search would have to rotate the template about a far-off-template
+pivot and the NCC peak's rotation curvature is degenerate for symmetric annuli).
+
+Restrictions and assumptions
+----------------------------
+
+- The orchestrator must populate
+  :attr:`~nav.nav_orchestrator.nav_context.NavContext.image_ext` and
+  :attr:`~nav.nav_orchestrator.nav_context.NavContext.sensor_mask_ext`.
+- The composite template must have non-empty support in the search window. An empty
+  template (every annulus off-frame) collapses the NCC to a constant; the spurious gate
+  flags the result.
+- The upstream rings model decides whether to emit ``RING_ANNULUS`` or ``RING_EDGE`` features per
+  the per-planet ``feature_emission.ring_annulus`` block in
+  ``config_510_techniques.yaml`` — the technique only sees the path the model chose.
+
+Sources of uncertainty
+----------------------
+
+The reported covariance is the Cramer-Rao lower bound from the local NCC curvature at the
+chosen peak. When the chosen peak sits within the at-edge tolerance of any axis bound the
+result is flagged
+:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and the hard-zero
+gate forces confidence to zero. The pyramid consistency check flags peaks that drift across
+levels as :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious`.
 
 Configuration
 =============
 
-This technique has no ``tuning`` block in
-``src/nav/config_files/config_510_techniques.yaml``; the
-``techniques.RingAnnulusNav`` stanza carries only the confidence coefficients
-documented below.  The single runtime knob it consumes lives in a different
-file: the Fourier upsample factor under ``offset`` in
-``src/nav/config_files/config_020_offset.yaml``.
+The technique itself has no per-technique ``tuning`` knobs in
+``config_510_techniques.yaml`` (the shared pyramid-NCC machinery owns the numeric thresholds
+for peak quality, consistency, and top-k count).
 
-- ``correlation_fft_upsample_factor`` -- int, default ``128`` (count).  The
-  Fourier-domain upsampling factor applied when refining the correlation peak to
-  sub-pixel accuracy; higher resolves a finer peak position at the cost of a
-  larger upsampled grid.  The technique validates that the value is a real
-  non-boolean number coercible to an integer in a bounded range, raising
-  :py:exc:`ValueError` otherwise, and substitutes an internal default of ``128``
-  when the ``offset`` block or the key is absent.
+Feature-emission tunables (per-planet)
+--------------------------------------
+
+The upstream rings model decides whether to emit ``RING_ANNULUS`` or ``RING_EDGE`` features based on
+``feature_emission.ring_annulus`` in ``src/nav/config_files/config_510_techniques.yaml``.
+The model emits a ``RING_ANNULUS`` template whenever a single ring edge has compressed below the
+per-polyline radial-pixel threshold, or when the per-planet km-per-pixel scale exceeds the
+per-planet threshold (the entire ring system is below the per-edge resolution limit).
+
+- ``feature_emission.ring_annulus.default.max_radial_px`` — float, default ``5.0`` px.
+  Maximum per-edge polyline radial extent below which the rings model emits a ``RING_ANNULUS``
+  template instead of per-edge polylines. Per-polyline gate; fires when a single ring edge
+  has compressed below this width.
+- ``feature_emission.ring_annulus.default.kmpp_threshold`` — float, default ``1000.0`` km/px.
+  Ring-radial km/px threshold above which the entire ring system is annulus-class
+  regardless of any per-polyline metric.
+- ``feature_emission.ring_annulus.planets.SATURN.max_radial_px`` — float, default
+  ``5.0`` px.
+- ``feature_emission.ring_annulus.planets.SATURN.kmpp_threshold`` — float, default
+  ``1000.0`` km/px. Saturn's main rings span ~75,000-140,000 km; at km/px > 1000 the
+  entire system is < 65 px wide and individual edges are sub-pixel apart.
+- ``feature_emission.ring_annulus.planets.JUPITER.max_radial_px`` — float, default
+  ``5.0`` px.
+- ``feature_emission.ring_annulus.planets.JUPITER.kmpp_threshold`` — float, default
+  ``200.0`` km/px. Jupiter's main ring is ~10x narrower than Saturn's, so the kmpp
+  threshold is correspondingly tighter.
+- ``feature_emission.ring_annulus.planets.URANUS.max_radial_px`` — float, default
+  ``5.0`` px.
+- ``feature_emission.ring_annulus.planets.URANUS.kmpp_threshold`` — float, default
+  ``300.0`` km/px.
+- ``feature_emission.ring_annulus.planets.NEPTUNE.max_radial_px`` — float, default
+  ``5.0`` px.
+- ``feature_emission.ring_annulus.planets.NEPTUNE.kmpp_threshold`` — float, default
+  ``500.0`` km/px.
+
+Per-instrument overrides
+------------------------
+
+Per-instrument YAML files in ``src/nav/config_files/config_4N0_inst_*.yaml`` do not
+override any ``feature_emission`` keys. The search-window margin used by the
+at-edge test comes from the per-instrument
+:class:`~nav.nav_orchestrator.instrument_config.InstrumentSettings`.
 
 Confidence formula
--------------------
+------------------
 
-The confidence coefficients live in the ``techniques.RingAnnulusNav`` stanza of
-``config_510_techniques.yaml``.  The sigmoid baseline is ``alpha0 = -2.0`` and
-hard-zero gates force confidence to zero when ``at_edge`` or ``spurious`` is
-true.  See :doc:`dev_guide_techniques_confidence` for the sigmoid mathematics.
+The technique reports a calibrated confidence in :math:`[0, 1]` produced by the shared
+sigmoid combination; see :doc:`dev_guide_techniques_confidence`. The formula spec is
+``techniques.RingAnnulusNav`` in the same YAML file and consumes attributes off
+:class:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics` plus
+:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and
+:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious`.
 
-- ``ncc_peak`` -- alpha = 1.5, offset = 0, divisor = 6.0, cap at 1.0.  The
-  peak-significance quality measure of the chosen correlation peak; healthy
-  annulus fits report quality in the 6 to 15 range.
-- ``peak_to_runner_up_ratio`` -- alpha = 0.0, offset = 0, divisor = 2.0, cap at
-  1.0.  Ratio of the winning peak's quality to the runner-up's; wired into the
-  formula with zero weight so a future calibration can activate it without code
-  changes.
-- ``annulus_count`` -- alpha = 0.4, offset = 0, divisor = 2.0, cap at 1.0.  Number
-  of ring systems fused into the composite; the saturation cap of 2 reflects the
-  scarcity of multi-planet ring scenes.
+- :attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.ncc_peak` — alpha = 1.5,
+  offset = 0.0, divisor = 6.0, cap at 1.0. PSR-style quality measure of the chosen NCC
+  peak. Healthy annulus fits report quality 6 to 15.
+- :attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.peak_to_runner_up_ratio` —
+  alpha = 0.0, offset = 0.0, divisor = 2.0, cap at 1.0. Ratio of the winning peak's
+  quality to the next-best peak's outside the exclusion radius. Carries no weight in
+  the configured confidence formula; the wiring is in place so a downstream
+  recalibration can tune the alpha.
+- :attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.annulus_count` —
+  alpha = 0.4, offset = 0.0, divisor = 2.0, cap at 1.0. Number of ``RING_ANNULUS`` features
+  fused. Multi-planet scenes saturate at 2 (vs ``body_count``'s 3).
+
+Hard-zero gate: :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and
+:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces
+confidence to zero. The constant baseline is :math:`\alpha_{0} = -2.0`. No post-sigmoid
+``hard_cap`` is applied.
 
 Implementation
 ==============
 
-Source file: ``src/nav/nav_technique/nav_technique_ring_annulus.py``.  The public
-class is
-:py:class:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav`, a
-subclass of :py:class:`~nav.nav_technique.nav_technique.NavTechnique`.  Its
-``accepts_feature_types`` is the single ``RING_ANNULUS`` feature type, its
-``requires_prior`` is ``False`` (it runs in pass 1), and its
-``confidence_attributes`` set names ``at_edge``, ``spurious``, ``ncc_peak``,
-``peak_to_runner_up_ratio``, ``used_gradient``, and ``annulus_count``.
+Source files:
 
-:py:meth:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav.is_feasible`
-reads only feature metadata -- never pixels -- and returns feasible when at least
-one ``RING_ANNULUS`` feature carries both a template image and a template mask.
+- ``src/nav/nav_technique/nav_technique_ring_annulus.py`` —
+  :class:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav` and the per-feature
+  filter / composite helpers.
+- ``src/nav/feature/composition.py`` —
+  :func:`~nav.feature.composition.compose_template_features`.
+- ``src/nav/support/correlate.py`` —
+  :func:`~nav.support.correlate.navigate_with_pyramid_kpeaks`, the shared pyramid-NCC entry
+  point.
+- ``src/nav/nav_technique/confidence.py`` — sigmoid-combination evaluator; documented at
+  :doc:`dev_guide_techniques_confidence`.
+- ``src/nav/nav_technique/diagnostics.py`` —
+  :class:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics`; documented at
+  :doc:`dev_guide_techniques_diagnostics`.
 
-:py:meth:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav.navigate`:
+Public class :class:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav`, base
+:class:`~nav.nav_technique.nav_technique.NavTechnique`. Self-registers via
+``__init_subclass__``.
 
-1. Filters the input features to those carrying a template payload, raising
-   :py:exc:`ValueError` when none qualify (the orchestrator gates this via
-   ``is_feasible`` first).
-2. Composes every eligible template into one composite image and mask sized to
-   the extended-FOV shape via
-   :py:func:`~nav.feature.composition.compose_template_features`.
-3. Sizes the search window from the observation margin via ``search_window_for_obs``,
-   reads the upsample factor through the private ``_upsample_factor`` validator,
-   and runs the masked correlation pyramid via
-   :py:func:`~nav.support.correlate.navigate_with_pyramid_kpeaks` with the
-   raw-versus-gradient mode left on ``auto``.
-4. Reads the offset, the covariance, and the spurious / at-edge / quality flags
-   off the correlator result; when rotation is fit it promotes the ``(2, 2)``
-   covariance to the rank-deficient ``(3, 3)`` form via
-   ``embed_rotation_unobservable``.
-5. Computes the peak-to-runner-up ratio from the correlator's ranked peak list
-   (via the module-private ``_peak_to_runner_up_ratio`` helper), evaluates the
-   YAML confidence formula via ``evaluate_sigmoid_combination`` wrapped by a
-   per-technique context adapter, and logs the per-term breakdown through
-   ``log_confidence_breakdown`` (see :doc:`dev_guide_techniques_confidence`).
+Class attributes:
 
-The result shape branches on whether rotation is fit.  With
-``fit_camera_rotation`` false (the default Cassini and New Horizons LORRI
-posture) the ``covariance_px2`` is ``(2, 2)`` and both ``rotation_rad`` and
-``sigma_rotation_rad`` are ``None``.  With rotation true the covariance is the
-rank-deficient ``(3, 3)`` form, ``rotation_rad`` is fixed at ``0.0``, and
-``sigma_rotation_rad`` is the rotation-unobservable sentinel returned by
-``rotation_unobservable_sigma_rad`` -- the translation correlation carries no
-rotation evidence, so the rank-deficient encoding flows through the ensemble
-without contaminating other techniques' rotation slots.
+- :attr:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav.name` —
+  ``'RingAnnulusNav'``.
+- :attr:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav.accepts_feature_types`
+  — ``frozenset({RING_ANNULUS})``.
+- :attr:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav.requires_prior` —
+  ``False``.
+- :attr:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav.confidence_attributes`
+  — ``{'at_edge', 'spurious', 'ncc_peak', 'peak_to_runner_up_ratio', 'used_gradient',
+  'annulus_count'}``.
 
-The only public methods are ``is_feasible`` and ``navigate``; ``_upsample_factor``
-is a private validator.  Every field of
-:py:class:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics` is populated:
-:py:attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.ncc_peak`,
-:py:attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.peak_to_runner_up_ratio`,
-and
-:py:attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.annulus_count`
-feed the confidence formula above, and
-:py:attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.used_gradient`
-records whether the auto correlator selected gradient mode.  The return value is
-a :py:class:`~nav.nav_technique.technique_result.NavTechniqueResult`.
+Public methods (autodocumented at :doc:`/api_reference/api_nav_technique`):
+:meth:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav.is_feasible` and
+:meth:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav.navigate`.
+
+Diagnostics
+-----------
+
+:class:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics`:
+
+- :attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.ncc_peak` — peak NCC
+  quality. Consumed by the confidence formula.
+- :attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.peak_to_runner_up_ratio` —
+  ratio of winning peak's quality to next-best. Consumed by the confidence formula.
+- :attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.annulus_count` — number of
+  ``RING_ANNULUS`` features fused.
+- :attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.used_gradient` — True when
+  ``auto`` mode picked the gradient pass.
+
+Call path
+---------
+
+Call path traced through
+:meth:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav.navigate`:
+
+1. Open a logged section. Filter the offered features to ``RING_ANNULUS`` entries that carry a
+   template payload via the private filter helper.
+2. Fuse the per-planet templates via
+   :func:`~nav.feature.composition.compose_template_features` into a single composite.
+3. Read the search-window margin off the observation via
+   :func:`~nav.nav_technique.nav_technique.search_window_for_obs`.
+4. Run :func:`~nav.support.correlate.navigate_with_pyramid_kpeaks` on the composite
+   template against the extfov image. The pyramid returns the chosen peak's
+   ``(dv, du)``, the 2x2 CRLB covariance, ``quality``, ``consistency``, ``spurious``,
+   ``at_edge``, ``used_gradient``, and the top-``k`` peak telemetry.
+5. The covariance shape is always (2, 2); rotation fitting is disabled for ring
+   annuli. When
+   :attr:`~nav.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` is true the
+   technique embeds the (2, 2) translation block in a (3, 3) covariance via
+   :func:`~nav.nav_technique.nav_technique.embed_rotation_unobservable` and reports the
+   rotation as unobservable.
+6. Apply the at-edge tests against the search-window axis bounds.
+7. Build a :class:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics`, evaluate the
+   confidence spec via :func:`~nav.nav_technique.confidence.evaluate_sigmoid_combination`,
+   log the breakdown, and assemble the
+   :class:`~nav.nav_technique.technique_result.NavTechniqueResult`.
+
+The :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.feature_ids` field
+preserves every consumed
+:attr:`~nav.feature.feature.NavFeature.feature_id` so the orchestrator's curator can
+attribute each contribution at audit time.
 
 Examples
 ========
 
-**ring_only_curved (N1447064164_1_CALIB).** A distant Saturn ring view whose
-catalog A, B, and C ring edges all collapse radially below the per-edge
-annulus threshold, so the rings model emits one ``RING_ANNULUS`` feature for the
-Saturn system rather than separate edge polylines.  Feasibility passes on that
-single template, the technique runs one joint correlation against the composite
-annulus, and the sidecar records ``primary_technique: RingAnnulusNav`` with
-``status: conflicted``.
+``ring_only_curved`` (Cassini ISS NAC, image ``N1447064164_1``)
+    A high-resolution Saturn-ring scene whose individual ring edges resolve into separable
+    polylines. On this scene the rings model emits ``RING_EDGE`` features rather than
+    ``RING_ANNULUS``, so :class:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav`
+    is not feasible. The annulus path fires on lower-resolution / approach-phase scenes
+    where the per-planet km/px exceeds the configured threshold.
 
-**ring_only_curved (W1444747627_1_CALIB).** A second distant Saturn ring frame in
-the same class that also collapses to a single ``RING_ANNULUS`` template.  Here
-the sidecar records ``primary_technique: RingAnnulusNav`` with ``status:
-success`` and ``confidence_tier: low``: the single-annulus correlation localises
-the offset against the operator ground truth of ``(1.5, -2.5)`` px, and the
-low-but-nonzero confidence reflects the weaker constraint of a broad ring band
-relative to a sharp edge fit.
+A multi-planet illustration: a hypothetical fly-by image that catches both Jupiter's main
+ring and Saturn's ring system (compressed below their per-planet kmpp thresholds) emits two
+``RING_ANNULUS`` features. The technique Z-buffer paints them into a composite (the closer
+planet's annulus overwriting the farther one's) and the pyramid NCC's joint geometric
+constraint produces a sharper peak than either annulus alone. The
+:attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.annulus_count` term in the
+confidence formula contributes a positive offset.

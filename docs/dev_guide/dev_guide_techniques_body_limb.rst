@@ -1,197 +1,317 @@
-====================
-Body Limb Navigation
-====================
+===========================
+Body Limb Fit (BodyLimbNav)
+===========================
 
 Overview
 ========
 
-The body-limb technique exploits the sharp brightness edge at the sunlit horizon of a
-resolved body: where the body silhouette ends and empty sky begins, the image gradient
-spikes, and the predicted geometric limb of an ellipsoidal body is a clean curve whose shape
-is known from SPICE.  The technique concatenates every predicted limb-arc polyline in the
-input feature set, weights each vertex by its prior normal-direction precision, and runs the
-shared distance-transform fitter to recover the single translation (and, on cameras whose
-rotation is fitted, the single rotation) that best slides the predicted limb onto the
-observed edge.  Feasibility passes when at least one predicted limb arc survives with enough
-visible vertices to constrain a two-dimensional translation.  Feasibility fails when no
-limb-arc feature reaches that minimum visible length -- a body too small to resolve, a body
-whose limb is entirely off-screen, or a body whose limb the reliability gate has already
-dropped (for example a fully-lit disc whose limb saturates the incidence penalty).
+:class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav` recovers a single translation
+from one or more body limb polylines by aligning
+each polyline against the image's edge-distance-transform. The technique consumes every
+:data:`~nav.feature.feature_type.NavFeatureType.LIMB_ARC` feature offered by the orchestrator,
+weights each vertex by its prior-precision sigma, and runs a coarse normalised-cross-correlation
+search followed by a Tukey-reweighted Levenberg-Marquardt refinement. The output is the
+joint translation that minimises the summed weighted squared distance from the model polylines
+to the image edges, plus a covariance derived from the M-estimator information matrix at
+convergence.
+
+Feasibility passes when at least one offered ``LIMB_ARC`` carries enough surviving vertices to
+constrain a 2-D translation; feasibility fails when every offered ``LIMB_ARC`` has fewer than the
+minimum-arc-length floor (a body whose limb is mostly hidden by the FOV boundary, occluded by
+another body, or lost to shadow).
 
 Theory
 ======
 
-A resolved body presents a silhouette edge where the lit surface meets the background.  For
-an ellipsoidal body whose pose is known from spacecraft ephemeris, the projected limb is a
-smooth planar curve; the only unknown is the small pointing error that displaces the whole
-predicted curve from where the edge actually lies in the image.  Because the error is a rigid
-displacement of the camera boresight, every vertex of every limb arc shares the same offset,
-so a single translation explains all of them jointly.
+The technique belongs to the distance-transform family of polyline fitters: predicted polylines
+are shifted as a rigid body until their vertices lie as close as possible to the nearest image
+edge, where "as close as possible" is measured against a precomputed image-edge distance
+transform. Shared algorithmic infrastructure handles the heavy lifting; this section describes
+the cost function and conventions specific to the limb fit.
 
-Let the predicted limb be sampled at vertices :math:`\mathbf{p}_i` with outward surface
-normals :math:`\mathbf{n}_i`.  An image-side distance transform assigns to every pixel its
-Euclidean distance to the nearest detected edge.  For a candidate offset
-:math:`\boldsymbol{\delta} = (\delta v, \delta u)` the signed residual at vertex :math:`i` is
-the distance-transform value sampled at the shifted vertex:
+Cost function
+-------------
+
+The technique minimises
 
 .. math::
 
-   r_i(\boldsymbol{\delta}) = D\!\left(\mathbf{p}_i + \boldsymbol{\delta}\right),
+    C(\Delta v, \Delta u, \theta) = \sum_{i} w_{i}(\Delta v, \Delta u, \theta) \,
+        \mathrm{DT}\bigl[\,R(\theta)\,(x_{i} - x_{p}) + x_{p} + (\Delta v, \Delta u)\,\bigr]^{2}
 
-where :math:`D` is the bilinearly interpolated edge distance transform.  The fit minimises the
-robust, precision-weighted sum of squared residuals
+where :math:`x_{i}` are the input vertices concatenated across every consumed ``LIMB_ARC``,
+:math:`x_{p}` is the rotation pivot (the centroid of the concatenated vertices),
+:math:`R(\theta)` is the in-plane rotation matrix, :math:`\mathrm{DT}` is the bilinearly
+sampled image-edge distance transform, and the per-vertex weight :math:`w_{i}` is the product
+of the prior precision :math:`1 / \sigma_{i}^{2}` (with :math:`\sigma_{i}` the per-vertex normal
+sigma supplied by the body model) and a Tukey biweight evaluated at the scaled DT residual
+:math:`\mathrm{DT}_{i} / \sigma_{i}`. When the per-instrument camera-rotation flag is off the
+parameter vector collapses to :math:`(\Delta v, \Delta u)` and the rotation term is dropped.
 
-.. math::
+Search strategy
+---------------
 
-   C(\boldsymbol{\delta}) = \sum_i \frac{\rho\!\left(r_i\right)}{\sigma_i^{2}},
+The fit proceeds in two stages:
 
-where :math:`\sigma_i` is the prior one-sigma uncertainty of vertex :math:`i` along its
-normal direction and :math:`\rho` is the Tukey biweight loss, which redescends to zero for
-residuals beyond a tuned multiple of the robust residual scale.  Vertices whose gradient
-direction disagrees with the expected limb polarity -- the image gradient should point into
-the bright silhouette -- are dropped before the fit so that an interior crater rim cannot be
-mistaken for the limb.
+1. **Coarse integer search.**  The model polyline is rendered into a binary mask, the image
+   edges are thresholded into a binary mask of their own (the truncated DT thresholded at
+   half a pixel), and an integer-pixel cross-correlation is evaluated over a search window
+   bracketing the per-instrument SPICE pointing-error envelope. The argmax of the correlation
+   is the seed translation.
+2. **Sub-pixel Levenberg-Marquardt refinement.**  Starting from the integer seed, the refiner
+   evaluates the cost above, its parameter Jacobian (central differences against the bilinear
+   DT), and an LM-damped normal-equation step. After each accepted step the Tukey weights are
+   recomputed against the new residuals (iteratively reweighted least squares), so vertices
+   that drifted onto an unrelated edge during refinement progressively lose weight.
 
-The optimisation proceeds in two stages.  A coarse integer-pixel stage scans the
-translation-search window by mask overlap to seed a basin; a Levenberg-Marquardt stage with
-Tukey reweighting then refines to sub-pixel precision inside a trust region centred on that
-seed.  Convergence is declared when the combined step norm drops below a small tolerance.  The
-M-estimator's information matrix yields the reported covariance; with rotation enabled the
-parameter vector gains a rotation angle about the limb centroid and the covariance grows to
-three by three.
+Robustness
+----------
 
-The technique is unobservable when no limb arc is long enough to pin both translation axes:
-a short arc seen edge-on constrains its normal direction but leaves the tangent direction
-free, so a single tiny limb fragment yields a rank-deficient fit.  Multi-body scenes sharpen
-the solution -- joint constraints from several bodies reduce the translation uncertainty
-roughly as the square root of the body count when the relative SPICE geometry is correct --
-and the single-translation parameterisation cannot represent a "swap two moons" mistake by
-construction.  The reported covariance captures only the residual scatter of the surviving
-inliers about the converged limb; it does not capture SPICE pointing bias, limb-shape error
-from topography on a non-ellipsoidal body, or a wholesale mis-convergence onto an interior
-edge.  Those failure modes are caught instead by separate spurious gates: an elevated
-unweighted residual, too few surviving inliers, too small an inlier fraction, or a refinement
-step that walked far from the coarse seed.
+The Tukey biweight is the redescender used by the LM reweighting; its asymptotic 95 % efficiency
+constant is the documented default. Vertices whose model normal disagrees with the local image
+gradient direction (a *polarity* mismatch — for a bright body on a dark background the gradient
+points outward, into the silhouette's exterior) are assigned a near-infinite synthetic residual
+on every iteration so the Tukey biweight zeroes their weight on the first reweighting; this
+keeps the limb fit from latching onto the body's interior crater rims.
+
+Restrictions and assumptions
+----------------------------
+
+- The orchestrator must supply both an image-edge distance transform and a per-pixel gradient
+  vector image on the per-image
+  :class:`~nav.nav_orchestrator.nav_context.NavContext`; in their absence the navigation aborts
+  with a runtime error.
+- The vertices and per-vertex normal sigmas must be physically meaningful — vertices with zero
+  or negative sigma are rejected by the LM refiner.
+- The fit assumes the body is bright against a dark background. The polarity rule is hard-coded
+  by inverting the geometric outward normal so that the sign of the test matches the
+  bright-on-dark gradient direction; this is correct for every supported instrument's body
+  scenes.
+- Multi-body inputs are fused into a single translation by concatenating their per-vertex
+  arrays. The joint-translation parameterisation cannot represent disagreement between bodies
+  about the offset; if SPICE relative geometry is wrong (a body misidentification, a stale SPK)
+  the joint fit walks toward the higher-vertex-count body and the lower-vertex body's residuals
+  appear as outliers the Tukey weight zeroes out.
+
+Sources of uncertainty
+----------------------
+
+The reported covariance is the Moore-Penrose pseudoinverse of the M-estimator information
+matrix at convergence, scaled by the per-vertex Tukey weights. The covariance therefore
+reflects the *shape* of the cost surface near the minimum and the surviving inlier population;
+it does not capture systematic biases (e.g. an inflation of the per-vertex sigma due to
+unmodelled crater roughness) and it does not capture model-side uncertainty in the SPICE
+prediction itself (the search-window margin is what bounds that). When the converged offset
+sits within a small tolerance of any axis bound of the search window, or when the rotation
+parameter is at the configured fraction of its cap, the result is flagged :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and the
+confidence formula's hard-zero gate forces confidence to zero. When the final RMS residual or
+the inlier count fails the spurious tests, the result is flagged :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious` and similarly
+forced to zero.
 
 Configuration
 =============
 
-Runtime tunables live under ``techniques.BodyLimbNav.tuning`` in
+All numeric tunables for this technique live in ``techniques.BodyLimbNav.tuning`` in
 ``src/nav/config_files/config_510_techniques.yaml``.
 
-- ``min_arc_px`` -- float, default ``30.0`` px.  Minimum surviving polyline vertex count per
-  LIMB_ARC for feasibility; raising it rejects shorter arcs that under-constrain the
-  translation.
-- ``spurious_dt_rms_factor`` -- float, default ``5.0`` (dimensionless).  Multiplier on the
-  smallest limb sigma that sets the DT residual ceiling; lowering it flags marginal fits
-  spurious sooner.
-- ``spurious_dt_floor_px`` -- float, default ``3.0`` px.  Lower bound on the DT residual
-  ceiling so tight-sigma limbs are not held to an unreasonably small threshold.
-- ``spurious_min_inliers`` -- int, default ``6`` (count).  Minimum Tukey inlier count below
-  which the M-estimator covariance is no longer trusted and the result is flagged spurious.
-- ``spurious_min_inlier_fraction`` -- float, default ``0.20`` (dimensionless).  Minimum
-  fraction of vertices that must survive Tukey reweighting; below it the fit has almost
-  certainly walked off the limb onto interior features.
-- ``spurious_max_lm_displacement_px`` -- float, default ``4.0`` px.  Maximum distance the
-  refinement may move from the integer coarse seed before the result is flagged spurious.
-- ``lm_trust_region_px`` -- float, default ``1.0`` px.  Radius of the trust region around the
-  coarse seed; tightening it denies the refinement the runway to reach a distant spurious
-  minimum at the cost of sub-pixel headroom.
-- ``lm_tikhonov_alpha`` -- float, default ``0.0`` (dimensionless).  Strength of the Tikhonov
-  anchor pulling the solution toward the coarse seed; larger values resist multi-pixel walks
-  but also suppress legitimate sub-pixel refinement.
-- ``at_edge_tolerance_px`` -- float, default ``1.0`` px.  Slack around the search-window axis
-  bounds for the at-edge check; a converged offset within this distance of a bound is flagged
-  at-edge.
-- ``rotation_at_edge_fraction`` -- float, default ``0.95`` (dimensionless).  Fraction of the
-  maximum rotation at which the fitted rotation trips the at-edge flag; lower values surface a
-  rotation pegged against its cap earlier.
+- ``min_arc_px`` — float, default ``30.0`` px. Minimum surviving vertex count per ``LIMB_ARC``
+  for feasibility. Shorter limbs do not constrain a 2-D translation enough to be worth the
+  LM iteration.
+- ``spurious_dt_rms_factor`` — float, default ``5.0`` (dimensionless). Final DT residual
+  exceeding this many limb-sigmas marks the result spurious.
+- ``spurious_dt_floor_px`` — float, default ``3.0`` px. Floor of the spurious-detection
+  threshold; the threshold is the larger of the floor and the per-feature sigma multiple.
+- ``spurious_min_inliers`` — int, default ``6`` (count). Below this Tukey-inlier count the
+  M-estimator covariance is uninformative; the result is flagged spurious.
+- ``spurious_min_inlier_fraction`` — float, default ``0.05`` (dimensionless). Below this
+  inlier fraction the LM has almost certainly walked off the true limb onto internal-body
+  features (crater rims, terminator); the result is flagged spurious.
+- ``at_edge_tolerance_px`` — float, default ``1.0`` px. A converged offset whose absolute
+  distance from any search-window axis bound falls within this tolerance is flagged
+  :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge`. Matches the bilinear-DT half-cell width.
+- ``rotation_at_edge_fraction`` — float, default ``0.95`` (dimensionless). When
+  :attr:`~nav.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` is true, the converged rotation magnitude trips :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` once it
+  crosses this fraction of the per-image :attr:`~nav.nav_orchestrator.nav_context.NavContext.max_rotation_deg` cap.
+
+Per-instrument overrides
+------------------------
+
+The seven keys above are global; the per-instrument YAML files in
+``src/nav/config_files/config_4N0_inst_*.yaml`` do not override any of them. The
+search-window margin used by the at-edge test comes from the per-instrument
+:class:`~nav.nav_orchestrator.instrument_config.InstrumentSettings` rather than from this block.
 
 Confidence formula
--------------------
+------------------
 
-The confidence coefficients live alongside ``tuning`` in the same
-``techniques.BodyLimbNav`` stanza.  The sigmoid argument starts from ``alpha0`` of
-``-1.0`` and adds the linear terms below; the sigmoid mathematics is documented in
-:doc:`dev_guide_techniques_confidence`.  The gate ``hard_zero_if`` forces confidence to zero
-when ``at_edge`` or ``spurious`` is true.
+The technique reports a calibrated confidence in :math:`[0, 1]` produced by the shared sigmoid
+combination, see :doc:`dev_guide_techniques_dt_fitting` for the per-term arithmetic and
+:doc:`dev_guide_techniques` for the family-level overview of confidence. The formula spec is
+``techniques.BodyLimbNav`` in the same YAML file and consumes attributes off
+:class:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics` plus the :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and
+:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious` flags carried on the result.
 
-- ``visible_limb_arc_fraction`` -- alpha = 3.0, offset = 0, divisor = 1, no cap.  Fraction of
-  the predicted limb that was visible and consumed; the dominant positive term.
-- ``dt_fit_rms_px`` -- alpha = -1.5, offset = 0, divisor = 1, no cap.  Final root-mean-square
-  DT residual; larger residuals pull confidence down.
-- ``visible_arc_px`` -- alpha = 0.4, offset = 0, divisor = 100.0, cap at 1.0.  Total surviving
-  arc length, normalised so a long limb saturates the term.
+- :attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.visible_limb_arc_fraction` —
+  alpha = 3.0, offset = 0.0, divisor = 1.0, no cap.
+  Fraction of the polyline (weighted by surviving vertex count across consumed ``LIMB_ARC``
+  features) whose vertices were not pre-rejected by the model-side shadow / FOV gates. One
+  means every offered vertex is usable.
+- :attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.dt_fit_rms_px` — alpha = -1.5,
+  offset = 0.0, divisor = 1.0, no cap. Final root-mean-square DT residual after LM
+  convergence; smaller is sharper.
+- :attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.visible_arc_px` — alpha = 0.4,
+  offset = 0.0, divisor = 100.0, cap at 1.0. Total surviving polyline length in pixels,
+  capped after normalisation. More polyline earns confidence up to a 100-pixel saturation
+  point.
+
+Hard-zero gate: :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces the confidence to zero before
+the sigmoid is evaluated. The constant baseline is :math:`\alpha_{0} = -1.0`. No post-sigmoid
+``hard_cap`` is applied.
 
 Implementation
 ==============
 
-The technique lives in ``src/nav/nav_technique/nav_technique_body_limb.py``;
-:py:class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav` subclasses
-:py:class:`~nav.nav_technique.nav_technique.NavTechnique`.  It declares
-``accepts_feature_types`` of ``frozenset({NavFeatureType.LIMB_ARC})``, ``requires_prior`` of
-``False`` (it runs in the prior-free pass 1), and a ``confidence_attributes`` set of
-``at_edge``, ``spurious``, ``visible_limb_arc_fraction``, ``visible_arc_px``,
-``dt_fit_rms_px``, ``lm_iterations``, and ``tukey_inlier_count``.
+Source files:
 
-:py:meth:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav.is_feasible` reads only the
-polyline vertex count per feature and returns a feasibility report, described under
-:doc:`dev_guide_techniques_feasibility`, that is feasible when at least one limb arc reaches
-``min_arc_px`` vertices.
+- ``src/nav/nav_technique/nav_technique_body_limb.py`` —
+  :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav` and its private aggregation /
+  polyline-mask helpers.
+- ``src/nav/nav_technique/dt_fitting.py`` — the shared coarse-NCC and LM-refinement helpers
+  documented at :doc:`dev_guide_techniques_dt_fitting`.
+- ``src/nav/nav_orchestrator/image_derivatives.py`` — the per-image gradient / DT derivatives
+  attached to :class:`~nav.nav_orchestrator.nav_context.NavContext`.
+- ``src/nav/nav_technique/confidence.py`` — the shared sigmoid-combination formula evaluator.
+- ``src/nav/nav_technique/diagnostics.py`` —
+  :class:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics`.
 
-:py:meth:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav.navigate` opens a logged
-technique section, validates that the context carries the image edge distance transform and
-gradient vectors, and drops arcs shorter than ``min_arc_px``.  The private helper
-``_aggregate_limb_features`` concatenates the surviving vertices, negates the geometric
-outward normals into polarity normals, and gathers the per-vertex sigmas.  The module-level
-``_build_polyline_mask`` rasterises the vertices into a boolean mask for the coarse search.
-The per-image edge distance transform and gradient vectors are sampled directly from the
-context; their construction is documented in :doc:`dev_guide_techniques_image_derivatives`.
-The translation-search half-window comes from ``search_window_for_obs``.  The coarse integer
-seed comes from ``coarse_ncc_search`` and the sub-pixel solution from ``lm_subpixel_refine``,
-both in the shared :doc:`dev_guide_techniques_dt_fitting` machinery; the rotation pivot
-distance, used only when rotation is fitted, comes from ``rotation_pivot_distance_px``.
+Public class :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav`, base
+:class:`~nav.nav_technique.nav_technique.NavTechnique`. Self-registers via
+``__init_subclass__`` so the orchestrator's
+``NavTechnique._registry`` discovers it.
 
-The result shape branches on ``context.fit_camera_rotation``.  When it is false (the Cassini
-and New Horizons LORRI posture) the covariance is two by two and ``rotation_rad`` /
-``sigma_rotation_rad`` are ``None``; a non-two-by-two covariance returned by the fitter is
-logged at warning and truncated to the translation block.  When it is true (Voyager ISS and
-Galileo SSI) the covariance is the three-by-three translation-plus-rotation information
-matrix, ``rotation_rad`` is the converged angle and ``sigma_rotation_rad`` is the square root
-of its diagonal; an unexpected covariance shape raises :py:exc:`RuntimeError`.  The at-edge
-flag fires when either translation axis reaches the search-window bound within
-``at_edge_tolerance_px`` or when the fitted rotation exceeds ``rotation_at_edge_fraction`` of
-the maximum.  The spurious flag is the disjunction of a degenerate fit, a weighted or
-unweighted DT residual above the ``spurious_dt_*`` threshold, an inlier count below
-``spurious_min_inliers``, an inlier fraction below ``spurious_min_inlier_fraction``, or a
-refinement displacement above ``spurious_max_lm_displacement_px``.
+Class attributes:
 
-The diagnostics object is a
-:py:class:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics` with fields
-``visible_limb_arc_fraction`` (vertex-count-weighted across the consumed features by the
-private ``_aggregate_visible_arc_fraction``), ``visible_arc_px`` (the total vertex count),
-``dt_fit_rms_px`` (the converged residual), ``lm_iterations`` (the refinement iteration
-count), and ``tukey_inlier_count`` (the surviving inlier count).  Confidence is evaluated by
-``evaluate_sigmoid_combination`` against an internal adapter that exposes those diagnostics
-alongside the ``at_edge`` and ``spurious`` flags; the calibration is documented in
-:doc:`dev_guide_techniques_confidence`, and the per-term breakdown is logged through
-``log_confidence_breakdown``.  The shared diagnostics dataclass is described in
-:doc:`dev_guide_techniques_diagnostics`.
+- :attr:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav.name` — ``'BodyLimbNav'``.
+- :attr:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav.accepts_feature_types` —
+  ``frozenset({LIMB_ARC})``.
+- :attr:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav.requires_prior` — ``False``.
+  The technique runs in pass 1 of the orchestrator's two-pass pipeline.
+- :attr:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav.confidence_attributes` — the
+  names of every attribute the spec is allowed to read, validated at config-load time:
+  ``{'at_edge', 'spurious', 'visible_limb_arc_fraction', 'visible_arc_px', 'dt_fit_rms_px',
+  'lm_iterations', 'tukey_inlier_count'}``.
+
+Public methods (autodocumented at :doc:`/api_reference/api_nav_technique`):
+:meth:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav.is_feasible` and
+:meth:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav.navigate`.
+
+Diagnostics
+-----------
+
+:class:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics` is the typed dataclass attached to
+the result. Every field is named in the call path or in the confidence formula above:
+
+- :attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.visible_limb_arc_fraction` —
+  vertex-weighted average of the per-feature visible-arc fraction; consumed by the confidence
+  formula.
+- :attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.visible_arc_px` — total
+  surviving polyline arc length in pixels; consumed by the confidence formula.
+- :attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.dt_fit_rms_px` — weighted RMS DT
+  residual at the converged pose; consumed by the confidence formula and by the
+  spurious-detection gate.
+- :attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.lm_iterations` — number of LM
+  iterations actually performed.
+- :attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.tukey_inlier_count` — number of
+  vertices that retained a strictly positive Tukey weight at the final estimate; consumed by
+  the spurious-detection gate.
+
+Call path traced through
+:meth:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav.navigate`:
+
+1. Open a logged section. Fail fast if either
+   :attr:`~nav.nav_orchestrator.nav_context.NavContext.image_edge_dt_ext` or
+   :attr:`~nav.nav_orchestrator.nav_context.NavContext.image_gradient_vu_ext` is missing from
+   the context — the orchestrator's per-image setup
+   is responsible for populating both via
+   :func:`~nav.nav_orchestrator.image_derivatives.compute_all_image_derivatives`; see
+   :doc:`dev_guide_techniques_dt_fitting` for the surface those products expose.
+2. Filter the offered features down to ``LIMB_ARC`` polylines whose surviving vertex count is at
+   least ``min_arc_px``, then concatenate the per-feature vertex / normal / sigma arrays via
+   the private ``_aggregate_limb_features`` helper. The geometric outward normals are negated
+   in this step so that the polarity test in the LM refiner expects the image gradient to
+   point *into* the body silhouette.
+3. Build a binary polyline mask and pull the search-window margin off the observation via
+   :func:`~nav.nav_technique.nav_technique.search_window_for_obs`. Run
+   :func:`~nav.nav_technique.dt_fitting.coarse_ncc_search` on the polyline mask and the
+   thresholded edge mask to obtain an integer seed offset.
+4. Decide whether to fit camera rotation by reading
+   :attr:`~nav.nav_orchestrator.nav_context.NavContext.fit_camera_rotation`. When rotation
+   is fit, the rotation pivot is set to the
+   centroid of the concatenated vertices and the pivot-to-image-centre distance is computed
+   via :func:`~nav.nav_technique.nav_technique.rotation_pivot_distance_px` for the convergence
+   test.
+5. Call :func:`~nav.nav_technique.dt_fitting.lm_subpixel_refine` with the polyline,
+   per-vertex sigmas, the edge DT, the gradient image, the integer seed, and the rotation
+   options. The refiner returns a converged
+   :class:`~nav.nav_technique.dt_fitting.LMRefineResult`.
+6. Compute the result-shape branches:
+
+   - **No rotation fit.**
+     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.covariance_px2` is the
+     (2, 2) translation block. Any non-(2, 2) covariance returned by the refiner is logged
+     at WARNING and truncated.
+     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.rotation_rad` and
+     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.sigma_rotation_rad` are
+     ``None``.
+   - **Rotation fit.**
+     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.covariance_px2` is the
+     (3, 3) translation + rotation information matrix.
+     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.rotation_rad` is the
+     converged angle and
+     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.sigma_rotation_rad` is
+     the square root of its diagonal. An unexpected covariance shape raises
+     :exc:`RuntimeError` — a programmer error in the refiner contract is not silently
+     absorbed.
+
+7. Apply the at-edge tests against both the translation axis bounds and the rotation cap, and
+   the spurious tests against the final RMS, the inlier count, and the inlier fraction.
+8. Build a :class:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics`, evaluate the
+   confidence spec via :func:`~nav.nav_technique.confidence.evaluate_sigmoid_combination`, log
+   the per-term breakdown via
+   :func:`~nav.nav_technique.nav_technique.log_confidence_breakdown`, and assemble the
+   :class:`~nav.nav_technique.technique_result.NavTechniqueResult`.
+
+The :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.feature_ids` field on the
+result preserves every consumed
+:attr:`~nav.feature.feature.NavFeature.feature_id` so the orchestrator's curator can attribute
+each contribution at audit time.
 
 Examples
 ========
 
-In the ``high_phase_terminator`` scene (Cassini NAC ``N1597846115_2``), a single high-phase
-limb-and-terminator body fills part of the field with no other features.  Feasibility passes:
-the limb arc clears ``min_arc_px``.  The fit converges to roughly ``(6.09, 1.19)`` px, within
-about one pixel of the operator ground truth ``(5.19, 1.30)`` px, and the limb result is
-selected as the primary technique.  Confidence is driven by a high
-``visible_limb_arc_fraction`` and a small ``dt_fit_rms_px``; neither the ``at_edge`` nor the
-``spurious`` gate fires.
+``body_partial_overflow`` (Cassini ISS NAC, image ``N1484593951_2``)
+    Rhea visible in the upper right, about 22 % of the disc off-frame. The body model emits a
+    ``LIMB_ARC`` feature; the technique consumes it and converges to
+    :math:`(\Delta v, \Delta u) = (12.06, 30.53)` px against an operator-verified ground truth
+    of ``(11.0, 29.5)`` px. Feasibility passes (one ``LIMB_ARC``, surviving vertex count well
+    above ``min_arc_px``), neither :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` nor :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious` fires, and the technique
+    becomes the orchestrator's primary on this image.
 
-In the ``multi_body`` scene (Cassini NAC ``N1487595731_1``), Dione and Rhea overlap at about
-ninety degrees phase.  Feasibility passes and the limb fit converges to ``(7.00, -18.00)``
-px, within about one pixel of the operator ground truth ``(7.03, -18.42)`` px, with a
-confidence of about ``0.239``.  The limb offset agrees closely with the disc technique on the
-same scene; the conflicted overall verdict on this scene comes from a separate terminator
-mis-convergence, not from the limb fit.
+``multi_body`` (Cassini ISS NAC, image ``N1487595731_1``)
+    Dione and Rhea both visible and overlapping at phase angle approximately 90 degrees. Two
+    ``LIMB_ARC`` features are offered;
+    :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav` fuses them into a joint
+    translation and
+    converges to :math:`(\Delta v, \Delta u) = (7.00, -18.00)` px against an operator-verified
+    ground truth of ``(7.03, -18.42)`` px. The technique reports a confidence near 0.24 — the
+    sigmoid is drawn down by the modest visible-arc length of each limb on its own — but the
+    fit is geometrically correct.
+
+``body_full_fov`` (Cassini ISS NAC, image ``N1572105349_1``)
+    Dione fills the FOV, predicted disc diameter approximately 155 px. The body model emits a
+    ``LIMB_ARC`` feature, but the upstream feature-reliability gate drops it before
+    :meth:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav.is_feasible` is consulted
+    (the textbook full-disc, fully-lit limb saturates
+    the model-side reliability formula's incidence-factor penalty). The technique therefore
+    reports zero consumed features and skips
+    :meth:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav.navigate` for this scene.

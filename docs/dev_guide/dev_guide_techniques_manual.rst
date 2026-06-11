@@ -1,107 +1,191 @@
-=================
-Manual Navigation
-=================
+==========================================================
+Manual Navigation (NavTechniqueManual)
+==========================================================
 
 Overview
 ========
 
-This technique is the interactive escape hatch: it composes every renderable
-predicted feature -- body discs, ring annuli, cartographic models, limb and
-terminator and ring-edge polylines, body-blob outlines, and star markers -- into
-a single overlay image and lets a human operator pick the ``(dv, du)`` offset by
-hand in a dialog.  An auto button inside the dialog runs the same masked
-correlation pyramid the autonomous correlation techniques use, so the operator
-can accept the auto pick or override it.  It is not part of the autonomous
-pipeline -- it is kept out of the technique auto-discovery registry and invoked
-directly by an interactive driver.  Feasibility passes whenever at least one
-feature paints something into the composite overlay; it fails when nothing is
-renderable.
+:class:`~nav.nav_technique.nav_technique_manual.NavTechniqueManual` is the interactive
+navigation technique. It renders every
+:class:`~nav.nav_model.nav_model.NavModel`'s predicted scene into a single composite
+overlay (templates, polylines, blob outlines, star markers), opens the
+:class:`~nav.ui.manual_nav_dialog.ManualNavDialog` PyQt6 widget, and packages the operator's chosen ``(dv, du)`` offset
+into a :class:`~nav.nav_technique.technique_result.NavTechniqueResult`.
+
+Manual navigation is not part of the autonomous pipeline — the class sets
+``_abstract = True`` so it never appears in
+:class:`~nav.nav_technique.nav_technique.NavTechnique`'s discovery registry and the
+orchestrator's background driver does not invoke the dialog during automated runs. An
+interactive driver calls
+:func:`~nav.nav_technique.nav_technique_manual.run_manual_nav` directly when an operator
+wants to navigate an image by hand or override an autonomous result.
+
+Feasibility passes whenever the operator opens the dialog (the technique reports feasible
+on any feature set, since manual navigation looks at whatever the scene has rendered);
+infeasibility paths exist only as defensive errors when the dialog cannot be opened.
 
 Theory
 ======
 
-Manual navigation carries no fitting algorithm of its own.  It renders the
-predicted scene -- the union of every feature's template silhouette, polyline
-vertices, blob outline, or star marker -- as an overlay registered to the
-extended field of view, and displays it over the observed image so a human can
-judge the registration directly.  The operator translates the overlay until the
-predicted features align with what the image shows, and the chosen translation is
-the reported offset.  An optional in-dialog correlation gives a starting
-suggestion, but the authoritative result is the operator's confirmed pick.
+Manual navigation is not algorithmic — there is no cost function, no convergence criterion,
+and no search. The technique renders the predicted scene, the operator inspects it
+overlaid on the observed image, and the operator picks an offset that visually matches.
 
-Because the offset is set by eye, its uncertainty is governed by display zoom,
-screen pixel pitch, and operator precision rather than by any measurement model.
-A fixed conservative per-axis pixel sigma is assigned to a confirmed pick.  A
-confirmed pick is treated as fully confident, since a human has visually verified
-the registration; a cancelled dialog yields a zero-confidence spurious result so
-the surrounding driver drops it.
+Composite overlay
+-----------------
+
+Every renderable feature kind in the scene contributes one element to the overlay:
+
+- Template-bearing features (``BODY_DISC``, ``RING_ANNULUS``, ``CARTOGRAPHIC_MODEL``) paint their
+  predicted brightness images into the composite.
+- Polyline-bearing features (``LIMB_ARC``, ``TERMINATOR_ARC``, ``RING_EDGE``) draw their per-vertex
+  polylines as one-pixel-wide strokes.
+- ``BODY_BLOB`` features draw a circle outline at the predicted-vu position sized by the
+  predicted disc diameter.
+- ``STAR`` features draw a rectangle outline at the predicted-vu position sized by the
+  per-feature point-spread-function bounding box.
+
+The composite is a single extended-FOV image plus mask the dialog overlays on top of the
+observed image. The operator drags or types the offset until the overlay aligns with the
+observed scene.
+
+Auto-pick option
+----------------
+
+The dialog includes an ``Auto`` button that runs the same masked-NCC pyramid the autonomous
+correlation-based techniques use; the operator can accept the auto-pick verbatim or
+override it. The auto-pick is a convenience — the technique itself remains operator-driven.
+
+Restrictions and assumptions
+----------------------------
+
+- Manual navigation requires PyQt6 and an interactive display. Background driver runs that
+  cannot open a window must not invoke this technique.
+- The auto-pick path consults the same NCC pyramid the
+  :class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav` and
+  :class:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav` techniques use;
+  when the scene has no template-bearing feature the auto-pick is unavailable and only the
+  manual drag / type path remains.
+- Operator precision in the dialog is limited by zoom, eye, and screen pixels; the
+  technique reports a per-axis 1 px sigma on the resulting covariance regardless of how the
+  operator picked.
+
+Sources of uncertainty
+----------------------
+
+The reported covariance is fixed at ``1.0`` px sigma per axis on a diagonal 2x2. The
+ensemble never combines a manual result with autonomous results, so the value only
+determines what shows up in the per-image JSON metadata.
 
 Configuration
 =============
 
-This technique has no configuration: it has no ``tuning`` block and no confidence
-formula in ``src/nav/config_files/config_510_techniques.yaml``, and its
-``confidence_attributes`` set is empty.  The single behavioural constant -- the
-per-axis pixel sigma assigned to a confirmed pick -- is a module-level constant
-(``_MANUAL_OFFSET_SIGMA_PX``) in the source, with no YAML override path; it only
-determines what covariance appears in the written metadata, because the ensemble
-never combines a manual result with autonomous results.
+:class:`~nav.nav_technique.nav_technique_manual.NavTechniqueManual` carries no per-technique
+``tuning`` block in ``config_510_techniques.yaml`` and no
+:attr:`~nav.nav_technique.nav_technique.NavTechnique.confidence_spec`. The technique opts
+out of the autonomous registry (sets ``_abstract = True``) so the config-load validation
+walk skips it. The single Python module-level constant is ``_MANUAL_OFFSET_SIGMA_PX = 1.0``,
+the per-axis pixel sigma assigned to every manual pick.
 
 Implementation
 ==============
 
-Source files: ``src/nav/nav_technique/nav_technique_manual.py``, the dialog in
-:py:mod:`nav.ui.manual_nav_dialog`, and the overlay composer in
-:py:mod:`nav.feature.composition`.  The public class is
-:py:class:`~nav.nav_technique.nav_technique_manual.NavTechniqueManual`, a subclass
-of :py:class:`~nav.nav_technique.nav_technique.NavTechnique`.  It sets the private
-``_abstract`` flag to ``True`` so it stays out of the auto-discovery registry, its
-``accepts_feature_types`` is the full set of feature types (manual navigation
-looks at whatever the scene rendered), and its ``requires_prior`` is ``False``.
+Source files:
 
-:py:meth:`~nav.nav_technique.nav_technique_manual.NavTechniqueManual.is_feasible`
-counts renderable features -- template-bearing features with a template image and
-mask, polyline-bearing features with non-empty vertices, body-blob geometries, and
-star geometries -- and returns feasible when at least one is renderable.
+- ``src/nav/nav_technique/nav_technique_manual.py`` —
+  :class:`~nav.nav_technique.nav_technique_manual.NavTechniqueManual` and
+  :func:`~nav.nav_technique.nav_technique_manual.run_manual_nav`.
+- ``src/nav/feature/composition.py`` —
+  :func:`~nav.feature.composition.compose_dialog_overlay`, the helper that builds the
+  composite overlay image and mask from the scene's NavFeatures.
+- ``src/nav/ui/manual_nav_dialog.py`` —
+  :class:`~nav.ui.manual_nav_dialog.ManualNavDialog`, the PyQt6 widget the technique
+  invokes.
 
-:py:meth:`~nav.nav_technique.nav_technique_manual.NavTechniqueManual.navigate`
-composes the overlay image and mask via
-:py:func:`~nav.feature.composition.compose_dialog_overlay`, ensures a Qt
-application exists, opens the dialog, and runs it modally.  The result shape
-branches on the operator's choice: a cancelled or empty pick returns a spurious
-:py:class:`~nav.nav_technique.technique_result.NavTechniqueResult` with zero
-confidence, a zero offset, an identity covariance, and a
-:py:class:`~nav.nav_technique.diagnostics.ManualNavDiagnostics` whose
-:py:attr:`~nav.nav_technique.diagnostics.ManualNavDiagnostics.operator_accepted`
-field is ``False``; a confirmed pick returns a non-spurious result carrying the
-operator's offset, a covariance of the per-axis pixel sigma squared, full
-confidence, and ``operator_accepted`` ``True``.
+Public surface (autodocumented at :doc:`/api_reference/api_nav_technique`):
 
-The module-level function
-:py:func:`~nav.nav_technique.nav_technique_manual.run_manual_nav` is the
-single-observation entry point: it builds the same models, context, and features
-the autonomous orchestrator would, opens the dialog with the autonomous
-reliability gate bypassed (the operator visually overrides the gate's decisions),
-and on a confirmed pick wraps the result in a full
-:py:class:`~nav.nav_orchestrator.nav_result.NavResult` -- provenance, image
-classifier, feature inventory, and annotations populated identically to the
-autonomous pipeline -- so callers can write the same metadata and preview outputs.
-It returns ``None`` when the operator cancels or when the composed overlay paints
-no pixels into the extended-FOV mask.
+- :class:`~nav.nav_technique.nav_technique_manual.NavTechniqueManual` — the technique.
+- :func:`~nav.nav_technique.nav_technique_manual.run_manual_nav` — the standalone
+  interactive driver an external caller (a CLI script, an automated regression harness in
+  pyqt-aware mode) invokes to open the dialog and obtain a result.
+
+Class attributes:
+
+- :attr:`~nav.nav_technique.nav_technique.NavTechnique.name` — ``'NavTechniqueManual'``.
+- :attr:`~nav.nav_technique.nav_technique.NavTechnique.accepts_feature_types` —
+  ``frozenset(NavFeatureType)`` — every feature type, since manual navigation overlays the
+  whole scene.
+- :attr:`~nav.nav_technique.nav_technique.NavTechnique.requires_prior` — ``False``.
+- ``_abstract`` — ``True``. Keeps the technique out of
+  ``NavTechnique._registry`` so the orchestrator's
+  autonomous driver never invokes it.
+
+The technique declares no
+:attr:`~nav.nav_technique.nav_technique.NavTechnique.confidence_spec` and no
+:attr:`~nav.nav_technique.nav_technique.NavTechnique.confidence_attributes` — manual results
+come back with the operator-implied confidence ``1.0`` and the ensemble does not fuse them
+with autonomous results.
+
+Public methods (autodocumented):
+:meth:`~nav.nav_technique.nav_technique_manual.NavTechniqueManual.is_feasible` and
+:meth:`~nav.nav_technique.nav_technique_manual.NavTechniqueManual.navigate`.
+
+Call path
+---------
+
+Call path traced through
+:func:`~nav.nav_technique.nav_technique_manual.run_manual_nav`:
+
+1. The driver constructs every registered
+   :class:`~nav.nav_model.nav_model.NavModel`'s instance for the observation and calls
+   :meth:`~nav.nav_model.nav_model.NavModel.create_model` on each so the per-model state is
+   populated.
+2. Each model's :meth:`~nav.nav_model.nav_model.NavModel.to_features` and
+   :meth:`~nav.nav_model.nav_model.NavModel.to_annotations` are invoked to gather the
+   per-image features and the merged annotation collection.
+3. :func:`~nav.feature.composition.compose_dialog_overlay` builds the composite extfov
+   image and mask the dialog overlays on top of the observed image.
+4. :class:`~nav.nav_technique.nav_technique_manual.NavTechniqueManual` is constructed with
+   the merged annotations.
+   :meth:`~nav.nav_technique.nav_technique_manual.NavTechniqueManual.navigate` opens the
+   :class:`~nav.ui.manual_nav_dialog.ManualNavDialog`.
+5. The dialog runs interactively until the operator confirms an offset. When the operator
+   uses ``Auto``, the dialog runs the masked-NCC pyramid against the composite template;
+   the result populates the dialog's offset entry and the operator may accept or override.
+6. The operator's chosen ``(dv, du)`` plus the per-axis 1 px sigma populate a
+   :class:`~nav.nav_technique.technique_result.NavTechniqueResult` with
+   :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.confidence` ``1.0``,
+   :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious` ``False``,
+   :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` ``False``, and a
+   diagnostics object capturing whatever the auto-pick scored (a
+   :class:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics` when the operator accepted
+   the auto-pick; otherwise zero-filled).
+7. When the operator saves a sidecar, the merged annotations populate a labelled summary
+   PNG alongside the JSON.
 
 Examples
 ========
 
-**multi_body (corpus class).** A scene with several bodies in the field renders a
-template silhouette per body plus any limb and terminator polylines into the
-overlay.  Feasibility passes because multiple features are renderable; the
-operator sees every predicted silhouette over the image and picks the offset that
-registers them.  A confirmed pick returns a non-spurious result with
-``operator_accepted`` ``True`` and the per-axis pixel-sigma covariance.
+**Operator overrides an auto-pick.**  An operator opens the dialog on a Cassini fly-by
+image where :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav` reported a
+``spurious=True`` result. The composite overlay shows the predicted limb and disc; the
+operator clicks ``Auto`` and the masked-NCC pyramid lands on a peak the operator can see is
+near-correct but a sub-pixel off. The operator drags the overlay one pixel and confirms
+the offset. The technique returns a
+:class:`~nav.nav_technique.technique_result.NavTechniqueResult` with the operator's offset
+and confidence ``1.0``; the summary PNG saves alongside the manual sidecar for reviewer
+audit.
 
-**ring_only_curved (N1447064164_1_CALIB).** A distant Saturn ring frame whose
-rings collapse to a single ``RING_ANNULUS`` template paints that template into the
-overlay, so feasibility passes on the one renderable feature.  An operator can
-register the ring band by hand here even though the autonomous run on this frame
-records ``status: conflicted`` -- manual navigation does not depend on the
-autonomous confidence outcome.
+**Star-only scene with no auto-pick.**  An operator navigates a dense star field where the
+autonomous :class:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav`
+reported ``status=failed``. The composite overlay shows the predicted catalog stars as
+rectangle outlines. The operator manually drags the overlay until visible stars align with
+the predicted boxes and confirms. The dialog's ``Auto`` button is greyed out (the scene has
+no template-bearing feature for the masked-NCC pyramid to consume); only the manual path is
+available.
+
+**Headless backend rejection.**  A CI runner invokes
+:func:`~nav.nav_technique.nav_technique_manual.run_manual_nav` without a display server.
+The PyQt6 import fails and the driver raises before the dialog opens. The autonomous
+pipeline never invokes manual navigation, so this failure is confined to the interactive
+driver path.

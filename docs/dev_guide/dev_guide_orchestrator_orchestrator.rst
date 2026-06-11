@@ -1,214 +1,308 @@
-=======================
-Navigation Orchestrator
-=======================
+==========================================================
+Orchestrator (NavOrchestrator)
+==========================================================
 
 Overview
 ========
 
-The orchestrator is the top-level driver that turns one observation into one
-:py:class:`~nav.nav_orchestrator.nav_result.NavResult`.  It builds the per-image
-:py:class:`~nav.nav_orchestrator.nav_context.NavContext`, instantiates every requested navigation
-model, extracts and reliability-gates their features, and then runs the registered navigation
-techniques in two passes.  The first pass runs prior-free techniques and reconciles their results
-into a coarse offset prior; the second pass runs prior-required techniques against that prior.  A
-final ensemble reconciliation over the union of both passes' results produces the single
-``NavResult`` returned to the caller.
+:class:`~nav.nav_orchestrator.orchestrator.NavOrchestrator` is the top-level driver that
+turns one observation into one
+:class:`~nav.nav_orchestrator.nav_result.NavResult`. The driver builds the per-image
+:class:`~nav.nav_orchestrator.nav_context.NavContext`, runs every registered
+:class:`~nav.nav_model.nav_model.NavModel`'s
+:meth:`~nav.nav_model.nav_model.NavModel.create_model` and
+:meth:`~nav.nav_model.nav_model.NavModel.to_features`, applies the feature-reliability
+gate, runs every feasible prior-free
+:class:`~nav.nav_technique.nav_technique.NavTechnique` (pass 1), reconciles those results
+into a prior via :func:`~nav.nav_orchestrator.ensemble.ensemble`, runs every feasible
+prior-required technique against that prior (pass 2), and reconciles the union of pass-1
+and pass-2 results into the final
+:class:`~nav.nav_orchestrator.nav_result.NavResult`.
 
-Four short-circuit gates can terminate the run before the final ensemble, each mapping to a
-distinct :py:class:`~nav.support.status_reason.NavStatusReason`.  The first is the hard-failure
-image-class gate, driven by the ``_HARD_FAILURE_TO_REASON`` table: a blank, fully overexposed,
-mostly-missing, or corrupt image fails before any model runs.  The remaining three fire after
-feature extraction: a no-features gate when no model emitted anything
-(:py:attr:`~nav.support.status_reason.NavStatusReason.NO_FEATURES_EXTRACTED`), an all-gated gate
-when every emitted feature fell below its reliability threshold
-(:py:attr:`~nav.support.status_reason.NavStatusReason.ALL_FEATURES_GATED`), and a
-no-feasible-techniques gate when pass one produced no technique results at all
-(:py:attr:`~nav.support.status_reason.NavStatusReason.NO_FEASIBLE_TECHNIQUES`).
+Two passes, four short-circuit gates, and an exception-sandbox discipline keep the driver
+from raising through to its caller — every failure mode surfaces on the returned
+:class:`~nav.nav_orchestrator.nav_result.NavResult` instead. The four short-circuit gates
+are:
+
+- ``_HARD_FAILURE_TO_REASON`` — the
+  :class:`~nav.nav_orchestrator.image_classifier.NavImageClassifier` reports ``blank``,
+  ``fully_overexposed``, ``mostly_missing_data``, or ``corrupt``.
+- ``NO_FEATURES_EXTRACTED`` — every :class:`~nav.nav_model.nav_model.NavModel` emitted zero features.
+- ``ALL_FEATURES_GATED`` — the reliability gate dropped every emitted feature.
+- ``NO_FEASIBLE_TECHNIQUES`` — pass 1 produced zero technique results (no technique was
+  feasible on the gated cohort).
 
 Theory
 ======
 
-The orchestrator implements a fixed pipeline; the stages run in order, and any stage may
-short-circuit the run.
+The orchestrator is a deterministic pipeline. Each per-image run is a sequence of stages:
+build context, build models, extract features, gate features, run pass 1, fuse pass 1 into a
+prior, run pass 2, fuse the union, return a
+:class:`~nav.nav_orchestrator.nav_result.NavResult`.
 
-1. Build a per-image context from the observation: the extended-field-of-view image (the sensor
-   rectangle zero-padded by a per-instrument margin), the sensor, saturation, and cosmic-ray
-   masks, the image-quality classification, the noise estimate, and the gradient-magnitude, signed
-   gradient-vector, and edge distance-transform images that the matching techniques reuse.
+Pipeline stages
+---------------
 
-2. Classify the image.  If the verdict is one of the hard-failure classes (a blank frame, a frame
-   whose pixels are almost all at full well, a frame dominated by the missing-data sentinel, or a
-   frame whose file failed to parse), the pipeline stops immediately and reports the matching
-   refusal reason without running any model or technique.
+1. **Provenance and context.**  Build a reproducibility envelope (git SHA, loaded SPICE
+   kernels, static-data hashes) and a per-image global-state container. The context
+   carries the extfov image, the per-image masks (sensor / saturation / cosmic-ray), the
+   per-image noise sigma, the image-quality classifier verdict, the shared image-side
+   derivatives (gradient magnitude, gradient vector, edge distance transform), and the
+   per-instrument settings (data units, rotation flag, max rotation cap, signal-to-image
+   scale).
+2. **Model construction.**  Iterate the registered
+   :class:`~nav.nav_model.nav_model.NavModel` set, calling each model's
+   :meth:`~nav.nav_model.nav_model.NavModel.create_model` per the operator's
+   ``only_models`` glob filter. An exception in any model is logged and the model is
+   dropped from the per-image set.
+3. **Feature extraction.**  Each surviving model's
+   :meth:`~nav.nav_model.nav_model.NavModel.to_features` is invoked; an exception is
+   logged and the model contributes zero features.
+4. **Reliability gate.**  The per-feature reliability gate (an instance of
+   :class:`~nav.feature.reliability.FeatureReliabilityGate`) drops features whose
+   per-feature ``reliability`` score falls below the per-type floor.
+5. **Pass 1.**  Run every registered technique with
+   :attr:`~nav.nav_technique.nav_technique.NavTechnique.requires_prior` ``False`` whose
+   :attr:`~nav.nav_technique.nav_technique.NavTechnique.accepts_feature_types` overlaps the
+   surviving feature set and whose ``is_feasible`` reports feasible.
+6. **Pass-1 ensemble.**  Reconcile the pass-1 results via
+   :func:`~nav.nav_orchestrator.ensemble.ensemble`. When the ensemble produces an offset,
+   that offset and its covariance become the pass-2 prior; when the ensemble fails the
+   technique pipeline returns a failed
+   :class:`~nav.nav_orchestrator.nav_result.NavResult` immediately.
+7. **Pass 2.**  Run every prior-required technique with the pass-2 context (a copy of the
+   pass-1 context with the prior offset attached via
+   :meth:`~nav.nav_orchestrator.nav_context.NavContext.with_prior`).
+8. **Final ensemble.**  Reconcile the union of pass-1 and pass-2 results into the final
+   :class:`~nav.nav_orchestrator.nav_result.NavResult`.
 
-3. Build every requested model and gather the synthetic features each predicts.  Apply the
-   reliability gate to drop features whose photometric or geometric reliability falls below a
-   per-feature-type threshold.  If no feature was emitted at all, or if every emitted feature was
-   gated away, the pipeline stops with the corresponding refusal reason.
+Exception-sandbox discipline
+----------------------------
 
-4. Run pass one: every feasible technique that does not require a prior.  Primary-tier techniques
-   run first; fallback-tier techniques run only for bodies that no primary-tier technique already
-   covered with a non-spurious result.  If pass one produced no result, the pipeline stops with the
-   no-feasible-techniques reason.
+Every :class:`~nav.nav_model.nav_model.NavModel` callback (``create_model``,
+``to_features``, ``to_annotations``) and every
+:class:`~nav.nav_technique.nav_technique.NavTechnique` callback (``navigate``)
+runs inside a broad ``except Exception`` block. An
+exception is logged with full traceback and the offending model or technique is treated as
+if it produced no output. This is intentional — the orchestrator must never raise through
+to its caller; failures land on the
+:class:`~nav.nav_orchestrator.nav_result.NavResult.status` field instead so the per-image
+JSON sidecar always exists.
 
-5. Reconcile the pass-one results into a single estimate.  When that estimate carries an offset and
-   a covariance, it becomes the prior for the second pass.
+Glob-pattern model and technique filters
+----------------------------------------
 
-6. Run pass two: every feasible technique that requires a prior, against the pass-one prior.
+The constructor accepts ``only_models`` and ``only_techniques`` glob patterns (or pattern
+lists) so an operator can restrict which models or techniques run for debugging. The
+syntax matches gitignore-style globs with leading ``!`` for exclusion. The model-name
+convention is ``prefix:VALUE`` (``rings:SATURN``, ``body:DIONE``, plain ``stars`` for the
+catalog star model); a pattern missing a colon expands to ``prefix:*`` so the common
+shorthand (``rings``) matches every namespaced ring model under that prefix.
 
-7. Reconcile the union of both passes' results into the final estimate.
+Restrictions and assumptions
+----------------------------
 
-The hard-failure short-circuit policy is deliberate: a corrupted or empty frame should fail in
-milliseconds with an unambiguous reason rather than waste time rendering models that have nothing
-to match.  Each short-circuit returns a failure carrying the image classification and provenance so
-a downstream reader can see exactly why navigation refused.
+- The orchestrator assumes
+  :class:`~nav.nav_model.nav_model.NavModel` and
+  :class:`~nav.nav_technique.nav_technique.NavTechnique` subclasses are well-formed and
+  non-malicious — the exception sandbox catches programmer bugs but cannot recover from
+  state-corrupting plugins.
+- The pass-1 → pass-2 hand-off only fires when the pass-1 ensemble produces a non-failed
+  offset. When pass 1 fails, pass 2 does not run.
+- The image-quality classifier's hard-failure short-circuit fires before any model is
+  constructed; a ``blank`` or ``fully_overexposed`` image never invokes a
+  :class:`~nav.nav_model.nav_model.NavModel`.
 
-Models and techniques are treated as sandboxed plugins.  Each model render, each feature
-extraction, each annotation pass, and each technique run is wrapped so that any exception it raises
-is logged with a full traceback and treated as zero output rather than propagated.  A misbehaving
-model contributes no features; a misbehaving technique contributes no result.  The pipeline never
-raises through to its caller -- every failure mode surfaces on the returned result instead.  This
-isolation is what lets an operator add an experimental model or technique without risking the rest
-of the pipeline.
+Sources of uncertainty
+----------------------
+
+The orchestrator itself reports no uncertainty. Per-technique uncertainty is captured in
+each technique's
+:class:`~nav.nav_technique.technique_result.NavTechniqueResult.covariance_px2`; the final
+:class:`~nav.nav_orchestrator.nav_result.NavResult.covariance_px2` is the
+precision-weighted-merge result from
+:func:`~nav.nav_orchestrator.ensemble.ensemble`.
 
 Configuration
 =============
 
-The orchestrator consumes no configuration of its own.  Every per-image tunable arrives by way of
-:py:func:`~nav.nav_orchestrator.instrument_config.instrument_settings_from_obs`, which reads the
-observation's resolved per-camera block from ``config_4N0_inst_*.yaml`` (for example
-``src/nav/config_files/config_400_inst_coiss.yaml``).  The keys that flow in are:
+The orchestrator's runtime knobs come from three places: per-instrument YAML
+(``config_4N0_inst_*.yaml`` via
+:class:`~nav.nav_orchestrator.instrument_config.InstrumentSettings`), construction-time
+overrides on the constructor, and the per-image
+:class:`~nav.nav_orchestrator.nav_context.NavContext`'s default values.
 
-- ``data_units`` -- string, default ``raw_dn``.  Selects the DN-keyed or I/F-keyed threshold set
-  and whether a saturation mask is computed at all.
-- ``noise`` -- the per-instrument noise block.  Its ``saturation_dn`` (float, default ``4095`` DN
-  on raw cameras) drives the per-pixel saturation mask, and its ``marker_value`` (numeric or
-  ``NaN``, default ``0``) is the missing-data sentinel; for calibrated-I/F cameras the marker is
-  literally ``NaN`` and is sanitised to a finite fill before the derivative kernels run.
-- ``image_quality_thresholds`` -- the per-instrument block feeding the image classifier (blank
-  floor, saturation fraction cap, missing fraction cap, noisy threshold); see
-  :doc:`dev_guide_orchestrator_image_classifier` for each field.
-- ``camera_rotation`` keys ``fit_camera_rotation`` (bool, default ``false``) and
-  ``max_rotation_deg`` (float, default ``5.0`` deg).  These enable 3-degree-of-freedom technique
-  fits and bound the fitted rotation magnitude.
-- ``signal_dn_to_image_unit_scale`` -- the per-instrument scale relating raw signal DN to image
-  units, carried on the instrument block for the noise and saturation reasoning.
+Per-instrument YAML keys (read via
+:func:`~nav.nav_orchestrator.instrument_config.instrument_settings_from_obs`):
 
-Constructor-level overrides on
-:py:class:`~nav.nav_orchestrator.orchestrator.NavOrchestrator` adjust which components run and
-which defaults apply: ``only_models`` and ``only_techniques`` are glob-pattern filters,
-``ensemble_config`` is an :py:class:`~nav.nav_orchestrator.ensemble.EnsembleConfig` override (see
-:doc:`dev_guide_orchestrator_ensemble`), ``image_derivatives_config`` is an
-:py:class:`~nav.nav_orchestrator.image_derivatives.ImageDerivativesConfig` override,
-``image_quality_thresholds`` is an
-:py:class:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds` override that supersedes
-the per-instrument block (see :doc:`dev_guide_orchestrator_image_classifier`), and
-``rms_nav_version`` is the version string written into provenance.
+- ``data_units`` — ``raw_dn`` or ``calibrated_if``. Drives the saturation-mask and
+  noise-sigma branches.
+- ``noise.saturation_dn`` — saturation DN threshold (``raw_dn`` only).
+- ``noise.marker_value`` — missing-data marker DN.
+- ``image_quality_thresholds.*`` — the per-instrument
+  :class:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds` values.
+- ``camera_rotation.fit_camera_rotation`` — bool; turns on 3-DoF technique fits.
+- ``camera_rotation.max_rotation_deg`` — float; rotation cap.
+- ``signal_dn_to_image_unit_scale`` — float; per-instrument DN-to-image-unit scale used by
+  the STAR ``predicted_snr`` formula.
+
+Constructor-level overrides:
+
+- ``models`` — list of constructed
+  :class:`~nav.nav_model.nav_model.NavModel` instances. The caller builds these per-image.
+- ``config`` — optional :class:`~nav.config.config.Config` override.
+- ``only_models`` — glob pattern or list selecting which models run. Default ``'*'``.
+- ``only_techniques`` — glob pattern or list selecting which techniques run. Default
+  ``'*'``.
+- ``ensemble_config`` — optional
+  :class:`~nav.nav_orchestrator.ensemble.EnsembleConfig` override.
+- ``image_quality_thresholds`` — optional
+  :class:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds` override.
+- ``image_derivatives_config`` — optional
+  :class:`~nav.nav_orchestrator.image_derivatives.ImageDerivativesConfig` override.
+- ``rms_nav_version`` — string written into provenance.
 
 Implementation
 ==============
 
-Source files: ``src/nav/nav_orchestrator/orchestrator.py``, with collaborators ``ensemble.py``,
-``nav_context.py``, ``nav_result.py``, ``image_classifier.py``, ``instrument_config.py``,
-``provenance.py``, ``feature_summary.py``, ``image_derivatives.py``, and ``status_reason_info.py``.
+Source files:
 
-The public class is :py:class:`~nav.nav_orchestrator.orchestrator.NavOrchestrator`, which derives
-from :py:class:`~nav.support.nav_base.NavBase` for the shared config and logger.  It exposes two
-public methods, :py:meth:`~nav.nav_orchestrator.orchestrator.NavOrchestrator.prepare` and
-:py:meth:`~nav.nav_orchestrator.orchestrator.NavOrchestrator.navigate`.  The
-:py:meth:`~nav.nav_orchestrator.orchestrator.NavOrchestrator.prepare` method runs the same
-pre-technique pipeline as navigate -- provenance, context, model builds, feature extraction,
-inventory, per-model metadata, merged annotations -- and bundles them in an
-:py:class:`~nav.nav_orchestrator.orchestrator.OrchestratorPrep`; it does not short-circuit on a
-hard-failure class, so the manual-navigation driver can override gate decisions visually.
+- ``src/nav/nav_orchestrator/orchestrator.py`` —
+  :class:`~nav.nav_orchestrator.orchestrator.NavOrchestrator`, the
+  ``_HARD_FAILURE_TO_REASON`` mapping, the ``_ModelRegistry`` glob-filter helper, and the
+  per-stage private methods.
+- ``src/nav/nav_orchestrator/nav_context.py`` —
+  :class:`~nav.nav_orchestrator.nav_context.NavContext`; documented at
+  :doc:`dev_guide_orchestrator_nav_context`.
+- ``src/nav/nav_orchestrator/nav_result.py`` —
+  :class:`~nav.nav_orchestrator.nav_result.NavResult`; documented at
+  :doc:`dev_guide_orchestrator_nav_result`.
+- ``src/nav/nav_orchestrator/ensemble.py`` —
+  :func:`~nav.nav_orchestrator.ensemble.ensemble`; documented at
+  :doc:`dev_guide_orchestrator_ensemble`.
+- ``src/nav/nav_orchestrator/image_classifier.py`` —
+  :class:`~nav.nav_orchestrator.image_classifier.NavImageClassifier`; documented at
+  :doc:`dev_guide_orchestrator_image_classifier`.
+- ``src/nav/nav_orchestrator/image_derivatives.py`` —
+  :func:`~nav.nav_orchestrator.image_derivatives.compute_all_image_derivatives`;
+  documented at :doc:`dev_guide_techniques_image_derivatives`.
+- ``src/nav/nav_orchestrator/instrument_config.py`` —
+  :class:`~nav.nav_orchestrator.instrument_config.InstrumentSettings`; documented at
+  :doc:`dev_guide_orchestrator_instrument_config`.
+- ``src/nav/nav_orchestrator/provenance.py`` —
+  :class:`~nav.nav_orchestrator.provenance.Provenance`; documented at
+  :doc:`dev_guide_orchestrator_provenance`.
+- ``src/nav/nav_orchestrator/status_reason_info.py`` —
+  ``STATUS_REASON_INFO_TEMPLATE``, the per-status-reason operator log lines.
+- ``src/nav/feature/reliability.py`` —
+  :class:`~nav.feature.reliability.FeatureReliabilityGate` and
+  :class:`~nav.feature.reliability.GatedFeatureRecord`.
 
-The :py:meth:`~nav.nav_orchestrator.orchestrator.NavOrchestrator.navigate` call path runs through
-private helpers in this order.  It builds the provenance envelope (``_make_provenance``, which reads
-runtime git, SPICE, and static-data state through
-:py:func:`~nav.nav_orchestrator.provenance.collect_provenance_metadata`), builds the context and the
-classifier verdict (``_make_context``, which calls
-:py:func:`~nav.nav_orchestrator.instrument_config.instrument_settings_from_obs`, sanitises the
-missing-data marker to a finite fill, runs
-:py:class:`~nav.nav_orchestrator.image_classifier.NavImageClassifier`, builds the saturation and
-cosmic-ray masks, and calls
-:py:func:`~nav.nav_orchestrator.image_derivatives.compute_all_image_derivatives`), and logs the
-verdict.  If the class is a hard-failure class, it returns through ``_fail`` with the matching
-reason.  Otherwise it builds models (``_build_models``), extracts features (``_extract_features``),
-gates them (``_extract_and_gate``), builds the inventory (``_build_inventory``), snapshots model
-metadata (``_collect_model_metadata``), and merges annotations (``_collect_annotations``).
+Public class :class:`~nav.nav_orchestrator.orchestrator.NavOrchestrator`, base
+:class:`~nav.support.nav_base.NavBase`.
 
-The two failure gates after extraction route through ``_fail``: no features at all, and every
-feature gated.  Pass one then runs ``_run_pass`` twice -- once for primary-tier prior-free
-techniques and once for fallback-tier prior-free techniques with the already-covered bodies
-excluded -- and a third ``_fail`` gate fires when pass one produced no results.  The pass-one
-results are reconciled by :py:func:`~nav.nav_orchestrator.ensemble.ensemble`; when that result
-carries an offset and covariance it is threaded into a prior-bearing context (via the context's
-``with_prior``) for pass two, which is a third ``_run_pass`` call with ``requires_prior=True``.  The
-final :py:func:`~nav.nav_orchestrator.ensemble.ensemble` call reconciles the union of both passes
-and is logged and returned.
+Public methods (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
 
-The four ``_fail`` gate paths return the reasons
-:py:attr:`~nav.support.status_reason.NavStatusReason.NO_SIGNAL_IN_IMAGE`,
-:py:attr:`~nav.support.status_reason.NavStatusReason.IMAGE_OVEREXPOSED`,
-:py:attr:`~nav.support.status_reason.NavStatusReason.MISSING_DATA_DOMINANT`, or
-:py:attr:`~nav.support.status_reason.NavStatusReason.IMAGE_CORRUPT` (hard-failure class, looked up
-from the ``_HARD_FAILURE_TO_REASON`` table);
-:py:attr:`~nav.support.status_reason.NavStatusReason.NO_FEATURES_EXTRACTED` (no feature emitted);
-:py:attr:`~nav.support.status_reason.NavStatusReason.ALL_FEATURES_GATED` (every feature gated); and
-:py:attr:`~nav.support.status_reason.NavStatusReason.NO_FEASIBLE_TECHNIQUES` (pass one produced no
-results).  Every ``_fail`` and every successful return also emits the operator-readable INFO lines
-from ``STATUS_REASON_INFO_TEMPLATE`` via ``_log_status_reason``, so the per-image log carries the
-human-readable narrative for the final reason.
+- :meth:`~nav.nav_orchestrator.orchestrator.NavOrchestrator.prepare` — build per-image
+  state without running any technique. Returns ``(context, features)``. Used by the
+  manual-nav dialog.
+- :meth:`~nav.nav_orchestrator.orchestrator.NavOrchestrator.navigate` — run the full
+  pipeline on one observation. Returns one
+  :class:`~nav.nav_orchestrator.nav_result.NavResult`.
 
-Model selection uses the glob filter ``filter_by_glob`` on the per-image registry: model names
-follow the ``prefix:VALUE`` convention (``rings:SATURN``, ``body:DIONE``, plain ``stars``), and a
-colon-free token such as ``rings`` is expanded to ``rings:*`` while the value part is upper-cased.
-Technique selection applies the constructor's ``only_techniques`` glob through
-:py:func:`~nav.nav_technique.nav_technique.filter_technique_names`, restricting each pass to the
-techniques whose ``requires_prior`` and tier match.
+Call path
+---------
+
+Call path traced through
+:meth:`~nav.nav_orchestrator.orchestrator.NavOrchestrator.navigate`:
+
+1. Build the :class:`~nav.nav_orchestrator.provenance.Provenance` envelope.
+2. Build the per-image :class:`~nav.nav_orchestrator.nav_context.NavContext` and the
+   image classifier verdict. Log the verdict at INFO.
+3. **Hard-failure short-circuit.**  When the classifier's ``image_class`` is in
+   ``_HARD_FAILURE_TO_REASON`` (``blank`` /
+   ``fully_overexposed`` / ``mostly_missing_data`` / ``corrupt``), return a failed
+   :class:`~nav.nav_orchestrator.nav_result.NavResult` with the matching
+   :class:`~nav.support.status_reason.NavStatusReason`.
+4. Build every :class:`~nav.nav_model.nav_model.NavModel` by invoking
+   :meth:`~nav.nav_model.nav_model.NavModel.create_model` (exception-sandboxed).
+5. Extract features from each surviving model
+   (:meth:`~nav.nav_model.nav_model.NavModel.to_features`, exception-sandboxed) and apply
+   the reliability gate.
+6. Build the feature inventory, the model metadata snapshot, and the merged annotations.
+7. **Three short-circuit gates** on the gated cohort:
+
+   - ``NO_FEATURES_EXTRACTED`` when every model emitted zero features.
+   - ``ALL_FEATURES_GATED`` when the gate dropped every feature.
+
+   Each returns a failed
+   :class:`~nav.nav_orchestrator.nav_result.NavResult` via the ``_fail`` helper.
+8. **Pass 1.**  Run every prior-free technique whose feature types overlap the gated
+   cohort and whose ``is_feasible`` returns feasible. An exception in any technique is
+   logged and the technique contributes no result.
+9. **NO_FEASIBLE_TECHNIQUES** when pass 1 produced zero results — return a failed
+   :class:`~nav.nav_orchestrator.nav_result.NavResult`.
+10. Reconcile pass-1 results via :func:`~nav.nav_orchestrator.ensemble.ensemble`. When
+    the ensemble's ``status`` is ``'failed'`` return the failed
+    :class:`~nav.nav_orchestrator.nav_result.NavResult`.
+11. Build the pass-2 context via
+    :meth:`~nav.nav_orchestrator.nav_context.NavContext.with_prior` carrying the pass-1
+    ensemble's offset and covariance.
+12. **Pass 2.**  Run every prior-required technique against the pass-2 context.
+13. Reconcile the union of pass-1 and pass-2 results via
+    :func:`~nav.nav_orchestrator.ensemble.ensemble` to produce the final
+    :class:`~nav.nav_orchestrator.nav_result.NavResult`.
+14. Log the final offset / confidence / per-technique summary and the per-status-reason
+    operator INFO lines from ``STATUS_REASON_INFO_TEMPLATE``.
+
+The ``_fail`` helper wraps
+:meth:`~nav.nav_orchestrator.nav_result.NavResult.failed` and emits the per-status-reason
+INFO log lines defined in ``STATUS_REASON_INFO_TEMPLATE``. Every short-circuit gate
+listed above invokes ``_fail`` to keep the operator log consistent.
 
 Examples
 ========
 
-These examples use named scenes from ``tests/integration/image_library/images/``.
+``body_partial_overflow`` (Cassini ISS NAC, image ``N1484593951_2``)
+    Rhea visible in the upper right with about 22 % of the disc off-frame. The
+    orchestrator builds the body model, extracts LIMB_ARC + BODY_DISC + TERMINATOR_ARC
+    features, runs pass 1 with
+    :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav`,
+    :class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav`, and
+    :class:`~nav.nav_technique.nav_technique_body_terminator.BodyTerminatorNav` (the latter
+    two flag spurious; only BodyLimb produces a usable result). The pass-1 ensemble
+    selects BodyLimb's offset of ``(12.06, 30.53)`` px, the pass-2 prior is set, and pass 2
+    runs no prior-required techniques (no STAR features in this scene). The final
+    :class:`~nav.nav_orchestrator.nav_result.NavResult` reports
+    :attr:`~nav.nav_orchestrator.nav_result.NavResult.status` ``'ok'`` against the
+    operator-verified offset :math:`(\Delta v, \Delta u) = (11.0, 29.5)` px.
 
-The ``body_partial_overflow`` scene (Cassini NAC ``N1484593951_2_CALIB``) shows a successful
-navigation.  Large Rhea is partially off-frame to the upper right with a good limb.
-:py:class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav` runs but flags itself
-spurious because the disc-template correlation peak collapses on the heavily cropped silhouette, and
-:py:class:`~nav.nav_technique.nav_technique_body_terminator.BodyTerminatorNav` runs but flags itself
-spurious as well, so :py:class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav` is the only
-non-spurious technique.  Its offset of ``(12.06, 30.53)`` px lies within the 1.0 px ground-truth
-uncertainty of the operator's ``(11.0, 29.5)``.  The final
-:py:class:`~nav.nav_orchestrator.nav_result.NavResult` carries ``status == 'success'``,
-``confidence_rank == 'low'``, the fused offset, a 2x2 covariance, and the full per-technique list
-including the spurious entries for diagnostics.
+``one_bright_star_no_body`` (Cassini ISS WAC, image ``W1449079117_1``)
+    Single bright star (Vega) in an otherwise empty FOV. The orchestrator's pass-1
+    :class:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav`
+    produces a 1-star prior; pass 2 runs
+    :class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav` against that
+    prior, polishes the offset, and returns it with
+    :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.confidence` capped at
+    0.5 by the single-inlier post-sigmoid cap. The final ensemble fuses both technique
+    results and reports
+    :attr:`~nav.nav_orchestrator.nav_result.NavResult.status` ``'ok'`` against the
+    operator-verified offset :math:`(\Delta v, \Delta u) = (3.06, -0.02)` px.
 
-The ``multi_body`` scene (Cassini NAC ``N1487595731_1_CALIB``) shows a conflicted navigation.  Dione
-and Rhea overlap at roughly 90 deg phase.
-:py:class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav` and
-:py:class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav` both converge within about a pixel
-of the operator's ``(7.03, -18.42)`` ground truth (disc ``(6.76, -17.71)`` confidence 0.246; limb
-``(7.00, -18.00)`` confidence 0.239), but
-:py:class:`~nav.nav_technique.nav_technique_body_terminator.BodyTerminatorNav` latches onto a wrong
-local minimum at ``(11.58, 12.64)`` with confidence 0.744.  The ensemble forms two disagreeing
-groups: disc-plus-limb sum to 0.485 against the lone terminator's 0.744, a gap of 0.259 below the
-agreement-gap threshold of 0.5.  The final
-:py:class:`~nav.nav_orchestrator.nav_result.NavResult` therefore carries ``status == 'conflicted'``
-and ``confidence_rank == 'conflicted'`` (see :doc:`dev_guide_orchestrator_ensemble` for the
-conflict-detection step).
+``star_dominated`` (Cassini ISS WAC, image ``W1580760393_1``)
+    Dense star field with no body in FOV. Pass 1 runs
+    :class:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav`, which
+    produces a multi-star prior via the triplet hash; pass 2 runs
+    :class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav`, which polishes
+    the offset using the full predictable cohort. The final ensemble fuses both and
+    reports the operator-verified offset
+    :math:`(\Delta v, \Delta u) = (-2.68, -3.68)` px.
 
-The ``star_dominated`` scene (Cassini WAC ``W1580760393_1_CALIB``) shows a failed navigation: the
-dense CLEAR-filter star field produces a result whose combined confidence does not earn any
-confidence tier, so the orchestrator returns a
-:py:class:`~nav.nav_orchestrator.nav_result.NavResult` with ``status == 'failed'``, ``offset_px`` of
-``None``, and ``confidence_rank == 'failed'``.
-
-The ``one_bright_star_no_body`` scene (Cassini WAC ``W1449079117_1_CALIB``) walks the pass-one to
-pass-two hand-off.  A single star (Vega) under the RED filter is matched in pass one by
-:py:class:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav`, whose pass-one
-ensemble estimate becomes the prior threaded into the pass-two context.
-:py:class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav` consumes that prior in pass
-two to refine the alignment, and the final
-:py:class:`~nav.nav_orchestrator.nav_result.NavResult` carries ``status == 'success'`` with
-``confidence_rank == 'low'`` and an offset near the operator's ``(3.06, -0.02)``.
+**Hard-failure short-circuit example.**  An over-exposed Cassini calibration target
+returns the classifier's ``fully_overexposed`` class. The orchestrator returns the failed
+:class:`~nav.nav_orchestrator.nav_result.NavResult` with
+:attr:`~nav.nav_orchestrator.nav_result.NavResult.status_reason`
+``IMAGE_OVEREXPOSED`` before any :class:`~nav.nav_model.nav_model.NavModel`
+constructs. The per-image JSON sidecar still
+emits with the classifier verdict and the provenance envelope so reviewer tooling can
+correlate the failure across an entire campaign.

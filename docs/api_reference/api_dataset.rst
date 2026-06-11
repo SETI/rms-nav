@@ -1,6 +1,8 @@
 nav.dataset
 ===========
 
+.. automodule:: nav.dataset
+
 .. automodule:: nav.dataset.dataset
    :members:
    :undoc-members:

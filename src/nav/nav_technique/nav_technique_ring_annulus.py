@@ -22,7 +22,6 @@ handle ``len(features) > 1``.
 
 from __future__ import annotations
 
-import numbers
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -291,7 +290,7 @@ class RingAnnulusNav(NavTechnique):
         raw = getattr(offset_block, 'correlation_fft_upsample_factor', None)
         if raw is None:
             return _DEFAULT_UPSAMPLE_FACTOR
-        if isinstance(raw, bool) or not isinstance(raw, numbers.Real):
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
             raise ValueError(
                 f'config.offset.correlation_fft_upsample_factor must be a '
                 f'real (non-bool) number; got {type(raw).__name__} {raw!r}'

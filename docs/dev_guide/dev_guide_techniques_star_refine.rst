@@ -1,184 +1,321 @@
-======================
-Star Refine Navigation
-======================
+==========================================
+Star Refinement (StarRefineNav)
+==========================================
 
 Overview
 ========
 
-This technique is the pass-2 star refiner.  It consumes the prior offset produced
-by the pass-1 ensemble and polishes it by re-centroiding every predicted catalog
-star around its prior-shifted position, then averaging the per-star residuals into
-a small correction.  Because it runs only after a prior offset exists, it is
-registered as prior-required and the orchestrator invokes it only on the second
-pass.  Feasibility passes when at least one usable catalog star is predicted in
-the extended field of view; it fails when no usable star is present.
+:class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav` is the pass-2 star
+refinement technique: given a prior offset produced by the
+pass-1 ensemble, it polishes that offset by re-centroiding every predicted catalog star against
+the image and averaging the per-star residuals. Each predicted catalog star is shifted by the
+prior offset, re-detected inside a tight refinement window, and its sub-pixel centroid compared
+to the shifted prediction; the inverse-variance weighted average of the per-star residuals is
+the refined delta the technique reports. When the per-instrument camera-rotation flag is on
+and at least two stars survive the per-star quality gates, a Procrustes / similarity-transform
+refit recovers a translation plus rotation instead of a translation alone.
+
+Feasibility passes when at least one
+:data:`~nav.feature.feature_type.NavFeatureType.STAR` feature survives the shared usability
+gates — predictable, not occluded by a body silhouette, not clipped by a saturation or
+cosmic-ray mask. Feasibility fails when no usable star is offered.
 
 Theory
 ======
 
-A pass-1 fit lands within a few pixels of the true offset but may carry residual
-centroiding error.  Given a prior offset, the predicted position of each catalog
-star is shifted by that prior, and a brightness peak is sought in a small
-refinement window around the shifted prediction.  Where a peak is found, a
-brightness-weighted centroid yields its sub-pixel position and the per-star
-residual is the centroid minus the shifted prediction.  Stars whose nearest peak
-sits beyond a maximum residual -- a wrong peak -- are dropped before the fit.
+The technique is a per-star centroid average rather than a global pattern-matcher. Pass-1 has
+already aligned the catalog to the image to within a few pixels (the prior offset); the
+remaining task is to extract the residual misalignment plus, on instruments that support it, the
+camera rotation.
 
-The surviving residuals are averaged in inverse-variance fashion, each star
-weighted by the inverse trace of its Cramer-Rao position covariance so that
-high-SNR stars count for more:
+Per-star centroid model
+-----------------------
+
+For a single predicted catalog star at position :math:`x_{\mathrm{pred}}` with covariance
+:math:`\Sigma_{i}` (the Cramer-Rao lower bound carried on the feature), the refinement step
+takes the brightness-weighted moment of a small box around the predicted brightness peak in a
+search window centred on :math:`x_{\mathrm{pred}} + \mathbf{p}` (where :math:`\mathbf{p}` is the
+prior offset). The centroid is rejected when the brightest pixel in the window is below the
+detection threshold or the implied per-star residual exceeds a configured cap; the surviving
+correspondences are the inlier set.
+
+Translation-only fit
+--------------------
+
+For each surviving star :math:`i` the per-star residual is
 
 .. math::
 
-   \Delta = \frac{\sum_i w_i\, r_i}{\sum_i w_i}, \qquad
-   w_i = \frac{1}{\operatorname{tr}\,\Sigma_i}.
+    r_{i} = \mathrm{centroid}_{i} - (x_{\mathrm{pred},\,i} + \mathbf{p}).
 
-The correction :math:`\Delta` is reported as a delta from the prior, and the
-ensemble adds it back.  The covariance reflects the per-axis scatter of the
-surviving residuals; with two or more inliers that scatter is the reported
-variance, while with a single inlier there is no scatter to measure and the
-per-feature Cramer-Rao floor is reported instead.
+The reported delta is the inverse-variance weighted mean
 
-A single-inlier refinement carries no independent cross-check beyond the prior it
-was handed -- it is the same single observation that drove the pass-1 fit, merely
-polished -- so its confidence is capped below the one-star unique-match ceiling so
-the ensemble cannot promote a lone refine over the lone match that produced its
-prior.  With two or more inliers the per-star residual scatter cross-checks the
-joint fit and no such cap applies.
+.. math::
 
-When a camera rotation is requested and two or more inliers survive, the refit is
-an orthogonal Procrustes (similarity) fit reconstructing each star's detection
-and prediction from the residuals, and the rotation variance follows the same
-lever-arm formula the multi-star pattern matcher uses: the pooled residual
-variance divided by the weighted catalog spread about its centroid, collapsing to
-the rotation-unobservable sentinel when that spread is degenerate.  A
-single-inlier refine under a rotation request reports rotation as unobservable
-with the sentinel variance.  The reported covariance captures the surviving-star
-residual scatter or the Cramer-Rao floor; it does not model SPICE pointing
-systematics.
+    \Delta = \frac{\sum_{i} w_{i} \, r_{i}}{\sum_{i} w_{i}},
+    \qquad w_{i} = \frac{1}{\mathrm{tr}(\Sigma_{i})}
+
+where :math:`\mathrm{tr}(\Sigma_{i})` is the trace of the per-star feature covariance; a
+zero-or-missing covariance falls back to a unit weight. The reported translation on the result
+is :math:`\mathbf{p} + \Delta` (absolute, not delta-from-prior); the orchestrator's ensemble
+combine treats every per-technique offset as absolute.
+
+Rotation-aware fit
+------------------
+
+When :attr:`~nav.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` is true and the inlier count is at least two, the technique runs
+a weighted Kabsch / orthogonal-Procrustes solve on the catalog-vs-detection point clouds to
+extract a rotation about the catalog-side weighted centroid plus a translation. The
+similarity-transform fitter computes the weighted cross-covariance, decomposes it via SVD, and
+applies a determinant correction so that one cohort being a numerical mirror image of the other
+cannot produce a reflection masquerading as a rotation. The translation read off the
+similarity-transform output is the reported absolute offset for the rotation-fitting
+branch; the inverse-variance-weighted mean is used only when rotation fitting is
+disabled or there are too few inliers to fit a rotation.
+
+The rotation variance is derived from the inlier residual scatter scaled by the catalog spread:
+
+.. math::
+
+    \sigma_{\theta}^{2} = \max\!\left(\frac{\sigma_{r}^{2}}{S},\; \frac{1}{S}\right),
+    \qquad S = \sum_{i} w_{i} \, \lVert x_{\mathrm{cat},\,i} - \bar{x}_{\mathrm{cat}}\rVert^{2}
+
+with :math:`\sigma_{r}^{2}` the per-axis-averaged weighted residual variance. A vanishing
+catalog spread (every inlier on top of the centroid) collapses :math:`S` to zero and the
+rotation is reported with the project-wide rotation-unobservable sigma sentinel; the ensemble
+combine treats that variance as effectively unconstrained.
+
+Restrictions and assumptions
+----------------------------
+
+- The technique requires a prior offset on the per-image
+  :class:`~nav.nav_orchestrator.nav_context.NavContext`; absent that, it returns a spurious
+  zero-confidence result rather than running the per-star centroid loop.
+- Predicted catalog positions are assumed to be in the same extended-FOV pixel frame the image
+  uses; a SPICE pose error larger than the refinement window radius pushes the prediction
+  outside the search window and the per-star detection misses.
+- The per-star CRLB covariance carried on each feature is taken at face value as the inlier
+  weight; an over-confident CRLB will tighten the reported confidence. The pass-1 model is
+  responsible for grounding the CRLB physically.
+- The 1-inlier path provides no independent cross-check beyond the prior it was handed: the
+  same single observation that drove the pass-1 fit just gets polished. A documented
+  post-sigmoid cap (default 0.5) prevents the technique from outranking
+  :class:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav` on the same
+  one-star scene.
+
+Sources of uncertainty
+----------------------
+
+The reported translation covariance is one of two forms:
+
+- **Single inlier.**  The (2, 2) covariance is the inlier feature's CRLB (a copy of
+  :attr:`~nav.feature.feature.NavFeature.position_cov_px`). A missing CRLB falls back to the
+  identity matrix.
+- **Multi-inlier.**  The (2, 2) covariance is a diagonal of the per-axis weighted residual
+  variances about the converged delta, floored at the inverse total weight so the diagonals do
+  not collapse to zero on a coincidentally-tight inlier set.
+
+When camera rotation is fit, the (2, 2) translation block is embedded in a (3, 3) covariance
+whose rotation diagonal is the variance derived above; with a single inlier the rotation
+diagonal is the project-wide rotation-unobservable sentinel and the rotation angle is reported
+as zero. At-edge and spurious flags hard-zero the confidence on top of the linear formula.
 
 Configuration
 =============
 
-Tunables live under ``techniques.StarRefineNav.tuning`` in
+All numeric tunables for this technique live in ``techniques.StarRefineNav.tuning`` in
 ``src/nav/config_files/config_510_techniques.yaml``.
 
-- ``refine_window_px`` -- float, default ``6.0`` px.  Half-width of the per-star
-  refinement window; tighter than the unique-match search window because the prior
-  already places the prediction within a few pixels of the star.
-- ``centroid_box_half_px`` -- int, default ``3`` px.  Half-width of the
-  brightness-weighted centroid box around the detected peak.
-- ``max_per_star_residual_px`` -- float, default ``4.0`` px.  Drop a star whose
-  detection sits more than this far from the prior-shifted prediction; almost
-  certainly a wrong peak.
-- ``detection_sigma`` -- float, default ``4.0`` (dimensionless).  Detection threshold
-  as a multiple of the per-pixel noise sigma.
-- ``min_inliers`` -- int, default ``1`` (count).  Below this many surviving inliers
-  the technique reports spurious.  Must be at least one.
-- ``at_edge_tolerance_px`` -- float, default ``1.0`` px.  Slack around the
-  search-window axis bounds for the at-edge check.
-- ``single_inlier_confidence_cap`` -- float, default ``0.5`` (dimensionless).  Post-
-  sigmoid confidence cap applied when only one inlier survives, set below the
-  one-star unique-match ceiling so a lone refine cannot outrank the lone match that
-  produced its prior.  Must lie in ``[0, 1]``.
-- ``rotation_at_edge_fraction`` -- float, default ``0.95`` (dimensionless).  When the
-  multi-inlier Procrustes path fits rotation, a converged rotation magnitude past
-  this fraction of the per-image rotation cap trips at-edge; a single-inlier refine
-  always reports rotation as unobservable so it is unaffected.
+- ``refine_window_px`` — float, default ``6.0`` px. Half-width of the per-star refinement
+  window centred on each shifted prediction. Tighter than the unique-match search window
+  because the pass-1 prior already put the prediction within a few pixels of the brightness
+  peak.
+- ``centroid_box_half_px`` — int, default ``3`` px. Half-width of the
+  brightness-weighted-moment box around each accepted peak.
+- ``max_per_star_residual_px`` — float, default ``4.0`` px. A star whose detected centroid
+  sits more than this many pixels from the shifted prediction is dropped before the average;
+  almost certainly a wrong peak.
+- ``detection_sigma`` — float, default ``4.0`` (dimensionless). Detection-threshold
+  multiplier on the per-image noise sigma; the brightest pixel in the refinement window must
+  clear ``detection_sigma * image_noise_sigma`` to be accepted.
+- ``min_inliers`` — int, default ``1`` (count). Below this many surviving inliers the
+  technique reports a spurious zero-confidence result instead of attempting the average.
+- ``at_edge_tolerance_px`` — float, default ``1.0`` px. The reported absolute translation
+  is flagged :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` when its absolute distance from any search-window axis bound falls
+  within this tolerance.
+- ``single_inlier_confidence_cap`` — float, default ``0.5`` (dimensionless). Post-sigmoid
+  confidence cap when the refine fit had only one inlier. A 1-star refine carries no
+  independent cross-check beyond the prior it was handed; the cap keeps the technique from
+  outranking a 1-star unique-match on the same observation.
+- ``rotation_at_edge_fraction`` — float, default ``0.95`` (dimensionless). Fraction of
+  :attr:`~nav.nav_orchestrator.nav_context.NavContext.max_rotation_deg` at which the converged rotation magnitude trips :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge`. Only the
+  multi-inlier Procrustes path uses this threshold; a 1-inlier refine always reports rotation
+  as unobservable.
+
+Per-instrument overrides
+------------------------
+
+The eight keys above are global; the per-instrument YAML files in
+``src/nav/config_files/config_4N0_inst_*.yaml`` do not override any of them. The
+camera-rotation flag (:attr:`~nav.nav_orchestrator.nav_context.NavContext.fit_camera_rotation`) and the rotation cap (:attr:`~nav.nav_orchestrator.nav_context.NavContext.max_rotation_deg`)
+that this technique reads off the per-image
+:class:`~nav.nav_orchestrator.nav_context.NavContext` come from the per-instrument
+:class:`~nav.nav_orchestrator.instrument_config.InstrumentSettings`.
 
 Confidence formula
--------------------
+------------------
 
-The confidence coefficients live in the ``techniques.StarRefineNav`` stanza of
-``config_510_techniques.yaml``.  The sigmoid baseline is ``alpha0 = -1.0`` and
-hard-zero gates force confidence to zero when ``at_edge`` or ``spurious`` is true;
-the single-inlier cap above is applied after the sigmoid.  See
-:doc:`dev_guide_techniques_confidence` for the sigmoid mathematics.
+The technique reports a calibrated confidence in :math:`[0, 1]` produced by the shared sigmoid
+combination, see :doc:`dev_guide_techniques_dt_fitting` for the per-term arithmetic and
+:doc:`dev_guide_techniques` for the family-level overview. The formula spec is
+``techniques.StarRefineNav`` in the same YAML file and consumes attributes off
+:class:`~nav.nav_technique.diagnostics.StarRefineDiagnostics` plus :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious`.
 
-- ``n_stars_used`` -- alpha = 1.0, offset = 0, divisor = 5.0, cap at 1.0.  Number of
-  stars that survived the per-star quality gates; more inliers add independent
-  constraints.
-- ``median_pos_err_px`` -- alpha = -1.0, offset = 0, divisor = 1.0, no cap.  Median
-  per-star refinement positional error; a lower error means a tighter refinement.
-- ``residual_scatter_px`` -- alpha = -1.0, offset = 0, divisor = 1.0, no cap.  Per-axis
-  RMS scatter of the per-star residuals; lower scatter is a more internally
-  consistent fit.
+- :attr:`~nav.nav_technique.diagnostics.StarRefineDiagnostics.n_stars_used` — alpha = 1.0,
+  offset = 0.0, divisor = 5.0, cap at 1.0. Number of stars that survived the per-star
+  quality gates. More inliers earn confidence up to a five-star saturation point.
+- :attr:`~nav.nav_technique.diagnostics.StarRefineDiagnostics.median_pos_err_px` —
+  alpha = -1.0, offset = 0.0, divisor = 1.0, no cap. Median per-star Euclidean residual
+  (observed centroid vs. shifted prediction). Larger residuals pull confidence down.
+- :attr:`~nav.nav_technique.diagnostics.StarRefineDiagnostics.residual_scatter_px` —
+  alpha = -1.0, offset = 0.0, divisor = 1.0, no cap. Per-axis weighted RMS of the per-star
+  residuals about the fitted delta. Internally inconsistent inlier sets pull confidence
+  down.
+
+Hard-zero gate: :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces confidence to zero before the
+sigmoid is evaluated. The constant baseline is :math:`\alpha_{0} = -1.0`. No post-sigmoid
+``hard_cap`` is applied at the spec level; the ``single_inlier_confidence_cap`` above is
+applied by the technique itself only when exactly one inlier survived.
 
 Implementation
 ==============
 
-Source files: ``src/nav/nav_technique/nav_technique_star_refine.py`` and the shared
-star helpers in ``nav.nav_technique._star_helpers``.  The public class is
-:py:class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav`, a subclass
-of :py:class:`~nav.nav_technique.nav_technique.NavTechnique`.  Its
-``accepts_feature_types`` is the single ``STAR`` feature type, its
-``requires_prior`` is ``True`` (it runs in pass 2), and its
-``confidence_attributes`` set names ``at_edge``, ``spurious``, ``n_stars_used``,
-``median_pos_err_px``, and ``residual_scatter_px``.
+Source files:
 
-:py:meth:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav.is_feasible`
-reads only feature metadata and returns feasible when at least one usable ``STAR``
-feature is present.
+- ``src/nav/nav_technique/nav_technique_star_refine.py`` —
+  :class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav` and its private
+  collect-residuals / build-covariance / Procrustes-refit / fail-shape helpers.
+- ``src/nav/nav_technique/_star_helpers.py`` — shared star-feature helpers
+  (``usable_stars``,
+  ``local_centroid``,
+  ``similarity_transform_fit``). The leading underscore
+  marks the module as package-private; every star technique imports it.
+- ``src/nav/nav_technique/confidence.py`` — the shared sigmoid-combination evaluator.
+- ``src/nav/nav_technique/diagnostics.py`` —
+  :class:`~nav.nav_technique.diagnostics.StarRefineDiagnostics`.
 
-:py:meth:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav.navigate`
-reads the prior offset from the context; because the technique is prior-required,
-the orchestrator only calls it on pass 2, but if the prior is somehow absent the
-method returns through the private ``_fail`` path.  Given a prior it collects
-per-star residuals through the private ``_collect_residuals`` (each star
-re-centroided around its prior-shifted prediction, dropped when no peak is found
-or the residual exceeds the maximum), returns ``_fail`` when fewer than the
-minimum inliers survive, and otherwise computes the inverse-variance-weighted
-delta, the median positional error, and the per-axis residual scatter.
+Public class :class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav`, base
+:class:`~nav.nav_technique.nav_technique.NavTechnique`.
 
-The result shape branches on the inlier count and on whether rotation is fit:
+Class attributes:
 
-- No rotation: the ``(2, 2)`` covariance from ``_build_covariance`` (the Cramer-Rao
-  floor with one inlier, the residual scatter with two or more); ``rotation_rad``
-  and ``sigma_rotation_rad`` are ``None``; the reported offset is the prior plus
-  the delta.
-- Rotation requested with two or more inliers: the private ``_fit_rotation_3dof``
-  runs a Procrustes refit, returning the rotation angle, its sigma, a full
-  ``(3, 3)`` covariance, and the absolute offset; the at-edge flag is recomputed
-  against that absolute offset and the rotation-at-edge test.
-- Rotation requested with a single inlier: the ``(2, 2)`` covariance is promoted to
-  the rank-deficient ``(3, 3)`` form via ``embed_rotation_unobservable``,
-  ``rotation_rad`` is fixed at ``0.0`` and ``sigma_rotation_rad`` is the
-  rotation-unobservable sentinel from ``rotation_unobservable_sigma_rad``.
+- :attr:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav.name` —
+  ``'StarRefineNav'``.
+- :attr:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav.accepts_feature_types`
+  — ``frozenset({STAR})``.
+- :attr:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav.requires_prior` —
+  ``True``. The orchestrator only invokes this technique on pass 2, after the pass-1
+  ensemble has produced a prior offset.
+- :attr:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav.confidence_attributes`
+  — ``{'at_edge', 'spurious', 'n_stars_used', 'median_pos_err_px', 'residual_scatter_px'}``.
 
-A single-inlier result additionally has its post-sigmoid confidence clamped to the
-single-inlier cap.  The YAML formula is evaluated through
-``evaluate_sigmoid_combination`` and logged through ``log_confidence_breakdown``
-(see :doc:`dev_guide_techniques_confidence`); the inverse-variance weighting reuses
-the per-feature Cramer-Rao trace through the module-private
-``_trace_inverse_variance`` helper.
+Public methods (autodocumented at :doc:`/api_reference/api_nav_technique`):
+:meth:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav.is_feasible` and
+:meth:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav.navigate`.
 
-Every field of
-:py:class:`~nav.nav_technique.diagnostics.StarRefineDiagnostics` is populated and
-feeds the confidence formula above:
-:py:attr:`~nav.nav_technique.diagnostics.StarRefineDiagnostics.n_stars_used`,
-:py:attr:`~nav.nav_technique.diagnostics.StarRefineDiagnostics.median_pos_err_px`,
-and
-:py:attr:`~nav.nav_technique.diagnostics.StarRefineDiagnostics.residual_scatter_px`.
-The return value is a
-:py:class:`~nav.nav_technique.technique_result.NavTechniqueResult`.
+Diagnostics
+-----------
+
+:class:`~nav.nav_technique.diagnostics.StarRefineDiagnostics`:
+
+- :attr:`~nav.nav_technique.diagnostics.StarRefineDiagnostics.n_stars_used` — count of stars
+  that survived the per-star quality gates. Consumed by the confidence formula and by the
+  single-inlier confidence cap.
+- :attr:`~nav.nav_technique.diagnostics.StarRefineDiagnostics.median_pos_err_px` — median
+  per-star Euclidean residual. Consumed by the confidence formula.
+- :attr:`~nav.nav_technique.diagnostics.StarRefineDiagnostics.residual_scatter_px` —
+  per-axis weighted RMS of the per-star residuals about the fitted delta. Consumed by the
+  confidence formula.
+
+Call path traced through
+:meth:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav.navigate`:
+
+1. Open a logged section. Filter the offered features down to
+   ``usable_stars`` (predictable, not in a body
+   silhouette, not in a saturation / cosmic-ray mask).
+2. **No prior on the context.**  Return early with a spurious zero-confidence result via the
+   private ``_fail`` helper, with ``reason='no_prior_offset_on_context'``.
+3. Read the prior offset, the extfov image, and the per-image noise sigma off the context.
+   Loop over the usable stars: for each, call
+   ``local_centroid`` against the shifted prediction; drop
+   stars with no peak above the detection threshold or whose centroid sits more than
+   ``max_per_star_residual_px`` from the shifted prediction. Compute the per-star residuals
+   and inverse-trace weights.
+4. **Too few inliers.**  When the surviving inlier count is below ``min_inliers``, return a
+   spurious zero-confidence result via ``_fail``.
+5. Compute the inverse-variance weighted delta, the median per-star residual distance, and
+   the per-axis weighted scatter about the delta. Build a
+   :class:`~nav.nav_technique.diagnostics.StarRefineDiagnostics`.
+6. Read the search-window margin via
+   :func:`~nav.nav_technique.nav_technique.search_window_for_obs` and apply the at-edge test
+   to the absolute offset (prior + delta). Evaluate the confidence spec via
+   :func:`~nav.nav_technique.confidence.evaluate_sigmoid_combination` and log the per-term
+   breakdown.
+7. **Single-inlier post-sigmoid cap.**  When exactly one inlier survived and the raw
+   confidence exceeds ``single_inlier_confidence_cap``, the confidence is clipped to the cap
+   and a log line records the clamp.
+8. Build the (2, 2) translation covariance via the private ``_build_covariance`` helper:
+   single-inlier returns the feature's CRLB; multi-inlier returns the diagonal of per-axis
+   residual variances floored at the inverse total weight.
+9. Result-shape branches on the rotation flag and the inlier count:
+
+   - **Translation only**
+     (:attr:`~nav.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` false). The
+     reported covariance is the (2, 2) block;
+     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.rotation_rad` and
+     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.sigma_rotation_rad` are
+     ``None``.
+   - **Rotation fit, two or more inliers.**  Call the private ``_fit_rotation_3dof`` helper,
+     which reconstructs the per-star detection and shifted-prediction positions from the
+     residuals and runs ``similarity_transform_fit`` to extract the rotation and translation.
+     The Procrustes refit can pull the absolute offset outside the search window even when
+     the delta-only path was inside, so
+     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` is re-evaluated
+     against the updated absolute offset and the rotation magnitude. The
+     reported covariance is the (3, 3) block with the per-axis translation variances on the
+     leading diagonal and the rotation variance on the bottom-right.
+   - **Rotation fit, single inlier.**  No rotation evidence exists; the technique embeds the
+     (2, 2) translation block in a (3, 3) covariance via
+     :func:`~nav.nav_technique.nav_technique.embed_rotation_unobservable`, sets
+     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.rotation_rad` to ``0.0``,
+     and reports
+     :func:`~nav.nav_technique.nav_technique.rotation_unobservable_sigma_rad` as the sigma.
+
+10. Assemble and return the
+    :class:`~nav.nav_technique.technique_result.NavTechniqueResult`.
+    :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.feature_ids` preserves the
+    inlier set; the orchestrator's curator uses it to attribute per-star contributions at
+    audit time.
 
 Examples
 ========
 
-**one_bright_star_no_body (W1449079117_1_CALIB).** A single bright star (Vega) in
-a wide-angle frame.  On pass 1 the unique-match technique produces a prior; on
-pass 2 this technique refines it.  Because only one star is predictable, the
-refine has a single inlier, so its confidence is capped at the single-inlier limit
-of 0.5 and the per-feature Cramer-Rao floor is reported as the covariance.  The
-sidecar records ``primary_technique: StarRefineNav`` with ``status: success`` and
-``confidence_tier: low`` -- the refined offset is accepted but at modest
-confidence, against the operator ground truth of ``(3.06, -0.02)`` px.  This scene
-exercises the prior-required pass-2 hand-off and the single-inlier branch.
+``one_bright_star_no_body`` (Cassini ISS WAC, image ``W1449079117_1``)
+    Single bright star (Vega) in an otherwise empty field. The pass-1 ensemble's
+    :class:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav` recovers a
+    1-star prior; :class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav` runs on
+    pass 2, finds that single star at the shifted
+    prediction, and reports a polished offset within sub-pixel of the prior. The result fires
+    the single-inlier confidence cap (one inlier, no cross-check) and is reported with
+    confidence at most 0.5. Operator-verified ground-truth offset is
+    :math:`(\Delta v, \Delta u) = (3.06, -0.02)` px.
 
-**star_dominated (W1580760393_1_CALIB).** A dense star field would, given a
-successful pass-1 prior, give this technique many inliers, so the residual scatter
-would cross-check the joint fit and the single-inlier cap would not apply.  On the
-corpus frame the pass-1 confidence falls below the orchestrator floor (the sidecar
-pins ``status: failed``), so no prior is promoted and the refiner is not the
-primary technique there; the multi-inlier branch is the one it would take whenever
-a prior is available.
+``star_dominated`` (Cassini ISS WAC, image ``W1580760393_1``)
+    Dense star field, no body in FOV. When the pass-1
+    :class:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav` produces a
+    multi-star prior, :class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav`
+    re-centroids every predicted catalog star against the
+    image and averages the per-star residuals. Multi-inlier inputs do not fire the
+    single-inlier cap; the reported covariance is the diagonal of per-axis weighted residual
+    variances rather than the CRLB floor. Operator-verified ground-truth offset is
+    :math:`(\Delta v, \Delta u) = (-2.68, -3.68)` px.

@@ -4,7 +4,7 @@ Class Hierarchy
 
 The autonomous-navigation pipeline is built around four cooperating
 groups of classes — observation snapshots, predicted-scene models,
-per-feature techniques, and the orchestrator that runs them.  The
+per-feature techniques, and the orchestrator that runs them. The
 following Mermaid diagram captures the principal relationships; the
 narrative below the diagram describes each group in turn.
 
@@ -15,8 +15,8 @@ narrative below the diagram describes each group in turn.
 
       class NavBase {
           +__init__(*, config=None, **kwargs)
-          +logger
-          +config
+          +config: Config
+          +logger: PdsLogger
       }
 
       class DataSet {
@@ -53,20 +53,43 @@ narrative below the diagram describes each group in turn.
           +instances_for_obs(obs)$ list[NavModel]
       }
 
+      class NavModelStars {
+          +create_model()
+          +to_features(context)
+          +to_annotations(context)
+      }
+
       class NavModelBodyBase {
           <<abstract>>
+          +_render_silhouette(...)
+          +_create_edge_annotations(...)
+      }
+
+      class NavModelBody {
+          +create_model()
+          +to_features(context)
+          +to_annotations(context)
       }
 
       class NavModelBodySimulated {
+          +create_model()
           +to_features(context)
           +to_annotations(context)
       }
 
       class NavModelRingsBase {
           <<abstract>>
+          +_create_edge_annotations(...)
+      }
+
+      class NavModelRings {
+          +create_model()
+          +to_features(context)
+          +to_annotations(context)
       }
 
       class NavModelRingsSimulated {
+          +create_model()
           +to_features(context)
           +to_annotations(context)
       }
@@ -86,10 +109,16 @@ narrative below the diagram describes each group in turn.
           +navigate(features, context)* NavTechniqueResult
       }
 
-      class NavTechniqueManual {
-          +is_feasible(features)
-          +navigate(features, context)
-      }
+      class StarUniqueMatchNav
+      class StarFieldFromCatalogNav
+      class StarRefineNav
+      class BodyLimbNav
+      class BodyTerminatorNav
+      class BodyDiscCorrelateNav
+      class BodyBlobNav
+      class RingEdgeNav
+      class RingAnnulusNav
+      class NavTechniqueManual
 
       class NavOrchestrator {
           +__init__(models, *, config=None, only_models='*', only_techniques='*')
@@ -107,10 +136,6 @@ narrative below the diagram describes each group in turn.
           +flags: NavFeatureFlags
       }
 
-      class NavFeatureExtractor {
-          <<future>>
-      }
-
       class NavTechniqueResult {
           <<frozen dataclass>>
           +technique_name
@@ -125,11 +150,15 @@ narrative below the diagram describes each group in turn.
       class NavResult {
           <<frozen dataclass>>
           +status
+          +status_reason
           +offset_px / sigma_px
-          +confidence_rank
+          +covariance_px2
+          +confidence / confidence_rank
+          +rotation_rad / sigma_rotation_rad
           +per_technique
           +feature_inventory
           +image_classifier
+          +model_metadata
           +annotations
           +provenance
       }
@@ -138,10 +167,50 @@ narrative below the diagram describes each group in turn.
           <<frozen dataclass>>
           +obs
           +image_ext
+          +sensor_mask_ext
           +image_noise_sigma
           +saturation_mask_ext
           +cosmic_ray_mask_ext
+          +image_classifier
+          +image_gradient_ext
+          +image_gradient_vu_ext
+          +image_edge_dt_ext
           +prior_offset_px
+          +prior_covariance_px2
+          +fit_camera_rotation
+          +provenance
+      }
+
+      class FeatureReliabilityGate {
+          +thresholds: dict[NavFeatureType, float]
+          +apply(features) tuple[list, list]
+      }
+
+      class InstrumentSettings {
+          <<frozen dataclass>>
+          +data_units
+          +saturation_dn
+          +marker_value
+          +thresholds: ImageQualityThresholds
+          +fit_camera_rotation
+          +max_rotation_deg
+          +signal_dn_to_image_unit_scale
+      }
+
+      class NavImageClassifier {
+          +classify(image, *, settings) NavImageClassifierResult
+      }
+
+      class Annotations {
+          +add_annotations(other)
+          +combine(offset_px) NDArray
+      }
+
+      class Annotation {
+          <<abstract>>
+          +color
+          +avoid_mask
+          +draw(image)*
       }
 
       NavBase <|-- DataSet
@@ -153,30 +222,49 @@ narrative below the diagram describes each group in turn.
       Obs <|-- ObsSnapshot
       ObsSnapshot <|-- ObsSnapshotInst
 
+      NavModel <|-- NavModelStars
       NavModel <|-- NavModelBodyBase
       NavModel <|-- NavModelRingsBase
       NavModel <|-- NavModelTitan
 
+      NavModelBodyBase <|-- NavModelBody
       NavModelBodyBase <|-- NavModelBodySimulated
+      NavModelRingsBase <|-- NavModelRings
       NavModelRingsBase <|-- NavModelRingsSimulated
 
+      NavTechnique <|-- StarUniqueMatchNav
+      NavTechnique <|-- StarFieldFromCatalogNav
+      NavTechnique <|-- StarRefineNav
+      NavTechnique <|-- BodyLimbNav
+      NavTechnique <|-- BodyTerminatorNav
+      NavTechnique <|-- BodyDiscCorrelateNav
+      NavTechnique <|-- BodyBlobNav
+      NavTechnique <|-- RingEdgeNav
+      NavTechnique <|-- RingAnnulusNav
       NavTechnique <|-- NavTechniqueManual
 
       NavOrchestrator --> NavModel : iterates
       NavOrchestrator --> NavTechnique : iterates registry
       NavOrchestrator --> NavContext : builds
       NavOrchestrator --> NavResult : produces
+      NavOrchestrator o-- FeatureReliabilityGate : owns
+      NavOrchestrator o-- InstrumentSettings : reads
+      NavOrchestrator o-- NavImageClassifier : runs
+      NavOrchestrator o-- Annotations : merges
       NavModel ..> NavFeature : emits
+      NavModel ..> Annotations : emits
       NavTechnique ..> NavFeature : consumes
       NavTechnique ..> NavTechniqueResult : produces
       NavResult --> NavTechniqueResult : per_technique
+      NavResult --> Annotations : annotations
+      Annotations o-- Annotation : aggregates
 
 
 Top-level driver
 ================
 
 :class:`~nav.nav_orchestrator.orchestrator.NavOrchestrator` is the
-top-level driver.  Given a list of pre-built
+top-level driver. Given a list of pre-built
 :class:`~nav.nav_model.nav_model.NavModel` instances and an
 :class:`~nav.obs.obs_snapshot.ObsSnapshot`, the orchestrator runs the
 full two-pass navigation pipeline: it builds a
@@ -186,28 +274,91 @@ model's ``create_model``, gathers
 gates them by reliability, runs every feasible
 :class:`~nav.nav_technique.nav_technique.NavTechnique`, and reconciles
 the per-technique results through
-:func:`~nav.nav_orchestrator.ensemble.ensemble`.  The output is a single
+:func:`~nav.nav_orchestrator.ensemble.ensemble`. The output is a single
 :class:`~nav.nav_orchestrator.nav_result.NavResult`.
 
 Glob-pattern filters at construction time
 (``only_models='body:MIMAS'``,
 ``only_techniques='!StarFieldFromCatalogNav'``) restrict which models or
 techniques run, supporting debugging and per-image study without
-modifying registry contents.
+modifying registry contents. See
+:ref:`selecting-models-and-techniques` in the user guide for the full
+pattern syntax (globs, ``!`` exclusion, prefix-only shorthand) and the
+list of shipping model and technique names.
 
 NavBase
 =======
 
 :class:`~nav.support.nav_base.NavBase` is the shared base class for the
 orchestrator, every model, every technique, and the dataset / obs
-hierarchies.  It provides ``config`` and ``logger`` properties; every
-subclass calls ``super().__init__(config=...)`` to inherit them.
+hierarchies. It carries no per-instance state beyond two read-only
+properties:
+
+- :attr:`~nav.support.nav_base.NavBase.config` — the
+  :class:`~nav.config.config.Config` object handed in at construction
+  time, defaulting to the module-level
+  :data:`~nav.config.config.DEFAULT_CONFIG` singleton when none is
+  supplied. Subclasses read every YAML-driven tunable through this
+  property so per-instance overrides flow naturally for tests.
+- :attr:`~nav.support.nav_base.NavBase.logger` — the project-wide
+  ``IMAGE_LOGGER`` (a :class:`pdslogger.PdsLogger`) loaded from
+  :mod:`nav.config.logger`. Subclasses log through this property; never
+  through the stdlib :mod:`logging` module.
+
+Construction follows a single contract: every subclass takes a
+keyword-only ``config`` parameter and forwards it via
+``super().__init__(config=config, **kwargs)``. The
+``**kwargs`` pass-through lets subclass-specific keyword arguments flow
+through without forcing the base class to enumerate them.
+
+FeatureReliabilityGate
+======================
+
+:class:`~nav.feature.reliability.FeatureReliabilityGate` is the gate the
+orchestrator runs between feature extraction and technique invocation.
+It carries a per-:class:`~nav.feature.feature_type.NavFeatureType`
+threshold mapping (defaulted from
+:data:`~nav.feature.reliability.DEFAULT_RELIABILITY_THRESHOLDS`) and
+exposes a single
+:meth:`~nav.feature.reliability.FeatureReliabilityGate.apply` method that
+splits an extracted feature list into ``(kept, gated)``: features whose
+self-assessed
+:attr:`~nav.feature.feature.NavFeature.reliability` falls below the
+per-type threshold are emitted as
+:class:`~nav.feature.reliability.GatedFeatureRecord` instances carrying a
+stable ``reason`` string; everything else passes through unmodified.
+
+Per-instance threshold overrides come from the configuration loader (the
+``features`` block in ``config_510_techniques.yaml`` and any per-instrument
+override under ``config_4N0_inst_*.yaml``). Threshold values are validated
+on construction: they must be finite floats in :math:`[0, 1]` and keyed
+by :class:`~nav.feature.feature_type.NavFeatureType` enum members. The
+gate is stateless — the same instance can be reused across images — and
+deterministic given its thresholds.
+
+Dataset, Obs, and ObsSnapshot
+=============================
+
+:class:`~nav.dataset.dataset.DataSet` handles access to image files and
+metadata; per-mission subclasses
+(``DataSetPDS3CassiniISS``, ``DataSetPDS3VoyagerISS``,
+``DataSetPDS3GalileoSSI``, ``DataSetPDS3NewHorizonsLORRI``,
+``DataSetSim``) implement archive-specific iteration and PDS4 bundle
+hooks.
+
+:class:`~nav.obs.obs.Obs` is the abstract observation base.
+:class:`~nav.obs.obs_snapshot.ObsSnapshot` adds backplane handling and
+extended-FOV accessors; per-instrument subclasses derive from
+:class:`~nav.obs.obs_snapshot_inst.ObsSnapshotInst` and implement the
+``from_file(path, ...)`` constructor. See
+:doc:`dev_guide_observations` for the per-mission subclass list, the
+public API surface, and the new-instrument checklist.
 
 NavModel
 ========
 
 :class:`~nav.nav_model.nav_model.NavModel` is the abstract base for
-predicted-scene generators.  Subclasses implement three methods:
+predicted-scene generators. Subclasses implement three methods:
 
 - ``create_model()`` populates the model's internal state and
   ``metadata`` dict.
@@ -216,43 +367,92 @@ predicted-scene generators.  Subclasses implement three methods:
   technique consumption.
 - ``to_annotations(context)`` returns an
   :class:`~nav.annotation.annotations.Annotations` collection that the
-  orchestrator merges into ``NavResult.annotations``.
+  orchestrator merges into
+  :attr:`~nav.nav_orchestrator.nav_result.NavResult.annotations`.
 
 Concrete subclasses self-register via ``__init_subclass__`` unless they
-opt out with ``_abstract = True``.  The class method
+opt out with ``_abstract = True``. The class method
 ``instances_for_obs(obs)`` is the per-class hook that
-``build_models_for_obs`` iterates.  Today's concrete subclasses include
-:class:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated`,
-:class:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated`,
-and :class:`~nav.nav_model.nav_model_titan.NavModelTitan` (a registered
-stub).  Real-scene body / ring / star models replace the simulated ones
-when available.
+``build_models_for_obs`` iterates. Today's concrete subclasses are
+:class:`~nav.nav_model.stars.nav_model_stars.NavModelStars` (catalog-driven
+star navigation, one instance per observation),
+:class:`~nav.nav_model.nav_model_body.NavModelBody` (catalog-driven
+per-body silhouette navigation),
+:class:`~nav.nav_model.nav_model_rings.NavModelRings` (catalog-driven
+per-planet ring navigation), the simulated-image siblings
+:class:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated`
+and
+:class:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated`
+(rendered from operator-supplied parameters), and the placeholder
+:class:`~nav.nav_model.nav_model_titan.NavModelTitan` (registered stub
+for atmospheric-body navigation; emits no features). A
+``NavModelStarsSimulated`` slot is reserved without an implementation.
 
-The :mod:`nav.nav_model.rings` subpackage carries the catalog-driven
-ring-feature data model (``RingFeature``, ``RingFeatureFilter``,
-``RingRenderResult``, ``RingsRenderContext``, ``ring_math``,
-``ring_types``); see
-:doc:`dev_guide_navigation_models_rings` for details.
+Per-family data models live alongside the renderer classes:
+
+- **Stars** — the :mod:`nav.nav_model.stars` subpackage carries
+  multi-catalog reduction (``catalog``), per-star body / ring conflict
+  marking (``conflicts``), predicted-SNR + B-V mapping
+  (``predicted_snr``), smear-aware PSF construction (``smeared_psf``),
+  and on-image source detection (``detection``); see
+  :doc:`dev_guide_navigation_models_star` for details.
+- **Bodies** — per-body shape, albedo, and SPK-residual values live in
+  :mod:`nav.nav_model.body_shape`
+  (:class:`~nav.nav_model.body_shape.BodyShape`,
+  :data:`~nav.nav_model.body_shape.BODY_SHAPE_TABLE`,
+  :data:`~nav.nav_model.body_shape.DEFAULT_BODY_SHAPE`,
+  :func:`~nav.nav_model.body_shape.shape_for_body`); see
+  :doc:`dev_guide_navigation_models_body` for details.
+- **Rings** — the :mod:`nav.nav_model.rings` subpackage carries the
+  catalog-driven ring-feature data model (``RingFeature``,
+  ``RingFeatureFilter``, ``RingRenderResult``, ``RingsRenderContext``,
+  ``ring_math``, ``ring_types``); see
+  :doc:`dev_guide_navigation_models_ring` for details.
+- **Titan** — placeholder only. A haze-aware data model is reserved
+  without an implementation; the registered stub
+  :class:`~nav.nav_model.nav_model_titan.NavModelTitan` reserves the
+  registry slot, and ``NavModelTitanSimulated`` is reserved as the
+  simulated-image sibling. See :doc:`dev_guide_navigation_models_titans`
+  for details.
 
 NavTechnique
 ============
 
 :class:`~nav.nav_technique.nav_technique.NavTechnique` is the abstract
-base for navigation algorithms.  Techniques consume a subset of
+base for navigation algorithms. Techniques consume a subset of
 :class:`~nav.feature.feature.NavFeature` instances filtered by
 ``accepts_feature_types`` and produce a
 :class:`~nav.nav_technique.technique_result.NavTechniqueResult` with an
 offset, covariance, calibrated confidence, and per-technique
-diagnostics.  ``is_feasible(features)`` is consulted before invocation
+diagnostics. ``is_feasible(features)`` is consulted before invocation
 and reads feature metadata only — never pixels.
 
 Concrete subclasses self-register.
 :class:`~nav.nav_technique.nav_technique_manual.NavTechniqueManual`
 opts out of the auto-discovery registry (it spawns a PyQt6 dialog) and
-is invoked by interactive drivers only.  Real-scene techniques
-(``BodyDiscCorrelateNav``, ``BodyLimbNav``,
-``StarFieldFromCatalogNav``, ...) plug in to the same registry as they
-arrive.
+is invoked by interactive drivers only. The shipping autonomous
+techniques are, by family:
+
+- **Star** —
+  :class:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav`,
+  :class:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav`,
+  :class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav`.
+- **Body** —
+  :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav`,
+  :class:`~nav.nav_technique.nav_technique_body_terminator.BodyTerminatorNav`,
+  :class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav`,
+  :class:`~nav.nav_technique.nav_technique_body_blob.BodyBlobNav`.
+- **Ring** —
+  :class:`~nav.nav_technique.nav_technique_ring_edge.RingEdgeNav`,
+  :class:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav`.
+- **Titan** — no Titan-specific techniques are registered;
+  :class:`~nav.nav_model.nav_model_titan.NavModelTitan` is a placeholder
+  that emits no features, so no technique consumes them.
+
+The DT-based body / ring techniques share their coarse-NCC +
+Levenberg-Marquardt + Tukey-biweight machinery via
+:mod:`nav.nav_technique.dt_fitting`. See :doc:`dev_guide_techniques`
+for the per-technique deep dive.
 
 NavFeature and NavFeatureGeometry
 =================================
@@ -268,7 +468,7 @@ The ``geometry`` field carries one of the
 (``StarGeometry``, ``LimbPolyline``, ``TerminatorPolyline``,
 ``RingEdgePolyline``, ``BodyDiscGeometry``, ``BodyBlobGeometry``,
 ``RingAnnulusGeometry``, ``CartographicModelGeometry``); each variant
-records the in-image position the technique needs.  The ``flags`` field
+records the in-image position the technique needs. The ``flags`` field
 carries one of the
 :data:`~nav.feature.flags.NavFeatureFlags` typed dataclasses, capturing
 feature-type-specific booleans (for example,
@@ -298,22 +498,6 @@ a class) that performs the precision-weighted Kalman-style merge.
 ``NavResult`` into a JSON-friendly metadata block written by
 ``navigate_image_files``.
 
-Dataset, Obs, and ObsSnapshot
-=============================
-
-:class:`~nav.dataset.dataset.DataSet` handles access to image files and
-metadata; per-mission subclasses
-(``DataSetPDS3CassiniISS``, ``DataSetPDS3VoyagerISS``,
-``DataSetPDS3GalileoSSI``, ``DataSetPDS3NewHorizonsLORRI``,
-``DataSetSim``) implement archive-specific iteration and PDS4 bundle
-hooks.
-
-:class:`~nav.obs.obs.Obs` is the abstract observation base.
-:class:`~nav.obs.obs_snapshot.ObsSnapshot` adds backplane handling and
-extended-FOV accessors; per-instrument subclasses derive from
-:class:`~nav.obs.obs_snapshot_inst.ObsSnapshotInst` and implement the
-``from_file(path, ...)`` constructor.
-
 Annotation
 ==========
 
@@ -321,6 +505,11 @@ The :mod:`nav.annotation` subsystem composes labels and graphical
 elements into an overlay used by the summary PNG.
 :class:`~nav.annotation.annotations.Annotations` aggregates
 model-provided annotations and renders them with appropriate coloring
-and contrast stretching.  Each ``NavModel.to_annotations`` returns a
-fresh ``Annotations`` collection; the orchestrator merges them into
-``NavResult.annotations`` via ``add_annotations``.
+and contrast stretching. Each
+:meth:`~nav.nav_model.nav_model.NavModel.to_annotations` returns a fresh
+:class:`~nav.annotation.annotations.Annotations` collection; the
+orchestrator merges them into
+:attr:`~nav.nav_orchestrator.nav_result.NavResult.annotations` via
+:meth:`~nav.annotation.annotations.Annotations.add_annotations`. See
+:doc:`dev_guide_annotations` for the per-class API, the per-:class:`~nav.nav_model.nav_model.NavModel`
+contributions, and the source-of-configuration map.

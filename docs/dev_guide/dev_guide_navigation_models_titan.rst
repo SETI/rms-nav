@@ -1,57 +1,98 @@
-=======================
+==========================================================
 Titan Navigation Model
-=======================
+==========================================================
 
 Overview
 ========
 
-The Titan navigation model is a registered placeholder for atmospheric-body navigation.  A body
-with a thick opaque atmosphere does not present an ellipsoidal hard limb: the visible edge is the
-top of the haze, it shifts with wavelength, and the solid surface beneath is invisible.  Fitting
-such a body requires a haze-aware limb algorithm with per-filter haze profiles, which is not part
-of the current pipeline.  The model therefore predicts no image feature and emits nothing.
+:class:`~nav.nav_model.nav_model_titan.NavModelTitan` is a registered placeholder for
+atmospheric-body navigation. Bodies with thick opaque atmospheres (Titan, Venus, Triton's
+nitrogen frost layer at low phase) need a fundamentally different algorithm than ellipsoid-
+limb fitting: the visible "limb" is the haze top, the haze top varies with wavelength, and
+the surface inside is invisible to optical wavelengths. The model exists in
+``NavModel._registry`` so the orchestrator's
+:func:`~nav.nav_model.nav_model.build_models_for_obs` driver and the per-image curator know
+the placeholder is here, but it never emits features or annotations.
 
-The model registers with the orchestrator's auto-discovery registry like any other concrete
-navigation model, but it inherits the empty default
-:py:meth:`~nav.nav_model.nav_model.NavModel.instances_for_obs` and so is never auto-instantiated
-from an observation.  When constructed and run it produces zero features and zero annotations, so
-the orchestrator falls through to the other models — stars and rings — on a Titan scene.
+A Titan-bearing image proceeds through the orchestrator as though no Titan-aware model had
+registered: the placeholder's :meth:`~nav.nav_model.nav_model.NavModel.instances_for_obs`
+inherits the base-class no-op, so the orchestrator constructs no instance and the technique
+pipeline sees no Titan-derived feature. The image still navigates against any other body,
+ring, or star in the FOV. A haze-aware extractor would override
+:meth:`~nav.nav_model.nav_model.NavModel.instances_for_obs` to opt in.
 
 Theory
 ======
 
-There is no algorithm to describe.  The model is an inert placeholder: it implements the required
-hooks so the registry stays uniform, but it carries no rendering, no geometry, and no uncertainty
-model.  The conceptual reason it is empty is that an opaque-atmosphere limb is photometrically and
-geometrically different from an ellipsoidal hard limb, and the haze-aware fit it would need is
-unimplemented.
+Atmospheric-body navigation is conceptually distinct from ellipsoid-limb fitting:
+
+- The optical limb is the haze top, not the solid surface. The haze top moves with
+  wavelength (deep red sees a slightly lower altitude than blue), so a single ellipsoidal
+  reference shape does not describe every filter.
+- Phase angle changes the apparent limb shape because forward-scattered haze brightens
+  the near-edge differently from back-scattered haze on the far edge.
+- The haze altitude varies with latitude, season, and (on Titan) the year-by-year
+  atmospheric circulation; a fixed reference radius is wrong by tens of kilometres
+  depending on epoch.
+
+The corresponding algorithm requires a per-filter haze profile, a phase-aware limb-fit cost
+function, and per-image refraction modelling. None of those components are wired into the
+technique pipeline; the placeholder reserves the registry slot for a haze-aware extractor.
+
+Restrictions and assumptions
+----------------------------
+
+The placeholder makes no algorithmic assumptions because it runs no algorithm. Every
+Titan-class body in an extended FOV produces no feature; downstream techniques receive
+no TITAN_LIMB feature.
+
+Sources of uncertainty
+----------------------
+
+The placeholder reports no uncertainty.
 
 Configuration
 =============
 
-The Titan model consumes no configuration in the predicted-scene sense.  A ``titan`` section
-exists in ``src/nav/config_files/config_060_titan.yaml`` with a single key,
-``atmosphere_height`` (default ``700`` km), reserved for the future haze-aware algorithm; the
-current model does not read it.
+The placeholder consumes no YAML configuration of its own. The shared
+:class:`~nav.config.config.Config` object is passed in for future use; the placeholder
+records ``stub: True`` on its
+:attr:`~nav.nav_model.nav_model.NavModel.metadata` dict so the curator surfaces the slot in
+the per-image JSON sidecar.
 
 Implementation
 ==============
 
-Source file: ``src/nav/nav_model/nav_model_titan.py``.  The public class is
-:py:class:`~nav.nav_model.nav_model_titan.NavModelTitan`, a subclass of
-:py:class:`~nav.nav_model.nav_model.NavModel`.
+Source file: ``src/nav/nav_model/nav_model_titan.py`` —
+:class:`~nav.nav_model.nav_model_titan.NavModelTitan`.
 
-:py:meth:`~nav.nav_model.nav_model_titan.NavModelTitan.create_model` records a single stub marker
-in metadata and has no other state to populate.
-:py:meth:`~nav.nav_model.nav_model_titan.NavModelTitan.to_features` returns an empty list, so the
-model emits no :py:class:`~nav.feature.feature_type.NavFeatureType` values.
-:py:meth:`~nav.nav_model.nav_model_titan.NavModelTitan.to_annotations` returns an empty
-:py:class:`~nav.annotation.annotations.Annotations` collection.
+Public class :class:`~nav.nav_model.nav_model_titan.NavModelTitan`, base
+:class:`~nav.nav_model.nav_model.NavModel`. Self-registers via ``__init_subclass__`` so
+:func:`~nav.nav_model.nav_model.build_models_for_obs` discovers it.
+
+Public methods (autodocumented at :doc:`/api_reference/api_nav_model`):
+
+- :meth:`~nav.nav_model.nav_model_titan.NavModelTitan.create_model` — no-op; records
+  ``stub: True`` on :attr:`~nav.nav_model.nav_model.NavModel.metadata`.
+- :meth:`~nav.nav_model.nav_model_titan.NavModelTitan.to_features` — returns an empty
+  list.
+- :meth:`~nav.nav_model.nav_model_titan.NavModelTitan.to_annotations` — returns an empty
+  :class:`~nav.annotation.annotations.Annotations` collection.
+
+The class does not override
+:meth:`~nav.nav_model.nav_model.NavModel.instances_for_obs`; the registry registers the
+class but the default base-class implementation returns an empty list, so the
+orchestrator never constructs an instance. A haze-aware extractor would override
+:meth:`~nav.nav_model.nav_model.NavModel.instances_for_obs` to return one instance per
+visible Titan-class body.
 
 Examples
 ========
 
-No scene in ``tests/integration/image_library/images/`` is navigated by the Titan model.  On any
-observation that includes Titan, the model contributes nothing and the orchestrator relies on the
-star and ring models for the offset; see :doc:`dev_guide_navigation_models_stars` and
-:doc:`dev_guide_navigation_models_rings` for the features that carry a Titan scene.
+The Titan placeholder produces no per-image effect. A Titan-class scene proceeds
+through the orchestrator as if no Titan-bearing model had registered: the
+:meth:`~nav.nav_model.nav_model_titan.NavModelTitan.to_features` return value is empty,
+:meth:`~nav.nav_model.nav_model_titan.NavModelTitan.to_annotations` return is empty, and
+the per-image JSON sidecar's
+:attr:`~nav.nav_orchestrator.nav_result.NavResult.model_metadata` contains ``"stub": true``
+under the model's name as a record that the slot is reserved.

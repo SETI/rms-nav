@@ -26,6 +26,11 @@ nav.nav_technique
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: nav.nav_technique.confidence_config
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: nav.nav_technique.dt_fitting
    :members:
    :undoc-members:
@@ -41,27 +46,17 @@ nav.nav_technique
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_technique.nav_technique_ring_edge
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-.. automodule:: nav.nav_technique.nav_technique_manual
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-.. automodule:: nav.nav_technique.confidence_config
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 .. automodule:: nav.nav_technique.nav_technique_body_disc
    :members:
    :undoc-members:
    :show-inheritance:
 
 .. automodule:: nav.nav_technique.nav_technique_body_blob
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: nav.nav_technique.nav_technique_ring_edge
    :members:
    :undoc-members:
    :show-inheritance:
@@ -76,12 +71,17 @@ nav.nav_technique
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: nav.nav_technique.nav_technique_star_refine
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: nav.nav_technique.nav_technique_star_unique_match
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_technique.nav_technique_star_refine
+.. automodule:: nav.nav_technique.nav_technique_manual
    :members:
    :undoc-members:
    :show-inheritance:

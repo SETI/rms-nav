@@ -1,179 +1,312 @@
-====================
-Body Disc Navigation
-====================
+==========================================================
+Body Disc Correlate (BodyDiscCorrelateNav)
+==========================================================
 
 Overview
 ========
 
-The body-disc technique exploits the whole sunlit silhouette of a resolved body rather than
-its boundary: it takes the per-body brightness template the model renders for each body in the
-field, fuses the templates into one composite by Z-buffer paint so a nearer body's pixels
-overwrite a farther body's, and correlates the composite against the image to recover one
-translation (and, on rotation-fitted cameras, one rotation).  The correlation runs a pyramid
-normalised-cross-correlation that self-selects between the raw image and its gradient, so a
-smooth Lambert-shaded disc that fills the field is matched on its interior brightness while a
-sparse crescent is matched on its limb signal.  Feasibility passes when at least one body-disc
-feature carries a rendered template payload.  Feasibility fails when no body-disc feature
-carries a template.
+:class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav` recovers a single
+translation by full-disc normalised cross-correlation against a composite template fused
+from every offered ``BODY_DISC`` feature. Per-body templates are Z-buffer painted into a single
+postage stamp (the closer body's pixels overwrite the farther body's), the result is run
+through the shared pyramid-NCC machinery in :mod:`nav.support.correlate`, and the chosen
+peak is returned with a Cramer-Rao-lower-bound covariance derived from the local correlation
+curvature. Multi-body composites improve the peak's signal-to-noise as roughly
+:math:`\sqrt{N}` for ``N`` bodies and remove the "swap moon assignments" mode-failure that
+plagues per-body solo correlation.
+
+Feasibility passes when at least one offered ``BODY_DISC`` feature carries a template payload;
+feasibility fails when no offered feature has one (a body model that emitted only
+``LIMB_ARC`` / ``BODY_BLOB`` without an accompanying disc).
 
 Theory
 ======
 
-A resolved body projects a filled brightness pattern -- the lit fraction of its disc shaded by
-the local photometry -- whose position in the image is known up to the pointing error.  If a
-synthetic template of that pattern is rendered at the predicted position, the pointing error
-is exactly the translation that maximises the agreement between template and image.
-Normalised cross-correlation measures that agreement while removing additive and multiplicative
-brightness offsets, so the match does not depend on absolute calibration.  For a candidate
-offset :math:`\boldsymbol{\delta}` over the masked template support, the correlation score is
+The technique fits a per-image translation by maximising the normalised cross-correlation
+between the composite template and the observed image. It supports an optional in-plane
+rotation parameter that runs an outer NCC pyramid over a rotation schedule.
+
+Composite template construction
+-------------------------------
+
+When more than one body emits a ``BODY_DISC`` feature, the per-body templates are fused into a
+single composite by Z-buffer paint: at each pixel covered by more than one body's bounding
+box, the closer body's template value (and the closer body's mask True) overwrite the
+farther body's, so an in-front body occludes an in-behind body in the composite. The fused
+template carries one combined bounding box, one fused brightness image, and one fused mask;
+the orchestrator's
+:func:`~nav.feature.composition.compose_template_features` helper does the work.
+
+Cost function
+-------------
+
+Let :math:`T` be the composite template image and :math:`M` the composite template mask.
+Let :math:`I` be the observed image (or a mode-selected gradient of it; see below). The
+technique maximises the normalised cross-correlation
 
 .. math::
 
-   \mathrm{NCC}(\boldsymbol{\delta}) = \frac{\sum_{k} \left(I_k(\boldsymbol{\delta}) -
-   \bar{I}\right)\left(T_k - \bar{T}\right)}
-   {\sqrt{\sum_{k}\left(I_k(\boldsymbol{\delta}) - \bar{I}\right)^2}
-   \sqrt{\sum_{k}\left(T_k - \bar{T}\right)^2}},
+    \mathrm{NCC}(\Delta v, \Delta u) =
+        \frac{\langle T, I_{\Delta v, \Delta u} \rangle_{M}}
+             {\sqrt{\langle T, T \rangle_{M} \cdot \langle I_{\Delta v, \Delta u},
+                                          I_{\Delta v, \Delta u} \rangle_{M}}}
 
-where :math:`T_k` is the template, :math:`I_k(\boldsymbol{\delta})` is the image sampled under
-the shifted template, and the bars denote means over the mask.  The peak of this surface is
-the offset; its sharpness and its separation from the next-best peak measure how unambiguous
-the match is.
+over the integer offsets :math:`(\Delta v, \Delta u)` in the per-instrument search window,
+where :math:`\langle \cdot, \cdot \rangle_{M}` denotes the masked inner product (only pixels
+where :math:`M = \mathrm{True}` contribute). Sub-pixel refinement comes from a quadratic fit
+to the correlation surface around the integer peak; the fitted curvature provides the
+Cramer-Rao lower bound covariance.
 
-The search is a coarse-to-fine image pyramid: the correlation is computed at a downsampled
-scale to localise the basin, then refined at successively finer scales with sub-pixel peak
-interpolation.  Two parallel correlation surfaces are available -- one on raw brightness and
-one on gradient magnitude -- and the fitter selects whichever yields the stronger peak per
-image, because raw brightness carries the unique-alignment signal on a full smooth disc while
-the gradient carries it when only the limb is informative.
+Mode selection (auto / raw / gradient)
+--------------------------------------
 
-When a rotation is fitted, the template is rotated about the centroid of the bodies'
-predicted centres across a multi-level angular schedule: a coarse sweep across the rotation
-cap, then two refinement passes that halve the angular step around the running winner.  Each
-sample is a full pyramid correlation, and the rotation with the highest peak quality wins.
-The disc rotation uncertainty is reported as unobservable: the correlation peak quality is a
-peak-separation ratio rather than a log-likelihood, so its curvature carries no calibrated
-Fisher information about the rotation angle, and the technique therefore contributes a
-translation estimate while abstaining on rotation by routing a sentinel variance into the
-rotation slot of the covariance.
+The shared NCC pyramid evaluates the correlation in two modes — raw image vs. raw template,
+and gradient image vs. gradient template — and ``auto`` mode runs both and picks whichever
+peak scores higher quality. Raw mode wins on smooth Lambert-shaded discs that fill the FOV
+where the per-pixel intensity carries unique-alignment signal; gradient mode wins when only
+the limb edge carries useful signal (a bright disc on a bright background, an over-exposed
+or saturated body).
 
-A multi-body composite sharpens the peak roughly as the square root of the body count when
-the backgrounds are independent, and the joint geometric constraint removes the "swap moon
-assignments" mode-failure that solo per-body correlation suffers.  The technique fails when
-the silhouette carries no unique alignment signal -- a featureless, partially-clipped, or
-below-resolution disc -- and a spurious flag fires when the correlation peak migrates between
-pyramid levels by more than a diameter-scaled tolerance, signalling that the coarse and fine
-scales disagree about where the body is.  The reported covariance captures only the
-correlation-peak curvature; it does not capture SPICE bias or template-shape error.
+Search strategy
+---------------
+
+The technique runs the shared pyramid-NCC entry point
+(:func:`~nav.support.correlate.navigate_with_pyramid_kpeaks`). At each pyramid level the
+NCC is evaluated coarse-to-fine, the top ``k`` peaks are kept, and consistency is measured
+between levels — a peak that drifts more than a documented threshold across levels is
+flagged spurious. The per-image quality metric is the peak-to-side-lobe ratio (PSR) at the
+finest level; the per-image consistency metric is the maximum Euclidean drift of the
+chosen peak across pyramid levels.
+
+Rotation-aware schedule
+-----------------------
+
+When the per-instrument camera-rotation flag is on, the technique runs the rotation-aware
+schedule: the template is rotated about the body-centroid pivot at 11 angles spanning
+:math:`\pm \mathrm{max\_rotation\_deg}` at the coarsest pyramid level, the best three
+rotations advance to a 5-sample refinement at the next level, and the best one advances to a
+3-sample fine refinement at the finest level. The (dv, du, theta) triple at the global
+maximum is returned with a 3x3 covariance whose translation block is the CRLB from the
+chosen rotation's correlation curvature and whose rotation diagonal is the inverse second
+derivative of the cost across the rotation schedule.
+
+Restrictions and assumptions
+----------------------------
+
+- The orchestrator must populate
+  :attr:`~nav.nav_orchestrator.nav_context.NavContext.image_ext` and
+  :attr:`~nav.nav_orchestrator.nav_context.NavContext.sensor_mask_ext` on the per-image
+  context; in their absence the technique cannot evaluate the NCC.
+- The composite template must have non-empty support inside the search window. An empty
+  template (every body off-frame) collapses the NCC to a constant; the spurious gate flags
+  the result.
+- Multi-body composites assume the per-body templates are coherent — the per-body
+  ``BODY_DISC`` emission gates upstream
+  (:doc:`dev_guide_navigation_models_body`) ensure each contributing body has a sharp,
+  high-contrast template.
+- The rotation-aware schedule assumes the rotation pivot is well-defined. When every
+  consumed body has a degenerate centroid (single-pixel bodies) the pivot collapses to the
+  image centre.
+
+Sources of uncertainty
+----------------------
+
+The reported covariance is the Cramer-Rao lower bound from the local NCC curvature at the
+chosen peak. It captures the noise-limited centroid uncertainty given the template /
+image power spectra; it does not capture systematic biases introduced by template-vs-image
+photometric mismatch (a body whose Lambert prediction differs from its true reflectance
+shifts the peak slightly), nor by the Z-buffer compositing itself when bodies are
+near-occluding. When the chosen peak sits within the at-edge tolerance of any axis bound,
+or when the rotation parameter is at the configured fraction of its cap, the result is
+flagged :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and the
+hard-zero gate forces confidence to zero. The pyramid-consistency check flags peaks that
+drift across levels as
+:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious`.
 
 Configuration
 =============
 
-Runtime tunables live under ``techniques.BodyDiscCorrelateNav.tuning`` in
-``src/nav/config_files/config_510_techniques.yaml``.
+All numeric tunables for this technique live in ``techniques.BodyDiscCorrelateNav.tuning``
+in ``src/nav/config_files/config_510_techniques.yaml``.
 
-- ``rotation_at_edge_fraction`` -- float, default ``0.95`` (dimensionless).  Fraction of the
-  maximum rotation at which the fitted rotation trips the at-edge flag; lower values surface a
-  rotation pegged against its cap earlier.
-- ``consistency_max_fraction_of_diameter`` -- float, default ``0.025`` (dimensionless).
-  Fraction of the largest body diameter contributing to the inter-pyramid consistency cap, so
-  a large textured body is allowed a proportionally larger peak walk between levels.
-- ``consistency_max_px`` -- float, default ``4.0`` px.  Floor on the inter-pyramid
-  consistency cap that covers pyramid quantisation regardless of body size; the applied cap is
-  the larger of this floor and the diameter-scaled value.
+- ``rotation_at_edge_fraction`` — float, default ``0.95`` (dimensionless). When
+  :attr:`~nav.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` is true, the
+  converged rotation magnitude trips
+  :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` once it crosses
+  this fraction of the per-image
+  :attr:`~nav.nav_orchestrator.nav_context.NavContext.max_rotation_deg` cap.
 
-The FFT upsample factor the correlation uses is read from ``config.offset`` (key
-``correlation_fft_upsample_factor``), not from this stanza.
+The remaining numeric thresholds (NCC peak quality, consistency tolerance, top-k count) are
+shared across every pyramid-NCC technique and live as module-level constants in
+:mod:`nav.support.correlate`; consuming techniques pass overrides at call time when needed.
+
+Per-instrument overrides
+------------------------
+
+The per-instrument YAML files in ``src/nav/config_files/config_4N0_inst_*.yaml`` do not
+override ``rotation_at_edge_fraction``. The search-window margin used by the
+at-edge test comes from the per-instrument
+:class:`~nav.nav_orchestrator.instrument_config.InstrumentSettings`.
 
 Confidence formula
--------------------
+------------------
 
-The confidence coefficients live alongside ``tuning`` in the same
-``techniques.BodyDiscCorrelateNav`` stanza.  The sigmoid argument starts from ``alpha0`` of
-``-2.0`` and adds the linear terms below; the sigmoid mathematics is documented in
-:doc:`dev_guide_techniques_confidence`.  The gate ``hard_zero_if`` forces confidence to zero
-when ``at_edge`` or ``spurious`` is true.
+The technique reports a calibrated confidence in :math:`[0, 1]` produced by the shared
+sigmoid combination; see :doc:`dev_guide_techniques_confidence`. The formula spec is
+``techniques.BodyDiscCorrelateNav`` and consumes attributes off
+:class:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics` plus
+:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and
+:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious`.
 
-- ``ncc_peak`` -- alpha = 1.5, offset = 0, divisor = 6.0, cap at 1.0.  Peak-separation quality
-  of the chosen correlation peak; the dominant positive term, saturating over the healthy
-  quality range.
-- ``consistency_ratio`` -- alpha = -1.0, offset = 0, divisor = 1.0, no cap.  Inter-pyramid
-  peak migration normalised by the per-image diameter-scaled spurious threshold; a ratio at
-  the spurious edge contributes minus one to the sigmoid argument.
-- ``body_count`` -- alpha = 0.4, offset = 0, divisor = 3.0, cap at 1.0.  Number of bodies
-  fused into the composite; more bodies sharpen the joint constraint, capped so a three-body
-  scene saturates.
-- ``peak_to_runner_up_ratio`` -- alpha = 0.0, offset = 0, divisor = 2.0, cap at 1.0.  Ratio of
-  the winning peak to the runner-up; wired into the formula but carrying no weight at the
-  current coefficient.
+- :attr:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics.ncc_peak` — alpha = 1.5,
+  offset = 0.0, divisor = 6.0, cap at 1.0. PSR-style quality measure of the chosen NCC
+  peak. Healthy body-disc fits report quality 6 to 15; the divisor maps that range onto
+  the sigmoid's responsive interval.
+- :attr:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics.consistency_px` — alpha = -1.0,
+  offset = 0.0, divisor = 2.0, no cap. Mean per-axis disagreement between coarse-pyramid
+  and full-resolution sub-pixel locations. Low values indicate a globally unambiguous peak.
+- :attr:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics.body_count` — alpha = 0.4,
+  offset = 0.0, divisor = 3.0, cap at 1.0. Number of ``BODY_DISC`` features fused into the
+  composite. More bodies sharpen the joint geometric constraint up to a 3-body saturation.
+- :attr:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics.peak_to_runner_up_ratio` —
+  alpha = 0.0, offset = 0.0, divisor = 2.0, cap at 1.0. Ratio of the winning peak's
+  quality to the next-best peak outside the exclusion radius.
+
+Hard-zero gate: :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and
+:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces
+confidence to zero before the sigmoid evaluates. The constant baseline is
+:math:`\alpha_{0} = -2.0`. No post-sigmoid ``hard_cap`` is applied.
 
 Implementation
 ==============
 
-The technique lives in ``src/nav/nav_technique/nav_technique_body_disc.py``;
-:py:class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav` subclasses
-:py:class:`~nav.nav_technique.nav_technique.NavTechnique`.  It declares
-``accepts_feature_types`` of ``frozenset({NavFeatureType.BODY_DISC})``, ``requires_prior`` of
-``False`` (it runs in pass 1), and a ``confidence_attributes`` set of ``at_edge``,
-``spurious``, ``ncc_peak``, ``peak_to_runner_up_ratio``, ``consistency_px``,
-``consistency_ratio``, ``used_gradient``, and ``body_count``.
+Source files:
 
-:py:meth:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav.is_feasible` reads
-only feature metadata, via the private ``_filter_disc_features`` filter, and returns a
-feasibility report (see :doc:`dev_guide_techniques_feasibility`) that is feasible when at
-least one body-disc feature carries a template payload.
+- ``src/nav/nav_technique/nav_technique_body_disc.py`` —
+  :class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav` and the rotation
+  / template-rotate / composite helpers.
+- ``src/nav/feature/composition.py`` —
+  :func:`~nav.feature.composition.compose_template_features`, the Z-buffer paint helper
+  that fuses per-body templates into a single composite.
+- ``src/nav/support/correlate.py`` —
+  :func:`~nav.support.correlate.navigate_with_pyramid_kpeaks`, the shared pyramid-NCC entry
+  point.
+- ``src/nav/nav_technique/confidence.py`` — shared sigmoid-combination evaluator;
+  documented at :doc:`dev_guide_techniques_confidence`.
+- ``src/nav/nav_technique/diagnostics.py`` —
+  :class:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics`; documented at
+  :doc:`dev_guide_techniques_diagnostics`.
 
-:py:meth:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav.navigate` opens a
-logged technique section, filters to template-bearing features, and fuses their templates into
-a single composite with :py:func:`~nav.feature.composition.compose_template_features`.  The
-search half-window comes from ``search_window_for_obs``; the FFT upsample factor from the
-private ``_upsample_factor``; the diameter-scaled consistency cap from the private
-``_consistency_tol_for``.
+Public class :class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav`, base
+:class:`~nav.nav_technique.nav_technique.NavTechnique`. Self-registers via
+``__init_subclass__`` so ``NavTechnique._registry`` discovers it.
 
-The result shape branches on ``context.fit_camera_rotation``.  When the flag is false the
-technique runs a single pyramid correlation,
-:py:func:`~nav.support.correlate.navigate_with_pyramid_kpeaks`, in ``'auto'`` gradient mode
-against the unrotated composite, and reports a two-by-two covariance with ``rotation_rad`` /
-``sigma_rotation_rad`` of ``None``.  When the flag is true the technique runs the rotation
-schedule in the private ``_run_3dof_pyramid``, which calls
-``_evaluate_rotation_samples`` over the coarse and first refinement levels and
-``_ncc_at_rotation`` per sample (each rotating the composite about the centroid pivot
-returned by the private ``_composite_pivot_vu`` and running one pyramid correlation), and
-derives the rotation uncertainty from ``_rotation_sigma_from_quality``; the result then
-carries a three-by-three covariance whose rotation slot holds the unobservable sentinel
-variance, ``rotation_rad`` is the winning angle, and ``sigma_rotation_rad`` is the square root
-of that slot.  A correlation covariance whose shape is not two by two raises
-:py:exc:`RuntimeError`.  The at-edge flag is the disjunction of the correlation's own at-edge
-flag and, with rotation, the rotation exceeding ``rotation_at_edge_fraction`` of the maximum;
-the spurious flag is taken directly from the correlation result.
+Class attributes:
 
-The diagnostics object is a
-:py:class:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics` with fields ``ncc_peak`` (the
-peak quality), ``peak_to_runner_up_ratio`` (computed by the module-level
-``_peak_to_runner_up_ratio`` over the returned top-K peaks), ``consistency_px`` (the raw
-inter-pyramid migration), ``consistency_ratio`` (that migration divided by the diameter-scaled
-cap), ``used_gradient`` (whether the auto picker chose gradient mode), and ``body_count`` (the
-number of fused bodies).  Confidence is evaluated by ``evaluate_sigmoid_combination`` against
-an internal adapter exposing those diagnostics alongside the ``at_edge`` and ``spurious``
-flags; the calibration is documented in :doc:`dev_guide_techniques_confidence`, the per-term
-breakdown is logged through ``log_confidence_breakdown``, and the shared diagnostics dataclass
-is described in :doc:`dev_guide_techniques_diagnostics`.  The unobservable-rotation sentinel is
-:py:data:`~nav.nav_technique.nav_technique.ROTATION_UNOBSERVABLE_VARIANCE`.
+- :attr:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav.name` —
+  ``'BodyDiscCorrelateNav'``.
+- :attr:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav.accepts_feature_types`
+  — ``frozenset({BODY_DISC})``.
+- :attr:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav.requires_prior` —
+  ``False``. Runs in pass 1 of the orchestrator's two-pass pipeline.
+- :attr:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav.confidence_attributes`
+  — ``{'at_edge', 'spurious', 'ncc_peak', 'peak_to_runner_up_ratio', 'consistency_px',
+  'used_gradient', 'body_count'}``.
+
+Public methods (autodocumented at :doc:`/api_reference/api_nav_technique`):
+:meth:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav.is_feasible` and
+:meth:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav.navigate`.
+
+Diagnostics
+-----------
+
+:class:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics`:
+
+- :attr:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics.ncc_peak` — peak NCC quality at
+  the finest pyramid level. Consumed by the confidence formula.
+- :attr:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics.peak_to_runner_up_ratio` —
+  ratio of the winning peak's quality to the next-best peak's outside the exclusion radius.
+- :attr:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics.consistency_px` — maximum
+  Euclidean drift across pyramid levels. Consumed by the spurious-detection gate.
+- :attr:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics.used_gradient` — True when
+  ``auto`` mode picked the gradient pass. Diagnostic only; not in the confidence formula.
+- :attr:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics.body_count` — number of
+  ``BODY_DISC`` features fused.
+
+Call path
+---------
+
+Call path traced through
+:meth:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav.navigate`:
+
+1. Open a logged section. Filter the offered features down to ``BODY_DISC`` entries that carry
+   a template payload via the private filter helper.
+2. Fuse the per-body templates into a single composite via
+   :func:`~nav.feature.composition.compose_template_features`. The composite carries a
+   single bounding box, brightness image, and mask.
+3. Read the search-window margin off the observation via
+   :func:`~nav.nav_technique.nav_technique.search_window_for_obs`.
+4. Result-shape branches on
+   :attr:`~nav.nav_orchestrator.nav_context.NavContext.fit_camera_rotation`:
+
+   - **No rotation fit.**  Run :func:`~nav.support.correlate.navigate_with_pyramid_kpeaks`
+     once on the unrotated composite. The pyramid returns the chosen peak's
+     ``(dv, du)``, the 2x2 CRLB covariance, ``quality``, ``consistency``, ``spurious``,
+     ``at_edge``, ``used_gradient``, and the top-``k`` peak telemetry.
+     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.rotation_rad` and
+     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.sigma_rotation_rad` are
+     ``None``; the (2, 2) covariance is reported.
+   - **Rotation fit.**  Run the private 3-DoF pyramid: 11 rotation samples at the coarsest
+     pyramid level, top 3 advance to 5 samples at the next level, top 1 advances to 3
+     samples at the finest level. At each rotation sample the template is rotated about the
+     body-centroid pivot via the private template-rotate helper and the pyramid evaluates as
+     usual. The (dv, du, theta) triple at the global maximum is returned with a 3x3
+     covariance: the translation block is the CRLB from the winning rotation's correlation
+     curvature, the rotation diagonal is the inverse second derivative of the cost across
+     the rotation schedule (or the rotation-unobservable sentinel when the schedule is
+     flat).
+
+5. Apply the at-edge tests against the search-window axis bounds and the rotation cap, and
+   the spurious tests using the pyramid wrapper's ``spurious`` and ``consistency``
+   readouts.
+6. Build a :class:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics` from the pyramid
+   wrapper's quality / consistency / used-gradient / runner-up-ratio readouts plus the
+   composite body count, evaluate the confidence spec via
+   :func:`~nav.nav_technique.confidence.evaluate_sigmoid_combination`, log the per-term
+   breakdown via :func:`~nav.nav_technique.nav_technique.log_confidence_breakdown`, and
+   assemble the :class:`~nav.nav_technique.technique_result.NavTechniqueResult`.
+
+The :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.feature_ids` field
+preserves every consumed
+:attr:`~nav.feature.feature.NavFeature.feature_id` so the orchestrator's curator can
+attribute each contribution at audit time.
 
 Examples
 ========
 
-In the ``body_full_fov`` scene (Cassini NAC ``N1572105349_1``), Dione fills the centre of the
-field, mostly lit with a sliver of terminator and a predicted diameter near one hundred
-fifty-five pixels.  Feasibility passes and the disc technique runs; the gradient-mode
-correlation finds a strong peak (quality near twenty) and converges to ``(9.17, -17.01)`` px,
-within half a pixel of the operator ground truth ``(8.68, -17.37)`` px.  The fit nonetheless
-flags itself ``spurious`` because the inter-pyramid ``consistency_px`` of about ``2.78`` px
-exceeds the consistency tolerance, so the ``hard_zero_if`` gate drives confidence to zero even
-though the headline offset is correct -- the dominant ``ncc_peak`` term is overridden by the
-spurious gate.
+``body_full_fov`` (Cassini ISS NAC, image ``N1572105349_1``)
+    Dione fills the FOV at predicted disc diameter approximately 155 px. The body model
+    emits a ``BODY_DISC`` feature; the technique converges to (9.17, -17.01) px against the
+    operator-verified ground truth :math:`(\Delta v, \Delta u) = (8.68, -17.37)` px (within
+    0.5 px of true). The pyramid wrapper's ``consistency`` reports 2.78 px disagreement
+    between coarse and fine pyramid levels in the auto-gradient pass, exceeding the
+    consistency tolerance and tripping the spurious gate; the result is therefore reported
+    with confidence zero even though the offset is geometrically correct.
 
-In the ``multi_body`` scene (Cassini NAC ``N1487595731_1``), Dione and Rhea overlap at about
-ninety degrees phase.  Feasibility passes and the disc technique converges to ``(6.76,
--17.71)`` px, within about one pixel of the operator ground truth ``(7.03, -18.42)`` px, with
-a confidence of about ``0.246``; ``ncc_peak`` and the two-body ``body_count`` drive the score,
-and the consistency stays within budget.
+``body_partial_overflow`` (Cassini ISS NAC, image ``N1484593951_2``)
+    Rhea visible in the upper right with about 22 % of the disc off-frame. The body model
+    emits a ``BODY_DISC`` feature; the disc-template NCC peak collapses against the
+    heavily-cropped silhouette and the technique correctly flags itself spurious.
+    :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav` carries the navigation
+    on this image; the operator-verified offset is
+    :math:`(\Delta v, \Delta u) = (11.0, 29.5)` px.
+
+``multi_body`` (Cassini ISS NAC, image ``N1487595731_1``)
+    Dione and Rhea both visible and overlapping at phase angle approximately 90 degrees.
+    The body model emits two ``BODY_DISC`` features;
+    :class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav` Z-buffer paints
+    them into a composite (the closer body's pixels overwriting the farther body's) and the
+    pyramid NCC converges to (6.76, -17.71) px against the operator-verified ground truth
+    :math:`(\Delta v, \Delta u) = (7.03, -18.42)` px. The composite's joint geometric
+    constraint sharpens the peak relative to a per-body solo correlation; the multi-body
+    body_count term contributes a positive offset to the confidence sum.

@@ -1,195 +1,336 @@
-============================
-Star Unique Match Navigation
-============================
+==========================================================
+Star Unique Match (StarUniqueMatchNav)
+==========================================================
 
 Overview
 ========
 
-This technique exploits the simplest star geometry: one or two catalog stars
-bright enough and isolated enough that the brightest image peak inside a small
-search window around each prediction is unambiguously the matched detection.  It
-needs no global star-detection pass and no triplet pattern matching, so it works
-on sparse fields where a multi-star matcher would fail.  Feasibility passes when
-at least one usable catalog star is predicted in the extended field of view; it
-fails when no usable star is present.  The navigate path then decides between a
-one-star and a two-star branch.
+:class:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav` is the pass-1
+brightness-margin-gated 1-star or 2-star unique-match technique. When the predictable
+catalog cohort has exactly one (or two) stars whose predicted SNR is at least a configured
+magnitude brighter than every other predictable star in the field, the technique searches a
+small window around each prediction, takes the brightest peak above a noise threshold, and
+reports the implied translation (1-star path) or the implied similarity transform (2-star
+path). It runs without a prior — its job is to seed the pass-2
+:class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav` on scenes where the SPICE
+pointing error is small enough that the brightest predictable star sits inside the
+per-instrument search window.
+
+Feasibility passes when at least one usable
+:data:`~nav.feature.feature_type.NavFeatureType.STAR` feature is in the input set;
+feasibility fails when none are usable (every predictable star is in a body silhouette,
+saturation mask, or cosmic-ray mask).
 
 Theory
 ======
 
-The search window around each predicted star position is sized to the
-per-instrument SPICE pointing-error envelope, so the brightest peak inside the
-window is, by construction, the matched detection.  A brightness-weighted
-centroid pins its sub-pixel position, and the offset is the centroid minus the
-prediction.
+The technique exploits a structural fact: when one predictable star dominates the field's
+predicted SNR by a comfortable margin, the brightest peak inside a small search window
+around that star's prediction is almost certainly the matched detection — there is no other
+predictable source bright enough to be confused with it. Two stars dominating the field
+similarly support a 2-star unique-match path that recovers translation plus rotation by
+Procrustes alignment.
 
-In the one-star branch a single match cannot cross-check itself, so the
-technique guards it with a brightness-uniqueness gate: the brightest catalog
-star must be at least a configured magnitude margin brighter than the
-next-brightest predictable star, otherwise the match is ambiguous and rejected.
-The recovered offset is
+Brightness-margin gate
+----------------------
+
+For each predictable star the matcher computes a magnitude difference to the next-brightest
+predictable star in the FOV (using the standard relation
+:math:`\Delta m = 2.5 \log_{10}(\mathrm{SNR}_{1} / \mathrm{SNR}_{2})`). A star whose
+brightness margin exceeds the configured floor (``brightness_margin_to_next_catalog_star_mag``)
+is "uniquely bright" and a candidate for the 1-star path. When two stars each meet the
+margin against the third-brightest, the 2-star path is candidate.
+
+Local centroid
+--------------
+
+For each candidate match, the technique slices a window of half-width ``search_window_px``
+around the predicted position, takes the brightest pixel above
+``detection_sigma * image_noise_sigma``, and fits a brightness-weighted moment over a
+``centroid_box_half_px``-half-width box around that peak to recover the sub-pixel centroid.
+A peak that fails the noise threshold collapses the candidate; a centroid whose residual
+against the prediction exceeds ``max_residual_px`` (after the implied translation is
+applied) marks the result spurious.
+
+1-star path
+-----------
+
+The 1-star path reports the per-star residual (observed centroid minus predicted position)
+as the translation. The reported covariance is the per-feature Cramer-Rao lower bound from
+:attr:`~nav.feature.feature.NavFeature.position_cov_px`. Rotation is unobservable on a
+single point match.
+
+2-star path
+-----------
+
+When two stars each pass the brightness-margin gate, the technique runs a Procrustes /
+similarity-transform fit on the two correspondences and reports the recovered translation
+plus rotation. The rotation variance is derived analytically as
 
 .. math::
 
-   (\Delta v, \Delta u) = (c_v - p_v,\; c_u - p_u),
+    \sigma_{\theta}^{2} = \frac{2 \,(\sigma_{v}^{2} + \sigma_{u}^{2})}{L^{2}}
 
-the detection centroid minus the prediction, and its confidence is capped below
-one because a lone match carries no internal consistency check.
+where :math:`L` is the catalog-pair angular separation and the per-axis sigmas are the
+average of the two stars' CRLB floors. When the 2-star path's best assignment residual
+exceeds ``max_residual_px`` the technique falls back to the 1-star path.
 
-In the two-star branch the two detections are matched to the two predictions
-under both possible assignments, and the assignment with the smaller joint
-residual is chosen:
+Per-mode confidence cap
+-----------------------
 
-.. math::
+The 1-star path cannot self-check (a single observation has nothing to validate against), so
+the technique applies a post-sigmoid cap of ``one_star_confidence_cap`` (default 0.7). The
+2-star path can validate the assignment via the per-correspondence residual, so its cap is
+``two_star_confidence_cap`` (default 0.8). The caps are applied by the technique itself,
+not by the YAML spec's :attr:`~nav.nav_technique.confidence.ConfidenceSpec.hard_cap`, so the
+two paths can share a single spec.
 
-   r = \min_{\text{assignment}}
-       \left\| (d - p) - \overline{(d - p)} \right\|,
+Restrictions and assumptions
+----------------------------
 
-where the residual is the centroid-relative scatter that a correct assignment
-drives to near zero.  That residual is a genuine cross-check, so the two-star
-confidence cap is higher than the one-star cap.  Two detections that resolve to
-the same image peak (their centroids less than a pixel apart, as happens when
-overlapping windows share one bright star) would fabricate a zero residual, so
-the technique falls back to the one-star branch in that case so the
-brightness-uniqueness gate can reject the ambiguity.
+- The catalog-side ``predicted_snr`` is assumed to be calibrated correctly. An over- or
+  under-predicted SNR shifts the brightness-margin computation and may erroneously pass or
+  fail the uniqueness gate.
+- The search window assumes the SPICE pointing error is bounded by ``search_window_px``
+  (default 30 px). When the per-instrument pointing envelope exceeds this width, the
+  brightest peak in the window is not the matched detection and the technique reports a
+  wrong centroid — this is the regime where the multi-star
+  :class:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav` triplet
+  matcher takes over.
+- Both paths assume the matched detection is unsaturated. A saturated star whose centroid
+  has been clipped will produce a biased centroid; the per-feature
+  :class:`~nav.feature.flags.StarFlags` includes a saturation flag that the upstream
+  ``usable_stars`` filter consults.
 
-The covariance floors on the per-feature Cramer-Rao position bound carried by
-each star and inflates it by the squared residual so a noisy match reports its
-real scatter rather than the noise-free lower bound.  When a camera rotation is
-requested, a single star cannot constrain rotation and the result is reported as
-rotation-unobservable with a sentinel variance; two stars constrain rotation
-through their separation, and the rotation variance follows the analytic
-small-angle lever-arm
+Sources of uncertainty
+----------------------
 
-.. math::
-
-   \sigma_\theta^2 = \frac{2\,(\sigma_v^2 + \sigma_u^2)}{L^2},
-
-where :math:`L` is the catalog separation of the pair.  The reported covariance
-captures the per-star centroid bound and the match residual; it does not model
-SPICE pointing systematics beyond that floor.
+The 1-star covariance is the per-feature CRLB floor from
+:attr:`~nav.feature.feature.NavFeature.position_cov_px`. The 2-star covariance is the
+per-feature CRLB floor for translation plus the analytic rotation variance derived above.
+When the converged offset sits within the at-edge tolerance of any axis bound, or when the
+2-star rotation parameter is at the configured fraction of its cap, the result is flagged
+:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and the hard-zero
+gate forces confidence to zero. When the per-star residual exceeds ``max_residual_px`` the
+result is flagged :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious`.
 
 Configuration
 =============
 
-Tunables live under ``techniques.StarUniqueMatchNav.tuning`` in
+All numeric tunables for this technique live in ``techniques.StarUniqueMatchNav.tuning`` in
 ``src/nav/config_files/config_510_techniques.yaml``.
 
-- ``brightness_margin_to_next_catalog_star_mag`` -- float, default ``1.5`` mag.
-  Minimum magnitude difference to the next-brightest predictable star for the
-  one-star branch to fire; larger demands a more uniquely bright star.
-- ``search_window_px`` -- float, default ``30.0`` px.  Half-width of the search
-  window around each prediction; should bracket the per-instrument pointing-error
+- ``brightness_margin_to_next_catalog_star_mag`` — float, default ``1.5`` (mag). Minimum
+  magnitude difference between the brightest predictable star and the next-brightest for
+  the 1-star path to fire.
+- ``search_window_px`` — float, default ``30.0`` px. Half-width of the search window
+  around each prediction. Should bracket the per-instrument SPICE pointing-error
   envelope.
-- ``centroid_box_half_px`` -- int, default ``3`` px.  Half-width of the
-  brightness-weighted centroid box around the detected peak.
-- ``max_residual_px`` -- float, default ``4.0`` px.  Maximum best-assignment
-  residual in the two-star branch before falling back to the one-star branch.
-- ``detection_sigma`` -- float, default ``4.0`` (dimensionless).  Detection
-  threshold as a multiple of the per-pixel noise sigma; below it the brightest
-  pixel in the window is treated as noise.
-- ``one_star_confidence_cap`` -- float, default ``0.7`` (dimensionless).  Post-sigmoid
-  confidence cap for the one-star branch; a lone match cannot self-check.  Must
-  lie in ``[0, 1]``.
-- ``two_star_confidence_cap`` -- float, default ``0.8`` (dimensionless).  Post-sigmoid
-  confidence cap for the two-star branch, higher because the residual cross-checks
-  the assignment.  Must lie in ``[0, 1]``.
-- ``at_edge_tolerance_px`` -- float, default ``1.0`` px.  Slack around the
-  search-window axis bounds for the at-edge check.
-- ``rotation_at_edge_fraction`` -- float, default ``0.95`` (dimensionless).  When the
-  two-star Procrustes path fits rotation, a converged rotation magnitude past this
-  fraction of the per-image rotation cap trips at-edge; the one-star path always
-  reports rotation as unobservable so it is unaffected.
+- ``centroid_box_half_px`` — int, default ``3`` px. Half-width of the brightness-weighted
+  moment box around the brightness peak.
+- ``max_residual_px`` — float, default ``4.0`` px. Maximum allowed best-assignment
+  residual in the 2-star path before falling back to the 1-star path; in the 1-star path
+  the same threshold marks the result spurious.
+- ``detection_sigma`` — float, default ``4.0`` (dimensionless). Detection-threshold
+  multiplier on the per-image noise sigma.
+- ``one_star_confidence_cap`` — float, default ``0.7`` (dimensionless). Post-sigmoid
+  confidence cap when the 1-star path fires. A single match cannot self-check.
+- ``two_star_confidence_cap`` — float, default ``0.8`` (dimensionless). Post-sigmoid
+  confidence cap when the 2-star path fires. Per-correspondence residual cross-checks the
+  assignment.
+- ``at_edge_tolerance_px`` — float, default ``1.0`` px. A converged offset whose absolute
+  distance from any search-window axis bound falls within this tolerance is flagged
+  :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge`.
+- ``rotation_at_edge_fraction`` — float, default ``0.95`` (dimensionless). Fraction of
+  :attr:`~nav.nav_orchestrator.nav_context.NavContext.max_rotation_deg` at which the
+  converged 2-star rotation magnitude trips
+  :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge`. Only the 2-star
+  Procrustes path uses it; the 1-star path always reports rotation as unobservable.
+
+Per-instrument overrides
+------------------------
+
+Per-instrument YAML files in ``src/nav/config_files/config_4N0_inst_*.yaml`` do not
+override any of these knobs.
 
 Confidence formula
--------------------
+------------------
 
-The confidence coefficients live in the ``techniques.StarUniqueMatchNav`` stanza
-of ``config_510_techniques.yaml``.  The sigmoid baseline is ``alpha0 = -1.0`` and
-hard-zero gates force confidence to zero when ``at_edge`` or ``spurious`` is true;
-the per-mode caps above are applied after the sigmoid.  See
-:doc:`dev_guide_techniques_confidence` for the sigmoid mathematics.
+The technique reports a calibrated confidence in :math:`[0, 1]` produced by the shared
+sigmoid combination; see :doc:`dev_guide_techniques_confidence`. Spec is
+``techniques.StarUniqueMatchNav``; consumes attributes off
+:class:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics` plus
+:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and
+:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious`.
 
-- ``predicted_snr`` -- alpha = 1.0, offset = 0, divisor = 20.0, cap at 1.0.  Predicted
-  signal-to-noise of the brightest catalog star; higher SNR tightens the match.
-- ``brightness_margin_mag`` -- alpha = 1.0, offset = 1.5, divisor = 1.5, cap at 1.0.
-  Magnitude margin to the next-brightest predictable star; additional margin above
-  the floor earns confidence.
-- ``residual_px`` -- alpha = -1.0, offset = 0, divisor = 2.0, no cap.  Detection-to-
-  prediction residual; larger residuals pull confidence down.
+- :attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.predicted_snr` —
+  alpha = 1.0, offset = 0.0, divisor = 20.0, cap at 1.0. Predicted SNR of the brightest
+  catalog star. Higher SNR shrinks the centroid CRLB; saturates near SNR=20.
+- :attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.brightness_margin_mag`
+  — alpha = 1.0, offset = 1.5, divisor = 1.5, cap at 1.0. Magnitude margin to the
+  next-brightest predictable star in the extfov. Below the 1.5 mag floor the technique
+  short-circuits before reaching the formula; above the floor, additional margin earns
+  confidence up to a 1.5 mag span.
+- :attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.residual_px` —
+  alpha = -1.0, offset = 0.0, divisor = 2.0, no cap. Detection-vs-prediction residual.
+  Larger residuals pull confidence down.
+
+Hard-zero gate: :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and
+:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces
+confidence to zero before the sigmoid evaluates. The constant baseline is
+:math:`\alpha_{0} = -1.0`. No post-sigmoid ``hard_cap`` is applied at the spec level; the
+per-mode caps above are applied by the technique itself.
 
 Implementation
 ==============
 
-Source files: ``src/nav/nav_technique/nav_technique_star_unique_match.py`` and the
-shared star helpers in ``nav.nav_technique._star_helpers``.  The public class is
-:py:class:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav`,
-a subclass of :py:class:`~nav.nav_technique.nav_technique.NavTechnique`.  Its
-``accepts_feature_types`` is the single ``STAR`` feature type, its
-``requires_prior`` is ``False`` (it runs in pass 1), and its
-``confidence_attributes`` set names ``at_edge``, ``spurious``, ``predicted_snr``,
-``brightness_margin_mag``, and ``residual_px``.
+Source files:
 
-:py:meth:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav.is_feasible`
-reads only feature metadata and returns feasible when at least one usable ``STAR``
-feature is present, consuming up to two of them.
+- ``src/nav/nav_technique/nav_technique_star_unique_match.py`` —
+  :class:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav` and the
+  brightness-margin / 1-star / 2-star helpers.
+- ``src/nav/nav_technique/_star_helpers.py`` — package-private helpers ``usable_stars``,
+  ``local_centroid``, ``predicted_snr``, ``predicted_vu``, ``brightness_margin_mag``, and
+  ``similarity_transform_fit``.
+- ``src/nav/nav_technique/confidence.py`` — sigmoid-combination evaluator; documented at
+  :doc:`dev_guide_techniques_confidence`.
+- ``src/nav/nav_technique/diagnostics.py`` —
+  :class:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics`; documented at
+  :doc:`dev_guide_techniques_diagnostics`.
 
-:py:meth:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav.navigate`
-ranks the usable stars by predicted signal-to-noise.  When two or more are
-available it attempts the two-star branch through the private ``_try_two_star``;
-that branch returns ``None`` -- falling through to the one-star branch -- when a
-detection is missing, when both predictions resolve to the same peak, or when the
-best-assignment residual exceeds the maximum.  Otherwise it runs the one-star
-branch through ``_try_one_star``.
+Public class :class:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav`,
+base :class:`~nav.nav_technique.nav_technique.NavTechnique`. Self-registers via
+``__init_subclass__``.
 
-The result shape branches on the chosen path and on whether rotation is fit:
+Class attributes:
 
-- One-star, no rotation: ``(2, 2)`` covariance from the per-feature bound;
-  ``rotation_rad`` and ``sigma_rotation_rad`` are ``None``.
-- One-star, with rotation: rank-deficient ``(3, 3)`` covariance via
-  ``embed_rotation_unobservable`` (a single match cannot constrain rotation),
-  ``rotation_rad`` fixed at ``0.0`` and ``sigma_rotation_rad`` the
-  rotation-unobservable sentinel from ``rotation_unobservable_sigma_rad``.
-- Two-star, no rotation: ``(2, 2)`` covariance averaging the two stars' bounds;
-  rotation fields ``None``.
-- Two-star, with rotation: full ``(3, 3)`` covariance with the analytic
-  lever-arm rotation diagonal built by ``_build_two_star_covariance_3dof``,
-  ``rotation_rad`` the Procrustes angle from ``_similarity_fit_assignment``, and
-  ``sigma_rotation_rad`` the square root of the rotation diagonal.
+- :attr:`~nav.nav_technique.nav_technique.NavTechnique.name` — ``'StarUniqueMatchNav'``.
+- :attr:`~nav.nav_technique.nav_technique.NavTechnique.accepts_feature_types` —
+  ``frozenset({STAR})``.
+- :attr:`~nav.nav_technique.nav_technique.NavTechnique.requires_prior` — ``False``.
+- :attr:`~nav.nav_technique.nav_technique.NavTechnique.confidence_attributes` —
+  ``{'at_edge', 'spurious', 'predicted_snr', 'brightness_margin_mag', 'residual_px'}``.
 
-``_evaluate_confidence`` runs the YAML formula via ``evaluate_sigmoid_combination``
-wrapped by a per-technique context adapter, logs the breakdown through
-``log_confidence_breakdown`` (see :doc:`dev_guide_techniques_confidence`), and
-applies the per-mode cap.  Every failure branch returns through the private
-``_fail`` path with a zero-confidence spurious result.
-
-Every field of
-:py:class:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics` is
-populated:
-:py:attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.predicted_snr`,
-:py:attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.brightness_margin_mag`,
+Public methods (autodocumented at :doc:`/api_reference/api_nav_technique`):
+:meth:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav.is_feasible`
 and
-:py:attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.residual_px`
-feed the confidence formula above, and
-:py:attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.mode` records
-which branch produced the result (a string, so it is not surfaced to the
-formula).  The return value is a
-:py:class:`~nav.nav_technique.technique_result.NavTechniqueResult`.
+:meth:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav.navigate`.
+
+Diagnostics
+-----------
+
+:class:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics`:
+
+- :attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.mode` —
+  ``'one_star'`` or ``'two_star'``. Diagnostic only; the confidence formula does not
+  consume strings, but the per-mode cap branches inside
+  :meth:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav.navigate`
+  read it.
+- :attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.predicted_snr` —
+  predicted SNR of the brightest catalog star. Consumed by the confidence formula.
+- :attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.brightness_margin_mag`
+  — magnitude difference to the next-brightest unmatched catalog source predictable in
+  extfov; ``+inf`` when no unmatched star exists. Consumed by the confidence formula.
+- :attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.residual_px` —
+  detection-vs-prediction residual. Consumed by the confidence formula and by the
+  spurious-detection gate.
+
+Call path
+---------
+
+Call path traced through
+:meth:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav.navigate`:
+
+1. Open a logged section. Filter the offered features down to ``usable_stars``
+   (predictable, not occluded, not in a saturation mask).
+2. Sort the usable cohort by predicted SNR (brightest first) and compute the brightness
+   margin between consecutive entries via ``brightness_margin_mag``.
+3. Branch on the brightness-margin gate:
+
+   - **2-star path eligible.**  When the brightest two stars each clear the margin against
+     the third-brightest, run the 2-star branch. For each of the two stars, slice a
+     ``search_window_px``-half-width window around its prediction in
+     :attr:`~nav.nav_orchestrator.nav_context.NavContext.image_ext` and call
+     ``local_centroid`` to extract the sub-pixel detection. When both detections clear
+     the noise threshold, run a Procrustes / similarity refit via
+     ``similarity_transform_fit`` to recover translation and rotation. When the
+     per-correspondence residual exceeds ``max_residual_px``, fall back to the 1-star
+     path.
+   - **1-star path.**  When only the brightest clears the margin (or the 2-star fallback
+     fired), slice a window around the brightest's prediction, extract the sub-pixel
+     centroid, and report the per-star residual as the translation.
+
+4. Result-shape branches on the chosen path and
+   :attr:`~nav.nav_orchestrator.nav_context.NavContext.fit_camera_rotation`:
+
+   - **1-star, no rotation.**  (2, 2) CRLB covariance from
+     :attr:`~nav.feature.feature.NavFeature.position_cov_px`;
+     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.rotation_rad` and
+     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.sigma_rotation_rad` are
+     ``None``.
+   - **1-star, rotation fit.**  Rank-deficient (3, 3) covariance via
+     :func:`~nav.nav_technique.nav_technique.embed_rotation_unobservable`;
+     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.rotation_rad` is
+     ``0.0`` and the sigma is the rotation-unobservable sentinel.
+   - **2-star, no rotation.**  (2, 2) CRLB covariance from the average of the two stars'
+     :attr:`~nav.feature.feature.NavFeature.position_cov_px` floors.
+   - **2-star, rotation fit.**  Full (3, 3) covariance: the (2, 2) translation block is
+     the per-axis CRLB average, the rotation diagonal is the analytic
+     :math:`2 (\sigma_{v}^{2} + \sigma_{u}^{2}) / L^{2}` form derived from the catalog-pair
+     separation :math:`L`.
+     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.rotation_rad` is the
+     Procrustes-fit angle and the sigma is the square root of the rotation diagonal.
+
+5. Apply the at-edge test against the search-window axis bounds and the rotation cap.
+6. Build a :class:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics`, evaluate the
+   confidence spec via :func:`~nav.nav_technique.confidence.evaluate_sigmoid_combination`,
+   apply the per-mode cap (``one_star_confidence_cap`` or ``two_star_confidence_cap``)
+   inside the technique itself, log the breakdown, and assemble the
+   :class:`~nav.nav_technique.technique_result.NavTechniqueResult`.
+
+The :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.feature_ids` field
+preserves every consumed
+:attr:`~nav.feature.feature.NavFeature.feature_id` so the orchestrator's curator can
+attribute each match at audit time.
 
 Examples
 ========
 
-**one_bright_star_no_body (W1449079117_1_CALIB).** A single bright star (Vega) in
-a wide-angle frame through a red filter, with no body or ring.  Feasibility
-passes on the one usable star and the one-star branch fires: the brightness-margin
-gate is satisfied (no comparably bright competitor), the brightest peak in the
-search window is matched, and the offset is recovered against the operator ground
-truth of ``(3.06, -0.02)`` px.  The sidecar records this technique under
-``techniques_must_run`` with ``confidence_tier: low`` -- the one-star confidence
-cap of 0.7 keeps a single unchecked match modest.
+``one_bright_star_no_body`` (Cassini ISS WAC, image ``W1449079117_1``)
+    Single star (Vega) in an otherwise empty FOV. The stars model emits a single ``STAR``
+    feature with a brightness margin of ``+inf`` to the (nonexistent) next-brightest.
+    :class:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav` runs the
+    1-star path: a small search window around Vega's prediction returns the brightest peak
+    above the noise threshold, the brightness-weighted moment recovers the centroid, and
+    the per-star residual is reported as the translation. The 1-star post-sigmoid cap of
+    0.7 holds the technique's confidence below 0.7 even when every term saturates.
+    Operator-verified offset is :math:`(\Delta v, \Delta u) = (3.06, -0.02)` px. The
+    pass-2 :class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav` consumes
+    this prior and polishes it; see :doc:`dev_guide_techniques_star_refine`.
 
-**two_bright_stars_no_body (corpus class).** This class has exactly two
-unambiguous catalog stars, each at least 1.5 magnitudes brighter than any
-competitor, with no body or ring.  Feasibility passes and the two-star branch
-fires: both detections are matched, the best-assignment residual cross-checks the
-fit, and confidence is capped at the higher two-star limit of 0.8.
+``two_bright_stars_no_body`` (Cassini ISS / NHLORRI star-calibration scene class)
+    Catalog yields exactly two unambiguous stars in the FOV, each at least 1.5 magnitudes
+    brighter than its next-brightest competing candidate. The stars model emits two
+    ``STAR`` features; the technique falls into the 2-star path, runs the per-star local
+    centroid against each prediction, and — when both detections clear the per-mode
+    photometric and at-image-edge gates — invokes
+    ``similarity_transform_fit`` on the catalog-vs-detection point pair to recover a
+    translation plus rotation simultaneously. The reported covariance is the
+    closed-form 3x3 from the similarity-transform residual scatter; the post-sigmoid
+    cap is the 2-star ``two_star_confidence_cap`` (default 0.85), allowing higher
+    final confidence than the 1-star path. The
+    :attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.mode` field on the
+    diagnostics carries ``'two_star'`` so the curator surfaces which path fired.
+
+``faint_stars`` (Galileo SSI / Voyager outer-leg scene class)
+    Every catalog star in the FOV has predicted SNR below the per-instrument detection
+    floor. The stars model emits no ``STAR`` features whose predicted SNR clears the
+    reliability gate, so the orchestrator does not offer any usable star feature to
+    :meth:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav.is_feasible`.
+    Feasibility fails with reason ``no_usable_stars`` and the technique skips its
+    :meth:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav.navigate`
+    pass entirely. The orchestrator surfaces the infeasibility on the per-image
+    :class:`~nav.nav_orchestrator.nav_result.NavResult` via the per-technique
+    :attr:`~nav.nav_technique.feasibility.NavFeasibilityReport.reason` so the curator
+    records which gate fired without the technique having to allocate a result
+    record.

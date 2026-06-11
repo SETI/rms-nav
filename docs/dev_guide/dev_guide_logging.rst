@@ -59,17 +59,58 @@ Tests assert log content via ``capsys`` not ``caplog``:
 
 The pdslogger templates avoid the ``%`` character because pdslogger
 interprets ``%`` as a positional-format placeholder. Plain prose ("most
-pixels at full-well DN") replaces percent-encoded numbers like ">80%".
+pixels at full-well DN") stands in for percent-encoded numbers like ">80%".
+
+Log levels
+==========
+
+pdslogger exposes the standard six-level ladder. Pick the level that matches the
+audience and the consequence of the line, not the call site's depth:
+
+* **DEBUG** — pixel-level intermediate values, per-iteration LM diagnostics, per-vertex
+  Tukey weights, and any other quantity an operator only consults while reproducing a
+  single image's behaviour. DEBUG output is not routed to the per-image log file by
+  default; enable it through the per-driver ``--log-level`` flag when needed.
+* **INFO** — the per-image narrative every operator should see by default: phase
+  headers (extraction begin / end, pass-1 ensemble verdict, pass-2 ensemble verdict),
+  the final ``status_reason`` line, and one summary line per technique with its
+  consumed feature count and reported confidence. INFO is the default verbosity for the
+  per-image log file.
+* **WARNING** — recoverable anomalies that do not fail the image but should bias an
+  operator's review: a feature dropped by the reliability gate, a technique's
+  :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious` or
+  :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` flag firing,
+  a fall-back path triggering, a per-instrument override missing where the default
+  applies. WARNING lines surface in the curator's per-image JSON sidecar so the
+  operator-curated regression library can flag them.
+* **ERROR** — a per-image failure that the orchestrator could downgrade to a failed
+  :class:`~nav.nav_orchestrator.nav_result.NavResult` rather than propagate as a Python
+  exception: a model whose ``create_model`` returned no usable state, an ensemble that
+  cannot reconcile any technique result. ERROR is reserved for failures whose remediation
+  is operator-side (re-run with different inputs, file a bug); the run continues to
+  emit a JSON sidecar.
+* **EXCEPTION** — emitted by ``self.logger.exception(...)`` from inside the
+  orchestrator's broad ``except Exception`` blocks around every model and technique
+  callback. Carries a full Python traceback; the offending model or technique is
+  treated as if it produced no output, the rest of the pipeline continues, and the
+  surfaced :attr:`~nav.nav_orchestrator.nav_result.NavResult.status_reason` records
+  what fell over. Never raise EXCEPTION from non-orchestrator code; let the
+  orchestrator's sandbox catch it.
+* **FATAL** — process-level failures (a corrupt config file, a missing kernel, an
+  un-importable extension) that abort the whole run before any image is processed.
+  Reserve for setup errors that no per-image fallback can recover from.
 
 Conventions
 ===========
 
 * Never ``import logging`` in ``nav.*`` core code.
 * Never ``print(...)`` in library code; route through ``self.logger``.
-* Every ``NavTechnique.navigate`` body wraps its work in
+* Every :meth:`~nav.nav_technique.nav_technique.NavTechnique.navigate` body
+  wraps its work in
   ``with self.logger.open(f'TECHNIQUE: {self.name}'):`` for log
   scoping.
 * The orchestrator captures every per-technique exception and emits an
   ``EXCEPTION``-level pdslogger line via ``self._logger.exception(...)``;
-  the technique's failure surfaces on the returned ``NavResult``,
+  the technique's failure surfaces on the returned
+  :class:`~nav.nav_orchestrator.nav_result.NavResult`,
   never as a propagating Python exception.

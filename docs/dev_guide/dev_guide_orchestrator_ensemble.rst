@@ -1,176 +1,192 @@
-=======================
-Ensemble Reconciliation
-=======================
+==========================================================
+Ensemble Combine (ensemble + EnsembleConfig)
+==========================================================
 
 Overview
 ========
 
-The ensemble is the single point in the pipeline where several per-technique offset estimates
-become one :py:class:`~nav.nav_orchestrator.nav_result.NavResult`.  It takes the list of
-per-technique results from one or both passes, discards the ones that cannot be trusted, groups the
-survivors by statistical agreement, picks the most-supported group, fuses its members into one
-offset with a combined covariance and confidence, and decides whether the surviving disagreement is
-benign or a genuine conflict.  It is exercised in isolation against synthetic per-technique results,
-because its correctness is what makes the rest of the pipeline trustworthy.
+:func:`~nav.nav_orchestrator.ensemble.ensemble` is the function that reconciles every
+per-technique :class:`~nav.nav_technique.technique_result.NavTechniqueResult` into a
+single :class:`~nav.nav_orchestrator.nav_result.NavResult`. The orchestrator invokes the
+ensemble twice per image: once after pass 1 (to derive the pass-2 prior) and once on the
+union of pass-1 and pass-2 results (to produce the final answer). The reconciliation
+discipline is honest: spurious results are dropped, at-edge results are dropped unless
+removing them empties the set, the surviving results are grouped by Mahalanobis-distance
+agreement, the highest summed-confidence group wins, and the within-group results are
+fused via precision-weighted (Kalman-style) merging.
 
 Theory
 ======
 
-The reconciliation runs as seven ordered steps over the per-technique estimates.  Each estimate is
-a translation offset (and, when the camera-rotation fit is enabled, a small rotation angle) with an
-associated covariance, a scalar confidence, and two boolean flags: one marking the result as
-spurious, one marking it as resting against the image edge.
+The ensemble's reconciliation is a seven-step pipeline.
 
-**1. Drop spurious results.**  Any estimate the producing technique flagged as untrustworthy is
-removed.  If every estimate was spurious, the reconciliation fails with no offset.
+Step 1 — drop spurious
+----------------------
 
-**2. Drop at-edge results unless that would empty the set.**  Estimates whose fitted feature sat
-against the image boundary are removed, because a curve cut off by the frame edge is poorly
-constrained along the cut.  This drop is conditional: if removing the edge-resting estimates would
-leave nothing, they are kept, so a scene whose only signal lies at the frame edge can still produce
-an answer.
+Every result with
+:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious` ``True`` is
+dropped unconditionally. Spurious is the technique's self-assessed structural failure
+flag; the ensemble does not second-guess it.
 
-**3. Group by agreement via single-link clustering.**  Two estimates are linked when *either* their
-Mahalanobis distance is at most a threshold *or* their plain Euclidean translation distance is at
-most a pixel floor.  For estimates :math:`a` and :math:`b` with means :math:`\mu_a, \mu_b` and
-covariances :math:`\Sigma_a, \Sigma_b`, the Mahalanobis distance is
+Step 2 — drop at-edge
+---------------------
 
-.. math::
-   d(a, b) = \sqrt{(\mu_a - \mu_b)^{\mathsf{T}}\, (\Sigma_a + \Sigma_b)^{+}\, (\mu_a - \mu_b)},
+Every result with
+:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` ``True`` is dropped
+*unless* dropping the at-edge cohort would empty the surviving set. The exception
+preserves an at-edge result when it is the only signal the orchestrator has — better a
+hint at a search-window edge than no answer at all.
 
-where :math:`(\cdot)^{+}` is the symmetric pseudoinverse, so a rank-deficient summed covariance is
-handled cleanly.  Any component of :math:`\mu_a - \mu_b` lying in the null space of the summed
-covariance is treated as infinite distance: two estimates cannot agree along an axis that neither
-of them observes.  The pixel floor exists because the per-technique covariances report only their
-estimator-tight precision, far below the true position uncertainty driven by model error and
-pointing residuals; without it, estimates that agree visually to a few pixels would register as
-hundreds of standard deviations apart and never link.  Transitive closure over the pairwise links
-yields the final groups.
+Step 3 — single-link Mahalanobis grouping
+-----------------------------------------
 
-**4. Select the highest summed-confidence group.**  The groups are ranked by the sum of their
-members' confidences, and the top group is chosen as the answer set.
-
-**5. Combine the group in information form.**  Within the chosen group, the translation components
-are fused by a precision-weighted (Kalman information-form) merge:
+Surviving results are clustered by single-linkage Mahalanobis-distance agreement. Two
+results :math:`(\mu_{a}, \Sigma_{a})` and :math:`(\mu_{b}, \Sigma_{b})` are linked when
 
 .. math::
-   \Sigma_{\mathrm{comb}} = \left( \sum_i \Sigma_i^{+} \right)^{+}, \qquad
-   \mu_{\mathrm{comb}} = \Sigma_{\mathrm{comb}} \sum_i \Sigma_i^{+}\, \mu_i.
 
-Tighter covariances pull the combined estimate harder.  When every member carries a rotation
-component, the rotation is not averaged as a plain coordinate (which would wrap incorrectly near
-:math:`\pm\pi`); it is combined on the circle as the precision-weighted circular mean
+    d_{M}(a, b) = \sqrt{(\mu_{a} - \mu_{b})^{\top} (\Sigma_{a} + \Sigma_{b})^{+}
+                        (\mu_{a} - \mu_{b})}
 
-.. math::
-   \theta_{\mathrm{comb}} =
-   \operatorname{atan2}\!\left( \sum_i w_i \sin\theta_i,\ \sum_i w_i \cos\theta_i \right),
+is at most ``agreement_sigma``, where the pseudoinverse uses
+:func:`scipy.linalg.pinvh` so rank-deficient covariances are handled. A result whose
+:math:`(\mu_{a} - \mu_{b})` projects into the null space of the summed covariance is
+treated as infinite distance — estimates cannot agree along an unobservable axis.
 
-with :math:`w_i` the rotation-component information of each member.  Every contributing rotation is
-required to lie strictly inside the small-angle bound that each technique already clamps to, so the
-linear differencing used in the agreement test and this circular mean are both valid.  The combined
-confidence is itself a precision-weighted average of the members' confidences, boosted by a factor
-that grows with the count of significantly-weighted contributors and capped at a fixed ceiling.
+Step 4 — pick the highest summed-confidence group
+-------------------------------------------------
 
-**6. Apply the disagreement penalty.**  When more than one group existed before the combine, the
-combined confidence is multiplied by a penalty below one, because the presence of a competing group
-means the answer is less certain than its internal agreement alone would suggest.
+For each connected component, sum the per-technique confidences and pick the group with
+the highest sum. When the runner-up's summed confidence is within ``agreement_gap`` of
+the winner's, the ensemble flags the conflict and returns a ``status='conflicted'``
+:class:`~nav.nav_orchestrator.nav_result.NavResult` instead of fusing.
 
-**7. Detect conflict.**  When a runner-up group exists, the gap between the best and runner-up
-summed confidences is compared against a threshold.  A gap below the threshold means the second
-group is nearly as well-supported as the first: the result is reported as conflicted, with its
-confidence further multiplied by a conflict penalty, so a downstream consumer must opt in
-explicitly before trusting it.  A sufficiently large gap clears the conflict check, and the
-combined estimate is emitted as a success -- subject to a final minimum-confidence floor and a
-confidence-tier assignment, below which the reconciliation fails instead.
+Step 5 — precision-weighted merge
+---------------------------------
 
-The reported covariance captures only the precision the contributing techniques claimed, propagated
-through the information-form merge; it does not model correlated systematic error shared across
-techniques.  When the summed information matrix has a near-zero eigenvalue relative to its largest,
-the combine is flagged rank-deficient: one axis is effectively unobservable, and the result records
-an infinite uncertainty along that direction.  When every contributing covariance shares a single
-null direction, the total weight is zero and the offset is unobservable, which fails the
-reconciliation outright.
+Inside the winning group, fuse the per-technique offsets into one estimate via
+Kalman-style information addition. The fused information matrix is the sum of the
+per-technique information matrices :math:`I_{i} = \Sigma_{i}^{+}`; the fused offset is
+:math:`\mu = \Sigma \, \sum_{i} I_{i} \mu_{i}`, where :math:`\Sigma` is the
+pseudo-inverse of the summed information matrix. The pseudoinverse handles rank-deficient
+inputs (e.g. a flat-ring-only result) gracefully — the unobservable axis carries an
+unbounded marginal sigma.
+
+Step 6 — disagreement and conflict penalties
+--------------------------------------------
+
+When more than one Mahalanobis-distance group survived, the fused confidence is multiplied
+by ``disagreement_penalty`` (default 0.7). When the conflict branch fired in Step 4 the
+``status='conflicted'`` :class:`~nav.nav_orchestrator.nav_result.NavResult` is returned with a further
+``conflicted_confidence_multiplier`` (default 0.3) applied to the runner-up's summed
+confidence so the JSON sidecar reflects the conflict's severity.
+
+Step 7 — confidence-rank assignment
+-----------------------------------
+
+The fused confidence and the per-axis sigma are mapped to a five-bucket rank
+(``'high'`` / ``'medium'`` / ``'low'`` / ``'conflicted'`` / ``'failed'``) by
+:func:`~nav.nav_orchestrator.ensemble.derive_confidence_rank` against the per-rank
+``min_confidence`` / ``max_sigma_px`` thresholds. Below the ``min_confidence`` floor the
+ensemble returns ``status='failed'``.
+
+Restrictions and assumptions
+----------------------------
+
+- Per-technique covariances must be 2x2 (translation-only) or 3x3 (translation +
+  rotation). The ensemble does not handle scale-disagreement or arbitrary-shape
+  parameter spaces.
+- The Mahalanobis grouping assumes the per-technique covariances are calibrated. An
+  over-confident covariance shrinks the apparent agreement region and may cause a
+  legitimate match to land in its own cluster.
+- The pseudoinverse cutoff (``pinvh_rcond``) is global; rank-deficient detection uses the
+  same threshold for grouping and merging so behaviour is consistent across the two
+  passes.
+
+Sources of uncertainty
+----------------------
+
+The fused covariance is the pseudo-inverse of the summed information matrix; it is the
+standard precision-weighted-merge form. When the input set has no full-rank result, the
+fused covariance is rank-deficient along the unconstrained axis; the
+:attr:`~nav.nav_orchestrator.nav_result.NavResult.sigma_along_unobservable_px` field
+captures the unbounded eigenvalue's direction. When the disagreement-penalty fires the
+fused confidence is reduced multiplicatively.
 
 Configuration
 =============
 
-The ensemble's tunables live on :py:class:`~nav.nav_orchestrator.ensemble.EnsembleConfig`, a frozen
-dataclass whose defaults match ``config_540_orchestrator.yaml``.  Each field:
+Tunables live on :class:`~nav.nav_orchestrator.ensemble.EnsembleConfig`. The defaults are
+module-level constants in :mod:`nav.nav_orchestrator.ensemble`; the orchestrator's
+constructor accepts an :class:`~nav.nav_orchestrator.ensemble.EnsembleConfig` override.
 
-- ``agreement_sigma`` -- float, default ``2.0`` (dimensionless).  Mahalanobis-distance threshold
-  for linking two estimates; larger groups more aggressively.
-- ``agreement_pixel_floor`` -- float, default ``5.0`` px.  Euclidean translation-distance fallback
-  for linking; two estimates link when they agree to within this many pixels even if their
-  Mahalanobis distance is large.  Set to ``0.0`` to disable the floor.
-- ``agreement_gap`` -- float, default ``0.5`` (dimensionless).  Minimum best-vs-runner-up
-  summed-confidence gap before the result is declared conflicted; larger values declare conflict
-  more readily.
-- ``disagreement_penalty`` -- float, default ``0.7`` (dimensionless).  Multiplier on combined
-  confidence when more than one group existed; smaller values penalise disagreement harder.
-- ``conflicted_confidence_multiplier`` -- float, default ``0.3`` (dimensionless).  Additional
-  multiplier applied to the confidence of a conflicted result.
-- ``min_confidence`` -- float, default ``0.2`` (dimensionless).  Floor below which the
-  reconciliation returns a failure instead of a success.
-- ``pinvh_rcond`` -- float, default ``1.0e-9`` (dimensionless).  Relative cutoff passed to the
-  symmetric pseudoinverse; smaller values keep more near-singular directions.
-- ``max_allowed_rotation_deg`` -- float, default ``5.0`` deg.  Small-angle bound a 3-DoF result's
-  rotation may take; the linear rotation differencing and circular-mean combine assume every input
-  stays strictly inside this magnitude, and a result arriving at or beyond it is an upstream
-  programming error that trips an assertion.
-- ``tier_thresholds`` -- mapping, default ``{high: {min_confidence: 0.8, max_sigma_px: 0.5},
-  medium: {min_confidence: 0.5, max_sigma_px: 2.0}, low: {min_confidence: 0.2, max_sigma_px:
-  null}}``.  Maps each confidence rank to the minimum confidence and maximum per-axis sigma it
-  requires; a ``max_sigma_px`` of ``null`` imposes no sigma bound on that tier.
+- :attr:`~nav.nav_orchestrator.ensemble.EnsembleConfig.agreement_sigma` — float, default
+  ``2.0``. Mahalanobis-distance threshold for grouping.
+- :attr:`~nav.nav_orchestrator.ensemble.EnsembleConfig.agreement_gap` — float, default
+  ``0.5``. Minimum summed-confidence gap between best and runner-up groups before
+  declaring a conflict.
+- :attr:`~nav.nav_orchestrator.ensemble.EnsembleConfig.disagreement_penalty` — float,
+  default ``0.7``. Multiplier on combined confidence when more than one group existed.
+- :attr:`~nav.nav_orchestrator.ensemble.EnsembleConfig.conflicted_confidence_multiplier` —
+  float, default ``0.3``. Additional multiplier when the conflicted branch fires.
+- :attr:`~nav.nav_orchestrator.ensemble.EnsembleConfig.min_confidence` — float, default
+  ``0.2``. Final-result threshold below which the ensemble returns
+  :meth:`~nav.nav_orchestrator.nav_result.NavResult.failed` instead of
+  :meth:`~nav.nav_orchestrator.nav_result.NavResult.ok`.
+- :attr:`~nav.nav_orchestrator.ensemble.EnsembleConfig.pinvh_rcond` — float, default
+  ``1.0e-9``. Cutoff for :func:`scipy.linalg.pinvh`.
+- :attr:`~nav.nav_orchestrator.ensemble.EnsembleConfig.tier_thresholds` — mapping
+  ``rank -> {min_confidence, max_sigma_px}``; default thresholds give ``'high'`` for
+  confidence at or above 0.8 with sigma at most 0.5 px, ``'medium'`` for 0.5 confidence
+  with sigma at most 2.0 px, ``'low'`` for 0.2 confidence with no sigma cap.
 
 Implementation
 ==============
 
-Source file: ``src/nav/nav_orchestrator/ensemble.py``.
+Source file: ``src/nav/nav_orchestrator/ensemble.py`` —
+:func:`~nav.nav_orchestrator.ensemble.ensemble`,
+:func:`~nav.nav_orchestrator.ensemble.derive_confidence_rank`, and
+:class:`~nav.nav_orchestrator.ensemble.EnsembleConfig`.
 
-The public entry point is :py:func:`~nav.nav_orchestrator.ensemble.ensemble`; its signature is
-deferred to autodoc.  It is driven by the
-:py:class:`~nav.nav_orchestrator.ensemble.EnsembleConfig` passed from the orchestrator and returns a
-:py:class:`~nav.nav_orchestrator.nav_result.NavResult` constructed through that class's
-:py:meth:`~nav.nav_orchestrator.nav_result.NavResult.success`,
-:py:meth:`~nav.nav_orchestrator.nav_result.NavResult.conflicted`, or
-:py:meth:`~nav.nav_orchestrator.nav_result.NavResult.failed` classmethod depending on the outcome.
+Public surface (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
 
-The seven steps map onto private helpers.  Spurious filtering and the conditional at-edge filtering
-run inline.  ``_drop_superseded_fallbacks`` removes fallback-tier results for any body already
-covered by a non-spurious primary-tier result (a redundant safety net behind the orchestrator's own
-tier filtering), using ``_source_bodies`` and ``_technique_tier`` to read the body names and tier
-from the technique registry.  ``_agreement_groups`` builds the single-link clusters: it computes
-pairwise distances with ``_mahalanobis_distance`` and the parameter vectors with
-``_result_param_vector``, builds a sparse adjacency matrix, and resolves the transitive closure with
-:py:func:`scipy.sparse.csgraph.connected_components`.  The chosen group is fused by
-``_combine_precision_weighted`` (translation by the information-form merge, rotation by the
-circular mean) and its confidence by ``_combine_confidence``; both call
-:py:func:`scipy.linalg.pinvh` for the pseudoinverse, which is also where the rank-deficiency check
-and the zero-total-weight unobservable check live.  The public
-:py:func:`~nav.nav_orchestrator.ensemble.derive_confidence_rank` helper maps the combined confidence
-and per-axis sigma onto a confidence rank using the configured ``tier_thresholds``.
+- :func:`~nav.nav_orchestrator.ensemble.ensemble` — the reconciler. Returns one
+  :class:`~nav.nav_orchestrator.nav_result.NavResult`.
+- :func:`~nav.nav_orchestrator.ensemble.derive_confidence_rank` — assign the
+  five-bucket rank from a confidence / sigma pair.
+- :class:`~nav.nav_orchestrator.ensemble.EnsembleConfig` — frozen dataclass carrying
+  the seven tunables documented above.
+
+The function uses :func:`scipy.sparse.csgraph.connected_components` to find the
+Mahalanobis-distance clusters and :func:`scipy.linalg.pinvh` for both the per-pair
+distance test and the precision-weighted merge.
 
 Examples
 ========
 
-The ``multi_body`` scene (Cassini NAC ``N1487595731_1_CALIB``) is the canonical conflict case.
-After dropping no spurious or at-edge results, three estimates survive:
-:py:class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav` at ``(6.76, -17.71)``
-confidence 0.246, :py:class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav` at
-``(7.00, -18.00)`` confidence 0.239, and
-:py:class:`~nav.nav_technique.nav_technique_body_terminator.BodyTerminatorNav` at ``(11.58, 12.64)``
-confidence 0.744.  The disc and limb estimates agree to within a pixel and fuse into one group with
-summed confidence ``0.246 + 0.239 = 0.485``; the terminator estimate is roughly 31 px away in the U
-axis and forms its own group at 0.744.  The best group is the lone terminator, but the gap to the
-runner-up is ``0.744 - 0.485 = 0.259``, below the default ``agreement_gap`` of 0.5, so step seven
-declares the result conflicted and returns a
-:py:class:`~nav.nav_orchestrator.nav_result.NavResult` through
-:py:meth:`~nav.nav_orchestrator.nav_result.NavResult.conflicted` with the confidence further scaled
-by ``conflicted_confidence_multiplier``.
+**Two agreeing techniques.**  Pass 1 produces
+:class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav`
+(:math:`(6.76, -17.71)` ± 0.5 px) and
+:class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav`
+(:math:`(7.00, -18.00)` ± 0.3 px). The Mahalanobis distance is well below
+``agreement_sigma=2.0``; both end up in the same group. The fused offset is
+:math:`(6.93, -17.92)` px with combined per-axis sigma ~0.26 px. No disagreement
+penalty fires (only one group existed) so the fused confidence is the summed per-technique
+confidence (capped by the project-wide ceiling).
 
-The ``body_partial_overflow`` scene (Cassini NAC ``N1484593951_2_CALIB``) shows the opposite
-outcome.  The disc and terminator techniques both flag themselves spurious, so step one removes
-them, leaving :py:class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav` at
-``(12.06, 30.53)`` as the sole survivor.  With one estimate there is exactly one group and no
-runner-up, the conflict check is skipped, and the reconciliation emits a success through
-:py:meth:`~nav.nav_orchestrator.nav_result.NavResult.success` at confidence rank ``low``.
+**Single-link grouping with three techniques.**  Three techniques converge:
+:math:`(7.0, -18.0)` ± 0.3, :math:`(8.0, -17.5)` ± 0.5, :math:`(11.6, 12.6)` ± 0.4. The
+first two are within ``agreement_sigma`` of each other; the third is several sigma off in
+both axes. Single-link grouping puts the first two in one cluster and the third in its
+own. The first cluster's summed confidence is 0.49; the third's is 0.74. When the gap
+:math:`0.74 - 0.49 = 0.25` falls below ``agreement_gap=0.5`` the ensemble flags the
+conflict and returns ``status='conflicted'`` rather than picking the higher-confidence
+isolated wrong answer (this is the documented ``multi_body`` test scene's behaviour).
+
+**Rank-deficient ring-edge fit.**  A flat-ring-only scene produces a
+:class:`~nav.nav_technique.nav_technique_ring_edge.RingEdgeNav` result whose covariance is
+rank-1 along radial only. The ensemble's pseudoinverse handles the rank deficiency: the
+fused covariance has unbounded variance along the along-edge tangent and the
+:attr:`~nav.nav_orchestrator.nav_result.NavResult.sigma_along_unobservable_px` field
+captures it. When a star or body limb supplies an orthogonal-axis constraint the fused
+result becomes full-rank.

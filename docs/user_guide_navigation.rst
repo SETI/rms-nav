@@ -126,21 +126,16 @@ Environment options
 Navigation options
 ^^^^^^^^^^^^^^^^^^
 
-* ``--nav-models LIST``: a comma-separated list of model names or patterns to
-  enable. Valid entries are ``stars``, ``rings``, and body-specific entries of
-  the form ``body:NAME`` (glob patterns are allowed).
+* ``--nav-models LIST``: a comma-separated glob-pattern list selecting which
+  ``NavModel`` instances run.  Names follow the ``stars`` /
+  ``body:NAME`` / ``rings:PLANET`` convention.  Defaults to ``*``.  See
+  :ref:`selecting-models-and-techniques` for the full syntax (globs,
+  ``!`` exclusion, prefix-only shorthand).
 
 * ``--nav-techniques LIST``: a comma-separated glob-pattern list selecting
-  which registered ``NavTechnique`` subclasses run.  Implemented techniques
-  today are ``BodyDiscCorrelateNav``, ``BodyBlobNav``, ``BodyLimbNav``,
-  ``BodyTerminatorNav``, ``RingAnnulusNav``, ``RingEdgeNav``,
-  ``StarUniqueMatchNav``, ``StarRefineNav``, and
-  ``StarFieldFromCatalogNav``.  Defaults to ``*`` (all registered
-  techniques run); a leading ``!`` excludes a pattern (e.g.
-  ``--nav-techniques '!RingEdgeNav'`` runs every technique except the
-  ring-edge fitter).  Multiple feasible techniques run in parallel and the
-  orchestrator combines their results via the ensemble; you do **not**
-  pick "one technique at a time" the way the legacy pipeline did.
+  which registered ``NavTechnique`` subclasses run.  Defaults to ``*``.
+  See :ref:`selecting-models-and-techniques` for the full syntax and the
+  list of shipping technique class names.
 
 Output options
 ^^^^^^^^^^^^^^
@@ -277,6 +272,162 @@ Fields:
   ``null``) and ``extra_params`` (arbitrary key/value dictionary forwarded
   to the task implementation; optional, may be ``null`` or omitted).
 
+.. _selecting-models-and-techniques:
+
+Selecting models and techniques
+===============================
+
+``nav_offset`` runs every applicable navigation model and every feasible
+navigation technique by default.  Two glob-pattern filters narrow that
+set: ``--nav-models`` selects which :class:`~nav.nav_model.nav_model.NavModel`
+instances run, ``--nav-techniques`` selects which
+:class:`~nav.nav_technique.nav_technique.NavTechnique` subclasses run.
+The same syntax applies in three places:
+
+* ``nav_offset --nav-models LIST --nav-techniques LIST`` on the CLI.
+* ``nav_offset_cloud_tasks`` task JSON, under
+  ``data.arguments.nav_models`` and ``data.arguments.nav_techniques``
+  (each a list of strings).
+* :class:`~nav.nav_orchestrator.orchestrator.NavOrchestrator` programmatic
+  use, via the ``only_models=`` and ``only_techniques=`` keyword arguments.
+
+The two filters share their pattern syntax; only the *names* they match
+differ.  Filtering is purely additive over the existing registry — it does
+not register new models or techniques, so an entry that does not exist on
+this build of ``rms-nav`` simply does not match.
+
+Pattern syntax
+--------------
+
+Patterns are gitignore-style fnmatch globs evaluated against the
+candidate name.  A single string or a comma-separated list (CLI) /
+list-of-strings (JSON, Python) is accepted; the orchestrator splits on
+commas and trims whitespace.
+
+Inclusion patterns
+^^^^^^^^^^^^^^^^^^
+
+* A literal name matches that name only:
+  ``BodyLimbNav`` matches the technique class
+  :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav` and
+  nothing else.
+* ``*`` matches any sequence of characters; ``?`` matches a single
+  character; ``[abc]`` matches any character from the set.  Standard
+  Python ``fnmatch`` semantics apply.
+* The default ``'*'`` matches every candidate.
+
+Exclusion patterns
+^^^^^^^^^^^^^^^^^^
+
+* A leading ``!`` marks an *exclusion* pattern: matches against the
+  remaining glob are removed from the result.
+  ``--nav-techniques '!StarFieldFromCatalogNav'`` runs every registered
+  technique except that one.
+* When every pattern in the list begins with ``!`` (a pure-exclusion
+  list), an implicit ``'*'`` inclusion is added so the result is
+  "everything except the excluded names".  ``--nav-models '!body:MIMAS'``
+  is therefore equivalent to ``--nav-models '*,!body:MIMAS'``.
+* When at least one inclusion pattern is present, only the listed
+  inclusions plus their non-excluded matches survive.
+  ``'body:*,!body:MIMAS'`` runs every body model except Mimas.
+
+Multiple patterns
+^^^^^^^^^^^^^^^^^
+
+* On the CLI, comma-separate patterns inside a single argument:
+  ``--nav-models 'body:MIMAS,rings:SATURN,stars'``.
+* In JSON or Python, supply a list of strings:
+  ``["body:MIMAS", "rings:SATURN", "stars"]``.
+* The list is order-independent: a candidate name is kept iff it
+  matches at least one inclusion pattern and no exclusion pattern.
+
+Model names
+-----------
+
+The catalog-driven models register under these per-instance names:
+
+* ``stars`` — :class:`~nav.nav_model.stars.nav_model_stars.NavModelStars`
+  (one instance per observation; no namespace).
+* ``body:NAME`` —
+  :class:`~nav.nav_model.nav_model_body.NavModelBody` (one instance per
+  body whose bounding box overlaps the extended FOV).  The ``NAME``
+  portion is the upper-case SPICE body name
+  (``body:MIMAS``, ``body:DIONE``, ``body:SATURN``).
+* ``rings:PLANET`` —
+  :class:`~nav.nav_model.nav_model_rings.NavModelRings` (one instance
+  per planet whose ring system has any radius inside the extended FOV;
+  Saturn, Uranus, and Neptune today).
+
+Two convenience normalizations apply to model patterns:
+
+* The ``VALUE`` part of ``prefix:VALUE`` is upper-cased automatically,
+  so ``body:saturn`` matches ``body:SATURN``.
+* A bare prefix without a colon and without glob characters
+  (``body``, ``rings``) is auto-expanded to ``prefix:*``, matching
+  every namespaced model under that prefix.  ``stars`` (which has no
+  namespace) continues to match itself directly.
+
+Both normalizations preserve the leading ``!`` exclusion marker.
+``--nav-models 'body'`` is therefore shorthand for "every body model";
+``--nav-models '!body'`` excludes every body model.
+
+Technique names
+---------------
+
+Techniques register under their class name.  The shipping concrete
+techniques are:
+
+* Body family —
+  :class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav`,
+  :class:`~nav.nav_technique.nav_technique_body_blob.BodyBlobNav`,
+  :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav`,
+  :class:`~nav.nav_technique.nav_technique_body_terminator.BodyTerminatorNav`.
+* Ring family —
+  :class:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav`,
+  :class:`~nav.nav_technique.nav_technique_ring_edge.RingEdgeNav`.
+* Star family —
+  :class:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav`,
+  :class:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav`,
+  :class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav`.
+
+:class:`~nav.nav_technique.nav_technique_manual.NavTechniqueManual` is
+the interactive driver and is not part of the autonomous registry; it
+cannot be invoked by ``--nav-techniques``.
+
+Multiple feasible techniques run in parallel and the orchestrator
+combines their results via the ensemble step; ``--nav-techniques`` is
+not a "pick one technique" knob the way the legacy pipeline was — it
+restricts the candidate set the orchestrator considers.
+
+Examples
+--------
+
+.. code-block:: bash
+
+   # Run every model and every technique (the default).
+   nav_offset coiss N1234567890
+
+   # Mimas only — drop every other body and the ring/star models.
+   nav_offset coiss N1234567890 --nav-models 'body:MIMAS'
+
+   # Every body, plus rings, but no stars.
+   nav_offset coiss N1234567890 --nav-models 'body:*,rings'
+
+   # Every model except Mimas (auto-expanded ``'*'`` inclusion).
+   nav_offset coiss N1234567890 --nav-models '!body:MIMAS'
+
+   # Two specific DT-based techniques only.
+   nav_offset nhlorri LOR_0034851733 \
+       --nav-techniques 'BodyLimbNav,RingEdgeNav'
+
+   # Every technique except the catalog star matcher.
+   nav_offset coiss N1234567890 \
+       --nav-techniques '!StarFieldFromCatalogNav'
+
+   # Body and ring families only (every body / ring technique, no stars).
+   nav_offset coiss N1234567890 \
+       --nav-techniques 'Body*,Ring*'
+
 Inputs and Outputs
 ==================
 
@@ -359,9 +510,9 @@ default ``*`` runs all of them.
 
 The algorithmic detail (DT pipeline, Levenberg-Marquardt refinement,
 information-matrix covariance) lives in
-:doc:`dev_guide/dev_guide_techniques` and :doc:`dev_guide/dev_guide_uncertainty`;
-this page summarises what each technique does and which scenes it
-applies to.
+:doc:`dev_guide/dev_guide_techniques` and
+:doc:`dev_guide/dev_guide_techniques_dt_fitting`; this page summarises
+what each technique does and which scenes it applies to.
 
 Implemented techniques
 ----------------------
@@ -447,7 +598,7 @@ stdout.  Exit code is ``2`` if the dialog is cancelled or no
 template-bearing features are available.  The dialog's **Save as
 Library Entry...** button is the recommended path for adding a sidecar
 to the operator-curated test image library; see
-:doc:`user_guide_image_library`.
+:doc:`dev_guide/dev_guide_image_library`.
 
 Programmatic equivalent (one obs in, ``NavTechniqueResult`` out):
 
@@ -514,13 +665,10 @@ in ``config_03_stars.yaml`` under ``stars.catalogs`` (default
 deduplicated using the RA / DEC and V-magnitude thresholds in the same
 file.
 
-**Per-star detectability.**  Each star is gated by catalog magnitude
-against the per-observation limiting magnitude
-``obs.star_max_usable_vmag()``, the faintest usable star for the
-observation (derived from the camera and exposure time).  Stars fainter
-than the limiting magnitude are dropped.  A magnitude-margin effective
-SNR (how far the star sits above the limit) sets the per-star positional
-covariance and reliability.
+**Per-star detectability.**  A predicted SNR is computed for each star
+using the per-instrument PSF (``obs.star_psf()``), the per-image noise
+sigma (a robust MAD estimate), and the catalog magnitude.  Stars whose
+predicted SNR is below ``stars.min_predicted_snr`` are dropped.
 
 **Smear.**  When the spacecraft attitude rate is non-zero during the
 exposure, stars smear into trails.  The model computes the per-image

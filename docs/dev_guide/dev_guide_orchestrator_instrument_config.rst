@@ -1,134 +1,163 @@
-===================
-Instrument Settings
-===================
+==========================================================
+Per-Instrument Settings (InstrumentSettings)
+==========================================================
 
 Overview
 ========
 
-:py:class:`~nav.nav_orchestrator.instrument_config.InstrumentSettings` is the frozen, already-resolved
-bundle of per-instrument values the orchestrator needs at navigate time: the data-unit kind, the
-saturation DN (when applicable), the missing-data sentinel, the image-quality thresholds, and the
-camera-rotation flags.  It exists so the orchestrator can branch on a resolved data-unit kind and
-hand the classifier a ready-made threshold set without re-reading raw YAML.
-
-The constructor is the free function
-:py:func:`~nav.nav_orchestrator.instrument_config.instrument_settings_from_obs`, which reads the
-per-camera config mapping carried on the observation (``obs.inst_config``, populated when the image
-was loaded) and resolves it into the dataclass.  The consumer is the orchestrator's
-``NavOrchestrator._make_context``, which uses the resolved data-unit kind to choose the
-saturation-mask policy and the marker-value sanitisation, and forwards the thresholds and rotation
-flags into the :py:class:`~nav.nav_orchestrator.nav_context.NavContext` it builds.
+:class:`~nav.nav_orchestrator.instrument_config.InstrumentSettings` is the frozen
+dataclass that carries per-instrument runtime parameters the orchestrator needs to navigate
+an observation. The companion function
+:func:`~nav.nav_orchestrator.instrument_config.instrument_settings_from_obs` reads the
+per-camera ``inst_config`` mapping that an
+:class:`~nav.obs.obs_inst.ObsInst` populates from
+``config_4N0_inst_*.yaml`` and returns a populated dataclass. Every per-instrument
+behavioural branch in :class:`~nav.nav_orchestrator.orchestrator.NavOrchestrator` ultimately
+reads off this dataclass.
 
 Theory
 ======
 
-The settings encode one branching convention: the data-unit kind.  An instrument exposes its
-pixels either in raw analog-to-digital counts or in calibrated incidence-corrected reflectance.
-The raw-count kind carries a meaningful full-well saturation level and DN-keyed quality thresholds.
-The calibrated-reflectance kind does not: the same physical full-well count maps to a different
-reflectance value for every combination of exposure time, filter, and gain, so a single
-reflectance saturation threshold would be meaningless.  For the calibrated kind the saturation gate
-is therefore disabled outright, and the classifier is handed an infinite saturation threshold so
-the overexposed fraction is always zero and the fully-overexposed early-out cannot fire; the
-reflectance-keyed blank and noise thresholds are used in place of the count-keyed ones.
+Per-instrument configuration is split into two layers:
 
-The missing-data sentinel differs by kind as well: raw instruments mark dropped pixels with a
-numeric value (typically zero), while calibrated instruments use a not-a-number sentinel.  All
-threshold values that survive resolution are required to be finite, because they are compared
-directly against pixel intensities downstream and a non-finite threshold would silently corrupt
-the comparison.
+- The static per-instrument YAML (``config_400_inst_coiss.yaml``,
+  ``config_410_inst_gossi.yaml``, ``config_420_inst_nhlorri.yaml``,
+  ``config_430_inst_vgiss.yaml``) carries the slow-moving parameters: data unit
+  convention, saturation DN, classifier thresholds, camera rotation flags, and the
+  DN-to-image-unit scale.
+- The per-image observation snapshot
+  (:class:`~nav.obs.obs_snapshot_inst.ObsSnapshotInst`) carries the fast-moving
+  parameters: PSF sigma, midtime, extfov margin. These come from the per-image instrument
+  spec rather than the YAML.
+
+:func:`~nav.nav_orchestrator.instrument_config.instrument_settings_from_obs` reads the
+slow-moving keys off the per-camera YAML block and returns a populated
+:class:`~nav.nav_orchestrator.instrument_config.InstrumentSettings`. The orchestrator
+calls it once per observation in ``_make_context`` and the result is consumed by:
+
+- :class:`~nav.nav_orchestrator.image_classifier.NavImageClassifier` (via the
+  ``thresholds`` field).
+- The orchestrator's saturation-mask construction (via ``saturation_dn`` / ``data_units``).
+- The orchestrator's pre-filter selection (per-instrument ``source_image_filter`` block).
+- The :class:`~nav.nav_orchestrator.nav_context.NavContext` rotation flags
+  (``fit_camera_rotation``, ``max_rotation_deg``).
+- The star navigation model's predicted-SNR formula (via
+  ``signal_dn_to_image_unit_scale``).
+
+Restrictions and assumptions
+----------------------------
+
+- The per-instrument YAML must declare the ``data_units`` field; missing values raise
+  :exc:`ValueError` at config-load time so the failure surfaces during process startup.
+- Required numeric fields are coerced through a ``_required_float`` helper that rejects
+  non-numeric, non-finite, or boolean values.
+- The marker-value field accepts the literal string ``"NaN"`` for calibrated-IF
+  instruments where the missing-data sentinel is :class:`float` ``NaN``; numeric values
+  are coerced through :class:`float`.
+- The dataclass is frozen; new instances are returned per observation rather than
+  mutated.
+
+Sources of uncertainty
+----------------------
+
+The dataclass carries no uncertainty.
 
 Configuration
 =============
 
-:py:func:`~nav.nav_orchestrator.instrument_config.instrument_settings_from_obs` reads three blocks
-from the per-camera section of ``config_4N0_inst_*.yaml`` (for example
-``config_400_inst_coiss.yaml``).  The keys it consumes are:
+The per-instrument YAML schema consumed by
+:func:`~nav.nav_orchestrator.instrument_config.instrument_settings_from_obs`:
 
-- ``data_units`` — string, one of ``raw_dn`` or ``calibrated_if`` (dimensionless).  Selects the
-  saturation-mask policy, the sentinel kind, and which threshold variants apply.
-- ``fit_camera_rotation`` — bool, default ``false`` (dimensionless).  Enables 3-DoF technique fits
-  that add in-plane camera rotation as a third parameter.
-- ``max_rotation_deg`` — float, default ``5.0`` degrees.  Maximum rotation magnitude when rotation
-  is fitted; rejected if non-finite or not positive.
-
-Under the ``noise`` block:
-
-- ``saturation_dn`` — float, required for ``raw_dn`` instruments.  Per-instrument full-well DN used
-  to build the saturation mask; not read for ``calibrated_if`` instruments.
-- ``marker_value`` — numeric or the string ``NaN``, default ``0`` for ``raw_dn`` and ``NaN`` for
-  ``calibrated_if``.  The missing-data sentinel; higher specificity here tightens which pixels are
-  treated as dropped.
-
-Under the ``image_quality_thresholds`` block:
-
-- ``saturation_threshold_dn`` — float, required for ``raw_dn``.  Count above which a pixel counts
-  as overexposed for the clean-fraction gate; unread for ``calibrated_if`` (an infinite threshold
-  is substituted, and declaring ``saturation_threshold_if`` is rejected).
-- ``blank_max_dn`` / ``blank_max_if`` — float, required.  Intensity below which the frame is judged
-  blank; the ``_dn`` variant applies to ``raw_dn``, the ``_if`` variant to ``calibrated_if``.
-- ``noisy_threshold_dn`` / ``noisy_threshold_if`` — float, required.  Noise-sigma level above which
-  the frame is judged noisy; the ``_dn`` variant applies to ``raw_dn``, the ``_if`` variant to
-  ``calibrated_if``.
-- ``max_missing_frac_clean`` — float, default ``0.30`` (fraction).  Maximum missing fraction a
-  frame may carry and still be ranked clean; lowering it tightens the clean gate.
-- ``max_overexposed_frac_clean`` — float, default ``0.80`` (fraction).  Maximum overexposed
-  fraction a frame may carry and still be ranked clean.
-- ``partial_dropout_min_frac`` — float, default ``0.05`` (fraction).  Missing fraction above which
-  the partial-dropout class fires.
-
-When ``obs.inst_config`` is absent (simulated or test obs without per-instrument wiring) the
-function returns ``raw_dn`` defaults with no saturation mask and the standard
-:py:class:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds` defaults.  These keys are
-overridden per instrument by editing the corresponding ``config_4N0_inst_*.yaml`` camera block.
+- ``data_units`` — str, one of ``'raw_dn'`` or ``'calibrated_if'``. ``raw_dn`` exposes
+  pixels in raw counts; ``calibrated_if`` exposes pixels in calibrated I/F reflectance.
+- ``noise.saturation_dn`` — float, optional. Per-instrument full-well DN. Required for
+  ``raw_dn`` instruments; ``None`` for ``calibrated_if`` (where saturation cannot be
+  identified post-CALIB).
+- ``noise.marker_value`` — int / float / str. Missing-data sentinel value. For raw
+  instruments typically 0; for calibrated-IF the literal ``"NaN"`` (or ``null``) becomes
+  :class:`float` ``NaN``.
+- ``image_quality_thresholds`` — block consumed by
+  :class:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds`. See
+  :doc:`dev_guide_orchestrator_image_classifier` for the field-by-field schema.
+- ``camera_rotation.fit_camera_rotation`` — bool, default ``False``. When ``True`` every
+  technique adds in-plane camera rotation as a third parameter. Cassini ISS / NHLORRI
+  default to ``False``; VGISS / GOSSI default to ``True``.
+- ``camera_rotation.max_rotation_deg`` — float, default ``5.0`` deg. Maximum allowed
+  rotation magnitude when ``fit_camera_rotation`` is ``True``.
+- ``signal_dn_to_image_unit_scale`` — float, default ``1.0``. Per-camera scale factor
+  converting an integrated DN signal into the image's native units. ``1.0`` for
+  ``raw_dn`` instruments; the per-camera CALIB-pipeline scale factor for
+  ``calibrated_if`` instruments (typically of order :math:`10^{-7}` for Cassini ISS
+  CALIB).
 
 Implementation
 ==============
 
-Source file: ``src/nav/nav_orchestrator/instrument_config.py``.  Public class
-:py:class:`~nav.nav_orchestrator.instrument_config.InstrumentSettings`, a frozen
-:py:func:`dataclasses.dataclass`.  The module also defines the ``DataUnits`` literal alias for the
-two recognised data-unit kinds.
+Source file: ``src/nav/nav_orchestrator/instrument_config.py`` —
+:class:`~nav.nav_orchestrator.instrument_config.InstrumentSettings`,
+:func:`~nav.nav_orchestrator.instrument_config.instrument_settings_from_obs`, and the
+``DataUnits`` Literal alias.
 
-The public fields are :py:attr:`~nav.nav_orchestrator.instrument_config.InstrumentSettings.data_units`,
-:py:attr:`~nav.nav_orchestrator.instrument_config.InstrumentSettings.saturation_dn` (``None`` for
-calibrated-IF), :py:attr:`~nav.nav_orchestrator.instrument_config.InstrumentSettings.marker_value`,
-:py:attr:`~nav.nav_orchestrator.instrument_config.InstrumentSettings.thresholds` (an
-:py:class:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds`),
-:py:attr:`~nav.nav_orchestrator.instrument_config.InstrumentSettings.fit_camera_rotation`, and
-:py:attr:`~nav.nav_orchestrator.instrument_config.InstrumentSettings.max_rotation_deg`.  The
-dataclass defines no ``__post_init__`` and no classmethods; it is a plain resolved container.
+Public surface (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
 
-The public entry point :py:func:`~nav.nav_orchestrator.instrument_config.instrument_settings_from_obs`
-reads ``obs.inst_config``, returns the untyped ``raw_dn`` default when it is absent, and otherwise
-validates that the mapping carries a recognised ``data_units`` value and a
-``image_quality_thresholds`` block.  On the ``raw_dn`` path it requires a ``noise`` block and reads
-the count-keyed thresholds; on the ``calibrated_if`` path it substitutes an infinite saturation
-threshold, reads the reflectance-keyed thresholds, and rejects any explicit reflectance saturation
-threshold.  Validation raises :py:exc:`ValueError` for missing or unrecognised fields and
-:py:exc:`TypeError` when a block has the wrong shape.  The module's private helpers — the
-marker-value coercion and the required-finite-float reader — perform the per-field parsing and
-finiteness checks.
+- :class:`~nav.nav_orchestrator.instrument_config.InstrumentSettings` — frozen dataclass.
+  Public fields:
+
+  - :attr:`~nav.nav_orchestrator.instrument_config.InstrumentSettings.data_units` —
+    ``'raw_dn'`` or ``'calibrated_if'``.
+  - :attr:`~nav.nav_orchestrator.instrument_config.InstrumentSettings.saturation_dn` —
+    float or ``None``. Saturation DN; ``None`` for calibrated-IF.
+  - :attr:`~nav.nav_orchestrator.instrument_config.InstrumentSettings.marker_value` —
+    float. Missing-data sentinel.
+  - :attr:`~nav.nav_orchestrator.instrument_config.InstrumentSettings.thresholds` —
+    :class:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds` for the
+    classifier.
+  - :attr:`~nav.nav_orchestrator.instrument_config.InstrumentSettings.fit_camera_rotation`
+    — bool.
+  - :attr:`~nav.nav_orchestrator.instrument_config.InstrumentSettings.max_rotation_deg` —
+    float.
+  - :attr:`~nav.nav_orchestrator.instrument_config.InstrumentSettings.signal_dn_to_image_unit_scale`
+    — float. Default ``1.0``.
+
+- :func:`~nav.nav_orchestrator.instrument_config.instrument_settings_from_obs` — reads the
+  per-camera YAML mapping off ``obs.inst_config`` and returns a populated
+  :class:`~nav.nav_orchestrator.instrument_config.InstrumentSettings`.
+
+The module's private helpers ``_coerce_marker_value`` and ``_required_float`` validate
+the YAML values; the public function is the only entry point external callers use.
 
 Examples
 ========
 
-For a Cassini ISS narrow-angle raw frame, ``obs.inst_config`` carries ``data_units: raw_dn``, a
-``noise`` block with ``saturation_dn: 4095`` and ``marker_value: 0``, and an
-``image_quality_thresholds`` block with ``saturation_threshold_dn: 4095``, ``blank_max_dn: 5.0``,
-and ``noisy_threshold_dn: 10.0``.  The resolved
-:py:class:`~nav.nav_orchestrator.instrument_config.InstrumentSettings` then has
-:py:attr:`~nav.nav_orchestrator.instrument_config.InstrumentSettings.data_units` equal to
-``'raw_dn'``, :py:attr:`~nav.nav_orchestrator.instrument_config.InstrumentSettings.saturation_dn`
-equal to ``4095.0``, and
-:py:attr:`~nav.nav_orchestrator.instrument_config.InstrumentSettings.marker_value` equal to
-``0.0``; the orchestrator builds a real saturation mask from the full-well DN.
+**Cassini ISS NAC.**  ``config_400_inst_coiss.yaml`` declares
+``data_units: raw_dn``, ``noise.saturation_dn: 4095.0``, ``noise.marker_value: 0``,
+``camera_rotation.fit_camera_rotation: false``,
+``camera_rotation.max_rotation_deg: 5.0``,
+``signal_dn_to_image_unit_scale: 1.0``.
+:func:`~nav.nav_orchestrator.instrument_config.instrument_settings_from_obs` returns::
 
-For the matching calibrated frame in ``body_partial_overflow`` (``N1484593951_2_CALIB``),
-``obs.inst_config`` carries ``data_units: calibrated_if``, a ``noise`` block with
-``marker_value: NaN``, and reflectance-keyed ``blank_max_if`` / ``noisy_threshold_if`` thresholds.
-The resolved settings have
-:py:attr:`~nav.nav_orchestrator.instrument_config.InstrumentSettings.saturation_dn` equal to
-``None`` and a :py:attr:`~nav.nav_orchestrator.instrument_config.InstrumentSettings.thresholds`
-whose saturation threshold is infinite, so the orchestrator emits an empty saturation mask and the
-overexposed early-out cannot fire.
+    InstrumentSettings(
+        data_units='raw_dn',
+        saturation_dn=4095.0,
+        marker_value=0.0,
+        thresholds=ImageQualityThresholds(...),
+        fit_camera_rotation=False,
+        max_rotation_deg=5.0,
+        signal_dn_to_image_unit_scale=1.0,
+    )
+
+**Voyager ISS.**  ``config_430_inst_vgiss.yaml`` declares
+``camera_rotation.fit_camera_rotation: true`` and
+``camera_rotation.max_rotation_deg: 10.0``. The orchestrator's per-image
+:class:`~nav.nav_orchestrator.nav_context.NavContext`
+inherits ``fit_camera_rotation=True`` and every technique runs the 3-DoF path, so
+:class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav` reports a 3x3 covariance
+on Voyager imagery.
+
+**Cassini ISS CALIB pipeline.**  When the operator runs the calibrated-IF pipeline,
+``data_units: calibrated_if``, ``noise.saturation_dn: null``, ``noise.marker_value: NaN``,
+``signal_dn_to_image_unit_scale`` carries the per-camera CALIB-pipeline scale (~``5e-7``).
+The orchestrator's saturation-mask helper returns an empty mask (saturation cannot be
+identified post-CALIB), and the star navigation model's predicted-SNR formula multiplies
+its DN-keyed catalog signal by ``signal_dn_to_image_unit_scale`` to bring it into
+calibrated-IF units before forming the SNR ratio.

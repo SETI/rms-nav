@@ -1,97 +1,224 @@
-=====================
-Technique Diagnostics
-=====================
+============================================================
+Per-Technique Diagnostics (Shared Dataclass Family)
+============================================================
 
 Overview
 ========
 
-Every navigation technique returns, alongside its offset, a typed diagnostics object summarising the
-internal quantities that explain how the fit went: peak heights, residual RMS values, inlier counts,
-arc fractions, mode flags. These objects feed two consumers. The confidence formula reads named
-diagnostic attributes to compute a calibrated score (see :doc:`dev_guide_techniques_confidence`), and
-the orchestrator's JSON curator walks a per-class field map to decide which diagnostics land in the
-output metadata. This page documents the module of diagnostics dataclasses as a family; each
-technique's own page covers how its specific fields drive its confidence formula.
+Per-technique diagnostics are the typed dataclasses every navigation technique returns on its
+:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.diagnostics` field. Each
+technique declares its own diagnostics dataclass — a frozen, narrow record of the per-fit
+quantities that the confidence formula consumes and the curator surfaces in the JSON sidecar.
+Centralising every diagnostics dataclass in one module lets the curator's allow-list
+discipline catch a programmer who adds a new diagnostic field without updating its JSON
+schema, and lets the
+:func:`~nav.nav_technique.nav_technique.validate_registered_confidence_specs` walk verify at
+config-load time that every YAML-driven confidence formula references only attributes the
+technique actually emits.
 
 Theory
 ======
 
-A diagnostics object is a pure container, not an algorithm: it records the measurements a technique
-already computed so that downstream stages can score and report them without re-deriving anything.
-The design has two recurring conventions. First, each diagnostic is a flat scalar — a count, a pixel
-length, a ratio, a flag, or a mode string — so it can be normalised by the confidence formula's
-affine transform and serialised to JSON without nesting. Second, every technique's diagnostics class
-carries a static field map naming, for each attribute, the JSON key it serialises to; a field that
-is present on the dataclass but absent from that map is a build-time error, which guarantees the
-published metadata stays in lock-step with the dataclass as fields are added or removed.
+A diagnostics dataclass is a frozen record whose fields are exactly the per-fit quantities
+that downstream systems read. Two consumers exist:
 
-The diagnostics also encode the difference between a raw measurement and the quantity the confidence
-formula actually consumes. Where a raw value would mislead the formula — a raw pixel disagreement
-that should be scaled by body diameter, a raw phase angle that understates centroid uncertainty on
-an irregular body — the dataclass carries both the raw value (for inspection) and a normalised
-companion (for the formula). This separation is a documented property of the containers, not a
-computation they perform.
+The confidence formula
+----------------------
+
+Each :class:`~nav.nav_technique.confidence.ConfidenceTerm` references a diagnostic-attribute
+name; the shared evaluator reads that attribute off the diagnostics object and feeds it
+through the offset / divisor / cap normalisation before applying the linear coefficient. See
+:doc:`dev_guide_techniques_confidence` for the sigmoid math. The technique's
+:attr:`~nav.nav_technique.nav_technique.NavTechnique.confidence_attributes` allow-list spans
+both the diagnostic-attribute names *and* any side-channel flags the spec is allowed to read
+(``at_edge``, ``spurious``, etc., which live on the result rather than the diagnostics
+object); the validation walk verifies that every term and every hard-zero key falls inside the
+allow-list.
+
+The curator
+-----------
+
+The orchestrator's curator
+(:func:`~nav.nav_orchestrator.curator.build_metadata_dict`) walks every diagnostics dataclass's
+``CURATOR_FIELDS`` class attribute — a mapping of dataclass-field name to JSON-key name (or
+``None`` to skip) — and emits exactly those fields into the per-image JSON sidecar. The
+mapping format lets the JSON schema use a different name than the Python field (e.g. an
+internal ``mode`` could surface as ``"path"`` in the JSON), but the conventional usage is
+identity (the dataclass field name and the JSON key match).
+:func:`~nav.nav_orchestrator.curator.assert_diagnostic_fields_present` runs at startup and
+fails the build when a new dataclass field is added without updating
+``CURATOR_FIELDS``.
+
+Restrictions and assumptions
+----------------------------
+
+- Every diagnostics dataclass is frozen (``@dataclass(frozen=True)``); the technique builds
+  one instance per fit and the orchestrator passes it on to the curator without mutation.
+- Every dataclass declares a ``CURATOR_FIELDS`` :class:`typing.ClassVar` mapping covering
+  every public field. Fields the curator deliberately omits are mapped to ``None``;
+  every other field maps to its JSON key name. CI fails if any field is unmapped.
+- All numeric fields are plain Python floats / ints. Numpy scalars are coerced before
+  storage so the JSON serialiser does not encounter non-native types.
+- Every per-technique confidence formula references only attributes that exist on the
+  technique's diagnostics dataclass plus the four side-channel flags carried on the
+  :class:`~nav.nav_technique.technique_result.NavTechniqueResult` itself
+  (:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge`,
+  :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious`, plus the
+  technique's own internal flags exposed via an adapter object).
+
+Sources of uncertainty
+----------------------
+
+Diagnostics are the *outputs* of the per-fit numerics — they record what the technique
+measured rather than uncertainty about the measurement. Any uncertainty quoted on the
+diagnostic value (e.g. an LM RMS residual) is the technique's own number.
 
 Configuration
 =============
 
-The diagnostics dataclasses have no configuration of their own: they are runtime containers
-populated by each technique, with no YAML knobs and no module-level tunables. The coefficients that
-consume their fields live in each technique's confidence-formula block in
-``config_510_techniques.yaml`` (see :doc:`dev_guide_techniques_confidence`), and the field-to-JSON
-mapping is a class constant on each dataclass rather than a configurable value.
+Diagnostics carry no YAML configuration of their own. Each technique's confidence formula —
+which references diagnostic-attribute names by string — lives under
+``techniques.<TechniqueName>`` in
+``src/nav/config_files/config_510_techniques.yaml``; see :doc:`dev_guide_techniques_confidence`
+for the YAML schema.
 
 Implementation
 ==============
 
-Source file: ``src/nav/nav_technique/diagnostics.py``. The module defines one frozen dataclass per
-concrete technique plus a union alias spanning all of them. Each dataclass carries a ``CURATOR_FIELDS``
-class variable mapping every public attribute to its JSON key, which the orchestrator's curator walks
-when assembling metadata.
+Source file: ``src/nav/nav_technique/diagnostics.py``.
 
-The body techniques' diagnostics are
-:py:class:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics` (``ncc_peak``,
-``peak_to_runner_up_ratio``, ``consistency_px``, ``consistency_ratio``, ``used_gradient``,
-``body_count``), :py:class:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics`
-(``visible_limb_arc_fraction``, ``visible_arc_px``, ``dt_fit_rms_px``, ``lm_iterations``,
-``tukey_inlier_count``), :py:class:`~nav.nav_technique.diagnostics.BodyTerminatorDiagnostics` (the
-same shape with ``visible_terminator_arc_fraction`` substituted), and
-:py:class:`~nav.nav_technique.diagnostics.BodyBlobDiagnostics`
-(``body_snr_inside_predicted_bbox``, ``body_extent_px``, ``blob_count``, ``residual_px``,
-``max_phase_angle_deg``, ``max_phase_irregularity_factor``).
+Public surface (autodocumented at :doc:`/api_reference/api_nav_technique`):
 
-The ring techniques' diagnostics are :py:class:`~nav.nav_technique.diagnostics.RingEdgeDiagnostics`
-(``total_edge_length_px``, ``per_edge_dt_rms_summed``, ``edge_count``, ``is_rank_1``) and
-:py:class:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics` (``ncc_peak``,
-``peak_to_runner_up_ratio``, ``annulus_count``, ``used_gradient``).
+- :class:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics` — emitted by
+  :class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav`. Fields:
+  :attr:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics.ncc_peak`,
+  :attr:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics.peak_to_runner_up_ratio`,
+  :attr:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics.consistency_px`,
+  :attr:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics.used_gradient`,
+  :attr:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics.body_count`.
 
-The star techniques' diagnostics are
-:py:class:`~nav.nav_technique.diagnostics.StarFieldDiagnostics` (``n_inliers``,
-``median_residual_px``, ``n_detected_sources``, ``n_catalog_predicted``, ``n_triplets_evaluated``),
-:py:class:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics` (``mode``, ``predicted_snr``,
-``brightness_margin_mag``, ``residual_px``), and
-:py:class:`~nav.nav_technique.diagnostics.StarRefineDiagnostics` (``n_stars_used``,
-``median_pos_err_px``, ``residual_scatter_px``). The interactive technique reports
-:py:class:`~nav.nav_technique.diagnostics.ManualNavDiagnostics` (``operator_accepted``).
+- :class:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics` — emitted by
+  :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav`. Fields:
+  :attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.visible_limb_arc_fraction`,
+  :attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.visible_arc_px`,
+  :attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.dt_fit_rms_px`,
+  :attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.lm_iterations`,
+  :attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.tukey_inlier_count`.
 
-The module-level alias :py:obj:`~nav.nav_technique.diagnostics.NavTechniqueDiagnostics` is the union
-of all ten dataclasses; the curator and the technique-result type both consume it, so adding a
-technique means adding both its dataclass and a new union member.
+- :class:`~nav.nav_technique.diagnostics.BodyTerminatorDiagnostics` — emitted by
+  :class:`~nav.nav_technique.nav_technique_body_terminator.BodyTerminatorNav`. Same shape as
+  :class:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics` with
+  ``visible_terminator_arc_fraction`` substituted for
+  ``visible_limb_arc_fraction``.
+
+- :class:`~nav.nav_technique.diagnostics.BodyBlobDiagnostics` — emitted by
+  :class:`~nav.nav_technique.nav_technique_body_blob.BodyBlobNav`. Fields:
+  :attr:`~nav.nav_technique.diagnostics.BodyBlobDiagnostics.body_snr_inside_predicted_bbox`,
+  :attr:`~nav.nav_technique.diagnostics.BodyBlobDiagnostics.body_extent_px`,
+  :attr:`~nav.nav_technique.diagnostics.BodyBlobDiagnostics.blob_count`,
+  :attr:`~nav.nav_technique.diagnostics.BodyBlobDiagnostics.residual_px`,
+  :attr:`~nav.nav_technique.diagnostics.BodyBlobDiagnostics.max_phase_angle_deg`,
+  :attr:`~nav.nav_technique.diagnostics.BodyBlobDiagnostics.max_phase_irregularity_factor`.
+
+- :class:`~nav.nav_technique.diagnostics.RingEdgeDiagnostics` — emitted by
+  :class:`~nav.nav_technique.nav_technique_ring_edge.RingEdgeNav`. Fields:
+  :attr:`~nav.nav_technique.diagnostics.RingEdgeDiagnostics.total_edge_length_px`,
+  :attr:`~nav.nav_technique.diagnostics.RingEdgeDiagnostics.per_edge_dt_rms_summed`,
+  :attr:`~nav.nav_technique.diagnostics.RingEdgeDiagnostics.edge_count`,
+  :attr:`~nav.nav_technique.diagnostics.RingEdgeDiagnostics.is_rank_1`.
+
+- :class:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics` — emitted by
+  :class:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav`. Fields:
+  :attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.ncc_peak`,
+  :attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.peak_to_runner_up_ratio`,
+  :attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.annulus_count`,
+  :attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.used_gradient`.
+
+- :class:`~nav.nav_technique.diagnostics.StarFieldDiagnostics` — emitted by
+  :class:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav`. Fields:
+  :attr:`~nav.nav_technique.diagnostics.StarFieldDiagnostics.n_inliers`,
+  :attr:`~nav.nav_technique.diagnostics.StarFieldDiagnostics.median_residual_px`,
+  :attr:`~nav.nav_technique.diagnostics.StarFieldDiagnostics.n_detected_sources`,
+  :attr:`~nav.nav_technique.diagnostics.StarFieldDiagnostics.n_catalog_predicted`,
+  :attr:`~nav.nav_technique.diagnostics.StarFieldDiagnostics.n_triplets_evaluated`.
+
+- :class:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics` — emitted by
+  :class:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav`. Fields:
+  :attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.mode`,
+  :attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.predicted_snr`,
+  :attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.brightness_margin_mag`,
+  :attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.residual_px`.
+
+- :class:`~nav.nav_technique.diagnostics.StarRefineDiagnostics` — emitted by
+  :class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav`. Fields:
+  :attr:`~nav.nav_technique.diagnostics.StarRefineDiagnostics.n_stars_used`,
+  :attr:`~nav.nav_technique.diagnostics.StarRefineDiagnostics.median_pos_err_px`,
+  :attr:`~nav.nav_technique.diagnostics.StarRefineDiagnostics.residual_scatter_px`.
+
+The module also exports the
+:data:`~nav.nav_technique.diagnostics.NavTechniqueDiagnostics` union type spanning every
+per-technique dataclass; the orchestrator's curator and
+:class:`~nav.nav_technique.technique_result.NavTechniqueResult` both consume this union.
+Adding a new technique means adding both its diagnostics dataclass and a new entry into the
+union.
 
 Examples
 ========
 
-Body-limb diagnostics on the ``body_partial_overflow`` scene (Cassini NAC ``N1484593951_2_CALIB``,
-a large partially-cropped Rhea with a good limb). The body-limb technique converges to about
-``(12.06, 30.53)`` px and populates a
-:py:class:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics` whose ``visible_arc_px`` and
-``visible_limb_arc_fraction`` reflect the surviving limb, ``dt_fit_rms_px`` records the final DT
-residual, ``lm_iterations`` the Levenberg-Marquardt iteration count, and ``tukey_inlier_count`` the
-number of vertices that kept positive Tukey weight; the curator serialises all five into the JSON
-metadata through ``CURATOR_FIELDS``.
+**Curator allow-list discipline.**  Each diagnostics dataclass declares a class-level
+``CURATOR_FIELDS`` mapping that the curator walks at JSON-emit time. For
+:class:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics` the mapping is::
 
-Degenerate terminator diagnostics on the same image. The body-terminator technique on
-``N1484593951_2_CALIB`` rejects every one of its 895 vertices and does not iterate, so its
-:py:class:`~nav.nav_technique.diagnostics.BodyTerminatorDiagnostics` carries
-``tukey_inlier_count`` of 0 and ``lm_iterations`` of 0 — the values the technique's hard-zero
-confidence gate reads to force its confidence to zero.
+    CURATOR_FIELDS = {
+        'visible_limb_arc_fraction': 'visible_limb_arc_fraction',
+        'visible_arc_px': 'visible_arc_px',
+        'dt_fit_rms_px': 'dt_fit_rms_px',
+        'lm_iterations': 'lm_iterations',
+        'tukey_inlier_count': 'tukey_inlier_count',
+    }
+
+A new field added to the dataclass without a corresponding entry trips
+:func:`~nav.nav_orchestrator.curator.assert_diagnostic_fields_present` at startup, which
+raises :exc:`AssertionError` and fails the build before any image is processed.
+
+**Confidence-formula reference.**  The YAML stanza for ``BodyLimbNav`` declares::
+
+    techniques:
+      BodyLimbNav:
+        terms:
+          - feature: visible_limb_arc_fraction
+            alpha: 3.0
+          - feature: dt_fit_rms_px
+            alpha: -1.5
+
+Each ``feature`` value names an attribute on
+:class:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics`. At config-load time
+:func:`~nav.nav_technique.nav_technique.validate_registered_confidence_specs` walks the spec
+and confirms every name appears in
+:class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav`'s
+:attr:`~nav.nav_technique.nav_technique.NavTechnique.confidence_attributes` allow-list.
+
+**JSON sidecar field-by-field.**  A successful ``BodyLimbNav`` fit on a Cassini image
+produces a per-technique block in the per-image JSON sidecar of the form::
+
+    {
+      "technique_name": "BodyLimbNav",
+      "feature_ids": ["limb_arc:DIONE"],
+      "offset_px": [11.0, 29.5],
+      "covariance_px2": [[0.0156, 0.0017], [0.0017, 0.0148]],
+      "confidence": 0.794,
+      "spurious": false,
+      "at_edge": false,
+      "diagnostics": {
+        "visible_limb_arc_fraction": 0.85,
+        "visible_arc_px": 120.0,
+        "dt_fit_rms_px": 0.4,
+        "lm_iterations": 5,
+        "tukey_inlier_count": 118
+      }
+    }
+
+Every key under ``"diagnostics"`` corresponds to a non-``None``-valued entry in the
+``CURATOR_FIELDS`` mapping for
+:class:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics`; nothing else surfaces in the
+sidecar.

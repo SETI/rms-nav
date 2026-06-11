@@ -14,8 +14,6 @@ Welcome to the Documentation for RMS-NAV!
    introduction
    user_guide
    dev_guide/dev_guide
-   api_reference
-   contributing
 
 Indices and tables
 ==================

@@ -2,24 +2,57 @@
 Navigation Models
 =================
 
-A navigation model renders the predicted appearance of one scene component and emits the
-features that techniques consume.  The abstract base defines three hooks every concrete
-model implements: one that populates internal state, one that returns features for
-technique consumption, and one that returns annotations for the summary image.  Concrete
-models self-register so the orchestrator can discover them and instantiate the right set
-for each observation.
+:class:`~nav.nav_model.nav_model.NavModel` is the abstract base for
+predicted-scene generators. Each subclass implements three methods:
 
-The registered families are the body models (catalog-driven and simulated), the ring
-models (catalog-driven and simulated), the star model, and the Titan model.  The
-body family has its own landing page; the remaining models each have a per-class page.
+- :meth:`~nav.nav_model.nav_model.NavModel.create_model` — populate the model's
+  internal state and :attr:`~nav.nav_model.nav_model.NavModel.metadata` dict.
+- :meth:`~nav.nav_model.nav_model.NavModel.to_features` — return a list of
+  :class:`~nav.feature.feature.NavFeature` instances for technique
+  consumption.
+- :meth:`~nav.nav_model.nav_model.NavModel.to_annotations` — return an
+  :class:`~nav.annotation.annotations.Annotations` collection for the
+  summary PNG.
 
-The API surface is summarised under :doc:`/api_reference/api_nav_model`.
+Concrete subclasses self-register via ``__init_subclass__``; abstract
+bases set ``_abstract = True`` to opt out. The class method
+:meth:`~nav.nav_model.nav_model.NavModel.instances_for_obs` is the per-class hook that
+:func:`~nav.nav_model.nav_model.build_models_for_obs` iterates.
+
+Registered concrete models, grouped by feature family:
+
+- **Stars** (:doc:`dev_guide_navigation_models_stars`) —
+  :class:`~nav.nav_model.stars.nav_model_stars.NavModelStars` (catalog-driven; one
+  instance per observation). A simulated-image sibling
+  ``NavModelStarsSimulated`` is reserved without an implementation.
+- **Bodies** (:doc:`dev_guide_navigation_models_bodies`) —
+  :class:`~nav.nav_model.nav_model_body.NavModelBody` (catalog-driven; one instance per
+  body whose bounding box overlaps the extended FOV) and
+  :class:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated`
+  (simulated-image GUI variant).
+- **Rings** (:doc:`dev_guide_navigation_models_rings`) —
+  :class:`~nav.nav_model.nav_model_rings.NavModelRings` (catalog-driven; one instance per
+  planet whose ring system is configured and visible) and
+  :class:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated`
+  (simulated-image GUI variant).
+- **Titan** (:doc:`dev_guide_navigation_models_titans`) —
+  :class:`~nav.nav_model.nav_model_titan.NavModelTitan` (registered placeholder for
+  atmospheric-body navigation; emits no features). A simulated-image sibling
+  ``NavModelTitanSimulated`` is reserved without an implementation.
+
+Shared annotation helpers live on
+:class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase` (body silhouette
++ label rendering) and
+:class:`~nav.nav_model.nav_model_rings_base.NavModelRingsBase` (per-edge
+polyline + label rendering).
+
+The API surface is summarised under
+:doc:`/api_reference/api_nav_model`.
 
 .. toctree::
-   :maxdepth: 1
+   :maxdepth: 4
 
+   dev_guide_navigation_models_stars
    dev_guide_navigation_models_bodies
    dev_guide_navigation_models_rings
-   dev_guide_navigation_models_rings_simulated
-   dev_guide_navigation_models_stars
-   dev_guide_navigation_models_titan
+   dev_guide_navigation_models_titans

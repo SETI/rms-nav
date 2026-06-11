@@ -1,100 +1,158 @@
-================
-Metadata Curator
-================
+==========================================================
+JSON Curation (build_metadata_dict)
+==========================================================
 
 Overview
 ========
 
-The curator projects an in-memory navigation result into the JSON-friendly metadata block written
-to disk for every image.  It selects the serializable fields, rounds every float to a documented
-precision so the output is byte-stable across runs, replaces infinite values with a finite
-sentinel, and assembles the ``navigation_result`` dictionary the orchestrator merges into the
-per-image metadata file.  It also enforces an invariant: every per-technique diagnostic field that
-ships in the JSON must be listed in that technique's curator allow-list, so a newly added diagnostic
-cannot silently vanish from the output.
+The curator turns a :class:`~nav.nav_orchestrator.nav_result.NavResult` into a JSON-friendly
+metadata dict consumed by downstream readers. Two functions form the public surface:
+:func:`~nav.nav_orchestrator.curator.build_metadata_dict` does the conversion, and
+:func:`~nav.nav_orchestrator.curator.assert_diagnostic_fields_present` runs at startup to
+enforce the per-technique ``CURATOR_FIELDS`` allow-list discipline so a new diagnostic
+field cannot silently disappear from the JSON output.
 
 Theory
 ======
 
-The transformation is mechanical, not algorithmic.  A navigation result holds rich in-memory state:
-the headline offset and its covariance, per-technique estimates with their own diagnostic records,
-a per-feature inventory, the image classification, and the provenance envelope.  The curator walks
-that structure and emits a plain nested dictionary of strings, numbers, lists, and nested
-dictionaries -- nothing that a standard JSON encoder cannot serialize.
+The curator picks JSON-friendly fields from a
+:class:`~nav.nav_orchestrator.nav_result.NavResult`, rounds floats to documented
+precision, substitutes the ``JSON_INF_SENTINEL`` finite sentinel for non-finite floats (or
+zero for NaN), and emits the ``navigation_result`` block consumed by downstream readers.
 
-Two policies govern the numeric output.  First, every float is rounded to a fixed number of decimal
-places chosen per quantity kind: pixel-valued quantities (offsets, sigmas, covariance entries) to a
-finer precision, confidence-like scores to a coarser one, and ephemeris-time timestamps to the
-finest, because a coarse timestamp would lose sub-second alignment.  These precisions are tighter
-than the per-image tolerance budget; their purpose is reproducibility, so two runs on the same
-inputs produce identical bytes.  Second, an infinite value -- which arises legitimately when one
-axis of the offset is unobservable -- cannot be encoded as standard JSON, so it is replaced by a
-large finite sentinel of the matching sign, and a not-a-number value is replaced by zero.
+Float rounding policy
+---------------------
 
-The allow-list invariant is a guardrail rather than a computation.  Each technique declares which of
-its diagnostic fields are exported and under what JSON key; a verification pass compares the
-declared set against the actual fields on the diagnostic record and refuses to proceed if any field
-is undeclared, turning an easy-to-miss omission into a loud failure.
+Three precision constants govern the rounding:
+
+- ``PIXEL_DECIMALS = 4`` — pixel-domain quantities (offsets, sigmas, covariance
+  entries).
+- ``CONFIDENCE_DECIMALS = 3`` — confidence scores in :math:`[0, 1]`.
+- ``ET_DECIMALS = 6`` — ET timestamps (seconds past J2000 TDB).
+
+The constants are chosen tighter than the per-image tolerance budget so the JSON output
+is byte-identical across runs of the same input — a regression-baseline comparator can
+diff the JSON directly.
+
+Allow-list discipline
+---------------------
+
+Every per-technique diagnostic field that ships in the JSON appears in the technique's
+``CURATOR_FIELDS`` class attribute (a mapping of dataclass-field name to JSON-key name, or
+``None`` to skip). The curator walks ``CURATOR_FIELDS`` rather than the dataclass's
+``fields()`` directly, so a new field added to a diagnostics dataclass without an entry
+in the mapping does not silently leak into the JSON.
+:func:`~nav.nav_orchestrator.curator.assert_diagnostic_fields_present` runs at startup
+(or in CI) and fails the build with :exc:`AssertionError` when any dataclass field is
+missing from its ``CURATOR_FIELDS``.
+
+Restrictions and assumptions
+----------------------------
+
+- The curator does not handle nested dataclasses generically. Per-technique diagnostic
+  classes are flat (every public field is a Python primitive or numpy scalar); when a
+  future diagnostic dataclass needs nested structure the curator will need a recursive
+  variant.
+- Non-finite floats (``+inf``, ``-inf``, ``nan``) are mapped: ``+inf`` becomes
+  ``JSON_INF_SENTINEL``, ``-inf`` becomes ``-JSON_INF_SENTINEL``, ``nan`` becomes ``0.0``.
+  The sentinel is a documented finite value the JSON schema reserves for "unbounded".
+- The curator does not include the per-image image array in the JSON (it would balloon
+  the sidecar to multi-megabyte sizes). An external image-export step writes the image
+  alongside the JSON when needed.
+
+Sources of uncertainty
+----------------------
+
+The curator reports no uncertainty. Every output is a deterministic projection of the
+input :class:`~nav.nav_orchestrator.nav_result.NavResult`.
 
 Configuration
 =============
 
-The curator is configured entirely by module-level constants in
-``src/nav/nav_orchestrator/curator.py``; there is no YAML override path.  The rounding policy
-constants:
-
-- ``PIXEL_DECIMALS`` -- int, default ``4`` (decimal places).  Precision for pixel-valued quantities:
-  offsets, per-axis sigmas, and covariance matrix entries.
-- ``CONFIDENCE_DECIMALS`` -- int, default ``3`` (decimal places).  Precision for confidence scores,
-  reliabilities, and the per-technique diagnostic floats.
-- ``ET_DECIMALS`` -- int, default ``6`` (decimal places).  Precision for the ephemeris-time image
-  timestamp.
-
-The infinite-value sentinel is the shared constant
-:py:data:`nav.feature.constants.JSON_INF_SENTINEL`: a positive infinity is written as this finite
-value and a negative infinity as its negation, so the unobservable-axis sigma survives JSON
-serialization as a large finite number rather than an encoder error.
+The curator carries no YAML configuration of its own. The three rounding constants
+(``PIXEL_DECIMALS``, ``CONFIDENCE_DECIMALS``, ``ET_DECIMALS``) and the
+``JSON_INF_SENTINEL`` live as module-level constants; ``JSON_INF_SENTINEL`` lives in
+:mod:`nav.feature.constants` and is shared with other JSON producers.
 
 Implementation
 ==============
 
-Source file: ``src/nav/nav_orchestrator/curator.py``.
+Source file: ``src/nav/nav_orchestrator/curator.py`` —
+:func:`~nav.nav_orchestrator.curator.build_metadata_dict`,
+:func:`~nav.nav_orchestrator.curator.assert_diagnostic_fields_present`, plus the private
+``_round_float`` / ``_round_pair`` / ``_round_2x2`` rounding helpers.
 
-The module exposes two public functions, both with signatures deferred to autodoc.
-:py:func:`~nav.nav_orchestrator.curator.build_metadata_dict` is the entry point: given a
-:py:class:`~nav.nav_orchestrator.nav_result.NavResult` it returns the JSON-ready
-``navigation_result`` dictionary.  It first calls
-:py:func:`~nav.nav_orchestrator.curator.assert_diagnostic_fields_present` to enforce the allow-list
-invariant, then assembles the headline fields (status, status reason, rounded offset and sigma,
-unobservable-axis sigma, confidence and rank, covariance, techniques used, and a per-type feature
-count over the kept inventory entries), and finally curates the per-technique results, the feature
-inventory, the image classifier verdict, and the provenance envelope.  Optional rotation and
-rotation-sigma fields are appended in degrees when the result carries a fitted rotation.
+Public surface (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
 
-The rounding and serialization run through private helpers: ``_round_float`` applies the
-per-quantity decimal policy and the infinity / not-a-number substitution, ``_round_pair`` and
-``_round_2x2`` extend it to offset pairs and covariance matrices, and ``_curate_technique_result``,
-``_curate_diagnostics``, ``_curate_feature_summary``, ``_curate_image_classifier``, and
-``_curate_provenance`` project each nested record.  ``_curate_diagnostics`` reads each technique's
-``CURATOR_FIELDS`` allow-list to decide which diagnostic fields to export and under which JSON key.
-:py:func:`~nav.nav_orchestrator.curator.assert_diagnostic_fields_present` walks the per-technique
-diagnostic records and raises :py:exc:`AssertionError` when a record lacks a ``CURATOR_FIELDS``
-declaration or carries a field absent from it, so continuous integration fails the build before an
-undocumented diagnostic reaches the JSON.
+- :func:`~nav.nav_orchestrator.curator.build_metadata_dict` — turns a
+  :class:`~nav.nav_orchestrator.nav_result.NavResult` into a JSON-friendly nested dict.
+  Public entry point for the per-image-sidecar writer.
+- :func:`~nav.nav_orchestrator.curator.assert_diagnostic_fields_present` — verifies every
+  per-technique diagnostic field has a ``CURATOR_FIELDS`` entry. Run at config-load
+  time; raises :exc:`AssertionError` on the first unmapped field.
+
+Per-technique diagnostics dataclasses (documented at
+:doc:`dev_guide_techniques_diagnostics`) declare their own ``CURATOR_FIELDS`` class
+attributes; the curator picks fields from each via the dataclass's
+``CURATOR_FIELDS`` rather than from
+:func:`dataclasses.fields` directly.
 
 Examples
 ========
 
-For the ``body_partial_overflow`` scene (Cassini NAC ``N1484593951_2_CALIB``), navigation succeeds
-on :py:class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav` with offset ``(12.06, 30.53)``
-px.  :py:func:`~nav.nav_orchestrator.curator.build_metadata_dict` emits a ``navigation_result`` block
-whose ``status`` is ``success``, whose ``offset_px`` is the offset rounded to ``PIXEL_DECIMALS``
-(``[12.06, 30.53]``), whose ``confidence`` is rounded to ``CONFIDENCE_DECIMALS``, and whose
-``confidence_rank`` is ``low``.  The ``per_technique`` list carries an entry for every technique
-that ran, including the disc and terminator entries that flagged themselves spurious, each with its
-diagnostics filtered through the technique's ``CURATOR_FIELDS`` allow-list; if any diagnostic field
-were missing from that allow-list,
-:py:func:`~nav.nav_orchestrator.curator.assert_diagnostic_fields_present` would have raised
-:py:exc:`AssertionError` before the dictionary was built.  A result whose offset axis was
-unobservable would carry ``sigma_along_unobservable_px`` written as the finite
-:py:data:`nav.feature.constants.JSON_INF_SENTINEL` rather than a raw infinity.
+**Per-image JSON sidecar shape.**  After a successful
+:class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav` fit on
+``body_partial_overflow``, the curator emits::
+
+    {
+      "navigation_result": {
+        "status": "ok",
+        "offset_px": [11.06, 30.53],
+        "sigma_px": [0.125, 0.122],
+        "confidence_rank": "high",
+        "confidence": 0.794,
+        "status_reason": "OK",
+        "covariance_px2": [[0.0156, 0.0017], [0.0017, 0.0148]],
+        "per_technique": [
+          {
+            "technique_name": "BodyLimbNav",
+            "feature_ids": ["limb_arc:RHEA"],
+            "offset_px": [12.06, 30.53],
+            "covariance_px2": [[0.0156, 0.0017], [0.0017, 0.0148]],
+            "confidence": 0.794,
+            "spurious": false,
+            "at_edge": false,
+            "diagnostics": {
+              "visible_limb_arc_fraction": 0.85,
+              "visible_arc_px": 120.0,
+              "dt_fit_rms_px": 0.4,
+              "lm_iterations": 5,
+              "tukey_inlier_count": 118
+            }
+          }
+        ],
+        ...
+      }
+    }
+
+Every per-technique diagnostic key under ``"diagnostics"`` corresponds to a non-``None``
+entry in the diagnostics dataclass's ``CURATOR_FIELDS``.
+
+**Allow-list catches a missed field.**  An operator adds a new field
+``mean_polarity_score`` to
+:class:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics` without updating
+``CURATOR_FIELDS``. At startup
+:func:`~nav.nav_orchestrator.curator.assert_diagnostic_fields_present` runs over the
+:class:`~nav.nav_orchestrator.nav_result.NavResult` returned by the smoke test, walks the
+diagnostic's :func:`dataclasses.fields`, and raises::
+
+    AssertionError: BodyLimbDiagnostics has unmapped fields ['mean_polarity_score'];
+    add them to CURATOR_FIELDS or set value to None to skip
+
+The build fails before the new field can silently disappear from the JSON sidecar.
+
+**Non-finite handling.**  A pathological technique reports ``rotation_rad = +inf`` (a
+genuine cost-collapse case the LM refiner mapped to the rotation-unobservable sentinel).
+The curator emits ``JSON_INF_SENTINEL`` (``1.0e30``) in the JSON instead of ``+inf``,
+keeping the file JSON-spec-compliant; downstream readers consult the sentinel to
+distinguish "intentionally unbounded" from a numerical NaN.

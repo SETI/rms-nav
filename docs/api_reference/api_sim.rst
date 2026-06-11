@@ -1,7 +1,14 @@
 nav.sim
 =======
 
+.. automodule:: nav.sim
+
 .. automodule:: nav.sim.render
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: nav.sim.sim_body
    :members:
    :undoc-members:
    :show-inheritance:
