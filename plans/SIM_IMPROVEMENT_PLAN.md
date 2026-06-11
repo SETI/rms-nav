@@ -665,7 +665,7 @@ Each GUI phase consumes one or more backend phases.  The phasing
 mirrors the backend phasing — never start a GUI phase before its
 backend is in.
 
-### Phase G0: Three-peer audit
+### Phase G0: Three-peer audit [done]
 
 **Goal:** confirm every existing GUI control is also reachable from
 the YAML scene-spec schema (Phase T1 below) and the Python API.
@@ -676,27 +676,33 @@ Where there's drift, fix it.
 field exists in the YAML schema and in the API.  Where it doesn't,
 add it.
 
+**Audit outcome:** the drift found was (a) the GUI had no `instrument`
+control -- closed by G1; (b) the GUI's `background_noise_intensity`
+slider is inert since B1 replaced the additive-Gaussian model -- to be
+replaced by the noise panel in G2; (c) the GUI load path dropped the
+catalog-only `noise` / `stray_light` / `exposure_sec` blocks -- now
+preserved on load (round-trip parity) pending their own controls in
+G2 / G6.  Per-body / per-ring controls already map to the API and YAML.
+
 **Why now:** keeps the three peers from drifting out of sync as the
 later phases land.  Cheap to do once; expensive to retrofit later.
 
 **Files touched:** `src/main/nav_create_simulated_image.py`, scene
 schema docs.
 
-### Phase G1: Instrument selector
+### Phase G1: Instrument selector [done]
 
 **Goal:** add a top-level "Instrument" combo box that drives the
 per-instrument config used for the rest of the rendering.
 
-**Scope:**
-
-- New combo with options `coiss_nac`, `coiss_wac`,
-  `coiss_calib_nac`, `coiss_calib_wac`, `gossi`, `nhlorri`,
-  `vgiss`, `(generic)`.
-- Selecting an instrument updates the General tab's defaults to
-  that instrument's PSF sigma, image dimensions, ADC bits,
-  saturation DN, etc.
-- Existing per-tab parameters that the instrument doesn't override
-  (random seed, body / ring tabs) stay as the operator left them.
+**Done:** a General-tab "Instrument" combo (`generic` plus every sim
+camera) writes `sim_params['instrument']`, which the renderer already
+consumes for noise / saturation / PSF / units (B2).  It round-trips
+through save / load and defaults to `generic`.  The "update General-tab
+defaults on instrument change" affordance (showing the instrument's PSF
+sigma / dimensions) is deferred -- the operator's fields stay as set and
+the renderer applies the instrument settings regardless; revisit if
+operators want the fields auto-populated.
 
 **Backend dependency:** B2 must land first.
 

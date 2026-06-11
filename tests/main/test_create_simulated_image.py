@@ -130,3 +130,49 @@ def test_load_explicit_closest_planet_is_preserved(
     """A real ``closest_planet`` value is preserved in the data model."""
     _load_json(monkeypatch, model, tmp_path, {'closest_planet': 'JUPITER'})
     assert model.sim_params['closest_planet'] == 'JUPITER'
+
+
+def test_default_instrument_is_generic(model: Any) -> None:
+    """A fresh model defaults to the generic (instrument-agnostic) frame."""
+    assert model.sim_params['instrument'] == 'generic'
+
+
+def test_instrument_combo_drives_sim_params(model: Any) -> None:
+    """Selecting an instrument updates the data model's instrument."""
+    model._instrument_combo.setCurrentText('coiss_nac')
+    assert model.sim_params['instrument'] == 'coiss_nac'
+
+
+def test_load_instrument_syncs_combo(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """Loading a scene with an instrument syncs both the model and the combo."""
+    _load_json(monkeypatch, model, tmp_path, {'instrument': 'gossi'})
+    assert model.sim_params['instrument'] == 'gossi'
+    assert model._instrument_combo.currentText() == 'gossi'
+
+
+def test_load_missing_instrument_defaults_to_generic(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """A scene without an instrument key falls back to generic."""
+    _load_json(monkeypatch, model, tmp_path, {'random_seed': 7})
+    assert model.sim_params['instrument'] == 'generic'
+
+
+def test_load_preserves_noise_block(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """Loading a scene round-trips the catalog-only noise block."""
+    noise = {'poisson': False, 'read_noise_dn': 12.0}
+    _load_json(monkeypatch, model, tmp_path, {'noise': noise})
+    assert model.sim_params['noise'] == noise
+
+
+def test_load_preserves_stray_light_block(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """Loading a scene round-trips the catalog-only stray_light block."""
+    stray = {'amplitude': 0.3, 'model': 'radial'}
+    _load_json(monkeypatch, model, tmp_path, {'stray_light': stray})
+    assert model.sim_params['stray_light'] == stray

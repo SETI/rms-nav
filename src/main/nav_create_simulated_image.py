@@ -44,8 +44,13 @@ from PyQt6.QtWidgets import (
 package_source_path = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, package_source_path)
 
+from nav.sim.instruments import SIM_INSTRUMENTS
 from nav.sim.render import render_combined_model
 from nav.ui.common import ZoomPanController
+
+# Instrument options for the General-tab selector: the generic (instrument-
+# agnostic) frame plus every per-instrument sim camera.
+_INSTRUMENT_CHOICES: list[str] = ['generic', *sorted(SIM_INSTRUMENTS)]
 
 
 def _dn_to_display_uint8(image: Any) -> Any:
@@ -133,6 +138,7 @@ class CreateSimulatedImageModel(QMainWindow):
             'offset_v': 0.0,
             'offset_u': 0.0,
             'random_seed': 42,
+            'instrument': 'generic',
             'closest_planet': 'SATURN',
             'time': 0.0,
             'ring_epoch': 0.0,
@@ -278,6 +284,20 @@ class CreateSimulatedImageModel(QMainWindow):
         self._random_seed_spin.setValue(self.sim_params['random_seed'])
         self._random_seed_spin.valueChanged.connect(self._on_random_seed)
         gen_layout.addRow('Random seed:', self._random_seed_spin)
+
+        # Instrument selector: drives the per-instrument noise / saturation /
+        # PSF / unit settings the renderer applies (see nav.sim.instruments).
+        self._instrument_combo = QComboBox()
+        self._instrument_combo.addItems(_INSTRUMENT_CHOICES)
+        instrument = str(self.sim_params.get('instrument', 'generic'))
+        instrument_index = self._instrument_combo.findText(instrument)
+        if instrument_index >= 0:
+            self._instrument_combo.setCurrentIndex(instrument_index)
+        self._instrument_combo.setToolTip(
+            'Camera the sim emulates; sets noise, saturation, PSF, and units.'
+        )
+        self._instrument_combo.currentTextChanged.connect(self._on_instrument)
+        gen_layout.addRow('Instrument:', self._instrument_combo)
 
         # Closest planet (for ring models)
         self._closest_planet_combo = QComboBox()
@@ -611,6 +631,10 @@ class CreateSimulatedImageModel(QMainWindow):
 
     def _on_random_seed(self, value: int) -> None:
         self.sim_params['random_seed'] = value
+        self._updater.request_update()
+
+    def _on_instrument(self, text: str) -> None:
+        self.sim_params['instrument'] = text or 'generic'
         self._updater.request_update()
 
     def _on_closest_planet(self, text: str) -> None:
@@ -2398,6 +2422,7 @@ class CreateSimulatedImageModel(QMainWindow):
                     'offset_v': float(params.get('offset_v', 0.0)),
                     'offset_u': float(params.get('offset_u', 0.0)),
                     'random_seed': int(params.get('random_seed', 42)),
+                    'instrument': str(params.get('instrument', 'generic')),
                     'background_noise_intensity': float(background_noise_val),
                     'background_stars_num': int(background_stars_val),
                     'background_stars_psf_sigma': float(
@@ -2414,6 +2439,12 @@ class CreateSimulatedImageModel(QMainWindow):
                     'stars': list(params.get('stars', [])),
                     'rings': list(params.get('rings', [])),
                 }
+                # Preserve catalog-only blocks the General tab does not yet edit
+                # (noise model, stray light, exposure) so loading a scene spec
+                # round-trips them instead of silently dropping them.
+                for passthrough_key in ('noise', 'stray_light', 'exposure_sec'):
+                    if passthrough_key in params:
+                        self.sim_params[passthrough_key] = params[passthrough_key]
                 # Sync the shade-solid-rings checkbox
                 self._shade_solid_rings_check.blockSignals(True)
                 self._shade_solid_rings_check.setChecked(bool(self.sim_params['shade_solid_rings']))
@@ -2424,6 +2455,14 @@ class CreateSimulatedImageModel(QMainWindow):
                 self._offset_v_spin.setValue(self.sim_params['offset_v'])
                 self._offset_u_spin.setValue(self.sim_params['offset_u'])
                 self._random_seed_spin.setValue(self.sim_params['random_seed'])
+                # Update instrument selector
+                self._instrument_combo.blockSignals(True)
+                instrument_index = self._instrument_combo.findText(
+                    str(self.sim_params['instrument'])
+                )
+                if instrument_index >= 0:
+                    self._instrument_combo.setCurrentIndex(instrument_index)
+                self._instrument_combo.blockSignals(False)
                 # Update time and epoch
                 self._time_spin.setValue(self.sim_params.get('time', 0.0))
                 self._epoch_spin.setValue(self.sim_params.get('ring_epoch', 0.0))
