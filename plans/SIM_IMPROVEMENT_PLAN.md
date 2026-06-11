@@ -836,10 +836,20 @@ the YAML schema introduced by T1.
 This is the section that turns the upgraded sim into useful
 calibration / verification infrastructure.  Phases T1–T7.
 
-### Phase T1: Scene-spec YAML catalog
+### Phase T1: Scene-spec YAML catalog [done]
 
 **Goal:** durable artifact directory for sim scenes, mirroring the
 real-image library's layout.
+
+**Done:** `tests/integration/sim_scene.py` validates the schema and maps
+a scene to sim params (`SimScene.to_sim_params`); `tests/integration/
+sim_scenes/<class>/<name>.yaml` holds the initial catalog with a
+`README.txt` schema doc; `tests/integration/test_sim_scenes.py` enforces
+the structural invariants (every scene validates, directories are
+declared classes, names unique, every scene renders) and runs in the
+default suite.  One addition to the drafted schema: `image_size_vu` is a
+required field (the renderer needs it).  The `smear_sweep` class is
+declared but unpopulated pending B3.
 
 **Scope:**
 

@@ -1,0 +1,34 @@
+schema_version: 1
+scene_name: two_moons
+instrument: coiss_nac
+image_size_vu: [128, 128]
+random_seed: 42
+exposure_sec: 1.0
+bodies:
+  - name: TETHYS
+    shape_model: ellipsoid
+    center_v: 44.0
+    center_u: 44.0
+    axis1: 40.0
+    axis2: 40.0
+    axis3: 40.0
+    illumination_angle: 20.0
+    phase_angle: 30.0
+    range: 500000.0
+  - name: DIONE
+    shape_model: ellipsoid
+    center_v: 86.0
+    center_u: 90.0
+    axis1: 34.0
+    axis2: 34.0
+    axis3: 34.0
+    illumination_angle: 20.0
+    phase_angle: 30.0
+    range: 700000.0
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+ground_truth:
+  planted_offset_dv_px: 0.0
+  planted_offset_du_px: 0.0
+  planted_rotation_deg: 0.0
