@@ -143,8 +143,6 @@ Per-instrument YAML keys (read via
   :class:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds` values.
 - ``camera_rotation.fit_camera_rotation`` — bool; turns on 3-DoF technique fits.
 - ``camera_rotation.max_rotation_deg`` — float; rotation cap.
-- ``signal_dn_to_image_unit_scale`` — float; per-instrument DN-to-image-unit scale used by
-  the STAR ``predicted_snr`` formula.
 
 Constructor-level overrides:
 

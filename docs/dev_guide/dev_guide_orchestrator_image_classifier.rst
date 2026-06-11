@@ -21,8 +21,9 @@ The classifier evaluates three cheap statistics over the sensor pixels:
 
 - ``saturation_frac`` — fraction of pixels at or above the per-instrument
   saturation DN.
-- ``missing_frac`` — fraction of pixels exactly equal to the per-instrument
-  missing-data marker.
+- ``missing_frac`` — fraction of pixels matching the per-instrument missing-data marker:
+  pixels exactly equal to the marker DN, or, when the marker is itself ``NaN``
+  (calibrated-IF dropout), pixels for which ``np.isnan`` holds.
 - ``noise_sigma`` — robust MAD-based noise sigma over the sensor area.
 
 The decision tree is order-sensitive:
@@ -81,7 +82,8 @@ The thresholds dataclass:
 - :attr:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds.saturation_threshold_dn`
   — float, default ``4095.0`` DN. Pixels at or above this DN are flagged saturated.
 - :attr:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds.missing_data_marker_dn`
-  — float, default ``0.0`` DN. Pixels exactly equal to this value are missing data.
+  — float, default ``0.0`` DN. Pixels exactly equal to this value are missing data; when
+  the marker is ``NaN``, the classifier detects missing data via ``np.isnan`` instead.
 - :attr:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds.max_saturation_frac_clean`
   — float, default ``0.80`` (dimensionless). Above this fraction of saturated pixels the
   image is ``fully_overexposed``.

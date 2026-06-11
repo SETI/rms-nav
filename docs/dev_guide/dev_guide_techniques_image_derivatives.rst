@@ -105,7 +105,10 @@ Restrictions and assumptions
   back to a direct MAD estimate when the classifier returns zero.
 - The input image must be 2-D and contain only finite values. NaN or +/-inf pixels would
   propagate through the Gaussian and Sobel passes and poison every downstream consumer; the
-  pass raises rather than silently degrading.
+  pass raises rather than silently degrading. The orchestrator sanitises the per-instrument
+  missing-data marker (including the calibrated-IF ``NaN`` marker) to a finite fill before
+  invoking this pass, so calibrated frames with NaN dropout markers reach the derivative
+  kernels as finite data.
 
 Sources of uncertainty
 ----------------------

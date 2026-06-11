@@ -194,7 +194,6 @@ narrative below the diagram describes each group in turn.
           +thresholds: ImageQualityThresholds
           +fit_camera_rotation
           +max_rotation_deg
-          +signal_dn_to_image_unit_scale
       }
 
       class NavImageClassifier {
@@ -392,7 +391,7 @@ Per-family data models live alongside the renderer classes:
 
 - **Stars** — the :mod:`nav.nav_model.stars` subpackage carries
   multi-catalog reduction (``catalog``), per-star body / ring conflict
-  marking (``conflicts``), predicted-SNR + B-V mapping
+  marking (``conflicts``), the raw-DN photometry diagnostic + B-V mapping
   (``predicted_snr``), smear-aware PSF construction (``smeared_psf``),
   and on-image source detection (``detection``); see
   :doc:`dev_guide_navigation_models_star` for details.
