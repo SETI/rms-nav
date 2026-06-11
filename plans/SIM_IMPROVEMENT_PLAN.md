@@ -220,7 +220,7 @@ Direct consequences of section 2.1:
 | Real-image phenomenon | Sim today | Gap impact on calibration |
 |---|---|---|
 | Body silhouette deviates from ellipsoid | Always ellipsoidal | `phase_irregularity_factor` always 0; can't exercise irregular-body regime |
-| Body rotational pose | Driven by SPICE pose at midtime | Chaotic rotators (Hyperion) have wrong orientation in sim too — same problem as real |
+| Body rotational pose | Scene-supplied rotation angles (not SPICE) | Pose is ground truth shared by renderer and navigator; for chaotic rotators (Hyperion) this is an advantage -- any true pose can be planted, and the navigator can be given an agreeing, disagreeing, or absent pose (see B7) |
 | Star PSF | Single Gaussian | Per-instrument wings absent (no diffraction spikes to model: the supported telescopes have no support vanes) |
 | Star centroid offset from catalog | Zero by construction | Can't exercise unique-match assignment ambiguity |
 | Per-pixel noise | Additive Gaussian, signal-independent | No Poisson, read floor, cosmic rays, dropouts; MAD-noise estimator overfits to a regime that doesn't exist in real frames |
@@ -548,18 +548,68 @@ the DSK-via-oops path is not available.  The only path is the
 **standalone polyhedral renderer**: the sim grows a small renderer that
 projects triangle-mesh vertices through the body's pose into image
 space and draws the silhouette.  Mesh files live under
-`src/nav/sim/shape_meshes/<BODY>.obj` (or .ply).  This is sim-only --
-the navigator still uses the ellipsoidal model -- and is documented as a
-*deliberate* shape-mismatch test fixture: "render the actual Hyperion
-shape so we can measure how badly the navigator's ellipsoidal silhouette
-mis-fits".  This is the scenario that exercises
-`phase_irregularity_factor`.
+`src/nav/sim/shape_meshes/<BODY>.obj` (or .ply).
 
-**Prerequisite to confirm:** the renderer needs the body's orientation
-in space at the scene midtime (the rotation that maps body-fixed mesh
-coordinates into the camera frame).  Without DSK, that pose must come
-from the body-fixed frame via `oops` / SPICE for the scene geometry.
-This must be available before B7 can start.
+#### Orientation is always an input; the scenarios differ only in shape
+
+The navigator never estimates body orientation from the pixels.  In real
+navigation the pose (the body-fixed -> camera rotation) is an *input*
+from SPICE; the navigator renders its predicted body at that pose and
+solves only for the pointing offset.  In the sim there is no SPICE
+(`ObsSim` fabricates the geometry), so the pose is supplied instead as
+**scene ground truth** carried on the obs and read by the sim-aware body
+NavModel -- exactly the channel `NavModelBodySimulated` already uses to
+read `rotation_z` / `rotation_tilt` today.
+
+Orientation is therefore a *required* input to draw the navigator's
+predicted body in every case, because a triaxial ellipsoid's silhouette
+and terminator both depend on its orientation.  What varies across the
+test scenarios is the **shape model** the navigator predicts with, and
+**whether the assumed pose agrees with the rendered (true) pose**.  This
+means the sim must separate two things that are usually identical:
+
+- the **render geometry** -- the true mesh and pose used to draw the
+  image (ground truth), and
+- the **navigation geometry** -- the shape and pose the navigator's
+  predicted body is built from.
+
+Default: the two are identical (the navigator knows the truth).  When
+they diverge, the divergence is the thing under test.
+
+#### The scenario matrix (maps onto the technique ladder)
+
+1. **mesh vs mesh, same pose** -- navigator predicts the true mesh at the
+   true pose; recovers the planted offset exactly.  Tests the resolved
+   mesh LIMB technique.
+2. **mesh vs ellipsoid, same pose** -- navigator predicts an *ellipsoid*
+   at the *true* pose; the only error is shape.  This cleanly isolates
+   and exercises `phase_irregularity_factor` (correct pose, wrong shape).
+3. **mesh vs ellipsoid, disagreeing pose** -- the chaotic-rotator case
+   for a body whose orientation we cannot know (Hyperion).  Render the
+   mesh at the true pose but give the navigator an ellipsoid at a
+   *different* assumed pose, so the predicted silhouette is both the
+   wrong shape and the wrong orientation.  Measures how badly limb
+   fitting degrades when the pose is untrustworthy -- and confirms the
+   navigator should demote to a pose-free technique here.
+4. **centroid only (no oriented model)** -- the realistic Hyperion path.
+   There is no usable orientation, so the navigator carries *no*
+   ellipsoid or mesh and falls back to the lit-weighted centroid
+   (`BodyBlobNav`), which is orientation-independent.  Render the true
+   irregular lit shape and assert the BLOB centroid still recovers the
+   planted offset.  This is valuable precisely because it is the correct
+   technique for chaotic rotators, where scenarios 1-3 do not apply.
+
+Scenarios 3 and 4 are why the render/navigation-geometry separation
+matters: a chaotic rotator's pose is genuinely unknown, so the useful
+tests are the ones where the navigator either guesses the orientation
+wrong (3) or declines to use it at all (4).
+
+**Prerequisite to confirm:** wire `NavModelBodySimulated` into the live
+model-selection path so a simulated obs builds the sim-aware body model
+(reading the orientation from sim metadata) instead of the SPICE-backed
+`NavModelBody`.  `grep` shows `NavModelBodySimulated` is defined but not
+yet instantiated by the orchestration; closing that is a precondition for
+any sim body navigation, mesh or ellipsoid.
 
 **Why now:** the `phase_irregularity_factor` term added in Phase 10
 §F is identically zero on every sim frame today.  Without B7, that
@@ -567,7 +617,8 @@ term cannot be calibrated, sensitivity-tested, or regression-covered
 on sim.
 
 **Files touched:** new `src/nav/sim/sim_body_polyhedral.py`,
-`src/nav/sim/render.py`, `src/nav/sim/shape_meshes/`, new
+`src/nav/sim/render.py`, `src/nav/sim/shape_meshes/`, the sim-aware
+body NavModel selection path, new
 `tests/nav/sim/test_sim_irregular_body.py`.
 
 ### Phase B8: Diffraction spikes -- dropped
