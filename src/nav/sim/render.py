@@ -566,8 +566,41 @@ def apply_detector_noise(
         missing_mask = missing_rng.random_sample(size=(size_v, size_u)) < missing_data_rate
         out_dn[missing_mask] = missing_data_marker_dn
 
-    # Raw frames carry no negative DN; the upper (saturation) clip is deferred.
+    # Raw frames carry no negative DN; the upper (saturation) clip is deferred
+    # to apply_saturation so cosmic-ray spikes can bloom before being clipped.
     img[:] = np.maximum(out_dn, 0.0)
+
+
+def apply_saturation(
+    img: NDArrayFloatType,
+    *,
+    saturation_dn: float,
+    bloom_length: int = 0,
+) -> None:
+    """Clip pixels at the full-well DN, optionally blooming excess along columns.
+
+    Pixels above ``saturation_dn`` are clipped to it, so they land on the
+    orchestrator's saturation mask (``image >= full_well_dn``).  When
+    ``bloom_length`` is positive, the charge above full well is first spread
+    along the column (the v axis) up to that many pixels in each direction --
+    conserving the total excess -- so a saturated star blooms into a vertical
+    streak the way it does on cameras with column bloom (e.g. Cassini NAC).
+
+    Parameters:
+        img: DN image, modified in place.
+        saturation_dn: Full-well DN ceiling.
+        bloom_length: Column-bloom half-length in pixels; 0 disables bloom.
+    """
+    if bloom_length > 0:
+        excess = np.maximum(img - saturation_dn, 0.0)
+        if float(excess.max()) > 0.0:
+            width = 2 * bloom_length + 1
+            # The box mean over the column window conserves the summed excess
+            # while spreading it onto neighbours, which may saturate in turn.
+            spread = ndimage.uniform_filter1d(excess, size=width, axis=0, mode='constant')
+            np.minimum(img, saturation_dn, out=img)
+            img += spread
+    np.minimum(img, saturation_dn, out=img)
 
 
 @lru_cache(maxsize=1)
@@ -874,6 +907,13 @@ def _render_combined_model_cached(
             noise_seed=noise_seed,
             cosmic_ray_seed=cosmic_ray_seed,
             missing_data_seed=missing_data_seed,
+        )
+        # Clip at the camera's full well (with optional column bloom) so
+        # saturated pixels land on the orchestrator's saturation mask.
+        apply_saturation(
+            img,
+            saturation_dn=float(inst_noise['saturation_dn']),
+            bloom_length=int(scene_noise.get('bloom_length', sim_noise.get('bloom_length', 0))),
         )
     else:
         # calibrated_if: realistic I/F noise is deferred (B2 scope).  The DN

@@ -1026,11 +1026,11 @@ B0 (determinism) [done]
  │
  ├──→ B1 (noise model) [done]
  │     │
- │     └──→ B4 (saturation), B5 (PSF), B6 (stray light), B7 (irregular)
+ │     └──→ B4 (saturation) [done], B5 (PSF), B6 (stray light), B7 (irregular)
  │
  └──→ B2 (per-instrument coupling) [done]
        │
-       └──→ B3 (smear), B4, B5, B6, B7
+       └──→ B3 (smear), B4 [done], B5, B6, B7
 
 T1 (scene catalog)
  │

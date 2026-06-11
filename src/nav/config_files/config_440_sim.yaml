@@ -29,6 +29,7 @@ sim:
     cosmic_ray_rate_per_sec: 0.0   # events / cm^2 / sec
     pixel_area_cm2: 1.0
     missing_data_rate: 0.0         # fraction of pixels marked missing
+    bloom_length: 0                # column-bloom half-length, px (0 = no bloom)
   image_quality_thresholds:
     blank_max_dn: 5.0
     saturation_threshold_dn: 4095
