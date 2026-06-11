@@ -1022,7 +1022,7 @@ The phases map onto a dependency graph.  Earlier phases unblock
 later ones:
 
 ```
-B0 (determinism)
+B0 (determinism) [done]
  │
  ├──→ B1 (noise model)
  │     │

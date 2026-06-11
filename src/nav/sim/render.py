@@ -8,6 +8,7 @@ from psfmodel import GaussianPSF
 from scipy import ndimage
 from starcat import Star
 
+from nav.sim.seeds import derive_effect_seed
 from nav.sim.sim_body import create_simulated_body
 from nav.sim.sim_ring import render_ring
 from nav.support.types import (
@@ -633,12 +634,17 @@ def _render_combined_model_cached(
 
     img = cast(NDArrayFloatType, np.zeros((size_v, size_u), dtype=np.float64))
 
-    # Get random seed for background effects
+    # Get the scene's single random seed and derive an independent sub-seed per
+    # randomized effect, so the effects' streams don't correlate and adding a
+    # new effect later leaves existing effects' output unchanged.
     random_seed = int(sim_params.get('random_seed', 42))
+    noise_seed = derive_effect_seed(random_seed, 'noise')
+    background_stars_seed = derive_effect_seed(random_seed, 'background_stars')
+    crater_seed = derive_effect_seed(random_seed, 'craters')
 
     # Apply background noise first
     background_noise_intensity = float(sim_params.get('background_noise_intensity', 0.0))
-    render_background_noise(img, background_noise_intensity, random_seed)
+    render_background_noise(img, background_noise_intensity, noise_seed)
 
     # Then background stars
     background_stars_num = int(sim_params.get('background_stars_num', 0))
@@ -649,7 +655,7 @@ def _render_combined_model_cached(
     render_background_stars(
         img,
         background_stars_num,
-        random_seed,
+        background_stars_seed,
         psf_sigma=background_stars_psf_sigma,
         distribution_exponent=background_stars_distribution_exponent,
     )
@@ -763,7 +769,7 @@ def _render_combined_model_cached(
                 item_params,
                 offset_v,
                 offset_u,
-                seed=random_seed,
+                seed=crater_seed,
                 ref_center_v=ref_center_v,
                 ref_center_u=ref_center_u,
             )

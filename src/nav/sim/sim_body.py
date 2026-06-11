@@ -9,6 +9,7 @@ from typing import cast
 
 import numpy as np
 
+from nav.sim.seeds import stable_param_seed
 from nav.support.types import NDArrayBoolType, NDArrayFloatType, NDArrayIntType
 
 
@@ -144,11 +145,13 @@ def create_simulated_body(
         avg_crater_area = (crater_max_radius * semi_major_axis * aa_scale) ** 2
         n_craters = np.clip(int(crater_fill * total_area / avg_crater_area), 0, 1000)
 
-        # Use provided seed or fall back to hash-based seed
+        # Use the provided seed, or fall back to a process-stable seed derived
+        # from the body geometry.  The built-in hash is salted per process for
+        # some types, so it cannot be used where determinism is required.
         if seed is not None:
             seed_value = int(seed) & 0x7FFFFFFF
         else:
-            seed_value = hash((axis1, axis2, axis3, center)) & 0x7FFFFFFF
+            seed_value = stable_param_seed(axis1, axis2, axis3, center) & 0x7FFFFFFF
         rng = np.random.RandomState(seed_value)
         # Choose crater centers strictly inside the ellipse (exclude AA rim and exterior)
         ellipse_mask_nz = ellipse_dist_sq < 1.0
