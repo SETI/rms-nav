@@ -9,6 +9,7 @@ from scipy import ndimage
 from starcat import Star
 
 from nav.config import DEFAULT_CONFIG
+from nav.sim.instruments import resolve_sim_inst_config
 from nav.sim.seeds import derive_effect_seed
 from nav.sim.sim_body import create_simulated_body
 from nav.sim.sim_ring import render_ring
@@ -832,27 +833,54 @@ def _render_combined_model_cached(
             near_index = order_near_to_far.index(body_info['name']) + 1
             body_index_map[body_mask] = near_index
 
-    # All signal is composed; convert to DN and apply detector noise.  Feature
-    # masks above are derived from the noise-free signal, so they are unaffected.
-    noise_cfg = DEFAULT_CONFIG.category('sim')['noise']
+    # All signal is composed; apply the detector model.  Feature masks above are
+    # derived from the noise-free signal, so they are unaffected.  Physical noise
+    # parameters delegate to the selected instrument's config; sim-only knobs
+    # (signal full-scale, cosmic-ray rate, dropout rate) come from the sim block.
+    inst_config = resolve_sim_inst_config(DEFAULT_CONFIG, sim_params.get('instrument'))
+    sim_noise = DEFAULT_CONFIG.category('sim')['noise']
     scene_noise = sim_params.get('noise') or {}
-    apply_detector_noise(
-        img,
-        signal_full_scale_dn=float(
-            scene_noise.get('signal_full_scale_dn', noise_cfg['signal_full_scale_dn'])
-        ),
-        read_noise_dn=float(scene_noise.get('read_noise_dn', noise_cfg['read_noise_dn'])),
-        saturation_dn=float(noise_cfg['saturation_dn']),
-        poisson=bool(scene_noise.get('poisson', True)),
-        cosmic_ray_rate_per_sec=float(scene_noise.get('cosmic_ray_rate_per_sec', 0.0)),
-        exposure_sec=float(sim_params.get('exposure_sec', 1.0)),
-        pixel_area_cm2=float(scene_noise.get('pixel_area_cm2', 1.0)),
-        missing_data_marker_dn=float(noise_cfg['marker_value']),
-        missing_data_rate=float(scene_noise.get('missing_data_rate', 0.0)),
-        noise_seed=noise_seed,
-        cosmic_ray_seed=cosmic_ray_seed,
-        missing_data_seed=missing_data_seed,
-    )
+    if inst_config.get('data_units', 'raw_dn') == 'raw_dn':
+        inst_noise = inst_config.get('noise') or {}
+        # Map a normalized signal of 1.0 to a fraction of the camera's full well,
+        # so a scene's brightness scales with the selected instrument's DN depth.
+        full_scale_frac = float(
+            scene_noise.get('signal_full_scale_frac', sim_noise['signal_full_scale_frac'])
+        )
+        signal_full_scale_dn = float(
+            scene_noise.get(
+                'signal_full_scale_dn', full_scale_frac * float(inst_noise['full_well_dn'])
+            )
+        )
+        apply_detector_noise(
+            img,
+            signal_full_scale_dn=signal_full_scale_dn,
+            read_noise_dn=float(scene_noise.get('read_noise_dn', inst_noise['read_noise_dn'])),
+            saturation_dn=float(inst_noise['saturation_dn']),
+            poisson=bool(scene_noise.get('poisson', True)),
+            cosmic_ray_rate_per_sec=float(
+                scene_noise.get(
+                    'cosmic_ray_rate_per_sec', sim_noise.get('cosmic_ray_rate_per_sec', 0.0)
+                )
+            ),
+            exposure_sec=float(sim_params.get('exposure_sec', 1.0)),
+            pixel_area_cm2=float(
+                scene_noise.get('pixel_area_cm2', sim_noise.get('pixel_area_cm2', 1.0))
+            ),
+            missing_data_marker_dn=float(inst_noise.get('marker_value', 0)),
+            missing_data_rate=float(
+                scene_noise.get('missing_data_rate', sim_noise.get('missing_data_rate', 0.0))
+            ),
+            noise_seed=noise_seed,
+            cosmic_ray_seed=cosmic_ray_seed,
+            missing_data_seed=missing_data_seed,
+        )
+    else:
+        # calibrated_if: realistic I/F noise is deferred (B2 scope).  The DN
+        # detector model (Poisson counts, full-well saturation, cosmic-ray
+        # spikes) does not map onto I/F, so the composed signal is left as I/F
+        # in [0, 1] with no detector noise applied.
+        np.clip(img, 0.0, 1.0, out=img)
 
     # Build body_masks_list in original order (matching bodies_params)
     body_masks_list: list[NDArrayBoolType] = []

@@ -1028,7 +1028,7 @@ B0 (determinism) [done]
  │     │
  │     └──→ B4 (saturation), B5 (PSF), B6 (stray light), B7 (irregular)
  │
- └──→ B2 (per-instrument coupling)
+ └──→ B2 (per-instrument coupling) [done]
        │
        └──→ B3 (smear), B4, B5, B6, B7
 

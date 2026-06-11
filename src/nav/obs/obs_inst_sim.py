@@ -8,6 +8,7 @@ from oops.observation.snapshot import Snapshot
 
 from nav.config import DEFAULT_CONFIG, IMAGE_LOGGER, Config
 from nav.obs.obs_snapshot_inst import ObsSnapshotInst
+from nav.sim.instruments import resolve_extfov_margin, resolve_sim_inst_config
 from nav.sim.render import render_combined_model
 from nav.support.types import PathLike
 
@@ -103,18 +104,17 @@ class ObsSim(ObsSnapshotInst):
         snapshot.sim_body_index_map = meta.get('body_index_map')
         snapshot.sim_body_mask_map = meta.get('body_mask_map', {})
 
-        # Determine extfov margins
-        inst_config = config.category('sim')
+        # Select the per-instrument config block the sim is emulating (or the
+        # generic sim block when no instrument is specified), so the
+        # orchestrator sees the right units / noise / saturation settings.
+        sim_block = config.category('sim')
+        inst_config = resolve_sim_inst_config(config, sim_params.get('instrument'))
         if extfov_margin_vu is None:
-            extfov_margin_vu_entry = inst_config['extfov_margin_vu']
-            if isinstance(extfov_margin_vu_entry, dict):
-                extfov_margin_vu = extfov_margin_vu_entry[size_v]
-            else:
-                extfov_margin_vu = extfov_margin_vu_entry
+            extfov_margin_vu = resolve_extfov_margin(inst_config, sim_block, size_v)
 
         snapshot._closest_planet = sim_params.get('closest_planet')
         new_obs = ObsSim(snapshot, config=config, extfov_margin_vu=extfov_margin_vu, simulated=True)
-        new_obs._inst_config = inst_config
+        new_obs._inst_config = cast(dict[str, Any], inst_config)
 
         new_obs.spice_kernels = ['fake_kernel1.txt', 'fake_kernel2.txt']
 
