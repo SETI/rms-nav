@@ -760,17 +760,15 @@ calibrated_if instruments, which have no saturation DN.
 
 **Files touched:** `src/main/nav_create_simulated_image.py`.
 
-### Phase G5: PSF preview pane
+### Phase G5: PSF preview pane [done]
 
 **Goal:** let the operator see what PSF the sim is using.
 
-**Scope:**
-
-- New collapsible pane (initially closed) showing the rendered
-  current per-instrument PSF as a small inset image, with the FWHM
-  / sigma annotated.  Updates when the instrument selector changes.
-- Optional toggle to also show the smeared PSF for the current
-  global smear setting (B3 + B5).
+**Done:** a collapsible "PSF preview" group (initially closed) on the
+General tab renders the selected instrument's Gaussian star PSF as an
+inset image and annotates its sigma / FWHM.  It refreshes when the
+instrument selector changes (and on load).  The smeared-PSF toggle is
+omitted -- it depends on B3, which is postponed.
 
 **Backend dependency:** B5.
 

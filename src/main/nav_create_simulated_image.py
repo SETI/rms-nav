@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -419,6 +420,21 @@ class CreateSimulatedImageModel(QMainWindow):
         self._stray_model_combo.currentTextChanged.connect(self._on_stray_model)
         gen_layout.addRow('Stray light model:', self._stray_model_combo)
 
+        # PSF preview (B5): a collapsible inset of the selected instrument's
+        # star PSF, with its sigma / FWHM, updated when the instrument changes.
+        self._psf_group = QGroupBox('PSF preview')
+        self._psf_group.setCheckable(True)
+        self._psf_group.setChecked(False)
+        psf_layout = QVBoxLayout(self._psf_group)
+        self._psf_image_label = QLabel()
+        self._psf_image_label.setVisible(False)
+        self._psf_info_label = QLabel()
+        self._psf_info_label.setVisible(False)
+        psf_layout.addWidget(self._psf_image_label)
+        psf_layout.addWidget(self._psf_info_label)
+        self._psf_group.toggled.connect(self._on_psf_group_toggled)
+        gen_layout.addRow(self._psf_group)
+
         # Background stars slider with min/max labels and spinbox
         stars_row = QHBoxLayout()
         stars_row.setSpacing(4)
@@ -689,7 +705,38 @@ class CreateSimulatedImageModel(QMainWindow):
 
     def _on_instrument(self, text: str) -> None:
         self.sim_params['instrument'] = text or 'generic'
+        self._update_psf_preview()
         self._updater.request_update()
+
+    def _on_psf_group_toggled(self, checked: bool) -> None:
+        """Show/hide the PSF inset and refresh it when expanded."""
+        self._psf_image_label.setVisible(checked)
+        self._psf_info_label.setVisible(checked)
+        if checked:
+            self._update_psf_preview()
+
+    def _update_psf_preview(self) -> None:
+        """Render the selected instrument's star PSF into the preview inset."""
+        if not self._psf_group.isChecked():
+            return
+        inst_config = resolve_sim_inst_config(DEFAULT_CONFIG, self.sim_params.get('instrument'))
+        sigma = float(inst_config.get('star_psf_sigma', 1.0))
+        size = 25
+        coords = np.arange(size) - size // 2
+        vv, uu = np.meshgrid(coords.astype(float), coords.astype(float), indexing='ij')
+        patch = np.exp(-(vv**2 + uu**2) / (2.0 * sigma**2))
+        patch_uint8 = np.ascontiguousarray((patch * 255.0).astype(np.uint8))
+        qimage = QImage(
+            patch_uint8.tobytes(), size, size, size, QImage.Format.Format_Grayscale8
+        ).copy()
+        pixmap = QPixmap.fromImage(qimage).scaled(
+            96,
+            96,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.FastTransformation,
+        )
+        self._psf_image_label.setPixmap(pixmap)
+        self._psf_info_label.setText(f'sigma = {sigma:.2f} px    FWHM = {2.3548 * sigma:.2f} px')
 
     def _on_closest_planet(self, text: str) -> None:
         # Store as None if empty, otherwise store the text (uppercase)
@@ -2583,6 +2630,7 @@ class CreateSimulatedImageModel(QMainWindow):
                 if instrument_index >= 0:
                     self._instrument_combo.setCurrentIndex(instrument_index)
                 self._instrument_combo.blockSignals(False)
+                self._update_psf_preview()
                 # Update time and epoch
                 self._time_spin.setValue(self.sim_params.get('time', 0.0))
                 self._epoch_spin.setValue(self.sim_params.get('ring_epoch', 0.0))

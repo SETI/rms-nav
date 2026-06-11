@@ -297,3 +297,28 @@ def test_saturation_overlay_off_clears_status(model: Any) -> None:
     model._saturation_overlay_check.setChecked(True)
     model._saturation_overlay_check.setChecked(False)
     assert model._saturation_label.text() == ''
+
+
+def test_psf_preview_collapsed_by_default(model: Any) -> None:
+    """The PSF preview pane starts collapsed with its inset hidden."""
+    assert model._psf_group.isChecked() is False
+    assert model._psf_image_label.isVisibleTo(model._psf_group) is False
+
+
+def test_psf_preview_expands_and_annotates(model: Any) -> None:
+    """Expanding the pane shows the PSF inset and its sigma / FWHM."""
+    model.sim_params['instrument'] = 'coiss_nac'
+    model._psf_group.setChecked(True)
+    assert model._psf_image_label.isVisibleTo(model._psf_group) is True
+    assert not model._psf_image_label.pixmap().isNull()
+    assert 'sigma' in model._psf_info_label.text()
+
+
+def test_psf_preview_tracks_instrument(model: Any) -> None:
+    """Switching instruments updates the PSF sigma shown."""
+    model._psf_group.setChecked(True)
+    model._instrument_combo.setCurrentText('coiss_nac')
+    coiss_text = model._psf_info_label.text()
+    model._instrument_combo.setCurrentText('gossi')
+    gossi_text = model._psf_info_label.text()
+    assert coiss_text != gossi_text
