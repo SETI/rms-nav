@@ -154,6 +154,12 @@ filterwarnings = [
   # ~/.astropy/config already exists (CI image state).  Benign env-var
   # precedence note; do not let it fail collection.
   "default:XDG_CONFIG_HOME is set to:UserWarning",
+  # On Python 3.11, the opentelemetry -> google-cloud-storage import chain
+  # (pulled in via filecache/pdslogger) hits importlib.metadata's deprecated
+  # SelectableGroups dict interface and emits this DeprecationWarning at import
+  # time.  It originates in third-party code and is absent on 3.12+; allow it
+  # through so it cannot fail conftest collection.
+  "default:SelectableGroups dict interface is deprecated:DeprecationWarning",
 ]
 markers = [
   "integration: requires PDS3_HOLDINGS_DIR (real holdings on disk or via filecache)",
