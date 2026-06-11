@@ -44,7 +44,8 @@ from PyQt6.QtWidgets import (
 package_source_path = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, package_source_path)
 
-from nav.sim.instruments import SIM_INSTRUMENTS
+from nav.config import DEFAULT_CONFIG
+from nav.sim.instruments import SIM_INSTRUMENTS, resolve_sim_inst_config
 from nav.sim.render import render_combined_model
 from nav.ui.common import ZoomPanController
 
@@ -172,6 +173,7 @@ class CreateSimulatedImageModel(QMainWindow):
         self._last_valid_tab_index = 0  # Start with General tab
 
         self._show_visual_aids = True
+        self._show_saturation_overlay = False
         self._zoom_sharp = True
 
         self._updater = ParameterUpdater(140)
@@ -228,6 +230,8 @@ class CreateSimulatedImageModel(QMainWindow):
         status_bar = QStatusBar()
         self._status_label = QLabel('V, U: --------, --------  Value: --')
         status_bar.addWidget(self._status_label)
+        self._saturation_label = QLabel('')
+        status_bar.addPermanentWidget(self._saturation_label)
         self._zoom_label = QLabel('Zoom: 1.00x')
         status_bar.addPermanentWidget(self._zoom_label)
         self.setStatusBar(status_bar)
@@ -555,6 +559,13 @@ class CreateSimulatedImageModel(QMainWindow):
         self._shade_solid_rings_check.setChecked(self.sim_params.get('shade_solid_rings', False))
         self._shade_solid_rings_check.stateChanged.connect(self._toggle_shade_solid_rings)
         vis_row.addWidget(self._shade_solid_rings_check)
+        self._saturation_overlay_check = QCheckBox('Saturation overlay')
+        self._saturation_overlay_check.setChecked(self._show_saturation_overlay)
+        self._saturation_overlay_check.setToolTip(
+            'Highlight pixels at or above the instrument saturation DN in red.'
+        )
+        self._saturation_overlay_check.toggled.connect(self._toggle_saturation_overlay)
+        vis_row.addWidget(self._saturation_overlay_check)
         vis_row.addStretch()
         exit_btn = QPushButton('Exit')
         exit_btn.clicked.connect(self.close)
@@ -2245,19 +2256,50 @@ class CreateSimulatedImageModel(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to render image:\n{e!s}')
 
+    def _toggle_saturation_overlay(self, checked: bool) -> None:
+        """Toggle the saturation overlay and re-display (no re-render)."""
+        self._show_saturation_overlay = bool(checked)
+        self._display_image()
+
+    def _current_saturation_dn(self) -> float | None:
+        """Saturation DN of the selected instrument, or None if it has none."""
+        inst_config = resolve_sim_inst_config(DEFAULT_CONFIG, self.sim_params.get('instrument'))
+        if str(inst_config.get('data_units', 'raw_dn')) != 'raw_dn':
+            return None
+        noise = inst_config.get('noise') or {}
+        if 'saturation_dn' not in noise:
+            return None
+        return float(noise['saturation_dn'])
+
     def _display_image(self) -> None:
         if self._current_image is None:
             return
         img_uint8 = _dn_to_display_uint8(self._current_image)
         height, width = img_uint8.shape
-        img_uint8 = np.ascontiguousarray(img_uint8.copy())
-        qimage = QImage(
-            img_uint8.tobytes(),
-            width,
-            height,
-            width,
-            QImage.Format.Format_Grayscale8,
-        ).copy()
+        saturation_dn = self._current_saturation_dn()
+        if self._show_saturation_overlay and saturation_dn is not None:
+            rgb = np.repeat(img_uint8[:, :, np.newaxis], 3, axis=2)
+            sat_mask = self._current_image >= saturation_dn
+            rgb[sat_mask] = (255, 0, 0)
+            rgb = np.ascontiguousarray(rgb, dtype=np.uint8)
+            qimage = QImage(
+                rgb.tobytes(),
+                width,
+                height,
+                3 * width,
+                QImage.Format.Format_RGB888,
+            ).copy()
+            self._saturation_label.setText(f'Saturated: {float(sat_mask.mean()) * 100:.2f}%')
+        else:
+            img_uint8 = np.ascontiguousarray(img_uint8.copy())
+            qimage = QImage(
+                img_uint8.tobytes(),
+                width,
+                height,
+                width,
+                QImage.Format.Format_Grayscale8,
+            ).copy()
+            self._saturation_label.setText('')
         pixmap = QPixmap(width, height)
         pixmap.fill(QColor(0, 0, 0))
         painter = QPainter(pixmap)

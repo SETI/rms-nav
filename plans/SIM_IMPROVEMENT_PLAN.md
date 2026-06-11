@@ -745,16 +745,16 @@ motion vector).  Add:
 
 **Files touched:** `src/main/nav_create_simulated_image.py`.
 
-### Phase G4: Saturation visualization
+### Phase G4: Saturation visualization [done]
 
 **Goal:** show the operator which pixels saturate.
 
-**Scope:**
-
-- New checkbox in the General tab: "Show saturation overlay".
-  When checked, pixels at or above the per-instrument
-  `saturation_dn` are highlighted in red on the live preview.
-- The status bar shows the per-image saturation fraction.
+**Done:** a "Saturation overlay" checkbox in the visual-options row.
+When checked, the preview renders in RGB and pixels at or above the
+selected instrument's `saturation_dn` are painted red, and a status-bar
+label shows the per-image saturation fraction.  The overlay is a display
+toggle (re-displays without re-rendering) and is inert for
+calibrated_if instruments, which have no saturation DN.
 
 **Backend dependency:** B4.
 

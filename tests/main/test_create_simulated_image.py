@@ -257,3 +257,43 @@ def test_load_stray_light_syncs_widgets(
     assert model._stray_amplitude_spin.value() == 0.25
     assert model._stray_direction_spin.value() == 90.0
     assert model._stray_model_combo.currentText() == 'radial'
+
+
+def test_saturation_overlay_defaults_off(model: Any) -> None:
+    """The saturation overlay starts disabled."""
+    assert model._show_saturation_overlay is False
+
+
+def test_toggle_saturation_overlay_sets_flag(model: Any) -> None:
+    """Checking the overlay box flips the display flag."""
+    model._saturation_overlay_check.setChecked(True)
+    assert model._show_saturation_overlay is True
+
+
+def test_saturation_dn_for_raw_instrument(model: Any) -> None:
+    """A raw-DN instrument reports its saturation DN."""
+    model.sim_params['instrument'] = 'coiss_nac'
+    assert model._current_saturation_dn() == 4095.0
+
+
+def test_saturation_dn_none_for_calibrated_instrument(model: Any) -> None:
+    """A calibrated-IF instrument has no saturation DN."""
+    model.sim_params['instrument'] = 'vgiss'
+    assert model._current_saturation_dn() is None
+
+
+def test_saturation_overlay_updates_status(model: Any) -> None:
+    """Enabling the overlay renders and reports a saturation fraction."""
+    model.sim_params['instrument'] = 'coiss_nac'
+    model._update_image()
+    model._saturation_overlay_check.setChecked(True)
+    assert 'Saturated' in model._saturation_label.text()
+
+
+def test_saturation_overlay_off_clears_status(model: Any) -> None:
+    """Disabling the overlay clears the saturation status."""
+    model.sim_params['instrument'] = 'coiss_nac'
+    model._update_image()
+    model._saturation_overlay_check.setChecked(True)
+    model._saturation_overlay_check.setChecked(False)
+    assert model._saturation_label.text() == ''
