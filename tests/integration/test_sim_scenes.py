@@ -10,14 +10,16 @@ from pathlib import Path
 import pytest
 
 from nav.sim.render import render_combined_model
-from tests.integration.sim_scene import (
+from nav.sim.scene import (
     DECLARED_SIM_SCENE_CLASSES,
     SimSceneValidationError,
     iter_scene_paths,
     load_sim_scene,
 )
 
-_SCENE_PATHS = iter_scene_paths()
+# The catalog root is co-located with this test module.
+_SCENES_ROOT = Path(__file__).parent / 'sim_scenes'
+_SCENE_PATHS = iter_scene_paths(_SCENES_ROOT)
 _SCENE_IDS = [f'{p.parent.name}/{p.stem}' for p in _SCENE_PATHS]
 
 

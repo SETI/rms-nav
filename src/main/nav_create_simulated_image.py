@@ -4,6 +4,7 @@ import os
 import re
 import sys
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
@@ -48,6 +49,7 @@ sys.path.insert(0, package_source_path)
 from nav.config import DEFAULT_CONFIG
 from nav.sim.instruments import SIM_INSTRUMENTS, resolve_sim_inst_config
 from nav.sim.render import render_combined_model
+from nav.sim.scene import load_sim_scene, save_sim_scene
 from nav.ui.common import ZoomPanController
 
 # Instrument options for the General-tab selector: the generic (instrument-
@@ -558,6 +560,14 @@ class CreateSimulatedImageModel(QMainWindow):
         self._load_json_btn = QPushButton('Load Parameters (JSON)')
         self._load_json_btn.clicked.connect(self._load_parameters)
         btns.addWidget(self._load_json_btn)
+
+        self._save_scene_btn = QPushButton('Save Scene (YAML)')
+        self._save_scene_btn.clicked.connect(self._save_scene)
+        btns.addWidget(self._save_scene_btn)
+
+        self._load_scene_btn = QPushButton('Load Scene (YAML)')
+        self._load_scene_btn.clicked.connect(self._load_scene)
+        btns.addWidget(self._load_scene_btn)
 
         right.addLayout(btns)
 
@@ -2631,131 +2641,157 @@ class CreateSimulatedImageModel(QMainWindow):
             '',
             'JSON Files (*.json)',
         )
-        if filename:
-            try:
-                with open(filename, encoding='utf-8') as f:
-                    params = json.load(f)
-                background_stars_val = params.get('background_stars_num', 0)
-                self.sim_params = {
-                    'size_v': int(params.get('size_v', 512)),
-                    'size_u': int(params.get('size_u', 512)),
-                    'offset_v': float(params.get('offset_v', 0.0)),
-                    'offset_u': float(params.get('offset_u', 0.0)),
-                    'random_seed': int(params.get('random_seed', 42)),
-                    'instrument': str(params.get('instrument', 'generic')),
-                    'background_stars_num': int(background_stars_val),
-                    'background_stars_psf_sigma': float(
-                        params.get('background_stars_psf_sigma', 0.9)
-                    ),
-                    'background_stars_distribution_exponent': float(
-                        params.get('background_stars_distribution_exponent', 2.5)
-                    ),
-                    'time': float(params.get('time', 0.0)),
-                    'ring_epoch': float(params.get('ring_epoch', 0.0)),
-                    'closest_planet': params.get('closest_planet') or 'SATURN',
-                    'shade_solid_rings': bool(params.get('shade_solid_rings', False)),
-                    'bodies': list(params.get('bodies', [])),
-                    'stars': list(params.get('stars', [])),
-                    'rings': list(params.get('rings', [])),
-                }
-                # Preserve catalog-only blocks the General tab does not yet edit
-                # (noise model, stray light, exposure) so loading a scene spec
-                # round-trips them instead of silently dropping them.
-                for passthrough_key in ('noise', 'stray_light', 'exposure_sec'):
-                    if passthrough_key in params:
-                        self.sim_params[passthrough_key] = params[passthrough_key]
-                # Sync the shade-solid-rings checkbox
-                self._shade_solid_rings_check.blockSignals(True)
-                self._shade_solid_rings_check.setChecked(bool(self.sim_params['shade_solid_rings']))
-                self._shade_solid_rings_check.blockSignals(False)
-                # Update general UI
-                self._size_v_spin.setValue(self.sim_params['size_v'])
-                self._size_u_spin.setValue(self.sim_params['size_u'])
-                self._offset_v_spin.setValue(self.sim_params['offset_v'])
-                self._offset_u_spin.setValue(self.sim_params['offset_u'])
-                self._random_seed_spin.setValue(self.sim_params['random_seed'])
-                # Update instrument selector
-                self._instrument_combo.blockSignals(True)
-                instrument_index = self._instrument_combo.findText(
-                    str(self.sim_params['instrument'])
-                )
-                if instrument_index >= 0:
-                    self._instrument_combo.setCurrentIndex(instrument_index)
-                self._instrument_combo.blockSignals(False)
-                self._update_psf_preview()
-                # Update time and epoch
-                self._time_spin.setValue(self.sim_params.get('time', 0.0))
-                self._epoch_spin.setValue(self.sim_params.get('ring_epoch', 0.0))
-                # Update closest planet
-                closest_planet = self.sim_params.get('closest_planet') or 'SATURN'
-                index = self._closest_planet_combo.findText(closest_planet)
-                if index >= 0:
-                    self._closest_planet_combo.setCurrentIndex(index)
-                else:
-                    self._closest_planet_combo.setCurrentText(closest_planet)
-                # Update detector-noise controls from the loaded noise block.
-                self._poisson_check.blockSignals(True)
-                self._poisson_check.setChecked(bool(self._noise_value('poisson', True)))
-                self._poisson_check.blockSignals(False)
-                self._read_noise_spin.blockSignals(True)
-                self._read_noise_spin.setValue(float(self._noise_value('read_noise_dn', 4.0)))
-                self._read_noise_spin.blockSignals(False)
-                self._cosmic_ray_spin.blockSignals(True)
-                self._cosmic_ray_spin.setValue(
-                    float(self._noise_value('cosmic_ray_rate_per_sec', 0.0))
-                )
-                self._cosmic_ray_spin.blockSignals(False)
-                self._missing_data_spin.blockSignals(True)
-                self._missing_data_spin.setValue(float(self._noise_value('missing_data_rate', 0.0)))
-                self._missing_data_spin.blockSignals(False)
-                # Update stray-light controls from the loaded stray_light block.
-                self._stray_amplitude_spin.blockSignals(True)
-                self._stray_amplitude_spin.setValue(float(self._stray_value('amplitude', 0.0)))
-                self._stray_amplitude_spin.blockSignals(False)
-                self._stray_direction_spin.blockSignals(True)
-                self._stray_direction_spin.setValue(float(self._stray_value('direction_deg', 0.0)))
-                self._stray_direction_spin.blockSignals(False)
-                self._stray_model_combo.blockSignals(True)
-                stray_model_index = self._stray_model_combo.findText(
-                    str(self._stray_value('model', 'linear'))
-                )
-                if stray_model_index >= 0:
-                    self._stray_model_combo.setCurrentIndex(stray_model_index)
-                self._stray_model_combo.blockSignals(False)
-                # Update background stars controls
-                self._background_stars_slider.blockSignals(True)
-                self._background_stars_slider.setValue(self.sim_params['background_stars_num'])
-                self._background_stars_slider.blockSignals(False)
-                self._background_stars_spin.blockSignals(True)
-                self._background_stars_spin.setValue(self.sim_params['background_stars_num'])
-                self._background_stars_spin.blockSignals(False)
-                # Update background stars PSF sigma controls
-                self._background_stars_psf_sigma_slider.blockSignals(True)
-                psf_sigma_val = int(self.sim_params['background_stars_psf_sigma'] * 100)
-                self._background_stars_psf_sigma_slider.setValue(psf_sigma_val)
-                self._background_stars_psf_sigma_slider.blockSignals(False)
-                self._background_stars_psf_sigma_spin.blockSignals(True)
-                psf_sigma_spin_val = self.sim_params['background_stars_psf_sigma']
-                self._background_stars_psf_sigma_spin.setValue(psf_sigma_spin_val)
-                self._background_stars_psf_sigma_spin.blockSignals(False)
-                # Update background stars distribution exponent controls
-                self._background_stars_dist_exp_slider.blockSignals(True)
-                dist_exp_slider_val = int(
-                    self.sim_params['background_stars_distribution_exponent'] * 100
-                )
-                self._background_stars_dist_exp_slider.setValue(dist_exp_slider_val)
-                self._background_stars_dist_exp_slider.blockSignals(False)
-                self._background_stars_dist_exp_spin.blockSignals(True)
-                dist_exp_spin_val = self.sim_params['background_stars_distribution_exponent']
-                self._background_stars_dist_exp_spin.setValue(dist_exp_spin_val)
-                self._background_stars_dist_exp_spin.blockSignals(False)
-                # Rebuild tabs
-                self._rebuild_dynamic_tabs()
-                self._update_tab_titles()
-                self._validate_ranges()
-                self._updater.immediate_update()
-            except Exception as e:
-                QMessageBox.critical(self, 'Error', f'Failed to load parameters:\n{e!s}')
+        if not filename:
+            return
+        try:
+            with open(filename, encoding='utf-8') as f:
+                params = json.load(f)
+            self._apply_params_dict(params)
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to load parameters:\n{e!s}')
+
+    def _save_scene(self) -> None:
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            'Save Scene',
+            'scene.yaml',
+            'YAML Files (*.yaml *.yml)',
+        )
+        if not filename:
+            return
+        try:
+            save_sim_scene(self.sim_params, Path(filename))
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to save scene:\n{e!s}')
+
+    def _load_scene(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            'Load Scene',
+            '',
+            'YAML Files (*.yaml *.yml)',
+        )
+        if not filename:
+            return
+        try:
+            scene = load_sim_scene(Path(filename))
+            self._apply_params_dict(scene.to_sim_params())
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to load scene:\n{e!s}')
+
+    def _apply_params_dict(self, params: dict[str, Any]) -> None:
+        """Rebuild sim_params from a loaded params dict and sync every widget."""
+        background_stars_val = params.get('background_stars_num', 0)
+        self.sim_params = {
+            'size_v': int(params.get('size_v', 512)),
+            'size_u': int(params.get('size_u', 512)),
+            'offset_v': float(params.get('offset_v', 0.0)),
+            'offset_u': float(params.get('offset_u', 0.0)),
+            'random_seed': int(params.get('random_seed', 42)),
+            'instrument': str(params.get('instrument', 'generic')),
+            'background_stars_num': int(background_stars_val),
+            'background_stars_psf_sigma': float(params.get('background_stars_psf_sigma', 0.9)),
+            'background_stars_distribution_exponent': float(
+                params.get('background_stars_distribution_exponent', 2.5)
+            ),
+            'time': float(params.get('time', 0.0)),
+            'ring_epoch': float(params.get('ring_epoch', 0.0)),
+            'closest_planet': params.get('closest_planet') or 'SATURN',
+            'shade_solid_rings': bool(params.get('shade_solid_rings', False)),
+            'bodies': list(params.get('bodies', [])),
+            'stars': list(params.get('stars', [])),
+            'rings': list(params.get('rings', [])),
+        }
+        # Preserve catalog-only blocks the General tab does not yet edit
+        # (noise model, stray light, exposure) so loading a scene spec
+        # round-trips them instead of silently dropping them.
+        for passthrough_key in ('noise', 'stray_light', 'exposure_sec'):
+            if passthrough_key in params:
+                self.sim_params[passthrough_key] = params[passthrough_key]
+        # Sync the shade-solid-rings checkbox
+        self._shade_solid_rings_check.blockSignals(True)
+        self._shade_solid_rings_check.setChecked(bool(self.sim_params['shade_solid_rings']))
+        self._shade_solid_rings_check.blockSignals(False)
+        # Update general UI
+        self._size_v_spin.setValue(self.sim_params['size_v'])
+        self._size_u_spin.setValue(self.sim_params['size_u'])
+        self._offset_v_spin.setValue(self.sim_params['offset_v'])
+        self._offset_u_spin.setValue(self.sim_params['offset_u'])
+        self._random_seed_spin.setValue(self.sim_params['random_seed'])
+        # Update instrument selector
+        self._instrument_combo.blockSignals(True)
+        instrument_index = self._instrument_combo.findText(str(self.sim_params['instrument']))
+        if instrument_index >= 0:
+            self._instrument_combo.setCurrentIndex(instrument_index)
+        self._instrument_combo.blockSignals(False)
+        self._update_psf_preview()
+        # Update time and epoch
+        self._time_spin.setValue(self.sim_params.get('time', 0.0))
+        self._epoch_spin.setValue(self.sim_params.get('ring_epoch', 0.0))
+        # Update closest planet
+        closest_planet = self.sim_params.get('closest_planet') or 'SATURN'
+        index = self._closest_planet_combo.findText(closest_planet)
+        if index >= 0:
+            self._closest_planet_combo.setCurrentIndex(index)
+        else:
+            self._closest_planet_combo.setCurrentText(closest_planet)
+        # Update detector-noise controls from the loaded noise block.
+        self._poisson_check.blockSignals(True)
+        self._poisson_check.setChecked(bool(self._noise_value('poisson', True)))
+        self._poisson_check.blockSignals(False)
+        self._read_noise_spin.blockSignals(True)
+        self._read_noise_spin.setValue(float(self._noise_value('read_noise_dn', 4.0)))
+        self._read_noise_spin.blockSignals(False)
+        self._cosmic_ray_spin.blockSignals(True)
+        self._cosmic_ray_spin.setValue(float(self._noise_value('cosmic_ray_rate_per_sec', 0.0)))
+        self._cosmic_ray_spin.blockSignals(False)
+        self._missing_data_spin.blockSignals(True)
+        self._missing_data_spin.setValue(float(self._noise_value('missing_data_rate', 0.0)))
+        self._missing_data_spin.blockSignals(False)
+        # Update stray-light controls from the loaded stray_light block.
+        self._stray_amplitude_spin.blockSignals(True)
+        self._stray_amplitude_spin.setValue(float(self._stray_value('amplitude', 0.0)))
+        self._stray_amplitude_spin.blockSignals(False)
+        self._stray_direction_spin.blockSignals(True)
+        self._stray_direction_spin.setValue(float(self._stray_value('direction_deg', 0.0)))
+        self._stray_direction_spin.blockSignals(False)
+        self._stray_model_combo.blockSignals(True)
+        stray_model_index = self._stray_model_combo.findText(
+            str(self._stray_value('model', 'linear'))
+        )
+        if stray_model_index >= 0:
+            self._stray_model_combo.setCurrentIndex(stray_model_index)
+        self._stray_model_combo.blockSignals(False)
+        # Update background stars controls
+        self._background_stars_slider.blockSignals(True)
+        self._background_stars_slider.setValue(self.sim_params['background_stars_num'])
+        self._background_stars_slider.blockSignals(False)
+        self._background_stars_spin.blockSignals(True)
+        self._background_stars_spin.setValue(self.sim_params['background_stars_num'])
+        self._background_stars_spin.blockSignals(False)
+        # Update background stars PSF sigma controls
+        self._background_stars_psf_sigma_slider.blockSignals(True)
+        psf_sigma_val = int(self.sim_params['background_stars_psf_sigma'] * 100)
+        self._background_stars_psf_sigma_slider.setValue(psf_sigma_val)
+        self._background_stars_psf_sigma_slider.blockSignals(False)
+        self._background_stars_psf_sigma_spin.blockSignals(True)
+        psf_sigma_spin_val = self.sim_params['background_stars_psf_sigma']
+        self._background_stars_psf_sigma_spin.setValue(psf_sigma_spin_val)
+        self._background_stars_psf_sigma_spin.blockSignals(False)
+        # Update background stars distribution exponent controls
+        self._background_stars_dist_exp_slider.blockSignals(True)
+        dist_exp_slider_val = int(self.sim_params['background_stars_distribution_exponent'] * 100)
+        self._background_stars_dist_exp_slider.setValue(dist_exp_slider_val)
+        self._background_stars_dist_exp_slider.blockSignals(False)
+        self._background_stars_dist_exp_spin.blockSignals(True)
+        dist_exp_spin_val = self.sim_params['background_stars_distribution_exponent']
+        self._background_stars_dist_exp_spin.setValue(dist_exp_spin_val)
+        self._background_stars_dist_exp_spin.blockSignals(False)
+        # Rebuild tabs
+        self._rebuild_dynamic_tabs()
+        self._update_tab_titles()
+        self._validate_ranges()
+        self._updater.immediate_update()
 
     # ---- Visual toggles ----
     def _toggle_visual_aids(self, state: Any) -> None:

@@ -1,18 +1,16 @@
-"""Scene-spec schema for the simulator scene catalog (Phase T1).
+"""Scene-spec schema for the simulator scene catalog.
 
-A sim scene is a YAML file at
-``tests/integration/sim_scenes/<scene_class>/<scene_name>.yaml`` describing a
-synthetic frame the navigator can be run against: instrument, geometry, noise,
-stray light, and the planted ground-truth offset the navigator should recover.
+A sim scene is a YAML file describing a synthetic frame the navigator can be run
+against: instrument, geometry, noise, stray light, and the planted ground-truth
+offset the navigator should recover.  The catalog is laid out as
+``<scene_class>/<scene_name>.yaml`` (the directory is the registry).
 
-The catalog mirrors the operator-curated image library's directory-as-registry
-layout (see :mod:`tests.integration.sidecar`), but its scene classes are scoped
-to what the sim is calibration-testing rather than the real library's classes.
-
-The validator is hand-rolled (no pydantic dependency).  Every field the render
-path or a downstream test reads is checked here so a malformed scene breaks
-collection rather than failing confusingly later.  ``SimScene.to_sim_params``
-produces the dict ``render_combined_model`` / ``ObsSim`` consume.
+This module is the canonical schema -- the importable peer of the YAML files and
+the GUI.  ``load_sim_scene`` validates a file into a :class:`SimScene`;
+``SimScene.to_sim_params`` maps it to the dict ``render_combined_model`` /
+``ObsSim`` consume; ``scene_dict_from_sim_params`` is the inverse used by the GUI
+to save the current scene back to YAML.  The validator is hand-rolled (no
+pydantic dependency).
 """
 
 from __future__ import annotations
@@ -27,7 +25,7 @@ from ruamel.yaml import YAML
 from nav.sim.instruments import GENERIC_INSTRUMENT_ALIASES, SIM_INSTRUMENTS
 
 # Scene classes for the sim catalog.  The structural test asserts every
-# subdirectory under sim_scenes/ is one of these so typos fail loudly.
+# subdirectory under a catalog root is one of these so typos fail loudly.
 DECLARED_SIM_SCENE_CLASSES: frozenset[str] = frozenset(
     {
         'phase_sweep_regular_body',
@@ -44,9 +42,6 @@ DECLARED_SIM_SCENE_CLASSES: frozenset[str] = frozenset(
 ALLOWED_INSTRUMENTS: frozenset[str] = frozenset(SIM_INSTRUMENTS) | GENERIC_INSTRUMENT_ALIASES
 
 CURRENT_SCHEMA_VERSION: int = 1
-
-# Default catalog root, resolved relative to this file.
-SIM_SCENES_ROOT: Path = Path(__file__).parent / 'sim_scenes'
 
 
 class SimSceneValidationError(ValueError):
@@ -118,7 +113,71 @@ class SimScene:
         return params
 
 
-def iter_scene_paths(root: Path = SIM_SCENES_ROOT) -> list[Path]:
+def scene_dict_from_sim_params(sim_params: dict[str, Any], *, scene_name: str) -> dict[str, Any]:
+    """Build a YAML-serialisable scene dict from GUI/render sim params.
+
+    The inverse of :meth:`SimScene.to_sim_params`: the rendered offset becomes
+    the planted ground truth, and the star background count / list fold back into
+    a ``stars`` block.
+
+    Parameters:
+        sim_params: The GUI / render parameter mapping.
+        scene_name: The scene name (must match the target filename stem).
+
+    Returns:
+        A mapping ready to validate via :func:`load_sim_scene` after writing.
+    """
+    scene: dict[str, Any] = {
+        'schema_version': CURRENT_SCHEMA_VERSION,
+        'scene_name': scene_name,
+        'instrument': str(sim_params.get('instrument', 'generic')),
+        'image_size_vu': [int(sim_params['size_v']), int(sim_params['size_u'])],
+        'random_seed': int(sim_params.get('random_seed', 42)),
+        'exposure_sec': float(sim_params.get('exposure_sec', 1.0)),
+    }
+    bodies = sim_params.get('bodies') or []
+    if bodies:
+        scene['bodies'] = [dict(b) for b in bodies]
+    rings = sim_params.get('rings') or []
+    if rings:
+        scene['rings'] = [dict(r) for r in rings]
+    stars_block: dict[str, Any] = {}
+    if int(sim_params.get('background_stars_num', 0)):
+        stars_block['background_count'] = int(sim_params['background_stars_num'])
+    if sim_params.get('stars'):
+        stars_block['list'] = [dict(s) for s in sim_params['stars']]
+    if stars_block:
+        scene['stars'] = stars_block
+    if sim_params.get('noise') is not None:
+        scene['noise'] = dict(sim_params['noise'])
+    if sim_params.get('stray_light') is not None:
+        scene['stray_light'] = dict(sim_params['stray_light'])
+    offset_v = float(sim_params.get('offset_v', 0.0))
+    offset_u = float(sim_params.get('offset_u', 0.0))
+    if offset_v or offset_u:
+        scene['ground_truth'] = {
+            'planted_offset_dv_px': offset_v,
+            'planted_offset_du_px': offset_u,
+            'planted_rotation_deg': 0.0,
+        }
+    return scene
+
+
+def save_sim_scene(sim_params: dict[str, Any], path: Path) -> None:
+    """Write the current scene to ``path`` as YAML, derived from sim params.
+
+    Parameters:
+        sim_params: The GUI / render parameter mapping.
+        path: Destination ``<scene_name>.yaml`` path; its stem is the scene name.
+    """
+    scene = scene_dict_from_sim_params(sim_params, scene_name=path.stem)
+    yaml = YAML(typ='safe')
+    yaml.default_flow_style = False
+    with path.open('w') as handle:
+        yaml.dump(scene, handle)
+
+
+def iter_scene_paths(root: Path) -> list[Path]:
     """Return every ``<class>/<name>.yaml`` scene path under ``root``, sorted."""
     return sorted(root.glob('*/*.yaml'))
 

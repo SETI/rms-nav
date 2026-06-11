@@ -804,28 +804,27 @@ generic `polyhedral_mesh` rather than named `HYPERION` / `PHOEBE`
 meshes, since the sim uses a procedural generator until named meshes are
 sourced (section 12.3).
 
-### Phase G8: Scene catalog browser
+### Phase G8: Scene catalog browser [done]
 
 **Goal:** the GUI becomes a first-class editor for the YAML scene
 catalog (Phase T1 below).
 
-**Scope:**
+**Done:** the GUI has "Load Scene (YAML)" and "Save Scene (YAML)"
+buttons alongside the JSON parameter buttons.  Loading a scene validates
+it and populates every tab (via a shared `_apply_params_dict` the JSON
+loader also uses); saving writes a schema-valid YAML derived from the
+current scene.  So an operator can render a scene in the GUI and save it
+as a catalog artifact, and load a catalog scene to edit it.
 
-- New "File" menu items: "Open Scene…" (browses
-  `tests/integration/sim_scenes/`), "Save As…" (writes a YAML scene
-  spec), "Save & Render" (renders the saved scene).
-- Loading a YAML scene populates every GUI tab from the YAML.
-- Saving from the GUI writes a YAML spec the test harness can
-  consume.
-
-This is the phase that makes the GUI a peer of the YAML, not just a
-control surface.  After G8, an operator who renders an interesting
-scene in the GUI can save it as a regression artifact with one click.
-
-**Backend dependency:** T1 (the YAML schema must exist first).
-
-**Files touched:** `src/main/nav_create_simulated_image.py`, plus
-the YAML schema introduced by T1.
+**Schema promotion:** to let production GUI code consume the schema
+without depending on a test module, the scene schema moved from
+`tests/integration/sim_scene.py` to **`src/nav/sim/scene.py`** (the
+importable peer named in principle 3.4).  It gained
+`scene_dict_from_sim_params` / `save_sim_scene` (the inverse mapping for
+saving); the T1 structural test now imports from `nav.sim.scene` and
+passes the catalog root explicitly.  Buttons are used rather than a File
+menu, consistent with the existing parameter buttons; "Save & Render" is
+unneeded since saving does not change the live preview.
 
 ---
 

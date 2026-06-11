@@ -357,3 +357,77 @@ def test_body_pose_handler_pads_missing_pose(model: Any) -> None:
     model.sim_params['bodies'].append({'name': 'B', 'center_v': 1.0, 'center_u': 1.0})
     model._on_body_pose(0, 2, 45.0)
     assert model.sim_params['bodies'][0]['pose_euler_deg'] == [0.0, 0.0, 45.0]
+
+
+def _no_critical(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make any error dialog raise so failures surface as test errors."""
+
+    def _raise(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError(f'error dialog raised: {args!r}')
+
+    monkeypatch.setattr(QMessageBox, 'critical', staticmethod(_raise))
+
+
+def test_save_scene_writes_valid_yaml(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """Saving a scene writes a YAML the schema validates."""
+    from nav.sim.scene import load_sim_scene
+
+    model.sim_params['instrument'] = 'coiss_nac'
+    model.sim_params['size_v'] = 128
+    model.sim_params['size_u'] = 128
+    out = tmp_path / 'myscene.yaml'
+    monkeypatch.setattr(
+        QFileDialog, 'getSaveFileName', staticmethod(lambda *a, **k: (str(out), 'YAML'))
+    )
+    _no_critical(monkeypatch)
+    model._save_scene()
+    scene = load_sim_scene(out)
+    assert scene.instrument == 'coiss_nac'
+    assert scene.scene_name == 'myscene'
+    assert scene.image_size_vu == (128, 128)
+
+
+def test_load_scene_populates_model(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """Loading a scene YAML populates the data model from it."""
+    scene_yaml = tmp_path / 'loadme.yaml'
+    scene_yaml.write_text(
+        'schema_version: 1\nscene_name: loadme\ninstrument: gossi\n'
+        'image_size_vu: [96, 96]\nrandom_seed: 5\n'
+    )
+    monkeypatch.setattr(
+        QFileDialog, 'getOpenFileName', staticmethod(lambda *a, **k: (str(scene_yaml), 'YAML'))
+    )
+    _no_critical(monkeypatch)
+    model._load_scene()
+    assert model.sim_params['instrument'] == 'gossi'
+    assert model.sim_params['size_v'] == 96
+
+
+def test_scene_round_trips_through_gui(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """A scene saved then loaded preserves instrument, size, and a body."""
+    model.sim_params['instrument'] = 'coiss_nac'
+    model.sim_params['size_v'] = 100
+    model.sim_params['size_u'] = 100
+    model.sim_params['bodies'] = [
+        {'name': 'B', 'center_v': 50.0, 'center_u': 50.0, 'axis1': 40.0, 'axis2': 40.0}
+    ]
+    out = tmp_path / 'rt.yaml'
+    monkeypatch.setattr(
+        QFileDialog, 'getSaveFileName', staticmethod(lambda *a, **k: (str(out), 'YAML'))
+    )
+    monkeypatch.setattr(
+        QFileDialog, 'getOpenFileName', staticmethod(lambda *a, **k: (str(out), 'YAML'))
+    )
+    _no_critical(monkeypatch)
+    model._save_scene()
+    model.sim_params['instrument'] = 'generic'
+    model._load_scene()
+    assert model.sim_params['instrument'] == 'coiss_nac'
+    assert model.sim_params['size_v'] == 100
+    assert model.sim_params['bodies'][0]['name'] == 'B'
