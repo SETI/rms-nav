@@ -532,23 +532,39 @@ real Galileo or Voyager outer-leg frame.
 `src/nav/config_files/config_440_sim.yaml`, new
 `tests/nav/sim/test_sim_stray_light.py`.
 
-### Phase B7: Non-ellipsoidal bodies [increment 1 done: render side]
+### Phase B7: Non-ellipsoidal bodies [increments 1-2 done]
 
 **Goal:** render at least one canonical irregular body
 (Hyperion-like, Phoebe-like) from a polyhedral mesh rather than as
 an ellipsoid silhouette.
 
-**Progress:** Increment 1 (the render side) is done.
-`src/nav/sim/sim_body_polyhedral.py` provides a procedural irregular-mesh
-generator and a z-buffered polyhedral renderer (orthographic projection,
-flat Lambertian shading matching the ellipsoid's light convention,
-supersampled limb).  A body with `shape_model: polyhedral_mesh` plus a
-`pose_euler_deg` orientation routes through it in `render.py`.  Remaining
-increments: wire `NavModelBodySimulated` into model selection and add the
-navigation-geometry separation; the four-scenario harness (mesh-vs-mesh,
-mesh-vs-ellipsoid same/disagreeing pose, centroid-only BLOB); and real
-named meshes / the `shape_meshes/` sourcing decision (section 12.3).  The
-current generator is procedural, so no large mesh files are committed yet.
+**Progress:**
+
+- *Increment 1 (render side):* `src/nav/sim/sim_body_polyhedral.py`
+  provides a procedural irregular-mesh generator and a z-buffered
+  polyhedral renderer (orthographic projection, flat Lambertian shading
+  matching the ellipsoid's light convention, supersampled limb).  A body
+  with `shape_model: polyhedral_mesh` plus a `pose_euler_deg` orientation
+  routes through it in `render.py`.
+- *Increment 2 (navigator-side prediction + geometry separation):*
+  `NavModelBodySimulated` predicts a mesh silhouette when its own params
+  say `shape_model: polyhedral_mesh`, via the shared `MeshBodySpec` /
+  `render_mesh_body_image` primitive.  Because the model reads its own
+  params, the predicted shape and pose can differ from what was rendered
+  -- this realises the render-geometry / navigation-geometry separation.
+  Verified: the predicted mesh reproduces the rendered shape when params
+  agree (scenario 1/2 base), differs from an ellipsoid prediction
+  (scenario 2), and changes under a disagreeing pose (scenario 3).  The
+  mesh seed/pose are explicit body params (not the scene noise seed) so
+  both sides reproduce the same shape.
+
+**Remaining increments:** route a simulated obs to
+`NavModelBodySimulated` in the live model-selection layer (not yet
+present -- neither body model is instantiated by the orchestration); the
+centroid-only `BodyBlobNav` scenario 4; an end-to-end planted-offset
+recovery harness across all four scenarios; and real named meshes / the
+`shape_meshes/` sourcing decision (section 12.3).  The current generator
+is procedural, so no large mesh files are committed yet.
 
 **Scope:**
 

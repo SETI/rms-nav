@@ -12,7 +12,9 @@ float array in [0, 1], lit by the same Lambertian convention so a mesh body and
 an ellipsoid body can be compared directly (the B7 shape-mismatch fixture).
 """
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 
@@ -255,3 +257,97 @@ def render_polyhedral_body(
     if aa_scale > 1:
         intensity = intensity.reshape(size_v, aa_scale, size_u, aa_scale).mean(axis=(1, 3))
     return _as_float64(np.clip(intensity, 0.0, 1.0))
+
+
+@dataclass(frozen=True)
+class MeshBodySpec:
+    """The mesh shape and pose for an irregular body, read from scene params.
+
+    Kept separate from the image so the same spec drives both the rendered data
+    and the navigator's predicted silhouette (or, for a shape-mismatch fixture,
+    two deliberately different specs).
+
+    Parameters:
+        lumpiness: Surface-relief amplitude as a fraction of the unit radius.
+        n_lat: Mesh latitude bands.
+        n_lon: Mesh longitude divisions.
+        seed: Seed selecting which irregular shape is generated.
+        pose_euler_deg: Body orientation as intrinsic X, Y, Z Euler angles, deg.
+    """
+
+    lumpiness: float = 0.3
+    n_lat: int = 16
+    n_lon: int = 32
+    seed: int = 0
+    pose_euler_deg: tuple[float, float, float] = field(default=(0.0, 0.0, 0.0))
+
+
+def mesh_spec_from_params(body_params: Mapping[str, Any]) -> MeshBodySpec:
+    """Build a :class:`MeshBodySpec` from a body parameter mapping.
+
+    The mesh seed and pose are explicit body parameters (not the scene's noise
+    seed), so the same body params reproduce the same shape on both the render
+    and prediction sides.
+
+    Parameters:
+        body_params: A body parameter mapping.
+
+    Returns:
+        The resolved :class:`MeshBodySpec`.
+
+    Raises:
+        ValueError: If ``pose_euler_deg`` does not hold exactly three angles.
+    """
+    pose = body_params.get('pose_euler_deg', (0.0, 0.0, 0.0))
+    values = [float(x) for x in pose]
+    if len(values) != 3:
+        raise ValueError(f'pose_euler_deg must have 3 angles; got {pose!r}')
+    return MeshBodySpec(
+        lumpiness=float(body_params.get('mesh_lumpiness', 0.3)),
+        n_lat=int(body_params.get('mesh_n_lat', 16)),
+        n_lon=int(body_params.get('mesh_n_lon', 32)),
+        seed=int(body_params.get('mesh_seed', 0)),
+        pose_euler_deg=(values[0], values[1], values[2]),
+    )
+
+
+def render_mesh_body_image(
+    *,
+    size: tuple[int, int],
+    center: tuple[float, float],
+    semi_axes_px: tuple[float, float, float],
+    spec: MeshBodySpec,
+    illumination_angle: float = 0.0,
+    phase_angle: float = 0.0,
+    anti_aliasing: float = 1.0,
+) -> NDArrayFloatType:
+    """Render an irregular mesh body from a :class:`MeshBodySpec`.
+
+    A thin convenience over ``make_irregular_mesh`` + ``render_polyhedral_body``
+    so the render path and the navigator's prediction share one primitive.
+
+    Parameters:
+        size: ``(size_v, size_u)`` output image size in pixels.
+        center: ``(v, u)`` body centre in pixels.
+        semi_axes_px: Per-axis ``(a, b, c)`` half-sizes in pixels.
+        spec: The mesh shape and pose.
+        illumination_angle: Image-plane light azimuth in radians.
+        phase_angle: Phase angle in radians.
+        anti_aliasing: Limb supersampling control.
+
+    Returns:
+        A ``(size_v, size_u)`` float array in [0, 1].
+    """
+    mesh = make_irregular_mesh(
+        n_lat=spec.n_lat, n_lon=spec.n_lon, lumpiness=spec.lumpiness, seed=spec.seed
+    )
+    return render_polyhedral_body(
+        size=size,
+        center=center,
+        mesh=mesh,
+        semi_axes_px=semi_axes_px,
+        pose_euler_deg=spec.pose_euler_deg,
+        illumination_angle=illumination_angle,
+        phase_angle=phase_angle,
+        anti_aliasing=anti_aliasing,
+    )

@@ -22,6 +22,7 @@ from nav.feature.flags import BodyDiscFlags
 from nav.feature.geometry import BodyDiscGeometry
 from nav.nav_model.nav_model_body_base import NavModelBodyBase
 from nav.sim.sim_body import create_simulated_body
+from nav.sim.sim_body_polyhedral import mesh_spec_from_params, render_mesh_body_image
 from nav.support.filters import NavFilterKind, NavFilterSpec
 from nav.support.time import now_dt
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
@@ -107,18 +108,33 @@ class NavModelBodySimulated(NavModelBodyBase):
         axis1 = float(p.get('axis1', 0.0))
         axis2 = float(p.get('axis2', 0.0))
         axis3 = float(p.get('axis3', min(axis1, axis2)))
-        sim_img = create_simulated_body(
-            size=(data_size_v, data_size_u),
-            center=(center_v, center_u),
-            axis1=axis1,
-            axis2=axis2,
-            axis3=axis3,
-            rotation_z=rotation_z_rad,
-            rotation_tilt=rotation_tilt_rad,
-            illumination_angle=illumination_angle_rad,
-            phase_angle=phase_angle_rad,
-            anti_aliasing=1,
-        )
+        # The predicted shape is read from this model's own params, which need
+        # not match what was rendered into the image: an irregular body can be
+        # predicted as a mesh (matching pose), as an ellipsoid (shape mismatch),
+        # or at a deliberately different pose (chaotic-rotator fixture).
+        if str(p.get('shape_model', 'ellipsoid')) == 'polyhedral_mesh':
+            sim_img = render_mesh_body_image(
+                size=(data_size_v, data_size_u),
+                center=(center_v, center_u),
+                semi_axes_px=(axis1 / 2.0, axis2 / 2.0, axis3 / 2.0),
+                spec=mesh_spec_from_params(p),
+                illumination_angle=illumination_angle_rad,
+                phase_angle=phase_angle_rad,
+                anti_aliasing=1.0,
+            )
+        else:
+            sim_img = create_simulated_body(
+                size=(data_size_v, data_size_u),
+                center=(center_v, center_u),
+                axis1=axis1,
+                axis2=axis2,
+                axis3=axis3,
+                rotation_z=rotation_z_rad,
+                rotation_tilt=rotation_tilt_rad,
+                illumination_angle=illumination_angle_rad,
+                phase_angle=phase_angle_rad,
+                anti_aliasing=1,
+            )
         body_mask = sim_img > 0.0
         limb_mask = self._compute_limb_mask_from_body_mask(body_mask)
         model_img_full = self.obs.make_extfov_zeros()
