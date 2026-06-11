@@ -176,3 +176,46 @@ def test_load_preserves_stray_light_block(
     stray = {'amplitude': 0.3, 'model': 'radial'}
     _load_json(monkeypatch, model, tmp_path, {'stray_light': stray})
     assert model.sim_params['stray_light'] == stray
+
+
+def test_default_has_no_dead_background_noise_key(model: Any) -> None:
+    """The inert background_noise_intensity key is gone from the defaults."""
+    assert 'background_noise_intensity' not in model.sim_params
+
+
+def test_default_noise_block_present(model: Any) -> None:
+    """A fresh model carries a detector-noise block with Poisson on."""
+    assert model.sim_params['noise']['poisson'] is True
+
+
+def test_poisson_toggle_updates_noise(model: Any) -> None:
+    """Unchecking Poisson writes through to the noise block."""
+    model._poisson_check.setChecked(False)
+    assert model.sim_params['noise']['poisson'] is False
+
+
+def test_read_noise_spin_updates_noise(model: Any) -> None:
+    """The read-noise spin writes read_noise_dn into the noise block."""
+    model._read_noise_spin.setValue(12.5)
+    assert model.sim_params['noise']['read_noise_dn'] == 12.5
+
+
+def test_cosmic_ray_spin_updates_noise(model: Any) -> None:
+    """The cosmic-ray spin writes cosmic_ray_rate_per_sec into the noise block."""
+    model._cosmic_ray_spin.setValue(0.002)
+    assert model.sim_params['noise']['cosmic_ray_rate_per_sec'] == 0.002
+
+
+def test_missing_data_spin_updates_noise(model: Any) -> None:
+    """The missing-data spin writes missing_data_rate into the noise block."""
+    model._missing_data_spin.setValue(0.1)
+    assert model.sim_params['noise']['missing_data_rate'] == 0.1
+
+
+def test_load_noise_block_syncs_widgets(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """Loading a noise block syncs the panel widgets."""
+    _load_json(monkeypatch, model, tmp_path, {'noise': {'poisson': False, 'read_noise_dn': 9.0}})
+    assert model._poisson_check.isChecked() is False
+    assert model._read_noise_spin.value() == 9.0

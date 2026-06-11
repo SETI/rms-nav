@@ -142,7 +142,12 @@ class CreateSimulatedImageModel(QMainWindow):
             'closest_planet': 'SATURN',
             'time': 0.0,
             'ring_epoch': 0.0,
-            'background_noise_intensity': 0.0,
+            'noise': {
+                'poisson': True,
+                'read_noise_dn': 4.0,
+                'cosmic_ray_rate_per_sec': 0.0,
+                'missing_data_rate': 0.0,
+            },
             'background_stars_num': 0,
             'background_stars_psf_sigma': 0.9,
             'background_stars_distribution_exponent': 2.5,
@@ -343,34 +348,41 @@ class CreateSimulatedImageModel(QMainWindow):
         self._epoch_spin.valueChanged.connect(self._on_epoch)
         gen_layout.addRow('Ring Epoch (TDB sec):', self._epoch_spin)
 
-        # Background noise slider with min/max labels and spinbox
-        noise_row = QHBoxLayout()
-        noise_row.setSpacing(4)
-        noise_row.setContentsMargins(0, 0, 0, 0)
-        noise_min_label = QLabel('0.0')
-        noise_min_label.setFixedWidth(35)
-        noise_min_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        noise_max_label = QLabel('1.0')
-        noise_max_label.setFixedWidth(35)
-        noise_max_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        self._background_noise_slider = QSlider(Qt.Orientation.Horizontal)
-        self._background_noise_slider.setRange(0, 1000)
-        noise_slider_init_val = int(self.sim_params['background_noise_intensity'] * 1000)
-        self._background_noise_slider.setValue(noise_slider_init_val)
-        self._background_noise_slider.valueChanged.connect(self._on_background_noise_slider)
-        self._background_noise_spin = QDoubleSpinBox()
-        self._background_noise_spin.setRange(0.0, 1.0)
-        self._background_noise_spin.setDecimals(3)
-        self._background_noise_spin.setSingleStep(0.001)
-        self._background_noise_spin.setValue(self.sim_params['background_noise_intensity'])
-        self._background_noise_spin.valueChanged.connect(self._on_background_noise_spin)
-        noise_row.addWidget(noise_min_label)
-        noise_row.addWidget(self._background_noise_slider, stretch=1)
-        noise_row.addWidget(noise_max_label)
-        noise_row.addWidget(self._background_noise_spin)
-        noise_holder = QWidget()
-        noise_holder.setLayout(noise_row)
-        gen_layout.addRow('Background noise intensity:', noise_holder)
+        # Detector-noise panel (B1 model): Poisson shot noise, a Gaussian
+        # read-noise floor, cosmic-ray rate, and a missing-data rate.  These
+        # write the sim_params['noise'] block the renderer consumes; physical
+        # defaults otherwise come from the selected instrument.
+        self._poisson_check = QCheckBox()
+        self._poisson_check.setChecked(bool(self._noise_value('poisson', True)))
+        self._poisson_check.setToolTip('Signal-dependent Poisson shot noise (usually on).')
+        self._poisson_check.toggled.connect(self._on_poisson)
+        gen_layout.addRow('Poisson shot noise:', self._poisson_check)
+
+        self._read_noise_spin = QDoubleSpinBox()
+        self._read_noise_spin.setRange(0.0, 50.0)
+        self._read_noise_spin.setDecimals(2)
+        self._read_noise_spin.setValue(float(self._noise_value('read_noise_dn', 4.0)))
+        self._read_noise_spin.setToolTip('Gaussian read-noise floor in DN.')
+        self._read_noise_spin.valueChanged.connect(self._on_read_noise)
+        gen_layout.addRow('Read noise (DN):', self._read_noise_spin)
+
+        self._cosmic_ray_spin = QDoubleSpinBox()
+        self._cosmic_ray_spin.setRange(0.0, 0.01)
+        self._cosmic_ray_spin.setDecimals(5)
+        self._cosmic_ray_spin.setSingleStep(0.0001)
+        self._cosmic_ray_spin.setValue(float(self._noise_value('cosmic_ray_rate_per_sec', 0.0)))
+        self._cosmic_ray_spin.setToolTip('Cosmic-ray fluence in events / cm^2 / sec.')
+        self._cosmic_ray_spin.valueChanged.connect(self._on_cosmic_ray)
+        gen_layout.addRow('Cosmic ray rate (/cm2/s):', self._cosmic_ray_spin)
+
+        self._missing_data_spin = QDoubleSpinBox()
+        self._missing_data_spin.setRange(0.0, 0.3)
+        self._missing_data_spin.setDecimals(3)
+        self._missing_data_spin.setSingleStep(0.005)
+        self._missing_data_spin.setValue(float(self._noise_value('missing_data_rate', 0.0)))
+        self._missing_data_spin.setToolTip('Fraction of pixels marked as missing data.')
+        self._missing_data_spin.valueChanged.connect(self._on_missing_data)
+        gen_layout.addRow('Missing data rate:', self._missing_data_spin)
 
         # Background stars slider with min/max labels and spinbox
         stars_row = QHBoxLayout()
@@ -653,21 +665,33 @@ class CreateSimulatedImageModel(QMainWindow):
         self.sim_params['ring_epoch'] = value
         self._updater.request_update()
 
-    def _on_background_noise_slider(self, value: int) -> None:
-        noise_val = value / 1000.0
-        self._background_noise_spin.blockSignals(True)
-        self._background_noise_spin.setValue(noise_val)
-        self._background_noise_spin.blockSignals(False)
-        self.sim_params['background_noise_intensity'] = noise_val
+    def _noise_value(self, key: str, default: Any) -> Any:
+        """Read a value from the sim_params noise block, or a default."""
+        noise = self.sim_params.get('noise')
+        if isinstance(noise, dict) and key in noise:
+            return noise[key]
+        return default
+
+    def _set_noise(self, key: str, value: Any) -> None:
+        """Write a value into the sim_params noise block and re-render."""
+        noise = self.sim_params.setdefault('noise', {})
+        if not isinstance(noise, dict):
+            noise = {}
+            self.sim_params['noise'] = noise
+        noise[key] = value
         self._updater.request_update()
 
-    def _on_background_noise_spin(self, value: float) -> None:
-        slider_val = int(value * 1000)
-        self._background_noise_slider.blockSignals(True)
-        self._background_noise_slider.setValue(slider_val)
-        self._background_noise_slider.blockSignals(False)
-        self.sim_params['background_noise_intensity'] = value
-        self._updater.request_update()
+    def _on_poisson(self, checked: bool) -> None:
+        self._set_noise('poisson', bool(checked))
+
+    def _on_read_noise(self, value: float) -> None:
+        self._set_noise('read_noise_dn', float(value))
+
+    def _on_cosmic_ray(self, value: float) -> None:
+        self._set_noise('cosmic_ray_rate_per_sec', float(value))
+
+    def _on_missing_data(self, value: float) -> None:
+        self._set_noise('missing_data_rate', float(value))
 
     def _on_background_stars_slider(self, value: int) -> None:
         self._background_stars_spin.blockSignals(True)
@@ -2414,7 +2438,6 @@ class CreateSimulatedImageModel(QMainWindow):
             try:
                 with open(filename, encoding='utf-8') as f:
                     params = json.load(f)
-                background_noise_val = params.get('background_noise_intensity', 0.0)
                 background_stars_val = params.get('background_stars_num', 0)
                 self.sim_params = {
                     'size_v': int(params.get('size_v', 512)),
@@ -2423,7 +2446,6 @@ class CreateSimulatedImageModel(QMainWindow):
                     'offset_u': float(params.get('offset_u', 0.0)),
                     'random_seed': int(params.get('random_seed', 42)),
                     'instrument': str(params.get('instrument', 'generic')),
-                    'background_noise_intensity': float(background_noise_val),
                     'background_stars_num': int(background_stars_val),
                     'background_stars_psf_sigma': float(
                         params.get('background_stars_psf_sigma', 0.9)
@@ -2473,14 +2495,21 @@ class CreateSimulatedImageModel(QMainWindow):
                     self._closest_planet_combo.setCurrentIndex(index)
                 else:
                     self._closest_planet_combo.setCurrentText(closest_planet)
-                # Update background noise controls
-                self._background_noise_slider.blockSignals(True)
-                noise_slider_val = int(self.sim_params['background_noise_intensity'] * 1000)
-                self._background_noise_slider.setValue(noise_slider_val)
-                self._background_noise_slider.blockSignals(False)
-                self._background_noise_spin.blockSignals(True)
-                self._background_noise_spin.setValue(self.sim_params['background_noise_intensity'])
-                self._background_noise_spin.blockSignals(False)
+                # Update detector-noise controls from the loaded noise block.
+                self._poisson_check.blockSignals(True)
+                self._poisson_check.setChecked(bool(self._noise_value('poisson', True)))
+                self._poisson_check.blockSignals(False)
+                self._read_noise_spin.blockSignals(True)
+                self._read_noise_spin.setValue(float(self._noise_value('read_noise_dn', 4.0)))
+                self._read_noise_spin.blockSignals(False)
+                self._cosmic_ray_spin.blockSignals(True)
+                self._cosmic_ray_spin.setValue(
+                    float(self._noise_value('cosmic_ray_rate_per_sec', 0.0))
+                )
+                self._cosmic_ray_spin.blockSignals(False)
+                self._missing_data_spin.blockSignals(True)
+                self._missing_data_spin.setValue(float(self._noise_value('missing_data_rate', 0.0)))
+                self._missing_data_spin.blockSignals(False)
                 # Update background stars controls
                 self._background_stars_slider.blockSignals(True)
                 self._background_stars_slider.setValue(self.sim_params['background_stars_num'])

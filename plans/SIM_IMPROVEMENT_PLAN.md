@@ -708,22 +708,20 @@ operators want the fields auto-populated.
 
 **Files touched:** `src/main/nav_create_simulated_image.py`.
 
-### Phase G2: Noise-model controls
+### Phase G2: Noise-model controls [done]
 
 **Goal:** expose the B1 noise model in the GUI.
 
-**Scope:** the General tab's single "Background noise intensity"
-slider expands into a small sub-panel:
-
-- Poisson shot noise (boolean — usually on)
-- Read-noise floor (DN, slider 0–20)
-- Cosmic-ray rate (events / sec, slider 0–10; auto-derived from
-  exposure_sec)
-- Missing-data rate (fraction, slider 0–0.30)
-- Missing-data block size (single pixels vs. row blocks)
-
-When G1's instrument selector changes, these populate from the
-selected instrument's defaults.
+**Done:** the inert "Background noise intensity" slider is removed and
+replaced by a detector-noise panel writing the `sim_params['noise']`
+block: a Poisson shot-noise checkbox, a read-noise (DN) spin, a
+cosmic-ray rate spin (events / cm^2 / sec), and a missing-data rate
+spin.  Values round-trip through save / load.  Two drafted items are
+deferred: the missing-data block-size (row-dropout) control waits on
+that render mode, and auto-populating the panel from the selected
+instrument's defaults on instrument change is the same deferral as G1
+(the renderer applies instrument defaults when the scene leaves a field
+unset).
 
 **Backend dependency:** B1, B2.
 
