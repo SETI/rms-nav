@@ -28,6 +28,7 @@ def _render_stars_cached(
     stars_params_json: str,
     offset_v: float,
     offset_u: float,
+    default_psf_sigma: float,
 ) -> tuple[Any, ...]:
     """Internal cached function to compute star rendering."""
     stars_params = json.loads(stars_params_json)
@@ -76,7 +77,7 @@ def _render_stars_cached(
         move_gran = max(abs(star.move_u) / max_move_steps, abs(star.move_v) / max_move_steps)
         move_gran = np.clip(move_gran, 0.1, 1.0)
 
-        sigma = star_params.get('psf_sigma', 3.0)
+        sigma = star_params.get('psf_sigma', default_psf_sigma)
         psf = GaussianPSF(sigma=sigma)
 
         # Stars where any part of the PSF would be off the edge of the image are ignored.
@@ -143,12 +144,23 @@ def render_stars(
     stars_params: list[dict[str, Any]],
     offset_v: float,
     offset_u: float,
+    *,
+    default_psf_sigma: float = 3.0,
 ) -> tuple[NDArrayFloatType, list[MutableStar], list[dict[str, Any]]]:
-    """Render stars into img. Returns (img, sim_star_list, star_render_info)."""
+    """Render stars into img. Returns (img, sim_star_list, star_render_info).
+
+    Parameters:
+        img: Image array to render stars into.
+        stars_params: Per-star parameter dictionaries.
+        offset_v: V offset to apply to every star.
+        offset_u: U offset to apply to every star.
+        default_psf_sigma: PSF sigma used for stars that do not specify their
+            own ``psf_sigma`` (the selected instrument's value).
+    """
     size_v, size_u = img.shape
     stars_params_json = json.dumps(stars_params, sort_keys=True)
     cached_img, cached_star_list, cached_star_info = _render_stars_cached(
-        size_v, size_u, stars_params_json, offset_v, offset_u
+        size_v, size_u, stars_params_json, offset_v, offset_u, default_psf_sigma
     )
     # Add cached stars to input image (don't overwrite background noise/stars)
     img[:] = np.clip(img + cached_img, 0.0, 1.0)
@@ -603,6 +615,62 @@ def apply_saturation(
     np.minimum(img, saturation_dn, out=img)
 
 
+def apply_stray_light(
+    img: NDArrayFloatType,
+    *,
+    amplitude: float,
+    direction_deg: float = 0.0,
+    model: str = 'linear',
+    center_v: float | None = None,
+    center_u: float | None = None,
+) -> None:
+    """Add a smooth low-frequency stray-light field to the signal in place.
+
+    Scattered light raises a slowly-varying background across the frame; the
+    navigator's BANDPASS_DOG source-image filter is meant to remove it.  The
+    field is additive, so it brightens dark sky as well as lit features (a
+    multiplicative field would leave the dark sky -- where the gradient most
+    needs suppressing -- untouched).  It is applied to the noise-free signal in
+    [0, 1] before the detector stage.
+
+    Parameters:
+        img: Normalized [0, 1] signal image, modified in place.
+        amplitude: Peak stray-light level added, in normalized signal units.
+        direction_deg: Ramp direction for the 'linear' model, in degrees.
+        model: 'linear' (a ramp spanning [0, amplitude]) or 'radial' (a bump of
+            height amplitude fading to 0 at the farthest corner).
+        center_v: Bump centre v for 'radial'; frame centre when None.
+        center_u: Bump centre u for 'radial'; frame centre when None.
+
+    Raises:
+        ValueError: If ``model`` is not 'linear' or 'radial'.
+    """
+    if amplitude <= 0.0:
+        return
+    size_v, size_u = img.shape
+    vv, uu = np.mgrid[0:size_v, 0:size_u]
+    vv = vv.astype(np.float64)
+    uu = uu.astype(np.float64)
+    if model == 'linear':
+        theta = np.radians(direction_deg)
+        proj = np.cos(theta) * vv + np.sin(theta) * uu
+        proj -= float(proj.min())
+        span = float(proj.max())
+        field = amplitude * (proj / span) if span > 0.0 else np.zeros_like(proj)
+    elif model == 'radial':
+        cv = size_v / 2.0 if center_v is None else float(center_v)
+        cu = size_u / 2.0 if center_u is None else float(center_u)
+        radius = np.sqrt((vv - cv) ** 2 + (uu - cu) ** 2)
+        corners = [(0.0, 0.0), (0.0, size_u), (size_v, 0.0), (size_v, size_u)]
+        r_max = max(np.hypot(cv - c[0], cu - c[1]) for c in corners)
+        if r_max <= 0.0:
+            return
+        field = amplitude * np.clip(1.0 - radius / r_max, 0.0, 1.0)
+    else:
+        raise ValueError(f"stray_light model must be 'linear' or 'radial'; got {model!r}")
+    img += field
+
+
 @lru_cache(maxsize=1)
 def _render_background_stars_cached(
     size_v: int,
@@ -727,12 +795,18 @@ def _render_combined_model_cached(
     cosmic_ray_seed = derive_effect_seed(random_seed, 'cosmic_rays')
     missing_data_seed = derive_effect_seed(random_seed, 'missing_data')
 
+    # Resolve the per-instrument config once; stars use its PSF sigma so their
+    # centroid diagnostics match the navigator's PSF, and the noise stage below
+    # reads its physical noise parameters.
+    inst_config = resolve_sim_inst_config(DEFAULT_CONFIG, sim_params.get('instrument'))
+    star_psf_sigma = float(inst_config['star_psf_sigma'])
+
     # Detector noise is applied last, after the full signal is composed, so the
     # Poisson shot term sees the noise-free signal it should grow with.
 
     # Background stars are part of the sky signal, composed before noise.
     background_stars_num = int(sim_params.get('background_stars_num', 0))
-    background_stars_psf_sigma = float(sim_params.get('background_stars_psf_sigma', 0.9))
+    background_stars_psf_sigma = float(sim_params.get('background_stars_psf_sigma', star_psf_sigma))
     background_stars_distribution_exponent = float(
         sim_params.get('background_stars_distribution_exponent', 2.5)
     )
@@ -748,7 +822,9 @@ def _render_combined_model_cached(
     bodies_params = sim_params.get('bodies', []) or []
     rings_params = sim_params.get('rings', []) or []
 
-    img, sim_star_list, star_info = render_stars(img, stars_params, offset_v, offset_u)
+    img, sim_star_list, star_info = render_stars(
+        img, stars_params, offset_v, offset_u, default_psf_sigma=star_psf_sigma
+    )
 
     # Process rings: assign default ranges
     for ring_number, ring_params in enumerate(rings_params):
@@ -866,11 +942,24 @@ def _render_combined_model_cached(
             near_index = order_near_to_far.index(body_info['name']) + 1
             body_index_map[body_mask] = near_index
 
+    # Stray light is a low-frequency addition to the signal, applied before the
+    # detector stage so it brightens dark sky and is then subject to noise.
+    stray = sim_params.get('stray_light')
+    if stray:
+        apply_stray_light(
+            img,
+            amplitude=float(stray.get('amplitude', 0.0)),
+            direction_deg=float(stray.get('direction_deg', 0.0)),
+            model=str(stray.get('model', 'linear')),
+            center_v=stray.get('center_v'),
+            center_u=stray.get('center_u'),
+        )
+
     # All signal is composed; apply the detector model.  Feature masks above are
     # derived from the noise-free signal, so they are unaffected.  Physical noise
-    # parameters delegate to the selected instrument's config; sim-only knobs
-    # (signal full-scale, cosmic-ray rate, dropout rate) come from the sim block.
-    inst_config = resolve_sim_inst_config(DEFAULT_CONFIG, sim_params.get('instrument'))
+    # parameters delegate to the selected instrument's config (resolved above);
+    # sim-only knobs (signal full-scale, cosmic-ray rate, dropout rate) come from
+    # the sim block.
     sim_noise = DEFAULT_CONFIG.category('sim')['noise']
     scene_noise = sim_params.get('noise') or {}
     if inst_config.get('data_units', 'raw_dn') == 'raw_dn':

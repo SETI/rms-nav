@@ -221,7 +221,7 @@ Direct consequences of section 2.1:
 |---|---|---|
 | Body silhouette deviates from ellipsoid | Always ellipsoidal | `phase_irregularity_factor` always 0; can't exercise irregular-body regime |
 | Body rotational pose | Driven by SPICE pose at midtime | Chaotic rotators (Hyperion) have wrong orientation in sim too — same problem as real |
-| Star PSF | Single Gaussian | Wings, diffraction spikes absent |
+| Star PSF | Single Gaussian | Per-instrument wings absent (no diffraction spikes to model: the supported telescopes have no support vanes) |
 | Star centroid offset from catalog | Zero by construction | Can't exercise unique-match assignment ambiguity |
 | Per-pixel noise | Additive Gaussian, signal-independent | No Poisson, read floor, cosmic rays, dropouts; MAD-noise estimator overfits to a regime that doesn't exist in real frames |
 | Smear on long exposure | Per-star translation | Real smear is a line integral; centroid bias and SNR distribute differently |
@@ -425,6 +425,12 @@ new `tests/nav/sim/test_sim_instrument_coupling.py`.
 
 ### Phase B3: Smear as a true convolution
 
+**Status: postponed.** `psfmodel` is being extended to produce smeared
+PSFs directly.  Once that lands, the sim renders smear by asking
+`psfmodel` for the smeared kernel rather than carrying its own
+line-integral code, so this phase waits on that upstream work instead
+of building a parallel implementation now.
+
 **Goal:** rendered smeared stars become line integrals of the PSF,
 matching the navigator's `smeared_psf.py` model.
 
@@ -478,7 +484,7 @@ saturates.
 **Files touched:** `src/nav/sim/render.py`, new
 `tests/nav/sim/test_sim_saturation.py`.
 
-### Phase B5: Realistic per-instrument PSF
+### Phase B5: Realistic per-instrument PSF [done]
 
 **Goal:** sim stars use the same `psfmodel.PSF` instance the
 navigator uses, with instrument-specific wings.
@@ -490,9 +496,10 @@ navigator uses, with instrument-specific wings.
   this lookup possible).  For Cassini NAC this means a real
   measured-from-data PSF if one is in `psfmodel`; for other
   cameras, the configured `star_psf_sigma` parameterized PSF.
-- Optional: diffraction spikes for very-bright stars on Cassini NAC
-  (cross-shaped spikes at SNR > some threshold).  Configurable
-  on/off so other cameras can opt out.
+- No diffraction spikes.  The Cassini telescope has no secondary-mirror
+  support vanes, so its stars carry no cross-shaped diffraction pattern
+  no matter how bright; the other supported cameras are likewise modelled
+  without spikes.
 
 **Why now:** brings star-centroid diagnostics into the same
 distribution as real CISS frames.  Less load-bearing than B1 and B2,
@@ -501,7 +508,7 @@ but matters for `StarFieldFromCatalogNav` calibration verification.
 **Files touched:** `src/nav/sim/render.py`, new
 `tests/nav/sim/test_sim_psf.py`.
 
-### Phase B6: Stray-light gradient
+### Phase B6: Stray-light gradient [done]
 
 **Goal:** optional per-frame stray-light contribution that exercises
 the BANDPASS_DOG source-image filter.
@@ -534,24 +541,25 @@ an ellipsoid silhouette.
 **Scope:**
 
 This phase is paired with `AUTONAV_PLAN.md` Part 13b §7 (resolved
-irregular-body LIMB_ARC via real shape models).  Two deployment
-paths:
+irregular-body LIMB_ARC via real shape models).
 
-- **DSK-via-oops path.** When `oops` adds DSK kernel support, the
-  sim's `sim_body.py` consumes the same DSK and renders the actual
-  silhouette.  At the same time the navigator's body NavModel
-  consumes the same DSK and predicts the actual silhouette.  Both
-  sides are then ellipsoid-free for that body.
-- **Standalone polyhedral renderer fallback.** Until DSK lands, the
-  sim grows a small polyhedral renderer (project triangle vertices
-  through the `oops`-supplied pose into image space, draw the
-  silhouette).  Mesh files live under
-  `src/nav/sim/shape_meshes/<BODY>.obj` (or .ply).  This is sim-only
-  — the navigator still uses the ellipsoidal model — and is
-  documented as a *deliberate* shape-mismatch test fixture: "render
-  the actual Hyperion shape so we can measure how badly the
-  navigator's ellipsoidal silhouette mis-fits".  This is the
-  scenario that exercises `phase_irregularity_factor`.
+`oops` will not gain DSK kernel support in the foreseeable future, so
+the DSK-via-oops path is not available.  The only path is the
+**standalone polyhedral renderer**: the sim grows a small renderer that
+projects triangle-mesh vertices through the body's pose into image
+space and draws the silhouette.  Mesh files live under
+`src/nav/sim/shape_meshes/<BODY>.obj` (or .ply).  This is sim-only --
+the navigator still uses the ellipsoidal model -- and is documented as a
+*deliberate* shape-mismatch test fixture: "render the actual Hyperion
+shape so we can measure how badly the navigator's ellipsoidal silhouette
+mis-fits".  This is the scenario that exercises
+`phase_irregularity_factor`.
+
+**Prerequisite to confirm:** the renderer needs the body's orientation
+in space at the scene midtime (the rotation that maps body-fixed mesh
+coordinates into the camera frame).  Without DSK, that pose must come
+from the body-fixed frame via `oops` / SPICE for the scene geometry.
+This must be available before B7 can start.
 
 **Why now:** the `phase_irregularity_factor` term added in Phase 10
 §F is identically zero on every sim frame today.  Without B7, that
@@ -562,17 +570,13 @@ on sim.
 `src/nav/sim/render.py`, `src/nav/sim/shape_meshes/`, new
 `tests/nav/sim/test_sim_irregular_body.py`.
 
-### Phase B8: Diffraction spikes (optional)
+### Phase B8: Diffraction spikes -- dropped
 
-**Goal:** Cassini NAC's cross-shaped diffraction pattern on very
-bright stars.
-
-**Scope:** configurable on/off per camera; only enabled for cameras
-with documented spike behavior.  Spike length scales with star
-brightness above some threshold.
-
-**Why now:** lowest-leverage of the phases.  Nice-to-have for
-visualization; doesn't shift any calibration diagnostic meaningfully.
+**Will not be done.**  The supported cameras have no diffraction
+spikes.  The Cassini telescope in particular has no secondary-mirror
+support vanes, so bright stars never show a cross-shaped diffraction
+pattern.  There is nothing to model, so this phase is removed from the
+plan permanently.
 
 ---
 
@@ -1026,11 +1030,11 @@ B0 (determinism) [done]
  │
  ├──→ B1 (noise model) [done]
  │     │
- │     └──→ B4 (saturation) [done], B5 (PSF), B6 (stray light), B7 (irregular)
+ │     └──→ B4 (saturation) [done], B5 (PSF) [done], B6 (stray light) [done], B7 (irregular)
  │
  └──→ B2 (per-instrument coupling) [done]
        │
-       └──→ B3 (smear), B4 [done], B5, B6, B7
+       └──→ B3 (smear) [postponed: psfmodel], B4 [done], B5 [done], B6 [done], B7
 
 T1 (scene catalog)
  │
@@ -1043,7 +1047,7 @@ T1 (scene catalog)
 G0 (3-peer audit) before any GUI phase
 G1 follows B2
 G2 follows B1, B2
-G3 follows B3
+G3 follows B3 (both postponed: psfmodel)
 G4 follows B4
 G5 follows B5
 G6 follows B6
@@ -1085,13 +1089,14 @@ backend phase with its matching GUI phase:
 3. B2 → G0 + G1 (3-peer audit + instrument selector)
 4. T1 → G8 (catalog browser)
 5. T2, T4, T6 (test infrastructure; no GUI change)
-6. B3 → G3 (smear)
-7. B4 → G4 (saturation)
-8. B5 → G5 (PSF preview)
-9. B6 → G6 (stray light)
-10. B7 → G7 (irregular bodies)
-11. T3, T5, T7 (sweeps, bootstrap, validation)
-12. B8 (diffraction; optional polish)
+6. B4 → G4 (saturation)
+7. B5 → G5 (PSF preview)
+8. B6 → G6 (stray light)
+9. B7 → G7 (irregular bodies)
+10. T3, T5, T7 (sweeps, bootstrap, validation)
+
+B3 / G3 (smear) are postponed pending `psfmodel`'s smear support; B8
+(diffraction) is dropped permanently.
 
 ---
 
@@ -1198,7 +1203,7 @@ src/nav/sim/shape_meshes/<BODY>.obj                      (B7+)
 
 ### Modified files
 ```
-src/nav/sim/render.py              (B0, B1, B3, B4, B5, B6, B7, B8)
+src/nav/sim/render.py              (B0, B1, B4, B5, B6, B7; B3 postponed, B8 dropped)
 src/nav/sim/sim_body.py            (B0, B2, B7)
 src/nav/sim/sim_ring.py            (B0)
 src/nav/obs/obs_inst_sim.py        (B2)
@@ -1308,10 +1313,11 @@ short-term but produces a GUI file that's permanently out of sync.
 
 Three reasons:
 
-1. **It's gated on `oops` DSK support, which is out of our control.**
-   The B7 fallback (standalone polyhedral renderer) is doable but
+1. **`oops` will not gain DSK support in the foreseeable future**, so
+   the only path is the standalone polyhedral renderer -- doable but
    significant: ~500 LOC of mesh loading, projection, silhouette
-   extraction, anti-aliasing.
+   extraction, anti-aliasing, plus sourcing the body's pose in space
+   at the scene midtime to orient the mesh.
 2. **The `phase_irregularity_factor` term it would exercise is
    already in place in the navigator** (Phase 10 §F's BLOB work).
    It's calibration-relevant but the term defaults to 0 in
@@ -1328,12 +1334,12 @@ Three reasons:
 If irregular-body sensitivity becomes a hot calibration question
 sooner, B7 can be promoted up the order.
 
-### 11.7 Why diffraction spikes (B8) are explicitly last
+### 11.7 Why diffraction spikes (B8) are dropped
 
-They look impressive in the rendered image but don't shift any
-diagnostic the calibration cares about.  Pure polish.  Listed in
-the plan only so they don't get accidentally promoted later
-("we should add diffraction spikes — should we?  no, see B8").
+The supported cameras have no diffraction spikes.  The Cassini
+telescope has no secondary-mirror support vanes, so its stars carry no
+cross-shaped diffraction pattern at any brightness.  There is nothing
+to model, so B8 is removed permanently rather than deferred.
 
 ### 11.8 What about the existing simulator users?
 
@@ -1351,15 +1357,15 @@ including tests + docs + reviews):
 
 | Phase | Estimated effort |
 |---|---|
-| B0 | 1 day |
-| B1 | 3 days |
-| B2 | 4 days |
-| B3 | 1 day |
-| B4 | 1 day |
-| B5 | 2 days |
-| B6 | 1 day |
+| B0 | 1 day (done) |
+| B1 | 3 days (done) |
+| B2 | 4 days (done) |
+| B3 | postponed (psfmodel smear) |
+| B4 | 1 day (done) |
+| B5 | 2 days (done) |
+| B6 | 1 day (done) |
 | B7 | 2 weeks |
-| B8 | 1 day |
+| B8 | dropped (no spikes) |
 | G0 | 1 day |
 | G1 | 1 day |
 | G2 | 2 days |
