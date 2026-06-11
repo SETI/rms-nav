@@ -195,6 +195,8 @@ The math-correctness findings lead, per the request.
 ### Critical
 
 #### CODE-NAV-001 — LM trial-acceptance freezes Tukey weights but the *final* covariance/RMS recompute does not match the accepted step's weights consistently
+
+> **STATUS: FIXED** — see the Remediation status table near the top of this document for the fix summary and the matching consolidated fix prompt.
 **File:** `src/nav/nav_technique/dt_fitting.py` · `lm_subpixel_refine`
 **Severity:** Critical (subtle; needs confirmation by test)
 
@@ -237,6 +239,8 @@ all vertices polarity-rejected and asserting the result is flagged spurious and
 covariance is `inf` (it is) *and* `rms_px` is not `0.0` (it currently is).
 
 #### CODE-NAV-002 — Body limb/terminator polyline normals are computed from the *ridge mask*, not the body interior; polarity sign is effectively arbitrary
+
+> **STATUS: FIXED** — see the Remediation status table near the top of this document for the fix summary and the matching consolidated fix prompt.
 **File:** `src/nav/nav_model/nav_model_body.py` · `_build_polyline_sampler` (lines 993-1009)
 **Severity:** Critical
 
@@ -279,6 +283,8 @@ polyline, and asserting `dot(normal_i, (vertex_i - body_center)) > 0` for every
 vertex — it will fail for a meaningful fraction today.
 
 #### CODE-NAV-003 — Star predicted-SNR uses an admitted PLACEHOLDER scale that gates whether *any* star feature survives on calibrated Cassini images
+
+> **STATUS: FIXED** — see the Remediation status table near the top of this document for the fix summary and the matching consolidated fix prompt.
 **Files:** `src/nav/nav_model/stars/predicted_snr.py` · `predicted_snr`; `src/nav/config_files/config_400_inst_coiss.yaml` (lines 116, 151)
 **Severity:** Critical (correctness of reliability gate; config)
 
@@ -310,6 +316,8 @@ placeholder; add a config-validation test that *fails* if any
 ### High
 
 #### CODE-NAV-004 — `StarFieldFromCatalogNav._build_covariance`: wrong power of `Σw` in the translation-mean covariance
+
+> **STATUS: FIXED** — see the Remediation status table near the top of this document for the fix summary and the matching consolidated fix prompt.
 > **Tracked by:** #123 — Mahalanobis agreement grouping breaks because per-technique covariances are CRLB-tight
 **File:** `src/nav/nav_technique/nav_technique_star_field.py` · `_build_covariance` (lines 881-901)
 **Severity:** High
@@ -340,6 +348,8 @@ the final confidence tier. **Confirm by** a unit test with two stars at known
 weighted-mean sigma.
 
 #### CODE-NAV-005 — `BodyBlobNav._joint_covariance`: same `(Σw)²` mis-normalization plus a hidden single-blob over-confidence
+
+> **STATUS: FIXED** — see the Remediation status table near the top of this document for the fix summary and the matching consolidated fix prompt.
 > **Tracked by:** #123 — Mahalanobis agreement grouping breaks because per-technique covariances are CRLB-tight
 **File:** `src/nav/nav_technique/nav_technique_body_blob.py` · `_joint_covariance` (lines 257-290)
 **Severity:** High
@@ -365,6 +375,8 @@ scene where a blob and a star field both fire; the blob's tiny covariance will
 dominate `mu_combined`.
 
 #### CODE-NAV-006 — DT-fit "spurious" gates can be defeated by Tukey weight collapse; `rms_px` is Tukey-weighted, not raw
+
+> **STATUS: FIXED** — see the Remediation status table near the top of this document for the fix summary and the matching consolidated fix prompt.
 > **Tracked by:** #125 — BodyTerminatorNav mis-convergence has no per-technique signal, #128 — Architectural redesign: robust limb navigation across all body types and illuminations
 **Files:** `nav_technique_body_limb.py` (lines 335-344), `nav_technique_ring_edge.py` (lines 304-316), `nav_technique_body_terminator.py`
 **Severity:** High
@@ -387,6 +399,8 @@ limb/terminator techniques, or report a raw (unweighted) RMS alongside the
 robust one and gate on the raw value.
 
 #### CODE-NAV-007 — `coarse_ncc_search` is documented as NCC but is a raw count; the "argmax unchanged" claim is false in general
+
+> **STATUS: FIXED** — see the Remediation status table near the top of this document for the fix summary and the matching consolidated fix prompt.
 > **Tracked by:** #128 — Architectural redesign: robust limb navigation across all body types and illuminations
 **File:** `src/nav/nav_technique/dt_fitting.py` · `coarse_ncc_search` (lines 106-203)
 **Severity:** High (correctness of the seed that the whole LM trusts)
@@ -413,6 +427,8 @@ it honestly as a chamfer-count seed (and widen the trust region accordingly), or
 divide each shift's score by the in-bounds vertex count so density bias cancels.
 
 #### CODE-NAV-008 — `_combine_precision_weighted` averages parameter vectors that include an angle without any wrap handling
+
+> **STATUS: FIXED** — see the Remediation status table near the top of this document for the fix summary and the matching consolidated fix prompt.
 **File:** `src/nav/nav_orchestrator/ensemble.py` · `_combine_precision_weighted` (lines 342-414); `_result_param_vector`
 **Severity:** High
 
@@ -433,6 +449,8 @@ rotations on the circle (atan2 of weighted sin/cos) or document and enforce the
 small-angle regime.
 
 #### CODE-NAV-009 — `_mahalanobis_distance` null-space test uses a fixed absolute tolerance `1e-6` against an un-normalized residual
+
+> **STATUS: FIXED** — see the Remediation status table near the top of this document for the fix summary and the matching consolidated fix prompt.
 **File:** `src/nav/nav_orchestrator/ensemble.py` · `_mahalanobis_distance` (lines 110-138)
 **Severity:** High
 
@@ -455,6 +473,8 @@ offset. **Impact:** intermittent failure to group agreeing results → spurious
 eps)`.
 
 #### CODE-NAV-010 — `_rotation_sigma_from_quality` covariance has wrong dimensions
+
+> **STATUS: FIXED** — see the Remediation status table near the top of this document for the fix summary and the matching consolidated fix prompt.
 > **Tracked by:** #123 — Mahalanobis agreement grouping breaks because per-technique covariances are CRLB-tight
 **File:** `src/nav/nav_technique/nav_technique_body_disc.py` · `_rotation_sigma_from_quality` (lines 692-751)
 **Severity:** High
@@ -626,6 +646,8 @@ rather than navigating on a contaminated template.
 ### High (already listed: CODE-NAV-008, CODE-NAV-009)
 
 #### CODE-ORCH-001 — The ensemble's grouping depends on a 5-pixel floor *because* the covariances it is supposed to use are wrong
+
+> **STATUS: PARTIAL** — root cause (over-confident covariances) fixed via CODE-NAV-004 / CODE-NAV-005; the ensemble-floor reduction is deferred. See the Remediation status table.
 > **Tracked by:** #123 — Mahalanobis agreement grouping breaks because per-technique covariances are CRLB-tight
 **File:** `src/nav/nav_orchestrator/ensemble.py` · `EnsembleConfig.agreement_pixel_floor`, `_agreement_groups`
 **Severity:** High
@@ -900,6 +922,8 @@ src/nav/dataset/dataset_pds4.py, src/nav/dataset/dataset_sim.py.
 ## src/nav/obs/obs_inst.py
 
 ### CODE-OBS-001 — High — `ObsInst.star_psf_size` returns plain `dict` when no threshold matches; default path is fragile and mistyped
+
+> **STATUS: FIXED** — see the Remediation status table near the top of this document for the fix summary and the matching consolidated fix prompt.
 `star_psf_size` (lines 72-92). The loop iterates `for mag in sorted(star_psf_sizes)`
 and returns `tuple(star_psf_sizes[mag])` on the first `star.vmag < mag`. The fallthrough
 `return tuple(star_psf_sizes[mag])` reuses the loop variable `mag` left over from the last
@@ -993,6 +1017,8 @@ time yields `-inf`/`nan`. Unlikely but unguarded. Note.
 ## src/nav/obs/obs_inst_voyager_iss.py
 
 ### CODE-OBS-011 — High — Spacecraft and I/F-correction selection keys off a single character `obs.dict['LAB02'][4]` with no validation
+
+> **STATUS: FIXED** — see the Remediation status table near the top of this document for the fix summary and the matching consolidated fix prompt.
 Lines 66 and 111. `obs.dict['LAB02'][4]` is used both to choose the V1-Saturn I/F correction and
 to build the instrument LID (`vg{spacecraft}`). If `LAB02` is missing, shorter than 5 chars, or
 formatted differently across volumes, this raises `KeyError`/`IndexError`, or worse silently picks
@@ -1003,6 +1029,8 @@ scaling -> wrong limb/terminator/ring fits. Confirm: check `LAB02` format across
 add an explicit assert that the extracted char is '1' or '2'.
 
 ### CODE-OBS-012 — Medium — `label3` factor parse via brittle string `.replace` of a fixed phrase; no error handling
+
+> **STATUS: FIXED** — see the Remediation status table near the top of this document for the fix summary and the matching consolidated fix prompt.
 Lines 62-64. `obs.dict['LABEL3'].replace('FOR (I/F)*10000., MULTIPLY DN VALUE BY', '')` then
 `float(...)`. If `LABEL3` text differs by punctuation/spacing/case in any volume, the replace
 leaves the phrase intact and `float()` raises `ValueError` with no context. WHY risky: silent
@@ -1080,6 +1108,8 @@ the raise. Minor UX/consistency: catch and re-raise with `inst_names()` in the m
 ## src/nav/dataset/dataset_pds3.py
 
 ### CODE-DS-001 — High — `vol_start_idx`/`vol_end_idx` may be referenced unbound (mypy strict should catch; confirm)
+
+> **STATUS: FIXED** — see the Remediation status table near the top of this document for the fix summary and the matching consolidated fix prompt.
 `_yield_image_files_index` lines 569-586. `vol_start_idx` is assigned only inside
 `if vol_start is not None:` and `vol_end_idx` only inside `if vol_end is not None:`. The later
 comprehension (lines 579-586) references them guarded by the same `is not None` checks, so runtime
@@ -1090,6 +1120,8 @@ comprehension. Confirm by running `mypy src/nav/dataset/dataset_pds3.py`; if it 
 Low (readability), else it is a type error to fix by initializing both indices to `None`/sentinel.
 
 ### CODE-DS-002 — High — `choose_random_images` logic is biased and can loop effectively forever / under-yield
+
+> **STATUS: FIXED** — see the Remediation status table near the top of this document for the fix summary and the matching consolidated fix prompt.
 `_yield_image_files_index` lines 686-851. When `choose_random_images` is set:
 (a) it picks one random volume, reads its full index, picks **one random row** (line 727), then
 breaks after at most one yield per outer `while True` iteration; (b) the chosen random row may fail
@@ -1159,6 +1191,8 @@ the plan to an issue/doc and deleting.
 ## src/nav/dataset/dataset_pds3_cassini_iss.py
 
 ### CODE-DS-010 — High — BOTSIM grouping mis-pairs when two consecutive non-paired BOTSIM images appear, and time-slop check uses image number as seconds
+
+> **STATUS: FIXED** — see the Remediation status table near the top of this document for the fix summary and the matching consolidated fix prompt.
 `yield_image_files_index` lines 287-316. Two issues:
 (1) The pairing assumes alternating N/W; if two consecutive rows are both BOTSIM but the second is
 not the partner (e.g. N then N), the `abs(img_num - last_img_num) <= 3` test (line 301) treats the
@@ -1337,6 +1371,8 @@ I read every file in scope in full. A separate review covers nav_model/nav_techn
 ## Findings
 
 ### CODE-BACKPLANE-001 — Backplane generation skips ALL navigated images (wrong status literal)
+
+> **STATUS: FIXED** — see the Remediation status table near the top of this document for the fix summary and the matching consolidated fix prompt.
 - Severity: **Critical**
 - File/symbol: `src/backplanes/backplanes.py`, `generate_backplanes_image_files`, line 53-61.
 - Description: The function reads the nav `_metadata.json` and tests `status = nav_metadata.get('status'); if status != 'success': ... return`. But `nav` writes `NavResult.status`, which is the `Literal['ok', 'failed', 'conflicted']` value `'ok'` for successful navigations (`src/nav/nav_orchestrator/nav_result.py` line 25, 175; written verbatim in `src/nav/navigate_image_files.py` line 192 as `'status': result.status`). The string `'success'` is never written to a nav metadata file (it only appears as a *cloud-task* runner status in `src/main/nav_*_cloud_tasks.py`, a different dict).
@@ -1344,6 +1380,8 @@ I read every file in scope in full. A separate review covers nav_model/nav_techn
 - Impact: `nav_backplanes` produces NO backplane FITS for any successfully navigated image (only logs "Skipping ... status=ok"). The entire downstream backplane stage is dead for real data. No test exercises this path, so it went uncaught.
 
 ### CODE-PDS4-001 — PDS4 bundle generation skips ALL navigated images (wrong status literal)
+
+> **STATUS: FIXED** — see the Remediation status table near the top of this document for the fix summary and the matching consolidated fix prompt.
 - Severity: **Critical**
 - File/symbol: `src/pds4/bundle_data.py`, `generate_bundle_data_files`, line 53-62.
 - Description: Same defect as CODE-BACKPLANE-001: `if status != 'success': ... return`. nav writes `'ok'`.
@@ -1489,6 +1527,8 @@ noise/PSF/crater model and per-scene seed sharing, not seed nondeterminism.
 ## Findings
 
 ### CODE-CFG-1 — `update_config` does a shallow (depth-1) merge; nested user overrides clobber sibling keys
+
+> **STATUS: FIXED** — see the Remediation status table near the top of this document for the fix summary and the matching consolidated fix prompt.
 - Severity: High
 - File: `src/nav/config/config.py`, `Config.update_config` (lines 235-239)
 - Description: The merge loop is
@@ -2221,6 +2261,8 @@ continue at CODE-ORCH-003 / CODE-DERIV-001.
 ## Findings
 
 ### CODE-ORCH-003 — NaN missing-data markers crash `navigate()` for `calibrated_if` images
+
+> **STATUS: FIXED** — see the Remediation status table near the top of this document for the fix summary and the matching consolidated fix prompt.
 **Severity: High**
 **File/symbol:** `orchestrator.py::NavOrchestrator._make_context` (lines 762-825); interacts with
 `image_classifier.py::NavImageClassifier.classify` (lines 121-127),
@@ -2569,6 +2611,8 @@ Every file was read in full (large files in pages).
 ## Findings
 
 ### CODE-MAIN-001 — `nav_backplanes_cloud_tasks` / `nav_create_bundle_cloud_tasks` register an `async def main` as a console-script entry point (never runs)
+
+> **STATUS: FIXED** — see the Remediation status table near the top of this document for the fix summary and the matching consolidated fix prompt.
 > **Tracked by:** #108 — Check all CLI programs for proper logging, cloud operation, and that `cloud_tasks` works
 Severity: **Critical**
 Files/symbols:
@@ -2586,6 +2630,8 @@ Impact: The `nav_backplanes_cloud_tasks` and `nav_create_bundle_cloud_tasks` con
 ---
 
 ### CODE-MAIN-002 — `nav_create_simulated_image` JSON load drops `shade_solid_rings` and can crash on `closest_planet=None`
+
+> **STATUS: FIXED** — see the Remediation status table near the top of this document for the fix summary and the matching consolidated fix prompt.
 Severity: **High**
 File/symbol: `src/main/nav_create_simulated_image.py:2386-2477` `_load_parameters`
 

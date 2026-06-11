@@ -16,16 +16,9 @@ saturation; failure modes (spurious, at-edge, polarity rejection) are forced
 deterministically via `monkeypatch`. This is real verification, not smoke
 testing.
 
-That good work sits on top of three serious problems:
+That good work sits on top of two serious problems:
 
-1. **The default `pytest` run is completely broken on this branch.** Two
-   uncommitted, uncurated `body_irregular` sidecars (`TODO_REPLACE_*`
-   placeholders) abort *collection* of the integration package, and because
-   pytest collects before applying the `-m "not integration"` marker filter,
-   a plain `pytest` invocation exits with 2 collection errors and runs **zero**
-   tests. This is a Critical, must-fix-before-merge issue. (Evidence: ran
-   `pytest -q`; aborts in `sidecar.py:209`.)
-2. **The model *rendering* algorithms are not unit-tested at all.** Every
+1. **The model *rendering* algorithms are not unit-tested at all.** Every
    `NavModel*.create_model` path (the code that projects body limbs,
    terminators, ring edges, and stars into image coordinates and builds
    `NavFeature`s) is exercised *only* by integration tests that require live
@@ -33,27 +26,22 @@ That good work sits on top of three serious problems:
    `nav_model_body.py` is 49%, `nav_model_body_base.py` 8%, the `*_simulated`
    models 20-24%, and `nav/sim/` 3-8%. The default suite never executes the
    most navigation-critical math.
-3. **The regression/baseline layer is near-vacuous and partly snapshots known-
+2. **The regression/baseline layer is near-vacuous and partly snapshots known-
    wrong output.** There is exactly **one** baseline JSON for **11** curated
    sidecars, it is gated behind `integration` + `PDS3_HOLDINGS_DIR`, and the
    single baseline it does pin (`N1597846115`) records an offset the sidecar's
    own notes describe as the *wrong* status decision.
 
-Two additional unit tests are already **failing** on this branch
-(`voyager_iss` config drift: tests assert `data_units == 'raw_dn'` but the
-shipped config now says `calibrated_if`).
-
-I ran: `pytest --collect-only`, `pytest -q` (default), the full unit suite via
-`pytest --ignore=tests/integration --cov=nav --cov-report=term-missing` (1275
-passed, 2 failed, 52 s), and targeted technique/integration subsets. I did
-**not** run the `integration`-marked regression body (no holdings/network in
-this environment); those findings are by reading.
+I ran the full unit suite via
+`pytest --ignore=tests/integration --cov=nav --cov-report=term-missing` and
+targeted technique/integration subsets. I did **not** run the
+`integration`-marked regression body (no holdings/network in this
+environment); those findings are by reading.
 
 ### Severity-tiered table of contents
 
 | Tier | IDs | Theme |
 |------|-----|-------|
-| Critical | TEST-INT-001, TEST-CFG-001 | Default suite broken; failing config tests |
 | High | TEST-MODEL-001, TEST-INT-002, TEST-INT-003, TEST-STAGE-001, TEST-STAR-001 | Untested model rendering, vacuous regression layer, untested downstream stages, untested star-conflict resolution |
 | Medium | TEST-INFRA-001, TEST-CONV-001, TEST-CONV-002, TEST-MODEL-002, TEST-INT-004 | Untested dataclass validation guards, caplog/stdlib-logging divergence, bare `pytest.raises`, simulated-model gaps, baseline-as-snapshot |
 | Low | TEST-CONV-003, TEST-MODEL-003, TEST-MISC-001 | Multi-condition assert, monotonicity-only reliability tests, minor hygiene |
@@ -63,8 +51,7 @@ this environment); those findings are by reading.
 ## Coverage matrix
 
 Coverage % is from the unit suite (`--ignore=tests/integration`). "Integration
-only" means the real algorithm runs only under the holdings-gated suite, which
-is currently uncollectable.
+only" means the real algorithm runs only under the holdings-gated suite.
 
 ### Navigation models
 
@@ -118,22 +105,6 @@ is currently uncollectable.
 
 ## Findings
 
-### Critical
-
-#### TEST-INT-001 — Two uncurated TODO sidecars abort the entire default `pytest` run
-- **Files:** `tests/integration/image_library/images/body_irregular/N1497129020_1_CALIB.yaml`, `.../N1640500719_1_CALIB.yaml` (both untracked `??` in `git status` but present on disk); root cause surfaces in `tests/integration/sidecar.py:208-212`, `tests/integration/test_baselines.py:_baseline_pairs` (collection-time), `tests/integration/test_autonomous_nav.py:pytest_generate_tests` (collection-time), `tests/integration/test_image_library.py::test_every_sidecar_validates`.
-- **Severity:** Critical.
-- **Description:** The stubs contain `scene_tags: [TODO_REPLACE_PRIMARY_CLASS]` and `primary_technique: TODO_REPLACE_TECHNIQUE`. `discover_sidecar_paths()` globs `images/*/*.yaml`, so `load_sidecar` is called on them during collection (via `pytest_generate_tests` and `_baseline_pairs`). Validation raises `SidecarValidationError`, which aborts collection of `test_autonomous_nav.py` and `test_baselines.py`. Because pytest performs collection before the default `addopts = ["-m", "not integration"]` filter is applied, a **plain `pytest` with no arguments exits with 2 collection errors and runs zero tests.** Additionally `test_image_library.py` (which is *not* integration-gated) produces 4 hard FAILURES.
-- **Why it matters:** Every developer running the prescribed `pytest` command, and CI's default job, gets a red suite that executed nothing. The good unit coverage is invisible behind this.
-- **Impact:** Suite unusable until fixed. Evidence: `pytest -q` → `2 errors in 0.88s`; `pytest tests/integration/test_image_library.py` → `4 failed, 11 passed`.
-
-#### TEST-CFG-001 — Two unit tests fail on `voyager_iss` config drift
-- **Files/tests:** `tests/nav/config_files/test_config_load.py::test_per_instrument_required_fields_present` (line 46); `tests/nav/nav_orchestrator/test_instrument_config.py::test_shipped_inst_configs_load_cleanly` (line 238).
-- **Severity:** Critical (suite is red even when TEST-INT-001 is worked around).
-- **Description:** Both assert `voyager_iss['data_units'] == 'raw_dn'` (and the second asserts *every* shipped instrument equals `'raw_dn'` in a loop), but the shipped config now sets `voyager_iss.data_units: 'calibrated_if'`. The tests were not updated when the config changed.
-- **Why it matters:** A red unit suite independent of the integration breakage; also `test_shipped_inst_configs_load_cleanly` over-asserts a single literal across all instruments in a loop (a per-instrument expectation table would be correct).
-- **Impact:** 2 failures in `pytest --ignore=tests/integration`. Either the config is wrong or the tests are stale — needs an operator decision, then the test (or config) corrected.
-
 ### High
 
 #### TEST-MODEL-001 — Model feature-extraction (`create_model`) has no unit test
@@ -155,7 +126,7 @@ is currently uncollectable.
 - **Severity:** High.
 - **Description:** This is the only test that scores real nav output against operator ground truth (status, confidence tier, offset-within-uncertainty, primary technique, must-run/must-skip). It is entirely `integration`-gated and holdings-gated. Two structural loopholes: (a) the offset-accuracy assertion (block c) runs **only** when `expected.status == 'ok'`, so any sidecar marked `conflicted`/`failed` (e.g. `high_phase_terminator`, whose offset is acknowledged-questionable) never has its offset checked; (b) the tolerance is `offset_uncertainty_px + 0.5`, set per-sidecar — a loosely-curated sidecar can assert almost nothing.
 - **Why it matters:** The suite's strongest correctness signal is invisible to the default run and can be weakened per-sidecar.
-- **Impact:** Real navigation accuracy is unverified in CI's default job. Add a CI lane that sets the env vars and runs `-m integration` (once TEST-INT-001 is fixed); consider also checking offset for `conflicted` images where a ground-truth offset is recorded.
+- **Impact:** Real navigation accuracy is unverified in CI's default job. Add a CI lane that sets the env vars and runs `-m integration`; consider also checking offset for `conflicted` images where a ground-truth offset is recorded.
 
 #### TEST-STAGE-001 — Entire downstream stages have zero tests
 - **Files:** No `tests/backplanes/`, no `tests/pds4/`, no `tests/nav/sim/` directory exists.
@@ -234,8 +205,7 @@ is currently uncollectable.
    those techniques consume is integration-only. The suite cannot catch a bug
    in the seam between them.
 2. **The integration tier carries the suite's only real end-to-end and
-   regression signal, but is invisible to the default run and currently
-   uncollectable.** Anything gated behind `integration` + holdings is, for
+   regression signal, but is invisible to the default run.** Anything gated behind `integration` + holdings is, for
    day-to-day development and the default CI job, not protecting anything.
 3. **Validation-guard branches (`__post_init__`, input validators) are
    routinely left untested** even where the happy path is covered (feasibility,
@@ -254,44 +224,7 @@ is currently uncollectable.
 
 Each prompt is self-contained and references its finding ID.
 
-### FP-1 (TEST-INT-001) — Unbreak the default suite
-You are working in `/seti/newnav/rms-nav` on branch `core_rewrite_phase10`.
-A plain `pytest` aborts during collection because two placeholder sidecars
-exist on disk:
-`tests/integration/image_library/images/body_irregular/N1497129020_1_CALIB.yaml`
-and `.../N1640500719_1_CALIB.yaml` (plus their `.png` siblings), all untracked.
-They contain `scene_tags: [TODO_REPLACE_PRIMARY_CLASS]` and
-`primary_technique: TODO_REPLACE_TECHNIQUE`, which `tests/integration/sidecar.py`
-rejects at load time, aborting collection of `test_autonomous_nav.py`,
-`test_baselines.py`, and failing 4 tests in `test_image_library.py`.
-Do ONE of: (a) curate both sidecars properly — replace the `TODO_*` placeholders
-with the real primary scene class `body_irregular`, a real
-`primary_technique` (e.g. `BodyBlobNav` or `BodyLimbNav`), real
-`ground_truth` offsets and `expected` block, so they validate; or (b) if these
-images are not ready, remove the two `.yaml` and `.png` files from the working
-tree so they are not discovered. Then make collection robust so a single
-malformed sidecar can never abort the whole default run: in
-`tests/integration/test_baselines.py::_baseline_pairs` and
-`tests/integration/test_autonomous_nav.py::pytest_generate_tests`, wrap
-`load_sidecar` so a `SidecarValidationError` is surfaced as a parametrized
-*failing test case* (e.g. an xfail or a case that asserts-and-fails) rather than
-a collection-time raise. Verify: `pytest -q` collects and runs the unit suite
-green (modulo FP-2); `pytest tests/integration/test_image_library.py -q` passes.
-
-### FP-2 (TEST-CFG-001) — Fix the failing voyager config tests
-In `tests/nav/config_files/test_config_load.py::test_per_instrument_required_fields_present`
-(line 46) and `tests/nav/nav_orchestrator/test_instrument_config.py::test_shipped_inst_configs_load_cleanly`
-(line 238), the assertion `voyager_iss['data_units'] == 'raw_dn'` fails because
-the shipped config now declares `calibrated_if`. Determine the intended value
-(check `src/nav/config_files/config_3N_inst_voyager*.yaml`). If `calibrated_if`
-is correct, update both tests to expect it for voyager. Replace the
-loop-over-all-instruments single-literal assertion in
-`test_shipped_inst_configs_load_cleanly` with a per-instrument expectation
-mapping (`{'cassini_iss': 'raw_dn', 'voyager_iss': 'calibrated_if', ...}`) so
-each instrument is asserted against its own correct value. Verify:
-`pytest tests/nav/config_files/test_config_load.py tests/nav/nav_orchestrator/test_instrument_config.py -q` passes.
-
-### FP-3 (TEST-MODEL-001) — Unit-test model feature extraction against the fake backplane
+### FP-1 (TEST-MODEL-001) — Unit-test model feature extraction against the fake backplane
 There is a fake backplane shim at `tests/shims/backplane.py` and obs shim at
 `tests/shims/obs.py`. Use them to unit-test the `create_model` paths that are
 currently integration-only. Add `tests/nav/nav_model/test_nav_model_body_create.py`
@@ -310,7 +243,7 @@ projected to a known image curve). Each assertion in its own test. Verify:
 `pytest --cov=nav.nav_model.nav_model_body --cov-report=term-missing` shows
 `create_model` lines (currently 303-599) executed.
 
-### FP-4 (TEST-INT-002, TEST-INT-003, TEST-INT-004) — Make the regression/ground-truth tier load-bearing
+### FP-2 (TEST-INT-002, TEST-INT-003, TEST-INT-004) — Make the regression/ground-truth tier load-bearing
 (a) Populate baselines for all curated sidecars: run the existing
 `tests/integration/update_baselines.py` harness with `PDS3_HOLDINGS_DIR` (and
 the other env vars in CLAUDE.md) set, producing one JSON under
@@ -329,7 +262,7 @@ env vars and runs `pytest -m integration -n auto --dist=loadfile`. Verify:
 with env vars set, `pytest -m integration -q` runs one case per sidecar and one
 per baseline and passes.
 
-### FP-5 (TEST-STAGE-001) — Create tests for backplanes, pds4, and sim
+### FP-3 (TEST-STAGE-001) — Create tests for backplanes, pds4, and sim
 Create `tests/backplanes/`, `tests/pds4/`, and `tests/nav/sim/` with `__init__.py`.
 For `tests/nav/sim/test_render.py`: render a synthetic disc/sphere via
 `src/nav/sim/render.py` / `sim_body.py` for a known geometry and assert image
@@ -344,7 +277,7 @@ assert the LID/LIDVID and label fields. Aim each at >80% coverage of its
 target module. Verify: `pytest tests/nav/sim tests/backplanes tests/pds4 -q`
 passes and `--cov` shows the target modules well above their current 0-8%.
 
-### FP-6 (TEST-STAR-001) — Test star-conflict resolution
+### FP-4 (TEST-STAR-001) — Test star-conflict resolution
 In `tests/nav/nav_model/stars/test_conflicts.py`, add tests for the conflict-
 detection functions covering `src/nav/nav_model/stars/conflicts.py` lines
 154-178, 210-218, 244-261. Construct a fake obs/backplane (use `tests/shims/`)
@@ -356,7 +289,7 @@ radius falls in an occluding annulus is flagged, one outside is not. One assert
 per condition. Verify: `pytest tests/nav/nav_model/stars/test_conflicts.py -q`
 passes and `--cov=nav.nav_model.stars.conflicts` reaches >85%.
 
-### FP-7 (TEST-INFRA-001) — Test the validation guards
+### FP-5 (TEST-INFRA-001) — Test the validation guards
 Add negative tests with `pytest.raises(..., match=...)`:
 - `tests/nav/nav_technique/test_feasibility.py`: one test per `__post_init__`
   raise in `NavFeasibilityReport` — non-bool `feasible` (TypeError), non-str
@@ -370,7 +303,7 @@ Add negative tests with `pytest.raises(..., match=...)`:
 Assert on the exact message substrings already in the source. Verify each
 module's coverage rises (feasibility 64%→100%, confidence 83%→~95%).
 
-### FP-8 (TEST-CONV-001, TEST-CONV-002, TEST-CONV-003) — Convention cleanup
+### FP-6 (TEST-CONV-001, TEST-CONV-002, TEST-CONV-003) — Convention cleanup
 (a) In `tests/nav/nav_model/test_ring_filter.py`, convert the `caplog`-based
 DEBUG-logging tests (lines 192-268) to capture pdslogger output via `capsys`,
 and remove the injected stdlib-logger seam from the test (and, if the only
@@ -384,7 +317,7 @@ message substring. (c) Split `test_shift_array`/`test_pad_array` so the raise
 check and the value check are separate test functions. Verify:
 `ruff check tests` clean and the affected files pass.
 
-### FP-9 (TEST-MODEL-003) — Pin reliability values, not just monotonicity
+### FP-7 (TEST-MODEL-003) — Pin reliability values, not just monotonicity
 In `tests/nav/nav_model/test_nav_model_body.py`, augment the reliability tests
 (`_limb_reliability`, `_disc_reliability`, `_terminator_reliability`,
 `_blob_reliability`): in addition to the existing monotonicity assertions, add
