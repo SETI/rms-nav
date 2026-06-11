@@ -532,11 +532,23 @@ real Galileo or Voyager outer-leg frame.
 `src/nav/config_files/config_440_sim.yaml`, new
 `tests/nav/sim/test_sim_stray_light.py`.
 
-### Phase B7: Non-ellipsoidal bodies
+### Phase B7: Non-ellipsoidal bodies [increment 1 done: render side]
 
 **Goal:** render at least one canonical irregular body
 (Hyperion-like, Phoebe-like) from a polyhedral mesh rather than as
 an ellipsoid silhouette.
+
+**Progress:** Increment 1 (the render side) is done.
+`src/nav/sim/sim_body_polyhedral.py` provides a procedural irregular-mesh
+generator and a z-buffered polyhedral renderer (orthographic projection,
+flat Lambertian shading matching the ellipsoid's light convention,
+supersampled limb).  A body with `shape_model: polyhedral_mesh` plus a
+`pose_euler_deg` orientation routes through it in `render.py`.  Remaining
+increments: wire `NavModelBodySimulated` into model selection and add the
+navigation-geometry separation; the four-scenario harness (mesh-vs-mesh,
+mesh-vs-ellipsoid same/disagreeing pose, centroid-only BLOB); and real
+named meshes / the `shape_meshes/` sourcing decision (section 12.3).  The
+current generator is procedural, so no large mesh files are committed yet.
 
 **Scope:**
 

@@ -12,6 +12,7 @@ from nav.config import DEFAULT_CONFIG
 from nav.sim.instruments import resolve_sim_inst_config
 from nav.sim.seeds import derive_effect_seed
 from nav.sim.sim_body import create_simulated_body
+from nav.sim.sim_body_polyhedral import make_irregular_mesh, render_polyhedral_body
 from nav.sim.sim_ring import render_ring
 from nav.support.types import (
     MutableStar,
@@ -350,6 +351,45 @@ def _render_bodies_positioned_cached(
     }
 
 
+@lru_cache(maxsize=30)
+def _render_mesh_shape_cached(
+    size_v: int,
+    size_u: int,
+    axis1: float,
+    axis2: float,
+    axis3: float,
+    pose_euler_deg: tuple[float, float, float],
+    illumination_angle: float,
+    phase_angle: float,
+    anti_aliasing: float,
+    lumpiness: float,
+    n_lat: int,
+    n_lon: int,
+    mesh_seed: int,
+) -> NDArrayFloatType:
+    """Cache an irregular mesh body shape at the reference (image) centre."""
+    mesh = make_irregular_mesh(n_lat=n_lat, n_lon=n_lon, lumpiness=lumpiness, seed=mesh_seed)
+    return render_polyhedral_body(
+        size=(size_v, size_u),
+        center=(size_v / 2.0, size_u / 2.0),
+        mesh=mesh,
+        semi_axes_px=(axis1 / 2.0, axis2 / 2.0, axis3 / 2.0),
+        pose_euler_deg=pose_euler_deg,
+        illumination_angle=illumination_angle,
+        phase_angle=phase_angle,
+        anti_aliasing=anti_aliasing,
+    )
+
+
+def _mesh_pose_from_params(body_params: dict[str, Any]) -> tuple[float, float, float]:
+    """Read a 3-angle body pose (degrees) from body params, defaulting to zero."""
+    pose = body_params.get('pose_euler_deg', (0.0, 0.0, 0.0))
+    values = [float(x) for x in pose]
+    if len(values) != 3:
+        raise ValueError(f'pose_euler_deg must have 3 angles; got {pose!r}')
+    return (values[0], values[1], values[2])
+
+
 def _render_single_body(
     img: NDArrayFloatType,
     body_params: dict[str, Any],
@@ -398,7 +438,38 @@ def _render_single_body(
     anti_aliasing = float(body_params.get('anti_aliasing', 1.0))
     body_seed = seed if seed is not None else body_params.get('seed')
 
-    # Get cached body shape (at reference center)
+    # Get cached body shape (at reference center).  An irregular body renders
+    # from a polyhedral mesh at a scene-supplied pose; otherwise an ellipsoid.
+    if str(body_params.get('shape_model', 'ellipsoid')) == 'polyhedral_mesh':
+        body_shape = _render_mesh_shape_cached(
+            size_v,
+            size_u,
+            axis1,
+            axis2,
+            axis3,
+            _mesh_pose_from_params(body_params),
+            illumination_angle,
+            phase_angle,
+            anti_aliasing,
+            float(body_params.get('mesh_lumpiness', 0.3)),
+            int(body_params.get('mesh_n_lat', 16)),
+            int(body_params.get('mesh_n_lon', 32)),
+            int(body_seed) if body_seed is not None else 0,
+        )
+        return _finish_single_body(
+            img,
+            body_shape,
+            body_params,
+            body_name,
+            center_v,
+            center_u,
+            axis1,
+            axis2,
+            axis3,
+            ref_center_v=ref_center_v,
+            ref_center_u=ref_center_u,
+        )
+
     body_shape = _render_body_shape_cached(
         size_v,
         size_u,
@@ -417,15 +488,39 @@ def _render_single_body(
         anti_aliasing,
         body_seed,
     )
+    return _finish_single_body(
+        img,
+        body_shape,
+        body_params,
+        body_name,
+        center_v,
+        center_u,
+        axis1,
+        axis2,
+        axis3,
+        ref_center_v=ref_center_v,
+        ref_center_u=ref_center_u,
+    )
 
-    # Translate body from reference center to actual center
+
+def _finish_single_body(
+    img: NDArrayFloatType,
+    body_shape: NDArrayFloatType,
+    body_params: dict[str, Any],
+    body_name: str,
+    center_v: float,
+    center_u: float,
+    axis1: float,
+    axis2: float,
+    axis3: float,
+    *,
+    ref_center_v: float,
+    ref_center_u: float,
+) -> tuple[NDArrayBoolType, dict[str, Any]]:
+    """Translate a reference-centred body shape into place and composite it."""
     dv = center_v - ref_center_v
     du = center_u - ref_center_u
-
-    # Create positioned body by translating the cached shape
     positioned_body = ndimage.shift(body_shape, (dv, du), order=1, mode='constant', cval=0.0)
-
-    # Composition: overwrite where body contributes
     mask = positioned_body > 0
     img[mask] = positioned_body[mask]
 
