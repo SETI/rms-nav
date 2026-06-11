@@ -322,3 +322,38 @@ def test_psf_preview_tracks_instrument(model: Any) -> None:
     model._instrument_combo.setCurrentText('gossi')
     gossi_text = model._psf_info_label.text()
     assert coiss_text != gossi_text
+
+
+def test_new_body_defaults_to_ellipsoid(model: Any) -> None:
+    """A newly added body uses the ellipsoid shape model by default."""
+    model._add_body_tab()
+    assert model.sim_params['bodies'][0]['shape_model'] == 'ellipsoid'
+
+
+def test_new_body_has_mesh_fields(model: Any) -> None:
+    """A newly added body carries the mesh shape parameters."""
+    model._add_body_tab()
+    body = model.sim_params['bodies'][0]
+    assert body['mesh_lumpiness'] == 0.3
+    assert body['pose_euler_deg'] == [0.0, 0.0, 0.0]
+
+
+def test_body_shape_model_field_updates(model: Any) -> None:
+    """Setting a body's shape_model writes through to the data model."""
+    model._add_body_tab()
+    model._on_body_field(0, 'shape_model', 'polyhedral_mesh')
+    assert model.sim_params['bodies'][0]['shape_model'] == 'polyhedral_mesh'
+
+
+def test_body_pose_handler_updates_axis(model: Any) -> None:
+    """The pose handler writes one axis of the body's mesh pose."""
+    model._add_body_tab()
+    model._on_body_pose(0, 1, 90.0)
+    assert model.sim_params['bodies'][0]['pose_euler_deg'] == [0.0, 90.0, 0.0]
+
+
+def test_body_pose_handler_pads_missing_pose(model: Any) -> None:
+    """The pose handler tolerates a body that lacks a pose list."""
+    model.sim_params['bodies'].append({'name': 'B', 'center_v': 1.0, 'center_u': 1.0})
+    model._on_body_pose(0, 2, 45.0)
+    assert model.sim_params['bodies'][0]['pose_euler_deg'] == [0.0, 0.0, 45.0]

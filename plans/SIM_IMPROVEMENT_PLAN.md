@@ -794,19 +794,15 @@ rest of the General tab and testable).
 **Goal:** let the operator pick "Hyperion (polyhedral mesh)"
 instead of just "Hyperion (ellipsoid)" for a per-body tab.
 
-**Scope:**
-
-- Per-body tab gets a new dropdown: "Shape model" with options
-  `ellipsoid`, `polyhedral_mesh: HYPERION`, `polyhedral_mesh:
-  PHOEBE`, etc. — populated from the meshes available under
-  `src/nav/sim/shape_meshes/`.
-- When `polyhedral_mesh` is selected, the axis-1 / axis-2 sliders
-  are greyed out (the mesh determines the silhouette); pose comes
-  from `oops` at the configured midtime as before.
-
-**Backend dependency:** B7.
-
-**Files touched:** `src/main/nav_create_simulated_image.py`.
+**Done:** each per-body tab has a "Shape model" dropdown
+(`ellipsoid` / `polyhedral_mesh`) plus mesh-lumpiness, mesh-seed, and
+three mesh-pose (X/Y/Z degrees) controls, wired to the body params B7
+consumes.  New bodies default to `ellipsoid`.  Two deviations from the
+draft: the axes are *not* greyed out for a mesh (they scale the
+procedural mesh, so they remain meaningful), and the dropdown lists the
+generic `polyhedral_mesh` rather than named `HYPERION` / `PHOEBE`
+meshes, since the sim uses a procedural generator until named meshes are
+sourced (section 12.3).
 
 ### Phase G8: Scene catalog browser
 

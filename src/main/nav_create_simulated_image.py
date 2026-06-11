@@ -1030,9 +1030,13 @@ class CreateSimulatedImageModel(QMainWindow):
                 'center_v': self.sim_params['size_v'] // 2 + 0.5,
                 'center_u': self.sim_params['size_u'] // 2 + 0.5,
                 'range': self._find_unique_range(),
+                'shape_model': 'ellipsoid',
                 'axis1': 100.0,
                 'axis2': 80.0,
                 'axis3': 80.0,
+                'mesh_lumpiness': 0.3,
+                'mesh_seed': 0,
+                'pose_euler_deg': [0.0, 0.0, 0.0],
                 'rotation_z': 0.0,
                 'rotation_tilt': 0.0,
                 'illumination_angle': 0.0,
@@ -1387,6 +1391,43 @@ class CreateSimulatedImageModel(QMainWindow):
         sc.setValue(p.get('axis3', 0.0))
         sc.valueChanged.connect(lambda v, i=idx: self._on_body_field(i, 'axis3', v))
         fl.addRow('Axis 3:', sc)
+
+        # Shape model (B7): ellipsoid or an irregular polyhedral mesh.  For a
+        # mesh, lumpiness/seed pick the shape and pose_euler_deg orients it; the
+        # axes above scale it.  The mesh fields are inert for an ellipsoid.
+        shape_combo = QComboBox()
+        shape_combo.addItems(['ellipsoid', 'polyhedral_mesh'])
+        shape_index = shape_combo.findText(str(p.get('shape_model', 'ellipsoid')))
+        if shape_index >= 0:
+            shape_combo.setCurrentIndex(shape_index)
+        shape_combo.currentTextChanged.connect(
+            lambda t, i=idx: self._on_body_field(i, 'shape_model', t)
+        )
+        fl.addRow('Shape model:', shape_combo)
+
+        mesh_lump = QDoubleSpinBox()
+        mesh_lump.setRange(0.0, 1.0)
+        mesh_lump.setDecimals(3)
+        mesh_lump.setSingleStep(0.01)
+        mesh_lump.setValue(float(p.get('mesh_lumpiness', 0.3)))
+        mesh_lump.valueChanged.connect(lambda v, i=idx: self._on_body_field(i, 'mesh_lumpiness', v))
+        fl.addRow('Mesh lumpiness:', mesh_lump)
+
+        mesh_seed = QSpinBox()
+        mesh_seed.setRange(0, 2147483647)
+        mesh_seed.setValue(int(p.get('mesh_seed', 0)))
+        mesh_seed.valueChanged.connect(lambda v, i=idx: self._on_body_field(i, 'mesh_seed', v))
+        fl.addRow('Mesh seed:', mesh_seed)
+
+        pose = p.get('pose_euler_deg', [0.0, 0.0, 0.0])
+        for axis_i, axis_name in enumerate(('X', 'Y', 'Z')):
+            pose_spin = QDoubleSpinBox()
+            pose_spin.setRange(0.0, 360.0)
+            pose_spin.setDecimals(1)
+            pose_spin.setWrapping(True)
+            pose_spin.setValue(float(pose[axis_i]) if axis_i < len(pose) else 0.0)
+            pose_spin.valueChanged.connect(lambda v, i=idx, a=axis_i: self._on_body_pose(i, a, v))
+            fl.addRow(f'Mesh pose {axis_name} (deg):', pose_spin)
 
         rz = QDoubleSpinBox()
         rz.setRange(0.0, 360.0)
@@ -1886,6 +1927,17 @@ class CreateSimulatedImageModel(QMainWindow):
             self._updater.request_update()
             if trigger_validate and key == 'range':
                 self._validate_ranges()
+
+    def _on_body_pose(self, idx: int, axis: int, value: float) -> None:
+        """Update one axis of a body's mesh pose (pose_euler_deg)."""
+        if 0 <= idx < len(self.sim_params['bodies']):
+            body = self.sim_params['bodies'][idx]
+            pose = list(body.get('pose_euler_deg', [0.0, 0.0, 0.0]))
+            while len(pose) < 3:
+                pose.append(0.0)
+            pose[axis] = float(value)
+            body['pose_euler_deg'] = pose
+            self._updater.request_update()
 
     def _on_body_name(self, idx: int, text: str) -> None:
         if 0 <= idx < len(self.sim_params['bodies']):
