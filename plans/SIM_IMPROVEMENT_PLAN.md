@@ -776,16 +776,16 @@ motion vector).  Add:
 
 **Files touched:** `src/main/nav_create_simulated_image.py`.
 
-### Phase G6: Stray-light controls
+### Phase G6: Stray-light controls [done]
 
 **Goal:** expose B6's stray-light gradient.
 
-**Scope:**
-
-- New "Stray light" panel in the General tab: amplitude slider,
-  gradient direction (dial widget), model dropdown (linear /
-  radial).
-- Defaults to off.
+**Done:** a stray-light panel on the General tab writes the
+`sim_params['stray_light']` block: an amplitude spin (0 = off, the
+default), a direction spin (degrees, wrapping), and a linear/radial
+model dropdown.  Values round-trip through save / load.  A spin is used
+for direction instead of the drafted dial widget (consistent with the
+rest of the General tab and testable).
 
 **Backend dependency:** B6.
 

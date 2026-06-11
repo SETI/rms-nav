@@ -384,6 +384,37 @@ class CreateSimulatedImageModel(QMainWindow):
         self._missing_data_spin.valueChanged.connect(self._on_missing_data)
         gen_layout.addRow('Missing data rate:', self._missing_data_spin)
 
+        # Stray-light panel (B6): an additive low-frequency gradient the
+        # navigator's BANDPASS_DOG filter is meant to suppress.  Writes the
+        # sim_params['stray_light'] block; amplitude 0 (default) means off.
+        self._stray_amplitude_spin = QDoubleSpinBox()
+        self._stray_amplitude_spin.setRange(0.0, 1.0)
+        self._stray_amplitude_spin.setDecimals(3)
+        self._stray_amplitude_spin.setSingleStep(0.01)
+        self._stray_amplitude_spin.setValue(float(self._stray_value('amplitude', 0.0)))
+        self._stray_amplitude_spin.setToolTip('Stray-light amplitude (0 = off).')
+        self._stray_amplitude_spin.valueChanged.connect(self._on_stray_amplitude)
+        gen_layout.addRow('Stray light amplitude:', self._stray_amplitude_spin)
+
+        self._stray_direction_spin = QDoubleSpinBox()
+        self._stray_direction_spin.setRange(0.0, 360.0)
+        self._stray_direction_spin.setDecimals(1)
+        self._stray_direction_spin.setWrapping(True)
+        self._stray_direction_spin.setValue(float(self._stray_value('direction_deg', 0.0)))
+        self._stray_direction_spin.setToolTip('Gradient direction for the linear model, degrees.')
+        self._stray_direction_spin.valueChanged.connect(self._on_stray_direction)
+        gen_layout.addRow('Stray light direction (deg):', self._stray_direction_spin)
+
+        self._stray_model_combo = QComboBox()
+        self._stray_model_combo.addItems(['linear', 'radial'])
+        stray_model = str(self._stray_value('model', 'linear'))
+        stray_model_index = self._stray_model_combo.findText(stray_model)
+        if stray_model_index >= 0:
+            self._stray_model_combo.setCurrentIndex(stray_model_index)
+        self._stray_model_combo.setToolTip('linear ramp or radial bump.')
+        self._stray_model_combo.currentTextChanged.connect(self._on_stray_model)
+        gen_layout.addRow('Stray light model:', self._stray_model_combo)
+
         # Background stars slider with min/max labels and spinbox
         stars_row = QHBoxLayout()
         stars_row.setSpacing(4)
@@ -692,6 +723,31 @@ class CreateSimulatedImageModel(QMainWindow):
 
     def _on_missing_data(self, value: float) -> None:
         self._set_noise('missing_data_rate', float(value))
+
+    def _stray_value(self, key: str, default: Any) -> Any:
+        """Read a value from the sim_params stray_light block, or a default."""
+        stray = self.sim_params.get('stray_light')
+        if isinstance(stray, dict) and key in stray:
+            return stray[key]
+        return default
+
+    def _set_stray(self, key: str, value: Any) -> None:
+        """Write a value into the sim_params stray_light block and re-render."""
+        stray = self.sim_params.setdefault('stray_light', {})
+        if not isinstance(stray, dict):
+            stray = {}
+            self.sim_params['stray_light'] = stray
+        stray[key] = value
+        self._updater.request_update()
+
+    def _on_stray_amplitude(self, value: float) -> None:
+        self._set_stray('amplitude', float(value))
+
+    def _on_stray_direction(self, value: float) -> None:
+        self._set_stray('direction_deg', float(value))
+
+    def _on_stray_model(self, text: str) -> None:
+        self._set_stray('model', text or 'linear')
 
     def _on_background_stars_slider(self, value: int) -> None:
         self._background_stars_spin.blockSignals(True)
@@ -2510,6 +2566,20 @@ class CreateSimulatedImageModel(QMainWindow):
                 self._missing_data_spin.blockSignals(True)
                 self._missing_data_spin.setValue(float(self._noise_value('missing_data_rate', 0.0)))
                 self._missing_data_spin.blockSignals(False)
+                # Update stray-light controls from the loaded stray_light block.
+                self._stray_amplitude_spin.blockSignals(True)
+                self._stray_amplitude_spin.setValue(float(self._stray_value('amplitude', 0.0)))
+                self._stray_amplitude_spin.blockSignals(False)
+                self._stray_direction_spin.blockSignals(True)
+                self._stray_direction_spin.setValue(float(self._stray_value('direction_deg', 0.0)))
+                self._stray_direction_spin.blockSignals(False)
+                self._stray_model_combo.blockSignals(True)
+                stray_model_index = self._stray_model_combo.findText(
+                    str(self._stray_value('model', 'linear'))
+                )
+                if stray_model_index >= 0:
+                    self._stray_model_combo.setCurrentIndex(stray_model_index)
+                self._stray_model_combo.blockSignals(False)
                 # Update background stars controls
                 self._background_stars_slider.blockSignals(True)
                 self._background_stars_slider.setValue(self.sim_params['background_stars_num'])

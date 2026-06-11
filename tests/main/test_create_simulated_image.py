@@ -219,3 +219,41 @@ def test_load_noise_block_syncs_widgets(
     _load_json(monkeypatch, model, tmp_path, {'noise': {'poisson': False, 'read_noise_dn': 9.0}})
     assert model._poisson_check.isChecked() is False
     assert model._read_noise_spin.value() == 9.0
+
+
+def test_stray_light_defaults_off(model: Any) -> None:
+    """A fresh model has no stray-light amplitude set (off)."""
+    assert model._stray_amplitude_spin.value() == 0.0
+
+
+def test_stray_amplitude_updates_block(model: Any) -> None:
+    """The amplitude spin writes into the stray_light block."""
+    model._stray_amplitude_spin.setValue(0.4)
+    assert model.sim_params['stray_light']['amplitude'] == 0.4
+
+
+def test_stray_direction_updates_block(model: Any) -> None:
+    """The direction spin writes direction_deg into the stray_light block."""
+    model._stray_direction_spin.setValue(45.0)
+    assert model.sim_params['stray_light']['direction_deg'] == 45.0
+
+
+def test_stray_model_updates_block(model: Any) -> None:
+    """The model combo writes the stray_light model."""
+    model._stray_model_combo.setCurrentText('radial')
+    assert model.sim_params['stray_light']['model'] == 'radial'
+
+
+def test_load_stray_light_syncs_widgets(
+    monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
+) -> None:
+    """Loading a stray_light block syncs the panel widgets."""
+    _load_json(
+        monkeypatch,
+        model,
+        tmp_path,
+        {'stray_light': {'amplitude': 0.25, 'direction_deg': 90.0, 'model': 'radial'}},
+    )
+    assert model._stray_amplitude_spin.value() == 0.25
+    assert model._stray_direction_spin.value() == 90.0
+    assert model._stray_model_combo.currentText() == 'radial'
