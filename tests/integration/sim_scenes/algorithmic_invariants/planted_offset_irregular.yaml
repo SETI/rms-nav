@@ -1,0 +1,26 @@
+schema_version: 1
+scene_name: planted_offset_irregular
+instrument: coiss_nac
+image_size_vu: [128, 128]
+random_seed: 42
+exposure_sec: 1.0
+bodies:
+  - name: HYPERION
+    shape_model: polyhedral_mesh
+    mesh_lumpiness: 0.4
+    mesh_seed: 7
+    pose_euler_deg: [10.0, 35.0, 0.0]
+    center_v: 64.0
+    center_u: 64.0
+    axis1: 90.0
+    axis2: 64.0
+    axis3: 56.0
+    illumination_angle: 25.0
+    phase_angle: 40.0
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+ground_truth:
+  planted_offset_dv_px: 2.0
+  planted_offset_du_px: 1.5
+  planted_rotation_deg: 0.0

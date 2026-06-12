@@ -998,10 +998,26 @@ signals a calibration bug.
 `tests/integration/sim_sweep_runner.py`, new
 `tests/integration/test_sim_sweeps.py`.
 
-### Phase T4: Algorithmic invariants (planted-offset / planted-rotation)
+### Phase T4: Algorithmic invariants (planted-offset / planted-rotation) [started]
 
 **Goal:** unit-test the techniques against ground truth that's
 correct *by construction*.
+
+**Progress:** the harness exists -- `tests/integration/
+test_sim_algorithmic_invariants.py` renders every
+`sim_scenes/algorithmic_invariants/` scene into an `ObsSim`, navigates
+it, and asserts success plus offset recovery within tolerance (correct by
+construction, so no baseline to bless).  Initial scenes:
+`planted_offset_disc` (ellipsoid), `planted_offset_small` (small offset),
+`planted_offset_irregular` (mesh body).  All navigate via
+`BodyDiscCorrelateNav` and recover to a few tenths of a pixel; the
+invariant bound is set to 1.0 px (the disc/correlation technique is not
+sub-0.1 px on these scenes, so the drafted 0.1 px target is loosened).
+
+**Remaining:** per-technique coverage for `BodyLimbNav`, `BodyBlobNav`
+(high phase), `RingEdgeNav`, and the star techniques -- each needs scenes
+that route to that technique (and, for stars, a simulated stars NavModel,
+which does not exist yet) plus planted-rotation recovery.
 
 **Scope:**
 
