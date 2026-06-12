@@ -245,6 +245,9 @@ class NavModelBody(NavModelBodyBase):
         Returns:
             One ``NavModelBody`` per body present in the extfov.
         """
+        # Simulated obs use the sim-params-driven NavModelBodySimulated instead.
+        if getattr(obs, 'is_simulated', False):
+            return []
         config = DEFAULT_CONFIG
         planet = getattr(obs, 'closest_planet', None)
         if planet is None:

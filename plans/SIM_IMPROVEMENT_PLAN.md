@@ -558,13 +558,26 @@ an ellipsoid silhouette.
   mesh seed/pose are explicit body params (not the scene noise seed) so
   both sides reproduce the same shape.
 
-**Remaining increments:** route a simulated obs to
-`NavModelBodySimulated` in the live model-selection layer (not yet
-present -- neither body model is instantiated by the orchestration); the
-centroid-only `BodyBlobNav` scenario 4; an end-to-end planted-offset
-recovery harness across all four scenarios; and real named meshes / the
-`shape_meshes/` sourcing decision (section 12.3).  The current generator
-is procedural, so no large mesh files are committed yet.
+- *Increment 3 (end-to-end navigation wiring):* the model-selection
+  layer **does** exist (`build_models_for_obs` is a registry factory over
+  each NavModel's `instances_for_obs`).  The gap was that the simulated
+  NavModels opted out of it.  Now `NavModelBodySimulated` /
+  `NavModelRingsSimulated` build one instance per body/ring from the sim
+  params the obs carries, gated on `obs.is_simulated`; the real
+  `NavModelBody` / `NavModelRings` / `NavModelStars` skip a simulated obs.
+  A sim image now navigates end to end (`navigate_image_files` /
+  `NavOrchestrator`) and recovers a planted offset -- the first rung of
+  the T4 layer (`tests/integration/test_sim_navigation.py`).  This also
+  required a **bias pedestal** in the detector model (`bias_dn`, default
+  20): signal-free sky rendered at exactly 0 DN collided with the
+  missing-data marker (0) and the frame was misclassified as
+  `mostly_missing_data`.
+
+**Remaining increments:** the centroid-only `BodyBlobNav` scenario 4;
+extending the harness across the mesh-vs-mesh / mesh-vs-ellipsoid pose
+scenarios; and real named meshes / the `shape_meshes/` sourcing decision
+(section 12.3).  The current generator is procedural, so no large mesh
+files are committed yet.
 
 **Scope:**
 

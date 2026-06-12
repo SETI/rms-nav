@@ -107,7 +107,7 @@ def _mesh_scene(**body: Any) -> dict[str, Any]:
         'size_u': 96,
         'random_seed': 1,
         'instrument': 'coiss_nac',
-        'noise': {'poisson': False, 'read_noise_dn': 0.0},
+        'noise': {'poisson': False, 'read_noise_dn': 0.0, 'bias_dn': 0.0},
         'bodies': [base],
     }
 

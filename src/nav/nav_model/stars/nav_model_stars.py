@@ -108,14 +108,19 @@ class NavModelStars(NavModel):
 
     @classmethod
     def instances_for_obs(cls, obs: Observation) -> list[NavModel]:
-        """Always returns one star NavModel per observation.
+        """Return one star NavModel per real observation.
+
+        Simulated obs have no real star-catalog pointing, so no star model is
+        built for them (the sim renders its own stars).
 
         Parameters:
             obs: Observation snapshot.
 
         Returns:
-            ``[NavModelStars('stars', obs)]``.
+            ``[NavModelStars('stars', obs)]`` for a real obs, else ``[]``.
         """
+        if getattr(obs, 'is_simulated', False):
+            return []
         return [cls('stars', obs)]
 
     @property

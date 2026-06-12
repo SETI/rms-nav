@@ -59,7 +59,7 @@ def _noiseless_star_scene(instrument: str, *, size: int = 41) -> dict[str, Any]:
         'size_u': size,
         'random_seed': 1,
         'instrument': instrument,
-        'noise': {'poisson': False, 'read_noise_dn': 0.0},
+        'noise': {'poisson': False, 'read_noise_dn': 0.0, 'bias_dn': 0.0},
         'stars': [{'name': 's', 'v': size / 2, 'u': size / 2, 'vmag': 0.0, 'psf_size': (31, 31)}],
     }
 

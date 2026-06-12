@@ -220,6 +220,9 @@ class NavModelRings(NavModelRingsBase):
     @classmethod
     def instances_for_obs(cls, obs: oops.Observation) -> list[NavModel]:
         """Return one NavModelRings per planet whose ring catalog touches the FOV."""
+        # Simulated obs use the sim-params-driven NavModelRingsSimulated instead.
+        if getattr(obs, 'is_simulated', False):
+            return []
         planet = getattr(obs, 'closest_planet', None)
         if planet is None:
             return []

@@ -23,6 +23,7 @@ from nav.feature.feature import NavFeature, NavReliabilityBreakdown
 from nav.feature.feature_type import NavFeatureType
 from nav.feature.flags import RingAnnulusFlags
 from nav.feature.geometry import RingAnnulusGeometry
+from nav.nav_model.nav_model import NavModel
 from nav.nav_model.nav_model_rings_base import NavModelRingsBase
 from nav.nav_model.rings import RingFeature
 from nav.sim.sim_ring import compute_border_atop_simulated, render_ring
@@ -72,6 +73,32 @@ class NavModelRingsSimulated(NavModelRingsBase):
         self._predicted_center_vu: tuple[float, float] = (0.0, 0.0)
         self._subject_range_km: float = float('inf')
         self._bbox_extfov_vu: tuple[int, int, int, int] = (0, 0, 0, 0)
+
+    @classmethod
+    def instances_for_obs(cls, obs: oops.Observation) -> list[NavModel]:
+        """Build one simulated ring model per ring of a simulated obs.
+
+        Reads ``obs.sim_params['rings']``; returns an empty list for a real obs
+        so the SPICE-backed ``NavModelRings`` handles those instead.
+
+        Parameters:
+            obs: Observation snapshot.
+
+        Returns:
+            One ``NavModelRingsSimulated`` per ring in the sim scene.
+        """
+        if not getattr(obs, 'is_simulated', False):
+            return []
+        sim_params = getattr(obs, 'sim_params', None)
+        if not isinstance(sim_params, dict):
+            return []
+        out: list[NavModel] = []
+        for ring_params in sim_params.get('rings', []) or []:
+            if not isinstance(ring_params, dict):
+                continue
+            ring_name = str(ring_params.get('name', 'SIM-RING'))
+            out.append(cls(f'rings_sim:{ring_name}', obs, ring_name, ring_params))
+        return out
 
     def create_model(self) -> None:
         """Render the simulated rings and populate masks, annotations, metadata."""

@@ -21,6 +21,10 @@ sim:
     expected_noise_dn: 1.0
     marker_value: 0
     read_noise_dn: 1.0
+    # Additive bias pedestal in DN.  Real raw frames sit on a bias level, so
+    # signal-free sky is never exactly zero; without it the dark sky collides
+    # with the missing-data marker (0) and the frame is misclassified.
+    bias_dn: 20.0
     # Fraction of the instrument's full well that a normalized signal of 1.0
     # maps to, so brightness scales with the selected camera's DN depth.
     signal_full_scale_frac: 0.5

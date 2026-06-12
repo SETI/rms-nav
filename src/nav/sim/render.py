@@ -593,6 +593,7 @@ def apply_detector_noise(
     read_noise_dn: float,
     saturation_dn: float,
     poisson: bool = True,
+    bias_dn: float = 0.0,
     cosmic_ray_rate_per_sec: float = 0.0,
     exposure_sec: float = 1.0,
     pixel_area_cm2: float = 1.0,
@@ -618,6 +619,9 @@ def apply_detector_noise(
         read_noise_dn: Standard deviation of the Gaussian read-noise floor, DN.
         saturation_dn: Full-well DN; cosmic-ray spikes are scaled to exceed it.
         poisson: Whether to apply Poisson shot noise (usually on).
+        bias_dn: Additive bias pedestal in DN.  Real raw frames sit on a bias
+            level, so signal-free sky is never exactly zero; without it the dark
+            sky collides with the missing-data marker (0) and is misclassified.
         cosmic_ray_rate_per_sec: Cosmic-ray fluence in events / cm^2 / sec.
         exposure_sec: Exposure time in seconds (scales cosmic-ray count).
         pixel_area_cm2: Detector pixel area in cm^2 (scales cosmic-ray count).
@@ -640,6 +644,9 @@ def apply_detector_noise(
         out_dn = signal_dn.copy()
     if read_noise_dn > 0:
         out_dn += noise_rng.normal(0.0, read_noise_dn, size=(size_v, size_u))
+    # Bias pedestal lifts signal-free sky off zero so it is not confused with
+    # the missing-data marker; injected markers below overwrite it back.
+    out_dn += bias_dn
 
     expected_hits = cosmic_ray_rate_per_sec * exposure_sec * pixel_area_cm2 * size_v * size_u
     if expected_hits > 0:
@@ -1060,6 +1067,7 @@ def _render_combined_model_cached(
             read_noise_dn=float(scene_noise.get('read_noise_dn', inst_noise['read_noise_dn'])),
             saturation_dn=float(inst_noise['saturation_dn']),
             poisson=bool(scene_noise.get('poisson', True)),
+            bias_dn=float(scene_noise.get('bias_dn', sim_noise.get('bias_dn', 0.0))),
             cosmic_ray_rate_per_sec=float(
                 scene_noise.get(
                     'cosmic_ray_rate_per_sec', sim_noise.get('cosmic_ray_rate_per_sec', 0.0)

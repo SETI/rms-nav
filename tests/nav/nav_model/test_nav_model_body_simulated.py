@@ -90,7 +90,7 @@ def test_mesh_prediction_matches_rendered_data() -> None:
             'size_u': _SIZE,
             'random_seed': 1,
             'instrument': 'coiss_nac',
-            'noise': {'poisson': False, 'read_noise_dn': 0.0},
+            'noise': {'poisson': False, 'read_noise_dn': 0.0, 'bias_dn': 0.0},
             'bodies': [body],
         }
     )

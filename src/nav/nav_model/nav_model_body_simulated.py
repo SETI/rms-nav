@@ -20,6 +20,7 @@ from nav.feature.feature import NavFeature, NavReliabilityBreakdown
 from nav.feature.feature_type import NavFeatureType
 from nav.feature.flags import BodyDiscFlags
 from nav.feature.geometry import BodyDiscGeometry
+from nav.nav_model.nav_model import NavModel
 from nav.nav_model.nav_model_body_base import NavModelBodyBase
 from nav.sim.sim_body import create_simulated_body
 from nav.sim.sim_body_polyhedral import mesh_spec_from_params, render_mesh_body_image
@@ -75,6 +76,33 @@ class NavModelBodySimulated(NavModelBodyBase):
         self._predicted_center_vu: tuple[float, float] = (0.0, 0.0)
         self._subject_range_km: float = float('inf')
         self._bbox_extfov_vu: tuple[int, int, int, int] = (0, 0, 0, 0)
+
+    @classmethod
+    def instances_for_obs(cls, obs: Observation) -> list[NavModel]:
+        """Build one simulated body model per body of a simulated obs.
+
+        Reads the per-body parameters the sim obs stashes on its snapshot
+        (``obs.sim_params['bodies']``).  Returns an empty list for a real obs,
+        so the SPICE-backed ``NavModelBody`` handles those instead.
+
+        Parameters:
+            obs: Observation snapshot.
+
+        Returns:
+            One ``NavModelBodySimulated`` per body in the sim scene.
+        """
+        if not getattr(obs, 'is_simulated', False):
+            return []
+        sim_params = getattr(obs, 'sim_params', None)
+        if not isinstance(sim_params, dict):
+            return []
+        out: list[NavModel] = []
+        for body_params in sim_params.get('bodies', []) or []:
+            if not isinstance(body_params, dict):
+                continue
+            body_name = str(body_params.get('name', 'SIM-BODY'))
+            out.append(cls(f'body_sim:{body_name}', obs, body_name, body_params))
+        return out
 
     def create_model(self) -> None:
         """Render the simulated body and populate masks, annotations, metadata."""
