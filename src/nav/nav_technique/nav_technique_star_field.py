@@ -64,7 +64,6 @@ from nav.nav_technique.nav_technique import (
     NavTechnique,
     embed_rotation_unobservable,
     log_confidence_breakdown,
-    rotation_unobservable_sigma_rad,
     search_window_for_obs,
 )
 from nav.nav_technique.technique_result import NavTechniqueResult
@@ -425,24 +424,6 @@ def _solve_translation(
     return dv, du
 
 
-def _seed_from_image_et(image_et: float) -> int:
-    """Return a deterministic 64-bit RANSAC seed from the obs midtime ET.
-
-    Per Part 3 §"Determinism in RANSAC" the matcher iterates triplets
-    in sorted order (no random sampling), so the seed is informational
-    rather than load-bearing.  It is logged so that any future
-    tie-breaking RNG can pull from the same value and stay
-    reproducible across two back-to-back invocations on the same obs.
-    """
-    if not math.isfinite(image_et):
-        return 0
-    # Convert seconds-past-J2000 (TDB) to integer nanoseconds, then
-    # mask into the unsigned 64-bit range; ``& 0xFFFFFFFFFFFFFFFF``
-    # makes negative ETs (pre-J2000 obs, e.g. Voyager) wrap cleanly
-    # rather than overflow ``np.random.default_rng``.
-    return round(image_et * 1.0e9) & 0xFFFFFFFFFFFFFFFF
-
-
 class _StarFieldConfidenceContext:
     """Adapter binding ``StarFieldDiagnostics`` plus side flags."""
 
@@ -545,8 +526,6 @@ class StarFieldFromCatalogNav(NavTechnique):
                 len(usable),
                 len(features),
             )
-            seed = _seed_from_image_et(float(context.provenance.image_et))
-            self.logger.debug('RANSAC seed (from obs.midtime ns): %d', seed)
             ranked_catalog = sorted(usable, key=predicted_snr, reverse=True)[: self._max_sources]
             n_catalog_predicted = len(ranked_catalog)
             if n_catalog_predicted < 3:
@@ -1006,17 +985,8 @@ class StarFieldFromCatalogNav(NavTechnique):
     ) -> NavTechniqueResult:
         """Return a zero-confidence spurious result with the supplied reason."""
         self.logger.info('Reporting spurious result: %s', reason)
-        cov_2x2 = 1e6 * np.eye(2, dtype=np.float64)
-        cov = embed_rotation_unobservable(cov_2x2) if fit_rotation else cov_2x2
-        return NavTechniqueResult(
-            technique_name=self.name,
+        return self._spurious_result(
             feature_ids=tuple(f.feature_id for f in features),
-            offset_px=(0.0, 0.0),
-            covariance_px2=cov,
-            confidence=0.0,
-            spurious=True,
-            at_edge=False,
             diagnostics=diagnostics,
-            rotation_rad=0.0 if fit_rotation else None,
-            sigma_rotation_rad=(rotation_unobservable_sigma_rad() if fit_rotation else None),
+            fit_rotation=fit_rotation,
         )

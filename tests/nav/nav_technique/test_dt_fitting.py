@@ -342,6 +342,22 @@ def test_polarity_filter_per_vertex_decision() -> None:
     assert keep.sum() == 8
 
 
+def test_polarity_filter_rejects_out_of_bounds_vertices() -> None:
+    """CODE-NAV-015: an off-image vertex is rejected even when the clamped
+    boundary pixel carries a strong gradient aligned with its normal."""
+    grad = np.zeros((8, 8, 2), dtype=np.float64)
+    # Strong gradient at the top-edge pixel (0, 4) pointing in +v.
+    grad[0, 4] = (10.0, 0.0)
+    grad[4, 4] = (10.0, 0.0)
+    # Vertex 0 is above the image (v = -5); it clamps to pixel (0, 4) whose
+    # gradient aligns with its normal.  Vertex 1 is in-bounds at (4, 4).
+    vertices = np.array([[-5.0, 4.0], [4.0, 4.0]], dtype=np.float64)
+    normals = np.array([[1.0, 0.0], [1.0, 0.0]], dtype=np.float64)
+    keep = polarity_filter(vertices, normals, grad)
+    assert not bool(keep[0])
+    assert bool(keep[1])
+
+
 def test_polarity_filter_rejects_misshaped_inputs() -> None:
     grad = np.zeros((4, 4, 2))
     with pytest.raises(ValueError, match='vertices_vu must have shape'):
@@ -391,6 +407,44 @@ def test_lm_subpixel_refine_recovers_subpixel_translation() -> None:
     assert result.offset_vu[1] == pytest.approx(-2.5, abs=0.05)
     assert result.iterations >= 1
     assert result.inlier_count == 64
+
+
+def test_lm_subpixel_refine_rejects_polarity_vertex_with_enormous_sigma() -> None:
+    """CODE-NAV-019: a polarity-rejected vertex is excluded regardless of sigma.
+
+    Rejection zeroes the weight via the polarity mask, not by driving the
+    penalty residual past the Tukey cutoff.  With an enormous per-vertex
+    sigma the old ``penalty / sigma > c`` chain would fail (the penalty
+    residual would scale below the cutoff and keep a non-zero weight); the
+    mask makes exclusion independent of sigma.
+    """
+    shape = (96, 96)
+    radius = 18.0
+    dt = _build_dt_for_circle(shape, radius)
+    cv = shape[0] / 2.0 + 1.5
+    cu = shape[1] / 2.0 + 2.5
+    vertices, outward_normals = _build_circle_polyline((cv, cu), radius, 64)
+    normals = -outward_normals  # inward normals are accepted on a bright disc
+    # Flip vertex 0 to the wrong polarity so the polarity filter rejects it,
+    # and give it a sigma far above the old 1e6 / tukey_c ~ 2.1e5 px bound.
+    normals[0] = outward_normals[0]
+    sigmas = np.full(vertices.shape[0], 0.5, dtype=np.float64)
+    sigmas[0] = 1.0e7
+    image = _render_image_with_circle(shape, (shape[0] / 2.0, shape[1] / 2.0), radius)
+    grad = compute_image_gradient_vu(image, sigma_px=DEFAULT_IMAGE_GRADIENT_SIGMA_PX)
+    result = lm_subpixel_refine(
+        vertices_vu=vertices,
+        normals_vu=normals,
+        sigma_normal_per_vertex_px=sigmas,
+        image_edge_dt=dt,
+        image_gradient_vu=grad,
+        initial_offset_vu=(-1.0, -2.0),
+        use_polarity=True,
+    )
+    # The wrong-polarity, huge-sigma vertex must be excluded (weight 0).
+    assert result.inlier_count == 63
+    assert result.offset_vu[0] == pytest.approx(-1.5, abs=0.05)
+    assert result.offset_vu[1] == pytest.approx(-2.5, abs=0.05)
 
 
 def test_lm_subpixel_refine_trust_region_caps_offset_displacement() -> None:

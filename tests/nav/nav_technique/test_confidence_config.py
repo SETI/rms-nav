@@ -169,7 +169,7 @@ def test_load_technique_tuning_returns_shipped_block() -> None:
     """``BodyLimbNav.tuning`` ships with the documented placeholders."""
     techniques = dict(Config().category('techniques'))
     tuning = load_technique_tuning(techniques, 'BodyLimbNav')
-    assert tuning['min_arc_px'] == pytest.approx(30.0)
+    assert tuning['min_arc_vertices'] == pytest.approx(30.0)
     assert tuning['spurious_dt_rms_factor'] == pytest.approx(5.0)
     assert tuning['spurious_dt_floor_px'] == pytest.approx(3.0)
     assert tuning['spurious_min_inliers'] == 6

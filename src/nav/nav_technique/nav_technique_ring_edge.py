@@ -24,6 +24,7 @@ from nav.feature.geometry import RingEdgePolyline
 from nav.nav_technique.confidence import evaluate_sigmoid_combination
 from nav.nav_technique.diagnostics import RingEdgeDiagnostics
 from nav.nav_technique.dt_fitting import (
+    build_polyline_mask,
     coarse_ncc_search,
     lm_subpixel_refine,
 )
@@ -35,7 +36,7 @@ from nav.nav_technique.nav_technique import (
     search_window_for_obs,
 )
 from nav.nav_technique.technique_result import NavTechniqueResult
-from nav.support.types import NDArrayBoolType, NDArrayFloatType
+from nav.support.types import NDArrayFloatType
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only import
     from nav.nav_orchestrator.nav_context import NavContext
@@ -55,19 +56,6 @@ _RANK1_NULL_RELATIVE_THRESHOLD: float = 1.0e-8
 Matches the ensemble's scale-independent rank-deficiency test so the
 two paths agree on whether a result is rank-deficient.
 """
-
-
-def _build_polyline_mask(
-    vertices_vu: NDArrayFloatType, shape_vu: tuple[int, int]
-) -> NDArrayBoolType:
-    """Render polyline vertices into a boolean image mask aligned to shape_vu."""
-    vs = np.rint(vertices_vu[:, 0]).astype(np.int64)
-    us = np.rint(vertices_vu[:, 1]).astype(np.int64)
-    valid = (vs >= 0) & (vs < shape_vu[0]) & (us >= 0) & (us < shape_vu[1])
-    mask = np.zeros(shape_vu, dtype=bool)
-    if valid.any():
-        mask[vs[valid], us[valid]] = True
-    return mask
 
 
 def _aggregate_ring_edges(
@@ -223,7 +211,7 @@ class RingEdgeNav(NavTechnique):
             edge_dt = context.image_edge_dt_ext
             gradient_vu = context.image_gradient_vu_ext
             edge_mask = edge_dt <= 0.5
-            polyline_mask = _build_polyline_mask(vertices, edge_dt.shape[:2])
+            polyline_mask = build_polyline_mask(vertices, edge_dt.shape[:2])
             margin_v, margin_u = search_window_for_obs(context)
             self.logger.debug(
                 'Aggregated %d ring-edge vertices, sigma_radial range [%.3f, %.3f] px, '
@@ -327,6 +315,11 @@ class RingEdgeNav(NavTechnique):
                 sigma_rotation_rad = float(np.sqrt(max(float(covariance[2, 2]), 0.0)))
             else:
                 if covariance.shape != (2, 2):
+                    self.logger.warning(
+                        'RingEdgeNav: lm_subpixel_refine returned %s covariance with '
+                        'fit_rotation=False; truncating to (2, 2)',
+                        covariance.shape,
+                    )
                     covariance = covariance[:2, :2]
                 rotation_rad = None
                 sigma_rotation_rad = None

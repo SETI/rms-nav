@@ -83,9 +83,9 @@ class NavTechniqueManual(NavTechnique):
         super().__init__(config=config)
         # ``annotations`` is the merged-per-NavModel ``Annotations`` the
         # dialog uses when it writes a labelled summary PNG next to a
-        # saved sidecar.  Optional for backwards compatibility / tests
-        # that only need the offset-pick path; ``run_manual_nav``
-        # always populates it.
+        # saved sidecar.  It is optional only because tests that exercise
+        # the offset-pick path alone do not need it; ``run_manual_nav``
+        # always populates it in normal use.
         self._annotations: Annotations | None = annotations
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:

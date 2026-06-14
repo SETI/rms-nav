@@ -42,7 +42,7 @@ from nav.nav_technique.nav_technique import (
     search_window_for_obs,
 )
 from nav.nav_technique.technique_result import NavTechniqueResult
-from nav.support.correlate import navigate_with_pyramid_kpeaks
+from nav.support.correlate import navigate_with_pyramid_kpeaks, peak_to_runner_up_ratio
 from nav.support.types import NDArrayFloatType
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only import
@@ -76,29 +76,6 @@ def _filter_annulus_features(features: list[NavFeature]) -> list[NavFeature]:
         and f.template_img is not None
         and f.template_mask is not None
     ]
-
-
-def _peak_to_runner_up_ratio(top_k_peaks: list[tuple[float, float, float]]) -> float:
-    """Return the ratio of the winning peak's quality to the runner-up's.
-
-    ``top_k_peaks`` is ``[(quality, dv, du), ...]`` sorted by quality
-    descending (the convention :func:`navigate_with_pyramid_kpeaks`
-    uses).  Returns ``1.0`` when only one peak survives non-maximum
-    suppression — which is what an unambiguous correlation looks
-    like, so a value at or above 1.0 is the "good" tail.  Returns
-    ``0.0`` when no peaks are present.  Negative-quality runners-up
-    (rare; happens with the prior penalty) are floored at a small
-    positive value so the ratio stays well-defined.
-    """
-    if not top_k_peaks:
-        return 0.0
-    if len(top_k_peaks) == 1:
-        return 1.0
-    winner_q = top_k_peaks[0][0]
-    runner_q = top_k_peaks[1][0]
-    if runner_q <= 1e-9:
-        return float(max(winner_q, 0.0)) / 1e-9
-    return float(winner_q) / float(runner_q)
 
 
 class RingAnnulusNav(NavTechnique):
@@ -237,7 +214,7 @@ class RingAnnulusNav(NavTechnique):
             top_k_peaks = ncc_result.get('top_k_peaks', [])
             diagnostics = RingAnnulusDiagnostics(
                 ncc_peak=quality,
-                peak_to_runner_up_ratio=_peak_to_runner_up_ratio(top_k_peaks),
+                peak_to_runner_up_ratio=peak_to_runner_up_ratio(top_k_peaks),
                 annulus_count=len(eligible),
                 used_gradient=used_gradient,
             )

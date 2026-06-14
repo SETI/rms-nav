@@ -21,7 +21,6 @@ from nav.nav_technique.nav_technique_star_field import (
     _enumerate_triplets,
     _greedy_inlier_count,
     _hash_distance_sq,
-    _seed_from_image_et,
     _solve_translation,
     _triplet_hash,
 )
@@ -409,20 +408,6 @@ def test_star_field_min_inliers_less_than_three_raises() -> None:
             technique_class()
     finally:
         technique_class.tuning = original_tuning
-
-
-def test_star_field_seed_from_image_et_handles_edge_cases() -> None:
-    """``_seed_from_image_et`` produces a stable 64-bit unsigned integer."""
-    seed_zero = _seed_from_image_et(0.0)
-    assert seed_zero == 0
-    seed_pos = _seed_from_image_et(123.456)
-    assert seed_pos > 0
-    seed_neg = _seed_from_image_et(-1.0)
-    # Negative ETs (pre-J2000 obs, e.g. Voyager) wrap into the unsigned
-    # 64-bit range rather than overflowing the RNG seed.
-    assert seed_neg > 0
-    seed_nan = _seed_from_image_et(math.nan)
-    assert seed_nan == 0
 
 
 # ---------------------------------------------------------------------------

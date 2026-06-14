@@ -1,5 +1,6 @@
 """NavTechniqueResult — the per-technique output consumed by the ensemble."""
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -34,6 +35,10 @@ class NavTechniqueResult:
             on instruments where rotation fitting is disabled.
         sigma_rotation_rad: Optional 1-sigma uncertainty on the fitted
             rotation.
+        source_bodies: SPICE body names this result was computed against
+            (from each consumed feature's structured ``body_name``).  Empty
+            for ring / star techniques.  The ensemble's fallback-supersession
+            filter reads this instead of parsing ``feature_ids`` strings.
     """
 
     technique_name: str
@@ -46,6 +51,7 @@ class NavTechniqueResult:
     diagnostics: NavTechniqueDiagnostics
     rotation_rad: float | None = None
     sigma_rotation_rad: float | None = None
+    source_bodies: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         """Validate covariance shape and freeze the array."""
@@ -63,6 +69,15 @@ class NavTechniqueResult:
             )
         if not 0.0 <= self.confidence <= 1.0:
             raise ValueError(f'confidence must lie in [0, 1]; got {self.confidence!r}')
+        # offset_px must be a length-2 finite pair: a NaN/inf offset would flow
+        # straight into the ensemble combine and poison the result.
+        if len(self.offset_px) != 2 or not all(math.isfinite(float(c)) for c in self.offset_px):
+            raise ValueError(f'offset_px must be a length-2 finite tuple; got {self.offset_px!r}')
+        # Rotation fields, when present, must be finite for the same reason.
+        for field_name in ('rotation_rad', 'sigma_rotation_rad'):
+            val = getattr(self, field_name)
+            if val is not None and not math.isfinite(float(val)):
+                raise ValueError(f'{field_name} must be finite when set; got {val!r}')
         cov.setflags(write=False)
         # Replace with the canonical float64 read-only copy.
         object.__setattr__(self, 'covariance_px2', cov)
@@ -70,6 +85,8 @@ class NavTechniqueResult:
         # so the hash is stable across instance lifetimes.
         if not isinstance(self.feature_ids, tuple):
             object.__setattr__(self, 'feature_ids', tuple(self.feature_ids))
+        if not all(isinstance(fid, str) for fid in self.feature_ids):
+            raise ValueError(f'feature_ids must all be strings; got {self.feature_ids!r}')
 
     # Equality and hashing operate on (technique_name, feature_ids) because
     # numpy-array fields prevent the default dataclass equality.

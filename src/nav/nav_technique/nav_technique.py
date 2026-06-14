@@ -19,6 +19,7 @@ import numpy as np
 from nav.feature.feature import NavFeature
 from nav.feature.feature_type import NavFeatureType
 from nav.nav_technique.confidence import ConfidenceBreakdown, ConfidenceSpec
+from nav.nav_technique.diagnostics import NavTechniqueDiagnostics
 from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.technique_result import NavTechniqueResult
 from nav.support.nav_base import NavBase
@@ -37,6 +38,7 @@ __all__ = [
     'rotation_pivot_distance_px',
     'rotation_unobservable_sigma_rad',
     'search_window_for_obs',
+    'technique_tier',
     'validate_registered_confidence_specs',
 ]
 
@@ -304,6 +306,66 @@ class NavTechnique(NavBase, ABC):
             A ``NavTechniqueResult`` with offset, covariance, confidence,
             and per-technique diagnostics.
         """
+
+    def _spurious_result(
+        self,
+        *,
+        feature_ids: tuple[str, ...],
+        diagnostics: NavTechniqueDiagnostics,
+        fit_rotation: bool = False,
+        source_bodies: frozenset[str] = frozenset(),
+    ) -> NavTechniqueResult:
+        """Return the canonical zero-confidence, spurious result.
+
+        Encodes the shared "no usable information" shape every technique
+        emits when it must hard-reject: zero offset, a finite-but-huge
+        (effectively zero-information) covariance, ``confidence=0.0``,
+        ``spurious=True``, ``at_edge=False``, and the rotation-unobservable
+        sentinel embedded when ``fit_rotation`` is set.
+
+        Parameters:
+            feature_ids: Feature ids consumed by the rejected attempt.
+            diagnostics: The technique's typed diagnostics dataclass.
+            fit_rotation: When True the covariance is ``(3, 3)`` with the
+                rotation-unobservable sentinel and the rotation fields are
+                populated; otherwise the covariance is ``(2, 2)`` and both
+                rotation fields are ``None``.
+            source_bodies: Optional SPICE body names the attempt covered
+                (body techniques pass these; ring / star techniques omit).
+
+        Returns:
+            A spurious :class:`NavTechniqueResult`.
+        """
+        cov_2x2 = 1e6 * np.eye(2, dtype=np.float64)
+        cov = embed_rotation_unobservable(cov_2x2) if fit_rotation else cov_2x2
+        return NavTechniqueResult(
+            technique_name=self.name,
+            feature_ids=feature_ids,
+            offset_px=(0.0, 0.0),
+            covariance_px2=cov,
+            confidence=0.0,
+            spurious=True,
+            at_edge=False,
+            diagnostics=diagnostics,
+            rotation_rad=0.0 if fit_rotation else None,
+            sigma_rotation_rad=(rotation_unobservable_sigma_rad() if fit_rotation else None),
+            source_bodies=source_bodies,
+        )
+
+
+def technique_tier(technique_name: str) -> str:
+    """Look up a registered technique's ``tier`` from the registry.
+
+    Returns ``'primary'`` for an unregistered name so unknown techniques (test
+    stubs, future plug-ins) are treated as primary by construction; an explicit
+    ``tier='fallback'`` declaration is required to opt into the fallback-drop
+    behaviour.  Shared by the orchestrator's fallback pre-filter and the
+    ensemble's fallback-supersession pass so the tier rule lives in one place.
+    """
+    for cls in NavTechnique._registry:
+        if cls.name == technique_name:
+            return cls.tier
+    return 'primary'
 
 
 def validate_registered_confidence_specs() -> None:

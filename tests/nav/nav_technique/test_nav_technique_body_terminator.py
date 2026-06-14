@@ -28,7 +28,7 @@ from nav.support.filters import NavFilterKind, NavFilterSpec
 # instantiation populates ``cls.tuning`` via ``Config.read_config`` —
 # see ``test_nav_technique_body_limb.py`` for the same pattern.
 BodyTerminatorNav()
-TERMINATOR_MIN_ARC_PX = BodyTerminatorNav.tuning['min_arc_px']
+TERMINATOR_MIN_ARC_PX = BodyTerminatorNav.tuning['min_arc_vertices']
 TERMINATOR_SPURIOUS_MIN_INLIER_FRACTION = BodyTerminatorNav.tuning['spurious_min_inlier_fraction']
 TERMINATOR_SPURIOUS_DT_FLOOR_PX = BodyTerminatorNav.tuning['spurious_dt_floor_px']
 

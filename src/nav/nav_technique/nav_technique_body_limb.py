@@ -17,12 +17,13 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from nav.config import Config
-from nav.feature.feature import NavFeature
+from nav.feature.feature import NavFeature, body_names_from_features
 from nav.feature.feature_type import NavFeatureType
 from nav.feature.geometry import LimbPolyline
 from nav.nav_technique.confidence import evaluate_sigmoid_combination
 from nav.nav_technique.diagnostics import BodyLimbDiagnostics
 from nav.nav_technique.dt_fitting import (
+    build_polyline_mask,
     coarse_ncc_search,
     lm_subpixel_refine,
 )
@@ -34,7 +35,7 @@ from nav.nav_technique.nav_technique import (
     search_window_for_obs,
 )
 from nav.nav_technique.technique_result import NavTechniqueResult
-from nav.support.types import NDArrayBoolType, NDArrayFloatType
+from nav.support.types import NDArrayFloatType
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only import
     from nav.nav_orchestrator.nav_context import NavContext
@@ -46,19 +47,6 @@ __all__ = ['BodyLimbNav']
 # ``techniques.BodyLimbNav.tuning``.  No Python-level fallback;
 # missing-key access in ``__init__`` is a KeyError so a config typo
 # fails fast at process startup.
-
-
-def _build_polyline_mask(
-    vertices_vu: NDArrayFloatType, shape_vu: tuple[int, int]
-) -> NDArrayBoolType:
-    """Render polyline vertices into a boolean image mask aligned to shape_vu."""
-    vs = np.rint(vertices_vu[:, 0]).astype(np.int64)
-    us = np.rint(vertices_vu[:, 1]).astype(np.int64)
-    valid = (vs >= 0) & (vs < shape_vu[0]) & (us >= 0) & (us < shape_vu[1])
-    mask = np.zeros(shape_vu, dtype=bool)
-    if valid.any():
-        mask[vs[valid], us[valid]] = True
-    return mask
 
 
 def _aggregate_limb_features(
@@ -135,7 +123,7 @@ class BodyLimbNav(NavTechnique):
     def __init__(self, *, config: Config | None = None) -> None:
         super().__init__(config=config)
         self.config.read_config()  # ensure cls.tuning is populated
-        self._min_arc_px = float(self.tuning['min_arc_px'])
+        self._min_arc_vertices = float(self.tuning['min_arc_vertices'])
         self._spurious_dt_rms_factor = float(self.tuning['spurious_dt_rms_factor'])
         self._spurious_dt_floor_px = float(self.tuning['spurious_dt_floor_px'])
         self._spurious_min_inliers = int(self.tuning['spurious_min_inliers'])
@@ -161,14 +149,14 @@ class BodyLimbNav(NavTechnique):
 
         Returns:
             ``NavFeasibilityReport`` with ``feasible=True`` iff at least
-            one LIMB_ARC has at least the configured ``min_arc_px``
+            one LIMB_ARC has at least the configured ``min_arc_vertices``
             surviving vertices.
         """
         eligible = [
             f
             for f in features
             if isinstance(f.geometry, LimbPolyline)
-            and f.geometry.vertices_vu.shape[0] >= self._min_arc_px
+            and f.geometry.vertices_vu.shape[0] >= self._min_arc_vertices
         ]
         if not eligible:
             return NavFeasibilityReport(
@@ -187,7 +175,7 @@ class BodyLimbNav(NavTechnique):
         Parameters:
             features: Feature list filtered to the technique's accepted
                 types.  Polylines with fewer than the configured
-                ``min_arc_px`` vertices are dropped before fitting.
+                ``min_arc_vertices`` vertices are dropped before fitting.
             context: Per-image NavContext.  Must carry
                 ``image_edge_dt_ext`` and ``image_gradient_vu_ext`` —
                 both populated by the orchestrator's ``_make_context``
@@ -224,7 +212,7 @@ class BodyLimbNav(NavTechnique):
                 f
                 for f in features
                 if isinstance(f.geometry, LimbPolyline)
-                and f.geometry.vertices_vu.shape[0] >= self._min_arc_px
+                and f.geometry.vertices_vu.shape[0] >= self._min_arc_vertices
             ]
             self.logger.info(
                 'Consuming %d LIMB_ARC features (out of %d offered)',
@@ -242,7 +230,7 @@ class BodyLimbNav(NavTechnique):
             edge_dt = context.image_edge_dt_ext
             gradient_vu = context.image_gradient_vu_ext
             edge_mask = edge_dt <= 0.5
-            polyline_mask = _build_polyline_mask(vertices, edge_dt.shape[:2])
+            polyline_mask = build_polyline_mask(vertices, edge_dt.shape[:2])
             margin_v, margin_u = search_window_for_obs(context)
             self.logger.debug(
                 'Aggregated %d limb vertices, sigma_normal range [%.3f, %.3f] px, '
@@ -407,6 +395,7 @@ class BodyLimbNav(NavTechnique):
                 diagnostics=diagnostics,
                 rotation_rad=rotation_rad,
                 sigma_rotation_rad=sigma_rotation_rad,
+                source_bodies=body_names_from_features(features),
             )
 
 

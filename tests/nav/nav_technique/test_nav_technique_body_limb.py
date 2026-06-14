@@ -22,7 +22,7 @@ from nav.nav_technique.nav_technique_body_limb import BodyLimbNav
 # read AFTER ``Config.read_config()`` runs (BodyLimbNav.__init__ calls
 # it) so the class-level ``BodyLimbNav.tuning`` dict is populated.
 BodyLimbNav()  # populates BodyLimbNav.tuning via Config.read_config
-LIMB_MIN_ARC_PX = BodyLimbNav.tuning['min_arc_px']
+LIMB_MIN_ARC_PX = BodyLimbNav.tuning['min_arc_vertices']
 SPURIOUS_MIN_INLIER_FRACTION = BodyLimbNav.tuning['spurious_min_inlier_fraction']
 SPURIOUS_MAX_LM_DISPLACEMENT_PX = BodyLimbNav.tuning['spurious_max_lm_displacement_px']
 SPURIOUS_DT_FLOOR_PX = BodyLimbNav.tuning['spurious_dt_floor_px']

@@ -159,7 +159,7 @@ techniques:
       # Minimum surviving polyline length per LIMB_ARC for feasibility.
       # Shorter limbs do not constrain a 2-D translation enough to be
       # worth the LM iteration.
-      min_arc_px: 30.0
+      min_arc_vertices: 30.0
       # Final DT residual exceeding this many limb-sigmas marks the
       # result spurious.
       spurious_dt_rms_factor: 5.0
@@ -236,8 +236,8 @@ techniques:
       spurious: true
     tuning:
       # Minimum surviving polyline length per TERMINATOR_ARC for
-      # feasibility (same shape as BodyLimbNav.min_arc_px).
-      min_arc_px: 30.0
+      # feasibility (same shape as BodyLimbNav.min_arc_vertices).
+      min_arc_vertices: 30.0
       # Final DT residual exceeding this many terminator-sigmas marks
       # the result spurious.
       spurious_dt_rms_factor: 5.0

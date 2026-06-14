@@ -38,6 +38,7 @@ __all__ = [
     'DEFAULT_PINVH_RCOND',
     'DEFAULT_TUKEY_C',
     'LMRefineResult',
+    'build_polyline_mask',
     'coarse_ncc_search',
     'information_matrix_to_covariance',
     'lm_subpixel_refine',
@@ -93,13 +94,19 @@ single project-wide cutoff keeps rank-deficiency handling consistent.
 
 
 _INFINITY_DT_PENALTY_PX: float = 1.0e6
-"""Effective ``+inf`` penalty assigned to polarity-rejected vertices.
+"""Effective ``+inf`` residual recorded for polarity-rejected vertices.
 
-The polarity filter forces a vertex to contribute an unbounded cost; we
-encode ``+inf`` as a very large finite number so the LM linear system
-remains numerically well-defined.  Such a vertex's residual is so large
-the Tukey biweight zeroes its weight on the first reweighting step, so
-the value's exact magnitude does not influence the converged estimate.
+A polarity-rejected vertex is excluded from the fit by zeroing its
+*weight* directly (the Tukey weight is multiplied by the polarity mask),
+so its exclusion is independent of its per-vertex sigma and never relies
+on this magnitude.  The penalty residual is still recorded in
+``raw_residuals`` so the unweighted ``raw_rms_px`` diagnostic reflects
+the wrong-polarity vertices; because the corresponding weight is zero it
+contributes nothing to the cost or the normal equations.  The value is a
+large-but-finite number (not literal ``inf``) only so those arrays stay
+numerically well-defined; it must not be enlarged without care, since
+``raw_rms_px`` -- and hence the limb / terminator spurious gate -- reads
+it directly.
 """
 
 
@@ -210,6 +217,35 @@ def coarse_ncc_search(
     return best_dv, best_du
 
 
+def build_polyline_mask(
+    vertices_vu: NDArrayFloatType, shape_vu: tuple[int, int]
+) -> NDArrayBoolType:
+    """Render polyline vertices into a boolean image mask aligned to ``shape_vu``.
+
+    Each vertex is rounded to the nearest integer pixel; vertices that fall
+    outside ``shape_vu`` are silently dropped.  The integer rasterization is
+    deliberate -- the mask feeds :func:`coarse_ncc_search`, which scores
+    integer-pixel shifts of the binary mask against the edge DT.
+
+    Shared by the limb / terminator / ring-edge techniques (previously a
+    verbatim per-module copy).
+
+    Parameters:
+        vertices_vu: ``(N, 2)`` polyline vertex positions in ``(v, u)``.
+        shape_vu: ``(H, W)`` target mask shape.
+
+    Returns:
+        ``(H, W)`` boolean mask, True at each in-bounds rounded vertex.
+    """
+    vs = np.rint(vertices_vu[:, 0]).astype(np.int64)
+    us = np.rint(vertices_vu[:, 1]).astype(np.int64)
+    valid = (vs >= 0) & (vs < shape_vu[0]) & (us >= 0) & (us < shape_vu[1])
+    mask = np.zeros(shape_vu, dtype=bool)
+    if valid.any():
+        mask[vs[valid], us[valid]] = True
+    return mask
+
+
 def polarity_filter(
     vertices_vu: NDArrayFloatType,
     normals_vu: NDArrayFloatType,
@@ -225,10 +261,14 @@ def polarity_filter(
     zero: orthogonal hits (dot product exactly zero, vanishingly rare in
     floating-point arithmetic) are rejected, never silently kept.
 
-    Out-of-bounds vertices have their gradient sampled at the nearest
-    in-bounds pixel via clamping; that pixel's gradient is rarely a real
-    edge, so the dot product is dominated by background noise and the
-    vertex is rejected on its own merits.
+    Out-of-bounds vertices are rejected explicitly: a vertex whose
+    rounded shifted position falls outside the image is never accepted,
+    regardless of the gradient at the clamped boundary pixel.  (Sampling
+    the clamped pixel and "letting it reject on its own merits" is unsafe
+    because a strong frame-edge gradient -- common after zero-padding into
+    the extended FOV -- can align with an outward normal and spuriously
+    accept an off-image vertex.)  The clamp below only keeps the gather
+    indices valid; the gathered value is discarded for such vertices.
 
     Parameters:
         vertices_vu: ``(N, 2)`` model vertex positions.
@@ -258,12 +298,15 @@ def polarity_filter(
         )
     height, width, _ = image_gradient_vu.shape
     dv, du = float(offset_vu[0]), float(offset_vu[1])
-    sample_v = np.clip(np.rint(verts[:, 0] + dv).astype(np.int64), 0, height - 1)
-    sample_u = np.clip(np.rint(verts[:, 1] + du).astype(np.int64), 0, width - 1)
+    rint_v = np.rint(verts[:, 0] + dv).astype(np.int64)
+    rint_u = np.rint(verts[:, 1] + du).astype(np.int64)
+    in_bounds = (rint_v >= 0) & (rint_v < height) & (rint_u >= 0) & (rint_u < width)
+    sample_v = np.clip(rint_v, 0, height - 1)
+    sample_u = np.clip(rint_u, 0, width - 1)
     gv = image_gradient_vu[sample_v, sample_u, 0]
     gu = image_gradient_vu[sample_v, sample_u, 1]
     dot = norms[:, 0] * gv + norms[:, 1] * gu
-    return cast(NDArrayBoolType, dot > 0.0)
+    return cast(NDArrayBoolType, in_bounds & (dot > 0.0))
 
 
 def tukey_biweight_weights(
@@ -373,8 +416,13 @@ class LMRefineResult:
         rotation_rad: Converged rotation in radians; ``0.0`` when
             ``fit_rotation`` was False.
         covariance: ``(2, 2)`` or ``(3, 3)`` parameter covariance derived
-            from the M-estimator information matrix at the converged
-            point.
+            from the M-estimator information matrix ``J^T diag(w) J`` at
+            the converged point.  This is the DATA-ONLY covariance: it
+            deliberately EXCLUDES the Tikhonov anchor diagonal that
+            ``tikhonov_alpha`` adds to the iteration Hessian, because that
+            anchor is a fitting aid that biases the step rather than
+            measured information and so must not shrink the reported
+            uncertainty.
         residuals_px: ``(N,)`` per-vertex DT residuals at the final
             estimate (raw, unweighted).
         weights: ``(N,)`` per-vertex weights at the final estimate
@@ -653,6 +701,8 @@ def lm_subpixel_refine(
             bound; Tikhonov pulls the LM toward the seed *inside*
             that bound when the DT cost surface has a deeper but
             wrong minimum on the way (crater rims, terminator edges).
+            The anchor biases the step only; it is excluded from the
+            reported data-only covariance (see ``LMRefineResult``).
     Returns:
         :class:`LMRefineResult`.
 
@@ -723,7 +773,12 @@ def lm_subpixel_refine(
         # Compute Tukey biweight weights from the (sigma-scaled) residuals.
         scaled = residuals / sigmas
         tukey_w = tukey_biweight_weights(scaled, c=tukey_c)
-        weights = inv_sigma_sq * tukey_w
+        # Zero polarity-rejected vertices directly via the mask rather than
+        # relying on the large-penalty residual being driven past the Tukey
+        # cutoff: that chain breaks for an enormous per-vertex sigma
+        # (scaled = penalty / sigma <= c), and ``navigate`` may not raise.
+        # The explicit mask makes rejection independent of sigma.
+        weights = inv_sigma_sq * tukey_w * state.polarity_mask
         cost_before = _weighted_cost(weights, residuals)
         state.raw_residuals = residuals
         state.weights = weights
@@ -841,7 +896,7 @@ def lm_subpixel_refine(
             final_scaled = residuals_final / sigmas
             final_tukey = tukey_biweight_weights(final_scaled, c=tukey_c)
             state.raw_residuals = residuals_final
-            state.weights = inv_sigma_sq * final_tukey
+            state.weights = inv_sigma_sq * final_tukey * state.polarity_mask
             state.jacobian = jacobian_final
             if step_norm < step_tolerance_px:
                 state.converged = True
@@ -866,7 +921,7 @@ def lm_subpixel_refine(
             final_scaled = residuals_final / sigmas
             final_tukey = tukey_biweight_weights(final_scaled, c=tukey_c)
             state.raw_residuals = residuals_final
-            state.weights = inv_sigma_sq * final_tukey
+            state.weights = inv_sigma_sq * final_tukey * state.polarity_mask
             _, state.jacobian = _compute_residuals_and_jacobian(
                 vertices_vu=verts,
                 pivot_vu=pivot,

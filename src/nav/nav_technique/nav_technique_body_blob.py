@@ -24,7 +24,7 @@ import numpy as np
 from pdslogger import PdsLogger
 
 from nav.config import Config
-from nav.feature.feature import NavFeature
+from nav.feature.feature import NavFeature, body_names_from_features
 from nav.feature.feature_type import NavFeatureType
 from nav.feature.geometry import BodyBlobGeometry
 from nav.nav_technique.confidence import evaluate_sigmoid_combination
@@ -488,6 +488,7 @@ class BodyBlobNav(NavTechnique):
                 diagnostics=diagnostics,
                 rotation_rad=0.0 if fit_rotation else None,
                 sigma_rotation_rad=(rotation_unobservable_sigma_rad() if fit_rotation else None),
+                source_bodies=body_names_from_features(residuals.consumed),
             )
 
     def _fail_no_signal(
@@ -526,19 +527,11 @@ class BodyBlobNav(NavTechnique):
             3.0 * noise_sigma,
             len(features),
         )
-        cov_2x2 = 1e6 * np.eye(2, dtype=np.float64)
-        cov = embed_rotation_unobservable(cov_2x2) if fit_rotation else cov_2x2
-        return NavTechniqueResult(
-            technique_name=self.name,
+        return self._spurious_result(
             feature_ids=tuple(f.feature_id for f in features),
-            offset_px=(0.0, 0.0),
-            covariance_px2=cov,
-            confidence=0.0,
-            spurious=True,
-            at_edge=False,
             diagnostics=diagnostics,
-            rotation_rad=0.0 if fit_rotation else None,
-            sigma_rotation_rad=(rotation_unobservable_sigma_rad() if fit_rotation else None),
+            fit_rotation=fit_rotation,
+            source_bodies=body_names_from_features(features),
         )
 
 
