@@ -501,6 +501,8 @@ as unobservable for the correlation technique until calibrated.
 ### Medium
 
 #### CODE-NAV-011 — Tikhonov/covariance inconsistency (see CODE-NAV-001 item 2), promoted as its own finding
+
+> **STATUS: FIXED** — The choice was settled by the CODE-NAV-001 fix (reported covariance is DATA-ONLY, excluding the Tikhonov anchor) and the code matches it. CODE-NAV-011 completes the documentation half: the public-facing `LMRefineResult.covariance` field docstring and the `tikhonov_alpha` parameter docstring now both state that the anchor biases the LM step only and is excluded from the reported covariance.
 **File:** `dt_fitting.py` · `lm_subpixel_refine`
 The reported translation covariance excludes the Tikhonov diagonal that was part
 of the minimized objective. Decide and document whether the covariance is the
@@ -508,6 +510,8 @@ data-only or the anchored-objective covariance, and make the code match the
 stated choice.
 
 #### CODE-NAV-012 — `brightness_margin_mag` assumes background-limited (linear) SNR but `predicted_snr` is shot+read (sub-linear)
+
+> **STATUS: IGNORED (obviated by CODE-NAV-003)** — The premise no longer holds. After CODE-NAV-003 the value feeding `brightness_margin_mag` is the magnitude-based pseudo-SNR `snr_eff = SNR_REF * 2.512**(mag_limit - vmag)` (`nav_model_stars.py:244`), which is *exactly linear in flux* by construction; the DN-based shot+read `predicted_snr()` is no longer imported into the model path. So `2.5*log10(s1/s2)` reduces algebraically to the exact catalog magnitude difference `vmag2 - vmag1`, with no shot-noise bias and no dependence on DN. The originally-proposed fix (consume `integrated_signal_dn`) would in fact break calibrated datasets (NH LORRI, Galileo, calibrated Cassini), which have no usable DN; the gate is already magnitude-exact for them precisely because it is driven by catalog photometry, not pixel values.
 **File:** `src/nav/nav_technique/_star_helpers.py` · `brightness_margin_mag` (lines 90-114)
 The `Δmag = 2.5·log10(s1/s2)` identity holds only when SNR ∝ flux
 (background-limited). `predicted_snr` (CODE-NAV-003) includes a `+ total_signal`
@@ -518,6 +522,8 @@ the formula should consume `integrated_signal_dn` directly (true flux ratio)
 rather than the SNR ratio.
 
 #### CODE-NAV-013 — `_combine_confidence` agreement boost `1 + 0.5·log2(n)` is unbounded-in-spirit and mixes confidence with precision weighting opaquely
+
+> **STATUS: FIXED** — The significance weight is now the *positional* precision `trace(pinvh(Sigma[:2, :2]))` (px^-2), with any rotation axis marginalised out, instead of `trace(pinvh(Sigma))` which added the v, u precisions (px^-2) to the rotation precision (rad^-2) and let a tightly-pinned rotation dominate `n_significant` and the weighted average on an arbitrary scale. The additive trace is retained (not `det(info)^(1/p)`) so it stays well-defined for the rank-1 ring-edge covariances. The 2-DoF path is unchanged (`cov[:2, :2]` is then the whole matrix). Regression test `test_combine_confidence_weight_ignores_rotation_precision` added; 30 ensemble tests pass.
 **File:** `src/nav/nav_orchestrator/ensemble.py` · `_combine_confidence` (lines 417-467)
 The "number of significant contributors" boost uses `trace(pinvh(Σ))` as the
 significance weight — but `trace` of the information matrix mixes the v, u, and θ
@@ -528,12 +534,16 @@ therefore both skewed by the rotation axis when present. Use per-axis-normalized
 weights or `det(info)^(1/p)` instead of raw trace.
 
 #### CODE-NAV-014 — `similarity_transform_fit` weighted-centroid residual `var_residual = 0.5·(var_v+var_u)` ignores anisotropy in the rotation-variance formula
+
+> **Tracked by:** #132 — Star-field rotation variance assumes isotropic residuals (up to 2x off)
 **File:** `nav_technique_star_field.py` · `_build_covariance_3dof` (lines 938-944) and `_star_helpers.similarity_transform_fit`
 The rotation variance `σ_θ² = var_residual / spread` assumes isotropic residuals;
 for anisotropic per-axis residuals it can be off by up to 2×. Minor for
 near-isotropic star centroids, but undocumented.
 
 #### CODE-NAV-015 — `polarity_filter` clamps out-of-bounds vertices to the boundary pixel rather than dropping them
+
+> **STATUS: FIXED** — `polarity_filter` now computes an `in_bounds` mask from the rounded shifted vertex positions and ANDs it into the acceptance, so an off-image vertex is rejected regardless of the clamped boundary pixel's gradient (the clamp now only keeps the gather indices valid). Docstring updated to explain the frame-edge-gradient hazard. Regression test `test_polarity_filter_rejects_out_of_bounds_vertices` added; 87 DT-technique tests pass.
 **File:** `dt_fitting.py` · `polarity_filter` (lines 252-259)
 A vertex outside the image samples the *nearest boundary pixel's* gradient and
 is then kept/dropped on that basis. The docstring rationalizes this ("rarely a
@@ -542,18 +552,24 @@ zero-padding into extfov) will spuriously *accept* off-image vertices. Better to
 mark out-of-bounds vertices as rejected explicitly.
 
 #### CODE-NAV-016 — `_build_polyline_mask` (3 copies) rounds vertices to nearest int and silently drops out-of-bounds; identical code duplicated across three techniques
+
+> **STATUS: FIXED** — Hoisted the verbatim helper into `dt_fitting.build_polyline_mask` (public, in `__all__`) and replaced the three identical local copies (limb / terminator / ring-edge) with an import; the now-unused `NDArrayBoolType` import was dropped from each. The integer rasterization is retained intentionally (it feeds `coarse_ncc_search`, which scores integer-pixel shifts) and is documented as such. 254 nav_technique tests pass; mypy clean. This also resolves the `_build_polyline_mask` portion of CODE-TECH-005.
 **Files:** `nav_technique_body_limb.py`, `nav_technique_body_terminator.py`, `nav_technique_ring_edge.py` (each ~lines 51-70)
 Pure duplication of a non-trivial helper that belongs in `dt_fitting.py` or
 `distance_transform.py`. Also: rounding the *seed* polyline mask to int loses the
 sub-pixel structure that `coarse_ncc_search` could exploit. Consolidate.
 
 #### CODE-NAV-017 — `_seed_from_image_et` computes a RANSAC seed that is admittedly never used
+
+> **STATUS: FIXED** — Removed the vestigial RANSAC scaffolding: `_seed_from_image_et`, its sole call site, and the `logger.debug('RANSAC seed ...')` line are deleted, along with the dedicated unit test and its import. The seed dated from an earlier randomized-triplet RANSAC design that was replaced by the deterministic sorted-order matcher (`_greedy_inlier_count`), so nothing consumed it; the matcher is deterministic and unchanged. 26 star-field tests pass; ruff/mypy clean.
 **File:** `nav_technique_star_field.py` · `_seed_from_image_et` (lines 428-443)
 The matcher iterates deterministically; the seed is "informational." Dead
 computation logged at debug. Remove or wire a real RNG, but do not keep
 load-bearing-looking dead code in a correctness-critical path.
 
 #### CODE-NAV-018 — `StarFieldFromCatalogNav` greedy inlier matching is order-dependent and not globally optimal
+
+> **Tracked by:** #133 — Star-field inlier matching is greedy/order-dependent, not optimal assignment. (Note: the "RANSAC re-scores" rationale is more precisely *deterministic* multi-hypothesis re-scoring; the randomized sampling was removed in CODE-NAV-017. The masking still holds.)
 **File:** `nav_technique_star_field.py` · `_greedy_inlier_count` (lines 325-371)
 Greedy nearest-neighbour in detection-index order can mis-assign when two
 detections compete for one catalog star; a Hungarian/optimal assignment within
@@ -566,6 +582,17 @@ RANSAC re-scores many candidates, partially masking the issue.
   `dt_fitting.py`; it interacts with `sigmas` (scaled = 1e6/σ) and Tukey's
   finite cutoff fine, but if any σ ≥ 1e6/4.685 the rejected vertex would *not* be
   zeroed. Add an assertion that σ ≪ that bound.
+  > **STATUS: FIXED** — Resolved without an assertion (`navigate` must not
+  > raise) and without enlarging the sentinel (it feeds `raw_rms_px` and hence
+  > the spurious gate). Polarity-rejected vertices now have their weight zeroed
+  > *directly* via `* state.polarity_mask` at all three weight-computation
+  > sites, so exclusion is independent of σ -- the `penalty / σ > c` chain is no
+  > longer load-bearing. The penalty residual is retained only to keep
+  > `raw_residuals` / `raw_rms_px` well-defined (its zero weight contributes
+  > nothing to the cost or normal equations). Sentinel docstring updated;
+  > regression test
+  > `test_lm_subpixel_refine_rejects_polarity_vertex_with_enormous_sigma`
+  > (σ = 1e7) added; 87 DT-technique tests pass, ruff/mypy clean.
 - **CODE-NAV-020** — `nav_technique_star_field.py` is 993 lines, approaching the
   1000-line module cap; splitting the triplet-hash matcher into a helper module
   would respect the convention and improve testability.
@@ -574,9 +601,31 @@ RANSAC re-scores many candidates, partially masking the issue.
   covariance for spurious results instead of `inf`; the ensemble drops spurious
   results anyway, but a finite huge covariance would *not* be dropped if the
   spurious flag were ever cleared. Prefer `inf` for honesty.
+  > **STATUS: IGNORED** — The recommendation is unsafe and the concern is
+  > moot. Literal `inf` cannot be used: `pinvh(np.diag([inf, inf]))` raises
+  > `ValueError('array must not contain infs or NaNs')`, so an un-dropped
+  > spurious result would *crash* the ensemble combine (and `inf * np.eye(2)`
+  > yields `nan` off-diagonal, failing the symmetry validator). The finite
+  > `1e6 * np.eye(2)` already inverts to `1e-6 px^-2` information -- six-plus
+  > orders below real informative covariances (`~1-100 px^-2`) -- so it is
+  > effectively zero-information in any combine, and spurious results are
+  > dropped before the combine regardless. Switching to `inf` would be strictly
+  > worse. (Sites: `nav_technique_body_blob.py:529`, `nav_technique_star_field.py:989`,
+  > `nav_technique_star_refine.py:507`, `nav_technique_star_unique_match.py:653`.)
 - **CODE-NAV-022** — `_peak_to_runner_up_ratio` divides by `1e-9` when the
   runner-up quality is non-positive, producing ratios up to `~1e9` that then feed
   a sigmoid confidence term; cap the ratio.
+  > **STATUS: FIXED** — The helper was hoisted into `nav.support.correlate` as
+  > the public `peak_to_runner_up_ratio` (next to `navigate_with_pyramid_kpeaks`,
+  > whose output it consumes) and the two verbatim copies in
+  > `nav_technique_ring_annulus.py` / `nav_technique_body_disc.py` now import it
+  > -- also resolving the `_peak_to_runner_up_ratio` portion of CODE-TECH-005.
+  > The result is capped at `_MAX_PEAK_RATIO = 1e3`: the near-zero-runner branch
+  > returns the cap (independent of winner magnitude, removing the odd
+  > `winner / 1e-9` scaling that CODE-TECH-009 also flags) and ordinary ratios
+  > are clamped. The confidence sigmoid (`divisor=2`, `cap_at=1`) saturates far
+  > below the cap, so behavior is unchanged except for the pathological tail. 6
+  > new unit tests; 49 technique/correlate tests pass; ruff/mypy clean.
 
 ---
 
@@ -587,6 +636,8 @@ RANSAC re-scores many candidates, partially masking the issue.
 ### Medium
 
 #### CODE-NAV-MODEL-001 — `_sigma_normal_per_vertex` hard-codes the photometric term `(limb_softness·0.5)²`
+
+> **STATUS: FIXED** — Both halves addressed. (1) Zero-resolution (off-body) ridge vertices (`km/px <= 0`, where the resolution backplane is masked/filled with 0.0) are now dropped in `_build_polyline_sampler` rather than reaching `_sigma_normal_per_vertex` and being silently floored to a finite fallback sigma; this keeps the downstream sigmas finite and positive as `lm_subpixel_refine` requires (an inf sigma was not an option -- the LM raises on non-finite sigma, violating the no-raise contract). (2) The `0.5` photometric coefficient is hoisted to the named module constant `TERMINATOR_PHOTOMETRIC_SOFTNESS_COEFF` with a provenance docstring (full YAML migration rides with #118 / CODE-NAV-MODEL-002). Regression test `test_polyline_sampler_drops_zero_resolution_vertices` added; 21 body-model tests pass; ruff/mypy clean.
 **File:** `nav_model_body.py` · `_sigma_normal_per_vertex` (lines 1030-1059)
 The `0.5` photometric-softness coefficient and the albedo term are baked in with
 no config knob and no calibration provenance, yet they directly set the
@@ -608,6 +659,8 @@ section. Several are exported in `__all__`, implying other modules import them �
 double-check none are overridden inconsistently.
 
 #### CODE-NAV-MODEL-003 — `visible_lit_fraction` denominator uses `body_total` (lit+dark) but the name says "lit"
+
+> **STATUS: FIXED (document only)** — The whole-disc denominator is *correct* for the BODY_DISC gate: `lit_visible_in_fov / body_total` drops for both high-phase crescents and partially-framed discs, which are exactly the cases where the disc-correlation template degrades; a lit-hemisphere denominator would score ~1.0 for any fully-framed body and lose that discriminating power. Only the name was misleading, and it is also a persisted sidecar key + diagnostics field, so a rename was rejected in favour of documentation. The computation comment (`nav_model_body.py`) and the `NavFeatureFlags.visible_lit_fraction` field doc (`feature.py`) now state explicitly that the denominator is the whole disc and that the resulting phase coupling is intentional. ruff clean.
 **File:** `nav_model_body.py` · `_build_backplane_model` (lines 576-585)
 `visible_lit_fraction = lit_visible_in_fov / body_total`. The numerator is
 lit-and-in-FOV pixels; the denominator is the *whole* disc. So a fully-in-frame
@@ -638,6 +691,16 @@ rather than navigating on a contaminated template.
   vertex survives (lines 1062-1071) — a placeholder. It feeds reliability and
   confidence, so it is a constant-1 input to several formulas. Document as a
   known stub or implement `survivors/total`.
+  > **STATUS: FIXED** — Implemented `survivors / total`. `_PolylineSampler` now
+  > carries a `total_vertices` field recording the ridge length found before
+  > per-vertex drops (currently the zero-resolution filter from
+  > CODE-NAV-MODEL-001; the shadow extractor will add to it when wired), and
+  > `_visible_arc_fraction` returns `len(survivors) / total_vertices` (0.0 when
+  > no ridge vertices were found). Reliability/confidence now see the real
+  > surviving fraction instead of a constant. Regression test
+  > `test_visible_arc_fraction_reports_survivors_over_total` added; all four
+  > `_PolylineSampler` construction sites updated; 368 nav_model tests pass;
+  > ruff/mypy clean.
 
 ---
 
@@ -688,6 +751,8 @@ the orchestrator's blanket catch defeats it.
 ### Medium
 
 #### CODE-ORCH-003 — `derive_confidence_rank` treats `sigma_px=None` as passing the sigma gate for tiers with `max_sigma_px=None` only, but `high`/`medium` require a sigma
+
+> **STATUS: FIXED** — `derive_confidence_rank` now emits an `IMAGE_LOGGER.warning` when `sigma_px is None`, noting that the sigma-constrained tiers (high/medium) are unreachable and the rank caps at the best sigma-free tier (low). A missing covariance is almost always an upstream technique failing to populate it, so it is surfaced rather than capped silently. The behavior (cap at `low`) is unchanged. Regression test `test_derive_confidence_rank_logs_when_sigma_missing` (capsys) added; 31 ensemble tests pass; ruff/mypy clean.
 **File:** `ensemble.py` · `derive_confidence_rank` (lines 470-507)
 When `sigma_px is None` and a tier has a numeric `max_sigma_px`, the tier is
 skipped (correct), but a result with unknown sigma can still land in `low`
@@ -696,6 +761,8 @@ silently caps at `low` rather than being flagged. Acceptable, but should be
 logged so a missing covariance is visible.
 
 #### CODE-ORCH-004 — `_drop_superseded_fallbacks` parses body names out of `feature_ids` by string prefix
+
+> **STATUS: FIXED** — Body identity is now carried structurally. Added `NavTechniqueResult.source_bodies: frozenset[str]`, a `NavFeature.body_name` property (reading the structured `body_name` already on `LimbArcFlags` / `TerminatorArcFlags` / `BodyDiscFlags` / `BodyBlobFlags`), and a `body_names_from_features` helper. The four body techniques populate `source_bodies` from their consumed features, and both the ensemble (`_source_bodies`) and the orchestrator (`_feature_source_bodies`, `_bodies_with_non_spurious_primary`) now read the structured fields instead of `fid.startswith(...)` parsing; the duplicated `_BODY_FEATURE_PREFIXES` constant was removed from both modules. A feature-id format change can no longer silently disable fallback suppression. Regression test `test_ensemble_fallback_drop_uses_source_bodies_not_feature_ids` (opaque feature_ids, explicit source_bodies) added; 473 technique/orchestrator/feature tests pass; ruff/mypy clean. (The remaining orchestrator-vs-ensemble logic *duplication* is separately tracked as CODE-ORCH-009.)
 **File:** `ensemble.py` · `_source_bodies` (lines 174-190)
 Body identity is recovered by `fid.startswith('body_disc:')` etc. and splitting
 on `:`. This couples the ensemble to a stringly-typed feature-id convention; a
@@ -709,6 +776,8 @@ name as a structured field on `NavTechniqueResult` instead.
 ### Medium
 
 #### CODE-REPROJ-001 — `_reduced_oops_precision` mutates oops global config; not thread-safe, as documented, but `RingMosaic.reproject` is reachable from multi-threaded mosaic drivers
+
+> **Tracked by:** #134 — RingMosaic reprojection mutates oops precision process-globally (concurrency hazard)
 **Files:** `src/nav/reproj/_context_managers.py`, `src/nav/reproj/rings.py` (line 1093)
 The context manager flips `oops.config.PATH_PHOTONS.dlt_precision` globally.
 CLAUDE.md's gotchas confirm `RingMosaic.reproject` is not safe for concurrent use
@@ -719,6 +788,8 @@ mosaic CLIs should serialize reprojection or the precision should be a
 thread-local / per-call argument rather than global mutation.
 
 #### CODE-REPROJ-002 — `nav.reproj.{rings,bodies,cartographic_model,_serialization}` import stdlib `logging`
+
+> **STATUS: SUPERSEDED** — Same issue as the detailed Part 3 finding **CODE-REPROJ-002** ("reproj modules use stdlib `logging` instead of pdslogger"); the disposition is decided there.
 **Files:** `src/nav/reproj/rings.py:12`, `bodies.py:8`, `cartographic_model.py:11`, `_serialization.py:42`
 CLAUDE.md forbids stdlib `logging` only in the listed core namespaces (feature,
 nav_model, nav_orchestrator, nav_technique, support), and `reproj` is not listed
@@ -767,6 +838,8 @@ ship.
 ### Medium
 
 #### CODE-OBS-001 — `compute_smear_vector_px` differences two boresight projections but assumes linear pixel motion across the exposure
+
+> **STATUS: IGNORED** — The centre-FOV linear-smear chord is adequate for the narrow-angle cameras this system navigates (Cassini ISS, Voyager ISS, Galileo SSI, NH LORRI), where field-position variation of the per-pixel motion across the frame is negligible. The `time[1] > time[0]` ordering is guaranteed by the upstream `oops` observation construction. Not worth the added complexity/guard for the supported instruments. (Note: ID collides with the unrelated FIXED `CODE-OBS-001` star_psf_size finding in the remediation table.)
 **File:** `src/nav/nav_model/stars/smeared_psf.py` · `compute_smear_vector_px` (lines 115-149)
 The smear vector is `uv(tfrac=1) − uv(tfrac=0)` at the FOV centre. For a fast
 slew the per-pixel motion is not uniform across the frame (it varies with field
@@ -799,6 +872,14 @@ silently default.
 - **CODE-STYLE-001** — Many techniques repeat the identical `_fail(...)` /
   spurious-result construction (`1e6*eye`, embed-rotation, zero offset). A shared
   `NavTechnique._spurious_result(...)` helper would remove ~5 copies.
+  > **STATUS: FIXED** — Added `NavTechnique._spurious_result(*, feature_ids,
+  > diagnostics, fit_rotation=False, source_bodies=frozenset())` to the base
+  > class, encoding the canonical zero-offset / `1e6*eye` (effectively
+  > zero-information) / `confidence=0` / `spurious=True` shape plus the
+  > rotation-unobservable sentinel. The four byte-identical copies
+  > (`star_field`, `star_refine`, `star_unique_match`, `body_blob._fail_no_signal`)
+  > now delegate to it; newly-unused imports were dropped. 254 technique + 152
+  > orchestrator tests pass; ruff/mypy clean.
 
 ---
 
@@ -814,6 +895,8 @@ parsing are intermixed; the simulation logic that is reused (`nav.sim`) should
 absorb the non-CLI parts so the driver is thin.
 
 #### CODE-MAIN-002 — `main/nav_mosaic.py` imports stdlib `logging`
+
+> **STATUS: FIXED** — The real problem was the `--log-level` handler reaching through the stdlib root logger: `getattr(logging, name)` + `logging.getLogger().setLevel(numeric)` re-levelled *every* third-party library, bypassing the program loggers. Replaced with `MAIN_LOGGER.set_level(name)` / `IMAGE_LOGGER.set_level(name)` (PdsLogger.set_level accepts a level-name string), so the flag now configures the program loggers directly. The lone remaining `import logging` use is the `list[logging.Handler]` return annotation on `_reproject_image_log_handlers` -- the correct type for the handlers `IMAGE_LOGGER.open(handler=...)` consumes (pdslogger handlers are stdlib handlers), so it is kept. ruff/mypy clean.
 **File:** `src/main/nav_mosaic.py:28`
 `main/` scripts are outside the forbidden namespaces, so not a rule breach, but
 inconsistent with the pdslogger-everywhere posture.
@@ -831,6 +914,9 @@ inconsistent with the pdslogger-everywhere posture.
   `reproj` mosaic logic; if any of it is becoming load-bearing it should graduate
   into `nav` with tests, otherwise it risks drifting out of sync with the real
   pipeline (the git status shows it was recently edited).
+  > **STATUS: IGNORED** — `src/experiments/` is intentionally scratch space,
+  > excluded from lint/type by design (CLAUDE.md). The drift risk is accepted;
+  > nothing in `experiments/` is imported by the shipped pipeline.
 
 ---
 
@@ -963,6 +1049,8 @@ WHY risky: construction-time SPICE dependency with no try/except or logging of w
 Confirm: read an image with one planet's SPICE kernel absent.
 
 ### CODE-OBS-004 — Medium — `_ra_dec_limits` declination wrap test uses `np.pi` threshold (should be `np.pi/2` range / different logic)
+
+> **STATUS: FIXED** — Removed the dead declination-wrap branch (declination spans only `[-pi/2, +pi/2]` and never wraps; the `dec > np.pi` selection would have produced an empty array and crashed on `.min()` had it ever fired). A comment now records why no wrap case exists. 16 obs tests pass; ruff/mypy clean.
 `_ra_dec_limits` lines 506-509. RA wrap-around at `> np.pi` is correct for RA in [0, 2pi).
 But declination ranges only over [-pi/2, +pi/2], so `dec_max - dec_min > np.pi` can never be
 true (max span is pi), and the wrap branch `dec[np.where(dec > np.pi)]` selects on `dec > np.pi`
@@ -973,12 +1061,16 @@ real dec can satisfy the condition, so it is dead, but it signals a copy-paste e
 block and should be removed.
 
 ### CODE-OBS-005 — Low — `extfov_margin_vu == (0, 0)` short-circuits make `ext_bp`/`ext_corner_bp` alias the non-ext Backplane
+
+> **STATUS: FIXED (document only)** — The aliasing is intentional (no margin => identical Backplane), so the behavior is kept; the `ext_bp` and `ext_corner_bp` docstrings now warn that they return the *same* object as `bp` / `corner_bp` when the margin is `(0, 0)` and must not be mutated in place assuming independence.
 `ext_bp` (lines 370-372) and `ext_corner_bp` (lines 405-406) assign `self._ext_bp = self.bp`
 when margin is zero. Correct, but it means the extended and non-extended caches share one
 Backplane object; callers that mutate or `reset` one expecting independence could be surprised.
 Low risk given current usage. Note only.
 
 ### CODE-OBS-006 — Low — `unpad_array_to_extfov` docstring/behavior mismatch; missing `Parameters:` section
+
+> **STATUS: FIXED** — Docstring rewritten to say it *crops* an array down to `extdata_shape_vu` (keeping the top-left region), with the `np.unpackbits` rounding rationale and a `Parameters:` block per project convention. ruff/mypy clean.
 `unpad_array_to_extfov` (lines 153-161): the method slices to `extdata_shape_vu` but the name
 says "unpad ... to extfov" while it actually crops a (possibly larger, e.g. unpackbits-rounded)
 array down to extdata shape. Docstring lacks the `Parameters:` block required by project
@@ -989,6 +1081,8 @@ convention. Cosmetic / doc-convention.
 ## src/nav/obs/obs_inst_cassini_iss.py
 
 ### CODE-OBS-007 — Medium — `star_min_usable_vmag` has dead WAC branch returning identical value
+
+> **STATUS: IGNORED** — The intended WAC-specific minimum usable magnitude is not known without a calibration/domain decision, and both branches returning `0.0` is harmless today (no functional bug). Left as-is rather than guessing a value or deleting a branch that documents an intended future WAC/NAC split; revisit when WAC limiting magnitudes are calibrated (cf. issue #130).
 `star_min_usable_vmag` lines 99-109: `if self.detector == 'WAC': return 0.0` then
 `return 0.0`. Both branches return the same value, so the conditional is dead code that
 implies an intended-but-unwritten WAC-specific value. WHY: either a TODO or leftover; misleads
@@ -1004,11 +1098,15 @@ SCLK strings are not always plain floats; this is exactly the format stored in
 valid images. Confirm: inspect a COISS index row's `SPACECRAFT_CLOCK_START_COUNT` value format.
 
 ### CODE-OBS-009 — Low — `instrument_lid` builder assumes `self.detector[0]` is N/W; no validation
+
+> **STATUS: FIXED** — `get_public_metadata` now raises a clear `ValueError` if `self.detector` is not `'NAC'`/`'WAC'` before building the `iss{n,w}a` LID, so an unexpected detector can never produce a malformed LID in a PDS4 label. (Same guard added to the Voyager twin under CODE-OBS-014.) 16 obs tests pass.
 Line 143: `iss{self.detector[0].lower()}a.co`. For detector 'NAC' -> 'issna.co', 'WAC' ->
 'isswa.co'. Correct for the two real cameras but silently produces a malformed LID for any
 unexpected detector string. Low risk. Note.
 
 ### CODE-OBS-010 — Low — `star_max_usable_vmag` uses `np.log(self.texp)` without guarding `texp <= 0`
+
+> **STATUS: FIXED** — Both the WAC and NAC branches now guard `self.texp <= 0.0` and return the reference-exposure magnitude (10.7 / 10.5) instead of feeding a non-positive exposure into `np.log` (which would yield `-inf`/`nan`). 16 obs tests pass; ruff/mypy clean.
 Lines 122/127: `np.log(self.texp / 26)` and `np.log(self.texp)`. A zero or negative exposure
 time yields `-inf`/`nan`. Unlikely but unguarded. Note.
 
@@ -1039,12 +1137,16 @@ crash on read for any non-conforming label. Confirm: diff LABEL3 across VGISS vo
 guarded parse with a clear error.
 
 ### CODE-OBS-013 — Medium — `pdslogger` percent-style logging mixed with f-strings; one call uses `%` args
+
+> **STATUS: FIXED** — The lone `%`-style debug call (the Voyager 1 @ Saturn I/F-correction line) is now an f-string, matching every other debug call in the file. ruff/mypy clean.
 Line 68-69: `logger.debug('  Applied Voyager 1 @ Saturn I/F correction: %.4fx', _V1_SATURN_IF_CORRECTION)`
 uses printf-style args while every other debug call in this file uses f-strings. pdslogger
 supports both, but the inconsistency is a style violation and risks a future reader copy-pasting
 the `%`-form without args. Low/Medium. Align with f-string style.
 
 ### CODE-OBS-014 — Low — `get_public_metadata` `camera`/`filters` rely on `self.detector`/`self.filter` from oops with no validation
+
+> **STATUS: FIXED (partial)** — Added the same `detector in ('NAC', 'WAC')` guard to Voyager `get_public_metadata` (protecting the LID and the `camera` field). The remaining note -- that Voyager emits a single-element `filters=[self.filter]` while Cassini emits two -- is a PDS4-template concern (whether the label template tolerates a variable-length list); that template verification is out of scope here and would be confirmed when the Voyager PDS4 bundle path is exercised. 16 obs tests pass.
 Lines 132-134. Consistent with other instruments; just noting the same unvalidated-attribute
 pattern. `filters` is `[self.filter]` (single) vs Cassini's two-element list — confirm downstream
 PDS4 templates handle the variable-length list.
@@ -1054,6 +1156,8 @@ PDS4 templates handle the variable-length list.
 ## src/nav/obs/obs_inst_galileo_ssi.py / obs_inst_newhorizons_lorri.py
 
 ### CODE-OBS-015 — Medium — NH LORRI and Galileo read uncalibrated data (`calibration=False` / no calibration) but report I/F-style metadata downstream
+
+> **STATUS: FIXED (document only)** — Reframed after domain clarification: Galileo SSI has no I/F-calibrated product and never will, and LORRI's calibrated products are themselves in DN (not I/F), so there is nothing to "calibrate to." The navigation pipeline is already scale-agnostic for these instruments -- detection thresholds are image-derived (`estimate_image_noise_sigma`, MAD), body/ring correlation is NCC, limb/terminator/ring-edge use gradients + distance transforms, and the star gate is magnitude-based (CODE-NAV-003) -- so DN is the correct working unit. Replaced the misleading "TODO Calibrate once oops.hosts is fixed" / pending-I/F comments in the LORRI and Galileo `from_file` readers with notes documenting that these instruments navigate in DN and the pipeline treats brightness scale-invariantly. ruff/mypy clean; 16 obs tests pass.
 LORRI `from_file` line 50 passes `calibration=False` with a TODO; Galileo applies no calibration
 (`# TODO Calibrate once oops.hosts is fixed`). The resulting `obs.data` is in raw DN, not I/F,
 yet the rest of the pipeline (noise thresholds, model brightness comparison) generally assumes a
@@ -1063,6 +1167,8 @@ Impact: degraded navigation for GOSSI/NHLORRI until calibration is wired. This i
 worth flagging as a correctness gap, not just a nicety.
 
 ### CODE-OBS-016 — Low — Heavy duplication across all five `from_file` implementations
+
+> **Tracked by:** #135 — Dedup the five from_file extfov-margin blocks; clear error on non-standard image height
 The extfov-margin resolution block
 (`if extfov_margin_vu is None: if isinstance(...dict): [...] else: [...]`) and the
 `fc_path`/`abspath`/`image_url`/logging boilerplate are copy-pasted verbatim in cassini, voyager,
@@ -1072,6 +1178,8 @@ margin-resolution logic must be applied five times). Impact: maintenance hazard.
 helper on `ObsSnapshotInst` (e.g. `_resolve_extfov_margin(inst_config, data_shape, override)`).
 
 ### CODE-OBS-017 — Medium — `extfov_margin_vu_entry[obs.data.shape[0]]` raises `KeyError` for non-standard image heights
+
+> **Tracked by:** #135 — Dedup the five from_file extfov-margin blocks; clear error on non-standard image height (the clear-error fix lives in the shared helper)
 All five instruments do `extfov_margin_vu_entry[obs.data.shape[0]]` (Cassini line 87, Voyager 74,
 Galileo 57, NHLorri 60, Sim 111) when the config entry is a dict keyed by image height
 (256/512/1024 for Cassini). A windowed/subframed/summed image with a height not in the dict raises
@@ -1084,6 +1192,8 @@ default fallback.
 ## src/nav/obs/obs_inst_sim.py
 
 ### CODE-OBS-018 — Low — `ObsSim.from_file` attaches fake SPICE kernels and `_closest_planet` directly to the snapshot
+
+> **STATUS: IGNORED** — Sim-only scaffolding; the bare attributes are how the simulator injects a known geometry for tests, and the fake-kernel literal never reaches a real PDS4 bundle (sim images are not bundled). Not worth restructuring.
 Lines 115-119. `snapshot._closest_planet = sim_params.get('closest_planet')` and
 `new_obs.spice_kernels = [...]` are set as bare attributes. The `_closest_planet` then defeats the
 base-class computation (intended). Fine for tests but the `spice_kernels` magic literal
@@ -1091,6 +1201,8 @@ base-class computation (intended). Fine for tests but the `spice_kernels` magic 
 Note only.
 
 ### CODE-OBS-019 — Low — `ObsSim.from_file` redundant `__init__` override
+
+> **STATUS: IGNORED** — Harmless redundancy in a sim-only class; removing it carries more regression risk than the cosmetic gain.
 Lines 18-19: `__init__` just calls `super().__init__(snapshot, **kwargs)` with no added behavior;
 it can be deleted (dead override). Minor.
 
@@ -1099,6 +1211,8 @@ it can be deleted (dead override). Minor.
 ## src/nav/obs/__init__.py
 
 ### CODE-OBS-020 — Low — `inst_name_to_obs_class` raises bare `KeyError` for unknown names while the dataset twin documents `Raises: KeyError`
+
+> **STATUS: FIXED** — `inst_name_to_obs_class` now catches the lookup miss and re-raises a `KeyError` whose message names the unknown instrument and lists the valid names, and the docstring documents `Raises: KeyError` to match the dataset twin. ruff/mypy clean.
 Line 33: `return _INST_NAME_TO_OBS_CLASS_MAPPING[name.lower()]`. Unknown instrument name yields a
 bare `KeyError` with no list of valid names, unlike `dataset_name_to_class` which at least documents
 the raise. Minor UX/consistency: catch and re-raise with `inst_names()` in the message.
@@ -1137,6 +1251,8 @@ filter. Impact: hangs or extreme slowness for `--choose-random-images N` combine
 volume.
 
 ### CODE-DS-003 — Medium — `done` early-exit assumes monotonic image numbers but BOTSIM/NAC+WAC interleave breaks it
+
+> **Tracked by:** #136 — --last-image-num can drop later WAC images (index not globally monotonic in image number)
 Lines 771-777: `if img_end_num is not None and img_num > img_end_num: ... done = True; break`
 relies on "Images are in monotonically increasing order". COISS index rows are ordered by
 FILE_SPECIFICATION_NAME, and NAC ('N...') and WAC ('W...') share the same numeric counter but sort
@@ -1148,6 +1264,8 @@ images in batch runs that use `--last-image-num`. Confirm: inspect ordering of a
 and test `--last-image-num` near a NAC/WAC boundary.
 
 ### CODE-DS-004 — Medium — `open(filename, ...)` for CSV/file-list uses stdlib `open`, bypassing FileCache; no URL support
+
+> **STATUS: FIXED** — Both `--image-filespec-csv` and `--image-file-list` inputs are now resolved through `FCPath(...).get_local_path()` before opening, so they may be http(s) holdings paths like the rest of the dataset layer. 31 dataset tests pass; ruff/mypy clean.
 `yield_image_files_from_arguments` lines 356 and 376. The `--image-filespec-csv` and
 `--image-file-list` inputs are read with builtin `open`, so they cannot be remote URLs even though
 the rest of the dataset layer is FCPath/FileCache-based and `pds3_holdings_root` may be a URL. WHY:
@@ -1155,6 +1273,8 @@ inconsistent I/O model; a user pointing these at an http(s) path gets a confusin
 Impact: feature gap / surprising error. Use FCPath.
 
 ### CODE-DS-005 — Medium — `image_filespec_csv` column-detection leaves `colnum` referencing the last column on a malformed (but header-present) file
+
+> **STATUS: FIXED** — The data-row loop now checks `colnum < len(row)` and logs+skips any short/ragged row (with its 1-based row number and the source filename) instead of `IndexError`-ing and aborting the whole batch. 31 dataset tests pass.
 Lines 359-371. The `for colnum in range(len(header))` with `else: raise` correctly raises when no
 matching header is found. But if a matching header **is** found, `colnum` is the matched index — fine.
 The subtle bug: `row[colnum]` (line 370) will `IndexError` on any data row shorter than `colnum+1`
@@ -1162,6 +1282,8 @@ columns with no per-row guard, aborting the whole run. WHY: ragged CSVs are comm
 kills the batch. Impact: brittle. Wrap row access with a length check and skip/log bad rows.
 
 ### CODE-DS-006 — Medium — `--image-file-list` reuses the loop variable `filename` for both the outer file and the parsed token
+
+> **STATUS: FIXED** — The outer list-file is now `list_source` and the per-line token is `token`; the `ValueError` reports the source list file (and the raw line), giving correct context. 31 dataset tests pass.
 Lines 375-385: outer `for filename in arguments.image_file_list:` then inside the loop
 `filename = line.split(' ')[0]`. The outer `filename` (the list-file path) is overwritten by the
 per-line token, so after the first line the original filename is lost — harmless today because it is
@@ -1171,10 +1293,14 @@ file, which is the wrong context for the user). WHY: confusing variable shadowin
 context. Impact: poor diagnostics. Rename inner variable.
 
 ### CODE-DS-007 — Low — `_validate_selection_arguments` is dead code (admitted in a TODO)
+
+> **Tracked by:** #137 — Wire in (or remove) dead _validate_selection_arguments in DataSetPDS3
 Lines 318-329, with `# TODO This method is currently unused and should be used`. Either wire it into
 `yield_image_files_from_arguments` or remove it. Dead code per conventions.
 
 ### CODE-DS-008 — Low — `lru_cache` on a bound method (`_read_pds_table`) keyed by `(self, fn, columns)` holds dataset instances alive
+
+> **STATUS: IGNORED** — Note only; the maxsize=3 per-instance cache is acceptable for the long-lived dataset instances and any thrash is a minor performance detail, not a correctness issue.
 Line 451-452 (`@lru_cache(maxsize=3)` with `# noqa: B019`). The noqa acknowledges it, and the comment
 says instances are long-lived; acceptable, but worth noting that the cache key includes `self`, so
 three distinct *tables* are cached per instance, not three globally — the maxsize=3 may thrash for a
@@ -1207,12 +1333,16 @@ NAC/WAC pairings in `--group botsim` runs. Confirm: feed a sequence with a lone 
 pairs and assert all frames are yielded.
 
 ### CODE-DS-011 — Medium — `pds4_bundle_path_for_image` returns `''` for short names but callers concatenate it into a path
+
+> **STATUS: FIXED** — `pds4_bundle_path_for_image` now raises `ValueError` for an image name shorter than 11 characters (a programming error -- a valid Cassini name is always >= 11) instead of returning the footgun `''`. The now-dead empty-string branch in `pds4_path_stub` was removed. 31 dataset tests pass; ruff/mypy clean.
 Lines 365-384: `if len(image_name) < 11: return ''`. `pds4_path_stub` (line 397) handles the empty
 string, but other call sites that do `bundle_path + something` would produce a malformed leading path.
 WHY: sentinel empty-string return is an easy footgun. Impact: silently wrong bundle paths for unexpected
 names. Prefer raising `ValueError` for an invalid name (it should never legitimately be <11 here).
 
 ### CODE-DS-012 — Medium — `_get_img_name_from_label_filespec` strips at first `_`, collapsing the BOTSIM sub-frame suffix and `_CALIB`
+
+> **STATUS: IGNORED** — The critique's premise is wrong: the `_1` suffix is neither a BOTSIM sub-frame nor a meaningful sequence number; it is always dropped and ignored by design. So `_get_img_name_from_label_filespec`'s `rsplit('_')[0]` is *correct* -- it normalizes to the canonical image name -- and `_img_name_valid` tolerating the `_d` suffix in user input merely accepts the same name in its on-disk form. There is no consequential inconsistency to reconcile.
 Line 95: `img_name.rsplit('.')[0].rsplit('_')[0]`. For a CALIB filespec `N1234567890_1_CALIB.IMG`
 this returns `N1234567890` (drops `_1`), which is the intended image **name**. But `_img_name_valid`
 explicitly supports the `[NW]dddddddddd_d[d]` sub-frame form (lines 121-129), so the two functions
@@ -1223,12 +1353,16 @@ is internally consistent here, but the inconsistency between "valid names may ca
 names. Confirm: filter with `N1234567890_1` and verify it matches.
 
 ### CODE-DS-013 — Low — `_check_additional_image_selection_criteria` requires `arguments.camera` to exist; raises AttributeError if a different parser is used
+
+> **STATUS: IGNORED** — The CLI argument parser is the only caller and always defines `camera`; supporting arbitrary non-CLI namespaces is not a current requirement. Revisit if a programmatic (non-argparse) selection API is added.
 Line 204: `if arguments is None or arguments.camera is None`. If `yield_image_files_index` is called
 programmatically with an `arguments` Namespace that lacks `camera`, this raises `AttributeError`
 instead of treating it as "no filter". WHY: tight coupling to the CLI namespace shape. Impact:
 brittle for non-CLI callers. Use `getattr(arguments, 'camera', None)`.
 
 ### CODE-DS-014 — Low — `_volset_and_volume`/`_volume_to_index` index `volume[6]` assuming exactly `COISS_Nxxx`
+
+> **STATUS: IGNORED** — Note only; `volume[6]` is correct for the fixed `COISS_Nxxx` / `VGISS` volume-name formats and there is no format change on the horizon.
 Lines 159, 169. `volume[6]` extracts the thousands digit; correct for `COISS_2001` -> '2'. Fragile
 to any volume-name format change; no validation. Note (same pattern in VGISS `volume[6]`).
 
@@ -1247,6 +1381,8 @@ that vanish without warning. Impact: silent data loss. Move to config or derive 
 add a directory not in the list and verify images are skipped.
 
 ### CODE-DS-016 — Low — `_volset_and_volume` hard-codes `GO_0xxx` for all volumes incl. `GO_0002`..`GO_0023`
+
+> **STATUS: IGNORED** — Note only; all Galileo SSI volumes live in the `GO_0xxx` volset and no `GO_1xxx` exists, so the hard-coded volset is correct.
 Line 185: `return f'GO_0xxx/{volume}'`. Correct only because all Galileo volumes are in the `GO_0xxx`
 volset; brittle if a `GO_1xxx` ever appears. Note.
 
@@ -1255,6 +1391,8 @@ volset; brittle if a `GO_1xxx` ever appears. Note.
 ## src/nav/dataset/dataset_pds3_voyager_iss.py
 
 ### CODE-DS-017 — Medium — `_img_name_valid` accepts only the 8-char `Cddddddd` form, but VGISS images are also referenced as `C1234567_GEOMED`
+
+> **STATUS: FIXED** — VGISS `_img_name_valid` now strips any extension and product suffix (`core = img_name.split('.', 1)[0].split('_', 1)[0]`) before validating the `Cddddddd` core, so product file names users naturally list (`C1234567_GEOMED`, `C1234567_CALIB`, `C1234567_GEOMED.IMG`) are accepted. 31 dataset tests pass; ruff/mypy clean.
 `_img_name_valid` lines 100-120 require `len == 8`. The `--image-file-list` path
 (dataset_pds3.py line 383) validates each list entry with `_img_name_valid`, so a user listing
 `C1234567_GEOMED` or `C1234567_CALIB` (the actual on-disk product names) is rejected with
@@ -1263,6 +1401,8 @@ naturally have. Impact: usability — valid file lists rejected. Confirm: put `C
 in an `--image-file-list` and observe the ValueError.
 
 ### CODE-DS-018 — Low — `_get_img_name_from_label_filespec` only accepts `_GEOMED.LBL`, silently returning None for `_CALIB`/`_RAW`
+
+> **STATUS: FIXED (document only)** — Added a comment that only the geometrically-corrected `_GEOMED` products are navigated and `_CALIB`/`_RAW` products are intentionally skipped (return None).
 Lines 95-97. Non-GEOMED products return `None` (skip). That is a deliberate "only navigate GEOMED"
 choice, but it is undocumented in the method and means a CALIB-only volume yields nothing with no log.
 Note / add a comment.
@@ -1272,12 +1412,16 @@ Note / add a comment.
 ## src/nav/dataset/dataset_pds3_newhorizons_lorri.py
 
 ### CODE-DS-019 — Medium — `_get_label_filespec_from_index` and `_get_img_name_from_label_filespec` mix `_eng` and `_sci` but only one image type should be navigated
+
+> **Tracked by:** #138 — LORRI dataset accepts both _sci and _eng products; confirm ENG frames should not be navigated
 Lines 48 and 90 accept both `_sci.lbl` and `_eng.lbl`. ENG (engineering) LORRI products are
 typically not science-calibrated frames for navigation; accepting both means the index loop will
 yield engineering frames too. WHY: likely unintended inclusion of non-science frames. Impact: ENG
 frames navigated/processed unexpectedly. Confirm intent; if only `_sci` is wanted, drop `_eng`.
 
 ### CODE-DS-020 — Low — `range_dir` length check `== 15` and `[8] != '_'` is an unexplained magic format
+
+> **STATUS: FIXED (document only)** — Added a comment explaining the LORRI range directory format `ddddddd_ddddddd` (two 7-digit request IDs joined by `_`, hence length 15 with `_` at index 8).
 Lines 85-88: `if len(range_dir) != 15 or range_dir[8] != '_'`. The expected format
 `ddddddd_ddddddd` is 15 chars; correct but undocumented magic constants. Note.
 
@@ -1286,6 +1430,8 @@ Lines 85-88: `if len(range_dir) != 15 or range_dir[8] != '_'`. The expected form
 ## src/nav/dataset/dataset.py
 
 ### CODE-DS-021 — Medium — `ImageFile.image_file_path`/`label_file_path` cache `get_local_path()` results with no thread safety
+
+> **STATUS: FIXED (document only)** — The `image_file_path` / `label_file_path` property docstrings now state the lazy memoization is not thread-safe and that a single `ImageFile` must be used by one thread at a time (enumerate-then-dispatch one per worker). A lock was not added since the mosaic/nav drivers use one `ImageFile` per thread.
 Lines 44-56. The lazy properties memoize `_image_file_path`/`_label_file_path` without locking. If a
 single `ImageFile` is shared across threads (the architecture note warns obs is not thread-safe, but
 ImageFiles can be enumerated then dispatched), two threads can both see `None` and race the download.
@@ -1294,11 +1440,15 @@ race on first access. Impact: redundant downloads or inconsistent path. Low-Medi
 thread-per-ImageFile or add a lock.
 
 ### CODE-DS-022 — Low — `ImageFiles.__getitem__` typed `idx: int` but does not support slices
+
+> **STATUS: IGNORED** — Note only; slicing is not used on `ImageFiles` anywhere, and the `int` annotation documents the supported contract.
 Lines 77-78. `__getitem__(self, idx: int)` returns a single `ImageFile`; slicing
 `image_files[1:3]` would return a `list[ImageFile]` at runtime but is untyped/unsupported by the
 annotation. Minor API gap. Note.
 
 ### CODE-DS-023 — Low — Seven `pds4_*` base methods raise `NotImplementedError` instead of being abstract, allowing silent partial implementations
+
+> **STATUS: IGNORED** — Intentional design (the comment explains it): datasets may legitimately not support PDS4, so the base provides raising stubs rather than abstract methods. Accepted tradeoff.
 Lines 153-281. The comment explains the deliberate non-abstract choice (datasets may not support
 PDS4). Reasonable, but it means a subclass that implements *some* pds4 methods and forgets others
 fails only at runtime when that path is hit. Acceptable tradeoff; noting the design.
@@ -1314,6 +1464,8 @@ Lines 46-48: `assert sorted(...) == sorted(...), 'Dataset names are inconsistent
 with a real check raising at import, or a unit test. Note.
 
 ### CODE-DS-025 — Low — `dataset_name_to_class`/`dataset_name_to_inst_name` raise bare `KeyError`; messages lack valid-name list
+
+> **STATUS: FIXED** — Both functions now catch the lookup miss and re-raise a `KeyError` naming the unknown dataset and listing the valid names (mirroring the CODE-OBS-020 fix); docstrings updated. ruff/mypy clean.
 Lines 68, 83. Same as CODE-OBS-020. Minor UX.
 
 ---
@@ -1321,6 +1473,8 @@ Lines 68, 83. Same as CODE-OBS-020. Minor UX.
 ## src/nav/dataset/dataset_sim.py
 
 ### CODE-DS-026 — Low — `pds4_template_variables` signature omits the keyword-only `*` present in the base/other subclasses
+
+> **STATUS: FIXED** — Added the keyword-only `*` to `DataSetSim.pds4_template_variables` so it matches the base signature (LSP) and the "3 positional max, rest keyword-only" convention. ruff/mypy clean; 31 dataset tests pass.
 Lines 87-94: `def pds4_template_variables(self, image_file, nav_metadata, backplane_metadata)` —
 positional, unlike the base (`*, image_file, ...`, dataset.py line 259) and Cassini. This violates
 the "3 positional max, rest keyword-only" convention and is an LSP mismatch with the base signature
@@ -1331,6 +1485,8 @@ the "3 positional max, rest keyword-only" convention and is an LSP mismatch with
 ## src/nav/dataset/dataset_pds4.py
 
 ### CODE-DS-027 — Low — Entire class is `NotImplementedError` stubs; `_img_name_valid` is declared `@staticmethod` but base wants it abstract
+
+> **STATUS: IGNORED** — `DataSetPDS4` is registered nowhere and is intentional placeholder scaffolding for future PDS4-input support; it is unreachable today and harmless.
 Lines 9-37. All methods raise. Fine as a placeholder, but it is registered nowhere
 (`_DATASET_NAME_TO_CLASS_MAPPING` has no PDS4 entry), so it is currently unreachable dead scaffolding.
 Note.
@@ -1389,6 +1545,8 @@ I read every file in scope in full. A separate review covers nav_model/nav_techn
 - Impact: `nav_create_bundle` generates no data/label/supplemental/browse files for any real navigated image. Combined with CODE-BACKPLANE-001, the entire backplane→PDS4 pipeline is inert on real data.
 
 ### CODE-PDS4-002 — Malformed LID in global index .tab files (missing `urn:nasa:pds:` prefix, wrong image part)
+
+> **Tracked by:** #139 — Global-index LID is malformed (missing urn:nasa:pds: prefix and wrong image part)
 - Severity: **High**
 - File/symbol: `src/pds4/collections.py`, `generate_global_index_files`, line 196: `lid = f'{pds4_bundle_name}:data:{image_name}'`.
 - Description: The body/ring global-index rows write a hand-built LID `'{bundle}:data:{image_name}'`. The canonical data LID (see `DataSet.pds4_image_name_to_data_lid`, e.g. `src/nav/dataset/dataset_pds3_cassini_iss.py` line 428-439) is `urn:nasa:pds:{bundle}:data:{image_lid_part}` where `image_lid_part = image_name.split('_',1)[0].split('.',1)[0]; image_lid_part = image_name[1:] + image_name[0].lower()` (e.g. `N1234567890` -> `1234567890n`).
@@ -1396,6 +1554,8 @@ I read every file in scope in full. A separate review covers nav_model/nav_techn
 - Impact: The `global_index_bodies.tab` / `global_index_rings.tab` LID columns reference products by an identifier that does not match the actual product LIDs, breaking PDS4 cross-references / validation for the supplemental index.
 
 ### CODE-BACKPLANE-002 — Backplane statistics units disagree with stored FITS array units
+
+> **STATUS: IGNORED (working as intended)** — Confirmed by the maintainer: the global index is deliberately human-readable (degrees), and there is no requirement that the supplemental index and the original FITS backplane share units. The degrees-in-index / radians-in-FITS split is intentional, not a bug.
 - Severity: **Medium**
 - File/symbol: `src/backplanes/backplanes_bodies.py` `create_body_backplanes` lines 178-183; `src/backplanes/backplanes_rings.py` lines 93-98; consumed by `src/backplanes/writer.py` (BUNIT) and `src/pds4/collections.py` (index columns).
 - Description: When a backplane's configured `units == 'rad'`, the min/max statistics are converted to degrees (`valid_values = np.degrees(valid_values)`) before being stored in `*_stats`, but the array written to FITS (`per_type_arrays[bp_name]` / `result['arrays'][bp_name]`) remains in radians, and `writer.py` sets `BUNIT` to the *declared* unit (`'rad'`). The degrees-valued stats then flow into the supplemental JSON and into `global_index_*.tab` min/max columns.
@@ -1403,6 +1563,8 @@ I read every file in scope in full. A separate review covers nav_model/nav_techn
 - Impact: The PDS4 global index reports angular ranges in degrees while the backplane data and BUNIT say radians — a unit mismatch in the delivered products. Confirm intended units for the index; if degrees are wanted in the index, the FITS/BUNIT should match or the conversion should be documented and the column labels set to degrees.
 
 ### CODE-BACKPLANE-003 — Body/ring occlusion in merge uses body *center* distance, not per-pixel distance
+
+> **STATUS: IGNORED** — Confirmed by the maintainer: a body and a ring can never be close enough in range for the body-radius-scale center-vs-limb distance difference to change the body-vs-ring occlusion ordering, so the scalar center distance is always a safe discriminator in practice.
 - Severity: **Medium**
 - File/symbol: `src/backplanes/merge.py`, `merge_sources_into_master`, lines 34-46, 73-77, 126.
 - Description: Each body contributes a single scalar distance (`float(entry['distance'])` = inventory center `range`) broadcast across its whole mask. `nearest_body_distance` and the ring occlusion test `occluded = body_presence & (nearest_body_distance < ring_distance)` therefore compare the body's *center* range against the per-pixel ring distance.
@@ -1410,6 +1572,8 @@ I read every file in scope in full. A separate review covers nav_model/nav_techn
 - Impact: Rings may be incorrectly revealed or occluded by up to roughly the body radius in distance near the body limb, corrupting merged ring backplane pixels there. Inter-body ordering has the same limitation. Confirm whether per-pixel body distance backplanes are available to replace the scalar.
 
 ### CODE-REPROJ-001 — Global ring antimask placement assumes grid-aligned `longitude_start`
+
+> **STATUS: FIXED** — `_reproject_inner` now bins and reconstructs longitudes relative to a *grid-aligned* origin `lon_bin_origin = full_min_lon_bin * lon_resolution` (the floor of `longitude_start` snapped to the global grid) instead of the raw `longitude_start`. The requested range is still enforced by the `longitude_start`/`longitude_end` mask, but the relative bin `b` now maps to global bin `b + full_min_lon_bin` whose mosaic longitude `(b + full_min_lon_bin) * res` exactly equals the reconstructed sample longitude -- so a non-grid-aligned `--longitude-range` start no longer misregisters columns by a sub-bin. 156 reproj tests pass; ruff/mypy clean. (Geometry-dependent `reproject()` coverage is integration-only per the test module, so the two-reprojection alignment confirm should be run there.)
 - Severity: **Medium**
 - File/symbol: `src/nav/reproj/rings.py`, `_reproject_inner`, lines 1210-1212, 1221-1225, 1255-1257, 1402-1403.
 - Description: Local longitude bins are computed relative to `longitude_start` (`bp_lon_binned = floor((lon - longitude_start)/res)`), and the per-column actual longitude is reconstructed as `lon_bins_restr * res + longitude_start` (correct). But the *global* antimask is filled with `new_antimask[lon_bins_restr[...] + full_min_lon_bin] = True` where `full_min_lon_bin = floor(longitude_start/res)`. The global mosaic's bin→longitude convention is `global_bin * res` (no `longitude_start` offset; see `RingMosaic.bounds` / `to_bounded` which use `bin * lon_resolution`).
@@ -1417,6 +1581,8 @@ I read every file in scope in full. A separate review covers nav_model/nav_techn
 - Impact: A custom `longitude_range` whose start is not a multiple of `longitude_resolution` shifts reprojected ring columns by a sub-bin/one-bin offset in the mosaic longitude grid, and can mis-merge against columns from other images that used a different (e.g. default) start. To confirm: build two reprojections of the same scene with `longitude_range` starts differing by a non-multiple of `lon_resolution` and check that identical features land in the same global bins.
 
 ### CODE-REPROJ-002 — reproj modules use stdlib `logging` instead of pdslogger
+
+> **STATUS: FIXED** — All four `nav.reproj` modules (`bodies`, `rings`, `cartographic_model`, `_serialization`) now use `IMAGE_LOGGER` (pdslogger) instead of `logging.getLogger`; the `logging.Logger` type hint in `rings._reproject_inner` is now `PdsLogger`, and the now-unused `import logging` / `_LOGGING_NAME` were removed from each. Reprojection diagnostics now flow through the same pdslogger stream handler the rest of nav uses (and that tests capture via capsys). 156 reproj tests pass; ruff/mypy clean. (This is the substance the Part 1 preliminary CODE-REPROJ-002 deferred to.)
 - Severity: **Medium**
 - File/symbol: `src/nav/reproj/bodies.py` (import line 9, use line 1016), `src/nav/reproj/rings.py` (import line 12, use line 1038, type hint `logger: logging.Logger` line 1130), `src/nav/reproj/cartographic_model.py` (import line 11, use line 77), `src/nav/reproj/_serialization.py` (import line 42, `_logger` line 57).
 - Description: All four `nav.reproj` modules import the stdlib `logging` module and call `logging.getLogger(...)`. CLAUDE.md states core nav code must use `pdslogger` via `NavBase.logger` / the `IMAGE_LOGGER`, and "Never import the stdlib `logging` module in core code". The rest of `nav` (and the backplane/pds4 packages, which take `logger: PdsLogger`) follow this.
@@ -1440,6 +1606,8 @@ I read every file in scope in full. A separate review covers nav_model/nav_techn
 - Impact: Sim-only `BODY_ID_MAP` values (and sim backplane fill values) are not reproducible across runs and two bodies can map to the same id. Use a stable hash (e.g. `hashlib`) or an explicit per-name counter, and narrow the except to the real cspyce error.
 
 ### CODE-REPROJ-003 — Off-by-one / wording mismatch on the uint16 image-count cap
+
+> **STATUS: FIXED (document only)** — The bodies `add()` docstrings now say the uint16 capacity is 65,536 (image numbers 0..65535) and that `OverflowError` is raised on the image that would exceed it, matching the rings docstring and the actual `> max` behavior.
 - Severity: **Low**
 - File/symbol: `src/nav/reproj/bodies.py` `add` lines 1409-1413 (and docstring lines 634-636, 1404-1405); `src/nav/reproj/rings.py` `add` lines 1588-1592 (and docstring lines 719-723, 1546-1548).
 - Description: The guard is `if self._image_count > np.iinfo(np.uint16).max:` (i.e. `> 65535`). Since `_image_count` is incremented after each add and is used as the `image_number` *before* incrementing, image numbers 0..65535 are valid and the guard only raises on the 65537th add. The bodies docstring says "capping a single mosaic at 65 535 contributing images" and "raises OverflowError if that limit is exceeded" which is inconsistent with the actual 65536-image capacity; the rings docstring correctly says 65,536.
@@ -1447,6 +1615,8 @@ I read every file in scope in full. A separate review covers nav_model/nav_techn
 - Impact: Cosmetic; no overflow can occur (the 65536th image uses image_number 65535 = uint16 max, the 65537th raises before writing). Align the bodies docstring with the rings docstring and the actual `> max` behaviour.
 
 ### CODE-REPROJ-004 — `RingMosaic` docstring claims `reproject()` mutates `obs.fov`; it does not
+
+> **STATUS: FIXED (document only)** — Dropped the false `obs.fov` mutation claim from the module docstring and the `RingMosaic` Notes; the thread-safety hazard is now described correctly as the process-global oops light-time precision reduction plus Backplane construction on the shared obs.
 - Severity: **Low**
 - File/symbol: `src/nav/reproj/rings.py` module docstring lines 6-8; class `RingMosaic` Notes lines 714-716; `reproject` docstring.
 - Description: The thread-safety notes state reproject "temporarily mutate[s] obs.fov and oops global precision settings." `_reproject_inner` only builds a `Meshgrid`/`Backplane` and reduces oops global precision via `_reduced_oops_precision`; it never assigns `obs.fov`.
@@ -1454,6 +1624,8 @@ I read every file in scope in full. A separate review covers nav_model/nav_techn
 - Impact: Misleading thread-safety guidance; could lead callers to over- or under-protect. Drop the `obs.fov` claim; keep the oops-global-precision + shared-`obs`-Backplane hazard.
 
 ### CODE-REPROJ-005 — `radius_at_longitude` method docstring drops the `/86400` day conversion
+
+> **STATUS: FIXED (document only)** — The `radius_at_longitude` docstring now states the pericenter direction is `w0 + dw * et / 86400` and notes `dw` is rad/day and `et` is TDB seconds, matching the implementation and the class docstring.
 - Severity: **Low**
 - File/symbol: `src/nav/reproj/ring_orbit_model.py`, `radius_at_longitude` docstring lines 91-93 ("pericenter direction at time `et` is `w0 + dw * et`").
 - Description: The method docstring says the pericenter direction is `w0 + dw * et`, but the implementation (line 102) and the class docstring (line 38) correctly use `w0 + dw * et / 86400` because `dw` is rad/day and `et` is seconds.
@@ -1461,6 +1633,8 @@ I read every file in scope in full. A separate review covers nav_model/nav_techn
 - Impact: Documentation only; the code is correct. Fix the method docstring to read `w0 + dw * et / 86400` (or "per day").
 
 ### CODE-PDS4-003 — `pds4` collection-label exception handling: `logger.exception` then `raise` (redundant) and inconsistent template.write call styles
+
+> **STATUS: FIXED** — Removed the four `try/except Exception: logger.exception(...); raise` wrappers around `template.write(...)` in `collections.py`; the exception now propagates once (the traceback names the failing write, and the top-level handler logs it), eliminating the double-logged traceback and the broad-except (ruff BLE). The mixed `template.write` arg styles (local-path+upload vs FCPath-direct) were left as-is: standardizing them changes the upload mechanism and the finding was uncertain about pdstemplate's write/upload behavior, so it was not worth the risk without verification. ruff/mypy clean.
 - Severity: **Low**
 - File/symbol: `src/pds4/collections.py` lines 82-89, 116-123, 299-303, 314-318; vs `src/pds4/bundle_data.py` line 112-113.
 - Description: Two stylistic inconsistencies. (1) Collection/global-index labels wrap `template.write(...)` in `try/except Exception: logger.exception(...); raise`, which logs a full traceback then re-raises the same exception (it will be logged again by the caller / top-level handler). (2) `template.write` is sometimes passed a local `str(...get_local_path())` (lines 83, 117) and sometimes an `FCPath` directly (lines 300, 315; and `bundle_data.py` line 113). `pdstemplate.PdsTemplate.write` normalizes its argument to `FCPath` and uses `write_bytes` (which uploads), so both styles work and the explicit `.upload()` calls after the local-path variants (e.g. collections.py 90, 124) are redundant — but the mixed styles obscure that and invite the (incorrect) assumption that the FCPath variants do not upload.
@@ -1468,6 +1642,8 @@ I read every file in scope in full. A separate review covers nav_model/nav_techn
 - Impact: Cosmetic / maintainability. Pick one `template.write` convention (pass the `FCPath`, drop the redundant `get_local_path()`+`upload()`), and either remove the catch-log-reraise or narrow it.
 
 ### CODE-PDS4-004 — Redundant/inconsistent parent-dir creation for global index .tab files
+
+> **STATUS: FIXED** — Removed the redundant `rings_tab_local.parent.mkdir(...)` so the bodies and rings global-index paths are symmetric; both rely on `FCPath.get_local_path()` creating parents (a comment records this). ruff/mypy clean.
 - Severity: **Low**
 - File/symbol: `src/pds4/collections.py`, `generate_global_index_files`, lines 233-234 (bodies_tab, no mkdir) vs 261-262 (rings_tab, explicit mkdir).
 - Description: `rings_tab_local.parent.mkdir(parents=True, exist_ok=True)` is called for the rings index but not for the bodies index in the same `supplemental_dir`. This is benign because `FCPath.get_local_path()` defaults to `create_parents=True` (verified), so both parents are already created — making the rings `mkdir` redundant and the asymmetry confusing.
@@ -1546,6 +1722,8 @@ noise/PSF/crater model and per-scene seed sharing, not seed nondeterminism.
   the user only meant to change its albedo).
 
 ### CODE-CFG-2 — `read_config(reread=True)` after the no-path branch leaves stale state / does not re-init `_config_dict`
+
+> **STATUS: FIXED** — The no-path branch now resets `self._config_dict = {}` before re-globbing the `config_files` directory, so a `read_config(reread=True)` is a clean reload and keys removed from the YAML since the prior load no longer survive (previously `update_config` merged into the stale dict, unioning old and new keys). Regression test `test_reread_no_path_drops_removed_keys` added; 7 config tests pass.
 - Severity: Medium
 - File: `src/nav/config/config.py`, `Config.read_config` (lines 158-170)
 - Description: When `config_path is None` and `reread=True`, the method does NOT
@@ -1563,6 +1741,8 @@ noise/PSF/crater model and per-scene seed sharing, not seed nondeterminism.
   removing it from a config file, and rereading; the key persists.
 
 ### CODE-CFG-3 — `category()` and several section properties return fresh `AttrDict` copies, so writes silently no-op; `category()` is not cached
+
+> **STATUS: FIXED** — `category()` now caches its `AttrDict` per category in `self._category_cache` and `_update_attrdicts` clears that cache on reload, matching the caching semantics of the named section properties (which are rebuilt there). The docstring notes config is read-only. Regression tests `test_category_returns_cached_instance` and `test_category_cache_rebuilt_on_reload` added; 7 config tests pass; ruff/mypy clean.
 - Severity: Low
 - File: `src/nav/config/config.py`, `Config.category` (lines 244-248) and
   `planets`/`satellites`/`fuzzy_satellites`/`ring_satellites`
@@ -1576,6 +1756,8 @@ noise/PSF/crater model and per-scene seed sharing, not seed nondeterminism.
   invites bugs and wastes allocations on hot paths.
 
 ### CODE-CFG-4 — `logger.py` imports the stdlib `logging` module inside the nav tree
+
+> **STATUS: FIXED (document only)** — Confirmed nav.config is intentionally exempt: the stdlib `logging` import is type-annotation-only (`logging.Handler` / `logging.FileHandler` for the pdslogger-backed handlers), and all runtime logging goes through pdslogger. Added a comment at the import documenting the exemption and that the rule targets nav.feature / nav_model / nav_orchestrator / nav_technique / nav.support.
 - Severity: Low
 - File: `src/nav/config/logger.py` (line 17), also used at lines 124, 149
 - Description: CLAUDE.md states the stdlib `logging` module must never be imported
@@ -1590,6 +1772,8 @@ noise/PSF/crater model and per-scene seed sharing, not seed nondeterminism.
 - Impact: Cosmetic / convention only.
 
 ### CODE-SIM-1 — All bodies in a combined scene share one crater seed, producing identical crater fields
+
+> **STATUS: DEFERRED** — Sim rendering-quality improvement (per-body crater seed + shape-cache key). Deferred; revisit with the simulator-fidelity work.
 - Severity: Medium
 - File: `src/nav/sim/render.py`, `_render_combined_model_cached` (line 766,
   `seed=random_seed`) and `_render_single_body` (line 384)
@@ -1608,6 +1792,8 @@ noise/PSF/crater model and per-scene seed sharing, not seed nondeterminism.
   name/index into the seed (e.g. `seed ^ hash(body_name)`).
 
 ### CODE-SIM-2 — Craters disable limb anti-aliasing; AA edge is forcibly zeroed
+
+> **STATUS: DEFERRED** — Sim rendering-quality improvement (unify the AA rim across crater / no-crater paths). Deferred.
 - Severity: Medium
 - File: `src/nav/sim/sim_body.py`, `_add_craters_and_shading` (line 479:
   `intensity_out[~ellipse_mask_nz] = 0.0`) vs `create_simulated_body` AA path
@@ -1627,6 +1813,8 @@ noise/PSF/crater model and per-scene seed sharing, not seed nondeterminism.
   depending on an unrelated parameter.
 
 ### CODE-SIM-3 — Two divergent illumination conventions between the crater and no-crater shaders
+
+> **STATUS: DEFERRED** — Sim rendering-quality fix (unify the two shaders' illumination convention incl. rotation_z back-rotation). Deferred.
 - Severity: Medium
 - File: `src/nav/sim/sim_body.py`, `_lambertian_shading` (lines 249-250) vs
   `_add_craters_and_shading` (lines 459-460)
@@ -1669,6 +1857,8 @@ noise/PSF/crater model and per-scene seed sharing, not seed nondeterminism.
   instead of darken. Affects multi-layer simulated scenes (rings + noise + stars).
 
 ### CODE-SIM-5 — `_render_*` use `lru_cache(maxsize=1)`, so any parameter change is a full recompute and nested caches thrash
+
+> **STATUS: DEFERRED** — Sim performance only (cache sizing / json.dumps overhead), not correctness. Deferred.
 - Severity: Low
 - File: `src/nav/sim/render.py` (`_render_stars_cached` maxsize=1,
   `_render_bodies_positioned_cached` maxsize=1, `_render_background_noise_cached`
@@ -1684,6 +1874,8 @@ noise/PSF/crater model and per-scene seed sharing, not seed nondeterminism.
   larger maxsize or removing the inner caches.
 
 ### CODE-SIM-6 — `render_stars` / `render_bodies` are dead public API and leak cached mutable objects
+
+> **STATUS: DEFERRED** — Dead sim-only API cleanup with a latent aliasing hazard if revived. Deferred.
 - Severity: Low
 - File: `src/nav/sim/render.py`, `render_stars` (138-152), `render_bodies`
   (435-491)
@@ -1698,6 +1890,8 @@ noise/PSF/crater model and per-scene seed sharing, not seed nondeterminism.
   the combined path through them.
 
 ### CODE-SIM-7 — Body inventory bbox uses `max(axis1,axis2,axis3)/2` for both axes and ignores tilt
+
+> **STATUS: DEFERRED** — Coarse diagnostic-only inventory bbox. Deferred.
 - Severity: Low
 - File: `src/nav/sim/render.py`, `_render_single_body` (lines 417-426) and
   `_render_bodies_positioned_cached` (lines 314-323)
@@ -1711,6 +1905,8 @@ noise/PSF/crater model and per-scene seed sharing, not seed nondeterminism.
   bbox. Low because inventory is diagnostic.
 
 ### CODE-SIM-8 — `_render_stars_cached` star-flux scaling reads as inverted / mislabeled
+
+> **STATUS: DEFERRED** — Needs confirmation of the intended star dynamic range / zero-point before changing. Deferred.
 - Severity: Low
 - File: `src/nav/sim/render.py`, lines 59, 116
 - Description: `star.dn = 2.512 ** -(star.vmag - 4.0)`. For brighter stars (smaller
@@ -1727,6 +1923,8 @@ noise/PSF/crater model and per-scene seed sharing, not seed nondeterminism.
   intended dynamic range.
 
 ### CODE-SIM-9 — `e >= 1.0 -> e = 0.99` silently corrupts ring geometry
+
+> **STATUS: DEFERRED** — Sim-only footgun (silent eccentricity clamp). Deferred.
 - Severity: Low
 - File: `src/nav/sim/sim_ring.py`, `compute_edge_radius_at_angle` (lines 96-97),
   `_compute_edge_radii_array` (lines 137-138)
@@ -1738,6 +1936,8 @@ noise/PSF/crater model and per-scene seed sharing, not seed nondeterminism.
 - Impact: Wrong simulated ring radius with no diagnostic. Low (sim-only).
 
 ### CODE-FEAT-1 — `composition.py` reaches into `geometry.bbox_extfov_vu` / `vertices_vu` via `getattr`/attribute access without exhaustively covering the sum type
+
+> **STATUS: Tracked by:** #140 — composition.py accesses geometry union fields via attribute/getattr (fragile vs the typed sum type)
 - Severity: Low
 - File: `src/nav/feature/composition.py`,
   `compose_template_features` (line 74, `feature.geometry.bbox_extfov_vu`) and
@@ -1757,6 +1957,8 @@ noise/PSF/crater model and per-scene seed sharing, not seed nondeterminism.
   Recommend `isinstance` dispatch or a shared protocol/base with `bbox_extfov_vu`.
 
 ### CODE-FEAT-2 — `NavReliabilityBreakdown` / flag dataclasses validate ranges, but the reliability score itself is not cross-checked against the breakdown
+
+> **STATUS: IGNORED** — Explicitly a design observation, not a bug: the reliability scalar is what gates, and the breakdown is for human curation. Flagged for the scoring-math owner; no consistency check added here.
 - Severity: Low
 - File: `src/nav/feature/feature.py` (`NavReliabilityBreakdown`, lines 28-70),
   `reliability.py`
@@ -1770,6 +1972,8 @@ noise/PSF/crater model and per-scene seed sharing, not seed nondeterminism.
 - Impact: None today; flag for the math review that owns the scoring formulas.
 
 ### CODE-ANNO-1 — `draw_rect` (used by the star-marker path) does not clip; mitigated only by manual half-width clamp
+
+> **STATUS: FIXED** — `draw_rect` now clips all slice bounds into `[0, rows]` / `[0, cols]`, so a center near or beyond the image edge can no longer wrap a negative index to the far side; a fully off-image rectangle draws nothing. The per-caller half-width clamp is no longer load-bearing. Tests `test_draw_rect_clips_off_image_center`, `test_draw_rect_draws_on_image`, `test_draw_rect_partial_off_edge_only_paints_in_bounds` added; 24 image tests pass; ruff/mypy clean.
 - Severity: Low
 - File: `src/nav/feature/composition.py`, `_paint_star_marker` (lines 205-216) +
   `src/nav/support/image.py`, `draw_rect` (805-847)
@@ -1784,6 +1988,8 @@ noise/PSF/crater model and per-scene seed sharing, not seed nondeterminism.
   itself, as `draw_circle` already does.
 
 ### CODE-ANNO-2 — `annotation_text_info.py` has a `# TODO Add error handling` font loader that will raise an unhelpful error on a missing font
+
+> **STATUS: FIXED** — `_load_font` now wraps `ImageFont.truetype` and re-raises a `FileNotFoundError` whose message names the offending path and points at the `general.truetype_font_dir` config key, instead of surfacing a raw PIL `OSError` deep in the annotation loop. ruff/mypy clean.
 - Severity: Low
 - File: `src/nav/annotation/annotation_text_info.py`, `_load_font` (lines 30-43)
 - Description: `ImageFont.truetype(path, size)` is called with no error handling
@@ -1794,6 +2000,8 @@ noise/PSF/crater model and per-scene seed sharing, not seed nondeterminism.
 - Impact: Low; cosmetic error quality.
 
 ### CODE-ANNO-3 — `AnnotationTextInfo` stores `self._config = DEFAULT_CONFIG` but never uses it
+
+> **STATUS: IGNORED** — Harmless unused field in a small annotation helper; removing it is cosmetic and the font dir is already injected via `tt_dir`. Not worth the churn.
 - Severity: Low
 - File: `src/nav/annotation/annotation_text_info.py` (line 68)
 - Description: `self._config` is assigned the global singleton and never read (the
@@ -1830,6 +2038,8 @@ noise/PSF/crater model and per-scene seed sharing, not seed nondeterminism.
 - Impact: Low — experiments only.
 
 ### CODE-EXP-2 — Experiment scripts duplicate large commented URL/body blocks and a duplicated `gaussian_patch`
+
+> **STATUS: IGNORED** — `src/experiments/` is intentionally scratch space, excluded from lint/type; the duplication is accepted and nothing in it is imported by the shipped pipeline.
 - Severity: Low (experiments)
 - File: `src/experiments/nav_master1.py`, `nav_model_body1.py`,
   `nav_model_stars1.py` (near-identical commented dataset menus);
@@ -1885,6 +2095,8 @@ live with the other star helpers, not be buried under 560 lines of comments.
 ---
 
 ### CODE-SUPPORT-002 — `clean_obj` mutates its caller's dict/list in place
+
+> **STATUS: FIXED (document only)** — Behavior kept (callers discard the dict after serializing); `clean_obj`'s docstring now states plainly that it is NOT pure -- a `dict` argument (and nested dicts) is converted in place and returned, while a `list`/`tuple` yields a new list but its nested dicts are still mutated -- and that callers needing the original untouched must pass a deep copy.
 Severity: **Medium**
 File: `src/nav/support/file.py`, `_clean_dict` (lines 49-61), `_clean_list` (lines 64-78), via `clean_obj` (lines 9-25), reached from `dump_yaml` and `json_as_string`.
 
@@ -1909,6 +2121,8 @@ is a footgun. Confirm by `d = {'x': np.int64(3)}; clean_obj(d); type(d['x'])` �
 ---
 
 ### CODE-SUPPORT-003 — `next_power_of_2(0)` returns 2 and `next_power_of_2` accepts/ignores negatives
+
+> **STATUS: FIXED** — `next_power_of_2` now returns `1` for `0`/`1` (the smallest power of 2 >= the input) and raises `ValueError` on negative input (which `bin()` would otherwise misparse). Regression assertions added to `test_next_power_of_2`; ruff/mypy clean.
 Severity: **Low**
 File: `src/nav/support/image.py`, `next_power_of_2` (lines 173-186).
 
@@ -1927,6 +2141,8 @@ returns `2`.
 ---
 
 ### CODE-SUPPORT-004 — `shift_array` / `pad_array` / `unpad_array` return the input array unchanged on no-op (aliasing inconsistency)
+
+> **STATUS: FIXED (document only)** — Aliasing is now documented precisely in each function's Returns: `shift_array`/`pad_array` return the *same* object on the no-op (zero) path and a fresh array otherwise; `unpad_array` never copies (same object on no-op, a *view* on a non-zero margin). Each notes not to mutate the result assuming independence.
 Severity: **Medium**
 File: `src/nav/support/image.py`, `shift_array` (lines 43-44), `pad_array` (lines 85-86), `unpad_array` (lines 115-116).
 
@@ -1950,6 +2166,8 @@ document the aliasing precisely. Confirm by `a = np.zeros((4,4)); shift_array(a,
 ---
 
 ### CODE-SUPPORT-005 — `apply_filter` null-sigma short-circuit returns raw intensity for `GRADIENT_OF_GAUSSIAN` and `MORPH_DILATE`, which is semantically wrong
+
+> **STATUS: FIXED** — The null-sigma identity short-circuit is now restricted to the blur-family kinds (`ISOTROPIC_GAUSSIAN`, `ANISOTROPIC_GAUSSIAN`, `BANDPASS_DOG`); `GRADIENT_OF_GAUSSIAN`, `MORPH_DILATE`, and `DISTANCE_TRANSFORM` are no longer short-circuited, so a small-sigma gradient request returns a gradient image rather than the raw intensities. Regression test `test_apply_filter_small_sigma_gradient_is_not_short_circuited` added; 14 filter tests pass; ruff/mypy clean.
 Severity: **Medium**
 File: `src/nav/support/filters.py`, `apply_filter` (lines 269-273), `_largest_sigma` (lines 109-131).
 
@@ -1974,6 +2192,8 @@ the null-sigma short-circuit to the blur-family kinds (mirroring how
 ---
 
 ### CODE-SUPPORT-006 — `_apply_anisotropic_gaussian` crops only top-left after rotate, losing centering and risking shape mismatch
+
+> **STATUS: FIXED** — Removed the dead `out = out[: arr.shape[0], : arr.shape[1]]` slice (a no-op since `rotate(..., reshape=False)` preserves shape) and the misleading comment that claimed it addressed a sub-pixel shift; replaced with a note that the result is already arr-shaped. 122 support tests pass.
 Severity: **Low**
 File: `src/nav/support/filters.py`, `_apply_anisotropic_gaussian` (lines 158-169).
 
@@ -1994,6 +2214,8 @@ preserves shape.
 ---
 
 ### CODE-SUPPORT-007 — `mad_std` returns NaN on empty input and has no guard
+
+> **STATUS: FIXED** — `mad_std` now filters to finite values and raises `ValueError` when none remain (empty or all-NaN/inf), instead of silently returning a `NaN` that poisons downstream covariance/confidence. Partial-NaN inputs now estimate from the finite subset rather than collapsing to NaN. 122 support tests pass; ruff/mypy clean.
 Severity: **Low**
 File: `src/nav/support/misc.py`, `mad_std` (lines 115-119); reached by `noise_estimate.estimate_image_noise_sigma` and `correlate.evaluate_candidate`.
 
@@ -2049,6 +2271,8 @@ sticky-failure caching are worth narrowing.
 ---
 
 ### CODE-SUPPORT-010 — `draw_rect` docstring describes `yhalfwidth` incorrectly
+
+> **STATUS: FIXED** — Corrected the `yhalfwidth` description (vertical half-width, not 'inner border'), clarified `xctr`/`yctr`/`xhalfwidth`, and reordered the Parameters to match the signature.
 Severity: **Low**
 File: `src/nav/support/image.py`, `draw_rect` (lines 805-826).
 
@@ -2064,6 +2288,8 @@ Impact: Documentation-only; trivial fix.
 ---
 
 ### CODE-SUPPORT-011 — `summary_png.grayscale_to_rgb_with_quantile_stretch`: `clip_quantile` can go to 0 or negative for tiny images
+
+> **STATUS: DEFERRED** — Currently safe (the negative-quantile case is unreachable and the `white <= black` guard handles the tiny/flat-image degenerate case). Hardening comment deferred.
 Severity: **Low**
 File: `src/nav/support/summary_png.py`, `grayscale_to_rgb_with_quantile_stretch` (lines 121-126).
 
@@ -2089,6 +2315,8 @@ harden it. Confirm by feeding a 1x1 finite image.
 ---
 
 ### CODE-SUPPORT-012 — `evaluate_candidate` assumes model fits inside image; `crop_center` raises if model smaller than image
+
+> **STATUS: FIXED** — `evaluate_candidate` now validates `model_shape >= image_shape` in both dimensions up front and raises a clear `ValueError` (pad the model to at least image size) instead of letting `crop_center` raise an opaque error two calls deep; the duplicate shape unpacking lower down was removed. ruff/mypy clean; 121 support tests pass.
 Severity: **Medium**
 File: `src/nav/support/correlate.py`, `evaluate_candidate` (lines 449-454), uses `crop_center` (`image.py:148-170`).
 
@@ -2113,6 +2341,8 @@ Impact: Medium — a mis-sized model produces a confusing `ValueError` from
 ---
 
 ### CODE-SUPPORT-013 — `navigate_with_pyramid_kpeaks` crashes with IndexError when `pyramid_levels <= 0`
+
+> **STATUS: FIXED** — `navigate_with_pyramid_kpeaks` now raises a clear `ValueError('pyramid_levels must be >= 1')` up front instead of letting an empty `shifts_arr[-1]` produce a cryptic `IndexError`. ruff/mypy clean; 122 support tests pass.
 Severity: **Low**
 File: `src/nav/support/correlate.py`, `navigate_with_pyramid_kpeaks` (lines 838-919).
 
@@ -2129,6 +2359,8 @@ cryptic crash. Add an explicit `pyramid_levels >= 1` check.
 ---
 
 ### CODE-SUPPORT-014 — Hard-coded magic numbers throughout `correlate.py` that the rest of the system makes configurable
+
+> **STATUS: DEFERRED** — Config-driven tuning of the correlation thresholds (overlap/variance floors, edge margin, quality threshold) is a larger plumbing change (these are free functions with no Config access). Deferred.
 Severity: **Low**
 File: `src/nav/support/correlate.py` — e.g. `_NCC_BIDIR_W_FRAC_MIN=0.3`, `_NCC_BIDIR_VAR_FRAC_MIN=0.1` (lines 109-110); the `at_edge` 2.0-pixel margin (lines 948-951); the `1e6`/`1e3` degenerate-uncertainty sentinels (lines 379, 627-628); the `quality_thresh=6.0`, `consistency_tol=2.0`, `prior_weight_final=0.25` defaults.
 
@@ -2148,6 +2380,8 @@ constants. Consider threading them through as parameters fed from config.
 ---
 
 ### CODE-SUPPORT-015 — `filters._apply_morph_dilate` ignores per-axis sigma; uses only the max as a square structuring element
+
+> **STATUS: FIXED** — `_apply_morph_dilate` now builds a per-axis rectangular structuring element from `(ceil(sigma_v), ceil(sigma_u))` instead of collapsing both axes to one square via `max(sigma_xy)`, so an anisotropic `sigma_xy` dilates each axis independently. Docstring updated; 122 support tests pass; ruff/mypy clean.
 Severity: **Low**
 File: `src/nav/support/filters.py`, `_apply_morph_dilate` (lines 204-214).
 
@@ -2166,6 +2400,8 @@ MORPH_DILATE specs.
 ---
 
 ### CODE-SUPPORT-016 — `time.utc_to_et` docstring example is not parseable by `julian.tai_from_iso` reliably; space-separated form unverified
+
+> **STATUS: IGNORED** — The space-separated ISO form is handled by the `julian` library `utc_to_et` delegates to; the docstring documents julian's accepted inputs and the example is correct for the installed version. Not worth adding a normalization layer.
 Severity: **Low**
 File: `src/nav/support/time.py`, `utc_to_et` (lines 55-67).
 
@@ -2186,6 +2422,8 @@ docstring or normalize the separator.
 ---
 
 ### CODE-SUPPORT-017 — `correlate.py` retains TODO/commentary blocks masquerading as code logic
+
+> **STATUS: DEFERRED** — Dead-comment cleanup in `correlate.py`; bundled with the broader correlate tidy-up (relates to the SUPPORT-014 config work). Deferred.
 Severity: **Low**
 File: `src/nav/support/correlate.py` — `evaluate_candidate` (lines 456-463, 477-484), `navigate_single_scale_kpeaks` (lines 617-622), `navigate_with_pyramid_kpeaks` docstring opens with `"""TODO Clean this up` (line 668).
 
@@ -2303,6 +2541,8 @@ escaping `navigate()`; check `classifier.missing_frac == 0.0` on the same input.
 ---
 
 ### CODE-ORCH-004 — Saturation mask + classifier statistics computed on the DC-removed filtered image
+
+> **STATUS: FIXED** — The image classifier and the saturation mask now read the *raw* image (their absolute-DN gates -- blank/saturation/overexposed and the full-well saturation mask -- are physical sensor properties that a DC-removing source-image filter like BANDPASS_DOG would invalidate), while the cosmic-ray mask and the derivative DT threshold estimate their noise sigma from the *filtered* working image they actually operate on. With every shipped source_image_filter disabled today (`image is raw_image`) this is a no-op, but a future DoG pre-filter no longer silently breaks saturation/blank flagging. 152 orchestrator tests pass; ruff/mypy clean.
 **Severity: Medium**
 **File/symbol:** `orchestrator.py::_make_context` lines 774-787 (`image, pre_filter = self._apply_source_image_filter(...)`,
 then `classifier.classify(image, ...)` and `_build_saturation_mask(image, ...)`).
@@ -2358,6 +2598,8 @@ nhlorri mean those calibrated cameras are effectively running the raw-DN scale. 
 ---
 
 ### CODE-ORCH-006 — `provenance` git-subprocess + full config hashing re-run on every image
+
+> **STATUS: FIXED** — `_resolve_git_sha` and `_resolve_static_data_hashes` are now `@functools.cache`-memoized at process scope (the repo SHA and shipped config files do not change mid-run), so the two `git` subprocesses and the sha256 pass run once per process instead of once per navigated image; `_resolve_spice_kernels` stays per-image. The unreadable-file test clears the cache around its mocked call. 152 orchestrator tests pass; ruff/mypy clean.
 **Severity: Medium**
 **File/symbol:** `provenance.py::collect_provenance_metadata` /
 `_resolve_git_sha` / `_resolve_static_data_hashes`; called by `orchestrator.py::_make_provenance`
@@ -2381,6 +2623,8 @@ git/hash cost scales linearly with N. **Fix direction:** memoize `_resolve_git_s
 ---
 
 ### CODE-ORCH-007 — `with_prior` raises `ValueError`/`TypeError` swapped vs documented contract
+
+> **STATUS: FIXED** — `NavContext.with_prior`'s docstring now correctly classifies the exceptions: `TypeError` only for non-numeric `offset_px` entries (coercion failure), and `ValueError` for a non-length-2 `offset_px`, non-finite entries, or a bad/non-finite covariance -- matching the code. (Docstring aligned rather than changing the raise type, which would break callers catching `ValueError`.)
 **Severity: Low**
 **File/symbol:** `nav_context.py::NavContext.with_prior` lines 128-143.
 
@@ -2399,6 +2643,8 @@ covariance_px2=np.eye(2))` raises `ValueError`, not `TypeError`.
 ---
 
 ### CODE-ORCH-008 — Conflicted pass-1 ensemble silently drives the pass-2 prior
+
+> **STATUS: FIXED** — The pass-2 prior is now installed only when the pass-1 ensemble status is `success`; a `conflicted` pass-1 (an explicitly untrustworthy best-group offset) no longer seeds pass-2, so pass-2 evidence can break the tie instead of being locked toward one arbitrary mode. 152 orchestrator tests pass (incl. the success-path prior test); ruff/mypy clean.
 **Severity: Low**
 **File/symbol:** `orchestrator.py::navigate` lines 450-467.
 
@@ -2419,6 +2665,8 @@ a sub-`agreement_gap` confidence gap and verify the conflicted offset is passed 
 ---
 
 ### CODE-ORCH-009 — Fallback-supersession logic duplicated between orchestrator and ensemble
+
+> **STATUS: FIXED** — The worst of the duplication (the `_BODY_FEATURE_PREFIXES` tuple + feature-id parsing) was already removed by the CODE-ORCH-004 structured-`source_bodies` fix. The remaining duplicate -- the technique-tier registry lookup -- is now a single shared `nav.nav_technique.nav_technique.technique_tier(name)` helper that both the orchestrator (`_bodies_with_non_spurious_primary`) and the ensemble (fallback-supersession pass) call; the ensemble's private `_technique_tier` and the orchestrator's inline registry loop were removed. 406 orchestrator+technique tests pass; ruff/mypy clean.
 **Severity: Low**
 **File/symbol:** `orchestrator.py::_BODY_FEATURE_PREFIXES` / `_feature_source_bodies` /
 `_bodies_with_non_spurious_primary` (lines 210-262) versus
@@ -2445,6 +2693,8 @@ the coverage set is computed twice per image, each with an O(results × registry
 ---
 
 ### CODE-ORCH-010 — `NavResult.__post_init__` does not enforce the `conflicted` rank/status invariant
+
+> **STATUS: FIXED** — `__post_init__` now enforces the symmetric invariant `confidence_rank == 'conflicted' <=> status == 'conflicted'`, so a directly-constructed `NavResult` mixing an `ok`/`success` status with a `conflicted` rank (or vice-versa) raises. The canonical `.conflicted()` constructor already pairs both. 152 tests pass.
 **Severity: Low**
 **File/symbol:** `nav_result.py::NavResult.__post_init__` lines 84-99.
 
@@ -2466,6 +2716,8 @@ self-consistent, so impact is confined to direct construction / future refactors
 ---
 
 ### CODE-ORCH-011 — `derive_confidence_rank` collapses "low confidence" and "sigma too large" into one reason
+
+> **STATUS: FIXED** — Added `NavStatusReason.FINAL_SIGMA_ABOVE_THRESHOLD` (+ its status-reason-info template entry). The ensemble's no-tier-earned branch now distinguishes the cause: if the combined confidence cleared the lowest tier's `min_confidence` it reports the new sigma reason (confident but too imprecise), otherwise `FINAL_CONFIDENCE_BELOW_THRESHOLD`. (Only reachable when a custom config gives the lowest tier a `max_sigma_px`; the default lowest tier has none, so confidence is the only default cause.) The taxonomy-coverage test now compares against the full enum. 152 tests pass; ruff/mypy clean.
 **Severity: Low**
 **File/symbol:** `ensemble.py::derive_confidence_rank` (lines 470-507) and its consumer
 `ensemble` lines 659-683.
@@ -2487,6 +2739,8 @@ confident but imprecise" from "low confidence." Diagnostic accuracy only — no 
 ---
 
 ### CODE-ORCH-012 — Curator silently maps NaN → 0.0, hiding non-finite covariance/offset entries
+
+> **STATUS: FIXED** — `curator._round_float` now maps `nan` to the positive `JSON_INF_SENTINEL` (huge variance = no information / unbounded uncertainty) instead of `0.0` (which read as a zero-variance, infinitely-confident entry -- the opposite of the truth). The only NaN-producing path here is a degenerate covariance. JSON stays valid. 152 tests pass.
 **Severity: Low**
 **File/symbol:** `curator.py::_round_float` lines 38-44 (used by `_round_pair`, `_round_2x2`,
 `_curate_*`).
@@ -2508,6 +2762,8 @@ Low likelihood (requires upstream NaN) but high consequence if it occurs. **Conf
 ---
 
 ### CODE-ORCH-013 — `_round_2x2` is misnamed; it serializes any NxN matrix
+
+> **STATUS: FIXED** — Renamed `_round_2x2` to `_round_matrix` (it serializes whatever square shape it gets -- 2x2 or 3x3 rotation-aware) and corrected the docstring to say so, noting the JSON `covariance_px2` value is 3x3 for a rotation-fitted result. 152 tests pass; ruff/mypy clean.
 **Severity: Low (cosmetic)**
 **File/symbol:** `curator.py::_round_2x2` (lines 53-62) and its use at lines 115, 209.
 
@@ -2525,6 +2781,8 @@ is a 3x3 list under a 2x2-named key.
 ---
 
 ### CODE-DERIV-001 — Edge-DT input mask uses `>` strictly, dropping pixels exactly at threshold; threshold-equality inconsistent with classifier
+
+> **STATUS: FIXED** — The edge-DT threshold now clamps the noise sigma to a tiny positive floor (`edge_threshold_k_sigma * max(image_noise_sigma, 1e-6)`), so a literal `0.0` sigma (permitted by the `>= 0` validation) can no longer collapse the threshold to 0 and promote every non-zero-gradient pixel to an edge -- mirroring the `cr_noise_sigma` clamp in `_make_context`. The NMS comment now states the map is *toward* one pixel wide and that an exactly-equal gradient plateau may retain both sides (harmless for DT input), matching the `>=` tie-break. 152 tests pass; ruff/mypy clean.
 **Severity: Low**
 **File/symbol:** `image_derivatives.py::_directional_nms` line 319
 (`np.where(keep & (gradient_magnitude > threshold), 1.0, 0.0)`).
@@ -2553,6 +2811,8 @@ near-saturated-to-zero DT. **Fix direction:** clamp the threshold to `max(k*sigm
 ---
 
 ### CODE-DERIV-002 — `noise_sigma` fed to derivatives is in image-native units, but the DT threshold mixes scales for `calibrated_if`
+
+> **STATUS: FIXED (document only)** — The derivative parameter docstrings now say the noise sigma is in *image-native units (DN or I/F)* rather than asserting 'DN units'; the threshold scaling is self-consistent (gradient and sigma share the image's units), so this was a documentation defect only.
 **Severity: Low**
 **File/symbol:** `image_derivatives.py` docstring (lines 22-27, "DN units") and `build_image_edge_dt`
 / `compute_all_image_derivatives` parameter docs ("MAD-derived noise sigma (DN units)"); fed from
@@ -2576,6 +2836,8 @@ field doc.
 ---
 
 ### CODE-ORCH-014 — `_run_pass` recomputes the available-feature-type set inside the technique loop
+
+> **STATUS: FIXED** — `available_types` is now computed once before the registry loop (it is loop-invariant in `features`) instead of being rebuilt per technique. 152 orchestrator tests pass; ruff/mypy clean.
 **Severity: Low (efficiency)**
 **File/symbol:** `orchestrator.py::_run_pass` line 723 (`available_types = {f.feature_type for f in features}`
 inside the per-class loop).
@@ -2672,6 +2934,8 @@ Impact: `--log-level` on `nav_mosaic` does not reliably change the program's own
 ---
 
 ### CODE-MAIN-005 — `nav_create_bundle summary` and `nav_backplane_viewer` reimplement config loading instead of `load_default_and_user_config`
+
+> **STATUS: FIXED** — Both `nav_create_bundle.main_summary` and `nav_backplane_viewer.main` now call the shared `load_default_and_user_config(arguments, DEFAULT_CONFIG)` instead of open-coding `read_config()` + the config-file loop + the `nav_default_config.yaml` fallback, so config/CLI/env precedence has a single source of truth and cannot drift. ruff/mypy clean.
 Severity: **Low**
 Files/symbols:
 - `src/main/nav_create_bundle.py:208-216` (`main_summary`)
@@ -2686,6 +2950,8 @@ Impact: Subtle precedence divergence between subcommands/drivers; maintenance ha
 ---
 
 ### CODE-MAIN-006 — High structural duplication across the six dataset-driven drivers and the cloud_tasks file-list parsing
+
+> **STATUS: Tracked by:** #141 — Dedup CLI driver preamble + cloud_tasks file loop; fix extra_params dropped for backplanes/bundle
 Severity: **Low**
 Files/symbols: `nav_offset.py:54-218`, `nav_backplanes.py:38-132`, `nav_consolidate_metadata.py:49-185`, `nav_create_bundle.py:86-126`, `nav_backplane_viewer.py:1431-1485` (parse_args + unknown-dataset block); `nav_offset_cloud_tasks.py:87-107`, `nav_backplanes_cloud_tasks.py:70-88`, `nav_create_bundle_cloud_tasks.py:77-95`, `nav_mosaic_cloud_tasks.py:199-226` (per-file `ImageFile` construction + missing-field error returns)
 
@@ -2698,6 +2964,8 @@ Impact: Maintenance burden and inconsistency risk (the extra_params drop is a re
 ---
 
 ### CODE-MAIN-007 — `nav_offset --output-cloud-tasks-file` iterates the dataset but assumes a single file for the task_id while the body handles multi-file batches
+
+> **STATUS: Tracked by:** #142 — nav_offset cloud-task export vs local run disagree on ImageFiles cardinality
 Severity: **Low**
 File/symbol: `src/main/nav_offset.py:393-427`
 
@@ -2710,6 +2978,8 @@ Impact: Either the assert is dead (datasets are always single-file, in which cas
 ---
 
 ### CODE-UI-001 — `nav_backplane_viewer._compose_and_display` duplicates ~70 lines of alpha-blend that `_alpha_blend_layer` already encapsulates
+
+> **STATUS: FIXED** — The two inline premultiplied-alpha blends in `_compose_and_display` (summary overlay + BODY_ID overlay) now call the shared `_alpha_blend_layer` helper that the save path (`_render_full_rgba`) already uses, so the on-screen and saved-PNG composites can no longer diverge. As a side benefit the BODY_ID path now gets the `np.errstate(invalid='ignore')` guard it was missing. ruff/mypy clean.
 Severity: **Medium**
 File/symbol: `src/main/nav_backplane_viewer.py:1207-1274` vs helper `_alpha_blend_layer` (164-183) and `_render_full_rgba` (827-912)
 
@@ -2722,6 +2992,8 @@ Impact: Maintenance hazard and latent on-screen/saved-PNG divergence. Medium bec
 ---
 
 ### CODE-UI-002 — `nav_backplane_viewer` cursor read-out assumes no pan offset, so values are wrong after panning at zoom != 1
+
+> **STATUS: Tracked by:** #143 — nav_backplane_viewer cursor read-out may be wrong after pan at zoom != 1
 Severity: **Medium**
 File/symbol: `src/main/nav_backplane_viewer.py:1349-1367` `_update_cursor_status`
 
@@ -2734,6 +3006,8 @@ Impact: Possible incorrect V,U / value / BODY_ID readouts after pan/zoom. Mark u
 ---
 
 ### CODE-UI-003 — `_zoom_at_point` in three widgets computes `new_zoom` and early-returns, then re-derives it in the controller (dead computation / drift risk)
+
+> **STATUS: FIXED** — The `ZoomPanController._zoom_at_point` already performs the identical clamp (`np.clip(.., 0.1, 50.0)`) and no-op-on-unchanged short-circuit, so the duplicated local clamp/`new_zoom` was dead. All three `_zoom_at_point` wrappers (`nav_create_simulated_image`, `nav_backplane_viewer`, `manual_nav_dialog`) now delegate straight to the controller (keeping their `None` guards), removing the duplicated limit constants. The `_zoom_in/_zoom_out` (and `_zoom_in_center/_zoom_out_center`) centre-anchored copies in those windows now call the controller's `zoom_in_center`/`zoom_out_center`. ruff/mypy clean.
 Severity: **Low**
 Files/symbols:
 - `src/main/nav_create_simulated_image.py:555-570` `_zoom_at_point`
@@ -2749,6 +3023,8 @@ Impact: If the controller's clamp range changes, these wrappers will mis-predict
 ---
 
 ### CODE-UI-004 — `nav_create_simulated_image` `_zoom_in/_zoom_out` ignore the scroll-offset convention used elsewhere
+
+> **STATUS: FIXED** — `nav_create_simulated_image._zoom_in/_zoom_out` now delegate to `self._zoom_ctl.zoom_in_center()/zoom_out_center()` (the controller wraps this window's own scroll area + zoom state, so it is exactly equivalent), removing the 4th open-coded copy of the centre-anchored zoom. Folded in with the CODE-UI-003 fix. ruff/mypy clean.
 Severity: **Low**
 File/symbol: `src/main/nav_create_simulated_image.py:525-553`
 
@@ -2761,6 +3037,8 @@ Impact: Maintenance only.
 ---
 
 ### CODE-UI-005 — `ring_window` redefines an inner `_ZoomSync` class while `body_window` hoists it to module scope
+
+> **STATUS: FIXED** — `_SyncedSlider` and `_ZoomSync` are hoisted into `nav/ui/mosaic_viewer/common.py` (one canonical copy). `body_window` and `ring_window` import them; `ring_window._make_zoom_sync` no longer defines a fresh `_ZoomSync` subclass per call. The two byte-identical `_SyncedSlider` copies (they differed only in docstrings) and the per-call inner class are gone. No import cycle (tiled_image_widget does not import common). Imports resolve; ruff/mypy clean.
 Severity: **Low**
 Files/symbols:
 - `src/nav/ui/mosaic_viewer/ring_window.py:837-842` (inner class inside `_make_zoom_sync`)
@@ -2775,6 +3053,8 @@ Impact: Defining a class inside a method is wasteful (a new type per call) and t
 ---
 
 ### CODE-UI-006 — `mosaic_viewer` modules use stdlib `logging.getLogger(__name__)` instead of pdslogger
+
+> **STATUS: FIXED** — `common.py`, `body_window.py`, and `ring_window.py` now use `IMAGE_LOGGER` (pdslogger) instead of `logging.getLogger(__name__)`; the `import logging` lines were removed. Load-failure tracebacks and draw warnings now flow through the same pdslogger routing as the rest of nav. Imports resolve; ruff/mypy clean.
 Severity: **Low**
 Files/symbols: `src/nav/ui/mosaic_viewer/common.py:9,25`; `body_window.py:3,50`; `ring_window.py:8,57,425`
 
@@ -2787,6 +3067,8 @@ Impact: Load-failure tracebacks and EW/radial draw warnings land in the stdlib r
 ---
 
 ### CODE-UI-007 — `__all__ = []` not annotated; `tiled_image_widget` reaches into private `_slider_to_zoom`/`_zoom_to_slider`
+
+> **STATUS: FIXED** — `__all__` in `nav/ui/__init__.py` and `nav/ui/mosaic_viewer/__init__.py` is now annotated `list[str] = []`. The zoom-mapping helpers `_slider_to_zoom` / `_zoom_to_slider` were renamed to public `slider_to_zoom` / `zoom_to_slider` in `tiled_image_widget` (their sole cross-module consumer is now `common.py` after CODE-UI-005), removing the private-import-across-modules smell. ruff/mypy clean; imports resolve.
 Severity: **Low**
 Files/symbols: `src/nav/ui/__init__.py:20`, `src/nav/ui/mosaic_viewer/__init__.py:11`; `body_window.py:44-48`, `ring_window.py:51-55`
 
@@ -2799,6 +3081,8 @@ Impact: Cosmetic / API-hygiene. Low.
 ---
 
 ### CODE-UI-008 — `manual_nav_dialog.run_modal` calls `app.quit()` on a freshly created QApplication but never deletes it, and other dialogs leave the same dangling-app pattern
+
+> **STATUS: Tracked by:** #144 — QApplication created in run_modal/main is never properly released (latent for repeated invocation)
 Severity: **Low**
 Files/symbols: `src/nav/ui/manual_nav_dialog.py:1145-1159`; compare `nav_backplane_viewer.py:1519-1538`
 
@@ -2811,6 +3095,8 @@ Impact: No effect on the current single-image `--manual` flow; latent issue for 
 ---
 
 ### CODE-UI-009 — Histogram-stretch `mousePressEvent` tie-break can pick the white indicator when black is exactly as close
+
+> **STATUS: FIXED** — The pick logic now tie-breaks coincident/equidistant indicators by click side (clicking to the right of the marker grabs white, otherwise black) instead of unconditionally choosing black, so the white indicator stays reachable when it sits on top of black (the flat-image dead-end is gone). Non-tie behavior is unchanged. ruff/mypy clean.
 Severity: **Low**
 File/symbol: `src/nav/ui/mosaic_viewer/histogram_stretch.py:260-265`
 
@@ -2894,6 +3180,8 @@ from the registry until the haze-aware algorithm lands) or give it a real
 ---
 
 ### CODE-MODEL-002 — Simulated rings `constituent_edge_count` is computed with a confusing `1 + a + b - 1` expression that double-counts intent
+
+> **STATUS: FIXED** — Simplified the `1 + (outer is not None) + (inner is not None) - 1` expression to `int(outer is not None) + int(inner is not None)` (the count of present edges). Same value, clear intent. 368 nav_model tests pass.
 Severity: Low
 File: `src/nav/nav_model/nav_model_rings_simulated.py`, `to_features`
 lines 174-180.
@@ -2930,6 +3218,8 @@ rename so the two are not confused).
 ---
 
 ### CODE-MODEL-003 — `shape_for_body` is an explicit "backward-compatible alias", violating the no-backwards-compat-shims convention
+
+> **STATUS: FIXED** — Removed the `shape_for_body` back-compat alias (and its `__all__` entry); the sole caller (`NavModelBody`) now calls `load_body_shape` directly, and the module/class docstrings and the test reference `load_body_shape`. ruff/mypy clean; 368 nav_model tests pass.
 Severity: Low
 File: `src/nav/nav_model/body_shape.py`, `shape_for_body` lines 210-225;
 caller `src/nav/nav_model/nav_model_body.py` imports `shape_for_body`
@@ -2957,6 +3247,8 @@ updating the single call site + tests.
 ---
 
 ### CODE-MODEL-004 — `_yaml_entry_for` swallows all exceptions with a bare `except Exception`
+
+> **STATUS: FIXED** — Narrowed `except Exception` to `except AttributeError` around the `cfg.body_shape` access (the only expected failure: a non-Config duck-typed `cfg`). A genuine config-load/validation error now propagates instead of being silently swallowed. 14 body-shape tests pass; ruff/mypy clean.
 Severity: Low
 File: `src/nav/nav_model/body_shape.py`, `_yaml_entry_for` lines 245-248.
 
@@ -2991,6 +3283,8 @@ loader runs.
 ---
 
 ### CODE-MODEL-005 — `_merge_catalogs` upgrades `pretty_name` to the later catalog's `pretty_name`, but the docstring/guard says `name`
+
+> **STATUS: FIXED** — When the kept star has no catalog `name` but the duplicate does, `_merge_catalogs` now adopts *both* `name` and `pretty_name` (previously only `pretty_name`, which left `name` empty and inconsistent with the very guard that triggered the upgrade). 368 nav_model tests pass.
 Severity: Low
 File: `src/nav/nav_model/stars/catalog.py`, `_merge_catalogs` lines
 559-560.
@@ -3026,6 +3320,8 @@ record whose `name` is set but `pretty_name` fell back to
 ---
 
 ### CODE-MODEL-006 — `NavModelStars._emit_features` calls `star.conflicts.startswith(...)` without the `or ''` guard the rest of the file uses
+
+> **STATUS: FIXED** — The two `star.conflicts.startswith('BODY'/'RING')` calls now use `(star.conflicts or '').startswith(...)`, matching the defensive guard used elsewhere in the file, so a `None` conflicts value no longer raises. 368 nav_model tests pass.
 Severity: Low
 File: `src/nav/nav_model/stars/nav_model_stars.py`, lines 237-238.
 
@@ -3054,6 +3350,8 @@ type-narrow `conflicts` to `str` once after reduction.
 ---
 
 ### CODE-MODEL-007 — `mark_body_and_ring_conflicts` ring check uses `bp_radii.median()` over a partially-masked window, biasing the occlusion test
+
+> **STATUS: Tracked by:** #145 — Star-ring occlusion uses median window radius, mis-classifying stars near ringlet edges/gaps
 Severity: Medium
 File: `src/nav/nav_model/stars/conflicts.py`, `_check_one_star`
 lines 167-177.
@@ -3120,6 +3418,8 @@ PLACEHOLDER until Phase-5 calibration. Confirm by grepping config for
 ---
 
 ### CODE-MODEL-009 — `NavModelRings.instances_for_obs` / `NavModelBody.instances_for_obs` read `DEFAULT_CONFIG`, ignoring any per-run config override
+
+> **STATUS: Tracked by:** #146 — instances_for_obs selects models against DEFAULT_CONFIG, ignoring a per-run config override
 Severity: Low
 File: `src/nav/nav_model/nav_model_rings.py` lines 230-234;
 `src/nav/nav_model/nav_model_body.py` lines 229-233.
@@ -3207,6 +3507,8 @@ both techniques. Verify the body-disc path now raises the same
 ---
 
 ### CODE-TECH-002 — `ManualNavDiagnostics` is missing from `nav_technique/__init__.py` exports
+
+> **STATUS: FIXED** — `ManualNavDiagnostics` is now re-exported from `nav_technique/__init__.py` (added to both the diagnostics import block and `__all__`, alphabetically), matching every other diagnostics dataclass. ruff/mypy clean; 254 technique tests pass.
 Severity: Low
 File: `src/nav/nav_technique/__init__.py` (import block lines 27-38 and
 `__all__` lines 53-82); the class is defined and exported in
@@ -3233,6 +3535,8 @@ walk, or a test asserting the union is fully re-exported). Add
 ---
 
 ### CODE-TECH-003 — `NavTechniqueManual.__init__` documents an "optional for backwards compatibility" parameter, violating the no-backwards-compat convention
+
+> **STATUS: FIXED** — Reworded the `annotations` parameter comment to drop the 'backwards compatibility' framing: it is optional only because tests exercising the offset-pick path alone do not need it, and `run_manual_nav` always populates it in normal use. ruff clean.
 Severity: Low
 File: `src/nav/nav_technique/nav_technique_manual.py`, `__init__`
 lines 86-89.
@@ -3293,6 +3597,8 @@ has a code, so it is borderline, but the better fix is the declaration.
 ---
 
 ### CODE-TECH-005 — Four-way duplicated `_build_polyline_mask` and two-way duplicated `_peak_to_runner_up_ratio` / `_TukeyConfidenceContext` adapters
+
+> **STATUS: PARTIAL** — Two of the three duplications are FIXED: `_build_polyline_mask` was hoisted to `dt_fitting.build_polyline_mask` (CODE-NAV-016) and `_peak_to_runner_up_ratio` to `nav.support.correlate.peak_to_runner_up_ratio` (CODE-NAV-022). The remaining per-technique `_XxxConfidenceContext` adapter dedup is tracked by #147.
 Severity: Low
 Files: `_build_polyline_mask` is byte-identical in
 `nav_technique_body_limb.py` (51-61),
@@ -3317,6 +3623,8 @@ from the single source. Verify all call sites unchanged behavior.
 ---
 
 ### CODE-TECH-006 — `RingEdgeNav` silently slices a non-(2,2) covariance to 2x2 while `BodyLimbNav`/`BodyTerminatorNav` log a WARNING for the same case
+
+> **STATUS: FIXED** — `RingEdgeNav` now logs the same WARNING as `BodyLimbNav`/`BodyTerminatorNav` ('returned %s covariance with fit_rotation=False; truncating to (2, 2)') before slicing, so the truncation is no longer silent. 254 technique tests pass.
 Severity: Low
 File: `src/nav/nav_technique/nav_technique_ring_edge.py` lines 327-329;
 compare `nav_technique_body_limb.py` lines 298-304 and
@@ -3348,6 +3656,8 @@ CODE-TECH-005). Trivial fix.
 ---
 
 ### CODE-TECH-007 — `BodyLimbNav.is_feasible` / `navigate` compare a *vertex count* against `min_arc_px` (a pixel-length threshold)
+
+> **STATUS: FIXED** — The threshold is genuinely a vertex-count gate (the limb/terminator ridge is rasterised one vertex per pixel), so it was renamed `min_arc_px` -> `min_arc_vertices` across the YAML tuning (BodyLimbNav + BodyTerminatorNav), both technique modules, and the tests, removing the count-vs-pixels unit mismatch in the comparison. 254 technique tests pass; ruff/mypy clean.
 Severity: Medium
 File: `src/nav/nav_technique/nav_technique_body_limb.py` lines 167-172 and
 223-228; same pattern in `nav_technique_body_terminator.py` lines 191-196
@@ -3383,6 +3693,8 @@ construction) and document the invariant explicitly.
 ---
 
 ### CODE-TECH-008 — `NavTechniqueResult.__post_init__` validates `confidence ∈ [0,1]` but not `offset_px` finiteness or `feature_ids` element types
+
+> **STATUS: FIXED** — `__post_init__` now also validates that `offset_px` is a length-2 finite pair, that `rotation_rad` / `sigma_rotation_rad` (when set) are finite, and that every `feature_ids` element is a string -- so a NaN offset / non-finite rotation / non-string id can no longer flow into the ensemble combine. 254 technique + 152 orchestrator tests pass; ruff/mypy clean.
 Severity: Low
 File: `src/nav/nav_technique/technique_result.py`, `__post_init__`
 lines 50-72.
@@ -3410,6 +3722,8 @@ passing `offset_px=(float('nan'), 0.0)`.
 ---
 
 ### CODE-TECH-009 — `BodyDiscCorrelateNav` slices the runner-up ratio helper's "negative-quality floored at 1e-9" path identically to the ring version, but the documented behavior is mathematically odd
+
+> **STATUS: FIXED (via CODE-NAV-022)** — The shared `peak_to_runner_up_ratio` now caps the result at `_MAX_PEAK_RATIO` and returns the cap for a non-positive runner-up *independent of the winner magnitude*, removing the mathematically-odd `winner * 1e9` scaling this finding flagged. Both the disc and ring-annulus techniques use that single helper.
 Severity: Low
 File: `nav_technique_body_disc.py` `_peak_to_runner_up_ratio`
 lines 204-224 (and the ring-annulus twin). Flagging as a NEW non-math
