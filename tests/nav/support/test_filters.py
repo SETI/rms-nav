@@ -29,6 +29,24 @@ def test_apply_filter_subnull_sigma_returns_input() -> None:
     assert out is arr
 
 
+def test_apply_filter_small_sigma_gradient_is_not_short_circuited() -> None:
+    """CODE-SUPPORT-005: a sub-threshold GRADIENT_OF_GAUSSIAN still produces a
+    gradient image, not the raw intensities."""
+    # A linear ramp has a constant non-zero gradient; the raw intensities are
+    # the ramp values themselves, so identity-passthrough would return the ramp.
+    arr = np.tile(np.arange(8, dtype=np.float64), (8, 1))
+    spec = NavFilterSpec(kind=NavFilterKind.GRADIENT_OF_GAUSSIAN, sigma_xy=(0.1, 0.1))
+    out = apply_filter(arr, spec)
+    # Must not short-circuit to the raw intensities.
+    assert out is not arr
+    assert not np.array_equal(out, arr)
+    # A ramp has a *constant* gradient, so each interior column is uniform --
+    # unlike the raw ramp whose columns increase 2,3,4,5.
+    interior = out[2:6, 2:6]
+    assert np.allclose(interior, interior[0, 0])
+    assert not np.allclose(interior, arr[2:6, 2:6])
+
+
 def test_apply_filter_isotropic_gaussian_blurs_delta() -> None:
     """An isotropic Gaussian smears a delta input into a positive blob."""
     arr = _delta((11, 11))

@@ -46,3 +46,37 @@ def test_deep_merge_does_not_mutate_inputs() -> None:
     overlay = {'a': {'y': 2}}
     _deep_merge(base, overlay)
     assert base == {'a': {'x': 1}}
+
+
+def test_category_returns_cached_instance() -> None:
+    """CODE-CFG-3: category() returns the same cached AttrDict across calls."""
+    config = Config()
+    config._config_dict = {'bodies': {'MIMAS': {'albedo': 2}}}
+    config._update_attrdicts()
+    first = config.category('bodies')
+    second = config.category('bodies')
+    assert first is second
+
+
+def test_category_cache_rebuilt_on_reload() -> None:
+    """CODE-CFG-3: the category cache is dropped when the config is reloaded."""
+    config = Config()
+    config._config_dict = {'bodies': {'MIMAS': {'albedo': 2}}}
+    config._update_attrdicts()
+    before = config.category('bodies')
+    config._config_dict = {'bodies': {'MIMAS': {'albedo': 9}}}
+    config._update_attrdicts()
+    after = config.category('bodies')
+    assert after is not before
+    assert after['MIMAS']['albedo'] == 9
+
+
+def test_reread_no_path_drops_removed_keys() -> None:
+    """CODE-CFG-2: a no-path reread starts from an empty dict (no stale keys)."""
+    config = Config()
+    # Simulate a prior load that contains a key the bundled YAML does not.
+    config._config_dict = {'general': {'stale_only_key': 123}}
+    config._update_attrdicts()
+    # Reread from the bundled config_files glob.
+    config.read_config(reread=True)
+    assert 'stale_only_key' not in config._config_dict.get('general', {})

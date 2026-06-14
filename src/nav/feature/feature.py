@@ -8,6 +8,7 @@ types are allowed to consume it.
 """
 
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -22,6 +23,7 @@ from nav.support.types import NDArrayBoolType, NDArrayFloatType
 __all__ = [
     'NavFeature',
     'NavReliabilityBreakdown',
+    'body_names_from_features',
 ]
 
 
@@ -43,8 +45,13 @@ class NavReliabilityBreakdown:
         albedo_penalty: TERMINATOR_ARC — albedo-variation penalty term.
         shadow_occluded_fraction: RING_EDGE — fraction of polyline vertices
             dropped to planet shadow.
-        visible_lit_fraction: BODY_DISC — fraction of the predicted disc
-            that is both lit (cos(incidence) >= 0) and inside the sensor.
+        visible_lit_fraction: BODY_DISC — fraction of the *whole* predicted
+            disc (lit + dark) that is both lit (cos(incidence) >= 0) and
+            inside the sensor.  Despite the name the denominator is the
+            entire disc, not the lit hemisphere, so this falls with phase
+            even for a fully-framed body — intentional, so the BODY_DISC
+            gate screens out thin high-phase crescents (a poor disc
+            template) as well as partially-framed discs.
         overflow_fraction: BODY_DISC — fraction of the predicted disc area
             outside the sensor.
         blob_snr: BODY_BLOB — image SNR within the predicted body bbox.
@@ -218,3 +225,25 @@ class NavFeature:
         if not isinstance(other, NavFeature):
             return NotImplemented
         return self.feature_id == other.feature_id
+
+    @property
+    def body_name(self) -> str:
+        """SPICE body name this feature traces, or ``''`` for non-body features.
+
+        Reads the structured ``body_name`` carried on the body-feature flag
+        dataclasses (``LimbArcFlags``, ``TerminatorArcFlags``,
+        ``BodyDiscFlags``, ``BodyBlobFlags``, ``CartographicModelFlags``).
+        Star and ring flags have no body, so the value is ``''``.  Consumers
+        should prefer this over parsing the ``feature_id`` string.
+        """
+        return str(getattr(self.flags, 'body_name', ''))
+
+
+def body_names_from_features(features: Iterable[NavFeature]) -> frozenset[str]:
+    """Return the set of non-empty body names across ``features``.
+
+    Uses each feature's structured :attr:`NavFeature.body_name` rather than
+    parsing ``feature_id`` strings, so the source-body identity a technique
+    reports cannot silently diverge from a change to the feature-id format.
+    """
+    return frozenset(bn for f in features if (bn := f.body_name))

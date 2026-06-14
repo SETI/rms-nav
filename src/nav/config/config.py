@@ -103,6 +103,7 @@ class Config:
         """Initializes a new Config instance with empty configuration containers."""
 
         self._config_dict: dict[str, Any] = {}
+        self._category_cache: dict[str, AttrDict] = {}
         self._config_environment: dict[str, Any] = AttrDict({})
         self._config_general: dict[str, Any] = AttrDict({})
         self._config_offset: dict[str, Any] = AttrDict({})
@@ -136,6 +137,10 @@ class Config:
         Converts dictionary sections to AttrDict instances for convenient attribute-style access.
         """
 
+        # The config was (re)loaded; drop any cached per-category AttrDicts so
+        # category() rebuilds them from the fresh dict (mirrors the named
+        # section properties below being reassigned here).
+        self._category_cache = {}
         self._config_environment = AttrDict(self._config_dict.get('environment', {}))
         self._config_general = AttrDict(self._config_dict.get('general', {}))
         self._config_offset = AttrDict(self._config_dict.get('offset', {}))
@@ -188,6 +193,12 @@ class Config:
 
         if config_path is None:
             config_dir = Path(__file__).resolve().parent.parent / 'config_files'
+            # The no-path branch always rebuilds from the full config_files
+            # glob, so start from an empty dict.  On a reread this ensures keys
+            # removed from the YAML files since the previous load do not survive
+            # (update_config merges *into* the dict, so a stale dict would union
+            # old and new keys rather than producing a clean reload).
+            self._config_dict = {}
             for filename in sorted(config_dir.glob('*.yaml')):
                 self.update_config(filename, read_default=False)
             self._validate_registered_techniques()
@@ -270,10 +281,20 @@ class Config:
             self._validate_registered_techniques()
 
     def category(self, category: str) -> AttrDict:
-        """Returns the configuration settings for the specified category."""
+        """Returns the configuration settings for the specified category.
+
+        The result is cached per category and rebuilt on config reload (see
+        ``_update_attrdicts``), matching the caching semantics of the named
+        section properties.  Config is treated read-only; mutating the returned
+        AttrDict is not supported.
+        """
 
         self.read_config()
-        return AttrDict(self._config_dict.get(category, {}))
+        cached = self._category_cache.get(category)
+        if cached is None:
+            cached = AttrDict(self._config_dict.get(category, {}))
+            self._category_cache[category] = cached
+        return cached
 
     @property
     def general(self) -> Any:

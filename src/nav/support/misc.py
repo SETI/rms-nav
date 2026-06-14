@@ -113,10 +113,25 @@ def safe_lstrip_zero(s: str) -> str:
 
 
 def mad_std(a: NDArrayFloatType | list[float]) -> float:
-    """Median absolute deviation (MAD) standard deviation."""
-    a_array = cast(NDArrayFloatType, np.asarray(a))
-    m = np.median(a_array)
-    return 1.4826 * float(np.median(np.abs(a_array - m)))
+    """Median absolute deviation (MAD) standard deviation.
+
+    Parameters:
+        a: Sample values; must contain at least one finite element.
+
+    Returns:
+        The robust standard-deviation estimate ``1.4826 * MAD``.
+
+    Raises:
+        ValueError: If ``a`` is empty or contains no finite values, which would
+            otherwise return a silent ``NaN`` that poisons every downstream
+            covariance / confidence computation.
+    """
+    a_array = cast(NDArrayFloatType, np.asarray(a, dtype=np.float64))
+    finite = a_array[np.isfinite(a_array)]
+    if finite.size == 0:
+        raise ValueError('mad_std requires at least one finite value; got none')
+    m = np.median(finite)
+    return 1.4826 * float(np.median(np.abs(finite - m)))
 
 
 _GIT_VERSION_CACHE: str | None = None

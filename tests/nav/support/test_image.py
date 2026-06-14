@@ -5,6 +5,7 @@ import pytest
 
 from nav.support.image import (
     apply_linear_gamma_stretch,
+    draw_rect,
     next_power_of_2,
     pad_array,
     pad_array_to_power_of_2,
@@ -115,6 +116,10 @@ def test_next_power_of_2() -> None:
     assert next_power_of_2(6) == 8
     assert next_power_of_2(7) == 8
     assert next_power_of_2(8) == 8
+    # CODE-SUPPORT-003: 0 -> 1 (smallest power of 2 >= 0), negatives rejected.
+    assert next_power_of_2(0) == 1
+    with pytest.raises(ValueError, match='non-negative'):
+        next_power_of_2(-4)
 
 
 def test_pad_array_to_power_of_2() -> None:
@@ -206,7 +211,31 @@ def test_draw_line() -> None:  # TODO: Implement
     ...
 
 
-def test_draw_rect() -> None:  # TODO: Implement
+def test_draw_rect_clips_off_image_center() -> None:
+    """CODE-ANNO-1: an off-image center must not wrap and paint spurious pixels."""
+    img = np.zeros((20, 20), dtype=np.float64)
+    # Center far off the top-left corner; a negative slice index would wrap to
+    # the opposite edge without clipping.
+    draw_rect(img, 1.0, xctr=-50, yctr=-50, xhalfwidth=3, yhalfwidth=3)
+    assert not np.any(img)
+
+
+def test_draw_rect_draws_on_image() -> None:
+    """A fully in-bounds rectangle paints its border."""
+    img = np.zeros((20, 20), dtype=np.float64)
+    draw_rect(img, 1.0, xctr=10, yctr=10, xhalfwidth=3, yhalfwidth=3)
+    assert np.any(img)
+
+
+def test_draw_rect_partial_off_edge_only_paints_in_bounds() -> None:
+    """A rectangle straddling an edge paints only in-bounds pixels (no wrap)."""
+    img = np.zeros((20, 20), dtype=np.float64)
+    draw_rect(img, 1.0, xctr=1, yctr=1, xhalfwidth=5, yhalfwidth=5)
+    # The far (bottom-right) edge of the image must remain untouched.
+    assert not np.any(img[15:, 15:])
+
+
+def _test_draw_rect_placeholder() -> None:  # TODO: Implement
     ...
 
 
