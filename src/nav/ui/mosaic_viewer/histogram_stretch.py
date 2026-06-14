@@ -257,12 +257,18 @@ class HistogramStretchWidget(QWidget):
         white_x = self._value_to_x(self._white)
         d_black = abs(x - black_x)
         d_white = abs(x - white_x)
-        if d_black <= d_white and d_black <= _PICK_THRESHOLD_PX:
+        if min(d_black, d_white) > _PICK_THRESHOLD_PX:
+            return
+        if d_black < d_white:
             self._drag = 'black'
-        elif d_white < d_black and d_white <= _PICK_THRESHOLD_PX:
+        elif d_white < d_black:
             self._drag = 'white'
         else:
-            return
+            # Coincident / equidistant indicators: tie-break by which side of
+            # the marker was clicked so the white indicator stays reachable when
+            # it sits on top of black (clicking to its right grabs white, else
+            # black) -- otherwise white could never be separated from black.
+            self._drag = 'white' if x > black_x else 'black'
         self._handle_drag_to(x)
 
     def mouseMoveEvent(self, event: QMouseEvent | None) -> None:

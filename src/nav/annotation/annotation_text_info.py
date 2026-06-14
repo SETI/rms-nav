@@ -37,10 +37,21 @@ def _load_font(path: str, size: int) -> ImageFont.FreeTypeFont:
 
     Returns:
         A FreeTypeFont object for the specified font and size.
+
+    Raises:
+        FileNotFoundError: If the font file cannot be opened; the message
+            points at the offending path and the ``general.truetype_font_dir``
+            config key so the operator can fix the configuration.
     """
 
-    # TODO Add error handling
-    return ImageFont.truetype(path, size)
+    try:
+        return ImageFont.truetype(path, size)
+    except OSError as exc:
+        raise FileNotFoundError(
+            f'Could not load TrueType font {path!r} (size {size}); check that '
+            f'general.truetype_font_dir points at a directory containing the '
+            f'font: {exc}'
+        ) from exc
 
 
 class AnnotationTextInfo:

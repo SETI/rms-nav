@@ -5,9 +5,7 @@ splitter (**radial | EW | image**), corotating EW bands (Ctrl+click), a Cursor
 Info grid and Color By controls in the lower strip, and status-bar readouts.
 """
 
-import logging
 import math
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -42,19 +40,23 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from nav.config import IMAGE_LOGGER
 from nav.support.time import et_to_utc
 from nav.ui.common import build_stretch_controls
-from nav.ui.mosaic_viewer.common import RingDisplayData, load_ring_file
+from nav.ui.mosaic_viewer.common import (
+    RingDisplayData,
+    _SyncedSlider,
+    _ZoomSync,
+    load_ring_file,
+)
 from nav.ui.mosaic_viewer.histogram_stretch import HistogramStretchWidget
 from nav.ui.mosaic_viewer.matplotlib_qt import canvas_draw_idle, new_figure_canvas_qtagg
 from nav.ui.mosaic_viewer.photometric_display import compute_ring_display_image
 from nav.ui.mosaic_viewer.tiled_image_widget import (
     TiledImageWidget,
-    _slider_to_zoom,
-    _zoom_to_slider,
 )
 
-logger = logging.getLogger(__name__)
+logger = IMAGE_LOGGER
 
 EW_PROFILE_LEFT_GUTTER_PX = 58
 
@@ -195,96 +197,6 @@ def _colorby_column(
     rgb = np.stack([r, g, b], axis=1)
     rgb[np.isnan(arr)] = 0.5
     return rgb
-
-
-class _SyncedSlider:
-    """Keeps a QLineEdit and QSlider in sync for a single numeric parameter."""
-
-    def __init__(
-        self,
-        line_edit: QLineEdit,
-        slider: QSlider,
-        lo: float,
-        hi: float,
-        fmt: str = '%.4f',
-        on_change: Callable[[float], None] | None = None,
-    ) -> None:
-        """Wire ``line_edit`` and ``slider`` over ``[lo, hi]`` with optional ``on_change``.
-
-        Parameters:
-            line_edit: Numeric text field.
-            slider: 0..1000 slider mapped linearly to ``[lo, hi]``.
-            lo: Lower bound of the mapped range.
-            hi: Upper bound of the mapped range.
-            fmt: ``printf`` format for the line edit.
-            on_change: Called with the new float after slider or edit updates.
-        """
-        self._le = line_edit
-        self._sl = slider
-        self._lo = lo
-        self._hi = hi
-        self._fmt = fmt
-        self._on_change = on_change
-        self._updating = False
-        self._sl.valueChanged.connect(self._slider_moved)
-        self._le.editingFinished.connect(self._edit_done)
-
-    def _to_slider(self, val: float) -> int:
-        """Map ``val`` in ``[lo, hi]`` to a slider position in ``[0, 1000]``."""
-        if self._hi <= self._lo:
-            return 0
-        pos = (val - self._lo) / (self._hi - self._lo) * 1000.0
-        return round(float(np.clip(pos, 0, 1000)))
-
-    def _from_slider(self, pos: int) -> float:
-        """Map slider position ``pos`` (0..1000) back to a float in ``[lo, hi]``."""
-        return self._lo + (self._hi - self._lo) * pos / 1000.0
-
-    def _slider_moved(self, pos: int) -> None:
-        """Mirror slider motion into the line edit and invoke ``on_change``."""
-        if self._updating:
-            return
-        val = self._from_slider(pos)
-        self._updating = True
-        self._le.setText(self._fmt % val)
-        self._updating = False
-        if self._on_change:
-            self._on_change(val)
-
-    def _edit_done(self) -> None:
-        """Parse the line edit, clamp to ``[lo, hi]``, sync the slider, call ``on_change``."""
-        if self._updating:
-            return
-        try:
-            val = float(self._le.text())
-        except ValueError:
-            return
-        val = max(self._lo, min(self._hi, val))
-        self._updating = True
-        self._sl.setValue(self._to_slider(val))
-        self._le.setText(self._fmt % val)
-        self._updating = False
-        if self._on_change:
-            self._on_change(val)
-
-    def set_range(self, lo: float, hi: float) -> None:
-        """Update ``lo``/``hi`` without changing the displayed value."""
-        self._lo = lo
-        self._hi = hi
-
-    def set_value(self, val: float) -> None:
-        """Programmatically set both widgets to ``val`` (clamped by current range)."""
-        self._updating = True
-        self._sl.setValue(self._to_slider(val))
-        self._le.setText(self._fmt % val)
-        self._updating = False
-
-    def get_value(self) -> float:
-        """Return the line-edit float if valid, otherwise infer from the slider."""
-        try:
-            return float(self._le.text())
-        except ValueError:
-            return self._from_slider(self._sl.value())
 
 
 class RingMosaicWindow(QMainWindow):
@@ -833,13 +745,6 @@ class RingMosaicWindow(QMainWindow):
                 iw.set_zoom(zoom_val, yz)
             else:
                 iw.set_zoom(xz, zoom_val)
-
-        class _ZoomSync(_SyncedSlider):
-            def _to_slider(self, val: float) -> int:
-                return _zoom_to_slider(val)
-
-            def _from_slider(self, pos: int) -> float:
-                return _slider_to_zoom(pos)
 
         sync = _ZoomSync(le, sl, 0.05, 100.0, '%.2f', on_change=_on_change)
         sync.set_value(1.0)

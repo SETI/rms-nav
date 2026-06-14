@@ -38,7 +38,6 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
-    QScrollBar,
     QSlider,
     QStatusBar,
     QVBoxLayout,
@@ -984,35 +983,20 @@ class ManualNavDialog(QDialog):
     # ---- Zoom/pan helpers (parity with sim_body_gui) ----
 
     def _zoom_in_center(self) -> None:
-        viewport = cast(QWidget, self._scroll.viewport())
-        cx = viewport.width() // 2
-        cy = viewport.height() // 2
-        sh = cast(QScrollBar, self._scroll.horizontalScrollBar())
-        sv = cast(QScrollBar, self._scroll.verticalScrollBar())
-        scaled_x = cx + sh.value()
-        scaled_y = cy + sv.value()
-        self._zoom_at_point(1.2, cx, cy, scaled_x, scaled_y)
+        # Centre-anchored zoom is provided by the controller (it wraps this
+        # window's scroll area); delegate instead of re-implementing it.
+        self._zoom_ctl.zoom_in_center()
 
     def _zoom_out_center(self) -> None:
-        viewport = cast(QWidget, self._scroll.viewport())
-        cx = viewport.width() // 2
-        cy = viewport.height() // 2
-        sh = cast(QScrollBar, self._scroll.horizontalScrollBar())
-        sv = cast(QScrollBar, self._scroll.verticalScrollBar())
-        scaled_x = cx + sh.value()
-        scaled_y = cy + sv.value()
-        self._zoom_at_point(1.0 / 1.2, cx, cy, scaled_x, scaled_y)
+        self._zoom_ctl.zoom_out_center()
 
     def _zoom_at_point(
         self, factor: float, vx: int, vy: int, scaled_x: float, scaled_y: float
     ) -> None:
         if self._pixmap_base is None:
             return
-        old_zoom = self._zoom
-        new_zoom = float(np.clip(old_zoom * factor, 0.1, 50.0))
-        if new_zoom == old_zoom:
-            return
-        # Use controller public API to maintain pan correctly
+        # The ZoomPanController owns the zoom clamp + no-op short-circuit, so
+        # delegate directly instead of re-deriving the clamped zoom here.
         self._zoom_ctl.zoom_at_point(factor, vx, vy, scaled_x, scaled_y)
 
     def _reset_view(self) -> None:

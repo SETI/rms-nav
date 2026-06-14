@@ -1,8 +1,6 @@
 """BodyMosaicWindow: PyQt6 window for browsing body reprojections and mosaics."""
 
-import logging
 import math
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -35,19 +33,23 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from nav.config import IMAGE_LOGGER
 from nav.support.time import et_to_utc
 from nav.ui.common import build_stretch_controls
-from nav.ui.mosaic_viewer.common import BodyDisplayData, load_body_file
+from nav.ui.mosaic_viewer.common import (
+    BodyDisplayData,
+    _SyncedSlider,
+    _ZoomSync,
+    load_body_file,
+)
 from nav.ui.mosaic_viewer.histogram_stretch import HistogramStretchWidget
 from nav.ui.mosaic_viewer.photometric_display import compute_body_display_image
 from nav.ui.mosaic_viewer.projections import ProjectionKind
 from nav.ui.mosaic_viewer.tiled_image_widget import (
     TiledImageWidget,
-    _slider_to_zoom,
-    _zoom_to_slider,
 )
 
-logger = logging.getLogger(__name__)
+logger = IMAGE_LOGGER
 
 _STATUS_HINTS: dict[ProjectionKind, str] = {
     ProjectionKind.RECT: (
@@ -128,110 +130,6 @@ def _colorby_tint(
     rgb = np.stack([r, g, b], axis=2)  # (n_rows, n_cols, 3)
     rgb[np.isnan(arr)] = 0.5
     return rgb
-
-
-class _SyncedSlider:
-    """Keeps a QLineEdit and QSlider in sync for a single numeric parameter."""
-
-    def __init__(
-        self,
-        line_edit: QLineEdit,
-        slider: QSlider,
-        lo: float,
-        hi: float,
-        fmt: str = '%.4f',
-        on_change: Callable[[float], None] | None = None,
-    ) -> None:
-        """Wire ``line_edit`` and ``slider`` to the same numeric range ``[lo, hi]``.
-
-        Parameters:
-            line_edit: Text field showing the current value.
-            slider: Horizontal slider mapped linearly to ``[lo, hi]``.
-            lo: Lower bound of the numeric range.
-            hi: Upper bound of the numeric range.
-            fmt: ``printf``-style format for the line edit (default four decimals).
-            on_change: Optional callback invoked with the new float after each edit.
-        """
-        self._le = line_edit
-        self._sl = slider
-        self._lo = lo
-        self._hi = hi
-        self._fmt = fmt
-        self._on_change = on_change
-        self._updating = False
-        self._sl.valueChanged.connect(self._slider_moved)
-        self._le.editingFinished.connect(self._edit_done)
-
-    def _to_slider(self, val: float) -> int:
-        if self._hi <= self._lo:
-            return 0
-        pos = (val - self._lo) / (self._hi - self._lo) * 1000.0
-        return round(float(np.clip(pos, 0, 1000)))
-
-    def _from_slider(self, pos: int) -> float:
-        return self._lo + (self._hi - self._lo) * pos / 1000.0
-
-    def _slider_moved(self, pos: int) -> None:
-        if self._updating:
-            return
-        val = self._from_slider(pos)
-        self._updating = True
-        self._le.setText(self._fmt % val)
-        self._updating = False
-        if self._on_change:
-            self._on_change(val)
-
-    def _edit_done(self) -> None:
-        if self._updating:
-            return
-        try:
-            val = float(self._le.text())
-        except ValueError:
-            return
-        val = max(self._lo, min(self._hi, val))
-        self._updating = True
-        self._sl.setValue(self._to_slider(val))
-        self._le.setText(self._fmt % val)
-        self._updating = False
-        if self._on_change:
-            self._on_change(val)
-
-    def set_range(self, lo: float, hi: float) -> None:
-        """Update the mapped numeric range without changing the current value text."""
-        self._lo = lo
-        self._hi = hi
-
-    def set_value(self, val: float) -> None:
-        """Set slider and line edit to ``val`` (clamped by prior ``set_range`` calls)."""
-        self._updating = True
-        self._sl.setValue(self._to_slider(val))
-        self._le.setText(self._fmt % val)
-        self._updating = False
-
-    def get_value(self) -> float:
-        """Return the current value, preferring a valid float from the line edit."""
-        try:
-            return float(self._le.text())
-        except ValueError:
-            return self._from_slider(self._sl.value())
-
-
-class _ZoomSync(_SyncedSlider):
-    """A :class:`_SyncedSlider` that uses logarithmic zoom mapping.
-
-    Converts between the zoom float value and a 0-1000 slider integer using
-    :func:`~nav.ui.mosaic_viewer.tiled_image_widget._zoom_to_slider` and
-    :func:`~nav.ui.mosaic_viewer.tiled_image_widget._slider_to_zoom` so that
-    zooming feels perceptually uniform.
-    """
-
-    def _to_slider(self, val: float) -> int:
-        """Convert zoom value to slider integer position via ``_zoom_to_slider``."""
-        return _zoom_to_slider(val)
-
-    def _from_slider(self, pos: int) -> float:
-        """Convert slider integer position to zoom value via ``_slider_to_zoom``."""
-        return _slider_to_zoom(pos)
 
 
 class BodyMosaicWindow(QMainWindow):
