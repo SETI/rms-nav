@@ -5,6 +5,7 @@ import pytest
 
 from nav.nav_orchestrator.ensemble import (
     EnsembleConfig,
+    _combine_confidence,
     derive_confidence_rank,
     ensemble,
 )
@@ -256,6 +257,16 @@ def test_derive_confidence_rank_failed_below_threshold() -> None:
     """Confidence below 0.2 yields 'failed'."""
     rank = derive_confidence_rank(confidence=0.1, sigma_px=(0.3, 0.3))
     assert rank == 'failed'
+
+
+def test_derive_confidence_rank_logs_when_sigma_missing(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """CODE-ORCH-003: a None sigma is logged and caps the rank at low."""
+    rank = derive_confidence_rank(confidence=0.95, sigma_px=None)
+    assert rank == 'low'
+    captured = capsys.readouterr()
+    assert 'sigma_px is None' in (captured.out + captured.err)
 
 
 def test_ensemble_order_independent() -> None:
@@ -567,12 +578,14 @@ def _body_feature_result(
 ) -> NavTechniqueResult:
     """Build a NavTechniqueResult with a body-feature-shaped feature_id.
 
-    Used by the fallback-tier filter tests so the body-name extraction
-    matches what the live emitters produce
-    (``<feature_kind>:<body_name>``).
+    Used by the fallback-tier filter tests.  ``source_bodies`` is derived
+    from the ``<feature_kind>:<body_name>`` feature_id, mirroring what the
+    live body techniques populate from each feature's structured
+    ``body_name``.
     """
     if cov is None:
         cov = np.eye(2, dtype=np.float64) * 0.25
+    body_name = feature_id.split(':', 1)[1] if ':' in feature_id else ''
     return NavTechniqueResult(
         technique_name=technique_name,
         feature_ids=(feature_id,),
@@ -582,6 +595,7 @@ def _body_feature_result(
         spurious=spurious,
         at_edge=False,
         diagnostics=BodyLimbDiagnostics(),
+        source_bodies=frozenset({body_name}) if body_name else frozenset(),
     )
 
 
@@ -613,6 +627,48 @@ def test_ensemble_drops_terminator_when_limb_succeeds_for_same_body() -> None:
     assert result.offset_px is not None
     # The reported offset must come from limb, not the higher-confidence
     # but mis-converged terminator.
+    assert abs(result.offset_px[1] - (-16.0)) < 1.0
+
+
+def test_ensemble_fallback_drop_uses_source_bodies_not_feature_ids() -> None:
+    """CODE-ORCH-004: supersession reads source_bodies, not the feature_id string.
+
+    Both results carry an unparseable feature_id but a structured
+    ``source_bodies={'DIONE'}``; the limb primary must still supersede the
+    terminator fallback, proving the ensemble no longer depends on the
+    feature-id format.
+    """
+    cov = np.eye(2, dtype=np.float64) * 0.25
+    limb = NavTechniqueResult(
+        technique_name='BodyLimbNav',
+        feature_ids=('opaque-id-1',),
+        offset_px=(-5.0, -16.0),
+        covariance_px2=cov,
+        confidence=0.5,
+        spurious=False,
+        at_edge=False,
+        diagnostics=BodyLimbDiagnostics(),
+        source_bodies=frozenset({'DIONE'}),
+    )
+    terminator = NavTechniqueResult(
+        technique_name='BodyTerminatorNav',
+        feature_ids=('opaque-id-2',),
+        offset_px=(-5.0, -40.0),
+        covariance_px2=cov,
+        confidence=0.7,
+        spurious=False,
+        at_edge=False,
+        diagnostics=BodyLimbDiagnostics(),
+        source_bodies=frozenset({'DIONE'}),
+    )
+    result = ensemble(
+        [limb, terminator],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.offset_px is not None
     assert abs(result.offset_px[1] - (-16.0)) < 1.0
 
 
@@ -721,3 +777,51 @@ def test_ensemble_rejects_mixed_dof_inputs() -> None:
             image_classifier=_classifier(),
             provenance=_provenance(),
         )
+
+
+def test_combine_confidence_weight_ignores_rotation_precision() -> None:
+    """CODE-NAV-013: the confidence weight uses positional precision only.
+
+    Two 3-DoF results share an identical (v, u) covariance but differ wildly
+    in rotation precision.  The rotation-tight result also carries the *lower*
+    confidence.  With the old full-trace weight (px^-2 added to rad^-2) the
+    rotation-tight result would dominate and drag the combined confidence down
+    to ~its own value; the positional-only weight gives both results equal
+    weight so the combine reflects both contributors.
+    """
+    cov_tight_rot = np.diag([0.25, 0.25, 1e-6]).astype(np.float64)
+    cov_loose_rot = np.diag([0.25, 0.25, 1.0]).astype(np.float64)
+    rot_tight = NavTechniqueResult(
+        technique_name='RotTight',
+        feature_ids=('rot_tight:f',),
+        offset_px=(0.0, 0.0),
+        covariance_px2=cov_tight_rot,
+        confidence=0.2,
+        spurious=False,
+        at_edge=False,
+        diagnostics=BodyLimbDiagnostics(),
+        rotation_rad=0.0,
+        sigma_rotation_rad=1e-3,
+    )
+    rot_loose = NavTechniqueResult(
+        technique_name='RotLoose',
+        feature_ids=('rot_loose:f',),
+        offset_px=(0.0, 0.0),
+        covariance_px2=cov_loose_rot,
+        confidence=0.8,
+        spurious=False,
+        at_edge=False,
+        diagnostics=BodyLimbDiagnostics(),
+        rotation_rad=0.0,
+        sigma_rotation_rad=1.0,
+    )
+    combined = _combine_confidence(
+        [rot_tight, rot_loose],
+        rcond=1e-6,
+        disagreement_penalty=0.3,
+        apply_disagreement_penalty=False,
+    )
+    # Equal positional weights -> weighted_avg = 0.5, n_significant = 2 ->
+    # agreement_factor = 1 + 0.5*log2(2) = 1.5 -> combined = 0.75.  Far above
+    # the ~0.2 the rotation-tight result would have forced under the old trace.
+    assert combined == pytest.approx(0.75, abs=1e-9)

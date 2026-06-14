@@ -13,6 +13,7 @@ dictionary at navigate time so the orchestrator can populate the
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import subprocess
 from collections.abc import Mapping
@@ -112,6 +113,7 @@ class ProvenanceMetadata:
     static_data_hashes: Mapping[str, str]
 
 
+@functools.cache
 def _resolve_git_sha() -> str | None:
     """Return the short git SHA at the head of the working tree or ``None``.
 
@@ -119,6 +121,9 @@ def _resolve_git_sha() -> str | None:
     --porcelain`` to detect uncommitted changes (returning ``'dirty'`` in
     that case).  Returns ``None`` when the tree is not inside a git
     repository or git is unavailable.
+
+    Process-memoized: the repo SHA does not change mid-run, so the two ``git``
+    subprocesses run once per process rather than once per navigated image.
     """
     repo_root = Path(__file__).resolve().parents[3]
     try:
@@ -173,6 +178,7 @@ def _resolve_spice_kernels() -> tuple[str, ...]:
     return tuple(sorted(kernels))
 
 
+@functools.cache
 def _resolve_static_data_hashes() -> Mapping[str, str]:
     """Return ``{filename: sha256_hex(raw bytes)}`` for shipped static data.
 
@@ -180,6 +186,9 @@ def _resolve_static_data_hashes() -> Mapping[str, str]:
     with one of the recognised static-data prefixes
     (``config_220_``, ``config_3``, ``config_4``).  Returns the mapping
     sorted by filename so equality testing is stable.
+
+    Process-memoized: the shipped config files do not change mid-run, so the
+    sha256 pass runs once per process rather than once per navigated image.
 
     Provenance metadata is best-effort: a per-file I/O failure (file
     disappearing between ``glob`` and ``read_bytes``, permission error,

@@ -195,14 +195,23 @@ def _build_edge_dt_from_gradients(
         ``(gradient_magnitude, edge_dt)`` float64 arrays.
     """
     gradient = np.hypot(gv, gu).astype(np.float64)
-    threshold = edge_threshold_k_sigma * image_noise_sigma
-    # Thin the gradient ridge to a one-pixel-wide edge map via Canny-style
+    # Clamp the noise sigma to a tiny positive floor so a literal ``0.0`` sigma
+    # (permitted by the ``>= 0`` validation -- e.g. synthetic or saturated-flat
+    # inputs) does not collapse the threshold to ``0`` and promote every
+    # non-zero-gradient pixel to an edge candidate, which would degenerate the
+    # DT toward all-zero.  Mirrors the ``cr_noise_sigma`` clamp in
+    # ``_make_context``.
+    threshold = edge_threshold_k_sigma * max(image_noise_sigma, 1e-6)
+    # Thin the gradient ridge toward a one-pixel-wide edge map via Canny-style
     # non-maximum suppression along the local gradient direction.  A naive
     # 3x3 NMS would discard most edge pixels along a smooth ridge; the
     # directional check compares each candidate only against the two
     # neighbours along its own gradient direction, leaving the full edge
     # length intact and producing a usable input for both the
-    # cross-correlation coarse search and the distance transform.
+    # cross-correlation coarse search and the distance transform.  (On a flat
+    # plateau of exactly-equal gradient magnitude the ``>=`` tie-break keeps
+    # both sides, so a plateau edge may be two pixels wide -- harmless for DT
+    # input.)
     edge_mask = _directional_nms(gradient, gv, gu, threshold)
     edge_dt = apply_filter(
         edge_mask.astype(np.float64, copy=False),
@@ -237,7 +246,7 @@ def build_image_edge_dt(
     Parameters:
         image_ext: Extended-FOV image array (post any source-image filter).
             Must be 2-D.
-        image_noise_sigma: MAD-derived noise sigma (DN units) used to scale
+        image_noise_sigma: MAD-derived noise sigma (image-native units: DN or I/F) used to scale
             the gradient threshold.  Must be finite and non-negative.
         config: Optional override; when ``None`` the documented defaults
             apply.
@@ -375,7 +384,7 @@ def compute_all_image_derivatives(
     Parameters:
         image_ext: Extended-FOV image array (post any source-image
             filter).  Must be 2-D.
-        image_noise_sigma: MAD-derived noise sigma (DN units) used to
+        image_noise_sigma: MAD-derived noise sigma (image-native units: DN or I/F) used to
             scale the gradient threshold.  Must be finite and
             non-negative.
         config: Optional override; when ``None`` the documented defaults

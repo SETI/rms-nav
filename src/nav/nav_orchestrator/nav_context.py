@@ -113,12 +113,11 @@ class NavContext:
             from the per-instrument flag.
 
         Raises:
-            TypeError: if ``offset_px`` is not a length-2 sequence of
-                numbers or ``covariance_px2`` cannot be coerced to a float
-                array.
-            ValueError: if ``offset_px`` contains non-finite entries or
-                ``covariance_px2`` is not square 2x2 / 3x3 or contains
-                non-finite entries.
+            TypeError: if ``offset_px`` entries are non-numeric (cannot be
+                coerced to ``float``).
+            ValueError: if ``offset_px`` is not a length-2 sequence, contains
+                non-finite entries, or ``covariance_px2`` is not square
+                2x2 / 3x3 or contains non-finite entries.
         """
         if len(offset_px) != 2:
             raise ValueError(f'offset_px must be a length-2 sequence; got length {len(offset_px)}')

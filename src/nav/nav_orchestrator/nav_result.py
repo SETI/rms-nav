@@ -89,6 +89,11 @@ class NavResult:
             raise ValueError('status=success must have a non-None offset_px')
         if self.confidence_rank == 'failed' and self.status != 'failed':
             raise ValueError('confidence_rank=failed requires status=failed')
+        if (self.confidence_rank == 'conflicted') != (self.status == 'conflicted'):
+            raise ValueError(
+                "confidence_rank 'conflicted' and status 'conflicted' must agree; got "
+                f'confidence_rank={self.confidence_rank!r}, status={self.status!r}'
+            )
         if not 0.0 <= self.confidence <= 1.0:
             raise ValueError(f'confidence must lie in [0, 1]; got {self.confidence!r}')
         if self.covariance_px2 is not None:

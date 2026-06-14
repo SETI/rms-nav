@@ -120,10 +120,17 @@ def test_static_data_hashes_skips_unreadable_files(
         return real_read_bytes(self)
 
     monkeypatch.setattr(pathlib.Path, 'read_bytes', fake_read_bytes)
-    hashes = provenance_mod._resolve_static_data_hashes()
-    assert 'config_400_inst_coiss.yaml' not in hashes
-    # Other static-data files still hash successfully.
-    assert 'config_220_body_shape.yaml' in hashes
-    out = capsys.readouterr().out
-    assert 'config_400_inst_coiss.yaml' in out
-    assert 'simulated permission denied' in out
+    # The resolver is process-memoized; clear the cache so this call recomputes
+    # under the mocked read_bytes, and clear it again afterwards so the
+    # mock-derived result does not leak into other tests.
+    provenance_mod._resolve_static_data_hashes.cache_clear()
+    try:
+        hashes = provenance_mod._resolve_static_data_hashes()
+        assert 'config_400_inst_coiss.yaml' not in hashes
+        # Other static-data files still hash successfully.
+        assert 'config_220_body_shape.yaml' in hashes
+        out = capsys.readouterr().out
+        assert 'config_400_inst_coiss.yaml' in out
+        assert 'simulated permission denied' in out
+    finally:
+        provenance_mod._resolve_static_data_hashes.cache_clear()

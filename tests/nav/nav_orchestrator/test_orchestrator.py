@@ -8,7 +8,11 @@ import numpy as np
 import pytest
 
 from nav.annotation import Annotations
-from nav.feature.feature import NavFeature, NavReliabilityBreakdown
+from nav.feature.feature import (
+    NavFeature,
+    NavReliabilityBreakdown,
+    body_names_from_features,
+)
 from nav.feature.feature_type import NavFeatureType
 from nav.feature.flags import BodyBlobFlags, BodyDiscFlags, StarFlags
 from nav.feature.geometry import (
@@ -673,6 +677,7 @@ class _FakeBodyPrimary(NavTechnique):
             spurious=type(self).spurious_override,
             at_edge=False,
             diagnostics=StarFieldDiagnostics(n_inliers=len(features)),
+            source_bodies=body_names_from_features(features),
         )
 
 
@@ -703,6 +708,7 @@ class _FakeBodyFallback(NavTechnique):
             spurious=False,
             at_edge=False,
             diagnostics=StarFieldDiagnostics(n_inliers=len(features)),
+            source_bodies=body_names_from_features(features),
         )
 
 

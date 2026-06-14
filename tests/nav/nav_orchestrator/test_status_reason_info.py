@@ -16,6 +16,6 @@ def test_template_lines_non_empty() -> None:
         assert lines, f'{reason!r} has empty template'
 
 
-def test_template_has_15_entries() -> None:
-    """Template covers the full 15-value NavStatusReason taxonomy."""
-    assert len(STATUS_REASON_INFO_TEMPLATE) == 15
+def test_template_covers_full_taxonomy() -> None:
+    """Template covers the full NavStatusReason taxonomy."""
+    assert set(STATUS_REASON_INFO_TEMPLATE) == set(NavStatusReason)

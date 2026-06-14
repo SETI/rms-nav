@@ -56,7 +56,11 @@ from nav.nav_orchestrator.provenance import (
     collect_provenance_metadata,
 )
 from nav.nav_orchestrator.status_reason_info import STATUS_REASON_INFO_TEMPLATE
-from nav.nav_technique.nav_technique import NavTechnique, filter_technique_names
+from nav.nav_technique.nav_technique import (
+    NavTechnique,
+    filter_technique_names,
+    technique_tier,
+)
 from nav.nav_technique.technique_result import NavTechniqueResult
 from nav.support.filters import NavFilterKind, NavFilterSpec, apply_filter
 from nav.support.image_quality import cosmic_ray_mask, saturation_mask
@@ -207,58 +211,30 @@ def _normalize_model_patterns(patterns: str | list[str], names: list[str]) -> li
     return out
 
 
-_BODY_FEATURE_PREFIXES: tuple[str, ...] = (
-    'body_disc:',
-    'body_blob:',
-    'limb_arc:',
-    'terminator_arc:',
-)
-"""Feature-id prefixes carrying the ``<feature_kind>:<body_name>`` convention.
-
-Mirrors :data:`nav.nav_orchestrator.ensemble._BODY_FEATURE_PREFIXES`; the
-ensemble's downstream :func:`_drop_superseded_fallbacks` is the redundant
-filter that catches any fallback result that still slipped through.
-Ring and star feature-ids do not embed a body and are not relevant to
-the fallback-skip logic.
-"""
-
-
 def _feature_source_bodies(feature: NavFeature) -> frozenset[str]:
     """Return the set of body names a feature was emitted for.
 
-    Returns an empty set for features whose ``feature_id`` does not
-    match the body-feature prefix convention (rings, stars).
+    Reads the structured :attr:`NavFeature.body_name`; ring and star
+    features have no body and yield an empty set.
     """
-    for prefix in _BODY_FEATURE_PREFIXES:
-        if feature.feature_id.startswith(prefix):
-            body, _, _ = feature.feature_id[len(prefix) :].partition(':')
-            if body:
-                return frozenset({body})
-    return frozenset()
+    return frozenset({feature.body_name}) if feature.body_name else frozenset()
 
 
 def _bodies_with_non_spurious_primary(
     results: list[NavTechniqueResult],
 ) -> frozenset[str]:
-    """Return the set of body names that have a non-spurious primary result."""
+    """Return the set of body names that have a non-spurious primary result.
+
+    Reads each result's structured ``source_bodies`` (populated by the body
+    techniques from the consumed features) rather than parsing ``feature_ids``.
+    """
     covered: set[str] = set()
     for r in results:
         if r.spurious:
             continue
-        tier = 'primary'
-        for cls in NavTechnique._registry:
-            if cls.name == r.technique_name:
-                tier = cls.tier
-                break
-        if tier != 'primary':
+        if technique_tier(r.technique_name) != 'primary':
             continue
-        for fid in r.feature_ids:
-            for prefix in _BODY_FEATURE_PREFIXES:
-                if fid.startswith(prefix):
-                    body, _, _ = fid[len(prefix) :].partition(':')
-                    if body:
-                        covered.add(body)
-                    break
+        covered.update(r.source_bodies)
     return frozenset(covered)
 
 
@@ -457,8 +433,16 @@ class NavOrchestrator(NavBase):
                 pass1_ensemble.offset_px[1],
                 pass1_ensemble.confidence,
             )
-        # Pass 2 — prior-required techniques refine on the pass-1 prior.
-        if pass1_ensemble.offset_px is not None and pass1_ensemble.covariance_px2 is not None:
+        # Pass 2 — prior-required techniques refine on the pass-1 prior.  Only
+        # a 'success' pass-1 ensemble seeds the prior: a 'conflicted' result is
+        # an explicitly untrustworthy "best group" offset, and installing it
+        # would lock pass-2 toward one arbitrary mode instead of letting pass-2
+        # evidence break the tie.  ('failed' already returned above.)
+        if (
+            pass1_ensemble.status == 'success'
+            and pass1_ensemble.offset_px is not None
+            and pass1_ensemble.covariance_px2 is not None
+        ):
             pass2_context = context.with_prior(
                 offset_px=pass1_ensemble.offset_px,
                 covariance_px2=pass1_ensemble.covariance_px2,
@@ -713,6 +697,9 @@ class NavOrchestrator(NavBase):
             and (tier_filter is None or cls.tier == tier_filter)
         ]
         kept_names = set(filter_technique_names(names, self._only_techniques))
+        # ``features`` is loop-invariant, so the available feature-type set is
+        # computed once rather than rebuilt for every registry entry.
+        available_types: set[NavFeatureType] = {f.feature_type for f in features}
         for cls in NavTechnique._registry:
             if cls.requires_prior != requires_prior:
                 continue
@@ -720,7 +707,6 @@ class NavOrchestrator(NavBase):
                 continue
             if cls.name not in kept_names:
                 continue
-            available_types: set[NavFeatureType] = {f.feature_type for f in features}
             if not (cls.accepts_feature_types & available_types):
                 continue
             technique = cls(config=self.config)
@@ -796,31 +782,33 @@ class NavOrchestrator(NavBase):
         n_sensor = int(sensor_mask.sum())
         missing_frac = float(sensor_missing.sum()) / float(max(n_sensor, 1))
         image, pre_filter = self._apply_source_image_filter(raw_image, obs)
-        # The classifier reads the image *after* the source-image filter
-        # so blank/saturation/missing fractions match what downstream
-        # extractors will see.  ``image`` is already NaN-free (markers were
-        # filled above), and the true missing fraction is supplied
-        # explicitly so the NaN sentinel still drives
-        # ``mostly_missing_data`` / ``partial_dropout``.
+        # The classifier and the saturation mask read the *raw* image, not the
+        # source-image-filtered ``image``: their absolute-DN gates (blank /
+        # saturation / overexposed, and the full-well saturation mask) are
+        # physical properties of the sensor data and become meaningless after a
+        # DC-removing filter such as BANDPASS_DOG (a near-full-well region comes
+        # out near zero post-DoG).  ``raw_image`` is already NaN-free (markers
+        # were filled above), and the true missing fraction is supplied
+        # explicitly so the NaN sentinel still drives ``mostly_missing_data`` /
+        # ``partial_dropout``.  (With every shipped source_image_filter disabled
+        # today, ``image is raw_image`` and this is a no-op.)
         classifier_thresholds = (
             self._explicit_thresholds
             if self._explicit_thresholds is not None
             else settings.thresholds
         )
         classifier = NavImageClassifier(thresholds=classifier_thresholds)
-        classifier_result = classifier.classify(image, sensor_mask, missing_frac=missing_frac)
-        sat_mask = self._build_saturation_mask(image, sensor_mask, settings)
-        # Cosmic-ray detection requires a strictly positive noise sigma;
-        # the classifier supplies one already, but a near-zero estimate is
-        # clamped to a tiny value so the mask is well-defined even on
-        # near-blank inputs.
-        cr_noise_sigma = max(classifier_result.noise_sigma, 1e-6)
+        classifier_result = classifier.classify(raw_image, sensor_mask, missing_frac=missing_frac)
+        sat_mask = self._build_saturation_mask(raw_image, sensor_mask, settings)
+        # Cosmic-ray detection and the derivative DT threshold operate on the
+        # *filtered* working ``image``, so their noise sigma is estimated from
+        # that image (not the raw classifier sigma) to stay self-consistent with
+        # the gradients the DT techniques actually fit.  A near-zero estimate is
+        # clamped to a tiny value so the CR mask is well-defined on near-blank
+        # inputs.
+        noise_sigma = estimate_image_noise_sigma(image, sensor_mask)
+        cr_noise_sigma = max(noise_sigma, 1e-6)
         cr_mask = cosmic_ray_mask(image, image_noise_sigma=cr_noise_sigma)
-        noise_sigma = (
-            classifier_result.noise_sigma
-            if classifier_result.noise_sigma > 0.0
-            else estimate_image_noise_sigma(image, sensor_mask)
-        )
         # Single-pass derivative computation: one gaussian + sobel pair
         # produces gradient magnitude, edge DT, and the signed gradient
         # vector image together rather than doing the heavy smoothing

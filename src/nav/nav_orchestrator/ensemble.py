@@ -35,7 +35,7 @@ from nav.nav_orchestrator.feature_summary import NavFeatureSummary
 from nav.nav_orchestrator.image_classifier_result import NavImageClassifierResult
 from nav.nav_orchestrator.nav_result import ConfidenceRank, NavResult
 from nav.nav_orchestrator.provenance import Provenance
-from nav.nav_technique.nav_technique import NavTechnique
+from nav.nav_technique.nav_technique import technique_tier
 from nav.nav_technique.technique_result import NavTechniqueResult
 from nav.support.status_reason import NavStatusReason
 from nav.support.types import NDArrayFloatType
@@ -176,49 +176,17 @@ def _result_param_vector(res: NavTechniqueResult) -> NDArrayFloatType:
     return cast(NDArrayFloatType, np.array([res.offset_px[0], res.offset_px[1]], np.float64))
 
 
-# Body-feature-id prefixes used to extract a body name for the
-# fallback-tier filter.  Ring and star feature_ids do not embed a body
-# name, so they are intentionally excluded — fallback dropping only
-# applies between body-feature techniques.
-_BODY_FEATURE_PREFIXES: tuple[str, ...] = (
-    'body_disc:',
-    'body_blob:',
-    'limb_arc:',
-    'terminator_arc:',
-)
-
-
 def _source_bodies(result: NavTechniqueResult) -> frozenset[str]:
     """Return the set of body names a result was computed against.
 
-    Parses ``feature_ids`` for the ``<feature_kind>:<body_name>``
-    convention used by every body-feature emitter (BODY_DISC,
-    BODY_BLOB, LIMB_ARC, TERMINATOR_ARC).  Non-body feature_ids
-    (rings, stars) yield an empty set.
+    Reads the structured ``NavTechniqueResult.source_bodies`` populated by
+    the body-feature techniques from each consumed feature's
+    ``NavFeature.body_name``.  Ring and star techniques leave it empty, so
+    they are naturally excluded from the body-only fallback-supersession
+    filter.  This replaces the earlier ``feature_ids`` string-parsing, which
+    silently broke if the feature-id format changed.
     """
-    bodies: set[str] = set()
-    for fid in result.feature_ids:
-        for prefix in _BODY_FEATURE_PREFIXES:
-            if fid.startswith(prefix):
-                body, _, _ = fid[len(prefix) :].partition(':')
-                if body:
-                    bodies.add(body)
-                break
-    return frozenset(bodies)
-
-
-def _technique_tier(technique_name: str) -> str:
-    """Look up a technique's ``tier`` from the registry.
-
-    Defaults to ``'primary'`` for unregistered names so the ensemble
-    treats unknown techniques (test stubs, future plug-ins) as
-    primary by construction; an explicit ``tier='fallback'``
-    declaration is required to opt into the fallback-drop behavior.
-    """
-    for cls in NavTechnique._registry:
-        if cls.name == technique_name:
-            return cls.tier
-    return 'primary'
+    return result.source_bodies
 
 
 def _drop_superseded_fallbacks(
@@ -240,14 +208,14 @@ def _drop_superseded_fallbacks(
     for r in results:
         if r.spurious:
             continue
-        if _technique_tier(r.technique_name) != 'primary':
+        if technique_tier(r.technique_name) != 'primary':
             continue
         primary_success_bodies.update(_source_bodies(r))
     if not primary_success_bodies:
         return list(results)
     kept: list[NavTechniqueResult] = []
     for r in results:
-        if _technique_tier(r.technique_name) == 'fallback':
+        if technique_tier(r.technique_name) == 'fallback':
             superseded = bool(_source_bodies(r) & primary_success_bodies)
             if superseded:
                 IMAGE_LOGGER.info(
@@ -492,8 +460,11 @@ def _combine_confidence(
 ) -> float:
     """Precision-weighted combine of per-result confidences.
 
-    Weights are ``trace(pinvh(Sigma_i))``: tighter covariances contribute
-    more to the combined confidence than loose ones.  The boosted combined
+    Weights are ``trace(pinvh(Sigma_i[:2, :2]))`` -- the positional (v, u)
+    precision in ``px^-2``, with any rotation axis marginalised out so the
+    weight is not skewed by the unrelated ``rad^-2`` rotation precision of a
+    3-DoF result.  Tighter covariances contribute more to the combined
+    confidence than loose ones.  The boosted combined
     confidence reflects the number of significant contributors, capped per
     ``AGREEMENT_FACTOR_CAP`` and ``COMBINED_CONFIDENCE_CAP``.
 
@@ -516,8 +487,17 @@ def _combine_confidence(
     weights = []
     for res in group:
         cov = np.asarray(res.covariance_px2, np.float64)
-        info = pinvh(cov, rtol=rcond)
-        weights.append(float(np.trace(info)))
+        # Weight by the *positional* precision only.  Taking trace(pinvh(cov))
+        # over a full 3-DoF covariance would add the v, u precisions (px^-2) to
+        # the rotation precision (rad^-2), so a star-field result whose rotation
+        # is tightly pinned would dominate the confidence average on an
+        # arbitrary, unit-mixed scale.  Marginalising rotation out and tracing
+        # the 2x2 translation block keeps every weight in px^-2; the additive
+        # trace (rather than det(info)^(1/p)) stays well-defined for the rank-1
+        # ring-edge covariances whose unobservable axis carries zero precision.
+        # The 2-DoF path is unchanged: cov[:2, :2] is then the whole matrix.
+        info_xy = pinvh(np.ascontiguousarray(cov[:2, :2]), rtol=rcond)
+        weights.append(float(np.trace(info_xy)))
     w_total = sum(weights)
     if w_total <= 0.0:
         raise ValueError('precision-weighted combine: total weight is zero; offset is unobservable')
@@ -562,6 +542,18 @@ def derive_confidence_rank(
     """
     thresholds = tier_thresholds or DEFAULT_TIER_THRESHOLDS
     max_sigma = max(sigma_px) if sigma_px is not None else None
+    if max_sigma is None:
+        # No covariance was supplied, so every sigma-constrained tier
+        # (high / medium) is unreachable and the result can only earn the
+        # best sigma-free tier (low).  Surface this: a missing covariance is
+        # almost always an upstream technique failing to populate it, not a
+        # legitimately unconstrained fit, and would otherwise cap the rank
+        # silently.
+        IMAGE_LOGGER.warning(
+            'derive_confidence_rank: sigma_px is None (no covariance); '
+            'sigma-constrained tiers are unreachable and the rank caps at the '
+            'best sigma-free tier'
+        )
     ranks: tuple[ConfidenceRank, ...] = ('high', 'medium', 'low')
     for rank in ranks:
         spec = thresholds[rank]
@@ -736,10 +728,22 @@ def ensemble(
         tier_thresholds=cfg.tier_thresholds,
     )
     if rank == 'failed':
-        # Confidence + sigma combination doesn't earn any tier.
+        # Confidence + sigma combination doesn't earn any tier.  Distinguish the
+        # two causes: if the combined confidence cleared the *lowest* tier's
+        # ``min_confidence`` yet still earned no tier, the offset was confident
+        # but too imprecise (sigma exceeded every tier's ``max_sigma_px``);
+        # otherwise the confidence itself was below threshold.
+        lowest_min_conf = min(
+            float(spec['min_confidence'] or 0.0) for spec in cfg.tier_thresholds.values()
+        )
+        if combined_confidence >= lowest_min_conf:
+            failed_reason = NavStatusReason.FINAL_SIGMA_ABOVE_THRESHOLD
+        else:
+            failed_reason = NavStatusReason.FINAL_CONFIDENCE_BELOW_THRESHOLD
         IMAGE_LOGGER.info(
-            'No tier earned: combined confidence %.3f, sigma (dv, du) = '
+            'No tier earned (%s): combined confidence %.3f, sigma (dv, du) = '
             '(%.3f, %.3f) px (max %.3f); tier thresholds = %s',
+            failed_reason.value,
             combined_confidence,
             sigma_dv,
             sigma_du,
@@ -747,7 +751,7 @@ def ensemble(
             cfg.tier_thresholds,
         )
         return NavResult.failed(
-            status_reason=NavStatusReason.FINAL_CONFIDENCE_BELOW_THRESHOLD,
+            status_reason=failed_reason,
             image_classifier=image_classifier,
             provenance=provenance,
             per_technique=results,
