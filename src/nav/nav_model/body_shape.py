@@ -2,7 +2,7 @@
 
 The body extractor's covariance and emission gates consult the per-body
 shape, albedo, and SPICE-residual quantities returned by
-:func:`shape_for_body`.  The lookup pulls operator-curated values from
+:func:`load_body_shape`.  The lookup pulls operator-curated values from
 ``config_220_body_shape.yaml`` first, falling back to the hard-coded
 ``BODY_SHAPE_TABLE`` profiles for bodies the YAML has not populated yet,
 and finally to ``DEFAULT_BODY_SHAPE`` for entirely unknown bodies.
@@ -41,7 +41,6 @@ __all__ = [
     'DEFAULT_BODY_SHAPE',
     'BodyShape',
     'load_body_shape',
-    'shape_for_body',
 ]
 
 
@@ -207,24 +206,6 @@ def load_body_shape(body_name: str, config: Any = None) -> BodyShape:
     return replace(baseline, **overrides)
 
 
-def shape_for_body(body_name: str, config: Any = None) -> BodyShape:
-    """Backward-compatible alias for :func:`load_body_shape`.
-
-    Earlier callers used ``shape_for_body(name)`` against the static
-    ``BODY_SHAPE_TABLE`` only.  Routing through :func:`load_body_shape`
-    means existing call sites pick up the YAML override automatically
-    once the static-data file is populated.
-
-    Parameters:
-        body_name: Body name in any case.
-        config: Optional ``Config`` override.
-
-    Returns:
-        Same ``BodyShape`` :func:`load_body_shape` produces.
-    """
-    return load_body_shape(body_name, config=config)
-
-
 def _yaml_entry_for(upper_body_name: str, config: Any) -> dict[str, Any] | None:
     """Return the YAML mapping for ``upper_body_name`` if present.
 
@@ -244,7 +225,10 @@ def _yaml_entry_for(upper_body_name: str, config: Any) -> dict[str, Any] | None:
         cfg = DEFAULT_CONFIG
     try:
         body_shape_section = cfg.body_shape
-    except Exception:
+    except AttributeError:
+        # ``cfg`` is not a Config-like object exposing ``body_shape`` (e.g. a
+        # duck-typed test stub, or pre-bootstrap).  A genuine config-load /
+        # validation error is a real failure and is left to propagate.
         return None
     if not isinstance(body_shape_section, dict):
         return None

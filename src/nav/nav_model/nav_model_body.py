@@ -11,7 +11,7 @@ The pipeline:
 2. Extracts the limb and terminator polylines from the discrete
    silhouette masks.
 3. Looks up the per-body shape parameters via
-   :func:`nav.nav_model.body_shape.shape_for_body`, which merges the
+   :func:`nav.nav_model.body_shape.load_body_shape`, which merges the
    operator-curated ``config_220_body_shape.yaml`` over the hard-coded
    ``BODY_SHAPE_TABLE`` profiles.
 4. Decides which features to emit by computing
@@ -69,7 +69,7 @@ from nav.feature.geometry import (
     LimbPolyline,
     TerminatorPolyline,
 )
-from nav.nav_model.body_shape import BodyShape, shape_for_body
+from nav.nav_model.body_shape import BodyShape, load_body_shape
 from nav.nav_model.nav_model import NavModel
 from nav.nav_model.nav_model_body_base import NavModelBodyBase
 from nav.nav_model.stars.predicted_snr import psf_sigma_px
@@ -156,6 +156,18 @@ the limb to be photometrically distinguishable.
 """
 
 
+TERMINATOR_PHOTOMETRIC_SOFTNESS_COEFF: float = 0.5
+"""Photometric-softness coefficient in the terminator normal-sigma.
+
+Scales the per-vertex limb-softness length (``psf_sigma_px * km/px``)
+into an additional position-uncertainty term for terminator arcs, where
+the gradual brightness roll-off broadens the apparent edge beyond the
+geometric terminator.  The numeric value is a config default pending
+calibration against the operator-curated image library (tracked with the
+other body thresholds by issue #118 / CODE-NAV-MODEL-002).
+"""
+
+
 @dataclass(frozen=True)
 class _PolylineSampler:
     """Bundle of sampled limb / terminator polyline data.
@@ -169,6 +181,13 @@ class _PolylineSampler:
     normals_vu: NDArrayFloatType
     incidence_rad: NDArrayFloatType
     km_per_pixel: NDArrayFloatType
+    total_vertices: int
+    """Ridge vertices found before per-vertex drops (resolution / future shadow).
+
+    ``vertices_vu`` holds only the survivors; ``total_vertices`` is the count
+    of the original ridge so :func:`_visible_arc_fraction` can report the
+    surviving fraction rather than a constant.
+    """
 
 
 class NavModelBody(NavModelBodyBase):
@@ -582,6 +601,12 @@ class NavModelBody(NavModelBodyBase):
         # AND which lies inside the sensor FOV — not the lit hemisphere
         # alone, which would always score ~1.0 for a fully-in-frame
         # body and lose discriminating power for the BODY_DISC gate.
+        # NOTE: the name is narrower than the quantity — the denominator is
+        # the whole disc, so this deliberately falls with phase (a thin
+        # high-phase crescent scores low even when fully framed) as well as
+        # with partial framing.  Both regimes make the disc-correlation
+        # template poor, which is exactly what the 0.4 gate screens out;
+        # the phase coupling is intentional, not a normalisation bug.
         lit_visible_in_fov = int(np.count_nonzero(lit_mask & in_sensor))
         visible_lit_fraction = lit_visible_in_fov / max(body_total, 1)
         overflow_fraction = 1.0 - (body_visible / max(body_total, 1))
@@ -607,7 +632,7 @@ class NavModelBody(NavModelBodyBase):
             if self._body_mask is None:
                 self._logger.debug('body_mask is None — emitting no features')
                 return []
-            shape = shape_for_body(self._body_name, config=self._config)
+            shape = load_body_shape(self._body_name, config=self._config)
             features: list[NavFeature] = []
             limb_uncertainty_px = self._limb_uncertainty_px(shape)
             self._logger.debug(
@@ -999,6 +1024,18 @@ def _build_polyline_sampler(
         ext_u0: Extfov u-offset of the local grid origin.
     """
     vs, us = np.where(local_mask)
+    total_vertices = int(vs.size)
+    if vs.size:
+        # Drop zero-resolution ridge vertices (km/px <= 0): the resolution
+        # backplane is masked / filled with 0.0 off the resolved body, so
+        # such a vertex carries no usable scale.  Keeping it would make the
+        # per-vertex sigma NaN, which ``_sigma_normal_per_vertex`` silently
+        # floors to a finite fallback -- letting an off-body vertex pollute
+        # the LM fit instead of being excluded.  Dropping it here keeps the
+        # sampler's parallel arrays consistent and the downstream sigmas
+        # finite and positive (which ``lm_subpixel_refine`` requires).
+        resolved = km_per_pixel_local[vs, us] > 0.0
+        vs, us = vs[resolved], us[resolved]
     if vs.size == 0:
         empty: NDArrayFloatType = np.empty((0, 2), dtype=np.float64)
         return _PolylineSampler(
@@ -1006,6 +1043,7 @@ def _build_polyline_sampler(
             normals_vu=empty,
             incidence_rad=np.empty(0, dtype=np.float64),
             km_per_pixel=np.empty(0, dtype=np.float64),
+            total_vertices=total_vertices,
         )
     vertices_vu: NDArrayFloatType = np.stack(
         [vs.astype(np.float64) + ext_v0, us.astype(np.float64) + ext_u0], axis=1
@@ -1033,6 +1071,7 @@ def _build_polyline_sampler(
         normals_vu=normals_vu,
         incidence_rad=incidence_rad,
         km_per_pixel=km_per_pixel,
+        total_vertices=total_vertices,
     )
 
 
@@ -1071,7 +1110,7 @@ def _sigma_normal_per_vertex(
     )
     if include_albedo:
         albedo_term = (shape.albedo_variation * limb_softness_km) ** 2
-        photometric_term = (limb_softness_km * 0.5) ** 2
+        photometric_term = (limb_softness_km * TERMINATOR_PHOTOMETRIC_SOFTNESS_COEFF) ** 2
         base = base + albedo_term + photometric_term
     sigma_km = np.sqrt(np.maximum(base, 0.0))
     sigma_px = sigma_km / km_per_pixel
@@ -1079,15 +1118,18 @@ def _sigma_normal_per_vertex(
 
 
 def _visible_arc_fraction(sampler: _PolylineSampler) -> float:
-    """Fraction of polyline vertices that are usable.
+    """Fraction of the predicted ridge vertices that survived to the fit.
 
-    The sampler already drops shadow / off-FOV vertices during
-    construction; for the purposes of the reliability reason we report
-    1.0 when any vertices survive.  When the table-driven shadow
-    extractor is wired, this will be replaced by
-    ``len(survivors) / len(total)``.
+    ``sampler.total_vertices`` is the ridge length found before per-vertex
+    drops (currently zero-resolution / off-body vertices; the table-driven
+    shadow extractor will add to this when wired), and ``vertices_vu`` holds
+    only the survivors, so the visible-arc fraction is ``survivors / total``.
+    Returns ``0.0`` when no ridge vertices were found at all.
     """
-    return 1.0 if sampler.vertices_vu.shape[0] > 0 else 0.0
+    total = sampler.total_vertices
+    if total <= 0:
+        return 0.0
+    return float(sampler.vertices_vu.shape[0]) / float(total)
 
 
 def _limb_reliability(*, visible_arc_fraction: float, visible_arc_px: float) -> float:

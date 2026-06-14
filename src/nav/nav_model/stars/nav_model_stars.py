@@ -252,8 +252,8 @@ class NavModelStars(NavModel):
                 skipped_smear += 1
                 continue
             v_extfov, u_extfov = self._extfov_indices(star)
-            in_body = bool(star.conflicts.startswith('BODY'))
-            in_ring = bool(star.conflicts.startswith('RING'))
+            in_body = bool((star.conflicts or '').startswith('BODY'))
+            in_ring = bool((star.conflicts or '').startswith('RING'))
             in_sat = bool(_safe_mask_lookup(sat_mask, v_extfov, u_extfov))
             in_cosmic = bool(_safe_mask_lookup(cosmic_mask, v_extfov, u_extfov))
             in_sat_or_cosmic = in_sat or in_cosmic

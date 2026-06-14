@@ -51,6 +51,7 @@ def _make_polyline_sampler(*, n: int, km_per_pixel: float = 1.0) -> _PolylineSam
         normals_vu=normals,
         incidence_rad=incidence,
         km_per_pixel=km,
+        total_vertices=n,
     )
 
 

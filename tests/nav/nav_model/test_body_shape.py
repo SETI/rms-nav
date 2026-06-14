@@ -12,7 +12,6 @@ from nav.nav_model.body_shape import (
     DEFAULT_BODY_SHAPE,
     BodyShape,
     load_body_shape,
-    shape_for_body,
 )
 
 
@@ -162,7 +161,7 @@ def test_yaml_unknown_field_is_ignored() -> None:
     assert shape == BODY_SHAPE_TABLE['MIMAS']
 
 
-def test_shape_for_body_alias_routes_through_loader() -> None:
-    """``shape_for_body`` is the back-compat alias that still picks up the YAML."""
+def test_load_body_shape_picks_up_yaml_override() -> None:
+    """``load_body_shape`` merges the operator-curated YAML over the baseline."""
     config = _FakeConfig({'MIMAS': {'crater_scale_km': 0.7}})
-    assert shape_for_body('MIMAS', config=config).crater_scale_km == 0.7
+    assert load_body_shape('MIMAS', config=config).crater_scale_km == 0.7
