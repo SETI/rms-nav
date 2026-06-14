@@ -38,7 +38,6 @@ from PyQt6.QtWidgets import (
 package_source_path = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, package_source_path)
 
-import matplotlib.cm as cm
 from matplotlib import colormaps as mpl_colormaps
 
 from nav.config import (
@@ -1212,17 +1211,10 @@ class NavBackplaneViewer(QDialog):
                 norm = np.zeros_like(ids, dtype=np.float32)
                 norm[valid] = (ids[valid] - id_min) / float(id_max - id_min)
                 cmap_name = self._body_id_cmap.currentData()
-                cmap_obj = None
-                if mpl_colormaps is not None and cmap_name is not None:
-                    try:
-                        cmap_obj = mpl_colormaps.get(str(cmap_name))
-                    except Exception:
-                        cmap_obj = None
-                if cmap_obj is None and cm is not None and cmap_name is not None:
-                    try:
-                        cmap_obj = cm.get_cmap(str(cmap_name))
-                    except Exception:
-                        cmap_obj = None
+                # Resolve via the shared helper (same as the save path), instead
+                # of the inline fallback that used the removed matplotlib
+                # ``cm.get_cmap`` API (CODE-UI-001).
+                cmap_obj = _load_colormap(cmap_name)
                 if cmap_obj is not None:
                     rgb = (cmap_obj(norm)[..., :3] * 255.0).astype(np.uint8)
                 else:
