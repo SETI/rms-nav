@@ -352,8 +352,11 @@ class DataSetPDS3(DataSet):
 
         # Also limit to the list of images in the FileSpec CSV file, if any
         if arguments.image_filespec_csv:
-            for filename in arguments.image_filespec_csv:
-                with open(filename, encoding='utf-8') as csvfile:
+            for csv_source in arguments.image_filespec_csv:
+                # Read via FCPath so the CSV may live behind an http(s)
+                # holdings path, consistent with the rest of the dataset layer.
+                local_csv = cast(Path, FCPath(csv_source).get_local_path())
+                with open(local_csv, encoding='utf-8') as csvfile:
                     csvreader = csv.reader(csvfile)
                     header = next(csvreader)
                     for colnum in range(len(header)):
@@ -364,25 +367,40 @@ class DataSetPDS3(DataSet):
                             break
                     else:
                         raise ValueError(
-                            f'Badly formatted CSV file "{filename}" - no Primary File Spec header'
+                            f'Badly formatted CSV file "{csv_source}" - no Primary File Spec header'
                         )
-                    for row in csvreader:
-                        filespec = row[colnum]
-                        img_filespec_list.append(filespec)
+                    # Header is row 1; data rows start at 2.
+                    for rownum, row in enumerate(csvreader, start=2):
+                        if colnum >= len(row):
+                            # Ragged / short row: skip it rather than aborting
+                            # the whole batch on an IndexError.
+                            self.logger.warning(
+                                'Skipping malformed row %d in CSV "%s": %d column(s), '
+                                'need at least %d',
+                                rownum,
+                                csv_source,
+                                len(row),
+                                colnum + 1,
+                            )
+                            continue
+                        img_filespec_list.append(row[colnum])
 
         # Also limit to the list of images in the filelist file, if any
         if arguments.image_file_list:
-            for filename in arguments.image_file_list:
-                with open(filename, encoding='utf-8') as fp:
+            for list_source in arguments.image_file_list:
+                local_list = cast(Path, FCPath(list_source).get_local_path())
+                with open(local_list, encoding='utf-8') as fp:
                     for line in fp:
                         line = line.strip()
                         if len(line) == 0 or line[0] == '#':
                             continue
-                        # Ignore anything after the filename
-                        filename = line.split(' ')[0]
-                        if not self._img_name_valid(filename):
-                            raise ValueError(f'Bad filename in filelist file "{filename}": {line}')
-                        img_name_list.append(filename)
+                        # Ignore anything after the filename token.
+                        token = line.split(' ')[0]
+                        if not self._img_name_valid(token):
+                            raise ValueError(
+                                f'Bad filename in filelist file "{list_source}": {line!r}'
+                            )
+                        img_name_list.append(token)
 
         first_image_number = arguments.first_image_num
         last_image_number = arguments.last_image_num

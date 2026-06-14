@@ -29,8 +29,16 @@ def inst_name_to_obs_class(name: str) -> type[ObsSnapshotInst]:
 
     Returns:
         The class corresponding to the instrument name.
+
+    Raises:
+        KeyError: If ``name`` does not match a registered instrument; the
+            message lists the valid names.
     """
-    return _INST_NAME_TO_OBS_CLASS_MAPPING[name.lower()]
+    try:
+        return _INST_NAME_TO_OBS_CLASS_MAPPING[name.lower()]
+    except KeyError:
+        valid = ', '.join(sorted(_INST_NAME_TO_OBS_CLASS_MAPPING))
+        raise KeyError(f'unknown instrument name {name!r}; valid names: {valid}') from None
 
 
 __all__ = [

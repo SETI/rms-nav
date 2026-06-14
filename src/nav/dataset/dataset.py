@@ -42,6 +42,13 @@ class ImageFile:
 
     @property
     def image_file_path(self) -> Path:
+        """Local path to the image file, downloading and memoizing on first use.
+
+        Not thread-safe: a single ``ImageFile`` must be used by one thread at a
+        time.  The lazy memoization is unsynchronized, so concurrent first
+        access from two threads can race and download twice.  Enumerate-then-
+        dispatch one ``ImageFile`` per worker thread.
+        """
         if self._image_file_path is None:
             self._image_file_path = cast(Path, self.image_file_url.get_local_path())
         return self._image_file_path
@@ -51,6 +58,11 @@ class ImageFile:
 
     @property
     def label_file_path(self) -> Path:
+        """Local path to the label file, downloading and memoizing on first use.
+
+        Not thread-safe; see :attr:`image_file_path` for the single-thread-per-
+        ``ImageFile`` expectation.
+        """
         if self._label_file_path is None:
             self._label_file_path = cast(Path, self.label_file_url.get_local_path())
         return self._label_file_path

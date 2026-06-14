@@ -121,7 +121,7 @@ class ObsVoyagerISS(ObsSnapshotInst):
         if spacecraft == '1' and obs.planet.upper() == 'SATURN':
             obs.data = obs.data * _V1_SATURN_IF_CORRECTION
             logger.debug(
-                '  Applied Voyager 1 @ Saturn I/F correction: %.4fx', _V1_SATURN_IF_CORRECTION
+                f'  Applied Voyager 1 @ Saturn I/F correction: {_V1_SATURN_IF_CORRECTION:.4f}x'
             )
         # TODO Calibrate once oops.hosts is fixed.
 
@@ -193,6 +193,14 @@ class ObsVoyagerISS(ObsSnapshotInst):
         # scet_end = float(obs.dict["SPACECRAFT_CLOCK_STOP_COUNT"])
 
         spacecraft = _voyager_spacecraft_digit(self.dict.get('LAB02', None))
+
+        # The instrument LID and `camera` field encode the camera as iss{n,w};
+        # guard against an unexpected detector so a malformed LID never reaches
+        # a PDS4 label.
+        if self.detector not in ('NAC', 'WAC'):
+            raise ValueError(
+                f"unexpected Voyager ISS detector {self.detector!r}; expected 'NAC' or 'WAC'"
+            )
 
         return {
             'image_path': self.image_url,

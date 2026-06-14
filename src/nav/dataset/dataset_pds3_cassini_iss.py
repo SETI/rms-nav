@@ -437,9 +437,14 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
             Bundle directory path relative to bundle root
             (e.g., "1234xxxxxx/123456xxxx").
         """
-        # Extract image number from name (skip first character N/W)
+        # Extract image number from name (skip first character N/W).  A valid
+        # Cassini image name is always >= 11 chars here; a shorter name is a
+        # programming error, so fail loudly rather than returning an empty
+        # string that callers would concatenate into a malformed path.
         if len(image_name) < 11:
-            return ''
+            raise ValueError(
+                f'invalid Cassini image name {image_name!r}: expected >= 11 characters'
+            )
         img_num_str = image_name[1:11]
         img_num = int(img_num_str)
 
@@ -459,10 +464,10 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         """
         image_name = image_file.image_file_name.split('_', 1)[0].split('.', 1)[0]
         image_lid_part = image_name[1:] + image_name[0].lower()
+        # pds4_bundle_path_for_image now raises on an invalid name rather than
+        # returning '', so the bundle path is always present here.
         bundle_path = self.pds4_bundle_path_for_image(image_name)
-        if bundle_path:
-            return f'{bundle_path.rstrip("/")}/{image_lid_part}'
-        return image_lid_part
+        return f'{bundle_path.rstrip("/")}/{image_lid_part}'
 
     def pds4_image_name_to_browse_lid(self, image_name: str) -> str:
         """Returns the browse LID for the given image name.

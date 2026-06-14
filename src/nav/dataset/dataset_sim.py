@@ -86,6 +86,7 @@ class DataSetSim(DataSet):
 
     def pds4_template_variables(
         self,
+        *,
         image_file: ImageFile,
         nav_metadata: dict[str, Any],
         backplane_metadata: dict[str, Any],

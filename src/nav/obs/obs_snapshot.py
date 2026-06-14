@@ -151,12 +151,20 @@ class ObsSnapshot(Obs, Snapshot):  # type: ignore[misc, unused-ignore]  # oops.S
         return mask
 
     def unpad_array_to_extfov(self, array: NDArrayType[NPType]) -> NDArrayType[NPType]:
-        """Unpads an array to be the size of the extended FOV.
+        """Crop an array down to the extended-FOV (extdata) shape.
 
-        This is most useful for using the result of np.unpackbits.
+        Slices ``array`` to ``extdata_shape_vu`` by keeping the top-left
+        region; any extra rows/columns are dropped.  This is most useful
+        for trimming the result of ``np.unpackbits``, which rounds the
+        bit-unpacked length up to a multiple of 8 and so can be larger
+        than the extended FOV.
+
+        Parameters:
+            array: Array at least as large as ``extdata_shape_vu`` in both
+                axes; only its top-left ``extdata_shape_vu`` region is kept.
 
         Returns:
-            The unpadded array.
+            The array cropped to ``extdata_shape_vu``.
         """
         return array[: self.extdata_shape_vu[0], : self.extdata_shape_vu[1]]
 
@@ -365,7 +373,13 @@ class ObsSnapshot(Obs, Snapshot):  # type: ignore[misc, unused-ignore]  # oops.S
 
     @property
     def ext_bp(self) -> Backplane:
-        """Create a Backplane for the entire extended FOV."""
+        """Create a Backplane for the entire extended FOV.
+
+        When the extended-FOV margin is ``(0, 0)`` the extended Backplane is
+        identical to :attr:`bp`, so this returns the *same* Backplane object
+        rather than a copy.  Callers must not mutate the result in place
+        assuming the extended and non-extended caches are independent.
+        """
 
         if self._ext_bp is None:
             if self._extfov_margin_vu == (0, 0):
@@ -399,7 +413,12 @@ class ObsSnapshot(Obs, Snapshot):  # type: ignore[misc, unused-ignore]  # oops.S
 
     @property
     def ext_corner_bp(self) -> Backplane:
-        """Create a Backplane with points only in the four corners of the extended FOV."""
+        """Create a Backplane with points only in the four corners of the extended FOV.
+
+        As with :attr:`ext_bp`, when the extended-FOV margin is ``(0, 0)``
+        this returns the *same* object as :attr:`corner_bp`; do not mutate
+        it assuming the extended and non-extended caches are independent.
+        """
 
         if self._ext_corner_bp is None:
             if self._extfov_margin_vu == (0, 0):
@@ -501,12 +520,10 @@ class ObsSnapshot(Obs, Snapshot):  # type: ignore[misc, unused-ignore]  # oops.S
             ra_min = ra[np.where(ra > np.pi)].min()
             ra_max = ra[np.where(ra < np.pi)].max()
 
+        # Declination ranges only over [-pi/2, +pi/2] and does not wrap, so
+        # (unlike RA) there is no wrap-around case to handle here.
         dec_min = dec.min()
         dec_max = dec.max()
-        if dec_max - dec_min > np.pi:
-            # Wrap around
-            dec_min = dec[np.where(dec > np.pi)].min()
-            dec_max = dec[np.where(dec < np.pi)].max()
 
         ra_min = ra_min.vals
         ra_max = ra_max.vals

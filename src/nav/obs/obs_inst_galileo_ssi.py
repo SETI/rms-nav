@@ -45,6 +45,11 @@ class ObsGalileoSSI(ObsSnapshotInst):
         logger = IMAGE_LOGGER
 
         logger.debug(f'Reading Galileo SSI image {path}')
+        # Galileo SSI navigates in raw DN: there is no I/F-calibrated SSI
+        # product and there never will be.  The navigation pipeline treats
+        # image brightness scale-invariantly (NCC correlation, image-derived
+        # MAD noise thresholds, magnitude-based star gate), so no photometric
+        # calibration is required here.
         obs = oops.hosts.galileo.ssi.from_file(path, full_fov=True)
         fc_path = FCPath(path)
         obs.abspath = cast(Path, fc_path.get_local_path()).absolute()

@@ -45,15 +45,17 @@ class ObsNewHorizonsLORRI(ObsSnapshotInst):
         logger = IMAGE_LOGGER
 
         logger.debug(f'Reading New Horizons LORRI image {path}')
-        # TODO calibration=False is required because the hosts module can't find things like
-        # the distance from the Sun to M7. How do we handle this?
+        # calibration=False reads the raw DN image.  LORRI navigates in DN:
+        # the calibrated LORRI products are themselves in DN (not I/F), and the
+        # navigation pipeline treats image brightness scale-invariantly (NCC
+        # correlation, image-derived MAD noise thresholds, magnitude-based star
+        # gate), so no I/F conversion is required or expected here.
         obs = oops.hosts.newhorizons.lorri.from_file(path, calibration=False)
         fc_path = FCPath(path)
         obs.abspath = cast(Path, fc_path.get_local_path()).absolute()
         obs.image_url = str(fc_path.absolute())
 
         inst_config = config.category('newhorizons_lorri')
-        # TODO Calibrate once oops.hosts is fixed.
 
         if extfov_margin_vu is None:
             if isinstance(inst_config.extfov_margin_vu, dict):
