@@ -1186,6 +1186,44 @@ The remainder of the plan (Parts 1–16) describes the *target* design;
 this section is the operational checklist that the per-phase sections
 above operationalise.
 
+### Code-critique hardening sweep (2026-06-14, branch `core_rewrite_phase10`)
+
+A full-depth correctness/quality critique of every `src/` module
+(`critiques/CODE_CRITIQUE.md`, 190 findings) was worked end-to-end. This
+is **prerequisite cleanup for Phase 10 proper**: the headline Phase 10
+work is calibrating the confidence formulas and seeding regression
+baselines against a curated image library, and that calibration is only
+meaningful once the Phase 0–9 techniques it measures are correct. So the
+sweep hardens the already-shipped Phase 0–9 code on this branch *before*
+the calibration starts; it does **not** itself deliver the Phase 10
+headline items (image library, confidence calibration, regression
+baselines, docs/breadth sweep), which remain outstanding as described
+below (see "Phase 10" and `PHASE10_CURATION.md`).
+
+- **~80 findings code-fixed** across nav_technique, nav_model,
+  nav_orchestrator/ensemble, obs, dataset, reproj, support, config, pds4,
+  and the PyQt6 UI, each with regression tests where testable. Highlights:
+  σ-independent polarity rejection and a documented data-only covariance
+  in `dt_fitting`; structured `source_bodies` replacing feature-id string
+  parsing in the ensemble/orchestrator; positional-only ensemble
+  confidence weighting; a distinct `FINAL_SIGMA_ABOVE_THRESHOLD` status
+  reason; grid-aligned ring-antimask longitude registration; `reproj` and
+  `mosaic_viewer` migrated to `pdslogger`; off-body limb vertices dropped;
+  numerous validation/guard/docstring fixes. Full per-finding disposition
+  is recorded inline in `critiques/CODE_CRITIQUE.md`.
+- **16 follow-up issues filed (#132–#147)** for findings needing real
+  holdings to confirm, larger refactors, or domain decisions (e.g. #136
+  NAC/WAC `--last-image-num` drop, #139 malformed global-index LID, #145
+  star-ring occlusion median-radius bias, #146 `instances_for_obs` config
+  override). These are the new entries in the GitHub backlog.
+- **Simulator findings deferred** to the `src/nav/sim` rewrite branch;
+  hand-off written to `critiques/SIM_REWRITE_FINDINGS.md` (all
+  `CODE-SIM-*` items).
+- Several findings were **obviated / confirmed working-as-intended** on
+  investigation (e.g. the calibrated-image STAR-SNR concern — see Phase 10
+  Scope F below — and the `1e6` "no-information" spurious covariance) and
+  are recorded with their rationale rather than changed.
+
 ### Implemented
 
 **Type system, sum types, and dataclasses (Part 1, Part 4, Part 16)**
@@ -3593,49 +3631,38 @@ E. **Manual-nav UI polish.** Save-as-library-entry button shipped
    discovered during the bulk library curation.
 
 F. **STAR predicted-SNR unit handling for calibrated images
-   (filed during Phase 7+8 curation, 2026-04-30).**
-   ``nav.nav_model.stars.predicted_snr.integrated_signal_dn`` returns
-   ``2.512 ** -(in_band_mag - 4.0)``, treating the result as a "DN"
-   quantity — but the same number is then plugged into
+   (filed during Phase 7+8 curation, 2026-04-30 — RESOLVED).**
+   Originally: ``predicted_snr`` mixed a DN-equivalent "signal"
+   (``2.512 ** -(in_band_mag - 4.0)``) with an ``image_noise_sigma``
+   in whatever units the obs returned, so on calibrated I/F images
+   (``image_noise_sigma`` ``~1e-7``) the SNR collapsed to ``√sig``
+   and every catalog star fell below the reliability gate's STAR
+   threshold — e.g. W1580760393_1_CALIB (Pleiades, 100 catalog
+   stars) failed with ``Every feature dropped by the reliability
+   gate`` even as a textbook Scenario C frame.
 
-   ::
+   **Resolved two ways and no longer blocks the calibration sweep:**
 
-       SNR = sig / sqrt(sig + image_noise_sigma**2 * N_aperture)
+   1. The live STAR reliability path no longer consumes DN-SNR at
+      all.  Star selection and the feature-emission gate are now
+      purely magnitude based against ``obs.star_max_usable_vmag()``;
+      the CRLB / reliability helpers synthesise a unit-agnostic
+      effective SNR from magnitude headroom
+      (``snr_eff = SNR_REF * 2.512 ** (mag_limit - vmag)``, ``SNR_REF
+      = 8.0``) in ``nav_model_stars.py``.  Because the limiting
+      magnitude is unit-free, a calibrated I/F frame and its raw-DN
+      twin gate identically.
+   2. The DN-based ``predicted_snr`` diagnostic (still consumed by
+      ``StarUniqueMatchNav`` for brightness-margin ratios, where
+      units cancel) gained the
+      ``signal_dn_to_image_unit_scale`` parameter this scope called
+      for: it converts ``image_noise_sigma`` to DN-equivalent
+      (``image_noise_sigma / signal_dn_to_image_unit_scale``) so the
+      diagnostic operates in a single unit system for both raw-DN and
+      calibrated-I/F obs.
 
-   where ``image_noise_sigma`` is the per-pixel noise on the
-   ``NavContext`` image (in whatever units the obs returned).  For
-   raw-DN images (e.g. ``_RAW.IMG``) the units agree and SNR is
-   sensible.  For calibrated I/F images
-   (Cassini ISS ``_CALIB.IMG``, NHLORRI ``_red.fit`` post-pipeline,
-   etc.) ``image_noise_sigma`` is in I/F (``~1e-7``) while the
-   "signal" is still DN-equivalent, so SNR collapses to ``√sig`` and
-   every catalog star comes in below the reliability gate's STAR
-   threshold (0.20).  Worked example: W1580760393_1_CALIB
-   (Pleiades, 100 catalog stars in FOV) — autonomous nav fails with
-   ``status=failed / Every feature dropped by the reliability gate``
-   even on a textbook Scenario C frame.
-
-   **Why this lands in Phase 10:** the calibration sweep depends on
-   running ``nav_offset`` autonomously over the library; the library
-   contains both ``_RAW.IMG`` and ``_CALIB.IMG`` entries.  Without
-   the fix, the calibration sweep silently drops every calibrated
-   image and tunes against an unrepresentative subset.
-
-   **Direction.**  Add a per-instrument-per-processing-level
-   ``signal_dn_to_image_unit_scale`` constant (or equivalent —
-   convert ``image_noise_sigma`` to DN-equivalent at NavContext
-   build time) so ``predicted_snr`` operates on a single unit
-   system regardless of whether the obs delivered raw DN or
-   calibrated I/F.  The per-camera ``mag_offset`` knob is for
-   catalog-band → instrument-band correction and is **not** the
-   right knob for this fix.
-
-   **Workaround pre-fix.**  Manual-nav curation
-   (``run_manual_nav`` / ``--manual``) bypasses the reliability
-   gate (``apply_gate=False``) so library sidecars can be created
-   from calibrated images even before the fix lands.  Operator
-   curation per ``PHASE7_LIBRARY_SEED.md`` Scenario C uses this
-   path.
+   No remaining Phase 10 work item; retained here as the resolution
+   record for the original finding.
 
 **Scope (out):** Cleanup — Phase 11. Deferred items — Phase 12+.
 
