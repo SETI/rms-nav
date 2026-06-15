@@ -800,9 +800,13 @@ plan-body section conflicts, this list wins.
     future need arises" / "tracked in Part 13b" / "to be designed and
     added later" sentence in Parts 1–12 either points to one of the
     Part 13b items or its referenced item is added. Reading pass
-    during Phase 0 caught the rest; for now, the 6 items in Part 13b
+    during Phase 0 caught the rest; for now, the 8 items in Part 13b
     are the canonical deferred-work list. (Legacy wording said "5
-    items" / "Phase 1".)
+    items" / "Phase 1"; the resolved-irregular-body shape-model item
+    was added later when the Phase 10 §F BLOB phase-irregularity
+    work surfaced the long-term fix; the simulated-stars NavModel
+    item was added when the SIM_IMPROVEMENT_PLAN surfaced the
+    asymmetry against the existing body / rings simulated models.)
 
 66. **UI per-technique-result panel layout (H13).** Out of scope for
     the cutover. Filed as a 6th Part 13b item: "UI per-technique panel
@@ -1181,6 +1185,44 @@ This section tracks what has shipped vs. what still needs to be built.
 The remainder of the plan (Parts 1–16) describes the *target* design;
 this section is the operational checklist that the per-phase sections
 above operationalise.
+
+### Code-critique hardening sweep (2026-06-14, branch `core_rewrite_phase10`)
+
+A full-depth correctness/quality critique of every `src/` module
+(`critiques/CODE_CRITIQUE.md`, 190 findings) was worked end-to-end. This
+is **prerequisite cleanup for Phase 10 proper**: the headline Phase 10
+work is calibrating the confidence formulas and seeding regression
+baselines against a curated image library, and that calibration is only
+meaningful once the Phase 0–9 techniques it measures are correct. So the
+sweep hardens the already-shipped Phase 0–9 code on this branch *before*
+the calibration starts; it does **not** itself deliver the Phase 10
+headline items (image library, confidence calibration, regression
+baselines, docs/breadth sweep), which remain outstanding as described
+below (see "Phase 10" and `PHASE10_CURATION.md`).
+
+- **~80 findings code-fixed** across nav_technique, nav_model,
+  nav_orchestrator/ensemble, obs, dataset, reproj, support, config, pds4,
+  and the PyQt6 UI, each with regression tests where testable. Highlights:
+  σ-independent polarity rejection and a documented data-only covariance
+  in `dt_fitting`; structured `source_bodies` replacing feature-id string
+  parsing in the ensemble/orchestrator; positional-only ensemble
+  confidence weighting; a distinct `FINAL_SIGMA_ABOVE_THRESHOLD` status
+  reason; grid-aligned ring-antimask longitude registration; `reproj` and
+  `mosaic_viewer` migrated to `pdslogger`; off-body limb vertices dropped;
+  numerous validation/guard/docstring fixes. Full per-finding disposition
+  is recorded inline in `critiques/CODE_CRITIQUE.md`.
+- **16 follow-up issues filed (#132–#147)** for findings needing real
+  holdings to confirm, larger refactors, or domain decisions (e.g. #136
+  NAC/WAC `--last-image-num` drop, #139 malformed global-index LID, #145
+  star-ring occlusion median-radius bias, #146 `instances_for_obs` config
+  override). These are the new entries in the GitHub backlog.
+- **Simulator findings deferred** to the `src/nav/sim` rewrite branch;
+  hand-off written to `critiques/SIM_REWRITE_FINDINGS.md` (all
+  `CODE-SIM-*` items).
+- Several findings were **obviated / confirmed working-as-intended** on
+  investigation (e.g. the calibrated-image STAR-SNR concern — see Phase 10
+  Scope F below — and the `1e6` "no-information" spurious covariance) and
+  are recorded with their rationale rather than changed.
 
 ### Implemented
 
@@ -3574,7 +3616,11 @@ C. **Confidence-formula calibration.** `confidence = sigmoid(α₀ +
    only — they are not claimed to produce the example confidence
    values stated alongside them; calibration replaces them.
    PR review enforces no `PLACEHOLDER` markers ship to production
-   (per Part 0 §5).
+   (per Part 0 §5). **Includes a mandatory per-instrument residual
+   audit** (`tier_target − sigmoid(α·x)` bucketed by
+   `sidecar.mission`); a systematically off mission triggers either
+   an upstream per-instrument input scale or a schema promotion to
+   per-instrument α vectors per Part 10 §"Confidence calibration".
 
 D. **Regression baselines for every library image.**
    `tests/integration/baselines/<image_id>.json` populated per
@@ -3585,49 +3631,38 @@ E. **Manual-nav UI polish.** Save-as-library-entry button shipped
    discovered during the bulk library curation.
 
 F. **STAR predicted-SNR unit handling for calibrated images
-   (filed during Phase 7+8 curation, 2026-04-30).**
-   ``nav.nav_model.stars.predicted_snr.integrated_signal_dn`` returns
-   ``2.512 ** -(in_band_mag - 4.0)``, treating the result as a "DN"
-   quantity — but the same number is then plugged into
+   (filed during Phase 7+8 curation, 2026-04-30 — RESOLVED).**
+   Originally: ``predicted_snr`` mixed a DN-equivalent "signal"
+   (``2.512 ** -(in_band_mag - 4.0)``) with an ``image_noise_sigma``
+   in whatever units the obs returned, so on calibrated I/F images
+   (``image_noise_sigma`` ``~1e-7``) the SNR collapsed to ``√sig``
+   and every catalog star fell below the reliability gate's STAR
+   threshold — e.g. W1580760393_1_CALIB (Pleiades, 100 catalog
+   stars) failed with ``Every feature dropped by the reliability
+   gate`` even as a textbook Scenario C frame.
 
-   ::
+   **Resolved two ways and no longer blocks the calibration sweep:**
 
-       SNR = sig / sqrt(sig + image_noise_sigma**2 * N_aperture)
+   1. The live STAR reliability path no longer consumes DN-SNR at
+      all.  Star selection and the feature-emission gate are now
+      purely magnitude based against ``obs.star_max_usable_vmag()``;
+      the CRLB / reliability helpers synthesise a unit-agnostic
+      effective SNR from magnitude headroom
+      (``snr_eff = SNR_REF * 2.512 ** (mag_limit - vmag)``, ``SNR_REF
+      = 8.0``) in ``nav_model_stars.py``.  Because the limiting
+      magnitude is unit-free, a calibrated I/F frame and its raw-DN
+      twin gate identically.
+   2. The DN-based ``predicted_snr`` diagnostic (still consumed by
+      ``StarUniqueMatchNav`` for brightness-margin ratios, where
+      units cancel) gained the
+      ``signal_dn_to_image_unit_scale`` parameter this scope called
+      for: it converts ``image_noise_sigma`` to DN-equivalent
+      (``image_noise_sigma / signal_dn_to_image_unit_scale``) so the
+      diagnostic operates in a single unit system for both raw-DN and
+      calibrated-I/F obs.
 
-   where ``image_noise_sigma`` is the per-pixel noise on the
-   ``NavContext`` image (in whatever units the obs returned).  For
-   raw-DN images (e.g. ``_RAW.IMG``) the units agree and SNR is
-   sensible.  For calibrated I/F images
-   (Cassini ISS ``_CALIB.IMG``, NHLORRI ``_red.fit`` post-pipeline,
-   etc.) ``image_noise_sigma`` is in I/F (``~1e-7``) while the
-   "signal" is still DN-equivalent, so SNR collapses to ``√sig`` and
-   every catalog star comes in below the reliability gate's STAR
-   threshold (0.20).  Worked example: W1580760393_1_CALIB
-   (Pleiades, 100 catalog stars in FOV) — autonomous nav fails with
-   ``status=failed / Every feature dropped by the reliability gate``
-   even on a textbook Scenario C frame.
-
-   **Why this lands in Phase 10:** the calibration sweep depends on
-   running ``nav_offset`` autonomously over the library; the library
-   contains both ``_RAW.IMG`` and ``_CALIB.IMG`` entries.  Without
-   the fix, the calibration sweep silently drops every calibrated
-   image and tunes against an unrepresentative subset.
-
-   **Direction.**  Add a per-instrument-per-processing-level
-   ``signal_dn_to_image_unit_scale`` constant (or equivalent —
-   convert ``image_noise_sigma`` to DN-equivalent at NavContext
-   build time) so ``predicted_snr`` operates on a single unit
-   system regardless of whether the obs delivered raw DN or
-   calibrated I/F.  The per-camera ``mag_offset`` knob is for
-   catalog-band → instrument-band correction and is **not** the
-   right knob for this fix.
-
-   **Workaround pre-fix.**  Manual-nav curation
-   (``run_manual_nav`` / ``--manual``) bypasses the reliability
-   gate (``apply_gate=False``) so library sidecars can be created
-   from calibrated images even before the fix lands.  Operator
-   curation per ``PHASE7_LIBRARY_SEED.md`` Scenario C uses this
-   path.
+   No remaining Phase 10 work item; retained here as the resolution
+   record for the original finding.
 
 **Scope (out):** Cleanup — Phase 11. Deferred items — Phase 12+.
 
@@ -6204,6 +6239,15 @@ CI test tolerance = `offset_uncertainty_px + 0.5 px` slack. Slack absorbs algori
 
 The confidence formulas in each technique are tuned once on this library: the constants are chosen so that the per-tier mappings in Part 4 hold empirically on the library. This is the single calibration pass; after that, the constants are frozen. Re-calibration happens only if technique code changes substantially.
 
+The schema in `config_510_techniques.yaml` keys α coefficients **per technique, not per (technique × instrument)**. The design assumption is that the diagnostics feeding each formula (`ncc_peak`, `consistency_px`, `body_snr_inside_predicted_bbox`, `n_inliers`, `residual_scatter_px`, etc.) are already unitless or instrument-normalized — per-instrument physics lives upstream in `config_4N0_inst_*.yaml` (`signal_dn_to_image_unit_scale`, `mag_offset_table`, `expected_noise_dn`, `star_psf_sigma`, `fit_camera_rotation`). Per-instrument library oversubscription (≥1 image per class per instrument, ≈ 17 × 4 × ≥2 = 136+ images) is therefore deliberately **not** a Phase 10 requirement; the ~50-image budget plus the "all four missions appear *somewhere* in the library" rule is enough to constrain the unified fit.
+
+**Per-instrument residual audit (mandatory step in the calibration sweep).** Immediately after the curve-fit lands α coefficients, dump the residual `tier_target − sigmoid(α·x)` for every library image and bucket by `sidecar.mission`. If one mission's residual distribution is systematically off (|mean| > ~0.1 in tier-space, or visibly asymmetric vs the others) the unified-formula assumption is failing for that camera. Two responses, in order of preference:
+
+1. **Find the offending diagnostic and add a per-instrument scale upstream** (the `signal_dn_to_image_unit_scale` pattern from Phase 10 §F — keep the formula global, fix the inputs). This is the cheaper change and the right answer when the per-instrument bias traces to a single diagnostic.
+2. **Promote the schema to per-instrument α vectors** (`techniques.<name>.<instrument>.{...}` with a fallback default block for instruments without enough images to fit). Heavier change: doubles or triples the number of coefficients to fit, and demands enough images per (technique × instrument) to constrain each block. Land this only if option 1 leaves the residuals unbalanced.
+
+The per-instrument residual plot belongs in the same PR as the calibration sweep so the choice between (1) and (2) is reviewed together with the data that motivated it. This is what turns "we picked one α per technique" from an assumption into a checked invariant.
+
 ---
 
 ## Part 11 — Manual research vs. AI-automated research
@@ -6496,6 +6540,228 @@ architecture leaves room for them.
    (the orchestrator's chosen offset is what gets surfaced). Track:
    ergonomics, interaction model, layout, color coding for confidence
    tiers. (Legacy wording said "Phase 4".)
+
+7. **Resolved-irregular-body LIMB_ARC via real shape models.** At high
+   resolution (body filling most of the FOV) on an irregular satellite
+   — Hyperion, Phoebe, Prometheus, Pandora, Atlas, Pan, Janus,
+   Epimetheus — the predicted ellipsoidal silhouette deviates from the
+   actual body by the full `ellipsoid_rms_residual_km`, so
+   `limb_uncertainty_px = residual_km / km_per_pixel_at_limb` exceeds
+   the 3 px LIMB_ARC threshold and `BodyLimbNav` is suppressed.
+   `BodyBlobNav` then carries the load with a per-image centroid sigma
+   of tens of pixels (the lit-weighted predicted centroid corrects the
+   *systematic* phase bias but the irregularity-driven covariance
+   inflation reflects the residual variance — see §F's
+   `phase_irregularity_factor`).  Two independent failure modes
+   compose here and the fix is split between them.
+
+   **Failure mode A — shape error.**  The drawn body silhouette is
+   the IAU triaxial ellipsoid with axes `BODY<NAIF>_RADII` from the
+   PCK kernel; the actual irregular body's silhouette differs from
+   that ellipsoid by `ellipsoid_rms_residual_km`.  The fix is to use
+   the body's *actual* shape when one is available:
+
+   - **DSK (digital shape kernel) integration through oops.** oops
+     does not currently consume DSK kernels for body limb projection;
+     when it does, the body NavModel can emit a per-vertex polyline
+     against the actual shape rather than the ellipsoidal silhouette.
+     `limb_uncertainty_px` drops to the per-vertex orientation
+     uncertainty (~ 0.1-0.5 px for major irregulars with dense DSK
+     coverage), `BodyLimbNav` re-engages, and the resolved-irregular
+     body becomes a high-precision navigation target.
+   - **Static shape-file fallback.** For bodies with published shape
+     models (Thomas et al., Stooke catalog) but no DSK kernel,
+     consume the polyhedral mesh directly from a per-body shape file
+     referenced from `config_220_body_shape.yaml` and project it via
+     a custom limb extractor.  Less convenient than DSK because every
+     shape file format needs its own loader, but unblocked by oops.
+   - **Per-vertex sigma_normal still uses `crater_scale_km`.** Even
+     with the bulk shape known, sub-shape-model topography (craters,
+     scarps, isolated boulders) limits per-vertex precision;
+     `BodyShape.crater_scale_km` continues to contribute the same
+     quadrature term it does for regular bodies.
+
+   **Failure mode B — pose error on chaotic rotators.**  The drawn
+   silhouette's *orientation* in image space is determined by the
+   body-fixed frame at the image epoch (PCK pole RA/Dec + W₀ +
+   W-dot).  For tide-locked irregulars (Phoebe, Pan, Atlas,
+   Prometheus, Pandora, Janus, Epimetheus, …) the IAU frame tracks
+   the actual rotation well enough that pose error is small — the
+   shape fix above is sufficient.  **Hyperion is the chaotic-
+   rotator outlier**: its spin state is not well-predicted by a
+   fixed pole + uniform W-dot, so the IAU frame's orientation at
+   any given image epoch is essentially *uncorrelated* with the
+   actual body orientation.  A DSK / shape-file fix gives you the
+   correct shape pointed the wrong way.
+
+   The chaotic-rotator pose problem is fundamentally not solvable
+   from SPICE alone.  Two viable approaches when it becomes
+   relevant:
+
+   - **Rotation-as-fit-parameter.**  Extend `BodyLimbNav` to
+     simultaneously fit translation *and* the body's three Euler
+     angles against the image limb, using the SPICE-predicted pose
+     as a weak prior and the DSK/shape-file polyhedron as the
+     model.  Costlier per-image (6-DoF instead of 2-DoF) and only
+     works when the limb is well-resolved on the image, but
+     converts pose error from "fundamentally wrong" to "another
+     fitted parameter".
+   - **Per-image pose lookup table.**  For Cassini imagery
+     specifically, ground-based and image-derived rotation
+     reconstructions of Hyperion exist (Black et al.) — bake an
+     observation-time-keyed pose override into a static-data file
+     when the relevant production traffic appears.
+
+   Out of scope for the cutover: no production traffic currently
+   needs either fix (Phase 10's library deliberately samples
+   irregular bodies at distance where they fit the BLOB regime, per
+   Part 14 §1).  Track when a use case materialises — typically a
+   Cassini Phoebe or Hyperion close-flyby frame that the cutover
+   library stops accepting at `low` confidence and starts demanding
+   `high`.  At that point the regression test set lands alongside
+   the DSK / shape-file integration *and* (for Hyperion specifically)
+   a chaotic-rotator pose strategy.
+
+8. **Simulated-stars NavModel.** The simulated-image path has
+   parallel NavModel subclasses for bodies
+   (:class:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated`)
+   and for rings
+   (:class:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated`)
+   so the navigator's predicted-scene overlay matches the sim's
+   rendered scene when both are derived from the same parameters.
+   There is no parallel ``NavModelStarsSimulated``; when the
+   navigator processes a sim image, the regular catalog-driven
+   :class:`~nav.nav_model.stars.nav_model_stars.NavModelStars` runs
+   against UCAC4 / Tycho2 / YBSC.  This is workable today because
+   the sim's star renderer (``nav.sim.render.render_stars``) draws
+   stars from a synthetic uniform-random distribution rather than
+   from a real catalog — so the navigator's catalog stars and the
+   sim's rendered stars are completely disjoint and the navigator
+   sees "no catalog stars match anything in the image".
+
+   The asymmetry becomes a real problem the moment the sim grows a
+   catalog-driven star renderer (see ``SIM_IMPROVEMENT_PLAN.md``
+   sections B5 / B7 and beyond, where instrument-coupled scenes
+   want stars from the same catalog the navigator consumes).  At
+   that point the navigator needs a ``NavModelStarsSimulated`` that
+   emits ``STAR`` features keyed off the sim's planted star list —
+   exactly catalog-position, exactly the sim's predicted SNR — so
+   the autonomous pipeline runs against ground truth that's correct
+   by construction.  This unblocks the tautology problem in the
+   SIM_IMPROVEMENT_PLAN's discussion (rendering stars from UCAC4
+   and navigating against UCAC4): with a simulated-stars NavModel,
+   the test asserts "the planted stars are recovered to within
+   centroid sigma", not "UCAC4 perfectly matches a UCAC4 render".
+
+   Track:
+   - Implement ``NavModelStarsSimulated`` mirroring the body /
+     rings precedent: pulls the planted star list from
+     ``obs.sim_metadata`` (a new attribute on ``ObsSim`` carrying
+     the renderer's input parameters), emits one ``STAR``
+     ``NavFeature`` per planted star with ``predicted_vu`` =
+     planted position and ``position_cov_px`` derived from the
+     sim's predicted SNR.
+   - Register it in ``nav.nav_model.__init__`` alongside the other
+     simulated models.
+   - Update ``build_models_for_obs`` to swap in the simulated
+     variant when the obs is an ``ObsSim`` (today this already
+     happens for body / rings; stars need the same dispatch).
+   - Add unit tests under ``tests/nav/nav_model/`` mirroring
+     ``test_nav_model_body_simulated.py``.
+
+   Out of scope for the cutover: no current production traffic
+   uses sim images for autonomous navigation.  Track until the
+   SIM_IMPROVEMENT_PLAN's catalog-driven star renderer (B5+) lands
+   and the calibration test layer (T4 — algorithmic invariants)
+   needs sim-stars planted-position recovery as a unit test.
+
+9. **Body-limb (and ring-edge) coarse-prior robustness.** Every
+   DT-fit technique that runs in pass 1 — `BodyLimbNav`,
+   `BodyTerminatorNav`, `RingEdgeNav` — feeds its LM refinement an
+   integer-pixel seed produced by
+   :func:`nav.nav_technique.dt_fitting.coarse_ncc_search`.  Despite
+   the name, the coarse stage is *not* an NCC: it renders the model
+   polyline as a binary mask, slides it across the per-instrument
+   `extfov_margin_vu` window (Cassini NAC 1024: ±50 v / ±140 u px),
+   and picks the integer offset that maximises the count of
+   polyline pixels landing on a thresholded image edge pixel.
+   Because the score is a polarity-blind binary overlap count, any
+   region of the image with high edge density (rings, terminator,
+   internal surface clutter, a second moon's silhouette) outscores
+   a thin true-limb arc whenever the limb itself is short relative
+   to the surrounding clutter.  The LM stage that follows can only
+   converge into the basin of the *nearest* edge field — at the DT
+   defaults (sigma 1.2 px, threshold 4 sigma, half-width 64 px) the
+   basin is roughly the distance to the nearest competing edge,
+   typically 5-10 px in cluttered scenes.  When the coarse seed
+   lands in the wrong basin the LM still converges, RMS can be
+   small, and the spurious gates
+   (`dt_fit_rms_px > 5 * sigma_min`, `tukey_inlier_count < 6`,
+   inlier_fraction < 5 %) miss the failure because the wrong
+   neighbourhood does have edges.  The result is a confident-but-
+   wrong offset, exactly the failure class the orchestrator's
+   ensemble vote is least equipped to detect (a single high-
+   confidence wrong group dominates anything weaker).
+
+   Four candidate fixes, in order of cost / payoff:
+
+   - **Polarity-weighted coarse score (cheapest, biggest single
+     win).** Replace the binary overlap sum in
+     :func:`coarse_ncc_search` with
+     `sum_i max(grad(image, x_i + shift) . normal_i, 0)` using the
+     per-vertex outward normal already on `LimbPolyline` and the
+     per-pixel gradient image already cached on
+     `NavContext.image_gradient_vu_ext`.  This makes the coarse
+     stage optimise the same quantity the LM stage already
+     optimises (polarity-respecting edge alignment) instead of a
+     polarity-blind proxy, so distractor edges with the wrong
+     gradient direction (ring inner edge, crater rim with the wrong
+     light side) stop dominating the peak.  No new image-side
+     pre-compute, no new config knobs.  Touches `dt_fitting.py`
+     and the three pass-1 DT techniques' call sites.
+
+   - **DT-vs-DT coarse correlation.** Build a DT from the model
+     polyline and slide the *image* DT against it.  Continuous DT
+     fields cross-correlate with a broad smooth peak (and a
+     well-defined argmax even when the true overlap is zero pixels
+     off-by-one), unlike sparse one-pixel-wide binary masks whose
+     peaks are knife-edge.  Could replace the binary overlap entry
+     point or sit alongside it as a fallback when the binary peak
+     is ambiguous.
+
+   - **Coarse-to-fine pyramid.** A single full-res scan biases
+     toward whichever edge population has the most pixels.  A
+     Gaussian-downsampled prior pass (4x or 8x) uses only the
+     dominant silhouette geometry; refine at full resolution.  The
+     codebase already has multi-scale correlation infrastructure
+     in `src/nav/support/correlate.py` left over from the legacy
+     pipeline that this work could reuse.
+
+   - **Body-disc seeding (orchestrator change, no new technique
+     code).** `BodyDiscCorrelateNav` and `BodyBlobNav` use the
+     body's *interior intensity*, not just the 1-D limb edge, and
+     are far less ambiguous when the body is mostly in-FOV.
+     Promote a confident disc/blob result to a prior, flip
+     `BodyLimbNav.requires_prior = True`, and let the limb
+     technique run as a local refinement in pass 2 with a tiny
+     search window.  The two-pass orchestration already exists
+     for the star-then-body case; this generalises it within the
+     body model family.  The same pattern applies to
+     `RingEdgeNav` once a confident ring-annulus result is
+     available.
+
+   Out of scope for the cutover: Phase 10's calibration on the
+   image library will quantify the failure rate before any of
+   these are scheduled.  Track when the calibration shows a
+   non-trivial population of `BodyLimbNav` results that the
+   ensemble vote accepts at high confidence but the
+   ground-truth offsets contradict — particularly in the
+   `multi_body`, `ring_only_curved`, and `star_dominated`
+   categories where competing edge populations are dense.  At
+   that point the polarity-weighted coarse score lands first
+   (smallest surface area, most direct attack on the failure
+   mode), with the body-disc seeding flow as the structural
+   follow-up if the prior change alone does not close the gap.
 
 ## Part 14 — Open questions — operator decisions
 

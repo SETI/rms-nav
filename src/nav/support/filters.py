@@ -163,9 +163,9 @@ def _apply_anisotropic_gaussian(arr: NDArrayFloatType, spec: NavFilterSpec) -> N
     angle_rad = float(np.arctan2(eigvecs[0, 1], eigvecs[1, 1]))
     rotated = rotate(arr.astype(np.float64), -np.degrees(angle_rad), reshape=False)
     blurred = gaussian_filter(rotated, sigma=(sigma_major, sigma_minor))
+    # ``rotate(..., reshape=False)`` preserves the input shape, so the result is
+    # already arr-shaped (no trim/pad needed).
     out = rotate(blurred, np.degrees(angle_rad), reshape=False)
-    # rotate may shift the array by sub-pixel; trim/pad back to original shape.
-    out = out[: arr.shape[0], : arr.shape[1]]
     return cast(NDArrayFloatType, out)
 
 
@@ -202,16 +202,19 @@ def _apply_gradient_of_gaussian(arr: NDArrayFloatType, spec: NavFilterSpec) -> N
 
 
 def _apply_morph_dilate(arr: NDArrayFloatType, spec: NavFilterSpec) -> NDArrayFloatType:
-    """Apply morphological dilation with a square structuring element.
+    """Apply morphological dilation with a per-axis rectangular element.
 
-    Half-width of the structuring element is the larger ``sigma_xy`` rounded
-    up to an integer.
+    The structuring-element half-width on each axis is that axis's ``sigma_xy``
+    component rounded up to an integer, so an anisotropic ``sigma_xy`` dilates
+    each axis by a different amount instead of collapsing to a single square.
     """
-    half_width = int(np.ceil(max(spec.sigma_xy)))
-    if half_width <= 0:
+    sigma_v, sigma_u = spec.sigma_xy
+    half_v = int(np.ceil(sigma_v))
+    half_u = int(np.ceil(sigma_u))
+    if half_v <= 0 and half_u <= 0:
         return arr
-    size = 2 * half_width + 1
-    return cast(NDArrayFloatType, grey_dilation(arr, size=(size, size)))
+    size = (2 * max(half_v, 0) + 1, 2 * max(half_u, 0) + 1)
+    return cast(NDArrayFloatType, grey_dilation(arr, size=size))
 
 
 def _apply_distance_transform(arr: NDArrayFloatType, spec: NavFilterSpec) -> NDArrayFloatType:
@@ -263,13 +266,20 @@ def apply_filter(arr: NDArrayFloatType, spec: NavFilterSpec) -> NDArrayFloatType
         raise TypeError(f'apply_filter requires a 2-D array; got ndim={arr.ndim}')
     if spec.kind is NavFilterKind.NONE:
         return arr
-    # Distance transform is not subject to the null-sigma short-circuit because
-    # it has no "sigma" concept — the half-width parameter governs saturation,
-    # not blur scale.
-    if (
-        spec.kind is not NavFilterKind.DISTANCE_TRANSFORM
-        and _largest_sigma(spec) < spec.null_filter_threshold_sigma
-    ):
+    # The null-sigma short-circuit (treat a tiny filter as identity, returning
+    # the input unchanged) is valid ONLY for the blur-family kinds, where a
+    # negligible blur really is ~identity.  It must NOT apply to
+    # GRADIENT_OF_GAUSSIAN (whose output is a gradient magnitude, not the
+    # intensity image), MORPH_DILATE (handled by its own half_width<=0 guard),
+    # or DISTANCE_TRANSFORM (no "sigma" concept — half_width governs
+    # saturation).  Short-circuiting those would silently change the meaning of
+    # the result to the raw intensity image.
+    _BLUR_FAMILY = (
+        NavFilterKind.ISOTROPIC_GAUSSIAN,
+        NavFilterKind.ANISOTROPIC_GAUSSIAN,
+        NavFilterKind.BANDPASS_DOG,
+    )
+    if spec.kind in _BLUR_FAMILY and _largest_sigma(spec) < spec.null_filter_threshold_sigma:
         return arr
     if spec.kind is NavFilterKind.ISOTROPIC_GAUSSIAN:
         sigma_v, sigma_u = spec.sigma_xy

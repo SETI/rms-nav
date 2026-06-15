@@ -14,6 +14,7 @@ __all__ = [
     'BodyDiscDiagnostics',
     'BodyLimbDiagnostics',
     'BodyTerminatorDiagnostics',
+    'ManualNavDiagnostics',
     'NavTechniqueDiagnostics',
     'RingAnnulusDiagnostics',
     'RingEdgeDiagnostics',
@@ -31,8 +32,14 @@ class BodyDiscDiagnostics:
         ncc_peak: Peak normalized cross-correlation value.
         peak_to_runner_up_ratio: Ratio of NCC peak to second-highest peak
             outside the exclusion radius around the peak.
-        consistency_px: Mean per-axis disagreement between coarse-pyramid
-            and full-resolution sub-pixel locations.
+        consistency_px: Inter-pyramid peak migration in pixels (raw).
+        consistency_ratio: ``consistency_px`` divided by the per-image
+            spurious threshold (which scales with body diameter).  A
+            value <= 1.0 means the result is within the diameter-scaled
+            consistency budget; the confidence formula consumes this
+            normalized form so a healthy fit on a large body is not
+            penalized by the same divisor that's appropriate for a
+            small body.
         used_gradient: True if gradient mode was selected by ``auto``.
         body_count: Number of BODY_DISC features fused into the combined
             template.
@@ -41,12 +48,14 @@ class BodyDiscDiagnostics:
     ncc_peak: float = 0.0
     peak_to_runner_up_ratio: float = 0.0
     consistency_px: float = 0.0
+    consistency_ratio: float = 0.0
     used_gradient: bool = False
     body_count: int = 0
     CURATOR_FIELDS: ClassVar[dict[str, str | None]] = {
         'ncc_peak': 'ncc_peak',
         'peak_to_runner_up_ratio': 'peak_to_runner_up_ratio',
         'consistency_px': 'consistency_px',
+        'consistency_ratio': 'consistency_ratio',
         'used_gradient': 'used_gradient',
         'body_count': 'body_count',
     }
@@ -111,17 +120,34 @@ class BodyBlobDiagnostics:
         body_extent_px: Predicted body's longer-axis extent in pixels.
         blob_count: Number of BODY_BLOB features fused.
         residual_px: Centroid-fit RMS residual.
+        max_phase_angle_deg: Maximum raw phase angle across the
+            consumed blobs.  Recorded for diagnostic inspection only;
+            the confidence formula consumes
+            ``max_phase_irregularity_factor`` instead because raw phase
+            understates the centroid uncertainty for an irregular
+            body.
+        max_phase_irregularity_factor: Maximum
+            ``sin(phase/2) * (ellipsoid_rms_residual_km /
+            body_radius_km)`` across the consumed blobs.  The
+            confidence formula uses this term to down-weight irregular
+            high-phase scenes where the lit-weighted predicted centroid
+            cannot fully correct for the unknown-orientation shadowing
+            on a non-ellipsoidal body.
     """
 
     body_snr_inside_predicted_bbox: float = 0.0
     body_extent_px: float = 0.0
     blob_count: int = 0
     residual_px: float = 0.0
+    max_phase_angle_deg: float = 0.0
+    max_phase_irregularity_factor: float = 0.0
     CURATOR_FIELDS: ClassVar[dict[str, str | None]] = {
         'body_snr_inside_predicted_bbox': 'body_snr_inside_predicted_bbox',
         'body_extent_px': 'body_extent_px',
         'blob_count': 'blob_count',
         'residual_px': 'residual_px',
+        'max_phase_angle_deg': 'max_phase_angle_deg',
+        'max_phase_irregularity_factor': 'max_phase_irregularity_factor',
     }
 
 
@@ -246,11 +272,31 @@ class StarRefineDiagnostics:
     }
 
 
+@dataclass(frozen=True)
+class ManualNavDiagnostics:
+    """Diagnostics emitted by ``NavTechniqueManual``.
+
+    Parameters:
+        operator_accepted: ``True`` when the operator confirmed the
+            dialog's chosen offset.  Always ``True`` on results that
+            reach the curator (cancelled picks short-circuit before the
+            ``NavResult`` is built), but kept explicit so the JSON
+            metadata records the fact that a human, not an autonomous
+            technique, set the offset.
+    """
+
+    operator_accepted: bool = True
+    CURATOR_FIELDS: ClassVar[dict[str, str | None]] = {
+        'operator_accepted': 'operator_accepted',
+    }
+
+
 NavTechniqueDiagnostics = (
     BodyDiscDiagnostics
     | BodyLimbDiagnostics
     | BodyTerminatorDiagnostics
     | BodyBlobDiagnostics
+    | ManualNavDiagnostics
     | RingEdgeDiagnostics
     | RingAnnulusDiagnostics
     | StarFieldDiagnostics

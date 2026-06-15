@@ -38,7 +38,6 @@ from PyQt6.QtWidgets import (
 package_source_path = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, package_source_path)
 
-import matplotlib.cm as cm
 from matplotlib import colormaps as mpl_colormaps
 
 from nav.config import (
@@ -47,6 +46,7 @@ from nav.config import (
     Config,
     get_backplane_results_root,
     get_nav_results_root,
+    load_default_and_user_config,
 )
 from nav.dataset import dataset_name_to_class, dataset_name_to_inst_name, dataset_names
 from nav.dataset.dataset import DataSet, ImageFiles
@@ -1133,32 +1133,12 @@ class NavBackplaneViewer(QDialog):
         self._zoom_ctl.on_wheel(event)
 
     def _zoom_in(self) -> None:
-        viewport = self._scroll.viewport()
-        if viewport is None:
-            return
-        center_x = viewport.width() // 2
-        center_y = viewport.height() // 2
-        scrollbar_h = self._scroll.horizontalScrollBar()
-        scrollbar_v = self._scroll.verticalScrollBar()
-        if scrollbar_h is None or scrollbar_v is None:
-            return
-        scaled_x = center_x + scrollbar_h.value()
-        scaled_y = center_y + scrollbar_v.value()
-        self._zoom_at_point(1.2, center_x, center_y, scaled_x, scaled_y)
+        # Centre-anchored zoom is provided by the controller (it wraps this
+        # window's scroll area); delegate instead of re-implementing it.
+        self._zoom_ctl.zoom_in_center()
 
     def _zoom_out(self) -> None:
-        viewport = self._scroll.viewport()
-        if viewport is None:
-            return
-        center_x = viewport.width() // 2
-        center_y = viewport.height() // 2
-        scrollbar_h = self._scroll.horizontalScrollBar()
-        scrollbar_v = self._scroll.verticalScrollBar()
-        if scrollbar_h is None or scrollbar_v is None:
-            return
-        scaled_x = center_x + scrollbar_h.value()
-        scaled_y = center_y + scrollbar_v.value()
-        self._zoom_at_point(1.0 / 1.2, center_x, center_y, scaled_x, scaled_y)
+        self._zoom_ctl.zoom_out_center()
 
     def _reset_view(self) -> None:
         self._zoom_factor = 1.0
@@ -1177,13 +1157,9 @@ class NavBackplaneViewer(QDialog):
         scaled_x: float,
         scaled_y: float,
     ) -> None:
-        # Delegate to controller's internal method via wheel interface
-        # Simulate a wheel event-based zoom by computing factor and calling controller
-        old_zoom = self._zoom_factor
-        new_zoom = float(np.clip(old_zoom * factor, 0.1, 50.0))
-        if new_zoom == old_zoom:
-            return
-        # Use controller logic
+        # The ZoomPanController owns the zoom clamp and the no-op-on-unchanged
+        # short-circuit (identical logic), so delegate directly rather than
+        # re-deriving the clamped zoom here with duplicated limit constants.
         self._zoom_ctl.zoom_at_point(factor, viewport_x, viewport_y, scaled_x, scaled_y)
 
     # ---- Compose & Display ----
@@ -1211,18 +1187,9 @@ class NavBackplaneViewer(QDialog):
                 alpha = float(self._summary_alpha_slider.value()) / 1000.0
                 s_rgb = s[..., :3].astype(np.float32)
                 s_a = (s[..., 3].astype(np.float32) / 255.0) * alpha
-                dst_rgb = rgba[..., :3].astype(np.float32)
-                dst_a = rgba[..., 3].astype(np.float32) / 255.0
-                out_a = s_a + dst_a * (1.0 - s_a)
-                with np.errstate(invalid='ignore'):
-                    out_rgb = s_rgb * s_a[..., None] + dst_rgb * dst_a[..., None] * (
-                        1.0 - s_a[..., None]
-                    )
-                    mask = out_a > 0
-                    out_rgb[mask] = out_rgb[mask] / out_a[mask, None]
-                    out_rgb[~mask] = 0.0
-                rgba[..., :3] = np.clip(out_rgb, 0, 255).astype(np.uint8)
-                rgba[..., 3] = np.clip(out_a * 255.0, 0, 255).astype(np.uint8)
+                # Use the shared blend so the on-screen and saved-PNG paths
+                # (_render_full_rgba) cannot diverge (CODE-UI-001).
+                rgba = _alpha_blend_layer(rgba, s_rgb, s_a)
 
         # BODY_ID overlay
         if self._body_id_map is not None and self._body_id_enable.isChecked():
@@ -1244,17 +1211,10 @@ class NavBackplaneViewer(QDialog):
                 norm = np.zeros_like(ids, dtype=np.float32)
                 norm[valid] = (ids[valid] - id_min) / float(id_max - id_min)
                 cmap_name = self._body_id_cmap.currentData()
-                cmap_obj = None
-                if mpl_colormaps is not None and cmap_name is not None:
-                    try:
-                        cmap_obj = mpl_colormaps.get(str(cmap_name))
-                    except Exception:
-                        cmap_obj = None
-                if cmap_obj is None and cm is not None and cmap_name is not None:
-                    try:
-                        cmap_obj = cm.get_cmap(str(cmap_name))
-                    except Exception:
-                        cmap_obj = None
+                # Resolve via the shared helper (same as the save path), instead
+                # of the inline fallback that used the removed matplotlib
+                # ``cm.get_cmap`` API (CODE-UI-001).
+                cmap_obj = _load_colormap(cmap_name)
                 if cmap_obj is not None:
                     rgb = (cmap_obj(norm)[..., :3] * 255.0).astype(np.uint8)
                 else:
@@ -1262,16 +1222,9 @@ class NavBackplaneViewer(QDialog):
                     rgb = np.stack([val, val, val], axis=-1)
                 a = np.zeros((h, w), dtype=np.float32)
                 a[valid] = float(self._body_id_alpha.value()) / 1000.0
-                dst_rgb = rgba[..., :3].astype(np.float32)
-                dst_a = rgba[..., 3].astype(np.float32) / 255.0
-                out_a = a + dst_a * (1.0 - a)
-                src_rgb = rgb.astype(np.float32)
-                out_rgb = src_rgb * a[..., None] + dst_rgb * dst_a[..., None] * (1.0 - a[..., None])
-                mask = out_a > 0
-                out_rgb[mask] = out_rgb[mask] / out_a[mask, None]
-                out_rgb[~mask] = 0.0
-                rgba[..., :3] = np.clip(out_rgb, 0, 255).astype(np.uint8)
-                rgba[..., 3] = np.clip(out_a * 255.0, 0, 255).astype(np.uint8)
+                # Shared blend (CODE-UI-001): keep the on-screen and saved-PNG
+                # composites identical.
+                rgba = _alpha_blend_layer(rgba, rgb.astype(np.float32), a)
 
         # Selected Body backplane
         body_name = self._body_combo.currentText()
@@ -1489,16 +1442,9 @@ def main() -> None:
     command_list = sys.argv[1:]
     arguments = parse_args(command_list)
 
-    # Config
-    DEFAULT_CONFIG.read_config()
-    if arguments.config_file:
-        for config_file in arguments.config_file:
-            DEFAULT_CONFIG.update_config(config_file)
-    else:
-        try:
-            DEFAULT_CONFIG.update_config('nav_default_config.yaml')
-        except FileNotFoundError:
-            pass
+    # Config via the shared loader (single source of truth for config / CLI /
+    # env precedence), matching the other drivers.
+    load_default_and_user_config(arguments, DEFAULT_CONFIG)
 
     # Roots
     nav_results_root_str = get_nav_results_root(arguments, DEFAULT_CONFIG)

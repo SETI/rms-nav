@@ -56,7 +56,7 @@ from nav.nav_orchestrator.image_derivatives import (
 )
 from nav.nav_orchestrator.nav_context import NavContext
 from nav.nav_orchestrator.nav_result import NavResult
-from nav.nav_orchestrator.orchestrator import NavOrchestrator
+from nav.nav_orchestrator.orchestrator import NavOrchestrator, OrchestratorPrep
 from nav.nav_orchestrator.provenance import Provenance
 from nav.nav_orchestrator.status_reason_info import STATUS_REASON_INFO_TEMPLATE
 
@@ -71,6 +71,7 @@ __all__ = [
     'NavImageClassifierResult',
     'NavOrchestrator',
     'NavResult',
+    'OrchestratorPrep',
     'Provenance',
     'assert_diagnostic_fields_present',
     'build_image_edge_dt',

@@ -9,11 +9,20 @@ from ruamel.yaml import YAML
 def clean_obj(obj: Any) -> Any:
     """Recursively converts NumPy types in any object to Python native types.
 
+    Not a pure function: a ``dict`` argument (and any nested ``dict``) is
+    converted **in place** -- each NumPy scalar is replaced by its Python
+    native equivalent in the caller's own dict -- and the same object is
+    returned.  A ``list``/``tuple`` argument yields a new ``list`` (so the
+    caller's sequence object is not mutated), but ``dict`` values nested
+    inside it are still mutated in place.  Callers that must keep the original
+    untouched should pass a deep copy.
+
     Parameters:
         obj: The object to clean, can be a dict, list, tuple or scalar value.
 
     Returns:
-        The object with all NumPy types converted to Python native types.
+        The object with all NumPy types converted to Python native types
+        (the same dict object when a dict is passed; see the mutation note).
     """
 
     if isinstance(obj, dict):

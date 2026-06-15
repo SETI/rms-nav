@@ -36,11 +36,20 @@ ET_DECIMALS = 6
 
 
 def _round_float(value: float, decimals: int) -> float:
-    """Round a float to ``decimals`` digits, preserving ``inf``/``nan``."""
+    """Round a float to ``decimals`` digits, mapping non-finite values to a
+    sentinel so the JSON stays valid.
+
+    ``inf`` maps to ``+/-JSON_INF_SENTINEL``.  ``nan`` maps to the *positive*
+    ``JSON_INF_SENTINEL`` (not ``0.0``): the only path that produces a NaN here
+    is a degenerate covariance/variance entry, and rendering that as ``0.0``
+    would read as a zero-variance, infinitely-confident value -- the opposite of
+    the truth.  Mapping it to the huge sentinel instead conveys "no
+    information" / unbounded uncertainty, which is the safe direction.
+    """
     if math.isinf(value):
         return JSON_INF_SENTINEL if value > 0 else -JSON_INF_SENTINEL
     if math.isnan(value):
-        return 0.0
+        return JSON_INF_SENTINEL
     return round(value, decimals)
 
 
@@ -50,8 +59,13 @@ def _round_pair(value: tuple[float, float] | None) -> list[float] | None:
     return [_round_float(value[0], PIXEL_DECIMALS), _round_float(value[1], PIXEL_DECIMALS)]
 
 
-def _round_2x2(matrix: Any) -> list[list[float]] | None:
-    """Round a 2x2 covariance into a JSON-friendly nested list."""
+def _round_matrix(matrix: Any) -> list[list[float]] | None:
+    """Round an NxN covariance matrix into a JSON-friendly nested list.
+
+    Serializes whatever square shape it is given (2x2 translation-only or 3x3
+    rotation-aware), so the JSON ``covariance_px2`` value is 3x3 for a
+    rotation-fitted result.
+    """
     if matrix is None:
         return None
     rows = []
@@ -112,7 +126,7 @@ def _curate_technique_result(res: NavTechniqueResult) -> dict[str, Any]:
         'technique_name': res.technique_name,
         'feature_ids': list(res.feature_ids),
         'offset_px': _round_pair(res.offset_px),
-        'covariance_px2': _round_2x2(res.covariance_px2),
+        'covariance_px2': _round_matrix(res.covariance_px2),
         'confidence': _round_float(res.confidence, CONFIDENCE_DECIMALS),
         'spurious': res.spurious,
         'at_edge': res.at_edge,
@@ -206,7 +220,7 @@ def build_metadata_dict(result: NavResult) -> dict[str, Any]:
         'sigma_along_unobservable_px': sigma_along_unobservable_px,
         'confidence': _round_float(result.confidence, CONFIDENCE_DECIMALS),
         'confidence_rank': result.confidence_rank,
-        'covariance_px2': _round_2x2(result.covariance_px2),
+        'covariance_px2': _round_matrix(result.covariance_px2),
         'techniques_used': sorted({r.technique_name for r in result.per_technique}),
         'feature_count_by_type': feature_count_by_type,
         'per_technique': [_curate_technique_result(r) for r in result.per_technique],

@@ -35,6 +35,7 @@ from nav.nav_orchestrator.feature_summary import NavFeatureSummary
 from nav.nav_orchestrator.image_classifier_result import NavImageClassifierResult
 from nav.nav_orchestrator.nav_result import ConfidenceRank, NavResult
 from nav.nav_orchestrator.provenance import Provenance
+from nav.nav_technique.nav_technique import technique_tier
 from nav.nav_technique.technique_result import NavTechniqueResult
 from nav.support.status_reason import NavStatusReason
 from nav.support.types import NDArrayFloatType
@@ -48,11 +49,13 @@ __all__ = [
 
 # Default constants used by the ensemble.  Configurable via ``EnsembleConfig``.
 DEFAULT_AGREEMENT_SIGMA = 2.0
+DEFAULT_AGREEMENT_PIXEL_FLOOR = 5.0
 DEFAULT_AGREEMENT_GAP = 0.5
 DEFAULT_DISAGREEMENT_PENALTY = 0.7
 DEFAULT_CONFLICTED_CONFIDENCE_MULTIPLIER = 0.3
 DEFAULT_MIN_CONFIDENCE = 0.2
 DEFAULT_PINVH_RCOND = 1.0e-9
+DEFAULT_MAX_ALLOWED_ROTATION_DEG = 5.0
 DEFAULT_TIER_THRESHOLDS: dict[str, dict[str, float | None]] = {
     'high': {'min_confidence': 0.8, 'max_sigma_px': 0.5},
     'medium': {'min_confidence': 0.5, 'max_sigma_px': 2.0},
@@ -68,6 +71,18 @@ class EnsembleConfig:
 
     Parameters:
         agreement_sigma: Mahalanobis-distance threshold for grouping.
+        agreement_pixel_floor: Translation-distance fallback grouping
+            threshold in pixels.  Two results are grouped when *either*
+            their Mahalanobis distance is at most ``agreement_sigma``
+            *or* their Euclidean translation distance is at most this
+            many pixels.  The pixel floor exists because per-technique
+            covariances are CRLB-tight (FFT subpixel localization for
+            ``BodyDiscCorrelateNav``, M-estimator information for the
+            DT-fit techniques), well below the actual position
+            uncertainty driven by model error and pointing residuals;
+            without the floor, results agreeing visually to a few px
+            register as hundreds of sigmas apart and never group.
+            Set to ``0.0`` to disable the floor.
         agreement_gap: Minimum summed-confidence gap between best and
             runner-up groups before declaring a conflict.
         disagreement_penalty: Multiplier on combined confidence when more
@@ -77,16 +92,27 @@ class EnsembleConfig:
         min_confidence: Final-result threshold below which the ensemble
             returns NavResult.failed instead of NavResult.ok.
         pinvh_rcond: rcond for ``scipy.linalg.pinvh``.
+        max_allowed_rotation_deg: Maximum magnitude (in degrees) a 3-DoF
+            result's rotation may take before the ensemble rejects it.
+            The rotation parameter is combined as a small angle (circular
+            mean of ``(dv, du, theta)`` triples); this bound enforces the
+            small-angle assumption that every contributing technique fits
+            against (every DT/star technique clamps its rotation to
+            ``+-max_rotation_deg``, default 5 deg).  A 3-DoF result
+            arriving with ``abs(rotation_rad)`` at or above this bound is a
+            programming error upstream and trips an assertion.
         tier_thresholds: Mapping ``rank -> {min_confidence, max_sigma_px}``;
             see ``derive_confidence_rank``.
     """
 
     agreement_sigma: float = DEFAULT_AGREEMENT_SIGMA
+    agreement_pixel_floor: float = DEFAULT_AGREEMENT_PIXEL_FLOOR
     agreement_gap: float = DEFAULT_AGREEMENT_GAP
     disagreement_penalty: float = DEFAULT_DISAGREEMENT_PENALTY
     conflicted_confidence_multiplier: float = DEFAULT_CONFLICTED_CONFIDENCE_MULTIPLIER
     min_confidence: float = DEFAULT_MIN_CONFIDENCE
     pinvh_rcond: float = DEFAULT_PINVH_RCOND
+    max_allowed_rotation_deg: float = DEFAULT_MAX_ALLOWED_ROTATION_DEG
     tier_thresholds: dict[str, dict[str, float | None]] = field(
         default_factory=lambda: copy.deepcopy(DEFAULT_TIER_THRESHOLDS)
     )
@@ -113,7 +139,13 @@ def _mahalanobis_distance(
     # Project delta back through pinv * cov_sum; residual lies in the null
     # space.
     null_proj = delta - cov_sum @ pinv @ delta
-    if np.linalg.norm(null_proj) > 1e-6:
+    # Scale-invariant null-space disagreement test: the residual that lies in
+    # the null space of the summed covariance must be negligible relative to
+    # the size of ``delta`` itself, not against a fixed absolute pixel
+    # tolerance (which silently flips behavior as image/offset scales change).
+    rel_tol = 1.0e-6
+    eps = np.finfo(float).eps
+    if np.linalg.norm(null_proj) > rel_tol * max(float(np.linalg.norm(delta)), eps):
         return float('inf')
     d_sq = float(delta.T @ pinv @ delta)
     if d_sq < 0:
@@ -144,19 +176,95 @@ def _result_param_vector(res: NavTechniqueResult) -> NDArrayFloatType:
     return cast(NDArrayFloatType, np.array([res.offset_px[0], res.offset_px[1]], np.float64))
 
 
-def _agreement_groups(
-    results: list[NavTechniqueResult], *, agreement_sigma: float, rcond: float
-) -> list[list[NavTechniqueResult]]:
-    """Single-link clustering by Mahalanobis distance.
+def _source_bodies(result: NavTechniqueResult) -> frozenset[str]:
+    """Return the set of body names a result was computed against.
 
-    Two results are placed in the same group iff their pairwise distance is
-    below ``agreement_sigma``; transitive closure builds final groups via
-    connected components.
+    Reads the structured ``NavTechniqueResult.source_bodies`` populated by
+    the body-feature techniques from each consumed feature's
+    ``NavFeature.body_name``.  Ring and star techniques leave it empty, so
+    they are naturally excluded from the body-only fallback-supersession
+    filter.  This replaces the earlier ``feature_ids`` string-parsing, which
+    silently broke if the feature-id format changed.
+    """
+    return result.source_bodies
+
+
+def _drop_superseded_fallbacks(
+    results: list[NavTechniqueResult],
+) -> list[NavTechniqueResult]:
+    """Drop fallback-tier results superseded by a non-spurious primary.
+
+    A fallback result is superseded when at least one of its source
+    bodies appears in the source-body set of any non-spurious primary
+    result.  Fallback results whose source body has no primary
+    coverage stay in the set so a scene with only a fallback (e.g.,
+    a body too small for limb fitting, where only BodyBlob ran) still
+    produces an offset.
+
+    Returns a new list preserving input ordering; the input list is
+    not mutated.
+    """
+    primary_success_bodies: set[str] = set()
+    for r in results:
+        if r.spurious:
+            continue
+        if technique_tier(r.technique_name) != 'primary':
+            continue
+        primary_success_bodies.update(_source_bodies(r))
+    if not primary_success_bodies:
+        return list(results)
+    kept: list[NavTechniqueResult] = []
+    for r in results:
+        if technique_tier(r.technique_name) == 'fallback':
+            superseded = bool(_source_bodies(r) & primary_success_bodies)
+            if superseded:
+                IMAGE_LOGGER.info(
+                    'Dropping fallback %s for body %s: superseded by a '
+                    'non-spurious primary result on the same body',
+                    r.technique_name,
+                    ', '.join(sorted(_source_bodies(r))) or '(unknown)',
+                )
+                continue
+        kept.append(r)
+    return kept
+
+
+def _agreement_groups(
+    results: list[NavTechniqueResult],
+    *,
+    agreement_sigma: float,
+    agreement_pixel_floor: float,
+    rcond: float,
+    max_allowed_rotation_deg: float,
+) -> list[list[NavTechniqueResult]]:
+    """Single-link clustering by Mahalanobis distance with a pixel-floor fallback.
+
+    Two results are placed in the same group iff *either* their pairwise
+    Mahalanobis distance is below ``agreement_sigma`` *or* their
+    Euclidean translation distance (in pixels, ignoring the rotation
+    component for 3-DoF results) is at most ``agreement_pixel_floor``.
+    Transitive closure builds final groups via connected components.
+
+    The Mahalanobis distance differences the rotation component of two
+    3-DoF results linearly; that is correct here because every input
+    rotation is bounded to the small-angle window enforced below, so the
+    pairwise angle difference never approaches the ``+-pi`` wrap.
+
+    The pixel floor compensates for per-technique covariances that
+    report only a CRLB-style precision (FFT subpixel localization or
+    M-estimator information) and so under-estimate the actual position
+    uncertainty by orders of magnitude.  See ``EnsembleConfig`` for the
+    motivation.
 
     Parameters:
         results: Non-empty list of per-technique results.
         agreement_sigma: Maximum pairwise Mahalanobis distance for grouping.
+        agreement_pixel_floor: Maximum pairwise Euclidean translation
+            distance (in pixels) for grouping; ``0.0`` disables.
         rcond: rcond passed to ``pinvh``.
+        max_allowed_rotation_deg: Small-angle bound; each 3-DoF input's
+            ``rotation_rad`` magnitude must stay strictly below this many
+            degrees for the linear rotation differencing to be valid.
 
     Returns:
         List of groups (each group a list of NavTechniqueResult).
@@ -164,6 +272,17 @@ def _agreement_groups(
     n = len(results)
     if n == 0:
         return []
+    max_rotation_rad = math.radians(max_allowed_rotation_deg)
+    for res in results:
+        cov = np.asarray(res.covariance_px2, np.float64)
+        if cov.shape == (3, 3) and res.rotation_rad is not None:
+            # Small-angle assumption: a 3-DoF rotation outside +-max_rotation_deg
+            # is an upstream error (every technique clamps its rotation fit to
+            # this bound), and would break the linear rotation differencing.
+            assert abs(res.rotation_rad) < max_rotation_rad, (
+                f'{res.technique_name}: rotation {math.degrees(res.rotation_rad):.3f} deg '
+                f'violates small-angle bound +-{max_allowed_rotation_deg:.3f} deg'
+            )
     if n == 1:
         return [list(results)]
     # Build a sparse adjacency matrix marking pairs within threshold.
@@ -188,7 +307,11 @@ def _agreement_groups(
                     f'{results[j].technique_name} produced {mu_j.shape}.'
                 )
             dist = _mahalanobis_distance(mu_i, cov_i, mu_j, cov_j, rcond=rcond)
-            if dist <= agreement_sigma:
+            mahal_match = dist <= agreement_sigma
+            translation_delta = mu_i[:2] - mu_j[:2]
+            pixel_dist = float(math.hypot(translation_delta[0], translation_delta[1]))
+            pixel_match = agreement_pixel_floor > 0.0 and pixel_dist <= agreement_pixel_floor
+            if mahal_match or pixel_match:
                 rows.extend([i, j])
                 cols.extend([j, i])
     # Build dense adjacency.  N is small (typically < 10), so this is fine.
@@ -222,24 +345,34 @@ class _CombinedEstimate:
 
 
 def _combine_precision_weighted(
-    group: list[NavTechniqueResult], *, rcond: float
+    group: list[NavTechniqueResult], *, rcond: float, max_allowed_rotation_deg: float
 ) -> _CombinedEstimate:
     """Information-form combine of a group of agreeing results.
 
-    Implements the Kalman-style information-form merge:
+    Implements the Kalman-style information-form merge for the translation
+    components:
 
         Sigma_combined = pinvh( sum_i pinvh(Sigma_i) )
         mu_combined    = Sigma_combined @ sum_i ( pinvh(Sigma_i) @ mu_i )
 
     Parameter vectors carry rotation as a third component when every input
     is 3-DoF; the resulting combined estimate then carries a non-``None``
-    ``rotation_rad`` field.
+    ``rotation_rad`` field.  The rotation parameter is *not* averaged as a
+    plain Euclidean coordinate (which would wrap incorrectly near
+    ``+-pi``); instead it is combined on the circle as the precision-weighted
+    circular mean ``atan2(sum_i w_i sin theta_i, sum_i w_i cos theta_i)``,
+    with ``w_i`` the rotation-component information ``pinvh(Sigma_i)[2, 2]``.
+    The translation components and the full combined covariance are produced
+    exactly as before by the information-form merge.
 
     Parameters:
         group: Non-empty list of agreeing results.  Every member must
             share the same parameter dimensionality (all 2-DoF or all
             3-DoF — :func:`_agreement_groups` already enforces this).
         rcond: rcond for ``pinvh``.
+        max_allowed_rotation_deg: Small-angle bound; each 3-DoF input's
+            ``rotation_rad`` magnitude must stay strictly below this many
+            degrees (in radians) for the circular-mean combine to be valid.
 
     Returns:
         :class:`_CombinedEstimate`.
@@ -254,6 +387,9 @@ def _combine_precision_weighted(
     info_sum: NDArrayFloatType | None = None
     info_mu_sum: NDArrayFloatType | None = None
     n_params: int | None = None
+    max_rotation_rad = math.radians(max_allowed_rotation_deg)
+    rot_w_sin = 0.0
+    rot_w_cos = 0.0
     for res in group:
         cov = np.asarray(res.covariance_px2, np.float64)
         if n_params is None:
@@ -265,6 +401,19 @@ def _combine_precision_weighted(
             )
         info = pinvh(cov, rtol=rcond)
         mu = _result_param_vector(res)
+        if cov.shape[0] == 3:
+            theta = float(mu[2])
+            # Small-angle assumption: every contributing technique clamps its
+            # rotation fit to +-max_rotation_deg, so a result arriving outside
+            # that bound is an upstream programming error, not data the
+            # circular-mean combine should silently absorb.
+            assert abs(theta) < max_rotation_rad, (
+                f'{res.technique_name}: rotation {math.degrees(theta):.3f} deg '
+                f'violates small-angle bound +-{max_allowed_rotation_deg:.3f} deg'
+            )
+            w_theta = float(info[2, 2])
+            rot_w_sin += w_theta * math.sin(theta)
+            rot_w_cos += w_theta * math.cos(theta)
         if info_sum is None:
             info_sum = info.copy()
             info_mu_sum = info @ mu
@@ -287,7 +436,13 @@ def _combine_precision_weighted(
     is_rank_deficient = bool(eigvals.min() / max(abs(eigvals.max()), eps) < rel_tol)
     rotation: float | None = None
     if n_params == 3:
-        rotation = float(mu_combined[2])
+        # Combine the rotation on the circle so angles near +-pi do not cancel
+        # to a spurious ~0; fall back to the information-form estimate when the
+        # rotation weight is degenerate (every input rotation-unobservable).
+        if rot_w_sin == 0.0 and rot_w_cos == 0.0:
+            rotation = float(mu_combined[2])
+        else:
+            rotation = float(math.atan2(rot_w_sin, rot_w_cos))
     return _CombinedEstimate(
         offset_px=(float(mu_combined[0]), float(mu_combined[1])),
         rotation_rad=rotation,
@@ -305,8 +460,11 @@ def _combine_confidence(
 ) -> float:
     """Precision-weighted combine of per-result confidences.
 
-    Weights are ``trace(pinvh(Sigma_i))``: tighter covariances contribute
-    more to the combined confidence than loose ones.  The boosted combined
+    Weights are ``trace(pinvh(Sigma_i[:2, :2]))`` -- the positional (v, u)
+    precision in ``px^-2``, with any rotation axis marginalised out so the
+    weight is not skewed by the unrelated ``rad^-2`` rotation precision of a
+    3-DoF result.  Tighter covariances contribute more to the combined
+    confidence than loose ones.  The boosted combined
     confidence reflects the number of significant contributors, capped per
     ``AGREEMENT_FACTOR_CAP`` and ``COMBINED_CONFIDENCE_CAP``.
 
@@ -329,8 +487,17 @@ def _combine_confidence(
     weights = []
     for res in group:
         cov = np.asarray(res.covariance_px2, np.float64)
-        info = pinvh(cov, rtol=rcond)
-        weights.append(float(np.trace(info)))
+        # Weight by the *positional* precision only.  Taking trace(pinvh(cov))
+        # over a full 3-DoF covariance would add the v, u precisions (px^-2) to
+        # the rotation precision (rad^-2), so a star-field result whose rotation
+        # is tightly pinned would dominate the confidence average on an
+        # arbitrary, unit-mixed scale.  Marginalising rotation out and tracing
+        # the 2x2 translation block keeps every weight in px^-2; the additive
+        # trace (rather than det(info)^(1/p)) stays well-defined for the rank-1
+        # ring-edge covariances whose unobservable axis carries zero precision.
+        # The 2-DoF path is unchanged: cov[:2, :2] is then the whole matrix.
+        info_xy = pinvh(np.ascontiguousarray(cov[:2, :2]), rtol=rcond)
+        weights.append(float(np.trace(info_xy)))
     w_total = sum(weights)
     if w_total <= 0.0:
         raise ValueError('precision-weighted combine: total weight is zero; offset is unobservable')
@@ -375,6 +542,18 @@ def derive_confidence_rank(
     """
     thresholds = tier_thresholds or DEFAULT_TIER_THRESHOLDS
     max_sigma = max(sigma_px) if sigma_px is not None else None
+    if max_sigma is None:
+        # No covariance was supplied, so every sigma-constrained tier
+        # (high / medium) is unreachable and the result can only earn the
+        # best sigma-free tier (low).  Surface this: a missing covariance is
+        # almost always an upstream technique failing to populate it, not a
+        # legitimately unconstrained fit, and would otherwise cap the rank
+        # silently.
+        IMAGE_LOGGER.warning(
+            'derive_confidence_rank: sigma_px is None (no covariance); '
+            'sigma-constrained tiers are unreachable and the rank caps at the '
+            'best sigma-free tier'
+        )
     ranks: tuple[ConfidenceRank, ...] = ('high', 'medium', 'low')
     for rank in ranks:
         spec = thresholds[rank]
@@ -441,13 +620,21 @@ def ensemble(
             model_metadata=md,
             annotations=ann,
         )
+    # Drop fallback-tier results superseded by a non-spurious primary
+    # for the same body (e.g., BodyTerminatorNav / BodyBlobNav when
+    # BodyLimbNav or BodyDiscCorrelateNav succeeded on the same body).
+    # The full ``results`` list is preserved on the NavResult for
+    # diagnostics; only the ensemble math sees the filtered set.
+    viable = _drop_superseded_fallbacks(viable)
     interior = [r for r in viable if not r.at_edge]
     if interior:
         viable = interior
     groups = _agreement_groups(
         viable,
         agreement_sigma=cfg.agreement_sigma,
+        agreement_pixel_floor=cfg.agreement_pixel_floor,
         rcond=cfg.pinvh_rcond,
+        max_allowed_rotation_deg=cfg.max_allowed_rotation_deg,
     )
     ranked = sorted(
         groups,
@@ -458,7 +645,11 @@ def ensemble(
     best_summed_conf = sum(r.confidence for r in best_group)
     apply_disagreement_penalty = len(groups) > 1
     try:
-        combined = _combine_precision_weighted(best_group, rcond=cfg.pinvh_rcond)
+        combined = _combine_precision_weighted(
+            best_group,
+            rcond=cfg.pinvh_rcond,
+            max_allowed_rotation_deg=cfg.max_allowed_rotation_deg,
+        )
         combined_confidence = _combine_confidence(
             best_group,
             rcond=cfg.pinvh_rcond,
@@ -537,10 +728,22 @@ def ensemble(
         tier_thresholds=cfg.tier_thresholds,
     )
     if rank == 'failed':
-        # Confidence + sigma combination doesn't earn any tier.
+        # Confidence + sigma combination doesn't earn any tier.  Distinguish the
+        # two causes: if the combined confidence cleared the *lowest* tier's
+        # ``min_confidence`` yet still earned no tier, the offset was confident
+        # but too imprecise (sigma exceeded every tier's ``max_sigma_px``);
+        # otherwise the confidence itself was below threshold.
+        lowest_min_conf = min(
+            float(spec['min_confidence'] or 0.0) for spec in cfg.tier_thresholds.values()
+        )
+        if combined_confidence >= lowest_min_conf:
+            failed_reason = NavStatusReason.FINAL_SIGMA_ABOVE_THRESHOLD
+        else:
+            failed_reason = NavStatusReason.FINAL_CONFIDENCE_BELOW_THRESHOLD
         IMAGE_LOGGER.info(
-            'No tier earned: combined confidence %.3f, sigma (dv, du) = '
+            'No tier earned (%s): combined confidence %.3f, sigma (dv, du) = '
             '(%.3f, %.3f) px (max %.3f); tier thresholds = %s',
+            failed_reason.value,
             combined_confidence,
             sigma_dv,
             sigma_du,
@@ -548,7 +751,7 @@ def ensemble(
             cfg.tier_thresholds,
         )
         return NavResult.failed(
-            status_reason=NavStatusReason.FINAL_CONFIDENCE_BELOW_THRESHOLD,
+            status_reason=failed_reason,
             image_classifier=image_classifier,
             provenance=provenance,
             per_technique=results,
@@ -562,7 +765,7 @@ def ensemble(
     sigma_rotation_rad: float | None = None
     if combined.rotation_rad is not None and cov.shape == (3, 3):
         sigma_rotation_rad = float(math.sqrt(max(cov[2, 2], 0.0)))
-    return NavResult.ok(
+    return NavResult.success(
         offset_px=combined.offset_px,
         covariance_px2=combined.covariance_px2,
         confidence=combined_confidence,

@@ -132,7 +132,7 @@ constructor accepts an :class:`~nav.nav_orchestrator.ensemble.EnsembleConfig` ov
 - :attr:`~nav.nav_orchestrator.ensemble.EnsembleConfig.min_confidence` — float, default
   ``0.2``. Final-result threshold below which the ensemble returns
   :meth:`~nav.nav_orchestrator.nav_result.NavResult.failed` instead of
-  :meth:`~nav.nav_orchestrator.nav_result.NavResult.ok`.
+  :meth:`~nav.nav_orchestrator.nav_result.NavResult.success`.
 - :attr:`~nav.nav_orchestrator.ensemble.EnsembleConfig.pinvh_rcond` — float, default
   ``1.0e-9``. Cutoff for :func:`scipy.linalg.pinvh`.
 - :attr:`~nav.nav_orchestrator.ensemble.EnsembleConfig.tier_thresholds` — mapping

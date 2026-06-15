@@ -45,7 +45,10 @@ class NavStatusReason(StrEnum):
       ``is_feasible`` returned true.
     - ``ALL_TECHNIQUES_SPURIOUS``: every technique returned ``spurious=True``.
     - ``FINAL_CONFIDENCE_BELOW_THRESHOLD``: ensemble combined confidence sat
-      below ``min_confidence``.
+      below ``min_confidence`` (or below every tier's ``min_confidence``).
+    - ``FINAL_SIGMA_ABOVE_THRESHOLD``: combined confidence cleared the lowest
+      tier's ``min_confidence`` but the offset sigma exceeded every tier's
+      ``max_sigma_px`` (confident but too imprecise to earn any tier).
     - ``UNOBSERVABLE_OFFSET``: every input covariance shares one null
       direction; the precision-weighted combine cannot proceed.
     """
@@ -64,4 +67,5 @@ class NavStatusReason(StrEnum):
     NO_FEASIBLE_TECHNIQUES = 'no_feasible_techniques'
     ALL_TECHNIQUES_SPURIOUS = 'all_techniques_spurious'
     FINAL_CONFIDENCE_BELOW_THRESHOLD = 'final_confidence_below_threshold'
+    FINAL_SIGMA_ABOVE_THRESHOLD = 'final_sigma_above_threshold'
     UNOBSERVABLE_OFFSET = 'unobservable_offset'

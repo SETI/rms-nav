@@ -1,8 +1,6 @@
 """BodyMosaicWindow: PyQt6 window for browsing body reprojections and mosaics."""
 
-import logging
 import math
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -35,18 +33,23 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from nav.config import IMAGE_LOGGER
 from nav.support.time import et_to_utc
 from nav.ui.common import build_stretch_controls
-from nav.ui.mosaic_viewer.common import BodyDisplayData, load_body_file
+from nav.ui.mosaic_viewer.common import (
+    BodyDisplayData,
+    _SyncedSlider,
+    _ZoomSync,
+    load_body_file,
+)
+from nav.ui.mosaic_viewer.histogram_stretch import HistogramStretchWidget
 from nav.ui.mosaic_viewer.photometric_display import compute_body_display_image
 from nav.ui.mosaic_viewer.projections import ProjectionKind
 from nav.ui.mosaic_viewer.tiled_image_widget import (
     TiledImageWidget,
-    _slider_to_zoom,
-    _zoom_to_slider,
 )
 
-logger = logging.getLogger(__name__)
+logger = IMAGE_LOGGER
 
 _STATUS_HINTS: dict[ProjectionKind, str] = {
     ProjectionKind.RECT: (
@@ -129,110 +132,6 @@ def _colorby_tint(
     return rgb
 
 
-class _SyncedSlider:
-    """Keeps a QLineEdit and QSlider in sync for a single numeric parameter."""
-
-    def __init__(
-        self,
-        line_edit: QLineEdit,
-        slider: QSlider,
-        lo: float,
-        hi: float,
-        fmt: str = '%.4f',
-        on_change: Callable[[float], None] | None = None,
-    ) -> None:
-        """Wire ``line_edit`` and ``slider`` to the same numeric range ``[lo, hi]``.
-
-        Parameters:
-            line_edit: Text field showing the current value.
-            slider: Horizontal slider mapped linearly to ``[lo, hi]``.
-            lo: Lower bound of the numeric range.
-            hi: Upper bound of the numeric range.
-            fmt: ``printf``-style format for the line edit (default four decimals).
-            on_change: Optional callback invoked with the new float after each edit.
-        """
-        self._le = line_edit
-        self._sl = slider
-        self._lo = lo
-        self._hi = hi
-        self._fmt = fmt
-        self._on_change = on_change
-        self._updating = False
-        self._sl.valueChanged.connect(self._slider_moved)
-        self._le.editingFinished.connect(self._edit_done)
-
-    def _to_slider(self, val: float) -> int:
-        if self._hi <= self._lo:
-            return 0
-        pos = (val - self._lo) / (self._hi - self._lo) * 1000.0
-        return round(float(np.clip(pos, 0, 1000)))
-
-    def _from_slider(self, pos: int) -> float:
-        return self._lo + (self._hi - self._lo) * pos / 1000.0
-
-    def _slider_moved(self, pos: int) -> None:
-        if self._updating:
-            return
-        val = self._from_slider(pos)
-        self._updating = True
-        self._le.setText(self._fmt % val)
-        self._updating = False
-        if self._on_change:
-            self._on_change(val)
-
-    def _edit_done(self) -> None:
-        if self._updating:
-            return
-        try:
-            val = float(self._le.text())
-        except ValueError:
-            return
-        val = max(self._lo, min(self._hi, val))
-        self._updating = True
-        self._sl.setValue(self._to_slider(val))
-        self._le.setText(self._fmt % val)
-        self._updating = False
-        if self._on_change:
-            self._on_change(val)
-
-    def set_range(self, lo: float, hi: float) -> None:
-        """Update the mapped numeric range without changing the current value text."""
-        self._lo = lo
-        self._hi = hi
-
-    def set_value(self, val: float) -> None:
-        """Set slider and line edit to ``val`` (clamped by prior ``set_range`` calls)."""
-        self._updating = True
-        self._sl.setValue(self._to_slider(val))
-        self._le.setText(self._fmt % val)
-        self._updating = False
-
-    def get_value(self) -> float:
-        """Return the current value, preferring a valid float from the line edit."""
-        try:
-            return float(self._le.text())
-        except ValueError:
-            return self._from_slider(self._sl.value())
-
-
-class _ZoomSync(_SyncedSlider):
-    """A :class:`_SyncedSlider` that uses logarithmic zoom mapping.
-
-    Converts between the zoom float value and a 0-1000 slider integer using
-    :func:`~nav.ui.mosaic_viewer.tiled_image_widget._zoom_to_slider` and
-    :func:`~nav.ui.mosaic_viewer.tiled_image_widget._slider_to_zoom` so that
-    zooming feels perceptually uniform.
-    """
-
-    def _to_slider(self, val: float) -> int:
-        """Convert zoom value to slider integer position via ``_zoom_to_slider``."""
-        return _zoom_to_slider(val)
-
-    def _from_slider(self, pos: int) -> float:
-        """Convert slider integer position to zoom value via ``_slider_to_zoom``."""
-        return _slider_to_zoom(pos)
-
-
 class BodyMosaicWindow(QMainWindow):
     """Viewer window for a list of body reprojection / mosaic files."""
 
@@ -284,6 +183,9 @@ class BodyMosaicWindow(QMainWindow):
         self._show_lat_ticks = show_lat_ticks
         self._show_lon_ticks = show_lon_ticks
         self._stretch_controls: dict[str, Any] = {}
+        self._stretch_form: QFormLayout = QFormLayout()
+        self._histogram_widget: HistogramStretchWidget | None = None
+        self._chk_histogram_mode: QCheckBox | None = None
         self._pending_fit = False
         self._body_view_ma: ma.MaskedArray | None = None
         self._proj_kind: ProjectionKind = initial_projection
@@ -476,6 +378,7 @@ class BodyMosaicWindow(QMainWindow):
         stretch_box = QGroupBox('Stretch')
         stretch_form = QFormLayout()
         stretch_form.setHorizontalSpacing(4)
+        self._stretch_form = stretch_form
         self._stretch_controls = build_stretch_controls(
             stretch_form,
             img_min=0.0,
@@ -488,6 +391,16 @@ class BodyMosaicWindow(QMainWindow):
             on_gamma_changed=lambda _v: self._apply_stretch(),
             slider_horizontal_stretch=1,
         )
+        self._histogram_widget = HistogramStretchWidget(
+            on_black_changed=self._on_histogram_black_changed,
+            on_white_changed=self._on_histogram_white_changed,
+        )
+        self._histogram_widget.setVisible(False)
+        stretch_left = QVBoxLayout()
+        stretch_left.setContentsMargins(0, 0, 0, 0)
+        stretch_left.setSpacing(2)
+        stretch_left.addWidget(self._histogram_widget)
+        stretch_left.addLayout(stretch_form)
         stretch_btn_col = QVBoxLayout()
         stretch_btn_col.setSpacing(4)
         btn_stretch_reset = QPushButton('Reset')
@@ -499,11 +412,14 @@ class BodyMosaicWindow(QMainWindow):
         for b in (btn_stretch_reset, btn_stretch_full, btn_stretch_bright):
             b.setMaximumWidth(72)
             stretch_btn_col.addWidget(b)
+        self._chk_histogram_mode = QCheckBox('Histogram')
+        self._chk_histogram_mode.toggled.connect(self._on_histogram_mode_toggled)
+        stretch_btn_col.addWidget(self._chk_histogram_mode)
         stretch_btn_col.addStretch()
         stretch_outer = QHBoxLayout()
         stretch_outer.setContentsMargins(4, 4, 4, 4)
         stretch_outer.setSpacing(8)
-        stretch_outer.addLayout(stretch_form, stretch=1)
+        stretch_outer.addLayout(stretch_left, stretch=1)
         stretch_outer.addLayout(stretch_btn_col)
         stretch_box.setLayout(stretch_outer)
         upper_h.addWidget(stretch_box, stretch=2)
@@ -751,7 +667,8 @@ class BodyMosaicWindow(QMainWindow):
         black, white = _percentile_stretch(img, 0.0, 98.0)
         g = max(0.1, self._stretch_controls['slider_gamma'].value() / 100.0)
         self._stretch_controls['set_range'](dd.vmin, dd.vmax)
-        self._stretch_controls['set_values'](black, white, g)
+        self._set_stretch_levels(black, white, g)
+        self._refresh_histogram_data()
         self._image_widget.set_stretch(black, white, g)
         self._on_colorby_changed(self._colorby_group.checkedButton())
 
@@ -802,7 +719,8 @@ class BodyMosaicWindow(QMainWindow):
         if self._initial_white is not None:
             white = self._initial_white
         self._stretch_controls['set_range'](dd.vmin, dd.vmax)
-        self._stretch_controls['set_values'](black, white, self._initial_gamma)
+        self._set_stretch_levels(black, white, self._initial_gamma)
+        self._refresh_histogram_data()
         self._image_widget.set_stretch(black, white, self._initial_gamma)
 
         self._clear_info()
@@ -828,6 +746,58 @@ class BodyMosaicWindow(QMainWindow):
         g = max(0.1, self._stretch_controls['slider_gamma'].value() / 100.0)
         self._image_widget.set_stretch(b, w, g)
 
+    def _set_stretch_levels(self, black: float, white: float, gamma: float) -> None:
+        """Sync black/white/gamma into the slider controls and the histogram widget."""
+        self._stretch_controls['set_values'](black, white, gamma)
+        if self._histogram_widget is not None:
+            self._histogram_widget.set_values(black, white)
+
+    def _on_histogram_black_changed(self, black: float) -> None:
+        """Histogram drag handler for the black indicator."""
+        white = self._stretch_controls['from_slider'](
+            self._stretch_controls['slider_white'].value()
+        )
+        gamma = max(0.1, self._stretch_controls['slider_gamma'].value() / 100.0)
+        self._stretch_controls['set_values'](black, white, gamma)
+        self._apply_stretch()
+
+    def _on_histogram_white_changed(self, white: float) -> None:
+        """Histogram drag handler for the white indicator."""
+        black = self._stretch_controls['from_slider'](
+            self._stretch_controls['slider_black'].value()
+        )
+        gamma = max(0.1, self._stretch_controls['slider_gamma'].value() / 100.0)
+        self._stretch_controls['set_values'](black, white, gamma)
+        self._apply_stretch()
+
+    def _on_histogram_mode_toggled(self, checked: bool) -> None:
+        """Swap between slider stretch UI and histogram-with-indicators UI."""
+        if self._histogram_widget is None or self._chk_histogram_mode is None:
+            return
+        # Slider rows are at indices 0 (Black) and 1 (White); Gamma at 2.
+        self._stretch_form.setRowVisible(0, not checked)
+        self._stretch_form.setRowVisible(1, not checked)
+        self._histogram_widget.setVisible(checked)
+        if checked:
+            black = self._stretch_controls['from_slider'](
+                self._stretch_controls['slider_black'].value()
+            )
+            white = self._stretch_controls['from_slider'](
+                self._stretch_controls['slider_white'].value()
+            )
+            self._histogram_widget.set_values(black, white)
+            self._refresh_histogram_data()
+
+    def _refresh_histogram_data(self) -> None:
+        """Push the active display image into the histogram widget."""
+        if self._histogram_widget is None:
+            return
+        dd = self._display_data
+        if dd is None:
+            return
+        view = self._body_view_ma if self._body_view_ma is not None else dd.image_ma
+        self._histogram_widget.set_data(view)
+
     def _on_stretch_preset_reset(self) -> None:
         """Reset stretch to a 0-98 percentile of the current display image."""
         dd = self._display_data
@@ -836,7 +806,7 @@ class BodyMosaicWindow(QMainWindow):
         black, white = _percentile_stretch(
             self._body_view_ma if self._body_view_ma is not None else dd.image_ma, 0.0, 98.0
         )
-        self._stretch_controls['set_values'](black, white, self._default_gamma)
+        self._set_stretch_levels(black, white, self._default_gamma)
         self._apply_stretch()
 
     def _on_stretch_preset_full(self) -> None:
@@ -844,7 +814,7 @@ class BodyMosaicWindow(QMainWindow):
         dd = self._display_data
         if dd is None:
             return
-        self._stretch_controls['set_values'](dd.vmin, dd.vmax, self._default_gamma)
+        self._set_stretch_levels(dd.vmin, dd.vmax, self._default_gamma)
         self._image_widget.set_stretch(dd.vmin, dd.vmax, self._default_gamma)
 
     def _on_stretch_preset_bright(self) -> None:
@@ -855,7 +825,7 @@ class BodyMosaicWindow(QMainWindow):
         black, white = _percentile_stretch(
             self._body_view_ma if self._body_view_ma is not None else dd.image_ma, 2.0, 98.0
         )
-        self._stretch_controls['set_values'](black, white, self._default_gamma)
+        self._set_stretch_levels(black, white, self._default_gamma)
         self._apply_stretch()
 
     def _fit_zoom_to_window(self) -> None:

@@ -172,7 +172,7 @@ for full option references and more examples.
 
 Each of the main batch drivers above has a queue-driven counterpart suffixed
 with `_cloud_tasks`, which reads file lists from a
-[cloud_tasks](https://github.com/SETI/rms-cloud_tasks) queue instead of
+[cloud_tasks](https://github.com/SETI/rms-cloud-tasks) queue instead of
 enumerating the dataset locally:
 
 - `nav_offset_cloud_tasks` — navigation offsets

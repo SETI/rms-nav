@@ -352,8 +352,11 @@ class DataSetPDS3(DataSet):
 
         # Also limit to the list of images in the FileSpec CSV file, if any
         if arguments.image_filespec_csv:
-            for filename in arguments.image_filespec_csv:
-                with open(filename, encoding='utf-8') as csvfile:
+            for csv_source in arguments.image_filespec_csv:
+                # Read via FCPath so the CSV may live behind an http(s)
+                # holdings path, consistent with the rest of the dataset layer.
+                local_csv = cast(Path, FCPath(csv_source).get_local_path())
+                with open(local_csv, encoding='utf-8') as csvfile:
                     csvreader = csv.reader(csvfile)
                     header = next(csvreader)
                     for colnum in range(len(header)):
@@ -364,25 +367,40 @@ class DataSetPDS3(DataSet):
                             break
                     else:
                         raise ValueError(
-                            f'Badly formatted CSV file "{filename}" - no Primary File Spec header'
+                            f'Badly formatted CSV file "{csv_source}" - no Primary File Spec header'
                         )
-                    for row in csvreader:
-                        filespec = row[colnum]
-                        img_filespec_list.append(filespec)
+                    # Header is row 1; data rows start at 2.
+                    for rownum, row in enumerate(csvreader, start=2):
+                        if colnum >= len(row):
+                            # Ragged / short row: skip it rather than aborting
+                            # the whole batch on an IndexError.
+                            self.logger.warning(
+                                'Skipping malformed row %d in CSV "%s": %d column(s), '
+                                'need at least %d',
+                                rownum,
+                                csv_source,
+                                len(row),
+                                colnum + 1,
+                            )
+                            continue
+                        img_filespec_list.append(row[colnum])
 
         # Also limit to the list of images in the filelist file, if any
         if arguments.image_file_list:
-            for filename in arguments.image_file_list:
-                with open(filename, encoding='utf-8') as fp:
+            for list_source in arguments.image_file_list:
+                local_list = cast(Path, FCPath(list_source).get_local_path())
+                with open(local_list, encoding='utf-8') as fp:
                     for line in fp:
                         line = line.strip()
                         if len(line) == 0 or line[0] == '#':
                             continue
-                        # Ignore anything after the filename
-                        filename = line.split(' ')[0]
-                        if not self._img_name_valid(filename):
-                            raise ValueError(f'Bad filename in filelist file "{filename}": {line}')
-                        img_name_list.append(filename)
+                        # Ignore anything after the filename token.
+                        token = line.split(' ')[0]
+                        if not self._img_name_valid(token):
+                            raise ValueError(
+                                f'Bad filename in filelist file "{list_source}": {line!r}'
+                            )
+                        img_name_list.append(token)
 
         first_image_number = arguments.first_image_num
         last_image_number = arguments.last_image_num
@@ -566,6 +584,8 @@ class DataSetPDS3(DataSet):
 
         # Restrict volumes to given "vol_start" and "vol_end" arguments
         # keeping original order
+        vol_start_idx: int | None = None
+        vol_end_idx: int | None = None
         if vol_start is not None:
             if vol_start not in all_volume_names:
                 raise ValueError(f'Illegal volume name: {vol_start}')
@@ -574,14 +594,14 @@ class DataSetPDS3(DataSet):
             if vol_end not in all_volume_names:
                 raise ValueError(f'Illegal volume name: {vol_end}')
             vol_end_idx = all_volume_names.index(vol_end)
-        if vol_start is not None and vol_end is not None and vol_start_idx > vol_end_idx:
+        if vol_start_idx is not None and vol_end_idx is not None and vol_start_idx > vol_end_idx:
             raise ValueError(f'vol_start ({vol_start!r}) must not be after vol_end ({vol_end!r})')
         valid_volumes = [
             v
             for v in valid_volumes
             if (
-                (vol_start is None or vol_start_idx <= all_volume_names.index(v))
-                and (vol_end is None or all_volume_names.index(v) <= vol_end_idx)
+                (vol_start_idx is None or vol_start_idx <= all_volume_names.index(v))
+                and (vol_end_idx is None or all_volume_names.index(v) <= vol_end_idx)
             )
         ]
 
@@ -681,174 +701,144 @@ class DataSetPDS3(DataSet):
                 limit_yields = max_filenames
             else:
                 limit_yields = min(limit_yields, max_filenames)
-        num_yields = 0
 
-        while True:
-            done = False
+        def _read_index_rows(search_vol: str) -> tuple[list[dict[str, Any]], FCPath]:
+            """Retrieve and read the index table for a volume.
 
-            # If choosing random images, replace the volumes with a single random volume
-            # but keep the original volume list for the next iteration
-            valid_volumes_to_use = valid_volumes
-            if choose_random_images:
-                valid_volumes_to_use = [
-                    valid_volumes_to_use[random.randint(0, len(valid_volumes_to_use) - 1)]
-                ]
+            Returns:
+                The list of index rows and the index ``.tab`` URL (used only for
+                error messages).
+            """
+            index_label_url = index_dir_url / self._volume_to_index(search_vol)
+            index_tab_url = index_label_url.with_suffix('.tab')
+            # This will raise a FileNotFoundError if the index file label or table
+            # can't be found
+            # TODO Implement actual error handling
+            # We have to convert the FCPaths to Posix strings here so that
+            # FileCache.retrieve() can use them. Note that if for some reason there was a
+            # specific FileCache given for pds3_holdings_root, it will be overriden by
+            # self._index_filecache.
+            # TODO Needs to return exceptions instead of a single FileNotFoundError
+            # so we can tell the user what's actually going on.
+            ret = self._index_filecache.retrieve(
+                [index_label_url.as_posix(), index_tab_url.as_posix()]
+            )
+            index_label_localpath, _ = cast(list[Path], ret)
+            index_tab = self._read_pds_table(index_label_localpath, columns=index_columns)
+            return index_tab.dicts_by_row(), index_tab_url
 
-            for search_vol in valid_volumes_to_use:
-                # Find and retrieve the volume index label/table
-                index_label_url = index_dir_url / self._volume_to_index(search_vol)
-                index_tab_url = index_label_url.with_suffix('.tab')
-                # This will raise a FileNotFoundError if the index file label or table
-                # can't be found
-                # TODO Implement actual error handling
-                # We have to convert the FCPaths to Posix strings here so that FileCache.retrieve()
-                # can use them. Note that if for some reason there was a specific FileCache given
-                # for pds3_holdings_root, it will be overriden by self._index_filecache.
-                # TODO Needs to return exceptions instead of a single FileNotFoundError
-                # so we can tell the user what's actually going on.
-                ret = self._index_filecache.retrieve(
-                    [index_label_url.as_posix(), index_tab_url.as_posix()]
+        def _row_to_imagefile(
+            row: dict[str, Any], search_vol: str, index_tab_url: FCPath
+        ) -> tuple[ImageFile | None, bool]:
+            """Apply all active filters to one index row.
+
+            Returns:
+                A tuple ``(imagefile, past_end)``. ``imagefile`` is the constructed
+                ``ImageFile`` if the row passes every filter, or None if it is filtered
+                out. ``past_end`` is True if ``img_num`` exceeds ``img_end_num``; because
+                index rows are in monotonically increasing image-number order, a True
+                value lets sequential scanning stop early.
+            """
+            label_filespec = self._get_label_filespec_from_index(row)
+            img_filespec = self._get_image_filespec_from_label_filespec(label_filespec)
+
+            # Get the image name
+            try:
+                img_name = self._get_img_name_from_label_filespec(label_filespec)
+            except ValueError:
+                logger.error(
+                    'IMGNAME: Index file "%s" contains bad Primary File Spec "%s"',
+                    index_tab_url,
+                    label_filespec,
                 )
-                index_label_localpath, _ = cast(list[Path], ret)
+                return None, False
+            if img_name is None:
+                return None, False  # Not a name we should process
 
-                # if search_volume_path is not None:
-                #     search_vol_fulldir = clean_join(search_volume_path, search_vol)
-                #     # If we require an offset/png file but the directory is missing,
-                #     # there's no point in looking further
-                #     if not os.path.isdir(search_vol_fulldir):
-                #         continue
+            # Check that the image filespec is in the requested list
+            if img_name_filter_list and img_name not in img_name_filter_list:
+                return None, False
 
-                # Read the index table
-                index_tab = self._read_pds_table(index_label_localpath, columns=index_columns)
-                rows = index_tab.dicts_by_row()
+            # Check that the image name is in the requested list
+            if img_name_list:
+                for restrict_name in img_name_list:
+                    if img_name.lower().startswith(restrict_name.lower()):
+                        break
+                else:
+                    return None, False
 
-                # If choosing random images, replace the rows with a single random row
-                if choose_random_images:
-                    rows = [rows[random.randint(0, len(rows) - 1)]]
+            # Get the image number and test that it's in range
+            # There's no point in checking the range dir for image number
+            # since we have to go through the entire index either way
+            try:
+                img_num = self._extract_img_number(img_name)
+            except ValueError as err:
+                raise ValueError(
+                    f'IMGNUM: Index file "{index_tab_url}" contains bad path "{label_filespec}"'
+                ) from err
+            if img_end_num is not None and img_num > img_end_num:
+                return None, True
+            if img_start_num is not None and img_num < img_start_num:
+                return None, False
 
+            # Check that the image meets any additional selection criteria specific
+            # to this dataset
+            label_url = volume_raw_dir_url / self._volset_and_volume(search_vol) / label_filespec
+            img_url = volume_raw_dir_url / self._volset_and_volume(search_vol) / img_filespec
+            if not self._check_additional_image_selection_criteria(
+                img_url.as_posix(), img_name, img_num, arguments
+            ):
+                return None, False
+
+            imagefile = ImageFile(
+                image_file_url=img_url,
+                label_file_url=label_url,
+                index_file_row=row,
+                results_path_stub=self._results_path_stub(search_vol, label_filespec),
+            )
+            return imagefile, False
+
+        if choose_random_images:
+            # Random sampling: for each volume we visit, read its index ONCE, collect
+            # every row passing all active filters into a pool, then sample without
+            # replacement from that pool. Volumes whose pool is exhausted (or empty) are
+            # never revisited, so the loop is bounded by the set of volumes and cannot
+            # livelock even when filters reject most rows.
+            num_yields = 0
+            remaining_volumes = list(valid_volumes)
+            while remaining_volumes and (limit_yields is None or num_yields < limit_yields):
+                search_vol = remaining_volumes.pop(random.randint(0, len(remaining_volumes) - 1))
+                rows, index_tab_url = _read_index_rows(search_vol)
+                pool: list[ImageFile] = []
                 for row in rows:
-                    label_filespec = self._get_label_filespec_from_index(row)
-                    img_filespec = self._get_image_filespec_from_label_filespec(label_filespec)
-
-                    # Get the image name
-                    try:
-                        img_name = self._get_img_name_from_label_filespec(label_filespec)
-                    except ValueError:
-                        logger.error(
-                            'IMGNAME: Index file "%s" contains bad Primary File Spec "%s"',
-                            index_tab_url,
-                            label_filespec,
-                        )
-                        continue
-                    if img_name is None:
-                        continue  # Not a name we should process
-
-                    # Check that the image filespec is in the requested list
-                    if img_name_filter_list and img_name not in img_name_filter_list:
-                        continue
-
-                    # Check that the image name is in the requested list
-                    if img_name_list:
-                        for restrict_name in img_name_list:
-                            if img_name.lower().startswith(restrict_name.lower()):
-                                break
-                        else:
-                            continue
-
-                    # if raw_suffix is not None:
-                    #     image_name = image_name.replace(raw_suffix, suffix)
-
-                    # Get the image number and test that it's in range
-                    # There's no point in checking the range dir for image number
-                    # since we have to go through the entire index either way
-                    try:
-                        img_num = self._extract_img_number(img_name)
-                    except ValueError as err:
-                        raise ValueError(
-                            f'IMGNUM: Index file "{index_tab_url}" contains bad '
-                            f'path "{label_filespec}"'
-                        ) from err
-                    if img_end_num is not None and img_num > img_end_num:
-                        if choose_random_images:
-                            continue
-                        # Images are in monotonically increasing order, so we can just
-                        # quit now for efficiency
-                        done = True
-                        break
-                    if img_start_num is not None and img_num < img_start_num:
-                        continue
-
-                    # Check that the image meets any additional selection criteria specific
-                    # to this dataset
-                    label_url = (
-                        volume_raw_dir_url / self._volset_and_volume(search_vol) / label_filespec
-                    )
-                    img_url = (
-                        volume_raw_dir_url / self._volset_and_volume(search_vol) / img_filespec
-                    )
-                    if not self._check_additional_image_selection_criteria(
-                        img_url.as_posix(), img_name, img_num, arguments
-                    ):
-                        continue
-
-                    # if force_has_offset_file:
-                    #     offset_path = img_to_offset_path(img_path, instrument_host)
-                    #     if not os.path.isfile(offset_path):
-                    #         continue
-                    # if force_has_no_offset_file:
-                    #     offset_path = img_to_offset_path(img_path, instrument_host)
-                    #     if os.path.isfile(offset_path):
-                    #         continue
-                    # if force_has_png_file:
-                    #     png_path = img_to_png_path(img_path, instrument_host)
-                    #     if not os.path.isfile(png_path):
-                    #         continue
-                    # if force_has_no_png_file:
-                    #     png_path = img_to_png_path(img_path, instrument_host)
-                    #     if os.path.isfile(png_path):
-                    #         continue
-                    # if (force_has_offset_error or force_has_offset_spice_error or
-                    #     force_has_offset_nonspice_error):
-                    #     if not _check_for_offset_errors(img_path, instrument_host,
-                    #                                     planet,
-                    #                                     force_has_offset_error,
-                    #                                     force_has_offset_nonspice_error,
-                    #                                     force_has_offset_spice_error):
-                    #         continue
-                    # if selection_expr is not None:
-                    #     # User-provided Python code to check the metadata
-                    #     metadata = read_offset_metadata(
-                    #                 img_path, instrument_host, planet,
-                    #                 type_pref='force_plain',
-                    #                 overlay=False)
-                    #     bootstrap_metadata = read_offset_metadata(
-                    #                 img_path, instrument_host, planet,
-                    #                 type_pref='force_bootstrap',
-                    #                 overlay=False)
-                    #     botsim_metadata = read_offset_metadata(
-                    #                 img_path, instrument_host, planet,
-                    #                 type_pref='force_botsim',
-                    #                 overlay=False)
-                    #     if metadata is None or not eval(selection_expr):
-                    #         continue
-                    imagefile = ImageFile(
-                        image_file_url=img_url,
-                        label_file_url=label_url,
-                        index_file_row=row,
-                        results_path_stub=self._results_path_stub(search_vol, label_filespec),
-                    )
+                    imagefile, _past_end = _row_to_imagefile(row, search_vol, index_tab_url)
+                    if imagefile is not None:
+                        pool.append(imagefile)
+                if not pool:
+                    continue
+                needed = len(pool) if limit_yields is None else limit_yields - num_yields
+                for imagefile in random.sample(pool, min(needed, len(pool))):
                     yield imagefile
-
                     num_yields += 1
-                    if limit_yields is not None and num_yields >= limit_yields:
-                        return
-                    if choose_random_images:
-                        # Only return one image before cycling back for a new volume
-                        break
-                if choose_random_images or done:
-                    break
-            if not choose_random_images:
-                break
+            return
+
+        # Sequential scanning over the requested volumes in order. Image numbers are
+        # monotonically increasing both within and across volumes, so once we pass the
+        # end of the requested range there is nothing left to find anywhere and we stop
+        # the whole scan.
+        num_yields = 0
+        for search_vol in valid_volumes:
+            rows, index_tab_url = _read_index_rows(search_vol)
+            for row in rows:
+                imagefile, past_end = _row_to_imagefile(row, search_vol, index_tab_url)
+                if past_end:
+                    return
+                if imagefile is None:
+                    continue
+                yield imagefile
+                num_yields += 1
+                if limit_yields is not None and num_yields >= limit_yields:
+                    return
 
     def _check_additional_image_selection_criteria(
         self,

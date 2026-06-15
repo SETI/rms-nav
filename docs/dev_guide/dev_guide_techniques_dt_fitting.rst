@@ -36,17 +36,22 @@ Stage 1 — coarse integer cross-correlation
 ------------------------------------------
 
 The first stage rasterises the polyline into a binary mask aligned with the image, thresholds
-the truncated DT into an edge mask, and evaluates the integer-shift cross-correlation
+the truncated DT into an edge mask, and evaluates the per-vertex match fraction
 
 .. math::
 
-    f(\Delta v, \Delta u) = \sum_{v, u}
-        \mathrm{polyline}[v, u] \, \mathrm{edge}[v + \Delta v, u + \Delta u]
+    f(\Delta v, \Delta u) =
+        \frac{\sum_{v, u}
+            \mathrm{polyline}[v, u] \, \mathrm{edge}[v + \Delta v, u + \Delta u]}
+             {N_{\mathrm{in\,bounds}}(\Delta v, \Delta u)}
 
 over every integer offset in :math:`[-m_{v}, m_{v}] \times [-m_{u}, m_{u}]`, where
-:math:`(m_{v}, m_{u})` is the per-instrument SPICE pointing-error margin. Both inputs are
-binary; the cross-correlation peak coincides with the NCC peak because the per-shift
-normaliser varies only mildly over the small search window.
+:math:`(m_{v}, m_{u})` is the per-instrument SPICE pointing-error margin and
+:math:`N_{\mathrm{in\,bounds}}` is the number of polyline vertices that remain inside the
+image after the shift. Both inputs are binary; dividing the raw overlap count by the
+in-bounds vertex count makes the argmax the true binary normalised cross-correlation peak
+(the NCC is the square root of this fraction), so a shift cannot win merely by keeping more
+vertices in bounds or covering a denser local edge region.
 
 Ties are broken by Manhattan distance from the origin (and lexicographic order among offsets at
 equal distance) so that on perfectly-flat inputs the nearest-to-origin shift wins
@@ -317,9 +322,13 @@ The :class:`~nav.nav_technique.dt_fitting.LMRefineResult` exposes the converged 
 fit), the parameter :attr:`~nav.nav_technique.dt_fitting.LMRefineResult.covariance`, the
 per-vertex :attr:`~nav.nav_technique.dt_fitting.LMRefineResult.residuals_px` at the final
 estimate, the per-vertex final :attr:`~nav.nav_technique.dt_fitting.LMRefineResult.weights`,
-the weighted :attr:`~nav.nav_technique.dt_fitting.LMRefineResult.rms_px`, the
+the weighted :attr:`~nav.nav_technique.dt_fitting.LMRefineResult.rms_px`, the unweighted
+:attr:`~nav.nav_technique.dt_fitting.LMRefineResult.raw_rms_px` (well-defined even when the
+weighted RMS collapses to zero), the
 :attr:`~nav.nav_technique.dt_fitting.LMRefineResult.iterations` count, the
-:attr:`~nav.nav_technique.dt_fitting.LMRefineResult.converged` flag, and the
+:attr:`~nav.nav_technique.dt_fitting.LMRefineResult.converged` flag, the
+:attr:`~nav.nav_technique.dt_fitting.LMRefineResult.degenerate` flag (set when no vertex
+survives reweighting), and the
 :attr:`~nav.nav_technique.dt_fitting.LMRefineResult.inlier_count`.
 
 Examples

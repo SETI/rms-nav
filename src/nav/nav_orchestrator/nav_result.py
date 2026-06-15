@@ -22,7 +22,7 @@ from nav.support.types import NDArrayFloatType
 __all__ = ['NavResult']
 
 
-Status = Literal['ok', 'failed', 'conflicted']
+Status = Literal['success', 'failed', 'conflicted']
 """Top-level status set on every NavResult."""
 
 ConfidenceRank = Literal['high', 'medium', 'low', 'conflicted', 'failed']
@@ -33,12 +33,12 @@ ConfidenceRank = Literal['high', 'medium', 'low', 'conflicted', 'failed']
 class NavResult:
     """Full in-memory navigation output for one image.
 
-    Constructors ``NavResult.ok``, ``NavResult.failed``, and
+    Constructors ``NavResult.success``, ``NavResult.failed``, and
     ``NavResult.conflicted`` are the canonical entry points; direct
     instantiation is also supported.
 
     Parameters:
-        status: One of ``'ok'``, ``'failed'``, ``'conflicted'``.
+        status: One of ``'success'``, ``'failed'``, ``'conflicted'``.
         offset_px: ``(dv, du)`` offset; ``None`` on failure.
         sigma_px: Per-axis 1sigma marginal uncertainty; ``None`` on failure.
         sigma_along_unobservable_px: Set when covariance is rank-1
@@ -85,10 +85,15 @@ class NavResult:
         """Validate consistency between status, offset, and reason."""
         if self.status == 'failed' and self.offset_px is not None:
             raise ValueError('status=failed must have offset_px=None')
-        if self.status == 'ok' and self.offset_px is None:
-            raise ValueError('status=ok must have a non-None offset_px')
+        if self.status == 'success' and self.offset_px is None:
+            raise ValueError('status=success must have a non-None offset_px')
         if self.confidence_rank == 'failed' and self.status != 'failed':
             raise ValueError('confidence_rank=failed requires status=failed')
+        if (self.confidence_rank == 'conflicted') != (self.status == 'conflicted'):
+            raise ValueError(
+                "confidence_rank 'conflicted' and status 'conflicted' must agree; got "
+                f'confidence_rank={self.confidence_rank!r}, status={self.status!r}'
+            )
         if not 0.0 <= self.confidence <= 1.0:
             raise ValueError(f'confidence must lie in [0, 1]; got {self.confidence!r}')
         if self.covariance_px2 is not None:
@@ -145,7 +150,7 @@ class NavResult:
         )
 
     @classmethod
-    def ok(
+    def success(
         cls,
         *,
         offset_px: tuple[float, float],
@@ -172,7 +177,7 @@ class NavResult:
         sigma_dv = float(np.sqrt(max(cov[0, 0], 0.0)))
         sigma_du = float(np.sqrt(max(cov[1, 1], 0.0)))
         return cls(
-            status='ok',
+            status='success',
             offset_px=offset_px,
             sigma_px=(sigma_dv, sigma_du),
             sigma_along_unobservable_px=sigma_along_unobservable_px,

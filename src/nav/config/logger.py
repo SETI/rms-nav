@@ -14,6 +14,13 @@ arguments have been resolved. It is safe to call more than once: existing
 """
 
 import argparse
+
+# The stdlib ``logging`` import below is type-annotation-only: it supplies
+# ``logging.Handler`` / ``logging.FileHandler`` for the pdslogger-backed
+# handlers in this module.  nav.config is intentionally exempt from the "no
+# stdlib logging in core code" rule (which targets nav.feature / nav_model /
+# nav_orchestrator / nav_technique / nav.support); all runtime logging here
+# goes through pdslogger.
 import logging
 from typing import TYPE_CHECKING, cast
 

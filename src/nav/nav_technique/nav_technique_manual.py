@@ -20,17 +20,19 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from nav.annotation import Annotations
 from nav.config import IMAGE_LOGGER, Config
 from nav.feature.composition import compose_dialog_overlay
 from nav.feature.feature import NavFeature
 from nav.feature.feature_type import NavFeatureType
-from nav.nav_technique.diagnostics import BodyDiscDiagnostics
+from nav.nav_technique.diagnostics import ManualNavDiagnostics
 from nav.nav_technique.feasibility import NavFeasibilityReport
 from nav.nav_technique.nav_technique import NavTechnique
 from nav.nav_technique.technique_result import NavTechniqueResult
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only import
     from nav.nav_orchestrator.nav_context import NavContext
+    from nav.nav_orchestrator.nav_result import NavResult
     from nav.obs import ObsSnapshotInst
 
 __all__ = ['NavTechniqueManual', 'run_manual_nav']
@@ -72,8 +74,19 @@ class NavTechniqueManual(NavTechnique):
     accepts_feature_types = frozenset(NavFeatureType)
     requires_prior = False
 
-    def __init__(self, *, config: Config | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        config: Config | None = None,
+        annotations: Annotations | None = None,
+    ) -> None:
         super().__init__(config=config)
+        # ``annotations`` is the merged-per-NavModel ``Annotations`` the
+        # dialog uses when it writes a labelled summary PNG next to a
+        # saved sidecar.  It is optional only because tests that exercise
+        # the offset-pick path alone do not need it; ``run_manual_nav``
+        # always populates it in normal use.
+        self._annotations: Annotations | None = annotations
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Manual navigation runs whenever there is anything to render.
@@ -149,6 +162,7 @@ class NavTechniqueManual(NavTechnique):
                 obs=obs,  # type: ignore[arg-type]
                 model_img_ext=model_img,
                 model_mask_ext=model_mask,
+                annotations=self._annotations,
                 config=self.config,
                 parent=None,
             )
@@ -165,7 +179,7 @@ class NavTechniqueManual(NavTechnique):
                 confidence=0.0,
                 spurious=True,
                 at_edge=False,
-                diagnostics=BodyDiscDiagnostics(),
+                diagnostics=ManualNavDiagnostics(operator_accepted=False),
             )
         return NavTechniqueResult(
             technique_name=self.name,
@@ -175,7 +189,7 @@ class NavTechniqueManual(NavTechnique):
             confidence=1.0,
             spurious=False,
             at_edge=False,
-            diagnostics=BodyDiscDiagnostics(),
+            diagnostics=ManualNavDiagnostics(operator_accepted=True),
         )
 
 
@@ -183,12 +197,18 @@ def run_manual_nav(
     obs: ObsSnapshotInst,
     *,
     config: Config | None = None,
-) -> NavTechniqueResult | None:
+) -> NavResult | None:
     """Open the manual-navigation dialog on a single observation.
 
     Builds the same NavContext + features the autonomous orchestrator
     would see, then opens :class:`~nav.ui.manual_nav_dialog.ManualNavDialog`
-    so the operator can pick an offset by hand.
+    so the operator can pick an offset by hand.  When the operator
+    accepts a pick, the dialog's offset is wrapped in a full
+    :class:`~nav.nav_orchestrator.NavResult` (provenance + image
+    classifier + feature inventory + annotations populated identically
+    to the autonomous pipeline), so callers can write the same
+    ``_metadata.json`` and ``_summary.png`` outputs ``navigate_image_files``
+    produces.
 
     Parameters:
         obs: Loaded observation snapshot to navigate.
@@ -196,9 +216,10 @@ def run_manual_nav(
             to :data:`~nav.config.DEFAULT_CONFIG`.
 
     Returns:
-        The :class:`NavTechniqueResult` produced by the dialog, or
-        ``None`` when no supported overlay features paint any pixels
-        into the ext-FOV composite.  Supported overlay types match
+        A :class:`NavResult` with ``status='success'`` on accept, or
+        ``None`` when the operator cancels or no supported overlay
+        feature paints any pixels into the ext-FOV composite.
+        Supported overlay types match
         :meth:`NavTechniqueManual.is_feasible`: template-bearing
         features (``BODY_DISC`` / ``RING_ANNULUS`` /
         ``CARTOGRAPHIC_MODEL``), polyline-bearing features (``LIMB_ARC``
@@ -212,10 +233,14 @@ def run_manual_nav(
     """
     # Local imports keep heavyweight dependencies (NavOrchestrator, NavModel
     # registry) out of import-time graphs for callers that only need the
-    # autonomous pipeline.
-    from nav.feature.composition import compose_dialog_overlay
+    # autonomous pipeline.  ``NavResult`` is imported here too because the
+    # ``nav_orchestrator`` package re-exports techniques through its
+    # ``curator`` module, making a top-level import of ``NavResult``
+    # circular for this module.
     from nav.nav_model import build_models_for_obs
+    from nav.nav_orchestrator.nav_result import NavResult
     from nav.nav_orchestrator.orchestrator import NavOrchestrator
+    from nav.support.status_reason import NavStatusReason
 
     models = build_models_for_obs(obs)
     orchestrator = NavOrchestrator(models, config=config)
@@ -223,9 +248,9 @@ def run_manual_nav(
     # overrides the autonomous reliability decision, so even features the
     # gate would drop (low SNR, large limb uncertainty, etc.) belong on
     # the dialog overlay.
-    context, features = orchestrator.prepare(obs, apply_gate=False)
-    technique = NavTechniqueManual(config=config)
-    feasibility = technique.is_feasible(features)
+    prep = orchestrator.prepare(obs, apply_gate=False)
+    technique = NavTechniqueManual(config=config, annotations=prep.annotations)
+    feasibility = technique.is_feasible(prep.features)
     if not feasibility.feasible:
         IMAGE_LOGGER.warning('Manual navigation skipped: %s', feasibility.reason)
         return None
@@ -234,12 +259,36 @@ def run_manual_nav(
     # ext-FOV shape the dialog will display so off-frame blobs and
     # all-clipped polylines fail loudly here instead of opening an
     # empty dialog.
-    shape = context.image_ext.shape
-    _overlay_img, overlay_mask = compose_dialog_overlay(features, (int(shape[0]), int(shape[1])))
+    shape = prep.context.image_ext.shape
+    _overlay_img, overlay_mask = compose_dialog_overlay(
+        prep.features, (int(shape[0]), int(shape[1]))
+    )
     if not overlay_mask.any():
         IMAGE_LOGGER.warning(
             'Manual navigation skipped: composed overlay is empty (every renderable '
             'feature clipped out of the ext-FOV)'
         )
         return None
-    return technique.navigate(features, context)
+    technique_result = technique.navigate(prep.features, prep.context)
+    if technique_result.spurious:
+        # Cancel: no NavResult is built so the caller skips the metadata /
+        # PNG write step.  The cancel reason has already been logged by
+        # ``NavTechniqueManual.navigate``.
+        return None
+    return NavResult.success(
+        offset_px=technique_result.offset_px,
+        covariance_px2=technique_result.covariance_px2,
+        confidence=technique_result.confidence,
+        # Operator confirmation overrides the autonomous confidence
+        # rank; a manually-picked offset is treated as high-confidence
+        # so downstream consumers (backplane / bundle) accept it
+        # without explicit opt-in.
+        confidence_rank='high',
+        status_reason=NavStatusReason.OK,
+        per_technique=[technique_result],
+        feature_inventory=prep.feature_inventory,
+        image_classifier=prep.image_classifier,
+        provenance=prep.provenance,
+        model_metadata=prep.model_metadata,
+        annotations=prep.annotations,
+    )

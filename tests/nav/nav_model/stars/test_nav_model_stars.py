@@ -22,6 +22,7 @@ from nav.feature.feature_type import NavFeatureType
 from nav.feature.flags import StarFlags
 from nav.feature.geometry import StarGeometry
 from nav.nav_model.stars.nav_model_stars import (
+    SNR_REF,
     NavModelStars,
     _compute_smear_for_obs,
     _crlb_covariance,
@@ -89,17 +90,22 @@ class _FakeContext:
 class _FakeObs:
     """Observation stand-in covering the methods ``NavModelStars`` reads."""
 
-    def __init__(self, *, extfov_margin: int = 14) -> None:
+    def __init__(self, *, extfov_margin: int = 14, star_max_vmag: float = 12.0) -> None:
         self.extfov_margin_v = extfov_margin
         self.extfov_margin_u = extfov_margin
         self.extdata_shape_vu = (128, 128)
         self.data_shape_v = 100
         self.data_shape_u = 100
         self._psf = _FakePSF(sigma=1.0)
+        self._star_max_vmag = star_max_vmag
 
     def star_psf(self) -> _FakePSF:
         """Return the fake PSF shared by every test star."""
         return self._psf
+
+    def star_max_usable_vmag(self) -> float:
+        """Return the limiting magnitude used by the star gate."""
+        return self._star_max_vmag
 
     def make_extfov_false(self) -> np.ndarray:
         """Return a False-filled boolean array of the extfov shape."""
@@ -117,9 +123,9 @@ class _FakeObs:
         )
 
 
-def _make_model() -> tuple[NavModelStars, _FakeObs]:
+def _make_model(*, star_max_vmag: float = 12.0) -> tuple[NavModelStars, _FakeObs]:
     """Build a NavModelStars instance with the fake obs and stars config."""
-    obs = _FakeObs()
+    obs = _FakeObs(star_max_vmag=star_max_vmag)
     config = mock.Mock()
     config.stars = _FakeStarsConfig()
     model = NavModelStars('stars', cast(Any, obs), config=config)
@@ -243,15 +249,66 @@ def test_to_features_emits_one_feature_per_star() -> None:
     assert feat.feature_id == 'star:UCAC4:12345'
 
 
-def test_to_features_skips_below_min_snr() -> None:
-    """Stars with predicted SNR below the configured floor are skipped."""
-    model, _obs = _make_model()
-    cfg = mock.Mock()
-    cfg.stars = _FakeStarsConfig()
-    cfg.stars.min_predicted_snr = 1e6
-    model._stars_config = cfg.stars
-    model._stars = [cast(MutableStar, _FakeMutableStar())]
+def test_to_features_skips_star_fainter_than_limit() -> None:
+    """A star fainter than ``obs.star_max_usable_vmag()`` is dropped."""
+    model, _obs = _make_model(star_max_vmag=8.0)
+    faint = _FakeMutableStar(vmag=9.0)
+    model._stars = [cast(MutableStar, faint)]
     assert model.to_features(cast(NavContext, _FakeContext())) == []
+
+
+def test_to_features_keeps_star_brighter_than_limit() -> None:
+    """A star brighter than the limiting magnitude is kept."""
+    model, _obs = _make_model(star_max_vmag=8.0)
+    bright = _FakeMutableStar(vmag=4.0)
+    model._stars = [cast(MutableStar, bright)]
+    assert len(model.to_features(cast(NavContext, _FakeContext()))) == 1
+
+
+def test_to_features_skips_star_without_vmag() -> None:
+    """A star with no catalog magnitude is dropped by the magnitude gate."""
+    model, _obs = _make_model(star_max_vmag=8.0)
+    no_mag = _FakeMutableStar(vmag=None)
+    model._stars = [cast(MutableStar, no_mag)]
+    assert model.to_features(cast(NavContext, _FakeContext())) == []
+
+
+def test_to_features_star_at_limit_gets_snr_ref() -> None:
+    """A star exactly at the limiting magnitude gets ``snr_eff == SNR_REF``."""
+    model, _obs = _make_model(star_max_vmag=8.0)
+    at_limit = _FakeMutableStar(vmag=8.0)
+    model._stars = [cast(MutableStar, at_limit)]
+    feat = model.to_features(cast(NavContext, _FakeContext()))[0]
+    assert isinstance(feat.flags, StarFlags)
+    assert feat.flags.predicted_snr == pytest.approx(SNR_REF)
+
+
+def test_to_features_brighter_star_has_higher_effective_snr() -> None:
+    """The effective SNR (and reliability) rises with magnitude margin.
+
+    Replaces the old DN-based SNR-floor skip test: detectability now comes
+    from how far below the limiting magnitude the star sits, not from a
+    DN-derived photometric SNR.
+    """
+    model, _obs = _make_model(star_max_vmag=8.0)
+    dim = _FakeMutableStar(unique_number=1, vmag=7.0)
+    bright = _FakeMutableStar(unique_number=2, vmag=3.0, u=70.0, v=80.0)
+    model._stars = [cast(MutableStar, dim), cast(MutableStar, bright)]
+    feats = model.to_features(cast(NavContext, _FakeContext()))
+    by_id = {f.feature_id: f for f in feats}
+    dim_feat = by_id['star:UCAC4:1']
+    bright_feat = by_id['star:UCAC4:2']
+    assert isinstance(dim_feat.flags, StarFlags)
+    assert isinstance(bright_feat.flags, StarFlags)
+    assert bright_feat.flags.predicted_snr > dim_feat.flags.predicted_snr
+    assert bright_feat.reliability > dim_feat.reliability
+    # The CRLB covariance is derived from the same effective SNR, so the
+    # brighter star's position is tighter (smaller variance).
+    bright_cov = bright_feat.position_cov_px
+    dim_cov = dim_feat.position_cov_px
+    assert bright_cov is not None
+    assert dim_cov is not None
+    assert bright_cov[0, 0] < dim_cov[0, 0]
 
 
 def test_to_features_returns_empty_when_noise_zero() -> None:

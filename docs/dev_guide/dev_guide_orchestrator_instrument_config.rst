@@ -23,8 +23,7 @@ Per-instrument configuration is split into two layers:
 - The static per-instrument YAML (``config_400_inst_coiss.yaml``,
   ``config_410_inst_gossi.yaml``, ``config_420_inst_nhlorri.yaml``,
   ``config_430_inst_vgiss.yaml``) carries the slow-moving parameters: data unit
-  convention, saturation DN, classifier thresholds, camera rotation flags, and the
-  DN-to-image-unit scale.
+  convention, saturation DN, classifier thresholds, and camera rotation flags.
 - The per-image observation snapshot
   (:class:`~nav.obs.obs_snapshot_inst.ObsSnapshotInst`) carries the fast-moving
   parameters: PSF sigma, midtime, extfov margin. These come from the per-image instrument
@@ -41,8 +40,6 @@ calls it once per observation in ``_make_context`` and the result is consumed by
 - The orchestrator's pre-filter selection (per-instrument ``source_image_filter`` block).
 - The :class:`~nav.nav_orchestrator.nav_context.NavContext` rotation flags
   (``fit_camera_rotation``, ``max_rotation_deg``).
-- The star navigation model's predicted-SNR formula (via
-  ``signal_dn_to_image_unit_scale``).
 
 Restrictions and assumptions
 ----------------------------
@@ -84,11 +81,6 @@ The per-instrument YAML schema consumed by
   default to ``False``; VGISS / GOSSI default to ``True``.
 - ``camera_rotation.max_rotation_deg`` — float, default ``5.0`` deg. Maximum allowed
   rotation magnitude when ``fit_camera_rotation`` is ``True``.
-- ``signal_dn_to_image_unit_scale`` — float, default ``1.0``. Per-camera scale factor
-  converting an integrated DN signal into the image's native units. ``1.0`` for
-  ``raw_dn`` instruments; the per-camera CALIB-pipeline scale factor for
-  ``calibrated_if`` instruments (typically of order :math:`10^{-7}` for Cassini ISS
-  CALIB).
 
 Implementation
 ==============
@@ -116,8 +108,6 @@ Public surface (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
     — bool.
   - :attr:`~nav.nav_orchestrator.instrument_config.InstrumentSettings.max_rotation_deg` —
     float.
-  - :attr:`~nav.nav_orchestrator.instrument_config.InstrumentSettings.signal_dn_to_image_unit_scale`
-    — float. Default ``1.0``.
 
 - :func:`~nav.nav_orchestrator.instrument_config.instrument_settings_from_obs` — reads the
   per-camera YAML mapping off ``obs.inst_config`` and returns a populated
@@ -131,9 +121,8 @@ Examples
 
 **Cassini ISS NAC.**  ``config_400_inst_coiss.yaml`` declares
 ``data_units: raw_dn``, ``noise.saturation_dn: 4095.0``, ``noise.marker_value: 0``,
-``camera_rotation.fit_camera_rotation: false``,
-``camera_rotation.max_rotation_deg: 5.0``,
-``signal_dn_to_image_unit_scale: 1.0``.
+``camera_rotation.fit_camera_rotation: false``, and
+``camera_rotation.max_rotation_deg: 5.0``.
 :func:`~nav.nav_orchestrator.instrument_config.instrument_settings_from_obs` returns::
 
     InstrumentSettings(
@@ -143,7 +132,6 @@ Examples
         thresholds=ImageQualityThresholds(...),
         fit_camera_rotation=False,
         max_rotation_deg=5.0,
-        signal_dn_to_image_unit_scale=1.0,
     )
 
 **Voyager ISS.**  ``config_430_inst_vgiss.yaml`` declares
@@ -155,9 +143,9 @@ inherits ``fit_camera_rotation=True`` and every technique runs the 3-DoF path, s
 on Voyager imagery.
 
 **Cassini ISS CALIB pipeline.**  When the operator runs the calibrated-IF pipeline,
-``data_units: calibrated_if``, ``noise.saturation_dn: null``, ``noise.marker_value: NaN``,
-``signal_dn_to_image_unit_scale`` carries the per-camera CALIB-pipeline scale (~``5e-7``).
-The orchestrator's saturation-mask helper returns an empty mask (saturation cannot be
-identified post-CALIB), and the star navigation model's predicted-SNR formula multiplies
-its DN-keyed catalog signal by ``signal_dn_to_image_unit_scale`` to bring it into
-calibrated-IF units before forming the SNR ratio.
+``data_units: calibrated_if``, ``noise.saturation_dn: null``, and
+``noise.marker_value: NaN``. The orchestrator's saturation-mask helper returns an empty
+mask (saturation cannot be identified post-CALIB), and the star navigation model gates
+catalog stars purely by magnitude against :meth:`obs.star_max_usable_vmag()
+<nav.obs.obs_inst.ObsInst.star_max_usable_vmag>`, so the calibrated-IF units carry
+no effect on the star detectability decision.

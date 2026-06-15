@@ -82,6 +82,19 @@ cassini_iss:
 # saturation 4095 DN) would mis-classify every CALIB image as `blank`.
 # The Cassini observation loader picks this block when the input
 # filename contains ``_CALIB``.
+#
+# Saturation policy (Phase 10 §F): there is no `saturation_threshold_if`
+# field.  The CISS CALIB pipeline applies an exposure-, filter-, and
+# gain-dependent calibration, so a single I/F constant cannot identify
+# the physically saturated DN ceiling.  The orchestrator therefore
+# leaves the per-pixel saturation mask empty for calibrated_if input
+# (see `nav.nav_orchestrator.orchestrator._build_saturation_mask`) and
+# the classifier sees an `inf` saturation threshold so
+# `saturation_frac` is always 0.0 and the `fully_overexposed`
+# early-out is disabled.  Operators who need accurate saturation flags
+# on a Cassini frame must navigate the matching `_RAW.IMG` (CISS
+# calibration is not a geometric reprojection, so raw and calibrated
+# share pixel coordinates).
 cassini_iss_calib:
   nac:
     data_units: calibrated_if
@@ -101,7 +114,6 @@ cassini_iss_calib:
       marker_value: NaN              # CISS CALIB missing-pixel sentinel
     image_quality_thresholds:
       blank_max_if: 1.0e-4            # PLACEHOLDER — calibrate in Phase 10
-      saturation_threshold_if: 10.0   # PLACEHOLDER — calibrate in Phase 10
       noisy_threshold_if: 0.005       # PLACEHOLDER — calibrate in Phase 10
       max_missing_frac_clean: 0.30
       max_overexposed_frac_clean: 0.80
@@ -132,7 +144,6 @@ cassini_iss_calib:
       marker_value: NaN
     image_quality_thresholds:
       blank_max_if: 1.0e-4
-      saturation_threshold_if: 10.0
       noisy_threshold_if: 0.005
       max_missing_frac_clean: 0.30
       max_overexposed_frac_clean: 0.80

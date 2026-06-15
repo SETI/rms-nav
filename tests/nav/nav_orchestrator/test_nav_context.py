@@ -79,6 +79,17 @@ def test_navcontext_rotation_fields_default_off() -> None:
     assert ctx.max_rotation_deg == 5.0
 
 
+def test_navcontext_has_no_signal_scale_field() -> None:
+    """The DN-to-image-unit scale was removed with the magnitude-based gate.
+
+    The star gate now limits by magnitude against
+    ``obs.star_max_usable_vmag()``, so no DN-to-image-unit scale is
+    propagated through the NavContext.
+    """
+    ctx = _minimal_context()
+    assert not hasattr(ctx, 'signal_dn_to_image_unit_scale')
+
+
 def test_navcontext_rotation_fields_propagate() -> None:
     """Explicit rotation flags survive construction and ``with_prior``."""
     ctx = _minimal_context(fit_camera_rotation=True, max_rotation_deg=3.5)

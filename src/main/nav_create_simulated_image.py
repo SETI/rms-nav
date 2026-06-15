@@ -523,34 +523,14 @@ class CreateSimulatedImageModel(QMainWindow):
         self._zoom_ctl.on_wheel(event)
 
     def _zoom_in(self) -> None:
+        # The ZoomPanController's centre-anchored zoom is identical to the
+        # open-coded version (it wraps this window's scroll area + zoom state).
         if self._base_pixmap is not None:
-            viewport = self._scroll_area.viewport()
-            if viewport is None:
-                return
-            center_x = viewport.width() // 2
-            center_y = viewport.height() // 2
-            scrollbar_h = self._scroll_area.horizontalScrollBar()
-            scrollbar_v = self._scroll_area.verticalScrollBar()
-            if scrollbar_h is None or scrollbar_v is None:
-                return
-            scaled_x = center_x + scrollbar_h.value()
-            scaled_y = center_y + scrollbar_v.value()
-            self._zoom_at_point(1.2, center_x, center_y, scaled_x, scaled_y)
+            self._zoom_ctl.zoom_in_center()
 
     def _zoom_out(self) -> None:
         if self._base_pixmap is not None:
-            viewport = self._scroll_area.viewport()
-            if viewport is None:
-                return
-            center_x = viewport.width() // 2
-            center_y = viewport.height() // 2
-            scrollbar_h = self._scroll_area.horizontalScrollBar()
-            scrollbar_v = self._scroll_area.verticalScrollBar()
-            if scrollbar_h is None or scrollbar_v is None:
-                return
-            scaled_x = center_x + scrollbar_h.value()
-            scaled_y = center_y + scrollbar_v.value()
-            self._zoom_at_point(1.0 / 1.2, center_x, center_y, scaled_x, scaled_y)
+            self._zoom_ctl.zoom_out_center()
 
     def _zoom_at_point(
         self,
@@ -562,11 +542,8 @@ class CreateSimulatedImageModel(QMainWindow):
     ) -> None:
         if self._base_pixmap is None:
             return
-        old_zoom = self._zoom_factor
-        new_zoom = float(np.clip(old_zoom * factor, 0.1, 50.0))
-        if new_zoom == old_zoom:
-            return
-        # Delegate to the controller to perform zoom and maintain pan
+        # The ZoomPanController owns the zoom clamp + no-op short-circuit, so
+        # delegate directly instead of re-deriving the clamped zoom here.
         self._zoom_ctl.zoom_at_point(factor, viewport_x, viewport_y, scaled_x, scaled_y)
 
     def _reset_view(self) -> None:
@@ -2412,11 +2389,16 @@ class CreateSimulatedImageModel(QMainWindow):
                     ),
                     'time': float(params.get('time', 0.0)),
                     'ring_epoch': float(params.get('ring_epoch', 0.0)),
-                    'closest_planet': params.get('closest_planet'),
+                    'closest_planet': params.get('closest_planet') or 'SATURN',
+                    'shade_solid_rings': bool(params.get('shade_solid_rings', False)),
                     'bodies': list(params.get('bodies', [])),
                     'stars': list(params.get('stars', [])),
                     'rings': list(params.get('rings', [])),
                 }
+                # Sync the shade-solid-rings checkbox
+                self._shade_solid_rings_check.blockSignals(True)
+                self._shade_solid_rings_check.setChecked(bool(self.sim_params['shade_solid_rings']))
+                self._shade_solid_rings_check.blockSignals(False)
                 # Update general UI
                 self._size_v_spin.setValue(self.sim_params['size_v'])
                 self._size_u_spin.setValue(self.sim_params['size_u'])
@@ -2427,7 +2409,7 @@ class CreateSimulatedImageModel(QMainWindow):
                 self._time_spin.setValue(self.sim_params.get('time', 0.0))
                 self._epoch_spin.setValue(self.sim_params.get('ring_epoch', 0.0))
                 # Update closest planet
-                closest_planet = self.sim_params.get('closest_planet', 'SATURN')
+                closest_planet = self.sim_params.get('closest_planet') or 'SATURN'
                 index = self._closest_planet_combo.findText(closest_planet)
                 if index >= 0:
                     self._closest_planet_combo.setCurrentIndex(index)

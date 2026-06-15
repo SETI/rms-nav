@@ -98,7 +98,7 @@ def process_task(
     return False, None  # No retry under any circumstances
 
 
-async def main() -> None:
+async def async_main() -> None:
     argparser = argparse.ArgumentParser(
         description='Backplanes Main Interface (Cloud Tasks version)'
     )
@@ -129,5 +129,10 @@ async def main() -> None:
     await worker.start()
 
 
+def main() -> None:  # Required for setuptools entry points
+    """Synchronous entry point; runs ``asyncio.run(async_main())``."""
+    asyncio.run(async_main())
+
+
 if __name__ == '__main__':
-    asyncio.run(main())
+    main()

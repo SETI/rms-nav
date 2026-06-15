@@ -26,7 +26,10 @@ def shift_array(
         fill: The value used to fill the newly created array elements.
 
     Returns:
-        The array shifted by the given amount.
+        The array shifted by the given amount.  Aliasing note: a zero offset
+        returns the *same* array object (no copy); any non-zero offset returns
+        a fresh copy.  Do not mutate the result in place assuming it is always
+        independent of the input.
 
     Raises:
         ValueError: If the array shape and offset list have different lengths.
@@ -71,7 +74,9 @@ def pad_array(
         fill: The value used to fill the newly created array elements.
 
     Returns:
-        The array padded by the given amount.
+        The array padded by the given amount.  Aliasing note: an all-zero
+        margin returns the *same* array object (no copy); a non-zero margin
+        returns a fresh ``np.pad`` array.
 
     Raises:
         ValueError: If the array shape and margin list have different lengths.
@@ -101,7 +106,11 @@ def unpad_array(
             original centered values are used on the new axis.
 
     Returns:
-        The array unpadded by the given amount.
+        The array unpadded by the given amount.  Aliasing note: this never
+        copies -- an all-zero margin returns the *same* array object and a
+        non-zero margin returns a *view* (slice) into the input.  Mutating the
+        result therefore mutates the input; copy first if independence is
+        needed.
 
     Raises:
         ValueError: If the array shape and margin list have different lengths.
@@ -174,12 +183,21 @@ def next_power_of_2(n: int) -> int:
     """Computes the smallest power of 2 that is greater than or equal to n.
 
     Parameters:
-        n: The input integer value.
+        n: A non-negative integer.
 
     Returns:
-        The smallest power of 2 that is greater than or equal to n.
+        The smallest power of 2 that is >= n.  ``0`` returns ``1`` (the
+        smallest power of 2 that is >= 0).
+
+    Raises:
+        ValueError: If ``n`` is negative (a power of 2 >= a negative number is
+            ill-defined, and ``bin()`` of a negative would be misparsed).
     """
 
+    if n < 0:
+        raise ValueError(f'next_power_of_2 requires a non-negative integer; got {n}')
+    if n <= 1:
+        return 1
     s = bin(n)[2:]
     if s.count('1') == 1:  # Already power of 2
         return n
@@ -816,34 +834,47 @@ def draw_rect(
 
     Parameters:
         img: The 2-D (or higher) array to draw on.
-        xctr, yctr: The center of the rectangle.
-        xhalfwidth: The width of the rectangle on each side of the center.
-        yhalfwidth: This is the inner border of the rectangle.
         color: The scalar (or higher) color to draw.
+        xctr: The horizontal (column) center of the rectangle.
+        yctr: The vertical (row) center of the rectangle.
+        xhalfwidth: The horizontal half-width, on each side of the center.
+        yhalfwidth: The vertical half-width, on each side of the center.
         thickness: The thickness (total width) of the line.
         dot_spacing: The spacing between dots in the rectangle. 1 means dots are
             adjacent (solid lines).
+
+    All slice bounds are clipped to the array extent so a center near or beyond
+    the image edge cannot wrap a negative index around to the far side and paint
+    a spurious rectangle; an entirely off-image rectangle draws nothing.
     """
+
+    rows, cols = int(img.shape[0]), int(img.shape[1])
+
+    def _cy(v: int) -> int:
+        return max(0, min(int(v), rows))
+
+    def _cx(v: int) -> int:
+        return max(0, min(int(v), cols))
 
     # Top
     img[
-        yctr - yhalfwidth - thickness + 1 : yctr - yhalfwidth + 1,
-        xctr - xhalfwidth - thickness + 1 : xctr + xhalfwidth + thickness : dot_spacing,
+        _cy(yctr - yhalfwidth - thickness + 1) : _cy(yctr - yhalfwidth + 1),
+        _cx(xctr - xhalfwidth - thickness + 1) : _cx(xctr + xhalfwidth + thickness) : dot_spacing,
     ] = color
     # Bottom
     img[
-        yctr + yhalfwidth : yctr + yhalfwidth + thickness,
-        xctr - xhalfwidth - thickness + 1 : xctr + xhalfwidth + thickness : dot_spacing,
+        _cy(yctr + yhalfwidth) : _cy(yctr + yhalfwidth + thickness),
+        _cx(xctr - xhalfwidth - thickness + 1) : _cx(xctr + xhalfwidth + thickness) : dot_spacing,
     ] = color
     # Left
     img[
-        yctr - yhalfwidth - thickness + 1 : yctr + yhalfwidth + thickness,
-        xctr - xhalfwidth - thickness + 1 : xctr - xhalfwidth + 1 : dot_spacing,
+        _cy(yctr - yhalfwidth - thickness + 1) : _cy(yctr + yhalfwidth + thickness),
+        _cx(xctr - xhalfwidth - thickness + 1) : _cx(xctr - xhalfwidth + 1) : dot_spacing,
     ] = color
     # Right
     img[
-        yctr - yhalfwidth - thickness + 1 : yctr + yhalfwidth + thickness,
-        xctr + xhalfwidth : xctr + xhalfwidth + thickness : dot_spacing,
+        _cy(yctr - yhalfwidth - thickness + 1) : _cy(yctr + yhalfwidth + thickness),
+        _cx(xctr + xhalfwidth) : _cx(xctr + xhalfwidth + thickness) : dot_spacing,
     ] = color
 
 

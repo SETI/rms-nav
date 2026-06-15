@@ -18,14 +18,15 @@ models or techniques run for debugging (``only_models='body:MIMAS'``,
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
 from nav.annotation import Annotations
-from nav.config import IMAGE_LOGGER, Config
+from nav.config import Config
 from nav.feature.feature import NavFeature
 from nav.feature.feature_type import NavFeatureType
 from nav.feature.reliability import FeatureReliabilityGate, GatedFeatureRecord
@@ -55,7 +56,11 @@ from nav.nav_orchestrator.provenance import (
     collect_provenance_metadata,
 )
 from nav.nav_orchestrator.status_reason_info import STATUS_REASON_INFO_TEMPLATE
-from nav.nav_technique.nav_technique import NavTechnique, filter_technique_names
+from nav.nav_technique.nav_technique import (
+    NavTechnique,
+    filter_technique_names,
+    technique_tier,
+)
 from nav.nav_technique.technique_result import NavTechniqueResult
 from nav.support.filters import NavFilterKind, NavFilterSpec, apply_filter
 from nav.support.image_quality import cosmic_ray_mask, saturation_mask
@@ -68,7 +73,50 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only import
 
 __all__ = [
     'NavOrchestrator',
+    'OrchestratorPrep',
 ]
+
+
+@dataclass(frozen=True)
+class OrchestratorPrep:
+    """Per-image artifacts produced by :meth:`NavOrchestrator.prepare`.
+
+    Bundles every prep-phase output a downstream caller might want.  The
+    autonomous :meth:`NavOrchestrator.navigate` does not use this struct
+    (it inlines the prep so it can short-circuit on hard-failure
+    images), but the manual-navigation driver does: it wraps the
+    operator's chosen offset in a full :class:`NavResult` populated
+    from ``provenance`` / ``image_classifier`` / ``feature_inventory``
+    / ``model_metadata`` / ``annotations`` so the manual pipeline
+    writes the same ``_metadata.json`` and ``_summary.png`` files the
+    autonomous pipeline does.
+
+    Parameters:
+        context: NavContext built from the observation.
+        provenance: Reproducibility envelope shared with the autonomous
+            pipeline.
+        image_classifier: Image-quality classifier verdict.
+        features: Either the gated-kept feature list (when
+            ``prepare(..., apply_gate=True)``) or every emitted feature
+            (when ``apply_gate=False``).  The manual driver always
+            requests the un-gated list because the operator visually
+            overrides gate decisions.
+        feature_inventory: Per-feature summary entries.  When the gate
+            ran, both kept and gated features are included with their
+            ``gated`` flag set accordingly; when the gate was skipped,
+            every entry has ``gated=False``.
+        model_metadata: Per-NavModel diagnostic dicts keyed by model name.
+        annotations: Merged annotation collection assembled from every
+            built NavModel's ``to_annotations``.
+    """
+
+    context: NavContext
+    provenance: Provenance
+    image_classifier: NavImageClassifierResult
+    features: list[NavFeature]
+    feature_inventory: list[NavFeatureSummary]
+    model_metadata: dict[str, dict[str, Any]]
+    annotations: Annotations
 
 
 _HARD_FAILURE_TO_REASON: dict[ImageClass, NavStatusReason] = {
@@ -163,6 +211,33 @@ def _normalize_model_patterns(patterns: str | list[str], names: list[str]) -> li
     return out
 
 
+def _feature_source_bodies(feature: NavFeature) -> frozenset[str]:
+    """Return the set of body names a feature was emitted for.
+
+    Reads the structured :attr:`NavFeature.body_name`; ring and star
+    features have no body and yield an empty set.
+    """
+    return frozenset({feature.body_name}) if feature.body_name else frozenset()
+
+
+def _bodies_with_non_spurious_primary(
+    results: list[NavTechniqueResult],
+) -> frozenset[str]:
+    """Return the set of body names that have a non-spurious primary result.
+
+    Reads each result's structured ``source_bodies`` (populated by the body
+    techniques from the consumed features) rather than parsing ``feature_ids``.
+    """
+    covered: set[str] = set()
+    for r in results:
+        if r.spurious:
+            continue
+        if technique_tier(r.technique_name) != 'primary':
+            continue
+        covered.update(r.source_bodies)
+    return frozenset(covered)
+
+
 class NavOrchestrator(NavBase):
     """Top-level driver for autonomous navigation.
 
@@ -213,41 +288,53 @@ class NavOrchestrator(NavBase):
         obs: ObsSnapshotInst,
         *,
         apply_gate: bool = True,
-    ) -> tuple[NavContext, list[NavFeature]]:
-        """Build per-image state without running any technique.
+    ) -> OrchestratorPrep:
+        """Build every per-image artifact a downstream caller might use.
 
         Runs the same pre-technique pipeline as :meth:`navigate`: builds
         the provenance envelope and the :class:`NavContext`, calls every
-        registered NavModel's ``create_model``, and extracts features.
-        Hard-failure image classes are logged but **not** short-circuited
-        — the caller (manual-nav dialog, debugger) decides what to do on
-        a blank or saturated frame.
+        registered NavModel's ``create_model``, extracts features,
+        builds the feature inventory, snapshots per-model metadata, and
+        merges annotations.  Hard-failure image classes are logged but
+        **not** short-circuited — the caller (manual-nav dialog,
+        debugger) decides what to do on a blank or saturated frame.
 
         Parameters:
             obs: The observation snapshot to prepare.
             apply_gate: When ``True`` (the default) the reliability gate
-                runs and only the kept features are returned.  When
-                ``False`` every emitted feature is returned, gated or
-                not — useful for the manual-nav dialog, where the
-                operator overrides the autonomous reliability decision.
-
-        Returns:
-            ``(context, features)``.  ``features`` is the gated subset
-            when ``apply_gate=True``, otherwise the full set.
+                runs; ``OrchestratorPrep.features`` carries only the
+                kept features and ``feature_inventory`` records the
+                gate verdict for both kept and gated entries.  When
+                ``False`` every emitted feature is returned (with
+                ``feature_inventory`` marking each as un-gated) — used
+                by the manual-nav dialog, where the operator overrides
+                the autonomous reliability decision.
         """
         provenance = self._make_provenance(obs)
         context, image_classifier = self._make_context(obs, provenance)
         self._log_classifier_verdict(image_classifier)
         built_models = self._build_models()
         all_features = self._extract_features(context, built_models)
-        if not apply_gate:
+        if apply_gate:
+            kept, gated = self._extract_and_gate(all_features)
+            features = kept
+            feature_inventory = self._build_inventory(kept, gated)
+        else:
             self._logger.info(
                 'Reliability gate skipped (apply_gate=False); returning %d feature(s)',
                 len(all_features),
             )
-            return context, all_features
-        kept, _gated = self._extract_and_gate(all_features)
-        return context, kept
+            features = all_features
+            feature_inventory = self._build_inventory(all_features, [])
+        return OrchestratorPrep(
+            context=context,
+            provenance=provenance,
+            image_classifier=image_classifier,
+            features=features,
+            feature_inventory=feature_inventory,
+            model_metadata=self._collect_model_metadata(built_models),
+            annotations=self._collect_annotations(context, built_models),
+        )
 
     def navigate(self, obs: ObsSnapshotInst) -> NavResult:
         """Run the full pipeline on one observation.
@@ -297,9 +384,26 @@ class NavOrchestrator(NavBase):
                 model_metadata=model_metadata,
                 annotations=annotations,
             )
-        # Pass 1 — prior-free techniques.
-        self._logger.info('Pass 1: running prior-free techniques')
-        pass1_results = self._run_pass(kept, context, requires_prior=False)
+        # Pass 1 — prior-free techniques.  Primaries run first so the
+        # fallback pass can skip techniques whose source body already
+        # has a non-spurious primary result; that matches the
+        # "fallback runs only when the primary fails" semantic
+        # operators expect, instead of running every technique and
+        # filtering downstream.
+        self._logger.info('Pass 1: running prior-free primary techniques')
+        pass1_primary = self._run_pass(kept, context, requires_prior=False, tier_filter='primary')
+        covered_bodies = _bodies_with_non_spurious_primary(pass1_primary)
+        if covered_bodies:
+            self._logger.debug('Pass 1 primary covered bodies: %s', sorted(covered_bodies))
+        self._logger.info('Pass 1: running prior-free fallback techniques')
+        pass1_fallback = self._run_pass(
+            kept,
+            context,
+            requires_prior=False,
+            tier_filter='fallback',
+            excluded_bodies=covered_bodies,
+        )
+        pass1_results = pass1_primary + pass1_fallback
         self._logger.info('Pass 1: %d technique result(s) produced', len(pass1_results))
         if not pass1_results:
             return self._fail(
@@ -329,8 +433,16 @@ class NavOrchestrator(NavBase):
                 pass1_ensemble.offset_px[1],
                 pass1_ensemble.confidence,
             )
-        # Pass 2 — prior-required techniques refine on the pass-1 prior.
-        if pass1_ensemble.offset_px is not None and pass1_ensemble.covariance_px2 is not None:
+        # Pass 2 — prior-required techniques refine on the pass-1 prior.  Only
+        # a 'success' pass-1 ensemble seeds the prior: a 'conflicted' result is
+        # an explicitly untrustworthy "best group" offset, and installing it
+        # would lock pass-2 toward one arbitrary mode instead of letting pass-2
+        # evidence break the tie.  ('failed' already returned above.)
+        if (
+            pass1_ensemble.status == 'success'
+            and pass1_ensemble.offset_px is not None
+            and pass1_ensemble.covariance_px2 is not None
+        ):
             pass2_context = context.with_prior(
                 offset_px=pass1_ensemble.offset_px,
                 covariance_px2=pass1_ensemble.covariance_px2,
@@ -440,6 +552,24 @@ class NavOrchestrator(NavBase):
             len(gated),
             len(all_features),
         )
+        # Per-feature DEBUG log so an operator can see exactly which
+        # reliability components dragged a gated feature below the
+        # threshold (visible_arc_fraction, incidence_factor,
+        # albedo_penalty, ...) without having to crack the metadata
+        # JSON.  Threshold lookup mirrors ``FeatureReliabilityGate.apply``.
+        gated_ids = {record.feature.feature_id for record in gated}
+        for feature in all_features:
+            verdict = 'gated' if feature.feature_id in gated_ids else 'kept'
+            threshold = self._gate.thresholds.get(feature.feature_type, 0.0)
+            self._logger.debug(
+                '%s: %s %s reliability=%.3f threshold=%.3f reasons={%s}',
+                verdict,
+                feature.feature_id,
+                feature.feature_type.name,
+                feature.reliability,
+                threshold,
+                _format_reliability_breakdown(feature.reliability_reasons),
+            )
         return kept, gated
 
     def _fail(
@@ -529,8 +659,29 @@ class NavOrchestrator(NavBase):
         context: NavContext,
         *,
         requires_prior: bool,
+        tier_filter: Literal['primary', 'fallback'] | None = None,
+        excluded_bodies: frozenset[str] = frozenset(),
     ) -> list[NavTechniqueResult]:
         """Run every feasible technique whose ``requires_prior`` matches.
+
+        Parameters:
+            features: Gated-kept features available to every technique.
+            context: Per-image NavContext.
+            requires_prior: Restricts the run to pass-1 (``False``) or
+                pass-2 (``True``) techniques.
+            tier_filter: If set, restrict to techniques in the given
+                tier (``'primary'`` or ``'fallback'``).  ``None`` runs
+                every tier.
+            excluded_bodies: Set of body names whose features should be
+                filtered out before each technique sees them.  The
+                orchestrator passes the set of body names that have a
+                non-spurious primary result so the fallback pass skips
+                techniques whose only candidate features belong to
+                already-covered bodies (the "fallback runs only when
+                the primary fails" semantic; the ensemble's
+                ``_drop_superseded_fallbacks`` is the redundant
+                downstream gate that catches anything that slips
+                through).
 
         A misbehaving NavTechnique is logged with a full traceback and
         treated as if it produced no result.  Catching every exception is
@@ -539,21 +690,52 @@ class NavOrchestrator(NavBase):
         the returned ``NavResult``.
         """
         results: list[NavTechniqueResult] = []
-        names = [cls.name for cls in NavTechnique._registry if cls.requires_prior == requires_prior]
+        names = [
+            cls.name
+            for cls in NavTechnique._registry
+            if cls.requires_prior == requires_prior
+            and (tier_filter is None or cls.tier == tier_filter)
+        ]
         kept_names = set(filter_technique_names(names, self._only_techniques))
+        # ``features`` is loop-invariant, so the available feature-type set is
+        # computed once rather than rebuilt for every registry entry.
+        available_types: set[NavFeatureType] = {f.feature_type for f in features}
         for cls in NavTechnique._registry:
             if cls.requires_prior != requires_prior:
                 continue
+            if tier_filter is not None and cls.tier != tier_filter:
+                continue
             if cls.name not in kept_names:
                 continue
-            available_types: set[NavFeatureType] = {f.feature_type for f in features}
             if not (cls.accepts_feature_types & available_types):
                 continue
             technique = cls(config=self.config)
-            feasibility = technique.is_feasible(features)
+            available_features = features
+            if excluded_bodies and cls.tier == 'fallback':
+                pre_filter_count = sum(
+                    1 for f in features if f.feature_type in cls.accepts_feature_types
+                )
+                available_features = [
+                    f for f in features if not (_feature_source_bodies(f) & excluded_bodies)
+                ]
+                post_filter_count = sum(
+                    1 for f in available_features if f.feature_type in cls.accepts_feature_types
+                )
+                dropped = pre_filter_count - post_filter_count
+                if dropped > 0:
+                    self._logger.info(
+                        'Skipping %d %s feature(s) for fallback %s: source body already '
+                        'covered by a non-spurious primary',
+                        dropped,
+                        ', '.join(sorted(t.value for t in cls.accepts_feature_types)),
+                        cls.name,
+                    )
+                if post_filter_count == 0:
+                    continue
+            feasibility = technique.is_feasible(available_features)
             if not feasibility.feasible:
                 continue
-            subset = [f for f in features if f.feature_type in cls.accepts_feature_types]
+            subset = [f for f in available_features if f.feature_type in cls.accepts_feature_types]
             try:
                 results.append(technique.navigate(subset, context))
             except Exception:  # plugin sandbox; see docstring
@@ -577,29 +759,56 @@ class NavOrchestrator(NavBase):
         settings = instrument_settings_from_obs(obs)
         raw_image = obs.extdata.astype('float64')
         sensor_mask = obs.extfov_data_sensor_mask()
+        # Sanitise the missing-data sentinel before any finite-only
+        # computation.  For calibrated-IF instruments the sentinel is
+        # literally NaN (CISS CALIB ``marker_value: NaN``); leaving those
+        # NaN in place would make ``_smooth_and_compute_gradients`` raise
+        # (its finite-only guard), and that ValueError would propagate out
+        # of ``navigate``, violating the orchestrator's never-raise
+        # contract.  ``missing_mask`` is computed for both the ``==
+        # marker`` case and the ``isnan(marker)`` case, then the matching
+        # pixels are replaced with a finite fill (0.0) so the gradient /
+        # noise path always sees finite data.  The *true* missing fraction
+        # is threaded into the classifier so missing/dropout detection
+        # still fires for calibrated images.
+        marker = settings.marker_value
+        if np.isnan(marker):
+            missing_mask = np.isnan(raw_image)
+        else:
+            missing_mask = raw_image == marker
+        if missing_mask.any():
+            raw_image = np.where(missing_mask, 0.0, raw_image)
+        sensor_missing = missing_mask & sensor_mask
+        n_sensor = int(sensor_mask.sum())
+        missing_frac = float(sensor_missing.sum()) / float(max(n_sensor, 1))
         image, pre_filter = self._apply_source_image_filter(raw_image, obs)
-        # The classifier reads the image *after* the source-image filter
-        # so blank/saturation/missing fractions match what downstream
-        # extractors will see.
+        # The classifier and the saturation mask read the *raw* image, not the
+        # source-image-filtered ``image``: their absolute-DN gates (blank /
+        # saturation / overexposed, and the full-well saturation mask) are
+        # physical properties of the sensor data and become meaningless after a
+        # DC-removing filter such as BANDPASS_DOG (a near-full-well region comes
+        # out near zero post-DoG).  ``raw_image`` is already NaN-free (markers
+        # were filled above), and the true missing fraction is supplied
+        # explicitly so the NaN sentinel still drives ``mostly_missing_data`` /
+        # ``partial_dropout``.  (With every shipped source_image_filter disabled
+        # today, ``image is raw_image`` and this is a no-op.)
         classifier_thresholds = (
             self._explicit_thresholds
             if self._explicit_thresholds is not None
             else settings.thresholds
         )
         classifier = NavImageClassifier(thresholds=classifier_thresholds)
-        classifier_result = classifier.classify(image, sensor_mask)
-        sat_mask = self._build_saturation_mask(image, sensor_mask, settings)
-        # Cosmic-ray detection requires a strictly positive noise sigma;
-        # the classifier supplies one already, but a near-zero estimate is
-        # clamped to a tiny value so the mask is well-defined even on
-        # near-blank inputs.
-        cr_noise_sigma = max(classifier_result.noise_sigma, 1e-6)
+        classifier_result = classifier.classify(raw_image, sensor_mask, missing_frac=missing_frac)
+        sat_mask = self._build_saturation_mask(raw_image, sensor_mask, settings)
+        # Cosmic-ray detection and the derivative DT threshold operate on the
+        # *filtered* working ``image``, so their noise sigma is estimated from
+        # that image (not the raw classifier sigma) to stay self-consistent with
+        # the gradients the DT techniques actually fit.  A near-zero estimate is
+        # clamped to a tiny value so the CR mask is well-defined on near-blank
+        # inputs.
+        noise_sigma = estimate_image_noise_sigma(image, sensor_mask)
+        cr_noise_sigma = max(noise_sigma, 1e-6)
         cr_mask = cosmic_ray_mask(image, image_noise_sigma=cr_noise_sigma)
-        noise_sigma = (
-            classifier_result.noise_sigma
-            if classifier_result.noise_sigma > 0.0
-            else estimate_image_noise_sigma(image, sensor_mask)
-        )
         # Single-pass derivative computation: one gaussian + sobel pair
         # produces gradient magnitude, edge DT, and the signed gradient
         # vector image together rather than doing the heavy smoothing
@@ -636,16 +845,16 @@ class NavOrchestrator(NavBase):
         """Construct the per-image saturation mask.
 
         For raw-DN instruments the mask is ``image >= saturation_dn``.
-        For calibrated-IF instruments the saturation_dn is unavailable
-        and the orchestrator emits an empty mask plus a one-line WARNING.
+        For calibrated-IF instruments the saturation gate is intentionally
+        off — the calibrated I/F values that survive the CALIB pipeline
+        depend on exposure, filter, and gain, so a single threshold
+        cannot identify which raw pixels were saturated before
+        calibration.  The orchestrator therefore returns an empty mask
+        without any logging; operators who need saturation flags on a
+        Cassini scene must navigate the corresponding raw frame.
         """
         if settings.saturation_dn is not None:
             return saturation_mask(image, full_well_dn=settings.saturation_dn)
-        if settings.data_units == 'calibrated_if':
-            IMAGE_LOGGER.warning(
-                'no saturation_dn configured for calibrated_if instrument; '
-                'overexposure cannot be detected — saturation mask left empty'
-            )
         return np.zeros(image.shape, dtype=bool)
 
     def _apply_source_image_filter(
@@ -743,3 +952,22 @@ def _bbox_from_geometry(feature: NavFeature) -> tuple[int, int, int, int]:
     """
     bbox = feature.geometry.bbox_extfov_vu
     return (int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3]))
+
+
+def _format_reliability_breakdown(breakdown: Any) -> str:
+    """Format a ``NavReliabilityBreakdown`` as ``key=value`` for the per-feature DEBUG log.
+
+    Only fields with non-``None`` values are rendered so the line stays
+    readable; floats round to three decimals, bools render as
+    ``True``/``False`` directly.
+    """
+    parts: list[str] = []
+    for f in dataclasses.fields(breakdown):
+        value = getattr(breakdown, f.name)
+        if value is None:
+            continue
+        if isinstance(value, float):
+            parts.append(f'{f.name}={value:.3f}')
+        else:
+            parts.append(f'{f.name}={value}')
+    return ', '.join(parts)

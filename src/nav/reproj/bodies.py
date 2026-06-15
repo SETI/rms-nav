@@ -5,7 +5,6 @@ images onto latitude/longitude grids and accumulating them into mosaics.
 """
 
 import enum
-import logging
 import math
 from dataclasses import dataclass, field
 from typing import Any, Final, Literal, cast
@@ -16,6 +15,7 @@ import oops
 import polymath
 from scipy.ndimage import maximum_filter
 
+from nav.config import IMAGE_LOGGER
 from nav.reproj._serialization import (
     infer_format,
     load_fits,
@@ -28,9 +28,6 @@ from nav.reproj._serialization import (
 from nav.reproj.photometric_model import PhotometricModel
 from nav.support.image import array_zoom
 from nav.support.types import NDArrayBoolType, NDArrayFloatType, NDArrayIntType, PathLike
-
-_LOGGING_NAME = __name__
-
 
 # Slop values: must be smaller than the smallest resolution we will ever use
 _LATITUDE_SLOP = 1e-6  # rad
@@ -632,8 +629,9 @@ class BodyMosaic:
         Note:
             ``time`` is always stored as ``float64`` regardless of
             ``metadata_dtype``. ``image_number`` is always stored as
-            ``uint16``, capping a single mosaic at 65 535 contributing images.
-            ``add()`` raises ``OverflowError`` if that limit is exceeded.
+            ``uint16``, capping a single mosaic at 65,536 contributing images
+            (image numbers 0..65535).  ``add()`` raises ``OverflowError`` on the
+            image that would exceed that capacity.
         """
         if latlon_type not in ('centric', 'graphic', 'squashed'):
             raise ValueError(
@@ -1013,7 +1011,7 @@ class BodyMosaic:
                 accepted).
             ValueError: If ``navigation_uncertainty`` is not finite or is ``< 0``.
         """
-        logger = logging.getLogger(_LOGGING_NAME + '.reproject')
+        logger = IMAGE_LOGGER
 
         navigation_uncertainty = _validate_navigation_uncertainty(navigation_uncertainty)
 
@@ -1402,7 +1400,7 @@ class BodyMosaic:
 
         Raises:
             OverflowError: If the number of images added would exceed the
-                uint16 maximum of 65 535.
+                uint16 capacity of 65,536 (image numbers 0..65535).
             ValueError: If repro's resolution, coordinate system, or
                 photometric model name does not match the mosaic's configuration.
         """

@@ -1,5 +1,6 @@
 import argparse
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -261,6 +262,67 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
             help='Only process images with the given camera type',
         )
 
+    # Maximum difference in IMAGE_TIME (seconds) allowed between the NAC and WAC frames
+    # of a BOTSIM pair. BOTSIM ("both simultaneous") commands fire both shutters at the
+    # same time, so the two frames are exposed within a fraction of a second of each
+    # other; the observed offset between paired NAC/WAC IMAGE_TIME values is well under
+    # one second. A 2.0 s tolerance comfortably accommodates that small offset while
+    # remaining far below the gap to any neighboring (non-partner) observation.
+    _BOTSIM_MAX_TIME_DELTA_SEC = 2.0
+
+    @staticmethod
+    def _parse_image_time(image_time: str) -> datetime | None:
+        """Parse a Cassini ISS IMAGE_TIME value (``YYYY-DOYThh:mm:ss.sss``).
+
+        Parameters:
+            image_time: The IMAGE_TIME string from the index row.
+
+        Returns:
+            A timezone-aware UTC ``datetime``, or None if the value cannot be parsed.
+        """
+
+        try:
+            parsed = datetime.strptime(image_time, '%Y-%jT%H:%M:%S.%f')
+        except (ValueError, TypeError):
+            return None
+        return parsed.replace(tzinfo=UTC)
+
+    @classmethod
+    def _is_botsim_pair(cls, first: ImageFile, second: ImageFile) -> bool:
+        """True if two frames form a genuine BOTSIM NAC/WAC pair.
+
+        A BOTSIM pair requires both frames to be flagged ``SHUTTER_MODE_ID == 'BOTSIM'``,
+        to come from opposite cameras (one NAC, one WAC), to share the same
+        ``OBSERVATION_ID``, and to have ``IMAGE_TIME`` values within
+        ``_BOTSIM_MAX_TIME_DELTA_SEC`` of each other. IMAGE_NUMBER is an SCLK-derived
+        counter (not a wall-clock time), so it is deliberately not used as the pairing
+        key; IMAGE_TIME provides the actual acquisition time.
+
+        Parameters:
+            first: The first candidate frame.
+            second: The second candidate frame.
+
+        Returns:
+            True if the two frames are a confident BOTSIM pair, False otherwise.
+        """
+
+        first_row = first.index_file_row
+        second_row = second.index_file_row
+        if first_row['SHUTTER_MODE_ID'] != 'BOTSIM' or second_row['SHUTTER_MODE_ID'] != 'BOTSIM':
+            return False
+        # Opposite cameras (one N, one W)
+        if {first.image_file_name[0], second.image_file_name[0]} != {'N', 'W'}:
+            return False
+        # Same observation
+        if first_row.get('OBSERVATION_ID') != second_row.get('OBSERVATION_ID'):
+            return False
+        # Acquired at essentially the same time
+        first_time = cls._parse_image_time(str(first_row.get('IMAGE_TIME', '')))
+        second_time = cls._parse_image_time(str(second_row.get('IMAGE_TIME', '')))
+        if first_time is None or second_time is None:
+            return False
+        return abs((first_time - second_time).total_seconds()) <= cls._BOTSIM_MAX_TIME_DELTA_SEC
+
     def yield_image_files_index(self, **kwargs: Any) -> Iterator[ImageFiles]:
         """Yield filenames given search criteria using index files.
 
@@ -283,33 +345,36 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         if group != 'botsim':
             raise ValueError(f'Invalid group type "{group}"')
 
-        # Combine BOTSIM files
+        # Combine confirmed BOTSIM NAC/WAC pairs into a single ImageFiles group; every
+        # other frame is yielded on its own. A frame is held back for one iteration only
+        # to test it against its immediate successor, so no frame is ever dropped: an
+        # unpaired held frame is always yielded before moving on.
         last_imagefile: ImageFile | None = None
         for imagefile in self._yield_image_files_index(
-            additional_index_columns=('SHUTTER_MODE_ID', 'IMAGE_NUMBER'), **kwargs
+            additional_index_columns=(
+                'SHUTTER_MODE_ID',
+                'IMAGE_NUMBER',
+                'OBSERVATION_ID',
+                'IMAGE_TIME',
+            ),
+            **kwargs,
         ):
-            if last_imagefile is not None:
-                if (
-                    last_imagefile.index_file_row['SHUTTER_MODE_ID'] != 'BOTSIM'
-                    or imagefile.index_file_row['SHUTTER_MODE_ID'] != 'BOTSIM'
-                ):
-                    yield ImageFiles(image_files=[last_imagefile])
-                    last_imagefile = imagefile
+            if last_imagefile is None:
+                last_imagefile = imagefile
+                continue
+            if self._is_botsim_pair(last_imagefile, imagefile):
+                if last_imagefile.image_file_name[0] == 'N':
+                    nac_imagefile = last_imagefile
+                    wac_imagefile = imagefile
                 else:
-                    last_img_num = int(last_imagefile.index_file_row['IMAGE_NUMBER'])
-                    img_num = int(imagefile.index_file_row['IMAGE_NUMBER'])
-                    if abs(img_num - last_img_num) <= 3:  # Allow 3 seconds slop
-                        if last_imagefile.image_file_name[0] == 'N':
-                            nac_imagefile = last_imagefile
-                            wac_imagefile = imagefile
-                        else:
-                            wac_imagefile = last_imagefile
-                            nac_imagefile = imagefile
-                        yield ImageFiles(image_files=[nac_imagefile, wac_imagefile])
-                        last_imagefile = None
-                    else:
-                        last_imagefile = imagefile
+                    wac_imagefile = last_imagefile
+                    nac_imagefile = imagefile
+                yield ImageFiles(image_files=[nac_imagefile, wac_imagefile])
+                last_imagefile = None
             else:
+                # Not a pair: emit the held frame and hold the current one. The held
+                # frame is never silently discarded.
+                yield ImageFiles(image_files=[last_imagefile])
                 last_imagefile = imagefile
 
         if last_imagefile is not None:
@@ -372,9 +437,14 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
             Bundle directory path relative to bundle root
             (e.g., "1234xxxxxx/123456xxxx").
         """
-        # Extract image number from name (skip first character N/W)
+        # Extract image number from name (skip first character N/W).  A valid
+        # Cassini image name is always >= 11 chars here; a shorter name is a
+        # programming error, so fail loudly rather than returning an empty
+        # string that callers would concatenate into a malformed path.
         if len(image_name) < 11:
-            return ''
+            raise ValueError(
+                f'invalid Cassini image name {image_name!r}: expected >= 11 characters'
+            )
         img_num_str = image_name[1:11]
         img_num = int(img_num_str)
 
@@ -394,10 +464,10 @@ class DataSetPDS3CassiniISS(DataSetPDS3):
         """
         image_name = image_file.image_file_name.split('_', 1)[0].split('.', 1)[0]
         image_lid_part = image_name[1:] + image_name[0].lower()
+        # pds4_bundle_path_for_image now raises on an invalid name rather than
+        # returning '', so the bundle path is always present here.
         bundle_path = self.pds4_bundle_path_for_image(image_name)
-        if bundle_path:
-            return f'{bundle_path.rstrip("/")}/{image_lid_part}'
-        return image_lid_part
+        return f'{bundle_path.rstrip("/")}/{image_lid_part}'
 
     def pds4_image_name_to_browse_lid(self, image_name: str) -> str:
         """Returns the browse LID for the given image name.

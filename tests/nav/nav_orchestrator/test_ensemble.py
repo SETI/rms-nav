@@ -5,6 +5,7 @@ import pytest
 
 from nav.nav_orchestrator.ensemble import (
     EnsembleConfig,
+    _combine_confidence,
     derive_confidence_rank,
     ensemble,
 )
@@ -96,7 +97,7 @@ def test_ensemble_two_agreeing_results_combine() -> None:
         image_classifier=_classifier(),
         provenance=_provenance(),
     )
-    assert result.status == 'ok'
+    assert result.status == 'success'
     assert result.offset_px is not None
     # Equal covariance + equal confidence -> arithmetic mean.
     assert np.isclose(result.offset_px[0], 1.025)
@@ -118,6 +119,69 @@ def test_ensemble_disagreement_yields_conflicted() -> None:
     assert result.confidence_rank == 'conflicted'
 
 
+def test_ensemble_pixel_floor_groups_crlb_tight_results_within_floor() -> None:
+    """CRLB-tight covariances disagreeing within the pixel floor still group.
+
+    Without the pixel-floor, two BodyDisc/Limb-class results reporting
+    sigmas ~0.001 px register as thousands of sigmas apart even when
+    their offsets agree to a few pixels — the production failure mode
+    that turned ``status=ok`` into ``status=conflicted`` for many real
+    images.  The default ``agreement_pixel_floor`` (5.0 px) recovers
+    the consensus in that regime.
+    """
+    cov_tight = np.eye(2, dtype=np.float64) * (1.0e-3) ** 2
+    cov_loose = np.eye(2, dtype=np.float64) * 0.15**2
+    disc = _make_result(
+        technique_name='BodyDiscCorrelateNav',
+        offset=(5.09, -6.95),
+        cov=cov_tight,
+        confidence=0.36,
+    )
+    limb = _make_result(
+        technique_name='BodyLimbNav',
+        offset=(8.65, -6.46),
+        cov=cov_loose,
+        confidence=0.46,
+    )
+    result = ensemble(
+        [disc, limb],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+
+
+def test_ensemble_pixel_floor_disabled_falls_back_to_mahalanobis() -> None:
+    """Setting ``agreement_pixel_floor=0.0`` restores Mahalanobis-only grouping."""
+    cov_tight = np.eye(2, dtype=np.float64) * (1.0e-3) ** 2
+    a = _make_result(technique_name='TechniqueA', offset=(0.0, 0.0), cov=cov_tight, confidence=0.5)
+    b = _make_result(technique_name='TechniqueB', offset=(3.0, 0.0), cov=cov_tight, confidence=0.5)
+    result = ensemble(
+        [a, b],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+        config=EnsembleConfig(agreement_pixel_floor=0.0),
+    )
+    assert result.status == 'conflicted'
+
+
+def test_ensemble_pixel_floor_does_not_group_results_beyond_floor() -> None:
+    """Two CRLB-tight results disagreeing well beyond the floor still conflict."""
+    cov_tight = np.eye(2, dtype=np.float64) * (1.0e-3) ** 2
+    a = _make_result(technique_name='TechniqueA', offset=(0.0, 0.0), cov=cov_tight, confidence=0.5)
+    # 20 px apart — far beyond the default 5.0 px floor.
+    b = _make_result(technique_name='TechniqueB', offset=(20.0, 0.0), cov=cov_tight, confidence=0.5)
+    result = ensemble(
+        [a, b],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'conflicted'
+
+
 def test_ensemble_at_edge_dropped_when_interior_exists() -> None:
     """An at-edge result is dropped when an interior result exists."""
     a = _make_result(
@@ -133,7 +197,7 @@ def test_ensemble_at_edge_dropped_when_interior_exists() -> None:
         image_classifier=_classifier(),
         provenance=_provenance(),
     )
-    assert result.status == 'ok'
+    assert result.status == 'success'
     # The at-edge result is dropped, leaving only the interior technique
     # which contributes its exact offset.
     assert result.offset_px == (1.05, 1.05)
@@ -153,7 +217,7 @@ def test_ensemble_at_edge_kept_when_only_one() -> None:
         image_classifier=_classifier(),
         provenance=_provenance(),
     )
-    assert result.status == 'ok'
+    assert result.status == 'success'
 
 
 def test_ensemble_below_min_confidence_fails() -> None:
@@ -195,6 +259,16 @@ def test_derive_confidence_rank_failed_below_threshold() -> None:
     assert rank == 'failed'
 
 
+def test_derive_confidence_rank_logs_when_sigma_missing(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """CODE-ORCH-003: a None sigma is logged and caps the rank at low."""
+    rank = derive_confidence_rank(confidence=0.95, sigma_px=None)
+    assert rank == 'low'
+    captured = capsys.readouterr()
+    assert 'sigma_px is None' in (captured.out + captured.err)
+
+
 def test_ensemble_order_independent() -> None:
     """Reordering inputs produces the same combined offset (within tolerance)."""
     cov = np.eye(2, dtype=np.float64) * 0.1
@@ -229,7 +303,7 @@ def test_ensemble_rank_1_only_for_single_axis_observable() -> None:
         image_classifier=_classifier(),
         provenance=_provenance(),
     )
-    assert result.status == 'ok'
+    assert result.status == 'success'
     from nav.support.status_reason import NavStatusReason
 
     assert result.status_reason == NavStatusReason.RANK_1_ONLY
@@ -296,7 +370,7 @@ def test_ensemble_3dof_combines_translation_and_rotation() -> None:
         image_classifier=_classifier(),
         provenance=_provenance(),
     )
-    assert result.status == 'ok'
+    assert result.status == 'success'
     assert result.rotation_rad is not None
     assert abs(result.rotation_rad - 0.011) < 1e-3
     assert result.sigma_rotation_rad is not None
@@ -342,11 +416,341 @@ def test_ensemble_3dof_with_rotation_unobservable_input() -> None:
         image_classifier=_classifier(),
         provenance=_provenance(),
     )
-    assert result.status == 'ok'
+    assert result.status == 'success'
     assert result.rotation_rad is not None
     # The unobservable input pulls rotation only marginally toward zero;
     # the observable input dominates.
     assert abs(result.rotation_rad - 0.01) < 1e-3
+
+
+def test_ensemble_3dof_rotation_circular_mean_does_not_collapse_near_wrap() -> None:
+    """Antipodal rotations combine on the circle, not to a spurious ~0.
+
+    With a plain Euclidean average, ``+179 deg`` and ``-179 deg`` cancel
+    to ~0; the precision-weighted *circular* mean instead reports ~180 deg.
+    The ``max_allowed_rotation_deg`` bound is relaxed here so these
+    deliberately-large stand-in angles pass the small-angle assertion while
+    still exercising the wrap.
+    """
+    cov = np.diag([0.04, 0.04, 1e-4]).astype(np.float64)
+    a = NavTechniqueResult(
+        technique_name='A',
+        feature_ids=('A:f',),
+        offset_px=(1.0, 2.0),
+        covariance_px2=cov,
+        confidence=0.8,
+        spurious=False,
+        at_edge=False,
+        diagnostics=BodyLimbDiagnostics(),
+        rotation_rad=np.radians(179.0),
+        sigma_rotation_rad=0.01,
+    )
+    b = NavTechniqueResult(
+        technique_name='B',
+        feature_ids=('B:f',),
+        offset_px=(1.0, 2.0),
+        covariance_px2=cov,
+        confidence=0.8,
+        spurious=False,
+        at_edge=False,
+        diagnostics=BodyLimbDiagnostics(),
+        rotation_rad=np.radians(-179.0),
+        sigma_rotation_rad=0.01,
+    )
+    result = ensemble(
+        [a, b],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+        config=EnsembleConfig(max_allowed_rotation_deg=180.0),
+    )
+    assert result.rotation_rad is not None
+    # Circular mean of +-179 deg is ~180 deg (|sin| ~ pi), nowhere near 0.
+    assert abs(result.rotation_rad) > np.radians(170.0)
+
+
+def test_ensemble_3dof_rotation_small_angle_circular_mean_matches_arithmetic() -> None:
+    """For genuinely small angles the circular mean equals the arithmetic mean."""
+    cov = np.diag([0.04, 0.04, 1e-4]).astype(np.float64)
+    a = NavTechniqueResult(
+        technique_name='A',
+        feature_ids=('A:f',),
+        offset_px=(1.0, 2.0),
+        covariance_px2=cov,
+        confidence=0.8,
+        spurious=False,
+        at_edge=False,
+        diagnostics=BodyLimbDiagnostics(),
+        rotation_rad=0.02,
+        sigma_rotation_rad=0.01,
+    )
+    b = NavTechniqueResult(
+        technique_name='B',
+        feature_ids=('B:f',),
+        offset_px=(1.0, 2.0),
+        covariance_px2=cov,
+        confidence=0.8,
+        spurious=False,
+        at_edge=False,
+        diagnostics=BodyLimbDiagnostics(),
+        rotation_rad=0.04,
+        sigma_rotation_rad=0.01,
+    )
+    result = ensemble(
+        [a, b],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.rotation_rad is not None
+    assert result.rotation_rad == pytest.approx(0.03, abs=1e-6)
+
+
+def test_ensemble_3dof_rotation_over_bound_trips_assertion() -> None:
+    """A 3-DoF rotation beyond max_allowed_rotation_deg trips the small-angle guard."""
+    cov = np.diag([0.04, 0.04, 1e-4]).astype(np.float64)
+    a = NavTechniqueResult(
+        technique_name='A',
+        feature_ids=('A:f',),
+        offset_px=(1.0, 2.0),
+        covariance_px2=cov,
+        confidence=0.8,
+        spurious=False,
+        at_edge=False,
+        diagnostics=BodyLimbDiagnostics(),
+        rotation_rad=np.radians(10.0),
+        sigma_rotation_rad=0.01,
+    )
+    with pytest.raises(AssertionError, match='small-angle bound'):
+        ensemble(
+            [a],
+            feature_inventory=[],
+            image_classifier=_classifier(),
+            provenance=_provenance(),
+        )
+
+
+def test_mahalanobis_null_space_groups_near_rank_deficient_agreement() -> None:
+    """Near-rank-deficient covariances that genuinely agree still group (finite dist)."""
+    # One eigenvalue ~1e-7 (nearly unobservable along v), tight along u.
+    cov = np.array([[1.0e-7, 0.0], [0.0, 0.04]], np.float64)
+    a = _make_result(technique_name='A', offset=(0.0, 0.0), cov=cov, confidence=0.7)
+    # Small genuine agreement: 0.1 px apart in u (the observable axis).
+    b = _make_result(technique_name='B', offset=(0.0, 0.1), cov=cov, confidence=0.7)
+    result = ensemble(
+        [a, b],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+        config=EnsembleConfig(agreement_pixel_floor=0.0),
+    )
+    assert result.status == 'success'
+
+
+def test_mahalanobis_null_space_separates_disagreement_along_null_axis() -> None:
+    """Two rank-1 results disagreeing ~3 px along the shared null axis do not group."""
+    # Exactly-singular rank-1 covariance: observable in u, fully unobservable
+    # in v.  pinvh projects the v axis into the null space, so any v
+    # disagreement is infinite distance.
+    cov = np.array([[0.0, 0.0], [0.0, 0.04]], np.float64)
+    a = _make_result(technique_name='A', offset=(0.0, 0.0), cov=cov, confidence=0.5)
+    # 3 px displacement along v, the unobservable null axis; agreement there is
+    # meaningless, so the Mahalanobis distance must be inf (-> separate groups).
+    b = _make_result(technique_name='B', offset=(3.0, 0.0), cov=cov, confidence=0.5)
+    result = ensemble(
+        [a, b],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+        config=EnsembleConfig(agreement_pixel_floor=0.0),
+    )
+    assert result.status == 'conflicted'
+
+
+def _body_feature_result(
+    *,
+    technique_name: str,
+    feature_id: str,
+    offset: tuple[float, float] = (0.0, 0.0),
+    cov: np.ndarray | None = None,
+    confidence: float = 0.6,
+    spurious: bool = False,
+) -> NavTechniqueResult:
+    """Build a NavTechniqueResult with a body-feature-shaped feature_id.
+
+    Used by the fallback-tier filter tests.  ``source_bodies`` is derived
+    from the ``<feature_kind>:<body_name>`` feature_id, mirroring what the
+    live body techniques populate from each feature's structured
+    ``body_name``.
+    """
+    if cov is None:
+        cov = np.eye(2, dtype=np.float64) * 0.25
+    body_name = feature_id.split(':', 1)[1] if ':' in feature_id else ''
+    return NavTechniqueResult(
+        technique_name=technique_name,
+        feature_ids=(feature_id,),
+        offset_px=offset,
+        covariance_px2=cov,
+        confidence=confidence,
+        spurious=spurious,
+        at_edge=False,
+        diagnostics=BodyLimbDiagnostics(),
+        source_bodies=frozenset({body_name}) if body_name else frozenset(),
+    )
+
+
+def test_ensemble_drops_terminator_when_limb_succeeds_for_same_body() -> None:
+    """Non-spurious BodyLimbNav supersedes BodyTerminatorNav on the same body.
+
+    On the bug image this prevented a mis-converged 25-px-off
+    terminator from out-voting a clean limb fit.
+    """
+    limb = _body_feature_result(
+        technique_name='BodyLimbNav',
+        feature_id='limb_arc:DIONE',
+        offset=(-5.0, -16.0),
+        confidence=0.5,
+    )
+    terminator = _body_feature_result(
+        technique_name='BodyTerminatorNav',
+        feature_id='terminator_arc:DIONE',
+        offset=(-5.0, -40.0),
+        confidence=0.7,
+    )
+    result = ensemble(
+        [limb, terminator],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.offset_px is not None
+    # The reported offset must come from limb, not the higher-confidence
+    # but mis-converged terminator.
+    assert abs(result.offset_px[1] - (-16.0)) < 1.0
+
+
+def test_ensemble_fallback_drop_uses_source_bodies_not_feature_ids() -> None:
+    """CODE-ORCH-004: supersession reads source_bodies, not the feature_id string.
+
+    Both results carry an unparseable feature_id but a structured
+    ``source_bodies={'DIONE'}``; the limb primary must still supersede the
+    terminator fallback, proving the ensemble no longer depends on the
+    feature-id format.
+    """
+    cov = np.eye(2, dtype=np.float64) * 0.25
+    limb = NavTechniqueResult(
+        technique_name='BodyLimbNav',
+        feature_ids=('opaque-id-1',),
+        offset_px=(-5.0, -16.0),
+        covariance_px2=cov,
+        confidence=0.5,
+        spurious=False,
+        at_edge=False,
+        diagnostics=BodyLimbDiagnostics(),
+        source_bodies=frozenset({'DIONE'}),
+    )
+    terminator = NavTechniqueResult(
+        technique_name='BodyTerminatorNav',
+        feature_ids=('opaque-id-2',),
+        offset_px=(-5.0, -40.0),
+        covariance_px2=cov,
+        confidence=0.7,
+        spurious=False,
+        at_edge=False,
+        diagnostics=BodyLimbDiagnostics(),
+        source_bodies=frozenset({'DIONE'}),
+    )
+    result = ensemble(
+        [limb, terminator],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.offset_px is not None
+    assert abs(result.offset_px[1] - (-16.0)) < 1.0
+
+
+def test_ensemble_keeps_terminator_when_limb_is_spurious() -> None:
+    """A spurious primary does not supersede the fallback — terminator runs solo."""
+    limb = _body_feature_result(
+        technique_name='BodyLimbNav',
+        feature_id='limb_arc:DIONE',
+        offset=(-5.0, -16.0),
+        confidence=0.5,
+        spurious=True,
+    )
+    terminator = _body_feature_result(
+        technique_name='BodyTerminatorNav',
+        feature_id='terminator_arc:DIONE',
+        offset=(-5.0, -40.0),
+        confidence=0.7,
+    )
+    result = ensemble(
+        [limb, terminator],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.offset_px is not None
+    # Terminator is the only viable input; its offset is reported.
+    assert abs(result.offset_px[1] - (-40.0)) < 1.0
+
+
+def test_ensemble_keeps_terminator_for_different_body() -> None:
+    """Limb success on body A does not drop terminator on body B."""
+    limb = _body_feature_result(
+        technique_name='BodyLimbNav',
+        feature_id='limb_arc:DIONE',
+        offset=(-5.0, -16.0),
+        confidence=0.5,
+    )
+    terminator_other = _body_feature_result(
+        technique_name='BodyTerminatorNav',
+        feature_id='terminator_arc:RHEA',
+        offset=(20.0, 30.0),
+        confidence=0.7,
+    )
+    result = ensemble(
+        [limb, terminator_other],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    # Both results survive the fallback filter, end up in different
+    # agreement groups, and so the ensemble flags conflicted.
+    assert result.status in ('conflicted', 'success')
+    # Cross-check by counting per-technique entries: both should be
+    # preserved on the NavResult for diagnostics.
+    names = {r.technique_name for r in result.per_technique}
+    assert names == {'BodyLimbNav', 'BodyTerminatorNav'}
+
+
+def test_ensemble_drops_blob_when_disc_succeeds_for_same_body() -> None:
+    """BodyBlobNav is also fallback — a non-spurious BodyDiscCorrelateNav supersedes it."""
+    disc = _body_feature_result(
+        technique_name='BodyDiscCorrelateNav',
+        feature_id='body_disc:MIMAS',
+        offset=(2.0, 3.0),
+        confidence=0.6,
+    )
+    blob = _body_feature_result(
+        technique_name='BodyBlobNav',
+        feature_id='body_blob:MIMAS',
+        offset=(20.0, 30.0),
+        confidence=0.4,
+    )
+    result = ensemble(
+        [disc, blob],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=_provenance(),
+    )
+    assert result.status == 'success'
+    assert result.offset_px is not None
+    assert abs(result.offset_px[0] - 2.0) < 1.0
 
 
 def test_ensemble_rejects_mixed_dof_inputs() -> None:
@@ -373,3 +777,51 @@ def test_ensemble_rejects_mixed_dof_inputs() -> None:
             image_classifier=_classifier(),
             provenance=_provenance(),
         )
+
+
+def test_combine_confidence_weight_ignores_rotation_precision() -> None:
+    """CODE-NAV-013: the confidence weight uses positional precision only.
+
+    Two 3-DoF results share an identical (v, u) covariance but differ wildly
+    in rotation precision.  The rotation-tight result also carries the *lower*
+    confidence.  With the old full-trace weight (px^-2 added to rad^-2) the
+    rotation-tight result would dominate and drag the combined confidence down
+    to ~its own value; the positional-only weight gives both results equal
+    weight so the combine reflects both contributors.
+    """
+    cov_tight_rot = np.diag([0.25, 0.25, 1e-6]).astype(np.float64)
+    cov_loose_rot = np.diag([0.25, 0.25, 1.0]).astype(np.float64)
+    rot_tight = NavTechniqueResult(
+        technique_name='RotTight',
+        feature_ids=('rot_tight:f',),
+        offset_px=(0.0, 0.0),
+        covariance_px2=cov_tight_rot,
+        confidence=0.2,
+        spurious=False,
+        at_edge=False,
+        diagnostics=BodyLimbDiagnostics(),
+        rotation_rad=0.0,
+        sigma_rotation_rad=1e-3,
+    )
+    rot_loose = NavTechniqueResult(
+        technique_name='RotLoose',
+        feature_ids=('rot_loose:f',),
+        offset_px=(0.0, 0.0),
+        covariance_px2=cov_loose_rot,
+        confidence=0.8,
+        spurious=False,
+        at_edge=False,
+        diagnostics=BodyLimbDiagnostics(),
+        rotation_rad=0.0,
+        sigma_rotation_rad=1.0,
+    )
+    combined = _combine_confidence(
+        [rot_tight, rot_loose],
+        rcond=1e-6,
+        disagreement_penalty=0.3,
+        apply_disagreement_penalty=False,
+    )
+    # Equal positional weights -> weighted_avg = 0.5, n_significant = 2 ->
+    # agreement_factor = 1 + 0.5*log2(2) = 1.5 -> combined = 0.75.  Far above
+    # the ~0.2 the rotation-tight result would have forced under the old trace.
+    assert combined == pytest.approx(0.75, abs=1e-9)

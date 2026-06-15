@@ -40,6 +40,34 @@ def _strip_underscore_keys(value: Any) -> Any:
     return value
 
 
+def _deep_merge(base: dict[Any, Any], overlay: dict[Any, Any]) -> dict[Any, Any]:
+    """Recursively merge ``overlay`` into ``base``, returning a new mapping.
+
+    When a key is present in both mappings and both values are dictionaries,
+    the values are merged key-by-key so sibling keys in ``base`` are
+    preserved.  For any other case (one side is not a mapping, or the key is
+    new) the ``overlay`` value replaces the ``base`` value; lists and scalars
+    are never merged element-wise.
+
+    Parameters:
+        base: The starting mapping (e.g. bundled defaults).
+        overlay: The mapping whose values take precedence at each leaf.
+
+    Returns:
+        A new ``dict`` containing the deep-merged result.  ``base`` and
+        ``overlay`` are not mutated.
+    """
+
+    merged: dict[Any, Any] = dict(base)
+    for key, overlay_value in overlay.items():
+        base_value = merged.get(key)
+        if isinstance(base_value, dict) and isinstance(overlay_value, dict):
+            merged[key] = _deep_merge(base_value, overlay_value)
+        else:
+            merged[key] = overlay_value
+    return merged
+
+
 def _as_str_list(value: Any, *, location: str) -> list[str]:
     """Coerce a YAML list value to ``list[str]``.
 
@@ -75,6 +103,7 @@ class Config:
         """Initializes a new Config instance with empty configuration containers."""
 
         self._config_dict: dict[str, Any] = {}
+        self._category_cache: dict[str, AttrDict] = {}
         self._config_environment: dict[str, Any] = AttrDict({})
         self._config_general: dict[str, Any] = AttrDict({})
         self._config_offset: dict[str, Any] = AttrDict({})
@@ -108,6 +137,10 @@ class Config:
         Converts dictionary sections to AttrDict instances for convenient attribute-style access.
         """
 
+        # The config was (re)loaded; drop any cached per-category AttrDicts so
+        # category() rebuilds them from the fresh dict (mirrors the named
+        # section properties below being reassigned here).
+        self._category_cache = {}
         self._config_environment = AttrDict(self._config_dict.get('environment', {}))
         self._config_general = AttrDict(self._config_dict.get('general', {}))
         self._config_offset = AttrDict(self._config_dict.get('offset', {}))
@@ -160,6 +193,12 @@ class Config:
 
         if config_path is None:
             config_dir = Path(__file__).resolve().parent.parent / 'config_files'
+            # The no-path branch always rebuilds from the full config_files
+            # glob, so start from an empty dict.  On a reread this ensures keys
+            # removed from the YAML files since the previous load do not survive
+            # (update_config merges *into* the dict, so a stale dict would union
+            # old and new keys rather than producing a clean reload).
+            self._config_dict = {}
             for filename in sorted(config_dir.glob('*.yaml')):
                 self.update_config(filename, read_default=False)
             self._validate_registered_techniques()
@@ -233,8 +272,8 @@ class Config:
             self.read_config()
         new_config = self._load_yaml(config_path)
         for key in new_config:
-            if key in self._config_dict:
-                self._config_dict[key].update(new_config[key])
+            if key in self._config_dict and isinstance(self._config_dict[key], dict):
+                self._config_dict[key] = _deep_merge(self._config_dict[key], new_config[key])
             else:
                 self._config_dict[key] = new_config[key]
         self._update_attrdicts()
@@ -242,10 +281,20 @@ class Config:
             self._validate_registered_techniques()
 
     def category(self, category: str) -> AttrDict:
-        """Returns the configuration settings for the specified category."""
+        """Returns the configuration settings for the specified category.
+
+        The result is cached per category and rebuilt on config reload (see
+        ``_update_attrdicts``), matching the caching semantics of the named
+        section properties.  Config is treated read-only; mutating the returned
+        AttrDict is not supported.
+        """
 
         self.read_config()
-        return AttrDict(self._config_dict.get(category, {}))
+        cached = self._category_cache.get(category)
+        if cached is None:
+            cached = AttrDict(self._config_dict.get(category, {}))
+            self._category_cache[category] = cached
+        return cached
 
     @property
     def general(self) -> Any:

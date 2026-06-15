@@ -1,0 +1,32 @@
+schema_version: 1
+mission: COISS                  # COISS | VGISS | GOSSI | NHLORRI
+camera: NAC                    # NAC | WAC | SSI | NA | WA | LORRI
+image_id: N1497129020_1_CALIB
+image_datetime_utc: '2005-06-10T20:42:33.381'
+exposure_time_sec: 38.0000
+filter_combo: 'CL1+UV3'                # canonicalized: filters sorted, '+'-joined
+image_url: 'pds3://calibrated/COISS_2xxx/COISS_2012/data/1497122835_1497164065/N1497129020_1_CALIB.IMG'
+
+scene_tags:
+  - TODO_REPLACE_PRIMARY_CLASS         # First tag is the primary class;
+                                       # must match the directory the
+                                       # sidecar lives in.
+
+ground_truth:
+  offset_dv_px: -12.0000
+  offset_du_px: -24.0000
+  offset_uncertainty_px: 1.0           # 1sigma marginal; tighten
+                                       # for bright stars / sharp limbs.
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-05-01
+  ui_version: 'rms-nav 0.1.dev25'
+  notes: |
+    TODO: describe the scene and any caveats.
+
+expected:
+  status: success                           # success | failed | conflicted
+  confidence_tier: high                # high | medium | low | failed
+  primary_technique: TODO_REPLACE_TECHNIQUE  # e.g. BodyLimbNav
+  techniques_must_run: []
+  techniques_must_skip: []

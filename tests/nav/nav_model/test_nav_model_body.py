@@ -25,6 +25,7 @@ from nav.nav_model.nav_model_body import (
     TERMINATOR_MIN_PHASE_FACTOR,
     TERMINATOR_MIN_VERTICES,
     _blob_reliability,
+    _build_polyline_sampler,
     _disc_reliability,
     _incidence_factor_array,
     _limb_reliability,
@@ -86,6 +87,7 @@ def _make_sampler(*, n: int, incidence_deg: float, km_per_pixel: float) -> _Poly
         normals_vu=normals,
         incidence_rad=incidence,
         km_per_pixel=km,
+        total_vertices=n,
     )
 
 
@@ -97,7 +99,7 @@ def test_sigma_normal_uses_quadrature_sum() -> None:
         sampler=sampler, shape=shape, psf_sigma_px=1.0, include_albedo=False
     )
     expected_km = math.sqrt(
-        shape.ellipsoid_residual_km**2
+        shape.ellipsoid_rms_residual_km**2
         + shape.crater_scale_km**2
         + 0.0  # incidence_factor=0 at i=0
         + shape.spice_orbital_residual_km**2
@@ -125,6 +127,18 @@ def test_visible_arc_fraction_reports_unity_when_vertices_present() -> None:
     assert _visible_arc_fraction(sampler) == 1.0
 
 
+def test_visible_arc_fraction_reports_survivors_over_total() -> None:
+    """CODE-NAV-MODEL-006: the fraction is survivors / pre-drop total, not 1.0."""
+    sampler = _PolylineSampler(
+        vertices_vu=np.zeros((3, 2), dtype=np.float64),
+        normals_vu=np.zeros((3, 2), dtype=np.float64),
+        incidence_rad=np.zeros(3, dtype=np.float64),
+        km_per_pixel=np.ones(3, dtype=np.float64),
+        total_vertices=12,
+    )
+    assert _visible_arc_fraction(sampler) == pytest.approx(0.25)
+
+
 def test_visible_arc_fraction_reports_zero_when_empty() -> None:
     """An empty polyline reports zero arc fraction."""
     sampler = _PolylineSampler(
@@ -132,6 +146,7 @@ def test_visible_arc_fraction_reports_zero_when_empty() -> None:
         normals_vu=np.empty((0, 2), dtype=np.float64),
         incidence_rad=np.empty(0, dtype=np.float64),
         km_per_pixel=np.empty(0, dtype=np.float64),
+        total_vertices=0,
     )
     assert _visible_arc_fraction(sampler) == 0.0
 
@@ -149,25 +164,29 @@ def test_sigmoid_at_zero() -> None:
 
 
 def test_limb_reliability_increases_with_visible_arc_fraction() -> None:
-    """Reliability is monotone in ``visible_arc_fraction`` for fixed other terms."""
-    low = _limb_reliability(
-        visible_arc_fraction=0.2, visible_arc_px=20.0, mean_incidence_factor=0.5
-    )
-    high = _limb_reliability(
-        visible_arc_fraction=0.9, visible_arc_px=20.0, mean_incidence_factor=0.5
-    )
+    """Reliability is monotone in ``visible_arc_fraction`` for fixed arc length."""
+    low = _limb_reliability(visible_arc_fraction=0.2, visible_arc_px=20.0)
+    high = _limb_reliability(visible_arc_fraction=0.9, visible_arc_px=20.0)
     assert high > low
 
 
-def test_limb_reliability_decreases_with_incidence() -> None:
-    """High incidence-factor scenes drive limb reliability down."""
-    low_inc = _limb_reliability(
-        visible_arc_fraction=0.9, visible_arc_px=20.0, mean_incidence_factor=0.0
-    )
-    high_inc = _limb_reliability(
-        visible_arc_fraction=0.9, visible_arc_px=20.0, mean_incidence_factor=4.0
-    )
-    assert high_inc < low_inc
+def test_limb_reliability_increases_with_arc_length() -> None:
+    """Longer arcs score higher (the ``visible_arc_px`` sigmoid)."""
+    short = _limb_reliability(visible_arc_fraction=0.9, visible_arc_px=5.0)
+    long = _limb_reliability(visible_arc_fraction=0.9, visible_arc_px=200.0)
+    assert long > short
+
+
+def test_limb_reliability_passes_gate_for_fully_lit_geometry() -> None:
+    """A fully visible, well-sampled limb scores well above the 0.30 gate.
+
+    Per-vertex softness already lives in ``_sigma_normal_per_vertex``;
+    the reliability score is a feature-existence gate, not a precision
+    estimate, so a textbook-good limb (Dione at low phase) must clear
+    it.
+    """
+    score = _limb_reliability(visible_arc_fraction=1.0, visible_arc_px=300.0)
+    assert score > 0.5
 
 
 def test_terminator_reliability_zero_at_zero_phase() -> None:
@@ -193,3 +212,102 @@ def test_blob_reliability_capped_at_0_4() -> None:
     """Blob reliability cannot exceed the 0.4 design cap."""
     out = _blob_reliability(snr=1e6, diameter_px=1e6)
     assert out <= 0.4 + 1e-12
+
+
+def _synthetic_disc_masks(
+    *, size: int, center: tuple[float, float], radius: float
+) -> tuple[np.ndarray, np.ndarray, tuple[float, float]]:
+    """Build a filled-disc silhouette mask plus its 1-px limb ridge.
+
+    Returns ``(silhouette_mask, limb_ridge_mask, center_vu)`` where the
+    silhouette is True inside the disc and the ridge is the inner ring of
+    silhouette pixels adjacent to space.
+    """
+    vv, uu = np.indices((size, size), dtype=np.float64)
+    dist = np.hypot(vv - center[0], uu - center[1])
+    silhouette = dist <= radius
+    # 1-px ridge: silhouette pixels with at least one space (False) neighbour.
+    space = ~silhouette
+    ridge = silhouette & (
+        np.roll(space, 1, axis=0)
+        | np.roll(space, -1, axis=0)
+        | np.roll(space, 1, axis=1)
+        | np.roll(space, -1, axis=1)
+    )
+    return silhouette, ridge, center
+
+
+def test_polyline_normal_points_outward_for_lit_disc() -> None:
+    """The limb normal points away from the disc center at >=95% of vertices.
+
+    Constructs a synthetic filled disc, extracts its limb ridge, and
+    checks ``dot(normal_i, vertex_i - center) > 0`` for the vast majority
+    of vertices.  This guards against the ridge-orientation sign bug
+    where the per-vertex normal was derived from the 1-px ridge rather
+    than from the body silhouette.
+    """
+    size = 41
+    center = (20.0, 20.0)
+    radius = 14.0
+    silhouette, ridge, center_vu = _synthetic_disc_masks(size=size, center=center, radius=radius)
+    sampler = _build_polyline_sampler(
+        local_mask=ridge,
+        region_mask=silhouette,
+        incidence_local=np.zeros((size, size), dtype=np.float64),
+        km_per_pixel_local=np.ones((size, size), dtype=np.float64),
+        ext_v0=0,
+        ext_u0=0,
+    )
+    assert sampler.vertices_vu.shape[0] > 0
+    radial = sampler.vertices_vu - np.array(center_vu, dtype=np.float64)
+    dots = np.sum(sampler.normals_vu * radial, axis=1)
+    outward_fraction = float(np.count_nonzero(dots > 0)) / dots.shape[0]
+    assert outward_fraction >= 0.95
+
+
+def test_polyline_sampler_drops_zero_resolution_vertices() -> None:
+    """CODE-NAV-MODEL-001: ridge vertices with km/px <= 0 are dropped.
+
+    Off the resolved body the resolution backplane is masked / filled with
+    0.0; such vertices must be excluded at construction so they cannot reach
+    the LM fit with a silently-floored fallback sigma.
+    """
+    size = 41
+    silhouette, ridge, _ = _synthetic_disc_masks(size=size, center=(20.0, 20.0), radius=14.0)
+    full = _build_polyline_sampler(
+        local_mask=ridge,
+        region_mask=silhouette,
+        incidence_local=np.zeros((size, size), dtype=np.float64),
+        km_per_pixel_local=np.ones((size, size), dtype=np.float64),
+        ext_v0=0,
+        ext_u0=0,
+    )
+    km = np.ones((size, size), dtype=np.float64)
+    km[:, : size // 2] = 0.0  # left half is unresolved (km/px == 0)
+    partial = _build_polyline_sampler(
+        local_mask=ridge,
+        region_mask=silhouette,
+        incidence_local=np.zeros((size, size), dtype=np.float64),
+        km_per_pixel_local=km,
+        ext_v0=0,
+        ext_u0=0,
+    )
+    assert partial.vertices_vu.shape[0] < full.vertices_vu.shape[0]
+    assert partial.vertices_vu.shape[0] > 0
+    assert np.all(partial.km_per_pixel > 0.0)
+
+
+def test_polyline_normal_is_unit_length() -> None:
+    """Each computed normal is unit length (or zero for isolated vertices)."""
+    size = 31
+    silhouette, ridge, _ = _synthetic_disc_masks(size=size, center=(15.0, 15.0), radius=10.0)
+    sampler = _build_polyline_sampler(
+        local_mask=ridge,
+        region_mask=silhouette,
+        incidence_local=np.zeros((size, size), dtype=np.float64),
+        km_per_pixel_local=np.ones((size, size), dtype=np.float64),
+        ext_v0=0,
+        ext_u0=0,
+    )
+    lengths = np.hypot(sampler.normals_vu[:, 0], sampler.normals_vu[:, 1])
+    assert np.all(lengths == pytest.approx(1.0, abs=1e-12))

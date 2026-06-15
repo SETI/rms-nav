@@ -22,8 +22,11 @@ from nav.nav_technique.nav_technique_body_limb import BodyLimbNav
 # read AFTER ``Config.read_config()`` runs (BodyLimbNav.__init__ calls
 # it) so the class-level ``BodyLimbNav.tuning`` dict is populated.
 BodyLimbNav()  # populates BodyLimbNav.tuning via Config.read_config
-LIMB_MIN_ARC_PX = BodyLimbNav.tuning['min_arc_px']
+LIMB_MIN_ARC_PX = BodyLimbNav.tuning['min_arc_vertices']
 SPURIOUS_MIN_INLIER_FRACTION = BodyLimbNav.tuning['spurious_min_inlier_fraction']
+SPURIOUS_MAX_LM_DISPLACEMENT_PX = BodyLimbNav.tuning['spurious_max_lm_displacement_px']
+SPURIOUS_DT_FLOOR_PX = BodyLimbNav.tuning['spurious_dt_floor_px']
+SPURIOUS_DT_RMS_FACTOR = BodyLimbNav.tuning['spurious_dt_rms_factor']
 
 
 def test_body_limb_nav_recovers_planted_offset_single_body(
@@ -158,6 +161,47 @@ def test_body_limb_nav_at_edge_when_offset_hits_search_window(
     assert result.confidence == pytest.approx(0.0, abs=1e-12)
 
 
+def test_body_limb_nav_at_edge_when_offset_walks_outside_search_window(
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_limb_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """LM converging at or beyond the extfov margin must register as at_edge.
+
+    ``ObsSnapshot.extract_offset_array`` cannot honour an offset whose
+    magnitude meets or exceeds the extfov margin without zero-filling
+    part of the overlay slice.  The technique must flag at_edge=True so
+    the ensemble can drop the result whenever an interior alternative
+    exists, and so downstream consumers know the offset is at the edge
+    of physically meaningful translations.
+
+    The LM is unconstrained and may either stop at the boundary or
+    walk past it; the regression we are guarding against is the
+    earlier check that only fired when the offset was *near* the
+    boundary within tolerance and missed offsets that overshot.
+    """
+    shape = (160, 160)
+    image_center = (80.0, 80.0)
+    radius = 25.0
+    image = disc_image(shape, image_center, radius)
+    margin_v, margin_u = 5, 10
+    # Plant the model far enough from the image centre that the
+    # converged offset reaches the V-axis margin in either direction.
+    model_center = (image_center[0] - 11.0, image_center[1] - 9.0)
+    vertices, outward = circle_polyline(model_center, radius, 120)
+    feature = make_limb_feature('past_edge_moon', vertices=vertices, outward_normals=outward)
+    technique = BodyLimbNav()
+    context = make_nav_context(image, extfov_margin_vu=(margin_v, margin_u))
+    result = technique.navigate([feature], context)
+    dv, _du = result.offset_px
+    at_edge_tolerance_px = float(technique._at_edge_tolerance_px)
+    # The fit converged at or past the V-axis margin (the regression case).
+    assert abs(dv) >= float(margin_v) - at_edge_tolerance_px
+    assert result.at_edge is True
+    assert result.confidence == pytest.approx(0.0, abs=1e-12)
+
+
 def test_body_limb_nav_marks_spurious_when_image_lacks_limb(
     circle_polyline: CirclePolylineFactory,
     make_limb_feature: NavFeatureFactory,
@@ -281,9 +325,11 @@ def test_body_limb_nav_marks_spurious_when_inlier_fraction_collapses(
         residuals_px=np.zeros(vertices.shape[0], dtype=np.float64),
         weights=np.zeros(vertices.shape[0], dtype=np.float64),
         rms_px=2.5,
+        raw_rms_px=2.5,
         iterations=5,
         converged=True,
         inlier_count=10,
+        degenerate=False,
     )
     monkeypatch.setattr(
         nav_technique_body_limb,
@@ -353,9 +399,11 @@ def test_body_limb_nav_3dof_at_edge_when_rotation_saturates(
         residuals_px=np.zeros(vertices.shape[0], dtype=np.float64),
         weights=np.ones(vertices.shape[0], dtype=np.float64),
         rms_px=0.1,
+        raw_rms_px=0.1,
         iterations=5,
         converged=True,
         inlier_count=int(vertices.shape[0]),
+        degenerate=False,
     )
     monkeypatch.setattr(
         nav_technique_body_limb,
@@ -365,6 +413,66 @@ def test_body_limb_nav_3dof_at_edge_when_rotation_saturates(
     result = technique.navigate([feature], context)
     assert result.at_edge is True
     assert result.rotation_rad == pytest.approx(forged_rotation_rad)
+
+
+def test_body_limb_nav_marks_spurious_when_lm_walks_far_from_coarse_seed(
+    monkeypatch: pytest.MonkeyPatch,
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_limb_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """LM that walks multi-pixel from the integer coarse seed is spurious.
+
+    Models the production failure mode (Cassini Tethys N1574928113):
+    the coarse NCC search found the integer-precision basin (-1, 2)
+    correctly, but the LM followed a DT gradient out of that basin
+    onto a crater rim and converged at (6.66, 6.48) — a 9 px walk.
+    The result retained > 50 % of vertices as inliers, so the
+    inlier-fraction guard could not catch it.  The displacement
+    guard caps trustworthy LM motion to a few pixels around the
+    coarse seed.
+    """
+    from nav.nav_technique import dt_fitting, nav_technique_body_limb
+
+    shape = (200, 200)
+    # Plant the model centered on the image — coarse NCC will report
+    # offset (0, 0) for the test setup.
+    image = disc_image(shape, (100.0, 100.0), 30.0)
+    vertices, outward = circle_polyline((100.0, 100.0), 30.0, 200)
+    feature = make_limb_feature('walked_off', vertices=vertices, outward_normals=outward)
+    technique = BodyLimbNav()
+    context = make_nav_context(image)
+
+    # Healthy inlier fraction and low RMS, but LM moved far from the
+    # coarse seed; only the displacement guard should fire.
+    forged_displacement = float(SPURIOUS_MAX_LM_DISPLACEMENT_PX) + 5.0
+    forged_result = dt_fitting.LMRefineResult(
+        offset_vu=(forged_displacement, 0.0),
+        rotation_rad=0.0,
+        covariance=np.eye(2, dtype=np.float64) * 0.25,
+        residuals_px=np.zeros(vertices.shape[0], dtype=np.float64),
+        weights=np.ones(vertices.shape[0], dtype=np.float64),
+        rms_px=0.4,
+        raw_rms_px=0.4,
+        iterations=8,
+        converged=True,
+        inlier_count=int(vertices.shape[0] * 0.6),
+        degenerate=False,
+    )
+    monkeypatch.setattr(
+        nav_technique_body_limb,
+        'lm_subpixel_refine',
+        lambda **_kwargs: forged_result,
+    )
+
+    result = technique.navigate([feature], context)
+    assert isinstance(result.diagnostics, BodyLimbDiagnostics)
+    inlier_fraction = result.diagnostics.tukey_inlier_count / float(vertices.shape[0])
+    # Sanity-check the test setup: inlier-fraction guard would NOT fire.
+    assert inlier_fraction >= SPURIOUS_MIN_INLIER_FRACTION
+    # The LM displacement was forced beyond the configured threshold.
+    assert result.spurious is True
 
 
 def test_body_limb_nav_does_not_mark_spurious_when_inlier_fraction_healthy(
@@ -396,9 +504,11 @@ def test_body_limb_nav_does_not_mark_spurious_when_inlier_fraction_healthy(
         residuals_px=np.zeros(vertices.shape[0], dtype=np.float64),
         weights=np.ones(vertices.shape[0], dtype=np.float64),
         rms_px=0.4,
+        raw_rms_px=0.4,
         iterations=8,
         converged=True,
         inlier_count=500,
+        degenerate=False,
     )
     monkeypatch.setattr(
         nav_technique_body_limb,
@@ -410,4 +520,122 @@ def test_body_limb_nav_does_not_mark_spurious_when_inlier_fraction_healthy(
     assert isinstance(result.diagnostics, BodyLimbDiagnostics)
     inlier_fraction = result.diagnostics.tukey_inlier_count / float(vertices.shape[0])
     assert inlier_fraction >= SPURIOUS_MIN_INLIER_FRACTION
+    assert result.spurious is False
+
+
+def test_body_limb_nav_raw_rms_gate_catches_tukey_masked_bad_arc(
+    monkeypatch: pytest.MonkeyPatch,
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_limb_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """A bad arc that Tukey down-weights to zero is still flagged spurious.
+
+    Models the mis-convergence the weighted ``rms_px`` gate cannot see:
+    one limb arc fits cleanly (~0 px) while a second arc is offset by
+    ~10 px.  Tukey reweights the bad arc's vertices to zero, so the
+    *weighted* ``rms_px`` collapses to near zero and would slip past the
+    ``rms_px > floor`` gate.  The *unweighted* ``raw_rms_px`` retains the
+    offset arc and exceeds the threshold, so the raw-RMS gate is the only
+    signal that recovers the spurious flag.
+    """
+    from nav.nav_technique import dt_fitting, nav_technique_body_limb
+
+    shape = (200, 200)
+    image = disc_image(shape, (100.0, 100.0), 30.0)
+    vertices, outward = circle_polyline((100.0, 100.0), 30.0, 200)
+    feature = make_limb_feature('masked_bad_arc', vertices=vertices, outward_normals=outward)
+    technique = BodyLimbNav()
+    context = make_nav_context(image)
+
+    # Bimodal residuals: half the vertices fit at ~0 px, the other half
+    # are offset by ~10 px.  Weights are 1 on the clean half and 0 on the
+    # offset half (Tukey rejected them), so the weighted ``rms_px`` is ~0
+    # but the raw RMS over ALL vertices is ~7 px.
+    n_total = vertices.shape[0]
+    n_half = n_total // 2
+    residuals = np.zeros(n_total, dtype=np.float64)
+    residuals[n_half:] = 10.0
+    weights = np.zeros(n_total, dtype=np.float64)
+    weights[:n_half] = 1.0
+    raw_rms = float(np.sqrt(np.mean(residuals**2)))
+    forged_result = dt_fitting.LMRefineResult(
+        offset_vu=(0.5, 0.5),
+        rotation_rad=0.0,
+        covariance=np.eye(2, dtype=np.float64) * 0.25,
+        residuals_px=residuals,
+        weights=weights,
+        # Weighted RMS over the surviving (clean) half is ~0 — below the
+        # floor, so the weighted gate alone would PASS this fit.
+        rms_px=0.0,
+        raw_rms_px=raw_rms,
+        iterations=10,
+        converged=True,
+        inlier_count=n_half,
+        degenerate=False,
+    )
+    monkeypatch.setattr(
+        nav_technique_body_limb,
+        'lm_subpixel_refine',
+        lambda **_kwargs: forged_result,
+    )
+
+    result = technique.navigate([feature], context)
+    assert isinstance(result.diagnostics, BodyLimbDiagnostics)
+    # The weighted gate would not fire: rms_px is below the floor.
+    assert forged_result.rms_px <= SPURIOUS_DT_FLOOR_PX
+    # The raw RMS is large (well above the floor) — the raw-RMS gate fires.
+    assert raw_rms > SPURIOUS_DT_FLOOR_PX
+    assert result.spurious is True
+
+
+def test_body_limb_nav_clean_fit_has_small_raw_rms_not_spurious(
+    monkeypatch: pytest.MonkeyPatch,
+    disc_image: DiscImageFactory,
+    circle_polyline: CirclePolylineFactory,
+    make_limb_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """A clean fit has a small ``raw_rms_px`` and is not flagged spurious.
+
+    Negative-path counterpart: every vertex fits to within a fraction of
+    a pixel, so the unweighted RMS stays well below the floor and the
+    raw-RMS gate does not fire.
+    """
+    from nav.nav_technique import dt_fitting, nav_technique_body_limb
+
+    shape = (200, 200)
+    image = disc_image(shape, (100.0, 100.0), 30.0)
+    vertices, outward = circle_polyline((100.0, 100.0), 30.0, 200)
+    feature = make_limb_feature('clean_arc', vertices=vertices, outward_normals=outward)
+    technique = BodyLimbNav()
+    context = make_nav_context(image)
+
+    n_total = vertices.shape[0]
+    residuals = np.full(n_total, 0.3, dtype=np.float64)
+    weights = np.ones(n_total, dtype=np.float64)
+    raw_rms = float(np.sqrt(np.mean(residuals**2)))
+    forged_result = dt_fitting.LMRefineResult(
+        offset_vu=(0.5, 0.5),
+        rotation_rad=0.0,
+        covariance=np.eye(2, dtype=np.float64) * 0.25,
+        residuals_px=residuals,
+        weights=weights,
+        rms_px=raw_rms,
+        raw_rms_px=raw_rms,
+        iterations=8,
+        converged=True,
+        inlier_count=n_total,
+        degenerate=False,
+    )
+    monkeypatch.setattr(
+        nav_technique_body_limb,
+        'lm_subpixel_refine',
+        lambda **_kwargs: forged_result,
+    )
+
+    result = technique.navigate([feature], context)
+    assert isinstance(result.diagnostics, BodyLimbDiagnostics)
+    assert raw_rms < SPURIOUS_DT_FLOOR_PX
     assert result.spurious is False

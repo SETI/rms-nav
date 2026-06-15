@@ -1,6 +1,6 @@
 schema_version: 1
 image_id: N1484593951_2_CALIB
-mission: CASSINI_ISS            # CASSINI_ISS | VOYAGER_ISS | GOSSI | NHLORRI
+mission: COISS            # COISS | VGISS | GOSSI | NHLORRI
 camera: NAC              # NAC | WAC | SSI | NA | WA | LORRI
 filter_combo: 'CL1+CL2'          # canonicalized: filters sorted, '+'-joined
 image_url: 'pds3://calibrated/COISS_2xxx/COISS_2009/data/1484573295_1484664788/N1484593951_2_CALIB.IMG'
@@ -34,7 +34,7 @@ ground_truth:
     non-spurious technique and becomes the orchestrator's primary.
 
 expected:
-  status: ok                           # ok | failed | conflicted
+  status: success                           # success | failed | conflicted
   confidence_tier: low                 # high | medium | low | failed
   primary_technique: BodyLimbNav  # e.g. BodyLimbNav
   techniques_must_run: [BodyLimbNav]

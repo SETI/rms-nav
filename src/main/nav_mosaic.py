@@ -549,13 +549,14 @@ def main() -> None:
         print(f'Invalid logging configuration: {exc}', file=sys.stderr)
         sys.exit(1)
 
-    # Set log level if --log-level was specified
+    # Apply the --log-level console override to the program loggers directly.
+    # PdsLogger.set_level accepts a level-name string, so there is no need to
+    # reach through the stdlib root logger (which would also re-level every
+    # third-party library) to honour the flag.
     log_level = args.log_level
     if log_level is not None and isinstance(log_level, str):
-        numeric = getattr(logging, log_level.upper(), None)
-        if numeric is not None:
-            logging.getLogger().setLevel(numeric)
-            MAIN_LOGGER.setLevel(numeric)
+        MAIN_LOGGER.set_level(log_level.upper())
+        IMAGE_LOGGER.set_level(log_level.upper())
 
     start = time.time()
     log_run_environment(MAIN_LOGGER, sys.argv[1:])

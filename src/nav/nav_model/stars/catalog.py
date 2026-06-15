@@ -557,6 +557,12 @@ def _merge_catalogs(
                 and abs(cast(float, prev.vmag) - cast(float, star.vmag)) < duplicate_vmag
             ):
                 if (not prev.name) and star.name:
+                    # The kept star has no catalog name but this duplicate does:
+                    # adopt both ``name`` and ``pretty_name`` so the merged star
+                    # carries the real identity (previously only ``pretty_name``
+                    # was copied, leaving ``name`` empty and inconsistent with
+                    # this very guard).
+                    prev.name = star.name
                     prev.pretty_name = star.pretty_name
                 is_dup = True
                 break

@@ -22,17 +22,18 @@ from nav.support.status_reason import NavStatusReason
         'NO_FEASIBLE_TECHNIQUES',
         'ALL_TECHNIQUES_SPURIOUS',
         'FINAL_CONFIDENCE_BELOW_THRESHOLD',
+        'FINAL_SIGMA_ABOVE_THRESHOLD',
         'UNOBSERVABLE_OFFSET',
     ],
 )
 def test_navstatusreason_has_value(name: str) -> None:
-    """The plan's full 15-value enumeration is present."""
+    """The full NavStatusReason enumeration is present."""
     assert hasattr(NavStatusReason, name)
 
 
 def test_navstatusreason_count_matches_plan() -> None:
-    """Exactly 15 values are defined; adding a value must update tests."""
-    assert len(list(NavStatusReason)) == 15
+    """Exactly 16 values are defined; adding a value must update tests."""
+    assert len(list(NavStatusReason)) == 16
 
 
 @pytest.mark.parametrize(

@@ -87,8 +87,13 @@ schedule: the template is rotated about the body-centroid pivot at 11 angles spa
 rotations advance to a 5-sample refinement at the next level, and the best one advances to a
 3-sample fine refinement at the finest level. The (dv, du, theta) triple at the global
 maximum is returned with a 3x3 covariance whose translation block is the CRLB from the
-chosen rotation's correlation curvature and whose rotation diagonal is the inverse second
-derivative of the cost across the rotation schedule.
+chosen rotation's correlation curvature. The technique reports its rotation as
+unobservable: the NCC-peak quality is a PSR/PMR separation ratio rather than a
+log-likelihood, so it carries no calibrated Fisher information about rotation, and the
+rotation diagonal holds the
+:data:`~nav.nav_technique.nav_technique.ROTATION_UNOBSERVABLE_VARIANCE` sentinel. The
+ensemble's ``pinvh`` combine maps that to a near-zero rotation contribution, so the disc
+technique constrains translation while abstaining on rotation.
 
 Restrictions and assumptions
 ----------------------------

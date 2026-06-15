@@ -10,8 +10,10 @@ The pipeline:
    box so the limb silhouette is anti-aliased.
 2. Extracts the limb and terminator polylines from the discrete
    silhouette masks.
-3. Looks up the per-body shape parameters in
-   ``nav.nav_model.body_shape.BODY_SHAPE_TABLE``.
+3. Looks up the per-body shape parameters via
+   :func:`nav.nav_model.body_shape.load_body_shape`, which merges the
+   operator-curated ``config_220_body_shape.yaml`` over the hard-coded
+   ``BODY_SHAPE_TABLE`` profiles.
 4. Decides which features to emit by computing
    ``limb_uncertainty_px`` and the ``visible_lit_fraction`` /
    ``overflow_fraction`` quantities the design specifies.
@@ -67,7 +69,7 @@ from nav.feature.geometry import (
     LimbPolyline,
     TerminatorPolyline,
 )
-from nav.nav_model.body_shape import BODY_SHAPE_TABLE, DEFAULT_BODY_SHAPE, BodyShape
+from nav.nav_model.body_shape import BodyShape, load_body_shape
 from nav.nav_model.nav_model import NavModel
 from nav.nav_model.nav_model_body_base import NavModelBodyBase
 from nav.nav_model.stars.predicted_snr import psf_sigma_px
@@ -154,6 +156,18 @@ the limb to be photometrically distinguishable.
 """
 
 
+TERMINATOR_PHOTOMETRIC_SOFTNESS_COEFF: float = 0.5
+"""Photometric-softness coefficient in the terminator normal-sigma.
+
+Scales the per-vertex limb-softness length (``psf_sigma_px * km/px``)
+into an additional position-uncertainty term for terminator arcs, where
+the gradual brightness roll-off broadens the apparent edge beyond the
+geometric terminator.  The numeric value is a config default pending
+calibration against the operator-curated image library (tracked with the
+other body thresholds by issue #118 / CODE-NAV-MODEL-002).
+"""
+
+
 @dataclass(frozen=True)
 class _PolylineSampler:
     """Bundle of sampled limb / terminator polyline data.
@@ -167,6 +181,13 @@ class _PolylineSampler:
     normals_vu: NDArrayFloatType
     incidence_rad: NDArrayFloatType
     km_per_pixel: NDArrayFloatType
+    total_vertices: int
+    """Ridge vertices found before per-vertex drops (resolution / future shadow).
+
+    ``vertices_vu`` holds only the survivors; ``total_vertices`` is the count
+    of the original ridge so :func:`_visible_arc_fraction` can report the
+    surviving fraction rather than a constant.
+    """
 
 
 class NavModelBody(NavModelBodyBase):
@@ -477,12 +498,22 @@ class NavModelBody(NavModelBodyBase):
             | shift_array(body_mask_invalid, (0, -1))
             | shift_array(body_mask_invalid, (0, 1))
         )
-        limb_mask_local: NDArrayBoolType = body_mask_valid & limb_mask_neighbor
-
         # Terminator mask: pixels whose incidence crosses 90 deg
         incidence_vals = incidence_scalar.vals
         is_lit = (incidence_vals < HALFPI) & body_mask_valid
         is_dark = (incidence_vals >= HALFPI) & body_mask_valid
+        # The geometric limb is the silhouette boundary (lit + unlit).
+        # The DT-fit LIMB_ARC technique can only see the *lit* limb in
+        # the image — the unlit limb merges into dark space and has no
+        # gradient.  Including unlit-side vertices in the polyline gives
+        # the LM no useful signal there, but the high sigma assigned to
+        # those vertices widens their Tukey inlier band so they happily
+        # lock onto the terminator (a strong DT minimum) when the LM
+        # shifts.  Filtering to lit-side vertices removes that hazard
+        # at the source.  See Cassini Tethys N1574928113 for the
+        # calibration case.
+        geometric_limb_mask: NDArrayBoolType = body_mask_valid & limb_mask_neighbor
+        limb_mask_local: NDArrayBoolType = geometric_limb_mask & is_lit
         # A pixel is on the terminator if it is lit and any neighbour is dark.
         terminator_local: NDArrayBoolType = is_lit & (
             shift_array(is_dark, (-1, 0))
@@ -537,6 +568,7 @@ class NavModelBody(NavModelBodyBase):
 
         limb_sampler = _build_polyline_sampler(
             local_mask=limb_mask_local,
+            region_mask=body_mask_valid,
             incidence_local=incidence_vals,
             km_per_pixel_local=km_per_pixel_local,
             ext_v0=ext_v0,
@@ -544,6 +576,7 @@ class NavModelBody(NavModelBodyBase):
         )
         terminator_sampler = _build_polyline_sampler(
             local_mask=terminator_local,
+            region_mask=is_lit,
             incidence_local=incidence_vals,
             km_per_pixel_local=km_per_pixel_local,
             ext_v0=ext_v0,
@@ -568,6 +601,12 @@ class NavModelBody(NavModelBodyBase):
         # AND which lies inside the sensor FOV — not the lit hemisphere
         # alone, which would always score ~1.0 for a fully-in-frame
         # body and lose discriminating power for the BODY_DISC gate.
+        # NOTE: the name is narrower than the quantity — the denominator is
+        # the whole disc, so this deliberately falls with phase (a thin
+        # high-phase crescent scores low even when fully framed) as well as
+        # with partial framing.  Both regimes make the disc-correlation
+        # template poor, which is exactly what the 0.4 gate screens out;
+        # the phase coupling is intentional, not a normalisation bug.
         lit_visible_in_fov = int(np.count_nonzero(lit_mask & in_sensor))
         visible_lit_fraction = lit_visible_in_fov / max(body_total, 1)
         overflow_fraction = 1.0 - (body_visible / max(body_total, 1))
@@ -593,16 +632,16 @@ class NavModelBody(NavModelBodyBase):
             if self._body_mask is None:
                 self._logger.debug('body_mask is None — emitting no features')
                 return []
-            shape = BODY_SHAPE_TABLE.get(self._body_name, DEFAULT_BODY_SHAPE)
+            shape = load_body_shape(self._body_name, config=self._config)
             features: list[NavFeature] = []
             limb_uncertainty_px = self._limb_uncertainty_px(shape)
             self._logger.debug(
-                'ellipsoid_residual = %.3f km; limb_uncertainty = %.3f px '
+                'ellipsoid_rms_residual = %.3f km; limb_uncertainty = %.3f px '
                 '(arc max %.3f); shape_class = %s',
-                shape.ellipsoid_residual_km,
+                shape.ellipsoid_rms_residual_km,
                 limb_uncertainty_px,
                 LIMB_ARC_MAX_UNCERTAINTY_PX,
-                getattr(shape, 'shape_class_hint', 'unknown'),
+                shape.shape_class_hint,
             )
             limb_arc_emitted = False
             blob_min_px = max(BODY_BLOB_MIN_DIAMETER_PX, shape.min_blob_diameter_px)
@@ -664,7 +703,7 @@ class NavModelBody(NavModelBodyBase):
         """Return the design's ``limb_uncertainty_px`` for this body."""
         if self._km_per_pixel_at_limb <= 0.0:
             return float('inf')
-        return shape.ellipsoid_residual_km / self._km_per_pixel_at_limb
+        return shape.ellipsoid_rms_residual_km / self._km_per_pixel_at_limb
 
     def _should_emit_disc(self, limb_arc_emitted: bool) -> bool:
         """Return True when BODY_DISC should be emitted alongside other features."""
@@ -718,8 +757,42 @@ class NavModelBody(NavModelBodyBase):
         )
 
     def _build_blob_feature(self, shape: BodyShape) -> NavFeature:
-        """Construct the BODY_BLOB feature."""
-        del shape
+        """Construct the BODY_BLOB feature.
+
+        Three phase-aware decisions live here:
+
+        * **Lit-weighted predicted centroid.** At high phase the
+          measured brightness centroid sits at the centroid of the lit
+          hemisphere, not at the geometric body center.  Predicting the
+          lit-weighted centroid up front means the navigation offset
+          the technique recovers is just the spacecraft pointing error,
+          not pointing error plus the systematic phase bias.  The
+          weighted centroid is computed over ``_model_img *
+          _body_mask`` (the rendered model already encodes the local
+          incidence-driven brightness from an *ellipsoidal* body) and
+          collapses to the geometric center at phase 0 where the model
+          is uniform.
+        * **Inflated centroid covariance.** The lit-weighted centroid
+          assumes an ellipsoidal body of *known* rotational
+          orientation; the same scene on an irregular body whose pose
+          we do not know carries a residual centroid bias the
+          ellipsoidal model cannot remove.  The bias scales with the
+          shape's RMS departure from an ellipsoid (in km) and with how
+          much of the body the lit hemisphere fails to sample
+          (``1 + 2 * sin^2(phase / 2)`` runs from 1 at full-phase to
+          3 at full crescent — even at phase 0 the orientation is
+          unknown, so a residual-scale bias is always present).  This
+          irregularity sigma is added to the photon-noise-limited
+          centroid sigma in quadrature so the joint-fit covariance
+          reflects both terms.
+        * **``phase_irregularity_factor`` on the flags.** Surfaces the
+          dimensionless ``sin(phase/2) * residual / radius`` so the
+          BLOB confidence formula can down-weight irregular high-phase
+          blobs without the technique having to recompute it.  Raw
+          ``phase_angle_deg`` is also recorded for diagnostic
+          inspection but the confidence formula consumes the combined
+          factor.
+        """
         # Estimate per-pixel SNR from the brightest pixel in the model.
         assert self._model_img is not None
         assert self._body_mask is not None
@@ -727,13 +800,23 @@ class NavModelBody(NavModelBodyBase):
         sigma_centroid = self._predicted_diameter_px / (
             2.0 * math.sqrt(max(int(self._body_mask.sum()), 1)) * max(snr, 1e-6)
         )
-        cov = (sigma_centroid * sigma_centroid) * np.eye(2, dtype=np.float64)
+        phase_angle_deg = float(self._metadata.get('phase_angle_deg', 0.0))
+        if not math.isfinite(phase_angle_deg):
+            phase_angle_deg = 0.0
+        # Clamp to the BodyBlobFlags valid range; phase outside [0, 180]
+        # is a SPICE-corner-case artefact, never a physical value.
+        phase_angle_deg = max(0.0, min(180.0, phase_angle_deg))
+        phase_irregularity_factor = self._phase_irregularity_factor(shape, phase_angle_deg)
+        sigma_irregular_px = phase_irregularity_factor * (self._predicted_diameter_px / 2.0)
+        sigma_total_px = math.sqrt(sigma_centroid * sigma_centroid + sigma_irregular_px**2)
+        cov = (sigma_total_px * sigma_total_px) * np.eye(2, dtype=np.float64)
+        predicted_center_vu = self._lit_weighted_centroid_vu()
         return NavFeature(
             feature_id=f'body_blob:{self._body_name}',
             feature_type=NavFeatureType.BODY_BLOB,
             source_model=self.name,
             geometry=BodyBlobGeometry(
-                predicted_center_vu=self._predicted_center_vu,
+                predicted_center_vu=predicted_center_vu,
                 bbox_extfov_vu=self._bbox_extfov_vu,
                 predicted_diameter_px=self._predicted_diameter_px,
             ),
@@ -750,8 +833,67 @@ class NavModelBody(NavModelBodyBase):
             flags=BodyBlobFlags(
                 body_name=self._body_name,
                 predicted_diameter_px=self._predicted_diameter_px,
+                phase_angle_deg=phase_angle_deg,
+                phase_irregularity_factor=phase_irregularity_factor,
             ),
         )
+
+    def _phase_irregularity_factor(self, shape: BodyShape, phase_angle_deg: float) -> float:
+        """Return the dimensionless phase-and-irregularity coupling.
+
+        Computed as ``(ellipsoid_rms_residual_km / body_radius_km) *
+        (1 + 2 * sin^2(phase / 2))``.  Two physical effects compose:
+
+        * The ``residual / radius`` ratio is the *fractional* shape
+          uncertainty of the body relative to its ellipsoidal model.
+          For a regular Mimas (residual ~ 1 km, radius ~ 200 km)
+          this is ~ 0.005; for irregular Hyperion / Phoebe (residual
+          ~ 10 km, radius ~ 100-135 km) it is ~ 0.07-0.10.
+        * The ``1 + 2 * sin^2(phase / 2)`` factor captures the
+          orientation-uncertainty bound.  At phase 0 the entire
+          hemisphere is lit and the factor is ``1`` — we still do
+          not know the body's rotational orientation so a full
+          ``residual_km``-scale centroid bias is in play even at
+          full phase.  At phase 90 the factor is ``2`` because only
+          half the body is lit and the dark side could be hiding an
+          equal amount of shape irregularity.  At phase 180 the
+          factor is ``3`` since only the crescent is lit, leaving
+          most of the body's irregularity hidden.
+
+        ``body_radius_km`` is derived from the predicted disc geometry
+        rather than from a separate static-data lookup so a body
+        absent from the YAML or hard-coded shape table still gets a
+        meaningful factor (the residual itself falls back to
+        ``DEFAULT_BODY_SHAPE`` upstream).
+        """
+        if self._predicted_diameter_px <= 0.0 or self._km_per_pixel_at_limb <= 0.0:
+            return 0.0
+        body_radius_km = self._km_per_pixel_at_limb * (self._predicted_diameter_px / 2.0)
+        if body_radius_km <= 0.0:
+            return 0.0
+        sin_half_phase = math.sin(math.radians(phase_angle_deg) / 2.0)
+        phase_factor = 1.0 + 2.0 * sin_half_phase * sin_half_phase
+        residual_fraction = shape.ellipsoid_rms_residual_km / body_radius_km
+        return float(max(0.0, residual_fraction * phase_factor))
+
+    def _lit_weighted_centroid_vu(self) -> tuple[float, float]:
+        """Return the brightness-weighted centroid of the rendered body.
+
+        Falls back to the geometric center when the model is empty or
+        the body mask is all-False (degenerate render).  The centroid
+        is in the same extfov coordinate frame ``_predicted_center_vu``
+        uses, so the BLOB feature's geometry stays self-consistent.
+        """
+        assert self._model_img is not None
+        assert self._body_mask is not None
+        weights = np.where(self._body_mask, self._model_img, 0.0)
+        total = float(weights.sum())
+        if total <= 0.0:
+            return self._predicted_center_vu
+        v_indices, u_indices = np.indices(weights.shape, dtype=np.float64)
+        lit_v = float((weights * v_indices).sum() / total)
+        lit_u = float((weights * u_indices).sum() / total)
+        return (lit_v, lit_u)
 
     def _maybe_build_terminator(self, shape: BodyShape) -> NavFeature | None:
         """Build TERMINATOR_ARC when the design's terminator gates pass."""
@@ -816,7 +958,6 @@ def _build_limb_arc(
     )
     sigma_tangent_per_vertex_px = np.full_like(sigma_normal_per_vertex_px, 0.5)
     visible_arc_fraction = _visible_arc_fraction(sampler)
-    incidence_factor_mean = float(np.mean(_incidence_factor_array(sampler.incidence_rad)))
     return NavFeature(
         feature_id=f'limb_arc:{body_name}',
         feature_type=NavFeatureType.LIMB_ARC,
@@ -835,11 +976,9 @@ def _build_limb_arc(
         reliability=_limb_reliability(
             visible_arc_fraction=visible_arc_fraction,
             visible_arc_px=float(sampler.vertices_vu.shape[0]),
-            mean_incidence_factor=incidence_factor_mean,
         ),
         reliability_reasons=NavReliabilityBreakdown(
             visible_arc_fraction=visible_arc_fraction,
-            incidence_factor=min(1.0, incidence_factor_mean / MAX_INCIDENCE_FACTOR_CAP),
         ),
         usable_types=frozenset({NavFeatureType.LIMB_ARC}),
         flags=LimbArcFlags(
@@ -852,6 +991,7 @@ def _build_limb_arc(
 def _build_polyline_sampler(
     *,
     local_mask: NDArrayBoolType,
+    region_mask: NDArrayBoolType,
     incidence_local: NDArrayFloatType,
     km_per_pixel_local: NDArrayFloatType,
     ext_v0: int,
@@ -859,13 +999,43 @@ def _build_polyline_sampler(
 ) -> _PolylineSampler:
     """Sample a polyline along the True pixels of ``local_mask``.
 
-    The local mask is a 1-pixel-wide ridge inside the body silhouette; we
+    The local mask is a 1-pixel-wide ridge along a feature boundary; we
     return a parallel array of vertex coordinates in extfov space, the
-    outward-pointing normal at each vertex (from the discrete-mask
-    gradient), the per-vertex incidence angle, and the per-vertex km/px
-    scale.
+    outward-pointing normal at each vertex, the per-vertex incidence
+    angle, and the per-vertex km/px scale.
+
+    The outward normal is the discrete gradient of ``region_mask`` (the
+    body silhouette for the limb, or the lit mask for the terminator),
+    not of the ridge itself: a one-pixel ridge has no consistent
+    interior/exterior orientation, so its gradient sign depends on the
+    diagonal orientation of the ridge rather than on which side is the
+    body interior.  With the body-side True / space-side False
+    convention, ``n_v = region[v-1, u] - region[v+1, u]`` and
+    ``n_u = region[v, u-1] - region[v, u+1]`` point from inside to
+    outside.  Out-of-image neighbours are treated as space (False).
+
+    Parameters:
+        local_mask: 1-pixel-wide ridge whose True pixels become vertices.
+        region_mask: Body-side / lit-side mask whose discrete gradient
+            defines the outward normal.  Same shape as ``local_mask``.
+        incidence_local: Per-pixel incidence angle (radians).
+        km_per_pixel_local: Per-pixel km/px scale.
+        ext_v0: Extfov v-offset of the local grid origin.
+        ext_u0: Extfov u-offset of the local grid origin.
     """
     vs, us = np.where(local_mask)
+    total_vertices = int(vs.size)
+    if vs.size:
+        # Drop zero-resolution ridge vertices (km/px <= 0): the resolution
+        # backplane is masked / filled with 0.0 off the resolved body, so
+        # such a vertex carries no usable scale.  Keeping it would make the
+        # per-vertex sigma NaN, which ``_sigma_normal_per_vertex`` silently
+        # floors to a finite fallback -- letting an off-body vertex pollute
+        # the LM fit instead of being excluded.  Dropping it here keeps the
+        # sampler's parallel arrays consistent and the downstream sigmas
+        # finite and positive (which ``lm_subpixel_refine`` requires).
+        resolved = km_per_pixel_local[vs, us] > 0.0
+        vs, us = vs[resolved], us[resolved]
     if vs.size == 0:
         empty: NDArrayFloatType = np.empty((0, 2), dtype=np.float64)
         return _PolylineSampler(
@@ -873,25 +1043,24 @@ def _build_polyline_sampler(
             normals_vu=empty,
             incidence_rad=np.empty(0, dtype=np.float64),
             km_per_pixel=np.empty(0, dtype=np.float64),
+            total_vertices=total_vertices,
         )
     vertices_vu: NDArrayFloatType = np.stack(
         [vs.astype(np.float64) + ext_v0, us.astype(np.float64) + ext_u0], axis=1
     )
-    rows, cols = local_mask.shape
+    rows, cols = region_mask.shape
+    region = region_mask.astype(np.float64)
     normals_vu = np.zeros_like(vertices_vu)
     for i, (v, u) in enumerate(zip(vs, us, strict=True)):
-        # Outward normal: gradient of body-mask values around the vertex.
-        # The body-side neighbour is True; the off-body neighbour is False.
-        v_dir = 0.0
-        u_dir = 0.0
-        if v > 0 and not local_mask[v - 1, u]:
-            v_dir = -1.0
-        elif v < rows - 1 and not local_mask[v + 1, u]:
-            v_dir = 1.0
-        if u > 0 and not local_mask[v, u - 1]:
-            u_dir = -1.0
-        elif u < cols - 1 and not local_mask[v, u + 1]:
-            u_dir = 1.0
+        # Outward normal: discrete gradient of the body-side / lit-side
+        # mask, pointing from inside (True) to outside (False).  Out-of-
+        # image neighbours count as space (0.0).
+        up = region[v - 1, u] if v > 0 else 0.0
+        down = region[v + 1, u] if v < rows - 1 else 0.0
+        left = region[v, u - 1] if u > 0 else 0.0
+        right = region[v, u + 1] if u < cols - 1 else 0.0
+        v_dir = up - down
+        u_dir = left - right
         norm = math.hypot(v_dir, u_dir) or 1.0
         normals_vu[i, 0] = v_dir / norm
         normals_vu[i, 1] = u_dir / norm
@@ -902,6 +1071,7 @@ def _build_polyline_sampler(
         normals_vu=normals_vu,
         incidence_rad=incidence_rad,
         km_per_pixel=km_per_pixel,
+        total_vertices=total_vertices,
     )
 
 
@@ -933,14 +1103,14 @@ def _sigma_normal_per_vertex(
     km_per_pixel = np.where(sampler.km_per_pixel > 0.0, sampler.km_per_pixel, np.nan)
     limb_softness_km = psf_sigma_px * km_per_pixel
     base = (
-        shape.ellipsoid_residual_km**2
+        shape.ellipsoid_rms_residual_km**2
         + shape.crater_scale_km**2
         + (incidence_factor * limb_softness_km) ** 2
         + shape.spice_orbital_residual_km**2
     )
     if include_albedo:
         albedo_term = (shape.albedo_variation * limb_softness_km) ** 2
-        photometric_term = (limb_softness_km * 0.5) ** 2
+        photometric_term = (limb_softness_km * TERMINATOR_PHOTOMETRIC_SOFTNESS_COEFF) ** 2
         base = base + albedo_term + photometric_term
     sigma_km = np.sqrt(np.maximum(base, 0.0))
     sigma_px = sigma_km / km_per_pixel
@@ -948,27 +1118,34 @@ def _sigma_normal_per_vertex(
 
 
 def _visible_arc_fraction(sampler: _PolylineSampler) -> float:
-    """Fraction of polyline vertices that are usable.
+    """Fraction of the predicted ridge vertices that survived to the fit.
 
-    The sampler already drops shadow / off-FOV vertices during
-    construction; for the purposes of the reliability reason we report
-    1.0 when any vertices survive.  When the table-driven shadow
-    extractor is wired, this will be replaced by
-    ``len(survivors) / len(total)``.
+    ``sampler.total_vertices`` is the ridge length found before per-vertex
+    drops (currently zero-resolution / off-body vertices; the table-driven
+    shadow extractor will add to this when wired), and ``vertices_vu`` holds
+    only the survivors, so the visible-arc fraction is ``survivors / total``.
+    Returns ``0.0`` when no ridge vertices were found at all.
     """
-    return 1.0 if sampler.vertices_vu.shape[0] > 0 else 0.0
+    total = sampler.total_vertices
+    if total <= 0:
+        return 0.0
+    return float(sampler.vertices_vu.shape[0]) / float(total)
 
 
-def _limb_reliability(
-    *, visible_arc_fraction: float, visible_arc_px: float, mean_incidence_factor: float
-) -> float:
-    """Sigmoid-of-sum reliability for LIMB_ARC features."""
-    z = (
-        -1.0
-        + 1.5 * visible_arc_fraction
-        + 1.0 * _sigmoid(visible_arc_px / 50.0)
-        - 0.7 * mean_incidence_factor
-    )
+def _limb_reliability(*, visible_arc_fraction: float, visible_arc_px: float) -> float:
+    """Sigmoid-of-sum reliability for LIMB_ARC features.
+
+    The score answers a feature-existence question: is this limb arc a
+    target a downstream technique should bother running on?  Per-vertex
+    geometric softness (high incidence at the terminator-adjacent end
+    of the limb) lives in :func:`_sigma_normal_per_vertex`, where the
+    LM fit weights individual vertices by their normal sigma; folding
+    it into the reliability scalar as well would double-count the same
+    physics and, because ``incidence_factor`` saturates near the cap
+    on every fully-lit body, would penalize the cleanest possible
+    geometries the hardest.
+    """
+    z = -1.0 + 1.5 * visible_arc_fraction + 1.0 * _sigmoid(visible_arc_px / 50.0)
     return float(_sigmoid(z))
 
 

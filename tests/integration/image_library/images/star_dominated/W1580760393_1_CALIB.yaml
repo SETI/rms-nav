@@ -1,6 +1,6 @@
 schema_version: 1
 image_id: W1580760393_1_CALIB
-mission: CASSINI_ISS            # CASSINI_ISS | VOYAGER_ISS | GOSSI | NHLORRI
+mission: COISS            # COISS | VGISS | GOSSI | NHLORRI
 camera: WAC              # NAC | WAC | SSI | NA | WA | LORRI
 filter_combo: 'CL1+CL2'          # canonicalized: filters sorted, '+'-joined
 image_url: 'pds3://calibrated/COISS_2xxx/COISS_2041/data/1580756433_1580830157/W1580760393_1_CALIB.IMG'
@@ -24,7 +24,7 @@ ground_truth:
     CLEAR filter.
 
 expected:
-  status: failed                           # ok | failed | conflicted
+  status: failed                           # success | failed | conflicted
   confidence_tier: failed                # high | medium | low | failed
   primary_technique: StarFieldFromCatalogNav  # e.g. BodyLimbNav
   techniques_must_run: [StarFieldFromCatalogNav]

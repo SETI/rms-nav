@@ -16,9 +16,9 @@ galileo_ssi:
     marker_value: 0
     read_noise_dn: 1.0             # PLACEHOLDER — calibrate in Phase 10
   image_quality_thresholds:
-    blank_max_dn: 2.0
-    saturation_threshold_dn: 255
-    noisy_threshold_dn: 5.0
+    blank_max_dn: 5.0              # PLACEHOLDER — calibrate in Phase 10
+    saturation_threshold_dn: 255   # 8-bit ADC
+    noisy_threshold_dn: 10.0       # PLACEHOLDER — calibrate in Phase 10
     max_missing_frac_clean: 0.30
     max_overexposed_frac_clean: 0.80
   source_image_filter:

@@ -191,6 +191,49 @@ def test_coarse_ncc_search_returns_zero_with_empty_polyline() -> None:
     assert (dv, du) == (0, 0)
 
 
+def test_coarse_ncc_search_uses_ncc_not_raw_count_under_clipping() -> None:
+    """The seed is the per-vertex (NCC) argmax, not the raw-overlap argmax.
+
+    When shifts clip a different number of polyline vertices off the image,
+    the in-bounds vertex count varies, so the raw-overlap-count argmax and the
+    per-vertex (NCC) argmax differ.  ``coarse_ncc_search`` must return the
+    latter (CODE-NAV-007).
+    """
+    h, w = 20, 20
+    poly_rows = np.arange(1, 11)  # 10-vertex vertical segment near the top edge
+    polyline_mask = np.zeros((h, w), dtype=bool)
+    polyline_mask[poly_rows, 10] = True
+    edge_mask = np.zeros((h, w), dtype=bool)
+    edge_mask[0:9, 10] = True  # edges only on rows 0..8 of that column
+    window = (10, 0)
+
+    def brute(*, normalize: bool) -> tuple[int, int]:
+        best = (0, 0)
+        best_score = -1.0
+        best_key = (math.inf, math.inf, math.inf, math.inf)
+        for dv in range(-window[0], window[0] + 1):
+            sv = poly_rows + dv
+            valid = (sv >= 0) & (sv < h)
+            if not valid.any():
+                continue
+            n_in = int(valid.sum())
+            overlap = int(edge_mask[sv[valid], 10].sum())
+            score = overlap / n_in if normalize else float(overlap)
+            key = (abs(dv), abs(dv), float(dv), 0.0)
+            if score > best_score or (score == best_score and key < best_key):
+                best_score, best_key, best = score, key, (dv, 0)
+        return best
+
+    raw_argmax = brute(normalize=False)
+    ncc_argmax = brute(normalize=True)
+    # The fixture genuinely distinguishes the two definitions.
+    assert raw_argmax == (-1, 0)
+    assert ncc_argmax == (-2, 0)
+    # The function returns the NCC argmax (it would return raw_argmax if it
+    # still summed the raw overlap count).
+    assert coarse_ncc_search(edge_mask, polyline_mask, window) == ncc_argmax
+
+
 @pytest.mark.parametrize(
     ('edge_mask', 'polyline_mask', 'window', 'message'),
     [
@@ -299,6 +342,22 @@ def test_polarity_filter_per_vertex_decision() -> None:
     assert keep.sum() == 8
 
 
+def test_polarity_filter_rejects_out_of_bounds_vertices() -> None:
+    """CODE-NAV-015: an off-image vertex is rejected even when the clamped
+    boundary pixel carries a strong gradient aligned with its normal."""
+    grad = np.zeros((8, 8, 2), dtype=np.float64)
+    # Strong gradient at the top-edge pixel (0, 4) pointing in +v.
+    grad[0, 4] = (10.0, 0.0)
+    grad[4, 4] = (10.0, 0.0)
+    # Vertex 0 is above the image (v = -5); it clamps to pixel (0, 4) whose
+    # gradient aligns with its normal.  Vertex 1 is in-bounds at (4, 4).
+    vertices = np.array([[-5.0, 4.0], [4.0, 4.0]], dtype=np.float64)
+    normals = np.array([[1.0, 0.0], [1.0, 0.0]], dtype=np.float64)
+    keep = polarity_filter(vertices, normals, grad)
+    assert not bool(keep[0])
+    assert bool(keep[1])
+
+
 def test_polarity_filter_rejects_misshaped_inputs() -> None:
     grad = np.zeros((4, 4, 2))
     with pytest.raises(ValueError, match='vertices_vu must have shape'):
@@ -350,6 +409,85 @@ def test_lm_subpixel_refine_recovers_subpixel_translation() -> None:
     assert result.inlier_count == 64
 
 
+def test_lm_subpixel_refine_rejects_polarity_vertex_with_enormous_sigma() -> None:
+    """CODE-NAV-019: a polarity-rejected vertex is excluded regardless of sigma.
+
+    Rejection zeroes the weight via the polarity mask, not by driving the
+    penalty residual past the Tukey cutoff.  With an enormous per-vertex
+    sigma the old ``penalty / sigma > c`` chain would fail (the penalty
+    residual would scale below the cutoff and keep a non-zero weight); the
+    mask makes exclusion independent of sigma.
+    """
+    shape = (96, 96)
+    radius = 18.0
+    dt = _build_dt_for_circle(shape, radius)
+    cv = shape[0] / 2.0 + 1.5
+    cu = shape[1] / 2.0 + 2.5
+    vertices, outward_normals = _build_circle_polyline((cv, cu), radius, 64)
+    normals = -outward_normals  # inward normals are accepted on a bright disc
+    # Flip vertex 0 to the wrong polarity so the polarity filter rejects it,
+    # and give it a sigma far above the old 1e6 / tukey_c ~ 2.1e5 px bound.
+    normals[0] = outward_normals[0]
+    sigmas = np.full(vertices.shape[0], 0.5, dtype=np.float64)
+    sigmas[0] = 1.0e7
+    image = _render_image_with_circle(shape, (shape[0] / 2.0, shape[1] / 2.0), radius)
+    grad = compute_image_gradient_vu(image, sigma_px=DEFAULT_IMAGE_GRADIENT_SIGMA_PX)
+    result = lm_subpixel_refine(
+        vertices_vu=vertices,
+        normals_vu=normals,
+        sigma_normal_per_vertex_px=sigmas,
+        image_edge_dt=dt,
+        image_gradient_vu=grad,
+        initial_offset_vu=(-1.0, -2.0),
+        use_polarity=True,
+    )
+    # The wrong-polarity, huge-sigma vertex must be excluded (weight 0).
+    assert result.inlier_count == 63
+    assert result.offset_vu[0] == pytest.approx(-1.5, abs=0.05)
+    assert result.offset_vu[1] == pytest.approx(-2.5, abs=0.05)
+
+
+def test_lm_subpixel_refine_trust_region_caps_offset_displacement() -> None:
+    """The trust-region kwarg physically prevents the LM from leaving the seed.
+
+    Plant a circle at (-1.5, -2.5) but seed the LM at (5, 5) — well
+    outside the planted basin.  Without a trust region, the LM either
+    walks back toward the truth or, on noisy data, walks to an
+    unrelated DT minimum.  With a 1.0-px trust region the converged
+    offset is constrained to ``hypot(dv-5, du-5) <= 1.0``: the LM can
+    refine inside the trust radius but cannot escape it.
+    """
+    shape = (96, 96)
+    radius = 18.0
+    dt = _build_dt_for_circle(shape, radius)
+    cv = shape[0] / 2.0 + 1.5
+    cu = shape[1] / 2.0 + 2.5
+    vertices, outward_normals = _build_circle_polyline((cv, cu), radius, 64)
+    inward_normals = -outward_normals
+    sigmas = np.full(vertices.shape[0], 0.5, dtype=np.float64)
+    image = _render_image_with_circle(shape, (shape[0] / 2.0, shape[1] / 2.0), radius)
+    grad = compute_image_gradient_vu(image, sigma_px=DEFAULT_IMAGE_GRADIENT_SIGMA_PX)
+    initial = (5.0, 5.0)
+    trust_region = 1.0
+    result = lm_subpixel_refine(
+        vertices_vu=vertices,
+        normals_vu=inward_normals,
+        sigma_normal_per_vertex_px=sigmas,
+        image_edge_dt=dt,
+        image_gradient_vu=grad,
+        initial_offset_vu=initial,
+        use_polarity=True,
+        trust_region_px=trust_region,
+    )
+    displacement = float(
+        np.hypot(result.offset_vu[0] - initial[0], result.offset_vu[1] - initial[1])
+    )
+    # The displacement is bounded by the trust radius (with a small
+    # tolerance for the final commit; the LM may accept a step
+    # exactly at the boundary).
+    assert displacement <= trust_region + 1.0e-6
+
+
 def test_lm_subpixel_refine_rejects_outliers_via_tukey() -> None:
     shape = (96, 96)
     radius = 18.0
@@ -380,6 +518,40 @@ def test_lm_subpixel_refine_rejects_outliers_via_tukey() -> None:
     # In-lier vertices should retain weight of 1 / sigma**2 = 4 (with sigma=0.5)
     inlier_idx = np.setdiff1d(np.arange(100), bad)
     assert float(result.weights[inlier_idx].min()) > 1.0
+
+
+def test_lm_subpixel_refine_degenerate_when_all_vertices_rejected() -> None:
+    """A fit with no surviving inliers reports +inf RMS and inf covariance.
+
+    With a zero gradient image every polarity dot product is zero (not
+    strictly positive), so the polarity filter rejects every vertex.
+    Each rejected vertex gets the infinity penalty, the Tukey biweight
+    zeroes its weight, and no evidence remains to constrain the fit.  The
+    result must advertise this honestly: ``rms_px`` is ``+inf`` (not the
+    misleading ``0.0`` that downstream spurious gates would read as a
+    perfect fit), ``degenerate`` is True, and the covariance is all-inf.
+    """
+    shape = (96, 96)
+    radius = 18.0
+    dt = _build_dt_for_circle(shape, radius)
+    cv = shape[0] / 2.0
+    cu = shape[1] / 2.0
+    vertices, outward_normals = _build_circle_polyline((cv, cu), radius, 64)
+    sigmas = np.full(vertices.shape[0], 0.5, dtype=np.float64)
+    zero_grad = np.zeros((*shape, 2), dtype=np.float64)
+    result = lm_subpixel_refine(
+        vertices_vu=vertices,
+        normals_vu=outward_normals,
+        sigma_normal_per_vertex_px=sigmas,
+        image_edge_dt=dt,
+        image_gradient_vu=zero_grad,
+        initial_offset_vu=(0.0, 0.0),
+        use_polarity=True,
+    )
+    assert result.inlier_count == 0
+    assert result.degenerate is True
+    assert result.rms_px == float('inf')
+    assert np.isinf(result.covariance).all()
 
 
 # ---------------------------------------------------------------------------

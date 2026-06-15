@@ -418,7 +418,23 @@ def evaluate_candidate(
 
     Returns:
         A dictionary containing the navigation result.
+
+    Raises:
+        ValueError: If the model is smaller than the image in either dimension
+            (the model must be at least image-sized; pad it with
+            ``pad_top_left`` first).  This is validated here so the failure is a
+            clear contract error rather than an opaque ``crop_center`` error two
+            calls deep.
     """
+
+    model_h, model_w = model_shape
+    image_h, image_w = image_shape
+    if image_h > model_h or image_w > model_w:
+        raise ValueError(
+            f'model shape {model_shape} must be at least as large as the image '
+            f'shape {image_shape} in both dimensions; a model smaller than the '
+            f'image is not supported (pad the model to at least image size first)'
+        )
 
     corr_v, corr_u = corr.shape
     p, q = rc
@@ -445,9 +461,8 @@ def evaluate_candidate(
     dy = dy_i + (upy - oy) / upsample_factor
     dx = dx_i + (upx - ox) / upsample_factor
 
-    # Align combined model and compute residual stats
-    model_h, model_w = model_shape
-    image_h, image_w = image_shape
+    # Align combined model and compute residual stats (model_h/w, image_h/w
+    # were unpacked and validated at the top of the function).
     model_shift = fourier_shift(model_pad[:model_h, :model_w], dy, dx)
     model_crop = crop_center(model_shift, (image_h, image_w))
     image_crop = image_pad[:image_h, :image_w]
@@ -617,11 +632,16 @@ def navigate_single_scale_kpeaks(
         # TODO When no candidates are found, the function returns cov: np.diag([1e6, 1e6])
         # and quality: -np.inf. Downstream code might not check for -np.inf quality and could
         # treat this as a valid result. Consider returning None or raising an exception instead.
+        # The result-shape contract matches the populated path so callers
+        # (e.g. ``navigate_with_pyramid_kpeaks`` debug log) can read every
+        # key without a KeyError when the search collapses.
         return {
             'offset': (0.0, 0.0),
             'cov': np.diag([1e6, 1e6]),
             'sigma_xy': (1e3, 1e3),
             'quality': -np.inf,
+            'peak_val': 0.0,
+            'rc': (0, 0),
             'all_candidates': [],
         }
     winner = max(candidates, key=lambda r: r['quality'])
@@ -641,6 +661,48 @@ def navigate_single_scale_kpeaks(
 # ==============================================================
 # Pyramid wrapper with K-peak final selection
 # ==============================================================
+
+
+_MAX_PEAK_RATIO: float = 1.0e3
+"""Upper bound on :func:`peak_to_runner_up_ratio`.
+
+Any ratio at or above this represents an effectively unambiguous winner;
+the downstream confidence sigmoid saturates far below it (``divisor=2``,
+``cap_at=1`` in ``config_510_techniques.yaml``).  The cap keeps the
+returned value -- and the diagnostic that stores it -- bounded instead of
+blowing up to ``~1e9`` when the runner-up quality is near zero.
+"""
+
+
+def peak_to_runner_up_ratio(top_k_peaks: list[tuple[float, float, float]]) -> float:
+    """Return the ratio of the winning peak's quality to the runner-up's.
+
+    ``top_k_peaks`` is ``[(quality, dv, du), ...]`` sorted by quality
+    descending (the convention :func:`navigate_with_pyramid_kpeaks` uses).
+    Returns ``1.0`` when only one peak survives non-maximum suppression --
+    what an unambiguous correlation looks like, so a value at or above 1.0
+    is the "good" tail -- and ``0.0`` when no peaks are present.  When the
+    runner-up quality is non-positive (rare; happens with the prior
+    penalty) the result is the unambiguous-winner cap ``_MAX_PEAK_RATIO``
+    rather than ``winner / 1e-9`` (which scaled with the winner's
+    magnitude and could reach ``~1e9``).  The ordinary ratio is likewise
+    clamped to ``_MAX_PEAK_RATIO``.
+
+    Parameters:
+        top_k_peaks: Peaks sorted by quality descending.
+
+    Returns:
+        Capped peak-to-runner-up quality ratio.
+    """
+    if not top_k_peaks:
+        return 0.0
+    if len(top_k_peaks) == 1:
+        return 1.0
+    winner_q = float(top_k_peaks[0][0])
+    runner_q = float(top_k_peaks[1][0])
+    if runner_q <= 1e-9:
+        return _MAX_PEAK_RATIO if winner_q > 0.0 else 0.0
+    return min(winner_q / runner_q, _MAX_PEAK_RATIO)
 
 
 def navigate_with_pyramid_kpeaks(
@@ -813,6 +875,9 @@ def navigate_with_pyramid_kpeaks(
         )
         winner['used_gradient'] = chosen == 'gradient'
         return winner
+
+    if pyramid_levels < 1:
+        raise ValueError(f'pyramid_levels must be >= 1; got {pyramid_levels}')
 
     logger.debug('Navigating with pyramid kpeaks:')
     logger.debug(f'  Pyramid levels: {pyramid_levels}')

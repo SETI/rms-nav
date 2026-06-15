@@ -110,8 +110,11 @@ covariance) and it does not capture model-side uncertainty in the SPICE predicti
 When the converged offset sits within a small tolerance of any axis bound of the search
 window, or when the rotation parameter is at the configured fraction of its cap, the result
 is flagged :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and the
-confidence formula's hard-zero gate forces confidence to zero. When the final RMS residual
-or the inlier count fails the spurious tests, the result is flagged
+confidence formula's hard-zero gate forces confidence to zero. The spurious tests gate on
+the Tukey-weighted DT residual RMS, the unweighted (raw) DT residual RMS against the same
+threshold (so a fit where Tukey rejects a wholly mis-aligned arc cannot pass on its
+collapsed weighted RMS), the degenerate flag, the inlier count and fraction, and the LM
+displacement from the coarse seed; when any of these fails, the result is flagged
 :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious` and similarly forced
 to zero.
 

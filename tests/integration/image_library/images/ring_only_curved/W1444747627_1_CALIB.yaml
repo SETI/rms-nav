@@ -1,6 +1,6 @@
 schema_version: 1
 image_id: W1444747627_1_CALIB
-mission: CASSINI_ISS            # CASSINI_ISS | VOYAGER_ISS | GOSSI | NHLORRI
+mission: COISS            # COISS | VGISS | GOSSI | NHLORRI
 camera: WAC              # NAC | WAC | SSI | NA | WA | LORRI
 filter_combo: 'CL1+VIO'          # canonicalized: filters sorted, '+'-joined
 image_url: 'pds3://calibrated/COISS_1xxx/COISS_1008/data/1444744636_1444749812/W1444747627_1_CALIB.IMG'
@@ -32,7 +32,7 @@ ground_truth:
     expected.confidence_tier below pins today's behavior.
 
 expected:
-  status: ok                           # ok | failed | conflicted
+  status: success                           # success | failed | conflicted
   confidence_tier: low                # high | medium | low | failed
   primary_technique: RingAnnulusNav  # e.g. BodyLimbNav
   techniques_must_run: [RingAnnulusNav]

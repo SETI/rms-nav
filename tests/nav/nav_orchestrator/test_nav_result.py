@@ -40,10 +40,10 @@ def test_navresult_failed_constructor_no_offset() -> None:
     assert result.confidence_rank == 'failed'
 
 
-def test_navresult_ok_derives_sigma_from_covariance() -> None:
-    """NavResult.ok computes sigma_px from the covariance diagonal."""
+def test_navresult_success_derives_sigma_from_covariance() -> None:
+    """NavResult.success computes sigma_px from the covariance diagonal."""
     cov = np.diag([0.04, 0.16])
-    result = NavResult.ok(
+    result = NavResult.success(
         offset_px=(1.0, 2.0),
         covariance_px2=cov,
         confidence=0.85,
@@ -54,7 +54,7 @@ def test_navresult_ok_derives_sigma_from_covariance() -> None:
         image_classifier=_classifier(),
         provenance=_provenance(),
     )
-    assert result.status == 'ok'
+    assert result.status == 'success'
     assert result.offset_px == (1.0, 2.0)
     assert result.sigma_px is not None
     assert np.isclose(result.sigma_px[0], 0.2)
@@ -97,11 +97,11 @@ def test_navresult_rejects_failed_with_offset() -> None:
         )
 
 
-def test_navresult_rejects_ok_without_offset() -> None:
-    """status='ok' with None offset_px raises ValueError."""
+def test_navresult_rejects_success_without_offset() -> None:
+    """status='success' with None offset_px raises ValueError."""
     with pytest.raises(ValueError, match='offset_px'):
         NavResult(
-            status='ok',
+            status='success',
             offset_px=None,
             sigma_px=None,
             sigma_along_unobservable_px=None,
@@ -116,11 +116,11 @@ def test_navresult_rejects_ok_without_offset() -> None:
         )
 
 
-def test_navresult_rejects_failed_rank_with_ok_status() -> None:
-    """confidence_rank='failed' on status='ok' raises ValueError."""
+def test_navresult_rejects_failed_rank_with_success_status() -> None:
+    """confidence_rank='failed' on status='success' raises ValueError."""
     with pytest.raises(ValueError, match='confidence_rank=failed'):
         NavResult(
-            status='ok',
+            status='success',
             offset_px=(0.0, 0.0),
             sigma_px=(0.0, 0.0),
             sigma_along_unobservable_px=None,

@@ -62,7 +62,7 @@ def _ok_result_with_one_technique() -> NavResult:
             bbox_extfov_vu=(100, 200, 300, 400),
         ),
     ]
-    return NavResult.ok(
+    return NavResult.success(
         offset_px=(1.234567, 2.345678),
         covariance_px2=cov,
         confidence=0.876543,
@@ -126,7 +126,7 @@ def test_metadata_dict_is_json_serializable() -> None:
 def test_metadata_dict_replaces_inf_with_sentinel() -> None:
     """A rank-1 result's sigma_along_unobservable_px is finite-clamped."""
     cov = np.diag([0.04, 1e10])
-    result = NavResult.ok(
+    result = NavResult.success(
         offset_px=(0.0, 0.0),
         covariance_px2=cov,
         confidence=0.5,
@@ -171,7 +171,7 @@ def test_assert_diagnostic_fields_present_detects_missing_curator_field() -> Non
         at_edge=False,
         diagnostics=BadDiag(),  # type: ignore[arg-type]
     )
-    result = NavResult.ok(
+    result = NavResult.success(
         offset_px=(0.0, 0.0),
         covariance_px2=cov,
         confidence=0.5,

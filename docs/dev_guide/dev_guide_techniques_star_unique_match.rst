@@ -88,9 +88,11 @@ two paths can share a single spec.
 Restrictions and assumptions
 ----------------------------
 
-- The catalog-side ``predicted_snr`` is assumed to be calibrated correctly. An over- or
-  under-predicted SNR shifts the brightness-margin computation and may erroneously pass or
-  fail the uniqueness gate.
+- The brightness-margin gate is driven by the catalog visual magnitudes: each star's
+  ``predicted_snr`` is the magnitude-margin effective SNR derived from how far the star
+  sits below the per-observation limiting magnitude, so the SNR ratio between two stars
+  recovers their catalog magnitude difference. A wrong catalog magnitude shifts the
+  brightness-margin computation and may erroneously pass or fail the uniqueness gate.
 - The search window assumes the SPICE pointing error is bounded by ``search_window_px``
   (default 30 px). When the per-instrument pointing envelope exceeds this width, the
   brightest peak in the window is not the matched detection and the technique reports a
@@ -323,9 +325,9 @@ Examples
     diagnostics carries ``'two_star'`` so the curator surfaces which path fired.
 
 ``faint_stars`` (Galileo SSI / Voyager outer-leg scene class)
-    Every catalog star in the FOV has predicted SNR below the per-instrument detection
-    floor. The stars model emits no ``STAR`` features whose predicted SNR clears the
-    reliability gate, so the orchestrator does not offer any usable star feature to
+    Every catalog star in the FOV is fainter than the per-observation limiting magnitude
+    ``obs.star_max_usable_vmag()``. The stars model emits no ``STAR`` features that clear
+    the magnitude gate, so the orchestrator does not offer any usable star feature to
     :meth:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav.is_feasible`.
     Feasibility fails with reason ``no_usable_stars`` and the technique skips its
     :meth:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav.navigate`

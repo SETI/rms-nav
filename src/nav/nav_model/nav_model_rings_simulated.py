@@ -173,10 +173,10 @@ class NavModelRingsSimulated(NavModelRingsBase):
                 usable_types=frozenset({NavFeatureType.RING_ANNULUS}),
                 flags=RingAnnulusFlags(
                     planet_name=self._ring_name,
-                    constituent_edge_count=1
-                    + int(self._ring_feature.outer_edge is not None)
-                    + int(self._ring_feature.inner_edge is not None)
-                    - 1,
+                    constituent_edge_count=(
+                        int(self._ring_feature.outer_edge is not None)
+                        + int(self._ring_feature.inner_edge is not None)
+                    ),
                 ),
                 template_img=self._model_img,
                 template_mask=self._ring_mask,

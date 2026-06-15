@@ -51,10 +51,11 @@ from tests.integration.sidecar import (  # noqa: E402
     load_sidecar,
 )
 
-# Mission-string -> Obs class.  Keys match the sidecar schema's ``mission`` enum.
+# Mission-string -> Obs class.  Keys match the sidecar schema's ``mission`` enum
+# (upper-cased dataset names from :mod:`nav.dataset`).
 _MISSION_TO_OBS_CLASS: dict[str, type[ObsSnapshotInst]] = {
-    'CASSINI_ISS': ObsCassiniISS,
-    'VOYAGER_ISS': ObsVoyagerISS,
+    'COISS': ObsCassiniISS,
+    'VGISS': ObsVoyagerISS,
     'GOSSI': ObsGalileoSSI,
     'NHLORRI': ObsNewHorizonsLORRI,
 }
@@ -105,7 +106,7 @@ def test_one_library_image(sidecar: Sidecar, tmp_path: Path) -> None:
     assert actual_status == sidecar.expected.status, (
         f'{sidecar.image_id}: expected status={sidecar.expected.status}, got {actual_status}'
     )
-    expected_success = sidecar.expected.status == 'ok'
+    expected_success = sidecar.expected.status == 'success'
     assert success == expected_success, (
         f'{sidecar.image_id}: success={success!r} disagrees with status={actual_status!r} '
         f'(expected success={expected_success!r} for expected.status='
@@ -120,7 +121,7 @@ def test_one_library_image(sidecar: Sidecar, tmp_path: Path) -> None:
     )
 
     # (c) offset_px within slack on each axis (only for ``ok`` outcomes)
-    if sidecar.expected.status == 'ok':
+    if sidecar.expected.status == 'success':
         offset = metadata.get('offset')
         assert offset is not None, f'{sidecar.image_id}: status=ok but metadata carries no offset'
         slack = sidecar.ground_truth.offset_uncertainty_px + 0.5
@@ -137,7 +138,7 @@ def test_one_library_image(sidecar: Sidecar, tmp_path: Path) -> None:
     technique_names = [entry.get('technique_name') for entry in per_technique]
 
     # (d) primary technique = highest confidence, tie-break by name ascending.
-    if sidecar.expected.status == 'ok' and per_technique:
+    if sidecar.expected.status == 'success' and per_technique:
         primary = _primary_technique(per_technique)
         assert primary == sidecar.expected.primary_technique, (
             f'{sidecar.image_id}: expected primary_technique='

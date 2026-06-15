@@ -43,9 +43,9 @@ def test_per_instrument_required_fields_present() -> None:
         assert camera['max_rotation_deg'] == 5.0
         assert camera['mag_offset']['fallback_combo'] == 'CL1+CL2'
     voyager = config.category('voyager_iss')
-    assert voyager['data_units'] == 'raw_dn'
+    assert voyager['data_units'] == 'calibrated_if'
     assert voyager['noise']['saturation_dn'] == 255
-    assert voyager['fit_camera_rotation'] is True
+    assert voyager['fit_camera_rotation'] is False
     assert voyager['max_rotation_deg'] == 5.0
     assert voyager['mag_offset']['fallback_combo'] == 'CL'
     galileo = config.category('galileo_ssi')

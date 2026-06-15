@@ -24,7 +24,7 @@ import numpy as np
 from pdslogger import PdsLogger
 
 from nav.config import Config
-from nav.feature.feature import NavFeature
+from nav.feature.feature import NavFeature, body_names_from_features
 from nav.feature.feature_type import NavFeatureType
 from nav.feature.geometry import BodyBlobGeometry
 from nav.nav_technique.confidence import evaluate_sigmoid_combination
@@ -52,8 +52,8 @@ class _BlobResiduals:
 
     ``offsets_v`` / ``offsets_u`` are the per-blob ``observed - predicted``
     centroid vectors, ``weights`` are the per-blob inverse-variance
-    weights, ``snrs`` and ``extents`` are diagnostic samples that feed
-    the confidence formula via :class:`BodyBlobDiagnostics`.
+    weights, and the trailing diagnostic lists feed
+    :class:`BodyBlobDiagnostics`.
     """
 
     consumed: list[NavFeature]
@@ -62,6 +62,8 @@ class _BlobResiduals:
     weights: NDArrayFloatType
     snrs: list[float]
     extents: list[float]
+    phase_angles_deg: list[float]
+    phase_irregularity_factors: list[float]
 
 
 @dataclass(frozen=True)
@@ -164,6 +166,8 @@ def _collect_per_blob_residuals(
     weights: list[float] = []
     snrs: list[float] = []
     extents: list[float] = []
+    phase_angles_deg: list[float] = []
+    phase_irregularity_factors: list[float] = []
     noise_threshold = 3.0 * max(image_noise_sigma, 1e-9)
     for feature in features:
         assert isinstance(feature.geometry, BodyBlobGeometry)
@@ -198,6 +202,14 @@ def _collect_per_blob_residuals(
         weights.append(max(weight, 1e-9))
         snrs.append(snr)
         extents.append(float(feature.geometry.predicted_diameter_px))
+        # ``phase_angle_deg`` and ``phase_irregularity_factor`` live on
+        # BodyBlobFlags; both default to 0.0 when the feature came from
+        # an older NavModel revision so the confidence-formula term
+        # degrades gracefully (no penalty) rather than raising.
+        flags_phase = float(getattr(feature.flags, 'phase_angle_deg', 0.0))
+        flags_factor = float(getattr(feature.flags, 'phase_irregularity_factor', 0.0))
+        phase_angles_deg.append(flags_phase)
+        phase_irregularity_factors.append(max(0.0, flags_factor))
         logger.debug(
             'Blob %s: predicted (%.2f, %.2f), observed (%.2f, %.2f), SNR %.2f, '
             'N_lit %d, weight %.3g',
@@ -217,10 +229,14 @@ def _collect_per_blob_residuals(
         weights=np.asarray(weights, np.float64),
         snrs=snrs,
         extents=extents,
+        phase_angles_deg=phase_angles_deg,
+        phase_irregularity_factors=phase_irregularity_factors,
     )
 
 
-def _joint_offset_from_residuals(residuals: _BlobResiduals) -> _JointFit:
+def _joint_offset_from_residuals(
+    residuals: _BlobResiduals, *, model_error_floor_px: float = 0.0
+) -> _JointFit:
     """Solve the precision-weighted joint translation across the per-blob residuals."""
     offsets_v = residuals.offsets_v
     offsets_u = residuals.offsets_u
@@ -236,6 +252,7 @@ def _joint_offset_from_residuals(residuals: _BlobResiduals) -> _JointFit:
         weights=weights,
         dv=dv,
         du=du,
+        model_error_floor_px=model_error_floor_px,
     )
     return _JointFit(dv=dv, du=du, covariance=cov, residual_rms=rms)
 
@@ -247,16 +264,35 @@ def _joint_covariance(
     weights: NDArrayFloatType,
     dv: float,
     du: float,
+    model_error_floor_px: float = 0.0,
 ) -> NDArrayFloatType:
-    """Return the per-axis precision-weighted covariance of the joint fit.
+    """Return the per-axis reduced-chi-square covariance of the joint fit.
 
-    The covariance is diagonal: independent per-axis weighted-mean
-    variances ``1 / sum(weights)`` inflated by the residual scatter
-    when more than one blob participates.  A single-blob fit reports
-    the inverse-precision floor; a multi-blob fit reports the actual
-    disagreement.
+    The covariance is diagonal.  With ``N`` blobs and ``p = 2`` fitted
+    translation parameters, the per-axis reduced chi-square is
 
-    The cross-term ``cov(v, u)`` is intentionally zero — per-axis
+    ::
+
+        chi2_nu_axis = sum_i w_i * r_axis_i**2 / max(N - p, 1)
+
+    and the weighted-mean variance is ``chi2_nu_axis / sum(w_i)``.
+
+    NAV-005: a single blob (``N = 1``) cannot constrain a 2-D
+    translation -- ``N - p = -1`` so ``max(N - p, 1) = 1`` and there is
+    no residual scatter to estimate (the lone residual is zero by
+    construction).  The result therefore collapses to the
+    inverse-precision floor ``1 / sum(w_i)``, which for a single blob is
+    the (large) per-blob centroid CRLB variance -- correctly reflecting
+    that one point is near-unobservable for two parameters rather than
+    over-confident.  The previous ``sum(w r^2) / (sum w)^2`` form was the
+    wrong power of ``sum w`` and carried no degrees-of-freedom factor.
+
+    The positive-definite floor is ``1 / sum(w_i)`` (pure
+    inverse-precision), NOT ``1 / (sum w_i)^2``.  The uncalibrated
+    ``model_error_floor_px**2`` is finally added to the diagonal (a
+    no-op at the default 0.0).
+
+    The cross-term ``cov(v, u)`` is intentionally zero -- per-axis
     residuals are independent under the BODY_BLOB CRLB derivation,
     and the precision-weighted ensemble combine downstream consumes
     diagonals correctly.  Future readers tempted to add
@@ -266,13 +302,22 @@ def _joint_covariance(
     """
     total_weight = float(weights.sum())
     floor = 1.0 / max(total_weight, 1e-12)
-    if offsets_v.size <= 1:
-        return float(floor) * np.eye(2, dtype=np.float64)
+    model_error = model_error_floor_px * model_error_floor_px
+    n = int(offsets_v.size)
+    if n <= 1:
+        # Single blob: under-determined for 2 translation params.  Report
+        # the inverse-precision floor (the per-blob centroid CRLB variance),
+        # not a tiny over-confident value.
+        return float(floor) * np.eye(2, dtype=np.float64) + model_error * np.eye(
+            2, dtype=np.float64
+        )
     residuals_v = offsets_v - dv
     residuals_u = offsets_u - du
-    total_weight_sq = max(total_weight * total_weight, 1e-24)
-    var_v = max(float(np.sum(weights * residuals_v * residuals_v) / total_weight_sq), floor)
-    var_u = max(float(np.sum(weights * residuals_u * residuals_u) / total_weight_sq), floor)
+    dof = max(n - 2, 1)
+    chi2_nu_v = float(np.sum(weights * residuals_v * residuals_v)) / dof
+    chi2_nu_u = float(np.sum(weights * residuals_u * residuals_u)) / dof
+    var_v = max(chi2_nu_v / total_weight, floor) + model_error
+    var_u = max(chi2_nu_u / total_weight, floor) + model_error
     return np.diag([var_v, var_u]).astype(np.float64)
 
 
@@ -281,12 +326,21 @@ class BodyBlobNav(NavTechnique):
 
     Class attributes:
         accepts_feature_types: ``frozenset({BODY_BLOB})``.
-        requires_prior: ``False`` — the technique runs in pass 1.
+        requires_prior: ``False`` (the technique runs in pass 1).
+        tier: ``'fallback'``.
+
+    The ``'fallback'`` tier reflects that the brightness-weighted centroid is a
+    weaker observation than a limb fit (already reflected in the technique's
+    ``hard_cap: 0.4``).  When a non-spurious primary fit (limb or disc) is
+    available for the same body the ensemble drops the blob result rather than
+    dilute the geometric techniques' answer with the centroid's lit-hemisphere
+    bias.
     """
 
     name = 'BodyBlobNav'
     accepts_feature_types = frozenset({NavFeatureType.BODY_BLOB})
     requires_prior = False
+    tier = 'fallback'
     confidence_attributes = frozenset(
         {
             'at_edge',
@@ -294,6 +348,8 @@ class BodyBlobNav(NavTechnique):
             'body_extent_px',
             'blob_count',
             'residual_px',
+            'max_phase_angle_deg',
+            'max_phase_irregularity_factor',
         }
     )
 
@@ -301,6 +357,10 @@ class BodyBlobNav(NavTechnique):
         super().__init__(config=config)
         self.config.read_config()  # ensure cls.tuning is populated
         self._at_edge_tolerance_px = float(self.tuning['at_edge_tolerance_px'])
+        # Uncalibrated model-error variance floor (px); added in quadrature to
+        # the reported covariance diagonal.  Default 0.0 -> no-op.  See
+        # ORCH-001 / config_510_techniques.yaml.
+        self._model_error_floor_px = float(self.tuning.get('model_error_floor_px', 0.0))
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Return whether the input set carries any usable BODY_BLOB feature.
@@ -367,7 +427,9 @@ class BodyBlobNav(NavTechnique):
                     noise_sigma=noise_sigma,
                     fit_rotation=bool(context.fit_camera_rotation),
                 )
-            fit = _joint_offset_from_residuals(residuals)
+            fit = _joint_offset_from_residuals(
+                residuals, model_error_floor_px=self._model_error_floor_px
+            )
             at_edge = (
                 abs(fit.dv) >= margin_v - self._at_edge_tolerance_px
                 or abs(fit.du) >= margin_u - self._at_edge_tolerance_px
@@ -378,11 +440,21 @@ class BodyBlobNav(NavTechnique):
             )
             mean_snr = float(np.mean(residuals.snrs))
             mean_extent = float(np.mean(residuals.extents))
+            max_phase_angle_deg = (
+                float(max(residuals.phase_angles_deg)) if residuals.phase_angles_deg else 0.0
+            )
+            max_phase_irregularity_factor = (
+                float(max(residuals.phase_irregularity_factors))
+                if residuals.phase_irregularity_factors
+                else 0.0
+            )
             diagnostics = BodyBlobDiagnostics(
                 body_snr_inside_predicted_bbox=mean_snr,
                 body_extent_px=mean_extent,
                 blob_count=len(residuals.consumed),
                 residual_px=fit.residual_rms,
+                max_phase_angle_deg=max_phase_angle_deg,
+                max_phase_irregularity_factor=max_phase_irregularity_factor,
             )
             assert self.confidence_spec is not None
             confidence, breakdown = evaluate_sigmoid_combination(
@@ -416,6 +488,7 @@ class BodyBlobNav(NavTechnique):
                 diagnostics=diagnostics,
                 rotation_rad=0.0 if fit_rotation else None,
                 sigma_rotation_rad=(rotation_unobservable_sigma_rad() if fit_rotation else None),
+                source_bodies=body_names_from_features(residuals.consumed),
             )
 
     def _fail_no_signal(
@@ -454,19 +527,11 @@ class BodyBlobNav(NavTechnique):
             3.0 * noise_sigma,
             len(features),
         )
-        cov_2x2 = 1e6 * np.eye(2, dtype=np.float64)
-        cov = embed_rotation_unobservable(cov_2x2) if fit_rotation else cov_2x2
-        return NavTechniqueResult(
-            technique_name=self.name,
+        return self._spurious_result(
             feature_ids=tuple(f.feature_id for f in features),
-            offset_px=(0.0, 0.0),
-            covariance_px2=cov,
-            confidence=0.0,
-            spurious=True,
-            at_edge=False,
             diagnostics=diagnostics,
-            rotation_rad=0.0 if fit_rotation else None,
-            sigma_rotation_rad=(rotation_unobservable_sigma_rad() if fit_rotation else None),
+            fit_rotation=fit_rotation,
+            source_bodies=body_names_from_features(features),
         )
 
 
@@ -489,3 +554,5 @@ class _BlobConfidenceContext:
         self.body_extent_px = diagnostics.body_extent_px
         self.blob_count = float(diagnostics.blob_count)
         self.residual_px = diagnostics.residual_px
+        self.max_phase_angle_deg = diagnostics.max_phase_angle_deg
+        self.max_phase_irregularity_factor = diagnostics.max_phase_irregularity_factor

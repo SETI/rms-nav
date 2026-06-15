@@ -177,20 +177,30 @@ def instrument_settings_from_obs(obs: Any) -> InstrumentSettings:
             ),
         )
     else:
-        # calibrated_if: DN-keyed fields are unavailable; the I/F-keyed
-        # thresholds are loaded into the same ImageQualityThresholds
-        # fields because the classifier compares pixel values uniformly
-        # — the unit interpretation is established by data_units.
+        # calibrated_if: DN-keyed fields are unavailable, and the
+        # saturation gate is intentionally disabled.  An I/F-keyed
+        # saturation threshold is meaningless — the same physical
+        # full-well DN maps to a different I/F value for every
+        # combination of exposure time, filter, and gain — so we never
+        # compute one.  The orchestrator emits an empty saturation mask
+        # (see ``_build_saturation_mask``) and the classifier is
+        # handed an ``inf`` threshold so ``saturation_frac`` is always
+        # 0.0 and the ``fully_overexposed`` early-out cannot fire.
+        # Reject any explicit ``saturation_threshold_if`` so stale
+        # configs surface immediately rather than silently no-op.
         marker_value = _coerce_marker_value(
             noise.get('marker_value', float('nan')) if noise is not None else float('nan')
         )
         saturation_dn = None
+        if 'saturation_threshold_if' in iqt_block:
+            raise ValueError(
+                'calibrated_if instrument must not declare '
+                'image_quality_thresholds.saturation_threshold_if; the '
+                'saturation gate is off for calibrated images because I/F '
+                'depends on exposure / filter / gain (see Phase 10 §F)'
+            )
         thresholds = ImageQualityThresholds(
-            saturation_threshold_dn=_required_float(
-                iqt_block,
-                'saturation_threshold_if',
-                location='image_quality_thresholds',
-            ),
+            saturation_threshold_dn=math.inf,
             missing_data_marker_dn=marker_value,
             max_saturation_frac_clean=float(iqt_block.get('max_overexposed_frac_clean', 0.80)),
             max_missing_frac_clean=float(iqt_block.get('max_missing_frac_clean', 0.30)),

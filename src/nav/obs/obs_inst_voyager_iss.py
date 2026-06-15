@@ -10,6 +10,68 @@ from nav.support.types import PathLike
 
 from .obs_snapshot_inst import ObsSnapshotInst
 
+# The Voyager 1 SEDR/PDS3 calibration pipeline always computed I/F as if the
+# image had been taken at Jupiter's heliocentric distance, so V1 @ Saturn
+# images come out too dim by (~9.54 / 5.20)**2.  Multiply by this factor to
+# recover Saturn-correct I/F.  V1 only visited Jupiter and Saturn, and V2 was
+# calibrated correctly at each of its encounters, so this is the only case.
+_V1_SATURN_IF_CORRECTION = 3.345
+
+# The I/F scaling factor lives in the GEOMED VICAR LABEL3 string as a
+# trailing numeric value after this fixed phrase.
+_IF_LABEL3_PHRASE = 'FOR (I/F)*10000., MULTIPLY DN VALUE BY'
+
+
+def _voyager_spacecraft_digit(lab02: Any) -> str:
+    """Extract and validate the Voyager spacecraft digit from a LAB02 record.
+
+    The Voyager VICAR ``LAB02`` record is a fixed-format string whose 5th
+    character (index 4) is the spacecraft digit, ``'1'`` for Voyager 1 or
+    ``'2'`` for Voyager 2.
+
+    Parameters:
+        lab02: The raw ``LAB02`` value from the image label.
+
+    Returns:
+        The spacecraft digit, either ``'1'`` or ``'2'``.
+
+    Raises:
+        ValueError: If ``lab02`` is not a string of length at least 5, or
+            its 5th character is not ``'1'`` or ``'2'``.
+    """
+
+    if not isinstance(lab02, str) or len(lab02) < 5:
+        raise ValueError(f'Unexpected Voyager LAB02 format: {lab02!r}')
+    digit = lab02[4]
+    if digit not in ('1', '2'):
+        raise ValueError(
+            f'Unexpected Voyager spacecraft id in LAB02[4]: {digit!r} (expected 1 or 2)'
+        )
+    return digit
+
+
+def _voyager_if_factor(label3: Any) -> float:
+    """Parse the I/F scaling factor from a Voyager GEOMED LABEL3 string.
+
+    Parameters:
+        label3: The raw ``LABEL3`` value from the image label.
+
+    Returns:
+        The numeric I/F scaling factor.
+
+    Raises:
+        ValueError: If ``label3`` is not a string, does not contain the
+            expected fixed phrase, or its numeric remainder cannot be parsed.
+    """
+
+    if not isinstance(label3, str) or _IF_LABEL3_PHRASE not in label3:
+        raise ValueError(f'Unexpected Voyager LABEL3 format: {label3!r}')
+    remainder = label3.replace(_IF_LABEL3_PHRASE, '').strip()
+    try:
+        return float(remainder)
+    except ValueError:
+        raise ValueError(f'Unexpected Voyager LABEL3 format: {label3!r}') from None
+
 
 class ObsVoyagerISS(ObsSnapshotInst):
     """Implements an observation of a Voyager ISS image.
@@ -52,12 +114,15 @@ class ObsVoyagerISS(ObsSnapshotInst):
 
         inst_config = config.category('voyager_iss')
 
-        label3 = obs.dict['LABEL3'].replace('FOR (I/F)*10000., MULTIPLY DN VALUE BY', '')
-        factor = float(label3)
+        factor = _voyager_if_factor(obs.dict.get('LABEL3', None))
         obs.data = obs.data * factor / 10000
-        # TODO Beware - Voyager 1 @ Saturn requires data to be multiplied by 3.345
-        # because the Voyager 1 calibration pipeline always assumes the image
-        # was taken at Jupiter.
+
+        spacecraft = _voyager_spacecraft_digit(obs.dict.get('LAB02', None))
+        if spacecraft == '1' and obs.planet.upper() == 'SATURN':
+            obs.data = obs.data * _V1_SATURN_IF_CORRECTION
+            logger.debug(
+                f'  Applied Voyager 1 @ Saturn I/F correction: {_V1_SATURN_IF_CORRECTION:.4f}x'
+            )
         # TODO Calibrate once oops.hosts is fixed.
 
         if extfov_margin_vu is None:
@@ -76,6 +141,9 @@ class ObsVoyagerISS(ObsSnapshotInst):
     def star_min_usable_vmag(self) -> float:
         """Returns the minimum usable magnitude for stars in this observation.
 
+        Mirrors the Cassini ISS reference implementation, which imposes no
+        bright-end cutoff (saturation of bright stars is handled elsewhere).
+
         Returns:
             The minimum usable magnitude for stars in this observation.
         """
@@ -84,10 +152,35 @@ class ObsVoyagerISS(ObsSnapshotInst):
     def star_max_usable_vmag(self) -> float:
         """Returns the maximum usable magnitude for stars in this observation.
 
+        The limiting magnitude follows the Cassini Pogson-ratio form,
+
+            star_max_usable_vmag(texp) = anchor + log(texp) / log(2.512)
+
+        where ``anchor`` is the limiting magnitude at a 1 s exposure (each
+        2.512x increase in exposure buys +1 mag of depth).
+
+        The anchor is scaled from the Cassini NAC anchor (10.5 mag at 1 s,
+        aperture D = 0.19 m) by collecting-area, with a detector-sensitivity
+        term for the Voyager vidicon (roughly 2 mag less sensitive than a
+        CCD).  These are nominal optics values; the terms are approximate and
+        pending calibration against real Voyager star fields.
+
+            anchor = 10.5 + 5*log10(D / 0.19) + detector_term
+
+        Per camera (apertures from the Voyager ISS optics; vidicon detector):
+
+            NAC: 10.5 + 5*log10(0.176/0.19) - 2.0 (vidicon) ~= 8.3
+            WAC: 10.5 + 5*log10(0.057/0.19) - 2.0 (vidicon) ~= 5.9
+
         Returns:
             The maximum usable magnitude for stars in this observation.
         """
-        return 10  # TODO
+
+        # Anchor (limiting mag at texp = 1 s) derived above; rounded to 0.1.
+        anchor = 5.9 if self.detector == 'WAC' else 8.3
+        if self.texp <= 0:
+            return anchor
+        return cast(float, anchor + np.log(self.texp) / np.log(2.512))
 
     def get_public_metadata(self) -> dict[str, Any]:
         """Returns the public metadata for Voyager ISS.
@@ -99,7 +192,15 @@ class ObsVoyagerISS(ObsSnapshotInst):
         # scet_start = float(obs.dict["SPACECRAFT_CLOCK_START_COUNT"])
         # scet_end = float(obs.dict["SPACECRAFT_CLOCK_STOP_COUNT"])
 
-        spacecraft = self.dict['LAB02'][4]
+        spacecraft = _voyager_spacecraft_digit(self.dict.get('LAB02', None))
+
+        # The instrument LID and `camera` field encode the camera as iss{n,w};
+        # guard against an unexpected detector so a malformed LID never reaches
+        # a PDS4 label.
+        if self.detector not in ('NAC', 'WAC'):
+            raise ValueError(
+                f"unexpected Voyager ISS detector {self.detector!r}; expected 'NAC' or 'WAC'"
+            )
 
         return {
             'image_path': self.image_url,

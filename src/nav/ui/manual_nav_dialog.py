@@ -13,6 +13,7 @@ auto-discovery registry) on demand.
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
@@ -21,6 +22,7 @@ from matplotlib.backends.backend_qt import NavigationToolbar2QT
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle
+from PIL import Image
 from PyQt6.QtCore import QPoint, Qt
 from PyQt6.QtGui import QImage, QMouseEvent, QPainter, QPixmap, QWheelEvent
 from PyQt6.QtWidgets import (
@@ -36,7 +38,6 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
-    QScrollBar,
     QSlider,
     QStatusBar,
     QVBoxLayout,
@@ -44,16 +45,18 @@ from PyQt6.QtWidgets import (
 )
 
 from nav._version import __version__ as _rms_nav_version
+from nav.annotation import Annotations
 from nav.config import Config
 from nav.obs import ObsSnapshot
 from nav.support.correlate import masked_ncc, navigate_with_pyramid_kpeaks
 from nav.support.image import apply_linear_gamma_stretch
+from nav.support.summary_png import render_annotated_summary_rgb
 from nav.support.types import NDArrayBoolType, NDArrayFloatType, NDArrayUint8Type
 from nav.ui.common import (
     ZoomPanController,
     build_stretch_controls,
 )
-from nav.ui.library_entry import build_sidecar_yaml, infer_obs_metadata
+from nav.ui.library_entry import build_sidecar_yaml, compute_image_url, infer_obs_metadata
 
 # Correlation map popup (_CorrMapDialog) layout sizing
 _CORR_MAP_MIN_WIDTH = 550
@@ -284,6 +287,7 @@ class ManualNavDialog(QDialog):
         model_img_ext: NDArrayFloatType,
         model_mask_ext: NDArrayBoolType,
         config: Config | None,
+        annotations: Annotations | None = None,
         parent: QWidget | None = None,
     ) -> None:
         """Initialize the manual-navigation dialog.
@@ -296,6 +300,12 @@ class ManualNavDialog(QDialog):
             model_mask_ext: Boolean mask matching ``model_img_ext``;
                 True wherever the composite carries signal.
             config: Optional ``Config`` override.
+            annotations: Merged ``Annotations`` collection (one entry
+                per NavModel that contributed).  Drawn at the chosen
+                ``(dv, du)`` into the labelled summary PNG written
+                alongside a saved sidecar.  ``None`` (or empty) is
+                permitted; the saved PNG then carries the source-image
+                grayscale alone.
             parent: Optional Qt parent widget.
         """
         super().__init__(parent)
@@ -304,6 +314,7 @@ class ManualNavDialog(QDialog):
 
         self._obs = obs
         self._config = config
+        self._annotations: Annotations = annotations if annotations is not None else Annotations()
 
         self.setWindowTitle(f'Manual Navigation - {obs.abspath.name}')
 
@@ -839,6 +850,13 @@ class ManualNavDialog(QDialog):
         for the operator-curated ones.  No round-trip into the image
         library is performed; the operator chooses the destination so an
         existing sidecar is not silently clobbered.
+
+        After the YAML is written, the dialog also drops an annotated
+        ``<stem>.png`` next to it: the same red-image / green-model
+        composite the operator was looking at when they hit save.  The
+        PNG is only an orientation aid (so a future reviewer skimming
+        the sidecar directory can see the scene at a glance); it is not
+        consumed by any test or downstream tool.
         """
         draft = infer_obs_metadata(self._obs)
         suggested_name = f'{draft.image_id or "TODO"}.yaml'
@@ -850,10 +868,7 @@ class ManualNavDialog(QDialog):
         )
         if not path_str:
             return
-        image_url = ''
-        abspath = getattr(self._obs, 'abspath', None)
-        if abspath is not None:
-            image_url = str(abspath)
+        image_url = compute_image_url(self._obs, self._config)
         try:
             yaml_text = build_sidecar_yaml(
                 draft=draft,
@@ -870,13 +885,30 @@ class ManualNavDialog(QDialog):
                 f'Could not write sidecar to {path_str}:\n{exc}',
             )
             return
+
+        # Companion PNG: render the same labelled annotation overlay
+        # (body / star / ring labels) the autonomous summary PNG would
+        # produce, drawn at the chosen (dv, du) so the snapshot matches
+        # the YAML's offset.  Falls back to the source-image grayscale
+        # alone when no NavModel emitted any annotations.  PNG-write
+        # failures are non-fatal — the YAML is the load-bearing
+        # artefact.
+        png_path = Path(path_str).with_suffix('.png')
+        png_warning = ''
+        try:
+            rgb = render_annotated_summary_rgb(self._obs, self._annotations, (self._dv, self._du))
+            Image.fromarray(rgb, mode='RGB').save(str(png_path), format='PNG')
+        except (OSError, ValueError) as exc:
+            png_warning = f'\n\n(Could not write companion PNG to {png_path}: {exc})'
+
         QMessageBox.information(
             self,
             'Sidecar saved',
             (
-                f'Wrote sidecar to:\n{path_str}\n\n'
+                f'Wrote sidecar to:\n{path_str}\n'
+                f'Wrote summary PNG to:\n{png_path}\n\n'
                 'Edit the TODO_REPLACE_* fields (scene_tags, primary_technique, '
-                'notes, etc.) before committing.'
+                'notes, etc.) before committing.' + png_warning
             ),
         )
 
@@ -951,35 +983,20 @@ class ManualNavDialog(QDialog):
     # ---- Zoom/pan helpers (parity with sim_body_gui) ----
 
     def _zoom_in_center(self) -> None:
-        viewport = cast(QWidget, self._scroll.viewport())
-        cx = viewport.width() // 2
-        cy = viewport.height() // 2
-        sh = cast(QScrollBar, self._scroll.horizontalScrollBar())
-        sv = cast(QScrollBar, self._scroll.verticalScrollBar())
-        scaled_x = cx + sh.value()
-        scaled_y = cy + sv.value()
-        self._zoom_at_point(1.2, cx, cy, scaled_x, scaled_y)
+        # Centre-anchored zoom is provided by the controller (it wraps this
+        # window's scroll area); delegate instead of re-implementing it.
+        self._zoom_ctl.zoom_in_center()
 
     def _zoom_out_center(self) -> None:
-        viewport = cast(QWidget, self._scroll.viewport())
-        cx = viewport.width() // 2
-        cy = viewport.height() // 2
-        sh = cast(QScrollBar, self._scroll.horizontalScrollBar())
-        sv = cast(QScrollBar, self._scroll.verticalScrollBar())
-        scaled_x = cx + sh.value()
-        scaled_y = cy + sv.value()
-        self._zoom_at_point(1.0 / 1.2, cx, cy, scaled_x, scaled_y)
+        self._zoom_ctl.zoom_out_center()
 
     def _zoom_at_point(
         self, factor: float, vx: int, vy: int, scaled_x: float, scaled_y: float
     ) -> None:
         if self._pixmap_base is None:
             return
-        old_zoom = self._zoom
-        new_zoom = float(np.clip(old_zoom * factor, 0.1, 50.0))
-        if new_zoom == old_zoom:
-            return
-        # Use controller public API to maintain pan correctly
+        # The ZoomPanController owns the zoom clamp + no-op short-circuit, so
+        # delegate directly instead of re-deriving the clamped zoom here.
         self._zoom_ctl.zoom_at_point(factor, vx, vy, scaled_x, scaled_y)
 
     def _reset_view(self) -> None:
@@ -989,8 +1006,18 @@ class ManualNavDialog(QDialog):
 
     # ---- Rendering ----
 
-    def _compose_overlay_pixmap(self) -> None:
-        """Compose the RGB overlay pixmap based on current stretch/offset/alpha."""
+    def _compose_overlay_rgb_fov(self) -> NDArrayUint8Type:
+        """Build the FOV-shaped RGB overlay at the current ``(dv, du)``.
+
+        Encapsulates the pixel logic shared between the on-screen pixmap
+        and the on-disk summary PNG written alongside a saved sidecar:
+        red + blue carry the stretched image, green carries the
+        image-and-model blend, and the optional binary-mask overlay
+        applies a semi-transparent white tint.
+
+        Returns:
+            ``(H, W, 3)`` uint8 array in FOV coordinates.
+        """
         # Primary image (FOV) -> red channel (mono repeated into RGB then tinted)
         img_u8 = _apply_stretch_gamma(
             self._img_fov, self._image_black, self._image_white, self._image_gamma
@@ -1034,7 +1061,12 @@ class ManualNavDialog(QDialog):
                     ch[mask_slice] * (1.0 - _MASK_OVERLAY_ALPHA) + 255.0 * _MASK_OVERLAY_ALPHA
                 )
                 rgb[:, :, c] = np.clip(ch, 0, 255).astype(np.uint8)
+        return rgb
 
+    def _compose_overlay_pixmap(self) -> None:
+        """Compose the RGB overlay pixmap based on current stretch/offset/alpha."""
+        rgb = self._compose_overlay_rgb_fov()
+        h, w = rgb.shape[:2]
         # Create QImage/QPixmap
         qimage = QImage(rgb.tobytes(), w, h, 3 * w, QImage.Format.Format_RGB888).copy()
         pixmap = QPixmap(w, h)

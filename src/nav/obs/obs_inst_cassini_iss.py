@@ -115,15 +115,21 @@ class ObsCassiniISS(ObsSnapshotInst):
             The maximum usable magnitude for stars in this observation.
         """
 
+        # A non-positive exposure time is invalid (np.log would give -inf/nan);
+        # fall back to the reference-exposure magnitude in that case.
         if self.detector == 'WAC':
             # This is based on star field image W1580760393 with texp 26 and clear filter.
             # This image was not useful beyond mag 10.7.
             # We don't try to compensate for non-clear filters.
+            if self.texp <= 0.0:
+                return 10.7
             return cast(float, 10.7 + np.log(self.texp / 26) / np.log(2.512))
 
         # This is based on star field image N1521881358 with texp 1 and clear filter.
         # This image was not useful beyond mag 10.7.
         # We don't try to compensate for non-clear filters.
+        if self.texp <= 0.0:
+            return 10.5
         return cast(float, 10.5 + np.log(self.texp) / np.log(2.512))
 
     def get_public_metadata(self) -> dict[str, Any]:
@@ -135,6 +141,13 @@ class ObsCassiniISS(ObsSnapshotInst):
 
         scet_start = float(self.dict['SPACECRAFT_CLOCK_START_COUNT'])
         scet_end = float(self.dict['SPACECRAFT_CLOCK_STOP_COUNT'])
+
+        # The instrument LID encodes the camera as iss{n,w}a; guard against an
+        # unexpected detector so a malformed LID never reaches a PDS4 label.
+        if self.detector not in ('NAC', 'WAC'):
+            raise ValueError(
+                f"unexpected Cassini ISS detector {self.detector!r}; expected 'NAC' or 'WAC'"
+            )
 
         return {
             'image_path': self.image_url,

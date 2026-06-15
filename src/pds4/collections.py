@@ -79,14 +79,7 @@ def generate_collection_files(
             'EARLIEST_START_DATE_TIME': '',  # TODO: Calculate from all images
             'LATEST_STOP_DATE_TIME': '',  # TODO: Calculate from all images
         }
-        try:
-            template.write(template_vars, str(collection_data_label_local))
-        except Exception:
-            logger.exception(
-                'Error creating label "collection_data.lblx": %s',
-                collection_data_label_local,
-            )
-            raise
+        template.write(template_vars, str(collection_data_label_local))
         collection_data_label.upload()
         logger.info('Generated "collection_data.lblx"')
 
@@ -113,14 +106,7 @@ def generate_collection_files(
         template_vars = {
             'COLLECTION_BROWSE_CSV_PATH': str(collection_browse_csv),
         }
-        try:
-            template.write(template_vars, str(collection_browse_label_local))
-        except Exception:
-            logger.exception(
-                'Error creating label "collection_browse.lblx": %s',
-                collection_browse_label_local,
-            )
-            raise
+        template.write(template_vars, str(collection_browse_label_local))
         collection_browse_label.upload()
         logger.info('Generated "collection_browse.lblx"')
 
@@ -259,7 +245,8 @@ def generate_global_index_files(
     # Generate global_index_rings.tab
     rings_tab = supplemental_dir / 'global_index_rings.tab'
     rings_tab_local = cast(Path, rings_tab.get_local_path())
-    rings_tab_local.parent.mkdir(parents=True, exist_ok=True)
+    # No explicit parent mkdir: get_local_path() creates parents (matching the
+    # bodies index above), so an extra mkdir here was redundant and asymmetric.
     with rings_tab_local.open('w', newline='') as f:
         writer = csv.writer(f)
         # Build header: LID, path_to_image_file, then min/max for each ring type
@@ -296,11 +283,7 @@ def generate_global_index_files(
         template_vars = {
             'FILE_RECORDS': len(body_index_rows),
         }
-        try:
-            template.write(template_vars, bodies_label)
-        except Exception:
-            logger.exception('Error creating label global_index_bodies.lblx: %s', bodies_label)
-            raise
+        template.write(template_vars, bodies_label)
         logger.info('Generated global_index_bodies.lblx')
 
     # Global index rings label
@@ -311,11 +294,7 @@ def generate_global_index_files(
         template_vars = {
             'FILE_RECORDS': len(ring_index_rows),
         }
-        try:
-            template.write(template_vars, rings_label)
-        except Exception:
-            logger.exception('Error creating label global_index_rings.lblx: %s', rings_label)
-            raise
+        template.write(template_vars, rings_label)
         logger.info('Generated global_index_rings.lblx')
 
     logger.info(

@@ -6,11 +6,13 @@ import numpy as np
 import pytest
 
 from nav.support.correlate import (
+    _MAX_PEAK_RATIO,
     gradient_magnitude,
     masked_ncc,
     navigate_single_scale_kpeaks,
     navigate_with_pyramid_kpeaks,
     nms_topk,
+    peak_to_runner_up_ratio,
 )
 from nav.support.image import pad_top_left
 
@@ -267,6 +269,36 @@ class TestSingleScale:
             logger=None,
         )
         assert result['quality'] > 6.0
+
+    def test_no_candidates_result_carries_full_key_set(self) -> None:
+        """When no peaks survive ``max_offset_vu`` the result still has every key.
+
+        Regression: the empty-candidates early-return previously omitted
+        ``peak_val`` and ``rc``, so callers that logged or read those
+        keys (notably ``navigate_with_pyramid_kpeaks``) crashed with a
+        ``KeyError`` whenever the search collapsed.  The contract now
+        matches the populated path exactly.
+        """
+        # Empty image + empty model => no real peak; force the
+        # max_offset_vu window down to (0, 0) so no candidate clears the
+        # window and the early-return branch fires deterministically.
+        image = np.zeros((16, 16), dtype=np.float64)
+        model = np.zeros((16, 16), dtype=np.float64)
+        mask = np.ones((16, 16), dtype=bool)
+        result = navigate_single_scale_kpeaks(
+            image=image,
+            model=model,
+            mask=mask,
+            max_peaks=3,
+            upsample_factor=8,
+            metric='psr',
+            max_offset_vu=(0, 0),
+            logger=None,
+        )
+        for key in ('offset', 'cov', 'sigma_xy', 'quality', 'peak_val', 'rc', 'all_candidates'):
+            assert key in result, f'no-candidates result missing key {key!r}'
+        assert result['all_candidates'] == []
+        assert result['quality'] == -np.inf
 
 
 # =========================================================================
@@ -525,3 +557,44 @@ class TestPyramidTopKPeaks:
         # Each entry has shape (quality, dv, du).
         for entry in peaks:
             assert len(entry) == 3
+
+
+# =========================================================================
+# peak_to_runner_up_ratio
+# =========================================================================
+
+
+def test_peak_to_runner_up_ratio_empty_and_single() -> None:
+    """No peaks -> 0.0; a single surviving peak -> 1.0."""
+    assert peak_to_runner_up_ratio([]) == 0.0
+    assert peak_to_runner_up_ratio([(5.0, 0.0, 0.0)]) == 1.0
+
+
+def test_peak_to_runner_up_ratio_ordinary() -> None:
+    """A clear winner returns winner / runner-up quality."""
+    ratio = peak_to_runner_up_ratio([(8.0, 0.0, 0.0), (2.0, 1.0, 1.0)])
+    assert ratio == pytest.approx(4.0)
+
+
+def test_peak_to_runner_up_ratio_caps_near_zero_runner_up() -> None:
+    """CODE-NAV-022: a near-zero runner-up returns the cap, not ~1e9."""
+    ratio = peak_to_runner_up_ratio([(1.0, 0.0, 0.0), (1e-12, 1.0, 1.0)])
+    assert ratio == _MAX_PEAK_RATIO
+
+
+def test_peak_to_runner_up_ratio_caps_independently_of_winner_magnitude() -> None:
+    """The capped near-zero-runner result no longer scales with the winner."""
+    small = peak_to_runner_up_ratio([(1e-6, 0.0, 0.0), (0.0, 1.0, 1.0)])
+    large = peak_to_runner_up_ratio([(1e3, 0.0, 0.0), (0.0, 1.0, 1.0)])
+    assert small == large == _MAX_PEAK_RATIO
+
+
+def test_peak_to_runner_up_ratio_nonpositive_winner_is_zero() -> None:
+    """A non-positive winner with a non-positive runner-up returns 0.0."""
+    assert peak_to_runner_up_ratio([(0.0, 0.0, 0.0), (-1.0, 1.0, 1.0)]) == 0.0
+
+
+def test_peak_to_runner_up_ratio_clamps_large_ordinary_ratio() -> None:
+    """An ordinary ratio above the cap is clamped to _MAX_PEAK_RATIO."""
+    ratio = peak_to_runner_up_ratio([(1e9, 0.0, 0.0), (1.0, 1.0, 1.0)])
+    assert ratio == _MAX_PEAK_RATIO

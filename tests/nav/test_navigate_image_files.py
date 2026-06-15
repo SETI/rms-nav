@@ -6,7 +6,8 @@ happy / image-load-failure / status=failed paths against a fake
 observation class so no holdings are required.
 
 Also covers the annotation-compositing summary-PNG renderer
-(``_write_summary_png`` and ``_grayscale_to_rgb_with_quantile_stretch``)
+(``write_summary_png`` and the rendering helper now exposed via
+``nav.support.summary_png.grayscale_to_rgb_with_quantile_stretch``)
 end-to-end against a synthetic ``Annotations`` collection.
 """
 
@@ -26,11 +27,13 @@ from nav.nav_orchestrator.image_classifier_result import NavImageClassifierResul
 from nav.nav_orchestrator.nav_result import NavResult
 from nav.nav_orchestrator.provenance import Provenance
 from nav.navigate_image_files import (
-    _grayscale_to_rgb_with_quantile_stretch,
-    _write_summary_png,
     navigate_image_files,
+    write_summary_png,
 )
 from nav.support.status_reason import NavStatusReason
+from nav.support.summary_png import (
+    grayscale_to_rgb_with_quantile_stretch as _grayscale_to_rgb_with_quantile_stretch,
+)
 
 
 class _FakeSnapshot:
@@ -300,7 +303,7 @@ def test_grayscale_to_rgb_stretch_keeps_default_clip_when_many_brights() -> None
 
 
 # ---------------------------------------------------------------------------
-# _write_summary_png — direct fixture-driven exercise
+# write_summary_png — direct fixture-driven exercise
 # ---------------------------------------------------------------------------
 
 
@@ -341,7 +344,7 @@ def _make_render_result(
         pipeline_run_iso8601='2026-04-28T00:00:00Z',
     )
     if offset_px is not None:
-        return NavResult.ok(
+        return NavResult.success(
             offset_px=offset_px,
             covariance_px2=np.eye(2),
             confidence=0.5,
@@ -368,7 +371,7 @@ def test_write_summary_png_image_only_when_no_annotations(tmp_path: Path) -> Non
     obs = _FakeObsForRender(image=image)
     result = _make_render_result(annotations=Annotations())
     png_path = FCPath(str(tmp_path / 'out.png'))
-    _write_summary_png(obs, result, png_path, _CapturingLogger())  # type: ignore[arg-type]
+    write_summary_png(obs, result, png_path, _CapturingLogger())  # type: ignore[arg-type]
     with Image.open(BytesIO(png_path.read_bytes())) as img:
         assert img.mode == 'RGB'
         assert img.size == (24, 20)
@@ -390,7 +393,7 @@ def test_write_summary_png_composites_overlay(tmp_path: Path) -> None:
     annotations.add_annotations(annotation)
     result = _make_render_result(annotations=annotations, offset_px=(0.0, 0.0))
     png_path = FCPath(str(tmp_path / 'overlay.png'))
-    _write_summary_png(obs, result, png_path, _CapturingLogger())  # type: ignore[arg-type]
+    write_summary_png(obs, result, png_path, _CapturingLogger())  # type: ignore[arg-type]
     with Image.open(BytesIO(png_path.read_bytes())) as raw:
         img = np.asarray(raw)
     inside = img[6, 6]

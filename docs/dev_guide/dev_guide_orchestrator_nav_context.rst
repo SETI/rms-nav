@@ -106,9 +106,6 @@ Public fields (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
   on 3-DoF technique fits. Default ``False``.
 - :attr:`~nav.nav_orchestrator.nav_context.NavContext.max_rotation_deg` — float; rotation
   cap when ``fit_camera_rotation`` is ``True``. Default ``5.0`` deg.
-- :attr:`~nav.nav_orchestrator.nav_context.NavContext.signal_dn_to_image_unit_scale` —
-  per-instrument scale converting an integrated DN signal into the image's native units.
-  ``1.0`` for ``raw_dn`` instruments; per-camera value for ``calibrated_if``.
 
 Public methods:
 
@@ -142,7 +139,6 @@ populated and the prior fields ``None``::
         pre_filter_applied=None,
         fit_camera_rotation=False,
         max_rotation_deg=5.0,
-        signal_dn_to_image_unit_scale=1.0,
     )
 
 **Pass 2 hand-off.**  After the pass-1 ensemble produces an offset, the orchestrator
@@ -164,7 +160,6 @@ fields might be::
         saturation_mask_ext.sum() = 0,             # no saturated pixels
         cosmic_ray_mask_ext.sum() = 12,            # 12 cosmic-ray hits
         fit_camera_rotation = False,               # Cassini default
-        signal_dn_to_image_unit_scale = 1.0,       # raw_dn instrument
         prior_offset_px = None,                    # pass 1
     )
 

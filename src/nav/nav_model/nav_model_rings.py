@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import oops
+from oops import Meshgrid
+from oops.backplane import Backplane
 
 from nav.annotation import Annotations
 from nav.config import DEFAULT_CONFIG, Config
@@ -78,6 +80,17 @@ When the maximum deviation of the polyline from its best-fit straight
 line is below this value, the corresponding ``RING_EDGE`` feature is
 emitted with ``is_straight_line=True``.  The technique-level fitter
 then handles its rank-1 covariance.
+"""
+
+
+SPARSE_VISIBILITY_GRID_SIZE: int = 16
+"""Side length of the sparse-grid backplane used by the cheap ring pre-check.
+
+A 16x16 ring-radius backplane evaluates ~256 SPICE ray casts (vs ~1M+
+for a 1024x1024 ext-FOV) and runs in well under 10 ms; it is sufficient
+to detect the two common skip cases — no ring-plane intersection in
+the FOV at all, and a visible radial range entirely beyond the
+catalog's outermost feature.
 """
 
 
@@ -244,6 +257,9 @@ class NavModelRings(NavModelRingsBase):
             self._logger.info('No planet identified — model is empty')
             return
         feature_count = meta.get('feature_count', 0)
+        if feature_count == 0:
+            self._logger.info('Planet = %s, surviving features = 0 — model is empty', planet)
+            return
         self._logger.info(
             'Planet = %s, surviving features = %d, km/px radial = %.4f, subject range = %.0f km',
             planet,
@@ -251,9 +267,8 @@ class NavModelRings(NavModelRingsBase):
             self._km_per_pixel_radial,
             self._subject_range_km,
         )
-        if feature_count > 0:
-            names = [entry['name'] for entry in meta.get('features', [])]
-            self._logger.debug('Surviving feature names = %s', names)
+        names = [entry['name'] for entry in meta.get('features', [])]
+        self._logger.debug('Surviving feature names = %s', names)
         self._logger.debug(
             'Extfov shape (vu) = (%d, %d); predicted_center = %s',
             self._extfov_v_size,
@@ -269,6 +284,7 @@ class NavModelRings(NavModelRingsBase):
             self._logger.warning('No closest planet found -- cannot create ring model')
             return
         self._planet = planet
+        self._metadata['planet'] = planet
         self._extfov_v_size = obs.extdata_shape_vu[0]
         self._extfov_u_size = obs.extdata_shape_vu[1]
         self._predicted_center_vu = (
@@ -322,8 +338,26 @@ class NavModelRings(NavModelRingsBase):
                 f'(got {type(features_raw).__name__!r})'
             )
         if not features_raw:
+            self._logger.info('Empty ring features dict for planet %s', planet)
             return
+        features: list[RingFeature] = []
+        for key, data in features_raw.items():
+            if not isinstance(data, dict):
+                raise ValueError(
+                    f'Ring config error: planet {planet!r} features.{key!r} must be a dict '
+                    f'(got {type(data).__name__!r})'
+                )
+            features.append(RingFeature.from_config(key, data))
+        validate_no_date_overlaps(features)
+        max_feature_extent = max(f.max_extent_radius for f in features)
         ring_target = f'{planet.lower()}:ring'
+        # Cheap 16x16 visibility pre-check: rules out the two common skip
+        # cases (no ring-plane intersection in the FOV at all; visible
+        # radial range entirely beyond the catalog's outermost feature)
+        # without paying for the dense ext-FOV backplane.  Saves ~5-7 s
+        # per image when it fires.
+        if self._sparse_visibility_skip(ring_target, max_feature_extent):
+            return
         bp_radii = obs.ext_bp.ring_radius(ring_target)
         if bp_radii.is_all_masked():
             self._logger.info('No rings visible in observation')
@@ -335,17 +369,15 @@ class NavModelRings(NavModelRingsBase):
             min_radius,
             max_radius,
         )
-        features: list[RingFeature] = []
-        for key, data in features_raw.items():
-            if not isinstance(data, dict):
-                raise ValueError(
-                    f'Ring config error: planet {planet!r} features.{key!r} must be a dict '
-                    f'(got {type(data).__name__!r})'
-                )
-            features.append(RingFeature.from_config(key, data))
-        validate_no_date_overlaps(features)
-        max_feature_extent = max(f.max_extent_radius for f in features)
         if min_radius > max_feature_extent:
+            self._logger.info(
+                'Visible ring radial range [%.0f, %.0f] km lies outside catalog '
+                'max extent of %.0f km for planet %s',
+                min_radius,
+                max_radius,
+                max_feature_extent,
+                planet,
+            )
             return
         resolutions: NDArrayFloatType = obs.ext_bp.ring_radial_resolution(ring_target).vals
         self._km_per_pixel_radial = float(np.mean(resolutions[np.isfinite(resolutions)]))
@@ -377,6 +409,9 @@ class NavModelRings(NavModelRingsBase):
         )
         surviving = feature_filter.filter(features)
         if not surviving:
+            self._logger.info(
+                'All %d ring features filtered out for planet %s', len(features), planet
+            )
             return
         all_edge_radii: list[tuple[float, str]] = []
         for feat in surviving:
@@ -443,6 +478,72 @@ class NavModelRings(NavModelRingsBase):
         self._metadata['features'] = [
             {'name': f.name, 'type': f.feature_type.value} for f in surviving
         ]
+
+    def _sparse_visibility_skip(self, ring_target: str, max_feature_extent: float) -> bool:
+        """Decide whether a sparse 16x16 ring-radius backplane rules out the dense path.
+
+        Builds a :class:`~oops.Meshgrid` covering the ext-FOV at
+        :data:`SPARSE_VISIBILITY_GRID_SIZE` samples per axis and runs a
+        single ``ring_radius`` evaluation against it.  Returns ``True``
+        when either:
+
+        * No sparse sample's ray intersects the ring plane — the FOV
+          looks entirely off the ring plane and the dense path would
+          report ``is_all_masked()`` after a much costlier
+          backplane evaluation.
+        * Every sparse sample's ring radius exceeds
+          ``max_feature_extent`` — the visible ring plane is at radii
+          beyond every catalog feature, so the dense ``min_radius >
+          max_feature_extent`` short-circuit would also fire.
+
+        Returns ``False`` when the dense path must run (some sparse
+        sample sees a ring radius inside the catalog, or the sparse
+        grid was uninformative).
+
+        Parameters:
+            ring_target: ``'<planet>:ring'`` target string.
+            max_feature_extent: Largest ``RingFeature.max_extent_radius``
+                across the surviving catalog entries.
+
+        Returns:
+            ``True`` to skip the dense backplane and emit no ring
+            features for this image; ``False`` to proceed.
+        """
+        obs = self.obs
+        u_extent = obs.extfov_u_max - obs.extfov_u_min + 1
+        v_extent = obs.extfov_v_max - obs.extfov_v_min + 1
+        u_step = max(1, u_extent // SPARSE_VISIBILITY_GRID_SIZE)
+        v_step = max(1, v_extent // SPARSE_VISIBILITY_GRID_SIZE)
+        sparse_meshgrid = Meshgrid.for_fov(
+            obs.fov,
+            origin=(obs.extfov_u_min + 0.5, obs.extfov_v_min + 0.5),
+            limit=(obs.extfov_u_max + 0.5, obs.extfov_v_max + 0.5),
+            undersample=(u_step, v_step),
+            swap=True,
+        )
+        sparse_bp = Backplane(obs, meshgrid=sparse_meshgrid)
+        sparse_radii = sparse_bp.ring_radius(ring_target)
+        if sparse_radii.is_all_masked():
+            self._logger.info(
+                'Sparse %dx%d visibility pre-check: no ring-plane intersection in FOV',
+                SPARSE_VISIBILITY_GRID_SIZE,
+                SPARSE_VISIBILITY_GRID_SIZE,
+            )
+            return True
+        sparse_min = float(sparse_radii.min().vals)
+        if sparse_min > max_feature_extent:
+            sparse_max = float(sparse_radii.max().vals)
+            self._logger.info(
+                'Sparse %dx%d visibility pre-check: visible ring radial range '
+                '[%.0f, %.0f] km lies outside catalog max extent of %.0f km',
+                SPARSE_VISIBILITY_GRID_SIZE,
+                SPARSE_VISIBILITY_GRID_SIZE,
+                sparse_min,
+                sparse_max,
+                max_feature_extent,
+            )
+            return True
+        return False
 
     def to_features(self, context: NavContext) -> list[NavFeature]:
         """Emit RING_EDGE / RING_ANNULUS features per surviving render result."""

@@ -21,7 +21,7 @@ Theory
 A :class:`~nav.nav_orchestrator.nav_result.NavResult` encodes one of three top-level
 outcomes:
 
-- ``'ok'`` — the ensemble combine produced an offset above the per-image confidence
+- ``'success'`` — the ensemble combine produced an offset above the per-image confidence
   threshold.
 - ``'failed'`` — a short-circuit gate fired, every technique was spurious, or the ensemble
   combine fell below the confidence threshold. The result carries no offset.
@@ -31,13 +31,13 @@ outcomes:
 The dataclass enforces consistency invariants in ``__post_init__``:
 
 - ``status='failed'`` must have ``offset_px=None``.
-- ``status='ok'`` must have a non-``None`` ``offset_px``.
+- ``status='success'`` must have a non-``None`` ``offset_px``.
 - ``confidence_rank='failed'`` requires ``status='failed'``.
 - ``confidence`` must lie in :math:`[0, 1]`.
 - ``covariance_px2``, when set, must be square and 2-D.
 
 Three classmethod constructors centralise common shapes:
-:meth:`~nav.nav_orchestrator.nav_result.NavResult.ok`,
+:meth:`~nav.nav_orchestrator.nav_result.NavResult.success`,
 :meth:`~nav.nav_orchestrator.nav_result.NavResult.failed`, and
 :meth:`~nav.nav_orchestrator.nav_result.NavResult.conflicted`. Direct instantiation is
 also supported when the caller already knows every field.
@@ -81,7 +81,7 @@ Public class :class:`~nav.nav_orchestrator.nav_result.NavResult`, frozen datacla
 
 Public fields (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
 
-- :attr:`~nav.nav_orchestrator.nav_result.NavResult.status` — one of ``'ok'``,
+- :attr:`~nav.nav_orchestrator.nav_result.NavResult.status` — one of ``'success'``,
   ``'failed'``, ``'conflicted'``.
 - :attr:`~nav.nav_orchestrator.nav_result.NavResult.offset_px` — ``(dv, du)`` offset;
   ``None`` on failure.
@@ -120,8 +120,8 @@ Public fields (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
 
 Public classmethod constructors:
 
-- :meth:`~nav.nav_orchestrator.nav_result.NavResult.ok` — build an ``ok``-status result
-  from the ensemble's offset and covariance.
+- :meth:`~nav.nav_orchestrator.nav_result.NavResult.success` — build a ``success``-status
+  result from the ensemble's offset and covariance.
 - :meth:`~nav.nav_orchestrator.nav_result.NavResult.failed` — build a ``failed``-status
   result from a status reason.
 - :meth:`~nav.nav_orchestrator.nav_result.NavResult.conflicted` — build a

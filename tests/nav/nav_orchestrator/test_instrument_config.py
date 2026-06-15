@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import pytest
@@ -65,14 +66,29 @@ def test_raw_dn_block_loads_thresholds() -> None:
     assert settings.thresholds.max_missing_frac_clean == 0.30
 
 
+def test_raw_dn_ignores_stray_signal_scale_key() -> None:
+    """A stray ``signal_dn_to_image_unit_scale`` key is silently ignored.
+
+    The field was removed from ``InstrumentSettings`` when the star gate
+    moved to a magnitude-based limit, so the loader no longer reads or
+    validates it; a leftover key must not break loading.
+    """
+    block = _raw_dn_block()
+    block['noise']['signal_dn_to_image_unit_scale'] = 0.5
+    settings = instrument_settings_from_obs(_FakeObs(block))
+    assert settings.data_units == 'raw_dn'
+    assert not hasattr(settings, 'signal_dn_to_image_unit_scale')
+
+
 def test_calibrated_if_block_uses_if_thresholds() -> None:
-    """A calibrated_if instrument reads saturation_threshold_if etc."""
+    """calibrated_if reads I/F thresholds and disables the saturation gate."""
     block = {
         'data_units': 'calibrated_if',
-        'noise': {'marker_value': 'NaN'},
+        'noise': {
+            'marker_value': 'NaN',
+        },
         'image_quality_thresholds': {
             'blank_max_if': 1.0e-3,
-            'saturation_threshold_if': 10.0,
             'noisy_threshold_if': 0.005,
             'max_missing_frac_clean': 0.05,
             'max_overexposed_frac_clean': 0.80,
@@ -84,8 +100,47 @@ def test_calibrated_if_block_uses_if_thresholds() -> None:
     assert settings.data_units == 'calibrated_if'
     assert settings.saturation_dn is None
     assert settings.thresholds.blank_max_dn == 1.0e-3
-    assert settings.thresholds.saturation_threshold_dn == 10.0
+    # Per Phase 10 §F: the saturation gate is intentionally off for
+    # calibrated_if, so the classifier sees an inf threshold and
+    # ``saturation_frac`` stays 0.0 regardless of pixel values.
+    assert math.isinf(settings.thresholds.saturation_threshold_dn)
     assert settings.thresholds.noisy_threshold == 0.005
+
+
+def test_calibrated_if_does_not_require_signal_scale() -> None:
+    """calibrated_if loads cleanly without a DN-to-image-unit scale.
+
+    The star gate is magnitude based now, so ``calibrated_if`` no longer
+    needs (or carries) ``signal_dn_to_image_unit_scale``.
+    """
+    block = {
+        'data_units': 'calibrated_if',
+        'noise': {'marker_value': 'NaN'},
+        'image_quality_thresholds': {
+            'blank_max_if': 1.0e-3,
+            'noisy_threshold_if': 0.005,
+        },
+    }
+    settings = instrument_settings_from_obs(_FakeObs(block))
+    assert settings.data_units == 'calibrated_if'
+    assert not hasattr(settings, 'signal_dn_to_image_unit_scale')
+
+
+def test_calibrated_if_rejects_explicit_saturation_threshold() -> None:
+    """A stale ``saturation_threshold_if`` field fails fast at load time."""
+    block = {
+        'data_units': 'calibrated_if',
+        'noise': {
+            'marker_value': 'NaN',
+        },
+        'image_quality_thresholds': {
+            'blank_max_if': 1.0e-3,
+            'saturation_threshold_if': 10.0,
+            'noisy_threshold_if': 0.005,
+        },
+    }
+    with pytest.raises(ValueError, match='saturation_threshold_if'):
+        instrument_settings_from_obs(_FakeObs(block))
 
 
 def test_missing_data_units_raises() -> None:
@@ -134,13 +189,12 @@ def test_calibrated_if_default_marker_is_nan() -> None:
         'data_units': 'calibrated_if',
         'image_quality_thresholds': {
             'blank_max_if': 1.0e-3,
-            'saturation_threshold_if': 10.0,
             'noisy_threshold_if': 0.005,
         },
-        'noise': None,
+        # An empty noise block still defaults the marker to NaN.
+        'noise': {},
     }
     settings = instrument_settings_from_obs(_FakeObs(block))
-    import math
 
     assert math.isnan(settings.marker_value)
 
@@ -155,7 +209,6 @@ def test_shipped_inst_configs_load_cleanly() -> None:
         config.category('cassini_iss').get('nac'),
         config.category('cassini_iss').get('wac'),
         config.category('newhorizons_lorri'),
-        config.category('voyager_iss'),
         config.category('galileo_ssi'),
     ]
     for block in blocks:
@@ -163,3 +216,22 @@ def test_shipped_inst_configs_load_cleanly() -> None:
         assert settings.data_units == 'raw_dn'
         assert settings.saturation_dn is not None
         assert settings.saturation_dn > 0.0
+
+
+def test_shipped_calibrated_if_configs_load_cleanly() -> None:
+    """Every shipped calibrated-IF block loads and disables the saturation gate."""
+    from nav.config import Config
+
+    config = Config()
+    config.read_config()
+    blocks = [
+        config.category('cassini_iss_calib').get('nac'),
+        config.category('cassini_iss_calib').get('wac'),
+        config.category('voyager_iss'),
+    ]
+    for block in blocks:
+        settings = instrument_settings_from_obs(_FakeObs(block))
+        assert settings.data_units == 'calibrated_if'
+        assert settings.saturation_dn is None
+        # Saturation gate disabled for calibrated_if (Phase 10 §F).
+        assert math.isinf(settings.thresholds.saturation_threshold_dn)

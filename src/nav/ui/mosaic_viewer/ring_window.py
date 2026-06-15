@@ -5,9 +5,7 @@ splitter (**radial | EW | image**), corotating EW bands (Ctrl+click), a Cursor
 Info grid and Color By controls in the lower strip, and status-bar readouts.
 """
 
-import logging
 import math
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -42,18 +40,23 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from nav.config import IMAGE_LOGGER
 from nav.support.time import et_to_utc
 from nav.ui.common import build_stretch_controls
-from nav.ui.mosaic_viewer.common import RingDisplayData, load_ring_file
+from nav.ui.mosaic_viewer.common import (
+    RingDisplayData,
+    _SyncedSlider,
+    _ZoomSync,
+    load_ring_file,
+)
+from nav.ui.mosaic_viewer.histogram_stretch import HistogramStretchWidget
 from nav.ui.mosaic_viewer.matplotlib_qt import canvas_draw_idle, new_figure_canvas_qtagg
 from nav.ui.mosaic_viewer.photometric_display import compute_ring_display_image
 from nav.ui.mosaic_viewer.tiled_image_widget import (
     TiledImageWidget,
-    _slider_to_zoom,
-    _zoom_to_slider,
 )
 
-logger = logging.getLogger(__name__)
+logger = IMAGE_LOGGER
 
 EW_PROFILE_LEFT_GUTTER_PX = 58
 
@@ -196,96 +199,6 @@ def _colorby_column(
     return rgb
 
 
-class _SyncedSlider:
-    """Keeps a QLineEdit and QSlider in sync for a single numeric parameter."""
-
-    def __init__(
-        self,
-        line_edit: QLineEdit,
-        slider: QSlider,
-        lo: float,
-        hi: float,
-        fmt: str = '%.4f',
-        on_change: Callable[[float], None] | None = None,
-    ) -> None:
-        """Wire ``line_edit`` and ``slider`` over ``[lo, hi]`` with optional ``on_change``.
-
-        Parameters:
-            line_edit: Numeric text field.
-            slider: 0..1000 slider mapped linearly to ``[lo, hi]``.
-            lo: Lower bound of the mapped range.
-            hi: Upper bound of the mapped range.
-            fmt: ``printf`` format for the line edit.
-            on_change: Called with the new float after slider or edit updates.
-        """
-        self._le = line_edit
-        self._sl = slider
-        self._lo = lo
-        self._hi = hi
-        self._fmt = fmt
-        self._on_change = on_change
-        self._updating = False
-        self._sl.valueChanged.connect(self._slider_moved)
-        self._le.editingFinished.connect(self._edit_done)
-
-    def _to_slider(self, val: float) -> int:
-        """Map ``val`` in ``[lo, hi]`` to a slider position in ``[0, 1000]``."""
-        if self._hi <= self._lo:
-            return 0
-        pos = (val - self._lo) / (self._hi - self._lo) * 1000.0
-        return round(float(np.clip(pos, 0, 1000)))
-
-    def _from_slider(self, pos: int) -> float:
-        """Map slider position ``pos`` (0..1000) back to a float in ``[lo, hi]``."""
-        return self._lo + (self._hi - self._lo) * pos / 1000.0
-
-    def _slider_moved(self, pos: int) -> None:
-        """Mirror slider motion into the line edit and invoke ``on_change``."""
-        if self._updating:
-            return
-        val = self._from_slider(pos)
-        self._updating = True
-        self._le.setText(self._fmt % val)
-        self._updating = False
-        if self._on_change:
-            self._on_change(val)
-
-    def _edit_done(self) -> None:
-        """Parse the line edit, clamp to ``[lo, hi]``, sync the slider, call ``on_change``."""
-        if self._updating:
-            return
-        try:
-            val = float(self._le.text())
-        except ValueError:
-            return
-        val = max(self._lo, min(self._hi, val))
-        self._updating = True
-        self._sl.setValue(self._to_slider(val))
-        self._le.setText(self._fmt % val)
-        self._updating = False
-        if self._on_change:
-            self._on_change(val)
-
-    def set_range(self, lo: float, hi: float) -> None:
-        """Update ``lo``/``hi`` without changing the displayed value."""
-        self._lo = lo
-        self._hi = hi
-
-    def set_value(self, val: float) -> None:
-        """Programmatically set both widgets to ``val`` (clamped by current range)."""
-        self._updating = True
-        self._sl.setValue(self._to_slider(val))
-        self._le.setText(self._fmt % val)
-        self._updating = False
-
-    def get_value(self) -> float:
-        """Return the line-edit float if valid, otherwise infer from the slider."""
-        try:
-            return float(self._le.text())
-        except ValueError:
-            return self._from_slider(self._sl.value())
-
-
 class RingMosaicWindow(QMainWindow):
     """PyQt6 viewer for ring reprojections and ring mosaics (``RingDisplayData``).
 
@@ -353,6 +266,9 @@ class RingMosaicWindow(QMainWindow):
         self._initial_gamma = initial_gamma
         self._show_radii_km = show_radii_km or []
         self._stretch_controls: dict[str, Any] = {}
+        self._stretch_form: QFormLayout = QFormLayout()
+        self._histogram_widget: HistogramStretchWidget | None = None
+        self._chk_histogram_mode: QCheckBox | None = None
         self._default_gamma = initial_gamma
         self._ring_view_ma: ma.MaskedArray | None = None
         self._last_profile_lon_ix: int | None = None
@@ -604,6 +520,7 @@ class RingMosaicWindow(QMainWindow):
         stretch_box = QGroupBox('Stretch')
         stretch_form = QFormLayout()
         stretch_form.setHorizontalSpacing(4)
+        self._stretch_form = stretch_form
         self._stretch_controls = build_stretch_controls(
             stretch_form,
             img_min=0.0,
@@ -616,6 +533,16 @@ class RingMosaicWindow(QMainWindow):
             on_gamma_changed=lambda _v: self._apply_stretch(),
             slider_horizontal_stretch=1,
         )
+        self._histogram_widget = HistogramStretchWidget(
+            on_black_changed=self._on_histogram_black_changed,
+            on_white_changed=self._on_histogram_white_changed,
+        )
+        self._histogram_widget.setVisible(False)
+        stretch_left = QVBoxLayout()
+        stretch_left.setContentsMargins(0, 0, 0, 0)
+        stretch_left.setSpacing(2)
+        stretch_left.addWidget(self._histogram_widget)
+        stretch_left.addLayout(stretch_form)
         stretch_btn_col = QVBoxLayout()
         stretch_btn_col.setSpacing(4)
         btn_stretch_reset = QPushButton('Reset')
@@ -627,11 +554,14 @@ class RingMosaicWindow(QMainWindow):
         for b in (btn_stretch_reset, btn_stretch_full, btn_stretch_bright):
             b.setMaximumWidth(72)
             stretch_btn_col.addWidget(b)
+        self._chk_histogram_mode = QCheckBox('Histogram')
+        self._chk_histogram_mode.toggled.connect(self._on_histogram_mode_toggled)
+        stretch_btn_col.addWidget(self._chk_histogram_mode)
         stretch_btn_col.addStretch()
         stretch_outer = QHBoxLayout()
         stretch_outer.setContentsMargins(4, 4, 4, 4)
         stretch_outer.setSpacing(8)
-        stretch_outer.addLayout(stretch_form, stretch=1)
+        stretch_outer.addLayout(stretch_left, stretch=1)
         stretch_outer.addLayout(stretch_btn_col)
         stretch_box.setLayout(stretch_outer)
         upper_h.addWidget(stretch_box, stretch=2)
@@ -816,13 +746,6 @@ class RingMosaicWindow(QMainWindow):
             else:
                 iw.set_zoom(xz, zoom_val)
 
-        class _ZoomSync(_SyncedSlider):
-            def _to_slider(self, val: float) -> int:
-                return _zoom_to_slider(val)
-
-            def _from_slider(self, pos: int) -> float:
-                return _slider_to_zoom(pos)
-
         sync = _ZoomSync(le, sl, 0.05, 100.0, '%.2f', on_change=_on_change)
         sync.set_value(1.0)
         return sync
@@ -886,7 +809,8 @@ class RingMosaicWindow(QMainWindow):
         black, white = _percentile_stretch(view, 0.0, 98.0)
         g = max(0.1, self._stretch_controls['slider_gamma'].value() / 100.0)
         self._stretch_controls['set_range'](dd.vmin, dd.vmax)
-        self._stretch_controls['set_values'](black, white, g)
+        self._set_stretch_levels(black, white, g)
+        self._refresh_histogram_data()
         self._image_widget.set_stretch(black, white, g)
         self._recompute_ring_ew_from_view()
         self._info['full_ew'].setText(f'{self._ew_mean:.5f} ± {self._ew_std:.5f}')
@@ -1287,7 +1211,8 @@ class RingMosaicWindow(QMainWindow):
             if self._initial_white is not None:
                 white = self._initial_white
             self._stretch_controls['set_range'](dd.vmin, dd.vmax)
-            self._stretch_controls['set_values'](black, white, self._initial_gamma)
+            self._set_stretch_levels(black, white, self._initial_gamma)
+            self._refresh_histogram_data()
             self._image_widget.set_stretch(black, white, self._initial_gamma)
 
             self._update_colorby_widgets_for_mosaic(dd.is_mosaic)
@@ -1337,20 +1262,68 @@ class RingMosaicWindow(QMainWindow):
         g = max(0.1, self._stretch_controls['slider_gamma'].value() / 100.0)
         self._image_widget.set_stretch(b, w, g)
 
+    def _set_stretch_levels(self, black: float, white: float, gamma: float) -> None:
+        """Sync black/white/gamma into both the slider controls and the histogram."""
+        self._stretch_controls['set_values'](black, white, gamma)
+        if self._histogram_widget is not None:
+            self._histogram_widget.set_values(black, white)
+
+    def _on_histogram_black_changed(self, black: float) -> None:
+        white = self._stretch_controls['from_slider'](
+            self._stretch_controls['slider_white'].value()
+        )
+        gamma = max(0.1, self._stretch_controls['slider_gamma'].value() / 100.0)
+        self._stretch_controls['set_values'](black, white, gamma)
+        self._apply_stretch()
+
+    def _on_histogram_white_changed(self, white: float) -> None:
+        black = self._stretch_controls['from_slider'](
+            self._stretch_controls['slider_black'].value()
+        )
+        gamma = max(0.1, self._stretch_controls['slider_gamma'].value() / 100.0)
+        self._stretch_controls['set_values'](black, white, gamma)
+        self._apply_stretch()
+
+    def _on_histogram_mode_toggled(self, checked: bool) -> None:
+        if self._histogram_widget is None or self._chk_histogram_mode is None:
+            return
+        # Slider rows are at indices 0 (Black) and 1 (White); Gamma at 2.
+        self._stretch_form.setRowVisible(0, not checked)
+        self._stretch_form.setRowVisible(1, not checked)
+        self._histogram_widget.setVisible(checked)
+        if checked:
+            black = self._stretch_controls['from_slider'](
+                self._stretch_controls['slider_black'].value()
+            )
+            white = self._stretch_controls['from_slider'](
+                self._stretch_controls['slider_white'].value()
+            )
+            self._histogram_widget.set_values(black, white)
+            self._refresh_histogram_data()
+
+    def _refresh_histogram_data(self) -> None:
+        if self._histogram_widget is None:
+            return
+        dd = self._display_data
+        if dd is None:
+            return
+        view = self._ring_view_ma if self._ring_view_ma is not None else dd.image_ma
+        self._histogram_widget.set_data(view)
+
     def _on_stretch_preset_reset(self) -> None:
         dd = self._display_data
         if dd is None:
             return
         view = self._ring_view_ma if self._ring_view_ma is not None else dd.image_ma
         black, white = _percentile_stretch(view, 0.0, 98.0)
-        self._stretch_controls['set_values'](black, white, self._default_gamma)
+        self._set_stretch_levels(black, white, self._default_gamma)
         self._apply_stretch()
 
     def _on_stretch_preset_full(self) -> None:
         dd = self._display_data
         if dd is None:
             return
-        self._stretch_controls['set_values'](dd.vmin, dd.vmax, self._default_gamma)
+        self._set_stretch_levels(dd.vmin, dd.vmax, self._default_gamma)
         self._image_widget.set_stretch(dd.vmin, dd.vmax, self._default_gamma)
 
     def _on_stretch_preset_bright(self) -> None:
@@ -1359,7 +1332,7 @@ class RingMosaicWindow(QMainWindow):
             return
         view = self._ring_view_ma if self._ring_view_ma is not None else dd.image_ma
         black, white = _percentile_stretch(view, 2.0, 98.0)
-        self._stretch_controls['set_values'](black, white, self._default_gamma)
+        self._set_stretch_levels(black, white, self._default_gamma)
         self._apply_stretch()
 
     def _fit_zoom_to_window(self) -> None:

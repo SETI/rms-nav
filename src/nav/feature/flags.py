@@ -36,11 +36,12 @@ class StarFlags:
             a predicted body silhouette in extfov.
         in_saturation_or_cosmic_mask: True if the predicted star position
             falls inside a saturation or cosmic-ray mask pixel.
-        predicted_snr: Predicted integrated SNR for the catalog star (raw,
-            uncapped).  Consumed by ``StarUniqueMatchNav`` to rank stars
-            by predicted brightness when picking the unique-bright pair.
-            ``0.0`` for fixtures or features whose model did not populate
-            it.  Must be ``>= 0``.
+        predicted_snr: Magnitude-margin-derived effective SNR for the
+            catalog star (``SNR_REF * 2.512 ** (mag_limit - vmag)``), not a
+            DN-based photometric SNR.  Monotone in catalog brightness, so
+            ``StarUniqueMatchNav`` can still rank stars by it when picking
+            the unique-bright pair.  ``0.0`` for fixtures or features whose
+            model did not populate it.  Must be ``>= 0``.
         vmag: Catalog V-band magnitude of the star, or ``None`` when the
             catalog entry has no magnitude.  Used by ``StarUniqueMatchNav``
             to compute the magnitude margin to the next-brightest star.
@@ -161,16 +162,41 @@ class BodyBlobFlags:
         body_name: SPICE body name whose blob this feature represents.
         predicted_diameter_px: Predicted disc diameter in pixels (longer
             axis of the predicted ellipse silhouette).  Must be ``>= 0``.
+        phase_angle_deg: Phase angle (Sun -> body -> observer) at the
+            body's center, in degrees.  Recorded for diagnostic
+            inspection; the BLOB confidence formula consumes
+            ``phase_irregularity_factor`` instead, since raw phase alone
+            understates the centroid uncertainty for an irregular body.
+            Must be in ``[0, 180]``.
+        phase_irregularity_factor: Dimensionless coupling of phase angle
+            and shape irregularity, computed by the body NavModel as
+            ``(ellipsoid_rms_residual_km / body_radius_km) *
+            (1 + 2 * sin^2(phase / 2))``.  Captures the centroid-bias
+            risk that the lit-weighted predicted centroid cannot fully
+            correct for.  The fractional ``residual / radius`` term is
+            ~ 0.005 for regular moons and ~ 0.05-0.10 for irregular
+            satellites; the phase factor goes from 1 at full-phase
+            (rotational orientation always unknown) to 3 at full
+            crescent (most of the body unlit, hiding most of the
+            irregularity).  Must be ``>= 0``.
     """
 
     body_name: str = ''
     predicted_diameter_px: float = 0.0
+    phase_angle_deg: float = 0.0
+    phase_irregularity_factor: float = 0.0
 
     def __post_init__(self) -> None:
-        """Validate ``predicted_diameter_px`` is non-negative."""
+        """Validate per-field constraints."""
         if self.predicted_diameter_px < 0.0:
             raise ValueError(
                 f'predicted_diameter_px must be >= 0; got {self.predicted_diameter_px!r}'
+            )
+        if not (0.0 <= self.phase_angle_deg <= 180.0):
+            raise ValueError(f'phase_angle_deg must be in [0, 180]; got {self.phase_angle_deg!r}')
+        if self.phase_irregularity_factor < 0.0:
+            raise ValueError(
+                f'phase_irregularity_factor must be >= 0; got {self.phase_irregularity_factor!r}'
             )
 
 

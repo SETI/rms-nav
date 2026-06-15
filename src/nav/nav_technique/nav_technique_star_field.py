@@ -64,7 +64,6 @@ from nav.nav_technique.nav_technique import (
     NavTechnique,
     embed_rotation_unobservable,
     log_confidence_breakdown,
-    rotation_unobservable_sigma_rad,
     search_window_for_obs,
 )
 from nav.nav_technique.technique_result import NavTechniqueResult
@@ -425,24 +424,6 @@ def _solve_translation(
     return dv, du
 
 
-def _seed_from_image_et(image_et: float) -> int:
-    """Return a deterministic 64-bit RANSAC seed from the obs midtime ET.
-
-    Per Part 3 §"Determinism in RANSAC" the matcher iterates triplets
-    in sorted order (no random sampling), so the seed is informational
-    rather than load-bearing.  It is logged so that any future
-    tie-breaking RNG can pull from the same value and stay
-    reproducible across two back-to-back invocations on the same obs.
-    """
-    if not math.isfinite(image_et):
-        return 0
-    # Convert seconds-past-J2000 (TDB) to integer nanoseconds, then
-    # mask into the unsigned 64-bit range; ``& 0xFFFFFFFFFFFFFFFF``
-    # makes negative ETs (pre-J2000 obs, e.g. Voyager) wrap cleanly
-    # rather than overflow ``np.random.default_rng``.
-    return round(image_et * 1.0e9) & 0xFFFFFFFFFFFFFFFF
-
-
 class _StarFieldConfidenceContext:
     """Adapter binding ``StarFieldDiagnostics`` plus side flags."""
 
@@ -497,6 +478,10 @@ class StarFieldFromCatalogNav(NavTechnique):
         self._min_inliers = int(self.tuning['pattern_match_min_inliers'])
         self._at_edge_tolerance_px = float(self.tuning['at_edge_tolerance_px'])
         self._rotation_at_edge_fraction = float(self.tuning['rotation_at_edge_fraction'])
+        # Uncalibrated model-error variance floor (px); added in quadrature to
+        # the reported covariance diagonal.  Default 0.0 -> no-op.  See
+        # ORCH-001 / config_510_techniques.yaml.
+        self._model_error_floor_px = float(self.tuning.get('model_error_floor_px', 0.0))
         if self._min_inliers < 3:
             raise ValueError(
                 f'pattern_match_min_inliers must be >= 3 (the matcher needs at '
@@ -541,8 +526,6 @@ class StarFieldFromCatalogNav(NavTechnique):
                 len(usable),
                 len(features),
             )
-            seed = _seed_from_image_et(float(context.provenance.image_et))
-            self.logger.debug('RANSAC seed (from obs.midtime ns): %d', seed)
             ranked_catalog = sorted(usable, key=predicted_snr, reverse=True)[: self._max_sources]
             n_catalog_predicted = len(ranked_catalog)
             if n_catalog_predicted < 3:
@@ -879,25 +862,40 @@ class StarFieldFromCatalogNav(NavTechnique):
         return refined, weights
 
     def _build_covariance(
-        self, *, weights: NDArrayFloatType, residuals: NDArrayFloatType
+        self, *, weights: NDArrayFloatType, residuals: NDArrayFloatType, n_params: int = 2
     ) -> NDArrayFloatType:
         """Return the per-axis covariance of the translation estimate.
 
-        With ``N`` weighted residuals the parameter (mean) covariance is
-        per-axis ``var_axis / sum(weights)``; the variance is computed
-        with the biweight weights so outliers do not inflate it.  A
-        small floor (``1 / sum(weights)``) keeps the covariance
-        positive-definite in the noise-free case where every residual
-        is zero.
+        Reduced-chi-square weighted-mean form.  With ``N`` weighted
+        residuals and ``p = n_params`` fitted parameters (2 for the
+        translation-only fit, 3 when an outer rotation is co-fitted),
+        the per-axis reduced chi-square is
+
+        ::
+
+            chi2_nu_axis = sum_i w_i * r_axis_i**2 / max(N - p, 1)
+
+        and the weighted-mean variance is ``chi2_nu_axis / sum(w_i)``.
+        The ``max(N - p, 1)`` degrees-of-freedom factor inflates the
+        variance when fewer points than parameters constrain the fit
+        (an under-determined geometry cannot be reported as confident).
+        A positive-definite floor of ``1 / sum(w_i)`` (pure
+        inverse-precision) keeps the covariance non-degenerate in the
+        noise-free case where every residual is zero.  Finally the
+        uncalibrated ``model_error_floor_px**2`` is added to the
+        diagonal (a no-op at the default 0.0).
         """
         total = float(weights.sum())
         if total <= 0.0:
             return np.eye(2, dtype=np.float64)
-        var_v = float(np.sum(weights * residuals[:, 0] ** 2)) / total
-        var_u = float(np.sum(weights * residuals[:, 1] ** 2)) / total
+        n = residuals.shape[0]
+        dof = max(n - n_params, 1)
+        chi2_nu_v = float(np.sum(weights * residuals[:, 0] ** 2)) / dof
+        chi2_nu_u = float(np.sum(weights * residuals[:, 1] ** 2)) / dof
         floor = 1.0 / total
-        cov_v = max(var_v / total, floor)
-        cov_u = max(var_u / total, floor)
+        model_error = self._model_error_floor_px * self._model_error_floor_px
+        cov_v = max(chi2_nu_v / total, floor) + model_error
+        cov_u = max(chi2_nu_u / total, floor) + model_error
         return np.diag([cov_v, cov_u]).astype(np.float64)
 
     def _build_covariance_3dof(
@@ -909,24 +907,32 @@ class StarFieldFromCatalogNav(NavTechnique):
     ) -> NDArrayFloatType:
         """Return the 3x3 covariance for the similarity-transform fit.
 
-        Translation block follows :meth:`_build_covariance`; the
-        rotation diagonal uses the textbook formula
+        Translation block follows :meth:`_build_covariance` with ``p =
+        3`` (three parameters are co-fitted: dv, du, theta); the
+        rotation diagonal uses the reduced-chi-square lever-arm formula
 
         ::
 
-            sigma_theta**2 = sigma_residual**2 / sum_i w_i * |cat_i - cc|**2
+            sigma_theta**2 = chi2_nu_residual / sum_i w_i * |cat_i - cc|**2
 
-        where ``sigma_residual**2`` is the per-axis weighted residual
-        variance and ``cc`` is the catalog centroid.  Cross-terms are
-        zero — under independent-isotropic-residual assumptions the
-        translation and rotation parameters of a Procrustes fit are
-        uncorrelated.  Whenever the catalog spread is too small to
-        constrain rotation (numerically zero or negative spread, e.g.
-        coincident inliers) the rotation diagonal collapses to the
-        rotation-unobservable sentinel so ``pinvh`` cleanly drops the
-        rotation contribution.
+        where ``cc`` is the (weighted) catalog centroid, ``|cat_i - cc|``
+        is each point's lever-arm distance from the rotation centre, and
+
+        ::
+
+            chi2_nu_residual = 0.5 * (sum_i w_i r_v_i**2 + sum_i w_i r_u_i**2)
+                               / max(N - 3, 1)
+
+        is the pooled per-axis reduced chi-square of the fit residuals.
+        Cross-terms are zero — under independent-isotropic-residual
+        assumptions the translation and rotation parameters of a
+        Procrustes fit are uncorrelated.  Whenever the catalog spread is
+        too small to constrain rotation (numerically zero or negative
+        spread, e.g. coincident inliers) the rotation diagonal collapses
+        to the rotation-unobservable sentinel so ``pinvh`` cleanly drops
+        the rotation contribution.
         """
-        cov_2x2 = self._build_covariance(weights=weights, residuals=residuals)
+        cov_2x2 = self._build_covariance(weights=weights, residuals=residuals, n_params=3)
         total = float(weights.sum())
         if total <= 0.0:
             return embed_rotation_unobservable(cov_2x2)
@@ -935,13 +941,15 @@ class StarFieldFromCatalogNav(NavTechnique):
         dv = cat_inliers[:, 0] - cat_c_v
         du = cat_inliers[:, 1] - cat_c_u
         spread = float(np.sum(weights * (dv * dv + du * du)))
-        var_v = float(np.sum(weights * residuals[:, 0] ** 2)) / total
-        var_u = float(np.sum(weights * residuals[:, 1] ** 2)) / total
-        var_residual = 0.5 * (var_v + var_u)
+        n = residuals.shape[0]
+        dof = max(n - 3, 1)
+        chi2_v = float(np.sum(weights * residuals[:, 0] ** 2))
+        chi2_u = float(np.sum(weights * residuals[:, 1] ** 2))
+        chi2_nu_residual = 0.5 * (chi2_v + chi2_u) / dof
         if spread <= 0.0:
             sigma_theta_sq = ROTATION_UNOBSERVABLE_VARIANCE
         else:
-            sigma_theta_sq = max(var_residual / spread, 1.0 / spread)
+            sigma_theta_sq = max(chi2_nu_residual / spread, 1.0 / spread)
         cov = np.zeros((3, 3), dtype=np.float64)
         cov[:2, :2] = cov_2x2
         cov[2, 2] = sigma_theta_sq
@@ -977,17 +985,8 @@ class StarFieldFromCatalogNav(NavTechnique):
     ) -> NavTechniqueResult:
         """Return a zero-confidence spurious result with the supplied reason."""
         self.logger.info('Reporting spurious result: %s', reason)
-        cov_2x2 = 1e6 * np.eye(2, dtype=np.float64)
-        cov = embed_rotation_unobservable(cov_2x2) if fit_rotation else cov_2x2
-        return NavTechniqueResult(
-            technique_name=self.name,
+        return self._spurious_result(
             feature_ids=tuple(f.feature_id for f in features),
-            offset_px=(0.0, 0.0),
-            covariance_px2=cov,
-            confidence=0.0,
-            spurious=True,
-            at_edge=False,
             diagnostics=diagnostics,
-            rotation_rad=0.0 if fit_rotation else None,
-            sigma_rotation_rad=(rotation_unobservable_sigma_rad() if fit_rotation else None),
+            fit_rotation=fit_rotation,
         )

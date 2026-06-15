@@ -40,7 +40,6 @@ from nav.nav_model.stars.catalog import reduce_catalogs
 from nav.nav_model.stars.conflicts import mark_body_and_ring_conflicts
 from nav.nav_model.stars.predicted_snr import (
     SCLASS_TO_B_MINUS_V,
-    predicted_snr,
     psf_sigma_px,
 )
 from nav.nav_model.stars.smeared_psf import compute_smear_vector_px, smear_length_px
@@ -58,6 +57,25 @@ __all__ = [
     'SCLASS_TO_B_MINUS_V',
     'NavModelStars',
 ]
+
+# Effective-SNR constants for the magnitude-margin reliability shape.
+#
+# The star gate is purely magnitude based: the catalog reduction and this
+# model drop any star fainter than ``obs.star_max_usable_vmag()``.  The
+# CRLB-covariance and reliability helpers still want an SNR-like quantity,
+# so we synthesise one from how far below the limiting magnitude the star
+# sits.  A star exactly at the limit gets ``snr_eff == SNR_REF``; every
+# extra magnitude of headroom multiplies the effective SNR by one Pogson
+# ratio (``2.512``), matching the flux ratio per magnitude.
+#
+# ``SNR_REF`` is set to 8.0 — just below the reliability sigmoid centre
+# (snr=10) so a star at the very edge of usability lands near the steep
+# part of the curve (reliability ~0.34) rather than saturating it, while a
+# star a few magnitudes brighter saturates the curve toward 1.0.
+# ``SNR_FLOOR`` keeps the synthesised SNR strictly positive so the
+# covariance never degenerates to the zero-SNR huge-variance branch.
+SNR_REF: float = 8.0
+SNR_FLOOR: float = 0.1
 
 
 class NavModelStars(NavModel):
@@ -154,13 +172,16 @@ class NavModelStars(NavModel):
             self._logger.info('Model created in %.3f s', self._metadata['elapsed_time_sec'])
 
     def to_features(self, context: NavContext) -> list[NavFeature]:
-        """Emit one STAR feature per catalog star above the SNR floor.
+        """Emit one STAR feature per catalog star within the magnitude limit.
 
         Stars with body or ring conflicts are emitted with the matching
         ``in_body_silhouette`` / ``in_saturation_or_cosmic_mask`` flags
         set; the reliability gate decides whether to keep them.  Stars
-        whose predicted SNR is below ``stars.min_predicted_snr`` (when
-        configured; default ``0`` keeps them all) are skipped.
+        fainter than ``obs.star_max_usable_vmag()`` (or with no catalog
+        magnitude) are skipped.  Detectability is expressed through a
+        magnitude-margin-derived effective SNR rather than a DN-based
+        photometric SNR, so the gate carries no dependence on any
+        DN-to-image-unit scale.
 
         Parameters:
             context: Per-image NavContext.
@@ -184,15 +205,18 @@ class NavModelStars(NavModel):
                 image_noise_sigma,
             )
             return []
+        mag_limit = float(self.obs.star_max_usable_vmag())
         min_snr = float(getattr(self._stars_config, 'min_predicted_snr', 0.0))
         max_smear = float(getattr(self._stars_config, 'max_smear', math.inf))
         sat_mask = context.saturation_mask_ext
         cosmic_mask = context.cosmic_ray_mask_ext
         mag_offset_value = _resolve_mag_offset(self.obs)
         self._logger.debug(
-            'image_noise_sigma = %.3f, sigma_psf = %.3f px, mag_offset = %.3f, '
+            'image_noise_sigma = %.3g, star_max_usable_vmag = %.3f, '
+            'sigma_psf = %.3f px, mag_offset = %.3f, '
             'min_predicted_snr = %.2f, max_smear = %.2f px',
             image_noise_sigma,
+            mag_limit,
             sigma_psf,
             mag_offset_value,
             min_snr,
@@ -200,21 +224,25 @@ class NavModelStars(NavModel):
         )
 
         features: list[NavFeature] = []
-        skipped_low_snr = 0
+        skipped_faint = 0
         skipped_smear = 0
         in_body_count = 0
         in_ring_count = 0
         in_sat_count = 0
         for star in self._stars:
-            snr = predicted_snr(
-                star,
-                psf=psf,
-                image_noise_sigma=image_noise_sigma,
-                mag_offset=mag_offset_value,
-            )
-            if snr < min_snr:
-                skipped_low_snr += 1
+            # Magnitude gate: drop stars with no catalog magnitude and stars
+            # fainter than the per-image limiting magnitude.  This is mostly
+            # redundant with the catalog reduction's magnitude cap, but it
+            # keeps the model self-contained and handles ``vmag is None``.
+            if star.vmag is None or float(star.vmag) > mag_limit:
+                skipped_faint += 1
                 continue
+            # Magnitude-margin-derived effective SNR: how far the star sits
+            # below the limiting magnitude, expressed as a flux ratio.  A
+            # star at the limit gets ``SNR_REF``; each brighter magnitude
+            # multiplies by one Pogson ratio.  No DN units are involved.
+            snr_eff = SNR_REF * (2.512 ** (mag_limit - float(star.vmag)))
+            snr_eff = max(snr_eff, SNR_FLOOR)
             smear_len = smear_length_px(star.move_v, star.move_u)
             # Per the design's "max_smear" gate — stars with a smear longer
             # than the per-instrument cap are unfittable even with the
@@ -224,8 +252,8 @@ class NavModelStars(NavModel):
                 skipped_smear += 1
                 continue
             v_extfov, u_extfov = self._extfov_indices(star)
-            in_body = bool(star.conflicts.startswith('BODY'))
-            in_ring = bool(star.conflicts.startswith('RING'))
+            in_body = bool((star.conflicts or '').startswith('BODY'))
+            in_ring = bool((star.conflicts or '').startswith('RING'))
             in_sat = bool(_safe_mask_lookup(sat_mask, v_extfov, u_extfov))
             in_cosmic = bool(_safe_mask_lookup(cosmic_mask, v_extfov, u_extfov))
             in_sat_or_cosmic = in_sat or in_cosmic
@@ -236,7 +264,7 @@ class NavModelStars(NavModel):
             if in_sat_or_cosmic:
                 in_sat_count += 1
             cov = _crlb_covariance(
-                snr=snr,
+                snr=snr_eff,
                 sigma_psf=sigma_psf,
                 move_v=star.move_v,
                 move_u=star.move_u,
@@ -263,13 +291,13 @@ class NavModelStars(NavModel):
                     intensity_sigma_rel=0.0,
                     preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
                     reliability=_reliability_from_snr(
-                        snr=snr,
+                        snr=snr_eff,
                         in_body=in_body,
                         in_ring=in_ring,
                         in_saturation=in_sat_or_cosmic,
                     ),
                     reliability_reasons=NavReliabilityBreakdown(
-                        predicted_snr=_snr_reason_score(snr, min_snr),
+                        predicted_snr=_snr_reason_score(snr_eff, min_snr),
                         in_body_silhouette=in_body or in_ring,
                         in_saturation_or_cosmic=in_sat_or_cosmic,
                         smear_length_ok=True,
@@ -280,15 +308,15 @@ class NavModelStars(NavModel):
                         smear_length_px=smear_len,
                         in_body_silhouette=in_body or in_ring,
                         in_saturation_or_cosmic_mask=in_sat_or_cosmic,
-                        predicted_snr=float(snr),
+                        predicted_snr=float(snr_eff),
                         vmag=(None if star.vmag is None else float(star.vmag)),
                     ),
                 )
             )
         self._logger.info(
-            'Emitted %d STAR feature(s) (low-SNR skipped %d, smear skipped %d)',
+            'Emitted %d STAR feature(s) (faint skipped %d, smear skipped %d)',
             len(features),
-            skipped_low_snr,
+            skipped_faint,
             skipped_smear,
         )
         if features:
@@ -485,16 +513,18 @@ def _crlb_covariance(
 
 
 def _snr_reason_score(snr: float, min_snr: float) -> float:
-    """Map a predicted SNR onto the reliability-breakdown ``predicted_snr`` field.
+    """Map an effective SNR onto the reliability-breakdown ``predicted_snr`` field.
 
     The ``NavReliabilityBreakdown.predicted_snr`` is a [0, 1] contribution
-    score, not the raw SNR.  This helper folds the configured floor in:
-    when ``min_snr > 0``, the score is ``snr / min_snr`` capped at 1; when
-    no floor is configured, an SNR of 50 saturates the score (the same
-    centre the reliability sigmoid uses).
+    score, not the raw SNR.  ``snr`` here is the magnitude-margin-derived
+    effective SNR (``SNR_REF * 2.512 ** (mag_limit - vmag)``), not a
+    photometric DN SNR.  This helper folds the configured floor in: when
+    ``min_snr > 0``, the score is ``snr / min_snr`` capped at 1; when no
+    floor is configured, an SNR of 50 saturates the score (the same centre
+    the reliability sigmoid uses).
 
     Parameters:
-        snr: Predicted SNR.
+        snr: Effective magnitude-margin SNR.
         min_snr: Configured floor (``stars.min_predicted_snr``); 0
             when unset.
 

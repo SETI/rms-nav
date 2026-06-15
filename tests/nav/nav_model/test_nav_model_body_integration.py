@@ -51,6 +51,7 @@ def _make_polyline_sampler(*, n: int, km_per_pixel: float = 1.0) -> _PolylineSam
         normals_vu=normals,
         incidence_rad=incidence,
         km_per_pixel=km,
+        total_vertices=n,
     )
 
 
@@ -230,7 +231,7 @@ def test_to_features_limb_uncertainty_at_threshold(fake_obs: FakeObs) -> None:
     """The LIMB_ARC vs BODY_BLOB switch is correctly placed around the threshold.
 
     With ``LIMB_ARC_MAX_UNCERTAINTY_PX = 3.0`` and Saturn's
-    ``ellipsoid_residual_km = 50`` (gas-giant default), the threshold
+    ``ellipsoid_rms_residual_km = 50`` (gas-giant default), the threshold
     sits at ``km_per_pixel_at_limb = 50 / 3.0 ~= 16.67``.  This test
     probes either side of that threshold:
 

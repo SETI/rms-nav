@@ -83,7 +83,7 @@ Sidecar schema (schema_version 1)
        Hand-verified limb fit, no rings in the FOV.
 
    expected:
-     status: ok                       # ok | failed | conflicted
+     status: success                  # success | failed | conflicted
      confidence_tier: high            # high | medium | low | failed
      primary_technique: BodyLimbNav
      techniques_must_run: [BodyLimbNav]

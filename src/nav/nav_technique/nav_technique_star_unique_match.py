@@ -650,17 +650,8 @@ class StarUniqueMatchNav(NavTechnique):
     ) -> NavTechniqueResult:
         """Return a zero-confidence spurious result with the supplied reason."""
         self.logger.info('Reporting spurious result: %s', reason)
-        cov_2x2 = 1e6 * np.eye(2, dtype=np.float64)
-        cov = embed_rotation_unobservable(cov_2x2) if fit_rotation else cov_2x2
-        return NavTechniqueResult(
-            technique_name=self.name,
+        return self._spurious_result(
             feature_ids=tuple(f.feature_id for f in features),
-            offset_px=(0.0, 0.0),
-            covariance_px2=cov,
-            confidence=0.0,
-            spurious=True,
-            at_edge=False,
             diagnostics=diagnostics,
-            rotation_rad=0.0 if fit_rotation else None,
-            sigma_rotation_rad=(rotation_unobservable_sigma_rad() if fit_rotation else None),
+            fit_rotation=fit_rotation,
         )

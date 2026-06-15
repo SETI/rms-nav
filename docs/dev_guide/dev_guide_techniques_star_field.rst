@@ -329,9 +329,9 @@ Examples
     cohort and polishes the offset further.
 
 ``faint_stars`` (Galileo SSI / Voyager outer-leg scene class)
-    Every catalog star in the FOV has predicted SNR below the per-instrument detection
-    floor. The stars model emits no ``STAR`` features whose predicted SNR clears the
-    reliability gate. The technique's
+    Every catalog star in the FOV is fainter than the per-observation limiting magnitude
+    ``obs.star_max_usable_vmag()``. The stars model emits no ``STAR`` features that clear
+    the magnitude gate. The technique's
     :meth:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav.is_feasible`
     fails with reason ``no_usable_stars`` and the technique skips its navigate pass
     entirely. The orchestrator falls back to whichever body- or ring-derived technique is

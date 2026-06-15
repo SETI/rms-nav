@@ -38,8 +38,12 @@ class NavContext:
         image_ext: The extended-FOV image array (post source-image filter).
         sensor_mask_ext: ``True`` where the pixel is real sensor data,
             ``False`` for extfov padding.
-        image_noise_sigma: Robust MAD-based noise sigma (DN units), computed
-            over the entire sensor area.
+        image_noise_sigma: Robust MAD-based noise sigma in the image's
+            native units (DN for ``raw_dn`` instruments, I/F for
+            ``calibrated_if``), computed over the entire sensor area.
+            Pixel-threshold consumers (cosmic-ray mask, body-blob noise
+            floor, star detection) use this value directly because they
+            compare against pixel intensities in the same units.
         saturation_mask_ext: ``True`` where pixels at or above the
             instrument's full-well DN.
         cosmic_ray_mask_ext: ``True`` where single-pixel cosmic-ray spikes
@@ -109,12 +113,11 @@ class NavContext:
             from the per-instrument flag.
 
         Raises:
-            TypeError: if ``offset_px`` is not a length-2 sequence of
-                numbers or ``covariance_px2`` cannot be coerced to a float
-                array.
-            ValueError: if ``offset_px`` contains non-finite entries or
-                ``covariance_px2`` is not square 2x2 / 3x3 or contains
-                non-finite entries.
+            TypeError: if ``offset_px`` entries are non-numeric (cannot be
+                coerced to ``float``).
+            ValueError: if ``offset_px`` is not a length-2 sequence, contains
+                non-finite entries, or ``covariance_px2`` is not square
+                2x2 / 3x3 or contains non-finite entries.
         """
         if len(offset_px) != 2:
             raise ValueError(f'offset_px must be a length-2 sequence; got length {len(offset_px)}')

@@ -7,11 +7,13 @@ Overview
 
 :class:`~nav.nav_model.stars.nav_model_stars.NavModelStars` is the catalog-driven star
 navigation model. For each observation the model reduces the configured catalog set into a
-deduplicated star list, computes per-star predicted SNR using the per-instrument PSF and the
-catalog-side B-V colour, flags stars whose predicted positions overlap a body silhouette or
+deduplicated star list, gates each star by catalog magnitude against the per-observation
+limiting magnitude :meth:`obs.star_max_usable_vmag() <nav.obs.obs_inst.ObsInst.star_max_usable_vmag>`,
+flags stars whose predicted positions overlap a body silhouette or
 ring annulus, and emits one
 :data:`~nav.feature.feature_type.NavFeatureType.STAR` :class:`~nav.feature.feature.NavFeature`
-per star whose predicted SNR clears the floor and whose conflict flags allow it.
+per star that is at least as bright as the limiting magnitude and whose conflict flags
+allow it.
 
 The orchestrator builds exactly one instance of this model per observation regardless of
 scene content; star navigation is the universal fallback when other navigation paths fail.
@@ -20,7 +22,7 @@ Theory
 ======
 
 The star model orchestrates four cooperating steps: catalog reduction, conflict marking,
-SNR prediction, and per-star feature emission.
+the magnitude detectability gate, and per-star feature emission.
 
 Catalog reduction
 -----------------
@@ -48,84 +50,71 @@ Conflict-flagged stars stay in the model's list (so the curator surfaces them in
 sidecar) but are excluded from the autonomous matching path by the upstream
 ``usable_stars`` filter consulted by every star technique.
 
-Predicted SNR
--------------
+Magnitude detectability gate
+----------------------------
 
-The per-star predicted SNR is the matched-filter integrated signal-to-noise ratio at the
-star's predicted pixel position, given the per-instrument PSF and the per-image robust
-noise estimate. Three quantities feed the formula:
+A star is detectable when its catalog visual magnitude is at least as bright as the
+per-observation limiting magnitude :meth:`obs.star_max_usable_vmag()
+<nav.obs.obs_inst.ObsInst.star_max_usable_vmag>`. The gate is purely
+magnitude-based: a star with no catalog magnitude, or with
+:math:`V_{\mathrm{mag}} > m_{\mathrm{limit}}`, is skipped, and no per-pixel DN photometry
+or DN-to-image-unit scaling enters the decision. The catalog reduction applies the same
+magnitude cap, so the gate in the model is mostly a self-contained re-check that also
+handles the missing-magnitude case.
 
-- The integrated in-band signal :math:`S_{\mathrm{DN}}` derived from the catalog
-  V-magnitude with a per-instrument-per-filter ``mag_offset``:
-
-  .. math::
-
-      S_{\mathrm{DN}} = 2.512^{-(V_{\mathrm{mag}} + \delta_{\mathrm{mag}} - 4)}
-
-  with :math:`\delta_{\mathrm{mag}}` resolved from
-  :class:`~nav.nav_orchestrator.instrument_config.InstrumentSettings` per the per-image
-  filter combo. The reference magnitude (4) is the calibration zero-point chosen so that
-  a fourth-magnitude star produces 1 DN of integrated in-band signal at the per-instrument
-  reference sensitivity.
-
-- The per-pixel noise sigma :math:`\sigma_{\mathrm{DN}}` in DN units, obtained by
-  rescaling the per-image robust noise estimate
-  :attr:`~nav.nav_orchestrator.nav_context.NavContext.image_noise_sigma` through the
-  per-instrument ``signal_dn_to_image_unit_scale``. For raw-DN instruments the scale is
-  ``1.0`` and :math:`\sigma_{\mathrm{DN}}` is the per-pixel sigma directly; for
-  calibrated-IF instruments (e.g. Cassini ISS ``_CALIB.IMG``) the scale is the per-camera
-  DN-to-I/F factor (typically of order :math:`10^{-7}`) so the per-pixel noise gets
-  converted back to a DN-equivalent for SNR formation. Without this conversion the SNR
-  for every catalog star would collapse to :math:`\sqrt{S_{\mathrm{DN}}}` on calibrated
-  images and the reliability gate would drop them all.
-
-- The PSF noise-equivalent aperture :math:`N_{\mathrm{ap}}`. Treating every PSF as a 2-D
-  Gaussian for SNR purposes, the noise-equivalent area is
-
-  .. math::
-
-      N_{\mathrm{ap}} = 4 \pi \, \sigma_{\mathrm{PSF}}^{2}
-
-  in pixels, with :math:`\sigma_{\mathrm{PSF}}` the per-axis-averaged Gaussian sigma
-  returned by :func:`~nav.nav_model.stars.predicted_snr.psf_sigma_px`.
-
-The integrated SNR is the standard matched-filter form
-(:func:`~nav.nav_model.stars.predicted_snr.predicted_snr`):
+Each per-instrument :meth:`star_max_usable_vmag()
+<nav.obs.obs_inst.ObsInst.star_max_usable_vmag>` follows the form
 
 .. math::
 
-    \mathrm{SNR} =
-        \frac{S_{\mathrm{DN}}}
-             {\sqrt{S_{\mathrm{DN}} + \sigma_{\mathrm{DN}}^{2} \, N_{\mathrm{ap}}}}.
+    m_{\mathrm{limit}}(t_{\mathrm{exp}}) =
+        \mathrm{anchor} + \frac{\log t_{\mathrm{exp}}}{\log 2.512},
 
-The numerator is the matched-filter signal; the denominator is the quadrature combination
-of shot noise (:math:`S_{\mathrm{DN}}`, the source's own Poisson contribution) and
-background-plus-read noise (:math:`\sigma_{\mathrm{DN}}^{2} N_{\mathrm{ap}}`, the
-per-pixel noise variance summed over the PSF support). For bright stars
-:math:`\mathrm{SNR} \approx \sqrt{S_{\mathrm{DN}}}` (shot-noise-limited); for faint stars
-:math:`\mathrm{SNR} \approx S_{\mathrm{DN}} / (\sigma_{\mathrm{DN}} \sqrt{N_{\mathrm{ap}}})`
-(background-limited).
+where ``anchor`` is the limiting magnitude at a one-second exposure and each Pogson factor
+of exposure time buys one more magnitude of depth.
+
+Magnitude-margin effective SNR
+------------------------------
+
+The CRLB covariance and the reliability sigmoid still want an SNR-like quantity, so the
+model synthesises one from how far below the limiting magnitude the star sits rather than
+from any photometric DN measurement:
+
+.. math::
+
+    \mathrm{SNR}_{\mathrm{eff}} =
+        \mathrm{SNR}_{\mathrm{REF}} \cdot 2.512^{\,(m_{\mathrm{limit}} - V_{\mathrm{mag}})},
+
+floored at the module constant ``SNR_FLOOR`` so it stays strictly positive. A star exactly
+at the limit gets ``SNR_REF`` (``8.0``, just below the reliability sigmoid centre); each
+magnitude of headroom multiplies the effective SNR by one Pogson ratio (``2.512``),
+matching the flux ratio per magnitude. ``SNR_FLOOR`` (``0.1``) keeps the covariance away
+from the zero-SNR huge-variance branch.
 
 When the per-image smear length exceeds the anisotropic-smear threshold the PSF is
 replaced by a smear-aware kernel built from the per-image smear vector via
 :func:`~nav.nav_model.stars.smeared_psf.compute_smear_vector_px`; the kernel has elongated
-support and a correspondingly larger :math:`N_{\mathrm{ap}}`. Below the per-instrument
-detection floor (``min_vmag`` / SNR cutoff) the predicted SNR is too small to support
-detection and the star drops out of the emission set.
+support, and the smear vector also rotates the CRLB covariance along the smear direction.
+Stars whose smear length exceeds the per-instrument ``max_smear`` cap are dropped from the
+emission set, as are stars fainter than the limiting magnitude.
+
+:mod:`nav.nav_model.stars.predicted_snr` retains a separate raw-DN ``predicted_snr``
+photometry helper for diagnostics; it is not the gate consulted by the navigator's star
+path.
 
 Per-feature uncertainty
 -----------------------
 
 Each emitted ``STAR`` feature carries a Cramer-Rao lower bound covariance derived from the
-predicted SNR and the per-instrument PSF. For a 2-D Gaussian PSF the CRLB on each
-position component reduces to
+magnitude-margin effective SNR and the per-instrument PSF. For a 2-D Gaussian PSF the CRLB
+on each position component reduces to
 
 .. math::
 
     \sigma_{\mathrm{pos}} = \frac{\sigma_{\mathrm{PSF}}}{\mathrm{SNR}},
 
-so high-SNR stars have sub-pixel position sigma and low-SNR stars have several-pixel
-sigma. The per-axis variances populate the diagonal of the
+so stars well above the limiting magnitude have sub-pixel position sigma and stars near
+the limit have several-pixel sigma. The per-axis variances populate the diagonal of the
 :attr:`~nav.feature.feature.NavFeature.position_cov_px` covariance; the off-diagonal is
 zero except when the smear-aware kernel is anisotropic, in which case the cross-axis
 correlation reflects the smear orientation.
@@ -133,9 +122,10 @@ correlation reflects the smear orientation.
 Restrictions and assumptions
 ----------------------------
 
-- Predicted SNR depends on a calibrated per-instrument bandpass and exposure model. When
-  the per-instrument calibration is wrong, the predicted SNR is wrong, and the emission
-  gate may include or exclude the wrong stars.
+- The detectability gate depends on the per-instrument limiting-magnitude model. When
+  :meth:`star_max_usable_vmag() <nav.obs.obs_inst.ObsInst.star_max_usable_vmag>`
+  is miscalibrated for an instrument or exposure, the emission gate may include or exclude
+  the wrong stars.
 - Catalog reduction assumes the per-catalog sky-coverage epoch is recent enough that proper
   motion brings the star to within the duplicate-detection tolerance of its true epoch
   position. Stars with very high proper motion may move out of catalog match between
@@ -146,11 +136,11 @@ Restrictions and assumptions
 Sources of uncertainty
 ----------------------
 
-The per-star CRLB covariance reflects the photon-noise-limited centroid uncertainty. It
+The per-star CRLB covariance reflects the magnitude-margin centroid uncertainty. It
 does not capture systematic biases from a misaligned camera distortion model, from
 unmodelled background flux, or from PSF smear that exceeds the per-instrument
-``max_smear`` cap (above which the model raises an error during construction rather than
-emit unreliable predictions). Star features whose predicted position lies inside a
+``max_smear`` cap (stars above that cap are dropped from the emission set rather than
+emitted with unreliable predictions). Star features whose predicted position lies inside a
 saturation or cosmic-ray mask are flagged on the
 :class:`~nav.feature.flags.StarFlags` so the orchestrator's reliability gate can drop them.
 
@@ -204,7 +194,7 @@ The model's runtime knobs live in ``stars`` in
 - ``psf_gain`` — list (DN, gain), default ``[5000, 4]``. PSF integrated gain mapping for
   flux estimation.
 - ``max_smear`` — float, default ``100`` (dimensionless). Maximum smear length above which
-  the model rejects the image.
+  a star is dropped from the emission set.
 - ``min_vmag`` — float, default ``5.0`` mag. Minimum visual magnitude (i.e. brightest)
   considered.
 - ``max_vmag`` — float, default ``15.0`` mag. Maximum visual magnitude (i.e. dimmest)
@@ -278,9 +268,10 @@ Source files:
 - ``src/nav/nav_model/stars/conflicts.py`` —
   :mod:`nav.nav_model.stars.conflicts` body / ring conflict marking.
 - ``src/nav/nav_model/stars/predicted_snr.py`` —
-  :func:`~nav.nav_model.stars.predicted_snr.predicted_snr` and
-  :func:`~nav.nav_model.stars.predicted_snr.psf_sigma_px` plus the
-  ``SCLASS_TO_B_MINUS_V`` spectral-class-to-colour table.
+  :func:`~nav.nav_model.stars.predicted_snr.psf_sigma_px` (used by the model and the
+  detection helpers) and the ``SCLASS_TO_B_MINUS_V`` spectral-class-to-colour table.
+  :func:`~nav.nav_model.stars.predicted_snr.predicted_snr` is a raw-DN photometry
+  diagnostic and is not the model's detectability gate.
 - ``src/nav/nav_model/stars/smeared_psf.py`` —
   :func:`~nav.nav_model.stars.smeared_psf.compute_smear_vector_px` and
   :func:`~nav.nav_model.stars.smeared_psf.smear_length_px`.
@@ -302,8 +293,8 @@ Public methods (autodocumented at :doc:`/api_reference/api_nav_model`):
 - :meth:`~nav.nav_model.stars.nav_model_stars.NavModelStars.instances_for_obs` — always
   returns ``[NavModelStars('stars', obs)]`` (one instance per observation).
 - :meth:`~nav.nav_model.stars.nav_model_stars.NavModelStars.create_model` — runs catalog
-  reduction, computes the smear vector, marks conflicts, and populates the per-star
-  predicted SNR and CRLB covariance.
+  reduction, computes the smear vector, marks conflicts, applies the magnitude
+  detectability gate, and populates the per-star CRLB covariance.
 - :meth:`~nav.nav_model.stars.nav_model_stars.NavModelStars.to_features` — emits one
   :data:`~nav.feature.feature_type.NavFeatureType.STAR` feature per surviving catalog star.
 - :meth:`~nav.nav_model.stars.nav_model_stars.NavModelStars.to_annotations` — emits
@@ -348,7 +339,7 @@ curator to surface in the per-image JSON sidecar:
 - ``start_time`` / ``end_time`` / ``elapsed_time_sec`` — wall-clock timing for the model
   build.
 - ``star_count`` — int, number of stars that survived catalog reduction, conflict
-  marking, and the predicted-SNR floor.
+  marking, and the magnitude detectability gate.
 - ``stars`` — list[dict], one entry per surviving star. Each entry carries
   ``catalog_name``, ``unique_number``, ``pretty_name``, ``ra_deg``, ``dec_deg``,
   ``vmag``, ``u``, ``v``, ``move_u``, ``move_v``, ``spectral_class``, and ``conflicts``
@@ -368,9 +359,8 @@ Call path traced through
 1. Open a logged section. Read the per-image observation epoch and configured catalog
    list.
 2. Compute the per-image motion smear vector via
-   :func:`~nav.nav_model.stars.smeared_psf.compute_smear_vector_px`. When the smear length
-   exceeds ``max_smear`` the model raises so the orchestrator skips star navigation rather
-   than emit unreliable predictions.
+   :func:`~nav.nav_model.stars.smeared_psf.compute_smear_vector_px`. Stars whose smear
+   length exceeds ``max_smear`` are dropped from the emission set at feature-build time.
 3. Reduce the configured catalogs into a deduplicated star list via
    :func:`~nav.nav_model.stars.catalog.reduce_catalogs`. The function returns a list of
    mutable star records carrying RA/Dec, magnitude, spectral class, parallax, proper
@@ -379,21 +369,22 @@ Call path traced through
    :func:`~nav.nav_model.stars.conflicts.mark_body_and_ring_conflicts`. The function
    consults the per-image inventory and the YAML's ``ring_occlusion_radii_km`` to set
    ``in_body_silhouette`` and ``in_ring_annulus`` flags.
-5. Compute per-star predicted SNR via
-   :func:`~nav.nav_model.stars.predicted_snr.predicted_snr` using the per-instrument PSF
-   sigma and the per-star spectral class (mapped to B-V colour via
-   ``SCLASS_TO_B_MINUS_V``).
-6. Drop stars whose predicted SNR falls below the per-instrument detection floor; record
-   the survivors on ``self._stars``.
+5. Resolve the per-observation limiting magnitude from :meth:`obs.star_max_usable_vmag()
+   <nav.obs.obs_inst.ObsInst.star_max_usable_vmag>` and synthesise the
+   magnitude-margin effective SNR for each star (used by the CRLB covariance and the
+   reliability sigmoid).
+6. Drop stars fainter than the limiting magnitude (or with no catalog magnitude) and
+   stars whose smear length exceeds the per-instrument cap; record the survivors on
+   ``self._stars``.
 
 Call path traced through
 :meth:`~nav.nav_model.stars.nav_model_stars.NavModelStars.to_features`:
 
 1. For each surviving star, build a :class:`~nav.feature.geometry.StarGeometry` from the
    predicted position and the per-feature CRLB covariance.
-2. Build a :class:`~nav.feature.flags.StarFlags` carrying the predicted SNR, the body /
-   ring conflict flags, and the saturation / cosmic-ray-mask flags read off the per-image
-   masks.
+2. Build a :class:`~nav.feature.flags.StarFlags` carrying the magnitude-margin effective
+   SNR, the catalog magnitude, the body / ring conflict flags, and the saturation /
+   cosmic-ray-mask flags read off the per-image masks.
 3. Construct one :data:`~nav.feature.feature_type.NavFeatureType.STAR`
    :class:`~nav.feature.feature.NavFeature` per star and return the list.
 
@@ -402,7 +393,8 @@ Examples
 
 ``one_bright_star_no_body`` (Cassini ISS WAC, image ``W1449079117_1``)
     Single bright star (Vega) in an otherwise empty FOV. The star model emits one STAR
-    feature for Vega with high predicted SNR and no body / ring conflict flags. The
+    feature for Vega, which is far brighter than the limiting magnitude and carries no
+    body / ring conflict flags. The
     pass-1 :class:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav`
     consumes the feature in its 1-star path and reports the operator-verified offset
     :math:`(\Delta v, \Delta u) = (3.06, -0.02)` px. Other catalog stars in the WAC's

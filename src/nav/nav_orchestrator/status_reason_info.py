@@ -66,6 +66,10 @@ STATUS_REASON_INFO_TEMPLATE: dict[NavStatusReason, list[str]] = {
         'Final: status=failed',
         'Combined confidence below min_confidence',
     ],
+    NavStatusReason.FINAL_SIGMA_ABOVE_THRESHOLD: [
+        'Final: status=failed',
+        'Combined offset sigma above every tier max_sigma_px (confident but imprecise)',
+    ],
     NavStatusReason.UNOBSERVABLE_OFFSET: [
         'Final: status=failed',
         'Every input covariance shares one null direction',

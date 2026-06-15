@@ -26,7 +26,7 @@ from scipy.ndimage import rotate as ndimage_rotate
 
 from nav.config import Config
 from nav.feature.composition import compose_template_features
-from nav.feature.feature import NavFeature
+from nav.feature.feature import NavFeature, body_names_from_features
 from nav.feature.feature_type import NavFeatureType
 from nav.feature.geometry import BodyDiscGeometry
 from nav.nav_technique.confidence import evaluate_sigmoid_combination
@@ -39,7 +39,7 @@ from nav.nav_technique.nav_technique import (
     search_window_for_obs,
 )
 from nav.nav_technique.technique_result import NavTechniqueResult
-from nav.support.correlate import navigate_with_pyramid_kpeaks
+from nav.support.correlate import navigate_with_pyramid_kpeaks, peak_to_runner_up_ratio
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only import
@@ -201,29 +201,6 @@ def _composite_pivot_vu(features: list[NavFeature]) -> tuple[float, float]:
     return float(cv), float(cu)
 
 
-def _peak_to_runner_up_ratio(top_k_peaks: list[tuple[float, float, float]]) -> float:
-    """Return the ratio of the winning peak's quality to the runner-up's.
-
-    ``top_k_peaks`` is ``[(quality, dv, du), ...]`` sorted by quality
-    descending (the convention :func:`navigate_with_pyramid_kpeaks`
-    uses).  Returns ``1.0`` when only one peak survives non-maximum
-    suppression — which is what an unambiguous correlation looks
-    like, so a value at or above 1.0 is the "good" tail.  Returns
-    ``0.0`` when no peaks are present.  Negative-quality runners-up
-    (rare; happens with the prior penalty) are floored at a small
-    positive value so the ratio stays well-defined.
-    """
-    if not top_k_peaks:
-        return 0.0
-    if len(top_k_peaks) == 1:
-        return 1.0
-    winner_q = top_k_peaks[0][0]
-    runner_q = top_k_peaks[1][0]
-    if runner_q <= 1e-9:
-        return float(max(winner_q, 0.0)) / 1e-9
-    return float(winner_q) / float(runner_q)
-
-
 class BodyDiscCorrelateNav(NavTechnique):
     """Body-disc full-disc NCC translation fit (multi-body, Z-buffer paint).
 
@@ -242,6 +219,7 @@ class BodyDiscCorrelateNav(NavTechnique):
             'ncc_peak',
             'peak_to_runner_up_ratio',
             'consistency_px',
+            'consistency_ratio',
             'used_gradient',
             'body_count',
         }
@@ -251,6 +229,10 @@ class BodyDiscCorrelateNav(NavTechnique):
         super().__init__(config=config)
         self.config.read_config()  # ensure cls.tuning is populated
         self._rotation_at_edge_fraction = float(self.tuning['rotation_at_edge_fraction'])
+        self._consistency_max_fraction_of_diameter = float(
+            self.tuning['consistency_max_fraction_of_diameter']
+        )
+        self._consistency_max_px = float(self.tuning['consistency_max_px'])
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Return whether the input set carries any usable BODY_DISC feature.
@@ -313,13 +295,15 @@ class BodyDiscCorrelateNav(NavTechnique):
             template_img, template_mask = compose_template_features(eligible, extfov_shape)
             margin_v, margin_u = search_window_for_obs(context)
             up_factor = self._upsample_factor()
+            consistency_tol = self._consistency_tol_for(eligible)
             self.logger.debug(
                 'Composite template: %d painted pixels; search window (v, u) = (%d, %d) px; '
-                'upsample factor = %d',
+                'upsample factor = %d; consistency tolerance = %.2f px',
                 int(template_mask.sum()),
                 margin_v,
                 margin_u,
                 up_factor,
+                consistency_tol,
             )
             fit_rotation = bool(context.fit_camera_rotation)
             if fit_rotation:
@@ -333,6 +317,7 @@ class BodyDiscCorrelateNav(NavTechnique):
                     data_mask=context.sensor_mask_ext,
                     upsample_factor=up_factor,
                     max_rotation_deg=float(context.max_rotation_deg),
+                    consistency_tol=consistency_tol,
                 )
             else:
                 best_theta_rad = 0.0
@@ -342,6 +327,7 @@ class BodyDiscCorrelateNav(NavTechnique):
                     model=template_img,
                     mask=template_mask,
                     upsample_factor=up_factor,
+                    consistency_tol=consistency_tol,
                     max_offset_vu=(margin_v, margin_u),
                     data_mask=context.sensor_mask_ext,
                     use_gradient='auto',
@@ -364,8 +350,15 @@ class BodyDiscCorrelateNav(NavTechnique):
             top_k_peaks = ncc_result.get('top_k_peaks', [])
             diagnostics = BodyDiscDiagnostics(
                 ncc_peak=quality,
-                peak_to_runner_up_ratio=_peak_to_runner_up_ratio(top_k_peaks),
+                peak_to_runner_up_ratio=peak_to_runner_up_ratio(top_k_peaks),
                 consistency_px=consistency,
+                # ``consistency_tol`` is the same diameter-scaled cap
+                # used by the spurious test, so a result that just
+                # barely cleared the spurious test reads as ratio
+                # slightly under 1.0 and a clean fit on a large body
+                # reads as the small ratio it deserves regardless of
+                # body size.
+                consistency_ratio=consistency / consistency_tol,
                 used_gradient=used_gradient,
                 body_count=len(eligible),
             )
@@ -432,7 +425,28 @@ class BodyDiscCorrelateNav(NavTechnique):
                 diagnostics=diagnostics,
                 rotation_rad=rotation_rad,
                 sigma_rotation_rad=sigma_rotation_rad,
+                source_bodies=body_names_from_features(eligible),
             )
+
+    def _consistency_tol_for(self, features: list[NavFeature]) -> float:
+        """Return the diameter-scaled inter-pyramid consistency cap.
+
+        A small body's NCC peak is naturally sharper in absolute pixels
+        than a large body's, so a flat cap penalizes large bodies twice
+        (real peak walks across pyramid levels scale with the
+        silhouette extent).  The applied cap is
+        ``max(consistency_max_px, consistency_max_fraction_of_diameter
+        * max_diameter_px)`` where ``max_diameter_px`` is the largest
+        ext-FOV bbox extent across the consumed BODY_DISC features.
+        """
+        if not features:
+            return self._consistency_max_px
+        max_extent_px = 0
+        for feature in features:
+            v_min, u_min, v_max, u_max = feature.geometry.bbox_extfov_vu
+            max_extent_px = max(max_extent_px, v_max - v_min, u_max - u_min)
+        scaled_px = self._consistency_max_fraction_of_diameter * float(max_extent_px)
+        return max(self._consistency_max_px, scaled_px)
 
     def _run_3dof_pyramid(
         self,
@@ -445,6 +459,7 @@ class BodyDiscCorrelateNav(NavTechnique):
         data_mask: NDArrayBoolType | None,
         upsample_factor: int,
         max_rotation_deg: float,
+        consistency_tol: float,
     ) -> tuple[float, dict[str, Any], float | None]:
         """Run the multi-level rotation-sample schedule.
 
@@ -483,6 +498,7 @@ class BodyDiscCorrelateNav(NavTechnique):
             max_offset_vu=max_offset_vu,
             data_mask=data_mask,
             upsample_factor=upsample_factor,
+            consistency_tol=consistency_tol,
         )
         # Level 1: 5 samples in 0.5 deg steps centred on the level-0 winner,
         # clamped to the configured ``+-max_rotation_deg`` cap so the
@@ -506,6 +522,7 @@ class BodyDiscCorrelateNav(NavTechnique):
             max_offset_vu=max_offset_vu,
             data_mask=data_mask,
             upsample_factor=upsample_factor,
+            consistency_tol=consistency_tol,
         )
         # Level 2: 3 samples in 0.25 deg steps centred on the level-1
         # winner, again clamped to the cap.
@@ -530,6 +547,7 @@ class BodyDiscCorrelateNav(NavTechnique):
                     max_offset_vu=max_offset_vu,
                     data_mask=data_mask,
                     upsample_factor=upsample_factor,
+                    consistency_tol=consistency_tol,
                 ),
             )
             for theta in l2_thetas
@@ -560,6 +578,7 @@ class BodyDiscCorrelateNav(NavTechnique):
         max_offset_vu: tuple[int, int],
         data_mask: NDArrayBoolType | None,
         upsample_factor: int,
+        consistency_tol: float,
     ) -> _RotationCandidate:
         """Run an NCC pyramid for each rotation sample; return the highest-quality candidate.
 
@@ -590,6 +609,7 @@ class BodyDiscCorrelateNav(NavTechnique):
                 max_offset_vu=max_offset_vu,
                 data_mask=data_mask,
                 upsample_factor=upsample_factor,
+                consistency_tol=consistency_tol,
             )
             candidate = _RotationCandidate(theta_rad=theta, ncc_result=ncc_result)
             if best is None or float(ncc_result['quality']) > float(best.ncc_result['quality']):
@@ -608,6 +628,7 @@ class BodyDiscCorrelateNav(NavTechnique):
         max_offset_vu: tuple[int, int],
         data_mask: NDArrayBoolType | None,
         upsample_factor: int,
+        consistency_tol: float,
     ) -> dict[str, Any]:
         """Rotate the template about ``pivot_vu`` and run a single NCC pyramid.
 
@@ -639,6 +660,7 @@ class BodyDiscCorrelateNav(NavTechnique):
             model=rotated_img,
             mask=rotated_mask,
             upsample_factor=upsample_factor,
+            consistency_tol=consistency_tol,
             max_offset_vu=max_offset_vu,
             data_mask=data_mask,
             use_gradient='auto',
@@ -652,59 +674,40 @@ class BodyDiscCorrelateNav(NavTechnique):
         winner: _RotationCandidate,
         step_rad: float,
     ) -> float | None:
-        """Estimate sigma_theta from the level-2 NCC quality curvature.
+        """Report disc rotation uncertainty as unobservable (always ``None``).
 
-        Fits a local quadratic ``q(theta) ≈ q0 + 0.5 * H * (theta - theta_0)**2``
-        through the three level-2 quality samples.  When ``H`` (second
-        derivative) is concave (``H < 0``) the precision is
-        ``-1 / H``; the matching sigma is ``sqrt(1 / (-H * q0))``
-        normalising by the peak quality so a high-confidence sharp
-        peak yields a tight rotation estimate.
+        NAV-010.  The NCC peak quality returned by
+        :func:`nav.support.correlate.navigate_with_pyramid_kpeaks` is a
+        PSR / PMR-style separation ratio, not a log-likelihood.  The
+        former curvature-to-variance map ``sigma_theta**2 = 1 / (-H *
+        q_centre)`` (with ``H`` the level-2 quality second derivative)
+        is dimensionally ``rad**2 / quality**2`` and has no calibrated
+        relationship to angular variance: PSR/PMR do not live on a
+        log-likelihood scale, so the curvature carries no Fisher
+        information about rotation.  A calibrated mapping from the
+        NCC-peak rotation curvature to an angular variance is not yet
+        available, so disc rotation uncertainty is reported as
+        unobservable.
 
-        The 3-sample finite-difference parabola is well-defined only
-        when the winner sits at the centre sample (so the centre is the
-        peak of the fit).  When the winner is at one of the side
-        samples — most commonly because the level-2 search is bumping
-        against ``+-max_rotation_deg`` after clamping — the function
-        returns ``None`` so the caller can fall back to the rotation-
-        unobservable sentinel rather than report a curvature taken at
-        the wrong centre.
+        Returning ``None`` routes the caller to the
+        :data:`~nav.nav_technique.nav_technique.ROTATION_UNOBSERVABLE_VARIANCE`
+        sentinel in the 3x3 covariance's rotation slot (the ensemble's
+        ``pinvh`` combine already maps that huge variance to a near-zero
+        rotation information contribution), so the disc technique
+        contributes a translation estimate while abstaining on rotation.
 
         Parameters:
             candidates: The three level-2 :class:`_RotationCandidate`
-                samples (any ordering).
-            winner: The candidate selected as the rotation pyramid's
-                final answer (highest NCC quality).  Used to verify
-                that the centre of the 3-sample fit coincides with the
-                returned ``theta``.
-            step_rad: Angular sampling step in radians (level-2 step;
-                evenly spaced).
+                samples (unused; retained for the call-site signature
+                and a future calibrated implementation).
+            winner: The rotation-pyramid winner (unused; see above).
+            step_rad: Angular sampling step in radians (unused).
 
         Returns:
-            Estimated sigma_theta in radians when the local curvature is
-            concave at the centre sample and the centre coincides with
-            the winner; ``None`` otherwise.
+            Always ``None`` -- disc rotation variance is reported as
+            unobservable pending a calibrated curvature -> variance map.
         """
-        if len(candidates) != 3:
-            return None
-        sorted_candidates = sorted(candidates, key=lambda c: c.theta_rad)
-        if sorted_candidates[1].theta_rad != winner.theta_rad:
-            return None
-        q_minus = float(sorted_candidates[0].ncc_result['quality'])
-        q_centre = float(sorted_candidates[1].ncc_result['quality'])
-        q_plus = float(sorted_candidates[2].ncc_result['quality'])
-        # Approximate second derivative; level 2 evenly samples theta so the
-        # finite difference is exact for a quadratic.
-        second_deriv = (q_plus - 2.0 * q_centre + q_minus) / (step_rad * step_rad)
-        if second_deriv >= 0.0 or q_centre <= 0.0:
-            return None
-        # Quality is in the same scale as PSR / PMR; the precision the peak
-        # carries scales with q_centre, so dividing keeps sigma_theta in
-        # natural units.
-        sigma_sq = 1.0 / (-second_deriv * q_centre)
-        if not math.isfinite(sigma_sq) or sigma_sq <= 0.0:
-            return None
-        return float(math.sqrt(sigma_sq))
+        return None
 
     def _upsample_factor(self) -> int:
         """Return the FFT upsample factor configured under ``config.offset``."""
@@ -730,5 +733,6 @@ class _DiscConfidenceContext:
         self.ncc_peak = diagnostics.ncc_peak
         self.peak_to_runner_up_ratio = diagnostics.peak_to_runner_up_ratio
         self.consistency_px = diagnostics.consistency_px
+        self.consistency_ratio = diagnostics.consistency_ratio
         self.used_gradient = diagnostics.used_gradient
         self.body_count = float(diagnostics.body_count)
