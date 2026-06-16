@@ -9,12 +9,12 @@ bodies:
     shape_model: ellipsoid
     center_v: 64.0
     center_u: 64.0
-    axis1: 18.0
-    axis2: 18.0
-    axis3: 18.0
+    axis1: 8.0
+    axis2: 8.0
+    axis3: 8.0
     illumination_angle: 20.0
     phase_angle: 35.0
-    range: 800000.0
+    range: 1500000.0
 noise:
   poisson: true
   read_noise_dn: 4.0

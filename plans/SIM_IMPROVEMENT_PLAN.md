@@ -930,7 +930,26 @@ human reviewers can all consume.
 `tests/integration/sim_scene.py`, new
 `tests/integration/test_sim_scenes.py`.
 
-### Phase T2: Deterministic regression baselines
+### Phase T2: Deterministic regression baselines [done]
+
+**Done:** `tests/integration/sim_baseline.py` defines the `SimBaseline`
+schema (scene_name, status, rounded offset, confidence -- with `status`
+and nullable offsets so failed scenes are recorded too, unlike the
+real-image baseline) plus `baseline_for_scene` (render + navigate).
+`tests/integration/sim_baselines/<scene>.json` holds the catalog's
+baselines; `tests/integration/update_sim_baselines.py` regenerates them
+(`python -m ...`); `tests/integration/test_sim_baselines.py` re-navigates
+every scene and asserts an exact rounded match.
+
+Two adjustments from the draft, both forced by reality: the technique
+solvers carry sub-millipixel floating-point jitter across processes under
+parallel load, so (a) the test is `@pytest.mark.integration` -- the
+deliberate layer, exactly like the real-image baseline test, rather than
+the fast default suite -- and (b) rounding is coarsened to 2 decimals
+(0.01 px / 0.01 confidence), still a real tripwire but immune to the
+jitter.  The `range_sweep/small_body` scene was shrunk so it robustly
+fails (it sat at the navigability boundary and flipped success/fail); its
+baseline records `failed` and will be re-blessed when BLOB lands.
 
 **Goal:** sim scenes get a regression-baseline layer parallel to
 the real-image library's `tests/integration/baselines/`.
