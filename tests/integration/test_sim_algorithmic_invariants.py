@@ -30,6 +30,7 @@ Scenes split into three kinds:
   tolerance bound.
 """
 
+import math
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +44,10 @@ from nav.sim.scene import SimScene, iter_scene_paths, load_sim_scene
 # Recovery tolerance in pixels.  The disc/correlation techniques converge to a
 # few tenths of a pixel on these clean scenes; 1.0 px is a safe invariant bound.
 _OFFSET_TOLERANCE_PX = 1.0
+# Recovery tolerance in degrees for the planted camera roll.  StarField recovers
+# the roll to a few hundredths of a degree on a clean field; 0.3 deg is a safe
+# invariant bound that absorbs cross-process solver jitter.
+_ROTATION_TOLERANCE_DEG = 0.3
 
 _INVARIANTS_DIR = Path(__file__).parent / 'sim_scenes' / 'algorithmic_invariants'
 _SCENE_PATHS = iter_scene_paths(_INVARIANTS_DIR.parent)
@@ -56,15 +61,28 @@ _BLOB_STEM_PREFIX = 'planted_offset_blob'
 # Star-designed scenes carry no body/rings; the star techniques are load-bearing
 # and the full ensemble recovers stably.
 _STAR_STEM_PREFIX = 'planted_offset_star'
+# Rotation-designed scenes carry a planted camera roll.  Recovery is verified on
+# the StarFieldFromCatalogNav per-technique result: that technique recovers the
+# roll geometrically (non-spurious), but on a clean sim field its confidence sits
+# at the placeholder-alpha floor, so the *fused* status is a stable 'failed'
+# rather than 'success' -- which is why the roll is asserted per-technique and the
+# scene is held out of the full-ensemble navigate assertion.
+_ROTATION_STEM_PREFIX = 'planted_rotation'
 _BLOB_PATHS = [p for p in _INVARIANT_PATHS if p.stem.startswith(_BLOB_STEM_PREFIX)]
 _BLOB_IDS = [p.stem for p in _BLOB_PATHS]
 _STAR_PATHS = [p for p in _INVARIANT_PATHS if p.stem.startswith(_STAR_STEM_PREFIX)]
 _STAR_IDS = [p.stem for p in _STAR_PATHS]
-# Disc scenes are everything that is neither blob- nor star-designed.
-_DISC_PATHS = [
-    p for p in _INVARIANT_PATHS if not p.stem.startswith((_BLOB_STEM_PREFIX, _STAR_STEM_PREFIX))
-]
+_ROTATION_PATHS = [p for p in _INVARIANT_PATHS if p.stem.startswith(_ROTATION_STEM_PREFIX)]
+_ROTATION_IDS = [p.stem for p in _ROTATION_PATHS]
+# Disc scenes are everything that is not blob-, star-, or rotation-designed.
+_OTHER_PREFIXES = (_BLOB_STEM_PREFIX, _STAR_STEM_PREFIX, _ROTATION_STEM_PREFIX)
+_DISC_PATHS = [p for p in _INVARIANT_PATHS if not p.stem.startswith(_OTHER_PREFIXES)]
 _DISC_IDS = [p.stem for p in _DISC_PATHS]
+# Scenes whose full ensemble reaches a success status (everything but rotation).
+_NAVIGATES_SUCCESS_PATHS = [
+    p for p in _INVARIANT_PATHS if not p.stem.startswith(_ROTATION_STEM_PREFIX)
+]
+_NAVIGATES_SUCCESS_IDS = [p.stem for p in _NAVIGATES_SUCCESS_PATHS]
 
 
 def _navigate(scene: SimScene, *, only_techniques: str = '*') -> Any:
@@ -90,7 +108,12 @@ def test_there_are_star_scenes() -> None:
     assert _STAR_PATHS
 
 
-@pytest.mark.parametrize('path', _INVARIANT_PATHS, ids=_INVARIANT_IDS)
+def test_there_are_rotation_scenes() -> None:
+    """At least one planted-roll scene exists for the rotation coverage."""
+    assert _ROTATION_PATHS
+
+
+@pytest.mark.parametrize('path', _NAVIGATES_SUCCESS_PATHS, ids=_NAVIGATES_SUCCESS_IDS)
 def test_invariant_scene_navigates(path: Path) -> None:
     """Each planted-offset scene navigates to a success status (full ensemble)."""
     result = _navigate(load_sim_scene(path))
@@ -170,3 +193,35 @@ def test_star_scene_recovers_planted_u(path: Path) -> None:
     result = _navigate(scene)
     assert result.offset_px is not None
     assert abs(result.offset_px[1] - scene.ground_truth.planted_offset_du_px) < _OFFSET_TOLERANCE_PX
+
+
+def _starfield_result(scene: SimScene) -> Any:
+    """Navigate ``scene`` with StarFieldFromCatalogNav alone; return its result.
+
+    Reads the per-technique result directly rather than the fused offset because
+    the roll is the quantity under test and the technique's confidence (not its
+    geometry) is what keeps the fused status below 'success' on a clean field.
+    """
+    result = _navigate(scene, only_techniques='StarFieldFromCatalogNav')
+    matches = [t for t in result.per_technique if t.technique_name == 'StarFieldFromCatalogNav']
+    assert matches, 'StarFieldFromCatalogNav produced no technique result'
+    return matches[0]
+
+
+@pytest.mark.parametrize('path', _ROTATION_PATHS, ids=_ROTATION_IDS)
+def test_rotation_scene_recovers_planted_roll(path: Path) -> None:
+    """Each rotation scene recovers its planted camera roll within tolerance.
+
+    Guards the camera-roll rendering (``offset_rotation_deg``) and the
+    ``fit_camera_rotation`` scene override: the renderer rotates each star about
+    the boresight, and StarFieldFromCatalogNav's similarity fit recovers the
+    planted roll.  Asserted on the StarField per-technique result -- the
+    technique recovers the roll geometrically (non-spurious) even though its
+    placeholder-alpha confidence holds the fused status below 'success'.
+    """
+    scene = load_sim_scene(path)
+    technique = _starfield_result(scene)
+    assert not technique.spurious
+    assert technique.rotation_rad is not None
+    recovered_deg = math.degrees(technique.rotation_rad)
+    assert abs(recovered_deg - scene.ground_truth.planted_rotation_deg) < _ROTATION_TOLERANCE_DEG

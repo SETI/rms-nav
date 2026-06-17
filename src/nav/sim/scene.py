@@ -74,6 +74,7 @@ class SimScene:
     stars: dict[str, Any] | None
     noise: dict[str, Any] | None
     stray_light: dict[str, Any] | None
+    fit_camera_rotation: bool | None = None
     ground_truth: GroundTruth = field(default_factory=GroundTruth)
 
     @property
@@ -98,6 +99,7 @@ class SimScene:
             'exposure_sec': self.exposure_sec,
             'offset_v': self.ground_truth.planted_offset_dv_px,
             'offset_u': self.ground_truth.planted_offset_du_px,
+            'offset_rotation_deg': self.ground_truth.planted_rotation_deg,
             'bodies': [dict(b) for b in self.bodies],
             'rings': [dict(r) for r in self.rings],
         }
@@ -110,6 +112,8 @@ class SimScene:
                 params['background_stars_num'] = int(self.stars['background_count'])
             if 'list' in self.stars:
                 params['stars'] = [dict(s) for s in self.stars['list']]
+        if self.fit_camera_rotation is not None:
+            params['fit_camera_rotation'] = self.fit_camera_rotation
         return params
 
 
@@ -152,13 +156,16 @@ def scene_dict_from_sim_params(sim_params: dict[str, Any], *, scene_name: str) -
         scene['noise'] = dict(sim_params['noise'])
     if sim_params.get('stray_light') is not None:
         scene['stray_light'] = dict(sim_params['stray_light'])
+    if sim_params.get('fit_camera_rotation') is not None:
+        scene['fit_camera_rotation'] = bool(sim_params['fit_camera_rotation'])
     offset_v = float(sim_params.get('offset_v', 0.0))
     offset_u = float(sim_params.get('offset_u', 0.0))
-    if offset_v or offset_u:
+    offset_rotation_deg = float(sim_params.get('offset_rotation_deg', 0.0))
+    if offset_v or offset_u or offset_rotation_deg:
         scene['ground_truth'] = {
             'planted_offset_dv_px': offset_v,
             'planted_offset_du_px': offset_u,
-            'planted_rotation_deg': 0.0,
+            'planted_rotation_deg': offset_rotation_deg,
         }
     return scene
 
@@ -232,6 +239,9 @@ def _validate(raw: dict[str, Any], *, path: Path) -> SimScene:
     stars = _optional_mapping(raw.get('stars'), 'stars', path=path)
     noise = _optional_mapping(raw.get('noise'), 'noise', path=path)
     stray_light = _optional_mapping(raw.get('stray_light'), 'stray_light', path=path)
+    fit_camera_rotation = raw.get('fit_camera_rotation')
+    if fit_camera_rotation is not None and not isinstance(fit_camera_rotation, bool):
+        raise SimSceneValidationError(f'{path}: fit_camera_rotation must be a boolean when present')
     ground_truth = _validate_ground_truth(raw.get('ground_truth'), path=path)
 
     return SimScene(
@@ -248,6 +258,7 @@ def _validate(raw: dict[str, Any], *, path: Path) -> SimScene:
         stars=stars,
         noise=noise,
         stray_light=stray_light,
+        fit_camera_rotation=fit_camera_rotation,
         ground_truth=ground_truth,
     )
 

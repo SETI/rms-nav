@@ -34,12 +34,27 @@ def _render_stars_cached(
     offset_v: float,
     offset_u: float,
     default_psf_sigma: float,
+    rotation_deg: float,
 ) -> tuple[Any, ...]:
     """Internal cached function to compute star rendering."""
     stars_params = json.loads(stars_params_json)
     img = np.zeros((size_v, size_u), dtype=np.float64)
     sim_star_list: list[MutableStar] = []
     star_info: list[dict[str, Any]] = []
+
+    # A camera roll rotates the whole frame about the boresight (image centre).
+    # The rendered star position is therefore the catalog position rotated by
+    # ``rotation_deg`` about the centre, then translated by the planted offset.
+    # The star record keeps its unrotated catalog (v, u) so the NavModel predicts
+    # the unshifted geometry and a star technique recovers BOTH the rotation and
+    # the translation.  The rotation matrix matches the navigator's
+    # ``similarity_transform_fit`` convention (maps catalog -> detection in
+    # ``(v, u)`` order), so the fitted angle equals ``rotation_deg``.
+    theta = np.radians(rotation_deg)
+    cos_t = float(np.cos(theta))
+    sin_t = float(np.sin(theta))
+    roll_center_v = size_v / 2.0
+    roll_center_u = size_u / 2.0
 
     for i, star_params in enumerate(stars_params):
         star = cast(MutableStar, Star())
@@ -68,8 +83,12 @@ def _render_stars_cached(
         star.dn = 2.512 ** -(star.vmag - 4.0)
         sim_star_list.append(star)
 
-        star_offset_v = star.v + offset_v
-        star_offset_u = star.u + offset_u
+        rel_v = star.v - roll_center_v
+        rel_u = star.u - roll_center_u
+        rot_v = cos_t * rel_v - sin_t * rel_u
+        rot_u = sin_t * rel_v + cos_t * rel_u
+        star_offset_v = roll_center_v + rot_v + offset_v
+        star_offset_u = roll_center_u + rot_u + offset_u
         v_int = int(star_offset_v)
         u_int = int(star_offset_u)
         v_frac = star_offset_v - v_int
@@ -160,6 +179,7 @@ def render_stars(
     offset_u: float,
     *,
     default_psf_sigma: float = 3.0,
+    rotation_deg: float = 0.0,
 ) -> tuple[NDArrayFloatType, list[MutableStar], list[dict[str, Any]]]:
     """Render stars into img. Returns (img, sim_star_list, star_render_info).
 
@@ -170,11 +190,14 @@ def render_stars(
         offset_u: U offset to apply to every star.
         default_psf_sigma: PSF sigma used for stars that do not specify their
             own ``psf_sigma`` (the selected instrument's value).
+        rotation_deg: Camera-roll angle (degrees) applied about the image centre
+            before the translation offset, modelling a pointing rotation the star
+            techniques recover.
     """
     size_v, size_u = img.shape
     stars_params_json = json.dumps(stars_params, sort_keys=True)
     cached_img, cached_star_list, cached_star_info = _render_stars_cached(
-        size_v, size_u, stars_params_json, offset_v, offset_u, default_psf_sigma
+        size_v, size_u, stars_params_json, offset_v, offset_u, default_psf_sigma, rotation_deg
     )
     # Add cached stars to input image (don't overwrite background noise/stars)
     img[:] = np.clip(img + cached_img, 0.0, 1.0)
@@ -875,9 +898,13 @@ def _render_combined_model_cached(
     if not ignore_offset:
         offset_v = float(sim_params.get('offset_v', 0.0))
         offset_u = float(sim_params.get('offset_u', 0.0))
+        # Camera roll about the boresight, part of the planted pointing error the
+        # navigator recovers; suppressed in GUI preview mode alongside the offset.
+        offset_rotation_deg = float(sim_params.get('offset_rotation_deg', 0.0))
     else:
         offset_v = 0.0
         offset_u = 0.0
+        offset_rotation_deg = 0.0
 
     img = cast(NDArrayFloatType, np.zeros((size_v, size_u), dtype=np.float64))
 
@@ -919,7 +946,12 @@ def _render_combined_model_cached(
     rings_params = sim_params.get('rings', []) or []
 
     img, sim_star_list, star_info = render_stars(
-        img, stars_params, offset_v, offset_u, default_psf_sigma=star_psf_sigma
+        img,
+        stars_params,
+        offset_v,
+        offset_u,
+        default_psf_sigma=star_psf_sigma,
+        rotation_deg=offset_rotation_deg,
     )
 
     # Process rings: assign default ranges
@@ -931,7 +963,14 @@ def _render_combined_model_cached(
             # Use a large starting value to ensure rings are behind bodies by default
             ring_params['range'] = float(ring_number + 1000.0)
 
-    # Process bodies: assign default ranges
+    # Process bodies: assign default ranges and apply the camera roll.  A roll
+    # rotates each body's centre about the boresight and adds to its line-of-sight
+    # pose (rotation_z), so a body moves and turns under the same pointing
+    # rotation the stars do; the body NavModel predicts the unrolled geometry.
+    roll_cos = float(np.cos(np.radians(offset_rotation_deg)))
+    roll_sin = float(np.sin(np.radians(offset_rotation_deg)))
+    roll_center_v = size_v / 2.0
+    roll_center_u = size_u / 2.0
     bodies_with_ranges = []
     for body_number, body_params in enumerate(bodies_params):
         body_params_copy = dict(body_params)
@@ -939,6 +978,14 @@ def _render_combined_model_cached(
             body_params_copy['range'] = float(body_params_copy['range'])
         else:
             body_params_copy['range'] = float(body_number + 1)
+        if offset_rotation_deg != 0.0:
+            cv = float(body_params_copy.get('center_v', roll_center_v)) - roll_center_v
+            cu = float(body_params_copy.get('center_u', roll_center_u)) - roll_center_u
+            body_params_copy['center_v'] = roll_center_v + roll_cos * cv - roll_sin * cu
+            body_params_copy['center_u'] = roll_center_u + roll_sin * cv + roll_cos * cu
+            body_params_copy['rotation_z'] = (
+                float(body_params_copy.get('rotation_z', 0.0)) + offset_rotation_deg
+            )
         bodies_with_ranges.append(body_params_copy)
 
     # Combine rings and bodies, sort by range (far to near)

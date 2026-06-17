@@ -112,6 +112,17 @@ class ObsSim(ObsSnapshotInst):
         if extfov_margin_vu is None:
             extfov_margin_vu = resolve_extfov_margin(inst_config, sim_block, size_v)
 
+        # A scene may toggle camera-rotation fitting independently of the camera
+        # it emulates.  In reality ``fit_camera_rotation`` is a per-camera
+        # property, but a sim scene is a navigation fixture: it can ask the
+        # navigator to solve for a planted roll on top of any instrument's optics
+        # (e.g. Cassini NAC's sharp PSF) without pretending to be a camera that
+        # happens to fit rotation.  The resolved block is shared live config, so
+        # copy before overriding.
+        fit_rotation_override = sim_params.get('fit_camera_rotation')
+        if fit_rotation_override is not None:
+            inst_config = {**inst_config, 'fit_camera_rotation': bool(fit_rotation_override)}
+
         snapshot._closest_planet = sim_params.get('closest_planet')
         new_obs = ObsSim(snapshot, config=config, extfov_margin_vu=extfov_margin_vu, simulated=True)
         new_obs._inst_config = cast(dict[str, Any], inst_config)

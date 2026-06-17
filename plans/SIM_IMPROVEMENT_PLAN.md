@@ -1108,13 +1108,35 @@ every full-ensemble layer (the generic navigate assertion, the recovery
 assertion, and the T2 baseline, whose recorded status would be marginal).  The
 one-star path is therefore left to a later non-status-gated harness.
 
+Planted-rotation recovery is now in.  The renderer applies `planted_rotation_deg`
+as a camera roll about the boresight -- rotating each star (and each body's
+centre and line-of-sight pose) before the translation offset -- while the star
+record keeps its unrolled catalog `(v, u)`, so the NavModel predicts the
+unrolled geometry and `StarFieldFromCatalogNav`'s similarity (rotation +
+translation) fit recovers the roll.  A design decision made this tractable:
+rotation fitting is gated per-instrument (`fit_camera_rotation`, true only for
+Galileo SSI among the real cameras), but Galileo's broad PSF and shallow 8-bit
+well make a clean star field hard to construct.  Rather than couple the sim's
+rotation testing to one finicky camera -- or invent a fake `sim_rotation`
+instrument that emulates nothing (violating principle 3.2) -- a scene carries an
+optional `fit_camera_rotation` flag that `ObsSim.from_file` injects into the
+resolved instrument config.  This decouples "does the navigator solve for a
+roll" from the camera's optics, so `planted_rotation_star_field` keeps Cassini
+NAC's sharp PSF (precise centroids) while exercising the 3-DoF path, and
+StarField recovers a 1.5 deg roll to ~0.05 deg.  The roll is asserted on the
+StarField per-technique result: the technique recovers it geometrically
+(non-spurious), but on a clean sim field its placeholder-alpha confidence holds
+the *fused* status at a stable `failed`, so the scene is held out of the
+full-ensemble navigate assertion and the roll is checked per-technique.  The
+roll is kept small (1.5 deg) so the outer stars stay inside the matcher's inlier
+tolerance; larger rolls drop the inlier count below the quorum.
+
 **Remaining:** the `StarUniqueMatchNav` one-star path (single dominant star)
 and `StarRefineNav`'s prior-refinement, each of which needs a technique-pinned
 assertion rather than a full-ensemble one; per-technique coverage for
-`BodyLimbNav` and `RingEdgeNav`; and planted-rotation recovery (the renderer
-applies the planted offset as a pure translation today; rotating the star field
-and body pose about the boresight to exercise `StarFieldFromCatalogNav`'s
-rotation fit and `planted_rotation_deg` is the next increment).
+`BodyLimbNav` and `RingEdgeNav`; and lifting the StarField confidence off its
+placeholder-alpha floor so a clean rotation field can navigate to a fused
+`success` (a Phase 10 calibration concern, not a sim gap).
 
 **Scope:**
 
@@ -1402,6 +1424,7 @@ tests/integration/test_sim_algorithmic_invariants.py     (T4)
 tests/integration/update_sim_baselines.py                (T2)
 src/nav/nav_model/stars/nav_model_stars_simulated.py     (T4)
 tests/nav/nav_model/stars/test_nav_model_stars_simulated.py (T4)
+tests/nav/sim/test_sim_rotation.py                       (T4: camera roll)
 tests/nav/sim/test_sim_determinism.py                    (B0)
 tests/nav/sim/test_sim_noise.py                          (B1)
 tests/nav/sim/test_sim_instrument_coupling.py            (B2)
@@ -1422,7 +1445,7 @@ src/nav/nav_model/__init__.py      (T4: register NavModelStarsSimulated)
 src/nav/nav_model/stars/__init__.py  (T4: register NavModelStarsSimulated)
 src/nav/sim/sim_body.py            (B0, B2, B7)
 src/nav/sim/sim_ring.py            (B0)
-src/nav/obs/obs_inst_sim.py        (B2)
+src/nav/obs/obs_inst_sim.py        (B2, T4: fit_camera_rotation override)
 src/nav/dataset/dataset_sim.py     (B2)
 src/nav/config_files/config_440_sim.yaml  (B1, B2, B6)
 src/main/nav_create_simulated_image.py  (G0, G1, G2, G3, G4, G5, G6, G7, G8)
