@@ -7,13 +7,26 @@ Overview
 
 :class:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated` is the
 simulated-image variant of the body navigation model. It renders a body from
-operator-supplied ellipsoid parameters (centre, axes, rotation, lighting) instead of from
-SPICE prediction, then emits a single
-:data:`~nav.feature.feature_type.NavFeatureType.BODY_DISC` feature carrying the rendered
-template. The simulated GUI driver constructs an instance directly with the operator's
-sim parameters; the orchestrator's autonomous registry never builds an instance because the
-class does not override
-:meth:`~nav.nav_model.nav_model.NavModel.instances_for_obs`.
+operator-supplied ellipsoid (or polyhedral-mesh) parameters -- centre, axes, rotation,
+lighting -- instead of from SPICE prediction, then emits the body features the navigation
+techniques consume:
+
+- always a :data:`~nav.feature.feature_type.NavFeatureType.BODY_DISC` carrying the
+  rendered template, for :class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav`;
+- a :data:`~nav.feature.feature_type.NavFeatureType.BODY_BLOB` (the orientation-free
+  lit-weighted centroid, built by the shared
+  :class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase`) when the predicted
+  diameter clears the blob floor, for
+  :class:`~nav.nav_technique.nav_technique_body_blob.BodyBlobNav`;
+- a :data:`~nav.feature.feature_type.NavFeatureType.LIMB_ARC` (the silhouette boundary as
+  a vertex polyline with outward normals) when the body is well resolved (diameter at
+  least 100 px) and at low phase (at most 60 degrees), for
+  :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav`.
+
+The model overrides :meth:`~nav.nav_model.nav_model.NavModel.instances_for_obs` to build
+one instance per body of a simulated observation; the parent
+:class:`~nav.nav_model.nav_model_body.NavModelBody` declines simulated observations, so the
+autonomous registry routes simulated frames here.
 
 Theory
 ======
@@ -24,11 +37,16 @@ specifies a body in image-plane coordinates (centre and per-axis radii) plus a p
 lighting geometry, and the renderer paints the corresponding ellipsoidal body onto an
 extended-FOV image plus matching mask.
 
-The rendered template is the BODY_DISC feature payload that downstream techniques
-(:class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav` is the primary
-consumer) navigate against. The simulated body's geometry is operator-known by
-construction, so the simulated path is the calibration regime — it lets a developer probe
-the navigation pipeline with bodies whose true offset is known to the pixel.
+The rendered template is the BODY_DISC feature payload the disc correlation navigates
+against. The blob and limb features extend the simulated body across the technique ladder:
+the blob is the orientation-independent fallback for small, high-phase, or irregular
+bodies, and the limb is the resolved-body distance-transform fit. Which feature is
+load-bearing tracks resolution and phase the same way it does on a real frame, so the
+range and phase parameter sweeps (:doc:`/user_guide/user_guide_simulated_images`) show the
+primary technique transitioning limb -> disc -> blob as a body shrinks. The simulated
+body's geometry is operator-known by construction, so the simulated path is the
+calibration regime -- it lets a developer probe the navigation pipeline with bodies whose
+true offset is known to the pixel.
 
 Restrictions and assumptions
 ----------------------------
@@ -62,9 +80,18 @@ in via the per-instance ``sim_params`` dict. Expected keys:
 - ``rotation_z`` — rotation about the line of sight (degrees).
 - ``rotation_tilt`` — tilt of the body (degrees).
 - ``illumination_angle`` — degrees.
-- ``phase_angle`` — degrees.
+- ``phase_angle`` — degrees. Also gates LIMB_ARC emission (limb only at or below 60
+  degrees).
+- ``shape_model`` — ``ellipsoid`` (default) or ``polyhedral_mesh`` for an irregular body;
+  a mesh reads ``mesh_lumpiness``, ``mesh_seed``, and ``pose_euler_deg`` (see
+  :func:`~nav.sim.sim_body_polyhedral.mesh_spec_from_params`).
+- ``km_per_pixel`` — optional physical scale at the limb; when absent the
+  phase-irregularity factor collapses to the regular-body case.
 
-Crater and anti-aliasing keys are accepted but ignored.
+Crater and anti-aliasing keys are accepted but ignored. The predicted silhouette diameter
+gates the blob (at least 8 px) and limb (at least 100 px) emission; the diameter floor on
+the limb keeps the LM-refined fit off marginally-resolved bodies, where it would inject
+cross-process jitter into the fused offset.
 
 Implementation
 ==============
@@ -73,20 +100,25 @@ Source file: ``src/nav/nav_model/nav_model_body_simulated.py`` —
 :class:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated`.
 
 Public class :class:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated`, base
-:class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase`. The class does *not*
-override :meth:`~nav.nav_model.nav_model.NavModel.instances_for_obs`, so the orchestrator's
-:func:`~nav.nav_model.nav_model.build_models_for_obs` driver never constructs an instance
-during autonomous runs.
+:class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase`. The class overrides
+:meth:`~nav.nav_model.nav_model.NavModel.instances_for_obs` to build one instance per body
+of a simulated observation; the parent
+:class:`~nav.nav_model.nav_model_body.NavModelBody` returns an empty list for a simulated
+observation, so the orchestrator's
+:func:`~nav.nav_model.nav_model.build_models_for_obs` driver routes simulated frames to
+this subclass.
 
 Public methods (autodocumented at :doc:`/api_reference/api_nav_model`):
 
 - :meth:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated.create_model` —
-  invokes :func:`~nav.sim.sim_body.create_simulated_body` to render the simulated body
-  image, then computes the limb mask via
-  :class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase`'s helper.
+  renders the simulated body (ellipsoid via
+  :func:`~nav.sim.sim_body.create_simulated_body`, or a mesh via
+  :func:`~nav.sim.sim_body_polyhedral.render_mesh_body_image`), computes the limb mask via
+  the shared :class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase` helper, and
+  records the predicted diameter and tight bounding box used to gate and emit features.
 - :meth:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated.to_features` — emits
-  a single :data:`~nav.feature.feature_type.NavFeatureType.BODY_DISC` feature carrying the
-  rendered template plus mask.
+  the BODY_DISC plus, when the resolution and phase gates pass, the BODY_BLOB and
+  LIMB_ARC features described under *Overview*.
 - :meth:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated.to_annotations` —
   reuses the shared body annotation helper on
   :class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase` to render body silhouette
@@ -120,15 +152,22 @@ Call path traced through
 Call path traced through
 :meth:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated.to_features`:
 
-1. Crop the rendered template image and mask to the per-instance bounding box.
+1. Crop the rendered template image and mask to the per-instance tight bounding box (the
+   silhouette bbox plus slop, matching the SPICE-backed model, so a downstream moment
+   stays local to the body rather than integrating over the whole frame).
 2. Construct one
    :data:`~nav.feature.feature_type.NavFeatureType.BODY_DISC`
    :class:`~nav.feature.feature.NavFeature` carrying the cropped template image, the
    cropped mask, the predicted centre, the subject range, and a
    :class:`~nav.feature.flags.BodyDiscFlags` with the operator-supplied body name plus
    ``overflow_fov_fraction = 0.0``.
-3. Reliability is fixed at ``1.0`` (the simulated body is by construction reliable;
-   downstream gates do not drop it).
+3. When the predicted diameter clears the blob floor, append a BODY_BLOB built by the
+   shared blob-feature helper on
+   :class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase`.
+4. When the diameter and phase gates pass, append a LIMB_ARC: the silhouette boundary is
+   sampled into a vertex polyline with outward normals and a fixed per-vertex sigma.
+5. Reliability on each feature is fixed at ``1.0`` (the simulated body is by construction
+   reliable; downstream gates do not drop it).
 
 Examples
 ========

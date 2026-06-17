@@ -93,6 +93,11 @@ nav.nav_model.stars
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: nav.nav_model.stars.nav_model_stars_simulated
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: nav.nav_model.stars.catalog
    :members:
    :undoc-members:

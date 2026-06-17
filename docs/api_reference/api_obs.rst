@@ -42,3 +42,8 @@ nav.obs
    :members:
    :undoc-members:
    :show-inheritance:
+
+.. automodule:: nav.obs.obs_inst_sim
+   :members:
+   :undoc-members:
+   :show-inheritance:
