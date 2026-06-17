@@ -41,7 +41,7 @@ _FIGURES_ROOT = Path(__file__).parent.parent.parent / 'docs' / 'simulator_report
 # For the SNR-vs-accuracy figures: a fixed, modest sub-pixel offset inside every
 # technique's capture range, so the only variable across that sweep is the noise
 # (and the background).
-_OFFSET = (0.5, -0.5)
+_OFFSET = (0.317, -0.211)
 # Read-noise grid (DN) for the SNR-vs-accuracy figures: clean frame down toward the
 # navigability cliff.
 _READ_NOISE = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0]

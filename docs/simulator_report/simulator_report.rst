@@ -589,8 +589,11 @@ are stated on each panel) and both are simulated, since a real image's true offs
 unknown.
 
 **Accuracy versus SNR (fixed injected offset).** Each technique's base scene is rendered at a
-fixed ``(dv, du) = (+0.50, -0.50)`` px offset while the per-image read noise is swept from a
-clean frame down toward the navigability cliff; the x-axis is a uniform per-image SNR proxy
+fixed ``(dv, du) = (+0.317, -0.211)`` px offset -- deliberately off the half- and
+quarter-pixel grid, since a round-number offset can land on a technique's sub-pixel-bias null
+and flatter the result (the disc, for instance, recovers a half-pixel offset *exactly* but
+carries a residual off-grid bias). The per-image read noise is swept from a clean frame down
+toward the navigability cliff; the x-axis is a uniform per-image SNR proxy
 ``(peak - background) / robust_noise`` (the noise estimated from adjacent-pixel differences
 so a stray-light ramp does not inflate it). Because each technique's feature has a different
 intrinsic brightness, the curves occupy different SNR bands -- itself part of the
@@ -600,19 +603,24 @@ characterization.
    :width: 100%
    :alt: Per-technique recovered-offset error vs SNR, nominal background.
 
-   Nominal background. The disc is flat at ~0.004 px and the ring sits at
-   ~0.003-0.007 px -- both essentially noise-immune over their range. The blob and star
-   improve steadily with SNR. The limb is pinned near its ~0.15 px distance-transform bias
-   floor regardless of SNR, which is why that bias is a separate follow-up rather than a
-   noise problem.
+   Nominal background. The disc (~0.03 px) and ring (~0.06 px) are flat with SNR --
+   noise-immune but carrying a residual *off-grid* sub-pixel bias that a round-number offset
+   would have hidden (both recover the half-pixel offset far more tightly; the disc's
+   off-grid residual reaches ~0.1 px at its worst sub-pixel phase). The blob is the most
+   accurate at high SNR (~0.008 px) and the star improves steadily with SNR. The limb is
+   pinned near its ~0.15 px distance-transform bias floor regardless of SNR, which is why that
+   bias is a separate follow-up rather than a noise problem.
 
 .. figure:: _figures/technique_snr_gradient.png
    :width: 100%
    :alt: Per-technique recovered-offset error vs SNR, stray-light gradient.
 
-   A gentle stray-light gradient (linear ramp ~3% of full scale). The disc loses the most
-   accuracy -- its full-FOV correlation is the most gradient-sensitive -- while the ring is
-   the most robust; the curves otherwise keep their nominal ordering.
+   A gentle stray-light gradient (linear ramp ~3% of full scale). The bright compact and
+   extended features survive -- the blob stays most accurate (~0.016 px), the disc rises to
+   ~0.04 px, the ring to ~0.06 px -- but the limb and star field drop out entirely: the ramp
+   pushes the dim-field detections and the limb edge below their working point, so neither
+   returns a result (their curves are absent). Stray light is therefore a far bigger threat to
+   the faint-feature techniques than read noise alone.
 
 **Accuracy versus injected offset (fixed SNR).** Holding the read noise at three levels, a
 pure-vertical offset is swept from 0 to 1.75 px (``u`` held at 0) for every technique. The
