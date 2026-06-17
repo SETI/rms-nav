@@ -1,0 +1,30 @@
+schema_version: 1
+scene_name: planted_offset_blob
+instrument: coiss_nac
+image_size_vu: [128, 128]
+random_seed: 7
+exposure_sec: 1.0
+# This body emits both a BODY_DISC and the BODY_BLOB feature that
+# NavModelBodySimulated now produces.  The disc correlation navigates the full
+# ensemble, but the dedicated blob-only test pins BodyBlobNav to the BODY_BLOB
+# feature alone to prove the simulated body's lit-weighted centroid recovers the
+# planted offset by itself -- the orientation-independent path that small,
+# high-phase, and irregular bodies depend on when the disc/limb fit is unusable.
+# Before this change there was no BODY_BLOB feature for BodyBlobNav to consume.
+bodies:
+  - name: RHEA
+    shape_model: ellipsoid
+    center_v: 64.0
+    center_u: 64.0
+    axis1: 50.0
+    axis2: 50.0
+    axis3: 50.0
+    illumination_angle: 18.0
+    phase_angle: 30.0
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+ground_truth:
+  planted_offset_dv_px: 1.5
+  planted_offset_du_px: -0.5
+  planted_rotation_deg: 0.0

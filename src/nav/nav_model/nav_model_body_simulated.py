@@ -20,8 +20,9 @@ from nav.feature.feature import NavFeature, NavReliabilityBreakdown
 from nav.feature.feature_type import NavFeatureType
 from nav.feature.flags import BodyDiscFlags
 from nav.feature.geometry import BodyDiscGeometry
+from nav.nav_model.body_shape import load_body_shape
 from nav.nav_model.nav_model import NavModel
-from nav.nav_model.nav_model_body_base import NavModelBodyBase
+from nav.nav_model.nav_model_body_base import BODY_BLOB_MIN_DIAMETER_PX, NavModelBodyBase
 from nav.sim.sim_body import create_simulated_body
 from nav.sim.sim_body_polyhedral import mesh_spec_from_params, render_mesh_body_image
 from nav.support.filters import NavFilterKind, NavFilterSpec
@@ -32,6 +33,23 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only import
     from nav.nav_orchestrator.nav_context import NavContext
 
 __all__ = ['NavModelBodySimulated']
+
+
+def _silhouette_diameter_px(body_mask: NDArrayBoolType) -> float:
+    """Return the longer pixel extent of a rendered body silhouette.
+
+    Measures the bounding-box span of the lit silhouette in each axis and
+    returns the larger of the two.  Returns ``0.0`` for an empty mask.
+    """
+    if not body_mask.any():
+        return 0.0
+    rows = np.any(body_mask, axis=1)
+    cols = np.any(body_mask, axis=0)
+    v_indices = np.where(rows)[0]
+    u_indices = np.where(cols)[0]
+    v_extent = float(v_indices[-1] - v_indices[0] + 1)
+    u_extent = float(u_indices[-1] - u_indices[0] + 1)
+    return max(v_extent, u_extent)
 
 
 class NavModelBodySimulated(NavModelBodyBase):
@@ -74,6 +92,8 @@ class NavModelBodySimulated(NavModelBodyBase):
         self._body_mask: NDArrayBoolType | None = None
         self._limb_mask: NDArrayBoolType | None = None
         self._predicted_center_vu: tuple[float, float] = (0.0, 0.0)
+        self._predicted_diameter_px: float = 0.0
+        self._km_per_pixel_at_limb: float = 0.0
         self._subject_range_km: float = float('inf')
         self._bbox_extfov_vu: tuple[int, int, int, int] = (0, 0, 0, 0)
 
@@ -188,37 +208,59 @@ class NavModelBodySimulated(NavModelBodyBase):
             int(ext_margin_v + data_size_v),
             int(ext_margin_u + data_size_u),
         )
+        # Predicted disc diameter: the longer pixel extent of the rendered
+        # silhouette.  Drives the BODY_BLOB emission gate and covariance.
+        self._predicted_diameter_px = _silhouette_diameter_px(body_mask)
+        # Physical scale at the limb.  The sim FOV is a dummy flat FOV with no
+        # real angular scale, so km/pixel is only known when the scene states
+        # it explicitly; absent that it stays 0, which makes the shared
+        # phase-irregularity factor collapse to 0 (the regular-body case).
+        self._km_per_pixel_at_limb = float(p.get('km_per_pixel', 0.0))
+        self._metadata['phase_angle_deg'] = float(p.get('phase_angle', 0.0))
 
     def to_features(self, context: NavContext) -> list[NavFeature]:
-        """Emit a single BODY_DISC feature carrying the rendered template."""
+        """Emit the body's NavFeatures.
+
+        Always emits a ``BODY_DISC`` carrying the rendered template (for the
+        correlation technique).  Also emits a ``BODY_BLOB`` whenever the
+        predicted silhouette is large enough -- the lit-weighted centroid is
+        orientation-independent, so it is the technique that navigates small,
+        high-phase, or irregular bodies that the disc correlation cannot.
+        """
         if self._model_img is None or self._body_mask is None:
             return []
         v_min, u_min, v_max, u_max = self._bbox_extfov_vu
         template_img = self._model_img[v_min:v_max, u_min:u_max].copy()
         template_mask = self._body_mask[v_min:v_max, u_min:u_max].copy()
-        feature = NavFeature(
-            feature_id=f'body_disc:{self._body_name}',
-            feature_type=NavFeatureType.BODY_DISC,
-            source_model=self.name,
-            geometry=BodyDiscGeometry(
-                bbox_extfov_vu=self._bbox_extfov_vu,
-                predicted_center_vu=self._predicted_center_vu,
-                overflow_fraction=0.0,
-            ),
-            subject_range_km=self._subject_range_km,
-            position_cov_px=None,
-            intensity_sigma_rel=0.0,
-            preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
-            reliability=1.0,
-            reliability_reasons=NavReliabilityBreakdown(
-                visible_lit_fraction=1.0, overflow_fraction=0.0
-            ),
-            usable_types=frozenset({NavFeatureType.BODY_DISC}),
-            flags=BodyDiscFlags(body_name=self._body_name, overflow_fov_fraction=0.0),
-            template_img=template_img,
-            template_mask=template_mask,
-        )
-        return [feature]
+        features: list[NavFeature] = [
+            NavFeature(
+                feature_id=f'body_disc:{self._body_name}',
+                feature_type=NavFeatureType.BODY_DISC,
+                source_model=self.name,
+                geometry=BodyDiscGeometry(
+                    bbox_extfov_vu=self._bbox_extfov_vu,
+                    predicted_center_vu=self._predicted_center_vu,
+                    overflow_fraction=0.0,
+                ),
+                subject_range_km=self._subject_range_km,
+                position_cov_px=None,
+                intensity_sigma_rel=0.0,
+                preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
+                reliability=1.0,
+                reliability_reasons=NavReliabilityBreakdown(
+                    visible_lit_fraction=1.0, overflow_fraction=0.0
+                ),
+                usable_types=frozenset({NavFeatureType.BODY_DISC}),
+                flags=BodyDiscFlags(body_name=self._body_name, overflow_fov_fraction=0.0),
+                template_img=template_img,
+                template_mask=template_mask,
+            )
+        ]
+        shape = load_body_shape(self._body_name, config=self._config)
+        blob_min_px = max(BODY_BLOB_MIN_DIAMETER_PX, shape.min_blob_diameter_px)
+        if self._predicted_diameter_px >= blob_min_px:
+            features.append(self._build_blob_feature(shape))
+        return features
 
     def to_annotations(self, context: NavContext) -> Annotations:
         """Emit body silhouette + label annotations for the summary PNG."""

@@ -573,11 +573,17 @@ an ellipsoid silhouette.
   missing-data marker (0) and the frame was misclassified as
   `mostly_missing_data`.
 
-**Remaining increments:** the centroid-only `BodyBlobNav` scenario 4;
-extending the harness across the mesh-vs-mesh / mesh-vs-ellipsoid pose
-scenarios; and real named meshes / the `shape_meshes/` sourcing decision
-(section 12.3).  The current generator is procedural, so no large mesh
-files are committed yet.
+**Remaining increments:** the centroid-only `BodyBlobNav` scenario 4 is
+now partly in -- `NavModelBodySimulated` emits the orientation-independent
+`BODY_BLOB` feature (the blob-feature construction was lifted into the
+shared `NavModelBodyBase` so the real and simulated body models share one
+implementation), and a moderate-phase scene recovers the planted offset
+via `BodyBlobNav` alone (see T4).  Still open: the true high-phase crescent
+case, which is blocked on the `BodyBlobNav` / `bias_dn` background-
+subtraction interaction (T4); extending the harness across the
+mesh-vs-mesh / mesh-vs-ellipsoid pose scenarios; and real named meshes /
+the `shape_meshes/` sourcing decision (section 12.3).  The current
+generator is procedural, so no large mesh files are committed yet.
 
 **Scope:**
 
@@ -1033,10 +1039,31 @@ construction, so no baseline to bless).  Initial scenes:
 invariant bound is set to 1.0 px (the disc/correlation technique is not
 sub-0.1 px on these scenes, so the drafted 0.1 px target is loosened).
 
-**Remaining:** per-technique coverage for `BodyLimbNav`, `BodyBlobNav`
-(high phase), `RingEdgeNav`, and the star techniques -- each needs scenes
-that route to that technique (and, for stars, a simulated stars NavModel,
-which does not exist yet) plus planted-rotation recovery.
+`BodyBlobNav` coverage is now in: `NavModelBodySimulated` emits a
+`BODY_BLOB` feature (the lit-weighted, orientation-independent centroid)
+in addition to `BODY_DISC`, so a simulated body can navigate by the blob
+path.  The `planted_offset_blob` scene plus three dedicated tests pin
+`only_techniques='BodyBlobNav'` and assert the blob alone recovers the
+planted offset.  Two constraints shaped the scene: (a) the blob centroid
+is computed by `BodyBlobNav` over above-noise image pixels, but the
+detector's 20-DN `bias_dn` pedestal exceeds the `3 * noise_sigma`
+threshold, so dark-sky pixels inside the predicted bbox enter the moment
+and bias the centroid increasingly with phase -- exact recovery is clean
+only up to moderate phase, so the catalog scene is moderate-phase, not the
+high-phase crescent; (b) a small body sits at the disc-spurious boundary
+where the full-ensemble outcome flips across processes (the same BLAS
+jitter the T2 baselines hit), so the scene body is large enough that the
+full ensemble is stably disc-dominated while the blob-only tests carry the
+blob proof.
+
+**Remaining:** per-technique coverage for `BodyLimbNav`, `RingEdgeNav`,
+and the star techniques -- each needs scenes that route to that technique
+(and, for stars, a simulated stars NavModel, which does not exist yet)
+plus planted-rotation recovery.  High-phase blob recovery needs the
+`BodyBlobNav` / `bias_dn` background-subtraction interaction resolved
+first (the technique should subtract the pedestal before the moment, or
+the predicted centroid should be computed the same way the observed one
+is).
 
 **Scope:**
 

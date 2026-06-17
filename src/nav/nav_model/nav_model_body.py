@@ -58,20 +58,22 @@ from nav.feature.constants import (
 from nav.feature.feature import NavFeature, NavReliabilityBreakdown
 from nav.feature.feature_type import NavFeatureType
 from nav.feature.flags import (
-    BodyBlobFlags,
     BodyDiscFlags,
     LimbArcFlags,
     TerminatorArcFlags,
 )
 from nav.feature.geometry import (
-    BodyBlobGeometry,
     BodyDiscGeometry,
     LimbPolyline,
     TerminatorPolyline,
 )
 from nav.nav_model.body_shape import BodyShape, load_body_shape
 from nav.nav_model.nav_model import NavModel
-from nav.nav_model.nav_model_body_base import NavModelBodyBase
+from nav.nav_model.nav_model_body_base import (
+    BODY_BLOB_MIN_DIAMETER_PX,
+    NavModelBodyBase,
+    _sigmoid,
+)
 from nav.nav_model.stars.predicted_snr import psf_sigma_px
 from nav.support.constants import HALFPI
 from nav.support.image import filter_downsample, shift_array
@@ -114,17 +116,6 @@ the DT-based limb fit; the extractor switches to ``BODY_BLOB`` so the
 brightness-weighted-centroid technique still has something to work
 with.  The numeric value is a config default pending calibration
 against the operator-curated image library.
-"""
-
-
-BODY_BLOB_MIN_DIAMETER_PX: float = 8.0
-"""Minimum predicted disc diameter (px) at which BODY_BLOB is emitted.
-
-Below this diameter the predicted body silhouette is too small for a
-brightness-weighted centroid to pin the body to better than ~1 px, so
-the extractor emits no body feature for the image.  The per-body
-shape table can override this floor for known irregular / gas-giant
-bodies.
 """
 
 
@@ -759,145 +750,6 @@ class NavModelBody(NavModelBodyBase):
             template_mask=template_mask,
         )
 
-    def _build_blob_feature(self, shape: BodyShape) -> NavFeature:
-        """Construct the BODY_BLOB feature.
-
-        Three phase-aware decisions live here:
-
-        * **Lit-weighted predicted centroid.** At high phase the
-          measured brightness centroid sits at the centroid of the lit
-          hemisphere, not at the geometric body center.  Predicting the
-          lit-weighted centroid up front means the navigation offset
-          the technique recovers is just the spacecraft pointing error,
-          not pointing error plus the systematic phase bias.  The
-          weighted centroid is computed over ``_model_img *
-          _body_mask`` (the rendered model already encodes the local
-          incidence-driven brightness from an *ellipsoidal* body) and
-          collapses to the geometric center at phase 0 where the model
-          is uniform.
-        * **Inflated centroid covariance.** The lit-weighted centroid
-          assumes an ellipsoidal body of *known* rotational
-          orientation; the same scene on an irregular body whose pose
-          we do not know carries a residual centroid bias the
-          ellipsoidal model cannot remove.  The bias scales with the
-          shape's RMS departure from an ellipsoid (in km) and with how
-          much of the body the lit hemisphere fails to sample
-          (``1 + 2 * sin^2(phase / 2)`` runs from 1 at full-phase to
-          3 at full crescent — even at phase 0 the orientation is
-          unknown, so a residual-scale bias is always present).  This
-          irregularity sigma is added to the photon-noise-limited
-          centroid sigma in quadrature so the joint-fit covariance
-          reflects both terms.
-        * **``phase_irregularity_factor`` on the flags.** Surfaces the
-          dimensionless ``sin(phase/2) * residual / radius`` so the
-          BLOB confidence formula can down-weight irregular high-phase
-          blobs without the technique having to recompute it.  Raw
-          ``phase_angle_deg`` is also recorded for diagnostic
-          inspection but the confidence formula consumes the combined
-          factor.
-        """
-        # Estimate per-pixel SNR from the brightest pixel in the model.
-        assert self._model_img is not None
-        assert self._body_mask is not None
-        snr = float(self._model_img[self._body_mask].mean()) if self._body_mask.any() else 0.0
-        sigma_centroid = self._predicted_diameter_px / (
-            2.0 * math.sqrt(max(int(self._body_mask.sum()), 1)) * max(snr, 1e-6)
-        )
-        phase_angle_deg = float(self._metadata.get('phase_angle_deg', 0.0))
-        if not math.isfinite(phase_angle_deg):
-            phase_angle_deg = 0.0
-        # Clamp to the BodyBlobFlags valid range; phase outside [0, 180]
-        # is a SPICE-corner-case artefact, never a physical value.
-        phase_angle_deg = max(0.0, min(180.0, phase_angle_deg))
-        phase_irregularity_factor = self._phase_irregularity_factor(shape, phase_angle_deg)
-        sigma_irregular_px = phase_irregularity_factor * (self._predicted_diameter_px / 2.0)
-        sigma_total_px = math.sqrt(sigma_centroid * sigma_centroid + sigma_irregular_px**2)
-        cov = (sigma_total_px * sigma_total_px) * np.eye(2, dtype=np.float64)
-        predicted_center_vu = self._lit_weighted_centroid_vu()
-        return NavFeature(
-            feature_id=f'body_blob:{self._body_name}',
-            feature_type=NavFeatureType.BODY_BLOB,
-            source_model=self.name,
-            geometry=BodyBlobGeometry(
-                predicted_center_vu=predicted_center_vu,
-                bbox_extfov_vu=self._bbox_extfov_vu,
-                predicted_diameter_px=self._predicted_diameter_px,
-            ),
-            subject_range_km=self._subject_range_km,
-            position_cov_px=cov,
-            intensity_sigma_rel=0.0,
-            preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
-            reliability=_blob_reliability(snr=snr, diameter_px=self._predicted_diameter_px),
-            reliability_reasons=NavReliabilityBreakdown(
-                blob_snr=min(1.0, snr / 10.0),
-                blob_extent_px=min(1.0, self._predicted_diameter_px / 30.0),
-            ),
-            usable_types=frozenset({NavFeatureType.BODY_BLOB}),
-            flags=BodyBlobFlags(
-                body_name=self._body_name,
-                predicted_diameter_px=self._predicted_diameter_px,
-                phase_angle_deg=phase_angle_deg,
-                phase_irregularity_factor=phase_irregularity_factor,
-            ),
-        )
-
-    def _phase_irregularity_factor(self, shape: BodyShape, phase_angle_deg: float) -> float:
-        """Return the dimensionless phase-and-irregularity coupling.
-
-        Computed as ``(ellipsoid_rms_residual_km / body_radius_km) *
-        (1 + 2 * sin^2(phase / 2))``.  Two physical effects compose:
-
-        * The ``residual / radius`` ratio is the *fractional* shape
-          uncertainty of the body relative to its ellipsoidal model.
-          For a regular Mimas (residual ~ 1 km, radius ~ 200 km)
-          this is ~ 0.005; for irregular Hyperion / Phoebe (residual
-          ~ 10 km, radius ~ 100-135 km) it is ~ 0.07-0.10.
-        * The ``1 + 2 * sin^2(phase / 2)`` factor captures the
-          orientation-uncertainty bound.  At phase 0 the entire
-          hemisphere is lit and the factor is ``1`` — we still do
-          not know the body's rotational orientation so a full
-          ``residual_km``-scale centroid bias is in play even at
-          full phase.  At phase 90 the factor is ``2`` because only
-          half the body is lit and the dark side could be hiding an
-          equal amount of shape irregularity.  At phase 180 the
-          factor is ``3`` since only the crescent is lit, leaving
-          most of the body's irregularity hidden.
-
-        ``body_radius_km`` is derived from the predicted disc geometry
-        rather than from a separate static-data lookup so a body
-        absent from the YAML or hard-coded shape table still gets a
-        meaningful factor (the residual itself falls back to
-        ``DEFAULT_BODY_SHAPE`` upstream).
-        """
-        if self._predicted_diameter_px <= 0.0 or self._km_per_pixel_at_limb <= 0.0:
-            return 0.0
-        body_radius_km = self._km_per_pixel_at_limb * (self._predicted_diameter_px / 2.0)
-        if body_radius_km <= 0.0:
-            return 0.0
-        sin_half_phase = math.sin(math.radians(phase_angle_deg) / 2.0)
-        phase_factor = 1.0 + 2.0 * sin_half_phase * sin_half_phase
-        residual_fraction = shape.ellipsoid_rms_residual_km / body_radius_km
-        return float(max(0.0, residual_fraction * phase_factor))
-
-    def _lit_weighted_centroid_vu(self) -> tuple[float, float]:
-        """Return the brightness-weighted centroid of the rendered body.
-
-        Falls back to the geometric center when the model is empty or
-        the body mask is all-False (degenerate render).  The centroid
-        is in the same extfov coordinate frame ``_predicted_center_vu``
-        uses, so the BLOB feature's geometry stays self-consistent.
-        """
-        assert self._model_img is not None
-        assert self._body_mask is not None
-        weights = np.where(self._body_mask, self._model_img, 0.0)
-        total = float(weights.sum())
-        if total <= 0.0:
-            return self._predicted_center_vu
-        v_indices, u_indices = np.indices(weights.shape, dtype=np.float64)
-        lit_v = float((weights * v_indices).sum() / total)
-        lit_u = float((weights * u_indices).sum() / total)
-        return (lit_v, lit_u)
-
     def _maybe_build_terminator(self, shape: BodyShape) -> NavFeature | None:
         """Build TERMINATOR_ARC when the design's terminator gates pass."""
         sampler = self._terminator_sampler
@@ -1166,17 +1018,3 @@ def _disc_reliability(
     """Reliability of BODY_DISC per the design (no scoring alpha coefficients yet)."""
     sigmoid_term = _sigmoid(diameter_px / 30.0 - 1.0)
     return float(visible_lit_fraction * (1.0 - overflow_fraction) * sigmoid_term)
-
-
-def _blob_reliability(*, snr: float, diameter_px: float) -> float:
-    """Reliability of BODY_BLOB per the design (cap at 0.4)."""
-    return float(_sigmoid(snr) * _sigmoid(diameter_px / 8.0 - 1.0) * 0.4)
-
-
-def _sigmoid(x: float) -> float:
-    """Logistic sigmoid (numerically safe)."""
-    if x >= 0:
-        z = math.exp(-x)
-        return 1.0 / (1.0 + z)
-    z = math.exp(x)
-    return z / (1.0 + z)

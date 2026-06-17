@@ -24,17 +24,16 @@ from nav.nav_model.nav_model_body import (
     LIMB_ARC_MAX_UNCERTAINTY_PX,
     TERMINATOR_MIN_PHASE_FACTOR,
     TERMINATOR_MIN_VERTICES,
-    _blob_reliability,
     _build_polyline_sampler,
     _disc_reliability,
     _incidence_factor_array,
     _limb_reliability,
     _PolylineSampler,
     _sigma_normal_per_vertex,
-    _sigmoid,
     _terminator_reliability,
     _visible_arc_fraction,
 )
+from nav.nav_model.nav_model_body_base import _blob_reliability, _sigmoid
 
 
 def test_constants_have_design_values() -> None:

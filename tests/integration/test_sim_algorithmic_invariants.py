@@ -28,9 +28,11 @@ _INVARIANT_PATHS = [p for p in _SCENE_PATHS if p.parent.name == 'algorithmic_inv
 _INVARIANT_IDS = [p.stem for p in _INVARIANT_PATHS]
 
 
-def _navigate(scene: SimScene) -> Any:
+def _navigate(scene: SimScene, *, only_techniques: str = '*') -> Any:
     obs = ObsSim.from_file('/tmp/invariant.json', sim_params=scene.to_sim_params())
-    orchestrator = NavOrchestrator(build_models_for_obs(obs), only_models='*', only_techniques='*')
+    orchestrator = NavOrchestrator(
+        build_models_for_obs(obs), only_models='*', only_techniques=only_techniques
+    )
     return orchestrator.navigate(obs)
 
 
@@ -60,5 +62,35 @@ def test_invariant_recovers_planted_u(path: Path) -> None:
     """Each scene recovers its planted u offset within tolerance."""
     scene = load_sim_scene(path)
     result = _navigate(scene)
+    assert result.offset_px is not None
+    assert abs(result.offset_px[1] - scene.ground_truth.planted_offset_du_px) < _OFFSET_TOLERANCE_PX
+
+
+# The blob scene is small enough that BodyBlobNav -- consuming the BODY_BLOB
+# feature NavModelBodySimulated now emits -- is the load-bearing technique.
+# Pinning ``only_techniques`` to it proves the simulated body's blob feature is
+# both produced and consumable, independent of the disc correlation.
+_BLOB_SCENE_PATH = _INVARIANTS_DIR / 'planted_offset_blob.yaml'
+
+
+def test_blob_scene_navigates_via_blob_alone() -> None:
+    """The small-body scene navigates with BodyBlobNav as the only technique."""
+    scene = load_sim_scene(_BLOB_SCENE_PATH)
+    result = _navigate(scene, only_techniques='BodyBlobNav')
+    assert result.status == 'success'
+
+
+def test_blob_alone_recovers_planted_v() -> None:
+    """BodyBlobNav alone recovers the planted v offset within tolerance."""
+    scene = load_sim_scene(_BLOB_SCENE_PATH)
+    result = _navigate(scene, only_techniques='BodyBlobNav')
+    assert result.offset_px is not None
+    assert abs(result.offset_px[0] - scene.ground_truth.planted_offset_dv_px) < _OFFSET_TOLERANCE_PX
+
+
+def test_blob_alone_recovers_planted_u() -> None:
+    """BodyBlobNav alone recovers the planted u offset within tolerance."""
+    scene = load_sim_scene(_BLOB_SCENE_PATH)
+    result = _navigate(scene, only_techniques='BodyBlobNav')
     assert result.offset_px is not None
     assert abs(result.offset_px[1] - scene.ground_truth.planted_offset_du_px) < _OFFSET_TOLERANCE_PX
