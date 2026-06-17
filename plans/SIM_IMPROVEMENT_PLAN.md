@@ -33,6 +33,100 @@ the implementer batch them.
 
 ---
 
+## 0. Current status and next steps (session handoff)
+
+This section is the live status board; the phase sections below are the durable
+plan. A new contributor should read this first, then the phase it points to.
+
+### 0.1 Plan-phase status
+
+- **Backend:** B0 (determinism), B1 (noise), B2 (per-instrument coupling),
+  B4 (saturation), B5 (PSF), B6 (stray light) are **done**. B7 (irregular bodies)
+  is **partially done** (procedural mesh render + navigator prediction +
+  end-to-end navigation; remaining: mesh-vs-ellipsoid pose scenarios, named
+  meshes). B3 (smear) is **postponed** on upstream `psfmodel`; B8 (diffraction)
+  is **dropped**.
+- **GUI:** G0, G1, G2, G4, G5, G6, G7, G8 are **done**. G3 (smear) is postponed
+  with B3.
+- **Test layer:** T1 (scene catalog), T2 (regression baselines), T3 (sweeps) are
+  **done**. T4 (algorithmic invariants) is **substantially done** -- disc, blob,
+  limb, ring edge, star field, and camera roll all navigate from catalog scenes
+  and recover planted transforms; remaining are the `StarUniqueMatchNav` one-star
+  and `StarRefineNav` prior-refinement technique-pinned cases. T5 (alpha
+  bootstrap), T6 (real-vs-sim diagnostics), T7 (calibration validation) are
+  **not started** and depend on the real-data Phase 10 calibration.
+
+### 0.2 Navigation-accuracy work completed alongside the plan
+
+A separate track of navigation/accuracy fixes was driven by the T3 sweeps and the
+per-technique characterization (`docs/simulator_report/`). Completed:
+
+1. **Star reliability gate** -- the star model no longer gates a star on the
+   saturation / cosmic-ray mask at its predicted position (a star's predicted
+   pixel is not special, and a sharp peak self-flags as a cosmic ray); gating is
+   occlusion-only. See `dev_guide_techniques_star_field` and the star model
+   chapters.
+2. **Star PSF-fit refinement (SNR-adaptive)** -- after the RANSAC match,
+   `StarFieldFromCatalogNav` re-centroids each matched inlier with a
+   maximum-likelihood PSF fit when the star is faint and keeps the
+   brightness-weighted moment when it is bright (the moment beats the PSF fit's
+   sub-pixel-phase bias floor above a configurable integrated-SNR ceiling,
+   `psf_refine_snr_max`). Dim-field offset error dropped ~0.05 -> ~0.025 px,
+   bright field ~0.005 px.
+3. **Disc correlator sub-pixel band-limit** -- `evaluate_candidate` low-passes both
+   refine surfaces before the cross-power (`refine_lowpass_sigma_px`, default
+   1.0 px), removing a sharp-edge aliasing S-curve (~0.03 px, up to ~0.1 px at the
+   worst 2-D phase). See `dev_guide_techniques_body_disc`.
+4. **Off-grid invariant offsets** -- every fixed algorithmic-invariant scene plants
+   one common off-grid offset `(1.43, -0.61)` px (sweeps keep round grids), so a
+   technique cannot land on a sub-pixel-bias null; the per-scene errors are at one
+   phase and directly comparable.
+5. **Per-technique characterization** -- `technique_snr_characterization.py` and
+   `star_snr_characterization.py` (runner-only) sweep SNR and injected offset
+   across backgrounds and emit the report figures.
+
+**Documentation split (cardinal):** the simulator report
+(`docs/simulator_report/`) is *ephemeral* -- current statistics, figures, and
+conclusions only, no decisions or change history. All mechanisms, decisions,
+rejected alternatives, and "what breaks if you don't" live in the **developer
+guide** (`docs/dev_guide/`). Keep new findings on that split.
+
+### 0.3 Next steps, in order
+
+The next three navigation/sim improvements, highest priority first:
+
+1. **Sim instrument config: inherit / override / fully self-specify.** Today a sim
+   scene's physical parameters are resolved from a referenced instrument's config
+   (B2). Extend this so a scene may (a) inherit from an instrument, (b) inherit but
+   override individual parameters, or (c) specify everything with no instrument
+   reference at all. The goal is to lock a scene's behavior so that a later change
+   to a real camera's config cannot silently shift existing sim tests/results. This
+   is the resolution of open question 2 (section 12) and an extension of B2; touch
+   `resolve_sim_inst_config` in `src/nav/sim/instruments.py`, the scene schema in
+   `src/nav/sim/scene.py`, and the GUI instrument control.
+2. **Staged limb / ring sub-pixel refine against the continuous gradient field.**
+   The limb (~0.135 px) and ring (~0.05 px) distance-transform techniques carry an
+   SNR-independent sub-pixel-phase bias floor from the integer-quantized DT. Keep
+   the DT/NCC coarse acquisition, then refine the final offset against the
+   *continuous* gradient field (sub-pixel, un-quantized). See the mechanism note in
+   `dev_guide_techniques_body_limb`; the ring shares it via `dt_fitting`.
+3. **Prior-aware large-offset refinement with graceful fallback.** For blob / limb /
+   ring, use a pass-1 prior to seed a larger-offset refinement, with graceful
+   fallback to the current prior-free behavior when there is no prior or the prior
+   is bad. Validate only with simulated images (a real image's true offset is
+   unknown).
+
+**Validation discipline (carried throughout):** validate accuracy changes only with
+simulated images; use ensemble statistics across seeds and offsets, not single
+scenes; keep the full sweep out of the normal pytest run; guard found defects with
+fast bug-specific regression scenes. The worktree has its own `.venv` -- run
+`/seti/newnav/rms-nav-sim/.venv/bin/python` and, for the `tests.*` runners,
+`PYTHONPATH=/seti/newnav/rms-nav-sim`. Integration tests and real-image
+re-blessing need the holdings env vars (`OOPS_RESOURCES`, `PDS3_HOLDINGS_DIR`,
+`PDS4_HOLDINGS_DIR`, `UCAC4_PATH`, `YBSC_PATH`).
+
+---
+
 ## 1. Context and problem statement
 
 ### 1.1 What this plan is for

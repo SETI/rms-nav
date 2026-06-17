@@ -103,8 +103,9 @@ it does not capture systematic biases (e.g. an inflation of the per-vertex sigma
 unmodelled crater roughness) and it does not capture model-side uncertainty in the SPICE
 prediction itself (the search-window margin is what bounds that).
 
-One such systematic is a **sub-pixel-phase bias floor of ~0.13-0.15 px** in the recovered
-offset. It is *independent of SNR* (it persists on a clean, high-signal frame), so it is not
+One such systematic is a **sub-pixel-phase bias floor of ~0.1 px** in the recovered offset
+(median ~0.09-0.14 px over a dense sub-pixel sweep depending on the cross-axis phase, up to
+~0.25 px at the worst two-axis phase). It is *independent of SNR* (it persists on a clean, high-signal frame), so it is not
 a noise effect: it arises because the image-edge distance transform is built from a binary
 thresholded-and-NMS'd edge mask and is then integer-quantized before bilinear sampling, so the
 distance field the Levenberg-Marquardt fit minimizes against is itself quantized at the

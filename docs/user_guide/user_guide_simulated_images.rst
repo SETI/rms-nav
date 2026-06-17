@@ -94,8 +94,8 @@ declares the planted offset and roll under ``ground_truth``:
      poisson: true
      read_noise_dn: 4.0
    ground_truth:
-     planted_offset_dv_px: 1.5
-     planted_offset_du_px: -0.5
+     planted_offset_dv_px: 1.43
+     planted_offset_du_px: -0.61
      planted_rotation_deg: 0.0
 
 Key scene fields:
@@ -113,7 +113,10 @@ Key scene fields:
   rotation by default, so a clean-PSF camera can exercise the 3-DoF path.
 * ``ground_truth.planted_offset_dv_px`` / ``planted_offset_du_px`` -- the
   translation the renderer applies; the navigator predicts the unshifted
-  geometry and must recover it.
+  geometry and must recover it. For a fixed scene, prefer an off-grid value (not
+  an integer, half-, or quarter-pixel offset): a round offset can sit on a
+  technique's sub-pixel-bias null and report a flatteringly small error. Round
+  values belong only in parameter sweeps, which traverse a grid.
 * ``ground_truth.planted_rotation_deg`` -- a camera roll about the boresight,
   applied to stars and bodies before the translation.
 

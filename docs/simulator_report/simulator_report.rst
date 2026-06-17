@@ -155,23 +155,23 @@ ensemble for the disc and star scenes.
      - Error
    * - ``planted_offset_disc``
      - BodyDiscCorrelateNav
-     - (3.37, -1.83) px
-     - (3.36, -1.84) px
-     - 0.01 px
+     - (1.43, -0.61) px
+     - (1.50, -0.60) px
+     - 0.07 px
    * - ``planted_offset_irregular``
      - BodyDiscCorrelateNav (mesh)
-     - (2.13, 1.37) px
-     - (2.12, 1.36) px
+     - (1.43, -0.61) px
+     - (1.43, -0.62) px
      - 0.01 px
    * - ``planted_offset_blob``
      - BodyBlobNav
-     - (1.23, -0.58) px
-     - (1.22, -0.59) px
-     - 0.01 px
+     - (1.43, -0.61) px
+     - (1.42, -0.62) px
+     - 0.02 px
    * - ``planted_offset_blob_crescent``
      - BodyBlobNav (120 deg)
-     - (1.37, -0.41) px
-     - (1.19, -0.34) px
+     - (1.43, -0.61) px
+     - (1.24, -0.59) px
      - 0.19 px
    * - ``planted_offset_star_field``
      - StarField + UniqueMatch + Refine
@@ -180,31 +180,34 @@ ensemble for the disc and star scenes.
      - 0.12 px
    * - ``planted_offset_limb``
      - BodyLimbNav
-     - (1.61, -0.43) px
-     - (1.77, -0.22) px
-     - 0.27 px
+     - (1.43, -0.61) px
+     - (1.40, -0.66) px
+     - 0.06 px
    * - ``planted_offset_ring``
      - RingEdgeNav
-     - (1.29, -0.67) px
-     - (1.25, -0.72) px
-     - 0.06 px
+     - (1.43, -0.61) px
+     - (1.42, -0.62) px
+     - 0.01 px
    * - ``planted_rotation_star_field``
      - StarFieldFromCatalogNav (roll)
-     - 1.37 deg
-     - 1.364 deg
-     - 0.006 deg
+     - (1.43, -0.61) px, 1.37 deg
+     - 1.356 deg
+     - 0.01 deg
 
 Observations:
 
-* Every technique recovers its planted transform well within the 1.0 px (and
-  third-of-a-degree) invariant bound at this off-grid phase.
-* The disc, mesh-body disc, and blob recover to ~0.01 px; the ring edge to
-  ~0.06 px; the fused star field to ~0.12 px; the limb to ~0.27 px at this phase.
+* All scenes plant the **same** off-grid offset ``(1.43, -0.61)`` px, so the
+  per-technique errors are at one common sub-pixel phase and directly comparable.
+  Every technique recovers well within the 1.0 px (and third-of-a-degree) bound.
+* At this phase the mesh disc and ring edge recover to ~0.01 px, the blob to
+  ~0.02 px, the limb to ~0.06 px, and the disc to ~0.07 px; the fused star field
+  to ~0.12 px.
 * The high-phase blob crescent (~0.19 px at 120 deg) is the hardest case: only a
   thin lit crescent constrains the centroid. It still recovers sub-pixel.
-* These are single off-grid samples, so they sit above the multi-offset medians in
-  the offset-accuracy section (e.g. the limb's ~0.13 px sweep median versus
-  ~0.27 px here); the table is a correctness check, not the precision benchmark.
+* These are single-phase samples, so a given technique can sit above or below its
+  multi-offset median in the offset-accuracy section (e.g. the disc's ~0.07 px here
+  versus its ~0.006 px sweep median); the table is a same-phase comparison and a
+  correctness check, not the precision benchmark.
 
 Single-variable sensitivity
 ===========================
@@ -385,7 +388,7 @@ swept across the dense sub-pixel set and the wide range described under
 
    Recovered-offset error (log scale) vs planted sub-pixel offset, each technique
    pinned. The disc, blob, and star field sit at or below a few hundredths of a
-   pixel; the ring edge (~0.05 px) and the limb (~0.135 px) hold distance-transform
+   pixel; the ring edge (~0.03 px) and the limb (~0.09 px) hold distance-transform
    residuals.
 
 .. list-table:: Sub-pixel recovery error (px) over the dense fractional sweep
@@ -401,13 +404,13 @@ swept across the dense sub-pixel set and the wide range described under
      - 0.006
      - 0.050
    * - BodyLimbNav
-     - 0.025
-     - 0.135
-     - 0.250
+     - 0.022
+     - 0.092
+     - 0.165
    * - RingEdgeNav
      - 0.003
-     - 0.053
-     - 0.099
+     - 0.034
+     - 0.069
    * - BodyBlobNav
      - 0.002
      - 0.006
@@ -427,7 +430,7 @@ pixel; the distance-transform techniques carry a larger sub-pixel residual:
 - **Disc and blob recover to <0.01 px** (median 0.006), and the bright star field
   to ~0.005 px -- the most accurate. A zero shift between identical frames recovers
   the disc exactly at ``(0, 0)``.
-- **The ring edge holds a ~0.05 px residual** and **the limb a ~0.135 px residual**
+- **The ring edge holds a ~0.03 px residual** and **the limb a ~0.09 px residual**
   across the dense sweep, both distance-transform effects that vary with the
   sub-pixel phase; they stay well inside the invariant bound. See
   :doc:`/dev_guide/dev_guide_techniques_body_limb` for the mechanism.
