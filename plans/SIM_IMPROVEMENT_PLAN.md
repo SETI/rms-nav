@@ -578,9 +578,11 @@ now partly in -- `NavModelBodySimulated` emits the orientation-independent
 `BODY_BLOB` feature (the blob-feature construction was lifted into the
 shared `NavModelBodyBase` so the real and simulated body models share one
 implementation), and a moderate-phase scene recovers the planted offset
-via `BodyBlobNav` alone (see T4).  Still open: the true high-phase crescent
-case, which is blocked on the `BodyBlobNav` / `bias_dn` background-
-subtraction interaction (T4); extending the harness across the
+via `BodyBlobNav` alone (see T4), and `BodyBlobNav` now subtracts the
+detector bias pedestal before the centroid moment so clean recovery
+reaches ~90 deg phase.  Still open: the true high-phase crescent (>90 deg),
+now limited by the hard-threshold-moment vs continuous-model centroid
+mismatch rather than the pedestal (T4); extending the harness across the
 mesh-vs-mesh / mesh-vs-ellipsoid pose scenarios; and real named meshes /
 the `shape_meshes/` sourcing decision (section 12.3).  The current
 generator is procedural, so no large mesh files are committed yet.
@@ -1044,26 +1046,34 @@ sub-0.1 px on these scenes, so the drafted 0.1 px target is loosened).
 in addition to `BODY_DISC`, so a simulated body can navigate by the blob
 path.  The `planted_offset_blob` scene plus three dedicated tests pin
 `only_techniques='BodyBlobNav'` and assert the blob alone recovers the
-planted offset.  Two constraints shaped the scene: (a) the blob centroid
-is computed by `BodyBlobNav` over above-noise image pixels, but the
-detector's 20-DN `bias_dn` pedestal exceeds the `3 * noise_sigma`
-threshold, so dark-sky pixels inside the predicted bbox enter the moment
-and bias the centroid increasingly with phase -- exact recovery is clean
-only up to moderate phase, so the catalog scene is moderate-phase, not the
-high-phase crescent; (b) a small body sits at the disc-spurious boundary
-where the full-ensemble outcome flips across processes (the same BLAS
-jitter the T2 baselines hit), so the scene body is large enough that the
-full ensemble is stably disc-dominated while the blob-only tests carry the
-blob proof.
+planted offset.  One constraint shaped the scene: a small body sits at the
+disc-spurious boundary where the full-ensemble outcome flips across
+processes (the same BLAS jitter the T2 baselines hit), so the scene body
+is large enough that the full ensemble is stably disc-dominated while the
+blob-only tests carry the blob proof.
+
+`BodyBlobNav` now subtracts a per-bbox background (bias + dark pedestal)
+before forming the brightness-weighted moment, via
+`_estimate_background_dn` (a low-percentile-seeded sky estimate refined by
+one sigma-clipping pass; ~0 on a zero-background fixture, so prior tests
+are unchanged).  This removes the pedestal bias that previously dragged the
+centroid toward the bbox center: blob-only recovery on a clean coiss_nac
+moon improved from ~0.5 px to ~0.16 px at phase 60 and from ~1.4 px (a
+failure) to ~0.55 px at phase 90, so the usable phase ceiling moved from
+~50 deg to ~90 deg.
 
 **Remaining:** per-technique coverage for `BodyLimbNav`, `RingEdgeNav`,
 and the star techniques -- each needs scenes that route to that technique
 (and, for stars, a simulated stars NavModel, which does not exist yet)
-plus planted-rotation recovery.  High-phase blob recovery needs the
-`BodyBlobNav` / `bias_dn` background-subtraction interaction resolved
-first (the technique should subtract the pedestal before the moment, or
-the predicted centroid should be computed the same way the observed one
-is).
+plus planted-rotation recovery.  The true high-phase crescent (>90 deg)
+still does not recover cleanly, but the cause is now a *different* one
+than the pedestal: the observed centroid hard-thresholds at
+`background + 3 * noise_sigma` (keeping only the bright crescent core)
+while the model's predicted centroid is a continuous weighting over the
+full lit falloff -- a moment-vs-model consistency mismatch that background
+subtraction cannot address.  Closing it needs matched thresholding of the
+predicted centroid (or a forward-model / profile fit instead of a hard
+moment), which is its own task.
 
 **Scope:**
 

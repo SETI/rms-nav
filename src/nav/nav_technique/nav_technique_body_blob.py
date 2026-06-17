@@ -100,48 +100,105 @@ def _clamp_bbox(
     )
 
 
+_BLOB_NOISE_THRESHOLD_SIGMA: float = 3.0
+"""Pixels above ``background + this * noise_sigma`` count as lit signal."""
+
+_BLOB_BACKGROUND_SEED_PERCENTILE: float = 20.0
+"""Low-percentile seed for the per-bbox background estimate.
+
+Seeding the sky estimate from a low percentile keeps it anchored on the
+background even when the bright body fills most of the bbox, after which
+one clipping pass refines it to the median of the sky population.
+"""
+
+
+def _estimate_background_dn(patch: NDArrayFloatType, noise_sigma: float) -> float:
+    """Estimate the background (bias + dark) DN level inside a bbox.
+
+    Real raw frames carry a non-zero bias/dark pedestal, and the sim adds
+    a ``bias_dn`` pedestal so dark sky is distinguishable from the
+    missing-data marker.  That pedestal sits on every pixel, so without
+    subtracting it the brightness-weighted moment is pulled toward the
+    bbox geometric center -- a bias that grows with phase as the lit
+    signal concentrates away from center.  This returns a robust sky
+    level so the caller can subtract it before forming the moment.
+
+    The estimate seeds from a low percentile (robust to a bright body
+    filling most of the bbox) and refines by re-medianing the pixels
+    within ``3 * noise_sigma`` of the running estimate (the sky
+    population).  On a zero-background fixture it returns ~0, so the
+    moment is unchanged from a plain above-noise centroid.
+
+    Parameters:
+        patch: The bbox sub-image (DN).
+        noise_sigma: Per-pixel image noise sigma (DN).
+
+    Returns:
+        The estimated background DN level.
+    """
+    sigma = max(noise_sigma, 1e-9)
+    flat = patch.reshape(-1)
+    background = float(np.percentile(flat, _BLOB_BACKGROUND_SEED_PERCENTILE))
+    for _ in range(3):
+        sky = flat[flat <= background + _BLOB_NOISE_THRESHOLD_SIGMA * sigma]
+        if sky.size == 0:
+            break
+        refined = float(np.median(sky))
+        if abs(refined - background) <= 1e-3 * sigma:
+            background = refined
+            break
+        background = refined
+    return background
+
+
 def _brightness_weighted_centroid(
     image_ext: NDArrayFloatType,
     image_noise_sigma: float,
     geometry: BodyBlobGeometry,
-) -> tuple[tuple[float, float] | None, float, int, tuple[int, int, int, int]]:
+) -> tuple[tuple[float, float] | None, float, int, tuple[int, int, int, int], float]:
     """Return the brightness-weighted centroid + signal stats for one blob.
 
-    The centroid is computed over every above-noise pixel inside the
+    The centroid is computed over every above-background pixel inside the
     feature's predicted bounding box (the bbox includes per-body slop so
     the actual body silhouette stays inside it under moderate SPICE
-    pointing error).  Above-noise pixels are those exceeding
-    ``3 * image_noise_sigma``; background DN never biases the moment.
-    A blob whose bbox carries no above-noise pixels returns
-    ``(None, 0.0, 0, clamped_bbox)`` so the caller can drop it from the
-    joint fit and still log its bbox in the per-blob rejection line.
+    pointing error).  The per-bbox background (bias + dark pedestal) is
+    estimated and subtracted first, so the moment weights are signal
+    above background, not raw DN; lit pixels are those exceeding
+    ``background + 3 * image_noise_sigma``.  Subtracting the background is
+    what keeps a uniform pedestal from dragging the centroid toward the
+    bbox center (a phase-dependent bias on high-phase crescents).
+    A blob whose bbox carries no above-background pixels returns
+    ``(None, 0.0, 0, clamped_bbox, background)`` so the caller can drop it
+    from the joint fit and still log its bbox in the per-blob rejection
+    line.
 
     Returns:
-        ``(centroid_vu, mean_signal_above_noise, n_lit_pixels,
-        clamped_bbox)``.  ``centroid_vu`` is ``None`` when the blob has
-        no usable signal.
+        ``(centroid_vu, mean_signal_above_background, n_lit_pixels,
+        clamped_bbox, background_dn)``.  ``centroid_vu`` is ``None`` when
+        the blob has no usable signal.
     """
     extfov_shape = (image_ext.shape[0], image_ext.shape[1])
     clamped_bbox = _clamp_bbox(geometry.bbox_extfov_vu, extfov_shape)
     v_min, u_min, v_max, u_max = clamped_bbox
     if v_max <= v_min or u_max <= u_min:
-        return None, 0.0, 0, clamped_bbox
+        return None, 0.0, 0, clamped_bbox, 0.0
     patch = image_ext[v_min:v_max, u_min:u_max]
-    noise_threshold = 3.0 * max(image_noise_sigma, 1e-9)
+    background = _estimate_background_dn(patch, image_noise_sigma)
+    noise_threshold = background + _BLOB_NOISE_THRESHOLD_SIGMA * max(image_noise_sigma, 1e-9)
     signal_mask: NDArrayBoolType = patch > noise_threshold
     n_lit = int(signal_mask.sum())
     if n_lit == 0:
-        return None, 0.0, 0, clamped_bbox
-    weights = np.where(signal_mask, patch, 0.0)
-    total_weight = float(weights.sum())
+        return None, 0.0, 0, clamped_bbox, background
+    signal = np.where(signal_mask, patch - background, 0.0)
+    total_weight = float(signal.sum())
     if total_weight <= 0.0:
-        return None, 0.0, 0, clamped_bbox
+        return None, 0.0, 0, clamped_bbox, background
     vs = np.arange(v_min, v_max, dtype=np.float64)
     us = np.arange(u_min, u_max, dtype=np.float64)
-    centroid_v = float(np.sum(weights * vs[:, None]) / total_weight)
-    centroid_u = float(np.sum(weights * us[None, :]) / total_weight)
-    mean_signal = float(weights[signal_mask].mean())
-    return (centroid_v, centroid_u), mean_signal, n_lit, clamped_bbox
+    centroid_v = float(np.sum(signal * vs[:, None]) / total_weight)
+    centroid_u = float(np.sum(signal * us[None, :]) / total_weight)
+    mean_signal = float(signal[signal_mask].mean())
+    return (centroid_v, centroid_u), mean_signal, n_lit, clamped_bbox, background
 
 
 def _collect_per_blob_residuals(
@@ -153,10 +210,11 @@ def _collect_per_blob_residuals(
     """Extract the per-blob ``observed - predicted`` residuals + weights.
 
     Iterates the input features in order and computes a
-    brightness-weighted-moment centroid inside each predicted bbox.
-    Blobs with no above-noise signal in their bbox are dropped (and
-    logged at DEBUG with the bbox bounds and noise threshold so the
-    operator can tell why).  The remaining blobs contribute to the
+    background-subtracted brightness-weighted-moment centroid inside each
+    predicted bbox.  Blobs with no above-background signal in their bbox
+    are dropped (and logged at DEBUG with the bbox bounds, estimated
+    background, and threshold so the operator can tell why).  The
+    remaining blobs contribute to the
     joint fit with weight ``N_lit * SNR^2 / radius_px^2`` per the
     BODY_BLOB centroid CRLB.
     """
@@ -168,19 +226,19 @@ def _collect_per_blob_residuals(
     extents: list[float] = []
     phase_angles_deg: list[float] = []
     phase_irregularity_factors: list[float] = []
-    noise_threshold = 3.0 * max(image_noise_sigma, 1e-9)
     for feature in features:
         assert isinstance(feature.geometry, BodyBlobGeometry)
-        centroid, mean_signal, n_lit, clamped_bbox = _brightness_weighted_centroid(
+        centroid, mean_signal, n_lit, clamped_bbox, background = _brightness_weighted_centroid(
             image_ext, image_noise_sigma, feature.geometry
         )
         if centroid is None:
             logger.debug(
-                'Blob %s has no above-noise signal in predicted bbox %s '
-                '(noise threshold = %.4f DN); dropping',
+                'Blob %s has no above-background signal in predicted bbox %s '
+                '(background = %.4f DN, threshold = %.4f DN); dropping',
                 feature.feature_id,
                 clamped_bbox,
-                noise_threshold,
+                background,
+                background + _BLOB_NOISE_THRESHOLD_SIGMA * max(image_noise_sigma, 1e-9),
             )
             continue
         pred_v, pred_u = feature.geometry.predicted_center_vu
@@ -211,13 +269,14 @@ def _collect_per_blob_residuals(
         phase_angles_deg.append(flags_phase)
         phase_irregularity_factors.append(max(0.0, flags_factor))
         logger.debug(
-            'Blob %s: predicted (%.2f, %.2f), observed (%.2f, %.2f), SNR %.2f, '
-            'N_lit %d, weight %.3g',
+            'Blob %s: predicted (%.2f, %.2f), observed (%.2f, %.2f), background %.2f DN, '
+            'SNR %.2f, N_lit %d, weight %.3g',
             feature.feature_id,
             pred_v,
             pred_u,
             obs_v,
             obs_u,
+            background,
             snr,
             n_lit,
             weight,
