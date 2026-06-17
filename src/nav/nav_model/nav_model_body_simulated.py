@@ -18,8 +18,8 @@ from nav.annotation import Annotations
 from nav.config import Config
 from nav.feature.feature import NavFeature, NavReliabilityBreakdown
 from nav.feature.feature_type import NavFeatureType
-from nav.feature.flags import BodyDiscFlags
-from nav.feature.geometry import BodyDiscGeometry
+from nav.feature.flags import BodyDiscFlags, LimbArcFlags
+from nav.feature.geometry import BodyDiscGeometry, LimbPolyline
 from nav.nav_model.body_shape import load_body_shape
 from nav.nav_model.nav_model import NavModel
 from nav.nav_model.nav_model_body_base import BODY_BLOB_MIN_DIAMETER_PX, NavModelBodyBase
@@ -33,6 +33,71 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only import
     from nav.nav_orchestrator.nav_context import NavContext
 
 __all__ = ['NavModelBodySimulated']
+
+# Minimum limb-polyline vertices to emit a LIMB_ARC.  Matches BodyLimbNav's
+# ``min_arc_vertices`` feasibility floor: a shorter arc cannot constrain the fit.
+_MIN_LIMB_ARC_VERTICES: int = 30
+# Minimum silhouette diameter to emit a LIMB_ARC.  The catalog body model gates
+# the limb on its ellipsoid-fit uncertainty (``<= 3 px``), which small or
+# low-resolution bodies fail; the sim has no km scale, so it gates on resolution
+# directly.  Below this the limb fit is imprecise and -- because it is an
+# LM-refined distance-transform fit -- it injects cross-process jitter into the
+# fused offset of any body scene, so only a well-resolved body emits a limb.
+_MIN_LIMB_DIAMETER_PX: float = 100.0
+# Per-vertex limb uncertainty for a simulated body.  The rendered silhouette edge
+# is sharp and noise-free, so the predicted limb sits within ~1 px of the image
+# edge; the tangent sigma reflects the one-pixel polyline sampling resolution.
+_LIMB_SIGMA_NORMAL_PX: float = 1.0
+_LIMB_SIGMA_TANGENT_PX: float = 0.5
+# Above this phase the lit limb is a thin crescent and most of the silhouette
+# boundary is terminator (a soft brightness gradient, not a sharp image edge), so
+# a limb fit is unreliable -- the body is then navigated by the blob centroid.
+# Gating emission here keeps LIMB_ARC off the high-phase scenes and matches the
+# catalog body model's limb/blob handoff.
+_LIMB_MAX_PHASE_DEG: float = 60.0
+
+
+def _limb_polyline_from_mask(
+    limb_mask: NDArrayBoolType,
+    body_mask: NDArrayBoolType,
+) -> tuple[NDArrayFloatType, NDArrayFloatType]:
+    """Extract limb vertices and outward normals from a 1-pixel limb mask.
+
+    Each ``True`` pixel of ``limb_mask`` (a body pixel adjacent to sky) becomes
+    one vertex.  The outward normal points away from the body interior: it is the
+    normalized sum of the unit directions toward each non-body 4-neighbour, so a
+    vertex on the sunward limb gets a normal pointing into the sky.
+
+    Parameters:
+        limb_mask: Extfov-shape boolean limb mask (the silhouette boundary).
+        body_mask: Extfov-shape boolean body silhouette mask.
+
+    Returns:
+        ``(vertices_vu, normals_vu)`` each shaped ``(N, 2)``; empty when the mask
+        has no pixels.
+    """
+    if not limb_mask.any():
+        empty: NDArrayFloatType = np.empty((0, 2), dtype=np.float64)
+        return empty, empty
+    vs, us = np.where(limb_mask)
+    vertices_vu = np.stack([vs.astype(np.float64), us.astype(np.float64)], axis=1)
+    rows, cols = body_mask.shape
+    normals_vu = np.zeros_like(vertices_vu)
+    for i, (v, u) in enumerate(zip(vs, us, strict=True)):
+        dv = 0.0
+        du = 0.0
+        if v > 0 and not body_mask[v - 1, u]:
+            dv -= 1.0
+        if v < rows - 1 and not body_mask[v + 1, u]:
+            dv += 1.0
+        if u > 0 and not body_mask[v, u - 1]:
+            du -= 1.0
+        if u < cols - 1 and not body_mask[v, u + 1]:
+            du += 1.0
+        norm = float(np.hypot(dv, du)) or 1.0
+        normals_vu[i, 0] = dv / norm
+        normals_vu[i, 1] = du / norm
+    return vertices_vu, normals_vu
 
 
 def _silhouette_diameter_px(body_mask: NDArrayBoolType) -> float:
@@ -310,7 +375,55 @@ class NavModelBodySimulated(NavModelBodyBase):
         blob_min_px = max(BODY_BLOB_MIN_DIAMETER_PX, shape.min_blob_diameter_px)
         if self._predicted_diameter_px >= blob_min_px:
             features.append(self._build_blob_feature(shape))
+        limb_feature = self._build_limb_arc_feature()
+        if limb_feature is not None:
+            features.append(limb_feature)
         return features
+
+    def _build_limb_arc_feature(self) -> NavFeature | None:
+        """Emit a LIMB_ARC from the rendered silhouette boundary, or ``None``.
+
+        The predicted limb is the silhouette boundary of the rendered body; on a
+        low-phase body it is essentially all lit, so BodyLimbNav's distance-
+        transform fit aligns it to the image edge and recovers the offset.  The
+        feature is emitted only when the boundary has enough vertices to
+        constrain the fit (a tiny or barely-resolved body yields too short an
+        arc).  The shadow-side vertices of a higher-phase body carry no sharp
+        image edge and are down-weighted by the technique's robust fit rather
+        than excluded here.
+        """
+        if self._limb_mask is None or self._body_mask is None:
+            return None
+        if self._predicted_diameter_px < _MIN_LIMB_DIAMETER_PX:
+            return None
+        if float(self._metadata.get('phase_angle_deg', 0.0)) > _LIMB_MAX_PHASE_DEG:
+            return None
+        vertices_vu, normals_vu = _limb_polyline_from_mask(self._limb_mask, self._body_mask)
+        n = vertices_vu.shape[0]
+        if n < _MIN_LIMB_ARC_VERTICES:
+            return None
+        sigma_normal = np.full(n, _LIMB_SIGMA_NORMAL_PX, dtype=np.float64)
+        sigma_tangent = np.full(n, _LIMB_SIGMA_TANGENT_PX, dtype=np.float64)
+        return NavFeature(
+            feature_id=f'limb_arc:{self._body_name}',
+            feature_type=NavFeatureType.LIMB_ARC,
+            source_model=self.name,
+            geometry=LimbPolyline(
+                vertices_vu=vertices_vu,
+                normals_vu=normals_vu,
+                sigma_normal_per_vertex_px=sigma_normal,
+                sigma_tangent_per_vertex_px=sigma_tangent,
+                bbox_extfov_vu=self._bbox_extfov_vu,
+            ),
+            subject_range_km=self._subject_range_km,
+            position_cov_px=None,
+            intensity_sigma_rel=0.0,
+            preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
+            reliability=1.0,
+            reliability_reasons=NavReliabilityBreakdown(visible_arc_fraction=1.0),
+            usable_types=frozenset({NavFeatureType.LIMB_ARC}),
+            flags=LimbArcFlags(body_name=self._body_name, visible_arc_fraction=1.0),
+        )
 
     def to_annotations(self, context: NavContext) -> Annotations:
         """Emit body silhouette + label annotations for the summary PNG."""

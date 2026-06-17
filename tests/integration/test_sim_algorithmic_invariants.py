@@ -68,19 +68,42 @@ _STAR_STEM_PREFIX = 'planted_offset_star'
 # rather than 'success' -- which is why the roll is asserted per-technique and the
 # scene is held out of the full-ensemble navigate assertion.
 _ROTATION_STEM_PREFIX = 'planted_rotation'
+# Limb scenes route through a LIMB_ARC the simulated body emits; the full ensemble
+# still recovers via the disc correlation (so they double as disc scenes) and the
+# limb path is asserted per-technique.
+_LIMB_STEM_PREFIX = 'planted_offset_limb'
+# Ring scenes route through a RING_EDGE the simulated ring emits; like rotation,
+# the technique recovers geometrically but its placeholder-alpha confidence holds
+# the fused status at a stable 'failed', so recovery is asserted per-technique and
+# the scene is held out of the full-ensemble navigate assertion.
+_RING_STEM_PREFIX = 'planted_offset_ring'
 _BLOB_PATHS = [p for p in _INVARIANT_PATHS if p.stem.startswith(_BLOB_STEM_PREFIX)]
 _BLOB_IDS = [p.stem for p in _BLOB_PATHS]
 _STAR_PATHS = [p for p in _INVARIANT_PATHS if p.stem.startswith(_STAR_STEM_PREFIX)]
 _STAR_IDS = [p.stem for p in _STAR_PATHS]
 _ROTATION_PATHS = [p for p in _INVARIANT_PATHS if p.stem.startswith(_ROTATION_STEM_PREFIX)]
 _ROTATION_IDS = [p.stem for p in _ROTATION_PATHS]
-# Disc scenes are everything that is not blob-, star-, or rotation-designed.
-_OTHER_PREFIXES = (_BLOB_STEM_PREFIX, _STAR_STEM_PREFIX, _ROTATION_STEM_PREFIX)
-_DISC_PATHS = [p for p in _INVARIANT_PATHS if not p.stem.startswith(_OTHER_PREFIXES)]
+_LIMB_PATHS = [p for p in _INVARIANT_PATHS if p.stem.startswith(_LIMB_STEM_PREFIX)]
+_LIMB_IDS = [p.stem for p in _LIMB_PATHS]
+_RING_PATHS = [p for p in _INVARIANT_PATHS if p.stem.startswith(_RING_STEM_PREFIX)]
+_RING_IDS = [p.stem for p in _RING_PATHS]
+# Disc scenes assert full-ensemble offset recovery.  Blob, star, rotation, and
+# ring scenes recover on a pinned technique instead (the fused offset is weak,
+# absent, or per-technique), so they are held out; limb scenes stay in (they
+# recover via the disc correlation).
+_DISC_EXCLUDE = (
+    _BLOB_STEM_PREFIX,
+    _STAR_STEM_PREFIX,
+    _ROTATION_STEM_PREFIX,
+    _RING_STEM_PREFIX,
+)
+_DISC_PATHS = [p for p in _INVARIANT_PATHS if not p.stem.startswith(_DISC_EXCLUDE)]
 _DISC_IDS = [p.stem for p in _DISC_PATHS]
-# Scenes whose full ensemble reaches a success status (everything but rotation).
+# Scenes whose full ensemble reaches 'success' (everything but rotation and ring,
+# whose clean-field confidence sits below the success threshold).
+_NAVIGATES_EXCLUDE = (_ROTATION_STEM_PREFIX, _RING_STEM_PREFIX)
 _NAVIGATES_SUCCESS_PATHS = [
-    p for p in _INVARIANT_PATHS if not p.stem.startswith(_ROTATION_STEM_PREFIX)
+    p for p in _INVARIANT_PATHS if not p.stem.startswith(_NAVIGATES_EXCLUDE)
 ]
 _NAVIGATES_SUCCESS_IDS = [p.stem for p in _NAVIGATES_SUCCESS_PATHS]
 
@@ -111,6 +134,16 @@ def test_there_are_star_scenes() -> None:
 def test_there_are_rotation_scenes() -> None:
     """At least one planted-roll scene exists for the rotation coverage."""
     assert _ROTATION_PATHS
+
+
+def test_there_are_limb_scenes() -> None:
+    """At least one limb-designed scene exists for the BodyLimbNav coverage."""
+    assert _LIMB_PATHS
+
+
+def test_there_are_ring_scenes() -> None:
+    """At least one ring-designed scene exists for the RingEdgeNav coverage."""
+    assert _RING_PATHS
 
 
 @pytest.mark.parametrize('path', _NAVIGATES_SUCCESS_PATHS, ids=_NAVIGATES_SUCCESS_IDS)
@@ -225,3 +258,68 @@ def test_rotation_scene_recovers_planted_roll(path: Path) -> None:
     assert technique.rotation_rad is not None
     recovered_deg = math.degrees(technique.rotation_rad)
     assert abs(recovered_deg - scene.ground_truth.planted_rotation_deg) < _ROTATION_TOLERANCE_DEG
+
+
+@pytest.mark.parametrize('path', _LIMB_PATHS, ids=_LIMB_IDS)
+def test_limb_alone_recovers_planted_v(path: Path) -> None:
+    """BodyLimbNav alone recovers each limb scene's planted v offset.
+
+    Guards the LIMB_ARC emission from the simulated body: the silhouette boundary
+    is sampled into a vertex polyline with outward normals, and BodyLimbNav's
+    distance-transform fit aligns it to the image edge.
+    """
+    scene = load_sim_scene(path)
+    result = _navigate(scene, only_techniques='BodyLimbNav')
+    assert result.offset_px is not None
+    assert abs(result.offset_px[0] - scene.ground_truth.planted_offset_dv_px) < _OFFSET_TOLERANCE_PX
+
+
+@pytest.mark.parametrize('path', _LIMB_PATHS, ids=_LIMB_IDS)
+def test_limb_alone_recovers_planted_u(path: Path) -> None:
+    """BodyLimbNav alone recovers each limb scene's planted u offset."""
+    scene = load_sim_scene(path)
+    result = _navigate(scene, only_techniques='BodyLimbNav')
+    assert result.offset_px is not None
+    assert abs(result.offset_px[1] - scene.ground_truth.planted_offset_du_px) < _OFFSET_TOLERANCE_PX
+
+
+def _ring_edge_result(scene: SimScene) -> Any:
+    """Navigate ``scene`` with RingEdgeNav alone; return its per-technique result.
+
+    Like the rotation scene, the offset is read from the per-technique result
+    because the technique's clean-field confidence (not its geometry) keeps the
+    fused status below 'success'.
+    """
+    result = _navigate(scene, only_techniques='RingEdgeNav')
+    matches = [t for t in result.per_technique if t.technique_name == 'RingEdgeNav']
+    assert matches, 'RingEdgeNav produced no technique result'
+    return matches[0]
+
+
+@pytest.mark.parametrize('path', _RING_PATHS, ids=_RING_IDS)
+def test_ring_scene_recovers_planted_v(path: Path) -> None:
+    """Each ring scene recovers its planted v offset within tolerance.
+
+    Guards the RING_EDGE emission from the simulated ring: each rendered edge is
+    sampled into a radial-normal polyline that RingEdgeNav fits against the
+    image-edge distance transform.  Two curved arcs constrain both axes.
+    """
+    scene = load_sim_scene(path)
+    technique = _ring_edge_result(scene)
+    assert not technique.spurious
+    assert technique.offset_px is not None
+    assert (
+        abs(technique.offset_px[0] - scene.ground_truth.planted_offset_dv_px) < _OFFSET_TOLERANCE_PX
+    )
+
+
+@pytest.mark.parametrize('path', _RING_PATHS, ids=_RING_IDS)
+def test_ring_scene_recovers_planted_u(path: Path) -> None:
+    """Each ring scene recovers its planted u offset within tolerance."""
+    scene = load_sim_scene(path)
+    technique = _ring_edge_result(scene)
+    assert not technique.spurious
+    assert technique.offset_px is not None
+    assert (
+        abs(technique.offset_px[1] - scene.ground_truth.planted_offset_du_px) < _OFFSET_TOLERANCE_PX
+    )

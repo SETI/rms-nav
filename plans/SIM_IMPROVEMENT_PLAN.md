@@ -1131,12 +1131,35 @@ full-ensemble navigate assertion and the roll is checked per-technique.  The
 roll is kept small (1.5 deg) so the outer stars stay inside the matcher's inlier
 tolerance; larger rolls drop the inlier count below the quorum.
 
-**Remaining:** the `StarUniqueMatchNav` one-star path (single dominant star)
-and `StarRefineNav`'s prior-refinement, each of which needs a technique-pinned
-assertion rather than a full-ensemble one; per-technique coverage for
-`BodyLimbNav` and `RingEdgeNav`; and lifting the StarField confidence off its
-placeholder-alpha floor so a clean rotation field can navigate to a fused
-`success` (a Phase 10 calibration concern, not a sim gap).
+`BodyLimbNav` and `RingEdgeNav` coverage is now in.  Both techniques consume a
+polyline feature the simulated models did not previously emit, so each model
+grew one:
+
+* `NavModelBodySimulated` emits a `LIMB_ARC` -- the silhouette boundary
+  (`_compute_limb_mask_from_body_mask`) sampled into a vertex polyline with
+  outward normals.  `BodyLimbNav`'s distance-transform fit aligns it to the
+  image edge and recovers the planted offset to ~0.02 px on a well-resolved
+  sphere.  Emission is gated on a minimum diameter (100 px) and low phase
+  (<= 60 deg): the catalog body gates the limb on its ellipsoid-fit uncertainty,
+  which small / low-resolution / high-phase bodies fail, and -- because the limb
+  is an LM-refined fit -- emitting it on a marginal body injects cross-process
+  jitter into the fused offset.  The diameter floor sits above every existing
+  catalog scene's body, so no existing baseline shifts; the dedicated
+  `planted_offset_limb` scene uses a 130 px body.
+* `NavModelRingsSimulated` emits one `RING_EDGE` per rendered edge -- the
+  `compute_border_atop_simulated` edge mask sampled into a polyline with outward
+  radial normals and a curvature-based `is_straight_line` flag.  `RingEdgeNav`
+  fits two curved arcs and recovers the planted offset in both axes (RMS
+  ~0.4 px, rank_1 false).  Like rotation, the offset is asserted on the
+  per-technique result: the technique is non-spurious but its placeholder-alpha
+  confidence holds the fused status at a stable `failed`.
+
+**Remaining:** the `StarUniqueMatchNav` one-star path (single dominant star) and
+`StarRefineNav`'s prior-refinement, each of which needs a technique-pinned
+assertion rather than a full-ensemble one; and lifting the StarField / RingEdge
+confidence off their placeholder-alpha floors so a clean rotation or ring field
+can navigate to a fused `success` (a Phase 10 calibration concern, not a sim
+gap).
 
 **Scope:**
 
@@ -1425,6 +1448,7 @@ tests/integration/update_sim_baselines.py                (T2)
 src/nav/nav_model/stars/nav_model_stars_simulated.py     (T4)
 tests/nav/nav_model/stars/test_nav_model_stars_simulated.py (T4)
 tests/nav/sim/test_sim_rotation.py                       (T4: camera roll)
+tests/nav/nav_model/test_nav_model_rings_simulated.py    (T4: RING_EDGE)
 tests/nav/sim/test_sim_determinism.py                    (B0)
 tests/nav/sim/test_sim_noise.py                          (B1)
 tests/nav/sim/test_sim_instrument_coupling.py            (B2)

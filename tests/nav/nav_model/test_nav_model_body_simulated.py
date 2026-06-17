@@ -113,3 +113,78 @@ def test_ellipsoid_prediction_still_renders() -> None:
     obs = _obs()
     ellipsoid = _predicted_mask(obs, _body_params())
     assert int(ellipsoid.sum()) > 0
+
+
+_LIMB_SIZE = 220
+
+
+def _limb_obs() -> ObsSim:
+    """A coiss_nac sim obs sized for a well-resolved limb body."""
+    return ObsSim.from_file(
+        '/tmp/limb_sim.json',
+        sim_params={'size_v': _LIMB_SIZE, 'size_u': _LIMB_SIZE, 'instrument': 'coiss_nac'},
+    )
+
+
+def _body_feature_types(obs: ObsSim, body_params: dict[str, Any]) -> list[str]:
+    """Build the model and return the feature-type names it emits."""
+    from typing import cast
+
+    from nav.nav_orchestrator.nav_context import NavContext
+
+    model = NavModelBodySimulated('body', obs, body_params['name'], body_params)
+    model.create_model()
+    features = model.to_features(cast(NavContext, None))
+    return [f.feature_type.name for f in features]
+
+
+def _large_body(**overrides: Any) -> dict[str, Any]:
+    """A well-resolved sphere (diameter 130 px) at low phase."""
+    params = {
+        'name': 'RHEA',
+        'center_v': _LIMB_SIZE / 2.0,
+        'center_u': _LIMB_SIZE / 2.0,
+        'axis1': 130.0,
+        'axis2': 130.0,
+        'axis3': 130.0,
+        'illumination_angle': 25.0,
+        'phase_angle': 30.0,
+    }
+    params.update(overrides)
+    return params
+
+
+def test_large_low_phase_body_emits_limb_arc() -> None:
+    """A well-resolved low-phase body emits a LIMB_ARC feature."""
+    assert 'LIMB_ARC' in _body_feature_types(_limb_obs(), _large_body())
+
+
+def test_small_body_emits_no_limb_arc() -> None:
+    """A body below the limb-resolution floor emits no LIMB_ARC."""
+    assert 'LIMB_ARC' not in _body_feature_types(
+        _limb_obs(), _large_body(axis1=40.0, axis2=40.0, axis3=40.0)
+    )
+
+
+def test_high_phase_body_emits_no_limb_arc() -> None:
+    """A high-phase body (mostly terminator) emits no LIMB_ARC."""
+    assert 'LIMB_ARC' not in _body_feature_types(_limb_obs(), _large_body(phase_angle=120.0))
+
+
+def test_limb_arc_polyline_has_vertices_and_unit_normals() -> None:
+    """The emitted LIMB_ARC carries a vertex polyline with unit outward normals."""
+    from typing import cast
+
+    from nav.feature.geometry import LimbPolyline
+    from nav.nav_orchestrator.nav_context import NavContext
+
+    model = NavModelBodySimulated('body', _limb_obs(), 'RHEA', _large_body())
+    model.create_model()
+    limb = next(
+        f for f in model.to_features(cast(NavContext, None)) if f.feature_type.name == 'LIMB_ARC'
+    )
+    geometry = limb.geometry
+    assert isinstance(geometry, LimbPolyline)
+    assert geometry.vertices_vu.shape[0] >= 30
+    norms = np.hypot(geometry.normals_vu[:, 0], geometry.normals_vu[:, 1])
+    assert np.allclose(norms, 1.0, atol=1e-9)
