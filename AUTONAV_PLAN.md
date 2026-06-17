@@ -5900,7 +5900,7 @@ the existing introduction_overview.rst update covers orientation.
 
 ### Methodology — TDD throughout
 
-Every phase is executed test-first per `.cursor/rules/python.mdc`:
+Every phase is executed test-first per `.cursor/rules/python_testing.mdc`:
 
 1. Read the spec (this plan + the docstring being implemented).
 2. Write the test. Required test-construction discipline:

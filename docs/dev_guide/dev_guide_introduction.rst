@@ -126,15 +126,15 @@ Every CLI listed in ``[project.scripts]`` is installed onto ``$PATH`` by
      - Queue-driven navigation variant; reads task JSON, processes one batch.
    * - ``nav_backplanes`` / ``nav_backplanes_cloud_tasks``
      - Generate per-pixel backplanes from a navigated image. See
-       :doc:`/user_guide/user_guide_backplanes` and :doc:`dev_guide_backplanes`.
+       :doc:`/user_guide/user_guide_backplanes` and :doc:`/dev_guide/dev_guide_backplanes`.
    * - ``nav_backplane_viewer``
      - PyQt6 viewer for a backplane file.
    * - ``nav_create_bundle`` / ``nav_create_bundle_cloud_tasks``
      - Build a PDS4 bundle from navigated images + backplanes. See
-       :doc:`/user_guide/user_guide_pds4_bundle` and :doc:`dev_guide_pds4`.
+       :doc:`/user_guide/user_guide_pds4_bundle` and :doc:`/dev_guide/dev_guide_pds4`.
    * - ``nav_mosaic`` / ``nav_mosaic_rings`` / ``nav_mosaic_body``
      - Reprojection drivers (rings, body, dispatcher). See
-       :doc:`/user_guide/user_guide_reprojection` and :doc:`dev_guide_reprojection`.
+       :doc:`/user_guide/user_guide_reprojection` and :doc:`/dev_guide/dev_guide_reprojection`.
    * - ``nav_mosaic_display`` / ``nav_mosaic_display_rings`` / ``nav_mosaic_display_body``
      - PyQt6 mosaic viewer.
    * - ``nav_mosaic_cloud_tasks``
