@@ -54,6 +54,7 @@ class SweepRow:
     value: float
     status: str
     offset_error_px: float | None
+    rotation_error_deg: float | None
     confidence: float
     primary_technique: str | None
 
@@ -148,12 +149,31 @@ def _navigate_params(sim_params: dict[str, Any]) -> Any:
     return orchestrator.navigate(obs)
 
 
+def _recovered_rotation_deg(result: Any) -> float | None:
+    """Return the recovered camera roll in degrees, or ``None``.
+
+    Prefers the fused result's rotation; when the fused status is below success
+    (e.g. a clean star field whose placeholder-alpha confidence is low) it falls
+    back to the highest-confidence non-spurious technique that reported a roll.
+    """
+    if result.rotation_rad is not None:
+        return math.degrees(result.rotation_rad)
+    candidates = [t for t in result.per_technique if not t.spurious and t.rotation_rad is not None]
+    if not candidates:
+        return None
+    best = max(candidates, key=lambda t: t.confidence)
+    return math.degrees(best.rotation_rad)
+
+
 def run_sweep(spec: SweepSpec) -> list[SweepRow]:
     """Navigate every step of a sweep and return the per-step rows.
 
-    The planted offset of the base scene is the ground truth; the offset error is
-    the Euclidean distance between the recovered and planted offset (``None`` when
-    navigation fails).
+    The planted ground truth is read from the (post-override) sim params, so a
+    sweep over the offset or the camera roll itself tracks correctly: the offset
+    error is the Euclidean distance between the recovered and planted offset, and
+    the rotation error is the absolute difference between the recovered and
+    planted roll. Either is ``None`` when the navigator (or the relevant
+    technique) produced no value.
 
     Parameters:
         spec: The sweep specification.
@@ -163,23 +183,29 @@ def run_sweep(spec: SweepSpec) -> list[SweepRow]:
     """
     scene: SimScene = load_sim_scene(spec.base_scene)
     base_params = scene.to_sim_params()
-    planted_v = scene.ground_truth.planted_offset_dv_px
-    planted_u = scene.ground_truth.planted_offset_du_px
     rows: list[SweepRow] = []
     for value in spec.values:
         sim_params = copy.deepcopy(base_params)
         for parameter in spec.parameters:
             _set_dotted(sim_params, parameter, value)
+        planted_v = float(sim_params.get('offset_v', 0.0))
+        planted_u = float(sim_params.get('offset_u', 0.0))
+        planted_rot = float(sim_params.get('offset_rotation_deg', 0.0))
         result = _navigate_params(sim_params)
         if result.offset_px is None:
-            error: float | None = None
+            offset_error: float | None = None
         else:
-            error = math.hypot(result.offset_px[0] - planted_v, result.offset_px[1] - planted_u)
+            offset_error = math.hypot(
+                result.offset_px[0] - planted_v, result.offset_px[1] - planted_u
+            )
+        recovered_rot = _recovered_rotation_deg(result)
+        rotation_error = None if recovered_rot is None else abs(recovered_rot - planted_rot)
         rows.append(
             SweepRow(
                 value=value,
                 status=str(result.status),
-                offset_error_px=error,
+                offset_error_px=offset_error,
+                rotation_error_deg=rotation_error,
                 confidence=float(result.confidence),
                 primary_technique=_primary_technique(result),
             )

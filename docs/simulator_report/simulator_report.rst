@@ -127,9 +127,11 @@ Observations:
   blob, limb, and the star field -- are the most precise (a few hundredths of a
   pixel), because their predicted geometry aligns exactly with a sharp image
   feature.
-* The disc correlation carries the largest error (~0.2 px) because it reports the
-  NCC peak on a coarse-then-refined grid; the mesh-body disc adds a shape error
-  on top, since the body is irregular but the correlation template is the same
+* The disc correlation carries the largest error (~0.2 px) -- not an inherent
+  limit but a correlator bug the offset sweep below pins down: its gradient-mode
+  sub-pixel refinement is biased near the peak, while raw-intensity NCC and the
+  feature techniques reach ~1/128 px. The mesh-body disc adds a shape error on
+  top, since the body is irregular but the correlation template is the same
   rendered shape. Both stay well inside the 1.0 px invariant bound.
 * The high-phase blob crescent (~0.18 px at 120 deg) is the hardest case: only a
   thin lit crescent constrains the centroid. It still recovers sub-pixel because
@@ -139,9 +141,10 @@ Observations:
 Single-variable sensitivity
 ===========================
 
-All three sweeps drive one base scene -- a well-resolved sphere with a planted
-``(1.5, -0.5)`` offset -- so the offset error column is the recovery error at
-each step.
+The noise, phase, and range sweeps drive one base scene -- a well-resolved sphere
+with a planted ``(1.5, -0.5)`` offset -- so the offset error column is the
+recovery error at each step. (The offset and roll sweeps that follow use their
+own base scenes.)
 
 Read-noise sweep
 ----------------
@@ -302,16 +305,176 @@ and the smallest body (12 px) is unnavigable. Every navigable step recovers the
 planted offset exactly. This transition is the sim's most direct verification
 that the orchestrator selects the right technique for the available resolution.
 
+Sub-pixel offset accuracy across the pixel
+==========================================
+
+The invariant scenes above all plant a single offset near the middle of a pixel.
+To check for pixel-boundary and quantization artifacts, two sweeps plant the same
+body offset across a range that includes whole pixels, the near-boundary 0.99 px,
+the exact half- and quarter-pixel, and arbitrary non-repeating fractions
+(0.12783, 0.73912) -- one on a small body navigated by the blob centroid, one on
+a resolved body navigated by the disc correlation.
+
+.. list-table:: Recovery error vs planted offset (px)
+   :header-rows: 1
+   :widths: 18 20 20
+
+   * - Planted offset
+     - Blob centroid
+     - Disc correlation
+   * - 0.0
+     - 0.007
+     - 0.33
+   * - 0.12783
+     - 0.010
+     - 0.36
+   * - 0.25
+     - 0.009
+     - 0.38
+   * - 0.5
+     - 0.003
+     - 0.00
+   * - 0.73912
+     - 0.003
+     - 0.24
+   * - 0.99
+     - 0.006
+     - 0.33
+   * - 1.0
+     - 0.007
+     - 0.33
+   * - 1.5
+     - 0.003
+     - 0.00
+   * - 2.99
+     - 0.006
+     - 0.33
+
+The **blob centroid is quantization-free**: it recovers every offset --
+whole-pixel, near-boundary, perfect-fraction, or arbitrary -- to a few
+hundredths of a pixel, with no dependence on the fractional part. The feature
+techniques (limb, ring edge, star field) behave the same way, because they fit a
+sharp predicted geometry to a sharp image feature.
+
+The **disc correlation shows a striking periodic error**: ~0.33 px at whole-pixel
+offsets, falling to ~0 at the exact half-pixel, with a period of one pixel. This
+is *not* a fundamental NCC limit. The correlator upsamples its correlation
+spectrum to 1/128 px and reaches that accuracy on raw intensity -- a zero shift
+between two identical frames recovers exactly ``(0, 0)``. The bias appears only on
+the **gradient-magnitude** pass, which the disc's ``auto`` mode selects for a
+smooth body because the edge gives a higher-contrast correlation peak. The Sobel
+*magnitude* rectifies the signal, so the gradient correlation peak is non-smooth
+at its apex, and the sub-pixel estimator is biased whenever the residual from the
+nearest whole pixel is small -- which recurs at every integer offset, vanishing at
+the half-pixel where the residual is farthest from the cusp.
+
+This is a core-correlator behaviour (it lives in
+:func:`nav.support.correlate.navigate_with_pyramid_kpeaks`, not in the simulator),
+so it applies to real-image disc navigation too. It is flagged for a fix --
+refining the final sub-pixel offset on raw intensity rather than gradient
+magnitude -- which should be validated against the real-image library before
+landing. The offset sweep is the regression that will confirm the fix and guard
+against recurrence; it is the clearest example of the simulated layer surfacing a
+real navigation defect.
+
+Camera-roll sensitivity and roll / translation separability
+============================================================
+
+Sweeping the planted camera roll on a star field shows both the working window
+and the separability floor:
+
+.. list-table:: Camera-roll recovery
+   :header-rows: 1
+   :widths: 14 22 30
+
+   * - Planted roll
+     - Full-ensemble error
+     - StarFieldFromCatalogNav alone
+   * - 0.25 deg
+     - --
+     - collapses to 0 (spurious)
+   * - 0.5 deg
+     - 0.05 deg
+     - collapses to 0 (spurious)
+   * - 0.75 deg
+     - --
+     - 0.69 deg (partial)
+   * - 1.0 deg
+     - 0.01 deg
+     - 1.04 deg
+   * - 1.5 deg
+     - 0.01 deg
+     - 1.51 deg
+   * - 2.0 deg
+     - 0.12 deg
+     - 1.89 deg
+
+The key limitation: **a small roll is not separable from a translation**.
+``StarFieldFromCatalogNav``'s RANSAC pattern matcher cannot distinguish a sub-0.75
+deg roll from a pure shift of the field, so it returns a zero roll (and a spurious
+flag) below that floor. The two-star ``StarUniqueMatchNav`` path -- a rigid
+two-point fit -- extends recovery down to ~0.5 deg, which is why the *full
+ensemble* recovers the 0.5 deg roll even though the field matcher alone does not.
+At exactly zero roll there is no rotation signal to fit, so no technique reports
+one. Above ~2-3 deg the outer stars rotate past the matcher's inlier tolerance and
+the inlier count falls below quorum. The usable window for the field matcher is
+therefore roughly 0.75-2 deg, widening to ~0.5 deg with the two-star path.
+
+Small-body navigation floor
+===========================
+
+The range sweep above fails at a 12 px body, which is small but not
+fundamentally unnavigable. The cause is not the algorithm: at a 16 px body the
+blob centroid is still exact (the correlation log reports the right peak), but the
+``BODY_BLOB`` feature's reliability falls just below the gate
+(``reliability 0.18 < threshold 0.20``) because its ``blob_extent_px`` term scores
+a small body low. At 24 px the reliability clears the gate (0.22) and the body
+navigates. The floor is thus set by the **reliability calibration**, not the
+centroid: the gate deliberately distrusts tiny bodies because on a *real* frame a
+handful of pixels is noise- and PSF-dominated. The centroid itself works well
+below the gate, so navigating down to a few pixels is a calibration decision (a
+Phase 10 concern), not an algorithmic barrier -- and one that must be tuned
+against real data rather than the noise-light sim.
+
+I/F-calibrated vs raw-DN navigation
+===================================
+
+Every sweep and scene above renders in raw DN. The
+``planted_offset_disc_if`` invariant scene confirms navigation is **unit-agnostic**:
+the same body on the I/F-calibrated ``coiss_calib_nac`` instrument recovers the
+planted offset exactly. The navigation techniques key on scale-invariant
+quantities -- normalised cross-correlation for the disc, a MAD-relative noise
+threshold for detection and the blob -- so they do not care whether a pixel is in
+DN or I/F. The differences are in the detector model, not the navigation: the
+``calibrated_if`` render path leaves the composed signal in [0, 1] I/F units and
+applies **no** DN detector model (no Poisson shot noise, no full-well saturation
+gate, no bias pedestal or missing-data markers), because those map onto DN, not
+I/F. A consequence worth noting is that simulated I/F frames are currently
+noise-light -- realistic I/F noise is a deferred sim feature -- so an I/F scene
+exercises the navigation algorithms but not yet a realistic I/F noise regime.
+
 Summary
 =======
 
 * All seven feature techniques (disc, mesh disc, blob, high-phase blob, star
   field, limb, ring edge) plus the camera-roll fit recover their planted
   transform to sub-pixel / sub-half-degree accuracy on clean simulated frames.
+* The point-feature techniques (blob, limb, ring edge, star field) are
+  quantization-free: they recover any offset -- whole, near-boundary, or arbitrary
+  fraction -- to a few hundredths of a pixel.
+* The offset sweep surfaced a real core-correlator defect: the disc's
+  gradient-magnitude sub-pixel refinement is biased (~0.3 px, periodic in the
+  fractional offset) where raw NCC reaches ~1/128 px. It affects real disc
+  navigation and is flagged for a fix to be validated against the real library.
 * The sweeps confirm the expected qualitative behaviour: navigation degrades to a
   clean failure past the noise cliff, the resolved body handles the full phase
   range with a mid-phase accuracy dip, and the primary technique walks the limb
   -> disc -> blob ladder as a body shrinks.
+* A small camera roll is not separable from a translation: the field matcher
+  recovers rolls only above ~0.75 deg (the two-star fit extends this to ~0.5 deg),
+  and the small-body navigation floor (~16-24 px) is set by the blob reliability
+  calibration, not the centroid algorithm. Navigation is unit-agnostic: I/F frames
+  navigate identically to raw DN.
 * The confidence column is flat by design -- the coefficients are uncalibrated
   placeholders, so the absolute confidence is not yet a calibrated tier. Turning
   these sweeps into confidence-monotonicity tripwires is the Phase 10 calibration

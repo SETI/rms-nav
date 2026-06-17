@@ -1,0 +1,28 @@
+schema_version: 1
+scene_name: small_sphere_base
+instrument: coiss_nac
+image_size_vu: [220, 220]
+random_seed: 7
+exposure_sec: 1.0
+# A small sphere (diameter 20 px) navigated by the orientation-free blob centroid.
+# It is the base scene for the fractional-offset blob sweep: the disc correlation
+# is spurious at this size, so the BODY_BLOB lit-weighted centroid is the
+# load-bearing technique, and it recovers any planted offset -- whole-pixel,
+# near-pixel-boundary, or arbitrary fraction -- to a few hundredths of a pixel.
+bodies:
+  - name: RHEA
+    center_v: 110.0
+    center_u: 110.0
+    axis1: 20.0
+    axis2: 20.0
+    axis3: 20.0
+    illumination_angle: 25.0
+    phase_angle: 30.0
+rings: []
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+ground_truth:
+  planted_offset_dv_px: 1.5
+  planted_offset_du_px: -0.5
+  planted_rotation_deg: 0.0

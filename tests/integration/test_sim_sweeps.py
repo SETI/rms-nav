@@ -105,3 +105,63 @@ def test_range_sweep_transitions_technique() -> None:
     rows = _rows('range_body_size')
     distinct = {row.primary_technique for row in rows if row.primary_technique is not None}
     assert len(distinct) >= 2
+
+
+_ROLL_TOLERANCE_DEG = 0.3
+_BLOB_OFFSET_TOLERANCE_PX = 0.1
+_DISC_OFFSET_TOLERANCE_PX = 0.6
+
+
+def test_star_rotation_sweep_recovers_roll() -> None:
+    """The star field recovers every planted roll in the working window.
+
+    The recovered roll is read from whichever technique reports it (the two-star
+    path at +/-1 deg, the field matcher at the larger rolls), so the assertion is
+    on the roll error, not the fused status.
+    """
+    rows = _rows('star_rotation')
+    for row in rows:
+        assert row.rotation_error_deg is not None
+        assert row.rotation_error_deg < _ROLL_TOLERANCE_DEG
+
+
+def test_blob_offset_sweep_is_quantization_free() -> None:
+    """The blob centroid recovers every offset -- whole, near-boundary, fractional.
+
+    This is the check that nothing snaps to a pixel boundary: a small body's
+    lit-weighted centroid recovers offsets like 0.12783 and 0.99 px as accurately
+    as a whole-pixel offset.
+    """
+    rows = _rows('offset_fractional_blob')
+    for row in rows:
+        assert row.status == 'success'
+        assert row.offset_error_px is not None
+        assert row.offset_error_px < _BLOB_OFFSET_TOLERANCE_PX
+
+
+def test_disc_offset_sweep_stays_subpixel() -> None:
+    """The disc correlation recovers every offset to within a fraction of a pixel.
+
+    Looser than the blob: the NCC sub-pixel refinement carries a fraction-
+    dependent bias, but it stays well inside a pixel across the offset range.
+    """
+    rows = _rows('offset_fractional_disc')
+    for row in rows:
+        assert row.status == 'success'
+        assert row.offset_error_px is not None
+        assert row.offset_error_px < _DISC_OFFSET_TOLERANCE_PX
+
+
+def test_disc_offset_sweep_shows_pixel_locking() -> None:
+    """The disc is most accurate at the half-pixel and biased at integer offsets.
+
+    A direct measurement of NCC pixel-locking: the recovered offset error at a
+    half-pixel planted offset (0.5) is markedly smaller than at a whole-pixel
+    offset (1.0). The blob, by contrast, is uniform across both (previous test).
+    """
+    by_value = {row.value: row for row in _rows('offset_fractional_disc')}
+    half = by_value[0.5]
+    whole = by_value[1.0]
+    assert half.offset_error_px is not None
+    assert whole.offset_error_px is not None
+    assert half.offset_error_px < whole.offset_error_px

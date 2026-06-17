@@ -1010,11 +1010,34 @@ frames).  Three sweeps over one resolved-sphere base scene
   `BodyLimbNav -> BodyDiscCorrelateNav -> BodyBlobNav` as resolution falls, and
   the smallest body is unnavigable -- the technique ladder the range regime is
   meant to exercise.
+- **offset (blob / disc)**: the planted offset swept across whole-pixel,
+  near-boundary (0.99), perfect-fraction, and arbitrary (0.12783, 0.73912) values
+  on a blob body and a disc body.  The blob is quantization-free (~0.006 px at
+  every offset); the disc shows a periodic ~0.3 px error (zero at the half-pixel)
+  that the sweep traces to the gradient-magnitude NCC sub-pixel refinement (raw
+  NCC reaches ~1/128 px).  This is a core-correlator defect in
+  `navigate_with_pyramid_kpeaks`, surfaced by the sweep and flagged for a fix
+  validated against the real-image library -- the clearest case of the sim layer
+  catching a real navigation defect.
+- **star roll** (0.5 -> 2 deg): the field recovers the roll in the working window;
+  below ~0.75 deg `StarFieldFromCatalogNav`'s RANSAC cannot separate a small roll
+  from a translation and collapses to zero (the two-star path extends the floor to
+  ~0.5 deg).
 
-The invariants are trends and bounds (a transition, a degradation, recovery
-within tolerance), not the placeholder-alpha confidence curve, which barely moves
-on these clean frames -- so the confidence-monotonicity checks the draft below
-imagined wait on the Phase 10 calibration and are deferred to T7.
+The harness reads the planted ground truth from the post-override sim params, so a
+sweep over the offset or the roll itself tracks correctly (`SweepRow` carries both
+`offset_error_px` and `rotation_error_deg`).  The invariants are trends and bounds
+(a transition, a degradation, recovery within tolerance), not the placeholder-alpha
+confidence curve, which barely moves on these clean frames -- so the
+confidence-monotonicity checks the draft below imagined wait on the Phase 10
+calibration and are deferred to T7.
+
+Two navigation findings the sweeps surfaced are documented in the standalone
+performance report (`docs/simulator_report/`): the gradient-NCC sub-pixel bias
+above, and that the small-body navigation floor (~16-24 px) is set by the
+`BODY_BLOB` reliability gate, not the centroid algorithm (the centroid is exact
+well below it).  Navigation is also confirmed unit-agnostic -- an I/F-calibrated
+`coiss_calib_nac` scene (`planted_offset_disc_if`) recovers identically to raw DN.
 
 **Scope:**
 

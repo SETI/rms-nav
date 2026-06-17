@@ -1,0 +1,9 @@
+sweep_name: offset_fractional_disc
+# The same offset sweep on a resolved body navigated by the disc correlation.
+# Unlike the blob, the NCC sub-pixel refinement carries a fraction-dependent bias
+# (largest near integer offsets, near-zero at the half-pixel) -- the pixel-locking
+# the perfect mid-pixel invariant scenes did not expose.  Recovery stays well
+# inside a pixel, but is an order of magnitude looser than the blob.
+base_scene: phase_sweep_regular_body/regular_sphere_base.yaml
+parameters: [offset_v]
+values: [0.0, 0.12783, 0.25, 0.5, 0.73912, 0.99, 1.0, 1.5, 2.99]

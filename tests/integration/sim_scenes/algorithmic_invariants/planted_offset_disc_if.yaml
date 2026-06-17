@@ -1,0 +1,26 @@
+schema_version: 1
+scene_name: planted_offset_disc_if
+instrument: coiss_calib_nac
+image_size_vu: [220, 220]
+random_seed: 7
+exposure_sec: 1.0
+# The disc-correlation invariant on an I/F-calibrated instrument (coiss_calib_nac)
+# rather than a raw-DN one.  The calibrated_if render path leaves the composed
+# signal in [0, 1] I/F units and applies no DN detector model, and the navigation
+# techniques key on scale-invariant quantities (normalised cross-correlation, a
+# MAD-relative noise threshold), so the disc recovers the planted offset the same
+# way it does on a raw-DN frame -- demonstrating navigation is unit-agnostic.
+bodies:
+  - name: RHEA
+    center_v: 110.0
+    center_u: 110.0
+    axis1: 90.0
+    axis2: 90.0
+    axis3: 90.0
+    illumination_angle: 25.0
+    phase_angle: 30.0
+rings: []
+ground_truth:
+  planted_offset_dv_px: 1.5
+  planted_offset_du_px: -0.5
+  planted_rotation_deg: 0.0

@@ -1,0 +1,8 @@
+sweep_name: offset_fractional_blob
+# Planted offset swept across whole-pixel, near-pixel-boundary, perfect-fraction,
+# and arbitrary-fraction values on a small body navigated by the blob centroid.
+# The lit-weighted centroid is quantization-free, so every offset is recovered to
+# a few hundredths of a pixel -- the check that nothing snaps to pixel boundaries.
+base_scene: phase_sweep_regular_body/small_sphere_base.yaml
+parameters: [offset_v]
+values: [0.0, 0.12783, 0.25, 0.5, 0.73912, 0.99, 1.0, 1.5, 2.99]
