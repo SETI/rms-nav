@@ -626,23 +626,29 @@ characterization.
 
 .. note::
 
-   **The disc / ring off-grid sub-pixel residual is a hard-edge correlation artifact.** Mapping
+   **The disc / ring off-grid sub-pixel residual is a correlator refinement artifact.** Mapping
    the disc residual against sub-pixel phase gives an odd S-curve that is zero at integer and
    half-pixel offsets and peaks (~0.03 px, up to ~0.1 px at the worst 2-D phase) near the
    quarter-pixel; it is per-axis separable (a pure-v offset produces a v-residual with ~zero
-   u-coupling), which is why the single-axis ``*_offset_fine`` sweeps report a faithful
-   per-axis figure -- the other axis behaves symmetrically. On a band-limited (Fourier) shift
-   the upsampled-DFT estimate is unbiased to ~0.003 px, so the cause is the sharp edge: both
-   the simulator's rendered body / ring and the navigator's correlation template are oversampled
-   *anti-aliased* silhouettes with no point-spread blur, and correlating two matched sharp
-   edges still aliases the cross-power peak by a sub-pixel-phase-dependent amount (a synthetic
-   sharp-edge shift reproduces the S-curve; blurring **both** images with a sigma>=1 PSF removes
-   it, to <0.005 px). A real limb is convolved with the optical PSF over ~1 px, so the clean fix
-   is to PSF-convolve the body / ring edge consistently in *both* the simulator and the nav
-   model template (blurring only the simulated image leaves it mismatched against the sharp
-   template and destabilizes the fit). That coupled change also sharpens real-image disc / ring
-   navigation, since a real PSF-blurred limb currently correlates against a sharp template; it
-   is tracked as a separate follow-up.
+   u-coupling), so the single-axis ``*_offset_fine`` sweeps report a faithful per-axis figure --
+   the other axis behaves symmetrically.
+
+   Capturing the exact ``(image, template)`` arrays the disc technique hands the correlator
+   shows the pipeline's sub-pixel offset equals a plain raw cross-power upsampled-DFT refine of
+   the two (the gradient mode chooses the integer peak but, per the gradient-NCC fix, refines on
+   raw). The bias is therefore in that refinement: the cross-power is formed from the raw,
+   sharp-edged, *anti-aliased* image and a Lambert template whose edge / shading profile differs
+   from the rendered body, and the mismatched high-frequency edge content aliases the cross-power
+   peak by a sub-pixel-phase-dependent amount. Two things were ruled out: it is not a simulator
+   hard-edge artifact alone (PSF-blurring the rendered body at the camera's own ~0.54 px sigma
+   barely moves it and destabilizes some phases, because the template stays sharp), and it is not
+   the upsampled-DFT quantization (1/128 px). The lever is a **band-limit inside the
+   refinement**: low-pass *both* surfaces (Gaussian sigma ~1 px) before the cross-power and the
+   residual drops from ~±0.035 px to ~±0.01 px across every phase, with no change to the rendered
+   image or the template. Real-image disc / ring navigation carries the same bias (a real
+   PSF-blurred limb correlates against the same sharp Lambert template), so the fix belongs in
+   the shared correlator; landing it requires re-blessing the real-image baselines (SPICE
+   holdings), so it is tracked as a dedicated correlator task alongside the limb DT bias.
 
 **Accuracy versus injected offset (fixed SNR).** Holding the read noise at three levels, a
 pure-vertical offset is swept from 0 to 1.75 px (``u`` held at 0) for every technique. The
