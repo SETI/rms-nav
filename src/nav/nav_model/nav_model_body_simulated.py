@@ -52,6 +52,50 @@ def _silhouette_diameter_px(body_mask: NDArrayBoolType) -> float:
     return max(v_extent, u_extent)
 
 
+def _tight_bbox_extfov(
+    body_mask: NDArrayBoolType,
+    *,
+    ext_margin_vu: tuple[int, int],
+    extfov_shape: tuple[int, int],
+    diameter_px: float,
+) -> tuple[int, int, int, int]:
+    """Return a tight extfov-coord bbox around a data-coord body silhouette.
+
+    The bbox is the silhouette's bounding box inflated by a slop margin
+    (so the body stays inside it under a modest pointing error) and
+    clamped to the extfov shape.  Returns the full extfov frame when the
+    mask is empty (a degenerate render the caller will not emit features
+    for).
+
+    Parameters:
+        body_mask: Data-shape boolean silhouette mask.
+        ext_margin_vu: Extfov margins ``(v, u)`` to shift data coords into
+            extfov coords.
+        extfov_shape: Extfov array shape ``(h, w)`` to clamp against.
+        diameter_px: Predicted silhouette diameter, used to size the slop.
+
+    Returns:
+        ``(v_min, u_min, v_max, u_max)`` half-open bbox in extfov coords.
+    """
+    ext_margin_v, ext_margin_u = ext_margin_vu
+    h, w = extfov_shape
+    if not body_mask.any():
+        return (0, 0, int(h), int(w))
+    rows = np.where(np.any(body_mask, axis=1))[0]
+    cols = np.where(np.any(body_mask, axis=0))[0]
+    slop = max(round(0.1 * diameter_px), 4)
+    v_min = int(rows[0]) + ext_margin_v - slop
+    v_max = int(rows[-1]) + ext_margin_v + slop + 1
+    u_min = int(cols[0]) + ext_margin_u - slop
+    u_max = int(cols[-1]) + ext_margin_u + slop + 1
+    return (
+        max(0, v_min),
+        max(0, u_min),
+        min(int(h), v_max),
+        min(int(w), u_max),
+    )
+
+
 class NavModelBodySimulated(NavModelBodyBase):
     """Body NavModel rendered from operator-supplied simulation parameters.
 
@@ -201,16 +245,22 @@ class NavModelBodySimulated(NavModelBodyBase):
             center_u + ext_margin_u,
         )
         self._subject_range_km = float(p.get('range', float('inf')))
-        # Extfov-coord bounding box of the body silhouette.
-        self._bbox_extfov_vu = (
-            int(ext_margin_v),
-            int(ext_margin_u),
-            int(ext_margin_v + data_size_v),
-            int(ext_margin_u + data_size_u),
-        )
         # Predicted disc diameter: the longer pixel extent of the rendered
         # silhouette.  Drives the BODY_BLOB emission gate and covariance.
         self._predicted_diameter_px = _silhouette_diameter_px(body_mask)
+        # Tight extfov-coord bounding box around the body silhouette (plus
+        # slop), matching the convention of the SPICE-backed ``NavModelBody``.
+        # A whole-frame bbox would make ``BodyBlobNav`` integrate its observed
+        # centroid over the entire frame, so scattered above-noise sky pixels
+        # would swamp a small or high-phase lit region; a tight bbox keeps the
+        # moment local to the body.  The slop lets the body stay inside the
+        # bbox under a modest pointing error.
+        self._bbox_extfov_vu = _tight_bbox_extfov(
+            body_mask,
+            ext_margin_vu=(ext_margin_v, ext_margin_u),
+            extfov_shape=(model_img_full.shape[0], model_img_full.shape[1]),
+            diameter_px=self._predicted_diameter_px,
+        )
         # Physical scale at the limb.  The sim FOV is a dummy flat FOV with no
         # real angular scale, so km/pixel is only known when the scene states
         # it explicitly; absent that it stays 0, which makes the shared

@@ -103,108 +103,129 @@ def _clamp_bbox(
 _BLOB_NOISE_THRESHOLD_SIGMA: float = 3.0
 """Pixels above ``background + this * noise_sigma`` count as lit signal."""
 
-_BLOB_BACKGROUND_SEED_PERCENTILE: float = 20.0
-"""Low-percentile seed for the per-bbox background estimate.
 
-Seeding the sky estimate from a low percentile keeps it anchored on the
-background even when the bright body fills most of the bbox, after which
-one clipping pass refines it to the median of the sky population.
-"""
+def _estimate_frame_background_and_sigma(
+    image_ext: NDArrayFloatType,
+    valid_mask: NDArrayBoolType,
+    noise_sigma: float,
+) -> tuple[float, float]:
+    """Estimate the frame's background pedestal and sky-noise sigma.
 
+    Returns two frame-global quantities the centroid moment needs:
 
-def _estimate_background_dn(patch: NDArrayFloatType, noise_sigma: float) -> float:
-    """Estimate the background (bias + dark) DN level inside a bbox.
+    * **Background (bias + dark) pedestal.** Real raw frames carry a
+      non-zero bias/dark pedestal, and the sim adds a ``bias_dn`` pedestal
+      so dark sky is distinguishable from the missing-data marker.  That
+      pedestal sits on every pixel, so without subtracting it the
+      brightness-weighted moment is pulled toward the bbox geometric
+      center -- a bias that grows with phase as the lit signal
+      concentrates away from center.
+    * **Sky-noise sigma.** The lit-pixel threshold must reject *sky*
+      noise, but ``context.image_noise_sigma`` is a MAD over the whole
+      sensor, which a bright body inflates (its brightness gradient widens
+      the global spread).  An inflated sigma raises the threshold and cuts
+      the dim crescent, so the thresholded observed centroid diverges from
+      the model's continuous predicted centroid at high phase.  The sky
+      noise estimated here, over the body-excluded sky population, is the
+      correct floor; for a small body (the typical resolved-enough-for-a-
+      blob case) it equals the global sigma, so this only matters when a
+      large body would otherwise inflate it.
 
-    Real raw frames carry a non-zero bias/dark pedestal, and the sim adds
-    a ``bias_dn`` pedestal so dark sky is distinguishable from the
-    missing-data marker.  That pedestal sits on every pixel, so without
-    subtracting it the brightness-weighted moment is pulled toward the
-    bbox geometric center -- a bias that grows with phase as the lit
-    signal concentrates away from center.  This returns a robust sky
-    level so the caller can subtract it before forming the moment.
-
-    The estimate seeds from a low percentile (robust to a bright body
-    filling most of the bbox) and refines by re-medianing the pixels
-    within ``3 * noise_sigma`` of the running estimate (the sky
-    population).  On a zero-background fixture it returns ~0, so the
-    moment is unchanged from a plain above-noise centroid.
+    Both are estimated over the valid sky region (sensor data, excluding
+    saturation / cosmic rays) by seeding at the overall median and the
+    global sigma, then rejecting the bright body (the high tail) and
+    re-estimating the median and MAD of the surviving sky population.  On
+    a zero-background fixture this returns ``(~0, ~0)``, so the moment is
+    unchanged from a plain above-noise centroid.
 
     Parameters:
-        patch: The bbox sub-image (DN).
-        noise_sigma: Per-pixel image noise sigma (DN).
+        image_ext: The extended-FOV image (DN).
+        valid_mask: ``True`` where the pixel is real sensor data and not
+            saturated / a cosmic ray (the sky-candidate population).
+        noise_sigma: Global per-pixel image noise sigma (DN); seeds the
+            sky-population selection.
 
     Returns:
-        The estimated background DN level.
+        ``(background_dn, sky_sigma_dn)``; ``(0.0, noise_sigma)`` when
+        there are no valid pixels.
     """
-    sigma = max(noise_sigma, 1e-9)
-    flat = patch.reshape(-1)
-    background = float(np.percentile(flat, _BLOB_BACKGROUND_SEED_PERCENTILE))
+    sigma0 = max(noise_sigma, 1e-9)
+    vals = image_ext[valid_mask]
+    if vals.size == 0:
+        return 0.0, sigma0
+    background = float(np.median(vals))
+    sky_sigma = sigma0
     for _ in range(3):
-        sky = flat[flat <= background + _BLOB_NOISE_THRESHOLD_SIGMA * sigma]
+        sky = vals[vals <= background + _BLOB_NOISE_THRESHOLD_SIGMA * sky_sigma]
         if sky.size == 0:
             break
-        refined = float(np.median(sky))
-        if abs(refined - background) <= 1e-3 * sigma:
-            background = refined
+        new_bg = float(np.median(sky))
+        new_sigma = max(1.4826 * float(np.median(np.abs(sky - new_bg))), 1e-9)
+        converged = (
+            abs(new_bg - background) <= 1e-3 * sigma0
+            and abs(new_sigma - sky_sigma) <= 1e-3 * sigma0
+        )
+        background, sky_sigma = new_bg, new_sigma
+        if converged:
             break
-        background = refined
-    return background
+    return background, sky_sigma
 
 
 def _brightness_weighted_centroid(
     image_ext: NDArrayFloatType,
     image_noise_sigma: float,
     geometry: BodyBlobGeometry,
-) -> tuple[tuple[float, float] | None, float, int, tuple[int, int, int, int], float]:
+    background: float,
+) -> tuple[tuple[float, float] | None, float, int, tuple[int, int, int, int]]:
     """Return the brightness-weighted centroid + signal stats for one blob.
 
     The centroid is computed over every above-background pixel inside the
     feature's predicted bounding box (the bbox includes per-body slop so
     the actual body silhouette stays inside it under moderate SPICE
-    pointing error).  The per-bbox background (bias + dark pedestal) is
-    estimated and subtracted first, so the moment weights are signal
-    above background, not raw DN; lit pixels are those exceeding
+    pointing error).  The frame ``background`` (bias + dark pedestal,
+    estimated once by :func:`_estimate_frame_background_dn`) is subtracted
+    first, so the moment weights are signal above background, not raw DN;
+    lit pixels are those exceeding
     ``background + 3 * image_noise_sigma``.  Subtracting the background is
     what keeps a uniform pedestal from dragging the centroid toward the
     bbox center (a phase-dependent bias on high-phase crescents).
     A blob whose bbox carries no above-background pixels returns
-    ``(None, 0.0, 0, clamped_bbox, background)`` so the caller can drop it
-    from the joint fit and still log its bbox in the per-blob rejection
-    line.
+    ``(None, 0.0, 0, clamped_bbox)`` so the caller can drop it from the
+    joint fit and still log its bbox in the per-blob rejection line.
 
     Returns:
         ``(centroid_vu, mean_signal_above_background, n_lit_pixels,
-        clamped_bbox, background_dn)``.  ``centroid_vu`` is ``None`` when
-        the blob has no usable signal.
+        clamped_bbox)``.  ``centroid_vu`` is ``None`` when the blob has
+        no usable signal.
     """
     extfov_shape = (image_ext.shape[0], image_ext.shape[1])
     clamped_bbox = _clamp_bbox(geometry.bbox_extfov_vu, extfov_shape)
     v_min, u_min, v_max, u_max = clamped_bbox
     if v_max <= v_min or u_max <= u_min:
-        return None, 0.0, 0, clamped_bbox, 0.0
+        return None, 0.0, 0, clamped_bbox
     patch = image_ext[v_min:v_max, u_min:u_max]
-    background = _estimate_background_dn(patch, image_noise_sigma)
     noise_threshold = background + _BLOB_NOISE_THRESHOLD_SIGMA * max(image_noise_sigma, 1e-9)
     signal_mask: NDArrayBoolType = patch > noise_threshold
     n_lit = int(signal_mask.sum())
     if n_lit == 0:
-        return None, 0.0, 0, clamped_bbox, background
+        return None, 0.0, 0, clamped_bbox
     signal = np.where(signal_mask, patch - background, 0.0)
     total_weight = float(signal.sum())
     if total_weight <= 0.0:
-        return None, 0.0, 0, clamped_bbox, background
+        return None, 0.0, 0, clamped_bbox
     vs = np.arange(v_min, v_max, dtype=np.float64)
     us = np.arange(u_min, u_max, dtype=np.float64)
     centroid_v = float(np.sum(signal * vs[:, None]) / total_weight)
     centroid_u = float(np.sum(signal * us[None, :]) / total_weight)
     mean_signal = float(signal[signal_mask].mean())
-    return (centroid_v, centroid_u), mean_signal, n_lit, clamped_bbox, background
+    return (centroid_v, centroid_u), mean_signal, n_lit, clamped_bbox
 
 
 def _collect_per_blob_residuals(
     features: list[NavFeature],
     image_ext: NDArrayFloatType,
     image_noise_sigma: float,
+    background: float,
     logger: PdsLogger,
 ) -> _BlobResiduals:
     """Extract the per-blob ``observed - predicted`` residuals + weights.
@@ -228,8 +249,8 @@ def _collect_per_blob_residuals(
     phase_irregularity_factors: list[float] = []
     for feature in features:
         assert isinstance(feature.geometry, BodyBlobGeometry)
-        centroid, mean_signal, n_lit, clamped_bbox, background = _brightness_weighted_centroid(
-            image_ext, image_noise_sigma, feature.geometry
+        centroid, mean_signal, n_lit, clamped_bbox = _brightness_weighted_centroid(
+            image_ext, image_noise_sigma, feature.geometry, background
         )
         if centroid is None:
             logger.debug(
@@ -478,8 +499,30 @@ class BodyBlobNav(NavTechnique):
             margin_v, margin_u = search_window_for_obs(context)
             self.logger.debug('Search window (v, u) = (%d, %d) px', margin_v, margin_u)
             image_ext = np.asarray(context.image_ext, np.float64)
-            noise_sigma = float(max(context.image_noise_sigma, 1e-9))
-            residuals = _collect_per_blob_residuals(eligible, image_ext, noise_sigma, self.logger)
+            global_sigma = float(max(context.image_noise_sigma, 1e-9))
+            # The background pedestal and the sky-noise floor are both
+            # frame-global, so estimate them once over the valid sky region
+            # (sensor data, excluding saturation and cosmic-ray spikes) rather
+            # than per-bbox, where a body-filled box would bias the background
+            # high.  The sky sigma -- not the body-inflated global sigma -- is
+            # the right threshold floor (see _estimate_frame_background_and_sigma).
+            valid_mask = (
+                np.asarray(context.sensor_mask_ext, bool)
+                & ~np.asarray(context.saturation_mask_ext, bool)
+                & ~np.asarray(context.cosmic_ray_mask_ext, bool)
+            )
+            background, noise_sigma = _estimate_frame_background_and_sigma(
+                image_ext, valid_mask, global_sigma
+            )
+            self.logger.debug(
+                'Frame background pedestal = %.4f DN, sky sigma = %.4f DN (global %.4f)',
+                background,
+                noise_sigma,
+                global_sigma,
+            )
+            residuals = _collect_per_blob_residuals(
+                eligible, image_ext, noise_sigma, background, self.logger
+            )
             if not residuals.consumed:
                 return self._fail_no_signal(
                     features=eligible,
