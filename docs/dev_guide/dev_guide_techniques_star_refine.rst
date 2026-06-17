@@ -17,8 +17,8 @@ refit recovers a translation plus rotation instead of a translation alone.
 
 Feasibility passes when at least one
 :data:`~nav.feature.feature_type.NavFeatureType.STAR` feature survives the shared usability
-gates — predictable, not occluded by a body silhouette, not clipped by a saturation or
-cosmic-ray mask. Feasibility fails when no usable star is offered.
+gates — predictable and not occluded by a body silhouette or ring annulus. Feasibility
+fails when no usable star is offered.
 
 Theory
 ======
@@ -241,8 +241,8 @@ Call path traced through
 :meth:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav.navigate`:
 
 1. Open a logged section. Filter the offered features down to
-   ``usable_stars`` (predictable, not in a body
-   silhouette, not in a saturation / cosmic-ray mask).
+   ``usable_stars`` (predictable and not occluded by a body
+   silhouette or ring annulus).
 2. **No prior on the context.**  Return early with a spurious zero-confidence result via the
    private ``_fail`` helper, with ``reason='no_prior_offset_on_context'``.
 3. Read the prior offset, the extfov image, and the per-image noise sigma off the context.

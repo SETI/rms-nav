@@ -294,7 +294,7 @@ Call path traced through
 :meth:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav.navigate`:
 
 1. Open a logged section. Filter the offered features down to ``usable_stars``
-   (predictable, not in a body silhouette, not in a saturation / cosmic-ray mask) and pull
+   (predictable and not occluded by a body silhouette or ring annulus) and pull
    the predicted catalog positions / SNR off the per-feature
    :attr:`~nav.feature.feature.NavFeature.geometry` and
    :attr:`~nav.feature.feature.NavFeature.flags`.
@@ -367,7 +367,7 @@ Examples
 ``stars_plus_body`` (Cassini long-exposure background-stars scene class)
     One body and at least three usable catalog stars in the same FOV. The stars model emits
     one ``STAR`` feature per predictable catalog star whose predicted position lies outside
-    the body silhouette and outside any saturation / cosmic-ray mask; the body model emits
+    the body silhouette and any ring annulus; the body model emits
     a ``LIMB_ARC`` (or ``BODY_BLOB``) for the body. On pass 1, the
     :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav` consumes the body's
     feature first and the orchestrator's ensemble combine populates the per-image prior
