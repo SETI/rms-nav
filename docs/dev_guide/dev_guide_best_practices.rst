@@ -3,8 +3,8 @@ Best Practices
 ==============
 
 Project conventions for all new and modified code live in
-``.cursor/rules/python_best_practices.mdc`` (with peer files for
-``dependency_management``, ``documentation``, ``environment_best_practices``,
+``.cursor/rules/python.mdc`` (with peer files for
+``dependency_management``, ``doc_python``, ``environment``,
 ``git_workflow``, ``pull_request``, and ``security``). That file is the
 authoritative standard; this page lists the rules that come up most often.
 

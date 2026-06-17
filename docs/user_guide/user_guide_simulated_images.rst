@@ -55,4 +55,4 @@ JSON parameter file reference
 The full description of the JSON file structure -- every supported
 top-level field, star parameter, body parameter, ring parameter, and ring
 edge mode -- is documented once under
-:doc:`introduction_simulated_images`.
+:doc:`/introduction_simulated_images`.
