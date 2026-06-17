@@ -12,7 +12,7 @@ Welcome to the Documentation for RMS-NAV!
    :caption: Contents:
 
    introduction
-   user_guide
+   user_guide/user_guide
    dev_guide/dev_guide
 
 Indices and tables

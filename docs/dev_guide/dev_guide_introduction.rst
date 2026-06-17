@@ -4,7 +4,7 @@ Introduction
 
 This is the developer manual for **RMS-NAV**, the spacecraft image-navigation system
 distributed as the ``rms-nav`` PyPI package. The user manual lives under
-:doc:`/user_guide` (one chapter per CLI driver); this manual is for contributors and
+:doc:`/user_guide/user_guide` (one chapter per CLI driver); this manual is for contributors and
 maintainers — people who modify, extend, build, test, or release the package.
 
 Package overview
@@ -58,7 +58,7 @@ The repo is a standard ``src``-layout Python package:
        nav/                      # unit tests, mirror src/nav layout
        integration/              # operator-curated image library + regression tests
      docs/
-       user_guide.rst            # user manual chapters
+       user_guide/               # user manual chapters
        dev_guide/                # this manual
        api_reference/            # autodoc landing pages
        conf.py                   # Sphinx config
@@ -121,27 +121,27 @@ Every CLI listed in ``[project.scripts]`` is installed onto ``$PATH`` by
      - Purpose
    * - ``nav_offset``
      - Run autonomous navigation on one image (or a batch); writes JSON
-       metadata + summary PNG. Documented at :doc:`/user_guide_navigation`.
+       metadata + summary PNG. Documented at :doc:`/user_guide/user_guide_navigation`.
    * - ``nav_offset_cloud_tasks``
      - Queue-driven navigation variant; reads task JSON, processes one batch.
    * - ``nav_backplanes`` / ``nav_backplanes_cloud_tasks``
      - Generate per-pixel backplanes from a navigated image. See
-       :doc:`/user_guide_backplanes` and :doc:`dev_guide_backplanes`.
+       :doc:`/user_guide/user_guide_backplanes` and :doc:`/dev_guide/dev_guide_backplanes`.
    * - ``nav_backplane_viewer``
      - PyQt6 viewer for a backplane file.
    * - ``nav_create_bundle`` / ``nav_create_bundle_cloud_tasks``
      - Build a PDS4 bundle from navigated images + backplanes. See
-       :doc:`/user_guide_pds4_bundle` and :doc:`dev_guide_pds4`.
+       :doc:`/user_guide/user_guide_pds4_bundle` and :doc:`/dev_guide/dev_guide_pds4`.
    * - ``nav_mosaic`` / ``nav_mosaic_rings`` / ``nav_mosaic_body``
      - Reprojection drivers (rings, body, dispatcher). See
-       :doc:`/user_guide_reprojection` and :doc:`dev_guide_reprojection`.
+       :doc:`/user_guide/user_guide_reprojection` and :doc:`/dev_guide/dev_guide_reprojection`.
    * - ``nav_mosaic_display`` / ``nav_mosaic_display_rings`` / ``nav_mosaic_display_body``
      - PyQt6 mosaic viewer.
    * - ``nav_mosaic_cloud_tasks``
      - Queue-driven mosaic builder.
    * - ``nav_create_simulated_image``
      - Render a synthetic test image (operator-supplied bodies / rings / stars).
-       See :doc:`/user_guide_simulated_images`.
+       See :doc:`/user_guide/user_guide_simulated_images`.
 
 Quick smoke test:
 

@@ -633,7 +633,7 @@ plan-body section conflicts, this list wins.
     every new module/class/function carries a Google-style docstring
     that includes `Parameters:`, `Returns:`, `Raises:`, plus a behavior
     paragraph sufficient to write a black-box test from the docstring
-    alone (per `documentation.mdc` §4). Specifically:
+    alone (per `doc_python.mdc` §4). Specifically:
     - `NavFeature` — docstring per field describing units, valid range,
       derivation source.
     - Each extractor — exact extraction algorithm including
@@ -1075,10 +1075,10 @@ work as the historical record of its quality bar — the existing
 stage-0 critique reports at the repo root are the precedent for this
 convention). The folder contains the following files:
 
-- `CRITIQUE_PYTHON.md` — review against `.cursor/rules/python_best_practices.mdc`.
-- `CRITIQUE_DOCS.md` — review against `.cursor/rules/documentation.mdc`.
-- `CRITIQUE_FILECACHE.md` — review against `.cursor/rules/filecache_best_practices.mdc`.
-- `CRITIQUE_LOGGING.md` — review against `.cursor/rules/logging_best_practices.mdc`.
+- `CRITIQUE_PYTHON.md` — review against `.cursor/rules/python.mdc`.
+- `CRITIQUE_DOCS.md` — review against `.cursor/rules/doc_python.mdc`.
+- `CRITIQUE_FILECACHE.md` — review against `.cursor/rules/filecache.mdc`.
+- `CRITIQUE_LOGGING.md` — review against `.cursor/rules/logging.mdc`.
 - `CRITIQUE_TESTS.md` — review using `.cursor/skills/critique-test-suite/SKILL.md`.
 - `CRITIQUE_CODEBASE.md` — review using `.cursor/skills/python-codebase-analysis/SKILL.md`.
 - `CRITIQUE_SUMMARY.md` — **executive summary** aggregating every
@@ -5900,7 +5900,7 @@ the existing introduction_overview.rst update covers orientation.
 
 ### Methodology — TDD throughout
 
-Every phase is executed test-first per `.cursor/rules/python_best_practices.mdc`:
+Every phase is executed test-first per `.cursor/rules/python_testing.mdc`:
 
 1. Read the spec (this plan + the docstring being implemented).
 2. Write the test. Required test-construction discipline:

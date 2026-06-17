@@ -98,7 +98,7 @@ distributed processing:
   of ring and body mosaic generation. A single worker process handles both
   ring and body tasks; the mode is encoded per-task in the task payload.
   (Mosaic combination remains a single-node step; see
-  :doc:`user_guide_reprojection`.)
+  :doc:`/user_guide/user_guide_reprojection`.)
 
 These cloud tasks variants read task payloads from a queue and process batches
 of files, making them suitable for large-scale processing in cloud

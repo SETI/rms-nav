@@ -28,7 +28,7 @@ by ``nav_create_bundle labels`` (see :doc:`user_guide_pds4_bundle`).
 
 For the pipeline's internal architecture (per-source generation,
 distance-aware merge, FITS writer details, "Adding a backplane" checklist),
-see :doc:`dev_guide/dev_guide_backplanes`.
+see :doc:`/dev_guide/dev_guide_backplanes`.
 
 Command-Line Interfaces
 ========================

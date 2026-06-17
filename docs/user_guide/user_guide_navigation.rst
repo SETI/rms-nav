@@ -41,7 +41,7 @@ RMS-NAV currently supports multiple instruments, organized by dataset names you 
 Installation and Setup
 ======================
 
-See :doc:`introduction_overview` for package installation with ``pip`` or
+See :doc:`/introduction_overview` for package installation with ``pip`` or
 ``pipx``.
 
 Environment Setup
@@ -88,7 +88,7 @@ Configuration System
 RMS-NAV uses a hierarchical YAML-based configuration system. For detailed
 information about the configuration system, including its structure, default
 YAML files, and how to override settings using configuration files and
-command-line options, see :doc:`introduction_configuration`.
+command-line options, see :doc:`/introduction_configuration`.
 
 Command-Line Interface
 ======================
@@ -113,7 +113,7 @@ Environment options
 ^^^^^^^^^^^^^^^^^^^
 
 * ``--config-file PATH`` (repeatable): one or more configuration file paths to
-  override defaults. See :doc:`introduction_configuration` for details.
+  override defaults. See :doc:`/introduction_configuration` for details.
 
 * ``--pds3-holdings-root PATH``: root directory or URL for PDS3 holdings,
   overriding both the ``PDS3_HOLDINGS_DIR`` environment variable and any
@@ -170,7 +170,7 @@ Logging options
 All four options accept a standard log-level string (``DEBUG``, ``INFO``, ``WARNING``,
 ``ERROR``, or ``CRITICAL``) and override the corresponding ``general.*`` configuration
 key for that run. For full details and the config-file equivalents see
-:doc:`introduction_configuration`.
+:doc:`/introduction_configuration`.
 
 * ``--log-level-main-console LEVEL``: stdout level for the main logger (overrides
   ``general.log_level_main_console``; default ``INFO``).
@@ -510,8 +510,8 @@ default ``*`` runs all of them.
 
 The algorithmic detail (DT pipeline, Levenberg-Marquardt refinement,
 information-matrix covariance) lives in
-:doc:`dev_guide/dev_guide_techniques` and
-:doc:`dev_guide/dev_guide_techniques_dt_fitting`; this page summarises
+:doc:`/dev_guide/dev_guide_techniques` and
+:doc:`/dev_guide/dev_guide_techniques_dt_fitting`; this page summarises
 what each technique does and which scenes it applies to.
 
 Implemented techniques
@@ -598,7 +598,7 @@ stdout.  Exit code is ``2`` if the dialog is cancelled or no
 template-bearing features are available.  The dialog's **Save as
 Library Entry...** button is the recommended path for adding a sidecar
 to the operator-curated test image library; see
-:doc:`dev_guide/dev_guide_image_library`.
+:doc:`/dev_guide/dev_guide_image_library`.
 
 Programmatic equivalent (one obs in, ``NavTechniqueResult`` out):
 

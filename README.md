@@ -165,7 +165,7 @@ nav_mosaic_body coiss_saturn \
 ```
 
 See the
-[Reprojection user guide](https://rms-nav.readthedocs.io/en/latest/user_guide_reprojection.html)
+[Reprojection user guide](https://rms-nav.readthedocs.io/en/latest/user_guide/user_guide_reprojection.html)
 for full option references and more examples.
 
 ### Cloud Tasks variants
@@ -190,11 +190,11 @@ JSON file for its matching worker via `--output-cloud-tasks-file PATH`. The
 per-feature user guides document the JSON schema each worker expects:
 
 - `nav_offset_cloud_tasks`:
-  [Navigation user guide](https://rms-nav.readthedocs.io/en/latest/user_guide_navigation.html)
+  [Navigation user guide](https://rms-nav.readthedocs.io/en/latest/user_guide/user_guide_navigation.html)
 - `nav_backplanes_cloud_tasks`:
-  [Backplanes user guide](https://rms-nav.readthedocs.io/en/latest/user_guide_backplanes.html)
+  [Backplanes user guide](https://rms-nav.readthedocs.io/en/latest/user_guide/user_guide_backplanes.html)
 - `nav_mosaic_rings_cloud_tasks` / `nav_mosaic_body_cloud_tasks`:
-  [Reprojection user guide](https://rms-nav.readthedocs.io/en/latest/user_guide_reprojection.html)
+  [Reprojection user guide](https://rms-nav.readthedocs.io/en/latest/user_guide/user_guide_reprojection.html)
 
 ## Documentation
 

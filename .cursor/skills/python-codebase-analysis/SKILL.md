@@ -28,7 +28,7 @@ Produce a structured analysis and recommendations report. Do not implement chang
 
 ### 2. Best practices alignment
 
-Compare against project rules when present (e.g. `.cursor/rules/python_best_practices.mdc`). Check:
+Compare against project rules when present (e.g. `.cursor/rules/python.mdc`). Check:
 
 - Naming (builtin shadowing, private `_` prefix, ALL_CAPS for module-level constants).
 - Explicit checks vs exception-based control flow; falsy checks (`is None`, `len(x) == 0`).
@@ -176,7 +176,20 @@ Use "Consider…", "Prefer…", "Avoid…" for suggestions. For critical/high, s
 
 ## Project-specific rules
 
-If the repo contains `.cursor/rules/` (e.g. `python_best_practices.mdc`), treat those as the primary standard for "best practices alignment". Mention when a finding contradicts or reinforces a project rule. For Python repos, prefer referencing the rule file rather than repeating long rule text.
+If the repo contains a `.cursor/rules/` directory, treat those rule files as the authoritative standard for the matching dimension. When a finding reinforces or contradicts a rule, cite the rule by filename; prefer referencing the rule file over repeating its text.
+
+| Dimension(s) | Rule file(s) |
+|--------------|--------------|
+| 1 Structure and layout, 2 Best practices alignment, 3 Types and static checks, 9 Technical debt | `python.mdc` |
+| 4 Testing | `python_testing.mdc` |
+| 6 Maintainability (documentation quality) | `doc_python.mdc`, `doc_readme.mdc`, `doc_user_guide.mdc`, `doc_dev_guide.mdc`, `doc_how_to.mdc` — or run the `critique-documentation` skill for a deep documentation audit |
+| 7 Security and robustness | `security.mdc` |
+| 8 Dependencies and tooling, 10 Packaging and distribution | `dependency_management.mdc`, `environment.mdc` |
+| Process (commits, pull requests, bug reports) | `git_workflow.mdc`, `pull_request.mdc`, `bug_report.mdc` |
+| 2 Best practices (logging in library code) | `logging.mdc`, `logging_nav.mdc` |
+| 2 Best practices, 5 Performance (transparent local/remote file I/O) | `filecache.mdc` |
+
+Not every project ships every rule. **If a referenced rule file does not exist, skip the corresponding part of the analysis** rather than inventing a standard or reporting the rule's absence as a finding. In particular, the `filecache` and `logging` (and `logging_nav`) rules are project-specific and are frequently absent; when they are missing, ignore the file-access and logging-convention checks that depend on them.
 
 ## Reference
 

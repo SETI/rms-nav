@@ -13,7 +13,7 @@ This chapter is the developer's reference for the pipeline's internals — the
 phase structure, the per-source generation algorithms, the distance-aware
 merge, and the FITS writer's HDU layout. The CLI walkthrough, configurable
 backplane list, and FITS / sidecar shape from a user's perspective lives at
-:doc:`/user_guide_backplanes`.
+:doc:`/user_guide/user_guide_backplanes`.
 
 Overview
 ========
@@ -85,7 +85,7 @@ Entry points
 are thin CLI wrappers around
 :func:`~backplanes.backplanes.generate_backplanes_image_files`. CLI flags,
 selection options, and per-batch behaviour are documented at
-:doc:`/user_guide_backplanes`. Code that embeds backplane generation in a
+:doc:`/user_guide/user_guide_backplanes`. Code that embeds backplane generation in a
 Python pipeline calls the function directly.
 
 Restrictions and assumptions
@@ -214,7 +214,7 @@ Configuration
 The configurable backplane list lives in
 ``src/nav/config_files/config_900_backplanes.yaml`` under the ``backplanes``
 section (exposed as ``config.backplanes``). The full YAML schema and the
-shipping defaults are documented at :doc:`/user_guide_backplanes`; this
+shipping defaults are documented at :doc:`/user_guide/user_guide_backplanes`; this
 section covers the developer-facing parts of the contract.
 
 - ``method`` resolves against :class:`oops.backplane.Backplane` by name at

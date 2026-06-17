@@ -10,7 +10,7 @@ Ring-Moon Systems node ships to PDS for archive: one collection of data labels
 together. This chapter covers the bundle-generation driver, the per-dataset
 extension points, the templated label workflow, and the output layout.
 
-The user-facing CLI walkthrough lives at :doc:`/user_guide_pds4_bundle`; this
+The user-facing CLI walkthrough lives at :doc:`/user_guide/user_guide_pds4_bundle`; this
 chapter is the developer's reference.
 
 Pipeline overview
@@ -60,7 +60,7 @@ labels) without re-rendering per-image data labels. Operators typically run
 across many shards, then once with ``--collections`` to assemble the bundle.
 
 Cloud-tasks variant ``nav_create_bundle_cloud_tasks`` reads the same task JSON
-schema as ``nav_offset_cloud_tasks`` (see :doc:`/user_guide_navigation`) so the
+schema as ``nav_offset_cloud_tasks`` (see :doc:`/user_guide/user_guide_navigation`) so the
 same task queue can drive offset + backplane + bundle in three queue passes.
 
 Per-dataset extension points
