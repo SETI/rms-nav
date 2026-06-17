@@ -1,0 +1,107 @@
+"""Single-variable sweep invariants (Phase T3).
+
+Each sweep drives one catalog scene by varying a single parameter and navigates
+every step.  These tests assert how a navigation diagnostic *responds* to the
+controlled change -- the verification layer a calibrated confidence formula
+relies on.  Assertions are trends and bounds (a technique transition, a
+degradation to failure, recovery within tolerance), not exact values, because the
+underlying navigation carries sub-millipixel cross-process jitter.
+
+Run in-process; heavier than the algorithmic invariants (each sweep navigates
+several frames), so the module is ``@pytest.mark.integration`` -- the deliberate
+tier, alongside the baselines.
+"""
+
+from pathlib import Path
+
+import pytest
+
+from tests.integration.sim_sweep import (
+    SweepRow,
+    iter_sweep_paths,
+    load_sweep,
+    run_sweep,
+)
+
+pytestmark = pytest.mark.integration
+
+_SWEEPS_ROOT = Path(__file__).parent / 'sim_sweeps'
+_RECOVERY_TOLERANCE_PX = 0.5
+
+
+def _rows(sweep_name: str) -> list[SweepRow]:
+    """Load and run a sweep by name."""
+    return run_sweep(load_sweep(_SWEEPS_ROOT / f'{sweep_name}.yaml'))
+
+
+def test_every_sweep_validates() -> None:
+    """Every sweep spec parses and validates."""
+    paths = iter_sweep_paths(_SWEEPS_ROOT)
+    assert paths
+    for path in paths:
+        load_sweep(path)
+
+
+def test_noise_sweep_starts_clean() -> None:
+    """At the lowest read noise the scene recovers the planted offset."""
+    rows = _rows('noise_read_noise')
+    assert rows[0].status == 'success'
+    assert rows[0].offset_error_px is not None
+    assert rows[0].offset_error_px < _RECOVERY_TOLERANCE_PX
+
+
+def test_noise_sweep_degrades_to_failure() -> None:
+    """At the highest read noise navigation fails -- the navigability cliff."""
+    rows = _rows('noise_read_noise')
+    assert rows[-1].status == 'failed'
+
+
+def test_noise_sweep_low_noise_all_succeed() -> None:
+    """Every below-cliff step recovers within tolerance."""
+    rows = _rows('noise_read_noise')
+    for row in rows:
+        if row.status != 'success':
+            continue
+        assert row.offset_error_px is not None
+        assert row.offset_error_px < _RECOVERY_TOLERANCE_PX
+
+
+def test_phase_sweep_navigates_every_phase() -> None:
+    """The resolved body navigates to success across the full phase range."""
+    rows = _rows('phase_regular_body')
+    for row in rows:
+        assert row.status == 'success'
+
+
+def test_phase_sweep_recovers_every_phase() -> None:
+    """The recovered offset stays within tolerance across the full phase range."""
+    rows = _rows('phase_regular_body')
+    for row in rows:
+        assert row.offset_error_px is not None
+        assert row.offset_error_px < _RECOVERY_TOLERANCE_PX
+
+
+def test_range_sweep_largest_body_uses_limb() -> None:
+    """The largest (well-resolved) body navigates by BodyLimbNav."""
+    rows = _rows('range_body_size')
+    assert rows[0].primary_technique == 'BodyLimbNav'
+
+
+def test_range_sweep_smallest_body_fails() -> None:
+    """The smallest body is unnavigable."""
+    rows = _rows('range_body_size')
+    assert rows[-1].status == 'failed'
+
+
+def test_range_sweep_reaches_blob_regime() -> None:
+    """A small-but-navigable body falls to the orientation-free BodyBlobNav."""
+    rows = _rows('range_body_size')
+    primaries = [row.primary_technique for row in rows]
+    assert 'BodyBlobNav' in primaries
+
+
+def test_range_sweep_transitions_technique() -> None:
+    """The primary technique is not constant -- the range ladder transitions."""
+    rows = _rows('range_body_size')
+    distinct = {row.primary_technique for row in rows if row.primary_technique is not None}
+    assert len(distinct) >= 2

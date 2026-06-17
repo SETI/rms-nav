@@ -984,10 +984,37 @@ regressions — anyone can rerun and get any result.  Baselines turn
 `tests/integration/test_sim_baselines.py`, new
 `tests/integration/update_sim_baselines.py`.
 
-### Phase T3: Single-variable parameter sweeps
+### Phase T3: Single-variable parameter sweeps [done]
 
 **Goal:** harness that renders a sweep of scenes varying one
 parameter, navigates each, and emits a per-parameter response curve.
+
+**Done:** `tests/integration/sim_sweep.py` defines the `SweepSpec` schema
+(`base_scene`, a list of dotted `parameters` moved together, `values`) plus
+`run_sweep`, which drives one catalog scene by overriding the parameter(s) in its
+sim-params and navigating each step into a `SweepRow` (status, offset error vs the
+planted offset, confidence, primary technique).  `tests/integration/
+sim_sweeps/<name>.yaml` holds the specs; `sim_sweep_runner.py` (`python -m`)
+writes per-step JSON response curves under `sim_sweeps/results/` (a regenerable
+diagnostic, gitignored, not a re-blessed baseline); `test_sim_sweeps.py` asserts
+the invariants and is `@pytest.mark.integration` (each sweep navigates several
+frames).  Three sweeps over one resolved-sphere base scene
+(`phase_sweep_regular_body/regular_sphere_base.yaml`):
+
+- **noise** (`read_noise_dn` 1 -> 64): recovers within tolerance at low noise and
+  fails at the navigability cliff (the highest level), capturing the
+  success-to-failure degradation.
+- **phase** (0 -> 150 deg): the resolved body navigates to success and recovers
+  within 0.5 px at every phase (disc at moderate phase, blob at the extremes).
+- **range** (diameter 130 -> 12 px): the primary technique transitions
+  `BodyLimbNav -> BodyDiscCorrelateNav -> BodyBlobNav` as resolution falls, and
+  the smallest body is unnavigable -- the technique ladder the range regime is
+  meant to exercise.
+
+The invariants are trends and bounds (a transition, a degradation, recovery
+within tolerance), not the placeholder-alpha confidence curve, which barely moves
+on these clean frames -- so the confidence-monotonicity checks the draft below
+imagined wait on the Phase 10 calibration and are deferred to T7.
 
 **Scope:**
 
@@ -1435,6 +1462,7 @@ tests/integration/sim_baselines/                         (T2)
 tests/integration/sim_baselines/<name>.json              (T2+)
 tests/integration/sim_sweeps/                            (T3)
 tests/integration/sim_sweeps/<name>.yaml                 (T3+)
+tests/integration/sim_sweep.py                           (T3: schema + runner core)
 tests/integration/sim_scene.py                           (T1)
 tests/integration/sim_sweep_runner.py                    (T3)
 tests/integration/sim_alpha_bootstrap.py                 (T5)

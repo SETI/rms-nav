@@ -1,0 +1,29 @@
+schema_version: 1
+scene_name: regular_sphere_base
+instrument: coiss_nac
+image_size_vu: [220, 220]
+random_seed: 7
+exposure_sec: 1.0
+# A clean, well-resolved sphere with a planted offset, sized with room to spare.
+# It is the base scene the T3 single-variable sweeps drive: the noise sweep
+# varies ``noise.read_noise_dn``, the phase sweep varies ``bodies.0.phase_angle``,
+# and the range sweep shrinks ``bodies.0.axis{1,2,3}`` together.  At its base
+# value (axis 90, phase 30, read-noise 4) it navigates by the disc correlation and
+# recovers the planted offset exactly.
+bodies:
+  - name: RHEA
+    center_v: 110.0
+    center_u: 110.0
+    axis1: 90.0
+    axis2: 90.0
+    axis3: 90.0
+    illumination_angle: 25.0
+    phase_angle: 30.0
+rings: []
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+ground_truth:
+  planted_offset_dv_px: 1.5
+  planted_offset_du_px: -0.5
+  planted_rotation_deg: 0.0
