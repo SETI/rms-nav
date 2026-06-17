@@ -102,6 +102,15 @@ Key scene fields:
 
 * ``instrument`` -- the camera the frame emulates (e.g. ``coiss_nac``, ``gossi``),
   selecting the PSF, noise, saturation, and units the renderer and navigator use.
+  Use ``generic`` for an instrument-agnostic frame.
+* ``instrument_config`` -- optional per-instrument config overrides, deep-merged
+  over the named instrument's block. Omit it to inherit every parameter from the
+  instrument; set individual keys (``star_psf_sigma``, ``data_units``, ``noise``
+  sub-keys, ...) to **pin** them to the scene; or name ``generic`` and set
+  everything to make the scene fully self-specified. A pinned value is locked to
+  the scene, so a later change to the real camera's config cannot shift that
+  scene's rendered image or recovered offset. Prefer this for catalog scenes whose
+  results you want to be stable against camera-config edits.
 * ``image_size_vu`` -- ``[height, width]`` in pixels.
 * ``bodies`` / ``rings`` / ``stars`` -- the geometry. Bodies and rings are lists
   of the same parameter dicts the GUI and JSON use; ``stars.list`` holds the

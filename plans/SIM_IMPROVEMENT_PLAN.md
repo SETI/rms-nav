@@ -101,8 +101,8 @@ name ``generic`` and override everything to self-specify. Pinned keys are
 decoupled from the live camera config, so a later camera-config edit cannot shift
 a sim scene's pinned behavior. Wired through the scene schema (`src/nav/sim/scene.py`),
 both consumers (`obs_inst_sim.py`, `render.py`), and the GUI load/save round-trip;
-documented in `dev_guide_observations` and the scene README. Resolves open
-question 2.
+documented in `dev_guide_observations`, the simulated-image user guide, and the
+scene README. Resolves open question 2.
 
 The next two navigation/sim improvements, highest priority first:
 
