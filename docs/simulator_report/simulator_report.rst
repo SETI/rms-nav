@@ -577,6 +577,70 @@ offset is unknown; the moment-vs-PSF choice is unit-tested directly, the dim and
 sweeps are the broad-coverage characterization, and the SNR sweep above is the
 estimator-vs-estimator comparison.
 
+Per-technique accuracy across SNR and injected offset
+=====================================================
+
+The dim-vs-bright study above is the star field's; the same question -- how does each
+technique's accuracy depend on signal-to-noise, and on the injected offset itself -- is
+characterized for every technique by
+``python -m tests.integration.technique_snr_characterization`` (runner-only). Two figure
+families come out of it; both fix nothing the reader has to infer (offsets and noise levels
+are stated on each panel) and both are simulated, since a real image's true offset is
+unknown.
+
+**Accuracy versus SNR (fixed injected offset).** Each technique's base scene is rendered at a
+fixed ``(dv, du) = (+0.50, -0.50)`` px offset while the per-image read noise is swept from a
+clean frame down toward the navigability cliff; the x-axis is a uniform per-image SNR proxy
+``(peak - background) / robust_noise`` (the noise estimated from adjacent-pixel differences
+so a stray-light ramp does not inflate it). Because each technique's feature has a different
+intrinsic brightness, the curves occupy different SNR bands -- itself part of the
+characterization.
+
+.. figure:: _figures/technique_snr_nominal.png
+   :width: 100%
+   :alt: Per-technique recovered-offset error vs SNR, nominal background.
+
+   Nominal background. The disc is flat at ~0.004 px and the ring sits at
+   ~0.003-0.007 px -- both essentially noise-immune over their range. The blob and star
+   improve steadily with SNR. The limb is pinned near its ~0.15 px distance-transform bias
+   floor regardless of SNR, which is why that bias is a separate follow-up rather than a
+   noise problem.
+
+.. figure:: _figures/technique_snr_gradient.png
+   :width: 100%
+   :alt: Per-technique recovered-offset error vs SNR, stray-light gradient.
+
+   A gentle stray-light gradient (linear ramp ~3% of full scale). The disc loses the most
+   accuracy -- its full-FOV correlation is the most gradient-sensitive -- while the ring is
+   the most robust; the curves otherwise keep their nominal ordering.
+
+**Accuracy versus injected offset (fixed SNR).** Holding the read noise at three levels, a
+pure-vertical offset is swept from 0 to 1.75 px (``u`` held at 0) for every technique. The
+panels share a y-range so the degradation as SNR drops reads directly.
+
+.. figure:: _figures/technique_offset_high_snr.png
+   :width: 100%
+   :alt: Per-technique error vs injected offset, high SNR.
+
+   High SNR (read noise 1 DN). Every technique recovers to a few hundredths of a pixel with
+   no dependence on the fractional part (the disc drops below 0.001 px at several offsets);
+   only the limb's bias floor stands out. This panel matches the dense fractional sweep.
+
+.. figure:: _figures/technique_offset_medium_snr.png
+   :width: 100%
+   :alt: Per-technique error vs injected offset, medium SNR.
+
+   Medium SNR (read noise 8 DN). The star field degrades to ~0.05-0.07 px and the others
+   hold; the limb stays at its bias floor.
+
+.. figure:: _figures/technique_offset_low_snr.png
+   :width: 100%
+   :alt: Per-technique error vs injected offset, low SNR.
+
+   Low SNR (read noise 32 DN). The disc, blob, and ring still recover (their features are
+   bright), but the limb and star field have crossed their navigability cliff and return no
+   result at any offset -- the missing curves are the failure, not an omission.
+
 Camera-roll sensitivity and roll / translation separability
 ============================================================
 
