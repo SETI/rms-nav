@@ -157,11 +157,12 @@ def test_disc_offset_sweep_shows_pixel_locking() -> None:
 
     A direct measurement of NCC pixel-locking: the recovered offset error at a
     half-pixel planted offset (0.5) is markedly smaller than at a whole-pixel
-    offset (1.0). The blob, by contrast, is uniform across both (previous test).
+    offset (12.0), independent of magnitude. The blob, by contrast, is uniform
+    across both (previous test).
     """
     by_value = {row.value: row for row in _rows('offset_fractional_disc')}
     half = by_value[0.5]
-    whole = by_value[1.0]
+    whole = by_value[12.0]
     assert half.offset_error_px is not None
     assert whole.offset_error_px is not None
     assert half.offset_error_px < whole.offset_error_px

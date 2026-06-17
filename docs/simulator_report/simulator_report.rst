@@ -309,56 +309,47 @@ Sub-pixel offset accuracy across the pixel
 ==========================================
 
 The invariant scenes above all plant a single offset near the middle of a pixel.
-To check for pixel-boundary and quantization artifacts, two sweeps plant the same
-body offset across a range that includes whole pixels, the near-boundary 0.99 px,
-the exact half- and quarter-pixel, and arbitrary non-repeating fractions
-(0.12783, 0.73912) -- one on a small body navigated by the blob centroid, one on
-a resolved body navigated by the disc correlation.
+To check for pixel-boundary and quantization artifacts, two sweeps plant the body
+offset across a range of magnitudes with a variety of fractional parts -- whole
+pixels, the exact half-pixel, and arbitrary non-repeating fractions -- one on a
+small body navigated by the blob centroid, one on a resolved body navigated by
+the disc correlation.
 
-.. list-table:: Recovery error vs planted offset (px)
+The disc sweep spans 0.3 to 12 px (recovery error in px):
+
+.. list-table:: Disc-correlation recovery vs planted offset
    :header-rows: 1
-   :widths: 18 20 20
+   :widths: 16 16 16 16 16
 
-   * - Planted offset
-     - Blob centroid
-     - Disc correlation
-   * - 0.0
-     - 0.007
-     - 0.33
-   * - 0.12783
-     - 0.010
-     - 0.36
-   * - 0.25
-     - 0.009
-     - 0.38
-   * - 0.5
-     - 0.003
-     - 0.00
-   * - 0.73912
-     - 0.003
-     - 0.24
-   * - 0.99
-     - 0.006
-     - 0.33
-   * - 1.0
-     - 0.007
-     - 0.33
-   * - 1.5
-     - 0.003
-     - 0.00
-   * - 2.99
-     - 0.006
-     - 0.33
+   * - 0.31 -> 0.37
+     - 0.5 -> 0.00
+     - 1.62 -> 0.12
+     - 2.5 -> 0.00
+     - 3.75 -> 0.25
+   * - 5.5 -> 0.00
+     - 7.6 -> 0.10
+     - 9.93 -> 0.31
+     - 12.0 -> 0.33
+     -
 
-The **blob centroid is quantization-free**: it recovers every offset --
-whole-pixel, near-boundary, perfect-fraction, or arbitrary -- to a few
-hundredths of a pixel, with no dependence on the fractional part. The feature
-techniques (limb, ring edge, star field) behave the same way, because they fit a
-sharp predicted geometry to a sharp image feature.
+The **blob centroid is quantization-free**: across its sweep (0.13 to 4.87 px,
+fractions 0.13/0.62/1.27/1.95/2.58/3.41/4.16/4.87) every offset is recovered to
+at most 0.011 px, with no dependence on the fractional part or the magnitude. The
+feature techniques (limb, ring edge, star field) behave the same way, because
+they fit a sharp predicted geometry to a sharp image feature.
+
+The blob sweep is deliberately kept inside the body's predicted bounding box: the
+blob is a *small-offset* technique. The lit-weighted centroid is integrated over
+the predicted bbox, so once the planted offset approaches the bbox extent the body
+clips out of the window and the recovered centroid degrades -- for the 20 px body
+here the error stays under 0.05 px out to ~6 px of offset, then grows (~0.5 px at
+9 px, ~1.6 px at 12 px) and fails past ~25 px. The disc correlation, by contrast,
+searches the full extended-FOV and recovers across the entire range.
 
 The **disc correlation shows a striking periodic error**: ~0.33 px at whole-pixel
-offsets, falling to ~0 at the exact half-pixel, with a period of one pixel. This
-is *not* a fundamental NCC limit. The correlator upsamples its correlation
+offsets, falling to ~0 at the exact half-pixel, with a period of one pixel and no
+dependence on magnitude (0.5, 2.5, and 5.5 px all recover exactly). This is *not*
+a fundamental NCC limit. The correlator upsamples its correlation
 spectrum to 1/128 px and reaches that accuracy on raw intensity -- a zero shift
 between two identical frames recovers exactly ``(0, 0)``. The bias appears only on
 the **gradient-magnitude** pass, which the disc's ``auto`` mode selects for a
