@@ -1080,10 +1080,41 @@ failing above ~50 deg phase to sub-pixel through 160 deg (e.g. ~0.05 px at
 (moderate) and `planted_offset_blob_crescent` (120 deg, disc-spurious)
 scenes plus blob-only tests guard it.
 
-**Remaining:** per-technique coverage for `BodyLimbNav`, `RingEdgeNav`,
-and the star techniques -- each needs scenes that route to that technique
-(and, for stars, a simulated stars NavModel, which does not exist yet)
-plus planted-rotation recovery.
+Star coverage is now in.  `NavModelStarsSimulated` (a thin subclass of
+`NavModelStars` registered for simulated obs) sources its star list from the
+sim renderer's output (`obs.sim_star_list`, the unshifted `MutableStar`
+records) and reuses the catalog-driven model's STAR feature emission, CRLB
+covariance, reliability, and annotations unchanged -- so a simulated star
+field is navigated by exactly the same `StarFieldFromCatalogNav` /
+`StarUniqueMatchNav` / `StarRefineNav` code a real frame is.  Closing this
+required a half-pixel rendering fix that is general to real-image fidelity:
+`render_stars` passed `psfmodel.eval_rect` the sub-pixel fraction directly,
+but `eval_rect` measures its offset from the pixel's lower edge (`offset=0`
+centres the PSF half a pixel low), whereas the detection centroid and the
+star NavModel's predicted position both use the pixel-centre convention.  The
+rendered star therefore sat half a pixel from where the model predicted it,
+and every star navigation carried a constant -0.5 px bias.  Adding 0.5 to the
+eval offset renders the star centroid exactly at its predicted `(v, u)`, so a
+star the model predicts at `(v, u)` lands there in the image and a technique
+recovers the planted offset without bias (recovery is now ~0.02-0.05 px on a
+clean coiss_nac field).  The `planted_offset_star_field` scene (a six-star
+field) plus full-ensemble recovery tests guard it: the field routes through
+`StarFieldFromCatalogNav`'s RANSAC pattern match, `StarUniqueMatchNav`'s
+two-star path, and `StarRefineNav`, and the fused offset is recovered stably.
+A lone-star scene was deliberately not added: a single star is correctly a
+low-confidence (rank-low) fix, so its full-ensemble *status* sits on the
+success/fail boundary and flips under parallel BLAS jitter -- which would flake
+every full-ensemble layer (the generic navigate assertion, the recovery
+assertion, and the T2 baseline, whose recorded status would be marginal).  The
+one-star path is therefore left to a later non-status-gated harness.
+
+**Remaining:** the `StarUniqueMatchNav` one-star path (single dominant star)
+and `StarRefineNav`'s prior-refinement, each of which needs a technique-pinned
+assertion rather than a full-ensemble one; per-technique coverage for
+`BodyLimbNav` and `RingEdgeNav`; and planted-rotation recovery (the renderer
+applies the planted offset as a pure translation today; rotating the star field
+and body pose about the boresight to exercise `StarFieldFromCatalogNav`'s
+rotation fit and `planted_rotation_deg` is the next increment).
 
 **Scope:**
 

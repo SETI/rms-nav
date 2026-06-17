@@ -7,7 +7,7 @@ ObsSim, navigate it, and assert success plus offset recovery within tolerance --
 true invariant (correct by construction), so unlike a baseline it never needs
 re-blessing.  Everything is in-process, so this runs in the default suite.
 
-Scenes split into two kinds:
+Scenes split into three kinds:
 
 * **Disc scenes** navigate by ``BodyDiscCorrelateNav`` and the *full ensemble*
   recovers the planted offset stably, so they exercise the generic full-ensemble
@@ -21,6 +21,13 @@ Scenes split into two kinds:
   but its recovered offset sits near the weak fallback's limit and jitters
   across processes under parallel BLAS load, so the *tolerance* assertion is made
   blob-only rather than on the full ensemble.
+* **Star scenes** (``planted_offset_star*``) carry no body or rings, so the
+  ``STAR`` features ``NavModelStarsSimulated`` emits are the only signal and the
+  star techniques (``StarFieldFromCatalogNav``, ``StarUniqueMatchNav``,
+  ``StarRefineNav``) are the load-bearing ones.  The recovery is asserted on the
+  full ensemble: with no body there is no disc-spurious fallback to jitter, and
+  the recovered offset sits a few hundredths of a pixel from truth, far from the
+  tolerance bound.
 """
 
 from pathlib import Path
@@ -46,10 +53,18 @@ _INVARIANT_IDS = [p.stem for p in _INVARIANT_PATHS]
 # blob-only because the full ensemble falls to the weak blob fallback and its
 # recovered offset jitters across processes near the technique's limit.
 _BLOB_STEM_PREFIX = 'planted_offset_blob'
-_DISC_PATHS = [p for p in _INVARIANT_PATHS if not p.stem.startswith(_BLOB_STEM_PREFIX)]
-_DISC_IDS = [p.stem for p in _DISC_PATHS]
+# Star-designed scenes carry no body/rings; the star techniques are load-bearing
+# and the full ensemble recovers stably.
+_STAR_STEM_PREFIX = 'planted_offset_star'
 _BLOB_PATHS = [p for p in _INVARIANT_PATHS if p.stem.startswith(_BLOB_STEM_PREFIX)]
 _BLOB_IDS = [p.stem for p in _BLOB_PATHS]
+_STAR_PATHS = [p for p in _INVARIANT_PATHS if p.stem.startswith(_STAR_STEM_PREFIX)]
+_STAR_IDS = [p.stem for p in _STAR_PATHS]
+# Disc scenes are everything that is neither blob- nor star-designed.
+_DISC_PATHS = [
+    p for p in _INVARIANT_PATHS if not p.stem.startswith((_BLOB_STEM_PREFIX, _STAR_STEM_PREFIX))
+]
+_DISC_IDS = [p.stem for p in _DISC_PATHS]
 
 
 def _navigate(scene: SimScene, *, only_techniques: str = '*') -> Any:
@@ -68,6 +83,11 @@ def test_there_are_invariant_scenes() -> None:
 def test_there_are_blob_scenes() -> None:
     """At least one blob-designed scene exists for the blob-only coverage."""
     assert _BLOB_PATHS
+
+
+def test_there_are_star_scenes() -> None:
+    """At least one star-designed scene exists for the star coverage."""
+    assert _STAR_PATHS
 
 
 @pytest.mark.parametrize('path', _INVARIANT_PATHS, ids=_INVARIANT_IDS)
@@ -122,5 +142,31 @@ def test_blob_alone_recovers_planted_u(path: Path) -> None:
     """BodyBlobNav alone recovers each blob scene's planted u offset."""
     scene = load_sim_scene(path)
     result = _navigate(scene, only_techniques='BodyBlobNav')
+    assert result.offset_px is not None
+    assert abs(result.offset_px[1] - scene.ground_truth.planted_offset_du_px) < _OFFSET_TOLERANCE_PX
+
+
+@pytest.mark.parametrize('path', _STAR_PATHS, ids=_STAR_IDS)
+def test_star_scene_recovers_planted_v(path: Path) -> None:
+    """Each star scene recovers its planted v offset within tolerance.
+
+    Guards the ``STAR`` feature emission from ``NavModelStarsSimulated`` and the
+    half-pixel-correct star rendering: without the eval-offset correction the
+    rendered star centroid sits half a pixel from the model's prediction and the
+    recovered offset carries a constant bias.  With no body in the frame the
+    star techniques are the only contributors, so this is a direct star-path
+    invariant on the full ensemble.
+    """
+    scene = load_sim_scene(path)
+    result = _navigate(scene)
+    assert result.offset_px is not None
+    assert abs(result.offset_px[0] - scene.ground_truth.planted_offset_dv_px) < _OFFSET_TOLERANCE_PX
+
+
+@pytest.mark.parametrize('path', _STAR_PATHS, ids=_STAR_IDS)
+def test_star_scene_recovers_planted_u(path: Path) -> None:
+    """Each star scene recovers its planted u offset within tolerance."""
+    scene = load_sim_scene(path)
+    result = _navigate(scene)
     assert result.offset_px is not None
     assert abs(result.offset_px[1] - scene.ground_truth.planted_offset_du_px) < _OFFSET_TOLERANCE_PX

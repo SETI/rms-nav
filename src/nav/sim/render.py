@@ -106,10 +106,19 @@ def _render_stars_cached(
             )
             continue
 
-        # Evaluate PSF with scale=1.0 first to get unnormalized PSF
+        # Evaluate PSF with scale=1.0 first to get unnormalized PSF.
+        #
+        # ``eval_rect`` centres the PSF half a pixel low for ``offset=0`` (its
+        # offset is measured from the pixel's lower edge, so ``offset=0.5`` lands
+        # on the pixel centre).  The navigator's detection centroid and the star
+        # NavModel's predicted position both use the pixel-centre convention
+        # (integer index ``i`` *is* coordinate ``i``).  Adding 0.5 to the eval
+        # offset renders the star centroid at exactly ``star.v + offset_v``, so a
+        # star the model predicts at ``(v, u)`` lands there in the image and a
+        # technique recovers the planted offset without a half-pixel bias.
         star_psf = psf.eval_rect(
             (psf_size_half_v * 2 + 1, psf_size_half_u * 2 + 1),
-            offset=(v_frac, u_frac),
+            offset=(v_frac + 0.5, u_frac + 0.5),
             scale=1.0,
             movement=(star.move_v, star.move_u),
             movement_granularity=move_gran,
