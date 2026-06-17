@@ -47,7 +47,7 @@ Consolidate all tool configuration into `pyproject.toml` where supported:
 | pytest | `[tool.pytest.ini_options]` |
 | coverage | `[tool.coverage.run]`, `[tool.coverage.report]` |
 | mypy | `[tool.mypy]`, `[[tool.mypy.overrides]]` |
-| ruff | `[tool.ruff]`, `[tool.ruff.lint]` — use explicit `select = [...]` for E, F, W, I, UP, B, SIM, C4, A, N, PT, RUF (see python_best_practices) |
+| ruff | `[tool.ruff]`, `[tool.ruff.lint]` — use explicit `select = [...]` for E, F, W, I, UP, B, SIM, C4, A, N, PT, RUF (see python) |
 | setuptools_scm | `[tool.setuptools_scm]` |
 
 Do NOT create separate config files (`.coveragerc`, `.mypy.ini`, `.flake8`, `setup.cfg`) when the tool supports `pyproject.toml`.

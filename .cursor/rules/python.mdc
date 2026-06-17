@@ -89,39 +89,10 @@ Apply these rules to ALL new and modified Python code. This project is a Python 
 
 ## 7. Testing
 
-### Test-driven development (TDD)
-
-- Use **test-driven development**: write tests first, then implement. Red → green → refactor.
-- Write tests BEFORE implementation based on stated requirements. If requirements are unclear, ask.
-- Run tests to confirm they fail, then implement, re-run, and fix until green.
-- After implementation, review tests to strengthen coverage.
-
-### Framework
-
-- ALWAYS include type annotations on test functions.
-- ALWAYS use `pytest` with `pytest-cov`.
-- ALWAYS use `pytest` with `pytest-xdist` and run tests with "-n auto".
-- ALWAYS write tests to be independent so that tests can be run in parallel.
-
-### Coverage and correctness
-
-- Target at least **90%** line coverage measured over the entire test suite (not a subset). Skipping hard-to-hit exception paths is acceptable.
-- NEVER write tests whose sole purpose is exercising code paths without asserting correctness.
-- Each `assert` MUST test exactly one condition (no `and` in assertions).
-- ALWAYS test for precise expected values, not ranges or existence checks. If the expected value is only known after implementation, update the test accordingly.
-- When multiple tests call the same function, use distinct inputs to maximize branch coverage, including edge cases and boundary values.
-- If two tests invoke the same code path but assert on different parts of the result, combine them into one test.
-- When testing exceptions, ALWAYS use `pytest.raises` as a context manager and assert on the exception **message content**, not just the exception type.
-
-### Test hygiene
-
-- If a test mutates a global, use a fixture or `try`/`finally` to restore the original value.
-- NEVER write a test that passes by ignoring an incorrect result or swallowing an exception. If the code is wrong, leave the failing test and explain why.
-- NEVER include line numbers, verbose rationale, or modification history in test comments. Keep comments to short (1-2 sentence) summaries useful for future maintainers.
-
-### Debugging
-
-- NEVER guess at bug causes. Use logic, stack traces, and targeted logging. If stuck in a fix loop, revert and re-approach from first principles. When necessary, ask for help.
+- All testing standards live in `python_testing` (pytest, fixtures,
+  parametrization, coverage targets, TDD, and test hygiene). Tests are
+  first-class code and MUST follow the naming, typing, docstring, and DRY rules
+  in this file as well.
 
 ## 8. Ruff Rule Categories (Default Set)
 

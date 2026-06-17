@@ -68,8 +68,9 @@ file object opened by a third-party API, etc.), follow the patterns below.
 
 ### 3a. Reading a file with normal Python I/O
 
-ALWAYS use `fcpath.open('r')` (or `'rb'`) inside a `with` block. This streams the
-remote file directly without staging a local copy.
+ALWAYS use `fcpath.open('r')` (or `'rb'`) inside a `with` block. This does store a
+local copy but follows Python best practices and automatically closes the file on
+context exit.
 
 ```python
 fcpath = FCPath(path)
