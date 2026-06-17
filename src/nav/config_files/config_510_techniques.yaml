@@ -503,6 +503,37 @@ techniques:
       # does not.  Default 0.0 is a no-op pending an integration-library
       # calibration sweep.
       model_error_floor_px: 0.0
+      # PSF-fit refinement of matched inliers.  The brightness-weighted
+      # moment centroid that pins each detection is unbiased but only
+      # noise-limited; for faint stars its scatter dominates the field
+      # offset.  After the matcher fixes the correspondences, each inlier
+      # detection is re-centroided by a true PSF fit
+      # (``obs.star_psf().find_position``) against the instrument's
+      # modelled point-spread function, which is the minimum-variance
+      # estimator and roughly halves-to-quarters the per-star error in
+      # the photon-noise-limited regime.  An undersampled PSF fit carries
+      # a small sub-pixel-phase bias floor (~0.08 px) that only matters
+      # once a star is bright enough for the moment's noise to fall below
+      # it, so the refinement is applied per star only below an
+      # integrated-SNR ceiling; brighter detections keep the moment.
+      # 1 enables the refinement; 0 keeps the moment centroid everywhere.
+      psf_refine_enabled: 1
+      # Square box side (px, odd) for the PSF fit and the integrated-SNR
+      # estimate around each inlier.
+      psf_refine_box_px: 11
+      # Maximum search distance (px) from the moment centroid for the
+      # PSF fit; the moment is already within a pixel of truth.
+      psf_refine_search_limit_px: 2.0
+      # Integrated-SNR ceiling: a detection whose box SNR
+      # (total net signal / sqrt(signal + n_pix * noise_sigma**2))
+      # exceeds this keeps its moment centroid, because above the
+      # moment/PSF crossover the moment's noise is already below the PSF
+      # bias floor.  Calibrated to the field-level crossover on the sim
+      # star fields (~30 for a nominal background; the optimum drifts to
+      # ~16-21 under elevated read noise or a stray-light gradient, so
+      # this is set for the nominal case -- see the star-field
+      # centroiding section of the simulator performance report).
+      psf_refine_snr_max: 30.0
 
   RingAnnulusNav:
     alpha0: -2.0

@@ -63,6 +63,40 @@ counts how many predicted positions land within ``inlier_tolerance_px`` of a det
 The transform with the most inliers wins; below ``pattern_match_min_inliers`` the technique
 reports spurious.
 
+PSF-fit inlier refinement
+-------------------------
+
+The detection centroid that pins each source is a brightness-weighted moment: unbiased, but
+only noise-limited, so on a faint field its per-star scatter dominates the field offset.
+Once the inlier correspondences are fixed, each matched inlier is re-centroided to drive that
+scatter down. Two estimators are available per star and they trade off with brightness:
+
+- The **brightness-weighted moment** is unbiased; its error falls roughly as
+  :math:`1/\mathrm{SNR}` as the star brightens.
+- A **maximum-likelihood PSF fit** (``obs.star_psf().find_position`` against the instrument's
+  modelled point-spread function) reaches the minimum variance and so wins decisively when
+  the star is faint. An undersampled PSF, however, carries a fixed sub-pixel-phase bias floor
+  (~0.08 px for the COISS NAC star PSF, sigma ~0.54 px) that does not improve with brightness.
+
+The two error curves cross near an integrated SNR of ~30 at the field level (the per-star
+crossover is a little higher, ~40, but the field fit averages the moment's noise down faster
+than the PSF fit's partly-correlated bias). The technique therefore refines a matched inlier
+with the PSF fit only while its box SNR is below the configurable ceiling
+``psf_refine_snr_max`` (default 30), and keeps the moment above it. The box SNR is
+:math:`\sum (\text{box} - \text{median}) / \sqrt{\text{signal} + n_{\text{pix}}\,\sigma^{2}}`
+over the fit box. The PSF fit reports its position in the ``eval_rect`` convention (offset
+measured from a pixel's lower edge), so the technique subtracts the half-pixel to land in the
+pixel-centre convention shared by the detection moment and the catalog prediction. Any inlier
+whose fit fails (too close to the image edge, too few good pixels, no convergence) silently
+falls back to its moment centroid. The whole step is gated by ``psf_refine_enabled`` and the
+obs supplying a ``star_psf()``; without either it is a no-op and the moment centroids stand.
+
+The observation that drives this is brightness-dependent: a dim field (vmag 3-4) improves its
+recovered-offset median from ~0.052 px (moment-only) to ~0.023 px, while a bright field
+(vmag 0-0.8) recovers to ~0.005 px on the moment alone -- where forcing the PSF fit would
+instead *raise* the error to ~0.056 px by exposing the bias floor. See the simulator
+performance report's star-field centroiding section for the dim-vs-bright sweep.
+
 Similarity-transform refit
 --------------------------
 
@@ -151,6 +185,18 @@ in ``src/nav/config_files/config_510_techniques.yaml``.
   :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` once it crosses
   this fraction of the per-image
   :attr:`~nav.nav_orchestrator.nav_context.NavContext.max_rotation_deg` cap.
+- ``psf_refine_enabled`` — int flag, default ``1``. ``1`` enables the PSF-fit re-centroiding
+  of matched inliers; ``0`` keeps the brightness-weighted moment centroid everywhere.
+- ``psf_refine_box_px`` — int, default ``11`` px (odd). Square box side for the PSF fit and
+  the integrated-SNR estimate around each inlier.
+- ``psf_refine_search_limit_px`` — float, default ``2.0`` px. Maximum search distance from
+  the moment centroid for the PSF fit; the moment is already within a pixel of truth.
+- ``psf_refine_snr_max`` — float, default ``30.0`` (dimensionless). Integrated-SNR ceiling
+  for the moment/PSF crossover: an inlier whose box SNR exceeds this keeps its moment
+  centroid (its noise has already fallen below the PSF fit's sub-pixel-phase bias floor);
+  fainter inliers are refined with the PSF fit. The default is tuned to the field-level
+  crossover on a nominal background; elevated read noise or a stray-light gradient pulls the
+  optimum down toward ~16-21 (see the simulator performance report).
 
 Per-instrument overrides
 ------------------------
@@ -264,10 +310,15 @@ Call path traced through
    - **Below min_inliers.**  Return a spurious zero-confidence result with the diagnostic
      fields populated for the JSON sidecar.
 
-5. Run a weighted Procrustes / Kabsch fit on the inlier correspondences via
+5. Refine the inlier detection positions: for each matched inlier below the
+   ``psf_refine_snr_max`` integrated-SNR ceiling, replace its moment centroid with a
+   maximum-likelihood PSF fit (``obs.star_psf().find_position``, half-pixel-corrected);
+   brighter inliers and failed fits keep the moment. Skipped entirely when
+   ``psf_refine_enabled`` is ``0`` or the obs exposes no ``star_psf()``.
+6. Run a weighted Procrustes / Kabsch fit on the (refined) inlier correspondences via
    ``similarity_transform_fit``. The fit returns the rotation and translation; the
    translation is the reported offset.
-6. Result-shape branches on
+7. Result-shape branches on
    :attr:`~nav.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` and the inlier
    count:
 
@@ -287,8 +338,8 @@ Call path traced through
      :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.rotation_rad` is ``0.0``
      and the sigma is the rotation-unobservable sentinel.
 
-7. Apply the at-edge tests against the search-window axis bounds and the rotation cap.
-8. Build a :class:`~nav.nav_technique.diagnostics.StarFieldDiagnostics`, evaluate the
+8. Apply the at-edge tests against the search-window axis bounds and the rotation cap.
+9. Build a :class:`~nav.nav_technique.diagnostics.StarFieldDiagnostics`, evaluate the
    confidence spec via :func:`~nav.nav_technique.confidence.evaluate_sigmoid_combination`,
    log the breakdown via
    :func:`~nav.nav_technique.nav_technique.log_confidence_breakdown`, and assemble the

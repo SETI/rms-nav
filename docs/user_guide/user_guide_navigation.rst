@@ -390,6 +390,14 @@ techniques are:
   :class:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav`,
   :class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav`.
 
+The star field matcher re-centroids each matched star with a point-spread-function fit
+when the star is faint, and keeps the simpler brightness-weighted centroid when the star
+is bright enough that its noise has already fallen below the PSF fit's residual bias.
+This makes the star field the most accurate technique on a well-exposed field. The
+brightness at which it switches is the configurable
+``techniques.StarFieldFromCatalogNav.tuning.psf_refine_snr_max`` knob in
+``config_510_techniques.yaml`` (set the whole step off with ``psf_refine_enabled: 0``).
+
 :class:`~nav.nav_technique.nav_technique_manual.NavTechniqueManual` is
 the interactive driver and is not part of the autonomous registry; it
 cannot be invoked by ``--nav-techniques``.

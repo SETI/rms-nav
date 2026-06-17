@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import math
+from dataclasses import replace
 
 import numpy as np
 import pytest
+from psfmodel import GaussianPSF
 from tests.nav.nav_technique.conftest import (
     DrawGaussianStarFactory,
     NavContextFactory,
@@ -408,6 +410,111 @@ def test_star_field_min_inliers_less_than_three_raises() -> None:
             technique_class()
     finally:
         technique_class.tuning = original_tuning
+
+
+# ---------------------------------------------------------------------------
+# PSF-fit inlier refinement.
+# ---------------------------------------------------------------------------
+
+
+class _PSFProviderObs:
+    """Obs stand-in exposing only ``star_psf`` (satisfies ``_StarPSFProvider``)."""
+
+    def __init__(self, sigma: float) -> None:
+        self._sigma = sigma
+
+    def star_psf(self) -> GaussianPSF:
+        return GaussianPSF(sigma=self._sigma)
+
+
+def _render_eval_rect_star(
+    image: np.ndarray, center_vu: tuple[float, float], *, peak_dn: float, sigma: float
+) -> None:
+    """Stamp a pixel-integrated Gaussian whose centroid lands at pixel-centre ``center``.
+
+    Uses the same ``eval_rect(offset + 0.5)`` convention as the production
+    renderer, so a ``find_position`` fit (which reports the ``eval_rect``
+    position) recovers ``center`` after the technique's half-pixel correction.
+    """
+    psf = GaussianPSF(sigma=sigma)
+    cv, cu = center_vu
+    v_int, u_int = int(cv), int(cu)
+    half = 8
+    stamp = psf.eval_rect(
+        (half * 2 + 1, half * 2 + 1),
+        offset=(cv - v_int + 0.5, cu - u_int + 0.5),
+        scale=1.0,
+        movement=(0.0, 0.0),
+        movement_granularity=1.0,
+    )
+    stamp = stamp / float(stamp.max()) * peak_dn
+    image[v_int - half : v_int + half + 1, u_int - half : u_int + half + 1] += stamp
+
+
+def test_box_snr_zero_for_flat_image() -> None:
+    """A flat box has no net signal, so its integrated SNR is zero."""
+    image = np.full((40, 40), 17.0, dtype=np.float64)
+    assert StarFieldFromCatalogNav._box_snr(image, 20, 20, 5, 4.0) == pytest.approx(0.0)
+
+
+def test_box_snr_increases_with_source_brightness() -> None:
+    """A brighter source yields a larger integrated SNR in the same box."""
+    faint = np.full((40, 40), 20.0, dtype=np.float64)
+    _render_eval_rect_star(faint, (20.0, 20.0), peak_dn=100.0, sigma=1.0)
+    bright = np.full((40, 40), 20.0, dtype=np.float64)
+    _render_eval_rect_star(bright, (20.0, 20.0), peak_dn=1000.0, sigma=1.0)
+    snr_faint = StarFieldFromCatalogNav._box_snr(faint, 20, 20, 5, 4.0)
+    snr_bright = StarFieldFromCatalogNav._box_snr(bright, 20, 20, 5, 4.0)
+    assert snr_bright > snr_faint
+
+
+def test_psf_refine_corrects_seeded_centroid_error(
+    make_nav_context: NavContextFactory,
+) -> None:
+    """PSF refinement pulls a deliberately-offset centroid back onto the star.
+
+    Exercises the ``find_position`` path and the half-pixel ``eval_rect``
+    convention: a noiseless star is planted at a sub-pixel centre, the input
+    centroid is seeded 0.3-0.4 px away, and the refined position must land back
+    on the true centre.
+    """
+    true_center = (30.37, 30.62)
+    image = np.full((60, 60), 20.0, dtype=np.float64)
+    _render_eval_rect_star(image, true_center, peak_dn=150.0, sigma=1.0)
+    context = replace(make_nav_context(image), obs=_PSFProviderObs(1.0))
+    technique = StarFieldFromCatalogNav()
+    technique._psf_refine_snr_max = 1.0e18  # force refinement regardless of SNR
+    seeded = np.array([[true_center[0] + 0.4, true_center[1] - 0.3]], dtype=np.float64)
+    refined = technique._psf_refine_positions(seeded, context)
+    assert refined[0, 0] == pytest.approx(true_center[0], abs=0.05)
+    assert refined[0, 1] == pytest.approx(true_center[1], abs=0.05)
+
+
+def test_psf_refine_keeps_moment_for_bright_source(
+    make_nav_context: NavContextFactory,
+) -> None:
+    """A source above the SNR ceiling keeps its moment centroid unchanged."""
+    image = np.full((60, 60), 20.0, dtype=np.float64)
+    _render_eval_rect_star(image, (30.4, 30.6), peak_dn=150.0, sigma=1.0)
+    context = replace(make_nav_context(image), obs=_PSFProviderObs(1.0))
+    technique = StarFieldFromCatalogNav()
+    technique._psf_refine_snr_max = 0.0  # every detection counts as "bright"
+    seeded = np.array([[30.8, 30.3]], dtype=np.float64)
+    refined = technique._psf_refine_positions(seeded, context)
+    assert np.array_equal(refined, seeded)
+
+
+def test_psf_refine_noop_when_obs_lacks_star_psf(
+    make_nav_context: NavContextFactory,
+) -> None:
+    """Refinement is a no-op when the observation cannot supply a star PSF."""
+    image = np.full((60, 60), 20.0, dtype=np.float64)
+    _render_eval_rect_star(image, (30.4, 30.6), peak_dn=150.0, sigma=1.0)
+    context = make_nav_context(image)  # obs is FakeObs, no star_psf method
+    technique = StarFieldFromCatalogNav()
+    seeded = np.array([[30.8, 30.3]], dtype=np.float64)
+    refined = technique._psf_refine_positions(seeded, context)
+    assert np.array_equal(refined, seeded)
 
 
 # ---------------------------------------------------------------------------

@@ -430,11 +430,16 @@ swept across the dense sub-pixel set and the wide range described under
      - 0.006
      - 0.011
      - 0.006
-   * - StarFieldFromCatalogNav
-     - 0.032
+   * - StarFieldFromCatalogNav (dim field)
+     - 0.007
+     - 0.023
+     - 0.060
      - 0.052
-     - 0.076
-     - 0.052
+   * - StarFieldFromCatalogNav (bright field)
+     - 0.001
+     - 0.005
+     - 0.011
+     - --
 
 All four point-feature / correlation techniques are now quantization-free; only
 the limb fit retains a sub-pixel bias:
@@ -460,8 +465,14 @@ the limb fit retains a sub-pixel bias:
 - **The star field is pinned here**, so its sub-pixel rows below ~1 px are absent:
   the field matcher alone cannot separate a sub-pixel translation of the whole
   field from noise and reports spurious (the two-star path, present in the full
-  ensemble, recovers them -- see the planted-offset star invariant). Above ~1 px it
-  recovers to ~0.05 px.
+  ensemble, recovers them -- see the planted-offset star invariant). Above ~1 px the
+  dim field recovers to ~0.02 px (median 0.023 over the dense sweep) and the bright
+  field to ~0.005 px -- the most accurate of any technique. The per-star centroid
+  drives this: each matched inlier is re-centroided with a maximum-likelihood PSF
+  fit when it is faint, and kept on its brightness-weighted moment when it is bright
+  enough that the moment's noise has already fallen below the PSF fit's
+  sub-pixel-phase bias floor. The dim/bright split and that crossover are detailed
+  below.
 
 The wide-range sweep confirms each technique recovers across the navigable range,
 and exposes the blob's capture limit:
@@ -491,6 +502,80 @@ characterization, and the fix re-blessed every disc-navigated baseline toward it
 planted offset (e.g. ``two_moons`` from a 0.36 px recovery error at zero offset to
 exactly ``(0, 0)``). The fix refines the final sub-pixel offset on raw intensity
 rather than gradient magnitude.
+
+Star-field centroiding: dim vs bright and the PSF-refine crossover
+==================================================================
+
+The star field's accuracy is set by how precisely each matched star is centred.
+Two sweeps isolate the two regimes on the same six-star geometry and the same
+planted offset, varying only the stars' brightness: ``star_offset_fine`` plants a
+dim field (vmag 3-4, ~100-150 DN net peak) and ``star_offset_fine_bright`` a bright
+field (vmag 0-0.8, ~1000-2000 DN net peak, below the 4095 DN full well).
+
+.. figure:: _figures/star_regime_accuracy.png
+   :width: 100%
+   :alt: Star-field sub-pixel accuracy for dim vs bright fields.
+
+   Recovered-offset error (log scale) vs planted offset for the dim and bright
+   star fields. The dim field sits near the PSF-refined error floor (~0.02 px);
+   the bright field reaches ~0.005 px -- below every other technique.
+
+Two estimators are available per star, and they trade off with brightness:
+
+- The **brightness-weighted moment centroid** is unbiased but only noise-limited,
+  so its error falls as the star brightens (roughly as 1/SNR).
+- A **maximum-likelihood PSF fit** (``obs.star_psf().find_position`` against the
+  instrument's modelled point-spread function) reaches the minimum variance, so it
+  wins decisively when the star is faint -- but an undersampled PSF (the COISS NAC
+  star PSF is sigma ~0.54 px) carries a fixed sub-pixel-phase bias floor of
+  ~0.08 px that does not improve with brightness.
+
+The two curves cross near an integrated SNR of ~30 (field level): below it the PSF
+fit is the lower-error estimator, above it the moment is. The technique therefore
+refines each matched inlier with the PSF fit only while its box SNR is under the
+configurable ceiling ``techniques.StarFieldFromCatalogNav.tuning.psf_refine_snr_max``
+(default 30), and keeps the moment above it. The payoff is visible at both ends: the
+dim field improves from a median 0.052 px (moment-only) to 0.023 px, and the bright
+field reaches 0.005 px -- where forcing the PSF fit instead would *raise* it to
+~0.056 px by exposing the bias floor.
+
+A finer characterization sweeps a uniform-brightness field across a 20x integrated-SNR
+range and overlays the three centroiding modes -- moment-only, PSF-everywhere, and the
+shipped SNR-adaptive choice -- under three backgrounds: clean, elevated read noise, and a
+stray-light gradient. (Run by
+``python -m tests.integration.star_snr_characterization``; not part of pytest.)
+
+.. figure:: _figures/star_snr_clean.png
+   :width: 100%
+   :alt: Star-field centroiding error vs SNR, clean background.
+
+   Clean background. The moment (blue) is noise-limited and improves without bound as
+   the field brightens; the PSF fit (orange) wins at low SNR but plateaus at its
+   ~0.05-0.07 px sub-pixel-phase bias floor. The shipped adaptive choice (green) rides
+   the lower envelope of the two -- PSF below the SNR ceiling, moment above it.
+
+.. figure:: _figures/star_snr_highnoise.png
+   :width: 100%
+   :alt: Star-field centroiding error vs SNR, elevated read noise.
+
+   Elevated read noise (read_noise_dn 20). The crossover slides down to an integrated
+   SNR of ~16, so a fixed box-SNR ceiling is not perfectly background-invariant; the
+   default 30 stays close to the envelope but a noisier scene benefits from a lower
+   ceiling.
+
+.. figure:: _figures/star_snr_gradient.png
+   :width: 100%
+   :alt: Star-field centroiding error vs SNR, stray-light gradient.
+
+   Stray-light linear gradient. The crossover sits near SNR ~21; the per-star PSF fit
+   subtracts a local background plane, so the gradient barely shifts the curves.
+
+The crossover is configurable precisely because it drifts with the background (~16 under
+heavy read noise, ~21 under a gradient, ~30 clean); the default is set for the nominal
+case. Every regime was verified entirely on simulated images, since a real image's true
+offset is unknown; the moment-vs-PSF choice is unit-tested directly, the dim and bright
+sweeps are the broad-coverage characterization, and the SNR sweep above is the
+estimator-vs-estimator comparison.
 
 Camera-roll sensitivity and roll / translation separability
 ============================================================

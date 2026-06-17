@@ -65,6 +65,37 @@ def _offset_figure(which: str, title: str, out_name: str) -> None:
     plt.close(fig)
 
 
+def _star_regime_figure() -> None:
+    """Overlay the dim- and bright-star field sweeps to show the SNR crossover.
+
+    The two sweeps share geometry and planted offset; only the stars' brightness
+    differs.  The dim field rides the PSF-refined error floor; the bright field
+    keeps the moment centroid (above the configured SNR ceiling) and reaches a
+    far smaller error -- the visible payoff of the per-star moment/PSF choice.
+    """
+    dim = _load('star_offset_fine')
+    bright = _load('star_offset_fine_bright')
+    if not dim and not bright:
+        return
+    fig, ax = plt.subplots(figsize=(8.0, 5.0))
+    for rows, marker, label in [
+        (dim, 'v', 'dim field (PSF-refined, vmag 3-4)'),
+        (bright, 'o', 'bright field (moment, vmag 0-0.8)'),
+    ]:
+        xs, ys = _xy(rows, 'offset_error_px')
+        if xs:
+            ax.plot(xs, ys, marker=marker, ms=4, lw=1.2, label=label)
+    ax.set_yscale('log')
+    ax.set_xlabel('planted offset (px)')
+    ax.set_ylabel('recovered-offset error (px, log scale)')
+    ax.set_title('Star-field sub-pixel accuracy: dim vs bright (PSF-refine crossover)')
+    ax.grid(True, which='both', ls=':', alpha=0.5)
+    ax.legend(fontsize=8, loc='best')
+    fig.tight_layout()
+    fig.savefig(_FIGURES_ROOT / 'star_regime_accuracy.png', dpi=110)
+    plt.close(fig)
+
+
 def _rotation_figure() -> None:
     """Plot recovered-roll error vs planted roll for the star-field sweep."""
     rows = _load('star_rotation')
@@ -95,6 +126,7 @@ def generate_plots() -> list[Path]:
         'Wide-range offset accuracy by technique (to the navigable ceiling)',
         'offset_accuracy_wide.png',
     )
+    _star_regime_figure()
     _rotation_figure()
     return sorted(_FIGURES_ROOT.glob('*.png'))
 
