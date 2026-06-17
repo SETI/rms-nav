@@ -2703,9 +2703,9 @@ class CreateSimulatedImageModel(QMainWindow):
             'rings': list(params.get('rings', [])),
         }
         # Preserve catalog-only blocks the General tab does not yet edit
-        # (noise model, stray light, exposure) so loading a scene spec
-        # round-trips them instead of silently dropping them.
-        for passthrough_key in ('noise', 'stray_light', 'exposure_sec'):
+        # (noise model, stray light, exposure, instrument-config overrides) so
+        # loading a scene spec round-trips them instead of silently dropping them.
+        for passthrough_key in ('noise', 'stray_light', 'exposure_sec', 'instrument_config'):
             if passthrough_key in params:
                 self.sim_params[passthrough_key] = params[passthrough_key]
         # Sync the shade-solid-rings checkbox

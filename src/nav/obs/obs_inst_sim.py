@@ -108,7 +108,9 @@ class ObsSim(ObsSnapshotInst):
         # generic sim block when no instrument is specified), so the
         # orchestrator sees the right units / noise / saturation settings.
         sim_block = config.category('sim')
-        inst_config = resolve_sim_inst_config(config, sim_params.get('instrument'))
+        inst_config = resolve_sim_inst_config(
+            config, sim_params.get('instrument'), sim_params.get('instrument_config')
+        )
         if extfov_margin_vu is None:
             extfov_margin_vu = resolve_extfov_margin(inst_config, sim_block, size_v)
 

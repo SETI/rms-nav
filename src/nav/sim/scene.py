@@ -75,6 +75,7 @@ class SimScene:
     stars: dict[str, Any] | None
     noise: dict[str, Any] | None
     stray_light: dict[str, Any] | None
+    instrument_config: dict[str, Any] | None = None
     fit_camera_rotation: bool | None = None
     ground_truth: GroundTruth = field(default_factory=GroundTruth)
 
@@ -113,6 +114,8 @@ class SimScene:
                 params['background_stars_num'] = int(self.stars['background_count'])
             if 'list' in self.stars:
                 params['stars'] = [dict(s) for s in self.stars['list']]
+        if self.instrument_config is not None:
+            params['instrument_config'] = dict(self.instrument_config)
         if self.fit_camera_rotation is not None:
             params['fit_camera_rotation'] = self.fit_camera_rotation
         return params
@@ -157,6 +160,8 @@ def scene_dict_from_sim_params(sim_params: dict[str, Any], *, scene_name: str) -
         scene['noise'] = dict(sim_params['noise'])
     if sim_params.get('stray_light') is not None:
         scene['stray_light'] = dict(sim_params['stray_light'])
+    if sim_params.get('instrument_config') is not None:
+        scene['instrument_config'] = dict(sim_params['instrument_config'])
     if sim_params.get('fit_camera_rotation') is not None:
         scene['fit_camera_rotation'] = bool(sim_params['fit_camera_rotation'])
     offset_v = float(sim_params.get('offset_v', 0.0))
@@ -240,6 +245,9 @@ def _validate(raw: dict[str, Any], *, path: Path) -> SimScene:
     stars = _optional_mapping(raw.get('stars'), 'stars', path=path)
     noise = _optional_mapping(raw.get('noise'), 'noise', path=path)
     stray_light = _optional_mapping(raw.get('stray_light'), 'stray_light', path=path)
+    instrument_config = _optional_mapping(
+        raw.get('instrument_config'), 'instrument_config', path=path
+    )
     fit_camera_rotation = raw.get('fit_camera_rotation')
     if fit_camera_rotation is not None and not isinstance(fit_camera_rotation, bool):
         raise SimSceneValidationError(f'{path}: fit_camera_rotation must be a boolean when present')
@@ -259,6 +267,7 @@ def _validate(raw: dict[str, Any], *, path: Path) -> SimScene:
         stars=stars,
         noise=noise,
         stray_light=stray_light,
+        instrument_config=instrument_config,
         fit_camera_rotation=fit_camera_rotation,
         ground_truth=ground_truth,
     )

@@ -121,3 +121,75 @@ def test_calibrated_if_render_stays_in_if_range() -> None:
     """A calibrated_if instrument render leaves the signal in I/F [0, 1]."""
     img, _ = render_combined_model(_lit_body_scene('vgiss'))
     assert float(img.max()) <= 1.0
+
+
+def test_overrides_pin_an_individual_key() -> None:
+    """An override pins one key while the rest still come from the instrument."""
+    base = resolve_sim_inst_config(DEFAULT_CONFIG, 'coiss_nac')
+    cfg = resolve_sim_inst_config(DEFAULT_CONFIG, 'coiss_nac', {'star_psf_sigma': 0.9})
+    assert cfg['star_psf_sigma'] == 0.9
+    assert cfg['data_units'] == base['data_units']
+
+
+def test_overrides_deep_merge_nested_block() -> None:
+    """A nested override changes one sub-key and preserves its siblings."""
+    base = resolve_sim_inst_config(DEFAULT_CONFIG, 'coiss_nac')
+    cfg = resolve_sim_inst_config(
+        DEFAULT_CONFIG, 'coiss_nac', {'noise': {'read_noise_dn': 7.0}}
+    )
+    assert cfg['noise']['read_noise_dn'] == 7.0
+    assert cfg['noise']['saturation_dn'] == base['noise']['saturation_dn']
+
+
+def test_overrides_do_not_mutate_the_live_block() -> None:
+    """Resolving with overrides leaves the underlying config block untouched."""
+    before = float(resolve_sim_inst_config(DEFAULT_CONFIG, 'coiss_nac')['star_psf_sigma'])
+    resolve_sim_inst_config(DEFAULT_CONFIG, 'coiss_nac', {'star_psf_sigma': 9.0})
+    after = float(resolve_sim_inst_config(DEFAULT_CONFIG, 'coiss_nac')['star_psf_sigma'])
+    assert before == after
+
+
+def test_generic_plus_overrides_self_specifies() -> None:
+    """The generic block plus overrides expresses a fully self-specified config."""
+    cfg = resolve_sim_inst_config(
+        DEFAULT_CONFIG,
+        'generic',
+        {'star_psf_sigma': 1.5, 'data_units': 'raw_dn', 'noise': {'read_noise_dn': 3.0}},
+    )
+    assert cfg['star_psf_sigma'] == 1.5
+    assert cfg['data_units'] == 'raw_dn'
+    assert cfg['noise']['read_noise_dn'] == 3.0
+
+
+def test_no_overrides_returns_the_live_block() -> None:
+    """Without overrides the resolver returns the instrument block unchanged."""
+    cfg = resolve_sim_inst_config(DEFAULT_CONFIG, 'coiss_nac', None)
+    assert cfg is resolve_sim_inst_config(DEFAULT_CONFIG, 'coiss_nac')
+
+
+def test_overrides_reach_the_obs_inst_config() -> None:
+    """A scene's instrument_config override is visible on the obs inst config."""
+    params: dict[str, Any] = {
+        'size_v': 64,
+        'size_u': 64,
+        'random_seed': 1,
+        'instrument': 'coiss_nac',
+        'instrument_config': {'noise': {'read_noise_dn': 12.0}},
+    }
+    obs = ObsSim.from_file('/tmp/sim_test.json', sim_params=params)
+    assert float(obs._inst_config['noise']['read_noise_dn']) == 12.0
+
+
+def test_instrument_config_round_trips_through_the_scene_schema() -> None:
+    """instrument_config survives sim-params -> scene-dict mapping (GUI save path)."""
+    from nav.sim.scene import scene_dict_from_sim_params
+
+    sim_params: dict[str, Any] = {
+        'size_v': 64,
+        'size_u': 64,
+        'random_seed': 1,
+        'instrument': 'generic',
+        'instrument_config': {'star_psf_sigma': 1.5, 'noise': {'read_noise_dn': 3.0}},
+    }
+    scene = scene_dict_from_sim_params(sim_params, scene_name='example')
+    assert scene['instrument_config'] == {'star_psf_sigma': 1.5, 'noise': {'read_noise_dn': 3.0}}

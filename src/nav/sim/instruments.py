@@ -10,6 +10,17 @@ stay in the ``sim`` config block.
 
 A value of ``None`` (or the generic aliases) selects the standalone ``sim``
 block, preserving the instrument-agnostic defaults.
+
+A scene may also carry ``instrument_config`` overrides that are deep-merged over
+the resolved block, so a scene can:
+
+- **inherit** every physical parameter from a named instrument (no overrides),
+- **inherit and override** individual parameters (override only those keys), or
+- **fully self-specify** by naming the generic block and overriding everything.
+
+Overriding a key pins it to the scene, so a later change to the real camera's
+config cannot silently shift a sim test's behavior for that key; the non-overridden
+keys continue to track the instrument.
 """
 
 from collections.abc import Mapping
@@ -39,21 +50,57 @@ SIM_INSTRUMENTS: dict[str, tuple[str, str | None]] = {
 GENERIC_INSTRUMENT_ALIASES = frozenset({'generic', 'sim'})
 
 
-def resolve_sim_inst_config(config: Config, instrument: str | None) -> Mapping[str, Any]:
+def _deep_merge(base: Mapping[str, Any], overrides: Mapping[str, Any]) -> dict[str, Any]:
+    """Return ``base`` with ``overrides`` recursively merged in.
+
+    Nested mappings merge key-by-key; any non-mapping value (scalar or list) in
+    ``overrides`` replaces the base value outright. The result is a fresh dict, so
+    the returned config is decoupled from the live config blocks it was built from.
+    """
+    merged: dict[str, Any] = {
+        key: dict(value) if isinstance(value, Mapping) else value for key, value in base.items()
+    }
+    for key, value in overrides.items():
+        existing = merged.get(key)
+        if isinstance(value, Mapping) and isinstance(existing, Mapping):
+            merged[key] = _deep_merge(existing, value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def resolve_sim_inst_config(
+    config: Config,
+    instrument: str | None,
+    overrides: Mapping[str, Any] | None = None,
+) -> Mapping[str, Any]:
     """Resolve a sim instrument name to its per-instrument config block.
 
     Parameters:
         config: The active configuration.
         instrument: A sim instrument name (see ``SIM_INSTRUMENTS``), one of the
             generic aliases, or ``None`` for the instrument-agnostic block.
+        overrides: Optional scene-level overrides deep-merged over the resolved
+            block. Overridden keys are pinned to the scene; the rest continue to
+            track the instrument. Combined with the generic block this expresses a
+            fully self-specified scene config.
 
     Returns:
-        The resolved per-instrument config mapping.
+        The resolved per-instrument config mapping (a fresh dict when ``overrides``
+        are supplied, otherwise the live config block).
 
     Raises:
         ValueError: If ``instrument`` is unrecognised, or the referenced config
             section / detector is missing.
     """
+    base = _resolve_base_block(config, instrument)
+    if not overrides:
+        return base
+    return _deep_merge(base, overrides)
+
+
+def _resolve_base_block(config: Config, instrument: str | None) -> Mapping[str, Any]:
+    """Resolve the unmodified per-instrument (or generic) config block."""
     if instrument is None or instrument in GENERIC_INSTRUMENT_ALIASES:
         return config.category('sim')
     if instrument not in SIM_INSTRUMENTS:

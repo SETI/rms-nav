@@ -93,24 +93,28 @@ guide** (`docs/dev_guide/`). Keep new findings on that split.
 
 ### 0.3 Next steps, in order
 
-The next three navigation/sim improvements, highest priority first:
+**Done (this track):** *Sim instrument config -- inherit / override / fully
+self-specify.* A scene may now carry an ``instrument_config`` mapping deep-merged
+over the resolved instrument block (:func:`resolve_sim_inst_config` gained an
+``overrides`` arg). Omit it to inherit; override individual keys to pin them;
+name ``generic`` and override everything to self-specify. Pinned keys are
+decoupled from the live camera config, so a later camera-config edit cannot shift
+a sim scene's pinned behavior. Wired through the scene schema (`src/nav/sim/scene.py`),
+both consumers (`obs_inst_sim.py`, `render.py`), and the GUI load/save round-trip;
+documented in `dev_guide_observations` and the scene README. Resolves open
+question 2.
 
-1. **Sim instrument config: inherit / override / fully self-specify.** Today a sim
-   scene's physical parameters are resolved from a referenced instrument's config
-   (B2). Extend this so a scene may (a) inherit from an instrument, (b) inherit but
-   override individual parameters, or (c) specify everything with no instrument
-   reference at all. The goal is to lock a scene's behavior so that a later change
-   to a real camera's config cannot silently shift existing sim tests/results. This
-   is the resolution of open question 2 (section 12) and an extension of B2; touch
-   `resolve_sim_inst_config` in `src/nav/sim/instruments.py`, the scene schema in
-   `src/nav/sim/scene.py`, and the GUI instrument control.
-2. **Staged limb / ring sub-pixel refine against the continuous gradient field.**
+The next two navigation/sim improvements, highest priority first:
+
+1. **Staged limb / ring sub-pixel refine against the continuous gradient field.**
    The limb (~0.135 px) and ring (~0.05 px) distance-transform techniques carry an
    SNR-independent sub-pixel-phase bias floor from the integer-quantized DT. Keep
    the DT/NCC coarse acquisition, then refine the final offset against the
    *continuous* gradient field (sub-pixel, un-quantized). See the mechanism note in
-   `dev_guide_techniques_body_limb`; the ring shares it via `dt_fitting`.
-3. **Prior-aware large-offset refinement with graceful fallback.** For blob / limb /
+   `dev_guide_techniques_body_limb`; the ring shares it via `dt_fitting`. The limb
+   sweep median is ~0.092 px (phase-dependent, up to ~0.25 px at the worst phase);
+   the ring ~0.034 px.
+2. **Prior-aware large-offset refinement with graceful fallback.** For blob / limb /
    ring, use a pass-1 prior to seed a larger-offset refinement, with graceful
    fallback to the current prior-free behavior when there is no prior or the prior
    is bad. Validate only with simulated images (a real image's true offset is
@@ -1812,13 +1816,13 @@ starting:
    "augment-not-substitute" stance (section 3.1) reflect the
    project's intent?  If the operator wants sim to be the primary
    calibration target, the plan needs to be reframed entirely.
-2. **Per-instrument config split** (B2).  The plan assumes the
-   `config_440_sim.yaml` block shrinks to a wrapper.  An alternative
-   is to keep `config_440_sim.yaml` as the sole source of truth for
-   sim parameters and *copy* the per-instrument values across at
-   load time.  The first option keeps the configs in sync
-   automatically; the second isolates the sim from instrument-config
-   changes.  Operator preference?
+2. **Per-instrument config split** (B2).  *Resolved.*  The two options
+   (auto-sync vs. isolate) are reconciled per scene rather than globally: a
+   scene inherits live from the named instrument by default (auto-sync), and an
+   optional ``instrument_config`` mapping deep-merged over the resolved block
+   pins individual keys (or all of them, with the ``generic`` block) to isolate
+   the scene from instrument-config drift.  See section 0.3 and
+   `dev_guide_observations`.
 3. **Polyhedral mesh source for B7.**  Per-body ``.obj`` files
    bundled in the repo, or fetched on demand from a per-mission
    shape archive?  Bundled is reproducible but adds repo size

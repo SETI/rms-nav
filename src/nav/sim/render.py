@@ -921,7 +921,9 @@ def _render_combined_model_cached(
     # Resolve the per-instrument config once; stars use its PSF sigma so their
     # centroid diagnostics match the navigator's PSF, and the noise stage below
     # reads its physical noise parameters.
-    inst_config = resolve_sim_inst_config(DEFAULT_CONFIG, sim_params.get('instrument'))
+    inst_config = resolve_sim_inst_config(
+        DEFAULT_CONFIG, sim_params.get('instrument'), sim_params.get('instrument_config')
+    )
     star_psf_sigma = float(inst_config['star_psf_sigma'])
 
     # Detector noise is applied last, after the full signal is composed, so the

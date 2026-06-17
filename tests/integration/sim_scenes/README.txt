@@ -44,6 +44,15 @@ Fields
   noise            (mapping, opt)    poisson, read_noise_dn, cosmic_ray_rate_per_sec,
                                      missing_data_rate, bloom_length, signal_full_scale_frac
   stray_light      (mapping, opt)    amplitude, direction_deg, model (linear|radial)
+  instrument_config (mapping, opt)   per-instrument config overrides deep-merged over
+                                     the named instrument's block (star_psf_sigma,
+                                     data_units, noise.*, extfov_margin_vu, ...).  Omit
+                                     to inherit everything; override individual keys to
+                                     pin them to the scene; name 'generic' and override
+                                     everything to fully self-specify so a later
+                                     camera-config change cannot shift the scene.  (The
+                                     top-level noise block still wins over
+                                     instrument_config.noise for rendering.)
   ground_truth     (mapping, opt)    planted_offset_dv_px, planted_offset_du_px,
                                      planted_rotation_deg
 
