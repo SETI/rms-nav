@@ -7,6 +7,14 @@ description: Run all linting, type checking, tests, Markdown lint, and documenta
 
 Execute all project checks (lint, typecheck, test, Markdown lint, docs) and fix any errors found. This skill aligns with the `scripts/run-all-checks.sh` script and a standard Python package layout (e.g. `src/`, `tests/`, `docs/`).
 
+## The script controls which checks are enabled
+
+`scripts/run-all-checks.sh` is the **single source of truth** for which checks a given repo runs. The set of checks MUST be consistent across this skill (the AI), the CI/CD pipeline, and the script — and the script is authoritative.
+
+- Run the checks the script actually runs, and **only** those. If a check listed in this skill (e.g. a docs build, Markdown lint, or coverage gate) is not enabled in the script for this repo, it does NOT need to be run as part of the skill — skip it rather than running it anyway.
+- Treat the commands and tools in this skill as the typical default set. When the script and this skill disagree, follow the script.
+- If you believe a check should be added or removed, change it in `scripts/run-all-checks.sh` first (and keep CI/CD in step with it), rather than running an out-of-band check from the skill.
+
 ## Quick Start
 
 1. Run all checks (optionally in parallel via the script).
@@ -135,7 +143,7 @@ Add `:no-index:` to the automodule directive where appropriate:
 
 ### Coverage threshold
 
-If coverage is below the project target (e.g. 80%): add tests or, temporarily, adjust `[tool.coverage.report]` / threshold in config. Prefer adding tests.
+If coverage is below the project target (90%; see `python_testing.mdc`): add tests or, temporarily, adjust `[tool.coverage.report]` / threshold in config. Prefer adding tests.
 
 ### Type annotation issues
 

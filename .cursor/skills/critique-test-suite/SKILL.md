@@ -13,6 +13,17 @@ Analyze all tests in the project and produce a **report only**—do not modify a
 - **Fixtures:** Include `conftest.py` and any shared fixtures in the analysis.
 - **Package:** Assume a standard Python package layout (e.g. `src/` with the package under test; tests in `tests/`).
 
+## Project rules
+
+If the repo contains a `.cursor/rules/` directory, treat those rule files as the authoritative standard and cite them by filename in findings:
+
+- `python_testing.mdc` — the **primary** standard for this critique (pytest usage, fixtures, parametrization, coverage target, markers, TDD, hygiene). Map the checklist items below to it wherever they overlap.
+- `python.mdc` — general coding standards that apply to test code as well (naming, type annotations, docstrings, DRY, line length).
+- `logging.mdc` / `logging_nav.mdc` — the logging conventions the logging-assertion checks (section 21) should validate against.
+- `filecache.mdc` — the transparent local/remote file-access conventions; relevant where tests touch file paths or temp directories.
+
+Not every project ships every rule. **If a referenced rule file does not exist, ignore the corresponding part of the critique** instead of inventing a standard. In particular, the `filecache` and `logging` (and `logging_nav`) rules are project-specific and are frequently absent; when they are missing, skip the file-access and logging-assertion checks that rely on them and do not report their absence as a finding.
+
 ## Checklist for Analysis
 
 Apply these criteria when reviewing each test file and each test case.
