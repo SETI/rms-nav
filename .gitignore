@@ -171,3 +171,6 @@ _work/
 /nav_*_config.yaml
 uv.lock
 tests/integration/sim_sweeps/results/
+
+# convenience symlink to .venv (local only)
+/venv
