@@ -603,15 +603,13 @@ characterization.
    :width: 100%
    :alt: Per-technique recovered-offset error vs SNR, nominal background.
 
-   Nominal background. The disc (~0.03 px) and ring (~0.06 px) are flat with SNR --
-   noise-immune but carrying a residual *off-grid* sub-pixel bias that a round-number offset
-   would have hidden (both recover the half-pixel offset far more tightly). The residual comes
-   from correlating a sharp (anti-aliased, PSF-free) body / ring edge against an equally sharp
-   template -- matched sharp edges still alias the cross-power peak -- and so is removed by
-   PSF-convolving the edge in both the simulator and the template (see the note below). The
-   blob is the most accurate at high SNR (~0.008 px) and the star improves steadily with SNR.
-   The limb is pinned near its ~0.15 px distance-transform bias floor regardless of SNR, a
-   separate follow-up rather than a noise problem.
+   Nominal background. The disc (~0.01 px) and blob (~0.008 px) are the most accurate and both
+   flat with SNR; the disc reaches that floor only because the correlator's sub-pixel refine is
+   band-limited (see the note below) -- without that it would sit at ~0.03 px here from the
+   sharp-edge S-curve. The star improves steadily with SNR. The ring is flat at ~0.06 px: that
+   residual is a distance-transform effect (``RingEdgeNav`` is not correlation based), shared
+   with the limb, not the correlator artifact the disc had. The limb is pinned near its ~0.15 px
+   distance-transform bias floor regardless of SNR -- a separate follow-up, not a noise problem.
 
 .. figure:: _figures/technique_snr_gradient.png
    :width: 100%
@@ -624,31 +622,10 @@ characterization.
    returns a result (their curves are absent). Stray light is therefore a far bigger threat to
    the faint-feature techniques than read noise alone.
 
-.. note::
-
-   **The disc / ring off-grid sub-pixel residual is a correlator refinement artifact.** Mapping
-   the disc residual against sub-pixel phase gives an odd S-curve that is zero at integer and
-   half-pixel offsets and peaks (~0.03 px, up to ~0.1 px at the worst 2-D phase) near the
-   quarter-pixel; it is per-axis separable (a pure-v offset produces a v-residual with ~zero
-   u-coupling), so the single-axis ``*_offset_fine`` sweeps report a faithful per-axis figure --
-   the other axis behaves symmetrically.
-
-   Capturing the exact ``(image, template)`` arrays the disc technique hands the correlator
-   shows the pipeline's sub-pixel offset equals a plain raw cross-power upsampled-DFT refine of
-   the two (the gradient mode chooses the integer peak but, per the gradient-NCC fix, refines on
-   raw). The bias is therefore in that refinement: the cross-power is formed from the raw,
-   sharp-edged, *anti-aliased* image and a Lambert template whose edge / shading profile differs
-   from the rendered body, and the mismatched high-frequency edge content aliases the cross-power
-   peak by a sub-pixel-phase-dependent amount. Two things were ruled out: it is not a simulator
-   hard-edge artifact alone (PSF-blurring the rendered body at the camera's own ~0.54 px sigma
-   barely moves it and destabilizes some phases, because the template stays sharp), and it is not
-   the upsampled-DFT quantization (1/128 px). The lever is a **band-limit inside the
-   refinement**: low-pass *both* surfaces (Gaussian sigma ~1 px) before the cross-power and the
-   residual drops from ~±0.035 px to ~±0.01 px across every phase, with no change to the rendered
-   image or the template. Real-image disc / ring navigation carries the same bias (a real
-   PSF-blurred limb correlates against the same sharp Lambert template), so the fix belongs in
-   the shared correlator; landing it requires re-blessing the real-image baselines (SPICE
-   holdings), so it is tracked as a dedicated correlator task alongside the limb DT bias.
+The disc and ring sub-pixel residuals are off-grid effects (zero at integer and half-pixel
+offsets), so they are measured against an off-grid planted offset; their mechanisms and the
+disc correlator band-limit are documented in the developer guide
+(:doc:`/dev_guide/dev_guide_techniques_body_disc`).
 
 **Accuracy versus injected offset (fixed SNR).** Holding the read noise at three levels, a
 pure-vertical offset is swept from 0 to 1.75 px (``u`` held at 0) for every technique. The

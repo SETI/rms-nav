@@ -46,6 +46,18 @@ techniques:
       # structure the coarser levels averaged out).
       consistency_max_fraction_of_diameter: 0.025
       consistency_max_px: 4.0
+      # Gaussian low-pass (px) applied to both surfaces in the
+      # correlator's full-resolution sub-pixel refinement.  The body
+      # silhouette and the Lambert template are sharp anti-aliased
+      # edges with differing profiles; correlating them aliases the
+      # cross-power peak into a sub-pixel-phase-dependent S-curve
+      # (~0.03 px, zero at integer / half-pixel offsets).  A ~1 px
+      # matched low-pass removes the high-frequency mismatch and cuts
+      # the residual to ~0.01 px; the upsampled DFT still localizes the
+      # smoothed peak.  Only the final full-resolution refine is
+      # band-limited -- coarse pyramid levels keep sharp surfaces for
+      # integer-peak selection.  0.0 disables it.
+      refine_lowpass_sigma_px: 1.0
     terms:
       # PSR-style quality measure of the chosen NCC peak.  Healthy
       # body-disc fits report quality 6-15; the divisor maps that range

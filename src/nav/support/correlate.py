@@ -401,6 +401,7 @@ def evaluate_candidate(
     metric: str = 'psr',
     refine_image_pad: NDArrayFloatType | None = None,
     refine_model_pad: NDArrayFloatType | None = None,
+    refine_lowpass_sigma_px: float = 0.0,
 ) -> dict[str, Any]:
     """
     Evaluate a candidate for the navigation.
@@ -458,7 +459,21 @@ def evaluate_candidate(
     # sub-pixel bias into the reported offset.
     refine_image = image_pad if refine_image_pad is None else refine_image_pad
     refine_model = model_pad if refine_model_pad is None else refine_model_pad
-    spec = fft2(refine_image) * np.conj(fft2(refine_model * mask_pad))
+    refine_model_masked = refine_model * mask_pad
+    # Band-limit both surfaces before the cross-power.  The sub-pixel peak of two
+    # sharp, anti-aliased (but non-PSF-blurred) surfaces with differing edge
+    # profiles -- a rendered body / ring vs. a Lambert template -- is aliased by a
+    # sub-pixel-phase-dependent amount (a ~0.03 px odd S-curve, zero at integer and
+    # half-pixel offsets).  A matched Gaussian low-pass removes the high-frequency
+    # mismatch that drives it, cutting the disc / ring residual to ~0.01 px; the
+    # upsampled DFT still localizes the smoothed peak.  The low-pass is applied to
+    # the final surfaces (the image and the already-masked model) so the model's
+    # support edge is not re-sharpened by the mask afterwards.  Default 0.0 is a
+    # no-op.
+    if refine_lowpass_sigma_px > 0.0:
+        refine_image = gaussian_filter(refine_image, refine_lowpass_sigma_px)
+        refine_model_masked = gaussian_filter(refine_model_masked, refine_lowpass_sigma_px)
+    spec = fft2(refine_image) * np.conj(fft2(refine_model_masked))
     # Center of the local upsampled DFT window should be the middle of the
     # evaluation region (e.g., 3x3 -> center index 1), not half the upsample factor.
     # Using upsample_factor here caused increasing bias for large factors.
@@ -542,6 +557,7 @@ def navigate_single_scale_kpeaks(
     max_offset_vu: tuple[int, int] | None = None,
     data_mask: NDArrayBoolType | None = None,
     use_gradient: bool = False,
+    refine_lowpass_sigma_px: float = 0.0,
 ) -> dict[str, Any]:
     """
     One-scale masked NCC + top-K candidate evaluation.
@@ -647,6 +663,7 @@ def navigate_single_scale_kpeaks(
             logger=logger,
             refine_image_pad=refine_image_pad,
             refine_model_pad=refine_model_pad,
+            refine_lowpass_sigma_px=refine_lowpass_sigma_px,
         )
         candidates.append(evaluation)
         if logger is not None:
@@ -751,6 +768,7 @@ def navigate_with_pyramid_kpeaks(
     max_offset_vu: tuple[int, int] | None = None,
     data_mask: NDArrayBoolType | None = None,
     use_gradient: bool | Literal['auto'] = False,
+    refine_lowpass_sigma_px: float = 0.0,
     logger: PdsLogger | None = None,
 ) -> dict[str, Any]:
     """TODO Clean this up
@@ -844,6 +862,7 @@ def navigate_with_pyramid_kpeaks(
             max_offset_vu=max_offset_vu,
             data_mask=data_mask,
             use_gradient=False,
+            refine_lowpass_sigma_px=refine_lowpass_sigma_px,
             logger=logger,
         )
         logger.debug('Auto-gradient: running gradient-magnitude pass')
@@ -862,6 +881,7 @@ def navigate_with_pyramid_kpeaks(
             max_offset_vu=max_offset_vu,
             data_mask=data_mask,
             use_gradient=True,
+            refine_lowpass_sigma_px=refine_lowpass_sigma_px,
             logger=logger,
         )
         # Pick the better result by ordered tiers. At-edge comes before
@@ -1026,6 +1046,9 @@ def navigate_with_pyramid_kpeaks(
         max_offset_vu=max_offset_vu,
         data_mask=data_mask,
         use_gradient=use_gradient,
+        # Band-limit only the full-resolution sub-pixel refinement; the coarse
+        # pyramid levels keep their sharp surfaces for integer-peak selection.
+        refine_lowpass_sigma_px=refine_lowpass_sigma_px,
         logger=logger,
     )
 

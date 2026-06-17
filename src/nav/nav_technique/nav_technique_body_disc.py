@@ -233,6 +233,7 @@ class BodyDiscCorrelateNav(NavTechnique):
             self.tuning['consistency_max_fraction_of_diameter']
         )
         self._consistency_max_px = float(self.tuning['consistency_max_px'])
+        self._refine_lowpass_sigma_px = float(self.tuning['refine_lowpass_sigma_px'])
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Return whether the input set carries any usable BODY_DISC feature.
@@ -331,6 +332,7 @@ class BodyDiscCorrelateNav(NavTechnique):
                     max_offset_vu=(margin_v, margin_u),
                     data_mask=context.sensor_mask_ext,
                     use_gradient='auto',
+                    refine_lowpass_sigma_px=self._refine_lowpass_sigma_px,
                     logger=self.logger,
                 )
             dv = float(ncc_result['offset'][0])
@@ -664,6 +666,7 @@ class BodyDiscCorrelateNav(NavTechnique):
             max_offset_vu=max_offset_vu,
             data_mask=data_mask,
             use_gradient='auto',
+            refine_lowpass_sigma_px=self._refine_lowpass_sigma_px,
             logger=self.logger,
         )
 
