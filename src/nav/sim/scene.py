@@ -35,6 +35,7 @@ DECLARED_SIM_SCENE_CLASSES: frozenset[str] = frozenset(
         'range_sweep',
         'multi_body_geometry',
         'algorithmic_invariants',
+        'regression',
     }
 )
 

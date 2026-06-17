@@ -108,8 +108,6 @@ def test_range_sweep_transitions_technique() -> None:
 
 
 _ROLL_TOLERANCE_DEG = 0.3
-_BLOB_OFFSET_TOLERANCE_PX = 0.1
-_DISC_OFFSET_TOLERANCE_PX = 0.6
 
 
 def test_star_rotation_sweep_recovers_roll() -> None:
@@ -125,44 +123,8 @@ def test_star_rotation_sweep_recovers_roll() -> None:
         assert row.rotation_error_deg < _ROLL_TOLERANCE_DEG
 
 
-def test_blob_offset_sweep_is_quantization_free() -> None:
-    """The blob centroid recovers every offset -- whole, near-boundary, fractional.
-
-    This is the check that nothing snaps to a pixel boundary: a small body's
-    lit-weighted centroid recovers offsets like 0.12783 and 0.99 px as accurately
-    as a whole-pixel offset.
-    """
-    rows = _rows('offset_fractional_blob')
-    for row in rows:
-        assert row.status == 'success'
-        assert row.offset_error_px is not None
-        assert row.offset_error_px < _BLOB_OFFSET_TOLERANCE_PX
-
-
-def test_disc_offset_sweep_stays_subpixel() -> None:
-    """The disc correlation recovers every offset to within a fraction of a pixel.
-
-    Looser than the blob: the NCC sub-pixel refinement carries a fraction-
-    dependent bias, but it stays well inside a pixel across the offset range.
-    """
-    rows = _rows('offset_fractional_disc')
-    for row in rows:
-        assert row.status == 'success'
-        assert row.offset_error_px is not None
-        assert row.offset_error_px < _DISC_OFFSET_TOLERANCE_PX
-
-
-def test_disc_offset_sweep_shows_pixel_locking() -> None:
-    """The disc is most accurate at the half-pixel and biased at integer offsets.
-
-    A direct measurement of NCC pixel-locking: the recovered offset error at a
-    half-pixel planted offset (0.5) is markedly smaller than at a whole-pixel
-    offset (12.0), independent of magnitude. The blob, by contrast, is uniform
-    across both (previous test).
-    """
-    by_value = {row.value: row for row in _rows('offset_fractional_disc')}
-    half = by_value[0.5]
-    whole = by_value[12.0]
-    assert half.offset_error_px is not None
-    assert whole.offset_error_px is not None
-    assert half.offset_error_px < whole.offset_error_px
+# The per-technique dense and wide offset sweeps (``*_offset_fine`` /
+# ``*_offset_wide``) are characterization runs, not assertions: they are executed
+# by ``sim_sweep_runner`` to produce the report's figures, and the specific defect
+# they expose (the disc gradient-NCC sub-pixel bias) is guarded by the fast
+# ``test_sim_regression`` case rather than by re-running the full sweep here.

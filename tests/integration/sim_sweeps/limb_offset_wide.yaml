@@ -1,0 +1,6 @@
+sweep_name: limb_offset_wide
+# Limb offset across the navigable range (~40 px ceiling).
+base_scene: algorithmic_invariants/planted_offset_limb.yaml
+parameters: [offset_v]
+values: [0.5, 2.3, 5.7, 9.1, 13.4, 18.7, 24.2, 31.6, 38.3]
+technique: BodyLimbNav

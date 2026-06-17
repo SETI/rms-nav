@@ -1,0 +1,6 @@
+sweep_name: blob_offset_wide
+# Blob offset past its bbox capture range -- accurate to ~6 px, then degrades as the body clips the integration window (a small-offset technique).
+base_scene: phase_sweep_regular_body/small_sphere_base.yaml
+parameters: [offset_v]
+values: [0.5, 1.5, 2.5, 4.0, 6.0, 9.0, 14.0, 20.0]
+technique: BodyBlobNav

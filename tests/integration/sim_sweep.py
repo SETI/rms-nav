@@ -45,6 +45,7 @@ class SweepSpec:
     base_scene: Path
     parameters: tuple[str, ...]
     values: tuple[float, ...]
+    technique: str
 
 
 @dataclass(frozen=True)
@@ -103,12 +104,16 @@ def load_sweep(path: Path) -> SweepSpec:
         or any(isinstance(v, bool) or not isinstance(v, (int, float)) for v in values)
     ):
         raise SimSweepValidationError(f'{path}: values must be a list of >= 2 numbers')
+    technique = raw.get('technique', '*')
+    if not isinstance(technique, str) or not technique:
+        raise SimSweepValidationError(f'{path}: technique must be a non-empty string when present')
     return SweepSpec(
         path=path,
         sweep_name=sweep_name,
         base_scene=base_scene,
         parameters=tuple(parameters),
         values=tuple(float(v) for v in values),
+        technique=technique,
     )
 
 
@@ -143,9 +148,11 @@ def _primary_technique(result: Any) -> str | None:
     return str(best.technique_name)
 
 
-def _navigate_params(sim_params: dict[str, Any]) -> Any:
+def _navigate_params(sim_params: dict[str, Any], only_techniques: str) -> Any:
     obs = ObsSim.from_file('/tmp/sweep.json', sim_params=sim_params)
-    orchestrator = NavOrchestrator(build_models_for_obs(obs), only_models='*', only_techniques='*')
+    orchestrator = NavOrchestrator(
+        build_models_for_obs(obs), only_models='*', only_techniques=only_techniques
+    )
     return orchestrator.navigate(obs)
 
 
@@ -165,6 +172,14 @@ def _recovered_rotation_deg(result: Any) -> float | None:
     return math.degrees(best.rotation_rad)
 
 
+def _pinned_technique_result(result: Any, technique: str) -> Any | None:
+    """Return the non-spurious per-technique result for ``technique``, or None."""
+    for t in result.per_technique:
+        if t.technique_name == technique and not t.spurious:
+            return t
+    return None
+
+
 def run_sweep(spec: SweepSpec) -> list[SweepRow]:
     """Navigate every step of a sweep and return the per-step rows.
 
@@ -175,6 +190,11 @@ def run_sweep(spec: SweepSpec) -> list[SweepRow]:
     planted roll. Either is ``None`` when the navigator (or the relevant
     technique) produced no value.
 
+    When ``spec.technique`` is a specific technique name (not ``'*'``) the sweep
+    pins that technique and reads its *own* recovered offset/roll, so a technique
+    can be characterised even when its clean-field confidence holds the fused
+    status below success. With ``'*'`` the fused full-ensemble result is used.
+
     Parameters:
         spec: The sweep specification.
 
@@ -183,6 +203,7 @@ def run_sweep(spec: SweepSpec) -> list[SweepRow]:
     """
     scene: SimScene = load_sim_scene(spec.base_scene)
     base_params = scene.to_sim_params()
+    pinned = spec.technique != '*'
     rows: list[SweepRow] = []
     for value in spec.values:
         sim_params = copy.deepcopy(base_params)
@@ -191,14 +212,24 @@ def run_sweep(spec: SweepSpec) -> list[SweepRow]:
         planted_v = float(sim_params.get('offset_v', 0.0))
         planted_u = float(sim_params.get('offset_u', 0.0))
         planted_rot = float(sim_params.get('offset_rotation_deg', 0.0))
-        result = _navigate_params(sim_params)
-        if result.offset_px is None:
+        result = _navigate_params(sim_params, spec.technique)
+        if pinned:
+            pin = _pinned_technique_result(result, spec.technique)
+            recovered_offset = pin.offset_px if pin is not None else None
+            recovered_rot = (
+                math.degrees(pin.rotation_rad)
+                if pin is not None and pin.rotation_rad is not None
+                else None
+            )
+        else:
+            recovered_offset = result.offset_px
+            recovered_rot = _recovered_rotation_deg(result)
+        if recovered_offset is None:
             offset_error: float | None = None
         else:
             offset_error = math.hypot(
-                result.offset_px[0] - planted_v, result.offset_px[1] - planted_u
+                recovered_offset[0] - planted_v, recovered_offset[1] - planted_u
             )
-        recovered_rot = _recovered_rotation_deg(result)
         rotation_error = None if recovered_rot is None else abs(recovered_rot - planted_rot)
         rows.append(
             SweepRow(

@@ -41,21 +41,101 @@ keys on the *recovered geometry* (offset error, roll error, primary technique,
 success/fail), not on the absolute confidence value, which barely moves on these
 clean frames and is a Phase 10 calibration concern.
 
-How to regenerate
-=================
+Methodology
+===========
 
-The recovery numbers come from navigating the algorithmic-invariant scenes:
+A **sweep** drives one base scene by overriding a single parameter across a list
+of values and navigating each step. For an offset or camera-roll sweep the
+planted ground truth is read from the (overridden) parameter itself, so the error
+is ``recovered - planted``. A sweep optionally **pins** one technique
+(``only_techniques=<name>``) and reads that technique's own recovered offset, so
+each technique is characterised independently -- even where its clean-field
+confidence would hold the fused status below ``success``. The harness, spec
+schema, runner, and plotting live in ``tests/integration/sim_sweep.py``,
+``sim_sweep_runner.py``, and ``sim_sweep_plots.py``.
+
+**Offset value sets.** Two offset sweeps per technique probe the offset axis at
+two scales:
+
+- A **dense sub-pixel** sweep fills the pixel rather than sampling a few points.
+  It plants every offset in
+
+  ::
+
+     0.0, 0.05, 0.1, 0.137, 0.2, 0.25, 0.31, 0.382, 0.45, 0.5, 0.55, 0.611,
+     0.667, 0.7, 0.75, 0.823, 0.9, 0.95, 1.0, 1.25, 1.5, 1.618, 1.75   (px)
+
+  -- the quarter- and half-pixel anchors (0.25, 0.5, 0.75), the thirds (0.333,
+  0.667), golden-ratio fractions (0.382, 0.618, 1.618), and a spread of other
+  non-power-of-2 fractions, so a fraction-dependent artifact like pixel-locking
+  cannot hide between samples.
+- A **wide-range** sweep plants offsets across the full navigable range with
+  varied fractional parts, up to each technique's ceiling.
+
+**Navigable range.** The recoverable offset is bounded by the extended-FOV search
+margin -- the navigator's configured pointing-error envelope. It is size-keyed per
+instrument: Cassini NAC is ``[13, 25]`` px at 256, ``[25, 50]`` at 512, and
+``[50, 140]`` at the full 1024, so a real frame's dozens-to-~hundred-pixel
+pointing error is exactly the envelope the navigator searches. The sweeps run at
+220 px (margin ~50 px, the generic fallback) for tractable runtime -- a 1024 px
+navigation costs ~35 s -- and sweep to the measured per-technique ceiling:
+
+.. list-table:: Per-technique offset sweep (base scene + navigable ceiling)
+   :header-rows: 1
+   :widths: 22 34 14 14
+
+   * - Technique
+     - Base scene (pinned technique)
+     - Wide ceiling
+     - Limit set by
+   * - BodyDiscCorrelateNav
+     - ``regular_sphere_base`` (90 px sphere)
+     - ~48 px
+     - extfov margin
+   * - RingEdgeNav
+     - ``planted_offset_ring`` (ringlet)
+     - ~48 px
+     - extfov margin
+   * - BodyLimbNav
+     - ``planted_offset_limb`` (130 px sphere)
+     - ~40 px
+     - extfov margin
+   * - StarFieldFromCatalogNav
+     - ``planted_offset_star_field`` (6-star field)
+     - ~20 px
+     - frame size / per-star search window
+   * - BodyBlobNav
+     - ``small_sphere_base`` (20 px sphere)
+     - ~6 px
+     - bbox capture range
+
+Beyond a technique's ceiling the navigator correctly reports failure (the feature
+is outside the searchable region); the wide sweeps run to the ceiling and, for the
+blob, a little past it to show the degradation.
+
+Running the sweeps
+==================
+
+The sweeps are **not** part of the normal pytest run. Generate every sweep's
+response curve (JSON under ``tests/integration/sim_sweeps/results/``) and the
+figures in this chapter with:
+
+.. code-block:: bash
+
+   python -m tests.integration.sim_sweep_runner
+
+A single sweep can be inspected from Python via
+``tests.integration.sim_sweep.load_sweep`` / ``run_sweep``. The planted-recovery
+table below comes from the algorithmic-invariant scenes, which *do* run in the
+deliberate (integration-marked) tier:
 
 .. code-block:: bash
 
    pytest tests/integration/test_sim_algorithmic_invariants.py -m "" -n auto --dist=loadfile
 
-The sweep response curves come from the sweep runner, which writes one JSON per
-sweep under ``tests/integration/sim_sweeps/results/``:
-
-.. code-block:: bash
-
-   python -m tests.integration.sim_sweep_runner
+Specific defects the sweeps uncover get their own fast regression scene under
+``sim_scenes/regression/`` so they are guarded in the normal suite without
+running the full sweep (see *Sub-pixel offset accuracy* below).
 
 See :doc:`/user_guide/user_guide_simulated_images` for the scene-catalog and
 sweep workflow, and :doc:`/dev_guide/dev_guide_navigation_models` for the
@@ -305,68 +385,102 @@ and the smallest body (12 px) is unnavigable. Every navigable step recovers the
 planted offset exactly. This transition is the sim's most direct verification
 that the orchestrator selects the right technique for the available resolution.
 
-Sub-pixel offset accuracy across the pixel
-==========================================
+Offset accuracy by technique
+============================
 
-The invariant scenes above all plant a single offset near the middle of a pixel.
-To check for pixel-boundary and quantization artifacts, two sweeps plant the body
-offset across a range of magnitudes with a variety of fractional parts -- whole
-pixels, the exact half-pixel, and arbitrary non-repeating fractions -- one on a
-small body navigated by the blob centroid, one on a resolved body navigated by
-the disc correlation.
+The invariant scenes above plant a single offset near the middle of a pixel. To
+look for pixel-boundary, quantization, and range corner cases, each technique is
+swept across the dense sub-pixel set and the wide range described under
+*Methodology*. The dense sweep traces accuracy across the pixel:
 
-The disc sweep spans 0.3 to 12 px (recovery error in px):
+.. figure:: _figures/offset_accuracy_fine.png
+   :width: 100%
+   :alt: Sub-pixel offset recovery error by technique.
 
-.. list-table:: Disc-correlation recovery vs planted offset
+   Recovered-offset error (log scale) vs planted sub-pixel offset, each technique
+   pinned. The disc correlation sits ~0.3 px with sharp dips at the half-pixels;
+   the limb fit is a few tenths; the blob, ring edge, and star field are an order
+   of magnitude better.
+
+.. list-table:: Sub-pixel recovery error (px) over the dense fractional sweep
    :header-rows: 1
-   :widths: 16 16 16 16 16
+   :widths: 30 14 14 14
 
-   * - 0.31 -> 0.37
-     - 0.5 -> 0.00
-     - 1.62 -> 0.12
-     - 2.5 -> 0.00
-     - 3.75 -> 0.25
-   * - 5.5 -> 0.00
-     - 7.6 -> 0.10
-     - 9.93 -> 0.31
-     - 12.0 -> 0.33
-     -
+   * - Technique
+     - min
+     - median
+     - max
+   * - BodyDiscCorrelateNav
+     - 0.000
+     - 0.306
+     - 0.383
+   * - BodyLimbNav
+     - 0.016
+     - 0.131
+     - 0.218
+   * - RingEdgeNav
+     - 0.000
+     - 0.011
+     - 0.032
+   * - BodyBlobNav
+     - 0.002
+     - 0.006
+     - 0.011
+   * - StarFieldFromCatalogNav
+     - 0.032
+     - 0.052
+     - 0.076
 
-The **blob centroid is quantization-free**: across its sweep (0.13 to 4.87 px,
-fractions 0.13/0.62/1.27/1.95/2.58/3.41/4.16/4.87) every offset is recovered to
-at most 0.011 px, with no dependence on the fractional part or the magnitude. The
-feature techniques (limb, ring edge, star field) behave the same way, because
-they fit a sharp predicted geometry to a sharp image feature.
+Two techniques carry a sub-pixel bias and three are essentially exact:
 
-The blob sweep is deliberately kept inside the body's predicted bounding box: the
-blob is a *small-offset* technique. The lit-weighted centroid is integrated over
-the predicted bbox, so once the planted offset approaches the bbox extent the body
-clips out of the window and the recovered centroid degrades -- for the 20 px body
-here the error stays under 0.05 px out to ~6 px of offset, then grows (~0.5 px at
-9 px, ~1.6 px at 12 px) and fails past ~25 px. The disc correlation, by contrast,
-searches the full extended-FOV and recovers across the entire range.
+- **Blob centroid and ring edge are quantization-free** -- at most ~0.01-0.03 px
+  with no dependence on the fractional part. They fit a sharp predicted geometry
+  to a sharp image feature.
+- **The disc correlation shows a striking periodic error**: ~0.33 px at
+  whole-pixel offsets, falling to ~0 at the exact half-pixel, period one pixel and
+  no dependence on magnitude (the wide sweep recovers 0.5, 2.5, 5.5, ... exactly
+  while integer offsets stay ~0.33). This is *not* a fundamental NCC limit: the
+  correlator upsamples to 1/128 px and reaches that on raw intensity -- a zero
+  shift between two identical frames recovers exactly ``(0, 0)``. The bias appears
+  only on the **gradient-magnitude** pass, which the disc's ``auto`` mode selects
+  for a smooth body because the edge gives a higher-contrast peak. The Sobel
+  *magnitude* rectifies the signal, so the gradient correlation peak is non-smooth
+  at its apex and the sub-pixel estimator is biased whenever the residual from the
+  nearest whole pixel is small -- recurring at every integer offset, vanishing at
+  the half-pixel. The limb fit, which also keys on the (distance-transformed) edge,
+  carries a smaller version of the same bias (~0.13 px median).
+- **The star field is pinned here**, so its sub-pixel rows below ~1 px are absent:
+  the field matcher alone cannot separate a sub-pixel translation of the whole
+  field from noise and reports spurious (the two-star path, present in the full
+  ensemble, recovers them -- see the planted-offset star invariant). Above ~1 px it
+  recovers to ~0.05 px.
 
-The **disc correlation shows a striking periodic error**: ~0.33 px at whole-pixel
-offsets, falling to ~0 at the exact half-pixel, with a period of one pixel and no
-dependence on magnitude (0.5, 2.5, and 5.5 px all recover exactly). This is *not*
-a fundamental NCC limit. The correlator upsamples its correlation
-spectrum to 1/128 px and reaches that accuracy on raw intensity -- a zero shift
-between two identical frames recovers exactly ``(0, 0)``. The bias appears only on
-the **gradient-magnitude** pass, which the disc's ``auto`` mode selects for a
-smooth body because the edge gives a higher-contrast correlation peak. The Sobel
-*magnitude* rectifies the signal, so the gradient correlation peak is non-smooth
-at its apex, and the sub-pixel estimator is biased whenever the residual from the
-nearest whole pixel is small -- which recurs at every integer offset, vanishing at
-the half-pixel where the residual is farthest from the cusp.
+The wide-range sweep confirms each technique recovers across the navigable range,
+and exposes the blob's capture limit:
 
-This is a core-correlator behaviour (it lives in
+.. figure:: _figures/offset_accuracy_wide.png
+   :width: 100%
+   :alt: Wide-range offset recovery error by technique.
+
+   Recovered-offset error vs planted offset across the navigable range. Disc,
+   ring, limb, and star recover to their ceilings; the blob is accurate only
+   within its bbox, degrading sharply once the body clips the integration window.
+
+The disc, ring, limb, and star recover with the same accuracy out to their
+ceilings (~48, ~48, ~40, ~20 px). The **blob is a small-offset technique**: its
+lit-weighted centroid is integrated over the predicted bbox, so for the 20 px body
+it holds under 0.05 px out to ~6 px, then degrades (~0.85 px at 10 px, ~5.8 px at
+20 px) as the body clips out of the window. A blob therefore refines a small
+residual; a large pointing error is found by the full-FOV disc search first.
+
+The disc / limb gradient bias is a **core-correlator defect** (it lives in
 :func:`nav.support.correlate.navigate_with_pyramid_kpeaks`, not in the simulator),
-so it applies to real-image disc navigation too. It is flagged for a fix --
-refining the final sub-pixel offset on raw intensity rather than gradient
-magnitude -- which should be validated against the real-image library before
-landing. The offset sweep is the regression that will confirm the fix and guard
-against recurrence; it is the clearest example of the simulated layer surfacing a
-real navigation defect.
+so it applies to real-image disc navigation too. Because a real image's true
+offset is unknown, the fix is verified with simulated images: the
+``regression/disc_subpixel_offset`` scene guards it in the normal suite without
+running the full sweep, and the dense offset sweep is the broad-coverage
+characterization. The fix refines the final sub-pixel offset on raw intensity
+rather than gradient magnitude.
 
 Camera-roll sensitivity and roll / translation separability
 ============================================================

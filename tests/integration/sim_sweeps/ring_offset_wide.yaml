@@ -1,0 +1,6 @@
+sweep_name: ring_offset_wide
+# Ring-edge offset across the navigable range (to ~the 50 px margin).
+base_scene: algorithmic_invariants/planted_offset_ring.yaml
+parameters: [offset_v]
+values: [0.5, 2.3, 5.7, 9.1, 13.4, 18.7, 24.2, 31.6, 38.3, 45.1]
+technique: RingEdgeNav

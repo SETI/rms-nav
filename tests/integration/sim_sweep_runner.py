@@ -43,6 +43,13 @@ def main() -> int:
         techniques = [row.primary_technique for row in rows]
         print(f'{spec.sweep_name}: {len(spec.values)} steps -> {techniques}')
     print(f'Wrote {len(sweep_paths)} sweep result(s) to {_RESULTS_ROOT}')
+    try:
+        from tests.integration.sim_sweep_plots import generate_plots
+    except ImportError:
+        print('matplotlib not available; skipping figures.', file=sys.stderr)
+        return 0
+    figures = generate_plots()
+    print(f'Wrote {len(figures)} figure(s) to {figures[0].parent if figures else "(none)"}')
     return 0
 
 
