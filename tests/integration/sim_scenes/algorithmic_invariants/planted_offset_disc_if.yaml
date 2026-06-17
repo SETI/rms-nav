@@ -21,6 +21,6 @@ bodies:
     phase_angle: 30.0
 rings: []
 ground_truth:
-  planted_offset_dv_px: 1.5
-  planted_offset_du_px: -0.5
+  planted_offset_dv_px: 1.43
+  planted_offset_du_px: -0.61
   planted_rotation_deg: 0.0

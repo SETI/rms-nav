@@ -135,9 +135,14 @@ Algorithmic-invariant recovery
 
 Each scene below plants a known transform and the navigator predicts the
 unshifted geometry, so the recovered offset (or roll) should equal the planted
-value. The technique column names the load-bearing technique -- pinned for the
-scenes whose fused confidence sits below the success threshold on a clean frame
-(blob, limb, ring, roll), and the full ensemble for the disc and star scenes.
+value. The planted offsets are deliberately off-grid (no integer, half-, or
+quarter-pixel values), so a technique cannot land on a sub-pixel-bias null and
+report a flatteringly small error; these are single-sample correctness checks at
+one arbitrary phase, while per-technique sub-pixel precision across many offsets is
+characterized in the offset-accuracy section below. The technique column names the
+load-bearing technique -- pinned for the scenes whose fused confidence sits below
+the success threshold on a clean frame (blob, limb, ring, roll), and the full
+ensemble for the disc and star scenes.
 
 .. list-table:: Planted-transform recovery by technique
    :header-rows: 1
@@ -150,55 +155,56 @@ scenes whose fused confidence sits below the success threshold on a clean frame
      - Error
    * - ``planted_offset_disc``
      - BodyDiscCorrelateNav
-     - (3.5, -2.0) px
-     - (3.50, -2.00) px
-     - 0.00 px
+     - (3.37, -1.83) px
+     - (3.36, -1.84) px
+     - 0.01 px
    * - ``planted_offset_irregular``
      - BodyDiscCorrelateNav (mesh)
-     - (2.0, 1.5) px
-     - (1.99, 1.50) px
+     - (2.13, 1.37) px
+     - (2.12, 1.36) px
      - 0.01 px
    * - ``planted_offset_blob``
      - BodyBlobNav
-     - (1.5, -0.5) px
-     - (1.49, -0.51) px
-     - 0.02 px
+     - (1.23, -0.58) px
+     - (1.22, -0.59) px
+     - 0.01 px
    * - ``planted_offset_blob_crescent``
      - BodyBlobNav (120 deg)
-     - (1.5, -0.5) px
-     - (1.32, -0.45) px
-     - 0.18 px
+     - (1.37, -0.41) px
+     - (1.19, -0.34) px
+     - 0.19 px
    * - ``planted_offset_star_field``
      - StarField + UniqueMatch + Refine
-     - (1.5, -0.5) px
-     - (1.52, -0.51) px
-     - 0.02 px
+     - (1.43, -0.61) px
+     - (1.32, -0.65) px
+     - 0.12 px
    * - ``planted_offset_limb``
      - BodyLimbNav
-     - (1.5, -0.5) px
-     - (1.51, -0.51) px
-     - 0.02 px
+     - (1.61, -0.43) px
+     - (1.77, -0.22) px
+     - 0.27 px
    * - ``planted_offset_ring``
      - RingEdgeNav
-     - (1.5, -0.5) px
-     - (1.50, -0.50) px
-     - 0.004 px
+     - (1.29, -0.67) px
+     - (1.25, -0.72) px
+     - 0.06 px
    * - ``planted_rotation_star_field``
      - StarFieldFromCatalogNav (roll)
-     - 1.50 deg
-     - 1.507 deg
-     - 0.007 deg
+     - 1.37 deg
+     - 1.364 deg
+     - 0.006 deg
 
 Observations:
 
-* Every technique recovers its planted transform to well under a pixel (or a
-  third of a degree for the roll). The point-feature techniques -- ring edge,
-  blob, limb, and the star field -- are the most precise, a few hundredths of a
-  pixel.
-* The disc correlation recovers to ~0.00 px; the mesh-body disc carries a small
-  residual (~0.01 px). Both are far inside the 1.0 px invariant bound.
-* The high-phase blob crescent (~0.18 px at 120 deg) is the hardest case: only a
+* Every technique recovers its planted transform well within the 1.0 px (and
+  third-of-a-degree) invariant bound at this off-grid phase.
+* The disc, mesh-body disc, and blob recover to ~0.01 px; the ring edge to
+  ~0.06 px; the fused star field to ~0.12 px; the limb to ~0.27 px at this phase.
+* The high-phase blob crescent (~0.19 px at 120 deg) is the hardest case: only a
   thin lit crescent constrains the centroid. It still recovers sub-pixel.
+* These are single off-grid samples, so they sit above the multi-offset medians in
+  the offset-accuracy section (e.g. the limb's ~0.13 px sweep median versus
+  ~0.27 px here); the table is a correctness check, not the precision benchmark.
 
 Single-variable sensitivity
 ===========================
@@ -378,8 +384,9 @@ swept across the dense sub-pixel set and the wide range described under
    :alt: Sub-pixel offset recovery error by technique.
 
    Recovered-offset error (log scale) vs planted sub-pixel offset, each technique
-   pinned. The disc, blob, ring edge, and star field all sit at a few hundredths
-   of a pixel; the limb fit holds a ~0.13 px distance-transform residual.
+   pinned. The disc, blob, and star field sit at or below a few hundredths of a
+   pixel; the ring edge (~0.05 px) and the limb (~0.135 px) hold distance-transform
+   residuals.
 
 .. list-table:: Sub-pixel recovery error (px) over the dense fractional sweep
    :header-rows: 1
@@ -391,45 +398,45 @@ swept across the dense sub-pixel set and the wide range described under
      - max
    * - BodyDiscCorrelateNav
      - 0.000
-     - 0.022
+     - 0.006
      - 0.050
    * - BodyLimbNav
-     - 0.016
-     - 0.131
-     - 0.218
+     - 0.025
+     - 0.135
+     - 0.250
    * - RingEdgeNav
-     - 0.000
-     - 0.011
-     - 0.032
+     - 0.003
+     - 0.053
+     - 0.099
    * - BodyBlobNav
      - 0.002
      - 0.006
      - 0.011
    * - StarFieldFromCatalogNav (dim field)
-     - 0.007
-     - 0.023
-     - 0.060
+     - 0.002
+     - 0.025
+     - 0.065
    * - StarFieldFromCatalogNav (bright field)
      - 0.001
      - 0.005
-     - 0.011
+     - 0.012
 
-The disc, blob, ring edge, and star field are quantization-free; the limb fit
-holds a sub-pixel residual:
+The correlation and centroid techniques sit at or below a few hundredths of a
+pixel; the distance-transform techniques carry a larger sub-pixel residual:
 
-- **Disc, blob, ring edge, and star field recover to a few hundredths of a
-  pixel** with no dependence on the fractional part. A zero shift between
-  identical frames recovers exactly ``(0, 0)``.
-- **The limb fit holds a ~0.13 px distance-transform residual** across the dense
-  sweep. It stays well inside the invariant bound. See
+- **Disc and blob recover to <0.01 px** (median 0.006), and the bright star field
+  to ~0.005 px -- the most accurate. A zero shift between identical frames recovers
+  the disc exactly at ``(0, 0)``.
+- **The ring edge holds a ~0.05 px residual** and **the limb a ~0.135 px residual**
+  across the dense sweep, both distance-transform effects that vary with the
+  sub-pixel phase; they stay well inside the invariant bound. See
   :doc:`/dev_guide/dev_guide_techniques_body_limb` for the mechanism.
 - **The star field is pinned here**, so its sub-pixel rows below ~1 px are absent:
   the field matcher alone does not recover a sub-pixel translation of the whole
   field (the two-star path in the full ensemble does -- see the planted-offset star
-  invariant). Above ~1 px the dim field recovers to ~0.02 px (median 0.023) and
-  the bright field to ~0.005 px, the most accurate of any technique. The dim/bright
-  split is detailed below; the per-star centroiding mechanism is in
-  :doc:`/dev_guide/dev_guide_techniques_star_field`.
+  invariant). Above ~1 px the dim field recovers to a median ~0.025 px and the
+  bright field to ~0.005 px. The dim/bright split is detailed below; the per-star
+  centroiding mechanism is in :doc:`/dev_guide/dev_guide_techniques_star_field`.
 
 The wide-range sweep confirms each technique recovers across the navigable range,
 and exposes the blob's capture limit:
@@ -464,7 +471,7 @@ field (vmag 0-0.8, ~1000-2000 DN net peak, below the 4095 DN full well).
    star fields. The dim field sits near ~0.02 px; the bright field reaches
    ~0.005 px -- below every other technique.
 
-The dim field recovers to a median ~0.023 px and the bright field to ~0.005 px,
+The dim field recovers to a median ~0.025 px and the bright field to ~0.005 px,
 the most accurate of any technique. The centroiding mechanism behind this split
 is documented in :doc:`/dev_guide/dev_guide_techniques_star_field`.
 

@@ -1,7 +1,7 @@
 {
-  "confidence": 0.39,
-  "offset_du_px": 1.49,
-  "offset_dv_px": 1.99,
+  "confidence": 0.4,
+  "offset_du_px": 1.36,
+  "offset_dv_px": 2.13,
   "scene_name": "planted_offset_irregular",
   "status": "success"
 }

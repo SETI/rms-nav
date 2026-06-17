@@ -1,7 +1,7 @@
 {
   "confidence": 0.67,
-  "offset_du_px": -0.51,
-  "offset_dv_px": 1.52,
+  "offset_du_px": -0.65,
+  "offset_dv_px": 1.32,
   "scene_name": "planted_offset_star_field",
   "status": "success"
 }

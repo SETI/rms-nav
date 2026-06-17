@@ -44,7 +44,7 @@ _FIGURES_ROOT = Path(__file__).parent.parent.parent / 'docs' / 'simulator_report
 # floor.  Peak DN scales as ~2.512**(-vmag).
 _VMAGS = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5]
 _SEEDS = list(range(6))
-_PLANTED = (0.382, -0.5)  # one representative awkward sub-pixel offset
+_PLANTED = (0.382, -0.213)  # one representative off-grid sub-pixel offset
 
 # (label, mode-override) for the three centroiding modes compared at every step.
 _SHIPPED_SNR_MAX = 30.0  # mirrors config_510 psf_refine_snr_max

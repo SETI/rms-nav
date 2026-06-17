@@ -27,6 +27,6 @@ noise:
   poisson: true
   read_noise_dn: 4.0
 ground_truth:
-  planted_offset_dv_px: 1.5
-  planted_offset_du_px: -0.5
+  planted_offset_dv_px: 1.29
+  planted_offset_du_px: -0.67
   planted_rotation_deg: 0.0
