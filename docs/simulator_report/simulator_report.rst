@@ -135,7 +135,7 @@ deliberate (integration-marked) tier:
 
 Specific defects the sweeps uncover get their own fast regression scene under
 ``sim_scenes/regression/`` so they are guarded in the normal suite without
-running the full sweep (see *Sub-pixel offset accuracy* below).
+running the full sweep (see *Offset accuracy by technique* below).
 
 See :doc:`/user_guide/user_guide_simulated_images` for the scene-catalog and
 sweep workflow, and :doc:`/dev_guide/dev_guide_navigation_models` for the
@@ -162,13 +162,13 @@ scenes whose fused confidence sits below the success threshold on a clean frame
    * - ``planted_offset_disc``
      - BodyDiscCorrelateNav
      - (3.5, -2.0) px
-     - (3.50, -1.80) px
-     - 0.20 px
+     - (3.50, -2.00) px
+     - 0.00 px
    * - ``planted_offset_irregular``
      - BodyDiscCorrelateNav (mesh)
      - (2.0, 1.5) px
-     - (1.75, 1.50) px
-     - 0.25 px
+     - (1.99, 1.50) px
+     - 0.01 px
    * - ``planted_offset_blob``
      - BodyBlobNav
      - (1.5, -0.5) px
@@ -207,12 +207,11 @@ Observations:
   blob, limb, and the star field -- are the most precise (a few hundredths of a
   pixel), because their predicted geometry aligns exactly with a sharp image
   feature.
-* The disc correlation carries the largest error (~0.2 px) -- not an inherent
-  limit but a correlator bug the offset sweep below pins down: its gradient-mode
-  sub-pixel refinement is biased near the peak, while raw-intensity NCC and the
-  feature techniques reach ~1/128 px. The mesh-body disc adds a shape error on
-  top, since the body is irregular but the correlation template is the same
-  rendered shape. Both stay well inside the 1.0 px invariant bound.
+* The disc correlation now recovers to ~0.00 px after the gradient-NCC sub-pixel
+  fix the offset sweep drove (see below); before the fix it carried a ~0.2 px
+  bias here. The mesh-body disc retains a small residual (~0.01 px) because the
+  body is irregular but the correlation template is the same rendered shape. Both
+  are far inside the 1.0 px invariant bound.
 * The high-phase blob crescent (~0.18 px at 120 deg) is the hardest case: only a
   thin lit crescent constrains the centroid. It still recovers sub-pixel because
   the blob subtracts the bias pedestal and thresholds against sky noise rather
@@ -398,57 +397,66 @@ swept across the dense sub-pixel set and the wide range described under
    :alt: Sub-pixel offset recovery error by technique.
 
    Recovered-offset error (log scale) vs planted sub-pixel offset, each technique
-   pinned. The disc correlation sits ~0.3 px with sharp dips at the half-pixels;
-   the limb fit is a few tenths; the blob, ring edge, and star field are an order
-   of magnitude better.
+   pinned, **after the gradient-NCC fix**. The disc, blob, ring edge, and star
+   field all sit at a few hundredths of a pixel; the limb fit retains a separate
+   ~0.13 px distance-transform bias.
 
 .. list-table:: Sub-pixel recovery error (px) over the dense fractional sweep
    :header-rows: 1
-   :widths: 30 14 14 14
+   :widths: 26 12 12 12 18
 
    * - Technique
      - min
      - median
      - max
+     - median before fix
    * - BodyDiscCorrelateNav
      - 0.000
+     - 0.022
+     - 0.050
      - 0.306
-     - 0.383
    * - BodyLimbNav
      - 0.016
      - 0.131
      - 0.218
+     - 0.131
    * - RingEdgeNav
      - 0.000
      - 0.011
      - 0.032
+     - 0.011
    * - BodyBlobNav
      - 0.002
      - 0.006
      - 0.011
+     - 0.006
    * - StarFieldFromCatalogNav
      - 0.032
      - 0.052
      - 0.076
+     - 0.052
 
-Two techniques carry a sub-pixel bias and three are essentially exact:
+All four point-feature / correlation techniques are now quantization-free; only
+the limb fit retains a sub-pixel bias:
 
-- **Blob centroid and ring edge are quantization-free** -- at most ~0.01-0.03 px
-  with no dependence on the fractional part. They fit a sharp predicted geometry
-  to a sharp image feature.
-- **The disc correlation shows a striking periodic error**: ~0.33 px at
-  whole-pixel offsets, falling to ~0 at the exact half-pixel, period one pixel and
-  no dependence on magnitude (the wide sweep recovers 0.5, 2.5, 5.5, ... exactly
-  while integer offsets stay ~0.33). This is *not* a fundamental NCC limit: the
-  correlator upsamples to 1/128 px and reaches that on raw intensity -- a zero
-  shift between two identical frames recovers exactly ``(0, 0)``. The bias appears
-  only on the **gradient-magnitude** pass, which the disc's ``auto`` mode selects
-  for a smooth body because the edge gives a higher-contrast peak. The Sobel
-  *magnitude* rectifies the signal, so the gradient correlation peak is non-smooth
-  at its apex and the sub-pixel estimator is biased whenever the residual from the
-  nearest whole pixel is small -- recurring at every integer offset, vanishing at
-  the half-pixel. The limb fit, which also keys on the (distance-transformed) edge,
-  carries a smaller version of the same bias (~0.13 px median).
+- **Disc, blob, ring edge, and star field recover to a few hundredths of a
+  pixel** with no dependence on the fractional part.
+- **The disc gradient-NCC bias is fixed.** Before the fix the disc showed a
+  striking periodic error -- ~0.33 px at whole-pixel offsets, ~0 at the exact
+  half-pixel, period one pixel and magnitude-independent. The cause: the disc's
+  ``auto`` mode correlates Sobel **gradient-magnitude** surfaces for a smooth
+  body (the edge gives a higher-contrast peak), but the magnitude rectifies the
+  signal, so the cross-power peak is non-smooth at its apex and the upsampled-DFT
+  sub-pixel estimate is biased near every whole-pixel residual. The fix keeps the
+  gradient surfaces for the integer peak (and quality) but refines the sub-pixel
+  offset on the **raw-intensity** surfaces, which reach the correlator's 1/128 px
+  upsample resolution -- a zero shift between identical frames now recovers exactly
+  ``(0, 0)``, and the disc median drops from 0.306 to 0.022 px.
+- **The limb fit retains a separate ~0.13 px bias.** It is a different mechanism
+  -- the limb keys on the distance-transformed edge through a Levenberg-Marquardt
+  polyline fit, not the NCC correlator -- so the gradient-NCC fix does not touch
+  it. It is flagged for separate follow-up; it stays well inside the invariant
+  bound.
 - **The star field is pinned here**, so its sub-pixel rows below ~1 px are absent:
   the field matcher alone cannot separate a sub-pixel translation of the whole
   field from noise and reports spurious (the two-star path, present in the full
@@ -473,13 +481,15 @@ it holds under 0.05 px out to ~6 px, then degrades (~0.85 px at 10 px, ~5.8 px a
 20 px) as the body clips out of the window. A blob therefore refines a small
 residual; a large pointing error is found by the full-FOV disc search first.
 
-The disc / limb gradient bias is a **core-correlator defect** (it lives in
+The disc gradient-NCC bias was a **core-correlator defect** (it lives in
 :func:`nav.support.correlate.navigate_with_pyramid_kpeaks`, not in the simulator),
-so it applies to real-image disc navigation too. Because a real image's true
-offset is unknown, the fix is verified with simulated images: the
+so it affected real-image disc navigation too. Because a real image's true offset
+is unknown, the fix was verified entirely with simulated images: the
 ``regression/disc_subpixel_offset`` scene guards it in the normal suite without
-running the full sweep, and the dense offset sweep is the broad-coverage
-characterization. The fix refines the final sub-pixel offset on raw intensity
+running the full sweep, the dense offset sweep is the broad-coverage
+characterization, and the fix re-blessed every disc-navigated baseline toward its
+planted offset (e.g. ``two_moons`` from a 0.36 px recovery error at zero offset to
+exactly ``(0, 0)``). The fix refines the final sub-pixel offset on raw intensity
 rather than gradient magnitude.
 
 Camera-roll sensitivity and roll / translation separability
@@ -564,13 +574,16 @@ Summary
 * All seven feature techniques (disc, mesh disc, blob, high-phase blob, star
   field, limb, ring edge) plus the camera-roll fit recover their planted
   transform to sub-pixel / sub-half-degree accuracy on clean simulated frames.
-* The point-feature techniques (blob, limb, ring edge, star field) are
-  quantization-free: they recover any offset -- whole, near-boundary, or arbitrary
-  fraction -- to a few hundredths of a pixel.
-* The offset sweep surfaced a real core-correlator defect: the disc's
-  gradient-magnitude sub-pixel refinement is biased (~0.3 px, periodic in the
-  fractional offset) where raw NCC reaches ~1/128 px. It affects real disc
-  navigation and is flagged for a fix to be validated against the real library.
+* The disc, blob, ring edge, and star field are quantization-free: they recover
+  any offset -- whole, near-boundary, or arbitrary fraction -- to a few hundredths
+  of a pixel.
+* The offset sweep surfaced -- and drove the fix of -- a real core-correlator
+  defect: the disc's gradient-magnitude sub-pixel refinement was biased (~0.3 px,
+  periodic in the fractional offset) where raw NCC reaches ~1/128 px. Refining the
+  sub-pixel offset on raw intensity dropped the disc median from 0.306 to 0.022 px
+  and re-blessed every disc-navigated baseline toward its planted offset, verified
+  entirely with simulated images. The limb fit's separate ~0.13 px
+  distance-transform bias remains, flagged for follow-up.
 * The sweeps confirm the expected qualitative behaviour: navigation degrades to a
   clean failure past the noise cliff, the resolved body handles the full phase
   range with a mid-phase accuracy dip, and the primary technique walks the limb

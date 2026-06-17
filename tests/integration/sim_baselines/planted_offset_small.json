@@ -1,7 +1,7 @@
 {
-  "confidence": 0.3,
+  "confidence": 0.39,
   "offset_du_px": 0.5,
-  "offset_dv_px": 0.66,
+  "offset_dv_px": 0.99,
   "scene_name": "planted_offset_small",
   "status": "success"
 }

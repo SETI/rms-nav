@@ -10,8 +10,6 @@ the default suite.
 import math
 from pathlib import Path
 
-import pytest
-
 from nav.nav_model import build_models_for_obs
 from nav.nav_orchestrator import NavOrchestrator
 from nav.obs.obs_inst_sim import ObsSim
@@ -45,10 +43,11 @@ def _disc_offset_error(scene_name: str) -> float:
     )
 
 
-@pytest.mark.xfail(
-    reason='gradient-magnitude NCC sub-pixel bias at whole-pixel offsets; fix pending',
-    strict=True,
-)
 def test_disc_recovers_whole_pixel_offset() -> None:
-    """The disc correlation recovers a whole-pixel offset to within a fraction of a pixel."""
+    """The disc correlation recovers a whole-pixel offset to within a fraction of a pixel.
+
+    Guards the gradient-magnitude NCC sub-pixel bias: the integer peak is found on
+    the gradient surfaces but the sub-pixel offset is refined on raw intensity, so
+    a whole-pixel offset no longer carries the ~0.3 px-per-axis rectification bias.
+    """
     assert _disc_offset_error('disc_subpixel_offset') < _DISC_SUBPIXEL_TOLERANCE_PX

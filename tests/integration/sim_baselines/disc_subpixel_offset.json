@@ -1,7 +1,7 @@
 {
-  "confidence": 0.35,
-  "offset_du_px": 2.12,
-  "offset_dv_px": 2.7,
+  "confidence": 0.4,
+  "offset_du_px": 2.0,
+  "offset_dv_px": 3.0,
   "scene_name": "disc_subpixel_offset",
   "status": "success"
 }

@@ -1,7 +1,7 @@
 {
-  "confidence": 0.31,
-  "offset_du_px": 0.06,
-  "offset_dv_px": -0.32,
+  "confidence": 0.38,
+  "offset_du_px": 0.0,
+  "offset_dv_px": 0.0,
   "scene_name": "clean_disc_readnoise_04",
   "status": "success"
 }

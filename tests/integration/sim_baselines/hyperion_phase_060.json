@@ -1,7 +1,7 @@
 {
-  "confidence": 0.32,
-  "offset_du_px": 0.16,
-  "offset_dv_px": -0.21,
+  "confidence": 0.39,
+  "offset_du_px": 0.0,
+  "offset_dv_px": 0.0,
   "scene_name": "hyperion_phase_060",
   "status": "success"
 }
