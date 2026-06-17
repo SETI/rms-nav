@@ -96,6 +96,15 @@ Restrictions and assumptions
 - A vanishing total flux (an entirely-in-shadow body whose predicted bounding box happens to
   cover the right part of the FOV) collapses the moment; the technique drops such blobs
   before the joint fit and reports a no-signal failure when every blob is dropped.
+- **Very small bodies are deliberately gated out.** The ``BODY_BLOB`` feature's reliability
+  carries a ``blob_extent_px`` term that drives reliability below the keep threshold for a
+  body only a handful of pixels across (on the simulated catalog a 20 px body passes but a
+  ~24 px-or-smaller body sits just under the gate). This is intentional: on a *real* frame a
+  body a few pixels wide is dominated by the point-spread function, cosmic rays, and
+  background structure, so its brightness-weighted centroid is not trustworthy even though the
+  arithmetic still produces a number. Navigating bodies below that floor is therefore held
+  back pending calibration against the operator-curated real-image library; the floor is a
+  config-tunable gate, not a hard algorithmic limit.
 - The technique carries no rotation evidence — a brightness-weighted centroid is rotation-
   invariant about itself. When the per-instrument
   :attr:`~nav.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` is true, the

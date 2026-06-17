@@ -101,7 +101,20 @@ matrix at convergence, scaled by the per-vertex Tukey weights. The covariance th
 reflects the *shape* of the cost surface near the minimum and the surviving inlier population;
 it does not capture systematic biases (e.g. an inflation of the per-vertex sigma due to
 unmodelled crater roughness) and it does not capture model-side uncertainty in the SPICE
-prediction itself (the search-window margin is what bounds that). When the converged offset
+prediction itself (the search-window margin is what bounds that).
+
+One such systematic is a **sub-pixel-phase bias floor of ~0.13-0.15 px** in the recovered
+offset. It is *independent of SNR* (it persists on a clean, high-signal frame), so it is not
+a noise effect: it arises because the image-edge distance transform is built from a binary
+thresholded-and-NMS'd edge mask and is then integer-quantized before bilinear sampling, so the
+distance field the Levenberg-Marquardt fit minimizes against is itself quantized at the
+sub-pixel scale (see :doc:`dev_guide_techniques_dt_fitting`). Unlike the disc correlator's
+sharp-edge S-curve -- which a band-limit in the cross-power refinement removes -- this floor
+lives in the distance-transform construction, so a correlator-side fix does not touch it. The
+intended remedy is to fit the final sub-pixel offset against the *continuous* gradient field
+rather than the quantized DT (the DT/NCC stage still does coarse acquisition); that work is a
+separate follow-up. Until then the limb fit is the least precise of the point-feature
+techniques on a well-resolved body, though it stays well inside the navigability bound. When the converged offset
 sits within a small tolerance of any axis bound of the search window, or when the rotation
 parameter is at the configured fraction of its cap, the result is flagged :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and the
 confidence formula's hard-zero gate forces confidence to zero. The spurious tests gate on

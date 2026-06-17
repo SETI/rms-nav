@@ -22,13 +22,8 @@ error trends with phase) are stable.
 Purpose and scope
 =================
 
-Per the simulator's cardinal principle, **the sim verifies, real data
-calibrates**. The sim does not set the per-technique confidence coefficients --
-those are tuned against the operator-curated real-image library. What the sim
-does is exercise the technique *algorithms* against ground truth that is correct
-by construction, and characterise how a navigation diagnostic *responds* to a
-controlled single-parameter change. This report is the summary of those two
-measurements:
+This report summarises two measurements taken on simulated frames with ground
+truth that is correct by construction:
 
 * **Algorithmic-invariant recovery** -- a planted offset (or camera roll) the
   navigator must recover, for each technique in the ladder.
@@ -36,10 +31,10 @@ measurements:
   body size, showing the navigability cliff, the phase response, and the
   technique-selection transitions.
 
-Because the confidence coefficients are uncalibrated placeholders, the report
-keys on the *recovered geometry* (offset error, roll error, primary technique,
-success/fail), not on the absolute confidence value, which barely moves on these
-clean frames and is a Phase 10 calibration concern.
+The report keys on the *recovered geometry* (offset error, roll error, primary
+technique, success/fail). The per-technique confidence coefficients are
+uncalibrated on these clean frames, so the absolute confidence value is reported
+but not interpreted as a calibrated tier.
 
 Methodology
 ===========
@@ -49,35 +44,30 @@ of values and navigating each step. For an offset or camera-roll sweep the
 planted ground truth is read from the (overridden) parameter itself, so the error
 is ``recovered - planted``. A sweep optionally **pins** one technique
 (``only_techniques=<name>``) and reads that technique's own recovered offset, so
-each technique is characterised independently -- even where its clean-field
-confidence would hold the fused status below ``success``. The harness, spec
-schema, runner, and plotting live in ``tests/integration/sim_sweep.py``,
-``sim_sweep_runner.py``, and ``sim_sweep_plots.py``.
+each technique is characterised independently. The harness, spec schema, runner,
+and plotting live in ``tests/integration/sim_sweep.py``, ``sim_sweep_runner.py``,
+and ``sim_sweep_plots.py``.
 
 **Offset value sets.** Two offset sweeps per technique probe the offset axis at
 two scales:
 
-- A **dense sub-pixel** sweep fills the pixel rather than sampling a few points.
-  It plants every offset in
+- A **dense sub-pixel** sweep plants every offset in
 
   ::
 
      0.0, 0.05, 0.1, 0.137, 0.2, 0.25, 0.31, 0.382, 0.45, 0.5, 0.55, 0.611,
      0.667, 0.7, 0.75, 0.823, 0.9, 0.95, 1.0, 1.25, 1.5, 1.618, 1.75   (px)
 
-  -- the quarter- and half-pixel anchors (0.25, 0.5, 0.75), the thirds (0.333,
-  0.667), golden-ratio fractions (0.382, 0.618, 1.618), and a spread of other
-  non-power-of-2 fractions, so a fraction-dependent artifact like pixel-locking
-  cannot hide between samples.
+  -- the quarter- and half-pixel anchors, the thirds, golden-ratio fractions, and
+  a spread of other non-power-of-2 fractions, sampling the pixel densely enough to
+  expose any fraction-dependent residual.
 - A **wide-range** sweep plants offsets across the full navigable range with
   varied fractional parts, up to each technique's ceiling.
 
 **Navigable range.** The recoverable offset is bounded by the extended-FOV search
-margin -- the navigator's configured pointing-error envelope. It is size-keyed per
-instrument: Cassini NAC is ``[13, 25]`` px at 256, ``[25, 50]`` at 512, and
-``[50, 140]`` at the full 1024, so a real frame's dozens-to-~hundred-pixel
-pointing error is exactly the envelope the navigator searches. The sweeps run at
-220 px (margin ~50 px, the generic fallback) for tractable runtime -- a 1024 px
+margin. It is size-keyed per instrument: Cassini NAC is ``[13, 25]`` px at 256,
+``[25, 50]`` at 512, and ``[50, 140]`` at the full 1024. The sweeps run at 220 px
+(margin ~50 px, the generic fallback) for tractable runtime -- a 1024 px
 navigation costs ~35 s -- and sweep to the measured per-technique ceiling:
 
 .. list-table:: Per-technique offset sweep (base scene + navigable ceiling)
@@ -133,9 +123,8 @@ deliberate (integration-marked) tier:
 
    pytest tests/integration/test_sim_algorithmic_invariants.py -m "" -n auto --dist=loadfile
 
-Specific defects the sweeps uncover get their own fast regression scene under
-``sim_scenes/regression/`` so they are guarded in the normal suite without
-running the full sweep (see *Offset accuracy by technique* below).
+Targeted regression scenes under ``sim_scenes/regression/`` guard specific
+behaviours in the normal suite without running the full sweep.
 
 See :doc:`/user_guide/user_guide_simulated_images` for the scene-catalog and
 sweep workflow, and :doc:`/dev_guide/dev_guide_navigation_models` for the
@@ -204,18 +193,12 @@ Observations:
 
 * Every technique recovers its planted transform to well under a pixel (or a
   third of a degree for the roll). The point-feature techniques -- ring edge,
-  blob, limb, and the star field -- are the most precise (a few hundredths of a
-  pixel), because their predicted geometry aligns exactly with a sharp image
-  feature.
-* The disc correlation now recovers to ~0.00 px after the gradient-NCC sub-pixel
-  fix the offset sweep drove (see below); before the fix it carried a ~0.2 px
-  bias here. The mesh-body disc retains a small residual (~0.01 px) because the
-  body is irregular but the correlation template is the same rendered shape. Both
-  are far inside the 1.0 px invariant bound.
+  blob, limb, and the star field -- are the most precise, a few hundredths of a
+  pixel.
+* The disc correlation recovers to ~0.00 px; the mesh-body disc carries a small
+  residual (~0.01 px). Both are far inside the 1.0 px invariant bound.
 * The high-phase blob crescent (~0.18 px at 120 deg) is the hardest case: only a
-  thin lit crescent constrains the centroid. It still recovers sub-pixel because
-  the blob subtracts the bias pedestal and thresholds against sky noise rather
-  than the body-inflated global noise.
+  thin lit crescent constrains the centroid. It still recovers sub-pixel.
 
 Single-variable sensitivity
 ===========================
@@ -273,10 +256,8 @@ cliff:
 
 The disc correlation is robust: the offset is recovered exactly until the read
 noise overwhelms the body signal, at which point the frame is classified
-unnavigable and navigation fails cleanly. The flat confidence reflects the
-uncalibrated placeholder coefficients -- a calibrated formula would taper the
-confidence down toward the cliff rather than stepping off it (a Phase 10 / T7
-concern).
+unnavigable and navigation fails cleanly. The confidence is flat across the
+navigable range on these uncalibrated clean frames.
 
 Phase-angle sweep
 -----------------
@@ -397,82 +378,58 @@ swept across the dense sub-pixel set and the wide range described under
    :alt: Sub-pixel offset recovery error by technique.
 
    Recovered-offset error (log scale) vs planted sub-pixel offset, each technique
-   pinned, **after the gradient-NCC fix**. The disc, blob, ring edge, and star
-   field all sit at a few hundredths of a pixel; the limb fit retains a separate
-   ~0.13 px distance-transform bias.
+   pinned. The disc, blob, ring edge, and star field all sit at a few hundredths
+   of a pixel; the limb fit holds a ~0.13 px distance-transform residual.
 
 .. list-table:: Sub-pixel recovery error (px) over the dense fractional sweep
    :header-rows: 1
-   :widths: 26 12 12 12 18
+   :widths: 34 14 14 14
 
    * - Technique
      - min
      - median
      - max
-     - median before fix
    * - BodyDiscCorrelateNav
      - 0.000
      - 0.022
      - 0.050
-     - 0.306
    * - BodyLimbNav
      - 0.016
      - 0.131
      - 0.218
-     - 0.131
    * - RingEdgeNav
      - 0.000
      - 0.011
      - 0.032
-     - 0.011
    * - BodyBlobNav
      - 0.002
      - 0.006
      - 0.011
-     - 0.006
    * - StarFieldFromCatalogNav (dim field)
      - 0.007
      - 0.023
      - 0.060
-     - 0.052
    * - StarFieldFromCatalogNav (bright field)
      - 0.001
      - 0.005
      - 0.011
-     - --
 
-All four point-feature / correlation techniques are now quantization-free; only
-the limb fit retains a sub-pixel bias:
+The disc, blob, ring edge, and star field are quantization-free; the limb fit
+holds a sub-pixel residual:
 
 - **Disc, blob, ring edge, and star field recover to a few hundredths of a
-  pixel** with no dependence on the fractional part.
-- **The disc gradient-NCC bias is fixed.** Before the fix the disc showed a
-  striking periodic error -- ~0.33 px at whole-pixel offsets, ~0 at the exact
-  half-pixel, period one pixel and magnitude-independent. The cause: the disc's
-  ``auto`` mode correlates Sobel **gradient-magnitude** surfaces for a smooth
-  body (the edge gives a higher-contrast peak), but the magnitude rectifies the
-  signal, so the cross-power peak is non-smooth at its apex and the upsampled-DFT
-  sub-pixel estimate is biased near every whole-pixel residual. The fix keeps the
-  gradient surfaces for the integer peak (and quality) but refines the sub-pixel
-  offset on the **raw-intensity** surfaces, which reach the correlator's 1/128 px
-  upsample resolution -- a zero shift between identical frames now recovers exactly
-  ``(0, 0)``, and the disc median drops from 0.306 to 0.022 px.
-- **The limb fit retains a separate ~0.13 px bias.** It is a different mechanism
-  -- the limb keys on the distance-transformed edge through a Levenberg-Marquardt
-  polyline fit, not the NCC correlator -- so the gradient-NCC fix does not touch
-  it. It is flagged for separate follow-up; it stays well inside the invariant
-  bound.
+  pixel** with no dependence on the fractional part. A zero shift between
+  identical frames recovers exactly ``(0, 0)``.
+- **The limb fit holds a ~0.13 px distance-transform residual** across the dense
+  sweep. It stays well inside the invariant bound. See
+  :doc:`/dev_guide/dev_guide_techniques_body_limb` for the mechanism.
 - **The star field is pinned here**, so its sub-pixel rows below ~1 px are absent:
-  the field matcher alone cannot separate a sub-pixel translation of the whole
-  field from noise and reports spurious (the two-star path, present in the full
-  ensemble, recovers them -- see the planted-offset star invariant). Above ~1 px the
-  dim field recovers to ~0.02 px (median 0.023 over the dense sweep) and the bright
-  field to ~0.005 px -- the most accurate of any technique. The per-star centroid
-  drives this: each matched inlier is re-centroided with a maximum-likelihood PSF
-  fit when it is faint, and kept on its brightness-weighted moment when it is bright
-  enough that the moment's noise has already fallen below the PSF fit's
-  sub-pixel-phase bias floor. The dim/bright split and that crossover are detailed
-  below.
+  the field matcher alone does not recover a sub-pixel translation of the whole
+  field (the two-star path in the full ensemble does -- see the planted-offset star
+  invariant). Above ~1 px the dim field recovers to ~0.02 px (median 0.023) and
+  the bright field to ~0.005 px, the most accurate of any technique. The dim/bright
+  split is detailed below; the per-star centroiding mechanism is in
+  :doc:`/dev_guide/dev_guide_techniques_star_field`.
 
 The wide-range sweep confirms each technique recovers across the navigable range,
 and exposes the blob's capture limit:
@@ -486,30 +443,17 @@ and exposes the blob's capture limit:
    within its bbox, degrading sharply once the body clips the integration window.
 
 The disc, ring, limb, and star recover with the same accuracy out to their
-ceilings (~48, ~48, ~40, ~20 px). The **blob is a small-offset technique**: its
-lit-weighted centroid is integrated over the predicted bbox, so for the 20 px body
-it holds under 0.05 px out to ~6 px, then degrades (~0.85 px at 10 px, ~5.8 px at
-20 px) as the body clips out of the window. A blob therefore refines a small
-residual; a large pointing error is found by the full-FOV disc search first.
+ceilings (~48, ~48, ~40, ~20 px). The **blob is a small-offset technique**: for
+the 20 px body it holds under 0.05 px out to ~6 px, then degrades (~0.85 px at
+10 px, ~5.8 px at 20 px) as the body clips out of the predicted bbox. See
+:doc:`/dev_guide/dev_guide_techniques_body_blob`.
 
-The disc gradient-NCC bias was a **core-correlator defect** (it lives in
-:func:`nav.support.correlate.navigate_with_pyramid_kpeaks`, not in the simulator),
-so it affected real-image disc navigation too. Because a real image's true offset
-is unknown, the fix was verified entirely with simulated images: the
-``regression/disc_subpixel_offset`` scene guards it in the normal suite without
-running the full sweep, the dense offset sweep is the broad-coverage
-characterization, and the fix re-blessed every disc-navigated baseline toward its
-planted offset (e.g. ``two_moons`` from a 0.36 px recovery error at zero offset to
-exactly ``(0, 0)``). The fix refines the final sub-pixel offset on raw intensity
-rather than gradient magnitude.
+Star-field centroiding: dim vs bright
+=====================================
 
-Star-field centroiding: dim vs bright and the PSF-refine crossover
-==================================================================
-
-The star field's accuracy is set by how precisely each matched star is centred.
-Two sweeps isolate the two regimes on the same six-star geometry and the same
-planted offset, varying only the stars' brightness: ``star_offset_fine`` plants a
-dim field (vmag 3-4, ~100-150 DN net peak) and ``star_offset_fine_bright`` a bright
+Two sweeps measure the star field on the same six-star geometry and planted
+offset, varying only the stars' brightness: ``star_offset_fine`` plants a dim
+field (vmag 3-4, ~100-150 DN net peak) and ``star_offset_fine_bright`` a bright
 field (vmag 0-0.8, ~1000-2000 DN net peak, below the 4095 DN full well).
 
 .. figure:: _figures/star_regime_accuracy.png
@@ -517,115 +461,85 @@ field (vmag 0-0.8, ~1000-2000 DN net peak, below the 4095 DN full well).
    :alt: Star-field sub-pixel accuracy for dim vs bright fields.
 
    Recovered-offset error (log scale) vs planted offset for the dim and bright
-   star fields. The dim field sits near the PSF-refined error floor (~0.02 px);
-   the bright field reaches ~0.005 px -- below every other technique.
+   star fields. The dim field sits near ~0.02 px; the bright field reaches
+   ~0.005 px -- below every other technique.
 
-Two estimators are available per star, and they trade off with brightness:
+The dim field recovers to a median ~0.023 px and the bright field to ~0.005 px,
+the most accurate of any technique. The centroiding mechanism behind this split
+is documented in :doc:`/dev_guide/dev_guide_techniques_star_field`.
 
-- The **brightness-weighted moment centroid** is unbiased but only noise-limited,
-  so its error falls as the star brightens (roughly as 1/SNR).
-- A **maximum-likelihood PSF fit** (``obs.star_psf().find_position`` against the
-  instrument's modelled point-spread function) reaches the minimum variance, so it
-  wins decisively when the star is faint -- but an undersampled PSF (the COISS NAC
-  star PSF is sigma ~0.54 px) carries a fixed sub-pixel-phase bias floor of
-  ~0.08 px that does not improve with brightness.
-
-The two curves cross near an integrated SNR of ~30 (field level): below it the PSF
-fit is the lower-error estimator, above it the moment is. The technique therefore
-refines each matched inlier with the PSF fit only while its box SNR is under the
-configurable ceiling ``techniques.StarFieldFromCatalogNav.tuning.psf_refine_snr_max``
-(default 30), and keeps the moment above it. The payoff is visible at both ends: the
-dim field improves from a median 0.052 px (moment-only) to 0.023 px, and the bright
-field reaches 0.005 px -- where forcing the PSF fit instead would *raise* it to
-~0.056 px by exposing the bias floor.
-
-A finer characterization sweeps a uniform-brightness field across a 20x integrated-SNR
-range and overlays the three centroiding modes -- moment-only, PSF-everywhere, and the
-shipped SNR-adaptive choice -- under three backgrounds: clean, elevated read noise, and a
-stray-light gradient. (Run by
+A finer characterization sweeps a uniform-brightness field across a 20x
+integrated-SNR range and overlays three centroiding modes -- moment-only,
+PSF-everywhere, and the shipped SNR-adaptive choice -- under three backgrounds:
+clean, elevated read noise, and a stray-light gradient. (Run by
 ``python -m tests.integration.star_snr_characterization``; not part of pytest.)
 
 .. figure:: _figures/star_snr_clean.png
    :width: 100%
    :alt: Star-field centroiding error vs SNR, clean background.
 
-   Clean background. The moment (blue) is noise-limited and improves without bound as
-   the field brightens; the PSF fit (orange) wins at low SNR but plateaus at its
-   ~0.05-0.07 px sub-pixel-phase bias floor. The shipped adaptive choice (green) rides
-   the lower envelope of the two -- PSF below the SNR ceiling, moment above it.
+   Clean background. The moment (blue) improves as the field brightens; the PSF
+   fit (orange) wins at low SNR but plateaus at ~0.05-0.07 px. The shipped
+   adaptive choice (green) rides the lower envelope of the two, crossing near an
+   integrated SNR of ~30.
 
 .. figure:: _figures/star_snr_highnoise.png
    :width: 100%
    :alt: Star-field centroiding error vs SNR, elevated read noise.
 
-   Elevated read noise (read_noise_dn 20). The crossover slides down to an integrated
-   SNR of ~16, so a fixed box-SNR ceiling is not perfectly background-invariant; the
-   default 30 stays close to the envelope but a noisier scene benefits from a lower
-   ceiling.
+   Elevated read noise (read_noise_dn 20). The crossover sits near an integrated
+   SNR of ~16.
 
 .. figure:: _figures/star_snr_gradient.png
    :width: 100%
    :alt: Star-field centroiding error vs SNR, stray-light gradient.
 
-   Stray-light linear gradient. The crossover sits near SNR ~21; the per-star PSF fit
-   subtracts a local background plane, so the gradient barely shifts the curves.
+   Stray-light linear gradient. The crossover sits near an integrated SNR of ~21;
+   the gradient barely shifts the curves.
 
-The crossover is configurable precisely because it drifts with the background (~16 under
-heavy read noise, ~21 under a gradient, ~30 clean); the default is set for the nominal
-case. Every regime was verified entirely on simulated images, since a real image's true
-offset is unknown; the moment-vs-PSF choice is unit-tested directly, the dim and bright
-sweeps are the broad-coverage characterization, and the SNR sweep above is the
-estimator-vs-estimator comparison.
+The moment/PSF crossover sits near an integrated SNR of ~30 on a clean
+background, ~16 under heavy read noise, and ~21 under a stray-light gradient. The
+estimator selection and its tuning are documented in
+:doc:`/dev_guide/dev_guide_techniques_star_field`.
 
 Per-technique accuracy across SNR and injected offset
 =====================================================
 
-The dim-vs-bright study above is the star field's; the same question -- how does each
-technique's accuracy depend on signal-to-noise, and on the injected offset itself -- is
-characterized for every technique by
-``python -m tests.integration.technique_snr_characterization`` (runner-only). Two figure
-families come out of it; both fix nothing the reader has to infer (offsets and noise levels
-are stated on each panel) and both are simulated, since a real image's true offset is
-unknown.
+Each technique's accuracy versus signal-to-noise and versus the injected offset
+is characterized by ``python -m tests.integration.technique_snr_characterization``
+(runner-only). Two figure families come out of it; offsets and noise levels are
+stated on each panel.
 
-**Accuracy versus SNR (fixed injected offset).** Each technique's base scene is rendered at a
-fixed ``(dv, du) = (+0.317, -0.211)`` px offset -- deliberately off the half- and
-quarter-pixel grid, since a round-number offset can land on a technique's sub-pixel-bias null
-and flatter the result (the disc, for instance, recovers a half-pixel offset *exactly* but
-carries a residual off-grid bias). The per-image read noise is swept from a clean frame down
-toward the navigability cliff; the x-axis is a uniform per-image SNR proxy
-``(peak - background) / robust_noise`` (the noise estimated from adjacent-pixel differences
-so a stray-light ramp does not inflate it). Because each technique's feature has a different
-intrinsic brightness, the curves occupy different SNR bands -- itself part of the
-characterization.
+**Accuracy versus SNR (fixed injected offset).** Each technique's base scene is
+rendered at a fixed off-grid ``(dv, du) = (+0.317, -0.211)`` px offset. The
+per-image read noise is swept from a clean frame down toward the navigability
+cliff; the x-axis is a uniform per-image SNR proxy
+``(peak - background) / robust_noise``. Each technique's feature has a different
+intrinsic brightness, so the curves occupy different SNR bands.
 
 .. figure:: _figures/technique_snr_nominal.png
    :width: 100%
    :alt: Per-technique recovered-offset error vs SNR, nominal background.
 
-   Nominal background. The disc (~0.01 px) and blob (~0.008 px) are the most accurate and both
-   flat with SNR; the disc reaches that floor only because the correlator's sub-pixel refine is
-   band-limited (see the note below) -- without that it would sit at ~0.03 px here from the
-   sharp-edge S-curve. The star improves steadily with SNR. The ring is flat at ~0.06 px: that
-   residual is a distance-transform effect (``RingEdgeNav`` is not correlation based), shared
-   with the limb, not the correlator artifact the disc had. The limb is pinned near its ~0.15 px
-   distance-transform bias floor regardless of SNR -- a separate follow-up, not a noise problem.
+   Nominal background. The disc (~0.01 px) and blob (~0.008 px) are the most
+   accurate and both flat with SNR. The star improves steadily with SNR. The ring
+   is flat at ~0.06 px and the limb at ~0.15 px, both distance-transform residuals
+   independent of SNR.
 
 .. figure:: _figures/technique_snr_gradient.png
    :width: 100%
    :alt: Per-technique recovered-offset error vs SNR, stray-light gradient.
 
-   A gentle stray-light gradient (linear ramp ~3% of full scale). The bright compact and
-   extended features survive -- the blob stays most accurate (~0.016 px), the disc rises to
-   ~0.04 px, the ring to ~0.06 px -- but the limb and star field drop out entirely: the ramp
-   pushes the dim-field detections and the limb edge below their working point, so neither
-   returns a result (their curves are absent). Stray light is therefore a far bigger threat to
-   the faint-feature techniques than read noise alone.
+   A gentle stray-light gradient (linear ramp ~3% of full scale). The blob stays
+   most accurate (~0.016 px), the disc rises to ~0.04 px, the ring holds ~0.06 px;
+   the limb and star field return no result (their curves are absent). Stray light
+   is a larger threat to the faint-feature techniques than read noise alone.
 
-The disc and ring sub-pixel residuals are off-grid effects (zero at integer and half-pixel
-offsets), so they are measured against an off-grid planted offset; their mechanisms and the
-disc correlator band-limit are documented in the developer guide
-(:doc:`/dev_guide/dev_guide_techniques_body_disc`).
+The disc and ring sub-pixel residuals are off-grid effects (zero at integer and
+half-pixel offsets), measured here against an off-grid planted offset. Their
+mechanisms are documented in
+:doc:`/dev_guide/dev_guide_techniques_body_disc` and
+:doc:`/dev_guide/dev_guide_techniques_ring_edge`.
 
 **Accuracy versus injected offset (fixed SNR).** Holding the read noise at three levels, a
 pure-vertical offset is swept from 0 to 1.75 px (``u`` held at 0) for every technique. The
@@ -686,49 +600,37 @@ and the separability floor:
      - 0.12 deg
      - 1.89 deg
 
-The key limitation: **a small roll is not separable from a translation**.
-``StarFieldFromCatalogNav``'s RANSAC pattern matcher cannot distinguish a sub-0.75
-deg roll from a pure shift of the field, so it returns a zero roll (and a spurious
-flag) below that floor. The two-star ``StarUniqueMatchNav`` path -- a rigid
-two-point fit -- extends recovery down to ~0.5 deg, which is why the *full
-ensemble* recovers the 0.5 deg roll even though the field matcher alone does not.
-At exactly zero roll there is no rotation signal to fit, so no technique reports
-one. Above ~2-3 deg the outer stars rotate past the matcher's inlier tolerance and
-the inlier count falls below quorum. The usable window for the field matcher is
-therefore roughly 0.75-2 deg, widening to ~0.5 deg with the two-star path.
+A small roll is not separable from a translation. ``StarFieldFromCatalogNav``'s
+RANSAC pattern matcher returns a zero roll (and a spurious flag) below ~0.75 deg.
+The two-star ``StarUniqueMatchNav`` path recovers down to ~0.5 deg, so the *full
+ensemble* recovers the 0.5 deg roll even where the field matcher alone does not.
+At exactly zero roll no technique reports a rotation. Above ~2-3 deg the inlier
+count falls below quorum. The usable window for the field matcher is therefore
+roughly 0.75-2 deg, widening to ~0.5 deg with the two-star path. See
+:doc:`/dev_guide/dev_guide_techniques_star_field` and
+:doc:`/dev_guide/dev_guide_techniques_star_unique_match`.
 
 Small-body navigation floor
 ===========================
 
-The range sweep above fails at a 12 px body, which is small but not
-fundamentally unnavigable. The cause is not the algorithm: at a 16 px body the
-blob centroid is still exact (the correlation log reports the right peak), but the
-``BODY_BLOB`` feature's reliability falls just below the gate
-(``reliability 0.18 < threshold 0.20``) because its ``blob_extent_px`` term scores
-a small body low. At 24 px the reliability clears the gate (0.22) and the body
-navigates. The floor is thus set by the **reliability calibration**, not the
-centroid: the gate deliberately distrusts tiny bodies because on a *real* frame a
-handful of pixels is noise- and PSF-dominated. The centroid itself works well
-below the gate, so navigating down to a few pixels is a calibration decision (a
-Phase 10 concern), not an algorithmic barrier -- and one that must be tuned
-against real data rather than the noise-light sim.
+The range sweep above fails at a 12 px body. At a 16 px body the blob centroid is
+still exact, but the ``BODY_BLOB`` feature's reliability falls just below the gate
+(``reliability 0.18 < threshold 0.20``). At 24 px the reliability clears the gate
+(0.22) and the body navigates. The floor is set by the feature-reliability gate,
+not by the centroid algorithm; the centroid itself is accurate below the gate. See
+:doc:`/dev_guide/dev_guide_techniques_body_blob`.
 
 I/F-calibrated vs raw-DN navigation
 ===================================
 
-Every sweep and scene above renders in raw DN. The
-``planted_offset_disc_if`` invariant scene confirms navigation is **unit-agnostic**:
-the same body on the I/F-calibrated ``coiss_calib_nac`` instrument recovers the
-planted offset exactly. The navigation techniques key on scale-invariant
-quantities -- normalised cross-correlation for the disc, a MAD-relative noise
-threshold for detection and the blob -- so they do not care whether a pixel is in
-DN or I/F. The differences are in the detector model, not the navigation: the
-``calibrated_if`` render path leaves the composed signal in [0, 1] I/F units and
-applies **no** DN detector model (no Poisson shot noise, no full-well saturation
-gate, no bias pedestal or missing-data markers), because those map onto DN, not
-I/F. A consequence worth noting is that simulated I/F frames are currently
-noise-light -- realistic I/F noise is a deferred sim feature -- so an I/F scene
-exercises the navigation algorithms but not yet a realistic I/F noise regime.
+Every sweep and scene above renders in raw DN. The ``planted_offset_disc_if``
+invariant scene confirms navigation is unit-agnostic: the same body on the
+I/F-calibrated ``coiss_calib_nac`` instrument recovers the planted offset exactly.
+The ``calibrated_if`` render path leaves the composed signal in [0, 1] I/F units
+and applies no DN detector model (no Poisson shot noise, no full-well saturation
+gate, no bias pedestal or missing-data markers). Simulated I/F frames are
+therefore noise-light: an I/F scene exercises the navigation algorithms but not a
+realistic I/F noise regime.
 
 Summary
 =======
@@ -738,25 +640,19 @@ Summary
   transform to sub-pixel / sub-half-degree accuracy on clean simulated frames.
 * The disc, blob, ring edge, and star field are quantization-free: they recover
   any offset -- whole, near-boundary, or arbitrary fraction -- to a few hundredths
-  of a pixel.
-* The offset sweep surfaced -- and drove the fix of -- a real core-correlator
-  defect: the disc's gradient-magnitude sub-pixel refinement was biased (~0.3 px,
-  periodic in the fractional offset) where raw NCC reaches ~1/128 px. Refining the
-  sub-pixel offset on raw intensity dropped the disc median from 0.306 to 0.022 px
-  and re-blessed every disc-navigated baseline toward its planted offset, verified
-  entirely with simulated images. The limb fit's separate ~0.13 px
-  distance-transform bias remains, flagged for follow-up.
-* The sweeps confirm the expected qualitative behaviour: navigation degrades to a
+  of a pixel. The disc and blob are the most accurate (~0.01 px). The limb holds a
+  ~0.13 px distance-transform residual and the ring a ~0.06 px residual.
+* The star field improves with SNR: a dim field recovers to ~0.02 px and a bright
+  field to ~0.005 px, the most accurate of any technique.
+* The sweeps show the expected qualitative behaviour: navigation degrades to a
   clean failure past the noise cliff, the resolved body handles the full phase
   range with a mid-phase accuracy dip, and the primary technique walks the limb
   -> disc -> blob ladder as a body shrinks.
 * A small camera roll is not separable from a translation: the field matcher
   recovers rolls only above ~0.75 deg (the two-star fit extends this to ~0.5 deg),
-  and the small-body navigation floor (~16-24 px) is set by the blob reliability
-  calibration, not the centroid algorithm. Navigation is unit-agnostic: I/F frames
+  and the small-body navigation floor (~16-24 px) is set by the feature-reliability
+  gate, not the centroid algorithm. Navigation is unit-agnostic: I/F frames
   navigate identically to raw DN.
-* The confidence column is flat by design -- the coefficients are uncalibrated
-  placeholders, so the absolute confidence is not yet a calibrated tier. Turning
-  these sweeps into confidence-monotonicity tripwires is the Phase 10 calibration
-  / T7 work; today they verify the recovered geometry and the technique
-  selection, which is what the simulated layer is for.
+* The confidence column is flat across the navigable range on these uncalibrated
+  clean frames; the report verifies the recovered geometry and the technique
+  selection.

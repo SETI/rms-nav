@@ -62,7 +62,7 @@ signal, making the cross-power peak non-smooth at its apex) into the reported of
 correlation-surface curvature provides the Cramer-Rao lower bound covariance.
 
 Sub-pixel refinement band-limit (``refine_lowpass_sigma_px``)
-------------------------------------------------------------
+-------------------------------------------------------------
 
 Before the cross-power spectrum is formed, the full-resolution refinement low-passes both
 surfaces -- the image and the (already mask-multiplied) template -- with a Gaussian of
@@ -90,6 +90,18 @@ applied **only** to the final full-resolution refine; the coarse pyramid levels 
 sharp surfaces so integer-peak selection is unaffected. It must low-pass the *mask-multiplied*
 template, not the bare template -- low-passing before the mask multiply lets the hard mask
 edge re-sharpen the model and makes the bias worse, not better.
+
+**Alternative considered and rejected: a render-time PSF.** Since the bias comes from sharp
+edges, an obvious idea is to convolve the simulated body (and, to match, the template) with
+the instrument point-spread function so the edges are realistically soft. This does not work
+as a fix. Blurring only the rendered image at the camera's own ~0.54 px sigma leaves it
+mismatched against the still-sharp template -- a soft image against a sharp template is a
+worse mismatch than two matched sharp surfaces -- and it destabilizes the integer-peak choice
+at some phases; a larger blur is monotonically worse. It is also the wrong layer: the bias is
+in the navigator's correlation, which applies to real PSF-blurred images too, so it must be
+fixed in the correlator (the band-limit above) rather than in the simulator. The band-limit
+removes the bias for both simulated and real images and changes neither the rendered image nor
+the template.
 
 Mode selection (auto / raw / gradient)
 --------------------------------------
