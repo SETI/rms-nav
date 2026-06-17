@@ -605,15 +605,13 @@ characterization.
 
    Nominal background. The disc (~0.03 px) and ring (~0.06 px) are flat with SNR --
    noise-immune but carrying a residual *off-grid* sub-pixel bias that a round-number offset
-   would have hidden (both recover the half-pixel offset far more tightly). This residual is a
-   **simulator artifact, not a navigation defect**: the sim renders bodies and rings with hard
-   edges (no instrument PSF, unlike the simulated stars), and the aliased edge displaces the
-   correlator's Fourier sub-pixel estimate by a phase-dependent amount; a real limb is
-   PSF-blurred and band-limited, so the bias does not arise on real images (blurring the
-   rendered edge with a sigma>=1 PSF collapses it to <0.005 px -- see the note below). The blob
-   is the most accurate at high SNR (~0.008 px) and the star improves steadily with SNR. The
-   limb is pinned near its ~0.15 px distance-transform bias floor regardless of SNR, a separate
-   follow-up rather than a noise problem.
+   would have hidden (both recover the half-pixel offset far more tightly). The residual comes
+   from correlating a sharp (anti-aliased, PSF-free) body / ring edge against an equally sharp
+   template -- matched sharp edges still alias the cross-power peak -- and so is removed by
+   PSF-convolving the edge in both the simulator and the template (see the note below). The
+   blob is the most accurate at high SNR (~0.008 px) and the star improves steadily with SNR.
+   The limb is pinned near its ~0.15 px distance-transform bias floor regardless of SNR, a
+   separate follow-up rather than a noise problem.
 
 .. figure:: _figures/technique_snr_gradient.png
    :width: 100%
@@ -628,19 +626,23 @@ characterization.
 
 .. note::
 
-   **The disc / ring off-grid sub-pixel residual is a hard-edge rendering artifact.** Mapping
+   **The disc / ring off-grid sub-pixel residual is a hard-edge correlation artifact.** Mapping
    the disc residual against sub-pixel phase gives an odd S-curve that is zero at integer and
    half-pixel offsets and peaks (~0.03 px, up to ~0.1 px at the worst 2-D phase) near the
    quarter-pixel; it is per-axis separable (a pure-v offset produces a v-residual with ~zero
    u-coupling), which is why the single-axis ``*_offset_fine`` sweeps report a faithful
-   per-axis figure -- the other axis behaves symmetrically. The cause is not the correlator:
-   on a band-limited (Fourier) shift the upsampled-DFT estimate is unbiased to ~0.003 px. It is
-   that the simulator renders bodies and rings with hard, anti-aliased-but-not-PSF-blurred
-   edges, whereas a real limb is convolved with the optical PSF over ~1 px. Re-running the
-   correlation on a synthetic disc shifted as a sharp edge reproduces the S-curve; blurring the
-   same edge with a sigma>=1 PSF removes it (residual <0.005 px). The realistic fix is to
-   convolve simulated bodies and rings with the instrument PSF (the renderer already does this
-   for stars); real-image disc / ring navigation does not carry this bias.
+   per-axis figure -- the other axis behaves symmetrically. On a band-limited (Fourier) shift
+   the upsampled-DFT estimate is unbiased to ~0.003 px, so the cause is the sharp edge: both
+   the simulator's rendered body / ring and the navigator's correlation template are oversampled
+   *anti-aliased* silhouettes with no point-spread blur, and correlating two matched sharp
+   edges still aliases the cross-power peak by a sub-pixel-phase-dependent amount (a synthetic
+   sharp-edge shift reproduces the S-curve; blurring **both** images with a sigma>=1 PSF removes
+   it, to <0.005 px). A real limb is convolved with the optical PSF over ~1 px, so the clean fix
+   is to PSF-convolve the body / ring edge consistently in *both* the simulator and the nav
+   model template (blurring only the simulated image leaves it mismatched against the sharp
+   template and destabilizes the fit). That coupled change also sharpens real-image disc / ring
+   navigation, since a real PSF-blurred limb currently correlates against a sharp template; it
+   is tracked as a separate follow-up.
 
 **Accuracy versus injected offset (fixed SNR).** Holding the read noise at three levels, a
 pure-vertical offset is swept from 0 to 1.75 px (``u`` held at 0) for every technique. The
