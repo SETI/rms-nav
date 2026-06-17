@@ -213,8 +213,6 @@ class NavModelStars(NavModel):
         mag_limit = float(self.obs.star_max_usable_vmag())
         min_snr = float(getattr(self._stars_config, 'min_predicted_snr', 0.0))
         max_smear = float(getattr(self._stars_config, 'max_smear', math.inf))
-        sat_mask = context.saturation_mask_ext
-        cosmic_mask = context.cosmic_ray_mask_ext
         mag_offset_value = _resolve_mag_offset(self.obs)
         self._logger.debug(
             'image_noise_sigma = %.3g, star_max_usable_vmag = %.3f, '
@@ -233,7 +231,6 @@ class NavModelStars(NavModel):
         skipped_smear = 0
         in_body_count = 0
         in_ring_count = 0
-        in_sat_count = 0
         for star in self._stars:
             # Magnitude gate: drop stars with no catalog magnitude and stars
             # fainter than the per-image limiting magnitude.  This is mostly
@@ -259,15 +256,18 @@ class NavModelStars(NavModel):
             v_extfov, u_extfov = self._extfov_indices(star)
             in_body = bool((star.conflicts or '').startswith('BODY'))
             in_ring = bool((star.conflicts or '').startswith('RING'))
-            in_sat = bool(_safe_mask_lookup(sat_mask, v_extfov, u_extfov))
-            in_cosmic = bool(_safe_mask_lookup(cosmic_mask, v_extfov, u_extfov))
-            in_sat_or_cosmic = in_sat or in_cosmic
+            # Saturation / cosmic-ray contamination is NOT determined here.  The
+            # mask is image content at the *actual* star position, but the model
+            # only knows the *predicted* (unshifted) position; with any pointing
+            # offset the two differ, so a predicted-position lookup is meaningless
+            # -- and a sharp star peak is itself flagged by ``cosmic_ray_mask``,
+            # which would gate every star whenever the offset is near zero.
+            # Real contamination is handled at detection time, where the matched
+            # peak's actual position and shape are known.
             if in_body:
                 in_body_count += 1
             if in_ring:
                 in_ring_count += 1
-            if in_sat_or_cosmic:
-                in_sat_count += 1
             cov = _crlb_covariance(
                 snr=snr_eff,
                 sigma_psf=sigma_psf,
@@ -299,20 +299,20 @@ class NavModelStars(NavModel):
                         snr=snr_eff,
                         in_body=in_body,
                         in_ring=in_ring,
-                        in_saturation=in_sat_or_cosmic,
+                        in_saturation=False,
                     ),
                     reliability_reasons=NavReliabilityBreakdown(
                         predicted_snr=_snr_reason_score(snr_eff, min_snr),
                         in_body_silhouette=in_body or in_ring,
-                        in_saturation_or_cosmic=in_sat_or_cosmic,
+                        in_saturation_or_cosmic=False,
                         smear_length_ok=True,
                     ),
                     usable_types=frozenset({NavFeatureType.STAR}),
                     flags=StarFlags(
-                        saturated=in_sat,
+                        saturated=False,
                         smear_length_px=smear_len,
                         in_body_silhouette=in_body or in_ring,
-                        in_saturation_or_cosmic_mask=in_sat_or_cosmic,
+                        in_saturation_or_cosmic_mask=False,
                         predicted_snr=float(snr_eff),
                         vmag=(None if star.vmag is None else float(star.vmag)),
                     ),
@@ -326,10 +326,9 @@ class NavModelStars(NavModel):
         )
         if features:
             self._logger.debug(
-                'Flagged in-body = %d, in-ring = %d, in-saturation/cosmic = %d',
+                'Flagged in-body = %d, in-ring = %d',
                 in_body_count,
                 in_ring_count,
-                in_sat_count,
             )
         return features
 

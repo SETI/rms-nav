@@ -1,0 +1,32 @@
+schema_version: 1
+scene_name: star_zero_offset
+instrument: coiss_nac
+image_size_vu: [200, 200]
+random_seed: 7
+exposure_sec: 1.0
+# Regression scene for the star reliability-gate defect: the star model used to
+# check the saturation / cosmic-ray mask at each star's PREDICTED position and
+# zero its reliability if flagged.  A sharp star peak is itself flagged by the
+# cosmic-ray detector, so at a near-zero offset (prediction on the star) every
+# star was gated and the star techniques had nothing to navigate.  With a zero
+# planted offset the prediction coincides exactly with each star; the star field
+# must still recover it.
+bodies: []
+rings: []
+stars:
+  list:
+    - {name: S1, v: 40.0, u: 50.0, vmag: 3.0}
+    - {name: S2, v: 160.0, u: 150.0, vmag: 3.0}
+    - {name: S3, v: 70.0, u: 165.0, vmag: 3.0}
+    - {name: S4, v: 150.0, u: 55.0, vmag: 3.0}
+    - {name: S5, v: 50.0, u: 120.0, vmag: 3.0}
+    - {name: S6, v: 150.0, u: 100.0, vmag: 3.0}
+    - {name: S7, v: 112.0, u: 172.0, vmag: 3.0}
+    - {name: S8, v: 88.0, u: 38.0, vmag: 3.0}
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+ground_truth:
+  planted_offset_dv_px: 0.0
+  planted_offset_du_px: 0.0
+  planted_rotation_deg: 0.0

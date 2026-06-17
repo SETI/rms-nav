@@ -21,25 +21,26 @@ _REGRESSION_DIR = Path(__file__).parent / 'sim_scenes' / 'regression'
 # pixel.  The correlator upsamples to 1/128 px and reaches that on raw intensity,
 # so 0.1 px is a generous bound that the correct behaviour clears comfortably.
 _DISC_SUBPIXEL_TOLERANCE_PX = 0.1
+# A star field must recover a zero offset; the moment centroid clears 0.1 px today
+# and the PSF-fit refinement tightens it further.
+_STAR_ZERO_OFFSET_TOLERANCE_PX = 0.1
 
 
-def _disc_offset_error(scene_name: str) -> float:
-    """Pin BodyDiscCorrelateNav on a regression scene; return its offset error."""
+def _technique_offset_error(scene_name: str, technique: str) -> float:
+    """Pin one technique on a regression scene; return its recovered-offset error."""
     scene = load_sim_scene(_REGRESSION_DIR / f'{scene_name}.yaml')
     obs = ObsSim.from_file('/tmp/regression.json', sim_params=scene.to_sim_params())
     result = NavOrchestrator(
-        build_models_for_obs(obs), only_models='*', only_techniques='BodyDiscCorrelateNav'
+        build_models_for_obs(obs), only_models='*', only_techniques=technique
     ).navigate(obs)
-    disc = next(
-        (t for t in result.per_technique if t.technique_name == 'BodyDiscCorrelateNav'), None
-    )
-    assert disc is not None
-    assert not disc.spurious
-    assert disc.offset_px is not None
+    pinned = next((t for t in result.per_technique if t.technique_name == technique), None)
+    assert pinned is not None
+    assert not pinned.spurious
+    assert pinned.offset_px is not None
     gt = scene.ground_truth
     return math.hypot(
-        disc.offset_px[0] - gt.planted_offset_dv_px,
-        disc.offset_px[1] - gt.planted_offset_du_px,
+        pinned.offset_px[0] - gt.planted_offset_dv_px,
+        pinned.offset_px[1] - gt.planted_offset_du_px,
     )
 
 
@@ -50,4 +51,18 @@ def test_disc_recovers_whole_pixel_offset() -> None:
     the gradient surfaces but the sub-pixel offset is refined on raw intensity, so
     a whole-pixel offset no longer carries the ~0.3 px-per-axis rectification bias.
     """
-    assert _disc_offset_error('disc_subpixel_offset') < _DISC_SUBPIXEL_TOLERANCE_PX
+    assert _technique_offset_error('disc_subpixel_offset', 'BodyDiscCorrelateNav') < (
+        _DISC_SUBPIXEL_TOLERANCE_PX
+    )
+
+
+def test_star_field_recovers_zero_offset() -> None:
+    """The star field recovers a zero offset, where the prediction sits on each star.
+
+    Guards the star reliability-gate defect: the model no longer gates a star on
+    the saturation / cosmic-ray mask at its predicted position, so a sharp star
+    flagged by the cosmic-ray detector is not killed when the offset is near zero.
+    """
+    assert _technique_offset_error('star_zero_offset', 'StarFieldFromCatalogNav') < (
+        _STAR_ZERO_OFFSET_TOLERANCE_PX
+    )
