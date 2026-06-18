@@ -44,17 +44,19 @@ plan. A new contributor should read this first, then the phase it points to.
   B4 (saturation), B5 (PSF), B6 (stray light) are **done**. B7 (irregular bodies)
   is **partially done** (procedural mesh render + navigator prediction +
   end-to-end navigation; remaining: mesh-vs-ellipsoid pose scenarios, named
-  meshes). B3 (smear) is **postponed** on upstream `psfmodel`; B8 (diffraction)
-  is **dropped**.
-- **GUI:** G0, G1, G2, G4, G5, G6, G7, G8 are **done**. G3 (smear) is postponed
-  with B3.
+  meshes). B3 (smear) is **deferred** on upstream `psfmodel` (issue #151); B8
+  (diffraction) is **deferred** as a lowest-priority future enhancement, only
+  relevant if a spike-producing instrument is ever supported (issue #152).
+- **GUI:** G0, G1, G2, G4, G5, G6, G7, G8 are **done**. G3 (smear) is **deferred**
+  with B3 (issue #151).
 - **Test layer:** T1 (scene catalog), T2 (regression baselines), T3 (sweeps) are
   **done**. T4 (algorithmic invariants) is **done** -- disc, blob (incl. the
   displaced high-phase crescent), limb, ring edge, star field, camera roll, the
   `StarUniqueMatchNav` one-star path, and the `StarRefineNav` pass-2
   prior-refinement path all navigate from catalog scenes and recover planted
-  transforms. T5 (alpha bootstrap), T6 (real-vs-sim diagnostics), T7 (calibration
-  validation) are **not started** and depend on the real-data Phase 10 calibration.
+  transforms. T5 (alpha bootstrap), T6 (real-vs-sim diagnostics), and T7
+  (calibration validation) are **deferred** until the project is ready to run the
+  real-data confidence calibration; they are specified together in issue #153.
 
 ### 0.2 Navigation-accuracy work completed alongside the plan
 
@@ -147,9 +149,28 @@ centroid or a prior. Self-contained in `nav_technique_body_blob.py` plus the sha
 `_build_blob_feature`; no orchestrator change. See `dev_guide_techniques_body_blob`,
 `dev_guide_navigation_models_body`, and the simulator report's navigable-range table.
 
-The next navigation/sim improvement: none queued -- the per-technique navigable-ceiling gaps
-identified by the T3 sweeps are now closed (disc, limb, ring at ~extfov; blob at ~extfov for
-both disc and crescent regimes).
+The per-technique navigable-ceiling gaps identified by the T3 sweeps are now closed (disc,
+limb, ring at ~extfov; blob at ~extfov for both disc and crescent regimes).
+
+**The next sim work item is B7's remaining increments** -- the only active (non-done,
+non-deferred) work left in this plan. Deferred work is parked in GitHub issues: smear
+rendering + GUI controls (B3/G3, #151, pending upstream `psfmodel`), diffraction spikes (B8,
+#152, a lowest-priority future enhancement), and the calibration test layer (T5/T6/T7, #153,
+gated on the real-data confidence calibration). B7 is sim-only and needs no real data:
+
+1. **Irregular-body pose scenarios** (see the B7 scenario matrix and the "What form each
+   remaining scenario takes" subsection for the exact test-vs-sweep mapping): scenario 1
+   (mesh-vs-mesh, resolved-mesh limb -- invariant test), scenario 2 (mesh-vs-ellipsoid same
+   pose -- invariant test + a `phase_irregularity_factor` characterization sweep), scenario 3
+   (mesh-vs-ellipsoid disagreeing pose -- a degradation sweep plus a per-technique behavioral
+   test asserting the limb degrades while the pose-free blob holds; NOT an exact-recovery
+   invariant), and scenario 4 (centroid-only on a mesh body -- invariant test pinned to
+   `BodyBlobNav`, a mesh variant of the existing crescent blob scenes).
+2. **Named meshes / `shape_meshes/` sourcing decision** (section 12.3): the generator is
+   procedural today, so no real Hyperion/Phoebe mesh files are committed yet.
+
+B7 also unblocks the eventual T5 bootstrap, since `phase_irregularity_factor` only varies once
+scenarios 2-3 land.
 
 **Validation discipline (carried throughout):** validate accuracy changes only with
 simulated images; use ensemble statistics across seeds and offsets, not single
@@ -554,11 +575,12 @@ new `tests/nav/sim/test_sim_instrument_coupling.py`.
 
 ### Phase B3: Smear as a true convolution
 
-**Status: postponed.** `psfmodel` is being extended to produce smeared
-PSFs directly.  Once that lands, the sim renders smear by asking
-`psfmodel` for the smeared kernel rather than carrying its own
-line-integral code, so this phase waits on that upstream work instead
-of building a parallel implementation now.
+**Status: deferred -- tracked in issue #151** (filed self-contained, with the
+backend rendering work and the GUI/scene controls of G3 together).  `psfmodel`
+is being extended to produce smeared PSFs directly.  Once that lands, the sim
+renders smear by asking `psfmodel` for the smeared kernel rather than carrying
+its own line-integral code, so this phase waits on that upstream work instead of
+building a parallel implementation now.
 
 **Goal:** rendered smeared stars become line integrals of the PSF,
 matching the navigator's `smeared_psf.py` model.
@@ -780,12 +802,52 @@ matters: a chaotic rotator's pose is genuinely unknown, so the useful
 tests are the ones where the navigator either guesses the orientation
 wrong (3) or declines to use it at all (4).
 
-**Prerequisite to confirm:** wire `NavModelBodySimulated` into the live
-model-selection path so a simulated obs builds the sim-aware body model
-(reading the orientation from sim metadata) instead of the SPICE-backed
-`NavModelBody`.  `grep` shows `NavModelBodySimulated` is defined but not
-yet instantiated by the orchestration; closing that is a precondition for
-any sim body navigation, mesh or ellipsoid.
+#### What form each remaining scenario takes (test vs sweep)
+
+The scenarios are not all the same kind of artifact.  This repo has two tracks
+-- exact-recovery **invariant tests** (`tests/integration/test_sim_algorithmic_invariants.py`,
+in the normal pytest run) and **characterization sweeps**
+(`tests/integration/sim_sweeps/*.yaml` + `sim_sweep_runner` -> report figures,
+with coarse response-shape assertions in `test_sim_sweeps.py`).  Map the
+remaining scenarios onto them as follows:
+
+- **Scenario 1 (mesh vs mesh, same pose) -> invariant test.** A scene under
+  `sim_scenes/algorithmic_invariants/` whose render and navigation geometry are
+  the same mesh + pose; assert the resolved-mesh limb path recovers the planted
+  offset to a tight tolerance.  This is the standard planted-offset invariant
+  shape.  (`planted_offset_irregular` already exercises a mesh body via the disc
+  correlator; the new work is pinning the *mesh limb* technique.)
+- **Scenario 2 (mesh vs ellipsoid, same pose) -> invariant test + a
+  characterization sweep.**  A pinned invariant scene confirms the body still
+  navigates with a shape-mismatched ellipsoid prediction; a sweep over phase (or
+  over a shape-irregularity parameter) characterizes how `phase_irregularity_factor`
+  and the resulting centroid bias grow, feeding the simulator report.  Correct
+  pose, wrong shape -- this is the clean isolation of the irregularity term.
+- **Scenario 3 (mesh vs ellipsoid, disagreeing pose) -> a sweep AND a behavioral
+  test; NOT an exact-recovery invariant.**  The point is that recovery
+  *degrades*, so do not assert "limb recovers the planted offset".  Instead:
+  (a) a **sweep** that walks the navigation pose away from the render pose and
+  records the limb technique's offset error and confidence as the disagreement
+  grows (a degradation curve in the report); and (b) a **behavioral test** that
+  asserts the *decision* -- on a wrong-pose body the limb per-technique error is
+  much larger than on the correct-pose body while the pose-free `BodyBlobNav`
+  stays accurate, i.e. the system should not trust the confidently-wrong limb.
+  Because the ensemble's demote-to-pose-free choice is confidence-driven and the
+  confidence alphas are uncalibrated placeholders, assert this **per-technique**
+  (the geometry/error gap is real and placeholder-independent), not on the fused
+  tier; the fused "prefers the pose-free answer" assertion only becomes clean
+  after the real-data calibration (issue #153).
+- **Scenario 4 (centroid-only) -> invariant test.**  An irregular-mesh body with
+  the navigator carrying no oriented model, pinned to `BodyBlobNav`, asserting
+  exact planted-offset recovery.  Largely already covered in ellipsoid form by
+  the high-phase crescent blob scenes; the delta is a mesh-rendered variant.
+
+**Prerequisite (done):** `NavModelBodySimulated` is wired into the live
+model-selection path -- `build_models_for_obs` builds it (and
+`NavModelRingsSimulated`) for a simulated obs, gated on `obs.is_simulated`, while
+the SPICE-backed models skip a simulated obs.  So sim body navigation (mesh or
+ellipsoid) is available; the remaining work is the scenarios above, not the
+wiring.
 
 **Why now:** the `phase_irregularity_factor` term added in Phase 10
 §F is identically zero on every sim frame today.  Without B7, that
@@ -797,13 +859,17 @@ on sim.
 body NavModel selection path, new
 `tests/nav/sim/test_sim_irregular_body.py`.
 
-### Phase B8: Diffraction spikes -- dropped
+### Phase B8: Diffraction spikes -- deferred (future enhancement, lowest priority)
 
-**Will not be done.**  The supported cameras have no diffraction
-spikes.  The Cassini telescope in particular has no secondary-mirror
-support vanes, so bright stars never show a cross-shaped diffraction
-pattern.  There is nothing to model, so this phase is removed from the
-plan permanently.
+**Status: deferred -- tracked in issue #152.**  None of the supported cameras
+have diffraction spikes.  The Cassini telescope in particular has no
+secondary-mirror support vanes, so bright stars never show a cross-shaped
+diffraction pattern, and there is nothing to model today.  Rather than drop it
+permanently, it is parked as a lowest-priority future enhancement: implement it
+only if the navigation system is ever extended to support an instrument whose
+optics genuinely produce diffraction spikes, at which point the simulator should
+reproduce the spike signature for star-detection / artifact-rejection testing.
+Until such an instrument lands, no work is scheduled against it.
 
 ---
 
@@ -877,6 +943,10 @@ unset).
 
 ### Phase G3: Smear controls
 
+**Status: deferred -- tracked in issue #151** (specified together with the B3
+rendering work, since the GUI/scene smear controls and the flux-correct renderer
+land as one unit).
+
 **Goal:** expose B3's per-star smear correctly.
 
 **Scope:** today the "Background stars" tab has a single PSF sigma
@@ -916,7 +986,7 @@ calibrated_if instruments, which have no saturation DN.
 General tab renders the selected instrument's Gaussian star PSF as an
 inset image and annotates its sigma / FWHM.  It refreshes when the
 instrument selector changes (and on load).  The smeared-PSF toggle is
-omitted -- it depends on B3, which is postponed.
+omitted -- it depends on B3, which is deferred (issue #151).
 
 **Backend dependency:** B5.
 
@@ -1202,7 +1272,7 @@ signals a calibration bug.
 `tests/integration/sim_sweep_runner.py`, new
 `tests/integration/test_sim_sweeps.py`.
 
-### Phase T4: Algorithmic invariants (planted-offset / planted-rotation) [started]
+### Phase T4: Algorithmic invariants (planted-offset / planted-rotation) [done]
 
 **Goal:** unit-test the techniques against ground truth that's
 correct *by construction*.
@@ -1333,12 +1403,23 @@ grew one:
   per-technique result: the technique is non-spurious but its placeholder-alpha
   confidence holds the fused status at a stable `failed`.
 
-**Remaining:** the `StarUniqueMatchNav` one-star path (single dominant star) and
-`StarRefineNav`'s prior-refinement, each of which needs a technique-pinned
-assertion rather than a full-ensemble one; and lifting the StarField / RingEdge
-confidence off their placeholder-alpha floors so a clean rotation or ring field
-can navigate to a fused `success` (a Phase 10 calibration concern, not a sim
-gap).
+The two remaining technique-pinned cases are now in.  `StarUniqueMatchNav`'s
+one-star path is covered by `planted_unique_star_single` (a single bright star,
+too sparse for the field matcher) pinned with `only_techniques='StarUniqueMatchNav'`.
+`StarRefineNav`'s prior-refinement is covered by `planted_refine_star_field` (a
+multi-star field whose pass-1 ensemble reaches `success` and installs a prior, so
+the pass-2 refine runs), read from the full-ensemble per-technique result since a
+prior-requiring pass-2 technique cannot be isolated with `only_techniques`.  The
+displaced high-phase crescent (`planted_offset_blob_crescent_displaced`, a 120 deg
+body planted ~20 px past its bounding box) was also added once `BodyBlobNav` gained
+its phase-aware crescent coarse-acquisition.
+
+**Done.**  Every technique on the ladder navigates from a catalog scene and recovers
+its planted transform.  The only residual item is *not* a T4 gap: lifting the
+StarField / RingEdge confidence off their placeholder-alpha floors so a clean
+rotation or ring field can navigate to a fused `success` is part of the real-data
+confidence calibration (issue #153), and until then those two are asserted
+per-technique.
 
 **Scope:**
 
@@ -1370,7 +1451,17 @@ the real library.
 `tests/integration/sim_scenes/algorithmic_invariants/*.yaml`, new
 `tests/integration/test_sim_algorithmic_invariants.py`.
 
-### Phase T5: α-bootstrap pre-fit
+### Phase T5: α-bootstrap pre-fit [deferred]
+
+**Status: deferred -- tracked in issue #153** (specified together with T6 and
+T7 as the calibration test layer), until the operator is ready to run the
+real-data calibration against the curated image library (Phase 10 §C).  T5 has
+no real-data dependency of its own -- it runs sim scenes against
+operator-supplied rough targets -- but its only consumer is the real
+calibration's starting guess, so it is sequenced to run immediately before
+that sweep rather than now.  Deferring it also lets the irregular-body
+diagnostics (`phase_irregularity_factor`, B7 scenarios 2-3) come online
+first, so the bootstrap fits over a representative diagnostic spread.
 
 **Goal:** use sim-derived diagnostic distributions to give the
 real-data calibration sweep a sensible starting point for the α
@@ -1393,15 +1484,20 @@ optimization.
 - Documented as a separate one-off helper script under
   `tests/integration/sim_alpha_bootstrap.py`.
 
-**Why now:** shrinks the optimization basin for the real-data
-calibration without committing to sim's diagnostic distributions.
-Optional but recommended; skip if the operator finds the placeholder
-coefficients already close enough.
+**Why deferred, not dropped:** when run, it shrinks the optimization basin
+for the real-data calibration without committing to sim's diagnostic
+distributions.  It is optional even then -- skip if the operator finds the
+placeholder coefficients already close enough -- which is why it waits until
+the calibration is actually about to happen.
 
 **Files touched:** new
 `tests/integration/sim_alpha_bootstrap.py`.
 
 ### Phase T6: Real-vs-sim diagnostic distribution comparison
+
+**Status: deferred -- tracked in issue #153** (specified together with T5 and
+T7 as the calibration test layer); needs the real-image library navigable
+(holdings + SPICE env) and is sequenced around the real-data calibration.
 
 **Goal:** quantify how close sim has come to real, per technique.
 
@@ -1428,6 +1524,10 @@ improvement actually closed the gap it was supposed to.
 `tests/integration/sim_vs_real_report.md`.
 
 ### Phase T7: Calibration validation harness
+
+**Status: deferred -- tracked in issue #153** (specified together with T5 and
+T6 as the calibration test layer); hard-gated on the real-data calibration
+having landed, so it is the last of the three.
 
 **Goal:** after the real-data Phase 10 §C calibration sweep lands,
 verify the calibrated formulas pass the sim sweeps from T3.
@@ -1470,7 +1570,7 @@ B0 (determinism) [done]
  │
  └──→ B2 (per-instrument coupling) [done]
        │
-       └──→ B3 (smear) [postponed: psfmodel], B4 [done], B5 [done], B6 [done], B7
+       └──→ B3 (smear) [deferred: psfmodel, #151], B4 [done], B5 [done], B6 [done], B7
 
 T1 (scene catalog)
  │
@@ -1483,15 +1583,15 @@ T1 (scene catalog)
 G0 (3-peer audit) before any GUI phase
 G1 follows B2
 G2 follows B1, B2
-G3 follows B3 (both postponed: psfmodel)
+G3 follows B3 (both deferred: psfmodel, #151)
 G4 follows B4
 G5 follows B5
 G6 follows B6
 G7 follows B7
 
-T5 (α bootstrap) — anytime after B1, B2, T1
-T6 (real-vs-sim) — anytime after T1; ideally after each B phase
-T7 (calibration validation) — last; depends on real-data calibration landing
+T5 (α bootstrap) — deferred (#153); run immediately before the real-data calibration (Phase 10 §C)
+T6 (real-vs-sim) — deferred (#153); needs the real-image library navigable; run around the calibration
+T7 (calibration validation) — deferred (#153); last, depends on real-data calibration landing
 ```
 
 ### Minimum viable cut
@@ -1531,8 +1631,9 @@ backend phase with its matching GUI phase:
 9. B7 → G7 (irregular bodies)
 10. T3, T5, T7 (sweeps, bootstrap, validation)
 
-B3 / G3 (smear) are postponed pending `psfmodel`'s smear support; B8
-(diffraction) is dropped permanently.
+B3 / G3 (smear) are deferred pending `psfmodel`'s smear support (issue #151);
+B8 (diffraction) is deferred as a lowest-priority future enhancement (issue
+#152).
 
 ---
 
@@ -1644,7 +1745,7 @@ src/nav/sim/shape_meshes/<BODY>.obj                      (B7+)
 
 ### Modified files
 ```
-src/nav/sim/render.py              (B0, B1, B4, B5, B6, B7, T4; B3 postponed, B8 dropped)
+src/nav/sim/render.py              (B0, B1, B4, B5, B6, B7, T4; B3 deferred #151, B8 deferred #152)
 src/nav/nav_model/__init__.py      (T4: register NavModelStarsSimulated)
 src/nav/nav_model/stars/__init__.py  (T4: register NavModelStarsSimulated)
 src/nav/sim/sim_body.py            (B0, B2, B7)
@@ -1777,12 +1878,14 @@ Three reasons:
 If irregular-body sensitivity becomes a hot calibration question
 sooner, B7 can be promoted up the order.
 
-### 11.7 Why diffraction spikes (B8) are dropped
+### 11.7 Why diffraction spikes (B8) are deferred, not built
 
 The supported cameras have no diffraction spikes.  The Cassini
 telescope has no secondary-mirror support vanes, so its stars carry no
 cross-shaped diffraction pattern at any brightness.  There is nothing
-to model, so B8 is removed permanently rather than deferred.
+to model today, so B8 is parked as a lowest-priority future enhancement
+(issue #152): build it only if the navigation system is ever extended
+to support an instrument whose optics genuinely produce spikes.
 
 ### 11.8 What about the existing simulator users?
 
@@ -1803,16 +1906,16 @@ including tests + docs + reviews):
 | B0 | 1 day (done) |
 | B1 | 3 days (done) |
 | B2 | 4 days (done) |
-| B3 | postponed (psfmodel smear) |
+| B3 | deferred (psfmodel smear; #151) |
 | B4 | 1 day (done) |
 | B5 | 2 days (done) |
 | B6 | 1 day (done) |
 | B7 | 2 weeks |
-| B8 | dropped (no spikes) |
+| B8 | deferred (future, #152) |
 | G0 | 1 day |
 | G1 | 1 day |
 | G2 | 2 days |
-| G3 | 1 day |
+| G3 | 1 day (deferred with B3; #151) |
 | G4 | 1 day |
 | G5 | 2 days |
 | G6 | 1 day |
@@ -1822,9 +1925,9 @@ including tests + docs + reviews):
 | T2 | 2 days |
 | T3 | 3 days |
 | T4 | 3 days |
-| T5 | 2 days |
-| T6 | 3 days |
-| T7 | 2 days |
+| T5 | 2 days (deferred; #153) |
+| T6 | 3 days (deferred; #153) |
+| T7 | 2 days (deferred; #153) |
 
 **Minimum viable cut total**: ~16 days.
 **Full plan total**: ~50 days, dominated by B7 (irregular-body
