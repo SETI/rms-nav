@@ -100,6 +100,29 @@ def _limb_polyline_from_mask(
     return vertices_vu, normals_vu
 
 
+def _nav_params(body_params: dict[str, Any]) -> dict[str, Any]:
+    """Overlay a body's ``nav_override`` onto its params for the predicted body.
+
+    Returns a shallow copy of ``body_params`` with the keys of its
+    ``nav_override`` mapping applied on top and the ``nav_override`` key itself
+    dropped.  Absent an override the params pass through unchanged, so the
+    predicted geometry equals the rendered geometry (the default agreeing case).
+
+    Parameters:
+        body_params: A scene body parameter mapping (the render geometry).
+
+    Returns:
+        The parameter mapping the navigator predicts from (the navigation
+        geometry).
+    """
+    override = body_params.get('nav_override')
+    if not isinstance(override, dict):
+        return dict(body_params)
+    merged = {k: v for k, v in body_params.items() if k != 'nav_override'}
+    merged.update(override)
+    return merged
+
+
 def _silhouette_diameter_px(body_mask: NDArrayBoolType) -> float:
     """Return the longer pixel extent of a rendered body silhouette.
 
@@ -214,6 +237,16 @@ class NavModelBodySimulated(NavModelBodyBase):
         (``obs.sim_params['bodies']``).  Returns an empty list for a real obs,
         so the SPICE-backed ``NavModelBody`` handles those instead.
 
+        A body may carry an optional ``nav_override`` mapping.  The renderer
+        ignores it (it draws the true shape), but the predicted body is built
+        from the body params with ``nav_override`` overlaid -- the channel that
+        makes the navigation geometry diverge from the render geometry.  A scene
+        renders an irregular mesh at the true pose yet predicts an ellipsoid
+        (shape mismatch, B7 scenario 2), or the same mesh at a different pose
+        (chaotic-rotator pose disagreement, B7 scenario 3), without touching the
+        rendered image.  The override never changes the centre, so the predicted
+        body stays at the unshifted position the planted offset is measured from.
+
         Parameters:
             obs: Observation snapshot.
 
@@ -230,7 +263,7 @@ class NavModelBodySimulated(NavModelBodyBase):
             if not isinstance(body_params, dict):
                 continue
             body_name = str(body_params.get('name', 'SIM-BODY'))
-            out.append(cls(f'body_sim:{body_name}', obs, body_name, body_params))
+            out.append(cls(f'body_sim:{body_name}', obs, body_name, _nav_params(body_params)))
         return out
 
     def create_model(self) -> None:

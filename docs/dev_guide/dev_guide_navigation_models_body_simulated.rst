@@ -87,11 +87,49 @@ in via the per-instance ``sim_params`` dict. Expected keys:
   :func:`~nav.sim.sim_body_polyhedral.mesh_spec_from_params`).
 - ``km_per_pixel`` — optional physical scale at the limb; when absent the
   phase-irregularity factor collapses to the regular-body case.
+- ``nav_override`` — optional mapping overlaid on the body params to build the
+  predicted body, separating the render geometry from the navigation geometry
+  (see *Render geometry vs navigation geometry* below).
 
 Crater and anti-aliasing keys are accepted but ignored. The predicted silhouette diameter
 gates the blob (at least 8 px) and limb (at least 100 px) emission; the diameter floor on
 the limb keeps the LM-refined fit off marginally-resolved bodies, where it would inject
 cross-process jitter into the fused offset.
+
+Render geometry vs navigation geometry
+--------------------------------------
+
+In real navigation the body's pose (the body-fixed to camera rotation) is an
+*input* from SPICE: the navigator renders its predicted body at that pose and
+solves only for the pointing offset; it never estimates orientation from the
+pixels. The simulator has no SPICE, so the pose is scene ground truth carried on
+the body params. By default the predicted body is built from the same params the
+renderer drew, so the navigator knows the truth (the agreeing case).
+
+An optional ``nav_override`` mapping breaks that tie. The renderer ignores it and
+always draws the true geometry; the navigator builds its predicted body from the
+body params with ``nav_override`` overlaid (``_nav_params``). This is the channel
+that lets the navigation geometry diverge from the render geometry, which the B7
+irregular-body scenarios exercise:
+
+- **Same geometry (no override)** -- mesh vs mesh at the true pose. The
+  resolved-mesh limb is exact by construction (scenario 1).
+- **Shape mismatch** -- render a lumpy mesh, predict its zero-relief
+  (ellipsoidal) limit by overriding ``mesh_lumpiness`` to ``0.0`` at the same
+  pose. The only residual is shape; the disc correlation still aligns the two
+  filled silhouettes and the recovered centroid bias grows with the rendered
+  relief (scenario 2). Realising the ellipsoidal prediction as the smooth limit
+  of the mesh keeps both silhouettes on one renderer with a consistent axis and
+  pose convention, so the residual is pure shape mismatch rather than a
+  renderer-convention skew.
+- **Pose disagreement** -- render the mesh at the true pose, predict the same
+  mesh at a different ``pose_euler_deg``. The wrong-pose silhouette boundary
+  drives the limb distance-transform fit to a confidently-wrong offset, while the
+  lit-weighted blob centroid -- which a centrally-symmetric (low-relief triaxial)
+  body keeps near the body centre under rotation -- stays accurate (scenario 3).
+
+The override never changes the centre, so the predicted body stays at the
+unshifted position the planted offset is measured from.
 
 Implementation
 ==============

@@ -1,8 +1,9 @@
-"""Polyhedral irregular-body renderer for the simulator (B7, increment 1).
+"""Polyhedral irregular-body renderer and navigation-geometry override (B7).
 
-Covers the standalone mesh renderer (shape, pose, shading, determinism) and its
-hook into the combined render path.  The navigator-side wiring and the
-shape-mismatch scenarios come in later B7 increments.
+Covers the standalone mesh renderer (shape, pose, shading, determinism), its
+hook into the combined render path, and the ``nav_override`` channel that builds
+the predicted body from a divergent geometry (the render-vs-navigation
+separation the shape-mismatch and pose-disagreement scenarios rely on).
 """
 
 from typing import Any
@@ -10,6 +11,9 @@ from typing import Any
 import numpy as np
 from scipy import ndimage
 
+from nav.nav_model import build_models_for_obs
+from nav.nav_model.nav_model_body_simulated import NavModelBodySimulated, _nav_params
+from nav.obs.obs_inst_sim import ObsSim
 from nav.sim.render import render_combined_model
 from nav.sim.sim_body_polyhedral import make_irregular_mesh, render_polyhedral_body
 
@@ -131,3 +135,52 @@ def test_combined_render_mesh_is_deterministic() -> None:
     a, _ = render_combined_model(_mesh_scene())
     b, _ = render_combined_model(_mesh_scene())
     assert np.array_equal(a, b)
+
+
+def test_nav_params_overlays_override() -> None:
+    """nav_override keys win over the body params and the key itself is dropped."""
+    merged = _nav_params(
+        {
+            'mesh_lumpiness': 0.4,
+            'pose_euler_deg': [1.0, 2.0, 3.0],
+            'nav_override': {'mesh_lumpiness': 0.0, 'shape_model': 'ellipsoid'},
+        }
+    )
+    assert merged == {
+        'mesh_lumpiness': 0.0,
+        'pose_euler_deg': [1.0, 2.0, 3.0],
+        'shape_model': 'ellipsoid',
+    }
+
+
+def test_nav_params_passthrough_without_override() -> None:
+    """Absent an override the predicted params equal the rendered params."""
+    body = {'mesh_lumpiness': 0.4, 'mesh_seed': 2}
+    assert _nav_params(body) == body
+
+
+def _body_sim_model(body: dict[str, Any]) -> NavModelBodySimulated:
+    """Build and render the simulated body NavModel for a one-body scene."""
+    obs = ObsSim.from_file('/tmp/override.json', sim_params=_mesh_scene(**body))
+    model = next(m for m in build_models_for_obs(obs) if isinstance(m, NavModelBodySimulated))
+    model.create_model()
+    return model
+
+
+def test_nav_override_predicts_the_overridden_shape() -> None:
+    """The predicted silhouette follows nav_override, not the rendered shape.
+
+    A body rendered lumpy but predicted smooth (the B7 scenario-2 channel) yields
+    the same predicted silhouette as a body that is smooth on both sides, and a
+    different one from a body predicted lumpy.
+    """
+    overridden = _body_sim_model(
+        {'mesh_lumpiness': 0.4, 'nav_override': {'mesh_lumpiness': 0.0}}
+    )._body_mask
+    smooth = _body_sim_model({'mesh_lumpiness': 0.0})._body_mask
+    lumpy = _body_sim_model({'mesh_lumpiness': 0.4})._body_mask
+    assert overridden is not None
+    assert smooth is not None
+    assert lumpy is not None
+    assert np.array_equal(overridden, smooth)
+    assert not np.array_equal(overridden, lumpy)

@@ -123,6 +123,28 @@ def test_star_rotation_sweep_recovers_roll() -> None:
         assert row.rotation_error_deg < _ROLL_TOLERANCE_DEG
 
 
+def test_irregularity_sweep_starts_matched() -> None:
+    """At zero relief the predicted smooth body equals the rendered one."""
+    rows = _rows('irregularity_shape_mismatch')
+    assert rows[0].offset_error_px is not None
+    assert rows[0].offset_error_px < 0.2
+
+
+def test_irregularity_sweep_bias_grows() -> None:
+    """Shape mismatch grows the recovered centroid bias as relief increases."""
+    rows = _rows('irregularity_shape_mismatch')
+    assert rows[-1].offset_error_px is not None
+    assert rows[0].offset_error_px is not None
+    assert rows[-1].offset_error_px > 2.0
+    assert rows[-1].offset_error_px > rows[0].offset_error_px + 1.0
+
+
+def test_irregularity_sweep_confidence_drops() -> None:
+    """The fused confidence falls as the predicted shape mismatch widens."""
+    rows = _rows('irregularity_shape_mismatch')
+    assert rows[-1].confidence < rows[0].confidence
+
+
 # The per-technique dense and wide offset sweeps (``*_offset_fine`` /
 # ``*_offset_wide``) are characterization runs, not assertions: they are executed
 # by ``sim_sweep_runner`` to produce the report's figures, and the specific defect

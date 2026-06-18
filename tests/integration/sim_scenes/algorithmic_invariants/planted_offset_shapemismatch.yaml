@@ -1,0 +1,44 @@
+schema_version: 1
+scene_name: planted_offset_shapemismatch
+instrument: coiss_nac
+image_size_vu: [220, 220]
+random_seed: 42
+exposure_sec: 1.0
+# B7 scenario 2: mesh vs ellipsoid, same pose.  The frame renders an irregular
+# (lumpy) mesh body, but the navigator predicts a smooth body at the same pose,
+# axes, and centre -- the only difference is shape.  The prediction is realised
+# through the body's nav_override mapping: the renderer draws the true geometry
+# (mesh_lumpiness 0.1) while NavModelBodySimulated predicts mesh_lumpiness 0.0,
+# the zero-relief (ellipsoidal) limit of the same mesh.  Realising the
+# ellipsoidal prediction as the smooth limit of the mesh keeps both silhouettes
+# on one renderer with a consistent axis/pose convention, so the residual is pure
+# shape mismatch rather than a renderer-convention skew.
+#
+# The point is that the body still navigates despite the shape mismatch: the disc
+# correlation aligns the two filled silhouettes and the full ensemble recovers
+# the planted offset to well under a pixel.  The companion irregularity sweep
+# (sim_sweeps/irregularity_shape_mismatch.yaml) walks mesh_lumpiness up from this
+# base and shows the centroid bias growing with irregularity.
+bodies:
+  - name: HYPERION
+    shape_model: polyhedral_mesh
+    mesh_lumpiness: 0.1
+    mesh_seed: 11
+    pose_euler_deg: [10.0, 35.0, 0.0]
+    center_v: 110.0
+    center_u: 110.0
+    axis1: 150.0
+    axis2: 110.0
+    axis3: 95.0
+    illumination_angle: 25.0
+    phase_angle: 30.0
+    nav_override:
+      mesh_lumpiness: 0.0
+rings: []
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+ground_truth:
+  planted_offset_dv_px: 1.43
+  planted_offset_du_px: -0.61
+  planted_rotation_deg: 0.0

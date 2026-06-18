@@ -60,6 +60,16 @@ Body params follow the renderer: shape_model (ellipsoid | polyhedral_mesh),
 center_v, center_u, axis1, axis2, axis3, illumination_angle, phase_angle, range,
 and -- for polyhedral_mesh -- mesh_lumpiness, mesh_seed, pose_euler_deg.
 
+A body may also carry an optional nav_override mapping.  The renderer ignores it
+(it always draws the true geometry), but the navigator builds its predicted body
+from the body params with nav_override overlaid -- the channel that makes the
+navigation geometry diverge from the render geometry.  Use it to render an
+irregular mesh yet predict its smooth (ellipsoidal) limit (mesh_lumpiness 0.0)
+for a shape mismatch (B7 scenario 2), or to predict the same body at a different
+pose_euler_deg for a pose disagreement (B7 scenario 3).  The override never
+changes the centre, so the predicted body stays at the unshifted position the
+planted offset is measured from.
+
 The planted ground-truth offset is applied as the rendered offset, so a
 navigator predicting the unshifted geometry must recover it (see Phase T4).
 
