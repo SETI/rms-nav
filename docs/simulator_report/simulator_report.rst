@@ -451,21 +451,24 @@ pixel; the distance-transform techniques carry a larger sub-pixel residual:
   bright field to ~0.005 px. The dim/bright split is detailed below; the per-star
   centroiding mechanism is in :doc:`/dev_guide/dev_guide_techniques_star_field`.
 
-The wide-range sweep confirms each technique recovers across the navigable range,
-and exposes the blob's capture limit:
+The wide-range sweep confirms each technique recovers across the navigable range:
 
 .. figure:: _figures/offset_accuracy_wide.png
    :width: 100%
    :alt: Wide-range offset recovery error by technique.
 
    Recovered-offset error vs planted offset across the navigable range. Disc,
-   ring, limb, and star recover to their ceilings; the blob is accurate only
-   within its bbox, degrading sharply once the body clips the integration window.
+   ring, limb, blob, and star each recover to their ceilings; the blob now tracks
+   the body across the full window via its coarse acquisition.
 
 The disc, ring, limb, and star recover with the same accuracy out to their
-ceilings (~48, ~48, ~40, ~20 px). The **blob is a small-offset technique**: for
-the 20 px body it holds under 0.05 px out to ~6 px, then degrades (~0.85 px at
-10 px, ~5.8 px at 20 px) as the body clips out of the predicted bbox. See
+ceilings (~48, ~48, ~40, ~20 px). The **blob now holds across the navigable
+range too**: for the 20 px body it stays under ~0.01 px out to ~45 px, where it
+was previously a ~6 px small-offset technique (degrading to ~5.8 px at 20 px) --
+the blob-shaped-disc coarse acquisition re-centres the integration window on the
+body before the centroid, so the body no longer clips out of the predicted bbox.
+The disc template models only a near-full disc, so this holds for bodies at least
+half-lit; a high-phase crescent beyond its bbox still needs a prior. See
 :doc:`/dev_guide/dev_guide_techniques_body_blob`.
 
 Star-field centroiding: dim vs bright

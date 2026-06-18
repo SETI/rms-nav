@@ -1,6 +1,8 @@
 sweep_name: blob_offset_wide
-# Blob offset past its bbox capture range -- accurate to ~6 px, then degrades as the body clips the integration window (a small-offset technique).
+# Blob offset across the navigable range.  The blob-shaped-disc coarse acquisition
+# re-centres each blob's bbox on the body before the centroid, so recovery now holds
+# to the extfov margin (was a ~6 px small-offset technique before the coarse stage).
 base_scene: phase_sweep_regular_body/small_sphere_base.yaml
 parameters: [offset_v]
-values: [0.5, 1.5, 2.5, 4.0, 6.0, 9.0, 14.0, 20.0]
+values: [0.5, 2.3, 5.7, 9.1, 13.4, 18.7, 24.2, 31.6, 38.3, 45.1]
 technique: BodyBlobNav
