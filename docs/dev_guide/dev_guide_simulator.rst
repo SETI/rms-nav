@@ -205,6 +205,56 @@ All other fields (``instrument``, ``random_seed``, ``exposure_sec``, ``bodies``,
 ``rings``, ``noise``, ``stray_light``, ``instrument_config``) carry the same names
 in both.
 
+A complete YAML scene -- a noisy Cassini NAC frame with one irregular mesh body, a
+ring, a couple of stars, and a planted offset the navigator must recover -- reads:
+
+.. code-block:: yaml
+
+   schema_version: 1
+   scene_name: example_scene
+   instrument: coiss_nac
+   image_size_vu: [220, 220]
+   random_seed: 42
+   exposure_sec: 1.0
+   bodies:
+     - name: HYPERION
+       shape_model: polyhedral_mesh
+       mesh_lumpiness: 0.4
+       mesh_seed: 7
+       pose_euler_deg: [10.0, 35.0, 0.0]
+       center_v: 110.0
+       center_u: 110.0
+       axis1: 150.0
+       axis2: 110.0
+       axis3: 95.0
+       illumination_angle: 25.0
+       phase_angle: 40.0
+   rings:
+     - name: RINGLET
+       feature_type: RINGLET
+       center_v: 110.0
+       center_u: 110.0
+       inner_data: [{mode: 1, a: 90.0, ae: 6.0}]
+       outer_data: [{mode: 1, a: 98.0, ae: 6.0}]
+       shading_distance: 10.0
+       range: 1000.0
+   stars:
+     background_count: 40
+     list:
+       - {name: S1, v: 30.0, u: 60.0, vmag: 6.0}
+       - {name: S2, v: 180.0, u: 150.0, vmag: 7.5}
+   noise:
+     poisson: true
+     read_noise_dn: 4.0
+   ground_truth:
+     planted_offset_dv_px: 1.43
+     planted_offset_du_px: -0.61
+
+The equivalent GUI JSON is the flat ``sim_params`` dict: ``size_v``/``size_u``
+replace ``image_size_vu``, ``offset_v``/``offset_u`` replace the ground-truth
+offset, ``background_stars_num`` and ``stars`` replace the ``stars`` block, and
+``bodies``, ``rings``, and ``noise`` are unchanged.
+
 Scene parameter reference
 =========================
 
