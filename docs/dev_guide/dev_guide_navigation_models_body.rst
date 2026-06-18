@@ -182,6 +182,18 @@ recovers is just the spacecraft pointing error, not pointing error plus the syst
 bias. At zero phase the rendered model is uniform and the formula collapses to the geometric
 centre.
 
+Sub-solar direction
+-------------------
+
+The vector from the geometric centre to the lit-weighted centroid points along the projected
+body-to-Sun direction, so the blob feature also carries its unit form as
+``sub_solar_dir_vu``. :doc:`dev_guide_techniques_body_blob` orients its high-phase
+crescent coarse-acquisition template along this direction (a filled disc cannot match a
+crescent). Near full phase the two centroids coincide and the direction is meaningless, so it
+is reported as ``(0, 0)`` and the technique falls back to a disc template. The derivation is
+model-agnostic -- it reads only the rendered appearance -- so a SPICE-backed body model
+populates the same field without extra plumbing.
+
 Phase-and-irregularity coupling
 -------------------------------
 

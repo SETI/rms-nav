@@ -130,13 +130,26 @@ high-phase crescent past its box still needs a prior, since a disc template cann
 crescent). Self-contained in `nav_technique_body_blob.py`; no orchestrator change. See
 `dev_guide_techniques_body_blob` and the simulator report's navigable-range table.
 
-The next navigation/sim improvement:
+**Done (this track):** *High-phase blob acquisition (phase-aware crescent template).* The
+remaining blob gap -- a high-phase crescent displaced beyond its bounding box -- is closed with
+a phase-aware coarse template. Above half phase `BodyBlobNav` now correlates a synthesised
+Lambertian crescent (oriented along the sub-solar direction the `BODY_BLOB` feature carries in
+`sub_solar_dir_vu`) instead of skipping the coarse stage; at or below half phase it keeps the
+filled disc. The crescent's center sits on the body center rather than the bright arc, and the
+template's brightness-centroid offset is added back so the recovered shift is expressed against
+the lit centroid the feature carries. Recovery holds to a few hundredths of a pixel out to the
+extfov margin across seeds and illumination directions; the
+`planted_offset_blob_crescent_displaced` invariant scene guards it. The sub-solar direction is
+derived model-agnostically from the rendered lit-centroid offset, so a SPICE-backed body model
+populates it without extra plumbing. The only residual gap is a high-phase body whose
+illumination geometry is unpopulated (no direction), which still relies on the bounding-box
+centroid or a prior. Self-contained in `nav_technique_body_blob.py` plus the shared
+`_build_blob_feature`; no orchestrator change. See `dev_guide_techniques_body_blob`,
+`dev_guide_navigation_models_body`, and the simulator report's navigable-range table.
 
-1. **High-phase / prior-fed blob acquisition.** Close the remaining blob gap -- a high-phase
-   crescent beyond its bounding box -- either with a phase-aware (crescent) coarse template or
-   by feeding the blob a pass-1 prior from another technique (the orchestrator installs a prior
-   only on a `success` pass-1 ensemble, which the placeholder-alpha star confidence currently
-   blocks; revisit after the star-confidence calibration). Validate only with simulated images.
+The next navigation/sim improvement: none queued -- the per-technique navigable-ceiling gaps
+identified by the T3 sweeps are now closed (disc, limb, ring at ~extfov; blob at ~extfov for
+both disc and crescent regimes).
 
 **Validation discipline (carried throughout):** validate accuracy changes only with
 simulated images; use ensemble statistics across seeds and offsets, not single

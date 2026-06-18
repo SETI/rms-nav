@@ -107,17 +107,21 @@ _BLOB_NOISE_THRESHOLD_SIGMA: float = 3.0
 
 
 _COARSE_CORRELATION_MAX_PHASE_DEG: float = 90.0
-"""Phase ceiling for the blob-shaped-disc coarse acquisition.
+"""Phase at which the coarse-acquisition template switches disc -> crescent.
 
-The matched-filter template is a filled disc, which models the lit
-silhouette only while the body is at least half-lit.  Above this phase the
-sunlit region is a thin crescent whose bright pixels sit a fraction of a
-radius off the body center, so a disc correlation locks onto the crescent
-arc rather than the center.  At or below the ceiling the coarse correlation
-runs (extending the capture range to the full search window); above it the
-technique keeps the predicted bbox (no relocation) and relies on the
-brightness-weighted centroid's existing crescent handling.  An installed
-prior bypasses this gate -- it is a measured offset, not a template match.
+The coarse acquisition correlates a matched-filter template of the predicted
+lit silhouette against the observed signal to re-centre each blob's bounding
+box on the body.  While the body is at least half-lit a filled disc models
+that silhouette, so at or below this phase the disc template runs.  Above it
+the sunlit region is a thin crescent whose bright pixels sit a fraction of a
+radius off the body center: a disc template locks onto the crescent arc
+rather than the center, so the technique instead correlates a crescent
+template synthesised at the body's phase and sub-solar direction (see
+:func:`_crescent_kernel`).  When that direction is unknown -- a body absent
+its illumination geometry -- the high-phase blob keeps its predicted bbox
+(no relocation) and relies on the brightness-weighted centroid's existing
+crescent handling.  Either way an installed prior bypasses the template
+match -- it is a measured offset, not a correlation.
 """
 
 
@@ -134,39 +138,97 @@ def _disc_kernel(radius_px: float) -> NDArrayFloatType:
     return disc
 
 
-def _coarse_disc_offset(
+def _crescent_kernel(
+    radius_px: float, phase_rad: float, sub_solar_dir_vu: tuple[float, float]
+) -> NDArrayFloatType:
+    """Return a Lambertian-crescent matched-filter kernel.
+
+    Synthesises the expected lit silhouette of a sphere of the predicted
+    radius at the given phase, illuminated from the image-plane direction
+    ``sub_solar_dir_vu`` -- the template the coarse acquisition correlates
+    when a body is past half phase.  Each pixel inside the projected disc
+    carries its Lambertian weight ``max(0, cos(incidence))``, mirroring the
+    shading the body NavModel renders, so the bright pixels form the same
+    crescent the observed body shows.  Correlating this crescent (rather than
+    a full disc) puts the template *center* on the body center instead of
+    locking onto the off-center crescent arc.
+
+    At phase 0 the in-plane illumination term vanishes and the kernel is a
+    limb-darkened full disc regardless of direction; the caller only reaches
+    this path above :data:`_COARSE_CORRELATION_MAX_PHASE_DEG`, where the
+    crescent is well-defined.
+
+    Parameters:
+        radius_px: Predicted body radius (pixels).
+        phase_rad: Phase angle (Sun -> body -> observer), radians.
+        sub_solar_dir_vu: Unit ``(v, u)`` image-plane direction toward the
+            bright limb (the projected body-to-Sun vector).
+
+    Returns:
+        ``(2r + 1, 2r + 1)`` float kernel; zero outside the projected disc
+        and on the unlit side.
+    """
+    r = max(math.ceil(radius_px), 1)
+    yy, xx = np.mgrid[-r : r + 1, -r : r + 1].astype(np.float64)
+    radius_sq = radius_px * radius_px
+    inside = yy * yy + xx * xx <= radius_sq
+    z = np.sqrt(np.clip(radius_sq - (yy * yy + xx * xx), 0.0, None))
+    # Illumination direction: in-plane component sin(phase) along the
+    # sub-solar azimuth, out-of-plane component cos(phase) toward the
+    # observer.  This vector is already unit-norm.
+    sin_p = math.sin(phase_rad)
+    cos_p = math.cos(phase_rad)
+    illum_v = sin_p * sub_solar_dir_vu[0]
+    illum_u = sin_p * sub_solar_dir_vu[1]
+    # cos(incidence) = surface_normal . illumination; the normal at (yy, xx)
+    # on the visible hemisphere is (yy, xx, z) / radius.
+    cos_incidence = (yy * illum_v + xx * illum_u + z * cos_p) / radius_px
+    kernel: NDArrayFloatType = np.where(inside, np.clip(cos_incidence, 0.0, None), 0.0)
+    return kernel
+
+
+def _coarse_correlation_offset(
     image_signal: NDArrayFloatType,
+    kernel: NDArrayFloatType,
     predicted_center_vu: tuple[float, float],
-    predicted_diameter_px: float,
     margin_vu: tuple[int, int],
 ) -> tuple[int, int]:
-    """Coarse integer offset from a blob-shaped-disc matched filter.
+    """Coarse integer offset from a matched-filter correlation.
 
-    Correlates a filled-disc template of the predicted body radius against
-    the lit-signal image (background-subtracted, sky-masked) and returns the
-    integer ``(dv, du)`` from the predicted centre to the response peak,
+    Cross-correlates ``kernel`` (a disc or crescent template) against the
+    lit-signal image and returns the integer ``(dv, du)`` shift that
+    re-centres the blob's predicted bounding box onto the observed body,
     searched over ``predicted_center +/- margin``.  This extends the blob's
     capture range from the predicted bounding box (a few pixels) to the full
     extended-FOV search window: a brightness-weighted centroid only sees the
     body when it already sits in the predicted box, whereas the correlation
     finds the body anywhere in the window even when SPICE mis-predicts it by
-    tens of pixels.
+    tens of pixels.  The kernel is flipped before the FFT convolution so the
+    operation is a correlation -- the peak lands where the template's geometric
+    centre best overlaps the body.
+
+    ``predicted_center_vu`` is the predicted *brightness* centroid (the lit
+    centroid the feature carries), which on a crescent sits off the geometric
+    centre.  The correlation peak is the body's geometric centre, so the
+    kernel's own brightness-centroid offset is added back: the returned shift
+    maps the predicted lit centroid onto the observed lit centroid, matching
+    the residual the caller forms against ``predicted_center_vu``.  For a
+    symmetric disc the offset is zero and the shift is just peak-minus-centre.
 
     Parameters:
         image_signal: ``(H, W)`` lit signal (image minus background, clipped
             at zero, sky-masked), in extfov coordinates.
-        predicted_center_vu: Predicted body centre in extfov coordinates.
-        predicted_diameter_px: Predicted disc diameter (pixels).
+        kernel: Odd-sized matched-filter template centred on its middle pixel.
+        predicted_center_vu: Predicted body lit centroid in extfov coordinates.
         margin_vu: ``(margin_v, margin_u)`` search half-window about the
             predicted centre.
 
     Returns:
-        ``(dv, du)`` integer offset (observed centre minus predicted centre);
-        ``(0, 0)`` when the search window is degenerate or carries no signal.
+        ``(dv, du)`` integer bbox shift (observed minus predicted lit
+        centroid); ``(0, 0)`` when the search window is degenerate or carries
+        no signal.
     """
-    radius = max(predicted_diameter_px / 2.0, 1.0)
-    kernel = _disc_kernel(radius)
-    response = fftconvolve(image_signal, kernel, mode='same')
+    response = fftconvolve(image_signal, kernel[::-1, ::-1], mode='same')
     h, w = image_signal.shape
     pred_v = round(predicted_center_vu[0])
     pred_u = round(predicted_center_vu[1])
@@ -181,7 +243,70 @@ def _coarse_disc_offset(
     if float(sub.max()) <= 0.0:
         return (0, 0)
     rv, ru = np.unravel_index(int(np.argmax(sub)), sub.shape)
-    return (v0 + int(rv) - pred_v, u0 + int(ru) - pred_u)
+    centroid_off_v, centroid_off_u = _kernel_centroid_offset(kernel)
+    return (
+        v0 + int(rv) - pred_v + round(centroid_off_v),
+        u0 + int(ru) - pred_u + round(centroid_off_u),
+    )
+
+
+def _kernel_centroid_offset(kernel: NDArrayFloatType) -> tuple[float, float]:
+    """Return a kernel's brightness centroid relative to its middle pixel.
+
+    Zero for a symmetric template (a filled disc); for a crescent it is the
+    lit-centroid displacement toward the bright limb, which
+    :func:`_coarse_correlation_offset` adds back so the recovered shift is in
+    terms of the lit centroid rather than the geometric centre.
+    """
+    total = float(kernel.sum())
+    if total <= 0.0:
+        return (0.0, 0.0)
+    n_v, n_u = kernel.shape
+    vs = np.arange(n_v, dtype=np.float64)[:, None]
+    us = np.arange(n_u, dtype=np.float64)[None, :]
+    centroid_v = float((kernel * vs).sum() / total)
+    centroid_u = float((kernel * us).sum() / total)
+    return (centroid_v - (n_v - 1) / 2.0, centroid_u - (n_u - 1) / 2.0)
+
+
+def _coarse_disc_offset(
+    image_signal: NDArrayFloatType,
+    predicted_center_vu: tuple[float, float],
+    predicted_diameter_px: float,
+    margin_vu: tuple[int, int],
+) -> tuple[int, int]:
+    """Coarse integer offset from a filled-disc matched filter.
+
+    Convenience wrapper around :func:`_coarse_correlation_offset` for the
+    at-least-half-lit case: builds a filled disc of the predicted radius and
+    correlates it.  See :func:`_coarse_correlation_offset` for the offset
+    convention and degenerate-window handling.
+    """
+    radius = max(predicted_diameter_px / 2.0, 1.0)
+    return _coarse_correlation_offset(
+        image_signal, _disc_kernel(radius), predicted_center_vu, margin_vu
+    )
+
+
+def _coarse_crescent_offset(
+    image_signal: NDArrayFloatType,
+    predicted_center_vu: tuple[float, float],
+    predicted_diameter_px: float,
+    phase_deg: float,
+    sub_solar_dir_vu: tuple[float, float],
+    margin_vu: tuple[int, int],
+) -> tuple[int, int]:
+    """Coarse integer offset from a phase-aware crescent matched filter.
+
+    Builds a Lambertian-crescent template at the body's phase and sub-solar
+    direction (:func:`_crescent_kernel`) and correlates it, so a high-phase
+    body displaced beyond its predicted bounding box is located without a
+    full lit disc to correlate.  See :func:`_coarse_correlation_offset` for
+    the offset convention and degenerate-window handling.
+    """
+    radius = max(predicted_diameter_px / 2.0, 1.0)
+    kernel = _crescent_kernel(radius, math.radians(phase_deg), sub_solar_dir_vu)
+    return _coarse_correlation_offset(image_signal, kernel, predicted_center_vu, margin_vu)
 
 
 def _shift_bbox(
@@ -359,10 +484,15 @@ def _collect_per_blob_residuals(
     for feature in features:
         assert isinstance(feature.geometry, BodyBlobGeometry)
         # Coarse acquisition: prefer an installed prior; otherwise correlate a
-        # blob-shaped disc to find the body across the full window -- but only
-        # while the body is at least half-lit, since the disc template does not
-        # match a high-phase crescent (see _COARSE_CORRELATION_MAX_PHASE_DEG).
+        # matched-filter template of the predicted lit silhouette to find the
+        # body across the full window.  A filled disc models that silhouette
+        # while the body is at least half-lit; past half phase a crescent
+        # template synthesised at the body's sub-solar direction is needed,
+        # since a disc locks onto the off-center crescent arc.  When the
+        # crescent's direction is unknown the high-phase blob keeps its
+        # predicted bbox (see _COARSE_CORRELATION_MAX_PHASE_DEG).
         phase_deg = float(getattr(feature.flags, 'phase_angle_deg', 0.0))
+        sub_solar_dir_vu = getattr(feature.flags, 'sub_solar_dir_vu', (0.0, 0.0))
         if prior_coarse is not None:
             coarse_offset = prior_coarse
         elif phase_deg <= _COARSE_CORRELATION_MAX_PHASE_DEG:
@@ -370,6 +500,15 @@ def _collect_per_blob_residuals(
                 image_signal,
                 feature.geometry.predicted_center_vu,
                 feature.geometry.predicted_diameter_px,
+                margin_vu,
+            )
+        elif sub_solar_dir_vu != (0.0, 0.0):
+            coarse_offset = _coarse_crescent_offset(
+                image_signal,
+                feature.geometry.predicted_center_vu,
+                feature.geometry.predicted_diameter_px,
+                phase_deg,
+                sub_solar_dir_vu,
                 margin_vu,
             )
         else:

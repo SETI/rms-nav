@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 from tests.nav.nav_technique.conftest import (
@@ -17,9 +19,12 @@ from nav.nav_technique.diagnostics import BodyBlobDiagnostics
 from nav.nav_technique.nav_technique import ROTATION_UNOBSERVABLE_VARIANCE
 from nav.nav_technique.nav_technique_body_blob import (
     BodyBlobNav,
+    _coarse_crescent_offset,
     _coarse_disc_offset,
+    _crescent_kernel,
     _disc_kernel,
     _joint_covariance,
+    _kernel_centroid_offset,
     _shift_bbox,
 )
 from nav.support.filters import NavFilterKind, NavFilterSpec
@@ -33,6 +38,7 @@ def _make_blob_feature(
     bbox_pad: int = 4,
     phase_angle_deg: float = 0.0,
     phase_irregularity_factor: float = 0.0,
+    sub_solar_dir_vu: tuple[float, float] = (0.0, 0.0),
 ) -> NavFeature:
     """Build a BODY_BLOB feature whose bbox tightly bounds the predicted disc."""
     radius = predicted_diameter_px / 2.0
@@ -66,6 +72,7 @@ def _make_blob_feature(
             predicted_diameter_px=predicted_diameter_px,
             phase_angle_deg=phase_angle_deg,
             phase_irregularity_factor=phase_irregularity_factor,
+            sub_solar_dir_vu=sub_solar_dir_vu,
         ),
     )
 
@@ -509,6 +516,123 @@ def test_coarse_disc_offset_returns_zero_on_blank_window() -> None:
     assert (dv, du) == (0, 0)
 
 
+# ---------------------------------------------------------------------------
+# Phase-aware crescent coarse acquisition
+# ---------------------------------------------------------------------------
+
+
+def test_crescent_kernel_is_lit_only_on_the_sub_solar_side() -> None:
+    """The crescent kernel lights the sub-solar limb and darkens the far side."""
+    # Sun toward -v (top of the image): the lit limb is at the top edge.
+    kernel = _crescent_kernel(10.0, math.radians(120.0), (-1.0, 0.0))
+    mid = kernel.shape[0] // 2
+    assert kernel[1, mid] > 0.0  # near the top (sun-side) limb: lit
+    assert kernel[-2, mid] == 0.0  # near the bottom (anti-sun) limb: dark
+    assert kernel[0, 0] == 0.0  # corner outside the projected disc: zero
+
+
+def test_crescent_kernel_at_zero_phase_is_a_full_disc() -> None:
+    """At phase 0 the crescent collapses to a symmetric full disc.
+
+    Independent of the sub-solar direction, the kernel is limb-darkened but
+    has no bright/dark asymmetry, so its brightness centroid sits at the
+    middle and its interior is lit (the limb itself is zero where ``z == 0``).
+    """
+    kernel = _crescent_kernel(6.0, 0.0, (-1.0, 0.0))
+    mid = kernel.shape[0] // 2
+    radius = 6.0
+    yy, xx = np.mgrid[-mid : mid + 1, -mid : mid + 1]
+    interior = yy * yy + xx * xx <= (radius - 1.0) ** 2
+    assert np.all(kernel[interior] > 0.0)  # every strict-interior pixel is lit
+    off_v, off_u = _kernel_centroid_offset(kernel)
+    assert off_v == pytest.approx(0.0, abs=1e-9)
+    assert off_u == pytest.approx(0.0, abs=1e-9)
+
+
+def test_kernel_centroid_offset_is_zero_for_a_disc() -> None:
+    """A symmetric disc kernel has its brightness centroid at the middle."""
+    off_v, off_u = _kernel_centroid_offset(_disc_kernel(8.0))
+    assert off_v == pytest.approx(0.0, abs=1e-9)
+    assert off_u == pytest.approx(0.0, abs=1e-9)
+
+
+def test_kernel_centroid_offset_points_toward_the_bright_limb() -> None:
+    """A crescent's brightness centroid is displaced toward the sub-solar limb."""
+    # Sun toward +u (right): the lit centroid sits right of the geometric center.
+    kernel = _crescent_kernel(10.0, math.radians(120.0), (0.0, 1.0))
+    off_v, off_u = _kernel_centroid_offset(kernel)
+    assert off_u > 1.0
+    assert off_v == pytest.approx(0.0, abs=0.2)
+
+
+def test_coarse_crescent_offset_locates_a_displaced_crescent() -> None:
+    """The crescent filter maps the predicted lit centroid onto the observed one.
+
+    The observed body is a crescent of the modelled shape placed at geometric
+    centre (80, 95); the prediction is the unshifted geometric centre (64, 64).
+    Because the feature carries the *lit* centroid, the same brightness-centroid
+    offset is added to both predicted and observed centres, so the recovered
+    shift must equal the geometric displacement ``(16, 31)`` -- this pins the
+    lit-vs-geometric-centroid bookkeeping the coarse stage depends on.
+    """
+    radius = 12.0
+    sub_solar = (0.0, 1.0)  # sun toward +u
+    phase_deg = 120.0
+    kernel = _crescent_kernel(radius, math.radians(phase_deg), sub_solar)
+    centroid_off = _kernel_centroid_offset(kernel)
+    half = kernel.shape[0] // 2
+    shape = (160, 160)
+    body_center = (80, 95)
+    signal = np.zeros(shape, dtype=np.float64)
+    v0, u0 = body_center[0] - half, body_center[1] - half
+    signal[v0 : v0 + kernel.shape[0], u0 : u0 + kernel.shape[1]] = 100.0 * kernel
+    # Feature carries the lit centroid: geometric centre + kernel centroid off.
+    pred_lit_vu = (64.0 + centroid_off[0], 64.0 + centroid_off[1])
+    dv, du = _coarse_crescent_offset(
+        signal,
+        predicted_center_vu=pred_lit_vu,
+        predicted_diameter_px=2.0 * radius,
+        phase_deg=phase_deg,
+        sub_solar_dir_vu=sub_solar,
+        margin_vu=(40, 40),
+    )
+    assert dv == pytest.approx(body_center[0] - 64, abs=1)
+    assert du == pytest.approx(body_center[1] - 64, abs=1)
+
+
+def test_body_blob_high_phase_crescent_relocates_with_sub_solar_dir(
+    disc_image: DiscImageFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """A high-phase blob carrying a sub-solar direction is found beyond its bbox.
+
+    With the direction known the coarse stage synthesises a crescent template
+    and correlates it, so a body displaced well outside its predicted bounding
+    box is relocated -- the case the skipped disc template cannot handle.  A
+    fully-lit disc stands in for the body here; the crescent template still
+    peaks on it because the disc subsumes the crescent's lit region.
+    """
+    shape = (220, 220)
+    actual_center = (110.0, 130.0)
+    radius = 8.0
+    image = disc_image(shape, actual_center, radius)
+    planted_dv, planted_du = 20.0, 24.0
+    pred_center = (actual_center[0] - planted_dv, actual_center[1] - planted_du)
+    feature = _make_blob_feature(
+        'crescentMoon',
+        predicted_center_vu=pred_center,
+        predicted_diameter_px=2.0 * radius,
+        phase_angle_deg=120.0,
+        sub_solar_dir_vu=(0.0, 1.0),
+    )
+    technique = BodyBlobNav()
+    context = make_nav_context(image)
+    result = technique.navigate([feature], context)
+    assert result.offset_px[0] == pytest.approx(planted_dv, abs=0.5)
+    assert result.offset_px[1] == pytest.approx(planted_du, abs=0.5)
+    assert result.spurious is False
+
+
 def test_shift_bbox_translates_all_corners() -> None:
     """``_shift_bbox`` adds the offset to both corners."""
     assert _shift_bbox((2, 3, 10, 11), 5, -4) == (7, -1, 15, 7)
@@ -549,11 +673,13 @@ def test_body_blob_high_phase_crescent_does_not_relocate(
     disc_image: DiscImageFactory,
     make_nav_context: NavContextFactory,
 ) -> None:
-    """A high-phase blob keeps its predicted bbox (the disc template is skipped).
+    """A high-phase blob with no sub-solar direction keeps its predicted bbox.
 
-    The disc matched filter would lock onto a crescent's bright arc rather
-    than the body center, so above the phase ceiling the coarse stage is
-    skipped.  With a small in-bbox offset the centroid still recovers it; the
+    Above the phase ceiling a disc template would lock onto a crescent's bright
+    arc rather than the body center, so it is skipped; the crescent template
+    that replaces it needs the sub-solar direction, which this feature does not
+    carry (default ``(0, 0)``).  The coarse stage therefore makes no relocation
+    and, with a small in-bbox offset, the centroid still recovers it -- the
     point is that no spurious multi-pixel relocation occurs.
     """
     shape = (200, 200)

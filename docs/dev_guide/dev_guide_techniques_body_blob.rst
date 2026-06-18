@@ -28,8 +28,8 @@ Theory
 The technique fits a per-image translation by minimising the inverse-variance-weighted
 squared residual between the per-blob observed and predicted centroids.
 
-Coarse acquisition (blob-shaped-disc correlation)
--------------------------------------------------
+Coarse acquisition (lit-shape matched filter)
+---------------------------------------------
 
 A brightness-weighted moment only sees the body when it already sits inside the predicted
 bounding box, so the bare centroid's capture range is just the box -- a few pixels of
@@ -42,20 +42,36 @@ bounding box on the body before the centroid is taken:
 - If a pass-1 prior offset is installed on the context (another technique already located the
   body), the box is shifted by the rounded prior. The prior is a measured offset, so it
   applies regardless of phase.
-- Otherwise the technique correlates a *blob-shaped disc* -- a filled-disc matched-filter
-  kernel of the predicted body radius -- against the lit-signal image (background subtracted,
-  clipped at zero, sky-masked) over ``predicted_center +/- margin``. The response peaks where
-  a body-sized bright region is best centred; the integer peak offset re-centres the box.
+- Otherwise the technique correlates a matched-filter template of the predicted *lit
+  silhouette* against the lit-signal image (background subtracted, clipped at zero,
+  sky-masked) over ``predicted_center +/- margin``. The response peaks where a body of that
+  shape is best centred; the integer peak offset re-centres the box. The template depends on
+  phase (:data:`~nav.nav_technique.nav_technique_body_blob._COARSE_CORRELATION_MAX_PHASE_DEG`,
+  90 deg):
 
-The disc template models the lit silhouette only while the body is at least half-lit, so the
-correlation is gated by phase (:data:`~nav.nav_technique.nav_technique_body_blob._COARSE_CORRELATION_MAX_PHASE_DEG`,
-90 deg): above the ceiling the sunlit region is a thin crescent whose bright pixels sit a
-fraction of a radius off the body center, and a disc correlation would lock onto the crescent
-arc rather than the center. For a high-phase crescent the coarse stage is skipped and the
-predicted box is kept (an installed prior still applies). The coarse offset is integer; the
-sub-pixel precision comes entirely from the brightness-weighted moment below, computed inside
-the re-centred box, so the recovered ``observed - predicted`` residual already includes the
-coarse shift.
+  - **At or below half phase** the lit silhouette is a near-full disc, so the kernel is a
+    filled disc of the predicted body radius.
+  - **Above half phase** the sunlit region is a thin crescent whose bright pixels sit a
+    fraction of a radius off the body center; a disc kernel would lock onto the crescent arc
+    rather than the center. The kernel is instead a *synthesised crescent* -- a Lambertian
+    ``max(0, cos(incidence))`` rendering of a sphere of the predicted radius at the body's
+    phase, lit from the sub-solar direction the ``BODY_BLOB`` feature carries
+    (``sub_solar_dir_vu``, the projected body-to-Sun direction; see
+    :doc:`dev_guide_navigation_models_body`). Correlating the crescent puts the template
+    *center* on the body center instead of the bright arc.
+
+  The kernel is flipped before the FFT so the operation is a cross-correlation, and the
+  template's own brightness-centroid offset is added back to the peak: the feature carries the
+  body's *lit* centroid (which on a crescent sits off the geometric center), so the recovered
+  shift is expressed in lit-centroid terms and matches the residual the centroid step forms.
+
+The crescent template needs the sub-solar direction. It is undefined near full phase (the lit
+and geometric centroids coincide), where the disc kernel is used anyway, and is reported as
+``(0, 0)`` then. If a body is past half phase yet carries no direction (its illumination
+geometry was not populated), the coarse stage makes no relocation and keeps the predicted box
+(an installed prior still applies). The coarse offset is integer; the sub-pixel precision
+comes entirely from the brightness-weighted moment below, computed inside the re-centred box,
+so the recovered ``observed - predicted`` residual already includes the coarse shift.
 
 Per-blob centroid
 -----------------
@@ -122,11 +138,11 @@ Restrictions and assumptions
   inside the box, the moment skews and the technique reports a wrong centroid. The upstream
   ``BODY_BLOB`` emission gates filter pathological cases (see
   :doc:`dev_guide_navigation_models_body`).
-- The coarse blob-shaped-disc acquisition extends the capture range from the bounding box to
-  the full search window for bodies at least half-lit; a *high-phase* body beyond its bounding
-  box is the residual gap, because the disc template does not match a crescent and the coarse
-  stage is skipped above the phase ceiling. Such a body is recovered only when a prior from
-  another technique is installed.
+- The coarse lit-shape acquisition extends the capture range from the bounding box to the full
+  search window at any phase: a disc template at or below half phase, a synthesised crescent
+  above it. The only residual gap is a body past half phase whose illumination geometry was
+  not populated (no ``sub_solar_dir_vu``), where the crescent cannot be oriented; such a body
+  is then recovered only via the bounding-box centroid (small offsets) or an installed prior.
 - A vanishing total flux (an entirely-in-shadow body whose predicted bounding box happens to
   cover the right part of the FOV) collapses the moment; the technique drops such blobs
   before the joint fit and reports a no-signal failure when every blob is dropped.

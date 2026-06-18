@@ -1,0 +1,35 @@
+schema_version: 1
+scene_name: planted_offset_blob_crescent_displaced
+instrument: coiss_nac
+image_size_vu: [128, 128]
+random_seed: 11
+exposure_sec: 1.0
+# A high-phase (120 deg) crescent planted FAR from its predicted position
+# (-18.6, 21.4 px), well past the predicted bounding box.  This is the one case
+# the filled-disc coarse acquisition cannot reach: above half phase a disc
+# template locks onto the off-center crescent arc, so it is gated off, and a
+# brightness-weighted centroid only sees the body inside its predicted box.
+# Without the phase-aware coarse acquisition the recovered offset is biased by
+# several pixels (the body has left the box); BodyBlobNav instead synthesises a
+# crescent template at the body's phase and sub-solar direction (carried on the
+# BODY_BLOB feature) and correlates it over the search window, re-centring the
+# box on the displaced body.  Recovering the planted offset here guards that
+# crescent coarse-acquisition path; the small-offset crescent scene
+# (planted_offset_blob_crescent.yaml) guards the in-box centroid math.
+bodies:
+  - name: HYPERION
+    shape_model: ellipsoid
+    center_v: 64.0
+    center_u: 64.0
+    axis1: 60.0
+    axis2: 60.0
+    axis3: 60.0
+    illumination_angle: 18.0
+    phase_angle: 120.0
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+ground_truth:
+  planted_offset_dv_px: -18.6
+  planted_offset_du_px: 21.4
+  planted_rotation_deg: 0.0

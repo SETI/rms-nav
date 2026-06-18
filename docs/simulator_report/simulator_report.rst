@@ -97,7 +97,7 @@ navigation costs ~35 s -- and sweep to the measured per-technique ceiling:
    * - BodyBlobNav
      - ``small_sphere_base`` (20 px sphere)
      - ~extfov margin
-     - blob-shaped-disc coarse acquisition
+     - lit-shape (disc / crescent) coarse acquisition
 
 Beyond a technique's ceiling the navigator correctly reports failure (the feature
 is outside the searchable region); the wide sweeps run to the ceiling and, for the
@@ -105,13 +105,15 @@ blob, a little past it to show the degradation.
 
 ``BodyBlobNav`` previously stopped at ~6 px (the predicted bounding box plus its
 per-body slop), past which the brightness-weighted centroid clipped and silently
-biased. A coarse blob-shaped-disc correlation now re-centres each blob's box on the
-body across the full search window before the centroid is taken, so the capture range
+biased. A coarse lit-shape correlation now re-centres each blob's box on the body
+across the full search window before the centroid is taken, so the capture range
 matches the other techniques (recovery holds to a few hundredths of a pixel out to the
-extfov margin on the low-phase ``small_sphere_base`` sweep). The disc template models
-only a near-full disc, so the coarse stage is gated to bodies at least half-lit; a
-high-phase crescent beyond its bounding box still needs a prior from another technique.
-See :doc:`../dev_guide/dev_guide_techniques_body_blob`.
+extfov margin on the low-phase ``small_sphere_base`` sweep). The template tracks phase:
+a filled disc at or below half phase, and a synthesised crescent above it, oriented
+along the sub-solar direction the blob feature carries. A high-phase crescent displaced
+~20 px beyond its bounding box recovers to a few hundredths of a pixel on the
+``planted_offset_blob_crescent_displaced`` invariant scene. See
+:doc:`../dev_guide/dev_guide_techniques_body_blob`.
 
 Running the sweeps
 ==================

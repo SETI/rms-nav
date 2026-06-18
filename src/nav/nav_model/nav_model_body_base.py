@@ -52,6 +52,16 @@ bodies.
 """
 
 
+_SUB_SOLAR_MIN_OFFSET_PX: float = 0.5
+"""Minimum lit-centroid offset (px) for a meaningful sub-solar direction.
+
+Below this the body is near full phase, the lit and geometric centroids
+coincide to within pixel noise, and the direction toward the bright limb
+is undefined; the BODY_BLOB feature then carries ``(0.0, 0.0)`` and
+BodyBlobNav falls back to the filled-disc coarse template.
+"""
+
+
 class NavModelBodyBase(NavModel):
     """Base class for body navigation models.
 
@@ -139,6 +149,7 @@ class NavModelBodyBase(NavModel):
         sigma_total_px = math.sqrt(sigma_centroid * sigma_centroid + sigma_irregular_px**2)
         cov = (sigma_total_px * sigma_total_px) * np.eye(2, dtype=np.float64)
         predicted_center_vu = self._lit_weighted_centroid_vu()
+        sub_solar_dir_vu = self._sub_solar_dir_vu(predicted_center_vu)
         body_name = getattr(self, '_body_name', 'BODY')
         return NavFeature(
             feature_id=f'body_blob:{body_name}',
@@ -164,6 +175,7 @@ class NavModelBodyBase(NavModel):
                 predicted_diameter_px=self._predicted_diameter_px,
                 phase_angle_deg=phase_angle_deg,
                 phase_irregularity_factor=phase_irregularity_factor,
+                sub_solar_dir_vu=sub_solar_dir_vu,
             ),
         )
 
@@ -223,6 +235,36 @@ class NavModelBodyBase(NavModel):
         lit_v = float((weights * v_indices).sum() / total)
         lit_u = float((weights * u_indices).sum() / total)
         return (lit_v, lit_u)
+
+    def _sub_solar_dir_vu(self, lit_centroid_vu: tuple[float, float]) -> tuple[float, float]:
+        """Return the unit image-plane direction toward the bright limb.
+
+        The brightness-weighted centroid of a partially-lit body sits between
+        the geometric center and the bright limb, so the vector from the
+        geometric center (``_predicted_center_vu``) to the lit centroid points
+        along the projected body-to-Sun direction.  ``BodyBlobNav`` orients its
+        phase-aware coarse template along this direction (a filled disc cannot
+        match a high-phase crescent).  At low phase the two centroids nearly
+        coincide and the direction is meaningless, so it collapses to
+        ``(0.0, 0.0)``; the technique uses the disc template there and never
+        consults the direction.
+
+        Parameters:
+            lit_centroid_vu: The brightness-weighted centroid (the value
+                stored as the feature's predicted center), in the same extfov
+                frame as ``_predicted_center_vu``.
+
+        Returns:
+            Unit ``(v, u)`` direction toward the bright limb, or
+            ``(0.0, 0.0)`` when the lit centroid is within
+            :data:`_SUB_SOLAR_MIN_OFFSET_PX` of the geometric center.
+        """
+        dv = lit_centroid_vu[0] - self._predicted_center_vu[0]
+        du = lit_centroid_vu[1] - self._predicted_center_vu[1]
+        norm = math.hypot(dv, du)
+        if norm < _SUB_SOLAR_MIN_OFFSET_PX:
+            return (0.0, 0.0)
+        return (dv / norm, du / norm)
 
     def _create_annotations(
         self,
