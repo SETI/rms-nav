@@ -145,6 +145,33 @@ def test_irregularity_sweep_confidence_drops() -> None:
     assert rows[-1].confidence < rows[0].confidence
 
 
+def test_pose_disagreement_starts_clean() -> None:
+    """With the predicted pose agreeing, the limb recovers the planted offset."""
+    rows = _rows('pose_disagreement')
+    assert rows[0].status == 'success'
+    assert rows[0].offset_error_px is not None
+    assert rows[0].offset_error_px < 1.0
+
+
+def test_pose_disagreement_limb_error_grows() -> None:
+    """A small pose disagreement already grows the limb fit error."""
+    rows = _rows('pose_disagreement')
+    assert rows[1].offset_error_px is not None
+    assert rows[0].offset_error_px is not None
+    assert rows[1].offset_error_px > rows[0].offset_error_px
+
+
+def test_pose_disagreement_large_disagreement_fails() -> None:
+    """At a large pose disagreement the limb no longer produces a trusted fix.
+
+    The pinned limb is flagged spurious once the predicted silhouette swings far
+    off the rendered one, so the fused (limb-only) status degrades to failed --
+    the navigator declining to trust the confidently-wrong limb.
+    """
+    rows = _rows('pose_disagreement')
+    assert rows[-1].status == 'failed'
+
+
 # The per-technique dense and wide offset sweeps (``*_offset_fine`` /
 # ``*_offset_wide``) are characterization runs, not assertions: they are executed
 # by ``sim_sweep_runner`` to produce the report's figures, and the specific defect
