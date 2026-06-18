@@ -101,6 +101,35 @@ The iteration terminates when the step-norm drops below the configured tolerance
 damping grows past :math:`10^{6}` (the trust region collapsed), or when the iteration cap is
 reached.
 
+Stage 3 — optional continuous gradient-ridge refinement
+-------------------------------------------------------
+
+``gradient_ridge_refine`` is a final, sub-pixel polish that fits directly against the
+*continuous* gradient-magnitude field rather than the integer-quantized DT. For each vertex at
+its current pose it bilinearly samples :math:`|\nabla|` along the outward normal across
+:math:`t \in [-3, +3]` px and parabola-interpolates the sub-pixel signed distance :math:`t^{*}`
+to the gradient peak; the residual is :math:`r_{i} = t^{*}_{i}`, driven to zero by
+Gauss-Newton. Translating a vertex by :math:`\delta` changes the residual by
+:math:`-(n_{i} \cdot \delta)`, so the translation Jacobian rows are :math:`[-n_{v}, -n_{u}]`;
+the rotation column (when fit) is central-differenced. The same Tukey reweighting and weighted
+normal equations as Stage 2 apply, and a displacement cap discards the result if it walks more
+than ~1.5 px from the DT-LM pose. When the stage runs, the reported residuals / weights / RMS /
+covariance are recomputed against the DT at the refined pose so the spurious gates stay on the
+same footing as without it.
+
+The stage exists and is unit-tested but is **held off by default** (the per-technique
+``gradient_ridge_refine`` tuning flag is ``0``). It is correct for *symmetric* edges, but the
+DT techniques' two real consumers do not benefit:
+
+- The ring edge is already at its floor (~0.016 px, below the 0.02 px target) because a ring
+  edge is a symmetric transition whose gradient peak coincides with the geometric edge.
+- The body limb is *worse* with it on. A limb is a one-sided transition, so its gradient peak
+  sits ~0.1 px inside the geometric silhouette the model predicts; the DT-LM's quantization
+  partially cancels that offset, and converging precisely onto the gradient peak removes the
+  cancellation and sharpens the bias. The limb floor is therefore a model-vs-image edge offset,
+  not a DT-construction artifact; the genuine remedy is a model-side limb-edge prediction
+  (issue #150). See :doc:`dev_guide_techniques_body_limb`.
+
 Polarity filtering
 ------------------
 

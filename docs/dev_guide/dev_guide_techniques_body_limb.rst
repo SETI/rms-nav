@@ -103,19 +103,34 @@ it does not capture systematic biases (e.g. an inflation of the per-vertex sigma
 unmodelled crater roughness) and it does not capture model-side uncertainty in the SPICE
 prediction itself (the search-window margin is what bounds that).
 
-One such systematic is a **sub-pixel-phase bias floor of ~0.1 px** in the recovered offset
-(median ~0.09-0.14 px over a dense sub-pixel sweep depending on the cross-axis phase, up to
-~0.25 px at the worst two-axis phase). It is *independent of SNR* (it persists on a clean, high-signal frame), so it is not
-a noise effect: it arises because the image-edge distance transform is built from a binary
-thresholded-and-NMS'd edge mask and is then integer-quantized before bilinear sampling, so the
-distance field the Levenberg-Marquardt fit minimizes against is itself quantized at the
-sub-pixel scale (see :doc:`dev_guide_techniques_dt_fitting`). Unlike the disc correlator's
-sharp-edge S-curve -- which a band-limit in the cross-power refinement removes -- this floor
-lives in the distance-transform construction, so a correlator-side fix does not touch it. The
-intended remedy is to fit the final sub-pixel offset against the *continuous* gradient field
-rather than the quantized DT (the DT/NCC stage still does coarse acquisition); that work is a
-separate follow-up. Until then the limb fit is the least precise of the point-feature
-techniques on a well-resolved body, though it stays well inside the navigability bound. When the converged offset
+One such systematic is a **model-vs-image edge-localization bias floor of ~0.1 px** in the
+recovered offset (median ~0.09-0.14 px over a dense sub-pixel sweep depending on the cross-axis
+phase, up to ~0.25 px at the worst two-axis phase). It is *independent of SNR* -- it persists
+on a clean, high-signal frame -- so it is not a noise effect. Its origin is the mismatch
+between what the ``LIMB_ARC`` model predicts and what the image edge actually is: the model
+predicts the *geometric silhouette*, but a body limb is a one-sided brightness transition
+(sky outside, limb-darkened surface rising from ~0 at the silhouette inside), so after PSF
+convolution the gradient-magnitude peak -- the feature any edge-fit locks onto -- sits a
+fraction of the PSF width *inside* the silhouette. On a clean, zero-planted-offset render the
+limb fit therefore recovers ~(0.06, 0.08) px instead of (0, 0), and a direct measurement of
+the signed normal distance from the model silhouette to the gradient peak gives a median of
+~+0.10 px inward.
+
+The integer-quantized distance transform (see :doc:`dev_guide_techniques_dt_fitting`) adds its
+own sub-pixel-phase jitter on top, and its quantization + Tukey + trust-region machinery
+*accidentally* pulls the fit ~0.1 px back toward truth, so the observed ~0.1 px floor is the
+partial cancellation of a larger (~0.16 px) inward model-image offset against that pull. This
+matters for the remedy: fitting the final sub-pixel offset against the *continuous* gradient
+field (the ``gradient_ridge_refine`` stage in :doc:`dev_guide_techniques_dt_fitting`, wired but
+held off via the ``gradient_ridge_refine`` tuning flag) converges precisely onto the gradient
+peak, which removes the lucky cancellation and *sharpens* the bias rather than removing it --
+clean planted-(0,0) recovery worsens from ~0.10 px to ~0.17 px. The ring edge, being a
+symmetric transition whose gradient peak coincides with the geometric edge, does not have this
+offset and is already at its floor (~0.016 px) without the refine. The genuine remedy is a
+*model-side* fix that predicts the limb at the gradient-peak location (limb-darkening- and
+PSF-aware); that work is tracked in issue #150. Until then the limb fit is the least precise of
+the point-feature techniques on a well-resolved body, though it stays well inside the
+navigability bound. When the converged offset
 sits within a small tolerance of any axis bound of the search window, or when the rotation
 parameter is at the configured fraction of its cap, the result is flagged :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and the
 confidence formula's hard-zero gate forces confidence to zero. The spurious tests gate on

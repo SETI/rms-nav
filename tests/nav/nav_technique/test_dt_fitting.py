@@ -15,7 +15,9 @@ from nav.nav_orchestrator.image_derivatives import (
 from nav.nav_technique.dt_fitting import (
     DEFAULT_TUKEY_C,
     LMRefineResult,
+    RidgeRefineResult,
     coarse_ncc_search,
+    gradient_ridge_refine,
     information_matrix_to_covariance,
     lm_subpixel_refine,
     polarity_filter,
@@ -765,3 +767,211 @@ def test_lm_subpixel_refine_bails_out_when_damping_saturates() -> None:
     assert result.converged is False
     # The offset stays at the initial value (no successful step reduced cost).
     assert result.offset_vu == (0.0, 0.0)
+
+
+# ---------------------------------------------------------------------------
+# gradient_ridge_refine
+# ---------------------------------------------------------------------------
+
+
+def _gradient_magnitude_for_circle(shape: tuple[int, int], radius: float) -> np.ndarray:
+    """Return the continuous gradient magnitude of a smoothed step-edge disc.
+
+    A disc step edge is symmetric, so after the Gaussian smooth the gradient
+    magnitude ridge coincides with the geometric circle -- the unbiased case
+    the ridge refinement is correct for.
+    """
+    cv = shape[0] / 2.0
+    cu = shape[1] / 2.0
+    image = _render_image_with_circle(shape, (cv, cu), radius)
+    grad = compute_image_gradient_vu(image, sigma_px=DEFAULT_IMAGE_GRADIENT_SIGMA_PX)
+    mag: np.ndarray = np.hypot(grad[..., 0], grad[..., 1])
+    return mag
+
+
+def test_gradient_ridge_refine_recovers_subpixel_translation() -> None:
+    """On a symmetric edge the ridge stage recovers the planted sub-pixel shift."""
+    shape = (96, 96)
+    radius = 18.0
+    grad_mag = _gradient_magnitude_for_circle(shape, radius)
+    # Model circle sits 1.5 px / 2.5 px off the image circle; the aligning
+    # offset is therefore (-1.5, -2.5).
+    cv = shape[0] / 2.0 + 1.5
+    cu = shape[1] / 2.0 + 2.5
+    vertices, outward_normals = _build_circle_polyline((cv, cu), radius, 64)
+    inward_normals = -outward_normals
+    sigmas = np.full(vertices.shape[0], 0.5, dtype=np.float64)
+    result = gradient_ridge_refine(
+        vertices_vu=vertices,
+        normals_vu=inward_normals,
+        sigma_normal_per_vertex_px=sigmas,
+        gradient_magnitude=grad_mag,
+        initial_offset_vu=(-1.0, -2.0),
+    )
+    assert result.applied is True
+    assert result.offset_vu[0] == pytest.approx(-1.5, abs=0.05)
+    assert result.offset_vu[1] == pytest.approx(-2.5, abs=0.05)
+    assert result.iterations >= 1
+
+
+def test_gradient_ridge_refine_returns_ridge_refine_result_type() -> None:
+    """The helper returns the documented dataclass."""
+    shape = (96, 96)
+    radius = 18.0
+    grad_mag = _gradient_magnitude_for_circle(shape, radius)
+    vertices, outward_normals = _build_circle_polyline((shape[0] / 2.0, shape[1] / 2.0), radius, 64)
+    sigmas = np.full(vertices.shape[0], 0.5, dtype=np.float64)
+    result = gradient_ridge_refine(
+        vertices_vu=vertices,
+        normals_vu=-outward_normals,
+        sigma_normal_per_vertex_px=sigmas,
+        gradient_magnitude=grad_mag,
+        initial_offset_vu=(0.0, 0.0),
+    )
+    assert isinstance(result, RidgeRefineResult)
+
+
+def test_gradient_ridge_refine_keeps_pose_when_displacement_capped() -> None:
+    """An over-tight displacement cap discards the refinement and keeps the seed."""
+    shape = (96, 96)
+    radius = 18.0
+    grad_mag = _gradient_magnitude_for_circle(shape, radius)
+    cv = shape[0] / 2.0 + 1.5
+    cu = shape[1] / 2.0 + 2.5
+    vertices, outward_normals = _build_circle_polyline((cv, cu), radius, 64)
+    sigmas = np.full(vertices.shape[0], 0.5, dtype=np.float64)
+    result = gradient_ridge_refine(
+        vertices_vu=vertices,
+        normals_vu=-outward_normals,
+        sigma_normal_per_vertex_px=sigmas,
+        gradient_magnitude=grad_mag,
+        initial_offset_vu=(-1.0, -2.0),
+        max_total_displacement_px=0.05,
+    )
+    assert result.applied is False
+    assert result.offset_vu == (-1.0, -2.0)
+
+
+def test_gradient_ridge_refine_keeps_pose_when_no_gradient() -> None:
+    """A flat (zero) gradient field yields no usable ridge; the seed is kept."""
+    shape = (64, 64)
+    grad_mag = np.zeros(shape, dtype=np.float64)
+    vertices, outward_normals = _build_circle_polyline((32.0, 32.0), 16.0, 48)
+    sigmas = np.full(vertices.shape[0], 0.5, dtype=np.float64)
+    result = gradient_ridge_refine(
+        vertices_vu=vertices,
+        normals_vu=-outward_normals,
+        sigma_normal_per_vertex_px=sigmas,
+        gradient_magnitude=grad_mag,
+        initial_offset_vu=(0.3, -0.4),
+    )
+    assert result.applied is False
+    assert result.offset_vu == (0.3, -0.4)
+
+
+def test_gradient_ridge_refine_recovers_small_rotation() -> None:
+    """With ``fit_rotation`` the stage refines a small planted roll."""
+    shape = (128, 128)
+    radius = 24.0
+    grad_mag = _gradient_magnitude_for_circle(shape, radius)
+    cv = shape[0] / 2.0
+    cu = shape[1] / 2.0
+    vertices, outward_normals = _build_circle_polyline((cv, cu), radius, 96)
+    sigmas = np.full(vertices.shape[0], 0.5, dtype=np.float64)
+    result = gradient_ridge_refine(
+        vertices_vu=vertices,
+        normals_vu=-outward_normals,
+        sigma_normal_per_vertex_px=sigmas,
+        gradient_magnitude=grad_mag,
+        initial_offset_vu=(0.0, 0.0),
+        fit_rotation=True,
+        pivot_vu=(cv, cu),
+        pivot_distance_px=float(math.hypot(cv, cu)),
+    )
+    # A centred circle is rotationally symmetric, so the fit stays put and
+    # exercises the rotation Jacobian path without diverging.
+    assert result.offset_vu[0] == pytest.approx(0.0, abs=0.05)
+    assert result.offset_vu[1] == pytest.approx(0.0, abs=0.05)
+
+
+@pytest.mark.parametrize(
+    ('kwargs', 'message'),
+    [
+        ({'vertices_vu': np.zeros((0, 2))}, r'vertices_vu must have shape'),
+        ({'normals_vu': np.zeros((3, 2))}, r'normals_vu must match'),
+        ({'sigma_normal_per_vertex_px': np.zeros(8)}, r'must be finite and > 0'),
+        ({'gradient_magnitude': np.zeros((5, 5, 2))}, r'gradient_magnitude must be 2-D'),
+    ],
+)
+def test_gradient_ridge_refine_rejects_invalid_inputs(
+    kwargs: dict[str, np.ndarray], message: str
+) -> None:
+    """Shape / value guards fire with informative messages."""
+    shape = (64, 64)
+    vertices, outward_normals = _build_circle_polyline((32.0, 32.0), 16.0, 8)
+    base = {
+        'vertices_vu': vertices,
+        'normals_vu': -outward_normals,
+        'sigma_normal_per_vertex_px': np.full(vertices.shape[0], 0.5, dtype=np.float64),
+        'gradient_magnitude': np.zeros(shape, dtype=np.float64),
+        'initial_offset_vu': (0.0, 0.0),
+    }
+    base.update(kwargs)
+    with pytest.raises(ValueError, match=message):
+        gradient_ridge_refine(**base)  # type: ignore[arg-type]
+
+
+def test_gradient_ridge_refine_requires_pivot_distance_for_rotation() -> None:
+    """``fit_rotation`` without a positive pivot distance is rejected."""
+    vertices, outward_normals = _build_circle_polyline((32.0, 32.0), 16.0, 8)
+    with pytest.raises(ValueError, match='requires pivot_distance_px'):
+        gradient_ridge_refine(
+            vertices_vu=vertices,
+            normals_vu=-outward_normals,
+            sigma_normal_per_vertex_px=np.full(vertices.shape[0], 0.5, dtype=np.float64),
+            gradient_magnitude=np.zeros((64, 64), dtype=np.float64),
+            initial_offset_vu=(0.0, 0.0),
+            fit_rotation=True,
+        )
+
+
+def test_lm_subpixel_refine_final_gradient_ridge_runs_on_symmetric_edge() -> None:
+    """The ``final_gradient_ridge`` path recovers the planted shift on a clean edge."""
+    shape = (96, 96)
+    radius = 18.0
+    dt = _build_dt_for_circle(shape, radius)
+    cv = shape[0] / 2.0 + 1.5
+    cu = shape[1] / 2.0 + 2.5
+    vertices, outward_normals = _build_circle_polyline((cv, cu), radius, 64)
+    sigmas = np.full(vertices.shape[0], 0.5, dtype=np.float64)
+    image = _render_image_with_circle(shape, (shape[0] / 2.0, shape[1] / 2.0), radius)
+    grad = compute_image_gradient_vu(image, sigma_px=DEFAULT_IMAGE_GRADIENT_SIGMA_PX)
+    result = lm_subpixel_refine(
+        vertices_vu=vertices,
+        normals_vu=-outward_normals,
+        sigma_normal_per_vertex_px=sigmas,
+        image_edge_dt=dt,
+        image_gradient_vu=grad,
+        initial_offset_vu=(-1.0, -2.0),
+        use_polarity=True,
+        final_gradient_ridge=True,
+    )
+    assert result.offset_vu[0] == pytest.approx(-1.5, abs=0.05)
+    assert result.offset_vu[1] == pytest.approx(-2.5, abs=0.05)
+
+
+def test_lm_subpixel_refine_final_gradient_ridge_requires_gradient() -> None:
+    """``final_gradient_ridge`` without an image gradient is rejected up front."""
+    shape = (32, 32)
+    dt = _build_dt_for_circle(shape, 8.0)
+    vertices, outward_normals = _build_circle_polyline((16.0, 16.0), 8.0, 16)
+    sigmas = np.full(vertices.shape[0], 0.5, dtype=np.float64)
+    with pytest.raises(ValueError, match='final_gradient_ridge=True requires image_gradient_vu'):
+        lm_subpixel_refine(
+            vertices_vu=vertices,
+            normals_vu=-outward_normals,
+            sigma_normal_per_vertex_px=sigmas,
+            image_edge_dt=dt,
+            use_polarity=False,
+            final_gradient_ridge=True,
+        )

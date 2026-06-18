@@ -104,17 +104,22 @@ both consumers (`obs_inst_sim.py`, `render.py`), and the GUI load/save round-tri
 documented in `dev_guide_observations`, the simulated-image user guide, and the
 scene README. Resolves open question 2.
 
-The next two navigation/sim improvements, highest priority first:
+**Investigated and re-scoped (this track):** *Staged limb / ring sub-pixel refine against the
+continuous gradient field.* The premise -- that the limb/ring floor is a removable
+quantized-DT artifact -- was disproved on the full sim pipeline. The continuous gradient-ridge
+refine (`gradient_ridge_refine` in `dt_fitting`, wired but held off via the per-technique
+tuning flag) does not help: the **ring** is already at its floor (~0.016 px, below the 0.02 px
+target) because its edges are symmetric, and the **limb** gets *worse* (clean planted-(0,0)
+recovery worsens from ~0.10 px to ~0.17 px). The limb floor is a **model-vs-image edge offset**
+-- the gradient peak of a limb-darkened, PSF-blurred limb sits ~0.1 px inside the geometric
+silhouette the `LIMB_ARC` predicts, and the DT-LM only hits ~0.10 px because its quantization
+accidentally pulls back toward truth. The genuine remedy is a model-side limb-edge prediction
+(limb-darkening- and PSF-aware), tracked in **issue #150**. See the corrected mechanism note in
+`dev_guide_techniques_body_limb` and `dev_guide_techniques_dt_fitting`.
 
-1. **Staged limb / ring sub-pixel refine against the continuous gradient field.**
-   The limb (~0.135 px) and ring (~0.05 px) distance-transform techniques carry an
-   SNR-independent sub-pixel-phase bias floor from the integer-quantized DT. Keep
-   the DT/NCC coarse acquisition, then refine the final offset against the
-   *continuous* gradient field (sub-pixel, un-quantized). See the mechanism note in
-   `dev_guide_techniques_body_limb`; the ring shares it via `dt_fitting`. The limb
-   sweep median is ~0.092 px (phase-dependent, up to ~0.25 px at the worst phase);
-   the ring ~0.034 px.
-2. **Prior-aware large-offset refinement with graceful fallback.** For blob / limb /
+The next navigation/sim improvement:
+
+1. **Prior-aware large-offset refinement with graceful fallback.** For blob / limb /
    ring, use a pass-1 prior to seed a larger-offset refinement, with graceful
    fallback to the current prior-free behavior when there is no prior or the prior
    is bad. Validate only with simulated images (a real image's true offset is

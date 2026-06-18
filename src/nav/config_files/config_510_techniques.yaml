@@ -221,6 +221,20 @@ techniques:
       # the spurious flag fires, and the fallback terminator
       # technique handles the body).
       lm_tikhonov_alpha: 0.0
+      # Final continuous gradient-ridge sub-pixel refinement after the DT
+      # Levenberg-Marquardt converges (see
+      # :func:`nav.nav_technique.dt_fitting.gradient_ridge_refine`).  Held
+      # OFF for the limb: the dominant limb error is a model-vs-image edge
+      # offset -- the gradient-magnitude peak of a limb-darkened,
+      # PSF-blurred limb sits ~0.1 px inside the geometric silhouette the
+      # LIMB_ARC predicts -- not the DT quantization the continuous fit
+      # would remove.  Refining onto the gradient peak therefore SHARPENS
+      # that offset (clean planted-(0,0) recovery worsens from ~0.10 px to
+      # ~0.17 px).  Removing the floor needs a model-side fix that predicts
+      # the limb at the gradient-peak location; see
+      # ``dev_guide_techniques_body_limb``.  1 enables, 0 disables (the
+      # tuning loader is numeric-only, so this is an int flag).
+      gradient_ridge_refine: 0
       # Pixels of slack around the search-window axis bounds for the
       # at-edge check.  See ``RingEdgeNav.at_edge_tolerance_px``.
       at_edge_tolerance_px: 1.0
@@ -320,6 +334,13 @@ techniques:
       lm_trust_region_px: 1.0
       # See ``BodyLimbNav.lm_tikhonov_alpha``.
       lm_tikhonov_alpha: 0.0
+      # Final continuous gradient-ridge sub-pixel refinement; see
+      # ``BodyLimbNav.gradient_ridge_refine``.  Held OFF: the ring edges are
+      # symmetric, so the gradient peak already coincides with the geometric
+      # edge and the DT-LM fit is at its floor (~0.016 px sweep median,
+      # already below the 0.02 px target); the continuous refine does not
+      # improve it.  1 enables, 0 disables.
+      gradient_ridge_refine: 0
       # Rotation-axis ``at_edge`` fraction; see
       # ``BodyDiscCorrelateNav.rotation_at_edge_fraction``.
       rotation_at_edge_fraction: 0.95
