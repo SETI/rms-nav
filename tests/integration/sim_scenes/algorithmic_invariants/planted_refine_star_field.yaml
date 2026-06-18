@@ -1,0 +1,36 @@
+schema_version: 1
+scene_name: planted_refine_star_field
+instrument: coiss_nac
+image_size_vu: [128, 128]
+random_seed: 7
+exposure_sec: 1.0
+# A clean multi-star field with no body or rings, used to exercise the pass-2
+# StarRefineNav prior-refinement path.  StarRefineNav requires a prior, so it
+# only runs after the pass-1 star ensemble (StarFieldFromCatalogNav +
+# StarUniqueMatchNav) reaches 'success' and the orchestrator installs that
+# offset; on a pure star scene with no body to dominate, pass 1 does reach
+# success.  StarRefineNav then re-centroids each predicted star around the
+# prior-shifted position and reports the inverse-variance-weighted refined
+# offset.  Recovery is asserted on the StarRefineNav per-technique result (read
+# from the full-ensemble navigate so the prior is actually installed); the scene
+# is held out of the full-ensemble offset assertions because the refine is one
+# contributor among the fused star techniques.  The field mirrors
+# planted_offset_star_field (six bright, well-spread stars) so the pass-1
+# ensemble is well-conditioned and several stars survive as refine inliers.
+bodies: []
+rings: []
+stars:
+  list:
+    - {name: R1, v: 32.0, u: 42.0, vmag: 3.0}
+    - {name: R2, v: 82.0, u: 33.0, vmag: 3.6}
+    - {name: R3, v: 57.0, u: 92.0, vmag: 3.3}
+    - {name: R4, v: 97.0, u: 93.0, vmag: 4.0}
+    - {name: R5, v: 42.0, u: 102.0, vmag: 3.8}
+    - {name: R6, v: 102.0, u: 52.0, vmag: 3.5}
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+ground_truth:
+  planted_offset_dv_px: 1.43
+  planted_offset_du_px: -0.61
+  planted_rotation_deg: 0.0

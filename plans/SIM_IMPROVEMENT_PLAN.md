@@ -49,12 +49,12 @@ plan. A new contributor should read this first, then the phase it points to.
 - **GUI:** G0, G1, G2, G4, G5, G6, G7, G8 are **done**. G3 (smear) is postponed
   with B3.
 - **Test layer:** T1 (scene catalog), T2 (regression baselines), T3 (sweeps) are
-  **done**. T4 (algorithmic invariants) is **substantially done** -- disc, blob,
-  limb, ring edge, star field, and camera roll all navigate from catalog scenes
-  and recover planted transforms; remaining are the `StarUniqueMatchNav` one-star
-  and `StarRefineNav` prior-refinement technique-pinned cases. T5 (alpha
-  bootstrap), T6 (real-vs-sim diagnostics), T7 (calibration validation) are
-  **not started** and depend on the real-data Phase 10 calibration.
+  **done**. T4 (algorithmic invariants) is **done** -- disc, blob (incl. the
+  displaced high-phase crescent), limb, ring edge, star field, camera roll, the
+  `StarUniqueMatchNav` one-star path, and the `StarRefineNav` pass-2
+  prior-refinement path all navigate from catalog scenes and recover planted
+  transforms. T5 (alpha bootstrap), T6 (real-vs-sim diagnostics), T7 (calibration
+  validation) are **not started** and depend on the real-data Phase 10 calibration.
 
 ### 0.2 Navigation-accuracy work completed alongside the plan
 
