@@ -141,7 +141,7 @@ Every CLI listed in ``[project.scripts]`` is installed onto ``$PATH`` by
      - Queue-driven mosaic builder.
    * - ``nav_create_simulated_image``
      - Render a synthetic test image (operator-supplied bodies / rings / stars).
-       See :doc:`/user_guide/user_guide_simulated_images`.
+       See :doc:`dev_guide_simulator`.
 
 Quick smoke test:
 

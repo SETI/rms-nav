@@ -42,7 +42,7 @@ against. The blob and limb features extend the simulated body across the techniq
 the blob is the orientation-independent fallback for small, high-phase, or irregular
 bodies, and the limb is the resolved-body distance-transform fit. Which feature is
 load-bearing tracks resolution and phase the same way it does on a real frame, so the
-range and phase parameter sweeps (:doc:`/user_guide/user_guide_simulated_images`) show the
+range and phase parameter sweeps (see :doc:`/simulator_report/simulator_report`) show the
 primary technique transitioning limb -> disc -> blob as a body shrinks. The simulated
 body's geometry is operator-known by construction, so the simulated path is the
 calibration regime -- it lets a developer probe the navigation pipeline with bodies whose
@@ -109,16 +109,16 @@ renderer drew, so the navigator knows the truth (the agreeing case).
 An optional ``nav_override`` mapping breaks that tie. The renderer ignores it and
 always draws the true geometry; the navigator builds its predicted body from the
 body params with ``nav_override`` overlaid (``_nav_params``). This is the channel
-that lets the navigation geometry diverge from the render geometry, which the B7
+that lets the navigation geometry diverge from the render geometry, which the
 irregular-body scenarios exercise:
 
 - **Same geometry (no override)** -- mesh vs mesh at the true pose. The
-  resolved-mesh limb is exact by construction (scenario 1).
+  resolved-mesh limb is exact by construction.
 - **Shape mismatch** -- render a lumpy mesh, predict its zero-relief
   (ellipsoidal) limit by overriding ``mesh_lumpiness`` to ``0.0`` at the same
   pose. The only residual is shape; the disc correlation still aligns the two
   filled silhouettes and the recovered centroid bias grows with the rendered
-  relief (scenario 2). Realising the ellipsoidal prediction as the smooth limit
+  relief. Realising the ellipsoidal prediction as the smooth limit
   of the mesh keeps both silhouettes on one renderer with a consistent axis and
   pose convention, so the residual is pure shape mismatch rather than a
   renderer-convention skew.
@@ -126,7 +126,7 @@ irregular-body scenarios exercise:
   mesh at a different ``pose_euler_deg``. The wrong-pose silhouette boundary
   drives the limb distance-transform fit to a confidently-wrong offset, while the
   lit-weighted blob centroid -- which a centrally-symmetric (low-relief triaxial)
-  body keeps near the body centre under rotation -- stays accurate (scenario 3).
+  body keeps near the body centre under rotation -- stays accurate.
 
 The override never changes the centre, so the predicted body stays at the
 unshifted position the planted offset is measured from.

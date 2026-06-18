@@ -495,17 +495,18 @@ The key information in the results is:
 Simulated Images
 ================
 
-RMS-NAV supports simulated images created with the
-``nav_create_simulated_image`` GUI. Simulated images share the same
-navigation pipeline as real images; they are selected by passing the ``sim``
-dataset name and a path to the JSON parameter file on the command line:
+RMS-NAV includes an image simulator used to test and validate the navigation
+pipeline. It is not needed for navigating real data, but a simulated frame can be
+navigated through the same pipeline by passing the ``sim`` dataset name and a path
+to a JSON parameter file:
 
 .. code-block:: bash
 
    nav_offset sim /path/to/simulated_image.json
 
-For a full description of the GUI, the JSON parameter file structure, and
-every supported field, see :doc:`user_guide_simulated_images`.
+The simulator, its scene formats, and the ``nav_create_simulated_image`` GUI are
+documented for developers in the :doc:`/dev_guide/dev_guide_simulator` chapter.
+See also :doc:`user_guide_simulated_images`.
 
 Navigation Techniques
 =====================

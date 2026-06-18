@@ -37,3 +37,8 @@ nav.sim
    :members:
    :undoc-members:
    :show-inheritance:
+
+.. automodule:: nav.sim.png_export
+   :members:
+   :undoc-members:
+   :show-inheritance:

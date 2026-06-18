@@ -78,7 +78,7 @@ Configuration
 
 The model consumes no YAML configuration of its own; it reads the rendered star list
 the observation carries on ``sim_star_list``. The per-star geometry comes from the
-scene's ``stars.list`` entries (see :doc:`/user_guide/user_guide_simulated_images`), and
+scene's ``stars.list`` entries (see :doc:`dev_guide_simulator`), and
 the per-image PSF sigma comes from the selected instrument's ``star_psf_sigma`` via the
 renderer.
 
@@ -109,4 +109,4 @@ A clean planted-offset star field plus the camera-roll fixture live under
 ``tests/integration/sim_scenes/algorithmic_invariants/`` (``planted_offset_star_field``,
 ``planted_rotation_star_field``); ``tests/integration/test_sim_algorithmic_invariants.py``
 asserts the planted offset and roll are recovered. See
-:doc:`/user_guide/user_guide_simulated_images` for the scene-catalog workflow.
+:doc:`dev_guide_simulator` for the scene-catalog workflow.

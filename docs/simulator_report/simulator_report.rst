@@ -138,9 +138,54 @@ deliberate (integration-marked) tier:
 Targeted regression scenes under ``sim_scenes/regression/`` guard specific
 behaviours in the normal suite without running the full sweep.
 
-See :doc:`/user_guide/user_guide_simulated_images` for the scene-catalog and
-sweep workflow, and :doc:`/dev_guide/dev_guide_navigation_models` for the
-simulated models that emit the features each technique consumes.
+See :doc:`/dev_guide/dev_guide_simulator` for the scene catalog, scene formats,
+and the sweep / image-dump tooling, :doc:`/dev_guide/dev_guide_testing` for the
+test tiers, and :doc:`/dev_guide/dev_guide_navigation_models` for the simulated
+models that emit the features each technique consumes.
+
+Example scenes
+==============
+
+The frames below are the actual catalog scenes behind the measurements in this
+chapter, rendered from their YAML by
+``python -m tests.integration.sim_doc_images``.
+
+.. list-table::
+   :widths: 25 25 25 25
+   :header-rows: 0
+
+   * - .. figure:: _scene_images/disc.png
+          :width: 100%
+
+          Resolved disc
+     - .. figure:: _scene_images/mesh_disc.png
+          :width: 100%
+
+          Irregular mesh body
+     - .. figure:: _scene_images/limb_mesh.png
+          :width: 100%
+
+          Mesh limb
+     - .. figure:: _scene_images/blob_crescent.png
+          :width: 100%
+
+          High-phase crescent
+   * - .. figure:: _scene_images/mesh_crescent.png
+          :width: 100%
+
+          Mesh crescent
+     - .. figure:: _scene_images/ring.png
+          :width: 100%
+
+          Ring edge
+     - .. figure:: _scene_images/star_field.png
+          :width: 100%
+
+          Star field
+     - .. figure:: _scene_images/regular_sphere_base.png
+          :width: 100%
+
+          Sweep base sphere
 
 Algorithmic-invariant recovery
 ==============================
@@ -247,27 +292,27 @@ cliff:
    * - 1
      - success
      - 0.00 px
-     - 0.30
+     - 0.39
      - BodyDiscCorrelateNav
    * - 4
      - success
      - 0.00 px
-     - 0.30
+     - 0.39
      - BodyDiscCorrelateNav
    * - 8
      - success
      - 0.00 px
-     - 0.30
+     - 0.39
      - BodyDiscCorrelateNav
    * - 16
      - success
      - 0.00 px
-     - 0.30
+     - 0.39
      - BodyDiscCorrelateNav
    * - 32
      - success
      - 0.00 px
-     - 0.30
+     - 0.39
      - BodyDiscCorrelateNav
    * - 64
      - **failed**
@@ -302,36 +347,37 @@ Varying ``bodies.0.phase_angle`` across the full range on the resolved sphere:
    * - 30
      - success
      - 0.00 px
-     - 0.30
+     - 0.39
      - BodyDiscCorrelateNav
    * - 60
      - success
-     - 0.27 px
-     - 0.30
+     - 0.01 px
+     - 0.39
      - BodyDiscCorrelateNav
    * - 90
      - success
-     - 0.29 px
-     - 0.29
+     - 0.00 px
+     - 0.39
      - BodyDiscCorrelateNav
    * - 120
      - success
-     - 0.34 px
-     - 0.28
+     - 0.00 px
+     - 0.39
      - BodyDiscCorrelateNav
    * - 150
      - success
-     - 0.01 px
+     - 0.00 px
      - 0.30
      - BodyDiscCorrelateNav
 
-The resolved body navigates to success at every phase and recovers within a third
-of a pixel. The disc-correlation error rises through the mid-phase range (60-120
-deg) as the terminator eats into the lit disc and the correlation template
-matches less of the image, then falls back near full phase (150 deg) where the
-crescent is again a sharp, well-defined feature. At zero phase the blob's
-lit-weighted centroid wins outright -- a fully-lit disc has no correlation
-gradient advantage.
+The resolved body navigates to success at every phase and recovers the planted
+offset to within ~0.01 px throughout. The disc correlation holds its accuracy as
+the terminator sweeps across the lit disc -- the gradient-domain matched filter
+keys on the sunward limb, which stays a sharp, well-defined feature at every
+phase -- so there is no mid-phase accuracy penalty. At zero phase the blob's
+lit-weighted centroid wins the technique selection outright: a fully-lit disc has
+no correlation-gradient advantage for the disc to exploit. From 30 deg onward the
+disc carries the frame.
 
 Body-size (range) sweep
 -----------------------
@@ -351,22 +397,22 @@ This is the technique ladder the range regime is meant to exercise:
    * - 130
      - success
      - 0.00 px
-     - 0.28
+     - 0.39
      - BodyLimbNav
    * - 90
      - success
      - 0.00 px
-     - 0.30
+     - 0.39
      - BodyDiscCorrelateNav
    * - 60
      - success
-     - 0.00 px
-     - 0.28
+     - 0.01 px
+     - 0.39
      - BodyDiscCorrelateNav
    * - 40
      - success
      - 0.00 px
-     - 0.31
+     - 0.39
      - BodyDiscCorrelateNav
    * - 20
      - success
@@ -593,6 +639,106 @@ panels share a y-range so the degradation as SNR drops reads directly.
    bright), but the limb and star field have crossed their navigability cliff and return no
    result at any offset -- the missing curves are the failure, not an omission.
 
+Irregular-body navigation
+=========================
+
+Non-ellipsoidal bodies (Hyperion-like, Phoebe-like) are rendered from a
+procedurally generated polyhedral mesh at a chosen three-axis pose. By default the
+navigator predicts the body from the same mesh and pose the renderer drew, so the
+recovery is exact by construction; the cases below also drive the navigator with a
+deliberately *wrong* shape or pose through the ``nav_override`` channel
+(:doc:`/dev_guide/dev_guide_simulator`), which is what makes a chaotic rotator's
+genuinely unknown orientation testable.
+
+.. list-table:: Mesh-body planted-offset recovery
+   :header-rows: 1
+   :widths: 30 26 16 16 12
+
+   * - Scene
+     - Technique (geometry)
+     - Planted
+     - Recovered
+     - Error
+   * - ``planted_offset_irregular``
+     - BodyDiscCorrelateNav (mesh = mesh)
+     - (1.43, -0.61) px
+     - (1.43, -0.62) px
+     - 0.01 px
+   * - ``planted_offset_limb_mesh``
+     - BodyLimbNav (mesh = mesh)
+     - (1.43, -0.61) px
+     - (1.43, -0.62) px
+     - 0.16 px
+   * - ``planted_offset_blob_mesh_crescent``
+     - BodyBlobNav (mesh, 120 deg)
+     - (1.43, -0.61) px
+     - (1.43, -0.62) px
+     - 0.16 px
+   * - ``planted_offset_shapemismatch``
+     - full ensemble (predict ellipsoid)
+     - (1.43, -0.61) px
+     - (1.81, -0.84) px
+     - 0.44 px
+
+When the predicted geometry matches the rendered mesh, the mesh disc, mesh limb,
+and mesh crescent recover the planted offset as tightly as their ellipsoid
+counterparts (0.01-0.16 px). The fourth row is the shape-mismatch case: the frame
+renders a mildly irregular mesh but the navigator predicts its smooth
+(ellipsoidal) limit at the same pose, and the body still navigates -- the disc
+correlation aligns the two filled silhouettes and recovers to under half a pixel.
+
+Shape mismatch vs irregularity
+------------------------------
+
+Holding the navigator's prediction at the smooth (zero-relief) limit and walking
+the rendered mesh's surface relief up isolates the centroid bias an ellipsoidal
+model cannot remove -- the regime the navigator's ``phase_irregularity_factor``
+term is meant to capture.
+
+.. figure:: _figures/mesh_irregularity.png
+   :width: 100%
+   :alt: Shape-mismatch centroid bias and confidence vs mesh relief.
+
+   Recovered-offset error (red) and fused confidence (blue) vs rendered mesh
+   lumpiness, with the prediction pinned to the zero-relief limit. The bias grows
+   from ~0.01 px (no mismatch) to ~6 px at heavy relief while the confidence falls
+   from ~0.39 to ~0.22 -- the navigator both mis-locates the body and reports
+   lower confidence as the shape diverges.
+
+The recovered error grows monotonically with relief (0.01, 0.45, 1.14, 3.01,
+4.03, 5.98 px at lumpiness 0.0 through 0.5) and the fused confidence falls in step
+(0.39 down to 0.22). The body keeps navigating to a ``success`` status throughout
+-- the disc correlation still locks onto the silhouette -- but the answer drifts,
+which is exactly the failure an irregular-body confidence penalty must learn to
+distrust.
+
+Pose disagreement
+-----------------
+
+For a body whose orientation we cannot trust, the useful question is what happens
+when the assumed pose is wrong. Rendering the mesh at its true pose and walking
+the navigator's *predicted* pose away from it degrades the orientation-dependent
+limb fit:
+
+.. figure:: _figures/mesh_pose_disagreement.png
+   :width: 100%
+   :alt: Mesh-limb recovery error vs predicted-pose disagreement.
+
+   Pinned-limb recovered-offset error vs the predicted pose's disagreement with
+   the true (rendered) pose. The limb solves at 0 deg (0.22 px) and 10 deg
+   (2.19 px) disagreement, then self-flags spurious and returns no fix (dashed
+   lines) past ~20 deg -- the navigator declining to trust a confidently-wrong
+   limb.
+
+The limb error climbs from 0.22 px at the true pose to 2.19 px at a 10 deg
+disagreement, and past ~20 deg the technique flags itself spurious and produces no
+fix at all. The pose-free blob centroid, by contrast, stays accurate on the same
+wrong-pose body, because a centrally-symmetric (low-relief triaxial) body's
+lit-weighted centroid barely moves under rotation. This is the behaviour the
+``test_sim_irregular_pose`` per-technique test pins: on a wrong-pose body the
+system should demote from the confidently-wrong limb to the orientation-free
+blob.
+
 Camera-roll sensitivity and roll / translation separability
 ============================================================
 
@@ -669,10 +815,17 @@ Summary
   ~0.13 px distance-transform residual and the ring a ~0.06 px residual.
 * The star field improves with SNR: a dim field recovers to ~0.02 px and a bright
   field to ~0.005 px, the most accurate of any technique.
+* Irregular (mesh) bodies navigate as accurately as ellipsoids when the predicted
+  geometry matches the rendered one (mesh disc, limb, and crescent all recover to
+  0.01-0.16 px). When the navigator predicts the wrong shape the centroid bias
+  grows with the rendered relief (to ~6 px) and the confidence falls; when it
+  predicts the wrong pose the limb degrades and self-flags spurious while the
+  pose-free blob holds -- the demote-to-pose-free behaviour a chaotic rotator
+  needs.
 * The sweeps show the expected qualitative behaviour: navigation degrades to a
-  clean failure past the noise cliff, the resolved body handles the full phase
-  range with a mid-phase accuracy dip, and the primary technique walks the limb
-  -> disc -> blob ladder as a body shrinks.
+  clean failure past the noise cliff, the resolved body recovers across the full
+  phase range with no mid-phase accuracy penalty, and the primary technique walks
+  the limb -> disc -> blob ladder as a body shrinks.
 * A small camera roll is not separable from a translation: the field matcher
   recovers rolls only above ~0.75 deg (the two-star fit extends this to ~0.5 deg),
   and the small-body navigation floor (~16-24 px) is set by the feature-reliability

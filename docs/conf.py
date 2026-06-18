@@ -40,7 +40,15 @@ templates_path = ['_templates']
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
-exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
+# The simulator image galleries carry a NOTES.md regeneration note alongside the
+# committed PNG assets; exclude them so Sphinx does not treat them as orphan docs.
+exclude_patterns = [
+    '_build',
+    'Thumbs.db',
+    '.DS_Store',
+    '**/_sim_images/NOTES.md',
+    '**/_scene_images/NOTES.md',
+]
 
 # The suffix(es) of source filenames.
 source_suffix = ['.rst', '.md']
