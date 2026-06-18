@@ -113,6 +113,76 @@ def _rotation_figure() -> None:
     plt.close(fig)
 
 
+def _mesh_irregularity_figure() -> None:
+    """Plot the shape-mismatch centroid bias and confidence vs mesh relief.
+
+    The navigator predicts the smooth (zero-relief) limit of the rendered mesh,
+    so each step widens a pure shape mismatch.  The recovered-offset error -- the
+    centroid bias the ellipsoidal model cannot remove -- grows with the rendered
+    relief while the fused confidence falls, the regime the
+    ``phase_irregularity_factor`` term is meant to capture.
+    """
+    rows = _load('irregularity_shape_mismatch')
+    xs, errs = _xy(rows, 'offset_error_px')
+    if not xs:
+        return
+    conf_x = [r['value'] for r in rows if r.get('confidence') is not None]
+    conf_y = [r['confidence'] for r in rows if r.get('confidence') is not None]
+    fig, ax = plt.subplots(figsize=(7.5, 4.8))
+    ax.plot(xs, errs, marker='o', ms=5, lw=1.3, color='tab:red', label='offset error')
+    ax.set_xlabel('rendered mesh lumpiness (relief fraction)')
+    ax.set_ylabel('recovered-offset error (px)', color='tab:red')
+    ax.tick_params(axis='y', labelcolor='tab:red')
+    ax.grid(True, ls=':', alpha=0.5)
+    if conf_x:
+        ax2 = ax.twinx()
+        ax2.plot(conf_x, conf_y, marker='s', ms=5, lw=1.3, color='tab:blue', label='confidence')
+        ax2.set_ylabel('fused confidence', color='tab:blue')
+        ax2.tick_params(axis='y', labelcolor='tab:blue')
+    ax.set_title('Shape mismatch: centroid bias and confidence vs mesh relief')
+    fig.tight_layout()
+    fig.savefig(_FIGURES_ROOT / 'mesh_irregularity.png', dpi=110)
+    plt.close(fig)
+
+
+def _mesh_pose_figure() -> None:
+    """Plot mesh-limb degradation as the predicted pose leaves the true pose.
+
+    The rendered mesh pose is fixed; the navigator's predicted pose is walked
+    away from it.  The pinned limb's recovered-offset error grows with the
+    disagreement and then the technique self-flags spurious (no point plotted),
+    the navigator declining to trust a confidently-wrong limb.
+    """
+    rows = _load('pose_disagreement')
+    if not rows:
+        return
+    true_pose = rows[0]['value']
+    solved = [
+        (r['value'] - true_pose, r['offset_error_px'])
+        for r in rows
+        if r.get('offset_error_px') is not None
+    ]
+    failed = [r['value'] - true_pose for r in rows if r.get('offset_error_px') is None]
+    if not solved:
+        return
+    fig, ax = plt.subplots(figsize=(7.5, 4.8))
+    ax.plot(
+        *zip(*solved, strict=True), marker='^', ms=6, lw=1.3, color='tab:green', label='limb solved'
+    )
+    for x in failed:
+        ax.axvline(x, color='tab:gray', ls='--', alpha=0.6)
+    if failed:
+        ax.axvline(failed[0], color='tab:gray', ls='--', alpha=0.6, label='limb spurious (no fix)')
+    ax.set_xlabel('predicted-pose disagreement (deg from true pose)')
+    ax.set_ylabel('limb recovered-offset error (px)')
+    ax.set_title('Mesh-limb degradation under pose disagreement')
+    ax.grid(True, ls=':', alpha=0.5)
+    ax.legend(fontsize=8, loc='best')
+    fig.tight_layout()
+    fig.savefig(_FIGURES_ROOT / 'mesh_pose_disagreement.png', dpi=110)
+    plt.close(fig)
+
+
 def generate_plots() -> list[Path]:
     """Render all report figures from the sweep results; return their paths."""
     _FIGURES_ROOT.mkdir(parents=True, exist_ok=True)
@@ -128,6 +198,8 @@ def generate_plots() -> list[Path]:
     )
     _star_regime_figure()
     _rotation_figure()
+    _mesh_irregularity_figure()
+    _mesh_pose_figure()
     return sorted(_FIGURES_ROOT.glob('*.png'))
 
 

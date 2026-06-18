@@ -27,7 +27,7 @@ from ruamel.yaml import YAML
 from nav.nav_model import build_models_for_obs
 from nav.nav_orchestrator import NavOrchestrator
 from nav.obs.obs_inst_sim import ObsSim
-from nav.sim.scene import SimScene, load_sim_scene
+from nav.sim.scene import load_sim_scene
 
 _SCENES_ROOT = Path(__file__).parent / 'sim_scenes'
 
@@ -180,6 +180,30 @@ def _pinned_technique_result(result: Any, technique: str) -> Any | None:
     return None
 
 
+def build_sweep_params(spec: SweepSpec) -> list[tuple[float, dict[str, Any]]]:
+    """Return the per-step ``(value, sim_params)`` pairs a sweep navigates.
+
+    Each step deep-copies the base scene's sim params and applies the sweep's
+    parameter override(s) for that value.  Exposed so both :func:`run_sweep` (which
+    navigates each step) and the image dump (which renders each step) build the
+    exact same frames.
+
+    Parameters:
+        spec: The sweep specification.
+
+    Returns:
+        One ``(value, sim_params)`` pair per value, in sweep order.
+    """
+    base_params = load_sim_scene(spec.base_scene).to_sim_params()
+    steps: list[tuple[float, dict[str, Any]]] = []
+    for value in spec.values:
+        sim_params = copy.deepcopy(base_params)
+        for parameter in spec.parameters:
+            _set_dotted(sim_params, parameter, value)
+        steps.append((value, sim_params))
+    return steps
+
+
 def run_sweep(spec: SweepSpec) -> list[SweepRow]:
     """Navigate every step of a sweep and return the per-step rows.
 
@@ -201,14 +225,9 @@ def run_sweep(spec: SweepSpec) -> list[SweepRow]:
     Returns:
         One :class:`SweepRow` per value, in sweep order.
     """
-    scene: SimScene = load_sim_scene(spec.base_scene)
-    base_params = scene.to_sim_params()
     pinned = spec.technique != '*'
     rows: list[SweepRow] = []
-    for value in spec.values:
-        sim_params = copy.deepcopy(base_params)
-        for parameter in spec.parameters:
-            _set_dotted(sim_params, parameter, value)
+    for value, sim_params in build_sweep_params(spec):
         planted_v = float(sim_params.get('offset_v', 0.0))
         planted_u = float(sim_params.get('offset_u', 0.0))
         planted_rot = float(sim_params.get('offset_rotation_deg', 0.0))
