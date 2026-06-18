@@ -134,9 +134,7 @@ def test_overrides_pin_an_individual_key() -> None:
 def test_overrides_deep_merge_nested_block() -> None:
     """A nested override changes one sub-key and preserves its siblings."""
     base = resolve_sim_inst_config(DEFAULT_CONFIG, 'coiss_nac')
-    cfg = resolve_sim_inst_config(
-        DEFAULT_CONFIG, 'coiss_nac', {'noise': {'read_noise_dn': 7.0}}
-    )
+    cfg = resolve_sim_inst_config(DEFAULT_CONFIG, 'coiss_nac', {'noise': {'read_noise_dn': 7.0}})
     assert cfg['noise']['read_noise_dn'] == 7.0
     assert cfg['noise']['saturation_dn'] == base['noise']['saturation_dn']
 
@@ -177,6 +175,7 @@ def test_overrides_reach_the_obs_inst_config() -> None:
         'instrument_config': {'noise': {'read_noise_dn': 12.0}},
     }
     obs = ObsSim.from_file('/tmp/sim_test.json', sim_params=params)
+    assert obs._inst_config is not None
     assert float(obs._inst_config['noise']['read_noise_dn']) == 12.0
 
 
