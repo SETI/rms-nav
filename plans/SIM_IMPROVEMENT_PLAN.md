@@ -117,13 +117,26 @@ accidentally pulls back toward truth. The genuine remedy is a model-side limb-ed
 (limb-darkening- and PSF-aware), tracked in **issue #150**. See the corrected mechanism note in
 `dev_guide_techniques_body_limb` and `dev_guide_techniques_dt_fitting`.
 
+**Done (this track):** *Large-offset acquisition for the blob centroid.* The per-technique
+navigable-ceiling characterization showed the bbox-limited technique was **BodyBlobNav**
+(~6 px capture range, set by the predicted bounding box); the DT edge techniques (limb, ring,
+disc) already reach ~extfov, so they did not need this. `BodyBlobNav` now runs a coarse
+acquisition before the brightness-weighted centroid: it uses an installed pass-1 prior when
+present, otherwise correlates a blob-shaped disc (filled-disc matched filter) over the search
+window to re-centre each blob's box on the body. This extends the blob capture range from
+~6 px to ~extfov (recovery to a few hundredths of a pixel out to the margin on the low-phase
+`small_sphere_base` sweep), with the disc correlation gated to bodies at least half-lit (a
+high-phase crescent past its box still needs a prior, since a disc template cannot match a
+crescent). Self-contained in `nav_technique_body_blob.py`; no orchestrator change. See
+`dev_guide_techniques_body_blob` and the simulator report's navigable-range table.
+
 The next navigation/sim improvement:
 
-1. **Prior-aware large-offset refinement with graceful fallback.** For blob / limb /
-   ring, use a pass-1 prior to seed a larger-offset refinement, with graceful
-   fallback to the current prior-free behavior when there is no prior or the prior
-   is bad. Validate only with simulated images (a real image's true offset is
-   unknown).
+1. **High-phase / prior-fed blob acquisition.** Close the remaining blob gap -- a high-phase
+   crescent beyond its bounding box -- either with a phase-aware (crescent) coarse template or
+   by feeding the blob a pass-1 prior from another technique (the orchestrator installs a prior
+   only on a `success` pass-1 ensemble, which the placeholder-alpha star confidence currently
+   blocks; revisit after the star-confidence calibration). Validate only with simulated images.
 
 **Validation discipline (carried throughout):** validate accuracy changes only with
 simulated images; use ensemble statistics across seeds and offsets, not single

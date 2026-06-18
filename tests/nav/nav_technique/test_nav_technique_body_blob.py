@@ -15,7 +15,13 @@ from nav.feature.flags import BodyBlobFlags
 from nav.feature.geometry import BodyBlobGeometry
 from nav.nav_technique.diagnostics import BodyBlobDiagnostics
 from nav.nav_technique.nav_technique import ROTATION_UNOBSERVABLE_VARIANCE
-from nav.nav_technique.nav_technique_body_blob import BodyBlobNav, _joint_covariance
+from nav.nav_technique.nav_technique_body_blob import (
+    BodyBlobNav,
+    _coarse_disc_offset,
+    _disc_kernel,
+    _joint_covariance,
+    _shift_bbox,
+)
 from nav.support.filters import NavFilterKind, NavFilterSpec
 
 
@@ -464,3 +470,138 @@ def test_joint_covariance_model_error_floor_inflates_diagonal_by_square() -> Non
     assert floored[0, 0] - base[0, 0] == pytest.approx(4.0, abs=1e-9)
     assert floored[1, 1] - base[1, 1] == pytest.approx(4.0, abs=1e-9)
     assert floored[0, 1] == pytest.approx(0.0, abs=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# Coarse blob-shaped-disc acquisition
+# ---------------------------------------------------------------------------
+
+
+def test_disc_kernel_is_a_filled_disc() -> None:
+    """The matched-filter kernel is a filled disc of the given radius."""
+    kernel = _disc_kernel(3.0)
+    assert kernel.shape == (7, 7)
+    assert kernel[3, 3] == 1.0  # center
+    assert kernel[0, 0] == 0.0  # corner outside the disc
+    assert kernel.sum() > 0.0
+
+
+def test_coarse_disc_offset_locates_body_outside_predicted_center() -> None:
+    """The correlation finds a bright disc displaced from the predicted center."""
+    signal = np.zeros((120, 120), dtype=np.float64)
+    vv, uu = np.mgrid[0:120, 0:120]
+    # Bright disc centered at (80, 50), radius 6.
+    signal[(vv - 80) ** 2 + (uu - 50) ** 2 <= 36] = 100.0
+    dv, du = _coarse_disc_offset(
+        signal, predicted_center_vu=(60.0, 60.0), predicted_diameter_px=12.0, margin_vu=(40, 40)
+    )
+    # Predicted (60, 60) -> body (80, 50): offset (+20, -10).
+    assert dv == pytest.approx(20, abs=1)
+    assert du == pytest.approx(-10, abs=1)
+
+
+def test_coarse_disc_offset_returns_zero_on_blank_window() -> None:
+    """With no signal in the window the coarse offset is zero (no relocation)."""
+    signal = np.zeros((64, 64), dtype=np.float64)
+    dv, du = _coarse_disc_offset(
+        signal, predicted_center_vu=(32.0, 32.0), predicted_diameter_px=8.0, margin_vu=(10, 10)
+    )
+    assert (dv, du) == (0, 0)
+
+
+def test_shift_bbox_translates_all_corners() -> None:
+    """``_shift_bbox`` adds the offset to both corners."""
+    assert _shift_bbox((2, 3, 10, 11), 5, -4) == (7, -1, 15, 7)
+
+
+def test_body_blob_recovers_offset_beyond_predicted_bbox(
+    disc_image: DiscImageFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """A body displaced far outside its predicted bbox is recovered via correlation.
+
+    The planted offset (22, -16) moves the body well outside the predicted
+    bounding box (radius + a few px of slop), so the brightness-weighted
+    centroid alone would clip and silently bias.  The blob-shaped-disc coarse
+    correlation relocates the bbox onto the body, restoring sub-pixel recovery.
+    """
+    shape = (220, 220)
+    actual_center = (110.0, 110.0)
+    radius = 8.0
+    image = disc_image(shape, actual_center, radius)
+    planted_dv, planted_du = 22.0, -16.0
+    pred_center = (actual_center[0] - planted_dv, actual_center[1] - planted_du)
+    feature = _make_blob_feature(
+        'farMoon',
+        predicted_center_vu=pred_center,
+        predicted_diameter_px=2.0 * radius,
+        phase_angle_deg=20.0,
+    )
+    technique = BodyBlobNav()
+    context = make_nav_context(image)
+    result = technique.navigate([feature], context)
+    assert result.offset_px[0] == pytest.approx(planted_dv, abs=0.5)
+    assert result.offset_px[1] == pytest.approx(planted_du, abs=0.5)
+    assert result.spurious is False
+
+
+def test_body_blob_high_phase_crescent_does_not_relocate(
+    disc_image: DiscImageFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """A high-phase blob keeps its predicted bbox (the disc template is skipped).
+
+    The disc matched filter would lock onto a crescent's bright arc rather
+    than the body center, so above the phase ceiling the coarse stage is
+    skipped.  With a small in-bbox offset the centroid still recovers it; the
+    point is that no spurious multi-pixel relocation occurs.
+    """
+    shape = (200, 200)
+    actual_center = (100.0, 100.0)
+    radius = 8.0
+    image = disc_image(shape, actual_center, radius)
+    planted_dv, planted_du = 1.5, -1.0
+    pred_center = (actual_center[0] - planted_dv, actual_center[1] - planted_du)
+    feature = _make_blob_feature(
+        'crescentMoon',
+        predicted_center_vu=pred_center,
+        predicted_diameter_px=2.0 * radius,
+        phase_angle_deg=120.0,
+    )
+    technique = BodyBlobNav()
+    context = make_nav_context(image)
+    result = technique.navigate([feature], context)
+    assert result.offset_px[0] == pytest.approx(planted_dv, abs=0.5)
+    assert result.offset_px[1] == pytest.approx(planted_du, abs=0.5)
+
+
+def test_body_blob_uses_installed_prior_to_seed_bbox(
+    disc_image: DiscImageFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """An installed prior seeds the bbox even for a high-phase body.
+
+    The prior is a measured offset, not a template match, so it bypasses the
+    phase gate.  Here a high-phase body sits far outside its predicted bbox;
+    only the prior (not the skipped disc correlation) can recover it.
+    """
+    shape = (220, 220)
+    actual_center = (110.0, 110.0)
+    radius = 8.0
+    image = disc_image(shape, actual_center, radius)
+    planted_dv, planted_du = 20.0, -14.0
+    pred_center = (actual_center[0] - planted_dv, actual_center[1] - planted_du)
+    feature = _make_blob_feature(
+        'priorMoon',
+        predicted_center_vu=pred_center,
+        predicted_diameter_px=2.0 * radius,
+        phase_angle_deg=120.0,
+    )
+    technique = BodyBlobNav()
+    base_context = make_nav_context(image)
+    context = base_context.with_prior(
+        offset_px=(planted_dv, planted_du), covariance_px2=np.eye(2, dtype=np.float64)
+    )
+    result = technique.navigate([feature], context)
+    assert result.offset_px[0] == pytest.approx(planted_dv, abs=0.5)
+    assert result.offset_px[1] == pytest.approx(planted_du, abs=0.5)

@@ -17,11 +17,13 @@ joint fit inherits that scaling.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
 from pdslogger import PdsLogger
+from scipy.signal import fftconvolve
 
 from nav.config import Config
 from nav.feature.feature import NavFeature, body_names_from_features
@@ -104,6 +106,92 @@ _BLOB_NOISE_THRESHOLD_SIGMA: float = 3.0
 """Pixels above ``background + this * noise_sigma`` count as lit signal."""
 
 
+_COARSE_CORRELATION_MAX_PHASE_DEG: float = 90.0
+"""Phase ceiling for the blob-shaped-disc coarse acquisition.
+
+The matched-filter template is a filled disc, which models the lit
+silhouette only while the body is at least half-lit.  Above this phase the
+sunlit region is a thin crescent whose bright pixels sit a fraction of a
+radius off the body center, so a disc correlation locks onto the crescent
+arc rather than the center.  At or below the ceiling the coarse correlation
+runs (extending the capture range to the full search window); above it the
+technique keeps the predicted bbox (no relocation) and relies on the
+brightness-weighted centroid's existing crescent handling.  An installed
+prior bypasses this gate -- it is a measured offset, not a template match.
+"""
+
+
+def _disc_kernel(radius_px: float) -> NDArrayFloatType:
+    """Return a binary filled-disc matched-filter kernel of the given radius.
+
+    The kernel is the blob-shaped template the coarse acquisition correlates
+    against the observed signal: a disc whose response, convolved with the
+    lit-signal image, peaks where a body-sized bright region is best centred.
+    """
+    r = max(math.ceil(radius_px), 1)
+    yy, xx = np.mgrid[-r : r + 1, -r : r + 1]
+    disc: NDArrayFloatType = (yy * yy + xx * xx <= radius_px * radius_px).astype(np.float64)
+    return disc
+
+
+def _coarse_disc_offset(
+    image_signal: NDArrayFloatType,
+    predicted_center_vu: tuple[float, float],
+    predicted_diameter_px: float,
+    margin_vu: tuple[int, int],
+) -> tuple[int, int]:
+    """Coarse integer offset from a blob-shaped-disc matched filter.
+
+    Correlates a filled-disc template of the predicted body radius against
+    the lit-signal image (background-subtracted, sky-masked) and returns the
+    integer ``(dv, du)`` from the predicted centre to the response peak,
+    searched over ``predicted_center +/- margin``.  This extends the blob's
+    capture range from the predicted bounding box (a few pixels) to the full
+    extended-FOV search window: a brightness-weighted centroid only sees the
+    body when it already sits in the predicted box, whereas the correlation
+    finds the body anywhere in the window even when SPICE mis-predicts it by
+    tens of pixels.
+
+    Parameters:
+        image_signal: ``(H, W)`` lit signal (image minus background, clipped
+            at zero, sky-masked), in extfov coordinates.
+        predicted_center_vu: Predicted body centre in extfov coordinates.
+        predicted_diameter_px: Predicted disc diameter (pixels).
+        margin_vu: ``(margin_v, margin_u)`` search half-window about the
+            predicted centre.
+
+    Returns:
+        ``(dv, du)`` integer offset (observed centre minus predicted centre);
+        ``(0, 0)`` when the search window is degenerate or carries no signal.
+    """
+    radius = max(predicted_diameter_px / 2.0, 1.0)
+    kernel = _disc_kernel(radius)
+    response = fftconvolve(image_signal, kernel, mode='same')
+    h, w = image_signal.shape
+    pred_v = round(predicted_center_vu[0])
+    pred_u = round(predicted_center_vu[1])
+    margin_v, margin_u = margin_vu
+    v0 = max(0, pred_v - margin_v)
+    v1 = min(h, pred_v + margin_v + 1)
+    u0 = max(0, pred_u - margin_u)
+    u1 = min(w, pred_u + margin_u + 1)
+    if v1 <= v0 or u1 <= u0:
+        return (0, 0)
+    sub = response[v0:v1, u0:u1]
+    if float(sub.max()) <= 0.0:
+        return (0, 0)
+    rv, ru = np.unravel_index(int(np.argmax(sub)), sub.shape)
+    return (v0 + int(rv) - pred_v, u0 + int(ru) - pred_u)
+
+
+def _shift_bbox(
+    bbox_extfov_vu: tuple[int, int, int, int], dv: int, du: int
+) -> tuple[int, int, int, int]:
+    """Translate a ``(v_min, u_min, v_max, u_max)`` bbox by ``(dv, du)``."""
+    v_min, u_min, v_max, u_max = bbox_extfov_vu
+    return (v_min + dv, u_min + du, v_max + dv, u_max + du)
+
+
 def _estimate_frame_background_and_sigma(
     image_ext: NDArrayFloatType,
     valid_mask: NDArrayBoolType,
@@ -176,30 +264,37 @@ def _brightness_weighted_centroid(
     image_noise_sigma: float,
     geometry: BodyBlobGeometry,
     background: float,
+    coarse_offset_vu: tuple[int, int] = (0, 0),
 ) -> tuple[tuple[float, float] | None, float, int, tuple[int, int, int, int]]:
     """Return the brightness-weighted centroid + signal stats for one blob.
 
     The centroid is computed over every above-background pixel inside the
-    feature's predicted bounding box (the bbox includes per-body slop so
-    the actual body silhouette stays inside it under moderate SPICE
-    pointing error).  The frame ``background`` (bias + dark pedestal,
-    estimated once by :func:`_estimate_frame_background_dn`) is subtracted
-    first, so the moment weights are signal above background, not raw DN;
-    lit pixels are those exceeding
-    ``background + 3 * image_noise_sigma``.  Subtracting the background is
-    what keeps a uniform pedestal from dragging the centroid toward the
-    bbox center (a phase-dependent bias on high-phase crescents).
-    A blob whose bbox carries no above-background pixels returns
+    feature's predicted bounding box, **shifted by ``coarse_offset_vu``** so
+    the box is re-centred on where the coarse acquisition (a blob-disc
+    correlation, or an installed prior) located the body.  Without the shift
+    the box only captures the body under small SPICE pointing error (its
+    per-body slop); with it the box tracks the body across the full search
+    window, so the centroid is computed over the body rather than a clipped
+    fragment.  The frame ``background`` (bias + dark pedestal, estimated once
+    by :func:`_estimate_frame_background_and_sigma`) is subtracted first, so
+    the moment weights are signal above background, not raw DN; lit pixels are
+    those exceeding ``background + 3 * image_noise_sigma``.  Subtracting the
+    background is what keeps a uniform pedestal from dragging the centroid
+    toward the bbox center (a phase-dependent bias on high-phase crescents).
+    A blob whose (shifted) bbox carries no above-background pixels returns
     ``(None, 0.0, 0, clamped_bbox)`` so the caller can drop it from the
     joint fit and still log its bbox in the per-blob rejection line.
 
     Returns:
         ``(centroid_vu, mean_signal_above_background, n_lit_pixels,
         clamped_bbox)``.  ``centroid_vu`` is ``None`` when the blob has
-        no usable signal.
+        no usable signal.  The centroid is in absolute extfov coordinates,
+        so the caller's ``observed - predicted`` residual already includes
+        the coarse offset.
     """
     extfov_shape = (image_ext.shape[0], image_ext.shape[1])
-    clamped_bbox = _clamp_bbox(geometry.bbox_extfov_vu, extfov_shape)
+    shifted_bbox = _shift_bbox(geometry.bbox_extfov_vu, coarse_offset_vu[0], coarse_offset_vu[1])
+    clamped_bbox = _clamp_bbox(shifted_bbox, extfov_shape)
     v_min, u_min, v_max, u_max = clamped_bbox
     if v_max <= v_min or u_max <= u_min:
         return None, 0.0, 0, clamped_bbox
@@ -227,17 +322,26 @@ def _collect_per_blob_residuals(
     image_noise_sigma: float,
     background: float,
     logger: PdsLogger,
+    *,
+    image_signal: NDArrayFloatType,
+    margin_vu: tuple[int, int],
+    prior_offset_vu: tuple[float, float] | None,
 ) -> _BlobResiduals:
     """Extract the per-blob ``observed - predicted`` residuals + weights.
 
-    Iterates the input features in order and computes a
-    background-subtracted brightness-weighted-moment centroid inside each
-    predicted bbox.  Blobs with no above-background signal in their bbox
-    are dropped (and logged at DEBUG with the bbox bounds, estimated
-    background, and threshold so the operator can tell why).  The
-    remaining blobs contribute to the
-    joint fit with weight ``N_lit * SNR^2 / radius_px^2`` per the
-    BODY_BLOB centroid CRLB.
+    Iterates the input features in order and, for each blob, first finds a
+    coarse integer offset that re-centres the predicted bbox on the body --
+    either the installed pass-1 ``prior_offset_vu`` (rounded), when one is
+    available from another technique, or a blob-shaped-disc correlation over
+    the search window (:func:`_coarse_disc_offset`).  It then computes a
+    background-subtracted brightness-weighted-moment centroid inside the
+    shifted bbox.  The coarse stage extends the capture range from the
+    bounding box (a few pixels) to the full extfov window; without it the
+    centroid silently clips and biases once the body leaves the predicted
+    box.  Blobs with no above-background signal in their (shifted) bbox are
+    dropped (and logged at DEBUG).  The remaining blobs contribute to the
+    joint fit with weight ``N_lit * SNR^2 / radius_px^2`` per the BODY_BLOB
+    centroid CRLB.
     """
     consumed: list[NavFeature] = []
     offsets_v: list[float] = []
@@ -247,10 +351,31 @@ def _collect_per_blob_residuals(
     extents: list[float] = []
     phase_angles_deg: list[float] = []
     phase_irregularity_factors: list[float] = []
+    prior_coarse = (
+        (round(prior_offset_vu[0]), round(prior_offset_vu[1]))
+        if prior_offset_vu is not None
+        else None
+    )
     for feature in features:
         assert isinstance(feature.geometry, BodyBlobGeometry)
+        # Coarse acquisition: prefer an installed prior; otherwise correlate a
+        # blob-shaped disc to find the body across the full window -- but only
+        # while the body is at least half-lit, since the disc template does not
+        # match a high-phase crescent (see _COARSE_CORRELATION_MAX_PHASE_DEG).
+        phase_deg = float(getattr(feature.flags, 'phase_angle_deg', 0.0))
+        if prior_coarse is not None:
+            coarse_offset = prior_coarse
+        elif phase_deg <= _COARSE_CORRELATION_MAX_PHASE_DEG:
+            coarse_offset = _coarse_disc_offset(
+                image_signal,
+                feature.geometry.predicted_center_vu,
+                feature.geometry.predicted_diameter_px,
+                margin_vu,
+            )
+        else:
+            coarse_offset = (0, 0)
         centroid, mean_signal, n_lit, clamped_bbox = _brightness_weighted_centroid(
-            image_ext, image_noise_sigma, feature.geometry, background
+            image_ext, image_noise_sigma, feature.geometry, background, coarse_offset
         )
         if centroid is None:
             logger.debug(
@@ -290,11 +415,13 @@ def _collect_per_blob_residuals(
         phase_angles_deg.append(flags_phase)
         phase_irregularity_factors.append(max(0.0, flags_factor))
         logger.debug(
-            'Blob %s: predicted (%.2f, %.2f), observed (%.2f, %.2f), background %.2f DN, '
-            'SNR %.2f, N_lit %d, weight %.3g',
+            'Blob %s: predicted (%.2f, %.2f), coarse offset (%d, %d), observed (%.2f, %.2f), '
+            'background %.2f DN, SNR %.2f, N_lit %d, weight %.3g',
             feature.feature_id,
             pred_v,
             pred_u,
+            coarse_offset[0],
+            coarse_offset[1],
             obs_v,
             obs_u,
             background,
@@ -520,8 +647,32 @@ class BodyBlobNav(NavTechnique):
                 noise_sigma,
                 global_sigma,
             )
+            # Lit-signal image for the coarse blob-disc correlation: background
+            # subtracted, clipped at zero, and zeroed outside the valid sky
+            # (saturation / cosmic rays / non-sensor) so those do not create
+            # spurious matched-filter peaks.
+            image_signal = np.where(
+                valid_mask, np.clip(image_ext - background, 0.0, None), 0.0
+            ).astype(np.float64)
+            # Use an installed pass-1 prior when present (another technique
+            # already located the body); otherwise the per-blob coarse
+            # correlation acquires it.
+            prior_offset_vu = context.prior_offset_px
+            if prior_offset_vu is not None:
+                self.logger.debug(
+                    'Using pass-1 prior offset (%.2f, %.2f) px to seed blob bboxes',
+                    prior_offset_vu[0],
+                    prior_offset_vu[1],
+                )
             residuals = _collect_per_blob_residuals(
-                eligible, image_ext, noise_sigma, background, self.logger
+                eligible,
+                image_ext,
+                noise_sigma,
+                background,
+                self.logger,
+                image_signal=image_signal,
+                margin_vu=(margin_v, margin_u),
+                prior_offset_vu=prior_offset_vu,
             )
             if not residuals.consumed:
                 return self._fail_no_signal(
