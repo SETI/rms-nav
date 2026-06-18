@@ -1,0 +1,40 @@
+schema_version: 1
+scene_name: planted_offset_blob_mesh_crescent
+instrument: coiss_nac
+image_size_vu: [220, 220]
+random_seed: 42
+exposure_sec: 1.0
+# B7 scenario 4: centroid-only navigation of an irregular (mesh) body.  This is
+# the realistic chaotic-rotator path -- a body whose orientation we cannot trust,
+# navigated by the orientation-free lit-weighted centroid rather than an oriented
+# limb or disc model.  It is the mesh-rendered variant of the existing ellipsoid
+# crescent blob scenes: a high-phase (120 deg) irregular body rendered as a thin
+# lit crescent, pinned to BodyBlobNav, recovering the planted offset.
+#
+# The render and navigation geometry are the same mesh at the same pose, so there
+# is no shape or pose mismatch; the point is that the blob centroid alone -- after
+# the frame-global background pedestal subtraction and the sky-noise threshold --
+# pins the lit crescent's centroid to better than a pixel without any oriented
+# model.  The phase is 120 deg (not 90) so the phase-aware crescent acquisition is
+# the load-bearing path, matching the ellipsoid crescent scenes.
+bodies:
+  - name: HYPERION
+    shape_model: polyhedral_mesh
+    mesh_lumpiness: 0.2
+    mesh_seed: 7
+    pose_euler_deg: [10.0, 35.0, 0.0]
+    center_v: 110.0
+    center_u: 110.0
+    axis1: 120.0
+    axis2: 95.0
+    axis3: 85.0
+    illumination_angle: 25.0
+    phase_angle: 120.0
+rings: []
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+ground_truth:
+  planted_offset_dv_px: 1.43
+  planted_offset_du_px: -0.61
+  planted_rotation_deg: 0.0
