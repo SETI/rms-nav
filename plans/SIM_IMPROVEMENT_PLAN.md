@@ -41,12 +41,15 @@ plan. A new contributor should read this first, then the phase it points to.
 ### 0.1 Plan-phase status
 
 - **Backend:** B0 (determinism), B1 (noise), B2 (per-instrument coupling),
-  B4 (saturation), B5 (PSF), B6 (stray light) are **done**. B7 (irregular bodies)
-  is **partially done** (procedural mesh render + navigator prediction +
-  end-to-end navigation; remaining: mesh-vs-ellipsoid pose scenarios, named
-  meshes). B3 (smear) is **deferred** on upstream `psfmodel` (issue #151); B8
-  (diffraction) is **deferred** as a lowest-priority future enhancement, only
-  relevant if a spike-producing instrument is ever supported (issue #152).
+  B4 (saturation), B5 (PSF), B6 (stray light), B7 (irregular bodies) are
+  **done**. B7 covers the procedural mesh render, navigator prediction,
+  end-to-end navigation, the four mesh-vs-ellipsoid / pose scenarios (via the
+  `nav_override` render-vs-navigation channel), and the named-mesh sourcing
+  decision (the procedural generator is the source; named `.obj` meshes are a
+  documented future hook, not built -- resolving open question 3). B3 (smear) is
+  **deferred** on upstream `psfmodel` (issue #151); B8 (diffraction) is
+  **deferred** as a lowest-priority future enhancement, only relevant if a
+  spike-producing instrument is ever supported (issue #152).
 - **GUI:** G0, G1, G2, G4, G5, G6, G7, G8 are **done**. G3 (smear) is **deferred**
   with B3 (issue #151).
 - **Test layer:** T1 (scene catalog), T2 (regression baselines), T3 (sweeps) are
@@ -152,25 +155,52 @@ centroid or a prior. Self-contained in `nav_technique_body_blob.py` plus the sha
 The per-technique navigable-ceiling gaps identified by the T3 sweeps are now closed (disc,
 limb, ring at ~extfov; blob at ~extfov for both disc and crescent regimes).
 
-**The next sim work item is B7's remaining increments** -- the only active (non-done,
-non-deferred) work left in this plan. Deferred work is parked in GitHub issues: smear
-rendering + GUI controls (B3/G3, #151, pending upstream `psfmodel`), diffraction spikes (B8,
-#152, a lowest-priority future enhancement), and the calibration test layer (T5/T6/T7, #153,
-gated on the real-data confidence calibration). B7 is sim-only and needs no real data:
+**Done (this track): B7's remaining increments.** The four irregular-body scenarios
+are in, each pinned by a catalog scene with a regression baseline and a recovery /
+behavioral assertion, and the named-mesh sourcing decision is resolved. The enabling
+mechanism is the body `nav_override` mapping -- the renderer always draws the true
+geometry, while `NavModelBodySimulated` builds its predicted body from the body params
+with `nav_override` overlaid, so the navigation geometry can diverge from the render
+geometry without touching the rendered image (it never moves the centre, so the
+predicted body stays at the unshifted position the planted offset is measured from).
+Both scenarios 2 and 3 keep the predicted body on the *same* mesh renderer as the
+rendered body (the ellipsoidal prediction is realised as the zero-relief limit of the
+mesh), so the residual is pure shape or pose mismatch rather than a renderer-convention
+skew between the mesh and ellipsoid renderers:
 
-1. **Irregular-body pose scenarios** (see the B7 scenario matrix and the "What form each
-   remaining scenario takes" subsection for the exact test-vs-sweep mapping): scenario 1
-   (mesh-vs-mesh, resolved-mesh limb -- invariant test), scenario 2 (mesh-vs-ellipsoid same
-   pose -- invariant test + a `phase_irregularity_factor` characterization sweep), scenario 3
-   (mesh-vs-ellipsoid disagreeing pose -- a degradation sweep plus a per-technique behavioral
-   test asserting the limb degrades while the pose-free blob holds; NOT an exact-recovery
-   invariant), and scenario 4 (centroid-only on a mesh body -- invariant test pinned to
-   `BodyBlobNav`, a mesh variant of the existing crescent blob scenes).
-2. **Named meshes / `shape_meshes/` sourcing decision** (section 12.3): the generator is
-   procedural today, so no real Hyperion/Phoebe mesh files are committed yet.
+1. **Scenario 1 (mesh vs mesh, same pose)** -- `planted_offset_limb_mesh` pins the
+   resolved-mesh limb to exact planted-offset recovery.
+2. **Scenario 2 (mesh vs ellipsoid, same pose)** -- `planted_offset_shapemismatch`
+   renders a lumpy mesh and predicts its smooth (ellipsoidal) limit; it still recovers
+   under a pixel, and the `irregularity_shape_mismatch` sweep walks the rendered relief
+   up to show the recovered centroid bias growing and the confidence falling.
+3. **Scenario 3 (mesh vs ellipsoid, disagreeing pose)** -- the `pose_disagreement`
+   degradation sweep walks the predicted pose off the rendered one (limb error grows,
+   then the limb self-flags spurious), and `test_sim_irregular_pose` asserts the
+   per-technique decision: the wrong-pose limb degrades far off while the pose-free blob
+   stays accurate. Per-technique, NOT on the fused tier (the confidence alphas are
+   uncalibrated placeholders).
+4. **Scenario 4 (centroid-only)** -- `planted_offset_blob_mesh_crescent` pins a
+   high-phase mesh crescent to `BodyBlobNav`, the mesh variant of the ellipsoid crescent
+   blob scenes.
 
-B7 also unblocks the eventual T5 bootstrap, since `phase_irregularity_factor` only varies once
-scenarios 2-3 land.
+**Named meshes / `shape_meshes/` sourcing decision (section 12.3, resolved):** the
+procedural generator stays the sim's mesh source; named `.obj`/`.ply` meshes are NOT
+bundled. The sim's job is controlled sensitivity and regression, for which a
+parameterised irregular body (seed, lumpiness, pose) spans the irregularity axis
+continuously -- more useful than one fixed Hyperion shape, which a single committed mesh
+cannot. Real irregular-body accuracy is calibrated against the real Cassini
+Hyperion/Phoebe images in the operator library (cardinal principle 3.1), so a bundled
+mesh would not move the calibration needle, and it would add repo bloat or
+network-at-test-time. The renderer already accepts any `Mesh` (vertices + faces), so a
+`shape_model: named_mesh` + `mesh_file` loader can be added behind that hook if a
+specific body is ever needed; it is left unbuilt until proven necessary.
+
+**The only remaining sim items are deferred**, parked in GitHub issues: smear rendering +
+GUI controls (B3/G3, #151, pending upstream `psfmodel`), diffraction spikes (B8, #152, a
+lowest-priority future enhancement), and the calibration test layer (T5/T6/T7, #153, gated
+on the real-data confidence calibration, which the now-complete B7 `phase_irregularity_factor`
+diagnostics feed when it runs).
 
 **Validation discipline (carried throughout):** validate accuracy changes only with
 simulated images; use ensemble statistics across seeds and offsets, not single
@@ -683,7 +713,7 @@ real Galileo or Voyager outer-leg frame.
 `src/nav/config_files/config_440_sim.yaml`, new
 `tests/nav/sim/test_sim_stray_light.py`.
 
-### Phase B7: Non-ellipsoidal bodies [increments 1-2 done]
+### Phase B7: Non-ellipsoidal bodies [done]
 
 **Goal:** render at least one canonical irregular body
 (Hyperion-like, Phoebe-like) from a polyhedral mesh rather than as
@@ -724,17 +754,53 @@ an ellipsoid silhouette.
   missing-data marker (0) and the frame was misclassified as
   `mostly_missing_data`.
 
-**Remaining increments:** the centroid-only `BodyBlobNav` scenario 4 is
-now partly in -- `NavModelBodySimulated` emits the orientation-independent
-`BODY_BLOB` feature (the blob-feature construction was lifted into the
-shared `NavModelBodyBase` so the real and simulated body models share one
-implementation), and moderate- and high-phase scenes recover the planted
-offset via `BodyBlobNav` alone (see T4): the simulated body emits a tight
-bbox and `BodyBlobNav` subtracts the bias pedestal and thresholds against
-sky noise, so a 120 deg crescent recovers sub-pixel.  Still open: extending
-the harness across the mesh-vs-mesh / mesh-vs-ellipsoid pose scenarios; and
-real named meshes / the `shape_meshes/` sourcing decision (section 12.3).  The current
-generator is procedural, so no large mesh files are committed yet.
+- *Increment 4 (render-vs-navigation separation channel + pose scenarios):* a
+  body may carry an optional `nav_override` mapping.  The renderer ignores it and
+  always draws the true geometry; `NavModelBodySimulated` builds its predicted
+  body from the body params with `nav_override` overlaid (`_nav_params`), so the
+  navigation geometry diverges from the render geometry at the scene level without
+  touching the rendered image.  The override never moves the centre, so the
+  predicted body stays at the unshifted position the planted offset is measured
+  from.  Both scenarios 2 and 3 keep the predicted body on the same mesh renderer
+  as the rendered body -- the ellipsoidal prediction is the zero-relief
+  (`mesh_lumpiness: 0.0`) limit of the mesh -- so the residual is pure shape or
+  pose mismatch, not a renderer-convention skew (the standalone ellipsoid renderer
+  transposes axis1/axis2 relative to the mesh renderer, so mixing the two would
+  inject a spurious 90 deg rotation).  The four scenarios each land as a catalog
+  scene with a regression baseline:
+
+  1. **Scenario 1 (mesh vs mesh, same pose) -- invariant.**
+     `planted_offset_limb_mesh` pins the resolved-mesh limb to exact planted-offset
+     recovery (a few tenths of a pixel).
+  2. **Scenario 2 (mesh vs ellipsoid, same pose) -- invariant + sweep.**
+     `planted_offset_shapemismatch` renders a lumpy mesh and predicts its smooth
+     limit; it still recovers under a pixel.  The `irregularity_shape_mismatch`
+     sweep walks the rendered relief up and shows the recovered centroid bias
+     growing (~0 to several px) and the fused confidence falling -- the
+     `phase_irregularity_factor` regime.
+  3. **Scenario 3 (mesh vs ellipsoid, disagreeing pose) -- degradation sweep +
+     behavioral test.**  The `pose_disagreement` sweep walks the predicted pose off
+     the rendered one; the limb error grows and then the limb self-flags spurious
+     (the navigator declining a confidently-wrong limb).  `test_sim_irregular_pose`
+     asserts the per-technique decision: the wrong-pose limb degrades far off while
+     the pose-free blob stays accurate (the body's bulk shape is a
+     centrally-symmetric triaxial ellipsoid, so its lit-weighted centroid barely
+     moves under rotation).  Asserted per-technique, NOT on the fused tier (the
+     confidence alphas are uncalibrated placeholders).
+  4. **Scenario 4 (centroid-only) -- invariant.**
+     `planted_offset_blob_mesh_crescent` pins a high-phase (120 deg) mesh crescent
+     to `BodyBlobNav`, the mesh variant of the ellipsoid crescent blob scenes.
+
+**Named meshes / `shape_meshes/` sourcing (section 12.3, resolved):** the procedural
+generator stays the sim's mesh source; named `.obj`/`.ply` meshes are not bundled.
+A parameterised irregular body (seed, lumpiness, pose) spans the irregularity axis
+continuously, which is what the controlled sensitivity / regression role needs --
+more useful than one fixed Hyperion shape; and real irregular-body accuracy is
+calibrated against the real Cassini images in the operator library (principle 3.1),
+so a bundled mesh would not move the calibration needle and would add repo bloat or
+network-at-test-time.  The renderer already accepts any `Mesh`, so a
+`shape_model: named_mesh` + `mesh_file` loader can be added behind that hook if a
+specific body is ever needed; it is left unbuilt until proven necessary.
 
 **Scope:**
 
@@ -745,8 +811,12 @@ irregular-body LIMB_ARC via real shape models).
 the DSK-via-oops path is not available.  The only path is the
 **standalone polyhedral renderer**: the sim grows a small renderer that
 projects triangle-mesh vertices through the body's pose into image
-space and draws the silhouette.  Mesh files live under
-`src/nav/sim/shape_meshes/<BODY>.obj` (or .ply).
+space and draws the silhouette.  The mesh itself is generated
+procedurally (`make_irregular_mesh`: seed + lumpiness + pose), not loaded
+from a bundled file -- see the named-mesh sourcing resolution above and in
+section 12.3.  A `shape_model: named_mesh` + `mesh_file` loader under a
+`src/nav/sim/shape_meshes/<BODY>.obj` (or .ply) hook is a documented future
+extension, left unbuilt until a specific body is proven necessary.
 
 #### Orientation is always an input; the scenarios differ only in shape
 
@@ -855,9 +925,14 @@ term cannot be calibrated, sensitivity-tested, or regression-covered
 on sim.
 
 **Files touched:** new `src/nav/sim/sim_body_polyhedral.py`,
-`src/nav/sim/render.py`, `src/nav/sim/shape_meshes/`, the sim-aware
-body NavModel selection path, new
-`tests/nav/sim/test_sim_irregular_body.py`.
+`src/nav/sim/render.py`, the sim-aware body NavModel selection path
+(`src/nav/nav_model/nav_model_body_simulated.py`, including the
+`nav_override` render-vs-navigation channel), the four
+`tests/integration/sim_scenes/.../planted_offset_*`/`hyperion_pose_disagree`
+scenes + baselines, the `irregularity_shape_mismatch` and `pose_disagreement`
+sweeps, `tests/integration/test_sim_irregular_pose.py`, and
+`tests/nav/sim/test_sim_irregular_body.py`.  No `shape_meshes/` directory is
+created: the mesh source is procedural (section 12.3, resolved).
 
 ### Phase B8: Diffraction spikes -- deferred (future enhancement, lowest priority)
 
@@ -1566,11 +1641,11 @@ B0 (determinism) [done]
  │
  ├──→ B1 (noise model) [done]
  │     │
- │     └──→ B4 (saturation) [done], B5 (PSF) [done], B6 (stray light) [done], B7 (irregular)
+ │     └──→ B4 (saturation) [done], B5 (PSF) [done], B6 (stray light) [done], B7 (irregular) [done]
  │
  └──→ B2 (per-instrument coupling) [done]
        │
-       └──→ B3 (smear) [deferred: psfmodel, #151], B4 [done], B5 [done], B6 [done], B7
+       └──→ B3 (smear) [deferred: psfmodel, #151], B4 [done], B5 [done], B6 [done], B7 [done]
 
 T1 (scene catalog)
  │
@@ -1739,8 +1814,10 @@ tests/nav/sim/test_sim_psf.py                            (B5)
 tests/nav/sim/test_sim_stray_light.py                    (B6)
 tests/nav/sim/test_sim_irregular_body.py                 (B7)
 src/nav/sim/sim_body_polyhedral.py                       (B7)
-src/nav/sim/shape_meshes/                                (B7)
-src/nav/sim/shape_meshes/<BODY>.obj                      (B7+)
+tests/integration/test_sim_irregular_pose.py             (B7: pose scenario 3)
+tests/integration/sim_sweeps/irregularity_shape_mismatch.yaml  (B7: scenario 2)
+tests/integration/sim_sweeps/pose_disagreement.yaml      (B7: scenario 3)
+(no src/nav/sim/shape_meshes/ -- mesh source is procedural; section 12.3)
 ```
 
 ### Modified files
@@ -1957,11 +2034,17 @@ starting:
    pins individual keys (or all of them, with the ``generic`` block) to isolate
    the scene from instrument-config drift.  See section 0.3 and
    `dev_guide_observations`.
-3. **Polyhedral mesh source for B7.**  Per-body ``.obj`` files
-   bundled in the repo, or fetched on demand from a per-mission
-   shape archive?  Bundled is reproducible but adds repo size
-   (Hyperion mesh is ~5 MB at typical resolution); on-demand
-   requires network access during test runs.
+3. **Polyhedral mesh source for B7.**  *Resolved (neither).*  The procedural
+   generator (``make_irregular_mesh``: seed + lumpiness + pose) is the sim's mesh
+   source; named ``.obj`` meshes are not bundled and not fetched.  A parameterised
+   irregular body spans the irregularity axis continuously, which the controlled
+   sensitivity / regression role needs, and real irregular-body accuracy is
+   calibrated against the real Cassini Hyperion/Phoebe images in the operator
+   library (principle 3.1), so a fixed bundled mesh would not move the calibration
+   needle while adding ~5 MB of repo size or network-at-test-time.  The renderer
+   accepts any ``Mesh``, so a ``shape_model: named_mesh`` + ``mesh_file`` loader is
+   a documented future hook, left unbuilt until a specific body is proven
+   necessary.  See the B7 section and section 0.3.
 4. **Sim baseline policy** (T2).  Should sim baselines be
    regenerated automatically when the sim's noise model changes
    (B1), or should each backend change explicitly call out which
