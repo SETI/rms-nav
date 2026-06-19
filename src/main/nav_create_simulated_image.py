@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import json
 import os
 import re
 import sys
@@ -638,14 +637,6 @@ class CreateSimulatedImageModel(QMainWindow):
         self._save_img_btn = QPushButton('Save Image (PNG)')
         self._save_img_btn.clicked.connect(self._save_image)
         btns.addWidget(self._save_img_btn)
-
-        self._save_json_btn = QPushButton('Save Parameters (JSON)')
-        self._save_json_btn.clicked.connect(self._save_parameters)
-        btns.addWidget(self._save_json_btn)
-
-        self._load_json_btn = QPushButton('Load Parameters (JSON)')
-        self._load_json_btn.clicked.connect(self._load_parameters)
-        btns.addWidget(self._load_json_btn)
 
         self._save_scene_btn = QPushButton('Save Scene (YAML)')
         self._save_scene_btn.clicked.connect(self._save_scene)
@@ -2869,36 +2860,6 @@ class CreateSimulatedImageModel(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, 'Error', f'Failed to save image:\n{e!s}')
 
-    def _save_parameters(self) -> None:
-        filename, _ = QFileDialog.getSaveFileName(
-            self,
-            'Save Parameters',
-            'simulated_image_params.json',
-            'JSON Files (*.json)',
-        )
-        if filename:
-            try:
-                with open(filename, 'w', encoding='utf-8') as f:
-                    json.dump(self.sim_params, f, indent=2)
-            except Exception as e:
-                QMessageBox.critical(self, 'Error', f'Failed to save parameters:\n{e!s}')
-
-    def _load_parameters(self) -> None:
-        filename, _ = QFileDialog.getOpenFileName(
-            self,
-            'Load Parameters',
-            '',
-            'JSON Files (*.json)',
-        )
-        if not filename:
-            return
-        try:
-            with open(filename, encoding='utf-8') as f:
-                params = json.load(f)
-            self._apply_params_dict(params)
-        except Exception as e:
-            QMessageBox.critical(self, 'Error', f'Failed to load parameters:\n{e!s}')
-
     def _save_scene(self) -> None:
         filename, _ = QFileDialog.getSaveFileName(
             self,
@@ -2923,8 +2884,7 @@ class CreateSimulatedImageModel(QMainWindow):
         if not filename:
             return
         try:
-            scene = load_sim_scene(Path(filename))
-            self._apply_params_dict(scene.to_sim_params())
+            self._apply_params_dict(load_sim_scene(Path(filename)))
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to load scene:\n{e!s}')
 

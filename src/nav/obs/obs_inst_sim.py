@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 from typing import Any, cast
 
@@ -10,6 +9,7 @@ from nav.config import DEFAULT_CONFIG, IMAGE_LOGGER, Config
 from nav.obs.obs_snapshot_inst import ObsSnapshotInst
 from nav.sim.instruments import resolve_extfov_margin, resolve_sim_inst_config
 from nav.sim.render import render_combined_model
+from nav.sim.scene import load_sim_scene
 from nav.support.types import PathLike
 
 
@@ -27,27 +27,26 @@ class ObsSim(ObsSnapshotInst):
         extfov_margin_vu: tuple[int, int] | None = None,
         **kwargs: Any,
     ) -> 'ObsSim':
-        """Creates an ObsSim from a JSON file.
+        """Creates an ObsSim from a YAML scene file.
 
         Parameters:
-            path: Path to the JSON description file.
+            path: Path to the YAML scene file.
             config: Navigation configuration. If None, uses defaults.
             extfov_margin_vu: Optional extended FOV margins (v,u) to add around the image.
             **kwargs: Additional keyword arguments.
-                sim_params: Dictionary of parameters saved by the GUI JSON. If present,
-                this will override the JSON file.
+                sim_params: Flat sim-params mapping. If present, this overrides the
+                scene file.
         """
 
         config = config or DEFAULT_CONFIG
         logger = IMAGE_LOGGER
 
         provided_sim_params = kwargs.get('sim_params')
-        json_path = FCPath(path)
-        abspath = cast(Path, json_path.get_local_path()).absolute()
+        scene_path = FCPath(path)
+        abspath = cast(Path, scene_path.get_local_path()).absolute()
         if provided_sim_params is None:
-            logger.debug(f'Reading simulated image JSON {json_path}')
-            with json_path.open() as f:
-                sim_params = json.load(f)
+            logger.debug(f'Reading simulated image scene {scene_path}')
+            sim_params = load_sim_scene(abspath)
         else:
             sim_params = provided_sim_params
             logger.debug('Using provided sim_params')
@@ -62,13 +61,13 @@ class ObsSim(ObsSnapshotInst):
             if provided_sim_params is None:
                 raise ValueError(
                     'Invalid or missing size/offset field in simulated image '
-                    f'JSON file "{json_path}": {e}'
+                    f'scene file "{scene_path}": {e}'
                 ) from e
             else:
                 raise ValueError(
                     'Invalid or missing size/offset field in provided '
-                    'sim_params for simulated image JSON file '
-                    f'"{json_path}": {e}'
+                    'sim_params for simulated image scene file '
+                    f'"{scene_path}": {e}'
                 ) from e
 
         # Build a basic Snapshot with a flat FOV and dummy geometry
@@ -81,8 +80,8 @@ class ObsSim(ObsSnapshotInst):
             path='SSB',
             frame='J2000',
         )
-        # Store data and the full JSON dictionary for future use
-        snapshot.image_url = str(json_path.absolute())
+        # Store data and the full sim-params dictionary for future use
+        snapshot.image_url = str(scene_path.absolute())
         snapshot.abspath = abspath
 
         snapshot.sim_params = sim_params
@@ -146,5 +145,5 @@ class ObsSim(ObsSnapshotInst):
             'instrument_host_lid': 'sim',
             'instrument_lid': 'sim',
             'image_shape_xy': self.data_shape_uv,
-            'description': 'Simulated observation from JSON',
+            'description': 'Simulated observation from YAML scene',
         }
