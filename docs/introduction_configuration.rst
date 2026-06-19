@@ -10,58 +10,30 @@ effective use of the system.
 Configuration Loading Order
 ============================
 
-The configuration system loads settings in the following order, with later files
-overriding earlier ones:
+RMS-NAV ships with a complete set of built-in defaults, so the system works out
+of the box with no configuration on your part. You customize behavior by layering
+your own settings on top of those defaults. Settings are loaded in the following
+order, with later sources overriding earlier ones for the same key:
 
-1. **Standard Configuration Files**: All YAML files in the
-   ``src/nav/config_files/`` directory are loaded in alphabetical order. These
-   files provide default settings for:
+1. **Built-in defaults**: RMS-NAV bundles a stack of default configuration files
+   that give every setting a sensible value. You do not edit these. (Developers
+   who need to know exactly which files ship and what each one holds should see
+   :doc:`/dev_guide/dev_guide_config_and_static_data`.)
 
-   * ``config_010_general.yaml``: General settings including all logging levels
-   * ``config_020_offset.yaml``: Offset-finding and star refinement parameters
-   * ``config_030_stars.yaml``: Star-model and ring-occlusion parameters
-   * ``config_040_bodies.yaml``: Body (planet/moon) rendering parameters
-   * ``config_050_rings.yaml``: Ring model parameters
-   * ``config_060_titan.yaml``: Titan-specific navigation parameters
-   * ``config_070_bootstrap.yaml``: Bootstrap navigation parameters (angles in degrees)
-   * ``config_100_satellites.yaml``: Satellite definitions for each planet
-   * ``config_220_body_shape.yaml``: Per-body shape table (radii, ellipsoid
-     residual, crater scale, albedo) consumed by the body NavModel and feature
-     extractors
-   * ``config_300_jupiter_rings.yaml``: Jupiter ring system parameters
-   * ``config_310_saturn_rings.yaml``: Saturn ring system parameters
-   * ``config_320_uranus_rings.yaml``: Uranus ring system parameters
-   * ``config_330_neptune_rings.yaml``: Neptune ring system parameters
-   * ``config_400_inst_coiss.yaml``: Cassini ISS instrument-specific settings
-   * ``config_410_inst_gossi.yaml``: Galileo SSI instrument-specific settings
-   * ``config_420_inst_nhlorri.yaml``: New Horizons LORRI instrument-specific settings
-   * ``config_430_inst_vgiss.yaml``: Voyager ISS instrument-specific settings
-   * ``config_440_sim.yaml``: Simulated image settings
-   * ``config_510_techniques.yaml``: Per-NavTechnique confidence-formula
-     coefficients and runtime tunables (spurious-detection thresholds,
-     at-edge tolerances, minimum arc lengths) plus the planet-specific
-     ``feature_emission.ring_annulus`` block that decides RING_EDGE vs
-     RING_ANNULUS feature emission
-   * ``config_900_backplanes.yaml``: Backplane generation settings
-   * ``config_950_pds4.yaml``: PDS4 metadata and export settings for generated
-     products, overrides for PDS4 label templates and mapping of internal fields
-     to PDS4 keys
+2. **User default configuration**: If a file named ``nav_default_config.yaml``
+   exists in the current working directory, it is loaded next. Use it to set
+   personal defaults that apply to all your runs.
 
-   The 3-digit numeric prefix is the lexicographic merge order.  Files in the
-   ``0xx`` range (000–099) are global / model-shared settings, ``1xx``
-   (100–199) are catalogues, ``2xx`` (200–299) are per-target tables (body
-   shape), ``3xx`` (300–399) are per-planet ring catalogues, ``4xx``
-   (400–499) are per-instrument camera blocks, ``5xx`` (500–599) are
-   per-technique tunables, and ``9xx`` (900–999) are downstream-product
-   settings.
+3. **Command-line configuration files**: Any files specified with the
+   ``--config-file`` option are loaded in the order given, overriding the
+   built-in defaults and your user defaults.
 
-2. **User Default Configuration**: If present, the file
-   ``nav_default_config.yaml`` in the current working directory is loaded. This
-   allows you to set personal defaults that apply to all runs.
+4. **Command-line option overrides**: A handful of CLI flags (described under
+   `Command-Line Option Overrides`_ below) override the matching configuration
+   key directly and take precedence over everything above.
 
-3. **Command-Line Configuration Files**: Any files specified with the
-   ``--config-file`` option are loaded in the order specified. These provide
-   the highest priority and can override any previous settings.
+You only ever need to specify the settings you want to change; everything else
+falls through to the built-in defaults.
 
 Configuration File Structure
 ============================
@@ -92,9 +64,10 @@ define the same setting, the value from the last file loaded takes precedence.
 Logging Configuration
 ---------------------
 
-All logging levels are set in the ``general`` section of ``config_010_general.yaml``.
-Each key accepts a standard log-level string: ``DEBUG``, ``INFO``, ``WARNING``,
-``ERROR``, or ``CRITICAL``.
+All logging levels live in the ``general`` configuration section. Each key accepts
+a standard log-level string: ``DEBUG``, ``INFO``, ``WARNING``, ``ERROR``, or
+``CRITICAL``. Set them in your ``nav_default_config.yaml`` or a ``--config-file``
+to override the built-in defaults shown below.
 
 **Main logger** (``nav_offset`` -- top-level program events):
 
@@ -242,7 +215,7 @@ Example: Combining Configuration Methods
 
 The following example demonstrates how different configuration methods interact:
 
-1. Default configuration files in ``src/nav/config_files/`` set
+1. The built-in defaults set
    ``offset.correlation_fft_upsample_factor: 128``
 
 2. User's ``nav_default_config.yaml`` overrides it to ``256``
