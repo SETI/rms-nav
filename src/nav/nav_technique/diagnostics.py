@@ -159,6 +159,11 @@ class RingEdgeDiagnostics:
         total_edge_length_px: Cumulative pixel length of all surviving
             ring-edge polylines.
         per_edge_dt_rms_summed: Sum of per-edge final DT RMS values.
+        per_edge_dt_rms_mean: Mean per-edge final DT RMS value
+            (``per_edge_dt_rms_summed / edge_count``).  Edge-count independent,
+            so it -- not the raw sum -- is the scale the confidence formula
+            uses; the sum grows with the number of fused edges and a fixed
+            divisor cannot normalise it.
         edge_count: Number of RING_EDGE features fused.
         is_rank_1: True if every ring-edge feature was straight-line and the
             combined covariance is rank-1.
@@ -166,11 +171,13 @@ class RingEdgeDiagnostics:
 
     total_edge_length_px: float = 0.0
     per_edge_dt_rms_summed: float = 0.0
+    per_edge_dt_rms_mean: float = 0.0
     edge_count: int = 0
     is_rank_1: bool = False
     CURATOR_FIELDS: ClassVar[dict[str, str | None]] = {
         'total_edge_length_px': 'total_edge_length_px',
         'per_edge_dt_rms_summed': 'per_edge_dt_rms_summed',
+        'per_edge_dt_rms_mean': 'per_edge_dt_rms_mean',
         'edge_count': 'edge_count',
         'is_rank_1': 'is_rank_1',
     }
