@@ -201,7 +201,12 @@ def render_polyhedral_body(
     height = size_v * aa_scale
     width = size_u * aa_scale
 
-    semi = np.array(semi_axes_px, dtype=np.float64) * aa_scale
+    # Match the ellipsoid renderer's axis convention: axis1 (semi_axes_px[0])
+    # sets the vertical (v) extent and axis2 the horizontal (u) extent.  The
+    # projection below sends body x -> u and body y -> v, so scale body x by
+    # axis2 and body y by axis1.
+    axis1_semi, axis2_semi, axis3_semi = np.array(semi_axes_px, dtype=np.float64) * aa_scale
+    semi = np.array([axis2_semi, axis1_semi, axis3_semi])
     rot = _rotation_matrix(pose_euler_deg)
     verts_cam = (mesh.vertices * semi) @ rot.T
     px = center[1] * aa_scale + verts_cam[:, 0]

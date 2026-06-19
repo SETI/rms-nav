@@ -401,15 +401,10 @@ controls ``crater_fill``, ``crater_min_radius``, ``crater_max_radius``,
 
 .. note::
 
-   **Axis convention.** The ellipsoid renderer maps ``axis1`` to the vertical
-   (``v``) extent and ``axis2`` to the horizontal (``u``) extent; the mesh
-   renderer maps ``axis1`` to the body-frame ``x`` axis, which projects to the
-   horizontal (``u``) extent. The two renderers are therefore transposed relative
-   to one another, so an ellipsoid and a mesh with identical ``axis1``/``axis2``
-   are oriented differently (compare the first two ingredient panels above). This
-   does not affect navigation accuracy because a single comparison always renders
-   and predicts with the *same* renderer; it matters only when reading absolute
-   pixel extents off the axes.
+   **Axis convention.** Both renderers use the same mapping: ``axis1`` is the
+   vertical (``v``) extent and ``axis2`` the horizontal (``u``) extent. An
+   ellipsoid and a mesh declared with identical ``axis1``/``axis2`` are oriented
+   the same way, so the two are interchangeable for the same geometry.
 
 **Render geometry vs navigation geometry.** By default the navigator predicts the
 body from the same parameters the renderer drew, so it knows the truth. A body

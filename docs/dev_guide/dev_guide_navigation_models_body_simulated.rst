@@ -118,10 +118,9 @@ irregular-body scenarios exercise:
   (ellipsoidal) limit by overriding ``mesh_lumpiness`` to ``0.0`` at the same
   pose. The only residual is shape; the disc correlation still aligns the two
   filled silhouettes and the recovered centroid bias grows with the rendered
-  relief. Realising the ellipsoidal prediction as the smooth limit
-  of the mesh keeps both silhouettes on one renderer with a consistent axis and
-  pose convention, so the residual is pure shape mismatch rather than a
-  renderer-convention skew.
+  relief. Realising the ellipsoidal prediction as the smooth limit of the mesh
+  keeps both silhouettes on one renderer, so the residual is purely the shape
+  mismatch under test.
 - **Pose disagreement** -- render the mesh at the true pose, predict the same
   mesh at a different ``pose_euler_deg``. The wrong-pose silhouette boundary
   drives the limb distance-transform fit to a confidently-wrong offset, while the

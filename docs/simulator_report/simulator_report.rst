@@ -662,30 +662,31 @@ genuinely unknown orientation testable.
    * - ``planted_offset_irregular``
      - BodyDiscCorrelateNav (mesh = mesh)
      - (1.43, -0.61) px
-     - (1.43, -0.62) px
-     - 0.01 px
+     - (1.43, -0.61) px
+     - 0.00 px
    * - ``planted_offset_limb_mesh``
      - BodyLimbNav (mesh = mesh)
      - (1.43, -0.61) px
-     - (1.43, -0.62) px
-     - 0.16 px
+     - (1.26, -0.53) px
+     - 0.19 px
    * - ``planted_offset_blob_mesh_crescent``
      - BodyBlobNav (mesh, 120 deg)
      - (1.43, -0.61) px
-     - (1.43, -0.62) px
-     - 0.16 px
+     - (1.24, -0.52) px
+     - 0.21 px
    * - ``planted_offset_shapemismatch``
      - full ensemble (predict ellipsoid)
      - (1.43, -0.61) px
-     - (1.81, -0.84) px
-     - 0.44 px
+     - (1.99, -0.90) px
+     - 0.63 px
 
 When the predicted geometry matches the rendered mesh, the mesh disc, mesh limb,
 and mesh crescent recover the planted offset as tightly as their ellipsoid
-counterparts (0.01-0.16 px). The fourth row is the shape-mismatch case: the frame
+counterparts (0.00-0.21 px). The fourth row is the shape-mismatch case: the frame
 renders a mildly irregular mesh but the navigator predicts its smooth
 (ellipsoidal) limit at the same pose, and the body still navigates -- the disc
-correlation aligns the two filled silhouettes and recovers to under half a pixel.
+correlation aligns the two filled silhouettes and recovers to within
+two-thirds of a pixel.
 
 Shape mismatch vs irregularity
 ------------------------------
@@ -701,13 +702,13 @@ term is meant to capture.
 
    Recovered-offset error (red) and fused confidence (blue) vs rendered mesh
    lumpiness, with the prediction pinned to the zero-relief limit. The bias grows
-   from ~0.01 px (no mismatch) to ~6 px at heavy relief while the confidence falls
-   from ~0.39 to ~0.22 -- the navigator both mis-locates the body and reports
+   from ~0.00 px (no mismatch) to ~4 px at heavy relief while the confidence falls
+   from ~0.39 to ~0.28 -- the navigator both mis-locates the body and reports
    lower confidence as the shape diverges.
 
-The recovered error grows monotonically with relief (0.01, 0.45, 1.14, 3.01,
-4.03, 5.98 px at lumpiness 0.0 through 0.5) and the fused confidence falls in step
-(0.39 down to 0.22). The body keeps navigating to a ``success`` status throughout
+The recovered error grows monotonically with relief (0.00, 0.63, 1.33, 2.17,
+4.02, 4.03 px at lumpiness 0.0 through 0.5) and the fused confidence falls in step
+(0.39 down to 0.28). The body keeps navigating to a ``success`` status throughout
 -- the disc correlation still locks onto the silhouette -- but the answer drifts,
 which is exactly the failure an irregular-body confidence penalty must learn to
 distrust.
@@ -725,17 +726,19 @@ limb fit:
    :alt: Mesh-limb recovery error vs predicted-pose disagreement.
 
    Pinned-limb recovered-offset error vs the predicted pose's disagreement with
-   the true (rendered) pose. The limb solves at 0 deg (0.22 px) and 10 deg
-   (2.19 px) disagreement, then self-flags spurious and returns no fix (dashed
-   lines) past ~20 deg -- the navigator declining to trust a confidently-wrong
-   limb.
+   the true (rendered) pose (a tumble about the body's long axis). The limb keeps
+   returning a fix across the swept range, but its error climbs from 0.27 px at
+   the true pose to 4.2 px at a 45 deg disagreement -- a confidently-wrong limb
+   that does not self-flag here.
 
-The limb error climbs from 0.22 px at the true pose to 2.19 px at a 10 deg
-disagreement, and past ~20 deg the technique flags itself spurious and produces no
-fix at all. The pose-free blob centroid, by contrast, stays accurate on the same
-wrong-pose body, because a centrally-symmetric (low-relief triaxial) body's
-lit-weighted centroid barely moves under rotation. This is the behaviour the
-``test_sim_irregular_pose`` per-technique test pins: on a wrong-pose body the
+The limb error climbs monotonically from 0.27 px at the true pose to 4.2 px at a
+45 deg tumble, all the while still reporting ``success`` at ~0.66 confidence: it
+does not self-flag in this range. A wrong in-plane roll degrades it far more
+sharply -- tens of pixels, and there it does self-flag spurious. The pose-free
+blob centroid, by contrast, stays accurate on the same wrong-pose body, because a
+centrally-symmetric (low-relief triaxial) body's lit-weighted centroid barely
+moves under rotation. This is the behaviour the ``test_sim_irregular_pose``
+per-technique test pins: on a wrong-pose body the
 system should demote from the confidently-wrong limb to the orientation-free
 blob.
 
@@ -817,11 +820,11 @@ Summary
   field to ~0.005 px, the most accurate of any technique.
 * Irregular (mesh) bodies navigate as accurately as ellipsoids when the predicted
   geometry matches the rendered one (mesh disc, limb, and crescent all recover to
-  0.01-0.16 px). When the navigator predicts the wrong shape the centroid bias
-  grows with the rendered relief (to ~6 px) and the confidence falls; when it
-  predicts the wrong pose the limb degrades and self-flags spurious while the
-  pose-free blob holds -- the demote-to-pose-free behaviour a chaotic rotator
-  needs.
+  0.00-0.21 px). When the navigator predicts the wrong shape the centroid bias
+  grows with the rendered relief (to ~4 px) and the confidence falls; when it
+  predicts the wrong pose the limb degrades to a confidently-wrong fix (or, for a
+  wrong in-plane roll, far enough that it self-flags) while the pose-free blob
+  holds -- the demote-to-pose-free behaviour a chaotic rotator needs.
 * The sweeps show the expected qualitative behaviour: navigation degrades to a
   clean failure past the noise cliff, the resolved body recovers across the full
   phase range with no mid-phase accuracy penalty, and the primary technique walks

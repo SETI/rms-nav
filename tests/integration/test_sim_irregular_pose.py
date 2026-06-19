@@ -1,24 +1,27 @@
-"""Pose-disagreement behavioral test (B7 scenario 3).
+"""Pose-disagreement behavioral test for an irregular body.
 
 A chaotic rotator's orientation is genuinely unknown, so the useful question is
 what the technique ladder does when the navigator's assumed pose is wrong.  This
 test renders one irregular body at its true pose and navigates it twice: once
 with the predicted pose agreeing with the render (the correct-pose body) and once
-with the predicted pose swung 25 degrees away (the wrong-pose body).  It asserts
-the *decision*, per technique, not an exact recovery:
+with the predicted body given a wrong in-plane roll (the wrong-pose body).  It
+asserts the *decision*, per technique, not an exact recovery:
 
 * The orientation-dependent ``BodyLimbNav`` recovers the planted offset at the
-  correct pose but lands far off at the wrong pose -- a confidently-wrong limb the
-  navigator should not trust (and indeed flags spurious).
+  correct pose but lands far off at the wrong pose -- a wrong-pose limb the
+  navigator should not trust (here it also self-flags spurious).
 * The orientation-free ``BodyBlobNav`` stays accurate at both poses, because the
   body's bulk shape is a centrally-symmetric triaxial ellipsoid whose
   lit-weighted centroid barely moves under rotation.
 
-The assertion is per-technique because the ensemble's demote-to-pose-free choice
-is confidence-driven and the confidence alphas are uncalibrated placeholders; the
+A wrong in-plane roll is used because it swings the elongated body's silhouette
+the most for the least centroid motion, giving the cleanest separation between
+the limb (which depends on the silhouette) and the blob (which does not).  The
+assertion is per-technique because the ensemble's demote-to-pose-free choice is
+confidence-driven and the confidence alphas are uncalibrated placeholders; the
 geometry/error gap asserted here is real and placeholder-independent.  The fused
 "prefers the pose-free answer" claim only becomes clean after the real-data
-calibration (issue #153).
+confidence calibration.
 """
 
 from __future__ import annotations
@@ -43,8 +46,9 @@ _SCENE = (
     / 'phase_sweep_irregular_body'
     / 'hyperion_pose_disagree.yaml'
 )
-# The wrong-pose body predicts the mesh swung 25 degrees in Y from the true 35.
-_WRONG_POSE_Y_DEG = 60.0
+# The wrong-pose body predicts the mesh with a 20-degree in-plane roll (the Z
+# Euler angle) added to the true pose [10, 35, 0].
+_WRONG_POSE_ROLL_DEG = 20.0
 
 
 def _navigate(sim_params: dict[str, Any], technique: str) -> Any:
@@ -76,7 +80,7 @@ def _params(*, wrong_pose: bool) -> dict[str, Any]:
     params = load_sim_scene(_SCENE).to_sim_params()
     if wrong_pose:
         params = copy.deepcopy(params)
-        params['bodies'][0]['nav_override']['pose_euler_deg'] = [10.0, _WRONG_POSE_Y_DEG, 0.0]
+        params['bodies'][0]['nav_override']['pose_euler_deg'] = [10.0, 35.0, _WRONG_POSE_ROLL_DEG]
     return params
 
 
@@ -86,7 +90,7 @@ def test_correct_pose_limb_is_accurate() -> None:
 
 
 def test_wrong_pose_limb_degrades() -> None:
-    """A 25-degree pose disagreement drives the limb far off the planted offset."""
+    """A wrong in-plane roll drives the limb far off the planted offset."""
     assert _technique_error_px(_params(wrong_pose=True), 'BodyLimbNav') > 4.0
 
 

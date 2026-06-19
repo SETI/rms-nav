@@ -154,22 +154,31 @@ def test_pose_disagreement_starts_clean() -> None:
 
 
 def test_pose_disagreement_limb_error_grows() -> None:
-    """A small pose disagreement already grows the limb fit error."""
+    """The limb fit error grows monotonically as the predicted pose drifts."""
     rows = _rows('pose_disagreement')
-    assert rows[1].offset_error_px is not None
-    assert rows[0].offset_error_px is not None
-    assert rows[1].offset_error_px > rows[0].offset_error_px
+    first = rows[0].offset_error_px
+    second = rows[1].offset_error_px
+    last = rows[-1].offset_error_px
+    assert first is not None
+    assert second is not None
+    assert last is not None
+    assert second > first
+    assert last > first + 1.0
+    assert last > 2.0
 
 
-def test_pose_disagreement_large_disagreement_fails() -> None:
-    """At a large pose disagreement the limb no longer produces a trusted fix.
+def test_pose_disagreement_limb_is_confidently_wrong() -> None:
+    """At the largest disagreement the limb is several pixels off yet still 'success'.
 
-    The pinned limb is flagged spurious once the predicted silhouette swings far
-    off the rendered one, so the fused (limb-only) status degrades to failed --
-    the navigator declining to trust the confidently-wrong limb.
+    The pinned limb does not self-flag across this tumble range -- it returns a
+    confidently-wrong fix (a multi-pixel error at unchanged confidence), which is
+    why the per-technique demote decision (test_sim_irregular_pose) cannot rely on
+    the limb's own status and compares it against the pose-free blob instead.
     """
     rows = _rows('pose_disagreement')
-    assert rows[-1].status == 'failed'
+    assert rows[-1].status == 'success'
+    assert rows[-1].offset_error_px is not None
+    assert rows[-1].offset_error_px > 2.0
 
 
 # The per-technique dense and wide offset sweeps (``*_offset_fine`` /

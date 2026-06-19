@@ -1,7 +1,7 @@
 {
-  "confidence": 0.38,
-  "offset_du_px": -0.84,
-  "offset_dv_px": 1.81,
+  "confidence": 0.4,
+  "offset_du_px": -0.9,
+  "offset_dv_px": 1.99,
   "scene_name": "planted_offset_shapemismatch",
   "status": "success"
 }
