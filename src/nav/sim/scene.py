@@ -1,22 +1,22 @@
 """Scene-spec schema for the simulator scene catalog.
 
 A sim scene is a YAML file describing a synthetic frame the navigator can be run
-against: instrument, geometry, noise, stray light, and the planted ground-truth
-offset the navigator should recover.  The catalog is laid out as
+against: instrument, geometry, noise, stray light, and the planted offset the
+navigator should recover.  The catalog is laid out as
 ``<scene_class>/<scene_name>.yaml`` (the directory is the registry).
 
-This module is the canonical schema -- the importable peer of the YAML files and
-the GUI.  ``load_sim_scene`` validates a file into a :class:`SimScene`;
-``SimScene.to_sim_params`` maps it to the dict ``render_combined_model`` /
-``ObsSim`` consume; ``scene_dict_from_sim_params`` is the inverse used by the GUI
-to save the current scene back to YAML.  The validator is hand-rolled (no
-pydantic dependency).
+The YAML fields are the flat runtime parameter names that the renderer
+(:func:`nav.sim.render.render_combined_model`),
+:class:`nav.obs.obs_inst_sim.ObsSim`, and the GUI consume, so a validated scene
+file IS the ``sim_params`` mapping with no translation layer.  ``load_sim_scene``
+parses and validates a file and returns that dict; ``save_sim_scene`` validates a
+``sim_params`` dict and writes it (injecting ``schema_version`` and
+``scene_name``).  The validator is hand-rolled (no pydantic dependency).
 """
 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -44,154 +44,43 @@ ALLOWED_INSTRUMENTS: frozenset[str] = frozenset(SIM_INSTRUMENTS) | GENERIC_INSTR
 
 CURRENT_SCHEMA_VERSION: int = 1
 
+# Every top-level key a scene may carry.  These are the flat runtime sim_params
+# names the renderer / ObsSim consume directly, plus the schema_version /
+# scene_name metadata the renderer ignores.  An unknown key fails validation so
+# typos do not silently render the default scene.
+_ALLOWED_KEYS: frozenset[str] = frozenset(
+    {
+        'schema_version',
+        'scene_name',
+        'instrument',
+        'size_v',
+        'size_u',
+        'random_seed',
+        'exposure_sec',
+        'offset_v',
+        'offset_u',
+        'offset_rotation_deg',
+        'midtime_utc',
+        'closest_planet',
+        'time',
+        'ring_epoch',
+        'shade_solid_rings',
+        'bodies',
+        'rings',
+        'stars',
+        'background_stars_num',
+        'background_stars_psf_sigma',
+        'background_stars_distribution_exponent',
+        'noise',
+        'stray_light',
+        'instrument_config',
+        'fit_camera_rotation',
+    }
+)
+
 
 class SimSceneValidationError(ValueError):
     """Raised when a sim scene YAML is missing or malformed."""
-
-
-@dataclass(frozen=True)
-class GroundTruth:
-    """The planted offset/rotation the navigator should recover."""
-
-    planted_offset_dv_px: float = 0.0
-    planted_offset_du_px: float = 0.0
-    planted_rotation_deg: float = 0.0
-
-
-@dataclass(frozen=True)
-class SimScene:
-    """A validated sim scene spec."""
-
-    path: Path
-    schema_version: int
-    scene_name: str
-    instrument: str
-    image_size_vu: tuple[int, int]
-    random_seed: int
-    exposure_sec: float
-    midtime_utc: str | None
-    bodies: tuple[dict[str, Any], ...]
-    rings: tuple[dict[str, Any], ...]
-    stars: dict[str, Any] | None
-    noise: dict[str, Any] | None
-    stray_light: dict[str, Any] | None
-    instrument_config: dict[str, Any] | None = None
-    fit_camera_rotation: bool | None = None
-    ground_truth: GroundTruth = field(default_factory=GroundTruth)
-
-    @property
-    def scene_class(self) -> str:
-        """The scene class is the immediate parent directory name."""
-        return self.path.parent.name
-
-    def to_sim_params(self) -> dict[str, Any]:
-        """Build the parameter dict ``render_combined_model`` / ``ObsSim`` use.
-
-        The planted ground-truth offset becomes the rendered ``offset`` so a
-        navigator predicting the unshifted geometry must recover it.
-
-        Returns:
-            A sim-params mapping.
-        """
-        params: dict[str, Any] = {
-            'size_v': self.image_size_vu[0],
-            'size_u': self.image_size_vu[1],
-            'random_seed': self.random_seed,
-            'instrument': self.instrument,
-            'exposure_sec': self.exposure_sec,
-            'offset_v': self.ground_truth.planted_offset_dv_px,
-            'offset_u': self.ground_truth.planted_offset_du_px,
-            'offset_rotation_deg': self.ground_truth.planted_rotation_deg,
-            'bodies': [dict(b) for b in self.bodies],
-            'rings': [dict(r) for r in self.rings],
-        }
-        if self.noise is not None:
-            params['noise'] = dict(self.noise)
-        if self.stray_light is not None:
-            params['stray_light'] = dict(self.stray_light)
-        if self.stars is not None:
-            if 'background_count' in self.stars:
-                params['background_stars_num'] = int(self.stars['background_count'])
-            if 'list' in self.stars:
-                params['stars'] = [dict(s) for s in self.stars['list']]
-        if self.instrument_config is not None:
-            params['instrument_config'] = dict(self.instrument_config)
-        if self.fit_camera_rotation is not None:
-            params['fit_camera_rotation'] = self.fit_camera_rotation
-        if self.midtime_utc is not None:
-            params['midtime_utc'] = self.midtime_utc
-        return params
-
-
-def scene_dict_from_sim_params(sim_params: dict[str, Any], *, scene_name: str) -> dict[str, Any]:
-    """Build a YAML-serialisable scene dict from GUI/render sim params.
-
-    The inverse of :meth:`SimScene.to_sim_params`: the rendered offset becomes
-    the planted ground truth, and the star background count / list fold back into
-    a ``stars`` block.
-
-    Parameters:
-        sim_params: The GUI / render parameter mapping.
-        scene_name: The scene name (must match the target filename stem).
-
-    Returns:
-        A mapping ready to validate via :func:`load_sim_scene` after writing.
-    """
-    scene: dict[str, Any] = {
-        'schema_version': CURRENT_SCHEMA_VERSION,
-        'scene_name': scene_name,
-        'instrument': str(sim_params.get('instrument', 'generic')),
-        'image_size_vu': [int(sim_params['size_v']), int(sim_params['size_u'])],
-        'random_seed': int(sim_params.get('random_seed', 42)),
-        'exposure_sec': float(sim_params.get('exposure_sec', 1.0)),
-    }
-    bodies = sim_params.get('bodies') or []
-    if bodies:
-        scene['bodies'] = [dict(b) for b in bodies]
-    rings = sim_params.get('rings') or []
-    if rings:
-        scene['rings'] = [dict(r) for r in rings]
-    stars_block: dict[str, Any] = {}
-    if int(sim_params.get('background_stars_num', 0)):
-        stars_block['background_count'] = int(sim_params['background_stars_num'])
-    if sim_params.get('stars'):
-        stars_block['list'] = [dict(s) for s in sim_params['stars']]
-    if stars_block:
-        scene['stars'] = stars_block
-    if sim_params.get('noise') is not None:
-        scene['noise'] = dict(sim_params['noise'])
-    if sim_params.get('stray_light') is not None:
-        scene['stray_light'] = dict(sim_params['stray_light'])
-    if sim_params.get('instrument_config') is not None:
-        scene['instrument_config'] = dict(sim_params['instrument_config'])
-    if sim_params.get('fit_camera_rotation') is not None:
-        scene['fit_camera_rotation'] = bool(sim_params['fit_camera_rotation'])
-    if sim_params.get('midtime_utc'):
-        scene['midtime_utc'] = str(sim_params['midtime_utc'])
-    offset_v = float(sim_params.get('offset_v', 0.0))
-    offset_u = float(sim_params.get('offset_u', 0.0))
-    offset_rotation_deg = float(sim_params.get('offset_rotation_deg', 0.0))
-    if offset_v or offset_u or offset_rotation_deg:
-        scene['ground_truth'] = {
-            'planted_offset_dv_px': offset_v,
-            'planted_offset_du_px': offset_u,
-            'planted_rotation_deg': offset_rotation_deg,
-        }
-    return scene
-
-
-def save_sim_scene(sim_params: dict[str, Any], path: Path) -> None:
-    """Write the current scene to ``path`` as YAML, derived from sim params.
-
-    Parameters:
-        sim_params: The GUI / render parameter mapping.
-        path: Destination ``<scene_name>.yaml`` path; its stem is the scene name.
-    """
-    scene = scene_dict_from_sim_params(sim_params, scene_name=path.stem)
-    yaml = YAML(typ='safe')
-    yaml.default_flow_style = False
-    with path.open('w') as handle:
-        yaml.dump(scene, handle)
 
 
 def iter_scene_paths(root: Path) -> list[Path]:
@@ -199,14 +88,25 @@ def iter_scene_paths(root: Path) -> list[Path]:
     return sorted(root.glob('*/*.yaml'))
 
 
-def load_sim_scene(path: Path) -> SimScene:
-    """Parse and validate a sim scene YAML.
+def scene_class_for_path(path: Path) -> str:
+    """The scene class is the immediate parent directory name."""
+    return path.parent.name
+
+
+def load_sim_scene(path: Path) -> dict[str, Any]:
+    """Parse and validate a sim scene YAML into a flat ``sim_params`` dict.
+
+    The returned mapping is exactly what
+    :func:`nav.sim.render.render_combined_model` and
+    :class:`nav.obs.obs_inst_sim.ObsSim` consume; the ``schema_version`` and
+    ``scene_name`` keys are metadata the renderer ignores.
 
     Parameters:
-        path: Path to a ``<scene_name>.yaml`` file.
+        path: Path to a ``<scene_name>.yaml`` file.  The ``scene_name`` field
+            must equal the filename stem.
 
     Returns:
-        A frozen :class:`SimScene`.
+        The validated flat ``sim_params`` mapping.
 
     Raises:
         SimSceneValidationError: On any missing/invalid field.
@@ -221,7 +121,33 @@ def load_sim_scene(path: Path) -> SimScene:
     return _validate(raw, path=path)
 
 
-def _validate(raw: dict[str, Any], *, path: Path) -> SimScene:
+def save_sim_scene(sim_params: dict[str, Any], path: Path) -> None:
+    """Validate ``sim_params`` and write it to ``path`` as a flat YAML scene.
+
+    The ``schema_version`` and ``scene_name`` (= the filename stem) keys are
+    injected so the written file validates on reload.
+
+    Parameters:
+        sim_params: The flat GUI / render parameter mapping.
+        path: Destination ``<scene_name>.yaml`` path; its stem is the scene name.
+    """
+    scene: dict[str, Any] = {
+        'schema_version': CURRENT_SCHEMA_VERSION,
+        'scene_name': path.stem,
+        **sim_params,
+    }
+    _validate(scene, path=path)
+    yaml = YAML(typ='safe')
+    yaml.default_flow_style = False
+    with path.open('w') as handle:
+        yaml.dump(scene, handle)
+
+
+def _validate(raw: dict[str, Any], *, path: Path) -> dict[str, Any]:
+    unknown = set(raw) - _ALLOWED_KEYS
+    if unknown:
+        raise SimSceneValidationError(f'{path}: unknown scene keys: {sorted(unknown)}')
+
     schema_version = _require_int(raw, 'schema_version', path=path)
     if schema_version != CURRENT_SCHEMA_VERSION:
         raise SimSceneValidationError(
@@ -237,56 +163,39 @@ def _validate(raw: dict[str, Any], *, path: Path) -> SimScene:
         raise SimSceneValidationError(
             f'{path}: instrument {instrument!r} is not one of {sorted(ALLOWED_INSTRUMENTS)}'
         )
-    image_size_vu = _require_int_pair(raw, 'image_size_vu', path=path)
-    random_seed = _require_int(raw, 'random_seed', path=path)
-    exposure_sec = _optional_positive_float(raw.get('exposure_sec'), 'exposure_sec', path=path)
-    midtime_utc = raw.get('midtime_utc')
-    if midtime_utc is not None and not isinstance(midtime_utc, str):
-        raise SimSceneValidationError(f'{path}: midtime_utc must be a string when present')
+    _require_positive_int(raw, 'size_v', path=path)
+    _require_positive_int(raw, 'size_u', path=path)
+    _require_int(raw, 'random_seed', path=path)
 
-    bodies = _require_mapping_list(raw.get('bodies'), 'bodies', path=path)
-    rings = _require_mapping_list(raw.get('rings'), 'rings', path=path)
-    stars = _optional_mapping(raw.get('stars'), 'stars', path=path)
-    noise = _optional_mapping(raw.get('noise'), 'noise', path=path)
-    stray_light = _optional_mapping(raw.get('stray_light'), 'stray_light', path=path)
-    instrument_config = _optional_mapping(
-        raw.get('instrument_config'), 'instrument_config', path=path
+    _check_optional_positive_number(raw.get('exposure_sec'), 'exposure_sec', path=path)
+    _check_optional_number(raw.get('offset_v'), 'offset_v', path=path)
+    _check_optional_number(raw.get('offset_u'), 'offset_u', path=path)
+    _check_optional_number(raw.get('offset_rotation_deg'), 'offset_rotation_deg', path=path)
+    _check_optional_number(raw.get('time'), 'time', path=path)
+    _check_optional_number(raw.get('ring_epoch'), 'ring_epoch', path=path)
+    _check_optional_positive_number(
+        raw.get('background_stars_psf_sigma'), 'background_stars_psf_sigma', path=path
     )
-    fit_camera_rotation = raw.get('fit_camera_rotation')
-    if fit_camera_rotation is not None and not isinstance(fit_camera_rotation, bool):
-        raise SimSceneValidationError(f'{path}: fit_camera_rotation must be a boolean when present')
-    ground_truth = _validate_ground_truth(raw.get('ground_truth'), path=path)
-
-    return SimScene(
+    _check_optional_number(
+        raw.get('background_stars_distribution_exponent'),
+        'background_stars_distribution_exponent',
         path=path,
-        schema_version=schema_version,
-        scene_name=scene_name,
-        instrument=instrument,
-        image_size_vu=image_size_vu,
-        random_seed=random_seed,
-        exposure_sec=exposure_sec,
-        midtime_utc=midtime_utc,
-        bodies=tuple(bodies),
-        rings=tuple(rings),
-        stars=stars,
-        noise=noise,
-        stray_light=stray_light,
-        instrument_config=instrument_config,
-        fit_camera_rotation=fit_camera_rotation,
-        ground_truth=ground_truth,
     )
-
-
-def _validate_ground_truth(raw: Any, *, path: Path) -> GroundTruth:
-    if raw is None:
-        return GroundTruth()
-    if not isinstance(raw, dict):
-        raise SimSceneValidationError(f'{path}: ground_truth must be a mapping when present')
-    return GroundTruth(
-        planted_offset_dv_px=_optional_float(raw.get('planted_offset_dv_px'), path=path),
-        planted_offset_du_px=_optional_float(raw.get('planted_offset_du_px'), path=path),
-        planted_rotation_deg=_optional_float(raw.get('planted_rotation_deg'), path=path),
+    _check_optional_nonnegative_int(
+        raw.get('background_stars_num'), 'background_stars_num', path=path
     )
+    _check_optional_str(raw.get('midtime_utc'), 'midtime_utc', path=path)
+    _check_optional_str(raw.get('closest_planet'), 'closest_planet', path=path)
+    _check_optional_bool(raw.get('shade_solid_rings'), 'shade_solid_rings', path=path)
+    _check_optional_bool(raw.get('fit_camera_rotation'), 'fit_camera_rotation', path=path)
+    _check_optional_mapping_list(raw.get('bodies'), 'bodies', path=path)
+    _check_optional_mapping_list(raw.get('rings'), 'rings', path=path)
+    _check_optional_mapping_list(raw.get('stars'), 'stars', path=path)
+    _check_optional_mapping(raw.get('noise'), 'noise', path=path)
+    _check_optional_mapping(raw.get('stray_light'), 'stray_light', path=path)
+    _check_optional_mapping(raw.get('instrument_config'), 'instrument_config', path=path)
+
+    return raw
 
 
 def _require_str(raw: dict[str, Any], key: str, *, path: Path) -> str:
@@ -303,47 +212,59 @@ def _require_int(raw: dict[str, Any], key: str, *, path: Path) -> int:
     return value
 
 
-def _require_int_pair(raw: dict[str, Any], key: str, *, path: Path) -> tuple[int, int]:
-    value = raw.get(key)
-    if (
-        not isinstance(value, list)
-        or len(value) != 2
-        or any(isinstance(v, bool) or not isinstance(v, int) or v <= 0 for v in value)
-    ):
-        raise SimSceneValidationError(f'{path}: {key} must be a [v, u] pair of positive integers')
-    return (int(value[0]), int(value[1]))
+def _require_positive_int(raw: dict[str, Any], key: str, *, path: Path) -> int:
+    value = _require_int(raw, key, path=path)
+    if value <= 0:
+        raise SimSceneValidationError(f'{path}: {key} must be a positive integer')
+    return value
 
 
-def _optional_float(value: Any, *, path: Path) -> float:
+def _check_optional_number(value: Any, key: str, *, path: Path) -> None:
     if value is None:
-        return 0.0
+        return
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise SimSceneValidationError(f'{path}: numeric field got {value!r}')
-    coerced = float(value)
-    if not math.isfinite(coerced):
-        raise SimSceneValidationError(f'{path}: numeric field must be finite; got {value!r}')
-    return coerced
+        raise SimSceneValidationError(f'{path}: {key} must be a number when present')
+    if not math.isfinite(float(value)):
+        raise SimSceneValidationError(f'{path}: {key} must be finite; got {value!r}')
 
 
-def _optional_positive_float(value: Any, key: str, *, path: Path) -> float:
+def _check_optional_positive_number(value: Any, key: str, *, path: Path) -> None:
     if value is None:
-        return 1.0
+        return
     if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
-        raise SimSceneValidationError(f'{path}: {key} must be a positive number')
-    return float(value)
+        raise SimSceneValidationError(f'{path}: {key} must be a positive number when present')
 
 
-def _optional_mapping(value: Any, key: str, *, path: Path) -> dict[str, Any] | None:
+def _check_optional_nonnegative_int(value: Any, key: str, *, path: Path) -> None:
     if value is None:
-        return None
+        return
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise SimSceneValidationError(f'{path}: {key} must be a non-negative integer when present')
+
+
+def _check_optional_str(value: Any, key: str, *, path: Path) -> None:
+    if value is None:
+        return
+    if not isinstance(value, str):
+        raise SimSceneValidationError(f'{path}: {key} must be a string when present')
+
+
+def _check_optional_bool(value: Any, key: str, *, path: Path) -> None:
+    if value is None:
+        return
+    if not isinstance(value, bool):
+        raise SimSceneValidationError(f'{path}: {key} must be a boolean when present')
+
+
+def _check_optional_mapping(value: Any, key: str, *, path: Path) -> None:
+    if value is None:
+        return
     if not isinstance(value, dict):
         raise SimSceneValidationError(f'{path}: {key} must be a mapping when present')
-    return value
 
 
-def _require_mapping_list(value: Any, key: str, *, path: Path) -> list[dict[str, Any]]:
+def _check_optional_mapping_list(value: Any, key: str, *, path: Path) -> None:
     if value is None:
-        return []
+        return
     if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
         raise SimSceneValidationError(f'{path}: {key} must be a list of mappings')
-    return value
