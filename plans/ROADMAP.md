@@ -1,24 +1,23 @@
 # RMS-NAV Roadmap to a Production Pipeline
 
-This document collates the open GitHub issues
-([SETI/rms-nav](https://github.com/SETI/rms-nav/issues)) into an ordered plan.
+This roadmap orders the open, in-scope GitHub issues
+([SETI/rms-nav](https://github.com/SETI/rms-nav/issues)) into a plan to reach one
+goal:
 
-**Strategy: one instrument, end to end, first.** Rather than build every
-capability across all four missions at once, the target is a *complete, working,
-cloud-capable pipeline for Cassini ISS* -- navigation -> reprojection -> backplanes
--> PDS4 bundles -> summary/preview images + metadata -> updated SPICE CK kernels,
-with the docs and tests an end user needs. Once that vertical slice ships and is
-calibrated, we add the other instruments (Voyager ISS, Galileo SSI, New Horizons
-LORRI) and the remaining features on top of a proven spine.
+> A fully working and calibrated pipeline that lets an end user process
+> **Cassini ISS, Voyager ISS, Galileo SSI, and New Horizons LORRI** end to end --
+> navigation -> reprojection -> backplanes -> PDS4 bundles -> summary/preview
+> images + metadata -> updated **SPICE CK kernels with new pointing** -- with the
+> docs and tests an end user needs.
 
-The eventual goal is unchanged: full production processing of **Cassini, Voyager,
-Galileo, and New Horizons** into quality bundles (backplanes, metadata, summary
-images, preview images) plus a full set of new **SPICE CK kernels with updated
-pointing**.
+**Strategy: one instrument, end to end, first.** Build a complete, cloud-capable
+pipeline for **Cassini ISS** before generalizing. Once that vertical slice ships
+and is calibrated, add the other three instruments and the remaining features on
+top of a proven spine.
 
-**Scope filter.** Lists issues at priority Critical / Essential / Important /
-Useful that lie on the path. **Priority Defer** and most **Priority 5 Minor**
-items are excluded and listed at the end. Issue links use the form `#NNN`.
+Ordering is by dependency, not just priority. Within a sub-stream, issues can
+largely run in parallel. This roadmap lists only the work on the path to the
+goal; issues that are out of scope for it are simply not included.
 
 ---
 
@@ -39,26 +38,27 @@ The deliverable: an end user can take Cassini ISS images and produce calibrated
 navigation, reprojections, backplanes, and PDS4 bundles (with summary/preview
 images, metadata, and updated CK kernels), running locally or in the cloud.
 
-Most of the machinery below is mission-agnostic -- the point of Phase 1 is to make
-it provably *work, end to end, for Cassini*. Sub-streams 1A->1C are sequential
-(navigation -> calibration -> **accuracy checkpoint**); only once the accuracy
-checkpoint (1C) shows the navigation is sound do we invest in the downstream
-products (1D-1H). 1D-1J can then largely proceed in parallel.
+Sub-streams 1A->1C are sequential (navigation -> calibration -> **accuracy
+checkpoint**); only once the accuracy checkpoint shows the navigation is sound do
+we invest in the downstream products. 1D-1J can then largely proceed in parallel.
 
 ### 1A. Navigation correctness (Cassini scenes: Saturn, rings, icy moons, stars)
 
+Do #180 first: a per-image reason at every failure/gate site makes debugging the
+rest of this work far easier.
+
 | Issue | Title | Pri |
 |---|---|---|
+| [#180](https://github.com/SETI/rms-nav/issues/180) | Wire `STATUS_REASON_INFO_TEMPLATE` through every `NavResult.failed` site | Useful |
 | [#123](https://github.com/SETI/rms-nav/issues/123) | Mahalanobis agreement grouping breaks (CRLB-tight covariances) | Essential |
 | [#86](https://github.com/SETI/rms-nav/issues/86) | Fix ring models (Saturn) | Essential |
-| [#126](https://github.com/SETI/rms-nav/issues/126) | BodyDiscCorrelateNav rotation pyramid is ~10 min on 1024x1024 | Essential |
 | [#124](https://github.com/SETI/rms-nav/issues/124) | Ensemble has no cross-technique outlier rejection | Important |
 | [#125](https://github.com/SETI/rms-nav/issues/125) | BodyTerminatorNav mis-convergence has no per-technique signal | Important |
 | [#128](https://github.com/SETI/rms-nav/issues/128) | Architectural redesign: robust limb navigation across body types | Important |
 | [#179](https://github.com/SETI/rms-nav/issues/179) | Make the DT coarse-prior search robust against competing edges | Important |
 | [#145](https://github.com/SETI/rms-nav/issues/145) | Star-ring occlusion mis-classifies stars near ringlet edges/gaps | Important |
 | [#25](https://github.com/SETI/rms-nav/issues/25) | Implement blurring for high-resolution bodies | Important |
-| [#150](https://github.com/SETI/rms-nav/issues/150) | BodyLimbNav floor is a model-vs-image edge offset | -- |
+| [#150](https://github.com/SETI/rms-nav/issues/150) | BodyLimbNav floor is a model-vs-image edge offset | Important |
 | [#146](https://github.com/SETI/rms-nav/issues/146) | `instances_for_obs` ignores a per-run config override | Useful |
 | [#130](https://github.com/SETI/rms-nav/issues/130) | Calibrate per-instrument star limiting magnitudes *(Cassini first)* | Useful |
 | [#136](https://github.com/SETI/rms-nav/issues/136) | `--last-image-num` can drop later WAC images *(Cassini ingest)* | Important |
@@ -70,15 +70,15 @@ Strictly ordered; the library and calibration start Cassini-only and grow with
 later phases.
 
 1. [#172](https://github.com/SETI/rms-nav/issues/172) -- Build the curated test library with ground-truth offsets (seed with Cassini scenes). *(Playbook: `plans/PHASE10_CURATION.md`.)*
-2. [#175](https://github.com/SETI/rms-nav/issues/175) -- Source body ellipsoid from SPICE/oops; populate per-body albedo config (Saturn system first).
+2. [#175](https://github.com/SETI/rms-nav/issues/175) -- Populate the per-body *consumed* shape / albedo-variation fields in `config_220` (Saturn system first). *(Ellipsoid radii and pose already come from oops/SPICE.)*
 3. [#173](https://github.com/SETI/rms-nav/issues/173) -- Calibrate confidence-formula alpha coefficients against the library. *(depends on #172, #176)*
 4. [#174](https://github.com/SETI/rms-nav/issues/174) -- Autonomous-nav integration tests + per-image regression baselines.
 
 ### 1C. Navigation statistics & accuracy checkpoint
 
-Run this **as soon as basic navigation is producing metadata, before investing in
-the downstream products (1D-1H)**, so pipeline accuracy is measured early and
-problems are fixed cheaply rather than after building on top of them.
+Run this as soon as basic navigation is producing metadata, before investing in
+the downstream products, so pipeline accuracy is measured early and problems are
+fixed cheaply.
 
 | Issue | Title | Pri |
 |---|---|---|
@@ -88,15 +88,12 @@ problems are fixed cheaply rather than after building on top of them.
 > text+figure report (success/failure + reasons, technique/model usage, V/U
 > offset stats, body/ring usage, cross-technique agreement, and how well the
 > confidence levels predict accuracy -- a direct QA check on the #173
-> calibration). It runs for any partial/full day and any instrument, so it keeps
-> serving every later phase. Cloud-sourced metadata aligns with #108; an early
-> local run does not need to wait for that.
+> calibration). It runs for any partial/full day and any instrument.
 
 ### 1D. Reprojection
 
-| Issue | Title |
-|---|---|
-| [#134](https://github.com/SETI/rms-nav/issues/134) | RingMosaic reprojection mutates oops precision process-globally (concurrency hazard) |
+No outstanding navigation-blocking work for Cassini; the reprojection path is
+functional and feeds the backplane and mosaic stages below.
 
 ### 1E. Backplane generation
 
@@ -104,10 +101,9 @@ problems are fixed cheaply rather than after building on top of them.
 |---|---|---|
 | [#28](https://github.com/SETI/rms-nav/issues/28) | Implement the backplane generator (parent) | TBD |
 | [#55](https://github.com/SETI/rms-nav/issues/55) | Determine final set of backplanes to include | Useful |
-| [#63](https://github.com/SETI/rms-nav/issues/63) | `create_body_backplanes` only handles bodies near planets | TBD |
 | [#54](https://github.com/SETI/rms-nav/issues/54) | Implement backplane cropping | Useful |
 | [#57](https://github.com/SETI/rms-nav/issues/57) | Figure out what to put in the FITS backplane HDUs | Useful |
-| [#77](https://github.com/SETI/rms-nav/issues/77) | Allow optional arguments for backplane creation | Useful |
+| [#77](https://github.com/SETI/rms-nav/issues/77) | Allow optional arguments for backplane creation *(only if #55 needs it)* | Useful |
 
 ### 1F. PDS4 bundle generation (Cassini bundle)
 
@@ -151,11 +147,6 @@ Required for Phase 1: the Cassini pipeline must run as cloud batch jobs.
 | [#108](https://github.com/SETI/rms-nav/issues/108) | Check all CLI programs for logging, cloud operation, `cloud_tasks` | Essential |
 | [#67](https://github.com/SETI/rms-nav/issues/67) | Make PDS4 bundle generation fully cloud aware | Important |
 | [#141](https://github.com/SETI/rms-nav/issues/141) | Dedup CLI driver preamble + cloud_tasks loop; fix dropped `extra_params` | Useful |
-| [#180](https://github.com/SETI/rms-nav/issues/180) | Wire `STATUS_REASON_INFO_TEMPLATE` through every `NavResult.failed` site | Useful |
-| [#181](https://github.com/SETI/rms-nav/issues/181) | Image-degradation classifier classes *(taxonomy needs design first)* | Useful |
-
-> The statistics/report system (#35) lands earlier, at the 1C accuracy
-> checkpoint; cloud-sourced metadata for it aligns with #108 here.
 
 ### 1J. Documentation and tests (Cassini)
 
@@ -163,10 +154,9 @@ Required for Phase 1: the Cassini pipeline must run as cloud batch jobs.
 |---|---|
 | [#93](https://github.com/SETI/rms-nav/issues/93) | Fill in instrument-specific user-guide appendices *(Cassini/COISS portion; currently stubs)* |
 | [#178](https://github.com/SETI/rms-nav/issues/178) | Write missing dev-guide pages: filters, uncertainty, troubleshooting |
-| [#94](https://github.com/SETI/rms-nav/issues/94) | Fill in developer-guide navigation-model pages |
 | [#70](https://github.com/SETI/rms-nav/issues/70) | Describe the supplemental-metadata file format in the User Guide |
 | [#122](https://github.com/SETI/rms-nav/issues/122) | Verify albedo / terminator-sharpness rationale in body-terminator docs |
-| [#129](https://github.com/SETI/rms-nav/issues/129) | Reach zero Sphinx nitpicky warnings and gate in CI |
+| [#129](https://github.com/SETI/rms-nav/issues/129) | Resolve the ~200 Sphinx nitpicky reference warnings, then enable nitpicky (`-n`) in CI *(the `-W` warnings gate already runs)* |
 
 **Phase 1 exit criteria:** an end user can process a real Cassini ISS data set
 end to end -- locally and in the cloud -- and get calibrated offsets, backplanes,
@@ -215,10 +205,17 @@ instrument-specific.
 
 - Extend [#173](https://github.com/SETI/rms-nav/issues/173) with per-instrument
   alpha vectors and a per-mission residual audit once each instrument's library
-  images are in (the calibration design already anticipates this).
+  images are in.
 - Extend [#130](https://github.com/SETI/rms-nav/issues/130) (limiting magnitudes)
-  and [#93](https://github.com/SETI/rms-nav/issues/93) (the remaining
-  instrument appendices) to the other three missions.
+  and [#93](https://github.com/SETI/rms-nav/issues/93) (instrument appendices) to
+  the other three missions.
+
+### 2F. Shared instrument-enablement work
+
+| Issue | Title | Note |
+|---|---|---|
+| [#126](https://github.com/SETI/rms-nav/issues/126) | BodyDiscCorrelateNav rotation pyramid is ~10 min on 1024x1024 | Only bites instruments that fit camera rotation (Galileo SSI, Voyager ISS); Cassini needs no rotation. |
+| [#181](https://github.com/SETI/rms-nav/issues/181) | Add image-degradation classifier classes *(taxonomy needs design first)* | Degradation patterns are largely instrument-specific (Voyager/Galileo). |
 
 ---
 
@@ -233,7 +230,6 @@ Schedule after the multi-instrument pipeline is solid.
 | [#107](https://github.com/SETI/rms-nav/issues/107) | Repo with a backplane reader / example programs |
 | [#34](https://github.com/SETI/rms-nav/issues/34) | Support the PDS4 version of Cassini ISS (when archive is available) |
 | [#84](https://github.com/SETI/rms-nav/issues/84) | Fix simulated ring edges and gaps |
-| [#40](https://github.com/SETI/rms-nav/issues/40) | Add features to simulated images |
 
 ---
 
@@ -259,30 +255,9 @@ Quality work that improves robustness; can proceed alongside the phases above.
 | [#99](https://github.com/SETI/rms-nav/issues/99) | Wire up or delete orphan report_profile.py |
 | [#39](https://github.com/SETI/rms-nav/issues/39) | Improve AttrDict to allow missing attributes |
 | [#92](https://github.com/SETI/rms-nav/issues/92) | Break up requirements into optional dependency groups |
-| [#24](https://github.com/SETI/rms-nav/issues/24) | Remove fuzzy and non-spherical bodies from navigation *(needs rescoping to the current architecture)* |
+| [#24](https://github.com/SETI/rms-nav/issues/24) | Remove fuzzy and non-spherical bodies from navigation |
 
 ---
 
-## Excluded: deferred, distant-future, and minor (off the critical path)
-
-Tracked but intentionally **not** scheduled toward the production goal:
-
-- **Deferred / distant-future:** #23 (body shape models -- genuinely waits on
-  oops gaining non-ellipsoidal/DSK support, which is not expected; the sim's
-  polyhedral shapes exist only to measure how much navigation degrades on
-  non-ellipsoidal bodies, not as a navigation route), #33 (NHLORRI SPICE
-  kernel), #151, #152, #153 (sim calibration layers), #184 (CartographicNav),
-  #187 (Hyperion chaotic-rotator pose, depends on #23), #60 (Titan navigation).
-- **Minor (Priority 5):** #13, #38, #43, #72, #74, #105, #132, #133, #137, #140,
-  #142, #144, #147, #155, #157, #158, #182 (stop-after-features inspection),
-  #183 (polarity-aware RingEdgeNav).
-- **Simulator follow-ups:** #78 (CraterMaker), plus the sim items above.
-- **Closed during triage as out of date** (referenced the removed
-  `NavTechniqueCorrelateAll`): #20, #87, #88.
-
----
-
-*Generated 2026-06-19 from the open SETI/rms-nav issue set; structured around a
-Cassini-first end-to-end pipeline. Pre-rewrite `B-NavTechniqueCorrelateAll`
-issues were triaged (#20, #87, #88 closed; #24 left open for rescoping; #86
-remains valid). The SPICE CK-generation gap was filed as #188.*
+*Generated from the open SETI/rms-nav issue set, structured around a Cassini-first
+end-to-end pipeline.*
