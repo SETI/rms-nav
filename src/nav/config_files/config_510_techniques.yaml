@@ -298,8 +298,15 @@ techniques:
         alpha: 1.0
         divisor: 200.0
         cap_at: 1.0
-      - feature: per_edge_dt_rms_summed
-        alpha: -2.0
+      # Penalise the MEAN per-edge DT residual (px), not the raw sum.  The sum
+      # scales with the number of fused edges, so with a fixed divisor a frame
+      # with more rings was penalised purely for having more rings, driving
+      # confidence to zero on real multi-edge scenes.  The mean is
+      # edge-count independent: alpha -1.0 with the default unit divisor costs
+      # ~1 logit per pixel of mean per-edge residual.  PROVISIONAL magnitude --
+      # the px scale awaits the integration-library calibration sweep.
+      - feature: per_edge_dt_rms_mean
+        alpha: -1.0
     hard_zero_if:
       at_edge: true
     tuning:
@@ -335,12 +342,16 @@ techniques:
       # See ``BodyLimbNav.lm_tikhonov_alpha``.
       lm_tikhonov_alpha: 0.0
       # Final continuous gradient-ridge sub-pixel refinement; see
-      # ``BodyLimbNav.gradient_ridge_refine``.  Held OFF: the ring edges are
-      # symmetric, so the gradient peak already coincides with the geometric
-      # edge and the DT-LM fit is at its floor (~0.016 px sweep median,
-      # already below the 0.02 px target); the continuous refine does not
-      # improve it.  1 enables, 0 disables.
-      gradient_ridge_refine: 0
+      # ``BodyLimbNav.gradient_ridge_refine``.  1 enables, 0 disables.
+      # ON: the binary edge mask quantises detected edges to the integer
+      # pixel grid, so on dense real ring scenes a large fraction of model
+      # vertices land exactly on edge pixels (DT == 0, zero gradient) and the
+      # DT-LM step stalls at the integer coarse-NCC seed.  The continuous
+      # gradient-ridge pass refines against the un-thresholded gradient
+      # magnitude, recovering the sub-pixel offset the quantised DT discards.
+      # (On clean sim scenes the DT-LM already reaches its ~0.016 px floor, so
+      # the refine is a no-op there.)
+      gradient_ridge_refine: 1
       # Rotation-axis ``at_edge`` fraction; see
       # ``BodyDiscCorrelateNav.rotation_at_edge_fraction``.
       rotation_at_edge_fraction: 0.95

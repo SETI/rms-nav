@@ -121,6 +121,7 @@ class RingEdgeNav(NavTechnique):
             'at_edge',
             'total_edge_length_px',
             'per_edge_dt_rms_summed',
+            'per_edge_dt_rms_mean',
             'edge_count',
             'is_rank_1',
         }
@@ -327,9 +328,11 @@ class RingEdgeNav(NavTechnique):
                 sigma_rotation_rad = None
             covariance = np.asarray(covariance, np.float64)
             is_rank_1 = _is_rank_1(covariance) or every_straight
+            per_edge_rms_mean = per_edge_rms_summed / float(max(edge_count, 1))
             diagnostics = RingEdgeDiagnostics(
                 total_edge_length_px=total_edge_length_px,
                 per_edge_dt_rms_summed=per_edge_rms_summed,
+                per_edge_dt_rms_mean=per_edge_rms_mean,
                 edge_count=edge_count,
                 is_rank_1=bool(is_rank_1),
             )
@@ -430,5 +433,6 @@ class _RingEdgeConfidenceContext:
         self.at_edge = at_edge
         self.total_edge_length_px = diagnostics.total_edge_length_px
         self.per_edge_dt_rms_summed = diagnostics.per_edge_dt_rms_summed
+        self.per_edge_dt_rms_mean = diagnostics.per_edge_dt_rms_mean
         self.edge_count = diagnostics.edge_count
         self.is_rank_1 = diagnostics.is_rank_1
