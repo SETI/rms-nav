@@ -8,8 +8,12 @@ as:
 
 The directory is the registry: <scene_class> is the immediate parent directory
 and must be one of the declared classes; <scene_name> must equal the filename
-stem.  The schema is defined and validated by tests/integration/sim_scene.py;
-the structural invariants are enforced by tests/integration/test_sim_scenes.py.
+stem.  The schema is defined and validated by src/nav/sim/scene.py; the
+structural invariants are enforced by tests/integration/test_sim_scenes.py.
+
+The fields are the flat runtime sim_params names the renderer consumes, so a
+validated scene file is the sim_params dict directly (load_sim_scene returns it
+unchanged; schema_version and scene_name are metadata the renderer ignores).
 
 This mirrors the operator-curated image library (images/README.txt) but the
 scenes are generated on demand by the simulator, so they augment -- never
@@ -34,13 +38,22 @@ Fields
   instrument       (str, required)   a sim instrument (coiss_nac, coiss_wac,
                                      coiss_calib_nac, coiss_calib_wac, gossi,
                                      nhlorri, vgiss) or 'generic'
-  image_size_vu    ([int,int], req)  image height/width in pixels
+  size_v, size_u   (int, required)   image height/width in pixels
   random_seed      (int, required)   scene seed (drives all sim randomness)
   exposure_sec     (float, opt)      exposure seconds (default 1.0)
+  offset_v, offset_u (float, opt)    planted pointing offset (px) the navigator
+                                     must recover (default 0.0)
+  offset_rotation_deg (float, opt)   planted boresight roll (deg, default 0.0)
   midtime_utc      (str, optional)   ISO timestamp, informational
+  closest_planet   (str, optional)   ring-model planet (default SATURN)
+  time, ring_epoch (float, opt)      TDB seconds for ring calculations
+  shade_solid_rings (bool, optional) shade solid rings (default false)
   bodies           (list, optional)  per-body params (see below)
   rings            (list, optional)  per-ring params
-  stars            (mapping, opt)    background_count and/or an explicit list
+  stars            (list, optional)  explicit star dicts (name, v, u, vmag, ...)
+  background_stars_num (int, opt)    random background-star count (default 0)
+  background_stars_psf_sigma (float) background-star PSF sigma (px)
+  background_stars_distribution_exponent (float)  background-star brightness slope
   noise            (mapping, opt)    poisson, read_noise_dn, cosmic_ray_rate_per_sec,
                                      missing_data_rate, bloom_length, signal_full_scale_frac
   stray_light      (mapping, opt)    amplitude, direction_deg, model (linear|radial)
@@ -53,8 +66,7 @@ Fields
                                      camera-config change cannot shift the scene.  (The
                                      top-level noise block still wins over
                                      instrument_config.noise for rendering.)
-  ground_truth     (mapping, opt)    planted_offset_dv_px, planted_offset_du_px,
-                                     planted_rotation_deg
+  fit_camera_rotation (bool, opt)    force whether navigation solves a camera roll
 
 Body params follow the renderer: shape_model (ellipsoid | polyhedral_mesh),
 center_v, center_u, axis1, axis2, axis3, illumination_angle, phase_angle, range,
@@ -70,8 +82,8 @@ pose_euler_deg for a pose disagreement (B7 scenario 3).  The override never
 changes the centre, so the predicted body stays at the unshifted position the
 planted offset is measured from.
 
-The planted ground-truth offset is applied as the rendered offset, so a
-navigator predicting the unshifted geometry must recover it (see Phase T4).
+The planted offset_v/offset_u is applied as the rendered offset, so a navigator
+predicting the unshifted geometry must recover it (see Phase T4).
 
 Adding a scene
 --------------

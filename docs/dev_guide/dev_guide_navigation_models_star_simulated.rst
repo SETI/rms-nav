@@ -78,7 +78,7 @@ Configuration
 
 The model consumes no YAML configuration of its own; it reads the rendered star list
 the observation carries on ``sim_star_list``. The per-star geometry comes from the
-scene's ``stars.list`` entries (see :doc:`dev_guide_simulator`), and
+scene's ``stars`` entries (see :doc:`dev_guide_simulator`), and
 the per-image PSF sigma comes from the selected instrument's ``star_psf_sigma`` via the
 renderer.
 

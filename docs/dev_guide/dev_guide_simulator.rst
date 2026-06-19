@@ -169,57 +169,25 @@ A scene can pin or override individual instrument settings with
 
 .. _sim-scene-formats:
 
-Scene formats
-=============
+Scene format
+============
 
-There are two interchangeable serializations of the same parameters.
+A scene is a single YAML file whose fields are the flat runtime ``sim_params``
+names the renderer consumes, so a validated scene file *is* the ``sim_params``
+dict with no translation layer.
 
-**YAML scene catalog** (:mod:`nav.sim.scene`) is the durable test artifact, laid
-out as ``tests/integration/sim_scenes/<scene_class>/<scene_name>.yaml`` (the
-directory is the registry). :func:`nav.sim.scene.load_sim_scene` validates a file
-into a :class:`~nav.sim.scene.SimScene`, and
-:meth:`~nav.sim.scene.SimScene.to_sim_params` maps it to the ``sim_params`` dict
-the renderer consumes. The scene classes (for example
-``algorithmic_invariants``, ``phase_sweep_regular_body``,
+The scene catalog (:mod:`nav.sim.scene`) is the durable test artifact, laid out
+as ``tests/integration/sim_scenes/<scene_class>/<scene_name>.yaml`` (the
+directory is the registry). :func:`nav.sim.scene.load_sim_scene` parses and
+validates a file and returns the flat ``sim_params`` dict the renderer consumes;
+the GUI's "Save Scene (YAML)" / "Load Scene (YAML)" buttons read and write the
+same format via :func:`nav.sim.scene.save_sim_scene`. The scene classes (for
+example ``algorithmic_invariants``, ``phase_sweep_regular_body``,
 ``phase_sweep_irregular_body``, ``range_sweep``, ``noise_sweep``,
 ``multi_body_geometry``, ``regression``) scope what each scene is testing and are
 enforced by the structural test. The scene README at
 ``tests/integration/sim_scenes/README.txt`` documents the schema alongside the
 code.
-
-**GUI JSON** is the ``sim_params`` dict itself, saved by
-``nav_create_simulated_image``. It uses the renderer's flat field names
-directly.
-
-The two differ only in a few field names, because the YAML schema is written for
-the navigation fixture while the JSON is the renderer's own dict:
-
-.. list-table::
-   :widths: 40 40 20
-   :header-rows: 1
-
-   * - YAML scene field
-     - ``sim_params`` / JSON field
-     - Meaning
-   * - ``image_size_vu: [v, u]``
-     - ``size_v``, ``size_u``
-     - Image height and width in pixels.
-   * - ``ground_truth.planted_offset_dv_px`` / ``_du_px``
-     - ``offset_v``, ``offset_u``
-     - Planted pointing offset the navigator must recover.
-   * - ``ground_truth.planted_rotation_deg``
-     - ``offset_rotation_deg``
-     - Planted boresight roll (degrees).
-   * - ``stars.background_count``
-     - ``background_stars_num``
-     - Number of random background stars.
-   * - ``stars.list``
-     - ``stars``
-     - Explicit star list.
-
-All other fields (``instrument``, ``random_seed``, ``exposure_sec``, ``bodies``,
-``rings``, ``noise``, ``stray_light``, ``instrument_config``) carry the same names
-in both.
 
 A complete YAML scene -- a noisy Cassini NAC frame with one irregular mesh body, a
 ring, a couple of stars, and a planted offset the navigator must recover -- reads:
@@ -229,7 +197,8 @@ ring, a couple of stars, and a planted offset the navigator must recover -- read
    schema_version: 1
    scene_name: example_scene
    instrument: coiss_nac
-   image_size_vu: [220, 220]
+   size_v: 220
+   size_u: 220
    random_seed: 42
    exposure_sec: 1.0
    bodies:
@@ -254,22 +223,19 @@ ring, a couple of stars, and a planted offset the navigator must recover -- read
        outer_data: [{mode: 1, a: 98.0, ae: 6.0}]
        shading_distance: 10.0
        range: 1000.0
+   background_stars_num: 40
    stars:
-     background_count: 40
-     list:
-       - {name: S1, v: 30.0, u: 60.0, vmag: 6.0}
-       - {name: S2, v: 180.0, u: 150.0, vmag: 7.5}
+     - {name: S1, v: 30.0, u: 60.0, vmag: 6.0}
+     - {name: S2, v: 180.0, u: 150.0, vmag: 7.5}
    noise:
      poisson: true
      read_noise_dn: 4.0
-   ground_truth:
-     planted_offset_dv_px: 1.43
-     planted_offset_du_px: -0.61
+   offset_v: 1.43
+   offset_u: -0.61
 
-The equivalent GUI JSON is the flat ``sim_params`` dict: ``size_v``/``size_u``
-replace ``image_size_vu``, ``offset_v``/``offset_u`` replace the ground-truth
-offset, ``background_stars_num`` and ``stars`` replace the ``stars`` block, and
-``bodies``, ``rings``, and ``noise`` are unchanged.
+The ``schema_version`` and ``scene_name`` keys are metadata the renderer
+ignores; ``scene_name`` must equal the filename stem. Every other key is a flat
+``sim_params`` field consumed directly by the renderer.
 
 Scene parameter reference
 =========================
@@ -285,6 +251,10 @@ Top-level fields
      - Type
      - Default
      - Meaning
+   * - ``size_v`` / ``size_u``
+     - int
+     - required
+     - Image height and width in pixels.
    * - ``instrument``
      - str
      - ``generic``
@@ -554,31 +524,32 @@ vector, and catalog label; each per-**ring** tab carries the ring's edges and
 shading. The parameters the GUI does not edit are the nested
 ``instrument_config`` overrides, multi-mode ring edges (the renderer reads only
 mode 1), and the absolute ``signal_full_scale_dn`` alias (its fractional form is
-exposed instead). Scenes round-trip through both **Load / Save Scene (YAML)** (the
-catalog format) and the JSON parameter buttons, so a scene rendered in the GUI
-can be saved as a catalog artifact and a catalog scene can be loaded back to
-edit. The GUI is one of the three peers, not the sole control surface; the YAML
-and the Python API are equally authoritative.
+exposed instead). Scenes round-trip through the **Load / Save Scene (YAML)**
+buttons, so a scene rendered in the GUI can be saved as a catalog artifact and a
+catalog scene can be loaded back to edit. The GUI is one peer, not the sole
+control surface; the YAML and the Python API are equally authoritative.
 
 Running navigation on a simulated image
 =======================================
 
 A simulated image is navigated through the same pipeline as a real frame, via the
-``sim`` dataset. With a saved JSON parameter file:
+``sim`` dataset. With a saved YAML scene file:
 
 .. code-block:: bash
 
-   nav_offset sim /path/to/simulated_image.json
+   nav_offset sim /path/to/scene.yaml
 
 The ``sim`` dataset (``DataSetSim``) builds an :class:`~nav.obs.obs_inst_sim.ObsSim`
-that renders the frame and carries the ``sim_params`` on the snapshot. The
+that loads the scene via :func:`nav.sim.scene.load_sim_scene`, renders the frame,
+and carries the ``sim_params`` on the snapshot. (A runtime scene file must still
+satisfy the validator, so its ``scene_name`` must equal the filename stem.) The
 model-selection layer routes a simulated obs to the simulated NavModels --
 ``NavModelBodySimulated``, ``NavModelRingsSimulated``, ``NavModelStarsSimulated``
 -- which build one feature set per body / ring / star field from the scene
 parameters, while the SPICE-backed models decline a simulated obs. From there the
 same techniques run and produce the same ``NavResult``. In tests the scene is
 usually driven directly:
-``ObsSim.from_file(path, sim_params=scene.to_sim_params())``.
+``ObsSim.from_file(path, sim_params=load_sim_scene(path))``.
 
 .. _sim-png-export:
 
