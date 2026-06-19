@@ -52,7 +52,7 @@ bodies.
 
 ## Prerequisites
 
-- Python 3.10 or higher
+- Python 3.11 or higher
 - SPICE toolkit and kernels for planetary data
 - Dependencies listed in `requirements.txt`
 
@@ -165,14 +165,14 @@ nav_mosaic_body coiss_saturn \
 ```
 
 See the
-[Reprojection user guide](https://rms-nav.readthedocs.io/en/latest/user_guide_reprojection.html)
+[Reprojection user guide](https://rms-nav.readthedocs.io/en/latest/user_guide/user_guide_reprojection.html)
 for full option references and more examples.
 
 ### Cloud Tasks variants
 
 Each of the main batch drivers above has a queue-driven counterpart suffixed
 with `_cloud_tasks`, which reads file lists from a
-[cloud_tasks](https://github.com/SETI/rms-cloud_tasks) queue instead of
+[cloud_tasks](https://github.com/SETI/rms-cloud-tasks) queue instead of
 enumerating the dataset locally:
 
 - `nav_offset_cloud_tasks` — navigation offsets
@@ -190,11 +190,11 @@ JSON file for its matching worker via `--output-cloud-tasks-file PATH`. The
 per-feature user guides document the JSON schema each worker expects:
 
 - `nav_offset_cloud_tasks`:
-  [Navigation user guide](https://rms-nav.readthedocs.io/en/latest/user_guide_navigation.html)
+  [Navigation user guide](https://rms-nav.readthedocs.io/en/latest/user_guide/user_guide_navigation.html)
 - `nav_backplanes_cloud_tasks`:
-  [Backplanes user guide](https://rms-nav.readthedocs.io/en/latest/user_guide_backplanes.html)
+  [Backplanes user guide](https://rms-nav.readthedocs.io/en/latest/user_guide/user_guide_backplanes.html)
 - `nav_mosaic_rings_cloud_tasks` / `nav_mosaic_body_cloud_tasks`:
-  [Reprojection user guide](https://rms-nav.readthedocs.io/en/latest/user_guide_reprojection.html)
+  [Reprojection user guide](https://rms-nav.readthedocs.io/en/latest/user_guide/user_guide_reprojection.html)
 
 ## Documentation
 

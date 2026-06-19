@@ -1,6 +1,8 @@
 nav.obs
 =======
 
+.. automodule:: nav.obs
+
 .. automodule:: nav.obs.obs
    :members:
    :undoc-members:
@@ -37,6 +39,11 @@ nav.obs
    :show-inheritance:
 
 .. automodule:: nav.obs.obs_inst_newhorizons_lorri
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: nav.obs.obs_inst_sim
    :members:
    :undoc-members:
    :show-inheritance:

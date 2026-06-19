@@ -8,7 +8,6 @@ provided observation and is not thread-safe. Do not call it from multiple
 threads with the same observation.
 """
 
-import logging
 import math
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -19,10 +18,9 @@ import oops
 import oops.backplane
 from scipy.ndimage import map_coordinates
 
+from nav.config import IMAGE_LOGGER
 from nav.reproj.bodies import BodyMosaicData
 from nav.support.types import NDArrayFloatType
-
-_LOGGING_NAME = __name__
 
 
 @dataclass(frozen=True)
@@ -74,7 +72,7 @@ def create_cartographic_model(
         CartographicModelResult with the model image and resolution ratio,
         or None if the mosaic contains no valid data.
     """
-    logger = logging.getLogger(_LOGGING_NAME + '.create_cartographic_model')
+    logger = IMAGE_LOGGER
 
     if not isinstance(body_name, str):
         raise TypeError(f'body_name must be str, not {type(body_name).__name__}')

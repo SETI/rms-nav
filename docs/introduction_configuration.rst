@@ -10,42 +10,30 @@ effective use of the system.
 Configuration Loading Order
 ============================
 
-The configuration system loads settings in the following order, with later files
-overriding earlier ones:
+RMS-NAV ships with a complete set of built-in defaults, so the system works out
+of the box with no configuration on your part. You customize behavior by layering
+your own settings on top of those defaults. Settings are loaded in the following
+order, with later sources overriding earlier ones for the same key:
 
-1. **Standard Configuration Files**: All YAML files in the
-   ``src/nav/config_files/`` directory are loaded in alphabetical order. These
-   files provide default settings for:
+1. **Built-in defaults**: RMS-NAV bundles a stack of default configuration files
+   that give every setting a sensible value. You do not edit these. (Developers
+   who need to know exactly which files ship and what each one holds should see
+   :doc:`/dev_guide/dev_guide_config_and_static_data`.)
 
-   * ``config_01_general.yaml``: General settings including all logging levels
-   * ``config_02_offset.yaml``: Offset-finding and star refinement parameters
-   * ``config_03_stars.yaml``: Star-model and ring-occlusion parameters
-   * ``config_04_bodies.yaml``: Body (planet/moon) rendering parameters
-   * ``config_05_rings.yaml``: Ring model parameters
-   * ``config_06_titan.yaml``: Titan-specific navigation parameters
-   * ``config_07_bootstrap.yaml``: Bootstrap navigation parameters
-   * ``config_10_satellites.yaml``: Satellite definitions for each planet
-   * ``config_20_jupiter_rings.yaml``: Jupiter ring system parameters
-   * ``config_21_saturn_rings.yaml``: Saturn ring system parameters
-   * ``config_22_uranus_rings.yaml``: Uranus ring system parameters
-   * ``config_23_neptune_rings.yaml``: Neptune ring system parameters
-   * ``config_30_inst_coiss.yaml``: Cassini ISS instrument-specific settings
-   * ``config_31_inst_gossi.yaml``: Galileo SSI instrument-specific settings
-   * ``config_32_inst_nhlorri.yaml``: New Horizons LORRI instrument-specific settings
-   * ``config_33_inst_vgiss.yaml``: Voyager ISS instrument-specific settings
-   * ``config_40_sim.yaml``: Simulated image settings
-   * ``config_90_backplanes.yaml``: Backplane generation settings
-   * ``config_95_pds4.yaml``: PDS4 metadata and export settings for generated
-     products, overrides for PDS4 label templates and mapping of internal fields
-     to PDS4 keys
+2. **User default configuration**: If a file named ``nav_default_config.yaml``
+   exists in the current working directory, it is loaded next. Use it to set
+   personal defaults that apply to all your runs.
 
-2. **User Default Configuration**: If present, the file
-   ``nav_default_config.yaml`` in the current working directory is loaded. This
-   allows you to set personal defaults that apply to all runs.
+3. **Command-line configuration files**: Any files specified with the
+   ``--config-file`` option are loaded in the order given, overriding the
+   built-in defaults and your user defaults.
 
-3. **Command-Line Configuration Files**: Any files specified with the
-   ``--config-file`` option are loaded in the order specified. These provide
-   the highest priority and can override any previous settings.
+4. **Command-line option overrides**: A handful of CLI flags (described under
+   `Command-Line Option Overrides`_ below) override the matching configuration
+   key directly and take precedence over everything above.
+
+You only ever need to specify the settings you want to change; everything else
+falls through to the built-in defaults.
 
 Configuration File Structure
 ============================
@@ -76,9 +64,10 @@ define the same setting, the value from the last file loaded takes precedence.
 Logging Configuration
 ---------------------
 
-All logging levels are set in the ``general`` section of ``config_01_general.yaml``.
-Each key accepts a standard log-level string: ``DEBUG``, ``INFO``, ``WARNING``,
-``ERROR``, or ``CRITICAL``.
+All logging levels live in the ``general`` configuration section. Each key accepts
+a standard log-level string: ``DEBUG``, ``INFO``, ``WARNING``, ``ERROR``, or
+``CRITICAL``. Set them in your ``nav_default_config.yaml`` or a ``--config-file``
+to override the built-in defaults shown below.
 
 **Main logger** (``nav_offset`` -- top-level program events):
 
@@ -106,8 +95,16 @@ an image is being processed):
 
 **Navigation technique loggers**:
 
-* ``general.log_level_nav_correlate_all`` (default: ``INFO``): Logging level for
-  the ``correlate_all`` technique, including star refinement.
+The autonomous-navigation pipeline routes every per-image technique line
+through ``IMAGE_LOGGER``; there is no per-technique log-level knob.  Each
+technique opens a ``with self.logger.open(f'TECHNIQUE: {self.name}')``
+section so the per-image log file delimits each technique's contribution.
+The legacy ``general.log_level_nav_correlate_all`` knob is retained for
+backwards compatibility with any user config files that still set it but
+the autonomous techniques (``BodyDiscCorrelateNav``, ``BodyBlobNav``,
+``BodyLimbNav``, ``BodyTerminatorNav``, ``RingEdgeNav``,
+``RingAnnulusNav``, ``StarUniqueMatchNav``, ``StarRefineNav``,
+``StarFieldFromCatalogNav``) do not consult it.
 
 **Annotation**:
 
@@ -218,7 +215,7 @@ Example: Combining Configuration Methods
 
 The following example demonstrates how different configuration methods interact:
 
-1. Default configuration files in ``src/nav/config_files/`` set
+1. The built-in defaults set
    ``offset.correlation_fft_upsample_factor: 128``
 
 2. User's ``nav_default_config.yaml`` overrides it to ``256``

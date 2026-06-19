@@ -86,10 +86,20 @@ class ObsInst(ABC):
             raise ValueError('Instrument configuration not set')
 
         star_psf_sizes = self._inst_config['star_psf_sizes']
-        for mag in sorted(star_psf_sizes):
+        keys = sorted(star_psf_sizes)
+        if not keys:
+            raise ValueError('star_psf_sizes is empty')
+
+        default_mag = max(keys)
+        selected_mag = default_mag
+        for mag in keys:
             if star.vmag < mag:
-                return tuple(star_psf_sizes[mag])
-        return tuple(star_psf_sizes[mag])  # Default to largest
+                selected_mag = mag
+                break
+
+        seq = star_psf_sizes[selected_mag]
+        assert len(seq) == 2, f'star_psf_sizes[{selected_mag}] must have 2 elements, got {seq!r}'
+        return (int(seq[0]), int(seq[1]))
 
     @abstractmethod
     def star_min_usable_vmag(self) -> float:

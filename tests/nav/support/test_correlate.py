@@ -1,13 +1,18 @@
 """Tests for nav.support.correlate, focused on masked NCC and pyramid navigation."""
 
+from itertools import pairwise
+
 import numpy as np
 import pytest
 
 from nav.support.correlate import (
+    _MAX_PEAK_RATIO,
+    gradient_magnitude,
     masked_ncc,
     navigate_single_scale_kpeaks,
     navigate_with_pyramid_kpeaks,
     nms_topk,
+    peak_to_runner_up_ratio,
 )
 from nav.support.image import pad_top_left
 
@@ -265,6 +270,36 @@ class TestSingleScale:
         )
         assert result['quality'] > 6.0
 
+    def test_no_candidates_result_carries_full_key_set(self) -> None:
+        """When no peaks survive ``max_offset_vu`` the result still has every key.
+
+        Regression: the empty-candidates early-return previously omitted
+        ``peak_val`` and ``rc``, so callers that logged or read those
+        keys (notably ``navigate_with_pyramid_kpeaks``) crashed with a
+        ``KeyError`` whenever the search collapsed.  The contract now
+        matches the populated path exactly.
+        """
+        # Empty image + empty model => no real peak; force the
+        # max_offset_vu window down to (0, 0) so no candidate clears the
+        # window and the early-return branch fires deterministically.
+        image = np.zeros((16, 16), dtype=np.float64)
+        model = np.zeros((16, 16), dtype=np.float64)
+        mask = np.ones((16, 16), dtype=bool)
+        result = navigate_single_scale_kpeaks(
+            image=image,
+            model=model,
+            mask=mask,
+            max_peaks=3,
+            upsample_factor=8,
+            metric='psr',
+            max_offset_vu=(0, 0),
+            logger=None,
+        )
+        for key in ('offset', 'cov', 'sigma_xy', 'quality', 'peak_val', 'rc', 'all_candidates'):
+            assert key in result, f'no-candidates result missing key {key!r}'
+        assert result['all_candidates'] == []
+        assert result['quality'] == -np.inf
+
 
 # =========================================================================
 # Pyramid correlation tests
@@ -422,3 +457,144 @@ class TestMaxOffsetVu:
         dy, dx = result['offset']
         assert dy == pytest.approx(1.0, abs=0.1)
         assert dx == pytest.approx(0.0, abs=0.1)
+
+    def test_pyramid_peak_at_window_edge_is_spurious(self) -> None:
+        """Pyramid result sitting within 1 pixel of the max-offset edge is spurious.
+
+        Reason: a correlation peak at the boundary usually means the true peak
+        is clipped outside the search window, so the reported offset cannot be
+        trusted.
+        """
+        image, model, mask = _make_single_star(image_offset=(2.0, 0.0))
+        result = navigate_with_pyramid_kpeaks(
+            image,
+            model,
+            mask,
+            pyramid_levels=3,
+            max_peaks=5,
+            upsample_factor=16,
+            metric='psr',
+            quality_thresh=0.0,
+            consistency_tol=10.0,
+            max_offset_vu=(3, 10),
+        )
+        assert result['spurious']
+
+
+# =========================================================================
+# Gradient-mode tests
+# =========================================================================
+
+
+class TestGradientMode:
+    """Gradient-mode NCC (``use_gradient=True``) for body-overflows-FOV scenes."""
+
+    def test_gradient_magnitude_highlights_edges(self) -> None:
+        """Gradient magnitude is ~0 on an interior flat region and large at an interior step."""
+        # Check interior only: sobel in 'constant' mode picks up the array-border
+        # as an edge, which is intentional (real images have a hard boundary to
+        # the zero-padded extfov margin); the data_mask used by masked_ncc
+        # excludes those pixels from the correlation at use time.
+        flat = np.full((30, 30), 7.0)
+        g_flat = gradient_magnitude(flat)
+        assert float(g_flat[5:25, 5:25].max()) < 1e-9
+
+        step = np.zeros((30, 30))
+        step[:, 15:] = 1.0
+        g_step = gradient_magnitude(step)
+        # Sobel magnitude at a unit step is 4; check interior of each side stays flat.
+        assert float(g_step[5:25, 14:16].max()) > 0.5
+        assert float(g_step[5:25, 5:10].max()) < 1e-9
+        assert float(g_step[5:25, 20:25].max()) < 1e-9
+
+    def test_pyramid_gradient_converges_on_star_scene(self) -> None:
+        """use_gradient=True still converges to the planted offset on a simple star scene."""
+        image, model, mask = _make_single_star(image_offset=(1.5, -0.5))
+        result = navigate_with_pyramid_kpeaks(
+            image,
+            model,
+            mask,
+            pyramid_levels=3,
+            max_peaks=5,
+            upsample_factor=16,
+            metric='psr',
+            quality_thresh=0.0,
+            consistency_tol=10.0,
+            max_offset_vu=(10, 10),
+            use_gradient=True,
+        )
+        dy, dx = result['offset']
+        assert dy == pytest.approx(1.5, abs=0.3)
+        assert dx == pytest.approx(-0.5, abs=0.3)
+
+
+class TestPyramidTopKPeaks:
+    """``navigate_with_pyramid_kpeaks`` surfaces a sorted ``top_k_peaks`` list."""
+
+    def test_top_k_peaks_present_and_sorted(self) -> None:
+        """The returned dict carries the per-peak telemetry sorted by quality."""
+        image, model, mask = _make_single_star(image_offset=(1.0, 0.0))
+        result = navigate_with_pyramid_kpeaks(
+            image,
+            model,
+            mask,
+            pyramid_levels=3,
+            max_peaks=3,
+            upsample_factor=16,
+            metric='psr',
+            quality_thresh=0.0,
+            consistency_tol=10.0,
+            max_offset_vu=(10, 10),
+        )
+        peaks = result['top_k_peaks']
+        assert isinstance(peaks, list)
+        assert len(peaks) >= 1
+        # First peak quality matches the headline ``quality`` value.
+        assert peaks[0][0] == pytest.approx(result['quality'])
+        # Sorted by quality descending.
+        for prev, cur in pairwise(peaks):
+            assert prev[0] >= cur[0]
+        # Each entry has shape (quality, dv, du).
+        for entry in peaks:
+            assert len(entry) == 3
+
+
+# =========================================================================
+# peak_to_runner_up_ratio
+# =========================================================================
+
+
+def test_peak_to_runner_up_ratio_empty_and_single() -> None:
+    """No peaks -> 0.0; a single surviving peak -> 1.0."""
+    assert peak_to_runner_up_ratio([]) == 0.0
+    assert peak_to_runner_up_ratio([(5.0, 0.0, 0.0)]) == 1.0
+
+
+def test_peak_to_runner_up_ratio_ordinary() -> None:
+    """A clear winner returns winner / runner-up quality."""
+    ratio = peak_to_runner_up_ratio([(8.0, 0.0, 0.0), (2.0, 1.0, 1.0)])
+    assert ratio == pytest.approx(4.0)
+
+
+def test_peak_to_runner_up_ratio_caps_near_zero_runner_up() -> None:
+    """CODE-NAV-022: a near-zero runner-up returns the cap, not ~1e9."""
+    ratio = peak_to_runner_up_ratio([(1.0, 0.0, 0.0), (1e-12, 1.0, 1.0)])
+    assert ratio == _MAX_PEAK_RATIO
+
+
+def test_peak_to_runner_up_ratio_caps_independently_of_winner_magnitude() -> None:
+    """The capped near-zero-runner result no longer scales with the winner."""
+    small = peak_to_runner_up_ratio([(1e-6, 0.0, 0.0), (0.0, 1.0, 1.0)])
+    large = peak_to_runner_up_ratio([(1e3, 0.0, 0.0), (0.0, 1.0, 1.0)])
+    assert small == large == _MAX_PEAK_RATIO
+
+
+def test_peak_to_runner_up_ratio_nonpositive_winner_is_zero() -> None:
+    """A non-positive winner with a non-positive runner-up returns 0.0."""
+    assert peak_to_runner_up_ratio([(0.0, 0.0, 0.0), (-1.0, 1.0, 1.0)]) == 0.0
+
+
+def test_peak_to_runner_up_ratio_clamps_large_ordinary_ratio() -> None:
+    """An ordinary ratio above the cap is clamped to _MAX_PEAK_RATIO."""
+    ratio = peak_to_runner_up_ratio([(1e9, 0.0, 0.0), (1.0, 1.0, 1.0)])
+    assert ratio == _MAX_PEAK_RATIO

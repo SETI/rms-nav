@@ -82,6 +82,8 @@ class DataSetPDS3NewHorizonsLORRI(DataSetPDS3):
             raise ValueError(f'Bad Primary File Spec "{filespec}" - expected "DATA"')
         range_dir = parts[1]
         img_name = parts[2]
+        # The range directory is "ddddddd_ddddddd" (two 7-digit request IDs
+        # joined by '_'), so it is exactly 15 chars with '_' at index 8.
         if len(range_dir) != 15 or range_dir[8] != '_':
             raise ValueError(
                 f'Bad Primary File Spec "{filespec}" - expected "DATA/ddddddd_ddddddd"'

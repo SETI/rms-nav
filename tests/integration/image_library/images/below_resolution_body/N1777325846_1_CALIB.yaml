@@ -1,0 +1,31 @@
+schema_version: 1
+image_id: N1777325846_1_CALIB
+mission: COISS            # COISS | VGISS | GOSSI | NHLORRI
+camera: NAC              # NAC | WAC | SSI | NA | WA | LORRI
+filter_combo: 'CL1+CL2'          # canonicalized: filters sorted, '+'-joined
+image_url: 'pds3://calibrated/COISS_2xxx/COISS_2090/data/1776647595_1777844466/N1777325846_1_CALIB.IMG'
+
+scene_tags:
+  - below_resolution_body              # First tag is the primary class;
+  - mimas                              # must match the directory the
+  - medium_phase                       # sidecar lives in.
+
+ground_truth:
+  offset_dv_px: 6.0841
+  offset_du_px: -1.5310
+  offset_uncertainty_px: 1.0           # 1sigma marginal; tighten
+                                       # for bright stars / sharp limbs.
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-05-01
+  ui_version: 'rms-nav 0.1.dev25'
+  notes: |
+    Small Mimas ~20 px diameter in lower left corner.
+    Slightly overexposed, 72 degree phase angle.
+
+expected:
+  status: success                           # success | failed | conflicted
+  confidence_tier: medium                # high | medium | low | failed
+  primary_technique: BodyBlobNav  # e.g. BodyLimbNav
+  techniques_must_run: [BodyBlobNav]
+  techniques_must_skip: []

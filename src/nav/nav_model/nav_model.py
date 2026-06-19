@@ -1,73 +1,175 @@
-from abc import ABC, abstractmethod
-from typing import Any
+"""NavModel — the base class for predicted-scene generators.
 
+Each NavModel renders the predicted appearance of one part of the scene
+(stars, a body, or rings) given the observation's SPICE prediction.  The
+orchestrator iterates registered NavModel instances and asks each to
+contribute features and annotations to the navigation pipeline:
+
+- ``create_model`` populates the model's internal state and metadata.
+- ``to_features(context)`` returns ``NavFeature`` instances ready for
+  technique consumption.
+- ``to_annotations(context)`` returns an ``Annotations`` collection for
+  the summary PNG.
+
+Concrete NavModel subclasses self-register via ``__init_subclass__``.  The
+module-level ``build_models_for_obs`` function iterates the registry and
+asks each subclass to construct whatever instances apply to the
+observation; this is what the top-level navigation driver uses so it does
+not need to know which scene categories exist.
+
+Every NavModel inherits from ``NavBase`` so it gets the project logger and
+config plumbing automatically.
+"""
+
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Any, ClassVar
+
+from nav.annotation import Annotations
 from nav.config import Config
+from nav.feature.feature import NavFeature
 from nav.obs import ObsSnapshot
 from nav.support.nav_base import NavBase
 
-from .nav_model_result import NavModelResult
+if TYPE_CHECKING:  # pragma: no cover - typing-only import
+    from nav.nav_orchestrator.nav_context import NavContext
+
+__all__ = ['NavModel', 'build_models_for_obs']
 
 
-class NavModel(ABC, NavBase):
-    """Base class for navigation models used to generate synthetic images."""
+class NavModel(NavBase, ABC):
+    """Base class for predicted-scene generators.
+
+    Class attributes:
+        _registry: List of every concrete subclass discovered at import
+            time.  Iterated by ``build_models_for_obs`` to construct the
+            per-image NavModel set.
+
+    Parameters:
+        name: The model's name (e.g. ``'stars'``, ``'body:MIMAS'``,
+            ``'rings:SATURN'``).  Used as the lookup key in the
+            orchestrator's ``model_metadata`` dict.
+        obs: Observation snapshot the model is built against.
+        config: Optional ``Config`` override (defaults to ``DEFAULT_CONFIG``).
+    """
+
+    _registry: ClassVar[list[type[NavModel]]] = []
+    _abstract: ClassVar[bool] = True
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Auto-register concrete subclasses.
+
+        Subclasses that exist only as shared bases (annotation helpers,
+        for example) opt out by setting ``_abstract: ClassVar[bool] =
+        True`` in the class body.
+        """
+        super().__init_subclass__(**kwargs)
+        if not cls.__dict__.get('_abstract', False):
+            NavModel._registry.append(cls)
 
     def __init__(self, name: str, obs: ObsSnapshot, *, config: Config | None = None) -> None:
-        """Initializes a navigation model with observation data.
-
-        Parameters:
-            name: The name of the model.
-            obs: Observation snapshot containing image and metadata.
-            config: Configuration object to use. If None, uses DEFAULT_CONFIG.
-        """
-
         super().__init__(config=config)
-
-        # The name of the model
         self._name = name
-
-        # The snapshot describing the observation the model is based on
         self._obs = obs
-
-        # Metadata describing the model and how it was computed
         self._metadata: dict[str, Any] = {}
-
-        # List of results produced by this model (one or more NavModelResult instances)
-        self._models: list[NavModelResult] = []
 
     @property
     def name(self) -> str:
-        """Returns the name of the model."""
+        """The model's name."""
         return self._name
 
     @property
     def obs(self) -> ObsSnapshot:
-        """Returns the observation snapshot associated with this model."""
+        """The observation snapshot this model is built against."""
         return self._obs
 
     @property
     def metadata(self) -> dict[str, Any]:
-        """Returns the metadata dictionary associated with this model."""
+        """Per-model diagnostic dict; populated during ``create_model``."""
         return self._metadata
 
-    @property
-    def models(self) -> list[NavModelResult]:
-        """Returns the list of results produced by this model."""
-        return self._models
+    @classmethod
+    def instances_for_obs(cls, obs: ObsSnapshot) -> list[NavModel]:
+        """Return concrete NavModel instances applicable to ``obs``.
 
-    @abstractmethod
-    def create_model(
-        self,
-        *,
-        always_create_model: bool = False,
-        never_create_model: bool = False,
-        create_annotations: bool = True,
-    ) -> None:
-        """Creates the internal model representation for a navigation model.
+        Default returns ``[]``.  Subclasses that auto-instantiate from an
+        observation (stars, body, rings) override this to construct the
+        appropriate set of instances — typically one per body in FOV, one
+        per planet with visible rings, one stars model.
+
+        Subclasses that require operator-supplied parameters (simulated
+        models populated from GUI JSON) inherit the default empty list;
+        the caller that uses them constructs them directly.
 
         Parameters:
-            always_create_model: If True, creates a model even if won't have useful contents.
-            never_create_model: If True, only creates metadata without generating a model or
-                annotations.
-            create_annotations: If True, creates text annotations for the model.
+            obs: Observation snapshot to inspect.
+
+        Returns:
+            Zero or more NavModel instances.
         """
-        ...
+        del obs
+        return []
+
+    @abstractmethod
+    def create_model(self) -> None:
+        """Populate the model's internal state and ``metadata``.
+
+        Called once per image before ``to_features`` or ``to_annotations``.
+        Implementations evaluate the SPICE prediction, render any required
+        templates, and populate ``self._metadata`` with diagnostic
+        information.
+        """
+
+    @abstractmethod
+    def to_features(self, context: NavContext) -> list[NavFeature]:
+        """Return navigation-ready features for this model.
+
+        Called after ``create_model``.  Implementations build per-element
+        ``NavFeature`` instances (stars, body limbs, ring edges) and assign
+        each its preferred filter, position covariance, and reliability.
+
+        Parameters:
+            context: Per-image ``NavContext`` carrying global statistics.
+
+        Returns:
+            List of ``NavFeature`` instances; may be empty if no usable
+            features are present in this scene.
+        """
+
+    @abstractmethod
+    def to_annotations(self, context: NavContext) -> Annotations:
+        """Return a collection of annotations describing the predicted scene.
+
+        Called after ``create_model``.  Annotations summarize what the
+        model predicts is visible in the image; they end up on the summary
+        PNG regardless of whether the features they describe end up gated
+        out or unused by techniques.
+
+        Parameters:
+            context: Per-image ``NavContext``.
+
+        Returns:
+            ``Annotations`` collection (possibly empty).
+        """
+
+
+def build_models_for_obs(obs: ObsSnapshot) -> list[NavModel]:
+    """Construct every NavModel applicable to ``obs``.
+
+    Iterates ``NavModel._registry`` and lets each registered concrete
+    subclass build whatever instances apply.  The top-level navigation
+    driver uses this so the choice of which scene categories are
+    represented (stars, body, rings, ...) lives entirely inside the
+    NavModel subclasses, not in the driver.
+
+    Parameters:
+        obs: Observation snapshot.
+
+    Returns:
+        Flat list of NavModel instances ready for the orchestrator.
+    """
+    out: list[NavModel] = []
+    for cls in NavModel._registry:
+        out.extend(cls.instances_for_obs(obs))
+    return out

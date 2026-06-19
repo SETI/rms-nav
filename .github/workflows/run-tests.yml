@@ -4,7 +4,6 @@ run-name: Run Tests triggered by ${{ github.ref_type }} ${{ github.ref_name }} o
 on:
   workflow_dispatch:
   pull_request:
-    branches: [ main ]
   push:
     branches: [ main ]
   schedule:
@@ -53,7 +52,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest]
-        python-version: ['3.10', '3.11', '3.12', '3.13']
+        python-version: ['3.11', '3.12', '3.13', '3.14']
       fail-fast: false
     permissions:
       contents: read
@@ -88,15 +87,19 @@ jobs:
           # loadfile keeps each test file on one xdist worker; PyQt6 + default load
           # scheduling has caused worker crashes when tests from the same file ran
           # in different processes.
-          python -m pytest --cov -n auto --dist=loadfile
+          # ``-m "not integration"`` skips the operator-curated image-library
+          # regression tests; those rely on real PDS3 holdings + SPICE kernels
+          # and are slow / flaky in CI.  Run the integration suite locally
+          # against a populated $PDS3_HOLDINGS_DIR before merging.
+          python -m pytest --cov --cov-report=xml -n auto --dist=loadfile -m "not integration"
 
       - name: Print coverage report
         run: |
           coverage report -m
 
       - name: Upload coverage report to codecov
-        uses: codecov/codecov-action@v5
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13'
+        uses: codecov/codecov-action@v6
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13' &&!github.event.pull_request.head.repo.fork
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true

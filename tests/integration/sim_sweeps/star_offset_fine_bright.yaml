@@ -1,0 +1,11 @@
+sweep_name: star_offset_fine_bright
+# Dense sub-pixel offsets on a BRIGHT star field, pinned to the field matcher.
+# Counterpart to ``star_offset_fine`` (dim stars): here the stars are well above
+# the PSF-refine integrated-SNR crossover, so the technique keeps the moment
+# centroid (whose noise has fallen below the PSF fit's sub-pixel-phase bias
+# floor) and recovers each fractional offset to a few thousandths of a pixel --
+# the most accurate of any technique in the high-SNR regime.
+base_scene: algorithmic_invariants/planted_offset_star_field_bright.yaml
+parameters: [offset_v]
+values: [0.0, 0.05, 0.1, 0.137, 0.2, 0.25, 0.31, 0.382, 0.45, 0.5, 0.55, 0.611, 0.667, 0.7, 0.75, 0.823, 0.9, 0.95, 1.0, 1.25, 1.5, 1.618, 1.75]
+technique: StarFieldFromCatalogNav

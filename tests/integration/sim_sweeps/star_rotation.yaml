@@ -1,0 +1,9 @@
+sweep_name: star_rotation
+# Star-field sensitivity to a planted camera roll, spanning the separability floor
+# into the working window.  Below ~1 deg the field matcher cannot separate a small
+# roll from a translation and the recovered roll collapses toward zero; in the
+# 1-2 deg window the similarity fit recovers it to a few hundredths of a degree;
+# above ~2-3 deg the outer stars leave the matcher's inlier tolerance.
+base_scene: algorithmic_invariants/planted_rotation_star_field.yaml
+parameters: [offset_rotation_deg]
+values: [0.5, 1.0, 1.5, 2.0, -1.5, -2.0]

@@ -70,6 +70,7 @@ instance/
 
 # Sphinx documentation
 docs/_build/
+docs/_linkcheck/
 
 # PyBuilder
 .pybuilder/
@@ -166,5 +167,10 @@ csmithing/
 prof/
 _work/
 **/_version.py
-nav_default_config.yaml
+# Local per-run nav config files kept in the repo root (not part of the package)
+/nav_*_config.yaml
 uv.lock
+tests/integration/sim_sweeps/results/
+
+# convenience symlink to .venv (local only)
+/venv

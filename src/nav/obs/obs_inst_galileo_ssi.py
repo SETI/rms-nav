@@ -45,6 +45,11 @@ class ObsGalileoSSI(ObsSnapshotInst):
         logger = IMAGE_LOGGER
 
         logger.debug(f'Reading Galileo SSI image {path}')
+        # Galileo SSI navigates in raw DN: there is no I/F-calibrated SSI
+        # product and there never will be.  The navigation pipeline treats
+        # image brightness scale-invariantly (NCC correlation, image-derived
+        # MAD noise thresholds, magnitude-based star gate), so no photometric
+        # calibration is required here.
         obs = oops.hosts.galileo.ssi.from_file(path, full_fov=True)
         fc_path = FCPath(path)
         obs.abspath = cast(Path, fc_path.get_local_path()).absolute()
@@ -68,6 +73,9 @@ class ObsGalileoSSI(ObsSnapshotInst):
     def star_min_usable_vmag(self) -> float:
         """Returns the minimum usable magnitude for stars in this observation.
 
+        Mirrors the Cassini ISS reference implementation, which imposes no
+        bright-end cutoff (saturation of bright stars is handled elsewhere).
+
         Returns:
             The minimum usable magnitude for stars in this observation.
         """
@@ -76,10 +84,30 @@ class ObsGalileoSSI(ObsSnapshotInst):
     def star_max_usable_vmag(self) -> float:
         """Returns the maximum usable magnitude for stars in this observation.
 
+        The limiting magnitude follows the Cassini Pogson-ratio form,
+
+            star_max_usable_vmag(texp) = anchor + log(texp) / log(2.512)
+
+        where ``anchor`` is the limiting magnitude at a 1 s exposure (each
+        2.512x increase in exposure buys +1 mag of depth).
+
+        The anchor is scaled from the Cassini NAC anchor (10.5 mag at 1 s,
+        aperture D = 0.19 m) by collecting-area.  Galileo SSI uses a CCD, so
+        no detector-sensitivity penalty is applied.  These are nominal optics
+        values; the term is approximate and pending calibration against real
+        Galileo star fields.
+
+            anchor = 10.5 + 5*log10(0.176/0.19) (CCD) ~= 10.3
+
         Returns:
             The maximum usable magnitude for stars in this observation.
         """
-        return 10  # TODO
+
+        # Anchor (limiting mag at texp = 1 s) derived above; rounded to 0.1.
+        anchor = 10.3
+        if self.texp <= 0:
+            return anchor
+        return cast(float, anchor + np.log(self.texp) / np.log(2.512))
 
     def get_public_metadata(self) -> dict[str, Any]:
         """Returns the public metadata for Galileo SSI.

@@ -32,7 +32,7 @@ from nav.config import (
 from nav.dataset import dataset_name_to_class, dataset_name_to_inst_name, dataset_names
 from nav.dataset.dataset import DataSet
 from nav.navigate_image_files import navigate_image_files
-from nav.obs import inst_name_to_obs_class
+from nav.obs import ObsSnapshotInst, inst_name_to_obs_class
 from nav.support.file import json_as_string
 from nav.support.misc import log_run_environment
 
@@ -119,6 +119,18 @@ def parse_args(command_list: list[str]) -> argparse.Namespace:
         type=str,
         default=None,
         help='Comma-separated list of navigation technique names to use',
+    )
+    nav_group.add_argument(
+        '--manual',
+        action='store_true',
+        default=False,
+        help="""Open the interactive manual-navigation dialog instead of running
+        the autonomous pipeline.  Requires the selection to resolve to exactly
+        one image.  On accept, the chosen offset is printed to stdout and the
+        same _metadata.json and _summary.png files the autonomous pipeline
+        writes are produced under nav_results_root (suppress with
+        --no-write-output-files); use the dialog's "Save as Library Entry..."
+        button to write a sidecar.""",
     )
 
     # Arguments about output file generation
@@ -214,6 +226,105 @@ def exit_processing() -> None:
     sys.exit(0)
 
 
+def _run_manual_pass(
+    obs_class: type['ObsSnapshotInst'],
+    arguments: argparse.Namespace,
+    nav_results_root: FCPath,
+    *,
+    write_output_files: bool = True,
+) -> None:
+    """Open the manual-navigation dialog on a single selected image.
+
+    Requires the dataset selection arguments to resolve to exactly one
+    one-image batch.  On accept, the chosen offset is printed to stdout
+    and the same ``_metadata.json`` and ``_summary.png`` files the
+    autonomous pipeline writes are produced under ``nav_results_root``;
+    set ``write_output_files=False`` to skip the writes.  The dialog's
+    "Save as Library Entry..." button independently writes a sidecar to
+    the image library when the operator wants one.
+
+    The orchestrator's per-image log lines (image classifier verdict,
+    NavModel build, feature extraction, manual-nav skip warnings) are
+    routed through the same per-image ``IMAGE_LOGGER.open(...)`` context
+    that ``navigate_image_files`` uses, so the per-image stdout / file
+    handlers are attached during prepare + dialog.
+    """
+    from datetime import datetime
+    from itertools import islice
+
+    from nav.config import IMAGE_LOGGER, image_log_handlers
+    from nav.nav_technique import run_manual_nav
+    from nav.navigate_image_files import build_metadata_from_result, write_summary_png
+
+    assert DATASET is not None
+    # Bound the dataset traversal to at most six items: we only need to
+    # distinguish the {0, 1, >1} cases and to surface up to five filespecs
+    # in the multi-match diagnostic.  Larger datasets used to scan the
+    # whole tree just to print a count.
+    selected_preview = list(islice(DATASET.yield_image_files_from_arguments(arguments), 6))
+    if not selected_preview:
+        MAIN_LOGGER.error('No images matched the selection arguments')
+        sys.exit(1)
+    if len(selected_preview) > 1:
+        names = ', '.join(b.image_files[0].image_file_url.as_posix() for b in selected_preview[:5])
+        MAIN_LOGGER.error(
+            '--manual requires exactly one image; selection matched at least %d '
+            '(first few: %s).  Tighten the selection flags.',
+            len(selected_preview),
+            names,
+        )
+        sys.exit(1)
+
+    image_files = selected_preview[0]
+    if len(image_files.image_files) != 1:
+        MAIN_LOGGER.error(
+            '--manual requires a one-image batch; got %d.', len(image_files.image_files)
+        )
+        sys.exit(1)
+
+    image_file = image_files.image_files[0]
+    image_url = image_file.image_file_url
+    image_path = image_file.image_file_path.absolute()
+    image_name = image_path.name
+    extra_params = image_file.extra_params
+    public_metadata_file = nav_results_root / (image_file.results_path_stub + '_metadata.json')
+    summary_png_file = nav_results_root / (image_file.results_path_stub + '_summary.png')
+    MAIN_LOGGER.info('Manual nav: loading image %s', image_url.as_posix())
+
+    timestamp = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
+    image_log_path = (
+        nav_results_root / 'logs' / (image_file.results_path_stub + '_' + timestamp + '.log')
+    )
+    local_handlers = image_log_handlers(image_log_path, arguments, DEFAULT_CONFIG)
+
+    try:
+        with IMAGE_LOGGER.open(str(image_url), handler=local_handlers):
+            obs = cast(ObsSnapshotInst, obs_class.from_file(image_url, **extra_params))
+            result = run_manual_nav(obs, config=DEFAULT_CONFIG)
+            if result is None:
+                # ``run_manual_nav`` already logged the precise reason
+                # (no renderable features, empty composed overlay, or
+                # operator cancelled).  No metadata or PNG is written.
+                sys.exit(2)
+
+            assert result.offset_px is not None  # status='success' guarantees offset
+            dv, du = result.offset_px
+            IMAGE_LOGGER.info('Manual nav: offset_dv_px=%.4f, offset_du_px=%.4f', dv, du)
+            if write_output_files:
+                metadata = build_metadata_from_result(result, image_path, image_name)
+                IMAGE_LOGGER.info('Writing metadata to %s', public_metadata_file)
+                public_metadata_file.write_text(json_as_string(metadata))
+                write_summary_png(obs, result, summary_png_file, IMAGE_LOGGER)
+            MAIN_LOGGER.info('Wrote log to %s', image_log_path)
+    finally:
+        for handler in local_handlers:
+            handler.close()
+    # The dv / du print statements are the CLI's machine-parsable contract;
+    # they go to stdout regardless of the per-image log routing.
+    print(f'offset_dv_px={dv:.4f}')
+    print(f'offset_du_px={du:.4f}')
+
+
 ###############################################################################
 #
 # MAIN
@@ -269,6 +380,15 @@ def main() -> None:
     )
 
     assert DATASET is not None  # just for type checking
+
+    if arguments.manual:
+        _run_manual_pass(
+            obs_class,
+            arguments,
+            nav_results_root,
+            write_output_files=not arguments.no_write_output_files,
+        )
+        sys.exit(0)
 
     if arguments.output_cloud_tasks_file:
         task_arguments = {

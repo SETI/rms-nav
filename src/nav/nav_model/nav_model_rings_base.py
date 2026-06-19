@@ -37,6 +37,8 @@ class NavModelRingsBase(NavModel):
     Anti-aliasing math is in ``nav.nav_model.rings.ring_math``.
     """
 
+    _abstract = True
+
     def _create_edge_annotations(
         self,
         obs: oops.Observation,

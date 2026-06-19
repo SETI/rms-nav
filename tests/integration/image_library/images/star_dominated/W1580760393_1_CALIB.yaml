@@ -1,0 +1,31 @@
+schema_version: 1
+image_id: W1580760393_1_CALIB
+mission: COISS            # COISS | VGISS | GOSSI | NHLORRI
+camera: WAC              # NAC | WAC | SSI | NA | WA | LORRI
+filter_combo: 'CL1+CL2'          # canonicalized: filters sorted, '+'-joined
+image_url: 'pds3://calibrated/COISS_2xxx/COISS_2041/data/1580756433_1580830157/W1580760393_1_CALIB.IMG'
+
+scene_tags:
+  - star_dominated                     # First tag is the primary class;
+                                       # must match the directory the
+                                       # sidecar lives in.
+
+ground_truth:
+  offset_dv_px: -2.6792
+  offset_du_px: -3.6839
+  offset_uncertainty_px: 1.0           # 1sigma marginal; tighten
+                                       # for bright stars / sharp limbs.
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-04-30
+  ui_version: 'rms-nav 0.1.dev25'
+  notes: |
+    Dense star field in FOV.
+    CLEAR filter.
+
+expected:
+  status: failed                           # success | failed | conflicted
+  confidence_tier: failed                # high | medium | low | failed
+  primary_technique: StarFieldFromCatalogNav  # e.g. BodyLimbNav
+  techniques_must_run: [StarFieldFromCatalogNav]
+  techniques_must_skip: []

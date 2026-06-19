@@ -204,16 +204,9 @@ def main_summary() -> None:
     command_list = sys.argv[2:]  # Skip 'summary'
     arguments = parse_args_summary(command_list)
 
-    # Read configuration files
-    DEFAULT_CONFIG.read_config()
-    if arguments.config_file:
-        for config_file in arguments.config_file:
-            DEFAULT_CONFIG.update_config(config_file)
-    else:
-        try:
-            DEFAULT_CONFIG.update_config('nav_default_config.yaml')
-        except FileNotFoundError:
-            pass
+    # Read configuration files via the shared loader (single source of truth
+    # for config / CLI / env precedence), matching main_labels.
+    load_default_and_user_config(arguments, DEFAULT_CONFIG)
 
     bundle_results_root_str = get_pds4_bundle_results_root(arguments, DEFAULT_CONFIG)
     bundle_results_root = FileCache(None).new_path(bundle_results_root_str)

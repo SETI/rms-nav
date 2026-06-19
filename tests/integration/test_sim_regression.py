@@ -1,0 +1,67 @@
+"""Fast regression tests for specific navigation defects surfaced by the sweeps.
+
+Each test pins the affected technique on one dedicated scene under
+``sim_scenes/regression/`` and asserts the correct behaviour, so the defect is
+guarded in the normal pytest run without executing the full (slow,
+runner-only) sweep suite. These tests are in-process and unmarked, so they run in
+the default suite.
+"""
+
+import math
+from pathlib import Path
+
+from nav.nav_model import build_models_for_obs
+from nav.nav_orchestrator import NavOrchestrator
+from nav.obs.obs_inst_sim import ObsSim
+from nav.sim.scene import load_sim_scene
+
+_REGRESSION_DIR = Path(__file__).parent / 'sim_scenes' / 'regression'
+
+# A well-resolved disc must recover a whole-pixel offset to a small fraction of a
+# pixel.  The correlator upsamples to 1/128 px and reaches that on raw intensity,
+# so 0.1 px is a generous bound that the correct behaviour clears comfortably.
+_DISC_SUBPIXEL_TOLERANCE_PX = 0.1
+# A star field must recover a zero offset; the moment centroid clears 0.1 px today
+# and the PSF-fit refinement tightens it further.
+_STAR_ZERO_OFFSET_TOLERANCE_PX = 0.1
+
+
+def _technique_offset_error(scene_name: str, technique: str) -> float:
+    """Pin one technique on a regression scene; return its recovered-offset error."""
+    scene = load_sim_scene(_REGRESSION_DIR / f'{scene_name}.yaml')
+    obs = ObsSim.from_file('/tmp/regression.yaml', sim_params=scene)
+    result = NavOrchestrator(
+        build_models_for_obs(obs), only_models='*', only_techniques=technique
+    ).navigate(obs)
+    pinned = next((t for t in result.per_technique if t.technique_name == technique), None)
+    assert pinned is not None
+    assert not pinned.spurious
+    assert pinned.offset_px is not None
+    return math.hypot(
+        pinned.offset_px[0] - scene['offset_v'],
+        pinned.offset_px[1] - scene['offset_u'],
+    )
+
+
+def test_disc_recovers_whole_pixel_offset() -> None:
+    """The disc correlation recovers a whole-pixel offset to within a fraction of a pixel.
+
+    Guards the gradient-magnitude NCC sub-pixel bias: the integer peak is found on
+    the gradient surfaces but the sub-pixel offset is refined on raw intensity, so
+    a whole-pixel offset no longer carries the ~0.3 px-per-axis rectification bias.
+    """
+    assert _technique_offset_error('disc_subpixel_offset', 'BodyDiscCorrelateNav') < (
+        _DISC_SUBPIXEL_TOLERANCE_PX
+    )
+
+
+def test_star_field_recovers_zero_offset() -> None:
+    """The star field recovers a zero offset, where the prediction sits on each star.
+
+    Guards the star reliability-gate defect: the model no longer gates a star on
+    the saturation / cosmic-ray mask at its predicted position, so a sharp star
+    flagged by the cosmic-ray detector is not killed when the offset is near zero.
+    """
+    assert _technique_offset_error('star_zero_offset', 'StarFieldFromCatalogNav') < (
+        _STAR_ZERO_OFFSET_TOLERANCE_PX
+    )

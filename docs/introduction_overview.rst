@@ -64,7 +64,8 @@ Navigation Phase
   offsets by correlating observed features with theoretical models.
 
 * ``nav_create_simulated_image`` - Create simulated images with stars, bodies,
-  and rings for testing navigation algorithms.
+  and rings, used internally to test and validate the navigation pipeline (see
+  the developer guide's :doc:`/dev_guide/dev_guide_simulator` chapter).
 
 Backplanes Phase
 ----------------
@@ -98,7 +99,7 @@ distributed processing:
   of ring and body mosaic generation. A single worker process handles both
   ring and body tasks; the mode is encoded per-task in the task payload.
   (Mosaic combination remains a single-node step; see
-  :doc:`user_guide_reprojection`.)
+  :doc:`/user_guide/user_guide_reprojection`.)
 
 These cloud tasks variants read task payloads from a queue and process batches
 of files, making them suitable for large-scale processing in cloud

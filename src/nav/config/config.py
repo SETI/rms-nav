@@ -16,6 +16,58 @@ from ruamel.yaml import YAML
 from nav.support.attrdict import AttrDict
 
 
+def _strip_underscore_keys(value: Any) -> Any:
+    """Recursively drop mapping keys whose name starts with ``_``.
+
+    Used by :meth:`Config._load_yaml` to remove documentation-only
+    ``_sources`` blocks before merging.  Lists are walked element-wise;
+    scalars pass through unchanged.
+
+    Parameters:
+        value: A YAML-parsed value (mapping, list, or scalar).
+
+    Returns:
+        ``value`` with every underscore-prefixed mapping key removed.
+    """
+    if isinstance(value, dict):
+        return {
+            k: _strip_underscore_keys(v)
+            for k, v in value.items()
+            if not (isinstance(k, str) and k.startswith('_'))
+        }
+    if isinstance(value, list):
+        return [_strip_underscore_keys(v) for v in value]
+    return value
+
+
+def _deep_merge(base: dict[Any, Any], overlay: dict[Any, Any]) -> dict[Any, Any]:
+    """Recursively merge ``overlay`` into ``base``, returning a new mapping.
+
+    When a key is present in both mappings and both values are dictionaries,
+    the values are merged key-by-key so sibling keys in ``base`` are
+    preserved.  For any other case (one side is not a mapping, or the key is
+    new) the ``overlay`` value replaces the ``base`` value; lists and scalars
+    are never merged element-wise.
+
+    Parameters:
+        base: The starting mapping (e.g. bundled defaults).
+        overlay: The mapping whose values take precedence at each leaf.
+
+    Returns:
+        A new ``dict`` containing the deep-merged result.  ``base`` and
+        ``overlay`` are not mutated.
+    """
+
+    merged: dict[Any, Any] = dict(base)
+    for key, overlay_value in overlay.items():
+        base_value = merged.get(key)
+        if isinstance(base_value, dict) and isinstance(overlay_value, dict):
+            merged[key] = _deep_merge(base_value, overlay_value)
+        else:
+            merged[key] = overlay_value
+    return merged
+
+
 def _as_str_list(value: Any, *, location: str) -> list[str]:
     """Coerce a YAML list value to ``list[str]``.
 
@@ -51,10 +103,12 @@ class Config:
         """Initializes a new Config instance with empty configuration containers."""
 
         self._config_dict: dict[str, Any] = {}
+        self._category_cache: dict[str, AttrDict] = {}
         self._config_environment: dict[str, Any] = AttrDict({})
         self._config_general: dict[str, Any] = AttrDict({})
         self._config_offset: dict[str, Any] = AttrDict({})
         self._config_bodies: dict[str, Any] = AttrDict({})
+        self._config_body_shape: dict[str, Any] = AttrDict({})
         self._config_rings: dict[str, Any] = AttrDict({})
         self._config_stars: dict[str, Any] = AttrDict({})
         self._config_titan: dict[str, Any] = AttrDict({})
@@ -83,10 +137,15 @@ class Config:
         Converts dictionary sections to AttrDict instances for convenient attribute-style access.
         """
 
+        # The config was (re)loaded; drop any cached per-category AttrDicts so
+        # category() rebuilds them from the fresh dict (mirrors the named
+        # section properties below being reassigned here).
+        self._category_cache = {}
         self._config_environment = AttrDict(self._config_dict.get('environment', {}))
         self._config_general = AttrDict(self._config_dict.get('general', {}))
         self._config_offset = AttrDict(self._config_dict.get('offset', {}))
         self._config_bodies = AttrDict(self._config_dict.get('bodies', {}))
+        self._config_body_shape = AttrDict(self._config_dict.get('body_shape', {}))
         self._config_rings = AttrDict(self._config_dict.get('rings', {}))
         self._config_stars = AttrDict(self._config_dict.get('stars', {}))
         self._config_titan = AttrDict(self._config_dict.get('titan', {}))
@@ -95,14 +154,25 @@ class Config:
         self._config_pds4 = AttrDict(self._config_dict.get('pds4', {}))
 
     def _load_yaml(self, config_path: str | Path) -> dict[str, Any]:
-        """Loads a YAML file and returns a dictionary mapping."""
+        """Loads a YAML file and returns a dictionary mapping.
+
+        Documentation-only ``_sources`` blocks (and any other top-level or
+        nested key that starts with an underscore) are stripped at load
+        time so citations can live alongside values for human review
+        without bloating the parsed config.
+        """
 
         yaml = YAML(typ='safe')
         with open(config_path, encoding='utf-8') as f:
             loaded = yaml.load(f) or {}
         if not isinstance(loaded, dict):
             raise ValueError(f'Config "{config_path}" did not parse to a dictionary mapping')
-        return loaded
+        stripped = _strip_underscore_keys(loaded)
+        # ``_strip_underscore_keys`` returns ``Any`` because it walks
+        # arbitrary YAML; the top-level shape is guaranteed dict because
+        # ``loaded`` was checked above.
+        assert isinstance(stripped, dict)
+        return stripped
 
     def read_config(self, config_path: str | Path | None = None, reread: bool = False) -> None:
         """Reads configuration from the specified YAML file.
@@ -111,6 +181,11 @@ class Config:
             config_path: Path to the configuration file. If None, uses the default
                 config files.
             reread: Whether to reread the configuration file if it has already been read.
+
+        Raises:
+            ValueError: If any registered NavTechnique's confidence spec
+                references an attribute the technique does not declare.
+                Validation runs once per ``read_config`` invocation.
         """
 
         if not reread and self._config_dict:
@@ -118,15 +193,74 @@ class Config:
 
         if config_path is None:
             config_dir = Path(__file__).resolve().parent.parent / 'config_files'
+            # The no-path branch always rebuilds from the full config_files
+            # glob, so start from an empty dict.  On a reread this ensures keys
+            # removed from the YAML files since the previous load do not survive
+            # (update_config merges *into* the dict, so a stale dict would union
+            # old and new keys rather than producing a clean reload).
+            self._config_dict = {}
             for filename in sorted(config_dir.glob('*.yaml')):
                 self.update_config(filename, read_default=False)
+            self._validate_registered_techniques()
             return
 
         self._config_dict = self._load_yaml(config_path)
         self._update_attrdicts()
+        self._validate_registered_techniques()
+
+    def _validate_registered_techniques(self) -> None:
+        """Load + validate every registered NavTechnique's confidence spec.
+
+        Builds each technique's :class:`ConfidenceSpec` from the
+        ``techniques.<technique_name>`` block in
+        ``config_510_techniques.yaml`` and assigns it to the class
+        attribute, then asserts every term references an attribute the
+        technique has declared in ``confidence_attributes``.  Test-only
+        registry entries whose ``name`` starts with ``_`` are exempt
+        from the YAML requirement (the test fixture supplies its own
+        spec or uses ``None`` to opt out of confidence evaluation).
+
+        Imported inside the method because ``nav.nav_technique.nav_technique``
+        imports ``nav.support.nav_base`` which imports ``nav.config``;
+        promoting these imports to the module top would fail with
+        ``ImportError: cannot import name 'DEFAULT_CONFIG' from
+        partially initialized module 'nav.config'``.  This lazy-import
+        site is the minimum cycle break — the other modules can keep
+        their top-of-file imports.
+        """
+        from nav.nav_technique.confidence_config import (
+            ConfidenceConfigError,
+            load_confidence_spec,
+            load_technique_tuning,
+        )
+        from nav.nav_technique.nav_technique import (
+            NavTechnique,
+            validate_registered_confidence_specs,
+        )
+
+        techniques_block = dict(self._config_dict.get('techniques', {}))
+        for cls in NavTechnique._registry:
+            try:
+                cls.confidence_spec = load_confidence_spec(techniques_block, cls.name)
+            except ConfidenceConfigError:
+                if not cls.name.startswith('_'):
+                    raise
+                # Test-only technique: leave spec as inherited (None)
+                # so the test fixture controls it.  Tuning still resets
+                # below so a stale fixture value cannot leak across reloads.
+            cls.tuning = load_technique_tuning(techniques_block, cls.name)
+        validate_registered_confidence_specs()
 
     def update_config(self, config_path: str | Path, read_default: bool = True) -> None:
         """Updates the current configuration with values from the specified YAML file.
+
+        When ``read_default`` is true the merged YAML is re-validated against
+        every registered :class:`NavTechnique` so per-technique overrides
+        (``confidence_spec`` and ``tuning``) take effect.  The internal
+        bootstrap path inside :meth:`read_config` calls with
+        ``read_default=False`` and validates once after the loop, since
+        early default files are loaded before
+        ``config_510_techniques.yaml`` has populated the techniques block.
 
         Parameters:
             config_path: Path to the configuration file containing update values.
@@ -138,17 +272,29 @@ class Config:
             self.read_config()
         new_config = self._load_yaml(config_path)
         for key in new_config:
-            if key in self._config_dict:
-                self._config_dict[key].update(new_config[key])
+            if key in self._config_dict and isinstance(self._config_dict[key], dict):
+                self._config_dict[key] = _deep_merge(self._config_dict[key], new_config[key])
             else:
                 self._config_dict[key] = new_config[key]
         self._update_attrdicts()
+        if read_default:
+            self._validate_registered_techniques()
 
     def category(self, category: str) -> AttrDict:
-        """Returns the configuration settings for the specified category."""
+        """Returns the configuration settings for the specified category.
+
+        The result is cached per category and rebuilt on config reload (see
+        ``_update_attrdicts``), matching the caching semantics of the named
+        section properties.  Config is treated read-only; mutating the returned
+        AttrDict is not supported.
+        """
 
         self.read_config()
-        return AttrDict(self._config_dict.get(category, {}))
+        cached = self._category_cache.get(category)
+        if cached is None:
+            cached = AttrDict(self._config_dict.get(category, {}))
+            self._category_cache[category] = cached
+        return cached
 
     @property
     def general(self) -> Any:
@@ -247,6 +393,21 @@ class Config:
 
         self.read_config()
         return self._config_bodies
+
+    @property
+    def body_shape(self) -> Any:
+        """Returns the per-body shape catalogue (``config_220_body_shape.yaml``).
+
+        Each entry is keyed by SPICE body name (e.g. ``MIMAS``) and exposes
+        ``radii_km``, ``ellipsoid_rms_residual_km``, ``crater_scale_km``,
+        ``albedo_mean``, ``albedo_variation``, and ``shape_class_hint``.
+        Missing-body lookups return ``None`` from ``AttrDict.get``; downstream
+        code applies the conservative fallback (10% radius default,
+        reliability cap 0.3).
+        """
+
+        self.read_config()
+        return self._config_body_shape
 
     @property
     def rings(self) -> Any:

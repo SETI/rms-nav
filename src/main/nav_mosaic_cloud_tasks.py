@@ -251,42 +251,46 @@ def process_task(
         image_log_path.parent.mkdir(parents=True, exist_ok=True)
         local_handlers = image_log_handlers(image_log_path, cli_args, DEFAULT_CONFIG)
 
-        with IMAGE_LOGGER.open(
-            f'REPROJECT {image_file.image_file_url}',
-            handler=local_handlers,
-        ):
-            try:
-                image_path = image_file.image_file_path.absolute()
-                obs = obs_class.from_file(image_path, extfov_margin_vu=(0, 0))
+        try:
+            with IMAGE_LOGGER.open(
+                f'REPROJECT {image_file.image_file_url}',
+                handler=local_handlers,
+            ):
+                try:
+                    image_path = image_file.image_file_path.absolute()
+                    obs = obs_class.from_file(image_path, extfov_margin_vu=(0, 0))
 
-                offset = load_offset_if_any(nav_results_root_path, image_file)
-                if offset is not None:
-                    apply_offset_to_obs(cast(ObsSnapshotInst, obs), offset[0], offset[1])
+                    offset = load_offset_if_any(nav_results_root_path, image_file)
+                    if offset is not None:
+                        apply_offset_to_obs(cast(ObsSnapshotInst, obs), offset[0], offset[1])
 
-                img_label = (
-                    image_name_override
-                    if image_name_override is not None
-                    else image_file.image_file_path.stem
-                )
-                obs_inst = cast(ObsSnapshotInst, obs)
-                result: BodyReprojResult | RingReprojResult
-                if mode == 'body':
-                    result = reproject_one_body(
-                        obs_inst, cast(BodyMosaic, mosaic), image_name=img_label
+                    img_label = (
+                        image_name_override
+                        if image_name_override is not None
+                        else image_file.image_file_path.stem
                     )
-                else:
-                    result = reproject_one_ring(
-                        obs_inst, task_args, cast(RingMosaic, mosaic), image_name=img_label
-                    )
+                    obs_inst = cast(ObsSnapshotInst, obs)
+                    result: BodyReprojResult | RingReprojResult
+                    if mode == 'body':
+                        result = reproject_one_body(
+                            obs_inst, cast(BodyMosaic, mosaic), image_name=img_label
+                        )
+                    else:
+                        result = reproject_one_ring(
+                            obs_inst, task_args, cast(RingMosaic, mosaic), image_name=img_label
+                        )
 
-                if not no_write_output_files:
-                    out_path.parent.mkdir(parents=True, exist_ok=True)
-                    result.save(out_path)
-                    MAIN_LOGGER.info('Saved reproj: %s', out_path)
-            except Exception:
-                _log_main_exception('Error reprojecting %s', image_file.image_file_url)
-            finally:
-                MAIN_LOGGER.info('Wrote reprojection log to %s', image_log_path)
+                    if not no_write_output_files:
+                        out_path.parent.mkdir(parents=True, exist_ok=True)
+                        result.save(out_path)
+                        MAIN_LOGGER.info('Saved reproj: %s', out_path)
+                except Exception:
+                    _log_main_exception('Error reprojecting %s', image_file.image_file_url)
+                finally:
+                    MAIN_LOGGER.info('Wrote reprojection log to %s', image_log_path)
+        finally:
+            for handler in local_handlers:
+                handler.close()
 
     return False, {'status': 'success'}  # No retry under any circumstances
 

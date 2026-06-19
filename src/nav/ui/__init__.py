@@ -17,4 +17,4 @@ Subpackages:
         Ring and body mosaic windows, projections, graticule, and tiled image display.
 """
 
-__all__ = []
+__all__: list[str] = []

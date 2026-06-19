@@ -63,9 +63,14 @@ def dataset_name_to_class(name: str) -> type[DataSet]:
         The class corresponding to the dataset name.
 
     Raises:
-        KeyError: If the dataset name is not found.
+        KeyError: If the dataset name is not found; the message lists the
+            valid names.
     """
-    return _DATASET_NAME_TO_CLASS_MAPPING[name.lower()]
+    try:
+        return _DATASET_NAME_TO_CLASS_MAPPING[name.lower()]
+    except KeyError:
+        valid = ', '.join(sorted(_DATASET_NAME_TO_CLASS_MAPPING))
+        raise KeyError(f'unknown dataset name {name!r}; valid names: {valid}') from None
 
 
 def dataset_name_to_inst_name(name: str) -> str:
@@ -78,9 +83,14 @@ def dataset_name_to_inst_name(name: str) -> str:
         The instrument name corresponding to the dataset name.
 
     Raises:
-        KeyError: If the dataset name is not found.
+        KeyError: If the dataset name is not found; the message lists the
+            valid names.
     """
-    return _DATASET_NAME_TO_INST_NAME_MAPPING[name.lower()]
+    try:
+        return _DATASET_NAME_TO_INST_NAME_MAPPING[name.lower()]
+    except KeyError:
+        valid = ', '.join(sorted(_DATASET_NAME_TO_INST_NAME_MAPPING))
+        raise KeyError(f'unknown dataset name {name!r}; valid names: {valid}') from None
 
 
 __all__ = [

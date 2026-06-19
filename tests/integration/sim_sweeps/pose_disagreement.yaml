@@ -1,0 +1,14 @@
+sweep_name: pose_disagreement
+# B7 scenario 3 degradation curve: walk the navigator's assumed pose away from the
+# true (rendered) pose and watch the limb fit degrade.  The base scene renders the
+# mesh at Y-Euler 35 deg; each step moves the predicted nav_override pose Y-Euler
+# further from it, so the predicted silhouette boundary swings off the rendered
+# one.  The limb is pinned, so its own recovered offset error is recorded even
+# when its clean-field confidence holds the fused status below success -- the
+# error grows with the disagreement, the curve that says a wrong-pose limb is
+# confidently wrong.  This is a degradation sweep, not an exact-recovery
+# invariant.
+base_scene: phase_sweep_irregular_body/hyperion_pose_disagree.yaml
+parameters: [bodies.0.nav_override.pose_euler_deg.1]
+values: [35.0, 45.0, 55.0, 65.0, 80.0]
+technique: BodyLimbNav

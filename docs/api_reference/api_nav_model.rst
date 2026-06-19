@@ -1,22 +1,14 @@
 nav.nav_model
 =============
 
+.. automodule:: nav.nav_model
+
 .. automodule:: nav.nav_model.nav_model
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_model.nav_model_result
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-.. automodule:: nav.nav_model.nav_model_stars
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-.. automodule:: nav.nav_model.nav_model_body_base
+.. automodule:: nav.nav_model.body_shape
    :members:
    :undoc-members:
    :show-inheritance:
@@ -26,12 +18,12 @@ nav.nav_model
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_model.nav_model_body_simulated
+.. automodule:: nav.nav_model.nav_model_body_base
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_model.nav_model_rings_base
+.. automodule:: nav.nav_model.nav_model_body_simulated
    :members:
    :undoc-members:
    :show-inheritance:
@@ -41,7 +33,17 @@ nav.nav_model
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: nav.nav_model.nav_model_rings_base
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: nav.nav_model.nav_model_rings_simulated
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: nav.nav_model.nav_model_titan
    :members:
    :undoc-members:
    :show-inheritance:
@@ -49,13 +51,7 @@ nav.nav_model
 nav.nav_model.rings
 -------------------
 
-The ``nav.nav_model.rings`` subpackage provides types, features, filters, and
-rendering support for planetary ring models.
-
 .. automodule:: nav.nav_model.rings
-   :members:
-   :undoc-members:
-   :show-inheritance:
 
 .. automodule:: nav.nav_model.rings.ring_types
    :members:
@@ -87,12 +83,42 @@ rendering support for planetary ring models.
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_model.nav_model_titan
+nav.nav_model.stars
+-------------------
+
+.. automodule:: nav.nav_model.stars
+
+.. automodule:: nav.nav_model.stars.nav_model_stars
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_model.nav_model_combined
+.. automodule:: nav.nav_model.stars.nav_model_stars_simulated
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: nav.nav_model.stars.catalog
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: nav.nav_model.stars.conflicts
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: nav.nav_model.stars.predicted_snr
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: nav.nav_model.stars.smeared_psf
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: nav.nav_model.stars.detection
    :members:
    :undoc-members:
    :show-inheritance:

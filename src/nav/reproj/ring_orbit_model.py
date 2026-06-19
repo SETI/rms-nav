@@ -87,9 +87,10 @@ class RingOrbitModel:
         """Return the ring radius (km) at each inertial longitude and time.
 
         Uses the standard Keplerian orbit equation with a precessing pericenter.
-        The pericenter direction at time ``et`` is ``w0 + dw * et``: ``w0`` is
-        the value of curly-pi at J2000 (the standard epoch), and ``dw`` is
-        integrated from J2000. The independent ``epoch_utc`` field anchors only
+        The pericenter direction at time ``et`` is ``w0 + dw * et / 86400``
+        (``dw`` is apsidal precession in rad/day and ``et`` is TDB seconds):
+        ``w0`` is the value of curly-pi at J2000 (the standard epoch), and
+        ``dw`` is integrated from J2000. The independent ``epoch_utc`` field anchors only
         the co-rotating mean-motion frame (see ``_longitude_shift``).
 
         Parameters:

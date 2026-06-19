@@ -39,7 +39,6 @@ does not match the expected kind. Future schema changes should bump
 ``load()`` implementation.
 """
 
-import logging
 import warnings
 from pathlib import Path
 from typing import Any, cast
@@ -50,11 +49,12 @@ from astropy.io import fits
 from astropy.io.fits.verify import VerifyWarning
 from filecache import FCPath
 
+from nav.config import IMAGE_LOGGER
 from nav.reproj.ring_orbit_model import RingOrbitModel
 from nav.support.types import PathLike
 
 _CURRENT_VERSION = 1
-_logger = logging.getLogger(__name__)
+_logger = IMAGE_LOGGER
 
 
 def _as_fcpath(path: PathLike) -> FCPath:

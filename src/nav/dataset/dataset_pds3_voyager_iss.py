@@ -92,6 +92,8 @@ class DataSetPDS3VoyagerISS(DataSetPDS3):
         img_name = parts[2]
         if len(range_dir) != 8 or range_dir[0] != 'C':
             raise ValueError(f'Bad Primary File Spec "{filespec}" - expected "Cddddddd"')
+        # Only the geometrically-corrected (_GEOMED) products are navigated;
+        # _CALIB / _RAW products return None (skipped) by design.
         if not img_name.endswith('_GEOMED.LBL'):
             return None
         return img_name.rsplit('_GEOMED')[0]
@@ -109,11 +111,15 @@ class DataSetPDS3VoyagerISS(DataSetPDS3):
 
         img_name = img_name.upper()
 
-        # Cddddddd
-        if len(img_name) != 8 or img_name[0] != 'C':
+        # Accept the canonical short name ``Cddddddd`` as well as the product
+        # file names users naturally list (e.g. ``C1234567_GEOMED``,
+        # ``C1234567_CALIB``, ``C1234567_GEOMED.IMG``): strip any extension and
+        # product suffix, then validate the ``Cddddddd`` core.
+        core = img_name.split('.', 1)[0].split('_', 1)[0]
+        if len(core) != 8 or core[0] != 'C':
             return False
         try:
-            _ = int(safe_lstrip_zero(img_name[1:]))
+            _ = int(safe_lstrip_zero(core[1:]))
         except ValueError:
             return False
 

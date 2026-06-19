@@ -1,6 +1,8 @@
 nav.annotation
 ==============
 
+.. automodule:: nav.annotation
+
 .. automodule:: nav.annotation.annotation
    :members:
    :undoc-members:

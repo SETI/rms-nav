@@ -1,0 +1,24 @@
+schema_version: 1
+scene_name: small_body
+instrument: coiss_nac
+size_v: 128
+size_u: 128
+random_seed: 42
+exposure_sec: 1.0
+bodies:
+  - name: ENCELADUS
+    shape_model: ellipsoid
+    center_v: 64.0
+    center_u: 64.0
+    axis1: 8.0
+    axis2: 8.0
+    axis3: 8.0
+    illumination_angle: 20.0
+    phase_angle: 35.0
+    range: 1500000.0
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 0.0
+offset_u: 0.0
+offset_rotation_deg: 0.0

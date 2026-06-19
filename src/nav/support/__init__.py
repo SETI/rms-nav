@@ -34,17 +34,38 @@ Modules:
     ``flux``
         Legacy flux and filter-convolution experiments; most of the implementation is
         commented out but kept for reference.
+    ``filters``
+        ``NavFilterSpec`` / ``NavFilterKind`` and the dispatcher ``apply_filter`` used
+        across feature extraction and matching techniques.
+    ``filter_combo``
+        ``canonicalize`` for normalizing multi-filter combos into a stable key.
+    ``status_reason``
+        ``NavStatusReason`` enum carried on every ``NavResult``.
+    ``noise_estimate``
+        ``estimate_image_noise_sigma`` — robust per-image noise estimator.
+    ``image_quality``
+        ``saturation_mask`` and ``cosmic_ray_mask`` — global image-quality
+        masks consumed by extractors.
+    ``distance_transform``
+        ``apply_translation`` and ``sample_dt_bilinear`` — chamfer-matching
+        helpers built on top of an externally-computed distance transform.
 """
 
 __all__ = [
     'attrdict',
     'constants',
     'correlate',
+    'distance_transform',
     'file',
+    'filter_combo',
+    'filters',
     'flux',
     'image',
+    'image_quality',
     'misc',
     'nav_base',
+    'noise_estimate',
+    'status_reason',
     'time',
     'types',
 ]

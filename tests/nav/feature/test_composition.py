@@ -1,0 +1,484 @@
+"""Tests for ``nav.feature.composition.compose_template_features``."""
+
+import numpy as np
+
+from nav.feature.composition import compose_template_features
+from nav.feature.feature import NavFeature, NavReliabilityBreakdown
+from nav.feature.feature_type import NavFeatureType
+from nav.feature.flags import BodyDiscFlags
+from nav.feature.geometry import BodyDiscGeometry
+from nav.support.filters import NavFilterKind, NavFilterSpec
+
+
+def _make_body(
+    *,
+    feature_id: str,
+    bbox: tuple[int, int, int, int],
+    template_value: float,
+    subject_range_km: float,
+) -> NavFeature:
+    """Build a BODY_DISC feature with a uniform-value template."""
+    h = bbox[2] - bbox[0]
+    w = bbox[3] - bbox[1]
+    template_img = np.full((h, w), template_value, dtype=np.float64)
+    template_mask = np.ones((h, w), dtype=bool)
+    return NavFeature(
+        feature_id=feature_id,
+        feature_type=NavFeatureType.BODY_DISC,
+        source_model='body',
+        geometry=BodyDiscGeometry(
+            bbox_extfov_vu=bbox,
+            predicted_center_vu=((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2),
+            overflow_fraction=0.0,
+        ),
+        subject_range_km=subject_range_km,
+        position_cov_px=None,
+        intensity_sigma_rel=0.0,
+        preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
+        reliability=1.0,
+        reliability_reasons=NavReliabilityBreakdown(visible_lit_fraction=1.0),
+        usable_types=frozenset({NavFeatureType.BODY_DISC}),
+        flags=BodyDiscFlags(body_name='X', overflow_fov_fraction=0.0),
+        template_img=template_img,
+        template_mask=template_mask,
+    )
+
+
+def test_compose_empty_features_yields_zero_image() -> None:
+    """No template features → zero image and false mask."""
+    image, mask = compose_template_features([], (10, 10))
+    assert image.shape == (10, 10)
+    assert image.sum() == 0.0
+    assert not mask.any()
+
+
+def test_compose_single_feature_paints_template() -> None:
+    """A single feature paints its template at the bbox location."""
+    feat = _make_body(
+        feature_id='body_disc:A',
+        bbox=(2, 3, 4, 6),
+        template_value=5.0,
+        subject_range_km=100.0,
+    )
+    image, mask = compose_template_features([feat], (10, 10))
+    assert image[2, 3] == 5.0
+    assert image[3, 5] == 5.0
+    assert image[5, 5] == 0.0
+    assert mask[2:4, 3:6].all()
+    assert not mask[0, 0]
+
+
+def test_compose_nearer_feature_overwrites_farther() -> None:
+    """Z-buffer paint: nearer subject_range_km overwrites farther on overlap."""
+    far = _make_body(
+        feature_id='body_disc:far',
+        bbox=(0, 0, 4, 4),
+        template_value=1.0,
+        subject_range_km=1000.0,
+    )
+    near = _make_body(
+        feature_id='body_disc:near',
+        bbox=(2, 2, 6, 6),
+        template_value=9.0,
+        subject_range_km=10.0,
+    )
+    image, _ = compose_template_features([far, near], (10, 10))
+    # Far-only region (0:2, 0:2) keeps far's value 1.0.
+    assert image[0, 0] == 1.0
+    # Overlap region (2:4, 2:4) takes near's value 9.0.
+    assert image[2, 2] == 9.0
+    assert image[3, 3] == 9.0
+    # Near-only region (4:6, 4:6) is near's value.
+    assert image[5, 5] == 9.0
+
+
+def test_compose_input_order_does_not_matter() -> None:
+    """The composite is order-independent (sort by range internally)."""
+    far = _make_body(
+        feature_id='body_disc:far',
+        bbox=(0, 0, 4, 4),
+        template_value=1.0,
+        subject_range_km=1000.0,
+    )
+    near = _make_body(
+        feature_id='body_disc:near',
+        bbox=(2, 2, 6, 6),
+        template_value=9.0,
+        subject_range_km=10.0,
+    )
+    img1, _ = compose_template_features([far, near], (10, 10))
+    img2, _ = compose_template_features([near, far], (10, 10))
+    assert np.array_equal(img1, img2)
+
+
+def test_compose_skips_features_without_templates() -> None:
+    """Features without template_img+template_mask are silently skipped."""
+    # Polyline-style feature: no template.
+    from nav.feature.flags import LimbArcFlags
+    from nav.feature.geometry import LimbPolyline
+
+    polyline = NavFeature(
+        feature_id='limb_arc:X',
+        feature_type=NavFeatureType.LIMB_ARC,
+        source_model='body',
+        geometry=LimbPolyline(
+            vertices_vu=np.array([[1.0, 1.0], [2.0, 2.0]]),
+            normals_vu=np.array([[1.0, 0.0], [0.0, 1.0]]),
+            sigma_normal_per_vertex_px=np.array([0.5, 0.5]),
+            sigma_tangent_per_vertex_px=np.array([0.5, 0.5]),
+            bbox_extfov_vu=(0, 0, 5, 5),
+        ),
+        subject_range_km=100.0,
+        position_cov_px=None,
+        intensity_sigma_rel=0.0,
+        preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
+        reliability=0.9,
+        reliability_reasons=NavReliabilityBreakdown(visible_arc_fraction=1.0),
+        usable_types=frozenset({NavFeatureType.LIMB_ARC}),
+        flags=LimbArcFlags(body_name='X', visible_arc_fraction=1.0),
+    )
+    body = _make_body(
+        feature_id='body_disc:X',
+        bbox=(0, 0, 4, 4),
+        template_value=3.0,
+        subject_range_km=100.0,
+    )
+    image, mask = compose_template_features([polyline, body], (10, 10))
+    assert image[0, 0] == 3.0
+    assert mask[0, 0]
+
+
+def test_compose_clamps_bbox_to_extfov() -> None:
+    """Templates with bbox extending past the ext-FOV are clamped."""
+    feat = _make_body(
+        feature_id='body_disc:X',
+        bbox=(8, 8, 12, 12),  # extends past 10x10 array
+        template_value=4.0,
+        subject_range_km=100.0,
+    )
+    image, mask = compose_template_features([feat], (10, 10))
+    # The 2x2 in-bounds region is painted.
+    assert image[8, 8] == 4.0
+    assert image[9, 9] == 4.0
+    assert mask[8, 8]
+    assert mask[9, 9]
+    # No paint leaks outside the (8:10, 8:10) clipped region.
+    assert image[:8, :8].sum() == 0.0
+    assert not mask[:8, :8].any()
+
+
+def _make_limb(
+    *, feature_id: str, vertices: list[tuple[float, float]], bbox: tuple[int, int, int, int]
+) -> NavFeature:
+    """Build a LIMB_ARC feature with the given vertices."""
+    from nav.feature.flags import LimbArcFlags
+    from nav.feature.geometry import LimbPolyline
+
+    verts = np.asarray(vertices, dtype=np.float64).reshape(-1, 2)
+    return NavFeature(
+        feature_id=feature_id,
+        feature_type=NavFeatureType.LIMB_ARC,
+        source_model='body',
+        geometry=LimbPolyline(
+            vertices_vu=verts,
+            normals_vu=np.zeros_like(verts),
+            sigma_normal_per_vertex_px=np.full(verts.shape[0], 0.5),
+            sigma_tangent_per_vertex_px=np.full(verts.shape[0], 0.5),
+            bbox_extfov_vu=bbox,
+        ),
+        subject_range_km=100.0,
+        position_cov_px=None,
+        intensity_sigma_rel=0.0,
+        preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
+        reliability=0.9,
+        reliability_reasons=NavReliabilityBreakdown(visible_arc_fraction=1.0),
+        usable_types=frozenset({NavFeatureType.LIMB_ARC}),
+        flags=LimbArcFlags(body_name='X', visible_arc_fraction=1.0),
+    )
+
+
+# ---------------------------------------------------------------------------
+# compose_dialog_overlay
+# ---------------------------------------------------------------------------
+
+
+def test_compose_dialog_overlay_paints_limb_polyline_pixels() -> None:
+    """Limb-arc vertices are rasterized into the composite mask."""
+    from nav.feature.composition import compose_dialog_overlay
+
+    limb = _make_limb(
+        feature_id='limb_arc:X',
+        vertices=[(2.0, 3.0), (4.0, 5.0), (6.0, 7.0)],
+        bbox=(2, 3, 7, 8),
+    )
+    image, mask = compose_dialog_overlay([limb], (10, 10))
+    for v, u in [(2, 3), (4, 5), (6, 7)]:
+        assert mask[v, u]
+        assert image[v, u] == 1.0
+    # Pixels not in the polyline are untouched.
+    assert image[0, 0] == 0.0
+    assert not mask[0, 0]
+
+
+def test_compose_dialog_overlay_drops_out_of_bounds_vertices() -> None:
+    """Vertices outside the ext-FOV are silently clipped."""
+    from nav.feature.composition import compose_dialog_overlay
+
+    limb = _make_limb(
+        feature_id='limb_arc:edge',
+        vertices=[(-1.0, 5.0), (5.0, 5.0), (5.0, 99.0)],
+        bbox=(0, 0, 10, 10),
+    )
+    _image, mask = compose_dialog_overlay([limb], (10, 10))
+    assert mask[5, 5]
+    assert mask.sum() == 1
+
+
+def test_compose_dialog_overlay_combines_template_and_polyline() -> None:
+    """A body-disc template + a limb-arc polyline both land in the composite."""
+    from nav.feature.composition import compose_dialog_overlay
+
+    body = _make_body(
+        feature_id='body_disc:X',
+        bbox=(0, 0, 3, 3),
+        template_value=4.0,
+        subject_range_km=100.0,
+    )
+    limb = _make_limb(
+        feature_id='limb_arc:X',
+        vertices=[(7.0, 7.0)],
+        bbox=(7, 7, 8, 8),
+    )
+    image, mask = compose_dialog_overlay([body, limb], (10, 10))
+    assert image[0, 0] == 4.0  # body template kept
+    assert mask[0, 0]
+    assert image[7, 7] == 1.0  # polyline pixel painted
+    assert mask[7, 7]
+
+
+def _make_blob(
+    *,
+    feature_id: str,
+    center: tuple[float, float],
+    diameter_px: float,
+    bbox: tuple[int, int, int, int],
+) -> NavFeature:
+    """Build a BODY_BLOB feature."""
+    from nav.feature.flags import BodyBlobFlags
+    from nav.feature.geometry import BodyBlobGeometry
+
+    return NavFeature(
+        feature_id=feature_id,
+        feature_type=NavFeatureType.BODY_BLOB,
+        source_model='body',
+        geometry=BodyBlobGeometry(
+            predicted_center_vu=center,
+            bbox_extfov_vu=bbox,
+            predicted_diameter_px=diameter_px,
+        ),
+        subject_range_km=100.0,
+        position_cov_px=None,
+        intensity_sigma_rel=0.0,
+        preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
+        reliability=0.5,
+        reliability_reasons=NavReliabilityBreakdown(blob_snr=0.5),
+        usable_types=frozenset({NavFeatureType.BODY_BLOB}),
+        flags=BodyBlobFlags(body_name='X', predicted_diameter_px=diameter_px),
+    )
+
+
+def test_compose_dialog_overlay_renders_body_blob_circle() -> None:
+    """A BODY_BLOB feature renders a 1-pixel circle outline at its centroid.
+
+    Pin the exact pixel set Bresenham produces for radius 5 centered at
+    (20, 20) so a future change to the circle algorithm or the dialog
+    overlay's painting logic fails this test loud.
+    """
+    from nav.feature.composition import compose_dialog_overlay
+
+    blob = _make_blob(
+        feature_id='body_blob:X',
+        center=(20.0, 20.0),
+        diameter_px=10.0,
+        bbox=(15, 15, 25, 25),
+    )
+    image, mask = compose_dialog_overlay([blob], (40, 40))
+    expected_pixels = {
+        (15, 18),
+        (15, 19),
+        (15, 20),
+        (15, 21),
+        (15, 22),
+        (16, 17),
+        (16, 23),
+        (17, 16),
+        (17, 24),
+        (18, 15),
+        (18, 25),
+        (19, 15),
+        (19, 25),
+        (20, 15),
+        (20, 25),
+        (21, 15),
+        (21, 25),
+        (22, 15),
+        (22, 25),
+        (23, 16),
+        (23, 24),
+        (24, 17),
+        (24, 23),
+        (25, 18),
+        (25, 19),
+        (25, 20),
+        (25, 21),
+        (25, 22),
+    }
+    actual_pixels = set(zip(*np.nonzero(image), strict=True))
+    assert actual_pixels == expected_pixels
+    assert set(zip(*np.nonzero(mask), strict=True)) == expected_pixels
+    assert np.count_nonzero(image) == len(expected_pixels)
+    assert np.count_nonzero(mask) == len(expected_pixels)
+
+
+def test_compose_dialog_overlay_blob_clips_to_extfov_bounds() -> None:
+    """A blob whose circle extends past ext-FOV is silently clipped.
+
+    With center (2, 2) and radius 10 against a 10x10 ext-FOV, the
+    Bresenham outline only intersects a single in-bounds pixel.  Pin
+    the exact pixel set so a regression in either the clipping logic
+    or the circle algorithm fails this test loud.
+    """
+    from nav.feature.composition import compose_dialog_overlay
+
+    blob = _make_blob(
+        feature_id='body_blob:edge',
+        center=(2.0, 2.0),
+        diameter_px=20.0,  # radius 10, way past (0,0)
+        bbox=(-10, -10, 12, 12),
+    )
+    image, mask = compose_dialog_overlay([blob], (10, 10))
+    assert image.shape == (10, 10)
+    expected_pixels = {(9, 9)}
+    assert set(zip(*np.nonzero(image), strict=True)) == expected_pixels
+    assert set(zip(*np.nonzero(mask), strict=True)) == expected_pixels
+    assert np.count_nonzero(image) == 1
+    assert np.count_nonzero(mask) == 1
+
+
+def _make_star(
+    *,
+    feature_id: str,
+    predicted_vu: tuple[float, float],
+    bbox_pad: int = 6,
+) -> NavFeature:
+    """Build a STAR feature with a PSF-sized bbox around the prediction."""
+    from nav.feature.flags import StarFlags
+    from nav.feature.geometry import StarGeometry
+
+    pv, pu = predicted_vu
+    bbox = (
+        int(np.floor(pv - bbox_pad)),
+        int(np.floor(pu - bbox_pad)),
+        int(np.ceil(pv + bbox_pad)) + 1,
+        int(np.ceil(pu + bbox_pad)) + 1,
+    )
+    return NavFeature(
+        feature_id=feature_id,
+        feature_type=NavFeatureType.STAR,
+        source_model='stars',
+        geometry=StarGeometry(
+            predicted_vu=predicted_vu,
+            catalog_vu=predicted_vu,
+            bbox_extfov_vu=bbox,
+        ),
+        subject_range_km=float('inf'),
+        position_cov_px=None,
+        intensity_sigma_rel=0.0,
+        preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
+        reliability=0.95,
+        reliability_reasons=NavReliabilityBreakdown(predicted_snr=1.0),
+        usable_types=frozenset({NavFeatureType.STAR}),
+        flags=StarFlags(predicted_snr=10.0),
+    )
+
+
+def test_compose_dialog_overlay_renders_star_marker_rectangle() -> None:
+    """A STAR feature renders an exact rectangle-outline pixel set.
+
+    Pin the full perimeter — top + bottom + left + right at half-width
+    5 around (20, 25) — so a regression in the marker geometry, the
+    bbox-to-half-extent conversion, or the choice of outline-vs-filled
+    rasteriser fails this test loud.
+    """
+    from nav.feature.composition import compose_dialog_overlay
+
+    star = _make_star(
+        feature_id='star:UCAC4:1',
+        predicted_vu=(20.0, 25.0),
+        bbox_pad=6,  # bbox spans (14, 19, 27, 32) -> half-width 5
+    )
+    image, mask = compose_dialog_overlay([star], (40, 40))
+    expected_pixels = set()
+    half = 5
+    v_min, v_max = 20 - half, 20 + half
+    u_min, u_max = 25 - half, 25 + half
+    for u in range(u_min, u_max + 1):
+        expected_pixels.add((v_min, u))  # top
+        expected_pixels.add((v_max, u))  # bottom
+    for v in range(v_min, v_max + 1):
+        expected_pixels.add((v, u_min))  # left
+        expected_pixels.add((v, u_max))  # right
+    actual_pixels = set(zip(*np.nonzero(image), strict=True))
+    assert actual_pixels == expected_pixels
+    assert set(zip(*np.nonzero(mask), strict=True)) == expected_pixels
+    assert np.count_nonzero(image) == len(expected_pixels)
+    assert np.count_nonzero(mask) == len(expected_pixels)
+
+
+def test_compose_dialog_overlay_star_marker_off_image_no_op() -> None:
+    """A STAR whose predicted (v, u) is off-image paints no pixels."""
+    from nav.feature.composition import compose_dialog_overlay
+
+    star = _make_star(
+        feature_id='star:UCAC4:offscreen',
+        predicted_vu=(-50.0, -50.0),
+    )
+    image, mask = compose_dialog_overlay([star], (20, 20))
+    assert np.count_nonzero(image) == 0
+    assert np.count_nonzero(mask) == 0
+
+
+def test_compose_dialog_overlay_star_marker_clamps_at_edge() -> None:
+    """A STAR centre near the FOV edge produces an exact 3x3-perimeter pixel set.
+
+    With predicted (1, 1) on a 20x20 FOV, the marker can extend at most
+    1 pixel before hitting the edge — the floor (3) does not apply here
+    because the explicit edge clamp is tighter.  The full 8-pixel
+    perimeter (3x3 outline minus the centre) is asserted as an exact
+    set so a regression in the half-width clamp logic fails loud.
+    """
+    from nav.feature.composition import compose_dialog_overlay
+
+    star = _make_star(
+        feature_id='star:UCAC4:edge',
+        predicted_vu=(1.0, 1.0),
+        bbox_pad=6,
+    )
+    image, mask = compose_dialog_overlay([star], (20, 20))
+    # Half-width clamped to 1 -> 3x3 outline around (1, 1).
+    expected_pixels = {
+        (0, 0),
+        (0, 1),
+        (0, 2),
+        (1, 0),
+        (1, 2),
+        (2, 0),
+        (2, 1),
+        (2, 2),
+    }
+    actual_pixels = set(zip(*np.nonzero(image), strict=True))
+    assert actual_pixels == expected_pixels
+    assert set(zip(*np.nonzero(mask), strict=True)) == expected_pixels
+    assert np.count_nonzero(image) == len(expected_pixels)
+    assert np.count_nonzero(mask) == len(expected_pixels)
+    assert image[1, 1] == 0.0  # centre not painted

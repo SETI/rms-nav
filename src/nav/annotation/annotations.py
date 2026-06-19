@@ -177,16 +177,19 @@ class Annotations(NavBase):
                         found_place = True
                         break
                     self.logger.debug(
-                        'Could not find place avoiding other items for text annotation '
-                        f'{text_info.text!r}'
+                        'Could not find place avoiding other items for text annotation %r',
+                        text_info.text,
                     )
                 if not found_place:
                     self.logger.warning(
-                        f'Could not find final place for text annotation {text_info.text!r}'
+                        'Could not find final place for text annotation %r',
+                        text_info.text,
                     )
 
-        # This ensures text_layer is writeable
-        text_layer = np.array(text_im.getdata()).astype(np.uint8).reshape(text_layer.shape)
+        # ``np.asarray`` views the PIL image directly; ``np.array`` copies
+        # so the result is writeable.  This replaces the deprecated
+        # ``Image.getdata()`` flatten + reshape dance.
+        text_layer = np.array(text_im, dtype=np.uint8)
         text_layer[graphic_layer != 0] = graphic_layer[graphic_layer != 0]
 
         res[text_layer != 0] = text_layer[text_layer != 0]

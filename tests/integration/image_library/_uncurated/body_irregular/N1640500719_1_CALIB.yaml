@@ -1,0 +1,36 @@
+schema_version: 1
+mission: COISS                  # COISS | VGISS | GOSSI | NHLORRI
+camera: NAC                    # NAC | WAC | SSI | NA | WA | LORRI
+image_id: N1640500719_1_CALIB
+image_datetime_utc: '2009-12-26T05:55:03.479'
+exposure_time_sec: 6.8000
+filter_combo: 'CL1+UV3'                # canonicalized: filters sorted, '+'-joined
+image_url: 'pds3://calibrated/COISS_2xxx/COISS_2059/data/1640478062_1640518661/N1640500719_1_CALIB.IMG'
+
+scene_tags:
+  - body_irregular
+  - prometheus
+  - highly_irregular
+  - medium_size
+
+
+ground_truth:
+  offset_dv_px: 9.0000
+  offset_du_px: 47.0000
+  offset_uncertainty_px: 1.0           # 1sigma marginal; tighten
+                                       # for bright stars / sharp limbs.
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-05-01
+  ui_version: 'rms-nav 0.1.dev25'
+  notes: |
+    Prometheus 317 px in the middle of the FOV.
+    Phase angle 8 degrees.
+    Limb 0.37 km/pix.
+
+expected:
+  status: success                           # success | failed | conflicted
+  confidence_tier: medium                # high | medium | low | failed
+  primary_technique: BodyBlobNav  # e.g. BodyLimbNav
+  techniques_must_run: [BodyBlobNav]
+  techniques_must_skip: [BodyLimbNav, BodyDiscCorrelateNav]

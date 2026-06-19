@@ -11,16 +11,16 @@ from .dataset import DataSet, ImageFile, ImageFiles
 
 
 class DataSetSim(DataSet):
-    """Dataset that yields a series of JSON-described simulated images.
+    """Dataset that yields a series of YAML-described simulated images.
 
-    Each dataset value is a direct file path to the JSON file; selection simply
-    returns that one file.
+    Each dataset value is a direct file path to the YAML scene file; selection
+    simply returns that one file.
     """
 
     @staticmethod
     def _img_name_valid(img_name: str) -> bool:
-        # Accept any path ending in .json
-        return str(img_name).lower().endswith('.json')
+        # Accept any path ending in .yaml or .yml
+        return str(img_name).lower().endswith(('.yaml', '.yml'))
 
     # Public methods
 
@@ -44,7 +44,7 @@ class DataSetSim(DataSet):
             action='append',
             nargs='*',
             type=str,
-            help='Paths to JSON files containing simulated images to process',
+            help='Paths to YAML scene files containing simulated images to process',
         )
 
     def yield_image_files_from_arguments(
@@ -52,11 +52,11 @@ class DataSetSim(DataSet):
     ) -> Iterator[ImageFiles]:
         img_path_list = flatten_list(arguments.img_path)
         for img_path in img_path_list:
-            json_fcpath = FCPath(img_path)
+            scene_fcpath = FCPath(img_path)
             imagefile = ImageFile(
-                image_file_url=json_fcpath,
-                label_file_url=json_fcpath,
-                results_path_stub=str(json_fcpath.with_suffix('').name),
+                image_file_url=scene_fcpath,
+                label_file_url=scene_fcpath,
+                results_path_stub=str(scene_fcpath.with_suffix('').name),
             )
             yield ImageFiles(image_files=[imagefile])
 
@@ -86,6 +86,7 @@ class DataSetSim(DataSet):
 
     def pds4_template_variables(
         self,
+        *,
         image_file: ImageFile,
         nav_metadata: dict[str, Any],
         backplane_metadata: dict[str, Any],

@@ -1,0 +1,7 @@
+sweep_name: phase_regular_body
+# Phase angle across the full range on a resolved sphere.  The navigator adapts
+# (disc at moderate phase, blob at the extremes) and recovers within tolerance at
+# every phase.
+base_scene: phase_sweep_regular_body/regular_sphere_base.yaml
+parameters: [bodies.0.phase_angle]
+values: [0.0, 30.0, 60.0, 90.0, 120.0, 150.0]

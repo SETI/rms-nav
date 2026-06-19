@@ -8,4 +8,4 @@ Submodules:
     body_window           -- BodyMosaicWindow for body reprojections/mosaics.
 """
 
-__all__ = []
+__all__: list[str] = []

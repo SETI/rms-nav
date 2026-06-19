@@ -1,0 +1,655 @@
+# Per-technique confidence-formula coefficients and runtime tunables.
+# Loaded at config-load time so any unknown reference fails fast at
+# startup rather than mid-image.  Each technique block looks like:
+#
+#   <technique_name>:
+#     alpha0: float                 # constant in the sigmoid argument
+#     terms:                        # confidence-formula linear terms
+#       - feature: str              # diagnostic-attribute name
+#         alpha: float              # linear coefficient
+#         offset: float | null      # subtracted before scaling (default 0)
+#         divisor: float | null     # divides after offset (default 1, non-zero)
+#         cap_at: float | null      # post-scale upper bound, in [0, 1] (optional)
+#     hard_zero_if:                 # mapping str -> bool; firing forces conf=0
+#       <attribute>: bool
+#     hard_cap: float | null        # optional post-sigmoid clamp, in [0, 1]
+#     tuning:                       # technique-specific runtime tunables
+#       <key>: float | int          # see ``load_technique_tuning`` for schema
+#
+# Coefficients are placeholders pending a calibration sweep against the
+# operator-curated image library; the sigmoid shape and the alpha=0
+# wiring for terms that are populated but not yet weighted (e.g.
+# peak_to_runner_up_ratio) are intentional so the calibration sweep
+# tunes alphas against real data without code changes.
+
+techniques:
+  BodyDiscCorrelateNav:
+    alpha0: -2.0
+    tuning:
+      # When ``fit_camera_rotation`` is True the converged rotation
+      # magnitude trips ``at_edge`` once it crosses
+      # ``rotation_at_edge_fraction * max_rotation_deg``.  The default
+      # 0.95 matches every other 3-DoF technique; lower values
+      # surface "rotation is pegged against the cap" earlier.
+      rotation_at_edge_fraction: 0.95
+      # Largest pyramid-level peak migration accepted before the result
+      # is flagged spurious.  Scales with the largest BODY_DISC
+      # silhouette so a 600 px Mimas is not held to the same absolute
+      # pixel budget as a 100 px Dione.  The applied cap is
+      # ``max(consistency_max_px,
+      # consistency_max_fraction_of_diameter * max_body_diameter_px)``.
+      # ``consistency_max_px`` covers pyramid quantization (factor-2
+      # downsampling shifts peaks by O(1) px regardless of body size);
+      # ``consistency_max_fraction_of_diameter`` handles the natural
+      # peak walk between pyramid levels for textured bodies
+      # (high-resolution levels resolve crater-scale brightness
+      # structure the coarser levels averaged out).
+      consistency_max_fraction_of_diameter: 0.025
+      consistency_max_px: 4.0
+      # Gaussian low-pass (px) applied to both surfaces in the
+      # correlator's full-resolution sub-pixel refinement.  The body
+      # silhouette and the Lambert template are sharp anti-aliased
+      # edges with differing profiles; correlating them aliases the
+      # cross-power peak into a sub-pixel-phase-dependent S-curve
+      # (~0.03 px, zero at integer / half-pixel offsets).  A ~1 px
+      # matched low-pass removes the high-frequency mismatch and cuts
+      # the residual to ~0.01 px; the upsampled DFT still localizes the
+      # smoothed peak.  Only the final full-resolution refine is
+      # band-limited -- coarse pyramid levels keep sharp surfaces for
+      # integer-peak selection.  0.0 disables it.
+      refine_lowpass_sigma_px: 1.0
+    terms:
+      # PSR-style quality measure of the chosen NCC peak.  Healthy
+      # body-disc fits report quality 6-15; the divisor maps that range
+      # onto the sigmoid's responsive interval.
+      - feature: ncc_peak
+        alpha: 1.5
+        divisor: 6.0
+        cap_at: 1.0
+      # Pyramid-level consistency, normalized by the per-image
+      # diameter-scaled spurious threshold.  ``consistency_ratio < 1.0``
+      # means the result is within budget; ``ratio == 1.0`` is exactly
+      # at the spurious edge and contributes ``-1.0`` to the sigmoid
+      # argument (the classic "right at the edge" position).  Using the
+      # ratio rather than the raw pixel value lets the divisor stay at
+      # 1.0 while the underlying budget tracks body diameter.
+      - feature: consistency_ratio
+        alpha: -1.0
+        divisor: 1.0
+      # Reward additional bodies in the composite (joint geometric
+      # constraint sharpens the peak); cap so a 3-body scene saturates.
+      - feature: body_count
+        alpha: 0.4
+        divisor: 3.0
+        cap_at: 1.0
+      # Peak-to-runner-up ratio: a sharp, unambiguous correlation peak
+      # has ratio >> 1 vs the next-best peak.  alpha=0.0 for now so the
+      # term carries no weight pending calibration; the wiring is in
+      # place so once a calibration sweep tunes the alpha the formula
+      # picks it up without code changes.
+      - feature: peak_to_runner_up_ratio
+        alpha: 0.0
+        divisor: 2.0
+        cap_at: 1.0
+    hard_zero_if:
+      at_edge: true
+      spurious: true
+
+  BodyBlobNav:
+    alpha0: -1.0
+    terms:
+      # Brightness-weighted centroid uncertainty shrinks with SNR.
+      - feature: body_snr_inside_predicted_bbox
+        alpha: 0.5
+        divisor: 4.0
+        cap_at: 1.0
+      # Larger blobs carry more centroid signal per the design's
+      # sigmoid(extent_px / 8 - 1) factor.
+      - feature: body_extent_px
+        alpha: 1.0
+        offset: 8.0
+        divisor: 8.0
+        cap_at: 1.0
+      # Multi-body geometry over-determines the joint translation.
+      - feature: blob_count
+        alpha: 0.4
+        divisor: 3.0
+        cap_at: 1.0
+      # Phase-and-irregularity penalty.  Combines shape irregularity
+      # with how much of the body is in shadow into a dimensionless
+      # factor ``(ellipsoid_rms_residual_km / body_radius_km) *
+      # (1 + 2 * sin^2(phase / 2))`` that the body NavModel emits
+      # per-blob.  Raw phase angle alone is too coarse: a regular
+      # Mimas at phase 90 has predictable shadowing and the lit-
+      # weighted predicted centroid handles it (factor ~ 0.01); an
+      # irregular Hyperion at the same phase has unpredictable
+      # shadowing on an unknown rotational orientation that the
+      # ellipsoidal model cannot fully correct (factor ~ 0.15).
+      # Typical factors are 0.005-0.20; ``divisor: 0.15`` puts a
+      # textbook irregular-and-side-lit scene near the saturation
+      # point.  alpha=0.0 wires the term into the formula without
+      # weighting it; Phase 10 calibration tunes alpha to a negative
+      # value against the curated library.
+      - feature: max_phase_irregularity_factor
+        alpha: 0.0
+        divisor: 0.15
+        cap_at: 1.0
+    hard_zero_if:
+      at_edge: true
+    # The hard cap mirrors the BODY_BLOB reliability formula: a
+    # brightness-weighted centroid is a weaker observation than a limb
+    # fit, so the technique cannot drive the ensemble past 0.4
+    # confidence even when every term saturates.
+    hard_cap: 0.4
+    tuning:
+      # Pixels of slack around the search-window axis bounds for the
+      # at-edge check.  See ``RingEdgeNav.at_edge_tolerance_px``.
+      at_edge_tolerance_px: 1.0
+      # Uncalibrated model-error floor (px), added in quadrature to the
+      # reported covariance diagonal: reported_cov = CRLB-form (+)
+      # model_error_floor_px**2.  Captures the SPICE pointing residual
+      # and body-shape (ellipsoid vs. true silhouette) error that the
+      # per-blob centroid CRLB does not.  Default 0.0 is a no-op pending
+      # an integration-library calibration sweep.
+      model_error_floor_px: 0.0
+
+  BodyLimbNav:
+    alpha0: -1.0
+    terms:
+      - feature: visible_limb_arc_fraction
+        alpha: 3.0
+      - feature: dt_fit_rms_px
+        alpha: -1.5
+      - feature: visible_arc_px
+        alpha: 0.4
+        divisor: 100.0
+        cap_at: 1.0
+    hard_zero_if:
+      at_edge: true
+      spurious: true
+    tuning:
+      # Minimum surviving polyline length per LIMB_ARC for feasibility.
+      # Shorter limbs do not constrain a 2-D translation enough to be
+      # worth the LM iteration.
+      min_arc_vertices: 30.0
+      # Final DT residual exceeding this many limb-sigmas marks the
+      # result spurious.
+      spurious_dt_rms_factor: 5.0
+      # Floor for the spurious-detection threshold.
+      spurious_dt_floor_px: 3.0
+      # Below this Tukey-inlier count the M-estimator covariance is no
+      # longer informative — flag spurious.
+      spurious_min_inliers: 6
+      # Below this inlier fraction the LM has almost certainly walked
+      # off the true limb onto internal-body features (crater rims,
+      # terminator, surface boundaries) — flag spurious.  A clean limb
+      # fit on a fully-visible body retains 50 %+ of vertices as
+      # inliers; image dropouts and cosmic rays on the polyline path
+      # account for at most a few percent more rejection.  Below 20 %
+      # is a strong mis-convergence signature (Voyager Enceladus
+      # C4400436 mis-converged at 17.7 % was the calibration case).
+      spurious_min_inlier_fraction: 0.20
+      # If the LM moves more than this many pixels from the integer
+      # coarse-NCC seed, flag spurious.  Defensive: with the trust
+      # region (below) the LM cannot leave the coarse basin, so
+      # this guard normally never fires; it stays in place to catch
+      # any future regression that bypasses the trust region.  Set
+      # slightly larger than ``lm_trust_region_px``.
+      spurious_max_lm_displacement_px: 4.0
+      # Maximum LM displacement from the integer coarse-NCC seed
+      # (pixels).  The LM rejects any trial step that would land
+      # outside this radius without committing — preventing the
+      # joint LM + Tukey IRLS instability that can otherwise drag
+      # the polyline off the coarse basin onto crater rims,
+      # terminator edges, or surface boundaries when reweighting
+      # at the trial offset finds a different inlier set.  The
+      # coarse NCC search returns the integer-pixel mask-overlap
+      # maximum, so the true sub-pixel optimum is within
+      # ``hypot(0.5, 0.5) ≈ 0.71`` px of the seed — 1.0 px gives
+      # legitimate sub-pixel refinement headroom while denying
+      # the LM the runway it needs to reach a 2-4 px-away
+      # spurious minimum.
+      lm_trust_region_px: 1.0
+      # Tikhonov anchor strength toward the coarse-NCC seed.  Set
+      # to 0 by default — Tikhonov strong enough to prevent
+      # multi-pixel walks on textured bodies also prevents
+      # legitimate sub-pixel refinement on clean ones.  The trust
+      # region is the harder bound; the spurious-detection guards
+      # catch the case where the LM hits the trust-region boundary
+      # with an unhealthy fit (Cassini Tethys N1574928113 falls
+      # here — the limb walks to the boundary, RMS is elevated,
+      # the spurious flag fires, and the fallback terminator
+      # technique handles the body).
+      lm_tikhonov_alpha: 0.0
+      # Final continuous gradient-ridge sub-pixel refinement after the DT
+      # Levenberg-Marquardt converges (see
+      # :func:`nav.nav_technique.dt_fitting.gradient_ridge_refine`).  Held
+      # OFF for the limb: the dominant limb error is a model-vs-image edge
+      # offset -- the gradient-magnitude peak of a limb-darkened,
+      # PSF-blurred limb sits ~0.1 px inside the geometric silhouette the
+      # LIMB_ARC predicts -- not the DT quantization the continuous fit
+      # would remove.  Refining onto the gradient peak therefore SHARPENS
+      # that offset (clean planted-(0,0) recovery worsens from ~0.10 px to
+      # ~0.17 px).  Removing the floor needs a model-side fix that predicts
+      # the limb at the gradient-peak location; see
+      # ``dev_guide_techniques_body_limb``.  1 enables, 0 disables (the
+      # tuning loader is numeric-only, so this is an int flag).
+      gradient_ridge_refine: 0
+      # Pixels of slack around the search-window axis bounds for the
+      # at-edge check.  See ``RingEdgeNav.at_edge_tolerance_px``.
+      at_edge_tolerance_px: 1.0
+      # Rotation-axis ``at_edge`` fraction; see
+      # ``BodyDiscCorrelateNav.rotation_at_edge_fraction``.
+      rotation_at_edge_fraction: 0.95
+
+  BodyTerminatorNav:
+    alpha0: -1.0
+    terms:
+      - feature: visible_terminator_arc_fraction
+        alpha: 2.0
+      - feature: dt_fit_rms_px
+        alpha: -1.0
+      - feature: visible_arc_px
+        alpha: 0.4
+        divisor: 100.0
+        cap_at: 1.0
+      - feature: mean_phase_angle_factor
+        alpha: 1.0
+      - feature: mean_albedo_penalty
+        alpha: -1.5
+    hard_zero_if:
+      at_edge: true
+      spurious: true
+    tuning:
+      # Minimum surviving polyline length per TERMINATOR_ARC for
+      # feasibility (same shape as BodyLimbNav.min_arc_vertices).
+      min_arc_vertices: 30.0
+      # Final DT residual exceeding this many terminator-sigmas marks
+      # the result spurious.
+      spurious_dt_rms_factor: 5.0
+      # Floor for the spurious-detection threshold (terminators are
+      # softer than limbs; the floor is one pixel wider).
+      spurious_dt_floor_px: 4.0
+      # Below this Tukey-inlier count the M-estimator covariance is
+      # no longer informative.
+      spurious_min_inliers: 6
+      # Below this inlier fraction the LM has almost certainly walked
+      # off the true terminator onto crater shadows or surface
+      # boundaries; see ``BodyLimbNav.spurious_min_inlier_fraction``
+      # for the motivation.
+      spurious_min_inlier_fraction: 0.20
+      # See ``BodyLimbNav.spurious_max_lm_displacement_px``.
+      spurious_max_lm_displacement_px: 4.0
+      # See ``BodyLimbNav.lm_trust_region_px``.
+      lm_trust_region_px: 1.0
+      # See ``BodyLimbNav.lm_tikhonov_alpha``.
+      lm_tikhonov_alpha: 0.0
+      # Pixels of slack around the search-window axis bounds for the
+      # at-edge check.  See ``RingEdgeNav.at_edge_tolerance_px``.
+      at_edge_tolerance_px: 1.0
+      # Rotation-axis ``at_edge`` fraction; see
+      # ``BodyDiscCorrelateNav.rotation_at_edge_fraction``.
+      rotation_at_edge_fraction: 0.95
+
+  RingEdgeNav:
+    alpha0: -1.0
+    terms:
+      - feature: total_edge_length_px
+        alpha: 1.0
+        divisor: 200.0
+        cap_at: 1.0
+      # Penalise the MEAN per-edge DT residual (px), not the raw sum.  The sum
+      # scales with the number of fused edges, so with a fixed divisor a frame
+      # with more rings was penalised purely for having more rings, driving
+      # confidence to zero on real multi-edge scenes.  The mean is
+      # edge-count independent: alpha -1.0 with the default unit divisor costs
+      # ~1 logit per pixel of mean per-edge residual.  PROVISIONAL magnitude --
+      # the px scale awaits the integration-library calibration sweep.
+      - feature: per_edge_dt_rms_mean
+        alpha: -1.0
+    hard_zero_if:
+      at_edge: true
+    tuning:
+      # Pixels of slack around the search-window axis bounds for the
+      # at-edge check.  A converged offset whose absolute distance from
+      # any axis bound (+/-margin_v, +/-margin_u) falls within this
+      # tolerance is flagged ``at_edge=True``.  One pixel matches the
+      # bilinear DT half-cell width: any closer and the LM gradient
+      # information is unreliable.
+      at_edge_tolerance_px: 1.0
+      # Final DT residual exceeding this many radial-sigmas marks the
+      # result spurious.
+      spurious_dt_rms_factor: 5.0
+      # Floor for the spurious-detection threshold.
+      spurious_dt_floor_px: 3.0
+      # Below this Tukey-inlier count the M-estimator covariance is no
+      # longer informative.
+      spurious_min_inliers: 6
+      # ``per_edge_dt_rms_summed / edge_count`` (the raw, un-Tukey-weighted
+      # average per-edge RMS) exceeding this many radial-sigmas marks
+      # the result spurious.  ``result.rms_px`` after Tukey reweighting
+      # collapses to ~0 when the LM converges to a local minimum where
+      # one edge fits cleanly and the others are wholly mis-aligned;
+      # the per-edge sum surfaces those bad edges so the ensemble does
+      # not have to absorb a confidence-zero result with a far-from-
+      # truth offset (Cassini Tethys N1572471790 was the calibration
+      # case — the LM locked onto one of three rings).
+      spurious_per_edge_rms_factor: 5.0
+      # See ``BodyLimbNav.spurious_max_lm_displacement_px``.
+      spurious_max_lm_displacement_px: 4.0
+      # See ``BodyLimbNav.lm_trust_region_px``.
+      lm_trust_region_px: 1.0
+      # See ``BodyLimbNav.lm_tikhonov_alpha``.
+      lm_tikhonov_alpha: 0.0
+      # Final continuous gradient-ridge sub-pixel refinement; see
+      # ``BodyLimbNav.gradient_ridge_refine``.  1 enables, 0 disables.
+      # ON: the binary edge mask quantises detected edges to the integer
+      # pixel grid, so on dense real ring scenes a large fraction of model
+      # vertices land exactly on edge pixels (DT == 0, zero gradient) and the
+      # DT-LM step stalls at the integer coarse-NCC seed.  The continuous
+      # gradient-ridge pass refines against the un-thresholded gradient
+      # magnitude, recovering the sub-pixel offset the quantised DT discards.
+      # (On clean sim scenes the DT-LM already reaches its ~0.016 px floor, so
+      # the refine is a no-op there.)
+      gradient_ridge_refine: 1
+      # Rotation-axis ``at_edge`` fraction; see
+      # ``BodyDiscCorrelateNav.rotation_at_edge_fraction``.
+      rotation_at_edge_fraction: 0.95
+
+  StarUniqueMatchNav:
+    # The 1-star path is capped at 0.7 inside the technique (single match
+    # cannot self-check); the 2-star path is capped at 0.8 (residual
+    # cross-checks the assignment).  YAML alpha shape is identical for
+    # both paths; the cap is applied post-sigmoid in
+    # ``StarUniqueMatchNav.navigate``.
+    alpha0: -1.0
+    terms:
+      # Higher predicted SNR shrinks the centroid CRLB and tightens the
+      # match.  Saturate near snr=20 (typical bright catalog star).
+      - feature: predicted_snr
+        alpha: 1.0
+        divisor: 20.0
+        cap_at: 1.0
+      # Magnitude margin to the next-brightest predictable star in the
+      # extfov.  Below the 1.5 mag floor the technique short-circuits
+      # before reaching the formula; above the floor, additional margin
+      # earns confidence up to a 1.5 mag span.
+      - feature: brightness_margin_mag
+        alpha: 1.0
+        offset: 1.5
+        divisor: 1.5
+        cap_at: 1.0
+      # Larger residuals between the matched detection and the prediction
+      # pull confidence down.
+      - feature: residual_px
+        alpha: -1.0
+        divisor: 2.0
+    hard_zero_if:
+      at_edge: true
+      spurious: true
+    tuning:
+      # Minimum magnitude difference to the next-brightest predictable
+      # star for the 1-star path to fire.
+      brightness_margin_to_next_catalog_star_mag: 1.5
+      # Half-width of the search window around each prediction (px).
+      # Should bracket the per-instrument SPICE pointing-error envelope
+      # so the brightest peak in the window is the matched detection.
+      search_window_px: 30.0
+      # Centroid box half-width around the brightness peak (px).
+      centroid_box_half_px: 3
+      # Maximum allowed best-assignment residual in the 2-star path
+      # before falling back to the 1-star path.
+      max_residual_px: 4.0
+      # Detection-threshold multiplier on image_noise_sigma; below this
+      # the brightest pixel inside the search window is considered noise.
+      detection_sigma: 4.0
+      # Per-mode caps applied post-sigmoid; the 1-star path cannot
+      # self-check, so its cap is lower than the 2-star path's.
+      one_star_confidence_cap: 0.7
+      two_star_confidence_cap: 0.8
+      # Pixels of slack around the search-window axis bounds for the
+      # at-edge check.  A converged offset whose absolute distance from
+      # any axis bound (+/-margin_v, +/-margin_u) falls within this
+      # tolerance is flagged ``at_edge=True`` and forced to zero
+      # confidence by the technique's ``hard_zero_if`` gate.  Matches
+      # the bilinear-DT half-cell width used elsewhere in the pipeline.
+      at_edge_tolerance_px: 1.0
+      # Rotation-axis ``at_edge`` fraction; see
+      # ``BodyDiscCorrelateNav.rotation_at_edge_fraction``.  Only used
+      # by the 2-star Procrustes path; the 1-star path always reports
+      # rotation as unobservable so the threshold has no effect there.
+      rotation_at_edge_fraction: 0.95
+
+  StarRefineNav:
+    # Pass-2 refinement on the pass-1 ensemble's prior offset.  Tighter
+    # alphas than the unique-match path because every surviving inlier
+    # contributes independent evidence.
+    alpha0: -1.0
+    terms:
+      # More inliers => more independent constraints; saturate at 5.
+      - feature: n_stars_used
+        alpha: 1.0
+        divisor: 5.0
+        cap_at: 1.0
+      # Lower median per-star error => tighter refinement.
+      - feature: median_pos_err_px
+        alpha: -1.0
+        divisor: 1.0
+      # Lower per-axis scatter => internally consistent fit.
+      - feature: residual_scatter_px
+        alpha: -1.0
+        divisor: 1.0
+    hard_zero_if:
+      at_edge: true
+      spurious: true
+    tuning:
+      # Half-width of the per-star refine window (px).  Tighter than the
+      # unique-match search window because the pass-1 prior already put
+      # us within a few pixels of the right answer.
+      refine_window_px: 6.0
+      # Centroid box half-width around the brightness peak (px).
+      centroid_box_half_px: 3
+      # Drop a star whose detection sits more than this many pixels from
+      # the prior-shifted prediction; almost certainly a wrong peak.
+      max_per_star_residual_px: 4.0
+      # Detection-threshold multiplier on image_noise_sigma.
+      detection_sigma: 4.0
+      # Below this many surviving inliers the technique reports spurious.
+      min_inliers: 1
+      # Pixels of slack around the search-window axis bounds for the
+      # at-edge check (see StarUniqueMatchNav.at_edge_tolerance_px).
+      at_edge_tolerance_px: 1.0
+      # Post-sigmoid confidence cap when the refine fit had only one
+      # inlier.  A 1-star refine adds no independent cross-check
+      # information beyond the prior it was handed (the same single
+      # observation that drove the pass-1 fit), so its confidence
+      # ceiling is set lower than ``StarUniqueMatchNav``'s 0.7 1-star
+      # cap.  The ensemble's primary-technique selection therefore
+      # cannot promote a 1-star refine over a 1-star unique-match on
+      # the same observation.  Phase 10 calibration may retune the
+      # numeric value; the structural cap stays.
+      single_inlier_confidence_cap: 0.5
+      # Rotation-axis ``at_edge`` fraction; see
+      # ``BodyDiscCorrelateNav.rotation_at_edge_fraction``.  Only the
+      # multi-inlier Procrustes path uses it; a 1-inlier refine always
+      # reports rotation as unobservable.
+      rotation_at_edge_fraction: 0.95
+
+  StarFieldFromCatalogNav:
+    # Multi-star RANSAC pattern matcher.  Confidence is dominated by
+    # ``n_inliers`` (more matched stars => stronger constraint) and is
+    # pulled down by residual scatter.  The ``n_detected_sources`` and
+    # ``n_catalog_predicted`` terms ride alpha=0.0 pending Phase 10
+    # calibration; the wiring is in place so a sweep can tune them
+    # without code changes.
+    alpha0: -2.0
+    terms:
+      - feature: n_inliers
+        alpha: 1.0
+        offset: 6.0
+        divisor: 6.0
+        cap_at: 1.0
+      - feature: median_residual_px
+        alpha: -1.0
+        divisor: 1.0
+      - feature: n_detected_sources
+        alpha: 0.0
+        divisor: 30.0
+        cap_at: 1.0
+      - feature: n_catalog_predicted
+        alpha: 0.0
+        divisor: 30.0
+        cap_at: 1.0
+    hard_zero_if:
+      at_edge: true
+      spurious: true
+    tuning:
+      # Maximum number of brightest detected sources / brightest
+      # catalog stars to feed the matcher.  Triplet count is M^3, so
+      # 30 keeps the candidate list bounded (~27K triplets per side).
+      max_sources: 30
+      # Detection-threshold multiplier on image_noise_sigma.
+      detection_sigma: 4.0
+      # Gaussian PSF sigma (px) used for the matched-filter kernel.
+      # Matches the typical ungroomed star PSF; per-instrument
+      # overrides arrive in Phase 9 / 10 once the integration library
+      # exercises the full instrument set.
+      psf_sigma_px: 1.0
+      # Centroid box half-width around each detection peak (px).
+      centroid_box_half_px: 3
+      # KD-tree match radius in the (ratio, ratio, angle_rad) hash
+      # space; weighted Euclidean.  0.05 is the empirical default for
+      # centroid sigma ~0.1 px against typical triplet scales (Part 3
+      # §"Algorithm specifics").
+      hash_match_tolerance: 0.05
+      # Per-axis weights in the hash distance metric.  Radians and
+      # dimensionless ratios are roughly comparable in magnitude over
+      # the typical triplet shapes; both default to 1.0.
+      hash_ratio_weight: 1.0
+      hash_angle_weight: 1.0
+      # Maximum residual (px) for a detection-to-catalog
+      # correspondence to count as an inlier under a candidate
+      # transform.
+      inlier_tolerance_px: 2.0
+      # Minimum inlier count for the matcher to accept a transform;
+      # below this the technique returns spurious.
+      pattern_match_min_inliers: 6
+      # Pixels of slack around the search-window axis bounds for the
+      # at-edge check (see StarUniqueMatchNav.at_edge_tolerance_px).
+      at_edge_tolerance_px: 1.0
+      # Rotation-axis ``at_edge`` fraction; see
+      # ``BodyDiscCorrelateNav.rotation_at_edge_fraction``.
+      rotation_at_edge_fraction: 0.95
+      # Uncalibrated model-error floor (px), added in quadrature to the
+      # reported covariance diagonal: reported_cov = CRLB-form (+)
+      # model_error_floor_px**2.  Captures the SPICE pointing residual
+      # and body-shape error that the pattern-match residual scatter
+      # does not.  Default 0.0 is a no-op pending an integration-library
+      # calibration sweep.
+      model_error_floor_px: 0.0
+      # PSF-fit refinement of matched inliers.  The brightness-weighted
+      # moment centroid that pins each detection is unbiased but only
+      # noise-limited; for faint stars its scatter dominates the field
+      # offset.  After the matcher fixes the correspondences, each inlier
+      # detection is re-centroided by a true PSF fit
+      # (``obs.star_psf().find_position``) against the instrument's
+      # modelled point-spread function, which is the minimum-variance
+      # estimator and roughly halves-to-quarters the per-star error in
+      # the photon-noise-limited regime.  An undersampled PSF fit carries
+      # a small sub-pixel-phase bias floor (~0.08 px) that only matters
+      # once a star is bright enough for the moment's noise to fall below
+      # it, so the refinement is applied per star only below an
+      # integrated-SNR ceiling; brighter detections keep the moment.
+      # 1 enables the refinement; 0 keeps the moment centroid everywhere.
+      psf_refine_enabled: 1
+      # Square box side (px, odd) for the PSF fit and the integrated-SNR
+      # estimate around each inlier.
+      psf_refine_box_px: 11
+      # Maximum search distance (px) from the moment centroid for the
+      # PSF fit; the moment is already within a pixel of truth.
+      psf_refine_search_limit_px: 2.0
+      # Integrated-SNR ceiling: a detection whose box SNR
+      # (total net signal / sqrt(signal + n_pix * noise_sigma**2))
+      # exceeds this keeps its moment centroid, because above the
+      # moment/PSF crossover the moment's noise is already below the PSF
+      # bias floor.  Calibrated to the field-level crossover on the sim
+      # star fields (~30 for a nominal background; the optimum drifts to
+      # ~16-21 under elevated read noise or a stray-light gradient, so
+      # this is set for the nominal case -- see the star-field
+      # centroiding section of the simulator performance report).
+      psf_refine_snr_max: 30.0
+
+  RingAnnulusNav:
+    alpha0: -2.0
+    terms:
+      # PSR-style quality measure of the chosen NCC peak.  Healthy
+      # annulus fits report quality 6-15; the divisor maps that range
+      # onto the sigmoid's responsive interval.
+      - feature: ncc_peak
+        alpha: 1.5
+        divisor: 6.0
+        cap_at: 1.0
+      # Peak-to-runner-up ratio: alpha=0.0 pending calibration (same
+      # posture as BodyDiscCorrelateNav).
+      - feature: peak_to_runner_up_ratio
+        alpha: 0.0
+        divisor: 2.0
+        cap_at: 1.0
+      # Reward additional ring systems in the composite.  The current
+      # spacecraft fleet has at most a handful of multi-planet ring
+      # scenes, so the saturation cap is at 2 (vs body_count's 3).
+      - feature: annulus_count
+        alpha: 0.4
+        divisor: 2.0
+        cap_at: 1.0
+    hard_zero_if:
+      at_edge: true
+      spurious: true
+
+
+# Feature-emission tunables that decide which technique a given
+# scene's features feed.  Per-planet overrides because Saturn's ring
+# system spans tens of thousands of km radially while the Jupiter /
+# Uranus / Neptune systems are an order of magnitude narrower; the
+# "individual edges can't be separated" criterion lives at very
+# different image-scale thresholds.
+feature_emission:
+  ring_annulus:
+    # Default applies to any planet that does not have an explicit
+    # entry below.  Both Saturn and the giant-planet fleet have entries
+    # so this default is mostly defensive against typos / new planets.
+    default:
+      # Maximum per-edge polyline radial extent (px) below which the
+      # rings model emits a RING_ANNULUS template instead of per-edge
+      # polylines.  Per-polyline gate; fires when a single ring edge
+      # has compressed below this width.
+      max_radial_px: 5.0
+      # Ring-radial km/px threshold above which the ENTIRE ring system
+      # is annulus-class regardless of any per-polyline metric.  At
+      # this resolution even a "well-traceable" per-edge polyline only
+      # spans a handful of pixels along the radial direction; the
+      # right technique is the multi-ring composite NCC, not the
+      # per-edge DT fit.
+      kmpp_threshold: 1000.0
+    planets:
+      SATURN:
+        # Saturn's main rings span ~75000-140000 km (~65000 km wide).
+        # At km/px > 1000 the entire system is < 65 px wide and
+        # individual edges within rings (gaps, ringlets) are sub-pixel
+        # apart — annulus path wins.
+        max_radial_px: 5.0
+        kmpp_threshold: 1000.0
+      JUPITER:
+        # Jupiter's main ring spans ~122500-129000 km (~6500 km wide,
+        # ~10x narrower than Saturn).  Lower kmpp threshold so
+        # annulus fires before the ring becomes a single bright pixel.
+        max_radial_px: 5.0
+        kmpp_threshold: 200.0
+      URANUS:
+        # Uranus's main rings span ~41800-51200 km (~9400 km wide).
+        max_radial_px: 5.0
+        kmpp_threshold: 300.0
+      NEPTUNE:
+        # Neptune's main rings span ~41900-62900 km (~21000 km wide).
+        max_radial_px: 5.0
+        kmpp_threshold: 500.0

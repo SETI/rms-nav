@@ -3,13 +3,13 @@
 This module provides the RingMosaic class for reprojecting planetary ring
 images onto radius/longitude grids and accumulating them into sparse mosaics.
 
-Thread safety: RingMosaic.reproject() is not thread-safe because it may
-temporarily mutate obs.fov and oops global precision settings. Concurrent
-calls from separate threads will interfere.
+Thread safety: RingMosaic.reproject() is not thread-safe because it
+temporarily reduces the oops global light-time precision (a process-global
+mutation) and builds a Backplane on the shared obs. Concurrent calls from
+separate threads will interfere.
 """
 
 import enum
-import logging
 import math
 from dataclasses import dataclass
 from typing import Any
@@ -18,8 +18,10 @@ import numpy as np
 import numpy.ma as ma
 import oops
 import scipy.ndimage as nd
+from pdslogger import PdsLogger
 from polymath import Scalar, Vector3
 
+from nav.config import IMAGE_LOGGER
 from nav.reproj._context_managers import _reduced_oops_precision
 from nav.reproj._serialization import (
     infer_format,
@@ -36,8 +38,6 @@ from nav.reproj.photometric_model import PhotometricModel
 from nav.reproj.ring_orbit_model import RingOrbitModel
 from nav.support.image import array_unzoom, array_zoom
 from nav.support.types import NDArrayBoolType, NDArrayFloatType, NDArrayIntType, PathLike
-
-_LOGGING_NAME = 'nav.' + __name__
 
 
 def _ring_plane_surface(ring_body_name: str) -> Any:
@@ -712,8 +712,9 @@ class RingMosaic:
             ``reproject()`` before accumulation. ``None`` means raw brightness.
 
     Notes:
-        reproject() is not thread-safe because it mutates obs.fov and oops
-        global precision settings.
+        reproject() is not thread-safe because it temporarily reduces the
+        oops global light-time precision (a process-global mutation) and
+        builds a Backplane on the shared obs.
 
         ``time`` is always stored as ``float64`` regardless of
         ``metadata_dtype``. ``image_number`` is always stored as
@@ -1035,7 +1036,7 @@ class RingMosaic:
             TypeError: If ``zoom_amt`` is not an int (excluding ``bool``) or a
                 length-2 tuple/list of ints, or an element is not int-like.
         """
-        logger = logging.getLogger(_LOGGING_NAME + '.reproject')
+        logger = IMAGE_LOGGER
         logger.debug(
             'longitude_range=%s radius_range=%s zoom=%s',
             longitude_range,
@@ -1127,7 +1128,7 @@ class RingMosaic:
         orbit_model: RingOrbitModel | None,
         uv_range: tuple[int, int, int, int] | None,
         omit_shadow: bool,
-        logger: logging.Logger,
+        logger: PdsLogger,
         image_name: str,
     ) -> RingReprojResult:
         """Inner reprojection logic, runs with reduced oops precision."""
@@ -1210,6 +1211,17 @@ class RingMosaic:
         full_min_lon_bin = int(np.floor(longitude_start / self._lon_resolution))
         full_max_lon_bin = int(np.floor(longitude_end / self._lon_resolution))
         n_full_lon_bins = full_max_lon_bin - full_min_lon_bin + 1
+        # Bin relative to a *grid-aligned* origin (the floor of longitude_start
+        # snapped to the global longitude grid), NOT to longitude_start itself.
+        # The global mosaic's bin -> longitude convention is ``bin * res`` (see
+        # ``bounds`` / ``to_bounded``), so placing relative bin ``b`` at global
+        # bin ``b + full_min_lon_bin`` is only correct when the binning origin
+        # is grid-aligned.  Using longitude_start directly would offset every
+        # column by the sub-bin remainder ``longitude_start - full_min_lon_bin *
+        # res`` whenever a custom ``--longitude-range`` start is not a multiple
+        # of the longitude resolution.  The requested range is still enforced by
+        # the mask below, which uses the true longitude_start / longitude_end.
+        lon_bin_origin = full_min_lon_bin * self._lon_resolution
 
         restr_bp_lon = bp_longitude[
             (bp_longitude >= longitude_start)
@@ -1219,7 +1231,7 @@ class RingMosaic:
         ]
 
         bp_lon_binned = np.floor(
-            (restr_bp_lon.vals - longitude_start) / self._lon_resolution
+            (restr_bp_lon.vals - lon_bin_origin) / self._lon_resolution
         ).astype('int')
         full_good_antimask = np.zeros(n_full_lon_bins, dtype=np.bool_)
         full_good_antimask[bp_lon_binned] = True
@@ -1253,7 +1265,7 @@ class RingMosaic:
 
         long_bins = np.tile(np.arange(n_lon_bins), n_radius_bins)
         long_bins_act = np.tile(
-            lon_bins_restr * self._lon_resolution + longitude_start, n_radius_bins
+            lon_bins_restr * self._lon_resolution + lon_bin_origin, n_radius_bins
         )
 
         if r_zoom_amt == 1 and l_zoom_amt == 1:
@@ -1262,7 +1274,7 @@ class RingMosaic:
         else:
             long_bins_zoom = np.tile(np.arange(n_lon_bins_zoom), n_radius_bins_zoom)
             long_bins_act_zoom = np.tile(
-                lon_bins_restr_zoom * self._lon_resolution + longitude_start,
+                lon_bins_restr_zoom * self._lon_resolution + lon_bin_origin,
                 n_radius_bins_zoom,
             )
 

@@ -1,0 +1,38 @@
+schema_version: 1
+scene_name: planted_offset_limb_mesh
+instrument: coiss_nac
+size_v: 220
+size_u: 220
+random_seed: 7
+exposure_sec: 1.0
+# B7 scenario 1: mesh vs mesh, same pose.  A well-resolved irregular (mesh) body
+# at low phase whose render and navigation geometry are the same mesh + pose, so
+# the resolved-mesh limb path is exact by construction.  NavModelBodySimulated
+# emits a LIMB_ARC from the rendered silhouette boundary; with the predicted mesh
+# identical to the rendered one, BodyLimbNav's distance-transform fit aligns the
+# two silhouettes and recovers the planted offset to a few tenths of a pixel.
+# The body is large (axis1 = 150 px) so it clears the 100 px limb-emission floor,
+# and the phase is 30 deg so most of the boundary is the sunward lit limb (a
+# sharp image edge) rather than terminator.  The full ensemble also recovers via
+# the disc correlation, so this doubles as a disc scene; the dedicated test pins
+# BodyLimbNav to prove the mesh-limb path.
+bodies:
+  - name: HYPERION
+    shape_model: polyhedral_mesh
+    mesh_lumpiness: 0.15
+    mesh_seed: 7
+    pose_euler_deg: [10.0, 35.0, 0.0]
+    center_v: 110.0
+    center_u: 110.0
+    axis1: 150.0
+    axis2: 110.0
+    axis3: 95.0
+    illumination_angle: 25.0
+    phase_angle: 30.0
+rings: []
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 1.43
+offset_u: -0.61
+offset_rotation_deg: 0.0

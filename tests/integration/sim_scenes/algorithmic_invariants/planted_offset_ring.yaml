@@ -1,0 +1,32 @@
+schema_version: 1
+scene_name: planted_offset_ring
+instrument: coiss_nac
+size_v: 220
+size_u: 220
+random_seed: 7
+exposure_sec: 1.0
+# A centred ringlet whose inner and outer edges are well-curved circular arcs.
+# The simulated ring model emits one RING_EDGE per edge -- a per-vertex polyline
+# with outward radial normals -- which RingEdgeNav fits against the image-edge
+# distance transform.  Two curved arcs constrain the offset in both axes, so the
+# planted offset is recovered (RMS ~0.4 px, rank_1=False).  Recovery is asserted
+# on the RingEdgeNav per-technique result: the technique recovers the offset
+# geometrically (non-spurious), but on a clean sim ring its placeholder-alpha
+# confidence sits below the success threshold, so the fused status is a stable
+# 'failed' -- the scene is held out of the full-ensemble navigate assertion.
+bodies: []
+rings:
+  - name: SATURN
+    feature_type: RINGLET
+    center_v: 110.0
+    center_u: 110.0
+    inner_data:
+      - {mode: 1, a: 60.0, rms: 1.0, ae: 0.0, long_peri: 0.0, rate_peri: 0.0}
+    outer_data:
+      - {mode: 1, a: 85.0, rms: 1.0, ae: 0.0, long_peri: 0.0, rate_peri: 0.0}
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 1.43
+offset_u: -0.61
+offset_rotation_deg: 0.0

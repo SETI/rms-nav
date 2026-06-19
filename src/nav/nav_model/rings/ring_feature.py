@@ -252,9 +252,9 @@ class RingFeature:
     def uncertainty(self) -> float:
         """Maximum RMS across all present edges (km).
 
-        Used to populate ``NavModelResult.uncertainty``. The maximum (rather
-        than minimum or average) is conservative: the overall uncertainty of
-        a feature is dominated by its least well-characterized edge.
+        The maximum (rather than minimum or average) is conservative: the
+        overall uncertainty of a feature is dominated by its least
+        well-characterized edge.
 
         Returns:
             Max of inner and outer edge RMS values, or the single edge RMS

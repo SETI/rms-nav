@@ -1,11 +1,11 @@
 import math
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import numpy as np
 import numpy.typing as npt
 from numpy.fft import fft2, fftfreq, ifft2, ifftshift
 from pdslogger import PdsLogger
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, sobel
 
 from nav.config import IMAGE_LOGGER
 from nav.support.image import crop_center, normalize_array, pad_top_left
@@ -20,6 +20,26 @@ _NCC_EPS = 1e-12
 # ==============================================================
 # Small utilities
 # ==============================================================
+
+
+def gradient_magnitude(arr: NDArrayFloatType) -> NDArrayFloatType:
+    """Sobel gradient magnitude.
+
+    Emphasizes edges over flat interior regions, which is what you want when
+    the raw-intensity NCC has a broad plateau — e.g., a lit body disc that
+    overflows the FOV, where interior brightness is near-uniform and the only
+    unique-alignment signal lies at the limb.
+
+    Parameters:
+        arr: 2-D input array.
+
+    Returns:
+        Same-shape gradient-magnitude array, as ``float64``.
+    """
+    a = np.asarray(arr, np.float64)
+    gx = sobel(a, axis=1, mode='constant', cval=0.0)
+    gy = sobel(a, axis=0, mode='constant', cval=0.0)
+    return cast(NDArrayFloatType, np.hypot(gx, gy))
 
 
 def int_to_signed(idx: int, size: int) -> int:
@@ -304,10 +324,13 @@ def nms_topk(
         k: Maximum number of peaks to return.
         radius: Suppression radius around each selected peak in pixels.
         max_offset_vu: If given, only positions whose signed offset
-            satisfies ``|dV| <= max_offset_vu[0]`` and
-            ``|dU| <= max_offset_vu[1]`` are eligible.  Signed offsets
-            are derived from the FFT-convention wrap-around used by
-            :func:`int_to_signed`.
+            satisfies ``|dV| < max_offset_vu[0]`` and
+            ``|dU| < max_offset_vu[1]`` are eligible (strict inequality:
+            peaks at the exact window boundary are excluded because they
+            signal a clipped search and cannot be trusted; the pyramid
+            driver additionally marks any final result within 1 pixel of
+            the boundary as spurious). Signed offsets are derived from the
+            FFT-convention wrap-around used by :func:`int_to_signed`.
 
     Returns:
         List of ``(row, col, value)`` tuples for up to ``k`` peaks.
@@ -321,8 +344,8 @@ def nms_topk(
         # Signed offsets via FFT wrap-around convention (same as int_to_signed).
         signed_rows = np.where(rows < corr_v // 2, rows, rows - corr_v)
         signed_cols = np.where(cols < corr_u // 2, cols, cols - corr_u)
-        work[np.abs(signed_rows) > max_v, :] = -np.inf
-        work[:, np.abs(signed_cols) > max_u] = -np.inf
+        work[np.abs(signed_rows) >= max_v, :] = -np.inf
+        work[:, np.abs(signed_cols) >= max_u] = -np.inf
     peaks: list[tuple[int, int, float]] = []
     if not np.any(np.isfinite(work)):
         return peaks
@@ -376,6 +399,9 @@ def evaluate_candidate(
     prior_shift: tuple[float, float] | None = None,
     prior_weight: float = 0.0,
     metric: str = 'psr',
+    refine_image_pad: NDArrayFloatType | None = None,
+    refine_model_pad: NDArrayFloatType | None = None,
+    refine_lowpass_sigma_px: float = 0.0,
 ) -> dict[str, Any]:
     """
     Evaluate a candidate for the navigation.
@@ -392,17 +418,62 @@ def evaluate_candidate(
         prior_shift: The prior shift.
         prior_weight: The prior weight.
         metric: The metric to use for the navigation.
+        refine_image_pad: Optional padded image used *only* for the sub-pixel
+            cross-power-spectrum refinement, in place of ``image_pad``.  When the
+            coarse peak is found on gradient-magnitude surfaces (``use_gradient``),
+            pass the raw-intensity padded image here: the Sobel *magnitude*
+            rectifies the signal, so its cross-power peak is non-smooth at the apex
+            and the upsampled-DFT sub-pixel estimate is biased (largest near
+            whole-pixel offsets), whereas raw intensity reaches the
+            ``upsample_factor`` resolution.  Defaults to ``image_pad``.
+        refine_model_pad: Optional padded model for the same refinement; defaults
+            to ``model_pad``.
 
     Returns:
         A dictionary containing the navigation result.
+
+    Raises:
+        ValueError: If the model is smaller than the image in either dimension
+            (the model must be at least image-sized; pad it with
+            ``pad_top_left`` first).  This is validated here so the failure is a
+            clear contract error rather than an opaque ``crop_center`` error two
+            calls deep.
     """
+
+    model_h, model_w = model_shape
+    image_h, image_w = image_shape
+    if image_h > model_h or image_w > model_w:
+        raise ValueError(
+            f'model shape {model_shape} must be at least as large as the image '
+            f'shape {image_shape} in both dimensions; a model smaller than the '
+            f'image is not supported (pad the model to at least image size first)'
+        )
 
     corr_v, corr_u = corr.shape
     p, q = rc
     dy_i, dx_i = int_to_signed(p, corr_v), int_to_signed(q, corr_u)
 
-    # Subpixel refinement: local upsampled DFT of correlation spectrum numerator
-    spec = fft2(image_pad) * np.conj(fft2(model_pad * mask_pad))
+    # Subpixel refinement: local upsampled DFT of correlation spectrum numerator.
+    # Refine on the raw-intensity surfaces when provided (see ``refine_image_pad``)
+    # so a gradient-magnitude coarse peak does not carry its rectified-cusp
+    # sub-pixel bias into the reported offset.
+    refine_image = image_pad if refine_image_pad is None else refine_image_pad
+    refine_model = model_pad if refine_model_pad is None else refine_model_pad
+    refine_model_masked = refine_model * mask_pad
+    # Band-limit both surfaces before the cross-power.  The sub-pixel peak of two
+    # sharp, anti-aliased (but non-PSF-blurred) surfaces with differing edge
+    # profiles -- a rendered body / ring vs. a Lambert template -- is aliased by a
+    # sub-pixel-phase-dependent amount (a ~0.03 px odd S-curve, zero at integer and
+    # half-pixel offsets).  A matched Gaussian low-pass removes the high-frequency
+    # mismatch that drives it, cutting the disc / ring residual to ~0.01 px; the
+    # upsampled DFT still localizes the smoothed peak.  The low-pass is applied to
+    # the final surfaces (the image and the already-masked model) so the model's
+    # support edge is not re-sharpened by the mask afterwards.  Default 0.0 is a
+    # no-op.
+    if refine_lowpass_sigma_px > 0.0:
+        refine_image = gaussian_filter(refine_image, refine_lowpass_sigma_px)
+        refine_model_masked = gaussian_filter(refine_model_masked, refine_lowpass_sigma_px)
+    spec = fft2(refine_image) * np.conj(fft2(refine_model_masked))
     # Center of the local upsampled DFT window should be the middle of the
     # evaluation region (e.g., 3x3 -> center index 1), not half the upsample factor.
     # Using upsample_factor here caused increasing bias for large factors.
@@ -422,9 +493,8 @@ def evaluate_candidate(
     dy = dy_i + (upy - oy) / upsample_factor
     dx = dx_i + (upx - ox) / upsample_factor
 
-    # Align combined model and compute residual stats
-    model_h, model_w = model_shape
-    image_h, image_w = image_shape
+    # Align combined model and compute residual stats (model_h/w, image_h/w
+    # were unpacked and validated at the top of the function).
     model_shift = fourier_shift(model_pad[:model_h, :model_w], dy, dx)
     model_crop = crop_center(model_shift, (image_h, image_w))
     image_crop = image_pad[:image_h, :image_w]
@@ -486,6 +556,8 @@ def navigate_single_scale_kpeaks(
     nms_radius: int = 5,
     max_offset_vu: tuple[int, int] | None = None,
     data_mask: NDArrayBoolType | None = None,
+    use_gradient: bool = False,
+    refine_lowpass_sigma_px: float = 0.0,
 ) -> dict[str, Any]:
     """
     One-scale masked NCC + top-K candidate evaluation.
@@ -512,6 +584,11 @@ def navigate_single_scale_kpeaks(
             the NCC is computed in its bi-directional form so that the
             model extending into the padded margin does not bias the
             peak toward ``|dV| = margin_v``.
+        use_gradient: When True, replace ``image`` and ``model`` with their
+            Sobel gradient magnitudes before the NCC. Use this when the raw
+            intensity surface has a broad plateau — e.g., a body that fills
+            or overflows the FOV, where the only unique-alignment signal is
+            at the limb.
 
     Returns:
         A dictionary containing the navigation result.
@@ -520,14 +597,31 @@ def navigate_single_scale_kpeaks(
     # Use original image for correlation surfaces; masked NCC computes its own
     # normalization, and using normalized-and-then-padded images biases the
     # unnormalized numerator surface used in refinement.
-    image_orig = np.asarray(image, np.float64)
-    model_h, model_w = model.shape
+    image_raw = np.asarray(image, np.float64)
+    model_raw = np.asarray(model, np.float64)
+    if use_gradient:
+        image_orig = np.asarray(gradient_magnitude(image), np.float64)
+        model_arr = np.asarray(gradient_magnitude(model), np.float64)
+    else:
+        image_orig = image_raw
+        model_arr = model_raw
+    model_h, model_w = model_arr.shape
     image_h, image_w = image_orig.shape
     padded_h, padded_w = image_h + model_h, image_w + model_w
 
     image_pad = pad_top_left(image_orig, padded_h, padded_w)
-    model_pad = pad_top_left(model, padded_h, padded_w)
+    model_pad = pad_top_left(model_arr, padded_h, padded_w)
     mask_pad = pad_top_left(mask, padded_h, padded_w)
+    # The gradient surfaces localise the integer peak (and drive quality), but the
+    # sub-pixel refinement runs on the raw-intensity surfaces to avoid the
+    # gradient-magnitude rectification bias.  Without gradient mode these are the
+    # same arrays, so the refinement is unchanged.
+    if use_gradient:
+        refine_image_pad = pad_top_left(image_raw, padded_h, padded_w)
+        refine_model_pad = pad_top_left(model_raw, padded_h, padded_w)
+    else:
+        refine_image_pad = image_pad
+        refine_model_pad = model_pad
     data_mask_pad: NDArrayBoolType | None = None
     if data_mask is not None:
         data_mask_pad = pad_top_left(data_mask.astype(bool), padded_h, padded_w)
@@ -567,6 +661,9 @@ def navigate_single_scale_kpeaks(
             prior_weight=prior_weight,
             metric=metric,
             logger=logger,
+            refine_image_pad=refine_image_pad,
+            refine_model_pad=refine_model_pad,
+            refine_lowpass_sigma_px=refine_lowpass_sigma_px,
         )
         candidates.append(evaluation)
         if logger is not None:
@@ -583,18 +680,77 @@ def navigate_single_scale_kpeaks(
         # TODO When no candidates are found, the function returns cov: np.diag([1e6, 1e6])
         # and quality: -np.inf. Downstream code might not check for -np.inf quality and could
         # treat this as a valid result. Consider returning None or raising an exception instead.
+        # The result-shape contract matches the populated path so callers
+        # (e.g. ``navigate_with_pyramid_kpeaks`` debug log) can read every
+        # key without a KeyError when the search collapses.
         return {
             'offset': (0.0, 0.0),
             'cov': np.diag([1e6, 1e6]),
             'sigma_xy': (1e3, 1e3),
             'quality': -np.inf,
+            'peak_val': 0.0,
+            'rc': (0, 0),
+            'all_candidates': [],
         }
-    return max(candidates, key=lambda r: r['quality'])
+    winner = max(candidates, key=lambda r: r['quality'])
+    # Carry every evaluated candidate so callers that want to inspect
+    # runner-up peaks (e.g. peak-to-runner-up ratio diagnostics) can do
+    # so without re-running the correlation.  Sorted by quality desc so
+    # ``all_candidates[0]`` is the winner and ``[1:]`` are runner-ups.
+    # Return a shallow copy of the winner with the per-candidate list
+    # attached separately so the returned dict is not self-referential
+    # (the original winner remains an entry inside the new list).
+    sorted_candidates = sorted(candidates, key=lambda r: r['quality'], reverse=True)
+    result = dict(winner)
+    result['all_candidates'] = sorted_candidates
+    return result
 
 
 # ==============================================================
 # Pyramid wrapper with K-peak final selection
 # ==============================================================
+
+
+_MAX_PEAK_RATIO: float = 1.0e3
+"""Upper bound on :func:`peak_to_runner_up_ratio`.
+
+Any ratio at or above this represents an effectively unambiguous winner;
+the downstream confidence sigmoid saturates far below it (``divisor=2``,
+``cap_at=1`` in ``config_510_techniques.yaml``).  The cap keeps the
+returned value -- and the diagnostic that stores it -- bounded instead of
+blowing up to ``~1e9`` when the runner-up quality is near zero.
+"""
+
+
+def peak_to_runner_up_ratio(top_k_peaks: list[tuple[float, float, float]]) -> float:
+    """Return the ratio of the winning peak's quality to the runner-up's.
+
+    ``top_k_peaks`` is ``[(quality, dv, du), ...]`` sorted by quality
+    descending (the convention :func:`navigate_with_pyramid_kpeaks` uses).
+    Returns ``1.0`` when only one peak survives non-maximum suppression --
+    what an unambiguous correlation looks like, so a value at or above 1.0
+    is the "good" tail -- and ``0.0`` when no peaks are present.  When the
+    runner-up quality is non-positive (rare; happens with the prior
+    penalty) the result is the unambiguous-winner cap ``_MAX_PEAK_RATIO``
+    rather than ``winner / 1e-9`` (which scaled with the winner's
+    magnitude and could reach ``~1e9``).  The ordinary ratio is likewise
+    clamped to ``_MAX_PEAK_RATIO``.
+
+    Parameters:
+        top_k_peaks: Peaks sorted by quality descending.
+
+    Returns:
+        Capped peak-to-runner-up quality ratio.
+    """
+    if not top_k_peaks:
+        return 0.0
+    if len(top_k_peaks) == 1:
+        return 1.0
+    winner_q = float(top_k_peaks[0][0])
+    runner_q = float(top_k_peaks[1][0])
+    if runner_q <= 1e-9:
+        return _MAX_PEAK_RATIO if winner_q > 0.0 else 0.0
+    return min(winner_q / runner_q, _MAX_PEAK_RATIO)
 
 
 def navigate_with_pyramid_kpeaks(
@@ -611,6 +767,8 @@ def navigate_with_pyramid_kpeaks(
     prior_weight_final: float = 0.25,
     max_offset_vu: tuple[int, int] | None = None,
     data_mask: NDArrayBoolType | None = None,
+    use_gradient: bool | Literal['auto'] = False,
+    refine_lowpass_sigma_px: float = 0.0,
     logger: PdsLogger | None = None,
 ) -> dict[str, Any]:
     """TODO Clean this up
@@ -645,6 +803,17 @@ def navigate_with_pyramid_kpeaks(
             in its bi-directional form at every pyramid level so that a body
             model extending into the extfov margin does not bias the peak toward
             ``|dV| = margin_v``.  Pass ``obs.extfov_data_sensor_mask()``.
+        use_gradient: Controls gradient-magnitude preprocessing of the image and
+            model before the NCC.
+
+            - ``False`` (default): raw-intensity NCC at every pyramid level.
+            - ``True``: gradient-magnitude NCC at every pyramid level. Use this
+              when the raw surface has a broad plateau — e.g., a body that
+              fills or overflows the FOV, where only the limb carries
+              unique-alignment signal.
+            - ``'auto'``: run both modes, pick the more confident result. A
+              non-spurious result is preferred over a spurious one; within the
+              same spurious bucket the higher-quality result wins.
         logger: The logger to use for the navigation.
 
     Returns:
@@ -676,6 +845,91 @@ def navigate_with_pyramid_kpeaks(
     if logger is None:
         logger = IMAGE_LOGGER
 
+    if use_gradient == 'auto':
+        logger.debug('Auto-gradient: running raw-intensity pass')
+        result_raw = navigate_with_pyramid_kpeaks(
+            image,
+            model,
+            mask,
+            pyramid_levels=pyramid_levels,
+            max_peaks=max_peaks,
+            upsample_factor=upsample_factor,
+            metric=metric,
+            quality_thresh=quality_thresh,
+            consistency_tol=consistency_tol,
+            nms_radius=nms_radius,
+            prior_weight_final=prior_weight_final,
+            max_offset_vu=max_offset_vu,
+            data_mask=data_mask,
+            use_gradient=False,
+            refine_lowpass_sigma_px=refine_lowpass_sigma_px,
+            logger=logger,
+        )
+        logger.debug('Auto-gradient: running gradient-magnitude pass')
+        result_grad = navigate_with_pyramid_kpeaks(
+            image,
+            model,
+            mask,
+            pyramid_levels=pyramid_levels,
+            max_peaks=max_peaks,
+            upsample_factor=upsample_factor,
+            metric=metric,
+            quality_thresh=quality_thresh,
+            consistency_tol=consistency_tol,
+            nms_radius=nms_radius,
+            prior_weight_final=prior_weight_final,
+            max_offset_vu=max_offset_vu,
+            data_mask=data_mask,
+            use_gradient=True,
+            refine_lowpass_sigma_px=refine_lowpass_sigma_px,
+            logger=logger,
+        )
+        # Pick the better result by ordered tiers. At-edge comes before
+        # quality: a mode with no real peak will often drift to the search
+        # boundary where the bidirectional NCC overlap weight maximizes, and
+        # the resulting false peak can still score high quality against a
+        # plateau of similar values — so an at-edge result must lose to any
+        # interior result even if the interior result has lower quality.
+        #   1. Non-spurious beats spurious.
+        #   2. Not-at-edge beats at-edge.
+        #   3. Higher quality wins within the same tier.
+        raw_tier = (not result_raw['spurious'], not result_raw['at_edge'])
+        grad_tier = (not result_grad['spurious'], not result_grad['at_edge'])
+        reason_parts = []
+        if raw_tier != grad_tier:
+            winner = result_raw if raw_tier > grad_tier else result_grad
+            chosen = 'raw' if raw_tier > grad_tier else 'gradient'
+            if raw_tier[0] != grad_tier[0]:
+                reason_parts.append('non-spurious beats spurious')
+            if raw_tier[1] != grad_tier[1]:
+                reason_parts.append('interior beats at-edge')
+        elif result_raw['quality'] >= result_grad['quality']:
+            winner = result_raw
+            chosen = 'raw'
+            reason_parts.append('higher quality')
+        else:
+            winner = result_grad
+            chosen = 'gradient'
+            reason_parts.append('higher quality')
+        logger.debug(
+            'Auto-gradient: picked %s (%s) — '
+            'raw: quality=%.3f spurious=%s at_edge=%s; '
+            'grad: quality=%.3f spurious=%s at_edge=%s',
+            chosen,
+            ', '.join(reason_parts),
+            result_raw['quality'],
+            result_raw['spurious'],
+            result_raw['at_edge'],
+            result_grad['quality'],
+            result_grad['spurious'],
+            result_grad['at_edge'],
+        )
+        winner['used_gradient'] = chosen == 'gradient'
+        return winner
+
+    if pyramid_levels < 1:
+        raise ValueError(f'pyramid_levels must be >= 1; got {pyramid_levels}')
+
     logger.debug('Navigating with pyramid kpeaks:')
     logger.debug(f'  Pyramid levels: {pyramid_levels}')
     logger.debug(f'  Max peaks: {max_peaks}')
@@ -685,6 +939,7 @@ def navigate_with_pyramid_kpeaks(
     logger.debug(f'  Consistency tolerance: {consistency_tol}')
     logger.debug(f'  NMS radius: {nms_radius}')
     logger.debug(f'  Prior weight final: {prior_weight_final}')
+    logger.debug(f'  Use gradient: {use_gradient}')
     if max_offset_vu is not None:
         logger.debug(f'  Max offset V: {max_offset_vu[0]}, U: {max_offset_vu[1]}')
 
@@ -753,6 +1008,7 @@ def navigate_with_pyramid_kpeaks(
             nms_radius=nms_radius,
             max_offset_vu=max_offset_at_scale,
             data_mask=data_mask_downsampled,
+            use_gradient=use_gradient,
             logger=logger,
         )
         logger.debug(
@@ -789,10 +1045,44 @@ def navigate_with_pyramid_kpeaks(
         nms_radius=nms_radius,
         max_offset_vu=max_offset_vu,
         data_mask=data_mask,
+        use_gradient=use_gradient,
+        # Band-limit only the full-resolution sub-pixel refinement; the coarse
+        # pyramid levels keep their sharp surfaces for integer-peak selection.
+        refine_lowpass_sigma_px=refine_lowpass_sigma_px,
         logger=logger,
     )
 
-    spurious = (result['quality'] < quality_thresh) or (consistency > consistency_tol)
+    at_edge = False
+    if max_offset_vu is not None:
+        # 2-pixel margin: the integer NMS argmax can land at |signed| = max - 1
+        # (one row inside the strict-inequality exclusion), and subpixel
+        # refinement can nudge the reported offset another 0.5 pixel further
+        # in. Flag anything within 2 px of the boundary as an unreliable
+        # boundary peak.
+        at_edge = (
+            abs(result['offset'][0]) >= max_offset_vu[0] - 2.0
+            or abs(result['offset'][1]) >= max_offset_vu[1] - 2.0
+        )
+    spurious = (result['quality'] < quality_thresh) or (consistency > consistency_tol) or at_edge
+    if at_edge:
+        logger.debug(
+            'Correlation peak within 2 pixels of max-offset window edge; marking result spurious'
+        )
+
+    # Surface the per-peak telemetry from the final-pass single-scale
+    # call so callers can derive a peak-to-runner-up ratio without
+    # re-running the correlation.  Each entry is
+    # ``(quality, offset_dv, offset_du)``; the winner is index 0 and
+    # any runner-ups follow in descending quality order.
+    all_candidates = result.get('all_candidates', [])
+    top_k_peaks: list[tuple[float, float, float]] = [
+        (
+            float(c['quality']),
+            float(c['offset'][0]),
+            float(c['offset'][1]),
+        )
+        for c in all_candidates
+    ]
 
     ret = {
         'offset': result['offset'],
@@ -802,6 +1092,9 @@ def navigate_with_pyramid_kpeaks(
         'metric': metric,
         'consistency': consistency,
         'spurious': bool(spurious),
+        'at_edge': bool(at_edge),
+        'used_gradient': bool(use_gradient),
+        'top_k_peaks': top_k_peaks,
     }
 
     logger.debug(

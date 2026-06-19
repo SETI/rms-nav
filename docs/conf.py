@@ -40,7 +40,15 @@ templates_path = ['_templates']
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
-exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
+# The simulator image galleries carry a NOTES.md regeneration note alongside the
+# committed PNG assets; exclude them so Sphinx does not treat them as orphan docs.
+exclude_patterns = [
+    '_build',
+    'Thumbs.db',
+    '.DS_Store',
+    '**/_sim_images/NOTES.md',
+    '**/_scene_images/NOTES.md',
+]
 
 # The suffix(es) of source filenames.
 source_suffix = ['.rst', '.md']
@@ -49,6 +57,13 @@ source_suffix = ['.rst', '.md']
 
 # The theme to use for HTML and HTML Help pages.
 html_theme = 'sphinx_rtd_theme'
+
+# Show every section level in the sidebar TOC, with all sub-trees expanded.
+html_theme_options = {
+    'navigation_depth': -1,
+    'collapse_navigation': False,
+    'titles_only': False,
+}
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
@@ -88,7 +103,27 @@ intersphinx_mapping = {
     'python': ('https://docs.python.org/3', None),
     'numpy': ('https://numpy.org/doc/stable/', None),
     'matplotlib': ('https://matplotlib.org/stable/', None),
+    'scipy': ('https://docs.scipy.org/doc/scipy/', None),
+    'filecache': ('https://rms-filecache.readthedocs.io/en/latest/', None),
+    'pdslogger': ('https://rms-pdslogger.readthedocs.io/en/latest/', None),
 }
+
+# Suppress nitpicky warnings for symbols that have no inventory we can link to:
+# third-party packages without Sphinx docs (oops), test modules excluded from
+# autodoc, sibling packages outside the importable nav API surface, typing
+# internals leaked by autodoc, and TypeVars / unqualified type aliases that
+# Sphinx does not register as cross-reference targets.
+nitpick_ignore_regex = [
+    (r'py:.*', r'oops\..*'),
+    (r'py:.*', r'tests\..*'),
+    (r'py:.*', r'backplanes\..*'),
+    (r'py:.*', r'pds4\..*'),
+    (r'py:.*', r'reproj_cli\..*'),
+    (r'py:.*', r'numpy\._typing\..*'),
+    (r'py:.*', r'argparse\._.*'),
+    (r'py:.*', r'nav\.support\.types\.NPType'),
+    (r'py:.*', r'nav\.ui\.mosaic_viewer\..*'),
+]
 
 # MyST-Parser settings
 myst_enable_extensions = [

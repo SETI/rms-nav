@@ -7,13 +7,14 @@ name = "rms-nav"
 dynamic = ["version"]
 description = "Navigation system for spacecraft imagery"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
   "astropy>=6.0",
+  "cspyce>=2.3.5",
   "matplotlib",
   "numpy>=2.2.0",
   "PyQt6",
-  "rms-cloud_tasks>=0.1.2",
+  "rms-cloud-tasks>=0.2.0",
   "rms-filecache>=3.0.0",
   "rms-imgdisp",
   "rms-julian>=3.0.1",
@@ -39,10 +40,10 @@ classifiers = [
   "Topic :: Software Development :: Libraries :: Python Modules",
   "Topic :: Utilities",
   "License :: OSI Approved :: Apache Software License",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Operating System :: MacOS :: MacOS X",
   "Operating System :: POSIX :: Linux",
   "Operating System :: Microsoft :: Windows"
@@ -141,12 +142,34 @@ ignore_missing_imports = true
 pythonpath = [
   "src"
 ]
+testpaths = ["tests"]
+addopts = ["--strict-markers", "--strict-config", "-m", "not integration"]
+filterwarnings = [
+  "error",
+  # Astropy's FITS reader can leave a file handle open while the cache
+  # owns the underlying path; the resulting unraisable exception is
+  # outside our control.  Allow it through as a non-fatal warning.
+  "default::pytest.PytestUnraisableExceptionWarning",
+  # Astropy emits this on import when XDG_CONFIG_HOME is set but
+  # ~/.astropy/config already exists (CI image state).  Benign env-var
+  # precedence note; do not let it fail collection.
+  "default:XDG_CONFIG_HOME is set to:UserWarning",
+  # On Python 3.11, the opentelemetry -> google-cloud-storage import chain
+  # (pulled in via filecache/pdslogger) hits importlib.metadata's deprecated
+  # SelectableGroups dict interface and emits this DeprecationWarning at import
+  # time.  It originates in third-party code and is absent on 3.12+; allow it
+  # through so it cannot fail conftest collection.
+  "default:SelectableGroups dict interface is deprecated:DeprecationWarning",
+]
+markers = [
+  "integration: requires PDS3_HOLDINGS_DIR (real holdings on disk or via filecache)",
+  "slow: per-image library regression test",
+]
 
 [tool.ruff]
 src = ["src", "tests"]
 extend-exclude = [
   "src/experiments",
-  "src/nav/support/correlate_old.py",
 ]
 line-length = 100
 
@@ -190,6 +213,7 @@ write_to = "src/nav/_version.py"
 [project.scripts]
 nav_offset = "main.nav_offset:main"
 nav_offset_cloud_tasks = "main.nav_offset_cloud_tasks:main"
+nav_consolidate_metadata = "main.nav_consolidate_metadata:main"
 nav_create_simulated_image = "main.nav_create_simulated_image:main"
 nav_backplanes = "main.nav_backplanes:main"
 nav_backplanes_cloud_tasks = "main.nav_backplanes_cloud_tasks:main"

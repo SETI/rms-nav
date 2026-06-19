@@ -1,3 +1,4 @@
+import math
 from typing import Any, cast
 
 import numpy as np
@@ -25,7 +26,10 @@ def shift_array(
         fill: The value used to fill the newly created array elements.
 
     Returns:
-        The array shifted by the given amount.
+        The array shifted by the given amount.  Aliasing note: a zero offset
+        returns the *same* array object (no copy); any non-zero offset returns
+        a fresh copy.  Do not mutate the result in place assuming it is always
+        independent of the input.
 
     Raises:
         ValueError: If the array shape and offset list have different lengths.
@@ -70,7 +74,9 @@ def pad_array(
         fill: The value used to fill the newly created array elements.
 
     Returns:
-        The array padded by the given amount.
+        The array padded by the given amount.  Aliasing note: an all-zero
+        margin returns the *same* array object (no copy); a non-zero margin
+        returns a fresh ``np.pad`` array.
 
     Raises:
         ValueError: If the array shape and margin list have different lengths.
@@ -100,7 +106,11 @@ def unpad_array(
             original centered values are used on the new axis.
 
     Returns:
-        The array unpadded by the given amount.
+        The array unpadded by the given amount.  Aliasing note: this never
+        copies -- an all-zero margin returns the *same* array object and a
+        non-zero margin returns a *view* (slice) into the input.  Mutating the
+        result therefore mutates the input; copy first if independence is
+        needed.
 
     Raises:
         ValueError: If the array shape and margin list have different lengths.
@@ -173,12 +183,21 @@ def next_power_of_2(n: int) -> int:
     """Computes the smallest power of 2 that is greater than or equal to n.
 
     Parameters:
-        n: The input integer value.
+        n: A non-negative integer.
 
     Returns:
-        The smallest power of 2 that is greater than or equal to n.
+        The smallest power of 2 that is >= n.  ``0`` returns ``1`` (the
+        smallest power of 2 that is >= 0).
+
+    Raises:
+        ValueError: If ``n`` is negative (a power of 2 >= a negative number is
+            ill-defined, and ``bin()`` of a negative would be misparsed).
     """
 
+    if n < 0:
+        raise ValueError(f'next_power_of_2 requires a non-negative integer; got {n}')
+    if n <= 1:
+        return 1
     s = bin(n)[2:]
     if s.count('1') == 1:  # Already power of 2
         return n
@@ -536,6 +555,76 @@ def normalize_array(a: NDArrayFloatType, eps: float = 1e-12) -> NDArrayFloatType
     return cast(NDArrayFloatType, (a - m) / s)
 
 
+def require_finite_int_or_float(name: str, value: object) -> None:
+    """Validate stretch control numeric parameters at the public API boundary.
+
+    Used by stretch helpers and the UI control-builders to reject ``bool``,
+    non-numeric, and non-finite inputs with a clear error message tagged by
+    the parameter name.
+
+    Parameters:
+        name: Parameter name to include in the error message (e.g.
+            ``'black'``).
+        value: Candidate value to validate.
+
+    Raises:
+        TypeError: When ``value`` is a ``bool`` or not an ``int``/``float``.
+        ValueError: When ``value`` is not finite.
+    """
+    if isinstance(value, bool):
+        raise TypeError(f'{name} must be int or float, not bool')
+    if not isinstance(value, (int, float)):
+        raise TypeError(f'{name} must be int or float, not {type(value).__name__}')
+    if not math.isfinite(float(value)):
+        raise ValueError(f'{name} must be a finite number, got {value!r}')
+
+
+def apply_linear_gamma_stretch(
+    data: NDArrayFloatType,
+    *,
+    black: float,
+    white: float,
+    gamma: float,
+) -> NDArrayFloatType:
+    """Apply black/white/gamma stretch and return a float array in ``[0, 1]``.
+
+    Uses the convention ``((clip(data, black, white) - black) / (white - black)) ** gamma``.
+    A ``gamma`` of 1.0 is linear; values below 1.0 brighten the mid-tones
+    (common for display) and values above 1.0 darken them.
+
+    Parameters:
+        data: Input float array (any shape).
+        black: Black-point; input values at or below this map to 0.
+        white: White-point; input values at or above this map to 1. If
+            ``white <= black`` (including accidental UI equality), ``white`` is
+            raised silently to the next representable float above ``black`` so
+            the linear scale denominator is never zero.
+        gamma: Exponent applied after linear normalisation; must be finite and
+            strictly greater than zero.
+
+    Returns:
+        Float array of the same shape as ``data`` with values in ``[0, 1]``.
+
+    Raises:
+        TypeError: If ``black``, ``white``, or ``gamma`` is not an ``int`` or
+            ``float``, or any of them is a ``bool``.
+        ValueError: If any of ``black``, ``white``, or ``gamma`` is not finite;
+            or if ``gamma <= 0``.
+    """
+    require_finite_int_or_float('black', black)
+    require_finite_int_or_float('white', white)
+    require_finite_int_or_float('gamma', gamma)
+    b = float(black)
+    w = float(white)
+    g = float(gamma)
+    if w <= b:
+        w = math.nextafter(b, math.inf)
+    if g <= 0.0:
+        raise ValueError(f'gamma must be greater than 0, got {g!r}')
+    normalized = np.clip((data - b) / (w - b), 0.0, 1.0)
+    return cast(NDArrayFloatType, np.power(normalized, g))
+
+
 def gradient_magnitude(img: NDArrayFloatType) -> NDArrayFloatType:
     """Compute isotropic gradient magnitude.
 
@@ -745,34 +834,47 @@ def draw_rect(
 
     Parameters:
         img: The 2-D (or higher) array to draw on.
-        xctr, yctr: The center of the rectangle.
-        xhalfwidth: The width of the rectangle on each side of the center.
-        yhalfwidth: This is the inner border of the rectangle.
         color: The scalar (or higher) color to draw.
+        xctr: The horizontal (column) center of the rectangle.
+        yctr: The vertical (row) center of the rectangle.
+        xhalfwidth: The horizontal half-width, on each side of the center.
+        yhalfwidth: The vertical half-width, on each side of the center.
         thickness: The thickness (total width) of the line.
         dot_spacing: The spacing between dots in the rectangle. 1 means dots are
             adjacent (solid lines).
+
+    All slice bounds are clipped to the array extent so a center near or beyond
+    the image edge cannot wrap a negative index around to the far side and paint
+    a spurious rectangle; an entirely off-image rectangle draws nothing.
     """
+
+    rows, cols = int(img.shape[0]), int(img.shape[1])
+
+    def _cy(v: int) -> int:
+        return max(0, min(int(v), rows))
+
+    def _cx(v: int) -> int:
+        return max(0, min(int(v), cols))
 
     # Top
     img[
-        yctr - yhalfwidth - thickness + 1 : yctr - yhalfwidth + 1,
-        xctr - xhalfwidth - thickness + 1 : xctr + xhalfwidth + thickness : dot_spacing,
+        _cy(yctr - yhalfwidth - thickness + 1) : _cy(yctr - yhalfwidth + 1),
+        _cx(xctr - xhalfwidth - thickness + 1) : _cx(xctr + xhalfwidth + thickness) : dot_spacing,
     ] = color
     # Bottom
     img[
-        yctr + yhalfwidth : yctr + yhalfwidth + thickness,
-        xctr - xhalfwidth - thickness + 1 : xctr + xhalfwidth + thickness : dot_spacing,
+        _cy(yctr + yhalfwidth) : _cy(yctr + yhalfwidth + thickness),
+        _cx(xctr - xhalfwidth - thickness + 1) : _cx(xctr + xhalfwidth + thickness) : dot_spacing,
     ] = color
     # Left
     img[
-        yctr - yhalfwidth - thickness + 1 : yctr + yhalfwidth + thickness,
-        xctr - xhalfwidth - thickness + 1 : xctr - xhalfwidth + 1 : dot_spacing,
+        _cy(yctr - yhalfwidth - thickness + 1) : _cy(yctr + yhalfwidth + thickness),
+        _cx(xctr - xhalfwidth - thickness + 1) : _cx(xctr - xhalfwidth + 1) : dot_spacing,
     ] = color
     # Right
     img[
-        yctr - yhalfwidth - thickness + 1 : yctr + yhalfwidth + thickness,
-        xctr + xhalfwidth : xctr + xhalfwidth + thickness : dot_spacing,
+        _cy(yctr - yhalfwidth - thickness + 1) : _cy(yctr + yhalfwidth + thickness),
+        _cx(xctr + xhalfwidth) : _cx(xctr + xhalfwidth + thickness) : dot_spacing,
     ] = color
 
 

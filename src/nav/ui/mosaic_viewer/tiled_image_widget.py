@@ -37,7 +37,7 @@ from PyQt6.QtGui import (
 )
 from PyQt6.QtWidgets import QAbstractScrollArea, QRubberBand, QScrollBar, QSizePolicy, QWidget
 
-from nav.ui.common import apply_linear_gamma_stretch
+from nav.support.image import apply_linear_gamma_stretch
 from nav.ui.mosaic_viewer.graticule import graticule_label_anchors, graticule_polylines
 from nav.ui.mosaic_viewer.projections import (
     ProjectionKind,
@@ -54,14 +54,14 @@ _ZOOM_LOG_HI = np.log10(_ZOOM_MAX)
 _PROJ_SCALE_MAX = 4000.0
 
 
-def _zoom_to_slider(zoom: float) -> int:
+def zoom_to_slider(zoom: float) -> int:
     """Convert zoom value to slider integer 1..1000."""
     log = np.log10(max(zoom, 1e-6))
     pos = (log - _ZOOM_LOG_LO) / (_ZOOM_LOG_HI - _ZOOM_LOG_LO) * 999.0 + 1.0
     return round(float(np.clip(pos, 1, 1000)))
 
 
-def _slider_to_zoom(pos: int) -> float:
+def slider_to_zoom(pos: int) -> float:
     """Convert slider integer 1..1000 to zoom value."""
     log = _ZOOM_LOG_LO + (pos - 1) / 999.0 * (_ZOOM_LOG_HI - _ZOOM_LOG_LO)
     return float(10.0**log)

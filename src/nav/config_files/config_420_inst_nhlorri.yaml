@@ -1,0 +1,56 @@
+# New Horizons LORRI per-camera configuration. Single 12-bit camera;
+# noise and image-quality threshold values carry `# PLACEHOLDER`
+# markers until phase-10 calibration finalizes them.
+newhorizons_lorri:
+  data_units: raw_dn
+  extfov_margin_vu:
+    256: [15, 15]
+    512: [30, 30]
+    1024: [60, 60]
+  star_psf_sigma: 3.
+  star_psf_sizes:
+    100: [7, 7]
+  fit_camera_rotation: false
+  max_rotation_deg: 5.0
+  noise:
+    saturation_dn: 4095            # 12-bit ADC
+    full_well_dn: 4095
+    expected_noise_dn: 4.0         # PLACEHOLDER — calibrate in Phase 10
+    marker_value: 0
+    read_noise_dn: 4.0             # PLACEHOLDER — calibrate in Phase 10
+  image_quality_thresholds:
+    blank_max_dn: 5.0              # PLACEHOLDER — calibrate in Phase 10
+    saturation_threshold_dn: 4095  # 12-bit ADC
+    noisy_threshold_dn: 10.0       # PLACEHOLDER — calibrate in Phase 10
+    max_missing_frac_clean: 0.30
+    max_overexposed_frac_clean: 0.80
+  source_image_filter:
+    kind: BANDPASS_DOG
+    lo_sigma_px: 5.0
+    hi_sigma_px: 0.7
+    enabled: false
+  mag_offset:
+    fallback_combo: '1'
+    mag_offset_table:
+      '1': {default: 0.0}          # PLACEHOLDER — calibrate in Phase 10
+  # ``_sources`` is documentation-only.  ``Config._load_yaml`` strips
+  # every key starting with ``_`` at load time, so this block does not
+  # affect runtime behaviour; it exists so reviewers can trace each
+  # value's provenance and so the Phase 10 calibration step has a
+  # checklist of references to verify.
+  _sources:
+    noise:
+      saturation_dn: 'New Horizons LORRI Instrument Calibration Report (PDS NHxxLO_xxxx). 12-bit ADC; 4095 DN is the hard-fact ADC ceiling.'
+      full_well_dn: 'PLACEHOLDER — calibrate in Phase 10 (full-well in DN, distinct from ADC saturation under PSU 4-signal mode).'
+      expected_noise_dn: 'PLACEHOLDER — calibrate in Phase 10 against the planted-offset library.'
+      marker_value: 'NHLORRI raw missing-pixel sentinel; 0 per the LORRI EDR pipeline.'
+      read_noise_dn: 'PLACEHOLDER — calibrate in Phase 10 (LORRI 1x1 read-noise expected ~ 1 e-, but tuned to per-image MAD floor in Phase 10).'
+    image_quality_thresholds:
+      blank_max_dn: 'PLACEHOLDER — calibrate in Phase 10; bias-subtracted dark frames typically peak below 5 DN.'
+      saturation_threshold_dn: 'Mirrors noise.saturation_dn (12-bit ADC).'
+      noisy_threshold_dn: 'PLACEHOLDER — calibrate in Phase 10 against the per-image MAD distribution from clean LORRI exposures.'
+      max_missing_frac_clean: 'Project-wide default; revisit in Phase 10 once the LORRI sensor-mask population is measured.'
+      max_overexposed_frac_clean: 'Project-wide default.'
+    mag_offset:
+      fallback_combo: 'NHLORRI uses a single panchromatic filter slot, encoded as ``1``.'
+      mag_offset_table: 'PLACEHOLDER — calibrate in Phase 10 against catalog-vs-instrument SNR on the planted-offset library.'

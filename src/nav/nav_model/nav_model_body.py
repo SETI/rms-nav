@@ -1,28 +1,200 @@
+"""Catalog-driven body NavModel.
+
+Renders one body's predicted appearance from SPICE, classifies it
+against the design's emission rules (limb arc vs. body disc vs. blob vs.
+terminator), and emits one ``NavFeature`` per surviving feature type.
+
+The pipeline:
+
+1. Builds an oversampled meshgrid around the predicted body bounding
+   box so the limb silhouette is anti-aliased.
+2. Extracts the limb and terminator polylines from the discrete
+   silhouette masks.
+3. Looks up the per-body shape parameters via
+   :func:`nav.nav_model.body_shape.load_body_shape`, which merges the
+   operator-curated ``config_220_body_shape.yaml`` over the hard-coded
+   ``BODY_SHAPE_TABLE`` profiles.
+4. Decides which features to emit by computing
+   ``limb_uncertainty_px`` and the ``visible_lit_fraction`` /
+   ``overflow_fraction`` quantities the design specifies.
+
+The feature-by-feature emission rules:
+
+- ``LIMB_ARC`` is emitted when ``limb_uncertainty_px <=
+  LIMB_ARC_MAX_UNCERTAINTY_PX`` and there are surviving limb vertices.
+- ``BODY_BLOB`` is emitted when the predicted disc diameter is at
+  least ``max(BODY_BLOB_MIN_DIAMETER_PX, shape.min_blob_diameter_px)``
+  *and* the limb uncertainty is too high for ``LIMB_ARC``.  The
+  per-body shape floor can override the global default upward but
+  not downward.
+- ``BODY_DISC`` is emitted alongside ``LIMB_ARC`` when the body fits
+  inside the FOV with at least ``BODY_DISC_MIN_VISIBLE_LIT_FRACTION``
+  of its lit side visible and ``overflow_fraction`` below
+  ``BODY_DISC_MAX_OVERFLOW_FRACTION``.
+- ``TERMINATOR_ARC`` is emitted when the terminator polyline has at
+  least ``TERMINATOR_MIN_VERTICES`` surviving vertices and the
+  phase-angle factor (``sin(phase_angle)``) is above
+  ``TERMINATOR_MIN_PHASE_FACTOR``.
+"""
+
+from __future__ import annotations
+
 import math
-from typing import Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import polymath
-
-# import matplotlib.pyplot as plt
-from oops import Meshgrid, Observation
+from oops import Meshgrid
 from oops.backplane import Backplane
 
-from nav.config import Config
-from nav.support.attrdict import AttrDict
+from nav.annotation import Annotations
+from nav.config import DEFAULT_CONFIG, Config
+from nav.feature.constants import (
+    INCIDENCE_FACTOR_ANGLE_CAP_DEG,
+    INCIDENCE_FACTOR_CLIP_DEG,
+    MAX_INCIDENCE_FACTOR_CAP,
+)
+from nav.feature.feature import NavFeature, NavReliabilityBreakdown
+from nav.feature.feature_type import NavFeatureType
+from nav.feature.flags import (
+    BodyDiscFlags,
+    LimbArcFlags,
+    TerminatorArcFlags,
+)
+from nav.feature.geometry import (
+    BodyDiscGeometry,
+    LimbPolyline,
+    TerminatorPolyline,
+)
+from nav.nav_model.body_shape import BodyShape, load_body_shape
+from nav.nav_model.nav_model import NavModel
+from nav.nav_model.nav_model_body_base import (
+    BODY_BLOB_MIN_DIAMETER_PX,
+    NavModelBodyBase,
+    _sigmoid,
+)
+from nav.nav_model.stars.predicted_snr import psf_sigma_px
 from nav.support.constants import HALFPI
 from nav.support.image import filter_downsample, shift_array
 from nav.support.time import now_dt
 from nav.support.types import NDArrayBoolType, NDArrayFloatType
 
-from .nav_model_body_base import NavModelBodyBase
-from .nav_model_result import NavModelResult
+if TYPE_CHECKING:  # pragma: no cover - typing-only import
+    from oops import Observation
 
-# Sometimes the bounding box returned by "inventory" is not quite big enough
-BODIES_POSITION_SLOP_FRAC = 0.05  # TODO Move to config
+    from nav.nav_orchestrator.nav_context import NavContext
+
+from nav.support.filters import NavFilterKind, NavFilterSpec
+
+__all__ = [
+    'BODY_BLOB_MIN_DIAMETER_PX',
+    'BODY_DISC_MAX_OVERFLOW_FRACTION',
+    'BODY_DISC_MIN_VISIBLE_LIT_FRACTION',
+    'BODY_POSITION_SLOP_FRAC',
+    'LIMB_ARC_MAX_UNCERTAINTY_PX',
+    'TERMINATOR_MIN_PHASE_FACTOR',
+    'TERMINATOR_MIN_VERTICES',
+    'NavModelBody',
+]
+
+
+BODY_POSITION_SLOP_FRAC: float = 0.05
+"""Inflation factor for the body bbox before clipping.
+
+The ``oops.inventory`` bounding box is sometimes a half-pixel too small.
+Inflating it by 5% before clipping into the extfov keeps anti-aliased
+limb pixels from being lost on the boundary.
+"""
+
+
+LIMB_ARC_MAX_UNCERTAINTY_PX: float = 3.0
+"""Cap on the limb normal-sigma at which LIMB_ARC remains useful.
+
+Above this value the per-vertex normal uncertainty is too large for
+the DT-based limb fit; the extractor switches to ``BODY_BLOB`` so the
+brightness-weighted-centroid technique still has something to work
+with.  The numeric value is a config default pending calibration
+against the operator-curated image library.
+"""
+
+
+BODY_DISC_MIN_VISIBLE_LIT_FRACTION: float = 0.4
+"""Minimum lit-and-in-FOV fraction for BODY_DISC emission.
+
+Below 40% of the lit hemisphere visible, the disc match is too
+asymmetric to be useful; BODY_BLOB or LIMB_ARC carries the load.
+"""
+
+
+BODY_DISC_MAX_OVERFLOW_FRACTION: float = 0.3
+"""Maximum overflow fraction for BODY_DISC emission.
+
+A body whose disc is more than 30% off-frame loses too much template
+support for the correlation peak to be sharp.
+"""
+
+
+TERMINATOR_MIN_VERTICES: int = 8
+"""Minimum surviving vertices for TERMINATOR_ARC emission."""
+
+
+TERMINATOR_MIN_PHASE_FACTOR: float = 0.05
+"""Minimum ``sin(phase_angle)`` for TERMINATOR_ARC emission.
+
+Below sin(phase) ~= 0.05 (phase < 3 deg) the terminator is too close to
+the limb to be photometrically distinguishable.
+"""
+
+
+TERMINATOR_PHOTOMETRIC_SOFTNESS_COEFF: float = 0.5
+"""Photometric-softness coefficient in the terminator normal-sigma.
+
+Scales the per-vertex limb-softness length (``psf_sigma_px * km/px``)
+into an additional position-uncertainty term for terminator arcs, where
+the gradual brightness roll-off broadens the apparent edge beyond the
+geometric terminator.  The numeric value is a config default pending
+calibration against the operator-curated image library (tracked with the
+other body thresholds by issue #118 / CODE-NAV-MODEL-002).
+"""
+
+
+@dataclass(frozen=True)
+class _PolylineSampler:
+    """Bundle of sampled limb / terminator polyline data.
+
+    Encapsulates the per-vertex outputs of the silhouette extraction so
+    multiple feature emitters can share the same data without
+    re-running the discrete-mask traversal.
+    """
+
+    vertices_vu: NDArrayFloatType
+    normals_vu: NDArrayFloatType
+    incidence_rad: NDArrayFloatType
+    km_per_pixel: NDArrayFloatType
+    total_vertices: int
+    """Ridge vertices found before per-vertex drops (resolution / future shadow).
+
+    ``vertices_vu`` holds only the survivors; ``total_vertices`` is the count
+    of the original ridge so :func:`_visible_arc_fraction` can report the
+    surviving fraction rather than a constant.
+    """
 
 
 class NavModelBody(NavModelBodyBase):
+    """Catalog-driven body NavModel.
+
+    Parameters:
+        name: Model instance name (e.g. ``'body:MIMAS'``).
+        obs: Observation snapshot.
+        body_name: SPICE body name.
+        inventory: Optional pre-computed inventory entry; pulled from
+            ``obs.inventory`` on demand otherwise.
+        config: Optional ``Config`` override.
+    """
+
+    _abstract = False
+
     def __init__(
         self,
         name: str,
@@ -31,310 +203,243 @@ class NavModelBody(NavModelBodyBase):
         *,
         inventory: dict[str, Any] | None = None,
         config: Config | None = None,
-    ):
-        """Creates a navigation model for a planetary body.
-
-        Parameters:
-            name: The name of the model.
-            obs: The observation object containing the image data.
-            body_name: The name of the planetary body.
-            inventory: Optional dictionary containing inventory information for the body.
-            config: Configuration object to use. If None, uses DEFAULT_CONFIG.
-        """
-
+    ) -> None:
         super().__init__(name, obs, config=config)
-
         self._body_name = body_name.upper()
-
-        if inventory is None:
-            inventory = self.obs.inventory([self._body_name], return_type='full')[self._body_name]
         self._inventory = inventory
+        self._model_img: NDArrayFloatType | None = None
+        self._body_mask: NDArrayBoolType | None = None
+        self._limb_mask: NDArrayBoolType | None = None
+        self._terminator_mask: NDArrayBoolType | None = None
+        self._limb_sampler: _PolylineSampler | None = None
+        self._terminator_sampler: _PolylineSampler | None = None
+        self._km_per_pixel_at_limb: float = 0.0
+        self._predicted_diameter_px: float = 0.0
+        self._predicted_center_vu: tuple[float, float] = (0.0, 0.0)
+        self._bbox_extfov_vu: tuple[int, int, int, int] = (0, 0, 0, 0)
+        self._subject_range_km: float = float('inf')
+        self._visible_lit_fraction: float = 0.0
+        self._overflow_fraction: float = 1.0
+        self._phase_angle_factor: float = 0.0
 
-    def create_model(
-        self,
-        *,
-        always_create_model: bool = False,
-        never_create_model: bool = False,
-        create_annotations: bool = True,
-    ) -> None:
-        """Creates a navigation model for a planetary body with optional text overlay.
+    @classmethod
+    def instances_for_obs(cls, obs: Observation) -> list[NavModel]:
+        """Return one NavModelBody per body whose bbox lies inside extfov.
+
+        Calls ``obs.inventory`` once with the planet + satellites list
+        from ``config.satellites`` and constructs a NavModel for every
+        entry whose ``inventory_body_in_extfov`` predicate fires.
 
         Parameters:
-            always_create_model: If True, creates a model even if the body is too small or has
-                poor limb definition.
-            never_create_model: If True, creates metadata but doesn't generate an actual model or
-                annotations.
-            create_annotations: If True, creates text annotations for the model.
-        """
+            obs: Observation snapshot.
 
-        metadata: dict[str, Any] = {}
+        Returns:
+            One ``NavModelBody`` per body present in the extfov.
+        """
+        # Simulated obs use the sim-params-driven NavModelBodySimulated instead.
+        if getattr(obs, 'is_simulated', False):
+            return []
+        config = DEFAULT_CONFIG
+        planet = getattr(obs, 'closest_planet', None)
+        if planet is None:
+            return []
+        body_list: list[str] = [planet, *list(config.satellites(planet))]
+        inventory_method = getattr(obs, 'inventory', None)
+        if not callable(inventory_method):
+            return []
+        try:
+            inv = inventory_method(body_list, return_type='full')
+        except (TypeError, AttributeError, ValueError):
+            return []
+        in_extfov = getattr(obs, 'inventory_body_in_extfov', None)
+        if not callable(in_extfov):
+            return []
+        out: list[NavModel] = []
+        for body_name in body_list:
+            entry = inv.get(body_name)
+            if entry is None:
+                continue
+            if not in_extfov(entry):
+                continue
+            out.append(cls(f'body:{body_name}', obs, body_name, inventory=entry))
+        return out
+
+    def create_model(self) -> None:
+        """Render the silhouette, masks, and polylines used by ``to_features``."""
         start_time = now_dt()
-        metadata['start_time'] = start_time.isoformat()
-        metadata['end_time'] = None
-        metadata['elapsed_time_sec'] = None
-
-        self._metadata = metadata
-        self._models.clear()
-
+        self._metadata.clear()
+        self._metadata['start_time'] = start_time.isoformat()
+        self._metadata['end_time'] = None
+        self._metadata['elapsed_time_sec'] = None
+        self._metadata['body_name'] = self._body_name
         with self._logger.open(f'CREATE BODY MODEL FOR: {self._body_name}'):
-            self._create_model(
-                always_create_model=always_create_model,
-                never_create_model=never_create_model,
-                create_annotations=create_annotations,
-            )
+            self._render()
+            self._log_geometry_summary()
+            end_time = now_dt()
+            self._metadata['end_time'] = end_time.isoformat()
+            self._metadata['elapsed_time_sec'] = (end_time - start_time).total_seconds()
+            self._logger.info('Model created in %.3f s', self._metadata['elapsed_time_sec'])
 
-        end_time = now_dt()
-        metadata['end_time'] = end_time.isoformat()
-        metadata['elapsed_time_sec'] = (end_time - start_time).total_seconds()
-
-    def _create_model(
-        self,
-        always_create_model: bool,
-        never_create_model: bool,
-        create_annotations: bool,
-    ) -> None:
-        """Creates the internal model representation for a planetary body.
-
-        Parameters:
-            always_create_model: If True, creates a model even if the body is too small.
-            never_create_model: If True, only creates metadata without generating a model.
-            create_annotations: If True, creates a text overlay with the body name.
-        """
-
-        # These are just shorthand to make later code easier to read
-        obs = self.obs
-        body_name = self._body_name
-        ext_bp = self.obs.ext_bp
-        body_config = self._config.bodies
-        inventory = self._inventory
-        metadata = self._metadata
-
-        ########################################################################
-        # Fill in basic metadata
-        ########################################################################
-
-        metadata['body_name'] = body_name
-        metadata['inventory'] = inventory
-        metadata['size_ok'] = None
-        metadata['guaranteed_visible_in_fov'] = None
-        # metadata['curvature_ok'] = None
-        # metadata['limb_ok'] = None
-        # metadata['entirely_visible'] = None
-        # metadata['occulted_by'] = None
-        # metadata['in_saturn_shadow'] = None
-        # metadata['image_blur'] = None
-        # metadata['body_blur'] = None
-        # metadata['nav_uncertainty'] = None
-        # metadata['reproj'] = None
-        # metadata['has_bad_pixels'] = None
-        # metadata['confidence'] = None
-
-        # Single-valued metadata
-        metadata['sub_solar_lon'] = np.degrees(ext_bp.sub_solar_longitude(body_name).vals)
-        metadata['sub_solar_lat'] = np.degrees(ext_bp.sub_solar_latitude(body_name).vals)
-        metadata['sub_observer_lon'] = np.degrees(ext_bp.sub_observer_longitude(body_name).vals)
-        metadata['sub_observer_lat'] = np.degrees(ext_bp.sub_observer_latitude(body_name).vals)
-        metadata['phase_angle'] = np.degrees(ext_bp.center_phase_angle(body_name).vals)
-
-        self._logger.info(f'Sub-solar longitude      {metadata["sub_solar_lon"]:6.2f}')
-        self._logger.info(f'Sub-solar latitude       {metadata["sub_solar_lat"]:6.2f}')
-        self._logger.info(f'Sub-observer longitude   {metadata["sub_observer_lon"]:6.2f}')
-        self._logger.info(f'Sub-observer latitude    {metadata["sub_observer_lat"]:6.2f}')
-        self._logger.info(f'Phase angle              {metadata["phase_angle"]:6.2f}')
-
-        ########################################################################
-        # Check the size of the bounding box
-        ########################################################################
-
-        bb_area = inventory['u_pixel_size'] * inventory['v_pixel_size']
+    def _log_geometry_summary(self) -> None:
+        """Emit INFO-level geometry summary plus DEBUG-level bbox detail."""
+        meta = self._metadata
         self._logger.info(
-            f'Pixel size {inventory["u_pixel_size"]:.2f} x '
-            f'{inventory["v_pixel_size"]:.2f}, bounding box area {bb_area:.2f}'
+            'Subsolar (lon, lat) = (%.2f, %.2f) deg; '
+            'subobserver (lon, lat) = (%.2f, %.2f) deg; phase = %.2f deg',
+            meta.get('sub_solar_lon_deg', float('nan')),
+            meta.get('sub_solar_lat_deg', float('nan')),
+            meta.get('sub_observer_lon_deg', float('nan')),
+            meta.get('sub_observer_lat_deg', float('nan')),
+            meta.get('phase_angle_deg', float('nan')),
         )
-        if bb_area >= body_config.min_bounding_box_area:
-            metadata['size_ok'] = True
-        else:
-            metadata['size_ok'] = False
-            if not always_create_model:
-                self._logger.info('Bounding box is too small to bother with - aborting early')
-                return
+        self._logger.info(
+            'Subject range = %.0f km; predicted diameter = %.2f px; km/px at limb = %.4f',
+            self._subject_range_km,
+            self._predicted_diameter_px,
+            self._km_per_pixel_at_limb,
+        )
+        self._logger.info(
+            'Visible-lit fraction = %.3f; silhouette overflow = %.3f; guaranteed-visible = %s',
+            self._visible_lit_fraction,
+            self._overflow_fraction,
+            meta.get('guaranteed_visible_in_fov', False),
+        )
+        self._logger.debug(
+            'Bbox (extfov vu) = %s; bbox area = %.1f px; size_ok = %s',
+            self._bbox_extfov_vu,
+            meta.get('bbox_area_px', 0.0),
+            meta.get('size_ok', False),
+        )
 
-        # # Create a Meshgrid that only covers the center pixel of the body
-        # ctr_uv = inventory['center_uv']
-        # ctr_meshgrid = oops.Meshgrid.for_fov(obs.fov,
-        #                                      origin=(ctr_uv[0]+.5, ctr_uv[1]+.5),
-        #                                      limit =(ctr_uv[0]+.5, ctr_uv[1]+.5),
-        #                                      swap  =True)
-        # ctr_bp = oops.backplane.Backplane(obs, meshgrid=ctr_meshgrid)
-        # if body_name == obs.planet:
-        #     metadata['in_planet_shadow'] = False
-        # else:
-        #     # We're just going to assume if part of the body is shadowed, the whole
-        #     # thing is
-        #     saturn_shadow = ctr_bp.where_inside_shadow(body_name, 'saturn').vals
-        #     if np.any(saturn_shadow):
-        #         self._logger.info(f'Body is in {obs.planet.title()}\'s shadow')
-        #         metadata['in_planet_shadow'] = True
-        #     else:
-        #         metadata['in_planet_shadow'] = False
+    def _render(self) -> None:
+        """Populate masks, polyline samplers, and metadata."""
+        obs = self.obs
+        ext_bp = obs.ext_bp
+        body_name = self._body_name
+        body_config = self._config.bodies
+        if self._inventory is None:
+            self._inventory = obs.inventory([body_name], return_type='full')[body_name]
+        inventory = self._inventory
 
-        # if body_name in nav.config.RINGS_BODY_LIST:
-        #     emission = obs.ext_bp.emission_angle('saturn:ring').mvals.astype('float32')
-        #     min_emission = np.min(np.abs(emission-oops.HALFPI))
-        #     if min_emission*oops.DPR < bodies_config['min_emission_ring_body']:
-        #         self._logger.info('Minimum emission angle %.2f from 90 too close to ring '+
-        #                     'plane - not using', min_emission*oops.DPR)
-        #         metadata['ring_emission_ok'] = False
-        #         metadata['end_time'] = time.time()
-        #         return None, metadata, None
+        sub_solar_lon = float(np.degrees(ext_bp.sub_solar_longitude(body_name).vals))
+        sub_solar_lat = float(np.degrees(ext_bp.sub_solar_latitude(body_name).vals))
+        sub_observer_lon = float(np.degrees(ext_bp.sub_observer_longitude(body_name).vals))
+        sub_observer_lat = float(np.degrees(ext_bp.sub_observer_latitude(body_name).vals))
+        phase_angle_deg = float(np.degrees(ext_bp.center_phase_angle(body_name).vals))
+        self._metadata['sub_solar_lon_deg'] = sub_solar_lon
+        self._metadata['sub_solar_lat_deg'] = sub_solar_lat
+        self._metadata['sub_observer_lon_deg'] = sub_observer_lon
+        self._metadata['sub_observer_lat_deg'] = sub_observer_lat
+        self._metadata['phase_angle_deg'] = phase_angle_deg
+        self._phase_angle_factor = float(np.sin(np.radians(phase_angle_deg)))
+        self._subject_range_km = float(inventory.get('range', float('inf')))
 
-        # metadata['ring_emission_ok'] = True
+        bb_area = float(inventory['u_pixel_size'] * inventory['v_pixel_size'])
+        self._metadata['bbox_area_px'] = bb_area
+        self._metadata['size_ok'] = bool(bb_area >= body_config.min_bounding_box_area)
 
-        ########################################################################
-        # Figure out if the body is guaranteed to be visible in the FOV
-        ########################################################################
-
-        u_min = int(inventory['u_min_unclipped'])
-        u_max = int(inventory['u_max_unclipped'])
-        v_min = int(inventory['v_min_unclipped'])
-        v_max = int(inventory['v_max_unclipped'])
-
-        # For curvature later
-        u_center = (u_min + u_max) // 2
-        v_center = (v_min + v_max) // 2
-        # width = u_max - u_min + 1
-        # height = v_max - v_min + 1
-        # curvature_threshold_frac = body_config.curvature_threshold_frac
-        # curvature_threshold_pix = config.curvature_threshold_pixels
-        # width_threshold = max(width * curvature_threshold_frac,
-        #                       curvature_threshold_pix)
-        # height_threshold = max(height * curvature_threshold_frac,
-        #                        curvature_threshold_pix)
-
-        # Figure out the bounding box with some slop and see whether or not the body is
-        # going to be entirely visible even in the case of maximum offset
-
-        u_slop = int((u_max - u_min) * BODIES_POSITION_SLOP_FRAC)
-        v_slop = int((v_max - v_min) * BODIES_POSITION_SLOP_FRAC)
-        u_min -= u_slop
-        u_max += u_slop
-        v_min -= v_slop
-        v_max += v_slop
-
+        u_min_unc = int(inventory['u_min_unclipped'])
+        u_max_unc = int(inventory['u_max_unclipped'])
+        v_min_unc = int(inventory['v_min_unclipped'])
+        v_max_unc = int(inventory['v_max_unclipped'])
+        u_slop = int((u_max_unc - u_min_unc) * BODY_POSITION_SLOP_FRAC)
+        v_slop = int((v_max_unc - v_min_unc) * BODY_POSITION_SLOP_FRAC)
+        u_min = u_min_unc - u_slop
+        u_max = u_max_unc + u_slop
+        v_min = v_min_unc - v_slop
+        v_max = v_max_unc + v_slop
         u_min, v_min = obs.clip_extfov(u_min, v_min)
         u_max, v_max = obs.clip_extfov(u_max, v_max)
-
-        # Things break if the moon is only a single pixel wide or tall
-        if u_min == u_max and u_min == obs.extfov_u_max:
+        if u_min == u_max == obs.extfov_u_max:
             u_min -= 1
-        if u_min == u_max and u_min == obs.extfov_u_min:
+        if u_min == u_max == obs.extfov_u_min:
             u_max += 1
-        if v_min == v_max and v_min == obs.extfov_v_max:
+        if v_min == v_max == obs.extfov_v_max:
             v_min -= 1
-        if v_min == v_max and v_min == obs.extfov_v_min:
+        if v_min == v_max == obs.extfov_v_min:
             v_max += 1
 
-        self._logger.debug(f'Original bounding box U {u_min} to {u_max}, V {v_min} to {v_max}')
-        self._logger.debug(
-            f'Image size {obs.data_shape_u} x {obs.data_shape_v}; '
-            f'subrect w/slop U {u_min} to {u_max}, V {v_min} to {v_max}'
-        )
-
-        guaranteed_visible_in_fov = False
-        if (
+        guaranteed_visible = (
             u_min >= obs.extfov_margin_u
             and u_max <= obs.data_shape_u - 1 - obs.extfov_margin_u
             and v_min >= obs.extfov_margin_v
             and v_max <= obs.data_shape_v - 1 - obs.extfov_margin_v
-        ):
-            # Body is entirely visible - no part is off the edge even when shifting
-            # the extended FOV
-            guaranteed_visible_in_fov = True
-            self._logger.info('All of body is guaranteed visible even after maximum offset')
-        else:
-            self._logger.info('Not all of body guaranteed to be visible after maximum offset')
-        metadata['guaranteed_visible_in_fov'] = guaranteed_visible_in_fov
+        )
+        self._metadata['guaranteed_visible_in_fov'] = guaranteed_visible
 
-        if never_create_model:
-            return
+        model_img, limb_mask, terminator_mask, body_mask, sampler_data = (
+            self._build_backplane_model(u_min=u_min, u_max=u_max, v_min=v_min, v_max=v_max)
+        )
+        self._model_img = model_img
+        self._body_mask = body_mask
+        self._limb_mask = limb_mask
+        self._terminator_mask = terminator_mask
 
-        model_img, limb_mask = self._create_backplane_model(
-            body_name=body_name,
-            obs=obs,
-            body_config=body_config,
-            inventory=inventory,
-            u_min=u_min,
-            u_max=u_max,
-            v_min=v_min,
-            v_max=v_max,
+        u_center_data = (u_min_unc + u_max_unc) / 2.0
+        v_center_data = (v_min_unc + v_max_unc) / 2.0
+        self._predicted_center_vu = (
+            float(v_center_data + obs.extfov_margin_v),
+            float(u_center_data + obs.extfov_margin_u),
+        )
+        diameter = max(
+            float(inventory['u_pixel_size']),
+            float(inventory['v_pixel_size']),
+        )
+        self._predicted_diameter_px = diameter
+        self._bbox_extfov_vu = (
+            int(v_min + obs.extfov_margin_v),
+            int(u_min + obs.extfov_margin_u),
+            int(v_max + obs.extfov_margin_v + 1),
+            int(u_max + obs.extfov_margin_u + 1),
         )
 
-        body_mask = model_img != 0
+        self._km_per_pixel_at_limb = sampler_data['km_per_pixel_mean']
+        self._limb_sampler = sampler_data['limb_sampler']
+        self._terminator_sampler = sampler_data['terminator_sampler']
+        self._visible_lit_fraction = float(sampler_data['visible_lit_fraction'])
+        self._overflow_fraction = float(sampler_data['overflow_fraction'])
+        self._metadata['km_per_pixel_at_limb'] = self._km_per_pixel_at_limb
+        self._metadata['predicted_diameter_px'] = self._predicted_diameter_px
+        self._metadata['visible_lit_fraction'] = self._visible_lit_fraction
+        self._metadata['overflow_fraction'] = self._overflow_fraction
 
-        # This is much faster than calculating the range at each pixel and we never
-        # need to know the precise range at that level of detail
-        range_arr = obs.make_extfov_zeros()
-        range_arr[:, :] = inventory['range'] * body_mask
-        range_arr[range_arr == 0] = math.inf
-
-        metadata['confidence'] = 1.0
-
-        ########################################################################
-        # Figure out all the location where we might want to label the body
-        ########################################################################
-
-        annotations = None
-        if create_annotations:
-            annotations = self._create_annotations(
-                u_center, v_center, model_img, limb_mask, body_mask
-            )
-
-        result = NavModelResult(
-            model_img=model_img,
-            model_mask=body_mask,
-            weighted_mask=None,
-            range=range_arr,
-            blur_amount=None,
-            uncertainty=0.0,
-            confidence=1.0,
-            stretch_regions=None,
-            annotations=annotations,
-        )
-        self._models.append(result)
-
-        self._logger.debug(f'  Body model min: {np.min(model_img)}, max: {np.max(model_img)}')
-
-    def _create_backplane_model(
+    def _build_backplane_model(
         self,
         *,
-        body_name: str,
-        obs: Observation,
-        body_config: AttrDict,
-        inventory: dict[str, Any],
         u_min: int,
         u_max: int,
         v_min: int,
         v_max: int,
-    ) -> tuple[NDArrayFloatType, NDArrayBoolType]:
-        """Create a model for a planetary body using a backplane.
+    ) -> tuple[
+        NDArrayFloatType,
+        NDArrayBoolType,
+        NDArrayBoolType,
+        NDArrayBoolType,
+        dict[str, Any],
+    ]:
+        """Build the silhouette, limb / terminator masks, and samplers.
+
+        Renders an oversampled Lambert silhouette over the body bbox,
+        downsamples to the extfov grid, extracts the discrete limb and
+        terminator masks, and samples per-vertex polyline data.
 
         Parameters:
-            body_name: The name of the planetary body.
-            obs: The observation object containing the image data.
-            body_config: Body configuration dictionary to use.
-            inventory: Dictionary of inventory data.
-            u_min: The minimum U coordinate.
-            u_max: The maximum U coordinate.
-            v_min: The minimum V coordinate.
-            v_max: The maximum V coordinate.
+            u_min, u_max, v_min, v_max: Body bounding box in extfov
+                coordinates (already clipped).
+
+        Returns:
+            ``(model_img, limb_mask, terminator_mask, body_mask, info)``
+            where ``info`` carries the polyline samplers, the mean
+            km/pixel at the limb, and the visibility / overflow
+            fractions.
         """
+        obs = self.obs
+        body_name = self._body_name
+        body_config = self._config.bodies
+        inventory = self._inventory
+        assert inventory is not None  # populated in _render
 
-        ########################################################################
-        # Make a new Backplane that only covers the body, but oversample it
-        # as necessary so we can do anti-aliasing
-        ########################################################################
-
-        restr_oversample_u = max(
+        oversample_u = max(
             int(
                 np.floor(
                     body_config.oversample_edge_limit / max(np.ceil(inventory['u_pixel_size']), 1)
@@ -342,7 +447,7 @@ class NavModelBody(NavModelBodyBase):
             ),
             1,
         )
-        restr_oversample_v = max(
+        oversample_v = max(
             int(
                 np.floor(
                     body_config.oversample_edge_limit / max(np.ceil(inventory['v_pixel_size']), 1)
@@ -350,192 +455,566 @@ class NavModelBody(NavModelBodyBase):
             ),
             1,
         )
-        restr_oversample_u = min(restr_oversample_u, body_config.oversample_maximum)
-        restr_oversample_v = min(restr_oversample_v, body_config.oversample_maximum)
-        self._logger.debug(f'Oversampling by {restr_oversample_u} x {restr_oversample_v}')
-        restr_u_min = u_min + 1.0 / (2 * restr_oversample_u)
-        restr_u_max = u_max + 1 - 1.0 / (2 * restr_oversample_u)
-        restr_v_min = v_min + 1.0 / (2 * restr_oversample_v)
-        restr_v_max = v_max + 1 - 1.0 / (2 * restr_oversample_v)
-        restr_o_meshgrid = Meshgrid.for_fov(
+        oversample_u = min(oversample_u, body_config.oversample_maximum)
+        oversample_v = min(oversample_v, body_config.oversample_maximum)
+        self._logger.debug(
+            'Body %s: backplane oversample (u, v) = (%d, %d); edge_limit = %s, max = %s',
+            self._body_name,
+            oversample_u,
+            oversample_v,
+            body_config.oversample_edge_limit,
+            body_config.oversample_maximum,
+        )
+        restr_u_min = u_min + 1.0 / (2 * oversample_u)
+        restr_u_max = u_max + 1 - 1.0 / (2 * oversample_u)
+        restr_v_min = v_min + 1.0 / (2 * oversample_v)
+        restr_v_max = v_max + 1 - 1.0 / (2 * oversample_v)
+        restr_meshgrid = Meshgrid.for_fov(
             obs.fov,
             origin=(restr_u_min, restr_v_min),
             limit=(restr_u_max, restr_v_max),
-            oversample=(restr_oversample_u, restr_oversample_v),
+            oversample=(oversample_u, oversample_v),
             swap=True,
         )
-        restr_o_bp = Backplane(obs, meshgrid=restr_o_meshgrid)
+        restr_bp = Backplane(obs, meshgrid=restr_meshgrid)
 
-        ########################################################################
-        # Compute the incidence angles
-        ########################################################################
-
-        restr_o_incidence_mvals = restr_o_bp.incidence_angle(body_name).mvals
-        restr_incidence_mvals = filter_downsample(
-            restr_o_incidence_mvals, restr_oversample_v, restr_oversample_u
+        oversampled_incidence_mvals = restr_bp.incidence_angle(body_name).mvals
+        downsampled_incidence_mvals = filter_downsample(
+            oversampled_incidence_mvals, oversample_v, oversample_u
         )
-        restr_incidence = polymath.Scalar(restr_incidence_mvals)
+        incidence_scalar = polymath.Scalar(downsampled_incidence_mvals)
 
-        ########################################################################
-        # Analyze the limb
-        ########################################################################
-
-        restr_body_mask_invalid = restr_incidence.expand_mask().mask
-        restr_body_mask_valid = ~restr_body_mask_invalid
-
-        # If the inv mask is true, but any of its neighbors are false, then
-        # this is an edge
-        restr_limb_mask_neighbor = (
-            shift_array(restr_body_mask_invalid, (-1, 0))
-            | shift_array(restr_body_mask_invalid, (1, 0))
-            | shift_array(restr_body_mask_invalid, (0, -1))
-            | shift_array(restr_body_mask_invalid, (0, 1))
+        body_mask_invalid = incidence_scalar.expand_mask().mask
+        body_mask_valid = ~body_mask_invalid
+        limb_mask_neighbor = (
+            shift_array(body_mask_invalid, (-1, 0))
+            | shift_array(body_mask_invalid, (1, 0))
+            | shift_array(body_mask_invalid, (0, -1))
+            | shift_array(body_mask_invalid, (0, 1))
         )
-        # This valid mask will be a single series of pixels just inside the limb
-        restr_limb_mask = restr_body_mask_valid & restr_limb_mask_neighbor
+        # Terminator mask: pixels whose incidence crosses 90 deg
+        incidence_vals = incidence_scalar.vals
+        is_lit = (incidence_vals < HALFPI) & body_mask_valid
+        is_dark = (incidence_vals >= HALFPI) & body_mask_valid
+        # The geometric limb is the silhouette boundary (lit + unlit).
+        # The DT-fit LIMB_ARC technique can only see the *lit* limb in
+        # the image — the unlit limb merges into dark space and has no
+        # gradient.  Including unlit-side vertices in the polyline gives
+        # the LM no useful signal there, but the high sigma assigned to
+        # those vertices widens their Tukey inlier band so they happily
+        # lock onto the terminator (a strong DT minimum) when the LM
+        # shifts.  Filtering to lit-side vertices removes that hazard
+        # at the source.  See Cassini Tethys N1574928113 for the
+        # calibration case.
+        geometric_limb_mask: NDArrayBoolType = body_mask_valid & limb_mask_neighbor
+        limb_mask_local: NDArrayBoolType = geometric_limb_mask & is_lit
+        # A pixel is on the terminator if it is lit and any neighbour is dark.
+        terminator_local: NDArrayBoolType = is_lit & (
+            shift_array(is_dark, (-1, 0))
+            | shift_array(is_dark, (1, 0))
+            | shift_array(is_dark, (0, -1))
+            | shift_array(is_dark, (0, 1))
+        )
 
-        if not restr_limb_mask.any():
-            self._logger.info('There is no limb')
+        if not body_mask_valid.any() or incidence_scalar[body_mask_valid].min() >= HALFPI:
+            local_model: NDArrayFloatType = np.zeros_like(body_mask_valid, dtype=np.float64)
+            local_model[body_mask_valid] = 0.01
         else:
-            restr_incidence_limb = restr_incidence.mask_where(~restr_limb_mask)
-            limb_incidence_min = np.degrees(restr_incidence_limb.min().vals)
-            limb_incidence_max = np.degrees(restr_incidence_limb.max().vals)
-            self._logger.info(
-                f'Limb incidence angle min {limb_incidence_min:.2f}, max {limb_incidence_max:.2f}'
-            )
-
-            # limb_threshold = config['limb_incidence_threshold']
-            # limb_frac = config['limb_incidence_frac']
-
-            # # Slightly more than half of the body must be visible in each of the
-            # # horizontal and vertical directions AND also have a good limb in
-            # # those quadrants
-
-            # curvature_ok = False
-            # limb_ok = False
-            # l_edge = obs.extfov_margin_u
-            # r_edge = obs.data_shape_u-1-obs.extfov_margin_u
-            # t_edge = obs.extfov_margin_v
-            # b_edge = obs.data_shape_v-1-obs.extfov_margin_v
-            # inc_r_edge = restr_incidence_limb.vals.shape[1]-1
-            # inc_b_edge = restr_incidence_limb.vals.shape[0]-1
-            # for l_moon, r_moon, lr_str in ((u_center-width_threshold,
-            #                                 u_center+width/2, 'L'),
-            #                             (u_center-width/2,
-            #                             u_center+width_threshold, 'R')):
-            #     for t_moon, b_moon, tb_str in ((v_center-height_threshold,
-            #                                     v_center+height/2, 'T'),
-            #                                 (v_center-height/2,
-            #                                     v_center+height_threshold, 'B')):
-            #         self._logger.debug('LMOON %d LEDGE %d / RMOON %d REDGE %d / '+
-            #                     'TMOON %d TEDGE %d / BMOON %d BEDGE %d',
-            #                     l_moon, l_edge, r_moon, r_edge,
-            #                     t_moon, t_edge, b_moon, b_edge)
-            #         if (l_moon >= l_edge and r_moon <= r_edge and
-            #             t_moon >= t_edge and b_moon <= b_edge):
-            #             l_moon_clip = int(np.clip(l_moon-u_min, 0, inc_r_edge))
-            #             r_moon_clip = int(np.clip(r_moon-u_min, 0, inc_r_edge))
-            #             t_moon_clip = int(np.clip(t_moon-v_min, 0, inc_b_edge))
-            #             b_moon_clip = int(np.clip(b_moon-v_min, 0, inc_b_edge))
-            #             sub_inc = masked_restr_incidence[
-            #                                 t_moon_clip:b_moon_clip+1,
-            #                                 l_moon_clip:r_moon_clip+1].mvals
-            #             ok_masked_incidence = sub_inc[np.where(sub_inc <
-            #                                                 limb_threshold)]
-            #             self._logger.debug('%s %s %d %d', tb_str, lr_str,
-            #                         ok_masked_incidence.compressed().shape[0],
-            #                         sub_inc.compressed().shape[0])
-            #             inc_frac = (float(ok_masked_incidence.compressed().shape[0]) /
-            #                         float(sub_inc.compressed().flatten().shape[0]))
-            #             if inc_frac >= limb_frac:
-            #                 self._logger.debug('Curvature+limb quadrant %s%s OK',
-            #                             tb_str, lr_str)
-            #                 curvature_ok = True
-
-            # if (not curvature_ok and
-            #     obs.extfov_margin[0] < u_center < obs.data_shape_xy[0]-1-obs.extfov_margin[0] and
-            #     obs.extfov_margin[1] < v_center < obs.data_shape_xy[1]-1-obs.extfov_margin[1]):
-            #     # See if the moon is mostly centered on the image, and just extends
-            #     # past the edges on each side leaving enough curvature behind
-            #     full_inc = ma.zeros((obs.extdata_shape_xy[1], obs.extdata_shape_xy[0]),
-            #                         dtype=np.float32)
-            #     full_inc[:,:] = ma.masked
-            #     full_inc[v_min+obs.extfov_margin[1]:v_max+obs.extfov_margin[1]+1,
-            #             u_min+obs.extfov_margin[0]:u_max+obs.extfov_margin[0]+1
-            #             ] = masked_restr_incidence.mvals
-            #     full_inc[:obs.extfov_margin[1]*2,:] = ma.masked
-            #     full_inc[:,:obs.extfov_margin[0]*2] = ma.masked
-            #     full_inc[-obs.extfov_margin[1]*2:,:] = ma.masked
-            #     full_inc[:,-obs.extfov_margin[0]*2:] = ma.masked
-            #     tl_inc = full_inc[:v_center+obs.extfov_margin[1],
-            #                     :u_center+obs.extfov_margin[0]]
-            #     tr_inc = full_inc[:v_center+obs.extfov_margin[1],
-            #                     u_center+obs.extfov_margin[0]:]
-            #     bl_inc = full_inc[v_center+obs.extfov_margin[1]:,
-            #                     :u_center+obs.extfov_margin[0]]
-            #     br_inc = full_inc[v_center+obs.extfov_margin[1]:,
-            #                     u_center+obs.extfov_margin[0]:]
-            #     if ((np.min(tl_inc) < limb_threshold and
-            #         np.min(br_inc) < limb_threshold) or
-            #         (np.min(tr_inc) < limb_threshold and
-            #         np.min(bl_inc) < limb_threshold)):
-            #         curvature_ok = True
-
-            # metadata['curvature_ok'] = curvature_ok
-            # if metadata['curvature_ok']:
-            #     metadata['limb_ok'] = True
-            #     self._logger.info('Curvature+limb OK')
-            # else:
-            #     self._logger.info('Curvature+limb BAD')
-
-        ########################################################################
-        # Make the actual model
-        ########################################################################
-
-        restr_model = None
-        if (
-            not restr_body_mask_valid.any()
-            or restr_incidence[restr_body_mask_valid].min() >= HALFPI
-        ):
-            self._logger.debug('Looking only at back side - making a faint glow')
-            # Make a slight glow even on the back side
-            restr_model = np.zeros(restr_body_mask_valid.shape)
-            restr_model[restr_body_mask_valid] = 0.01  # TODO Move to config
-        else:
-            self._logger.debug('Making Lambert model')
-
             if body_config.use_lambert:
-                # Make an oversampled Lambert, then downsample to get a nice anti-aliased
-                # edge
-                restr_o_lambert = restr_o_bp.lambert_law(body_name).mvals.filled(0.0)
-                restr_model = filter_downsample(
-                    restr_o_lambert, restr_oversample_v, restr_oversample_u
-                )
-                # if body_name == 'TITAN':
-                #     # Special case for Titan because of the atmospheric glow at
-                #     # high phase angles. The model won't be used for correlation,
-                #     # only for making the pretty offset PNG.
-                #     restr_model = restr_model+filt.maximum_filter(limb_mask, 3)
-                # Make a slight glow even past the terminator
-                restr_model = restr_model + 0.05  # TODO Move to config
-                restr_model[restr_body_mask_invalid] = 0.0
+                lambert_oversampled = restr_bp.lambert_law(body_name).mvals.filled(0.0)
+                local_model = filter_downsample(lambert_oversampled, oversample_v, oversample_u)
+                local_model = local_model + 0.05
+                local_model[body_mask_invalid] = 0.0
             else:
-                restr_model = restr_body_mask_valid.astype(float)
-
+                local_model = body_mask_valid.astype(np.float64)
             if body_config.use_albedo and body_name in body_config.geometric_albedo:
-                albedo = body_config.geometric_albedo[body_name]
-                self._logger.info(f'Applying albedo {albedo:.6f}')
-                restr_model *= albedo
+                albedo = float(body_config.geometric_albedo[body_name])
+                local_model = local_model * albedo
 
-        ########################################################################
-        # Put the small model back in the right place in the full-size model
-        ########################################################################
-
-        model_slice_0 = slice(v_min + obs.extfov_margin_v, v_max + obs.extfov_margin_v + 1)
-        model_slice_1 = slice(u_min + obs.extfov_margin_u, u_max + obs.extfov_margin_u + 1)
+        # Promote to extfov-shaped arrays.
+        ext_v0 = v_min + obs.extfov_margin_v
+        ext_u0 = u_min + obs.extfov_margin_u
+        v_size = local_model.shape[0]
+        u_size = local_model.shape[1]
         model_img = obs.make_extfov_zeros()
-        model_img[model_slice_0, model_slice_1] = restr_model
         limb_mask = obs.make_extfov_false()
-        limb_mask[model_slice_0, model_slice_1] = restr_limb_mask
+        body_mask = obs.make_extfov_false()
+        terminator_mask = obs.make_extfov_false()
+        v_slice = slice(ext_v0, ext_v0 + v_size)
+        u_slice = slice(ext_u0, ext_u0 + u_size)
+        model_img[v_slice, u_slice] = local_model
+        limb_mask[v_slice, u_slice] = limb_mask_local
+        terminator_mask[v_slice, u_slice] = terminator_local
+        body_mask[v_slice, u_slice] = body_mask_valid
 
-        return model_img, limb_mask
+        # km/pixel is queried at the oversampled grid and downsampled to
+        # match the masks.  When the predicted silhouette is empty the
+        # backplane query is skipped (it would return masked values
+        # anyway) and the downsampled-shape zeros array is used
+        # directly — feeding it back through ``filter_downsample`` would
+        # try to downsample an already-downsampled array, asserting on
+        # the (downsampled-)shape vs oversample divisibility.
+        if body_mask_valid.any():
+            km_per_pixel_arr = restr_bp.resolution(body_name).mvals.filled(0.0)
+            km_per_pixel_local = filter_downsample(km_per_pixel_arr, oversample_v, oversample_u)
+        else:
+            km_per_pixel_local = np.zeros_like(body_mask_valid, dtype=np.float64)
+
+        limb_sampler = _build_polyline_sampler(
+            local_mask=limb_mask_local,
+            region_mask=body_mask_valid,
+            incidence_local=incidence_vals,
+            km_per_pixel_local=km_per_pixel_local,
+            ext_v0=ext_v0,
+            ext_u0=ext_u0,
+        )
+        terminator_sampler = _build_polyline_sampler(
+            local_mask=terminator_local,
+            region_mask=is_lit,
+            incidence_local=incidence_vals,
+            km_per_pixel_local=km_per_pixel_local,
+            ext_v0=ext_v0,
+            ext_u0=ext_u0,
+        )
+
+        sensor_v0 = obs.extfov_margin_v
+        sensor_v1 = obs.extfov_margin_v + obs.data_shape_v
+        sensor_u0 = obs.extfov_margin_u
+        sensor_u1 = obs.extfov_margin_u + obs.data_shape_u
+        in_sensor = np.zeros_like(body_mask, dtype=bool)
+        in_sensor[sensor_v0:sensor_v1, sensor_u0:sensor_u1] = True
+        lit_mask = body_mask.copy()
+        if local_model.size > 0:
+            lit_arr = obs.make_extfov_false()
+            lit_arr[v_slice, u_slice] = is_lit
+            lit_mask = lit_arr
+        body_total = int(np.count_nonzero(body_mask))
+        body_visible = int(np.count_nonzero(body_mask & in_sensor))
+        # ``visible_lit_fraction`` measures the fraction of the *whole
+        # predicted disc* (lit + dark together) whose cos(incidence) >= 0
+        # AND which lies inside the sensor FOV — not the lit hemisphere
+        # alone, which would always score ~1.0 for a fully-in-frame
+        # body and lose discriminating power for the BODY_DISC gate.
+        # NOTE: the name is narrower than the quantity — the denominator is
+        # the whole disc, so this deliberately falls with phase (a thin
+        # high-phase crescent scores low even when fully framed) as well as
+        # with partial framing.  Both regimes make the disc-correlation
+        # template poor, which is exactly what the 0.4 gate screens out;
+        # the phase coupling is intentional, not a normalisation bug.
+        lit_visible_in_fov = int(np.count_nonzero(lit_mask & in_sensor))
+        visible_lit_fraction = lit_visible_in_fov / max(body_total, 1)
+        overflow_fraction = 1.0 - (body_visible / max(body_total, 1))
+
+        if limb_mask_local.any() and km_per_pixel_local[limb_mask_local].size:
+            km_per_pixel_mean = float(np.mean(km_per_pixel_local[limb_mask_local]))
+        else:
+            km_per_pixel_mean = 0.0
+
+        info: dict[str, Any] = {
+            'limb_sampler': limb_sampler,
+            'terminator_sampler': terminator_sampler,
+            'km_per_pixel_mean': km_per_pixel_mean,
+            'visible_lit_fraction': visible_lit_fraction,
+            'overflow_fraction': overflow_fraction,
+        }
+        return model_img, limb_mask, terminator_mask, body_mask, info
+
+    def to_features(self, context: NavContext) -> list[NavFeature]:
+        """Emit the body's NavFeatures per the design's gate rules."""
+        del context
+        with self._logger.open(f'EMIT BODY FEATURES: {self._body_name}'):
+            if self._body_mask is None:
+                self._logger.debug('body_mask is None — emitting no features')
+                return []
+            shape = load_body_shape(self._body_name, config=self._config)
+            features: list[NavFeature] = []
+            limb_uncertainty_px = self._limb_uncertainty_px(shape)
+            self._logger.debug(
+                'ellipsoid_rms_residual = %.3f km; limb_uncertainty = %.3f px '
+                '(arc max %.3f); shape_class = %s',
+                shape.ellipsoid_rms_residual_km,
+                limb_uncertainty_px,
+                LIMB_ARC_MAX_UNCERTAINTY_PX,
+                shape.shape_class_hint,
+            )
+            limb_arc_emitted = False
+            blob_min_px = max(BODY_BLOB_MIN_DIAMETER_PX, shape.min_blob_diameter_px)
+            if (
+                self._limb_sampler is not None
+                and self._limb_sampler.vertices_vu.size > 0
+                and limb_uncertainty_px <= LIMB_ARC_MAX_UNCERTAINTY_PX
+            ):
+                features.append(
+                    _build_limb_arc(
+                        body_name=self._body_name,
+                        sampler=self._limb_sampler,
+                        shape=shape,
+                        bbox=self._bbox_extfov_vu,
+                        subject_range_km=self._subject_range_km,
+                        psf_sigma_px=psf_sigma_px(self.obs.star_psf()),
+                        source_model=self.name,
+                    )
+                )
+                limb_arc_emitted = True
+            elif self._predicted_diameter_px >= blob_min_px:
+                features.append(self._build_blob_feature(shape))
+            else:
+                self._logger.debug(
+                    'No body feature emitted: limb_uncertainty %.3f > %.3f and '
+                    'predicted_diameter %.3f < %.3f',
+                    limb_uncertainty_px,
+                    LIMB_ARC_MAX_UNCERTAINTY_PX,
+                    self._predicted_diameter_px,
+                    blob_min_px,
+                )
+
+            if self._should_emit_disc(limb_arc_emitted):
+                features.append(self._build_disc_feature(shape))
+
+            terminator_feature = self._maybe_build_terminator(shape)
+            if terminator_feature is not None:
+                features.append(terminator_feature)
+
+            kinds = ', '.join(sorted({f.feature_type.name for f in features})) or 'none'
+            self._logger.info('Emitted %d feature(s) [%s]', len(features), kinds)
+            return features
+
+    def to_annotations(self, context: NavContext) -> Annotations:
+        """Reuse the shared body annotation helper."""
+        del context
+        if self._model_img is None or self._body_mask is None or self._limb_mask is None:
+            return Annotations()
+        v_center, u_center = self._predicted_center_vu
+        return self._create_annotations(
+            round(u_center - self.obs.extfov_margin_u),
+            round(v_center - self.obs.extfov_margin_v),
+            self._model_img,
+            self._limb_mask,
+            self._body_mask,
+        )
+
+    def _limb_uncertainty_px(self, shape: BodyShape) -> float:
+        """Return the design's ``limb_uncertainty_px`` for this body."""
+        if self._km_per_pixel_at_limb <= 0.0:
+            return float('inf')
+        return shape.ellipsoid_rms_residual_km / self._km_per_pixel_at_limb
+
+    def _should_emit_disc(self, limb_arc_emitted: bool) -> bool:
+        """Return True when BODY_DISC should be emitted alongside other features."""
+        if not limb_arc_emitted:
+            return False
+        if self._visible_lit_fraction < BODY_DISC_MIN_VISIBLE_LIT_FRACTION:
+            return False
+        return not self._overflow_fraction > BODY_DISC_MAX_OVERFLOW_FRACTION
+
+    def _build_disc_feature(self, shape: BodyShape) -> NavFeature:
+        """Construct the BODY_DISC feature (template + geometry + flags)."""
+        assert self._model_img is not None
+        assert self._body_mask is not None
+        # ``compose_template_features`` expects the template payload to be a
+        # postage-stamp sized to ``bbox_extfov_vu``.  ``self._model_img`` is
+        # an extfov-shaped buffer with non-zero values only inside the body
+        # bbox, so crop here to the body's bbox.  The .copy() detaches from
+        # the parent so the feature can freeze its own array safely.
+        v_min, u_min, v_max, u_max = self._bbox_extfov_vu
+        template_img = self._model_img[v_min:v_max, u_min:u_max].copy()
+        template_mask = self._body_mask[v_min:v_max, u_min:u_max].copy()
+        return NavFeature(
+            feature_id=f'body_disc:{self._body_name}',
+            feature_type=NavFeatureType.BODY_DISC,
+            source_model=self.name,
+            geometry=BodyDiscGeometry(
+                bbox_extfov_vu=self._bbox_extfov_vu,
+                predicted_center_vu=self._predicted_center_vu,
+                overflow_fraction=self._overflow_fraction,
+            ),
+            subject_range_km=self._subject_range_km,
+            position_cov_px=None,
+            intensity_sigma_rel=float(min(0.5, shape.albedo_variation)),
+            preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
+            reliability=_disc_reliability(
+                visible_lit_fraction=self._visible_lit_fraction,
+                overflow_fraction=self._overflow_fraction,
+                diameter_px=self._predicted_diameter_px,
+            ),
+            reliability_reasons=NavReliabilityBreakdown(
+                visible_lit_fraction=self._visible_lit_fraction,
+                overflow_fraction=self._overflow_fraction,
+            ),
+            usable_types=frozenset({NavFeatureType.BODY_DISC}),
+            flags=BodyDiscFlags(
+                body_name=self._body_name,
+                overflow_fov_fraction=self._overflow_fraction,
+            ),
+            template_img=template_img,
+            template_mask=template_mask,
+        )
+
+    def _maybe_build_terminator(self, shape: BodyShape) -> NavFeature | None:
+        """Build TERMINATOR_ARC when the design's terminator gates pass."""
+        sampler = self._terminator_sampler
+        if sampler is None or sampler.vertices_vu.shape[0] < TERMINATOR_MIN_VERTICES:
+            return None
+        if self._phase_angle_factor < TERMINATOR_MIN_PHASE_FACTOR:
+            return None
+        sigma_normal_per_vertex_px = _sigma_normal_per_vertex(
+            sampler=sampler,
+            shape=shape,
+            psf_sigma_px=psf_sigma_px(self.obs.star_psf()),
+            include_albedo=True,
+        )
+        sigma_tangent_per_vertex_px = np.full_like(sigma_normal_per_vertex_px, 0.5)
+        return NavFeature(
+            feature_id=f'terminator_arc:{self._body_name}',
+            feature_type=NavFeatureType.TERMINATOR_ARC,
+            source_model=self.name,
+            geometry=TerminatorPolyline(
+                vertices_vu=sampler.vertices_vu,
+                normals_vu=sampler.normals_vu,
+                sigma_normal_per_vertex_px=sigma_normal_per_vertex_px,
+                sigma_tangent_per_vertex_px=sigma_tangent_per_vertex_px,
+                bbox_extfov_vu=self._bbox_extfov_vu,
+            ),
+            subject_range_km=self._subject_range_km,
+            position_cov_px=None,
+            intensity_sigma_rel=0.0,
+            preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
+            reliability=_terminator_reliability(
+                visible_arc_fraction=_visible_arc_fraction(sampler),
+                albedo_variation=shape.albedo_variation,
+                phase_factor=self._phase_angle_factor,
+            ),
+            reliability_reasons=NavReliabilityBreakdown(
+                visible_arc_fraction=_visible_arc_fraction(sampler),
+                albedo_penalty=min(1.0, shape.albedo_variation),
+            ),
+            usable_types=frozenset({NavFeatureType.TERMINATOR_ARC}),
+            flags=TerminatorArcFlags(
+                body_name=self._body_name,
+                visible_arc_fraction=_visible_arc_fraction(sampler),
+                phase_angle_factor=min(1.0, self._phase_angle_factor),
+            ),
+        )
+
+
+def _build_limb_arc(
+    *,
+    body_name: str,
+    sampler: _PolylineSampler,
+    shape: BodyShape,
+    bbox: tuple[int, int, int, int],
+    subject_range_km: float,
+    psf_sigma_px: float,
+    source_model: str,
+) -> NavFeature:
+    """Construct the LIMB_ARC NavFeature for one body."""
+    sigma_normal_per_vertex_px = _sigma_normal_per_vertex(
+        sampler=sampler, shape=shape, psf_sigma_px=psf_sigma_px, include_albedo=False
+    )
+    sigma_tangent_per_vertex_px = np.full_like(sigma_normal_per_vertex_px, 0.5)
+    visible_arc_fraction = _visible_arc_fraction(sampler)
+    return NavFeature(
+        feature_id=f'limb_arc:{body_name}',
+        feature_type=NavFeatureType.LIMB_ARC,
+        source_model=source_model,
+        geometry=LimbPolyline(
+            vertices_vu=sampler.vertices_vu,
+            normals_vu=sampler.normals_vu,
+            sigma_normal_per_vertex_px=sigma_normal_per_vertex_px,
+            sigma_tangent_per_vertex_px=sigma_tangent_per_vertex_px,
+            bbox_extfov_vu=bbox,
+        ),
+        subject_range_km=subject_range_km,
+        position_cov_px=None,
+        intensity_sigma_rel=0.0,
+        preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
+        reliability=_limb_reliability(
+            visible_arc_fraction=visible_arc_fraction,
+            visible_arc_px=float(sampler.vertices_vu.shape[0]),
+        ),
+        reliability_reasons=NavReliabilityBreakdown(
+            visible_arc_fraction=visible_arc_fraction,
+        ),
+        usable_types=frozenset({NavFeatureType.LIMB_ARC}),
+        flags=LimbArcFlags(
+            body_name=body_name,
+            visible_arc_fraction=visible_arc_fraction,
+        ),
+    )
+
+
+def _build_polyline_sampler(
+    *,
+    local_mask: NDArrayBoolType,
+    region_mask: NDArrayBoolType,
+    incidence_local: NDArrayFloatType,
+    km_per_pixel_local: NDArrayFloatType,
+    ext_v0: int,
+    ext_u0: int,
+) -> _PolylineSampler:
+    """Sample a polyline along the True pixels of ``local_mask``.
+
+    The local mask is a 1-pixel-wide ridge along a feature boundary; we
+    return a parallel array of vertex coordinates in extfov space, the
+    outward-pointing normal at each vertex, the per-vertex incidence
+    angle, and the per-vertex km/px scale.
+
+    The outward normal is the discrete gradient of ``region_mask`` (the
+    body silhouette for the limb, or the lit mask for the terminator),
+    not of the ridge itself: a one-pixel ridge has no consistent
+    interior/exterior orientation, so its gradient sign depends on the
+    diagonal orientation of the ridge rather than on which side is the
+    body interior.  With the body-side True / space-side False
+    convention, ``n_v = region[v-1, u] - region[v+1, u]`` and
+    ``n_u = region[v, u-1] - region[v, u+1]`` point from inside to
+    outside.  Out-of-image neighbours are treated as space (False).
+
+    Parameters:
+        local_mask: 1-pixel-wide ridge whose True pixels become vertices.
+        region_mask: Body-side / lit-side mask whose discrete gradient
+            defines the outward normal.  Same shape as ``local_mask``.
+        incidence_local: Per-pixel incidence angle (radians).
+        km_per_pixel_local: Per-pixel km/px scale.
+        ext_v0: Extfov v-offset of the local grid origin.
+        ext_u0: Extfov u-offset of the local grid origin.
+    """
+    vs, us = np.where(local_mask)
+    total_vertices = int(vs.size)
+    if vs.size:
+        # Drop zero-resolution ridge vertices (km/px <= 0): the resolution
+        # backplane is masked / filled with 0.0 off the resolved body, so
+        # such a vertex carries no usable scale.  Keeping it would make the
+        # per-vertex sigma NaN, which ``_sigma_normal_per_vertex`` silently
+        # floors to a finite fallback -- letting an off-body vertex pollute
+        # the LM fit instead of being excluded.  Dropping it here keeps the
+        # sampler's parallel arrays consistent and the downstream sigmas
+        # finite and positive (which ``lm_subpixel_refine`` requires).
+        resolved = km_per_pixel_local[vs, us] > 0.0
+        vs, us = vs[resolved], us[resolved]
+    if vs.size == 0:
+        empty: NDArrayFloatType = np.empty((0, 2), dtype=np.float64)
+        return _PolylineSampler(
+            vertices_vu=empty,
+            normals_vu=empty,
+            incidence_rad=np.empty(0, dtype=np.float64),
+            km_per_pixel=np.empty(0, dtype=np.float64),
+            total_vertices=total_vertices,
+        )
+    vertices_vu: NDArrayFloatType = np.stack(
+        [vs.astype(np.float64) + ext_v0, us.astype(np.float64) + ext_u0], axis=1
+    )
+    rows, cols = region_mask.shape
+    region = region_mask.astype(np.float64)
+    normals_vu = np.zeros_like(vertices_vu)
+    for i, (v, u) in enumerate(zip(vs, us, strict=True)):
+        # Outward normal: discrete gradient of the body-side / lit-side
+        # mask, pointing from inside (True) to outside (False).  Out-of-
+        # image neighbours count as space (0.0).
+        up = region[v - 1, u] if v > 0 else 0.0
+        down = region[v + 1, u] if v < rows - 1 else 0.0
+        left = region[v, u - 1] if u > 0 else 0.0
+        right = region[v, u + 1] if u < cols - 1 else 0.0
+        v_dir = up - down
+        u_dir = left - right
+        norm = math.hypot(v_dir, u_dir) or 1.0
+        normals_vu[i, 0] = v_dir / norm
+        normals_vu[i, 1] = u_dir / norm
+    incidence_rad = incidence_local[vs, us].astype(np.float64)
+    km_per_pixel = km_per_pixel_local[vs, us].astype(np.float64)
+    return _PolylineSampler(
+        vertices_vu=vertices_vu,
+        normals_vu=normals_vu,
+        incidence_rad=incidence_rad,
+        km_per_pixel=km_per_pixel,
+        total_vertices=total_vertices,
+    )
+
+
+def _incidence_factor_array(incidence_rad: NDArrayFloatType) -> NDArrayFloatType:
+    """Return the design's ``incidence_factor`` array, capped per the constants."""
+    deg = np.degrees(incidence_rad)
+    deg_clipped = np.clip(deg, 0.0, INCIDENCE_FACTOR_CLIP_DEG)
+    factor = 1.0 / np.cos(np.radians(np.minimum(deg_clipped, INCIDENCE_FACTOR_ANGLE_CAP_DEG))) - 1.0
+    factor = np.clip(factor, 0.0, MAX_INCIDENCE_FACTOR_CAP)
+    out: NDArrayFloatType = factor.astype(np.float64)
+    return out
+
+
+def _sigma_normal_per_vertex(
+    *,
+    sampler: _PolylineSampler,
+    shape: BodyShape,
+    psf_sigma_px: float,
+    include_albedo: bool,
+) -> NDArrayFloatType:
+    """Compute the per-vertex normal-sigma per the design.
+
+    Implements the formula from Part 1's "Position covariance per
+    feature type" section, including the limb-softness term that uses
+    the per-vertex km/px scale and the optional albedo / photometric
+    contribution for terminator arcs.
+    """
+    incidence_factor = _incidence_factor_array(sampler.incidence_rad)
+    km_per_pixel = np.where(sampler.km_per_pixel > 0.0, sampler.km_per_pixel, np.nan)
+    limb_softness_km = psf_sigma_px * km_per_pixel
+    base = (
+        shape.ellipsoid_rms_residual_km**2
+        + shape.crater_scale_km**2
+        + (incidence_factor * limb_softness_km) ** 2
+        + shape.spice_orbital_residual_km**2
+    )
+    if include_albedo:
+        albedo_term = (shape.albedo_variation * limb_softness_km) ** 2
+        photometric_term = (limb_softness_km * TERMINATOR_PHOTOMETRIC_SOFTNESS_COEFF) ** 2
+        base = base + albedo_term + photometric_term
+    sigma_km = np.sqrt(np.maximum(base, 0.0))
+    sigma_px = sigma_km / km_per_pixel
+    return np.nan_to_num(sigma_px, nan=LIMB_ARC_MAX_UNCERTAINTY_PX, posinf=1e3, neginf=1e3)
+
+
+def _visible_arc_fraction(sampler: _PolylineSampler) -> float:
+    """Fraction of the predicted ridge vertices that survived to the fit.
+
+    ``sampler.total_vertices`` is the ridge length found before per-vertex
+    drops (currently zero-resolution / off-body vertices; the table-driven
+    shadow extractor will add to this when wired), and ``vertices_vu`` holds
+    only the survivors, so the visible-arc fraction is ``survivors / total``.
+    Returns ``0.0`` when no ridge vertices were found at all.
+    """
+    total = sampler.total_vertices
+    if total <= 0:
+        return 0.0
+    return float(sampler.vertices_vu.shape[0]) / float(total)
+
+
+def _limb_reliability(*, visible_arc_fraction: float, visible_arc_px: float) -> float:
+    """Sigmoid-of-sum reliability for LIMB_ARC features.
+
+    The score answers a feature-existence question: is this limb arc a
+    target a downstream technique should bother running on?  Per-vertex
+    geometric softness (high incidence at the terminator-adjacent end
+    of the limb) lives in :func:`_sigma_normal_per_vertex`, where the
+    LM fit weights individual vertices by their normal sigma; folding
+    it into the reliability scalar as well would double-count the same
+    physics and, because ``incidence_factor`` saturates near the cap
+    on every fully-lit body, would penalize the cleanest possible
+    geometries the hardest.
+    """
+    z = -1.0 + 1.5 * visible_arc_fraction + 1.0 * _sigmoid(visible_arc_px / 50.0)
+    return float(_sigmoid(z))
+
+
+def _terminator_reliability(
+    *, visible_arc_fraction: float, albedo_variation: float, phase_factor: float
+) -> float:
+    """Reliability of TERMINATOR_ARC mirroring the design's formula."""
+    base = _sigmoid(-1.0 + 1.5 * visible_arc_fraction - 1.5 * albedo_variation)
+    return float(base * min(1.0, phase_factor))
+
+
+def _disc_reliability(
+    *, visible_lit_fraction: float, overflow_fraction: float, diameter_px: float
+) -> float:
+    """Reliability of BODY_DISC per the design (no scoring alpha coefficients yet)."""
+    sigmoid_term = _sigmoid(diameter_px / 30.0 - 1.0)
+    return float(visible_lit_fraction * (1.0 - overflow_fraction) * sigmoid_term)
