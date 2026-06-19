@@ -118,6 +118,8 @@ class SimScene:
             params['instrument_config'] = dict(self.instrument_config)
         if self.fit_camera_rotation is not None:
             params['fit_camera_rotation'] = self.fit_camera_rotation
+        if self.midtime_utc is not None:
+            params['midtime_utc'] = self.midtime_utc
         return params
 
 
@@ -164,6 +166,8 @@ def scene_dict_from_sim_params(sim_params: dict[str, Any], *, scene_name: str) -
         scene['instrument_config'] = dict(sim_params['instrument_config'])
     if sim_params.get('fit_camera_rotation') is not None:
         scene['fit_camera_rotation'] = bool(sim_params['fit_camera_rotation'])
+    if sim_params.get('midtime_utc'):
+        scene['midtime_utc'] = str(sim_params['midtime_utc'])
     offset_v = float(sim_params.get('offset_v', 0.0))
     offset_u = float(sim_params.get('offset_u', 0.0))
     offset_rotation_deg = float(sim_params.get('offset_rotation_deg', 0.0))

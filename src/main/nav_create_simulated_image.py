@@ -141,6 +141,8 @@ class CreateSimulatedImageModel(QMainWindow):
             'size_u': 512,
             'offset_v': 0.0,
             'offset_u': 0.0,
+            'offset_rotation_deg': 0.0,
+            'exposure_sec': 1.0,
             'random_seed': 42,
             'instrument': 'generic',
             'closest_planet': 'SATURN',
@@ -290,6 +292,24 @@ class CreateSimulatedImageModel(QMainWindow):
         self._offset_u_spin.valueChanged.connect(self._on_offset_u)
         gen_layout.addRow('Offset U:', self._offset_u_spin)
 
+        self._offset_rotation_spin = QDoubleSpinBox()
+        self._offset_rotation_spin.setRange(-180.0, 180.0)
+        self._offset_rotation_spin.setDecimals(3)
+        self._offset_rotation_spin.setValue(self.sim_params['offset_rotation_deg'])
+        self._offset_rotation_spin.setToolTip(
+            'Planted camera roll (deg) about the boresight; recovered by navigation.'
+        )
+        self._offset_rotation_spin.valueChanged.connect(self._on_offset_rotation)
+        gen_layout.addRow('Offset rotation (deg):', self._offset_rotation_spin)
+
+        self._exposure_spin = QDoubleSpinBox()
+        self._exposure_spin.setRange(0.001, 100000.0)
+        self._exposure_spin.setDecimals(3)
+        self._exposure_spin.setValue(float(self.sim_params['exposure_sec']))
+        self._exposure_spin.setToolTip('Exposure time (sec); scales the cosmic-ray count.')
+        self._exposure_spin.valueChanged.connect(self._on_exposure)
+        gen_layout.addRow('Exposure (sec):', self._exposure_spin)
+
         # Random seed
         self._random_seed_spin = QSpinBox()
         self._random_seed_spin.setRange(0, 2147483647)
@@ -310,6 +330,22 @@ class CreateSimulatedImageModel(QMainWindow):
         )
         self._instrument_combo.currentTextChanged.connect(self._on_instrument)
         gen_layout.addRow('Instrument:', self._instrument_combo)
+
+        # Camera-rotation fit override: blank inherits the instrument default,
+        # on/off force whether navigation solves for a camera roll on this scene.
+        self._fit_rotation_combo = QComboBox()
+        self._fit_rotation_combo.addItems(['(inherit)', 'on', 'off'])
+        self._fit_rotation_combo.setToolTip(
+            'Force whether navigation fits a camera roll; (inherit) uses the instrument default.'
+        )
+        self._fit_rotation_combo.currentTextChanged.connect(self._on_fit_rotation)
+        gen_layout.addRow('Fit camera rotation:', self._fit_rotation_combo)
+
+        # Midtime (informational ISO timestamp carried on the scene).
+        self._midtime_edit = QLineEdit(str(self.sim_params.get('midtime_utc') or ''))
+        self._midtime_edit.setToolTip('Optional ISO UTC timestamp recorded on the scene.')
+        self._midtime_edit.textChanged.connect(self._on_midtime)
+        gen_layout.addRow('Midtime UTC:', self._midtime_edit)
 
         # Closest planet (for ring models)
         self._closest_planet_combo = QComboBox()
@@ -391,6 +427,40 @@ class CreateSimulatedImageModel(QMainWindow):
         self._missing_data_spin.valueChanged.connect(self._on_missing_data)
         gen_layout.addRow('Missing data rate:', self._missing_data_spin)
 
+        self._bias_spin = QDoubleSpinBox()
+        self._bias_spin.setRange(0.0, 10000.0)
+        self._bias_spin.setDecimals(2)
+        self._bias_spin.setValue(float(self._noise_value('bias_dn', 20.0)))
+        self._bias_spin.setToolTip('Additive bias pedestal in DN (lifts dark sky off zero).')
+        self._bias_spin.valueChanged.connect(self._on_bias)
+        gen_layout.addRow('Bias (DN):', self._bias_spin)
+
+        self._bloom_spin = QSpinBox()
+        self._bloom_spin.setRange(0, 200)
+        self._bloom_spin.setValue(int(self._noise_value('bloom_length', 0)))
+        self._bloom_spin.setToolTip('Saturation column-bloom half-length in pixels (0 = none).')
+        self._bloom_spin.valueChanged.connect(self._on_bloom)
+        gen_layout.addRow('Bloom length (px):', self._bloom_spin)
+
+        self._signal_frac_spin = QDoubleSpinBox()
+        self._signal_frac_spin.setRange(0.001, 1.0)
+        self._signal_frac_spin.setDecimals(3)
+        self._signal_frac_spin.setSingleStep(0.05)
+        self._signal_frac_spin.setValue(float(self._noise_value('signal_full_scale_frac', 0.5)))
+        self._signal_frac_spin.setToolTip(
+            'Signal of 1.0 maps to this fraction of the camera full well.'
+        )
+        self._signal_frac_spin.valueChanged.connect(self._on_signal_frac)
+        gen_layout.addRow('Signal full-scale frac:', self._signal_frac_spin)
+
+        self._pixel_area_spin = QDoubleSpinBox()
+        self._pixel_area_spin.setRange(0.0, 1000.0)
+        self._pixel_area_spin.setDecimals(4)
+        self._pixel_area_spin.setValue(float(self._noise_value('pixel_area_cm2', 1.0)))
+        self._pixel_area_spin.setToolTip('Detector pixel area (cm^2); scales the cosmic-ray count.')
+        self._pixel_area_spin.valueChanged.connect(self._on_pixel_area)
+        gen_layout.addRow('Pixel area (cm2):', self._pixel_area_spin)
+
         # Stray-light panel (B6): an additive low-frequency gradient the
         # navigator's BANDPASS_DOG filter is meant to suppress.  Writes the
         # sim_params['stray_light'] block; amplitude 0 (default) means off.
@@ -421,6 +491,22 @@ class CreateSimulatedImageModel(QMainWindow):
         self._stray_model_combo.setToolTip('linear ramp or radial bump.')
         self._stray_model_combo.currentTextChanged.connect(self._on_stray_model)
         gen_layout.addRow('Stray light model:', self._stray_model_combo)
+
+        self._stray_center_v_spin = QDoubleSpinBox()
+        self._stray_center_v_spin.setRange(-10000.0, 20000.0)
+        self._stray_center_v_spin.setDecimals(1)
+        self._stray_center_v_spin.setValue(float(self._stray_value('center_v', 0.0)))
+        self._stray_center_v_spin.setToolTip('Radial-model bump centre V (0 = frame centre).')
+        self._stray_center_v_spin.valueChanged.connect(self._on_stray_center_v)
+        gen_layout.addRow('Stray light center V:', self._stray_center_v_spin)
+
+        self._stray_center_u_spin = QDoubleSpinBox()
+        self._stray_center_u_spin.setRange(-10000.0, 20000.0)
+        self._stray_center_u_spin.setDecimals(1)
+        self._stray_center_u_spin.setValue(float(self._stray_value('center_u', 0.0)))
+        self._stray_center_u_spin.setToolTip('Radial-model bump centre U (0 = frame centre).')
+        self._stray_center_u_spin.valueChanged.connect(self._on_stray_center_u)
+        gen_layout.addRow('Stray light center U:', self._stray_center_u_spin)
 
         # PSF preview (B5): a collapsible inset of the selected instrument's
         # star PSF, with its sigma / FWHM, updated when the instrument changes.
@@ -709,6 +795,29 @@ class CreateSimulatedImageModel(QMainWindow):
         self.sim_params['offset_u'] = value
         self._updater.request_update()
 
+    def _on_offset_rotation(self, value: float) -> None:
+        self.sim_params['offset_rotation_deg'] = float(value)
+        self._updater.request_update()
+
+    def _on_exposure(self, value: float) -> None:
+        self.sim_params['exposure_sec'] = float(value)
+        self._updater.request_update()
+
+    def _on_fit_rotation(self, text: str) -> None:
+        if text == 'on':
+            self.sim_params['fit_camera_rotation'] = True
+        elif text == 'off':
+            self.sim_params['fit_camera_rotation'] = False
+        else:
+            self.sim_params.pop('fit_camera_rotation', None)
+        self._updater.request_update()
+
+    def _on_midtime(self, text: str) -> None:
+        if text.strip():
+            self.sim_params['midtime_utc'] = text.strip()
+        else:
+            self.sim_params.pop('midtime_utc', None)
+
     def _on_random_seed(self, value: int) -> None:
         self.sim_params['random_seed'] = value
         self._updater.request_update()
@@ -792,6 +901,18 @@ class CreateSimulatedImageModel(QMainWindow):
     def _on_missing_data(self, value: float) -> None:
         self._set_noise('missing_data_rate', float(value))
 
+    def _on_bias(self, value: float) -> None:
+        self._set_noise('bias_dn', float(value))
+
+    def _on_bloom(self, value: int) -> None:
+        self._set_noise('bloom_length', int(value))
+
+    def _on_signal_frac(self, value: float) -> None:
+        self._set_noise('signal_full_scale_frac', float(value))
+
+    def _on_pixel_area(self, value: float) -> None:
+        self._set_noise('pixel_area_cm2', float(value))
+
     def _stray_value(self, key: str, default: Any) -> Any:
         """Read a value from the sim_params stray_light block, or a default."""
         stray = self.sim_params.get('stray_light')
@@ -816,6 +937,22 @@ class CreateSimulatedImageModel(QMainWindow):
 
     def _on_stray_model(self, text: str) -> None:
         self._set_stray('model', text or 'linear')
+
+    def _on_stray_center(self, key: str, value: float) -> None:
+        # 0 means "use the frame centre": omit the key so the renderer defaults it.
+        if value == 0.0:
+            stray = self.sim_params.get('stray_light')
+            if isinstance(stray, dict):
+                stray.pop(key, None)
+            self._updater.request_update()
+        else:
+            self._set_stray(key, float(value))
+
+    def _on_stray_center_v(self, value: float) -> None:
+        self._on_stray_center('center_v', value)
+
+    def _on_stray_center_u(self, value: float) -> None:
+        self._on_stray_center('center_u', value)
 
     def _on_background_stars_slider(self, value: int) -> None:
         self._background_stars_spin.blockSignals(True)
@@ -1429,6 +1566,20 @@ class CreateSimulatedImageModel(QMainWindow):
         mesh_seed.valueChanged.connect(lambda v, i=idx: self._on_body_field(i, 'mesh_seed', v))
         fl.addRow('Mesh seed:', mesh_seed)
 
+        mesh_n_lat = QSpinBox()
+        mesh_n_lat.setRange(2, 256)
+        mesh_n_lat.setValue(int(p.get('mesh_n_lat', 16)))
+        mesh_n_lat.setToolTip('Mesh latitude bands (resolution).')
+        mesh_n_lat.valueChanged.connect(lambda v, i=idx: self._on_body_field(i, 'mesh_n_lat', v))
+        fl.addRow('Mesh lat bands:', mesh_n_lat)
+
+        mesh_n_lon = QSpinBox()
+        mesh_n_lon.setRange(3, 512)
+        mesh_n_lon.setValue(int(p.get('mesh_n_lon', 32)))
+        mesh_n_lon.setToolTip('Mesh longitude divisions (resolution).')
+        mesh_n_lon.valueChanged.connect(lambda v, i=idx: self._on_body_field(i, 'mesh_n_lon', v))
+        fl.addRow('Mesh lon divisions:', mesh_n_lon)
+
         pose = p.get('pose_euler_deg', [0.0, 0.0, 0.0])
         for axis_i, axis_name in enumerate(('X', 'Y', 'Z')):
             pose_spin = QDoubleSpinBox()
@@ -1560,6 +1711,76 @@ class CreateSimulatedImageModel(QMainWindow):
         # Store references for sync
         w.anti_aliasing_slider = aa_slider  # type: ignore[attr-defined]
         w.anti_aliasing_spin = aa_spin  # type: ignore[attr-defined]
+
+        # Crater seed: -1 ("Auto") omits the key so the renderer hashes the
+        # geometry; any other value pins the crater pattern.
+        crater_seed = QSpinBox()
+        crater_seed.setRange(-1, 2147483647)
+        crater_seed.setSpecialValueText('Auto')
+        crater_seed.setValue(int(p['seed']) if p.get('seed') is not None else -1)
+        crater_seed.setToolTip('Crater RNG seed; Auto hashes the body geometry.')
+        crater_seed.valueChanged.connect(lambda v, i=idx: self._on_body_seed(i, v))
+        fl.addRow('Crater seed:', crater_seed)
+
+        km_pp = QDoubleSpinBox()
+        km_pp.setRange(0.0, 1.0e9)
+        km_pp.setDecimals(4)
+        km_pp.setValue(float(p.get('km_per_pixel', 0.0)))
+        km_pp.setToolTip('Physical scale at the limb (0 = none); drives the irregularity factor.')
+        km_pp.valueChanged.connect(lambda v, i=idx: self._on_body_field(i, 'km_per_pixel', v))
+        fl.addRow('km per pixel:', km_pp)
+
+        # Navigation-override group: the renderer ignores it (it always draws the
+        # true geometry), but the navigator predicts the body with these fields
+        # overlaid, so a scene can render a mesh and predict a smooth ellipsoid or
+        # a different pose.  Unchecking it removes the override.
+        override = p.get('nav_override') if isinstance(p.get('nav_override'), dict) else {}
+        nav_group = QGroupBox('Navigation override (predicted geometry)')
+        nav_group.setCheckable(True)
+        nav_group.setChecked('nav_override' in p)
+        nav_form = QFormLayout(nav_group)
+        nav_shape = QComboBox()
+        nav_shape.addItems(['ellipsoid', 'polyhedral_mesh'])
+        nav_shape_idx = nav_shape.findText(
+            str(override.get('shape_model', p.get('shape_model', 'ellipsoid')))
+        )
+        if nav_shape_idx >= 0:
+            nav_shape.setCurrentIndex(nav_shape_idx)
+        nav_form.addRow('Predicted shape:', nav_shape)
+        nav_lump = QDoubleSpinBox()
+        nav_lump.setRange(0.0, 1.0)
+        nav_lump.setDecimals(3)
+        nav_lump.setSingleStep(0.01)
+        nav_lump.setValue(float(override.get('mesh_lumpiness', p.get('mesh_lumpiness', 0.3))))
+        nav_form.addRow('Predicted lumpiness:', nav_lump)
+        nav_pose = override.get('pose_euler_deg', p.get('pose_euler_deg', [0.0, 0.0, 0.0]))
+        nav_pose_spins = []
+        for axis_i, axis_name in enumerate(('X', 'Y', 'Z')):
+            sp = QDoubleSpinBox()
+            sp.setRange(0.0, 360.0)
+            sp.setDecimals(1)
+            sp.setWrapping(True)
+            sp.setValue(float(nav_pose[axis_i]) if axis_i < len(nav_pose) else 0.0)
+            nav_form.addRow(f'Predicted pose {axis_name} (deg):', sp)
+            nav_pose_spins.append(sp)
+
+        def _update_override(_arg: Any = None, i: int = idx) -> None:
+            if not nav_group.isChecked():
+                self.sim_params['bodies'][i].pop('nav_override', None)
+            else:
+                self.sim_params['bodies'][i]['nav_override'] = {
+                    'shape_model': nav_shape.currentText(),
+                    'mesh_lumpiness': float(nav_lump.value()),
+                    'pose_euler_deg': [float(s.value()) for s in nav_pose_spins],
+                }
+            self._updater.request_update()
+
+        nav_group.toggled.connect(_update_override)
+        nav_shape.currentTextChanged.connect(_update_override)
+        nav_lump.valueChanged.connect(_update_override)
+        for sp in nav_pose_spins:
+            sp.valueChanged.connect(_update_override)
+        fl.addRow(nav_group)
 
         # Delete button at bottom
         delete_btn = QPushButton('Delete')
@@ -1836,6 +2057,25 @@ class CreateSimulatedImageModel(QMainWindow):
         psf.valueChanged.connect(lambda v, i=idx: self._on_star_field(i, 'psf_sigma', v))
         fl.addRow('PSF sigma:', psf)
 
+        move_v_spin = QDoubleSpinBox()
+        move_v_spin.setRange(-200.0, 200.0)
+        move_v_spin.setDecimals(2)
+        move_v_spin.setValue(float(p.get('move_v', 0.0)))
+        move_v_spin.setToolTip('Star smear vector V (px) during the exposure.')
+        move_v_spin.valueChanged.connect(lambda v, i=idx: self._on_star_field(i, 'move_v', v))
+        fl.addRow('Smear V (px):', move_v_spin)
+        move_u_spin = QDoubleSpinBox()
+        move_u_spin.setRange(-200.0, 200.0)
+        move_u_spin.setDecimals(2)
+        move_u_spin.setValue(float(p.get('move_u', 0.0)))
+        move_u_spin.setToolTip('Star smear vector U (px) during the exposure.')
+        move_u_spin.valueChanged.connect(lambda v, i=idx: self._on_star_field(i, 'move_u', v))
+        fl.addRow('Smear U (px):', move_u_spin)
+        catalog_edit = QLineEdit(str(p.get('catalog_name', 'SIM')))
+        catalog_edit.setToolTip('Source-catalog label carried on the star.')
+        catalog_edit.textChanged.connect(lambda t, i=idx: self._on_star_field(i, 'catalog_name', t))
+        fl.addRow('Catalog name:', catalog_edit)
+
         # PSF size V slider with min/max labels and spinbox
         # Map slider positions 0-11 to odd values 1, 3, 5, ..., 23
         psf_size_v_row = QHBoxLayout()
@@ -1937,6 +2177,15 @@ class CreateSimulatedImageModel(QMainWindow):
             self._updater.request_update()
             if trigger_validate and key == 'range':
                 self._validate_ranges()
+
+    def _on_body_seed(self, idx: int, value: int) -> None:
+        """Set an integer crater seed, or remove it (Auto) when value is -1."""
+        if 0 <= idx < len(self.sim_params['bodies']):
+            if value < 0:
+                self.sim_params['bodies'][idx].pop('seed', None)
+            else:
+                self.sim_params['bodies'][idx]['seed'] = int(value)
+            self._updater.request_update()
 
     def _on_body_pose(self, idx: int, axis: int, value: float) -> None:
         """Update one axis of a body's mesh pose (pose_euler_deg)."""
@@ -2687,6 +2936,8 @@ class CreateSimulatedImageModel(QMainWindow):
             'size_u': int(params.get('size_u', 512)),
             'offset_v': float(params.get('offset_v', 0.0)),
             'offset_u': float(params.get('offset_u', 0.0)),
+            'offset_rotation_deg': float(params.get('offset_rotation_deg', 0.0)),
+            'exposure_sec': float(params.get('exposure_sec', 1.0)),
             'random_seed': int(params.get('random_seed', 42)),
             'instrument': str(params.get('instrument', 'generic')),
             'background_stars_num': int(background_stars_val),
@@ -2705,7 +2956,13 @@ class CreateSimulatedImageModel(QMainWindow):
         # Preserve catalog-only blocks the General tab does not yet edit
         # (noise model, stray light, exposure, instrument-config overrides) so
         # loading a scene spec round-trips them instead of silently dropping them.
-        for passthrough_key in ('noise', 'stray_light', 'exposure_sec', 'instrument_config'):
+        for passthrough_key in (
+            'noise',
+            'stray_light',
+            'instrument_config',
+            'midtime_utc',
+            'fit_camera_rotation',
+        ):
             if passthrough_key in params:
                 self.sim_params[passthrough_key] = params[passthrough_key]
         # Sync the shade-solid-rings checkbox
@@ -2717,6 +2974,12 @@ class CreateSimulatedImageModel(QMainWindow):
         self._size_u_spin.setValue(self.sim_params['size_u'])
         self._offset_v_spin.setValue(self.sim_params['offset_v'])
         self._offset_u_spin.setValue(self.sim_params['offset_u'])
+        self._offset_rotation_spin.blockSignals(True)
+        self._offset_rotation_spin.setValue(self.sim_params['offset_rotation_deg'])
+        self._offset_rotation_spin.blockSignals(False)
+        self._exposure_spin.blockSignals(True)
+        self._exposure_spin.setValue(float(self.sim_params['exposure_sec']))
+        self._exposure_spin.blockSignals(False)
         self._random_seed_spin.setValue(self.sim_params['random_seed'])
         # Update instrument selector
         self._instrument_combo.blockSignals(True)
@@ -2724,6 +2987,17 @@ class CreateSimulatedImageModel(QMainWindow):
         if instrument_index >= 0:
             self._instrument_combo.setCurrentIndex(instrument_index)
         self._instrument_combo.blockSignals(False)
+        # Camera-rotation fit override and midtime
+        fit_rotation = self.sim_params.get('fit_camera_rotation')
+        fit_text = 'on' if fit_rotation is True else 'off' if fit_rotation is False else '(inherit)'
+        self._fit_rotation_combo.blockSignals(True)
+        fit_index = self._fit_rotation_combo.findText(fit_text)
+        if fit_index >= 0:
+            self._fit_rotation_combo.setCurrentIndex(fit_index)
+        self._fit_rotation_combo.blockSignals(False)
+        self._midtime_edit.blockSignals(True)
+        self._midtime_edit.setText(str(self.sim_params.get('midtime_utc') or ''))
+        self._midtime_edit.blockSignals(False)
         self._update_psf_preview()
         # Update time and epoch
         self._time_spin.setValue(self.sim_params.get('time', 0.0))
@@ -2748,6 +3022,18 @@ class CreateSimulatedImageModel(QMainWindow):
         self._missing_data_spin.blockSignals(True)
         self._missing_data_spin.setValue(float(self._noise_value('missing_data_rate', 0.0)))
         self._missing_data_spin.blockSignals(False)
+        self._bias_spin.blockSignals(True)
+        self._bias_spin.setValue(float(self._noise_value('bias_dn', 20.0)))
+        self._bias_spin.blockSignals(False)
+        self._bloom_spin.blockSignals(True)
+        self._bloom_spin.setValue(int(self._noise_value('bloom_length', 0)))
+        self._bloom_spin.blockSignals(False)
+        self._signal_frac_spin.blockSignals(True)
+        self._signal_frac_spin.setValue(float(self._noise_value('signal_full_scale_frac', 0.5)))
+        self._signal_frac_spin.blockSignals(False)
+        self._pixel_area_spin.blockSignals(True)
+        self._pixel_area_spin.setValue(float(self._noise_value('pixel_area_cm2', 1.0)))
+        self._pixel_area_spin.blockSignals(False)
         # Update stray-light controls from the loaded stray_light block.
         self._stray_amplitude_spin.blockSignals(True)
         self._stray_amplitude_spin.setValue(float(self._stray_value('amplitude', 0.0)))
@@ -2762,6 +3048,12 @@ class CreateSimulatedImageModel(QMainWindow):
         if stray_model_index >= 0:
             self._stray_model_combo.setCurrentIndex(stray_model_index)
         self._stray_model_combo.blockSignals(False)
+        self._stray_center_v_spin.blockSignals(True)
+        self._stray_center_v_spin.setValue(float(self._stray_value('center_v', 0.0)))
+        self._stray_center_v_spin.blockSignals(False)
+        self._stray_center_u_spin.blockSignals(True)
+        self._stray_center_u_spin.setValue(float(self._stray_value('center_u', 0.0)))
+        self._stray_center_u_spin.blockSignals(False)
         # Update background stars controls
         self._background_stars_slider.blockSignals(True)
         self._background_stars_slider.setValue(self.sim_params['background_stars_num'])

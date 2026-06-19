@@ -431,3 +431,147 @@ def test_scene_round_trips_through_gui(
     assert model.sim_params['instrument'] == 'coiss_nac'
     assert model.sim_params['size_v'] == 100
     assert model.sim_params['bodies'][0]['name'] == 'B'
+
+
+def test_offset_rotation_handler_updates_param(model: Any) -> None:
+    """The offset-rotation spin writes the planted roll."""
+    model._on_offset_rotation(1.5)
+    assert model.sim_params['offset_rotation_deg'] == 1.5
+
+
+def test_exposure_handler_updates_param(model: Any) -> None:
+    """The exposure spin writes exposure_sec."""
+    model._on_exposure(2.5)
+    assert model.sim_params['exposure_sec'] == 2.5
+
+
+def test_fit_rotation_combo_tristate(model: Any) -> None:
+    """The fit-camera-rotation combo maps to True / False / unset."""
+    model._on_fit_rotation('on')
+    assert model.sim_params['fit_camera_rotation'] is True
+    model._on_fit_rotation('off')
+    assert model.sim_params['fit_camera_rotation'] is False
+    model._on_fit_rotation('(inherit)')
+    assert 'fit_camera_rotation' not in model.sim_params
+
+
+def test_midtime_handler_omits_when_blank(model: Any) -> None:
+    """A blank midtime removes the key; a value sets it."""
+    model._on_midtime('2010-01-01T00:00:00Z')
+    assert model.sim_params['midtime_utc'] == '2010-01-01T00:00:00Z'
+    model._on_midtime('   ')
+    assert 'midtime_utc' not in model.sim_params
+
+
+def test_noise_bias_and_bloom_handlers(model: Any) -> None:
+    """The new noise spins write into the noise block."""
+    model._on_bias(18.0)
+    model._on_bloom(3)
+    assert model.sim_params['noise']['bias_dn'] == 18.0
+    assert model.sim_params['noise']['bloom_length'] == 3
+
+
+def test_stray_center_zero_is_omitted(model: Any) -> None:
+    """A stray-light centre of 0 is omitted (frame centre); non-zero is kept."""
+    model._on_stray_center_v(40.0)
+    assert model.sim_params['stray_light']['center_v'] == 40.0
+    model._on_stray_center_v(0.0)
+    assert 'center_v' not in model.sim_params.get('stray_light', {})
+
+
+def test_body_seed_auto_omits(model: Any) -> None:
+    """A crater seed of -1 (Auto) removes the key; a value sets it."""
+    model.sim_params['bodies'] = [{'name': 'B'}]
+    model._on_body_seed(0, 11)
+    assert model.sim_params['bodies'][0]['seed'] == 11
+    model._on_body_seed(0, -1)
+    assert 'seed' not in model.sim_params['bodies'][0]
+
+
+def test_full_parameter_round_trip(
+    model: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Every newly exposed parameter survives a GUI save -> load scene cycle."""
+    model.sim_params.update(
+        {
+            'instrument': 'coiss_nac',
+            'size_v': 128,
+            'size_u': 128,
+            'offset_v': 1.4,
+            'offset_u': -0.6,
+            'offset_rotation_deg': 1.5,
+            'exposure_sec': 2.5,
+            'midtime_utc': '2010-01-01T00:00:00Z',
+            'fit_camera_rotation': True,
+            'noise': {'poisson': True, 'read_noise_dn': 4.0, 'bias_dn': 18.0, 'bloom_length': 3},
+            'stray_light': {
+                'amplitude': 0.3,
+                'direction_deg': 35.0,
+                'model': 'radial',
+                'center_v': 40.0,
+                'center_u': 50.0,
+            },
+            'bodies': [
+                {
+                    'name': 'B',
+                    'center_v': 64.0,
+                    'center_u': 64.0,
+                    'axis1': 90.0,
+                    'axis2': 70.0,
+                    'axis3': 60.0,
+                    'shape_model': 'polyhedral_mesh',
+                    'mesh_lumpiness': 0.4,
+                    'mesh_seed': 3,
+                    'mesh_n_lat': 20,
+                    'mesh_n_lon': 40,
+                    'pose_euler_deg': [10.0, 35.0, 0.0],
+                    'seed': 11,
+                    'km_per_pixel': 5.0,
+                    'nav_override': {
+                        'shape_model': 'ellipsoid',
+                        'mesh_lumpiness': 0.0,
+                        'pose_euler_deg': [10.0, 35.0, 0.0],
+                    },
+                }
+            ],
+            'stars': [
+                {
+                    'name': 'S',
+                    'v': 30.0,
+                    'u': 40.0,
+                    'vmag': 6.0,
+                    'move_v': 1.0,
+                    'move_u': -2.0,
+                    'catalog_name': 'UCAC4',
+                }
+            ],
+        }
+    )
+    out = tmp_path / 'full_round_trip.yaml'
+    monkeypatch.setattr(
+        QFileDialog, 'getSaveFileName', staticmethod(lambda *a, **k: (str(out), 'YAML'))
+    )
+    monkeypatch.setattr(
+        QFileDialog, 'getOpenFileName', staticmethod(lambda *a, **k: (str(out), 'YAML'))
+    )
+    _no_critical(monkeypatch)
+    model._save_scene()
+    model._apply_params_dict({'size_v': 64, 'size_u': 64})  # wipe state
+    model._load_scene()
+    p = model.sim_params
+    assert p['offset_rotation_deg'] == 1.5
+    assert p['exposure_sec'] == 2.5
+    assert p['midtime_utc'] == '2010-01-01T00:00:00Z'
+    assert p['fit_camera_rotation'] is True
+    assert p['noise']['bias_dn'] == 18.0
+    assert p['noise']['bloom_length'] == 3
+    assert p['stray_light']['center_v'] == 40.0
+    body = p['bodies'][0]
+    assert body['mesh_n_lat'] == 20
+    assert body['mesh_n_lon'] == 40
+    assert body['seed'] == 11
+    assert body['km_per_pixel'] == 5.0
+    assert body['nav_override']['shape_model'] == 'ellipsoid'
+    star = p['stars'][0]
+    assert star['move_v'] == 1.0
+    assert star['catalog_name'] == 'UCAC4'

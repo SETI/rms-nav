@@ -537,18 +537,28 @@ live preview. Launch it with:
 
    nav_create_simulated_image
 
-The **General** tab carries the image size, the planted offset and seed, the
-instrument selector, the detector-noise panel (Poisson, read noise, cosmic-ray
-rate, missing-data rate), the stray-light panel (amplitude, direction, model), a
-PSF preview, a saturation overlay toggle, the closest-planet selector and ring
-times, and the background-star controls. Each per-**body** tab carries that
-body's geometry, a shape-model dropdown (ellipsoid or mesh) with the mesh
-lumpiness / seed / pose controls, and the crater controls; each per-**ring** tab
-carries the ring's edges and shading. Scenes round-trip through both **Load /
-Save Scene (YAML)** (the catalog format) and the JSON parameter buttons, so a
-scene rendered in the GUI can be saved as a catalog artifact and a catalog scene
-can be loaded back to edit. The GUI is one of the three peers, not the sole
-control surface; the YAML and the Python API are equally authoritative.
+The GUI exposes the full scene parameter surface, so any scene that can be
+written by hand in YAML can also be built in the GUI. The **General** tab carries
+the image size, the planted offset and camera roll, the exposure time, the seed,
+the instrument selector, the camera-rotation-fit override and midtime, the
+detector-noise panel (Poisson, read noise, bias, bloom, signal full-scale,
+pixel area, cosmic-ray rate, missing-data rate), the stray-light panel
+(amplitude, direction, model, radial centre), a PSF preview, a saturation overlay
+toggle, the closest-planet selector and ring times, and the background-star
+controls. Each per-**body** tab carries that body's geometry, a shape-model
+dropdown (ellipsoid or mesh) with the mesh lumpiness / seed / resolution / pose
+controls, the crater controls and crater seed, an optional physical scale, and a
+navigation-override group (the predicted geometry that diverges from the rendered
+one). Each per-**star** tab carries the star's position, magnitude, PSF, smear
+vector, and catalog label; each per-**ring** tab carries the ring's edges and
+shading. The parameters the GUI does not edit are the nested
+``instrument_config`` overrides, multi-mode ring edges (the renderer reads only
+mode 1), and the absolute ``signal_full_scale_dn`` alias (its fractional form is
+exposed instead). Scenes round-trip through both **Load / Save Scene (YAML)** (the
+catalog format) and the JSON parameter buttons, so a scene rendered in the GUI
+can be saved as a catalog artifact and a catalog scene can be loaded back to
+edit. The GUI is one of the three peers, not the sole control surface; the YAML
+and the Python API are equally authoritative.
 
 Running navigation on a simulated image
 =======================================
