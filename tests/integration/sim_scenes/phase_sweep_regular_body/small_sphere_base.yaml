@@ -1,7 +1,8 @@
 schema_version: 1
 scene_name: small_sphere_base
 instrument: coiss_nac
-image_size_vu: [220, 220]
+size_v: 220
+size_u: 220
 random_seed: 7
 exposure_sec: 1.0
 # A small sphere (diameter 20 px) navigated by the orientation-free blob centroid.
@@ -22,7 +23,6 @@ rings: []
 noise:
   poisson: true
   read_noise_dn: 4.0
-ground_truth:
-  planted_offset_dv_px: 1.5
-  planted_offset_du_px: -0.5
-  planted_rotation_deg: 0.0
+offset_v: 1.5
+offset_u: -0.5
+offset_rotation_deg: 0.0

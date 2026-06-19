@@ -1,7 +1,8 @@
 schema_version: 1
 scene_name: planted_offset_blob_crescent_displaced
 instrument: coiss_nac
-image_size_vu: [128, 128]
+size_v: 128
+size_u: 128
 random_seed: 11
 exposure_sec: 1.0
 # A high-phase (120 deg) crescent planted FAR from its predicted position
@@ -29,7 +30,6 @@ bodies:
 noise:
   poisson: true
   read_noise_dn: 4.0
-ground_truth:
-  planted_offset_dv_px: -18.6
-  planted_offset_du_px: 21.4
-  planted_rotation_deg: 0.0
+offset_v: -18.6
+offset_u: 21.4
+offset_rotation_deg: 0.0

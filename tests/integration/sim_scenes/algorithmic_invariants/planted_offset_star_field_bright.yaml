@@ -1,7 +1,8 @@
 schema_version: 1
 scene_name: planted_offset_star_field_bright
 instrument: coiss_nac
-image_size_vu: [128, 128]
+size_v: 128
+size_u: 128
 random_seed: 7
 exposure_sec: 1.0
 # A bright-star counterpart to ``planted_offset_star_field`` (same geometry, same
@@ -15,17 +16,15 @@ exposure_sec: 1.0
 bodies: []
 rings: []
 stars:
-  list:
-    - {name: B1, v: 30.0, u: 40.0, vmag: 0.0}
-    - {name: B2, v: 80.0, u: 35.0, vmag: 0.6}
-    - {name: B3, v: 55.0, u: 90.0, vmag: 0.3}
-    - {name: B4, v: 95.0, u: 95.0, vmag: 0.8}
-    - {name: B5, v: 40.0, u: 100.0, vmag: 0.7}
-    - {name: B6, v: 100.0, u: 50.0, vmag: 0.5}
+  - {name: B1, v: 30.0, u: 40.0, vmag: 0.0}
+  - {name: B2, v: 80.0, u: 35.0, vmag: 0.6}
+  - {name: B3, v: 55.0, u: 90.0, vmag: 0.3}
+  - {name: B4, v: 95.0, u: 95.0, vmag: 0.8}
+  - {name: B5, v: 40.0, u: 100.0, vmag: 0.7}
+  - {name: B6, v: 100.0, u: 50.0, vmag: 0.5}
 noise:
   poisson: true
   read_noise_dn: 4.0
-ground_truth:
-  planted_offset_dv_px: 1.43
-  planted_offset_du_px: -0.61
-  planted_rotation_deg: 0.0
+offset_v: 1.43
+offset_u: -0.61
+offset_rotation_deg: 0.0

@@ -1,7 +1,8 @@
 schema_version: 1
 scene_name: hyperion_phase_060
 instrument: coiss_nac
-image_size_vu: [128, 128]
+size_v: 128
+size_u: 128
 random_seed: 42
 midtime_utc: '2010-01-01T00:00:00Z'
 exposure_sec: 1.0
@@ -21,7 +22,6 @@ bodies:
 noise:
   poisson: true
   read_noise_dn: 4.0
-ground_truth:
-  planted_offset_dv_px: 0.0
-  planted_offset_du_px: 0.0
-  planted_rotation_deg: 0.0
+offset_v: 0.0
+offset_u: 0.0
+offset_rotation_deg: 0.0

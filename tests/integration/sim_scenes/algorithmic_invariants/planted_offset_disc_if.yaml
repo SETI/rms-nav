@@ -1,7 +1,8 @@
 schema_version: 1
 scene_name: planted_offset_disc_if
 instrument: coiss_calib_nac
-image_size_vu: [220, 220]
+size_v: 220
+size_u: 220
 random_seed: 7
 exposure_sec: 1.0
 # The disc-correlation invariant on an I/F-calibrated instrument (coiss_calib_nac)
@@ -20,7 +21,6 @@ bodies:
     illumination_angle: 25.0
     phase_angle: 30.0
 rings: []
-ground_truth:
-  planted_offset_dv_px: 1.43
-  planted_offset_du_px: -0.61
-  planted_rotation_deg: 0.0
+offset_v: 1.43
+offset_u: -0.61
+offset_rotation_deg: 0.0
