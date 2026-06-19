@@ -25,6 +25,12 @@ This document is ephemeral: once the library is built and the
 calibration sweep has landed, Phase 10 is over and this file should
 be deleted.
 
+> **Tracked by:** #172 (build the library), #175 (body ellipsoid from
+> SPICE/oops + albedo config), #173 (calibrate the confidence-formula alpha
+> coefficients), #174 (integration tests + regression baselines). #176 (move
+> tuning constants into config as placeholders) lands before #173. This file is
+> the operator how-to behind those issues; see `plans/ROADMAP.md` Milestone 2.
+
 ---
 
 ## What you are producing

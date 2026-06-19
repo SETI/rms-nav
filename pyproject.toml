@@ -170,7 +170,6 @@ markers = [
 src = ["src", "tests"]
 extend-exclude = [
   "src/experiments",
-  "src/nav/support/correlate_old.py",
 ]
 line-length = 100
 

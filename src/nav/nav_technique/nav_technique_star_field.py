@@ -836,7 +836,7 @@ class StarFieldFromCatalogNav(NavTechnique):
         whose hash-distance falls within ``hash_match_tolerance``.  The
         candidate list is sorted by ``(hash_dist_sq, sorted
         detection-source indices ascending, catalog-triplet index)`` —
-        per AUTONAV_PLAN.md §33 the sorted-ascending detection tuple
+        per plans/AUTONAV_PLAN.md §33 the sorted-ascending detection tuple
         ``(min, mid, max)`` is the canonical tie-breaker, not the
         canonical (a=brightest, b<c) order, because the
         sorted-ascending key is invariant under brightness re-ranking

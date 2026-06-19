@@ -1,5 +1,65 @@
 # Autonomous Navigation Overhaul — Design Plan
 
+## Issue triage and decisions (2026-06-19)
+
+This block records the outcome of an issue-tracking pass over this plan. The
+deferred / unimplemented work below was filed as GitHub issues, and the status
+snapshot further down was found to be stale in two places. The ordered plan of
+record across all open issues now lives in `plans/ROADMAP.md`.
+
+**Found already implemented (status snapshot below is stale):**
+
+- **Summary-PNG annotation renderer** — implemented in `nav.support.summary_png`
+  + `navigate_image_files.write_summary_png` (shipped in #131). The "no-op"
+  description below is outdated. Only test coverage was missing -> filed as #177.
+- **`NavModelStarsSimulated`** — implemented in
+  `nav.nav_model.stars.nav_model_stars_simulated` (shipped in #154; uses an
+  `obs.sim_star_list` attribute). Part 13b §8 is therefore done.
+
+**Filed as issues (Phase 10 / 11 / Part 13b deferred work):**
+
+| Plan section | Issue | Notes |
+|---|---|---|
+| Phase 10A — curated library | #172 | playbook is `plans/PHASE10_CURATION.md` |
+| Phase 10B — body shape/albedo | #175 | re-scoped: ellipsoid comes from SPICE/oops, only albedo in config |
+| Phase 10C — confidence calibration | #173 | |
+| Phase 10D — integration tests + baselines | #174 | |
+| Static-data config YAMLs | #176 | re-sequenced: config-first (placeholders), then tune |
+| Status-reason INFO logging (12.7) | #180 | |
+| Image-classifier completeness | #181 | taxonomy needs design first |
+| Feature/gate inspection | #182 | re-scoped: a `--stop-after=features` option, not a new CLI |
+| Phase 11 docs sweep | #178 | scoped to filters/uncertainty/troubleshooting (others exist or are #70/#93) |
+| Part 13b §1 — ring polarity | #183 | |
+| Part 13b §2 — CartographicNav | #184 | Deferred (gated on production mosaics) |
+| Part 13b §4 — gated-feature styling | #185 | prioritized up |
+| Part 13b §6 — manual-nav panel | #186 | prioritized up |
+| Part 13b §7 — Hyperion pose | #187 | Deferred |
+| Part 13b §9 — DT coarse-prior robustness | #179 | |
+
+**Decisions / not filed:**
+
+- **Breadth comparison vs the legacy pipeline** (old Phase 11G) — **dropped**.
+  The legacy baseline is not trusted, which is why the pipeline was rewritten,
+  so a new-vs-legacy gate is not meaningful.
+- **CI grep for deleted symbols + coverage gate** (old Phase 11A/B) — **not
+  pursued** at this time.
+- **Part 13b §3 (Titan nav)** is tracked by #60; **§5 (mixed-instrument SPICE
+  kernel hot path)** was not filed (perf-only); **§7 shape integration** is
+  tracked by #23.
+- A first pass of these issues was created pre-review as #159-#171; those were
+  closed as duplicates/superseded in favour of the reviewed set above.
+
+**On the path to the goal:** producing a full set of **SPICE CK kernels with
+updated pointing** as a delivered product is tracked by #188 (#50, internal
+C-matrix use, is a prerequisite). See `plans/ROADMAP.md` Milestone 7.
+
+**Doc housekeeping:** the spent per-phase operator seed runbooks
+(`PHASE4/5/6/7_LIBRARY_SEED.md`) have been removed now that Phases 4-9 are
+complete; references to them in the completed-phase narratives below are
+historical. `PHASE10_CURATION.md` is retained as the live Phase 10 playbook.
+
+---
+
 ## Reading order for an AI picking this up cold
 
 Read in this order; later items reference earlier ones, not the

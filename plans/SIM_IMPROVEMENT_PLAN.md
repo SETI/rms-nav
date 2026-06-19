@@ -7,6 +7,14 @@ verification work.  It is written so that an AI or developer with no
 prior context can read this single file and understand both what to
 build and why.
 
+> **Issue triage (2026-06-19).** A pass over this plan found that every
+> unimplemented phase is already tracked: **B3/G3** (flux-correct star smear) ->
+> #151, **B8** (diffraction spikes) -> #152, and **T5/T6/T7** (alpha-bootstrap,
+> real-vs-sim diagnostics, calibration validation) -> #153 -- all Priority
+> Defer. No new issues were needed. The implemented phases (B0-B7 except B3, all
+> GUI phases, T1-T4) live on branch `core_rewrite_phase10_sim`. See
+> `plans/ROADMAP.md` for how these fit the overall plan.
+
 ---
 
 ## Reading-order guide
