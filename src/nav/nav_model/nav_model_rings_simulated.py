@@ -21,8 +21,9 @@ from nav.annotation import Annotations
 from nav.config import Config
 from nav.feature.feature import NavFeature, NavReliabilityBreakdown
 from nav.feature.feature_type import NavFeatureType
-from nav.feature.flags import RingAnnulusFlags
-from nav.feature.geometry import RingAnnulusGeometry
+from nav.feature.flags import RingAnnulusFlags, RingEdgeFlags
+from nav.feature.geometry import RingAnnulusGeometry, RingEdgePolyline
+from nav.nav_model.nav_model import NavModel
 from nav.nav_model.nav_model_rings_base import NavModelRingsBase
 from nav.nav_model.rings import RingFeature
 from nav.sim.sim_ring import compute_border_atop_simulated, render_ring
@@ -34,6 +35,58 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only import
     from nav.nav_orchestrator.nav_context import NavContext
 
 __all__ = ['NavModelRingsSimulated']
+
+# Per-vertex ring-edge uncertainty for a simulated ring.  The rendered edge is
+# sharp and noise-free, so the predicted edge sits within ~1 px of the image
+# edge; the along-edge sigma reflects the one-pixel polyline sampling resolution.
+_RING_EDGE_SIGMA_RADIAL_PX: float = 1.0
+_RING_EDGE_SIGMA_ALONG_PX: float = 0.5
+# A polyline whose max deviation from its best-fit line is below this is treated
+# as straight (rank-1 constraint); a curved ring arc exceeds it and constrains
+# the offset in both axes.
+_RING_EDGE_FLAT_CURVATURE_PX: float = 1.0
+
+
+def _ring_edge_is_straight(vertices_vu: NDArrayFloatType) -> bool:
+    """Return True when the polyline's deviation from a line is below threshold.
+
+    Computed by SVD of the centred vertices: the smaller singular direction's
+    spread is the max perpendicular deviation from the best-fit line.
+    """
+    if vertices_vu.shape[0] < 3:
+        return True
+    centred = vertices_vu - vertices_vu.mean(axis=0, keepdims=True)
+    _u, _s, vt = np.linalg.svd(centred, full_matrices=False)
+    deviations = centred @ vt[1]
+    return bool(float(np.max(np.abs(deviations))) <= _RING_EDGE_FLAT_CURVATURE_PX)
+
+
+def _ring_edge_polyline(
+    edge_mask: NDArrayBoolType,
+    center_vu: tuple[float, float],
+) -> tuple[NDArrayFloatType, NDArrayFloatType]:
+    """Extract ring-edge vertices and outward radial normals from an edge mask.
+
+    Each ``True`` pixel becomes a vertex; the normal points radially outward from
+    the ring centre (the direction across the edge the technique fits along).
+
+    Parameters:
+        edge_mask: Extfov-shape boolean 1-pixel edge mask.
+        center_vu: Ring centre ``(v, u)`` in extfov coordinates.
+
+    Returns:
+        ``(vertices_vu, normals_vu)`` each shaped ``(N, 2)``; empty when no edge.
+    """
+    if not edge_mask.any():
+        empty: NDArrayFloatType = np.empty((0, 2), dtype=np.float64)
+        return empty, empty
+    vs, us = np.where(edge_mask)
+    vertices_vu = np.stack([vs.astype(np.float64), us.astype(np.float64)], axis=1)
+    radial = vertices_vu - np.asarray(center_vu, dtype=np.float64)[None, :]
+    norms = np.hypot(radial[:, 0], radial[:, 1])
+    norms[norms == 0.0] = 1.0
+    normals_vu = radial / norms[:, None]
+    return vertices_vu, normals_vu
 
 
 class NavModelRingsSimulated(NavModelRingsBase):
@@ -72,6 +125,32 @@ class NavModelRingsSimulated(NavModelRingsBase):
         self._predicted_center_vu: tuple[float, float] = (0.0, 0.0)
         self._subject_range_km: float = float('inf')
         self._bbox_extfov_vu: tuple[int, int, int, int] = (0, 0, 0, 0)
+
+    @classmethod
+    def instances_for_obs(cls, obs: oops.Observation) -> list[NavModel]:
+        """Build one simulated ring model per ring of a simulated obs.
+
+        Reads ``obs.sim_params['rings']``; returns an empty list for a real obs
+        so the SPICE-backed ``NavModelRings`` handles those instead.
+
+        Parameters:
+            obs: Observation snapshot.
+
+        Returns:
+            One ``NavModelRingsSimulated`` per ring in the sim scene.
+        """
+        if not getattr(obs, 'is_simulated', False):
+            return []
+        sim_params = getattr(obs, 'sim_params', None)
+        if not isinstance(sim_params, dict):
+            return []
+        out: list[NavModel] = []
+        for ring_params in sim_params.get('rings', []) or []:
+            if not isinstance(ring_params, dict):
+                continue
+            ring_name = str(ring_params.get('name', 'SIM-RING'))
+            out.append(cls(f'rings_sim:{ring_name}', obs, ring_name, ring_params))
+        return out
 
     def create_model(self) -> None:
         """Render the simulated rings and populate masks, annotations, metadata."""
@@ -152,10 +231,17 @@ class NavModelRingsSimulated(NavModelRingsBase):
         )
 
     def to_features(self, context: NavContext) -> list[NavFeature]:
-        """Emit a single RING_ANNULUS feature carrying the rendered template."""
+        """Emit the ring features.
+
+        Always emits a ``RING_ANNULUS`` carrying the rendered template (for the
+        correlation path).  Also emits one ``RING_EDGE`` per rendered edge
+        (inner / outer) -- a per-vertex polyline with outward radial normals that
+        ``RingEdgeNav`` fits against the image-edge distance transform, so a
+        curved ring arc recovers the planted offset in both axes.
+        """
         if self._model_img is None or self._ring_mask is None or self._ring_feature is None:
             return []
-        return [
+        features: list[NavFeature] = [
             NavFeature(
                 feature_id=f'ring_annulus:{self._ring_name}',
                 feature_type=NavFeatureType.RING_ANNULUS,
@@ -182,6 +268,87 @@ class NavModelRingsSimulated(NavModelRingsBase):
                 template_mask=self._ring_mask,
             )
         ]
+        for edge_type, edge_mask in self._iter_edge_masks():
+            edge_feature = self._build_ring_edge_feature(edge_type, edge_mask)
+            if edge_feature is not None:
+                features.append(edge_feature)
+        return features
+
+    def _build_ring_edge_feature(
+        self,
+        edge_type: str,
+        edge_mask: NDArrayBoolType,
+    ) -> NavFeature | None:
+        """Build a RING_EDGE feature from an edge mask, or ``None`` if empty."""
+        vertices_vu, normals_vu = _ring_edge_polyline(edge_mask, self._predicted_center_vu)
+        n = vertices_vu.shape[0]
+        if n == 0:
+            return None
+        sigma_radial = np.full(n, _RING_EDGE_SIGMA_RADIAL_PX, dtype=np.float64)
+        sigma_along = np.full(n, _RING_EDGE_SIGMA_ALONG_PX, dtype=np.float64)
+        return NavFeature(
+            feature_id=f'ring_edge:{self._ring_name}:{edge_type}',
+            feature_type=NavFeatureType.RING_EDGE,
+            source_model=self.name,
+            geometry=RingEdgePolyline(
+                vertices_vu=vertices_vu,
+                normals_vu=normals_vu,
+                sigma_radial_per_vertex_px=sigma_radial,
+                sigma_along_edge_per_vertex_px=sigma_along,
+                is_straight_line=_ring_edge_is_straight(vertices_vu),
+                bbox_extfov_vu=self._bbox_extfov_vu,
+            ),
+            subject_range_km=self._subject_range_km,
+            position_cov_px=None,
+            intensity_sigma_rel=0.0,
+            preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
+            reliability=1.0,
+            reliability_reasons=NavReliabilityBreakdown(visible_arc_fraction=1.0),
+            usable_types=frozenset({NavFeatureType.RING_EDGE}),
+            flags=RingEdgeFlags(
+                is_straight_line=_ring_edge_is_straight(vertices_vu),
+                edge_name=f'{self._ring_name}:{edge_type}',
+                planet_name=self._ring_name,
+            ),
+        )
+
+    def _iter_edge_masks(self) -> list[tuple[str, NDArrayBoolType]]:
+        """Return ``(edge_type, edge_mask_extfov)`` for each rendered ring edge."""
+        assert self._ring_feature is not None
+        obs = self.obs
+        data_size_v = int(obs.data_shape_v)
+        data_size_u = int(obs.data_shape_u)
+        center_v = float(self._sim_params.get('center_v', data_size_v / 2.0))
+        center_u = float(self._sim_params.get('center_u', data_size_u / 2.0))
+        time = obs.sim_time
+        epoch = obs.sim_epoch
+        out: list[tuple[str, NDArrayBoolType]] = []
+        for edge_data, edge_type in (
+            (self._ring_feature.inner_edge, 'inner'),
+            (self._ring_feature.outer_edge, 'outer'),
+        ):
+            if edge_data is None:
+                continue
+            base = edge_data.base_orbit
+            edge_mask = compute_border_atop_simulated(
+                data_size_v,
+                data_size_u,
+                center_v,
+                center_u,
+                a=base.a,
+                ae=base.ae,
+                long_peri=base.long_peri,
+                rate_peri=base.rate_peri,
+                epoch=epoch,
+                time=time,
+            )
+            edge_mask_extfov: NDArrayBoolType = obs.make_extfov_false()
+            edge_mask_extfov[
+                obs.extfov_margin_v : obs.extfov_margin_v + data_size_v,
+                obs.extfov_margin_u : obs.extfov_margin_u + data_size_u,
+            ] = edge_mask
+            out.append((edge_type, edge_mask_extfov))
+        return out
 
     def to_annotations(self, context: NavContext) -> Annotations:
         """Emit ring-edge polyline + label annotations."""

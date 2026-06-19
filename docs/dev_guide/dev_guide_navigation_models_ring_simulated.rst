@@ -8,12 +8,18 @@ Overview
 :class:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated` is the
 simulated-image variant of the ring navigation model. It renders a ring system from
 operator-supplied edge radii and shading parameters instead of from a SPICE-driven
-catalog, then emits a single
-:data:`~nav.feature.feature_type.NavFeatureType.RING_ANNULUS` feature carrying the rendered
-template. The simulated GUI driver constructs an instance directly with the operator's
-sim parameters; the orchestrator's autonomous registry does not build an instance because
-the class does not override
-:meth:`~nav.nav_model.nav_model.NavModel.instances_for_obs`.
+catalog, then emits two feature kinds:
+
+- a :data:`~nav.feature.feature_type.NavFeatureType.RING_ANNULUS` carrying the rendered
+  template, for :class:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav`;
+- one :data:`~nav.feature.feature_type.NavFeatureType.RING_EDGE` per rendered edge (inner
+  and outer) -- a per-vertex polyline with outward radial normals -- for
+  :class:`~nav.nav_technique.nav_technique_ring_edge.RingEdgeNav`.
+
+The model overrides :meth:`~nav.nav_model.nav_model.NavModel.instances_for_obs` to build
+one instance per ring of a simulated observation; the parent
+:class:`~nav.nav_model.nav_model_rings.NavModelRings` declines simulated observations, so
+the autonomous registry routes simulated frames here.
 
 Theory
 ======
@@ -25,12 +31,15 @@ metadata exactly as in the catalog-driven path; only the rendering pipeline diff
 (pixel-space here vs. backplane-based for the real model).
 
 The rendered template is the
-:data:`~nav.feature.feature_type.NavFeatureType.RING_ANNULUS` feature payload that
-downstream techniques
-(:class:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav` is the primary
-consumer) navigate against. The simulated ring's geometry is operator-known by
-construction, so the simulated path is the calibration regime — a developer can probe the
-ring-annulus pipeline with rings whose true offset is known to the pixel.
+:data:`~nav.feature.feature_type.NavFeatureType.RING_ANNULUS` feature payload the
+correlation technique navigates against. The per-edge RING_EDGE polyline extends the
+simulated ring to the edge-fitting technique: each rendered edge mask
+(:func:`~nav.sim.sim_ring.compute_border_atop_simulated`) is sampled into a vertex
+polyline with outward radial normals and a curvature-based ``is_straight_line`` flag, and
+:class:`~nav.nav_technique.nav_technique_ring_edge.RingEdgeNav` fits two curved arcs to
+constrain the offset in both axes. The simulated ring's geometry is operator-known by
+construction, so the simulated path is the calibration regime -- a developer can probe the
+ring pipelines with rings whose true offset is known to the pixel.
 
 Restrictions and assumptions
 ----------------------------
@@ -56,7 +65,7 @@ The simulated ring model consumes no YAML configuration of its own; every parame
 in via the per-instance ``sim_params`` dict. Expected keys:
 
 - ``name`` — ring-system label used in metadata.
-- ``feature_type`` — selects the annulus rendering path (``RING_ANNULUS``).
+- ``feature_type`` — ``RINGLET`` (bright ring) or ``GAP`` (dark gap).
 - ``center_v``, ``center_u`` — pixel coordinates of the ring centre.
 - ``range`` — subject distance in km.
 - ``shading_distance`` — controls the per-edge surface-brightness falloff.
@@ -70,10 +79,13 @@ Source file: ``src/nav/nav_model/nav_model_rings_simulated.py`` —
 :class:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated`.
 
 Public class :class:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated`,
-base :class:`~nav.nav_model.nav_model_rings_base.NavModelRingsBase`. The class does *not*
-override :meth:`~nav.nav_model.nav_model.NavModel.instances_for_obs`, so the orchestrator's
-:func:`~nav.nav_model.nav_model.build_models_for_obs` driver never constructs an instance
-during autonomous runs.
+base :class:`~nav.nav_model.nav_model_rings_base.NavModelRingsBase`. The class overrides
+:meth:`~nav.nav_model.nav_model.NavModel.instances_for_obs` to build one instance per ring
+of a simulated observation; the parent
+:class:`~nav.nav_model.nav_model_rings.NavModelRings` returns an empty list for a simulated
+observation, so the orchestrator's
+:func:`~nav.nav_model.nav_model.build_models_for_obs` driver routes simulated frames to
+this subclass.
 
 Public methods (autodocumented at :doc:`/api_reference/api_nav_model`):
 
@@ -81,8 +93,7 @@ Public methods (autodocumented at :doc:`/api_reference/api_nav_model`):
   invokes :func:`~nav.sim.sim_ring.render_ring` to render the simulated ring stack, then
   computes the bounding box and reliability scalars.
 - :meth:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated.to_features` —
-  emits a single :data:`~nav.feature.feature_type.NavFeatureType.RING_ANNULUS` feature
-  carrying the rendered template plus mask.
+  emits the RING_ANNULUS plus one RING_EDGE per rendered edge (inner / outer).
 - :meth:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated.to_annotations`
   — reuses the shared ring annotation helper on
   :class:`~nav.nav_model.nav_model_rings_base.NavModelRingsBase` to render per-edge
@@ -117,13 +128,17 @@ Call path traced through
 Call path traced through
 :meth:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated.to_features`:
 
-1. Crop the rendered template image and mask to the per-instance bounding box.
-2. Construct one
+1. Construct one
    :data:`~nav.feature.feature_type.NavFeatureType.RING_ANNULUS`
-   :class:`~nav.feature.feature.NavFeature` carrying the cropped template image, the
-   cropped mask, the predicted centre, and a
+   :class:`~nav.feature.feature.NavFeature` carrying the rendered template image, the
+   mask, the predicted centre, and a
    :class:`~nav.feature.flags.RingAnnulusFlags` with the operator-supplied ring-system name.
-3. Reliability is fixed at ``1.0``.
+2. For each rendered edge, recompute its 1-pixel edge mask via
+   :func:`~nav.sim.sim_ring.compute_border_atop_simulated`, sample it into a vertex
+   polyline with outward radial normals, classify it straight or curved, and append a
+   :data:`~nav.feature.feature_type.NavFeatureType.RING_EDGE` carrying a
+   :class:`~nav.feature.geometry.RingEdgePolyline`.
+3. Reliability on each feature is fixed at ``1.0``.
 
 Examples
 ========

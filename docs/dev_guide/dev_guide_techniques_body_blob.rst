@@ -28,11 +28,56 @@ Theory
 The technique fits a per-image translation by minimising the inverse-variance-weighted
 squared residual between the per-blob observed and predicted centroids.
 
+Coarse acquisition (lit-shape matched filter)
+---------------------------------------------
+
+A brightness-weighted moment only sees the body when it already sits inside the predicted
+bounding box, so the bare centroid's capture range is just the box -- a few pixels of
+per-body slop. Once the SPICE pointing error exceeds that slop the body drifts out of the
+box, the moment is taken over a clipped fragment, and the technique reports a *silently*
+biased centroid (no spurious or at-edge flag fires). To extend the capture range to the full
+extended-FOV search window, each blob first runs a coarse acquisition that re-centres its
+bounding box on the body before the centroid is taken:
+
+- If a pass-1 prior offset is installed on the context (another technique already located the
+  body), the box is shifted by the rounded prior. The prior is a measured offset, so it
+  applies regardless of phase.
+- Otherwise the technique correlates a matched-filter template of the predicted *lit
+  silhouette* against the lit-signal image (background subtracted, clipped at zero,
+  sky-masked) over ``predicted_center +/- margin``. The response peaks where a body of that
+  shape is best centred; the integer peak offset re-centres the box. The template depends on
+  phase (:data:`~nav.nav_technique.nav_technique_body_blob._COARSE_CORRELATION_MAX_PHASE_DEG`,
+  90 deg):
+
+  - **At or below half phase** the lit silhouette is a near-full disc, so the kernel is a
+    filled disc of the predicted body radius.
+  - **Above half phase** the sunlit region is a thin crescent whose bright pixels sit a
+    fraction of a radius off the body center; a disc kernel would lock onto the crescent arc
+    rather than the center. The kernel is instead a *synthesised crescent* -- a Lambertian
+    ``max(0, cos(incidence))`` rendering of a sphere of the predicted radius at the body's
+    phase, lit from the sub-solar direction the ``BODY_BLOB`` feature carries
+    (``sub_solar_dir_vu``, the projected body-to-Sun direction; see
+    :doc:`dev_guide_navigation_models_body`). Correlating the crescent puts the template
+    *center* on the body center instead of the bright arc.
+
+  The kernel is flipped before the FFT so the operation is a cross-correlation, and the
+  template's own brightness-centroid offset is added back to the peak: the feature carries the
+  body's *lit* centroid (which on a crescent sits off the geometric center), so the recovered
+  shift is expressed in lit-centroid terms and matches the residual the centroid step forms.
+
+The crescent template needs the sub-solar direction. It is undefined near full phase (the lit
+and geometric centroids coincide), where the disc kernel is used anyway, and is reported as
+``(0, 0)`` then. If a body is past half phase yet carries no direction (its illumination
+geometry was not populated), the coarse stage makes no relocation and keeps the predicted box
+(an installed prior still applies). The coarse offset is integer; the sub-pixel precision
+comes entirely from the brightness-weighted moment below, computed inside the re-centred box,
+so the recovered ``observed - predicted`` residual already includes the coarse shift.
+
 Per-blob centroid
 -----------------
 
 For each consumed body, the technique computes the brightness-weighted moment over the
-predicted bounding box:
+(coarse-re-centred) predicted bounding box:
 
 .. math::
 
@@ -88,14 +133,28 @@ The reported translation covariance is :math:`\sigma^{2} I` with :math:`\sigma^{
 Restrictions and assumptions
 ----------------------------
 
-- Per-blob centroids assume the bounding box truly contains the body's flux. When a
-  cosmic-ray hit, an in-band stellar source, or a neighbouring body's halo lands inside the
-  predicted bounding box, the moment skews and the technique reports a wrong centroid. The
-  upstream ``BODY_BLOB`` emission gates filter pathological cases (see
+- Per-blob centroids assume the (coarse-re-centred) bounding box truly contains the body's
+  flux. When a cosmic-ray hit, an in-band stellar source, or a neighbouring body's halo lands
+  inside the box, the moment skews and the technique reports a wrong centroid. The upstream
+  ``BODY_BLOB`` emission gates filter pathological cases (see
   :doc:`dev_guide_navigation_models_body`).
+- The coarse lit-shape acquisition extends the capture range from the bounding box to the full
+  search window at any phase: a disc template at or below half phase, a synthesised crescent
+  above it. The only residual gap is a body past half phase whose illumination geometry was
+  not populated (no ``sub_solar_dir_vu``), where the crescent cannot be oriented; such a body
+  is then recovered only via the bounding-box centroid (small offsets) or an installed prior.
 - A vanishing total flux (an entirely-in-shadow body whose predicted bounding box happens to
   cover the right part of the FOV) collapses the moment; the technique drops such blobs
   before the joint fit and reports a no-signal failure when every blob is dropped.
+- **Very small bodies are deliberately gated out.** The ``BODY_BLOB`` feature's reliability
+  carries a ``blob_extent_px`` term that drives reliability below the keep threshold for a
+  body only a handful of pixels across (on the simulated catalog a 20 px body passes but a
+  ~24 px-or-smaller body sits just under the gate). This is intentional: on a *real* frame a
+  body a few pixels wide is dominated by the point-spread function, cosmic rays, and
+  background structure, so its brightness-weighted centroid is not trustworthy even though the
+  arithmetic still produces a number. Navigating bodies below that floor is therefore held
+  back pending calibration against the operator-curated real-image library; the floor is a
+  config-tunable gate, not a hard algorithmic limit.
 - The technique carries no rotation evidence — a brightness-weighted centroid is rotation-
   invariant about itself. When the per-instrument
   :attr:`~nav.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` is true, the

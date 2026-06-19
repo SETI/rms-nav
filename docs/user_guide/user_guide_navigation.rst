@@ -390,6 +390,14 @@ techniques are:
   :class:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav`,
   :class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav`.
 
+The star field matcher re-centroids each matched star with a point-spread-function fit
+when the star is faint, and keeps the simpler brightness-weighted centroid when the star
+is bright enough that its noise has already fallen below the PSF fit's residual bias.
+This makes the star field the most accurate technique on a well-exposed field. The
+brightness at which it switches is the configurable
+``techniques.StarFieldFromCatalogNav.tuning.psf_refine_snr_max`` knob in
+``config_510_techniques.yaml`` (set the whole step off with ``psf_refine_enabled: 0``).
+
 :class:`~nav.nav_technique.nav_technique_manual.NavTechniqueManual` is
 the interactive driver and is not part of the autonomous registry; it
 cannot be invoked by ``--nav-techniques``.
@@ -487,17 +495,18 @@ The key information in the results is:
 Simulated Images
 ================
 
-RMS-NAV supports simulated images created with the
-``nav_create_simulated_image`` GUI. Simulated images share the same
-navigation pipeline as real images; they are selected by passing the ``sim``
-dataset name and a path to the JSON parameter file on the command line:
+RMS-NAV includes an image simulator used to test and validate the navigation
+pipeline. It is not needed for navigating real data, but a simulated frame can be
+navigated through the same pipeline by passing the ``sim`` dataset name and a path
+to a JSON parameter file:
 
 .. code-block:: bash
 
    nav_offset sim /path/to/simulated_image.json
 
-For a full description of the GUI, the JSON parameter file structure, and
-every supported field, see :doc:`user_guide_simulated_images`.
+The simulator, its scene formats, and the ``nav_create_simulated_image`` GUI are
+documented for developers in the :doc:`/dev_guide/dev_guide_simulator` chapter.
+See also :doc:`user_guide_simulated_images`.
 
 Navigation Techniques
 =====================

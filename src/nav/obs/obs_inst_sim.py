@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 from typing import Any, cast
 
@@ -8,7 +7,9 @@ from oops.observation.snapshot import Snapshot
 
 from nav.config import DEFAULT_CONFIG, IMAGE_LOGGER, Config
 from nav.obs.obs_snapshot_inst import ObsSnapshotInst
+from nav.sim.instruments import resolve_extfov_margin, resolve_sim_inst_config
 from nav.sim.render import render_combined_model
+from nav.sim.scene import load_sim_scene
 from nav.support.types import PathLike
 
 
@@ -26,27 +27,26 @@ class ObsSim(ObsSnapshotInst):
         extfov_margin_vu: tuple[int, int] | None = None,
         **kwargs: Any,
     ) -> 'ObsSim':
-        """Creates an ObsSim from a JSON file.
+        """Creates an ObsSim from a YAML scene file.
 
         Parameters:
-            path: Path to the JSON description file.
+            path: Path to the YAML scene file.
             config: Navigation configuration. If None, uses defaults.
             extfov_margin_vu: Optional extended FOV margins (v,u) to add around the image.
             **kwargs: Additional keyword arguments.
-                sim_params: Dictionary of parameters saved by the GUI JSON. If present,
-                this will override the JSON file.
+                sim_params: Flat sim-params mapping. If present, this overrides the
+                scene file.
         """
 
         config = config or DEFAULT_CONFIG
         logger = IMAGE_LOGGER
 
         provided_sim_params = kwargs.get('sim_params')
-        json_path = FCPath(path)
-        abspath = cast(Path, json_path.get_local_path()).absolute()
+        scene_path = FCPath(path)
+        abspath = cast(Path, scene_path.get_local_path()).absolute()
         if provided_sim_params is None:
-            logger.debug(f'Reading simulated image JSON {json_path}')
-            with json_path.open() as f:
-                sim_params = json.load(f)
+            logger.debug(f'Reading simulated image scene {scene_path}')
+            sim_params = load_sim_scene(abspath)
         else:
             sim_params = provided_sim_params
             logger.debug('Using provided sim_params')
@@ -61,13 +61,13 @@ class ObsSim(ObsSnapshotInst):
             if provided_sim_params is None:
                 raise ValueError(
                     'Invalid or missing size/offset field in simulated image '
-                    f'JSON file "{json_path}": {e}'
+                    f'scene file "{scene_path}": {e}'
                 ) from e
             else:
                 raise ValueError(
                     'Invalid or missing size/offset field in provided '
-                    'sim_params for simulated image JSON file '
-                    f'"{json_path}": {e}'
+                    'sim_params for simulated image scene file '
+                    f'"{scene_path}": {e}'
                 ) from e
 
         # Build a basic Snapshot with a flat FOV and dummy geometry
@@ -80,8 +80,8 @@ class ObsSim(ObsSnapshotInst):
             path='SSB',
             frame='J2000',
         )
-        # Store data and the full JSON dictionary for future use
-        snapshot.image_url = str(json_path.absolute())
+        # Store data and the full sim-params dictionary for future use
+        snapshot.image_url = str(scene_path.absolute())
         snapshot.abspath = abspath
 
         snapshot.sim_params = sim_params
@@ -103,18 +103,30 @@ class ObsSim(ObsSnapshotInst):
         snapshot.sim_body_index_map = meta.get('body_index_map')
         snapshot.sim_body_mask_map = meta.get('body_mask_map', {})
 
-        # Determine extfov margins
-        inst_config = config.category('sim')
+        # Select the per-instrument config block the sim is emulating (or the
+        # generic sim block when no instrument is specified), so the
+        # orchestrator sees the right units / noise / saturation settings.
+        sim_block = config.category('sim')
+        inst_config = resolve_sim_inst_config(
+            config, sim_params.get('instrument'), sim_params.get('instrument_config')
+        )
         if extfov_margin_vu is None:
-            extfov_margin_vu_entry = inst_config['extfov_margin_vu']
-            if isinstance(extfov_margin_vu_entry, dict):
-                extfov_margin_vu = extfov_margin_vu_entry[size_v]
-            else:
-                extfov_margin_vu = extfov_margin_vu_entry
+            extfov_margin_vu = resolve_extfov_margin(inst_config, sim_block, size_v)
+
+        # A scene may toggle camera-rotation fitting independently of the camera
+        # it emulates.  In reality ``fit_camera_rotation`` is a per-camera
+        # property, but a sim scene is a navigation fixture: it can ask the
+        # navigator to solve for a planted roll on top of any instrument's optics
+        # (e.g. Cassini NAC's sharp PSF) without pretending to be a camera that
+        # happens to fit rotation.  The resolved block is shared live config, so
+        # copy before overriding.
+        fit_rotation_override = sim_params.get('fit_camera_rotation')
+        if fit_rotation_override is not None:
+            inst_config = {**inst_config, 'fit_camera_rotation': bool(fit_rotation_override)}
 
         snapshot._closest_planet = sim_params.get('closest_planet')
         new_obs = ObsSim(snapshot, config=config, extfov_margin_vu=extfov_margin_vu, simulated=True)
-        new_obs._inst_config = inst_config
+        new_obs._inst_config = cast(dict[str, Any], inst_config)
 
         new_obs.spice_kernels = ['fake_kernel1.txt', 'fake_kernel2.txt']
 
@@ -133,5 +145,5 @@ class ObsSim(ObsSnapshotInst):
             'instrument_host_lid': 'sim',
             'instrument_lid': 'sim',
             'image_shape_xy': self.data_shape_uv,
-            'description': 'Simulated observation from JSON',
+            'description': 'Simulated observation from YAML scene',
         }

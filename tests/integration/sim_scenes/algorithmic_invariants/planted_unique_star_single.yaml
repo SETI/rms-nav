@@ -1,0 +1,27 @@
+schema_version: 1
+scene_name: planted_unique_star_single
+instrument: coiss_nac
+size_v: 128
+size_u: 128
+random_seed: 7
+exposure_sec: 1.0
+# A single bright star with no body, rings, or companion stars -- the minimal
+# input for StarUniqueMatchNav's one-star path.  StarFieldFromCatalogNav needs a
+# multi-star pattern for its RANSAC triplet match, so it is infeasible here;
+# StarUniqueMatchNav instead detects the brightest peak inside the lone star's
+# search window and reports centroid-minus-prediction as the offset (the
+# brightness-uniqueness gate passes trivially with no competing star).  The
+# offset is asserted on the StarUniqueMatchNav per-technique result: the
+# technique recovers it geometrically (non-spurious), but its one-star confidence
+# cap and the placeholder-alpha star confidences keep the fused status off a
+# stable 'success', so the scene is held out of the full-ensemble assertions.
+bodies: []
+rings: []
+stars:
+  - {name: S1, v: 64.0, u: 70.0, vmag: 3.0}
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 1.43
+offset_u: -0.61
+offset_rotation_deg: 0.0

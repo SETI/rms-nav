@@ -133,6 +133,7 @@ class BodyLimbNav(NavTechnique):
         )
         self._lm_trust_region_px = float(self.tuning['lm_trust_region_px'])
         self._lm_tikhonov_alpha = float(self.tuning['lm_tikhonov_alpha'])
+        self._gradient_ridge_refine = bool(self.tuning['gradient_ridge_refine'])
         self._at_edge_tolerance_px = float(self.tuning['at_edge_tolerance_px'])
         self._rotation_at_edge_fraction = float(self.tuning['rotation_at_edge_fraction'])
 
@@ -265,6 +266,7 @@ class BodyLimbNav(NavTechnique):
                 pivot_distance_px=pivot_distance,
                 trust_region_px=self._lm_trust_region_px,
                 tikhonov_alpha=self._lm_tikhonov_alpha,
+                final_gradient_ridge=self._gradient_ridge_refine,
             )
             dv_final, du_final = result.offset_vu
             max_rotation_rad = math.radians(context.max_rotation_deg)

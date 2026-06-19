@@ -1,0 +1,39 @@
+schema_version: 1
+scene_name: planted_rotation_star_field
+instrument: coiss_nac
+size_v: 200
+size_u: 200
+random_seed: 7
+exposure_sec: 1.0
+# A clean multi-star field with a planted camera ROLL.  ``fit_camera_rotation``
+# asks the navigator to solve for a roll on top of the instrument's optics --
+# decoupling rotation fitting from the camera the scene emulates, so the scene
+# keeps Cassini NAC's sharp PSF (precise centroids) while exercising the 3-DoF
+# path.  The renderer rotates each star about the boresight by
+# ``planted_rotation_deg`` then translates by the planted offset; the simulated
+# stars NavModel predicts the unrotated geometry, so StarFieldFromCatalogNav's
+# similarity (rotation + translation) fit recovers the planted roll.  The roll is
+# kept small (1.5 deg) so the outer stars stay within the matcher's inlier
+# tolerance; larger rolls displace them past it and drop the inlier count.
+fit_camera_rotation: true
+bodies: []
+rings: []
+stars:
+  - {name: F1, v: 55.0, u: 70.0, vmag: 3.0}
+  - {name: F2, v: 145.0, u: 130.0, vmag: 3.0}
+  - {name: F3, v: 70.0, u: 145.0, vmag: 3.0}
+  - {name: F4, v: 130.0, u: 55.0, vmag: 3.0}
+  - {name: F5, v: 50.0, u: 110.0, vmag: 3.0}
+  - {name: F6, v: 150.0, u: 90.0, vmag: 3.0}
+  - {name: F7, v: 112.0, u: 152.0, vmag: 3.0}
+  - {name: F8, v: 88.0, u: 48.0, vmag: 3.0}
+  - {name: F9, v: 155.0, u: 140.0, vmag: 3.0}
+  - {name: F10, v: 45.0, u: 60.0, vmag: 3.0}
+  - {name: F11, v: 140.0, u: 115.0, vmag: 3.0}
+  - {name: F12, v: 60.0, u: 85.0, vmag: 3.0}
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 1.43
+offset_u: -0.61
+offset_rotation_deg: 1.37

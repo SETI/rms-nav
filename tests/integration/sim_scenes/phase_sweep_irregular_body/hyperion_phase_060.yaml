@@ -1,0 +1,27 @@
+schema_version: 1
+scene_name: hyperion_phase_060
+instrument: coiss_nac
+size_v: 128
+size_u: 128
+random_seed: 42
+midtime_utc: '2010-01-01T00:00:00Z'
+exposure_sec: 1.0
+bodies:
+  - name: HYPERION
+    shape_model: polyhedral_mesh
+    mesh_lumpiness: 0.45
+    mesh_seed: 7
+    pose_euler_deg: [10.0, 35.0, 0.0]
+    center_v: 64.0
+    center_u: 64.0
+    axis1: 84.0
+    axis2: 60.0
+    axis3: 52.0
+    illumination_angle: 25.0
+    phase_angle: 60.0
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 0.0
+offset_u: 0.0
+offset_rotation_deg: 0.0

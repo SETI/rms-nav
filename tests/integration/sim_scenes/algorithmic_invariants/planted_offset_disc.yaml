@@ -1,0 +1,23 @@
+schema_version: 1
+scene_name: planted_offset_disc
+instrument: coiss_nac
+size_v: 128
+size_u: 128
+random_seed: 42
+exposure_sec: 1.0
+bodies:
+  - name: RHEA
+    shape_model: ellipsoid
+    center_v: 64.0
+    center_u: 64.0
+    axis1: 86.0
+    axis2: 86.0
+    axis3: 86.0
+    illumination_angle: 18.0
+    phase_angle: 30.0
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 1.43
+offset_u: -0.61
+offset_rotation_deg: 0.0

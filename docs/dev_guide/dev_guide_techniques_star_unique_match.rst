@@ -18,8 +18,8 @@ per-instrument search window.
 
 Feasibility passes when at least one usable
 :data:`~nav.feature.feature_type.NavFeatureType.STAR` feature is in the input set;
-feasibility fails when none are usable (every predictable star is in a body silhouette,
-saturation mask, or cosmic-ray mask).
+feasibility fails when none are usable (every predictable star is occluded by a body
+silhouette or ring annulus).
 
 Theory
 ======
@@ -100,9 +100,10 @@ Restrictions and assumptions
   :class:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav` triplet
   matcher takes over.
 - Both paths assume the matched detection is unsaturated. A saturated star whose centroid
-  has been clipped will produce a biased centroid; the per-feature
-  :class:`~nav.feature.flags.StarFlags` includes a saturation flag that the upstream
-  ``usable_stars`` filter consults.
+  has been clipped will produce a biased centroid; in practice the brightest catalog stars
+  are held off by the magnitude gate. The predicted-position saturation / cosmic-ray mask is
+  not consulted to gate stars (a star's predicted pixel is not special once an offset is
+  present), so star usability is an occlusion-only gate.
 
 Sources of uncertainty
 ----------------------
@@ -244,7 +245,7 @@ Call path traced through
 :meth:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav.navigate`:
 
 1. Open a logged section. Filter the offered features down to ``usable_stars``
-   (predictable, not occluded, not in a saturation mask).
+   (predictable and not occluded by a body silhouette or ring annulus).
 2. Sort the usable cohort by predicted SNR (brightest first) and compute the brightness
    margin between consecutive entries via ``brightness_margin_mag``.
 3. Branch on the brightness-margin gate:

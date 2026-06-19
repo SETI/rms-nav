@@ -8,7 +8,15 @@ from psfmodel import GaussianPSF
 from scipy import ndimage
 from starcat import Star
 
+from nav.config import DEFAULT_CONFIG
+from nav.sim.instruments import resolve_sim_inst_config
+from nav.sim.seeds import derive_effect_seed
 from nav.sim.sim_body import create_simulated_body
+from nav.sim.sim_body_polyhedral import (
+    MeshBodySpec,
+    mesh_spec_from_params,
+    render_mesh_body_image,
+)
 from nav.sim.sim_ring import render_ring
 from nav.support.types import (
     MutableStar,
@@ -25,12 +33,28 @@ def _render_stars_cached(
     stars_params_json: str,
     offset_v: float,
     offset_u: float,
+    default_psf_sigma: float,
+    rotation_deg: float,
 ) -> tuple[Any, ...]:
     """Internal cached function to compute star rendering."""
     stars_params = json.loads(stars_params_json)
     img = np.zeros((size_v, size_u), dtype=np.float64)
     sim_star_list: list[MutableStar] = []
     star_info: list[dict[str, Any]] = []
+
+    # A camera roll rotates the whole frame about the boresight (image centre).
+    # The rendered star position is therefore the catalog position rotated by
+    # ``rotation_deg`` about the centre, then translated by the planted offset.
+    # The star record keeps its unrotated catalog (v, u) so the NavModel predicts
+    # the unshifted geometry and a star technique recovers BOTH the rotation and
+    # the translation.  The rotation matrix matches the navigator's
+    # ``similarity_transform_fit`` convention (maps catalog -> detection in
+    # ``(v, u)`` order), so the fitted angle equals ``rotation_deg``.
+    theta = np.radians(rotation_deg)
+    cos_t = float(np.cos(theta))
+    sin_t = float(np.sin(theta))
+    roll_center_v = size_v / 2.0
+    roll_center_u = size_u / 2.0
 
     for i, star_params in enumerate(stars_params):
         star = cast(MutableStar, Star())
@@ -59,8 +83,12 @@ def _render_stars_cached(
         star.dn = 2.512 ** -(star.vmag - 4.0)
         sim_star_list.append(star)
 
-        star_offset_v = star.v + offset_v
-        star_offset_u = star.u + offset_u
+        rel_v = star.v - roll_center_v
+        rel_u = star.u - roll_center_u
+        rot_v = cos_t * rel_v - sin_t * rel_u
+        rot_u = sin_t * rel_v + cos_t * rel_u
+        star_offset_v = roll_center_v + rot_v + offset_v
+        star_offset_u = roll_center_u + rot_u + offset_u
         v_int = int(star_offset_v)
         u_int = int(star_offset_u)
         v_frac = star_offset_v - v_int
@@ -73,7 +101,7 @@ def _render_stars_cached(
         move_gran = max(abs(star.move_u) / max_move_steps, abs(star.move_v) / max_move_steps)
         move_gran = np.clip(move_gran, 0.1, 1.0)
 
-        sigma = star_params.get('psf_sigma', 3.0)
+        sigma = star_params.get('psf_sigma', default_psf_sigma)
         psf = GaussianPSF(sigma=sigma)
 
         # Stars where any part of the PSF would be off the edge of the image are ignored.
@@ -97,10 +125,19 @@ def _render_stars_cached(
             )
             continue
 
-        # Evaluate PSF with scale=1.0 first to get unnormalized PSF
+        # Evaluate PSF with scale=1.0 first to get unnormalized PSF.
+        #
+        # ``eval_rect`` centres the PSF half a pixel low for ``offset=0`` (its
+        # offset is measured from the pixel's lower edge, so ``offset=0.5`` lands
+        # on the pixel centre).  The navigator's detection centroid and the star
+        # NavModel's predicted position both use the pixel-centre convention
+        # (integer index ``i`` *is* coordinate ``i``).  Adding 0.5 to the eval
+        # offset renders the star centroid at exactly ``star.v + offset_v``, so a
+        # star the model predicts at ``(v, u)`` lands there in the image and a
+        # technique recovers the planted offset without a half-pixel bias.
         star_psf = psf.eval_rect(
             (psf_size_half_v * 2 + 1, psf_size_half_u * 2 + 1),
-            offset=(v_frac, u_frac),
+            offset=(v_frac + 0.5, u_frac + 0.5),
             scale=1.0,
             movement=(star.move_v, star.move_u),
             movement_granularity=move_gran,
@@ -140,12 +177,27 @@ def render_stars(
     stars_params: list[dict[str, Any]],
     offset_v: float,
     offset_u: float,
+    *,
+    default_psf_sigma: float = 3.0,
+    rotation_deg: float = 0.0,
 ) -> tuple[NDArrayFloatType, list[MutableStar], list[dict[str, Any]]]:
-    """Render stars into img. Returns (img, sim_star_list, star_render_info)."""
+    """Render stars into img. Returns (img, sim_star_list, star_render_info).
+
+    Parameters:
+        img: Image array to render stars into.
+        stars_params: Per-star parameter dictionaries.
+        offset_v: V offset to apply to every star.
+        offset_u: U offset to apply to every star.
+        default_psf_sigma: PSF sigma used for stars that do not specify their
+            own ``psf_sigma`` (the selected instrument's value).
+        rotation_deg: Camera-roll angle (degrees) applied about the image centre
+            before the translation offset, modelling a pointing rotation the star
+            techniques recover.
+    """
     size_v, size_u = img.shape
     stars_params_json = json.dumps(stars_params, sort_keys=True)
     cached_img, cached_star_list, cached_star_info = _render_stars_cached(
-        size_v, size_u, stars_params_json, offset_v, offset_u
+        size_v, size_u, stars_params_json, offset_v, offset_u, default_psf_sigma, rotation_deg
     )
     # Add cached stars to input image (don't overwrite background noise/stars)
     img[:] = np.clip(img + cached_img, 0.0, 1.0)
@@ -335,6 +387,30 @@ def _render_bodies_positioned_cached(
     }
 
 
+@lru_cache(maxsize=30)
+def _render_mesh_shape_cached(
+    size_v: int,
+    size_u: int,
+    axis1: float,
+    axis2: float,
+    axis3: float,
+    spec: MeshBodySpec,
+    illumination_angle: float,
+    phase_angle: float,
+    anti_aliasing: float,
+) -> NDArrayFloatType:
+    """Cache an irregular mesh body shape at the reference (image) centre."""
+    return render_mesh_body_image(
+        size=(size_v, size_u),
+        center=(size_v / 2.0, size_u / 2.0),
+        semi_axes_px=(axis1 / 2.0, axis2 / 2.0, axis3 / 2.0),
+        spec=spec,
+        illumination_angle=illumination_angle,
+        phase_angle=phase_angle,
+        anti_aliasing=anti_aliasing,
+    )
+
+
 def _render_single_body(
     img: NDArrayFloatType,
     body_params: dict[str, Any],
@@ -383,7 +459,34 @@ def _render_single_body(
     anti_aliasing = float(body_params.get('anti_aliasing', 1.0))
     body_seed = seed if seed is not None else body_params.get('seed')
 
-    # Get cached body shape (at reference center)
+    # Get cached body shape (at reference center).  An irregular body renders
+    # from a polyhedral mesh at a scene-supplied pose; otherwise an ellipsoid.
+    if str(body_params.get('shape_model', 'ellipsoid')) == 'polyhedral_mesh':
+        body_shape = _render_mesh_shape_cached(
+            size_v,
+            size_u,
+            axis1,
+            axis2,
+            axis3,
+            mesh_spec_from_params(body_params),
+            illumination_angle,
+            phase_angle,
+            anti_aliasing,
+        )
+        return _finish_single_body(
+            img,
+            body_shape,
+            body_params,
+            body_name,
+            center_v,
+            center_u,
+            axis1,
+            axis2,
+            axis3,
+            ref_center_v=ref_center_v,
+            ref_center_u=ref_center_u,
+        )
+
     body_shape = _render_body_shape_cached(
         size_v,
         size_u,
@@ -402,15 +505,39 @@ def _render_single_body(
         anti_aliasing,
         body_seed,
     )
+    return _finish_single_body(
+        img,
+        body_shape,
+        body_params,
+        body_name,
+        center_v,
+        center_u,
+        axis1,
+        axis2,
+        axis3,
+        ref_center_v=ref_center_v,
+        ref_center_u=ref_center_u,
+    )
 
-    # Translate body from reference center to actual center
+
+def _finish_single_body(
+    img: NDArrayFloatType,
+    body_shape: NDArrayFloatType,
+    body_params: dict[str, Any],
+    body_name: str,
+    center_v: float,
+    center_u: float,
+    axis1: float,
+    axis2: float,
+    axis3: float,
+    *,
+    ref_center_v: float,
+    ref_center_u: float,
+) -> tuple[NDArrayBoolType, dict[str, Any]]:
+    """Translate a reference-centred body shape into place and composite it."""
     dv = center_v - ref_center_v
     du = center_u - ref_center_u
-
-    # Create positioned body by translating the cached shape
     positioned_body = ndimage.shift(body_shape, (dv, du), order=1, mode='constant', cval=0.0)
-
-    # Composition: overwrite where body contributes
     mask = positioned_body > 0
     img[mask] = positioned_body[mask]
 
@@ -491,32 +618,176 @@ def render_bodies(
     }
 
 
-@lru_cache(maxsize=1)
-def _render_background_noise_cached(
-    size_v: int,
-    size_u: int,
-    noise_level: float,
-    seed: int,
-) -> NDArrayFloatType:
-    """Internal cached function to compute background noise."""
-    rng = np.random.RandomState(seed)
-    noise = rng.normal(0.0, noise_level, size=(size_v, size_u))
-    return noise
+def apply_detector_noise(
+    img: NDArrayFloatType,
+    *,
+    signal_full_scale_dn: float,
+    read_noise_dn: float,
+    saturation_dn: float,
+    poisson: bool = True,
+    bias_dn: float = 0.0,
+    cosmic_ray_rate_per_sec: float = 0.0,
+    exposure_sec: float = 1.0,
+    pixel_area_cm2: float = 1.0,
+    missing_data_marker_dn: float = 0.0,
+    missing_data_rate: float = 0.0,
+    noise_seed: int,
+    cosmic_ray_seed: int,
+    missing_data_seed: int,
+) -> None:
+    """Convert a normalized signal image to DN and add detector noise in place.
 
-
-def render_background_noise(img: NDArrayFloatType, noise_level: float, seed: int) -> None:
-    """Add Gaussian background noise to the image.
+    The composed bodies/rings/stars/sky signal arrives normalized to [0, 1].
+    This stage maps it to detector counts (DN) at ``signal_full_scale_dn`` per
+    unit signal, then applies the real camera-noise structure: signal-dependent
+    Poisson shot noise, a Gaussian read-noise floor, sparse cosmic-ray spikes,
+    and missing-data markers.  Saturation clipping at the full well is left to a
+    later stage so cosmic-ray spikes can exceed it; only a zero floor (raw
+    frames carry no negative DN) is enforced here.
 
     Parameters:
-        img: Image array to modify in-place.
-        noise_level: Standard deviation of Gaussian noise (0-1).
-        seed: Random seed for reproducibility.
+        img: Normalized [0, 1] signal image, overwritten in place with DN.
+        signal_full_scale_dn: DN that a normalized signal of 1.0 maps to.
+        read_noise_dn: Standard deviation of the Gaussian read-noise floor, DN.
+        saturation_dn: Full-well DN; cosmic-ray spikes are scaled to exceed it.
+        poisson: Whether to apply Poisson shot noise (usually on).
+        bias_dn: Additive bias pedestal in DN.  Real raw frames sit on a bias
+            level, so signal-free sky is never exactly zero; without it the dark
+            sky collides with the missing-data marker (0) and is misclassified.
+        cosmic_ray_rate_per_sec: Cosmic-ray fluence in events / cm^2 / sec.
+        exposure_sec: Exposure time in seconds (scales cosmic-ray count).
+        pixel_area_cm2: Detector pixel area in cm^2 (scales cosmic-ray count).
+        missing_data_marker_dn: DN value written to dropped pixels.
+        missing_data_rate: Fraction of pixels (0-1) marked as missing.
+        noise_seed: Seed for the shot + read-noise stream.
+        cosmic_ray_seed: Seed for cosmic-ray placement and intensity.
+        missing_data_seed: Seed for missing-data placement.
     """
-    if noise_level <= 0:
+    size_v, size_u = img.shape
+
+    signal_dn = np.clip(img, 0.0, 1.0) * signal_full_scale_dn
+
+    noise_rng = np.random.RandomState(noise_seed)
+    if poisson:
+        # Poisson mean equals the noise-free signal, so noise grows with
+        # brightness the way a real detector's shot noise does.
+        out_dn = noise_rng.poisson(np.maximum(signal_dn, 0.0)).astype(np.float64)
+    else:
+        out_dn = signal_dn.copy()
+    if read_noise_dn > 0:
+        out_dn += noise_rng.normal(0.0, read_noise_dn, size=(size_v, size_u))
+    # Bias pedestal lifts signal-free sky off zero so it is not confused with
+    # the missing-data marker; injected markers below overwrite it back.
+    out_dn += bias_dn
+
+    expected_hits = cosmic_ray_rate_per_sec * exposure_sec * pixel_area_cm2 * size_v * size_u
+    if expected_hits > 0:
+        cosmic_rng = np.random.RandomState(cosmic_ray_seed)
+        n_hits = int(cosmic_rng.poisson(expected_hits))
+        if n_hits > 0:
+            hit_v = cosmic_rng.randint(0, size_v, size=n_hits)
+            hit_u = cosmic_rng.randint(0, size_u, size=n_hits)
+            # Long-tailed spike intensities that exceed the full well by design,
+            # so the cosmic-ray mask in the orchestrator has something to catch.
+            spikes = saturation_dn * (1.0 + cosmic_rng.lognormal(0.0, 1.0, size=n_hits))
+            np.add.at(out_dn, (hit_v, hit_u), spikes)
+
+    if missing_data_rate > 0:
+        missing_rng = np.random.RandomState(missing_data_seed)
+        missing_mask = missing_rng.random_sample(size=(size_v, size_u)) < missing_data_rate
+        out_dn[missing_mask] = missing_data_marker_dn
+
+    # Raw frames carry no negative DN; the upper (saturation) clip is deferred
+    # to apply_saturation so cosmic-ray spikes can bloom before being clipped.
+    img[:] = np.maximum(out_dn, 0.0)
+
+
+def apply_saturation(
+    img: NDArrayFloatType,
+    *,
+    saturation_dn: float,
+    bloom_length: int = 0,
+) -> None:
+    """Clip pixels at the full-well DN, optionally blooming excess along columns.
+
+    Pixels above ``saturation_dn`` are clipped to it, so they land on the
+    orchestrator's saturation mask (``image >= full_well_dn``).  When
+    ``bloom_length`` is positive, the charge above full well is first spread
+    along the column (the v axis) up to that many pixels in each direction --
+    conserving the total excess -- so a saturated star blooms into a vertical
+    streak the way it does on cameras with column bloom (e.g. Cassini NAC).
+
+    Parameters:
+        img: DN image, modified in place.
+        saturation_dn: Full-well DN ceiling.
+        bloom_length: Column-bloom half-length in pixels; 0 disables bloom.
+    """
+    if bloom_length > 0:
+        excess = np.maximum(img - saturation_dn, 0.0)
+        if float(excess.max()) > 0.0:
+            width = 2 * bloom_length + 1
+            # The box mean over the column window conserves the summed excess
+            # while spreading it onto neighbours, which may saturate in turn.
+            spread = ndimage.uniform_filter1d(excess, size=width, axis=0, mode='constant')
+            np.minimum(img, saturation_dn, out=img)
+            img += spread
+    np.minimum(img, saturation_dn, out=img)
+
+
+def apply_stray_light(
+    img: NDArrayFloatType,
+    *,
+    amplitude: float,
+    direction_deg: float = 0.0,
+    model: str = 'linear',
+    center_v: float | None = None,
+    center_u: float | None = None,
+) -> None:
+    """Add a smooth low-frequency stray-light field to the signal in place.
+
+    Scattered light raises a slowly-varying background across the frame; the
+    navigator's BANDPASS_DOG source-image filter is meant to remove it.  The
+    field is additive, so it brightens dark sky as well as lit features (a
+    multiplicative field would leave the dark sky -- where the gradient most
+    needs suppressing -- untouched).  It is applied to the noise-free signal in
+    [0, 1] before the detector stage.
+
+    Parameters:
+        img: Normalized [0, 1] signal image, modified in place.
+        amplitude: Peak stray-light level added, in normalized signal units.
+        direction_deg: Ramp direction for the 'linear' model, in degrees.
+        model: 'linear' (a ramp spanning [0, amplitude]) or 'radial' (a bump of
+            height amplitude fading to 0 at the farthest corner).
+        center_v: Bump centre v for 'radial'; frame centre when None.
+        center_u: Bump centre u for 'radial'; frame centre when None.
+
+    Raises:
+        ValueError: If ``model`` is not 'linear' or 'radial'.
+    """
+    if amplitude <= 0.0:
         return
     size_v, size_u = img.shape
-    noise = _render_background_noise_cached(size_v, size_u, noise_level, seed)
-    img[:] = np.clip(img + noise, 0.0, 1.0)
+    vv, uu = np.mgrid[0:size_v, 0:size_u]
+    vv = vv.astype(np.float64)
+    uu = uu.astype(np.float64)
+    if model == 'linear':
+        theta = np.radians(direction_deg)
+        proj = np.cos(theta) * vv + np.sin(theta) * uu
+        proj -= float(proj.min())
+        span = float(proj.max())
+        field = amplitude * (proj / span) if span > 0.0 else np.zeros_like(proj)
+    elif model == 'radial':
+        cv = size_v / 2.0 if center_v is None else float(center_v)
+        cu = size_u / 2.0 if center_u is None else float(center_u)
+        radius = np.sqrt((vv - cv) ** 2 + (uu - cu) ** 2)
+        corners = [(0.0, 0.0), (0.0, size_u), (size_v, 0.0), (size_v, size_u)]
+        r_max = max(np.hypot(cv - c[0], cu - c[1]) for c in corners)
+        if r_max <= 0.0:
+            return
+        field = amplitude * np.clip(1.0 - radius / r_max, 0.0, 1.0)
+    else:
+        raise ValueError(f"stray_light model must be 'linear' or 'radial'; got {model!r}")
+    img += field
 
 
 @lru_cache(maxsize=1)
@@ -627,29 +898,47 @@ def _render_combined_model_cached(
     if not ignore_offset:
         offset_v = float(sim_params.get('offset_v', 0.0))
         offset_u = float(sim_params.get('offset_u', 0.0))
+        # Camera roll about the boresight, part of the planted pointing error the
+        # navigator recovers; suppressed in GUI preview mode alongside the offset.
+        offset_rotation_deg = float(sim_params.get('offset_rotation_deg', 0.0))
     else:
         offset_v = 0.0
         offset_u = 0.0
+        offset_rotation_deg = 0.0
 
     img = cast(NDArrayFloatType, np.zeros((size_v, size_u), dtype=np.float64))
 
-    # Get random seed for background effects
+    # Get the scene's single random seed and derive an independent sub-seed per
+    # randomized effect, so the effects' streams don't correlate and adding a
+    # new effect later leaves existing effects' output unchanged.
     random_seed = int(sim_params.get('random_seed', 42))
+    noise_seed = derive_effect_seed(random_seed, 'noise')
+    background_stars_seed = derive_effect_seed(random_seed, 'background_stars')
+    crater_seed = derive_effect_seed(random_seed, 'craters')
+    cosmic_ray_seed = derive_effect_seed(random_seed, 'cosmic_rays')
+    missing_data_seed = derive_effect_seed(random_seed, 'missing_data')
 
-    # Apply background noise first
-    background_noise_intensity = float(sim_params.get('background_noise_intensity', 0.0))
-    render_background_noise(img, background_noise_intensity, random_seed)
+    # Resolve the per-instrument config once; stars use its PSF sigma so their
+    # centroid diagnostics match the navigator's PSF, and the noise stage below
+    # reads its physical noise parameters.
+    inst_config = resolve_sim_inst_config(
+        DEFAULT_CONFIG, sim_params.get('instrument'), sim_params.get('instrument_config')
+    )
+    star_psf_sigma = float(inst_config['star_psf_sigma'])
 
-    # Then background stars
+    # Detector noise is applied last, after the full signal is composed, so the
+    # Poisson shot term sees the noise-free signal it should grow with.
+
+    # Background stars are part of the sky signal, composed before noise.
     background_stars_num = int(sim_params.get('background_stars_num', 0))
-    background_stars_psf_sigma = float(sim_params.get('background_stars_psf_sigma', 0.9))
+    background_stars_psf_sigma = float(sim_params.get('background_stars_psf_sigma', star_psf_sigma))
     background_stars_distribution_exponent = float(
         sim_params.get('background_stars_distribution_exponent', 2.5)
     )
     render_background_stars(
         img,
         background_stars_num,
-        random_seed,
+        background_stars_seed,
         psf_sigma=background_stars_psf_sigma,
         distribution_exponent=background_stars_distribution_exponent,
     )
@@ -658,7 +947,14 @@ def _render_combined_model_cached(
     bodies_params = sim_params.get('bodies', []) or []
     rings_params = sim_params.get('rings', []) or []
 
-    img, sim_star_list, star_info = render_stars(img, stars_params, offset_v, offset_u)
+    img, sim_star_list, star_info = render_stars(
+        img,
+        stars_params,
+        offset_v,
+        offset_u,
+        default_psf_sigma=star_psf_sigma,
+        rotation_deg=offset_rotation_deg,
+    )
 
     # Process rings: assign default ranges
     for ring_number, ring_params in enumerate(rings_params):
@@ -669,7 +965,14 @@ def _render_combined_model_cached(
             # Use a large starting value to ensure rings are behind bodies by default
             ring_params['range'] = float(ring_number + 1000.0)
 
-    # Process bodies: assign default ranges
+    # Process bodies: assign default ranges and apply the camera roll.  A roll
+    # rotates each body's centre about the boresight and adds to its line-of-sight
+    # pose (rotation_z), so a body moves and turns under the same pointing
+    # rotation the stars do; the body NavModel predicts the unrolled geometry.
+    roll_cos = float(np.cos(np.radians(offset_rotation_deg)))
+    roll_sin = float(np.sin(np.radians(offset_rotation_deg)))
+    roll_center_v = size_v / 2.0
+    roll_center_u = size_u / 2.0
     bodies_with_ranges = []
     for body_number, body_params in enumerate(bodies_params):
         body_params_copy = dict(body_params)
@@ -677,6 +980,14 @@ def _render_combined_model_cached(
             body_params_copy['range'] = float(body_params_copy['range'])
         else:
             body_params_copy['range'] = float(body_number + 1)
+        if offset_rotation_deg != 0.0:
+            cv = float(body_params_copy.get('center_v', roll_center_v)) - roll_center_v
+            cu = float(body_params_copy.get('center_u', roll_center_u)) - roll_center_u
+            body_params_copy['center_v'] = roll_center_v + roll_cos * cv - roll_sin * cu
+            body_params_copy['center_u'] = roll_center_u + roll_sin * cv + roll_cos * cu
+            body_params_copy['rotation_z'] = (
+                float(body_params_copy.get('rotation_z', 0.0)) + offset_rotation_deg
+            )
         bodies_with_ranges.append(body_params_copy)
 
     # Combine rings and bodies, sort by range (far to near)
@@ -763,7 +1074,7 @@ def _render_combined_model_cached(
                 item_params,
                 offset_v,
                 offset_u,
-                seed=random_seed,
+                seed=crater_seed,
                 ref_center_v=ref_center_v,
                 ref_center_u=ref_center_u,
             )
@@ -775,6 +1086,76 @@ def _render_combined_model_cached(
             # Index into near-to-far order is 1-based
             near_index = order_near_to_far.index(body_info['name']) + 1
             body_index_map[body_mask] = near_index
+
+    # Stray light is a low-frequency addition to the signal, applied before the
+    # detector stage so it brightens dark sky and is then subject to noise.
+    stray = sim_params.get('stray_light')
+    if stray:
+        apply_stray_light(
+            img,
+            amplitude=float(stray.get('amplitude', 0.0)),
+            direction_deg=float(stray.get('direction_deg', 0.0)),
+            model=str(stray.get('model', 'linear')),
+            center_v=stray.get('center_v'),
+            center_u=stray.get('center_u'),
+        )
+
+    # All signal is composed; apply the detector model.  Feature masks above are
+    # derived from the noise-free signal, so they are unaffected.  Physical noise
+    # parameters delegate to the selected instrument's config (resolved above);
+    # sim-only knobs (signal full-scale, cosmic-ray rate, dropout rate) come from
+    # the sim block.
+    sim_noise = DEFAULT_CONFIG.category('sim')['noise']
+    scene_noise = sim_params.get('noise') or {}
+    if inst_config.get('data_units', 'raw_dn') == 'raw_dn':
+        inst_noise = inst_config.get('noise') or {}
+        # Map a normalized signal of 1.0 to a fraction of the camera's full well,
+        # so a scene's brightness scales with the selected instrument's DN depth.
+        full_scale_frac = float(
+            scene_noise.get('signal_full_scale_frac', sim_noise['signal_full_scale_frac'])
+        )
+        signal_full_scale_dn = float(
+            scene_noise.get(
+                'signal_full_scale_dn', full_scale_frac * float(inst_noise['full_well_dn'])
+            )
+        )
+        apply_detector_noise(
+            img,
+            signal_full_scale_dn=signal_full_scale_dn,
+            read_noise_dn=float(scene_noise.get('read_noise_dn', inst_noise['read_noise_dn'])),
+            saturation_dn=float(inst_noise['saturation_dn']),
+            poisson=bool(scene_noise.get('poisson', True)),
+            bias_dn=float(scene_noise.get('bias_dn', sim_noise.get('bias_dn', 0.0))),
+            cosmic_ray_rate_per_sec=float(
+                scene_noise.get(
+                    'cosmic_ray_rate_per_sec', sim_noise.get('cosmic_ray_rate_per_sec', 0.0)
+                )
+            ),
+            exposure_sec=float(sim_params.get('exposure_sec', 1.0)),
+            pixel_area_cm2=float(
+                scene_noise.get('pixel_area_cm2', sim_noise.get('pixel_area_cm2', 1.0))
+            ),
+            missing_data_marker_dn=float(inst_noise.get('marker_value', 0)),
+            missing_data_rate=float(
+                scene_noise.get('missing_data_rate', sim_noise.get('missing_data_rate', 0.0))
+            ),
+            noise_seed=noise_seed,
+            cosmic_ray_seed=cosmic_ray_seed,
+            missing_data_seed=missing_data_seed,
+        )
+        # Clip at the camera's full well (with optional column bloom) so
+        # saturated pixels land on the orchestrator's saturation mask.
+        apply_saturation(
+            img,
+            saturation_dn=float(inst_noise['saturation_dn']),
+            bloom_length=int(scene_noise.get('bloom_length', sim_noise.get('bloom_length', 0))),
+        )
+    else:
+        # calibrated_if: realistic I/F noise is deferred (B2 scope).  The DN
+        # detector model (Poisson counts, full-well saturation, cosmic-ray
+        # spikes) does not map onto I/F, so the composed signal is left as I/F
+        # in [0, 1] with no detector noise applied.
+        np.clip(img, 0.0, 1.0, out=img)
 
     # Build body_masks_list in original order (matching bodies_params)
     body_masks_list: list[NDArrayBoolType] = []

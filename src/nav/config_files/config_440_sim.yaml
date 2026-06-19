@@ -1,6 +1,12 @@
 # Simulated observation configuration. Mirrors the per-camera schema
 # of the real instrument blocks so the sim path can be navigated without
 # branching the orchestrator on observation type.
+#
+# This block serves the instrument-agnostic ('generic') sim frame. When a
+# scene names an instrument, the physical parameters (read noise, saturation,
+# marker, units, thresholds) delegate to that instrument's config_4N0 block;
+# only the sim-only knobs here (signal_full_scale_frac, cosmic_ray_rate_per_sec,
+# pixel_area_cm2, missing_data_rate) continue to apply.
 sim:
   data_units: raw_dn
   extfov_margin_vu: [50, 50]
@@ -15,6 +21,19 @@ sim:
     expected_noise_dn: 1.0
     marker_value: 0
     read_noise_dn: 1.0
+    # Additive bias pedestal in DN.  Real raw frames sit on a bias level, so
+    # signal-free sky is never exactly zero; without it the dark sky collides
+    # with the missing-data marker (0) and the frame is misclassified.
+    bias_dn: 20.0
+    # Fraction of the instrument's full well that a normalized signal of 1.0
+    # maps to, so brightness scales with the selected camera's DN depth.
+    signal_full_scale_frac: 0.5
+    # Detector-noise defaults; scenes may override via a 'noise' block. Poisson
+    # shot noise is on by default; cosmic rays and dropouts are off by default.
+    cosmic_ray_rate_per_sec: 0.0   # events / cm^2 / sec
+    pixel_area_cm2: 1.0
+    missing_data_rate: 0.0         # fraction of pixels marked missing
+    bloom_length: 0                # column-bloom half-length, px (0 = no bloom)
   image_quality_thresholds:
     blank_max_dn: 5.0
     saturation_threshold_dn: 4095

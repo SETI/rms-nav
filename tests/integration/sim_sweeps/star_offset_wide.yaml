@@ -1,0 +1,6 @@
+sweep_name: star_offset_wide
+# Star-field offset across the navigable range (~20 px, limited by the frame size and per-star search window).
+base_scene: algorithmic_invariants/planted_offset_star_field.yaml
+parameters: [offset_v]
+values: [0.5, 1.7, 3.4, 5.7, 8.2, 11.3, 14.6, 18.1]
+technique: StarFieldFromCatalogNav

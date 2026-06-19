@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-import json
 import os
 import re
 import sys
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -44,8 +45,34 @@ from PyQt6.QtWidgets import (
 package_source_path = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, package_source_path)
 
+from nav.config import DEFAULT_CONFIG
+from nav.sim.instruments import SIM_INSTRUMENTS, resolve_sim_inst_config
 from nav.sim.render import render_combined_model
+from nav.sim.scene import load_sim_scene, save_sim_scene
 from nav.ui.common import ZoomPanController
+
+# Instrument options for the General-tab selector: the generic (instrument-
+# agnostic) frame plus every per-instrument sim camera.
+_INSTRUMENT_CHOICES: list[str] = ['generic', *sorted(SIM_INSTRUMENTS)]
+
+
+def _dn_to_display_uint8(image: Any) -> Any:
+    """Stretch a DN image to 8-bit grayscale for display, scaling by its peak.
+
+    The renderer emits detector counts (DN), whose range depends on the signal
+    full-scale and any cosmic-ray spikes, so a peak-relative stretch keeps the
+    preview legible regardless of absolute DN.
+
+    Parameters:
+        image: The DN image array to stretch.
+
+    Returns:
+        A uint8 array in [0, 255].
+    """
+    arr = np.asarray(image, dtype=np.float64)
+    peak = float(arr.max()) if arr.size else 0.0
+    scale = 255.0 / peak if peak > 0 else 0.0
+    return np.clip(arr * scale, 0.0, 255.0).astype(np.uint8)
 
 
 class ImageLabel(QLabel):
@@ -113,11 +140,19 @@ class CreateSimulatedImageModel(QMainWindow):
             'size_u': 512,
             'offset_v': 0.0,
             'offset_u': 0.0,
+            'offset_rotation_deg': 0.0,
+            'exposure_sec': 1.0,
             'random_seed': 42,
+            'instrument': 'generic',
             'closest_planet': 'SATURN',
             'time': 0.0,
             'ring_epoch': 0.0,
-            'background_noise_intensity': 0.0,
+            'noise': {
+                'poisson': True,
+                'read_noise_dn': 4.0,
+                'cosmic_ray_rate_per_sec': 0.0,
+                'missing_data_rate': 0.0,
+            },
             'background_stars_num': 0,
             'background_stars_psf_sigma': 0.9,
             'background_stars_distribution_exponent': 2.5,
@@ -142,6 +177,7 @@ class CreateSimulatedImageModel(QMainWindow):
         self._last_valid_tab_index = 0  # Start with General tab
 
         self._show_visual_aids = True
+        self._show_saturation_overlay = False
         self._zoom_sharp = True
 
         self._updater = ParameterUpdater(140)
@@ -198,6 +234,8 @@ class CreateSimulatedImageModel(QMainWindow):
         status_bar = QStatusBar()
         self._status_label = QLabel('V, U: --------, --------  Value: --')
         status_bar.addWidget(self._status_label)
+        self._saturation_label = QLabel('')
+        status_bar.addPermanentWidget(self._saturation_label)
         self._zoom_label = QLabel('Zoom: 1.00x')
         status_bar.addPermanentWidget(self._zoom_label)
         self.setStatusBar(status_bar)
@@ -253,12 +291,60 @@ class CreateSimulatedImageModel(QMainWindow):
         self._offset_u_spin.valueChanged.connect(self._on_offset_u)
         gen_layout.addRow('Offset U:', self._offset_u_spin)
 
+        self._offset_rotation_spin = QDoubleSpinBox()
+        self._offset_rotation_spin.setRange(-180.0, 180.0)
+        self._offset_rotation_spin.setDecimals(3)
+        self._offset_rotation_spin.setValue(self.sim_params['offset_rotation_deg'])
+        self._offset_rotation_spin.setToolTip(
+            'Planted camera roll (deg) about the boresight; recovered by navigation.'
+        )
+        self._offset_rotation_spin.valueChanged.connect(self._on_offset_rotation)
+        gen_layout.addRow('Offset rotation (deg):', self._offset_rotation_spin)
+
+        self._exposure_spin = QDoubleSpinBox()
+        self._exposure_spin.setRange(0.001, 100000.0)
+        self._exposure_spin.setDecimals(3)
+        self._exposure_spin.setValue(float(self.sim_params['exposure_sec']))
+        self._exposure_spin.setToolTip('Exposure time (sec); scales the cosmic-ray count.')
+        self._exposure_spin.valueChanged.connect(self._on_exposure)
+        gen_layout.addRow('Exposure (sec):', self._exposure_spin)
+
         # Random seed
         self._random_seed_spin = QSpinBox()
         self._random_seed_spin.setRange(0, 2147483647)
         self._random_seed_spin.setValue(self.sim_params['random_seed'])
         self._random_seed_spin.valueChanged.connect(self._on_random_seed)
         gen_layout.addRow('Random seed:', self._random_seed_spin)
+
+        # Instrument selector: drives the per-instrument noise / saturation /
+        # PSF / unit settings the renderer applies (see nav.sim.instruments).
+        self._instrument_combo = QComboBox()
+        self._instrument_combo.addItems(_INSTRUMENT_CHOICES)
+        instrument = str(self.sim_params.get('instrument', 'generic'))
+        instrument_index = self._instrument_combo.findText(instrument)
+        if instrument_index >= 0:
+            self._instrument_combo.setCurrentIndex(instrument_index)
+        self._instrument_combo.setToolTip(
+            'Camera the sim emulates; sets noise, saturation, PSF, and units.'
+        )
+        self._instrument_combo.currentTextChanged.connect(self._on_instrument)
+        gen_layout.addRow('Instrument:', self._instrument_combo)
+
+        # Camera-rotation fit override: blank inherits the instrument default,
+        # on/off force whether navigation solves for a camera roll on this scene.
+        self._fit_rotation_combo = QComboBox()
+        self._fit_rotation_combo.addItems(['(inherit)', 'on', 'off'])
+        self._fit_rotation_combo.setToolTip(
+            'Force whether navigation fits a camera roll; (inherit) uses the instrument default.'
+        )
+        self._fit_rotation_combo.currentTextChanged.connect(self._on_fit_rotation)
+        gen_layout.addRow('Fit camera rotation:', self._fit_rotation_combo)
+
+        # Midtime (informational ISO timestamp carried on the scene).
+        self._midtime_edit = QLineEdit(str(self.sim_params.get('midtime_utc') or ''))
+        self._midtime_edit.setToolTip('Optional ISO UTC timestamp recorded on the scene.')
+        self._midtime_edit.textChanged.connect(self._on_midtime)
+        gen_layout.addRow('Midtime UTC:', self._midtime_edit)
 
         # Closest planet (for ring models)
         self._closest_planet_combo = QComboBox()
@@ -304,34 +390,137 @@ class CreateSimulatedImageModel(QMainWindow):
         self._epoch_spin.valueChanged.connect(self._on_epoch)
         gen_layout.addRow('Ring Epoch (TDB sec):', self._epoch_spin)
 
-        # Background noise slider with min/max labels and spinbox
-        noise_row = QHBoxLayout()
-        noise_row.setSpacing(4)
-        noise_row.setContentsMargins(0, 0, 0, 0)
-        noise_min_label = QLabel('0.0')
-        noise_min_label.setFixedWidth(35)
-        noise_min_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        noise_max_label = QLabel('1.0')
-        noise_max_label.setFixedWidth(35)
-        noise_max_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        self._background_noise_slider = QSlider(Qt.Orientation.Horizontal)
-        self._background_noise_slider.setRange(0, 1000)
-        noise_slider_init_val = int(self.sim_params['background_noise_intensity'] * 1000)
-        self._background_noise_slider.setValue(noise_slider_init_val)
-        self._background_noise_slider.valueChanged.connect(self._on_background_noise_slider)
-        self._background_noise_spin = QDoubleSpinBox()
-        self._background_noise_spin.setRange(0.0, 1.0)
-        self._background_noise_spin.setDecimals(3)
-        self._background_noise_spin.setSingleStep(0.001)
-        self._background_noise_spin.setValue(self.sim_params['background_noise_intensity'])
-        self._background_noise_spin.valueChanged.connect(self._on_background_noise_spin)
-        noise_row.addWidget(noise_min_label)
-        noise_row.addWidget(self._background_noise_slider, stretch=1)
-        noise_row.addWidget(noise_max_label)
-        noise_row.addWidget(self._background_noise_spin)
-        noise_holder = QWidget()
-        noise_holder.setLayout(noise_row)
-        gen_layout.addRow('Background noise intensity:', noise_holder)
+        # Detector-noise panel (B1 model): Poisson shot noise, a Gaussian
+        # read-noise floor, cosmic-ray rate, and a missing-data rate.  These
+        # write the sim_params['noise'] block the renderer consumes; physical
+        # defaults otherwise come from the selected instrument.
+        self._poisson_check = QCheckBox()
+        self._poisson_check.setChecked(bool(self._noise_value('poisson', True)))
+        self._poisson_check.setToolTip('Signal-dependent Poisson shot noise (usually on).')
+        self._poisson_check.toggled.connect(self._on_poisson)
+        gen_layout.addRow('Poisson shot noise:', self._poisson_check)
+
+        self._read_noise_spin = QDoubleSpinBox()
+        self._read_noise_spin.setRange(0.0, 50.0)
+        self._read_noise_spin.setDecimals(2)
+        self._read_noise_spin.setValue(float(self._noise_value('read_noise_dn', 4.0)))
+        self._read_noise_spin.setToolTip('Gaussian read-noise floor in DN.')
+        self._read_noise_spin.valueChanged.connect(self._on_read_noise)
+        gen_layout.addRow('Read noise (DN):', self._read_noise_spin)
+
+        self._cosmic_ray_spin = QDoubleSpinBox()
+        self._cosmic_ray_spin.setRange(0.0, 0.01)
+        self._cosmic_ray_spin.setDecimals(5)
+        self._cosmic_ray_spin.setSingleStep(0.0001)
+        self._cosmic_ray_spin.setValue(float(self._noise_value('cosmic_ray_rate_per_sec', 0.0)))
+        self._cosmic_ray_spin.setToolTip('Cosmic-ray fluence in events / cm^2 / sec.')
+        self._cosmic_ray_spin.valueChanged.connect(self._on_cosmic_ray)
+        gen_layout.addRow('Cosmic ray rate (/cm2/s):', self._cosmic_ray_spin)
+
+        self._missing_data_spin = QDoubleSpinBox()
+        self._missing_data_spin.setRange(0.0, 0.3)
+        self._missing_data_spin.setDecimals(3)
+        self._missing_data_spin.setSingleStep(0.005)
+        self._missing_data_spin.setValue(float(self._noise_value('missing_data_rate', 0.0)))
+        self._missing_data_spin.setToolTip('Fraction of pixels marked as missing data.')
+        self._missing_data_spin.valueChanged.connect(self._on_missing_data)
+        gen_layout.addRow('Missing data rate:', self._missing_data_spin)
+
+        self._bias_spin = QDoubleSpinBox()
+        self._bias_spin.setRange(0.0, 10000.0)
+        self._bias_spin.setDecimals(2)
+        self._bias_spin.setValue(float(self._noise_value('bias_dn', 20.0)))
+        self._bias_spin.setToolTip('Additive bias pedestal in DN (lifts dark sky off zero).')
+        self._bias_spin.valueChanged.connect(self._on_bias)
+        gen_layout.addRow('Bias (DN):', self._bias_spin)
+
+        self._bloom_spin = QSpinBox()
+        self._bloom_spin.setRange(0, 200)
+        self._bloom_spin.setValue(int(self._noise_value('bloom_length', 0)))
+        self._bloom_spin.setToolTip('Saturation column-bloom half-length in pixels (0 = none).')
+        self._bloom_spin.valueChanged.connect(self._on_bloom)
+        gen_layout.addRow('Bloom length (px):', self._bloom_spin)
+
+        self._signal_frac_spin = QDoubleSpinBox()
+        self._signal_frac_spin.setRange(0.001, 1.0)
+        self._signal_frac_spin.setDecimals(3)
+        self._signal_frac_spin.setSingleStep(0.05)
+        self._signal_frac_spin.setValue(float(self._noise_value('signal_full_scale_frac', 0.5)))
+        self._signal_frac_spin.setToolTip(
+            'Signal of 1.0 maps to this fraction of the camera full well.'
+        )
+        self._signal_frac_spin.valueChanged.connect(self._on_signal_frac)
+        gen_layout.addRow('Signal full-scale frac:', self._signal_frac_spin)
+
+        self._pixel_area_spin = QDoubleSpinBox()
+        self._pixel_area_spin.setRange(0.0, 1000.0)
+        self._pixel_area_spin.setDecimals(4)
+        self._pixel_area_spin.setValue(float(self._noise_value('pixel_area_cm2', 1.0)))
+        self._pixel_area_spin.setToolTip('Detector pixel area (cm^2); scales the cosmic-ray count.')
+        self._pixel_area_spin.valueChanged.connect(self._on_pixel_area)
+        gen_layout.addRow('Pixel area (cm2):', self._pixel_area_spin)
+
+        # Stray-light panel (B6): an additive low-frequency gradient the
+        # navigator's BANDPASS_DOG filter is meant to suppress.  Writes the
+        # sim_params['stray_light'] block; amplitude 0 (default) means off.
+        self._stray_amplitude_spin = QDoubleSpinBox()
+        self._stray_amplitude_spin.setRange(0.0, 1.0)
+        self._stray_amplitude_spin.setDecimals(3)
+        self._stray_amplitude_spin.setSingleStep(0.01)
+        self._stray_amplitude_spin.setValue(float(self._stray_value('amplitude', 0.0)))
+        self._stray_amplitude_spin.setToolTip('Stray-light amplitude (0 = off).')
+        self._stray_amplitude_spin.valueChanged.connect(self._on_stray_amplitude)
+        gen_layout.addRow('Stray light amplitude:', self._stray_amplitude_spin)
+
+        self._stray_direction_spin = QDoubleSpinBox()
+        self._stray_direction_spin.setRange(0.0, 360.0)
+        self._stray_direction_spin.setDecimals(1)
+        self._stray_direction_spin.setWrapping(True)
+        self._stray_direction_spin.setValue(float(self._stray_value('direction_deg', 0.0)))
+        self._stray_direction_spin.setToolTip('Gradient direction for the linear model, degrees.')
+        self._stray_direction_spin.valueChanged.connect(self._on_stray_direction)
+        gen_layout.addRow('Stray light direction (deg):', self._stray_direction_spin)
+
+        self._stray_model_combo = QComboBox()
+        self._stray_model_combo.addItems(['linear', 'radial'])
+        stray_model = str(self._stray_value('model', 'linear'))
+        stray_model_index = self._stray_model_combo.findText(stray_model)
+        if stray_model_index >= 0:
+            self._stray_model_combo.setCurrentIndex(stray_model_index)
+        self._stray_model_combo.setToolTip('linear ramp or radial bump.')
+        self._stray_model_combo.currentTextChanged.connect(self._on_stray_model)
+        gen_layout.addRow('Stray light model:', self._stray_model_combo)
+
+        self._stray_center_v_spin = QDoubleSpinBox()
+        self._stray_center_v_spin.setRange(-10000.0, 20000.0)
+        self._stray_center_v_spin.setDecimals(1)
+        self._stray_center_v_spin.setValue(float(self._stray_value('center_v', 0.0)))
+        self._stray_center_v_spin.setToolTip('Radial-model bump centre V (0 = frame centre).')
+        self._stray_center_v_spin.valueChanged.connect(self._on_stray_center_v)
+        gen_layout.addRow('Stray light center V:', self._stray_center_v_spin)
+
+        self._stray_center_u_spin = QDoubleSpinBox()
+        self._stray_center_u_spin.setRange(-10000.0, 20000.0)
+        self._stray_center_u_spin.setDecimals(1)
+        self._stray_center_u_spin.setValue(float(self._stray_value('center_u', 0.0)))
+        self._stray_center_u_spin.setToolTip('Radial-model bump centre U (0 = frame centre).')
+        self._stray_center_u_spin.valueChanged.connect(self._on_stray_center_u)
+        gen_layout.addRow('Stray light center U:', self._stray_center_u_spin)
+
+        # PSF preview (B5): a collapsible inset of the selected instrument's
+        # star PSF, with its sigma / FWHM, updated when the instrument changes.
+        self._psf_group = QGroupBox('PSF preview')
+        self._psf_group.setCheckable(True)
+        self._psf_group.setChecked(False)
+        psf_layout = QVBoxLayout(self._psf_group)
+        self._psf_image_label = QLabel()
+        self._psf_image_label.setVisible(False)
+        self._psf_info_label = QLabel()
+        self._psf_info_label.setVisible(False)
+        psf_layout.addWidget(self._psf_image_label)
+        psf_layout.addWidget(self._psf_info_label)
+        self._psf_group.toggled.connect(self._on_psf_group_toggled)
+        gen_layout.addRow(self._psf_group)
 
         # Background stars slider with min/max labels and spinbox
         stars_row = QHBoxLayout()
@@ -449,13 +638,13 @@ class CreateSimulatedImageModel(QMainWindow):
         self._save_img_btn.clicked.connect(self._save_image)
         btns.addWidget(self._save_img_btn)
 
-        self._save_json_btn = QPushButton('Save Parameters (JSON)')
-        self._save_json_btn.clicked.connect(self._save_parameters)
-        btns.addWidget(self._save_json_btn)
+        self._save_scene_btn = QPushButton('Save Scene (YAML)')
+        self._save_scene_btn.clicked.connect(self._save_scene)
+        btns.addWidget(self._save_scene_btn)
 
-        self._load_json_btn = QPushButton('Load Parameters (JSON)')
-        self._load_json_btn.clicked.connect(self._load_parameters)
-        btns.addWidget(self._load_json_btn)
+        self._load_scene_btn = QPushButton('Load Scene (YAML)')
+        self._load_scene_btn.clicked.connect(self._load_scene)
+        btns.addWidget(self._load_scene_btn)
 
         right.addLayout(btns)
 
@@ -473,6 +662,13 @@ class CreateSimulatedImageModel(QMainWindow):
         self._shade_solid_rings_check.setChecked(self.sim_params.get('shade_solid_rings', False))
         self._shade_solid_rings_check.stateChanged.connect(self._toggle_shade_solid_rings)
         vis_row.addWidget(self._shade_solid_rings_check)
+        self._saturation_overlay_check = QCheckBox('Saturation overlay')
+        self._saturation_overlay_check.setChecked(self._show_saturation_overlay)
+        self._saturation_overlay_check.setToolTip(
+            'Highlight pixels at or above the instrument saturation DN in red.'
+        )
+        self._saturation_overlay_check.toggled.connect(self._toggle_saturation_overlay)
+        vis_row.addWidget(self._saturation_overlay_check)
         vis_row.addStretch()
         exit_btn = QPushButton('Exit')
         exit_btn.clicked.connect(self.close)
@@ -590,9 +786,67 @@ class CreateSimulatedImageModel(QMainWindow):
         self.sim_params['offset_u'] = value
         self._updater.request_update()
 
+    def _on_offset_rotation(self, value: float) -> None:
+        self.sim_params['offset_rotation_deg'] = float(value)
+        self._updater.request_update()
+
+    def _on_exposure(self, value: float) -> None:
+        self.sim_params['exposure_sec'] = float(value)
+        self._updater.request_update()
+
+    def _on_fit_rotation(self, text: str) -> None:
+        if text == 'on':
+            self.sim_params['fit_camera_rotation'] = True
+        elif text == 'off':
+            self.sim_params['fit_camera_rotation'] = False
+        else:
+            self.sim_params.pop('fit_camera_rotation', None)
+        self._updater.request_update()
+
+    def _on_midtime(self, text: str) -> None:
+        if text.strip():
+            self.sim_params['midtime_utc'] = text.strip()
+        else:
+            self.sim_params.pop('midtime_utc', None)
+
     def _on_random_seed(self, value: int) -> None:
         self.sim_params['random_seed'] = value
         self._updater.request_update()
+
+    def _on_instrument(self, text: str) -> None:
+        self.sim_params['instrument'] = text or 'generic'
+        self._update_psf_preview()
+        self._updater.request_update()
+
+    def _on_psf_group_toggled(self, checked: bool) -> None:
+        """Show/hide the PSF inset and refresh it when expanded."""
+        self._psf_image_label.setVisible(checked)
+        self._psf_info_label.setVisible(checked)
+        if checked:
+            self._update_psf_preview()
+
+    def _update_psf_preview(self) -> None:
+        """Render the selected instrument's star PSF into the preview inset."""
+        if not self._psf_group.isChecked():
+            return
+        inst_config = resolve_sim_inst_config(DEFAULT_CONFIG, self.sim_params.get('instrument'))
+        sigma = float(inst_config.get('star_psf_sigma', 1.0))
+        size = 25
+        coords = np.arange(size) - size // 2
+        vv, uu = np.meshgrid(coords.astype(float), coords.astype(float), indexing='ij')
+        patch = np.exp(-(vv**2 + uu**2) / (2.0 * sigma**2))
+        patch_uint8 = np.ascontiguousarray((patch * 255.0).astype(np.uint8))
+        qimage = QImage(
+            patch_uint8.tobytes(), size, size, size, QImage.Format.Format_Grayscale8
+        ).copy()
+        pixmap = QPixmap.fromImage(qimage).scaled(
+            96,
+            96,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.FastTransformation,
+        )
+        self._psf_image_label.setPixmap(pixmap)
+        self._psf_info_label.setText(f'sigma = {sigma:.2f} px    FWHM = {2.3548 * sigma:.2f} px')
 
     def _on_closest_planet(self, text: str) -> None:
         # Store as None if empty, otherwise store the text (uppercase)
@@ -610,21 +864,86 @@ class CreateSimulatedImageModel(QMainWindow):
         self.sim_params['ring_epoch'] = value
         self._updater.request_update()
 
-    def _on_background_noise_slider(self, value: int) -> None:
-        noise_val = value / 1000.0
-        self._background_noise_spin.blockSignals(True)
-        self._background_noise_spin.setValue(noise_val)
-        self._background_noise_spin.blockSignals(False)
-        self.sim_params['background_noise_intensity'] = noise_val
+    def _noise_value(self, key: str, default: Any) -> Any:
+        """Read a value from the sim_params noise block, or a default."""
+        noise = self.sim_params.get('noise')
+        if isinstance(noise, dict) and key in noise:
+            return noise[key]
+        return default
+
+    def _set_noise(self, key: str, value: Any) -> None:
+        """Write a value into the sim_params noise block and re-render."""
+        noise = self.sim_params.setdefault('noise', {})
+        if not isinstance(noise, dict):
+            noise = {}
+            self.sim_params['noise'] = noise
+        noise[key] = value
         self._updater.request_update()
 
-    def _on_background_noise_spin(self, value: float) -> None:
-        slider_val = int(value * 1000)
-        self._background_noise_slider.blockSignals(True)
-        self._background_noise_slider.setValue(slider_val)
-        self._background_noise_slider.blockSignals(False)
-        self.sim_params['background_noise_intensity'] = value
+    def _on_poisson(self, checked: bool) -> None:
+        self._set_noise('poisson', bool(checked))
+
+    def _on_read_noise(self, value: float) -> None:
+        self._set_noise('read_noise_dn', float(value))
+
+    def _on_cosmic_ray(self, value: float) -> None:
+        self._set_noise('cosmic_ray_rate_per_sec', float(value))
+
+    def _on_missing_data(self, value: float) -> None:
+        self._set_noise('missing_data_rate', float(value))
+
+    def _on_bias(self, value: float) -> None:
+        self._set_noise('bias_dn', float(value))
+
+    def _on_bloom(self, value: int) -> None:
+        self._set_noise('bloom_length', int(value))
+
+    def _on_signal_frac(self, value: float) -> None:
+        self._set_noise('signal_full_scale_frac', float(value))
+
+    def _on_pixel_area(self, value: float) -> None:
+        self._set_noise('pixel_area_cm2', float(value))
+
+    def _stray_value(self, key: str, default: Any) -> Any:
+        """Read a value from the sim_params stray_light block, or a default."""
+        stray = self.sim_params.get('stray_light')
+        if isinstance(stray, dict) and key in stray:
+            return stray[key]
+        return default
+
+    def _set_stray(self, key: str, value: Any) -> None:
+        """Write a value into the sim_params stray_light block and re-render."""
+        stray = self.sim_params.setdefault('stray_light', {})
+        if not isinstance(stray, dict):
+            stray = {}
+            self.sim_params['stray_light'] = stray
+        stray[key] = value
         self._updater.request_update()
+
+    def _on_stray_amplitude(self, value: float) -> None:
+        self._set_stray('amplitude', float(value))
+
+    def _on_stray_direction(self, value: float) -> None:
+        self._set_stray('direction_deg', float(value))
+
+    def _on_stray_model(self, text: str) -> None:
+        self._set_stray('model', text or 'linear')
+
+    def _on_stray_center(self, key: str, value: float) -> None:
+        # 0 means "use the frame centre": omit the key so the renderer defaults it.
+        if value == 0.0:
+            stray = self.sim_params.get('stray_light')
+            if isinstance(stray, dict):
+                stray.pop(key, None)
+            self._updater.request_update()
+        else:
+            self._set_stray(key, float(value))
+
+    def _on_stray_center_v(self, value: float) -> None:
+        self._on_stray_center('center_v', value)
+
+    def _on_stray_center_u(self, value: float) -> None:
+        self._on_stray_center('center_u', value)
 
     def _on_background_stars_slider(self, value: int) -> None:
         self._background_stars_spin.blockSignals(True)
@@ -849,9 +1168,13 @@ class CreateSimulatedImageModel(QMainWindow):
                 'center_v': self.sim_params['size_v'] // 2 + 0.5,
                 'center_u': self.sim_params['size_u'] // 2 + 0.5,
                 'range': self._find_unique_range(),
+                'shape_model': 'ellipsoid',
                 'axis1': 100.0,
                 'axis2': 80.0,
                 'axis3': 80.0,
+                'mesh_lumpiness': 0.3,
+                'mesh_seed': 0,
+                'pose_euler_deg': [0.0, 0.0, 0.0],
                 'rotation_z': 0.0,
                 'rotation_tilt': 0.0,
                 'illumination_angle': 0.0,
@@ -1207,6 +1530,57 @@ class CreateSimulatedImageModel(QMainWindow):
         sc.valueChanged.connect(lambda v, i=idx: self._on_body_field(i, 'axis3', v))
         fl.addRow('Axis 3:', sc)
 
+        # Shape model (B7): ellipsoid or an irregular polyhedral mesh.  For a
+        # mesh, lumpiness/seed pick the shape and pose_euler_deg orients it; the
+        # axes above scale it.  The mesh fields are inert for an ellipsoid.
+        shape_combo = QComboBox()
+        shape_combo.addItems(['ellipsoid', 'polyhedral_mesh'])
+        shape_index = shape_combo.findText(str(p.get('shape_model', 'ellipsoid')))
+        if shape_index >= 0:
+            shape_combo.setCurrentIndex(shape_index)
+        shape_combo.currentTextChanged.connect(
+            lambda t, i=idx: self._on_body_field(i, 'shape_model', t)
+        )
+        fl.addRow('Shape model:', shape_combo)
+
+        mesh_lump = QDoubleSpinBox()
+        mesh_lump.setRange(0.0, 1.0)
+        mesh_lump.setDecimals(3)
+        mesh_lump.setSingleStep(0.01)
+        mesh_lump.setValue(float(p.get('mesh_lumpiness', 0.3)))
+        mesh_lump.valueChanged.connect(lambda v, i=idx: self._on_body_field(i, 'mesh_lumpiness', v))
+        fl.addRow('Mesh lumpiness:', mesh_lump)
+
+        mesh_seed = QSpinBox()
+        mesh_seed.setRange(0, 2147483647)
+        mesh_seed.setValue(int(p.get('mesh_seed', 0)))
+        mesh_seed.valueChanged.connect(lambda v, i=idx: self._on_body_field(i, 'mesh_seed', v))
+        fl.addRow('Mesh seed:', mesh_seed)
+
+        mesh_n_lat = QSpinBox()
+        mesh_n_lat.setRange(2, 256)
+        mesh_n_lat.setValue(int(p.get('mesh_n_lat', 16)))
+        mesh_n_lat.setToolTip('Mesh latitude bands (resolution).')
+        mesh_n_lat.valueChanged.connect(lambda v, i=idx: self._on_body_field(i, 'mesh_n_lat', v))
+        fl.addRow('Mesh lat bands:', mesh_n_lat)
+
+        mesh_n_lon = QSpinBox()
+        mesh_n_lon.setRange(3, 512)
+        mesh_n_lon.setValue(int(p.get('mesh_n_lon', 32)))
+        mesh_n_lon.setToolTip('Mesh longitude divisions (resolution).')
+        mesh_n_lon.valueChanged.connect(lambda v, i=idx: self._on_body_field(i, 'mesh_n_lon', v))
+        fl.addRow('Mesh lon divisions:', mesh_n_lon)
+
+        pose = p.get('pose_euler_deg', [0.0, 0.0, 0.0])
+        for axis_i, axis_name in enumerate(('X', 'Y', 'Z')):
+            pose_spin = QDoubleSpinBox()
+            pose_spin.setRange(0.0, 360.0)
+            pose_spin.setDecimals(1)
+            pose_spin.setWrapping(True)
+            pose_spin.setValue(float(pose[axis_i]) if axis_i < len(pose) else 0.0)
+            pose_spin.valueChanged.connect(lambda v, i=idx, a=axis_i: self._on_body_pose(i, a, v))
+            fl.addRow(f'Mesh pose {axis_name} (deg):', pose_spin)
+
         rz = QDoubleSpinBox()
         rz.setRange(0.0, 360.0)
         rz.setDecimals(1)
@@ -1328,6 +1702,76 @@ class CreateSimulatedImageModel(QMainWindow):
         # Store references for sync
         w.anti_aliasing_slider = aa_slider  # type: ignore[attr-defined]
         w.anti_aliasing_spin = aa_spin  # type: ignore[attr-defined]
+
+        # Crater seed: -1 ("Auto") omits the key so the renderer hashes the
+        # geometry; any other value pins the crater pattern.
+        crater_seed = QSpinBox()
+        crater_seed.setRange(-1, 2147483647)
+        crater_seed.setSpecialValueText('Auto')
+        crater_seed.setValue(int(p['seed']) if p.get('seed') is not None else -1)
+        crater_seed.setToolTip('Crater RNG seed; Auto hashes the body geometry.')
+        crater_seed.valueChanged.connect(lambda v, i=idx: self._on_body_seed(i, v))
+        fl.addRow('Crater seed:', crater_seed)
+
+        km_pp = QDoubleSpinBox()
+        km_pp.setRange(0.0, 1.0e9)
+        km_pp.setDecimals(4)
+        km_pp.setValue(float(p.get('km_per_pixel', 0.0)))
+        km_pp.setToolTip('Physical scale at the limb (0 = none); drives the irregularity factor.')
+        km_pp.valueChanged.connect(lambda v, i=idx: self._on_body_field(i, 'km_per_pixel', v))
+        fl.addRow('km per pixel:', km_pp)
+
+        # Navigation-override group: the renderer ignores it (it always draws the
+        # true geometry), but the navigator predicts the body with these fields
+        # overlaid, so a scene can render a mesh and predict a smooth ellipsoid or
+        # a different pose.  Unchecking it removes the override.
+        override = p.get('nav_override') if isinstance(p.get('nav_override'), dict) else {}
+        nav_group = QGroupBox('Navigation override (predicted geometry)')
+        nav_group.setCheckable(True)
+        nav_group.setChecked('nav_override' in p)
+        nav_form = QFormLayout(nav_group)
+        nav_shape = QComboBox()
+        nav_shape.addItems(['ellipsoid', 'polyhedral_mesh'])
+        nav_shape_idx = nav_shape.findText(
+            str(override.get('shape_model', p.get('shape_model', 'ellipsoid')))
+        )
+        if nav_shape_idx >= 0:
+            nav_shape.setCurrentIndex(nav_shape_idx)
+        nav_form.addRow('Predicted shape:', nav_shape)
+        nav_lump = QDoubleSpinBox()
+        nav_lump.setRange(0.0, 1.0)
+        nav_lump.setDecimals(3)
+        nav_lump.setSingleStep(0.01)
+        nav_lump.setValue(float(override.get('mesh_lumpiness', p.get('mesh_lumpiness', 0.3))))
+        nav_form.addRow('Predicted lumpiness:', nav_lump)
+        nav_pose = override.get('pose_euler_deg', p.get('pose_euler_deg', [0.0, 0.0, 0.0]))
+        nav_pose_spins = []
+        for axis_i, axis_name in enumerate(('X', 'Y', 'Z')):
+            sp = QDoubleSpinBox()
+            sp.setRange(0.0, 360.0)
+            sp.setDecimals(1)
+            sp.setWrapping(True)
+            sp.setValue(float(nav_pose[axis_i]) if axis_i < len(nav_pose) else 0.0)
+            nav_form.addRow(f'Predicted pose {axis_name} (deg):', sp)
+            nav_pose_spins.append(sp)
+
+        def _update_override(_arg: Any = None, i: int = idx) -> None:
+            if not nav_group.isChecked():
+                self.sim_params['bodies'][i].pop('nav_override', None)
+            else:
+                self.sim_params['bodies'][i]['nav_override'] = {
+                    'shape_model': nav_shape.currentText(),
+                    'mesh_lumpiness': float(nav_lump.value()),
+                    'pose_euler_deg': [float(s.value()) for s in nav_pose_spins],
+                }
+            self._updater.request_update()
+
+        nav_group.toggled.connect(_update_override)
+        nav_shape.currentTextChanged.connect(_update_override)
+        nav_lump.valueChanged.connect(_update_override)
+        for sp in nav_pose_spins:
+            sp.valueChanged.connect(_update_override)
+        fl.addRow(nav_group)
 
         # Delete button at bottom
         delete_btn = QPushButton('Delete')
@@ -1604,6 +2048,25 @@ class CreateSimulatedImageModel(QMainWindow):
         psf.valueChanged.connect(lambda v, i=idx: self._on_star_field(i, 'psf_sigma', v))
         fl.addRow('PSF sigma:', psf)
 
+        move_v_spin = QDoubleSpinBox()
+        move_v_spin.setRange(-200.0, 200.0)
+        move_v_spin.setDecimals(2)
+        move_v_spin.setValue(float(p.get('move_v', 0.0)))
+        move_v_spin.setToolTip('Star smear vector V (px) during the exposure.')
+        move_v_spin.valueChanged.connect(lambda v, i=idx: self._on_star_field(i, 'move_v', v))
+        fl.addRow('Smear V (px):', move_v_spin)
+        move_u_spin = QDoubleSpinBox()
+        move_u_spin.setRange(-200.0, 200.0)
+        move_u_spin.setDecimals(2)
+        move_u_spin.setValue(float(p.get('move_u', 0.0)))
+        move_u_spin.setToolTip('Star smear vector U (px) during the exposure.')
+        move_u_spin.valueChanged.connect(lambda v, i=idx: self._on_star_field(i, 'move_u', v))
+        fl.addRow('Smear U (px):', move_u_spin)
+        catalog_edit = QLineEdit(str(p.get('catalog_name', 'SIM')))
+        catalog_edit.setToolTip('Source-catalog label carried on the star.')
+        catalog_edit.textChanged.connect(lambda t, i=idx: self._on_star_field(i, 'catalog_name', t))
+        fl.addRow('Catalog name:', catalog_edit)
+
         # PSF size V slider with min/max labels and spinbox
         # Map slider positions 0-11 to odd values 1, 3, 5, ..., 23
         psf_size_v_row = QHBoxLayout()
@@ -1705,6 +2168,26 @@ class CreateSimulatedImageModel(QMainWindow):
             self._updater.request_update()
             if trigger_validate and key == 'range':
                 self._validate_ranges()
+
+    def _on_body_seed(self, idx: int, value: int) -> None:
+        """Set an integer crater seed, or remove it (Auto) when value is -1."""
+        if 0 <= idx < len(self.sim_params['bodies']):
+            if value < 0:
+                self.sim_params['bodies'][idx].pop('seed', None)
+            else:
+                self.sim_params['bodies'][idx]['seed'] = int(value)
+            self._updater.request_update()
+
+    def _on_body_pose(self, idx: int, axis: int, value: float) -> None:
+        """Update one axis of a body's mesh pose (pose_euler_deg)."""
+        if 0 <= idx < len(self.sim_params['bodies']):
+            body = self.sim_params['bodies'][idx]
+            pose = list(body.get('pose_euler_deg', [0.0, 0.0, 0.0]))
+            while len(pose) < 3:
+                pose.append(0.0)
+            pose[axis] = float(value)
+            body['pose_euler_deg'] = pose
+            self._updater.request_update()
 
     def _on_body_name(self, idx: int, text: str) -> None:
         if 0 <= idx < len(self.sim_params['bodies']):
@@ -2122,19 +2605,50 @@ class CreateSimulatedImageModel(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, 'Error', f'Failed to render image:\n{e!s}')
 
+    def _toggle_saturation_overlay(self, checked: bool) -> None:
+        """Toggle the saturation overlay and re-display (no re-render)."""
+        self._show_saturation_overlay = bool(checked)
+        self._display_image()
+
+    def _current_saturation_dn(self) -> float | None:
+        """Saturation DN of the selected instrument, or None if it has none."""
+        inst_config = resolve_sim_inst_config(DEFAULT_CONFIG, self.sim_params.get('instrument'))
+        if str(inst_config.get('data_units', 'raw_dn')) != 'raw_dn':
+            return None
+        noise = inst_config.get('noise') or {}
+        if 'saturation_dn' not in noise:
+            return None
+        return float(noise['saturation_dn'])
+
     def _display_image(self) -> None:
         if self._current_image is None:
             return
-        img_uint8 = (np.clip(self._current_image, 0.0, 1.0) * 255).astype(np.uint8)
+        img_uint8 = _dn_to_display_uint8(self._current_image)
         height, width = img_uint8.shape
-        img_uint8 = np.ascontiguousarray(img_uint8.copy())
-        qimage = QImage(
-            img_uint8.tobytes(),
-            width,
-            height,
-            width,
-            QImage.Format.Format_Grayscale8,
-        ).copy()
+        saturation_dn = self._current_saturation_dn()
+        if self._show_saturation_overlay and saturation_dn is not None:
+            rgb = np.repeat(img_uint8[:, :, np.newaxis], 3, axis=2)
+            sat_mask = self._current_image >= saturation_dn
+            rgb[sat_mask] = (255, 0, 0)
+            rgb = np.ascontiguousarray(rgb, dtype=np.uint8)
+            qimage = QImage(
+                rgb.tobytes(),
+                width,
+                height,
+                3 * width,
+                QImage.Format.Format_RGB888,
+            ).copy()
+            self._saturation_label.setText(f'Saturated: {float(sat_mask.mean()) * 100:.2f}%')
+        else:
+            img_uint8 = np.ascontiguousarray(img_uint8.copy())
+            qimage = QImage(
+                img_uint8.tobytes(),
+                width,
+                height,
+                width,
+                QImage.Format.Format_Grayscale8,
+            ).copy()
+            self._saturation_label.setText('')
         pixmap = QPixmap(width, height)
         pixmap.fill(QColor(0, 0, 0))
         painter = QPainter(pixmap)
@@ -2341,122 +2855,195 @@ class CreateSimulatedImageModel(QMainWindow):
             try:
                 from PIL import Image
 
-                img_uint8 = (np.clip(self._current_image, 0.0, 1.0) * 255).astype(np.uint8)
+                img_uint8 = _dn_to_display_uint8(self._current_image)
                 Image.fromarray(img_uint8, mode='L').save(filename)
             except Exception as e:
                 QMessageBox.critical(self, 'Error', f'Failed to save image:\n{e!s}')
 
-    def _save_parameters(self) -> None:
+    def _save_scene(self) -> None:
         filename, _ = QFileDialog.getSaveFileName(
             self,
-            'Save Parameters',
-            'simulated_image_params.json',
-            'JSON Files (*.json)',
+            'Save Scene',
+            'scene.yaml',
+            'YAML Files (*.yaml *.yml)',
         )
-        if filename:
-            try:
-                with open(filename, 'w', encoding='utf-8') as f:
-                    json.dump(self.sim_params, f, indent=2)
-            except Exception as e:
-                QMessageBox.critical(self, 'Error', f'Failed to save parameters:\n{e!s}')
+        if not filename:
+            return
+        try:
+            save_sim_scene(self.sim_params, Path(filename))
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to save scene:\n{e!s}')
 
-    def _load_parameters(self) -> None:
+    def _load_scene(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
             self,
-            'Load Parameters',
+            'Load Scene',
             '',
-            'JSON Files (*.json)',
+            'YAML Files (*.yaml *.yml)',
         )
-        if filename:
-            try:
-                with open(filename, encoding='utf-8') as f:
-                    params = json.load(f)
-                background_noise_val = params.get('background_noise_intensity', 0.0)
-                background_stars_val = params.get('background_stars_num', 0)
-                self.sim_params = {
-                    'size_v': int(params.get('size_v', 512)),
-                    'size_u': int(params.get('size_u', 512)),
-                    'offset_v': float(params.get('offset_v', 0.0)),
-                    'offset_u': float(params.get('offset_u', 0.0)),
-                    'random_seed': int(params.get('random_seed', 42)),
-                    'background_noise_intensity': float(background_noise_val),
-                    'background_stars_num': int(background_stars_val),
-                    'background_stars_psf_sigma': float(
-                        params.get('background_stars_psf_sigma', 0.9)
-                    ),
-                    'background_stars_distribution_exponent': float(
-                        params.get('background_stars_distribution_exponent', 2.5)
-                    ),
-                    'time': float(params.get('time', 0.0)),
-                    'ring_epoch': float(params.get('ring_epoch', 0.0)),
-                    'closest_planet': params.get('closest_planet') or 'SATURN',
-                    'shade_solid_rings': bool(params.get('shade_solid_rings', False)),
-                    'bodies': list(params.get('bodies', [])),
-                    'stars': list(params.get('stars', [])),
-                    'rings': list(params.get('rings', [])),
-                }
-                # Sync the shade-solid-rings checkbox
-                self._shade_solid_rings_check.blockSignals(True)
-                self._shade_solid_rings_check.setChecked(bool(self.sim_params['shade_solid_rings']))
-                self._shade_solid_rings_check.blockSignals(False)
-                # Update general UI
-                self._size_v_spin.setValue(self.sim_params['size_v'])
-                self._size_u_spin.setValue(self.sim_params['size_u'])
-                self._offset_v_spin.setValue(self.sim_params['offset_v'])
-                self._offset_u_spin.setValue(self.sim_params['offset_u'])
-                self._random_seed_spin.setValue(self.sim_params['random_seed'])
-                # Update time and epoch
-                self._time_spin.setValue(self.sim_params.get('time', 0.0))
-                self._epoch_spin.setValue(self.sim_params.get('ring_epoch', 0.0))
-                # Update closest planet
-                closest_planet = self.sim_params.get('closest_planet') or 'SATURN'
-                index = self._closest_planet_combo.findText(closest_planet)
-                if index >= 0:
-                    self._closest_planet_combo.setCurrentIndex(index)
-                else:
-                    self._closest_planet_combo.setCurrentText(closest_planet)
-                # Update background noise controls
-                self._background_noise_slider.blockSignals(True)
-                noise_slider_val = int(self.sim_params['background_noise_intensity'] * 1000)
-                self._background_noise_slider.setValue(noise_slider_val)
-                self._background_noise_slider.blockSignals(False)
-                self._background_noise_spin.blockSignals(True)
-                self._background_noise_spin.setValue(self.sim_params['background_noise_intensity'])
-                self._background_noise_spin.blockSignals(False)
-                # Update background stars controls
-                self._background_stars_slider.blockSignals(True)
-                self._background_stars_slider.setValue(self.sim_params['background_stars_num'])
-                self._background_stars_slider.blockSignals(False)
-                self._background_stars_spin.blockSignals(True)
-                self._background_stars_spin.setValue(self.sim_params['background_stars_num'])
-                self._background_stars_spin.blockSignals(False)
-                # Update background stars PSF sigma controls
-                self._background_stars_psf_sigma_slider.blockSignals(True)
-                psf_sigma_val = int(self.sim_params['background_stars_psf_sigma'] * 100)
-                self._background_stars_psf_sigma_slider.setValue(psf_sigma_val)
-                self._background_stars_psf_sigma_slider.blockSignals(False)
-                self._background_stars_psf_sigma_spin.blockSignals(True)
-                psf_sigma_spin_val = self.sim_params['background_stars_psf_sigma']
-                self._background_stars_psf_sigma_spin.setValue(psf_sigma_spin_val)
-                self._background_stars_psf_sigma_spin.blockSignals(False)
-                # Update background stars distribution exponent controls
-                self._background_stars_dist_exp_slider.blockSignals(True)
-                dist_exp_slider_val = int(
-                    self.sim_params['background_stars_distribution_exponent'] * 100
-                )
-                self._background_stars_dist_exp_slider.setValue(dist_exp_slider_val)
-                self._background_stars_dist_exp_slider.blockSignals(False)
-                self._background_stars_dist_exp_spin.blockSignals(True)
-                dist_exp_spin_val = self.sim_params['background_stars_distribution_exponent']
-                self._background_stars_dist_exp_spin.setValue(dist_exp_spin_val)
-                self._background_stars_dist_exp_spin.blockSignals(False)
-                # Rebuild tabs
-                self._rebuild_dynamic_tabs()
-                self._update_tab_titles()
-                self._validate_ranges()
-                self._updater.immediate_update()
-            except Exception as e:
-                QMessageBox.critical(self, 'Error', f'Failed to load parameters:\n{e!s}')
+        if not filename:
+            return
+        try:
+            self._apply_params_dict(load_sim_scene(Path(filename)))
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', f'Failed to load scene:\n{e!s}')
+
+    def _apply_params_dict(self, params: dict[str, Any]) -> None:
+        """Rebuild sim_params from a loaded params dict and sync every widget."""
+        background_stars_val = params.get('background_stars_num', 0)
+        self.sim_params = {
+            'size_v': int(params.get('size_v', 512)),
+            'size_u': int(params.get('size_u', 512)),
+            'offset_v': float(params.get('offset_v', 0.0)),
+            'offset_u': float(params.get('offset_u', 0.0)),
+            'offset_rotation_deg': float(params.get('offset_rotation_deg', 0.0)),
+            'exposure_sec': float(params.get('exposure_sec', 1.0)),
+            'random_seed': int(params.get('random_seed', 42)),
+            'instrument': str(params.get('instrument', 'generic')),
+            'background_stars_num': int(background_stars_val),
+            'background_stars_psf_sigma': float(params.get('background_stars_psf_sigma', 0.9)),
+            'background_stars_distribution_exponent': float(
+                params.get('background_stars_distribution_exponent', 2.5)
+            ),
+            'time': float(params.get('time', 0.0)),
+            'ring_epoch': float(params.get('ring_epoch', 0.0)),
+            'closest_planet': params.get('closest_planet') or 'SATURN',
+            'shade_solid_rings': bool(params.get('shade_solid_rings', False)),
+            'bodies': list(params.get('bodies', [])),
+            'stars': list(params.get('stars', [])),
+            'rings': list(params.get('rings', [])),
+        }
+        # Preserve catalog-only blocks the General tab does not yet edit
+        # (noise model, stray light, exposure, instrument-config overrides) so
+        # loading a scene spec round-trips them instead of silently dropping them.
+        for passthrough_key in (
+            'noise',
+            'stray_light',
+            'instrument_config',
+            'midtime_utc',
+            'fit_camera_rotation',
+        ):
+            if passthrough_key in params:
+                self.sim_params[passthrough_key] = params[passthrough_key]
+        # Sync the shade-solid-rings checkbox
+        self._shade_solid_rings_check.blockSignals(True)
+        self._shade_solid_rings_check.setChecked(bool(self.sim_params['shade_solid_rings']))
+        self._shade_solid_rings_check.blockSignals(False)
+        # Update general UI
+        self._size_v_spin.setValue(self.sim_params['size_v'])
+        self._size_u_spin.setValue(self.sim_params['size_u'])
+        self._offset_v_spin.setValue(self.sim_params['offset_v'])
+        self._offset_u_spin.setValue(self.sim_params['offset_u'])
+        self._offset_rotation_spin.blockSignals(True)
+        self._offset_rotation_spin.setValue(self.sim_params['offset_rotation_deg'])
+        self._offset_rotation_spin.blockSignals(False)
+        self._exposure_spin.blockSignals(True)
+        self._exposure_spin.setValue(float(self.sim_params['exposure_sec']))
+        self._exposure_spin.blockSignals(False)
+        self._random_seed_spin.setValue(self.sim_params['random_seed'])
+        # Update instrument selector
+        self._instrument_combo.blockSignals(True)
+        instrument_index = self._instrument_combo.findText(str(self.sim_params['instrument']))
+        if instrument_index >= 0:
+            self._instrument_combo.setCurrentIndex(instrument_index)
+        self._instrument_combo.blockSignals(False)
+        # Camera-rotation fit override and midtime
+        fit_rotation = self.sim_params.get('fit_camera_rotation')
+        fit_text = 'on' if fit_rotation is True else 'off' if fit_rotation is False else '(inherit)'
+        self._fit_rotation_combo.blockSignals(True)
+        fit_index = self._fit_rotation_combo.findText(fit_text)
+        if fit_index >= 0:
+            self._fit_rotation_combo.setCurrentIndex(fit_index)
+        self._fit_rotation_combo.blockSignals(False)
+        self._midtime_edit.blockSignals(True)
+        self._midtime_edit.setText(str(self.sim_params.get('midtime_utc') or ''))
+        self._midtime_edit.blockSignals(False)
+        self._update_psf_preview()
+        # Update time and epoch
+        self._time_spin.setValue(self.sim_params.get('time', 0.0))
+        self._epoch_spin.setValue(self.sim_params.get('ring_epoch', 0.0))
+        # Update closest planet
+        closest_planet = self.sim_params.get('closest_planet') or 'SATURN'
+        index = self._closest_planet_combo.findText(closest_planet)
+        if index >= 0:
+            self._closest_planet_combo.setCurrentIndex(index)
+        else:
+            self._closest_planet_combo.setCurrentText(closest_planet)
+        # Update detector-noise controls from the loaded noise block.
+        self._poisson_check.blockSignals(True)
+        self._poisson_check.setChecked(bool(self._noise_value('poisson', True)))
+        self._poisson_check.blockSignals(False)
+        self._read_noise_spin.blockSignals(True)
+        self._read_noise_spin.setValue(float(self._noise_value('read_noise_dn', 4.0)))
+        self._read_noise_spin.blockSignals(False)
+        self._cosmic_ray_spin.blockSignals(True)
+        self._cosmic_ray_spin.setValue(float(self._noise_value('cosmic_ray_rate_per_sec', 0.0)))
+        self._cosmic_ray_spin.blockSignals(False)
+        self._missing_data_spin.blockSignals(True)
+        self._missing_data_spin.setValue(float(self._noise_value('missing_data_rate', 0.0)))
+        self._missing_data_spin.blockSignals(False)
+        self._bias_spin.blockSignals(True)
+        self._bias_spin.setValue(float(self._noise_value('bias_dn', 20.0)))
+        self._bias_spin.blockSignals(False)
+        self._bloom_spin.blockSignals(True)
+        self._bloom_spin.setValue(int(self._noise_value('bloom_length', 0)))
+        self._bloom_spin.blockSignals(False)
+        self._signal_frac_spin.blockSignals(True)
+        self._signal_frac_spin.setValue(float(self._noise_value('signal_full_scale_frac', 0.5)))
+        self._signal_frac_spin.blockSignals(False)
+        self._pixel_area_spin.blockSignals(True)
+        self._pixel_area_spin.setValue(float(self._noise_value('pixel_area_cm2', 1.0)))
+        self._pixel_area_spin.blockSignals(False)
+        # Update stray-light controls from the loaded stray_light block.
+        self._stray_amplitude_spin.blockSignals(True)
+        self._stray_amplitude_spin.setValue(float(self._stray_value('amplitude', 0.0)))
+        self._stray_amplitude_spin.blockSignals(False)
+        self._stray_direction_spin.blockSignals(True)
+        self._stray_direction_spin.setValue(float(self._stray_value('direction_deg', 0.0)))
+        self._stray_direction_spin.blockSignals(False)
+        self._stray_model_combo.blockSignals(True)
+        stray_model_index = self._stray_model_combo.findText(
+            str(self._stray_value('model', 'linear'))
+        )
+        if stray_model_index >= 0:
+            self._stray_model_combo.setCurrentIndex(stray_model_index)
+        self._stray_model_combo.blockSignals(False)
+        self._stray_center_v_spin.blockSignals(True)
+        self._stray_center_v_spin.setValue(float(self._stray_value('center_v', 0.0)))
+        self._stray_center_v_spin.blockSignals(False)
+        self._stray_center_u_spin.blockSignals(True)
+        self._stray_center_u_spin.setValue(float(self._stray_value('center_u', 0.0)))
+        self._stray_center_u_spin.blockSignals(False)
+        # Update background stars controls
+        self._background_stars_slider.blockSignals(True)
+        self._background_stars_slider.setValue(self.sim_params['background_stars_num'])
+        self._background_stars_slider.blockSignals(False)
+        self._background_stars_spin.blockSignals(True)
+        self._background_stars_spin.setValue(self.sim_params['background_stars_num'])
+        self._background_stars_spin.blockSignals(False)
+        # Update background stars PSF sigma controls
+        self._background_stars_psf_sigma_slider.blockSignals(True)
+        psf_sigma_val = int(self.sim_params['background_stars_psf_sigma'] * 100)
+        self._background_stars_psf_sigma_slider.setValue(psf_sigma_val)
+        self._background_stars_psf_sigma_slider.blockSignals(False)
+        self._background_stars_psf_sigma_spin.blockSignals(True)
+        psf_sigma_spin_val = self.sim_params['background_stars_psf_sigma']
+        self._background_stars_psf_sigma_spin.setValue(psf_sigma_spin_val)
+        self._background_stars_psf_sigma_spin.blockSignals(False)
+        # Update background stars distribution exponent controls
+        self._background_stars_dist_exp_slider.blockSignals(True)
+        dist_exp_slider_val = int(self.sim_params['background_stars_distribution_exponent'] * 100)
+        self._background_stars_dist_exp_slider.setValue(dist_exp_slider_val)
+        self._background_stars_dist_exp_slider.blockSignals(False)
+        self._background_stars_dist_exp_spin.blockSignals(True)
+        dist_exp_spin_val = self.sim_params['background_stars_distribution_exponent']
+        self._background_stars_dist_exp_spin.setValue(dist_exp_spin_val)
+        self._background_stars_dist_exp_spin.blockSignals(False)
+        # Rebuild tabs
+        self._rebuild_dynamic_tabs()
+        self._update_tab_titles()
+        self._validate_ranges()
+        self._updater.immediate_update()
 
     # ---- Visual toggles ----
     def _toggle_visual_aids(self, state: Any) -> None:

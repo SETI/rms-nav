@@ -38,7 +38,7 @@ from nav.nav_model.nav_model_rings import NavModelRings
 from nav.nav_model.nav_model_rings_base import NavModelRingsBase
 from nav.nav_model.nav_model_rings_simulated import NavModelRingsSimulated
 from nav.nav_model.nav_model_titan import NavModelTitan
-from nav.nav_model.stars import NavModelStars
+from nav.nav_model.stars import NavModelStars, NavModelStarsSimulated
 
 __all__ = [
     'NavModel',
@@ -49,6 +49,7 @@ __all__ = [
     'NavModelRingsBase',
     'NavModelRingsSimulated',
     'NavModelStars',
+    'NavModelStarsSimulated',
     'NavModelTitan',
     'build_models_for_obs',
 ]

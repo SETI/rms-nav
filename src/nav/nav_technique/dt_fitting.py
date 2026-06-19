@@ -36,10 +36,16 @@ __all__ = [
     'DEFAULT_LM_MAX_ITERATIONS',
     'DEFAULT_LM_STEP_TOLERANCE',
     'DEFAULT_PINVH_RCOND',
+    'DEFAULT_RIDGE_HALF_WIDTH_PX',
+    'DEFAULT_RIDGE_MAX_ITERATIONS',
+    'DEFAULT_RIDGE_MAX_TOTAL_DISPLACEMENT_PX',
+    'DEFAULT_RIDGE_SAMPLE_STEP_PX',
     'DEFAULT_TUKEY_C',
     'LMRefineResult',
+    'RidgeRefineResult',
     'build_polyline_mask',
     'coarse_ncc_search',
+    'gradient_ridge_refine',
     'information_matrix_to_covariance',
     'lm_subpixel_refine',
     'polarity_filter',
@@ -90,6 +96,54 @@ DEFAULT_PINVH_RCOND: float = 1.0e-9
 
 Matches the same value the orchestrator's ensemble combine uses; a
 single project-wide cutoff keeps rank-deficiency handling consistent.
+"""
+
+
+DEFAULT_RIDGE_HALF_WIDTH_PX: float = 3.0
+"""Half-width (pixels) of the gradient-ridge sub-pixel search window.
+
+After the DT Levenberg-Marquardt converges, the final continuous
+gradient-ridge stage samples the gradient magnitude along each vertex's
+normal across ``[-half_width, +half_width]`` and locates the sub-pixel
+peak.  Three pixels covers the residual a clean DT-LM convergence leaves
+(the integer-quantized DT zero-set snaps within ~1 px) with margin to
+spare, while staying narrow enough that the sampled profile contains a
+single edge ridge rather than two adjacent edges.
+"""
+
+
+DEFAULT_RIDGE_SAMPLE_STEP_PX: float = 0.5
+"""Spacing (pixels) of the gradient-ridge sample points along each normal.
+
+The peak is located by a three-point parabola fit around the discrete
+argmax, so the spacing trades convergence robustness against
+sensitivity: a half-pixel step gives a stable parabola on the
+Gaussian-smoothed gradient profile (image_gradient_sigma_px ~ 1.2).  The
+*converged* offset is unbiased regardless of the step because at the
+Gauss-Newton fixed point the vertex sits on the ridge peak, so the
+parabola is evaluated symmetrically about the true maximum where its
+discretization bias vanishes.
+"""
+
+
+DEFAULT_RIDGE_MAX_ITERATIONS: int = 10
+"""Maximum gradient-ridge Gauss-Newton iterations.
+
+The ridge stage starts from the DT-LM optimum (sub-pixel residual), so
+the near-linear Gauss-Newton step converges in a handful of iterations;
+the cap is a safety net.
+"""
+
+
+DEFAULT_RIDGE_MAX_TOTAL_DISPLACEMENT_PX: float = 1.5
+"""Cap on how far the gradient-ridge stage may move the DT-LM offset.
+
+The ridge refinement is a *sub-pixel* polish of an already-converged
+fit; a converged DT-LM optimum is within ~1 px of the true edge, so the
+ridge should never walk more than about a pixel.  If the cumulative
+displacement from the DT-LM offset exceeds this bound the ridge result
+is discarded and the DT-LM offset is kept -- a defensive guard against a
+pathological ridge walk onto an unrelated gradient feature.
 """
 
 
@@ -508,6 +562,28 @@ def _rotate_vertices(
     return cast(NDArrayFloatType, np.stack([new_v, new_u], axis=-1))
 
 
+def _rotate_directions(
+    directions_vu: NDArrayFloatType,
+    theta: float,
+) -> NDArrayFloatType:
+    """Rotate direction vectors (normals) by ``theta`` radians about the origin.
+
+    Unlike :func:`_rotate_vertices` there is no pivot: a normal is a free
+    vector, so only the in-plane rotation applies.  Used by the
+    gradient-ridge stage to keep each vertex's outward normal aligned with
+    the body after a rotation step.
+    """
+    if theta == 0.0:
+        return directions_vu
+    cos_t = math.cos(theta)
+    sin_t = math.sin(theta)
+    nv = directions_vu[:, 0]
+    nu = directions_vu[:, 1]
+    rot_v = cos_t * nv - sin_t * nu
+    rot_u = sin_t * nv + cos_t * nu
+    return cast(NDArrayFloatType, np.stack([rot_v, rot_u], axis=-1))
+
+
 def _shift_vertices(
     vertices_vu: NDArrayFloatType,
     dv: float,
@@ -610,6 +686,304 @@ def _step_norm_px(
     return float(math.sqrt(step[0] ** 2 + step[1] ** 2 + rotation_step_px**2))
 
 
+def _ridge_normal_distances(
+    *,
+    vertices_vu: NDArrayFloatType,
+    normals_vu: NDArrayFloatType,
+    pivot_vu: tuple[float, float],
+    gradient_magnitude: NDArrayFloatType,
+    dv: float,
+    du: float,
+    dtheta: float,
+    t_samples: NDArrayFloatType,
+    sample_step_px: float,
+) -> tuple[NDArrayFloatType, NDArrayFloatType, NDArrayFloatType]:
+    """Locate the sub-pixel gradient-magnitude ridge along each vertex normal.
+
+    For each vertex at its current (rotated + shifted) position the
+    continuous gradient magnitude is bilinearly sampled at
+    ``position + t * normal`` for every ``t`` in ``t_samples``; the signed
+    normal distance ``t*`` to the ridge is the parabola-interpolated
+    location of the sampled maximum.  ``t*`` is the residual the
+    gradient-ridge Gauss-Newton stage drives to zero (the vertex then sits
+    on the continuous edge ridge).
+
+    Parameters:
+        vertices_vu: ``(N, 2)`` base (unshifted) model vertices.
+        normals_vu: ``(N, 2)`` base model normals (unit length).
+        pivot_vu: rotation pivot.
+        gradient_magnitude: ``(H, W)`` continuous gradient magnitude image.
+        dv, du: current translation.
+        dtheta: current rotation (radians).
+        t_samples: ``(K,)`` monotone normal offsets to sample.
+        sample_step_px: spacing of ``t_samples`` (pixels).
+
+    Returns:
+        ``(t_star, normals_current, valid)``:
+
+        - ``t_star`` ``(N,)`` signed normal distance to the ridge peak.
+        - ``normals_current`` ``(N, 2)`` normals rotated by ``dtheta`` (the
+          directions the translation Jacobian rows ``-n`` use).
+        - ``valid`` ``(N,)`` boolean: True where the sampled maximum is a
+          strict interior peak (a usable sub-pixel residual).  A maximum at
+          either sampling boundary means the true ridge lies outside the
+          search window, so that vertex carries no usable ridge residual.
+    """
+    norms_current = _rotate_directions(normals_vu, dtheta)
+    pos = _shift_vertices(_rotate_vertices(vertices_vu, pivot_vu, dtheta), dv, du)
+    n = pos.shape[0]
+    k = t_samples.shape[0]
+    # Sample points along each normal: (N, K, 2).
+    sample_pts = pos[:, None, :] + t_samples[None, :, None] * norms_current[:, None, :]
+    # ``sample_dt_bilinear`` is a clamped bilinear interpolator over any 2-D
+    # field, so it samples the continuous gradient magnitude here just as it
+    # samples the DT elsewhere.
+    mag = sample_dt_bilinear(gradient_magnitude, sample_pts.reshape(-1, 2)).reshape(n, k)
+    kmax = np.argmax(mag, axis=1)
+    rows = np.arange(n)
+    interior = (kmax > 0) & (kmax < k - 1)
+    # Clamp the peak index so the three-point gather stays in bounds; the
+    # boundary peaks are masked out via ``valid`` regardless.
+    kc = np.clip(kmax, 1, k - 2)
+    y_minus = mag[rows, kc - 1]
+    y_zero = mag[rows, kc]
+    y_plus = mag[rows, kc + 1]
+    denom = y_minus - 2.0 * y_zero + y_plus
+    # A genuine peak is concave-down (denom < 0); a non-concave triple has no
+    # interior vertex, so fall back to the sampled location (delta = 0).
+    concave = denom < -1.0e-12
+    delta = np.where(concave, 0.5 * (y_minus - y_plus) / np.where(concave, denom, -1.0), 0.0)
+    # Keep the parabola vertex inside the central cell so a noisy triple cannot
+    # throw ``t*`` past the neighbouring samples.
+    delta = np.clip(delta, -0.5, 0.5)
+    t_star = t_samples[kc] + delta * sample_step_px
+    return cast(NDArrayFloatType, t_star), norms_current, cast(NDArrayFloatType, interior)
+
+
+@dataclass(frozen=True)
+class RidgeRefineResult:
+    """Structured output of :func:`gradient_ridge_refine`.
+
+    Parameters:
+        offset_vu: ``(dv, du)`` refined translation in pixels.
+        rotation_rad: refined rotation in radians (unchanged from the input
+            when ``fit_rotation`` was False).
+        iterations: Gauss-Newton iterations performed.
+        converged: True if the step-norm tolerance was met before the cap.
+        applied: True if the refined pose was accepted.  False when the
+            stage found too few valid ridge residuals to fit, or the
+            cumulative displacement from the input offset exceeded the
+            displacement cap -- in both cases ``offset_vu`` / ``rotation_rad``
+            equal the inputs unchanged and the caller keeps the DT-LM pose.
+    """
+
+    offset_vu: tuple[float, float]
+    rotation_rad: float
+    iterations: int
+    converged: bool
+    applied: bool
+
+
+def gradient_ridge_refine(
+    *,
+    vertices_vu: NDArrayFloatType,
+    normals_vu: NDArrayFloatType,
+    sigma_normal_per_vertex_px: NDArrayFloatType,
+    gradient_magnitude: NDArrayFloatType,
+    initial_offset_vu: tuple[float, float],
+    weight_mask: NDArrayFloatType | None = None,
+    initial_rotation_rad: float = 0.0,
+    fit_rotation: bool = False,
+    pivot_vu: tuple[float, float] | None = None,
+    pivot_distance_px: float = 0.0,
+    max_iterations: int = DEFAULT_RIDGE_MAX_ITERATIONS,
+    step_tolerance_px: float = DEFAULT_LM_STEP_TOLERANCE,
+    tukey_c: float = DEFAULT_TUKEY_C,
+    half_width_px: float = DEFAULT_RIDGE_HALF_WIDTH_PX,
+    sample_step_px: float = DEFAULT_RIDGE_SAMPLE_STEP_PX,
+    max_total_displacement_px: float = DEFAULT_RIDGE_MAX_TOTAL_DISPLACEMENT_PX,
+) -> RidgeRefineResult:
+    """Polish a polyline alignment against the continuous gradient-ridge field.
+
+    This is the final, sub-pixel stage after the coarse-NCC + DT
+    Levenberg-Marquardt acquisition.  The DT-LM minimises distance to an
+    integer-quantized edge mask, whose zero-set snaps the recovered edge to
+    integer pixels and leaves an SNR-independent sub-pixel-phase bias floor.
+    This stage removes that floor by fitting directly to the *continuous*
+    (un-quantized) gradient magnitude: for each vertex it finds the
+    sub-pixel signed normal distance ``t*`` to the gradient ridge and runs
+    Gauss-Newton with Tukey-biweight reweighting to drive every ``t*`` to
+    zero.
+
+    The residual for vertex ``i`` is ``r_i = t*_i`` (signed distance from
+    the vertex to the ridge along its outward normal ``n_i``).  Moving the
+    vertex by a translation ``delta`` changes the residual by ``-(n_i .
+    delta)``, so the translation Jacobian rows are ``[-n_v, -n_u]``; the
+    rotation column (when fitted) is central-differenced.  The normal
+    equations and the Tukey reweighting reuse the same machinery as the
+    DT-LM stage.
+
+    Parameters:
+        vertices_vu: ``(N, 2)`` base (unshifted) model vertices.
+        normals_vu: ``(N, 2)`` model normals; need not be unit length but
+            should be (the DT techniques pass unit normals).
+        sigma_normal_per_vertex_px: ``(N,)`` strictly-positive prior sigma;
+            ``1 / sigma**2`` is the prior precision weight, identical to the
+            DT-LM stage.
+        gradient_magnitude: ``(H, W)`` continuous gradient magnitude image
+            (``hypot`` of the gradient-vector components).
+        initial_offset_vu: ``(dv, du)`` starting translation (the DT-LM
+            optimum).
+        weight_mask: optional ``(N,)`` multiplicative mask (e.g. the DT-LM
+            polarity acceptance) applied to every vertex weight.  ``None``
+            keeps all vertices.
+        initial_rotation_rad: starting rotation (the DT-LM optimum).
+        fit_rotation: when True the parameter vector is ``(dv, du, dtheta)``.
+        pivot_vu: rotation pivot; defaults to the centroid of
+            ``vertices_vu``.
+        pivot_distance_px: pivot-to-image-centre distance for the rotation
+            step-norm conversion.  Required when ``fit_rotation`` is True.
+        max_iterations: Gauss-Newton iteration cap.
+        step_tolerance_px: step-norm threshold for convergence.
+        tukey_c: Holland-Welsch Tukey constant.
+        half_width_px: half-width of the normal search window.
+        sample_step_px: spacing of the normal sample points.
+        max_total_displacement_px: cap on cumulative displacement from
+            ``initial_offset_vu``; exceeding it discards the refinement.
+
+    Returns:
+        :class:`RidgeRefineResult`.
+
+    Raises:
+        ValueError: if shape requirements are violated, the prior sigmas
+            are not strictly positive, or ``fit_rotation`` is True without a
+            positive ``pivot_distance_px``.
+    """
+    verts = np.asarray(vertices_vu, np.float64)
+    norms = np.asarray(normals_vu, np.float64)
+    sigmas = np.asarray(sigma_normal_per_vertex_px, np.float64)
+    if verts.ndim != 2 or verts.shape[1] != 2 or verts.shape[0] == 0:
+        raise ValueError(f'vertices_vu must have shape (N, 2) with N > 0; got {verts.shape}')
+    if norms.shape != verts.shape:
+        raise ValueError(f'normals_vu must match vertices_vu shape; got {norms.shape}')
+    if sigmas.ndim != 1 or sigmas.shape[0] != verts.shape[0]:
+        raise ValueError(
+            'sigma_normal_per_vertex_px must be a 1-D vector matching '
+            f'vertices_vu; got {sigmas.shape}'
+        )
+    if (sigmas <= 0.0).any() or not np.isfinite(sigmas).all():
+        raise ValueError('sigma_normal_per_vertex_px entries must be finite and > 0')
+    if gradient_magnitude.ndim != 2:
+        raise ValueError(f'gradient_magnitude must be 2-D; got ndim={gradient_magnitude.ndim}')
+    if fit_rotation and not (pivot_distance_px > 0.0):
+        raise ValueError(
+            'fit_rotation=True requires pivot_distance_px > 0 for the convergence test'
+        )
+    base_mask = (
+        np.ones(verts.shape[0], np.float64)
+        if weight_mask is None
+        else np.asarray(weight_mask, np.float64)
+    )
+    pivot = (
+        (float(verts[:, 0].mean()), float(verts[:, 1].mean()))
+        if pivot_vu is None
+        else (float(pivot_vu[0]), float(pivot_vu[1]))
+    )
+    inv_sigma_sq = 1.0 / (sigmas * sigmas)
+    half = float(half_width_px)
+    step = float(sample_step_px)
+    # Symmetric, monotone sample offsets including 0; the central sample lets
+    # a converged (t* -> 0) vertex report a zero residual exactly.
+    n_side = round(half / step)
+    t_samples = np.arange(-n_side, n_side + 1, dtype=np.float64) * step
+    dv0, du0 = float(initial_offset_vu[0]), float(initial_offset_vu[1])
+    dv, du, dtheta = dv0, du0, float(initial_rotation_rad)
+    eps_t = 1.0e-3
+    iterations = 0
+    converged = False
+    for _ in range(max_iterations):
+        t_star, norms_current, valid = _ridge_normal_distances(
+            vertices_vu=verts,
+            normals_vu=norms,
+            pivot_vu=pivot,
+            gradient_magnitude=gradient_magnitude,
+            dv=dv,
+            du=du,
+            dtheta=dtheta,
+            t_samples=t_samples,
+            sample_step_px=step,
+        )
+        scaled = t_star / sigmas
+        tukey_w = tukey_biweight_weights(scaled, c=tukey_c)
+        weights = inv_sigma_sq * tukey_w * valid * base_mask
+        if not np.any(weights > 0):
+            # No usable ridge evidence; keep whatever pose we have.
+            break
+        if fit_rotation:
+            t_plus, _, _ = _ridge_normal_distances(
+                vertices_vu=verts,
+                normals_vu=norms,
+                pivot_vu=pivot,
+                gradient_magnitude=gradient_magnitude,
+                dv=dv,
+                du=du,
+                dtheta=dtheta + eps_t,
+                t_samples=t_samples,
+                sample_step_px=step,
+            )
+            t_minus, _, _ = _ridge_normal_distances(
+                vertices_vu=verts,
+                normals_vu=norms,
+                pivot_vu=pivot,
+                gradient_magnitude=gradient_magnitude,
+                dv=dv,
+                du=du,
+                dtheta=dtheta - eps_t,
+                t_samples=t_samples,
+                sample_step_px=step,
+            )
+            drdth = (t_plus - t_minus) / (2.0 * eps_t)
+            jacobian = np.stack([-norms_current[:, 0], -norms_current[:, 1], drdth], axis=-1)
+        else:
+            jacobian = np.stack([-norms_current[:, 0], -norms_current[:, 1]], axis=-1)
+        hessian, rhs = _weighted_normal_equations(jacobian, t_star, weights)
+        try:
+            gn_step = -np.linalg.solve(hessian, rhs)
+        except np.linalg.LinAlgError:
+            gn_step = -pinvh(hessian, rtol=DEFAULT_PINVH_RCOND) @ rhs
+        dv += float(gn_step[0])
+        du += float(gn_step[1])
+        if fit_rotation:
+            dtheta += float(gn_step[2])
+        iterations += 1
+        step_norm = _step_norm_px(
+            gn_step,
+            fit_rotation=fit_rotation,
+            pivot_distance_px=pivot_distance_px,
+        )
+        if step_norm < step_tolerance_px:
+            converged = True
+            break
+    displacement = math.hypot(dv - dv0, du - du0)
+    if iterations == 0 or displacement > max_total_displacement_px:
+        # Either no Gauss-Newton step ran (no valid ridge evidence) or the
+        # stage walked too far to trust; keep the DT-LM pose.
+        return RidgeRefineResult(
+            offset_vu=(dv0, du0),
+            rotation_rad=float(initial_rotation_rad),
+            iterations=iterations,
+            converged=converged,
+            applied=False,
+        )
+    return RidgeRefineResult(
+        offset_vu=(dv, du),
+        rotation_rad=dtheta,
+        iterations=iterations,
+        converged=converged,
+        applied=True,
+    )
+
+
 def lm_subpixel_refine(
     *,
     vertices_vu: NDArrayFloatType,
@@ -630,6 +1004,7 @@ def lm_subpixel_refine(
     pinvh_rcond: float = DEFAULT_PINVH_RCOND,
     trust_region_px: float | None = None,
     tikhonov_alpha: float = 0.0,
+    final_gradient_ridge: bool = False,
 ) -> LMRefineResult:
     """Refine a polyline-vs-image alignment by Levenberg-Marquardt.
 
@@ -703,6 +1078,17 @@ def lm_subpixel_refine(
             wrong minimum on the way (crater rims, terminator edges).
             The anchor biases the step only; it is excluded from the
             reported data-only covariance (see ``LMRefineResult``).
+        final_gradient_ridge: When True, after the DT Levenberg-Marquardt
+            converges, a final :func:`gradient_ridge_refine` stage polishes
+            the offset against the *continuous* gradient-magnitude ridge,
+            removing the sub-pixel-phase bias floor the integer-quantized DT
+            zero-set leaves.  ``image_gradient_vu`` must be supplied (it is
+            already required when ``use_polarity`` is True).  The reported
+            ``residuals_px`` / ``weights`` / ``rms_px`` / ``covariance`` are
+            recomputed against the DT at the ridge-refined pose, so the
+            spurious gates and the reported uncertainty stay on the same DT
+            footing as without the stage.  ``False`` (default) leaves the
+            DT-LM optimum unchanged.
     Returns:
         :class:`LMRefineResult`.
 
@@ -731,6 +1117,8 @@ def lm_subpixel_refine(
         raise ValueError(
             'fit_rotation=True requires pivot_distance_px > 0 for the convergence test'
         )
+    if final_gradient_ridge and image_gradient_vu is None:
+        raise ValueError('final_gradient_ridge=True requires image_gradient_vu')
     if use_polarity:
         if image_gradient_vu is None:
             raise ValueError('use_polarity=True requires image_gradient_vu')
@@ -931,6 +1319,53 @@ def lm_subpixel_refine(
                 dtheta=state.dtheta,
                 fit_rotation=fit_rotation,
             )
+    # Final continuous gradient-ridge stage.  The DT-LM above minimised
+    # distance to an integer-quantized edge mask, whose zero-set snaps the
+    # recovered edge to integer pixels and leaves a sub-pixel-phase bias
+    # floor; this stage polishes the offset against the un-quantized
+    # gradient magnitude.  Only run when there is surviving DT evidence to
+    # anchor it (a degenerate DT-LM has no inlier set to start from); the
+    # ridge stage itself keeps the DT-LM pose if it finds no usable ridge
+    # residual or walks too far.  The DT residuals / weights / Jacobian are
+    # then recomputed at the refined pose so the reported rms / covariance /
+    # spurious gates stay on the same DT footing as the no-ridge path.
+    if final_gradient_ridge and image_gradient_vu is not None and np.any(state.weights > 0):
+        gradient_magnitude = np.hypot(image_gradient_vu[..., 0], image_gradient_vu[..., 1]).astype(
+            np.float64
+        )
+        ridge = gradient_ridge_refine(
+            vertices_vu=verts,
+            normals_vu=norms,
+            sigma_normal_per_vertex_px=sigmas,
+            gradient_magnitude=gradient_magnitude,
+            initial_offset_vu=(state.dv, state.du),
+            weight_mask=state.polarity_mask.astype(np.float64),
+            initial_rotation_rad=state.dtheta,
+            fit_rotation=fit_rotation,
+            pivot_vu=pivot,
+            pivot_distance_px=pivot_distance_px,
+            tukey_c=tukey_c,
+        )
+        if ridge.applied:
+            state.dv, state.du = ridge.offset_vu
+            state.dtheta = ridge.rotation_rad
+            residuals_ridge, jacobian_ridge = _compute_residuals_and_jacobian(
+                vertices_vu=verts,
+                pivot_vu=pivot,
+                image_dt=image_edge_dt,
+                dv=state.dv,
+                du=state.du,
+                dtheta=state.dtheta,
+                fit_rotation=fit_rotation,
+            )
+            residuals_ridge = np.where(
+                state.polarity_mask, residuals_ridge, _INFINITY_DT_PENALTY_PX
+            )
+            ridge_scaled = residuals_ridge / sigmas
+            ridge_tukey = tukey_biweight_weights(ridge_scaled, c=tukey_c)
+            state.raw_residuals = residuals_ridge
+            state.weights = inv_sigma_sq * ridge_tukey * state.polarity_mask
+            state.jacobian = jacobian_ridge
     final_weights = state.weights
     final_residuals = state.raw_residuals
     inlier_count = int(np.sum(final_weights > 0))

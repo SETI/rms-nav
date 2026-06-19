@@ -1,0 +1,7 @@
+sweep_name: noise_read_noise
+# Read noise rising from a clean frame to past the navigability cliff.  Recovery
+# holds at low noise and navigation fails at the highest level, so the sweep
+# captures the degradation from success to failure.
+base_scene: phase_sweep_regular_body/regular_sphere_base.yaml
+parameters: [noise.read_noise_dn]
+values: [1.0, 4.0, 8.0, 16.0, 32.0, 64.0]

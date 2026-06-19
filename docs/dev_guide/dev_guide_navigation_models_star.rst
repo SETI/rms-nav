@@ -43,8 +43,14 @@ Each predicted star is checked against:
   silhouette mask, the star is flagged ``in_body_silhouette``.
 - Ring annuli — when a star's predicted position lies inside any planet's ring system
   (defined by the per-planet radial bounds in the YAML config), the star is flagged
-  ``in_ring_annulus``.
-- Saturation / cosmic-ray masks — populated at navigate time from the per-image masks.
+  ``in_body_silhouette`` as well (a ring conflict occludes the star the same way).
+
+The model does **not** gate a star on the saturation or cosmic-ray mask at its predicted
+position: once a pointing offset is present the predicted position carries no special
+significance, and a sharp stellar peak self-triggers the cosmic-ray detector, so consulting
+the mask there would suppress good stars. The ``saturated`` and
+``in_saturation_or_cosmic_mask`` flags therefore stay clear. Star usability is an
+occlusion-only gate.
 
 Conflict-flagged stars stay in the model's list (so the curator surfaces them in the
 sidecar) but are excluded from the autonomous matching path by the upstream
@@ -140,9 +146,9 @@ The per-star CRLB covariance reflects the magnitude-margin centroid uncertainty.
 does not capture systematic biases from a misaligned camera distortion model, from
 unmodelled background flux, or from PSF smear that exceeds the per-instrument
 ``max_smear`` cap (stars above that cap are dropped from the emission set rather than
-emitted with unreliable predictions). Star features whose predicted position lies inside a
-saturation or cosmic-ray mask are flagged on the
-:class:`~nav.feature.flags.StarFlags` so the orchestrator's reliability gate can drop them.
+emitted with unreliable predictions). Star usability is gated only on body / ring occlusion;
+the saturation and cosmic-ray masks are not consulted at the predicted position, so the
+:class:`~nav.feature.flags.StarFlags` saturation flags stay clear.
 
 Configuration
 =============
@@ -383,8 +389,8 @@ Call path traced through
 1. For each surviving star, build a :class:`~nav.feature.geometry.StarGeometry` from the
    predicted position and the per-feature CRLB covariance.
 2. Build a :class:`~nav.feature.flags.StarFlags` carrying the magnitude-margin effective
-   SNR, the catalog magnitude, the body / ring conflict flags, and the saturation /
-   cosmic-ray-mask flags read off the per-image masks.
+   SNR, the catalog magnitude, and the body / ring conflict flags. The saturation /
+   cosmic-ray-mask flags are left clear -- star usability is an occlusion-only gate.
 3. Construct one :data:`~nav.feature.feature_type.NavFeatureType.STAR`
    :class:`~nav.feature.feature.NavFeature` per star and return the list.
 

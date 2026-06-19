@@ -1,0 +1,39 @@
+schema_version: 1
+scene_name: hyperion_pose_disagree
+instrument: coiss_nac
+size_v: 220
+size_u: 220
+random_seed: 42
+midtime_utc: '2010-01-01T00:00:00Z'
+exposure_sec: 1.0
+# B7 scenario 3 base: mesh rendered at the true pose, predicted at a pose the
+# navigator can be made to disagree with.  At the base the predicted pose equals
+# the rendered pose (nav_override.pose_euler_deg matches the body pose), so the
+# body navigates cleanly -- the baseline.  The pose_disagreement sweep walks
+# nav_override.pose_euler_deg[1] (the Y Euler angle) away from the true 35 deg and
+# records how the limb fit degrades, and the behavioral test
+# (test_sim_irregular_pose) navigates this scene at an agreeing and a disagreeing
+# predicted pose to show the limb degrades while the pose-stable blob holds.
+#
+# The body is mildly irregular (mesh_lumpiness 0.1) but its bulk shape is a
+# triaxial ellipsoid, which is centrally symmetric: rotating the predicted pose
+# barely moves the lit-weighted centroid (so the blob stays accurate) while it
+# swings the silhouette boundary (so the limb distance-transform fit degrades).
+bodies:
+  - name: HYPERION
+    shape_model: polyhedral_mesh
+    mesh_lumpiness: 0.1
+    mesh_seed: 7
+    pose_euler_deg: [10.0, 35.0, 0.0]
+    center_v: 110.0
+    center_u: 110.0
+    axis1: 150.0
+    axis2: 110.0
+    axis3: 95.0
+    illumination_angle: 25.0
+    phase_angle: 30.0
+    nav_override:
+      pose_euler_deg: [10.0, 35.0, 0.0]
+offset_v: 1.43
+offset_u: -0.61
+offset_rotation_deg: 0.0

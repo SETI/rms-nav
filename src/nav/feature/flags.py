@@ -179,12 +179,23 @@ class BodyBlobFlags:
             (rotational orientation always unknown) to 3 at full
             crescent (most of the body unlit, hiding most of the
             irregularity).  Must be ``>= 0``.
+        sub_solar_dir_vu: Unit ``(v, u)`` image-plane direction from the
+            body's geometric center toward the bright limb (the
+            projection of the body-to-Sun vector).  ``(0.0, 0.0)`` when
+            the direction is unknown or undefined (a near-full-phase body
+            whose lit centroid coincides with its geometric center).
+            ``BodyBlobNav`` orients its phase-aware coarse-acquisition
+            template along this direction so a high-phase crescent
+            displaced beyond its predicted bounding box is still found; a
+            filled-disc template cannot match a thin crescent.  Both
+            components must lie in ``[-1, 1]``.
     """
 
     body_name: str = ''
     predicted_diameter_px: float = 0.0
     phase_angle_deg: float = 0.0
     phase_irregularity_factor: float = 0.0
+    sub_solar_dir_vu: tuple[float, float] = (0.0, 0.0)
 
     def __post_init__(self) -> None:
         """Validate per-field constraints."""
@@ -197,6 +208,11 @@ class BodyBlobFlags:
         if self.phase_irregularity_factor < 0.0:
             raise ValueError(
                 f'phase_irregularity_factor must be >= 0; got {self.phase_irregularity_factor!r}'
+            )
+        dir_v, dir_u = self.sub_solar_dir_vu
+        if not (-1.0 <= dir_v <= 1.0 and -1.0 <= dir_u <= 1.0):
+            raise ValueError(
+                f'sub_solar_dir_vu components must lie in [-1, 1]; got {self.sub_solar_dir_vu!r}'
             )
 
 

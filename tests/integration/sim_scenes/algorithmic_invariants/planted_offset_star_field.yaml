@@ -1,0 +1,31 @@
+schema_version: 1
+scene_name: planted_offset_star_field
+instrument: coiss_nac
+size_v: 128
+size_u: 128
+random_seed: 7
+exposure_sec: 1.0
+# A clean multi-star field with no body or rings.  The simulated stars NavModel
+# emits one STAR feature per rendered star at its unshifted predicted position;
+# the image places each star at (v + offset), so the star techniques
+# (StarFieldFromCatalogNav's RANSAC pattern match, StarUniqueMatchNav's two-star
+# path, and StarRefineNav's prior refinement) recover the planted translation.
+# The stars are bright (vmag 3-4 -> a few hundred DN at this instrument's full
+# well) so they clear the detection threshold under Poisson + read noise, and
+# spread across the frame so the field matcher's triplet geometry is
+# well-conditioned.
+bodies: []
+rings: []
+stars:
+  - {name: F1, v: 30.0, u: 40.0, vmag: 3.0}
+  - {name: F2, v: 80.0, u: 35.0, vmag: 3.6}
+  - {name: F3, v: 55.0, u: 90.0, vmag: 3.3}
+  - {name: F4, v: 95.0, u: 95.0, vmag: 4.0}
+  - {name: F5, v: 40.0, u: 100.0, vmag: 3.8}
+  - {name: F6, v: 100.0, u: 50.0, vmag: 3.5}
+noise:
+  poisson: true
+  read_noise_dn: 4.0
+offset_v: 1.43
+offset_u: -0.61
+offset_rotation_deg: 0.0

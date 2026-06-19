@@ -46,6 +46,18 @@ techniques:
       # structure the coarser levels averaged out).
       consistency_max_fraction_of_diameter: 0.025
       consistency_max_px: 4.0
+      # Gaussian low-pass (px) applied to both surfaces in the
+      # correlator's full-resolution sub-pixel refinement.  The body
+      # silhouette and the Lambert template are sharp anti-aliased
+      # edges with differing profiles; correlating them aliases the
+      # cross-power peak into a sub-pixel-phase-dependent S-curve
+      # (~0.03 px, zero at integer / half-pixel offsets).  A ~1 px
+      # matched low-pass removes the high-frequency mismatch and cuts
+      # the residual to ~0.01 px; the upsampled DFT still localizes the
+      # smoothed peak.  Only the final full-resolution refine is
+      # band-limited -- coarse pyramid levels keep sharp surfaces for
+      # integer-peak selection.  0.0 disables it.
+      refine_lowpass_sigma_px: 1.0
     terms:
       # PSR-style quality measure of the chosen NCC peak.  Healthy
       # body-disc fits report quality 6-15; the divisor maps that range
@@ -209,6 +221,20 @@ techniques:
       # the spurious flag fires, and the fallback terminator
       # technique handles the body).
       lm_tikhonov_alpha: 0.0
+      # Final continuous gradient-ridge sub-pixel refinement after the DT
+      # Levenberg-Marquardt converges (see
+      # :func:`nav.nav_technique.dt_fitting.gradient_ridge_refine`).  Held
+      # OFF for the limb: the dominant limb error is a model-vs-image edge
+      # offset -- the gradient-magnitude peak of a limb-darkened,
+      # PSF-blurred limb sits ~0.1 px inside the geometric silhouette the
+      # LIMB_ARC predicts -- not the DT quantization the continuous fit
+      # would remove.  Refining onto the gradient peak therefore SHARPENS
+      # that offset (clean planted-(0,0) recovery worsens from ~0.10 px to
+      # ~0.17 px).  Removing the floor needs a model-side fix that predicts
+      # the limb at the gradient-peak location; see
+      # ``dev_guide_techniques_body_limb``.  1 enables, 0 disables (the
+      # tuning loader is numeric-only, so this is an int flag).
+      gradient_ridge_refine: 0
       # Pixels of slack around the search-window axis bounds for the
       # at-edge check.  See ``RingEdgeNav.at_edge_tolerance_px``.
       at_edge_tolerance_px: 1.0
@@ -308,6 +334,13 @@ techniques:
       lm_trust_region_px: 1.0
       # See ``BodyLimbNav.lm_tikhonov_alpha``.
       lm_tikhonov_alpha: 0.0
+      # Final continuous gradient-ridge sub-pixel refinement; see
+      # ``BodyLimbNav.gradient_ridge_refine``.  Held OFF: the ring edges are
+      # symmetric, so the gradient peak already coincides with the geometric
+      # edge and the DT-LM fit is at its floor (~0.016 px sweep median,
+      # already below the 0.02 px target); the continuous refine does not
+      # improve it.  1 enables, 0 disables.
+      gradient_ridge_refine: 0
       # Rotation-axis ``at_edge`` fraction; see
       # ``BodyDiscCorrelateNav.rotation_at_edge_fraction``.
       rotation_at_edge_fraction: 0.95
@@ -503,6 +536,37 @@ techniques:
       # does not.  Default 0.0 is a no-op pending an integration-library
       # calibration sweep.
       model_error_floor_px: 0.0
+      # PSF-fit refinement of matched inliers.  The brightness-weighted
+      # moment centroid that pins each detection is unbiased but only
+      # noise-limited; for faint stars its scatter dominates the field
+      # offset.  After the matcher fixes the correspondences, each inlier
+      # detection is re-centroided by a true PSF fit
+      # (``obs.star_psf().find_position``) against the instrument's
+      # modelled point-spread function, which is the minimum-variance
+      # estimator and roughly halves-to-quarters the per-star error in
+      # the photon-noise-limited regime.  An undersampled PSF fit carries
+      # a small sub-pixel-phase bias floor (~0.08 px) that only matters
+      # once a star is bright enough for the moment's noise to fall below
+      # it, so the refinement is applied per star only below an
+      # integrated-SNR ceiling; brighter detections keep the moment.
+      # 1 enables the refinement; 0 keeps the moment centroid everywhere.
+      psf_refine_enabled: 1
+      # Square box side (px, odd) for the PSF fit and the integrated-SNR
+      # estimate around each inlier.
+      psf_refine_box_px: 11
+      # Maximum search distance (px) from the moment centroid for the
+      # PSF fit; the moment is already within a pixel of truth.
+      psf_refine_search_limit_px: 2.0
+      # Integrated-SNR ceiling: a detection whose box SNR
+      # (total net signal / sqrt(signal + n_pix * noise_sigma**2))
+      # exceeds this keeps its moment centroid, because above the
+      # moment/PSF crossover the moment's noise is already below the PSF
+      # bias floor.  Calibrated to the field-level crossover on the sim
+      # star fields (~30 for a nominal background; the optimum drifts to
+      # ~16-21 under elevated read noise or a stray-light gradient, so
+      # this is set for the nominal case -- see the star-field
+      # centroiding section of the simulator performance report).
+      psf_refine_snr_max: 30.0
 
   RingAnnulusNav:
     alpha0: -2.0

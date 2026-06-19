@@ -14,6 +14,7 @@ Welcome to the Documentation for RMS-NAV!
    introduction
    user_guide/user_guide
    dev_guide/dev_guide
+   simulator_report/simulator_report
 
 Indices and tables
 ==================

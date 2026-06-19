@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import numpy as np
 from scipy.ndimage import maximum_filter
@@ -70,9 +70,24 @@ from nav.nav_technique.technique_result import NavTechniqueResult
 from nav.support.types import NDArrayFloatType
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only import
+    from psfmodel import PSF
+
     from nav.nav_orchestrator.nav_context import NavContext
 
 __all__ = ['StarFieldFromCatalogNav']
+
+
+@runtime_checkable
+class _StarPSFProvider(Protocol):
+    """Structural type for an observation that can supply a star PSF model.
+
+    The PSF-refinement step only needs ``star_psf()``; typing the obs against
+    this Protocol (rather than the concrete ``ObsSnapshotInst``) keeps the
+    technique decoupled from the obs class hierarchy and lets a lightweight
+    test double opt into refinement just by exposing the one method.
+    """
+
+    def star_psf(self) -> PSF: ...
 
 
 _COLLINEAR_REL_EPS: float = 1.0e-6
@@ -482,6 +497,13 @@ class StarFieldFromCatalogNav(NavTechnique):
         # the reported covariance diagonal.  Default 0.0 -> no-op.  See
         # ORCH-001 / config_510_techniques.yaml.
         self._model_error_floor_px = float(self.tuning.get('model_error_floor_px', 0.0))
+        # PSF-fit re-centroiding of matched inliers (see config_510_techniques.yaml).
+        self._psf_refine_enabled = bool(int(self.tuning['psf_refine_enabled']))
+        self._psf_refine_box_px = int(self.tuning['psf_refine_box_px'])
+        self._psf_refine_search_limit_px = float(self.tuning['psf_refine_search_limit_px'])
+        self._psf_refine_snr_max = float(self.tuning['psf_refine_snr_max'])
+        if self._psf_refine_box_px % 2 == 0:
+            raise ValueError(f'psf_refine_box_px must be odd; got {self._psf_refine_box_px}')
         if self._min_inliers < 3:
             raise ValueError(
                 f'pattern_match_min_inliers must be >= 3 (the matcher needs at '
@@ -579,6 +601,91 @@ class StarFieldFromCatalogNav(NavTechnique):
                 n_catalog_predicted=n_catalog_predicted,
             )
 
+    def _psf_refine_positions(
+        self, det_inliers: NDArrayFloatType, context: NavContext
+    ) -> NDArrayFloatType:
+        """Re-centroid each matched inlier with a true PSF fit where it helps.
+
+        The moment centroid is unbiased but noise-limited; a maximum-likelihood
+        PSF fit against the instrument's modelled point-spread function reaches
+        the minimum variance and so sharply reduces the per-star error of faint
+        detections.  An undersampled PSF fit, however, carries a fixed
+        sub-pixel-phase bias floor, so a detection bright enough that its moment
+        noise already sits below that floor keeps the moment.  The brightness
+        test is a per-detection integrated SNR over the fit box.
+
+        Detections whose fit fails (off the edge, too few good pixels, no
+        convergence) silently fall back to the moment centroid.
+
+        Parameters:
+            det_inliers: ``(N, 2)`` moment centroids ``(v, u)`` of the matched
+                inliers, in the extended-FOV frame.
+            context: Per-image NavContext (supplies the image, the noise sigma,
+                and the observation's PSF model).
+
+        Returns:
+            ``(N, 2)`` refined positions; rows that could not be improved are
+            returned unchanged.
+        """
+        obs = context.obs
+        if not isinstance(obs, _StarPSFProvider):
+            return det_inliers
+        psf = obs.star_psf()
+        image = np.asarray(context.image_ext, np.float64)
+        noise_sigma = float(max(context.image_noise_sigma, 1e-9))
+        box = self._psf_refine_box_px
+        half = box // 2
+        search_limit = (self._psf_refine_search_limit_px, self._psf_refine_search_limit_px)
+        h, w = image.shape
+        refined = det_inliers.copy()
+        n_refined = 0
+        for i, (v, u) in enumerate(det_inliers):
+            v_pix = round(float(v))
+            u_pix = round(float(u))
+            if not (half <= v_pix < h - half and half <= u_pix < w - half):
+                continue
+            if self._box_snr(image, v_pix, u_pix, half, noise_sigma) > self._psf_refine_snr_max:
+                continue  # bright: moment beats the PSF fit's bias floor
+            try:
+                result = psf.find_position(
+                    image, (box, box), (float(v_pix), float(u_pix)), search_limit=search_limit
+                )
+            except (ValueError, RuntimeError):
+                continue
+            if result is None:
+                continue
+            # ``find_position`` reports the position in ``eval_rect`` convention
+            # (offset measured from the pixel's lower edge); the detection and
+            # catalog convention is pixel-centre, so subtract the half-pixel.
+            refined[i, 0] = result[0] - 0.5
+            refined[i, 1] = result[1] - 0.5
+            n_refined += 1
+        self.logger.debug(
+            'PSF-refined %d of %d matched inlier(s); the rest kept their moment centroid',
+            n_refined,
+            len(det_inliers),
+        )
+        return refined
+
+    @staticmethod
+    def _box_snr(
+        image: NDArrayFloatType, v_pix: int, u_pix: int, half: int, noise_sigma: float
+    ) -> float:
+        """Return the integrated SNR of a source in a square box around a pixel.
+
+        ``signal = sum(clip(box - median, 0))`` is the total net counts; the
+        variance is ``signal + n_pix * noise_sigma**2`` (source-shot plus
+        background/read), so the ratio is the photon-noise-limited detection
+        SNR used to pick the moment-vs-PSF crossover.
+        """
+        box = image[v_pix - half : v_pix + half + 1, u_pix - half : u_pix + half + 1]
+        net = np.clip(box - float(np.median(box)), 0.0, None)
+        signal = float(net.sum())
+        variance = signal + net.size * noise_sigma * noise_sigma
+        if variance <= 0.0:
+            return 0.0
+        return signal / math.sqrt(variance)
+
     def _match_and_fit(
         self,
         *,
@@ -640,8 +747,10 @@ class StarFieldFromCatalogNav(NavTechnique):
                 fit_rotation=bool(context.fit_camera_rotation),
             )
         n_inliers, correspondences, _coarse_offset = best
-        det_inliers = det_points_arr[[d for d, _ in correspondences]]
+        det_inliers: NDArrayFloatType = det_points_arr[[d for d, _ in correspondences]]
         cat_inliers = cat_points_arr[[c for _, c in correspondences]]
+        if self._psf_refine_enabled:
+            det_inliers = self._psf_refine_positions(det_inliers, context)
         fit_rotation = bool(context.fit_camera_rotation)
         if fit_rotation:
             sim_fit, weights = self._similarity_refit(det_inliers, cat_inliers)

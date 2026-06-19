@@ -53,9 +53,55 @@ technique maximises the normalised cross-correlation
 
 over the integer offsets :math:`(\Delta v, \Delta u)` in the per-instrument search window,
 where :math:`\langle \cdot, \cdot \rangle_{M}` denotes the masked inner product (only pixels
-where :math:`M = \mathrm{True}` contribute). Sub-pixel refinement comes from a quadratic fit
-to the correlation surface around the integer peak; the fitted curvature provides the
-Cramer-Rao lower bound covariance.
+where :math:`M = \mathrm{True}` contribute). Sub-pixel refinement comes from a localized
+upsampled-DFT (Guizar-Sicairos) of the cross-power spectrum around the integer peak,
+reaching a 1/128 px resolution. The refinement is evaluated on the **raw-intensity**
+surfaces even when the integer peak was chosen on the gradient surfaces, so a gradient-mode
+peak does not carry the gradient-magnitude rectification bias (the magnitude rectifies the
+signal, making the cross-power peak non-smooth at its apex) into the reported offset; the
+correlation-surface curvature provides the Cramer-Rao lower bound covariance.
+
+Sub-pixel refinement band-limit (``refine_lowpass_sigma_px``)
+-------------------------------------------------------------
+
+Before the cross-power spectrum is formed, the full-resolution refinement low-passes both
+surfaces -- the image and the (already mask-multiplied) template -- with a Gaussian of
+``refine_lowpass_sigma_px`` (default 1.0 px).
+
+**Why.** The template is an oversampled but otherwise *sharp* Lambert silhouette, and a real
+or simulated body has an equally sharp (PSF-aside) limb whose edge profile does not match the
+template's. Cross-correlating two sharp surfaces with differing edge profiles aliases the
+cross-power peak: the high-frequency edge content beats against the sampling grid and shifts
+the peak by an amount that depends on the sub-pixel phase. The result is an odd S-curve in the
+recovered offset -- zero at integer and half-pixel offsets, growing to a peak near the
+quarter-pixel -- which is *per-axis separable* (a pure-``v`` offset biases ``v`` only). The
+matched low-pass removes the high-frequency mismatch that drives the aliasing, so the peak
+lands on the true shift. The localized upsampled DFT still resolves the smoothed peak to
+1/128 px, so the band-limit costs no usable resolution.
+
+**What happens if you don't (set it to 0).** The disc carries a sub-pixel-phase-dependent
+residual of roughly ``±0.03`` px on a single axis, rising to ``~0.1`` px at the worst
+two-axis phase, *independent of SNR* (it is a deterministic correlation artifact, not noise).
+Because the simulator's body and the navigator's template are both sharp, a round-number
+planted offset (``0``, ``0.5``) lands on the bias null and hides it entirely -- which is why
+the per-technique characterization plants an off-grid offset. With the default 1.0 px
+low-pass the residual drops to ``~0.01`` px across every sub-pixel phase. The band-limit is
+applied **only** to the final full-resolution refine; the coarse pyramid levels keep their
+sharp surfaces so integer-peak selection is unaffected. It must low-pass the *mask-multiplied*
+template, not the bare template -- low-passing before the mask multiply lets the hard mask
+edge re-sharpen the model and makes the bias worse, not better.
+
+**Alternative considered and rejected: a render-time PSF.** Since the bias comes from sharp
+edges, an obvious idea is to convolve the simulated body (and, to match, the template) with
+the instrument point-spread function so the edges are realistically soft. This does not work
+as a fix. Blurring only the rendered image at the camera's own ~0.54 px sigma leaves it
+mismatched against the still-sharp template -- a soft image against a sharp template is a
+worse mismatch than two matched sharp surfaces -- and it destabilizes the integer-peak choice
+at some phases; a larger blur is monotonically worse. It is also the wrong layer: the bias is
+in the navigator's correlation, which applies to real PSF-blurred images too, so it must be
+fixed in the correlator (the band-limit above) rather than in the simulator. The band-limit
+removes the bias for both simulated and real images and changes neither the rendered image nor
+the template.
 
 Mode selection (auto / raw / gradient)
 --------------------------------------
@@ -140,6 +186,14 @@ in ``src/nav/config_files/config_510_techniques.yaml``.
   :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` once it crosses
   this fraction of the per-image
   :attr:`~nav.nav_orchestrator.nav_context.NavContext.max_rotation_deg` cap.
+- ``consistency_max_fraction_of_diameter`` / ``consistency_max_px`` — floats, defaults
+  ``0.025`` / ``4.0`` px. Diameter-scaled and absolute floors on the accepted pyramid-level
+  peak migration; the applied spurious cap is the larger of the two.
+- ``refine_lowpass_sigma_px`` — float, default ``1.0`` px. Gaussian low-pass applied to both
+  surfaces in the full-resolution sub-pixel refine (see "Sub-pixel refinement band-limit").
+  Removes the sharp-edge cross-power aliasing that otherwise leaves a ~0.03 px (up to ~0.1 px
+  at the worst two-axis phase) sub-pixel-phase S-curve in the recovered offset; ``0.0``
+  disables it and restores that bias.
 
 The remaining numeric thresholds (NCC peak quality, consistency tolerance, top-k count) are
 shared across every pyramid-NCC technique and live as module-level constants in

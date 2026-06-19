@@ -87,8 +87,9 @@ shipping sections:
   :attr:`~nav.feature.feature_type.NavFeatureType.RING_ANNULUS` gates; see
   :doc:`dev_guide_techniques_ring_annulus`.
 
-The user-facing tour at :doc:`/introduction_configuration` lists every shipping
-file with one-sentence descriptions.
+The user-facing tour at :doc:`/introduction_configuration` covers how operators
+override these defaults with their own files; this chapter is the reference for
+what ships and where.
 
 .. _config-file-layout:
 
@@ -131,6 +132,38 @@ ranges are conventional, not enforced by the loader:
    * - ``9xx``
      - Downstream-product settings
      - ``config_900_backplanes``, ``config_950_pds4``
+
+Per-file contents
+-----------------
+
+Each shipping file and what it holds:
+
+- ``config_010_general`` — general settings, including all logging levels.
+- ``config_020_offset`` — offset-finding and star-refinement parameters.
+- ``config_030_stars`` — star-model and ring-occlusion parameters.
+- ``config_040_bodies`` — body (planet / moon) rendering parameters.
+- ``config_050_rings`` — ring-model parameters.
+- ``config_060_titan`` — Titan-specific navigation parameters.
+- ``config_070_bootstrap`` — bootstrap navigation parameters (angles in degrees).
+- ``config_100_satellites`` — satellite definitions for each planet.
+- ``config_220_body_shape`` — per-body shape table (radii, ellipsoid residual,
+  crater scale, albedo) consumed by the body NavModel and feature extractors;
+  see :ref:`static-data-citations`.
+- ``config_300_jupiter_rings`` / ``config_310_saturn_rings`` /
+  ``config_320_uranus_rings`` / ``config_330_neptune_rings`` — per-planet ring
+  system parameters.
+- ``config_400_inst_coiss`` — Cassini ISS instrument-specific settings.
+- ``config_410_inst_gossi`` — Galileo SSI instrument-specific settings.
+- ``config_420_inst_nhlorri`` — New Horizons LORRI instrument-specific settings.
+- ``config_430_inst_vgiss`` — Voyager ISS instrument-specific settings.
+- ``config_440_sim`` — simulated-image settings.
+- ``config_510_techniques`` — per-NavTechnique confidence-formula coefficients and
+  runtime tunables (spurious-detection thresholds, at-edge tolerances, minimum
+  arc lengths) plus the planet-specific ``feature_emission.ring_annulus`` block
+  that decides RING_EDGE vs RING_ANNULUS emission.
+- ``config_900_backplanes`` — backplane-generation settings.
+- ``config_950_pds4`` — PDS4 metadata and export settings for generated products,
+  PDS4 label-template overrides, and the mapping of internal fields to PDS4 keys.
 
 Loader rules
 ------------

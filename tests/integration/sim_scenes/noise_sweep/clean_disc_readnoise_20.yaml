@@ -1,0 +1,23 @@
+schema_version: 1
+scene_name: clean_disc_readnoise_20
+instrument: coiss_nac
+size_v: 128
+size_u: 128
+random_seed: 42
+exposure_sec: 1.0
+bodies:
+  - name: RHEA
+    shape_model: ellipsoid
+    center_v: 64.0
+    center_u: 64.0
+    axis1: 90.0
+    axis2: 90.0
+    axis3: 90.0
+    illumination_angle: 15.0
+    phase_angle: 40.0
+noise:
+  poisson: true
+  read_noise_dn: 20.0
+offset_v: 0.0
+offset_u: 0.0
+offset_rotation_deg: 0.0
