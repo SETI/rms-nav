@@ -265,7 +265,7 @@ def generate() -> list[Path]:
         if not scene_path.is_file():
             print(f'skip {name}: {scene_path} not found', file=sys.stderr)
             continue
-        params = load_sim_scene(scene_path).to_sim_params()
+        params = load_sim_scene(scene_path)
         written.append(
             render_scene_png(
                 params, _REPORT_DIR / f'{name}.png', ignore_offset=False, upscale=2, **kwargs

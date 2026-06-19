@@ -15,6 +15,7 @@ from nav.sim.scene import (
     SimSceneValidationError,
     iter_scene_paths,
     load_sim_scene,
+    scene_class_for_path,
 )
 
 # The catalog root is co-located with this test module.
@@ -45,27 +46,29 @@ def test_scene_names_are_unique() -> None:
 def test_scene_validates(path: Path) -> None:
     """Each scene YAML parses and validates."""
     scene = load_sim_scene(path)
-    assert scene.scene_name == path.stem
-    assert scene.scene_class in DECLARED_SIM_SCENE_CLASSES
+    assert scene['scene_name'] == path.stem
+    assert scene_class_for_path(path) in DECLARED_SIM_SCENE_CLASSES
 
 
 @pytest.mark.parametrize('path', _SCENE_PATHS, ids=_SCENE_IDS)
 def test_scene_renders(path: Path) -> None:
     """Each scene's sim params render without error and produce signal."""
     scene = load_sim_scene(path)
-    img, _ = render_combined_model(scene.to_sim_params())
-    assert img.shape == tuple(scene.image_size_vu)
+    img, _ = render_combined_model(scene)
+    assert img.shape == (scene['size_v'], scene['size_u'])
     assert float(img.max()) > 0.0
 
 
-def test_planted_offset_becomes_render_offset() -> None:
-    """A planted ground-truth offset maps onto the rendered sim offset."""
+def test_loaded_scene_is_flat_sim_params() -> None:
+    """A loaded scene is the flat sim_params dict the renderer consumes."""
     scene = load_sim_scene(
         next(p for p in _SCENE_PATHS if p.parent.name == 'algorithmic_invariants')
     )
-    params = scene.to_sim_params()
-    assert params['offset_v'] == scene.ground_truth.planted_offset_dv_px
-    assert params['offset_u'] == scene.ground_truth.planted_offset_du_px
+    assert 'offset_v' in scene
+    assert 'offset_u' in scene
+    assert 'size_v' in scene
+    assert 'image_size_vu' not in scene
+    assert 'ground_truth' not in scene
 
 
 def test_validator_rejects_unknown_instrument(tmp_path: Path) -> None:
@@ -73,7 +76,7 @@ def test_validator_rejects_unknown_instrument(tmp_path: Path) -> None:
     bad = tmp_path / 'bad.yaml'
     bad.write_text(
         'schema_version: 1\nscene_name: bad\ninstrument: hubble\n'
-        'image_size_vu: [64, 64]\nrandom_seed: 1\n'
+        'size_v: 64\nsize_u: 64\nrandom_seed: 1\n'
     )
     with pytest.raises(SimSceneValidationError, match='instrument'):
         load_sim_scene(bad)
@@ -84,7 +87,7 @@ def test_validator_rejects_name_mismatch(tmp_path: Path) -> None:
     bad = tmp_path / 'actual_name.yaml'
     bad.write_text(
         'schema_version: 1\nscene_name: other_name\ninstrument: coiss_nac\n'
-        'image_size_vu: [64, 64]\nrandom_seed: 1\n'
+        'size_v: 64\nsize_u: 64\nrandom_seed: 1\n'
     )
     with pytest.raises(SimSceneValidationError, match='must match filename stem'):
         load_sim_scene(bad)
@@ -95,7 +98,18 @@ def test_validator_rejects_wrong_schema_version(tmp_path: Path) -> None:
     bad = tmp_path / 'v2.yaml'
     bad.write_text(
         'schema_version: 2\nscene_name: v2\ninstrument: coiss_nac\n'
-        'image_size_vu: [64, 64]\nrandom_seed: 1\n'
+        'size_v: 64\nsize_u: 64\nrandom_seed: 1\n'
     )
     with pytest.raises(SimSceneValidationError, match='schema_version'):
+        load_sim_scene(bad)
+
+
+def test_validator_rejects_unknown_key(tmp_path: Path) -> None:
+    """An unmodeled top-level key fails validation so typos do not pass silently."""
+    bad = tmp_path / 'typo.yaml'
+    bad.write_text(
+        'schema_version: 1\nscene_name: typo\ninstrument: coiss_nac\n'
+        'size_v: 64\nsize_u: 64\nrandom_seed: 1\nbogus_key: 3\n'
+    )
+    with pytest.raises(SimSceneValidationError, match='unknown scene keys'):
         load_sim_scene(bad)

@@ -1,18 +1,18 @@
 """GUI smoke tests for ``src/main/nav_create_simulated_image.py``.
 
-These cover the ``_load_parameters`` JSON-load path, specifically that
+These cover the ``_load_scene`` YAML-load path, specifically that
 ``shade_solid_rings`` round-trips into both the data model and its checkbox,
 and that a missing or null ``closest_planet`` falls back to ``SATURN`` without
 raising (``QComboBox.findText(None)`` would otherwise raise ``TypeError``).
 """
 
 import importlib.util
-import json
 import os
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
+from ruamel.yaml import YAML
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
@@ -59,35 +59,46 @@ def model(qapp: QApplication) -> Any:
     return ncsi.CreateSimulatedImageModel()
 
 
-def _load_json(
+def _load_scene_with(
     monkeypatch: pytest.MonkeyPatch,
     model: Any,
     tmp_path: Path,
     payload: dict[str, Any],
 ) -> None:
-    """Write ``payload`` to a temp file and drive ``_load_parameters`` through it."""
-    json_path = tmp_path / 'params.json'
-    json_path.write_text(json.dumps(payload), encoding='utf-8')
+    """Merge ``payload`` into a minimal valid scene, write it, and drive ``_load_scene``."""
+    scene: dict[str, Any] = {
+        'schema_version': 1,
+        'scene_name': 'params',
+        'instrument': 'generic',
+        'size_v': 128,
+        'size_u': 128,
+        'random_seed': 42,
+        **payload,
+    }
+    scene_path = tmp_path / 'params.yaml'
+    yaml = YAML(typ='safe')
+    with scene_path.open('w') as handle:
+        yaml.dump(scene, handle)
     monkeypatch.setattr(
         QFileDialog,
         'getOpenFileName',
-        staticmethod(lambda *a, **k: (str(json_path), 'JSON')),
+        staticmethod(lambda *a, **k: (str(scene_path), 'YAML')),
     )
 
-    # ``_load_parameters`` swallows exceptions into a critical dialog; surface
-    # any such failure as a test error instead so a regression is visible.
+    # ``_load_scene`` swallows exceptions into a critical dialog; surface any
+    # such failure as a test error instead so a regression is visible.
     def _fail_on_critical(*args: Any, **kwargs: Any) -> None:
-        raise AssertionError(f'_load_parameters raised an error dialog: {args!r}')
+        raise AssertionError(f'_load_scene raised an error dialog: {args!r}')
 
     monkeypatch.setattr(QMessageBox, 'critical', staticmethod(_fail_on_critical))
-    model._load_parameters()
+    model._load_scene()
 
 
 def test_load_shade_solid_rings_true_syncs_param(
     monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
 ) -> None:
     """Loading ``shade_solid_rings: true`` sets the data-model flag to True."""
-    _load_json(monkeypatch, model, tmp_path, {'shade_solid_rings': True})
+    _load_scene_with(monkeypatch, model, tmp_path, {'shade_solid_rings': True})
     assert model.sim_params['shade_solid_rings'] is True
 
 
@@ -95,7 +106,7 @@ def test_load_shade_solid_rings_true_checks_box(
     monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
 ) -> None:
     """Loading ``shade_solid_rings: true`` checks the wired checkbox."""
-    _load_json(monkeypatch, model, tmp_path, {'shade_solid_rings': True})
+    _load_scene_with(monkeypatch, model, tmp_path, {'shade_solid_rings': True})
     assert model._shade_solid_rings_check.isChecked() is True
 
 
@@ -104,15 +115,15 @@ def test_load_shade_solid_rings_false_unchecks_box(
 ) -> None:
     """Loading ``shade_solid_rings: false`` clears the wired checkbox."""
     model._shade_solid_rings_check.setChecked(True)
-    _load_json(monkeypatch, model, tmp_path, {'shade_solid_rings': False})
+    _load_scene_with(monkeypatch, model, tmp_path, {'shade_solid_rings': False})
     assert model._shade_solid_rings_check.isChecked() is False
 
 
 def test_load_missing_closest_planet_defaults_to_saturn(
     monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
 ) -> None:
-    """A JSON file with no ``closest_planet`` key falls back to ``SATURN``."""
-    _load_json(monkeypatch, model, tmp_path, {'shade_solid_rings': False})
+    """A scene with no ``closest_planet`` key falls back to ``SATURN``."""
+    _load_scene_with(monkeypatch, model, tmp_path, {'shade_solid_rings': False})
     assert model.sim_params['closest_planet'] == 'SATURN'
 
 
@@ -120,7 +131,7 @@ def test_load_null_closest_planet_defaults_to_saturn(
     monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
 ) -> None:
     """An explicit ``closest_planet: null`` falls back to ``SATURN`` without raising."""
-    _load_json(monkeypatch, model, tmp_path, {'closest_planet': None})
+    _load_scene_with(monkeypatch, model, tmp_path, {'closest_planet': None})
     assert model.sim_params['closest_planet'] == 'SATURN'
 
 
@@ -128,7 +139,7 @@ def test_load_explicit_closest_planet_is_preserved(
     monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
 ) -> None:
     """A real ``closest_planet`` value is preserved in the data model."""
-    _load_json(monkeypatch, model, tmp_path, {'closest_planet': 'JUPITER'})
+    _load_scene_with(monkeypatch, model, tmp_path, {'closest_planet': 'JUPITER'})
     assert model.sim_params['closest_planet'] == 'JUPITER'
 
 
@@ -147,7 +158,7 @@ def test_load_instrument_syncs_combo(
     monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
 ) -> None:
     """Loading a scene with an instrument syncs both the model and the combo."""
-    _load_json(monkeypatch, model, tmp_path, {'instrument': 'gossi'})
+    _load_scene_with(monkeypatch, model, tmp_path, {'instrument': 'gossi'})
     assert model.sim_params['instrument'] == 'gossi'
     assert model._instrument_combo.currentText() == 'gossi'
 
@@ -156,7 +167,7 @@ def test_load_missing_instrument_defaults_to_generic(
     monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
 ) -> None:
     """A scene without an instrument key falls back to generic."""
-    _load_json(monkeypatch, model, tmp_path, {'random_seed': 7})
+    _load_scene_with(monkeypatch, model, tmp_path, {'random_seed': 7})
     assert model.sim_params['instrument'] == 'generic'
 
 
@@ -165,7 +176,7 @@ def test_load_preserves_noise_block(
 ) -> None:
     """Loading a scene round-trips the catalog-only noise block."""
     noise = {'poisson': False, 'read_noise_dn': 12.0}
-    _load_json(monkeypatch, model, tmp_path, {'noise': noise})
+    _load_scene_with(monkeypatch, model, tmp_path, {'noise': noise})
     assert model.sim_params['noise'] == noise
 
 
@@ -174,7 +185,7 @@ def test_load_preserves_stray_light_block(
 ) -> None:
     """Loading a scene round-trips the catalog-only stray_light block."""
     stray = {'amplitude': 0.3, 'model': 'radial'}
-    _load_json(monkeypatch, model, tmp_path, {'stray_light': stray})
+    _load_scene_with(monkeypatch, model, tmp_path, {'stray_light': stray})
     assert model.sim_params['stray_light'] == stray
 
 
@@ -216,7 +227,9 @@ def test_load_noise_block_syncs_widgets(
     monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
 ) -> None:
     """Loading a noise block syncs the panel widgets."""
-    _load_json(monkeypatch, model, tmp_path, {'noise': {'poisson': False, 'read_noise_dn': 9.0}})
+    _load_scene_with(
+        monkeypatch, model, tmp_path, {'noise': {'poisson': False, 'read_noise_dn': 9.0}}
+    )
     assert model._poisson_check.isChecked() is False
     assert model._read_noise_spin.value() == 9.0
 
@@ -248,7 +261,7 @@ def test_load_stray_light_syncs_widgets(
     monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
 ) -> None:
     """Loading a stray_light block syncs the panel widgets."""
-    _load_json(
+    _load_scene_with(
         monkeypatch,
         model,
         tmp_path,
@@ -384,9 +397,10 @@ def test_save_scene_writes_valid_yaml(
     _no_critical(monkeypatch)
     model._save_scene()
     scene = load_sim_scene(out)
-    assert scene.instrument == 'coiss_nac'
-    assert scene.scene_name == 'myscene'
-    assert scene.image_size_vu == (128, 128)
+    assert scene['instrument'] == 'coiss_nac'
+    assert scene['scene_name'] == 'myscene'
+    assert scene['size_v'] == 128
+    assert scene['size_u'] == 128
 
 
 def test_load_scene_populates_model(
@@ -396,7 +410,7 @@ def test_load_scene_populates_model(
     scene_yaml = tmp_path / 'loadme.yaml'
     scene_yaml.write_text(
         'schema_version: 1\nscene_name: loadme\ninstrument: gossi\n'
-        'image_size_vu: [96, 96]\nrandom_seed: 5\n'
+        'size_v: 96\nsize_u: 96\nrandom_seed: 5\n'
     )
     monkeypatch.setattr(
         QFileDialog, 'getOpenFileName', staticmethod(lambda *a, **k: (str(scene_yaml), 'YAML'))

@@ -77,7 +77,7 @@ def _technique_error_px(sim_params: dict[str, Any], technique: str) -> float:
 
 
 def _params(*, wrong_pose: bool) -> dict[str, Any]:
-    params = load_sim_scene(_SCENE).to_sim_params()
+    params = load_sim_scene(_SCENE)
     if wrong_pose:
         params = copy.deepcopy(params)
         params['bodies'][0]['nav_override']['pose_euler_deg'] = [10.0, 35.0, _WRONG_POSE_ROLL_DEG]

@@ -1,4 +1,4 @@
-"""Scene schema mapping and save/load round-trip (nav.sim.scene)."""
+"""Flat-schema validation and save/load round-trip (nav.sim.scene)."""
 
 from pathlib import Path
 from typing import Any
@@ -9,7 +9,6 @@ from nav.sim.scene import (
     SimSceneValidationError,
     load_sim_scene,
     save_sim_scene,
-    scene_dict_from_sim_params,
 )
 
 
@@ -27,51 +26,37 @@ def _sim_params() -> dict[str, Any]:
     }
 
 
-def test_scene_dict_maps_image_size() -> None:
-    """The sim image size folds into image_size_vu."""
-    scene = scene_dict_from_sim_params(_sim_params(), scene_name='s')
-    assert scene['image_size_vu'] == [128, 128]
-
-
-def test_scene_dict_offset_becomes_ground_truth() -> None:
-    """A rendered offset folds back into the planted ground truth."""
-    scene = scene_dict_from_sim_params(_sim_params(), scene_name='s')
-    assert scene['ground_truth']['planted_offset_dv_px'] == 3.0
-    assert scene['ground_truth']['planted_offset_du_px'] == -2.0
-
-
-def test_scene_dict_background_stars_fold_into_block() -> None:
-    """The background star count folds into a stars block."""
-    scene = scene_dict_from_sim_params(_sim_params(), scene_name='s')
-    assert scene['stars']['background_count'] == 12
-
-
-def test_save_then_load_round_trips(tmp_path: Path) -> None:
-    """A saved scene reloads with matching geometry and planted offset."""
+def test_save_injects_schema_version_and_scene_name(tmp_path: Path) -> None:
+    """A saved scene carries the schema version and the filename stem as its name."""
     path = tmp_path / 'roundtrip.yaml'
     save_sim_scene(_sim_params(), path)
     scene = load_sim_scene(path)
-    assert scene.instrument == 'coiss_nac'
-    assert scene.image_size_vu == (128, 128)
-    assert scene.bodies[0]['name'] == 'RHEA'
-    assert scene.ground_truth.planted_offset_dv_px == 3.0
+    assert scene['schema_version'] == 1
+    assert scene['scene_name'] == 'roundtrip'
 
 
-def test_round_trip_params_match(tmp_path: Path) -> None:
-    """to_sim_params after a save reproduces the offset and instrument."""
+def test_loaded_scene_is_the_flat_sim_params(tmp_path: Path) -> None:
+    """A loaded scene is the flat sim_params dict the renderer consumes."""
     path = tmp_path / 'rt2.yaml'
     save_sim_scene(_sim_params(), path)
-    params = load_sim_scene(path).to_sim_params()
-    assert params['instrument'] == 'coiss_nac'
-    assert params['offset_v'] == 3.0
-    assert params['background_stars_num'] == 12
+    scene = load_sim_scene(path)
+    assert scene['instrument'] == 'coiss_nac'
+    assert scene['size_v'] == 128
+    assert scene['size_u'] == 128
+    assert scene['offset_v'] == 3.0
+    assert scene['offset_u'] == -2.0
+    assert scene['bodies'][0]['name'] == 'RHEA'
+    assert scene['background_stars_num'] == 12
 
 
-def test_saved_scene_name_matches_filename(tmp_path: Path) -> None:
-    """The saved scene_name is the filename stem, so it validates."""
+def test_save_then_load_preserves_values(tmp_path: Path) -> None:
+    """Saving then loading reproduces every flat field verbatim."""
     path = tmp_path / 'named_scene.yaml'
-    save_sim_scene(_sim_params(), path)
-    assert load_sim_scene(path).scene_name == 'named_scene'
+    params = _sim_params()
+    save_sim_scene(params, path)
+    scene = load_sim_scene(path)
+    for key, value in params.items():
+        assert scene[key] == value
 
 
 def test_load_rejects_bad_instrument(tmp_path: Path) -> None:
@@ -79,7 +64,29 @@ def test_load_rejects_bad_instrument(tmp_path: Path) -> None:
     path = tmp_path / 'bad.yaml'
     path.write_text(
         'schema_version: 1\nscene_name: bad\ninstrument: hubble\n'
-        'image_size_vu: [64, 64]\nrandom_seed: 1\n'
+        'size_v: 64\nsize_u: 64\nrandom_seed: 1\n'
     )
     with pytest.raises(SimSceneValidationError, match='instrument'):
+        load_sim_scene(path)
+
+
+def test_load_rejects_unknown_key(tmp_path: Path) -> None:
+    """An unmodeled top-level key fails validation."""
+    path = tmp_path / 'typo.yaml'
+    path.write_text(
+        'schema_version: 1\nscene_name: typo\ninstrument: coiss_nac\n'
+        'size_v: 64\nsize_u: 64\nrandom_seed: 1\nwobble: 5\n'
+    )
+    with pytest.raises(SimSceneValidationError, match='unknown scene keys'):
+        load_sim_scene(path)
+
+
+def test_load_rejects_nonpositive_size(tmp_path: Path) -> None:
+    """A non-positive image size fails validation."""
+    path = tmp_path / 'small.yaml'
+    path.write_text(
+        'schema_version: 1\nscene_name: small\ninstrument: coiss_nac\n'
+        'size_v: 0\nsize_u: 64\nrandom_seed: 1\n'
+    )
+    with pytest.raises(SimSceneValidationError, match='size_v'):
         load_sim_scene(path)

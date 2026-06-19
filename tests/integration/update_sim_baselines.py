@@ -34,14 +34,15 @@ def main() -> int:
     for scene_path in scene_paths:
         scene = load_sim_scene(scene_path)
         baseline = baseline_for_scene(scene)
-        out_path = sim_baseline_path(_BASELINES_DIR, scene.scene_name)
+        scene_name = scene['scene_name']
+        out_path = sim_baseline_path(_BASELINES_DIR, scene_name)
         out_path.write_text(baseline.to_json())
         offset = (
             f'({baseline.offset_dv_px}, {baseline.offset_du_px})'
             if baseline.offset_dv_px is not None
             else 'none'
         )
-        print(f'{scene.scene_name}: {baseline.status} offset={offset} conf={baseline.confidence}')
+        print(f'{scene_name}: {baseline.status} offset={offset} conf={baseline.confidence}')
     print(f'Wrote {len(scene_paths)} baseline(s) to {_BASELINES_DIR}')
     return 0
 

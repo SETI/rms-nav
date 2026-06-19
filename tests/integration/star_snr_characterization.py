@@ -21,7 +21,6 @@ simulated.
 from __future__ import annotations
 
 import math
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -88,14 +87,10 @@ def _install_mode_patch() -> dict[str, Any]:
 
 def _sim_params(vmag: float, noise: dict[str, Any], stray: dict[str, Any] | None) -> dict[str, Any]:
     """Build sim params for the base scene with a uniform vmag and a background."""
-    scene = load_sim_scene(_BASE_SCENE)
-    gt = replace(
-        scene.ground_truth,
-        planted_offset_dv_px=_PLANTED[0],
-        planted_offset_du_px=_PLANTED[1],
-    )
-    scene = replace(scene, ground_truth=gt, noise=noise)
-    params = scene.to_sim_params()
+    params = load_sim_scene(_BASE_SCENE)
+    params['offset_v'] = _PLANTED[0]
+    params['offset_u'] = _PLANTED[1]
+    params['noise'] = noise
     for star in params['stars']:
         star['vmag'] = vmag
     if stray is not None:

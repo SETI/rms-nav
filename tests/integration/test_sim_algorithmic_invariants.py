@@ -47,7 +47,7 @@ import pytest
 from nav.nav_model import build_models_for_obs
 from nav.nav_orchestrator import NavOrchestrator
 from nav.obs.obs_inst_sim import ObsSim
-from nav.sim.scene import SimScene, iter_scene_paths, load_sim_scene
+from nav.sim.scene import iter_scene_paths, load_sim_scene
 
 # Recovery tolerance in pixels.  The disc/correlation techniques converge to a
 # few tenths of a pixel on these clean scenes; 1.0 px is a safe invariant bound.
@@ -138,8 +138,8 @@ _NAVIGATES_SUCCESS_PATHS = [
 _NAVIGATES_SUCCESS_IDS = [p.stem for p in _NAVIGATES_SUCCESS_PATHS]
 
 
-def _navigate(scene: SimScene, *, only_techniques: str = '*') -> Any:
-    obs = ObsSim.from_file('/tmp/invariant.json', sim_params=scene.to_sim_params())
+def _navigate(scene: dict[str, Any], *, only_techniques: str = '*') -> Any:
+    obs = ObsSim.from_file('/tmp/invariant.yaml', sim_params=scene)
     orchestrator = NavOrchestrator(
         build_models_for_obs(obs), only_models='*', only_techniques=only_techniques
     )
@@ -199,7 +199,7 @@ def test_invariant_recovers_planted_v(path: Path) -> None:
     scene = load_sim_scene(path)
     result = _navigate(scene)
     assert result.offset_px is not None
-    assert abs(result.offset_px[0] - scene.ground_truth.planted_offset_dv_px) < _OFFSET_TOLERANCE_PX
+    assert abs(result.offset_px[0] - scene['offset_v']) < _OFFSET_TOLERANCE_PX
 
 
 @pytest.mark.parametrize('path', _DISC_PATHS, ids=_DISC_IDS)
@@ -208,7 +208,7 @@ def test_invariant_recovers_planted_u(path: Path) -> None:
     scene = load_sim_scene(path)
     result = _navigate(scene)
     assert result.offset_px is not None
-    assert abs(result.offset_px[1] - scene.ground_truth.planted_offset_du_px) < _OFFSET_TOLERANCE_PX
+    assert abs(result.offset_px[1] - scene['offset_u']) < _OFFSET_TOLERANCE_PX
 
 
 @pytest.mark.parametrize('path', _BLOB_PATHS, ids=_BLOB_IDS)
@@ -230,7 +230,7 @@ def test_blob_alone_recovers_planted_v(path: Path) -> None:
     scene = load_sim_scene(path)
     result = _navigate(scene, only_techniques='BodyBlobNav')
     assert result.offset_px is not None
-    assert abs(result.offset_px[0] - scene.ground_truth.planted_offset_dv_px) < _OFFSET_TOLERANCE_PX
+    assert abs(result.offset_px[0] - scene['offset_v']) < _OFFSET_TOLERANCE_PX
 
 
 @pytest.mark.parametrize('path', _BLOB_PATHS, ids=_BLOB_IDS)
@@ -239,7 +239,7 @@ def test_blob_alone_recovers_planted_u(path: Path) -> None:
     scene = load_sim_scene(path)
     result = _navigate(scene, only_techniques='BodyBlobNav')
     assert result.offset_px is not None
-    assert abs(result.offset_px[1] - scene.ground_truth.planted_offset_du_px) < _OFFSET_TOLERANCE_PX
+    assert abs(result.offset_px[1] - scene['offset_u']) < _OFFSET_TOLERANCE_PX
 
 
 @pytest.mark.parametrize('path', _STAR_PATHS, ids=_STAR_IDS)
@@ -256,7 +256,7 @@ def test_star_scene_recovers_planted_v(path: Path) -> None:
     scene = load_sim_scene(path)
     result = _navigate(scene)
     assert result.offset_px is not None
-    assert abs(result.offset_px[0] - scene.ground_truth.planted_offset_dv_px) < _OFFSET_TOLERANCE_PX
+    assert abs(result.offset_px[0] - scene['offset_v']) < _OFFSET_TOLERANCE_PX
 
 
 @pytest.mark.parametrize('path', _STAR_PATHS, ids=_STAR_IDS)
@@ -265,10 +265,10 @@ def test_star_scene_recovers_planted_u(path: Path) -> None:
     scene = load_sim_scene(path)
     result = _navigate(scene)
     assert result.offset_px is not None
-    assert abs(result.offset_px[1] - scene.ground_truth.planted_offset_du_px) < _OFFSET_TOLERANCE_PX
+    assert abs(result.offset_px[1] - scene['offset_u']) < _OFFSET_TOLERANCE_PX
 
 
-def _starfield_result(scene: SimScene) -> Any:
+def _starfield_result(scene: dict[str, Any]) -> Any:
     """Navigate ``scene`` with StarFieldFromCatalogNav alone; return its result.
 
     Reads the per-technique result directly rather than the fused offset because
@@ -297,7 +297,7 @@ def test_rotation_scene_recovers_planted_roll(path: Path) -> None:
     assert not technique.spurious
     assert technique.rotation_rad is not None
     recovered_deg = math.degrees(technique.rotation_rad)
-    assert abs(recovered_deg - scene.ground_truth.planted_rotation_deg) < _ROTATION_TOLERANCE_DEG
+    assert abs(recovered_deg - scene['offset_rotation_deg']) < _ROTATION_TOLERANCE_DEG
 
 
 @pytest.mark.parametrize('path', _LIMB_PATHS, ids=_LIMB_IDS)
@@ -311,7 +311,7 @@ def test_limb_alone_recovers_planted_v(path: Path) -> None:
     scene = load_sim_scene(path)
     result = _navigate(scene, only_techniques='BodyLimbNav')
     assert result.offset_px is not None
-    assert abs(result.offset_px[0] - scene.ground_truth.planted_offset_dv_px) < _OFFSET_TOLERANCE_PX
+    assert abs(result.offset_px[0] - scene['offset_v']) < _OFFSET_TOLERANCE_PX
 
 
 @pytest.mark.parametrize('path', _LIMB_PATHS, ids=_LIMB_IDS)
@@ -320,10 +320,10 @@ def test_limb_alone_recovers_planted_u(path: Path) -> None:
     scene = load_sim_scene(path)
     result = _navigate(scene, only_techniques='BodyLimbNav')
     assert result.offset_px is not None
-    assert abs(result.offset_px[1] - scene.ground_truth.planted_offset_du_px) < _OFFSET_TOLERANCE_PX
+    assert abs(result.offset_px[1] - scene['offset_u']) < _OFFSET_TOLERANCE_PX
 
 
-def _ring_edge_result(scene: SimScene) -> Any:
+def _ring_edge_result(scene: dict[str, Any]) -> Any:
     """Navigate ``scene`` with RingEdgeNav alone; return its per-technique result.
 
     Like the rotation scene, the offset is read from the per-technique result
@@ -348,9 +348,7 @@ def test_ring_scene_recovers_planted_v(path: Path) -> None:
     technique = _ring_edge_result(scene)
     assert not technique.spurious
     assert technique.offset_px is not None
-    assert (
-        abs(technique.offset_px[0] - scene.ground_truth.planted_offset_dv_px) < _OFFSET_TOLERANCE_PX
-    )
+    assert abs(technique.offset_px[0] - scene['offset_v']) < _OFFSET_TOLERANCE_PX
 
 
 @pytest.mark.parametrize('path', _RING_PATHS, ids=_RING_IDS)
@@ -360,12 +358,10 @@ def test_ring_scene_recovers_planted_u(path: Path) -> None:
     technique = _ring_edge_result(scene)
     assert not technique.spurious
     assert technique.offset_px is not None
-    assert (
-        abs(technique.offset_px[1] - scene.ground_truth.planted_offset_du_px) < _OFFSET_TOLERANCE_PX
-    )
+    assert abs(technique.offset_px[1] - scene['offset_u']) < _OFFSET_TOLERANCE_PX
 
 
-def _unique_match_result(scene: SimScene) -> Any:
+def _unique_match_result(scene: dict[str, Any]) -> Any:
     """Navigate ``scene`` with StarUniqueMatchNav alone; return its result.
 
     The technique needs no prior (pass 1), so it can be isolated.  The offset is
@@ -392,9 +388,7 @@ def test_unique_match_scene_recovers_planted_v(path: Path) -> None:
     technique = _unique_match_result(scene)
     assert not technique.spurious
     assert technique.offset_px is not None
-    assert (
-        abs(technique.offset_px[0] - scene.ground_truth.planted_offset_dv_px) < _OFFSET_TOLERANCE_PX
-    )
+    assert abs(technique.offset_px[0] - scene['offset_v']) < _OFFSET_TOLERANCE_PX
 
 
 @pytest.mark.parametrize('path', _UNIQUE_MATCH_PATHS, ids=_UNIQUE_MATCH_IDS)
@@ -404,12 +398,10 @@ def test_unique_match_scene_recovers_planted_u(path: Path) -> None:
     technique = _unique_match_result(scene)
     assert not technique.spurious
     assert technique.offset_px is not None
-    assert (
-        abs(technique.offset_px[1] - scene.ground_truth.planted_offset_du_px) < _OFFSET_TOLERANCE_PX
-    )
+    assert abs(technique.offset_px[1] - scene['offset_u']) < _OFFSET_TOLERANCE_PX
 
 
-def _star_refine_result(scene: SimScene) -> Any:
+def _star_refine_result(scene: dict[str, Any]) -> Any:
     """Navigate ``scene`` with the full ensemble; return its StarRefineNav result.
 
     StarRefineNav requires the pass-1 prior, so it cannot be isolated with
@@ -438,9 +430,7 @@ def test_refine_scene_recovers_planted_v(path: Path) -> None:
     technique = _star_refine_result(scene)
     assert not technique.spurious
     assert technique.offset_px is not None
-    assert (
-        abs(technique.offset_px[0] - scene.ground_truth.planted_offset_dv_px) < _OFFSET_TOLERANCE_PX
-    )
+    assert abs(technique.offset_px[0] - scene['offset_v']) < _OFFSET_TOLERANCE_PX
 
 
 @pytest.mark.parametrize('path', _REFINE_PATHS, ids=_REFINE_IDS)
@@ -450,6 +440,4 @@ def test_refine_scene_recovers_planted_u(path: Path) -> None:
     technique = _star_refine_result(scene)
     assert not technique.spurious
     assert technique.offset_px is not None
-    assert (
-        abs(technique.offset_px[1] - scene.ground_truth.planted_offset_du_px) < _OFFSET_TOLERANCE_PX
-    )
+    assert abs(technique.offset_px[1] - scene['offset_u']) < _OFFSET_TOLERANCE_PX

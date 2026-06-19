@@ -35,7 +35,6 @@ from typing import Any
 from nav.nav_model import build_models_for_obs
 from nav.nav_orchestrator import NavOrchestrator
 from nav.obs.obs_inst_sim import ObsSim
-from nav.sim.scene import SimScene
 
 OFFSET_DECIMALS: int = 2
 CONFIDENCE_DECIMALS: int = 2
@@ -119,14 +118,14 @@ def load_sim_baseline(path: Path) -> SimBaseline:
     )
 
 
-def baseline_for_scene(scene: SimScene) -> SimBaseline:
-    """Render and navigate ``scene``, returning its rounded baseline."""
-    obs = ObsSim.from_file('/tmp/sim_baseline.json', sim_params=scene.to_sim_params())
+def baseline_for_scene(scene: dict[str, Any]) -> SimBaseline:
+    """Render and navigate the scene ``sim_params``, returning its rounded baseline."""
+    obs = ObsSim.from_file('/tmp/sim_baseline.yaml', sim_params=scene)
     result = NavOrchestrator(
         build_models_for_obs(obs), only_models='*', only_techniques='*'
     ).navigate(obs)
     return SimBaseline.from_run(
-        scene_name=scene.scene_name,
+        scene_name=scene['scene_name'],
         status=str(result.status),
         offset_px=result.offset_px,
         confidence=float(result.confidence),

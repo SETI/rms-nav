@@ -194,7 +194,7 @@ def build_sweep_params(spec: SweepSpec) -> list[tuple[float, dict[str, Any]]]:
     Returns:
         One ``(value, sim_params)`` pair per value, in sweep order.
     """
-    base_params = load_sim_scene(spec.base_scene).to_sim_params()
+    base_params = load_sim_scene(spec.base_scene)
     steps: list[tuple[float, dict[str, Any]]] = []
     for value in spec.values:
         sim_params = copy.deepcopy(base_params)

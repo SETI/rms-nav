@@ -24,7 +24,6 @@ unknown, so the whole characterization is simulated.
 from __future__ import annotations
 
 import math
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -94,11 +93,10 @@ def _sim_params(
     seed: int | None = None,
 ) -> dict[str, Any]:
     """Build sim params for a base scene at ``offset``, given noise + background."""
-    scene = load_sim_scene(_SCENES / base)
-    gt = replace(scene.ground_truth, planted_offset_dv_px=offset[0], planted_offset_du_px=offset[1])
-    noise = {**(scene.noise or {}), 'poisson': True, 'read_noise_dn': read_noise}
-    scene = replace(scene, ground_truth=gt, noise=noise)
-    params = scene.to_sim_params()
+    params = load_sim_scene(_SCENES / base)
+    params['offset_v'] = offset[0]
+    params['offset_u'] = offset[1]
+    params['noise'] = {**params.get('noise', {}), 'poisson': True, 'read_noise_dn': read_noise}
     if stray is not None:
         params['stray_light'] = dict(stray)
     if seed is not None:

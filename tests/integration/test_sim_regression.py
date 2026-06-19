@@ -29,7 +29,7 @@ _STAR_ZERO_OFFSET_TOLERANCE_PX = 0.1
 def _technique_offset_error(scene_name: str, technique: str) -> float:
     """Pin one technique on a regression scene; return its recovered-offset error."""
     scene = load_sim_scene(_REGRESSION_DIR / f'{scene_name}.yaml')
-    obs = ObsSim.from_file('/tmp/regression.json', sim_params=scene.to_sim_params())
+    obs = ObsSim.from_file('/tmp/regression.yaml', sim_params=scene)
     result = NavOrchestrator(
         build_models_for_obs(obs), only_models='*', only_techniques=technique
     ).navigate(obs)
@@ -37,10 +37,9 @@ def _technique_offset_error(scene_name: str, technique: str) -> float:
     assert pinned is not None
     assert not pinned.spurious
     assert pinned.offset_px is not None
-    gt = scene.ground_truth
     return math.hypot(
-        pinned.offset_px[0] - gt.planted_offset_dv_px,
-        pinned.offset_px[1] - gt.planted_offset_du_px,
+        pinned.offset_px[0] - scene['offset_v'],
+        pinned.offset_px[1] - scene['offset_u'],
     )
 
 

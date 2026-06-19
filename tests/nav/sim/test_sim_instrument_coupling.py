@@ -6,6 +6,7 @@ applies to a real frame.  These tests cover the config resolver, the obs-level
 ``InstrumentSettings``, and the DN-vs-I/F rendering split.
 """
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -179,9 +180,9 @@ def test_overrides_reach_the_obs_inst_config() -> None:
     assert float(obs._inst_config['noise']['read_noise_dn']) == 12.0
 
 
-def test_instrument_config_round_trips_through_the_scene_schema() -> None:
-    """instrument_config survives sim-params -> scene-dict mapping (GUI save path)."""
-    from nav.sim.scene import scene_dict_from_sim_params
+def test_instrument_config_round_trips_through_the_scene_schema(tmp_path: Path) -> None:
+    """instrument_config survives a scene save/load round-trip (GUI save path)."""
+    from nav.sim.scene import load_sim_scene, save_sim_scene
 
     sim_params: dict[str, Any] = {
         'size_v': 64,
@@ -190,5 +191,7 @@ def test_instrument_config_round_trips_through_the_scene_schema() -> None:
         'instrument': 'generic',
         'instrument_config': {'star_psf_sigma': 1.5, 'noise': {'read_noise_dn': 3.0}},
     }
-    scene = scene_dict_from_sim_params(sim_params, scene_name='example')
+    path = tmp_path / 'example.yaml'
+    save_sim_scene(sim_params, path)
+    scene = load_sim_scene(path)
     assert scene['instrument_config'] == {'star_psf_sigma': 1.5, 'noise': {'read_noise_dn': 3.0}}
