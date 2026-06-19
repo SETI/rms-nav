@@ -150,42 +150,53 @@ The frames below are the actual catalog scenes behind the measurements in this
 chapter, rendered from their YAML by
 ``python -m tests.integration.sim_doc_images``.
 
-.. list-table::
-   :widths: 25 25 25 25
-   :header-rows: 0
+.. figure:: _scene_images/disc.png
+   :width: 45%
+   :align: center
 
-   * - .. figure:: _scene_images/disc.png
-          :width: 100%
+   Resolved disc
 
-          Resolved disc
-     - .. figure:: _scene_images/mesh_disc.png
-          :width: 100%
+.. figure:: _scene_images/mesh_disc.png
+   :width: 45%
+   :align: center
 
-          Irregular mesh body
-     - .. figure:: _scene_images/limb_mesh.png
-          :width: 100%
+   Irregular mesh body
 
-          Mesh limb
-     - .. figure:: _scene_images/blob_crescent.png
-          :width: 100%
+.. figure:: _scene_images/limb_mesh.png
+   :width: 45%
+   :align: center
 
-          High-phase crescent
-   * - .. figure:: _scene_images/mesh_crescent.png
-          :width: 100%
+   Mesh limb
 
-          Mesh crescent
-     - .. figure:: _scene_images/ring.png
-          :width: 100%
+.. figure:: _scene_images/blob_crescent.png
+   :width: 45%
+   :align: center
 
-          Ring edge
-     - .. figure:: _scene_images/star_field.png
-          :width: 100%
+   High-phase crescent
 
-          Star field
-     - .. figure:: _scene_images/regular_sphere_base.png
-          :width: 100%
+.. figure:: _scene_images/mesh_crescent.png
+   :width: 45%
+   :align: center
 
-          Sweep base sphere
+   Mesh crescent
+
+.. figure:: _scene_images/ring.png
+   :width: 45%
+   :align: center
+
+   Ring edge
+
+.. figure:: _scene_images/star_field.png
+   :width: 45%
+   :align: center
+
+   Star field
+
+.. figure:: _scene_images/regular_sphere_base.png
+   :width: 45%
+   :align: center
+
+   Sweep base sphere
 
 Algorithmic-invariant recovery
 ==============================

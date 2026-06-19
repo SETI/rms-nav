@@ -68,58 +68,74 @@ Scene ingredients
 The panels below are rendered by ``python -m tests.integration.sim_doc_images``
 (see :ref:`sim-png-export`); each isolates one ingredient.
 
-.. list-table::
-   :widths: 50 50
-   :header-rows: 0
+.. figure:: _sim_images/ellipsoid_body.png
+   :width: 45%
+   :align: center
 
-   * - .. figure:: _sim_images/ellipsoid_body.png
-          :width: 100%
+   Ellipsoidal body (Lambertian, moderate phase). ``axis1`` is the vertical
+   extent, ``axis2`` the horizontal.
 
-          Ellipsoidal body (Lambertian, moderate phase). ``axis1`` is the
-          vertical extent, ``axis2`` the horizontal.
-     - .. figure:: _sim_images/mesh_body.png
-          :width: 100%
+.. figure:: _sim_images/mesh_body.png
+   :width: 45%
+   :align: center
 
-          Irregular polyhedral-mesh body of the same axes at a three-axis pose.
-   * - .. figure:: _sim_images/body_craters.png
-          :width: 100%
+   Irregular polyhedral-mesh body of the same axes at a three-axis pose.
 
-          Ellipsoid with procedurally generated craters.
-     - .. figure:: _sim_images/crescent_body.png
-          :width: 100%
+.. figure:: _sim_images/body_craters.png
+   :width: 45%
+   :align: center
 
-          High-phase (130 deg) mesh body rendered as a thin lit crescent.
-   * - .. figure:: _sim_images/rings.png
-          :width: 100%
+   Ellipsoid with procedurally generated craters.
 
-          Two eccentric ringlets with a gap between them.
-     - .. figure:: _sim_images/star_field.png
-          :width: 100%
+.. figure:: _sim_images/crescent_body.png
+   :width: 45%
+   :align: center
 
-          A random background star field.
-   * - .. figure:: _sim_images/multi_body.png
-          :width: 100%
+   High-phase (130 deg) mesh body rendered as a thin lit crescent.
 
-          Multiple bodies (ellipsoid and mesh) at different sizes, depth-ordered
-          by ``range``.
-     - .. figure:: _sim_images/body_and_stars.png
-          :width: 100%
+.. figure:: _sim_images/rings.png
+   :width: 45%
+   :align: center
 
-          A body against a background star field.
-   * - .. figure:: _sim_images/detector_noise.png
-          :width: 100%
+   Two eccentric ringlets with a gap between them.
 
-          Detector model: read + shot noise, sparse cosmic-ray spikes (bright)
-          and missing-data dropouts (dark).
-     - .. figure:: _sim_images/stray_light_gradient.png
-          :width: 100%
+.. figure:: _sim_images/star_field.png
+   :width: 45%
+   :align: center
 
-          A linear stray-light gradient behind a body.
-   * - .. figure:: _sim_images/composite_scene.png
-          :width: 100%
+   A random background star field.
 
-          A composite frame: a mesh moon, a ring, and a star field.
-     -
+.. figure:: _sim_images/multi_body.png
+   :width: 45%
+   :align: center
+
+   Multiple bodies (ellipsoid and mesh) at different sizes, depth-ordered by
+   ``range``.
+
+.. figure:: _sim_images/body_and_stars.png
+   :width: 45%
+   :align: center
+
+   A body against a background star field.
+
+.. figure:: _sim_images/detector_noise.png
+   :width: 45%
+   :align: center
+
+   Detector model: read + shot noise, sparse cosmic-ray spikes (bright) and
+   missing-data dropouts (dark).
+
+.. figure:: _sim_images/stray_light_gradient.png
+   :width: 45%
+   :align: center
+
+   A linear stray-light gradient behind a body.
+
+.. figure:: _sim_images/composite_scene.png
+   :width: 45%
+   :align: center
+
+   A composite frame: a mesh moon, a ring, and a star field.
 
 The render pipeline
 ===================
