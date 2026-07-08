@@ -540,6 +540,17 @@ techniques:
       # Rotation-axis ``at_edge`` fraction; see
       # ``BodyDiscCorrelateNav.rotation_at_edge_fraction``.
       rotation_at_edge_fraction: 0.95
+      # Roll / translation separability floor (deg).  The camera-roll
+      # separability analysis in
+      # docs/simulator_report/simulator_report.rst ("Camera-roll
+      # sensitivity and roll / translation separability") shows the
+      # RANSAC field matcher cannot separate a roll below ~0.75 deg
+      # from a pure translation: the fitted roll collapses toward a
+      # spurious zero.  A fitted |rotation| below this floor is
+      # therefore reported with the rotation-unobservable sentinel
+      # variance and the ``rotation_below_separability_floor``
+      # diagnostics flag instead of a confident near-zero value.
+      rotation_separability_floor_deg: 0.75
       # Uncalibrated model-error floor (px), added in quadrature to the
       # reported covariance diagonal: reported_cov = CRLB-form (+)
       # model_error_floor_px**2.  Captures the SPICE pointing residual

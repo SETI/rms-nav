@@ -8,6 +8,8 @@ using :class:`ruamel.yaml.YAML` (safe typ), then exposes sections as
 config structures.
 """
 
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -68,6 +70,29 @@ def _deep_merge(base: dict[Any, Any], overlay: dict[Any, Any]) -> dict[Any, Any]
     return merged
 
 
+def _stringify_keys(value: Any) -> Any:
+    """Recursively coerce every mapping key to ``str``.
+
+    Used by :meth:`Config.resolved_config_hash` so the deterministic JSON
+    serialization never hits the mixed-key-type comparison error that
+    ``json.dumps(..., sort_keys=True)`` raises (per-instrument blocks use
+    integer keys such as image sizes and PSF-size thresholds).
+
+    Parameters:
+        value: A YAML-parsed value (mapping, list, or scalar).
+
+    Returns:
+        ``value`` with every mapping key converted to its ``str`` form;
+        lists are walked element-wise and scalars pass through unchanged.
+    """
+
+    if isinstance(value, dict):
+        return {str(k): _stringify_keys(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_stringify_keys(v) for v in value]
+    return value
+
+
 def _as_str_list(value: Any, *, location: str) -> list[str]:
     """Coerce a YAML list value to ``list[str]``.
 
@@ -104,6 +129,7 @@ class Config:
 
         self._config_dict: dict[str, Any] = {}
         self._category_cache: dict[str, AttrDict] = {}
+        self._override_paths: list[str] = []
         self._config_environment: dict[str, Any] = AttrDict({})
         self._config_general: dict[str, Any] = AttrDict({})
         self._config_offset: dict[str, Any] = AttrDict({})
@@ -199,12 +225,17 @@ class Config:
             # (update_config merges *into* the dict, so a stale dict would union
             # old and new keys rather than producing a clean reload).
             self._config_dict = {}
+            # A clean rebuild from bundled defaults carries no user overrides.
+            self._override_paths = []
             for filename in sorted(config_dir.glob('*.yaml')):
                 self.update_config(filename, read_default=False)
             self._validate_registered_techniques()
             return
 
         self._config_dict = self._load_yaml(config_path)
+        # An explicit path replaces the bundled defaults wholesale; record it
+        # as the single applied override so provenance can reproduce the load.
+        self._override_paths = [str(config_path)]
         self._update_attrdicts()
         self._validate_registered_techniques()
 
@@ -276,9 +307,52 @@ class Config:
                 self._config_dict[key] = _deep_merge(self._config_dict[key], new_config[key])
             else:
                 self._config_dict[key] = new_config[key]
+        if read_default:
+            # ``read_default=True`` marks a user/CLI override file (the
+            # internal bundled-defaults bootstrap loads with
+            # ``read_default=False``); record it in application order so
+            # provenance can list exactly which overrides shaped the run.
+            self._override_paths.append(str(config_path))
         self._update_attrdicts()
         if read_default:
             self._validate_registered_techniques()
+
+    @property
+    def override_paths(self) -> tuple[str, ...]:
+        """The user/CLI override config files applied, in application order.
+
+        Bundled default files (the ``config_files`` glob loaded by
+        :meth:`read_config` with no path) are not overrides and never
+        appear here; only files loaded via :meth:`update_config` with
+        ``read_default=True`` (user ``nav_default_config.yaml`` or
+        ``--config-file`` paths) or an explicit :meth:`read_config` path
+        are recorded.
+        """
+
+        return tuple(self._override_paths)
+
+    def resolved_config_hash(self) -> str:
+        """Return a stable sha256 hex digest of the fully-resolved config.
+
+        The merged config dict (bundled defaults plus every applied
+        override) is serialized deterministically -- mapping keys are
+        stringified and sorted, list order is preserved -- and hashed, so
+        two configs with identical resolved content produce identical
+        digests regardless of load order or comment/whitespace changes in
+        the source YAML files.
+
+        Returns:
+            64-character sha256 hex digest of the resolved config content.
+        """
+
+        self.read_config()
+        canonical = json.dumps(
+            _stringify_keys(self._config_dict),
+            sort_keys=True,
+            separators=(',', ':'),
+            default=str,
+        )
+        return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
 
     def category(self, category: str) -> AttrDict:
         """Returns the configuration settings for the specified category.

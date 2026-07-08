@@ -176,6 +176,9 @@ def _curate_provenance(provenance: Provenance) -> dict[str, Any]:
         'static_data_hashes': dict(provenance.static_data_hashes),
         'technique_names': list(provenance.technique_names),
         'extractor_names': list(provenance.extractor_names),
+        'config_hash': provenance.config_hash,
+        'config_overrides': list(provenance.config_overrides),
+        'star_catalogs': dict(provenance.star_catalogs),
         'image_et': _round_float(provenance.image_et, ET_DECIMALS),
         'pipeline_run_iso8601': provenance.pipeline_run_iso8601,
     }
@@ -219,6 +222,12 @@ def build_metadata_dict(result: NavResult) -> dict[str, Any]:
         'sigma_px': _round_pair(result.sigma_px),
         'sigma_along_unobservable_px': sigma_along_unobservable_px,
         'confidence': _round_float(result.confidence, CONFIDENCE_DECIMALS),
+        # Literal marker (always true) flagging that confidence values and
+        # confidence_rank tiers are not yet calibrated against measured
+        # error and must not be read as probabilities; it stays true until
+        # the confidence-calibration workstream (WS-5,
+        # plans/VALIDATION_AND_CALIBRATION_PLAN.md) lands.
+        'confidence_provisional': True,
         'confidence_rank': result.confidence_rank,
         'covariance_px2': _round_matrix(result.covariance_px2),
         'techniques_used': sorted({r.technique_name for r in result.per_technique}),

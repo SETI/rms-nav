@@ -140,7 +140,8 @@ Public surface (autodocumented at :doc:`/api_reference/api_nav_technique`):
   :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.median_residual_px`,
   :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.n_detected_sources`,
   :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.n_catalog_predicted`,
-  :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.n_triplets_evaluated`.
+  :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.n_triplets_evaluated`,
+  :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.rotation_below_separability_floor`.
 
 - :class:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics` — emitted by
   :class:`~spindoctor.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav`. Fields:
