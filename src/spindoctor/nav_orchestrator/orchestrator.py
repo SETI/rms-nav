@@ -581,7 +581,7 @@ class NavOrchestrator(NavBase):
             try:
                 model.create_model()
             except NavContractError:
-                self._logger.error(
+                self._logger.exception(
                     'CONTRACT VIOLATION in NavModel %s.create_model; re-raising',
                     model.name,
                 )
@@ -676,7 +676,7 @@ class NavOrchestrator(NavBase):
             try:
                 model_annotations = model.to_annotations(context)
             except NavContractError:
-                self._logger.error(
+                self._logger.exception(
                     'CONTRACT VIOLATION in NavModel %s.to_annotations; re-raising',
                     model.name,
                 )
@@ -708,7 +708,7 @@ class NavOrchestrator(NavBase):
             try:
                 emitted = model.to_features(context)
             except NavContractError:
-                self._logger.error(
+                self._logger.exception(
                     'CONTRACT VIOLATION in NavModel %s.to_features; re-raising',
                     model.name,
                 )
@@ -810,7 +810,7 @@ class NavOrchestrator(NavBase):
             try:
                 results.append(technique.navigate(subset, context))
             except NavContractError:
-                self._logger.error(
+                self._logger.exception(
                     'CONTRACT VIOLATION in NavTechnique %s.navigate; re-raising',
                     cls.name,
                 )

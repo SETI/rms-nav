@@ -28,7 +28,7 @@ The system works by:
 Supported Missions
 ------------------
 
-SpinDoctor currently supports multiple instruments, organized by dataset names you will pass on the command line. Dataset names are case-insensitive and map to instrument-specific handlers. The complete set is:
+SpinDoctor supports multiple instruments, organized by dataset names you will pass on the command line. Dataset names are case-insensitive and map to instrument-specific handlers. The complete set is:
 
 * ``coiss`` and ``coiss_pds3`` — Cassini Imaging Science Subsystem (all volumes)
 * ``coiss_cruise`` and ``coiss_cruise_pds3`` — Cassini Imaging Science Subsystem (Cruise volumes 1001-1009)

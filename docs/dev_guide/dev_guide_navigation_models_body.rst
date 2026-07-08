@@ -457,8 +457,7 @@ Source files:
 - ``src/spindoctor/nav_model/body_shape.py`` —
   :class:`~spindoctor.nav_model.body_shape.BodyShape`,
   :data:`~spindoctor.nav_model.body_shape.BODY_SHAPE_TABLE`,
-  :data:`~spindoctor.nav_model.body_shape.DEFAULT_BODY_SHAPE`,
-  :func:`~spindoctor.nav_model.body_shape.load_body_shape`, and
+  :data:`~spindoctor.nav_model.body_shape.DEFAULT_BODY_SHAPE`, and
   :func:`~spindoctor.nav_model.body_shape.load_body_shape`.
 
 Public class :class:`~spindoctor.nav_model.nav_model_body.NavModelBody`, base

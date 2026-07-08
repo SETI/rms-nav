@@ -115,7 +115,8 @@ Public surface (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
 - :class:`~spindoctor.nav_orchestrator.provenance.ProvenanceMetadata` — internal dataclass
   returned by
   :func:`~spindoctor.nav_orchestrator.provenance.collect_provenance_metadata` carrying the
-  freshly-read git SHA, kernel list, and static-data hash dict.
+  freshly-read git SHA, kernel list, static-data hash dict, resolved-config hash, applied
+  config-override paths, and star-catalog paths.
 
 - :func:`~spindoctor.nav_orchestrator.provenance.collect_provenance_metadata` — runs the live
   readouts. Called once per

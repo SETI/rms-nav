@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 
+from ruamel.yaml.error import YAMLError
+
 from spindoctor.config import DEFAULT_CONFIG, IMAGE_LOGGER, Config
 
 __all__ = [
@@ -262,7 +264,7 @@ def _resolve_config_hash(config: Config) -> str | None:
     """
     try:
         return config.resolved_config_hash()
-    except (OSError, TypeError, ValueError) as exc:
+    except (OSError, TypeError, ValueError, YAMLError) as exc:
         IMAGE_LOGGER.warning('resolved-config hash unavailable: %s', exc)
         return None
 

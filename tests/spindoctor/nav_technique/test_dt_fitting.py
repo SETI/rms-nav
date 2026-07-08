@@ -342,6 +342,15 @@ def test_coarse_ncc_search_rejects_float_window_entry() -> None:
         coarse_ncc_search(edge_mask, polyline_mask, (1.5, 1))  # type: ignore[arg-type]
 
 
+@pytest.mark.parametrize('fraction', [-0.1, 1.5])
+def test_coarse_ncc_search_rejects_out_of_range_min_support_fraction(fraction: float) -> None:
+    """A min_support_fraction outside [0, 1] is rejected with a named message."""
+    edge_mask = np.zeros((4, 4), bool)
+    polyline_mask = np.zeros((4, 4), bool)
+    with pytest.raises(ValueError, match=r'min_support_fraction must be in \[0, 1\]'):
+        coarse_ncc_search(edge_mask, polyline_mask, (1, 1), min_support_fraction=fraction)
+
+
 def test_coarse_ncc_search_rejects_non_sequence_window() -> None:
     """A non-tuple/list window is rejected by the length-2 sequence guard."""
     edge_mask = np.zeros((4, 4), bool)
