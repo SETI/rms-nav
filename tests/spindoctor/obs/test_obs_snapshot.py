@@ -4,6 +4,7 @@ import numpy as np
 import oops
 import pytest
 from tests.config import (
+    REQUIRES_EXTERNAL_DATA,
     URL_CASSINI_ISS_STARS_01,
     URL_CASSINI_ISS_TITAN_01,
     URL_VOYAGER_ISS_IO_01,
@@ -13,6 +14,8 @@ from tests.config import (
 import spindoctor.obs.obs_inst_cassini_iss as obstcoiss
 import spindoctor.obs.obs_inst_voyager_iss as obstvgiss
 import spindoctor.obs.obs_snapshot as obs_snapshot
+
+pytestmark = REQUIRES_EXTERNAL_DATA
 
 
 @pytest.fixture

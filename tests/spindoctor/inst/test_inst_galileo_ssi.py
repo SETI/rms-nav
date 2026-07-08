@@ -1,10 +1,12 @@
 import math
 
 import pytest
-from tests.config import URL_GALILEO_SSI_IO_01
+from tests.config import REQUIRES_EXTERNAL_DATA, URL_GALILEO_SSI_IO_01
 
 import spindoctor.obs.obs_inst_galileo_ssi as obstgossi
 from spindoctor.obs.obs_inst_galileo_ssi import ObsGalileoSSI
+
+pytestmark = REQUIRES_EXTERNAL_DATA
 
 # Documented anchor limiting magnitude (limiting mag at texp = 1 s).
 _GALILEO_ANCHOR = 10.3

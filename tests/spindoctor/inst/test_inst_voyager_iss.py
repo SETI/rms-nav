@@ -1,7 +1,7 @@
 import math
 
 import pytest
-from tests.config import URL_VOYAGER_ISS_IO_01
+from tests.config import REQUIRES_EXTERNAL_DATA, URL_VOYAGER_ISS_IO_01
 
 import spindoctor.obs.obs_inst_voyager_iss as obstvgiss
 from spindoctor.obs.obs_inst_voyager_iss import (
@@ -9,6 +9,8 @@ from spindoctor.obs.obs_inst_voyager_iss import (
     _voyager_if_factor,
     _voyager_spacecraft_digit,
 )
+
+pytestmark = REQUIRES_EXTERNAL_DATA
 
 # Documented anchor limiting magnitudes (limiting mag at texp = 1 s).
 _VOYAGER_NAC_ANCHOR = 8.3
