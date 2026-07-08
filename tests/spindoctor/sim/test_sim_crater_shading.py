@@ -9,6 +9,7 @@ the smooth path's for rotated poses.
 """
 
 import numpy as np
+import pytest
 
 from spindoctor.sim.sim_body import create_simulated_body
 
@@ -44,22 +45,25 @@ def _bright_centroid(img: np.ndarray) -> tuple[float, float]:
     return float((bright * vv).sum() / total), float((bright * uu).sum() / total)
 
 
-def test_rotated_cratered_body_matches_smooth_bright_centroid_v() -> None:
-    """At rotation_z = pi/2 the cratered lit hemisphere matches the smooth one (v)."""
-    smooth = _render(rotation_z=np.pi / 2, rotation_tilt=1.0, crater_fill=0.0)
-    cratered = _render(rotation_z=np.pi / 2, rotation_tilt=1.0, crater_fill=0.3)
-    assert abs(_bright_centroid(cratered)[0] - _bright_centroid(smooth)[0]) < _CENTROID_TOLERANCE
+@pytest.mark.parametrize('axis', [0, 1], ids=['v', 'u'])
+@pytest.mark.parametrize(
+    ('rotation_z', 'rotation_tilt'),
+    [(np.pi / 2, 1.0), (0.0, 0.0)],
+    ids=['rotated', 'unrotated'],
+)
+def test_cratered_body_matches_smooth_bright_centroid(
+    rotation_z: float, rotation_tilt: float, axis: int
+) -> None:
+    """The cratered lit hemisphere matches the smooth one at the same pose.
 
-
-def test_rotated_cratered_body_matches_smooth_bright_centroid_u() -> None:
-    """At rotation_z = pi/2 the cratered lit hemisphere matches the smooth one (u).
-
-    Before the shared-convention fix this centroid was displaced by roughly 9
-    pixels for this pose, so the tolerance is a strong regression guard.
+    Before the shared-convention fix the rotated pose displaced the u centroid
+    by roughly 9 pixels, so the tolerance is a strong regression guard; the
+    unrotated pose guards the shading paths' agreement at identity pose.
     """
-    smooth = _render(rotation_z=np.pi / 2, rotation_tilt=1.0, crater_fill=0.0)
-    cratered = _render(rotation_z=np.pi / 2, rotation_tilt=1.0, crater_fill=0.3)
-    assert abs(_bright_centroid(cratered)[1] - _bright_centroid(smooth)[1]) < _CENTROID_TOLERANCE
+    smooth = _render(rotation_z=rotation_z, rotation_tilt=rotation_tilt, crater_fill=0.0)
+    cratered = _render(rotation_z=rotation_z, rotation_tilt=rotation_tilt, crater_fill=0.3)
+    delta = abs(_bright_centroid(cratered)[axis] - _bright_centroid(smooth)[axis])
+    assert delta < _CENTROID_TOLERANCE
 
 
 def test_rotated_cratered_body_actually_has_craters() -> None:
@@ -67,17 +71,3 @@ def test_rotated_cratered_body_actually_has_craters() -> None:
     smooth = _render(rotation_z=np.pi / 2, rotation_tilt=1.0, crater_fill=0.0)
     cratered = _render(rotation_z=np.pi / 2, rotation_tilt=1.0, crater_fill=0.3)
     assert not np.array_equal(cratered, smooth)
-
-
-def test_unrotated_cratered_body_matches_smooth_bright_centroid_v() -> None:
-    """At rotation_z = 0 the crater and smooth paths agree as before (v)."""
-    smooth = _render(rotation_z=0.0, rotation_tilt=0.0, crater_fill=0.0)
-    cratered = _render(rotation_z=0.0, rotation_tilt=0.0, crater_fill=0.3)
-    assert abs(_bright_centroid(cratered)[0] - _bright_centroid(smooth)[0]) < _CENTROID_TOLERANCE
-
-
-def test_unrotated_cratered_body_matches_smooth_bright_centroid_u() -> None:
-    """At rotation_z = 0 the crater and smooth paths agree as before (u)."""
-    smooth = _render(rotation_z=0.0, rotation_tilt=0.0, crater_fill=0.0)
-    cratered = _render(rotation_z=0.0, rotation_tilt=0.0, crater_fill=0.3)
-    assert abs(_bright_centroid(cratered)[1] - _bright_centroid(smooth)[1]) < _CENTROID_TOLERANCE
