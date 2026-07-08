@@ -125,7 +125,7 @@ def _largest_sigma(spec: NavFilterSpec) -> float:
         # Sigma is sqrt of variance; largest sigma corresponds to largest
         # eigenvalue.  Clamp to >= 0 for floating-point noise on rank-1
         # inputs.
-        return float(np.sqrt(max(eigvals.max(), 0.0)))
+        return float(np.sqrt(max(float(eigvals.max()), 0.0)))
     if spec.kind is NavFilterKind.BANDPASS_DOG:
         return float(max(spec.bandpass_cutoffs_px))
     return 0.0

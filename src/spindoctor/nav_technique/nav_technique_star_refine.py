@@ -426,7 +426,7 @@ class StarRefineNav(NavTechnique):
             offset_v_total, offset_u_total)``.
         """
         cat_pts = np.asarray(
-            [list(star.geometry.predicted_vu) for star in inliers],  # type: ignore[union-attr]
+            [list(star.geometry.predicted_vu) for star in inliers],  # type: ignore[union-attr, misc]
             dtype=np.float64,
         )
         shifted_pred = cat_pts + np.asarray([prior_v, prior_u], dtype=np.float64)[None, :]

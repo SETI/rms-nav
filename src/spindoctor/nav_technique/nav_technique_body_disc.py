@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from scipy.ndimage import rotate as ndimage_rotate
@@ -113,7 +113,7 @@ def _zero_padded_shift(
     dst_v_hi = dst_v_lo + (src_v_hi - src_v_lo)
     dst_u_hi = dst_u_lo + (src_u_hi - src_u_lo)
     out[dst_v_lo:dst_v_hi, dst_u_lo:dst_u_hi] = arr[src_v_lo:src_v_hi, src_u_lo:src_u_hi]
-    return cast(NDArrayFloatType, out)
+    return out
 
 
 def _rotate_template(

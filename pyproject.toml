@@ -160,6 +160,11 @@ filterwarnings = [
   # time.  It originates in third-party code and is absent on 3.12+; allow it
   # through so it cannot fail conftest collection.
   "default:SelectableGroups dict interface is deprecated:DeprecationWarning",
+  # NumPy 2.5 deprecated setting ``arr.dtype`` in place; the rms-pdstable
+  # dependency still does this when parsing fixed-width PDS3 index tables
+  # (pdstable/__init__.py). It is outside our control, so allow it through as
+  # a non-fatal warning until a pdstable release adopts ``arr.view(dtype)``.
+  "default:Setting the dtype on a NumPy array has been deprecated:DeprecationWarning",
 ]
 markers = [
   "integration: requires PDS3_HOLDINGS_DIR (real holdings on disk or via filecache)",

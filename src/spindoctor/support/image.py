@@ -506,7 +506,7 @@ def filter_downsample(arr: NDArrayFloatType, amt_y: int, amt_x: int) -> NDArrayF
         .reshape(ny, nx, amt_x * amt_y)
         .mean(axis=2)
     )
-    return cast(NDArrayFloatType, ret)
+    return ret
 
 
 def gaussian_blur_cov(img: NDArrayFloatType, sigma: NDArrayFloatType) -> NDArrayFloatType:

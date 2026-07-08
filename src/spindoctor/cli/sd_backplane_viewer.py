@@ -121,11 +121,11 @@ def _apply_stretch_gamma(image: np.ndarray, black: float, white: float, gamma: f
 
 def _rad_to_deg_if_units(name: str, units: str | None, arr: np.ndarray) -> np.ndarray:
     if units and units.lower() == 'rad':
-        return cast(np.ndarray, np.degrees(arr))
+        return np.degrees(arr)
     # Heuristic: some HDU names encode angle but BUNIT may be missing
     lower = name.lower()
     if any(k in lower for k in ('longitude', 'latitude', 'incidence', 'emission', 'phase')):
-        return cast(np.ndarray, np.degrees(arr))
+        return np.degrees(arr)
     return arr
 
 
