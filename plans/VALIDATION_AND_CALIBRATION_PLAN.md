@@ -1,18 +1,21 @@
-# RMS-NAV Remediation Plan
+# RMS-NAV Validation and Calibration Plan
 
 *A concrete, sequenced plan to close every issue raised in
-`SCIENTIST_REVIEW_CRITICAL.md`. Each workstream states the problem, the goal, the
-specific tasks (with the files involved), the acceptance criteria that define
-"closed," dependencies, and risk. A traceability matrix at the end shows each
-critical-report finding mapped to the workstream(s) that retire it.*
+`critiques/archive/SCIENTIST_REVIEW_CRITICAL_2026-06-19.md`. Each workstream states the problem, the
+goal, the specific tasks (with the files involved), the acceptance criteria that
+define "closed," dependencies, and risk. A traceability matrix at the end shows
+each critical-report finding mapped to the workstream(s) that retire it.*
 
 ---
 
-**Premise.** The core rewrite is complete as of phase 10; this plan is
-*calibration and validation*, not architecture change, so the validation effort
-targets stable code. There is **no fixed accuracy specification** — the goal is to
-characterize the best accuracy the system actually achieves, honestly and with its
-uncertainty, not to clear a numeric bar.
+**Premise.** The core rewrite architecture is stable (AUTONAV phases 0-9 plus the
+phase-10 hardening are merged); this plan is *calibration and validation*, not
+architecture change, so the validation effort targets stable code. The open
+phase-10 content — the curated image library, the confidence calibration, and the
+body-shape table — is exactly the WS-3/WS-5 territory below, sequenced against
+`plans/ROADMAP.md` sub-stream 1B. There is **no fixed accuracy specification** —
+the goal is to characterize the best accuracy the system actually achieves,
+honestly and with its uncertainty, not to clear a numeric bar.
 
 ## Guiding principles
 
@@ -42,6 +45,56 @@ uncertainty, not to clear a numeric bar.
 7. **Validation can fail.** It may reveal accuracy worse than hoped. With no spec
  to pass/fail against, a poor result is not a gate — but it feeds the algorithm
  workstreams (e.g. WS-10), it is not merely reported and shrugged off.
+
+---
+
+## Relationship to `plans/ROADMAP.md`
+
+`plans/ROADMAP.md` is the ordered plan of record across all open GitHub issues,
+organized as a Cassini-first pipeline build-out. This plan is its companion for
+the validation and calibration program: ROADMAP says *when* the calibration and
+library work runs (sub-stream 1B, then 2E for the other instruments); this plan
+says *how* and defines what "validated" and "calibrated" mean. Where the two
+overlap, the methodology here is authoritative and the issue ordering there is
+authoritative.
+
+**Two shared decisions, declared once:**
+
+- **Confidence-calibration methodology (binding for #173).** Confidence is
+  calibrated per WS-5: per-technique reliability diagrams against measured error
+  anchors (WS-1 per-technique covariance where identifiable, pairwise combined
+  covariance elsewhere, WS-2 sim recovery error where no multi-object cohort
+  exists), a monotonic calibration map, tiers defined by error percentiles, and
+  the calibration basis recorded per emitted value. Operator-assigned sidecar
+  tiers are plausibility cross-checks and regression expectations, never fit
+  targets.
+- **Library-size target (binding for #172 and WS-3).** One library, two stages:
+  the 49-image curated library (#172, playbook `plans/PHASE10_CURATION.md`) is
+  the first stage — it seeds regression baselines and the initial calibration
+  cohort; WS-3 then grows the same library to >=20 images per instrument, >=120
+  total, which is the size the WS-1 agreement study needs. The 49-image stage is
+  a milestone inside the WS-3 target, not a competing number.
+
+**Workstream-to-issue cross-map** (issues carry the trackable work; workstreams
+carry the methodology and acceptance criteria):
+
+| Workstream | GitHub issue(s) | Note |
+|---|---|---|
+| WS-0 / WS-1 / WS-1b / WS-2 / WS-17 | none yet | The validation program itself; file issues when scheduled. ROADMAP's 1C (#35) reports statistics from metadata and consumes WS-1's per-frame disagreement metric; it is not the agreement study. |
+| WS-3 | #172, #174 | 49-image stage first, then the >=120 target above. |
+| WS-4 | none yet | CI integration tiers. |
+| WS-5 | #173, #176 | #176 (constants into config) lands before calibration writes coefficients. |
+| WS-6 | none yet | Capability matrix. |
+| WS-7 | #60 | Titan: implement or scope out. |
+| WS-8 | #53, #67, #34 | PDS4 input + bundle generalization. |
+| WS-9 | #130, #176 | Constants and measured star SNR. |
+| WS-10 | #150, #128 | Limb bias root cause and redesign. |
+| WS-11 | none yet | Degenerate-rotation reporting. |
+| WS-12 | #93 | Instrument appendices. |
+| WS-13 | #153 | I/F realism ties into the sim calibration test layer. |
+| WS-14 | none yet | Remaining provenance fields (see WS-14 scope). |
+| WS-15 | #103, #134, #126 | Thread safety and performance. |
+| WS-18 | #28, #66 (partial) | End-product accuracy checks. |
 
 ---
 
@@ -286,7 +339,7 @@ the intra-body separation is valid **only on round, photometrically bland bodies
 irregular or high-contrast bodies are excluded from per-technique separation (their
 pairwise disagreement is still reported, flagged as shape-contaminated). The
 qualification gate is **not a judgment call**: derive it from the existing static
-body-shape table (`ellipsoid_residual_km`, `crater_scale_km`, `albedo_variation`),
+body-shape table (`ellipsoid_rms_residual_km`, `crater_scale_km`, `albedo_variation`),
 with explicit thresholds, so "round and bland enough" is a reproducible,
 data-sourced criterion. This shrinks the qualifying cohort further. WS-2's
 shape/photometric sweeps quantify the effect on the sim, but on a real frame it
@@ -425,6 +478,21 @@ checks the navigated offsets, WS-18 checks the assembled mosaic. They share the
 implementation (build it once, apply twice). *Blind spot:* error common to both
 frames (shared SPK / timing) cancels undetected, so this corroborates WS-1 and never
 substitutes for it.
+
+**Acceptance criteria.**
+- A reprojection-consistency harness exists that, given overlapping frames of one
+ body (or ring region), navigates each frame independently and reports the
+ body-fixed (lat/lon or radius/longitude) scatter of matched surface features,
+ with an uncertainty interval per sequence.
+- The published results cover at least one single-fiducial sequence per
+ instrument where the archive provides one (documented as absent where it does
+ not), binned by resolution, and state the shared-SPK/timing blind spot
+ alongside every number.
+- Sequences whose scatter exceeds the combined reported per-frame σ beyond the
+ expected rate are flagged and fed into WS-1/WS-10 as inputs, not dropped.
+- WS-18's mosaic seam check consumes the same implementation (asserted by a
+ shared-module test), so the two checks cannot drift apart.
+
 **Dependencies:** WS-3. Shares implementation with WS-18. **Risk:** medium.
 
 ### WS-2: De-circularize the simulator AND prove it realistic (primary accuracy instrument)
@@ -555,22 +623,28 @@ trusted.
 
 ### WS-3: Expand the real-image regression cohort
 **Closes:** "real-image regression rests on ~13 hand-blessed images."
+**Tracked by:** #172 (the 49-image first stage; playbook
+`plans/PHASE10_CURATION.md`) and #174 (integration tests + baselines); this
+workstream then carries the growth beyond that stage.
 
 **Tasks.**
-- Grow `tests/integration/image_library/` from the current ~13 sidecars to a
- documented target (e.g. ≥20 per instrument, ≥120 total) spanning the geometry
+- Complete the 49-image curated stage (#172), then grow
+ `tests/integration/image_library/` to the target of **≥20 per instrument, ≥120
+ total** — the size the WS-1 agreement study needs — spanning the geometry
  taxonomy already present (full-FOV body, partial overflow, below-resolution,
  high-phase terminator, multi-body, ring curved/flat, ring+body, star-dominated,
  faint stars, scattered light, negative cases).
-- Write the empty `image_library/README.txt`: sidecar schema, curation workflow,
- blessing/re-blessing procedure, and the ground-truth provenance for each entry.
+- Expand `image_library/README.md` (currently a minimal schema/registry note)
+ with the curation workflow, blessing/re-blessing procedure, and the
+ ground-truth provenance for each entry.
 - Add explicit **negative/failure cases** (unnavigable frames) and assert the
  system fails cleanly with the right status reason.
 
 **Acceptance criteria.**
-- Cohort size and per-category coverage meet the documented targets.
-- `README.txt` documents schema + curation; every sidecar records its
- ground-truth source.
+- Cohort size and per-category coverage meet the documented targets (49-image
+ stage first, then ≥20 per instrument / ≥120 total).
+- `README.md` documents schema + curation + blessing + provenance; every sidecar
+ records its ground-truth source.
 
 **Dependencies:** feeds WS-1, WS-7. **Risk:** low.
 
@@ -605,10 +679,17 @@ provisioning in CI is the hard part; a cached fixture bundle is the mitigation.
 
 ### WS-5: Calibrate (or quarantine) confidence and tiers
 **Closes:** "ships a confidence it admits is meaningless."
+**Tracked by:** #173 (the calibration itself — this workstream defines its
+methodology, binding per the ROADMAP-relationship section above) and #176
+(constants into config, which lands before calibration writes coefficients).
+The curated library's operator-assigned `confidence_tier` labels serve as
+plausibility cross-checks and regression expectations for the calibrated
+output; they are never fit targets.
 
 **Problem.** `confidence`/`confidence_tier` are emitted per image but the sigmoid
-coefficients and tiers are hand-tuned to the circular simulator
-(`nav_technique/confidence*.py`, `confidence_config.py`).
+coefficients and tiers are uncalibrated defaults
+(`nav_technique/confidence*.py`, `confidence_config.py`,
+`config_510_techniques.yaml`).
 
 **Real-data anchor.** There is no per-frame "achieved pixel error" on real images
 (no external truth). The anchors are, in order of strength: per-technique covariance
@@ -666,8 +747,8 @@ techniques' covariances are mis-scaled (feeds WS-9).
 ## Phase 3 — Close the capability gaps (or scope them out honestly)
 
 ### WS-6: Reconcile claims with reality (capability matrix)
-**Closes:** "unfinished rewrite wearing a finished manual," doc/`CLAUDE.md`
-contradiction, forward-looking vapor.
+**Closes:** "unfinished rewrite wearing a finished manual," forward-looking
+vapor.
 
 **Tasks.**
 - Author a single **capability matrix** (instrument × {navigate, backplanes,
@@ -681,8 +762,6 @@ contradiction, forward-looking vapor.
  on curated set, absolute-attitude anchored, sim-only}. The matrix must carry the
  accuracy-evidence tier, not just feature existence, and link to the WS-1/WS-2
  reports for the numbers.
-- Reconcile the top-level `CLAUDE.md` ("star techniques pending") with the shipped
- star techniques; make `CLAUDE.md` and the user guide agree.
 - Sweep `docs/` for "placeholder / reserved for / pending / not yet implemented /
  future enhancement"; move each to a **roadmap** page or delete it. The user
  guide describes only what exists.
@@ -694,13 +773,13 @@ contradiction, forward-looking vapor.
 **Acceptance criteria.**
 - A capability matrix exists, is test-verified, and is the single referenced
  source for "what works."
-- `CLAUDE.md` and user guide are consistent.
 - No shipped config key is documented as functional unless the code consumes it.
 
 **Dependencies:** light coupling to WS-7/8. **Risk:** low.
 
 ### WS-7: Titan / atmospheric-body navigation — implement or scope out
 **Closes:** "Titan is a no-op."
+**Tracked by:** #60 (Implement Titan navigation) for the "implement" branch.
 
 **Problem.** `nav_model_titan.py:48` `to_features()` returns `[]`.
 
@@ -721,6 +800,8 @@ or Titan is unambiguously documented as not-supported and handled gracefully.
 
 ### WS-8: PDS4 — finish input and generalize bundle generation
 **Closes:** "PDS4 is largely fictional."
+**Tracked by:** #53 (bundle generator parent), #67 (cloud-aware bundles), #34
+(PDS4 Cassini input when the archive is available).
 
 **Problem.** `dataset_pds4.py` raises "not yet implemented" for all methods (no
 PDS4 input); `pds4_*` bundle hooks raise `NotImplementedError` for Voyager,
@@ -744,6 +825,7 @@ schema validation in CI.
 
 ### WS-12: Write the instrument appendices
 **Closes:** "the instrument appendices are empty."
+**Tracked by:** #93.
 
 **Tasks.** Replace the four placeholder appendices
 (`user_guide_appendix_{coiss,gossi,nhlorri,vgiss}.rst`) with real content:
@@ -764,12 +846,14 @@ artifacts, and the config knobs a user touches; none is a placeholder.
 ### WS-9: Justify, derive, or measure the magic constants
 **Closes:** "the numbers a scientist would quote are built on hand-picked
 constants," and the fabricated star SNR.
+**Tracked by:** #176 (constants into config) and #130 (star limiting-magnitude
+calibration).
 
 **Tasks.**
 - Inventory the load-bearing constants: `ROTATION_UNOBSERVABLE_VARIANCE = 1e15`
  (`nav_technique.py:46`), `DEFAULT_PINVH_RCOND = 1e-9` (`dt_fitting.py:94`),
- `SNR_REF = 8.0` / `SNR_FLOOR = 0.1` (`nav_model_stars.py:77-78`), blob noise
- thresholds, MAD factor, edge thresholds. For each: document its derivation,
+ `SNR_REF = 8.0` / `SNR_FLOOR = 0.1` (`nav_model/stars/nav_model_stars.py:77-78`),
+ blob noise thresholds, MAD factor, edge thresholds. For each: document its derivation,
  sensitivity, and the regime where it holds, next to its definition.
 - **Measure star SNR from the image, not the magnitude.** Replace (or cross-check)
  the synthesized `snr_eff = SNR_REF * 2.512**(mag_limit - vmag)` with a
@@ -788,11 +872,14 @@ medium — measured SNR may change star gating behavior and need re-tuning.
 
 ### WS-10: Fix the limb systematic bias
 **Closes:** "known systematic, no working fix."
+**Tracked by:** #150 (model-vs-image edge offset) and #128 (limb-navigation
+redesign).
 
 **Problem.** Limb bias ~0.09–0.13 px (≤0.25 px two-axis); the implemented
-gradient-ridge refine is shipped disabled (`config_510_techniques.yaml:237,343`)
-because it worsens limb fits. The current partial cancellation (integer DT
-quantization + Tukey) is accidental.
+gradient-ridge refine is disabled for the limb technique
+(`config_510_techniques.yaml:237`) because it worsens limb fits there, while the
+ring-edge technique runs with it enabled (`:354`). The limb's current partial
+cancellation (integer DT quantization + Tukey) is accidental.
 
 **Tasks.**
 - Root-cause why gradient-ridge refine degrades the limb (the model-side limb-edge
@@ -847,23 +934,26 @@ an "unobservable" flag, never a confident zero.
 non-separable regime; the metadata carries an explicit unobservable flag.
 **Dependencies:** none. **Risk:** low.
 
-### WS-14: Pin kernel and config provenance into output metadata
-**Closes:** "garbage in, garbage out, with no audit trail."
+### WS-14: Complete the provenance block in output metadata
+**Closes:** the remaining gaps in "garbage in, garbage out, with no audit trail."
 
-**Tasks.** Record in every `_metadata.json`: the SPICE kernels actually loaded
-(names + versions/hashes of CK/SPK/etc.), the resolved config (a hash plus the
-applied overrides), the `rms-nav` version (already from `setuptools_scm`), and the
-catalog versions used. Add a `nav_provenance` block via the curator
-(`nav_orchestrator/curator.py`). Document how to reproduce a result from the
-block.
+**Scope.** `nav_orchestrator/provenance.py` + the curator already pin the git
+SHA, the loaded SPICE-kernel list, the static-data YAML hashes, and the run
+timestamp into every `_metadata.json`. What remains:
+
+**Tasks.** Add to the provenance block: a hash of the *resolved* config plus the
+applied user/CLI overrides, and the star-catalog versions used. Document how to
+reproduce a result from the block, and add a reproduce-from-metadata test.
 
 **Acceptance criteria.** Any archived result can be traced to exact kernels,
-config, code version, and catalogs from its metadata alone; a reproduce-from-
-metadata test passes.
+config (including overrides), code version, and catalogs from its metadata
+alone; a reproduce-from-metadata test passes.
 **Dependencies:** none. **Risk:** low.
 
 ### WS-15: Performance and safe parallelism
 **Closes:** "it is slow," "the obvious fix for slowness is mined."
+**Tracked by:** #103 (thread-unsafe caches), #134 (oops precision mutated
+process-globally), #126 (rotation-pyramid cost).
 
 **Tasks.**
 - **Thread-safety:** remove the global `oops` precision mutation in
@@ -998,7 +1088,7 @@ common-mode/identifiability/bias caveats together are the honest result.
 | 9b | Reprojection thread-unsafe | WS-15 | per-thread state + proving concurrency test |
 | 9c | Sub-0.75° roll returned as spurious zero | WS-11 | unobservable flag, never confident zero |
 | 9d | I/F path noise-light/untested | WS-13 | realistic detector model + I/F in accuracy report |
-| 9e | No kernel/config provenance | WS-14 | `nav_provenance` block + reproduce-from-metadata test |
+| 9e | Provenance gaps (config-override hash, catalog versions) | WS-14 | provenance block carries resolved-config hash + catalog versions; reproduce-from-metadata test passes |
 | 10 | End products (backplanes/mosaics/PDS4) accuracy untested | WS-18 | backplanes match sim truth; mosaic seams quantified; PDS4 geometry matches source |
 
 ---
@@ -1047,7 +1137,7 @@ report, none silently assumed):**
  bland bodies. On topographic/high-contrast bodies the limb-center and disc-center
  differ by a real physical amount that inflates the apparent disagreement, so such
  bodies are excluded from per-technique separation by a reproducible gate derived
- from the static body-shape table (`ellipsoid_residual_km`, `crater_scale_km`,
+ from the static body-shape table (`ellipsoid_rms_residual_km`, `crater_scale_km`,
  `albedo_variation`), not a judgment call (WS-1 body-shape caveat).
 - **Identifiability** of the covariance system per bin (WS-0). The common limb+disc
  frame is *not* separable; per-technique covariance is reported only on qualified,

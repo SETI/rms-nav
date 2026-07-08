@@ -3667,20 +3667,20 @@ B. **Full ~55-body `config_220_body_shape.yaml` population** per
    PRs of ≤ 10 each for human reviewer spot-check.
 
 C. **Confidence-formula calibration.** `confidence = sigmoid(α₀ +
-   Σ αᵢ × xᵢ)`; fit via `scipy.optimize.curve_fit` against
-   `target_tier_midpoint` per image (`0.9` for `high`, `0.65` for
-   `medium`, `0.35` for `low`, `0.1` for `failed`). One-time fit;
-   check `config_510_techniques.yaml` in afterward; never updated
-   by per-image runs. The placeholder coefficients in
+   Σ αᵢ × xᵢ)`; the α coefficients are calibrated per WS-5 of
+   `plans/VALIDATION_AND_CALIBRATION_PLAN.md` (reliability diagrams
+   against measured error anchors, a monotonic calibration map,
+   tiers at stated error percentiles; the sidecar tier labels are
+   plausibility cross-checks, not fit targets). Check
+   `config_510_techniques.yaml` in afterward; never updated by
+   per-image runs. The uncalibrated default coefficients in
    `config_510_techniques.yaml` are arithmetically illustrative
    only — they are not claimed to produce the example confidence
    values stated alongside them; calibration replaces them.
-   PR review enforces no `PLACEHOLDER` markers ship to production
-   (per Part 0 §5). **Includes a mandatory per-instrument residual
-   audit** (`tier_target − sigmoid(α·x)` bucketed by
-   `sidecar.mission`); a systematically off mission triggers either
-   an upstream per-instrument input scale or a schema promotion to
-   per-instrument α vectors per Part 10 §"Confidence calibration".
+   Per-instrument behaviour is handled per WS-5: per-instrument
+   reliability diagrams once each instrument's library images are
+   in, with schema promotion to per-instrument α vectors only where
+   the diagrams demand it.
 
 D. **Regression baselines for every library image.**
    `tests/integration/baselines/<image_id>.json` populated per
@@ -6297,16 +6297,16 @@ CI test tolerance = `offset_uncertainty_px + 0.5 px` slack. Slack absorbs algori
 
 ### Confidence calibration
 
-The confidence formulas in each technique are tuned once on this library: the constants are chosen so that the per-tier mappings in Part 4 hold empirically on the library. This is the single calibration pass; after that, the constants are frozen. Re-calibration happens only if technique code changes substantially.
+The confidence formulas in each technique are calibrated once against this library per WS-5 of `plans/VALIDATION_AND_CALIBRATION_PLAN.md`: per-technique reliability diagrams against measured error anchors (WS-1 agreement covariances where identifiable, pairwise combined covariance elsewhere, WS-2 sim recovery error where no multi-object cohort exists), a monotonic calibration map, and tier boundaries at stated error percentiles. The sidecar `confidence_tier` labels are plausibility cross-checks on the calibrated output, not fit targets. This is the single calibration pass; after that, the constants are frozen. Re-calibration happens only if technique code changes substantially, via the same WS-5 procedure.
 
-The schema in `config_510_techniques.yaml` keys α coefficients **per technique, not per (technique × instrument)**. The design assumption is that the diagnostics feeding each formula (`ncc_peak`, `consistency_px`, `body_snr_inside_predicted_bbox`, `n_inliers`, `residual_scatter_px`, etc.) are already unitless or instrument-normalized — per-instrument physics lives upstream in `config_4N0_inst_*.yaml` (`signal_dn_to_image_unit_scale`, `mag_offset_table`, `expected_noise_dn`, `star_psf_sigma`, `fit_camera_rotation`). Per-instrument library oversubscription (≥1 image per class per instrument, ≈ 17 × 4 × ≥2 = 136+ images) is therefore deliberately **not** a Phase 10 requirement; the ~50-image budget plus the "all four missions appear *somewhere* in the library" rule is enough to constrain the unified fit.
+The schema in `config_510_techniques.yaml` keys α coefficients **per technique, not per (technique × instrument)**. The design assumption is that the diagnostics feeding each formula (`ncc_peak`, `consistency_px`, `body_snr_inside_predicted_bbox`, `n_inliers`, `residual_scatter_px`, etc.) are already unitless or instrument-normalized — per-instrument physics lives upstream in `config_4N0_inst_*.yaml` (`signal_dn_to_image_unit_scale`, `mag_offset_table`, `expected_noise_dn`, `star_psf_sigma`, `fit_camera_rotation`). Per-instrument library oversubscription (≥1 image per class per instrument, ≈ 17 × 4 × ≥2 = 136+ images) is therefore deliberately **not** a Phase 10 requirement; the ~50-image budget plus the "all four missions appear *somewhere* in the library" rule is enough to constrain the unified calibration, and the library later grows to the WS-3 target (≥20 per instrument, ≥120 total) for the agreement study.
 
-**Per-instrument residual audit (mandatory step in the calibration sweep).** Immediately after the curve-fit lands α coefficients, dump the residual `tier_target − sigmoid(α·x)` for every library image and bucket by `sidecar.mission`. If one mission's residual distribution is systematically off (|mean| > ~0.1 in tier-space, or visibly asymmetric vs the others) the unified-formula assumption is failing for that camera. Two responses, in order of preference:
+**Per-instrument check (mandatory step in the calibration).** WS-5's per-instrument reliability diagrams are the check that one α vector per technique serves every camera. If one mission's diagram is systematically mis-calibrated while the others are fine, the unified-formula assumption is failing for that camera. Two responses, in order of preference:
 
 1. **Find the offending diagnostic and add a per-instrument scale upstream** (the `signal_dn_to_image_unit_scale` pattern from Phase 10 §F — keep the formula global, fix the inputs). This is the cheaper change and the right answer when the per-instrument bias traces to a single diagnostic.
-2. **Promote the schema to per-instrument α vectors** (`techniques.<name>.<instrument>.{...}` with a fallback default block for instruments without enough images to fit). Heavier change: doubles or triples the number of coefficients to fit, and demands enough images per (technique × instrument) to constrain each block. Land this only if option 1 leaves the residuals unbalanced.
+2. **Promote the schema to per-instrument α vectors** (`techniques.<name>.<instrument>.{...}` with a fallback default block for instruments without enough images to fit). Heavier change: doubles or triples the number of coefficients to fit, and demands enough images per (technique × instrument) to constrain each block. Land this only if option 1 leaves the diagrams unbalanced.
 
-The per-instrument residual plot belongs in the same PR as the calibration sweep so the choice between (1) and (2) is reviewed together with the data that motivated it. This is what turns "we picked one α per technique" from an assumption into a checked invariant.
+The per-instrument reliability diagrams belong in the same PR as the calibration so the choice between (1) and (2) is reviewed together with the data that motivated it. This is what turns "we picked one α per technique" from an assumption into a checked invariant.
 
 ---
 

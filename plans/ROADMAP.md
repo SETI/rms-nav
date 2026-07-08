@@ -19,6 +19,16 @@ Ordering is by dependency, not just priority. Within a sub-stream, issues can
 largely run in parallel. This roadmap lists only the work on the path to the
 goal; issues that are out of scope for it are simply not included.
 
+**Companion plan.** `plans/VALIDATION_AND_CALIBRATION_PLAN.md` defines the
+validation and calibration program (workstreams WS-0 through WS-18): what
+"calibrated" means, how accuracy is characterized without external ground truth,
+and the acceptance criteria for every validation deliverable. This roadmap
+orders the issue-tracked work; where an issue overlaps a workstream, the
+methodology in that plan is binding (its "Relationship to `plans/ROADMAP.md`"
+section carries the workstream-to-issue cross-map and the two shared decisions:
+the WS-5 confidence-calibration methodology behind #173, and the two-stage
+library target behind #172).
+
 ---
 
 ## Phase 0 -- Foundation (unblocks everything)
@@ -56,6 +66,7 @@ rest of this work far easier.
 | [#125](https://github.com/SETI/rms-nav/issues/125) | BodyTerminatorNav mis-convergence has no per-technique signal | Important |
 | [#128](https://github.com/SETI/rms-nav/issues/128) | Architectural redesign: robust limb navigation across body types | Important |
 | [#179](https://github.com/SETI/rms-nav/issues/179) | Make the DT coarse-prior search robust against competing edges | Important |
+| [#191](https://github.com/SETI/rms-nav/issues/191) | DT coarse search: overlap-fraction score needs a minimum-support guard | Important |
 | [#145](https://github.com/SETI/rms-nav/issues/145) | Star-ring occlusion mis-classifies stars near ringlet edges/gaps | Important |
 | [#25](https://github.com/SETI/rms-nav/issues/25) | Implement blurring for high-resolution bodies | Important |
 | [#150](https://github.com/SETI/rms-nav/issues/150) | BodyLimbNav floor is a model-vs-image edge offset | Important |
@@ -67,11 +78,18 @@ rest of this work far easier.
 ### 1B. Calibration and the test library ("calibrated"), Cassini-scoped
 
 Strictly ordered; the library and calibration start Cassini-only and grow with
-later phases.
+later phases. Calibration follows the WS-5 methodology in
+`plans/VALIDATION_AND_CALIBRATION_PLAN.md`: reliability diagrams against
+measured error anchors, a monotonic calibration map, and tiers defined by error
+percentiles. The error anchors come from that plan's WS-0/WS-1/WS-2 validation
+program (cross-technique agreement on real frames plus the de-circularized
+simulator), which therefore runs alongside this sub-stream; the library built by
+#172 is the same cohort those workstreams consume (49 images first, growing to
+the WS-3 target of >=20 per instrument / >=120 total).
 
-1. [#172](https://github.com/SETI/rms-nav/issues/172) -- Build the curated test library with ground-truth offsets (seed with Cassini scenes). *(Playbook: `plans/PHASE10_CURATION.md`.)*
+1. [#172](https://github.com/SETI/rms-nav/issues/172) -- Build the curated test library with ground-truth offsets (seed with Cassini scenes). *(Playbook: `plans/PHASE10_CURATION.md`; first stage of WS-3.)*
 2. [#175](https://github.com/SETI/rms-nav/issues/175) -- Populate the per-body *consumed* shape / albedo-variation fields in `config_220` (Saturn system first). *(Ellipsoid radii and pose already come from oops/SPICE.)*
-3. [#173](https://github.com/SETI/rms-nav/issues/173) -- Calibrate confidence-formula alpha coefficients against the library. *(depends on #172, #176)*
+3. [#173](https://github.com/SETI/rms-nav/issues/173) -- Calibrate confidence per WS-5 against the library and the validation-program anchors. *(depends on #172, #176)*
 4. [#174](https://github.com/SETI/rms-nav/issues/174) -- Autonomous-nav integration tests + per-image regression baselines.
 
 ### 1C. Navigation statistics & accuracy checkpoint
@@ -88,7 +106,10 @@ fixed cheaply.
 > text+figure report (success/failure + reasons, technique/model usage, V/U
 > offset stats, body/ring usage, cross-technique agreement, and how well the
 > confidence levels predict accuracy -- a direct QA check on the #173
-> calibration). It runs for any partial/full day and any instrument.
+> calibration). It runs for any partial/full day and any instrument. It reports
+> statistics over the metadata (including the WS-1 per-frame disagreement
+> metric); the accuracy characterization itself is the
+> `plans/VALIDATION_AND_CALIBRATION_PLAN.md` WS-0/WS-1/WS-2 program.
 
 ### 1D. Reprojection
 
@@ -203,9 +224,10 @@ instrument-specific.
 
 ### 2E. Cross-instrument calibration
 
-- Extend [#173](https://github.com/SETI/rms-nav/issues/173) with per-instrument
-  alpha vectors and a per-mission residual audit once each instrument's library
-  images are in.
+- Extend [#173](https://github.com/SETI/rms-nav/issues/173) to the other three
+  missions once each instrument's library images are in: per-instrument
+  reliability diagrams and calibration maps per WS-5, with per-instrument tier
+  boundaries where the error percentiles differ.
 - Extend [#130](https://github.com/SETI/rms-nav/issues/130) (limiting magnitudes)
   and [#93](https://github.com/SETI/rms-nav/issues/93) (instrument appendices) to
   the other three missions.
@@ -230,6 +252,15 @@ Schedule after the multi-instrument pipeline is solid.
 | [#107](https://github.com/SETI/rms-nav/issues/107) | Repo with a backplane reader / example programs |
 | [#34](https://github.com/SETI/rms-nav/issues/34) | Support the PDS4 version of Cassini ISS (when archive is available) |
 | [#84](https://github.com/SETI/rms-nav/issues/84) | Fix simulated ring edges and gaps |
+| [#194](https://github.com/SETI/rms-nav/issues/194) | Sim: bodies in a combined scene share one crater seed / shape-cache key |
+| [#195](https://github.com/SETI/rms-nav/issues/195) | Sim: crater vs no-crater shaders use divergent illumination conventions |
+| [#196](https://github.com/SETI/rms-nav/issues/196) | Sim: `render_stars`/`render_bodies` dead public API leaking cached mutables |
+| [#197](https://github.com/SETI/rms-nav/issues/197) | Sim: inventory bbox uses max axis for both image axes |
+| [#198](https://github.com/SETI/rms-nav/issues/198) | Sim: impossible ring eccentricity silently clamped |
+
+*(#194 and #195 rise in priority if they surface during the
+`plans/VALIDATION_AND_CALIBRATION_PLAN.md` WS-2 simulator-realism work, where the
+simulator is the accuracy instrument.)*
 
 ---
 
@@ -241,6 +272,8 @@ Quality work that improves robustness; can proceed alongside the phases above.
 |---|---|
 | [#65](https://github.com/SETI/rms-nav/issues/65) | Harden code and implement new exception class |
 | [#104](https://github.com/SETI/rms-nav/issues/104) | Replace broad `except Exception` control-flow |
+| [#192](https://github.com/SETI/rms-nav/issues/192) | Ensemble small-angle bound: bare assert swallowed by orchestrator sandboxes |
+| [#193](https://github.com/SETI/rms-nav/issues/193) | Document or unify rotation-combine weighting (info[2,2] only) |
 | [#103](https://github.com/SETI/rms-nav/issues/103) | Guard/document thread-unsafe module-level caches |
 | [#98](https://github.com/SETI/rms-nav/issues/98) | Consolidate parallel instrument registries |
 | [#97](https://github.com/SETI/rms-nav/issues/97) | Split oversized modules exceeding the 1000-line limit |
