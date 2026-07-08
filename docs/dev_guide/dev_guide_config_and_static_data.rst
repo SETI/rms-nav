@@ -22,11 +22,12 @@ access. The stack is, in order (later files override earlier ones for the same k
 1. The bundled ``src/spindoctor/config_files/*.yaml`` files, sorted by filename. The
    3-digit numeric prefix is the merge order; the file groups are documented
    under :ref:`config-file-layout` below.
-2. ``nav_default_config.yaml`` in the current working directory (if present),
-   for per-checkout personal defaults.
-3. Any files passed via ``--config-file PATH`` on the CLI (repeatable; each
-   merges in order).
-4. The handful of CLI flags that map to config keys (``--pds3-holdings-root``,
+2. Exactly one of: any files passed via ``--config-file PATH`` on the CLI
+   (repeatable; each merges in order), or -- only when no ``--config-file`` is
+   given -- ``nav_default_config.yaml`` in the current working directory (if
+   present), for per-checkout personal defaults. Passing ``--config-file``
+   replaces the personal-defaults file rather than merging on top of it.
+3. The handful of CLI flags that map to config keys (``--pds3-holdings-root``,
    ``--nav-results-root``, etc.) override the corresponding ``environment``
    block entry.
 
@@ -223,7 +224,7 @@ Static-data files
 
 - ``config_220_body_shape.yaml`` populates ``config.body_shape`` — per-body
   radii, ellipsoid residuals, albedo, crater scale; consumed by
-  :func:`~spindoctor.nav_model.body_shape.shape_for_body` and from there by every
+  :func:`~spindoctor.nav_model.body_shape.load_body_shape` and from there by every
   body :class:`~spindoctor.nav_technique.nav_technique.NavTechnique`'s covariance
   and reliability formula. See
   :doc:`dev_guide_navigation_models_body`.

@@ -471,6 +471,15 @@ These JSON files contain the navigation results, including:
 * Technique-specific metadata
 * Timestamps
 
+.. note::
+
+   The ``confidence`` values and ``confidence_rank`` tiers are not yet
+   calibrated against measured navigation error and must not be read as
+   probabilities; they order results by internal fit quality only.  The
+   ``confidence_provisional: true`` field in every ``_metadata.json``
+   marks this and will remain true until the confidence-calibration
+   workstream lands.
+
 Summary PNG Files (``*_summary.png``)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -669,7 +678,7 @@ to bring each catalog position into the spacecraft frame at observation
 time, and emits one feature per usable star.
 
 **Catalog precedence.**  Catalogs are searched in the order configured
-in ``config_03_stars.yaml`` under ``stars.catalogs`` (default
+in ``config_030_stars.yaml`` under ``stars.catalogs`` (default
 ``[ucac4, tycho2, ybsc]``).  Stars present in more than one catalog are
 deduplicated using the RA / DEC and V-magnitude thresholds in the same
 file.
@@ -695,7 +704,7 @@ with a ``BODY:`` or ``RING:`` conflict string and excluded from
 matching.  Body intercepts win over ring intercepts.
 
 **Configuration.**  Most user-tunable parameters live in
-``config_03_stars.yaml``:
+``config_030_stars.yaml``:
 
 .. list-table::
    :header-rows: 1
@@ -754,7 +763,7 @@ quantities drive the per-vertex polyline sigmas and the BODY_BLOB
 emission threshold.  For bodies absent from the table a conservative
 generic-icy-moon profile is used.
 
-**Configuration.**  ``config_04_bodies.yaml`` exposes:
+**Configuration.**  ``config_040_bodies.yaml`` exposes:
 
 .. list-table::
    :header-rows: 1
@@ -783,7 +792,7 @@ Ring Navigation Model
 
 The ring navigation model generates theoretical brightness profiles
 for planetary ring edges and emits one feature per surviving edge.
-Two top-level options in ``config_05_rings.yaml`` control whether
+Two top-level options in ``config_050_rings.yaml`` control whether
 ring pixels in shadow are excluded from the model before navigation.
 
 For each surviving ring feature the model emits one of:
@@ -797,7 +806,9 @@ For each surviving ring feature the model emits one of:
   surviving polyline compresses radially below 5 px (the edges are
   not separable at the image scale).
 
-Per-edge feature definitions live in ``config_2X_<planet>_rings.yaml``
+Per-edge feature definitions live in the per-planet ring files
+(``config_300_jupiter_rings.yaml``, ``config_310_saturn_rings.yaml``,
+``config_320_uranus_rings.yaml``, ``config_330_neptune_rings.yaml``)
 under ``rings.ring_features.<PLANET>.features``.  See "Ring YAML
 configuration" in the developer guide for the full schema.
 

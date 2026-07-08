@@ -18,7 +18,7 @@ renders a body from operator-supplied ellipsoid parameters instead of SPICE pred
 classes share the silhouette / annotation helpers on
 :class:`~spindoctor.nav_model.nav_model_body_base.NavModelBodyBase`. Per-body shape, albedo, and SPICE
 ephemeris-residual quantities feed in from
-:func:`~spindoctor.nav_model.body_shape.shape_for_body`, which overlays an operator-curated YAML on top
+:func:`~spindoctor.nav_model.body_shape.load_body_shape`, which overlays an operator-curated YAML on top
 of a hard-coded :data:`~spindoctor.nav_model.body_shape.BODY_SHAPE_TABLE` and a
 :data:`~spindoctor.nav_model.body_shape.DEFAULT_BODY_SHAPE` fallback.
 
@@ -277,7 +277,7 @@ parameters live under ``bodies`` in ``src/spindoctor/config_files/config_040_bod
 by the model itself plus its annotation helpers and the reprojection pipeline); per-body
 shape, albedo, and SPK-residual values live under ``body_shape`` in
 ``src/spindoctor/config_files/config_220_body_shape.yaml`` (consumed via the
-:func:`~spindoctor.nav_model.body_shape.shape_for_body` lookup chain). Module-level Python
+:func:`~spindoctor.nav_model.body_shape.load_body_shape` lookup chain). Module-level Python
 constants in :mod:`spindoctor.nav_model.nav_model_body` set the emission-gate thresholds that are
 not exposed to YAML.
 
@@ -459,7 +459,7 @@ Source files:
   :data:`~spindoctor.nav_model.body_shape.BODY_SHAPE_TABLE`,
   :data:`~spindoctor.nav_model.body_shape.DEFAULT_BODY_SHAPE`,
   :func:`~spindoctor.nav_model.body_shape.load_body_shape`, and
-  :func:`~spindoctor.nav_model.body_shape.shape_for_body`.
+  :func:`~spindoctor.nav_model.body_shape.load_body_shape`.
 
 Public class :class:`~spindoctor.nav_model.nav_model_body.NavModelBody`, base
 :class:`~spindoctor.nav_model.nav_model_body_base.NavModelBodyBase`. The class registers itself in
@@ -509,7 +509,7 @@ covariance and emission gates:
   (``regular`` / ``irregular`` / ``highly_irregular`` / ``unknown``); used in human-readable
   logs and reviewer-facing diagnostics.
 
-The lookup chain is :func:`~spindoctor.nav_model.body_shape.shape_for_body`, which calls
+The lookup chain is :func:`~spindoctor.nav_model.body_shape.load_body_shape`, which calls
 :func:`~spindoctor.nav_model.body_shape.load_body_shape` and returns the merged
 :class:`~spindoctor.nav_model.body_shape.BodyShape`. Priority order:
 
@@ -579,7 +579,7 @@ Call path traced through
    pixels are counted to compute ``visible_lit_fraction`` and ``overflow_fraction``.
 6. :meth:`~spindoctor.nav_model.nav_model_body.NavModelBody.to_features` resolves the per-body
    :class:`~spindoctor.nav_model.body_shape.BodyShape` via
-   :func:`~spindoctor.nav_model.body_shape.shape_for_body` and computes the limb-uncertainty
+   :func:`~spindoctor.nav_model.body_shape.load_body_shape` and computes the limb-uncertainty
    scalar. Three branches follow, in order:
 
    - When the limb polyline survived and its uncertainty is at or below

@@ -8,6 +8,11 @@ spindoctor.config
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: spindoctor.config.config_helper
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: spindoctor.config.logger
    :members:
    :undoc-members:

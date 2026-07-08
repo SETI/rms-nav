@@ -178,8 +178,9 @@ enumerating the dataset locally:
 - `sd_offset_cloud_tasks` — navigation offsets
 - `sd_backplanes_cloud_tasks` — backplane generation
 - `sd_create_bundle_cloud_tasks` — PDS4 bundle labels pass
-- `sd_mosaic_rings_cloud_tasks` / `sd_mosaic_body_cloud_tasks` —
-  mosaic reprojection pass (mosaic combination is run separately via
+- `sd_mosaic_cloud_tasks` — mosaic reprojection pass; a single worker
+  handles both ring and body tasks, with the mode carried in each task
+  payload (mosaic combination is run separately via
   `sd_mosaic <mode> --skip-reproject`)
 
 These workers accept only the environment flags needed to locate configuration
@@ -193,7 +194,7 @@ per-feature user guides document the JSON schema each worker expects:
   [Navigation user guide](https://rms-spindoctor.readthedocs.io/en/latest/user_guide/user_guide_navigation.html)
 - `sd_backplanes_cloud_tasks`:
   [Backplanes user guide](https://rms-spindoctor.readthedocs.io/en/latest/user_guide/user_guide_backplanes.html)
-- `sd_mosaic_rings_cloud_tasks` / `sd_mosaic_body_cloud_tasks`:
+- `sd_mosaic_cloud_tasks`:
   [Reprojection user guide](https://rms-spindoctor.readthedocs.io/en/latest/user_guide/user_guide_reprojection.html)
 
 ## Documentation
