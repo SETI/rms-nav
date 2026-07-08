@@ -1,14 +1,14 @@
-nav.config
-==========
+spindoctor.config
+=================
 
-.. automodule:: nav.config
+.. automodule:: spindoctor.config
 
-.. automodule:: nav.config.config
+.. automodule:: spindoctor.config.config
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.config.logger
+.. automodule:: spindoctor.config.logger
    :members:
    :undoc-members:
    :show-inheritance:

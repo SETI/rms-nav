@@ -66,8 +66,8 @@ Command-Line Interfaces
 
 Two main programs support bundle generation:
 
-* ``nav_create_bundle`` (local/CLI) — supports both labels and summary passes
-* ``nav_create_bundle_cloud_tasks`` (Cloud Tasks) — parallel processing for labels pass
+* ``sd_create_bundle`` (local/CLI) — supports both labels and summary passes
+* ``sd_create_bundle_cloud_tasks`` (Cloud Tasks) — parallel processing for labels pass
 
 Labels Pass
 -----------
@@ -79,7 +79,7 @@ Basic Usage
 
 .. code-block:: bash
 
-   nav_create_bundle labels DATASET_NAME [options]
+   sd_create_bundle labels DATASET_NAME [options]
 
 Where ``DATASET_NAME`` is one of the supported dataset names (see Navigation User Guide).
 
@@ -115,7 +115,7 @@ Process a single Cassini image to generate bundle files:
 
 .. code-block:: bash
 
-   nav_create_bundle labels coiss_saturn N1234567890 \
+   sd_create_bundle labels coiss_saturn N1234567890 \
      --nav-results-root /data/nav/results \
      --backplane-results-root /data/nav/backplanes \
      --bundle-results-root /data/nav/bundle
@@ -124,7 +124,7 @@ Process all images in a volume range:
 
 .. code-block:: bash
 
-   nav_create_bundle labels coiss_saturn \
+   sd_create_bundle labels coiss_saturn \
      --volumes COISS_2001 --first-image-num 1454000000 --last-image-num 1454999999 \
      --nav-results-root /data/nav/results \
      --backplane-results-root /data/nav/backplanes \
@@ -133,13 +133,13 @@ Process all images in a volume range:
 Cloud Tasks Variant
 ^^^^^^^^^^^^^^^^^^^
 
-Queue-driven processing for the labels pass is supported by ``nav_create_bundle_cloud_tasks``.
+Queue-driven processing for the labels pass is supported by ``sd_create_bundle_cloud_tasks``.
 This variant reads tasks from a queue and processes each batch of files. It accepts the
 same environment options used to derive configuration and results roots.
 
 .. code-block:: bash
 
-   nav_create_bundle_cloud_tasks \
+   sd_create_bundle_cloud_tasks \
      --config-file /path/to/config.yaml \
      --nav-results-root /data/nav/results \
      --backplane-results-root /data/nav/backplanes \
@@ -167,7 +167,7 @@ Basic Usage
 
 .. code-block:: bash
 
-   nav_create_bundle summary DATASET_NAME [options]
+   sd_create_bundle summary DATASET_NAME [options]
 
 Command-Line Arguments
 ^^^^^^^^^^^^^^^^^^^^^^
@@ -187,7 +187,7 @@ Generate collection and global index files for a completed bundle:
 
 .. code-block:: bash
 
-   nav_create_bundle summary coiss_saturn \
+   sd_create_bundle summary coiss_saturn \
      --bundle-results-root /data/nav/bundle
 
 Inputs and Outputs
@@ -278,7 +278,7 @@ Configuration Options
 ---------------------
 
 * ``template_dir``: Name or absolute path to the template directory. If just a name, it
-  is resolved relative to ``src/pds4/templates/`` in the ``rms-nav`` package.
+  is resolved relative to ``src/spindoctor/cli/pds4/templates/`` in the ``rms-spindoctor`` package.
   If an absolute path, it is used as-is.
 
 * ``bundle_name``: Name of the bundle directory (e.g., ``cassini_iss_saturn_backplanes_rsfrench2027``).
@@ -298,7 +298,7 @@ then configuration files.
 Templates
 =========
 
-PDS4 labels are generated using templates from the ``src/pds4/templates/`` directory.
+PDS4 labels are generated using templates from the ``src/spindoctor/cli/pds4/templates/`` directory.
 Each dataset has its own template directory containing:
 
 * ``data.lblx``: Template for individual backplane data product labels
@@ -340,14 +340,14 @@ Typical workflow for generating a complete PDS4 bundle:
 
    .. code-block:: bash
 
-      nav_offset coiss_saturn --volumes COISS_2001 \
+      sd_offset coiss_saturn --volumes COISS_2001 \
         --nav-results-root /data/nav/results
 
 2. **Run Backplanes Pass**: Generate backplane FITS files and metadata
 
    .. code-block:: bash
 
-      nav_backplanes coiss_saturn --volumes COISS_2001 \
+      sd_backplanes coiss_saturn --volumes COISS_2001 \
         --nav-results-root /data/nav/results \
         --backplane-results-root /data/nav/backplanes
 
@@ -355,7 +355,7 @@ Typical workflow for generating a complete PDS4 bundle:
 
    .. code-block:: bash
 
-      nav_create_bundle labels coiss_saturn --volumes COISS_2001 \
+      sd_create_bundle labels coiss_saturn --volumes COISS_2001 \
         --nav-results-root /data/nav/results \
         --backplane-results-root /data/nav/backplanes \
         --bundle-results-root /data/nav/bundle
@@ -364,7 +364,7 @@ Typical workflow for generating a complete PDS4 bundle:
 
    .. code-block:: bash
 
-      nav_create_bundle_cloud_tasks \
+      sd_create_bundle_cloud_tasks \
         --nav-results-root /data/nav/results \
         --backplane-results-root /data/nav/backplanes \
         --bundle-results-root /data/nav/bundle
@@ -373,7 +373,7 @@ Typical workflow for generating a complete PDS4 bundle:
 
    .. code-block:: bash
 
-      nav_create_bundle summary coiss_saturn \
+      sd_create_bundle summary coiss_saturn \
         --bundle-results-root /data/nav/bundle
 
 Troubleshooting

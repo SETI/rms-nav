@@ -5,19 +5,19 @@ Star Unique Match (StarUniqueMatchNav)
 Overview
 ========
 
-:class:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav` is the pass-1
+:class:`~spindoctor.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav` is the pass-1
 brightness-margin-gated 1-star or 2-star unique-match technique. When the predictable
 catalog cohort has exactly one (or two) stars whose predicted SNR is at least a configured
 magnitude brighter than every other predictable star in the field, the technique searches a
 small window around each prediction, takes the brightest peak above a noise threshold, and
 reports the implied translation (1-star path) or the implied similarity transform (2-star
 path). It runs without a prior — its job is to seed the pass-2
-:class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav` on scenes where the SPICE
+:class:`~spindoctor.nav_technique.nav_technique_star_refine.StarRefineNav` on scenes where the SPICE
 pointing error is small enough that the brightest predictable star sits inside the
 per-instrument search window.
 
 Feasibility passes when at least one usable
-:data:`~nav.feature.feature_type.NavFeatureType.STAR` feature is in the input set;
+:data:`~spindoctor.feature.feature_type.NavFeatureType.STAR` feature is in the input set;
 feasibility fails when none are usable (every predictable star is occluded by a body
 silhouette or ring annulus).
 
@@ -57,7 +57,7 @@ applied) marks the result spurious.
 
 The 1-star path reports the per-star residual (observed centroid minus predicted position)
 as the translation. The reported covariance is the per-feature Cramer-Rao lower bound from
-:attr:`~nav.feature.feature.NavFeature.position_cov_px`. Rotation is unobservable on a
+:attr:`~spindoctor.feature.feature.NavFeature.position_cov_px`. Rotation is unobservable on a
 single point match.
 
 2-star path
@@ -82,7 +82,7 @@ The 1-star path cannot self-check (a single observation has nothing to validate 
 the technique applies a post-sigmoid cap of ``one_star_confidence_cap`` (default 0.7). The
 2-star path can validate the assignment via the per-correspondence residual, so its cap is
 ``two_star_confidence_cap`` (default 0.8). The caps are applied by the technique itself,
-not by the YAML spec's :attr:`~nav.nav_technique.confidence.ConfidenceSpec.hard_cap`, so the
+not by the YAML spec's :attr:`~spindoctor.nav_technique.confidence.ConfidenceSpec.hard_cap`, so the
 two paths can share a single spec.
 
 Restrictions and assumptions
@@ -97,7 +97,7 @@ Restrictions and assumptions
   (default 30 px). When the per-instrument pointing envelope exceeds this width, the
   brightest peak in the window is not the matched detection and the technique reports a
   wrong centroid — this is the regime where the multi-star
-  :class:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav` triplet
+  :class:`~spindoctor.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav` triplet
   matcher takes over.
 - Both paths assume the matched detection is unsaturated. A saturated star whose centroid
   has been clipped will produce a biased centroid; in practice the brightest catalog stars
@@ -109,19 +109,19 @@ Sources of uncertainty
 ----------------------
 
 The 1-star covariance is the per-feature CRLB floor from
-:attr:`~nav.feature.feature.NavFeature.position_cov_px`. The 2-star covariance is the
+:attr:`~spindoctor.feature.feature.NavFeature.position_cov_px`. The 2-star covariance is the
 per-feature CRLB floor for translation plus the analytic rotation variance derived above.
 When the converged offset sits within the at-edge tolerance of any axis bound, or when the
 2-star rotation parameter is at the configured fraction of its cap, the result is flagged
-:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and the hard-zero
+:attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and the hard-zero
 gate forces confidence to zero. When the per-star residual exceeds ``max_residual_px`` the
-result is flagged :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious`.
+result is flagged :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious`.
 
 Configuration
 =============
 
 All numeric tunables for this technique live in ``techniques.StarUniqueMatchNav.tuning`` in
-``src/nav/config_files/config_510_techniques.yaml``.
+``src/spindoctor/config_files/config_510_techniques.yaml``.
 
 - ``brightness_margin_to_next_catalog_star_mag`` — float, default ``1.5`` (mag). Minimum
   magnitude difference between the brightest predictable star and the next-brightest for
@@ -143,17 +143,17 @@ All numeric tunables for this technique live in ``techniques.StarUniqueMatchNav.
   assignment.
 - ``at_edge_tolerance_px`` — float, default ``1.0`` px. A converged offset whose absolute
   distance from any search-window axis bound falls within this tolerance is flagged
-  :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge`.
+  :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge`.
 - ``rotation_at_edge_fraction`` — float, default ``0.95`` (dimensionless). Fraction of
-  :attr:`~nav.nav_orchestrator.nav_context.NavContext.max_rotation_deg` at which the
+  :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.max_rotation_deg` at which the
   converged 2-star rotation magnitude trips
-  :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge`. Only the 2-star
+  :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge`. Only the 2-star
   Procrustes path uses it; the 1-star path always reports rotation as unobservable.
 
 Per-instrument overrides
 ------------------------
 
-Per-instrument YAML files in ``src/nav/config_files/config_4N0_inst_*.yaml`` do not
+Per-instrument YAML files in ``src/spindoctor/config_files/config_4N0_inst_*.yaml`` do not
 override any of these knobs.
 
 Confidence formula
@@ -162,24 +162,24 @@ Confidence formula
 The technique reports a calibrated confidence in :math:`[0, 1]` produced by the shared
 sigmoid combination; see :doc:`dev_guide_techniques_confidence`. Spec is
 ``techniques.StarUniqueMatchNav``; consumes attributes off
-:class:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics` plus
-:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and
-:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious`.
+:class:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics` plus
+:attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and
+:attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious`.
 
-- :attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.predicted_snr` —
+- :attr:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics.predicted_snr` —
   alpha = 1.0, offset = 0.0, divisor = 20.0, cap at 1.0. Predicted SNR of the brightest
   catalog star. Higher SNR shrinks the centroid CRLB; saturates near SNR=20.
-- :attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.brightness_margin_mag`
+- :attr:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics.brightness_margin_mag`
   — alpha = 1.0, offset = 1.5, divisor = 1.5, cap at 1.0. Magnitude margin to the
   next-brightest predictable star in the extfov. Below the 1.5 mag floor the technique
   short-circuits before reaching the formula; above the floor, additional margin earns
   confidence up to a 1.5 mag span.
-- :attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.residual_px` —
+- :attr:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics.residual_px` —
   alpha = -1.0, offset = 0.0, divisor = 2.0, no cap. Detection-vs-prediction residual.
   Larger residuals pull confidence down.
 
-Hard-zero gate: :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and
-:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces
+Hard-zero gate: :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and
+:attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces
 confidence to zero before the sigmoid evaluates. The constant baseline is
 :math:`\alpha_{0} = -1.0`. No post-sigmoid ``hard_cap`` is applied at the spec level; the
 per-mode caps above are applied by the technique itself.
@@ -189,52 +189,52 @@ Implementation
 
 Source files:
 
-- ``src/nav/nav_technique/nav_technique_star_unique_match.py`` —
-  :class:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav` and the
+- ``src/spindoctor/nav_technique/nav_technique_star_unique_match.py`` —
+  :class:`~spindoctor.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav` and the
   brightness-margin / 1-star / 2-star helpers.
-- ``src/nav/nav_technique/_star_helpers.py`` — package-private helpers ``usable_stars``,
+- ``src/spindoctor/nav_technique/_star_helpers.py`` — package-private helpers ``usable_stars``,
   ``local_centroid``, ``predicted_snr``, ``predicted_vu``, ``brightness_margin_mag``, and
   ``similarity_transform_fit``.
-- ``src/nav/nav_technique/confidence.py`` — sigmoid-combination evaluator; documented at
+- ``src/spindoctor/nav_technique/confidence.py`` — sigmoid-combination evaluator; documented at
   :doc:`dev_guide_techniques_confidence`.
-- ``src/nav/nav_technique/diagnostics.py`` —
-  :class:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics`; documented at
+- ``src/spindoctor/nav_technique/diagnostics.py`` —
+  :class:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics`; documented at
   :doc:`dev_guide_techniques_diagnostics`.
 
-Public class :class:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav`,
-base :class:`~nav.nav_technique.nav_technique.NavTechnique`. Self-registers via
+Public class :class:`~spindoctor.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav`,
+base :class:`~spindoctor.nav_technique.nav_technique.NavTechnique`. Self-registers via
 ``__init_subclass__``.
 
 Class attributes:
 
-- :attr:`~nav.nav_technique.nav_technique.NavTechnique.name` — ``'StarUniqueMatchNav'``.
-- :attr:`~nav.nav_technique.nav_technique.NavTechnique.accepts_feature_types` —
+- :attr:`~spindoctor.nav_technique.nav_technique.NavTechnique.name` — ``'StarUniqueMatchNav'``.
+- :attr:`~spindoctor.nav_technique.nav_technique.NavTechnique.accepts_feature_types` —
   ``frozenset({STAR})``.
-- :attr:`~nav.nav_technique.nav_technique.NavTechnique.requires_prior` — ``False``.
-- :attr:`~nav.nav_technique.nav_technique.NavTechnique.confidence_attributes` —
+- :attr:`~spindoctor.nav_technique.nav_technique.NavTechnique.requires_prior` — ``False``.
+- :attr:`~spindoctor.nav_technique.nav_technique.NavTechnique.confidence_attributes` —
   ``{'at_edge', 'spurious', 'predicted_snr', 'brightness_margin_mag', 'residual_px'}``.
 
 Public methods (autodocumented at :doc:`/api_reference/api_nav_technique`):
-:meth:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav.is_feasible`
+:meth:`~spindoctor.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav.is_feasible`
 and
-:meth:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav.navigate`.
+:meth:`~spindoctor.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav.navigate`.
 
 Diagnostics
 -----------
 
-:class:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics`:
+:class:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics`:
 
-- :attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.mode` —
+- :attr:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics.mode` —
   ``'one_star'`` or ``'two_star'``. Diagnostic only; the confidence formula does not
   consume strings, but the per-mode cap branches inside
-  :meth:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav.navigate`
+  :meth:`~spindoctor.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav.navigate`
   read it.
-- :attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.predicted_snr` —
+- :attr:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics.predicted_snr` —
   predicted SNR of the brightest catalog star. Consumed by the confidence formula.
-- :attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.brightness_margin_mag`
+- :attr:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics.brightness_margin_mag`
   — magnitude difference to the next-brightest unmatched catalog source predictable in
   extfov; ``+inf`` when no unmatched star exists. Consumed by the confidence formula.
-- :attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.residual_px` —
+- :attr:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics.residual_px` —
   detection-vs-prediction residual. Consumed by the confidence formula and by the
   spurious-detection gate.
 
@@ -242,7 +242,7 @@ Call path
 ---------
 
 Call path traced through
-:meth:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav.navigate`:
+:meth:`~spindoctor.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav.navigate`:
 
 1. Open a logged section. Filter the offered features down to ``usable_stars``
    (predictable and not occluded by a body silhouette or ring annulus).
@@ -253,7 +253,7 @@ Call path traced through
    - **2-star path eligible.**  When the brightest two stars each clear the margin against
      the third-brightest, run the 2-star branch. For each of the two stars, slice a
      ``search_window_px``-half-width window around its prediction in
-     :attr:`~nav.nav_orchestrator.nav_context.NavContext.image_ext` and call
+     :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.image_ext` and call
      ``local_centroid`` to extract the sub-pixel detection. When both detections clear
      the noise threshold, run a Procrustes / similarity refit via
      ``similarity_transform_fit`` to recover translation and rotation. When the
@@ -264,36 +264,36 @@ Call path traced through
      centroid, and report the per-star residual as the translation.
 
 4. Result-shape branches on the chosen path and
-   :attr:`~nav.nav_orchestrator.nav_context.NavContext.fit_camera_rotation`:
+   :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.fit_camera_rotation`:
 
    - **1-star, no rotation.**  (2, 2) CRLB covariance from
-     :attr:`~nav.feature.feature.NavFeature.position_cov_px`;
-     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.rotation_rad` and
-     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.sigma_rotation_rad` are
+     :attr:`~spindoctor.feature.feature.NavFeature.position_cov_px`;
+     :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.rotation_rad` and
+     :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.sigma_rotation_rad` are
      ``None``.
    - **1-star, rotation fit.**  Rank-deficient (3, 3) covariance via
-     :func:`~nav.nav_technique.nav_technique.embed_rotation_unobservable`;
-     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.rotation_rad` is
+     :func:`~spindoctor.nav_technique.nav_technique.embed_rotation_unobservable`;
+     :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.rotation_rad` is
      ``0.0`` and the sigma is the rotation-unobservable sentinel.
    - **2-star, no rotation.**  (2, 2) CRLB covariance from the average of the two stars'
-     :attr:`~nav.feature.feature.NavFeature.position_cov_px` floors.
+     :attr:`~spindoctor.feature.feature.NavFeature.position_cov_px` floors.
    - **2-star, rotation fit.**  Full (3, 3) covariance: the (2, 2) translation block is
      the per-axis CRLB average, the rotation diagonal is the analytic
      :math:`2 (\sigma_{v}^{2} + \sigma_{u}^{2}) / L^{2}` form derived from the catalog-pair
      separation :math:`L`.
-     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.rotation_rad` is the
+     :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.rotation_rad` is the
      Procrustes-fit angle and the sigma is the square root of the rotation diagonal.
 
 5. Apply the at-edge test against the search-window axis bounds and the rotation cap.
-6. Build a :class:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics`, evaluate the
-   confidence spec via :func:`~nav.nav_technique.confidence.evaluate_sigmoid_combination`,
+6. Build a :class:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics`, evaluate the
+   confidence spec via :func:`~spindoctor.nav_technique.confidence.evaluate_sigmoid_combination`,
    apply the per-mode cap (``one_star_confidence_cap`` or ``two_star_confidence_cap``)
    inside the technique itself, log the breakdown, and assemble the
-   :class:`~nav.nav_technique.technique_result.NavTechniqueResult`.
+   :class:`~spindoctor.nav_technique.technique_result.NavTechniqueResult`.
 
-The :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.feature_ids` field
+The :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.feature_ids` field
 preserves every consumed
-:attr:`~nav.feature.feature.NavFeature.feature_id` so the orchestrator's curator can
+:attr:`~spindoctor.feature.feature.NavFeature.feature_id` so the orchestrator's curator can
 attribute each match at audit time.
 
 Examples
@@ -302,13 +302,13 @@ Examples
 ``one_bright_star_no_body`` (Cassini ISS WAC, image ``W1449079117_1``)
     Single star (Vega) in an otherwise empty FOV. The stars model emits a single ``STAR``
     feature with a brightness margin of ``+inf`` to the (nonexistent) next-brightest.
-    :class:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav` runs the
+    :class:`~spindoctor.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav` runs the
     1-star path: a small search window around Vega's prediction returns the brightest peak
     above the noise threshold, the brightness-weighted moment recovers the centroid, and
     the per-star residual is reported as the translation. The 1-star post-sigmoid cap of
     0.7 holds the technique's confidence below 0.7 even when every term saturates.
     Operator-verified offset is :math:`(\Delta v, \Delta u) = (3.06, -0.02)` px. The
-    pass-2 :class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav` consumes
+    pass-2 :class:`~spindoctor.nav_technique.nav_technique_star_refine.StarRefineNav` consumes
     this prior and polishes it; see :doc:`dev_guide_techniques_star_refine`.
 
 ``two_bright_stars_no_body`` (Cassini ISS / NHLORRI star-calibration scene class)
@@ -322,18 +322,18 @@ Examples
     closed-form 3x3 from the similarity-transform residual scatter; the post-sigmoid
     cap is the 2-star ``two_star_confidence_cap`` (default 0.85), allowing higher
     final confidence than the 1-star path. The
-    :attr:`~nav.nav_technique.diagnostics.StarUniqueMatchDiagnostics.mode` field on the
+    :attr:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics.mode` field on the
     diagnostics carries ``'two_star'`` so the curator surfaces which path fired.
 
 ``faint_stars`` (Galileo SSI / Voyager outer-leg scene class)
     Every catalog star in the FOV is fainter than the per-observation limiting magnitude
     ``obs.star_max_usable_vmag()``. The stars model emits no ``STAR`` features that clear
     the magnitude gate, so the orchestrator does not offer any usable star feature to
-    :meth:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav.is_feasible`.
+    :meth:`~spindoctor.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav.is_feasible`.
     Feasibility fails with reason ``no_usable_stars`` and the technique skips its
-    :meth:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav.navigate`
+    :meth:`~spindoctor.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav.navigate`
     pass entirely. The orchestrator surfaces the infeasibility on the per-image
-    :class:`~nav.nav_orchestrator.nav_result.NavResult` via the per-technique
-    :attr:`~nav.nav_technique.feasibility.NavFeasibilityReport.reason` so the curator
+    :class:`~spindoctor.nav_orchestrator.nav_result.NavResult` via the per-technique
+    :attr:`~spindoctor.nav_technique.feasibility.NavFeasibilityReport.reason` so the curator
     records which gate fired without the technique having to allocate a result
     record.

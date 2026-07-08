@@ -2,7 +2,7 @@
 Reprojection Mosaicing
 =======================
 
-The ``nav.reproj`` package provides utilities for reprojecting planetary body
+The ``spindoctor.reproj`` package provides utilities for reprojecting planetary body
 and ring images onto regular grids and accumulating multiple reprojected images
 into mosaics.
 
@@ -11,22 +11,22 @@ Overview
 
 Two main classes are provided:
 
-- :class:`~nav.reproj.bodies.BodyMosaic` -- reprojects body images onto a
+- :class:`~spindoctor.reproj.bodies.BodyMosaic` -- reprojects body images onto a
   latitude/longitude grid and accumulates them into a mosaic.
-- :class:`~nav.reproj.rings.RingMosaic` -- reprojects ring images onto a
+- :class:`~spindoctor.reproj.rings.RingMosaic` -- reprojects ring images onto a
   radius/longitude grid and accumulates them with true sparse longitude storage.
 
-A standalone utility function :func:`~nav.reproj.cartographic_model.create_cartographic_model`
+A standalone utility function :func:`~spindoctor.reproj.cartographic_model.create_cartographic_model`
 projects a body mosaic back onto image coordinates for use as a navigation
 correlation model.
 
 Body reprojection and mosaicing
 --------------------------------
 
-Create a :class:`~nav.reproj.bodies.BodyMosaic` once per body, then feed it
+Create a :class:`~spindoctor.reproj.bodies.BodyMosaic` once per body, then feed it
 observations::
 
-    from nav.reproj import BodyMosaic
+    from spindoctor.reproj import BodyMosaic
 
     mosaic = BodyMosaic(body_name='MIMAS')
     for obs in observations:
@@ -69,7 +69,7 @@ arrays (resolution, phase, emission, incidence) use ``float32`` (via the default
 ``metadata_dtype``), and the ``time`` field is always stored as ``float64``
 regardless of the ``metadata_dtype`` argument to ``BodyMosaic``::
 
-    from nav.reproj import BodyMosaic
+    from spindoctor.reproj import BodyMosaic
     import numpy as np
 
     # Defaults: image in float64, geometry in float32, time in float64
@@ -90,45 +90,45 @@ Photometric correction
 
 Pass a photometric model to apply a correction during reprojection::
 
-    from nav.reproj import BodyMosaic, LambertModel
+    from spindoctor.reproj import BodyMosaic, LambertModel
 
     mosaic = BodyMosaic(
         body_name='MIMAS',
         photometric_model=LambertModel(),
     )
 
-Available models are :class:`~nav.reproj.photometric_model.LambertModel`,
-:class:`~nav.reproj.photometric_model.LommelSeeligerModel`, and
-:class:`~nav.reproj.photometric_model.MinnaertModel`. When ``photometric_model``
+Available models are :class:`~spindoctor.reproj.photometric_model.LambertModel`,
+:class:`~spindoctor.reproj.photometric_model.LommelSeeligerModel`, and
+:class:`~spindoctor.reproj.photometric_model.MinnaertModel`. When ``photometric_model``
 is ``None`` (the default), pixel values are reprojected without correction.
 
 Pixel conflict resolution
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
 ``BodyMosaic`` uses the ``BEST_RESOLUTION`` strategy (see
-:class:`~nav.reproj.bodies.BodyMosaicMergeStrategy`): empty (masked) pixels are
+:class:`~spindoctor.reproj.bodies.BodyMosaicMergeStrategy`): empty (masked) pixels are
 filled unconditionally and existing data is replaced only when the new
 observation has strictly better effective resolution (lower km/pixel).
 
 Geometry limits when adding
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-:meth:`~nav.reproj.bodies.BodyMosaic.reproject` applies ``max_incidence``,
+:meth:`~spindoctor.reproj.bodies.BodyMosaic.reproject` applies ``max_incidence``,
 ``max_emission``, and ``max_resolution`` from the mosaic constructor so saved
-per-image products stay within those bounds. :meth:`~nav.reproj.bodies.BodyMosaic.add`
+per-image products stay within those bounds. :meth:`~spindoctor.reproj.bodies.BodyMosaic.add`
 can apply the **same** limits again when merging saved
-:class:`~nav.reproj.bodies.BodyReprojResult` objects (for example after
+:class:`~spindoctor.reproj.bodies.BodyReprojResult` objects (for example after
 ``--skip-reproject``), and can optionally **override** them per call.
 
 Keyword-only arguments ``max_incidence``, ``max_emission``, and ``max_resolution``
-default to :data:`~nav.reproj.USE_MOSAIC_LIMITS`, meaning each limit matches the
+default to :data:`~spindoctor.reproj.USE_MOSAIC_LIMITS`, meaning each limit matches the
 value given when the ``BodyMosaic`` was constructed. Pass a numeric value in
 **radians** (incidence/emission) or **km/pixel** (resolution) to use a
 different cutoff for that ``add()`` only; pass ``None`` to disable that cutoff
 for that call (pixels are still constrained by the merge strategy and valid
 ``repro.img`` mask).
 
-The ``nav_mosaic body`` CLI always passes these three arguments explicitly,
+The ``sd_mosaic body`` CLI always passes these three arguments explicitly,
 using the same ``--max-incidence``, ``--max-emission``, and ``--max-resolution``
 values as for reprojection (degrees / km/pixel on the CLI; incidence and
 emission are converted to radians before ``add()``).
@@ -143,28 +143,28 @@ correctly. The retrieval methods unwrap longitude automatically.
 Retrieval methods
 ^^^^^^^^^^^^^^^^^
 
-All retrieval methods return a :class:`~nav.reproj.bodies.BodyMosaicData`
+All retrieval methods return a :class:`~spindoctor.reproj.bodies.BodyMosaicData`
 frozen dataclass with masked arrays for image data, resolution, phase,
 emission, incidence, observation time and image-number metadata, plus
 per-contributing-image sub-solar and sub-observer longitudes and latitudes
 (see below):
 
-- :meth:`~nav.reproj.bodies.BodyMosaic.to_bounded` -- return the mosaic
+- :meth:`~spindoctor.reproj.bodies.BodyMosaic.to_bounded` -- return the mosaic
   clipped to the data bounds or a user-specified range.
-- :meth:`~nav.reproj.bodies.BodyMosaic.to_full` -- return the full
+- :meth:`~spindoctor.reproj.bodies.BodyMosaic.to_full` -- return the full
   -|pi|/2 to |pi|/2 x 0 to 2\ |pi| grid.
-- :attr:`~nav.reproj.bodies.BodyMosaic.bounds` -- the current (lat, lon)
+- :attr:`~spindoctor.reproj.bodies.BodyMosaic.bounds` -- the current (lat, lon)
   extents of accumulated data, or ``None`` if the mosaic is empty.
 
 Ring reprojection and mosaicing
 ---------------------------------
 
-:class:`~nav.reproj.rings.RingMosaic` works similarly but uses **sparse**
+:class:`~spindoctor.reproj.rings.RingMosaic` works similarly but uses **sparse**
 longitude storage: only longitude columns that contain at least one valid
 pixel are stored. This is memory-efficient for the common case where only a
 fraction of the ring plane is observed::
 
-    from nav.reproj import RingMosaic
+    from spindoctor.reproj import RingMosaic
 
     mosaic = RingMosaic('SATURN', radius_inner=70000, radius_outer=140000)
     for obs in observations:
@@ -180,10 +180,10 @@ Choosing dtypes (rings)
 ^^^^^^^^^^^^^^^^^^^^^^^
 
 The same ``image_dtype`` / ``metadata_dtype`` kwargs are available on
-:class:`~nav.reproj.rings.RingMosaic`::
+:class:`~spindoctor.reproj.rings.RingMosaic`::
 
     import numpy as np
-    from nav.reproj import RingMosaic
+    from spindoctor.reproj import RingMosaic
 
     mosaic = RingMosaic(
         'SATURN', radius_inner=70000, radius_outer=140000,
@@ -194,12 +194,12 @@ Orbit model
 ^^^^^^^^^^^
 
 The ring geometry (eccentricity, ring plane) is handled by
-:class:`~nav.reproj.ring_orbit_model.RingOrbitModel`. Pre-defined instances
+:class:`~spindoctor.reproj.ring_orbit_model.RingOrbitModel`. Pre-defined instances
 are available::
 
-    from nav.reproj import FRING_CORE, BRING_OUTER_EDGE
+    from spindoctor.reproj import FRING_CORE, BRING_OUTER_EDGE
 
-The :data:`~nav.reproj.ring_orbit_model.FRING_CORE` instance has
+The :data:`~spindoctor.reproj.ring_orbit_model.FRING_CORE` instance has
 ``name='F-RING-CORE-ALBERS-2007'`` and uses the Albers et al. 2012 Table 3
 Fit #2 elements; the ``2007`` suffix marks the epoch (2007-01-01T00:00:00Z)
 at which the co-rotating frame is anchored.
@@ -224,7 +224,7 @@ supplied:
 
 Examples::
 
-    from nav.reproj import RingMosaic, FRING_CORE
+    from spindoctor.reproj import RingMosaic, FRING_CORE
 
     # Inertial / absolute (no orbit model)
     mosaic_abs = RingMosaic('SATURN', radius_inner=70000, radius_outer=140000)
@@ -238,7 +238,7 @@ Examples::
 Pass a custom model via the ``orbit_model`` parameter::
 
     import math
-    from nav.reproj import RingMosaic, RingOrbitModel
+    from spindoctor.reproj import RingMosaic, RingOrbitModel
 
     my_orbit = RingOrbitModel(
         name='MY-RING',
@@ -255,7 +255,7 @@ Pass a custom model via the ``orbit_model`` parameter::
 Mosaic compatibility
 ^^^^^^^^^^^^^^^^^^^^
 
-:meth:`~nav.reproj.rings.RingMosaic.add` validates that the reprojection it
+:meth:`~spindoctor.reproj.rings.RingMosaic.add` validates that the reprojection it
 is being given was produced with the **same** orbit model and the **same**
 photometric model as the mosaic. Mixing settings would silently corrupt the
 mosaic because radii and longitudes carry different meanings under different
@@ -267,7 +267,7 @@ Merge strategy
 The ``merge_strategy`` parameter controls how longitude columns are updated
 when multiple observations overlap::
 
-    from nav.reproj import RingMosaic, RingMosaicMergeStrategy
+    from spindoctor.reproj import RingMosaic, RingMosaicMergeStrategy
 
     mosaic = RingMosaic(
         'SATURN', radius_inner=70000, radius_outer=140000,
@@ -283,21 +283,21 @@ when multiple observations overlap::
 Retrieval methods
 ^^^^^^^^^^^^^^^^^
 
-- :meth:`~nav.reproj.rings.RingMosaic.to_sparse` -- sparse storage (only
+- :meth:`~spindoctor.reproj.rings.RingMosaic.to_sparse` -- sparse storage (only
   present longitude columns). The ``longitude_antimask`` field marks present
   columns.
-- :meth:`~nav.reproj.rings.RingMosaic.to_bounded` -- dense array clipped to
+- :meth:`~spindoctor.reproj.rings.RingMosaic.to_bounded` -- dense array clipped to
   a longitude range.
-- :meth:`~nav.reproj.rings.RingMosaic.to_full` -- dense full 0 to 2\ |pi|
+- :meth:`~spindoctor.reproj.rings.RingMosaic.to_full` -- dense full 0 to 2\ |pi|
   longitude grid.
 
 Saving and loading
 ------------------
 
-All four result dataclasses (:class:`~nav.reproj.bodies.BodyMosaicData`,
-:class:`~nav.reproj.bodies.BodyReprojResult`,
-:class:`~nav.reproj.rings.RingMosaicData`,
-:class:`~nav.reproj.rings.RingReprojResult`) support ``save()`` and ``load()``
+All four result dataclasses (:class:`~spindoctor.reproj.bodies.BodyMosaicData`,
+:class:`~spindoctor.reproj.bodies.BodyReprojResult`,
+:class:`~spindoctor.reproj.rings.RingMosaicData`,
+:class:`~spindoctor.reproj.rings.RingReprojResult`) support ``save()`` and ``load()``
 methods. Two file formats are supported:
 
 - **npz** (NumPy archive, default) — format inferred from a ``.npz``
@@ -312,7 +312,7 @@ uploaded on ``save()``.
 
 Body mosaic examples::
 
-    from nav.reproj import BodyMosaic, BodyMosaicData
+    from spindoctor.reproj import BodyMosaic, BodyMosaicData
 
     data = mosaic.to_bounded()
 
@@ -328,7 +328,7 @@ Body mosaic examples::
 
 Body reprojection result::
 
-    from nav.reproj import BodyReprojResult
+    from spindoctor.reproj import BodyReprojResult
 
     result = mosaic.reproject(obs, image_name='N1234567890')
     result.save('reproj.npz')
@@ -337,7 +337,7 @@ Body reprojection result::
 Ring mosaic examples::
 
     import math
-    from nav.reproj import RingMosaicData
+    from spindoctor.reproj import RingMosaicData
 
     data = ring_mosaic.to_bounded(longitude_range=(0.0, math.pi))
     data.save('saturn_rings.npz')
@@ -345,7 +345,7 @@ Ring mosaic examples::
 
 Ring reprojection result::
 
-    from nav.reproj import RingReprojResult
+    from spindoctor.reproj import RingReprojResult
 
     result = ring_mosaic.reproject(obs, image_name='N1234567890')
     result.save('ring_reproj.fits')
@@ -359,34 +359,34 @@ that may have coerced dtypes.
 Image labels (reprojection and mosaic)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Each :class:`~nav.reproj.rings.RingReprojResult` and
-:class:`~nav.reproj.bodies.BodyReprojResult` carries an ``image_name`` string
+Each :class:`~spindoctor.reproj.rings.RingReprojResult` and
+:class:`~spindoctor.reproj.bodies.BodyReprojResult` carries an ``image_name`` string
 (typically the source image stem). The ``save()`` and ``load()`` methods
 preserve this value.
 
-Each :class:`~nav.reproj.rings.RingMosaicData` and
-:class:`~nav.reproj.bodies.BodyMosaicData` carries ``contributing_image_names``,
+Each :class:`~spindoctor.reproj.rings.RingMosaicData` and
+:class:`~spindoctor.reproj.bodies.BodyMosaicData` carries ``contributing_image_names``,
 a tuple of strings in the same order as the ``image_number`` indices stored in
 the mosaic (pixel value ``k`` refers to ``contributing_image_names[k]`` when
 ``k`` is in range). The tuple grows by one entry each time ``mosaic.add()``
 finishes incorporating a reprojection and advances the internal image counter.
 
-In Python, pass ``image_name=...`` to :meth:`~nav.reproj.rings.RingMosaic.reproject`
-and :meth:`~nav.reproj.bodies.BodyMosaic.reproject`. The ``nav_mosaic`` CLI
+In Python, pass ``image_name=...`` to :meth:`~spindoctor.reproj.rings.RingMosaic.reproject`
+and :meth:`~spindoctor.reproj.bodies.BodyMosaic.reproject`. The ``sd_mosaic`` CLI
 stores the dataset image stem per file by default; pass ``--image-name LABEL``
 to use the same label for every image in the run instead.
 
 Sub-solar and sub-observer geometry (body reprojection and mosaics)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-For bodies only, each :class:`~nav.reproj.bodies.BodyReprojResult` records the
+For bodies only, each :class:`~spindoctor.reproj.bodies.BodyReprojResult` records the
 sub-solar and sub-observer longitude and latitude on the body at the
 observation midtime, using the same ``latlon_type`` and ``lon_direction`` as
 the reprojection. Fields are ``sub_solar_lon``, ``sub_solar_lat``,
 ``sub_observer_lon``, and ``sub_observer_lat`` (all **radians**). They are
 written by ``save()`` / ``load()`` alongside the image and geometry arrays.
 
-Each :class:`~nav.reproj.bodies.BodyMosaicData` adds parallel **per-image**
+Each :class:`~spindoctor.reproj.bodies.BodyMosaicData` adds parallel **per-image**
 1-D ``float64`` arrays—``sub_solar_lon_per_image``,
 ``sub_solar_lat_per_image``, ``sub_observer_lon_per_image``, and
 ``sub_observer_lat_per_image``—with length equal to the number of contributing
@@ -397,7 +397,7 @@ Older mosaic or reprojection files that omit the sub-observer fields load with
 those values set to zero. Files that omit the per-image arrays load with empty
 arrays for those fields.
 
-The body mosaic viewer (:class:`~nav.ui.mosaic_viewer.body_window.BodyMosaicWindow`)
+The body mosaic viewer (:class:`~spindoctor.ui.mosaic_viewer.body_window.BodyMosaicWindow`)
 shows sub-solar and sub-observer longitude and latitude in degrees in the
 **Cursor Info** panel, indexed by the contributing image for the pixel under
 the cursor (or image index ``0`` for a single reprojection file).
@@ -408,7 +408,7 @@ Cartographic navigation model
 Once a body mosaic is built, it can be projected back onto image coordinates
 to produce a navigation model for correlation::
 
-    from nav.reproj import create_cartographic_model
+    from spindoctor.reproj import create_cartographic_model
 
     result = create_cartographic_model(
         mosaic.to_bounded(),
@@ -431,8 +431,8 @@ will be blurrier than the image.
 Command-line mosaic generation
 -------------------------------
 
-The ``nav_mosaic_rings`` and ``nav_mosaic_body`` commands (entry points into
-the single ``nav_mosaic`` program) reproject a dataset of images and combine
+The ``sd_mosaic_rings`` and ``sd_mosaic_body`` commands (entry points into
+the single ``sd_mosaic`` program) reproject a dataset of images and combine
 them into a mosaic using a two-pass workflow:
 
 1. **Reprojection pass** — for each image in the dataset, load the observation,
@@ -441,7 +441,7 @@ them into a mosaic using a two-pass workflow:
    set to that image's file stem, or to ``--image-name`` when that option is
    given), and save the result as
    ``<output-dir>/<prefix>_<body_or_planet>_<image_stem>_reproj.<fmt>`` (body
-   name for ``nav_mosaic body``, planet name for ``nav_mosaic rings``). Existing
+   name for ``sd_mosaic body``, planet name for ``sd_mosaic rings``). Existing
    files are skipped unless ``--overwrite`` is given, enabling interrupted runs
    to be resumed.
 
@@ -454,7 +454,7 @@ Either pass may be skipped with ``--skip-reproject`` / ``--skip-mosaic``.
 
 Ring mosaics quick example (absolute radii, no orbit model)::
 
-    nav_mosaic_rings coiss_saturn \
+    sd_mosaic_rings coiss_saturn \
         --volumes COISS_2001 \
         --pds3-holdings-root /data/pds3 \
         --nav-results-root /data/nav_results \
@@ -466,7 +466,7 @@ Ring mosaics quick example (absolute radii, no orbit model)::
 
 F ring mosaic example (offsets relative to the F ring core orbit)::
 
-    nav_mosaic_rings coiss_saturn \
+    sd_mosaic_rings coiss_saturn \
         --volumes COISS_2001 \
         --pds3-holdings-root /data/pds3 \
         --nav-results-root /data/nav_results \
@@ -479,7 +479,7 @@ F ring mosaic example (offsets relative to the F ring core orbit)::
 
 Body mosaics quick example::
 
-    nav_mosaic_body coiss_saturn \
+    sd_mosaic_body coiss_saturn \
         --volumes COISS_2001 \
         --pds3-holdings-root /data/pds3 \
         --nav-results-root /data/nav_results \
@@ -490,8 +490,8 @@ Body mosaics quick example::
 Offset application
 ^^^^^^^^^^^^^^^^^^
 
-When ``--nav-results-root`` is provided, ``nav_mosaic`` looks up a
-``_metadata.json`` file for each image (written by ``nav_offset``). If the
+When ``--nav-results-root`` is provided, ``sd_mosaic`` looks up a
+``_metadata.json`` file for each image (written by ``sd_offset``). If the
 file exists and has ``status == 'success'``, the stored ``(dv, du)`` offset is
 applied to the observation's FOV via ``oops.fov.OffsetFOV`` before reprojection.
 If the file is absent, invalid JSON, or has a non-success status, a warning is
@@ -514,7 +514,7 @@ If ``--prefix`` is empty (the default), the leading underscore is omitted.
 Cloud-tasks entry point
 ^^^^^^^^^^^^^^^^^^^^^^^
 
-Queue-driven reprojection is supported by ``nav_mosaic_cloud_tasks``. Each
+Queue-driven reprojection is supported by ``sd_mosaic_cloud_tasks``. Each
 task payload names one or more images, carries every per-task parameter
 (output directory, mosaic geometry, body/planet, etc.), and declares its
 ``mode`` (``"rings"`` or ``"body"``). A single worker process can therefore
@@ -531,8 +531,8 @@ scoped and shared across every task the worker handles:
 * ``--config-file PATH`` (may be repeated)
 * ``--nav-results-root PATH``
 
-All other parameters that the local ``nav_mosaic_rings`` /
-``nav_mosaic_body`` accept (``--output-dir``, ``--prefix``, ``--format``,
+All other parameters that the local ``sd_mosaic_rings`` /
+``sd_mosaic_body`` accept (``--output-dir``, ``--prefix``, ``--format``,
 ``--overwrite``, ``--image-name``, ``--no-write-output-files``, and the full
 ring-/body-mosaic configuration such as ``--planet``, ``--body-name``,
 ``--radius-inner``, ``--lat-resolution``, ``--photometric-model`` etc.) are
@@ -540,21 +540,21 @@ passed per-task inside the task JSON. Invoke the worker with:
 
 .. code-block:: bash
 
-   nav_mosaic_cloud_tasks [--config-file PATH] [--nav-results-root PATH]
+   sd_mosaic_cloud_tasks [--config-file PATH] [--nav-results-root PATH]
 
 To build a ready-to-load task-queue JSON file from the local driver without
 running any reprojection, use ``--output-cloud-tasks-file``:
 
 .. code-block:: bash
 
-   nav_mosaic_rings coiss_saturn \
+   sd_mosaic_rings coiss_saturn \
        --volumes COISS_2001 \
        --planet SATURN \
        --radius-inner 70000 --radius-outer 140000 \
        --output-dir /data/mosaics --prefix saturn_main_rings_2004 \
        --output-cloud-tasks-file rings_tasks.json
 
-   nav_mosaic_body coiss_saturn \
+   sd_mosaic_body coiss_saturn \
        --volumes COISS_2001 \
        --body-name MIMAS \
        --output-dir /data/mosaics --prefix mimas_2004 \
@@ -598,14 +598,14 @@ Fields:
   first image's label filename, and the enumeration index.
 * ``data.mode``: ``"rings"`` or ``"body"``. Selects the mosaic factory and
   reprojection function for this task. Because the mode is per-task, a single
-  ``nav_mosaic_cloud_tasks`` worker can drain a queue that contains both ring
+  ``sd_mosaic_cloud_tasks`` worker can drain a queue that contains both ring
   and body tasks.
 * ``data.dataset_name``: one of the supported dataset names.
 * ``data.arguments``: a dictionary whose keys are the argparse destinations
   produced by the local driver's Output group plus either the body- or
   ring-mosaic group (``body_name`` / ``lat_resolution`` / ... for body mode;
   ``planet`` / ``radius_inner`` / ``radius_outer`` / ... for rings). Every
-  non-flow-control argument of the local ``nav_mosaic`` driver is copied
+  non-flow-control argument of the local ``sd_mosaic`` driver is copied
   here verbatim by ``--output-cloud-tasks-file`` so that the worker can
   reconstruct the exact same reprojection configuration.
 * ``data.files``: one or more file descriptors with required fields
@@ -618,7 +618,7 @@ same mosaic-configuration flags (so the expected output file names match):
 
 .. code-block:: bash
 
-   nav_mosaic_rings coiss_saturn \
+   sd_mosaic_rings coiss_saturn \
        --skip-reproject \
        --volumes COISS_2001 \
        --planet SATURN \
@@ -654,7 +654,7 @@ Common options reference
      - Skip the mosaic-building pass.
    * - ``--nav-results-root DIR``
      - ``None``
-     - Root written by ``nav_offset``; enables offset application.
+     - Root written by ``sd_offset``; enables offset application.
    * - ``--dry-run``
      - ``False``
      - Print what would be done without writing files.
@@ -772,7 +772,7 @@ All reprojections added to the same mosaic must agree on the orbit model
 (and on the photometric model). ``RingMosaic.add()`` raises
 :class:`ValueError` on a mismatch.
 
-The pre-defined :data:`~nav.reproj.ring_orbit_model.FRING_CORE` instance is
+The pre-defined :data:`~spindoctor.reproj.ring_orbit_model.FRING_CORE` instance is
 named ``F-RING-CORE-ALBERS-2007`` (Albers et al. 2012 Table 3 Fit #2; the
 ``2007`` indicates the co-rotation epoch, 2007-01-01T00:00:00Z).
 
@@ -843,19 +843,19 @@ Body-specific options
 Command-line mosaic display
 ----------------------------
 
-The ``nav_mosaic_display_rings`` and ``nav_mosaic_display_body`` commands
-(entry points into the single ``nav_mosaic_display`` program) open an
+The ``sd_mosaic_display_rings`` and ``sd_mosaic_display_body`` commands
+(entry points into the single ``sd_mosaic_display`` program) open an
 interactive PyQt6 window for browsing reprojection and mosaic files. Multiple
 files can be passed; the window shows one file at a time and includes
 **Prev / Next** navigation buttons.
 
 Ring display quick example::
 
-    nav_mosaic_display_rings /data/mosaics/fring_2004_mosaic.fits
+    sd_mosaic_display_rings /data/mosaics/fring_2004_mosaic.fits
 
 Body display quick example::
 
-    nav_mosaic_display_body /data/mosaics/mimas_2004_MIMAS_N1234567890_reproj.fits
+    sd_mosaic_display_body /data/mosaics/mimas_2004_MIMAS_N1234567890_reproj.fits
 
 Display options
 ^^^^^^^^^^^^^^^
@@ -939,11 +939,11 @@ and **Show meridians** checkboxes in the Overlays panel and the **Latitude axis
 ticks** / **Longitude axis ticks** checkboxes in the header control the overlay
 in every mode.
 
-The ``nav_mosaic_display_body`` command accepts a ``--projection`` flag to
+The ``sd_mosaic_display_body`` command accepts a ``--projection`` flag to
 start in a non-default mode::
 
-    nav_mosaic_display_body --projection sphere3d my_mosaic.npz
-    nav_mosaic_display_body --projection polar_n  polar_mosaic.npz
+    sd_mosaic_display_body --projection sphere3d my_mosaic.npz
+    sd_mosaic_display_body --projection polar_n  polar_mosaic.npz
 
 Valid values for ``--projection`` are ``rect``, ``polar_n``, ``polar_s``,
 ``mollweide``, and ``sphere3d``.

@@ -1,1 +1,1 @@
-"""Tests for the ``src/main`` CLI / GUI driver scripts."""
+"""Tests for the ``spindoctor.cli`` CLI / GUI driver scripts."""

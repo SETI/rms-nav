@@ -2,7 +2,7 @@
 PDS4 Bundle Generation
 =======================
 
-The :mod:`pds4` package builds PDS4-compliant bundles from RMS-NAV's per-image
+The :mod:`pds4` package builds PDS4-compliant bundles from SpinDoctor's per-image
 navigation metadata and per-pixel backplanes. A bundle is the deliverable the
 Ring-Moon Systems node ships to PDS for archive: one collection of data labels
 (one per image), one collection of browse PNGs, plus the auxiliary collections
@@ -16,12 +16,12 @@ chapter is the developer's reference.
 Pipeline overview
 =================
 
-Bundle generation is a two-phase process driven by ``nav_create_bundle``:
+Bundle generation is a two-phase process driven by ``sd_create_bundle``:
 
 1. **Per-image data labels.**  For each image in the input batch,
-   :func:`~pds4.bundle_data.generate_bundle_data_files` reads the
-   ``_metadata.json`` produced by ``nav_offset`` and the
-   ``_backplane_metadata.json`` produced by ``nav_backplanes``, populates a
+   :func:`~spindoctor.cli.pds4.bundle_data.generate_bundle_data_files` reads the
+   ``_metadata.json`` produced by ``sd_offset`` and the
+   ``_backplane_metadata.json`` produced by ``sd_backplanes``, populates a
    ``pdstemplate`` rendering context with per-image template variables, and
    writes the matching ``<image>_backplanes.lblx`` file (plus a copy of the
    browse PNG into the bundle's ``browse/`` tree). The backplane FITS file
@@ -29,13 +29,13 @@ Bundle generation is a two-phase process driven by ``nav_create_bundle``:
    the backplane root into the bundle's ``data/`` tree.
 
 2. **Collections + bundle assembly.**  After every per-image data label is in
-   place, :func:`~pds4.collections.generate_collection_files` walks the
+   place, :func:`~spindoctor.cli.pds4.collections.generate_collection_files` walks the
    bundle's ``data/`` tree, collects every ``_backplanes.lblx`` it finds,
    sorts them by image name, writes the
    ``collection_data.csv`` inventory and the matching
    ``collection_data.lblx`` label, and renders the bundle's other collection
    labels (context, browse, document, xml_schema) plus the top-level
-   ``bundle.lblx``.  :func:`~pds4.collections.generate_global_index_files`
+   ``bundle.lblx``.  :func:`~spindoctor.cli.pds4.collections.generate_global_index_files`
    writes the per-bundle ``global_index_bodies.lblx`` and
    ``global_index_rings.lblx`` summary tables.
 
@@ -43,12 +43,12 @@ The driver runs phase 1 once per image (fan-out friendly — each image is
 independent) and phase 2 once at the end (sequential — needs every per-image
 label in place before it can build the inventory).
 
-Driver: ``nav_create_bundle``
+Driver: ``sd_create_bundle``
 =============================
 
-``nav_create_bundle`` (``src/main/nav_create_bundle.py``) is the per-image
+``sd_create_bundle`` (``src/spindoctor/cli/sd_create_bundle.py``) is the per-image
 phase-1 entry point. Like the other CLIs it takes a ``DATASET_NAME``, the
-selection flags from the matching :class:`~nav.dataset.dataset.DataSet`
+selection flags from the matching :class:`~spindoctor.dataset.dataset.DataSet`
 subclass, the standard environment options (``--config-file``,
 ``--pds3-holdings-root``, ``--bundle-results-root``,
 ``--nav-results-root``, ``--backplane-results-root``), and walks every
@@ -56,55 +56,55 @@ selected image.
 
 A separate ``--collections`` flag triggers phase 2 (collection + bundle
 labels) without re-rendering per-image data labels. Operators typically run
-``nav_create_bundle DATASET --image-list FOO --no-collections`` in parallel
+``sd_create_bundle DATASET --image-list FOO --no-collections`` in parallel
 across many shards, then once with ``--collections`` to assemble the bundle.
 
-Cloud-tasks variant ``nav_create_bundle_cloud_tasks`` reads the same task JSON
-schema as ``nav_offset_cloud_tasks`` (see :doc:`/user_guide/user_guide_navigation`) so the
+Cloud-tasks variant ``sd_create_bundle_cloud_tasks`` reads the same task JSON
+schema as ``sd_offset_cloud_tasks`` (see :doc:`/user_guide/user_guide_navigation`) so the
 same task queue can drive offset + backplane + bundle in three queue passes.
 
 Per-dataset extension points
 ============================
 
 PDS4 bundle generation is parameterized by the
-:class:`~nav.dataset.dataset.DataSet` subclass. The base class declares the
+:class:`~spindoctor.dataset.dataset.DataSet` subclass. The base class declares the
 extension points as non-abstract methods that raise ``NotImplementedError`` —
 a dataset that does not need PDS4 support can simply not override them, and
 the bundle drivers refuse to run.
 
 The full extension-point set:
 
-- :meth:`~nav.dataset.dataset.DataSet.pds4_bundle_template_dir` — absolute
+- :meth:`~spindoctor.dataset.dataset.DataSet.pds4_bundle_template_dir` — absolute
   path to the directory of ``pdstemplate`` ``.lblx`` files this dataset uses.
   Lookups consult ``config.pds4.<dataset_name>.template_dir`` first; relative
-  paths resolve under ``src/pds4/templates/``. The reference Cassini ISS
+  paths resolve under ``src/spindoctor/cli/pds4/templates/``. The reference Cassini ISS
   Saturn dataset uses ``cassini_iss_saturn_1.0/``.
-- :meth:`~nav.dataset.dataset.DataSet.pds4_bundle_name` — the bundle's
+- :meth:`~spindoctor.dataset.dataset.DataSet.pds4_bundle_name` — the bundle's
   external name (for example
   ``cassini_iss_saturn_backplanes_rsfrench2027``). The bundle root is
   ``<bundle_results_root>/<bundle_name>/``. Lookups consult
   ``config.pds4.<dataset_name>.bundle_name``.
-- :meth:`~nav.dataset.dataset.DataSet.pds4_bundle_path_for_image` — maps an
+- :meth:`~spindoctor.dataset.dataset.DataSet.pds4_bundle_path_for_image` — maps an
   image name to its position in the bundle's ``data/`` directory tree
   (typically a sharded path like ``1234xxxxxx/123456xxxx`` to keep per-leaf
   cardinality manageable on filesystems that struggle with very wide
   directories).
-- :meth:`~nav.dataset.dataset.DataSet.pds4_path_stub` — full per-image stub
+- :meth:`~spindoctor.dataset.dataset.DataSet.pds4_path_stub` — full per-image stub
   including the image name (e.g.
   ``1234xxxxxx/123456xxxx/1234567890w``). Builds the per-file paths under
   ``data/`` and ``browse/``.
-- :meth:`~nav.dataset.dataset.DataSet.pds4_image_name_to_browse_lid` /
-  :meth:`~nav.dataset.dataset.DataSet.pds4_image_name_to_browse_lidvid`
+- :meth:`~spindoctor.dataset.dataset.DataSet.pds4_image_name_to_browse_lid` /
+  :meth:`~spindoctor.dataset.dataset.DataSet.pds4_image_name_to_browse_lidvid`
   — emit the browse-product Logical Identifier (LID) and LID + version
   (LIDVID) for the given image name. LIDs follow the PDS4 namespace
   convention ``urn:nasa:pds:<bundle>:browse:<image>``.
-- :meth:`~nav.dataset.dataset.DataSet.pds4_image_name_to_data_lid` /
-  :meth:`~nav.dataset.dataset.DataSet.pds4_image_name_to_data_lidvid` —
+- :meth:`~spindoctor.dataset.dataset.DataSet.pds4_image_name_to_data_lid` /
+  :meth:`~spindoctor.dataset.dataset.DataSet.pds4_image_name_to_data_lidvid` —
   same, for the data product (the backplane ``.lblx`` + ``.fits`` pair).
-- :meth:`~nav.dataset.dataset.DataSet.pds4_template_variables` — returns a
+- :meth:`~spindoctor.dataset.dataset.DataSet.pds4_template_variables` — returns a
   dict of template variables consumed by the per-image
   ``data.lblx`` / ``browse.lblx`` templates. Inputs are the
-  :class:`~nav.dataset.dataset.ImageFile`, the navigation metadata dict
+  :class:`~spindoctor.dataset.dataset.ImageFile`, the navigation metadata dict
   parsed from ``<image>_metadata.json``, and the backplane metadata dict
   parsed from ``<image>_backplane_metadata.json``. The dataset is free to
   derive any per-image quantity the templates reference (target body,
@@ -112,16 +112,16 @@ The full extension-point set:
   per-backplane min/max/units, and so on).
 
 Reference implementation:
-:class:`~nav.dataset.dataset_pds3_cassini_iss.DataSetPDS3CassiniISS`
+:class:`~spindoctor.dataset.dataset_pds3_cassini_iss.DataSetPDS3CassiniISS`
 overrides every PDS4 hook above and serves as the canonical worked example.
-Voyager ISS (:class:`~nav.dataset.dataset_pds3_voyager_iss.DataSetPDS3VoyagerISS`)
+Voyager ISS (:class:`~spindoctor.dataset.dataset_pds3_voyager_iss.DataSetPDS3VoyagerISS`)
 mirrors the same shape for an instrument with different image-naming
 conventions.
 
 The ``pds4`` config block
 -------------------------
 
-``src/nav/config_files/config_950_pds4.yaml`` populates ``config.pds4`` with
+``src/spindoctor/config_files/config_950_pds4.yaml`` populates ``config.pds4`` with
 per-dataset bundle metadata: the bundle name, the template directory name,
 the LID namespace prefix, and any per-bundle template defaults the
 ``pds4_template_variables`` hook draws from. See
@@ -161,13 +161,13 @@ dictionary and the destination path.
 Template tree
 -------------
 
-Each dataset's template directory under ``src/pds4/templates/`` contains the
+Each dataset's template directory under ``src/spindoctor/cli/pds4/templates/`` contains the
 shipping ``.lblx`` files. The Cassini-ISS-Saturn-1.0 set is the reference
 layout:
 
 ::
 
-   src/pds4/templates/cassini_iss_saturn_1.0/
+   src/spindoctor/cli/pds4/templates/cassini_iss_saturn_1.0/
      bundle.lblx                              # top-level bundle label
      readme.txt                               # bundle-level README
      data.lblx                                # per-image backplane data label
@@ -234,16 +234,16 @@ Adding PDS4 support to a new dataset
 The end-to-end checklist:
 
 1. Override every ``pds4_*`` method on the new
-   :class:`~nav.dataset.dataset.DataSet` subclass. Use
-   :class:`~nav.dataset.dataset_pds3_cassini_iss.DataSetPDS3CassiniISS` as
+   :class:`~spindoctor.dataset.dataset.DataSet` subclass. Use
+   :class:`~spindoctor.dataset.dataset_pds3_cassini_iss.DataSetPDS3CassiniISS` as
    the reference implementation. The methods that absolutely must work
-   are :meth:`~nav.dataset.dataset.DataSet.pds4_bundle_template_dir`,
-   :meth:`~nav.dataset.dataset.DataSet.pds4_bundle_name`,
-   :meth:`~nav.dataset.dataset.DataSet.pds4_path_stub`, the four
+   are :meth:`~spindoctor.dataset.dataset.DataSet.pds4_bundle_template_dir`,
+   :meth:`~spindoctor.dataset.dataset.DataSet.pds4_bundle_name`,
+   :meth:`~spindoctor.dataset.dataset.DataSet.pds4_path_stub`, the four
    ``pds4_image_name_to_*_lid[vid]`` methods, and
-   :meth:`~nav.dataset.dataset.DataSet.pds4_template_variables`.
+   :meth:`~spindoctor.dataset.dataset.DataSet.pds4_template_variables`.
 2. Drop a per-dataset template directory under
-   ``src/pds4/templates/<dataset>_<version>/`` containing the ``.lblx``
+   ``src/spindoctor/cli/pds4/templates/<dataset>_<version>/`` containing the ``.lblx``
    files and the static inventory CSVs. Copy from
    ``cassini_iss_saturn_1.0/`` and adapt the field set.
 3. Add an entry under ``pds4.<dataset_name>:`` in
@@ -251,7 +251,7 @@ The end-to-end checklist:
    sets the bundle name plus any per-bundle defaults the
    ``pds4_template_variables`` hook draws from.
 4. Add an integration smoke test that renders one image through
-   ``nav_create_bundle`` and asserts the resulting ``data.lblx`` validates
+   ``sd_create_bundle`` and asserts the resulting ``data.lblx`` validates
    against the PDS4 schema. The Cassini ISS test under
    ``tests/integration/`` is the pattern to follow.
 
@@ -261,11 +261,11 @@ API reference
 The :mod:`pds4` package has no autogenerated entry under
 :doc:`/api_reference`; the module's public surface is the three
 phase-1 / phase-2 entry points listed below, plus the
-:class:`~nav.dataset.dataset.DataSet` ``pds4_*`` extension hooks
+:class:`~spindoctor.dataset.dataset.DataSet` ``pds4_*`` extension hooks
 documented above.
 
-- :func:`~pds4.bundle_data.generate_bundle_data_files` — phase 1, one image.
-- :func:`~pds4.collections.generate_collection_files` — phase 2, collection
+- :func:`~spindoctor.cli.pds4.bundle_data.generate_bundle_data_files` — phase 1, one image.
+- :func:`~spindoctor.cli.pds4.collections.generate_collection_files` — phase 2, collection
   + bundle assembly.
-- :func:`~pds4.collections.generate_global_index_files` — per-bundle bodies
+- :func:`~spindoctor.cli.pds4.collections.generate_global_index_files` — per-bundle bodies
   / rings global indexes.

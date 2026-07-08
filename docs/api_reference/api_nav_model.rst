@@ -1,124 +1,124 @@
-nav.nav_model
-=============
+spindoctor.nav_model
+====================
 
-.. automodule:: nav.nav_model
+.. automodule:: spindoctor.nav_model
 
-.. automodule:: nav.nav_model.nav_model
+.. automodule:: spindoctor.nav_model.nav_model
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_model.body_shape
+.. automodule:: spindoctor.nav_model.body_shape
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_model.nav_model_body
+.. automodule:: spindoctor.nav_model.nav_model_body
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_model.nav_model_body_base
+.. automodule:: spindoctor.nav_model.nav_model_body_base
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_model.nav_model_body_simulated
+.. automodule:: spindoctor.nav_model.nav_model_body_simulated
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_model.nav_model_rings
+.. automodule:: spindoctor.nav_model.nav_model_rings
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_model.nav_model_rings_base
+.. automodule:: spindoctor.nav_model.nav_model_rings_base
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_model.nav_model_rings_simulated
+.. automodule:: spindoctor.nav_model.nav_model_rings_simulated
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_model.nav_model_titan
+.. automodule:: spindoctor.nav_model.nav_model_titan
    :members:
    :undoc-members:
    :show-inheritance:
 
-nav.nav_model.rings
--------------------
+spindoctor.nav_model.rings
+--------------------------
 
-.. automodule:: nav.nav_model.rings
+.. automodule:: spindoctor.nav_model.rings
 
-.. automodule:: nav.nav_model.rings.ring_types
+.. automodule:: spindoctor.nav_model.rings.ring_types
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_model.rings.ring_feature
+.. automodule:: spindoctor.nav_model.rings.ring_feature
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_model.rings.ring_filter
+.. automodule:: spindoctor.nav_model.rings.ring_filter
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_model.rings.ring_math
+.. automodule:: spindoctor.nav_model.rings.ring_math
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_model.rings.ring_render_context
+.. automodule:: spindoctor.nav_model.rings.ring_render_context
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_model.rings.ring_render_result
+.. automodule:: spindoctor.nav_model.rings.ring_render_result
    :members:
    :undoc-members:
    :show-inheritance:
 
-nav.nav_model.stars
--------------------
+spindoctor.nav_model.stars
+--------------------------
 
-.. automodule:: nav.nav_model.stars
+.. automodule:: spindoctor.nav_model.stars
 
-.. automodule:: nav.nav_model.stars.nav_model_stars
+.. automodule:: spindoctor.nav_model.stars.nav_model_stars
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_model.stars.nav_model_stars_simulated
+.. automodule:: spindoctor.nav_model.stars.nav_model_stars_simulated
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_model.stars.catalog
+.. automodule:: spindoctor.nav_model.stars.catalog
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_model.stars.conflicts
+.. automodule:: spindoctor.nav_model.stars.conflicts
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_model.stars.predicted_snr
+.. automodule:: spindoctor.nav_model.stars.predicted_snr
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_model.stars.smeared_psf
+.. automodule:: spindoctor.nav_model.stars.smeared_psf
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_model.stars.detection
+.. automodule:: spindoctor.nav_model.stars.detection
    :members:
    :undoc-members:
    :show-inheritance:

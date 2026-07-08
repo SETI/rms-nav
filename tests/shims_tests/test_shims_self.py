@@ -14,7 +14,7 @@ import numpy as np
 import polymath
 import pytest
 
-from nav.nav_model.stars import catalog as nav_catalog
+from spindoctor.nav_model.stars import catalog as nav_catalog
 from tests.shims import (
     BodyBackplaneData,
     FakeBackplane,
@@ -294,9 +294,9 @@ def test_install_fake_catalogs_does_not_persist_across_tests() -> None:
     catalog module sees the production function again.
     """
     # The unpatched function is the one defined in
-    # ``nav.nav_model.stars.catalog``; a leftover lambda from an
+    # ``spindoctor.nav_model.stars.catalog``; a leftover lambda from an
     # earlier test would have ``__module__`` set to ``tests.shims.catalog``.
-    assert nav_catalog.get_ucac4_catalog.__module__ == 'nav.nav_model.stars.catalog'
+    assert nav_catalog.get_ucac4_catalog.__module__ == 'spindoctor.nav_model.stars.catalog'
 
 
 def test_body_backplane_data_default_resolution_fills_array() -> None:

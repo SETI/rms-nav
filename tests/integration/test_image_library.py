@@ -122,7 +122,7 @@ ground_truth:
   source: operator_verified
   operator: rfrench
   verified_date: 2026-04-28
-  ui_version: 'rms-nav 0.0.0'
+  ui_version: 'spindoctor 0.0.0'
   notes: 'Hand-picked for the schema test.'
 expected:
   status: success

@@ -1,4 +1,4 @@
-"""GUI smoke tests for ``src/main/nav_create_simulated_image.py``.
+"""GUI smoke tests for ``spindoctor.cli.sd_create_simulated_image``.
 
 These cover the ``_load_scene`` YAML-load path, specifically that
 ``shade_solid_rings`` round-trips into both the data model and its checkbox,
@@ -6,7 +6,7 @@ and that a missing or null ``closest_planet`` falls back to ``SATURN`` without
 raising (``QComboBox.findText(None)`` would otherwise raise ``TypeError``).
 """
 
-import importlib.util
+import importlib
 import os
 from pathlib import Path
 from typing import Any, cast
@@ -33,16 +33,8 @@ except Exception as exc:
         allow_module_level=True,
     )
 
-# The driver lives under ``src/main`` and is not an importable package, so load
-# it directly from its file path the same way ``python src/main/...`` would.
-_MODULE_PATH = (
-    Path(__file__).resolve().parents[2] / 'src' / 'main' / 'nav_create_simulated_image.py'
-)
-_spec = importlib.util.spec_from_file_location('nav_create_simulated_image', _MODULE_PATH)
-assert _spec is not None
-assert _spec.loader is not None
-ncsi = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(ncsi)
+# The driver is an importable module under the ``spindoctor.cli`` package.
+ncsi = importlib.import_module('spindoctor.cli.sd_create_simulated_image')
 
 
 @pytest.fixture
@@ -385,7 +377,7 @@ def test_save_scene_writes_valid_yaml(
     monkeypatch: pytest.MonkeyPatch, model: Any, tmp_path: Path
 ) -> None:
     """Saving a scene writes a YAML the schema validates."""
-    from nav.sim.scene import load_sim_scene
+    from spindoctor.sim.scene import load_sim_scene
 
     model.sim_params['instrument'] = 'coiss_nac'
     model.sim_params['size_v'] = 128

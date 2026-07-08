@@ -29,10 +29,10 @@ the ring system), merges the per-source results into one master array per
 backplane name (so the per-pixel output is unambiguous when a body silhouette
 overlaps the rings), and writes the result.
 
-The pipeline preserves the navigation offset. ``nav_backplanes`` reads the
-``_metadata.json`` produced by ``nav_offset``, applies the
+The pipeline preserves the navigation offset. ``sd_backplanes`` reads the
+``_metadata.json`` produced by ``sd_offset``, applies the
 ``(dv, du)`` offset to the
-:class:`~nav.obs.obs_snapshot.ObsSnapshot`'s FOV via
+:class:`~spindoctor.obs.obs_snapshot.ObsSnapshot`'s FOV via
 :class:`oops.fov.OffsetFOV`, and *then* evaluates every backplane. Every
 output pixel is therefore the geometry that the navigation step says it is —
 not the geometry that the raw SPICE prediction would have produced before the
@@ -46,28 +46,28 @@ Per-image, the driver runs three phases:
 1. **Build the offset-corrected snapshot.**  Read the per-image
    ``_metadata.json`` from ``--nav-results-root``, refuse to proceed if
    ``status != 'success'``, build the per-instrument
-   :class:`~nav.obs.obs_snapshot_inst.ObsSnapshotInst` with
+   :class:`~spindoctor.obs.obs_snapshot_inst.ObsSnapshotInst` with
    ``extfov_margin_vu=(0, 0)`` (backplanes are evaluated on the sensor
    only, not on the extended FOV used by navigation), wrap its FOV in
    :class:`oops.fov.OffsetFOV` carrying the navigated offset, and stash
    it as ``snapshot``.
 2. **Evaluate per-source backplanes.**
-   :func:`~backplanes.backplanes_bodies.create_body_backplanes` walks
+   :func:`~spindoctor.cli.backplanes.backplanes_bodies.create_body_backplanes` walks
    every body in the per-image inventory and, for each, builds a clipped
    meshgrid around the body's bounding box (no oversampling — backplanes
    target sensor-resolution accuracy) and evaluates the configured body
    backplane methods against an ``oops.Backplane`` over that meshgrid.
-   :func:`~backplanes.backplanes_rings.create_ring_backplanes` evaluates
+   :func:`~spindoctor.cli.backplanes.backplanes_rings.create_ring_backplanes` evaluates
    the configured ring backplane methods against the snapshot's
    full-frame ``snapshot.bp``. Both functions return per-pixel arrays
    plus the per-source ``distance`` array used by phase 3.
 3. **Distance-aware merge + write.**
-   :func:`~backplanes.merge.merge_sources_into_master` walks every
+   :func:`~spindoctor.cli.backplanes.merge.merge_sources_into_master` walks every
    pixel; for each pixel it picks the source with the smallest distance
    (closest body or ring intersection along the line of sight) and
    copies that source's per-backplane values into the master arrays.
    The merge also fills a per-pixel ``BODY_ID_MAP`` carrying the NAIF ID
-   of the source that won at each pixel.  :func:`~backplanes.writer.write_fits`
+   of the source that won at each pixel.  :func:`~spindoctor.cli.backplanes.writer.write_fits`
    serialises the master arrays and the body-ID map to FITS, attaching
    the ``BUNIT`` header from the per-backplane config, and writes a
    companion ``_backplane_metadata.json`` with per-body inventory and
@@ -80,10 +80,10 @@ backplane FITS is missing, so a single hard failure propagates cleanly.
 Entry points
 ============
 
-``nav_backplanes`` and ``nav_backplanes_cloud_tasks``
-(``src/main/nav_backplanes.py`` and ``src/main/nav_backplanes_cloud_tasks.py``)
+``sd_backplanes`` and ``sd_backplanes_cloud_tasks``
+(``src/spindoctor/cli/sd_backplanes.py`` and ``src/spindoctor/cli/sd_backplanes_cloud_tasks.py``)
 are thin CLI wrappers around
-:func:`~backplanes.backplanes.generate_backplanes_image_files`. CLI flags,
+:func:`~spindoctor.cli.backplanes.backplanes.generate_backplanes_image_files`. CLI flags,
 selection options, and per-batch behaviour are documented at
 :doc:`/user_guide/user_guide_backplanes`. Code that embeds backplane generation in a
 Python pipeline calls the function directly.
@@ -117,7 +117,7 @@ Per-source backplane generation
 Bodies
 ------
 
-:func:`~backplanes.backplanes_bodies.create_body_backplanes` evaluates the
+:func:`~spindoctor.cli.backplanes.backplanes_bodies.create_body_backplanes` evaluates the
 configured ``backplanes.bodies`` list against every body in the per-image
 inventory. For each body:
 
@@ -149,7 +149,7 @@ no SPICE entry.
 Rings
 -----
 
-:func:`~backplanes.backplanes_rings.create_ring_backplanes` evaluates the
+:func:`~spindoctor.cli.backplanes.backplanes_rings.create_ring_backplanes` evaluates the
 configured ``backplanes.rings`` list against the snapshot's full-frame
 ``snapshot.bp``. Unlike bodies the ring backplanes do not need a
 clipped meshgrid — the ring system covers a continuous range of radii
@@ -164,7 +164,7 @@ owns each pixel.
 Distance-aware merge
 ====================
 
-:func:`~backplanes.merge.merge_sources_into_master` walks every pixel
+:func:`~spindoctor.cli.backplanes.merge.merge_sources_into_master` walks every pixel
 exactly once. For each pixel it iterates the per-source distances and
 picks the source with the smallest finite distance (closest along the
 line of sight); the per-backplane values from that source are copied
@@ -186,7 +186,7 @@ does not enforce a body-then-rings precedence order.
 FITS writer
 ===========
 
-:func:`~backplanes.writer.write_fits` serialises the master arrays. The
+:func:`~spindoctor.cli.backplanes.writer.write_fits` serialises the master arrays. The
 output FITS file structure:
 
 - **Primary HDU** — empty, conventional placeholder.
@@ -212,7 +212,7 @@ Configuration
 =============
 
 The configurable backplane list lives in
-``src/nav/config_files/config_900_backplanes.yaml`` under the ``backplanes``
+``src/spindoctor/config_files/config_900_backplanes.yaml`` under the ``backplanes``
 section (exposed as ``config.backplanes``). The full YAML schema and the
 shipping defaults are documented at :doc:`/user_guide/user_guide_backplanes`; this
 section covers the developer-facing parts of the contract.
@@ -227,7 +227,7 @@ section covers the developer-facing parts of the contract.
   ``distance``; ``backplanes.rings`` entries are evaluated against the
   full-frame ``snapshot.bp`` and merged with ring ``distance``. An entry
   in the wrong list fails at evaluation time.
-- The :class:`~nav.config.config.Config` loader's deep-merge rules apply
+- The :class:`~spindoctor.config.config.Config` loader's deep-merge rules apply
   to the ``backplanes`` block the same way they apply elsewhere; an
   override file overwrites the per-source list wholesale (lists are
   overwritten, not appended). See
@@ -236,24 +236,24 @@ section covers the developer-facing parts of the contract.
 Per-instrument overrides are not exposed — every instrument gets the same
 backplane set. An instrument-specific backplane would require a per-
 instrument ``backplanes`` block in ``config_4N0_inst_*.yaml`` plus a
-config-merge hook in :func:`~backplanes.backplanes.generate_backplanes_image_files`
+config-merge hook in :func:`~spindoctor.cli.backplanes.backplanes.generate_backplanes_image_files`
 to splice it onto the global list.
 
 Snapshot helpers
 ================
 
 The backplanes pipeline relies on four helpers added to
-:class:`~nav.obs.obs_snapshot.ObsSnapshot` (also consumed by the navigation
+:class:`~spindoctor.obs.obs_snapshot.ObsSnapshot` (also consumed by the navigation
 pipeline):
 
-- :meth:`~nav.obs.obs_snapshot.ObsSnapshot.inventory_body_in_fov` /
-  :meth:`~nav.obs.obs_snapshot.ObsSnapshot.inventory_body_in_extfov` —
+- :meth:`~spindoctor.obs.obs_snapshot.ObsSnapshot.inventory_body_in_fov` /
+  :meth:`~spindoctor.obs.obs_snapshot.ObsSnapshot.inventory_body_in_extfov` —
   consume an ``oops`` inventory entry and return whether the predicted
   body bounding box overlaps the sensor / extended FOV. The body
   backplane step queries the inventory and uses these to decide which
   bodies contribute.
-- :meth:`~nav.obs.obs_snapshot.ObsSnapshot.clip_rect_fov` /
-  :meth:`~nav.obs.obs_snapshot.ObsSnapshot.clip_rect_extfov` — clamp a
+- :meth:`~spindoctor.obs.obs_snapshot.ObsSnapshot.clip_rect_fov` /
+  :meth:`~spindoctor.obs.obs_snapshot.ObsSnapshot.clip_rect_extfov` — clamp a
   rectangle ``(u_min, u_max, v_min, v_max)`` into the sensor / extended
   FOV. The body backplane step uses ``clip_rect_fov`` on every body's
   inflated inventory bounding box before building the per-body meshgrid.
@@ -270,14 +270,14 @@ Adding a backplane
 2. Append a ``{name, method, units}`` entry to the matching list in
    ``config_900_backplanes.yaml``. Pick a ``name`` that scans well as
    a FITS HDU name (uppercase or snake_case, no spaces).
-3. Rebuild a sample image with ``nav_backplanes`` and verify the new
+3. Rebuild a sample image with ``sd_backplanes`` and verify the new
    HDU appears in the FITS file with the expected ``BUNIT`` header and
-   non-trivial pixel content (use ``nav_backplane_viewer`` for a quick
+   non-trivial pixel content (use ``sd_backplane_viewer`` for a quick
    visual check).
 4. If the new backplane is consumed by the PDS4 bundle, extend the
    per-dataset ``data.lblx`` template to declare the corresponding
    ``Array_2D_Image`` element and update
-   :meth:`~nav.dataset.dataset.DataSet.pds4_template_variables` to
+   :meth:`~spindoctor.dataset.dataset.DataSet.pds4_template_variables` to
    surface the relevant per-HDU stats (min, max, units) into the
    template's variable dict. See :doc:`dev_guide_pds4`.
 
@@ -301,12 +301,12 @@ The :mod:`backplanes` package has no autogenerated entry under
 :doc:`/api_reference`; the public surface is the five functions listed
 below:
 
-- :func:`~backplanes.backplanes.generate_backplanes_image_files` —
+- :func:`~spindoctor.cli.backplanes.backplanes.generate_backplanes_image_files` —
   per-image driver.
-- :func:`~backplanes.backplanes_bodies.create_body_backplanes` — body
+- :func:`~spindoctor.cli.backplanes.backplanes_bodies.create_body_backplanes` — body
   source.
-- :func:`~backplanes.backplanes_rings.create_ring_backplanes` — ring
+- :func:`~spindoctor.cli.backplanes.backplanes_rings.create_ring_backplanes` — ring
   source.
-- :func:`~backplanes.merge.merge_sources_into_master` — distance-aware
+- :func:`~spindoctor.cli.backplanes.merge.merge_sources_into_master` — distance-aware
   merge.
-- :func:`~backplanes.writer.write_fits` — FITS + sidecar writer.
+- :func:`~spindoctor.cli.backplanes.writer.write_fits` — FITS + sidecar writer.

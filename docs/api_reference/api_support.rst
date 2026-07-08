@@ -1,84 +1,84 @@
-nav.support
-===========
+spindoctor.support
+==================
 
-.. automodule:: nav.support
+.. automodule:: spindoctor.support
 
-.. automodule:: nav.support.attrdict
+.. automodule:: spindoctor.support.attrdict
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.support.constants
+.. automodule:: spindoctor.support.constants
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.support.correlate
+.. automodule:: spindoctor.support.correlate
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.support.distance_transform
+.. automodule:: spindoctor.support.distance_transform
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.support.file
+.. automodule:: spindoctor.support.file
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.support.filter_combo
+.. automodule:: spindoctor.support.filter_combo
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.support.filters
+.. automodule:: spindoctor.support.filters
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.support.flux
+.. automodule:: spindoctor.support.flux
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.support.image
+.. automodule:: spindoctor.support.image
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.support.image_quality
+.. automodule:: spindoctor.support.image_quality
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.support.misc
+.. automodule:: spindoctor.support.misc
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.support.nav_base
+.. automodule:: spindoctor.support.nav_base
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.support.noise_estimate
+.. automodule:: spindoctor.support.noise_estimate
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.support.status_reason
+.. automodule:: spindoctor.support.status_reason
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.support.time
+.. automodule:: spindoctor.support.time
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.support.types
+.. automodule:: spindoctor.support.types
    :members:
    :undoc-members:
    :show-inheritance:

@@ -5,7 +5,7 @@ The Image Simulator
 Overview
 ========
 
-The image simulator (the ``nav.sim`` package) renders synthetic spacecraft
+The image simulator (the ``spindoctor.sim`` package) renders synthetic spacecraft
 frames -- stars, planetary bodies, and rings, with a realistic detector model --
 from operator-supplied geometry rather than from SPICE. It exists to **test and
 validate the navigation pipeline**, not as an end-user product: because every
@@ -17,11 +17,11 @@ single-variable sensitivity sweeps, and the sensitivity report
 
 The simulator has three equally valid entry points (the "three peers"):
 
-- the **Python API** (:func:`nav.sim.render.render_combined_model` and the
+- the **Python API** (:func:`spindoctor.sim.render.render_combined_model` and the
   per-feature renderers),
 - the **YAML scene catalog** under ``tests/integration/sim_scenes/`` (validated by
-  :mod:`nav.sim.scene`), which is the durable test artifact, and
-- the **GUI** ``nav_create_simulated_image``, an interactive editor for the same
+  :mod:`spindoctor.sim.scene`), which is the durable test artifact, and
+- the **GUI** ``sd_create_simulated_image``, an interactive editor for the same
   parameters.
 
 Every parameter is reachable from all three; adding a physical effect means
@@ -140,7 +140,7 @@ The panels below are rendered by ``python -m tests.integration.sim_doc_images``
 The render pipeline
 ===================
 
-:func:`nav.sim.render.render_combined_model` takes a ``sim_params`` dict and
+:func:`spindoctor.sim.render.render_combined_model` takes a ``sim_params`` dict and
 returns ``(image, metadata)``. It composes the frame in a fixed order so each
 later stage sees the accumulated signal: background stars, then the explicit
 star list, then bodies and rings (depth-sorted far-to-near by their ``range``),
@@ -150,7 +150,7 @@ missing-data markers, and saturation with optional bloom). The output is an arra
 of detector counts (DN).
 
 **Determinism.** Every random effect draws from a per-effect sub-seed derived
-from the scene's ``random_seed`` (:mod:`nav.sim.seeds`), so the same scene
+from the scene's ``random_seed`` (:mod:`spindoctor.sim.seeds`), so the same scene
 renders byte-identically, and adding a new randomized effect does not perturb the
 output of existing ones. Crater placement uses a stable hash of the body's
 geometry when the body gives no explicit ``seed``.
@@ -159,7 +159,7 @@ geometry when the body gives no explicit ``seed``.
 
 **Instruments.** The ``instrument`` field selects which per-instrument
 configuration block drives the detector model and PSF
-(:mod:`nav.sim.instruments`). The recognized names are ``coiss_nac``,
+(:mod:`spindoctor.sim.instruments`). The recognized names are ``coiss_nac``,
 ``coiss_wac``, ``coiss_calib_nac``, ``coiss_calib_wac``, ``gossi``, ``nhlorri``,
 and ``vgiss``, plus ``generic`` (alias ``sim``) for the instrument-agnostic
 defaults. Calibrated (``*_calib_*``) instruments are in I/F units with a NaN
@@ -176,12 +176,12 @@ A scene is a single YAML file whose fields are the flat runtime ``sim_params``
 names the renderer consumes, so a validated scene file *is* the ``sim_params``
 dict with no translation layer.
 
-The scene catalog (:mod:`nav.sim.scene`) is the durable test artifact, laid out
+The scene catalog (:mod:`spindoctor.sim.scene`) is the durable test artifact, laid out
 as ``tests/integration/sim_scenes/<scene_class>/<scene_name>.yaml`` (the
-directory is the registry). :func:`nav.sim.scene.load_sim_scene` parses and
+directory is the registry). :func:`spindoctor.sim.scene.load_sim_scene` parses and
 validates a file and returns the flat ``sim_params`` dict the renderer consumes;
 the GUI's "Save Scene (YAML)" / "Load Scene (YAML)" buttons read and write the
-same format via :func:`nav.sim.scene.save_sim_scene`. The scene classes (for
+same format via :func:`spindoctor.sim.scene.save_sim_scene`. The scene classes (for
 example ``algorithmic_invariants``, ``phase_sweep_regular_body``,
 ``phase_sweep_irregular_body``, ``range_sweep``, ``noise_sweep``,
 ``multi_body_geometry``, ``regression``) scope what each scene is testing and are
@@ -500,12 +500,12 @@ self-specify. The top-level ``noise`` block still wins over
 The simulated-image GUI
 =======================
 
-``nav_create_simulated_image`` is a PyQt6 editor for the same parameters, with a
+``sd_create_simulated_image`` is a PyQt6 editor for the same parameters, with a
 live preview. Launch it with:
 
 .. code-block:: bash
 
-   nav_create_simulated_image
+   sd_create_simulated_image
 
 The GUI exposes the full scene parameter surface, so any scene that can be
 written by hand in YAML can also be built in the GUI. The **General** tab carries
@@ -537,10 +537,10 @@ A simulated image is navigated through the same pipeline as a real frame, via th
 
 .. code-block:: bash
 
-   nav_offset sim /path/to/scene.yaml
+   sd_offset sim /path/to/scene.yaml
 
-The ``sim`` dataset (``DataSetSim``) builds an :class:`~nav.obs.obs_inst_sim.ObsSim`
-that loads the scene via :func:`nav.sim.scene.load_sim_scene`, renders the frame,
+The ``sim`` dataset (``DataSetSim``) builds an :class:`~spindoctor.obs.obs_inst_sim.ObsSim`
+that loads the scene via :func:`spindoctor.sim.scene.load_sim_scene`, renders the frame,
 and carries the ``sim_params`` on the snapshot. (A runtime scene file must still
 satisfy the validator, so its ``scene_name`` must equal the filename stem.) The
 model-selection layer routes a simulated obs to the simulated NavModels --
@@ -557,14 +557,14 @@ Exporting viewable PNGs
 =======================
 
 The renderer emits detector counts whose absolute range depends on the instrument
-and on cosmic-ray spikes, so :mod:`nav.sim.png_export` stretches a DN image to a
+and on cosmic-ray spikes, so :mod:`spindoctor.sim.png_export` stretches a DN image to a
 viewable grayscale PNG with a percentile clip (a few hot pixels do not crush the
 signal) and an optional gamma that lifts dim features such as a crescent or a
 faint star field:
 
 .. code-block:: python
 
-   from nav.sim.png_export import render_scene_png
+   from spindoctor.sim.png_export import render_scene_png
    render_scene_png(sim_params, 'frame.png', gamma=1.4, upscale=2)
 
 Two tools build on it. The sweep runner can dump every frame behind a response

@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from nav.sim.render import render_combined_model
-from nav.sim.scene import (
+from spindoctor.sim.render import render_combined_model
+from spindoctor.sim.scene import (
     DECLARED_SIM_SCENE_CLASSES,
     SimSceneValidationError,
     iter_scene_paths,

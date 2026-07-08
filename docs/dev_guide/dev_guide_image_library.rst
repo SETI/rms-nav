@@ -78,7 +78,7 @@ Sidecar schema (schema_version 1)
      source: operator_verified
      operator: rfrench
      verified_date: 2026-04-28
-     ui_version: 'rms-nav 0.1.dev0'
+     ui_version: 'rms-spindoctor 0.1.dev0'
      notes: |
        Hand-verified limb fit, no rings in the FOV.
 
@@ -115,7 +115,7 @@ operator actually hand-verified the offset. The library is that cohort.
 The same cohort drives:
 
 - **Per-technique confidence-formula coefficients.**  Each
-  :class:`~nav.nav_technique.nav_technique.NavTechnique`
+  :class:`~spindoctor.nav_technique.nav_technique.NavTechnique`
   carries a small set of calibrated coefficients in
   ``techniques.<TechniqueName>.confidence`` in
   ``config_510_techniques.yaml``. The coefficients map per-technique
@@ -147,7 +147,7 @@ through this loop:
    library entries it shifts. A pure refactor should shift nothing; a
    tuning change shifts a known cohort.
 2. **Inspect the diff per image.**  For each shifted image, the author
-   re-runs ``nav_offset --manual <image>`` and visually verifies that
+   re-runs ``sd_offset --manual <image>`` and visually verifies that
    the recomputed offset still overlays the limb / star field / ring
    edge. When the recomputed offset is *better* than the operator-stored
    ground truth — for example a fix produces a sub-pixel offset where
@@ -253,7 +253,7 @@ The recommended path is the manual-navigation dialog's
 **Save as Library Entry...** button:
 
 1. Run the manual-nav dialog on the candidate image with the
-   ``nav_offset [args] --manual`` CLI flag, where ``[args]`` are the
+   ``sd_offset [args] --manual`` CLI flag, where ``[args]`` are the
    selection / dataset / config flags that pin the run down to a
    single image (e.g. dataset id, an image-list file, ``--config`` for
    a non-default bundle).
@@ -349,7 +349,7 @@ refuses to run without ``PDS3_HOLDINGS_DIR`` set.
    python -m tests.integration.update_baselines --all --dry-run            # preview only
 
 For each image the tool runs
-:func:`~nav.navigate_image_files.navigate_image_files` against the live
+:func:`~spindoctor.navigate_image_files.navigate_image_files` against the live
 holdings, rounds the result via
 :meth:`tests.integration.baseline.Baseline.from_run`, compares against
 any existing baseline, and reports one of:

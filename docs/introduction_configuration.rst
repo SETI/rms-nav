@@ -2,7 +2,7 @@
 Configuration
 =============
 
-RMS-NAV uses a hierarchical YAML-based configuration system that allows you to
+SpinDoctor uses a hierarchical YAML-based configuration system that allows you to
 customize behavior without modifying the source code. Understanding how
 configuration files are loaded and how to override settings is important for
 effective use of the system.
@@ -10,12 +10,12 @@ effective use of the system.
 Configuration Loading Order
 ============================
 
-RMS-NAV ships with a complete set of built-in defaults, so the system works out
+SpinDoctor ships with a complete set of built-in defaults, so the system works out
 of the box with no configuration on your part. You customize behavior by layering
 your own settings on top of those defaults. Settings are loaded in the following
 order, with later sources overriding earlier ones for the same key:
 
-1. **Built-in defaults**: RMS-NAV bundles a stack of default configuration files
+1. **Built-in defaults**: SpinDoctor bundles a stack of default configuration files
    that give every setting a sensible value. You do not edit these. (Developers
    who need to know exactly which files ship and what each one holds should see
    :doc:`/dev_guide/dev_guide_config_and_static_data`.)
@@ -69,12 +69,12 @@ a standard log-level string: ``DEBUG``, ``INFO``, ``WARNING``, ``ERROR``, or
 ``CRITICAL``. Set them in your ``nav_default_config.yaml`` or a ``--config-file``
 to override the built-in defaults shown below.
 
-**Main logger** (``nav_offset`` -- top-level program events):
+**Main logger** (``sd_offset`` -- top-level program events):
 
 * ``general.log_level_main_console`` (default: ``INFO``): Level for output written
   to stdout while the program runs.
 * ``general.log_level_main_file`` (default: ``INFO``): Level for the timestamped
-  logfile written to ``$NAV_RESULTS_ROOT/logs/nav_offset/``.
+  logfile written to ``$NAV_RESULTS_ROOT/logs/sd_offset/``.
 
 **Image logger** (``nav_image`` -- per-image processing events, active only while
 an image is being processed):
@@ -145,13 +145,13 @@ You can override configuration on a per-run basis using ``--config-file``:
 
 .. code-block:: bash
 
-   nav_offset coiss N1234567890 --config-file /path/to/special_config.yaml
+   sd_offset coiss N1234567890 --config-file /path/to/special_config.yaml
 
 You can specify multiple configuration files, and they will be loaded in order:
 
 .. code-block:: bash
 
-   nav_offset coiss N1234567890 \
+   sd_offset coiss N1234567890 \
      --config-file base_overrides.yaml \
      --config-file run_specific.yaml
 
@@ -197,7 +197,7 @@ key for that run. Each accepts a standard log-level string: ``DEBUG``, ``INFO``,
 
 * ``--log-level-main-file LEVEL``: Override ``general.log_level_main_file``
   -- the level at which the main logger writes to its logfile under
-  ``$NAV_RESULTS_ROOT/logs/nav_offset/``.
+  ``$NAV_RESULTS_ROOT/logs/sd_offset/``.
 
 * ``--log-level-image-console LEVEL``: Override ``general.log_level_image_console``
   -- the level at which the image logger writes to stdout during image processing.

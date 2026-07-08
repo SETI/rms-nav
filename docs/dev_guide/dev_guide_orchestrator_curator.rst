@@ -5,10 +5,10 @@ JSON Curation (build_metadata_dict)
 Overview
 ========
 
-The curator turns a :class:`~nav.nav_orchestrator.nav_result.NavResult` into a JSON-friendly
+The curator turns a :class:`~spindoctor.nav_orchestrator.nav_result.NavResult` into a JSON-friendly
 metadata dict consumed by downstream readers. Two functions form the public surface:
-:func:`~nav.nav_orchestrator.curator.build_metadata_dict` does the conversion, and
-:func:`~nav.nav_orchestrator.curator.assert_diagnostic_fields_present` runs at startup to
+:func:`~spindoctor.nav_orchestrator.curator.build_metadata_dict` does the conversion, and
+:func:`~spindoctor.nav_orchestrator.curator.assert_diagnostic_fields_present` runs at startup to
 enforce the per-technique ``CURATOR_FIELDS`` allow-list discipline so a new diagnostic
 field cannot silently disappear from the JSON output.
 
@@ -16,7 +16,7 @@ Theory
 ======
 
 The curator picks JSON-friendly fields from a
-:class:`~nav.nav_orchestrator.nav_result.NavResult`, rounds floats to documented
+:class:`~spindoctor.nav_orchestrator.nav_result.NavResult`, rounds floats to documented
 precision, substitutes the ``JSON_INF_SENTINEL`` finite sentinel for non-finite floats (or
 zero for NaN), and emits the ``navigation_result`` block consumed by downstream readers.
 
@@ -42,7 +42,7 @@ Every per-technique diagnostic field that ships in the JSON appears in the techn
 ``None`` to skip). The curator walks ``CURATOR_FIELDS`` rather than the dataclass's
 ``fields()`` directly, so a new field added to a diagnostics dataclass without an entry
 in the mapping does not silently leak into the JSON.
-:func:`~nav.nav_orchestrator.curator.assert_diagnostic_fields_present` runs at startup
+:func:`~spindoctor.nav_orchestrator.curator.assert_diagnostic_fields_present` runs at startup
 (or in CI) and fails the build with :exc:`AssertionError` when any dataclass field is
 missing from its ``CURATOR_FIELDS``.
 
@@ -64,7 +64,7 @@ Sources of uncertainty
 ----------------------
 
 The curator reports no uncertainty. Every output is a deterministic projection of the
-input :class:`~nav.nav_orchestrator.nav_result.NavResult`.
+input :class:`~spindoctor.nav_orchestrator.nav_result.NavResult`.
 
 Configuration
 =============
@@ -72,22 +72,22 @@ Configuration
 The curator carries no YAML configuration of its own. The three rounding constants
 (``PIXEL_DECIMALS``, ``CONFIDENCE_DECIMALS``, ``ET_DECIMALS``) and the
 ``JSON_INF_SENTINEL`` live as module-level constants; ``JSON_INF_SENTINEL`` lives in
-:mod:`nav.feature.constants` and is shared with other JSON producers.
+:mod:`spindoctor.feature.constants` and is shared with other JSON producers.
 
 Implementation
 ==============
 
-Source file: ``src/nav/nav_orchestrator/curator.py`` —
-:func:`~nav.nav_orchestrator.curator.build_metadata_dict`,
-:func:`~nav.nav_orchestrator.curator.assert_diagnostic_fields_present`, plus the private
+Source file: ``src/spindoctor/nav_orchestrator/curator.py`` —
+:func:`~spindoctor.nav_orchestrator.curator.build_metadata_dict`,
+:func:`~spindoctor.nav_orchestrator.curator.assert_diagnostic_fields_present`, plus the private
 ``_round_float`` / ``_round_pair`` / ``_round_2x2`` rounding helpers.
 
 Public surface (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
 
-- :func:`~nav.nav_orchestrator.curator.build_metadata_dict` — turns a
-  :class:`~nav.nav_orchestrator.nav_result.NavResult` into a JSON-friendly nested dict.
+- :func:`~spindoctor.nav_orchestrator.curator.build_metadata_dict` — turns a
+  :class:`~spindoctor.nav_orchestrator.nav_result.NavResult` into a JSON-friendly nested dict.
   Public entry point for the per-image-sidecar writer.
-- :func:`~nav.nav_orchestrator.curator.assert_diagnostic_fields_present` — verifies every
+- :func:`~spindoctor.nav_orchestrator.curator.assert_diagnostic_fields_present` — verifies every
   per-technique diagnostic field has a ``CURATOR_FIELDS`` entry. Run at config-load
   time; raises :exc:`AssertionError` on the first unmapped field.
 
@@ -101,7 +101,7 @@ Examples
 ========
 
 **Per-image JSON sidecar shape.**  After a successful
-:class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav` fit on
+:class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav` fit on
 ``body_partial_overflow``, the curator emits::
 
     {
@@ -140,10 +140,10 @@ entry in the diagnostics dataclass's ``CURATOR_FIELDS``.
 
 **Allow-list catches a missed field.**  An operator adds a new field
 ``mean_polarity_score`` to
-:class:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics` without updating
+:class:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics` without updating
 ``CURATOR_FIELDS``. At startup
-:func:`~nav.nav_orchestrator.curator.assert_diagnostic_fields_present` runs over the
-:class:`~nav.nav_orchestrator.nav_result.NavResult` returned by the smoke test, walks the
+:func:`~spindoctor.nav_orchestrator.curator.assert_diagnostic_fields_present` runs over the
+:class:`~spindoctor.nav_orchestrator.nav_result.NavResult` returned by the smoke test, walks the
 diagnostic's :func:`dataclasses.fields`, and raises::
 
     AssertionError: BodyLimbDiagnostics has unmapped fields ['mean_polarity_score'];

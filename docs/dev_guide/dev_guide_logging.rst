@@ -3,10 +3,10 @@ Developer Guide: Logging
 ========================
 
 The autonomous-navigation pipeline routes every per-image log line
-through ``pdslogger`` (``nav.config.logger.IMAGE_LOGGER``). The standard
+through ``pdslogger`` (``spindoctor.config.logger.IMAGE_LOGGER``). The standard
 library ``logging`` module is intentionally **not used** anywhere in the
-``nav.feature``, ``nav.nav_model``, ``nav.nav_orchestrator``,
-``nav.nav_technique``, or ``nav.support`` packages.
+``spindoctor.feature``, ``spindoctor.nav_model``, ``spindoctor.nav_orchestrator``,
+``spindoctor.nav_technique``, or ``spindoctor.support`` packages.
 
 Why pdslogger
 =============
@@ -31,7 +31,7 @@ plus a final ``status_reason``-keyed verdict:
   ``with self.logger.open(f'TECHNIQUE: {self.name}'):`` so per-image
   logs delimit each technique's contribution unambiguously.
 * **Per status reason.** The orchestrator emits one INFO line per item
-  in :data:`nav.nav_orchestrator.status_reason_info.STATUS_REASON_INFO_TEMPLATE`
+  in :data:`spindoctor.nav_orchestrator.status_reason_info.STATUS_REASON_INFO_TEMPLATE`
   for the final verdict's ``status_reason``. Operator-readable text
   describes both the outcome (``Final: status=ok``,
   ``Final: status=failed``) and the proximate cause
@@ -78,13 +78,13 @@ audience and the consequence of the line, not the call site's depth:
   per-image log file.
 * **WARNING** — recoverable anomalies that do not fail the image but should bias an
   operator's review: a feature dropped by the reliability gate, a technique's
-  :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious` or
-  :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` flag firing,
+  :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` or
+  :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` flag firing,
   a fall-back path triggering, a per-instrument override missing where the default
   applies. WARNING lines surface in the curator's per-image JSON sidecar so the
   operator-curated regression library can flag them.
 * **ERROR** — a per-image failure that the orchestrator could downgrade to a failed
-  :class:`~nav.nav_orchestrator.nav_result.NavResult` rather than propagate as a Python
+  :class:`~spindoctor.nav_orchestrator.nav_result.NavResult` rather than propagate as a Python
   exception: a model whose ``create_model`` returned no usable state, an ensemble that
   cannot reconcile any technique result. ERROR is reserved for failures whose remediation
   is operator-side (re-run with different inputs, file a bug); the run continues to
@@ -93,7 +93,7 @@ audience and the consequence of the line, not the call site's depth:
   orchestrator's broad ``except Exception`` blocks around every model and technique
   callback. Carries a full Python traceback; the offending model or technique is
   treated as if it produced no output, the rest of the pipeline continues, and the
-  surfaced :attr:`~nav.nav_orchestrator.nav_result.NavResult.status_reason` records
+  surfaced :attr:`~spindoctor.nav_orchestrator.nav_result.NavResult.status_reason` records
   what fell over. Never raise EXCEPTION from non-orchestrator code; let the
   orchestrator's sandbox catch it.
 * **FATAL** — process-level failures (a corrupt config file, a missing kernel, an
@@ -105,12 +105,12 @@ Conventions
 
 * Never ``import logging`` in ``nav.*`` core code.
 * Never ``print(...)`` in library code; route through ``self.logger``.
-* Every :meth:`~nav.nav_technique.nav_technique.NavTechnique.navigate` body
+* Every :meth:`~spindoctor.nav_technique.nav_technique.NavTechnique.navigate` body
   wraps its work in
   ``with self.logger.open(f'TECHNIQUE: {self.name}'):`` for log
   scoping.
 * The orchestrator captures every per-technique exception and emits an
   ``EXCEPTION``-level pdslogger line via ``self._logger.exception(...)``;
   the technique's failure surfaces on the returned
-  :class:`~nav.nav_orchestrator.nav_result.NavResult`,
+  :class:`~spindoctor.nav_orchestrator.nav_result.NavResult`,
   never as a propagating Python exception.

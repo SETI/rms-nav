@@ -3,7 +3,7 @@ requires = ["setuptools", "setuptools_scm[toml]"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "rms-nav"
+name = "rms-spindoctor"
 dynamic = ["version"]
 description = "Navigation system for spacecraft imagery"
 readme = "README.md"
@@ -60,7 +60,7 @@ dev = [
   "pytest-profiling",
   "pytest-xdist",
   "ruff",
-  "rms-nav[docs]",
+  "rms-spindoctor[docs]",
 ]
 # Sphinx stack only. ``pip install -e ".[docs]"`` (ReadTheDocs: ``path: .`` +
 # ``extra_requirements: [docs]``) installs these *plus* ``[project] dependencies``.
@@ -72,22 +72,22 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/SETI/rms-nav"
-Documentation = "https://rms-nav.readthedocs.io/en/latest"
-Repository = "https://github.com/SETI/rms-nav"
-Source = "https://github.com/SETI/rms-nav"
-Issues = "https://github.com/SETI/rms-nav/issues"
+Homepage = "https://github.com/SETI/rms-spindoctor"
+Documentation = "https://rms-spindoctor.readthedocs.io/en/latest"
+Repository = "https://github.com/SETI/rms-spindoctor"
+Source = "https://github.com/SETI/rms-spindoctor"
+Issues = "https://github.com/SETI/rms-spindoctor/issues"
 
 [tool.mypy]
 strict = true
 disallow_subclassing_any = false
-exclude = ["src/experiments", "^build/"]
+exclude = ["^experiments/", "^build/"]
 mypy_path = "src"
 # Third-party science stack is largely untyped or stub-incomplete; per-module
 # ``ignore_missing_imports`` below covers missing packages.
 
 [[tool.mypy.overrides]]
-module = "nav._version"
+module = "spindoctor._version"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
@@ -160,6 +160,11 @@ filterwarnings = [
   # time.  It originates in third-party code and is absent on 3.12+; allow it
   # through so it cannot fail conftest collection.
   "default:SelectableGroups dict interface is deprecated:DeprecationWarning",
+  # NumPy 2.5 deprecated setting ``arr.dtype`` in place; the rms-pdstable
+  # dependency still does this when parsing fixed-width PDS3 index tables
+  # (pdstable/__init__.py). It is outside our control, so allow it through as
+  # a non-fatal warning until a pdstable release adopts ``arr.view(dtype)``.
+  "default:Setting the dtype on a NumPy array has been deprecated:DeprecationWarning",
 ]
 markers = [
   "integration: requires PDS3_HOLDINGS_DIR (real holdings on disk or via filecache)",
@@ -169,7 +174,7 @@ markers = [
 [tool.ruff]
 src = ["src", "tests"]
 extend-exclude = [
-  "src/experiments",
+  "experiments",
 ]
 line-length = 100
 
@@ -188,8 +193,8 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "A", "N", "PT", "RUF"]
 extend-ignore = ["N802", "N803", "N806", "PT011", "SIM105", "SIM108"]
 
 [tool.ruff.lint.per-file-ignores]
-# Entry-point scripts add package to path before importing nav
-"src/main/*.py" = ["E402"]
+# Entry-point scripts add package to path before importing spindoctor
+"src/spindoctor/cli/sd_*.py" = ["E402"]
 # Sphinx reads ``copyright`` from conf by name (builtin shadowing is unavoidable).
 "docs/conf.py" = ["A001"]
 
@@ -204,26 +209,27 @@ order-by-type = true
 where = ["src"]
 
 [tool.setuptools.package-data]
-"nav" = ["py.typed"]
+"spindoctor" = ["py.typed"]
+"spindoctor.cli.pds4" = ["templates/**/*"]
 
 [tool.setuptools_scm]
 local_scheme = "no-local-version"
-write_to = "src/nav/_version.py"
+write_to = "src/spindoctor/_version.py"
 
 [project.scripts]
-nav_offset = "main.nav_offset:main"
-nav_offset_cloud_tasks = "main.nav_offset_cloud_tasks:main"
-nav_consolidate_metadata = "main.nav_consolidate_metadata:main"
-nav_create_simulated_image = "main.nav_create_simulated_image:main"
-nav_backplanes = "main.nav_backplanes:main"
-nav_backplanes_cloud_tasks = "main.nav_backplanes_cloud_tasks:main"
-nav_backplane_viewer = "main.nav_backplane_viewer:main"
-nav_create_bundle = "main.nav_create_bundle:main"
-nav_create_bundle_cloud_tasks = "main.nav_create_bundle_cloud_tasks:main"
-nav_mosaic = "main.nav_mosaic:main"
-nav_mosaic_rings = "main.nav_mosaic:rings_main"
-nav_mosaic_body = "main.nav_mosaic:body_main"
-nav_mosaic_cloud_tasks = "main.nav_mosaic_cloud_tasks:main"
-nav_mosaic_display = "main.nav_mosaic_display:main"
-nav_mosaic_display_rings = "main.nav_mosaic_display:rings_main"
-nav_mosaic_display_body = "main.nav_mosaic_display:body_main"
+sd_offset = "spindoctor.cli.sd_offset:main"
+sd_offset_cloud_tasks = "spindoctor.cli.sd_offset_cloud_tasks:main"
+sd_consolidate_metadata = "spindoctor.cli.sd_consolidate_metadata:main"
+sd_create_simulated_image = "spindoctor.cli.sd_create_simulated_image:main"
+sd_backplanes = "spindoctor.cli.sd_backplanes:main"
+sd_backplanes_cloud_tasks = "spindoctor.cli.sd_backplanes_cloud_tasks:main"
+sd_backplane_viewer = "spindoctor.cli.sd_backplane_viewer:main"
+sd_create_bundle = "spindoctor.cli.sd_create_bundle:main"
+sd_create_bundle_cloud_tasks = "spindoctor.cli.sd_create_bundle_cloud_tasks:main"
+sd_mosaic = "spindoctor.cli.sd_mosaic:main"
+sd_mosaic_rings = "spindoctor.cli.sd_mosaic:rings_main"
+sd_mosaic_body = "spindoctor.cli.sd_mosaic:body_main"
+sd_mosaic_cloud_tasks = "spindoctor.cli.sd_mosaic_cloud_tasks:main"
+sd_mosaic_display = "spindoctor.cli.sd_mosaic_display:main"
+sd_mosaic_display_rings = "spindoctor.cli.sd_mosaic_display:rings_main"
+sd_mosaic_display_body = "spindoctor.cli.sd_mosaic_display:body_main"

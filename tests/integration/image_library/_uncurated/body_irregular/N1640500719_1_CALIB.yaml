@@ -22,7 +22,7 @@ ground_truth:
   source: operator_verified
   operator: rfrench
   verified_date: 2026-05-01
-  ui_version: 'rms-nav 0.1.dev25'
+  ui_version: 'spindoctor 0.1.dev25'
   notes: |
     Prometheus 317 px in the middle of the FOV.
     Phase angle 8 degrees.

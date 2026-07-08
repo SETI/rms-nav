@@ -12,13 +12,13 @@ sys.path.insert(0, os.path.abspath('../src'))
 
 # -- Project information -----------------------------------------------------
 
-project = 'RMS-NAV'
+project = 'SpinDoctor'
 copyright = '2025, SETI Institute'
 author = 'SETI Institute'
 
 # The full version, including alpha/beta/rc tags
 try:
-    release = importlib.metadata.version('rms-nav')
+    release = importlib.metadata.version('rms-spindoctor')
 except importlib.metadata.PackageNotFoundError:
     release = '1.0.0'  # fallback for development
 
@@ -72,7 +72,7 @@ html_static_path = ['_static']
 
 add_module_names = False
 autodoc_typehints_format = 'short'
-# Mock PyQt6 and matplotlib Qt backends so autodoc can import nav.ui modules
+# Mock PyQt6 and matplotlib Qt backends so autodoc can import spindoctor.ui modules
 # without a display or OpenGL context (e.g. in CI).
 autodoc_mock_imports = [
     'PyQt6',
@@ -110,19 +110,19 @@ intersphinx_mapping = {
 
 # Suppress nitpicky warnings for symbols that have no inventory we can link to:
 # third-party packages without Sphinx docs (oops), test modules excluded from
-# autodoc, sibling packages outside the importable nav API surface, typing
+# autodoc, sibling packages outside the importable spindoctor API surface, typing
 # internals leaked by autodoc, and TypeVars / unqualified type aliases that
 # Sphinx does not register as cross-reference targets.
 nitpick_ignore_regex = [
     (r'py:.*', r'oops\..*'),
     (r'py:.*', r'tests\..*'),
-    (r'py:.*', r'backplanes\..*'),
-    (r'py:.*', r'pds4\..*'),
-    (r'py:.*', r'reproj_cli\..*'),
+    (r'py:.*', r'spindoctor\.cli\.backplanes\..*'),
+    (r'py:.*', r'spindoctor\.cli\.pds4\..*'),
+    (r'py:.*', r'spindoctor\.cli\.reproj\..*'),
     (r'py:.*', r'numpy\._typing\..*'),
     (r'py:.*', r'argparse\._.*'),
-    (r'py:.*', r'nav\.support\.types\.NPType'),
-    (r'py:.*', r'nav\.ui\.mosaic_viewer\..*'),
+    (r'py:.*', r'spindoctor\.support\.types\.NPType'),
+    (r'py:.*', r'spindoctor\.ui\.mosaic_viewer\..*'),
 ]
 
 # MyST-Parser settings

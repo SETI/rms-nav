@@ -5,13 +5,13 @@ Image Classifier (NavImageClassifier)
 Overview
 ========
 
-:class:`~nav.nav_orchestrator.image_classifier.NavImageClassifier` is the quick-fail image
+:class:`~spindoctor.nav_orchestrator.image_classifier.NavImageClassifier` is the quick-fail image
 quality classifier the orchestrator runs once per image before any
-:class:`~nav.nav_model.nav_model.NavModel` is constructed.
+:class:`~spindoctor.nav_model.nav_model.NavModel` is constructed.
 It assigns the image to one of a small set of classes (``clean`` /
 ``blank`` / ``fully_overexposed`` / ``mostly_missing_data``) plus optional advisory flags
 (``noisy`` / ``partial_dropout``). The hard-failure classes short-circuit the pipeline
-inside :class:`~nav.nav_orchestrator.orchestrator.NavOrchestrator` — corrupted or blank
+inside :class:`~spindoctor.nav_orchestrator.orchestrator.NavOrchestrator` — corrupted or blank
 images fail in milliseconds with a clear status reason.
 
 Theory
@@ -43,7 +43,7 @@ The decision tree is order-sensitive:
 
 The orchestrator's ``_HARD_FAILURE_TO_REASON`` dispatch table maps the three hard-failure
 classes to
-:class:`~nav.support.status_reason.NavStatusReason` values; the ``clean`` case proceeds
+:class:`~spindoctor.support.status_reason.NavStatusReason` values; the ``clean`` case proceeds
 through the pipeline regardless of the advisory flags.
 
 Restrictions and assumptions
@@ -57,7 +57,7 @@ Restrictions and assumptions
   data.
 - The matched-filter detection in star navigation consumes a separate noise-sigma
   estimate from
-  :func:`~nav.support.noise_estimate.estimate_image_noise_sigma`; the classifier's
+  :func:`~spindoctor.support.noise_estimate.estimate_image_noise_sigma`; the classifier's
   ``noise_sigma`` is the same MAD estimator but on the per-image sensor cohort.
 - The classifier does not look at predicted feature positions — it is a global readout
   over the whole sensor, not a per-target check.
@@ -72,30 +72,30 @@ Configuration
 =============
 
 Per-instrument thresholds live in
-:class:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds`, populated by
-:func:`~nav.nav_orchestrator.instrument_config.instrument_settings_from_obs` from the
+:class:`~spindoctor.nav_orchestrator.image_classifier.ImageQualityThresholds`, populated by
+:func:`~spindoctor.nav_orchestrator.instrument_config.instrument_settings_from_obs` from the
 ``image_quality_thresholds`` block in ``config_4N0_inst_*.yaml``. Documented at
 :doc:`dev_guide_orchestrator_instrument_config`.
 
 The thresholds dataclass:
 
-- :attr:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds.saturation_threshold_dn`
+- :attr:`~spindoctor.nav_orchestrator.image_classifier.ImageQualityThresholds.saturation_threshold_dn`
   — float, default ``4095.0`` DN. Pixels at or above this DN are flagged saturated.
-- :attr:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds.missing_data_marker_dn`
+- :attr:`~spindoctor.nav_orchestrator.image_classifier.ImageQualityThresholds.missing_data_marker_dn`
   — float, default ``0.0`` DN. Pixels exactly equal to this value are missing data; when
   the marker is ``NaN``, the classifier detects missing data via ``np.isnan`` instead.
-- :attr:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds.max_saturation_frac_clean`
+- :attr:`~spindoctor.nav_orchestrator.image_classifier.ImageQualityThresholds.max_saturation_frac_clean`
   — float, default ``0.80`` (dimensionless). Above this fraction of saturated pixels the
   image is ``fully_overexposed``.
-- :attr:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds.max_missing_frac_clean`
+- :attr:`~spindoctor.nav_orchestrator.image_classifier.ImageQualityThresholds.max_missing_frac_clean`
   — float, default ``0.30`` (dimensionless). Above this fraction of missing pixels the
   image is ``mostly_missing_data``.
-- :attr:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds.partial_dropout_min_frac`
+- :attr:`~spindoctor.nav_orchestrator.image_classifier.ImageQualityThresholds.partial_dropout_min_frac`
   — float, default ``0.05`` (dimensionless). At or above this fraction (and below
   ``max_missing_frac_clean``) the ``partial_dropout`` advisory flag is set.
-- :attr:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds.blank_max_dn` —
+- :attr:`~spindoctor.nav_orchestrator.image_classifier.ImageQualityThresholds.blank_max_dn` —
   float, default ``5.0`` DN. Below this maximum sensor DN the image is ``blank``.
-- :attr:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds.noisy_threshold` —
+- :attr:`~spindoctor.nav_orchestrator.image_classifier.ImageQualityThresholds.noisy_threshold` —
   float, default ``10.0`` DN. Above this MAD-noise sigma the ``noisy`` advisory flag is
   set.
 
@@ -104,35 +104,35 @@ Implementation
 
 Source files:
 
-- ``src/nav/nav_orchestrator/image_classifier.py`` —
-  :class:`~nav.nav_orchestrator.image_classifier.NavImageClassifier` and
-  :class:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds`.
-- ``src/nav/nav_orchestrator/image_classifier_result.py`` —
-  :class:`~nav.nav_orchestrator.image_classifier_result.NavImageClassifierResult` plus the
+- ``src/spindoctor/nav_orchestrator/image_classifier.py`` —
+  :class:`~spindoctor.nav_orchestrator.image_classifier.NavImageClassifier` and
+  :class:`~spindoctor.nav_orchestrator.image_classifier.ImageQualityThresholds`.
+- ``src/spindoctor/nav_orchestrator/image_classifier_result.py`` —
+  :class:`~spindoctor.nav_orchestrator.image_classifier_result.NavImageClassifierResult` plus the
   ``ImageClass`` and ``ImageFlag`` Literal aliases.
-- ``src/nav/support/noise_estimate.py`` —
-  :func:`~nav.support.noise_estimate.estimate_image_noise_sigma`, the MAD-based noise
+- ``src/spindoctor/support/noise_estimate.py`` —
+  :func:`~spindoctor.support.noise_estimate.estimate_image_noise_sigma`, the MAD-based noise
   estimator the classifier delegates to.
 
 Public classes (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
 
-- :class:`~nav.nav_orchestrator.image_classifier.NavImageClassifier` — the classifier.
+- :class:`~spindoctor.nav_orchestrator.image_classifier.NavImageClassifier` — the classifier.
   Public method:
-  :meth:`~nav.nav_orchestrator.image_classifier.NavImageClassifier.classify` runs the
+  :meth:`~spindoctor.nav_orchestrator.image_classifier.NavImageClassifier.classify` runs the
   three-statistic readout plus the decision tree and returns a
-  :class:`~nav.nav_orchestrator.image_classifier_result.NavImageClassifierResult`.
+  :class:`~spindoctor.nav_orchestrator.image_classifier_result.NavImageClassifierResult`.
 
-- :class:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds` — frozen
+- :class:`~spindoctor.nav_orchestrator.image_classifier.ImageQualityThresholds` — frozen
   dataclass carrying the seven thresholds documented above.
 
-- :class:`~nav.nav_orchestrator.image_classifier_result.NavImageClassifierResult` — frozen
+- :class:`~spindoctor.nav_orchestrator.image_classifier_result.NavImageClassifierResult` — frozen
   dataclass returned by ``classify``. Public fields:
-  :attr:`~nav.nav_orchestrator.image_classifier_result.NavImageClassifierResult.image_class`,
-  :attr:`~nav.nav_orchestrator.image_classifier_result.NavImageClassifierResult.saturation_frac`,
-  :attr:`~nav.nav_orchestrator.image_classifier_result.NavImageClassifierResult.missing_frac`,
-  :attr:`~nav.nav_orchestrator.image_classifier_result.NavImageClassifierResult.noise_sigma`,
-  :attr:`~nav.nav_orchestrator.image_classifier_result.NavImageClassifierResult.max_dn`,
-  :attr:`~nav.nav_orchestrator.image_classifier_result.NavImageClassifierResult.flags`.
+  :attr:`~spindoctor.nav_orchestrator.image_classifier_result.NavImageClassifierResult.image_class`,
+  :attr:`~spindoctor.nav_orchestrator.image_classifier_result.NavImageClassifierResult.saturation_frac`,
+  :attr:`~spindoctor.nav_orchestrator.image_classifier_result.NavImageClassifierResult.missing_frac`,
+  :attr:`~spindoctor.nav_orchestrator.image_classifier_result.NavImageClassifierResult.noise_sigma`,
+  :attr:`~spindoctor.nav_orchestrator.image_classifier_result.NavImageClassifierResult.max_dn`,
+  :attr:`~spindoctor.nav_orchestrator.image_classifier_result.NavImageClassifierResult.flags`.
 
 Examples
 ========
@@ -162,9 +162,9 @@ first::
     )
 
 The orchestrator's hard-failure short-circuit maps ``image_class='blank'`` to
-:attr:`~nav.support.status_reason.NavStatusReason.NO_SIGNAL_IN_IMAGE` and returns a failed
-:class:`~nav.nav_orchestrator.nav_result.NavResult` before any
-:class:`~nav.nav_model.nav_model.NavModel` constructs.
+:attr:`~spindoctor.support.status_reason.NavStatusReason.NO_SIGNAL_IN_IMAGE` and returns a failed
+:class:`~spindoctor.nav_orchestrator.nav_result.NavResult` before any
+:class:`~spindoctor.nav_model.nav_model.NavModel` constructs.
 
 **Clean with advisory flags.**  Saturation fraction 0.0, missing fraction 0.12, MAD sigma
 12.4. The classifier reports::

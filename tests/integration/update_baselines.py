@@ -166,8 +166,8 @@ def update_one(sidecar: Sidecar, *, baselines_dir: Path, dry_run: bool) -> _Imag
     # Local imports keep the module importable without holdings / oops.
     from filecache import FCPath
 
-    from nav.dataset.dataset import ImageFile, ImageFiles
-    from nav.navigate_image_files import navigate_image_files
+    from spindoctor.dataset.dataset import ImageFile, ImageFiles
+    from spindoctor.navigate_image_files import navigate_image_files
     from tests.integration.baseline import (
         Baseline,
         baseline_path,

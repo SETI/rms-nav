@@ -1,19 +1,19 @@
-nav.annotation
-==============
+spindoctor.annotation
+=====================
 
-.. automodule:: nav.annotation
+.. automodule:: spindoctor.annotation
 
-.. automodule:: nav.annotation.annotation
+.. automodule:: spindoctor.annotation.annotation
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.annotation.annotations
+.. automodule:: spindoctor.annotation.annotations
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.annotation.annotation_text_info
+.. automodule:: spindoctor.annotation.annotation_text_info
    :members:
    :undoc-members:
    :show-inheritance:

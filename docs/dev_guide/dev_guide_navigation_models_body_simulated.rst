@@ -5,34 +5,34 @@ Simulated Body Navigation Model
 Overview
 ========
 
-:class:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated` is the
+:class:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated` is the
 simulated-image variant of the body navigation model. It renders a body from
 operator-supplied ellipsoid (or polyhedral-mesh) parameters -- centre, axes, rotation,
 lighting -- instead of from SPICE prediction, then emits the body features the navigation
 techniques consume:
 
-- always a :data:`~nav.feature.feature_type.NavFeatureType.BODY_DISC` carrying the
-  rendered template, for :class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav`;
-- a :data:`~nav.feature.feature_type.NavFeatureType.BODY_BLOB` (the orientation-free
+- always a :data:`~spindoctor.feature.feature_type.NavFeatureType.BODY_DISC` carrying the
+  rendered template, for :class:`~spindoctor.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav`;
+- a :data:`~spindoctor.feature.feature_type.NavFeatureType.BODY_BLOB` (the orientation-free
   lit-weighted centroid, built by the shared
-  :class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase`) when the predicted
+  :class:`~spindoctor.nav_model.nav_model_body_base.NavModelBodyBase`) when the predicted
   diameter clears the blob floor, for
-  :class:`~nav.nav_technique.nav_technique_body_blob.BodyBlobNav`;
-- a :data:`~nav.feature.feature_type.NavFeatureType.LIMB_ARC` (the silhouette boundary as
+  :class:`~spindoctor.nav_technique.nav_technique_body_blob.BodyBlobNav`;
+- a :data:`~spindoctor.feature.feature_type.NavFeatureType.LIMB_ARC` (the silhouette boundary as
   a vertex polyline with outward normals) when the body is well resolved (diameter at
   least 100 px) and at low phase (at most 60 degrees), for
-  :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav`.
+  :class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav`.
 
-The model overrides :meth:`~nav.nav_model.nav_model.NavModel.instances_for_obs` to build
+The model overrides :meth:`~spindoctor.nav_model.nav_model.NavModel.instances_for_obs` to build
 one instance per body of a simulated observation; the parent
-:class:`~nav.nav_model.nav_model_body.NavModelBody` declines simulated observations, so the
+:class:`~spindoctor.nav_model.nav_model_body.NavModelBody` declines simulated observations, so the
 autonomous registry routes simulated frames here.
 
 Theory
 ======
 
 Simulated body rendering is a controlled-input version of the same silhouette-extraction
-pipeline that drives :class:`~nav.nav_model.nav_model_body.NavModelBody`. The operator
+pipeline that drives :class:`~spindoctor.nav_model.nav_model_body.NavModelBody`. The operator
 specifies a body in image-plane coordinates (centre and per-axis radii) plus a phase /
 lighting geometry, and the renderer paints the corresponding ellipsoidal body onto an
 extended-FOV image plus matching mask.
@@ -53,7 +53,7 @@ Restrictions and assumptions
 
 - The operator must supply finite, positive ellipsoid axes. Degenerate inputs (zero
   radius, negative axes) are rejected by
-  :func:`~nav.sim.sim_body.create_simulated_body`.
+  :func:`~spindoctor.sim.sim_body.create_simulated_body`.
 - Crater and anti-aliasing keys in the sim-params dict are accepted but ignored; the
   simulated renderer always uses maximum anti-aliasing.
 - The simulated body is rendered onto a fixed extfov image without per-instrument noise
@@ -84,7 +84,7 @@ in via the per-instance ``sim_params`` dict. Expected keys:
   degrees).
 - ``shape_model`` — ``ellipsoid`` (default) or ``polyhedral_mesh`` for an irregular body;
   a mesh reads ``mesh_lumpiness``, ``mesh_seed``, and ``pose_euler_deg`` (see
-  :func:`~nav.sim.sim_body_polyhedral.mesh_spec_from_params`).
+  :func:`~spindoctor.sim.sim_body_polyhedral.mesh_spec_from_params`).
 - ``km_per_pixel`` — optional physical scale at the limb; when absent the
   phase-irregularity factor collapses to the regular-body case.
 - ``nav_override`` — optional mapping overlaid on the body params to build the
@@ -133,53 +133,53 @@ unshifted position the planted offset is measured from.
 Implementation
 ==============
 
-Source file: ``src/nav/nav_model/nav_model_body_simulated.py`` —
-:class:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated`.
+Source file: ``src/spindoctor/nav_model/nav_model_body_simulated.py`` —
+:class:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated`.
 
-Public class :class:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated`, base
-:class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase`. The class overrides
-:meth:`~nav.nav_model.nav_model.NavModel.instances_for_obs` to build one instance per body
+Public class :class:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated`, base
+:class:`~spindoctor.nav_model.nav_model_body_base.NavModelBodyBase`. The class overrides
+:meth:`~spindoctor.nav_model.nav_model.NavModel.instances_for_obs` to build one instance per body
 of a simulated observation; the parent
-:class:`~nav.nav_model.nav_model_body.NavModelBody` returns an empty list for a simulated
+:class:`~spindoctor.nav_model.nav_model_body.NavModelBody` returns an empty list for a simulated
 observation, so the orchestrator's
-:func:`~nav.nav_model.nav_model.build_models_for_obs` driver routes simulated frames to
+:func:`~spindoctor.nav_model.nav_model.build_models_for_obs` driver routes simulated frames to
 this subclass.
 
 Public methods (autodocumented at :doc:`/api_reference/api_nav_model`):
 
-- :meth:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated.create_model` —
+- :meth:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated.create_model` —
   renders the simulated body (ellipsoid via
-  :func:`~nav.sim.sim_body.create_simulated_body`, or a mesh via
-  :func:`~nav.sim.sim_body_polyhedral.render_mesh_body_image`), computes the limb mask via
-  the shared :class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase` helper, and
+  :func:`~spindoctor.sim.sim_body.create_simulated_body`, or a mesh via
+  :func:`~spindoctor.sim.sim_body_polyhedral.render_mesh_body_image`), computes the limb mask via
+  the shared :class:`~spindoctor.nav_model.nav_model_body_base.NavModelBodyBase` helper, and
   records the predicted diameter and tight bounding box used to gate and emit features.
-- :meth:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated.to_features` — emits
+- :meth:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated.to_features` — emits
   the BODY_DISC plus, when the resolution and phase gates pass, the BODY_BLOB and
   LIMB_ARC features described under *Overview*.
-- :meth:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated.to_annotations` —
+- :meth:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated.to_annotations` —
   reuses the shared body annotation helper on
-  :class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase` to render body silhouette
+  :class:`~spindoctor.nav_model.nav_model_body_base.NavModelBodyBase` to render body silhouette
   and labels onto the summary PNG.
 
-Inherited :class:`~nav.nav_model.nav_model.NavModel` properties:
-:attr:`~nav.nav_model.nav_model.NavModel.name`,
-:attr:`~nav.nav_model.nav_model.NavModel.obs`,
-:attr:`~nav.nav_model.nav_model.NavModel.metadata`.
+Inherited :class:`~spindoctor.nav_model.nav_model.NavModel` properties:
+:attr:`~spindoctor.nav_model.nav_model.NavModel.name`,
+:attr:`~spindoctor.nav_model.nav_model.NavModel.obs`,
+:attr:`~spindoctor.nav_model.nav_model.NavModel.metadata`.
 
 Call path
 ---------
 
 Call path traced through
-:meth:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated.create_model`:
+:meth:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated.create_model`:
 
 1. Open a logged section. Read the operator-supplied sim parameters off the per-instance
    dict.
 2. Convert per-axis rotations and angle parameters from degrees to radians.
-3. Call :func:`~nav.sim.sim_body.create_simulated_body` with the per-axis radii and
+3. Call :func:`~spindoctor.sim.sim_body.create_simulated_body` with the per-axis radii and
    geometry; the helper returns the rendered simulated body image.
 4. Derive the body mask from the rendered image (every non-zero pixel is on the body).
 5. Compute the limb mask via
-   :class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase`'s shared discrete-mask
+   :class:`~spindoctor.nav_model.nav_model_body_base.NavModelBodyBase`'s shared discrete-mask
    neighbour-shift helper.
 6. Promote the rendered image and the masks from sensor-shaped arrays to extfov-shaped
    arrays (zero-padded for the extfov margin).
@@ -187,20 +187,20 @@ Call path traced through
    internal state for downstream feature emission.
 
 Call path traced through
-:meth:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated.to_features`:
+:meth:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated.to_features`:
 
 1. Crop the rendered template image and mask to the per-instance tight bounding box (the
    silhouette bbox plus slop, matching the SPICE-backed model, so a downstream moment
    stays local to the body rather than integrating over the whole frame).
 2. Construct one
-   :data:`~nav.feature.feature_type.NavFeatureType.BODY_DISC`
-   :class:`~nav.feature.feature.NavFeature` carrying the cropped template image, the
+   :data:`~spindoctor.feature.feature_type.NavFeatureType.BODY_DISC`
+   :class:`~spindoctor.feature.feature.NavFeature` carrying the cropped template image, the
    cropped mask, the predicted centre, the subject range, and a
-   :class:`~nav.feature.flags.BodyDiscFlags` with the operator-supplied body name plus
+   :class:`~spindoctor.feature.flags.BodyDiscFlags` with the operator-supplied body name plus
    ``overflow_fov_fraction = 0.0``.
 3. When the predicted diameter clears the blob floor, append a BODY_BLOB built by the
    shared blob-feature helper on
-   :class:`~nav.nav_model.nav_model_body_base.NavModelBodyBase`.
+   :class:`~spindoctor.nav_model.nav_model_body_base.NavModelBodyBase`.
 4. When the diameter and phase gates pass, append a LIMB_ARC: the silhouette boundary is
    sampled into a vertex polyline with outward normals and a fixed per-vertex sigma.
 5. Reliability on each feature is fixed at ``1.0`` (the simulated body is by construction
@@ -210,11 +210,11 @@ Examples
 ========
 
 The simulated body model is consumed by the simulated-image GUI driver
-(``nav_create_simulated_image``). An operator specifies a body — say a Mimas-like
+(``sd_create_simulated_image``). An operator specifies a body — say a Mimas-like
 ellipsoid centred at ``(512, 512)`` with semi-axes ``200`` km, illumination angle ``60``
 degrees, phase angle ``30`` degrees — and the simulator renders the corresponding
 extended-FOV image plus mask. The downstream
-:class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav` correlates the
+:class:`~spindoctor.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav` correlates the
 template against an injected synthetic-noise image and recovers the operator-known
 ``(0, 0)`` offset (or whatever offset the operator injected) within sub-pixel. The
 operator uses the residual to validate per-instrument plate-scale and PSF assumptions

@@ -1,4 +1,4 @@
-"""Tests for ``reproj_cli.factories.build_ring_mosaic`` argument validation.
+"""Tests for ``spindoctor.cli.reproj.factories.build_ring_mosaic`` argument validation.
 
 Covers the absolute-vs-offset radius semantics tied to ``--orbit-model``:
 
@@ -16,10 +16,10 @@ import argparse
 
 import pytest
 
-from nav.reproj.ring_orbit_model import FRING_CORE
-from nav.reproj.rings import RingMosaic
-from reproj_cli.args import add_ring_args
-from reproj_cli.factories import build_ring_mosaic
+from spindoctor.cli.reproj.args import add_ring_args
+from spindoctor.cli.reproj.factories import build_ring_mosaic
+from spindoctor.reproj.ring_orbit_model import FRING_CORE
+from spindoctor.reproj.rings import RingMosaic
 
 
 def _build_parser() -> argparse.ArgumentParser:

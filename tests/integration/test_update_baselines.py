@@ -165,7 +165,7 @@ def test_update_one_creates_new_baseline_when_missing(tmp_path: Path) -> None:
     """A sidecar with no on-disk baseline yields CREATE and writes the file."""
     sidecar = _make_sidecar('NEW_001')
     with mock.patch(
-        'nav.navigate_image_files.navigate_image_files',
+        'spindoctor.navigate_image_files.navigate_image_files',
         return_value=(True, {'offset': [12.34567, -7.89012], 'confidence': 0.876}),
     ):
         outcome = update_baselines.update_one(sidecar, baselines_dir=tmp_path, dry_run=False)
@@ -190,7 +190,7 @@ def test_update_one_unchanged_when_baseline_already_matches(tmp_path: Path) -> N
     target.write_text(existing.to_json())
     mtime_before = target.stat().st_mtime_ns
     with mock.patch(
-        'nav.navigate_image_files.navigate_image_files',
+        'spindoctor.navigate_image_files.navigate_image_files',
         return_value=(True, {'offset': [1.0, 2.0], 'confidence': 0.5}),
     ):
         outcome = update_baselines.update_one(sidecar, baselines_dir=tmp_path, dry_run=False)
@@ -212,7 +212,7 @@ def test_update_one_update_includes_field_diff(tmp_path: Path) -> None:
     target = baseline_path(tmp_path, 'DRIFT_001')
     target.write_text(existing.to_json())
     with mock.patch(
-        'nav.navigate_image_files.navigate_image_files',
+        'spindoctor.navigate_image_files.navigate_image_files',
         return_value=(True, {'offset': [1.5, 2.0], 'confidence': 0.555}),
     ):
         outcome = update_baselines.update_one(sidecar, baselines_dir=tmp_path, dry_run=False)
@@ -234,7 +234,7 @@ def test_update_one_dry_run_does_not_write(tmp_path: Path) -> None:
     sidecar = _make_sidecar('DRY_001')
     target = baseline_path(tmp_path, 'DRY_001')
     with mock.patch(
-        'nav.navigate_image_files.navigate_image_files',
+        'spindoctor.navigate_image_files.navigate_image_files',
         return_value=(True, {'offset': [1.5, 2.0], 'confidence': 0.555}),
     ):
         outcome = update_baselines.update_one(sidecar, baselines_dir=tmp_path, dry_run=True)
@@ -246,7 +246,7 @@ def test_update_one_failed_when_orchestrator_returns_no_offset(tmp_path: Path) -
     """A run that produces no offset yields FAILED and writes nothing."""
     sidecar = _make_sidecar('FAIL_001')
     with mock.patch(
-        'nav.navigate_image_files.navigate_image_files',
+        'spindoctor.navigate_image_files.navigate_image_files',
         return_value=(False, {'status': 'failed'}),
     ):
         outcome = update_baselines.update_one(sidecar, baselines_dir=tmp_path, dry_run=False)

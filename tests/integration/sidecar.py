@@ -63,10 +63,10 @@ ALLOWED_MISSIONS: frozenset[str] = frozenset(
 )
 """Mission codes accepted by ``Sidecar.mission``.
 
-Match the dataset names registered in :mod:`nav.dataset` upper-cased
+Match the dataset names registered in :mod:`spindoctor.dataset` upper-cased
 (``coiss`` / ``vgiss`` / ``gossi`` / ``nhlorri``) so the sidecar's
 ``mission`` is unambiguous against a CLI invocation like
-``nav_offset --dataset coiss``.
+``sd_offset --dataset coiss``.
 """
 
 ALLOWED_CAMERAS: frozenset[str] = frozenset(
@@ -81,7 +81,7 @@ ALLOWED_CAMERAS: frozenset[str] = frozenset(
 )
 
 ALLOWED_STATUSES: frozenset[str] = frozenset({'success', 'failed', 'conflicted'})
-# 'conflicted' mirrors :data:`nav.nav_orchestrator.nav_result.ConfidenceRank` —
+# 'conflicted' mirrors :data:`spindoctor.nav_orchestrator.nav_result.ConfidenceRank` —
 # the orchestrator hard-sets the rank to 'conflicted' whenever it returns a
 # conflicted NavResult, so the sidecar schema has to accept it as an
 # expected.confidence_tier value alongside the four tier names.

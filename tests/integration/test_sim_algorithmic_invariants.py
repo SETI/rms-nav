@@ -44,10 +44,10 @@ from typing import Any
 
 import pytest
 
-from nav.nav_model import build_models_for_obs
-from nav.nav_orchestrator import NavOrchestrator
-from nav.obs.obs_inst_sim import ObsSim
-from nav.sim.scene import iter_scene_paths, load_sim_scene
+from spindoctor.nav_model import build_models_for_obs
+from spindoctor.nav_orchestrator import NavOrchestrator
+from spindoctor.obs.obs_inst_sim import ObsSim
+from spindoctor.sim.scene import iter_scene_paths, load_sim_scene
 
 # Recovery tolerance in pixels.  The disc/correlation techniques converge to a
 # few tenths of a pixel on these clean scenes; 1.0 px is a safe invariant bound.

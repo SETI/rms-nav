@@ -5,10 +5,10 @@ Body Limb Fit (BodyLimbNav)
 Overview
 ========
 
-:class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav` recovers a single translation
+:class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav` recovers a single translation
 from one or more body limb polylines by aligning
 each polyline against the image's edge-distance-transform. The technique consumes every
-:data:`~nav.feature.feature_type.NavFeatureType.LIMB_ARC` feature offered by the orchestrator,
+:data:`~spindoctor.feature.feature_type.NavFeatureType.LIMB_ARC` feature offered by the orchestrator,
 weights each vertex by its prior-precision sigma, and runs a coarse normalised-cross-correlation
 search followed by a Tukey-reweighted Levenberg-Marquardt refinement. The output is the
 joint translation that minimises the summed weighted squared distance from the model polylines
@@ -79,7 +79,7 @@ Restrictions and assumptions
 
 - The orchestrator must supply both an image-edge distance transform and a per-pixel gradient
   vector image on the per-image
-  :class:`~nav.nav_orchestrator.nav_context.NavContext`; in their absence the navigation aborts
+  :class:`~spindoctor.nav_orchestrator.nav_context.NavContext`; in their absence the navigation aborts
   with a runtime error.
 - The vertices and per-vertex normal sigmas must be physically meaningful — vertices with zero
   or negative sigma are rejected by the LM refiner.
@@ -132,20 +132,20 @@ PSF-aware); that work is tracked in issue #150. Until then the limb fit is the l
 the point-feature techniques on a well-resolved body, though it stays well inside the
 navigability bound. When the converged offset
 sits within a small tolerance of any axis bound of the search window, or when the rotation
-parameter is at the configured fraction of its cap, the result is flagged :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and the
+parameter is at the configured fraction of its cap, the result is flagged :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and the
 confidence formula's hard-zero gate forces confidence to zero. The spurious tests gate on
 the Tukey-weighted DT residual RMS, the unweighted (raw) DT residual RMS against the same
 threshold (so a fit where Tukey rejects a wholly mis-aligned arc cannot pass on its
 collapsed weighted RMS), the degenerate flag, the inlier count and fraction, and the LM
 displacement from the coarse seed; when any of these fails, the result is flagged
-:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious` and similarly
+:attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` and similarly
 forced to zero.
 
 Configuration
 =============
 
 All numeric tunables for this technique live in ``techniques.BodyLimbNav.tuning`` in
-``src/nav/config_files/config_510_techniques.yaml``.
+``src/spindoctor/config_files/config_510_techniques.yaml``.
 
 - ``min_arc_px`` — float, default ``30.0`` px. Minimum surviving vertex count per ``LIMB_ARC``
   for feasibility. Shorter limbs do not constrain a 2-D translation enough to be worth the
@@ -161,18 +161,18 @@ All numeric tunables for this technique live in ``techniques.BodyLimbNav.tuning`
   features (crater rims, terminator); the result is flagged spurious.
 - ``at_edge_tolerance_px`` — float, default ``1.0`` px. A converged offset whose absolute
   distance from any search-window axis bound falls within this tolerance is flagged
-  :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge`. Matches the bilinear-DT half-cell width.
+  :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge`. Matches the bilinear-DT half-cell width.
 - ``rotation_at_edge_fraction`` — float, default ``0.95`` (dimensionless). When
-  :attr:`~nav.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` is true, the converged rotation magnitude trips :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` once it
-  crosses this fraction of the per-image :attr:`~nav.nav_orchestrator.nav_context.NavContext.max_rotation_deg` cap.
+  :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` is true, the converged rotation magnitude trips :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` once it
+  crosses this fraction of the per-image :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.max_rotation_deg` cap.
 
 Per-instrument overrides
 ------------------------
 
 The seven keys above are global; the per-instrument YAML files in
-``src/nav/config_files/config_4N0_inst_*.yaml`` do not override any of them. The
+``src/spindoctor/config_files/config_4N0_inst_*.yaml`` do not override any of them. The
 search-window margin used by the at-edge test comes from the per-instrument
-:class:`~nav.nav_orchestrator.instrument_config.InstrumentSettings` rather than from this block.
+:class:`~spindoctor.nav_orchestrator.instrument_config.InstrumentSettings` rather than from this block.
 
 Confidence formula
 ------------------
@@ -181,23 +181,23 @@ The technique reports a calibrated confidence in :math:`[0, 1]` produced by the 
 combination, see :doc:`dev_guide_techniques_dt_fitting` for the per-term arithmetic and
 :doc:`dev_guide_techniques` for the family-level overview of confidence. The formula spec is
 ``techniques.BodyLimbNav`` in the same YAML file and consumes attributes off
-:class:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics` plus the :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and
-:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious` flags carried on the result.
+:class:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics` plus the :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and
+:attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` flags carried on the result.
 
-- :attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.visible_limb_arc_fraction` —
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics.visible_limb_arc_fraction` —
   alpha = 3.0, offset = 0.0, divisor = 1.0, no cap.
   Fraction of the polyline (weighted by surviving vertex count across consumed ``LIMB_ARC``
   features) whose vertices were not pre-rejected by the model-side shadow / FOV gates. One
   means every offered vertex is usable.
-- :attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.dt_fit_rms_px` — alpha = -1.5,
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics.dt_fit_rms_px` — alpha = -1.5,
   offset = 0.0, divisor = 1.0, no cap. Final root-mean-square DT residual after LM
   convergence; smaller is sharper.
-- :attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.visible_arc_px` — alpha = 0.4,
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics.visible_arc_px` — alpha = 0.4,
   offset = 0.0, divisor = 100.0, cap at 1.0. Total surviving polyline length in pixels,
   capped after normalisation. More polyline earns confidence up to a 100-pixel saturation
   point.
 
-Hard-zero gate: :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces the confidence to zero before
+Hard-zero gate: :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces the confidence to zero before
 the sigmoid is evaluated. The constant baseline is :math:`\alpha_{0} = -1.0`. No post-sigmoid
 ``hard_cap`` is applied.
 
@@ -206,67 +206,67 @@ Implementation
 
 Source files:
 
-- ``src/nav/nav_technique/nav_technique_body_limb.py`` —
-  :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav` and its private aggregation /
+- ``src/spindoctor/nav_technique/nav_technique_body_limb.py`` —
+  :class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav` and its private aggregation /
   polyline-mask helpers.
-- ``src/nav/nav_technique/dt_fitting.py`` — the shared coarse-NCC and LM-refinement helpers
+- ``src/spindoctor/nav_technique/dt_fitting.py`` — the shared coarse-NCC and LM-refinement helpers
   documented at :doc:`dev_guide_techniques_dt_fitting`.
-- ``src/nav/nav_orchestrator/image_derivatives.py`` — the per-image gradient / DT derivatives
-  attached to :class:`~nav.nav_orchestrator.nav_context.NavContext`.
-- ``src/nav/nav_technique/confidence.py`` — the shared sigmoid-combination formula evaluator.
-- ``src/nav/nav_technique/diagnostics.py`` —
-  :class:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics`.
+- ``src/spindoctor/nav_orchestrator/image_derivatives.py`` — the per-image gradient / DT derivatives
+  attached to :class:`~spindoctor.nav_orchestrator.nav_context.NavContext`.
+- ``src/spindoctor/nav_technique/confidence.py`` — the shared sigmoid-combination formula evaluator.
+- ``src/spindoctor/nav_technique/diagnostics.py`` —
+  :class:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics`.
 
-Public class :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav`, base
-:class:`~nav.nav_technique.nav_technique.NavTechnique`. Self-registers via
+Public class :class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav`, base
+:class:`~spindoctor.nav_technique.nav_technique.NavTechnique`. Self-registers via
 ``__init_subclass__`` so the orchestrator's
 ``NavTechnique._registry`` discovers it.
 
 Class attributes:
 
-- :attr:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav.name` — ``'BodyLimbNav'``.
-- :attr:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav.accepts_feature_types` —
+- :attr:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav.name` — ``'BodyLimbNav'``.
+- :attr:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav.accepts_feature_types` —
   ``frozenset({LIMB_ARC})``.
-- :attr:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav.requires_prior` — ``False``.
+- :attr:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav.requires_prior` — ``False``.
   The technique runs in pass 1 of the orchestrator's two-pass pipeline.
-- :attr:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav.confidence_attributes` — the
+- :attr:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav.confidence_attributes` — the
   names of every attribute the spec is allowed to read, validated at config-load time:
   ``{'at_edge', 'spurious', 'visible_limb_arc_fraction', 'visible_arc_px', 'dt_fit_rms_px',
   'lm_iterations', 'tukey_inlier_count'}``.
 
 Public methods (autodocumented at :doc:`/api_reference/api_nav_technique`):
-:meth:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav.is_feasible` and
-:meth:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav.navigate`.
+:meth:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav.is_feasible` and
+:meth:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav.navigate`.
 
 Diagnostics
 -----------
 
-:class:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics` is the typed dataclass attached to
+:class:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics` is the typed dataclass attached to
 the result. Every field is named in the call path or in the confidence formula above:
 
-- :attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.visible_limb_arc_fraction` —
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics.visible_limb_arc_fraction` —
   vertex-weighted average of the per-feature visible-arc fraction; consumed by the confidence
   formula.
-- :attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.visible_arc_px` — total
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics.visible_arc_px` — total
   surviving polyline arc length in pixels; consumed by the confidence formula.
-- :attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.dt_fit_rms_px` — weighted RMS DT
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics.dt_fit_rms_px` — weighted RMS DT
   residual at the converged pose; consumed by the confidence formula and by the
   spurious-detection gate.
-- :attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.lm_iterations` — number of LM
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics.lm_iterations` — number of LM
   iterations actually performed.
-- :attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.tukey_inlier_count` — number of
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics.tukey_inlier_count` — number of
   vertices that retained a strictly positive Tukey weight at the final estimate; consumed by
   the spurious-detection gate.
 
 Call path traced through
-:meth:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav.navigate`:
+:meth:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav.navigate`:
 
 1. Open a logged section. Fail fast if either
-   :attr:`~nav.nav_orchestrator.nav_context.NavContext.image_edge_dt_ext` or
-   :attr:`~nav.nav_orchestrator.nav_context.NavContext.image_gradient_vu_ext` is missing from
+   :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.image_edge_dt_ext` or
+   :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.image_gradient_vu_ext` is missing from
    the context — the orchestrator's per-image setup
    is responsible for populating both via
-   :func:`~nav.nav_orchestrator.image_derivatives.compute_all_image_derivatives`; see
+   :func:`~spindoctor.nav_orchestrator.image_derivatives.compute_all_image_derivatives`; see
    :doc:`dev_guide_techniques_dt_fitting` for the surface those products expose.
 2. Filter the offered features down to ``LIMB_ARC`` polylines whose surviving vertex count is at
    least ``min_arc_px``, then concatenate the per-feature vertex / normal / sigma arrays via
@@ -274,49 +274,49 @@ Call path traced through
    in this step so that the polarity test in the LM refiner expects the image gradient to
    point *into* the body silhouette.
 3. Build a binary polyline mask and pull the search-window margin off the observation via
-   :func:`~nav.nav_technique.nav_technique.search_window_for_obs`. Run
-   :func:`~nav.nav_technique.dt_fitting.coarse_ncc_search` on the polyline mask and the
+   :func:`~spindoctor.nav_technique.nav_technique.search_window_for_obs`. Run
+   :func:`~spindoctor.nav_technique.dt_fitting.coarse_ncc_search` on the polyline mask and the
    thresholded edge mask to obtain an integer seed offset.
 4. Decide whether to fit camera rotation by reading
-   :attr:`~nav.nav_orchestrator.nav_context.NavContext.fit_camera_rotation`. When rotation
+   :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.fit_camera_rotation`. When rotation
    is fit, the rotation pivot is set to the
    centroid of the concatenated vertices and the pivot-to-image-centre distance is computed
-   via :func:`~nav.nav_technique.nav_technique.rotation_pivot_distance_px` for the convergence
+   via :func:`~spindoctor.nav_technique.nav_technique.rotation_pivot_distance_px` for the convergence
    test.
-5. Call :func:`~nav.nav_technique.dt_fitting.lm_subpixel_refine` with the polyline,
+5. Call :func:`~spindoctor.nav_technique.dt_fitting.lm_subpixel_refine` with the polyline,
    per-vertex sigmas, the edge DT, the gradient image, the integer seed, and the rotation
    options. The refiner returns a converged
-   :class:`~nav.nav_technique.dt_fitting.LMRefineResult`.
+   :class:`~spindoctor.nav_technique.dt_fitting.LMRefineResult`.
 6. Compute the result-shape branches:
 
    - **No rotation fit.**
-     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.covariance_px2` is the
+     :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.covariance_px2` is the
      (2, 2) translation block. Any non-(2, 2) covariance returned by the refiner is logged
      at WARNING and truncated.
-     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.rotation_rad` and
-     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.sigma_rotation_rad` are
+     :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.rotation_rad` and
+     :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.sigma_rotation_rad` are
      ``None``.
    - **Rotation fit.**
-     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.covariance_px2` is the
+     :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.covariance_px2` is the
      (3, 3) translation + rotation information matrix.
-     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.rotation_rad` is the
+     :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.rotation_rad` is the
      converged angle and
-     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.sigma_rotation_rad` is
+     :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.sigma_rotation_rad` is
      the square root of its diagonal. An unexpected covariance shape raises
      :exc:`RuntimeError` — a programmer error in the refiner contract is not silently
      absorbed.
 
 7. Apply the at-edge tests against both the translation axis bounds and the rotation cap, and
    the spurious tests against the final RMS, the inlier count, and the inlier fraction.
-8. Build a :class:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics`, evaluate the
-   confidence spec via :func:`~nav.nav_technique.confidence.evaluate_sigmoid_combination`, log
+8. Build a :class:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics`, evaluate the
+   confidence spec via :func:`~spindoctor.nav_technique.confidence.evaluate_sigmoid_combination`, log
    the per-term breakdown via
-   :func:`~nav.nav_technique.nav_technique.log_confidence_breakdown`, and assemble the
-   :class:`~nav.nav_technique.technique_result.NavTechniqueResult`.
+   :func:`~spindoctor.nav_technique.nav_technique.log_confidence_breakdown`, and assemble the
+   :class:`~spindoctor.nav_technique.technique_result.NavTechniqueResult`.
 
-The :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.feature_ids` field on the
+The :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.feature_ids` field on the
 result preserves every consumed
-:attr:`~nav.feature.feature.NavFeature.feature_id` so the orchestrator's curator can attribute
+:attr:`~spindoctor.feature.feature.NavFeature.feature_id` so the orchestrator's curator can attribute
 each contribution at audit time.
 
 Examples
@@ -327,13 +327,13 @@ Examples
     ``LIMB_ARC`` feature; the technique consumes it and converges to
     :math:`(\Delta v, \Delta u) = (12.06, 30.53)` px against an operator-verified ground truth
     of ``(11.0, 29.5)`` px. Feasibility passes (one ``LIMB_ARC``, surviving vertex count well
-    above ``min_arc_px``), neither :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` nor :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious` fires, and the technique
+    above ``min_arc_px``), neither :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` nor :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` fires, and the technique
     becomes the orchestrator's primary on this image.
 
 ``multi_body`` (Cassini ISS NAC, image ``N1487595731_1``)
     Dione and Rhea both visible and overlapping at phase angle approximately 90 degrees. Two
     ``LIMB_ARC`` features are offered;
-    :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav` fuses them into a joint
+    :class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav` fuses them into a joint
     translation and
     converges to :math:`(\Delta v, \Delta u) = (7.00, -18.00)` px against an operator-verified
     ground truth of ``(7.03, -18.42)`` px. The technique reports a confidence near 0.24 — the
@@ -343,8 +343,8 @@ Examples
 ``body_full_fov`` (Cassini ISS NAC, image ``N1572105349_1``)
     Dione fills the FOV, predicted disc diameter approximately 155 px. The body model emits a
     ``LIMB_ARC`` feature, but the upstream feature-reliability gate drops it before
-    :meth:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav.is_feasible` is consulted
+    :meth:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav.is_feasible` is consulted
     (the textbook full-disc, fully-lit limb saturates
     the model-side reliability formula's incidence-factor penalty). The technique therefore
     reports zero consumed features and skips
-    :meth:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav.navigate` for this scene.
+    :meth:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav.navigate` for this scene.

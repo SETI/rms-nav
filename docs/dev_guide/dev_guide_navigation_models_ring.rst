@@ -5,20 +5,20 @@ Ring Navigation Model
 Overview
 ========
 
-:class:`~nav.nav_model.nav_model_rings.NavModelRings` is the catalog-driven ring navigation
+:class:`~spindoctor.nav_model.nav_model_rings.NavModelRings` is the catalog-driven ring navigation
 model. For each planet whose ring system has any radius inside the extended FOV the model
 renders the per-ring-edge silhouette from the catalog, runs a four-pass
 ``RingFeatureFilter`` to drop edges that are not separable / detectable on this image, and
-emits either a :data:`~nav.feature.feature_type.NavFeatureType.RING_EDGE` per surviving edge
+emits either a :data:`~spindoctor.feature.feature_type.NavFeatureType.RING_EDGE` per surviving edge
 (the "edges resolve" path) or a single
-:data:`~nav.feature.feature_type.NavFeatureType.RING_ANNULUS` per planet (the "edges
+:data:`~spindoctor.feature.feature_type.NavFeatureType.RING_ANNULUS` per planet (the "edges
 compress" path) when individual edges fall below the resolvability threshold.
 
 The orchestrator constructs one model instance per planet whose ring system overlaps the
 extfov. A simulated-image sibling
-(:class:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated`) renders rings
+(:class:`~spindoctor.nav_model.nav_model_rings_simulated.NavModelRingsSimulated`) renders rings
 from operator-supplied parameters instead of the catalog; both classes share annotation
-helpers on :class:`~nav.nav_model.nav_model_rings_base.NavModelRingsBase`.
+helpers on :class:`~spindoctor.nav_model.nav_model_rings_base.NavModelRingsBase`.
 
 Theory
 ======
@@ -86,7 +86,7 @@ the polyline; spatial variation of the catalog ``rms`` along the ring's longitud
 modelled.
 
 The along-edge sigma is the project-wide constant
-:data:`~nav.nav_model.nav_model_rings.RING_EDGE_SIGMA_ALONG_PX` (``0.5`` px), reflecting
+:data:`~spindoctor.nav_model.nav_model_rings.RING_EDGE_SIGMA_ALONG_PX` (``0.5`` px), reflecting
 the polyline-sampling resolution. The DT-based fit treats motion along the polyline as
 essentially unobservable by construction, so this axis only sets the scale at which
 along-edge displacement is numerically de-weighted relative to the radial axis.
@@ -95,7 +95,7 @@ The per-vertex covariance does not absorb the optical PSF sigma, the per-edge ph
 contrast against the background, or any longitude-dependent perturbation; those terms
 shift the apparent edge position non-uniformly around the ring rather than enlarging the
 per-vertex radial sigma, and the technique-side fitter handles that scatter via the
-shared M-estimator robust-weighting machinery in :mod:`nav.nav_technique.dt_fitting`
+shared M-estimator robust-weighting machinery in :mod:`spindoctor.nav_technique.dt_fitting`
 (see :doc:`dev_guide_techniques_dt_fitting`).
 
 Annulus template
@@ -103,7 +103,7 @@ Annulus template
 
 When the per-planet km/px scale exceeds the configured threshold (or any single ring edge
 compresses below the per-polyline radial-pixel threshold), the model emits a single
-:attr:`~nav.feature.feature_type.NavFeatureType.RING_ANNULUS` feature carrying a rendered
+:attr:`~spindoctor.feature.feature_type.NavFeatureType.RING_ANNULUS` feature carrying a rendered
 template image of the entire ring system
 (every ring radius painted at the catalog brightness contrast) plus the matching mask.
 The template's bounding box is the union of the per-edge bounding boxes; the template
@@ -133,7 +133,7 @@ non-uniformly around the ring. Those terms enter the technique-side fit through 
 M-estimator's robust weighting (which down-weights vertices whose DT residual is
 inconsistent with the per-vertex sigma) rather than by inflating the sigma itself; see
 :doc:`dev_guide_techniques_dt_fitting` for the fitter's treatment. Edges flagged
-:attr:`~nav.feature.flags.RingEdgeFlags.is_straight_line` are rank-1 along radial only;
+:attr:`~spindoctor.feature.flags.RingEdgeFlags.is_straight_line` are rank-1 along radial only;
 edges that pass the curvature classification carry full-rank locally-observable
 information.
 
@@ -141,13 +141,13 @@ Configuration
 =============
 
 The model's runtime knobs are split across three locations: the ``rings`` block in
-``src/nav/config_files/config_050_rings.yaml`` (general per-model knobs and label
+``src/spindoctor/config_files/config_050_rings.yaml`` (general per-model knobs and label
 rendering), the per-planet ring catalogues in
-``src/nav/config_files/config_3N0_*_rings.yaml`` (one file per planet, each carrying a
+``src/spindoctor/config_files/config_3N0_*_rings.yaml`` (one file per planet, each carrying a
 ``rings.ring_features`` mapping), and the per-planet annulus-emission thresholds under
-``feature_emission.ring_annulus`` in ``src/nav/config_files/config_510_techniques.yaml``
+``feature_emission.ring_annulus`` in ``src/spindoctor/config_files/config_510_techniques.yaml``
 (consumed by the per-feature emission gate; see :doc:`dev_guide_techniques_ring_annulus`).
-Module-level Python constants in :mod:`nav.nav_model.nav_model_rings` set per-vertex
+Module-level Python constants in :mod:`spindoctor.nav_model.nav_model_rings` set per-vertex
 sigma and curvature thresholds that are not exposed to YAML.
 
 rings block
@@ -196,31 +196,31 @@ bullet names the consumer (or "reserved" when no consumer is wired).
   inside the per-planet shadow before rendering ring edges; the ring radius is still
   defined inside the shadow but the brightness is zero, so leaving the shadow pixels
   in would skew the per-vertex covariance. Consumed by
-  :class:`~nav.nav_model.nav_model_rings.NavModelRings`.
+  :class:`~spindoctor.nav_model.nav_model_rings.NavModelRings`.
 - ``remove_body_shadows`` — bool, default ``false``. Reserved for masking the projected
   shadow of every body in the FOV. Not consumed by the active extractor.
 - ``ring_features`` — dict[str, dict]. Per-planet ring catalogue overlaid from the
   per-planet ``config_3N0_*_rings.yaml`` files (see below). Consumed by
-  :class:`~nav.nav_model.nav_model_rings.NavModelRings`.
+  :class:`~spindoctor.nav_model.nav_model_rings.NavModelRings`.
 - ``label_font`` — str, default ``liberation2/LiberationMono-Bold.ttf``. Font used for
   ring labels. Consumed by
-  :class:`~nav.nav_model.nav_model_rings_base.NavModelRingsBase`.
+  :class:`~spindoctor.nav_model.nav_model_rings_base.NavModelRingsBase`.
 - ``label_font_size`` — int, default ``18`` px. Ring label font size. Consumed by
-  :class:`~nav.nav_model.nav_model_rings_base.NavModelRingsBase`.
+  :class:`~spindoctor.nav_model.nav_model_rings_base.NavModelRingsBase`.
 - ``label_font_color`` — list[int], default ``[255, 0, 0]`` (RGB). Ring label font
-  color. Consumed by :class:`~nav.nav_model.nav_model_rings_base.NavModelRingsBase`.
+  color. Consumed by :class:`~spindoctor.nav_model.nav_model_rings_base.NavModelRingsBase`.
 - ``label_limb_color`` — list[int], default ``[255, 0, 0]`` (RGB). Color of the per-edge
   polyline drawn on the summary PNG. Consumed by
-  :class:`~nav.nav_model.nav_model_rings_base.NavModelRingsBase`.
+  :class:`~spindoctor.nav_model.nav_model_rings_base.NavModelRingsBase`.
 - ``label_mask_enlarge`` — int, default ``10`` px. Pixels around a ring edge to avoid
   for label placement. Consumed by
-  :class:`~nav.nav_model.nav_model_rings_base.NavModelRingsBase`.
+  :class:`~spindoctor.nav_model.nav_model_rings_base.NavModelRingsBase`.
 - ``label_horiz_gap`` — int, default ``7`` px. Horizontal gap between the edge and the
   head of the label arrow. Consumed by
-  :class:`~nav.nav_model.nav_model_rings_base.NavModelRingsBase`.
+  :class:`~spindoctor.nav_model.nav_model_rings_base.NavModelRingsBase`.
 - ``label_vert_gap`` — int, default ``5`` px. Vertical gap between the edge and the head
   of the label arrow. Consumed by
-  :class:`~nav.nav_model.nav_model_rings_base.NavModelRingsBase`.
+  :class:`~spindoctor.nav_model.nav_model_rings_base.NavModelRingsBase`.
 
 Per-planet ring catalogue
 -------------------------
@@ -246,26 +246,26 @@ per planet: Jupiter, Saturn, Uranus, Neptune). Each per-planet entry sets:
   enumerates the per-mode catalog terms (mode number plus ``a`` / ``rms`` / ``ae`` /
   ``long_peri`` / ``rate_peri`` for orbiting features, or ``amplitude`` / ``phase`` /
   ``pattern_speed`` for free-mode features). Consumed by
-  :class:`~nav.nav_model.rings.ring_feature.RingFeature`.
+  :class:`~spindoctor.nav_model.rings.ring_feature.RingFeature`.
 
 Module-level emission constants
 -------------------------------
 
 The per-vertex sigma defaults and curvature threshold are Python module-level constants
-in :mod:`nav.nav_model.nav_model_rings` and are not exposed as YAML knobs. Tests and
+in :mod:`spindoctor.nav_model.nav_model_rings` and are not exposed as YAML knobs. Tests and
 downstream tools read the canonical values via these symbols.
 
-- :data:`~nav.nav_model.nav_model_rings.RING_EDGE_DEFAULT_RELIABILITY` — float, ``0.7``
+- :data:`~spindoctor.nav_model.nav_model_rings.RING_EDGE_DEFAULT_RELIABILITY` — float, ``0.7``
   (dimensionless). Catalog default reliability scaling applied to a
-  :attr:`~nav.feature.feature_type.NavFeatureType.RING_EDGE` feature before per-image
+  :attr:`~spindoctor.feature.feature_type.NavFeatureType.RING_EDGE` feature before per-image
   weighting; the design's "catalog_default_reliability" term in the
-  :attr:`~nav.feature.feature_type.NavFeatureType.RING_EDGE` sigmoid.
-- :data:`~nav.nav_model.nav_model_rings.RING_EDGE_SIGMA_ALONG_PX` — float, ``0.5`` px.
+  :attr:`~spindoctor.feature.feature_type.NavFeatureType.RING_EDGE` sigmoid.
+- :data:`~spindoctor.nav_model.nav_model_rings.RING_EDGE_SIGMA_ALONG_PX` — float, ``0.5`` px.
   Per-vertex sigma along the polyline tangent direction. Reflects polyline-sampling
   resolution; the technique-side fitter treats this axis as essentially unobservable.
-- :data:`~nav.nav_model.nav_model_rings.FLAT_CURVATURE_THRESHOLD_PX` — float, ``1.0`` px.
+- :data:`~spindoctor.nav_model.nav_model_rings.FLAT_CURVATURE_THRESHOLD_PX` — float, ``1.0`` px.
   Pixel-deviation threshold below which a polyline is flagged
-  :attr:`~nav.feature.flags.RingEdgeFlags.is_straight_line`. The technique-side fitter
+  :attr:`~spindoctor.feature.flags.RingEdgeFlags.is_straight_line`. The technique-side fitter
   then handles its rank-1 covariance.
 
 Per-instrument overrides
@@ -274,8 +274,8 @@ Per-instrument overrides
 The ``rings`` block is global: per-instrument YAML (``config_4N0_inst_*.yaml``) does not
 override any of the keys above. Instrument-specific behaviour enters through the
 observation snapshot — the optical PSF sigma read from
-:meth:`~nav.obs.obs_inst.ObsInst.star_psf` and the extended-FOV margin set by
-:class:`~nav.nav_orchestrator.instrument_config.InstrumentSettings` — rather than through
+:meth:`~spindoctor.obs.obs_inst.ObsInst.star_psf` and the extended-FOV margin set by
+:class:`~spindoctor.nav_orchestrator.instrument_config.InstrumentSettings` — rather than through
 this config block.
 
 Implementation
@@ -283,69 +283,69 @@ Implementation
 
 Source files:
 
-- ``src/nav/nav_model/nav_model_rings.py`` —
-  :class:`~nav.nav_model.nav_model_rings.NavModelRings`, the four-pass filter, the
+- ``src/spindoctor/nav_model/nav_model_rings.py`` —
+  :class:`~spindoctor.nav_model.nav_model_rings.NavModelRings`, the four-pass filter, the
   per-edge sampler, and the annulus-template builder.
-- ``src/nav/nav_model/nav_model_rings_base.py`` —
-  :class:`~nav.nav_model.nav_model_rings_base.NavModelRingsBase`, abstract shared base
+- ``src/spindoctor/nav_model/nav_model_rings_base.py`` —
+  :class:`~spindoctor.nav_model.nav_model_rings_base.NavModelRingsBase`, abstract shared base
   carrying the ring annotation pipeline.
-- ``src/nav/nav_model/rings/`` — the :mod:`nav.nav_model.rings` subpackage with the
+- ``src/spindoctor/nav_model/rings/`` — the :mod:`spindoctor.nav_model.rings` subpackage with the
   validation, filtering, and rendering helpers
-  (:mod:`~nav.nav_model.rings.ring_types`,
-  :mod:`~nav.nav_model.rings.ring_feature`,
-  :mod:`~nav.nav_model.rings.ring_filter`,
-  :mod:`~nav.nav_model.rings.ring_math`,
-  :mod:`~nav.nav_model.rings.ring_render_context`,
-  :mod:`~nav.nav_model.rings.ring_render_result`).
+  (:mod:`~spindoctor.nav_model.rings.ring_types`,
+  :mod:`~spindoctor.nav_model.rings.ring_feature`,
+  :mod:`~spindoctor.nav_model.rings.ring_filter`,
+  :mod:`~spindoctor.nav_model.rings.ring_math`,
+  :mod:`~spindoctor.nav_model.rings.ring_render_context`,
+  :mod:`~spindoctor.nav_model.rings.ring_render_result`).
 
-Public class :class:`~nav.nav_model.nav_model_rings.NavModelRings`, base
-:class:`~nav.nav_model.nav_model_rings_base.NavModelRingsBase`. Self-registers via
+Public class :class:`~spindoctor.nav_model.nav_model_rings.NavModelRings`, base
+:class:`~spindoctor.nav_model.nav_model_rings_base.NavModelRingsBase`. Self-registers via
 ``__init_subclass__``.
 
 Public methods (autodocumented at :doc:`/api_reference/api_nav_model`):
 
-- :meth:`~nav.nav_model.nav_model_rings.NavModelRings.instances_for_obs` — class method
+- :meth:`~spindoctor.nav_model.nav_model_rings.NavModelRings.instances_for_obs` — class method
   that returns one instance per planet whose ring system has any radius inside the
   extended FOV.
-- :meth:`~nav.nav_model.nav_model_rings.NavModelRings.create_model` — populates the model
+- :meth:`~spindoctor.nav_model.nav_model_rings.NavModelRings.create_model` — populates the model
   state by rendering each per-edge silhouette, running the four-pass filter, and emitting
   per-vertex polyline data plus an optional annulus template.
-- :meth:`~nav.nav_model.nav_model_rings.NavModelRings.to_features` — runs the per-edge
+- :meth:`~spindoctor.nav_model.nav_model_rings.NavModelRings.to_features` — runs the per-edge
   emission gates and constructs zero or more
-  :class:`~nav.feature.feature.NavFeature` instances
-  (:attr:`~nav.feature.feature_type.NavFeatureType.RING_EDGE` per surviving edge, or
-  :attr:`~nav.feature.feature_type.NavFeatureType.RING_ANNULUS` per planet when the
+  :class:`~spindoctor.feature.feature.NavFeature` instances
+  (:attr:`~spindoctor.feature.feature_type.NavFeatureType.RING_EDGE` per surviving edge, or
+  :attr:`~spindoctor.feature.feature_type.NavFeatureType.RING_ANNULUS` per planet when the
   annulus path fires).
-- :meth:`~nav.nav_model.nav_model_rings.NavModelRings.to_annotations` — emits per-edge
+- :meth:`~spindoctor.nav_model.nav_model_rings.NavModelRings.to_annotations` — emits per-edge
   polylines and per-planet labels for the summary PNG.
 
-Inherited :class:`~nav.nav_model.nav_model.NavModel` properties:
-:attr:`~nav.nav_model.nav_model.NavModel.name`,
-:attr:`~nav.nav_model.nav_model.NavModel.obs`,
-:attr:`~nav.nav_model.nav_model.NavModel.metadata`.
+Inherited :class:`~spindoctor.nav_model.nav_model.NavModel` properties:
+:attr:`~spindoctor.nav_model.nav_model.NavModel.name`,
+:attr:`~spindoctor.nav_model.nav_model.NavModel.obs`,
+:attr:`~spindoctor.nav_model.nav_model.NavModel.metadata`.
 
 Annotation helpers
 ------------------
 
-:class:`~nav.nav_model.nav_model_rings_base.NavModelRingsBase` is the abstract shared
+:class:`~spindoctor.nav_model.nav_model_rings_base.NavModelRingsBase` is the abstract shared
 base. One helper lives there:
 
 - ``_create_edge_annotations`` — builds the per-edge polyline + per-edge label
-  :class:`~nav.annotation.annotations.Annotations` collection for the summary PNG.
+  :class:`~spindoctor.annotation.annotations.Annotations` collection for the summary PNG.
   Consumes the ``label_*`` keys documented above. Used by both
-  :class:`~nav.nav_model.nav_model_rings.NavModelRings` and
-  :class:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated`.
+  :class:`~spindoctor.nav_model.nav_model_rings.NavModelRings` and
+  :class:`~spindoctor.nav_model.nav_model_rings_simulated.NavModelRingsSimulated`.
 
 The per-edge anti-aliasing math invoked from
-:class:`~nav.nav_model.rings.ring_feature.RingFeature` lives in
-:mod:`~nav.nav_model.rings.ring_math` (``compute_antialiasing``); it is shared between
+:class:`~spindoctor.nav_model.rings.ring_feature.RingFeature` lives in
+:mod:`~spindoctor.nav_model.rings.ring_math` (``compute_antialiasing``); it is shared between
 the real and simulated paths but is not part of the annotation pipeline.
 
 Per-image metadata
 ------------------
 
-:meth:`~nav.nav_model.nav_model_rings.NavModelRings.create_model` populates
-:attr:`~nav.nav_model.nav_model.NavModel.metadata` with the following entries for the
+:meth:`~spindoctor.nav_model.nav_model_rings.NavModelRings.create_model` populates
+:attr:`~spindoctor.nav_model.nav_model.NavModel.metadata` with the following entries for the
 curator to surface in the per-image JSON sidecar:
 
 - ``start_time`` / ``end_time`` / ``elapsed_time_sec`` — wall-clock timing for the model
@@ -357,14 +357,14 @@ curator to surface in the per-image JSON sidecar:
 - ``feature_count`` — int, number of ring features that survived the four-pass filter.
 - ``features`` — list[dict[str, str]], one entry per surviving ring feature carrying
   ``name`` (the catalog edge name) and ``type`` (the
-  :class:`~nav.feature.feature_type.NavFeatureType` value the per-edge emission gate
+  :class:`~spindoctor.feature.feature_type.NavFeatureType` value the per-edge emission gate
   ultimately produced — ``RING_EDGE`` or ``RING_ANNULUS``).
 
 Call path
 ---------
 
 Call path traced through
-:meth:`~nav.nav_model.nav_model_rings.NavModelRings.create_model`:
+:meth:`~spindoctor.nav_model.nav_model_rings.NavModelRings.create_model`:
 
 1. Open a logged section. Look up the per-planet ring catalogue from the configured
    ``ring_features`` mapping. Each entry carries a name, a radius, an RMS, and a per-edge
@@ -379,19 +379,19 @@ Call path traced through
 5. Decide the per-planet emission path: when the per-planet km/px scale exceeds the
    configured threshold, or when any single edge compresses below the per-polyline radial-
    pixel threshold, render a
-   :attr:`~nav.feature.feature_type.NavFeatureType.RING_ANNULUS` template; otherwise emit
+   :attr:`~spindoctor.feature.feature_type.NavFeatureType.RING_ANNULUS` template; otherwise emit
    per-edge polylines.
 
 Call path traced through
-:meth:`~nav.nav_model.nav_model_rings.NavModelRings.to_features`:
+:meth:`~spindoctor.nav_model.nav_model_rings.NavModelRings.to_features`:
 
 1. **Annulus path.**  Construct one
-   :data:`~nav.feature.feature_type.NavFeatureType.RING_ANNULUS` feature per planet
+   :data:`~spindoctor.feature.feature_type.NavFeatureType.RING_ANNULUS` feature per planet
    carrying the rendered annulus template plus the per-planet bounding box.
 2. **Per-edge path.**  For each surviving edge, construct one
-   :data:`~nav.feature.feature_type.NavFeatureType.RING_EDGE` feature carrying the
-   :class:`~nav.feature.geometry.RingEdgePolyline` (vertices, normals, per-vertex sigmas)
-   plus a per-edge :class:`~nav.feature.flags.RingEdgeFlags` with the catalog edge name and
+   :data:`~spindoctor.feature.feature_type.NavFeatureType.RING_EDGE` feature carrying the
+   :class:`~spindoctor.feature.geometry.RingEdgePolyline` (vertices, normals, per-vertex sigmas)
+   plus a per-edge :class:`~spindoctor.feature.flags.RingEdgeFlags` with the catalog edge name and
    the curvature classification.
 
 Examples
@@ -400,19 +400,19 @@ Examples
 ``ring_only_curved`` (Cassini ISS NAC, image ``N1447064164_1``)
     A high-resolution Saturn-ring scene whose individual catalog edges resolve into
     separable polylines. The ring model emits multiple
-    :data:`~nav.feature.feature_type.NavFeatureType.RING_EDGE` features (the F-ring outer
+    :data:`~spindoctor.feature.feature_type.NavFeatureType.RING_EDGE` features (the F-ring outer
     edge, the A-ring outer edge, gaps, ringlets); the per-planet km/px on this scene is
     well below the annulus threshold so the annulus path does not fire. Curvature
     classification flags the edges curved (each surviving polyline arcs noticeably across
-    the FOV); the rank of the joint :class:`~nav.nav_technique.nav_technique_ring_edge.RingEdgeNav`
+    the FOV); the rank of the joint :class:`~spindoctor.nav_technique.nav_technique_ring_edge.RingEdgeNav`
     fit is full-rank because the curvature lifts the rank-1 degeneracy. See
     :doc:`dev_guide_techniques_ring_edge`.
 
 ``ring_annulus_unresolved`` (Cassini ISS WAC, low-resolution approach phase)
     A low-resolution approach-phase Saturn image whose km/px exceeds the per-planet
     kmpp threshold. The ring model emits a single
-    :data:`~nav.feature.feature_type.NavFeatureType.RING_ANNULUS` feature per planet
+    :data:`~spindoctor.feature.feature_type.NavFeatureType.RING_ANNULUS` feature per planet
     carrying the rendered annulus template; the
-    :class:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav` consumes it
+    :class:`~spindoctor.nav_technique.nav_technique_ring_annulus.RingAnnulusNav` consumes it
     via the shared pyramid-NCC machinery. See
     :doc:`dev_guide_techniques_ring_annulus`.

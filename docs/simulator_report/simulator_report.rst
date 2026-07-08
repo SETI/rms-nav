@@ -2,7 +2,7 @@
 Simulator Performance and Sensitivity Report
 ============================================
 
-This chapter reports how the RMS-NAV navigation pipeline performs on simulated
+This chapter reports how the SpinDoctor navigation pipeline performs on simulated
 images: how accurately each technique recovers a known transform, and how its
 navigation responds as a single scene parameter is swept. It is a standalone
 chapter, separate from the user and developer guides, and is regenerable on

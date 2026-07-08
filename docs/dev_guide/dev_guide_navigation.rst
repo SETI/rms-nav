@@ -2,7 +2,7 @@
 Navigation
 ==========
 
-Navigation is the core competence of RMS-NAV: ingesting one image, predicting what
+Navigation is the core competence of SpinDoctor: ingesting one image, predicting what
 the scene should look like from SPICE, and reporting the offset that brings the
 prediction into alignment with the data. This chapter is the top-level entry into
 every part of the navigation pipeline — from the per-image observation wrapper, to the

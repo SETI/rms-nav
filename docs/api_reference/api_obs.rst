@@ -1,49 +1,49 @@
-nav.obs
-=======
+spindoctor.obs
+==============
 
-.. automodule:: nav.obs
+.. automodule:: spindoctor.obs
 
-.. automodule:: nav.obs.obs
+.. automodule:: spindoctor.obs.obs
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.obs.obs_snapshot
+.. automodule:: spindoctor.obs.obs_snapshot
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.obs.obs_snapshot_inst
+.. automodule:: spindoctor.obs.obs_snapshot_inst
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.obs.obs_inst
+.. automodule:: spindoctor.obs.obs_inst
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.obs.obs_inst_cassini_iss
+.. automodule:: spindoctor.obs.obs_inst_cassini_iss
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.obs.obs_inst_voyager_iss
+.. automodule:: spindoctor.obs.obs_inst_voyager_iss
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.obs.obs_inst_galileo_ssi
+.. automodule:: spindoctor.obs.obs_inst_galileo_ssi
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.obs.obs_inst_newhorizons_lorri
+.. automodule:: spindoctor.obs.obs_inst_newhorizons_lorri
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.obs.obs_inst_sim
+.. automodule:: spindoctor.obs.obs_inst_sim
    :members:
    :undoc-members:
    :show-inheritance:

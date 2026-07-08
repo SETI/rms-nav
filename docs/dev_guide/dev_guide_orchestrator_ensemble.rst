@@ -5,9 +5,9 @@ Ensemble Combine (ensemble + EnsembleConfig)
 Overview
 ========
 
-:func:`~nav.nav_orchestrator.ensemble.ensemble` is the function that reconciles every
-per-technique :class:`~nav.nav_technique.technique_result.NavTechniqueResult` into a
-single :class:`~nav.nav_orchestrator.nav_result.NavResult`. The orchestrator invokes the
+:func:`~spindoctor.nav_orchestrator.ensemble.ensemble` is the function that reconciles every
+per-technique :class:`~spindoctor.nav_technique.technique_result.NavTechniqueResult` into a
+single :class:`~spindoctor.nav_orchestrator.nav_result.NavResult`. The orchestrator invokes the
 ensemble twice per image: once after pass 1 (to derive the pass-2 prior) and once on the
 union of pass-1 and pass-2 results (to produce the final answer). The reconciliation
 discipline is honest: spurious results are dropped, at-edge results are dropped unless
@@ -24,7 +24,7 @@ Step 1 — drop spurious
 ----------------------
 
 Every result with
-:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious` ``True`` is
+:attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` ``True`` is
 dropped unconditionally. Spurious is the technique's self-assessed structural failure
 flag; the ensemble does not second-guess it.
 
@@ -32,7 +32,7 @@ Step 2 — drop at-edge
 ---------------------
 
 Every result with
-:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` ``True`` is dropped
+:attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` ``True`` is dropped
 *unless* dropping the at-edge cohort would empty the surviving set. The exception
 preserves an at-edge result when it is the only signal the orchestrator has — better a
 hint at a search-window edge than no answer at all.
@@ -59,7 +59,7 @@ Step 4 — pick the highest summed-confidence group
 For each connected component, sum the per-technique confidences and pick the group with
 the highest sum. When the runner-up's summed confidence is within ``agreement_gap`` of
 the winner's, the ensemble flags the conflict and returns a ``status='conflicted'``
-:class:`~nav.nav_orchestrator.nav_result.NavResult` instead of fusing.
+:class:`~spindoctor.nav_orchestrator.nav_result.NavResult` instead of fusing.
 
 Step 5 — precision-weighted merge
 ---------------------------------
@@ -77,7 +77,7 @@ Step 6 — disagreement and conflict penalties
 
 When more than one Mahalanobis-distance group survived, the fused confidence is multiplied
 by ``disagreement_penalty`` (default 0.7). When the conflict branch fired in Step 4 the
-``status='conflicted'`` :class:`~nav.nav_orchestrator.nav_result.NavResult` is returned with a further
+``status='conflicted'`` :class:`~spindoctor.nav_orchestrator.nav_result.NavResult` is returned with a further
 ``conflicted_confidence_multiplier`` (default 0.3) applied to the runner-up's summed
 confidence so the JSON sidecar reflects the conflict's severity.
 
@@ -86,7 +86,7 @@ Step 7 — confidence-rank assignment
 
 The fused confidence and the per-axis sigma are mapped to a five-bucket rank
 (``'high'`` / ``'medium'`` / ``'low'`` / ``'conflicted'`` / ``'failed'``) by
-:func:`~nav.nav_orchestrator.ensemble.derive_confidence_rank` against the per-rank
+:func:`~spindoctor.nav_orchestrator.ensemble.derive_confidence_rank` against the per-rank
 ``min_confidence`` / ``max_sigma_px`` thresholds. Below the ``min_confidence`` floor the
 ensemble returns ``status='failed'``.
 
@@ -109,33 +109,33 @@ Sources of uncertainty
 The fused covariance is the pseudo-inverse of the summed information matrix; it is the
 standard precision-weighted-merge form. When the input set has no full-rank result, the
 fused covariance is rank-deficient along the unconstrained axis; the
-:attr:`~nav.nav_orchestrator.nav_result.NavResult.sigma_along_unobservable_px` field
+:attr:`~spindoctor.nav_orchestrator.nav_result.NavResult.sigma_along_unobservable_px` field
 captures the unbounded eigenvalue's direction. When the disagreement-penalty fires the
 fused confidence is reduced multiplicatively.
 
 Configuration
 =============
 
-Tunables live on :class:`~nav.nav_orchestrator.ensemble.EnsembleConfig`. The defaults are
-module-level constants in :mod:`nav.nav_orchestrator.ensemble`; the orchestrator's
-constructor accepts an :class:`~nav.nav_orchestrator.ensemble.EnsembleConfig` override.
+Tunables live on :class:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig`. The defaults are
+module-level constants in :mod:`spindoctor.nav_orchestrator.ensemble`; the orchestrator's
+constructor accepts an :class:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig` override.
 
-- :attr:`~nav.nav_orchestrator.ensemble.EnsembleConfig.agreement_sigma` — float, default
+- :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.agreement_sigma` — float, default
   ``2.0``. Mahalanobis-distance threshold for grouping.
-- :attr:`~nav.nav_orchestrator.ensemble.EnsembleConfig.agreement_gap` — float, default
+- :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.agreement_gap` — float, default
   ``0.5``. Minimum summed-confidence gap between best and runner-up groups before
   declaring a conflict.
-- :attr:`~nav.nav_orchestrator.ensemble.EnsembleConfig.disagreement_penalty` — float,
+- :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.disagreement_penalty` — float,
   default ``0.7``. Multiplier on combined confidence when more than one group existed.
-- :attr:`~nav.nav_orchestrator.ensemble.EnsembleConfig.conflicted_confidence_multiplier` —
+- :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.conflicted_confidence_multiplier` —
   float, default ``0.3``. Additional multiplier when the conflicted branch fires.
-- :attr:`~nav.nav_orchestrator.ensemble.EnsembleConfig.min_confidence` — float, default
+- :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.min_confidence` — float, default
   ``0.2``. Final-result threshold below which the ensemble returns
-  :meth:`~nav.nav_orchestrator.nav_result.NavResult.failed` instead of
-  :meth:`~nav.nav_orchestrator.nav_result.NavResult.success`.
-- :attr:`~nav.nav_orchestrator.ensemble.EnsembleConfig.pinvh_rcond` — float, default
+  :meth:`~spindoctor.nav_orchestrator.nav_result.NavResult.failed` instead of
+  :meth:`~spindoctor.nav_orchestrator.nav_result.NavResult.success`.
+- :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.pinvh_rcond` — float, default
   ``1.0e-9``. Cutoff for :func:`scipy.linalg.pinvh`.
-- :attr:`~nav.nav_orchestrator.ensemble.EnsembleConfig.tier_thresholds` — mapping
+- :attr:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig.tier_thresholds` — mapping
   ``rank -> {min_confidence, max_sigma_px}``; default thresholds give ``'high'`` for
   confidence at or above 0.8 with sigma at most 0.5 px, ``'medium'`` for 0.5 confidence
   with sigma at most 2.0 px, ``'low'`` for 0.2 confidence with no sigma cap.
@@ -143,18 +143,18 @@ constructor accepts an :class:`~nav.nav_orchestrator.ensemble.EnsembleConfig` ov
 Implementation
 ==============
 
-Source file: ``src/nav/nav_orchestrator/ensemble.py`` —
-:func:`~nav.nav_orchestrator.ensemble.ensemble`,
-:func:`~nav.nav_orchestrator.ensemble.derive_confidence_rank`, and
-:class:`~nav.nav_orchestrator.ensemble.EnsembleConfig`.
+Source file: ``src/spindoctor/nav_orchestrator/ensemble.py`` —
+:func:`~spindoctor.nav_orchestrator.ensemble.ensemble`,
+:func:`~spindoctor.nav_orchestrator.ensemble.derive_confidence_rank`, and
+:class:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig`.
 
 Public surface (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
 
-- :func:`~nav.nav_orchestrator.ensemble.ensemble` — the reconciler. Returns one
-  :class:`~nav.nav_orchestrator.nav_result.NavResult`.
-- :func:`~nav.nav_orchestrator.ensemble.derive_confidence_rank` — assign the
+- :func:`~spindoctor.nav_orchestrator.ensemble.ensemble` — the reconciler. Returns one
+  :class:`~spindoctor.nav_orchestrator.nav_result.NavResult`.
+- :func:`~spindoctor.nav_orchestrator.ensemble.derive_confidence_rank` — assign the
   five-bucket rank from a confidence / sigma pair.
-- :class:`~nav.nav_orchestrator.ensemble.EnsembleConfig` — frozen dataclass carrying
+- :class:`~spindoctor.nav_orchestrator.ensemble.EnsembleConfig` — frozen dataclass carrying
   the seven tunables documented above.
 
 The function uses :func:`scipy.sparse.csgraph.connected_components` to find the
@@ -165,9 +165,9 @@ Examples
 ========
 
 **Two agreeing techniques.**  Pass 1 produces
-:class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav`
+:class:`~spindoctor.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav`
 (:math:`(6.76, -17.71)` ± 0.5 px) and
-:class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav`
+:class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav`
 (:math:`(7.00, -18.00)` ± 0.3 px). The Mahalanobis distance is well below
 ``agreement_sigma=2.0``; both end up in the same group. The fused offset is
 :math:`(6.93, -17.92)` px with combined per-axis sigma ~0.26 px. No disagreement
@@ -184,9 +184,9 @@ conflict and returns ``status='conflicted'`` rather than picking the higher-conf
 isolated wrong answer (this is the documented ``multi_body`` test scene's behaviour).
 
 **Rank-deficient ring-edge fit.**  A flat-ring-only scene produces a
-:class:`~nav.nav_technique.nav_technique_ring_edge.RingEdgeNav` result whose covariance is
+:class:`~spindoctor.nav_technique.nav_technique_ring_edge.RingEdgeNav` result whose covariance is
 rank-1 along radial only. The ensemble's pseudoinverse handles the rank deficiency: the
 fused covariance has unbounded variance along the along-edge tangent and the
-:attr:`~nav.nav_orchestrator.nav_result.NavResult.sigma_along_unobservable_px` field
+:attr:`~spindoctor.nav_orchestrator.nav_result.NavResult.sigma_along_unobservable_px` field
 captures it. When a star or body limb supplies an orthogonal-axis constraint the fused
 result becomes full-rank.

@@ -36,9 +36,9 @@ if 'PDS3_HOLDINGS_DIR' not in os.environ:
         allow_module_level=True,
     )
 
-from nav.dataset.dataset import ImageFile, ImageFiles  # noqa: E402  (guarded import)
-from nav.navigate_image_files import navigate_image_files  # noqa: E402
-from nav.obs import (  # noqa: E402
+from spindoctor.dataset.dataset import ImageFile, ImageFiles  # noqa: E402  (guarded import)
+from spindoctor.navigate_image_files import navigate_image_files  # noqa: E402
+from spindoctor.obs import (  # noqa: E402
     ObsCassiniISS,
     ObsGalileoSSI,
     ObsNewHorizonsLORRI,
@@ -52,7 +52,7 @@ from tests.integration.sidecar import (  # noqa: E402
 )
 
 # Mission-string -> Obs class.  Keys match the sidecar schema's ``mission`` enum
-# (upper-cased dataset names from :mod:`nav.dataset`).
+# (upper-cased dataset names from :mod:`spindoctor.dataset`).
 _MISSION_TO_OBS_CLASS: dict[str, type[ObsSnapshotInst]] = {
     'COISS': ObsCassiniISS,
     'VGISS': ObsVoyagerISS,

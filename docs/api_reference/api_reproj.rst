@@ -1,29 +1,29 @@
-nav.reproj
-==========
+spindoctor.reproj
+=================
 
-.. automodule:: nav.reproj
+.. automodule:: spindoctor.reproj
 
-.. automodule:: nav.reproj.bodies
+.. automodule:: spindoctor.reproj.bodies
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.reproj.rings
+.. automodule:: spindoctor.reproj.rings
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.reproj.cartographic_model
+.. automodule:: spindoctor.reproj.cartographic_model
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.reproj.photometric_model
+.. automodule:: spindoctor.reproj.photometric_model
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.reproj.ring_orbit_model
+.. automodule:: spindoctor.reproj.ring_orbit_model
    :members:
    :undoc-members:
    :show-inheritance:

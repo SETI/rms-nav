@@ -8,7 +8,7 @@ Overview
 Image derivatives are the shared image-side products that every distance-transform technique
 samples to align its model polylines against the observed image. Three quantities are produced
 once per navigation by the orchestrator and attached to the per-image
-:class:`~nav.nav_orchestrator.nav_context.NavContext`: a smoothed gradient magnitude image, a
+:class:`~spindoctor.nav_orchestrator.nav_context.NavContext`: a smoothed gradient magnitude image, a
 signed per-pixel gradient vector image, and a thresholded, non-maximum-suppressed,
 truncated-distance-transform of the gradient ridge. Computing them once keeps the per-image
 cost bounded regardless of how many DT-based techniques run later.
@@ -16,9 +16,9 @@ cost bounded regardless of how many DT-based techniques run later.
 A combined entry point shares the heavy Gaussian + Sobel pass across all three products; two
 additional entry points produce the gradient-only and DT-only subsets when a caller does not
 need the full bundle. The DT-based techniques
-(:class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav`,
-:class:`~nav.nav_technique.nav_technique_body_terminator.BodyTerminatorNav`,
-:class:`~nav.nav_technique.nav_technique_ring_edge.RingEdgeNav`) consume the DT and gradient
+(:class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav`,
+:class:`~spindoctor.nav_technique.nav_technique_body_terminator.BodyTerminatorNav`,
+:class:`~spindoctor.nav_technique.nav_technique_ring_edge.RingEdgeNav`) consume the DT and gradient
 vector images directly; see :doc:`dev_guide_techniques_dt_fitting` for the fitter that
 operates on these products.
 
@@ -125,32 +125,32 @@ Configuration
 
 Image derivatives carry no YAML configuration of their own. Every numeric default is a
 module-level constant exposed through the
-:class:`~nav.nav_orchestrator.image_derivatives.ImageDerivativesConfig` dataclass; the
+:class:`~spindoctor.nav_orchestrator.image_derivatives.ImageDerivativesConfig` dataclass; the
 orchestrator's
-:class:`~nav.nav_orchestrator.orchestrator.NavOrchestrator` constructor accepts an
+:class:`~spindoctor.nav_orchestrator.orchestrator.NavOrchestrator` constructor accepts an
 ``image_derivatives_config`` override and otherwise uses the documented defaults.
 
-- :data:`~nav.nav_orchestrator.image_derivatives.DEFAULT_IMAGE_GRADIENT_SIGMA_PX` — float,
+- :data:`~spindoctor.nav_orchestrator.image_derivatives.DEFAULT_IMAGE_GRADIENT_SIGMA_PX` — float,
   default ``1.2`` px. Gaussian sigma used to smooth the image before the Sobel operator.
   Matches the typical instrument PSF.
-- :data:`~nav.nav_orchestrator.image_derivatives.DEFAULT_EDGE_THRESHOLD_K_SIGMA` — float,
+- :data:`~spindoctor.nav_orchestrator.image_derivatives.DEFAULT_EDGE_THRESHOLD_K_SIGMA` — float,
   default ``4.0`` (dimensionless). Multiples of ``image_noise_sigma`` used to threshold the
   gradient magnitude into a binary edge mask. Pixels at or below this threshold are
   discarded regardless of NMS outcome.
-- :data:`~nav.nav_orchestrator.image_derivatives.DEFAULT_DT_HALF_WIDTH_PX` — float, default
+- :data:`~spindoctor.nav_orchestrator.image_derivatives.DEFAULT_DT_HALF_WIDTH_PX` — float, default
   ``64.0`` px. Maximum distance returned by the truncated distance transform. Pixels
   farther than this from any thresholded gradient pixel saturate at this value.
 
-The :class:`~nav.nav_orchestrator.image_derivatives.ImageDerivativesConfig` fields:
+The :class:`~spindoctor.nav_orchestrator.image_derivatives.ImageDerivativesConfig` fields:
 
-- :attr:`~nav.nav_orchestrator.image_derivatives.ImageDerivativesConfig.image_gradient_sigma_px`
+- :attr:`~spindoctor.nav_orchestrator.image_derivatives.ImageDerivativesConfig.image_gradient_sigma_px`
   — float, default ``DEFAULT_IMAGE_GRADIENT_SIGMA_PX`` px. Per-axis Gaussian sigma; both
   axes share the same value (anisotropic blur is intentionally not exposed because the
   image-side computation must be feature-agnostic).
-- :attr:`~nav.nav_orchestrator.image_derivatives.ImageDerivativesConfig.edge_threshold_k_sigma`
+- :attr:`~spindoctor.nav_orchestrator.image_derivatives.ImageDerivativesConfig.edge_threshold_k_sigma`
   — float, default ``DEFAULT_EDGE_THRESHOLD_K_SIGMA`` (dimensionless). Threshold multiplier
   fed into the gradient-magnitude thresholding step.
-- :attr:`~nav.nav_orchestrator.image_derivatives.ImageDerivativesConfig.dt_half_width_px` —
+- :attr:`~spindoctor.nav_orchestrator.image_derivatives.ImageDerivativesConfig.dt_half_width_px` —
   float, default ``DEFAULT_DT_HALF_WIDTH_PX`` px. Cap on the DT distance.
 
 The dataclass's ``__post_init__`` rejects any non-positive or non-finite field with
@@ -161,27 +161,27 @@ Implementation
 
 Source files:
 
-- ``src/nav/nav_orchestrator/image_derivatives.py`` —
-  :class:`~nav.nav_orchestrator.image_derivatives.ImageDerivativesConfig`,
-  :func:`~nav.nav_orchestrator.image_derivatives.build_image_edge_dt`,
-  :func:`~nav.nav_orchestrator.image_derivatives.compute_image_gradient_vu`, and
-  :func:`~nav.nav_orchestrator.image_derivatives.compute_all_image_derivatives` plus the
+- ``src/spindoctor/nav_orchestrator/image_derivatives.py`` —
+  :class:`~spindoctor.nav_orchestrator.image_derivatives.ImageDerivativesConfig`,
+  :func:`~spindoctor.nav_orchestrator.image_derivatives.build_image_edge_dt`,
+  :func:`~spindoctor.nav_orchestrator.image_derivatives.compute_image_gradient_vu`, and
+  :func:`~spindoctor.nav_orchestrator.image_derivatives.compute_all_image_derivatives` plus the
   three ``DEFAULT_*`` module constants.
-- ``src/nav/support/filters.py`` — the
-  :class:`~nav.support.filters.NavFilterSpec` /
-  :class:`~nav.support.filters.NavFilterKind` machinery the DT step delegates into for the
+- ``src/spindoctor/support/filters.py`` — the
+  :class:`~spindoctor.support.filters.NavFilterSpec` /
+  :class:`~spindoctor.support.filters.NavFilterKind` machinery the DT step delegates into for the
   truncated distance transform.
 
 Public surface (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
 
-- :func:`~nav.nav_orchestrator.image_derivatives.compute_all_image_derivatives` — combined
+- :func:`~spindoctor.nav_orchestrator.image_derivatives.compute_all_image_derivatives` — combined
   entry point that returns the gradient magnitude, edge DT, and gradient-vector products in
   a single Gaussian + Sobel pass. The orchestrator's per-image setup uses this entry point.
-- :func:`~nav.nav_orchestrator.image_derivatives.build_image_edge_dt` — returns the
+- :func:`~spindoctor.nav_orchestrator.image_derivatives.build_image_edge_dt` — returns the
   gradient-magnitude and edge-DT pair only (omits the signed gradient vector).
-- :func:`~nav.nav_orchestrator.image_derivatives.compute_image_gradient_vu` — returns the
+- :func:`~spindoctor.nav_orchestrator.image_derivatives.compute_image_gradient_vu` — returns the
   signed ``(g_v, g_u)`` gradient-vector image only (omits the DT).
-- :class:`~nav.nav_orchestrator.image_derivatives.ImageDerivativesConfig` — frozen dataclass
+- :class:`~spindoctor.nav_orchestrator.image_derivatives.ImageDerivativesConfig` — frozen dataclass
   carrying the three configurable parameters.
 
 Each public function validates its inputs (finiteness of the input image, positivity of the
@@ -191,11 +191,11 @@ configured sigmas, non-negativity of the noise sigma) and raises :exc:`TypeError
 Call path
 ---------
 
-The combined :func:`~nav.nav_orchestrator.image_derivatives.compute_all_image_derivatives`
+The combined :func:`~spindoctor.nav_orchestrator.image_derivatives.compute_all_image_derivatives`
 entry point follows three steps:
 
 1. Validate ``image_noise_sigma`` is finite and non-negative; pick the supplied
-   :class:`~nav.nav_orchestrator.image_derivatives.ImageDerivativesConfig` or fall back to
+   :class:`~spindoctor.nav_orchestrator.image_derivatives.ImageDerivativesConfig` or fall back to
    the documented defaults.
 2. Run the shared private smooth-and-Sobel helper once, producing ``(g_v, g_u)``. The
    helper validates that the input image is 2-D and finite and that the smoothing sigma is
@@ -203,12 +203,12 @@ entry point follows three steps:
 3. Pass the gradient pair through the shared private edge-DT helper, which computes the
    gradient magnitude, applies the directional Canny-style non-maximum suppression, and
    builds the truncated distance transform via
-   :func:`~nav.support.filters.apply_filter` with
-   :attr:`~nav.support.filters.NavFilterKind.DISTANCE_TRANSFORM`. Stack the gradient pair
+   :func:`~spindoctor.support.filters.apply_filter` with
+   :attr:`~spindoctor.support.filters.NavFilterKind.DISTANCE_TRANSFORM`. Stack the gradient pair
    into the ``(H, W, 2)`` gradient-vector image and return the three products.
 
-The stand-alone :func:`~nav.nav_orchestrator.image_derivatives.build_image_edge_dt` and
-:func:`~nav.nav_orchestrator.image_derivatives.compute_image_gradient_vu` entry points each
+The stand-alone :func:`~spindoctor.nav_orchestrator.image_derivatives.build_image_edge_dt` and
+:func:`~spindoctor.nav_orchestrator.image_derivatives.compute_image_gradient_vu` entry points each
 call the shared smooth-and-Sobel helper exactly once and produce only the subset they
 declare. Calling both stand-alone helpers on the same image runs the heavy Gaussian + Sobel
 pass twice; prefer the combined entry point when both products are needed.
@@ -228,22 +228,22 @@ worked examples below are numerical illustrations rather than image-library scen
 default ``image_gradient_sigma_px = 1.2`` runs one separable Gaussian (truncated by SciPy's
 default at four sigma, ~9 × 9 effective kernel) plus two separable Sobel passes — three
 passes over the image, no full-image FFT. Reusing the
-:func:`~nav.nav_orchestrator.image_derivatives.compute_all_image_derivatives` combined entry
+:func:`~spindoctor.nav_orchestrator.image_derivatives.compute_all_image_derivatives` combined entry
 point keeps it at three passes; calling
-:func:`~nav.nav_orchestrator.image_derivatives.build_image_edge_dt` and
-:func:`~nav.nav_orchestrator.image_derivatives.compute_image_gradient_vu` separately on the
+:func:`~spindoctor.nav_orchestrator.image_derivatives.build_image_edge_dt` and
+:func:`~spindoctor.nav_orchestrator.image_derivatives.compute_image_gradient_vu` separately on the
 same image runs the Gaussian + Sobel pass twice (six passes total) for the same products.
 
 **Threshold scaling on a clean ISS NAC image.**  A typical Cassini ISS NAC frame has
 ``image_noise_sigma`` near 5 DN. At the default
-:data:`~nav.nav_orchestrator.image_derivatives.DEFAULT_EDGE_THRESHOLD_K_SIGMA` of 4.0 the
+:data:`~spindoctor.nav_orchestrator.image_derivatives.DEFAULT_EDGE_THRESHOLD_K_SIGMA` of 4.0 the
 gradient threshold is :math:`\tau = 20` DN/px. A bright limb on a dark background produces
 gradient magnitudes well above 100 DN/px and survives the threshold; isolated single-pixel
 noise of order 5 DN/px is rejected.
 
 **DT cap on an empty region.**  A polyline vertex that lands 100 pixels from any edge pixel
 is clamped to the saturation cap
-:data:`~nav.nav_orchestrator.image_derivatives.DEFAULT_DT_HALF_WIDTH_PX` = 64 px instead of
+:data:`~spindoctor.nav_orchestrator.image_derivatives.DEFAULT_DT_HALF_WIDTH_PX` = 64 px instead of
 contributing a 100 px DT residual to the LM cost. The Tukey biweight
 (see :doc:`dev_guide_techniques_dt_fitting`) zeroes the vertex's weight on the first
 reweighting step regardless, but the cap keeps the linear-system right-hand side from

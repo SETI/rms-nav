@@ -7,7 +7,7 @@ Overview
 
 Confidence calibration is the shared scoring layer that every autonomous navigation technique
 uses to convert a typed diagnostics dataclass into a calibrated :math:`[0, 1]` confidence on
-its :class:`~nav.nav_technique.technique_result.NavTechniqueResult`. Each technique declares
+its :class:`~spindoctor.nav_technique.technique_result.NavTechniqueResult`. Each technique declares
 a YAML spec — a constant baseline, a list of linear terms keyed by diagnostic-attribute name,
 optional hard-zero gates, and an optional post-sigmoid clamp — and the shared evaluator
 applies that spec uniformly. Centralising the math means a config-load validation pass can
@@ -103,7 +103,7 @@ Restrictions and assumptions
 - Caps, when set, must lie in :math:`[0, 1]`.
 - Every term's feature name and every hard-zero key must reference an attribute the diagnostics
   object actually carries. The orchestrator's startup-time
-  :func:`~nav.nav_technique.nav_technique.validate_registered_confidence_specs` walk catches
+  :func:`~spindoctor.nav_technique.nav_technique.validate_registered_confidence_specs` walk catches
   unknown attribute names before any image is processed; if a YAML spec references an unknown
   field the process fails fast.
 - The offset / divisor / cap transformation is dimensional but the framework is unit-agnostic —
@@ -124,7 +124,7 @@ Configuration
 
 Confidence calibration is the *consumer* of YAML, not a producer. Every technique's
 confidence spec lives under ``techniques.<TechniqueName>`` in
-``src/nav/config_files/config_510_techniques.yaml`` alongside its ``tuning`` block. The spec
+``src/spindoctor/config_files/config_510_techniques.yaml`` alongside its ``tuning`` block. The spec
 shape is:
 
 - ``alpha0`` — float (dimensionless). Baseline contribution to the sigmoid argument. Negative
@@ -133,7 +133,7 @@ shape is:
 
   - ``feature`` — str, the diagnostic-attribute name. Must exist on the technique's
     diagnostics dataclass and appear in the technique's
-    :attr:`~nav.nav_technique.nav_technique.NavTechnique.confidence_attributes` allow-list.
+    :attr:`~spindoctor.nav_technique.nav_technique.NavTechnique.confidence_attributes` allow-list.
   - ``alpha`` — float (dimensionless). Linear coefficient applied after normalisation.
   - ``offset`` — float, default ``0.0``. Subtracted from the raw value before division. Same
     units as the raw value.
@@ -156,90 +156,90 @@ Implementation
 
 Source files:
 
-- ``src/nav/nav_technique/confidence.py`` — the
-  :class:`~nav.nav_technique.confidence.ConfidenceSpec`,
-  :class:`~nav.nav_technique.confidence.ConfidenceTerm`,
-  :class:`~nav.nav_technique.confidence.ConfidenceTermContribution`, and
-  :class:`~nav.nav_technique.confidence.ConfidenceBreakdown` dataclasses plus the
-  :func:`~nav.nav_technique.confidence.evaluate_sigmoid_combination` evaluator.
-- ``src/nav/nav_technique/confidence_config.py`` — YAML-to-:class:`~nav.nav_technique.confidence.ConfidenceSpec`
-  loader used by :class:`~nav.config.config.Config` at startup.
-- ``src/nav/nav_technique/nav_technique.py`` —
-  :func:`~nav.nav_technique.nav_technique.validate_registered_confidence_specs` and
-  :func:`~nav.nav_technique.nav_technique.log_confidence_breakdown`, the orchestrator-side
+- ``src/spindoctor/nav_technique/confidence.py`` — the
+  :class:`~spindoctor.nav_technique.confidence.ConfidenceSpec`,
+  :class:`~spindoctor.nav_technique.confidence.ConfidenceTerm`,
+  :class:`~spindoctor.nav_technique.confidence.ConfidenceTermContribution`, and
+  :class:`~spindoctor.nav_technique.confidence.ConfidenceBreakdown` dataclasses plus the
+  :func:`~spindoctor.nav_technique.confidence.evaluate_sigmoid_combination` evaluator.
+- ``src/spindoctor/nav_technique/confidence_config.py`` — YAML-to-:class:`~spindoctor.nav_technique.confidence.ConfidenceSpec`
+  loader used by :class:`~spindoctor.config.config.Config` at startup.
+- ``src/spindoctor/nav_technique/nav_technique.py`` —
+  :func:`~spindoctor.nav_technique.nav_technique.validate_registered_confidence_specs` and
+  :func:`~spindoctor.nav_technique.nav_technique.log_confidence_breakdown`, the orchestrator-side
   validation and logging helpers.
 
 Public surface (autodocumented at :doc:`/api_reference/api_nav_technique`):
 
-- :class:`~nav.nav_technique.confidence.ConfidenceSpec` — the per-technique formula. Fields:
+- :class:`~spindoctor.nav_technique.confidence.ConfidenceSpec` — the per-technique formula. Fields:
 
-  - :attr:`~nav.nav_technique.confidence.ConfidenceSpec.alpha0` — sigmoid-argument baseline.
-  - :attr:`~nav.nav_technique.confidence.ConfidenceSpec.terms` — tuple of
-    :class:`~nav.nav_technique.confidence.ConfidenceTerm` linear contributions.
-  - :attr:`~nav.nav_technique.confidence.ConfidenceSpec.hard_zero_if` — short-circuit map.
-  - :attr:`~nav.nav_technique.confidence.ConfidenceSpec.hard_cap` — optional post-sigmoid clamp.
+  - :attr:`~spindoctor.nav_technique.confidence.ConfidenceSpec.alpha0` — sigmoid-argument baseline.
+  - :attr:`~spindoctor.nav_technique.confidence.ConfidenceSpec.terms` — tuple of
+    :class:`~spindoctor.nav_technique.confidence.ConfidenceTerm` linear contributions.
+  - :attr:`~spindoctor.nav_technique.confidence.ConfidenceSpec.hard_zero_if` — short-circuit map.
+  - :attr:`~spindoctor.nav_technique.confidence.ConfidenceSpec.hard_cap` — optional post-sigmoid clamp.
 
-- :class:`~nav.nav_technique.confidence.ConfidenceTerm` — one linear term. Fields:
+- :class:`~spindoctor.nav_technique.confidence.ConfidenceTerm` — one linear term. Fields:
 
-  - :attr:`~nav.nav_technique.confidence.ConfidenceTerm.feature` — diagnostic-attribute name.
-  - :attr:`~nav.nav_technique.confidence.ConfidenceTerm.alpha` — coefficient.
-  - :attr:`~nav.nav_technique.confidence.ConfidenceTerm.offset` — pre-scale offset.
-  - :attr:`~nav.nav_technique.confidence.ConfidenceTerm.divisor` — pre-scale divisor.
-  - :attr:`~nav.nav_technique.confidence.ConfidenceTerm.cap_at` — optional post-scale upper bound.
+  - :attr:`~spindoctor.nav_technique.confidence.ConfidenceTerm.feature` — diagnostic-attribute name.
+  - :attr:`~spindoctor.nav_technique.confidence.ConfidenceTerm.alpha` — coefficient.
+  - :attr:`~spindoctor.nav_technique.confidence.ConfidenceTerm.offset` — pre-scale offset.
+  - :attr:`~spindoctor.nav_technique.confidence.ConfidenceTerm.divisor` — pre-scale divisor.
+  - :attr:`~spindoctor.nav_technique.confidence.ConfidenceTerm.cap_at` — optional post-scale upper bound.
 
-- :class:`~nav.nav_technique.confidence.ConfidenceTermContribution` — one term's contribution
+- :class:`~spindoctor.nav_technique.confidence.ConfidenceTermContribution` — one term's contribution
   trace. Fields:
-  :attr:`~nav.nav_technique.confidence.ConfidenceTermContribution.feature`,
-  :attr:`~nav.nav_technique.confidence.ConfidenceTermContribution.raw`,
-  :attr:`~nav.nav_technique.confidence.ConfidenceTermContribution.normalized`,
-  :attr:`~nav.nav_technique.confidence.ConfidenceTermContribution.alpha`,
-  :attr:`~nav.nav_technique.confidence.ConfidenceTermContribution.contribution`.
+  :attr:`~spindoctor.nav_technique.confidence.ConfidenceTermContribution.feature`,
+  :attr:`~spindoctor.nav_technique.confidence.ConfidenceTermContribution.raw`,
+  :attr:`~spindoctor.nav_technique.confidence.ConfidenceTermContribution.normalized`,
+  :attr:`~spindoctor.nav_technique.confidence.ConfidenceTermContribution.alpha`,
+  :attr:`~spindoctor.nav_technique.confidence.ConfidenceTermContribution.contribution`.
 
-- :class:`~nav.nav_technique.confidence.ConfidenceBreakdown` — full evaluation trace. Fields:
-  :attr:`~nav.nav_technique.confidence.ConfidenceBreakdown.confidence`,
-  :attr:`~nav.nav_technique.confidence.ConfidenceBreakdown.sigmoid_arg`,
-  :attr:`~nav.nav_technique.confidence.ConfidenceBreakdown.alpha0`,
-  :attr:`~nav.nav_technique.confidence.ConfidenceBreakdown.terms`,
-  :attr:`~nav.nav_technique.confidence.ConfidenceBreakdown.hard_zero`,
-  :attr:`~nav.nav_technique.confidence.ConfidenceBreakdown.hard_cap_applied`.
+- :class:`~spindoctor.nav_technique.confidence.ConfidenceBreakdown` — full evaluation trace. Fields:
+  :attr:`~spindoctor.nav_technique.confidence.ConfidenceBreakdown.confidence`,
+  :attr:`~spindoctor.nav_technique.confidence.ConfidenceBreakdown.sigmoid_arg`,
+  :attr:`~spindoctor.nav_technique.confidence.ConfidenceBreakdown.alpha0`,
+  :attr:`~spindoctor.nav_technique.confidence.ConfidenceBreakdown.terms`,
+  :attr:`~spindoctor.nav_technique.confidence.ConfidenceBreakdown.hard_zero`,
+  :attr:`~spindoctor.nav_technique.confidence.ConfidenceBreakdown.hard_cap_applied`.
 
-- :func:`~nav.nav_technique.confidence.evaluate_sigmoid_combination` — the evaluator. Returns
+- :func:`~spindoctor.nav_technique.confidence.evaluate_sigmoid_combination` — the evaluator. Returns
   the calibrated confidence, or a ``(confidence, ConfidenceBreakdown)`` pair when
   ``return_breakdown=True``.
 
 Call path traced through
-:func:`~nav.nav_technique.confidence.evaluate_sigmoid_combination`:
+:func:`~spindoctor.nav_technique.confidence.evaluate_sigmoid_combination`:
 
-1. Walk the spec's :attr:`~nav.nav_technique.confidence.ConfidenceSpec.hard_zero_if`. For
+1. Walk the spec's :attr:`~spindoctor.nav_technique.confidence.ConfidenceSpec.hard_zero_if`. For
    each entry, fetch the named attribute off the diagnostics object (raising :exc:`ValueError`
    when missing) and compare against the demanded boolean. If any condition holds,
    short-circuit with a ``0.0`` confidence (and a hard-zero-tagged
-   :class:`~nav.nav_technique.confidence.ConfidenceBreakdown` when the caller asked for one).
+   :class:`~spindoctor.nav_technique.confidence.ConfidenceBreakdown` when the caller asked for one).
 2. Initialise the sigmoid argument with
-   :attr:`~nav.nav_technique.confidence.ConfidenceSpec.alpha0`.
-3. For each term in :attr:`~nav.nav_technique.confidence.ConfidenceSpec.terms`, fetch the
+   :attr:`~spindoctor.nav_technique.confidence.ConfidenceSpec.alpha0`.
+3. For each term in :attr:`~spindoctor.nav_technique.confidence.ConfidenceSpec.terms`, fetch the
    named attribute, apply the offset / divisor / cap normalisation, multiply by the alpha,
    and accumulate the contribution. Record the per-term contribution in a
-   :class:`~nav.nav_technique.confidence.ConfidenceTermContribution` when a breakdown was
+   :class:`~spindoctor.nav_technique.confidence.ConfidenceTermContribution` when a breakdown was
    requested.
 4. Pass the accumulated argument through the numerically-stable logistic sigmoid.
-5. Apply :attr:`~nav.nav_technique.confidence.ConfidenceSpec.hard_cap` when set; record
+5. Apply :attr:`~spindoctor.nav_technique.confidence.ConfidenceSpec.hard_cap` when set; record
    whether the cap fired in the breakdown.
 6. Return the calibrated confidence (and the breakdown when requested).
 
 The orchestrator-side helpers are:
 
-- :func:`~nav.nav_technique.nav_technique.validate_registered_confidence_specs` — invoked at
+- :func:`~spindoctor.nav_technique.nav_technique.validate_registered_confidence_specs` — invoked at
   config-load time. Walks every registered
-  :class:`~nav.nav_technique.nav_technique.NavTechnique` whose
-  :attr:`~nav.nav_technique.nav_technique.NavTechnique.confidence_spec` was loaded and verifies
+  :class:`~spindoctor.nav_technique.nav_technique.NavTechnique` whose
+  :attr:`~spindoctor.nav_technique.nav_technique.NavTechnique.confidence_spec` was loaded and verifies
   that every term's
-  :attr:`~nav.nav_technique.confidence.ConfidenceTerm.feature` and every
-  :attr:`~nav.nav_technique.confidence.ConfidenceSpec.hard_zero_if` key appears in the
+  :attr:`~spindoctor.nav_technique.confidence.ConfidenceTerm.feature` and every
+  :attr:`~spindoctor.nav_technique.confidence.ConfidenceSpec.hard_zero_if` key appears in the
   technique's
-  :attr:`~nav.nav_technique.nav_technique.NavTechnique.confidence_attributes` allow-list.
+  :attr:`~spindoctor.nav_technique.nav_technique.NavTechnique.confidence_attributes` allow-list.
   Raises :exc:`ValueError` on the first unknown name.
-- :func:`~nav.nav_technique.nav_technique.log_confidence_breakdown` — emits the breakdown at
+- :func:`~spindoctor.nav_technique.nav_technique.log_confidence_breakdown` — emits the breakdown at
   DEBUG always, and also at INFO when the calibrated confidence falls at or below a
   ``low_threshold`` (default 0.1). This is what surfaces "alpha=-1.5 dt_fit_rms_px=8.7
   contribution=-13.05 drove confidence to zero" in the per-image log.
@@ -257,7 +257,7 @@ approximately 0.475.
 
 **Hard-zero override.**  The ``BodyLimbNav`` spec declares ``hard_zero_if: {at_edge: true,
 spurious: true}``. When a fit converges with
-:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` true (the offset hit
+:attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` true (the offset hit
 the search-window boundary), the linear combination is irrelevant — the calibrated confidence
 is ``0.0`` regardless of how the dt-fit RMS or visible-arc terms scored. The breakdown
 returned in this case carries a ``hard_zero='at_edge'`` annotation so the operator log line
@@ -270,22 +270,22 @@ fit and the cap encodes that fact independently of the per-term coefficients.
 
 **Validation at startup.**  If the YAML spec for a technique declares
 ``feature: dt_fit_rms_px`` for a star technique whose
-:class:`~nav.nav_technique.diagnostics.StarRefineDiagnostics` does not carry
+:class:`~spindoctor.nav_technique.diagnostics.StarRefineDiagnostics` does not carry
 ``dt_fit_rms_px``, the
-:func:`~nav.nav_technique.nav_technique.validate_registered_confidence_specs` walk fails with
+:func:`~spindoctor.nav_technique.nav_technique.validate_registered_confidence_specs` walk fails with
 a :exc:`ValueError` naming the technique class and the unknown attribute, before any image is
 processed. The same check fires for unknown
-:attr:`~nav.nav_technique.confidence.ConfidenceSpec.hard_zero_if` keys.
+:attr:`~spindoctor.nav_technique.confidence.ConfidenceSpec.hard_zero_if` keys.
 
 **Worked breakdown.**  A converged ``BodyLimbNav`` fit with
-:attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.visible_limb_arc_fraction`
+:attr:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics.visible_limb_arc_fraction`
 ``0.85``,
-:attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.dt_fit_rms_px` ``0.4`` px, and
-:attr:`~nav.nav_technique.diagnostics.BodyLimbDiagnostics.visible_arc_px` ``120`` px feeds
+:attr:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics.dt_fit_rms_px` ``0.4`` px, and
+:attr:`~spindoctor.nav_technique.diagnostics.BodyLimbDiagnostics.visible_arc_px` ``120`` px feeds
 the spec ``alpha0 = -1.0``, ``alpha(visible_limb_arc_fraction) = 3.0``,
 ``alpha(dt_fit_rms_px) = -1.5``, ``alpha(visible_arc_px / 100, capped at 1) = 0.4``. The
 sigmoid argument is :math:`-1.0 + 3.0 \cdot 0.85 - 1.5 \cdot 0.4 + 0.4 \cdot 1.0 = 1.35`, the
 sigmoid evaluates to approximately ``0.794``, and the technique reports a calibrated
-confidence of ~0.79. When :func:`~nav.nav_technique.nav_technique.log_confidence_breakdown`
+confidence of ~0.79. When :func:`~spindoctor.nav_technique.nav_technique.log_confidence_breakdown`
 fires, every term's raw / normalised / contribution numbers appear in the per-image log so an
 operator can trace which diagnostic carried the score.
