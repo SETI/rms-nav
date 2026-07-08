@@ -81,7 +81,7 @@ carry the methodology and acceptance criteria):
 | Workstream | GitHub issue(s) | Note |
 |---|---|---|
 | WS-0 / WS-1 / WS-1b / WS-2 / WS-17 | none yet | The validation program itself; file issues when scheduled. ROADMAP's 1C (#35) reports statistics from metadata and consumes WS-1's per-frame disagreement metric; it is not the agreement study. |
-| WS-3 | #172, #174 | 49-image stage first, then the >=120 target above. |
+| WS-3 | #172, #174 | 49-image stage first, then the >=120 target above; discovery/review workflow in `plans/COHORT_CURATION_PLAN.md`. |
 | WS-4 | none yet | CI integration tiers. |
 | WS-5 | #173, #176 | #176 (constants into config) lands before calibration writes coefficients. |
 | WS-6 | none yet | Capability matrix. |
@@ -669,6 +669,21 @@ nothing real is exercised automatically.
 - Every PR runs at least the `integration_fast` tier with real images.
 - A scheduled job runs the full accuracy suite and gates on regression.
 - A documented, reproducible mechanism supplies images + kernels to CI.
+
+**Library consumers and CI tiers (binding note).** The image library has four
+distinct consumers, and only the smallest of them ever runs per PR:
+
+| Consumer | What runs | When |
+|---|---|---|
+| Sim tier (baselines + sim navigation/invariant tests) | fast, no network | every default `pytest` and every PR |
+| `integration_fast` real-image subset (~5-10 cached frames) | bounded minutes | every PR |
+| Full library regression + accuracy suite | the whole library | nightly/weekly schedule only |
+| Calibration (WS-5) and agreement study (WS-1) | offline analysis producing reports and coefficients | on demand, never CI-gated per PR (only the cheap calibration-drift check joins the scheduled tier) |
+
+The arithmetic forbids anything else: at ~35 s/frame a 120-image library is
+over an hour of compute before downloads. Do not wire the full library, the
+calibration sweep, or the agreement analysis into per-PR CI; the per-PR gate
+is the sim tier plus the small cached `integration_fast` subset.
 
 **Dependencies:** WS-1, WS-3. **Risk:** medium — kernel/holdings
 provisioning in CI is the hard part; a cached fixture bundle is the mitigation.

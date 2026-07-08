@@ -87,7 +87,7 @@ simulator), which therefore runs alongside this sub-stream; the library built by
 #172 is the same cohort those workstreams consume (49 images first, growing to
 the WS-3 target of >=20 per instrument / >=120 total).
 
-1. [#172](https://github.com/SETI/rms-nav/issues/172) -- Build the curated test library with ground-truth offsets (seed with Cassini scenes). *(Playbook: `plans/PHASE10_CURATION.md`; first stage of WS-3.)*
+1. [#172](https://github.com/SETI/rms-nav/issues/172) -- Build the curated test library with ground-truth offsets (seed with Cassini scenes). *(Playbooks: `plans/COHORT_CURATION_PLAN.md` for the metadata-driven search + review workflow, `plans/PHASE10_CURATION.md` for sidecar mechanics; first stage of WS-3.)*
 2. [#175](https://github.com/SETI/rms-nav/issues/175) -- Populate the per-body *consumed* shape / albedo-variation fields in `config_220` (Saturn system first). *(Ellipsoid radii and pose already come from oops/SPICE.)*
 3. [#173](https://github.com/SETI/rms-nav/issues/173) -- Calibrate confidence per WS-5 against the library and the validation-program anchors. *(depends on #172, #176)*
 4. [#174](https://github.com/SETI/rms-nav/issues/174) -- Autonomous-nav integration tests + per-image regression baselines.
