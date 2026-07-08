@@ -85,6 +85,7 @@ def test_metadata_dict_contains_top_level_keys() -> None:
         'sigma_px',
         'sigma_along_unobservable_px',
         'confidence',
+        'confidence_provisional',
         'confidence_rank',
         'covariance_px2',
         'techniques_used',
@@ -107,6 +108,52 @@ def test_metadata_dict_rounds_confidence_to_3_decimals() -> None:
     """confidence is rounded to 3 decimals."""
     md = build_metadata_dict(_ok_result_with_one_technique())
     assert md['confidence'] == 0.877
+
+
+def test_metadata_dict_marks_confidence_provisional() -> None:
+    """confidence_provisional is present and literally true.
+
+    The marker stays true until the WS-5 confidence calibration lands
+    (plans/VALIDATION_AND_CALIBRATION_PLAN.md): confidence values and
+    tiers are uncalibrated and must not be read as probabilities.
+    """
+    md = build_metadata_dict(_ok_result_with_one_technique())
+    assert md['confidence_provisional'] is True
+
+
+def test_metadata_dict_provenance_carries_config_and_catalog_fields() -> None:
+    """The provenance block serializes the config hash, overrides, and catalogs."""
+    prov = Provenance(
+        spindoctor_version='0.5.2',
+        image_et=414504000.123456789,
+        pipeline_run_iso8601='2026-04-26T12:00:00Z',
+        config_hash='cd' * 32,
+        config_overrides=('/etc/spindoctor/site.yaml',),
+        star_catalogs={'ucac4': 'gs://bucket/UCAC4'},
+    )
+    result = NavResult.success(
+        offset_px=(0.0, 0.0),
+        covariance_px2=np.eye(2, dtype=np.float64),
+        confidence=0.5,
+        confidence_rank='low',
+        status_reason=NavStatusReason.OK,
+        per_technique=[],
+        feature_inventory=[],
+        image_classifier=_classifier(),
+        provenance=prov,
+    )
+    md = build_metadata_dict(result)
+    assert md['provenance']['config_hash'] == 'cd' * 32
+    assert md['provenance']['config_overrides'] == ['/etc/spindoctor/site.yaml']
+    assert md['provenance']['star_catalogs'] == {'ucac4': 'gs://bucket/UCAC4'}
+
+
+def test_metadata_dict_provenance_config_fields_default_to_empty() -> None:
+    """A minimal provenance still emits the new keys (null hash, empty lists)."""
+    md = build_metadata_dict(_ok_result_with_one_technique())
+    assert md['provenance']['config_hash'] is None
+    assert md['provenance']['config_overrides'] == []
+    assert md['provenance']['star_catalogs'] == {}
 
 
 def test_metadata_dict_rounds_image_et_to_6_decimals() -> None:

@@ -1,7 +1,7 @@
 # Phase 10 — Image library curation + calibration
 
 This is the operator playbook for the bulk work in Phase 10 of the
-autonomous-navigation rewrite (`AUTONAV_PLAN.md`):
+autonomous-navigation rewrite (`plans/archive/AUTONAV_PLAN_2026-06-19.md`):
 
 1. **Source ~50 images** that together exercise every scene class and
    every non-deferred `NavTechnique`.
@@ -10,12 +10,13 @@ autonomous-navigation rewrite (`AUTONAV_PLAN.md`):
 3. **Save a sidecar** in the right scene-class directory.
 4. **Run the autonomous pipeline** on the resulting library and seed a
    regression baseline per image.
-5. **Calibrate** each technique's confidence formula against the
-   library's `confidence_tier` targets (and replace every `PLACEHOLDER`
-   in `config_510_techniques.yaml`).
+5. **Calibrate** each technique's confidence formula per the WS-5
+   methodology in `plans/VALIDATION_AND_CALIBRATION_PLAN.md`,
+   replacing the uncalibrated default coefficients in
+   `config_510_techniques.yaml`.
 
 The reference for the schema / scene classes / coverage matrix is
-`docs/dev_guide/dev_guide_image_library.rst` plus `AUTONAV_PLAN.md`
+`docs/dev_guide/dev_guide_image_library.rst` plus `plans/archive/AUTONAV_PLAN_2026-06-19.md`
 Part 10.
 This file is the *workflow* — what to do in what order, where the
 data lives, how the manual-nav UI threads into it, and how a
@@ -27,9 +28,11 @@ be deleted.
 
 > **Tracked by:** #172 (build the library), #175 (body ellipsoid from
 > SPICE/oops + albedo config), #173 (calibrate the confidence-formula alpha
-> coefficients), #174 (integration tests + regression baselines). #176 (move
+> coefficients, per WS-5 of `plans/VALIDATION_AND_CALIBRATION_PLAN.md`),
+> #174 (integration tests + regression baselines). #176 (move
 > tuning constants into config as placeholders) lands before #173. This file is
-> the operator how-to behind those issues; see `plans/ROADMAP.md` Milestone 2.
+> the operator how-to behind those issues; see `plans/ROADMAP.md` Phase 1
+> sub-stream 1B.
 
 ---
 
@@ -58,9 +61,11 @@ For each library image, three artefacts are required, in this order:
    snapshotting its output.  Schema in `tests.integration.baseline`.
 
 3. **(Eventual)** the calibrated coefficients in
-   `src/nav/config_files/config_510_techniques.yaml` produced by
-   fitting confidence formulas against the per-tier targets across the
-   library.  This is one PR after the library is full.
+   `src/nav/config_files/config_510_techniques.yaml` produced by the
+   WS-5 calibration (reliability diagrams against measured error
+   anchors; see "How do we get the confidence + calibration data?"
+   below).  This is one PR after the library is full and the
+   validation-program anchors exist.
 
 The directory tree under `tests/integration/image_library/images/`
 **is** the registry — there is no `manifest.yaml`.  Adding a sidecar
@@ -70,7 +75,7 @@ in the right scene-class subdirectory enrolls the image automatically.
 
 ## Phase-10 image budget (49 images)
 
-Per `AUTONAV_PLAN.md` Part 10 §"Library structure", the target
+Per `plans/archive/AUTONAV_PLAN_2026-06-19.md` Part 10 §"Library structure", the target
 distribution is:
 
 | Scene class (directory name)   | Min images | What it exercises                                                       |
@@ -131,7 +136,7 @@ candidate sits between two classes, pick the one that exercises the
 
 ### Mission-specific hints
 
-Per `AUTONAV_PLAN.md` Part 1 §"Star-poor missions":
+Per `plans/archive/AUTONAV_PLAN_2026-06-19.md` Part 1 §"Star-poor missions":
 
 - **Cassini ISS (NAC + WAC):** rich source of every body / ring class
   *and* the most usable star fields.  Both `_RAW.IMG` and `_CALIB.IMG`
@@ -231,15 +236,17 @@ orientation aid for future reviewers (no test reads it).
 
 Open the saved YAML and replace every `TODO_REPLACE_*` placeholder.
 
-> **Important framing.** The `expected.*` fields are the **target**
-> values you want the *fully calibrated* pipeline to produce, not a
-> description of what the pipeline does today.  The calibration sweep
-> in step C of this phase fits the α coefficients against exactly
-> these targets; if you fudge them to match placeholder behaviour, you
-> bake the placeholders into the curated truth and the sweep has
-> nothing left to fix.  Initial-library `test_autonomous_nav.py`
-> failures on the tier check are *expected* and informational — they
-> are the calibration input.
+> **Important framing.** The `expected.*` fields describe what the
+> *fully calibrated* pipeline ought to produce, not what the pipeline
+> does today.  The tier labels are plausibility cross-checks on the
+> WS-5 calibration and regression expectations afterward — they are
+> **not** fit inputs; the calibration fits against measured error
+> anchors, and a calibrated pipeline whose tiers disagree wholesale
+> with the operator labels means either the labels or the calibration
+> needs a second look.  If you fudge a label to match uncalibrated
+> behaviour, you destroy exactly that cross-check.  Initial-library
+> `test_autonomous_nav.py` failures on the tier check are *expected*
+> and informational until calibration lands.
 
 Field rubric:
 
@@ -263,8 +270,8 @@ Field rubric:
     answer is `ok`.
 - `expected.confidence_tier` — pick from the rubric below for the
   tier the **fully calibrated** pipeline ought to land, given how
-  good the scene actually is.  This is the calibration target
-  midpoint your sidecar contributes:
+  good the scene actually is.  This is the plausibility cross-check
+  and regression expectation your sidecar contributes:
   - `high` — sharp limb fully in frame, dense bright stars, multiple
     unambiguous features.  Calibrated σ should be < 0.5 px.
   - `medium` — partial limb / soft terminator / a few stars but not
@@ -276,9 +283,9 @@ Field rubric:
 
   **Ratchet conservatively.**  A `medium` that comes back `high`
   after calibration is a free win you can revise upward; a `high`
-  that the calibrated pipeline can never reach is a target the fit
-  cannot satisfy, which biases the α coefficients across every other
-  image.  Practical rule: if you'd be unsurprised either way, write
+  that the calibrated pipeline can never reach is a permanent tier
+  failure that muddies the cross-check for every review after it.
+  Practical rule: if you'd be unsurprised either way, write
   `medium`.
 
 - `expected.primary_technique` — the technique you expect to win
@@ -413,82 +420,70 @@ Tests 2 and 3 only pass once **both** of these are true:
   `config_510_techniques.yaml` map the run's diagnostic numbers onto
   the right tier.
 
-Until the calibration in Phase 10 item C runs, the second condition is
-the one that gets violated for the majority of images: the *placeholder*
+Until the WS-5 calibration runs, the second condition is the one that
+gets violated for the majority of images: the *uncalibrated default*
 α coefficients live in `config_510_techniques.yaml` and assign
 arbitrary tiers.  The expectation is therefore that during library
 expansion, `test_autonomous_nav.py` tier checks are *informational* —
 add the sidecar with your best-judgement tier, expect failures, and
-collect them all.  After all 49 sidecars are in, run the calibration
-sweep and the tiers should align.
+collect them all.  After the library is full and the validation
+program's error anchors exist, run the WS-5 calibration and the tiers
+should align.
 
 ---
 
 ## How do we get the confidence + calibration data?
 
-Per `AUTONAV_PLAN.md` Part 10 §"Confidence calibration", the formula
-for every technique is:
+The formula for every technique is:
 
 ```
 confidence = sigmoid(α₀ + Σ αᵢ × xᵢ)
 ```
 
 where `xᵢ` are the diagnostics each technique reports (e.g. for a star
-refine: number of inliers, residual scatter, at-edge flag).  Phase 10
-calibrates the `αᵢ` once against the curated library:
+refine: number of inliers, residual scatter, at-edge flag).  The
+calibration methodology is WS-5 of
+`plans/VALIDATION_AND_CALIBRATION_PLAN.md`; in outline:
 
 1. **Per image, per technique**, the orchestrator already records every
-   `xᵢ` it consumed when computing the placeholder confidence (the
-   diagnostics live on the per-technique result and are echoed in the
-   `_metadata.json` log file).
-2. **The sidecar's expected tier** maps onto a numeric **target
-   midpoint**:
+   `xᵢ` it consumed when computing the confidence (the diagnostics live
+   on the per-technique result and are echoed in the `_metadata.json`
+   log file).  The library runs supply these diagnostic vectors.
+2. **The error anchors come from the validation program**, in order of
+   strength: per-technique covariance from WS-1 where WS-0 certifies it
+   identifiable and bias-independent; pairwise combined covariance
+   elsewhere; per-frame cross-technique disagreement; and WS-2 sim
+   recovery error for regimes with no multi-object cohort.  Each
+   emitted confidence records its calibration basis (real-anchored vs
+   sim-anchored).
+3. **Per-technique reliability diagrams** plot reported confidence (and
+   reported σ) against those anchors, carrying the anchors' own
+   uncertainty intervals.
+4. **A monotonic calibration map** (isotonic regression, or
+   temperature/Platt scaling of the existing sigmoid — i.e. the fitted
+   α vector) makes reported confidence track empirical reliability.
+   The fitted coefficients land in `config_510_techniques.yaml`.
+5. **Tier boundaries are set at stated error percentiles** of the
+   anchor distributions, not by hand.
+6. **Cross-check against the sidecar tiers.**  Re-run
+   `test_autonomous_nav.py` against the full library; the calibrated
+   tiers should now match the operator labels.  A wholesale mismatch
+   means either the labels or the calibration needs review (a single
+   image whose tier is still wrong usually means the human-assigned
+   tier was outside what the diagnostics could distinguish; revisit
+   *that* sidecar's tier).  A calibration regression test recomputes
+   the reliability diagram and fails on drift.
 
-   ```
-   target = {high: 0.9, medium: 0.65, low: 0.35, failed: 0.1}[tier]
-   ```
+After the calibration lands, `config_510_techniques.yaml` is frozen,
+baselines are seeded, and the library exists as the
+regression-protection net for every subsequent change; recalibration
+happens only when technique code changes substantially, via the same
+WS-5 procedure.
 
-3. **Across the library**, a one-shot `scipy.optimize.curve_fit` finds
-   the α vector minimizing the squared error between
-   `sigmoid(α₀ + Σ αᵢ xᵢ)` and `target`, with one fit per technique
-   (each technique has its own diagnostic vector).
-4. **Replace the placeholder coefficients** in
-   `config_510_techniques.yaml` with the fitted values.  The PR review
-   gate enforces that no `PLACEHOLDER` markers ship to production
-   (Part 0 §5).
-5. **Audit per-instrument residuals.**  After the fit, dump the
-   residual `tier_target − sigmoid(α·x)` for every library image and
-   bucket by `sidecar.mission`.  If one mission's residual
-   distribution is systematically off (mean magnitude > ~0.1 in
-   tier-space, or visibly asymmetric vs the others), the unified
-   one-α-per-technique assumption is failing for that camera.  Two
-   responses, in order of preference:
-   - Find the offending diagnostic and add a per-instrument scale
-     upstream (the `signal_dn_to_image_unit_scale` pattern from
-     Phase 10 §F — keep the formula global, fix the inputs).
-   - If no single diagnostic is the culprit, promote the schema to
-     per-instrument α vectors
-     (`techniques.<name>.<instrument>.{...}` with a fallback default
-     block).  This is the heavier change and should only land if (1)
-     leaves the residuals unbalanced.
-
-   Either decision belongs in the same PR as the calibration sweep so
-   the rationale and the per-mission residual plot are reviewed
-   together.
-6. **Re-run** `test_autonomous_nav.py` against the full library; the
-   tier checks should now match (any image whose tier is still wrong
-   means the human-assigned tier was outside what the diagnostics could
-   distinguish; revisit *that* sidecar's tier).
-
-The fit is one-time.  After it lands,
-`config_510_techniques.yaml` is frozen, baselines are seeded, and the
-library exists as the regression-protection net for every subsequent
-change.
-
-The `ground_truth.offset_*` is **not** an input to the fit — it is
-what the orchestrator's *position* claim is checked against.  Tier
-calibration is a separate, parallel operation that consumes the
-`expected.confidence_tier` labels.
+The `ground_truth.offset_*` is **not** a calibration input — it is
+what the orchestrator's *position* claim is checked against.  The
+`expected.confidence_tier` labels are likewise not calibration inputs;
+they are the cross-check in step 6.
 
 ---
 
@@ -498,7 +493,7 @@ The current state of the library (as of 2026-04-30):
 
 - 11 sidecars across 9 of 17 scene classes.
 - 1 baseline JSON (`N1597846115_2_CALIB.json`).
-- 11 of ~55 bodies populated in `config_220_body_shape.yaml` (all
+- 10 of ~55 bodies populated in `config_220_body_shape.yaml` (all
   PLACEHOLDER values awaiting Phase 10 §B literature population).
 
 **Recommended order of work:**
@@ -525,10 +520,11 @@ The current state of the library (as of 2026-04-30):
    curation PR is dominated by `ground_truth` spot-checks; smaller PRs
    review faster and surface schema mistakes earlier.
 
-5. **After ~50 sidecars are in**, run the confidence-formula
-   calibration sweep (Phase 10 §C) as its own PR.  That is when the
-   `test_autonomous_nav.py` tier checks are expected to start passing
-   uniformly.
+5. **After ~50 sidecars are in** and the validation program's error
+   anchors exist, run the WS-5 confidence calibration
+   (`plans/VALIDATION_AND_CALIBRATION_PLAN.md`) as its own PR.  That
+   is when the `test_autonomous_nav.py` tier checks are expected to
+   start passing uniformly.
 
 6. **Seed regression baselines** as the final library PR (Phase 10 §D).
    At that point the library is read-only except for additive sidecars
@@ -538,10 +534,12 @@ The current state of the library (as of 2026-04-30):
 
 ## References
 
-- `AUTONAV_PLAN.md` Part 1 §"Star-poor missions" — mission spread.
-- `AUTONAV_PLAN.md` Part 10 — full library design (this is the
+- `plans/VALIDATION_AND_CALIBRATION_PLAN.md` WS-5 — the confidence-calibration
+  methodology; WS-3 — the library growth target beyond this phase's 49 images.
+- `plans/archive/AUTONAV_PLAN_2026-06-19.md` Part 1 §"Star-poor missions" — mission spread.
+- `plans/archive/AUTONAV_PLAN_2026-06-19.md` Part 10 — full library design (this is the
   authoritative spec; this document is the operator-facing distillation).
-- `AUTONAV_PLAN.md` Part 11 — what stays manual vs. what an agent can
+- `plans/archive/AUTONAV_PLAN_2026-06-19.md` Part 11 — what stays manual vs. what an agent can
   draft.
 - `docs/dev_guide/dev_guide_image_library.rst` — sidecar schema reference.
 - `tests/integration/sidecar.py` — schema validator.

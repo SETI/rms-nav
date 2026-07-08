@@ -28,6 +28,7 @@ from spindoctor.nav_technique.diagnostics import StarFieldDiagnostics
 from spindoctor.nav_technique.feasibility import NavFeasibilityReport
 from spindoctor.nav_technique.nav_technique import NavTechnique
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
+from spindoctor.support.exceptions import NavContractError
 from spindoctor.support.filters import NavFilterKind, NavFilterSpec
 from spindoctor.support.status_reason import NavStatusReason
 
@@ -434,6 +435,84 @@ def test_orchestrator_logs_when_technique_raises(
     assert result.status_reason == NavStatusReason.NO_FEASIBLE_TECHNIQUES
     assert 'navigate raised' in captured.out
     assert 'synthetic navigate failure' in captured.out
+
+
+def test_orchestrator_ensemble_contract_violation_yields_failed_result(
+    fake_obs: _FakeObs, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An over-bound rotation reaching the ensemble fails with contract_violation."""
+
+    class _OverRotatedTechnique(NavTechnique):
+        """Technique whose 3-DoF rotation violates the ensemble small-angle bound."""
+
+        name = '_OverRotatedTechnique'
+        accepts_feature_types = frozenset({NavFeatureType.STAR})
+
+        def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
+            return NavFeasibilityReport(
+                feasible=True, reason='ok', consumed_feature_count=len(features)
+            )
+
+        def navigate(self, features: list[NavFeature], context: NavContext) -> NavTechniqueResult:
+            return NavTechniqueResult(
+                technique_name=self.name,
+                feature_ids=tuple(f.feature_id for f in features),
+                offset_px=(1.5, 2.5),
+                covariance_px2=np.diag([0.04, 0.04, 1.0e-4]).astype(np.float64),
+                confidence=0.85,
+                spurious=False,
+                at_edge=False,
+                diagnostics=StarFieldDiagnostics(n_inliers=len(features)),
+                rotation_rad=float(np.radians(10.0)),
+                sigma_rotation_rad=0.01,
+            )
+
+    try:
+        obs = fake_obs
+        model = _FakeStarModel(obs, feature_count=3)
+        orch = NavOrchestrator([model], only_techniques=['_OverRotatedTechnique'])
+        result = orch.navigate(obs)  # type: ignore[arg-type]
+    finally:
+        NavTechnique._registry.remove(_OverRotatedTechnique)
+    captured = capsys.readouterr()
+    assert result.status == 'failed'
+    assert result.status_reason == NavStatusReason.CONTRACT_VIOLATION
+    assert 'CONTRACT VIOLATION' in captured.out
+    assert 'violates small-angle bound' in captured.out
+
+
+def test_orchestrator_technique_contract_error_not_swallowed_as_no_result(
+    fake_obs: _FakeObs, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A NavContractError from a technique is not sandboxed as an ordinary failure."""
+
+    class _ContractRaisingTechnique(NavTechnique):
+        """Technique whose ``navigate`` raises NavContractError directly."""
+
+        name = '_ContractRaisingTechnique'
+        accepts_feature_types = frozenset({NavFeatureType.STAR})
+
+        def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
+            return NavFeasibilityReport(
+                feasible=True, reason='ok', consumed_feature_count=len(features)
+            )
+
+        def navigate(self, features: list[NavFeature], context: NavContext) -> NavTechniqueResult:
+            raise NavContractError('synthetic contract violation in navigate')
+
+    try:
+        obs = fake_obs
+        model = _FakeStarModel(obs, feature_count=3)
+        orch = NavOrchestrator([model], only_techniques=['_ContractRaisingTechnique'])
+        result = orch.navigate(obs)  # type: ignore[arg-type]
+    finally:
+        NavTechnique._registry.remove(_ContractRaisingTechnique)
+    captured = capsys.readouterr()
+    # An ordinary technique failure would yield no_feasible_techniques (the
+    # sandbox drops the result); the contract violation must surface instead.
+    assert result.status_reason == NavStatusReason.CONTRACT_VIOLATION
+    assert 'CONTRACT VIOLATION in NavTechnique _ContractRaisingTechnique' in captured.out
+    assert 'synthetic contract violation in navigate' in captured.out
 
 
 def test_orchestrator_pass2_receives_pass1_prior(fake_obs: _FakeObs) -> None:

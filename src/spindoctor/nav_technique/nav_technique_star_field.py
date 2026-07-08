@@ -493,6 +493,13 @@ class StarFieldFromCatalogNav(NavTechnique):
         self._min_inliers = int(self.tuning['pattern_match_min_inliers'])
         self._at_edge_tolerance_px = float(self.tuning['at_edge_tolerance_px'])
         self._rotation_at_edge_fraction = float(self.tuning['rotation_at_edge_fraction'])
+        # Roll / translation separability floor (deg).  Below this a fitted
+        # rotation is not separable from a pure translation (see the
+        # camera-roll separability analysis in docs/simulator_report) and is
+        # reported as unobservable; see config_510_techniques.yaml.
+        self._rotation_separability_floor_deg = float(
+            self.tuning['rotation_separability_floor_deg']
+        )
         # Uncalibrated model-error variance floor (px); added in quadrature to
         # the reported covariance diagonal.  Default 0.0 -> no-op.  See
         # ORCH-001 / config_510_techniques.yaml.
@@ -770,12 +777,31 @@ class StarFieldFromCatalogNav(NavTechnique):
             )
         else:
             cov = self._build_covariance(weights=weights, residuals=residuals)
+        # Below the roll/translation separability floor the fitted rotation
+        # is not distinguishable from a pure translation (see the camera-roll
+        # separability analysis in docs/simulator_report): the matcher
+        # collapses a sub-floor planted roll toward a spurious zero.  Report
+        # the rotation as unobservable (sentinel variance + diagnostics
+        # flag) so no downstream consumer reads a confident near-zero roll.
+        rotation_below_floor = fit_rotation and (
+            rotation_rad is not None
+            and abs(rotation_rad) < math.radians(self._rotation_separability_floor_deg)
+        )
+        if rotation_below_floor:
+            cov[2, 2] = ROTATION_UNOBSERVABLE_VARIANCE
+            self.logger.info(
+                'Fitted rotation %.4f deg is below the %.2f deg separability floor; '
+                'reporting rotation as unobservable',
+                math.degrees(rotation_rad if rotation_rad is not None else 0.0),
+                self._rotation_separability_floor_deg,
+            )
         diagnostics = StarFieldDiagnostics(
             n_inliers=n_inliers,
             median_residual_px=median_residual_px,
             n_detected_sources=n_detected_sources,
             n_catalog_predicted=n_catalog_predicted,
             n_triplets_evaluated=n_triplets_evaluated,
+            rotation_below_separability_floor=rotation_below_floor,
         )
         margin_v, margin_u = search_window_for_obs(context)
         max_rotation_rad = math.radians(context.max_rotation_deg)

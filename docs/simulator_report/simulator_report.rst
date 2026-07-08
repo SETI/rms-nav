@@ -786,7 +786,12 @@ and the separability floor:
      - 1.89 deg
 
 A small roll is not separable from a translation. ``StarFieldFromCatalogNav``'s
-RANSAC pattern matcher returns a zero roll (and a spurious flag) below ~0.75 deg.
+RANSAC pattern matcher collapses a roll below ~0.75 deg toward zero (often with a
+spurious flag); a fitted roll below the configurable
+``rotation_separability_floor_deg`` (default 0.75 deg) is therefore reported with
+the rotation-unobservable sentinel variance and the
+``rotation_below_separability_floor`` diagnostics flag, never as a confident
+near-zero value.
 The two-star ``StarUniqueMatchNav`` path recovers down to ~0.5 deg, so the *full
 ensemble* recovers the 0.5 deg roll even where the field matcher alone does not.
 At exactly zero roll no technique reports a rotation. Above ~2-3 deg the inlier

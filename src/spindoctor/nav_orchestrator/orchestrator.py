@@ -62,6 +62,7 @@ from spindoctor.nav_technique.nav_technique import (
     technique_tier,
 )
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
+from spindoctor.support.exceptions import NavContractError
 from spindoctor.support.filters import NavFilterKind, NavFilterSpec, apply_filter
 from spindoctor.support.image_quality import cosmic_ray_mask, saturation_mask
 from spindoctor.support.nav_base import NavBase
@@ -339,6 +340,12 @@ class NavOrchestrator(NavBase):
     def navigate(self, obs: ObsSnapshotInst) -> NavResult:
         """Run the full pipeline on one observation.
 
+        Never raises through to the caller: plugin failures are sandboxed
+        (see ``_extract_features`` / ``_run_pass``), and a
+        ``NavContractError`` (an internal invariant violated by upstream
+        code) is logged at error level and converted into a failed
+        ``NavResult`` with ``NavStatusReason.CONTRACT_VIOLATION``.
+
         Parameters:
             obs: The observation snapshot to navigate.
 
@@ -354,6 +361,47 @@ class NavOrchestrator(NavBase):
                 image_classifier=image_classifier,
                 provenance=provenance,
             )
+        try:
+            return self._navigate_pipeline(
+                context=context,
+                image_classifier=image_classifier,
+                provenance=provenance,
+            )
+        except NavContractError as exc:
+            self._logger.exception(
+                'CONTRACT VIOLATION: %s; an internal navigation invariant '
+                'was violated (programming error, not bad image data); '
+                'failing this image with status_reason=contract_violation',
+                str(exc),
+            )
+            return self._fail(
+                status_reason=NavStatusReason.CONTRACT_VIOLATION,
+                image_classifier=image_classifier,
+                provenance=provenance,
+            )
+
+    def _navigate_pipeline(
+        self,
+        *,
+        context: NavContext,
+        image_classifier: NavImageClassifierResult,
+        provenance: Provenance,
+    ) -> NavResult:
+        """Run the model / feature / technique / ensemble pipeline.
+
+        Called by :meth:`navigate` after the hard-failure short-circuit;
+        a ``NavContractError`` raised anywhere in here (including one
+        re-raised by a plugin sandbox) propagates to :meth:`navigate`,
+        which converts it into a failed ``NavResult``.
+
+        Parameters:
+            context: Per-image NavContext.
+            image_classifier: Image-quality classifier verdict.
+            provenance: Reproducibility envelope.
+
+        Returns:
+            A single ``NavResult`` summarizing the navigation outcome.
+        """
         built_models = self._build_models()
         all_features = self._extract_features(context, built_models)
         kept, gated = self._extract_and_gate(all_features)
@@ -532,6 +580,12 @@ class NavOrchestrator(NavBase):
         for model in self._registry.models:
             try:
                 model.create_model()
+            except NavContractError:
+                self._logger.exception(
+                    'CONTRACT VIOLATION in NavModel %s.create_model; re-raising',
+                    model.name,
+                )
+                raise
             except Exception:  # plugin sandbox; mirrors _extract_features
                 self._logger.exception(
                     'NavModel %s.create_model raised; skipping its features and annotations',
@@ -621,6 +675,12 @@ class NavOrchestrator(NavBase):
         for model in models:
             try:
                 model_annotations = model.to_annotations(context)
+            except NavContractError:
+                self._logger.exception(
+                    'CONTRACT VIOLATION in NavModel %s.to_annotations; re-raising',
+                    model.name,
+                )
+                raise
             except Exception:  # plugin sandbox; mirrors _extract_features
                 self._logger.exception(
                     'NavModel %s.to_annotations raised; skipping its annotations',
@@ -638,12 +698,21 @@ class NavOrchestrator(NavBase):
         intentional: the orchestrator must never raise through to its
         caller — failures surface on the returned ``NavResult`` instead.
         Specific exceptions cannot be enumerated because every NavModel
-        plugin has its own failure modes.
+        plugin has its own failure modes.  The one exemption is
+        ``NavContractError``: a contract violation is a programming error,
+        not a plugin failure, so it is logged at error level and re-raised
+        for :meth:`navigate` to convert into a failed ``NavResult``.
         """
         all_features: list[NavFeature] = []
         for model in models:
             try:
                 emitted = model.to_features(context)
+            except NavContractError:
+                self._logger.exception(
+                    'CONTRACT VIOLATION in NavModel %s.to_features; re-raising',
+                    model.name,
+                )
+                raise
             except Exception:  # plugin sandbox; see docstring
                 self._logger.exception(
                     'NavModel %s.to_features raised; treating as no features',
@@ -687,7 +756,9 @@ class NavOrchestrator(NavBase):
         treated as if it produced no result.  Catching every exception is
         intentional for the same reason as ``_extract_features``: the
         orchestrator never raises through to its caller, failures land on
-        the returned ``NavResult``.
+        the returned ``NavResult``.  ``NavContractError`` is exempt (see
+        ``_extract_features``): it is logged at error level and re-raised
+        for :meth:`navigate` to convert into a failed ``NavResult``.
         """
         results: list[NavTechniqueResult] = []
         names = [
@@ -738,6 +809,12 @@ class NavOrchestrator(NavBase):
             subset = [f for f in available_features if f.feature_type in cls.accepts_feature_types]
             try:
                 results.append(technique.navigate(subset, context))
+            except NavContractError:
+                self._logger.exception(
+                    'CONTRACT VIOLATION in NavTechnique %s.navigate; re-raising',
+                    cls.name,
+                )
+                raise
             except Exception:  # plugin sandbox; see docstring
                 self._logger.exception(
                     'NavTechnique %s.navigate raised; treating as no result',
@@ -898,11 +975,12 @@ class NavOrchestrator(NavBase):
         """Build the per-image Provenance envelope.
 
         Reads the runtime-derived fields (git SHA, loaded SPICE kernels,
-        static-data hashes) once per ``navigate`` call via
+        static-data hashes, resolved-config hash plus applied overrides,
+        and star-catalog identifiers) once per ``navigate`` call via
         :func:`collect_provenance_metadata`.
         """
         timestamp = datetime.now(UTC).isoformat(timespec='seconds').replace('+00:00', 'Z')
-        meta = collect_provenance_metadata()
+        meta = collect_provenance_metadata(self.config)
         return Provenance(
             spindoctor_version=self._spindoctor_version,
             image_et=float(obs.midtime),
@@ -912,6 +990,9 @@ class NavOrchestrator(NavBase):
             static_data_hashes=meta.static_data_hashes,
             technique_names=tuple(sorted(cls.name for cls in NavTechnique._registry)),
             extractor_names=tuple(sorted(m.name for m in self._registry.models)),
+            config_hash=meta.config_hash,
+            config_overrides=meta.config_overrides,
+            star_catalogs=meta.star_catalogs,
         )
 
     @staticmethod

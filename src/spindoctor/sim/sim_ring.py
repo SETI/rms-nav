@@ -13,6 +13,29 @@ import numpy as np
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
 
 
+def _edge_eccentricity(*, a: float, ae: float) -> float:
+    """Eccentricity of a mode 1 ring edge, validated against the ellipse limit.
+
+    Parameters:
+        a: Semi-major axis in pixels.
+        ae: Eccentricity times semi-major axis in pixels.
+
+    Returns:
+        The eccentricity ``ae / a`` (0.0 when ``a`` is not positive).
+
+    Raises:
+        ValueError: If the eccentricity is 1 or more, which does not describe
+            a closed elliptical edge.
+    """
+    e = ae / a if a > 0 else 0.0
+    if e >= 1.0:
+        raise ValueError(
+            f'Ring edge eccentricity e = ae/a = {ae}/{a} = {e} is physically '
+            f'impossible; a closed elliptical edge requires e < 1'
+        )
+    return e
+
+
 def compute_edge_radius_mode1(
     center_v: float,
     center_u: float,
@@ -83,6 +106,10 @@ def compute_edge_radius_at_angle(
 
     Returns:
         Edge radius in pixels at the given angle.
+
+    Raises:
+        ValueError: If ``ae / a`` is an eccentricity of 1 or more, which does
+            not describe a closed elliptical edge.
     """
     # Compute current longitude of pericenter
     days_since_epoch = (time - epoch) / 86400.0
@@ -92,9 +119,7 @@ def compute_edge_radius_at_angle(
     true_anomaly = angle - current_long_peri
 
     # Compute radius using elliptical orbit equation
-    e = ae / a if a > 0 else 0.0
-    if e >= 1.0:
-        e = 0.99  # Clamp eccentricity to valid range
+    e = _edge_eccentricity(a=a, ae=ae)
     r = a * (1.0 - e * e) / (1.0 + e * math.cos(true_anomaly))
 
     return r
@@ -123,6 +148,10 @@ def _compute_edge_radii_array(
 
     Returns:
         Array of edge radii in pixels at the given angles.
+
+    Raises:
+        ValueError: If ``ae / a`` is an eccentricity of 1 or more, which does
+            not describe a closed elliptical edge.
     """
     # Compute current longitude of pericenter
     days_since_epoch = (time - epoch) / 86400.0
@@ -133,9 +162,7 @@ def _compute_edge_radii_array(
 
     # Compute radius using elliptical orbit equation: r = a(1 - e^2) / (1 + e*cos(v))
     # where e = ae / a
-    e = ae / a if a > 0 else 0.0
-    if e >= 1.0:
-        e = 0.99  # Clamp eccentricity to valid range
+    e = _edge_eccentricity(a=a, ae=ae)
     r = a * (1.0 - e * e) / (1.0 + e * np.cos(true_anomaly))
 
     return cast(NDArrayFloatType, r)

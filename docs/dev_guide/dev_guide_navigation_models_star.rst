@@ -320,8 +320,9 @@ Annotation helpers
 
 - ``_build_annotations`` — builds the per-star
   :class:`~spindoctor.annotation.annotations.Annotations` collection: a rectangle outline at
-  every predicted star position sized by its
-  :attr:`~spindoctor.feature.flags.StarFlags.psf_size`, plus per-star labels carrying the
+  every predicted star position sized by the star's ``psf_size`` (assigned
+  from :meth:`~spindoctor.obs.obs_inst.ObsInst.star_psf_size`), plus per-star labels
+  carrying the
   catalog name and visual magnitude. Stars flagged with a body / ring conflict are
   skipped (they are surfaced in the per-image metadata for reviewer awareness but not
   drawn). Consumes the ``label_*`` and ``label_star_color`` keys documented above.

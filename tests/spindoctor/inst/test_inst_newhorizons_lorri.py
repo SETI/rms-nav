@@ -1,10 +1,12 @@
 import math
 
 import pytest
-from tests.config import URL_NEWHORIZONS_LORRI_CHARON_01
+from tests.config import REQUIRES_EXTERNAL_DATA, URL_NEWHORIZONS_LORRI_CHARON_01
 
 import spindoctor.obs.obs_inst_newhorizons_lorri as obstnhlorri
 from spindoctor.obs.obs_inst_newhorizons_lorri import ObsNewHorizonsLORRI
+
+pytestmark = REQUIRES_EXTERNAL_DATA
 
 # Documented anchor limiting magnitude (limiting mag at texp = 1 s).
 _LORRI_ANCHOR = 11.7

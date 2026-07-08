@@ -560,12 +560,29 @@ def _rotate_about(
     return rotated
 
 
-def test_star_field_3dof_recovers_planted_rotation(
-    draw_gaussian_star: DrawGaussianStarFactory,
-    make_star_feature: NavFeatureFactory,
-    make_nav_context: NavContextFactory,
-) -> None:
-    """A planted rotation + translation is recovered by the Procrustes path."""
+def _rotated_star_field_fixture(
+    *,
+    draw: DrawGaussianStarFactory,
+    make_feature: NavFeatureFactory,
+    planted_offset: tuple[float, float],
+    planted_theta: float,
+) -> tuple[np.ndarray, list[NavFeature]]:
+    """Build an image + catalog features for a planted rotation + translation.
+
+    The detection-frame star centres are rotated back into the catalog frame
+    about the (shifted) field centroid, so the technique should report
+    ``(planted_offset, planted_theta)`` as the similarity transform that maps
+    catalog to detection.
+
+    Parameters:
+        draw: Gaussian-star renderer fixture.
+        make_feature: STAR-feature factory fixture.
+        planted_offset: Planted ``(dv, du)`` translation in pixels.
+        planted_theta: Planted camera roll in radians.
+
+    Returns:
+        ``(image, features)`` ready for ``StarFieldFromCatalogNav.navigate``.
+    """
     centers = [
         (80.0, 90.0),
         (170.0, 200.0),
@@ -575,18 +592,11 @@ def test_star_field_3dof_recovers_planted_rotation(
         (60.0, 60.0),
         (260.0, 250.0),
     ]
-    image = _star_field_image(centers, draw=draw_gaussian_star, shape=(320, 320))
-    planted_offset = (1.5, -2.0)
-    # 0.5 deg rotation: displacement at ~150 px radius from the pivot is
-    # ~1.3 px, comfortably under the 2.0 px inlier-matching tolerance.
-    planted_theta = math.radians(0.5)
+    image = _star_field_image(centers, draw=draw, shape=(320, 320))
     pivot = (
         sum(c[0] for c in centers) / len(centers),
         sum(c[1] for c in centers) / len(centers),
     )
-    # Rotate detection-frame centres back into the catalog frame.  The
-    # technique should report (planted_offset, planted_theta) as the
-    # similarity transform that maps catalog -> detection.
     catalog_centers = _rotate_about(
         [(c[0] - planted_offset[0], c[1] - planted_offset[1]) for c in centers],
         pivot=(pivot[0] - planted_offset[0], pivot[1] - planted_offset[1]),
@@ -594,14 +604,37 @@ def test_star_field_3dof_recovers_planted_rotation(
     )
     snrs = [40.0 - 0.5 * i for i in range(len(catalog_centers))]
     features: list[NavFeature] = [
-        make_star_feature(
+        make_feature(
             f'star:UCAC4:{i}',
             predicted_vu=catalog_centers[i],
             predicted_snr=snrs[i],
         )
         for i in range(len(catalog_centers))
     ]
+    return image, features
+
+
+def test_star_field_3dof_recovers_planted_rotation(
+    draw_gaussian_star: DrawGaussianStarFactory,
+    make_star_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """An above-floor planted rotation + translation is recovered normally."""
+    # 1.0 deg is above the 0.75 deg roll/translation separability floor, so
+    # the rotation must be reported with a genuine (non-sentinel) variance.
+    planted_theta = math.radians(1.0)
+    image, features = _rotated_star_field_fixture(
+        draw=draw_gaussian_star,
+        make_feature=make_star_feature,
+        planted_offset=(1.5, -2.0),
+        planted_theta=planted_theta,
+    )
     technique = StarFieldFromCatalogNav()
+    # 1.0 deg of roll displaces the outermost stars by ~2.5 px relative to a
+    # candidate triplet's pure-translation transform; widen the RANSAC inlier
+    # tolerance so the rotation-induced residual does not evict inliers
+    # before the Procrustes refit absorbs it.
+    technique._inlier_tolerance_px = 4.0
     context = make_nav_context(image, fit_camera_rotation=True, max_rotation_deg=5.0)
     result = technique.navigate(features, context)
     assert result.spurious is False
@@ -610,6 +643,40 @@ def test_star_field_3dof_recovers_planted_rotation(
     assert result.rotation_rad == pytest.approx(planted_theta, abs=math.radians(0.2))
     assert result.sigma_rotation_rad is not None
     assert result.sigma_rotation_rad > 0.0
+    assert result.covariance_px2[2, 2] < ROTATION_UNOBSERVABLE_VARIANCE
+    assert isinstance(result.diagnostics, StarFieldDiagnostics)
+    assert result.diagnostics.rotation_below_separability_floor is False
+
+
+def test_star_field_3dof_sub_floor_rotation_reports_unobservable(
+    draw_gaussian_star: DrawGaussianStarFactory,
+    make_star_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """A planted sub-floor roll is reported unobservable, never a confident zero.
+
+    Below the ~0.75 deg roll/translation separability floor the fitted
+    rotation is not separable from a translation (see the camera-roll
+    section of the simulator report), so the rotation slot must carry the
+    unobservable sentinel and the diagnostics flag -- not a small sigma.
+    """
+    planted_theta = math.radians(0.5)
+    image, features = _rotated_star_field_fixture(
+        draw=draw_gaussian_star,
+        make_feature=make_star_feature,
+        planted_offset=(1.5, -2.0),
+        planted_theta=planted_theta,
+    )
+    technique = StarFieldFromCatalogNav()
+    context = make_nav_context(image, fit_camera_rotation=True, max_rotation_deg=5.0)
+    result = technique.navigate(features, context)
+    assert result.spurious is False
+    assert result.covariance_px2.shape == (3, 3)
+    assert result.covariance_px2[2, 2] == pytest.approx(ROTATION_UNOBSERVABLE_VARIANCE)
+    assert result.sigma_rotation_rad is not None
+    assert result.sigma_rotation_rad == pytest.approx(math.sqrt(ROTATION_UNOBSERVABLE_VARIANCE))
+    assert isinstance(result.diagnostics, StarFieldDiagnostics)
+    assert result.diagnostics.rotation_below_separability_floor is True
 
 
 def test_star_field_3dof_zero_rotation_path_remains_close_to_planted_offset(
@@ -637,6 +704,11 @@ def test_star_field_3dof_zero_rotation_path_remains_close_to_planted_offset(
     assert result.offset_px[0] == pytest.approx(planted[0], abs=0.5)
     assert result.offset_px[1] == pytest.approx(planted[1], abs=0.5)
     assert result.rotation_rad == pytest.approx(0.0, abs=math.radians(0.5))
+    # A fitted near-zero roll sits below the separability floor: it must be
+    # flagged unobservable rather than reported as a confident zero.
+    assert result.covariance_px2[2, 2] == pytest.approx(ROTATION_UNOBSERVABLE_VARIANCE)
+    assert isinstance(result.diagnostics, StarFieldDiagnostics)
+    assert result.diagnostics.rotation_below_separability_floor is True
 
 
 def test_build_covariance_two_point_reduced_chi_square() -> None:

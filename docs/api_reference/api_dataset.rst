@@ -38,3 +38,8 @@ spindoctor.dataset
    :members:
    :undoc-members:
    :show-inheritance:
+
+.. automodule:: spindoctor.dataset.dataset_sim
+   :members:
+   :undoc-members:
+   :show-inheritance:

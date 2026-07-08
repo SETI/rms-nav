@@ -111,6 +111,7 @@ Examples
         "sigma_px": [0.125, 0.122],
         "confidence_rank": "high",
         "confidence": 0.794,
+        "confidence_provisional": true,
         "status_reason": "OK",
         "covariance_px2": [[0.0156, 0.0017], [0.0017, 0.0148]],
         "per_technique": [
@@ -137,6 +138,11 @@ Examples
 
 Every per-technique diagnostic key under ``"diagnostics"`` corresponds to a non-``None``
 entry in the diagnostics dataclass's ``CURATOR_FIELDS``.
+
+The literal ``"confidence_provisional": true`` marker flags that the confidence values
+and ``confidence_rank`` tiers are not yet calibrated against measured navigation error
+and must not be read as probabilities; the curator emits it unconditionally until the
+confidence-calibration workstream lands.
 
 **Allow-list catches a missed field.**  An operator adds a new field
 ``mean_polarity_score`` to

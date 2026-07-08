@@ -1,7 +1,10 @@
 """Tests for ``spindoctor.nav_orchestrator.provenance.Provenance``."""
 
+from pathlib import Path
+
 import pytest
 
+from spindoctor.config import Config
 from spindoctor.nav_orchestrator.provenance import (
     Provenance,
     ProvenanceMetadata,
@@ -97,6 +100,137 @@ def test_collect_provenance_metadata_is_byte_identical_across_calls() -> None:
     b = collect_provenance_metadata()
     assert dict(a.static_data_hashes) == dict(b.static_data_hashes)
     assert a.spice_kernels == b.spice_kernels
+
+
+def test_provenance_carries_config_and_catalog_fields() -> None:
+    """The config hash, override list, and star catalogs are stored."""
+    prov = Provenance(
+        spindoctor_version='0.5.2',
+        image_et=1.0,
+        pipeline_run_iso8601='2026-04-26T12:00:00Z',
+        config_hash='ab' * 32,
+        config_overrides=('/z_first.yaml', '/a_second.yaml'),
+        star_catalogs={'ybsc': 'gs://bucket/YBSC', 'ucac4': 'gs://bucket/UCAC4'},
+    )
+    assert prov.config_hash == 'ab' * 32
+    # Override order is application order; it must NOT be sorted.
+    assert prov.config_overrides == ('/z_first.yaml', '/a_second.yaml')
+    assert dict(prov.star_catalogs) == {
+        'ucac4': 'gs://bucket/UCAC4',
+        'ybsc': 'gs://bucket/YBSC',
+    }
+
+
+def test_provenance_star_catalogs_is_immutable() -> None:
+    """``star_catalogs`` is wrapped as ``MappingProxyType``."""
+    prov = Provenance(
+        spindoctor_version='0.5.2',
+        image_et=1.0,
+        pipeline_run_iso8601='2026-04-26T12:00:00Z',
+        star_catalogs={'ucac4': 'gs://bucket/UCAC4'},
+    )
+    with pytest.raises(TypeError, match='item assignment'):
+        prov.star_catalogs['ybsc'] = 'x'  # type: ignore[index]
+
+
+def test_collect_provenance_metadata_includes_config_hash() -> None:
+    """The metadata carries a 64-char sha256 of the resolved config."""
+    meta = collect_provenance_metadata()
+    assert meta.config_hash is not None
+    assert len(meta.config_hash) == 64
+    assert all(c in '0123456789abcdef' for c in meta.config_hash)
+
+
+def test_collect_provenance_metadata_lists_configured_star_catalogs() -> None:
+    """Every configured catalog name appears in the star-catalog mapping."""
+    meta = collect_provenance_metadata()
+    names = set(meta.star_catalogs.keys())
+    assert 'ucac4' in names
+    assert 'tycho2' in names
+    assert 'ybsc' in names
+
+
+def test_star_catalog_paths_follow_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Catalog paths mirror the env vars the catalog constructors read."""
+    monkeypatch.setenv('UCAC4_PATH', 'gs://bucket/UCAC4')
+    monkeypatch.setenv('YBSC_PATH', 'gs://bucket/YBSC')
+    monkeypatch.setenv('SPICE_PATH', '/kernels')
+    meta = collect_provenance_metadata()
+    assert meta.star_catalogs['ucac4'] == 'gs://bucket/UCAC4'
+    assert meta.star_catalogs['ybsc'] == 'gs://bucket/YBSC'
+    assert meta.star_catalogs['tycho2'] == '/kernels/Stars'
+
+
+def test_star_catalog_paths_empty_when_unresolvable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unset catalog env vars record an empty path, never a fabricated one."""
+    monkeypatch.delenv('UCAC4_PATH', raising=False)
+    monkeypatch.delenv('YBSC_PATH', raising=False)
+    monkeypatch.delenv('SPICE_PATH', raising=False)
+    monkeypatch.delenv('OOPS_RESOURCES', raising=False)
+    meta = collect_provenance_metadata()
+    assert meta.star_catalogs['ucac4'] == ''
+    assert meta.star_catalogs['ybsc'] == ''
+    assert meta.star_catalogs['tycho2'] == ''
+
+
+def test_resolved_config_hash_identical_for_identical_inputs() -> None:
+    """Two configs loaded from the same bundled defaults hash identically."""
+    a = Config()
+    b = Config()
+    assert a.resolved_config_hash() == b.resolved_config_hash()
+
+
+def test_resolved_config_hash_changes_with_override_content(tmp_path: Path) -> None:
+    """An override that changes resolved content changes the hash."""
+    base = Config()
+    override = tmp_path / 'override.yaml'
+    override.write_text('stars:\n  max_stars: 12345\n', encoding='utf-8')
+    modified = Config()
+    modified.update_config(override)
+    assert modified.resolved_config_hash() != base.resolved_config_hash()
+
+
+def test_resolved_config_hash_ignores_override_provenance_not_content(tmp_path: Path) -> None:
+    """Two override files with identical content produce identical hashes."""
+    text = 'stars:\n  max_stars: 12345\n'
+    first = tmp_path / 'first.yaml'
+    second = tmp_path / 'second.yaml'
+    first.write_text(text, encoding='utf-8')
+    second.write_text(text, encoding='utf-8')
+    a = Config()
+    a.update_config(first)
+    b = Config()
+    b.update_config(second)
+    assert a.resolved_config_hash() == b.resolved_config_hash()
+
+
+def test_override_paths_recorded_in_application_order(tmp_path: Path) -> None:
+    """User override files are recorded in the order they were applied."""
+    first = tmp_path / 'z_first.yaml'
+    second = tmp_path / 'a_second.yaml'
+    first.write_text('stars:\n  max_stars: 111\n', encoding='utf-8')
+    second.write_text('stars:\n  max_stars: 222\n', encoding='utf-8')
+    config = Config()
+    config.update_config(first)
+    config.update_config(second)
+    assert config.override_paths == (str(first), str(second))
+
+
+def test_override_paths_empty_for_bundled_defaults() -> None:
+    """A plain bundled-defaults load records no overrides."""
+    config = Config()
+    config.read_config()
+    assert config.override_paths == ()
+
+
+def test_collect_provenance_metadata_records_overrides(tmp_path: Path) -> None:
+    """The applied override list flows into the collected metadata."""
+    override = tmp_path / 'override.yaml'
+    override.write_text('stars:\n  max_stars: 777\n', encoding='utf-8')
+    config = Config()
+    config.update_config(override)
+    meta = collect_provenance_metadata(config)
+    assert meta.config_overrides == (str(override),)
 
 
 def test_static_data_hashes_skips_unreadable_files(

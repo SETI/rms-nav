@@ -6,22 +6,27 @@ by construction; regression-baseline comparison strips that field before
 comparing.
 
 The :func:`collect_provenance_metadata` helper produces the per-image
-``spindoctor_git_sha``, loaded-SPICE-kernel list, and the static-data hash
-dictionary at navigate time so the orchestrator can populate the
-``Provenance`` envelope without each caller re-implementing the lookups.
+``spindoctor_git_sha``, loaded-SPICE-kernel list, static-data hash
+dictionary, resolved-config hash (plus applied override paths), and
+star-catalog identifiers at navigate time so the orchestrator can
+populate the ``Provenance`` envelope without each caller re-implementing
+the lookups.
 """
 
 from __future__ import annotations
 
 import functools
 import hashlib
+import os
 import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 
-from spindoctor.config import IMAGE_LOGGER
+from ruamel.yaml.error import YAMLError
+
+from spindoctor.config import DEFAULT_CONFIG, IMAGE_LOGGER, Config
 
 __all__ = [
     'Provenance',
@@ -59,6 +64,18 @@ class Provenance:
             Stored as a read-only ``MappingProxyType`` after construction.
         technique_names: Sorted tuple of registered technique class names.
         extractor_names: Sorted tuple of registered extractor class names.
+        config_hash: sha256 hex digest of the fully-resolved config content
+            (bundled defaults plus applied overrides, deterministically
+            serialized with sorted keys), or ``None`` when unavailable.
+        config_overrides: Tuple of user/CLI override config file paths in
+            application order (order matters -- later files win the merge),
+            so it is deliberately not sorted in ``__post_init__``.
+        star_catalogs: Mapping ``catalog name -> configured path or URL``
+            for every star catalog in ``config.stars.catalogs``.  The value
+            is the resolution root (env var or default), or ``''`` when the
+            path cannot be determined.  No version numbers are recorded --
+            the catalog data carries none.  Stored as a read-only
+            ``MappingProxyType`` after construction.
         image_et: Observation midtime ET (TDB seconds past J2000).
         pipeline_run_iso8601: UTC timestamp when the run began.  Excluded
             from byte-identical regression-baseline comparison because it
@@ -76,22 +93,34 @@ class Provenance:
     static_data_hashes: Mapping[str, str] = field(default_factory=dict)
     technique_names: tuple[str, ...] = ()
     extractor_names: tuple[str, ...] = ()
+    config_hash: str | None = None
+    config_overrides: tuple[str, ...] = ()
+    star_catalogs: Mapping[str, str] = field(default_factory=dict)
     spice_kernel_count: int = field(init=False)
 
     def __post_init__(self) -> None:
-        """Normalize sequences, derive count, freeze ``static_data_hashes``."""
+        """Normalize sequences, derive count, freeze the mapping fields."""
         # Normalize the three sequence fields to deterministic sorted
         # tuples so callers' mutable or unsorted inputs cannot leak in.
+        # ``config_overrides`` keeps its caller-supplied order because the
+        # merge is order-sensitive; it is only coerced to a tuple.
         # ``object.__setattr__`` is required because the dataclass is frozen.
         object.__setattr__(self, 'spice_kernels', tuple(sorted(self.spice_kernels)))
         object.__setattr__(self, 'technique_names', tuple(sorted(self.technique_names)))
         object.__setattr__(self, 'extractor_names', tuple(sorted(self.extractor_names)))
+        object.__setattr__(self, 'config_overrides', tuple(self.config_overrides))
         object.__setattr__(self, 'spice_kernel_count', len(self.spice_kernels))
         if not isinstance(self.static_data_hashes, MappingProxyType):
             object.__setattr__(
                 self,
                 'static_data_hashes',
                 MappingProxyType(dict(self.static_data_hashes)),
+            )
+        if not isinstance(self.star_catalogs, MappingProxyType):
+            object.__setattr__(
+                self,
+                'star_catalogs',
+                MappingProxyType(dict(sorted(dict(self.star_catalogs).items()))),
             )
 
 
@@ -106,11 +135,20 @@ class ProvenanceMetadata:
             loaded.
         static_data_hashes: Mapping of static-data YAML filename to
             sha256-hex digest of the file's raw bytes.
+        config_hash: sha256 hex digest of the fully-resolved config
+            content, or ``None`` when the hash could not be computed.
+        config_overrides: Applied user/CLI override config file paths in
+            application order.
+        star_catalogs: Mapping of configured star-catalog name to its
+            resolved path or URL (``''`` when unresolvable).
     """
 
     git_sha: str | None
     spice_kernels: tuple[str, ...]
     static_data_hashes: Mapping[str, str]
+    config_hash: str | None
+    config_overrides: tuple[str, ...]
+    star_catalogs: Mapping[str, str]
 
 
 @functools.cache
@@ -210,15 +248,89 @@ def _resolve_static_data_hashes() -> Mapping[str, str]:
     return MappingProxyType(hashes)
 
 
-def collect_provenance_metadata() -> ProvenanceMetadata:
+def _resolve_config_hash(config: Config) -> str | None:
+    """Return the resolved-config sha256 digest, or ``None`` on failure.
+
+    Provenance metadata is best-effort: a config that cannot be loaded or
+    serialized (malformed user override, unreadable file) is logged at
+    WARNING and reported as ``None`` rather than allowed to abort the
+    navigation run.
+
+    Parameters:
+        config: Project ``Config`` whose resolved content is hashed.
+
+    Returns:
+        64-character sha256 hex digest, or ``None``.
+    """
+    try:
+        return config.resolved_config_hash()
+    except (OSError, TypeError, ValueError, YAMLError) as exc:
+        IMAGE_LOGGER.warning('resolved-config hash unavailable: %s', exc)
+        return None
+
+
+def _resolve_star_catalogs(config: Config) -> Mapping[str, str]:
+    """Return ``{catalog name: path or URL}`` for the configured catalogs.
+
+    Walks ``config.stars.catalogs`` and records, per catalog, the same
+    resolution root the catalog constructors use: ``UCAC4_PATH`` for
+    UCAC4, ``YBSC_PATH`` for YBSC, and ``SPICE_PATH/Stars`` (falling back
+    to ``OOPS_RESOURCES/SPICE/Stars``) for the SPICE-kernel-backed
+    Tycho-2 catalog.  An unresolvable path is recorded as ``''`` -- the
+    catalog name still appears so the metadata shows what was configured.
+    Only names and paths/URLs are recorded; the catalog data carries no
+    version identifier to report.
+
+    Parameters:
+        config: Project ``Config`` supplying ``stars.catalogs``.
+
+    Returns:
+        Read-only mapping sorted by catalog name.
+    """
+    try:
+        catalog_names = [str(name).lower() for name in config.stars.catalogs]
+    except (AttributeError, TypeError, OSError) as exc:
+        IMAGE_LOGGER.warning('star-catalog provenance unavailable: %s', exc)
+        return MappingProxyType({})
+    resolved: dict[str, str] = {}
+    for name in catalog_names:
+        if name == 'ucac4':
+            resolved[name] = os.environ.get('UCAC4_PATH', '')
+        elif name == 'ybsc':
+            resolved[name] = os.environ.get('YBSC_PATH', '')
+        elif name == 'tycho2':
+            spice_path = os.environ.get('SPICE_PATH')
+            oops_resources = os.environ.get('OOPS_RESOURCES')
+            if spice_path:
+                resolved[name] = f'{spice_path}/Stars'
+            elif oops_resources:
+                resolved[name] = f'{oops_resources}/SPICE/Stars'
+            else:
+                resolved[name] = ''
+        else:
+            resolved[name] = ''
+    return MappingProxyType(dict(sorted(resolved.items())))
+
+
+def collect_provenance_metadata(config: Config | None = None) -> ProvenanceMetadata:
     """Gather process-wide provenance metadata at navigate time.
+
+    Parameters:
+        config: Project ``Config`` supplying the resolved-config hash, the
+            applied override list, and the star-catalog configuration.
+            Defaults to ``DEFAULT_CONFIG``.
 
     Returns:
         A :class:`ProvenanceMetadata` instance populated with the current
-        git SHA, loaded SPICE kernel list, and static-data hashes.
+        git SHA, loaded SPICE kernel list, static-data hashes,
+        resolved-config hash plus overrides, and star-catalog identifiers.
     """
+    config = config or DEFAULT_CONFIG
     return ProvenanceMetadata(
         git_sha=_resolve_git_sha(),
         spice_kernels=_resolve_spice_kernels(),
         static_data_hashes=_resolve_static_data_hashes(),
+        config_hash=_resolve_config_hash(config),
+        config_overrides=config.override_paths,
+        star_catalogs=_resolve_star_catalogs(config),
     )

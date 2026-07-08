@@ -18,7 +18,7 @@ Registered concrete subclasses:
 
 Per-body shape, albedo, and SPK-residual quantities consumed by the covariance and emission
 gates live in :mod:`spindoctor.nav_model.body_shape`. The runtime lookup
-:func:`~spindoctor.nav_model.body_shape.shape_for_body` overlays operator YAML
+:func:`~spindoctor.nav_model.body_shape.load_body_shape` overlays operator YAML
 (``config_220_body_shape.yaml``) onto the hard-coded
 :data:`~spindoctor.nav_model.body_shape.BODY_SHAPE_TABLE`, falling back to
 :data:`~spindoctor.nav_model.body_shape.DEFAULT_BODY_SHAPE` for entirely unknown bodies.

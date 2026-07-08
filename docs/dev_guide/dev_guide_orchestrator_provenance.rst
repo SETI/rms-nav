@@ -25,7 +25,16 @@ The provenance envelope captures three independent kinds of state:
   ``static_data_hashes`` sha256-hashes every YAML in
   ``src/spindoctor/config_files`` whose filename matches one of the
   ``_STATIC_DATA_PREFIXES`` (``config_220_`` for the body shape catalogue, ``config_3``
-  for ring catalogues, ``config_4`` for per-instrument blocks).
+  for ring catalogues, ``config_4`` for per-instrument blocks); ``star_catalogs``
+  records each configured star catalog's name and its resolved path or URL (the same
+  roots the catalog constructors read: ``UCAC4_PATH``, ``YBSC_PATH``, and
+  ``SPICE_PATH``/``OOPS_RESOURCES`` for Tycho-2).  Catalog version numbers are not
+  recorded because the catalog data carries none.
+- **Configuration state.**  ``config_hash`` is a sha256 digest of the *resolved*
+  config content (bundled defaults deep-merged with every applied override,
+  serialized deterministically with sorted keys), and ``config_overrides`` lists the
+  user/CLI override files (``nav_default_config.yaml`` or ``--config-file`` paths) in
+  application order.  Together they pin exactly which configuration shaped the run.
 - **Pipeline state.**  ``technique_names`` and ``extractor_names`` enumerate every
   registered :class:`~spindoctor.nav_technique.nav_technique.NavTechnique` and
   :class:`~spindoctor.nav_model.nav_model.NavModel` under the current process — so a regression
@@ -92,13 +101,22 @@ Public surface (autodocumented at :doc:`/api_reference/api_nav_orchestrator`):
     registered technique class names.
   - :attr:`~spindoctor.nav_orchestrator.provenance.Provenance.extractor_names` — sorted tuple of
     registered extractor class names.
+  - :attr:`~spindoctor.nav_orchestrator.provenance.Provenance.config_hash` — sha256 hex digest
+    of the fully-resolved config content, or ``None`` when unavailable.
+  - :attr:`~spindoctor.nav_orchestrator.provenance.Provenance.config_overrides` — applied
+    user/CLI override config paths in application order (not sorted; the merge is
+    order-sensitive).
+  - :attr:`~spindoctor.nav_orchestrator.provenance.Provenance.star_catalogs` — read-only
+    mapping of configured star-catalog name to its resolved path or URL (``''`` when
+    unresolvable).
   - :attr:`~spindoctor.nav_orchestrator.provenance.Provenance.spice_kernel_count` — derived;
     populated from ``len(spice_kernels)`` in ``__post_init__``.
 
 - :class:`~spindoctor.nav_orchestrator.provenance.ProvenanceMetadata` — internal dataclass
   returned by
   :func:`~spindoctor.nav_orchestrator.provenance.collect_provenance_metadata` carrying the
-  freshly-read git SHA, kernel list, and static-data hash dict.
+  freshly-read git SHA, kernel list, static-data hash dict, resolved-config hash, applied
+  config-override paths, and star-catalog paths.
 
 - :func:`~spindoctor.nav_orchestrator.provenance.collect_provenance_metadata` — runs the live
   readouts. Called once per

@@ -1538,39 +1538,40 @@ the real library.
 
 **Status: deferred -- tracked in issue #153** (specified together with T6 and
 T7 as the calibration test layer), until the operator is ready to run the
-real-data calibration against the curated image library (Phase 10 §C).  T5 has
-no real-data dependency of its own -- it runs sim scenes against
-operator-supplied rough targets -- but its only consumer is the real
-calibration's starting guess, so it is sequenced to run immediately before
-that sweep rather than now.  Deferring it also lets the irregular-body
-diagnostics (`phase_irregularity_factor`, B7 scenarios 2-3) come online
-first, so the bootstrap fits over a representative diagnostic spread.
+real-data WS-5 calibration (`plans/VALIDATION_AND_CALIBRATION_PLAN.md`)
+against the curated image library.  T5 has no real-data dependency of its
+own -- it runs sim scenes whose recovery error is known by construction --
+but its only consumer is the real calibration's starting guess, so it is
+sequenced to run immediately before that calibration rather than now.
+Deferring it also lets the irregular-body diagnostics
+(`phase_irregularity_factor`, B7 scenarios 2-3) come online first, so the
+bootstrap fits over a representative diagnostic spread.
 
 **Goal:** use sim-derived diagnostic distributions to give the
-real-data calibration sweep a sensible starting point for the α
-optimization.
+real-data WS-5 calibration a sensible starting point for the α
+coefficients.
 
 **Scope:**
 
 - Run a representative set of sim scenes through the navigator.
-- For each scene, record the per-technique diagnostics.
-- Use these to pre-fit the α coefficients via
-  `scipy.optimize.curve_fit` against an *operator-supplied
-  approximate target* per scene (e.g. "this clean Mimas should land
-  high; this irregular Hyperion should land low").  The targets are
-  rough by design — the sim can't supply real-world tier targets, but
-  it can rule out obviously-wrong α regions.
+- For each scene, record the per-technique diagnostics and the known
+  recovery error (planted offset minus recovered offset).
+- Pre-fit the α coefficients so reported confidence tracks the
+  sim recovery error — the sim-anchored arm of WS-5's reliability
+  calibration, run early.  The sim anchors are approximate by design
+  (sim realism is itself under validation), but they rule out
+  obviously-wrong α regions.
 - The output α is **not** committed to
   `config_510_techniques.yaml`.  It's used as the initial guess for
-  the real-data calibration in Phase 10 §C, replacing the current
-  arithmetic-illustrative placeholder coefficients.
+  the real-data WS-5 calibration, replacing the current
+  arithmetic-illustrative default coefficients.
 - Documented as a separate one-off helper script under
   `tests/integration/sim_alpha_bootstrap.py`.
 
 **Why deferred, not dropped:** when run, it shrinks the optimization basin
 for the real-data calibration without committing to sim's diagnostic
 distributions.  It is optional even then -- skip if the operator finds the
-placeholder coefficients already close enough -- which is why it waits until
+default coefficients already close enough -- which is why it waits until
 the calibration is actually about to happen.
 
 **Files touched:** new
@@ -1612,8 +1613,8 @@ improvement actually closed the gap it was supposed to.
 T6 as the calibration test layer); hard-gated on the real-data calibration
 having landed, so it is the last of the three.
 
-**Goal:** after the real-data Phase 10 §C calibration sweep lands,
-verify the calibrated formulas pass the sim sweeps from T3.
+**Goal:** after the real-data WS-5 calibration lands, verify the
+calibrated formulas pass the sim sweeps from T3.
 
 **Scope:**
 
@@ -1672,7 +1673,7 @@ G5 follows B5
 G6 follows B6
 G7 follows B7
 
-T5 (α bootstrap) — deferred (#153); run immediately before the real-data calibration (Phase 10 §C)
+T5 (α bootstrap) — deferred (#153); run immediately before the real-data WS-5 calibration
 T6 (real-vs-sim) — deferred (#153); needs the real-image library navigable; run around the calibration
 T7 (calibration validation) — deferred (#153); last, depends on real-data calibration landing
 ```

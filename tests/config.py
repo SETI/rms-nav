@@ -1,3 +1,17 @@
+"""Shared test constants: external-image URLs and environment gates."""
+
+import os
+
+import pytest
+
+# Tests importing this marker exercise real image reading against external
+# holdings and SPICE/oops resources; they cannot run without these env vars
+# (CI sets them in .github/workflows/run-tests.yml).
+REQUIRES_EXTERNAL_DATA = pytest.mark.skipif(
+    'OOPS_RESOURCES' not in os.environ or 'PDS3_HOLDINGS_DIR' not in os.environ,
+    reason='requires OOPS_RESOURCES and PDS3_HOLDINGS_DIR (external holdings/resources)',
+)
+
 # TODO: Update to use PDS3_HOLDINGS_DIR
 
 # Image of Rhea

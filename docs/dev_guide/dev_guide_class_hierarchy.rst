@@ -400,7 +400,7 @@ Per-family data models live alongside the renderer classes:
   (:class:`~spindoctor.nav_model.body_shape.BodyShape`,
   :data:`~spindoctor.nav_model.body_shape.BODY_SHAPE_TABLE`,
   :data:`~spindoctor.nav_model.body_shape.DEFAULT_BODY_SHAPE`,
-  :func:`~spindoctor.nav_model.body_shape.shape_for_body`); see
+  :func:`~spindoctor.nav_model.body_shape.load_body_shape`); see
   :doc:`dev_guide_navigation_models_body` for details.
 - **Rings** — the :mod:`spindoctor.nav_model.rings` subpackage carries the
   catalog-driven ring-feature data model (``RingFeature``,

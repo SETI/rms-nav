@@ -185,6 +185,13 @@ in ``src/spindoctor/config_files/config_510_techniques.yaml``.
   :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` once it crosses
   this fraction of the per-image
   :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.max_rotation_deg` cap.
+- ``rotation_separability_floor_deg`` — float, default ``0.75`` deg. Roll/translation
+  separability floor: the camera-roll analysis in the simulator performance report shows
+  the matcher cannot separate a roll below ~0.75 deg from a pure translation, so a fitted
+  rotation magnitude below this floor is reported with the rotation-unobservable sentinel
+  variance and the
+  :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.rotation_below_separability_floor`
+  diagnostics flag instead of a confident near-zero value.
 - ``psf_refine_enabled`` — int flag, default ``1``. ``1`` enables the PSF-fit re-centroiding
   of matched inliers; ``0`` keeps the brightness-weighted moment centroid everywhere.
 - ``psf_refine_box_px`` — int, default ``11`` px (odd). Square box side for the PSF fit and
@@ -286,6 +293,12 @@ Diagnostics
   of catalog stars in the extfov.
 - :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.n_triplets_evaluated` —
   number of triplet candidates considered by RANSAC.
+- :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.rotation_below_separability_floor`
+  — true when a co-fitted rotation's magnitude fell below the roll/translation
+  separability floor (``rotation_separability_floor_deg``, default 0.75 deg per the
+  camera-roll separability analysis in the simulator performance report) and the
+  rotation was therefore reported with the rotation-unobservable sentinel variance
+  instead of a confident near-zero value.
 
 Call path
 ---------

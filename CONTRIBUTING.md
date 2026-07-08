@@ -5,8 +5,8 @@ guidelines and instructions for contributing to the project.
 
 ## Code of Conduct
 
-We expect all contributors to follow our Code of Conduct, which ensures a
-welcoming and inclusive environment for everyone. See CODE_OF_CONDUCT.md.
+We expect all contributors to be respectful and considerate in all project
+interactions, keeping the environment welcoming and inclusive for everyone.
 
 ## Getting Started
 
@@ -26,10 +26,10 @@ welcoming and inclusive environment for everyone. See CODE_OF_CONDUCT.md.
    pip install -r requirements.txt
    ```
 
-4. Set up pre-commit hooks:
+4. Before pushing changes, run the full check suite (lint, types, tests, docs):
 
    ```bash
-   pre-commit install
+   ./scripts/run-all-checks.sh
    ```
 
 ## Development Workflow
@@ -74,7 +74,7 @@ We follow these standards for all code contributions:
 * **Docstrings**: Document all classes and methods with docstrings following
   the Google style
 * **Testing**: Include unit tests for new functionality
-* **Compatibility**: Ensure compatibility with Python 3.10+
+* **Compatibility**: Ensure compatibility with Python 3.11+
 
 Example of a well-formatted function:
 
@@ -89,10 +89,10 @@ def calculate_offset(
         model: The theoretical model as a NumPy array
 
     Returns:
-        A tuple containing the (u, v) offset in pixels
+        A tuple containing the (v, u) offset in pixels
     """
     # Implementation here
-    return u_offset, v_offset
+    return v_offset, u_offset
 ```
 
 ## Pull Request Process

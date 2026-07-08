@@ -31,7 +31,8 @@ The simulated path is the calibration regime for the star techniques: a develope
 probe star matching with a field whose true offset, photometry, and (planted) camera
 roll are known by construction.
 
-The renderer (:func:`~spindoctor.sim.render.render_stars`) builds each star at its *unshifted*
+The renderer (the star stage of
+:func:`~spindoctor.sim.render.render_combined_model`) builds each star at its *unshifted*
 predicted ``(v, u)`` and draws it into the image shifted by the scene's planted offset
 and camera roll. This model adopts that unshifted star list as its prediction, so a
 technique that detects the shifted peak recovers the planted transform -- the same
@@ -43,7 +44,7 @@ Two rendering details make the simulated field faithful to a real one:
 - **Pixel-centre convention.** ``psfmodel.eval_rect`` measures its sub-pixel offset
   from the pixel's lower edge (``offset=0`` centres the PSF half a pixel low), whereas
   the navigator's detection centroid and this model's predicted position both treat
-  integer index ``i`` as the pixel centre. :func:`~spindoctor.sim.render.render_stars` adds
+  integer index ``i`` as the pixel centre. The star renderer adds
   0.5 to the eval offset so a star the model predicts at ``(v, u)`` lands there in the
   image, with no half-pixel bias in the recovered offset.
 - **Camera roll about the boresight.** A planted ``offset_rotation_deg`` rotates each

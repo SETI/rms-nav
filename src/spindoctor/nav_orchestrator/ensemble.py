@@ -37,6 +37,7 @@ from spindoctor.nav_orchestrator.nav_result import ConfidenceRank, NavResult
 from spindoctor.nav_orchestrator.provenance import Provenance
 from spindoctor.nav_technique.nav_technique import technique_tier
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
+from spindoctor.support.exceptions import NavContractError
 from spindoctor.support.status_reason import NavStatusReason
 from spindoctor.support.types import NDArrayFloatType
 
@@ -100,7 +101,7 @@ class EnsembleConfig:
             against (every DT/star technique clamps its rotation to
             ``+-max_rotation_deg``, default 5 deg).  A 3-DoF result
             arriving with ``abs(rotation_rad)`` at or above this bound is a
-            programming error upstream and trips an assertion.
+            programming error upstream and raises ``NavContractError``.
         tier_thresholds: Mapping ``rank -> {min_confidence, max_sigma_px}``;
             see ``derive_confidence_rank``.
     """
@@ -268,6 +269,10 @@ def _agreement_groups(
 
     Returns:
         List of groups (each group a list of NavTechniqueResult).
+
+    Raises:
+        NavContractError: if a 3-DoF input's rotation magnitude is at or
+            above the small-angle bound (an upstream programming error).
     """
     n = len(results)
     if n == 0:
@@ -275,13 +280,21 @@ def _agreement_groups(
     max_rotation_rad = math.radians(max_allowed_rotation_deg)
     for res in results:
         cov = np.asarray(res.covariance_px2, np.float64)
-        if cov.shape == (3, 3) and res.rotation_rad is not None:
-            # Small-angle assumption: a 3-DoF rotation outside +-max_rotation_deg
-            # is an upstream error (every technique clamps its rotation fit to
-            # this bound), and would break the linear rotation differencing.
-            assert abs(res.rotation_rad) < max_rotation_rad, (
-                f'{res.technique_name}: rotation {math.degrees(res.rotation_rad):.3f} deg '
-                f'violates small-angle bound +-{max_allowed_rotation_deg:.3f} deg'
+        # Small-angle assumption: a 3-DoF rotation outside +-max_rotation_deg
+        # is an upstream error (every technique clamps its rotation fit to
+        # this bound), and would break the linear rotation differencing.
+        # Raised as NavContractError (not a bare assert) so the check
+        # survives python -O and is never swallowed as an ordinary
+        # technique failure.
+        if (
+            cov.shape == (3, 3)
+            and res.rotation_rad is not None
+            and abs(res.rotation_rad) >= max_rotation_rad
+        ):
+            raise NavContractError(
+                f'{res.technique_name}: rotation '
+                f'{math.degrees(res.rotation_rad):.3f} deg violates small-angle '
+                f'bound +-{max_allowed_rotation_deg:.3f} deg'
             )
     if n == 1:
         return [list(results)]
@@ -381,6 +394,8 @@ def _combine_precision_weighted(
         ValueError: if ``group`` is empty (defensive; the orchestrator must
             ensure non-emptiness before calling), if total weight is zero,
             or if the group contains a mix of 2-DoF and 3-DoF results.
+        NavContractError: if a 3-DoF input's rotation magnitude is at or
+            above the small-angle bound (an upstream programming error).
     """
     if not group:
         raise ValueError('empty group passed to _combine_precision_weighted')
@@ -406,11 +421,28 @@ def _combine_precision_weighted(
             # Small-angle assumption: every contributing technique clamps its
             # rotation fit to +-max_rotation_deg, so a result arriving outside
             # that bound is an upstream programming error, not data the
-            # circular-mean combine should silently absorb.
-            assert abs(theta) < max_rotation_rad, (
-                f'{res.technique_name}: rotation {math.degrees(theta):.3f} deg '
-                f'violates small-angle bound +-{max_allowed_rotation_deg:.3f} deg'
-            )
+            # circular-mean combine should silently absorb.  Raised as
+            # NavContractError (not a bare assert) so the check survives
+            # python -O and is never swallowed as an ordinary technique
+            # failure.
+            if abs(theta) >= max_rotation_rad:
+                raise NavContractError(
+                    f'{res.technique_name}: rotation {math.degrees(theta):.3f} deg '
+                    f'violates small-angle bound +-{max_allowed_rotation_deg:.3f} deg'
+                )
+            # Rotation weight: the scalar rotation-information element
+            # ``info[2, 2]`` only.  The circular mean needs one scalar weight
+            # per angle, so the rotation-translation cross-information
+            # ``info[:2, 2]`` (which the information-form translation merge
+            # below does retain) cannot enter this average.  Dropping it
+            # approximates each input's rotation as independent of its
+            # translation, i.e. it uses the conditional rotation information
+            # instead of the marginal ``1 / Sigma[2, 2]``; under the
+            # small-angle clamp enforced above the rotations differ by at
+            # most a few degrees, so the reweighting error this introduces
+            # in the combined angle is far below the reported rotation
+            # sigma.  The combined covariance itself is exact: it comes from
+            # the full information-form merge, cross-terms included.
             w_theta = float(info[2, 2])
             rot_w_sin += w_theta * math.sin(theta)
             rot_w_cos += w_theta * math.cos(theta)

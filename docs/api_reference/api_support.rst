@@ -73,6 +73,11 @@ spindoctor.support
    :undoc-members:
    :show-inheritance:
 
+.. automodule:: spindoctor.support.summary_png
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 .. automodule:: spindoctor.support.time
    :members:
    :undoc-members:

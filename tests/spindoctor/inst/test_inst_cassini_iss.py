@@ -1,6 +1,8 @@
-from tests.config import URL_CASSINI_ISS_RHEA_01
+from tests.config import REQUIRES_EXTERNAL_DATA, URL_CASSINI_ISS_RHEA_01
 
 import spindoctor.obs.obs_inst_cassini_iss as obstcoiss
+
+pytestmark = REQUIRES_EXTERNAL_DATA
 
 
 def test_cassini_iss_basic() -> None:

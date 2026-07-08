@@ -26,6 +26,8 @@ Modules:
         from nested structures.
     ``constants``
         Common mathematical constants (e.g. ``PI``, ``HALFPI``).
+    ``exceptions``
+        ``NavContractError`` — typed exception for internal contract violations.
     ``nav_base``
         ``NavBase``, a small base class wiring ``Config`` and ``PdsLogger`` for nav
         objects.
@@ -56,6 +58,7 @@ __all__ = [
     'constants',
     'correlate',
     'distance_transform',
+    'exceptions',
     'file',
     'filter_combo',
     'filters',

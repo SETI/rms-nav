@@ -11,24 +11,31 @@ Configuration Loading Order
 ============================
 
 SpinDoctor ships with a complete set of built-in defaults, so the system works out
-of the box with no configuration on your part. You customize behavior by layering
-your own settings on top of those defaults. Settings are loaded in the following
-order, with later sources overriding earlier ones for the same key:
+of the box with no configuration on your part. You customize behavior by supplying
+your own settings on top of those defaults. Settings are resolved as follows:
 
 1. **Built-in defaults**: SpinDoctor bundles a stack of default configuration files
    that give every setting a sensible value. You do not edit these. (Developers
    who need to know exactly which files ship and what each one holds should see
    :doc:`/dev_guide/dev_guide_config_and_static_data`.)
 
-2. **User default configuration**: If a file named ``nav_default_config.yaml``
-   exists in the current working directory, it is loaded next. Use it to set
-   personal defaults that apply to all your runs.
+2. **Exactly one of the following** is loaded on top of the built-in defaults:
 
-3. **Command-line configuration files**: Any files specified with the
-   ``--config-file`` option are loaded in the order given, overriding the
-   built-in defaults and your user defaults.
+   * **Command-line configuration files**: If one or more files are specified
+     with the ``--config-file`` option, they are loaded in the order given,
+     each overriding the built-in defaults (and, for the same key, any file
+     loaded before it).
 
-4. **Command-line option overrides**: A handful of CLI flags (described under
+   * **User default configuration**: Only when no ``--config-file`` option is
+     given, a file named ``nav_default_config.yaml`` in the current working
+     directory is loaded if it exists. Use it to set personal defaults for
+     runs where you do not pass ``--config-file``. Note that passing
+     ``--config-file`` replaces this file entirely rather than adding to it;
+     to keep your personal defaults in such a run, list
+     ``nav_default_config.yaml`` explicitly as the first ``--config-file``
+     argument.
+
+3. **Command-line option overrides**: A handful of CLI flags (described under
    `Command-Line Option Overrides`_ below) override the matching configuration
    key directly and take precedence over everything above.
 
@@ -47,8 +54,8 @@ Configuration files use YAML format and are organized into sections:
      pds3_holdings_root: /path/to/pds3
 
    general:
+     log_level_model_stars: DEBUG
      log_level_model_rings: DEBUG
-     log_level_nav_correlate_all: DEBUG
 
    offset:
      correlation_fft_upsample_factor: 128
@@ -99,12 +106,6 @@ The autonomous-navigation pipeline routes every per-image technique line
 through ``IMAGE_LOGGER``; there is no per-technique log-level knob.  Each
 technique opens a ``with self.logger.open(f'TECHNIQUE: {self.name}')``
 section so the per-image log file delimits each technique's contribution.
-The legacy ``general.log_level_nav_correlate_all`` knob is retained for
-backwards compatibility with any user config files that still set it but
-the autonomous techniques (``BodyDiscCorrelateNav``, ``BodyBlobNav``,
-``BodyLimbNav``, ``BodyTerminatorNav``, ``RingEdgeNav``,
-``RingAnnulusNav``, ``StarUniqueMatchNav``, ``StarRefineNav``,
-``StarFieldFromCatalogNav``) do not consult it.
 
 **Annotation**:
 
@@ -136,7 +137,8 @@ To create your own default configuration:
       offset:
         correlation_fft_upsample_factor: 256
 
-3. The system will automatically load this file if it exists
+3. The system will automatically load this file if it exists, provided you do
+   not pass ``--config-file`` (which replaces it; see below)
 
 Using Command-Line Configuration Overrides
 ===========================================
@@ -153,6 +155,16 @@ You can specify multiple configuration files, and they will be loaded in order:
 
    sd_offset coiss N1234567890 \
      --config-file base_overrides.yaml \
+     --config-file run_specific.yaml
+
+When any ``--config-file`` is given, ``nav_default_config.yaml`` is not loaded
+automatically. To keep your personal defaults for that run, pass the file
+explicitly as the first ``--config-file`` argument:
+
+.. code-block:: bash
+
+   sd_offset coiss N1234567890 \
+     --config-file nav_default_config.yaml \
      --config-file run_specific.yaml
 
 Command-Line Option Overrides
@@ -182,8 +194,16 @@ Navigation Options
   form ``body:NAME`` (glob patterns are allowed).
 
 * ``--nav-techniques LIST``: Overrides any default technique selection. This
-  is a comma-separated list of navigation techniques to apply. Valid entries
-  include ``correlate_all`` and ``manual``.
+  is a comma-separated list of glob patterns matched against the registered
+  technique names: ``BodyBlobNav``, ``BodyDiscCorrelateNav``, ``BodyLimbNav``,
+  ``BodyTerminatorNav``, ``RingAnnulusNav``, ``RingEdgeNav``,
+  ``StarFieldFromCatalogNav``, ``StarRefineNav``, and ``StarUniqueMatchNav``.
+  Shell-glob wildcards are allowed (``Star*`` selects the three star
+  techniques) and a leading ``!`` excludes matching names (``!Ring*`` runs
+  everything except the ring techniques). Interactive manual navigation is
+  not selected here; it is invoked with the separate ``--manual`` flag, which
+  opens the manual-navigation dialog instead of running the autonomous
+  pipeline.
 
 Logging Options
 ---------------
@@ -213,16 +233,24 @@ taking precedence over all configuration files, including those specified with
 Example: Combining Configuration Methods
 ========================================
 
-The following example demonstrates how different configuration methods interact:
+The following example demonstrates how different configuration methods interact.
+Suppose the built-in defaults set
+``offset.correlation_fft_upsample_factor: 128``, your
+``nav_default_config.yaml`` sets it to ``256``, and ``custom.yaml`` sets it to
+``512``:
 
-1. The built-in defaults set
-   ``offset.correlation_fft_upsample_factor: 128``
+1. Running ``sd_offset`` with no ``--config-file`` loads
+   ``nav_default_config.yaml``, so the final value is ``256``.
 
-2. User's ``nav_default_config.yaml`` overrides it to ``256``
+2. Running ``sd_offset --config-file custom.yaml`` does not load
+   ``nav_default_config.yaml`` at all, so the final value is ``512`` -- and
+   every other setting in ``nav_default_config.yaml`` also reverts to its
+   built-in default.
 
-3. Command-line ``--config-file custom.yaml`` overrides it to ``512``
-
-4. The final value used is ``512``
+3. To combine the two, list both files explicitly:
+   ``sd_offset --config-file nav_default_config.yaml --config-file custom.yaml``
+   loads them in order, so the final value is ``512`` while the rest of your
+   personal defaults still apply.
 
 If you also specify ``--nav-models stars,rings`` on the command line, this
 overrides any model selection from configuration files, regardless of what's in

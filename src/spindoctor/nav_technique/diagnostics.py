@@ -217,6 +217,11 @@ class StarFieldDiagnostics:
         n_catalog_predicted: Number of catalog stars in the extfov.
         n_triplets_evaluated: Number of triplet candidates considered by
             RANSAC.
+        rotation_below_separability_floor: True when a co-fitted camera
+            rotation's magnitude fell below the roll/translation
+            separability floor (``rotation_separability_floor_deg``) and
+            the rotation was therefore reported as unobservable rather
+            than as a confident near-zero value.
     """
 
     n_inliers: int = 0
@@ -224,12 +229,14 @@ class StarFieldDiagnostics:
     n_detected_sources: int = 0
     n_catalog_predicted: int = 0
     n_triplets_evaluated: int = 0
+    rotation_below_separability_floor: bool = False
     CURATOR_FIELDS: ClassVar[dict[str, str | None]] = {
         'n_inliers': 'n_inliers',
         'median_residual_px': 'median_residual_px',
         'n_detected_sources': 'n_detected_sources',
         'n_catalog_predicted': 'n_catalog_predicted',
         'n_triplets_evaluated': 'n_triplets_evaluated',
+        'rotation_below_separability_floor': 'rotation_below_separability_floor',
     }
 
 
