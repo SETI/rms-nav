@@ -2,7 +2,7 @@
 
 import pytest
 
-from nav.config import DEFAULT_CONFIG
+from spindoctor.config import DEFAULT_CONFIG
 
 
 @pytest.fixture(autouse=True)

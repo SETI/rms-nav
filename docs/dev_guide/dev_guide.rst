@@ -2,7 +2,7 @@
 Developer Guide
 ===============
 
-This guide is intended for developers who want to understand, modify, or extend the RMS-NAV system.
+This guide is intended for developers who want to understand, modify, or extend the SpinDoctor system.
 
 .. toctree::
    :maxdepth: 5

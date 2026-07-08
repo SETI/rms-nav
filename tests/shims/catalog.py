@@ -11,7 +11,7 @@ provides:
   vmag_max, **kwargs)`` API the real catalogs expose.
 - :func:`install_fake_catalogs` — pytest helper that monkeypatches
   the lazy catalog getters in
-  :mod:`nav.nav_model.stars.catalog` so the production code reads from
+  :mod:`spindoctor.nav_model.stars.catalog` so the production code reads from
   fake catalogs instead.
 
 The shim is generic — tests can plug in any list of stars and any
@@ -268,7 +268,7 @@ def install_fake_catalogs(
     }
     for name in cat_map:
         monkeypatch.setattr(
-            f'nav.nav_model.stars.catalog.get_{name}_catalog',
+            f'spindoctor.nav_model.stars.catalog.get_{name}_catalog',
             lambda _name=name: cat_map[_name],
         )
     return cat_map

@@ -1,35 +1,35 @@
-# RMS-NAV
+# SpinDoctor
 
 <!-- pyml disable MD025 -->
 
-[![GitHub release; latest by date](https://img.shields.io/github/v/release/SETI/rms-nav)](https://github.com/SETI/rms-nav/releases)
-[![GitHub Release Date](https://img.shields.io/github/release-date/SETI/rms-nav)](https://github.com/SETI/rms-nav/releases)
-[![Test Status](https://img.shields.io/github/actions/workflow/status/SETI/rms-nav/run-tests.yml?branch=main)](https://github.com/SETI/rms-nav/actions)
-[![Documentation Status](https://readthedocs.org/projects/rms-nav/badge/?version=latest)](https://rms-nav.readthedocs.io/en/latest/?badge=latest)
-[![Code coverage](https://img.shields.io/codecov/c/github/SETI/rms-nav/main?logo=codecov)](https://codecov.io/gh/SETI/rms-nav)
+[![GitHub release; latest by date](https://img.shields.io/github/v/release/SETI/rms-spindoctor)](https://github.com/SETI/rms-spindoctor/releases)
+[![GitHub Release Date](https://img.shields.io/github/release-date/SETI/rms-spindoctor)](https://github.com/SETI/rms-spindoctor/releases)
+[![Test Status](https://img.shields.io/github/actions/workflow/status/SETI/rms-spindoctor/run-tests.yml?branch=main)](https://github.com/SETI/rms-spindoctor/actions)
+[![Documentation Status](https://readthedocs.org/projects/rms-spindoctor/badge/?version=latest)](https://rms-spindoctor.readthedocs.io/en/latest/?badge=latest)
+[![Code coverage](https://img.shields.io/codecov/c/github/SETI/rms-spindoctor/main?logo=codecov)](https://codecov.io/gh/SETI/rms-spindoctor)
 
-[![PyPI - Version](https://img.shields.io/pypi/v/rms-nav)](https://pypi.org/project/rms-nav)
-[![PyPI - Format](https://img.shields.io/pypi/format/rms-nav)](https://pypi.org/project/rms-nav)
-[![PyPI - Downloads](https://img.shields.io/pypi/dm/rms-nav)](https://pypi.org/project/rms-nav)
-[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/rms-nav)](https://pypi.org/project/rms-nav)
+[![PyPI - Version](https://img.shields.io/pypi/v/rms-spindoctor)](https://pypi.org/project/rms-spindoctor)
+[![PyPI - Format](https://img.shields.io/pypi/format/rms-spindoctor)](https://pypi.org/project/rms-spindoctor)
+[![PyPI - Downloads](https://img.shields.io/pypi/dm/rms-spindoctor)](https://pypi.org/project/rms-spindoctor)
+[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/rms-spindoctor)](https://pypi.org/project/rms-spindoctor)
 
-[![GitHub commits since latest release](https://img.shields.io/github/commits-since/SETI/rms-nav/latest)](https://github.com/SETI/rms-nav/commits/main/)
-[![GitHub commit activity](https://img.shields.io/github/commit-activity/m/SETI/rms-nav)](https://github.com/SETI/rms-nav/commits/main/)
-[![GitHub last commit](https://img.shields.io/github/last-commit/SETI/rms-nav)](https://github.com/SETI/rms-nav/commits/main/)
+[![GitHub commits since latest release](https://img.shields.io/github/commits-since/SETI/rms-spindoctor/latest)](https://github.com/SETI/rms-spindoctor/commits/main/)
+[![GitHub commit activity](https://img.shields.io/github/commit-activity/m/SETI/rms-spindoctor)](https://github.com/SETI/rms-spindoctor/commits/main/)
+[![GitHub last commit](https://img.shields.io/github/last-commit/SETI/rms-spindoctor)](https://github.com/SETI/rms-spindoctor/commits/main/)
 
-[![Number of GitHub open issues](https://img.shields.io/github/issues-raw/SETI/rms-nav)](https://github.com/SETI/rms-nav/issues)
-[![Number of GitHub closed issues](https://img.shields.io/github/issues-closed-raw/SETI/rms-nav)](https://github.com/SETI/rms-nav/issues)
-[![Number of GitHub open pull requests](https://img.shields.io/github/issues-pr-raw/SETI/rms-nav)](https://github.com/SETI/rms-nav/pulls)
-[![Number of GitHub closed pull requests](https://img.shields.io/github/issues-pr-closed-raw/SETI/rms-nav)](https://github.com/SETI/rms-nav/pulls)
+[![Number of GitHub open issues](https://img.shields.io/github/issues-raw/SETI/rms-spindoctor)](https://github.com/SETI/rms-spindoctor/issues)
+[![Number of GitHub closed issues](https://img.shields.io/github/issues-closed-raw/SETI/rms-spindoctor)](https://github.com/SETI/rms-spindoctor/issues)
+[![Number of GitHub open pull requests](https://img.shields.io/github/issues-pr-raw/SETI/rms-spindoctor)](https://github.com/SETI/rms-spindoctor/pulls)
+[![Number of GitHub closed pull requests](https://img.shields.io/github/issues-pr-closed-raw/SETI/rms-spindoctor)](https://github.com/SETI/rms-spindoctor/pulls)
 
-![GitHub License](https://img.shields.io/github/license/SETI/rms-nav)
-[![Number of GitHub stars](https://img.shields.io/github/stars/SETI/rms-nav)](https://github.com/SETI/rms-nav/stargazers)
-![GitHub forks](https://img.shields.io/github/forks/SETI/rms-nav)
+![GitHub License](https://img.shields.io/github/license/SETI/rms-spindoctor)
+[![Number of GitHub stars](https://img.shields.io/github/stars/SETI/rms-spindoctor)](https://github.com/SETI/rms-spindoctor/stargazers)
+![GitHub forks](https://img.shields.io/github/forks/SETI/rms-spindoctor)
 <!-- start-after-point -->
 
 # Introduction
 
-RMS-NAV is a comprehensive navigation system designed for spacecraft imagery
+SpinDoctor is a comprehensive navigation system designed for spacecraft imagery
 processing. It provides tools to analyze images from various space missions
 (Cassini, Voyager, Galileo, New Horizons) and determine precise positional
 offsets by comparing observed images with theoretical models of celestial
@@ -61,8 +61,8 @@ bodies.
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/SETI/rms-nav.git
-   cd rms-nav
+   git clone https://github.com/SETI/rms-spindoctor.git
+   cd rms-spindoctor
    ```
 
 2. Create and activate a virtual environment (recommended):
@@ -97,7 +97,7 @@ bodies.
 Process a single Cassini image using the installed CLI script:
 
 ```bash
-nav_offset coiss N1234567890 \
+sd_offset coiss N1234567890 \
   --pds3-holdings-root /path/to/pds3 \
   --nav-results-root /path/to/nav_results
 ```
@@ -105,7 +105,7 @@ nav_offset coiss N1234567890 \
 Process all Voyager images within a single PDS3 volume:
 
 ```bash
-nav_offset vgiss \
+sd_offset vgiss \
   --volumes VGISS_5101 \
   --pds3-holdings-root /path/to/pds3 \
   --nav-results-root /path/to/nav_results
@@ -114,7 +114,7 @@ nav_offset vgiss \
 Generate backplanes for processed images:
 
 ```bash
-nav_backplanes coiss_saturn \
+sd_backplanes coiss_saturn \
   --nav-results-root /path/to/nav_results \
   --backplane-results-root /path/to/backplane_results \
   --volumes COISS_2001
@@ -123,7 +123,7 @@ nav_backplanes coiss_saturn \
 Generate PDS4 bundle files:
 
 ```bash
-nav_create_bundle labels coiss_saturn \
+sd_create_bundle labels coiss_saturn \
   --nav-results-root /path/to/nav_results \
   --backplane-results-root /path/to/backplane_results \
   --bundle-results-root /path/to/bundle_results \
@@ -135,7 +135,7 @@ nav_create_bundle labels coiss_saturn \
 Reproject a set of ring images and combine them into a mosaic:
 
 ```bash
-nav_mosaic_rings coiss_saturn \
+sd_mosaic_rings coiss_saturn \
   --volumes COISS_2001 \
   --pds3-holdings-root /path/to/pds3 \
   --nav-results-root /path/to/nav_results \
@@ -149,13 +149,13 @@ nav_mosaic_rings coiss_saturn \
 Display the resulting mosaic (or any individual reprojection file):
 
 ```bash
-nav_mosaic_display_rings /path/to/mosaic_results/saturn_fring_2004_mosaic.fits
+sd_mosaic_display_rings /path/to/mosaic_results/saturn_fring_2004_mosaic.fits
 ```
 
 Reproject body images (e.g. Mimas):
 
 ```bash
-nav_mosaic_body coiss_saturn \
+sd_mosaic_body coiss_saturn \
   --volumes COISS_2001 \
   --pds3-holdings-root /path/to/pds3 \
   --nav-results-root /path/to/nav_results \
@@ -165,7 +165,7 @@ nav_mosaic_body coiss_saturn \
 ```
 
 See the
-[Reprojection user guide](https://rms-nav.readthedocs.io/en/latest/user_guide/user_guide_reprojection.html)
+[Reprojection user guide](https://rms-spindoctor.readthedocs.io/en/latest/user_guide/user_guide_reprojection.html)
 for full option references and more examples.
 
 ### Cloud Tasks variants
@@ -175,26 +175,26 @@ with `_cloud_tasks`, which reads file lists from a
 [cloud_tasks](https://github.com/SETI/rms-cloud-tasks) queue instead of
 enumerating the dataset locally:
 
-- `nav_offset_cloud_tasks` — navigation offsets
-- `nav_backplanes_cloud_tasks` — backplane generation
-- `nav_create_bundle_cloud_tasks` — PDS4 bundle labels pass
-- `nav_mosaic_rings_cloud_tasks` / `nav_mosaic_body_cloud_tasks` —
+- `sd_offset_cloud_tasks` — navigation offsets
+- `sd_backplanes_cloud_tasks` — backplane generation
+- `sd_create_bundle_cloud_tasks` — PDS4 bundle labels pass
+- `sd_mosaic_rings_cloud_tasks` / `sd_mosaic_body_cloud_tasks` —
   mosaic reprojection pass (mosaic combination is run separately via
-  `nav_mosaic <mode> --skip-reproject`)
+  `sd_mosaic <mode> --skip-reproject`)
 
 These workers accept only the environment flags needed to locate configuration
 and results roots; the task payload carries the list of files plus any
-per-task parameters. Each of `nav_offset`, `nav_backplanes`, and
-`nav_mosaic_rings` / `nav_mosaic_body` can produce a ready-to-load task-queue
+per-task parameters. Each of `sd_offset`, `sd_backplanes`, and
+`sd_mosaic_rings` / `sd_mosaic_body` can produce a ready-to-load task-queue
 JSON file for its matching worker via `--output-cloud-tasks-file PATH`. The
 per-feature user guides document the JSON schema each worker expects:
 
-- `nav_offset_cloud_tasks`:
-  [Navigation user guide](https://rms-nav.readthedocs.io/en/latest/user_guide/user_guide_navigation.html)
-- `nav_backplanes_cloud_tasks`:
-  [Backplanes user guide](https://rms-nav.readthedocs.io/en/latest/user_guide/user_guide_backplanes.html)
-- `nav_mosaic_rings_cloud_tasks` / `nav_mosaic_body_cloud_tasks`:
-  [Reprojection user guide](https://rms-nav.readthedocs.io/en/latest/user_guide/user_guide_reprojection.html)
+- `sd_offset_cloud_tasks`:
+  [Navigation user guide](https://rms-spindoctor.readthedocs.io/en/latest/user_guide/user_guide_navigation.html)
+- `sd_backplanes_cloud_tasks`:
+  [Backplanes user guide](https://rms-spindoctor.readthedocs.io/en/latest/user_guide/user_guide_backplanes.html)
+- `sd_mosaic_rings_cloud_tasks` / `sd_mosaic_body_cloud_tasks`:
+  [Reprojection user guide](https://rms-spindoctor.readthedocs.io/en/latest/user_guide/user_guide_reprojection.html)
 
 ## Documentation
 
@@ -211,8 +211,8 @@ The built documentation will be available in `docs/_build/html`.
 ## Contributing
 
 Information on contributing to this package can be found in the [Contributing
-Guide](https://github.com/SETI/rms-nav/blob/main/CONTRIBUTING.md).
+Guide](https://github.com/SETI/rms-spindoctor/blob/main/CONTRIBUTING.md).
 
 ## Licensing
 
-This code is licensed under the [Apache License v2.0](https://github.com/SETI/rms-nav/blob/main/LICENSE).
+This code is licensed under the [Apache License v2.0](https://github.com/SETI/rms-spindoctor/blob/main/LICENSE).

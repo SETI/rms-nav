@@ -2,7 +2,7 @@
 Reprojection Internals
 ==========================
 
-This section describes the internal design of the ``nav.reproj`` package for
+This section describes the internal design of the ``spindoctor.reproj`` package for
 developers who need to extend or debug the reprojection and mosaicing
 subsystem.
 
@@ -11,7 +11,7 @@ Module layout
 
 .. code-block:: text
 
-    src/nav/reproj/
+    src/spindoctor/reproj/
         __init__.py              # Public API re-exports and __all__
         bodies.py                # BodyMosaic, BodyMosaicMergeStrategy, BodyReprojResult, BodyMosaicData
         rings.py                 # RingMosaic, RingMosaicMergeStrategy, RingReprojResult, RingMosaicData
@@ -24,12 +24,12 @@ Module layout
 Thread safety
 -------------
 
-:meth:`~nav.reproj.rings.RingMosaic.reproject` temporarily modifies oops
+:meth:`~spindoctor.reproj.rings.RingMosaic.reproject` temporarily modifies oops
 global precision settings via
-:func:`~nav.reproj._context_managers._reduced_oops_precision`. Concurrent
+:func:`~spindoctor.reproj._context_managers._reduced_oops_precision`. Concurrent
 calls from different threads on the same observation will interfere.
-:meth:`~nav.reproj.bodies.BodyMosaic.reproject` and
-:func:`~nav.reproj.cartographic_model.create_cartographic_model` create
+:meth:`~spindoctor.reproj.bodies.BodyMosaic.reproject` and
+:func:`~spindoctor.reproj.cartographic_model.create_cartographic_model` create
 ``Backplane`` objects from the provided observation and are likewise not
 safe for concurrent use with the same observation.
 
@@ -39,7 +39,7 @@ its own ``obs`` instance.
 Body mosaic storage
 -------------------
 
-:class:`~nav.reproj.bodies.BodyMosaic` uses a *shifted circular buffer* to
+:class:`~spindoctor.reproj.bodies.BodyMosaic` uses a *shifted circular buffer* to
 handle longitude wraparound without allocating the full 0 to 2\ |pi| range.
 
 The internal arrays (``_img``, ``_has_data``, etc.) have shape
@@ -61,38 +61,38 @@ the column index list by concatenating the two disjoint ranges.
 Ring sparse storage
 -------------------
 
-:class:`~nav.reproj.rings.RingMosaic` stores only longitude columns that
+:class:`~spindoctor.reproj.rings.RingMosaic` stores only longitude columns that
 contain at least one valid pixel. The ``_sparse_lon_mask`` boolean array
 (length ``n_full_lon``) marks which full-grid longitude bins are present.
 The data arrays have shape ``(n_rad, n_sparse_lon)`` where ``n_sparse_lon``
 equals the number of ``True`` entries in ``_sparse_lon_mask``.
 
-When :meth:`~nav.reproj.rings.RingMosaic.add` receives a
-:class:`~nav.reproj.rings.RingReprojResult`, it:
+When :meth:`~spindoctor.reproj.rings.RingMosaic.add` receives a
+:class:`~spindoctor.reproj.rings.RingReprojResult`, it:
 
 1. Identifies incoming longitude columns absent from the sparse store.
 2. Inserts those columns into all data arrays using a single
    ``np.insert(..., axis=1)`` call per array to avoid repeated reallocations.
 3. Updates ``_sparse_lon_mask``.
-4. Applies the :class:`~nav.reproj.rings.RingMosaicMergeStrategy` to resolve conflicts on existing columns.
+4. Applies the :class:`~spindoctor.reproj.rings.RingMosaicMergeStrategy` to resolve conflicts on existing columns.
 5. If at least one valid longitude column was present, appends
    ``repro.image_name`` to ``_contributing_image_names`` and increments
    ``_image_count`` (so ``contributing_image_names[k]`` matches pixels tagged
    with ``image_number == k``).
 
 The always-sparse design means that
-:meth:`~nav.reproj.rings.RingMosaic.reproject` always returns a
-:class:`~nav.reproj.rings.RingReprojResult` with only the valid longitude
+:meth:`~spindoctor.reproj.rings.RingMosaic.reproject` always returns a
+:class:`~spindoctor.reproj.rings.RingReprojResult` with only the valid longitude
 columns populated; sparsity is the invariant.
 
 Ring radius and longitude semantics
 -----------------------------------
 
 The interpretation of
-:attr:`~nav.reproj.rings.RingMosaic.radius_inner` /
-:attr:`~nav.reproj.rings.RingMosaic.radius_outer` (and the matching fields
-on :class:`~nav.reproj.rings.RingReprojResult` and
-:class:`~nav.reproj.rings.RingMosaicData`) depends on whether the mosaic
+:attr:`~spindoctor.reproj.rings.RingMosaic.radius_inner` /
+:attr:`~spindoctor.reproj.rings.RingMosaic.radius_outer` (and the matching fields
+on :class:`~spindoctor.reproj.rings.RingReprojResult` and
+:class:`~spindoctor.reproj.rings.RingMosaicData`) depends on whether the mosaic
 was constructed with an ``orbit_model``:
 
 - ``orbit_model is None``: longitudes are inertial J2000; radii are
@@ -113,12 +113,12 @@ Implementation notes:
 - The radius filter on ``bp_radius`` first computes per-pixel offsets
   ``bp_radius_filter = bp_radius - model_r(inertial_lon, midtime)`` so the
   ``[radius_inner, radius_outer]`` test compares offsets to offsets.
-- :meth:`~nav.reproj.rings.RingMosaic.reproject` rejects a per-call
+- :meth:`~spindoctor.reproj.rings.RingMosaic.reproject` rejects a per-call
   ``orbit_model`` that differs from the constructor's, because radius
   semantics are tied to that choice.
-- :meth:`~nav.reproj.rings.RingMosaic.add` validates that the
+- :meth:`~spindoctor.reproj.rings.RingMosaic.add` validates that the
   reprojection's ``orbit_model`` is value-equal to the mosaic's
-  (:class:`~nav.reproj.ring_orbit_model.RingOrbitModel` is a frozen
+  (:class:`~spindoctor.reproj.ring_orbit_model.RingOrbitModel` is a frozen
   dataclass with auto-generated ``__eq__``, so a model rebuilt from disk
   compares equal to the in-memory instance) and that
   ``photometric_model_name`` matches; mismatches raise ``ValueError``.
@@ -126,8 +126,8 @@ Implementation notes:
 dtype propagation
 -----------------
 
-Each :class:`~nav.reproj.bodies.BodyMosaic` and
-:class:`~nav.reproj.rings.RingMosaic` instance holds two authoritative dtype
+Each :class:`~spindoctor.reproj.bodies.BodyMosaic` and
+:class:`~spindoctor.reproj.rings.RingMosaic` instance holds two authoritative dtype
 attributes set at construction:
 
 - ``_image_dtype`` (default ``np.float64``) — dtype for reprojected brightness
@@ -146,11 +146,11 @@ These propagate through the pipeline as follows:
    ``float64``, not ``_metadata_dtype``).
 2. ``reproject()`` builds per-pixel ``img`` at ``_image_dtype`` and the
    geometry fields above at ``_metadata_dtype``. Scalar ``time`` on
-   :class:`~nav.reproj.bodies.BodyReprojResult` is a Python ``float`` (IEEE
+   :class:`~spindoctor.reproj.bodies.BodyReprojResult` is a Python ``float`` (IEEE
    double); ring/body mosaic ``time`` grids are ``numpy.float64`` arrays
    regardless of ``metadata_dtype``.
-3. Every :class:`~nav.reproj.bodies.BodyReprojResult` and
-   :class:`~nav.reproj.bodies.BodyMosaicData` (and ring equivalents)
+3. Every :class:`~spindoctor.reproj.bodies.BodyReprojResult` and
+   :class:`~spindoctor.reproj.bodies.BodyMosaicData` (and ring equivalents)
    carries explicit ``image_dtype`` and ``metadata_dtype`` fields describing
    the stored image and geometry dtypes; ``time`` is never governed by
    ``metadata_dtype``. That contract is self-describing and survives a
@@ -163,7 +163,7 @@ a single mosaic at 65,535 contributing images. ``add()`` raises
 Serialization
 -------------
 
-The :mod:`nav.reproj._serialization` module provides the format helpers used
+The :mod:`spindoctor.reproj._serialization` module provides the format helpers used
 by all four dataclass ``save()`` / ``load()`` methods. It is a private
 module (not exported from ``__init__.py``).
 
@@ -241,7 +241,7 @@ external tools that may have coerced dtypes on write.
 RingOrbitModel serialization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-:class:`~nav.reproj.ring_orbit_model.RingOrbitModel` is not a plain array;
+:class:`~spindoctor.reproj.ring_orbit_model.RingOrbitModel` is not a plain array;
 it is serialized flat via ``orbit_model_to_dict`` /
 ``orbit_model_from_dict``:
 
@@ -252,7 +252,7 @@ it is serialized flat via ``orbit_model_to_dict`` /
 Photometric models
 ------------------
 
-The :class:`~nav.reproj.photometric_model.PhotometricModel` protocol requires
+The :class:`~spindoctor.reproj.photometric_model.PhotometricModel` protocol requires
 a single method::
 
     def correct(
@@ -270,33 +270,33 @@ Passing ``photometric_model=None`` (the default) bypasses the correction.
 
 Implementations provided:
 
-- :class:`~nav.reproj.photometric_model.LambertModel`: divides by
+- :class:`~spindoctor.reproj.photometric_model.LambertModel`: divides by
   ``cos(incidence)``, clamped at a minimum threshold to avoid division by
   near-zero values.
-- :class:`~nav.reproj.photometric_model.LommelSeeligerModel`: divides by
+- :class:`~spindoctor.reproj.photometric_model.LommelSeeligerModel`: divides by
   ``cos(incidence) / (cos(incidence) + cos(emission))``.
-- :class:`~nav.reproj.photometric_model.MinnaertModel`: applies the
+- :class:`~spindoctor.reproj.photometric_model.MinnaertModel`: applies the
   Minnaert law ``cos(incidence)^k * cos(emission)^(k-1)`` for a
   user-specified exponent ``k``.
 
 Context managers
 ----------------
 
-One context manager in :mod:`nav.reproj._context_managers` ensures global
+One context manager in :mod:`spindoctor.reproj._context_managers` ensures global
 state is restored even if an exception occurs:
 
-- :func:`~nav.reproj._context_managers._reduced_oops_precision`: sets
+- :func:`~spindoctor.reproj._context_managers._reduced_oops_precision`: sets
   ``oops.config.PATH_PHOTONS`` and ``SURFACE_PHOTONS`` delta-time precision
   to ``dlt``. Restores both on exit.
 
 Adding a new photometric model
 ------------------------------
 
-Implement the :class:`~nav.reproj.photometric_model.PhotometricModel`
+Implement the :class:`~spindoctor.reproj.photometric_model.PhotometricModel`
 protocol::
 
-    from nav.reproj.photometric_model import PhotometricModel
-    from nav.support.types import NDArrayFloatType
+    from spindoctor.reproj.photometric_model import PhotometricModel
+    from spindoctor.support.types import NDArrayFloatType
     import numpy as np
 
     class MyModel:
@@ -313,14 +313,14 @@ protocol::
             # custom correction logic
             return data / np.cos(incidence)
 
-Pass the instance to :class:`~nav.reproj.bodies.BodyMosaic` or
-:class:`~nav.reproj.rings.RingMosaic` via the ``photometric_model``
+Pass the instance to :class:`~spindoctor.reproj.bodies.BodyMosaic` or
+:class:`~spindoctor.reproj.rings.RingMosaic` via the ``photometric_model``
 parameter.
 
 Cartographic model projection
 -------------------------------
 
-:func:`~nav.reproj.cartographic_model.create_cartographic_model` inverts the
+:func:`~spindoctor.reproj.cartographic_model.create_cartographic_model` inverts the
 reprojection: for each pixel in the observation, the backplane is used to
 obtain the lat/lon on the body surface, and the mosaic is sampled at that
 position via bilinear interpolation (``scipy.ndimage.map_coordinates`` with
@@ -339,12 +339,12 @@ Command-line layer
 
 The command-line tools are composed of three layers:
 
-**Entry-point scripts** (``src/main/``)
-   - ``nav_mosaic.py`` — :func:`main` dispatches on the first positional
+**Entry-point scripts** (``src/spindoctor/cli/``)
+   - ``sd_mosaic.py`` — :func:`main` dispatches on the first positional
      argument (``rings`` or ``body``) and calls ``_run_rings`` / ``_run_body``.
      ``rings_main`` and ``body_main`` are thin wrappers that prepend the
      subcommand to ``sys.argv`` and call ``main``.
-   - ``nav_mosaic_cloud_tasks.py`` — Cloud Tasks worker that runs the
+   - ``sd_mosaic_cloud_tasks.py`` — Cloud Tasks worker that runs the
      reprojection pass only. The mode (``'rings'`` or ``'body'``) is read
      from each task's ``task_data['mode']`` field, so a single worker process
      can handle a queue that mixes ring and body tasks. The worker's CLI
@@ -353,16 +353,16 @@ The command-line tools are composed of three layers:
      ``add_body_args``. Every other parameter (output directory, format,
      mosaic geometry, body/planet selection, etc.) is read directly from each
      task's ``task_data['arguments']`` dict.
-     ``process_task`` calls the same ``reproj_cli`` helpers
+     ``process_task`` calls the same ``spindoctor.cli.reproj`` helpers
      (``build_*_mosaic``, ``per_image_output_path``, ``load_offset_if_any``,
      ``apply_offset_to_obs``, ``reproject_one_*``) as the local driver.
      Mosaic combination is not performed here; run
-     ``nav_mosaic <mode> <dataset_name> --skip-reproject`` after the queue
-     drains (note that ``nav_mosaic.py`` requires both the mode and the
+     ``sd_mosaic <mode> <dataset_name> --skip-reproject`` after the queue
+     drains (note that ``sd_mosaic.py`` requires both the mode and the
      ``<dataset_name>`` positional arguments).
-   - ``nav_mosaic_display.py`` — same pattern for the display tools.
+   - ``sd_mosaic_display.py`` — same pattern for the display tools.
 
-**Shared CLI helpers** (``src/reproj_cli/``)
+**Shared CLI helpers** (``src/spindoctor/cli/reproj/``)
    This top-level package (sibling of ``nav/``, ``backplanes/``, ``pds4/``)
    contains all the reusable CLI logic:
 
@@ -376,12 +376,12 @@ The command-line tools are composed of three layers:
      underlying classes gain a new option.
    - ``paths.py`` — ``per_image_output_path`` / ``mosaic_output_path`` define
      the output-file naming convention; pass-1 image logs go under
-     ``<output-dir>/logs/`` (see ``nav_mosaic._reproject_image_log_handlers``).
+     ``<output-dir>/logs/`` (see ``sd_mosaic._reproject_image_log_handlers``).
    - ``offsets.py`` — ``load_offset_if_any`` reads the ``_metadata.json`` file
-     written by ``nav_offset`` and returns ``(dv, du)`` when ``status ==
+     written by ``sd_offset`` and returns ``(dv, du)`` when ``status ==
      'success'``. ``apply_offset_to_obs`` wraps the result in
      ``oops.fov.OffsetFOV``. This mirrors the same pattern used in
-     ``src/backplanes/backplanes.py``.
+     ``src/spindoctor/cli/backplanes/backplanes.py``.
    - ``reproject.py`` — ``reproject_one_body`` / ``reproject_one_ring`` thin
      wrappers that translate ring-specific CLI args (zoom, longitude range,
      radius range, margin) into keyword arguments for
@@ -389,12 +389,12 @@ The command-line tools are composed of three layers:
      per-image ``image_name`` string (from the CLI or from ``args.image_name``).
 
 **Dataset enumeration**
-   Both ``nav_mosaic.py`` and the ``nav_offset.py`` / ``nav_backplanes.py``
+   Both ``sd_mosaic.py`` and the ``sd_offset.py`` / ``sd_backplanes.py``
    scripts enumerate images via
-   :meth:`~nav.dataset.dataset.DataSet.yield_image_files_from_arguments`.
+   :meth:`~spindoctor.dataset.dataset.DataSet.yield_image_files_from_arguments`.
    The dataset class is instantiated from ``DATASET_NAME = sys.argv[1]``
-   via :func:`~nav.dataset.dataset_name_to_class`, which also provides
-   :meth:`~nav.dataset.dataset.DataSet.add_selection_arguments` to add
+   via :func:`~spindoctor.dataset.dataset_name_to_class`, which also provides
+   :meth:`~spindoctor.dataset.dataset.DataSet.add_selection_arguments` to add
    dataset-specific filtering flags to the parser.
 
 Two-pass workflow
@@ -424,9 +424,9 @@ matches the CLI even when reprojection was skipped), and saves the final
 Display layer
 --------------
 
-**Package layout** — ``src/nav/ui/mosaic_viewer/``
+**Package layout** — ``src/spindoctor/ui/mosaic_viewer/``
 
-   - ``tiled_image_widget.py`` — :class:`~nav.ui.mosaic_viewer.tiled_image_widget.TiledImageWidget`.
+   - ``tiled_image_widget.py`` — :class:`~spindoctor.ui.mosaic_viewer.tiled_image_widget.TiledImageWidget`.
      A generalized :class:`QAbstractScrollArea` that:
 
      - Renders only the visible viewport tiles on each paint event (tile-granular
@@ -441,22 +441,22 @@ Display layer
        via ``set_axis_tick_options``.
      - ``y_flip=True`` for ring mosaics (array row 0 = inner radius, displayed at
        bottom); ``y_flip=False`` for body mosaics (row 0 = top of display).
-     - Uses :func:`nav.support.image.apply_linear_gamma_stretch` for image contrast,
+     - Uses :func:`spindoctor.support.image.apply_linear_gamma_stretch` for image contrast,
        ensuring a consistent ``data ** gamma`` convention across all viewers.
-     - Does *not* use :class:`nav.ui.common.ZoomPanController` — that helper
+     - Does *not* use :class:`spindoctor.ui.common.ZoomPanController` — that helper
        assumes a pre-scaled ``QLabel`` inside a ``QScrollArea``, which is
        incompatible with tile-paint independent X/Y zoom.
 
-   - ``common.py`` — :func:`~nav.ui.mosaic_viewer.common.load_ring_file` /
-     :func:`~nav.ui.mosaic_viewer.common.load_body_file`. Peeks at the
+   - ``common.py`` — :func:`~spindoctor.ui.mosaic_viewer.common.load_ring_file` /
+     :func:`~spindoctor.ui.mosaic_viewer.common.load_body_file`. Peeks at the
      ``__kind__`` header in an npz or FITS file, then delegates to the
      appropriate ``*.load()`` classmethod and normalises the result into a
-     :class:`~nav.ui.mosaic_viewer.common.RingDisplayData` /
-     :class:`~nav.ui.mosaic_viewer.common.BodyDisplayData` dataclass ready
+     :class:`~spindoctor.ui.mosaic_viewer.common.RingDisplayData` /
+     :class:`~spindoctor.ui.mosaic_viewer.common.BodyDisplayData` dataclass ready
      for the window.
 
-   - ``ring_window.py`` — :class:`~nav.ui.mosaic_viewer.ring_window.RingMosaicWindow`.
-     Includes: stretch controls (via :func:`nav.ui.common.build_stretch_controls`),
+   - ``ring_window.py`` — :class:`~spindoctor.ui.mosaic_viewer.ring_window.RingMosaicWindow`.
+     Includes: stretch controls (via :func:`spindoctor.ui.common.build_stretch_controls`),
      color-by panel (radial/angular resolution, phase, emission, image number;
      ephemeris-only options are omitted), EW-profile Matplotlib panel,
      radial-slice Matplotlib panel (right-click on mosaic), show-radii overlay,
@@ -465,14 +465,14 @@ Display layer
      feed the cursor **Source image** line (name and UTC time combined) for mosaics
      and single reprojections.
 
-   - ``body_window.py`` — :class:`~nav.ui.mosaic_viewer.body_window.BodyMosaicWindow`.
+   - ``body_window.py`` — :class:`~spindoctor.ui.mosaic_viewer.body_window.BodyMosaicWindow`.
      Header row for latitude/longitude axis tick toggles, image area with
      parallels/meridians overlays in the sidebar, lower strip with stretch
      presets, log-style zoom controls, a four-column **Cursor Info** grid, and
      a **Color By** radio grid (resolution, effective resolution, phase, emission,
      incidence, image number when present). The cursor grid includes sub-solar
      and sub-observer longitude and latitude (degrees), resolved from
-     ``BodyDisplayData`` per-image arrays populated by :func:`~nav.ui.mosaic_viewer.common.load_body_file`.
+     ``BodyDisplayData`` per-image arrays populated by :func:`~spindoctor.ui.mosaic_viewer.common.load_body_file`.
      The **Source image** line shows the contributing name (or file stem) together
      with the pixel observation time in UTC when available.
 
@@ -499,9 +499,9 @@ Gamma stretch convention
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
 All viewers use the ``((clip - black) / (white - black)) ** gamma`` convention
-implemented by :func:`~nav.support.image.apply_linear_gamma_stretch`. A
+implemented by :func:`~spindoctor.support.image.apply_linear_gamma_stretch`. A
 gamma of ``1.0`` is linear; values below ``1.0`` brighten mid-tones (the
 common display choice). The convention is uniform across
-:class:`~nav.ui.mosaic_viewer.tiled_image_widget.TiledImageWidget`,
-:mod:`nav.ui.manual_nav_dialog`, ``nav_backplane_viewer``, and
-``nav_create_simulated_image``.
+:class:`~spindoctor.ui.mosaic_viewer.tiled_image_widget.TiledImageWidget`,
+:mod:`spindoctor.ui.manual_nav_dialog`, ``sd_backplane_viewer``, and
+``sd_create_simulated_image``.

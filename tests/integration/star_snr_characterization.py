@@ -2,7 +2,7 @@
 
 Runner-only (NOT part of pytest): sweeps a uniform-brightness star field across a
 wide integrated-SNR range and, at each step, compares the three centroiding modes
-of :class:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav` --
+of :class:`~spindoctor.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav` --
 moment-only, the PSF-fit-everywhere extreme, and the shipped SNR-adaptive choice --
 under several background conditions (clean, elevated read noise, a stray-light
 gradient).  It writes one comparison figure per background to
@@ -26,12 +26,12 @@ from typing import Any
 
 import numpy as np
 
-import nav.nav_technique.nav_technique_star_field as star_field_mod
-from nav.nav_model import build_models_for_obs
-from nav.nav_orchestrator import NavOrchestrator
-from nav.nav_technique.nav_technique_star_field import StarFieldFromCatalogNav
-from nav.obs.obs_inst_sim import ObsSim
-from nav.sim.scene import load_sim_scene
+import spindoctor.nav_technique.nav_technique_star_field as star_field_mod
+from spindoctor.nav_model import build_models_for_obs
+from spindoctor.nav_orchestrator import NavOrchestrator
+from spindoctor.nav_technique.nav_technique_star_field import StarFieldFromCatalogNav
+from spindoctor.obs.obs_inst_sim import ObsSim
+from spindoctor.sim.scene import load_sim_scene
 
 _TECHNIQUE = 'StarFieldFromCatalogNav'
 _SCENES_ROOT = Path(__file__).parent / 'sim_scenes'

@@ -1,40 +1,40 @@
-nav.feature
-===========
+spindoctor.feature
+==================
 
-.. automodule:: nav.feature
+.. automodule:: spindoctor.feature
    :no-index:
 
-.. automodule:: nav.feature.feature
+.. automodule:: spindoctor.feature.feature
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.feature.feature_type
+.. automodule:: spindoctor.feature.feature_type
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.feature.geometry
+.. automodule:: spindoctor.feature.geometry
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.feature.flags
+.. automodule:: spindoctor.feature.flags
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.feature.composition
+.. automodule:: spindoctor.feature.composition
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.feature.reliability
+.. automodule:: spindoctor.feature.reliability
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.feature.constants
+.. automodule:: spindoctor.feature.constants
    :members:
    :undoc-members:
    :show-inheritance:

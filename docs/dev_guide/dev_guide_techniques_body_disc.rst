@@ -5,11 +5,11 @@ Body Disc Correlate (BodyDiscCorrelateNav)
 Overview
 ========
 
-:class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav` recovers a single
+:class:`~spindoctor.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav` recovers a single
 translation by full-disc normalised cross-correlation against a composite template fused
 from every offered ``BODY_DISC`` feature. Per-body templates are Z-buffer painted into a single
 postage stamp (the closer body's pixels overwrite the farther body's), the result is run
-through the shared pyramid-NCC machinery in :mod:`nav.support.correlate`, and the chosen
+through the shared pyramid-NCC machinery in :mod:`spindoctor.support.correlate`, and the chosen
 peak is returned with a Cramer-Rao-lower-bound covariance derived from the local correlation
 curvature. Multi-body composites improve the peak's signal-to-noise as roughly
 :math:`\sqrt{N}` for ``N`` bodies and remove the "swap moon assignments" mode-failure that
@@ -35,7 +35,7 @@ box, the closer body's template value (and the closer body's mask True) overwrit
 farther body's, so an in-front body occludes an in-behind body in the composite. The fused
 template carries one combined bounding box, one fused brightness image, and one fused mask;
 the orchestrator's
-:func:`~nav.feature.composition.compose_template_features` helper does the work.
+:func:`~spindoctor.feature.composition.compose_template_features` helper does the work.
 
 Cost function
 -------------
@@ -117,7 +117,7 @@ Search strategy
 ---------------
 
 The technique runs the shared pyramid-NCC entry point
-(:func:`~nav.support.correlate.navigate_with_pyramid_kpeaks`). At each pyramid level the
+(:func:`~spindoctor.support.correlate.navigate_with_pyramid_kpeaks`). At each pyramid level the
 NCC is evaluated coarse-to-fine, the top ``k`` peaks are kept, and consistency is measured
 between levels — a peak that drifts more than a documented threshold across levels is
 flagged spurious. The per-image quality metric is the peak-to-side-lobe ratio (PSR) at the
@@ -137,7 +137,7 @@ chosen rotation's correlation curvature. The technique reports its rotation as
 unobservable: the NCC-peak quality is a PSR/PMR separation ratio rather than a
 log-likelihood, so it carries no calibrated Fisher information about rotation, and the
 rotation diagonal holds the
-:data:`~nav.nav_technique.nav_technique.ROTATION_UNOBSERVABLE_VARIANCE` sentinel. The
+:data:`~spindoctor.nav_technique.nav_technique.ROTATION_UNOBSERVABLE_VARIANCE` sentinel. The
 ensemble's ``pinvh`` combine maps that to a near-zero rotation contribution, so the disc
 technique constrains translation while abstaining on rotation.
 
@@ -145,8 +145,8 @@ Restrictions and assumptions
 ----------------------------
 
 - The orchestrator must populate
-  :attr:`~nav.nav_orchestrator.nav_context.NavContext.image_ext` and
-  :attr:`~nav.nav_orchestrator.nav_context.NavContext.sensor_mask_ext` on the per-image
+  :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.image_ext` and
+  :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.sensor_mask_ext` on the per-image
   context; in their absence the technique cannot evaluate the NCC.
 - The composite template must have non-empty support inside the search window. An empty
   template (every body off-frame) collapses the NCC to a constant; the spurious gate flags
@@ -169,23 +169,23 @@ photometric mismatch (a body whose Lambert prediction differs from its true refl
 shifts the peak slightly), nor by the Z-buffer compositing itself when bodies are
 near-occluding. When the chosen peak sits within the at-edge tolerance of any axis bound,
 or when the rotation parameter is at the configured fraction of its cap, the result is
-flagged :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and the
+flagged :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and the
 hard-zero gate forces confidence to zero. The pyramid-consistency check flags peaks that
 drift across levels as
-:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious`.
+:attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious`.
 
 Configuration
 =============
 
 All numeric tunables for this technique live in ``techniques.BodyDiscCorrelateNav.tuning``
-in ``src/nav/config_files/config_510_techniques.yaml``.
+in ``src/spindoctor/config_files/config_510_techniques.yaml``.
 
 - ``rotation_at_edge_fraction`` — float, default ``0.95`` (dimensionless). When
-  :attr:`~nav.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` is true, the
+  :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` is true, the
   converged rotation magnitude trips
-  :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` once it crosses
+  :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` once it crosses
   this fraction of the per-image
-  :attr:`~nav.nav_orchestrator.nav_context.NavContext.max_rotation_deg` cap.
+  :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.max_rotation_deg` cap.
 - ``consistency_max_fraction_of_diameter`` / ``consistency_max_px`` — floats, defaults
   ``0.025`` / ``4.0`` px. Diameter-scaled and absolute floors on the accepted pyramid-level
   peak migration; the applied spurious cap is the larger of the two.
@@ -197,15 +197,15 @@ in ``src/nav/config_files/config_510_techniques.yaml``.
 
 The remaining numeric thresholds (NCC peak quality, consistency tolerance, top-k count) are
 shared across every pyramid-NCC technique and live as module-level constants in
-:mod:`nav.support.correlate`; consuming techniques pass overrides at call time when needed.
+:mod:`spindoctor.support.correlate`; consuming techniques pass overrides at call time when needed.
 
 Per-instrument overrides
 ------------------------
 
-The per-instrument YAML files in ``src/nav/config_files/config_4N0_inst_*.yaml`` do not
+The per-instrument YAML files in ``src/spindoctor/config_files/config_4N0_inst_*.yaml`` do not
 override ``rotation_at_edge_fraction``. The search-window margin used by the
 at-edge test comes from the per-instrument
-:class:`~nav.nav_orchestrator.instrument_config.InstrumentSettings`.
+:class:`~spindoctor.nav_orchestrator.instrument_config.InstrumentSettings`.
 
 Confidence formula
 ------------------
@@ -213,26 +213,26 @@ Confidence formula
 The technique reports a calibrated confidence in :math:`[0, 1]` produced by the shared
 sigmoid combination; see :doc:`dev_guide_techniques_confidence`. The formula spec is
 ``techniques.BodyDiscCorrelateNav`` and consumes attributes off
-:class:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics` plus
-:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and
-:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious`.
+:class:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics` plus
+:attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and
+:attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious`.
 
-- :attr:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics.ncc_peak` — alpha = 1.5,
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.ncc_peak` — alpha = 1.5,
   offset = 0.0, divisor = 6.0, cap at 1.0. PSR-style quality measure of the chosen NCC
   peak. Healthy body-disc fits report quality 6 to 15; the divisor maps that range onto
   the sigmoid's responsive interval.
-- :attr:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics.consistency_px` — alpha = -1.0,
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.consistency_px` — alpha = -1.0,
   offset = 0.0, divisor = 2.0, no cap. Mean per-axis disagreement between coarse-pyramid
   and full-resolution sub-pixel locations. Low values indicate a globally unambiguous peak.
-- :attr:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics.body_count` — alpha = 0.4,
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.body_count` — alpha = 0.4,
   offset = 0.0, divisor = 3.0, cap at 1.0. Number of ``BODY_DISC`` features fused into the
   composite. More bodies sharpen the joint geometric constraint up to a 3-body saturation.
-- :attr:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics.peak_to_runner_up_ratio` —
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.peak_to_runner_up_ratio` —
   alpha = 0.0, offset = 0.0, divisor = 2.0, cap at 1.0. Ratio of the winning peak's
   quality to the next-best peak outside the exclusion radius.
 
-Hard-zero gate: :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and
-:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces
+Hard-zero gate: :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and
+:attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces
 confidence to zero before the sigmoid evaluates. The constant baseline is
 :math:`\alpha_{0} = -2.0`. No post-sigmoid ``hard_cap`` is applied.
 
@@ -241,79 +241,79 @@ Implementation
 
 Source files:
 
-- ``src/nav/nav_technique/nav_technique_body_disc.py`` —
-  :class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav` and the rotation
+- ``src/spindoctor/nav_technique/nav_technique_body_disc.py`` —
+  :class:`~spindoctor.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav` and the rotation
   / template-rotate / composite helpers.
-- ``src/nav/feature/composition.py`` —
-  :func:`~nav.feature.composition.compose_template_features`, the Z-buffer paint helper
+- ``src/spindoctor/feature/composition.py`` —
+  :func:`~spindoctor.feature.composition.compose_template_features`, the Z-buffer paint helper
   that fuses per-body templates into a single composite.
-- ``src/nav/support/correlate.py`` —
-  :func:`~nav.support.correlate.navigate_with_pyramid_kpeaks`, the shared pyramid-NCC entry
+- ``src/spindoctor/support/correlate.py`` —
+  :func:`~spindoctor.support.correlate.navigate_with_pyramid_kpeaks`, the shared pyramid-NCC entry
   point.
-- ``src/nav/nav_technique/confidence.py`` — shared sigmoid-combination evaluator;
+- ``src/spindoctor/nav_technique/confidence.py`` — shared sigmoid-combination evaluator;
   documented at :doc:`dev_guide_techniques_confidence`.
-- ``src/nav/nav_technique/diagnostics.py`` —
-  :class:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics`; documented at
+- ``src/spindoctor/nav_technique/diagnostics.py`` —
+  :class:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics`; documented at
   :doc:`dev_guide_techniques_diagnostics`.
 
-Public class :class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav`, base
-:class:`~nav.nav_technique.nav_technique.NavTechnique`. Self-registers via
+Public class :class:`~spindoctor.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav`, base
+:class:`~spindoctor.nav_technique.nav_technique.NavTechnique`. Self-registers via
 ``__init_subclass__`` so ``NavTechnique._registry`` discovers it.
 
 Class attributes:
 
-- :attr:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav.name` —
+- :attr:`~spindoctor.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav.name` —
   ``'BodyDiscCorrelateNav'``.
-- :attr:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav.accepts_feature_types`
+- :attr:`~spindoctor.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav.accepts_feature_types`
   — ``frozenset({BODY_DISC})``.
-- :attr:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav.requires_prior` —
+- :attr:`~spindoctor.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav.requires_prior` —
   ``False``. Runs in pass 1 of the orchestrator's two-pass pipeline.
-- :attr:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav.confidence_attributes`
+- :attr:`~spindoctor.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav.confidence_attributes`
   — ``{'at_edge', 'spurious', 'ncc_peak', 'peak_to_runner_up_ratio', 'consistency_px',
   'used_gradient', 'body_count'}``.
 
 Public methods (autodocumented at :doc:`/api_reference/api_nav_technique`):
-:meth:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav.is_feasible` and
-:meth:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav.navigate`.
+:meth:`~spindoctor.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav.is_feasible` and
+:meth:`~spindoctor.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav.navigate`.
 
 Diagnostics
 -----------
 
-:class:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics`:
+:class:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics`:
 
-- :attr:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics.ncc_peak` — peak NCC quality at
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.ncc_peak` — peak NCC quality at
   the finest pyramid level. Consumed by the confidence formula.
-- :attr:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics.peak_to_runner_up_ratio` —
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.peak_to_runner_up_ratio` —
   ratio of the winning peak's quality to the next-best peak's outside the exclusion radius.
-- :attr:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics.consistency_px` — maximum
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.consistency_px` — maximum
   Euclidean drift across pyramid levels. Consumed by the spurious-detection gate.
-- :attr:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics.used_gradient` — True when
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.used_gradient` — True when
   ``auto`` mode picked the gradient pass. Diagnostic only; not in the confidence formula.
-- :attr:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics.body_count` — number of
+- :attr:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics.body_count` — number of
   ``BODY_DISC`` features fused.
 
 Call path
 ---------
 
 Call path traced through
-:meth:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav.navigate`:
+:meth:`~spindoctor.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav.navigate`:
 
 1. Open a logged section. Filter the offered features down to ``BODY_DISC`` entries that carry
    a template payload via the private filter helper.
 2. Fuse the per-body templates into a single composite via
-   :func:`~nav.feature.composition.compose_template_features`. The composite carries a
+   :func:`~spindoctor.feature.composition.compose_template_features`. The composite carries a
    single bounding box, brightness image, and mask.
 3. Read the search-window margin off the observation via
-   :func:`~nav.nav_technique.nav_technique.search_window_for_obs`.
+   :func:`~spindoctor.nav_technique.nav_technique.search_window_for_obs`.
 4. Result-shape branches on
-   :attr:`~nav.nav_orchestrator.nav_context.NavContext.fit_camera_rotation`:
+   :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.fit_camera_rotation`:
 
-   - **No rotation fit.**  Run :func:`~nav.support.correlate.navigate_with_pyramid_kpeaks`
+   - **No rotation fit.**  Run :func:`~spindoctor.support.correlate.navigate_with_pyramid_kpeaks`
      once on the unrotated composite. The pyramid returns the chosen peak's
      ``(dv, du)``, the 2x2 CRLB covariance, ``quality``, ``consistency``, ``spurious``,
      ``at_edge``, ``used_gradient``, and the top-``k`` peak telemetry.
-     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.rotation_rad` and
-     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.sigma_rotation_rad` are
+     :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.rotation_rad` and
+     :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.sigma_rotation_rad` are
      ``None``; the (2, 2) covariance is reported.
    - **Rotation fit.**  Run the private 3-DoF pyramid: 11 rotation samples at the coarsest
      pyramid level, top 3 advance to 5 samples at the next level, top 1 advances to 3
@@ -328,16 +328,16 @@ Call path traced through
 5. Apply the at-edge tests against the search-window axis bounds and the rotation cap, and
    the spurious tests using the pyramid wrapper's ``spurious`` and ``consistency``
    readouts.
-6. Build a :class:`~nav.nav_technique.diagnostics.BodyDiscDiagnostics` from the pyramid
+6. Build a :class:`~spindoctor.nav_technique.diagnostics.BodyDiscDiagnostics` from the pyramid
    wrapper's quality / consistency / used-gradient / runner-up-ratio readouts plus the
    composite body count, evaluate the confidence spec via
-   :func:`~nav.nav_technique.confidence.evaluate_sigmoid_combination`, log the per-term
-   breakdown via :func:`~nav.nav_technique.nav_technique.log_confidence_breakdown`, and
-   assemble the :class:`~nav.nav_technique.technique_result.NavTechniqueResult`.
+   :func:`~spindoctor.nav_technique.confidence.evaluate_sigmoid_combination`, log the per-term
+   breakdown via :func:`~spindoctor.nav_technique.nav_technique.log_confidence_breakdown`, and
+   assemble the :class:`~spindoctor.nav_technique.technique_result.NavTechniqueResult`.
 
-The :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.feature_ids` field
+The :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.feature_ids` field
 preserves every consumed
-:attr:`~nav.feature.feature.NavFeature.feature_id` so the orchestrator's curator can
+:attr:`~spindoctor.feature.feature.NavFeature.feature_id` so the orchestrator's curator can
 attribute each contribution at audit time.
 
 Examples
@@ -356,14 +356,14 @@ Examples
     Rhea visible in the upper right with about 22 % of the disc off-frame. The body model
     emits a ``BODY_DISC`` feature; the disc-template NCC peak collapses against the
     heavily-cropped silhouette and the technique correctly flags itself spurious.
-    :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav` carries the navigation
+    :class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav` carries the navigation
     on this image; the operator-verified offset is
     :math:`(\Delta v, \Delta u) = (11.0, 29.5)` px.
 
 ``multi_body`` (Cassini ISS NAC, image ``N1487595731_1``)
     Dione and Rhea both visible and overlapping at phase angle approximately 90 degrees.
     The body model emits two ``BODY_DISC`` features;
-    :class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav` Z-buffer paints
+    :class:`~spindoctor.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav` Z-buffer paints
     them into a composite (the closer body's pixels overwriting the farther body's) and the
     pyramid NCC converges to (6.76, -17.71) px against the operator-verified ground truth
     :math:`(\Delta v, \Delta u) = (7.03, -18.42)` px. The composite's joint geometric

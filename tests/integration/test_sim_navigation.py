@@ -8,9 +8,9 @@ first rung of the planted-offset algorithmic-invariant layer (Phase T4).
 
 from typing import Any
 
-from nav.nav_model import build_models_for_obs
-from nav.nav_orchestrator import NavOrchestrator
-from nav.obs.obs_inst_sim import ObsSim
+from spindoctor.nav_model import build_models_for_obs
+from spindoctor.nav_orchestrator import NavOrchestrator
+from spindoctor.obs.obs_inst_sim import ObsSim
 
 
 def _disc_scene(*, offset_v: float = 0.0, offset_u: float = 0.0) -> dict[str, Any]:

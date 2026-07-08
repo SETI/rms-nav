@@ -5,12 +5,12 @@ Titan
 Atmospheric-body navigation models render predicted views of bodies whose visible
 "limb" is a haze top rather than a solid surface (Titan, Venus, Triton's nitrogen frost
 layer at low phase) and emit feature types tailored to that geometry. All concrete
-subclasses derive from :class:`~nav.nav_model.nav_model.NavModel` directly; the family
+subclasses derive from :class:`~spindoctor.nav_model.nav_model.NavModel` directly; the family
 has no shared abstract base because no full implementation is registered.
 
 Registered concrete subclasses:
 
-- :class:`~nav.nav_model.nav_model_titan.NavModelTitan` — registered placeholder for
+- :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` — registered placeholder for
   haze-aware atmospheric-body navigation; emits no features. Documented at
   :doc:`dev_guide_navigation_models_titan`.
 - ``NavModelTitanSimulated`` — reserved without an implementation. The simulated-image

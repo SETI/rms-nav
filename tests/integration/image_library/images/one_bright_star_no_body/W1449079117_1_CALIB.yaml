@@ -18,7 +18,7 @@ ground_truth:
   source: operator_verified
   operator: rfrench
   verified_date: 2026-04-30
-  ui_version: 'rms-nav 0.1.dev25'
+  ui_version: 'spindoctor 0.1.dev25'
   notes: |
     Single star (Vega) in FOV.
     RED filter.

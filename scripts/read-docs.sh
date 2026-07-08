@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# rms-nav - Build Sphinx documentation and open the HTML index
+# rms-spindoctor - Build Sphinx documentation and open the HTML index
 #
 # Runs `make html` in docs/ with SPHINXOPTS=-W (warnings fail the build),
 # then opens docs/_build/html/index.html using the platform default handler.

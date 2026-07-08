@@ -6,7 +6,7 @@ Overview
 ========
 
 ``NavModelTitanSimulated`` is the simulated-image counterpart of
-:class:`~nav.nav_model.nav_model_titan.NavModelTitan`. It is reserved without an
+:class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan`. It is reserved without an
 implementation; the documentation slot exists so the toctree under
 :doc:`dev_guide_navigation_models_titans` is parallel with
 :doc:`dev_guide_navigation_models_bodies`,
@@ -14,7 +14,7 @@ implementation; the documentation slot exists so the toctree under
 :doc:`dev_guide_navigation_models_stars`.
 
 A direct simulated-image counterpart is the logical complement of
-:class:`~nav.nav_model.nav_model_titan.NavModelTitan`: the catalog-driven path needs a
+:class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan`: the catalog-driven path needs a
 haze-aware extractor, and the simulated path needs a controlled-input renderer so a
 developer can probe the haze-fit pipeline with geometry whose true offset is known by
 construction.
@@ -33,7 +33,7 @@ Restrictions and assumptions
 
 The slot has no implementation, so no algorithmic assumptions apply. A future
 implementation would inherit the constraints already documented for
-:class:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated` plus the
+:class:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated` plus the
 haze-profile parameter constraints described in
 :doc:`dev_guide_navigation_models_titan`.
 
@@ -46,7 +46,7 @@ Configuration
 =============
 
 The slot consumes no YAML configuration. The anticipated sim-params parallel to
-:class:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated` would carry
+:class:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated` would carry
 ``name``, ``center_v``, ``center_u``, ``range``, ``haze_radius``, ``haze_profile``,
 ``illumination_angle``, and ``phase_angle``.
 
@@ -54,11 +54,11 @@ Implementation
 ==============
 
 The slot has no source file. A direct simulated-image counterpart would live at
-``src/nav/nav_model/nav_model_titan_simulated.py`` and self-register via
+``src/spindoctor/nav_model/nav_model_titan_simulated.py`` and self-register via
 ``__init_subclass__``; like
-:class:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated` and
-:class:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated` it would not
-override :meth:`~nav.nav_model.nav_model.NavModel.instances_for_obs`, so the orchestrator's
+:class:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated` and
+:class:`~spindoctor.nav_model.nav_model_rings_simulated.NavModelRingsSimulated` it would not
+override :meth:`~spindoctor.nav_model.nav_model.NavModel.instances_for_obs`, so the orchestrator's
 autonomous registry would not build an instance during real-image runs.
 
 Examples

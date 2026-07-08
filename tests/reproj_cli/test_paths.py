@@ -1,13 +1,13 @@
-"""Tests for ``reproj_cli.paths``."""
+"""Tests for ``spindoctor.cli.reproj.paths``."""
 
 from filecache import FCPath
 
-from nav.dataset.dataset import ImageFile
-from reproj_cli.paths import mosaic_output_path, per_image_output_path
+from spindoctor.cli.reproj.paths import mosaic_output_path, per_image_output_path
+from spindoctor.dataset.dataset import ImageFile
 
 
 def _dummy_image_file(stem: str) -> ImageFile:
-    """Build a minimal :class:`~nav.dataset.dataset.ImageFile` for path tests.
+    """Build a minimal :class:`~spindoctor.dataset.dataset.ImageFile` for path tests.
 
     Args:
         stem: Fake image stem used in ``image_file_url`` / ``label_file_url`` paths.

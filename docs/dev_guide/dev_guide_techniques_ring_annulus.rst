@@ -5,12 +5,12 @@ Ring Annulus Correlate (RingAnnulusNav)
 Overview
 ========
 
-:class:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav` recovers a single
+:class:`~spindoctor.nav_technique.nav_technique_ring_annulus.RingAnnulusNav` recovers a single
 translation by full-template normalised cross-correlation against a composite annulus
 fused from every offered ``RING_ANNULUS`` feature. Per-planet annulus templates are Z-buffer
 painted into a single postage stamp (the closer ring system's pixels overwrite the farther
 one's), the result is run through the shared pyramid-NCC machinery in
-:mod:`nav.support.correlate`, and the chosen peak is returned with a Cramer-Rao-lower-bound
+:mod:`spindoctor.support.correlate`, and the chosen peak is returned with a Cramer-Rao-lower-bound
 covariance derived from the local correlation curvature.
 
 Multi-planet annulus composites improve disambiguation in the same way as multi-body disc
@@ -39,7 +39,7 @@ the closer planet's template value (and its mask True) overwrite the farther one
 in-front ring system occludes an in-behind ring system in the composite. The fused
 template carries one combined bounding box, one fused brightness image, and one fused mask;
 the orchestrator's
-:func:`~nav.feature.composition.compose_template_features` helper does the work.
+:func:`~spindoctor.feature.composition.compose_template_features` helper does the work.
 
 Cost function
 -------------
@@ -72,7 +72,7 @@ Search strategy
 ---------------
 
 The shared pyramid-NCC entry point
-(:func:`~nav.support.correlate.navigate_with_pyramid_kpeaks`) runs coarse-to-fine, keeps the
+(:func:`~spindoctor.support.correlate.navigate_with_pyramid_kpeaks`) runs coarse-to-fine, keeps the
 top ``k`` peaks at each level, and reports the per-level consistency. See
 :doc:`dev_guide_techniques_dt_fitting` for the per-iteration mechanics that the body-disc
 technique shares. Rotation fitting is disabled for ring annuli (the rotation pivot
@@ -84,8 +84,8 @@ Restrictions and assumptions
 ----------------------------
 
 - The orchestrator must populate
-  :attr:`~nav.nav_orchestrator.nav_context.NavContext.image_ext` and
-  :attr:`~nav.nav_orchestrator.nav_context.NavContext.sensor_mask_ext`.
+  :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.image_ext` and
+  :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.sensor_mask_ext`.
 - The composite template must have non-empty support in the search window. An empty
   template (every annulus off-frame) collapses the NCC to a constant; the spurious gate
   flags the result.
@@ -99,9 +99,9 @@ Sources of uncertainty
 The reported covariance is the Cramer-Rao lower bound from the local NCC curvature at the
 chosen peak. When the chosen peak sits within the at-edge tolerance of any axis bound the
 result is flagged
-:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and the hard-zero
+:attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and the hard-zero
 gate forces confidence to zero. The pyramid consistency check flags peaks that drift across
-levels as :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious`.
+levels as :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious`.
 
 Configuration
 =============
@@ -114,7 +114,7 @@ Feature-emission tunables (per-planet)
 --------------------------------------
 
 The upstream rings model decides whether to emit ``RING_ANNULUS`` or ``RING_EDGE`` features based on
-``feature_emission.ring_annulus`` in ``src/nav/config_files/config_510_techniques.yaml``.
+``feature_emission.ring_annulus`` in ``src/spindoctor/config_files/config_510_techniques.yaml``.
 The model emits a ``RING_ANNULUS`` template whenever a single ring edge has compressed below the
 per-polyline radial-pixel threshold, or when the per-planet km-per-pixel scale exceeds the
 per-planet threshold (the entire ring system is below the per-edge resolution limit).
@@ -148,10 +148,10 @@ per-planet threshold (the entire ring system is below the per-edge resolution li
 Per-instrument overrides
 ------------------------
 
-Per-instrument YAML files in ``src/nav/config_files/config_4N0_inst_*.yaml`` do not
+Per-instrument YAML files in ``src/spindoctor/config_files/config_4N0_inst_*.yaml`` do not
 override any ``feature_emission`` keys. The search-window margin used by the
 at-edge test comes from the per-instrument
-:class:`~nav.nav_orchestrator.instrument_config.InstrumentSettings`.
+:class:`~spindoctor.nav_orchestrator.instrument_config.InstrumentSettings`.
 
 Confidence formula
 ------------------
@@ -159,24 +159,24 @@ Confidence formula
 The technique reports a calibrated confidence in :math:`[0, 1]` produced by the shared
 sigmoid combination; see :doc:`dev_guide_techniques_confidence`. The formula spec is
 ``techniques.RingAnnulusNav`` in the same YAML file and consumes attributes off
-:class:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics` plus
-:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and
-:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious`.
+:class:`~spindoctor.nav_technique.diagnostics.RingAnnulusDiagnostics` plus
+:attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and
+:attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious`.
 
-- :attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.ncc_peak` — alpha = 1.5,
+- :attr:`~spindoctor.nav_technique.diagnostics.RingAnnulusDiagnostics.ncc_peak` — alpha = 1.5,
   offset = 0.0, divisor = 6.0, cap at 1.0. PSR-style quality measure of the chosen NCC
   peak. Healthy annulus fits report quality 6 to 15.
-- :attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.peak_to_runner_up_ratio` —
+- :attr:`~spindoctor.nav_technique.diagnostics.RingAnnulusDiagnostics.peak_to_runner_up_ratio` —
   alpha = 0.0, offset = 0.0, divisor = 2.0, cap at 1.0. Ratio of the winning peak's
   quality to the next-best peak's outside the exclusion radius. Carries no weight in
   the configured confidence formula; the wiring is in place so a downstream
   recalibration can tune the alpha.
-- :attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.annulus_count` —
+- :attr:`~spindoctor.nav_technique.diagnostics.RingAnnulusDiagnostics.annulus_count` —
   alpha = 0.4, offset = 0.0, divisor = 2.0, cap at 1.0. Number of ``RING_ANNULUS`` features
   fused. Multi-planet scenes saturate at 2 (vs ``body_count``'s 3).
 
-Hard-zero gate: :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and
-:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces
+Hard-zero gate: :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and
+:attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces
 confidence to zero. The constant baseline is :math:`\alpha_{0} = -2.0`. No post-sigmoid
 ``hard_cap`` is applied.
 
@@ -185,85 +185,85 @@ Implementation
 
 Source files:
 
-- ``src/nav/nav_technique/nav_technique_ring_annulus.py`` —
-  :class:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav` and the per-feature
+- ``src/spindoctor/nav_technique/nav_technique_ring_annulus.py`` —
+  :class:`~spindoctor.nav_technique.nav_technique_ring_annulus.RingAnnulusNav` and the per-feature
   filter / composite helpers.
-- ``src/nav/feature/composition.py`` —
-  :func:`~nav.feature.composition.compose_template_features`.
-- ``src/nav/support/correlate.py`` —
-  :func:`~nav.support.correlate.navigate_with_pyramid_kpeaks`, the shared pyramid-NCC entry
+- ``src/spindoctor/feature/composition.py`` —
+  :func:`~spindoctor.feature.composition.compose_template_features`.
+- ``src/spindoctor/support/correlate.py`` —
+  :func:`~spindoctor.support.correlate.navigate_with_pyramid_kpeaks`, the shared pyramid-NCC entry
   point.
-- ``src/nav/nav_technique/confidence.py`` — sigmoid-combination evaluator; documented at
+- ``src/spindoctor/nav_technique/confidence.py`` — sigmoid-combination evaluator; documented at
   :doc:`dev_guide_techniques_confidence`.
-- ``src/nav/nav_technique/diagnostics.py`` —
-  :class:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics`; documented at
+- ``src/spindoctor/nav_technique/diagnostics.py`` —
+  :class:`~spindoctor.nav_technique.diagnostics.RingAnnulusDiagnostics`; documented at
   :doc:`dev_guide_techniques_diagnostics`.
 
-Public class :class:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav`, base
-:class:`~nav.nav_technique.nav_technique.NavTechnique`. Self-registers via
+Public class :class:`~spindoctor.nav_technique.nav_technique_ring_annulus.RingAnnulusNav`, base
+:class:`~spindoctor.nav_technique.nav_technique.NavTechnique`. Self-registers via
 ``__init_subclass__``.
 
 Class attributes:
 
-- :attr:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav.name` —
+- :attr:`~spindoctor.nav_technique.nav_technique_ring_annulus.RingAnnulusNav.name` —
   ``'RingAnnulusNav'``.
-- :attr:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav.accepts_feature_types`
+- :attr:`~spindoctor.nav_technique.nav_technique_ring_annulus.RingAnnulusNav.accepts_feature_types`
   — ``frozenset({RING_ANNULUS})``.
-- :attr:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav.requires_prior` —
+- :attr:`~spindoctor.nav_technique.nav_technique_ring_annulus.RingAnnulusNav.requires_prior` —
   ``False``.
-- :attr:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav.confidence_attributes`
+- :attr:`~spindoctor.nav_technique.nav_technique_ring_annulus.RingAnnulusNav.confidence_attributes`
   — ``{'at_edge', 'spurious', 'ncc_peak', 'peak_to_runner_up_ratio', 'used_gradient',
   'annulus_count'}``.
 
 Public methods (autodocumented at :doc:`/api_reference/api_nav_technique`):
-:meth:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav.is_feasible` and
-:meth:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav.navigate`.
+:meth:`~spindoctor.nav_technique.nav_technique_ring_annulus.RingAnnulusNav.is_feasible` and
+:meth:`~spindoctor.nav_technique.nav_technique_ring_annulus.RingAnnulusNav.navigate`.
 
 Diagnostics
 -----------
 
-:class:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics`:
+:class:`~spindoctor.nav_technique.diagnostics.RingAnnulusDiagnostics`:
 
-- :attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.ncc_peak` — peak NCC
+- :attr:`~spindoctor.nav_technique.diagnostics.RingAnnulusDiagnostics.ncc_peak` — peak NCC
   quality. Consumed by the confidence formula.
-- :attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.peak_to_runner_up_ratio` —
+- :attr:`~spindoctor.nav_technique.diagnostics.RingAnnulusDiagnostics.peak_to_runner_up_ratio` —
   ratio of winning peak's quality to next-best. Consumed by the confidence formula.
-- :attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.annulus_count` — number of
+- :attr:`~spindoctor.nav_technique.diagnostics.RingAnnulusDiagnostics.annulus_count` — number of
   ``RING_ANNULUS`` features fused.
-- :attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.used_gradient` — True when
+- :attr:`~spindoctor.nav_technique.diagnostics.RingAnnulusDiagnostics.used_gradient` — True when
   ``auto`` mode picked the gradient pass.
 
 Call path
 ---------
 
 Call path traced through
-:meth:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav.navigate`:
+:meth:`~spindoctor.nav_technique.nav_technique_ring_annulus.RingAnnulusNav.navigate`:
 
 1. Open a logged section. Filter the offered features to ``RING_ANNULUS`` entries that carry a
    template payload via the private filter helper.
 2. Fuse the per-planet templates via
-   :func:`~nav.feature.composition.compose_template_features` into a single composite.
+   :func:`~spindoctor.feature.composition.compose_template_features` into a single composite.
 3. Read the search-window margin off the observation via
-   :func:`~nav.nav_technique.nav_technique.search_window_for_obs`.
-4. Run :func:`~nav.support.correlate.navigate_with_pyramid_kpeaks` on the composite
+   :func:`~spindoctor.nav_technique.nav_technique.search_window_for_obs`.
+4. Run :func:`~spindoctor.support.correlate.navigate_with_pyramid_kpeaks` on the composite
    template against the extfov image. The pyramid returns the chosen peak's
    ``(dv, du)``, the 2x2 CRLB covariance, ``quality``, ``consistency``, ``spurious``,
    ``at_edge``, ``used_gradient``, and the top-``k`` peak telemetry.
 5. The covariance shape is always (2, 2); rotation fitting is disabled for ring
    annuli. When
-   :attr:`~nav.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` is true the
+   :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` is true the
    technique embeds the (2, 2) translation block in a (3, 3) covariance via
-   :func:`~nav.nav_technique.nav_technique.embed_rotation_unobservable` and reports the
+   :func:`~spindoctor.nav_technique.nav_technique.embed_rotation_unobservable` and reports the
    rotation as unobservable.
 6. Apply the at-edge tests against the search-window axis bounds.
-7. Build a :class:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics`, evaluate the
-   confidence spec via :func:`~nav.nav_technique.confidence.evaluate_sigmoid_combination`,
+7. Build a :class:`~spindoctor.nav_technique.diagnostics.RingAnnulusDiagnostics`, evaluate the
+   confidence spec via :func:`~spindoctor.nav_technique.confidence.evaluate_sigmoid_combination`,
    log the breakdown, and assemble the
-   :class:`~nav.nav_technique.technique_result.NavTechniqueResult`.
+   :class:`~spindoctor.nav_technique.technique_result.NavTechniqueResult`.
 
-The :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.feature_ids` field
+The :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.feature_ids` field
 preserves every consumed
-:attr:`~nav.feature.feature.NavFeature.feature_id` so the orchestrator's curator can
+:attr:`~spindoctor.feature.feature.NavFeature.feature_id` so the orchestrator's curator can
 attribute each contribution at audit time.
 
 Examples
@@ -272,7 +272,7 @@ Examples
 ``ring_only_curved`` (Cassini ISS NAC, image ``N1447064164_1``)
     A high-resolution Saturn-ring scene whose individual ring edges resolve into separable
     polylines. On this scene the rings model emits ``RING_EDGE`` features rather than
-    ``RING_ANNULUS``, so :class:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav`
+    ``RING_ANNULUS``, so :class:`~spindoctor.nav_technique.nav_technique_ring_annulus.RingAnnulusNav`
     is not feasible. The annulus path fires on lower-resolution / approach-phase scenes
     where the per-planet km/px exceeds the configured threshold.
 
@@ -281,5 +281,5 @@ ring and Saturn's ring system (compressed below their per-planet kmpp thresholds
 ``RING_ANNULUS`` features. The technique Z-buffer paints them into a composite (the closer
 planet's annulus overwriting the farther one's) and the pyramid NCC's joint geometric
 constraint produces a sharper peak than either annulus alone. The
-:attr:`~nav.nav_technique.diagnostics.RingAnnulusDiagnostics.annulus_count` term in the
+:attr:`~spindoctor.nav_technique.diagnostics.RingAnnulusDiagnostics.annulus_count` term in the
 confidence formula contributes a positive offset.

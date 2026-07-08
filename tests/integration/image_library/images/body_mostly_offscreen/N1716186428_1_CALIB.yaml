@@ -15,7 +15,7 @@ ground_truth:
   source: operator_verified
   operator: rfrench
   verified_date: 2026-04-28
-  ui_version: 'rms-nav 0.1.dev25'
+  ui_version: 'spindoctor 0.1.dev25'
   notes: |
     Tethys offset to upper left of frame. Brightly lit limb fully visible. Limb is obviously not a perfect ellipsoid. Nothing else in the FOV.
 

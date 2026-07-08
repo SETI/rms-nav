@@ -8,9 +8,9 @@ Overview
 DT fitting is the shared algorithmic core that aligns a polyline of model vertices against an
 image's edge-distance-transform. It is reused by every distance-transform-based technique in
 the pipeline:
-:class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav`,
-:class:`~nav.nav_technique.nav_technique_body_terminator.BodyTerminatorNav`, and
-:class:`~nav.nav_technique.nav_technique_ring_edge.RingEdgeNav`. The module exposes pure
+:class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav`,
+:class:`~spindoctor.nav_technique.nav_technique_body_terminator.BodyTerminatorNav`, and
+:class:`~spindoctor.nav_technique.nav_technique_ring_edge.RingEdgeNav`. The module exposes pure
 numerical helpers — coarse integer cross-correlation, polarity filtering, Tukey biweight
 weights, Levenberg-Marquardt sub-pixel refinement, and an information-matrix-to-covariance
 helper — and lets each technique assemble its own vertex / normal / sigma arrays before calling
@@ -213,7 +213,7 @@ the per-axis sigma reported by the ensemble correctly flags the rank deficiency 
 silently inverting floating-point noise.
 
 A single project-wide cutoff
-(:data:`~nav.nav_technique.dt_fitting.DEFAULT_PINVH_RCOND`, ``1e-9``) keeps the threshold
+(:data:`~spindoctor.nav_technique.dt_fitting.DEFAULT_PINVH_RCOND`, ``1e-9``) keeps the threshold
 consistent across every technique that consumes this helper and across the orchestrator's
 ensemble combine. The value is calibrated so that a tighter cutoff would silently treat
 near-rank-deficient matrices as full-rank, producing garbage inverse entries; a looser cutoff
@@ -254,7 +254,7 @@ Restrictions and assumptions
   with the Tukey-zero-weight covariance sentinel.
 - The polarity filter assumes the gradient vector image is the signed
   :math:`(g_{v}, g_{u})` Sobel-of-Gaussian readout produced by the orchestrator's
-  :func:`~nav.nav_orchestrator.image_derivatives.compute_image_gradient_vu`. Magnitude-only
+  :func:`~spindoctor.nav_orchestrator.image_derivatives.compute_image_gradient_vu`. Magnitude-only
   gradient images cannot drive the polarity test and the caller must opt out via
   ``use_polarity=False``.
 - The convergence test uses a single step-norm tolerance for both translation-only and
@@ -281,19 +281,19 @@ overrides at call time. The defaults below are exposed in the module's ``__all__
 tests, downstream tools, and consuming techniques can reference the canonical values without
 re-reading the source.
 
-- :data:`~nav.nav_technique.dt_fitting.DEFAULT_TUKEY_C` — float, default ``4.685`` sigma.
+- :data:`~spindoctor.nav_technique.dt_fitting.DEFAULT_TUKEY_C` — float, default ``4.685`` sigma.
   Holland-Welsch biweight cutoff. Sigma-scaled residuals beyond this magnitude are dropped
   completely; 4.685 corresponds to ~95 % asymptotic Gaussian efficiency.
-- :data:`~nav.nav_technique.dt_fitting.DEFAULT_LM_DAMPING` — float, default ``1.0e-3``
+- :data:`~spindoctor.nav_technique.dt_fitting.DEFAULT_LM_DAMPING` — float, default ``1.0e-3``
   (dimensionless). Initial Levenberg-Marquardt damping :math:`\lambda`. Multiplied by 0.5
   on accepted steps and by 2 on rejected steps; bracketed in :math:`[10^{-12}, 10^{6}]`.
-- :data:`~nav.nav_technique.dt_fitting.DEFAULT_LM_MAX_ITERATIONS` — int, default ``30``
+- :data:`~spindoctor.nav_technique.dt_fitting.DEFAULT_LM_MAX_ITERATIONS` — int, default ``30``
   (count). Maximum LM iterations before the refiner terminates without convergence.
-- :data:`~nav.nav_technique.dt_fitting.DEFAULT_LM_STEP_TOLERANCE` — float, default
+- :data:`~spindoctor.nav_technique.dt_fitting.DEFAULT_LM_STEP_TOLERANCE` — float, default
   ``1.0e-3`` px. Step-norm threshold below which the iteration terminates with
   ``converged=True``. Combines translation magnitude and rotation step times pivot distance
   into a single pixel-equivalent number.
-- :data:`~nav.nav_technique.dt_fitting.DEFAULT_PINVH_RCOND` — float, default ``1.0e-9``
+- :data:`~spindoctor.nav_technique.dt_fitting.DEFAULT_PINVH_RCOND` — float, default ``1.0e-9``
   (dimensionless). Cutoff passed to :func:`scipy.linalg.pinvh` for the
   information-to-covariance map. Eigenvalues smaller than this fraction of the largest are
   treated as null.
@@ -303,30 +303,30 @@ Implementation
 
 Source files:
 
-- ``src/nav/nav_technique/dt_fitting.py`` — the shared helpers and the
-  :class:`~nav.nav_technique.dt_fitting.LMRefineResult` dataclass.
-- ``src/nav/support/distance_transform.py`` —
-  :func:`~nav.support.distance_transform.sample_dt_bilinear`, the bilinear DT sampler the
+- ``src/spindoctor/nav_technique/dt_fitting.py`` — the shared helpers and the
+  :class:`~spindoctor.nav_technique.dt_fitting.LMRefineResult` dataclass.
+- ``src/spindoctor/support/distance_transform.py`` —
+  :func:`~spindoctor.support.distance_transform.sample_dt_bilinear`, the bilinear DT sampler the
   refiner calls per iteration.
-- ``src/nav/nav_orchestrator/image_derivatives.py`` — the image-side derivatives
+- ``src/spindoctor/nav_orchestrator/image_derivatives.py`` — the image-side derivatives
   documented at :doc:`dev_guide_techniques`; the orchestrator computes them once per image
   and the DT fitter consumes the products attached to
-  :class:`~nav.nav_orchestrator.nav_context.NavContext`.
+  :class:`~spindoctor.nav_orchestrator.nav_context.NavContext`.
 
 Public surface (autodocumented at :doc:`/api_reference/api_nav_technique`):
 
-- :func:`~nav.nav_technique.dt_fitting.coarse_ncc_search` — the integer-shift binary
+- :func:`~spindoctor.nav_technique.dt_fitting.coarse_ncc_search` — the integer-shift binary
   cross-correlation.
-- :func:`~nav.nav_technique.dt_fitting.polarity_filter` — per-vertex polarity acceptance from
+- :func:`~spindoctor.nav_technique.dt_fitting.polarity_filter` — per-vertex polarity acceptance from
   the gradient vector image.
-- :func:`~nav.nav_technique.dt_fitting.tukey_biweight_weights` — Holland-Welsch redescender
+- :func:`~spindoctor.nav_technique.dt_fitting.tukey_biweight_weights` — Holland-Welsch redescender
   evaluated at scaled residuals.
-- :func:`~nav.nav_technique.dt_fitting.lm_subpixel_refine` — translation (or translation +
+- :func:`~spindoctor.nav_technique.dt_fitting.lm_subpixel_refine` — translation (or translation +
   rotation) LM refinement with Tukey reweighting.
-- :func:`~nav.nav_technique.dt_fitting.information_matrix_to_covariance` — Hessian to
+- :func:`~spindoctor.nav_technique.dt_fitting.information_matrix_to_covariance` — Hessian to
   covariance via the symmetric pseudoinverse.
-- :class:`~nav.nav_technique.dt_fitting.LMRefineResult` — frozen result dataclass exposed by
-  :func:`~nav.nav_technique.dt_fitting.lm_subpixel_refine`.
+- :class:`~spindoctor.nav_technique.dt_fitting.LMRefineResult` — frozen result dataclass exposed by
+  :func:`~spindoctor.nav_technique.dt_fitting.lm_subpixel_refine`.
 
 Consuming techniques follow the same eight-step pattern (the body-limb fit is the canonical
 example documented at :doc:`dev_guide_techniques_body_limb`):
@@ -334,31 +334,31 @@ example documented at :doc:`dev_guide_techniques_body_limb`):
 1. Aggregate the per-feature vertex / normal / sigma arrays.
 2. Render the polyline into a binary mask aligned with the image edge mask.
 3. Read the search-window margin via
-   :func:`~nav.nav_technique.nav_technique.search_window_for_obs`.
-4. Call :func:`~nav.nav_technique.dt_fitting.coarse_ncc_search` to obtain the integer seed.
+   :func:`~spindoctor.nav_technique.nav_technique.search_window_for_obs`.
+4. Call :func:`~spindoctor.nav_technique.dt_fitting.coarse_ncc_search` to obtain the integer seed.
 5. Decide whether to fit camera rotation; when rotation is fit, set the rotation pivot to the
    vertex centroid and read the pivot-to-image-centre distance via
-   :func:`~nav.nav_technique.nav_technique.rotation_pivot_distance_px`.
-6. Call :func:`~nav.nav_technique.dt_fitting.lm_subpixel_refine` with the polyline, the
+   :func:`~spindoctor.nav_technique.nav_technique.rotation_pivot_distance_px`.
+6. Call :func:`~spindoctor.nav_technique.dt_fitting.lm_subpixel_refine` with the polyline, the
    per-vertex sigmas, the integer seed, and the rotation options.
 7. Apply the per-technique at-edge and spurious tests against the converged
-   :class:`~nav.nav_technique.dt_fitting.LMRefineResult`.
+   :class:`~spindoctor.nav_technique.dt_fitting.LMRefineResult`.
 8. Build the per-technique diagnostics dataclass and evaluate the confidence formula.
 
-The :class:`~nav.nav_technique.dt_fitting.LMRefineResult` exposes the converged offset
-:attr:`~nav.nav_technique.dt_fitting.LMRefineResult.offset_vu`, the rotation
-:attr:`~nav.nav_technique.dt_fitting.LMRefineResult.rotation_rad` (zero when rotation was not
-fit), the parameter :attr:`~nav.nav_technique.dt_fitting.LMRefineResult.covariance`, the
-per-vertex :attr:`~nav.nav_technique.dt_fitting.LMRefineResult.residuals_px` at the final
-estimate, the per-vertex final :attr:`~nav.nav_technique.dt_fitting.LMRefineResult.weights`,
-the weighted :attr:`~nav.nav_technique.dt_fitting.LMRefineResult.rms_px`, the unweighted
-:attr:`~nav.nav_technique.dt_fitting.LMRefineResult.raw_rms_px` (well-defined even when the
+The :class:`~spindoctor.nav_technique.dt_fitting.LMRefineResult` exposes the converged offset
+:attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.offset_vu`, the rotation
+:attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.rotation_rad` (zero when rotation was not
+fit), the parameter :attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.covariance`, the
+per-vertex :attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.residuals_px` at the final
+estimate, the per-vertex final :attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.weights`,
+the weighted :attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.rms_px`, the unweighted
+:attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.raw_rms_px` (well-defined even when the
 weighted RMS collapses to zero), the
-:attr:`~nav.nav_technique.dt_fitting.LMRefineResult.iterations` count, the
-:attr:`~nav.nav_technique.dt_fitting.LMRefineResult.converged` flag, the
-:attr:`~nav.nav_technique.dt_fitting.LMRefineResult.degenerate` flag (set when no vertex
+:attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.iterations` count, the
+:attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.converged` flag, the
+:attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.degenerate` flag (set when no vertex
 survives reweighting), and the
-:attr:`~nav.nav_technique.dt_fitting.LMRefineResult.inlier_count`.
+:attr:`~spindoctor.nav_technique.dt_fitting.LMRefineResult.inlier_count`.
 
 Examples
 ========
@@ -376,7 +376,7 @@ alternative would touch :math:`1024^{2}` pixels regardless of polyline support a
 for windows this size.
 
 **LM iteration count.**  An on-axis body limb with sub-pixel SPICE pointing usually converges
-in 4-8 iterations; the default :data:`~nav.nav_technique.dt_fitting.DEFAULT_LM_MAX_ITERATIONS`
+in 4-8 iterations; the default :data:`~spindoctor.nav_technique.dt_fitting.DEFAULT_LM_MAX_ITERATIONS`
 of 30 is a safety net for pathological inputs. When the polyline lands inside a flat DT
 plateau the refiner exits via the
 :math:`\lambda \ge 10^{6}` damping bound rather than reaching the iteration cap.
@@ -392,7 +392,7 @@ iteration.
 **Rank-deficient covariance.**  A perfectly straight ring-edge polyline produces an
 information matrix of rank one — only the radial direction is constrained; the along-edge
 direction is unobservable. The pseudoinverse via
-:data:`~nav.nav_technique.dt_fitting.DEFAULT_PINVH_RCOND` returns a covariance whose null
+:data:`~spindoctor.nav_technique.dt_fitting.DEFAULT_PINVH_RCOND` returns a covariance whose null
 eigenvalue is mapped to :math:`+\infty` (an unbounded variance along the along-edge
 direction). The orchestrator's ensemble combine, which uses the Moore-Penrose pseudoinverse
 to fuse covariances, treats the unbounded eigenvalue as a zero-information contribution along

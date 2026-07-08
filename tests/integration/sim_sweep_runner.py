@@ -24,7 +24,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from nav.sim.png_export import render_scene_png
+from spindoctor.sim.png_export import render_scene_png
 from tests.integration.sim_sweep import (
     build_sweep_params,
     iter_sweep_paths,

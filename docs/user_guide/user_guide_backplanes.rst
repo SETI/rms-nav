@@ -18,13 +18,13 @@ Key properties:
   primary HDU).
 - Backplanes that are entirely zero are omitted from the FITS file.
 - The list of backplanes to generate is configured under ``backplanes`` in
-  ``src/nav/config_files/config_900_backplanes.yaml``.
+  ``src/spindoctor/config_files/config_900_backplanes.yaml``.
 - For simulated observations, synthetic backplanes are produced whose masks
   follow the simulated body shapes.
 
 Backplane generation only writes the FITS file and the associated metadata
 JSON. PDS4 labels for the backplane products are produced in a later step
-by ``nav_create_bundle labels`` (see :doc:`user_guide_pds4_bundle`).
+by ``sd_create_bundle labels`` (see :doc:`user_guide_pds4_bundle`).
 
 For the pipeline's internal architecture (per-source generation,
 distance-aware merge, FITS writer details, "Adding a backplane" checklist),
@@ -35,15 +35,15 @@ Command-Line Interfaces
 
 Two drivers mirror the offset drivers:
 
-- ``nav_backplanes`` (local/CLI)
-- ``nav_backplanes_cloud_tasks`` (Cloud Tasks)
+- ``sd_backplanes`` (local/CLI)
+- ``sd_backplanes_cloud_tasks`` (Cloud Tasks)
 
 Common flags:
 
 - ``--nav-results-root``: Root containing prior navigation results
   (``*_metadata.json``).
 - ``--backplane-results-root``: Root directory for the backplane outputs.
-- Dataset selection flags are the same as for ``nav_offset`` (see
+- Dataset selection flags are the same as for ``sd_offset`` (see
   :doc:`user_guide_navigation`).
 
 Examples
@@ -53,7 +53,7 @@ Generate backplanes locally for a dataset:
 
 .. code-block:: bash
 
-    nav_backplanes coiss_saturn \
+    sd_backplanes coiss_saturn \
       --nav-results-root /data/nav/results \
       --backplane-results-root /data/nav/backplanes \
       --volumes COISS_2001 --first-image-num 1454000000 --last-image-num 1454999999
@@ -63,7 +63,7 @@ generating any backplanes, use ``--output-cloud-tasks-file``:
 
 .. code-block:: bash
 
-    nav_backplanes coiss_saturn \
+    sd_backplanes coiss_saturn \
       --volumes COISS_2001 \
       --output-cloud-tasks-file backplanes_tasks.json
 
@@ -71,7 +71,7 @@ Cloud Tasks variant (file list comes from the queue):
 
 .. code-block:: bash
 
-    nav_backplanes_cloud_tasks \
+    sd_backplanes_cloud_tasks \
       --nav-results-root /data/nav/results \
       --backplane-results-root /data/nav/backplanes
 
@@ -103,11 +103,11 @@ Fields:
 * ``task_id``: unique string identifier built from the dataset name, the
   first image's label filename, and the enumeration index.
 * ``data.dataset_name``: one of the supported dataset names (same value as
-  the positional argument to ``nav_backplanes``).
+  the positional argument to ``sd_backplanes``).
 * ``data.files``: one or more file descriptors. Each descriptor has required
   fields ``image_file_url``, ``label_file_url``, ``results_path_stub``, and
   an optional ``index_file_row`` (metadata from the source index file, may
-  be ``null``). The ``nav_backplanes_cloud_tasks`` worker accepts no other
+  be ``null``). The ``sd_backplanes_cloud_tasks`` worker accepts no other
   task-level parameters; all other settings come from its own
   ``--config-file``, ``--nav-results-root``, and ``--backplane-results-root``
   CLI flags, which apply to every task the worker handles.
@@ -116,7 +116,7 @@ Configuration
 -------------
 
 Backplanes are configured under ``backplanes`` in
-``src/nav/config_files/config_900_backplanes.yaml``:
+``src/spindoctor/config_files/config_900_backplanes.yaml``:
 
 - ``backplanes.bodies``: list of body backplane entries. Each entry has
   ``name`` (the FITS HDU name), ``method`` (the ``oops.Backplane`` method to
@@ -128,7 +128,7 @@ Backplanes are configured under ``backplanes`` in
 Outputs
 -------
 
-For each processed image, ``nav_backplanes`` writes two files under
+For each processed image, ``sd_backplanes`` writes two files under
 ``--backplane-results-root``:
 
 - ``<results_path_stub>_backplanes.fits`` containing:
@@ -140,7 +140,7 @@ For each processed image, ``nav_backplanes`` writes two files under
 
 - ``<results_path_stub>_backplane_metadata.json`` containing per-body
   inventory information and per-backplane ``min``/``max`` statistics
-  (consumed by ``nav_create_bundle`` when generating PDS4 labels).
+  (consumed by ``sd_create_bundle`` when generating PDS4 labels).
 
 Backplane Viewer GUI
 ====================
@@ -152,7 +152,7 @@ Run
 
 .. code-block:: bash
 
-    nav_backplane_viewer coiss_saturn \
+    sd_backplane_viewer coiss_saturn \
       --nav-results-root /data/nav/results \
       --backplane-results-root /data/nav/backplanes \
       --volumes COISS_2001 \

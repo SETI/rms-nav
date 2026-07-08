@@ -5,15 +5,15 @@ Per-Feature Post-Mortem (NavFeatureSummary)
 Overview
 ========
 
-:class:`~nav.nav_orchestrator.feature_summary.NavFeatureSummary` is the small frozen
+:class:`~spindoctor.nav_orchestrator.feature_summary.NavFeatureSummary` is the small frozen
 dataclass that records one entry per emitted
-:class:`~nav.feature.feature.NavFeature` in the per-image
-:attr:`~nav.nav_orchestrator.nav_result.NavResult.feature_inventory` list. The summary
+:class:`~spindoctor.feature.feature.NavFeature` in the per-image
+:attr:`~spindoctor.nav_orchestrator.nav_result.NavResult.feature_inventory` list. The summary
 carries enough information about each feature for the curator to write a post-mortem entry
 into the per-image JSON sidecar — the per-feature identifier, its type, its source model,
 the gate decision (kept vs. dropped, with a stable reason), and its bounding box. It does
 not carry the heavy bits of a full
-:class:`~nav.feature.feature.NavFeature` (templates, polylines, covariance) because those
+:class:`~spindoctor.feature.feature.NavFeature` (templates, polylines, covariance) because those
 would bloat the metadata.
 
 Theory
@@ -25,8 +25,8 @@ of every feature in the per-image JSON would balloon the sidecar to multi-megaby
 without operationally useful content. The summary keeps the post-mortem structure (one
 entry per emitted feature) without the bulk.
 
-The :attr:`~nav.nav_orchestrator.feature_summary.NavFeatureSummary.gated` flag and the
-:attr:`~nav.nav_orchestrator.feature_summary.NavFeatureSummary.gate_reason` together
+The :attr:`~spindoctor.nav_orchestrator.feature_summary.NavFeatureSummary.gated` flag and the
+:attr:`~spindoctor.nav_orchestrator.feature_summary.NavFeatureSummary.gate_reason` together
 describe the per-feature reliability-gate decision: ``gated=False`` means the feature
 reached the technique-feasibility loop; ``gated=True`` means the gate dropped it before
 any technique saw it. The reason string is stable across images so reviewer tooling can
@@ -45,7 +45,7 @@ Sources of uncertainty
 ----------------------
 
 The summary reports no uncertainty. The reliability score is the per-feature value the
-producing :class:`~nav.nav_model.nav_model.NavModel` reported; the gate decision is
+producing :class:`~spindoctor.nav_model.nav_model.NavModel` reported; the gate decision is
 deterministic given the per-image context.
 
 Configuration
@@ -53,34 +53,34 @@ Configuration
 
 The dataclass carries no YAML configuration of its own. The per-feature reliability
 floor that drives the gate decision lives on the
-:class:`~nav.feature.reliability.FeatureReliabilityGate` (per-type floor) rather than on
+:class:`~spindoctor.feature.reliability.FeatureReliabilityGate` (per-type floor) rather than on
 this summary dataclass.
 
 Implementation
 ==============
 
-Source file: ``src/nav/nav_orchestrator/feature_summary.py`` —
-:class:`~nav.nav_orchestrator.feature_summary.NavFeatureSummary`.
+Source file: ``src/spindoctor/nav_orchestrator/feature_summary.py`` —
+:class:`~spindoctor.nav_orchestrator.feature_summary.NavFeatureSummary`.
 
-Public class :class:`~nav.nav_orchestrator.feature_summary.NavFeatureSummary`, frozen
+Public class :class:`~spindoctor.nav_orchestrator.feature_summary.NavFeatureSummary`, frozen
 dataclass. Public fields (autodocumented at
 :doc:`/api_reference/api_nav_orchestrator`):
 
-- :attr:`~nav.nav_orchestrator.feature_summary.NavFeatureSummary.feature_id` —
+- :attr:`~spindoctor.nav_orchestrator.feature_summary.NavFeatureSummary.feature_id` —
   unique identifier matching the producing
-  :attr:`~nav.feature.feature.NavFeature.feature_id`. Non-empty string.
-- :attr:`~nav.nav_orchestrator.feature_summary.NavFeatureSummary.feature_type` — one of
-  the :class:`~nav.feature.feature_type.NavFeatureType` enum values.
-- :attr:`~nav.nav_orchestrator.feature_summary.NavFeatureSummary.source_model` — name of
-  the producing :class:`~nav.nav_model.nav_model.NavModel` (``'stars'``,
+  :attr:`~spindoctor.feature.feature.NavFeature.feature_id`. Non-empty string.
+- :attr:`~spindoctor.nav_orchestrator.feature_summary.NavFeatureSummary.feature_type` — one of
+  the :class:`~spindoctor.feature.feature_type.NavFeatureType` enum values.
+- :attr:`~spindoctor.nav_orchestrator.feature_summary.NavFeatureSummary.source_model` — name of
+  the producing :class:`~spindoctor.nav_model.nav_model.NavModel` (``'stars'``,
   ``'body:DIONE'``, ``'rings:SATURN'``). Non-empty string.
-- :attr:`~nav.nav_orchestrator.feature_summary.NavFeatureSummary.reliability` — per-feature
+- :attr:`~spindoctor.nav_orchestrator.feature_summary.NavFeatureSummary.reliability` — per-feature
   reliability score in :math:`[0, 1]`.
-- :attr:`~nav.nav_orchestrator.feature_summary.NavFeatureSummary.gated` — bool. ``True``
+- :attr:`~spindoctor.nav_orchestrator.feature_summary.NavFeatureSummary.gated` — bool. ``True``
   when the reliability gate dropped this feature before any technique saw it.
-- :attr:`~nav.nav_orchestrator.feature_summary.NavFeatureSummary.gate_reason` — str or
+- :attr:`~spindoctor.nav_orchestrator.feature_summary.NavFeatureSummary.gate_reason` — str or
   ``None``. Stable English reason when ``gated`` is ``True``; ``None`` otherwise.
-- :attr:`~nav.nav_orchestrator.feature_summary.NavFeatureSummary.bbox_extfov_vu` —
+- :attr:`~spindoctor.nav_orchestrator.feature_summary.NavFeatureSummary.bbox_extfov_vu` —
   half-open ``(v_min, u_min, v_max, u_max)`` bounding box in extfov coordinates;
   4-tuple of ints.
 
@@ -90,11 +90,11 @@ non-empty string when ``gated`` is ``True``; ``bbox_extfov_vu`` must be a length
 of real :class:`int` (numpy int / bool are rejected).
 
 The orchestrator's
-:meth:`~nav.nav_orchestrator.orchestrator.NavOrchestrator.navigate` builds the per-image
+:meth:`~spindoctor.nav_orchestrator.orchestrator.NavOrchestrator.navigate` builds the per-image
 inventory by iterating over the kept and gated cohorts and constructing one
-:class:`~nav.nav_orchestrator.feature_summary.NavFeatureSummary` per feature via the
+:class:`~spindoctor.nav_orchestrator.feature_summary.NavFeatureSummary` per feature via the
 private ``_summary_from_feature`` helper, which projects the heavy
-:class:`~nav.feature.feature.NavFeature` down to the summary's narrow shape.
+:class:`~spindoctor.feature.feature.NavFeature` down to the summary's narrow shape.
 
 Examples
 ========
@@ -136,6 +136,6 @@ penalty saturates on full-disc bodies.
 predictable stars produces an inventory of 50 STAR plus up to 12 body-derived features
 (LIMB_ARC + BODY_DISC + TERMINATOR_ARC per body) — about 62 entries totalling ~6 KB of
 JSON. The same scene's heavy-bit
-:class:`~nav.feature.feature.NavFeature` objects total tens of megabytes; the summary's
+:class:`~spindoctor.feature.feature.NavFeature` objects total tens of megabytes; the summary's
 narrow shape is what makes the per-image sidecar tractable to read in a reviewer's text
 editor.

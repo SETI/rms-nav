@@ -262,19 +262,19 @@ narrative below the diagram describes each group in turn.
 Top-level driver
 ================
 
-:class:`~nav.nav_orchestrator.orchestrator.NavOrchestrator` is the
+:class:`~spindoctor.nav_orchestrator.orchestrator.NavOrchestrator` is the
 top-level driver. Given a list of pre-built
-:class:`~nav.nav_model.nav_model.NavModel` instances and an
-:class:`~nav.obs.obs_snapshot.ObsSnapshot`, the orchestrator runs the
+:class:`~spindoctor.nav_model.nav_model.NavModel` instances and an
+:class:`~spindoctor.obs.obs_snapshot.ObsSnapshot`, the orchestrator runs the
 full two-pass navigation pipeline: it builds a
-:class:`~nav.nav_orchestrator.nav_context.NavContext`, calls each
+:class:`~spindoctor.nav_orchestrator.nav_context.NavContext`, calls each
 model's ``create_model``, gathers
-:class:`~nav.feature.feature.NavFeature` instances via ``to_features``,
+:class:`~spindoctor.feature.feature.NavFeature` instances via ``to_features``,
 gates them by reliability, runs every feasible
-:class:`~nav.nav_technique.nav_technique.NavTechnique`, and reconciles
+:class:`~spindoctor.nav_technique.nav_technique.NavTechnique`, and reconciles
 the per-technique results through
-:func:`~nav.nav_orchestrator.ensemble.ensemble`. The output is a single
-:class:`~nav.nav_orchestrator.nav_result.NavResult`.
+:func:`~spindoctor.nav_orchestrator.ensemble.ensemble`. The output is a single
+:class:`~spindoctor.nav_orchestrator.nav_result.NavResult`.
 
 Glob-pattern filters at construction time
 (``only_models='body:MIMAS'``,
@@ -288,20 +288,20 @@ list of shipping model and technique names.
 NavBase
 =======
 
-:class:`~nav.support.nav_base.NavBase` is the shared base class for the
+:class:`~spindoctor.support.nav_base.NavBase` is the shared base class for the
 orchestrator, every model, every technique, and the dataset / obs
 hierarchies. It carries no per-instance state beyond two read-only
 properties:
 
-- :attr:`~nav.support.nav_base.NavBase.config` — the
-  :class:`~nav.config.config.Config` object handed in at construction
+- :attr:`~spindoctor.support.nav_base.NavBase.config` — the
+  :class:`~spindoctor.config.config.Config` object handed in at construction
   time, defaulting to the module-level
-  :data:`~nav.config.config.DEFAULT_CONFIG` singleton when none is
+  :data:`~spindoctor.config.config.DEFAULT_CONFIG` singleton when none is
   supplied. Subclasses read every YAML-driven tunable through this
   property so per-instance overrides flow naturally for tests.
-- :attr:`~nav.support.nav_base.NavBase.logger` — the project-wide
+- :attr:`~spindoctor.support.nav_base.NavBase.logger` — the project-wide
   ``IMAGE_LOGGER`` (a :class:`pdslogger.PdsLogger`) loaded from
-  :mod:`nav.config.logger`. Subclasses log through this property; never
+  :mod:`spindoctor.config.logger`. Subclasses log through this property; never
   through the stdlib :mod:`logging` module.
 
 Construction follows a single contract: every subclass takes a
@@ -313,42 +313,42 @@ through without forcing the base class to enumerate them.
 FeatureReliabilityGate
 ======================
 
-:class:`~nav.feature.reliability.FeatureReliabilityGate` is the gate the
+:class:`~spindoctor.feature.reliability.FeatureReliabilityGate` is the gate the
 orchestrator runs between feature extraction and technique invocation.
-It carries a per-:class:`~nav.feature.feature_type.NavFeatureType`
+It carries a per-:class:`~spindoctor.feature.feature_type.NavFeatureType`
 threshold mapping (defaulted from
-:data:`~nav.feature.reliability.DEFAULT_RELIABILITY_THRESHOLDS`) and
+:data:`~spindoctor.feature.reliability.DEFAULT_RELIABILITY_THRESHOLDS`) and
 exposes a single
-:meth:`~nav.feature.reliability.FeatureReliabilityGate.apply` method that
+:meth:`~spindoctor.feature.reliability.FeatureReliabilityGate.apply` method that
 splits an extracted feature list into ``(kept, gated)``: features whose
 self-assessed
-:attr:`~nav.feature.feature.NavFeature.reliability` falls below the
+:attr:`~spindoctor.feature.feature.NavFeature.reliability` falls below the
 per-type threshold are emitted as
-:class:`~nav.feature.reliability.GatedFeatureRecord` instances carrying a
+:class:`~spindoctor.feature.reliability.GatedFeatureRecord` instances carrying a
 stable ``reason`` string; everything else passes through unmodified.
 
 Per-instance threshold overrides come from the configuration loader (the
 ``features`` block in ``config_510_techniques.yaml`` and any per-instrument
 override under ``config_4N0_inst_*.yaml``). Threshold values are validated
 on construction: they must be finite floats in :math:`[0, 1]` and keyed
-by :class:`~nav.feature.feature_type.NavFeatureType` enum members. The
+by :class:`~spindoctor.feature.feature_type.NavFeatureType` enum members. The
 gate is stateless — the same instance can be reused across images — and
 deterministic given its thresholds.
 
 Dataset, Obs, and ObsSnapshot
 =============================
 
-:class:`~nav.dataset.dataset.DataSet` handles access to image files and
+:class:`~spindoctor.dataset.dataset.DataSet` handles access to image files and
 metadata; per-mission subclasses
 (``DataSetPDS3CassiniISS``, ``DataSetPDS3VoyagerISS``,
 ``DataSetPDS3GalileoSSI``, ``DataSetPDS3NewHorizonsLORRI``,
 ``DataSetSim``) implement archive-specific iteration and PDS4 bundle
 hooks.
 
-:class:`~nav.obs.obs.Obs` is the abstract observation base.
-:class:`~nav.obs.obs_snapshot.ObsSnapshot` adds backplane handling and
+:class:`~spindoctor.obs.obs.Obs` is the abstract observation base.
+:class:`~spindoctor.obs.obs_snapshot.ObsSnapshot` adds backplane handling and
 extended-FOV accessors; per-instrument subclasses derive from
-:class:`~nav.obs.obs_snapshot_inst.ObsSnapshotInst` and implement the
+:class:`~spindoctor.obs.obs_snapshot_inst.ObsSnapshotInst` and implement the
 ``from_file(path, ...)`` constructor. See
 :doc:`dev_guide_observations` for the per-mission subclass list, the
 public API surface, and the new-instrument checklist.
@@ -356,60 +356,60 @@ public API surface, and the new-instrument checklist.
 NavModel
 ========
 
-:class:`~nav.nav_model.nav_model.NavModel` is the abstract base for
+:class:`~spindoctor.nav_model.nav_model.NavModel` is the abstract base for
 predicted-scene generators. Subclasses implement three methods:
 
 - ``create_model()`` populates the model's internal state and
   ``metadata`` dict.
 - ``to_features(context)`` returns a list of
-  :class:`~nav.feature.feature.NavFeature` instances ready for
+  :class:`~spindoctor.feature.feature.NavFeature` instances ready for
   technique consumption.
 - ``to_annotations(context)`` returns an
-  :class:`~nav.annotation.annotations.Annotations` collection that the
+  :class:`~spindoctor.annotation.annotations.Annotations` collection that the
   orchestrator merges into
-  :attr:`~nav.nav_orchestrator.nav_result.NavResult.annotations`.
+  :attr:`~spindoctor.nav_orchestrator.nav_result.NavResult.annotations`.
 
 Concrete subclasses self-register via ``__init_subclass__`` unless they
 opt out with ``_abstract = True``. The class method
 ``instances_for_obs(obs)`` is the per-class hook that
 ``build_models_for_obs`` iterates. Today's concrete subclasses are
-:class:`~nav.nav_model.stars.nav_model_stars.NavModelStars` (catalog-driven
+:class:`~spindoctor.nav_model.stars.nav_model_stars.NavModelStars` (catalog-driven
 star navigation, one instance per observation),
-:class:`~nav.nav_model.nav_model_body.NavModelBody` (catalog-driven
+:class:`~spindoctor.nav_model.nav_model_body.NavModelBody` (catalog-driven
 per-body silhouette navigation),
-:class:`~nav.nav_model.nav_model_rings.NavModelRings` (catalog-driven
+:class:`~spindoctor.nav_model.nav_model_rings.NavModelRings` (catalog-driven
 per-planet ring navigation), the simulated-image siblings
-:class:`~nav.nav_model.nav_model_body_simulated.NavModelBodySimulated`
+:class:`~spindoctor.nav_model.nav_model_body_simulated.NavModelBodySimulated`
 and
-:class:`~nav.nav_model.nav_model_rings_simulated.NavModelRingsSimulated`
+:class:`~spindoctor.nav_model.nav_model_rings_simulated.NavModelRingsSimulated`
 (rendered from operator-supplied parameters), and the placeholder
-:class:`~nav.nav_model.nav_model_titan.NavModelTitan` (registered stub
+:class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` (registered stub
 for atmospheric-body navigation; emits no features). A
 ``NavModelStarsSimulated`` slot is reserved without an implementation.
 
 Per-family data models live alongside the renderer classes:
 
-- **Stars** — the :mod:`nav.nav_model.stars` subpackage carries
+- **Stars** — the :mod:`spindoctor.nav_model.stars` subpackage carries
   multi-catalog reduction (``catalog``), per-star body / ring conflict
   marking (``conflicts``), the raw-DN photometry diagnostic + B-V mapping
   (``predicted_snr``), smear-aware PSF construction (``smeared_psf``),
   and on-image source detection (``detection``); see
   :doc:`dev_guide_navigation_models_star` for details.
 - **Bodies** — per-body shape, albedo, and SPK-residual values live in
-  :mod:`nav.nav_model.body_shape`
-  (:class:`~nav.nav_model.body_shape.BodyShape`,
-  :data:`~nav.nav_model.body_shape.BODY_SHAPE_TABLE`,
-  :data:`~nav.nav_model.body_shape.DEFAULT_BODY_SHAPE`,
-  :func:`~nav.nav_model.body_shape.shape_for_body`); see
+  :mod:`spindoctor.nav_model.body_shape`
+  (:class:`~spindoctor.nav_model.body_shape.BodyShape`,
+  :data:`~spindoctor.nav_model.body_shape.BODY_SHAPE_TABLE`,
+  :data:`~spindoctor.nav_model.body_shape.DEFAULT_BODY_SHAPE`,
+  :func:`~spindoctor.nav_model.body_shape.shape_for_body`); see
   :doc:`dev_guide_navigation_models_body` for details.
-- **Rings** — the :mod:`nav.nav_model.rings` subpackage carries the
+- **Rings** — the :mod:`spindoctor.nav_model.rings` subpackage carries the
   catalog-driven ring-feature data model (``RingFeature``,
   ``RingFeatureFilter``, ``RingRenderResult``, ``RingsRenderContext``,
   ``ring_math``, ``ring_types``); see
   :doc:`dev_guide_navigation_models_ring` for details.
 - **Titan** — placeholder only. A haze-aware data model is reserved
   without an implementation; the registered stub
-  :class:`~nav.nav_model.nav_model_titan.NavModelTitan` reserves the
+  :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` reserves the
   registry slot, and ``NavModelTitanSimulated`` is reserved as the
   simulated-image sibling. See :doc:`dev_guide_navigation_models_titans`
   for details.
@@ -417,98 +417,98 @@ Per-family data models live alongside the renderer classes:
 NavTechnique
 ============
 
-:class:`~nav.nav_technique.nav_technique.NavTechnique` is the abstract
+:class:`~spindoctor.nav_technique.nav_technique.NavTechnique` is the abstract
 base for navigation algorithms. Techniques consume a subset of
-:class:`~nav.feature.feature.NavFeature` instances filtered by
+:class:`~spindoctor.feature.feature.NavFeature` instances filtered by
 ``accepts_feature_types`` and produce a
-:class:`~nav.nav_technique.technique_result.NavTechniqueResult` with an
+:class:`~spindoctor.nav_technique.technique_result.NavTechniqueResult` with an
 offset, covariance, calibrated confidence, and per-technique
 diagnostics. ``is_feasible(features)`` is consulted before invocation
 and reads feature metadata only — never pixels.
 
 Concrete subclasses self-register.
-:class:`~nav.nav_technique.nav_technique_manual.NavTechniqueManual`
+:class:`~spindoctor.nav_technique.nav_technique_manual.NavTechniqueManual`
 opts out of the auto-discovery registry (it spawns a PyQt6 dialog) and
 is invoked by interactive drivers only. The shipping autonomous
 techniques are, by family:
 
 - **Star** —
-  :class:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav`,
-  :class:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav`,
-  :class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav`.
+  :class:`~spindoctor.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav`,
+  :class:`~spindoctor.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav`,
+  :class:`~spindoctor.nav_technique.nav_technique_star_refine.StarRefineNav`.
 - **Body** —
-  :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav`,
-  :class:`~nav.nav_technique.nav_technique_body_terminator.BodyTerminatorNav`,
-  :class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav`,
-  :class:`~nav.nav_technique.nav_technique_body_blob.BodyBlobNav`.
+  :class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav`,
+  :class:`~spindoctor.nav_technique.nav_technique_body_terminator.BodyTerminatorNav`,
+  :class:`~spindoctor.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav`,
+  :class:`~spindoctor.nav_technique.nav_technique_body_blob.BodyBlobNav`.
 - **Ring** —
-  :class:`~nav.nav_technique.nav_technique_ring_edge.RingEdgeNav`,
-  :class:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav`.
+  :class:`~spindoctor.nav_technique.nav_technique_ring_edge.RingEdgeNav`,
+  :class:`~spindoctor.nav_technique.nav_technique_ring_annulus.RingAnnulusNav`.
 - **Titan** — no Titan-specific techniques are registered;
-  :class:`~nav.nav_model.nav_model_titan.NavModelTitan` is a placeholder
+  :class:`~spindoctor.nav_model.nav_model_titan.NavModelTitan` is a placeholder
   that emits no features, so no technique consumes them.
 
 The DT-based body / ring techniques share their coarse-NCC +
 Levenberg-Marquardt + Tukey-biweight machinery via
-:mod:`nav.nav_technique.dt_fitting`. See :doc:`dev_guide_techniques`
+:mod:`spindoctor.nav_technique.dt_fitting`. See :doc:`dev_guide_techniques`
 for the per-technique deep dive.
 
 NavFeature and NavFeatureGeometry
 =================================
 
-A :class:`~nav.feature.feature.NavFeature` is the smallest
+A :class:`~spindoctor.feature.feature.NavFeature` is the smallest
 independently-navigable scene element: a star, one body's limb arc,
 one ring edge, a body disc rendered as a pixel template, and so on.
-The :class:`~nav.feature.feature_type.NavFeatureType` enum names every
+The :class:`~spindoctor.feature.feature_type.NavFeatureType` enum names every
 shipping feature category.
 
 The ``geometry`` field carries one of the
-:data:`~nav.feature.geometry.NavFeatureGeometry` payload variants
+:data:`~spindoctor.feature.geometry.NavFeatureGeometry` payload variants
 (``StarGeometry``, ``LimbPolyline``, ``TerminatorPolyline``,
 ``RingEdgePolyline``, ``BodyDiscGeometry``, ``BodyBlobGeometry``,
 ``RingAnnulusGeometry``, ``CartographicModelGeometry``); each variant
 records the in-image position the technique needs. The ``flags`` field
 carries one of the
-:data:`~nav.feature.flags.NavFeatureFlags` typed dataclasses, capturing
+:data:`~spindoctor.feature.flags.NavFeatureFlags` typed dataclasses, capturing
 feature-type-specific booleans (for example,
 ``RingEdgeFlags.is_straight_line``).
 
 Per-feature uncertainty in image-plane pixels lives on
 ``position_cov_px`` (or per-vertex on the polyline payloads);
 ``preferred_filter`` is the
-:class:`~nav.support.filters.NavFilterSpec` the feature requests for
+:class:`~spindoctor.support.filters.NavFilterSpec` the feature requests for
 both its template and the surrounding image patch.
 
 NavResult, ensemble, curator
 ============================
 
 The orchestrator's final answer is a
-:class:`~nav.nav_orchestrator.nav_result.NavResult` carrying the headline
+:class:`~spindoctor.nav_orchestrator.nav_result.NavResult` carrying the headline
 ``offset_px`` ± ``sigma_px``, a five-bucket ``confidence_rank``, the
 discrete ``status_reason``, every per-technique
-:class:`~nav.nav_technique.technique_result.NavTechniqueResult`, the
+:class:`~spindoctor.nav_technique.technique_result.NavTechniqueResult`, the
 per-feature inventory (kept and gated entries), the image-quality
 classifier verdict, the merged annotation collection, and the
-reproducibility :class:`~nav.nav_orchestrator.provenance.Provenance`.
+reproducibility :class:`~spindoctor.nav_orchestrator.provenance.Provenance`.
 
-:func:`~nav.nav_orchestrator.ensemble.ensemble` is a free function (not
+:func:`~spindoctor.nav_orchestrator.ensemble.ensemble` is a free function (not
 a class) that performs the precision-weighted Kalman-style merge.
-:func:`~nav.nav_orchestrator.curator.build_metadata_dict` projects
+:func:`~spindoctor.nav_orchestrator.curator.build_metadata_dict` projects
 ``NavResult`` into a JSON-friendly metadata block written by
 ``navigate_image_files``.
 
 Annotation
 ==========
 
-The :mod:`nav.annotation` subsystem composes labels and graphical
+The :mod:`spindoctor.annotation` subsystem composes labels and graphical
 elements into an overlay used by the summary PNG.
-:class:`~nav.annotation.annotations.Annotations` aggregates
+:class:`~spindoctor.annotation.annotations.Annotations` aggregates
 model-provided annotations and renders them with appropriate coloring
 and contrast stretching. Each
-:meth:`~nav.nav_model.nav_model.NavModel.to_annotations` returns a fresh
-:class:`~nav.annotation.annotations.Annotations` collection; the
+:meth:`~spindoctor.nav_model.nav_model.NavModel.to_annotations` returns a fresh
+:class:`~spindoctor.annotation.annotations.Annotations` collection; the
 orchestrator merges them into
-:attr:`~nav.nav_orchestrator.nav_result.NavResult.annotations` via
-:meth:`~nav.annotation.annotations.Annotations.add_annotations`. See
-:doc:`dev_guide_annotations` for the per-class API, the per-:class:`~nav.nav_model.nav_model.NavModel`
+:attr:`~spindoctor.nav_orchestrator.nav_result.NavResult.annotations` via
+:meth:`~spindoctor.annotation.annotations.Annotations.add_annotations`. See
+:doc:`dev_guide_annotations` for the per-class API, the per-:class:`~spindoctor.nav_model.nav_model.NavModel`
 contributions, and the source-of-configuration map.

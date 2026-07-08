@@ -2,7 +2,7 @@
 API Reference
 =============
 
-This section provides detailed API documentation for the RMS-NAV system.
+This section provides detailed API documentation for the SpinDoctor system.
 
 .. toctree::
    :maxdepth: 2

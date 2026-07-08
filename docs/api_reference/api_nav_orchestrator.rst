@@ -1,64 +1,64 @@
-nav.nav_orchestrator
-====================
+spindoctor.nav_orchestrator
+===========================
 
-.. automodule:: nav.nav_orchestrator
+.. automodule:: spindoctor.nav_orchestrator
 
-.. automodule:: nav.nav_orchestrator.orchestrator
+.. automodule:: spindoctor.nav_orchestrator.orchestrator
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_orchestrator.nav_context
+.. automodule:: spindoctor.nav_orchestrator.nav_context
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_orchestrator.nav_result
+.. automodule:: spindoctor.nav_orchestrator.nav_result
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_orchestrator.feature_summary
+.. automodule:: spindoctor.nav_orchestrator.feature_summary
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_orchestrator.image_classifier
+.. automodule:: spindoctor.nav_orchestrator.image_classifier
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_orchestrator.image_classifier_result
+.. automodule:: spindoctor.nav_orchestrator.image_classifier_result
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_orchestrator.image_derivatives
+.. automodule:: spindoctor.nav_orchestrator.image_derivatives
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_orchestrator.provenance
+.. automodule:: spindoctor.nav_orchestrator.provenance
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_orchestrator.ensemble
+.. automodule:: spindoctor.nav_orchestrator.ensemble
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_orchestrator.curator
+.. automodule:: spindoctor.nav_orchestrator.curator
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_orchestrator.status_reason_info
+.. automodule:: spindoctor.nav_orchestrator.status_reason_info
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: nav.nav_orchestrator.instrument_config
+.. automodule:: spindoctor.nav_orchestrator.instrument_config
    :members:
    :undoc-members:
    :show-inheritance:

@@ -5,21 +5,21 @@ Simulated Star Navigation Model
 Overview
 ========
 
-:class:`~nav.nav_model.stars.nav_model_stars_simulated.NavModelStarsSimulated` is
+:class:`~spindoctor.nav_model.stars.nav_model_stars_simulated.NavModelStarsSimulated` is
 the simulated-image counterpart of
-:class:`~nav.nav_model.stars.nav_model_stars.NavModelStars`. It is a thin subclass
+:class:`~spindoctor.nav_model.stars.nav_model_stars.NavModelStars`. It is a thin subclass
 of the catalog-driven model: it sources its star list from the simulated renderer's
 output rather than from a catalog reduction, and inherits the parent's
-:data:`~nav.feature.feature_type.NavFeatureType.STAR` feature emission, CRLB
+:data:`~spindoctor.feature.feature_type.NavFeatureType.STAR` feature emission, CRLB
 covariance, reliability gate, and annotations unchanged. A simulated star field is
 therefore navigated by exactly the same
-:class:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav`,
-:class:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav`, and
-:class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav` code a real frame
+:class:`~spindoctor.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav`,
+:class:`~spindoctor.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav`, and
+:class:`~spindoctor.nav_technique.nav_technique_star_refine.StarRefineNav` code a real frame
 is.
 
-Unlike :class:`~nav.nav_model.stars.nav_model_stars.NavModelStars`, this model *does*
-override :meth:`~nav.nav_model.nav_model.NavModel.instances_for_obs`: it builds one
+Unlike :class:`~spindoctor.nav_model.stars.nav_model_stars.NavModelStars`, this model *does*
+override :meth:`~spindoctor.nav_model.nav_model.NavModel.instances_for_obs`: it builds one
 instance for a simulated observation that rendered at least one star, and the parent
 declines simulated observations, so the autonomous registry routes simulated frames to
 this subclass and real frames to the parent.
@@ -31,7 +31,7 @@ The simulated path is the calibration regime for the star techniques: a develope
 probe star matching with a field whose true offset, photometry, and (planted) camera
 roll are known by construction.
 
-The renderer (:func:`~nav.sim.render.render_stars`) builds each star at its *unshifted*
+The renderer (:func:`~spindoctor.sim.render.render_stars`) builds each star at its *unshifted*
 predicted ``(v, u)`` and draws it into the image shifted by the scene's planted offset
 and camera roll. This model adopts that unshifted star list as its prediction, so a
 technique that detects the shifted peak recovers the planted transform -- the same
@@ -43,13 +43,13 @@ Two rendering details make the simulated field faithful to a real one:
 - **Pixel-centre convention.** ``psfmodel.eval_rect`` measures its sub-pixel offset
   from the pixel's lower edge (``offset=0`` centres the PSF half a pixel low), whereas
   the navigator's detection centroid and this model's predicted position both treat
-  integer index ``i`` as the pixel centre. :func:`~nav.sim.render.render_stars` adds
+  integer index ``i`` as the pixel centre. :func:`~spindoctor.sim.render.render_stars` adds
   0.5 to the eval offset so a star the model predicts at ``(v, u)`` lands there in the
   image, with no half-pixel bias in the recovered offset.
 - **Camera roll about the boresight.** A planted ``offset_rotation_deg`` rotates each
   star about the image centre before the translation offset, while the star record
   keeps its unrolled ``(v, u)``; the similarity fit in
-  :class:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav` then
+  :class:`~spindoctor.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav` then
   recovers the roll. See :doc:`dev_guide_rotation`.
 
 Restrictions and assumptions
@@ -85,22 +85,22 @@ renderer.
 Implementation
 ==============
 
-Source file: ``src/nav/nav_model/stars/nav_model_stars_simulated.py`` --
-:class:`~nav.nav_model.stars.nav_model_stars_simulated.NavModelStarsSimulated`, base
-:class:`~nav.nav_model.stars.nav_model_stars.NavModelStars`. The subclass self-registers
+Source file: ``src/spindoctor/nav_model/stars/nav_model_stars_simulated.py`` --
+:class:`~spindoctor.nav_model.stars.nav_model_stars_simulated.NavModelStarsSimulated`, base
+:class:`~spindoctor.nav_model.stars.nav_model_stars.NavModelStars`. The subclass self-registers
 via ``__init_subclass__``.
 
 Public methods (autodocumented at :doc:`/api_reference/api_nav_model`):
 
-- :meth:`~nav.nav_model.stars.nav_model_stars_simulated.NavModelStarsSimulated.instances_for_obs`
+- :meth:`~spindoctor.nav_model.stars.nav_model_stars_simulated.NavModelStarsSimulated.instances_for_obs`
   -- returns one instance for a simulated observation carrying a non-empty
   ``sim_star_list``; an empty list for a real observation or a simulated one with no
   rendered stars.
-- :meth:`~nav.nav_model.stars.nav_model_stars_simulated.NavModelStarsSimulated.create_model`
+- :meth:`~spindoctor.nav_model.stars.nav_model_stars_simulated.NavModelStarsSimulated.create_model`
   -- adopts ``obs.sim_star_list`` as the star list, sets a zero smear vector, and
   populates the same metadata fields the parent records.
 - ``to_features`` / ``to_annotations`` -- inherited unchanged from
-  :class:`~nav.nav_model.stars.nav_model_stars.NavModelStars`.
+  :class:`~spindoctor.nav_model.stars.nav_model_stars.NavModelStars`.
 
 Examples
 ========

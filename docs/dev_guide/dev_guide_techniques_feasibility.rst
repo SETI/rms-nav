@@ -66,43 +66,43 @@ count, etc.) live on each technique's ``tuning`` block; the feasibility check ju
 Implementation
 ==============
 
-Source file: ``src/nav/nav_technique/feasibility.py`` —
-:class:`~nav.nav_technique.feasibility.NavFeasibilityReport`.
+Source file: ``src/spindoctor/nav_technique/feasibility.py`` —
+:class:`~spindoctor.nav_technique.feasibility.NavFeasibilityReport`.
 
 Public surface (autodocumented at :doc:`/api_reference/api_nav_technique`):
 
-- :class:`~nav.nav_technique.feasibility.NavFeasibilityReport` — the dataclass. Frozen,
+- :class:`~spindoctor.nav_technique.feasibility.NavFeasibilityReport` — the dataclass. Frozen,
   three-field. Fields:
 
-  - :attr:`~nav.nav_technique.feasibility.NavFeasibilityReport.feasible` — bool. True when
+  - :attr:`~spindoctor.nav_technique.feasibility.NavFeasibilityReport.feasible` — bool. True when
     the technique can run on the supplied feature set; False when not.
-  - :attr:`~nav.nav_technique.feasibility.NavFeasibilityReport.reason` — str. Human-readable
+  - :attr:`~spindoctor.nav_technique.feasibility.NavFeasibilityReport.reason` — str. Human-readable
     reason; required non-empty when ``feasible`` is False; ignored (but commonly set to
     ``"ok"``) when True.
-  - :attr:`~nav.nav_technique.feasibility.NavFeasibilityReport.consumed_feature_count` — int.
+  - :attr:`~spindoctor.nav_technique.feasibility.NavFeasibilityReport.consumed_feature_count` — int.
     Number of features the technique *would* consume after its own type filter. Defaults to
     zero; safe to leave at zero when ``feasible`` is False.
 
 The dataclass enforces its own invariants in ``__post_init__``:
 
-- :attr:`~nav.nav_technique.feasibility.NavFeasibilityReport.feasible` must be a real
+- :attr:`~spindoctor.nav_technique.feasibility.NavFeasibilityReport.feasible` must be a real
   :class:`bool` (not an int or numpy bool).
-- :attr:`~nav.nav_technique.feasibility.NavFeasibilityReport.reason` must be a real
+- :attr:`~spindoctor.nav_technique.feasibility.NavFeasibilityReport.reason` must be a real
   :class:`str`.
-- :attr:`~nav.nav_technique.feasibility.NavFeasibilityReport.consumed_feature_count` must be
+- :attr:`~spindoctor.nav_technique.feasibility.NavFeasibilityReport.consumed_feature_count` must be
   a real non-bool :class:`int` and at least zero.
 - An infeasible report with an empty ``reason`` raises :exc:`ValueError`.
 
 The dataclass is consumed by every concrete
-:class:`~nav.nav_technique.nav_technique.NavTechnique` subclass's
-:meth:`~nav.nav_technique.nav_technique.NavTechnique.is_feasible` method and the
+:class:`~spindoctor.nav_technique.nav_technique.NavTechnique` subclass's
+:meth:`~spindoctor.nav_technique.nav_technique.NavTechnique.is_feasible` method and the
 orchestrator's two-pass driver. See :doc:`dev_guide_techniques` for the family-level
 overview of how feasibility plugs into the pipeline.
 
 Examples
 ========
 
-**Feasible report, body limb fit.**  When :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav`
+**Feasible report, body limb fit.**  When :class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav`
 sees three offered ``LIMB_ARC`` features, two of which carry surviving vertex counts at or above
 ``min_arc_px``, the report is::
 
@@ -113,7 +113,7 @@ sees three offered ``LIMB_ARC`` features, two of which carry surviving vertex co
     )
 
 The orchestrator invokes
-:meth:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav.navigate` with the full feature
+:meth:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav.navigate` with the full feature
 set; the technique itself drops the third polyline before fitting.
 
 **Infeasible report, body limb fit.**  When every offered ``LIMB_ARC`` has fewer surviving
@@ -126,7 +126,7 @@ vertices than ``min_arc_px``, the report is::
     )
 
 The orchestrator records the reason in the per-image log and skips
-:meth:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav.navigate`.
+:meth:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav.navigate`.
 
 **Reason-keyed correlation.**  An imaging campaign that produced 1,000 images and reports
 ``no_limb_arc_features_with_sufficient_visible_arc`` on 380 of them tells the operator that

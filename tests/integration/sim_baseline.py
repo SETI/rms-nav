@@ -32,9 +32,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from nav.nav_model import build_models_for_obs
-from nav.nav_orchestrator import NavOrchestrator
-from nav.obs.obs_inst_sim import ObsSim
+from spindoctor.nav_model import build_models_for_obs
+from spindoctor.nav_orchestrator import NavOrchestrator
+from spindoctor.obs.obs_inst_sim import ObsSim
 
 OFFSET_DECIMALS: int = 2
 CONFIDENCE_DECIMALS: int = 2

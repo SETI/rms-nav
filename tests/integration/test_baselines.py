@@ -148,8 +148,8 @@ def test_regression_baseline_exact_match(pair: tuple[Baseline, Sidecar], tmp_pat
     """
     # Local imports keep the citations / unit tests importable without
     # the heavy obs / orchestrator stack.
-    from nav.dataset.dataset import ImageFile, ImageFiles
-    from nav.navigate_image_files import navigate_image_files
+    from spindoctor.dataset.dataset import ImageFile, ImageFiles
+    from spindoctor.navigate_image_files import navigate_image_files
     from tests.integration.test_autonomous_nav import (
         _MISSION_TO_OBS_CLASS,
         _resolve_pds3_url,

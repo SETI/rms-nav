@@ -5,12 +5,12 @@ Image Navigation
 Introduction
 ============
 
-RMS-NAV is a spacecraft image navigation system designed to analyze images from various space missions and determine precise positional offsets. This guide explains how to use the primary command-line interface exposed by the ``nav_offset`` script to navigate images and generate results, and how to invoke the cloud-tasks variant for queue-driven processing.
+SpinDoctor is a spacecraft image navigation system designed to analyze images from various space missions and determine precise positional offsets. This guide explains how to use the primary command-line interface exposed by the ``sd_offset`` script to navigate images and generate results, and how to invoke the cloud-tasks variant for queue-driven processing.
 
 Purpose of the System
 ---------------------
 
-The primary purpose of RMS-NAV is to determine the precise pointing of spacecraft instruments by comparing the observed images with theoretical models of what should appear in the field of view. This process, known as "navigation," is crucial for:
+The primary purpose of SpinDoctor is to determine the precise pointing of spacecraft instruments by comparing the observed images with theoretical models of what should appear in the field of view. This process, known as "navigation," is crucial for:
 
 1. Validating and correcting spacecraft pointing information
 2. Ensuring accurate scientific interpretations of the imagery
@@ -28,7 +28,7 @@ The system works by:
 Supported Missions
 ------------------
 
-RMS-NAV currently supports multiple instruments, organized by dataset names you will pass on the command line. Dataset names are case-insensitive and map to instrument-specific handlers. The complete set is:
+SpinDoctor currently supports multiple instruments, organized by dataset names you will pass on the command line. Dataset names are case-insensitive and map to instrument-specific handlers. The complete set is:
 
 * ``coiss`` and ``coiss_pds3`` — Cassini Imaging Science Subsystem (all volumes)
 * ``coiss_cruise`` and ``coiss_cruise_pds3`` — Cassini Imaging Science Subsystem (Cruise volumes 1001-1009)
@@ -85,7 +85,7 @@ Remote holdings are supported: ``PDS3_HOLDINGS_DIR`` and
 Configuration System
 ====================
 
-RMS-NAV uses a hierarchical YAML-based configuration system. For detailed
+SpinDoctor uses a hierarchical YAML-based configuration system. For detailed
 information about the configuration system, including its structure, default
 YAML files, and how to override settings using configuration files and
 command-line options, see :doc:`/introduction_configuration`.
@@ -96,11 +96,11 @@ Command-Line Interface
 Basic Usage
 -----------
 
-The main entry point for RMS-NAV is the ``nav_offset`` script installed via ``pyproject.toml``. The basic syntax is:
+The main entry point for SpinDoctor is the ``sd_offset`` script installed via ``pyproject.toml``. The basic syntax is:
 
 .. code-block:: bash
 
-   nav_offset DATASET_NAME [options]
+   sd_offset DATASET_NAME [options]
 
 Where ``DATASET_NAME`` is one of the supported names listed in the "Supported Missions" section. Names are case-insensitive (for example, ``COISS`` and ``coiss`` are equivalent).
 
@@ -176,7 +176,7 @@ key for that run. For full details and the config-file equivalents see
   ``general.log_level_main_console``; default ``INFO``).
 
 * ``--log-level-main-file LEVEL``: logfile level for the main logger written to
-  ``$NAV_RESULTS_ROOT/logs/nav_offset/`` (overrides ``general.log_level_main_file``;
+  ``$NAV_RESULTS_ROOT/logs/sd_offset/`` (overrides ``general.log_level_main_file``;
   default ``INFO``).
 
 * ``--log-level-image-console LEVEL``: stdout level for the image logger, active
@@ -194,42 +194,42 @@ To process a single Cassini image by specifying its name explicitly and using th
 
 .. code-block:: bash
 
-   nav_offset coiss N1234567890
+   sd_offset coiss N1234567890
 
 To process Voyager images within a single PDS3 volume:
 
 .. code-block:: bash
 
-   nav_offset vgiss --volumes VGISS_5101
+   sd_offset vgiss --volumes VGISS_5101
 
 To process a New Horizons image list found in a CSV from PDS, restricting the
 run to the body-limb and ring-edge DT techniques:
 
 .. code-block:: bash
 
-   nav_offset nhlorri --image-filespec-csv /path/to/nhlorri.csv \
+   sd_offset nhlorri --image-filespec-csv /path/to/nhlorri.csv \
        --nav-techniques 'BodyLimbNav,RingEdgeNav'
 
 To choose ten random Cassini images between two volumes and perform a dry run:
 
 .. code-block:: bash
 
-   nav_offset coiss --first-volume COISS_2001 --last-volume COISS_2010 --choose-random-images 10 --dry-run
+   sd_offset coiss --first-volume COISS_2001 --last-volume COISS_2010 --choose-random-images 10 --dry-run
 
 To generate a cloud-tasks JSON file for images across two Voyager volumes without processing:
 
 .. code-block:: bash
 
-   nav_offset vgiss --volumes VGISS_5101 --volumes VGISS_5102 --output-cloud-tasks-file tasks.json
+   sd_offset vgiss --volumes VGISS_5101 --volumes VGISS_5102 --output-cloud-tasks-file tasks.json
 
 Cloud-tasks entry point
 -----------------------
 
-Queue-driven processing is supported by ``nav_offset_cloud_tasks``. This variant reads tasks from a queue and processes each batch of files described by the task payload. It accepts the same environment options used to derive configuration and results roots and does not include dataset selection flags because the task provides the list of files. Invoke it with:
+Queue-driven processing is supported by ``sd_offset_cloud_tasks``. This variant reads tasks from a queue and processes each batch of files described by the task payload. It accepts the same environment options used to derive configuration and results roots and does not include dataset selection flags because the task provides the list of files. Invoke it with:
 
 .. code-block:: bash
 
-   nav_offset_cloud_tasks [--config-file PATH] [--nav-results-root PATH]
+   sd_offset_cloud_tasks [--config-file PATH] [--nav-results-root PATH]
 
 Cloud-tasks JSON schema
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -277,24 +277,24 @@ Fields:
 Selecting models and techniques
 ===============================
 
-``nav_offset`` runs every applicable navigation model and every feasible
+``sd_offset`` runs every applicable navigation model and every feasible
 navigation technique by default.  Two glob-pattern filters narrow that
-set: ``--nav-models`` selects which :class:`~nav.nav_model.nav_model.NavModel`
+set: ``--nav-models`` selects which :class:`~spindoctor.nav_model.nav_model.NavModel`
 instances run, ``--nav-techniques`` selects which
-:class:`~nav.nav_technique.nav_technique.NavTechnique` subclasses run.
+:class:`~spindoctor.nav_technique.nav_technique.NavTechnique` subclasses run.
 The same syntax applies in three places:
 
-* ``nav_offset --nav-models LIST --nav-techniques LIST`` on the CLI.
-* ``nav_offset_cloud_tasks`` task JSON, under
+* ``sd_offset --nav-models LIST --nav-techniques LIST`` on the CLI.
+* ``sd_offset_cloud_tasks`` task JSON, under
   ``data.arguments.nav_models`` and ``data.arguments.nav_techniques``
   (each a list of strings).
-* :class:`~nav.nav_orchestrator.orchestrator.NavOrchestrator` programmatic
+* :class:`~spindoctor.nav_orchestrator.orchestrator.NavOrchestrator` programmatic
   use, via the ``only_models=`` and ``only_techniques=`` keyword arguments.
 
 The two filters share their pattern syntax; only the *names* they match
 differ.  Filtering is purely additive over the existing registry — it does
 not register new models or techniques, so an entry that does not exist on
-this build of ``rms-nav`` simply does not match.
+this build of ``rms-spindoctor`` simply does not match.
 
 Pattern syntax
 --------------
@@ -309,7 +309,7 @@ Inclusion patterns
 
 * A literal name matches that name only:
   ``BodyLimbNav`` matches the technique class
-  :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav` and
+  :class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav` and
   nothing else.
 * ``*`` matches any sequence of characters; ``?`` matches a single
   character; ``[abc]`` matches any character from the set.  Standard
@@ -346,15 +346,15 @@ Model names
 
 The catalog-driven models register under these per-instance names:
 
-* ``stars`` — :class:`~nav.nav_model.stars.nav_model_stars.NavModelStars`
+* ``stars`` — :class:`~spindoctor.nav_model.stars.nav_model_stars.NavModelStars`
   (one instance per observation; no namespace).
 * ``body:NAME`` —
-  :class:`~nav.nav_model.nav_model_body.NavModelBody` (one instance per
+  :class:`~spindoctor.nav_model.nav_model_body.NavModelBody` (one instance per
   body whose bounding box overlaps the extended FOV).  The ``NAME``
   portion is the upper-case SPICE body name
   (``body:MIMAS``, ``body:DIONE``, ``body:SATURN``).
 * ``rings:PLANET`` —
-  :class:`~nav.nav_model.nav_model_rings.NavModelRings` (one instance
+  :class:`~spindoctor.nav_model.nav_model_rings.NavModelRings` (one instance
   per planet whose ring system has any radius inside the extended FOV;
   Saturn, Uranus, and Neptune today).
 
@@ -378,17 +378,17 @@ Techniques register under their class name.  The shipping concrete
 techniques are:
 
 * Body family —
-  :class:`~nav.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav`,
-  :class:`~nav.nav_technique.nav_technique_body_blob.BodyBlobNav`,
-  :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav`,
-  :class:`~nav.nav_technique.nav_technique_body_terminator.BodyTerminatorNav`.
+  :class:`~spindoctor.nav_technique.nav_technique_body_disc.BodyDiscCorrelateNav`,
+  :class:`~spindoctor.nav_technique.nav_technique_body_blob.BodyBlobNav`,
+  :class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav`,
+  :class:`~spindoctor.nav_technique.nav_technique_body_terminator.BodyTerminatorNav`.
 * Ring family —
-  :class:`~nav.nav_technique.nav_technique_ring_annulus.RingAnnulusNav`,
-  :class:`~nav.nav_technique.nav_technique_ring_edge.RingEdgeNav`.
+  :class:`~spindoctor.nav_technique.nav_technique_ring_annulus.RingAnnulusNav`,
+  :class:`~spindoctor.nav_technique.nav_technique_ring_edge.RingEdgeNav`.
 * Star family —
-  :class:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav`,
-  :class:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav`,
-  :class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav`.
+  :class:`~spindoctor.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav`,
+  :class:`~spindoctor.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav`,
+  :class:`~spindoctor.nav_technique.nav_technique_star_refine.StarRefineNav`.
 
 The star field matcher re-centroids each matched star with a point-spread-function fit
 when the star is faint, and keeps the simpler brightness-weighted centroid when the star
@@ -398,7 +398,7 @@ brightness at which it switches is the configurable
 ``techniques.StarFieldFromCatalogNav.tuning.psf_refine_snr_max`` knob in
 ``config_510_techniques.yaml`` (set the whole step off with ``psf_refine_enabled: 0``).
 
-:class:`~nav.nav_technique.nav_technique_manual.NavTechniqueManual` is
+:class:`~spindoctor.nav_technique.nav_technique_manual.NavTechniqueManual` is
 the interactive driver and is not part of the autonomous registry; it
 cannot be invoked by ``--nav-techniques``.
 
@@ -413,27 +413,27 @@ Examples
 .. code-block:: bash
 
    # Run every model and every technique (the default).
-   nav_offset coiss N1234567890
+   sd_offset coiss N1234567890
 
    # Mimas only — drop every other body and the ring/star models.
-   nav_offset coiss N1234567890 --nav-models 'body:MIMAS'
+   sd_offset coiss N1234567890 --nav-models 'body:MIMAS'
 
    # Every body, plus rings, but no stars.
-   nav_offset coiss N1234567890 --nav-models 'body:*,rings'
+   sd_offset coiss N1234567890 --nav-models 'body:*,rings'
 
    # Every model except Mimas (auto-expanded ``'*'`` inclusion).
-   nav_offset coiss N1234567890 --nav-models '!body:MIMAS'
+   sd_offset coiss N1234567890 --nav-models '!body:MIMAS'
 
    # Two specific DT-based techniques only.
-   nav_offset nhlorri LOR_0034851733 \
+   sd_offset nhlorri LOR_0034851733 \
        --nav-techniques 'BodyLimbNav,RingEdgeNav'
 
    # Every technique except the catalog star matcher.
-   nav_offset coiss N1234567890 \
+   sd_offset coiss N1234567890 \
        --nav-techniques '!StarFieldFromCatalogNav'
 
    # Body and ring families only (every body / ring technique, no stars).
-   nav_offset coiss N1234567890 \
+   sd_offset coiss N1234567890 \
        --nav-techniques 'Body*,Ring*'
 
 Inputs and Outputs
@@ -442,7 +442,7 @@ Inputs and Outputs
 Input Files
 -----------
 
-The primary input to RMS-NAV is spacecraft imagery. The system supports:
+The primary input to SpinDoctor is spacecraft imagery. The system supports:
 
 * PDS3 formatted image files (.IMG)
 * Associated metadata (labels, SPICE kernels)
@@ -456,7 +456,7 @@ The system requires access to:
 Output Files
 ------------
 
-RMS-NAV generates two types of output files:
+SpinDoctor generates two types of output files:
 
 Metadata Files (``*_metadata.json``)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -495,16 +495,16 @@ The key information in the results is:
 Simulated Images
 ================
 
-RMS-NAV includes an image simulator used to test and validate the navigation
+SpinDoctor includes an image simulator used to test and validate the navigation
 pipeline. It is not needed for navigating real data, but a simulated frame can be
 navigated through the same pipeline by passing the ``sim`` dataset name and a path
 to a JSON parameter file:
 
 .. code-block:: bash
 
-   nav_offset sim /path/to/simulated_image.json
+   sd_offset sim /path/to/simulated_image.json
 
-The simulator, its scene formats, and the ``nav_create_simulated_image`` GUI are
+The simulator, its scene formats, and the ``sd_create_simulated_image`` GUI are
 documented for developers in the :doc:`/dev_guide/dev_guide_simulator` chapter.
 See also :doc:`user_guide_simulated_images`.
 
@@ -592,13 +592,13 @@ NHLORRI Pluto/Charon ring geometries).
 Interactive PyQt6 dialog that composes every template-bearing feature
 into a single ext-FOV overlay and lets the operator pick the offset by
 hand.  Not part of the autonomous registry; opt into it from the normal
-``nav_offset`` driver with the ``--manual`` flag, which requires the
+``sd_offset`` driver with the ``--manual`` flag, which requires the
 selection to resolve to exactly one image:
 
 .. code-block:: bash
 
    echo W1521598221_1_CALIB > /tmp/img_list.txt
-   nav_offset coiss --manual --image-file-list /tmp/img_list.txt
+   sd_offset coiss --manual --image-file-list /tmp/img_list.txt
 
 The driver loads the image, runs the orchestrator's ``prepare`` step
 (image classifier + NavModels + features + reliability gate), opens the
@@ -613,7 +613,7 @@ Programmatic equivalent (one obs in, ``NavTechniqueResult`` out):
 
 .. code-block:: python
 
-   from nav.nav_technique import run_manual_nav
+   from spindoctor.nav_technique import run_manual_nav
 
    result = run_manual_nav(obs)
 
@@ -624,19 +624,19 @@ Run only the ring-edge technique:
 
 .. code-block:: bash
 
-   nav_offset coiss N1234567890 --nav-techniques RingEdgeNav
+   sd_offset coiss N1234567890 --nav-techniques RingEdgeNav
 
 Run every technique except ``BodyTerminatorNav``:
 
 .. code-block:: bash
 
-   nav_offset coiss N1234567890 --nav-techniques '!BodyTerminatorNav'
+   sd_offset coiss N1234567890 --nav-techniques '!BodyTerminatorNav'
 
 Run both DT body techniques together:
 
 .. code-block:: bash
 
-   nav_offset coiss N1234567890 --nav-techniques 'BodyLimbNav,BodyTerminatorNav'
+   sd_offset coiss N1234567890 --nav-techniques 'BodyLimbNav,BodyTerminatorNav'
 
 Output
 ------
@@ -651,7 +651,7 @@ both numbers land in the per-image ``_metadata.json``.
 Navigation Models
 =================
 
-A *navigation model* is RMS-NAV's prediction of what the image *should*
+A *navigation model* is SpinDoctor's prediction of what the image *should*
 look like at the spacecraft's nominal pointing.  Three model families
 ship out of the box: stars, planetary bodies, and planetary rings.
 Each contributes one or more *features* (typed predictions with their

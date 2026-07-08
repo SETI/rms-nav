@@ -10,10 +10,10 @@ the default suite.
 import math
 from pathlib import Path
 
-from nav.nav_model import build_models_for_obs
-from nav.nav_orchestrator import NavOrchestrator
-from nav.obs.obs_inst_sim import ObsSim
-from nav.sim.scene import load_sim_scene
+from spindoctor.nav_model import build_models_for_obs
+from spindoctor.nav_orchestrator import NavOrchestrator
+from spindoctor.obs.obs_inst_sim import ObsSim
+from spindoctor.sim.scene import load_sim_scene
 
 _REGRESSION_DIR = Path(__file__).parent / 'sim_scenes' / 'regression'
 

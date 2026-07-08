@@ -5,18 +5,18 @@ Star Field Pattern Match (StarFieldFromCatalogNav)
 Overview
 ========
 
-:class:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav` is the pass-1
+:class:`~spindoctor.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav` is the pass-1
 multi-star pattern matcher. It hashes catalog and detection triplets into a translation- and
 rotation-invariant feature space, finds correspondences via a KD-tree match in that space,
 and runs a RANSAC similarity-transform fit to recover the translation (plus optional in-plane
 rotation) that maps the predicted catalog cohort onto the observed detections. The technique
 runs without a prior — it is the ensemble's primary star path on scenes where the SPICE
 pointing error is too large for
-:class:`~nav.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav`'s search
+:class:`~spindoctor.nav_technique.nav_technique_star_unique_match.StarUniqueMatchNav`'s search
 window to contain the brightest predictable star.
 
 Feasibility passes when the predictable-star cohort has at least three usable
-:data:`~nav.feature.feature_type.NavFeatureType.STAR` features (the matcher cannot form a
+:data:`~spindoctor.feature.feature_type.NavFeatureType.STAR` features (the matcher cannot form a
 single triplet below that count); feasibility fails otherwise.
 
 Theory
@@ -110,7 +110,7 @@ Per-axis covariance
 
 The reported translation covariance is derived from the inlier residual scatter and the
 catalog-side centroid spread, per the same precision-weighted-mean form
-:class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav` uses; see
+:class:`~spindoctor.nav_technique.nav_technique_star_refine.StarRefineNav` uses; see
 :doc:`dev_guide_techniques_star_refine` for the algebra. When the per-instrument
 camera-rotation flag is on and the inlier count supports it, a 3x3 covariance with the
 rotation diagonal is reported; otherwise the 2x2 translation block is reported on its own
@@ -141,16 +141,16 @@ inlier scatter), and it does not capture catalog-side errors (a star with a wron
 position bumps the inlier count by zero or one and the bulk of the fit is unaffected). When
 the converged offset sits within the at-edge tolerance of any axis bound, or when the
 rotation parameter is at the configured fraction of its cap, the result is flagged
-:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and the hard-zero
+:attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and the hard-zero
 gate forces confidence to zero. When the inlier count falls below
 ``pattern_match_min_inliers`` the result is flagged
-:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious`.
+:attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious`.
 
 Configuration
 =============
 
 All numeric tunables for this technique live in ``techniques.StarFieldFromCatalogNav.tuning``
-in ``src/nav/config_files/config_510_techniques.yaml``.
+in ``src/spindoctor/config_files/config_510_techniques.yaml``.
 
 - ``max_sources`` — int, default ``30`` (count). Maximum number of brightest detected
   sources / brightest catalog stars per side feeding the matcher. Triplet count is
@@ -178,13 +178,13 @@ in ``src/nav/config_files/config_510_techniques.yaml``.
   least 3 (the matcher needs at least one triplet per side).
 - ``at_edge_tolerance_px`` — float, default ``1.0`` px. A converged offset whose absolute
   distance from any search-window axis bound falls within this tolerance is flagged
-  :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge`.
+  :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge`.
 - ``rotation_at_edge_fraction`` — float, default ``0.95`` (dimensionless). When
-  :attr:`~nav.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` is true, the
+  :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` is true, the
   converged rotation magnitude trips
-  :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` once it crosses
+  :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` once it crosses
   this fraction of the per-image
-  :attr:`~nav.nav_orchestrator.nav_context.NavContext.max_rotation_deg` cap.
+  :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.max_rotation_deg` cap.
 - ``psf_refine_enabled`` — int flag, default ``1``. ``1`` enables the PSF-fit re-centroiding
   of matched inliers; ``0`` keeps the brightness-weighted moment centroid everywhere.
 - ``psf_refine_box_px`` — int, default ``11`` px (odd). Square box side for the PSF fit and
@@ -201,7 +201,7 @@ in ``src/nav/config_files/config_510_techniques.yaml``.
 Per-instrument overrides
 ------------------------
 
-Per-instrument YAML files in ``src/nav/config_files/config_4N0_inst_*.yaml`` do not
+Per-instrument YAML files in ``src/spindoctor/config_files/config_4N0_inst_*.yaml`` do not
 override any of these knobs.
 
 Confidence formula
@@ -210,26 +210,26 @@ Confidence formula
 The technique reports a calibrated confidence in :math:`[0, 1]` produced by the shared
 sigmoid combination; see :doc:`dev_guide_techniques_confidence`. Spec is
 ``techniques.StarFieldFromCatalogNav``; consumes attributes off
-:class:`~nav.nav_technique.diagnostics.StarFieldDiagnostics` plus
-:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and
-:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious`.
+:class:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics` plus
+:attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and
+:attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious`.
 
-- :attr:`~nav.nav_technique.diagnostics.StarFieldDiagnostics.n_inliers` — alpha = 1.0,
+- :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.n_inliers` — alpha = 1.0,
   offset = 6.0, divisor = 6.0, cap at 1.0. Number of detection-to-catalog inliers after
   RANSAC. Saturates at 12 inliers (offset = 6 plus full cap).
-- :attr:`~nav.nav_technique.diagnostics.StarFieldDiagnostics.median_residual_px` —
+- :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.median_residual_px` —
   alpha = -1.0, offset = 0.0, divisor = 1.0, no cap. Median position residual on inliers.
   Larger residuals pull confidence down.
-- :attr:`~nav.nav_technique.diagnostics.StarFieldDiagnostics.n_detected_sources` —
+- :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.n_detected_sources` —
   alpha = 0.0, offset = 0.0, divisor = 30.0, cap at 1.0. Number of bright sources detected
   in the image. Carries no weight in the current confidence formula; the wiring is in place so a downstream
   recalibration can tune the alpha.
-- :attr:`~nav.nav_technique.diagnostics.StarFieldDiagnostics.n_catalog_predicted` —
+- :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.n_catalog_predicted` —
   alpha = 0.0, offset = 0.0, divisor = 30.0, cap at 1.0. Number of catalog stars in the
   extfov. Same posture as the detected-sources term.
 
-Hard-zero gate: :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.at_edge` and
-:attr:`~nav.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces
+Hard-zero gate: :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge` and
+:attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.spurious` either firing forces
 confidence to zero before the sigmoid evaluates. The constant baseline is
 :math:`\alpha_{0} = -2.0`. No post-sigmoid ``hard_cap`` is applied.
 
@@ -238,68 +238,68 @@ Implementation
 
 Source files:
 
-- ``src/nav/nav_technique/nav_technique_star_field.py`` —
-  :class:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav` and the
+- ``src/spindoctor/nav_technique/nav_technique_star_field.py`` —
+  :class:`~spindoctor.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav` and the
   hashing / RANSAC / fit helpers.
-- ``src/nav/nav_technique/_star_helpers.py`` — package-private helpers
+- ``src/spindoctor/nav_technique/_star_helpers.py`` — package-private helpers
   ``usable_stars`` (filter), ``local_centroid`` (per-source centroid), and
   ``similarity_transform_fit`` (Kabsch / Procrustes solve).
-- ``src/nav/nav_technique/confidence.py`` — sigmoid-combination evaluator; documented at
+- ``src/spindoctor/nav_technique/confidence.py`` — sigmoid-combination evaluator; documented at
   :doc:`dev_guide_techniques_confidence`.
-- ``src/nav/nav_technique/diagnostics.py`` —
-  :class:`~nav.nav_technique.diagnostics.StarFieldDiagnostics`; documented at
+- ``src/spindoctor/nav_technique/diagnostics.py`` —
+  :class:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics`; documented at
   :doc:`dev_guide_techniques_diagnostics`.
 
 Public class
-:class:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav`, base
-:class:`~nav.nav_technique.nav_technique.NavTechnique`. Self-registers via
+:class:`~spindoctor.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav`, base
+:class:`~spindoctor.nav_technique.nav_technique.NavTechnique`. Self-registers via
 ``__init_subclass__``.
 
 Class attributes:
 
-- :attr:`~nav.nav_technique.nav_technique.NavTechnique.name` —
+- :attr:`~spindoctor.nav_technique.nav_technique.NavTechnique.name` —
   ``'StarFieldFromCatalogNav'``.
-- :attr:`~nav.nav_technique.nav_technique.NavTechnique.accepts_feature_types` —
+- :attr:`~spindoctor.nav_technique.nav_technique.NavTechnique.accepts_feature_types` —
   ``frozenset({STAR})``.
-- :attr:`~nav.nav_technique.nav_technique.NavTechnique.requires_prior` — ``False``.
-- :attr:`~nav.nav_technique.nav_technique.NavTechnique.confidence_attributes` —
+- :attr:`~spindoctor.nav_technique.nav_technique.NavTechnique.requires_prior` — ``False``.
+- :attr:`~spindoctor.nav_technique.nav_technique.NavTechnique.confidence_attributes` —
   ``{'at_edge', 'spurious', 'n_inliers', 'median_residual_px', 'n_detected_sources',
   'n_catalog_predicted'}``.
 
 Public methods (autodocumented at :doc:`/api_reference/api_nav_technique`):
-:meth:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav.is_feasible` and
-:meth:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav.navigate`.
+:meth:`~spindoctor.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav.is_feasible` and
+:meth:`~spindoctor.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav.navigate`.
 
 Diagnostics
 -----------
 
-:class:`~nav.nav_technique.diagnostics.StarFieldDiagnostics`:
+:class:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics`:
 
-- :attr:`~nav.nav_technique.diagnostics.StarFieldDiagnostics.n_inliers` — number of
+- :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.n_inliers` — number of
   detection-to-catalog inliers. Consumed by the confidence formula and the spurious-
   detection gate.
-- :attr:`~nav.nav_technique.diagnostics.StarFieldDiagnostics.median_residual_px` — median
+- :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.median_residual_px` — median
   position residual on inliers. Consumed by the confidence formula.
-- :attr:`~nav.nav_technique.diagnostics.StarFieldDiagnostics.n_detected_sources` — number
+- :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.n_detected_sources` — number
   of bright sources detected in the image.
-- :attr:`~nav.nav_technique.diagnostics.StarFieldDiagnostics.n_catalog_predicted` — number
+- :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.n_catalog_predicted` — number
   of catalog stars in the extfov.
-- :attr:`~nav.nav_technique.diagnostics.StarFieldDiagnostics.n_triplets_evaluated` —
+- :attr:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics.n_triplets_evaluated` —
   number of triplet candidates considered by RANSAC.
 
 Call path
 ---------
 
 Call path traced through
-:meth:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav.navigate`:
+:meth:`~spindoctor.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav.navigate`:
 
 1. Open a logged section. Filter the offered features down to ``usable_stars``
    (predictable and not occluded by a body silhouette or ring annulus) and pull
    the predicted catalog positions / SNR off the per-feature
-   :attr:`~nav.feature.feature.NavFeature.geometry` and
-   :attr:`~nav.feature.feature.NavFeature.flags`.
+   :attr:`~spindoctor.feature.feature.NavFeature.geometry` and
+   :attr:`~spindoctor.feature.feature.NavFeature.flags`.
 2. Run the matched-filter detection over
-   :attr:`~nav.nav_orchestrator.nav_context.NavContext.image_ext` to find the brightest
+   :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.image_ext` to find the brightest
    sources. Cap the catalog and detection cohorts at ``max_sources`` each.
 3. Compute every catalog and detection triplet's (ratio, ratio, angle) hash. Load both
    sets into a KD-tree and find correspondences within ``hash_match_tolerance``.
@@ -319,35 +319,35 @@ Call path traced through
    ``similarity_transform_fit``. The fit returns the rotation and translation; the
    translation is the reported offset.
 7. Result-shape branches on
-   :attr:`~nav.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` and the inlier
+   :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` and the inlier
    count:
 
    - **Translation only** (``fit_camera_rotation`` false). The (2, 2) covariance comes
      from the inlier residual scatter scaled by the catalog-side centroid spread.
-     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.rotation_rad` and
-     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.sigma_rotation_rad` are
+     :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.rotation_rad` and
+     :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.sigma_rotation_rad` are
      ``None``.
    - **Rotation fit, two or more inliers.**  The (3, 3) covariance has the per-axis
      translation variances and the rotation variance derived from the inlier residual
      scatter against the catalog-side spread (same algebra as
-     :class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav` documented at
+     :class:`~spindoctor.nav_technique.nav_technique_star_refine.StarRefineNav` documented at
      :doc:`dev_guide_techniques_star_refine`).
    - **Rotation fit, one inlier.**  The (2, 2) translation block is embedded in a
      rank-deficient (3, 3) via
-     :func:`~nav.nav_technique.nav_technique.embed_rotation_unobservable`;
-     :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.rotation_rad` is ``0.0``
+     :func:`~spindoctor.nav_technique.nav_technique.embed_rotation_unobservable`;
+     :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.rotation_rad` is ``0.0``
      and the sigma is the rotation-unobservable sentinel.
 
 8. Apply the at-edge tests against the search-window axis bounds and the rotation cap.
-9. Build a :class:`~nav.nav_technique.diagnostics.StarFieldDiagnostics`, evaluate the
-   confidence spec via :func:`~nav.nav_technique.confidence.evaluate_sigmoid_combination`,
+9. Build a :class:`~spindoctor.nav_technique.diagnostics.StarFieldDiagnostics`, evaluate the
+   confidence spec via :func:`~spindoctor.nav_technique.confidence.evaluate_sigmoid_combination`,
    log the breakdown via
-   :func:`~nav.nav_technique.nav_technique.log_confidence_breakdown`, and assemble the
-   :class:`~nav.nav_technique.technique_result.NavTechniqueResult`.
+   :func:`~spindoctor.nav_technique.nav_technique.log_confidence_breakdown`, and assemble the
+   :class:`~spindoctor.nav_technique.technique_result.NavTechniqueResult`.
 
-The :attr:`~nav.nav_technique.technique_result.NavTechniqueResult.feature_ids` field
+The :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.feature_ids` field
 preserves every consumed
-:attr:`~nav.feature.feature.NavFeature.feature_id` so the orchestrator's curator can
+:attr:`~spindoctor.feature.feature.NavFeature.feature_id` so the orchestrator's curator can
 attribute each per-star contribution at audit time.
 
 Examples
@@ -356,11 +356,11 @@ Examples
 ``star_dominated`` (Cassini ISS WAC, image ``W1580760393_1``)
     Dense star field with no body in FOV. The stars model emits one ``STAR`` feature per
     predictable catalog star;
-    :class:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav` runs the
+    :class:`~spindoctor.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav` runs the
     triplet hash against the detected sources, lands on a similarity transform with several
     inliers, and reports a translation against the operator-verified offset
     :math:`(\Delta v, \Delta u) = (-2.68, -3.68)` px. The pass-2
-    :class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav` consumes this prior
+    :class:`~spindoctor.nav_technique.nav_technique_star_refine.StarRefineNav` consumes this prior
     and polishes the offset using the full predictable cohort; see
     :doc:`dev_guide_techniques_star_refine` for that walk-through.
 
@@ -369,23 +369,23 @@ Examples
     one ``STAR`` feature per predictable catalog star whose predicted position lies outside
     the body silhouette and any ring annulus; the body model emits
     a ``LIMB_ARC`` (or ``BODY_BLOB``) for the body. On pass 1, the
-    :class:`~nav.nav_technique.nav_technique_body_limb.BodyLimbNav` consumes the body's
+    :class:`~spindoctor.nav_technique.nav_technique_body_limb.BodyLimbNav` consumes the body's
     feature first and the orchestrator's ensemble combine populates the per-image prior
     from the limb-derived offset.
-    :class:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav` runs in
+    :class:`~spindoctor.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav` runs in
     parallel on the star cohort: the triplet hash matches the predicted catalog stars
     against detected sources, the RANSAC inlier set lands on the same translation as the
     body fit, and the ensemble combine tightens the per-image covariance. On pass 2 the
-    :class:`~nav.nav_technique.nav_technique_star_refine.StarRefineNav` consumes the
+    :class:`~spindoctor.nav_technique.nav_technique_star_refine.StarRefineNav` consumes the
     cohort and polishes the offset further.
 
 ``faint_stars`` (Galileo SSI / Voyager outer-leg scene class)
     Every catalog star in the FOV is fainter than the per-observation limiting magnitude
     ``obs.star_max_usable_vmag()``. The stars model emits no ``STAR`` features that clear
     the magnitude gate. The technique's
-    :meth:`~nav.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav.is_feasible`
+    :meth:`~spindoctor.nav_technique.nav_technique_star_field.StarFieldFromCatalogNav.is_feasible`
     fails with reason ``no_usable_stars`` and the technique skips its navigate pass
     entirely. The orchestrator falls back to whichever body- or ring-derived technique is
     feasible on the scene and surfaces the per-technique infeasibility on the per-image
-    :class:`~nav.nav_orchestrator.nav_result.NavResult` so the curator records which gate
+    :class:`~spindoctor.nav_orchestrator.nav_result.NavResult` so the curator records which gate
     fired.

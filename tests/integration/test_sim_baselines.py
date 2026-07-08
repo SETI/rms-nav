@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from nav.sim.scene import iter_scene_paths, load_sim_scene
+from spindoctor.sim.scene import iter_scene_paths, load_sim_scene
 from tests.integration.sim_baseline import (
     SimBaseline,
     baseline_for_scene,

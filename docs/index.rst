@@ -1,7 +1,7 @@
-.. RMS-NAV documentation master file
+.. SpinDoctor documentation master file
 
-Welcome to the Documentation for RMS-NAV!
-=========================================
+Welcome to the Documentation for SpinDoctor!
+============================================
 
 .. include:: ../README.md
    :parser: myst_parser.sphinx_

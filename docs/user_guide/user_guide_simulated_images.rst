@@ -2,7 +2,7 @@
 Simulated Images
 ================
 
-RMS-NAV includes an image simulator that synthesizes spacecraft frames -- stars,
+SpinDoctor includes an image simulator that synthesizes spacecraft frames -- stars,
 planetary bodies, and rings, with a realistic detector model -- for arbitrary
 geometry. It exists to **test and validate the navigation pipeline**: because a
 simulated frame's true pointing offset is known by construction, it is the only

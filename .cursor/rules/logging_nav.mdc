@@ -1,27 +1,27 @@
 ---
 alwaysApply: true
-description: Project-specific logger wiring for rms-nav — the two config-driven module loggers, NavBase access, and handler setup.
+description: Project-specific logger wiring for rms-spindoctor — the two config-driven module loggers, NavBase access, and handler setup.
 ---
 
-# Logging in RMS-NAV
+# Logging in SpinDoctor
 
-This rule covers the project-specific logger setup for `rms-nav`. The generic
+This rule covers the project-specific logger setup for `rms-spindoctor`. The generic
 `PdsLogger` usage patterns (sectioning with `logger.open()`, `%`-style deferred
 formatting, FCPath interaction, never using stdlib `logging`) live in
 `logging` and apply here unchanged.
 
 ## 1. The Two Module-Level Loggers
 
-`nav.config.logger` defines two singleton loggers, configured through the
-project config system and imported from `nav.config`:
+`spindoctor.config.logger` defines two singleton loggers, configured through the
+project config system and imported from `spindoctor.config`:
 
 ```python
-from nav.config import MAIN_LOGGER, IMAGE_LOGGER
+from spindoctor.config import MAIN_LOGGER, IMAGE_LOGGER
 ```
 
 | Logger | Name | Purpose |
 |--------|------|---------|
-| `MAIN_LOGGER` | `"nav_offset"` | Top-level program events; stdout + timestamped file handler attached at startup via `setup_logging()` |
+| `MAIN_LOGGER` | `"sd_offset"` | Top-level program events; stdout + timestamped file handler attached at startup via `setup_logging()` |
 | `IMAGE_LOGGER` | `"nav_image"` | Per-image events; handlers are attached only inside an `IMAGE_LOGGER.open()` context via `image_log_handlers()` |
 
 Navigation components (subclasses of `NavBase`) receive `IMAGE_LOGGER` via
@@ -36,11 +36,11 @@ attaches a stdout stream handler and a rotating timestamped file handler to
 `MAIN_LOGGER`:
 
 ```python
-from nav.config import setup_logging, MAIN_LOGGER
+from spindoctor.config import setup_logging, MAIN_LOGGER
 
 setup_logging(arguments, config, nav_results_root_str)
 # `setup_logging` attaches both the stdout stream handler and the
-# timestamped file handler under {nav_results_root}/logs/nav_offset/
+# timestamped file handler under {nav_results_root}/logs/sd_offset/
 # to MAIN_LOGGER; do not call `MAIN_LOGGER.add_handler` again or the
 # stdout console will see every line twice.
 ```
@@ -51,7 +51,7 @@ For `IMAGE_LOGGER`, create per-image handlers with `image_log_handlers()` and
 pass them to `logger.open()` -- never attach them permanently to the logger:
 
 ```python
-from nav.config import IMAGE_LOGGER, image_log_handlers
+from spindoctor.config import IMAGE_LOGGER, image_log_handlers
 
 local_handlers = image_log_handlers(image_log_path, arguments, config)
 with IMAGE_LOGGER.open(str(image_url), handler=local_handlers):
@@ -71,7 +71,7 @@ Per the `filecache` rule, `image_log_path` is an `FCPath`; never
 
 | Task | Pattern |
 |------|---------|
-| Import loggers | `from nav.config import MAIN_LOGGER, IMAGE_LOGGER` |
+| Import loggers | `from spindoctor.config import MAIN_LOGGER, IMAGE_LOGGER` |
 | Top-level events | `MAIN_LOGGER.info(...)` |
 | Per-image events | `self._logger.info(...)` (`self._logger` is `IMAGE_LOGGER`) |
 | Set up `MAIN_LOGGER` | `setup_logging(arguments, config, results_root)` once in `main()` |

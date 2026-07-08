@@ -2,7 +2,7 @@
 Overview
 ========
 
-RMS-NAV is a spacecraft image navigation system designed to analyze images from
+SpinDoctor is a spacecraft image navigation system designed to analyze images from
 various space missions and determine precise positional offsets. This overview
 provides an introduction to the system architecture, installation, and
 command-line tools.
@@ -10,7 +10,7 @@ command-line tools.
 Navigation Pipeline
 ===================
 
-RMS-NAV follows a three-phase pipeline for processing spacecraft imagery:
+SpinDoctor follows a three-phase pipeline for processing spacecraft imagery:
 
 1. **Navigation** - Determine pointing offsets by correlating observed images
    with theoretical models of stars, planets, moons, and rings.
@@ -28,14 +28,14 @@ backplane generation, and both contributing to the final PDS4 bundle.
 Installation
 ============
 
-RMS-NAV can be installed using either ``pip`` or ``pipx``:
+SpinDoctor can be installed using either ``pip`` or ``pipx``:
 
 Using pip
 ---------
 
 .. code-block:: bash
 
-   pip install rms-nav
+   pip install rms-spindoctor
 
 This installs the package and all command-line programs into your Python
 environment.
@@ -45,7 +45,7 @@ Using pipx
 
 .. code-block:: bash
 
-   pipx install rms-nav
+   pipx install rms-spindoctor
 
 This creates isolated command-line programs that can be run independently of
 your Python environment. This is recommended if you want the command-line tools
@@ -54,48 +54,48 @@ available system-wide without managing Python dependencies.
 Command-Line Programs
 =====================
 
-RMS-NAV provides command-line programs that correspond to each phase of the
+SpinDoctor provides command-line programs that correspond to each phase of the
 navigation pipeline:
 
 Navigation Phase
 ----------------
 
-* ``nav_offset`` - Perform navigation on spacecraft images, determining pointing
+* ``sd_offset`` - Perform navigation on spacecraft images, determining pointing
   offsets by correlating observed features with theoretical models.
 
-* ``nav_create_simulated_image`` - Create simulated images with stars, bodies,
+* ``sd_create_simulated_image`` - Create simulated images with stars, bodies,
   and rings, used internally to test and validate the navigation pipeline (see
   the developer guide's :doc:`/dev_guide/dev_guide_simulator` chapter).
 
 Backplanes Phase
 ----------------
 
-* ``nav_backplanes`` - Generate geometric and photometric backplanes for
+* ``sd_backplanes`` - Generate geometric and photometric backplanes for
   spacecraft images.
 
-* ``nav_backplane_viewer`` - Interactive viewer for examining backplane data.
+* ``sd_backplane_viewer`` - Interactive viewer for examining backplane data.
 
 PDS4 Bundle Phase
 -----------------
 
-* ``nav_create_bundle`` - Create PDS4-compliant data bundles containing
+* ``sd_create_bundle`` - Create PDS4-compliant data bundles containing
   navigation results, backplanes, and metadata. Supports both label generation
   and summary creation.
 
 Cloud Tasks Support
 ===================
 
-RMS-NAV supports queue-driven processing through cloud tasks for scalable,
+SpinDoctor supports queue-driven processing through cloud tasks for scalable,
 distributed processing:
 
-* ``nav_offset_cloud_tasks`` - Cloud tasks worker for navigation processing.
+* ``sd_offset_cloud_tasks`` - Cloud tasks worker for navigation processing.
 
-* ``nav_backplanes_cloud_tasks`` - Cloud tasks worker for backplane generation.
+* ``sd_backplanes_cloud_tasks`` - Cloud tasks worker for backplane generation.
 
-* ``nav_create_bundle_cloud_tasks`` - Cloud tasks worker for PDS4 bundle
+* ``sd_create_bundle_cloud_tasks`` - Cloud tasks worker for PDS4 bundle
   creation.
 
-* ``nav_mosaic_cloud_tasks`` - Cloud tasks worker for the reprojection pass
+* ``sd_mosaic_cloud_tasks`` - Cloud tasks worker for the reprojection pass
   of ring and body mosaic generation. A single worker process handles both
   ring and body tasks; the mode is encoded per-task in the task payload.
   (Mosaic combination remains a single-node step; see
@@ -103,7 +103,7 @@ distributed processing:
 
 These cloud tasks variants read task payloads from a queue and process batches
 of files, making them suitable for large-scale processing in cloud
-environments. The local batch drivers ``nav_offset``, ``nav_backplanes``, and
-``nav_mosaic_rings`` / ``nav_mosaic_body`` can emit a cloud-tasks JSON file
+environments. The local batch drivers ``sd_offset``, ``sd_backplanes``, and
+``sd_mosaic_rings`` / ``sd_mosaic_body`` can emit a cloud-tasks JSON file
 for their respective workers via ``--output-cloud-tasks-file PATH``; see the
 matching user guide for each driver's JSON schema.

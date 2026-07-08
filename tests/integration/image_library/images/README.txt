@@ -34,7 +34,7 @@ Workflow
 
   2. Open the manual-navigation dialog on the candidate:
 
-         nav_offset [args] --manual
+         sd_offset [args] --manual
 
      where [args] are whatever selection / dataset / config flags
      pin the run down to a single image (dataset id, an image-list
@@ -103,7 +103,7 @@ YAML schema
     source: operator_verified
     operator: <username>             # required, non-empty string
     verified_date: YYYY-MM-DD
-    ui_version: <rms-nav version>
+    ui_version: <spindoctor version>
     notes: |                         # optional multi-line string
       <one-line rationale: which feature you used to verify>
 
@@ -136,7 +136,7 @@ mission     ALLOWED_MISSIONS
   These match the dataset names registered in the rms-nav CLI
   (``coiss`` / ``vgiss`` / ``gossi`` / ``nhlorri``) upper-cased so a
   sidecar's mission is unambiguous against an invocation like
-  ``nav_offset --dataset coiss``.
+  ``sd_offset --dataset coiss``.
 
 camera      ALLOWED_CAMERAS
   NAC | WAC | SSI | NA | WA | LORRI

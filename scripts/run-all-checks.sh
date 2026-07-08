@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# rms-nav - Run All Checks Script
+# rms-spindoctor - Run All Checks Script
 #
 # This script runs linting, type checking, tests, and documentation build
-# for the rms-nav project.
+# for the rms-spindoctor project.
 #
 # Usage:
 #   ./scripts/run-all-checks.sh [options]
@@ -188,7 +188,7 @@ fi
 # Start timer
 START_TIME=$(date +%s)
 
-print_header "rms-nav - Running All Checks"
+print_header "rms-spindoctor - Running All Checks"
 
 if [ "$PARALLEL" = true ]; then
     print_info "Running checks in PARALLEL mode"

@@ -1,6 +1,6 @@
-# Contributing to RMS-NAV
+# Contributing to SpinDoctor
 
-Thank you for your interest in contributing to RMS-NAV! This document provides
+Thank you for your interest in contributing to SpinDoctor! This document provides
 guidelines and instructions for contributing to the project.
 
 ## Code of Conduct
@@ -14,8 +14,8 @@ welcoming and inclusive environment for everyone. See CODE_OF_CONDUCT.md.
 2. Clone your fork locally:
 
    ```bash
-   git clone https://github.com/your-username/rms-nav.git
-   cd rms-nav
+   git clone https://github.com/your-username/rms-spindoctor.git
+   cd rms-spindoctor
    ```
 
 3. Create a virtual environment and install dependencies:
@@ -166,4 +166,4 @@ If you find a bug or have a suggestion for improvement:
    * Your environment information (Python version, OS, etc.)
    * Any relevant logs or screenshots
 
-Thank you for contributing to RMS-NAV!
+Thank you for contributing to SpinDoctor!

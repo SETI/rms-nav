@@ -2,8 +2,8 @@
 Config and Static Data
 ==========================
 
-Every RMS-NAV subsystem reads its tunables from a single
-:class:`~nav.config.config.Config` object loaded from a stack of YAML files. The
+Every SpinDoctor subsystem reads its tunables from a single
+:class:`~spindoctor.config.config.Config` object loaded from a stack of YAML files. The
 files split cleanly into two kinds: **runtime configuration** (knobs an operator
 might want to tune per run — search ranges, emission thresholds, label fonts) and
 **static data** (per-body shape tables, per-ring catalogues, per-instrument
@@ -16,10 +16,10 @@ static-data citation discipline.
 The Config object
 =================
 
-:class:`~nav.config.config.Config` lazily loads its YAML stack on first attribute
+:class:`~spindoctor.config.config.Config` lazily loads its YAML stack on first attribute
 access. The stack is, in order (later files override earlier ones for the same key):
 
-1. The bundled ``src/nav/config_files/*.yaml`` files, sorted by filename. The
+1. The bundled ``src/spindoctor/config_files/*.yaml`` files, sorted by filename. The
    3-digit numeric prefix is the merge order; the file groups are documented
    under :ref:`config-file-layout` below.
 2. ``nav_default_config.yaml`` in the current working directory (if present),
@@ -34,24 +34,24 @@ Direct programmatic use:
 
 .. code-block:: python
 
-   from nav.config import Config, DEFAULT_CONFIG
+   from spindoctor.config import Config, DEFAULT_CONFIG
 
    cfg = Config()                            # lazy; reads the stack on first access
    cfg.update_config('custom.yaml')          # merge in an override file
    print(cfg.offset.correlation_fft_upsample_factor)
    print(cfg.environment.pds3_holdings_root)
 
-The module-level :data:`~nav.config.config.DEFAULT_CONFIG` singleton is what
+The module-level :data:`~spindoctor.config.config.DEFAULT_CONFIG` singleton is what
 most subsystems read when no explicit ``config=`` keyword is supplied.
 Per-class ``config`` properties on
-:class:`~nav.support.nav_base.NavBase` subclasses surface the same singleton
+:class:`~spindoctor.support.nav_base.NavBase` subclasses surface the same singleton
 through dependency injection.
 
 Sections
 --------
 
 Top-level YAML keys are exposed as
-:class:`~nav.support.attrdict.AttrDict` properties so code can write
+:class:`~spindoctor.support.attrdict.AttrDict` properties so code can write
 ``cfg.bodies.use_lambert`` instead of ``cfg['bodies']['use_lambert']``. The
 shipping sections:
 
@@ -77,14 +77,14 @@ shipping sections:
 - ``coiss`` / ``vgiss`` / ``gossi`` / ``nhlorri`` — per-camera blocks
   (``noise``, ``mag_offset``, ``image_quality_thresholds``,
   ``source_image_filter``, etc.).
-- ``techniques`` — per-:class:`~nav.nav_technique.nav_technique.NavTechnique`
+- ``techniques`` — per-:class:`~spindoctor.nav_technique.nav_technique.NavTechnique`
   tunables and confidence-formula
   coefficients; see :doc:`dev_guide_techniques`.
 - ``satellites`` — per-planet satellite lists used by the body
-  :class:`~nav.nav_model.nav_model.NavModel`'s inventory query.
+  :class:`~spindoctor.nav_model.nav_model.NavModel`'s inventory query.
 - ``feature_emission`` — per-planet
-  :attr:`~nav.feature.feature_type.NavFeatureType.RING_EDGE` vs
-  :attr:`~nav.feature.feature_type.NavFeatureType.RING_ANNULUS` gates; see
+  :attr:`~spindoctor.feature.feature_type.NavFeatureType.RING_EDGE` vs
+  :attr:`~spindoctor.feature.feature_type.NavFeatureType.RING_ANNULUS` gates; see
   :doc:`dev_guide_techniques_ring_annulus`.
 
 The user-facing tour at :doc:`/introduction_configuration` covers how operators
@@ -176,13 +176,13 @@ Loader rules
 - Mapping keys whose name starts with ``_`` are stripped at load time. This
   is the strip-rule that lets static-data files carry ``_sources`` blocks
   alongside their numeric values without bloating the parsed
-  :class:`~nav.config.config.Config` object;
+  :class:`~spindoctor.config.config.Config` object;
   see :ref:`static-data-citations`.
 
 Numeric values are typed by YAML; downstream consumers convert with explicit
 casts where the section schema is mixed (e.g. the per-instrument
 ``image_quality_thresholds`` block constructs a frozen
-:class:`~nav.nav_orchestrator.image_classifier.ImageQualityThresholds`
+:class:`~spindoctor.nav_orchestrator.image_classifier.ImageQualityThresholds`
 dataclass).
 
 Path resolution
@@ -194,11 +194,11 @@ The ``environment`` block carries the four downstream output roots:
   ``$PDS3_HOLDINGS_DIR``, falling back to
   ``https://pds-rings.seti.org/holdings``).
 - ``nav_results_root`` — write root for ``_metadata.json`` and ``_summary.png``
-  files produced by ``nav_offset``.
+  files produced by ``sd_offset``.
 - ``backplane_results_root`` — write root for backplane FITS / NumPy products
-  produced by ``nav_backplanes``.
+  produced by ``sd_backplanes``.
 - ``bundle_results_root`` — write root for PDS4 bundles produced by
-  ``nav_create_bundle``.
+  ``sd_create_bundle``.
 
 Each value may be a local path or a URL; ``filecache``-aware consumers handle
 both. Environment-variable overrides
@@ -223,8 +223,8 @@ Static-data files
 
 - ``config_220_body_shape.yaml`` populates ``config.body_shape`` — per-body
   radii, ellipsoid residuals, albedo, crater scale; consumed by
-  :func:`~nav.nav_model.body_shape.shape_for_body` and from there by every
-  body :class:`~nav.nav_technique.nav_technique.NavTechnique`'s covariance
+  :func:`~spindoctor.nav_model.body_shape.shape_for_body` and from there by every
+  body :class:`~spindoctor.nav_technique.nav_technique.NavTechnique`'s covariance
   and reliability formula. See
   :doc:`dev_guide_navigation_models_body`.
 - ``config_3N0_*_rings.yaml`` populate ``config.rings.<planet>.ring_features``
@@ -328,7 +328,7 @@ Strip-rule guarantee
 
 ``Config._load_yaml`` strips every mapping key whose
 name starts with ``_`` before merging, so ``_sources`` blocks never appear in
-the parsed :class:`~nav.config.config.Config` object. The runtime accessors
+the parsed :class:`~spindoctor.config.config.Config` object. The runtime accessors
 (``config.body_shape``, ``config.<camera>.mag_offset``, etc.) see only the
 value-bearing fields. Tests assert this behaviour explicitly so the strip
 rule cannot regress silently.

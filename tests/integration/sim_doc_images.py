@@ -26,8 +26,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from nav.sim.png_export import render_scene_png
-from nav.sim.scene import load_sim_scene
+from spindoctor.sim.png_export import render_scene_png
+from spindoctor.sim.scene import load_sim_scene
 
 _DOCS = Path(__file__).parent.parent.parent / 'docs'
 _GUI_DIR = _DOCS / 'dev_guide' / '_sim_images'
@@ -226,7 +226,7 @@ Regenerate (and review the diff) after any change that alters rendering:
 
     python -m tests.integration.sim_doc_images
 
-Each image uses `nav.sim.png_export.render_scene_png`, which stretches detector
+Each image uses `spindoctor.sim.png_export.render_scene_png`, which stretches detector
 counts to visible grayscale with a percentile clip plus a per-image gamma (dim
 features such as a crescent or a faint star field use a higher gamma). The scene
 definitions live in `_GUI_GALLERY` in the generator; edit there to change a
@@ -246,7 +246,7 @@ Regenerate (and review the diff) after a scene's geometry changes:
     python -m tests.integration.sim_doc_images
 
 The mapping from PNG to scene file is `_REPORT_SCENES` in the generator. Each
-image is rendered with `nav.sim.png_export.render_scene_png` (percentile stretch
+image is rendered with `spindoctor.sim.png_export.render_scene_png` (percentile stretch
 plus a per-image gamma).
 """
 
