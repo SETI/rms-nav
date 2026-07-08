@@ -236,6 +236,53 @@ def test_coarse_ncc_search_uses_ncc_not_raw_count_under_clipping() -> None:
     assert coarse_ncc_search(edge_mask, polyline_mask, window) == ncc_argmax
 
 
+def test_coarse_ncc_search_low_support_shift_loses_to_dense_partial_match() -> None:
+    """A near-fully-clipped perfect score cannot beat a dense partial match.
+
+    The per-vertex match fraction over-rewards shifts that clip nearly the
+    whole polyline off-frame: a handful of surviving vertices that happen to
+    land on edge pixels score a perfect 1.0.  The minimum-support guard
+    makes such shifts ineligible, so a dense partial match (18 of 20
+    vertices on edges, fraction 0.9) at the planted offset must win.
+    """
+    h, w = 40, 40
+    poly_rows = np.arange(5, 25)  # 20-vertex vertical segment
+    polyline_mask = np.zeros((h, w), dtype=bool)
+    polyline_mask[poly_rows, 20] = True
+    edge_mask = np.zeros((h, w), dtype=bool)
+    # Dense partial match at the planted shift dv=+3: edges on rows 8..27
+    # except rows 12 and 18, so 18 of the 20 shifted vertices land on edges.
+    edge_mask[8:28, 20] = True
+    edge_mask[12, 20] = False
+    edge_mask[18, 20] = False
+    # Adversarial far edges near the bottom border: a dv=+33 shift clips all
+    # but two vertices off-frame and both survivors land on these edges,
+    # scoring a perfect (but 10 %-supported) match fraction of 1.0.
+    edge_mask[38, 20] = True
+    edge_mask[39, 20] = True
+    window = (35, 0)
+
+    def unguarded_brute() -> tuple[int, int]:
+        best = (0, 0)
+        best_score = -1.0
+        best_key = (math.inf, math.inf, math.inf, math.inf)
+        for dv in range(-window[0], window[0] + 1):
+            sv = poly_rows + dv
+            valid = (sv >= 0) & (sv < h)
+            if not valid.any():
+                continue
+            score = float(edge_mask[sv[valid], 20].sum()) / float(valid.sum())
+            key = (abs(dv), abs(dv), float(dv), 0.0)
+            if score > best_score or (score == best_score and key < best_key):
+                best_score, best_key, best = score, key, (dv, 0)
+        return best
+
+    # Without the support guard the clipped perfect score wins the argmax,
+    # so the fixture genuinely exercises the guard.
+    assert unguarded_brute() == (33, 0)
+    assert coarse_ncc_search(edge_mask, polyline_mask, window) == (3, 0)
+
+
 @pytest.mark.parametrize(
     ('edge_mask', 'polyline_mask', 'window', 'message'),
     [

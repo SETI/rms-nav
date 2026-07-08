@@ -4,8 +4,10 @@ import numpy as np
 import pytest
 
 from spindoctor.nav_orchestrator.ensemble import (
+    DEFAULT_MAX_ALLOWED_ROTATION_DEG,
     EnsembleConfig,
     _combine_confidence,
+    _combine_precision_weighted,
     derive_confidence_rank,
     ensemble,
 )
@@ -17,6 +19,7 @@ from spindoctor.nav_technique.nav_technique import (
     embed_rotation_unobservable,
 )
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
+from spindoctor.support.exceptions import NavContractError
 
 
 def _classifier() -> NavImageClassifierResult:
@@ -506,8 +509,8 @@ def test_ensemble_3dof_rotation_small_angle_circular_mean_matches_arithmetic() -
     assert result.rotation_rad == pytest.approx(0.03, abs=1e-6)
 
 
-def test_ensemble_3dof_rotation_over_bound_trips_assertion() -> None:
-    """A 3-DoF rotation beyond max_allowed_rotation_deg trips the small-angle guard."""
+def test_ensemble_3dof_rotation_over_bound_raises_contract_error() -> None:
+    """A 3-DoF rotation beyond max_allowed_rotation_deg raises NavContractError."""
     cov = np.diag([0.04, 0.04, 1e-4]).astype(np.float64)
     a = NavTechniqueResult(
         technique_name='A',
@@ -521,12 +524,35 @@ def test_ensemble_3dof_rotation_over_bound_trips_assertion() -> None:
         rotation_rad=np.radians(10.0),
         sigma_rotation_rad=0.01,
     )
-    with pytest.raises(AssertionError, match='small-angle bound'):
+    with pytest.raises(NavContractError, match='small-angle bound'):
         ensemble(
             [a],
             feature_inventory=[],
             image_classifier=_classifier(),
             provenance=_provenance(),
+        )
+
+
+def test_combine_precision_weighted_rotation_over_bound_raises_contract_error() -> None:
+    """The circular-mean combine's small-angle guard raises NavContractError directly."""
+    cov = np.diag([0.04, 0.04, 1e-4]).astype(np.float64)
+    a = NavTechniqueResult(
+        technique_name='A',
+        feature_ids=('A:f',),
+        offset_px=(1.0, 2.0),
+        covariance_px2=cov,
+        confidence=0.8,
+        spurious=False,
+        at_edge=False,
+        diagnostics=BodyLimbDiagnostics(),
+        rotation_rad=np.radians(10.0),
+        sigma_rotation_rad=0.01,
+    )
+    with pytest.raises(NavContractError, match='violates small-angle bound'):
+        _combine_precision_weighted(
+            [a],
+            rcond=1.0e-9,
+            max_allowed_rotation_deg=DEFAULT_MAX_ALLOWED_ROTATION_DEG,
         )
 
 

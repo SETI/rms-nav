@@ -32,6 +32,7 @@ from spindoctor.support.distance_transform import sample_dt_bilinear
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
 
 __all__ = [
+    'DEFAULT_COARSE_MIN_SUPPORT_FRACTION',
     'DEFAULT_LM_DAMPING',
     'DEFAULT_LM_MAX_ITERATIONS',
     'DEFAULT_LM_STEP_TOLERANCE',
@@ -51,6 +52,29 @@ __all__ = [
     'polarity_filter',
     'tukey_biweight_weights',
 ]
+
+
+DEFAULT_COARSE_MIN_SUPPORT_FRACTION: float = 0.5
+"""Minimum in-bounds vertex fraction for a coarse-search candidate shift.
+
+:func:`coarse_ncc_search` scores each candidate shift by the fraction of
+its *in-bounds* polyline vertices that land on edge pixels.  That ratio
+is only meaningful when enough vertices survive the shift: a shift that
+clips nearly the whole polyline off-frame can score a perfect 1.0 from a
+handful of vertices that happen to land on edge pixels, beating a dense
+well-supported match (e.g. 450 of 500 vertices on edges).  A candidate
+whose in-bounds vertex fraction falls below this threshold is therefore
+ineligible.
+
+The 0.5 value is safe for the intended geometry: the model polyline is
+rendered in-frame, and the search window margins (tens of pixels on a
+1024 x 1024 image) are small relative to the polyline extent, so the true
+pointing offset never clips half the vertices.  A shift that does remove
+half the polyline cannot be the correct correction, while 0.5 still
+tolerates bodies and ring arcs that legitimately hang partly off-frame.
+The zero shift keeps every vertex in bounds (the mask is built from
+in-frame vertices only), so at least one candidate is always eligible.
+"""
 
 
 DEFAULT_TUKEY_C: float = 4.685
@@ -168,6 +192,8 @@ def coarse_ncc_search(
     edge_mask: NDArrayBoolType,
     polyline_mask: NDArrayBoolType,
     search_window_vu: tuple[int, int],
+    *,
+    min_support_fraction: float = DEFAULT_COARSE_MIN_SUPPORT_FRACTION,
 ) -> tuple[int, int]:
     """Return the integer offset that maximises the normalised overlap of two masks.
 
@@ -177,12 +203,17 @@ def coarse_ncc_search(
     ``f(dv, du) = (sum_{v, u} polyline_mask[v, u] * edge_mask[v + dv, u + du])
     / N_in_bounds(dv, du)``, where ``N_in_bounds`` is the number of polyline
     vertices that remain inside the image after the shift.  Dividing the raw
-    overlap count by the in-bounds vertex count gives the per-vertex match
-    fraction, whose argmax coincides with the binary normalised
-    cross-correlation peak (the NCC equals the square root of this fraction).
-    It removes the bias of a raw overlap count toward shifts that simply keep
-    more vertices in bounds or place the polyline over a denser local edge
-    region.
+    overlap count by the in-bounds vertex count removes the bias of a raw
+    overlap count toward shifts that simply keep more vertices in bounds.
+    Note this per-vertex match fraction is NOT the binary normalised
+    cross-correlation (a binary NCC normalises by ``sqrt(N_in_bounds)``, not
+    ``N_in_bounds``, so its argmax can differ); the plain fraction is used
+    because it fully cancels the in-bounds-count advantage, at the cost of
+    over-rewarding shifts with very few surviving vertices.  That failure
+    mode is closed by the minimum-support guard: a shift whose in-bounds
+    vertex fraction falls below ``min_support_fraction`` is ineligible, so a
+    perfect score on a handful of edge-pixel stragglers cannot beat a dense
+    well-supported match (see :data:`DEFAULT_COARSE_MIN_SUPPORT_FRACTION`).
 
     Ties are broken by the smaller ``(|dv| + |du|, |dv|, dv, du)`` tuple,
     so the nearest-to-origin shift (by Manhattan distance) wins on
@@ -194,15 +225,21 @@ def coarse_ncc_search(
             ``edge_mask``.  Must have the same shape as ``edge_mask``.
         search_window_vu: ``(margin_v, margin_u)`` non-negative integers
             bounding the search range in v and u.
+        min_support_fraction: Minimum fraction of the polyline's vertices
+            that must remain in bounds after a candidate shift for that
+            shift to be eligible.  The zero shift keeps every mask vertex
+            in bounds, so with any value at most 1.0 at least one candidate
+            is always eligible when the window includes the origin.
 
     Returns:
         ``(dv, du)`` integer offset pair at the peak.
 
     Raises:
         TypeError: if either entry of ``search_window_vu`` is not an int.
-        ValueError: if shapes disagree, masks are not 2-D, or
+        ValueError: if shapes disagree, masks are not 2-D,
             ``search_window_vu`` is not a length-2 sequence of
-            non-negative ints.
+            non-negative ints, or ``min_support_fraction`` is outside
+            ``[0, 1]``.
     """
     if edge_mask.ndim != 2 or polyline_mask.ndim != 2:
         raise ValueError(
@@ -227,6 +264,8 @@ def coarse_ncc_search(
         raise TypeError(f'search_window_vu[1] must be int; got {type(margin_u_raw).__name__}')
     if margin_v_raw < 0 or margin_u_raw < 0:
         raise ValueError(f'search_window_vu must be non-negative; got {search_window_vu!r}')
+    if not 0.0 <= min_support_fraction <= 1.0:
+        raise ValueError(f'min_support_fraction must be in [0, 1]; got {min_support_fraction!r}')
     margin_v, margin_u = margin_v_raw, margin_u_raw
     height, width = edge_mask.shape
     edge_f = edge_mask.astype(np.float64, copy=False)
@@ -238,6 +277,12 @@ def coarse_ncc_search(
     poly_vs, poly_us = np.where(polyline_mask)
     if poly_vs.size == 0:
         return (0, 0)
+    # Minimum in-bounds vertex count for a candidate shift to be eligible.
+    # The per-vertex match fraction below is a ratio over the surviving
+    # vertices, so a shift that clips nearly the whole polyline off-frame
+    # can score a perfect 1.0 from a few edge-pixel stragglers; requiring
+    # at least this many survivors keeps such shifts out of the running.
+    min_support = min_support_fraction * float(poly_vs.size)
     best_dv = 0
     best_du = 0
     best_score = -1.0
@@ -254,13 +299,17 @@ def coarse_ncc_search(
                 continue
             sv = shifted_v[valid]
             su = shifted_u[valid]
+            if float(sv.size) < min_support:
+                # Too few vertices survive this shift for the match
+                # fraction to be trustworthy; the candidate is ineligible.
+                continue
             # Score is the fraction of in-bounds polyline points (after the
             # shift) that fall on edge pixels: the raw overlap count divided
             # by the in-bounds vertex count.  Normalising by ``sv.size``
             # (== valid.sum(), guaranteed >= 1 by the ``valid.any()`` check
-            # above) makes the argmax the binary NCC argmax, so a shift does
-            # not win merely by keeping more vertices in bounds or covering a
-            # denser edge region.
+            # above) removes the raw count's bias toward shifts that keep
+            # more vertices in bounds.  This is not the binary NCC (which
+            # would divide by ``sqrt(sv.size)``); see the docstring.
             score = float(edge_f[sv, su].sum()) / float(sv.size)
             key = (abs(dv) + abs(du), abs(dv), dv, du)
             if score > best_score or (score == best_score and key < best_key):

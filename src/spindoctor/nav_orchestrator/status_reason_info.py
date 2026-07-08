@@ -74,4 +74,8 @@ STATUS_REASON_INFO_TEMPLATE: dict[NavStatusReason, list[str]] = {
         'Final: status=failed',
         'Every input covariance shares one null direction',
     ],
+    NavStatusReason.CONTRACT_VIOLATION: [
+        'Final: status=failed',
+        'Internal contract violation (programming error); see the error log',
+    ],
 }

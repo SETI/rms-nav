@@ -51,6 +51,9 @@ class NavStatusReason(StrEnum):
       ``max_sigma_px`` (confident but too imprecise to earn any tier).
     - ``UNOBSERVABLE_OFFSET``: every input covariance shares one null
       direction; the precision-weighted combine cannot proceed.
+    - ``CONTRACT_VIOLATION``: an internal navigation invariant was violated
+      (``NavContractError``); a programming error upstream, not bad image
+      data.  The full traceback is in the error log.
     """
 
     OK = 'ok'
@@ -69,3 +72,4 @@ class NavStatusReason(StrEnum):
     FINAL_CONFIDENCE_BELOW_THRESHOLD = 'final_confidence_below_threshold'
     FINAL_SIGMA_ABOVE_THRESHOLD = 'final_sigma_above_threshold'
     UNOBSERVABLE_OFFSET = 'unobservable_offset'
+    CONTRACT_VIOLATION = 'contract_violation'
