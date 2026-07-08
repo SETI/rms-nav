@@ -172,7 +172,7 @@ def _render_stars_cached(
     return (img, sim_star_list, star_info)
 
 
-def render_stars(
+def _render_stars(
     img: NDArrayFloatType,
     stars_params: list[dict[str, Any]],
     offset_v: float,
@@ -253,140 +253,6 @@ def _render_body_shape_cached(
     return sim_body
 
 
-@lru_cache(maxsize=1)
-def _render_bodies_positioned_cached(
-    size_v: int,
-    size_u: int,
-    bodies_params_no_center_json: str,
-    centers_json: str,
-    offset_v: float,
-    offset_u: float,
-    seed: int | None,
-) -> dict[str, Any]:
-    """Second layer cache: position cached body shapes based on u,v coordinates.
-
-    Caches the final positioned result based on center_v/center_u.
-    Max size 1 means only the most recent positioning is cached.
-    """
-    bodies_params_no_center = json.loads(bodies_params_no_center_json)
-    centers = json.loads(centers_json)
-    img = np.zeros((size_v, size_u), dtype=np.float64)
-
-    # Reconstruct full body params with centers for processing
-    body_models = []
-    for i, params_no_center in enumerate(bodies_params_no_center):
-        params = dict(params_no_center)
-        center_v, center_u = centers[i]
-        params['center_v'] = center_v
-        params['center_u'] = center_u
-        body_models.append(params)
-
-    for body_number, body_params in enumerate(body_models):
-        if 'range' in body_params:
-            body_params['range'] = float(body_params['range'])
-        else:
-            body_params['range'] = body_number + 1
-
-    # Sort by range: far to near for composition; also prepare near-to-far order for hit-test
-    sorted_body_models = sorted(body_models, key=lambda x: x['range'], reverse=True)
-    order_near_to_far = [
-        bp.get('name', f'SIM-BODY-{i + 1}').upper()
-        for i, bp in enumerate(sorted(body_models, key=lambda x: x['range']))
-    ]
-
-    inventory: dict[str, dict[str, float]] = {}
-    body_model_dict: dict[str, dict[str, Any]] = {}
-    body_masks: list[NDArrayBoolType] = []
-    body_mask_map: dict[str, NDArrayBoolType] = {}
-    body_index_map: NDArrayIntType = np.zeros((size_v, size_u), dtype=np.int32)
-
-    ref_center_v = size_v / 2.0
-    ref_center_u = size_u / 2.0
-
-    for body_number, params in enumerate(sorted_body_models):
-        body_name = params.get('name', f'SIM-BODY-{body_number + 1}').upper()
-
-        center_v = float(params.get('center_v', size_v / 2.0)) + offset_v
-        center_u = float(params.get('center_u', size_u / 2.0)) + offset_u
-
-        axis1 = float(params.get('axis1', 0.0))
-        axis2 = float(params.get('axis2', 0.0))
-        axis3 = float(params.get('axis3', min(axis1, axis2)))
-
-        rotation_z = np.radians(params.get('rotation_z', 0.0))
-        rotation_tilt = np.radians(params.get('rotation_tilt', 0.0))
-        illumination_angle = np.radians(params.get('illumination_angle', 0.0))
-        phase_angle = np.radians(params.get('phase_angle', 0.0))
-
-        crater_fill = float(params.get('crater_fill', 0.0))
-        crater_min_radius = float(params.get('crater_min_radius', 0.05))
-        crater_max_radius = float(params.get('crater_max_radius', 0.25))
-        crater_power_law_exponent = float(params.get('crater_power_law_exponent', 3.0))
-        crater_relief_scale = float(params.get('crater_relief_scale', 0.6))
-        anti_aliasing = float(params.get('anti_aliasing', 1.0))
-        body_seed = seed if seed is not None else params.get('seed')
-
-        # Get cached body shape (at reference center)
-        body_shape = _render_body_shape_cached(
-            size_v,
-            size_u,
-            axis1,
-            axis2,
-            axis3,
-            rotation_z,
-            rotation_tilt,
-            illumination_angle,
-            phase_angle,
-            crater_fill,
-            crater_min_radius,
-            crater_max_radius,
-            crater_power_law_exponent,
-            crater_relief_scale,
-            anti_aliasing,
-            body_seed,
-        )
-
-        # Translate body from reference center to actual center
-        dv = center_v - ref_center_v
-        du = center_u - ref_center_u
-
-        # Create positioned body by translating the cached shape
-        # Use scipy for sub-pixel translation
-        positioned_body = ndimage.shift(body_shape, (dv, du), order=1, mode='constant', cval=0.0)
-
-        # Composition: overwrite where body contributes
-        mask = positioned_body > 0
-        img[mask] = positioned_body[mask]
-        body_masks.append(mask)
-        body_mask_map[body_name] = mask
-        # Index into near-to-far order is 1-based
-        near_index = order_near_to_far.index(body_name) + 1
-        body_index_map[mask] = near_index
-
-        max_dim = max(axis1, axis2, axis3) / 2.0  # Convert to half-width for dimension calculation
-        inventory_item = {
-            'v_min_unclipped': center_v - max_dim,
-            'v_max_unclipped': center_v + max_dim,
-            'u_min_unclipped': center_u - max_dim,
-            'u_max_unclipped': center_u + max_dim,
-            'v_pixel_size': 2 * max_dim,
-            'u_pixel_size': 2 * max_dim,
-            'range': params['range'],
-        }
-        inventory[body_name] = inventory_item
-        body_model_dict[body_name] = params
-
-    return {
-        'img': img,
-        'bodies': body_model_dict,
-        'inventory': inventory,
-        'body_masks': body_masks,
-        'body_mask_map': body_mask_map,
-        'order_near_to_far': order_near_to_far,
-        'body_index_map': body_index_map,
-    }
-
-
 @lru_cache(maxsize=30)
 def _render_mesh_shape_cached(
     size_v: int,
@@ -418,6 +284,7 @@ def _render_single_body(
     offset_u: float,
     *,
     seed: int | None = None,
+    body_index: int = 0,
     ref_center_v: float,
     ref_center_u: float,
 ) -> tuple[NDArrayBoolType, dict[str, Any]]:
@@ -428,7 +295,10 @@ def _render_single_body(
         body_params: Body parameters dictionary.
         offset_v: V offset to apply.
         offset_u: U offset to apply.
-        seed: Random seed for crater generation.
+        seed: Scene-level crater seed; a per-body sub-seed is derived from it
+            so bodies with identical geometry get independent crater patterns.
+        body_index: Stable index of this body in the scene's body list, mixed
+            into the per-body crater sub-seed alongside the body name.
         ref_center_v: Reference center V for body shape caching.
         ref_center_u: Reference center U for body shape caching.
 
@@ -457,7 +327,31 @@ def _render_single_body(
     crater_power_law_exponent = float(body_params.get('crater_power_law_exponent', 3.0))
     crater_relief_scale = float(body_params.get('crater_relief_scale', 0.6))
     anti_aliasing = float(body_params.get('anti_aliasing', 1.0))
-    body_seed = seed if seed is not None else body_params.get('seed')
+
+    # Mix a stable per-body identity (scene index and name) into the scene's
+    # crater seed so two bodies with identical geometry draw independent crater
+    # patterns and occupy distinct shape-cache entries.  The derivation is
+    # SHA-256 based (never Python's salted hash), so it is process-stable.  A
+    # body without craters never consumes the seed; None keeps identical
+    # smooth bodies sharing one cached shape.
+    body_seed: int | None
+    if crater_fill <= 0.0:
+        body_seed = None
+    elif seed is not None:
+        body_seed = derive_effect_seed(seed, f'body:{body_index}:{body_name}')
+    else:
+        body_seed = body_params.get('seed')
+
+    # Projected half-extents of the body in the image plane.  The rendered
+    # silhouette is the axis1/axis2 ellipse rotated in-plane by rotation_z
+    # (axis3 is the depth axis and does not project), so the bounding
+    # half-extents along the image axes follow from the rotated ellipse.
+    semi_1 = axis1 / 2.0
+    semi_2 = axis2 / 2.0
+    cos_rz = float(np.cos(rotation_z))
+    sin_rz = float(np.sin(rotation_z))
+    half_extent_v = float(np.hypot(semi_1 * cos_rz, semi_2 * sin_rz))
+    half_extent_u = float(np.hypot(semi_1 * sin_rz, semi_2 * cos_rz))
 
     # Get cached body shape (at reference center).  An irregular body renders
     # from a polyhedral mesh at a scene-supplied pose; otherwise an ellipsoid.
@@ -473,6 +367,9 @@ def _render_single_body(
             phase_angle,
             anti_aliasing,
         )
+        # A mesh body's pose is an arbitrary 3D rotation, so fall back to the
+        # bounding sphere of the ellipsoidal envelope for both image axes.
+        mesh_half_extent = max(axis1, axis2, axis3) / 2.0
         return _finish_single_body(
             img,
             body_shape,
@@ -480,9 +377,8 @@ def _render_single_body(
             body_name,
             center_v,
             center_u,
-            axis1,
-            axis2,
-            axis3,
+            half_extent_v=mesh_half_extent,
+            half_extent_u=mesh_half_extent,
             ref_center_v=ref_center_v,
             ref_center_u=ref_center_u,
         )
@@ -512,9 +408,8 @@ def _render_single_body(
         body_name,
         center_v,
         center_u,
-        axis1,
-        axis2,
-        axis3,
+        half_extent_v=half_extent_v,
+        half_extent_u=half_extent_u,
         ref_center_v=ref_center_v,
         ref_center_u=ref_center_u,
     )
@@ -527,28 +422,43 @@ def _finish_single_body(
     body_name: str,
     center_v: float,
     center_u: float,
-    axis1: float,
-    axis2: float,
-    axis3: float,
     *,
+    half_extent_v: float,
+    half_extent_u: float,
     ref_center_v: float,
     ref_center_u: float,
 ) -> tuple[NDArrayBoolType, dict[str, Any]]:
-    """Translate a reference-centred body shape into place and composite it."""
+    """Translate a reference-centred body shape into place and composite it.
+
+    Parameters:
+        img: Image array to modify in-place.
+        body_shape: Body intensity rendered at the reference center.
+        body_params: Body parameters dictionary.
+        body_name: Upper-cased body name for the inventory keys.
+        center_v: Body center V in the image (offset already applied).
+        center_u: Body center U in the image (offset already applied).
+        half_extent_v: Projected half-extent of the silhouette along v.
+        half_extent_u: Projected half-extent of the silhouette along u.
+        ref_center_v: Reference center V the shape was rendered at.
+        ref_center_u: Reference center U the shape was rendered at.
+
+    Returns:
+        Tuple of (body_mask, body_info_dict) where body_info_dict contains
+        name, inventory item, and model params.
+    """
     dv = center_v - ref_center_v
     du = center_u - ref_center_u
     positioned_body = ndimage.shift(body_shape, (dv, du), order=1, mode='constant', cval=0.0)
     mask = positioned_body > 0
     img[mask] = positioned_body[mask]
 
-    max_dim = max(axis1, axis2, axis3) / 2.0
     inventory_item = {
-        'v_min_unclipped': center_v - max_dim,
-        'v_max_unclipped': center_v + max_dim,
-        'u_min_unclipped': center_u - max_dim,
-        'u_max_unclipped': center_u + max_dim,
-        'v_pixel_size': 2 * max_dim,
-        'u_pixel_size': 2 * max_dim,
+        'v_min_unclipped': center_v - half_extent_v,
+        'v_max_unclipped': center_v + half_extent_v,
+        'u_min_unclipped': center_u - half_extent_u,
+        'u_max_unclipped': center_u + half_extent_u,
+        'v_pixel_size': 2 * half_extent_v,
+        'u_pixel_size': 2 * half_extent_u,
         'range': body_params.get('range', 1.0),
     }
 
@@ -556,65 +466,6 @@ def _finish_single_body(
         'name': body_name,
         'inventory': inventory_item,
         'params': body_params,
-    }
-
-
-def render_bodies(
-    img: NDArrayFloatType,
-    bodies_params: list[dict[str, Any]],
-    offset_v: float,
-    offset_u: float,
-    *,
-    seed: int | None = None,
-) -> dict[str, Any]:
-    """Render bodies over img and return fields by name.
-
-    Returns: a dict with keys:
-
-      - img: NDArrayFloatType the rendered image
-      - bodies: dict[str, dict[str, Any]]
-      - inventory: dict[str, dict[str, float]]
-      - body_masks: list[NDArrayBoolType]
-      - order_near_to_far: list[str]
-      - body_index_map: NDArrayIntType (int32), 1-based index into order_near_to_far or 0 if none
-    """
-    size_v, size_u = img.shape
-
-    # Separate parameters: body shapes (without center) and centers
-    bodies_params_no_center = []
-    centers = []
-    for params in bodies_params:
-        params_no_center = dict(params)
-        center_v = float(params_no_center.pop('center_v', size_v / 2.0))
-        center_u = float(params_no_center.pop('center_u', size_u / 2.0))
-        bodies_params_no_center.append(params_no_center)
-        centers.append((center_v, center_u))
-
-    bodies_params_no_center_json = json.dumps(bodies_params_no_center, sort_keys=True)
-    centers_json = json.dumps(centers, sort_keys=True)
-
-    cached_result = _render_bodies_positioned_cached(
-        size_v,
-        size_u,
-        bodies_params_no_center_json,
-        centers_json,
-        offset_v,
-        offset_u,
-        seed,
-    )
-    # Overwrite with bodies where they exist (preserve background noise/stars elsewhere)
-    body_img = cached_result['img']
-    body_mask = body_img > 0
-    img[body_mask] = body_img[body_mask]
-    # Return with copied arrays to avoid cache modification
-    return {
-        'img': img,
-        'bodies': cached_result['bodies'],
-        'inventory': cached_result['inventory'],
-        'body_masks': [m.copy() for m in cached_result['body_masks']],
-        'body_mask_map': {k: v.copy() for k, v in cached_result['body_mask_map'].items()},
-        'order_near_to_far': cached_result['order_near_to_far'],
-        'body_index_map': cached_result['body_index_map'].copy(),
     }
 
 
@@ -947,7 +798,7 @@ def _render_combined_model_cached(
     bodies_params = sim_params.get('bodies', []) or []
     rings_params = sim_params.get('rings', []) or []
 
-    img, sim_star_list, star_info = render_stars(
+    img, sim_star_list, star_info = _render_stars(
         img,
         stars_params,
         offset_v,
@@ -1075,6 +926,7 @@ def _render_combined_model_cached(
                 offset_v,
                 offset_u,
                 seed=crater_seed,
+                body_index=orig_idx,
                 ref_center_v=ref_center_v,
                 ref_center_u=ref_center_u,
             )
@@ -1174,7 +1026,6 @@ def _render_combined_model_cached(
             # Should not happen, but create empty mask if missing
             ring_masks.append(np.zeros((size_v, size_u), dtype=np.bool_))
 
-    # Create bodies_result dict in the same format as render_bodies
     # Note: img is already the correct variable, no need to reassign
     body_models = body_models_dict
     inventory = inventory_dict

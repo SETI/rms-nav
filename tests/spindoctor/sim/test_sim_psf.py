@@ -11,7 +11,7 @@ import numpy as np
 
 from spindoctor.config import DEFAULT_CONFIG
 from spindoctor.sim.instruments import resolve_sim_inst_config
-from spindoctor.sim.render import render_combined_model, render_stars
+from spindoctor.sim.render import render_combined_model
 
 
 def _rms_spread(image: np.ndarray) -> float:
@@ -25,11 +25,26 @@ def _rms_spread(image: np.ndarray) -> float:
 
 
 def _render_one_star(sigma: float) -> np.ndarray:
-    """Render a single centered star at the given default PSF sigma."""
-    img = np.zeros((41, 41), dtype=np.float64)
-    stars = [{'name': 's', 'v': 20.0, 'u': 20.0, 'vmag': 0.0, 'psf_size': (31, 31)}]
-    out, _, _ = render_stars(img, stars, 0.0, 0.0, default_psf_sigma=sigma)
-    return out
+    """Render a single centered star at the given per-star PSF sigma."""
+    scene: dict[str, Any] = {
+        'size_v': 41,
+        'size_u': 41,
+        'random_seed': 1,
+        'instrument': 'coiss_nac',
+        'noise': {'poisson': False, 'read_noise_dn': 0.0, 'bias_dn': 0.0},
+        'stars': [
+            {
+                'name': 's',
+                'v': 20.0,
+                'u': 20.0,
+                'vmag': 0.0,
+                'psf_size': (31, 31),
+                'psf_sigma': sigma,
+            }
+        ],
+    }
+    img, _ = render_combined_model(scene)
+    return img
 
 
 def test_spread_increases_with_sigma() -> None:

@@ -175,21 +175,30 @@ def create_simulated_body(
             phase_angle,  # 0 = from front, pi/2 = from side, pi = from back
             ellipse_mask=ellipse_mask,
             z_coords=z_coords,
+            v_rot=v_rot,
+            u_rot=u_rot,
+            work_semi_major=work_semi_major,
+            work_semi_minor=work_semi_minor,
+            work_semi_c=work_semi_c,
+            cos_rz=cos_rz,
+            sin_rz=sin_rz,
         )
 
     else:
-        intensity = _lambertian_shading(
+        normal_v, normal_u, normal_z = _ellipsoid_image_normals(
             ellipse_mask,
             v_rot,
             u_rot,
             z_coords,
-            work_semi_major,
-            work_semi_minor,
-            work_semi_c,
-            illumination_angle,
-            phase_angle,
-            cos_rz,
-            sin_rz,
+            work_semi_major=work_semi_major,
+            work_semi_minor=work_semi_minor,
+            work_semi_c=work_semi_c,
+            cos_rz=cos_rz,
+            sin_rz=sin_rz,
+        )
+        intensity = (
+            _lambert_from_normals(normal_v, normal_u, normal_z, illumination_angle, phase_angle)
+            * ellipse_mask
         )
 
     # Downsample if anti-aliasing was used
@@ -203,25 +212,43 @@ def create_simulated_body(
     return intensity
 
 
-def _lambertian_shading(
+def _ellipsoid_image_normals(
     ellipse_mask: NDArrayFloatType,
     v_rot: NDArrayFloatType,
     u_rot: NDArrayFloatType,
     z_coords: NDArrayFloatType,
+    *,
     work_semi_major: float,
     work_semi_minor: float,
     work_semi_c: float,
-    illumination_angle: float,
-    phase_angle: float,
     cos_rz: float,
     sin_rz: float,
-) -> NDArrayFloatType:
-    """Add Lambertian shading to the intensity."""
-    # Apply Lambertian shading for 3D ellipsoid
-    # For a 3D ellipsoid, the surface normal at point (v, u, z) is:
-    # n = (v/a^2, u/b^2, z/c^2) normalized
+) -> tuple[NDArrayFloatType, NDArrayFloatType, NDArrayFloatType]:
+    """Unit surface normals of the base ellipsoid in image coordinates.
 
-    # Compute 3D surface normal in local coordinates
+    For a 3D ellipsoid, the surface normal at body-frame point (v, u, z) is
+    (v/a^2, u/b^2, z/c^2) normalized.  The in-plane components are then rotated
+    back from the ellipsoid's rotated frame to image coordinates through the
+    inverse of the rotation_z coordinate transformation; the z component is
+    perpendicular to the image plane and unaffected.  Both the smooth and the
+    cratered shading paths derive their base normals here, so the two paths
+    share a single illumination convention.
+
+    Parameters:
+        ellipse_mask: Ellipse coverage mask; normals are computed where > 0.
+        v_rot: Rotated-frame v coordinate of each pixel.
+        u_rot: Rotated-frame u coordinate of each pixel.
+        z_coords: Depth of the visible ellipsoid surface at each pixel.
+        work_semi_major: Semi-major axis (a) at working resolution.
+        work_semi_minor: Semi-minor axis (b) at working resolution.
+        work_semi_c: Depth semi-axis (c) at working resolution.
+        cos_rz: Cosine of the rotation_z angle.
+        sin_rz: Sine of the rotation_z angle.
+
+    Returns:
+        Tuple of (normal_v, normal_u, normal_z) unit-normal component arrays in
+        image coordinates.
+    """
     normal_v_local = np.zeros_like(v_rot)
     normal_u_local = np.zeros_like(u_rot)
     normal_z_local = np.zeros_like(z_coords)
@@ -244,8 +271,33 @@ def _lambertian_shading(
     # Use inverse rotation (negate sin) to match the coordinate transformation
     normal_v = normal_v_local * cos_rz + normal_u_local * sin_rz
     normal_u = -normal_v_local * sin_rz + normal_u_local * cos_rz
-    normal_z = normal_z_local  # z is perpendicular to image plane
+    return normal_v, normal_u, normal_z_local
 
+
+def _lambert_from_normals(
+    normal_v: NDArrayFloatType,
+    normal_u: NDArrayFloatType,
+    normal_z: NDArrayFloatType,
+    illumination_angle: float,
+    phase_angle: float,
+) -> NDArrayFloatType:
+    """Lambertian illumination strength for image-frame unit surface normals.
+
+    The normals must already be unit length (or zero outside the body).  Both
+    the smooth and the cratered shading paths use this single implementation
+    so their illumination conventions cannot diverge.
+
+    Parameters:
+        normal_v: V component of the unit surface normal in image coordinates.
+        normal_u: U component of the unit surface normal in image coordinates.
+        normal_z: Z (toward-observer) component of the unit surface normal.
+        illumination_angle: In-plane light direction in radians; 0 is from the
+            top of the image, pi/2 from the right.
+        phase_angle: Phase angle in radians; 0 is fully lit, pi is backlit.
+
+    Returns:
+        Illumination strength array in [0, 1]; 0 on the far hemisphere.
+    """
     # Illumination direction in 3D space
     # illumination_angle: 0 = top, pi/2 = right, pi = bottom, 3pi/2 = left
     # This is the direction in the image plane
@@ -300,10 +352,7 @@ def _lambertian_shading(
     )
     illum_strength **= light_side_illum_gamma
 
-    # Base intensity from Lambertian shading (only inside the ellipsoid and visible hemisphere)
-    intensity = illum_strength * ellipse_mask
-
-    return intensity
+    return cast(NDArrayFloatType, illum_strength)
 
 
 def _add_craters_and_shading(
@@ -325,9 +374,49 @@ def _add_craters_and_shading(
     *,
     ellipse_mask: NDArrayFloatType,
     z_coords: NDArrayFloatType,
+    v_rot: NDArrayFloatType,
+    u_rot: NDArrayFloatType,
+    work_semi_major: float,
+    work_semi_minor: float,
+    work_semi_c: float,
+    cos_rz: float,
+    sin_rz: float,
 ) -> NDArrayFloatType:
-    """
-    Returns new intensity with craters + lighting applied.
+    """Carve craters into the ellipsoid surface and apply Lambertian shading.
+
+    The base-surface normals and the Lambertian illumination model are shared
+    with the smooth (no-crater) path via ``_ellipsoid_image_normals`` and
+    ``_lambert_from_normals``, so a cratered body and a smooth body with the
+    same pose and illumination shade identically outside the craters.
+
+    Parameters:
+        ellipse_mask_nz: Boolean mask of pixels strictly inside the ellipse.
+        v_coords: Centered v pixel coordinates at working resolution.
+        u_coords: Centered u pixel coordinates at working resolution.
+        nz: Array of (v, u) indices of pixels inside the ellipse.
+        rng: Seeded random stream for crater placement and sizes.
+        n_craters: Number of craters to place.
+        R_min: Minimum crater radius in pixels (before aa scaling).
+        R_max: Maximum crater radius in pixels (before aa scaling).
+        crater_power_law_exponent: Power law exponent for crater radii.
+        crater_relief_scale: Scale factor for crater depth.
+        work_center_v: Body center v at working resolution.
+        work_center_u: Body center u at working resolution.
+        aa_scale: Anti-aliasing supersampling factor.
+        lighting_angle: In-plane light direction in radians (0 = from top).
+        phase_angle: Phase angle in radians (0 = fully lit, pi = backlit).
+        ellipse_mask: Ellipse coverage mask including the soft AA rim.
+        z_coords: Depth of the visible ellipsoid surface at each pixel.
+        v_rot: Rotated-frame v coordinate of each pixel.
+        u_rot: Rotated-frame u coordinate of each pixel.
+        work_semi_major: Semi-major axis (a) at working resolution.
+        work_semi_minor: Semi-minor axis (b) at working resolution.
+        work_semi_c: Depth semi-axis (c) at working resolution.
+        cos_rz: Cosine of the rotation_z angle.
+        sin_rz: Sine of the rotation_z angle.
+
+    Returns:
+        New intensity array with craters and lighting applied.
     """
 
     # ------------------------------------------------------------------
@@ -442,39 +531,41 @@ def _add_craters_and_shading(
     # plt.show()
 
     # ----------------------------------------------------------------------
-    # 3. Lambertian shading using perturbed surface normals from z + height
+    # 3. Lambertian shading: base-ellipsoid normals perturbed by crater relief
     # ----------------------------------------------------------------------
-    z_with_craters = z_coords + height
+    # The base-surface normal comes from the same analytic formula (and the
+    # same rotation_z back-rotation to image coordinates) as the smooth,
+    # no-crater path, so both shading paths share one illumination convention.
+    normal_v, normal_u, normal_z = _ellipsoid_image_normals(
+        ellipse_mask,
+        v_rot,
+        u_rot,
+        z_coords,
+        work_semi_major=work_semi_major,
+        work_semi_minor=work_semi_minor,
+        work_semi_c=work_semi_c,
+        cos_rz=cos_rz,
+        sin_rz=sin_rz,
+    )
 
-    # Approximate surface normal from height field: n ~ (-dz/du, -dz/dv, 1)
-    dz_dv, dz_du = np.gradient(z_with_craters)
-    nx = -dz_du
-    ny = -dz_dv
-    nz_ = np.ones_like(z_with_craters)
+    # The crater height field is carved along the viewing axis, so the exact
+    # normal of the combined surface (base + height) is proportional to
+    # (-d(z + height)/dv, -d(z + height)/du, 1).  Scaling that vector by the
+    # base normal's z component rewrites it as the base normal plus a
+    # height-gradient term, which stays finite at the limb where the base
+    # surface gradient diverges.
+    dheight_dv, dheight_du = np.gradient(height)
+    perturbed_v = normal_v - normal_z * dheight_dv
+    perturbed_u = normal_u - normal_z * dheight_du
+    perturbed_mag = np.sqrt(perturbed_v**2 + perturbed_u**2 + normal_z**2)
+    perturbed_mag = np.maximum(perturbed_mag, 1e-10)  # Avoid division by zero
+    perturbed_v /= perturbed_mag
+    perturbed_u /= perturbed_mag
+    perturbed_z = normal_z / perturbed_mag
 
-    norm = np.sqrt(nx**2 + ny**2 + nz_**2)
-    norm = np.maximum(norm, 1e-9)
-    nx /= norm
-    ny /= norm
-    nz_ /= norm
-
-    # Illumination direction in image coordinates
-    lx_2d = np.sin(lighting_angle)  # +u to the right
-    ly_2d = -np.cos(lighting_angle)  # -v is up (v increases downward)
-    lx = lx_2d * np.sin(phase_angle)
-    ly = ly_2d * np.sin(phase_angle)
-    lz = np.cos(phase_angle)
-    Lnorm = np.sqrt(lx**2 + ly**2 + lz**2)
-    if Lnorm > 1e-12:
-        lx, ly, lz = lx / Lnorm, ly / Lnorm, lz / Lnorm
-
-    # Only illuminate points on the visible hemisphere (facing observer)
-    visible = nz_ > 0
-    cos_incidence = nx * lx + ny * ly + nz_ * lz
-    dark_side_illum_strength = 0.01  # TODO make config parameter
-    light_side_illum_gamma = 1  # TODO make config parameter
-    lambert = np.where(visible, np.clip(cos_incidence, dark_side_illum_strength, 1.0), 0.0)
-    lambert **= light_side_illum_gamma
+    lambert = _lambert_from_normals(
+        perturbed_v, perturbed_u, perturbed_z, lighting_angle, phase_angle
+    )
 
     # Apply ellipse mask (with AA edge)
     intensity_out = lambert * ellipse_mask

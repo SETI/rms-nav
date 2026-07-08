@@ -27,7 +27,6 @@ def _clear_render_caches() -> None:
     render._render_combined_model_cached.cache_clear()
     render._render_stars_cached.cache_clear()
     render._render_body_shape_cached.cache_clear()
-    render._render_bodies_positioned_cached.cache_clear()
     render._render_background_stars_cached.cache_clear()
 
 
