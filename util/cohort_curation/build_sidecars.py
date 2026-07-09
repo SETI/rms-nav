@@ -108,13 +108,18 @@ def str_representer(dumper: yaml.Dumper, data: str) -> yaml.ScalarNode:
 yaml.add_representer(str, str_representer)
 
 
-def filter_combo(image_path: str) -> str:
-    """Canonical filter combo (sorted, '+'-joined) from the image label.
+def filter_combo(image_path: str, mission: str) -> str:
+    """Canonical filter combo (sorted, '+'-joined) for one image.
 
     Parameters:
-        image_path: Path to the VICAR image whose label carries
+        image_path: Path to the image file; VICAR label carries
             FILTER_NAME (a string or a list of strings).
+        mission: Mission key; NHLORRI is FITS with a single
+            panchromatic filter slot, encoded as '1' per
+            config_420_inst_nhlorri.yaml.
     """
+    if mission == 'NHLORRI':
+        return '1'
     lab = VicarImage.from_file(image_path, strict=False).label
     try:
         raw = lab['FILTER_NAME']
@@ -209,6 +214,19 @@ def build_one(entry: dict, rec: dict, ui_version: str,
             'proposed offset during batch review (summary PNG plus, for '
             'star classes, a hard-stretch star-check PNG with circled '
             'catalog positions).',
+        ]
+        if rec.get('rescued'):
+            note_lines += [
+                'Offset produced by the triage rescue pass '
+                '(rescue_config.yaml: relaxed uncalibrated technique '
+                'alpha0 / spurious knobs, lowered ensemble min_confidence '
+                'and reliability-gate thresholds via the orchestrator '
+                'config section). The default pipeline failed this frame; '
+                'the confidence value below is from the relaxed run and '
+                'is not meaningful. Ground truth rests on the operator '
+                'overlay verification.',
+            ]
+        note_lines += [
             f'Pipeline: status={rec.get("status")}, '
             f'confidence={rec.get("confidence")}, '
             f'rank={rec.get("confidence_rank")}, '
@@ -251,7 +269,7 @@ def build_one(entry: dict, rec: dict, ui_version: str,
         'image_id': image_id,
         'mission': rec['mission'],
         'camera': rec['camera'],
-        'filter_combo': filter_combo(image_path),
+        'filter_combo': filter_combo(image_path, rec['mission']),
         'image_url': url,
         'scene_tags': tags,
         'ground_truth': {
@@ -288,6 +306,14 @@ def main() -> None:
                    else f'triage_report_batch{args.batch:03d}.yaml')
     report = yaml.safe_load((OUT_DIR / report_name).read_text())
     byname = {r['image_name']: r for r in report['results']}
+    # frames appended from other batches (e.g. late rescues) carry their
+    # triage record in that batch's report; fill the gaps from every
+    # other report without overriding this batch's records
+    for other in sorted(OUT_DIR.glob('triage_report*.yaml')):
+        if other.name == report_name:
+            continue
+        for r in yaml.safe_load(other.read_text())['results']:
+            byname.setdefault(r['image_name'], r)
 
     try:
         ui_version = f'spindoctor {version("rms-spindoctor")}'
