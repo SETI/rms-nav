@@ -32,9 +32,11 @@ HERE = Path(__file__).parent
 REPO = HERE.parent.parent
 OUT_DIR = REPO / '_work/cohort_curation'
 
+# scattered_light is included for the hard stretch alone: the summary
+# PNG's linear scale hides the measured low-order gradient.
 STAR_CLASSES = {'stars_plus_body', 'two_bright_stars_no_body',
                 'faint_stars', 'one_bright_star_no_body',
-                'star_dominated'}
+                'star_dominated', 'scattered_light'}
 
 # extfov_margin_vu per instrument (src/spindoctor/config_files/
 # config_4N0_inst_*.yaml), keyed by image size where it varies.
