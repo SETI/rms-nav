@@ -136,6 +136,17 @@ def _evaluate(candidate: dict, rec: dict) -> dict:
                    triage_reason=f'saturated bloom ({saturated:.0%})')
         return rec
 
+    # Infrastructure errors (missing SPICE coverage, bad file, ...) are
+    # not navigation outcomes: the frame proves nothing as a negative
+    # case and cannot be manually navigated (no model to align), so it
+    # is unusable for any class.
+    if status == 'error':
+        rec['status_error'] = meta.get('status_error')
+        rec.update(triage='dropped',
+                   triage_reason='infrastructure error, not a navigation '
+                                 f'outcome: {rec["status_error"]}')
+        return rec
+
     cls = candidate['scene_class']
     ok = status == 'success' and rec['offset_px'] is not None
 
