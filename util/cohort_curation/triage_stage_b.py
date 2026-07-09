@@ -61,6 +61,9 @@ def image_name_for(candidate: dict) -> str:
         # suffix (C2783018, N1828132857); startswith-matching needs the
         # bare name.
         return stem.split('_')[0]
+    if candidate['mission'] == 'NHLORRI':
+        # lor_0003103486_0x630_sci -> LOR_0003103486
+        return stem.upper()[:14]
     return stem
 
 
@@ -78,8 +81,7 @@ def run_one(candidate: dict) -> dict:
                    triage_reason='skipped: navigation exhausts memory '
                                  '(OOM killer); needs pipeline investigation')
         return rec
-    if not candidate.get('_force') and sorted(
-            RESULTS_ROOT.rglob(f'{name}*_metadata.json')):
+    if not candidate.get('_force') and _result_files(name, '_metadata.json'):
         rec['exit_code'] = 0
         rec['log_tail'] = ['(reused existing triage result)']
         return _evaluate(candidate, rec)
@@ -97,10 +99,17 @@ def run_one(candidate: dict) -> dict:
     return _evaluate(candidate, rec)
 
 
+def _result_files(name: str, suffix: str) -> list:
+    files = sorted(RESULTS_ROOT.rglob(f'{name}*{suffix}'))
+    if not files and name != name.lower():
+        files = sorted(RESULTS_ROOT.rglob(f'{name.lower()}*{suffix}'))
+    return files
+
+
 def _evaluate(candidate: dict, rec: dict) -> dict:
     name = rec['image_name']
-    meta_files = sorted(RESULTS_ROOT.rglob(f'{name}*_metadata.json'))
-    png_files = sorted(RESULTS_ROOT.rglob(f'{name}*_summary.png'))
+    meta_files = _result_files(name, '_metadata.json')
+    png_files = _result_files(name, '_summary.png')
     if not meta_files:
         rec.update(triage='dropped',
                    triage_reason='no metadata written (pipeline error)')
@@ -209,10 +218,12 @@ def main() -> None:
                     help='comma-separated image names to mark as dropped '
                          'without running (e.g. known memory-exhausting '
                          'frames)')
+    ap.add_argument('--batch', type=int, default=1,
+                    help='batch number (selects manifest and report names)')
     args = ap.parse_args()
 
     manifest = yaml.safe_load(
-        (OUT_DIR / 'candidates_batch001.yaml').read_text())
+        (OUT_DIR / f'candidates_batch{args.batch:03d}.yaml').read_text())
     cands = [c for cls, group in manifest['classes'].items() for c in group]
     if args.classes:
         wanted = set(args.classes.split(','))
@@ -238,15 +249,17 @@ def main() -> None:
 
     promoted = [r for r in results if r.get('triage') == 'promoted']
     report = {
-        'manifest': 'candidates_batch001.yaml',
+        'manifest': f'candidates_batch{args.batch:03d}.yaml',
         'n_triaged': len(results),
         'n_promoted': len(promoted),
         'results': results,
     }
-    (OUT_DIR / 'triage_report.yaml').write_text(
+    report_name = ('triage_report.yaml' if args.batch == 1
+                   else f'triage_report_batch{args.batch:03d}.yaml')
+    (OUT_DIR / report_name).write_text(
         yaml.safe_dump(report, sort_keys=False, width=100))
     print(f'\npromoted {len(promoted)}/{len(results)}; '
-          f'wrote triage_report.yaml')
+          f'wrote {report_name}')
 
 
 if __name__ == '__main__':

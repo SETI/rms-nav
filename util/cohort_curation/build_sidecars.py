@@ -47,6 +47,18 @@ UNCERTAINTY = {
     'body_irregular': 2.0,
     'ring_plus_body': 1.0,
     'stars_plus_body': 1.0,
+    'body_full_fov': 1.0,
+    'body_partial_overflow': 1.0,
+    'body_mostly_offscreen': 1.0,
+    'multi_body': 1.0,
+    'high_phase_terminator': 2.0,
+    'below_resolution_body': 2.0,
+    'ring_only_curved': 1.0,
+    'star_dominated': 1.0,
+    'one_bright_star_no_body': 1.0,
+    'two_bright_stars_no_body': 1.0,
+    'faint_stars': 2.0,
+    'scattered_light': 2.0,
 }
 
 # expected.confidence_tier the *calibrated* pipeline ought to reach
@@ -55,11 +67,34 @@ TIER = {
     'body_irregular': 'medium',
     'ring_plus_body': 'medium',
     'stars_plus_body': 'medium',
+    'body_full_fov': 'medium',
+    'body_partial_overflow': 'medium',
+    'body_mostly_offscreen': 'medium',
+    'multi_body': 'medium',
+    'high_phase_terminator': 'medium',
+    'below_resolution_body': 'low',
+    'ring_only_curved': 'medium',
+    'star_dominated': 'medium',
+    'one_bright_star_no_body': 'medium',
+    'two_bright_stars_no_body': 'medium',
+    'faint_stars': 'low',
+    'scattered_light': 'low',
 }
 
 # Single-mode classes take the rubric's quick-map technique; ensemble
 # classes pick the highest-confidence non-spurious technique instead.
-PRIMARY_MAP = {'body_irregular': 'BodyBlobNav'}
+PRIMARY_MAP = {
+    'body_irregular': 'BodyBlobNav',
+    'below_resolution_body': 'BodyBlobNav',
+    'body_full_fov': 'BodyDiscCorrelateNav',
+    'body_partial_overflow': 'BodyDiscCorrelateNav',
+    'body_mostly_offscreen': 'BodyLimbNav',
+    'high_phase_terminator': 'BodyTerminatorNav',
+    'ring_only_curved': 'RingEdgeNav',
+    'star_dominated': 'StarFieldFromCatalogNav',
+    'one_bright_star_no_body': 'StarUniqueMatchNav',
+    'two_bright_stars_no_body': 'StarUniqueMatchNav',
+}
 ENSEMBLE_CLASSES = {'ring_plus_body', 'stars_plus_body'}
 
 
@@ -249,7 +284,9 @@ def main() -> None:
 
     batch_dir = REPO / '_work/cohort_review' / f'batch_{args.batch:03d}'
     votes = yaml.safe_load((batch_dir / 'votes.yaml').read_text())
-    report = yaml.safe_load((OUT_DIR / 'triage_report.yaml').read_text())
+    report_name = ('triage_report.yaml' if args.batch == 1
+                   else f'triage_report_batch{args.batch:03d}.yaml')
+    report = yaml.safe_load((OUT_DIR / report_name).read_text())
     byname = {r['image_name']: r for r in report['results']}
 
     try:

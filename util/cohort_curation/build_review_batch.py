@@ -94,13 +94,22 @@ def compose(rec: dict, out_path: Path, seq: int) -> None:
 # every class represented with headroom over the Phase-10 minima.
 CLASS_CAPS = {
     'body_irregular': 15,
-    'faint_stars': 8,
+    'faint_stars': 10,
     'negative_cases': 10,
     'ring_only_flat': 12,
     'ring_plus_body': 15,
-    'scattered_light': 10,
+    'scattered_light': 12,
     'stars_plus_body': 15,
-    'two_bright_stars_no_body': 8,
+    'two_bright_stars_no_body': 10,
+    'body_full_fov': 8,
+    'body_partial_overflow': 8,
+    'body_mostly_offscreen': 6,
+    'multi_body': 8,
+    'high_phase_terminator': 6,
+    'below_resolution_body': 8,
+    'ring_only_curved': 6,
+    'star_dominated': 8,
+    'one_bright_star_no_body': 8,
 }
 
 # Classes whose triage-dropped frames are rescued into the manual-nav queue
@@ -142,7 +151,9 @@ def main() -> None:
     ap.add_argument('--batch', type=int, default=1)
     args = ap.parse_args()
 
-    report = yaml.safe_load((OUT_DIR / 'triage_report.yaml').read_text())
+    report_name = ('triage_report.yaml' if args.batch == 1
+                   else f'triage_report_batch{args.batch:03d}.yaml')
+    report = yaml.safe_load((OUT_DIR / report_name).read_text())
     promoted = [r for r in report['results'] if r.get('triage') == 'promoted']
     for r in report['results']:
         if (r.get('triage') == 'dropped'

@@ -32,7 +32,9 @@ HERE = Path(__file__).parent
 REPO = HERE.parent.parent
 OUT_DIR = REPO / '_work/cohort_curation'
 
-STAR_CLASSES = {'stars_plus_body', 'two_bright_stars_no_body', 'faint_stars'}
+STAR_CLASSES = {'stars_plus_body', 'two_bright_stars_no_body',
+                'faint_stars', 'one_bright_star_no_body',
+                'star_dominated'}
 
 # extfov_margin_vu per instrument (src/spindoctor/config_files/
 # config_4N0_inst_*.yaml), keyed by image size where it varies.
@@ -101,8 +103,19 @@ def render_one(rec: dict, entry: dict, batch_dir: Path) -> str | None:
 
     # strict=False: Galileo SSI labels carry keywords longer than the
     # 32-character VICAR limit (UNEVEN_BIT_WEIGHT_CORRECTION_FLAG).
-    data = VicarImage.from_file(
-        image_path, strict=False).data_2d.astype(np.float64)
+    # NH LORRI images are FITS, not VICAR; fall back to astropy.
+    try:
+        data = VicarImage.from_file(
+            image_path, strict=False).data_2d.astype(np.float64)
+    except Exception:
+        try:
+            from astropy.io import fits
+            with fits.open(image_path) as hdul:
+                data = np.asarray(hdul[0].data, dtype=np.float64)
+            if data.ndim == 3:
+                data = data[0]
+        except Exception:
+            return None
     img = Image.fromarray(stretch(data)).convert('RGB')
     draw = ImageDraw.Draw(img)
 
@@ -146,7 +159,9 @@ def main() -> None:
 
     batch_dir = REPO / '_work/cohort_review' / f'batch_{args.batch:03d}'
     votes = yaml.safe_load((batch_dir / 'votes.yaml').read_text())
-    report = yaml.safe_load((OUT_DIR / 'triage_report.yaml').read_text())
+    report_name = ('triage_report.yaml' if args.batch == 1
+                   else f'triage_report_batch{args.batch:03d}.yaml')
+    report = yaml.safe_load((OUT_DIR / report_name).read_text())
     byname = {r['image_name']: r for r in report['results']}
 
     n = 0

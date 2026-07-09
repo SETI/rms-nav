@@ -19,6 +19,7 @@ Run:  venv/bin/python util/cohort_curation/scan_stage_a.py
 
 from __future__ import annotations
 
+import argparse
 import json
 import math
 import random
@@ -34,7 +35,6 @@ REPO = HERE.parent.parent
 OUT_DIR = REPO / '_work/cohort_curation'   # generated outputs (gitignored)
 
 SEED = 20260708
-QUERY_NAME = 'stage_a_batch001'
 
 RADII = json.loads((HERE / 'body_radii.json').read_text())['radius_km']
 
@@ -62,11 +62,35 @@ def epoch_covered(mission: str, image_time: str) -> bool:
     day = image_time[:10]
     return any(lo <= day <= hi for lo, hi in windows)
 
-# Images already in the library (curated or uncurated) -- never re-offer.
-EXISTING_IDS = {
-    p.stem.replace('_CALIB', '')
-    for p in (REPO / 'tests/integration/image_library').rglob('*.yaml')
-}
+# Images already in the library (curated or uncurated) or offered in a
+# prior batch manifest -- never re-offer.  Populated by load_existing_ids
+# in main(); module-level so the scan functions can consult it.
+EXISTING_IDS: set[str] = set()
+
+
+def load_existing_ids(batch: int) -> set[str]:
+    """IDs to exclude: library sidecar stems + prior-batch candidates.
+
+    Parameters:
+        batch: Current batch number; only manifests from earlier
+            batches are excluded (a re-run of the current batch must
+            not exclude its own previous output).
+    """
+    ids = {
+        p.stem.replace('_CALIB', '')
+        for p in (REPO / 'tests/integration/image_library').rglob('*.yaml')
+    }
+    for mp in sorted(OUT_DIR.glob('candidates_batch*.yaml')):
+        try:
+            prior_batch = int(mp.stem.rsplit('batch', 1)[1])
+        except ValueError:
+            continue
+        if prior_batch >= batch:
+            continue
+        prior = yaml.safe_load(mp.read_text())
+        for group in (prior.get('classes') or {}).values():
+            ids |= {c['image_name'] for c in group}
+    return ids
 
 IRREGULARS = {'PHOEBE', 'HYPERION', 'JANUS', 'EPIMETHEUS', 'PROMETHEUS',
               'PANDORA', 'ATLAS', 'PAN', 'TELESTO', 'CALYPSO', 'HELENE'}
@@ -194,7 +218,12 @@ def cand(scene_class: str, volset: str, volume: str, filespec: str,
          mission: str, camera: str, dataset: str, strata: tuple,
          selection: dict, *, needs_visual: bool = False) -> dict:
     stem = Path(filespec.strip()).stem
-    img_name = stem.split('_')[0] if mission != 'GOSSI' else stem
+    if mission == 'GOSSI':
+        img_name = stem
+    elif mission == 'NHLORRI':
+        img_name = stem.upper()[:14]     # lor_0003103486_0x630_sci
+    else:
+        img_name = stem.split('_')[0]
     return {
         'scene_class': scene_class,
         'image_name': img_name,
@@ -367,6 +396,89 @@ def _scan_coiss_volume(vs: dict, volume: str, out: dict[str, list[dict]],
                      'ring_opening_deg': bobs,
                      'finest_ring_intercept_res_km': rres,
                      'filter': filt, 'year': time}))
+            # ---- ring_only_curved: clearly curved edge (sagitta > 2 px)
+            worst = min(
+                (RING_EDGES[n] * abs(math.sin(math.radians(bobs))) / rres, n)
+                for n in redges)
+            if worst[0] <= FRAME_PX * FRAME_PX / 16.0 and rres >= 0.3:
+                out['ring_only_curved'].append(cand(
+                    'ring_only_curved', volset, volume, filespec, 'COISS',
+                    camera, dataset,
+                    (round(bobs, -1), res_decade(rres)),
+                    {'ring_edges_in_frame': redges[:6],
+                     'most_curved_edge': worst[1],
+                     'apparent_curvature_radius_px': round(worst[0]),
+                     'ring_opening_deg': bobs,
+                     'finest_ring_intercept_res_km': rres,
+                     'filter': filt, 'year': time},
+                    needs_visual=True))
+
+        # ---- body geometry classes (single resolved moon)
+        if len(res_moons) == 1 and not planet_disc:
+            tgt, d, mr = res_moons[0]
+            ph = moon.num(mr, 'CENTER_PHASE_ANGLE')
+            lat_lo = moon.num(mr, 'MINIMUM_PLANETOCENTRIC_LATITUDE')
+            lat_hi = moon.num(mr, 'MAXIMUM_PLANETOCENTRIC_LATITUDE')
+            lat_range = (lat_hi - lat_lo
+                         if lat_lo is not None and lat_hi is not None
+                         else None)
+            regular = tgt not in IRREGULARS
+            sel = {'target': tgt, 'apparent_diameter_px': round(d, 1),
+                   'center_phase_deg': ph,
+                   'lat_coverage_deg': (round(lat_range, 1)
+                                        if lat_range is not None else None),
+                   'filter': filt, 'year': time}
+            if (regular and 700 <= d <= 950 and not rings_visible
+                    and ph is not None and ph < 110
+                    and lat_range is not None and lat_range > 160):
+                out['body_full_fov'].append(cand(
+                    'body_full_fov', volset, volume, filespec, 'COISS',
+                    camera, dataset, (tgt, phase_bin(ph)), sel,
+                    needs_visual=True))
+            if 1080 <= d <= 1500 and not rings_visible:
+                out['body_partial_overflow'].append(cand(
+                    'body_partial_overflow', volset, volume, filespec,
+                    'COISS', camera, dataset, (tgt, phase_bin(ph)), sel,
+                    needs_visual=True))
+            if (d >= 1700
+                    and lat_range is not None and lat_range < 120):
+                out['body_mostly_offscreen'].append(cand(
+                    'body_mostly_offscreen', volset, volume, filespec,
+                    'COISS', camera, dataset, (tgt, phase_bin(ph)), sel,
+                    needs_visual=True))
+            if (regular and ph is not None and ph >= 95
+                    and 100 <= d <= 700 and not rings_visible):
+                out['high_phase_terminator'].append(cand(
+                    'high_phase_terminator', volset, volume, filespec,
+                    'COISS', camera, dataset, (tgt, phase_bin(ph)), sel,
+                    needs_visual=True))
+
+        # ---- multi_body: >=2 separable resolved bodies
+        big = [(t, d2, mr2) for t, d2, mr2 in res_moons if d2 >= 20]
+        if len(big) >= 2 and not planet_disc:
+            names = sorted(t for t, _, _ in big)
+            dmax = max(d2 for _, d2, _ in big)
+            out['multi_body'].append(cand(
+                'multi_body', volset, volume, filespec, 'COISS',
+                camera, dataset, ('+'.join(names[:3]),),
+                {'targets_px': {t: round(d2, 1) for t, d2, _ in big},
+                 'largest_px': round(dmax, 1),
+                 'filter': filt, 'year': time},
+                needs_visual=True))
+
+        # ---- below_resolution_body: one 4-14 px body, nothing else
+        smalls = [(t, d2) for t, d2 in all_diams if 4 <= d2 <= 14]
+        others = [d2 for t, d2 in all_diams if (t, d2) not in smalls]
+        if (len(smalls) == 1 and not res_moons and not rings_visible
+                and not planet_disc and camera == 'NAC'
+                and all(d2 < 3 for d2 in others)):
+            out['below_resolution_body'].append(cand(
+                'below_resolution_body', volset, volume, filespec,
+                'COISS', camera, dataset, (smalls[0][0],),
+                {'target': smalls[0][0],
+                 'apparent_diameter_px': round(smalls[0][1], 2),
+                 'texp_s': texp, 'filter': filt, 'year': time},
+                needs_visual=True))
 
         # ---- pools for star-count classes (catalog query deferred)
         # No exposure floor: bright-pair star-cal frames are typically
@@ -423,15 +535,25 @@ def _coiss_star_passes(out: dict[str, list[dict]],
         vm = star_vmags(fr['ra'], fr['dec'], FOV_DEG[('COISS', fr['camera'])],
                         lim + 2.0)
         n_bright = sum(1 for v in vm if v <= lim)
+        sel = {'texp_s': fr['texp'], 'maglim': round(lim, 2),
+               'star_vmags': [round(v, 2) for v in vm[:5]],
+               'n_detectable': n_bright, 'filter': fr['filt'],
+               'year': fr['year']}
         if n_bright == 2 and (len(vm) < 3 or vm[2] >= vm[1] + 1.5):
             out['two_bright_stars_no_body'].append(cand(
                 'two_bright_stars_no_body', fr['volset'], fr['volume'],
                 fr['filespec'], 'COISS', fr['camera'], fr['dataset'],
-                (fr['year'],),
-                {'texp_s': fr['texp'], 'maglim': round(lim, 2),
-                 'star_vmags': [round(v, 2) for v in vm[:5]],
-                 'n_detectable': n_bright, 'filter': fr['filt'],
-                 'year': fr['year']}))
+                (fr['year'],), sel))
+        elif n_bright == 1 and (len(vm) < 2 or vm[1] >= vm[0] + 1.5):
+            out['one_bright_star_no_body'].append(cand(
+                'one_bright_star_no_body', fr['volset'], fr['volume'],
+                fr['filespec'], 'COISS', fr['camera'], fr['dataset'],
+                (fr['year'],), sel))
+        elif n_bright >= 3:
+            out['star_dominated'].append(cand(
+                'star_dominated', fr['volset'], fr['volume'],
+                fr['filespec'], 'COISS', fr['camera'], fr['dataset'],
+                (fr['year'], min(n_bright, 8)), sel))
         elif n_bright == 0 and fr['texp'] <= 3.0 and len(vm) == 0:
             out['negative_cases'].append(cand(
                 'negative_cases', fr['volset'], fr['volume'],
@@ -472,6 +594,85 @@ def _coiss_star_passes(out: dict[str, list[dict]],
                  'n_detectable_stars': 0, 'filter': fr['filt'],
                  'year': fr['year']}))
 
+
+
+# ---------------------------------------------------------------- NH scan
+
+def scan_nh() -> dict[str, list[dict]]:
+    """New Horizons LORRI sky / calibration frames: the star classes.
+
+    Only the calibrated (2001-series) volumes are scanned; frames with
+    rows in any body-summary table are excluded, leaving sky and
+    star-calibration pointings.  LORRI's deep limiting magnitude
+    (11.7 anchor) makes it the best autonomous source for the
+    one/two-bright-star and star_dominated classes.
+    """
+    out: dict[str, list[dict]] = defaultdict(list)
+    volset, dataset = 'NHxxLO_xxxx', 'nhlorri'
+    cache: dict[tuple[float, float, float], list[float]] = {}
+
+    for volume in pm.volumes(volset):
+        if not volume.endswith('_2001'):
+            continue
+        sup = pm.load_table(volset, volume, 'supplemental_index')
+        if not sup:
+            continue
+        body_specs: set[str] = set()
+        for kind in ('moon_summary', 'jupiter_summary', 'pluto_summary',
+                     'charon_summary', 'body_summary'):
+            t = pm.load_table(volset, volume, kind)
+            if t:
+                body_specs |= {
+                    (t.get(r, 'FILE_SPECIFICATION_NAME') or '')
+                    .rsplit('.', 1)[0].strip().lower()
+                    for r in t.rows}
+        for row in sup.rows:
+            filespec = (sup.get(row, 'FILE_SPECIFICATION_NAME')
+                        or '').strip()
+            if not filespec:
+                continue
+            img = Path(filespec).stem.upper()[:14]
+            if img in EXISTING_IDS:
+                continue
+            if filespec.rsplit('.', 1)[0].lower() in body_specs:
+                continue
+            time_full = sup.get(row, 'START_TIME') or ''
+            if not epoch_covered('NHLORRI', time_full):
+                continue
+            texp = sup.num(row, 'EXPOSURE_DURATION')   # seconds
+            ra = sup.num(row, 'RIGHT_ASCENSION')
+            dec = sup.num(row, 'DECLINATION')
+            if texp is None or texp <= 0 or ra is None or dec is None:
+                continue
+            binning = (sup.get(row, 'BINNING_MODE') or '').strip()
+            tgt = (sup.get(row, 'TARGET_NAME') or '').strip()
+            lim = maglim('NHLORRI', 'LORRI', texp)
+            ckey = (round(ra, 1), round(dec, 1), round(lim, 1))
+            if ckey not in cache:
+                cache[ckey] = star_vmags(
+                    ra, dec, FOV_DEG[('NHLORRI', 'LORRI')], lim + 2.0)
+            vm = cache[ckey]
+            n_bright = sum(1 for v in vm if v <= lim)
+            sel = {'texp_s': texp, 'maglim': round(lim, 2),
+                   'star_vmags': [round(v, 2) for v in vm[:5]],
+                   'n_detectable': n_bright, 'binning': binning,
+                   'target': tgt, 'year': time_full[:4]}
+            if n_bright == 2 and (len(vm) < 3 or vm[2] >= vm[1] + 1.5):
+                out['two_bright_stars_no_body'].append(cand(
+                    'two_bright_stars_no_body', volset, volume, filespec,
+                    'NHLORRI', 'LORRI', dataset,
+                    ('NH', time_full[:4]), sel))
+            elif n_bright == 1 and (len(vm) < 2 or vm[1] >= vm[0] + 1.5):
+                out['one_bright_star_no_body'].append(cand(
+                    'one_bright_star_no_body', volset, volume, filespec,
+                    'NHLORRI', 'LORRI', dataset,
+                    ('NH', time_full[:4]), sel))
+            elif n_bright >= 3:
+                out['star_dominated'].append(cand(
+                    'star_dominated', volset, volume, filespec,
+                    'NHLORRI', 'LORRI', dataset,
+                    ('NH', time_full[:4], min(n_bright, 8)), sel))
+    return out
 
 
 # ---------------------------------------------------------------- GO scan
@@ -572,7 +773,7 @@ def scan_go() -> dict[str, list[dict]]:
 
     stray_pool = sorted(stray_pool, key=lambda c: c['filespec'])
     rng.shuffle(stray_pool)
-    for fr in stray_pool[:20]:
+    for fr in stray_pool[:60]:
         out['scattered_light'].append(cand(
             'scattered_light', volset, fr['volume'], fr['filespec'],
             'GOSSI', 'SSI', dataset, ('GOSSI', fr['year']),
@@ -656,7 +857,7 @@ def scan_vgiss() -> dict[str, list[dict]]:
 
     stray_pool = sorted(stray_pool, key=lambda c: c['filespec'])
     rng.shuffle(stray_pool)
-    for fr in stray_pool[:20]:
+    for fr in stray_pool[:60]:
         out['scattered_light'].append(cand(
             'scattered_light', fr['volset'], fr['volume'], fr['filespec'],
             'VGISS', fr['camera'], 'vgiss', ('VGISS', fr['year']),
@@ -681,15 +882,36 @@ def scan_vgiss() -> dict[str, list[dict]]:
 
 # ---------------------------------------------------------------- sampling
 
-QUOTAS = {
-    'body_irregular': 20,
-    'ring_only_flat': 20,
-    'ring_plus_body': 20,
-    'stars_plus_body': 20,
-    'two_bright_stars_no_body': 12,
-    'faint_stars': 12,
-    'scattered_light': 16,
-    'negative_cases': 16,
+QUOTAS_BY_BATCH: dict[int, dict[str, int]] = {
+    # batch 1: the eight empty classes of the Phase-10 budget
+    1: {
+        'body_irregular': 20,
+        'ring_only_flat': 20,
+        'ring_plus_body': 20,
+        'stars_plus_body': 20,
+        'two_bright_stars_no_body': 12,
+        'faint_stars': 12,
+        'scattered_light': 16,
+        'negative_cases': 16,
+    },
+    # batch 2: every class still below its Part-10 minimum after the
+    # batch-1 votes (2026-07-09), plus refreshed pools for the classes
+    # that produced no usable exemplars (scattered_light, faint_stars,
+    # two_bright) and the NH LORRI star classes.
+    2: {
+        'body_full_fov': 8,
+        'body_partial_overflow': 8,
+        'body_mostly_offscreen': 6,
+        'multi_body': 8,
+        'high_phase_terminator': 6,
+        'below_resolution_body': 8,
+        'ring_only_curved': 6,
+        'star_dominated': 8,
+        'one_bright_star_no_body': 8,
+        'two_bright_stars_no_body': 10,
+        'faint_stars': 10,
+        'scattered_light': 12,
+    },
 }
 
 
@@ -710,15 +932,33 @@ def stratified_sample(cands: list[dict], n: int, rng: random.Random) -> list[dic
 
 
 def main() -> None:
-    results: dict[str, list[dict]] = defaultdict(list)
-    for scan in (scan_coiss, scan_go, scan_vgiss):
-        for cls, cands in scan().items():
-            results[cls].extend(cands)
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--batch', type=int, default=2,
+                    help='batch number (selects quotas and output name)')
+    args = ap.parse_args()
+    quotas = QUOTAS_BY_BATCH[args.batch]
 
-    # a frame can satisfy only one class: scarce-first priority
-    priority = ['two_bright_stars_no_body', 'faint_stars', 'scattered_light',
-                'ring_only_flat', 'stars_plus_body', 'ring_plus_body',
-                'body_irregular', 'negative_cases']
+    global EXISTING_IDS
+    EXISTING_IDS = load_existing_ids(args.batch)
+    print(f'excluding {len(EXISTING_IDS)} library/prior-batch ids')
+
+    results: dict[str, list[dict]] = defaultdict(list)
+    for scan in (scan_coiss, scan_go, scan_vgiss, scan_nh):
+        for cls, cands in scan().items():
+            if cls in quotas:
+                results[cls].extend(cands)
+
+    # scattered_light: geometry cannot predict a visible gradient
+    # (batch-1 lesson: 0/10 survived review), so score the actual
+    # pixels and keep only frames with a strong low-order gradient.
+    if args.batch >= 2 and results.get('scattered_light'):
+        from scatter_prescan import prescan
+        results['scattered_light'] = prescan(
+            results['scattered_light'],
+            keep=quotas.get('scattered_light', 12) * 2)
+
+    # a frame can satisfy only one class: scarcest class first
+    priority = sorted(results, key=lambda c: len(results[c]))
     seen: set[str] = set()
     for cls in priority:
         keep = []
@@ -730,27 +970,26 @@ def main() -> None:
 
     rng = random.Random(SEED + 3)
     manifest: dict = {
-        'query': QUERY_NAME,
+        'query': f'stage_a_batch{args.batch:03d}',
         'seed': SEED,
-        'generated': '2026-07-08',
-        'notes': 'Stage A candidates for the 8 empty scene classes '
-                 '(plans/COHORT_CURATION_PLAN.md section 5 step 1). '
+        'generated': '2026-07-09',
+        'notes': 'Stage A candidates (plans/COHORT_CURATION_PLAN.md). '
                  'Selection criteria recorded per candidate under '
                  '"selection".',
         'classes': {},
     }
     counts_lines = []
-    for cls in sorted(QUOTAS):
+    for cls in sorted(quotas):
         cands = results.get(cls, [])
-        sample = stratified_sample(cands, QUOTAS[cls], rng)
+        sample = stratified_sample(cands, quotas[cls], rng)
         manifest['classes'][cls] = sample
         counts_lines.append(f'{cls}: {len(cands)} hits -> {len(sample)} sampled')
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = OUT_DIR / 'candidates_batch001.yaml'
+    out_path = OUT_DIR / f'candidates_batch{args.batch:03d}.yaml'
     out_path.write_text(yaml.safe_dump(manifest, sort_keys=False, width=100))
     counts = '\n'.join(counts_lines)
-    (OUT_DIR / 'scan_counts.txt').write_text(counts + '\n')
+    (OUT_DIR / f'scan_counts_batch{args.batch:03d}.txt').write_text(counts + '\n')
     print(counts)
     print(f'wrote {out_path}')
 
