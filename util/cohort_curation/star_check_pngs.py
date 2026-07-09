@@ -44,6 +44,8 @@ MARGINS = {
     ('VGISS', 'NA'): {1000: (400, 400)},
     ('VGISS', 'WA'): {1000: (400, 400)},
     ('GOSSI', 'SSI'): None,   # size-independent
+    ('NHLORRI', 'LORRI'): {256: (15, 15), 512: (30, 30),
+                           1024: (60, 60)},
 }
 MARGIN_FLAT = {('GOSSI', 'SSI'): (350, 350)}
 
