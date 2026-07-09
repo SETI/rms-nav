@@ -53,7 +53,9 @@ STAR_CLASSES = {'faint_stars', 'two_bright_stars_no_body',
                 'stars_plus_body', 'one_bright_star_no_body',
                 'star_dominated'}
 
-TIMEOUT_S = 1200        # Galileo/Voyager camera-rotation fits are slow
+TIMEOUT_S = 1200
+RESCUE_ROOT = OUT_DIR / 'rescue_results'
+RESCUE_CONFIG = HERE / 'rescue_config.yaml'        # Galileo/Voyager camera-rotation fits are slow
 
 
 def image_name_for(candidate: dict) -> str:
@@ -86,7 +88,7 @@ def run_one(candidate: dict) -> dict:
     if not candidate.get('_force') and _result_files(name, '_metadata.json'):
         rec['exit_code'] = 0
         rec['log_tail'] = ['(reused existing triage result)']
-        return _evaluate(candidate, rec)
+        return _maybe_rescue(candidate, _evaluate(candidate, rec))
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True,
                               timeout=TIMEOUT_S, env=ENV, cwd=REPO)
@@ -98,20 +100,69 @@ def run_one(candidate: dict) -> dict:
                    triage='dropped', triage_reason='timeout')
         return rec
 
-    return _evaluate(candidate, rec)
+    return _maybe_rescue(candidate, _evaluate(candidate, rec))
 
 
-def _result_files(name: str, suffix: str) -> list:
-    files = sorted(RESULTS_ROOT.rglob(f'{name}*{suffix}'))
+def _maybe_rescue(candidate: dict, rec: dict) -> dict:
+    """Retry a navigation-failed frame with the relaxed rescue config.
+
+    The default pipeline gates carry uncalibrated placeholder values
+    (Phase 10 calibrates them); many navigable scenes fail only because
+    a confidence formula or spurious detector is conservative.  The
+    rescue pass re-runs the frame with rescue_config.yaml (relaxed
+    alpha0 / spurious knobs); an offset produced this way is promoted
+    with an explicit warning so the operator verifies the overlay.
+    negative_cases are never rescued (failure is the desired outcome).
+
+    Parameters:
+        candidate: The manifest candidate.
+        rec: The evaluated default-config triage record.
+    """
+    cls = candidate['scene_class']
+    if cls == 'negative_cases':
+        return rec
+    if rec.get('offset_px') is not None:
+        return rec
+    if rec.get('status') not in ('failed', 'conflicted'):
+        return rec              # infrastructure error / timeout / skip
+    name = rec['image_name']
+    if candidate.get('_force') or not _result_files(
+            name, '_metadata.json', RESCUE_ROOT):
+        cmd = [str(VENV_BIN / 'sd_offset'), candidate['dataset'], name,
+               '--config-file', str(RESCUE_CONFIG),
+               '--nav-results-root', str(RESCUE_ROOT)]
+        try:
+            subprocess.run(cmd, capture_output=True, text=True,
+                           timeout=TIMEOUT_S, env=ENV, cwd=REPO)
+        except subprocess.TimeoutExpired:
+            return rec
+    rec2 = {k: rec[k] for k in rec if not k.startswith('triage')}
+    rec2 = _evaluate(candidate, rec2, RESCUE_ROOT)
+    if rec2.get('status') == 'success' and rec2.get('offset_px') is not None:
+        warnings = rec2.get('triage_warnings') or []
+        warnings.append('rescued_relaxed_config: offset from relaxed '
+                        'uncalibrated gates; verify overlay carefully')
+        rec2.update(rescued=True, triage='promoted',
+                    triage_reason='rescued: relaxed gates produced an '
+                                  'offset (default pipeline failed: '
+                                  f'{rec.get("status_reason")})',
+                    triage_warnings=warnings)
+        return rec2
+    return rec
+
+
+def _result_files(name: str, suffix: str, root: Path | None = None) -> list:
+    root = root or RESULTS_ROOT
+    files = sorted(root.rglob(f'{name}*{suffix}'))
     if not files and name != name.lower():
-        files = sorted(RESULTS_ROOT.rglob(f'{name.lower()}*{suffix}'))
+        files = sorted(root.rglob(f'{name.lower()}*{suffix}'))
     return files
 
 
-def _evaluate(candidate: dict, rec: dict) -> dict:
+def _evaluate(candidate: dict, rec: dict, root: Path | None = None) -> dict:
     name = rec['image_name']
-    meta_files = _result_files(name, '_metadata.json')
-    png_files = _result_files(name, '_summary.png')
+    meta_files = _result_files(name, '_metadata.json', root)
+    png_files = _result_files(name, '_summary.png', root)
     if not meta_files:
         rec.update(triage='dropped',
                    triage_reason='no metadata written (pipeline error)')
