@@ -14,8 +14,11 @@
     "Voyager predict CKs claim coverage to 2027 yet scan-platform CKs have",
     "holes inside the encounter windows; those residual holes are caught by",
     "Stage B triage rather than this filter.",
-    "GOSSI is the SPK window intersected with the CK span (1995-10-09 to",
-    "2002-01-15); early-cruise Earth/Moon/Venus frames are not navigable."
+    "GOSSI has NO window on purpose: SPICE.db lists GLL SPKs only from",
+    "1995 (with a 1995-12..1997-11 hole), yet 1990/1992 Earth-flyby frames",
+    "navigate fine in Stage B (they fail on confidence, not on SPICE), and",
+    "no GOSSI frame in the batch-001 manifest hit a SPICE error - the DB",
+    "tables do not predict GOSSI navigability, so nothing is filtered."
   ],
   "windows": {
     "COISS": [["2004-01-01", "2017-09-15"]],
@@ -27,7 +30,6 @@
       ["1985-08-21", "1986-02-13"],
       ["1988-11-12", "1989-10-01"]
     ],
-    "GOSSI": [["1995-10-09", "2002-01-15"]],
     "NHLORRI": [["2006-01-19", "2016-01-01"]]
   }
 }
