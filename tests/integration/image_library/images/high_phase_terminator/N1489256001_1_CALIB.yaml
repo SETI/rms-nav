@@ -1,0 +1,29 @@
+schema_version: 1
+image_id: N1489256001_1_CALIB
+mission: COISS
+camera: NAC
+filter_combo: MT2+P120
+image_url: pds3://calibrated/COISS_2xxx/COISS_2010/data/1489133441_1489305100/N1489256001_1_CALIB.IMG
+scene_tags:
+- high_phase_terminator
+- dione
+ground_truth:
+  offset_dv_px: 5.5194
+  offset_du_px: -0.8135
+  offset_uncertainty_px: 2.0
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-07-09
+  ui_version: spindoctor 0.1.dev24 (cohort review batch 002)
+  notes: |
+    high_phase_terminator exemplar from cohort-curation review batch 002 (seq 039).
+    Selection: DIONE | 90-120; {"apparent_diameter_px": 160.4, "center_phase_deg": 106.863, "filter": "P120", "lat_coverage_deg": 119.1, "target": "DIONE", "year": "2005"}.
+    Operator verified the pipeline overlay alignment at the proposed offset during batch review (summary PNG plus, for star classes, a hard-stretch star-check PNG with circled catalog positions).
+    Pipeline: status=success, confidence=0.841, rank=high, techniques=['BodyLimbNav', 'StarFieldFromCatalogNav', 'StarRefineNav', 'StarUniqueMatchNav'], per-technique offsets={"BodyLimbNav": [5.5269, -0.8399], "StarFieldFromCatalogNav": [0.0, 0.0], "StarUniqueMatchNav": [0.0, 0.0], "StarRefineNav": [4.8156, -0.4015]}.
+expected:
+  status: success
+  confidence_tier: medium
+  primary_technique: BodyTerminatorNav
+  techniques_must_run:
+  - BodyTerminatorNav
+  techniques_must_skip: []

@@ -1,0 +1,29 @@
+schema_version: 1
+image_id: N1858933303_1_CALIB
+mission: COISS
+camera: NAC
+filter_combo: CL1+IR3
+image_url: pds3://calibrated/COISS_2xxx/COISS_2108/data/1858919981_1859049979/N1858933303_1_CALIB.IMG
+scene_tags:
+- high_phase_terminator
+- enceladus
+ground_truth:
+  offset_dv_px: 14.2766
+  offset_du_px: -15.8676
+  offset_uncertainty_px: 2.0
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-07-09
+  ui_version: spindoctor 0.1.dev24 (cohort review batch 002)
+  notes: |
+    high_phase_terminator exemplar from cohort-curation review batch 002 (seq 044).
+    Selection: ENCELADUS | 90-120; {"apparent_diameter_px": 650.5, "center_phase_deg": 117.033, "filter": "CL1", "lat_coverage_deg": 84.3, "target": "ENCELADUS", "year": "2016"}.
+    Operator verified the pipeline overlay alignment at the proposed offset during batch review (summary PNG plus, for star classes, a hard-stretch star-check PNG with circled catalog positions).
+    Pipeline: status=success, confidence=0.465, rank=low, techniques=['BodyLimbNav', 'StarFieldFromCatalogNav', 'StarRefineNav', 'StarUniqueMatchNav'], per-technique offsets={"BodyLimbNav": [14.6187, -17.0685], "StarFieldFromCatalogNav": [0.0, 0.0], "StarUniqueMatchNav": [0.0, 0.0], "StarRefineNav": [14.0751, -15.655]}.
+expected:
+  status: success
+  confidence_tier: medium
+  primary_technique: BodyTerminatorNav
+  techniques_must_run:
+  - BodyTerminatorNav
+  techniques_must_skip: []

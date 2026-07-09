@@ -1,0 +1,28 @@
+schema_version: 1
+image_id: N1519300016_2_CALIB
+mission: COISS
+camera: NAC
+filter_combo: CL1+CL2
+image_url: pds3://calibrated/COISS_2xxx/COISS_2020/data/1519240356_1519390650/N1519300016_2_CALIB.IMG
+scene_tags:
+- multi_body
+ground_truth:
+  offset_dv_px: 2.1094
+  offset_du_px: -22.9844
+  offset_uncertainty_px: 1.0
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-07-09
+  ui_version: spindoctor 0.1.dev24 (cohort review batch 002)
+  notes: |
+    multi_body exemplar from cohort-curation review batch 002 (seq 046).
+    Selection: DIONE+MIMAS; {"filter": "CL1", "largest_px": 137.4, "targets_px": {"DIONE": 137.4, "MIMAS": 41.4}, "year": "2006"}.
+    Operator verified the pipeline overlay alignment at the proposed offset during batch review (summary PNG plus, for star classes, a hard-stretch star-check PNG with circled catalog positions).
+    Pipeline: status=success, confidence=0.413, rank=low, techniques=['BodyDiscCorrelateNav', 'BodyLimbNav'], per-technique offsets={"BodyDiscCorrelateNav": [2.1094, -22.9844], "BodyLimbNav": [2.0088, -23.0733]}.
+expected:
+  status: success
+  confidence_tier: medium
+  primary_technique: BodyLimbNav
+  techniques_must_run:
+  - BodyLimbNav
+  techniques_must_skip: []

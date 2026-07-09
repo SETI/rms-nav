@@ -1,0 +1,31 @@
+schema_version: 1
+image_id: N1465178827_2_CALIB
+mission: COISS
+camera: NAC
+filter_combo: CL1+CL2
+image_url: pds3://calibrated/COISS_2xxx/COISS_2003/data/1465118023_1465220364/N1465178827_2_CALIB.IMG
+scene_tags:
+- below_resolution_body
+- enceladus
+ground_truth:
+  offset_dv_px: 5.5
+  offset_du_px: -14.75
+  offset_uncertainty_px: 2.0
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-07-09
+  ui_version: spindoctor 0.1.dev24 (cohort review batch 002)
+  notes: |
+    below_resolution_body exemplar from cohort-curation review batch 002 (seq 003).
+    Selection: ENCELADUS; {"apparent_diameter_px": 6.06, "filter": "CL1", "target": "ENCELADUS", "texp_s": 0.06, "year": "2004"}.
+    Operator verified the pipeline overlay alignment at the proposed offset during batch review (summary PNG plus, for star classes, a hard-stretch star-check PNG with circled catalog positions).
+    Offset produced by the triage rescue pass (rescue_config.yaml: relaxed uncalibrated technique alpha0 / spurious knobs, lowered ensemble min_confidence and reliability-gate thresholds via the orchestrator config section). The default pipeline failed this frame; the confidence value below is from the relaxed run and is not meaningful. Ground truth rests on the operator overlay verification.
+    Pipeline: status=success, confidence=0.821, rank=high, techniques=['BodyDiscCorrelateNav'], per-technique offsets={"BodyDiscCorrelateNav": [5.5, -14.75]}.
+    Operator comment: re-vote: rescued with relaxed gates (previous vote: m)
+expected:
+  status: success
+  confidence_tier: low
+  primary_technique: BodyBlobNav
+  techniques_must_run:
+  - BodyBlobNav
+  techniques_must_skip: []
