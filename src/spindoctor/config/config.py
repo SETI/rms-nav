@@ -141,6 +141,7 @@ class Config:
         self._config_bootstrap: dict[str, Any] = AttrDict({})
         self._config_backplanes: dict[str, Any] = AttrDict({})
         self._config_pds4: dict[str, Any] = AttrDict({})
+        self._config_orchestrator: dict[str, Any] = AttrDict({})
 
     @property
     def is_loaded(self) -> bool:
@@ -178,6 +179,7 @@ class Config:
         self._config_bootstrap = AttrDict(self._config_dict.get('bootstrap', {}))
         self._config_backplanes = AttrDict(self._config_dict.get('backplanes', {}))
         self._config_pds4 = AttrDict(self._config_dict.get('pds4', {}))
+        self._config_orchestrator = AttrDict(self._config_dict.get('orchestrator', {}))
 
     def _load_yaml(self, config_path: str | Path) -> dict[str, Any]:
         """Loads a YAML file and returns a dictionary mapping.
@@ -510,6 +512,13 @@ class Config:
 
         self.read_config()
         return self._config_bootstrap
+
+    @property
+    def orchestrator(self) -> Any:
+        """Returns the orchestrator (ensemble + reliability gate) settings."""
+
+        self.read_config()
+        return self._config_orchestrator
 
     @property
     def backplanes(self) -> Any:

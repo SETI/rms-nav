@@ -252,7 +252,9 @@ class NavOrchestrator(NavBase):
         only_techniques: Glob-pattern string or list selecting which
             techniques run.  Default ``'*'`` runs every registered
             technique.
-        ensemble_config: Optional ``EnsembleConfig`` override.
+        ensemble_config: Optional ``EnsembleConfig`` override; when omitted
+            the ensemble parameters come from the ``orchestrator.ensemble``
+            config section (config_540_orchestrator.yaml defaults).
         image_quality_thresholds: Optional thresholds for the image-quality
             classifier.
         spindoctor_version: Version string written into provenance.
@@ -275,13 +277,16 @@ class NavOrchestrator(NavBase):
             models=_ModelRegistry(models=models).filter_by_glob(only_models)
         )
         self._only_techniques = only_techniques
-        self._ensemble_config = ensemble_config or EnsembleConfig()
+        orch_cfg = self.config.orchestrator
+        self._ensemble_config = ensemble_config or EnsembleConfig.from_mapping(
+            orch_cfg.get('ensemble')
+        )
         # ``image_quality_thresholds`` overrides the per-instrument config
         # block when supplied; otherwise the orchestrator builds the
         # thresholds from ``obs.inst_config`` per image.
         self._explicit_thresholds = image_quality_thresholds
         self._image_derivatives_config = image_derivatives_config or ImageDerivativesConfig()
-        self._gate = FeatureReliabilityGate()
+        self._gate = FeatureReliabilityGate.from_mapping(orch_cfg.get('reliability_gate'))
         self._spindoctor_version = spindoctor_version
 
     def prepare(

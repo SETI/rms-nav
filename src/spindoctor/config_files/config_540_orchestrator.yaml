@@ -1,0 +1,46 @@
+# Orchestrator-level acceptance parameters: the ensemble combine and the
+# per-feature-type reliability gate.
+#
+# Every value here mirrors the code default (DEFAULT_* constants in
+# spindoctor.nav_orchestrator.ensemble and
+# spindoctor.feature.reliability); the section exists so calibration
+# sweeps and user config files can override them without code changes.
+# All values are placeholders subject to Phase-10 empirical calibration.
+orchestrator:
+  ensemble:
+    # Mahalanobis-distance threshold for grouping per-technique results.
+    agreement_sigma: 2.0
+    # Euclidean translation-distance fallback grouping threshold (px).
+    agreement_pixel_floor: 5.0
+    # Minimum summed-confidence gap between best and runner-up groups
+    # before declaring a conflict.
+    agreement_gap: 0.5
+    # Multiplier on combined confidence when more than one group existed.
+    disagreement_penalty: 0.7
+    # Additional multiplier when the conflicted branch fires.
+    conflicted_confidence_multiplier: 0.3
+    # Final-result threshold below which the ensemble returns failed.
+    min_confidence: 0.2
+    # rcond for scipy.linalg.pinvh.
+    pinvh_rcond: 1.0e-9
+    # Maximum |rotation| (deg) a 3-DoF result may take before rejection.
+    max_allowed_rotation_deg: 5.0
+    # Confidence/sigma requirements per confidence tier; max_sigma_px
+    # null means no sigma requirement for that tier.
+    tier_thresholds:
+      high: {min_confidence: 0.8, max_sigma_px: 0.5}
+      medium: {min_confidence: 0.5, max_sigma_px: 2.0}
+      low: {min_confidence: 0.2, max_sigma_px: null}
+  # Minimum reliability per feature type; features below their type's
+  # threshold are gated out before any technique runs.  Feature types
+  # not listed fall through with a 0.0 threshold (no gate).
+  reliability_gate:
+    STAR: 0.20
+    LIMB_ARC: 0.30
+    TERMINATOR_ARC: 0.30
+    BODY_DISC: 0.30
+    BODY_BLOB: 0.20
+    RING_EDGE: 0.30
+    RING_ANNULUS: 0.30
+    CARTOGRAPHIC_MODEL: 0.30
+    TITAN_LIMB: 0.30

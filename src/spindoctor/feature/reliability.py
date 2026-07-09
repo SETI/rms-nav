@@ -13,7 +13,7 @@ when no override is supplied by the loader.
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Final
+from typing import Any, Final
 
 from spindoctor.feature.feature import NavFeature
 from spindoctor.feature.feature_type import NavFeatureType
@@ -73,6 +73,43 @@ class FeatureReliabilityGate:
     thresholds: dict[NavFeatureType, float] = field(
         default_factory=lambda: dict(DEFAULT_RELIABILITY_THRESHOLDS)
     )
+
+    @classmethod
+    def from_mapping(cls, mapping: Mapping[str, Any] | None) -> 'FeatureReliabilityGate':
+        """Build a gate from a YAML-derived ``{type name: threshold}`` mapping.
+
+        Parameters:
+            mapping: The ``orchestrator.reliability_gate`` config section.
+                ``None`` or empty returns the code defaults.  Keys are
+                ``NavFeatureType`` member names; each value overrides the
+                default threshold for that type only, so a partial mapping
+                leaves the other types at their defaults.
+
+        Returns:
+            A ``FeatureReliabilityGate`` with the merged thresholds.
+
+        Raises:
+            ValueError: If a key is not a ``NavFeatureType`` member name.
+        """
+        if not mapping:
+            return cls()
+        thresholds = dict(DEFAULT_RELIABILITY_THRESHOLDS)
+        for name, value in mapping.items():
+            try:
+                ftype = NavFeatureType[str(name)]
+            except KeyError:
+                valid = ', '.join(t.name for t in NavFeatureType)
+                raise ValueError(
+                    f'Unknown feature type {name!r} in reliability_gate config; '
+                    f'valid names: {valid}'
+                ) from None
+            try:
+                thresholds[ftype] = float(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f'orchestrator.reliability_gate.{name} must be a number; got {value!r}'
+                ) from exc
+        return cls(thresholds=thresholds)
 
     def __post_init__(self) -> None:
         """Validate the thresholds mapping and every threshold value."""

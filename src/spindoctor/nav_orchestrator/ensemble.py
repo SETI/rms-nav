@@ -18,7 +18,8 @@ correctness here is what makes the rest of the pipeline trustworthy.
 
 import copy
 import math
-from dataclasses import dataclass, field
+from collections.abc import Mapping
+from dataclasses import dataclass, field, fields
 from typing import Any, cast
 
 import numpy as np
@@ -117,6 +118,65 @@ class EnsembleConfig:
     tier_thresholds: dict[str, dict[str, float | None]] = field(
         default_factory=lambda: copy.deepcopy(DEFAULT_TIER_THRESHOLDS)
     )
+
+    @classmethod
+    def from_mapping(cls, mapping: Mapping[str, Any] | None) -> 'EnsembleConfig':
+        """Build an ``EnsembleConfig`` from a YAML-derived mapping.
+
+        Parameters:
+            mapping: The ``orchestrator.ensemble`` config section.  ``None``
+                or empty returns the code defaults.  Scalar keys override
+                their field; a ``tier_thresholds`` block is merged tier-by-
+                tier over the defaults, so a partial override (for example
+                only ``low.min_confidence``) leaves the other tiers intact.
+
+        Returns:
+            An ``EnsembleConfig`` with mapping values overriding the code
+            defaults field-by-field.
+
+        Raises:
+            ValueError: If the mapping contains an unknown key, an unknown
+                tier name, or an unknown tier-threshold key.
+        """
+        if not mapping:
+            return cls()
+        data = dict(mapping)
+        tiers_raw = data.pop('tier_thresholds', None)
+        scalar_fields = {f.name for f in fields(cls)} - {'tier_thresholds'}
+        unknown = set(data) - scalar_fields
+        if unknown:
+            raise ValueError(f'Unknown orchestrator.ensemble config keys: {sorted(unknown)}')
+        kwargs: dict[str, Any] = {}
+        for key, value in data.items():
+            try:
+                kwargs[key] = float(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f'orchestrator.ensemble.{key} must be a number; got {value!r}'
+                ) from exc
+        if tiers_raw is not None:
+            if not isinstance(tiers_raw, Mapping):
+                raise ValueError('orchestrator.ensemble.tier_thresholds must be a mapping')
+            tiers = copy.deepcopy(DEFAULT_TIER_THRESHOLDS)
+            for tier, spec in tiers_raw.items():
+                if tier not in tiers:
+                    raise ValueError(
+                        f'Unknown tier {tier!r} in tier_thresholds; valid tiers: {sorted(tiers)}'
+                    )
+                if not isinstance(spec, Mapping):
+                    raise ValueError(f'tier_thresholds[{tier!r}] must be a mapping')
+                for key, value in spec.items():
+                    if key not in ('min_confidence', 'max_sigma_px'):
+                        raise ValueError(f'Unknown tier_thresholds[{tier!r}] key {key!r}')
+                    try:
+                        tiers[tier][key] = None if value is None else float(value)
+                    except (TypeError, ValueError) as exc:
+                        raise ValueError(
+                            f'orchestrator.ensemble.tier_thresholds[{tier!r}].{key} '
+                            f'must be a number or null; got {value!r}'
+                        ) from exc
+            kwargs['tier_thresholds'] = tiers
+        return cls(**kwargs)
 
 
 def _mahalanobis_distance(
