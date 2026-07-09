@@ -26,6 +26,20 @@ HERE = Path(__file__).parent
 REPO = HERE.parent.parent
 OUT_DIR = REPO / '_work/cohort_curation'   # generated outputs (gitignored)
 
+VOTE_INSTRUCTIONS = (
+    'Set vote to y, m, or n per image (optional comment). '
+    'y = good example of the class AND the overlay is aligned at the '
+    'proposed offset (for negative_cases: good example that correctly '
+    'has nothing to navigate). '
+    'm = good example of the class, but the proposed offset is missing '
+    'or misaligned; frame is kept and routed to the manual-nav queue or '
+    'curated as an expected-failure. '
+    'n = not a good example of the class, or unusable image; discard. '
+    'ring_only_flat: vote on class membership only (y for a clean '
+    'straight edge); a straight edge is rank-1 and cannot be fully '
+    'navigated, so no alignment judgment is expected.'
+)
+
 
 def load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     for name in ('DejaVuSansMono.ttf', 'DejaVuSans.ttf'):
@@ -161,9 +175,7 @@ def main() -> None:
 
     (batch_dir / 'votes.yaml').write_text(yaml.safe_dump(
         {'batch': args.batch,
-         'instructions': 'Set vote to y or n per image (optional comment). '
-                         'y = overlay is aligned at the proposed offset and '
-                         'the scene matches the class; n = anything else.',
+         'instructions': VOTE_INSTRUCTIONS,
          'images': votes},
         sort_keys=False, width=100))
     print(f'wrote {batch_dir}/votes.yaml with {len(votes)} images')
