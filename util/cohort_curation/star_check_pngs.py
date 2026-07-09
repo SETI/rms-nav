@@ -98,8 +98,6 @@ def render_one(rec: dict, entry: dict, batch_dir: Path) -> str | None:
     nav = meta.get('navigation_result') or {}
     stars = [f for f in (nav.get('feature_inventory') or [])
              if f.get('feature_type') == 'STAR']
-    if not stars:
-        return None
 
     # strict=False: Galileo SSI labels carry keywords longer than the
     # 32-character VICAR limit (UNEVEN_BIT_WEIGHT_CORRECTION_FLAG).
@@ -125,10 +123,14 @@ def render_one(rec: dict, entry: dict, batch_dir: Path) -> str | None:
         rel = f.get('reliability')
         label = f'{float(rel):.2f}' if rel is not None else '?'
         draw.text((u + r + 3, v - 7), label, fill=color)
-    note = ('circles at predicted star positions + proposed offset'
-            if dv_du else
-            'circles at PREDICTED star positions (no offset; actual '
-            'stars sit nearby, shifted by the true offset)')
+    if not stars:
+        note = ('NO star features in nav metadata (stars gated or '
+                'navigation errored); inspect for star dots manually')
+    elif dv_du:
+        note = 'circles at predicted star positions + proposed offset'
+    else:
+        note = ('circles at PREDICTED star positions (no offset; actual '
+                'stars sit nearby, shifted by the true offset)')
     draw.text((8, 8), f'#{entry["seq"]:03d} {entry["image_name"]} '
                       f'hard stretch; {note}', fill=(255, 80, 80))
 
