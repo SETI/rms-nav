@@ -916,18 +916,41 @@ QUOTAS_BY_BATCH: dict[int, dict[str, int]] = {
 
 
 def stratified_sample(cands: list[dict], n: int, rng: random.Random) -> list[dict]:
-    strata: dict[str, list[dict]] = defaultdict(list)
+    """Round-robin missions first, then strata within each mission.
+
+    A flat strata round-robin starves low-volume missions: with tens of
+    thousands of COISS hits spread over dozens of year strata, a small
+    quota fills before the sorted key order ever reaches the NH or GO
+    strata.  Balancing missions first guarantees each mission with hits
+    contributes before any mission gets a second pick.
+    """
+    by_mission: dict[str, dict[str, list[dict]]] = defaultdict(
+        lambda: defaultdict(list))
     for c in cands:
-        strata[c['strata']].append(c)
-    for group in strata.values():
-        group.sort(key=lambda c: c['filespec'])
-        rng.shuffle(group)
+        by_mission[c['mission']][c['strata']].append(c)
+    for strata in by_mission.values():
+        for group in strata.values():
+            group.sort(key=lambda c: c['filespec'])
+            rng.shuffle(group)
+    mission_keys = sorted(by_mission)
+    key_cycle = {m: sorted(by_mission[m]) for m in mission_keys}
     picked: list[dict] = []
-    keys = sorted(strata)
-    while len(picked) < n and any(strata[k] for k in keys):
-        for k in keys:
-            if strata[k] and len(picked) < n:
-                picked.append(strata[k].pop())
+    while len(picked) < n:
+        progress = False
+        for m in mission_keys:
+            strata = by_mission[m]
+            for k in key_cycle[m]:
+                if strata[k]:
+                    picked.append(strata[k].pop())
+                    progress = True
+                    # rotate this mission's strata so its next pick
+                    # comes from a different stratum
+                    key_cycle[m] = key_cycle[m][1:] + key_cycle[m][:1]
+                    break
+            if len(picked) >= n:
+                break
+        if not progress:
+            break
     return picked
 
 

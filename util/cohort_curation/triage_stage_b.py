@@ -49,7 +49,9 @@ ENV = {
     'HOME': str(Path.home()),
 }
 
-STAR_CLASSES = {'faint_stars', 'two_bright_stars_no_body', 'stars_plus_body'}
+STAR_CLASSES = {'faint_stars', 'two_bright_stars_no_body',
+                'stars_plus_body', 'one_bright_star_no_body',
+                'star_dominated'}
 
 TIMEOUT_S = 1200        # Galileo/Voyager camera-rotation fits are slow
 
