@@ -100,3 +100,22 @@ def test_bundled_yaml_gate_section_matches_code_defaults() -> None:
     section = config.orchestrator.get('reliability_gate')
     gate = FeatureReliabilityGate.from_mapping(section)
     assert gate.thresholds == DEFAULT_RELIABILITY_THRESHOLDS
+
+
+def test_ensemble_from_mapping_non_numeric_scalar_names_key() -> None:
+    with pytest.raises(
+        ValueError, match=r'orchestrator\.ensemble\.min_confidence must be a number'
+    ):
+        EnsembleConfig.from_mapping({'min_confidence': 'high'})
+
+
+def test_ensemble_from_mapping_non_numeric_tier_value_names_key() -> None:
+    with pytest.raises(
+        ValueError, match=r"tier_thresholds\['low'\]\.min_confidence must be a number"
+    ):
+        EnsembleConfig.from_mapping({'tier_thresholds': {'low': {'min_confidence': 'tiny'}}})
+
+
+def test_gate_from_mapping_non_numeric_value_names_key() -> None:
+    with pytest.raises(ValueError, match=r'orchestrator\.reliability_gate\.STAR must be a number'):
+        FeatureReliabilityGate.from_mapping({'STAR': 'strict'})

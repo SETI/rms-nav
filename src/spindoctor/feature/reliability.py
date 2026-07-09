@@ -103,7 +103,12 @@ class FeatureReliabilityGate:
                     f'Unknown feature type {name!r} in reliability_gate config; '
                     f'valid names: {valid}'
                 ) from None
-            thresholds[ftype] = float(value)
+            try:
+                thresholds[ftype] = float(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f'orchestrator.reliability_gate.{name} must be a number; got {value!r}'
+                ) from exc
         return cls(thresholds=thresholds)
 
     def __post_init__(self) -> None:

@@ -146,7 +146,14 @@ class EnsembleConfig:
         unknown = set(data) - scalar_fields
         if unknown:
             raise ValueError(f'Unknown orchestrator.ensemble config keys: {sorted(unknown)}')
-        kwargs: dict[str, Any] = {key: float(value) for key, value in data.items()}
+        kwargs: dict[str, Any] = {}
+        for key, value in data.items():
+            try:
+                kwargs[key] = float(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f'orchestrator.ensemble.{key} must be a number; got {value!r}'
+                ) from exc
         if tiers_raw is not None:
             if not isinstance(tiers_raw, Mapping):
                 raise ValueError('orchestrator.ensemble.tier_thresholds must be a mapping')
@@ -161,7 +168,13 @@ class EnsembleConfig:
                 for key, value in spec.items():
                     if key not in ('min_confidence', 'max_sigma_px'):
                         raise ValueError(f'Unknown tier_thresholds[{tier!r}] key {key!r}')
-                    tiers[tier][key] = None if value is None else float(value)
+                    try:
+                        tiers[tier][key] = None if value is None else float(value)
+                    except (TypeError, ValueError) as exc:
+                        raise ValueError(
+                            f'orchestrator.ensemble.tier_thresholds[{tier!r}].{key} '
+                            f'must be a number or null; got {value!r}'
+                        ) from exc
             kwargs['tier_thresholds'] = tiers
         return cls(**kwargs)
 
