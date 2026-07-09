@@ -71,6 +71,13 @@ def run_one(candidate: dict) -> dict:
     rec: dict = {'image_name': name, **{k: candidate[k] for k in
                  ('scene_class', 'filespec', 'volume', 'mission', 'camera',
                   'dataset', 'strata', 'needs_visual', 'selection')}}
+    if candidate.get('_skip'):
+        rec.update(exit_code=None,
+                   log_tail=['(skipped via --skip-names)'],
+                   triage='dropped',
+                   triage_reason='skipped: navigation exhausts memory '
+                                 '(OOM killer); needs pipeline investigation')
+        return rec
     if not candidate.get('_force') and sorted(
             RESULTS_ROOT.rglob(f'{name}*_metadata.json')):
         rec['exit_code'] = 0
@@ -187,6 +194,10 @@ def main() -> None:
     ap.add_argument('--workers', type=int, default=3)
     ap.add_argument('--force', action='store_true',
                     help='re-run frames that already have triage results')
+    ap.add_argument('--skip-names', default='',
+                    help='comma-separated image names to mark as dropped '
+                         'without running (e.g. known memory-exhausting '
+                         'frames)')
     args = ap.parse_args()
 
     manifest = yaml.safe_load(
@@ -197,8 +208,10 @@ def main() -> None:
         cands = [c for c in cands if c['scene_class'] in wanted]
     if args.limit:
         cands = cands[:args.limit]
+    skip_names = {s for s in args.skip_names.split(',') if s}
     for c in cands:
         c['_force'] = args.force
+        c['_skip'] = image_name_for(c) in skip_names
 
     RESULTS_ROOT.mkdir(parents=True, exist_ok=True)
     print(f'triaging {len(cands)} candidates with {args.workers} workers',
