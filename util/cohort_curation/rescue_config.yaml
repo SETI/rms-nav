@@ -36,3 +36,16 @@ techniques:
     alpha0: 1.0
   StarFieldFromCatalogNav:
     alpha0: 0.5
+orchestrator:
+  ensemble:
+    min_confidence: 0.05
+    tier_thresholds:
+      low: {min_confidence: 0.05, max_sigma_px: null}
+  reliability_gate:
+    STAR: 0.05
+    LIMB_ARC: 0.05
+    TERMINATOR_ARC: 0.05
+    BODY_DISC: 0.05
+    BODY_BLOB: 0.05
+    RING_EDGE: 0.05
+    RING_ANNULUS: 0.05
