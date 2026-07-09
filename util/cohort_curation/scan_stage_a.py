@@ -440,7 +440,7 @@ def _scan_coiss_volume(vs: dict, volume: str, out: dict[str, list[dict]],
                     'body_partial_overflow', volset, volume, filespec,
                     'COISS', camera, dataset, (tgt, phase_bin(ph)), sel,
                     needs_visual=True))
-            if (d >= 1700
+            if (d >= 1700 and ph is not None and ph < 90
                     and lat_range is not None and lat_range < 120):
                 out['body_mostly_offscreen'].append(cand(
                     'body_mostly_offscreen', volset, volume, filespec,
@@ -736,13 +736,25 @@ def scan_go() -> dict[str, list[dict]]:
                         dec=(de0 + de1) / 2, filt=filt, year=year, tgt=tgt))
 
             # stray-light candidates: Earth/Moon/Venus in inventory but
-            # not resolved on disc (bright body near/behind the frame)
+            # not resolved on disc (bright body near/behind the frame).
+            # Batch-2 lesson (operator, 2026-07-09): a gradient alone is
+            # useless -- the frame must ALSO contain navigable content,
+            # so a pointing (for the star screen) is required here and
+            # a detectable-star count is enforced at emit time.
             if (tgt in ('EARTH', 'MOON', 'VENUS')
                     and brows and not res_bodies
-                    and texp is not None and texp >= 0.05):
-                stray_pool.append(dict(
-                    filespec=filespec, volume=volume, texp=texp,
-                    filt=filt, year=year, tgt=tgt))
+                    and texp is not None and texp >= 0.05
+                    and skyrow is not None):
+                ra0 = sky.num(skyrow, 'MINIMUM_RIGHT_ASCENSION')
+                ra1 = sky.num(skyrow, 'MAXIMUM_RIGHT_ASCENSION')
+                de0 = sky.num(skyrow, 'MINIMUM_DECLINATION')
+                de1 = sky.num(skyrow, 'MAXIMUM_DECLINATION')
+                if None not in (ra0, ra1, de0, de1):
+                    stray_pool.append(dict(
+                        filespec=filespec, volume=volume, texp=texp,
+                        ra=(ra0 + ra1) / 2 if ra0 <= ra1 else ra1,
+                        dec=(de0 + de1) / 2,
+                        filt=filt, year=year, tgt=tgt))
 
     pool = sorted(pool, key=lambda c: c['filespec'])
     rng.shuffle(pool)
@@ -773,12 +785,24 @@ def scan_go() -> dict[str, list[dict]]:
 
     stray_pool = sorted(stray_pool, key=lambda c: c['filespec'])
     rng.shuffle(stray_pool)
-    for fr in stray_pool[:60]:
+    n_stray = 0
+    for fr in stray_pool:
+        if n_stray >= 60:
+            break
+        lim = maglim('GOSSI', 'SSI', fr['texp'])
+        vm = star_vmags(fr['ra'], fr['dec'], FOV_DEG[('GOSSI', 'SSI')], lim)
+        # navigable content requirement: enough catalog stars that some
+        # should survive the glare
+        if len(vm) < 3:
+            continue
+        n_stray += 1
         out['scattered_light'].append(cand(
             'scattered_light', volset, fr['volume'], fr['filespec'],
             'GOSSI', 'SSI', dataset, ('GOSSI', fr['year']),
             {'surrogate': 'bright body in inventory, unresolved on disc',
              'target': fr['tgt'], 'texp_s': fr['texp'],
+             'n_detectable_stars': len(vm), 'maglim': round(lim, 2),
+             'star_vmags': [round(v, 2) for v in vm[:6]],
              'filter': fr['filt'], 'year': fr['year']},
             needs_visual=True))
 
@@ -844,15 +868,22 @@ def scan_vgiss() -> dict[str, list[dict]]:
                 nothing_resolved = (rawspec not in moon_specs_resolved
                                     and rawspec not in sat_specs_resolved
                                     and rawspec not in ring_specs)
-                if not nothing_resolved or texp_s is None:
+                if texp_s is None:
                     continue
                 rec = dict(filespec=filespec, volset=volset, volume=volume,
                            texp=texp_s, filt=filt, year=year, tgt=tgt,
                            camera=camera)
-                if tgt == 'SATURN' and texp_s >= 1.0:
+                # Batch-2 lesson: scattered_light frames must contain
+                # navigable content; VGISS has no pointing columns for a
+                # star screen, so require resolved rings or a resolved
+                # limb alongside the (prescan-verified) glare.
+                if (tgt == 'SATURN' and texp_s >= 1.0
+                        and (rawspec in ring_specs
+                             or rawspec in moon_specs_resolved
+                             or rawspec in sat_specs_resolved)):
                     stray_pool.append(rec)
-                elif texp_s <= 0.5 and tgt in ('DARK', 'SKY', 'STAR',
-                                               'SATURN'):
+                if (nothing_resolved and texp_s <= 0.5
+                        and tgt in ('DARK', 'SKY', 'STAR', 'SATURN')):
                     neg_pool.append(rec)
 
     stray_pool = sorted(stray_pool, key=lambda c: c['filespec'])
@@ -911,6 +942,12 @@ QUOTAS_BY_BATCH: dict[int, dict[str, int]] = {
         'two_bright_stars_no_body': 10,
         'faint_stars': 10,
         'scattered_light': 12,
+    },
+    # batch 3: classes still empty after batch-2 votes; scattered_light
+    # re-targeted with the navigable-content requirement
+    3: {
+        'scattered_light': 14,
+        'body_mostly_offscreen': 8,
     },
 }
 
