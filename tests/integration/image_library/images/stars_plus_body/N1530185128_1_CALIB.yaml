@@ -1,0 +1,30 @@
+schema_version: 1
+image_id: N1530185128_1_CALIB
+mission: COISS
+camera: NAC
+filter_combo: CL1+IR3
+image_url: pds3://calibrated/COISS_2xxx/COISS_2023/data/1530158136_1530199809/N1530185128_1_CALIB.IMG
+scene_tags:
+- stars_plus_body
+- hyperion
+ground_truth:
+  offset_dv_px: 18.1585
+  offset_du_px: 0.1291
+  offset_uncertainty_px: 2.0
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-07-09
+  ui_version: spindoctor 0.1.dev24 (cohort review batch 001)
+  notes: |
+    stars_plus_body exemplar from cohort-curation review batch 001 (seq 073).
+    Selection: HYPERION | <30; {"apparent_diameter_px": 186.3, "center_phase_deg": 27.681, "filter": "CL1", "maglim": 11.25, "n_detectable_stars": 17, "star_vmags": [9.24, 9.74, 9.83, 9.85, 10.17, 10.23, 10.44, 10.73], "target": "HYPERION", "texp_s": 2.0, "year": "2006"}.
+    Operator verified the pipeline overlay alignment at the proposed offset during batch review (summary PNG plus, for star classes, a hard-stretch star-check PNG with circled catalog positions).
+    Pipeline: status=conflicted, confidence=0.104, rank=conflicted, techniques=['BodyBlobNav', 'StarFieldFromCatalogNav', 'StarRefineNav', 'StarUniqueMatchNav'], per-technique offsets={"StarFieldFromCatalogNav": [0.0, 0.0], "StarUniqueMatchNav": [18.1585, 0.1291], "BodyBlobNav": [-1.0508, 3.4756], "StarRefineNav": [0.0, 0.0]}.
+    Operator comment: stars are motion streaked
+expected:
+  status: success
+  confidence_tier: medium
+  primary_technique: StarUniqueMatchNav
+  techniques_must_run:
+  - StarUniqueMatchNav
+  techniques_must_skip: []

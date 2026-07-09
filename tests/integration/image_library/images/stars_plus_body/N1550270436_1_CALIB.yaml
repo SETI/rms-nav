@@ -1,0 +1,29 @@
+schema_version: 1
+image_id: N1550270436_1_CALIB
+mission: COISS
+camera: NAC
+filter_combo: GRN+P120
+image_url: pds3://calibrated/COISS_2xxx/COISS_2029/data/1550261798_1550410364/N1550270436_1_CALIB.IMG
+scene_tags:
+- stars_plus_body
+- hyperion
+ground_truth:
+  offset_dv_px: -1.0316
+  offset_du_px: -8.7157
+  offset_uncertainty_px: 1.0
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-07-09
+  ui_version: spindoctor 0.1.dev24 (cohort review batch 001)
+  notes: |
+    stars_plus_body exemplar from cohort-curation review batch 001 (seq 074).
+    Selection: HYPERION | 60-90; {"apparent_diameter_px": 244.0, "center_phase_deg": 73.676, "filter": "P120", "maglim": 10.5, "n_detectable_stars": 4, "star_vmags": [9.19, 9.38, 9.79, 10.03], "target": "HYPERION", "texp_s": 1.0, "year": "2007"}.
+    Operator verified the pipeline overlay alignment at the proposed offset during batch review (summary PNG plus, for star classes, a hard-stretch star-check PNG with circled catalog positions).
+    Pipeline: status=conflicted, confidence=0.13, rank=conflicted, techniques=['BodyBlobNav', 'BodyTerminatorNav', 'StarRefineNav', 'StarUniqueMatchNav'], per-technique offsets={"StarUniqueMatchNav": [-1.0316, -8.7157], "BodyBlobNav": [3.4608, -23.0015], "BodyTerminatorNav": [-3.2845, 32.46], "StarRefineNav": [0.0, 0.0]}.
+expected:
+  status: success
+  confidence_tier: medium
+  primary_technique: StarUniqueMatchNav
+  techniques_must_run:
+  - StarUniqueMatchNav
+  techniques_must_skip: []

@@ -1,0 +1,29 @@
+schema_version: 1
+image_id: N1560303384_1_CALIB
+mission: COISS
+camera: NAC
+filter_combo: CL1+UV3
+image_url: pds3://calibrated/COISS_2xxx/COISS_2032/data/1560158734_1560303787/N1560303384_1_CALIB.IMG
+scene_tags:
+- body_irregular
+- atlas
+ground_truth:
+  offset_dv_px: 8.4286
+  offset_du_px: -16.6754
+  offset_uncertainty_px: 2.0
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-07-09
+  ui_version: spindoctor 0.1.dev24 (cohort review batch 001)
+  notes: |
+    body_irregular exemplar from cohort-curation review batch 001 (seq 004).
+    Selection: ATLAS | 90-120; {"apparent_diameter_px": 182.6, "center_phase_deg": 90.755, "filter": "CL1", "target": "ATLAS", "year": "2007"}.
+    Operator verified the pipeline overlay alignment at the proposed offset during batch review (summary PNG plus, for star classes, a hard-stretch star-check PNG with circled catalog positions).
+    Pipeline: status=success, confidence=0.4, rank=low, techniques=['BodyBlobNav', 'BodyTerminatorNav', 'StarFieldFromCatalogNav', 'StarRefineNav', 'StarUniqueMatchNav'], per-technique offsets={"StarFieldFromCatalogNav": [0.0, 0.0], "StarUniqueMatchNav": [0.0, 0.0], "BodyBlobNav": [8.4286, -16.6754], "BodyTerminatorNav": [13.3809, 4.4969], "StarRefineNav": [9.5654, -16.0876]}.
+expected:
+  status: success
+  confidence_tier: medium
+  primary_technique: BodyBlobNav
+  techniques_must_run:
+  - BodyBlobNav
+  techniques_must_skip: []

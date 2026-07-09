@@ -1,0 +1,29 @@
+schema_version: 1
+image_id: N1867602424_1_CALIB
+mission: COISS
+camera: NAC
+filter_combo: CL1+CL2
+image_url: pds3://calibrated/COISS_2xxx/COISS_2111/data/1867558636_1867602962/N1867602424_1_CALIB.IMG
+scene_tags:
+- ring_plus_body
+- pan
+ground_truth:
+  offset_dv_px: 2.5046
+  offset_du_px: 11.3412
+  offset_uncertainty_px: 1.0
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-07-09
+  ui_version: spindoctor 0.1.dev24 (cohort review batch 001)
+  notes: |
+    ring_plus_body exemplar from cohort-curation review batch 001 (seq 055).
+    Selection: PAN | 30-60 | 20.0; {"apparent_diameter_px": 97.6, "center_phase_deg": 50.243, "filter": "CL1", "ring_edges_in_frame": ["encke_gap.inner", "encke_gap.outer"], "ring_opening_deg": 21.18, "target": "PAN", "year": "2017"}.
+    Operator verified the pipeline overlay alignment at the proposed offset during batch review (summary PNG plus, for star classes, a hard-stretch star-check PNG with circled catalog positions).
+    Pipeline: status=success, confidence=0.4, rank=low, techniques=['BodyBlobNav', 'BodyTerminatorNav', 'RingEdgeNav'], per-technique offsets={"RingEdgeNav": [49.4333, 21.2151], "BodyBlobNav": [2.5046, 11.3412], "BodyTerminatorNav": [-15.0823, -24.3971]}.
+expected:
+  status: success
+  confidence_tier: medium
+  primary_technique: BodyBlobNav
+  techniques_must_run:
+  - BodyBlobNav
+  techniques_must_skip: []

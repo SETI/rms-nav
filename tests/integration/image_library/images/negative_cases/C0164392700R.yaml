@@ -1,0 +1,28 @@
+schema_version: 1
+image_id: C0164392700R
+mission: GOSSI
+camera: SSI
+filter_combo: UNKNOWN
+image_url: pds3://volumes/GO_0xxx/GO_0008/RAW_CAL/C0164392700R.IMG
+scene_tags:
+- negative_cases
+- black_sky
+ground_truth:
+  offset_dv_px: 0.0
+  offset_du_px: 0.0
+  offset_uncertainty_px: 99.0
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-07-09
+  ui_version: spindoctor 0.1.dev24 (cohort review batch 001)
+  notes: |
+    negative_cases exemplar from cohort-curation review batch 001 (seq 023).
+    Selection: GOSSI | empty_sky; {"filter": "VIOLET", "maglim": 4.35, "n_stars_within_2mag": 0, "target": "BLACK_SKY", "texp_s": 0.00417, "type": "empty_sky", "year": "1992"}.
+    Operator confirmed nothing navigable at review; the pipeline failed as required (status=failed, reason=final_confidence_below_threshold).
+    Ground-truth offset is a placeholder: the scene is unnavigable by design, so no offset is measurable; the regression assertion for this sidecar is expected.status=failed (offsets are only compared for status=success).
+expected:
+  status: failed
+  confidence_tier: failed
+  primary_technique: RingEdgeNav
+  techniques_must_run: []
+  techniques_must_skip: []

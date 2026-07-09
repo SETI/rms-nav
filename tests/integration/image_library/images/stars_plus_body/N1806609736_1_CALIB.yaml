@@ -1,0 +1,29 @@
+schema_version: 1
+image_id: N1806609736_1_CALIB
+mission: COISS
+camera: NAC
+filter_combo: IR2+IR3
+image_url: pds3://calibrated/COISS_2xxx/COISS_2096/data/1806542109_1806660268/N1806609736_1_CALIB.IMG
+scene_tags:
+- stars_plus_body
+- iapetus
+ground_truth:
+  offset_dv_px: 1.4356
+  offset_du_px: 12.256
+  offset_uncertainty_px: 1.0
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-07-09
+  ui_version: spindoctor 0.1.dev24 (cohort review batch 001)
+  notes: |
+    stars_plus_body exemplar from cohort-curation review batch 001 (seq 082).
+    Selection: IAPETUS | 30-60; {"apparent_diameter_px": 243.5, "center_phase_deg": 58.029, "filter": "IR2", "maglim": 12.16, "n_detectable_stars": 31, "star_vmags": [9.35, 9.71, 10.18, 10.61, 10.84, 10.9, 10.99, 11.07], "target": "IAPETUS", "texp_s": 4.6, "year": "2015"}.
+    Operator verified the pipeline overlay alignment at the proposed offset during batch review (summary PNG plus, for star classes, a hard-stretch star-check PNG with circled catalog positions).
+    Pipeline: status=success, confidence=0.99, rank=high, techniques=['BodyDiscCorrelateNav', 'BodyLimbNav', 'StarFieldFromCatalogNav', 'StarRefineNav', 'StarUniqueMatchNav'], per-technique offsets={"BodyDiscCorrelateNav": [-48.5, 61.5], "BodyLimbNav": [1.4644, 12.8465], "StarFieldFromCatalogNav": [0.0, 0.0], "StarUniqueMatchNav": [1.5275, 11.3323], "StarRefineNav": [1.4887, 11.3878]}.
+expected:
+  status: success
+  confidence_tier: medium
+  primary_technique: BodyLimbNav
+  techniques_must_run:
+  - BodyLimbNav
+  techniques_must_skip: []

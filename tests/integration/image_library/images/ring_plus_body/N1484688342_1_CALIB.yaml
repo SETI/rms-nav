@@ -1,0 +1,29 @@
+schema_version: 1
+image_id: N1484688342_1_CALIB
+mission: COISS
+camera: NAC
+filter_combo: MT2+P0
+image_url: pds3://calibrated/COISS_2xxx/COISS_2009/data/1484688237_1484761461/N1484688342_1_CALIB.IMG
+scene_tags:
+- ring_plus_body
+- mimas
+ground_truth:
+  offset_dv_px: 9.1749
+  offset_du_px: -19.1923
+  offset_uncertainty_px: 1.0
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-07-09
+  ui_version: spindoctor 0.1.dev24 (cohort review batch 001)
+  notes: |
+    ring_plus_body exemplar from cohort-curation review batch 001 (seq 044).
+    Selection: MIMAS | >120 | -10.0; {"apparent_diameter_px": 55.5, "center_phase_deg": 126.28, "filter": "P0", "ring_edges_in_frame": ["keeler_a_ring_oe_2005_05_01_2005_08_01.inner", "keeler_a_ring_oe_2005_05_01_2005_08_01.outer", "keeler_a_ring_oe_2006_01_01_2009_07_01.inner", "keeler_a_ring_oe_2006_01_01_2009_07_01.outer", "keeler_a_ring_oe_2010_01_01_2013_08_01.inner", "keeler_a_ring_oe_2010_01_01_2013_08_01.outer"], "ring_opening_deg": -5.01, "target": "MIMAS", "year": "2005"}.
+    Operator verified the pipeline overlay alignment at the proposed offset during batch review (summary PNG plus, for star classes, a hard-stretch star-check PNG with circled catalog positions).
+    Pipeline: status=success, confidence=0.817, rank=high, techniques=['BodyLimbNav', 'RingEdgeNav', 'StarFieldFromCatalogNav', 'StarRefineNav', 'StarUniqueMatchNav'], per-technique offsets={"BodyLimbNav": [9.1482, -19.2175], "RingEdgeNav": [10.1821, -26.8157], "StarFieldFromCatalogNav": [0.0, 0.0], "StarUniqueMatchNav": [0.0, 0.0], "StarRefineNav": [9.6853, -18.4109]}.
+expected:
+  status: success
+  confidence_tier: medium
+  primary_technique: BodyLimbNav
+  techniques_must_run:
+  - BodyLimbNav
+  techniques_must_skip: []
