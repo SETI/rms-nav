@@ -38,6 +38,30 @@ QUERY_NAME = 'stage_a_batch001'
 
 RADII = json.loads((HERE / 'body_radii.json').read_text())['radius_km']
 
+# Usable epochs per mission (see spice_coverage.json _provenance); frames
+# outside these windows fail navigation with missing-SPICE errors, so they
+# are excluded from candidacy for every scene class.
+SPICE_COVERAGE = json.loads(
+    (HERE / 'spice_coverage.json').read_text())['windows']
+
+
+def epoch_covered(mission: str, image_time: str) -> bool:
+    """True if the ISO image time falls inside a usable SPICE window.
+
+    Parameters:
+        mission: Mission key ('COISS', 'VGISS', 'GOSSI', 'NHLORRI').
+        image_time: ISO date/time string from the index table; an empty
+            or unknown value is treated as covered (Stage B triage
+            catches any survivor).
+    """
+    if not image_time:
+        return True
+    windows = SPICE_COVERAGE.get(mission)
+    if not windows:
+        return True
+    day = image_time[:10]
+    return any(lo <= day <= hi for lo, hi in windows)
+
 # Images already in the library (curated or uncurated) -- never re-offer.
 EXISTING_IDS = {
     p.stem.replace('_CALIB', '')
@@ -254,7 +278,10 @@ def _scan_coiss_volume(vs: dict, volume: str, out: dict[str, list[dict]],
         texp_ms = idx.num(irow, 'EXPOSURE_DURATION')
         texp = texp_ms / 1000.0 if texp_ms else None
         filt = (idx.get(irow, 'FILTER_NAME') or '').strip()
-        time = (idx.get(irow, 'IMAGE_TIME') or '')[:4]
+        time_full = idx.get(irow, 'IMAGE_TIME') or ''
+        if not epoch_covered('COISS', time_full):
+            continue
+        time = time_full[:4]
         ra = idx.num(irow, 'RIGHT_ASCENSION')
         dec = idx.num(irow, 'DECLINATION')
 
@@ -485,7 +512,10 @@ def scan_go() -> dict[str, list[dict]]:
             texp = texp_ms / 1000.0 if texp_ms else None
             filt = (idx.get(irow, 'FILTER_NAME') or '').strip()
             tgt = (idx.get(irow, 'TARGET_NAME') or '').strip()
-            year = (idx.get(irow, 'IMAGE_TIME') or '')[:4]
+            time_full = idx.get(irow, 'IMAGE_TIME') or ''
+            if not epoch_covered('GOSSI', time_full):
+                continue
+            year = time_full[:4]
 
             brows = body_rows.get(filespec, [])
             res_bodies = [b for b in brows if resolved(body, b)]
@@ -603,7 +633,10 @@ def scan_vgiss() -> dict[str, list[dict]]:
                 texp_s = idx.num(irow, 'EXPOSURE_DURATION')
                 filt = (idx.get(irow, 'FILTER_NAME') or '').strip()
                 tgt = (idx.get(irow, 'TARGET_NAME') or '').strip()
-                year = (idx.get(irow, 'IMAGE_TIME') or '')[:4]
+                time_full = idx.get(irow, 'IMAGE_TIME') or ''
+                if not epoch_covered('VGISS', time_full):
+                    continue
+                year = time_full[:4]
                 inst = (idx.get(irow, 'INSTRUMENT_NAME') or '')
                 camera = 'WA' if 'WIDE' in inst else 'NA'
 
