@@ -440,8 +440,12 @@ def _scan_coiss_volume(vs: dict, volume: str, out: dict[str, list[dict]],
                     'body_partial_overflow', volset, volume, filespec,
                     'COISS', camera, dataset, (tgt, phase_bin(ph)), sel,
                     needs_visual=True))
-            if (d >= 1700 and ph is not None and ph < 90
-                    and lat_range is not None and lat_range < 120):
+            # 1700 <= d <= 2200: body ~2x the frame, so roughly half
+            # is off-screen with a limb arc in frame.  Batch-3 votes:
+            # the m-voted exemplars sat at d=1840-1960; everything
+            # d >= 2365 was rejected as 'extreme closeup filling fov'.
+            if (1700 <= d <= 2200 and ph is not None and ph < 90
+                    and lat_range is not None and 25 <= lat_range < 120):
                 out['body_mostly_offscreen'].append(cand(
                     'body_mostly_offscreen', volset, volume, filespec,
                     'COISS', camera, dataset, (tgt, phase_bin(ph)), sel,
@@ -791,9 +795,11 @@ def scan_go() -> dict[str, list[dict]]:
             break
         lim = maglim('GOSSI', 'SSI', fr['texp'])
         vm = star_vmags(fr['ra'], fr['dec'], FOV_DEG[('GOSSI', 'SSI')], lim)
-        # navigable content requirement: enough catalog stars that some
-        # should survive the glare
-        if len(vm) < 3:
+        # navigable content requirement: batch-3 votes rejected frames
+        # whose catalog stars sat at the detection limit ('just noise'),
+        # so demand clearly-bright stars with margin under the glare
+        n_clear = sum(1 for v in vm if v <= lim - 1.5)
+        if n_clear < 2:
             continue
         n_stray += 1
         out['scattered_light'].append(cand(
@@ -947,6 +953,13 @@ QUOTAS_BY_BATCH: dict[int, dict[str, int]] = {
     # re-targeted with the navigable-content requirement
     3: {
         'scattered_light': 14,
+        'body_mostly_offscreen': 8,
+    },
+    # batch 4: same two classes with batch-3 vote-driven refinements
+    # (diameter cap + lat floor for offscreen; bright-star margin for
+    # GOSSI scattered)
+    4: {
+        'scattered_light': 10,
         'body_mostly_offscreen': 8,
     },
 }
