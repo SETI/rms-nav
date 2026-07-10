@@ -479,8 +479,7 @@ These JSON files contain the navigation results, including:
    the simulator's realism as an unquantified assumption and must not
    be read as probabilities of real-image accuracy.  The
    ``confidence_provisional: true`` field in every ``_metadata.json``
-   marks this and will remain true until a calibration anchored to
-   real-image error measurements lands.
+   marks this sim-anchored basis.
 
 Summary PNG Files (``*_summary.png``)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

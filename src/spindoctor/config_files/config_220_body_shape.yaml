@@ -11,10 +11,10 @@
 #     _sources:                       # documentation-only; loader ignores `_` keys
 #       <field>: 'citation string'
 #
-# Population, sourcing discipline, and the review procedure are described
-# in the developers guide (dev_guide_config_and_static_data, "Body-shape
-# table: population and sources").  Summary of the source classes used
-# below, per the anti-hallucination rules there:
+# Sourcing discipline and the review procedure are described in the
+# developers guide (dev_guide_config_and_static_data, "Body-shape
+# table: sources").  Summary of the source classes used below, per the
+# anti-hallucination rules there:
 #
 # - MEASURED, cited: value read from a document fetched during the
 #   populating session.  The two load-bearing documents are
@@ -38,10 +38,9 @@
 #   feed sigma/reliability terms (not science products) and whose
 #   runtime fallbacks are themselves per-class estimates.
 #
-# albedo_mean is currently null throughout: it has no runtime consumer
-# and no albedo table could be fetched during the populating session
-# (NSSDC unreachable); populate it with citations when a consumer
-# materializes.
+# albedo_mean is null throughout: it has no runtime consumer.  Populate
+# it with cited values when a consumer materializes, following the
+# developers-guide procedure.
 
 body_shape:
   # ---------------------------------------------------------------- Saturn

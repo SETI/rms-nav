@@ -276,15 +276,13 @@ parsed ``Config`` — the citation lives in the file for human review only.
           ellipsoid_rms_residual_km: '...'
           # ... and so on for every numeric field.
 
-Body-shape table: population and sources
-----------------------------------------
+Body-shape table: sources
+-------------------------
 
-The table was populated (2026-07-10, Phase 10 section B / issue #175) for
-the bodies the four supported missions navigate: the Saturn system
-including the irregulars, the Galileans plus Amalthea, the Uranian majors,
-Triton and Proteus, and the Pluto system.  Two documents carry nearly all
-of the measured values, both fetched and read during the populating
-session:
+The table carries entries for the bodies the four supported missions
+navigate: the Saturn system including the irregulars, the Galileans plus
+Amalthea, the Uranian majors, Triton and Proteus, and the Pluto system.
+Two documents carry nearly all of the measured values:
 
 - **Thomas et al. (2007), Icarus 190, 573–584** — *Shapes of the
   saturnian icy satellites and their significance*.  The source of the
@@ -296,8 +294,8 @@ session:
   section 4 also gives the **2.5–8 %-of-mean-radius roughness class** for
   small satellites and asteroids (citing Thomas 1989), which is the
   stated basis for the ESTIMATE residuals of Hyperion, Janus,
-  Epimetheus, Prometheus, and Pandora — bodies whose residuals have no
-  directly-published per-body value in the fetched documents.
+  Epimetheus, Prometheus, and Pandora — bodies with no directly-published
+  per-body residual.
 - **Archinal et al. (2011), Celest Mech Dyn Astr 109, 101–135** — the IAU
   WGCCRE 2009 report.  Table 5 supplies every satellite's radii (the
   Saturn rows reproduce Thomas 2010) and the RMS-deviation-from-ellipsoid
@@ -305,27 +303,29 @@ session:
   (3.2), the Uranian majors, and Proteus (7.9); Table 4 supplies the
   1-bar planet ellipsoids.
 
-Pluto and Charon radii come from **Nimmo et al. (2017), Icarus 287**
-(arXiv:1603.00821).  Io's and Ganymede's RMS deviations are from
-**Archinal et al. (2018), CMDA 130:22** Table 5 via an in-session
-search-result summary only (the PDF resisted fetching) and are flagged in
-their ``_sources`` for reviewer spot-check.
+Pluto and Charon radii cite **Nimmo et al. (2017), Icarus 287**
+(arXiv:1603.00821).  Io's and Ganymede's RMS deviations cite
+**Archinal et al. (2018), CMDA 130:22** Table 5; their ``_sources``
+entries record that the citation was made from a search-result summary
+rather than the document itself and flag them for reviewer spot-check.
 
 Fields that are *estimates by design*: ``crater_scale_km`` (characteristic
 limb topographic roughness beyond the ellipsoid) and ``albedo_variation``
 have no standard published per-body scalar; entries carry
 ``'ESTIMATE — <physical basis>'`` sources and feed sigma/reliability
-terms only.  ``albedo_mean`` is currently ``null`` throughout — it has no
-runtime consumer and no albedo table could be fetched during the
-populating session.
+terms only.  ``albedo_mean`` is ``null`` throughout because it has no
+runtime consumer; a developer adding a consumer should populate it with
+cited values at that point, following the procedure below.
 
 Downstream, ``ellipsoid_rms_residual_km`` drives the LIMB_ARC
 normal-sigma quadrature and the ``max_phase_irregularity_factor``
 confidence term of ``BodyBlobNav`` (see
-:doc:`dev_guide_navigation_models_body`); the WS-5 calibration campaign
-(``util/calibration/``) renders its simulated bodies with relief
-amplitude tied to these same residual-over-radius ratios, so the
-sim-anchored confidence coefficients and this table stay one system.
+:doc:`dev_guide_navigation_models_body`).  The calibration tooling in
+``util/calibration/`` renders its simulated bodies at relief amplitudes
+derived from these same residual-over-radius ratios, so the sim-anchored
+confidence coefficients and this table form one system: a developer who
+revises a residual here should re-run that calibration (see
+``util/calibration/README.md``).
 
 Anti-hallucination procedure
 ----------------------------
