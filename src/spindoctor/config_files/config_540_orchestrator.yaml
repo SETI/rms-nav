@@ -5,7 +5,22 @@
 # spindoctor.nav_orchestrator.ensemble and
 # spindoctor.feature.reliability); the section exists so calibration
 # sweeps and user config files can override them without code changes.
-# All values are placeholders subject to Phase-10 empirical calibration.
+#
+# The tier min_confidence boundaries are SIM-ANCHORED (WS-5): derived
+# 2026-07-09 from the WS-2 sim campaign's fused results (util/calibration,
+# 3014 fused offsets) as the smallest confidence at which the tier's
+# sigma-gated subset achieves a 0.9 success rate against the tier's own
+# error budget (high: err <= 0.5 px at 0.922; medium: err <= 2.0 px at
+# 0.908).  max_sigma_px values are the tier definitions, not fitted.
+# min_confidence stays at 0.2: the campaign's fit rate in the 0.15-0.35
+# confidence bands is 0.53-0.61 on small n, which neither supports
+# raising nor lowering the gate.  Everything else remains subject to
+# empirical calibration.  Caveat carried from the same campaign: the
+# NCC-family techniques (disc, annulus, blob) report positional sigmas
+# far tighter than their actual sim error (<= 1-sigma coverage ~0.01 vs
+# the 0.39 Gaussian reference), so the sigma half of the tier gate is
+# effectively inert for them until the covariance scaling is fixed
+# (WS-9 territory; see the calibration report).
 orchestrator:
   ensemble:
     # Mahalanobis-distance threshold for grouping per-technique results.
@@ -28,8 +43,8 @@ orchestrator:
     # Confidence/sigma requirements per confidence tier; max_sigma_px
     # null means no sigma requirement for that tier.
     tier_thresholds:
-      high: {min_confidence: 0.8, max_sigma_px: 0.5}
-      medium: {min_confidence: 0.5, max_sigma_px: 2.0}
+      high: {min_confidence: 0.85, max_sigma_px: 0.5}
+      medium: {min_confidence: 0.45, max_sigma_px: 2.0}
       low: {min_confidence: 0.2, max_sigma_px: null}
   # Minimum reliability per feature type; features below their type's
   # threshold are gated out before any technique runs.  Feature types
