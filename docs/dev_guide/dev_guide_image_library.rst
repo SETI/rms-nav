@@ -152,7 +152,7 @@ through this loop:
    edge. When the recomputed offset is *better* than the operator-stored
    ground truth — for example a fix produces a sub-pixel offset where
    the prior implementation reported 1.5 px — the operator-stored
-   ground truth is updated in the same PR (a fresh
+   ground truth is updated in the same change (a fresh
    ``Save as Library Entry...`` from the manual nav dialog rewrites the
    sidecar's ``ground_truth`` block; ``operator``, ``verified_date``,
    and ``ui_version`` get refreshed automatically).
@@ -160,7 +160,7 @@ through this loop:
    ground-truth review is complete, the author runs
    ``python -m tests.integration.update_baselines --image-id <ids>`` to
    refresh the byte-stable baseline JSONs for the images that shifted.
-   The diff that update emits goes into the same PR as the code change.
+   The diff that update emits lands together with the code change.
 4. **Re-tune calibrated confidence if needed.**  If the change shifts
    the per-image confidence score (not just the offset), the author
    re-runs the offline confidence-tuning script. (Automated tooling
@@ -168,7 +168,7 @@ through this loop:
    slot pending a wider library cohort; the workflow uses ad-hoc
    per-technique tuning.) The per-technique ``confidence`` coefficient
    block in ``config_510_techniques.yaml`` updates accordingly.
-5. **Reviewer sign-off.**  PRs that touch any of (a) library sidecars,
+5. **Reviewer sign-off.**  Changes that touch any of (a) library sidecars,
    (b) baseline JSONs, or (c) per-technique coefficients require a
    reviewer to manually open at least one shifted image's summary PNG
    and verify the overlay still tracks the data. This is the
@@ -325,7 +325,7 @@ Two tests under ``tests/integration/test_baselines.py``:
   :meth:`tests.integration.baseline.Baseline.from_run` to round the
   fresh outputs, and asserts ``actual == expected`` (exact equality on
   all four keys). The failure message tells the operator to update
-  the JSON in the same PR if the diff is intended.
+  the JSON in the same change if the diff is intended.
 
 Plus a handful of round-trip / serialisation unit tests on
 :meth:`tests.integration.baseline.Baseline.from_run` and
@@ -368,8 +368,8 @@ was emitted, ``2`` on argument-parsing errors or when
 
 Sidecars must land first — the
 ``test_every_baseline_cites_a_sidecar`` invariant refuses orphan
-baselines. Baseline updates always require explicit operator review
-on the PR; the CLI is the mechanical step, but the human review of
+baselines. Baseline updates always require explicit operator review;
+the CLI is the mechanical step, but the human review of
 the resulting diff (does the new offset still overlay the limb?  does
 the new confidence still match ``expected.confidence_tier``?) is what
 keeps the regression layer trustworthy.
