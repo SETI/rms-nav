@@ -18,6 +18,7 @@ from spindoctor.nav_technique.diagnostics import RingEdgeDiagnostics
 from spindoctor.nav_technique.nav_technique_ring_edge import (
     _RANK1_NULL_RELATIVE_THRESHOLD,
     RingEdgeNav,
+    aggregate_edge_normal_angle_deg,
 )
 
 
@@ -289,6 +290,58 @@ def test_ring_edge_nav_flat_parallel_edges_with_minority_snaps_not_spurious(
     assert result.diagnostics.per_edge_dt_rms_mean > 3.0
     assert result.spurious is False
     assert result.diagnostics.is_rank_1 is True
+
+
+def test_aggregate_edge_normal_angle_all_straight_horizontal(
+    flat_polyline: FlatPolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+) -> None:
+    """Horizontal straight edges have a +v-aligned normal: angle 0 deg."""
+    vertices, outward = flat_polyline(100.5, 20.0, 180.0, 60)
+    feature = make_ring_feature(
+        'flat', vertices=vertices, outward_normals=outward, is_straight_line=True
+    )
+    angle = aggregate_edge_normal_angle_deg([feature])
+    assert angle is not None
+    assert angle == pytest.approx(0.0, abs=1.0e-6)
+
+
+def test_aggregate_edge_normal_angle_polarity_sign_independent(
+    flat_polyline: FlatPolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+) -> None:
+    """Two parallel edges with opposite normal senses do not cancel."""
+    vertices_a, outward_a = flat_polyline(80.5, 20.0, 180.0, 60)
+    vertices_b, outward_b = flat_polyline(120.5, 20.0, 180.0, 60)
+    feat_a = make_ring_feature(
+        'inner', vertices=vertices_a, outward_normals=outward_a, is_straight_line=True
+    )
+    feat_b = make_ring_feature(
+        'outer', vertices=vertices_b, outward_normals=-outward_b, is_straight_line=True
+    )
+    angle = aggregate_edge_normal_angle_deg([feat_a, feat_b])
+    assert angle is not None
+    assert angle == pytest.approx(0.0, abs=1.0e-6)
+
+
+def test_aggregate_edge_normal_angle_none_when_any_edge_curved(
+    circle_polyline: CirclePolylineFactory,
+    flat_polyline: FlatPolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+) -> None:
+    """A mixed straight + curved scene is full-rank: no constraint seed."""
+    curved_v, curved_n = circle_polyline((100.0, 100.0), 30.0, 60)
+    flat_v, flat_n = flat_polyline(150.5, 20.0, 180.0, 60)
+    curved = make_ring_feature(
+        'curved', vertices=curved_v, outward_normals=curved_n, is_straight_line=False
+    )
+    flat = make_ring_feature('flat', vertices=flat_v, outward_normals=flat_n, is_straight_line=True)
+    assert aggregate_edge_normal_angle_deg([curved, flat]) is None
+
+
+def test_aggregate_edge_normal_angle_none_without_ring_edges() -> None:
+    """No ring-edge features means no seed."""
+    assert aggregate_edge_normal_angle_deg([]) is None
 
 
 def test_ring_edge_nav_registered_with_navtechnique_registry() -> None:

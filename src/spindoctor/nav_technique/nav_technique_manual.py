@@ -28,6 +28,7 @@ from spindoctor.feature.feature_type import NavFeatureType
 from spindoctor.nav_technique.diagnostics import ManualNavDiagnostics
 from spindoctor.nav_technique.feasibility import NavFeasibilityReport
 from spindoctor.nav_technique.nav_technique import NavTechnique
+from spindoctor.nav_technique.nav_technique_ring_edge import aggregate_edge_normal_angle_deg
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only import
@@ -164,6 +165,7 @@ class NavTechniqueManual(NavTechnique):
                 model_mask_ext=model_mask,
                 annotations=self._annotations,
                 config=self.config,
+                constraint_normal_seed_deg=aggregate_edge_normal_angle_deg(features),
                 parent=None,
             )
             accepted, chosen_offset, _last_corr = dialog.run_modal()

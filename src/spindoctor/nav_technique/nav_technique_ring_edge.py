@@ -41,7 +41,7 @@ from spindoctor.support.types import NDArrayFloatType
 if TYPE_CHECKING:  # pragma: no cover - typing-only import
     from spindoctor.nav_orchestrator.nav_context import NavContext
 
-__all__ = ['RingEdgeNav']
+__all__ = ['RingEdgeNav', 'aggregate_edge_normal_angle_deg']
 
 # All numeric tunables for this technique live in
 # ``config_files/config_510_techniques.yaml`` under
@@ -425,6 +425,39 @@ def _is_rank_1(covariance: NDArrayFloatType) -> bool:
     if largest == 0.0:
         return True
     return smallest / largest < _RANK1_NULL_RELATIVE_THRESHOLD
+
+
+def aggregate_edge_normal_angle_deg(features: list[NavFeature]) -> float | None:
+    """Return the dominant edge-normal orientation of an all-straight scene.
+
+    The angle is in degrees in the ``(v, u)`` frame, measured from ``+v``
+    toward ``+u`` (the unit normal is ``(cos, sin)``) — the same convention
+    as the sidecar schema's ``ground_truth.constraint.normal_angle_deg``.
+    The orientation is the dominant eigenvector of the per-vertex normals'
+    outer-product sum, so it is independent of each edge's polarity sign.
+
+    Parameters:
+        features: Any feature list; only ``RING_EDGE`` polylines are read.
+
+    Returns:
+        The orientation in degrees, normalised to ``(-90, 90]``, or ``None``
+        unless at least one ring-edge polyline is present and every one is
+        straight — the constraint direction is only meaningful for a rank-1
+        scene.
+    """
+    _vertices, normals, _sigmas, ids, every_straight = _aggregate_ring_edges(features)
+    if not ids or not every_straight:
+        return None
+    outer_sum = normals.T @ normals
+    _eigvals, eigvecs = np.linalg.eigh(outer_sum)
+    n_hat = eigvecs[:, -1]
+    angle = math.degrees(math.atan2(float(n_hat[1]), float(n_hat[0])))
+    # An orientation, not a direction: fold to (-90, 90].
+    if angle <= -90.0:
+        angle += 180.0
+    elif angle > 90.0:
+        angle -= 180.0
+    return float(angle)
 
 
 def _rank1_projected_covariance(
