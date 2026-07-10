@@ -345,6 +345,16 @@ def main() -> None:
             continue
         if vote != 'y' or not rec:
             continue
+        if (vote == 'y' and entry['scene_class'] != 'negative_cases'
+                and rec.get('offset_px') is None):
+            # y without a verified offset cannot become ground truth;
+            # treat as m (good example, offset pending manual nav)
+            manual_queue.append({'image_name': entry['image_name'],
+                                 'scene_class': entry['scene_class'],
+                                 'seq': entry['seq'],
+                                 'comment': 'y-vote without proposed offset; '
+                                            'routed to manual queue'})
+            continue
         if entry['scene_class'] in DEFERRED_CLASSES:
             deferred.append({'image_name': entry['image_name'],
                              'scene_class': entry['scene_class'],
