@@ -1,0 +1,51 @@
+# Cohort-triage rescue config: relax the uncalibrated placeholder gates
+# so navigable scenes produce a proposed offset for operator review.
+# NOT for production navigation - confidence values are meaningless
+# under these settings; only the offsets (verified by eye) matter.
+stars:
+  min_confidence: 0.4
+techniques:
+  BodyDiscCorrelateNav:
+    alpha0: 0.5
+    tuning:
+      consistency_max_px: 40.0
+      consistency_max_fraction_of_diameter: 0.25
+  BodyBlobNav:
+    alpha0: 0.5
+  BodyLimbNav:
+    tuning:
+      spurious_dt_rms_factor: 50.0
+      spurious_dt_floor_px: 30.0
+      spurious_min_inliers: 3
+      spurious_min_inlier_fraction: 0.05
+  BodyTerminatorNav:
+    tuning:
+      spurious_dt_rms_factor: 50.0
+      spurious_dt_floor_px: 30.0
+      spurious_min_inliers: 3
+      spurious_min_inlier_fraction: 0.05
+  RingEdgeNav:
+    tuning:
+      spurious_dt_rms_factor: 50.0
+      spurious_dt_floor_px: 30.0
+      spurious_min_inliers: 3
+      spurious_min_inlier_fraction: 0.05
+  StarUniqueMatchNav:
+    alpha0: 1.0
+  StarRefineNav:
+    alpha0: 1.0
+  StarFieldFromCatalogNav:
+    alpha0: 0.5
+orchestrator:
+  ensemble:
+    min_confidence: 0.05
+    tier_thresholds:
+      low: {min_confidence: 0.05, max_sigma_px: null}
+  reliability_gate:
+    STAR: 0.05
+    LIMB_ARC: 0.05
+    TERMINATOR_ARC: 0.05
+    BODY_DISC: 0.05
+    BODY_BLOB: 0.05
+    RING_EDGE: 0.05
+    RING_ANNULUS: 0.05

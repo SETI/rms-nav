@@ -20,13 +20,27 @@ narrow cohort silently invalidates it.
 
 ## 1. Data sources (all local, no network needed)
 
+**Canonical environment: `source /seti/newnav/setup.sh`.** It activates the
+project venv (`venv/` at the repo root — not `.venv`, which is stale) and
+exports every variable below. Do not use the `/mnt/ganymede/SPICE` or
+`/mnt/ganymede/UCAC4` shares for navigation runs: the SPICE share has no
+`SPICE.db` (which spicedb requires) and the UCAC4 mountpoint is empty.
+
 | Resource | Path |
 |---|---|
-| PDS3 holdings (images) | `/mnt/ganymede/PDS/holdings` (set `PDS3_HOLDINGS_DIR` to this) |
+| PDS3 holdings (images) | `/mnt/ganymede/PDS/holdings` (`PDS3_HOLDINGS_DIR`) |
 | Geometry metadata tables | `/mnt/ganymede/PDS/holdings/metadata/<VOLSET>/<VOLUME>/` |
-| SPICE kernels | `/mnt/ganymede/SPICE` (`SPICE_PATH`) |
-| UCAC4 star catalog | `/mnt/ganymede/UCAC4` (`UCAC4_PATH`) |
-| OOPS resources | set `OOPS_RESOURCES` per CI workflow if no local mirror |
+| OOPS resources (incl. SPICE) | `/home/rfrench/DS/Shared/OOPS-Resources` (`OOPS_RESOURCES`; `SPICE.db` lives at `$OOPS_RESOURCES/SPICE/SPICE.db`, no `SPICE_PATH` needed) |
+| UCAC4 star catalog | `/data/external-data/star-catalogs/UCAC4` (`UCAC4_PATH`) |
+| YBSC star catalog | `/data/external-data/star-catalogs/YBSC` (`YBSC_PATH`) |
+| Nav results (default root) | `/data/nav-offset-results` (`NAV_RESULTS_ROOT`) |
+
+**Tooling:** the Stage A/B/C automation lives in `util/cohort_curation/`
+(scan, triage, review-batch scripts plus `body_radii.json`; see its README
+for usage and the metadata-format gotchas discovered while building it).
+Generated artifacts — candidate manifests, triage results, review batches,
+votes — go under `_work/`, which is gitignored; only the tooling is
+tracked.
 
 Volume sets by instrument: `COISS_1xxx` (Cassini Jupiter leg) and `COISS_2xxx`
 (Cassini Saturn) for COISS; `VGISS_5xxx`/`6xxx`/`7xxx`/`8xxx` (Voyager
@@ -145,7 +159,8 @@ flyby is worthless. Enforce at query time:
 ## 4. Workflow: minimal operator interaction
 
 The operator's entire job is: look at a PNG, vote yes/no, optionally comment.
-Target under 30 seconds per image, in batches of 20-30. Everything else is
+Target under 30 seconds per image, in batches of up to 100 (operator
+preference, 2026-07-08). Everything else is
 automated.
 
 **Stage A — query.** Scripted scan of the metadata tables per cohort
