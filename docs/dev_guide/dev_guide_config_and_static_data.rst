@@ -353,8 +353,7 @@ Every PR touching ``config_220_body_shape.yaml`` requires a reviewer to
 spot-check **at least 5 randomly-selected citations** by opening the cited
 document and verifying the value appears at the cited location. PRs are
 merged only after the reviewer marks the PR with the
-``cited-values-spot-checked`` label. To keep review tractable, an
-initial-population PR is broken into ≤ 10 bodies per PR.
+``cited-values-spot-checked`` label.
 
 Validation tests
 ----------------
