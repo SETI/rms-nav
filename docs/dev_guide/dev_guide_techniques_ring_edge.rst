@@ -15,9 +15,13 @@ Tukey-reweighted Levenberg-Marquardt refinement that
 
 When every consumed ring edge is flagged straight-line the combined Jacobian is rank-
 deficient — all parallel ring edges share a single ring-plane normal so the along-edge axis
-is unobservable. The returned covariance is honestly rank-1 in that case; the orchestrator's
-ensemble combine fuses it with any orthogonal-axis result (a star, body limb, body blob)
-before declaring a final answer.
+is unobservable. The technique projects the returned covariance to be *exactly* rank-1
+(see below); the orchestrator's ensemble combine fuses it with any orthogonal-axis result
+(a star, body limb, body blob) before declaring a final answer, and when no orthogonal
+information exists the fused result carries
+:attr:`~spindoctor.support.status_reason.NavStatusReason.RANK_1_ONLY` with the offset
+reported as the minimum-norm representative along the edge and the unobservable axis
+surfaced through ``sigma_along_unobservable_px``.
 
 Feasibility passes when at least one offered ``RING_EDGE`` has a non-empty polyline. A single
 non-empty edge is sufficient — even an all-flat scene produces a useful rank-1 constraint.
@@ -37,12 +41,19 @@ Rank-deficient covariance
 
 Ring edges differ from limbs in that each ring edge is only locally observable along its
 *radial* direction (orthogonal to the edge tangent). Motion along the tangent of a single
-ring edge produces no DT cost change. When a single ring edge dominates the consumed set,
-the joint Jacobian's null space is the along-edge tangent and the M-estimator information
-matrix is rank-1. The Moore-Penrose pseudoinverse used by
-:func:`~spindoctor.nav_technique.dt_fitting.information_matrix_to_covariance` handles this
-gracefully — the returned 2x2 covariance has an effectively-infinite eigenvalue along the
-tangent direction.
+ring edge produces no DT cost change *in the interior*; the finite polyline's end vertices
+do respond to tangential motion (they track wherever the detected edge enters and leaves
+the frame), so the raw LM covariance of an all-straight scene often comes back numerically
+tight along the tangent — a false constraint. The technique therefore enforces the rank-1
+contract explicitly: when every consumed edge is straight (or the raw covariance already
+fails the relative-eigenvalue rank test), the translation covariance is rebuilt as the
+exactly singular ``sigma_n^2 n n^T``, where ``n`` is the dominant eigenvector of the
+per-vertex normals' outer-product sum (polarity-sign-independent) and ``sigma_n^2`` the raw
+covariance's marginal variance along it. Exact singularity is the representation the
+ensemble is built around: ``pinvh`` keeps the normal-axis measurement when forming the
+information matrix, the combine's rank-deficiency test fires, and the unobservable axis is
+reported through the ``sigma_along_unobservable_px`` sentinel rather than an inflated
+per-axis sigma.
 
 Multi-edge inputs at different orbital radii share the same ring-plane normal but sample
 different points around the projected ring; the joint information matrix becomes full-rank
@@ -74,8 +85,9 @@ Sources of uncertainty
 ----------------------
 
 The reported covariance is the Moore-Penrose pseudoinverse of the M-estimator information
-matrix at convergence; the rank-1 case carries an unbounded eigenvalue along the tangent
-direction. When the converged offset sits within the at-edge tolerance of any axis bound,
+matrix at convergence; the rank-1 case is projected to an exactly singular covariance whose
+only non-null axis is the aggregate edge normal (see above). When the converged offset sits
+within the at-edge tolerance of any axis bound,
 or when the rotation parameter is at the configured fraction of its cap, the result is
 flagged :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge`.
 
@@ -95,6 +107,14 @@ All numeric tunables for this technique live in ``techniques.RingEdgeNav.tuning`
   threshold; the threshold is the larger of the floor and the per-feature sigma multiple.
 - ``spurious_min_inliers`` — int, default ``6`` (count). Below this Tukey-inlier count the
   M-estimator covariance is uninformative; the result is flagged spurious.
+- ``spurious_min_inlier_fraction`` — float, default ``0.5`` (dimensionless). A Tukey inlier
+  fraction (inliers over aggregated model vertices) below this marks the result spurious.
+  This is the wrong-ringlet mis-convergence detector: a fit locked onto the wrong ring
+  anchors a minority of the model vertices, while a correct fit whose faintest edge is
+  simply undetectable in the image still anchors a large majority. Residual statistics
+  cannot make that distinction — an undetected edge and a misaligned edge both sit a
+  ringlet spacing from the nearest image edge — which is why the gate is a support
+  fraction rather than a residual threshold.
 - ``rotation_at_edge_fraction`` — float, default ``0.95`` (dimensionless). When
   :attr:`~spindoctor.nav_orchestrator.nav_context.NavContext.fit_camera_rotation` is true, the
   converged rotation magnitude trips
@@ -105,7 +125,7 @@ All numeric tunables for this technique live in ``techniques.RingEdgeNav.tuning`
 Per-instrument overrides
 ------------------------
 
-The five keys above are global; per-instrument YAML files in
+The keys above are global; per-instrument YAML files in
 ``src/spindoctor/config_files/config_4N0_inst_*.yaml`` do not override any of them.
 
 Confidence formula
