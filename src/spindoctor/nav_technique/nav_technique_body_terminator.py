@@ -160,6 +160,7 @@ class BodyTerminatorNav(NavTechnique):
         )
         self._lm_trust_region_px = float(self.tuning['lm_trust_region_px'])
         self._lm_tikhonov_alpha = float(self.tuning['lm_tikhonov_alpha'])
+        self._model_error_floor_px = float(self.tuning.get('model_error_floor_px', 0.0))
         self._at_edge_tolerance_px = float(self.tuning['at_edge_tolerance_px'])
         self._rotation_at_edge_fraction = float(self.tuning['rotation_at_edge_fraction'])
 
@@ -417,6 +418,15 @@ class BodyTerminatorNav(NavTechnique):
                 mean_phase,
                 mean_albedo,
             )
+            # Model-error floor, added in quadrature to the translation
+            # diagonal (#210): the robust-fit covariance under-reports the
+            # model error the fit cannot see (edge-vs-silhouette offset,
+            # shape mismatch), leaving these results over-weighted in the
+            # ensemble against the floored NCC techniques.
+            if self._model_error_floor_px > 0.0:
+                covariance = covariance.copy()
+                covariance[0, 0] += self._model_error_floor_px**2
+                covariance[1, 1] += self._model_error_floor_px**2
             return NavTechniqueResult(
                 technique_name=self.name,
                 feature_ids=tuple(feature_ids),

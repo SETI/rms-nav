@@ -145,6 +145,7 @@ class StarRefineNav(NavTechnique):
         self._at_edge_tolerance_px = float(self.tuning['at_edge_tolerance_px'])
         self._single_inlier_confidence_cap = float(self.tuning['single_inlier_confidence_cap'])
         self._rotation_at_edge_fraction = float(self.tuning['rotation_at_edge_fraction'])
+        self._model_error_floor_px = float(self.tuning.get('model_error_floor_px', 0.0))
         if self._min_inliers < 1:
             raise ValueError(f'min_inliers must be >= 1; got {self._min_inliers}')
         if not 0.0 <= self._single_inlier_confidence_cap <= 1.0:
@@ -326,6 +327,12 @@ class StarRefineNav(NavTechnique):
                 residual_scatter_px,
                 confidence,
             )
+            # Model-error floor, added in quadrature to the translation
+            # diagonal (#210); see the YAML tuning comment.
+            if self._model_error_floor_px > 0.0:
+                cov = cov.copy()
+                cov[0, 0] += self._model_error_floor_px**2
+                cov[1, 1] += self._model_error_floor_px**2
             return NavTechniqueResult(
                 technique_name=self.name,
                 feature_ids=tuple(f.feature_id for f in inliers),

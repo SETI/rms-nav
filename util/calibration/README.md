@@ -45,7 +45,18 @@ package); generated artifacts go under `_work/calibration/` (gitignored).
 4. Write the fitted alphas into `config_510_techniques.yaml` (by hand, so
    the YAML comments stay curated), then **re-collect** — fused
    confidences depend on the per-technique alphas.
-5. **`fit_gates.py`** — derives the orchestrator acceptance parameters
+5. **`fit_floors.py`** — solves each technique's `model_error_floor_px`
+   tuning value (#210): the quadrature floor that brings the 2-sigma
+   coverage of `sqrt(sigma_reported^2 + floor^2)` to the 2D-Gaussian
+   expectation (0.865) against planted truth.  Run it on a collection
+   pass made with the floors at their current values: a converged
+   configuration solves to ~0 additional floor for every technique.
+
+   ```bash
+   venv/bin/python util/calibration/fit_floors.py _work/calibration/rows_v5.jsonl
+   ```
+
+6. **`fit_gates.py`** — derives the orchestrator acceptance parameters
    (`config_540_orchestrator.yaml`) from the pass-2 fused rows: tier
    `min_confidence` boundaries at the WS-5 error-percentile targets and
    the final `min_confidence` gate, plus the per-technique sigma coverage
@@ -56,7 +67,7 @@ package); generated artifacts go under `_work/calibration/` (gitignored).
        --out-report _work/calibration/gates_v2.md
    ```
 
-6. **`library_crosscheck.py`** — WS-5 step-6 plausibility cross-check:
+7. **`library_crosscheck.py`** — WS-5 step-6 plausibility cross-check:
    runs the calibrated pipeline over every operator-curated sidecar
    (needs the local-holdings environment) and reports status / tier /
    offset / primary-technique agreement independently per image, plus a

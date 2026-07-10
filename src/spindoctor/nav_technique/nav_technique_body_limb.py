@@ -136,6 +136,7 @@ class BodyLimbNav(NavTechnique):
         self._gradient_ridge_refine = bool(self.tuning['gradient_ridge_refine'])
         self._at_edge_tolerance_px = float(self.tuning['at_edge_tolerance_px'])
         self._rotation_at_edge_fraction = float(self.tuning['rotation_at_edge_fraction'])
+        self._model_error_floor_px = float(self.tuning.get('model_error_floor_px', 0.0))
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Return whether the input set carries any usable limb arc.
@@ -386,6 +387,15 @@ class BodyLimbNav(NavTechnique):
                 sigma_min_px,
                 visible_limb_arc_fraction,
             )
+            # Model-error floor, added in quadrature to the translation
+            # diagonal (#210): the robust-fit covariance under-reports the
+            # model error the fit cannot see (edge-vs-silhouette offset,
+            # shape mismatch), leaving these results over-weighted in the
+            # ensemble against the floored NCC techniques.
+            if self._model_error_floor_px > 0.0:
+                covariance = covariance.copy()
+                covariance[0, 0] += self._model_error_floor_px**2
+                covariance[1, 1] += self._model_error_floor_px**2
             return NavTechniqueResult(
                 technique_name=self.name,
                 feature_ids=tuple(feature_ids),

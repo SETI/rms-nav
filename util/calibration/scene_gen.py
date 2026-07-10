@@ -44,6 +44,45 @@ FAMILIES = (
     'star_unique',
 )
 
+# Body identities the campaign draws from, with mean radius and published
+# ellipsoid RMS residual pulled live from config_220_body_shape.yaml (so
+# the campaign always matches the shipped table).  Every rendered body is
+# a polyhedral mesh whose relief AMPLITUDE is ~3x the body's fractional
+# RMS residual (amplitude ~ 3 sigma of relief), while the navigator
+# predicts the smooth (zero-relief) limit -- so the rendered shape error,
+# and hence the recovered-offset error, physically tracks the
+# max_phase_irregularity_factor the confidence formula consumes.  The
+# scene also carries km_per_pixel = mean_radius_km / radius_px, without
+# which the sim blob feature reports a zero irregularity factor.
+_REGULAR_BODIES = ('MIMAS', 'ENCELADUS', 'TETHYS', 'DIONE', 'RHEA')
+_IRREGULAR_BODIES = ('HYPERION', 'PHOEBE', 'JANUS', 'EPIMETHEUS')
+
+
+def _body_catalog() -> dict[str, tuple[float, float]]:
+    """Return ``{name: (mean_radius_km, rms_residual_km)}`` from config_220."""
+    from spindoctor.config import DEFAULT_CONFIG
+
+    catalog: dict[str, tuple[float, float]] = {}
+    for name in _REGULAR_BODIES + _IRREGULAR_BODIES:
+        entry = DEFAULT_CONFIG.body_shape[name]
+        radii = entry['radii_km']
+        catalog[name] = (
+            sum(float(r) for r in radii) / len(radii),
+            float(entry['ellipsoid_rms_residual_km']),
+        )
+    return catalog
+
+
+_CATALOG: dict[str, tuple[float, float]] | None = None
+
+
+def _catalog() -> dict[str, tuple[float, float]]:
+    """Lazily built body catalog (config load deferred past import)."""
+    global _CATALOG
+    if _CATALOG is None:
+        _CATALOG = _body_catalog()
+    return _CATALOG
+
 
 def _read_noise(rng: random.Random, *, lo: float = 1.0, hi: float = 48.0) -> float:
     """Log-uniform read-noise draw (DN) between ``lo`` and ``hi``."""
@@ -74,29 +113,47 @@ def _base(rng: random.Random, *, size: int) -> dict[str, Any]:
     }
 
 
-def _mesh_body(
+def _catalog_body(
     rng: random.Random,
     *,
-    name: str,
     center_v: float,
     center_u: float,
     radius: float,
     phase: float,
     illumination: float,
-    lumpiness: float,
+    irregular_fraction: float,
     pose_error_deg: float = 0.0,
 ) -> dict[str, Any]:
-    """An irregular (mesh) body whose nav prediction is its smooth limit.
+    """A named body whose rendered relief tracks its published shape residual.
 
-    The renderer draws the lumpy mesh; the navigator predicts
-    ``mesh_lumpiness 0.0`` (and, when ``pose_error_deg`` is nonzero, a
-    Y-Euler pose rotated away from the rendered one) -- the controlled
-    model-error channel the calibration needs.
+    Draws the identity from the config_220-backed catalog (regular vs
+    irregular per ``irregular_fraction``), renders a polyhedral mesh whose
+    relief amplitude is ~3x the body's fractional RMS residual, and has
+    the navigator predict the smooth (zero-relief) limit -- so the shape
+    error the navigator cannot model scales with the same
+    residual-over-radius ratio the ``max_phase_irregularity_factor``
+    confidence term consumes.  ``km_per_pixel`` gives the sim blob feature
+    the physical scale that factor needs (it reports 0.0 without it).
     """
+    if rng.random() < irregular_fraction:
+        name = rng.choice(_IRREGULAR_BODIES)
+    else:
+        name = rng.choice(_REGULAR_BODIES)
+    mean_radius_km, rms_residual_km = _catalog()[name]
+    residual_fraction = rms_residual_km / mean_radius_km
+    lumpiness = 3.0 * residual_fraction
     pose = [rng.uniform(0.0, 60.0), rng.uniform(0.0, 60.0), 0.0]
     nav_override: dict[str, Any] = {'mesh_lumpiness': 0.0}
     if pose_error_deg != 0.0:
         nav_override['pose_euler_deg'] = [pose[0], pose[1] + pose_error_deg, pose[2]]
+    # Irregular bodies get genuinely tri-axial base ellipsoids; the
+    # near-spherical regulars keep modest axis spreads.
+    if name in _IRREGULAR_BODIES:
+        axis2 = radius * rng.uniform(0.75, 0.95)
+        axis3 = radius * rng.uniform(0.6, 0.85)
+    else:
+        axis2 = radius * rng.uniform(0.97, 1.0)
+        axis3 = radius * rng.uniform(0.95, 1.0)
     return {
         'name': name,
         'shape_model': 'polyhedral_mesh',
@@ -106,36 +163,12 @@ def _mesh_body(
         'center_v': center_v,
         'center_u': center_u,
         'axis1': radius,
-        'axis2': radius * rng.uniform(0.75, 0.95),
-        'axis3': radius * rng.uniform(0.6, 0.85),
+        'axis2': axis2,
+        'axis3': axis3,
         'illumination_angle': illumination,
         'phase_angle': phase,
+        'km_per_pixel': mean_radius_km / radius,
         'nav_override': nav_override,
-    }
-
-
-def _ellipsoid_body(
-    rng: random.Random,
-    *,
-    name: str,
-    center_v: float,
-    center_u: float,
-    radius: float,
-    phase: float,
-    illumination: float,
-) -> dict[str, Any]:
-    """A regular (spherical-ellipsoid) body with no model error."""
-    del rng
-    return {
-        'name': name,
-        'shape_model': 'ellipsoid',
-        'center_v': center_v,
-        'center_u': center_u,
-        'axis1': radius,
-        'axis2': radius,
-        'axis3': radius,
-        'illumination_angle': illumination,
-        'phase_angle': phase,
     }
 
 
@@ -148,27 +181,15 @@ def gen_disc(rng: random.Random) -> dict[str, Any]:
     illumination = rng.uniform(0.0, 40.0)
     center_v = size / 2 + rng.uniform(-0.15, 0.15) * size
     center_u = size / 2 + rng.uniform(-0.15, 0.15) * size
-    if rng.random() < 0.35:
-        body = _mesh_body(
-            rng,
-            name='HYPERION',
-            center_v=center_v,
-            center_u=center_u,
-            radius=radius,
-            phase=phase,
-            illumination=illumination,
-            lumpiness=rng.uniform(0.05, 0.5),
-        )
-    else:
-        body = _ellipsoid_body(
-            rng,
-            name='RHEA',
-            center_v=center_v,
-            center_u=center_u,
-            radius=radius,
-            phase=phase,
-            illumination=illumination,
-        )
+    body = _catalog_body(
+        rng,
+        center_v=center_v,
+        center_u=center_u,
+        radius=radius,
+        phase=phase,
+        illumination=illumination,
+        irregular_fraction=0.35,
+    )
     params['bodies'] = [body]
     return params
 
@@ -186,40 +207,19 @@ def gen_limb(rng: random.Random) -> dict[str, Any]:
     displacement = rng.uniform(0.0, radius * 0.9)
     center_v = size / 2 + displacement * math.sin(theta)
     center_u = size / 2 + displacement * math.cos(theta)
-    roll = rng.random()
-    if roll < 0.20:
-        body = _mesh_body(
-            rng,
-            name='HYPERION',
-            center_v=center_v,
-            center_u=center_u,
-            radius=radius,
-            phase=phase,
-            illumination=illumination,
-            lumpiness=rng.uniform(0.05, 0.35),
-        )
-    elif roll < 0.40:
-        body = _mesh_body(
-            rng,
-            name='HYPERION',
-            center_v=center_v,
-            center_u=center_u,
-            radius=radius,
-            phase=phase,
-            illumination=illumination,
-            lumpiness=rng.uniform(0.05, 0.25),
-            pose_error_deg=rng.uniform(2.0, 35.0),
-        )
-    else:
-        body = _ellipsoid_body(
-            rng,
-            name='RHEA',
-            center_v=center_v,
-            center_u=center_u,
-            radius=radius,
-            phase=phase,
-            illumination=illumination,
-        )
+    # A pose-error slice keeps the "confidently wrong limb" failure mode
+    # in the cohort (the trained-away B7-3 scenario).
+    pose_error = rng.uniform(2.0, 35.0) if rng.random() < 0.2 else 0.0
+    body = _catalog_body(
+        rng,
+        center_v=center_v,
+        center_u=center_u,
+        radius=radius,
+        phase=phase,
+        illumination=illumination,
+        irregular_fraction=0.4,
+        pose_error_deg=pose_error,
+    )
     params['bodies'] = [body]
     return params
 
@@ -233,61 +233,42 @@ def gen_terminator(rng: random.Random) -> dict[str, Any]:
     illumination = rng.uniform(5.0, 35.0)
     center_v = size / 2 + rng.uniform(-0.1, 0.1) * size
     center_u = size / 2 + rng.uniform(-0.1, 0.1) * size
-    if rng.random() < 0.25:
-        body = _mesh_body(
-            rng,
-            name='HYPERION',
-            center_v=center_v,
-            center_u=center_u,
-            radius=radius,
-            phase=phase,
-            illumination=illumination,
-            lumpiness=rng.uniform(0.05, 0.4),
-        )
-    else:
-        body = _ellipsoid_body(
-            rng,
-            name='RHEA',
-            center_v=center_v,
-            center_u=center_u,
-            radius=radius,
-            phase=phase,
-            illumination=illumination,
-        )
+    body = _catalog_body(
+        rng,
+        center_v=center_v,
+        center_u=center_u,
+        radius=radius,
+        phase=phase,
+        illumination=illumination,
+        irregular_fraction=0.4,
+    )
     params['bodies'] = [body]
     return params
 
 
 def gen_blob(rng: random.Random) -> dict[str, Any]:
-    """Small / distant body (BodyBlobNav regime)."""
+    """Small-to-mid body (BodyBlobNav regime).
+
+    The BODY_BLOB reliability gate currently culls genuinely small bodies
+    (issue #209), so the range extends into the gate-admitted sizes; the
+    sub-gate scenes still exercise the fused failure path.
+    """
     size = 128
     params = _base(rng, size=size)
-    radius = rng.uniform(2.5, 14.0)
+    radius = rng.uniform(2.5, 30.0)
     phase = rng.uniform(10.0, 130.0)
     illumination = rng.uniform(0.0, 35.0)
     center_v = size / 2 + rng.uniform(-0.2, 0.2) * size
     center_u = size / 2 + rng.uniform(-0.2, 0.2) * size
-    if rng.random() < 0.4:
-        body = _mesh_body(
-            rng,
-            name='HYPERION',
-            center_v=center_v,
-            center_u=center_u,
-            radius=radius,
-            phase=phase,
-            illumination=illumination,
-            lumpiness=rng.uniform(0.1, 0.5),
-        )
-    else:
-        body = _ellipsoid_body(
-            rng,
-            name='RHEA',
-            center_v=center_v,
-            center_u=center_u,
-            radius=radius,
-            phase=phase,
-            illumination=illumination,
-        )
+    body = _catalog_body(
+        rng,
+        center_v=center_v,
+        center_u=center_u,
+        radius=radius,
+        phase=phase,
+        illumination=illumination,
+        irregular_fraction=0.5,
+    )
     params['bodies'] = [body]
     return params
 

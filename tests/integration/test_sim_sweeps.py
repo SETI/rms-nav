@@ -131,10 +131,19 @@ def test_star_rotation_sweep_recovers_roll() -> None:
 
 
 def test_irregularity_sweep_starts_matched() -> None:
-    """At zero relief the predicted smooth body equals the rendered one."""
+    """At zero relief the fused recovery stays sub-half-pixel.
+
+    The fused offset precision-weights the disc correlation (~0.03 px
+    recovery here) against the limb DT fit (which carries the documented
+    ~0.1 px-class gradient-peak/model offset and errs a few tenths on
+    this faceted mesh).  With the #210 model-error floors both report
+    comparable honest sigmas, so the fused value is their blend rather
+    than whichever technique used to claim the tighter covariance; the
+    bound reflects that blend, not a single technique's floor.
+    """
     rows = _rows('irregularity_shape_mismatch')
     assert rows[0].offset_error_px is not None
-    assert rows[0].offset_error_px < 0.2
+    assert rows[0].offset_error_px < 0.5
 
 
 def test_irregularity_sweep_bias_grows() -> None:

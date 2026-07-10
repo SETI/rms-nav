@@ -99,6 +99,9 @@ TRANSFORM_OVERRIDES: dict[tuple[str, str], dict[str, float | None]] = {
     ('RingAnnulusNav', 'ncc_peak'): {'offset': 6.0, 'divisor': 45.0, 'cap_at': 1.0},
     # raw 9.2 / 42.4 / 307.8; old /20 cap-1 pinned 73% of rows.
     ('StarUniqueMatchNav', 'predicted_snr'): {'divisor': 100.0, 'cap_at': 1.0},
+    # raw 0.002 / 0.047 / 0.367 on the physical-body campaign; the design
+    # /0.15 saturated 29% of rows.
+    ('BodyBlobNav', 'max_phase_irregularity_factor'): {'divisor': 0.35, 'cap_at': 1.0},
 }
 
 # Sign constraints for the fitted alphas, by feature name.  Error-like
