@@ -11,10 +11,16 @@ plans/COHORT_CURATION_PLAN.md Stage A.
 from __future__ import annotations
 
 import csv
+import os
 import re
 from pathlib import Path
 
-METADATA_ROOT = Path('/mnt/ganymede/PDS/holdings/metadata')
+# Derived from the same environment variable the pipeline uses (set by
+# /seti/newnav/setup.sh); the literal fallback matches the operator host.
+METADATA_ROOT = (
+    Path(os.environ.get('PDS3_HOLDINGS_DIR', '/mnt/ganymede/PDS/holdings'))
+    / 'metadata'
+)
 
 _NAME_RE = re.compile(r'^\s*NAME\s*=\s*"?([A-Za-z0-9_]+)"?')
 _ITEMS_RE = re.compile(r'^\s*ITEMS\s*=\s*(\d+)')
@@ -56,6 +62,12 @@ class SummaryTable:
     """One <VOLUME>_<kind>.tab with named-column access."""
 
     def __init__(self, tab_path: Path, lbl_path: Path) -> None:
+        """Parse the label's column layout and read every table row.
+
+        Parameters:
+            tab_path: The comma-separated .tab data file.
+            lbl_path: The .lbl label defining the column layout.
+        """
         self.path = tab_path
         self.cols = parse_label_columns(lbl_path)
         with open(tab_path, errors='replace', newline='') as f:
@@ -66,6 +78,17 @@ class SummaryTable:
             ]
 
     def get(self, row: list[str], name: str, *alt_names: str) -> str | None:
+        """String value of the first matching column, or None.
+
+        Parameters:
+            row: One row as returned in :attr:`rows`.
+            name: Primary column name.
+            alt_names: Fallback column names (layouts differ by mission).
+
+        Returns:
+            The stripped field value, or None when no listed column
+            exists in this table (or the row is too short).
+        """
         for n in (name, *alt_names):
             idx = self.cols.get(n)
             if idx is not None and idx < len(row):

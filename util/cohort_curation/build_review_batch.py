@@ -17,6 +17,7 @@ Run:  venv/bin/python util/cohort_curation/build_review_batch.py --batch 1
 from __future__ import annotations
 
 import argparse
+import random
 from pathlib import Path
 
 import yaml
@@ -42,6 +43,11 @@ VOTE_INSTRUCTIONS = (
 
 
 def load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    """A monospace font at the given size, falling back to PIL's default.
+
+    Parameters:
+        size: Point size for the TrueType candidates.
+    """
     for name in ('DejaVuSansMono.ttf', 'DejaVuSans.ttf'):
         try:
             return ImageFont.truetype(name, size)
@@ -55,6 +61,13 @@ FONT_SMALL = load_font(13)
 
 
 def compose(rec: dict, out_path: Path, seq: int) -> None:
+    """Write one review PNG: summary image plus a burned-in text margin.
+
+    Parameters:
+        rec: Triage record (summary_png, offset, confidence, warnings).
+        out_path: Destination PNG path.
+        seq: 1-based sequence number within the review batch.
+    """
     src = rec.get('summary_png')
     if src and Path(src).exists():
         img = Image.open(src).convert('RGB')
@@ -121,7 +134,6 @@ RESCUE_CLASSES = {'ring_only_flat'}
 def select(promoted: list[dict]) -> list[dict]:
     """Per-class stratified pick: prefer frames with offsets and low
     technique spread, then round-robin across strata."""
-    import random
     rng = random.Random(20260708)
     picked: list[dict] = []
     by_class: dict[str, list[dict]] = {}
@@ -147,6 +159,7 @@ def select(promoted: list[dict]) -> list[dict]:
 
 
 def main() -> None:
+    """Build the review batch directory (PNGs + votes.yaml) for one batch."""
     ap = argparse.ArgumentParser()
     ap.add_argument('--batch', type=int, default=1)
     args = ap.parse_args()

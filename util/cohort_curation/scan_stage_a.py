@@ -20,8 +20,11 @@ Run:  venv/bin/python util/cohort_curation/scan_stage_a.py
 from __future__ import annotations
 
 import argparse
+import datetime
+import functools
 import json
 import math
+import os
 import random
 from collections import defaultdict
 from pathlib import Path
@@ -136,12 +139,21 @@ def load_saturn_ring_edges() -> dict[str, float]:
     return edges
 
 
-RING_EDGES = load_saturn_ring_edges()
+@functools.lru_cache(maxsize=1)
+def ring_edges() -> dict[str, float]:
+    """Cached ring-edge table; loaded lazily to avoid import-time I/O."""
+    return load_saturn_ring_edges()
 
 
 def edges_in_frame(rmin: float, rmax: float) -> list[str]:
+    """Names of mode-1 ring edges strictly inside the radius range.
+
+    Parameters:
+        rmin: Minimum ring radius visible in the frame (km).
+        rmax: Maximum ring radius visible in the frame (km).
+    """
     margin = 0.02 * (rmax - rmin)
-    return [name for name, a in RING_EDGES.items()
+    return [name for name, a in ring_edges().items()
             if rmin + margin <= a <= rmax - margin]
 
 
@@ -156,7 +168,9 @@ def star_vmags(ra_deg: float, dec_deg: float, fov_deg: float,
     global _UCAC4
     if _UCAC4 is None:
         from starcat import UCAC4StarCatalog
-        _UCAC4 = UCAC4StarCatalog('/data/external-data/star-catalogs/UCAC4')
+        _UCAC4 = UCAC4StarCatalog(
+            os.environ.get('UCAC4_PATH',
+                           '/data/external-data/star-catalogs/UCAC4'))
     half = math.radians(0.75 * fov_deg)      # frame + pointing-error margin
     dec = math.radians(dec_deg)
     ra = math.radians(ra_deg % 360.0)
@@ -183,6 +197,12 @@ def star_vmags(ra_deg: float, dec_deg: float, fov_deg: float,
 # ---------------------------------------------------------------- helpers
 
 def app_diam_px(target: str, center_res: float | None) -> float | None:
+    """Apparent diameter in pixels from the mean radius and resolution.
+
+    Parameters:
+        target: Body name (key into the oops-derived radius table).
+        center_res: CENTER_RESOLUTION from the summary table (km/px).
+    """
     r = RADII.get(target)
     if r is None or center_res is None or center_res <= 0:
         return None
@@ -190,11 +210,13 @@ def app_diam_px(target: str, center_res: float | None) -> float | None:
 
 
 def resolved(t: pm.SummaryTable, row: list[str]) -> bool:
+    """True when the summary row carries surface lat/lon coverage."""
     return (t.num(row, 'MINIMUM_PLANETOCENTRIC_LATITUDE') is not None
             and t.num(row, 'MINIMUM_IAU_LONGITUDE') is not None)
 
 
 def phase_bin(phase: float | None) -> str:
+    """Coarse phase-angle bucket used as a stratification key."""
     if phase is None:
         return 'unknown'
     for hi, name in ((30, '<30'), (60, '30-60'), (90, '60-90'),
@@ -205,6 +227,7 @@ def phase_bin(phase: float | None) -> str:
 
 
 def res_decade(res: float | None) -> str:
+    """Coarse resolution bucket (km decades) used as a strata key."""
     if res is None:
         return 'unknown'
     if res < 1:
@@ -214,9 +237,25 @@ def res_decade(res: float | None) -> str:
     return '>10km'
 
 
-def cand(scene_class: str, volset: str, volume: str, filespec: str,
+def cand(scene_class: str, volset: str, volume: str, *, filespec: str,
          mission: str, camera: str, dataset: str, strata: tuple,
-         selection: dict, *, needs_visual: bool = False) -> dict:
+         selection: dict, needs_visual: bool = False) -> dict:
+    """Build one candidate-manifest record.
+
+    Parameters:
+        scene_class: Target scene class for the candidate.
+        volset: Volume set (e.g. ``'COISS_2xxx'``).
+        volume: Volume name (e.g. ``'COISS_2060'``).
+        filespec: Label filespec relative to the volume directory.
+        mission: Mission key (``'COISS'``/``'VGISS'``/``'GOSSI'``/
+            ``'NHLORRI'``).
+        camera: Camera name for the frame.
+        dataset: sd_offset dataset name.
+        strata: Stratification key parts (joined with ``' | '``).
+        selection: Machine-readable record of why the frame qualified.
+        needs_visual: True when class membership needs eyeball
+            confirmation at review time.
+    """
     stem = Path(filespec.strip()).stem
     if mission == 'GOSSI':
         img_name = stem
@@ -242,6 +281,7 @@ def cand(scene_class: str, volset: str, volume: str, filespec: str,
 # ---------------------------------------------------------------- COISS scan
 
 def scan_coiss() -> dict[str, list[dict]]:
+    """Cassini ISS scan: body/ring geometry classes plus star pools."""
     out: dict[str, list[dict]] = defaultdict(list)
     star_frame_pool: list[dict] = []      # cheap-pass no-body frames
     body_star_pool: list[dict] = []       # cheap-pass one-body frames
@@ -261,16 +301,31 @@ def scan_coiss() -> dict[str, list[dict]]:
     ]
     for vs in volsets:
         for volume in pm.volumes(vs['volset']):
-            _scan_coiss_volume(vs, volume, out, star_frame_pool,
-                               body_star_pool, tiny_pool)
-    _coiss_star_passes(out, star_frame_pool, body_star_pool, tiny_pool)
+            _scan_coiss_volume(vs, volume, out=out,
+                               star_frame_pool=star_frame_pool,
+                               body_star_pool=body_star_pool,
+                               tiny_pool=tiny_pool)
+    _coiss_star_passes(out, star_frame_pool=star_frame_pool,
+                       body_star_pool=body_star_pool,
+                       tiny_pool=tiny_pool)
     return out
 
 
-def _scan_coiss_volume(vs: dict, volume: str, out: dict[str, list[dict]],
+def _scan_coiss_volume(vs: dict, volume: str, *,
+                       out: dict[str, list[dict]],
                        star_frame_pool: list[dict],
                        body_star_pool: list[dict],
                        tiny_pool: list[dict]) -> None:
+    """Scan one COISS volume, appending hits to ``out`` and the pools.
+
+    Parameters:
+        vs: Volume-set descriptor (volset, dataset, ring span, flags).
+        volume: Volume name within the set.
+        out: Per-class candidate lists (mutated).
+        star_frame_pool: No-body frames for the star-count passes.
+        body_star_pool: Single-body frames for stars_plus_body.
+        tiny_pool: All-tiny-body frames for negative candidates.
+    """
     volset, dataset = vs['volset'], vs['dataset']
     ring_classes = vs['ring_classes']
     span_lo, span_hi = vs['main_ring_span']
@@ -349,9 +404,9 @@ def _scan_coiss_volume(vs: dict, volume: str, out: dict[str, list[dict]],
             if tgt in IRREGULARS and 150 <= d <= 800:
                 ph = moon.num(mr, 'CENTER_PHASE_ANGLE')
                 out['body_irregular'].append(cand(
-                    'body_irregular', volset, volume, filespec, 'COISS',
-                    camera, dataset, (tgt, phase_bin(ph)),
-                    {'target': tgt, 'apparent_diameter_px': round(d, 1),
+                    'body_irregular', volset, volume, filespec=filespec, mission='COISS',
+                    camera=camera, dataset=dataset, strata=(tgt, phase_bin(ph)),
+                    selection={'target': tgt, 'apparent_diameter_px': round(d, 1),
                      'center_phase_deg': ph, 'filter': filt,
                      'year': time}))
 
@@ -362,10 +417,10 @@ def _scan_coiss_volume(vs: dict, volume: str, out: dict[str, list[dict]],
             if d >= 50:
                 ph = moon.num(mr, 'CENTER_PHASE_ANGLE')
                 out['ring_plus_body'].append(cand(
-                    'ring_plus_body', volset, volume, filespec, 'COISS',
-                    camera, dataset,
-                    (tgt, phase_bin(ph), round(bobs or 0, -1)),
-                    {'target': tgt, 'apparent_diameter_px': round(d, 1),
+                    'ring_plus_body', volset, volume, filespec=filespec, mission='COISS',
+                    camera=camera, dataset=dataset,
+                    strata=(tgt, phase_bin(ph), round(bobs or 0, -1)),
+                    selection={'target': tgt, 'apparent_diameter_px': round(d, 1),
                      'ring_edges_in_frame': redges[:6],
                      'ring_opening_deg': bobs,
                      'center_phase_deg': ph, 'filter': filt,
@@ -377,7 +432,7 @@ def _scan_coiss_volume(vs: dict, volume: str, out: dict[str, list[dict]],
                 and rres is not None and rres > 0):
             best = None
             for name in redges:
-                a = RING_EDGES[name]
+                a = ring_edges()[name]
                 r_app = a * abs(math.sin(math.radians(bobs))) / rres
                 if best is None or r_app > best[1]:
                     best = (name, r_app)
@@ -386,10 +441,10 @@ def _scan_coiss_volume(vs: dict, volume: str, out: dict[str, list[dict]],
             closeup = rres < 0.3
             if is_flat or closeup:
                 out['ring_only_flat'].append(cand(
-                    'ring_only_flat', volset, volume, filespec, 'COISS',
-                    camera, dataset,
-                    (round(bobs, -1), res_decade(rres)),
-                    {'ring_edges_in_frame': redges[:6],
+                    'ring_only_flat', volset, volume, filespec=filespec, mission='COISS',
+                    camera=camera, dataset=dataset,
+                    strata=(round(bobs, -1), res_decade(rres)),
+                    selection={'ring_edges_in_frame': redges[:6],
                      'flattest_edge': best[0],
                      'apparent_curvature_radius_px': round(best[1]),
                      'criterion': 'sagitta' if is_flat else 'closeup',
@@ -398,14 +453,14 @@ def _scan_coiss_volume(vs: dict, volume: str, out: dict[str, list[dict]],
                      'filter': filt, 'year': time}))
             # ---- ring_only_curved: clearly curved edge (sagitta > 2 px)
             worst = min(
-                (RING_EDGES[n] * abs(math.sin(math.radians(bobs))) / rres, n)
+                (ring_edges()[n] * abs(math.sin(math.radians(bobs))) / rres, n)
                 for n in redges)
             if worst[0] <= FRAME_PX * FRAME_PX / 16.0 and rres >= 0.3:
                 out['ring_only_curved'].append(cand(
-                    'ring_only_curved', volset, volume, filespec, 'COISS',
-                    camera, dataset,
-                    (round(bobs, -1), res_decade(rres)),
-                    {'ring_edges_in_frame': redges[:6],
+                    'ring_only_curved', volset, volume, filespec=filespec, mission='COISS',
+                    camera=camera, dataset=dataset,
+                    strata=(round(bobs, -1), res_decade(rres)),
+                    selection={'ring_edges_in_frame': redges[:6],
                      'most_curved_edge': worst[1],
                      'apparent_curvature_radius_px': round(worst[0]),
                      'ring_opening_deg': bobs,
@@ -432,13 +487,13 @@ def _scan_coiss_volume(vs: dict, volume: str, out: dict[str, list[dict]],
                     and ph is not None and ph < 110
                     and lat_range is not None and lat_range > 160):
                 out['body_full_fov'].append(cand(
-                    'body_full_fov', volset, volume, filespec, 'COISS',
-                    camera, dataset, (tgt, phase_bin(ph)), sel,
+                    'body_full_fov', volset, volume, filespec=filespec, mission='COISS',
+                    camera=camera, dataset=dataset, strata=(tgt, phase_bin(ph)), selection=sel,
                     needs_visual=True))
             if 1080 <= d <= 1500 and not rings_visible:
                 out['body_partial_overflow'].append(cand(
-                    'body_partial_overflow', volset, volume, filespec,
-                    'COISS', camera, dataset, (tgt, phase_bin(ph)), sel,
+                    'body_partial_overflow', volset, volume, filespec=filespec,
+                    mission='COISS', camera=camera, dataset=dataset, strata=(tgt, phase_bin(ph)), selection=sel,
                     needs_visual=True))
             # 1700 <= d <= 2200: body ~2x the frame, so roughly half
             # is off-screen with a limb arc in frame.  Batch-3 votes:
@@ -447,14 +502,14 @@ def _scan_coiss_volume(vs: dict, volume: str, out: dict[str, list[dict]],
             if (1700 <= d <= 2200 and ph is not None and ph < 90
                     and lat_range is not None and 25 <= lat_range < 120):
                 out['body_mostly_offscreen'].append(cand(
-                    'body_mostly_offscreen', volset, volume, filespec,
-                    'COISS', camera, dataset, (tgt, phase_bin(ph)), sel,
+                    'body_mostly_offscreen', volset, volume, filespec=filespec,
+                    mission='COISS', camera=camera, dataset=dataset, strata=(tgt, phase_bin(ph)), selection=sel,
                     needs_visual=True))
             if (regular and ph is not None and ph >= 95
                     and 100 <= d <= 700 and not rings_visible):
                 out['high_phase_terminator'].append(cand(
-                    'high_phase_terminator', volset, volume, filespec,
-                    'COISS', camera, dataset, (tgt, phase_bin(ph)), sel,
+                    'high_phase_terminator', volset, volume, filespec=filespec,
+                    mission='COISS', camera=camera, dataset=dataset, strata=(tgt, phase_bin(ph)), selection=sel,
                     needs_visual=True))
 
         # ---- multi_body: >=2 separable resolved bodies
@@ -463,9 +518,9 @@ def _scan_coiss_volume(vs: dict, volume: str, out: dict[str, list[dict]],
             names = sorted(t for t, _, _ in big)
             dmax = max(d2 for _, d2, _ in big)
             out['multi_body'].append(cand(
-                'multi_body', volset, volume, filespec, 'COISS',
-                camera, dataset, ('+'.join(names[:3]),),
-                {'targets_px': {t: round(d2, 1) for t, d2, _ in big},
+                'multi_body', volset, volume, filespec=filespec, mission='COISS',
+                camera=camera, dataset=dataset, strata=('+'.join(names[:3]),),
+                selection={'targets_px': {t: round(d2, 1) for t, d2, _ in big},
                  'largest_px': round(dmax, 1),
                  'filter': filt, 'year': time},
                 needs_visual=True))
@@ -477,9 +532,9 @@ def _scan_coiss_volume(vs: dict, volume: str, out: dict[str, list[dict]],
                 and not planet_disc and camera == 'NAC'
                 and all(d2 < 3 for d2 in others)):
             out['below_resolution_body'].append(cand(
-                'below_resolution_body', volset, volume, filespec,
-                'COISS', camera, dataset, (smalls[0][0],),
-                {'target': smalls[0][0],
+                'below_resolution_body', volset, volume, filespec=filespec,
+                mission='COISS', camera=camera, dataset=dataset, strata=(smalls[0][0],),
+                selection={'target': smalls[0][0],
                  'apparent_diameter_px': round(smalls[0][1], 2),
                  'texp_s': texp, 'filter': filt, 'year': time},
                 needs_visual=True))
@@ -523,10 +578,18 @@ def _scan_coiss_volume(vs: dict, volume: str, out: dict[str, list[dict]],
                      bodies={t: round(d, 2) for t, d in all_diams}))
 
 
-def _coiss_star_passes(out: dict[str, list[dict]],
+def _coiss_star_passes(out: dict[str, list[dict]], *,
                        star_frame_pool: list[dict],
                        body_star_pool: list[dict],
                        tiny_pool: list[dict]) -> None:
+    """UCAC4 star-count passes over the pooled COISS frames.
+
+    Parameters:
+        out: Per-class candidate lists (mutated).
+        star_frame_pool: No-body frames (star classes + negatives).
+        body_star_pool: Single-body frames (stars_plus_body).
+        tiny_pool: All-tiny-body frames (negatives).
+    """
     rng = random.Random(SEED)
 
     def sample(pool: list[dict], n: int) -> list[dict]:
@@ -546,24 +609,24 @@ def _coiss_star_passes(out: dict[str, list[dict]],
         if n_bright == 2 and (len(vm) < 3 or vm[2] >= vm[1] + 1.5):
             out['two_bright_stars_no_body'].append(cand(
                 'two_bright_stars_no_body', fr['volset'], fr['volume'],
-                fr['filespec'], 'COISS', fr['camera'], fr['dataset'],
-                (fr['year'],), sel))
+                filespec=fr['filespec'], mission='COISS', camera=fr['camera'], dataset=fr['dataset'],
+                strata=(fr['year'],), selection=sel))
         elif n_bright == 1 and (len(vm) < 2 or vm[1] >= vm[0] + 1.5):
             out['one_bright_star_no_body'].append(cand(
                 'one_bright_star_no_body', fr['volset'], fr['volume'],
-                fr['filespec'], 'COISS', fr['camera'], fr['dataset'],
-                (fr['year'],), sel))
+                filespec=fr['filespec'], mission='COISS', camera=fr['camera'], dataset=fr['dataset'],
+                strata=(fr['year'],), selection=sel))
         elif n_bright >= 3:
             out['star_dominated'].append(cand(
                 'star_dominated', fr['volset'], fr['volume'],
-                fr['filespec'], 'COISS', fr['camera'], fr['dataset'],
-                (fr['year'], min(n_bright, 8)), sel))
+                filespec=fr['filespec'], mission='COISS', camera=fr['camera'], dataset=fr['dataset'],
+                strata=(fr['year'], min(n_bright, 8)), selection=sel))
         elif n_bright == 0 and fr['texp'] <= 3.0 and len(vm) == 0:
             out['negative_cases'].append(cand(
                 'negative_cases', fr['volset'], fr['volume'],
-                fr['filespec'], 'COISS', fr['camera'], fr['dataset'],
-                ('COISS', 'empty_sky'),
-                {'type': 'empty_sky', 'texp_s': fr['texp'],
+                filespec=fr['filespec'], mission='COISS', camera=fr['camera'], dataset=fr['dataset'],
+                strata=('COISS', 'empty_sky'),
+                selection={'type': 'empty_sky', 'texp_s': fr['texp'],
                  'maglim': round(lim, 2), 'n_stars_within_2mag': len(vm),
                  'filter': fr['filt'], 'year': fr['year']}))
 
@@ -574,9 +637,9 @@ def _coiss_star_passes(out: dict[str, list[dict]],
         if len(vm) >= 3:
             out['stars_plus_body'].append(cand(
                 'stars_plus_body', fr['volset'], fr['volume'],
-                fr['filespec'], 'COISS', fr['camera'], fr['dataset'],
-                (fr['target'], phase_bin(fr['phase'])),
-                {'target': fr['target'],
+                filespec=fr['filespec'], mission='COISS', camera=fr['camera'], dataset=fr['dataset'],
+                strata=(fr['target'], phase_bin(fr['phase'])),
+                selection={'target': fr['target'],
                  'apparent_diameter_px': round(fr['diam'], 1),
                  'n_detectable_stars': len(vm),
                  'star_vmags': [round(v, 2) for v in vm[:8]],
@@ -591,9 +654,9 @@ def _coiss_star_passes(out: dict[str, list[dict]],
         if not vm:
             out['negative_cases'].append(cand(
                 'negative_cases', fr['volset'], fr['volume'],
-                fr['filespec'], 'COISS', fr['camera'], fr['dataset'],
-                ('COISS', 'tiny_body'),
-                {'type': 'tiny_body_no_stars', 'bodies_px': fr['bodies'],
+                filespec=fr['filespec'], mission='COISS', camera=fr['camera'], dataset=fr['dataset'],
+                strata=('COISS', 'tiny_body'),
+                selection={'type': 'tiny_body_no_stars', 'bodies_px': fr['bodies'],
                  'texp_s': fr['texp'], 'maglim': round(lim, 2),
                  'n_detectable_stars': 0, 'filter': fr['filt'],
                  'year': fr['year']}))
@@ -663,25 +726,26 @@ def scan_nh() -> dict[str, list[dict]]:
                    'target': tgt, 'year': time_full[:4]}
             if n_bright == 2 and (len(vm) < 3 or vm[2] >= vm[1] + 1.5):
                 out['two_bright_stars_no_body'].append(cand(
-                    'two_bright_stars_no_body', volset, volume, filespec,
-                    'NHLORRI', 'LORRI', dataset,
-                    ('NH', time_full[:4]), sel))
+                    'two_bright_stars_no_body', volset, volume, filespec=filespec,
+                    mission='NHLORRI', camera='LORRI', dataset=dataset,
+                    strata=('NH', time_full[:4]), selection=sel))
             elif n_bright == 1 and (len(vm) < 2 or vm[1] >= vm[0] + 1.5):
                 out['one_bright_star_no_body'].append(cand(
-                    'one_bright_star_no_body', volset, volume, filespec,
-                    'NHLORRI', 'LORRI', dataset,
-                    ('NH', time_full[:4]), sel))
+                    'one_bright_star_no_body', volset, volume, filespec=filespec,
+                    mission='NHLORRI', camera='LORRI', dataset=dataset,
+                    strata=('NH', time_full[:4]), selection=sel))
             elif n_bright >= 3:
                 out['star_dominated'].append(cand(
-                    'star_dominated', volset, volume, filespec,
-                    'NHLORRI', 'LORRI', dataset,
-                    ('NH', time_full[:4], min(n_bright, 8)), sel))
+                    'star_dominated', volset, volume, filespec=filespec,
+                    mission='NHLORRI', camera='LORRI', dataset=dataset,
+                    strata=('NH', time_full[:4], min(n_bright, 8)), selection=sel))
     return out
 
 
 # ---------------------------------------------------------------- GO scan
 
 def scan_go() -> dict[str, list[dict]]:
+    """Galileo SSI scan: faint-star, empty-sky, and stray-light classes."""
     out: dict[str, list[dict]] = defaultdict(list)
     volset, dataset = 'GO_0xxx', 'gossi'
     rng = random.Random(SEED + 1)
@@ -770,9 +834,9 @@ def scan_go() -> dict[str, list[dict]]:
         n_faint = sum(1 for v in vm if lim - 0.3 < v <= lim + 2.0)
         if n_bright == 0 and n_faint >= 3:
             out['faint_stars'].append(cand(
-                'faint_stars', volset, fr['volume'], fr['filespec'],
-                'GOSSI', 'SSI', dataset, (fr['year'],),
-                {'texp_s': fr['texp'], 'maglim': round(lim, 2),
+                'faint_stars', volset, fr['volume'], filespec=fr['filespec'],
+                mission='GOSSI', camera='SSI', dataset=dataset, strata=(fr['year'],),
+                selection={'texp_s': fr['texp'], 'maglim': round(lim, 2),
                  'n_bright': 0, 'n_faint_within_2mag': n_faint,
                  'faintest_usable_vmags':
                      [round(v, 2) for v in vm[:6]],
@@ -780,9 +844,9 @@ def scan_go() -> dict[str, list[dict]]:
                  'year': fr['year']}))
         elif n_bright == 0 and n_faint == 0 and fr['texp'] <= 0.5:
             out['negative_cases'].append(cand(
-                'negative_cases', volset, fr['volume'], fr['filespec'],
-                'GOSSI', 'SSI', dataset, ('GOSSI', 'empty_sky'),
-                {'type': 'empty_sky', 'texp_s': fr['texp'],
+                'negative_cases', volset, fr['volume'], filespec=fr['filespec'],
+                mission='GOSSI', camera='SSI', dataset=dataset, strata=('GOSSI', 'empty_sky'),
+                selection={'type': 'empty_sky', 'texp_s': fr['texp'],
                  'maglim': round(lim, 2), 'n_stars_within_2mag': 0,
                  'target': fr['tgt'], 'filter': fr['filt'],
                  'year': fr['year']}))
@@ -803,9 +867,9 @@ def scan_go() -> dict[str, list[dict]]:
             continue
         n_stray += 1
         out['scattered_light'].append(cand(
-            'scattered_light', volset, fr['volume'], fr['filespec'],
-            'GOSSI', 'SSI', dataset, ('GOSSI', fr['year']),
-            {'surrogate': 'bright body in inventory, unresolved on disc',
+            'scattered_light', volset, fr['volume'], filespec=fr['filespec'],
+            mission='GOSSI', camera='SSI', dataset=dataset, strata=('GOSSI', fr['year']),
+            selection={'surrogate': 'bright body in inventory, unresolved on disc',
              'target': fr['tgt'], 'texp_s': fr['texp'],
              'n_detectable_stars': len(vm), 'maglim': round(lim, 2),
              'star_vmags': [round(v, 2) for v in vm[:6]],
@@ -896,9 +960,9 @@ def scan_vgiss() -> dict[str, list[dict]]:
     rng.shuffle(stray_pool)
     for fr in stray_pool[:60]:
         out['scattered_light'].append(cand(
-            'scattered_light', fr['volset'], fr['volume'], fr['filespec'],
-            'VGISS', fr['camera'], 'vgiss', ('VGISS', fr['year']),
-            {'surrogate': 'Saturn-target frame, nothing resolved in FOV',
+            'scattered_light', fr['volset'], fr['volume'], filespec=fr['filespec'],
+            mission='VGISS', camera=fr['camera'], dataset='vgiss', strata=('VGISS', fr['year']),
+            selection={'surrogate': 'Saturn-target frame, nothing resolved in FOV',
              'target': fr['tgt'], 'texp_s': fr['texp'],
              'filter': fr['filt'], 'year': fr['year']},
             needs_visual=True))
@@ -907,9 +971,9 @@ def scan_vgiss() -> dict[str, list[dict]]:
     rng.shuffle(neg_pool)
     for fr in neg_pool[:10]:
         out['negative_cases'].append(cand(
-            'negative_cases', fr['volset'], fr['volume'], fr['filespec'],
-            'VGISS', fr['camera'], 'vgiss', ('VGISS', 'empty_short_exp'),
-            {'type': 'empty_short_exposure', 'target': fr['tgt'],
+            'negative_cases', fr['volset'], fr['volume'], filespec=fr['filespec'],
+            mission='VGISS', camera=fr['camera'], dataset='vgiss', strata=('VGISS', 'empty_short_exp'),
+            selection={'type': 'empty_short_exposure', 'target': fr['tgt'],
              'texp_s': fr['texp'], 'filter': fr['filt'],
              'year': fr['year']},
             needs_visual=True))
@@ -1005,10 +1069,14 @@ def stratified_sample(cands: list[dict], n: int, rng: random.Random) -> list[dic
 
 
 def main() -> None:
+    """Run every mission scan and write the batch candidate manifest."""
     ap = argparse.ArgumentParser()
     ap.add_argument('--batch', type=int, default=2,
                     help='batch number (selects quotas and output name)')
     args = ap.parse_args()
+    if args.batch not in QUOTAS_BY_BATCH:
+        ap.error(f'unsupported --batch {args.batch}; supported batches: '
+                 f'{sorted(QUOTAS_BY_BATCH)}')
     quotas = QUOTAS_BY_BATCH[args.batch]
 
     global EXISTING_IDS
@@ -1045,7 +1113,7 @@ def main() -> None:
     manifest: dict = {
         'query': f'stage_a_batch{args.batch:03d}',
         'seed': SEED,
-        'generated': '2026-07-09',
+        'generated': datetime.date.today().isoformat(),
         'notes': 'Stage A candidates (plans/COHORT_CURATION_PLAN.md). '
                  'Selection criteria recorded per candidate under '
                  '"selection".',

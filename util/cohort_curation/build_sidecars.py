@@ -27,7 +27,7 @@ import argparse
 import datetime
 import json
 import shutil
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import yaml
@@ -99,13 +99,16 @@ ENSEMBLE_CLASSES = {'ring_plus_body', 'stars_plus_body'}
 
 
 def str_representer(dumper: yaml.Dumper, data: str) -> yaml.ScalarNode:
+    """Represent multi-line strings as YAML literal blocks (``|``).
+
+    Parameters:
+        dumper: The active PyYAML dumper.
+        data: The string being represented.
+    """
     if '\n' in data:
         return dumper.represent_scalar(
             'tag:yaml.org,2002:str', data, style='|')
     return dumper.represent_scalar('tag:yaml.org,2002:str', data)
-
-
-yaml.add_representer(str, str_representer)
 
 
 def filter_combo(image_path: str, mission: str) -> str:
@@ -164,7 +167,7 @@ def scene_tag_secondary(rec: dict, meta: dict) -> str | None:
     return None
 
 
-def build_one(entry: dict, rec: dict, ui_version: str,
+def build_one(entry: dict, rec: dict, *, ui_version: str,
               verified_date: datetime.date) -> Path:
     """Write the sidecar + companion PNG for one y-voted frame.
 
@@ -290,12 +293,17 @@ def build_one(entry: dict, rec: dict, ui_version: str,
     out_path = out_dir / f'{image_id}.yaml'
     out_path.write_text(yaml.dump(sidecar, sort_keys=False, width=78))
     png = rec.get('summary_png')
-    if png and Path(png).exists():
-        shutil.copyfile(png, out_dir / f'{image_id}.png')
+    if png:
+        try:
+            shutil.copyfile(png, out_dir / f'{image_id}.png')
+        except FileNotFoundError:
+            pass
     return out_path
 
 
 def main() -> None:
+    """Generate sidecars + followups for one voted review batch."""
+    yaml.add_representer(str, str_representer)
     ap = argparse.ArgumentParser()
     ap.add_argument('--batch', type=int, required=True)
     args = ap.parse_args()
@@ -317,10 +325,10 @@ def main() -> None:
 
     try:
         ui_version = f'spindoctor {version("rms-spindoctor")}'
-    except Exception:
+    except PackageNotFoundError:
         ui_version = 'spindoctor (dev)'
     ui_version += f' (cohort review batch {args.batch:03d})'
-    verified_date = datetime.date(2026, 7, 9)
+    verified_date = datetime.date.today()
 
     written: list[str] = []
     deferred: list[dict] = []
@@ -362,7 +370,8 @@ def main() -> None:
                              'reason': 'rank-1 ground truth unsupported '
                                        '(#203/#204)'})
             continue
-        out = build_one(entry, rec, ui_version, verified_date)
+        out = build_one(entry, rec, ui_version=ui_version,
+                        verified_date=verified_date)
         written.append(str(out.relative_to(REPO)))
         print(f'wrote {out.relative_to(REPO)}')
 

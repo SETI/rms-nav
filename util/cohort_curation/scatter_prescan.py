@@ -15,12 +15,18 @@ scores ~0-3; a frame with a real veiling gradient scores well above 5.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
 from vicar import VicarImage
 
-HOLDINGS_VOLUMES = Path('/mnt/ganymede/PDS/holdings/volumes')
+# Derived from the same environment variable the pipeline uses (set by
+# /seti/newnav/setup.sh); the literal fallback matches the operator host.
+HOLDINGS_VOLUMES = (
+    Path(os.environ.get('PDS3_HOLDINGS_DIR', '/mnt/ganymede/PDS/holdings'))
+    / 'volumes'
+)
 
 MIN_SCORE = 5.0
 
@@ -31,6 +37,10 @@ def image_path_for(cand: dict) -> Path:
     Parameters:
         cand: Stage A candidate dict (volset, volume, filespec with a
             .LBL extension).
+
+    Returns:
+        The .IMG path under the local holdings volumes tree (existence
+        is not checked here; the caller handles missing files).
     """
     spec = cand['filespec'].rsplit('.', 1)[0] + '.IMG'
     return HOLDINGS_VOLUMES / cand['volset'] / cand['volume'] / spec
@@ -41,6 +51,11 @@ def gradient_score(data: np.ndarray) -> tuple[float, float] | None:
 
     Parameters:
         data: 2-D image array in any physical units.
+
+    Returns:
+        ``(score, amplitude)`` where score is the plane peak-to-peak
+        divided by the MAD-sigma of the residuals, or None when the
+        image is too small or the residual sigma is zero.
     """
     h, w = data.shape
     b = 16
@@ -69,6 +84,12 @@ def prescan(cands: list[dict], *, keep: int) -> list[dict]:
     Parameters:
         cands: scattered_light candidates from the metadata scan.
         keep: Maximum number of candidates to return.
+
+    Returns:
+        Up to ``keep`` candidates with ``gradient_score`` /
+        ``gradient_amplitude`` added to their selection dicts, sorted
+        strongest-gradient first; unreadable or low-scoring frames are
+        dropped.
     """
     scored: list[tuple[float, dict]] = []
     n_read = n_missing = 0

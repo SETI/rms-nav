@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -40,11 +41,25 @@ OUT_DIR = REPO / '_work/cohort_curation'   # generated outputs (gitignored)
 RESULTS_ROOT = OUT_DIR / 'triage_results'
 VENV_BIN = REPO / 'venv/bin'
 
+def _required_env(name: str) -> str:
+    """Value of a required environment variable, failing fast if unset.
+
+    Parameters:
+        name: Environment variable name (set by /seti/newnav/setup.sh).
+    """
+    value = os.environ.get(name)
+    if not value:
+        raise ValueError(
+            f'{name} is not set; run "source /seti/newnav/setup.sh" (or '
+            'set the variable) before invoking the cohort-curation tools')
+    return value
+
+
 ENV = {
-    'PDS3_HOLDINGS_DIR': '/mnt/ganymede/PDS/holdings',
-    'OOPS_RESOURCES': '/home/rfrench/DS/Shared/OOPS-Resources',
-    'UCAC4_PATH': '/data/external-data/star-catalogs/UCAC4',
-    'YBSC_PATH': '/data/external-data/star-catalogs/YBSC',
+    'PDS3_HOLDINGS_DIR': _required_env('PDS3_HOLDINGS_DIR'),
+    'OOPS_RESOURCES': _required_env('OOPS_RESOURCES'),
+    'UCAC4_PATH': _required_env('UCAC4_PATH'),
+    'YBSC_PATH': _required_env('YBSC_PATH'),
     'PATH': '/usr/bin:/bin',
     'HOME': str(Path.home()),
 }
@@ -55,10 +70,15 @@ STAR_CLASSES = {'faint_stars', 'two_bright_stars_no_body',
 
 TIMEOUT_S = 1200
 RESCUE_ROOT = OUT_DIR / 'rescue_results'
-RESCUE_CONFIG = HERE / 'rescue_config.yaml'        # Galileo/Voyager camera-rotation fits are slow
+RESCUE_CONFIG = HERE / 'rescue_config.yaml'
 
 
 def image_name_for(candidate: dict) -> str:
+    """The bare image name sd_offset's startswith-matching expects.
+
+    Parameters:
+        candidate: Stage A candidate dict (filespec, mission).
+    """
     stem = Path(candidate['filespec']).stem
     if candidate['mission'] in ('VGISS', 'COISS'):
         # The dataset index carries names without the product/version
@@ -72,6 +92,15 @@ def image_name_for(candidate: dict) -> str:
 
 
 def run_one(candidate: dict) -> dict:
+    """Triage one candidate: run (or reuse) sd_offset and evaluate.
+
+    Skipped candidates return a dropped record immediately; existing
+    results are reused unless the candidate carries ``_force``; failed
+    navigations get a rescue retry via :func:`_maybe_rescue`.
+
+    Parameters:
+        candidate: Stage A candidate dict from the manifest.
+    """
     name = image_name_for(candidate)
     cmd = [str(VENV_BIN / 'sd_offset'), candidate['dataset'], name,
            '--nav-results-root', str(RESULTS_ROOT)]
@@ -98,6 +127,11 @@ def run_one(candidate: dict) -> dict:
     except subprocess.TimeoutExpired:
         rec.update(exit_code=None, log_tail=['TIMEOUT'],
                    triage='dropped', triage_reason='timeout')
+        return rec
+    except OSError as exc:
+        rec.update(exit_code=None, log_tail=[f'OSError: {exc}'],
+                   triage='dropped',
+                   triage_reason=f'could not run sd_offset: {exc}')
         return rec
 
     return _maybe_rescue(candidate, _evaluate(candidate, rec))
@@ -134,7 +168,7 @@ def _maybe_rescue(candidate: dict, rec: dict) -> dict:
         try:
             subprocess.run(cmd, capture_output=True, text=True,
                            timeout=TIMEOUT_S, env=ENV, cwd=REPO)
-        except subprocess.TimeoutExpired:
+        except (subprocess.TimeoutExpired, OSError):
             return rec
     rec2 = {k: rec[k] for k in rec if not k.startswith('triage')}
     rec2 = _evaluate(candidate, rec2, RESCUE_ROOT)
@@ -151,7 +185,17 @@ def _maybe_rescue(candidate: dict, rec: dict) -> dict:
     return rec
 
 
-def _result_files(name: str, suffix: str, root: Path | None = None) -> list:
+def _result_files(name: str, suffix: str, root: Path | None = None) -> list[Path]:
+    """Result files under a results root matching one image name.
+
+    NH result files keep the lowercase ``lor_...`` stem, so a second
+    lowercase glob covers them.
+
+    Parameters:
+        name: Bare image name (see :func:`image_name_for`).
+        suffix: Filename suffix, e.g. ``'_metadata.json'``.
+        root: Results root; defaults to the default-config results.
+    """
     root = root or RESULTS_ROOT
     files = sorted(root.rglob(f'{name}*{suffix}'))
     if not files and name != name.lower():
@@ -160,6 +204,18 @@ def _result_files(name: str, suffix: str, root: Path | None = None) -> list:
 
 
 def _evaluate(candidate: dict, rec: dict, root: Path | None = None) -> dict:
+    """Apply the machine accept/drop rules to one navigation result.
+
+    Reads the metadata JSON under ``root`` and sets ``triage`` /
+    ``triage_reason`` / ``triage_warnings`` on ``rec`` per the rules in
+    the module docstring.
+
+    Parameters:
+        candidate: The manifest candidate (scene_class, needs_visual).
+        rec: Partially-filled triage record for the frame.
+        root: Results root to evaluate; defaults to the default-config
+            results.
+    """
     name = rec['image_name']
     meta_files = _result_files(name, '_metadata.json', root)
     png_files = _result_files(name, '_summary.png', root)
@@ -241,7 +297,8 @@ def _evaluate(candidate: dict, rec: dict, root: Path | None = None) -> dict:
         return rec
 
     # technique agreement: max pairwise offset spread
-    offsets = [o for o in rec['per_technique_offsets'].values() if o]
+    offsets = [o for o in rec['per_technique_offsets'].values()
+               if o is not None]
     if len(offsets) >= 2:
         dvs = [o[0] for o in offsets]
         dus = [o[1] for o in offsets]
@@ -259,6 +316,7 @@ def _evaluate(candidate: dict, rec: dict, root: Path | None = None) -> dict:
 
 
 def main() -> None:
+    """Triage every candidate in the batch manifest and write the report."""
     ap = argparse.ArgumentParser()
     ap.add_argument('--limit', type=int, default=0,
                     help='triage only the first N candidates (debug)')
@@ -284,9 +342,16 @@ def main() -> None:
     if args.limit:
         cands = cands[:args.limit]
     skip_names = {s for s in args.skip_names.split(',') if s}
+    matched: set[str] = set()
     for c in cands:
         c['_force'] = args.force
-        c['_skip'] = image_name_for(c) in skip_names
+        name = image_name_for(c)
+        c['_skip'] = name in skip_names
+        if c['_skip']:
+            matched.add(name)
+    for missed in sorted(skip_names - matched):
+        print(f'WARNING: --skip-names entry {missed!r} matches no '
+              'candidate; check for typos or a product suffix', flush=True)
 
     RESULTS_ROOT.mkdir(parents=True, exist_ok=True)
     print(f'triaging {len(cands)} candidates with {args.workers} workers',

@@ -51,6 +51,13 @@ MARGINS = {
 }
 MARGIN_FLAT = {('GOSSI', 'SSI'): (350, 350)}
 
+# Stretch and overlay tuning.
+MAD_TO_SIGMA = 1.4826            # normal-consistency factor for the MAD
+STRETCH_SOFTNESS_SIGMA = 3.0     # asinh knee, in robust sigmas
+CLIP_PERCENTILE = 99.9           # clip the brightest tail before scaling
+U8_MAX = 255.0
+CIRCLE_RADIUS_PX = 14
+
 
 def margin_for(mission: str, camera: str, size: int) -> tuple[int, int]:
     """Extended-FOV margin (v, u) for one image.
@@ -79,11 +86,11 @@ def stretch(data: np.ndarray) -> np.ndarray:
     """
     med = float(np.median(data))
     mad = float(np.median(np.abs(data - med)))
-    sigma = 1.4826 * mad if mad > 0 else float(data.std()) or 1.0
-    z = np.arcsinh((data - med) / (3.0 * sigma))
-    z = np.clip(z, 0.0, np.percentile(z, 99.9))
+    sigma = MAD_TO_SIGMA * mad if mad > 0 else float(data.std()) or 1.0
+    z = np.arcsinh((data - med) / (STRETCH_SOFTNESS_SIGMA * sigma))
+    z = np.clip(z, 0.0, np.percentile(z, CLIP_PERCENTILE))
     top = z.max() or 1.0
-    return (z / top * 255.0).astype(np.uint8)
+    return (z / top * U8_MAX).astype(np.uint8)
 
 
 def render_one(rec: dict, entry: dict, batch_dir: Path) -> str | None:
@@ -95,11 +102,14 @@ def render_one(rec: dict, entry: dict, batch_dir: Path) -> str | None:
         batch_dir: Review-batch directory receiving the output PNG.
     """
     mp = rec.get('metadata_path')
-    if not mp or not Path(mp).exists():
+    if not mp:
         return None
-    meta = json.loads(Path(mp).read_text())
+    try:
+        meta = json.loads(Path(mp).read_text())
+    except FileNotFoundError:
+        return None
     image_path = (meta.get('observation') or {}).get('image_path')
-    if not image_path or not Path(image_path).exists():
+    if not image_path:
         return None
     nav = meta.get('navigation_result') or {}
     stars = [f for f in (nav.get('feature_inventory') or [])
@@ -126,7 +136,7 @@ def render_one(rec: dict, entry: dict, batch_dir: Path) -> str | None:
     dv_du = nav.get('offset_px')
     mv, mu = margin_for(rec['mission'], rec['camera'], data.shape[0])
     color = (0, 255, 0) if dv_du else (255, 220, 0)
-    r = 14
+    r = CIRCLE_RADIUS_PX
     for f in stars:
         v0, u0, v1, u1 = f['bbox_extfov_vu']
         v = (v0 + v1) / 2.0 - mv
@@ -157,6 +167,12 @@ def render_one(rec: dict, entry: dict, batch_dir: Path) -> str | None:
 
 
 def main() -> None:
+    """Render star-check PNGs for every star-class entry of one batch.
+
+    Loads the batch votes.yaml and triage report, filters entries whose
+    scene class is in STAR_CLASSES, and writes NNN_<name>_stars.png
+    next to the review PNGs.
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument('--batch', type=int, required=True)
     args = ap.parse_args()
