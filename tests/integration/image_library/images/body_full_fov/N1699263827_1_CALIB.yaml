@@ -1,0 +1,29 @@
+schema_version: 1
+image_id: N1699263827_1_CALIB
+mission: COISS
+camera: NAC
+filter_combo: CL1+CL2
+image_url: pds3://calibrated/COISS_2xxx/COISS_2071/data/1699232928_1699364434/N1699263827_1_CALIB.IMG
+scene_tags:
+- body_full_fov
+- enceladus
+ground_truth:
+  offset_dv_px: 17.5
+  offset_du_px: -19.3281
+  offset_uncertainty_px: 1.0
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-07-09
+  ui_version: spindoctor 0.1.dev24 (cohort review batch 002)
+  notes: |
+    body_full_fov exemplar from cohort-curation review batch 002 (seq 015).
+    Selection: ENCELADUS | <30; {"apparent_diameter_px": 788.6, "center_phase_deg": 21.271, "filter": "CL1", "lat_coverage_deg": 161.4, "target": "ENCELADUS", "year": "2011"}.
+    Operator verified the pipeline overlay alignment at the proposed offset during batch review (summary PNG plus, for star classes, a hard-stretch star-check PNG with circled catalog positions).
+    Pipeline: status=success, confidence=0.377, rank=low, techniques=['BodyDiscCorrelateNav', 'BodyLimbNav'], per-technique offsets={"BodyDiscCorrelateNav": [17.5, -19.3281], "BodyLimbNav": [18.2049, -19.6064]}.
+expected:
+  status: success
+  confidence_tier: medium
+  primary_technique: BodyDiscCorrelateNav
+  techniques_must_run:
+  - BodyDiscCorrelateNav
+  techniques_must_skip: []

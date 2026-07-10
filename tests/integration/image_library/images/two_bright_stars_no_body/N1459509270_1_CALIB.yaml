@@ -1,0 +1,29 @@
+schema_version: 1
+image_id: N1459509270_1_CALIB
+mission: COISS
+camera: NAC
+filter_combo: CL1+CL2
+image_url: pds3://calibrated/COISS_2xxx/COISS_2001/data/1459263896_1459551623/N1459509270_1_CALIB.IMG
+scene_tags:
+- two_bright_stars_no_body
+ground_truth:
+  offset_dv_px: 3.6928
+  offset_du_px: 5.8052
+  offset_uncertainty_px: 1.0
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-07-09
+  ui_version: spindoctor 0.1.dev24 (cohort review batch 002)
+  notes: |
+    two_bright_stars_no_body exemplar from cohort-curation review batch 002 (seq 082).
+    Selection: 2004; {"filter": "CL1", "maglim": 10.5, "n_detectable": 2, "star_vmags": [8.73, 9.42, 10.99, 11.1, 11.19], "texp_s": 1.0, "year": "2004"}.
+    Operator verified the pipeline overlay alignment at the proposed offset during batch review (summary PNG plus, for star classes, a hard-stretch star-check PNG with circled catalog positions).
+    Pipeline: status=success, confidence=0.771, rank=medium, techniques=['StarRefineNav', 'StarUniqueMatchNav'], per-technique offsets={"StarUniqueMatchNav": [3.6862, 5.7972], "StarRefineNav": [3.6961, 5.8105]}.
+    Operator comment: this actually has two stars
+expected:
+  status: success
+  confidence_tier: medium
+  primary_technique: StarUniqueMatchNav
+  techniques_must_run:
+  - StarUniqueMatchNav
+  techniques_must_skip: []

@@ -1,0 +1,29 @@
+schema_version: 1
+image_id: N1644757096_1_CALIB
+mission: COISS
+camera: NAC
+filter_combo: CL1+IR3
+image_url: pds3://calibrated/COISS_2xxx/COISS_2060/data/1644743986_1644781734/N1644757096_1_CALIB.IMG
+scene_tags:
+- body_irregular
+- calypso
+ground_truth:
+  offset_dv_px: 13.4533
+  offset_du_px: -3.7217
+  offset_uncertainty_px: 2.0
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-07-09
+  ui_version: spindoctor 0.1.dev24 (cohort review batch 001)
+  notes: |
+    body_irregular exemplar from cohort-curation review batch 001 (seq 008).
+    Selection: CALYPSO | 30-60; {"apparent_diameter_px": 181.9, "center_phase_deg": 32.287, "filter": "CL1", "target": "CALYPSO", "year": "2010"}.
+    Operator verified the pipeline overlay alignment at the proposed offset during batch review (summary PNG plus, for star classes, a hard-stretch star-check PNG with circled catalog positions).
+    Pipeline: status=success, confidence=0.4, rank=low, techniques=['BodyBlobNav', 'BodyTerminatorNav'], per-technique offsets={"BodyBlobNav": [13.4533, -3.7217], "BodyTerminatorNav": [14.8509, -3.0129]}.
+expected:
+  status: success
+  confidence_tier: medium
+  primary_technique: BodyBlobNav
+  techniques_must_run:
+  - BodyBlobNav
+  techniques_must_skip: []

@@ -1,0 +1,29 @@
+schema_version: 1
+image_id: N1486991973_1_CALIB
+mission: COISS
+camera: NAC
+filter_combo: CL1+CL2
+image_url: pds3://calibrated/COISS_2xxx/COISS_2009/data/1486900812_1487070046/N1486991973_1_CALIB.IMG
+scene_tags:
+- ring_plus_body
+- enceladus
+ground_truth:
+  offset_dv_px: 7.5789
+  offset_du_px: 8.5808
+  offset_uncertainty_px: 1.0
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-07-09
+  ui_version: spindoctor 0.1.dev24 (cohort review batch 001)
+  notes: |
+    ring_plus_body exemplar from cohort-curation review batch 001 (seq 045).
+    Selection: ENCELADUS | 30-60 | -0.0; {"apparent_diameter_px": 51.0, "center_phase_deg": 42.235, "filter": "CL1", "ring_edges_in_frame": ["keeler_a_ring_oe_2005_05_01_2005_08_01.inner", "keeler_a_ring_oe_2005_05_01_2005_08_01.outer", "keeler_a_ring_oe_2006_01_01_2009_07_01.inner", "keeler_a_ring_oe_2006_01_01_2009_07_01.outer", "keeler_a_ring_oe_2010_01_01_2013_08_01.inner", "keeler_a_ring_oe_2010_01_01_2013_08_01.outer"], "ring_opening_deg": -1.766, "target": "ENCELADUS", "year": "2005"}.
+    Operator verified the pipeline overlay alignment at the proposed offset during batch review (summary PNG plus, for star classes, a hard-stretch star-check PNG with circled catalog positions).
+    Pipeline: status=success, confidence=0.771, rank=medium, techniques=['BodyDiscCorrelateNav', 'BodyLimbNav', 'RingEdgeNav', 'StarFieldFromCatalogNav', 'StarRefineNav', 'StarUniqueMatchNav'], per-technique offsets={"BodyDiscCorrelateNav": [-29.5, 27.5], "BodyLimbNav": [8.8129, 8.4537], "RingEdgeNav": [-49.9978, 95.0056], "StarFieldFromCatalogNav": [0.0, 0.0], "StarUniqueMatchNav": [6.3535, 8.9801], "StarRefineNav": [6.3885, 8.9523]}.
+expected:
+  status: success
+  confidence_tier: medium
+  primary_technique: BodyLimbNav
+  techniques_must_run:
+  - BodyLimbNav
+  techniques_must_skip: []

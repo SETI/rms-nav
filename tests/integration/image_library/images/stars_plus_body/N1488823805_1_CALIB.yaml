@@ -1,0 +1,29 @@
+schema_version: 1
+image_id: N1488823805_1_CALIB
+mission: COISS
+camera: NAC
+filter_combo: GRN+P60
+image_url: pds3://calibrated/COISS_2xxx/COISS_2010/data/1488818242_1488893120/N1488823805_1_CALIB.IMG
+scene_tags:
+- stars_plus_body
+- dione
+ground_truth:
+  offset_dv_px: -1.0625
+  offset_du_px: 5.5
+  offset_uncertainty_px: 1.0
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-07-09
+  ui_version: spindoctor 0.1.dev24 (cohort review batch 001)
+  notes: |
+    stars_plus_body exemplar from cohort-curation review batch 001 (seq 070).
+    Selection: DIONE | 30-60; {"apparent_diameter_px": 138.7, "center_phase_deg": 50.515, "filter": "P60", "maglim": 10.7, "n_detectable_stars": 10, "star_vmags": [8.37, 9.02, 9.82, 9.85, 9.87, 10.13, 10.14, 10.2], "target": "DIONE", "texp_s": 1.2, "year": "2005"}.
+    Operator verified the pipeline overlay alignment at the proposed offset during batch review (summary PNG plus, for star classes, a hard-stretch star-check PNG with circled catalog positions).
+    Pipeline: status=success, confidence=0.361, rank=low, techniques=['BodyDiscCorrelateNav', 'BodyLimbNav', 'StarFieldFromCatalogNav', 'StarRefineNav', 'StarUniqueMatchNav'], per-technique offsets={"BodyDiscCorrelateNav": [-1.0625, 5.5], "BodyLimbNav": [-0.7074, 5.0762], "StarFieldFromCatalogNav": [0.0, 0.0], "StarUniqueMatchNav": [-1.5095, 4.8689], "StarRefineNav": [-1.4165, 4.7348]}.
+expected:
+  status: success
+  confidence_tier: medium
+  primary_technique: BodyLimbNav
+  techniques_must_run:
+  - BodyLimbNav
+  techniques_must_skip: []

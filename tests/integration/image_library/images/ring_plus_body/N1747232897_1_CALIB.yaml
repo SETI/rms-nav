@@ -1,0 +1,29 @@
+schema_version: 1
+image_id: N1747232897_1_CALIB
+mission: COISS
+camera: NAC
+filter_combo: CL1+CL2
+image_url: pds3://calibrated/COISS_2xxx/COISS_2082/data/1747232897_1747485614/N1747232897_1_CALIB.IMG
+scene_tags:
+- ring_plus_body
+- mimas
+ground_truth:
+  offset_dv_px: 3.9687
+  offset_du_px: -20.7891
+  offset_uncertainty_px: 1.0
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-07-09
+  ui_version: spindoctor 0.1.dev24 (cohort review batch 001)
+  notes: |
+    ring_plus_body exemplar from cohort-curation review batch 001 (seq 051).
+    Selection: MIMAS | 30-60 | -10.0; {"apparent_diameter_px": 62.8, "center_phase_deg": 31.35, "filter": "CL1", "ring_edges_in_frame": ["huygens_gap.inner", "huygens_gap.outer", "huygens_ringlet.inner", "huygens_ringlet.outer", "strange_ringlet.inner", "strange_ringlet.outer"], "ring_opening_deg": -5.01, "target": "MIMAS", "year": "2013"}.
+    Operator verified the pipeline overlay alignment at the proposed offset during batch review (summary PNG plus, for star classes, a hard-stretch star-check PNG with circled catalog positions).
+    Pipeline: status=success, confidence=0.426, rank=low, techniques=['BodyDiscCorrelateNav', 'BodyLimbNav', 'RingEdgeNav'], per-technique offsets={"BodyDiscCorrelateNav": [3.9688, -20.7891], "BodyLimbNav": [3.9904, -21.095], "RingEdgeNav": [-2.8987, -16.9884]}.
+expected:
+  status: success
+  confidence_tier: medium
+  primary_technique: BodyLimbNav
+  techniques_must_run:
+  - BodyLimbNav
+  techniques_must_skip: []

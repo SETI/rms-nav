@@ -1,0 +1,29 @@
+schema_version: 1
+image_id: N1481737141_2_CALIB
+mission: COISS
+camera: NAC
+filter_combo: GRN+RED
+image_url: pds3://calibrated/COISS_2xxx/COISS_2008/data/1481725037_1481737714/N1481737141_2_CALIB.IMG
+scene_tags:
+- body_partial_overflow
+- dione
+ground_truth:
+  offset_dv_px: -4.5
+  offset_du_px: 6.9219
+  offset_uncertainty_px: 1.0
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-07-09
+  ui_version: spindoctor 0.1.dev24 (cohort review batch 002)
+  notes: |
+    body_partial_overflow exemplar from cohort-curation review batch 002 (seq 021).
+    Selection: DIONE | 30-60; {"apparent_diameter_px": 1161.5, "center_phase_deg": 33.843, "filter": "RED", "lat_coverage_deg": 139.5, "target": "DIONE", "year": "2004"}.
+    Operator verified the pipeline overlay alignment at the proposed offset during batch review (summary PNG plus, for star classes, a hard-stretch star-check PNG with circled catalog positions).
+    Pipeline: status=success, confidence=0.392, rank=low, techniques=['BodyDiscCorrelateNav', 'BodyLimbNav', 'StarRefineNav', 'StarUniqueMatchNav'], per-technique offsets={"BodyDiscCorrelateNav": [-4.5, 6.9219], "BodyLimbNav": [-5.3883, 6.4939], "StarUniqueMatchNav": [-11.3827, 25.4959], "StarRefineNav": [0.0, 0.0]}.
+expected:
+  status: success
+  confidence_tier: medium
+  primary_technique: BodyDiscCorrelateNav
+  techniques_must_run:
+  - BodyDiscCorrelateNav
+  techniques_must_skip: []

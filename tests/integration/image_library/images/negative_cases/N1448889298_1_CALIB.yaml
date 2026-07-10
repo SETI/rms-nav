@@ -1,0 +1,28 @@
+schema_version: 1
+image_id: N1448889298_1_CALIB
+mission: COISS
+camera: NAC
+filter_combo: BL1+CL2
+image_url: pds3://calibrated/COISS_1xxx/COISS_1009/data/1448865801_1448900037/N1448889298_1_CALIB.IMG
+scene_tags:
+- negative_cases
+- empty_sky
+ground_truth:
+  offset_dv_px: 0.0
+  offset_du_px: 0.0
+  offset_uncertainty_px: 99.0
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-07-09
+  ui_version: spindoctor 0.1.dev24 (cohort review batch 001)
+  notes: |
+    negative_cases exemplar from cohort-curation review batch 001 (seq 030).
+    Selection: COISS | empty_sky; {"filter": "BL1", "maglim": 7.76, "n_stars_within_2mag": 0, "texp_s": 0.08, "type": "empty_sky", "year": "2003"}.
+    Operator confirmed nothing navigable at review; the pipeline failed as required (status=failed, reason=no_features_extracted).
+    Ground-truth offset is a placeholder: the scene is unnavigable by design, so no offset is measurable; the regression assertion for this sidecar is expected.status=failed (offsets are only compared for status=success).
+expected:
+  status: failed
+  confidence_tier: failed
+  primary_technique: RingEdgeNav
+  techniques_must_run: []
+  techniques_must_skip: []

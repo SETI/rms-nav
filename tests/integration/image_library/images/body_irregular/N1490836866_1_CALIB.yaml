@@ -1,0 +1,29 @@
+schema_version: 1
+image_id: N1490836866_1_CALIB
+mission: COISS
+camera: NAC
+filter_combo: GRN+P60
+image_url: pds3://calibrated/COISS_2xxx/COISS_2010/data/1490681029_1490886704/N1490836866_1_CALIB.IMG
+scene_tags:
+- body_irregular
+- epimetheus
+ground_truth:
+  offset_dv_px: -7.9295
+  offset_du_px: -43.2614
+  offset_uncertainty_px: 2.0
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-07-09
+  ui_version: spindoctor 0.1.dev24 (cohort review batch 001)
+  notes: |
+    body_irregular exemplar from cohort-curation review batch 001 (seq 001).
+    Selection: EPIMETHEUS | 90-120; {"apparent_diameter_px": 300.4, "center_phase_deg": 115.464, "filter": "P60", "target": "EPIMETHEUS", "year": "2005"}.
+    Operator verified the pipeline overlay alignment at the proposed offset during batch review (summary PNG plus, for star classes, a hard-stretch star-check PNG with circled catalog positions).
+    Pipeline: status=success, confidence=0.4, rank=low, techniques=['BodyBlobNav', 'BodyTerminatorNav'], per-technique offsets={"BodyBlobNav": [-7.9295, -43.2614], "BodyTerminatorNav": [-38.2005, -51.6002]}.
+expected:
+  status: success
+  confidence_tier: medium
+  primary_technique: BodyBlobNav
+  techniques_must_run:
+  - BodyBlobNav
+  techniques_must_skip: []

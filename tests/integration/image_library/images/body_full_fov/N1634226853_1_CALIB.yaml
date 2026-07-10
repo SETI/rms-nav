@@ -1,0 +1,29 @@
+schema_version: 1
+image_id: N1634226853_1_CALIB
+mission: COISS
+camera: NAC
+filter_combo: CL1+IR1
+image_url: pds3://calibrated/COISS_2xxx/COISS_2058/data/1634145016_1634275721/N1634226853_1_CALIB.IMG
+scene_tags:
+- body_full_fov
+- tethys
+ground_truth:
+  offset_dv_px: 3.7812
+  offset_du_px: 32.5
+  offset_uncertainty_px: 1.0
+  source: operator_verified
+  operator: rfrench
+  verified_date: 2026-07-09
+  ui_version: spindoctor 0.1.dev24 (cohort review batch 002)
+  notes: |
+    body_full_fov exemplar from cohort-curation review batch 002 (seq 009).
+    Selection: TETHYS | <30; {"apparent_diameter_px": 764.9, "center_phase_deg": 1.532, "filter": "CL1", "lat_coverage_deg": 165.2, "target": "TETHYS", "year": "2009"}.
+    Operator verified the pipeline overlay alignment at the proposed offset during batch review (summary PNG plus, for star classes, a hard-stretch star-check PNG with circled catalog positions).
+    Pipeline: status=success, confidence=0.381, rank=low, techniques=['BodyDiscCorrelateNav', 'BodyLimbNav'], per-technique offsets={"BodyDiscCorrelateNav": [3.7812, 32.5], "BodyLimbNav": [3.5133, 32.3413]}.
+expected:
+  status: success
+  confidence_tier: medium
+  primary_technique: BodyDiscCorrelateNav
+  techniques_must_run:
+  - BodyDiscCorrelateNav
+  techniques_must_skip: []
