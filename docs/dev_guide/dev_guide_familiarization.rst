@@ -406,4 +406,4 @@ conventions land on top of a working mental model of the code.
   - :mod:`spindoctor.ui.mosaic_viewer.sphere_render`
   - :mod:`spindoctor.ui.mosaic_viewer.graticule`
 
-- :doc:`/contributing` — the contributor checklist that gates every change.
+- :doc:`/contributing` — the contributor checklist that gates every PR.

@@ -343,16 +343,18 @@ AI agents drafting body-shape entries:
    reliability cap of 0.3) handles ``null`` values.
 3. DOIs and paper titles must verify against a real
    ``https://doi.org/<DOI>`` lookup; agents do not invent identifiers.
-4. Any drafted change found in human review to contain an invented citation
-   is reverted in full and re-drafted by a different process.
+4. Any draft PR that lists a citation an AI agent invented (caught in human
+   review) is reverted in full and re-drafted by a different process.
 
 Human review
 ------------
 
-Every change touching ``config_220_body_shape.yaml`` requires a reviewer to
+Every PR touching ``config_220_body_shape.yaml`` requires a reviewer to
 spot-check **at least 5 randomly-selected citations** by opening the cited
-document and verifying the value appears at the cited location before the
-change merges.
+document and verifying the value appears at the cited location. PRs are
+merged only after the reviewer marks the PR with the
+``cited-values-spot-checked`` label. To keep review tractable, an
+initial-population PR is broken into ≤ 10 bodies per PR.
 
 Validation tests
 ----------------

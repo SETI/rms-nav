@@ -240,14 +240,14 @@ CI / CD pipeline
 
 GitHub Actions defines three workflows under ``.github/workflows/``:
 
-- ``run-tests.yml`` — runs on every proposed change and on pushes to ``main``,
-  plus a weekly cron. Three jobs:
+- ``run-tests.yml`` — runs on every PR and on pushes to ``main``, plus a weekly
+  cron. Three jobs:
 
   - **Lint** — Python 3.13. ``ruff check``, ``ruff format --check``, ``mypy``.
   - **Test** — matrix across Python 3.11 / 3.12 / 3.13 / 3.14 on Ubuntu. Runs
     ``pytest -m "not integration" -n auto --dist=loadfile`` with the holdings /
     catalog env vars exported. Uploads coverage to Codecov from the 3.13 job
-    on pushes (fork-submitted changes are excluded for secrets reasons).
+    on pushes (PRs from forks are excluded for secrets reasons).
   - **Docs** — ``sphinx-build -W`` against the ``[docs]`` extra.
 
   Integration tests are skipped in CI (slow, holdings-dependent). Maintainers
@@ -292,9 +292,9 @@ The contributor checklist is at :doc:`/contributing`. Highlights:
 - Conventional Commits subjects (``feat:``, ``fix:``, ``docs:``, ``refactor:``,
   ``test:``, ``perf:``, ``ci:``, ``chore:``, ``style:``). Subject imperative,
   ≤ 50 chars, no trailing period. One logical change per commit.
-- Changes squash-merge to ``main``; the squash message becomes the release
-  notes entry.
-- Every change must pass ``./scripts/run-all-checks.sh`` locally and the same
+- PRs squash-merge to ``main``; the squash message becomes the release notes
+  entry.
+- Every PR must pass ``./scripts/run-all-checks.sh`` locally and the same
   checks in CI.
 - Static-data values (per-body shape, per-instrument calibration) require a
   citation traceable to a fetched document; see :doc:`dev_guide_config_and_static_data`.
