@@ -56,6 +56,19 @@ package); generated artifacts go under `_work/calibration/` (gitignored).
        --out-report _work/calibration/gates_v2.md
    ```
 
+6. **`library_crosscheck.py`** — WS-5 step-6 plausibility cross-check:
+   runs the calibrated pipeline over every operator-curated sidecar
+   (needs the local-holdings environment) and reports status / tier /
+   offset / primary-technique agreement independently per image, plus a
+   tier confusion table.  The operator tiers are never fit targets;
+   wholesale disagreement here means the labels or the calibration need
+   a second look.
+
+   ```bash
+   venv/bin/python util/calibration/library_crosscheck.py \
+       --workers 8 --out _work/calibration/library_crosscheck.md
+   ```
+
 ## Structural caps and hard gates
 
 Post-sigmoid caps (BodyBlobNav's 0.4, StarUniqueMatchNav's per-mode
