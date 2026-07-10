@@ -1,0 +1,454 @@
+"""Randomized sim-scene generation for the WS-5 confidence calibration.
+
+Generates seeded, randomized sim_params dicts (the same flat mapping the
+sim-sweep harness feeds ObsSim) spanning each NavTechnique's operating
+regime, from clean well-resolved frames through the failure cliff:
+
+- disc        : resolved regular/irregular body, low-moderate phase
+                (BodyDiscCorrelateNav; mesh-vs-ellipsoid shape mismatch)
+- limb        : large body partially off-frame, low phase (BodyLimbNav;
+                pose-disagreement and shape-mismatch slices)
+- terminator  : high-phase crescent (BodyTerminatorNav)
+- blob        : small / distant body (BodyBlobNav; irregular slice)
+- ring        : 1-2 ringlets, curved through near-flat arcs (RingEdgeNav
+                and, via the always-emitted template, RingAnnulusNav)
+- star_field  : 3-15 stars, bright through sub-detection (the star
+                techniques incl. the pass-2 StarRefineNav)
+- star_unique : 1-2 star scenes with varying brightness margin
+                (StarUniqueMatchNav one- and two-star paths)
+
+Every scene carries a planted (offset_v, offset_u) ground truth. The noise
+level, feature sizes/counts, and the model-error axes (mesh lumpiness vs an
+ellipsoidal nav prediction, predicted-pose error) are drawn from ranges wide
+enough that each technique's diagnostics span healthy to broken -- the spread
+a logistic calibration fit needs on both label classes.
+
+All randomness comes from a caller-seeded ``random.Random`` so a campaign is
+reproducible from its seed.
+"""
+
+from __future__ import annotations
+
+import math
+import random
+from collections.abc import Callable
+from typing import Any
+
+FAMILIES = (
+    'disc',
+    'limb',
+    'terminator',
+    'blob',
+    'ring',
+    'star_field',
+    'star_unique',
+)
+
+
+def _read_noise(rng: random.Random, *, lo: float = 1.0, hi: float = 48.0) -> float:
+    """Log-uniform read-noise draw (DN) between ``lo`` and ``hi``."""
+    return math.exp(rng.uniform(math.log(lo), math.log(hi)))
+
+
+def _planted_offset(rng: random.Random) -> tuple[float, float]:
+    """Planted (dv, du): mostly a few px, a tail out to +/-10 px."""
+    span = 4.0 if rng.random() < 0.7 else 10.0
+    return rng.uniform(-span, span), rng.uniform(-span, span)
+
+
+def _base(rng: random.Random, *, size: int) -> dict[str, Any]:
+    """Common sim_params skeleton every family builds on."""
+    dv, du = _planted_offset(rng)
+    return {
+        'instrument': 'coiss_nac',
+        'size_v': size,
+        'size_u': size,
+        'random_seed': rng.randrange(2**31),
+        'exposure_sec': 1.0,
+        'bodies': [],
+        'rings': [],
+        'noise': {'poisson': True, 'read_noise_dn': _read_noise(rng)},
+        'offset_v': dv,
+        'offset_u': du,
+        'offset_rotation_deg': 0.0,
+    }
+
+
+def _mesh_body(
+    rng: random.Random,
+    *,
+    name: str,
+    center_v: float,
+    center_u: float,
+    radius: float,
+    phase: float,
+    illumination: float,
+    lumpiness: float,
+    pose_error_deg: float = 0.0,
+) -> dict[str, Any]:
+    """An irregular (mesh) body whose nav prediction is its smooth limit.
+
+    The renderer draws the lumpy mesh; the navigator predicts
+    ``mesh_lumpiness 0.0`` (and, when ``pose_error_deg`` is nonzero, a
+    Y-Euler pose rotated away from the rendered one) -- the controlled
+    model-error channel the calibration needs.
+    """
+    pose = [rng.uniform(0.0, 60.0), rng.uniform(0.0, 60.0), 0.0]
+    nav_override: dict[str, Any] = {'mesh_lumpiness': 0.0}
+    if pose_error_deg != 0.0:
+        nav_override['pose_euler_deg'] = [pose[0], pose[1] + pose_error_deg, pose[2]]
+    return {
+        'name': name,
+        'shape_model': 'polyhedral_mesh',
+        'mesh_lumpiness': lumpiness,
+        'mesh_seed': rng.randrange(2**31),
+        'pose_euler_deg': pose,
+        'center_v': center_v,
+        'center_u': center_u,
+        'axis1': radius,
+        'axis2': radius * rng.uniform(0.75, 0.95),
+        'axis3': radius * rng.uniform(0.6, 0.85),
+        'illumination_angle': illumination,
+        'phase_angle': phase,
+        'nav_override': nav_override,
+    }
+
+
+def _ellipsoid_body(
+    rng: random.Random,
+    *,
+    name: str,
+    center_v: float,
+    center_u: float,
+    radius: float,
+    phase: float,
+    illumination: float,
+) -> dict[str, Any]:
+    """A regular (spherical-ellipsoid) body with no model error."""
+    del rng
+    return {
+        'name': name,
+        'shape_model': 'ellipsoid',
+        'center_v': center_v,
+        'center_u': center_u,
+        'axis1': radius,
+        'axis2': radius,
+        'axis3': radius,
+        'illumination_angle': illumination,
+        'phase_angle': phase,
+    }
+
+
+def gen_disc(rng: random.Random) -> dict[str, Any]:
+    """Resolved body at low-moderate phase (BodyDiscCorrelateNav regime)."""
+    size = 200
+    params = _base(rng, size=size)
+    radius = rng.uniform(18.0, 95.0)
+    phase = rng.uniform(5.0, 80.0)
+    illumination = rng.uniform(0.0, 40.0)
+    center_v = size / 2 + rng.uniform(-0.15, 0.15) * size
+    center_u = size / 2 + rng.uniform(-0.15, 0.15) * size
+    if rng.random() < 0.35:
+        body = _mesh_body(
+            rng,
+            name='HYPERION',
+            center_v=center_v,
+            center_u=center_u,
+            radius=radius,
+            phase=phase,
+            illumination=illumination,
+            lumpiness=rng.uniform(0.05, 0.5),
+        )
+    else:
+        body = _ellipsoid_body(
+            rng,
+            name='RHEA',
+            center_v=center_v,
+            center_u=center_u,
+            radius=radius,
+            phase=phase,
+            illumination=illumination,
+        )
+    params['bodies'] = [body]
+    return params
+
+
+def gen_limb(rng: random.Random) -> dict[str, Any]:
+    """Large body, often partially off-frame, low phase (BodyLimbNav regime)."""
+    size = 220
+    params = _base(rng, size=size)
+    radius = rng.uniform(90.0, 190.0)
+    phase = rng.uniform(8.0, 55.0)
+    illumination = rng.uniform(0.0, 35.0)
+    # Slide the center along a random direction so the visible limb arc
+    # fraction spans "fully in frame" to "small arc in one corner".
+    theta = rng.uniform(0.0, 2.0 * math.pi)
+    displacement = rng.uniform(0.0, radius * 0.9)
+    center_v = size / 2 + displacement * math.sin(theta)
+    center_u = size / 2 + displacement * math.cos(theta)
+    roll = rng.random()
+    if roll < 0.20:
+        body = _mesh_body(
+            rng,
+            name='HYPERION',
+            center_v=center_v,
+            center_u=center_u,
+            radius=radius,
+            phase=phase,
+            illumination=illumination,
+            lumpiness=rng.uniform(0.05, 0.35),
+        )
+    elif roll < 0.40:
+        body = _mesh_body(
+            rng,
+            name='HYPERION',
+            center_v=center_v,
+            center_u=center_u,
+            radius=radius,
+            phase=phase,
+            illumination=illumination,
+            lumpiness=rng.uniform(0.05, 0.25),
+            pose_error_deg=rng.uniform(2.0, 35.0),
+        )
+    else:
+        body = _ellipsoid_body(
+            rng,
+            name='RHEA',
+            center_v=center_v,
+            center_u=center_u,
+            radius=radius,
+            phase=phase,
+            illumination=illumination,
+        )
+    params['bodies'] = [body]
+    return params
+
+
+def gen_terminator(rng: random.Random) -> dict[str, Any]:
+    """High-phase crescent (BodyTerminatorNav regime)."""
+    size = 200
+    params = _base(rng, size=size)
+    radius = rng.uniform(35.0, 90.0)
+    phase = rng.uniform(95.0, 150.0)
+    illumination = rng.uniform(5.0, 35.0)
+    center_v = size / 2 + rng.uniform(-0.1, 0.1) * size
+    center_u = size / 2 + rng.uniform(-0.1, 0.1) * size
+    if rng.random() < 0.25:
+        body = _mesh_body(
+            rng,
+            name='HYPERION',
+            center_v=center_v,
+            center_u=center_u,
+            radius=radius,
+            phase=phase,
+            illumination=illumination,
+            lumpiness=rng.uniform(0.05, 0.4),
+        )
+    else:
+        body = _ellipsoid_body(
+            rng,
+            name='RHEA',
+            center_v=center_v,
+            center_u=center_u,
+            radius=radius,
+            phase=phase,
+            illumination=illumination,
+        )
+    params['bodies'] = [body]
+    return params
+
+
+def gen_blob(rng: random.Random) -> dict[str, Any]:
+    """Small / distant body (BodyBlobNav regime)."""
+    size = 128
+    params = _base(rng, size=size)
+    radius = rng.uniform(2.5, 14.0)
+    phase = rng.uniform(10.0, 130.0)
+    illumination = rng.uniform(0.0, 35.0)
+    center_v = size / 2 + rng.uniform(-0.2, 0.2) * size
+    center_u = size / 2 + rng.uniform(-0.2, 0.2) * size
+    if rng.random() < 0.4:
+        body = _mesh_body(
+            rng,
+            name='HYPERION',
+            center_v=center_v,
+            center_u=center_u,
+            radius=radius,
+            phase=phase,
+            illumination=illumination,
+            lumpiness=rng.uniform(0.1, 0.5),
+        )
+    else:
+        body = _ellipsoid_body(
+            rng,
+            name='RHEA',
+            center_v=center_v,
+            center_u=center_u,
+            radius=radius,
+            phase=phase,
+            illumination=illumination,
+        )
+    params['bodies'] = [body]
+    return params
+
+
+def _ringlet(
+    rng: random.Random, *, center_v: float, center_u: float, a_inner: float, a_outer: float
+) -> dict[str, Any]:
+    """One circular RINGLET entry in renderer form."""
+    return {
+        'name': 'SATURN',
+        'feature_type': 'RINGLET',
+        'center_v': center_v,
+        'center_u': center_u,
+        'inner_data': [
+            {'mode': 1, 'a': a_inner, 'rms': 1.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0}
+        ],
+        'outer_data': [
+            {'mode': 1, 'a': a_outer, 'rms': 1.0, 'ae': 0.0, 'long_peri': 0.0, 'rate_peri': 0.0}
+        ],
+    }
+
+
+def gen_ring(rng: random.Random) -> dict[str, Any]:
+    """Ringlet scene: curved through near-flat arcs, 1-2 ringlets, narrow to wide.
+
+    Curvature is controlled by pushing the ring center off-frame: an arc from
+    a ring of radius R passing through a frame R away from its center is
+    nearly straight (the rank-1 regime), while an in-frame center gives
+    fully-curved closed edges.
+    """
+    size = 220
+    params = _base(rng, size=size)
+    rings: list[dict[str, Any]] = []
+    n_ringlets = 1 if rng.random() < 0.7 else 2
+    flat = rng.random() < 0.3
+    if flat:
+        # Distant center: edges cross the frame as gentle arcs.
+        big_r = rng.uniform(300.0, 900.0)
+        theta = rng.uniform(0.0, 2.0 * math.pi)
+        center_v = size / 2 + big_r * math.sin(theta)
+        center_u = size / 2 + big_r * math.cos(theta)
+        base_a = big_r + rng.uniform(-30.0, 30.0)
+    else:
+        center_v = size / 2 + rng.uniform(-40.0, 40.0)
+        center_u = size / 2 + rng.uniform(-40.0, 40.0)
+        base_a = rng.uniform(40.0, 80.0)
+    for _ in range(n_ringlets):
+        width = rng.uniform(2.0, 35.0)
+        rings.append(
+            _ringlet(
+                rng,
+                center_v=center_v,
+                center_u=center_u,
+                a_inner=base_a,
+                a_outer=base_a + width,
+            )
+        )
+        base_a += width + rng.uniform(10.0, 30.0)
+    params['rings'] = rings
+    return params
+
+
+def gen_star_field(rng: random.Random) -> dict[str, Any]:
+    """3-15 stars, bright through sub-detection (star-technique regimes)."""
+    size = 128
+    params = _base(rng, size=size)
+    # The sim limiting magnitude is ~7.5 at read noise 1 and ~6.0 at read
+    # noise 4 (ObsSim.star_max_usable_vmag), so cap the star-scene noise a
+    # little lower than the body/ring families and keep the brightness
+    # regime spanning "well above the limit" to "straddling it".
+    params['noise']['read_noise_dn'] = _read_noise(rng, hi=16.0)
+    n_stars = rng.randint(3, 15)
+    # Per-scene brightness regime so whole frames span easy to marginal
+    # (a per-star-only draw would almost always leave >= 3 bright stars).
+    mag_lo = rng.uniform(2.5, 7.0)
+    mag_hi = mag_lo + rng.uniform(0.5, 2.5)
+    margin = 12.0
+    stars = []
+    for index in range(n_stars):
+        stars.append(
+            {
+                'name': f'C{index + 1}',
+                'v': rng.uniform(margin, size - margin),
+                'u': rng.uniform(margin, size - margin),
+                'vmag': rng.uniform(mag_lo, mag_hi),
+            }
+        )
+    params['stars'] = stars
+    if rng.random() < 0.25:
+        params['stray_light'] = {
+            'amplitude': rng.uniform(0.05, 0.5),
+            'direction_deg': rng.uniform(0.0, 360.0),
+            'model': 'linear',
+        }
+    return params
+
+
+def gen_star_unique(rng: random.Random) -> dict[str, Any]:
+    """1-2 star scenes with varying brightness margin (StarUniqueMatchNav)."""
+    size = 128
+    params = _base(rng, size=size)
+    params['noise']['read_noise_dn'] = _read_noise(rng, hi=16.0)
+    margin = 16.0
+    primary_mag = rng.uniform(2.5, 7.0)
+    stars = [
+        {
+            'name': 'U1',
+            'v': rng.uniform(margin, size - margin),
+            'u': rng.uniform(margin, size - margin),
+            'vmag': primary_mag,
+        }
+    ]
+    if rng.random() < 0.55:
+        # Two-star scene; the pairwise brightness gap varies the
+        # assignment ambiguity the two-star path must resolve.
+        stars.append(
+            {
+                'name': 'U2',
+                'v': rng.uniform(margin, size - margin),
+                'u': rng.uniform(margin, size - margin),
+                'vmag': primary_mag + rng.uniform(0.1, 3.0),
+            }
+        )
+    params['stars'] = stars
+    return params
+
+
+_GENERATORS: dict[str, Callable[[random.Random], dict[str, Any]]] = {
+    'disc': gen_disc,
+    'limb': gen_limb,
+    'terminator': gen_terminator,
+    'blob': gen_blob,
+    'ring': gen_ring,
+    'star_field': gen_star_field,
+    'star_unique': gen_star_unique,
+}
+
+
+def generate_scenes(
+    family: str, count: int, *, campaign_seed: int
+) -> list[tuple[str, dict[str, Any]]]:
+    """Return ``count`` seeded scenes for ``family`` as (scene_id, sim_params).
+
+    Each scene draws from its own ``random.Random`` seeded by
+    ``(campaign_seed, family, index)`` so any single scene can be regenerated
+    without replaying the whole campaign.
+
+    Parameters:
+        family: One of :data:`FAMILIES`.
+        count: Number of scenes to generate.
+        campaign_seed: Campaign-level seed recorded in the output manifest.
+
+    Returns:
+        List of ``(scene_id, sim_params)`` pairs.
+    """
+    if family not in _GENERATORS:
+        raise ValueError(f'unknown scene family {family!r}; valid: {sorted(_GENERATORS)}')
+    generator = _GENERATORS[family]
+    scenes = []
+    for index in range(count):
+        rng = random.Random(f'{campaign_seed}/{family}/{index}')
+        scene_id = f'{family}_{index:05d}'
+        scenes.append((scene_id, generator(rng)))
+    return scenes
