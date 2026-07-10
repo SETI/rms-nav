@@ -204,10 +204,91 @@ def test_ring_edge_nav_marks_spurious_when_per_edge_rms_collapses_to_one(
     result = technique.navigate([feat_a, feat_b, feat_c], context)
     assert isinstance(result.diagnostics, RingEdgeDiagnostics)
     assert result.diagnostics.edge_count == 3
-    # Average per-edge RMS = (0 + 50 + 50) / 3 ≈ 33.3, far above any
-    # plausible spurious threshold derived from sub-pixel sigmas.
+    # The forged fit anchors only edge A — one third of the model
+    # vertices — so the inlier fraction sits far below the 0.5 gate.
+    # The per-edge diagnostics record the misalignment signature.
+    assert result.diagnostics.per_edge_dt_median_max == pytest.approx(50.0)
     assert result.diagnostics.per_edge_dt_rms_summed > 50.0
     assert result.spurious is True
+
+
+def test_ring_edge_nav_flat_parallel_edges_with_minority_snaps_not_spurious(
+    monkeypatch: pytest.MonkeyPatch,
+    horizontal_step_image: HorizontalStepImageFactory,
+    flat_polyline: FlatPolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """A correct flat multi-edge fit with an outlier minority passes the gate.
+
+    Models the ``ring_only_flat`` production regression (#203, Cassini
+    N1863267799): parallel straight Keeler-gap edges fit cleanly while a
+    minority of vertices (an edge too faint to detect, vertices snapping
+    to a neighbouring parallel edge 9-30 px away) are Tukey outliers.
+    Those outliers inflate every raw per-edge residual statistic past any
+    sigma-derived threshold even though the joint fit is correct — which is
+    exactly what used to gate every flat ansa frame as spurious.  The fit
+    still anchors 85% of the model vertices, so the inlier-fraction gate
+    passes and the result survives with ``is_rank_1=True`` for the ensemble
+    to surface as ``rank_1_only``.
+    """
+    from spindoctor.nav_technique import dt_fitting, nav_technique_ring_edge
+
+    shape = (200, 200)
+    image = horizontal_step_image(shape, 100.0)
+    features = []
+    for name, row in (('inner', 80.5), ('middle', 100.5), ('outer', 120.5)):
+        vertices, outward = flat_polyline(row, 20.0, 180.0, 60)
+        features.append(
+            make_ring_feature(
+                name, vertices=vertices, outward_normals=outward, is_straight_line=True
+            )
+        )
+    technique = RingEdgeNav()
+    context = make_nav_context(image)
+
+    # Per-edge residuals: 85% of vertices at the ~1 px fit residual, 15%
+    # snapped to a parallel neighbour 20 px away.  Raw per-edge RMS is
+    # sqrt(0.85*1 + 0.15*400) ~ 7.8 px — any sigma-derived residual gate
+    # would fire — but the inlier fraction is 0.85, well above the gate.
+    n_per_edge = 60
+    per_edge = np.full(n_per_edge, 1.0, dtype=np.float64)
+    per_edge[: int(0.15 * n_per_edge)] = 20.0
+    residuals = np.concatenate([per_edge] * 3)
+    weights = np.ones(residuals.size, dtype=np.float64)
+    forged_result = dt_fitting.LMRefineResult(
+        offset_vu=(-1.5, 0.0),
+        rotation_rad=0.0,
+        covariance=np.array([[0.04, 0.0], [0.0, 1.0e9]], dtype=np.float64),
+        residuals_px=residuals,
+        weights=weights,
+        rms_px=1.0,
+        raw_rms_px=float(np.sqrt(np.mean(residuals**2))),
+        iterations=10,
+        converged=True,
+        inlier_count=int(residuals.size * 0.85),
+        degenerate=False,
+    )
+    monkeypatch.setattr(
+        nav_technique_ring_edge,
+        'lm_subpixel_refine',
+        lambda **_kwargs: forged_result,
+    )
+    # Pin the coarse seed next to the forged LM offset so the unrelated
+    # LM-displacement gate stays quiet; this test is about the per-edge gate.
+    monkeypatch.setattr(
+        nav_technique_ring_edge,
+        'coarse_ncc_search',
+        lambda *_args, **_kwargs: (-2, 0),
+    )
+
+    result = technique.navigate(features, context)
+    assert isinstance(result.diagnostics, RingEdgeDiagnostics)
+    assert result.diagnostics.edge_count == 3
+    assert result.diagnostics.per_edge_dt_median_max == pytest.approx(1.0)
+    assert result.diagnostics.per_edge_dt_rms_mean > 3.0
+    assert result.spurious is False
+    assert result.diagnostics.is_rank_1 is True
 
 
 def test_ring_edge_nav_registered_with_navtechnique_registry() -> None:
