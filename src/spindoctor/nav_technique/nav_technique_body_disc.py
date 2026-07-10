@@ -234,6 +234,7 @@ class BodyDiscCorrelateNav(NavTechnique):
         )
         self._consistency_max_px = float(self.tuning['consistency_max_px'])
         self._refine_lowpass_sigma_px = float(self.tuning['refine_lowpass_sigma_px'])
+        self._model_error_floor_px = float(self.tuning.get('model_error_floor_px', 0.0))
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Return whether the input set carries any usable BODY_DISC feature.
@@ -343,6 +344,14 @@ class BodyDiscCorrelateNav(NavTechnique):
                     f'BodyDiscCorrelateNav: navigate_with_pyramid_kpeaks returned '
                     f'covariance with shape {covariance_2x2.shape}; expected (2, 2). '
                     'Investigate the pyramid output rather than silently slicing.'
+                )
+            # Model-error floor, added in quadrature (see the YAML tuning
+            # comment): the NCC peak-curvature covariance measures photon
+            # statistics only and sits orders of magnitude below the real
+            # silhouette/photometric model error of a template correlation.
+            if self._model_error_floor_px > 0.0:
+                covariance_2x2 = covariance_2x2 + (self._model_error_floor_px**2) * np.eye(
+                    2, dtype=np.float64
                 )
             spurious = bool(ncc_result['spurious'])
             at_edge_translation = bool(ncc_result['at_edge'])

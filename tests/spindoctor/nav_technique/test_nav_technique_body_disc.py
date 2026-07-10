@@ -364,3 +364,35 @@ def test_rotation_sigma_from_quality_reports_unobservable() -> None:
         candidates=candidates, winner=winner, step_rad=0.1
     )
     assert sigma is None
+
+
+def test_body_disc_model_error_floor_inflates_covariance(
+    disc_image: DiscImageFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """model_error_floor_px adds exactly its square to the covariance diagonal.
+
+    The NCC peak-curvature covariance measures photon statistics only; the
+    floor (calibrated by the WS-5 sweep) carries the silhouette /
+    photometric model error of the template correlation.
+    """
+    shape = (160, 160)
+    image_center = (80.0, 80.0)
+    radius = 20.0
+    image = disc_image(shape, image_center, radius)
+    feature = _make_disc_feature(
+        'moonA',
+        extfov_shape=shape,
+        image_center_vu=image_center,
+        radius=radius,
+        planted_offset_vu=(2.0, -3.0),
+    )
+    context = make_nav_context(image, extfov_margin_vu=(16, 16))
+    bare = BodyDiscCorrelateNav()
+    bare._model_error_floor_px = 0.0
+    floored = BodyDiscCorrelateNav()
+    floored._model_error_floor_px = 0.8
+    cov_bare = bare.navigate([feature], context).covariance_px2
+    cov_floored = floored.navigate([feature], context).covariance_px2
+    for axis in (0, 1):
+        assert cov_floored[axis, axis] == pytest.approx(cov_bare[axis, axis] + 0.8**2, rel=1e-9)
