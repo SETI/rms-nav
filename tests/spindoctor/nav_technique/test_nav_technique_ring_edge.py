@@ -292,6 +292,69 @@ def test_ring_edge_nav_flat_parallel_edges_with_minority_snaps_not_spurious(
     assert result.diagnostics.is_rank_1 is True
 
 
+def test_ring_edge_nav_rank1_tangent_slide_not_gated(
+    monkeypatch: pytest.MonkeyPatch,
+    horizontal_step_image: HorizontalStepImageFactory,
+    flat_polyline: FlatPolylineFactory,
+    make_ring_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """Tangent slide on a rank-1 scene trips neither at_edge nor displacement.
+
+    Nothing constrains the along-edge axis of an all-straight fit, so the
+    LM may drift to the search-window boundary along the tangent (Cassini
+    N1863267979: dv slid to the margin while the observable normal
+    component was mid-window).  Both the at-edge check and the
+    LM-displacement spurious gate must therefore be evaluated on the
+    edge-normal component only.
+    """
+    from spindoctor.nav_technique import dt_fitting, nav_technique_ring_edge
+
+    shape = (200, 200)
+    image = horizontal_step_image(shape, 100.0)
+    vertices, outward = flat_polyline(101.5, 20.0, 180.0, 60)
+    feature = make_ring_feature(
+        'flat', vertices=vertices, outward_normals=outward, is_straight_line=True
+    )
+    technique = RingEdgeNav()
+    context = make_nav_context(image)  # extfov margins (32, 32)
+
+    # Horizontal edge: normal is +v, tangent is +u.  The forged fit slid
+    # 31.5 px along the tangent — at the (32 - 1) px per-axis at-edge
+    # boundary and far past the 4 px displacement gate — while the
+    # observable normal component stays a benign -1.5 px.
+    residuals = np.full(vertices.shape[0], 0.5, dtype=np.float64)
+    forged_result = dt_fitting.LMRefineResult(
+        offset_vu=(-1.5, 31.5),
+        rotation_rad=0.0,
+        covariance=np.array([[0.04, 0.0], [0.0, 1.0e9]], dtype=np.float64),
+        residuals_px=residuals,
+        weights=np.ones(residuals.size, dtype=np.float64),
+        rms_px=0.5,
+        raw_rms_px=0.5,
+        iterations=10,
+        converged=True,
+        inlier_count=int(residuals.size),
+        degenerate=False,
+    )
+    monkeypatch.setattr(
+        nav_technique_ring_edge,
+        'lm_subpixel_refine',
+        lambda **_kwargs: forged_result,
+    )
+    monkeypatch.setattr(
+        nav_technique_ring_edge,
+        'coarse_ncc_search',
+        lambda *_args, **_kwargs: (-2, 0),
+    )
+
+    result = technique.navigate([feature], context)
+    assert result.at_edge is False
+    assert result.spurious is False
+    assert isinstance(result.diagnostics, RingEdgeDiagnostics)
+    assert result.diagnostics.is_rank_1 is True
+
+
 def test_aggregate_edge_normal_angle_all_straight_horizontal(
     flat_polyline: FlatPolylineFactory,
     make_ring_feature: NavFeatureFactory,

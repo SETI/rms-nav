@@ -13,7 +13,7 @@ body blob) before declaring a final answer.
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
@@ -262,11 +262,28 @@ class RingEdgeNav(NavTechnique):
             # See BodyLimbNav: ``>=`` covers both at-edge and over-edge cases
             # so an LM that walked past the coarse-NCC search window does
             # not silently report an offset outside the extfov margin.
-            at_edge = (
-                abs(dv_final) >= margin_v - self._at_edge_tolerance_px
-                or abs(du_final) >= margin_u - self._at_edge_tolerance_px
-                or rotation_at_edge
-            )
+            if every_straight:
+                # Rank-1 scene: the along-edge (tangent) offset component is
+                # unobservable and nothing constrains it, so the LM may
+                # slide to the search-window boundary along it (Tikhonov is
+                # off by default).  Gating per axis would hard-zero a
+                # perfectly valid normal-component fix; gate on the
+                # observable component instead — at-edge along the normal
+                # means the *measurement* is pinned at the window limit.
+                n_hat = _aggregate_normal_orientation(polarity_normals)
+                offset_along_normal = abs(dv_final * n_hat[0] + du_final * n_hat[1])
+                # Maximum reach of the search box along the normal.
+                bound_along_normal = abs(n_hat[0]) * margin_v + abs(n_hat[1]) * margin_u
+                at_edge = (
+                    offset_along_normal >= bound_along_normal - self._at_edge_tolerance_px
+                    or rotation_at_edge
+                )
+            else:
+                at_edge = (
+                    abs(dv_final) >= margin_v - self._at_edge_tolerance_px
+                    or abs(du_final) >= margin_u - self._at_edge_tolerance_px
+                    or rotation_at_edge
+                )
             sigma_min_px = float(sigmas.min()) if sigmas.size else 1.0
             covariance = result.covariance
             total_edge_length_px = float(vertices.shape[0])
@@ -294,9 +311,19 @@ class RingEdgeNav(NavTechnique):
             inlier_fraction = (
                 float(result.inlier_count) / float(total_vertices) if total_vertices else 0.0
             )
-            lm_displacement_px = float(
-                math.hypot(dv_final - float(coarse_dv), du_final - float(coarse_du))
-            )
+            if every_straight:
+                # As with at_edge above: the tangent component of the
+                # LM-vs-coarse displacement is unconstrained slide along the
+                # unobservable axis, not evidence of a runaway fit.
+                n_hat = _aggregate_normal_orientation(polarity_normals)
+                lm_displacement_px = abs(
+                    (dv_final - float(coarse_dv)) * n_hat[0]
+                    + (du_final - float(coarse_du)) * n_hat[1]
+                )
+            else:
+                lm_displacement_px = float(
+                    math.hypot(dv_final - float(coarse_dv), du_final - float(coarse_du))
+                )
             spurious = (
                 result.degenerate
                 or result.rms_px
@@ -427,6 +454,24 @@ def _is_rank_1(covariance: NDArrayFloatType) -> bool:
     return smallest / largest < _RANK1_NULL_RELATIVE_THRESHOLD
 
 
+def _aggregate_normal_orientation(polarity_normals: NDArrayFloatType) -> NDArrayFloatType:
+    """Return the dominant unit-normal orientation of the aggregated edges.
+
+    The dominant eigenvector of the per-vertex normals' outer-product sum;
+    polarity-sign-independent (a gap's inner and outer edges carry opposite
+    normal senses, so a plain mean could cancel).
+
+    Parameters:
+        polarity_normals: ``(N, 2)`` per-vertex edge normals (either sign).
+
+    Returns:
+        Unit 2-vector in ``(v, u)`` order.
+    """
+    outer_sum = polarity_normals.T @ polarity_normals
+    _eigvals, eigvecs = np.linalg.eigh(outer_sum)
+    return cast(NDArrayFloatType, eigvecs[:, -1])
+
+
 def aggregate_edge_normal_angle_deg(features: list[NavFeature]) -> float | None:
     """Return the dominant edge-normal orientation of an all-straight scene.
 
@@ -448,9 +493,7 @@ def aggregate_edge_normal_angle_deg(features: list[NavFeature]) -> float | None:
     _vertices, normals, _sigmas, ids, every_straight = _aggregate_ring_edges(features)
     if not ids or not every_straight:
         return None
-    outer_sum = normals.T @ normals
-    _eigvals, eigvecs = np.linalg.eigh(outer_sum)
-    n_hat = eigvecs[:, -1]
+    n_hat = _aggregate_normal_orientation(normals)
     angle = math.degrees(math.atan2(float(n_hat[1]), float(n_hat[0])))
     # An orientation, not a direction: fold to (-90, 90].
     if angle <= -90.0:
@@ -495,9 +538,7 @@ def _rank1_projected_covariance(
         A new covariance of the input shape whose translation block is
         exactly rank-1.
     """
-    outer_sum = polarity_normals.T @ polarity_normals
-    _eigvals, eigvecs = np.linalg.eigh(outer_sum)
-    n_hat = eigvecs[:, -1]
+    n_hat = _aggregate_normal_orientation(polarity_normals)
     sigma_n_sq = float(n_hat @ covariance[:2, :2] @ n_hat)
     projected = np.zeros_like(covariance)
     projected[:2, :2] = sigma_n_sq * np.outer(n_hat, n_hat)
