@@ -21,6 +21,7 @@ skipped automatically when ``PDS3_HOLDINGS_DIR`` is not set.
 
 from __future__ import annotations
 
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -113,26 +114,50 @@ def test_one_library_image(sidecar: Sidecar, tmp_path: Path) -> None:
         f'{sidecar.expected.status!r})'
     )
 
-    # (b) confidence_rank (no slack, exact match)
+    # (b) confidence_rank (no slack, exact match), plus the optional
+    # status_reason pin (e.g. ``rank_1_only`` for a flat-ring frame).
     actual_rank = nav_meta.get('confidence_rank')
     assert actual_rank == sidecar.expected.confidence_tier, (
         f'{sidecar.image_id}: expected confidence_tier='
         f'{sidecar.expected.confidence_tier}, got {actual_rank}'
     )
+    if sidecar.expected.status_reason is not None:
+        actual_reason = nav_meta.get('status_reason')
+        assert actual_reason == sidecar.expected.status_reason, (
+            f'{sidecar.image_id}: expected status_reason='
+            f'{sidecar.expected.status_reason}, got {actual_reason}'
+        )
 
-    # (c) offset_px within slack on each axis (only for ``ok`` outcomes)
+    # (c) offset within slack (only for ``ok`` outcomes).  A rank-1
+    # constrained ground truth compares only the component along the
+    # constraint normal — the along-edge component is physically
+    # unobservable, so per-axis comparison would score noise.
     if sidecar.expected.status == 'success':
         offset = metadata.get('offset')
         assert offset is not None, f'{sidecar.image_id}: status=ok but metadata carries no offset'
-        slack = sidecar.ground_truth.offset_uncertainty_px + 0.5
-        dv_err = abs(float(offset[0]) - sidecar.ground_truth.offset_dv_px)
-        du_err = abs(float(offset[1]) - sidecar.ground_truth.offset_du_px)
-        assert dv_err <= slack, (
-            f'{sidecar.image_id}: dv error {dv_err:.3f} px exceeds tolerance {slack:.3f} px'
-        )
-        assert du_err <= slack, (
-            f'{sidecar.image_id}: du error {du_err:.3f} px exceeds tolerance {slack:.3f} px'
-        )
+        constraint = sidecar.ground_truth.constraint
+        if constraint is not None:
+            angle = math.radians(constraint.normal_angle_deg)
+            actual_along_normal = float(offset[0]) * math.cos(angle) + float(offset[1]) * math.sin(
+                angle
+            )
+            slack = constraint.uncertainty_px + 0.5
+            normal_err = abs(actual_along_normal - constraint.offset_along_normal_px)
+            assert normal_err <= slack, (
+                f'{sidecar.image_id}: edge-normal offset error {normal_err:.3f} px '
+                f'exceeds tolerance {slack:.3f} px (constraint normal at '
+                f'{constraint.normal_angle_deg:.2f} deg)'
+            )
+        else:
+            slack = sidecar.ground_truth.offset_uncertainty_px + 0.5
+            dv_err = abs(float(offset[0]) - sidecar.ground_truth.offset_dv_px)
+            du_err = abs(float(offset[1]) - sidecar.ground_truth.offset_du_px)
+            assert dv_err <= slack, (
+                f'{sidecar.image_id}: dv error {dv_err:.3f} px exceeds tolerance {slack:.3f} px'
+            )
+            assert du_err <= slack, (
+                f'{sidecar.image_id}: du error {du_err:.3f} px exceeds tolerance {slack:.3f} px'
+            )
 
     per_technique = nav_meta.get('per_technique', [])
     technique_names = [entry.get('technique_name') for entry in per_technique]

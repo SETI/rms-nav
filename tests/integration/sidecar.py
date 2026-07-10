@@ -24,6 +24,8 @@ from typing import Any
 
 from ruamel.yaml import YAML
 
+from spindoctor.support.status_reason import NavStatusReason
+
 # ---------------------------------------------------------------------------
 # Library-wide enumerations
 # ---------------------------------------------------------------------------
@@ -87,8 +89,16 @@ ALLOWED_STATUSES: frozenset[str] = frozenset({'success', 'failed', 'conflicted'}
 # expected.confidence_tier value alongside the four tier names.
 ALLOWED_TIERS: frozenset[str] = frozenset({'high', 'medium', 'low', 'failed', 'conflicted'})
 ALLOWED_GT_SOURCES: frozenset[str] = frozenset({'operator_verified'})
+ALLOWED_CONSTRAINT_TYPES: frozenset[str] = frozenset({'rank_1'})
+ALLOWED_STATUS_REASONS: frozenset[str] = frozenset({reason.value for reason in NavStatusReason})
 
 CURRENT_SCHEMA_VERSION: int = 1
+
+# Maximum disagreement (px) tolerated between the 2-D representative offset
+# projected onto the constraint normal and the declared
+# ``offset_along_normal_px``.  Both come from the same manual-nav save, so any
+# larger gap means one of them was hand-edited inconsistently.
+_CONSTRAINT_PROJECTION_TOLERANCE_PX: float = 0.01
 
 
 # ---------------------------------------------------------------------------
@@ -97,8 +107,34 @@ CURRENT_SCHEMA_VERSION: int = 1
 
 
 @dataclass(frozen=True)
+class GroundTruthConstraint:
+    """Single-axis (rank-1) observability constraint on a ground-truth offset.
+
+    For a straight (flat) ring edge only the offset component along the edge
+    normal is observable; the along-edge component is physically
+    unconstrained.  ``normal_angle_deg`` is the edge-normal direction in the
+    ``(v, u)`` frame, measured from ``+v`` toward ``+u`` — the unit normal is
+    ``(cos(angle), sin(angle))`` and a 2-D offset's observable component is
+    ``dv * cos(angle) + du * sin(angle)``.
+    """
+
+    type: str
+    normal_angle_deg: float
+    offset_along_normal_px: float
+    uncertainty_px: float
+
+
+@dataclass(frozen=True)
 class GroundTruth:
-    """Operator-verified offset for one image."""
+    """Operator-verified offset for one image.
+
+    When ``constraint`` is present the 2-D ``offset_dv_px`` /
+    ``offset_du_px`` pair is a *representative point* on the constraint line
+    (whatever the operator saved from the manual-nav drag); only the
+    component along the constraint normal is operator-verified, and the
+    regression comparison projects onto that normal instead of comparing per
+    axis.
+    """
 
     offset_dv_px: float
     offset_du_px: float
@@ -108,17 +144,25 @@ class GroundTruth:
     verified_date: date
     ui_version: str
     notes: str | None = None
+    constraint: GroundTruthConstraint | None = None
 
 
 @dataclass(frozen=True)
 class Expected:
-    """Expected-outcome targets the regression test compares against."""
+    """Expected-outcome targets the regression test compares against.
+
+    ``status_reason`` is optional: when present the regression test also
+    asserts the orchestrator's discrete ``NavStatusReason`` (e.g.
+    ``rank_1_only`` for a flat-ring frame whose only observable axis is the
+    edge normal); when absent only the status / tier are checked.
+    """
 
     status: str
     confidence_tier: str
     primary_technique: str
     techniques_must_run: tuple[str, ...] = ()
     techniques_must_skip: tuple[str, ...] = ()
+    status_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -299,6 +343,19 @@ def _validate_ground_truth(raw: dict[str, Any], *, path: Path) -> GroundTruth:
     notes = raw.get('notes')
     if notes is not None and not isinstance(notes, str):
         raise SidecarValidationError(f'{path}: ground_truth.notes must be a string when present')
+    constraint = _validate_constraint(raw.get('constraint'), path=path)
+    if constraint is not None:
+        projected = offset_dv_px * math.cos(
+            math.radians(constraint.normal_angle_deg)
+        ) + offset_du_px * math.sin(math.radians(constraint.normal_angle_deg))
+        if abs(projected - constraint.offset_along_normal_px) > _CONSTRAINT_PROJECTION_TOLERANCE_PX:
+            raise SidecarValidationError(
+                f'{path}: ground_truth (offset_dv_px, offset_du_px) projected onto the '
+                f'constraint normal is {projected:.4f} px but '
+                f'constraint.offset_along_normal_px is '
+                f'{constraint.offset_along_normal_px:.4f} px; the representative point '
+                f'must lie on the constraint line'
+            )
     return GroundTruth(
         offset_dv_px=offset_dv_px,
         offset_du_px=offset_du_px,
@@ -308,6 +365,30 @@ def _validate_ground_truth(raw: dict[str, Any], *, path: Path) -> GroundTruth:
         verified_date=verified_date,
         ui_version=ui_version,
         notes=notes,
+        constraint=constraint,
+    )
+
+
+def _validate_constraint(raw: Any, *, path: Path) -> GroundTruthConstraint | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise SidecarValidationError(
+            f'{path}: ground_truth.constraint must be a mapping when present'
+        )
+    constraint_type = _require_enum(raw, 'type', ALLOWED_CONSTRAINT_TYPES, path=path)
+    normal_angle_deg = _require_float(raw, 'normal_angle_deg', path=path)
+    offset_along_normal_px = _require_float(raw, 'offset_along_normal_px', path=path)
+    uncertainty_px = _require_float(raw, 'uncertainty_px', path=path)
+    if uncertainty_px <= 0.0:
+        raise SidecarValidationError(
+            f'{path}: ground_truth.constraint.uncertainty_px must be > 0, got {uncertainty_px}'
+        )
+    return GroundTruthConstraint(
+        type=constraint_type,
+        normal_angle_deg=normal_angle_deg,
+        offset_along_normal_px=offset_along_normal_px,
+        uncertainty_px=uncertainty_px,
     )
 
 
@@ -342,12 +423,21 @@ def _validate_expected(raw: dict[str, Any], *, path: Path) -> Expected:
         raise SidecarValidationError(
             f'{path}: techniques_must_run and techniques_must_skip overlap: {sorted(overlap)}'
         )
+    status_reason = raw.get('status_reason')
+    if status_reason is not None and (
+        not isinstance(status_reason, str) or status_reason not in ALLOWED_STATUS_REASONS
+    ):
+        raise SidecarValidationError(
+            f'{path}: expected.status_reason must be one of '
+            f'{sorted(ALLOWED_STATUS_REASONS)} when present, got {status_reason!r}'
+        )
     return Expected(
         status=status,
         confidence_tier=confidence_tier,
         primary_technique=primary_technique,
         techniques_must_run=techniques_must_run,
         techniques_must_skip=techniques_must_skip,
+        status_reason=status_reason,
     )
 
 

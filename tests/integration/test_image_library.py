@@ -224,3 +224,101 @@ def test_load_sidecar_rejects_unknown_schema_version(tmp_path: Path) -> None:
     p.write_text(bad)
     with pytest.raises(SidecarValidationError, match=r'schema_version'):
         load_sidecar(p)
+
+
+# 12.5 * cos(60 deg) + (-3.25) * sin(60 deg) = 3.435
+_RANK1_CONSTRAINT_BLOCK = """\
+  constraint:
+    type: rank_1
+    normal_angle_deg: 60.0
+    offset_along_normal_px: 3.435
+    uncertainty_px: 0.4
+"""
+
+
+def _with_constraint(text: str, block: str = _RANK1_CONSTRAINT_BLOCK) -> str:
+    """Insert a ``ground_truth.constraint`` block into the reference YAML."""
+    return text.replace(
+        "  notes: 'Hand-picked for the schema test.'\n",
+        "  notes: 'Hand-picked for the schema test.'\n" + block,
+    )
+
+
+def test_load_sidecar_accepts_rank_1_constraint(tmp_path: Path) -> None:
+    """A consistent ``ground_truth.constraint`` block round-trips."""
+    p = tmp_path / 'TEST_IMG_0001.yaml'
+    p.write_text(_with_constraint(_VALID_SIDECAR_TEXT))
+    sidecar = load_sidecar(p)
+    constraint = sidecar.ground_truth.constraint
+    assert constraint is not None
+    assert constraint.type == 'rank_1'
+    assert constraint.normal_angle_deg == 60.0
+    assert constraint.offset_along_normal_px == 3.435
+    assert constraint.uncertainty_px == 0.4
+
+
+def test_load_sidecar_constraint_absent_is_none(tmp_path: Path) -> None:
+    """A sidecar without a constraint block parses with ``constraint=None``."""
+    p = tmp_path / 'TEST_IMG_0001.yaml'
+    p.write_text(_VALID_SIDECAR_TEXT)
+    assert load_sidecar(p).ground_truth.constraint is None
+
+
+def test_load_sidecar_rejects_constraint_off_line_representative(tmp_path: Path) -> None:
+    """The 2-D offset must project onto the declared normal component."""
+    bad = _with_constraint(
+        _VALID_SIDECAR_TEXT,
+        _RANK1_CONSTRAINT_BLOCK.replace(
+            'offset_along_normal_px: 3.435', 'offset_along_normal_px: 5.0'
+        ),
+    )
+    p = tmp_path / 'BAD.yaml'
+    p.write_text(bad)
+    with pytest.raises(SidecarValidationError, match=r'constraint line'):
+        load_sidecar(p)
+
+
+def test_load_sidecar_rejects_unknown_constraint_type(tmp_path: Path) -> None:
+    """``constraint.type`` must be a declared constraint type."""
+    bad = _with_constraint(
+        _VALID_SIDECAR_TEXT, _RANK1_CONSTRAINT_BLOCK.replace('type: rank_1', 'type: rank_2')
+    )
+    p = tmp_path / 'BAD.yaml'
+    p.write_text(bad)
+    with pytest.raises(SidecarValidationError, match=r'type'):
+        load_sidecar(p)
+
+
+def test_load_sidecar_rejects_nonpositive_constraint_uncertainty(tmp_path: Path) -> None:
+    """``constraint.uncertainty_px`` must be strictly positive."""
+    bad = _with_constraint(
+        _VALID_SIDECAR_TEXT,
+        _RANK1_CONSTRAINT_BLOCK.replace('uncertainty_px: 0.4', 'uncertainty_px: 0.0'),
+    )
+    p = tmp_path / 'BAD.yaml'
+    p.write_text(bad)
+    with pytest.raises(SidecarValidationError, match=r'uncertainty_px'):
+        load_sidecar(p)
+
+
+def test_load_sidecar_accepts_status_reason(tmp_path: Path) -> None:
+    """An ``expected.status_reason`` from the NavStatusReason enum validates."""
+    good = _VALID_SIDECAR_TEXT.replace(
+        'primary_technique: BodyLimbNav',
+        'primary_technique: BodyLimbNav\n  status_reason: rank_1_only',
+    )
+    p = tmp_path / 'TEST_IMG_0001.yaml'
+    p.write_text(good)
+    assert load_sidecar(p).expected.status_reason == 'rank_1_only'
+
+
+def test_load_sidecar_rejects_unknown_status_reason(tmp_path: Path) -> None:
+    """``expected.status_reason`` outside the NavStatusReason enum fails."""
+    bad = _VALID_SIDECAR_TEXT.replace(
+        'primary_technique: BodyLimbNav',
+        'primary_technique: BodyLimbNav\n  status_reason: half_rank',
+    )
+    p = tmp_path / 'BAD.yaml'
+    p.write_text(bad)
+    with pytest.raises(SidecarValidationError, match=r'status_reason'):
+        load_sidecar(p)
