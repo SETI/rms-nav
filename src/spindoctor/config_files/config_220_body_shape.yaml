@@ -11,160 +11,505 @@
 #     _sources:                       # documentation-only; loader ignores `_` keys
 #       <field>: 'citation string'
 #
-# Bodies present in this initial population — Phase 4 first-image targets
-# plus their immediate neighbours.  Full ~55-body coverage lands in
-# Phase 10 with literature-cited values; until then, every numeric field
-# is `null` with a matching `'PLACEHOLDER — ...'` source so the runtime
-# fallback (10% radius default + reliability cap 0.3) handles each body
-# uniformly.
+# Population, sourcing discipline, and the review procedure are described
+# in the developers guide (dev_guide_config_and_static_data, "Body-shape
+# table: population and sources").  Summary of the source classes used
+# below, per the anti-hallucination rules there:
+#
+# - MEASURED, cited: value read from a document fetched during the
+#   populating session.  The two load-bearing documents are
+#   (a) Thomas et al. (2007), Icarus 190, 573-584 "Shapes of the
+#   saturnian icy satellites and their significance" (PDF; ellipsoid RMS
+#   limb-fit residuals: Mimas 0.74 km quoted in section 3.2, the rest
+#   read from Fig. 8; the 2.5-8%-of-radius small-satellite roughness
+#   class in section 4), and (b) Archinal et al. (2011), Celest Mech Dyn
+#   Astr 109, 101-135, the IAU WGCCRE 2009 report (PDF; Table 5 satellite
+#   radii -- which carry the Thomas 2010 Saturn values -- and RMS
+#   deviations for Titan, Europa, Callisto, Amalthea, the Uranian
+#   majors, and Proteus; Table 4 planet radii).  Pluto and Charon radii
+#   are from Nimmo et al. (2017), Icarus 287 (arXiv:1603.00821,
+#   abstract fetched).
+# - SEARCH-TRACEABLE: value obtained from an in-session search-result
+#   summary of a named table, where the underlying PDF resisted
+#   fetching.  Flagged 'reviewer spot-check required' (Io and Ganymede
+#   RMS, from Archinal et al. 2018 Table 5).
+# - ESTIMATE: order-of-magnitude judgment with its physical basis
+#   stated.  Used only for crater_scale_km and albedo_variation, which
+#   feed sigma/reliability terms (not science products) and whose
+#   runtime fallbacks are themselves per-class estimates.
+#
+# albedo_mean is currently null throughout: it has no runtime consumer
+# and no albedo table could be fetched during the populating session
+# (NSSDC unreachable); populate it with citations when a consumer
+# materializes.
 
 body_shape:
+  # ---------------------------------------------------------------- Saturn
   MIMAS:
-    radii_km: null
-    ellipsoid_rms_residual_km: null
-    crater_scale_km: null
+    radii_km: [207.8, 196.7, 190.6]
+    ellipsoid_rms_residual_km: 0.74
+    crater_scale_km: 1.0
     albedo_mean: null
-    albedo_variation: null
+    albedo_variation: 0.06
     shape_class_hint: regular
     _sources:
-      radii_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      ellipsoid_rms_residual_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      crater_scale_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      albedo_mean: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      albedo_variation: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      shape_class_hint: 'IAU WGCCRE — regular ellipsoidal satellites of Saturn (citation pending fetch)'
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 5 (per Thomas 2010, Icarus 208); PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'Thomas et al. 2007, Icarus 190, section 3.2: "rms residuals to the ellipsoid fit are 0.74 km, or ~0.4% of the mean radius"; PDF fetched in-session 2026-07-10'
+      crater_scale_km: 'ESTIMATE — Herschel (135 km wide) excluded from limb coverage per Thomas et al. 2007 section 3.2; typical limb relief ~1 km (their Fig. 3c)'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE — bland cratered surface, low disk-resolved contrast'
+      shape_class_hint: 'Thomas et al. 2007 — well fit by triaxial ellipsoid'
 
   ENCELADUS:
-    radii_km: null
-    ellipsoid_rms_residual_km: null
-    crater_scale_km: null
+    radii_km: [256.6, 251.4, 248.3]
+    ellipsoid_rms_residual_km: 0.4
+    crater_scale_km: 0.5
     albedo_mean: null
-    albedo_variation: null
+    albedo_variation: 0.05
     shape_class_hint: regular
     _sources:
-      radii_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      ellipsoid_rms_residual_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      crater_scale_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      albedo_mean: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      albedo_variation: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      shape_class_hint: 'IAU WGCCRE — regular ellipsoidal satellites of Saturn (citation pending fetch)'
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 5 (per Thomas 2010); PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'Thomas et al. 2007, Icarus 190, Fig. 8b (~0.4 km; narrowest residual distribution in Fig. 3; global-fit residual extremes ~2.5 km per section 3.3); PDF fetched in-session 2026-07-10'
+      crater_scale_km: 'ESTIMATE — smoothest saturnian satellite; limb-profile relief sub-km (Thomas et al. 2007 Fig. 7 top panels)'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE — near-uniform E-ring frost coverage'
+      shape_class_hint: 'Thomas et al. 2007 — well fit by triaxial ellipsoid'
 
   TETHYS:
-    radii_km: null
-    ellipsoid_rms_residual_km: null
-    crater_scale_km: null
+    radii_km: [538.4, 528.3, 526.3]
+    ellipsoid_rms_residual_km: 1.2
+    crater_scale_km: 1.0
     albedo_mean: null
-    albedo_variation: null
+    albedo_variation: 0.10
     shape_class_hint: regular
     _sources:
-      radii_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      ellipsoid_rms_residual_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      crater_scale_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      albedo_mean: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      albedo_variation: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      shape_class_hint: 'IAU WGCCRE — regular ellipsoidal satellites of Saturn (citation pending fetch)'
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 5 (per Thomas 2010); PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'Thomas et al. 2007, Icarus 190, Fig. 8 (~0.0022 of mean radius x 531 km); PDF fetched in-session 2026-07-10'
+      crater_scale_km: 'ESTIMATE — Odysseus basin (relaxed) and Ithaca Chasma (~3 km deep, localized)'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE — modest hemispheric asymmetry'
+      shape_class_hint: 'Thomas et al. 2007 — well fit by triaxial ellipsoid'
 
   DIONE:
-    radii_km: null
-    ellipsoid_rms_residual_km: null
-    crater_scale_km: null
+    radii_km: [563.4, 561.3, 559.6]
+    ellipsoid_rms_residual_km: 0.5
+    crater_scale_km: 0.5
     albedo_mean: null
-    albedo_variation: null
+    albedo_variation: 0.15
     shape_class_hint: regular
     _sources:
-      radii_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      ellipsoid_rms_residual_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      crater_scale_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      albedo_mean: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      albedo_variation: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      shape_class_hint: 'IAU WGCCRE — regular ellipsoidal satellites of Saturn (citation pending fetch)'
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 5 (per Thomas 2010); PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'Thomas et al. 2007, Icarus 190, Fig. 8b (~0.5 km; with Rhea the smoothest relative roughness, section 4); PDF fetched in-session 2026-07-10'
+      crater_scale_km: 'ESTIMATE — subdued crater relief'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE — wispy fractured trailing hemisphere vs bright leading'
+      shape_class_hint: 'Thomas et al. 2007 — well fit by triaxial ellipsoid'
 
   RHEA:
-    radii_km: null
-    ellipsoid_rms_residual_km: null
-    crater_scale_km: null
+    radii_km: [765.0, 763.1, 762.4]
+    ellipsoid_rms_residual_km: 0.9
+    crater_scale_km: 1.0
     albedo_mean: null
-    albedo_variation: null
+    albedo_variation: 0.10
     shape_class_hint: regular
     _sources:
-      radii_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      ellipsoid_rms_residual_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      crater_scale_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      albedo_mean: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      albedo_variation: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      shape_class_hint: 'IAU WGCCRE — regular ellipsoidal satellites of Saturn (citation pending fetch)'
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 5 (per Thomas 2010; mean 763.5 +- 0.6); PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'Thomas et al. 2007, Icarus 190, Fig. 8 (~0.0012 of mean radius x 764 km); PDF fetched in-session 2026-07-10'
+      crater_scale_km: 'ESTIMATE — heavily cratered, typical limb relief ~1 km'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE — modest wispy-terrain contrast'
+      shape_class_hint: 'Thomas et al. 2007 — well fit by triaxial ellipsoid'
 
   TITAN:
-    radii_km: null
-    ellipsoid_rms_residual_km: null
-    crater_scale_km: null
+    radii_km: [2575.15, 2574.78, 2574.47]
+    ellipsoid_rms_residual_km: 0.26
+    crater_scale_km: 0.3
     albedo_mean: null
-    albedo_variation: null
+    albedo_variation: 0.03
     shape_class_hint: regular
     _sources:
-      radii_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      ellipsoid_rms_residual_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      crater_scale_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      albedo_mean: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      albedo_variation: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      shape_class_hint: 'IAU WGCCRE — Titan, hazy regular body (citation pending fetch)'
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 5 (Cassini radar solid-body values); PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'Archinal et al. 2011, CMDA 109, Table 5 (RMS deviation from ellipsoid 0.26 km); PDF fetched in-session 2026-07-10'
+      crater_scale_km: 'ESTIMATE — subdued topography, relief mostly < 0.5 km; note the OPTICAL limb is haze, ~100-200 km above the surface, handled by the Titan model, not this table'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE — near-uniform haze at ISS wavelengths'
+      shape_class_hint: 'oblate, haze-covered regular body'
+
+  HYPERION:
+    radii_km: [180.1, 133.0, 102.7]
+    ellipsoid_rms_residual_km: 10.0
+    crater_scale_km: 8.0
+    albedo_mean: null
+    albedo_variation: 0.20
+    shape_class_hint: highly_irregular
+    _sources:
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 5 (axes +- 4.5 km, mean 135 +- 4); PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'ESTIMATE from published class — small satellites carry limb roughness 2.5-8% of mean radius (Thomas et al. 2007, Icarus 190, section 4, citing Thomas 1989; PDF fetched in-session); sponge-like Hyperion taken at the high end: ~0.075 x 135 km'
+      crater_scale_km: 'ESTIMATE — deep unrelaxed craters, 2-10 km relief'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE — dark crater floors vs brighter rims'
+      shape_class_hint: 'highly irregular, chaotic rotator'
 
   IAPETUS:
-    radii_km: null
-    ellipsoid_rms_residual_km: null
-    crater_scale_km: null
+    radii_km: [745.7, 745.7, 712.1]
+    ellipsoid_rms_residual_km: 4.1
+    crater_scale_km: 3.0
     albedo_mean: null
-    albedo_variation: null
+    albedo_variation: 0.60
     shape_class_hint: regular
     _sources:
-      radii_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      ellipsoid_rms_residual_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      crater_scale_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      albedo_mean: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      albedo_variation: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      shape_class_hint: 'IAU WGCCRE — Iapetus regular body (citation pending fetch)'
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 5 (oblate spheroid per Thomas 2010, mean 734.3 +- 2.8); PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'Thomas et al. 2007, Icarus 190, Fig. 8b (~4.1 km; "relative roughness less than 1% of the mean radius", section 3.7); PDF fetched in-session 2026-07-10'
+      crater_scale_km: 'ESTIMATE — equatorial ridge (removing its limb portions moves the fit axes by 1.2 km per Thomas et al. 2007 section 3.7) plus large basins'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'two-faced hemispheric dichotomy, "albedos that differed by a factor of ~10" (Thomas et al. 2007 section 3.7; PDF fetched in-session)'
+      shape_class_hint: 'Thomas et al. 2007 — oblate spheroid (fossil rotational bulge)'
+
+  PHOEBE:
+    radii_km: [109.4, 108.5, 101.8]
+    ellipsoid_rms_residual_km: 2.3
+    crater_scale_km: 5.0
+    albedo_mean: null
+    albedo_variation: 0.25
+    shape_class_hint: irregular
+    _sources:
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 5 (mean 106.5 +- 0.7); PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'Thomas et al. 2007, Icarus 190, Fig. 8 (~0.0215 of mean radius — the roughest satellite plotted; "factor of nearly 4 in relative limb roughness between Phoebe and Iapetus", section 4); PDF fetched in-session 2026-07-10'
+      crater_scale_km: 'ESTIMATE — deep steep-walled craters with large local relief'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE — bright ice exposed in crater walls on a dark body'
+      shape_class_hint: 'Thomas et al. 2007 — distinctly rougher than the ellipsoidal group'
+
+  JANUS:
+    radii_km: [101.5, 92.5, 76.3]
+    ellipsoid_rms_residual_km: 3.5
+    crater_scale_km: 3.0
+    albedo_mean: null
+    albedo_variation: 0.10
+    shape_class_hint: irregular
+    _sources:
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 5 (mean 89.5 +- 1.4); PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'ESTIMATE from published class — 2.5-8% of mean radius for small satellites (Thomas et al. 2007, Icarus 190, section 4; PDF fetched in-session): ~4% x 89.5 km'
+      crater_scale_km: 'ESTIMATE — large craters relative to body size'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE — bland icy surface'
+      shape_class_hint: 'irregular co-orbital moon'
+
+  EPIMETHEUS:
+    radii_km: [64.9, 57.0, 53.1]
+    ellipsoid_rms_residual_km: 2.9
+    crater_scale_km: 3.0
+    albedo_mean: null
+    albedo_variation: 0.10
+    shape_class_hint: irregular
+    _sources:
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 5 (mean 58.1 +- 1.8); PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'ESTIMATE from published class — 2.5-8% of mean radius (Thomas et al. 2007, Icarus 190, section 4; PDF fetched in-session): ~5% x 58.1 km'
+      crater_scale_km: 'ESTIMATE — large craters and ridges relative to body size'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE — bland icy surface'
+      shape_class_hint: 'irregular co-orbital moon'
 
   PROMETHEUS:
-    radii_km: null
-    ellipsoid_rms_residual_km: null
-    crater_scale_km: null
+    radii_km: [67.8, 39.7, 29.7]
+    ellipsoid_rms_residual_km: 2.6
+    crater_scale_km: 2.0
     albedo_mean: null
-    albedo_variation: null
+    albedo_variation: 0.10
     shape_class_hint: highly_irregular
     _sources:
-      radii_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      ellipsoid_rms_residual_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      crater_scale_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      albedo_mean: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      albedo_variation: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      shape_class_hint: 'IAU WGCCRE — irregular ring-shepherd satellites (citation pending fetch)'
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 5 (mean 43.1 +- 2.7); PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'ESTIMATE from published class — 2.5-8% of mean radius (Thomas et al. 2007, Icarus 190, section 4; PDF fetched in-session): ~6% x 43.1 km (elongated, ridged shepherd)'
+      crater_scale_km: 'ESTIMATE — subdued craters, drift-covered'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE — smooth drift deposits'
+      shape_class_hint: 'highly elongated F-ring shepherd'
 
   PANDORA:
-    radii_km: null
-    ellipsoid_rms_residual_km: null
-    crater_scale_km: null
+    radii_km: [52.0, 40.5, 32.0]
+    ellipsoid_rms_residual_km: 2.4
+    crater_scale_km: 2.0
     albedo_mean: null
-    albedo_variation: null
+    albedo_variation: 0.10
     shape_class_hint: highly_irregular
     _sources:
-      radii_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      ellipsoid_rms_residual_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      crater_scale_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      albedo_mean: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      albedo_variation: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      shape_class_hint: 'IAU WGCCRE — irregular ring-shepherd satellites (citation pending fetch)'
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 5 (mean 40.7 +- 1.5); PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'ESTIMATE from published class — 2.5-8% of mean radius (Thomas et al. 2007, Icarus 190, section 4; PDF fetched in-session): ~6% x 40.7 km'
+      crater_scale_km: 'ESTIMATE — two large craters relative to body size'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE — smooth drift deposits'
+      shape_class_hint: 'irregular F-ring shepherd'
 
   SATURN:
-    radii_km: null
-    ellipsoid_rms_residual_km: null
-    crater_scale_km: null
+    radii_km: [60268.0, 60268.0, 54364.0]
+    ellipsoid_rms_residual_km: 50.0
+    crater_scale_km: 0.0
     albedo_mean: null
-    albedo_variation: null
+    albedo_variation: 0.05
     shape_class_hint: regular
     _sources:
-      radii_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      ellipsoid_rms_residual_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      crater_scale_km: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      albedo_mean: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      albedo_variation: 'PLACEHOLDER — no source found, calibrate in Phase 10'
-      shape_class_hint: 'IAU WGCCRE — Saturn oblate spheroid (citation pending fetch)'
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 4 (1-bar level, equatorial 60268 +- 4, polar 54364 +- 10); PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'ESTIMATE — atmospheric limb: the optical limb sits within ~1-2 pressure scale heights (H ~ 60 km) of the 1-bar ellipsoid depending on wavelength and aerosol loading'
+      crater_scale_km: 'not applicable — gaseous limb'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE — muted banding at ISS wavelengths'
+      shape_class_hint: 'oblate 1-bar spheroid'
+
+  # ---------------------------------------------------------------- Jupiter
+  IO:
+    radii_km: [1829.4, 1819.4, 1815.7]
+    ellipsoid_rms_residual_km: 1.4
+    crater_scale_km: 1.5
+    albedo_mean: null
+    albedo_variation: 0.25
+    shape_class_hint: regular
+    _sources:
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 5; PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'Archinal et al. 2018, CMDA 130:22, Table 5 (~1.4 km) — via in-session search-result summary 2026-07-10; the PDF resisted fetching, reviewer spot-check required'
+      crater_scale_km: 'ESTIMATE — isolated mountains to 17 km but sparse; typical limb relief 1-2 km'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE — volcanic albedo patterns (plume deposits, paterae), strong disk-resolved contrast'
+      shape_class_hint: 'regular tidally distorted ellipsoid'
+
+  EUROPA:
+    radii_km: [1562.6, 1560.3, 1559.5]
+    ellipsoid_rms_residual_km: 0.32
+    crater_scale_km: 0.3
+    albedo_mean: null
+    albedo_variation: 0.10
+    shape_class_hint: regular
+    _sources:
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 5; PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'Archinal et al. 2011, CMDA 109, Table 5 (RMS deviation from ellipsoid 0.32 km); PDF fetched in-session 2026-07-10'
+      crater_scale_km: 'ESTIMATE — smoothest icy satellite; relief mostly sub-km'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE — lineae contrast on bright plains'
+      shape_class_hint: 'regular ellipsoid'
+
+  GANYMEDE:
+    radii_km: [2631.2, 2631.2, 2631.2]
+    ellipsoid_rms_residual_km: 0.6
+    crater_scale_km: 0.7
+    albedo_mean: null
+    albedo_variation: 0.15
+    shape_class_hint: regular
+    _sources:
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 5 (mean radius 2631.2 +- 1.7; axes not separately resolved); PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'Archinal et al. 2018, CMDA 130:22, Table 5 (~0.6 km) — via in-session search-result summary 2026-07-10; the PDF resisted fetching, reviewer spot-check required'
+      crater_scale_km: 'ESTIMATE — grooved-terrain relief mostly sub-km'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE — bright grooved vs dark cratered terrain contrast'
+      shape_class_hint: 'regular sphere at limb-fit precision'
+
+  CALLISTO:
+    radii_km: [2410.3, 2410.3, 2410.3]
+    ellipsoid_rms_residual_km: 0.6
+    crater_scale_km: 0.7
+    albedo_mean: null
+    albedo_variation: 0.15
+    shape_class_hint: regular
+    _sources:
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 5 (mean radius 2410.3 +- 1.5); PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'Archinal et al. 2011, CMDA 109, Table 5 (RMS deviation from ellipsoid 0.6 km); PDF fetched in-session 2026-07-10'
+      crater_scale_km: 'ESTIMATE — heavily cratered but subdued relief'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE — bright crater rays / palimpsests on dark plains'
+      shape_class_hint: 'regular sphere at limb-fit precision'
+
+  AMALTHEA:
+    radii_km: [125.0, 73.0, 64.0]
+    ellipsoid_rms_residual_km: 3.2
+    crater_scale_km: 3.0
+    albedo_mean: null
+    albedo_variation: 0.20
+    shape_class_hint: highly_irregular
+    _sources:
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 5; PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'Archinal et al. 2011, CMDA 109, Table 5 (RMS deviation from ellipsoid 3.2 km); PDF fetched in-session 2026-07-10'
+      crater_scale_km: 'ESTIMATE — large craters relative to body size'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE — bright spots on a dark reddish surface'
+      shape_class_hint: 'highly irregular inner moon'
+
+  JUPITER:
+    radii_km: [71492.0, 71492.0, 66854.0]
+    ellipsoid_rms_residual_km: 30.0
+    crater_scale_km: 0.0
+    albedo_mean: null
+    albedo_variation: 0.15
+    shape_class_hint: regular
+    _sources:
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 4 (1-bar level, equatorial 71492 +- 4, polar 66854 +- 10); PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'ESTIMATE — atmospheric limb within ~1-2 pressure scale heights (H ~ 27 km) of the 1-bar ellipsoid'
+      crater_scale_km: 'not applicable — gaseous limb'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE — belt/zone banding, strong disk-resolved contrast'
+      shape_class_hint: 'oblate 1-bar spheroid'
+
+  # ---------------------------------------------------------------- Uranus
+  MIRANDA:
+    radii_km: [240.4, 234.2, 232.9]
+    ellipsoid_rms_residual_km: 1.6
+    crater_scale_km: 2.0
+    albedo_mean: null
+    albedo_variation: 0.15
+    shape_class_hint: regular
+    _sources:
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 5 (Voyager limb fits); PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'Archinal et al. 2011, CMDA 109, Table 5 (RMS deviation from ellipsoid 1.6 km); PDF fetched in-session 2026-07-10'
+      crater_scale_km: 'ESTIMATE — coronae and scarps (Verona Rupes 5-10 km, localized)'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE — coronae vs cratered-terrain contrast'
+      shape_class_hint: 'regular ellipsoid with extreme localized tectonics'
+
+  ARIEL:
+    radii_km: [581.1, 577.9, 577.7]
+    ellipsoid_rms_residual_km: 0.9
+    crater_scale_km: 1.0
+    albedo_mean: null
+    albedo_variation: 0.10
+    shape_class_hint: regular
+    _sources:
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 5 (Voyager limb fits); PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'Archinal et al. 2011, CMDA 109, Table 5 (RMS deviation from ellipsoid 0.9 km); PDF fetched in-session 2026-07-10'
+      crater_scale_km: 'ESTIMATE — rift valleys 1-2 km deep'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE'
+      shape_class_hint: 'regular ellipsoid'
+
+  UMBRIEL:
+    radii_km: [584.7, 584.7, 584.7]
+    ellipsoid_rms_residual_km: 2.6
+    crater_scale_km: 1.5
+    albedo_mean: null
+    albedo_variation: 0.10
+    shape_class_hint: regular
+    _sources:
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 5 (mean radius 584.7 +- 2.8); PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'Archinal et al. 2011, CMDA 109, Table 5 (RMS deviation from ellipsoid 2.6 km); PDF fetched in-session 2026-07-10'
+      crater_scale_km: 'ESTIMATE — heavily cratered'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE — bright Wunda annulus on a dark surface'
+      shape_class_hint: 'regular sphere at Voyager limb-fit precision'
+
+  TITANIA:
+    radii_km: [788.9, 788.9, 788.9]
+    ellipsoid_rms_residual_km: 1.3
+    crater_scale_km: 1.0
+    albedo_mean: null
+    albedo_variation: 0.10
+    shape_class_hint: regular
+    _sources:
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 5 (mean radius 788.9 +- 1.8); PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'Archinal et al. 2011, CMDA 109, Table 5 (RMS deviation from ellipsoid 1.3 km); PDF fetched in-session 2026-07-10'
+      crater_scale_km: 'ESTIMATE — chasmata to ~2 km, localized'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE'
+      shape_class_hint: 'regular sphere at Voyager limb-fit precision'
+
+  OBERON:
+    radii_km: [761.4, 761.4, 761.4]
+    ellipsoid_rms_residual_km: 1.5
+    crater_scale_km: 1.5
+    albedo_mean: null
+    albedo_variation: 0.10
+    shape_class_hint: regular
+    _sources:
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 5 (mean radius 761.4 +- 2.6); PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'Archinal et al. 2011, CMDA 109, Table 5 (RMS deviation from ellipsoid 1.5 km); PDF fetched in-session 2026-07-10'
+      crater_scale_km: 'ESTIMATE — one limb mountain ~6 km seen by Voyager, otherwise cratered'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE'
+      shape_class_hint: 'regular sphere at Voyager limb-fit precision'
+
+  URANUS:
+    radii_km: [25559.0, 25559.0, 24973.0]
+    ellipsoid_rms_residual_km: 30.0
+    crater_scale_km: 0.0
+    albedo_mean: null
+    albedo_variation: 0.02
+    shape_class_hint: regular
+    _sources:
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 4 (1-bar level, equatorial 25559 +- 4, polar 24973 +- 20); PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'ESTIMATE — atmospheric limb within ~1 pressure scale height (H ~ 28 km) of the 1-bar ellipsoid'
+      crater_scale_km: 'not applicable — gaseous limb'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE — nearly featureless at Voyager wavelengths'
+      shape_class_hint: 'oblate 1-bar spheroid'
+
+  # ---------------------------------------------------------------- Neptune
+  TRITON:
+    radii_km: [1352.6, 1352.6, 1352.6]
+    ellipsoid_rms_residual_km: 1.0
+    crater_scale_km: 0.5
+    albedo_mean: null
+    albedo_variation: 0.15
+    shape_class_hint: regular
+    _sources:
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 5 (mean radius 1352.6 +- 2.4); PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'ESTIMATE — Archinal et al. 2011 Table 5 lists no RMS deviation for Triton; Voyager limb profiles and the cantaloupe terrain relief bound it near ~1 km'
+      crater_scale_km: 'ESTIMATE — cantaloupe-terrain relief mostly sub-km'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE — bright polar cap vs darker equatorial terrain'
+      shape_class_hint: 'regular sphere at Voyager limb-fit precision'
+
+  PROTEUS:
+    radii_km: [218.0, 208.0, 201.0]
+    ellipsoid_rms_residual_km: 7.9
+    crater_scale_km: 5.0
+    albedo_mean: null
+    albedo_variation: 0.10
+    shape_class_hint: highly_irregular
+    _sources:
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 5 (Voyager); PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'Archinal et al. 2011, CMDA 109, Table 5 (RMS deviation from ellipsoid 7.9 km); PDF fetched in-session 2026-07-10'
+      crater_scale_km: 'ESTIMATE — Pharos basin ~10 km deep relative to surroundings'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE — uniformly dark'
+      shape_class_hint: 'largest irregularly shaped neptunian moon'
+
+  NEPTUNE:
+    radii_km: [24764.0, 24764.0, 24341.0]
+    ellipsoid_rms_residual_km: 30.0
+    crater_scale_km: 0.0
+    albedo_mean: null
+    albedo_variation: 0.05
+    shape_class_hint: regular
+    _sources:
+      radii_km: 'Archinal et al. 2011, CMDA 109, Table 4 (1-bar level, equatorial 24764 +- 15, polar 24341 +- 30); PDF fetched in-session 2026-07-10'
+      ellipsoid_rms_residual_km: 'ESTIMATE — atmospheric limb within ~1 pressure scale height (H ~ 20 km) of the 1-bar ellipsoid'
+      crater_scale_km: 'not applicable — gaseous limb'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE — Great Dark Spot / bright cloud streaks at the Voyager epoch'
+      shape_class_hint: 'oblate 1-bar spheroid'
+
+  # ---------------------------------------------------------------- Pluto
+  PLUTO:
+    radii_km: [1188.3, 1188.3, 1188.3]
+    ellipsoid_rms_residual_km: 1.0
+    crater_scale_km: 1.5
+    albedo_mean: null
+    albedo_variation: 0.35
+    shape_class_hint: regular
+    _sources:
+      radii_km: 'Nimmo et al. 2017, Icarus 287 (arXiv:1603.00821, fetched in-session 2026-07-10): mean radius 1188.3 +- 1.6 km (2-sigma); oblateness upper bound < 0.6%'
+      ellipsoid_rms_residual_km: 'ESTIMATE — no tidal/rotational distortion detected (Nimmo et al. 2017, fetched in-session); New Horizons topography spans a few km extremes with typical relief ~1 km'
+      crater_scale_km: 'ESTIMATE — mountain blocks and pits, localized relief to ~4 km'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE — extreme regional contrast (bright Sputnik Planitia vs dark Cthulhu)'
+      shape_class_hint: 'sphere at limb/occultation precision'
+
+  CHARON:
+    radii_km: [606.0, 606.0, 606.0]
+    ellipsoid_rms_residual_km: 1.5
+    crater_scale_km: 2.0
+    albedo_mean: null
+    albedo_variation: 0.15
+    shape_class_hint: regular
+    _sources:
+      radii_km: 'Nimmo et al. 2017, Icarus 287 (arXiv:1603.00821, fetched in-session 2026-07-10): mean radius 606.0 +- 1.0 km (2-sigma); oblateness upper bound < 0.5%'
+      ellipsoid_rms_residual_km: 'ESTIMATE — no detected distortion (Nimmo et al. 2017, fetched in-session); tectonic relief locally to ~5 km, typical 1-2 km'
+      crater_scale_km: 'ESTIMATE — Serenity Chasma walls to ~5 km, localized'
+      albedo_mean: 'PLACEHOLDER — no in-session source fetched; no runtime consumer'
+      albedo_variation: 'ESTIMATE — dark Mordor Macula polar region'
+      shape_class_hint: 'sphere at limb precision'
