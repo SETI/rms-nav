@@ -473,12 +473,14 @@ These JSON files contain the navigation results, including:
 
 .. note::
 
-   The ``confidence`` values and ``confidence_rank`` tiers are not yet
-   calibrated against measured navigation error and must not be read as
-   probabilities; they order results by internal fit quality only.  The
+   The ``confidence`` values and ``confidence_rank`` tiers are
+   calibrated against *simulated* planted-truth recovery only
+   (sim-anchored, per the WS-5 methodology): on real images they carry
+   the simulator's realism as an unquantified assumption and must not
+   be read as probabilities of real-image accuracy.  The
    ``confidence_provisional: true`` field in every ``_metadata.json``
-   marks this and will remain true until the confidence-calibration
-   workstream lands.
+   marks this and will remain true until a calibration anchored to
+   real-image error measurements lands.
 
 Summary PNG Files (``*_summary.png``)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
