@@ -227,10 +227,15 @@ def test_to_features_collapses_multi_ring_input_into_one_annulus(
     annulus = annulus_features[0]
     assert isinstance(annulus.flags, RingAnnulusFlags)
     assert annulus.flags.constituent_edge_count == 3
-    # The composite mask carries every constituent ring's pixels.
+    # The template is a postage stamp local to the composite bbox
+    # (rows 40-60 inclusive, columns 30-79 inclusive), carrying every
+    # constituent ring's pixels at bbox-local coordinates.
+    v_min, u_min, v_max, u_max = annulus.geometry.bbox_extfov_vu
+    assert (v_min, u_min, v_max, u_max) == (40, 30, 61, 80)
     assert annulus.template_mask is not None
+    assert annulus.template_mask.shape == (v_max - v_min, u_max - u_min)
     for m in masks:
-        assert annulus.template_mask[m].all()
+        assert annulus.template_mask[m[v_min:v_max, u_min:u_max]].all()
 
 
 def test_to_features_emits_edge_when_kmpp_below_planet_threshold(
