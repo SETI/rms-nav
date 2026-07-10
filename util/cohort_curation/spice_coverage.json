@@ -1,0 +1,35 @@
+{
+  "_provenance": [
+    "Usable observation-epoch windows per mission, derived 2026-07-09 from",
+    "$OOPS_RESOURCES/SPICE/SPICE.db (SPK segment windows per spacecraft) plus",
+    "empirical restrictions from cohort-curation Stage B triage failures.",
+    "The operator confirmed no additional SPK kernels are available, so",
+    "epochs outside these windows are permanently un-navigable locally.",
+    "VGISS windows are the union of VG1 and VG2 encounter SPKs (encounters",
+    "do not overlap, so the union is safe without knowing the spacecraft).",
+    "COISS is restricted to the Saturn tour: SPICE.db lists cruise-era SPK",
+    "and CK rows, but 1999-2003 frames fail with SPICE(NOFRAMECONNECT)",
+    "(patchy cruise CK), so the window starts at tour arrival.",
+    "CK coverage rows in SPICE.db are NOT trustworthy for filtering:",
+    "Voyager predict CKs claim coverage to 2027 yet scan-platform CKs have",
+    "holes inside the encounter windows; those residual holes are caught by",
+    "Stage B triage rather than this filter.",
+    "GOSSI has NO window on purpose: SPICE.db lists GLL SPKs only from",
+    "1995 (with a 1995-12..1997-11 hole), yet 1990/1992 Earth-flyby frames",
+    "navigate fine in Stage B (they fail on confidence, not on SPICE), and",
+    "no GOSSI frame in the batch-001 manifest hit a SPICE error - the DB",
+    "tables do not predict GOSSI navigability, so nothing is filtered."
+  ],
+  "windows": {
+    "COISS": [["2004-01-01", "2017-09-15"]],
+    "VGISS": [
+      ["1979-01-31", "1979-04-09"],
+      ["1979-06-04", "1979-08-29"],
+      ["1980-08-06", "1980-11-19"],
+      ["1981-06-07", "1981-09-21"],
+      ["1985-08-21", "1986-02-13"],
+      ["1988-11-12", "1989-10-01"]
+    ],
+    "NHLORRI": [["2006-01-19", "2016-01-01"]]
+  }
+}
