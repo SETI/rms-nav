@@ -321,3 +321,69 @@ def local_centroid(
     centroid_v = float(np.sum(vs[:, None] * weights) / total)
     centroid_u = float(np.sum(us[None, :] * weights) / total)
     return (centroid_v, centroid_u), peak_dn
+
+
+def detection_peak_ratio(
+    image_ext: NDArrayFloatType,
+    predicted_vu_pos: tuple[float, float],
+    detection_vu: tuple[float, float],
+    *,
+    search_window_px: float,
+    exclude_half_px: int,
+) -> float:
+    """Return the detection's background-subtracted peak-to-runner-up ratio.
+
+    The one-star match rests on the premise that the search window holds
+    a *single unambiguous* detection.  When the target star is marginal,
+    the brightest pixel in a multi-thousand-pixel window is routinely a
+    noise spike whose amplitude barely exceeds the next spike's -- the
+    match then carries no information even though the detection cleared
+    the absolute ``detection_sigma`` threshold.  This ratio measures the
+    ambiguity directly and stays unit-free (no DN-scale or photometric
+    calibration enters): a real star detection towers over the noise
+    order statistics; a matched noise spike sits within a few percent of
+    its runner-up.
+
+    Parameters:
+        image_ext: 2-D extfov image array.
+        predicted_vu_pos: ``(v, u)`` prediction at the centre of the
+            search window (same value passed to :func:`local_centroid`).
+        detection_vu: The accepted detection centroid whose surrounding
+            ``exclude_half_px`` box (the source's own pixels) is removed
+            before the runner-up is taken.
+        search_window_px: Half-width of the search window in pixels.
+        exclude_half_px: Half-width of the exclusion box around the
+            detection; use at least the centroid-box half-width so the
+            source's own wings do not masquerade as the runner-up.
+
+    Returns:
+        ``(peak - background) / (runner_up - background)`` with the
+        window median as background, clamped to ``>= 0``; ``inf`` when
+        the runner-up does not exceed the background.  0.0 when the
+        window is degenerate.
+    """
+    v0, u0 = predicted_vu_pos
+    h, w = image_ext.shape
+    v_lo = max(0, math.floor(v0 - search_window_px))
+    u_lo = max(0, math.floor(u0 - search_window_px))
+    v_hi = min(h, math.ceil(v0 + search_window_px) + 1)
+    u_hi = min(w, math.ceil(u0 + search_window_px) + 1)
+    if v_hi <= v_lo or u_hi <= u_lo:
+        return 0.0
+    window = np.asarray(image_ext[v_lo:v_hi, u_lo:u_hi], np.float64)
+    background = float(np.median(window))
+    peak = float(window.max()) - background
+    if peak <= 0.0:
+        return 0.0
+    masked = window.copy()
+    det_v, det_u = detection_vu
+    bv_lo = max(0, round(det_v) - exclude_half_px - v_lo)
+    bu_lo = max(0, round(det_u) - exclude_half_px - u_lo)
+    bv_hi = min(window.shape[0], round(det_v) + exclude_half_px + 1 - v_lo)
+    bu_hi = min(window.shape[1], round(det_u) + exclude_half_px + 1 - u_lo)
+    if bv_hi > bv_lo and bu_hi > bu_lo:
+        masked[bv_lo:bv_hi, bu_lo:bu_hi] = background
+    runner_up = float(masked.max()) - background
+    if runner_up <= 0.0:
+        return math.inf
+    return peak / runner_up

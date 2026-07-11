@@ -60,6 +60,18 @@ as the translation. The reported covariance is the per-feature Cramer-Rao lower 
 :attr:`~spindoctor.feature.feature.NavFeature.position_cov_px`. Rotation is unobservable on a
 single point match.
 
+The path rests on the premise that the search window holds a *single unambiguous*
+detection, and the absolute ``detection_sigma`` threshold alone cannot enforce that: the
+maximum of the window's several thousand noise pixels sits at 3.5-4.5 sigma, so with a
+marginal star the brightest pixel is routinely a noise spike that clears the threshold.
+The detection therefore also passes a peak-to-runner-up ambiguity gate
+(``one_star_min_peak_ratio``): the background-subtracted peak must exceed the window's
+runner-up (outside the detection's own centroid box) by the configured ratio, or the
+result is spurious with an ``ambiguous_detection`` reason. A real star detection towers
+over the window's noise order statistics while a matched spike sits within a few percent
+of its runner-up; the ratio is unit-free, so no DN-scale or photometric calibration enters
+the gate. The measured ratio is surfaced as the ``detection_peak_ratio`` diagnostic.
+
 2-star path
 -----------
 

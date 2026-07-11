@@ -490,6 +490,17 @@ techniques:
       # Detection-threshold multiplier on image_noise_sigma; below this
       # the brightest pixel inside the search window is considered noise.
       detection_sigma: 4.0
+      # Minimum background-subtracted peak-to-runner-up ratio for the
+      # 1-star detection (#211).  The absolute detection_sigma test
+      # cannot reject a noise spike: the maximum of the ~3700-pixel
+      # search window sits at 3.5-4.5 sigma for pure noise, so a
+      # marginal star routinely loses to a spike that clears 4 sigma.
+      # A real star detection towers over the window's noise order
+      # statistics (sim: ratio >= ~2 for every good match) while a
+      # matched spike sits within ~30% of its runner-up; below this
+      # ratio the single-detection premise of the 1-star path fails and
+      # the result is spurious.  Unit-free (no DN-scale dependence).
+      one_star_min_peak_ratio: 1.5
       # Per-mode caps applied post-sigmoid; the 1-star path cannot
       # self-check, so its cap is lower than the 2-star path's.
       one_star_confidence_cap: 0.7
