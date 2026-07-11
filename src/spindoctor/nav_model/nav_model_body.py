@@ -119,6 +119,21 @@ against the operator-curated image library.
 """
 
 
+LIMB_ARC_MIN_VERTICES: int = 30
+"""Minimum limb-polyline vertices to emit a LIMB_ARC.
+
+Matches ``BodyLimbNav``'s ``min_arc_vertices`` feasibility floor
+(``config_510_techniques.yaml``): an arc the technique is guaranteed to
+reject cannot constrain any fit, so emitting it only starves the body of
+its BODY_BLOB feature.  The uncertainty cap above cannot stand in for
+this check -- the per-vertex sigma scales with the shape residual in
+*pixels*, so a distant small body (a few-km residual mapped through a
+long range) passes the uncertainty test precisely because it is tiny,
+which is when the limb fit is least usable.  Below this floor the
+extractor falls through to ``BODY_BLOB``.
+"""
+
+
 BODY_DISC_MIN_VISIBLE_LIT_FRACTION: float = 0.4
 """Minimum lit-and-in-FOV fraction for BODY_DISC emission.
 
@@ -628,21 +643,28 @@ class NavModelBody(NavModelBodyBase):
             shape = load_body_shape(self._body_name, config=self._config)
             features: list[NavFeature] = []
             limb_uncertainty_px = self._limb_uncertainty_px(shape)
+            limb_vertices = (
+                int(self._limb_sampler.vertices_vu.shape[0])
+                if self._limb_sampler is not None
+                else 0
+            )
             self._logger.debug(
                 'ellipsoid_rms_residual = %.3f km; limb_uncertainty = %.3f px '
-                '(arc max %.3f); shape_class = %s',
+                '(arc max %.3f); limb vertices = %d (min %d); shape_class = %s',
                 shape.ellipsoid_rms_residual_km,
                 limb_uncertainty_px,
                 LIMB_ARC_MAX_UNCERTAINTY_PX,
+                limb_vertices,
+                LIMB_ARC_MIN_VERTICES,
                 shape.shape_class_hint,
             )
             limb_arc_emitted = False
             blob_min_px = max(BODY_BLOB_MIN_DIAMETER_PX, shape.min_blob_diameter_px)
             if (
-                self._limb_sampler is not None
-                and self._limb_sampler.vertices_vu.size > 0
+                limb_vertices >= LIMB_ARC_MIN_VERTICES
                 and limb_uncertainty_px <= LIMB_ARC_MAX_UNCERTAINTY_PX
             ):
+                assert self._limb_sampler is not None
                 features.append(
                     _build_limb_arc(
                         body_name=self._body_name,
@@ -659,10 +681,13 @@ class NavModelBody(NavModelBodyBase):
                 features.append(self._build_blob_feature(shape, context=context))
             else:
                 self._logger.debug(
-                    'No body feature emitted: limb_uncertainty %.3f > %.3f and '
-                    'predicted_diameter %.3f < %.3f',
+                    'No body feature emitted: limb unusable (uncertainty %.3f vs '
+                    'max %.3f, vertices %d vs min %d) and predicted_diameter '
+                    '%.3f < %.3f',
                     limb_uncertainty_px,
                     LIMB_ARC_MAX_UNCERTAINTY_PX,
+                    limb_vertices,
+                    LIMB_ARC_MIN_VERTICES,
                     self._predicted_diameter_px,
                     blob_min_px,
                 )

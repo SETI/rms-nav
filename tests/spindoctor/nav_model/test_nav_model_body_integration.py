@@ -64,7 +64,7 @@ def _build_body(
     overflow_fraction: float = 0.1,
     phase_factor: float = 0.5,
     km_per_pixel_at_limb: float = 1.0,
-    limb_vertices: int = 20,
+    limb_vertices: int = 40,
     terminator_vertices: int = 20,
 ) -> NavModelBody:
     """Build a NavModelBody with internal state populated for ``to_features``.
@@ -143,8 +143,8 @@ def test_to_features_emits_limb_arc_when_uncertainty_is_low(fake_obs: FakeObs) -
     assert isinstance(limb.geometry, LimbPolyline)
     assert isinstance(limb.flags, LimbArcFlags)
     assert limb.flags.body_name == 'MIMAS'
-    assert limb.geometry.vertices_vu.shape == (20, 2)
-    assert limb.geometry.sigma_normal_per_vertex_px.shape == (20,)
+    assert limb.geometry.vertices_vu.shape == (40, 2)
+    assert limb.geometry.sigma_normal_per_vertex_px.shape == (40,)
 
 
 def test_to_features_emits_blob_instead_of_limb_when_uncertainty_high(
@@ -162,6 +162,21 @@ def test_to_features_emits_blob_instead_of_limb_when_uncertainty_high(
     assert isinstance(blob.geometry, BodyBlobGeometry)
     assert isinstance(blob.flags, BodyBlobFlags)
     assert blob.flags.predicted_diameter_px == pytest.approx(30.0)
+
+
+def test_to_features_emits_blob_when_limb_arc_too_short(fake_obs: FakeObs) -> None:
+    """A limb polyline below the vertex floor falls through to BODY_BLOB.
+
+    The per-vertex uncertainty is excellent (high resolution), but the arc
+    is shorter than ``BodyLimbNav``'s feasibility floor -- the distant
+    small-body posture where the uncertainty test alone would emit a
+    guaranteed-infeasible LIMB_ARC and starve the body of its blob.
+    """
+    model = _build_body(obs=fake_obs, km_per_pixel_at_limb=10.0, limb_vertices=9)
+    features = model.to_features(bare_nav_context(fake_obs))
+    types = {f.feature_type for f in features}
+    assert NavFeatureType.LIMB_ARC not in types
+    assert NavFeatureType.BODY_BLOB in types
 
 
 def test_to_features_emits_disc_alongside_limb_when_visibility_high(
