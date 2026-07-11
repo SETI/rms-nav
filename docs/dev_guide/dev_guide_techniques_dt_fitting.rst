@@ -325,8 +325,14 @@ Public surface (autodocumented at :doc:`/api_reference/api_nav_technique`):
   rotation) LM refinement with Tukey reweighting.
 - :func:`~spindoctor.nav_technique.dt_fitting.information_matrix_to_covariance` — Hessian to
   covariance via the symmetric pseudoinverse.
+- :func:`~spindoctor.nav_technique.dt_fitting.find_secondary_dt_minimum` — the basin
+  second-opinion: scans the search window for a competing DT-cost minimum away from the
+  converged offset, so a consuming technique can flag a non-unimodal fit as spurious
+  (``BodyTerminatorNav`` uses it; see :doc:`dev_guide_techniques_body_terminator`).
 - :class:`~spindoctor.nav_technique.dt_fitting.LMRefineResult` — frozen result dataclass exposed by
   :func:`~spindoctor.nav_technique.dt_fitting.lm_subpixel_refine`.
+- :class:`~spindoctor.nav_technique.dt_fitting.SecondaryBasin` — frozen result dataclass exposed
+  by :func:`~spindoctor.nav_technique.dt_fitting.find_secondary_dt_minimum`.
 
 Consuming techniques follow the same eight-step pattern (the body-limb fit is the canonical
 example documented at :doc:`dev_guide_techniques_body_limb`):
