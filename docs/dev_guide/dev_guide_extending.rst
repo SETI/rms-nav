@@ -30,6 +30,25 @@ Example:
 
 The dataset will automatically be available to the CLI once registered.
 
+PDS3 datasets additionally implement the static index-parsing hooks
+(:meth:`~spindoctor.dataset.dataset_pds3.DataSetPDS3._get_label_filespec_from_index`,
+``_get_image_filespec_from_label_filespec``, ``_get_img_name_from_label_filespec``,
+``_extract_img_number``, ``_volset_and_volume``, ``_volume_to_index``,
+``_results_path_stub``) and should review two behaviors:
+
+* ``_get_image_filespec_from_label_filespec`` is an index-time *guess* (typically an
+  extension swap). The definitive image filename is resolved lazily from the label's
+  ``^IMAGE`` pointer when the image is first retrieved, via the
+  :attr:`~spindoctor.dataset.dataset.ImageFile.image_url_resolver` installed on every
+  yielded :class:`~spindoctor.dataset.dataset.ImageFile`; the guess only needs to be
+  right often enough to serve as a display name and manifest entry.
+* ``_IMG_NUM_MONOTONIC_ACROSS_VOLUMES`` (class attribute, default ``True``) tells the
+  index scanner whether every image number in a volume exceeds every image number in
+  all earlier volumes, which permits stopping a ``--last-image-num`` scan after the
+  first volume that is entirely past the range. Set it to ``False`` when the
+  instrument's image counter resets between volumes (Voyager FDS counts restart per
+  spacecraft/encounter), at the cost of scanning every requested volume.
+
 Implementing PDS4 bundle generation methods
 -------------------------------------------
 

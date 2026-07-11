@@ -1,9 +1,49 @@
 # Complete program after the manual work — 2026-07-11
 
-This is the full task inventory that remains after your five manual steps (merge
-#208/#213/#214, vote `batch_retriage2`, sidecar reconciliation, ring_only_flat
+This is the full task inventory that remains after your manual steps (merge the
+PR stack, vote `batch_retriage2`, sidecar reconciliation, ring_only_flat
 curation, the two small leftovers). It supersedes the abbreviated "Part 5" of the
 previous handoff, which listed only immediate follow-ons.
+
+## Status update — 2026-07-11 (Track B/C execution pass)
+
+The executable parts of Track B and all of Track C item 1 are **done**, delivered
+as stacked PRs. Merge order (squash each; I rebase the rest of the stack after
+each merge): **#208 → #213 → #214 → #215 → #216 → #217 → #218 → #219 → #220**.
+
+- **#215** — #136 (`--last-image-num` WAC drop) + #12 (image filespec from the
+  label `^IMAGE` pointer). Voyager number ranges now correctly match across
+  encounters (FDS counts are not monotonic across volumes).
+- **#216** — #146 (per-run config governs model *selection*) + #145 (per-pixel
+  star-ring occlusion, `ring_occlusion_min_opaque_fraction`).
+- **#217** — #124 (ensemble consensus-subset outlier rejection; new
+  `excluded_from_consensus` metadata field). #123 closed as already fixed
+  (pixel floor + tests verified; Option A remains #210).
+- **#218** — #125 (terminator basin second-opinion spurious gate;
+  `find_secondary_dt_minimum` reusable for #179's blast radius).
+- **#219** — #202 (Helene OOM: BodyBlobNav matched-filter kernel unbounded in
+  predicted body diameter; clamped to the frame half-diagonal; A/B-verified
+  root cause — the triage `--skip-names` workaround can retire).
+- **#220** — #35 (statistics system: `sd_stats_ingest` / `sd_stats_report`;
+  smoke-tested on the 270 real triage metadata files).
+- **Closed without PRs:** #86 (already fixed by the four-pass ring filter's
+  Pass-4 fade-conflict logic; W1728613298 verified) and #123.
+- **Validation:** full unit suite, sim integration suites (zero baseline
+  changes), sphinx, and the 62-sidecar `library_crosscheck` — every per-image
+  delta vs the v7 baseline is byte-identical on the #214 parent (zero
+  Track-B-caused deltas; the #209 poster frame N1465178827 now passes).
+- **New issues from the crosscheck diff** (pre-existing, parent-era): **#221**
+  (rank-1 flat-ring RingEdge outvotes an absolute blob constraint — high tier
+  with 7–10 px along-edge error) and **#222** (pass-2 StarRefine corroborates
+  its own pass-1 prior — expected-failed frame reports success/high). Both sit
+  squarely in WS-1's blast radius and belong near the top of Track B.
+
+Track B remainder (deferred with reasons): #128 (design first), #150 (WS-10
+science; validate against real images before touching), #130 (needs a real
+star-field campaign), #179 (needs a calibration pass), #25 (investigation),
+#210 (NCC covariance scale — the big open covariance item), the sub-5 px policy
+and #212 (**yours**), and the two session triage items (multi_body,
+Voyager scattered_light) — not started.
 
 Sources: `plans/VALIDATION_AND_CALIBRATION_PLAN.md` (workstreams WS-0..WS-18 and
 Milestones A–D), `plans/ROADMAP.md` (Phases 0–3 + hardening track),
@@ -86,34 +126,36 @@ ongoing batch voting that feeds WS-3.
 These fix known wrongness or fragility in the navigator itself. Several directly
 improve WS-1's data quality, so they should land before or during it.
 
-| Item | Why | Effort |
+| Item | Why | Status |
 |---|---|---|
-| #123 — Mahalanobis grouping breaks on CRLB-tight covariances | Possibly largely fixed by this week's #210 sigma floors — needs verification and closure either way. Ensemble agreement quality feeds WS-1 directly. | S–M |
-| #124 — No cross-technique outlier rejection (one disagreement forces `conflicted`) | Ensemble robustness; visible in the queue's `conflicted` frames. | M |
-| #86 — Fix ring models (Saturn) | Essential per roadmap; ring-heavy frames are a large cohort fraction. | M–L |
-| #125 — BodyTerminatorNav mis-convergence has no per-technique signal | Same class of defect as #209/#211: a technique that can't self-flag. | M |
-| #179 / #191 — DT coarse-prior search robustness + minimum-support guard | Known false-lock vectors for limb/ring techniques. | M |
-| #128 — Robust limb navigation redesign (all body types/illuminations) | The strategic fix behind #150/#125/#187. | XL (design first) |
-| #150 — Limb floor is model-vs-image edge offset (the WS-10 systematic) | Accuracy floor for the limb technique. | M |
-| #145 — Star-ring occlusion mis-classifies stars near ringlet edges | Star-technique data quality for WS-1. | S–M |
-| #130 — Calibrate per-instrument star limiting magnitudes on real fields | Part of the star-gate real anchoring. | M |
-| #146, #136, #12 — config-override selection bug, WAC ingest drop, label filespecs | Ingest/config correctness. | S each |
-| #25 — Blurring for high-resolution bodies | Roadmap "important" for close flybys. | M |
-| #202 — sd_offset exhausts >61 GB on N1646315051 (Helene) | Must be fixed before any large WS-1 campaign (it would kill batch runs). | M |
-| Session: multi_body N17023890xx triage (3 frames, all techniques spurious) | Likely occlusion/model-conflict bug; one debugging session. | S–M |
-| Session: Voyager scattered_light C00598xx quintet fails wholesale | Voyager photometric path or prescan criteria. | M |
-| Session: sub-5 px body policy — expected-failure sidecars vs a relaxed-disc pathway | Your rescue proved the disc can lock 4–5 px bodies with loosened gates; decide and implement or curate as expected failures. **Needs your decision.** | S–M |
-| #212 — closes after your CPU RMA (remove systemd unit + setup.sh taskset) | Hardware tracker. | S |
+| #123 — Mahalanobis grouping breaks on CRLB-tight covariances | Ensemble agreement quality feeds WS-1 directly. | **Closed** — pixel floor + tests verified; Option A remains #210 |
+| #124 — No cross-technique outlier rejection (one disagreement forces `conflicted`) | Ensemble robustness; visible in the queue's `conflicted` frames. | **Done** — PR #217 |
+| #86 — Fix ring models (Saturn) | Ring-heavy frames are a large cohort fraction. | **Closed** — already fixed by the four-pass filter's Pass 4; verified on W1728613298 |
+| #125 — BodyTerminatorNav mis-convergence has no per-technique signal | Same class of defect as #209/#211: a technique that can't self-flag. | **Done** — PR #218 (basin second-opinion) |
+| #179 — DT coarse-prior search robustness (#191's guard already landed) | Known false-lock vector for limb/ring techniques. | Open — needs a calibration pass; #218 closes its confident-wrong endpoint for the terminator |
+| #128 — Robust limb navigation redesign (all body types/illuminations) | The strategic fix behind #150/#125/#187. | Open — XL, design first |
+| #150 — Limb floor is model-vs-image edge offset (the WS-10 systematic) | Accuracy floor for the limb technique. | Open — WS-10; validate against real images before touching |
+| #145 — Star-ring occlusion mis-classifies stars near ringlet edges | Star-technique data quality for WS-1. | **Done** — PR #216 (per-pixel membership) |
+| #130 — Calibrate per-instrument star limiting magnitudes on real fields | Part of the star-gate real anchoring. | Open — needs a real star-field campaign |
+| #146, #136, #12 — config-override selection bug, WAC ingest drop, label filespecs | Ingest/config correctness. | **Done** — PRs #215 / #216 |
+| #221 — rank-1 RingEdge outvotes an absolute blob constraint at high tier | Found by the 2026-07-11 crosscheck diff; pre-existing. Flat-ring accuracy + tier honesty. | Open — new; fix is rank-aware agreement or a tier guard |
+| #222 — pass-2 refine corroborates its own pass-1 prior | Found by the same diff; inflates consensus confidence on wrong priors. | Open — new |
+| #25 — Blurring for high-resolution bodies | Roadmap "important" for close flybys. | Open — investigation |
+| #202 — sd_offset exhausts >61 GB on N1646315051 (Helene) | Blocks any large WS-1 campaign. | **Done** — PR #219 (kernel clamp; root cause A/B-verified) |
+| Session: multi_body N17023890xx triage (3 frames, all techniques spurious) | Likely occlusion/model-conflict bug; one debugging session. | Open |
+| Session: Voyager scattered_light C00598xx quintet fails wholesale | Voyager photometric path or prescan criteria. | Open |
+| Session: sub-5 px body policy — expected-failure sidecars vs a relaxed-disc pathway | Decide and implement or curate as expected failures. **Needs your decision.** | Open — yours |
+| #212 — closes after your CPU RMA (remove systemd unit + setup.sh taskset) | Hardware tracker. | Open — yours |
 
 ---
 
 ## Track C — Statistics, QA, and the accuracy checkpoint (ROADMAP 1C)
 
-| Item | Why | Effort |
+| Item | Why | Status |
 |---|---|---|
-| #35 — Navigation statistics system (metadata → SQLite → report) | The roadmap's accuracy checkpoint: success/failure rates, technique usage, offset stats, per-frame disagreement, and "does confidence predict accuracy" — the standing QA check on calibration. Runs over any day/instrument. | L |
-| `library_crosscheck.py` re-run after your sidecar reconciliation | Confirms tier agreement post-reconciliation; repeat after every calibration change. | S (recurring) |
-| Coverage-matrix test (every class ≥2 sidecars, every technique exercised) wired into the deliberate tier | Turns Phase-10's deferred invariant on once Track-A/WS-3 fills the classes. | S |
+| #35 — Navigation statistics system (metadata → SQLite → report) | The roadmap's accuracy checkpoint: success/failure rates, technique usage, offset stats, per-frame disagreement, and "does confidence predict accuracy" — the standing QA check on calibration. Runs over any day/instrument. | **Done** — PR #220 (`sd_stats_ingest` / `sd_stats_report`) |
+| `library_crosscheck.py` re-run after your sidecar reconciliation | Confirms tier agreement post-reconciliation; repeat after every calibration change. | Recurring — last run 2026-07-11 on the stack head (result in PR #216 comment) |
+| Coverage-matrix test (every class ≥2 sidecars, every technique exercised) wired into the deliberate tier | Turns Phase-10's deferred invariant on once Track-A/WS-3 fills the classes. | Open — S |
 
 ---
 
@@ -187,11 +229,12 @@ decisions.
 ## Suggested global order (what I'd actually do)
 
 1. **Immediately after your merges:** rebases; batch-vote sidecars (WS-3);
-   #202 memory fix + #123 verification (they block campaign-scale runs);
-   WS-2 design proposal to you; WS-0a estimator in parallel.
-2. **While WS-2 builds:** Track B correctness items (#86, #124, #125, #179/#191,
-   #145), #35 statistics system (it pays for itself immediately), Track E test
-   debt (backplanes/pds4/star-conflict tests), WS-4 CI tier.
+   WS-2 design proposal to you; WS-0a estimator in parallel. (#202 and #123 —
+   previously in this slot — are done/closed.)
+2. **While WS-2 builds:** the remaining Track B items (#221, #222, #179, the
+   two session triage items), Track E test debt (backplanes/pds4 tests;
+   star-conflict tests partially covered by PR #216), WS-4 CI tier. (#86,
+   #124, #125, #145, #35 — previously in this slot — are done/closed.)
 3. **Then:** WS-17 → WS-1 (+1b) → WS-5-full → WS-9/10/13. This is the calibration
    finish line: confidence and sigma defensible against reality.
 4. **Then:** Track D decisions (Titan, PDS4 scope, CK kernels) and Phase 2
@@ -200,8 +243,9 @@ decisions.
    review bandwidth.
 
 **Effort honesty:** Track A alone is multi-week at agent pace (WS-2 and WS-1 are
-the two XL items and they serialize through WS-0/WS-17 in between). Tracks B+C+E
-are roughly 2–3 weeks of interleavable M/S items. Track D depends entirely on
+the two XL items and they serialize through WS-0/WS-17 in between). Track B+C's
+executable half landed 2026-07-11 (PRs #215–#220); the remainder plus Track E
+is roughly 1–2 weeks of interleavable M/S items. Track D depends entirely on
 your scope decisions. Phase 2 is another multi-week block per the same pattern as
 Cassini but smaller. Nothing on this list besides your five manual steps and the
 five decision gates marked "**yours**" requires your hands on a keyboard — the
