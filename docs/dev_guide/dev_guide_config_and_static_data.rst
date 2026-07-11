@@ -319,7 +319,7 @@ cited values at that point, following the procedure below.
 
 Downstream, ``ellipsoid_rms_residual_km`` drives the LIMB_ARC
 normal-sigma quadrature and the ``max_phase_irregularity_factor``
-confidence term of ``BodyBlobNav`` (see
+confidence term of :class:`~spindoctor.nav_technique.nav_technique_body_blob.BodyBlobNav` (see
 :doc:`dev_guide_navigation_models_body`).  The calibration tooling in
 ``util/calibration/`` renders its simulated bodies at relief amplitudes
 derived from these same residual-over-radius ratios, so the sim-anchored
@@ -335,7 +335,10 @@ AI agents drafting body-shape entries:
 1. **Cite only documents fetched in-session.**  Every citation must be
    traceable to a ``WebFetch`` / ``WebSearch`` lookup performed in the same
    session, or to an ``oops``-package data file read directly. No citing
-   from training-data memory.
+   from training-data memory.  A citation made from a search-result
+   *summary* (rather than the fetched document itself) is permitted only
+   when its ``_sources`` entry says so explicitly and flags the value for
+   reviewer spot-check, as the Io and Ganymede residual entries do.
 2. If a value cannot be sourced from a fetched document, leave it as ``null``
    and write
    ``'PLACEHOLDER — no source found, calibration pending'`` as the

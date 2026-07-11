@@ -97,8 +97,8 @@ techniques:
       # Pyramid-level consistency, normalized by the per-image
       # diameter-scaled spurious threshold.  ``consistency_ratio < 1.0``
       # means the result is within budget; ``ratio == 1.0`` is exactly
-      # at the spurious edge and contributes ``-1.0`` to the sigmoid
-      # argument (the classic "right at the edge" position).  Using the
+      # at the spurious edge, where the term contributes its full
+      # negative alpha to the sigmoid argument.  Using the
       # ratio rather than the raw pixel value lets the divisor stay at
       # 1.0 while the underlying budget tracks body diameter.
       - feature: consistency_ratio
@@ -356,10 +356,12 @@ techniques:
       # Rotation-axis ``at_edge`` fraction; see
       # ``BodyDiscCorrelateNav.rotation_at_edge_fraction``.
       rotation_at_edge_fraction: 0.95
-      # Model-error floor (px), inherited from BodyLimbNav (#210): the
-      # sim emits no terminator arcs to calibrate against, and a
-      # terminator is a strictly softer edge than a limb fitted by the
-      # same DT machinery, so the limb's floor is a lower bound.
+      # Model-error floor (px), copied from BodyLimbNav's calibrated
+      # value (#210): the sim emits no terminator arcs to calibrate
+      # against, and a terminator is a strictly softer edge than a limb
+      # fitted by the same DT machinery, so the limb's floor is a lower
+      # bound.  The two scalars are not linked; refitting the limb floor
+      # must revisit this one.
       model_error_floor_px: 0.92
 
   RingEdgeNav:

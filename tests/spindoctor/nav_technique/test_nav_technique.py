@@ -17,7 +17,9 @@ from spindoctor.nav_technique.diagnostics import BodyLimbDiagnostics
 from spindoctor.nav_technique.feasibility import NavFeasibilityReport
 from spindoctor.nav_technique.nav_technique import (
     NavTechnique,
+    add_model_error_floor,
     filter_technique_names,
+    load_model_error_floor,
     validate_registered_confidence_specs,
 )
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
@@ -128,3 +130,39 @@ def test_validate_registered_confidence_specs_rejects_unknown_attribute() -> Non
             validate_registered_confidence_specs()
     finally:
         NavTechnique._registry.remove(_BadConfidenceTechnique)
+
+
+# --- model-error floor helpers (#210) ---
+
+
+def test_load_model_error_floor_defaults_to_disabled() -> None:
+    """A tuning block without the key yields a disabled (0.0) floor."""
+    assert load_model_error_floor({}, 'SomeNav') == 0.0
+
+
+def test_load_model_error_floor_accepts_positive_value() -> None:
+    """A configured positive floor is returned unchanged."""
+    assert load_model_error_floor({'model_error_floor_px': 0.92}, 'SomeNav') == 0.92
+
+
+@pytest.mark.parametrize('bad', [-0.5, float('nan'), float('inf')])
+def test_load_model_error_floor_rejects_invalid_values(bad: float) -> None:
+    """Negative and non-finite floors raise instead of silently misbehaving."""
+    with pytest.raises(ValueError, match='model_error_floor_px must be finite'):
+        load_model_error_floor({'model_error_floor_px': bad}, 'SomeNav')
+
+
+def test_add_model_error_floor_adds_in_quadrature() -> None:
+    """The floor squares onto the translation diagonal without mutating the input."""
+    cov = np.array([[1.0, 0.1], [0.1, 4.0]])
+    out = add_model_error_floor(cov, 2.0)
+    assert out[0, 0] == pytest.approx(5.0)
+    assert out[1, 1] == pytest.approx(8.0)
+    assert out[0, 1] == pytest.approx(0.1)
+    assert cov[0, 0] == pytest.approx(1.0)
+
+
+def test_add_model_error_floor_zero_is_identity() -> None:
+    """A disabled floor returns the input covariance object unchanged."""
+    cov = np.array([[1.0, 0.0], [0.0, 1.0]])
+    assert add_model_error_floor(cov, 0.0) is cov

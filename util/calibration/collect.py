@@ -61,7 +61,9 @@ def _sigma_max_px(covariance: Any) -> float | None:
         if np.any(diag < 0):
             return None
         return float(np.sqrt(diag.max()))
-    except Exception:
+    except (TypeError, ValueError):
+        # Malformed covariance payload (ragged / non-numeric / wrong rank);
+        # anything else is a genuine bug and must surface.
         return None
 
 

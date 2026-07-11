@@ -63,6 +63,7 @@ from spindoctor.nav_technique.nav_technique import (
     ROTATION_UNOBSERVABLE_VARIANCE,
     NavTechnique,
     embed_rotation_unobservable,
+    load_model_error_floor,
     log_confidence_breakdown,
     search_window_for_obs,
 )
@@ -503,7 +504,7 @@ class StarFieldFromCatalogNav(NavTechnique):
         # Uncalibrated model-error variance floor (px); added in quadrature to
         # the reported covariance diagonal.  Default 0.0 -> no-op.  See
         # ORCH-001 / config_510_techniques.yaml.
-        self._model_error_floor_px = float(self.tuning.get('model_error_floor_px', 0.0))
+        self._model_error_floor_px = load_model_error_floor(self.tuning, self.name)
         # PSF-fit re-centroiding of matched inliers (see config_510_techniques.yaml).
         self._psf_refine_enabled = bool(int(self.tuning['psf_refine_enabled']))
         self._psf_refine_box_px = int(self.tuning['psf_refine_box_px'])

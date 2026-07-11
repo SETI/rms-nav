@@ -37,13 +37,34 @@ TARGET_2SIGMA = 1.0 - math.exp(-2.0)
 
 
 def _coverage(errors: np.ndarray, sigmas: np.ndarray, floor: float, k: float = 2.0) -> float:
-    """Fraction of rows with error within k * floored sigma."""
+    """Fraction of rows with error within k * floored sigma.
+
+    Parameters:
+        errors: Per-row absolute offset errors (px).
+        sigmas: Per-row reported max positional sigmas (px).
+        floor: Candidate floor added in quadrature to every sigma (px).
+        k: Coverage multiple (2.0 = the 2-sigma target).
+
+    Returns:
+        Fraction of rows whose error falls within ``k * sqrt(sigma^2 + floor^2)``.
+    """
     floored = np.sqrt(sigmas**2 + floor**2)
     return float((errors <= k * floored).mean())
 
 
 def solve_floor(errors: np.ndarray, sigmas: np.ndarray) -> float:
-    """Bisect the floor bringing 2-sigma coverage to the Gaussian target."""
+    """Bisect the floor bringing 2-sigma coverage to the Gaussian target.
+
+    Parameters:
+        errors: Per-row absolute offset errors (px).
+        sigmas: Per-row reported max positional sigmas (px).
+
+    Returns:
+        The smallest floor (px, within the [0, 50] bracket at 60-step
+        bisection precision) whose 2-sigma coverage reaches
+        ``TARGET_2SIGMA``; ``0.0`` when the unfloored sigmas already
+        cover.
+    """
     lo, hi = 0.0, 50.0
     if _coverage(errors, sigmas, lo) >= TARGET_2SIGMA:
         return 0.0
@@ -57,7 +78,14 @@ def solve_floor(errors: np.ndarray, sigmas: np.ndarray) -> float:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Solve and report the per-technique floors."""
+    """Solve and report the per-technique floors.
+
+    Parameters:
+        argv: Argument list; None uses ``sys.argv``.
+
+    Returns:
+        Process exit code (0 on success).
+    """
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     parser.add_argument('rows', type=Path)
     args = parser.parse_args(argv)

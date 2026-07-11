@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import multiprocessing
+import os
 import sys
 import tempfile
 from collections import Counter
@@ -154,6 +155,11 @@ def main(argv: list[str] | None = None) -> int:
         '--out', type=Path, default=REPO / '_work/calibration/library_crosscheck.md'
     )
     args = parser.parse_args(argv)
+
+    # Workers expand pds3:// sidecar URLs against this root; failing here
+    # gives one clear startup error instead of a KeyError in every worker.
+    if not os.environ.get('PDS3_HOLDINGS_DIR'):
+        parser.error('PDS3_HOLDINGS_DIR must be set (root of the PDS3 holdings tree)')
 
     from tests.integration.sidecar import LibraryRoot
 

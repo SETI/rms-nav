@@ -134,6 +134,19 @@ def _catalog_body(
     residual-over-radius ratio the ``max_phase_irregularity_factor``
     confidence term consumes.  ``km_per_pixel`` gives the sim blob feature
     the physical scale that factor needs (it reports 0.0 without it).
+
+    Parameters:
+        rng: Scene-local random generator.
+        center_v: Body center row in image coordinates (px).
+        center_u: Body center column in image coordinates (px).
+        radius: Apparent body radius (px).
+        phase: Phase angle (deg).
+        illumination: Image-plane illumination direction (deg).
+        irregular_fraction: Probability of drawing an irregular-catalog body.
+        pose_error_deg: Pose error applied to the predicted (nav) mesh (deg).
+
+    Returns:
+        A sim ``bodies`` entry dict ready for the scene parameter file.
     """
     if rng.random() < irregular_fraction:
         name = rng.choice(_IRREGULAR_BODIES)
@@ -173,7 +186,14 @@ def _catalog_body(
 
 
 def gen_disc(rng: random.Random) -> dict[str, Any]:
-    """Resolved body at low-moderate phase (BodyDiscCorrelateNav regime)."""
+    """Resolved body at low-moderate phase (BodyDiscCorrelateNav regime).
+
+    Parameters:
+        rng: Scene-local random generator.
+
+    Returns:
+        A complete sim scene parameter dict.
+    """
     size = 200
     params = _base(rng, size=size)
     radius = rng.uniform(18.0, 95.0)
@@ -195,7 +215,14 @@ def gen_disc(rng: random.Random) -> dict[str, Any]:
 
 
 def gen_limb(rng: random.Random) -> dict[str, Any]:
-    """Large body, often partially off-frame, low phase (BodyLimbNav regime)."""
+    """Large body, often partially off-frame, low phase (BodyLimbNav regime).
+
+    Parameters:
+        rng: Scene-local random generator.
+
+    Returns:
+        A complete sim scene parameter dict.
+    """
     size = 220
     params = _base(rng, size=size)
     radius = rng.uniform(90.0, 190.0)
@@ -225,7 +252,14 @@ def gen_limb(rng: random.Random) -> dict[str, Any]:
 
 
 def gen_terminator(rng: random.Random) -> dict[str, Any]:
-    """High-phase crescent (BodyTerminatorNav regime)."""
+    """High-phase crescent (BodyTerminatorNav regime).
+
+    Parameters:
+        rng: Scene-local random generator.
+
+    Returns:
+        A complete sim scene parameter dict.
+    """
     size = 200
     params = _base(rng, size=size)
     radius = rng.uniform(35.0, 90.0)
@@ -252,6 +286,12 @@ def gen_blob(rng: random.Random) -> dict[str, Any]:
     The BODY_BLOB reliability gate currently culls genuinely small bodies
     (issue #209), so the range extends into the gate-admitted sizes; the
     sub-gate scenes still exercise the fused failure path.
+
+    Parameters:
+        rng: Scene-local random generator.
+
+    Returns:
+        A complete sim scene parameter dict.
     """
     size = 128
     params = _base(rng, size=size)

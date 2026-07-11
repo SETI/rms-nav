@@ -10,6 +10,7 @@ from typing import Any, cast
 
 import numpy as np
 
+from spindoctor.feature.composition import compose_template_features
 from spindoctor.feature.geometry import RingEdgePolyline
 from spindoctor.nav_model.nav_model_rings_simulated import NavModelRingsSimulated
 from spindoctor.nav_orchestrator.nav_context import NavContext
@@ -112,8 +113,6 @@ def test_ring_annulus_template_paints_at_ring_radius() -> None:
     ringlet's inner and outer radii from the predicted center -- the
     placement invariant the displaced-template defect broke.
     """
-    from spindoctor.feature.composition import compose_template_features
-
     obs = _obs()
     annuli = [f for f in _features() if f.feature_type.name == 'RING_ANNULUS']
     annulus = annuli[0]
