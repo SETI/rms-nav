@@ -96,8 +96,13 @@ matrix rides with Track D decisions).
      (noise spectra, PSF wings, limb profiles, ring-edge shapes, photometric
      levels). Issue #153 holds the deferred calibration-validation scene work
      that belongs here; #194/#195 (crater seed/illumination) rise in priority if
-     they surface during realism comparison. **This has real architectural
-     choices — the one Track-A item where I'll bring you a design to approve.**
+     they surface during realism comparison. An explicit WS-2 deliverable is
+     sim `TERMINATOR_ARC` emission plus a terminator calibration pass (#223):
+     `BodyTerminatorNav` is the one technique with no sim anchoring, and the
+     terminator's photometric nature means emitting it before the shading/
+     texture realism verdict would calibrate against the least-validated part
+     of the renderer. **This has real architectural choices — the one Track-A
+     item where I'll bring you a design to approve.**
    - WS-0a is analysis code: given N techniques' offsets+covariances on one
      frame, when is per-technique σ recoverable, and is the estimator unbiased.
 3. **WS-17** — validate the Voyager/Galileo distortion models on star frames
