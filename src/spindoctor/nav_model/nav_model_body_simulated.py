@@ -38,8 +38,8 @@ __all__ = ['NavModelBodySimulated']
 # ``min_arc_vertices`` feasibility floor: a shorter arc cannot constrain the fit.
 _MIN_LIMB_ARC_VERTICES: int = 30
 # Minimum silhouette diameter to emit a LIMB_ARC.  The catalog body model gates
-# the limb on its ellipsoid-fit uncertainty (``<= 3 px``), which small or
-# low-resolution bodies fail; the sim has no km scale, so it gates on resolution
+# the limb on its ellipsoid-fit uncertainty (``<= 3 px``) plus the shared
+# vertex-count floor; the sim has no km scale, so it gates on resolution
 # directly.  Below this the limb fit is imprecise and -- because it is an
 # LM-refined distance-transform fit -- it injects cross-process jitter into the
 # fused offset of any body scene, so only a well-resolved body emits a limb.

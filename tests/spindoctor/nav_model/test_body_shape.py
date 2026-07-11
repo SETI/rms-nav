@@ -51,7 +51,7 @@ def test_default_body_shape_values() -> None:
     assert DEFAULT_BODY_SHAPE.crater_scale_km == 5.0
     assert DEFAULT_BODY_SHAPE.albedo_variation == 0.15
     assert DEFAULT_BODY_SHAPE.spice_orbital_residual_km == 2.0
-    assert DEFAULT_BODY_SHAPE.min_blob_diameter_px == 8.0
+    assert DEFAULT_BODY_SHAPE.min_blob_diameter_px == 5.0
     assert DEFAULT_BODY_SHAPE.shape_class_hint == 'unknown'
 
 

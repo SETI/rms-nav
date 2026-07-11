@@ -153,7 +153,7 @@ Restrictions and assumptions
   and subtracts the level pure noise's top-``N`` order statistics would produce. The SNR
   sigmoid is centered at the technique's own 3-sigma lit-pixel threshold, so a window with
   no body-scale signal above the noise floor sits decisively below the keep threshold at any
-  size, while a bright body only a little above the 8 px emission floor is admitted (the
+  size, while a bright body only a little above the 5 px emission floor is admitted (the
   extent term applies a mild near-floor discount, not a second size gate — the reliability
   crosses the 0.20 gate at detection SNR ~3.1-3.3 across the emitted size range). Whether
   the centroid is then *precise* is the per-blob covariance's and the confidence formula's

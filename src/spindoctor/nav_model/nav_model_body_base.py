@@ -47,14 +47,19 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only import
 __all__ = ['BODY_BLOB_MIN_DIAMETER_PX', 'NavModelBodyBase']
 
 
-BODY_BLOB_MIN_DIAMETER_PX: float = 8.0
+BODY_BLOB_MIN_DIAMETER_PX: float = 5.0
 """Minimum predicted disc diameter (px) at which BODY_BLOB is emitted.
 
-Below this diameter the predicted body silhouette is too small for a
-brightness-weighted centroid to pin the body to better than ~1 px, so
-the extractor emits no body feature for the image.  The per-body
-shape table can override this floor for known irregular / gas-giant
-bodies.
+Below this the silhouette covers so few pixels (< ~20) that the
+brightness-weighted centroid is dominated by the PSF and per-pixel
+noise rather than the body's position.  The floor admits the
+operator-curated ``below_resolution_body`` exemplars (a 6 px Enceladus
+whose sidecar requires ``BodyBlobNav`` to run); on the sim calibration
+campaign the 5-8 px band recovers planted offsets to under 0.15 px
+with honest 2-sigma coverage, so precision above the floor is the
+covariance's and the confidence formula's job, not the emission
+gate's.  The per-body shape table can override this floor upward for
+known difficult bodies (gas giants use 20).
 """
 
 
@@ -84,14 +89,14 @@ any body size.
 _BLOB_EXTENT_MIDPOINT_PX: float = 4.0
 """Predicted diameter at which the blob reliability's extent term crosses 0.5.
 
-Half the :data:`BODY_BLOB_MIN_DIAMETER_PX` emission floor.  The floor
-already guarantees no BODY_BLOB below 8 px exists, so the extent term
+Below the :data:`BODY_BLOB_MIN_DIAMETER_PX` emission floor.  The floor
+already guarantees no undersized BODY_BLOB exists, so the extent term
 must not re-gate at-floor bodies (with the midpoint at the floor itself
-an 8 px body could never clear the 0.20 reliability gate: ``0.4 * 0.5 *
-snr_term < 0.2`` for every finite SNR).  Sitting the midpoint at half
-the floor makes the term ~0.88 at the floor -- a mild discount that asks
-near-floor bodies for a slightly stronger detection (SNR ~3.3 at 8 px
-vs ~3.1 at 20 px) rather than a second size gate.
+an at-floor body could never clear the 0.20 reliability gate: ``0.4 *
+0.5 * snr_term < 0.2`` for every finite SNR).  Sitting the midpoint
+just under the floor makes the term a mild near-floor discount that
+asks a smaller body for a stronger detection (SNR ~4.4 at 5 px, ~3.3
+at 8 px, ~3.1 at 20 px) rather than acting as a second size gate.
 """
 
 
