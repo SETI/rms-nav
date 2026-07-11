@@ -19,6 +19,7 @@ from spindoctor.nav_technique.diagnostics import BodyBlobDiagnostics
 from spindoctor.nav_technique.nav_technique import ROTATION_UNOBSERVABLE_VARIANCE
 from spindoctor.nav_technique.nav_technique_body_blob import (
     BodyBlobNav,
+    _clamped_kernel_radius,
     _coarse_crescent_offset,
     _coarse_disc_offset,
     _crescent_kernel,
@@ -731,3 +732,34 @@ def test_body_blob_uses_installed_prior_to_seed_bbox(
     result = technique.navigate([feature], context)
     assert result.offset_px[0] == pytest.approx(planted_dv, abs=0.5)
     assert result.offset_px[1] == pytest.approx(planted_du, abs=0.5)
+
+
+# --- kernel-radius clamp (issue #202) ---
+
+
+def test_clamped_kernel_radius_passes_small_bodies_through() -> None:
+    """A body smaller than the frame keeps its predicted radius."""
+    assert _clamped_kernel_radius(12.0, (256, 256)) == pytest.approx(6.0)
+
+
+def test_clamped_kernel_radius_bounds_huge_bodies_to_frame() -> None:
+    """A predicted diameter far beyond the frame clamps to the half-diagonal."""
+    radius = _clamped_kernel_radius(50_000.0, (256, 256))
+    assert radius == pytest.approx(math.hypot(256, 256) / 2.0)
+
+
+def test_coarse_disc_offset_bounded_for_offframe_giant() -> None:
+    """A mostly off-frame giant's blob must not allocate a body-sized kernel.
+
+    Before the clamp, a predicted diameter of tens of thousands of pixels
+    (an off-frame gas giant) built a kernel quadratic in the diameter and
+    exhausted memory inside fftconvolve (issue #202: N1646315051 grew past
+    61 GB RSS).  With the clamp the correlation runs against a frame-sized
+    template and completes in bounded memory.
+    """
+    image = np.zeros((128, 128), dtype=np.float64)
+    image[40:90, 30:80] = 50.0
+    offset = _coarse_disc_offset(image, (64.0, 64.0), 40_000.0, (32, 32))
+    assert isinstance(offset, tuple)
+    assert abs(offset[0]) <= 32
+    assert abs(offset[1]) <= 32
