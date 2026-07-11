@@ -489,6 +489,11 @@ These JSON files contain the navigation results, including:
    ``confidence_provisional: true`` field in every ``_metadata.json``
    marks this sim-anchored basis.
 
+These files are also the input to the run-statistics tooling
+(``sd_stats_ingest`` / ``sd_stats_report``), which aggregates them into
+success/failure, technique-usage, offset, and cross-technique-agreement
+reports; see :doc:`user_guide_statistics`.
+
 Summary PNG Files (``*_summary.png``)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
