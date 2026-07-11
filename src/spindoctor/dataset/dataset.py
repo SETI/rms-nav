@@ -7,7 +7,7 @@ from typing import Any, cast
 
 from filecache import FCPath
 
-from spindoctor.config import Config
+from spindoctor.config import MAIN_LOGGER, Config
 from spindoctor.support.nav_base import NavBase
 
 
@@ -68,13 +68,27 @@ class ImageFile:
         ``image_file_url``.  The resolver runs at most once; subsequent calls
         return the memoized URL.
 
+        A resolver failure (typically an unretrievable label) falls back to the
+        current ``image_file_url`` guess with a logged warning: resolution runs
+        before the pipeline's per-image error boundary is open, and the guess is
+        usable whenever the image file itself is retrievable.
+
         Returns:
             The image file URL, corrected from the label contents when a resolver
             is set and reports a different filename.
         """
         if self.image_url_resolver is not None:
             resolver, self.image_url_resolver = self.image_url_resolver, None
-            resolved = resolver(self.image_file_url, self.label_file_path)
+            try:
+                resolved = resolver(self.image_file_url, self.label_file_path)
+            except OSError as exc:
+                MAIN_LOGGER.warning(
+                    'Image URL resolution from label %s failed (%s); keeping %s',
+                    self.label_file_url.as_posix(),
+                    exc,
+                    self.image_file_url.as_posix(),
+                )
+                resolved = None
             if resolved is not None:
                 self.image_file_url = resolved
         return self.image_file_url

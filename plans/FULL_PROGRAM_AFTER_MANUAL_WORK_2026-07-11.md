@@ -40,8 +40,8 @@ each merge): **#208 → #213 → #214 → #215 → #216 → #217 → #218 → #2
 
 Track B remainder (deferred with reasons): #128 (design first), #150 (WS-10
 science; validate against real images before touching), #130 (needs a real
-star-field campaign), #179 (needs a calibration pass), #25 (investigation),
-#210 (NCC covariance scale — the big open covariance item), the sub-5 px policy
+star-field campaign), #179 (needs a calibration pass), #25
+(investigation), #210 (NCC covariance scale — the big open covariance item), the sub-5 px policy
 and #212 (**yours**), and the two session triage items (multi_body,
 Voyager scattered_light) — not started.
 
@@ -205,22 +205,22 @@ The critique's still-open addendum item 6 plus section-4 leftovers:
   (degradation classifier taxonomy)
 
 **Phase 3 (after multi-instrument):** #27 BOTSIM, #22 star streaks, #107
-backplane-reader repo, #34 Cassini PDS4 archive source, #84 sim ring edges/gaps,
-#194–#198 sim polish (higher priority if WS-2 surfaces them), #184 CartographicNav
+backplane-reader repo, #34 Cassini PDS4 archive source, #84 sim ring
+edges/gaps, #194–#198 sim polish (higher priority if WS-2 surfaces them), #184 CartographicNav
 + bootstrap (the crater-mapping design — explicitly far off), #183 polarity-aware
 ring matching, #187 chaotic-rotator pose handling, #186 manual-nav dialog
 redesign, #185 gated-feature PNG styling, #182 stop-after-features flag, #158/#157
 sim rendering polish, #155 display-scaling consolidation.
 
-**Hardening/cleanup (parallel, any time, mostly S each):** #65 exception class,
-#104 broad-except control flow, #192 ensemble bare assert, #193 rotation-combine
+**Hardening/cleanup (parallel, any time, mostly S each):** #65 exception
+class, #104 broad-except control flow, #192 ensemble bare assert, #193 rotation-combine
 weighting doc, #103 thread-unsafe caches, #98 registry consolidation, #97
-oversized modules, #96 dead code, #135 from_file dedup, #143 viewer cursor bug,
-#144 QApplication lifetime, #109/#110/#100 shared helpers, #101/#102 CLI cleanup,
-#99 orphan module, #92 dependency groups, #105 Any→TypedDict boundaries, #140
+oversized modules, #96 dead code, #135 from_file dedup, #143 viewer cursor
+bug, #144 QApplication lifetime, #109/#110/#100 shared helpers, #101/#102 CLI
+cleanup, #99 orphan module, #92 dependency groups, #105 Any→TypedDict boundaries, #140
 geometry union access, #139 malformed global-index LID, #137 dead validation
-helper, #141/#142 cloud-task dedup/cardinality, #118 config validation system,
-#147 confidence-context dedup, #119 PNG creation location, #108 CLI
+helper, #141/#142 cloud-task dedup/cardinality, #118 config validation
+system, #147 confidence-context dedup, #119 PNG creation location, #108 CLI
 logging/cloud audit, #39 AttrDict, #77 backplane args, #55/#57 backplane content
 decisions.
 

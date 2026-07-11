@@ -15,15 +15,21 @@ def ds() -> DataSetPDS3CassiniISS:
 
 
 class _FakeIndexTable:
+    """Stand-in for a PdsTable serving canned index rows."""
+
     def __init__(self, rows: list[dict[str, Any]]) -> None:
         self._rows = rows
 
     def dicts_by_row(self) -> list[dict[str, Any]]:
+        """Return the canned rows in index order."""
         return self._rows
 
 
 class _FakeIndexCache:
+    """Stand-in for the index FileCache: echoes URLs back as local paths."""
+
     def retrieve(self, urls: list[str]) -> list[Path]:
+        """Return the label/table URL pair as paths without any I/O."""
         return [Path(urls[0]), Path(urls[1])]
 
 
@@ -54,6 +60,7 @@ def _coiss_filespecs(camera: str, numbers: list[int]) -> list[str]:
 
 
 def _yielded_names(groups: list[Any]) -> list[str]:
+    """Base image names (no suffix) of the yielded single-image groups."""
     return [g.image_files[0].image_file_name.split('_')[0] for g in groups]
 
 
@@ -153,6 +160,7 @@ def test_yielded_imagefile_carries_label_resolver(
 
 
 def _write_label(tmp_path: Path, name: str, text: str) -> Path:
+    """Write a synthetic PDS3 label file and return its path."""
     label_path = tmp_path / name
     label_path.write_text(text)
     return label_path
@@ -234,6 +242,7 @@ def _make_imagefile(
     label_path: Path,
     resolver: Callable[[FCPath, Path], FCPath | None],
 ) -> ImageFile:
+    """Build an ImageFile with the given provisional URL and resolver."""
     return ImageFile(
         image_file_url=image_url,
         label_file_url=FCPath(label_path),
@@ -278,3 +287,26 @@ def test_image_file_path_uses_resolved_url(tmp_path: Path) -> None:
     )
 
     assert imagefile.image_file_path == real_image
+
+
+def test_resolve_image_url_falls_back_when_resolver_raises(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # An unretrievable label must not abort the image before the pipeline's
+    # per-image error boundary: the provisional guess is kept and a warning
+    # is logged, and the resolver never runs again.
+    label_path = _write_label(tmp_path, 'IMG.LBL', 'END\r\n')
+    guess = FCPath(tmp_path / 'GUESS.IMG')
+    calls: list[FCPath] = []
+
+    def resolver(image_url: FCPath, _label_path: Path) -> FCPath:
+        calls.append(image_url)
+        raise FileNotFoundError('label missing from holdings')
+
+    imagefile = _make_imagefile(guess, label_path, resolver)
+
+    assert imagefile.resolve_image_url() == guess
+    assert imagefile.resolve_image_url() == guess
+    assert len(calls) == 1
+    captured = capsys.readouterr()
+    assert 'Image URL resolution from label' in captured.out + captured.err
