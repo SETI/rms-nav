@@ -94,7 +94,16 @@ class BodyTerminatorDiagnostics:
     """Diagnostics emitted by ``BodyTerminatorNav``.
 
     Parameters: same shape as ``BodyLimbDiagnostics`` with
-    ``visible_terminator_arc_fraction`` substituted.
+    ``visible_terminator_arc_fraction`` substituted, plus the basin
+    second-opinion pair:
+
+        secondary_basin_distance_px: Distance from the converged offset to
+            the best competing DT-cost basin in the search window; ``0.0``
+            when the scan did not run or found no eligible shift.
+        secondary_basin_cost_ratio: Competing basin's mean per-vertex DT
+            cost divided by the converged cost (epsilon-guarded); values
+            below the technique's ``basin_cost_ratio_threshold`` mark the
+            fit spurious.  ``0.0`` when not measured.
     """
 
     visible_terminator_arc_fraction: float = 0.0
@@ -102,12 +111,16 @@ class BodyTerminatorDiagnostics:
     dt_fit_rms_px: float = 0.0
     lm_iterations: int = 0
     tukey_inlier_count: int = 0
+    secondary_basin_distance_px: float = 0.0
+    secondary_basin_cost_ratio: float = 0.0
     CURATOR_FIELDS: ClassVar[dict[str, str | None]] = {
         'visible_terminator_arc_fraction': 'visible_terminator_arc_fraction',
         'visible_arc_px': 'visible_arc_px',
         'dt_fit_rms_px': 'dt_fit_rms_px',
         'lm_iterations': 'lm_iterations',
         'tukey_inlier_count': 'tukey_inlier_count',
+        'secondary_basin_distance_px': 'secondary_basin_distance_px',
+        'secondary_basin_cost_ratio': 'secondary_basin_cost_ratio',
     }
 
 

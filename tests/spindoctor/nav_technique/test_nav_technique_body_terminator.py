@@ -463,3 +463,63 @@ def test_body_terminator_nav_3dof_emits_3x3_covariance(
     assert result.sigma_rotation_rad is not None
     # No rotation planted; convergence stays well inside the 5 degree cap.
     assert abs(result.rotation_rad) < np.deg2rad(5.0)
+
+
+def test_body_terminator_nav_marks_spurious_on_competing_basin(
+    disc_image: DiscImageFactory,
+    arc_polyline: ArcPolylineFactory,
+    make_terminator_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """A rival edge in the search window makes the fit non-unimodal (issue #125).
+
+    Two identical discs sit 30 px apart, so the model arc aligns equally well
+    with either disc's edge.  The technique cannot know which basin is the
+    true one; the basin second-opinion must mark the result spurious and
+    report the rival in the diagnostics.
+    """
+    shape = (200, 200)
+    center_a = (100.0, 80.0)
+    center_b = (100.0, 110.0)
+    radius = 15.0
+    image = np.maximum(
+        disc_image(shape, center_a, radius),
+        disc_image(shape, center_b, radius),
+    )
+    vertices, outward = arc_polyline(
+        center_a, radius, 80, _TERMINATOR_ANGLE_START, _TERMINATOR_ANGLE_END
+    )
+    feature = make_terminator_feature('moonA', vertices=vertices, outward_normals=outward)
+    technique = BodyTerminatorNav()
+    context = make_nav_context(image)
+    result = technique.navigate([feature], context)
+    assert result.spurious is True
+    diagnostics = result.diagnostics
+    assert isinstance(diagnostics, BodyTerminatorDiagnostics)
+    assert diagnostics.secondary_basin_cost_ratio > 0.0
+    assert diagnostics.secondary_basin_cost_ratio < 1.2
+    assert diagnostics.secondary_basin_distance_px > 5.0
+
+
+def test_body_terminator_nav_clean_fit_reports_costly_secondary_basin(
+    disc_image: DiscImageFactory,
+    arc_polyline: ArcPolylineFactory,
+    make_terminator_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+) -> None:
+    """A single-disc scene stays non-spurious and reports a costly rival basin."""
+    shape = (200, 200)
+    image_center = (100.0, 100.0)
+    radius = 30.0
+    image = disc_image(shape, image_center, radius)
+    vertices, outward = arc_polyline(
+        image_center, radius, 80, _TERMINATOR_ANGLE_START, _TERMINATOR_ANGLE_END
+    )
+    feature = make_terminator_feature('moonA', vertices=vertices, outward_normals=outward)
+    technique = BodyTerminatorNav()
+    context = make_nav_context(image)
+    result = technique.navigate([feature], context)
+    assert result.spurious is False
+    diagnostics = result.diagnostics
+    assert isinstance(diagnostics, BodyTerminatorDiagnostics)
+    assert diagnostics.secondary_basin_cost_ratio >= 1.2
