@@ -1,0 +1,280 @@
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+import pytest
+from filecache import FCPath
+
+from spindoctor.dataset.dataset import ImageFile
+from spindoctor.dataset.dataset_pds3_cassini_iss import DataSetPDS3CassiniISS
+
+
+@pytest.fixture
+def ds() -> DataSetPDS3CassiniISS:
+    return DataSetPDS3CassiniISS('/fake/holdings')
+
+
+class _FakeIndexTable:
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        self._rows = rows
+
+    def dicts_by_row(self) -> list[dict[str, Any]]:
+        return self._rows
+
+
+class _FakeIndexCache:
+    def retrieve(self, urls: list[str]) -> list[Path]:
+        return [Path(urls[0]), Path(urls[1])]
+
+
+def _install_fake_index(
+    ds: DataSetPDS3CassiniISS,
+    monkeypatch: pytest.MonkeyPatch,
+    volume_filespecs: dict[str, list[str]],
+) -> list[str]:
+    """Serve synthetic index rows per volume; returns the log of volumes read."""
+    volumes_read: list[str] = []
+
+    def fake_read_pds_table(fn: Path, columns: tuple[str, ...] | None = None) -> _FakeIndexTable:
+        for vol, specs in volume_filespecs.items():
+            if vol in str(fn):
+                volumes_read.append(vol)
+                return _FakeIndexTable([{'FILE_SPECIFICATION_NAME': s} for s in specs])
+        raise AssertionError(f'Unexpected index read: {fn}')
+
+    monkeypatch.setattr(ds, '_index_filecache', _FakeIndexCache())
+    monkeypatch.setattr(ds, '_read_pds_table', fake_read_pds_table)
+    return volumes_read
+
+
+def _coiss_filespecs(camera: str, numbers: list[int]) -> list[str]:
+    """Index filespecs for one camera, in the index's per-camera sorted order."""
+    range_dir = f'{numbers[0]:010d}_{numbers[-1]:010d}'
+    return [f'data/{range_dir}/{camera}{num:010d}_1.IMG' for num in numbers]
+
+
+def _yielded_names(groups: list[Any]) -> list[str]:
+    return [g.image_files[0].image_file_name.split('_')[0] for g in groups]
+
+
+def test_last_image_num_keeps_wac_frames(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # COISS indexes sort all N* rows before all W* rows, so the image-number
+    # sequence resets partway through the volume. In-range WAC frames after the
+    # reset must still be yielded (issue #136).
+    numbers = [1000000100, 1000000101, 1000000102, 1000000103, 1000000104]
+    _install_fake_index(
+        ds,
+        monkeypatch,
+        {'COISS_2001': _coiss_filespecs('N', numbers) + _coiss_filespecs('W', numbers)},
+    )
+
+    groups = list(ds.yield_image_files_index(volumes=['COISS_2001'], img_end_num=1000000102))
+
+    assert _yielded_names(groups) == [
+        'N1000000100',
+        'N1000000101',
+        'N1000000102',
+        'W1000000100',
+        'W1000000101',
+        'W1000000102',
+    ]
+
+
+def test_scan_stops_after_first_volume_fully_past_range(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Volumes are chronological, so the scan stops after the first volume whose
+    # rows are all past img_end_num -- without reading any later volume's index.
+    in_range = [1000000100, 1000000101]
+    past_range = [1000000200, 1000000201]
+    far_past_range = [1000000300, 1000000301]
+    volumes_read = _install_fake_index(
+        ds,
+        monkeypatch,
+        {
+            'COISS_2001': _coiss_filespecs('N', in_range) + _coiss_filespecs('W', in_range),
+            'COISS_2002': _coiss_filespecs('N', past_range),
+            'COISS_2003': _coiss_filespecs('N', far_past_range),
+        },
+    )
+
+    groups = list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001', 'COISS_2002', 'COISS_2003'], img_end_num=1000000101
+        )
+    )
+
+    assert len(groups) == 4
+    assert volumes_read == ['COISS_2001', 'COISS_2002']
+
+
+def test_img_name_list_range_clamp_still_stops_scan(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # An explicit image-name list clamps the number range; rows rejected by the
+    # name list must still report past-the-range so the volume scan terminates.
+    numbers = [1000000100, 1000000101, 1000000102]
+    later = [1000000200, 1000000201]
+    volumes_read = _install_fake_index(
+        ds,
+        monkeypatch,
+        {
+            'COISS_2001': _coiss_filespecs('N', numbers) + _coiss_filespecs('W', numbers),
+            'COISS_2002': _coiss_filespecs('N', later),
+        },
+    )
+
+    groups = list(
+        ds.yield_image_files_index(
+            volumes=['COISS_2001', 'COISS_2002'], img_name_list=['N1000000101']
+        )
+    )
+
+    assert _yielded_names(groups) == ['N1000000101']
+    assert volumes_read == ['COISS_2001', 'COISS_2002']
+
+
+def test_yielded_imagefile_carries_label_resolver(
+    ds: DataSetPDS3CassiniISS, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_fake_index(
+        ds, monkeypatch, {'COISS_2001': _coiss_filespecs('N', [1000000100, 1000000100])[:1]}
+    )
+
+    groups = list(ds.yield_image_files_index(volumes=['COISS_2001']))
+
+    assert len(groups) == 1
+    assert groups[0].image_files[0].image_url_resolver is not None
+
+
+# --- ^IMAGE pointer parsing (issue #12) ---
+
+
+def _write_label(tmp_path: Path, name: str, text: str) -> Path:
+    label_path = tmp_path / name
+    label_path.write_text(text)
+    return label_path
+
+
+@pytest.mark.parametrize(
+    ('pointer_line', 'expected'),
+    [
+        ('^IMAGE = ("N1454725799_1.IMG",4)', 'N1454725799_1.IMG'),
+        ('^IMAGE                          = ("C3250013_GEOMED.IMG", 2)', 'C3250013_GEOMED.IMG'),
+        ('^IMAGE = "LOR_0003103486_0X630_SCI.FIT"', 'LOR_0003103486_0X630_SCI.FIT'),
+        ('^IMAGE = N1454725799_1.IMG', 'N1454725799_1.IMG'),
+    ],
+)
+def test_image_filename_from_label_pointer_forms(
+    tmp_path: Path, pointer_line: str, expected: str
+) -> None:
+    label_path = _write_label(
+        tmp_path,
+        'test.LBL',
+        f'PDS_VERSION_ID = PDS3\r\n^IMAGE_HEADER = ("OTHER.IMG",1)\r\n{pointer_line}\r\nEND\r\n',
+    )
+    assert DataSetPDS3CassiniISS._image_filename_from_label(label_path) == expected
+
+
+def test_image_filename_from_label_attached_offset_is_none(tmp_path: Path) -> None:
+    label_text = 'PDS_VERSION_ID = PDS3\r\n^IMAGE = 3\r\nEND\r\n'
+    label_path = _write_label(tmp_path, 'test.LBL', label_text)
+    assert DataSetPDS3CassiniISS._image_filename_from_label(label_path) is None
+
+
+def test_image_filename_from_label_missing_pointer_is_none(tmp_path: Path) -> None:
+    label_path = _write_label(tmp_path, 'test.LBL', 'PDS_VERSION_ID = PDS3\r\nEND\r\n')
+    assert DataSetPDS3CassiniISS._image_filename_from_label(label_path) is None
+
+
+def test_image_url_from_label_case_insensitive_match_keeps_guess(
+    ds: DataSetPDS3CassiniISS, tmp_path: Path
+) -> None:
+    # NH LORRI labels name the .fit file in uppercase while the holdings store it
+    # in lowercase; a case-only difference must not rewrite the URL.
+    label_path = _write_label(
+        tmp_path,
+        'lor_0003103486_0x630_sci.lbl',
+        '^IMAGE = ("LOR_0003103486_0X630_SCI.FIT", 14)\r\nEND\r\n',
+    )
+    guess = FCPath('/holdings/data/lor_0003103486_0x630_sci.fit')
+    assert ds._image_url_from_label(guess, label_path) is None
+
+
+def test_image_url_from_label_corrects_differing_name(
+    ds: DataSetPDS3CassiniISS, tmp_path: Path
+) -> None:
+    label_path = _write_label(
+        tmp_path,
+        'n1454725799_1.lbl',
+        '^IMAGE = ("N1454725799_1_FULL.IMG", 4)\r\nEND\r\n',
+    )
+    guess = FCPath('/holdings/data/n1454725799_1.img')
+    resolved = ds._image_url_from_label(guess, label_path)
+    assert resolved is not None
+    # The pointer name adopts the label filename's (lowercase) case convention.
+    assert resolved.as_posix() == '/holdings/data/n1454725799_1_full.img'
+
+
+def test_image_url_from_label_no_pointer_keeps_guess(
+    ds: DataSetPDS3CassiniISS, tmp_path: Path
+) -> None:
+    label_path = _write_label(tmp_path, 'test.LBL', 'PDS_VERSION_ID = PDS3\r\nEND\r\n')
+    guess = FCPath('/holdings/data/TEST.IMG')
+    assert ds._image_url_from_label(guess, label_path) is None
+
+
+# --- ImageFile.resolve_image_url ---
+
+
+def _make_imagefile(
+    image_url: FCPath,
+    label_path: Path,
+    resolver: Callable[[FCPath, Path], FCPath | None],
+) -> ImageFile:
+    return ImageFile(
+        image_file_url=image_url,
+        label_file_url=FCPath(label_path),
+        results_path_stub='stub',
+        image_url_resolver=resolver,
+    )
+
+
+def test_resolve_image_url_replaces_url_and_runs_once(tmp_path: Path) -> None:
+    label_path = _write_label(tmp_path, 'IMG.LBL', 'END\r\n')
+    corrected = FCPath(tmp_path / 'CORRECTED.IMG')
+    calls: list[FCPath] = []
+
+    def resolver(image_url: FCPath, _label_path: Path) -> FCPath:
+        calls.append(image_url)
+        return corrected
+
+    imagefile = _make_imagefile(FCPath(tmp_path / 'GUESS.IMG'), label_path, resolver)
+
+    assert imagefile.resolve_image_url() == corrected
+    assert imagefile.image_file_url == corrected
+    assert imagefile.resolve_image_url() == corrected
+    assert len(calls) == 1
+
+
+def test_resolve_image_url_none_keeps_guess(tmp_path: Path) -> None:
+    label_path = _write_label(tmp_path, 'IMG.LBL', 'END\r\n')
+    guess = FCPath(tmp_path / 'GUESS.IMG')
+
+    imagefile = _make_imagefile(guess, label_path, lambda _url, _path: None)
+
+    assert imagefile.resolve_image_url() == guess
+
+
+def test_image_file_path_uses_resolved_url(tmp_path: Path) -> None:
+    label_path = _write_label(tmp_path, 'IMG.LBL', 'END\r\n')
+    real_image = tmp_path / 'REAL.IMG'
+    real_image.write_bytes(b'image')
+
+    imagefile = _make_imagefile(
+        FCPath(tmp_path / 'WRONG.IMG'), label_path, lambda _url, _path: FCPath(real_image)
+    )
+
+    assert imagefile.image_file_path == real_image

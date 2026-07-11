@@ -2,6 +2,7 @@ import argparse
 import csv
 import os
 import random
+import re
 from abc import abstractmethod
 from collections.abc import Iterator
 from functools import lru_cache
@@ -16,6 +17,16 @@ from spindoctor.support.misc import flatten_list
 
 from .dataset import DataSet, ImageFile, ImageFiles
 
+# A PDS3 ^IMAGE pointer naming the data file that holds the image object, e.g.
+#   ^IMAGE = ("N1454725799_1.IMG",4)
+#   ^IMAGE                          = ("C3250013_GEOMED.IMG", 2)
+#   ^IMAGE = "LOR_0003103486_0X630_SCI.FIT"
+# Matches only the top-level IMAGE pointer, not IMAGE_HEADER / EXTENSION_*_IMAGE.
+_LABEL_IMAGE_POINTER_RE = re.compile(
+    r'^\s*\^IMAGE\s*=\s*\(?\s*"?(?P<name>[^"\',()\s]+)"?',
+    re.MULTILINE,
+)
+
 
 class DataSetPDS3(DataSet):
     """Parent class for PDS3 datasets.
@@ -27,6 +38,12 @@ class DataSetPDS3(DataSet):
     _ALL_VOLUME_NAMES: tuple[str, ...] = ()
     _INDEX_COLUMNS: tuple[str, ...] = ()
     _VOLUMES_DIR_NAME: str = ''
+    # True when every image number in a volume is greater than every image number in
+    # all earlier volumes, letting a sequential scan stop once a whole volume is past
+    # the end of the requested number range. False for datasets whose image counter
+    # resets between volumes (Voyager FDS counts restart per spacecraft/encounter and
+    # VG2 Neptune rolls over below VG1 Jupiter), where every volume must be scanned.
+    _IMG_NUM_MONOTONIC_ACROSS_VOLUMES: bool = True
 
     def __init__(
         self,
@@ -466,6 +483,68 @@ class DataSetPDS3(DataSet):
         #     else:
         #         yield last_image_path
 
+    @staticmethod
+    def _image_filename_from_label(label_path: Path) -> str | None:
+        """Extracts the image data filename from a PDS3 label's ^IMAGE pointer.
+
+        Parameters:
+            label_path: Local path to the retrieved PDS3 label file.
+
+        Returns:
+            The filename named by the label's ``^IMAGE`` pointer, or None when the
+            label has no such pointer or the pointer does not name a file (an
+            attached-label record offset like ``^IMAGE = 3``).
+        """
+        try:
+            label_text = label_path.read_text(encoding='utf-8', errors='replace')
+        except OSError:
+            return None
+        match = _LABEL_IMAGE_POINTER_RE.search(label_text)
+        if match is None:
+            return None
+        name = match.group('name')
+        # An attached-label pointer gives a record offset, not a filename
+        if '.' not in name:
+            return None
+        return name
+
+    def _image_url_from_label(self, image_url: FCPath, label_path: Path) -> FCPath | None:
+        """Resolves the definitive image URL from the label's ^IMAGE pointer.
+
+        Used as the :class:`ImageFile` ``image_url_resolver``: the index-time image
+        filespec is an extension-swap guess derived from the label filespec, and
+        this callback corrects it against what the label actually points to.
+
+        The comparison is case-insensitive because archive labels do not reliably
+        record the on-disk filename case (NH LORRI labels name the ``.fit`` file in
+        uppercase while the holdings store it in lowercase).  When the pointer
+        names a genuinely different file, the label filename's case convention is
+        applied to the pointer name for mono-case names.
+
+        Parameters:
+            image_url: The provisional image URL derived by extension swap.
+            label_path: Local path to the retrieved PDS3 label file.
+
+        Returns:
+            The corrected image URL, or None when the guess already matches the
+            label pointer (or the label has no usable pointer).
+        """
+        name = self._image_filename_from_label(label_path)
+        if name is None or name.lower() == image_url.name.lower():
+            return None
+        label_name = label_path.name
+        if name.isupper() and label_name.islower():
+            name = name.lower()
+        elif name.islower() and label_name.isupper():
+            name = name.upper()
+        self._logger.debug(
+            'Image filespec %s corrected to %s from label %s',
+            image_url.name,
+            name,
+            label_name,
+        )
+        return image_url.parent / name
+
     @lru_cache(maxsize=3)  # noqa: B019 # small cache; dataset instances are long-lived
     def _read_pds_table(self, fn: str, columns: tuple[str, ...] | None = None) -> PdsTable:
         """Reads a PDS table file with caching.
@@ -735,9 +814,12 @@ class DataSetPDS3(DataSet):
             Returns:
                 A tuple ``(imagefile, past_end)``. ``imagefile`` is the constructed
                 ``ImageFile`` if the row passes every filter, or None if it is filtered
-                out. ``past_end`` is True if ``img_num`` exceeds ``img_end_num``; because
-                index rows are in monotonically increasing image-number order, a True
-                value lets sequential scanning stop early.
+                out. ``past_end`` is True if ``img_num`` exceeds ``img_end_num``. Image
+                numbers are monotonic only within one camera's rows -- an index can
+                interleave camera streams (COISS sorts all N* rows before all W* rows,
+                resetting the numeric sequence partway through the volume) -- so a True
+                value means only that *this row's* camera stream has passed the end of
+                the range, not that the scan as a whole can stop.
             """
             label_filespec = self._get_label_filespec_from_index(row)
             img_filespec = self._get_image_filespec_from_label_filespec(label_filespec)
@@ -755,6 +837,20 @@ class DataSetPDS3(DataSet):
             if img_name is None:
                 return None, False  # Not a name we should process
 
+            # Get the image number and test that it's in range. This runs before the
+            # explicit-list filters so a row rejected by those lists still reports
+            # past_end, letting the caller stop scanning volumes past the range.
+            try:
+                img_num = self._extract_img_number(img_name)
+            except ValueError as err:
+                raise ValueError(
+                    f'IMGNUM: Index file "{index_tab_url}" contains bad path "{label_filespec}"'
+                ) from err
+            if img_end_num is not None and img_num > img_end_num:
+                return None, True
+            if img_start_num is not None and img_num < img_start_num:
+                return None, False
+
             # Check that the image filespec is in the requested list
             if img_name_filter_list and img_name not in img_name_filter_list:
                 return None, False
@@ -766,20 +862,6 @@ class DataSetPDS3(DataSet):
                         break
                 else:
                     return None, False
-
-            # Get the image number and test that it's in range
-            # There's no point in checking the range dir for image number
-            # since we have to go through the entire index either way
-            try:
-                img_num = self._extract_img_number(img_name)
-            except ValueError as err:
-                raise ValueError(
-                    f'IMGNUM: Index file "{index_tab_url}" contains bad path "{label_filespec}"'
-                ) from err
-            if img_end_num is not None and img_num > img_end_num:
-                return None, True
-            if img_start_num is not None and img_num < img_start_num:
-                return None, False
 
             # Check that the image meets any additional selection criteria specific
             # to this dataset
@@ -795,6 +877,7 @@ class DataSetPDS3(DataSet):
                 label_file_url=label_url,
                 index_file_row=row,
                 results_path_stub=self._results_path_stub(search_vol, label_filespec),
+                image_url_resolver=self._image_url_from_label,
             )
             return imagefile, False
 
@@ -823,22 +906,28 @@ class DataSetPDS3(DataSet):
             return
 
         # Sequential scanning over the requested volumes in order. Image numbers are
-        # monotonically increasing both within and across volumes, so once we pass the
-        # end of the requested range there is nothing left to find anywhere and we stop
-        # the whole scan.
+        # monotonic within one camera's rows, but an index can interleave camera
+        # streams (COISS sorts all N* rows before all W* rows, resetting the numeric
+        # sequence partway through the volume), so a single past-the-end row must not
+        # stop the scan. When image numbers are monotonic across volumes, the scan
+        # stops after the first volume in which every row is past the end of the
+        # requested range; otherwise every requested volume is scanned.
         num_yields = 0
         for search_vol in valid_volumes:
             rows, index_tab_url = _read_index_rows(search_vol)
+            all_rows_past_end = bool(rows)
             for row in rows:
                 imagefile, past_end = _row_to_imagefile(row, search_vol, index_tab_url)
-                if past_end:
-                    return
+                if not past_end:
+                    all_rows_past_end = False
                 if imagefile is None:
                     continue
                 yield imagefile
                 num_yields += 1
                 if limit_yields is not None and num_yields >= limit_yields:
                     return
+            if all_rows_past_end and self._IMG_NUM_MONOTONIC_ACROSS_VOLUMES:
+                return
 
     def _check_additional_image_selection_criteria(
         self,

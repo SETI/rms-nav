@@ -151,7 +151,10 @@ For PDS3 datasets (``coiss``, ``coiss_pds3``, ``coiss_cruise``, ``coiss_cruise_p
 
 * ``img_name`` (positional, repeatable): specific image name(s) to process.
 * ``--first-image-num N``: minimum image number (inclusive).
-* ``--last-image-num N``: maximum image number (inclusive).
+* ``--last-image-num N``: maximum image number (inclusive). Voyager FDS counts
+  restart per spacecraft/encounter, so for Voyager a number range can match
+  frames from more than one encounter; combine it with the volume options to
+  bound the selection.
 * ``--volumes NAME[,NAME...]`` (repeatable): one or more complete PDS3 volume names; you may pass comma-separated values or specify the option multiple times.
 * ``--first-volume NAME``: starting PDS3 volume; only that volume and chronologically later ones are processed.
 * ``--last-volume NAME``: ending PDS3 volume; only that volume and chronologically earlier ones are processed.
