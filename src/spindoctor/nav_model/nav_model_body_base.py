@@ -158,9 +158,15 @@ class NavModelBodyBase(NavModel):
         prediction (no albedo or flux calibration is available for
         bodies):
 
-        1. Count the model's lit pixels ``N`` (rendered brightness > 0
-           inside the silhouette) -- how many image pixels the body
-           should light up.
+        1. Compute the model's *effective* lit pixel count ``N`` -- the
+           Kish effective sample size ``(sum w)^2 / sum(w^2)`` of the
+           rendered lit-pixel brightnesses -- how many image pixels
+           carry the body's predicted flux.  For a uniform silhouette
+           this equals the plain lit count; for a high-phase Lambert
+           crescent it concentrates on the bright core, so the
+           near-terminator tail of barely-lit model pixels (whose real
+           counterparts are routinely darker than the render predicts)
+           does not drag the estimate into the sky population.
         2. Take the median of the ``N`` brightest valid pixels in the
            search window, as sigmas above the frame background (the
            shared iterative sky estimate,
@@ -194,9 +200,12 @@ class NavModelBodyBase(NavModel):
         """
         assert self._model_img is not None
         assert self._body_mask is not None
-        n_lit = int(np.count_nonzero(self._body_mask & (self._model_img > 0.0)))
-        if n_lit == 0:
+        lit_mask = self._body_mask & (self._model_img > 0.0)
+        lit_weights = np.asarray(self._model_img, np.float64)[lit_mask]
+        weight_sq_sum = float((lit_weights * lit_weights).sum())
+        if weight_sq_sum <= 0.0:
             return 0.0
+        n_lit = max(1, int(float(lit_weights.sum()) ** 2 / weight_sq_sum))
         image_ext = np.asarray(context.image_ext, np.float64)
         valid_mask = (
             np.asarray(context.sensor_mask_ext, bool)
