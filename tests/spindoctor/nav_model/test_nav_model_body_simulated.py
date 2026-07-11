@@ -254,3 +254,33 @@ def test_blob_admits_small_bright_body_off_prediction() -> None:
     blob = _blob_feature(obs, _small_body(obs), bare_nav_context(obs, image))
     assert blob.reliability >= 0.2
     assert blob.reliability <= 0.4
+
+
+def test_blob_admits_mostly_offscreen_body() -> None:
+    """Off-sensor predicted flux must not dilute the detection SNR.
+
+    A body whose silhouette extends past the sensor edge only lights up
+    its on-sensor pixels; counting the whole predicted lit area would
+    push the top-N median into the sky and falsely veto the visible
+    part (regression seen on body_mostly_offscreen frames).
+    """
+    import dataclasses
+
+    obs = _obs()
+    # Body centred 2 px inside the frame edge: roughly half the 20 px
+    # silhouette hangs past the sensor into the extfov margin.
+    params = dict(_small_body(obs))
+    params.update(center_v=2.0, axis1=20.0, axis2=20.0, axis3=20.0)
+    image = _noise_image(obs, seed=20260712)
+    mv, mu = int(obs.extfov_margin_v), int(obs.extfov_margin_u)
+    # Sensor mask covers only the data region, as on a real frame.
+    sensor = np.zeros(image.shape, dtype=bool)
+    sensor[mv : mv + int(obs.data_shape_v), mu : mu + int(obs.data_shape_u)] = True
+    # Bright half-disc at the predicted position, clipped to the sensor.
+    center_v = 2.0 + mv
+    center_u = obs.data_shape_u / 2.0 + mu
+    vv, uu = np.indices(image.shape, dtype=np.float64)
+    image[(np.hypot(vv - center_v, uu - center_u) <= 10.0) & sensor] += 25.0
+    context = dataclasses.replace(bare_nav_context(obs, image), sensor_mask_ext=sensor)
+    blob = _blob_feature(obs, params, context)
+    assert blob.reliability >= 0.2

@@ -147,8 +147,11 @@ Restrictions and assumptions
   cover the right part of the FOV) collapses the moment; the technique drops such blobs
   before the joint fit and reports a no-signal failure when every blob is dropped.
 - **Undetected bodies are gated out; small detected ones are not.** The ``BODY_BLOB``
-  feature's reliability is driven by a *measured* detection SNR: the model counts its lit
-  pixels ``N``, takes the median of the ``N`` brightest valid pixels in the search window
+  feature's reliability is driven by a *measured* detection SNR: the model computes the
+  flux-weighted effective count ``N`` of its *observable* lit pixels (the Kish effective
+  sample size of the rendered brightnesses over on-sensor, unsaturated pixels -- a Lambert
+  crescent's near-terminator tail and any off-sensor overhang do not inflate it), takes the
+  median of the ``N`` brightest valid pixels in the search window
   (the predicted bbox expanded by the extfov margins, since the pointing error is unknown),
   and subtracts the level pure noise's top-``N`` order statistics would produce. The SNR
   sigmoid is centered at the technique's own 3-sigma lit-pixel threshold, so a window with

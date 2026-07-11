@@ -200,18 +200,23 @@ class NavModelBodyBase(NavModel):
         """
         assert self._model_img is not None
         assert self._body_mask is not None
-        lit_mask = self._body_mask & (self._model_img > 0.0)
-        lit_weights = np.asarray(self._model_img, np.float64)[lit_mask]
-        weight_sq_sum = float((lit_weights * lit_weights).sum())
-        if weight_sq_sum <= 0.0:
-            return 0.0
-        n_lit = max(1, int(float(lit_weights.sum()) ** 2 / weight_sq_sum))
         image_ext = np.asarray(context.image_ext, np.float64)
         valid_mask = (
             np.asarray(context.sensor_mask_ext, bool)
             & ~np.asarray(context.saturation_mask_ext, bool)
             & ~np.asarray(context.cosmic_ray_mask_ext, bool)
         )
+        # Count only *observable* lit pixels: a mostly-offscreen body's
+        # silhouette extends past the sensor, and predicted flux that can
+        # never land on a valid pixel must not inflate N (it would push
+        # the top-N median into the sky population and falsely veto the
+        # visible part of the body).
+        lit_mask = self._body_mask & (self._model_img > 0.0) & valid_mask
+        lit_weights = np.asarray(self._model_img, np.float64)[lit_mask]
+        weight_sq_sum = float((lit_weights * lit_weights).sum())
+        if weight_sq_sum <= 0.0:
+            return 0.0
+        n_lit = max(1, int(float(lit_weights.sum()) ** 2 / weight_sq_sum))
         background, sky_sigma = estimate_background_and_sky_sigma(
             image_ext, valid_mask, noise_sigma=float(context.image_noise_sigma)
         )
