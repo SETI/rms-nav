@@ -17,7 +17,11 @@ predicted-scene generators. Each subclass implements three methods:
 Concrete subclasses self-register via ``__init_subclass__``; abstract
 bases set ``_abstract = True`` to opt out. The class method
 :meth:`~spindoctor.nav_model.nav_model.NavModel.instances_for_obs` is the per-class hook that
-:func:`~spindoctor.nav_model.nav_model.build_models_for_obs` iterates.
+:func:`~spindoctor.nav_model.nav_model.build_models_for_obs` iterates. Both take a
+keyword-only ``config`` parameter used for *selection* (which ring systems have
+catalogs, which satellites are considered) as well as for constructing the
+instances, so a per-run configuration override changes which models exist the
+same way it changes how they behave; ``None`` uses ``DEFAULT_CONFIG``.
 
 Registered concrete models, grouped by feature family:
 
