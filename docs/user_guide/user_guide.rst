@@ -13,6 +13,7 @@ appendices.
    user_guide_navigation
    user_guide_reprojection
    user_guide_backplanes
+   user_guide_statistics
    user_guide_simulated_images
    user_guide_pds4_bundle
    user_guide_appendix_coiss
