@@ -120,12 +120,23 @@ def estimate_image_noise_sigma(
     return float(mad_std(finite) / _LAPLACIAN_NORM)
 
 
+NOISE_CLIP_SIGMA: float = 3.0
+"""Sigmas above background at which a pixel stops counting as sky.
+
+Shared between the estimator's high-tail rejection (``clip_sigma``) and the
+blob technique's lit-pixel threshold
+(``nav_technique_body_blob._BLOB_NOISE_THRESHOLD_SIGMA``) so the model's
+detection-SNR estimate and the technique's actual threshold cannot drift
+apart.
+"""
+
+
 def estimate_background_and_sky_sigma(
     image: NDArrayFloatType,
     valid_mask: NDArrayBoolType,
     *,
     noise_sigma: float,
-    clip_sigma: float = 3.0,
+    clip_sigma: float = NOISE_CLIP_SIGMA,
 ) -> tuple[float, float]:
     """Estimate the frame's background pedestal and sky-noise sigma.
 

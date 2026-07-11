@@ -41,7 +41,10 @@ from spindoctor.nav_technique.nav_technique import (
     search_window_for_obs,
 )
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
-from spindoctor.support.noise_estimate import estimate_background_and_sky_sigma
+from spindoctor.support.noise_estimate import (
+    NOISE_CLIP_SIGMA,
+    estimate_background_and_sky_sigma,
+)
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only import
@@ -104,8 +107,12 @@ def _clamp_bbox(
     )
 
 
-_BLOB_NOISE_THRESHOLD_SIGMA: float = 3.0
-"""Pixels above ``background + this * noise_sigma`` count as lit signal."""
+_BLOB_NOISE_THRESHOLD_SIGMA: float = NOISE_CLIP_SIGMA
+"""Pixels above ``background + this * noise_sigma`` count as lit signal.
+
+Aliased to :data:`~spindoctor.support.noise_estimate.NOISE_CLIP_SIGMA` so the
+threshold and the background estimator's sky clip stay one value.
+"""
 
 
 _COARSE_CORRELATION_MAX_PHASE_DEG: float = 90.0

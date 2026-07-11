@@ -283,7 +283,7 @@ def gen_terminator(rng: random.Random) -> dict[str, Any]:
 def gen_blob(rng: random.Random) -> dict[str, Any]:
     """Small-to-mid body (BodyBlobNav regime).
 
-    The radius range spans from below the 8 px BODY_BLOB emission floor
+    The radius range spans from below the 5 px BODY_BLOB emission floor
     (those scenes exercise the fused failure path) through the sizes where
     the disc correlation takes over, so the fit sees the technique's whole
     design regime including the small-blob band the detection-SNR gate

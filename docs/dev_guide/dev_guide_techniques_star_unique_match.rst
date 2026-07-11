@@ -70,7 +70,9 @@ runner-up (outside the detection's own centroid box) by the configured ratio, or
 result is spurious with an ``ambiguous_detection`` reason. A real star detection towers
 over the window's noise order statistics while a matched spike sits within a few percent
 of its runner-up; the ratio is unit-free, so no DN-scale or photometric calibration enters
-the gate. The measured ratio is surfaced as the ``detection_peak_ratio`` diagnostic.
+the gate. The measured ratio is surfaced as the
+:attr:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics.detection_peak_ratio`
+diagnostic.
 
 2-star path
 -----------
@@ -153,6 +155,10 @@ All numeric tunables for this technique live in ``techniques.StarUniqueMatchNav.
 - ``two_star_confidence_cap`` — float, default ``0.8`` (dimensionless). Post-sigmoid
   confidence cap when the 2-star path fires. Per-correspondence residual cross-checks the
   assignment.
+- ``one_star_min_peak_ratio`` — float, default ``1.5`` (dimensionless). Minimum
+  background-subtracted peak-to-runner-up ratio for a 1-star detection; below it the
+  result is spurious with an ``ambiguous_detection`` reason. Values below 1 are invalid
+  (the peak is by definition at least the runner-up).
 - ``at_edge_tolerance_px`` — float, default ``1.0`` px. A converged offset whose absolute
   distance from any search-window axis bound falls within this tolerance is flagged
   :attr:`~spindoctor.nav_technique.technique_result.NavTechniqueResult.at_edge`.
@@ -249,6 +255,10 @@ Diagnostics
 - :attr:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics.residual_px` —
   detection-vs-prediction residual. Consumed by the confidence formula and by the
   spurious-detection gate.
+- :attr:`~spindoctor.nav_technique.diagnostics.StarUniqueMatchDiagnostics.detection_peak_ratio`
+  — background-subtracted peak over window runner-up for the 1-star path (``0.0`` when
+  not measured; ``inf`` when the runner-up sits at or below the background). Diagnostic
+  only; the ambiguity gate consumes it before the confidence formula runs.
 
 Call path
 ---------

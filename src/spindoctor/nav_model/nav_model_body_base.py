@@ -36,7 +36,7 @@ from spindoctor.feature.geometry import BodyBlobGeometry
 from spindoctor.nav_model.body_shape import BodyShape
 from spindoctor.support.filters import NavFilterKind, NavFilterSpec
 from spindoctor.support.image import shift_array
-from spindoctor.support.noise_estimate import estimate_background_and_sky_sigma
+from spindoctor.support.noise_estimate import NOISE_CLIP_SIGMA, estimate_background_and_sky_sigma
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
 
 from .nav_model import NavModel
@@ -218,7 +218,10 @@ class NavModelBodyBase(NavModel):
             return 0.0
         n_lit = max(1, int(float(lit_weights.sum()) ** 2 / weight_sq_sum))
         background, sky_sigma = estimate_background_and_sky_sigma(
-            image_ext, valid_mask, noise_sigma=float(context.image_noise_sigma)
+            image_ext,
+            valid_mask,
+            noise_sigma=float(context.image_noise_sigma),
+            clip_sigma=NOISE_CLIP_SIGMA,
         )
         v_min, u_min, v_max, u_max = self._bbox_extfov_vu
         margin_v = int(self._obs.extfov_margin_v)
@@ -571,11 +574,11 @@ def _blob_reliability(*, snr: float, diameter_px: float) -> float:
     lit-pixel threshold) so a window with no signal above the noise
     order-statistics scores ~0.02 (gated for any body size) while a
     clearly detected body saturates the term.  The extent sigmoid
-    (midpoint :data:`_BLOB_EXTENT_MIDPOINT_PX`, below the 8 px emission
-    floor) applies a mild near-floor discount; detection is the primary
-    discriminator against the reliability gate's 0.20 threshold, which
-    the combination crosses at SNR ~3.1-3.3 across the emitted size
-    range.
+    (midpoint :data:`_BLOB_EXTENT_MIDPOINT_PX`, below the
+    :data:`BODY_BLOB_MIN_DIAMETER_PX` emission floor) applies a mild
+    near-floor discount; detection is the primary discriminator against
+    the reliability gate's 0.20 threshold, which the combination crosses
+    at SNR ~3.0 for a 20 px body up to ~4.4 at the 5 px floor.
     """
     snr_term = _sigmoid(snr - _BLOB_DETECTION_SNR_MIDPOINT)
     extent_term = _sigmoid((diameter_px - _BLOB_EXTENT_MIDPOINT_PX) / _BLOB_EXTENT_SCALE_PX)
