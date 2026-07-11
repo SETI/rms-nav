@@ -238,7 +238,7 @@ class NavModelBody(NavModelBodyBase):
         self._phase_angle_factor: float = 0.0
 
     @classmethod
-    def instances_for_obs(cls, obs: Observation) -> list[NavModel]:
+    def instances_for_obs(cls, obs: Observation, *, config: Config | None = None) -> list[NavModel]:
         """Return one NavModelBody per body whose bbox lies inside extfov.
 
         Calls ``obs.inventory`` once with the planet + satellites list
@@ -247,6 +247,9 @@ class NavModelBody(NavModelBodyBase):
 
         Parameters:
             obs: Observation snapshot.
+            config: Configuration whose satellite catalog decides which bodies
+                are considered; also passed to the constructed instances.  None
+                uses ``DEFAULT_CONFIG``.
 
         Returns:
             One ``NavModelBody`` per body present in the extfov.
@@ -254,7 +257,8 @@ class NavModelBody(NavModelBodyBase):
         # Simulated obs use the sim-params-driven NavModelBodySimulated instead.
         if getattr(obs, 'is_simulated', False):
             return []
-        config = DEFAULT_CONFIG
+        if config is None:
+            config = DEFAULT_CONFIG
         planet = getattr(obs, 'closest_planet', None)
         if planet is None:
             return []
@@ -276,7 +280,7 @@ class NavModelBody(NavModelBodyBase):
                 continue
             if not in_extfov(entry):
                 continue
-            out.append(cls(f'body:{body_name}', obs, body_name, inventory=entry))
+            out.append(cls(f'body:{body_name}', obs, body_name, inventory=entry, config=config))
         return out
 
     def create_model(self) -> None:

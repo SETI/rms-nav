@@ -28,6 +28,7 @@ from spindoctor.nav_model.stars.nav_model_stars import (
 from spindoctor.support.time import now_dt
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only import
+    from spindoctor.config import Config
     from spindoctor.support.types import MutableStar
 
 __all__ = ['NavModelStarsSimulated']
@@ -48,7 +49,7 @@ class NavModelStarsSimulated(NavModelStars):
     """
 
     @classmethod
-    def instances_for_obs(cls, obs: Observation) -> list[NavModel]:
+    def instances_for_obs(cls, obs: Observation, *, config: Config | None = None) -> list[NavModel]:
         """Return one star model for a simulated obs that rendered stars.
 
         Returns an empty list for a real obs (the catalog-driven
@@ -57,6 +58,8 @@ class NavModelStarsSimulated(NavModelStars):
 
         Parameters:
             obs: Observation snapshot.
+            config: Configuration passed to the constructed instance.  None
+                uses ``DEFAULT_CONFIG``.
 
         Returns:
             ``[NavModelStarsSimulated('stars', obs)]`` for a simulated obs
@@ -66,7 +69,7 @@ class NavModelStarsSimulated(NavModelStars):
             return []
         if not getattr(obs, 'sim_star_list', None):
             return []
-        return [cls('stars', obs)]
+        return [cls('stars', obs, config=config)]
 
     def create_model(self) -> None:
         """Populate the star list from the rendered scene.

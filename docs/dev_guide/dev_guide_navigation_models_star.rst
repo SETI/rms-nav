@@ -219,6 +219,11 @@ The model's runtime knobs live in ``stars`` in
   ``too_bright_dn`` (reserved tuning slot).
 - ``ring_occlusion_enabled`` — bool, default ``true``. Whether to flag stars whose
   predicted positions lie inside a planet's ring system.
+- ``ring_occlusion_min_opaque_fraction`` — float, default ``0.25``. Fraction of the
+  star's conflict-window pixels that must fall inside an opaque annulus before the
+  star is flagged ring-occluded. Membership is tested per pixel, so a star whose
+  window straddles a ringlet edge or a gap boundary is judged by how much of the
+  window is actually over opaque material.
 - ``ring_occlusion_radii_km`` — dict[str, list[list[float]]]. Per-planet ring annular
   bounds (km) used by the occlusion check. Saturn entry covers C, B, and A rings; Uranus
   covers the main ring system; Neptune covers Galle through Adams rings.

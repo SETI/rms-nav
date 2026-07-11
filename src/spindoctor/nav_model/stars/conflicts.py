@@ -127,6 +127,32 @@ def _conflict_body_list(obs: ObsSnapshot, config: Config) -> list[str]:
     return body_list
 
 
+def _ring_opaque_fraction(
+    radii_km: np.ndarray,
+    valid_mask: np.ndarray,
+    annuli: list[tuple[float, float]],
+) -> float:
+    """Fraction of the valid window pixels that lie inside an opaque annulus.
+
+    Parameters:
+        radii_km: Ring-radius backplane values over the conflict window, in km.
+        valid_mask: True where the backplane value is valid (ring plane
+            intercepted); same shape as ``radii_km``.
+        annuli: List of opaque ``(inner_km, outer_km)`` annuli.
+
+    Returns:
+        Opaque-pixel count divided by valid-pixel count, or 0.0 when no
+        window pixel is valid.
+    """
+    n_valid = int(np.count_nonzero(valid_mask))
+    if n_valid == 0:
+        return 0.0
+    opaque = np.zeros(radii_km.shape, dtype=bool)
+    for inner_km, outer_km in annuli:
+        opaque |= (radii_km >= inner_km) & (radii_km <= outer_km)
+    return float(np.count_nonzero(opaque & valid_mask)) / n_valid
+
+
 def _check_one_star(
     *,
     obs: ObsSnapshot,
@@ -135,8 +161,16 @@ def _check_one_star(
     ring_annuli: dict[str, list[tuple[float, float]]],
     rings_can_conflict: bool,
     body_conflict_margin: float,
+    ring_min_opaque_fraction: float,
 ) -> bool:
     """Return True if ``star`` conflicts with a body or ring; sets the flag.
+
+    Ring membership is tested per pixel over the conflict window: the star is
+    ring-occluded when at least ``ring_min_opaque_fraction`` of the valid
+    window pixels fall inside an opaque annulus.  A single collapsed statistic
+    (the window's median radius) would mis-classify stars whose window
+    straddles a ringlet edge or a gap boundary -- exactly where occlusion
+    matters most.
 
     Parameters:
         obs: Observation snapshot.
@@ -146,6 +180,8 @@ def _check_one_star(
         rings_can_conflict: Toggle the ring check.
         body_conflict_margin: Pixel slop around the star when building
             the conflict-check meshgrid.
+        ring_min_opaque_fraction: Minimum opaque fraction of valid window
+            pixels for a ring conflict.
 
     Returns:
         True if a conflict was found (and ``star.conflicts`` set);
@@ -170,11 +206,12 @@ def _check_one_star(
             ring_target = f'{obs.closest_planet.lower()}:ring'
             bp_radii = backplane.ring_radius(ring_target)
             if not bp_radii.is_all_masked():
-                radius_km = float(bp_radii.median().vals)
-                for inner_km, outer_km in annuli:
-                    if inner_km <= radius_km <= outer_km:
-                        star.conflicts = f'RING: {obs.closest_planet}'
-                        return True
+                radii_km = np.asarray(bp_radii.vals, dtype=np.float64)
+                valid_mask = ~np.broadcast_to(np.asarray(bp_radii.mask, dtype=bool), radii_km.shape)
+                fraction = _ring_opaque_fraction(radii_km, valid_mask, annuli)
+                if fraction >= ring_min_opaque_fraction:
+                    star.conflicts = f'RING: {obs.closest_planet}'
+                    return True
     return False
 
 
@@ -195,8 +232,10 @@ def mark_body_and_ring_conflicts(
 
     2. **Ring annulus occlusion.**  When ``stars.ring_occlusion_enabled``
        is True and the closest-planet has annuli configured, the same
-       meshgrid is queried for ``ring_radius`` and the median radius is
-       compared against each annulus.  A hit marks the star with
+       meshgrid is queried for ``ring_radius`` and each valid pixel's
+       radius is tested against the annuli.  When at least
+       ``stars.ring_occlusion_min_opaque_fraction`` of the valid window
+       pixels are opaque, the star is marked with
        ``conflicts = 'RING: <planet>'``.
 
     Stars already marked with a non-empty ``conflicts`` (e.g. ``'STAR'``
@@ -212,6 +251,7 @@ def mark_body_and_ring_conflicts(
     ring_annuli = parse_ring_occlusion_annuli(_cast_dict(stars_config.ring_occlusion_radii_km))
     rings_can_conflict = bool(stars_config.ring_occlusion_enabled)
     margin = float(stars_config.body_conflict_margin)
+    min_opaque_fraction = float(stars_config.ring_occlusion_min_opaque_fraction)
     for star in stars:
         if star.conflicts:
             continue
@@ -222,6 +262,7 @@ def mark_body_and_ring_conflicts(
             ring_annuli=ring_annuli,
             rings_can_conflict=rings_can_conflict,
             body_conflict_margin=margin,
+            ring_min_opaque_fraction=min_opaque_fraction,
         )
 
 

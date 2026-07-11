@@ -233,7 +233,7 @@ class NavModelBodySimulated(NavModelBodyBase):
         self._bbox_extfov_vu: tuple[int, int, int, int] = (0, 0, 0, 0)
 
     @classmethod
-    def instances_for_obs(cls, obs: Observation) -> list[NavModel]:
+    def instances_for_obs(cls, obs: Observation, *, config: Config | None = None) -> list[NavModel]:
         """Build one simulated body model per body of a simulated obs.
 
         Reads the per-body parameters the sim obs stashes on its snapshot
@@ -252,6 +252,8 @@ class NavModelBodySimulated(NavModelBodyBase):
 
         Parameters:
             obs: Observation snapshot.
+            config: Configuration passed to the constructed instances.  None
+                uses ``DEFAULT_CONFIG``.
 
         Returns:
             One ``NavModelBodySimulated`` per body in the sim scene.
@@ -266,7 +268,15 @@ class NavModelBodySimulated(NavModelBodyBase):
             if not isinstance(body_params, dict):
                 continue
             body_name = str(body_params.get('name', 'SIM-BODY'))
-            out.append(cls(f'body_sim:{body_name}', obs, body_name, _nav_params(body_params)))
+            out.append(
+                cls(
+                    f'body_sim:{body_name}',
+                    obs,
+                    body_name,
+                    _nav_params(body_params),
+                    config=config,
+                )
+            )
         return out
 
     def create_model(self) -> None:

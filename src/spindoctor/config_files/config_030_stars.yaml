@@ -43,6 +43,12 @@ stars:
   too_bright_dn: 1000
   too_bright_factor: 1  # TODO
   ring_occlusion_enabled: true
+  # Fraction of the star's conflict-window pixels that must fall inside an
+  # opaque annulus before the star is marked ring-occluded. Membership is
+  # tested per pixel, so a star sitting on a ringlet edge or straddling a gap
+  # is judged by how much of its window is actually over opaque material
+  # rather than by the window's median radius.
+  ring_occlusion_min_opaque_fraction: 0.25
   ring_occlusion_radii_km:
     SATURN:
       - [74490.0, 91980.0]    # C ring
