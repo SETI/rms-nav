@@ -125,31 +125,29 @@ techniques:
       spurious: true
 
   BodyBlobNav:
-    # Sim campaign (physical-body pass -- rendered relief and
-    # km_per_pixel tied to the config_220 residuals): n=468 usable,
-    # base rate 0.69, AUC 0.58 -> 0.89, Brier 0.30 -> 0.16.
-    # Note the campaign only exercises blobs the
-    # BODY_BLOB reliability gate admits (extent >= ~22 px): the gate's
-    # blob_snr input is the mean rendered model brightness, which sits
-    # far below the 0.20 threshold for genuinely small bodies, so the
-    # below-resolution regime this technique was designed for never
-    # reaches it autonomously (defect noted in the calibration report).
-    alpha0: 1.087
+    # Sim campaign (refit seed 20260710, taken after the BODY_BLOB
+    # reliability gate moved to detection SNR and so admits the full
+    # emitted size range -- the fit finally sees the below-resolution
+    # design regime; 199 of 556 usable rows have extent < 22 px):
+    # n=556 usable, base rate 0.90, AUC 0.55 -> 0.98,
+    # Brier 0.34 -> 0.07.
+    alpha0: 1.963
     terms:
       # Brightness-weighted centroid uncertainty shrinks with SNR.
-      # Campaign raw p5/p50/p95 = 18/70/681 (heavy tail).
+      # Campaign raw p5/p50/p95 = 34/109/679 (heavy tail).
       - feature: body_snr_inside_predicted_bbox
-        alpha: 0.934
+        alpha: 0.405
         divisor: 600.0
         cap_at: 1.0
-      # NEGATIVE alpha, reversing the design's more-signal prior: in
-      # the gate-admitted regime the lit-weighted-centroid model error
-      # grows with apparent size, so absolute P(err <= 1 px) falls as
-      # the blob gets bigger (campaign correlation -0.47).  The design's
-      # small-blob rationale is unexercisable while the gate excludes
-      # small blobs.  Campaign raw p5/p50/p95 = 22/50/139.
+      # NEGATIVE alpha, reversing the design's more-signal prior, and
+      # confirmed on the full size regime including small blobs: the
+      # lit-weighted-centroid model error grows with apparent size, so
+      # absolute P(err <= 1 px) falls as the blob gets bigger.  Small
+      # blobs are the technique's tightest regime in absolute pixels
+      # (every usable sub-22 px row on the campaign recovered within
+      # 1 px).  Campaign raw p5/p50/p95 = 11/24/110.
       - feature: body_extent_px
-        alpha: -1.564
+        alpha: -1.477
         offset: 8.0
         divisor: 130.0
         cap_at: 1.0
@@ -170,13 +168,15 @@ techniques:
       # irregular Hyperion at the same phase has unpredictable
       # shadowing on an unknown rotational orientation that the
       # ellipsoidal model cannot fully correct (factor ~ 0.15).
-      # Calibrated on the physical-body campaign (config_220 residuals
+      # Calibrated on the detection-SNR-gate pass (config_220 residuals
       # populated; simulated bodies rendered at the matching relief and
       # navigated against the smooth ellipsoid): campaign raw factor
-      # p5/p50/p95 = 0.002 / 0.047 / 0.37, so the divisor spans that
-      # range (the design 0.15 saturated 29% of rows).
+      # p5/p50/p95 = 0.002 / 0.073 / 0.30, so the divisor spans that
+      # range.  The penalty is milder than on the large-blob-only
+      # regime: with small blobs in the fit the base rate rises to 0.90
+      # and irregularity explains less of the residual failure mass.
       - feature: max_phase_irregularity_factor
-        alpha: -0.806
+        alpha: -0.164
         divisor: 0.35
         cap_at: 1.0
     hard_zero_if:
