@@ -213,6 +213,30 @@ def test_blob_reliability_capped_at_0_4() -> None:
     assert out <= 0.4 + 1e-12
 
 
+def test_blob_reliability_gated_without_detection() -> None:
+    """Zero detection SNR sits below the 0.20 gate at any body size."""
+    out = _blob_reliability(snr=0.0, diameter_px=1e6)
+    assert out < 0.2
+
+
+def test_blob_reliability_admits_small_detected_body() -> None:
+    """A clearly detected 10 px body clears the 0.20 reliability gate.
+
+    This is the issue #209 regression: the blob's design regime
+    (below-resolution bodies under ~15 px) must be admitted when the
+    body is genuinely bright against the image noise.
+    """
+    out = _blob_reliability(snr=10.0, diameter_px=10.0)
+    assert out >= 0.2
+
+
+def test_blob_reliability_monotone_in_snr() -> None:
+    """Reliability increases with detection SNR at fixed size."""
+    low = _blob_reliability(snr=1.0, diameter_px=12.0)
+    high = _blob_reliability(snr=8.0, diameter_px=12.0)
+    assert high > low
+
+
 def _synthetic_disc_masks(
     *, size: int, center: tuple[float, float], radius: float
 ) -> tuple[np.ndarray, np.ndarray, tuple[float, float]]:

@@ -1,9 +1,12 @@
-"""Tests for ``spindoctor.support.noise_estimate.estimate_image_noise_sigma``."""
+"""Tests for the ``spindoctor.support.noise_estimate`` estimators."""
 
 import numpy as np
 import pytest
 
-from spindoctor.support.noise_estimate import estimate_image_noise_sigma
+from spindoctor.support.noise_estimate import (
+    estimate_background_and_sky_sigma,
+    estimate_image_noise_sigma,
+)
 
 
 def test_estimate_image_noise_sigma_unit_normal() -> None:
@@ -56,3 +59,35 @@ def test_estimate_image_noise_sigma_rejects_non_2d() -> None:
     image = np.zeros((4, 4, 4), np.float64)
     with pytest.raises(TypeError, match='2-D'):
         estimate_image_noise_sigma(image)
+
+
+def test_estimate_background_and_sky_sigma_recovers_pedestal() -> None:
+    """The estimate recovers the pedestal and noise despite a bright body."""
+    rng = np.random.default_rng(seed=45)
+    image = 100.0 + 2.0 * rng.standard_normal(size=(256, 256))
+    image[40:120, 40:120] = 500.0  # bright body covering ~10% of the frame
+    background, sky_sigma = estimate_background_and_sky_sigma(
+        image, np.ones(image.shape, bool), noise_sigma=2.0
+    )
+    assert abs(background - 100.0) < 0.5
+    assert abs(sky_sigma - 2.0) < 0.5
+
+
+def test_estimate_background_and_sky_sigma_empty_mask() -> None:
+    """No valid pixels returns a zero background and the floored seed sigma."""
+    image = np.zeros((8, 8), np.float64)
+    background, sky_sigma = estimate_background_and_sky_sigma(
+        image, np.zeros((8, 8), bool), noise_sigma=3.0
+    )
+    assert background == 0.0
+    assert sky_sigma == 3.0
+
+
+def test_estimate_background_and_sky_sigma_zero_frame() -> None:
+    """A constant-zero frame yields a zero pedestal and the sigma floor."""
+    image = np.zeros((32, 32), np.float64)
+    background, sky_sigma = estimate_background_and_sky_sigma(
+        image, np.ones((32, 32), bool), noise_sigma=0.0
+    )
+    assert background == 0.0
+    assert sky_sigma <= 1e-9

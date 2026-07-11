@@ -41,6 +41,7 @@ from spindoctor.nav_technique.nav_technique import (
     search_window_for_obs,
 )
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
+from spindoctor.support.noise_estimate import estimate_background_and_sky_sigma
 from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only import
@@ -318,73 +319,6 @@ def _shift_bbox(
     return (v_min + dv, u_min + du, v_max + dv, u_max + du)
 
 
-def _estimate_frame_background_and_sigma(
-    image_ext: NDArrayFloatType,
-    valid_mask: NDArrayBoolType,
-    noise_sigma: float,
-) -> tuple[float, float]:
-    """Estimate the frame's background pedestal and sky-noise sigma.
-
-    Returns two frame-global quantities the centroid moment needs:
-
-    * **Background (bias + dark) pedestal.** Real raw frames carry a
-      non-zero bias/dark pedestal, and the sim adds a ``bias_dn`` pedestal
-      so dark sky is distinguishable from the missing-data marker.  That
-      pedestal sits on every pixel, so without subtracting it the
-      brightness-weighted moment is pulled toward the bbox geometric
-      center -- a bias that grows with phase as the lit signal
-      concentrates away from center.
-    * **Sky-noise sigma.** The lit-pixel threshold must reject *sky*
-      noise, but ``context.image_noise_sigma`` is a MAD over the whole
-      sensor, which a bright body inflates (its brightness gradient widens
-      the global spread).  An inflated sigma raises the threshold and cuts
-      the dim crescent, so the thresholded observed centroid diverges from
-      the model's continuous predicted centroid at high phase.  The sky
-      noise estimated here, over the body-excluded sky population, is the
-      correct floor; for a small body (the typical resolved-enough-for-a-
-      blob case) it equals the global sigma, so this only matters when a
-      large body would otherwise inflate it.
-
-    Both are estimated over the valid sky region (sensor data, excluding
-    saturation / cosmic rays) by seeding at the overall median and the
-    global sigma, then rejecting the bright body (the high tail) and
-    re-estimating the median and MAD of the surviving sky population.  On
-    a zero-background fixture this returns ``(~0, ~0)``, so the moment is
-    unchanged from a plain above-noise centroid.
-
-    Parameters:
-        image_ext: The extended-FOV image (DN).
-        valid_mask: ``True`` where the pixel is real sensor data and not
-            saturated / a cosmic ray (the sky-candidate population).
-        noise_sigma: Global per-pixel image noise sigma (DN); seeds the
-            sky-population selection.
-
-    Returns:
-        ``(background_dn, sky_sigma_dn)``; ``(0.0, noise_sigma)`` when
-        there are no valid pixels.
-    """
-    sigma0 = max(noise_sigma, 1e-9)
-    vals = image_ext[valid_mask]
-    if vals.size == 0:
-        return 0.0, sigma0
-    background = float(np.median(vals))
-    sky_sigma = sigma0
-    for _ in range(3):
-        sky = vals[vals <= background + _BLOB_NOISE_THRESHOLD_SIGMA * sky_sigma]
-        if sky.size == 0:
-            break
-        new_bg = float(np.median(sky))
-        new_sigma = max(1.4826 * float(np.median(np.abs(sky - new_bg))), 1e-9)
-        converged = (
-            abs(new_bg - background) <= 1e-3 * sigma0
-            and abs(new_sigma - sky_sigma) <= 1e-3 * sigma0
-        )
-        background, sky_sigma = new_bg, new_sigma
-        if converged:
-            break
-    return background, sky_sigma
-
-
 def _brightness_weighted_centroid(
     image_ext: NDArrayFloatType,
     image_noise_sigma: float,
@@ -402,7 +336,8 @@ def _brightness_weighted_centroid(
     per-body slop); with it the box tracks the body across the full search
     window, so the centroid is computed over the body rather than a clipped
     fragment.  The frame ``background`` (bias + dark pedestal, estimated once
-    by :func:`_estimate_frame_background_and_sigma`) is subtracted first, so
+    by :func:`~spindoctor.support.noise_estimate.estimate_background_and_sky_sigma`)
+    is subtracted first, so
     the moment weights are signal above background, not raw DN; lit pixels are
     those exceeding ``background + 3 * image_noise_sigma``.  Subtracting the
     background is what keeps a uniform pedestal from dragging the centroid
@@ -772,14 +707,17 @@ class BodyBlobNav(NavTechnique):
             # (sensor data, excluding saturation and cosmic-ray spikes) rather
             # than per-bbox, where a body-filled box would bias the background
             # high.  The sky sigma -- not the body-inflated global sigma -- is
-            # the right threshold floor (see _estimate_frame_background_and_sigma).
+            # the right threshold floor (see estimate_background_and_sky_sigma).
             valid_mask = (
                 np.asarray(context.sensor_mask_ext, bool)
                 & ~np.asarray(context.saturation_mask_ext, bool)
                 & ~np.asarray(context.cosmic_ray_mask_ext, bool)
             )
-            background, noise_sigma = _estimate_frame_background_and_sigma(
-                image_ext, valid_mask, global_sigma
+            background, noise_sigma = estimate_background_and_sky_sigma(
+                image_ext,
+                valid_mask,
+                noise_sigma=global_sigma,
+                clip_sigma=_BLOB_NOISE_THRESHOLD_SIGMA,
             )
             self.logger.debug(
                 'Frame background pedestal = %.4f DN, sky sigma = %.4f DN (global %.4f)',

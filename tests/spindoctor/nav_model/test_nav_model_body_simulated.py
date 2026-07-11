@@ -9,8 +9,10 @@ that the predicted mesh reproduces the rendered data when the params agree.
 from typing import Any
 
 import numpy as np
+from tests.shims import bare_nav_context
 
 from spindoctor.nav_model.nav_model_body_simulated import NavModelBodySimulated
+from spindoctor.nav_orchestrator.nav_context import NavContext
 from spindoctor.obs.obs_inst_sim import ObsSim
 from spindoctor.sim.render import render_combined_model
 
@@ -128,13 +130,9 @@ def _limb_obs() -> ObsSim:
 
 def _body_feature_types(obs: ObsSim, body_params: dict[str, Any]) -> list[str]:
     """Build the model and return the feature-type names it emits."""
-    from typing import cast
-
-    from spindoctor.nav_orchestrator.nav_context import NavContext
-
     model = NavModelBodySimulated('body', obs, body_params['name'], body_params)
     model.create_model()
-    features = model.to_features(cast(NavContext, None))
+    features = model.to_features(bare_nav_context(obs))
     return [f.feature_type.name for f in features]
 
 
@@ -173,18 +171,86 @@ def test_high_phase_body_emits_no_limb_arc() -> None:
 
 def test_limb_arc_polyline_has_vertices_and_unit_normals() -> None:
     """The emitted LIMB_ARC carries a vertex polyline with unit outward normals."""
-    from typing import cast
-
     from spindoctor.feature.geometry import LimbPolyline
-    from spindoctor.nav_orchestrator.nav_context import NavContext
 
-    model = NavModelBodySimulated('body', _limb_obs(), 'RHEA', _large_body())
+    obs = _limb_obs()
+    model = NavModelBodySimulated('body', obs, 'RHEA', _large_body())
     model.create_model()
     limb = next(
-        f for f in model.to_features(cast(NavContext, None)) if f.feature_type.name == 'LIMB_ARC'
+        f for f in model.to_features(bare_nav_context(obs)) if f.feature_type.name == 'LIMB_ARC'
     )
     geometry = limb.geometry
     assert isinstance(geometry, LimbPolyline)
     assert geometry.vertices_vu.shape[0] >= 30
     norms = np.hypot(geometry.normals_vu[:, 0], geometry.normals_vu[:, 1])
     assert np.allclose(norms, 1.0, atol=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# BODY_BLOB detection SNR (issue #209)
+# ---------------------------------------------------------------------------
+
+
+def _blob_feature(obs: ObsSim, body_params: dict[str, Any], context: NavContext) -> Any:
+    """Build the model and return its emitted BODY_BLOB feature."""
+    model = NavModelBodySimulated('body', obs, body_params['name'], body_params)
+    model.create_model()
+    features = model.to_features(context)
+    return next(f for f in features if f.feature_type.name == 'BODY_BLOB')
+
+
+def _small_body(obs: ObsSim) -> dict[str, Any]:
+    """A 12 px sphere at low phase, centred in ``obs``'s frame."""
+    return {
+        'name': 'RHEA',
+        'center_v': obs.data_shape_v / 2.0,
+        'center_u': obs.data_shape_u / 2.0,
+        'axis1': 12.0,
+        'axis2': 12.0,
+        'axis3': 12.0,
+        'illumination_angle': 0.0,
+        'phase_angle': 10.0,
+    }
+
+
+def _noise_image(obs: ObsSim, seed: int) -> np.ndarray:
+    """Unit-sigma Gaussian noise over the extfov shape."""
+    rng = np.random.default_rng(seed)
+    shape = (
+        int(obs.data_shape_v + 2 * obs.extfov_margin_v),
+        int(obs.data_shape_u + 2 * obs.extfov_margin_u),
+    )
+    return rng.standard_normal(shape)
+
+
+def test_blob_gated_on_pure_noise_image() -> None:
+    """With no body signal anywhere, the blob sits below the 0.20 gate.
+
+    The top-N order statistics of a pure-noise search window exceed 3
+    sigma individually; the null-level subtraction must keep the
+    detection SNR near zero regardless.
+    """
+    obs = _obs()
+    image = _noise_image(obs, seed=20260710)
+    blob = _blob_feature(obs, _small_body(obs), bare_nav_context(obs, image))
+    assert blob.reliability < 0.2
+
+
+def test_blob_admits_small_bright_body_off_prediction() -> None:
+    """A bright 12 px body displaced within the search window is admitted.
+
+    Issue #209 regression: the detection SNR must find the body anywhere
+    inside the extfov capture range (the pointing error is unknown), and
+    the resulting reliability must clear the 0.20 BODY_BLOB gate.
+    """
+    obs = _obs()
+    image = _noise_image(obs, seed=20260711)
+    # Plant a bright disc displaced (12, -9) px from the predicted center
+    # (extfov coords), well inside the 50 px extfov margins.
+    center_v = obs.data_shape_v / 2.0 + obs.extfov_margin_v + 12.0
+    center_u = obs.data_shape_u / 2.0 + obs.extfov_margin_u - 9.0
+    vv, uu = np.indices(image.shape, dtype=np.float64)
+    image[np.hypot(vv - center_v, uu - center_u) <= 6.0] += 25.0
+    blob = _blob_feature(obs, _small_body(obs), bare_nav_context(obs, image))
+    assert blob.reliability >= 0.2
+    assert blob.reliability <= 0.4

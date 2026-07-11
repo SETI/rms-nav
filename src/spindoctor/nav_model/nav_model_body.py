@@ -621,7 +621,6 @@ class NavModelBody(NavModelBodyBase):
 
     def to_features(self, context: NavContext) -> list[NavFeature]:
         """Emit the body's NavFeatures per the design's gate rules."""
-        del context
         with self._logger.open(f'EMIT BODY FEATURES: {self._body_name}'):
             if self._body_mask is None:
                 self._logger.debug('body_mask is None — emitting no features')
@@ -657,7 +656,7 @@ class NavModelBody(NavModelBodyBase):
                 )
                 limb_arc_emitted = True
             elif self._predicted_diameter_px >= blob_min_px:
-                features.append(self._build_blob_feature(shape))
+                features.append(self._build_blob_feature(shape, context=context))
             else:
                 self._logger.debug(
                     'No body feature emitted: limb_uncertainty %.3f > %.3f and '

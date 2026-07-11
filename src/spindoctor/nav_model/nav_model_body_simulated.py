@@ -407,7 +407,7 @@ class NavModelBodySimulated(NavModelBodyBase):
         shape = load_body_shape(self._body_name, config=self._config)
         blob_min_px = max(BODY_BLOB_MIN_DIAMETER_PX, shape.min_blob_diameter_px)
         if self._predicted_diameter_px >= blob_min_px:
-            features.append(self._build_blob_feature(shape))
+            features.append(self._build_blob_feature(shape, context=context))
         limb_feature = self._build_limb_arc_feature()
         if limb_feature is not None:
             features.append(limb_feature)
