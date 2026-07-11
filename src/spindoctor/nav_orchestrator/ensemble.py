@@ -5,12 +5,17 @@ estimates become one offset.  Every step is honest:
 
 1. Drop ``spurious=True`` results.
 2. Drop ``at_edge=True`` results unless dropping them would empty the set.
-3. Group remaining results by Mahalanobis-distance agreement (single-link).
-4. Pick the highest summed-confidence group.
-5. Combine offsets within that group via precision-weighted (Kalman-style)
-   merging.
+3. Select the consensus subset: every result sponsors the set of results
+   that agree with it pairwise (Mahalanobis distance or pixel floor); the
+   subset with the highest summed confidence wins.
+4. Exclude results outside the consensus from the combine.  A lone
+   dissenter against a multi-technique consensus is outlier-rejected;
+   only a genuine alternative (a runner-up consensus with at least two
+   members, or no quorum anywhere) can force the conflicted branch.
+5. Combine offsets within the winning subset via precision-weighted
+   (Kalman-style) merging.
 6. Apply optional disagreement / conflict penalties.
-7. Emit a NavResult.
+7. Emit a NavResult carrying the excluded technique names.
 
 The ensemble is tested in isolation against synthetic per-technique results;
 correctness here is what makes the rest of the pipeline trustworthy.
@@ -24,7 +29,6 @@ from typing import Any, cast
 
 import numpy as np
 from scipy.linalg import pinvh
-from scipy.sparse.csgraph import connected_components
 
 from spindoctor.annotation import Annotations
 from spindoctor.config import IMAGE_LOGGER
@@ -40,7 +44,7 @@ from spindoctor.nav_technique.nav_technique import technique_tier
 from spindoctor.nav_technique.technique_result import NavTechniqueResult
 from spindoctor.support.exceptions import NavContractError
 from spindoctor.support.status_reason import NavStatusReason
-from spindoctor.support.types import NDArrayFloatType
+from spindoctor.support.types import NDArrayBoolType, NDArrayFloatType
 
 __all__ = [
     'EnsembleConfig',
@@ -299,26 +303,45 @@ def _drop_superseded_fallbacks(
     return kept
 
 
-def _agreement_groups(
+@dataclass(frozen=True)
+class _ConsensusSelection:
+    """Output of :func:`_consensus_selection`.
+
+    Parameters:
+        best: The winning consensus subset (never empty).
+        excluded: Viable results outside the winning subset, in input order.
+        runner_up_confidence: Highest summed confidence of any consensus
+            subset formed within ``excluded`` alone; ``0.0`` when nothing
+            was excluded.
+        runner_up_has_quorum: True when that runner-up subset has at least
+            two members -- a genuine alternative consensus rather than a
+            lone dissenter.
+    """
+
+    best: list[NavTechniqueResult]
+    excluded: list[NavTechniqueResult]
+    runner_up_confidence: float
+    runner_up_has_quorum: bool
+
+
+def _agreement_adjacency(
     results: list[NavTechniqueResult],
     *,
     agreement_sigma: float,
     agreement_pixel_floor: float,
     rcond: float,
-    max_allowed_rotation_deg: float,
-) -> list[list[NavTechniqueResult]]:
-    """Single-link clustering by Mahalanobis distance with a pixel-floor fallback.
+) -> NDArrayBoolType:
+    """Pairwise agreement matrix: Mahalanobis threshold with a pixel-floor fallback.
 
-    Two results are placed in the same group iff *either* their pairwise
-    Mahalanobis distance is below ``agreement_sigma`` *or* their
-    Euclidean translation distance (in pixels, ignoring the rotation
-    component for 3-DoF results) is at most ``agreement_pixel_floor``.
-    Transitive closure builds final groups via connected components.
+    Two results agree iff *either* their pairwise Mahalanobis distance is
+    at most ``agreement_sigma`` *or* their Euclidean translation distance
+    (in pixels, ignoring the rotation component for 3-DoF results) is at
+    most ``agreement_pixel_floor``.
 
     The Mahalanobis distance differences the rotation component of two
     3-DoF results linearly; that is correct here because every input
-    rotation is bounded to the small-angle window enforced below, so the
-    pairwise angle difference never approaches the ``+-pi`` wrap.
+    rotation is bounded to the small-angle window enforced by the caller,
+    so the pairwise angle difference never approaches the ``+-pi`` wrap.
 
     The pixel floor compensates for per-technique covariances that
     report only a CRLB-style precision (FFT subpixel localization or
@@ -327,52 +350,20 @@ def _agreement_groups(
     motivation.
 
     Parameters:
-        results: Non-empty list of per-technique results.
-        agreement_sigma: Maximum pairwise Mahalanobis distance for grouping.
+        results: List of two or more per-technique results.
+        agreement_sigma: Maximum pairwise Mahalanobis distance for agreement.
         agreement_pixel_floor: Maximum pairwise Euclidean translation
-            distance (in pixels) for grouping; ``0.0`` disables.
+            distance (in pixels) for agreement; ``0.0`` disables.
         rcond: rcond passed to ``pinvh``.
-        max_allowed_rotation_deg: Small-angle bound; each 3-DoF input's
-            ``rotation_rad`` magnitude must stay strictly below this many
-            degrees for the linear rotation differencing to be valid.
 
     Returns:
-        List of groups (each group a list of NavTechniqueResult).
+        Symmetric boolean ``(n, n)`` matrix with a True diagonal.
 
     Raises:
-        NavContractError: if a 3-DoF input's rotation magnitude is at or
-            above the small-angle bound (an upstream programming error).
+        ValueError: if 2-DoF and 3-DoF results are mixed.
     """
     n = len(results)
-    if n == 0:
-        return []
-    max_rotation_rad = math.radians(max_allowed_rotation_deg)
-    for res in results:
-        cov = np.asarray(res.covariance_px2, np.float64)
-        # Small-angle assumption: a 3-DoF rotation outside +-max_rotation_deg
-        # is an upstream error (every technique clamps its rotation fit to
-        # this bound), and would break the linear rotation differencing.
-        # Raised as NavContractError (not a bare assert) so the check
-        # survives python -O and is never swallowed as an ordinary
-        # technique failure.
-        if (
-            cov.shape == (3, 3)
-            and res.rotation_rad is not None
-            and abs(res.rotation_rad) >= max_rotation_rad
-        ):
-            raise NavContractError(
-                f'{res.technique_name}: rotation '
-                f'{math.degrees(res.rotation_rad):.3f} deg violates small-angle '
-                f'bound +-{max_allowed_rotation_deg:.3f} deg'
-            )
-    if n == 1:
-        return [list(results)]
-    # Build a sparse adjacency matrix marking pairs within threshold.
-    rows: list[int] = []
-    cols: list[int] = []
-    for i in range(n):
-        rows.append(i)
-        cols.append(i)
+    adj = np.eye(n, dtype=bool)
     for i in range(n):
         mu_i = _result_param_vector(results[i])
         cov_i = np.asarray(results[i].covariance_px2, np.float64)
@@ -394,16 +385,133 @@ def _agreement_groups(
             pixel_dist = float(math.hypot(translation_delta[0], translation_delta[1]))
             pixel_match = agreement_pixel_floor > 0.0 and pixel_dist <= agreement_pixel_floor
             if mahal_match or pixel_match:
-                rows.extend([i, j])
-                cols.extend([j, i])
-    # Build dense adjacency.  N is small (typically < 10), so this is fine.
-    adj = np.zeros((n, n), dtype=bool)
-    adj[rows, cols] = True
-    n_components, labels = connected_components(csgraph=adj, directed=False, return_labels=True)
-    groups: list[list[NavTechniqueResult]] = [[] for _ in range(n_components)]
-    for idx, label in enumerate(labels):
-        groups[int(label)].append(results[idx])
-    return groups
+                adj[i, j] = True
+                adj[j, i] = True
+    return adj
+
+
+def _best_neighborhood(
+    results: list[NavTechniqueResult],
+    adj: NDArrayBoolType,
+    candidate_indices: list[int],
+) -> list[int]:
+    """The candidate neighborhood with the highest summed confidence.
+
+    Each candidate ``i`` sponsors the subset of ``candidate_indices`` that
+    agree with it pairwise (including itself).  Subsets are scored by
+    summed confidence; ties break toward the larger subset, then toward
+    the earlier candidate, so the selection is deterministic.
+
+    Parameters:
+        results: The full per-technique result list (for confidences).
+        adj: Pairwise agreement matrix over ``results``.
+        candidate_indices: Indices eligible for this selection round.
+
+    Returns:
+        The winning subset as a list of indices into ``results``.
+    """
+    best: list[int] = []
+    best_key = (float('-inf'), 0)
+    for i in candidate_indices:
+        subset = [j for j in candidate_indices if adj[i, j]]
+        key = (sum(results[j].confidence for j in subset), len(subset))
+        if key > best_key:
+            best = subset
+            best_key = key
+    return best
+
+
+def _consensus_selection(
+    results: list[NavTechniqueResult],
+    *,
+    agreement_sigma: float,
+    agreement_pixel_floor: float,
+    rcond: float,
+    max_allowed_rotation_deg: float,
+) -> _ConsensusSelection:
+    """Select the consensus subset the ensemble combines, and its outliers.
+
+    Every result sponsors a candidate subset -- the results that agree
+    with it pairwise (Mahalanobis distance within ``agreement_sigma`` or
+    translation distance within ``agreement_pixel_floor``).  The subset
+    with the highest summed confidence wins; results outside it are
+    excluded from the combine rather than forcing a conflict, and the
+    strongest consensus formable among the excluded results alone is
+    reported as the runner-up so the caller can distinguish a lone
+    mis-converged dissenter from a genuine alternative answer.
+
+    Unlike single-link transitive-closure grouping, a result that agrees
+    with only one member of the winning subset does not drag the whole
+    subset toward it: membership requires pairwise agreement with the
+    sponsoring result.
+
+    Parameters:
+        results: Non-empty list of per-technique results.
+        agreement_sigma: Maximum pairwise Mahalanobis distance for agreement.
+        agreement_pixel_floor: Maximum pairwise Euclidean translation
+            distance (in pixels) for agreement; ``0.0`` disables.
+        rcond: rcond passed to ``pinvh``.
+        max_allowed_rotation_deg: Small-angle bound; each 3-DoF input's
+            ``rotation_rad`` magnitude must stay strictly below this many
+            degrees for the linear rotation differencing to be valid.
+
+    Returns:
+        The selection: winning subset, excluded results, and runner-up
+        summary.
+
+    Raises:
+        NavContractError: if a 3-DoF input's rotation magnitude is at or
+            above the small-angle bound (an upstream programming error).
+        ValueError: if 2-DoF and 3-DoF results are mixed.
+    """
+    n = len(results)
+    max_rotation_rad = math.radians(max_allowed_rotation_deg)
+    for res in results:
+        cov = np.asarray(res.covariance_px2, np.float64)
+        # Small-angle assumption: a 3-DoF rotation outside +-max_rotation_deg
+        # is an upstream error (every technique clamps its rotation fit to
+        # this bound), and would break the linear rotation differencing.
+        # Raised as NavContractError (not a bare assert) so the check
+        # survives python -O and is never swallowed as an ordinary
+        # technique failure.
+        if (
+            cov.shape == (3, 3)
+            and res.rotation_rad is not None
+            and abs(res.rotation_rad) >= max_rotation_rad
+        ):
+            raise NavContractError(
+                f'{res.technique_name}: rotation '
+                f'{math.degrees(res.rotation_rad):.3f} deg violates small-angle '
+                f'bound +-{max_allowed_rotation_deg:.3f} deg'
+            )
+    if n == 1:
+        return _ConsensusSelection(
+            best=list(results),
+            excluded=[],
+            runner_up_confidence=0.0,
+            runner_up_has_quorum=False,
+        )
+    adj = _agreement_adjacency(
+        results,
+        agreement_sigma=agreement_sigma,
+        agreement_pixel_floor=agreement_pixel_floor,
+        rcond=rcond,
+    )
+    best_indices = _best_neighborhood(results, adj, list(range(n)))
+    best_set = set(best_indices)
+    excluded_indices = [i for i in range(n) if i not in best_set]
+    runner_up_confidence = 0.0
+    runner_up_has_quorum = False
+    if excluded_indices:
+        runner_indices = _best_neighborhood(results, adj, excluded_indices)
+        runner_up_confidence = sum(results[j].confidence for j in runner_indices)
+        runner_up_has_quorum = len(runner_indices) >= 2
+    return _ConsensusSelection(
+        best=[results[i] for i in sorted(best_set)],
+        excluded=[results[i] for i in excluded_indices],
+        runner_up_confidence=runner_up_confidence,
+        runner_up_has_quorum=runner_up_has_quorum,
+    )
 
 
 @dataclass(frozen=True)
@@ -730,21 +838,18 @@ def ensemble(
     interior = [r for r in viable if not r.at_edge]
     if interior:
         viable = interior
-    groups = _agreement_groups(
+    selection = _consensus_selection(
         viable,
         agreement_sigma=cfg.agreement_sigma,
         agreement_pixel_floor=cfg.agreement_pixel_floor,
         rcond=cfg.pinvh_rcond,
         max_allowed_rotation_deg=cfg.max_allowed_rotation_deg,
     )
-    ranked = sorted(
-        groups,
-        key=lambda g: sum(r.confidence for r in g),
-        reverse=True,
-    )
-    best_group = ranked[0]
+    best_group = selection.best
+    excluded = selection.excluded
+    excluded_names = [r.technique_name for r in excluded]
     best_summed_conf = sum(r.confidence for r in best_group)
-    apply_disagreement_penalty = len(groups) > 1
+    apply_disagreement_penalty = bool(excluded)
     try:
         combined = _combine_precision_weighted(
             best_group,
@@ -774,21 +879,28 @@ def ensemble(
             model_metadata=md,
             annotations=ann,
         )
-    # Conflict check: best-vs-runner-up summed-confidence gap.
-    if len(ranked) > 1:
-        runner_up_summed_conf = sum(r.confidence for r in ranked[1])
-        gap = best_summed_conf - runner_up_summed_conf
-        if gap < cfg.agreement_gap:
+    # Conflict check.  Excluded results force the conflicted branch only when
+    # they constitute a genuine alternative: a runner-up consensus with at
+    # least two members, or a lone-vs-lone standoff (the winning subset has no
+    # quorum either).  A single dissenter against a multi-technique consensus
+    # is outlier-rejected instead -- reported via excluded_from_consensus and
+    # the disagreement penalty, not as a conflict.
+    if excluded:
+        genuine_alternative = selection.runner_up_has_quorum or len(best_group) == 1
+        gap = best_summed_conf - selection.runner_up_confidence
+        if genuine_alternative and gap < cfg.agreement_gap:
             conflicted_confidence = combined_confidence * cfg.conflicted_confidence_multiplier
             IMAGE_LOGGER.info(
                 'Conflicted: best-vs-runner-up summed-confidence gap %.3f is '
                 'below the agreement_gap threshold %.3f '
-                '(best %.3f, runner-up %.3f); conflicted confidence = %.3f '
+                '(best %.3f, runner-up %.3f, runner-up quorum: %s); '
+                'conflicted confidence = %.3f '
                 '(combined %.3f x conflicted_multiplier %.3f)',
                 gap,
                 cfg.agreement_gap,
                 best_summed_conf,
-                runner_up_summed_conf,
+                selection.runner_up_confidence,
+                selection.runner_up_has_quorum,
                 conflicted_confidence,
                 combined_confidence,
                 cfg.conflicted_confidence_multiplier,
@@ -801,9 +913,21 @@ def ensemble(
                 feature_inventory=feature_inventory,
                 image_classifier=image_classifier,
                 provenance=provenance,
+                excluded_from_consensus=excluded_names,
                 model_metadata=md,
                 annotations=ann,
             )
+        IMAGE_LOGGER.info(
+            'Excluded %d result(s) from consensus as outlier(s): %s '
+            '(consensus %d member(s) summing %.3f; excluded runner-up %.3f, '
+            'quorum: %s)',
+            len(excluded),
+            ', '.join(excluded_names),
+            len(best_group),
+            best_summed_conf,
+            selection.runner_up_confidence,
+            selection.runner_up_has_quorum,
+        )
     if combined_confidence < cfg.min_confidence:
         IMAGE_LOGGER.info(
             'Combined confidence %.3f is below the min_confidence threshold %.3f',
@@ -877,6 +1001,7 @@ def ensemble(
         image_classifier=image_classifier,
         provenance=provenance,
         sigma_along_unobservable_px=sigma_along_unobservable_px,
+        excluded_from_consensus=excluded_names,
         model_metadata=md,
         annotations=ann,
         rotation_rad=combined.rotation_rad,
