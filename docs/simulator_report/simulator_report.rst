@@ -33,8 +33,9 @@ truth that is correct by construction:
 
 The report keys on the *recovered geometry* (offset error, roll error, primary
 technique, success/fail). The per-technique confidence coefficients are
-uncalibrated on these clean frames, so the absolute confidence value is reported
-but not interpreted as a calibrated tier.
+sim-calibrated (WS-5; see ``config_510_techniques.yaml``), so the confidence
+column reflects the shipped formulas; tier interpretation against real frames
+still rests on the operator-curated image library, not on these clean scenes.
 
 Methodology
 ===========
@@ -208,9 +209,9 @@ quarter-pixel values), so a technique cannot land on a sub-pixel-bias null and
 report a flatteringly small error; these are single-sample correctness checks at
 one arbitrary phase, while per-technique sub-pixel precision across many offsets is
 characterized in the offset-accuracy section below. The technique column names the
-load-bearing technique -- pinned for the scenes whose fused confidence sits below
-the success threshold on a clean frame (blob, limb, ring, roll), and the full
-ensemble for the disc and star scenes.
+load-bearing technique -- pinned for the single-technique scenes (blob, limb,
+ring, roll) so each is characterised in isolation, and the full ensemble for the
+disc and star scenes.
 
 .. list-table:: Planted-transform recovery by technique
    :header-rows: 1
@@ -303,27 +304,27 @@ cliff:
    * - 1
      - success
      - 0.00 px
-     - 0.39
+     - 0.75
      - BodyDiscCorrelateNav
    * - 4
      - success
      - 0.00 px
-     - 0.39
+     - 0.75
      - BodyDiscCorrelateNav
    * - 8
      - success
      - 0.00 px
-     - 0.39
+     - 0.75
      - BodyDiscCorrelateNav
    * - 16
      - success
      - 0.00 px
-     - 0.39
+     - 0.75
      - BodyDiscCorrelateNav
    * - 32
      - success
      - 0.00 px
-     - 0.39
+     - 0.75
      - BodyDiscCorrelateNav
    * - 64
      - **failed**
@@ -333,8 +334,9 @@ cliff:
 
 The disc correlation is robust: the offset is recovered exactly until the read
 noise overwhelms the body signal, at which point the frame is classified
-unnavigable and navigation fails cleanly. The confidence is flat across the
-navigable range on these uncalibrated clean frames.
+unnavigable and navigation fails cleanly. The calibrated confidence is flat
+across the navigable range -- the correlation-quality diagnostics the formula
+consumes do not degrade until the cliff itself.
 
 Phase-angle sweep
 -----------------
@@ -358,27 +360,27 @@ Varying ``bodies.0.phase_angle`` across the full range on the resolved sphere:
    * - 30
      - success
      - 0.00 px
-     - 0.39
+     - 0.75
      - BodyDiscCorrelateNav
    * - 60
      - success
      - 0.01 px
-     - 0.39
+     - 0.75
      - BodyDiscCorrelateNav
    * - 90
      - success
      - 0.00 px
-     - 0.39
+     - 0.74
      - BodyDiscCorrelateNav
    * - 120
      - success
      - 0.00 px
-     - 0.39
+     - 0.73
      - BodyDiscCorrelateNav
    * - 150
      - success
      - 0.00 px
-     - 0.30
+     - 0.65
      - BodyDiscCorrelateNav
 
 The resolved body navigates to success at every phase and recovers the planted
@@ -488,9 +490,9 @@ swept across the dense sub-pixel set and the wide range described under
      - 0.092
      - 0.165
    * - RingEdgeNav
-     - 0.003
+     - 0.021
+     - 0.028
      - 0.034
-     - 0.069
    * - BodyBlobNav
      - 0.002
      - 0.006
@@ -724,16 +726,17 @@ term is meant to capture.
 
    Recovered-offset error (red) and fused confidence (blue) vs rendered mesh
    lumpiness, with the prediction pinned to the zero-relief limit. The bias grows
-   from ~0.00 px (no mismatch) to ~4 px at heavy relief while the confidence falls
-   from ~0.39 to ~0.28 -- the navigator both mis-locates the body and reports
+   from ~0.3 px (no mismatch) to ~4 px at heavy relief while the confidence falls
+   from ~0.99 to ~0.71 -- the navigator both mis-locates the body and reports
    lower confidence as the shape diverges.
 
-The recovered error grows monotonically with relief (0.00, 0.63, 1.33, 2.17,
-4.02, 4.03 px at lumpiness 0.0 through 0.5) and the fused confidence falls in step
-(0.39 down to 0.28). The body keeps navigating to a ``success`` status throughout
--- the disc correlation still locks onto the silhouette -- but the answer drifts,
-which is exactly the failure an irregular-body confidence penalty must learn to
-distrust.
+The recovered error grows monotonically with relief (0.33, 0.47, 1.33, 2.17,
+4.02, 4.03 px at lumpiness 0.0 through 0.5) and the fused confidence falls in
+step (0.99 down to 0.71). At low relief the limb fit carries the frame at high
+confidence; from lumpiness 0.2 the primary hands off to the disc correlation,
+which still locks onto the silhouette but drifts with the unmodelled relief --
+exactly the failure the irregular-body confidence penalty must learn to
+distrust. The body keeps navigating to a ``success`` status throughout.
 
 Pose disagreement
 -----------------
@@ -754,7 +757,7 @@ limb fit:
    that does not self-flag here.
 
 The limb error climbs monotonically from 0.27 px at the true pose to 4.2 px at a
-45 deg tumble, all the while still reporting ``success`` at ~0.66 confidence: it
+45 deg tumble, all the while still reporting ``success`` at ~0.76 confidence: it
 does not self-flag in this range. A wrong in-plane roll degrades it far more
 sharply -- tens of pixels, and there it does self-flag spurious. The pose-free
 blob centroid, by contrast, stays accurate on the same wrong-pose body, because a
@@ -844,7 +847,7 @@ Summary
 * The disc, blob, ring edge, and star field are quantization-free: they recover
   any offset -- whole, near-boundary, or arbitrary fraction -- to a few hundredths
   of a pixel. The disc and blob are the most accurate (~0.01 px). The limb holds a
-  ~0.13 px distance-transform residual and the ring a ~0.06 px residual.
+  ~0.09 px distance-transform residual and the ring a ~0.03 px residual.
 * The star field improves with SNR: a dim field recovers to ~0.02 px and a bright
   field to ~0.005 px, the most accurate of any technique.
 * Irregular (mesh) bodies navigate as accurately as ellipsoids when the predicted
@@ -863,6 +866,7 @@ Summary
   and the small-body navigation floor (the 5 px ``BODY_BLOB`` emission floor) is
   set by the feature-emission gate, not the centroid algorithm. Navigation is
   unit-agnostic: I/F frames navigate identically to raw DN.
-* The confidence column is flat across the navigable range on these uncalibrated
-  clean frames; the report verifies the recovered geometry and the technique
-  selection.
+* The confidence column reflects the sim-calibrated per-technique formulas
+  (limb ~0.99, disc ~0.65-0.77, blob capped at 0.40 on clean frames); the report
+  verifies the recovered geometry and the technique selection, while tier
+  behaviour on real frames is validated against the operator-curated library.
