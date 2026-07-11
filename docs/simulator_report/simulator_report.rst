@@ -407,23 +407,23 @@ This is the technique ladder the range regime is meant to exercise:
      - Primary technique
    * - 130
      - success
-     - 0.00 px
-     - 0.39
+     - 0.01 px
+     - 0.99
      - BodyLimbNav
    * - 90
      - success
      - 0.00 px
-     - 0.39
+     - 0.75
      - BodyDiscCorrelateNav
    * - 60
      - success
      - 0.01 px
-     - 0.39
+     - 0.74
      - BodyDiscCorrelateNav
    * - 40
      - success
      - 0.00 px
-     - 0.39
+     - 0.74
      - BodyDiscCorrelateNav
    * - 20
      - success
@@ -431,6 +431,11 @@ This is the technique ladder the range regime is meant to exercise:
      - 0.40
      - BodyBlobNav
    * - 12
+     - success
+     - 0.02 px
+     - 0.40
+     - BodyBlobNav
+   * - 6
      - **failed**
      - --
      - 0.00
@@ -438,10 +443,11 @@ This is the technique ladder the range regime is meant to exercise:
 
 The primary technique transitions cleanly as resolution falls: a well-resolved
 body (130 px) is navigated by the limb fit; a mid-size body by the disc
-correlation; a small body (20 px) falls to the orientation-free blob centroid;
-and the smallest body (12 px) is unnavigable. Every navigable step recovers the
-planted offset exactly. This transition is the sim's most direct verification
-that the orchestrator selects the right technique for the available resolution.
+correlation; a small body (20 px or 12 px) falls to the orientation-free blob
+centroid; and the smallest body (6 px, below the 8 px ``BODY_BLOB`` emission
+floor) is unnavigable. Every navigable step recovers the planted offset
+exactly. This transition is the sim's most direct verification that the
+orchestrator selects the right technique for the available resolution.
 
 Offset accuracy by technique
 ============================
@@ -803,11 +809,13 @@ roughly 0.75-2 deg, widening to ~0.5 deg with the two-star path. See
 Small-body navigation floor
 ===========================
 
-The range sweep above fails at a 12 px body. At a 16 px body the blob centroid is
-still exact, but the ``BODY_BLOB`` feature's reliability falls just below the gate
-(``reliability 0.18 < threshold 0.20``). At 24 px the reliability clears the gate
-(0.22) and the body navigates. The floor is set by the feature-reliability gate,
-not by the centroid algorithm; the centroid itself is accurate below the gate. See
+The range sweep above navigates a 12 px body by ``BodyBlobNav`` and fails at 6 px,
+below the 8 px ``BODY_BLOB`` emission floor where the model emits no body feature
+at all. The floor is the emission gate (a brightness-weighted centroid cannot pin
+a sub-8-px silhouette to better than ~1 px), not the reliability gate: the
+``BODY_BLOB`` reliability is driven by a measured detection SNR, so a bright body
+is admitted at any emitted size while a predicted body with no image signal
+anywhere in its search window is culled regardless of size. See
 :doc:`/dev_guide/dev_guide_techniques_body_blob`.
 
 I/F-calibrated vs raw-DN navigation
@@ -847,9 +855,9 @@ Summary
   the limb -> disc -> blob ladder as a body shrinks.
 * A small camera roll is not separable from a translation: the field matcher
   recovers rolls only above ~0.75 deg (the two-star fit extends this to ~0.5 deg),
-  and the small-body navigation floor (~16-24 px) is set by the feature-reliability
-  gate, not the centroid algorithm. Navigation is unit-agnostic: I/F frames
-  navigate identically to raw DN.
+  and the small-body navigation floor (the 8 px ``BODY_BLOB`` emission floor) is
+  set by the feature-emission gate, not the centroid algorithm. Navigation is
+  unit-agnostic: I/F frames navigate identically to raw DN.
 * The confidence column is flat across the navigable range on these uncalibrated
   clean frames; the report verifies the recovered geometry and the technique
   selection.
