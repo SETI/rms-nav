@@ -33,7 +33,7 @@ truth that is correct by construction:
 
 The report keys on the *recovered geometry* (offset error, roll error, primary
 technique, success/fail). The per-technique confidence coefficients are
-sim-calibrated (WS-5; see ``config_510_techniques.yaml``), so the confidence
+sim-calibrated (see ``config_510_techniques.yaml``), so the confidence
 column reflects the shipped formulas; tier interpretation against real frames
 still rests on the operator-curated image library, not on these clean scenes.
 
