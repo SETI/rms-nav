@@ -916,8 +916,9 @@ class DataSetPDS3(DataSet):
         # every row is range-filtered individually. When image numbers are
         # monotonic across volumes, the scan stops after the first volume in which
         # every row is past the end of the requested range; otherwise (Voyager,
-        # whose FDS counts roll over between encounter volume sets) every
-        # requested volume is scanned.
+        # whose FDS counts roll over between encounter volume sets) no
+        # image-number-based stop applies and every requested volume is scanned,
+        # though a requested result limit can still end the scan early.
         num_yields = 0
         for search_vol in valid_volumes:
             rows, index_tab_url = _read_index_rows(search_vol)
