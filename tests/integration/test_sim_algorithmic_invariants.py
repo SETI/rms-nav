@@ -109,6 +109,13 @@ _UNIQUE_MATCH_PATHS = [p for p in _INVARIANT_PATHS if p.stem.startswith(_UNIQUE_
 _UNIQUE_MATCH_IDS = [p.stem for p in _UNIQUE_MATCH_PATHS]
 _REFINE_PATHS = [p for p in _INVARIANT_PATHS if p.stem.startswith(_REFINE_STEM_PREFIX)]
 _REFINE_IDS = [p.stem for p in _REFINE_PATHS]
+# Rank-1 scenes are all-straight flat-ring frames: only the offset component
+# along the edge normal is observable, so full 2-D recovery is undefined and
+# the assertions are rank-1-specific (status_reason, exact covariance rank
+# deficiency, and recovery of the normal component only).
+_RANK1_STEM_PREFIX = 'planted_rank1'
+_RANK1_PATHS = [p for p in _INVARIANT_PATHS if p.stem.startswith(_RANK1_STEM_PREFIX)]
+_RANK1_IDS = [p.stem for p in _RANK1_PATHS]
 # Disc scenes assert full-ensemble offset recovery.  Blob, star, rotation, ring,
 # and the technique-pinned star scenes recover on a pinned technique instead (the
 # fused offset is weak, absent, or per-technique), so they are held out; limb
@@ -118,6 +125,7 @@ _DISC_EXCLUDE = (
     _STAR_STEM_PREFIX,
     _ROTATION_STEM_PREFIX,
     _RING_STEM_PREFIX,
+    _RANK1_STEM_PREFIX,
     _UNIQUE_MATCH_STEM_PREFIX,
     _REFINE_STEM_PREFIX,
 )
@@ -184,6 +192,59 @@ def test_there_are_unique_match_scenes() -> None:
 def test_there_are_refine_scenes() -> None:
     """At least one star-field scene exists for the StarRefineNav coverage."""
     assert _REFINE_PATHS
+
+
+def test_there_are_rank1_scenes() -> None:
+    """At least one flat-ring scene exists for the rank-1 coverage."""
+    assert _RANK1_PATHS
+
+
+@pytest.mark.parametrize('path', _RANK1_PATHS, ids=_RANK1_IDS)
+def test_rank1_scene_reports_rank_1_only(path: Path) -> None:
+    """A flat-ring scene fuses to success with the rank_1_only status reason.
+
+    The unobservable axis is surfaced through both the discrete reason and
+    the ``sigma_along_unobservable_px`` sentinel; the fused covariance is
+    exactly rank-deficient (the technique projects it onto the edge normal).
+    """
+    import numpy as np
+
+    from spindoctor.support.status_reason import NavStatusReason
+
+    result = _navigate(load_sim_scene(path))
+    assert result.status == 'success'
+    assert result.status_reason == NavStatusReason.RANK_1_ONLY
+    assert result.sigma_along_unobservable_px == math.inf
+    cov = np.asarray(result.covariance_px2, dtype=np.float64)
+    eigvals = np.linalg.eigvalsh(cov[:2, :2])
+    assert float(eigvals.min()) == pytest.approx(0.0, abs=1.0e-9)
+    assert float(eigvals.max()) > 0.0
+
+
+@pytest.mark.parametrize('path', _RANK1_PATHS, ids=_RANK1_IDS)
+def test_rank1_scene_recovers_normal_component(path: Path) -> None:
+    """A flat-ring scene recovers the planted offset's edge-normal component.
+
+    The along-edge component is physically unobservable (the fused offset
+    is the minimum-norm representative), so the invariant projects the
+    recovery error onto the observable axis — the fused covariance's only
+    non-null eigenvector — and bounds that component alone.
+    """
+    import numpy as np
+
+    scene = load_sim_scene(path)
+    result = _navigate(scene)
+    assert result.offset_px is not None
+    cov = np.asarray(result.covariance_px2, dtype=np.float64)
+    _eigvals, eigvecs = np.linalg.eigh(cov[:2, :2])
+    n_hat = eigvecs[:, -1]
+    error_vu = np.array(
+        [
+            result.offset_px[0] - scene['offset_v'],
+            result.offset_px[1] - scene['offset_u'],
+        ]
+    )
+    assert abs(float(error_vu @ n_hat)) < _OFFSET_TOLERANCE_PX
 
 
 @pytest.mark.parametrize('path', _NAVIGATES_SUCCESS_PATHS, ids=_NAVIGATES_SUCCESS_IDS)

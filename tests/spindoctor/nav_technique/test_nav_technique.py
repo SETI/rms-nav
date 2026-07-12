@@ -26,9 +26,16 @@ from spindoctor.nav_technique.technique_result import NavTechniqueResult
 
 
 class _ConcreteTechniqueForTest(NavTechnique):
-    """Concrete subclass for registry testing."""
+    """Concrete subclass for direct-invocation testing.
+
+    ``_abstract = True`` keeps it out of the process-wide registry so it
+    cannot leak into full-ensemble navigations run later in the same
+    worker; the registration behaviour itself is exercised by
+    ``test_navtechnique_registry_records_subclass`` with a scoped probe.
+    """
 
     name = '_ConcreteTechniqueForTest'
+    _abstract = True
     accepts_feature_types = frozenset({NavFeatureType.STAR})
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
@@ -49,7 +56,36 @@ class _ConcreteTechniqueForTest(NavTechnique):
 
 def test_navtechnique_registry_records_subclass() -> None:
     """Concrete subclasses self-register via __init_subclass__."""
-    assert _ConcreteTechniqueForTest in NavTechnique._registry
+
+    class _RegistrationProbe(_ConcreteTechniqueForTest):
+        name = '_RegistrationProbe'
+        _abstract = False
+
+    try:
+        assert _RegistrationProbe in NavTechnique._registry
+    finally:
+        NavTechnique._registry.remove(_RegistrationProbe)
+
+
+def test_navtechnique_abstract_subclass_stays_out_of_registry() -> None:
+    """``_abstract = True`` opts a subclass out of the registry entirely."""
+    assert _ConcreteTechniqueForTest not in NavTechnique._registry
+
+
+def test_registry_contains_only_shipped_techniques() -> None:
+    """No test-defined technique leaks into the process-wide registry.
+
+    A leaked fake runs inside every later full-ensemble navigation in
+    the same process and fuses its hardcoded offset into real results —
+    a worker-colocation heisenbug under pytest-xdist.  Test fakes must
+    set ``_abstract = True`` and register through a scoped fixture.
+    """
+    for cls in NavTechnique._registry:
+        assert cls.__module__.startswith('spindoctor.'), (
+            f'{cls.__module__}.{cls.__qualname__} is registered in '
+            f'NavTechnique._registry but is not a shipped technique; test fakes '
+            f'must set _abstract = True and use a scoped registration fixture'
+        )
 
 
 def test_navtechnique_can_invoke_navigate() -> None:

@@ -16,6 +16,7 @@ file before committing it.
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 from datetime import date
@@ -194,6 +195,7 @@ def build_sidecar_yaml(
     ui_version: str,
     operator: str | None = None,
     today: date | None = None,
+    constraint_normal_angle_deg: float | None = None,
 ) -> str:
     """Render the sidecar as a YAML string with placeholders for the rest.
 
@@ -202,6 +204,12 @@ def build_sidecar_yaml(
     to edit before committing.  Fields the dialog can infer
     (``offset_*_px``, ``mission``, ``camera``, ``filter_combo``,
     ``exposure_time_sec``, ``image_id``) are filled in directly.
+
+    When ``constraint_normal_angle_deg`` is set (the operator navigated
+    with the constrained-drag mode on a rank-1 scene), the ground truth
+    carries a ``constraint`` block — ``offset_along_normal_px`` computed
+    from the saved 2-D offset so the two stay consistent by construction —
+    and ``expected`` pins ``status_reason: rank_1_only``.
     """
     op_name = operator or os.environ.get('USER') or 'unknown'
     on_date = (today or date.today()).isoformat()
@@ -216,6 +224,23 @@ def build_sidecar_yaml(
         )
     else:
         datetime_block = f"image_datetime_utc: '{draft.image_datetime_utc}'\n"
+    constraint_block = ''
+    status_reason_block = ''
+    if constraint_normal_angle_deg is not None:
+        angle_rad = math.radians(constraint_normal_angle_deg)
+        along_normal = offset_dv_px * math.cos(angle_rad) + offset_du_px * math.sin(angle_rad)
+        constraint_block = (
+            '  # Rank-1 scene: only the offset component along this normal is\n'
+            '  # observable; (offset_dv_px, offset_du_px) is a representative\n'
+            '  # point on the constraint line.\n'
+            '  constraint:\n'
+            '    type: rank_1\n'
+            f'    normal_angle_deg: {constraint_normal_angle_deg:.4f}\n'
+            f'    offset_along_normal_px: {along_normal:.4f}\n'
+            '    # 1sigma along the normal; tighten for sharp edges.\n'
+            '    uncertainty_px: 1.0\n'
+        )
+        status_reason_block = '  status_reason: rank_1_only\n'
     return (
         'schema_version: 1\n'
         '# COISS | VGISS | GOSSI | NHLORRI\n'
@@ -238,8 +263,7 @@ def build_sidecar_yaml(
         f'  offset_dv_px: {offset_dv_px:.4f}\n'
         f'  offset_du_px: {offset_du_px:.4f}\n'
         '  # 1sigma marginal; tighten for bright stars / sharp limbs.\n'
-        '  offset_uncertainty_px: 1.0\n'
-        '  source: operator_verified\n'
+        '  offset_uncertainty_px: 1.0\n' + constraint_block + '  source: operator_verified\n'
         f'  operator: {op_name}\n'
         f'  verified_date: {on_date}\n'
         f"  ui_version: 'spindoctor {ui_version}'\n"
@@ -250,8 +274,7 @@ def build_sidecar_yaml(
         '  # success | failed | conflicted\n'
         '  status: success\n'
         '  # high | medium | low | failed\n'
-        '  confidence_tier: high\n'
-        '  # e.g. BodyLimbNav\n'
+        '  confidence_tier: high\n' + status_reason_block + '  # e.g. BodyLimbNav\n'
         '  primary_technique: TODO_REPLACE_TECHNIQUE\n'
         '  techniques_must_run: []\n'
         '  techniques_must_skip: []\n'

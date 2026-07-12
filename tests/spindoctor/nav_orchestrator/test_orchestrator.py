@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 
 import numpy as np
@@ -111,9 +112,19 @@ class _FakeStarModel(NavModel):
 
 
 class _FakeStarTechnique(NavTechnique):
-    """Stand-in technique that always reports a fixed offset."""
+    """Stand-in technique that always reports a fixed offset.
+
+    ``_abstract = True`` keeps this (and every fake below) out of the
+    process-wide ``NavTechnique._registry`` at import; the autouse
+    ``_register_fakes`` fixture registers them for the duration of each
+    test in this module.  A permanently registered fake would otherwise
+    run inside every later full-ensemble navigation in the same worker
+    (e.g. the sim invariant tests) and fuse its hardcoded offset into
+    real results.
+    """
 
     name = '_FakeStarTechnique'
+    _abstract = True
     accepts_feature_types = frozenset({NavFeatureType.STAR})
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
@@ -140,6 +151,31 @@ class _FakeStarTechnique(NavTechnique):
 def fake_obs() -> _FakeObs:
     """Provide a clean fake observation."""
     return _FakeObs()
+
+
+@pytest.fixture(autouse=True)
+def _register_fakes() -> Iterator[None]:
+    """Register this module's fake techniques for the duration of one test.
+
+    The fakes carry ``_abstract = True`` so they never enter the global
+    ``NavTechnique._registry`` at import; this fixture makes them
+    name-resolvable (``only_techniques=['_FakeStarTechnique']``) inside
+    this module's tests only, and guarantees no other test in the same
+    process ever sees them.
+    """
+    fakes: list[type[NavTechnique]] = [
+        _FakeStarTechnique,
+        _RaisingTechnique,
+        _PassTwoTechnique,
+        _FakeBodyPrimary,
+        _FakeBodyFallback,
+    ]
+    NavTechnique._registry.extend(fakes)
+    try:
+        yield
+    finally:
+        for fake in fakes:
+            NavTechnique._registry.remove(fake)
 
 
 def test_orchestrator_runs_pipeline_end_to_end(fake_obs: _FakeObs) -> None:
@@ -373,6 +409,7 @@ class _RaisingTechnique(NavTechnique):
     """NavTechnique whose ``navigate`` always raises a RuntimeError."""
 
     name = '_RaisingTechnique'
+    _abstract = True  # scoped to this module via _register_fakes
     accepts_feature_types = frozenset({NavFeatureType.STAR})
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
@@ -388,6 +425,7 @@ class _PassTwoTechnique(NavTechnique):
     """Pass-2 (requires_prior=True) technique that captures the prior offset."""
 
     name = '_PassTwoTechnique'
+    _abstract = True  # scoped to this module via _register_fakes
     accepts_feature_types = frozenset({NavFeatureType.STAR})
     requires_prior = True
     captured_prior: tuple[float, float] | None = None
@@ -732,6 +770,7 @@ class _FakeBodyPrimary(NavTechnique):
     """Primary technique consuming BODY_DISC; tracks how many times it ran."""
 
     name = '_FakeBodyPrimary'
+    _abstract = True  # scoped to this module via _register_fakes
     accepts_feature_types = frozenset({NavFeatureType.BODY_DISC})
     tier = 'primary'
     run_count: int = 0
@@ -764,6 +803,7 @@ class _FakeBodyFallback(NavTechnique):
     """Fallback technique consuming BODY_BLOB; tracks how many times it ran."""
 
     name = '_FakeBodyFallback'
+    _abstract = True  # scoped to this module via _register_fakes
     accepts_feature_types = frozenset({NavFeatureType.BODY_BLOB})
     tier = 'fallback'
     run_count: int = 0

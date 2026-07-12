@@ -288,6 +288,7 @@ class ManualNavDialog(QDialog):
         model_mask_ext: NDArrayBoolType,
         config: Config | None,
         annotations: Annotations | None = None,
+        constraint_normal_seed_deg: float | None = None,
         parent: QWidget | None = None,
     ) -> None:
         """Initialize the manual-navigation dialog.
@@ -306,6 +307,13 @@ class ManualNavDialog(QDialog):
                 alongside a saved sidecar.  ``None`` (or empty) is
                 permitted; the saved PNG then carries the source-image
                 grayscale alone.
+            constraint_normal_seed_deg: Optional seed for the
+                constrained-drag normal angle (degrees in the ``(v, u)``
+                frame, ``+v`` toward ``+u``).  Supplied by the caller when
+                the scene's observable axis is known — e.g. the aggregate
+                edge normal of an all-straight flat-ring scene — so the
+                operator can toggle the constraint on without measuring
+                the angle by eye.  ``None`` leaves the angle at 0.
             parent: Optional Qt parent widget.
         """
         super().__init__(parent)
@@ -361,6 +369,10 @@ class ManualNavDialog(QDialog):
         # Offsets (dv, du)
         self._dv = 0.0
         self._du = 0.0
+
+        # Constrained-drag state (rank-1 scenes): when enabled, drags move
+        # the offset only along the normal at ``_constraint_angle_deg``.
+        self._constraint_seed_deg = constraint_normal_seed_deg
 
         # Zoom/pan state
         self._zoom = 1.0
@@ -596,6 +608,31 @@ class ManualNavDialog(QDialog):
         self._spin_du.valueChanged.connect(self._on_spin_du)
         offset_form.addRow('dV (rows):', self._spin_dv)
         offset_form.addRow('dU (cols):', self._spin_du)
+        # Constrained drag (rank-1 scenes): restrict right-drag motion to the
+        # normal direction so the operator cannot move the model along an
+        # axis the scene does not constrain (a straight ring edge's tangent).
+        self._chk_constrain = QCheckBox('Constrain drag to normal')
+        self._chk_constrain.setChecked(False)
+        self._chk_constrain.setToolTip(
+            'Restrict right-drag to the normal direction below. Use for '
+            'rank-1 scenes (straight ring edges) where only the edge-normal '
+            'offset component is observable; the saved sidecar then carries '
+            'a ground_truth.constraint block.'
+        )
+        self._spin_constraint_angle = QDoubleSpinBox()
+        self._spin_constraint_angle.setDecimals(2)
+        self._spin_constraint_angle.setRange(-180.0, 180.0)
+        self._spin_constraint_angle.setSingleStep(1.0)
+        self._spin_constraint_angle.setValue(
+            self._constraint_seed_deg if self._constraint_seed_deg is not None else 0.0
+        )
+        self._spin_constraint_angle.setToolTip(
+            'Normal direction in the (v, u) frame, measured from +v toward '
+            '+u; the unit normal is (cos, sin). Seeded from the aggregate '
+            'ring-edge normal when the scene is all-straight.'
+        )
+        offset_form.addRow(self._chk_constrain)
+        offset_form.addRow('Normal angle (deg):', self._spin_constraint_angle)
         offset_group.setLayout(offset_form)
         right.addWidget(offset_group)
 
@@ -869,6 +906,9 @@ class ManualNavDialog(QDialog):
         if not path_str:
             return
         image_url = compute_image_url(self._obs, self._config)
+        constraint_angle: float | None = None
+        if self._chk_constrain.isChecked():
+            constraint_angle = float(self._spin_constraint_angle.value())
         try:
             yaml_text = build_sidecar_yaml(
                 draft=draft,
@@ -876,6 +916,7 @@ class ManualNavDialog(QDialog):
                 offset_dv_px=self._dv,
                 offset_du_px=self._du,
                 ui_version=_spindoctor_version,
+                constraint_normal_angle_deg=constraint_angle,
             )
             FCPath(path_str).write_text(yaml_text)
         except OSError as exc:
@@ -930,8 +971,19 @@ class ManualNavDialog(QDialog):
             delta = current_pos - self._drag_start_pos
             if self._drag_start_offset is not None:
                 # Convert label-pixel delta to image pixels via zoom
-                du = self._drag_start_offset[1] + (delta.x() / max(self._zoom, 1e-6))
-                dv = self._drag_start_offset[0] + (delta.y() / max(self._zoom, 1e-6))
+                ddv = delta.y() / max(self._zoom, 1e-6)
+                ddu = delta.x() / max(self._zoom, 1e-6)
+                if self._chk_constrain.isChecked():
+                    # Project the drag onto the constraint normal so the
+                    # offset moves only along the observable axis.
+                    angle = math.radians(self._spin_constraint_angle.value())
+                    n_v = math.cos(angle)
+                    n_u = math.sin(angle)
+                    along = ddv * n_v + ddu * n_u
+                    ddv = along * n_v
+                    ddu = along * n_u
+                dv = self._drag_start_offset[0] + ddv
+                du = self._drag_start_offset[1] + ddu
                 # Clamp within extfov bounds (minus 1 to keep slices valid after rounding)
                 dv = float(
                     np.clip(

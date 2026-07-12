@@ -164,6 +164,12 @@ class RingEdgeDiagnostics:
             so it -- not the raw sum -- is the scale the confidence formula
             uses; the sum grows with the number of fused edges and a fixed
             divisor cannot normalise it.
+        per_edge_dt_median_max: Largest per-edge median absolute DT residual
+            (px).  The mis-convergence gate statistic: a wholly misaligned
+            edge (the wrong-ringlet failure mode) drives its own median to
+            the ringlet spacing, while a minority of vertices snapping to a
+            neighbouring parallel edge (routine on flat multi-edge scenes)
+            leaves every median near the fit residual.
         edge_count: Number of RING_EDGE features fused.
         is_rank_1: True if every ring-edge feature was straight-line and the
             combined covariance is rank-1.
@@ -172,12 +178,14 @@ class RingEdgeDiagnostics:
     total_edge_length_px: float = 0.0
     per_edge_dt_rms_summed: float = 0.0
     per_edge_dt_rms_mean: float = 0.0
+    per_edge_dt_median_max: float = 0.0
     edge_count: int = 0
     is_rank_1: bool = False
     CURATOR_FIELDS: ClassVar[dict[str, str | None]] = {
         'total_edge_length_px': 'total_edge_length_px',
         'per_edge_dt_rms_summed': 'per_edge_dt_rms_summed',
         'per_edge_dt_rms_mean': 'per_edge_dt_rms_mean',
+        'per_edge_dt_median_max': 'per_edge_dt_median_max',
         'edge_count': 'edge_count',
         'is_rank_1': 'is_rank_1',
     }
