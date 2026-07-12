@@ -1045,6 +1045,7 @@ def _two_line_dt(shape: tuple[int, int], u1: int, u2: int) -> np.ndarray:
 
 
 def _vertical_polyline(u: float, v_lo: int, v_hi: int) -> np.ndarray:
+    """Vertical polyline of vertices at column ``u`` spanning rows ``[v_lo, v_hi)``."""
     vs = np.arange(v_lo, v_hi, dtype=np.float64)
     return np.stack([vs, np.full_like(vs, u)], axis=-1)
 
@@ -1081,9 +1082,12 @@ def test_find_secondary_dt_minimum_exclude_radius_hides_converged_basin() -> Non
     assert basin is not None
     # The best rival sits just outside the exclusion radius with a cost equal
     # to its column distance from the single zero line -- clearly worse than
-    # the perfect converged fit.
-    assert basin.cost_px >= 5.0
-    assert basin.distance_px > 5.0
+    # the perfect converged fit. The minimum eligible cost is exactly 5.0
+    # (du = +/-5 needs |dv| >= 1 to clear the 5.0 px exclusion radius), and
+    # the cost-then-distance tie-break lands on (dv, du) = (+/-1, +/-5) at
+    # distance sqrt(26).
+    assert basin.cost_px == pytest.approx(5.0)
+    assert basin.distance_px == pytest.approx(math.sqrt(26.0))
 
 
 def test_find_secondary_dt_minimum_empty_polyline_returns_none() -> None:

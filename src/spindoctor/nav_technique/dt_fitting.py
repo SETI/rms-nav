@@ -396,7 +396,10 @@ def find_secondary_dt_minimum(
     Parameters:
         image_edge_dt: 2-D edge distance transform the LM fit ran against.
         vertices_vu: ``(N, 2)`` polyline vertex positions in ``(v, u)``,
-            unshifted (the same array handed to the LM refine).
+            unshifted. A caller that fitted rotation must pass the vertices
+            already rotated by the converged angle (the geometry the LM
+            evaluated), or the converged cost is inflated relative to the
+            actual fit.
         converged_offset_vu: The LM fit's converged ``(dv, du)``.
         search_window_vu: ``(margin_v, margin_u)`` non-negative integers
             bounding the scan, normally the technique's coarse search

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import math
+from typing import Any
+
 import numpy as np
 import pytest
 from tests.spindoctor.nav_technique.conftest import (
@@ -16,7 +19,16 @@ from spindoctor.feature.feature_type import NavFeatureType
 from spindoctor.feature.flags import TerminatorArcFlags
 from spindoctor.feature.geometry import TerminatorPolyline
 from spindoctor.nav_orchestrator.nav_context import NavContext
+from spindoctor.nav_technique import nav_technique_body_terminator
 from spindoctor.nav_technique.diagnostics import BodyTerminatorDiagnostics
+from spindoctor.nav_technique.dt_fitting import (
+    LMRefineResult,
+    SecondaryBasin,
+    _rotate_directions,
+    _rotate_vertices,
+    find_secondary_dt_minimum,
+    lm_subpixel_refine,
+)
 from spindoctor.nav_technique.nav_technique_body_terminator import (
     BodyTerminatorNav,
     _aggregate_terminator_features,
@@ -496,9 +508,13 @@ def test_body_terminator_nav_marks_spurious_on_competing_basin(
     assert result.spurious is True
     diagnostics = result.diagnostics
     assert isinstance(diagnostics, BodyTerminatorDiagnostics)
+    assert diagnostics.secondary_basin_cost_ratio is not None
     assert diagnostics.secondary_basin_cost_ratio > 0.0
     assert diagnostics.secondary_basin_cost_ratio < 1.2
-    assert diagnostics.secondary_basin_distance_px > 5.0
+    # The rival basin is the second disc, 30 px away in u; the scan's integer
+    # grid puts it at that separation (within the converged fit's sub-pixel
+    # residual), not merely anywhere past the 5 px exclusion radius.
+    assert diagnostics.secondary_basin_distance_px == pytest.approx(30.0, abs=1.5)
 
 
 def test_body_terminator_nav_clean_fit_reports_costly_secondary_basin(
@@ -522,4 +538,70 @@ def test_body_terminator_nav_clean_fit_reports_costly_secondary_basin(
     assert result.spurious is False
     diagnostics = result.diagnostics
     assert isinstance(diagnostics, BodyTerminatorDiagnostics)
+    assert diagnostics.secondary_basin_cost_ratio is not None
     assert diagnostics.secondary_basin_cost_ratio >= 1.2
+
+
+def test_body_terminator_nav_basin_scan_scores_rotated_geometry(
+    disc_image: DiscImageFactory,
+    arc_polyline: ArcPolylineFactory,
+    make_terminator_feature: NavFeatureFactory,
+    make_nav_context: NavContextFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With rotation fitted, the basin scan scores the rotated geometry.
+
+    The LM evaluates the DT at the rotated vertex positions, so handing the
+    unrotated polyline to :func:`find_secondary_dt_minimum` would inflate the
+    converged cost and could mark a good rotated fit as non-unimodal. The
+    model arc is pre-rotated about its pivot so the fit must recover a
+    nonzero rotation; the spy asserts the basin scan then received exactly
+    the vertices rotated by the fitted angle.
+    """
+    shape = (200, 200)
+    image_center = (100.0, 100.0)
+    radius = 30.0
+    image = disc_image(shape, image_center, radius)
+    vertices, outward = arc_polyline(
+        image_center, radius, 80, _TERMINATOR_ANGLE_START, _TERMINATOR_ANGLE_END
+    )
+    theta0 = math.radians(3.0)
+    pivot = (float(vertices[:, 0].mean()), float(vertices[:, 1].mean()))
+    feature = make_terminator_feature(
+        'moonA',
+        vertices=_rotate_vertices(vertices, pivot, theta0),
+        outward_normals=_rotate_directions(outward, theta0),
+    )
+
+    captured: dict[str, Any] = {}
+    real_lm = lm_subpixel_refine
+    real_basin = find_secondary_dt_minimum
+
+    def spy_lm(**kwargs: Any) -> LMRefineResult:
+        """Capture the vertices and fitted rotation of the real LM refine."""
+        captured['lm_vertices'] = kwargs['vertices_vu']
+        result = real_lm(**kwargs)
+        captured['rotation_rad'] = result.rotation_rad
+        return result
+
+    def spy_basin(
+        image_edge_dt: np.ndarray, vertices_vu: np.ndarray, **kwargs: Any
+    ) -> SecondaryBasin | None:
+        """Capture the vertices handed to the real basin scan."""
+        captured['basin_vertices'] = vertices_vu
+        return real_basin(image_edge_dt, vertices_vu, **kwargs)
+
+    monkeypatch.setattr(nav_technique_body_terminator, 'lm_subpixel_refine', spy_lm)
+    monkeypatch.setattr(nav_technique_body_terminator, 'find_secondary_dt_minimum', spy_basin)
+
+    technique = BodyTerminatorNav()
+    context = make_nav_context(image, fit_camera_rotation=True, max_rotation_deg=5.0)
+    result = technique.navigate([feature], context)
+    assert result.spurious is False
+    assert 'basin_vertices' in captured
+    fitted_theta = float(captured['rotation_rad'])
+    assert fitted_theta != 0.0
+    lm_vertices = captured['lm_vertices']
+    lm_pivot = (float(lm_vertices[:, 0].mean()), float(lm_vertices[:, 1].mean()))
+    expected = _rotate_vertices(lm_vertices, lm_pivot, fitted_theta)
+    np.testing.assert_allclose(captured['basin_vertices'], expected, atol=1.0e-12)

@@ -127,7 +127,9 @@ coarse search window, and when the best shift farther than ``basin_exclude_radiu
 from the converged offset scores below ``basin_cost_ratio_threshold`` times the converged
 cost, the DT surface is not unimodal and the result is flagged spurious. The rival's
 distance and cost ratio are recorded on the diagnostics
-(``secondary_basin_distance_px`` / ``secondary_basin_cost_ratio``). This matters most for
+(:attr:`~spindoctor.nav_technique.diagnostics.BodyTerminatorDiagnostics.secondary_basin_distance_px` /
+:attr:`~spindoctor.nav_technique.diagnostics.BodyTerminatorDiagnostics.secondary_basin_cost_ratio`).
+This matters most for
 the lone-primary case: the ensemble's fallback-tier drop protects against a mis-converged
 terminator only when a limb or disc result exists on the same body to supersede it.
 

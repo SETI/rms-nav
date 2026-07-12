@@ -28,6 +28,7 @@ from spindoctor.feature.geometry import TerminatorPolyline
 from spindoctor.nav_technique.confidence import evaluate_sigmoid_combination
 from spindoctor.nav_technique.diagnostics import BodyTerminatorDiagnostics
 from spindoctor.nav_technique.dt_fitting import (
+    _rotate_vertices,
     build_polyline_mask,
     coarse_ncc_search,
     find_secondary_dt_minimum,
@@ -376,12 +377,21 @@ class BodyTerminatorNav(NavTechnique):
             # the search window for a competing basin; when its cost rivals
             # the converged cost the fit is not unimodal and the result is
             # spurious.  Skipped when already spurious or disabled.
-            secondary_basin_distance_px = 0.0
-            secondary_basin_cost_ratio = 0.0
+            secondary_basin_distance_px: float | None = None
+            secondary_basin_cost_ratio: float | None = None
             if not spurious and self._basin_cost_ratio_threshold > 0.0:
+                # The LM evaluates the DT at the *rotated* vertex positions
+                # when it fits rotation; the basin scan must score the same
+                # geometry, or the converged cost is inflated and a good
+                # rotated fit reads as non-unimodal.
+                basin_vertices = vertices
+                if fit_rotation and result.rotation_rad != 0.0:
+                    basin_vertices = _rotate_vertices(
+                        vertices, pivot_vu, float(result.rotation_rad)
+                    )
                 basin = find_secondary_dt_minimum(
                     edge_dt,
-                    vertices,
+                    basin_vertices,
                     converged_offset_vu=(dv_final, du_final),
                     search_window_vu=(margin_v, margin_u),
                     exclude_radius_px=self._basin_exclude_radius_px,
