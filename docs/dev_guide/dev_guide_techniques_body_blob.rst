@@ -65,6 +65,12 @@ bounding box on the body before the centroid is taken:
   body's *lit* centroid (which on a crescent sits off the geometric center), so the recovered
   shift is expressed in lit-centroid terms and matches the residual the centroid step forms.
 
+Both templates clamp their radius to the frame's half-diagonal
+(``_clamped_kernel_radius``): a template
+larger than the frame adds no localization information, while the kernel array and its FFT
+convolution allocate memory quadratically in the predicted diameter — a mostly off-frame gas
+giant predicts tens of thousands of pixels and exhausted RAM before the clamp (issue #202).
+
 The crescent template needs the sub-solar direction. It is undefined near full phase (the lit
 and geometric centroids coincide), where the disc kernel is used anyway, and is reported as
 ``(0, 0)`` then. If a body is past half phase yet carries no direction (its illumination

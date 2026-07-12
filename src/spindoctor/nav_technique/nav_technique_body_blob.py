@@ -278,6 +278,30 @@ def _kernel_centroid_offset(kernel: NDArrayFloatType) -> tuple[float, float]:
     return (centroid_v - (n_v - 1) / 2.0, centroid_u - (n_u - 1) / 2.0)
 
 
+def _clamped_kernel_radius(predicted_diameter_px: float, image_shape: tuple[int, ...]) -> float:
+    """Matched-filter kernel radius bounded by the image footprint.
+
+    The template scales with the predicted body diameter, but a template
+    larger than the frame adds no localization information (every in-window
+    shift sees the same uniform coverage) while the kernel array and its FFT
+    convolution allocate memory quadratically in the diameter.  A mostly
+    off-frame gas giant predicts a diameter of tens of thousands of pixels,
+    which exhausted RAM before this clamp (issue #202).  The frame's
+    half-diagonal is the largest radius at which the template's shape can
+    still influence the correlation inside the frame.
+
+    Parameters:
+        predicted_diameter_px: Predicted body diameter in pixels.
+        image_shape: ``(H, W)`` shape of the extfov signal image.
+
+    Returns:
+        ``max(predicted_diameter_px / 2, 1)`` clamped to the image
+        half-diagonal.
+    """
+    radius = max(predicted_diameter_px / 2.0, 1.0)
+    return min(radius, math.hypot(image_shape[0], image_shape[1]) / 2.0)
+
+
 def _coarse_disc_offset(
     image_signal: NDArrayFloatType,
     predicted_center_vu: tuple[float, float],
@@ -287,11 +311,12 @@ def _coarse_disc_offset(
     """Coarse integer offset from a filled-disc matched filter.
 
     Convenience wrapper around :func:`_coarse_correlation_offset` for the
-    at-least-half-lit case: builds a filled disc of the predicted radius and
+    at-least-half-lit case: builds a filled disc of the predicted radius
+    (clamped to the image footprint; see :func:`_clamped_kernel_radius`) and
     correlates it.  See :func:`_coarse_correlation_offset` for the offset
     convention and degenerate-window handling.
     """
-    radius = max(predicted_diameter_px / 2.0, 1.0)
+    radius = _clamped_kernel_radius(predicted_diameter_px, image_signal.shape)
     return _coarse_correlation_offset(
         image_signal, _disc_kernel(radius), predicted_center_vu, margin_vu
     )
@@ -310,10 +335,11 @@ def _coarse_crescent_offset(
     Builds a Lambertian-crescent template at the body's phase and sub-solar
     direction (:func:`_crescent_kernel`) and correlates it, so a high-phase
     body displaced beyond its predicted bounding box is located without a
-    full lit disc to correlate.  See :func:`_coarse_correlation_offset` for
-    the offset convention and degenerate-window handling.
+    full lit disc to correlate.  The radius is clamped to the image footprint
+    (:func:`_clamped_kernel_radius`).  See :func:`_coarse_correlation_offset`
+    for the offset convention and degenerate-window handling.
     """
-    radius = max(predicted_diameter_px / 2.0, 1.0)
+    radius = _clamped_kernel_radius(predicted_diameter_px, image_signal.shape)
     kernel = _crescent_kernel(radius, math.radians(phase_deg), sub_solar_dir_vu)
     return _coarse_correlation_offset(image_signal, kernel, predicted_center_vu, margin_vu)
 
