@@ -332,7 +332,7 @@ def build_report(
         'For each confidence tier: how well the techniques that fed the fused',
         'offset agreed with one another.  Without ground truth, cross-technique',
         'agreement is the standing production check that confidence tiers are',
-        'meaningful (the calibrated anchor is the WS-5 sim campaign).',
+        'meaningful (the calibrated anchor is the simulated-scene campaign).',
         '',
         '| tier | images | with >=2 techniques | median max-disagreement (px) | p95 (px) |',
         '|---|---|---|---|---|',
