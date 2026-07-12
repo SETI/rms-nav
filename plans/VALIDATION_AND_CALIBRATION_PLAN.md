@@ -77,10 +77,10 @@ still-open workstream now has a tracking issue (cross-map below).
   tiers are plausibility cross-checks and regression expectations, never fit
   targets.
 - **Library-size target (binding for #172 and WS-3).** One library, two stages:
-  the 49-image curated library (#172, workflow `plans/COHORT_CURATION_PLAN.md`) is
+  the 47-image curated library (#172, workflow `plans/COHORT_CURATION_PLAN.md`) is
   the first stage — it seeds regression baselines and the initial calibration
   cohort; WS-3 then grows the same library to >=20 images per instrument, >=120
-  total, which is the size the WS-1 agreement study needs. The 49-image stage is
+  total, which is the size the WS-1 agreement study needs. The 47-image stage is
   a milestone inside the WS-3 target, not a competing number.
 
 **Workstream-to-issue cross-map** (issues carry the trackable work; workstreams
@@ -93,7 +93,7 @@ carry the methodology and acceptance criteria):
 | WS-1b | #226 | Reprojection consistency. |
 | WS-2 | #227 (+ #223, #153, #84) | Sim de-circularization + realism. |
 | WS-17 | #228 | Distortion validation. |
-| WS-3 | #172, #174, #235 | 49-image stage first (#172), then the >=120 growth target (#235); discovery/review workflow in `plans/COHORT_CURATION_PLAN.md`. |
+| WS-3 | #172, #174, #235 | 47-image stage first (#172), then the >=120 growth target (#235); discovery/review workflow in `plans/COHORT_CURATION_PLAN.md`. |
 | WS-4 | #229 | CI integration tiers. |
 | WS-5 | #230 (sim-anchored half done via #173/PR #208), #176 | Real-anchored recalibration once WS-1 anchors exist. |
 | WS-6 | #231 | Capability matrix (docs-honesty half already done). |
@@ -635,12 +635,12 @@ trusted.
 
 ### WS-3: Expand the real-image regression cohort
 **Closes:** "real-image regression rests on ~13 hand-blessed images."
-**Tracked by:** #172 (the 49-image first stage; workflow
+**Tracked by:** #172 (the 47-image first stage; workflow
 `plans/COHORT_CURATION_PLAN.md`) and #174 (integration tests + baselines);
-#235 carries the growth beyond that stage.
+the growth beyond that stage is #235.
 
 **Tasks.**
-- Complete the 49-image curated stage (#172), then grow
+- Complete the 47-image curated stage (#172), then grow
  `tests/integration/image_library/` to the target of **≥20 per instrument, ≥120
  total** — the size the WS-1 agreement study needs — spanning the geometry
  taxonomy already present (full-FOV body, partial overflow, below-resolution,
@@ -653,7 +653,7 @@ trusted.
  system fails cleanly with the right status reason.
 
 **Acceptance criteria.**
-- Cohort size and per-category coverage meet the documented targets (49-image
+- Cohort size and per-category coverage meet the documented targets (47-image
  stage first, then ≥20 per instrument / ≥120 total).
 - `README.md` documents schema + curation + blessing + provenance; every sidecar
  records its ground-truth source.

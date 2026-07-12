@@ -3,8 +3,8 @@
 *The top-level plan of record for all remaining work. It is written to be
 readable without knowledge of the code internals or the statistical
 methodology; the detail lives in the three sub-plans it points to. Last
-reconciled 2026-07-12, immediately after the nine-PR stack #208-#220 was
-prepared for merge.*
+reconciled 2026-07-12, immediately after the nine-PR stack (#208,
+#213-#220) was prepared for merge.*
 
 **Document map** (what to read for what):
 
@@ -67,7 +67,7 @@ the issue index marks what they close.
 
 The curated image library — the raw material for both regression testing
 and validation — stands at 62 operator-verified images (Cassini and
-Voyager only), against a first-stage budget of 49 spanning 17 scene classes
+Voyager only), against a first-stage budget of 47 spanning 17 scene classes
 (4 classes still empty or underfilled) and a final target of at least 120
 across all four instruments.
 

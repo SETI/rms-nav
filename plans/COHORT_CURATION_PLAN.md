@@ -9,7 +9,7 @@ semantics, and baseline mechanics). The scene-class budget and per-class
 selection guide are in the appendix at the end of this file.
 
 **Goal.** Populate every image cohort the validation and calibration program
-needs — the 49-image curated library (#172), its WS-3 growth to >=20 per
+needs — the 47-image curated first stage (#172), its WS-3 growth to >=20 per
 instrument / >=120 total, and the WS-1 agreement-study cohorts — by
 **automated search over the published PDS geometry metadata**, so the operator
 does nothing but look at overlay PNGs and vote yes/no. Arbitrary or convenient
@@ -112,7 +112,7 @@ for the full rationale.
 
 | Cohort | Definition (metadata query sketch) | Feeds |
 |---|---|---|
-| **Scene-class library, 49 images** | the 17 classes in the appendix budget table, found per class as in section 3 | #172 regression seed, calibration diagnostics, #174 baselines |
+| **Scene-class library, 47 images** | the 17 classes in the appendix budget table, found per class as in section 3 | #172 regression seed, diagnostics for the confidence recalibration (#230), #174 baselines |
 | **WS-3 growth** | same classes continued to >=20/instrument, >=120 total | WS-1 statistics, WS-4 CI tiers |
 | **Route 1: intra-body** | one resolved moon, apparent diameter 150-900 px, full limb or >=30% arc, phase < 90 for limb+disc pairs and > 90 to add terminator; **restricted to round, photometrically bland bodies** per the config_220 shape gate (`ellipsoid_rms_residual_km`, `crater_scale_km`, `albedo_variation`) | WS-1 Route 1 (technique pairs on one body; SPICE cancels) |
 | **Route 2: body + ring** | inventory has >=1 moon AND ring_summary row with a catalog edge radius inside [MIN,MAX]_RING_RADIUS; the bulk cohort — collect widely | WS-1 Route 2 (ring-radial axis) |
@@ -199,24 +199,28 @@ reviewed offset (`source: operator_verified`, the vote date, the reviewed
 PNG kept beside the YAML), auto-filled `expected.*` per the sidecar rubric in
 `docs/dev_guide/dev_guide_image_library.rst` (conservative tier — `medium`
 when unsure; tier labels are plausibility cross-checks, never calibration fit
-targets), and the selection provenance in `notes`. Run
-`pytest tests/integration/test_image_library.py -m "" -k <id>` until
-structurally clean. Submit one PR per review batch (operator preference,
+targets), and the selection provenance in `notes`. Run the structural
+suite unfiltered — `pytest tests/integration/test_image_library.py -m ""`
+— until clean (the cross-image invariants, per-class minima and duplicate
+ids, only run unfiltered); then, with `PDS3_HOLDINGS_DIR` set, spot-run
+the new frames with
+`pytest tests/integration/test_autonomous_nav.py -m "" -k <id>`. Submit one PR per review batch (operator preference,
 2026-07: reviewer cost is dominated by `ground_truth` spot-checks, and one
 batch per PR keeps the vote-to-merge mapping clean).
 
 **Stage E — baselines and consumption.** After sidecar PRs merge, seed
 regression baselines (`python -m tests.integration.update_baselines`), then
-hand off per consumer: calibration diagnostics collection for #173 (WS-5
-methodology — reliability diagrams against measured error anchors, never
-tier-midpoint fitting), agreement-study runs per WS-1's harness plan, WS-17
-plate solves on the star-field cohort. CI stays tiered per WS-4's
+hand off per consumer: calibration diagnostics collection for the
+real-anchored confidence recalibration (#230; the interim sim-anchored pass
+landed via #173 — reliability diagrams against measured error anchors, never
+tier-midpoint fitting), agreement-study runs per WS-1's harness plan (#225),
+plate solves on the star-field cohort for distortion validation (#228). CI stays tiered per WS-4's
 "Library consumers and CI tiers" note: the full library and all offline
 analyses never run per-PR.
 
 ## 5. Order of work
 
-1. Fill the empty scene classes of the 49-image budget first (per-class
+1. Fill the empty scene classes of the first-stage budget first (per-class
    state: compare the appendix budget table against
    `tests/integration/image_library/images/*/`), one review batch.
 2. Top up all classes to the per-class minima; verify mission spread
@@ -260,7 +264,7 @@ Distilled from the retired first-stage playbook
 rubric, tier semantics, and baseline workflow live in
 `docs/dev_guide/dev_guide_image_library.rst`.
 
-### First-stage budget (49 images across 17 scene classes)
+### First-stage budget (47 images across 17 scene classes)
 
 | Scene class (directory name)   | Min images | What it exercises                                              |
 |--------------------------------|-----------:|----------------------------------------------------------------|
@@ -282,6 +286,8 @@ rubric, tier semantics, and baseline workflow live in
 | `below_resolution_body`        |          2 | `BodyBlobNav` (detection-SNR gate); body < 15 px               |
 | `negative_cases`               |          3 | Expected `status='failed'`: unnavigable scenes                 |
 
+The per-class minima above sum to 47 and are the authoritative first-stage
+budget (enforced by the structural-invariants test).
 The WS-3 growth target (>=20 per instrument, >=120 total; #235) continues the
 same classes; the structural-invariants test asserts per-class minima on
 non-empty classes.
