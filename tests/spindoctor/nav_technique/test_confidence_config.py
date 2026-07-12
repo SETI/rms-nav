@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import pytest
@@ -20,7 +21,9 @@ def test_load_confidence_spec_returns_spec_for_shipped_technique() -> None:
     techniques = dict(Config().category('techniques'))
     spec = load_confidence_spec(techniques, 'BodyDiscCorrelateNav')
     assert isinstance(spec, ConfidenceSpec)
-    assert spec.alpha0 == pytest.approx(-2.0)
+    # The alpha values themselves belong to the calibration sweep; the
+    # structural claim is that the shipped YAML parses into a finite spec.
+    assert math.isfinite(spec.alpha0)
     feature_names = [t.feature for t in spec.terms]
     assert 'ncc_peak' in feature_names
     assert spec.hard_zero_if == {'at_edge': True, 'spurious': True}

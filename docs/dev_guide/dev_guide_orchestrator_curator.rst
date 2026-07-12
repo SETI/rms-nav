@@ -140,9 +140,10 @@ Every per-technique diagnostic key under ``"diagnostics"`` corresponds to a non-
 entry in the diagnostics dataclass's ``CURATOR_FIELDS``.
 
 The literal ``"confidence_provisional": true`` marker flags that the confidence values
-and ``confidence_rank`` tiers are not yet calibrated against measured navigation error
-and must not be read as probabilities; the curator emits it unconditionally until the
-confidence-calibration workstream lands.
+and ``confidence_rank`` tiers are calibrated against simulated planted-truth recovery
+only (sim-anchored) and must not be read as probabilities of real-image accuracy; the
+curator emits it unconditionally.  A developer who recalibrates against real-image
+error measurements should retire the marker at that point.
 
 **Allow-list catches a missed field.**  An operator adds a new field
 ``mean_polarity_score`` to

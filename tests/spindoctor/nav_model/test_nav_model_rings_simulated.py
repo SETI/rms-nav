@@ -10,6 +10,7 @@ from typing import Any, cast
 
 import numpy as np
 
+from spindoctor.feature.composition import compose_template_features
 from spindoctor.feature.geometry import RingEdgePolyline
 from spindoctor.nav_model.nav_model_rings_simulated import NavModelRingsSimulated
 from spindoctor.nav_orchestrator.nav_context import NavContext
@@ -82,3 +83,48 @@ def test_ring_edge_normals_are_unit_radial() -> None:
     assert isinstance(geometry, RingEdgePolyline)
     norms = np.hypot(geometry.normals_vu[:, 0], geometry.normals_vu[:, 1])
     assert np.allclose(norms, 1.0, atol=1e-9)
+
+
+def test_ring_annulus_template_is_bbox_local_postage_stamp() -> None:
+    """The RING_ANNULUS template payload is exactly the size of its bbox.
+
+    The compose_template_features convention anchors the template's (0, 0)
+    at the bbox origin, so an ext-FOV-sized template with an interior bbox
+    paints the ring displaced by the bbox origin (the annulus NCC then
+    recovers an offset wrong by exactly the ext-FOV margin).
+    """
+    annuli = [f for f in _features() if f.feature_type.name == 'RING_ANNULUS']
+    assert len(annuli) == 1
+    annulus = annuli[0]
+    bbox = annulus.geometry.bbox_extfov_vu
+    expected_shape = (bbox[2] - bbox[0], bbox[3] - bbox[1])
+    assert annulus.template_img is not None
+    assert annulus.template_mask is not None
+    assert annulus.template_img.shape == expected_shape
+    assert annulus.template_mask.shape == expected_shape
+    assert annulus.template_mask.any()
+
+
+def test_ring_annulus_template_paints_at_ring_radius() -> None:
+    """Composing the annulus paints pixels at the ring's radius from its center.
+
+    Re-composes the emitted feature into an ext-FOV canvas (the same path
+    RingAnnulusNav uses) and checks every painted pixel sits between the
+    ringlet's inner and outer radii from the predicted center -- the
+    placement invariant the displaced-template defect broke.
+    """
+    obs = _obs()
+    annuli = [f for f in _features() if f.feature_type.name == 'RING_ANNULUS']
+    annulus = annuli[0]
+    extfov_shape = (
+        _SIZE + 2 * obs.extfov_margin_v,
+        _SIZE + 2 * obs.extfov_margin_u,
+    )
+    _, mask = compose_template_features([annulus], extfov_shape)
+    assert mask.any()
+    center_v, center_u = annulus.geometry.predicted_center_vu
+    vs, us = np.where(mask)
+    radii = np.hypot(vs - center_v, us - center_u)
+    # Inner edge at 60 px, outer at 85 px; 1.5 px of rasterization slack.
+    assert radii.min() >= 60.0 - 1.5
+    assert radii.max() <= 85.0 + 1.5

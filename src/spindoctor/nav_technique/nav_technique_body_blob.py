@@ -35,6 +35,7 @@ from spindoctor.nav_technique.feasibility import NavFeasibilityReport
 from spindoctor.nav_technique.nav_technique import (
     NavTechnique,
     embed_rotation_unobservable,
+    load_model_error_floor,
     log_confidence_breakdown,
     rotation_unobservable_sigma_rad,
     search_window_for_obs,
@@ -706,7 +707,7 @@ class BodyBlobNav(NavTechnique):
         # Uncalibrated model-error variance floor (px); added in quadrature to
         # the reported covariance diagonal.  Default 0.0 -> no-op.  See
         # ORCH-001 / config_510_techniques.yaml.
-        self._model_error_floor_px = float(self.tuning.get('model_error_floor_px', 0.0))
+        self._model_error_floor_px = load_model_error_floor(self.tuning, self.name)
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Return whether the input set carries any usable BODY_BLOB feature.

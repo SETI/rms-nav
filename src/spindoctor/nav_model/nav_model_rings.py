@@ -649,12 +649,24 @@ class NavModelRings(NavModelRingsBase):
                 composite_bbox = _mask_bbox(composite_mask)
                 composite_radial_extent_px = float(composite_bbox[2] - composite_bbox[0])
                 joint_label = ', '.join(sorted({label for _, _, label, _ in annulus_renderings}))
+                # The template payload convention (``compose_template_features``)
+                # is a postage stamp local to ``bbox_extfov_vu``; crop the
+                # ext-FOV-sized composite down to the bbox.  Passing the full
+                # ext-FOV image displaces the painted annulus by the bbox
+                # origin when the consumer re-composes it, and the annulus
+                # NCC then recovers a garbage offset.
                 features.append(
                     _build_annulus_feature(
                         ring_name=joint_label,
                         planet=self._planet or '',
-                        model_img=composite_img,
-                        model_mask=composite_mask,
+                        model_img=composite_img[
+                            composite_bbox[0] : composite_bbox[2],
+                            composite_bbox[1] : composite_bbox[3],
+                        ],
+                        model_mask=composite_mask[
+                            composite_bbox[0] : composite_bbox[2],
+                            composite_bbox[1] : composite_bbox[3],
+                        ],
                         bbox=composite_bbox,
                         predicted_center_vu=self._predicted_center_vu,
                         subject_range_km=self._subject_range_km,

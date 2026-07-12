@@ -1,6 +1,9 @@
 """Tests for ``spindoctor.feature.composition.compose_template_features``."""
 
+import dataclasses
+
 import numpy as np
+import pytest
 
 from spindoctor.feature.composition import compose_template_features
 from spindoctor.feature.feature import NavFeature, NavReliabilityBreakdown
@@ -146,6 +149,23 @@ def test_compose_skips_features_without_templates() -> None:
     image, mask = compose_template_features([polyline, body], (10, 10))
     assert image[0, 0] == 3.0
     assert mask[0, 0]
+
+
+def test_compose_rejects_template_larger_than_declared_bbox() -> None:
+    """A template bigger than its bbox extents raises instead of painting displaced content."""
+    feat = _make_body(
+        feature_id='body_disc:oversized',
+        bbox=(2, 3, 4, 6),
+        template_value=5.0,
+        subject_range_km=100.0,
+    )
+    oversized = dataclasses.replace(
+        feat,
+        template_img=np.full((10, 10), 5.0, dtype=np.float64),
+        template_mask=np.ones((10, 10), dtype=bool),
+    )
+    with pytest.raises(ValueError, match='bbox-local postage stamps'):
+        compose_template_features([oversized], (10, 10))
 
 
 def test_compose_clamps_bbox_to_extfov() -> None:

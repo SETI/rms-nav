@@ -78,18 +78,27 @@ def compose_template_features(
         assert feature.template_mask is not None
         template_img = feature.template_img
         template_mask = feature.template_mask
-        # Slice the part of the template that fits inside ext-FOV.
         bbox = feature.geometry.bbox_extfov_vu
+        # The payload must be a postage stamp exactly the size of its
+        # declared bbox.  The slice below anchors the template's (0, 0) at
+        # the bbox origin, so an oversized template (e.g. a full ext-FOV
+        # render paired with an interior bbox) silently paints its content
+        # displaced by the padding amount -- two ring-model emitters
+        # shipped exactly that defect.  Fail loudly instead.
+        expected_shape = (bbox[2] - bbox[0], bbox[3] - bbox[1])
+        if template_img.shape != expected_shape or template_mask.shape != expected_shape:
+            raise ValueError(
+                f'feature {feature.feature_id!r}: template shape '
+                f'{template_img.shape!r} / mask shape {template_mask.shape!r} '
+                f'must equal the declared bbox {bbox!r} extents '
+                f'{expected_shape!r}; template payloads are bbox-local '
+                f'postage stamps'
+            )
+        # Slice the part of the template that fits inside ext-FOV.
         t_v_lo = v_min - bbox[0]
         t_u_lo = u_min - bbox[1]
         t_v_hi = t_v_lo + (v_max - v_min)
         t_u_hi = t_u_lo + (u_max - u_min)
-        if t_v_hi > template_img.shape[0] or t_u_hi > template_img.shape[1]:
-            raise ValueError(
-                f'feature {feature.feature_id!r}: declared bbox '
-                f'{feature.geometry.bbox_extfov_vu!r} extends past template '
-                f'shape {template_img.shape!r}'
-            )
         sub_img = template_img[t_v_lo:t_v_hi, t_u_lo:t_u_hi]
         sub_mask = template_mask[t_v_lo:t_v_hi, t_u_lo:t_u_hi]
         target_image_slice = image[v_min:v_max, u_min:u_max]

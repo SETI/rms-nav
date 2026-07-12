@@ -32,8 +32,10 @@ __all__ = [
     'ROTATION_AT_EDGE_FRACTION',
     'ROTATION_UNOBSERVABLE_VARIANCE',
     'NavTechnique',
+    'add_model_error_floor',
     'embed_rotation_unobservable',
     'filter_technique_names',
+    'load_model_error_floor',
     'log_confidence_breakdown',
     'rotation_pivot_distance_px',
     'rotation_unobservable_sigma_rad',
@@ -351,6 +353,59 @@ class NavTechnique(NavBase, ABC):
             sigma_rotation_rad=(rotation_unobservable_sigma_rad() if fit_rotation else None),
             source_bodies=source_bodies,
         )
+
+
+def load_model_error_floor(tuning: dict[str, Any], technique_name: str) -> float:
+    """Read and validate a technique's ``model_error_floor_px`` tunable.
+
+    The floor is added in quadrature to the technique's reported translation
+    covariance (#210): robust-fit and NCC covariances measure statistical
+    precision only and under-report the model error the fit cannot see
+    (silhouette mismatch, photometric error, template pivot), leaving those
+    results over-weighted in the ensemble.
+
+    Parameters:
+        tuning: The technique's YAML ``tuning`` mapping.
+        technique_name: Technique name for the error message.
+
+    Returns:
+        The floor in pixels; ``0.0`` (disabled) when the key is absent.
+
+    Raises:
+        ValueError: If the configured value is negative or non-finite (a
+            negative or NaN floor would silently disable the quadrature sum;
+            an infinite floor would poison the covariance and tier gates).
+    """
+    raw = float(tuning.get('model_error_floor_px', 0.0))
+    if not math.isfinite(raw) or raw < 0.0:
+        raise ValueError(
+            f'{technique_name}: model_error_floor_px must be finite and >= 0; got {raw!r}'
+        )
+    return raw
+
+
+def add_model_error_floor(covariance: NDArrayFloatType, floor_px: float) -> NDArrayFloatType:
+    """Return ``covariance`` with ``floor_px**2`` added to the translation diagonal.
+
+    Shared by every technique that applies the #210 model-error floor, so the
+    quadrature-sum convention and its rationale live in one place (see
+    :func:`load_model_error_floor`).  The input is not mutated.
+
+    Parameters:
+        covariance: ``(2, 2)`` or ``(3, 3)`` covariance; only the leading two
+            diagonal entries (the translation axes) are floored.
+        floor_px: Validated floor in pixels; ``0.0`` returns the input
+            unchanged.
+
+    Returns:
+        The floored covariance (a copy when ``floor_px > 0``).
+    """
+    if floor_px <= 0.0:
+        return covariance
+    out = covariance.copy()
+    out[0, 0] += floor_px**2
+    out[1, 1] += floor_px**2
+    return out
 
 
 def technique_tier(technique_name: str) -> str:

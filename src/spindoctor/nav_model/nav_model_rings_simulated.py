@@ -233,41 +233,58 @@ class NavModelRingsSimulated(NavModelRingsBase):
     def to_features(self, context: NavContext) -> list[NavFeature]:
         """Emit the ring features.
 
-        Always emits a ``RING_ANNULUS`` carrying the rendered template (for the
-        correlation path).  Also emits one ``RING_EDGE`` per rendered edge
+        Emits a ``RING_ANNULUS`` carrying the rendered template (for the
+        correlation path) whenever the render put any ring pixels on the
+        ext-FOV.  The template payload convention (``compose_template_features``)
+        is a postage stamp local to ``bbox_extfov_vu``, so the ext-FOV-sized
+        render is cropped to the mask's tight bbox before emission --
+        passing the full ext-FOV image with an interior bbox displaces the
+        painted ring by the bbox origin and the annulus NCC recovers a
+        garbage offset.  Also emits one ``RING_EDGE`` per rendered edge
         (inner / outer) -- a per-vertex polyline with outward radial normals that
         ``RingEdgeNav`` fits against the image-edge distance transform, so a
         curved ring arc recovers the planted offset in both axes.
         """
         if self._model_img is None or self._ring_mask is None or self._ring_feature is None:
             return []
-        features: list[NavFeature] = [
-            NavFeature(
-                feature_id=f'ring_annulus:{self._ring_name}',
-                feature_type=NavFeatureType.RING_ANNULUS,
-                source_model=self.name,
-                geometry=RingAnnulusGeometry(
-                    bbox_extfov_vu=self._bbox_extfov_vu,
-                    predicted_center_vu=self._predicted_center_vu,
-                ),
-                subject_range_km=self._subject_range_km,
-                position_cov_px=None,
-                intensity_sigma_rel=0.0,
-                preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
-                reliability=1.0,
-                reliability_reasons=NavReliabilityBreakdown(visible_arc_fraction=1.0),
-                usable_types=frozenset({NavFeatureType.RING_ANNULUS}),
-                flags=RingAnnulusFlags(
-                    planet_name=self._ring_name,
-                    constituent_edge_count=(
-                        int(self._ring_feature.outer_edge is not None)
-                        + int(self._ring_feature.inner_edge is not None)
-                    ),
-                ),
-                template_img=self._model_img,
-                template_mask=self._ring_mask,
+        features: list[NavFeature] = []
+        if self._ring_mask.any():
+            mask_vs, mask_us = np.where(self._ring_mask)
+            bbox = (
+                int(mask_vs.min()),
+                int(mask_us.min()),
+                int(mask_vs.max()) + 1,
+                int(mask_us.max()) + 1,
             )
-        ]
+            template_img = self._model_img[bbox[0] : bbox[2], bbox[1] : bbox[3]].copy()
+            template_mask = self._ring_mask[bbox[0] : bbox[2], bbox[1] : bbox[3]].copy()
+            features.append(
+                NavFeature(
+                    feature_id=f'ring_annulus:{self._ring_name}',
+                    feature_type=NavFeatureType.RING_ANNULUS,
+                    source_model=self.name,
+                    geometry=RingAnnulusGeometry(
+                        bbox_extfov_vu=bbox,
+                        predicted_center_vu=self._predicted_center_vu,
+                    ),
+                    subject_range_km=self._subject_range_km,
+                    position_cov_px=None,
+                    intensity_sigma_rel=0.0,
+                    preferred_filter=NavFilterSpec(kind=NavFilterKind.NONE),
+                    reliability=1.0,
+                    reliability_reasons=NavReliabilityBreakdown(visible_arc_fraction=1.0),
+                    usable_types=frozenset({NavFeatureType.RING_ANNULUS}),
+                    flags=RingAnnulusFlags(
+                        planet_name=self._ring_name,
+                        constituent_edge_count=(
+                            int(self._ring_feature.outer_edge is not None)
+                            + int(self._ring_feature.inner_edge is not None)
+                        ),
+                    ),
+                    template_img=template_img,
+                    template_mask=template_mask,
+                )
+            )
         for edge_type, edge_mask in self._iter_edge_masks():
             edge_feature = self._build_ring_edge_feature(edge_type, edge_mask)
             if edge_feature is not None:

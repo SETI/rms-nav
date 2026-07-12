@@ -16,15 +16,36 @@
 #     tuning:                       # technique-specific runtime tunables
 #       <key>: float | int          # see ``load_technique_tuning`` for schema
 #
-# Coefficients are placeholders pending a calibration sweep against the
-# operator-curated image library; the sigmoid shape and the alpha=0
-# wiring for terms that are populated but not yet weighted (e.g.
-# peak_to_runner_up_ratio) are intentional so the calibration sweep
-# tunes alphas against real data without code changes.
+# Alpha coefficients and term normalizations are SIM-ANCHORED: fitted
+# 2026-07-09/10 by L2-regularized logistic regression against
+# planted-truth recovery on a randomized simulated-scene campaign
+# (util/calibration, campaign seed 20260709, 4200 scenes per pass;
+# label = "technique's own offset error <= 1.0 px").  The body
+# techniques were refit on the campaign's physical-body pass (simulated
+# bodies drawn from the config_220 catalog, rendered at relief
+# amplitudes tied to their published shape residuals, with km_per_pixel
+# so the irregularity factor is live).  The model_error_floor_px
+# tunables (#210) are calibrated on the same campaign so each
+# technique's 2-sigma error coverage matches the 2D-Gaussian
+# expectation (0.865).  A technique's confidence approximates its
+# sim-anchored P(offset error <= 1 px) given its diagnostics; hard
+# gates (spurious / at_edge) still force 0.  The calibration basis is
+# the sim's realism, which is unquantified, so confidence_provisional
+# stays true in the metadata; when a real-image anchor set exists
+# (operator-verified offsets with measured per-technique errors), the
+# same fit reruns against it and these sim-anchored values become the
+# fallback for regimes real data cannot reach.
+# BodyTerminatorNav is the exception: the simulated body model emits no
+# TERMINATOR_ARC, so its alphas keep the uncalibrated defaults and its
+# covariance floor is inherited from BodyLimbNav.
+# Fit reports (reliability tables, AUC/Brier, per-term health):
+# util/calibration/README.md describes how to regenerate them.
 
 techniques:
   BodyDiscCorrelateNav:
-    alpha0: -2.0
+    # Sim campaign (physical-body pass): n=1438 usable, base rate
+    # 0.78, AUC 0.82, Brier 0.34 -> 0.15.
+    alpha0: 0.377
     tuning:
       # When ``fit_camera_rotation`` is True the converged rotation
       # magnitude trips ``at_edge`` once it crosses
@@ -58,37 +79,45 @@ techniques:
       # band-limited -- coarse pyramid levels keep sharp surfaces for
       # integer-peak selection.  0.0 disables it.
       refine_lowpass_sigma_px: 1.0
+      # Model-error floor (px), added in quadrature to the reported
+      # covariance diagonal (#210).  The NCC peak-curvature covariance
+      # measures photon statistics only (campaign 1-sigma coverage
+      # ~0.00 vs the 0.39 2D-Gaussian reference); this floor carries
+      # the silhouette / photometric model error and brings 2-sigma
+      # coverage to 0.865 on the campaign (util/calibration/fit_floors).
+      model_error_floor_px: 0.93
     terms:
-      # PSR-style quality measure of the chosen NCC peak.  Healthy
-      # body-disc fits report quality 6-15; the divisor maps that range
-      # onto the sigmoid's responsive interval.
+      # PSR-style quality measure of the chosen NCC peak.  Campaign raw
+      # p5/p50/p95 = 6.3/9.6/19.9, so the offset-6 divisor-14 transform
+      # spans that range in [0, 1] (the old /6 cap-1 pinned every
+      # healthy fit at the cap and carried no information).
       - feature: ncc_peak
-        alpha: 1.5
-        divisor: 6.0
+        alpha: 0.123
+        offset: 6.0
+        divisor: 14.0
         cap_at: 1.0
       # Pyramid-level consistency, normalized by the per-image
       # diameter-scaled spurious threshold.  ``consistency_ratio < 1.0``
       # means the result is within budget; ``ratio == 1.0`` is exactly
-      # at the spurious edge and contributes ``-1.0`` to the sigmoid
-      # argument (the classic "right at the edge" position).  Using the
+      # at the spurious edge, where the term contributes its full
+      # negative alpha to the sigmoid argument.  Using the
       # ratio rather than the raw pixel value lets the divisor stay at
       # 1.0 while the underlying budget tracks body diameter.
       - feature: consistency_ratio
-        alpha: -1.0
+        alpha: -1.159
         divisor: 1.0
       # Reward additional bodies in the composite (joint geometric
       # constraint sharpens the peak); cap so a 3-body scene saturates.
+      # Not identifiable in the sim campaign (single-body scenes only);
+      # retained at the design prior.
       - feature: body_count
         alpha: 0.4
         divisor: 3.0
         cap_at: 1.0
       # Peak-to-runner-up ratio: a sharp, unambiguous correlation peak
-      # has ratio >> 1 vs the next-best peak.  alpha=0.0 for now so the
-      # term carries no weight pending calibration; the wiring is in
-      # place so once a calibration sweep tunes the alpha the formula
-      # picks it up without code changes.
+      # has ratio >> 1 vs the next-best peak.
       - feature: peak_to_runner_up_ratio
-        alpha: 0.0
+        alpha: 1.187
         divisor: 2.0
         cap_at: 1.0
     hard_zero_if:
@@ -96,21 +125,37 @@ techniques:
       spurious: true
 
   BodyBlobNav:
-    alpha0: -1.0
+    # Sim campaign (physical-body pass -- rendered relief and
+    # km_per_pixel tied to the config_220 residuals): n=468 usable,
+    # base rate 0.69, AUC 0.58 -> 0.89, Brier 0.30 -> 0.16.
+    # Note the campaign only exercises blobs the
+    # BODY_BLOB reliability gate admits (extent >= ~22 px): the gate's
+    # blob_snr input is the mean rendered model brightness, which sits
+    # far below the 0.20 threshold for genuinely small bodies, so the
+    # below-resolution regime this technique was designed for never
+    # reaches it autonomously (defect noted in the calibration report).
+    alpha0: 1.087
     terms:
       # Brightness-weighted centroid uncertainty shrinks with SNR.
+      # Campaign raw p5/p50/p95 = 18/70/681 (heavy tail).
       - feature: body_snr_inside_predicted_bbox
-        alpha: 0.5
-        divisor: 4.0
+        alpha: 0.934
+        divisor: 600.0
         cap_at: 1.0
-      # Larger blobs carry more centroid signal per the design's
-      # sigmoid(extent_px / 8 - 1) factor.
+      # NEGATIVE alpha, reversing the design's more-signal prior: in
+      # the gate-admitted regime the lit-weighted-centroid model error
+      # grows with apparent size, so absolute P(err <= 1 px) falls as
+      # the blob gets bigger (campaign correlation -0.47).  The design's
+      # small-blob rationale is unexercisable while the gate excludes
+      # small blobs.  Campaign raw p5/p50/p95 = 22/50/139.
       - feature: body_extent_px
-        alpha: 1.0
+        alpha: -1.564
         offset: 8.0
-        divisor: 8.0
+        divisor: 130.0
         cap_at: 1.0
       # Multi-body geometry over-determines the joint translation.
+      # Not identifiable in the sim campaign (single-body scenes only);
+      # retained at the design prior.
       - feature: blob_count
         alpha: 0.4
         divisor: 3.0
@@ -125,14 +170,14 @@ techniques:
       # irregular Hyperion at the same phase has unpredictable
       # shadowing on an unknown rotational orientation that the
       # ellipsoidal model cannot fully correct (factor ~ 0.15).
-      # Typical factors are 0.005-0.20; ``divisor: 0.15`` puts a
-      # textbook irregular-and-side-lit scene near the saturation
-      # point.  alpha=0.0 wires the term into the formula without
-      # weighting it; Phase 10 calibration tunes alpha to a negative
-      # value against the curated library.
+      # Calibrated on the physical-body campaign (config_220 residuals
+      # populated; simulated bodies rendered at the matching relief and
+      # navigated against the smooth ellipsoid): campaign raw factor
+      # p5/p50/p95 = 0.002 / 0.047 / 0.37, so the divisor spans that
+      # range (the design 0.15 saturated 29% of rows).
       - feature: max_phase_irregularity_factor
-        alpha: 0.0
-        divisor: 0.15
+        alpha: -0.806
+        divisor: 0.35
         cap_at: 1.0
     hard_zero_if:
       at_edge: true
@@ -145,24 +190,34 @@ techniques:
       # Pixels of slack around the search-window axis bounds for the
       # at-edge check.  See ``RingEdgeNav.at_edge_tolerance_px``.
       at_edge_tolerance_px: 1.0
-      # Uncalibrated model-error floor (px), added in quadrature to the
-      # reported covariance diagonal: reported_cov = CRLB-form (+)
-      # model_error_floor_px**2.  Captures the SPICE pointing residual
-      # and body-shape (ellipsoid vs. true silhouette) error that the
-      # per-blob centroid CRLB does not.  Default 0.0 is a no-op pending
-      # an integration-library calibration sweep.
-      model_error_floor_px: 0.0
+      # Model-error floor (px), added in quadrature to the reported
+      # covariance diagonal: reported_cov = CRLB-form (+)
+      # model_error_floor_px**2.  Captures the pointing / body-shape
+      # error the per-blob centroid CRLB does not (#210).  Calibrated to
+      # bring the campaign's 2-sigma coverage to 0.865
+      # (util/calibration/fit_floors).
+      model_error_floor_px: 1.1
 
   BodyLimbNav:
-    alpha0: -1.0
+    # Sim campaign (physical-body pass): n=311 usable, base rate
+    # 0.75, AUC 0.77, Brier 0.17.  The residual weight is smaller than
+    # the first-pass fit because the physically-scaled relief renders
+    # subtler shape error than the synthetic-lumpiness pass did.
+    alpha0: -2.386
     terms:
+      # The sim limb polyline always reports fraction 1.0 (it IS the
+      # visible boundary), so the coefficient is not identifiable from
+      # the campaign; the design's partial-arc penalty is retained and
+      # alpha0 above absorbs the constant 3.0 contribution.
       - feature: visible_limb_arc_fraction
         alpha: 3.0
       - feature: dt_fit_rms_px
-        alpha: -1.5
+        alpha: -0.41
+      # Campaign raw p5/p50/p95 = 151/280/440 (the old /100 cap-1
+      # pinned every row at the cap).
       - feature: visible_arc_px
-        alpha: 0.4
-        divisor: 100.0
+        alpha: 1.254
+        divisor: 440.0
         cap_at: 1.0
     hard_zero_if:
       at_edge: true
@@ -241,8 +296,21 @@ techniques:
       # Rotation-axis ``at_edge`` fraction; see
       # ``BodyDiscCorrelateNav.rotation_at_edge_fraction``.
       rotation_at_edge_fraction: 0.95
+      # Model-error floor (px), added in quadrature to the covariance's
+      # translation diagonal (#210).  The Tukey-weighted DT covariance
+      # under-reports the limb model error (the ~0.1 px gradient-peak
+      # offset, shape mismatch): campaign 2-sigma coverage 0.31 vs the
+      # 0.865 reference before flooring, 0.86 after
+      # (util/calibration/fit_floors).
+      model_error_floor_px: 0.92
 
   BodyTerminatorNav:
+    # NOT sim-calibrated: the simulated body model emits no
+    # TERMINATOR_ARC (crescent sim scenes navigate by BODY_BLOB), so
+    # the calibration campaign produced no rows for this technique and
+    # the uncalibrated defaults below are retained.  Calibrating it
+    # needs either terminator emission in the sim body model (#223) or
+    # a real-anchored calibration.
     alpha0: -1.0
     terms:
       - feature: visible_terminator_arc_fraction
@@ -290,23 +358,37 @@ techniques:
       # Rotation-axis ``at_edge`` fraction; see
       # ``BodyDiscCorrelateNav.rotation_at_edge_fraction``.
       rotation_at_edge_fraction: 0.95
+      # Model-error floor (px), copied from BodyLimbNav's calibrated
+      # value (#210): the sim emits no terminator arcs to calibrate
+      # against, and a terminator is a strictly softer edge than a limb
+      # fitted by the same DT machinery, so the limb's floor is a lower
+      # bound.  The two scalars are not linked; refitting the limb floor
+      # must revisit this one.
+      model_error_floor_px: 0.92
 
   RingEdgeNav:
-    alpha0: -1.0
+    # Sim campaign: n=596 usable, base rate 0.96, AUC 0.67 -> 0.69,
+    # Brier 0.36 -> 0.04.
+    alpha0: 1.841
     terms:
+      # Campaign raw p5/p50/p95 = 440/762/1552 (the old /200 cap-1
+      # pinned every row at the cap).
       - feature: total_edge_length_px
-        alpha: 1.0
-        divisor: 200.0
+        alpha: 1.137
+        divisor: 1500.0
         cap_at: 1.0
       # Penalise the MEAN per-edge DT residual (px), not the raw sum.  The sum
       # scales with the number of fused edges, so with a fixed divisor a frame
       # with more rings was penalised purely for having more rings, driving
       # confidence to zero on real multi-edge scenes.  The mean is
-      # edge-count independent: alpha -1.0 with the default unit divisor costs
-      # ~1 logit per pixel of mean per-edge residual.  PROVISIONAL magnitude --
-      # the px scale awaits the integration-library calibration sweep.
+      # edge-count independent.  The sim fit drives this alpha to its
+      # sign bound at 0.0: the campaign's failures are clean-residual
+      # wrong-ringlet locks (multi-ringlet aliasing), which the residual
+      # cannot see, and an unconstrained fit would have given the term a
+      # positive (anti-calibrated) weight.  Kept wired for a future
+      # real-anchored calibration.
       - feature: per_edge_dt_rms_mean
-        alpha: -1.0
+        alpha: 0.0
     hard_zero_if:
       at_edge: true
     tuning:
@@ -362,27 +444,29 @@ techniques:
     # cross-checks the assignment).  YAML alpha shape is identical for
     # both paths; the cap is applied post-sigmoid in
     # ``StarUniqueMatchNav.navigate``.
-    alpha0: -1.0
+    # Sim campaign: n=612 usable, base rate 0.80, AUC 0.91 -> 0.94,
+    # Brier 0.33 -> 0.06 (both modes pooled; the structural caps stay).
+    alpha0: 1.156
     terms:
       # Higher predicted SNR shrinks the centroid CRLB and tightens the
-      # match.  Saturate near snr=20 (typical bright catalog star).
+      # match.  Campaign raw p5/p50/p95 = 9/42/308.
       - feature: predicted_snr
-        alpha: 1.0
-        divisor: 20.0
+        alpha: 1.295
+        divisor: 100.0
         cap_at: 1.0
       # Magnitude margin to the next-brightest predictable star in the
       # extfov.  Below the 1.5 mag floor the technique short-circuits
       # before reaching the formula; above the floor, additional margin
       # earns confidence up to a 1.5 mag span.
       - feature: brightness_margin_mag
-        alpha: 1.0
+        alpha: 1.288
         offset: 1.5
         divisor: 1.5
         cap_at: 1.0
       # Larger residuals between the matched detection and the prediction
       # pull confidence down.
       - feature: residual_px
-        alpha: -1.0
+        alpha: -0.45
         divisor: 2.0
     hard_zero_if:
       at_edge: true
@@ -421,23 +505,24 @@ techniques:
       rotation_at_edge_fraction: 0.95
 
   StarRefineNav:
-    # Pass-2 refinement on the pass-1 ensemble's prior offset.  Tighter
-    # alphas than the unique-match path because every surviving inlier
-    # contributes independent evidence.
-    alpha0: -1.0
+    # Pass-2 refinement on the pass-1 ensemble's prior offset.  Fit on
+    # a re-collected campaign pass (the calibrated pass-1 formulas change
+    # which priors reach pass 2): n=567 usable, base rate 0.93,
+    # AUC 0.79, Brier 0.14 -> 0.05.
+    alpha0: 1.888
     terms:
       # More inliers => more independent constraints; saturate at 5.
       - feature: n_stars_used
-        alpha: 1.0
+        alpha: 1.144
         divisor: 5.0
         cap_at: 1.0
       # Lower median per-star error => tighter refinement.
       - feature: median_pos_err_px
-        alpha: -1.0
+        alpha: -0.822
         divisor: 1.0
       # Lower per-axis scatter => internally consistent fit.
       - feature: residual_scatter_px
-        alpha: -1.0
+        alpha: -0.213
         divisor: 1.0
     hard_zero_if:
       at_edge: true
@@ -474,35 +559,50 @@ techniques:
       # multi-inlier Procrustes path uses it; a 1-inlier refine always
       # reports rotation as unobservable.
       rotation_at_edge_fraction: 0.95
+      # Model-error floor (px), added in quadrature to the covariance's
+      # translation diagonal (#210): campaign 2-sigma coverage 0.60 vs
+      # the 0.865 reference before flooring, 0.86 after
+      # (util/calibration/fit_floors).
+      model_error_floor_px: 0.22
 
   StarFieldFromCatalogNav:
-    # Multi-star RANSAC pattern matcher.  Confidence is dominated by
-    # ``n_inliers`` (more matched stars => stronger constraint) and is
-    # pulled down by residual scatter.  The ``n_detected_sources`` and
-    # ``n_catalog_predicted`` terms ride alpha=0.0 pending Phase 10
-    # calibration; the wiring is in place so a sweep can tune them
-    # without code changes.
-    alpha0: -2.0
+    # Multi-star RANSAC pattern matcher.
+    # Sim campaign: n=106 usable, base rate 1.00 -- every non-spurious
+    # pattern match recovered planted truth, so the fit is single-class
+    # and the calibrated output is a high plateau rather than a
+    # discriminative curve; the hard_cap below keeps the single-class
+    # evidence from claiming near-certainty on real frames the sim
+    # cannot represent (distortion, smear, saturated bloom).
+    alpha0: 2.339
     terms:
       - feature: n_inliers
-        alpha: 1.0
+        alpha: 0.906
         offset: 6.0
         divisor: 6.0
         cap_at: 1.0
+      # Sign-constrained to zero by the fit: with no failure class the
+      # residual carries no signal in the campaign.  Kept wired for a
+      # future real-anchored calibration.
       - feature: median_residual_px
-        alpha: -1.0
+        alpha: 0.0
         divisor: 1.0
+      # Constant in the campaign (the detector always fills its
+      # max_sources=30 budget, noise peaks included) -- no information
+      # as wired; kept at zero weight.
       - feature: n_detected_sources
         alpha: 0.0
         divisor: 30.0
         cap_at: 1.0
       - feature: n_catalog_predicted
-        alpha: 0.0
+        alpha: 0.777
         divisor: 30.0
         cap_at: 1.0
     hard_zero_if:
       at_edge: true
       spurious: true
+    # Single-class sim evidence cannot support confidence above ~0.95;
+    # conservative ceiling pending the real-anchored calibration.
+    hard_cap: 0.95
     tuning:
       # Maximum number of brightest detected sources / brightest
       # catalog stars to feed the matcher.  Triplet count is M^3, so
@@ -591,31 +691,40 @@ techniques:
       psf_refine_snr_max: 30.0
 
   RingAnnulusNav:
-    alpha0: -2.0
+    # Sim campaign: n=515 usable, base rate 0.95, AUC 0.43 -> 0.91,
+    # Brier 0.31 -> 0.05 (after the displaced-template defect fix that
+    # this campaign surfaced).
+    alpha0: 0.895
     terms:
-      # PSR-style quality measure of the chosen NCC peak.  Healthy
-      # annulus fits report quality 6-15; the divisor maps that range
-      # onto the sigmoid's responsive interval.
+      # PSR-style quality measure of the chosen NCC peak.  Campaign raw
+      # p5/p50/p95 = 11/33/52 (the old /6 cap-1 pinned every row).
       - feature: ncc_peak
-        alpha: 1.5
-        divisor: 6.0
+        alpha: 1.184
+        offset: 6.0
+        divisor: 45.0
         cap_at: 1.0
-      # Peak-to-runner-up ratio: alpha=0.0 pending calibration (same
-      # posture as BodyDiscCorrelateNav).
       - feature: peak_to_runner_up_ratio
-        alpha: 0.0
+        alpha: 1.106
         divisor: 2.0
         cap_at: 1.0
       # Reward additional ring systems in the composite.  The current
       # spacecraft fleet has at most a handful of multi-planet ring
       # scenes, so the saturation cap is at 2 (vs body_count's 3).
       - feature: annulus_count
-        alpha: 0.4
+        alpha: 0.321
         divisor: 2.0
         cap_at: 1.0
     hard_zero_if:
       at_edge: true
       spurious: true
+    tuning:
+      # Model-error floor (px), added in quadrature to the reported
+      # covariance diagonal (#210).  The NCC peak-curvature covariance
+      # measures photon statistics only (campaign 1-sigma coverage
+      # ~0.00 vs the 0.39 2D-Gaussian reference); this floor carries
+      # the ring-template model error and brings 2-sigma coverage to
+      # 0.865 on the campaign (util/calibration/fit_floors).
+      model_error_floor_px: 0.13
 
 
 # Feature-emission tunables that decide which technique a given

@@ -48,7 +48,9 @@ from spindoctor.nav_technique.feasibility import NavFeasibilityReport
 from spindoctor.nav_technique.nav_technique import (
     ROTATION_UNOBSERVABLE_VARIANCE,
     NavTechnique,
+    add_model_error_floor,
     embed_rotation_unobservable,
+    load_model_error_floor,
     log_confidence_breakdown,
     rotation_unobservable_sigma_rad,
     search_window_for_obs,
@@ -145,6 +147,7 @@ class StarRefineNav(NavTechnique):
         self._at_edge_tolerance_px = float(self.tuning['at_edge_tolerance_px'])
         self._single_inlier_confidence_cap = float(self.tuning['single_inlier_confidence_cap'])
         self._rotation_at_edge_fraction = float(self.tuning['rotation_at_edge_fraction'])
+        self._model_error_floor_px = load_model_error_floor(self.tuning, self.name)
         if self._min_inliers < 1:
             raise ValueError(f'min_inliers must be >= 1; got {self._min_inliers}')
         if not 0.0 <= self._single_inlier_confidence_cap <= 1.0:
@@ -326,6 +329,8 @@ class StarRefineNav(NavTechnique):
                 residual_scatter_px,
                 confidence,
             )
+            # Model-error floor (#210); rationale on load_model_error_floor.
+            cov = add_model_error_floor(cov, self._model_error_floor_px)
             return NavTechniqueResult(
                 technique_name=self.name,
                 feature_ids=tuple(f.feature_id for f in inliers),

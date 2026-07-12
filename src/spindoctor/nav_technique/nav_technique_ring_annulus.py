@@ -36,7 +36,9 @@ from spindoctor.nav_technique.diagnostics import RingAnnulusDiagnostics
 from spindoctor.nav_technique.feasibility import NavFeasibilityReport
 from spindoctor.nav_technique.nav_technique import (
     NavTechnique,
+    add_model_error_floor,
     embed_rotation_unobservable,
+    load_model_error_floor,
     log_confidence_breakdown,
     rotation_unobservable_sigma_rad,
     search_window_for_obs,
@@ -102,6 +104,8 @@ class RingAnnulusNav(NavTechnique):
 
     def __init__(self, *, config: Config | None = None) -> None:
         super().__init__(config=config)
+        self.config.read_config()  # ensure cls.tuning is populated
+        self._model_error_floor_px = load_model_error_floor(self.tuning, self.name)
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Return whether the input set carries any usable RING_ANNULUS feature.
@@ -203,6 +207,8 @@ class RingAnnulusNav(NavTechnique):
             covariance_2x2 = np.asarray(ncc_result['cov'], np.float64)
             if covariance_2x2.shape != (2, 2):
                 covariance_2x2 = covariance_2x2[:2, :2]
+            # Model-error floor (#210); rationale on load_model_error_floor.
+            covariance_2x2 = add_model_error_floor(covariance_2x2, self._model_error_floor_px)
             fit_rotation = bool(context.fit_camera_rotation)
             covariance: NDArrayFloatType = (
                 embed_rotation_unobservable(covariance_2x2) if fit_rotation else covariance_2x2

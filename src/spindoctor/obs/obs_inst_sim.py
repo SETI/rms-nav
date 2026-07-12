@@ -1,3 +1,4 @@
+import math
 from pathlib import Path
 from typing import Any, cast
 
@@ -136,7 +137,50 @@ class ObsSim(ObsSnapshotInst):
         return 0.0
 
     def star_max_usable_vmag(self) -> float:
-        return 100.0
+        """Returns the maximum usable magnitude for stars in this observation.
+
+        Derived from the scene's own detector model rather than anchored to a
+        reference exposure the way the real instruments do it: the sim
+        renderer draws a star's PSF peak at ``signal_full_scale_dn *
+        2.512**-vmag`` DN (see ``sim.render``), so the limiting magnitude is
+        where that peak falls to twice the effective per-pixel noise sigma --
+        the matched-filter detection boundary measured on single-star sim
+        scenes.  Keeping this physical matters beyond the faint-star gate:
+        the star NavModel synthesises each STAR feature's predicted SNR (and
+        from it the CRLB position covariance and reliability score) from how
+        far the star sits above this limit, so an arbitrarily permissive
+        placeholder inflates every simulated star's SNR by tens of orders of
+        magnitude and collapses its covariance to zero.
+
+        Returns:
+            The maximum usable magnitude for stars in this observation.  For
+            calibrated-unit sim instruments the renderer applies no detector
+            noise, so any rendered star is detectable and the limit is a
+            generous constant.
+        """
+        inst_config = self._inst_config or {}
+        inst_noise = inst_config.get('noise') or {}
+        if inst_config.get('data_units', 'raw_dn') != 'raw_dn':
+            # calibrated_if: the renderer leaves the composed I/F signal
+            # noise-free (detector noise there is deferred sim scope).
+            return 30.0
+        # Mirror the renderer's resolution order: scene noise block first,
+        # then the emulated instrument's config, then the sim defaults.
+        sim_noise = self.config.category('sim')['noise']
+        scene_noise = self.sim_params.get('noise') or {}
+        full_scale_frac = float(
+            scene_noise.get('signal_full_scale_frac', sim_noise['signal_full_scale_frac'])
+        )
+        signal_full_scale_dn = float(
+            scene_noise.get(
+                'signal_full_scale_dn', full_scale_frac * float(inst_noise['full_well_dn'])
+            )
+        )
+        read_noise_dn = float(scene_noise.get('read_noise_dn', inst_noise['read_noise_dn']))
+        # Poisson shot noise on the star's own counts keeps the effective
+        # sigma above ~1 DN even on a read-noise-free frame.
+        sigma_eff = max(read_noise_dn, 1.0)
+        return 2.5 * math.log10(signal_full_scale_dn / (2.0 * sigma_eff))
 
     def get_public_metadata(self) -> dict[str, Any]:
         return {

@@ -35,6 +35,8 @@ from spindoctor.nav_technique.feasibility import NavFeasibilityReport
 from spindoctor.nav_technique.nav_technique import (
     ROTATION_UNOBSERVABLE_VARIANCE,
     NavTechnique,
+    add_model_error_floor,
+    load_model_error_floor,
     log_confidence_breakdown,
     search_window_for_obs,
 )
@@ -234,6 +236,7 @@ class BodyDiscCorrelateNav(NavTechnique):
         )
         self._consistency_max_px = float(self.tuning['consistency_max_px'])
         self._refine_lowpass_sigma_px = float(self.tuning['refine_lowpass_sigma_px'])
+        self._model_error_floor_px = load_model_error_floor(self.tuning, self.name)
 
     def is_feasible(self, features: list[NavFeature]) -> NavFeasibilityReport:
         """Return whether the input set carries any usable BODY_DISC feature.
@@ -344,6 +347,8 @@ class BodyDiscCorrelateNav(NavTechnique):
                     f'covariance with shape {covariance_2x2.shape}; expected (2, 2). '
                     'Investigate the pyramid output rather than silently slicing.'
                 )
+            # Model-error floor (#210); rationale on load_model_error_floor.
+            covariance_2x2 = add_model_error_floor(covariance_2x2, self._model_error_floor_px)
             spurious = bool(ncc_result['spurious'])
             at_edge_translation = bool(ncc_result['at_edge'])
             quality = float(ncc_result['quality'])

@@ -443,3 +443,34 @@ def test_upsample_factor_rejects_overlarge_value() -> None:
     technique._config = _StubConfig()  # type: ignore[assignment]
     with pytest.raises(ValueError, match=r'must lie in \[1,'):
         technique._upsample_factor()
+
+
+def test_ring_annulus_model_error_floor_inflates_covariance(
+    make_nav_context: NavContextFactory,
+) -> None:
+    """model_error_floor_px adds exactly its square to the covariance diagonal.
+
+    The NCC peak-curvature covariance measures photon statistics only; the
+    floor (calibrated against the simulated-scene campaign) carries the
+    template model error.
+    """
+    shape = (180, 180)
+    image_center = (90.0, 90.0)
+    image = _render_annulus_image(shape, image_center, 14.0, 28.0)
+    feature = _make_annulus_feature(
+        'SATURN',
+        extfov_shape=shape,
+        image_center_vu=image_center,
+        inner_radius=14.0,
+        outer_radius=28.0,
+        planted_offset_vu=(2.0, -3.0),
+    )
+    context = make_nav_context(image, extfov_margin_vu=(16, 16))
+    bare = RingAnnulusNav()
+    bare._model_error_floor_px = 0.0
+    floored = RingAnnulusNav()
+    floored._model_error_floor_px = 1.5
+    cov_bare = bare.navigate([feature], context).covariance_px2
+    cov_floored = floored.navigate([feature], context).covariance_px2
+    for axis in (0, 1):
+        assert cov_floored[axis, axis] == pytest.approx(cov_bare[axis, axis] + 1.5**2, rel=1e-9)
