@@ -763,3 +763,21 @@ def test_coarse_disc_offset_bounded_for_offframe_giant() -> None:
     assert isinstance(offset, tuple)
     assert abs(offset[0]) <= 32
     assert abs(offset[1]) <= 32
+
+
+def test_coarse_crescent_offset_bounded_for_offframe_giant() -> None:
+    """The crescent path clamps its kernel exactly like the disc path.
+
+    ``_coarse_crescent_offset`` builds its own template, so removing the
+    clamp there would regress independently of the disc caller: an
+    off-frame giant at high phase would again allocate a kernel quadratic
+    in the predicted diameter inside fftconvolve (issue #202).
+    """
+    image = np.zeros((128, 128), dtype=np.float64)
+    image[40:90, 30:80] = 50.0
+    offset = _coarse_crescent_offset(
+        image, (64.0, 64.0), 40_000.0, 120.0, (0.0, -1.0), (32, 32)
+    )
+    assert isinstance(offset, tuple)
+    assert abs(offset[0]) <= 32
+    assert abs(offset[1]) <= 32

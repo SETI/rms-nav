@@ -66,7 +66,7 @@ bounding box on the body before the centroid is taken:
   shift is expressed in lit-centroid terms and matches the residual the centroid step forms.
 
 Both templates clamp their radius to the frame's half-diagonal
-(:func:`~spindoctor.nav_technique.nav_technique_body_blob._clamped_kernel_radius`): a template
+(``_clamped_kernel_radius``): a template
 larger than the frame adds no localization information, while the kernel array and its FFT
 convolution allocate memory quadratically in the predicted diameter — a mostly off-frame gas
 giant predicts tens of thousands of pixels and exhausted RAM before the clamp (issue #202).
