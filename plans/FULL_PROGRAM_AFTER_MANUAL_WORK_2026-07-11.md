@@ -41,9 +41,11 @@ each merge): **#208 → #213 → #214 → #215 → #216 → #217 → #218 → #2
 Track B remainder (deferred with reasons): #128 (design first), #150 (WS-10
 science; validate against real images before touching), #130 (needs a real
 star-field campaign), #179 (needs a calibration pass), #25
-(investigation), #210 (NCC covariance scale — the big open covariance item), the sub-5 px policy
-and #212 (**yours**), and the two session triage items (multi_body,
-Voyager scattered_light) — not started.
+(investigation), #210 (rescoped to the NCC covariance-model review; the coverage symptom is
+fixed by the floors), the sub-5 px policy (**yours**), #212 (rescoped to the
+software xdist nondeterminism — the faulty cores are permanently disabled, no
+RMA), and the two session triage items (multi_body, Voyager scattered_light)
+— not started.
 
 Sources: `plans/VALIDATION_AND_CALIBRATION_PLAN.md` (workstreams WS-0..WS-18 and
 Milestones A–D), `plans/ROADMAP.md` (Phases 0–3 + hardening track),
@@ -152,7 +154,7 @@ improve WS-1's data quality, so they should land before or during it.
 | Session: multi_body N17023890xx triage (3 frames, all techniques spurious) | Likely occlusion/model-conflict bug; one debugging session. | Open |
 | Session: Voyager scattered_light C00598xx quintet fails wholesale | Voyager photometric path or prescan criteria. | Open |
 | Session: sub-5 px body policy — expected-failure sidecars vs a relaxed-disc pathway | Decide and implement or curate as expected failures. **Needs your decision.** | Open — yours |
-| #212 — closes after your CPU RMA (remove systemd unit + setup.sh taskset) | Hardware tracker. | Open — yours |
+| #212 — xdist worker-history nondeterminism | The faulty CPU cores are permanently disabled (no RMA; the systemd offline unit and `setup.sh` taskset line are permanent). Rescoped to the software flake only; nothing gates on hardware. | Open |
 
 ---
 
