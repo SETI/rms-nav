@@ -841,14 +841,20 @@ and input support is **not required for project completion** — when an
 archive becomes available, implementing its `DataSetPDS4` replaces the PDS3
 source for that instrument.
 
-**Problem.** `pds4_*` bundle hooks raise `NotImplementedError` for Voyager,
-Galileo, NH; `dataset_pds4.py` (input) raises "not yet implemented" for all
-methods, correctly, since no input archive exists to read.
+**Problem.** No instrument's bundle output works today: the Cassini path is
+partially implemented (hook pattern and collection machinery exist) but has
+no final templates, no tests, and no schema validation; the `pds4_*` bundle
+hooks raise `NotImplementedError` for Voyager, Galileo, NH.
+`dataset_pds4.py` (input) raises "not yet implemented" for all methods,
+correctly, since no input archive exists to read.
 
 **Tasks:**
+- **Finish and validate the Cassini path (required):** final templates,
+ tests, and schema validation for the partially implemented reference
+ implementation.
 - **Bundle generalization (required):** implement `pds4_*` hooks (template
- dir, LID/LIDVID, template variables) for Voyager/Galileo/NH using
- `DataSetPDS3CassiniISS` as the reference, with per-mission template trees.
+ dir, LID/LIDVID, template variables) for Voyager/Galileo/NH using the
+ completed Cassini path as the reference, with per-mission template trees.
 - Add bundle-validation tests (schema-validate generated `.lblx` against PDS4
  schemas) for all four instruments.
 - **PDS4 input (deferred until archives exist):** implement `DataSetPDS4`

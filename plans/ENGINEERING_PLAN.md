@@ -188,12 +188,16 @@ and input support (#34, `dataset_pds4.py`) is not required for project
 completion — when an archive appears, implementing its `DataSetPDS4`
 replaces the PDS3 source for that instrument.
 
-Output current state: Cassini ISS bundles work end to end; the other
-three instruments hit `NotImplementedError` walls in their `pds4_*`
-DataSet hooks. The per-dataset hook pattern (template dir, LID/LIDVID
-builders, template variables) is established on `DataSetPDS3CassiniISS`
-— generalization is per-mission template trees plus hook
-implementations, mechanical but voluminous.
+Output current state: nothing works end to end yet. The Cassini path is
+partially implemented — the per-dataset hook pattern (template dir,
+LID/LIDVID builders, template variables) exists on
+`DataSetPDS3CassiniISS` and the collection machinery runs — but it has
+no final templates, zero tests (#242), and no schema validation, so its
+output is unvalidated. The other three instruments additionally hit
+`NotImplementedError` walls in their `pds4_*` DataSet hooks. The work
+is therefore: finish and validate Cassini first (final templates,
+tests, schema validation), then generalize — per-mission template trees
+plus hook implementations, mechanical but voluminous.
 
 Work items, in dependency order:
 

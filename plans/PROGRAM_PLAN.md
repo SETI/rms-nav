@@ -45,8 +45,9 @@ uncertainties is not finished, it is merely running.
 
 The engineering core is built and healthy: the full navigation architecture
 (nine autonomous techniques plus manual), reprojection, backplanes,
-Cassini PDS4 bundles, simulation, statistics reporting, and strict quality
-gates (typing, linting, ~1,700 tests) are in place. An independent project
+simulation, statistics reporting, and strict quality gates (typing,
+linting, ~1,700 tests) are in place. PDS4 bundle generation exists only
+as partially implemented machinery (see Track D). An independent project
 review (2026-07-08) rated the engineering strong and the self-assessment
 honest.
 
@@ -215,10 +216,13 @@ commitment:
 | **Backplane content** (#28 family): finalize the backplane set and formats | #55, #54, #57, #77, then the generator hardening. |
 
 **PDS4 output bundles are required for all four instruments** — not a
-scope decision. Cassini bundles work today; Voyager, Galileo, and New
-Horizons hit not-implemented walls that are open work: per-mission label
-templates, LID builders, and collection machinery (#53 with #66, #67,
-#69, #71-#76, #79, #47, #30, #63). Distinct from this, **PDS4 *input***
+scope decision — and **none of it works today**. The Cassini path is
+partially implemented machinery with no final templates, no tests, and
+no validation; Voyager, Galileo, and New Horizons additionally hit
+not-implemented walls. The work is: finish and validate the Cassini
+path (final templates, schema validation, tests), then generalize —
+per-mission label templates, LID builders, and collection machinery
+(#53 with #66, #67, #69, #71-#76, #79, #47, #30, #63). Distinct from this, **PDS4 *input***
 (#34) — reading PDS4-archived data instead of PDS3 — is treated like any
 other future instrument: the archives do not exist yet, their creation
 is external development outside our control, and input support is *not*
