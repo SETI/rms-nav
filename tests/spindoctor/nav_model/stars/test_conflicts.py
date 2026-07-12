@@ -4,9 +4,15 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+import numpy as np
 import pytest
 
-from spindoctor.nav_model.stars.conflicts import _conflict_body_list, parse_ring_occlusion_annuli
+import spindoctor.nav_model.stars.conflicts as conflicts_module
+from spindoctor.nav_model.stars.conflicts import (
+    _conflict_body_list,
+    _ring_opaque_fraction,
+    parse_ring_occlusion_annuli,
+)
 
 
 def test_parse_ring_occlusion_annuli_normalises_keys() -> None:
@@ -106,3 +112,141 @@ def test_conflict_body_list_returns_empty_when_no_closest_planet() -> None:
     """When ``obs.closest_planet`` is ``None`` the body list is empty."""
     out = _conflict_body_list(cast(Any, _FakeObsNoPlanet()), cast(Any, _FakeEmptyConfig()))
     assert out == []
+
+
+# --- Per-pixel ring occlusion (issue #145) ---
+
+
+def test_ring_opaque_fraction_counts_per_pixel_membership() -> None:
+    """Half the window inside the annulus gives fraction 0.5."""
+    radii = np.array([[100.0, 100.0], [200.0, 200.0]])
+    valid = np.ones_like(radii, dtype=bool)
+    fraction = _ring_opaque_fraction(radii, valid, [(150.0, 250.0)])
+    assert fraction == pytest.approx(0.5)
+
+
+def test_ring_opaque_fraction_ignores_invalid_pixels() -> None:
+    """Masked pixels are excluded from both numerator and denominator."""
+    radii = np.array([[100.0, 200.0], [200.0, 200.0]])
+    valid = np.array([[True, True], [False, False]])
+    fraction = _ring_opaque_fraction(radii, valid, [(150.0, 250.0)])
+    assert fraction == pytest.approx(0.5)
+
+
+def test_ring_opaque_fraction_zero_when_all_invalid() -> None:
+    """An all-masked window yields fraction 0.0 (no occlusion verdict)."""
+    radii = np.array([[100.0, 200.0]])
+    valid = np.zeros_like(radii, dtype=bool)
+    assert _ring_opaque_fraction(radii, valid, [(150.0, 250.0)]) == 0.0
+
+
+def test_ring_opaque_fraction_unions_annuli() -> None:
+    """A pixel inside any configured annulus counts as opaque."""
+    radii = np.array([[100.0, 300.0, 500.0]])
+    valid = np.ones_like(radii, dtype=bool)
+    fraction = _ring_opaque_fraction(radii, valid, [(90.0, 110.0), (290.0, 310.0)])
+    assert fraction == pytest.approx(2.0 / 3.0)
+
+
+class _FakeScalar:
+    """Stand-in for the oops ring-radius backplane scalar."""
+
+    def __init__(self, vals: np.ndarray, mask: np.ndarray | bool = False) -> None:
+        self.vals = vals
+        self.mask = mask
+
+    def is_all_masked(self) -> bool:
+        """True when every window pixel is masked."""
+        return bool(np.all(self.mask))
+
+
+class _FakeBackplane:
+    """Stand-in Backplane serving canned body and ring answers."""
+
+    ring_radii: np.ndarray = np.zeros((1, 1))
+
+    def __init__(self, obs: Any, meshgrid: Any) -> None:
+        del obs, meshgrid
+
+    def where_intercepted(self, body_name: str) -> np.ndarray:
+        """No body intercepts anywhere in the window."""
+        del body_name
+        return np.zeros((2, 2), dtype=bool)
+
+    def ring_radius(self, ring_target: str) -> _FakeScalar:
+        """Serve the canned ring-radius window."""
+        del ring_target
+        return _FakeScalar(self.ring_radii)
+
+
+class _FakeMeshgrid:
+    """Stand-in for ``oops.Meshgrid`` construction."""
+
+    @staticmethod
+    def for_fov(fov: Any, *, origin: Any, limit: Any) -> None:
+        """Accept the call; the fake backplane ignores the meshgrid."""
+        del fov, origin, limit
+        return None
+
+
+class _FakeStar:
+    """Minimal star record for the conflict check."""
+
+    def __init__(self) -> None:
+        self.u = 10.0
+        self.v = 10.0
+        self.conflicts = ''
+
+
+def _run_check_one_star(
+    monkeypatch: pytest.MonkeyPatch,
+    ring_radii: np.ndarray,
+    *,
+    min_opaque_fraction: float,
+) -> _FakeStar:
+    """Run ``_check_one_star`` against a canned ring-radius window."""
+    monkeypatch.setattr(conflicts_module, 'Meshgrid', _FakeMeshgrid)
+    monkeypatch.setattr(conflicts_module, 'Backplane', _FakeBackplane)
+    monkeypatch.setattr(_FakeBackplane, 'ring_radii', ring_radii)
+    star = _FakeStar()
+    obs = _FakeObsWithSaturn()
+    obs_any = cast(Any, obs)
+    obs_any.fov = object()
+    conflicts_module._check_one_star(
+        obs=obs_any,
+        star=cast(Any, star),
+        body_list=['SATURN'],
+        ring_annuli={'SATURN': [(74490.0, 91980.0)]},
+        rings_can_conflict=True,
+        body_conflict_margin=2.0,
+        ring_min_opaque_fraction=min_opaque_fraction,
+    )
+    return star
+
+
+def test_check_one_star_flags_star_straddling_annulus_edge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A window straddling the annulus edge is judged per pixel, not by median.
+
+    Two thirds of the window sit just outside the C-ring inner edge, so the
+    median radius lands in free space and a collapsed-median test would clear
+    the star -- but a third of its window is over opaque ring material.
+    """
+    ring_radii = np.array([[74000.0, 74000.0, 74000.0], [74500.0, 74500.0, 74000.0]])
+    star = _run_check_one_star(monkeypatch, ring_radii, min_opaque_fraction=0.25)
+    assert star.conflicts == 'RING: SATURN'
+
+
+def test_check_one_star_clears_star_when_median_falls_in_thin_annulus(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A visible star is kept when only a sliver of the window is opaque.
+
+    The median radius of this window falls inside the annulus, so the
+    collapsed-median test would reject the star even though only one of six
+    pixels is actually over ring material.
+    """
+    ring_radii = np.array([[60000.0, 70000.0, 74500.0], [95000.0, 100000.0, 105000.0]])
+    star = _run_check_one_star(monkeypatch, ring_radii, min_opaque_fraction=0.25)
+    assert star.conflicts == ''

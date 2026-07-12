@@ -107,7 +107,7 @@ class NavModelStars(NavModel):
         self._smear_vu: tuple[float, float] = (0.0, 0.0)
 
     @classmethod
-    def instances_for_obs(cls, obs: Observation) -> list[NavModel]:
+    def instances_for_obs(cls, obs: Observation, *, config: Config | None = None) -> list[NavModel]:
         """Return one star NavModel per real observation.
 
         Simulated obs have no real star-catalog pointing, so no star model is
@@ -115,13 +115,15 @@ class NavModelStars(NavModel):
 
         Parameters:
             obs: Observation snapshot.
+            config: Configuration passed to the constructed instance.  None
+                uses ``DEFAULT_CONFIG``.
 
         Returns:
             ``[NavModelStars('stars', obs)]`` for a real obs, else ``[]``.
         """
         if getattr(obs, 'is_simulated', False):
             return []
-        return [cls('stars', obs)]
+        return [cls('stars', obs, config=config)]
 
     @property
     def stars(self) -> list[MutableStar]:

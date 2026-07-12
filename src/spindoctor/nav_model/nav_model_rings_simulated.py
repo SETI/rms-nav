@@ -127,7 +127,9 @@ class NavModelRingsSimulated(NavModelRingsBase):
         self._bbox_extfov_vu: tuple[int, int, int, int] = (0, 0, 0, 0)
 
     @classmethod
-    def instances_for_obs(cls, obs: oops.Observation) -> list[NavModel]:
+    def instances_for_obs(
+        cls, obs: oops.Observation, *, config: Config | None = None
+    ) -> list[NavModel]:
         """Build one simulated ring model per ring of a simulated obs.
 
         Reads ``obs.sim_params['rings']``; returns an empty list for a real obs
@@ -135,6 +137,8 @@ class NavModelRingsSimulated(NavModelRingsBase):
 
         Parameters:
             obs: Observation snapshot.
+            config: Configuration passed to the constructed instances.  None
+                uses ``DEFAULT_CONFIG``.
 
         Returns:
             One ``NavModelRingsSimulated`` per ring in the sim scene.
@@ -149,7 +153,7 @@ class NavModelRingsSimulated(NavModelRingsBase):
             if not isinstance(ring_params, dict):
                 continue
             ring_name = str(ring_params.get('name', 'SIM-RING'))
-            out.append(cls(f'rings_sim:{ring_name}', obs, ring_name, ring_params))
+            out.append(cls(f'rings_sim:{ring_name}', obs, ring_name, ring_params, config=config))
         return out
 
     def create_model(self) -> None:

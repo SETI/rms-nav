@@ -218,8 +218,21 @@ class NavModelRings(NavModelRingsBase):
         self._subject_range_km: float = float('inf')
 
     @classmethod
-    def instances_for_obs(cls, obs: oops.Observation) -> list[NavModel]:
-        """Return one NavModelRings per planet whose ring catalog touches the FOV."""
+    def instances_for_obs(
+        cls, obs: oops.Observation, *, config: Config | None = None
+    ) -> list[NavModel]:
+        """Return one NavModelRings per planet whose ring catalog touches the FOV.
+
+        Parameters:
+            obs: Observation snapshot.
+            config: Configuration whose ring catalog decides which planets have
+                navigable rings; also passed to the constructed instances.  None
+                uses ``DEFAULT_CONFIG``.
+
+        Returns:
+            ``[NavModelRings]`` for the closest planet when its ring catalog is
+            configured and the obs exposes the extfov surface, else ``[]``.
+        """
         # Simulated obs use the sim-params-driven NavModelRingsSimulated instead.
         if getattr(obs, 'is_simulated', False):
             return []
@@ -230,11 +243,11 @@ class NavModelRings(NavModelRingsBase):
         # stand-ins that don't expose those are not applicable.
         if not hasattr(obs, 'extdata_shape_vu') or not hasattr(obs, 'ext_bp'):
             return []
-        rings_config = DEFAULT_CONFIG.rings
+        rings_config = (config if config is not None else DEFAULT_CONFIG).rings
         ring_features_dict = getattr(rings_config, 'ring_features', None)
         if not ring_features_dict or planet not in ring_features_dict:
             return []
-        return [cls(f'rings:{planet}', obs)]
+        return [cls(f'rings:{planet}', obs, config=config)]
 
     def create_model(self) -> None:
         """Run the four-pass filter, render surviving features, populate metadata."""

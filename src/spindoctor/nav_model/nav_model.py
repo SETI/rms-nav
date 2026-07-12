@@ -90,7 +90,7 @@ class NavModel(NavBase, ABC):
         return self._metadata
 
     @classmethod
-    def instances_for_obs(cls, obs: ObsSnapshot) -> list[NavModel]:
+    def instances_for_obs(cls, obs: ObsSnapshot, *, config: Config | None = None) -> list[NavModel]:
         """Return concrete NavModel instances applicable to ``obs``.
 
         Default returns ``[]``.  Subclasses that auto-instantiate from an
@@ -104,11 +104,13 @@ class NavModel(NavBase, ABC):
 
         Parameters:
             obs: Observation snapshot to inspect.
+            config: Configuration used both to decide which instances apply
+                and to construct them.  None uses ``DEFAULT_CONFIG``.
 
         Returns:
             Zero or more NavModel instances.
         """
-        del obs
+        del obs, config
         return []
 
     @abstractmethod
@@ -154,7 +156,7 @@ class NavModel(NavBase, ABC):
         """
 
 
-def build_models_for_obs(obs: ObsSnapshot) -> list[NavModel]:
+def build_models_for_obs(obs: ObsSnapshot, *, config: Config | None = None) -> list[NavModel]:
     """Construct every NavModel applicable to ``obs``.
 
     Iterates ``NavModel._registry`` and lets each registered concrete
@@ -165,11 +167,15 @@ def build_models_for_obs(obs: ObsSnapshot) -> list[NavModel]:
 
     Parameters:
         obs: Observation snapshot.
+        config: Configuration used both to decide which instances apply and
+            to construct them, so a per-run override changes model selection
+            the same way it changes model behavior.  None uses
+            ``DEFAULT_CONFIG``.
 
     Returns:
         Flat list of NavModel instances ready for the orchestrator.
     """
     out: list[NavModel] = []
     for cls in NavModel._registry:
-        out.extend(cls.instances_for_obs(obs))
+        out.extend(cls.instances_for_obs(obs, config=config))
     return out
