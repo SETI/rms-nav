@@ -80,6 +80,12 @@ def rows_from_metadata(
     image_name = observation.get('image_name')
     if not image_name:
         raise ValueError(f'{source_file}: metadata lacks observation.image_name')
+    # The pipeline records the instrument in the metadata itself; the
+    # filename-shape classifier is the fallback for documents that lack
+    # the field.
+    instrument = observation.get('instrument')
+    if not isinstance(instrument, str) or not instrument:
+        instrument = instrument_from_image_name(str(image_name))
     nav = metadata.get('navigation_result') or {}
     provenance = nav.get('provenance') or {}
     classifier = nav.get('image_classifier') or {}
@@ -90,7 +96,7 @@ def rows_from_metadata(
 
     image_row: dict[str, Any] = {
         'image_name': image_name,
-        'instrument': instrument_from_image_name(str(image_name)),
+        'instrument': instrument,
         'image_path': observation.get('image_path'),
         'image_et': image_et,
         'image_date': date_from_image_et(image_et),

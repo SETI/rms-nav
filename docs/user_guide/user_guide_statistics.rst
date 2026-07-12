@@ -38,8 +38,10 @@ was ingested.
 
 The schema has three tables:
 
-- ``images`` — one row per image: instrument (classified from the image
-  name), UTC image date (derived from the SPICE epoch), status and failure
+- ``images`` — one row per image: instrument (from the metadata document's
+  ``observation.instrument`` field, falling back to filename-shape
+  classification for documents that lack the field), UTC image date (derived
+  from the SPICE epoch), status and failure
   reason, fused offset / sigma / confidence / tier, ensemble consensus
   exclusions, image-classifier verdict, and run provenance (config hash, git
   SHA, pipeline timestamp).

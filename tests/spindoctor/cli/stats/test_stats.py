@@ -18,6 +18,7 @@ from spindoctor.cli.stats.schema import open_stats_db, upsert_image
 def _metadata(
     *,
     image_name: str = 'N1454725799_1_CALIB.IMG',
+    instrument: str | None = 'coiss',
     status: str = 'success',
     status_reason: str = 'ok',
     offset: list[float] | None = None,
@@ -27,15 +28,22 @@ def _metadata(
     excluded: list[str] | None = None,
     image_et: float = 0.0,
 ) -> dict[str, Any]:
-    """Build a minimal metadata document in the navigate_image_files shape."""
+    """Build a minimal metadata document in the navigate_image_files shape.
+
+    ``instrument=None`` omits the ``observation.instrument`` field to model
+    a metadata document that predates the field.
+    """
     if offset is None and status == 'success':
         offset = [1.5, -2.5]
+    observation: dict[str, Any] = {
+        'image_path': f'/holdings/{image_name}',
+        'image_name': image_name,
+    }
+    if instrument is not None:
+        observation['instrument'] = instrument
     return {
         'status': status,
-        'observation': {
-            'image_path': f'/holdings/{image_name}',
-            'image_name': image_name,
-        },
+        'observation': observation,
         'navigation_result': {
             'status': status,
             'status_reason': status_reason,
@@ -157,6 +165,20 @@ def test_rows_from_metadata_requires_image_name() -> None:
         rows_from_metadata({'observation': {}}, source_file='x.json')
 
 
+def test_rows_from_metadata_prefers_recorded_instrument() -> None:
+    """The recorded observation.instrument wins over the filename shape."""
+    doc = _metadata(instrument='sim')
+    image_row, _, _ = rows_from_metadata(doc, source_file='x.json')
+    assert image_row['instrument'] == 'sim'
+
+
+def test_rows_from_metadata_instrument_falls_back_to_filename() -> None:
+    """A document without observation.instrument classifies by filename."""
+    doc = _metadata(instrument=None)
+    image_row, _, _ = rows_from_metadata(doc, source_file='x.json')
+    assert image_row['instrument'] == 'coiss'
+
+
 # --- ingestion ---
 
 
@@ -245,6 +267,7 @@ def _populated_db(tmp_path: Path) -> sqlite3.Connection:
         ),
         _metadata(
             image_name='C3250013_GEOMED.IMG',
+            instrument='vgiss',
             status='failed',
             status_reason='no_features_extracted',
             offset=None,

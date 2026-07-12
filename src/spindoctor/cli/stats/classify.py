@@ -21,6 +21,10 @@ _NHLORRI_RE = re.compile(r'^LOR_\d+.*$')
 def instrument_from_image_name(image_name: str) -> str:
     """Classify an image filename into one of the supported instruments.
 
+    Fallback only: ingest prefers the ``observation.instrument`` field the
+    pipeline records in each metadata document and calls this just for
+    documents that lack the field.
+
     Parameters:
         image_name: Image filename, with or without directory, calibration
             suffix, or extension (``N1454725799_1_CALIB.IMG`` and

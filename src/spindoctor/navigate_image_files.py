@@ -33,7 +33,7 @@ from spindoctor.nav_orchestrator import (
     NavResult,
     build_metadata_dict,
 )
-from spindoctor.obs import ObsSnapshotInst
+from spindoctor.obs import ObsSnapshotInst, obs_class_to_inst_name
 from spindoctor.support.file import json_as_string
 from spindoctor.support.misc import log_run_environment
 from spindoctor.support.summary_png import render_annotated_summary_rgb
@@ -110,6 +110,7 @@ def navigate_image_files(
     image_url = image_file.resolve_image_url()
     image_path = image_file.image_file_path.absolute()
     image_name = image_path.name
+    instrument = obs_class_to_inst_name(obs_class)
     extra_params = image_file.extra_params
     public_metadata_file = nav_results_root / (image_file.results_path_stub + '_metadata.json')
     summary_png_file = nav_results_root / (image_file.results_path_stub + '_summary.png')
@@ -126,7 +127,9 @@ def navigate_image_files(
             try:
                 snapshot = obs_class.from_file(image_url, **extra_params)
             except (OSError, RuntimeError) as exc:
-                metadata = _metadata_for_load_error(image_path, image_name, exc, logger)
+                metadata = _metadata_for_load_error(
+                    image_path, image_name, exc, logger, instrument=instrument
+                )
                 if write_output_files:
                     public_metadata_file.write_text(json_as_string(metadata))
                 MAIN_LOGGER.info('Wrote log to %s', image_log_path)
@@ -138,7 +141,9 @@ def navigate_image_files(
                 only_techniques=nav_techniques or '*',
             )
             nav_result = orchestrator.navigate(snapshot_inst)
-            metadata = build_metadata_from_result(nav_result, image_path, image_name)
+            metadata = build_metadata_from_result(
+                nav_result, image_path, image_name, instrument=instrument
+            )
             if write_output_files:
                 logger.info('Writing metadata to %s', public_metadata_file)
                 public_metadata_file.write_text(json_as_string(metadata))
@@ -155,6 +160,8 @@ def _metadata_for_load_error(
     image_name: str,
     exc: BaseException,
     logger: Any,
+    *,
+    instrument: str,
 ) -> dict[str, Any]:
     """Build a metadata dict for an image-load or kernel-coverage failure."""
     message = str(exc)
@@ -171,12 +178,17 @@ def _metadata_for_load_error(
         'observation': {
             'image_path': str(image_path),
             'image_name': image_name,
+            'instrument': instrument,
         },
     }
 
 
 def build_metadata_from_result(
-    result: NavResult, image_path: Path, image_name: str
+    result: NavResult,
+    image_path: Path,
+    image_name: str,
+    *,
+    instrument: str,
 ) -> dict[str, Any]:
     """Build the JSON metadata dict from a NavResult.
 
@@ -189,12 +201,16 @@ def build_metadata_from_result(
             ``observation.image_path`` field.
         image_name: Basename of the source image; written to the
             ``observation.image_name`` field.
+        instrument: Registered instrument name for the observation class
+            (see :func:`spindoctor.obs.obs_class_to_inst_name`); written to
+            the ``observation.instrument`` field.
     """
     metadata: dict[str, Any] = {
         'status': result.status,
         'observation': {
             'image_path': str(image_path),
             'image_name': image_name,
+            'instrument': instrument,
         },
         'navigation_result': build_metadata_dict(result),
     }

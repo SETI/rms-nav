@@ -115,6 +115,8 @@ def test_navigate_image_files_no_features_path(tmp_path: Path) -> None:
     assert success is False
     assert metadata['status'] == 'failed'
     assert metadata['confidence'] == 0.0
+    # The fake observation class is not in the instrument registry.
+    assert metadata['observation']['instrument'] == 'unknown'
     assert 'navigation_result' in metadata
     nav_result = metadata['navigation_result']
     # Without registered real-scene models the classifier still runs.
@@ -169,6 +171,7 @@ def test_navigate_image_files_image_load_failure_records_status(tmp_path: Path) 
     assert metadata['status'] == 'error'
     assert metadata['status_error'] == 'image_read_error'
     assert 'cannot read fixture image' in metadata['status_exception']
+    assert metadata['observation']['instrument'] == 'unknown'
 
 
 def test_navigate_image_files_spice_load_failure_records_missing_kernel(

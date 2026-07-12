@@ -32,7 +32,7 @@ from spindoctor.config import (
 from spindoctor.dataset import dataset_name_to_class, dataset_name_to_inst_name, dataset_names
 from spindoctor.dataset.dataset import DataSet
 from spindoctor.navigate_image_files import navigate_image_files
-from spindoctor.obs import ObsSnapshotInst, inst_name_to_obs_class
+from spindoctor.obs import ObsSnapshotInst, inst_name_to_obs_class, obs_class_to_inst_name
 from spindoctor.support.file import json_as_string
 from spindoctor.support.misc import log_run_environment
 
@@ -313,7 +313,12 @@ def _run_manual_pass(
             dv, du = result.offset_px
             IMAGE_LOGGER.info('Manual nav: offset_dv_px=%.4f, offset_du_px=%.4f', dv, du)
             if write_output_files:
-                metadata = build_metadata_from_result(result, image_path, image_name)
+                metadata = build_metadata_from_result(
+                    result,
+                    image_path,
+                    image_name,
+                    instrument=obs_class_to_inst_name(obs_class),
+                )
                 IMAGE_LOGGER.info('Writing metadata to %s', public_metadata_file)
                 public_metadata_file.write_text(json_as_string(metadata))
                 write_summary_png(obs, result, summary_png_file, IMAGE_LOGGER)
