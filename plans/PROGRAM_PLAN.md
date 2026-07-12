@@ -94,8 +94,9 @@ mutually reinforcing sources of evidence:
    — feeding both of the above and serving as the permanent regression
    safety net.
 
-Everything else in the program — new instruments' quirks, PDS4 breadth,
-performance, documentation — is real work but conventional engineering.
+Everything else in the program — new instruments' quirks, PDS4 bundle
+generalization, performance, documentation — is real work but
+conventional engineering.
 This is the part that makes the numbers mean something.
 
 ## 4. The tracks
@@ -204,15 +205,25 @@ program's QA instrument.
 **Goal:** every capability the docs imply either works and is validated,
 or is explicitly scoped out in the capability matrix.
 
-Each major item starts with an operator decision, because each is a
-scope commitment:
+Some items start with an operator decision, because each is a scope
+commitment:
 
 | Decision | Then the work is |
 |---|---|
 | **Titan navigation** (#60): implement atmospheric-limb navigation or scope it out? | A new haze-limb model and technique (hard, physics-heavy), or graceful degradation plus honest docs. |
-| **PDS4 breadth** (#53 family): bundles for all four instruments or Cassini-only? | Per-mission label templates, LID builders, collection machinery (#66, #67, #69, #71-#76, #79, #47, #30, #63), or a documented Cassini-only scope. |
 | **CK kernels** (#188, prerequisite #50): ship updated-pointing SPICE kernels as a product? | The kernel writer and its validation — a headline deliverable either way. |
 | **Backplane content** (#28 family): finalize the backplane set and formats | #55, #54, #57, #77, then the generator hardening. |
+
+**PDS4 output bundles are required for all four instruments** — not a
+scope decision. Cassini bundles work today; Voyager, Galileo, and New
+Horizons hit not-implemented walls that are open work: per-mission label
+templates, LID builders, and collection machinery (#53 with #66, #67,
+#69, #71-#76, #79, #47, #30, #63). Distinct from this, **PDS4 *input***
+(#34) — reading PDS4-archived data instead of PDS3 — is treated like any
+other future instrument: the archives do not exist yet, their creation
+is external development outside our control, and input support is *not*
+required for project completion; when an archive appears, its support
+replaces the PDS3 source for that instrument.
 
 Plus, not gated on decisions: the capability matrix itself (#231),
 cloud-operation audit (#108, #67, #141, #142), performance and safe
@@ -221,7 +232,8 @@ validation (#118), and the user-guide completion items (#93, #70).
 
 **Parallelism:** decisions can be made any time; the resulting work is
 independent of Tracks A-B except that #232 (end-product accuracy) wants
-the PDS4/backplane decisions settled.
+the backplane-content decisions settled and the PDS4 bundle
+generalization done.
 
 ### Track E — Test and documentation debt
 
@@ -253,7 +265,9 @@ enhancement backlog and code-quality tail are burned down.
   (#181), per-instrument calibration extension (re-run #230 per
   instrument as library frames land).
 - **Features:** BOTSIM (#27), star streaks (#22), backplane-reader repo
-  (#107), Cassini PDS4 input (#34), cartographic/bootstrap navigation
+  (#107), PDS4 input when external archives exist (#34 — replaces the
+  PDS3 source per instrument; not required for project completion),
+  cartographic/bootstrap navigation
   (#184 — explicitly far off), polarity-aware ring matching (#183),
   chaotic-rotator poses (#187), manual-nav dialog redesign (#186),
   gated-feature PNG styling (#185), stop-after-features flag (#182),
@@ -295,10 +309,9 @@ and the five decision gates, not by any implementation.
 
 1. Simulator de-circularization design approval (#227) — before build.
 2. Titan: implement or scope out (#60).
-3. PDS4 bundle breadth: four instruments or Cassini-only (#53).
-4. CK kernels as a delivered product (#188).
-5. Sub-5 px body policy (#239).
-6. Recurring: library batch votes; realism verdict; agreement-study frame
+3. CK kernels as a delivered product (#188).
+4. Sub-5 px body policy (#239).
+5. Recurring: library batch votes; realism verdict; agreement-study frame
    selection; tier re-blessing after #230.
 
 ## 7. Issue index

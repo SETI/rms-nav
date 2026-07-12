@@ -98,7 +98,7 @@ carry the methodology and acceptance criteria):
 | WS-5 | #230 (sim-anchored half done via #173/PR #208), #176 | Real-anchored recalibration once WS-1 anchors exist. |
 | WS-6 | #231 | Capability matrix (docs-honesty half already done). |
 | WS-7 | #60 | Titan: implement or scope out. |
-| WS-8 | #53, #67, #34 | PDS4 input + bundle generalization. |
+| WS-8 | #53, #67 | Output bundles for all four instruments (required). PDS4 input (#34) is availability-contingent and not required for completion. |
 | WS-9 | #233, #130, #176 | Measured star SNR + sensitivity tests (#233); constants inventory (#176); limiting magnitudes (#130). |
 | WS-10 | #150, #128 | Limb bias root cause and redesign. |
 | WS-11 | done (PR #200) | Degenerate-rotation reporting. |
@@ -826,28 +826,40 @@ or Titan is unambiguously documented as not-supported and handled gracefully.
 
 **Dependencies:** WS-1 if implementing. **Risk:** high if building (haze physics is genuinely hard).
 
-### WS-8: PDS4 — finish input and generalize bundle generation
+### WS-8: PDS4 — generalize output bundle generation (input is separate and external-dependent)
 **Closes:** "PDS4 is largely fictional."
-**Tracked by:** #53 (bundle generator parent), #67 (cloud-aware bundles), #34
-(PDS4 Cassini input when the archive is available).
+**Tracked by:** #53 (bundle generator parent — output bundles, required for all
+four instruments), #67 (cloud-aware bundles), #34 (PDS4 input — availability-
+contingent, not required for completion).
 
-**Problem.** `dataset_pds4.py` raises "not yet implemented" for all methods (no
-PDS4 input); `pds4_*` bundle hooks raise `NotImplementedError` for Voyager,
-Galileo, NH.
+**Scope split (binding).** PDS4 *output* (bundle generation) and PDS4 *input*
+(reading PDS4-archived data as a dataset source) are different deliverables.
+Output bundles are **mandatory for all four instruments**. Input is treated
+like any other future instrument: no PDS4 archive of these datasets exists
+yet, producing one is external development outside this project's control,
+and input support is **not required for project completion** — when an
+archive becomes available, implementing its `DataSetPDS4` replaces the PDS3
+source for that instrument.
 
-**Tasks (scope per release decision):**
-- **PDS4 input:** implement `DataSetPDS4` enumeration/reading, or remove the
- `*_pds4` dataset names from the user-facing list until implemented.
-- **Bundle generalization:** implement `pds4_*` hooks (template dir, LID/LIDVID,
- template variables) for Voyager/Galileo/NH using `DataSetPDS3CassiniISS` as the
- reference, with per-mission template trees under `src/pds4/templates/`; or
- document bundle generation as Cassini-only in the capability matrix.
+**Problem.** `pds4_*` bundle hooks raise `NotImplementedError` for Voyager,
+Galileo, NH; `dataset_pds4.py` (input) raises "not yet implemented" for all
+methods, correctly, since no input archive exists to read.
+
+**Tasks:**
+- **Bundle generalization (required):** implement `pds4_*` hooks (template
+ dir, LID/LIDVID, template variables) for Voyager/Galileo/NH using
+ `DataSetPDS3CassiniISS` as the reference, with per-mission template trees.
 - Add bundle-validation tests (schema-validate generated `.lblx` against PDS4
- schemas) per supported instrument.
+ schemas) for all four instruments.
+- **PDS4 input (deferred until archives exist):** implement `DataSetPDS4`
+ enumeration/reading per instrument as each external archive appears (#34);
+ until then the capability matrix lists input as pending external archive
+ availability.
 
-**Acceptance criteria.** Every instrument's PDS4 status in the capability matrix
-matches reality; for each "supported" instrument, generated bundles pass PDS4
-schema validation in CI.
+**Acceptance criteria.** Generated bundles pass PDS4 schema validation in CI
+for all four instruments; the capability matrix records PDS4 input as pending
+external archive availability (or supported, once an archive exists and is
+implemented).
 
 **Dependencies:** WS-6. **Risk:** medium.
 
@@ -1107,7 +1119,7 @@ common-mode/identifiability/bias caveats together are the honest result.
 | 4 | Ships uncalibrated confidence/tiers | WS-5 | calibrated where per-technique covariance exists, sim-anchored elsewhere (basis recorded per value); reliability diagram; interim provisional label |
 | 5 | Mid-rewrite; docs ≠ code; vapor; dead config | WS-6 | test-verified capability matrix; docs/config reconciled |
 | 6a | Titan is a no-op | WS-7 | implemented+validated, or scoped-out + graceful |
-| 6b | PDS4 input absent; bundles Cassini-only | WS-8 | matrix matches code; bundles schema-validate per supported inst |
+| 6b | PDS4 input absent; bundles Cassini-only | WS-8 | bundles schema-validate for all four instruments; input recorded as pending external archive availability |
 | 6c | Empty instrument appendices | WS-12 | all four appendices written |
 | 7a | Covariance shaped by magic constants | WS-9 | each constant derived + sensitivity-bounded |
 | 7b | Star SNR fabricated from magnitude | WS-9 | measured-photometry SNR; covariance coverage passes |
@@ -1212,9 +1224,11 @@ report, none silently assumed):**
 - (Within-bin stationarity, covered above, is the broad limiter — it constrains the
  *pairwise* fallback too, which is *less* assumption-laden than the separation but
  not assumption-free.)
-- Scope decisions (Titan build vs scope-out; PDS4 breadth) should be made at the
- WS-6/WS-7/WS-8 decision gates before committing build effort; the plan supports
- either branch and the matrix keeps the docs honest regardless.
+- The Titan scope decision (build vs scope-out) should be made at the
+ WS-6/WS-7 decision gates before committing build effort; the plan supports
+ either branch and the matrix keeps the docs honest regardless. PDS4 output
+ bundles are required for all four instruments (WS-8); only PDS4 *input* is
+ external-dependent and out of the completion scope.
 - **Validation can come back bad.** There is no fixed accuracy spec to pass (goal is
  best-achievable, honestly characterized), so a poor result is not a go/no-go gate
  — but it is not merely reported either: a worse-than-hoped σ routes into the

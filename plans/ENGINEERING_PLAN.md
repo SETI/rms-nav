@@ -177,19 +177,27 @@ design document, not code.
 
 ## Track D — Capability completion
 
-### PDS4 bundle family (decision: #53 scope)
+### PDS4 output bundles (required for all four instruments)
 
-Current state: Cassini ISS bundles work end to end; the other three
-instruments hit `NotImplementedError` walls in their `pds4_*` DataSet
-hooks; PDS4 *input* (`dataset_pds4.py`) is unimplemented (#34 tracks the
-Cassini PDS4 archive variant). The per-dataset hook pattern (template
-dir, LID/LIDVID builders, template variables) is established on
-`DataSetPDS3CassiniISS` — generalization is per-mission template trees
-plus hook implementations, mechanical but voluminous.
+PDS4 *output* (bundle generation) and PDS4 *input* (reading
+PDS4-archived data as a dataset source) are different things. Output
+bundles are mandatory for every instrument. Input is
+availability-contingent: no PDS4 archive of these datasets exists yet,
+producing one is external development outside this project's control,
+and input support (#34, `dataset_pds4.py`) is not required for project
+completion — when an archive appears, implementing its `DataSetPDS4`
+replaces the PDS3 source for that instrument.
 
-Work items, in dependency order once scope is decided:
+Output current state: Cassini ISS bundles work end to end; the other
+three instruments hit `NotImplementedError` walls in their `pds4_*`
+DataSet hooks. The per-dataset hook pattern (template dir, LID/LIDVID
+builders, template variables) is established on `DataSetPDS3CassiniISS`
+— generalization is per-mission template trees plus hook
+implementations, mechanical but voluminous.
 
-1. **#139** (Essential, independent of the decision) — the global-index
+Work items, in dependency order:
+
+1. **#139** (Essential) — the global-index
    LID is malformed (missing `urn:nasa:pds:` prefix, wrong image part):
   `src/spindoctor/cli/pds4/collections.py`. Fix with a label-round-trip
    test.
@@ -204,7 +212,7 @@ Work items, in dependency order once scope is decided:
 6. **#67** — cloud-aware bundle generation (with the Track D cloud
    audit).
 7. Schema-validate generated `.lblx` against the PDS4 schemas in CI for
-   every supported instrument (acceptance for the whole family).
+   all four instruments (acceptance for the whole family).
 
 ### Backplane family (decision: #28 scope)
 
@@ -310,7 +318,9 @@ calibration (#230) and the appendix (#93).
 ### Features
 
 In rough priority order: #27 BOTSIM (NAC/WAC simultaneous), #22 star
-streaks, #107 backplane-reader companion repo, #34 Cassini PDS4 input, #184
+streaks, #107 backplane-reader companion repo, #34 PDS4 input (when
+external archives exist — replaces the PDS3 source per instrument; not
+required for project completion), #184
 cartographic/bootstrap navigation (crater-mapping correlation of
 overlapping navigated frames — explicitly far off; design record in the
 issue), #183 polarity-aware ring matching, #187 chaotic-rotator
