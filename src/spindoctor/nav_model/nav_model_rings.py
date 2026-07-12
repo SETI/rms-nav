@@ -228,6 +228,10 @@ class NavModelRings(NavModelRingsBase):
             config: Configuration whose ring catalog decides which planets have
                 navigable rings; also passed to the constructed instances.  None
                 uses ``DEFAULT_CONFIG``.
+
+        Returns:
+            ``[NavModelRings]`` for the closest planet when its ring catalog is
+            configured and the obs exposes the extfov surface, else ``[]``.
         """
         # Simulated obs use the sim-params-driven NavModelRingsSimulated instead.
         if getattr(obs, 'is_simulated', False):

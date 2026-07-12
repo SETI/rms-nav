@@ -54,10 +54,10 @@ class _FakeSaturnObs:
     closest_planet = 'saturn'
 
     def inventory(self, body_list: list[str], return_type: str = 'full') -> dict[str, Any]:
-        """Report Saturn present in the FOV; no satellites visible."""
+        """Report every requested body as present in the FOV."""
         del return_type
         entry = {'center_uv': np.array([5.0, 5.0]), 'u_pixel_size': 4.0, 'v_pixel_size': 4.0}
-        return {name: entry for name in body_list if name.lower() == 'saturn'}
+        return dict.fromkeys(body_list, entry)
 
     def inventory_body_in_extfov(self, entry: dict[str, Any]) -> bool:
         """Every reported body is inside the extended FOV."""
@@ -65,10 +65,31 @@ class _FakeSaturnObs:
         return True
 
 
+def _config_with_titan_only_satellites(tmp_path: Path) -> Config:
+    override = tmp_path / 'satellites_override.yaml'
+    # List values replace wholesale on merge, so this shrinks Saturn's
+    # satellite catalog to a single body.
+    override.write_text('satellites:\n  SATURN:\n    - TITAN\n')
+    config = Config()
+    config.update_config(override)
+    return config
+
+
+def test_body_selection_uses_config_satellite_catalog(tmp_path: Path) -> None:
+    # The satellite catalog in the supplied config decides which bodies are
+    # even considered: an override shrinking Saturn's satellites to Titan
+    # must shrink the instantiated model set accordingly.
+    config = _config_with_titan_only_satellites(tmp_path)
+    instances = NavModelBody.instances_for_obs(cast(Any, _FakeSaturnObs()), config=config)
+    assert sorted(m.name for m in instances) == ['body:TITAN', 'body:saturn']
+    default_instances = NavModelBody.instances_for_obs(cast(Any, _FakeSaturnObs()))
+    assert len(default_instances) > len(instances)
+
+
 def test_body_selection_threads_config_to_instances(tmp_path: Path) -> None:
     # The selection stage and the constructed instances must share the same
     # per-run config object.
     config = _config_with_jupiter_rings(tmp_path)
     instances = NavModelBody.instances_for_obs(cast(Any, _FakeSaturnObs()), config=config)
-    assert len(instances) == 1
-    assert instances[0]._config is config
+    assert len(instances) > 0
+    assert all(m._config is config for m in instances)
