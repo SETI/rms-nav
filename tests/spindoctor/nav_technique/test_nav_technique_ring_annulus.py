@@ -451,7 +451,8 @@ def test_ring_annulus_model_error_floor_inflates_covariance(
     """model_error_floor_px adds exactly its square to the covariance diagonal.
 
     The NCC peak-curvature covariance measures photon statistics only; the
-    floor (calibrated by the WS-5 sweep) carries the template model error.
+    floor (calibrated against the simulated-scene campaign) carries the
+    template model error.
     """
     shape = (180, 180)
     image_center = (90.0, 90.0)

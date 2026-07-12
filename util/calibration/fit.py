@@ -1,4 +1,4 @@
-"""Fit the WS-5 per-technique confidence calibration from sim planted truth.
+"""Fit the per-technique confidence calibration from sim planted truth.
 
 Consumes the JSONL rows written by ``collect.py`` and, for every technique
 with enough usable rows, refits the sigmoid-of-linear-combination alpha
@@ -6,16 +6,15 @@ coefficients (``config_510_techniques.yaml``) so the reported confidence
 tracks the empirical probability that the technique's own recovered offset
 lies within ``--err-ok-px`` (default 1.0 px) of the planted truth.
 
-Methodology (plans/VALIDATION_AND_CALIBRATION_PLAN.md WS-5, sim-anchored
-regime):
+Methodology (sim-anchored regime):
 
 - Rows where a hard gate fired (``spurious`` / ``at_edge``) are excluded:
   the gates force confidence to zero regardless of the alphas, so they are
   not part of the sigmoid fit.
 - Each YAML term's ``offset`` / ``divisor`` / ``cap_at`` normalization is
   kept exactly as configured; only ``alpha0`` and the per-term ``alpha``
-  are refit.  The fit is therefore a drop-in coefficient update -- the
-  Platt-scaling variant WS-5 names.
+  are refit.  The fit is therefore a drop-in coefficient update
+  (Platt scaling).
 - L2-regularized logistic regression (lambda ``--l2``), so a technique
   whose usable rows are single-class converges to a bounded, honest
   plateau instead of a runaway intercept.
@@ -424,7 +423,7 @@ def fit_technique(
 def _format_report(proposals: list[dict[str, Any]], *, err_ok_px: float) -> str:
     """Render the human-readable calibration report."""
     lines = [
-        '# WS-5 sim-anchored confidence calibration fit',
+        '# Sim-anchored confidence calibration fit',
         '',
         f'Label: technique offset error <= {err_ok_px} px vs planted truth.',
         'Rows where a hard gate fired (spurious / at_edge) are excluded; the',

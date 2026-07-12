@@ -1,12 +1,15 @@
-# WS-5 confidence calibration tooling (sim-anchored)
+# Confidence calibration tooling (sim-anchored)
 
-Offline tooling for the confidence-calibration workstream (WS-5 of
-`plans/VALIDATION_AND_CALIBRATION_PLAN.md`, issue #173), in its
-**sim-anchored** regime: the anchors are recovery errors against planted
-truth on randomized simulated scenes (WS-2's instrument), because the
-real-data anchors (WS-1 per-technique covariance) do not exist yet.  When
-WS-1 lands, the same fit reruns against the real anchors and the
-sim-anchored values become the fallback for regimes WS-1 cannot reach.
+Offline tooling that fits the per-technique confidence formulas
+(`config_510_techniques.yaml`) and the orchestrator acceptance gates
+(`config_540_orchestrator.yaml`).  The current fit is **sim-anchored**:
+the anchors are recovery errors against planted truth on randomized
+simulated scenes, because no real-image anchor set (operator-verified
+offsets with measured per-technique errors) exists yet.  When such a set
+exists, the same fit reruns against it and the sim-anchored values
+become the fallback for regimes real data cannot reach.  (Historical
+background and sequencing: `plans/VALIDATION_AND_CALIBRATION_PLAN.md`,
+issue #173.)
 
 Everything here is a repo-checkout script (not part of the distributed
 package); generated artifacts go under `_work/calibration/` (gitignored).
@@ -58,16 +61,17 @@ package); generated artifacts go under `_work/calibration/` (gitignored).
 
 6. **`fit_gates.py`** — derives the orchestrator acceptance parameters
    (`config_540_orchestrator.yaml`) from the pass-2 fused rows: tier
-   `min_confidence` boundaries at the WS-5 error-percentile targets and
-   the final `min_confidence` gate, plus the per-technique sigma coverage
-   check.
+   `min_confidence` boundaries (the smallest confidence at which each
+   tier's sigma-gated subset achieves a 0.9 success rate against the
+   tier's error budget) and the final `min_confidence` gate, plus the
+   per-technique sigma coverage check.
 
    ```bash
    venv/bin/python util/calibration/fit_gates.py _work/calibration/rows_v2.jsonl \
        --out-report _work/calibration/gates_v2.md
    ```
 
-7. **`library_crosscheck.py`** — WS-5 step-6 plausibility cross-check:
+7. **`library_crosscheck.py`** — plausibility cross-check:
    runs the calibrated pipeline over every operator-curated sidecar
    (needs the local-holdings environment) and reports status / tier /
    offset / primary-technique agreement independently per image, plus a
@@ -89,13 +93,13 @@ ordering, not per-technique reliability; they are retained, not fitted.
 
 ## Caveats
 
-- **Sim-anchored basis.** Every value fitted here carries WS-5's
-  "sim-anchored" label: it is only as real as the WS-2 realism match,
-  which has not been quantified yet.  `confidence_provisional` stays true
+- **Sim-anchored basis.** Every value fitted here is only as real as
+  the simulator's match to real images, which has not been quantified
+  yet.  `confidence_provisional` stays true
   in the metadata until a real-anchored calibration lands.
 - The scene families cover the sim's rendering vocabulary; regimes the
   sim cannot render (real PSF wings, saturation bloom on stars,
   calibrated-I/F detector noise) are uncalibrated by this fit.
 - The operator-curated image-library tiers are the *plausibility
-  cross-check* for this calibration (PHASE10_CURATION), never fit
-  targets.
+  cross-check* for this calibration, never fit targets (the curation
+  conventions live in `docs/dev_guide/dev_guide_image_library.rst`).

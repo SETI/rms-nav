@@ -6,8 +6,10 @@
 # spindoctor.feature.reliability); the section exists so calibration
 # sweeps and user config files can override them without code changes.
 #
-# The tier min_confidence boundaries are SIM-ANCHORED (WS-5): derived
-# 2026-07-10 from the WS-2 sim campaign's fused results (util/calibration,
+# The tier min_confidence boundaries are SIM-ANCHORED (calibrated
+# against simulated planted-truth recovery only; see the provenance
+# note in config_510_techniques.yaml): derived 2026-07-10 from the
+# simulated-scene calibration campaign's fused results (util/calibration,
 # 3100 fused offsets, physical-body pass with all #210 covariance floors
 # live) as the smallest confidence at which the tier's sigma-gated subset
 # achieves a 0.9 success rate against the tier's own error budget.

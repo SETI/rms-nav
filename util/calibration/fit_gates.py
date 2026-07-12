@@ -1,4 +1,4 @@
-"""Derive orchestrator-level gates from fused sim results (WS-5 pass 2).
+"""Derive orchestrator-level gates from fused sim results.
 
 The per-technique alphas (``fit.py``) change every fused confidence, so the
 ensemble-level acceptance parameters in ``config_540_orchestrator.yaml``
@@ -6,8 +6,7 @@ ensemble-level acceptance parameters in ``config_540_orchestrator.yaml``
 must be derived from a collection run AFTER the fitted alphas are written
 into ``config_510_techniques.yaml``.
 
-Method, per plans/VALIDATION_AND_CALIBRATION_PLAN.md WS-5 ("tier boundaries
-map to stated error percentiles"):
+Method ("tier boundaries map to stated error percentiles"):
 
 - Tier sigma limits (``max_sigma_px`` 0.5 / 2.0) are the tier *definitions*
   (high ~ sub-half-pixel, medium ~ couple-pixel) and stay fixed; this
@@ -19,8 +18,8 @@ map to stated error percentiles"):
   ``--err-fit-px`` "still clearly a fit" budget.
 
 Also reports the per-technique sigma coverage check (does the actual error
-fall within k * reported sigma at the expected rate) that WS-5 names, for
-the report and for future ``model_error_floor_px`` decisions.
+fall within k * reported sigma at the expected rate), for the report and
+for future ``model_error_floor_px`` decisions.
 
 Run:
 
@@ -151,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f'{len(rows)} scene rows, {len(arrays["confidence"])} fused results')
 
     lines = [
-        '# WS-5 orchestrator gate derivation (sim-anchored)',
+        '# Orchestrator gate derivation (sim-anchored)',
         '',
         f'{len(arrays["confidence"])} fused results with an offset.',
         f'Tier target success rate: {args.target_rate}; '

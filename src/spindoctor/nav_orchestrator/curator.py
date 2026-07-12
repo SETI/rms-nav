@@ -223,10 +223,11 @@ def build_metadata_dict(result: NavResult) -> dict[str, Any]:
         'sigma_along_unobservable_px': sigma_along_unobservable_px,
         'confidence': _round_float(result.confidence, CONFIDENCE_DECIMALS),
         # Literal marker (always true) flagging that confidence values and
-        # confidence_rank tiers are not yet calibrated against measured
-        # error and must not be read as probabilities; it stays true until
-        # the confidence-calibration workstream (WS-5,
-        # plans/VALIDATION_AND_CALIBRATION_PLAN.md) lands.
+        # confidence_rank tiers are calibrated against simulated
+        # planted-truth recovery only (sim-anchored; see the provenance
+        # note in config_510_techniques.yaml) and must not be read as
+        # probabilities of real-image accuracy; it stays true until a
+        # calibration against real-image error measurements lands.
         'confidence_provisional': True,
         'confidence_rank': result.confidence_rank,
         'covariance_px2': _round_matrix(result.covariance_px2),

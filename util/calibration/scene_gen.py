@@ -1,4 +1,4 @@
-"""Randomized sim-scene generation for the WS-5 confidence calibration.
+"""Randomized sim-scene generation for the confidence calibration.
 
 Generates seeded, randomized sim_params dicts (the same flat mapping the
 sim-sweep harness feeds ObsSim) spanning each NavTechnique's operating

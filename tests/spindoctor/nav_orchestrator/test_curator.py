@@ -113,9 +113,10 @@ def test_metadata_dict_rounds_confidence_to_3_decimals() -> None:
 def test_metadata_dict_marks_confidence_provisional() -> None:
     """confidence_provisional is present and literally true.
 
-    The marker stays true until the WS-5 confidence calibration lands
-    (plans/VALIDATION_AND_CALIBRATION_PLAN.md): confidence values and
-    tiers are uncalibrated and must not be read as probabilities.
+    The marker flags that confidence values and tiers are calibrated
+    against simulated planted-truth recovery only and must not be read
+    as probabilities of real-image accuracy; it stays true until a
+    calibration against real-image error measurements lands.
     """
     md = build_metadata_dict(_ok_result_with_one_technique())
     assert md['confidence_provisional'] is True

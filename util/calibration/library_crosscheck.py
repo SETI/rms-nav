@@ -1,14 +1,14 @@
-"""WS-5 step-6 plausibility cross-check: calibrated pipeline vs library tiers.
+"""Plausibility cross-check: calibrated pipeline vs operator library tiers.
 
 Runs the autonomous pipeline over every operator-curated sidecar in
 ``tests/integration/image_library/images/`` (same plumbing as
 ``test_autonomous_nav``) and reports each comparison INDEPENDENTLY per
 image -- status match, tier match, offset agreement within the sidecar's
 slack, primary technique, must-run / must-skip -- instead of stopping at
-the first failed assertion the way the test does.  This is the analysis
-view WS-5 names: the operator tiers are plausibility cross-checks on the
-calibration, and a wholesale mismatch means either the labels or the
-calibration needs review.
+the first failed assertion the way the test does.  The operator tiers are
+plausibility cross-checks on the calibration, never fit targets; a
+wholesale mismatch means either the labels or the calibration needs
+review.
 
 Needs the local-holdings environment (``source /seti/newnav/setup.sh``).
 
@@ -179,7 +179,7 @@ def main(argv: list[str] | None = None) -> int:
         return f'{sum(1 for r in relevant if r[key])}/{len(relevant)}'
 
     lines = [
-        '# WS-5 library cross-check (calibrated pipeline vs operator sidecars)',
+        '# Library cross-check (calibrated pipeline vs operator sidecars)',
         '',
         f'{len(rows)} sidecars.  Independent per-check agreement:',
         '',

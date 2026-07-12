@@ -16,23 +16,25 @@
 #     tuning:                       # technique-specific runtime tunables
 #       <key>: float | int          # see ``load_technique_tuning`` for schema
 #
-# Alpha coefficients and term normalizations are SIM-ANCHORED (WS-5 of
-# plans/VALIDATION_AND_CALIBRATION_PLAN.md): fitted 2026-07-09/10 by
-# L2-regularized logistic regression against planted-truth recovery on
-# the randomized WS-2 sim campaign (util/calibration, campaign seed
-# 20260709, 4200 scenes per pass; label = "technique's own offset error
-# <= 1.0 px").  The body techniques were refit on the physical-body pass
-# (simulated bodies drawn from the config_220 catalog, rendered at
-# relief amplitudes tied to their published shape residuals, with
-# km_per_pixel so the irregularity factor is live).  The
-# model_error_floor_px tunables (#210) are calibrated on the same
-# campaign so each technique's 2-sigma error coverage matches the
-# 2D-Gaussian expectation (0.865).  A technique's confidence
-# approximates its sim-anchored P(offset error <= 1 px) given its
-# diagnostics; hard gates (spurious / at_edge) still force 0.  The
-# calibration basis is the sim's realism, which is unquantified (WS-2
-# realism match pending), so confidence_provisional stays true in the
-# metadata and the fit reruns against real anchors when WS-1 lands.
+# Alpha coefficients and term normalizations are SIM-ANCHORED: fitted
+# 2026-07-09/10 by L2-regularized logistic regression against
+# planted-truth recovery on a randomized simulated-scene campaign
+# (util/calibration, campaign seed 20260709, 4200 scenes per pass;
+# label = "technique's own offset error <= 1.0 px").  The body
+# techniques were refit on the campaign's physical-body pass (simulated
+# bodies drawn from the config_220 catalog, rendered at relief
+# amplitudes tied to their published shape residuals, with km_per_pixel
+# so the irregularity factor is live).  The model_error_floor_px
+# tunables (#210) are calibrated on the same campaign so each
+# technique's 2-sigma error coverage matches the 2D-Gaussian
+# expectation (0.865).  A technique's confidence approximates its
+# sim-anchored P(offset error <= 1 px) given its diagnostics; hard
+# gates (spurious / at_edge) still force 0.  The calibration basis is
+# the sim's realism, which is unquantified, so confidence_provisional
+# stays true in the metadata; when a real-image anchor set exists
+# (operator-verified offsets with measured per-technique errors), the
+# same fit reruns against it and these sim-anchored values become the
+# fallback for regimes real data cannot reach.
 # BodyTerminatorNav is the exception: the simulated body model emits no
 # TERMINATOR_ARC, so its alphas keep the uncalibrated defaults and its
 # covariance floor is inherited from BodyLimbNav.
@@ -41,7 +43,7 @@
 
 techniques:
   BodyDiscCorrelateNav:
-    # Sim campaign (physical-body pass, v5): n=1438 usable, base rate
+    # Sim campaign (physical-body pass): n=1438 usable, base rate
     # 0.78, AUC 0.82, Brier 0.34 -> 0.15.
     alpha0: 0.377
     tuning:
@@ -123,7 +125,7 @@ techniques:
       spurious: true
 
   BodyBlobNav:
-    # Sim campaign (physical-body pass, v5 -- rendered relief and
+    # Sim campaign (physical-body pass -- rendered relief and
     # km_per_pixel tied to the config_220 residuals): n=468 usable,
     # base rate 0.69, AUC 0.58 -> 0.89, Brier 0.30 -> 0.16.
     # Note the campaign only exercises blobs the
@@ -197,7 +199,7 @@ techniques:
       model_error_floor_px: 1.1
 
   BodyLimbNav:
-    # Sim campaign (physical-body pass, v5): n=311 usable, base rate
+    # Sim campaign (physical-body pass): n=311 usable, base rate
     # 0.75, AUC 0.77, Brier 0.17.  The residual weight is smaller than
     # the first-pass fit because the physically-scaled relief renders
     # subtler shape error than the synthetic-lumpiness pass did.
@@ -305,10 +307,10 @@ techniques:
   BodyTerminatorNav:
     # NOT sim-calibrated: the simulated body model emits no
     # TERMINATOR_ARC (crescent sim scenes navigate by BODY_BLOB), so
-    # the WS-2 campaign produced no rows for this technique and the
-    # uncalibrated defaults below are retained.  Calibrating it needs
-    # either terminator emission in the sim body model or the
-    # real-anchored WS-1 pass.
+    # the calibration campaign produced no rows for this technique and
+    # the uncalibrated defaults below are retained.  Calibrating it
+    # needs either terminator emission in the sim body model (#223) or
+    # a real-anchored calibration.
     alpha0: -1.0
     terms:
       - feature: visible_terminator_arc_fraction
@@ -383,8 +385,8 @@ techniques:
       # sign bound at 0.0: the campaign's failures are clean-residual
       # wrong-ringlet locks (multi-ringlet aliasing), which the residual
       # cannot see, and an unconstrained fit would have given the term a
-      # positive (anti-calibrated) weight.  Kept wired for the
-      # real-anchored pass.
+      # positive (anti-calibrated) weight.  Kept wired for a future
+      # real-anchored calibration.
       - feature: per_edge_dt_rms_mean
         alpha: 0.0
     hard_zero_if:
@@ -504,7 +506,7 @@ techniques:
 
   StarRefineNav:
     # Pass-2 refinement on the pass-1 ensemble's prior offset.  Fit on
-    # the second campaign pass (the calibrated pass-1 formulas change
+    # a re-collected campaign pass (the calibrated pass-1 formulas change
     # which priors reach pass 2): n=567 usable, base rate 0.93,
     # AUC 0.79, Brier 0.14 -> 0.05.
     alpha0: 1.888
@@ -579,8 +581,8 @@ techniques:
         divisor: 6.0
         cap_at: 1.0
       # Sign-constrained to zero by the fit: with no failure class the
-      # residual carries no signal in the campaign.  Kept wired for the
-      # real-anchored pass.
+      # residual carries no signal in the campaign.  Kept wired for a
+      # future real-anchored calibration.
       - feature: median_residual_px
         alpha: 0.0
         divisor: 1.0

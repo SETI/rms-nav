@@ -142,8 +142,8 @@ entry in the diagnostics dataclass's ``CURATOR_FIELDS``.
 The literal ``"confidence_provisional": true`` marker flags that the confidence values
 and ``confidence_rank`` tiers are calibrated against simulated planted-truth recovery
 only (sim-anchored) and must not be read as probabilities of real-image accuracy; the
-curator emits it unconditionally.  A developer who calibrates against real-image error
-measurements (the WS-5 real-anchored pass) should retire the marker at that point.
+curator emits it unconditionally.  A developer who recalibrates against real-image
+error measurements should retire the marker at that point.
 
 **Allow-list catches a missed field.**  An operator adds a new field
 ``mean_polarity_score`` to

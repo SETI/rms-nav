@@ -373,7 +373,7 @@ def test_body_disc_model_error_floor_inflates_covariance(
     """model_error_floor_px adds exactly its square to the covariance diagonal.
 
     The NCC peak-curvature covariance measures photon statistics only; the
-    floor (calibrated by the WS-5 sweep) carries the silhouette /
+    floor (calibrated against the simulated-scene campaign) carries the silhouette /
     photometric model error of the template correlation.
     """
     shape = (160, 160)

@@ -1,4 +1,4 @@
-"""Collect WS-5 calibration rows: navigate randomized sim scenes, record truth.
+"""Collect calibration rows: navigate randomized sim scenes, record truth.
 
 For every generated scene (see ``scene_gen``) this runs the full autonomous
 ensemble in-process (the sim needs no external holdings) and writes one JSON
@@ -8,7 +8,7 @@ line per frame to the output file:
 - the fused result: status, confidence, tier rank, offset error, sigma
 - every per-technique result: confidence, spurious/at_edge flags, the
   technique's own offset error and reported sigma, and its full typed
-  diagnostics dict -- the (x_i, error) pairs the WS-5 sigmoid fit consumes
+  diagnostics dict -- the (x_i, error) pairs the sigmoid fit consumes
 
 Run (from an activated project venv; ``source /seti/newnav/setup.sh``):
 
