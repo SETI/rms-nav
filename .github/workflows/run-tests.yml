@@ -81,9 +81,13 @@ jobs:
         run: |
           export PDS3_HOLDINGS_DIR=https://pds-rings.seti.org/holdings
           export PDS4_HOLDINGS_DIR=https://pds-rings.seti.org/pds4
-          export OOPS_RESOURCES=https://storage.googleapis.com/rms-node-oops-resources
-          export UCAC4_PATH=https://storage.googleapis.com/rms-node-star-catalogs/UCAC4
-          export YBSC_PATH=https://storage.googleapis.com/rms-node-star-catalogs/YBSC
+          # OOPS_RESOURCES / UCAC4_PATH / YBSC_PATH are deliberately NOT set:
+          # the SPICE and star-catalog trees live in cloud buckets whose bulk
+          # egress is prohibitively expensive, so public access is off and
+          # automated runs must not download them. Tests marked
+          # REQUIRES_EXTERNAL_DATA (tests/config.py) skip without
+          # OOPS_RESOURCES; run them locally against a local copy of the
+          # oops resources directory.
           # loadfile keeps each test file on one xdist worker; PyQt6 + default load
           # scheduling has caused worker crashes when tests from the same file ran
           # in different processes.
