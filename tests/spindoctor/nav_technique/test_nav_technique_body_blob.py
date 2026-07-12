@@ -775,9 +775,15 @@ def test_coarse_crescent_offset_bounded_for_offframe_giant() -> None:
     """
     image = np.zeros((128, 128), dtype=np.float64)
     image[40:90, 30:80] = 50.0
-    offset = _coarse_crescent_offset(
-        image, (64.0, 64.0), 40_000.0, 120.0, (0.0, -1.0), (32, 32)
+    offset = _coarse_crescent_offset(image, (64.0, 64.0), 40_000.0, 120.0, (0.0, -1.0), (32, 32))
+    # Completing at all on a 128x128 frame proves the clamp: unclamped, the
+    # 40,000 px diameter would allocate a 40k x 40k kernel before the FFT.
+    # The returned shift is the margin-bounded correlation peak plus the
+    # crescent kernel's lit-centroid compensation, so the bound includes it.
+    radius = _clamped_kernel_radius(40_000.0, (128, 128))
+    centroid_v, centroid_u = _kernel_centroid_offset(
+        _crescent_kernel(radius, math.radians(120.0), (0.0, -1.0))
     )
     assert isinstance(offset, tuple)
-    assert abs(offset[0]) <= 32
-    assert abs(offset[1]) <= 32
+    assert abs(offset[0]) <= 32 + abs(centroid_v) + 1.0
+    assert abs(offset[1]) <= 32 + abs(centroid_u) + 1.0
