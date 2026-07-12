@@ -4,12 +4,27 @@ import os
 
 import pytest
 
-# Tests importing this marker exercise real image reading against external
-# holdings and SPICE/oops resources; they cannot run without these env vars
-# (CI sets them in .github/workflows/run-tests.yml).
+# Tests importing these markers exercise real image reading against external
+# data trees. Two tiers:
+#
+# REQUIRES_EXTERNAL_DATA needs the oops/SPICE resource tree (OOPS_RESOURCES)
+# in addition to the PDS3 holdings. The resource tree is not publicly
+# downloadable (bulk egress from its cloud bucket is prohibitively
+# expensive, so public access is off), which is why CI does not set
+# OOPS_RESOURCES: these tests run only locally, against a local copy of
+# the oops resources directory.
+#
+# REQUIRES_PDS3_HOLDINGS needs only the PDS3 holdings tree, which is served
+# by the PDS Ring-Moon Systems Node; CI sets PDS3_HOLDINGS_DIR, so these
+# tests run in automated environments too.
 REQUIRES_EXTERNAL_DATA = pytest.mark.skipif(
     'OOPS_RESOURCES' not in os.environ or 'PDS3_HOLDINGS_DIR' not in os.environ,
     reason='requires OOPS_RESOURCES and PDS3_HOLDINGS_DIR (external holdings/resources)',
+)
+
+REQUIRES_PDS3_HOLDINGS = pytest.mark.skipif(
+    'PDS3_HOLDINGS_DIR' not in os.environ,
+    reason='requires PDS3_HOLDINGS_DIR (PDS3 holdings)',
 )
 
 # TODO: Update to use PDS3_HOLDINGS_DIR

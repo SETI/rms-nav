@@ -1,9 +1,9 @@
 import pytest
-from tests.config import REQUIRES_EXTERNAL_DATA
+from tests.config import REQUIRES_PDS3_HOLDINGS
 
 import spindoctor.dataset.dataset_pds3_newhorizons_lorri as dsnhlor
 
-pytestmark = REQUIRES_EXTERNAL_DATA
+pytestmark = REQUIRES_PDS3_HOLDINGS
 
 
 @pytest.fixture

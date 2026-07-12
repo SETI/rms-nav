@@ -3,12 +3,12 @@ from typing import Any
 
 import pytest
 from filecache import FCPath
-from tests.config import REQUIRES_EXTERNAL_DATA
+from tests.config import REQUIRES_PDS3_HOLDINGS
 
 import spindoctor.dataset.dataset_pds3_cassini_iss as dscoiss
 from spindoctor.dataset.dataset import ImageFile
 
-pytestmark = REQUIRES_EXTERNAL_DATA
+pytestmark = REQUIRES_PDS3_HOLDINGS
 
 
 @pytest.fixture
