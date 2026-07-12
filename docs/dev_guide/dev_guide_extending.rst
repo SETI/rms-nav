@@ -37,6 +37,11 @@ skeleton, using the Cassini ISS implementation
 
 .. code-block:: python
 
+   from pathlib import Path
+
+   from spindoctor.dataset.dataset_pds3 import DataSetPDS3
+
+
    class DataSetPDS3NewInstrument(DataSetPDS3):
        _ALL_VOLUME_NAMES = tuple(f'NEWI_{n:04d}' for n in range(1, 12))
        _INDEX_COLUMNS = ('FILE_SPECIFICATION_NAME',)

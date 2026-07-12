@@ -86,8 +86,10 @@ matrix rides with Track D decisions).
 
 1. **WS-3 continues** — your batch votes → my Stage-D sidecars → repeat with new
    cohort scans. Target: fill `faint_stars` and `ring_only_flat`, get every class
-   to ≥2, add first Galileo SSI and New Horizons LORRI frames. WS-3 gates
-   everything else.
+   to ≥2, add first Galileo SSI and New Horizons LORRI frames. WS-3 gates the
+   *breadth* of everything downstream — the missing classes and the off-Cassini
+   instruments cap what WS-1/WS-2 can eventually claim — but its existing 62
+   images are enough to start on, which is why step 2 begins in parallel.
 2. **WS-2 and WS-0a start in parallel** immediately after your merges — neither
    waits on anything but WS-3's existing images.
    - WS-2 is the big one: separate the sim's rendering from the nav models'
