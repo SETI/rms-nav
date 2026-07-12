@@ -814,12 +814,15 @@ class DataSetPDS3(DataSet):
             Returns:
                 A tuple ``(imagefile, past_end)``. ``imagefile`` is the constructed
                 ``ImageFile`` if the row passes every filter, or None if it is filtered
-                out. ``past_end`` is True if ``img_num`` exceeds ``img_end_num``. Image
-                numbers are monotonic only within one camera's rows -- an index can
-                interleave camera streams (COISS sorts all N* rows before all W* rows,
-                resetting the numeric sequence partway through the volume) -- so a True
-                value means only that *this row's* camera stream has passed the end of
-                the range, not that the scan as a whole can stop.
+                out. ``past_end`` is True if ``img_num`` exceeds ``img_end_num``. Index
+                rows are time-ordered but not strictly monotonic in image number:
+                measured over the full COISS archive (2026-07-12), 16 of 126 volumes
+                contain a few local inversions -- mostly simultaneous NAC/WAC exposure
+                pairs where the wide-angle row appears one count after its narrow-angle
+                partner, plus out-of-order runs of up to ~500 counts in the early
+                cruise volumes (COISS_1001-1003) -- so a True value means only that
+                *this row* is past the end of the range, not that the scan as a whole
+                can stop.
             """
             label_filespec = self._get_label_filespec_from_index(row)
             img_filespec = self._get_image_filespec_from_label_filespec(label_filespec)
@@ -905,13 +908,16 @@ class DataSetPDS3(DataSet):
                     num_yields += 1
             return
 
-        # Sequential scanning over the requested volumes in order. Image numbers are
-        # monotonic within one camera's rows, but an index can interleave camera
-        # streams (COISS sorts all N* rows before all W* rows, resetting the numeric
-        # sequence partway through the volume), so a single past-the-end row must not
-        # stop the scan. When image numbers are monotonic across volumes, the scan
-        # stops after the first volume in which every row is past the end of the
-        # requested range; otherwise every requested volume is scanned.
+        # Sequential scanning over the requested volumes in order. Index rows are
+        # time-ordered but not strictly monotonic in image number (COISS volumes
+        # carry rare local inversions: simultaneous NAC/WAC exposure pairs whose
+        # wide-angle row sorts one count late, and out-of-order runs in the early
+        # cruise volumes), so a single past-the-end row must not stop the scan;
+        # every row is range-filtered individually. When image numbers are
+        # monotonic across volumes, the scan stops after the first volume in which
+        # every row is past the end of the requested range; otherwise (Voyager,
+        # whose FDS counts roll over between encounter volume sets) every
+        # requested volume is scanned.
         num_yields = 0
         for search_vol in valid_volumes:
             rows, index_tab_url = _read_index_rows(search_vol)
